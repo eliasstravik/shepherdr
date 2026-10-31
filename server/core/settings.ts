@@ -251,6 +251,9 @@ export class CoreSettings {
     if (check?.platform && check.platform !== 'Linux' && check.platform !== 'Darwin') return `Autopilot needs Linux or macOS. ${where} runs ${check.platform}.`
     if (!mac && check?.sandbox === 'missing') return `Autopilot needs bubblewrap, which is not installed on ${where}.`
     if (!mac && check?.sandbox === 'blocked') return `Autopilot's sandbox is blocked on ${where}: its user namespaces are off.`
+    if (mac && check?.seatbelt === 'missing') return `The Mac sandbox needs sandbox-exec, which is not on ${where}.`
+    // The launcher enforces this too (helper/core-pilot-launch.ts).
+    if (mac && check?.bun && Bun.semver.order(check.bun, '1.4.2') < 0) return `The Mac sandbox needs Bun 1.4.2 or newer on ${where}, not ${check.bun}.`
     if (mac && [this.agent('autopilot', level).kind, kindOf(this.get('reviewer.agent', level))].includes('codex')) return "Codex can't run commands in the Mac sandbox yet. Choose Claude Code for Autopilot's agent and reviewer."
     const kind = this.agent('autopilot', level).kind, state = check?.cli[kind]
     if (state && state !== 'ready') return `Autopilot runs on ${names[kind]}, which is ${state === 'missing' ? 'not installed' : 'not signed in'} on ${where}.`

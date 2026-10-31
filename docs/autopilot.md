@@ -17,7 +17,7 @@ time, wake reason and delivery/turn outcome; a turn ending is not a claim that t
 actual messages and saved progress carry its results; Shepherdr generates no separate status report.
 
 The ⋯ switch asks first, with what it replaces and spends and the limits now set. Where it can't run (a home space,
-the wrong permission profile for its system, Codex in the Mac sandbox, no usable bubblewrap, or its CLI missing or signed out) the switch is greyed with the reason, and
+the wrong permission profile for its system, Codex or an old Bun in the Mac sandbox, no usable bubblewrap, or its CLI missing or signed out) the switch is greyed with the reason, and
 Settings → Autopilot shows the same line. Turning off is one tap.
 
 Turning ON closes/replaces the regular coordinator with a fresh selected Autopilot session. OFF starts a fresh
@@ -148,8 +148,7 @@ sandbox with each reading on stdin, latest first and one at a time, its output i
 
 Only those numbers cross, and an agent can write them, so treat them as a hint.
 
-To rerun the escape attempts on a Mac: `TMPDIR=/private/tmp bun test test/core-pilot-mac-escape.test.ts`. The scratch
-folders must be outside `/var/folders`, the usual `TMPDIR`, which the profile doesn't allow.
+To rerun the escape attempts on a Mac: `bun test test/core-pilot-mac-escape.test.ts`.
 
 Access and limits are behind an expansion:
 

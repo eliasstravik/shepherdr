@@ -17,7 +17,8 @@
 //
 // The tests run below everything else on this machine, on every core: they take only the CPU and disk no one else
 // wants, so herdr, Shepherdr's server and the agents stay quick while several tasks test at once.
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, realpathSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { gather, mapFile, pick, readMap, screenMap } from '../test/screen-map.ts'
 import { INPUTS } from '../test/web.ts'
@@ -212,6 +213,8 @@ const cmd = [...lowPriority(), process.execPath, 'test', jobs, ...timeout, `--ti
 if (files) console.log(`${files.length} test file${files.length === 1 ? '' : 's'}: ${files.map((f) => f.replace(/^test\//, '')).join(' ')}`)
 const t0 = Date.now()
 const env: Record<string, string | undefined> = { ...process.env, SHEPHERDR_TEST_RUNNER: '1' }
+// A Mac's TMPDIR goes through the /var symlink, and Autopilot's private folders must be real paths.
+if (process.platform === 'darwin') env.TMPDIR = realpathSync(tmpdir())
 
 // one browser for every browser test of the run, as low in line as the tests; it closes when this process is gone
 let browser: ReturnType<typeof Bun.spawn> | null = null

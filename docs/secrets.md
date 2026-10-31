@@ -30,7 +30,8 @@ Secret scope comes from the private agent record: its space, its owning machine,
 overview access does not widen that scope. Separately launched reviewers receive no secret permission and cannot
 retrieve values. A child process of an ordinary agent can inherit that agent’s capability; it is the same authority,
 not a new reviewer grant. Isolated workspace agents reach only their fixed gateway and the run’s explicit secret
-allowlist. They cannot read a host core socket or credential.
+allowlist. They cannot read a host core socket or credential. On a Mac sandbox run, an agent can still read another
+process’s environment, including a value while `secret run` is using it: macOS doesn’t stop that read.
 
 Grants rotate/revoke on replacement and explicit lifecycle changes. They persist privately across an application
 restart so a still-running core agent can reconnect; server restart alone does not grant a new identity. A stopped,

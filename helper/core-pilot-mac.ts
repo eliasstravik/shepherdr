@@ -8,7 +8,7 @@ import type { PilotHome } from './core-pilot-home.ts'
 import type { PilotSandbox } from './core-pilot-sandbox.ts'
 import { pilotGitPaths, pilotProjectFiles } from './core-pilot-sandbox.ts'
 import { pilotHostLogin, pilotLoginPaths, PilotMacLogin, PilotUsageHook } from './core-pilot-mac-login.ts'
-import { pilotMacSweep, type PilotMacMarker } from './core-pilot-mac-stop.ts'
+import { pilotMacSweep, type PilotMacMarker, pilotMacVisible } from './core-pilot-mac-stop.ts'
 
 export type PilotAccess = 'isolated' | 'mac'
 /** Saved in the launch record. The proxy port is chosen only when the runtime starts. */
@@ -143,12 +143,14 @@ export function pilotMacProfileInput(home: Pick<PilotHome, 'gateway'>, sandbox: 
     gateway: home.gateway, proxyPort, writable: sandbox.writable, masks, tty, developer: mac.developer, marker: mac.marker, sealed: [sandbox.cwd, sandbox.state, join(sandbox.state, '.claude'), file, temporary] }
 }
 /** Loopback is shared with the whole Mac, so unlike Linux's private relay this one passes CONNECT only: never /mail. */
-async function pilotMacRelay(gateway: string) {
+export async function pilotMacRelay(gateway: string, idle = 10_000) {
   const peers = new Set<Socket>()
   const server = createServer(client => {
     if (peers.size >= 32) { client.destroy(); return }
     peers.add(client); client.on('close', () => peers.delete(client)); client.on('error', () => {})
+    client.setTimeout(idle, () => client.destroy()) // Any local process can connect: it mustn't hold a slot by saying nothing.
     client.once('data', (first: Buffer) => {
+      client.setTimeout(0)
       if (first.subarray(0, 8).toString('latin1') !== 'CONNECT ') { client.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return }
       const upstream = connect(gateway)
       peers.add(upstream); upstream.on('close', () => { peers.delete(upstream); client.destroy() }); upstream.on('error', () => client.destroy())
@@ -159,11 +161,11 @@ async function pilotMacRelay(gateway: string) {
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
   return { port: (server.address() as { port: number }).port, close: () => { for (const socket of peers) socket.destroy(); server.close() } }
 }
-export interface PilotMacRun { command: string[]; env: Record<string, string>; usage(reading: unknown): boolean; close(): Promise<void> }
+export interface PilotMacRun { visible(child: { pid: number; exitCode: number | null; signalCode: string | number | null }): Promise<boolean>; watcher: Promise<number>; command: string[]; env: Record<string, string>; usage(reading: unknown): boolean; close(): Promise<void> }
 /** Holds what must outlive a crash of this wrapper (the stop watcher) and what only exists while it runs. */
 export async function startPilotMac(home: PilotHome, sandbox: PilotSandbox, mac: PilotMacPrepared, args: string[], deadline?: number): Promise<PilotMacRun> {
   // In its own session: stopping this terminal must not stop the process that cleans up after it.
-  const watcher = Bun.spawn([sandbox.bun, join(import.meta.dir, 'core-pilot-mac-stop.ts'), mac.marker.allowed, mac.marker.denied, String(deadline ?? 0)], { stdin: 'pipe', stdout: 'ignore', stderr: 'ignore', detached: true, cwd: home.root, env: { PATH: '/usr/bin:/bin' } })
+  const watcher = Bun.spawn([sandbox.bun, join(import.meta.dir, 'core-pilot-mac-stop.ts'), mac.marker.allowed, mac.marker.denied, String(deadline ?? 0), pilotLoginPaths(sandbox.state).file], { stdin: 'pipe', stdout: 'ignore', stderr: 'ignore', detached: true, cwd: home.root, env: { PATH: '/usr/bin:/bin' } })
   const relay = await pilotMacRelay(home.gateway).catch(error => { void watcher.stdin.end(); throw error })
   const login = sandbox.kind === 'claude' ? new PilotMacLogin(sandbox.state, pilotHostLogin(sandbox.binary)) : undefined
   const hook = new PilotUsageHook()
@@ -187,7 +189,7 @@ export async function startPilotMac(home: PilotHome, sandbox: PilotSandbox, mac:
     const profile = join(home.root, 'profile.sb'), map = { control: sandbox.control, gateway: home.gateway, bun: sandbox.bun, binary: sandbox.binary, kind: sandbox.kind }
     writeFileSync(profile, pilotMacProfile(pilotMacProfileInput(home, sandbox, mac, relay.port, tty)), { mode: 0o600 })
     if (lstatSync(profile).nlink !== 1) throw Error('The sandbox profile changed while it was being written')
-    return { close, usage: reading => hook.report(reading), env: pilotMacEnvironment({ state: sandbox.state, control: sandbox.control, gateway: home.gateway, proxyPort: relay.port, developer: mac.developer }),
+    return { close, visible: child => pilotMacVisible(mac.marker, child), watcher: watcher.exited, usage: reading => hook.report(reading), env: pilotMacEnvironment({ state: sandbox.state, control: sandbox.control, gateway: home.gateway, proxyPort: relay.port, developer: mac.developer }),
       command: ['/usr/bin/sandbox-exec', '-f', profile, sandbox.bun, join(sandbox.control, 'bootstrap.ts'), join(sandbox.control, 'bin', sandbox.kind), ...args.map(word => pilotMacText(word, map))] }
   } catch (error) { await close().catch(() => {}); throw error }
 }

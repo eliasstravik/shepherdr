@@ -2,7 +2,8 @@ import { expect, test } from 'bun:test'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pilotMacEnvironment, pilotMacProfile, pilotMacReadProfile, pilotMacText, type PilotMacProfile } from '../helper/core-pilot-mac.ts'
+import { pilotMacEnvironment, pilotMacProfile, pilotMacReadProfile, pilotMacRelay, pilotMacText, type PilotMacProfile } from '../helper/core-pilot-mac.ts'
+import { connect } from 'node:net'
 import { pilotLiveLogin, pilotLoginPaths, PilotMacLogin, pilotUsageReading, PilotUsageHook, type PilotLoginSource } from '../helper/core-pilot-mac-login.ts'
 import { PilotProxy } from '../helper/core-pilot-proxy.ts'
 import { preparePilotLaunch } from '../helper/core-pilot-launch.ts'
@@ -118,6 +119,29 @@ test('usage readings reach only a backend that offers them', async () => {
   expect(await call({ ...base, usage: reading => { seen.push(reading); return true } })).toBe(200)
   expect(seen).toEqual([{ rate_limits: {} }])
 })
+test('a Keychain that cannot be read refuses the start, and later only keeps the last login', async () => {
+  const state = realpathSync(mkdtempSync(join(tmpdir(), 'shep-login-locked-')))
+  try {
+    mkdirSync(join(state, '.claude'))
+    let locked = true, mark = 1
+    const source: PilotLoginSource = { changeMark: () => mark++, read: async () => { if (locked) throw Error('locked'); return JSON.stringify({ claudeAiOauth: { accessToken: 'A', refreshToken: 'host', expiresAt: Date.now() + 3_600_000 } }) }, refresh: () => {} }
+    const login = new PilotMacLogin(state, source)
+    await expect(login.start()).rejects.toThrow('locked')
+    locked = false; await login.start(); login.stop()
+    const token = () => JSON.parse(readFileSync(pilotLoginPaths(state).file, 'utf8')).claudeAiOauth.accessToken
+    expect(token()).toBe('A')
+    locked = true; await expect(login.check()).rejects.toThrow('locked'); expect(token()).toBe('A')
+  } finally { rmSync(state, { recursive: true, force: true }) }
+})
+
+test('the relay drops a local client that holds a slot and says nothing', async () => {
+  const relay = await pilotMacRelay('/nonexistent/gateway.sock', 50)
+  try {
+    const client = connect(relay.port, '127.0.0.1')
+    await new Promise<void>(done => client.on('close', () => done()))
+  } finally { relay.close() }
+})
+
 test('each platform refuses the other platform’s profile and starts nothing', () => {
   const input = { parent: '/nowhere', cwd: '/nowhere', repo: '/nowhere', kind: 'claude' as const, writable: false, instructions: '', privateRoots: [], settings: '{}' }
   if (process.platform === 'darwin') expect(() => preparePilotLaunch({ ...input, access: 'isolated' })).toThrow('choose the Mac sandbox')

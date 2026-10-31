@@ -1,13 +1,13 @@
 // Real escape attempts from inside the real Mac profile. macOS only, so GitHub's Linux runners skip it; on a Mac:
-//   TMPDIR=/private/tmp bun test test/core-pilot-mac-escape.test.ts
-// (The scratch folders must be outside /var/folders, the usual TMPDIR, which the profile doesn't allow.)
+//   bun test test/core-pilot-mac-escape.test.ts
 // Everything uses a scratch home and repository. It never reads the real login, and it reaches two public hosts.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { copyFileSync, chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:net'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pilotMacProcesses, pilotMacSweep } from '../helper/core-pilot-mac-stop.ts'
+import { pilotMacProcesses, pilotMacSweep, pilotMacVisible } from '../helper/core-pilot-mac-stop.ts'
+import { CoreRemotes } from '../server/core/remote.ts'
+import type { CoreFiles } from '../server/core/files.ts'
 import { pilotArtifact } from '../helper/core-pilot-artifact.ts'
 
 const fixture = join(import.meta.dir, 'core-pilot-mac-escape.fixture.ts'), runner = process.execPath
@@ -17,10 +17,10 @@ interface Attempt { name: string; code: number; out: string }
 describe.skipIf(process.platform !== 'darwin')('Mac sandbox escape attempts', () => {
   let root: string, home: string, repo: string, task: string, parent: string, listener: Server, unix: Server, listenerPort = 0
   const git = (...args: string[]) => { const out = Bun.spawnSync(['/usr/bin/git', ...args], { cwd: repo, env: { PATH: '/usr/bin:/bin:/opt/homebrew/bin', HOME: home, GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t.invalid' } }); if (out.exitCode) throw Error(out.stderr.toString()) }
-  const launch = (config: { writable?: boolean; cwd?: string; args: string[]; deadline?: number; kind?: 'claude' | 'codex' }) => Bun.spawn([runner, fixture, JSON.stringify({ parent, cwd: config.cwd ?? task, repo, writable: config.writable ?? true, access: 'mac', kind: config.kind ?? 'claude', args: config.args, hosts: ['example.com'], deadline: config.deadline })],
+  const launch = (config: { writable?: boolean; cwd?: string; args: string[]; deadline?: number; kind?: 'claude' | 'codex'; fixture?: string; parent?: string }) => Bun.spawn([runner, config.fixture ?? fixture, JSON.stringify({ parent: config.parent ?? parent, cwd: config.cwd ?? task, repo, writable: config.writable ?? true, access: 'mac', kind: config.kind ?? 'claude', args: config.args, hosts: ['example.com', '100.100.100.100'], deadline: config.deadline })],
     { cwd: root, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', env: { HOME: home, PATH: `${join(root, 'bin')}:/usr/bin:/bin`, USER: 'tester' } })
   /** Runs `script` as the agent and returns one row per `try` line it wrote. */
-  async function attempts(script: string, config: { writable?: boolean; cwd?: string } = {}) {
+  async function attempts(script: string, config: { writable?: boolean; cwd?: string; fixture?: string; parent?: string } = {}) {
     const words = `
 attempt() { name=$1; shift; result=$("$@" 2>&1); printf '%s\\t%s\\t%s\\n' "$name" "$?" "$(printf '%s' "$result" | tr '\\n\\t' '  ' | cut -c1-200)" >> "$HOME/attempts.tsv"; }
 export HOST_HOME=${JSON.stringify(home)} REPO=${JSON.stringify(repo)} TASK=${JSON.stringify(task)} LISTENER=${listenerPort}
@@ -34,7 +34,8 @@ ${script}
   const row = (rows: Attempt[], name: string) => { const found = rows.find(item => item.name === name); if (!found) throw Error(`No attempt named ${name}`); return found }
 
   beforeAll(async () => {
-    root = realpathSync(mkdtempSync(join(tmpdir(), 'shep-mac-escape-')))
+    // Not the usual TMPDIR: the profile doesn't allow /var/folders, so a worktree there couldn't be read.
+    root = realpathSync(mkdtempSync('/private/tmp/shep-mac-escape-'))
     home = join(root, 'home'); repo = join(root, 'repo'); task = join(root, 'task'); parent = join(root, 'sessions')
     for (const path of [join(home, '.ssh'), join(home, '.aws'), join(home, '.claude'), join(root, 'bin'), repo]) mkdirSync(path, { recursive: true })
     mkdirSync(parent, { mode: 0o700 })
@@ -103,20 +104,32 @@ attempt write-private-home touch "$HOME/written"
 curl() { /usr/bin/curl -sS -m 8 -o /dev/null "$@"; }
 plain() { env -u HTTPS_PROXY -u HTTP_PROXY -u ALL_PROXY -u https_proxy -u http_proxy /usr/bin/curl -sS -m 5 -o /dev/null "$@"; }
 attempt direct-internet plain https://example.com/
-attempt direct-address plain https://1.1.1.1/
-attempt direct-tailscale plain --noproxy '*' http://100.100.100.100/
-attempt direct-private plain --noproxy '*' http://192.168.1.1/
-attempt direct-host-service plain --noproxy '*' "http://127.0.0.1:$LISTENER/"
+direct() { "$(command -v python3)" -I -c "
+import socket,sys
+try: socket.create_connection((sys.argv[1],int(sys.argv[2])),3)
+except OSError as e: sys.exit(str(e))" "$@"; }
+attempt direct-address direct 1.1.1.1 443
+attempt direct-tailscale direct 100.100.100.100 80
+attempt direct-private direct 192.168.1.1 80
+attempt direct-host-service direct 127.0.0.1 "$LISTENER"
 attempt host-not-allowed curl https://example.org/
 attempt gateway-private-address curl https://100.100.100.100/
 attempt gateway-other-port curl https://example.com:8443/
 attempt proxy-port-mail /bin/sh -c 'printf "POST /mail HTTP/1.1\\r\\nHost: x\\r\\nContent-Length: 2\\r\\n\\r\\n{}" | /usr/bin/nc -w 3 127.0.0.1 "\${HTTPS_PROXY##*:}" | grep -q "403 Forbidden" && exit 1; exit 0'
 attempt control-socket /usr/bin/nc -w 2 -U "$HOST_HOME/control.sock"
-attempt mapped-address-other-port "$(command -v python3)" -I -c "import os,socket;s=socket.socket(socket.AF_INET6);s.settimeout(3);s.connect(('::ffff:127.0.0.1',int(os.environ['LISTENER'])))"
+attempt mapped-address-other-port "$(command -v python3)" -I -c "
+import os,socket,sys
+s=socket.socket(socket.AF_INET6);s.settimeout(3)
+try: s.connect(('::ffff:127.0.0.1',int(os.environ['LISTENER'])))
+except OSError as e: sys.exit(str(e))"
 attempt host-allowed curl https://example.com/
 attempt product-command "$SHEPHERDR_COMMAND" status
 `)
     for (const name of ['direct-internet', 'direct-address', 'direct-tailscale', 'direct-private', 'direct-host-service', 'host-not-allowed', 'gateway-private-address', 'gateway-other-port', 'proxy-port-mail', 'control-socket', 'mapped-address-other-port']) expect([name, row(rows, name).code === 0]).toEqual([name, false])
+    // Blocked for the right reason, not by a timeout or a missing route.
+    for (const name of ['direct-address', 'direct-tailscale', 'direct-private', 'direct-host-service', 'mapped-address-other-port']) expect([name, row(rows, name).out]).toEqual([name, expect.stringMatching(/not permitted/i)])
+    expect(row(rows, 'direct-internet').out).toMatch(/resolve host|not permitted/i)
+    for (const name of ['host-not-allowed', 'gateway-private-address', 'gateway-other-port']) expect([name, row(rows, name).out]).toEqual([name, expect.stringMatching(/\b403\b/)])
     for (const name of ['host-allowed', 'product-command']) expect([name, row(rows, name).code, row(rows, name).out]).toEqual([name, 0, name === 'product-command' ? 'product command reached the gateway' : ''])
   }, 90_000)
 
@@ -232,7 +245,7 @@ if os.fork() == 0:
     const first = new TextDecoder().decode((await reader.read()).value)
     const prepared = JSON.parse(first.split('\n')[0]!).prepared as { paths: { state: string }; mac: { marker: { allowed: string; denied: string } } }
     const pid = await untilFile(join(prepared.paths.state, 'daemon.pid'))
-    return { child, pid, marker: prepared.mac.marker }
+    return { child, pid, marker: prepared.mac.marker, state: prepared.paths.state }
   }
   async function gone(pid: number, marker: { allowed: string; denied: string }) { for (let n = 0; n < 200 && (alive(pid) || pilotMacProcesses(marker).length); n++) await Bun.sleep(50); return !alive(pid) && !pilotMacProcesses(marker).length }
 
@@ -244,11 +257,56 @@ if os.fork() == 0:
   }, 60_000)
 
   test('a crash of the wrapper ends a detached daemon', async () => {
-    const { child, pid, marker } = await startDaemon()
-    expect(alive(pid)).toBe(true)
+    const { child, pid, marker, state } = await startDaemon(), login = join(state, '.claude/.credentials.json')
+    expect(alive(pid)).toBe(true); expect(existsSync(login)).toBe(true)
     child.kill('SIGKILL'); await child.exited
     expect(await gone(pid, marker)).toBe(true)
+    // The wrapper that would remove its access token is gone, so the watcher does.
+    for (let n = 0; n < 100 && existsSync(login); n++) await Bun.sleep(50)
+    expect(existsSync(login)).toBe(false)
   }, 60_000)
+
+  test('losing the watcher stops the run, as nothing would enforce its deadline or a crash', async () => {
+    const { child, pid, marker } = await startDaemon()
+    const watcher = Number(Bun.spawnSync(['/usr/bin/pgrep', '-f', marker.allowed]).stdout.toString().trim().split('\n')[0])
+    expect(watcher).toBeGreaterThan(1)
+    process.kill(watcher, 'SIGKILL'); await child.exited
+    expect(await gone(pid, marker)).toBe(true)
+  }, 60_000)
+
+  test('a process the sweep cannot see counts as not stoppable, so the run is refused', async () => {
+    const allowed = join(root, 'visible-allowed'), denied = join(root, 'visible-denied'); writeFileSync(allowed, ''); writeFileSync(denied, '')
+    const outside = Bun.spawn(['/bin/sleep', '30'])
+    expect(await pilotMacVisible({ allowed, denied }, outside, 200)).toBe(false)
+    outside.kill('SIGKILL'); await outside.exited
+    expect(await pilotMacVisible({ allowed, denied }, outside)).toBe(true) // Already gone: nothing to stop.
+  }, 30_000)
+
+  test('a connected Mac: the helper folder Shepherdr provisions there runs a contained launch', async () => {
+    // Everything but the transport: the real provisioning writes the real folder, and the fixture beside it imports only from it.
+    const machine = join(root, 'connected'); mkdirSync(machine)
+    const files = { exec: async (_machine: string, argv: string[], _cwd?: string, input?: Uint8Array) => {
+      if (argv[0] === 'sh') return Buffer.from(runner)
+      if (argv[2]?.startsWith('const o=require')) return Buffer.from(JSON.stringify({ home: machine, bun: runner, hc: '/core/hc', path: '/core', version: 'hc 0.1.14', session: 'isolated', environment: {}, platform: process.platform, arch: process.arch, musl: false }))
+      if (argv[2]?.startsWith('const {CoreClient}')) return Buffer.from('identity verified')
+      const result = Bun.spawnSync(argv, { stdin: input ?? 'ignore' })
+      if (result.exitCode) throw Error(result.stderr.toString())
+      return result.stdout
+    } } as unknown as CoreFiles
+    const provisioned = await new CoreRemotes(files, 'installation', () => ({ version: '0.1.14' })).prepare('machine')
+    expect(provisioned.root.startsWith(join(machine, '.local/share/shepherdr-agents/installation/'))).toBe(true)
+    const sessions = join(provisioned.root, 'sessions'), beside = join(provisioned.root, 'test/core-pilot-mac-escape.fixture.ts')
+    mkdirSync(sessions, { recursive: true, mode: 0o700 }); mkdirSync(join(provisioned.root, 'test')); copyFileSync(fixture, beside)
+    const rows = await attempts(`
+attempt read-worktree cat "$TASK/README"
+attempt write-worktree touch "$TASK/from-connected"
+attempt product-command "$SHEPHERDR_COMMAND" status
+attempt write-helpers touch ${JSON.stringify(join(provisioned.root, 'helper/planted.ts'))}
+attempt read-other-sessions ls ${JSON.stringify(parent)}
+`, { fixture: beside, parent: sessions })
+    for (const name of ['read-worktree', 'write-worktree', 'product-command']) expect([name, row(rows, name).code, row(rows, name).out]).toEqual([name, 0, name === 'read-worktree' ? 'repo' : name === 'product-command' ? 'product command reached the gateway' : ''])
+    for (const name of ['write-helpers', 'read-other-sessions']) expect([name, row(rows, name).code === 0]).toEqual([name, false])
+  }, 90_000)
 
   test('the shared deadline ends a detached daemon', async () => {
     const { child, pid, marker } = await startDaemon({ deadline: Date.now() + 4000 })

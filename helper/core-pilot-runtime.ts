@@ -64,6 +64,11 @@ export async function runPilotRuntime(input: PilotRuntime): Promise<number> {
     }
     child = Bun.spawn(command, { detached: true, stdin: 'inherit', stdout: 'inherit', stderr: 'inherit', cwd: mac ? input.sandbox.cwd : undefined, env: mac ? mac.env : { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' } })
     const completion = child.exited.then(code => { exited = true; return code })
+    if (mac) {
+      // Stopping rests on the sweep seeing this process, and the deadline and crash cleanup on the watcher.
+      if (!await mac.visible(child)) throw Error('The Mac sandbox could not confirm it can stop this run, so it was refused; no unrestricted fallback was started')
+      void mac.watcher.then(() => { if (!exited && !stopping) stop(Error('The Mac sandbox watcher stopped, so this run was stopped')) })
+    }
     if (input.deadline !== undefined) deadline = setTimeout(() => stop(Error('Autopilot runtime limit reached')), Math.max(1, input.deadline - Date.now()))
     poll = setInterval(() => {
       if (checking || stopping || exited) return

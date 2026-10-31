@@ -40,7 +40,8 @@ export function pilotHostLogin(binary: string, home = homedir(), user = userInfo
       const item = Bun.spawn([SECURITY, 'find-generic-password', '-s', service, '-a', user, '-w'], { stdout: 'pipe', stderr: 'ignore', stdin: 'ignore', timeout: 15_000, killSignal: 'SIGKILL' })
       const [text, code] = await Promise.all([new Response(item.stdout).text(), item.exited])
       if (code === 0) return text
-      if (code !== ITEM_NOT_FOUND) return // Locked or busy: keep the last login rather than sign the agent out.
+      // Locked or busy. At the start this refuses the run; later, a failed pass keeps the last login.
+      if (code !== ITEM_NOT_FOUND) throw Error("Claude's login could not be read from this Mac's Keychain. Unlock it and start again; no unrestricted fallback was started")
       return existsSync(file) ? readFileSync(file, 'utf8') : undefined
     },
     // Claude's own refresh, under its own lock, into its own store. This never mints or handles a refresh token.

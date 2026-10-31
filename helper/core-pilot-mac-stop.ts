@@ -3,7 +3,7 @@
 // session and parent. Its Seatbelt profile cannot be left, though, and the kernel answers for any same-user PID what
 // that profile allows. Two host-owned marker files, one only this profile may read, name its processes exactly.
 import { dlopen, FFIType, ptr } from 'bun:ffi'
-import { lstatSync } from 'node:fs'
+import { lstatSync, rmSync } from 'node:fs'
 
 export interface PilotMacMarker { allowed: string; denied: string }
 let native: { sandboxed(pid: number): number; check(pid: number, operation: Buffer, path: Buffer): number; list(buffer: Int32Array): number } | undefined
@@ -59,10 +59,20 @@ export async function pilotMacSweep(marker: PilotMacMarker, deadline = Date.now(
   return true
 }
 
+/** Whether a sweep sees a process just started, so one finding nothing can be believed. One already gone needs no stopping. */
+export async function pilotMacVisible(marker: PilotMacMarker, child: { pid: number; exitCode: number | null; signalCode: string | number | null }, wait = 5000) {
+  const running = () => child.exitCode === null && child.signalCode === null, end = Date.now() + wait
+  while (running() && Date.now() < end) {
+    if (pilotMacProcesses(marker).includes(child.pid)) return true
+    await Bun.sleep(10)
+  }
+  return !running()
+}
+
 // One per runtime, in its own session. The owner holds this stdin open, so even its SIGKILL ends here as EOF. A
 // sandboxed process cannot signal it: the profile allows signals only inside the same sandbox.
 if (import.meta.main) {
-  const [allowed, denied, end] = process.argv.slice(2)
+  const [allowed, denied, end, login] = process.argv.slice(2)
   if (!allowed?.startsWith('/') || !denied?.startsWith('/')) throw Error('Invalid sandbox marker')
   const marker = { allowed, denied }, deadline = Number(end)
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -77,5 +87,7 @@ if (import.meta.main) {
   let clean = false
   // A refused sweep can't improve by retrying: it killed nothing, and the owner reports the exit.
   try { while (!clean && Date.now() < giveUp) clean = await pilotMacSweep(marker) } catch { clean = false }
+  // The owner normally does this, but it may have been killed. The run is over, so this token has no reader.
+  if (login?.startsWith('/')) rmSync(login, { force: true })
   process.exit(clean ? 0 : 1)
 }
