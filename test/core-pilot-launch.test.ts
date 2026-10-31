@@ -34,7 +34,7 @@ function fixture(mac = false) {
     return Buffer.from(JSON.stringify(prepared))
   }
   const space = { id: 'space', name: 'Example', machine: 'machine', folder: '/repo', base: 'main', prefix: 'EX', mode: 'regular' as const, added: 1 }
-  const launch = (kind: 'claude' | 'codex' = 'codex') => agents.launch(space, 'EX-1/Reviewer-1', kind, 'Review only', { role: 'reviewer', readOnly: true, pilot: { run: 'run', hosts: ['chatgpt.com'], repo: '/repo' } })
+  const launch = (kind: 'claude' | 'codex' = 'codex', access?: 'mac') => agents.launch(space, 'EX-1/Reviewer-1', kind, 'Review only', { role: 'reviewer', readOnly: true, pilot: { run: 'run', hosts: ['chatgpt.com'], repo: '/repo', access } })
   return { root, home, store, agents, launch, get prepared() { return prepared! }, get argv() { return argv }, get cwd() { return cwd }, get submitted() { return submitted }, get revoked() { return revoked }, loseResponse() { uncertain = true }, close() { owned?.discard(); store.close(); rmSync(root, { recursive: true, force: true }) } }
 }
 
@@ -56,12 +56,11 @@ test('contained reviewer wraps only native args and keeps its endpoint credentia
 test('a contained launch starts host Bun outside the worktree on either system, and its terminal still reports the worktree', async () => {
   const f = fixture(true), linux = fixture()
   try {
-    await f.launch()
+    await expect(f.launch('codex', 'mac')).rejects.toThrow("Codex can't run commands in the Mac sandbox")
+    expect(f.submitted).toBe(false)
+    await f.launch('claude', 'mac')
     expect(f.argv.slice(0, 4)).toEqual(['/bin/sh', '-c', 'cd "$0" && exec "$@"', join(f.home, 'sessions')])
     expect(f.cwd).toBe('/repo')
-    const review = JSON.parse(readFileSync(f.argv[6]!, 'utf8')), launch = JSON.parse(readFileSync(review.argv[2], 'utf8'))
-    expect(launch.args.slice(0, 3)).toEqual(['exec', '--json', '--dangerously-bypass-approvals-and-sandbox'])
-    expect(launch.args).not.toContain('--sandbox')
     await linux.launch()
     expect(linux.argv.slice(0, 4)).toEqual(['/bin/sh', '-c', 'cd "$0" && exec "$@"', join(linux.home, 'sessions')])
     expect(linux.cwd).toBe('/repo')

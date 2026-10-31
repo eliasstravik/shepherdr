@@ -78,6 +78,8 @@ export class CoreAgents {
     message?: string
     pilot?: { run: string; hosts: string[]; deadline?: number; repo: string; access?: PilotAccess }
   } = {}): Promise<CoreAgent> {
+    // Until a current Codex model can run commands in there. Every restart and task route ends up here.
+    if (options.pilot?.access === 'mac' && kind === 'codex') throw Error("Codex can't run commands in the Mac sandbox yet. Choose Claude Code for Autopilot's agent and reviewer.")
     if (this.launching.has(chat)) throw new Error('This agent is already starting')
     this.launching.add(chat)
     let prepared: PilotPrepared | undefined, previous: CoreAgent | undefined, launchRecord: CoreAgent | undefined, submitted = false, cleanup: (() => Promise<void>) | undefined

@@ -17,7 +17,7 @@ time, wake reason and delivery/turn outcome; a turn ending is not a claim that t
 actual messages and saved progress carry its results; Shepherdr generates no separate status report.
 
 The ⋯ switch asks first, with what it replaces and spends and the limits now set. Where it can't run (a home space,
-the wrong permission profile for its system, no usable bubblewrap, or its CLI missing or signed out) the switch is greyed with the reason, and
+the wrong permission profile for its system, Codex in the Mac sandbox, no usable bubblewrap, or its CLI missing or signed out) the switch is greyed with the reason, and
 Settings → Autopilot shows the same line. Turning off is one tap.
 
 Turning ON closes/replaces the regular coordinator with a fresh selected Autopilot session. OFF starts a fresh
@@ -126,7 +126,7 @@ Xcode's own tools and its toolchain's compilers come first on `PATH` instead. iO
 **Codex is refused on this profile for now.** Its tools ran inside the profile against a local fake endpoint, and a real
 Codex turn answered through the gateway. With a current real model it uses a `codex-code-mode-host` helper, and inside the
 sandbox Codex gave up on it (`timed out negotiating with the code-mode host`), so that coordinator could not run
-commands. The cause is unknown and this wasn't solved, so Autopilot won't start with Codex as its agent or reviewer here.
+commands. The cause is unknown and this wasn't solved, so nothing starts Codex as an agent or reviewer here.
 The default reviewer is Codex where it's signed in, so set the reviewer to Claude Code. Rust and OpenSSL clients get their trust roots from `/etc/ssl/cert.pem`,
 not the Keychain, so a private certificate authority isn't trusted.
 
