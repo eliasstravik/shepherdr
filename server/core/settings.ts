@@ -245,7 +245,7 @@ export class CoreSettings {
     if (!space) return undefined
     if (space.home) return "Autopilot needs a repository space. A home space can't run it."
     const check = this.store.get<MachineCheck>('machine-check', space.machine), where = this.machineName(space.machine) || 'this machine'
-    const mac = this.get('autopilot.access', level) === 'Mac sandbox'
+    const mac = this.get('autopilot.access', level).startsWith('Mac sandbox')
     if (check?.platform === 'Darwin' && !mac) return `Isolated workspace needs Linux. ${where} runs macOS: choose the Mac sandbox permission profile.`
     if (check?.platform === 'Linux' && mac) return `The Mac sandbox permission profile needs macOS. ${where} runs Linux.`
     if (check?.platform && check.platform !== 'Linux' && check.platform !== 'Darwin') return `Autopilot needs Linux or macOS. ${where} runs ${check.platform}.`

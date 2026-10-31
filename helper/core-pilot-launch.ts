@@ -56,7 +56,7 @@ function preparePilotMac(input: PilotPrepare): PilotPrepared {
       privateRoots: [...input.privateRoots, ...protectedRoots, home.root] }
     pilotSandboxChecks(sandbox) // Refuse unsafe paths before the app records or launches this runtime.
     pilotNativeWorkspace(home, input.cwd, input.kind)
-    const mac = pilotMacPrepare(home, sandbox)
+    const mac = pilotMacPrepare(home, sandbox, input.access)
     const { root, state, control, captures, gateway } = home
     return { paths: { root, state, control, captures, gateway }, sandbox, bwrap: '/usr/bin/sandbox-exec', mac }
   } catch (error) { home.discard(); throw error }

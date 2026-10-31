@@ -95,6 +95,30 @@ test('one large read from a fast download reaches the contained client whole', a
     expect((await tunnel(socket, 'api.openai.com', undefined, clientHello('api.openai.com'))).length).toBeGreaterThan(size)
   } finally { await proxy.close() }
 }))
+test('a run may hold more tunnels only when it was given the limits to', async () => fixture(async (root, records) => {
+  const upstream = createServer(peer => peer.on('data', () => peer.write('REPLY')))
+  await new Promise<void>(done => upstream.listen(0, '127.0.0.1', done))
+  const port = (upstream.address() as { port: number }).port
+  const dns = (async () => [{ address: '1.1.1.1', family: 4 }]) as unknown as typeof lookup, tcp = (options: NetConnectOpts) => connect({ ...options, host: '127.0.0.1', port })
+  const open = async (name: string, limits?: { sockets: number; handshakes: number }) => {
+    const socket = join(root, name), proxy = new PilotProxy(['api.openai.com'], records, backend(), dns, tcp, limits), clients: Socket[] = []
+    await proxy.listen(socket)
+    const replied = await Promise.all(Array.from({ length: 12 }, () => new Promise<boolean>(done => {
+      const client = connect(socket); clients.push(client); client.on('error', () => done(false)); client.on('close', () => done(false))
+      client.once('connect', () => client.write('CONNECT api.openai.com:443 HTTP/1.1\r\nHost: api.openai.com:443\r\n\r\n'))
+      client.on('data', part => { if (part.toString().includes('200 Connection')) client.write(clientHello('api.openai.com')); if (part.toString().includes('REPLY')) done(true) })
+      setTimeout(() => done(false), 2500)
+    })))
+    for (const client of clients) client.destroy()
+    await proxy.close()
+    return replied.filter(Boolean).length
+  }
+  try {
+    expect(await open('default.sock')).toBeLessThan(12)
+    expect(await open('build.sock', { sockets: 64, handshakes: 16 })).toBe(12)
+  } finally { await new Promise<void>(done => upstream.close(() => done())) }
+}))
+
 test('quota refusal closes a tunnel before unreserved incoming bytes reach the contained client', async () => fixture(async (root, records) => {
   const socket = join(root, 'gateway.sock'), received: Buffer[] = []
   const upstream = createServer(peer => peer.on('data', bytes => { received.push(Buffer.from(bytes)); peer.end('REPLY') }))

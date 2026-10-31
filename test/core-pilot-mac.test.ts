@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pilotMacEnvironment, pilotMacProfile, pilotMacReadProfile, pilotMacRelay, pilotMacText, type PilotMacProfile } from '../helper/core-pilot-mac.ts'
-import { connect } from 'node:net'
+import { pilotMacEnvironment, pilotMacHeldPort, pilotMacProfile, pilotMacReadProfile, pilotMacRelay, pilotMacText, type PilotMacProfile } from '../helper/core-pilot-mac.ts'
+import { connect, createServer } from 'node:net'
 import { pilotLiveLogin, pilotLoginPaths, PilotMacLogin, pilotUsageReading, PilotUsageHook, type PilotLoginSource } from '../helper/core-pilot-mac-login.ts'
 import { PilotProxy } from '../helper/core-pilot-proxy.ts'
 import { preparePilotLaunch } from '../helper/core-pilot-launch.ts'
@@ -25,6 +25,35 @@ test('the profile denies by default and opens only this run', () => {
   for (const service of ['com.apple.SecurityServer', 'securityd', 'launchservicesd', 'appleevents', 'pasteboard', 'cfprefsd', 'com.apple.metadata', 'trustd']) expect(text).not.toContain(service)
   expect(text).not.toContain('"/System"') // /System/Volumes/Data is a second path to every user file.
   expect(text).not.toContain('/Users')
+})
+test('the local-ports profile opens only the ports it names, and the other profile none', () => {
+  const build = { read: ['/tools/jdk', '/tools/sdk'], java: '/tools/jdk', android: '/tools/sdk' }, text = profile({ build, ports: [50000, 17005] }), strict = profile()
+  expect(text).toContain('(allow network-outbound (remote ip "localhost:50000"))'); expect(text).toContain('(allow network-outbound (remote ip "localhost:17005"))')
+  expect(text).toContain('(allow network-bind network-inbound (local ip "localhost:*"))')
+  expect(text).not.toContain('(remote ip "localhost:*")'); expect(text).not.toContain('(remote ip "localhost:50001")')
+  expect(text).toContain('(subpath "/tools/jdk")'); expect(text).not.toContain('(allow file-write* (subpath "/tools/jdk")')
+  expect(text).toContain('(allow file-write-data (literal "/work/task"))') // Gradle asks whether its project root is writable.
+  expect(profile({ build, ports: [], writable: false })).not.toContain('(allow file-write-data (literal "/work/task"))')
+  for (const line of ['(local ip', '/tools/jdk', 'file-write-data (literal "/work/task")']) expect(strict).not.toContain(line)
+  expect(() => profile({ build, ports: [70000] })).toThrow('port')
+})
+test('a port something else holds is read from netstat, whoever owns it', () => {
+  expect(pilotMacHeldPort('tcp4       0      0  127.0.0.1.49435        *.*                    LISTEN')).toBe(49435)
+  expect(pilotMacHeldPort('tcp46      0      0  *.5000                 *.*                    LISTEN')).toBe(5000)
+  expect(pilotMacHeldPort('tcp6       0      0  ::1.46569              *.*                    LISTEN')).toBe(46569)
+  expect(pilotMacHeldPort('udp4       0      0  *.53                   *.*')).toBeUndefined()
+  expect(pilotMacHeldPort('tcp4       0      0  127.0.0.1.50000        127.0.0.1.50001        ESTABLISHED')).toBeUndefined()
+  for (const line of ['Active Internet connections (including servers)', 'Proto Recv-Q Send-Q  Local Address          Foreign Address        (state)', '']) expect(pilotMacHeldPort(line)).toBeUndefined()
+})
+test.skipIf(process.platform !== 'darwin')('a build run\'s relay answers on both loopback addresses, on one port', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'shep-mac-relay-')), socket = join(root, 'gateway.sock'), upstream = createServer(peer => peer.end('tunnel'))
+  await new Promise<void>(done => upstream.listen(socket, done))
+  const reach = (port: number, host: string) => new Promise<string>(done => { const client = connect(port, host); let said = ''; client.on('connect', () => client.write('CONNECT example.com:443 HTTP/1.1\r\n\r\n')); client.on('data', part => { said += part.toString() }); client.on('close', () => done(said)); client.on('error', error => done((error as NodeJS.ErrnoException).code ?? 'error')) })
+  const plain = await pilotMacRelay(socket), build = await pilotMacRelay(socket, undefined, true)
+  try {
+    expect(await reach(build.port, '127.0.0.1')).toBe('tunnel'); expect(await reach(build.port, '::1')).toBe('tunnel')
+    expect(await reach(plain.port, '127.0.0.1')).toBe('tunnel'); expect(await reach(plain.port, '::1')).toBe('ECONNREFUSED')
+  } finally { plain.close(); build.close(); upstream.close(); rmSync(root, { recursive: true, force: true }) }
 })
 test('later rules keep Git metadata and the live login read-only inside writable folders', () => {
   const text = profile(), write = text.indexOf('(allow file-write* '), seal = text.indexOf('(deny file-write* ')
@@ -57,6 +86,11 @@ test('fixed launch paths become their real locations', () => {
   expect(env.HOME).toBe('/real/home'); expect(env.CLAUDE_CONFIG_DIR).toBe('/real/home/.claude'); expect(env.SHEPHERDR_PILOT_PROXY).toBe('http://127.0.0.1:4242')
   expect(env.PATH.split(':').slice(0, 3)).toEqual(['/real/control/bin', '/dev/tools/Toolchains/XcodeDefault.xctoolchain/usr/bin', '/dev/tools/usr/bin'])
   expect(JSON.stringify(env)).not.toContain('CREDENTIAL')
+  expect(env).not.toHaveProperty('JAVA_TOOL_OPTIONS')
+  const build = pilotMacEnvironment({ state: '/real/home', control: '/real/control', gateway: '/real/gateway.sock', proxyPort: 4242, build: { read: ['/tools/jdk'], java: '/tools/jdk', android: '/tools/sdk' } }) as Record<string, string>
+  for (const option of ['-Djava.net.preferIPv6Addresses=true', '-Dhttps.proxyHost=localhost', '-Dhttps.proxyPort=4242', '-Dhttp.proxyPort=4242', '-Duser.home="/real/home"', '-Djava.io.tmpdir="/real/home/tmp"']) expect(build.JAVA_TOOL_OPTIONS).toContain(option)
+  expect(build).toMatchObject({ JAVA_HOME: '/tools/jdk', ANDROID_HOME: '/tools/sdk', GRADLE_USER_HOME: '/real/home/.gradle' })
+  expect(build.PATH!.split(':').slice(0, 2)).toEqual(['/real/control/bin', '/tools/jdk/bin'])
 })
 test('only the live access token crosses into the sandbox', () => {
   const host = { claudeAiOauth: { accessToken: 'access', refreshToken: 'refresh', expiresAt: 5, scopes: ['user:inference'], subscriptionType: 'max', rateLimitTier: 'tier', other: 'x' }, mcpOAuth: { server: { accessToken: 'mcp', refreshToken: 'mcp-refresh' } } }
@@ -150,10 +184,11 @@ test('each platform refuses the other platform’s profile and starts nothing', 
 test('the permission profile is a labeled setting and policy accepts only offered values', () => {
   const row = PILOT_SETTINGS.rows.find(item => item.key === 'autopilot.access')!
   expect(row.value).toBe('Isolated workspace')
-  expect(row.options).toEqual(['Isolated workspace', 'Mac sandbox'])
+  expect(row.options).toEqual(['Isolated workspace', 'Mac sandbox', 'Mac sandbox with local ports'])
   const store = { get: () => undefined, set: () => {}, all: () => [], delete: () => {} } as never
   const config = { harness: { kind: 'claude' as const }, reviewer: { kind: 'claude' as const }, hosts: [], secrets: [], approvals: [], parallel: 1 }
   const policy = new CorePilotPolicy(store)
   expect(policy.begin('p', 'm', { ...config, access: 'mac' }).config.access).toBe('mac')
+  expect(new CorePilotPolicy(store).begin('p', 'm', { ...config, access: 'mac-ports' }).config.access).toBe('mac-ports')
   expect(() => new CorePilotPolicy(store).begin('p', 'm', { ...config, access: 'open' as never })).toThrow('permission profile')
 })

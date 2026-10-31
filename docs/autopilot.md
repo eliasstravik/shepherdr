@@ -41,6 +41,7 @@ wrapper PATH are verified before Herdr starts any agent. A shell configuration t
 | Isolated workspace: local Linux repository space with usable bubblewrap namespaces | Required | Required | — |
 | Mac sandbox profile on a local macOS repository space | Yes | Once its helper is out of quarantine; real model not verified, see below | Refused |
 | Mac sandbox profile on a connected Mac | Nothing refuses it; not verified | Not verified | Refused |
+| Mac sandbox with local ports, for Gradle builds | Yes, on a local Mac; see its section below | Same as Mac sandbox; Gradle under it not verified with Codex | Refused |
 | Home-space Autopilot | Refused | Refused | — |
 | Connected Linux machines | Nothing refuses them; not verified | Nothing refuses them; not verified | — |
 
@@ -102,11 +103,13 @@ What it does not give you, compared with Linux:
 - **Loopback is shared with the whole Mac.** There's no private localhost, and Shepherdr's own web port would be on
   it, so an agent reaches only this run's CONNECT port. Anything that talks to itself over localhost fails, including
   local test servers. Gradle can't run at all, even with `--no-daemon`: it binds a local socket at startup and stops at
-  `FileLockContentionHandler` with `SocketException: Operation not permitted`. Unix sockets inside the private home work.
+  `FileLockContentionHandler` with `SocketException: Operation not permitted`; use the profile below for that. Unix
+  sockets inside the private home work.
 - **Java needs settings of its own.** A JVM's default sockets use IPv4-mapped addresses, which the rule for this run's
   CONNECT port doesn't match, so it can't reach even that port without `-Djava.net.preferIPv4Stack=true`. It also
   ignores `HTTPS_PROXY`, and takes its home folder from the system rather than `HOME`, so it's denied the real one
-  unless told otherwise. A JDK kept in the home folder, or linked there from `/Library/Java`, can't be read.
+  unless told otherwise. A JDK kept in the home folder, or linked there from `/Library/Java`, can't be read. The
+  profile below sets all of this for you.
 - **There's no private `/tmp` or `/dev`.** `TMPDIR` points into the private home; a tool that hardcodes `/tmp` fails.
   Only named devices and the run's own terminal are open, so a tool that needs a new pseudo-terminal fails too.
 - **Shared memory, semaphores and system notifications aren't private.** An agent can open the host's named segments,
@@ -122,6 +125,43 @@ too: for `xcodebuild`, pass `-IDEPackageSupportDisableManifestSandbox=1 -IDEPack
 Apple's `trustd` is out of reach because it fetches URLs named in a certificate from outside the sandbox, so Go and
 Swift programs that verify TLS through the system fail. `xcrun` and the `/usr/bin` developer shims can't run, because their shared cache would steer the host's own tools;
 Xcode's own tools and its toolchain's compilers come first on `PATH` instead. iOS simulators and full Xcode builds are untested.
+
+## Mac sandbox with local ports
+
+Gradle needs sockets of its own: a UDP lock socket, a daemon, and workers that connect back over TCP. Seatbelt has no
+private loopback to give it, so this separate profile opens a part of the shared one. Choose it only for a repository
+that builds with Gradle, knowing these limits, none of which **Mac sandbox** has:
+
+- **Another machine can connect to an agent.** Seatbelt can't confine a listener to loopback. An agent can listen on
+  every address, and any machine that can reach this Mac, on its network or tailnet, can connect and read what it
+  sends, past the gateway and its host list. A second machine reading from a contained listener confirmed this. The
+  agent still can't start that connection itself. Use it on networks you trust; macOS's firewall may block this, but
+  that isn't tested.
+- **A service that starts later is reachable.** An agent can connect to local ports 49152–65535, where the system
+  assigns a listener's port, and 17001–18000, where Kotlin's compile daemon picks one. Seatbelt can't tell which
+  listeners are the run's own, so each launch reads what listens now and closes those ports, whoever owns them. That
+  covers Shepherdr's web port and any host service already up. Something that starts afterwards on those ranges, such
+  as a browser's debugging port or a dev server on an assigned port, can be reached until the next launch. So can
+  another run's CONNECT port, and UDP services on those ranges whenever they started. Every other local port stays closed.
+- **A launch takes about 4 s longer.** Seatbelt has no port ranges, so the profile holds one rule per port and takes
+  that long to compile.
+- **A port that closes after the launch stays closed.** If the system assigns one to a Gradle listener, that build
+  fails with `Could not connect`; it's rare, and the next launch reads the ports again. Rerunning the build usually
+  gets another port.
+
+Each agent's JVMs get `JAVA_TOOL_OPTIONS`, which every JVM prints a line about when it starts. It sends them through
+the gateway and gives them private home and temporary folders, and `GRADLE_USER_HOME` is private as well. So a build's
+caches start empty, and nothing reads the host's `~/.gradle`. JVMs reach each other over `::1`, because a plain JVM
+reaches `127.0.0.1` through an IPv4-mapped address that no rule can match without opening the internet. So a JVM
+connecting to the literal `127.0.0.1` fails, and `localhost` works; other programs can use either.
+
+`JAVA_HOME` is whatever `/usr/libexec/java_home` finds. JDKs in `~/Library/Java/JavaVirtualMachines` and the JDK
+folders mise and SDKMAN keep, and the Android SDK at `~/Library/Android/sdk`, are readable, and `ANDROID_HOME` points to
+that SDK. The SDK is read-only: install what a build needs before starting Autopilot. Add the hosts it downloads
+from to **Network hosts**. A Kotlin Android build here needed `services.gradle.org`, `github.com` and
+`release-assets.githubusercontent.com` (the wrapper), `plugins.gradle.org`, `plugins-artifacts.gradle.org`,
+`repo.maven.apache.org`, `dl.google.com` and `maven.google.com`. A file Git ignores, such as `google-services.json`, isn't
+in a worktree unless the project makes one. Android emulators, instrumented tests and Kotlin/Native builds are untested.
 
 **Codex needs its helper out of quarantine.** A current model runs commands through a `codex-code-mode-host` helper
 beside the CLI. A Homebrew cask leaves that helper quarantined and unapproved, and macOS then hangs it, in or out of a

@@ -5,7 +5,7 @@ import type { PilotHome } from '../helper/core-pilot-home.ts'
 import { runPilotRuntime } from '../helper/core-pilot-runtime.ts'
 import { dirname } from 'node:path'
 import { rmSync } from 'node:fs'
-const input = JSON.parse(process.argv[2]!) as { parent: string; cwd: string; repo: string; writable: boolean; access: 'mac'; kind: 'claude' | 'codex'; args: string[]; hosts: string[]; deadline?: number }
+const input = JSON.parse(process.argv[2]!) as { parent: string; cwd: string; repo: string; writable: boolean; access: 'mac' | 'mac-ports'; kind: 'claude' | 'codex'; args: string[]; hosts: string[]; deadline?: number }
 const prepared = preparePilotLaunch({ parent: input.parent, cwd: input.cwd, repo: input.repo, kind: input.kind, writable: input.writable, instructions: 'Use /run/shepherdr/bin/shepherdr.', privateRoots: [], settings: JSON.stringify({ hooks: {} }), access: input.access })
 console.log(JSON.stringify({ prepared }))
 const stop = new AbortController()

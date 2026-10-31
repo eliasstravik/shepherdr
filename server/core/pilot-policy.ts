@@ -4,6 +4,8 @@ import type { AgentKind } from './model.ts'
 import { Refusal } from './client.ts'
 import type { PilotAccess } from '../../helper/core-pilot-mac.ts'
 
+/** The permission profiles as the human reads them in Settings. */
+export const PILOT_ACCESS: Record<PilotAccess, string> = { isolated: 'Isolated workspace', mac: 'Mac sandbox', 'mac-ports': 'Mac sandbox with local ports' }
 export interface PilotHarness { kind: AgentKind; model?: string; effort?: string; speed?: string }
 export interface CorePilotConfig {
   harness: PilotHarness
@@ -50,7 +52,7 @@ function configuration(input: CorePilotConfig): CorePilotConfig {
   }
   if (!Array.isArray(input.secrets) || input.secrets.length > 128 || input.secrets.some(name => typeof name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name))) throw new Refusal('List available secrets by environment name')
   if (!Array.isArray(input.approvals) || input.approvals.some(value => value !== 'merge')) throw new Refusal('Human approval can require merge, or none')
-  if (input.access !== undefined && !['isolated', 'mac'].includes(input.access)) throw new Refusal('Choose an offered permission profile')
+  if (input.access !== undefined && !['isolated', 'mac', 'mac-ports'].includes(input.access)) throw new Refusal('Choose an offered permission profile')
   return { access: input.access, harness: harness(input.harness), reviewer: harness(input.reviewer), hosts: pilotHosts(input.hosts), secrets: [...new Set(input.secrets)], approvals: [...new Set(input.approvals)],
     parallel: input.parallel, traffic: input.traffic, tokens: input.tokens, runtime: input.runtime }
 }

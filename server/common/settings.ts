@@ -199,7 +199,7 @@ export const CATALOG: Section[] = [
       { group: 'Agent', label: 'Agent', key: 'autopilot.agent', value: 'inherit', options: ['inherit', ...AUTOPILOT_KINDS.map(nameOf)] },
       { group: 'Agent', label: 'Model', key: 'autopilot.model', value: 'inherit', text: true },
       { group: 'Agent', label: 'Effort', key: 'autopilot.effort', value: 'inherit', options: ['inherit', ...EFFORTS] },
-      { group: 'Access and limits', label: 'Permission profile', key: 'autopilot.access', value: 'Isolated workspace', options: ['Isolated workspace', 'Mac sandbox'] },
+      { group: 'Access and limits', label: 'Permission profile', key: 'autopilot.access', value: 'Isolated workspace', options: ['Isolated workspace', 'Mac sandbox', 'Mac sandbox with local ports'] },
       { group: 'Access and limits', label: 'Network hosts (HTTPS)', key: 'autopilot.hosts', value: 'api.openai.com, chatgpt.com, api.anthropic.com', text: true },
       { group: 'Access and limits', label: 'Available secrets (names)', key: 'autopilot.secrets', value: '', text: true },
       { group: 'Access and limits', label: 'Human approval required', key: 'autopilot.approvals', value: 'merge', options: ['merge', 'none'] },

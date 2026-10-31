@@ -2,8 +2,8 @@
 //   bun test test/core-pilot-mac-escape.test.ts
 // Everything uses a scratch home and repository. It never reads the real login, and it reaches two public hosts.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { copyFileSync, chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
-import { createServer, type Server } from 'node:net'
+import { copyFileSync, chmodSync, cpSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { createServer, type Server, type Socket } from 'node:net'
 import { join } from 'node:path'
 import { pilotMacQuarantined } from '../helper/core-pilot-mac.ts'
 import { pilotMacProcesses, pilotMacSweep, pilotMacVisible } from '../helper/core-pilot-mac-stop.ts'
@@ -18,10 +18,10 @@ interface Attempt { name: string; code: number; out: string }
 describe.skipIf(process.platform !== 'darwin')('Mac sandbox escape attempts', () => {
   let root: string, home: string, repo: string, task: string, parent: string, listener: Server, unix: Server, listenerPort = 0
   const git = (...args: string[]) => { const out = Bun.spawnSync(['/usr/bin/git', ...args], { cwd: repo, env: { PATH: '/usr/bin:/bin:/opt/homebrew/bin', HOME: home, GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t.invalid' } }); if (out.exitCode) throw Error(out.stderr.toString()) }
-  const launch = (config: { writable?: boolean; cwd?: string; args: string[]; deadline?: number; kind?: 'claude' | 'codex'; fixture?: string; parent?: string }) => Bun.spawn([runner, config.fixture ?? fixture, JSON.stringify({ parent: config.parent ?? parent, cwd: config.cwd ?? task, repo, writable: config.writable ?? true, access: 'mac', kind: config.kind ?? 'claude', args: config.args, hosts: ['example.com', '100.100.100.100'], deadline: config.deadline })],
+  const launch = (config: { writable?: boolean; cwd?: string; args: string[]; deadline?: number; kind?: 'claude' | 'codex'; fixture?: string; parent?: string; access?: 'mac' | 'mac-ports' }) => Bun.spawn([runner, config.fixture ?? fixture, JSON.stringify({ parent: config.parent ?? parent, cwd: config.cwd ?? task, repo, writable: config.writable ?? true, access: config.access ?? 'mac', kind: config.kind ?? 'claude', args: config.args, hosts: ['example.com', '100.100.100.100'], deadline: config.deadline })],
     { cwd: root, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', env: { HOME: home, PATH: `${join(root, 'bin')}:/usr/bin:/bin`, USER: 'tester' } })
   /** Runs `script` as the agent and returns one row per `try` line it wrote. */
-  async function attempts(script: string, config: { writable?: boolean; cwd?: string; fixture?: string; parent?: string } = {}) {
+  async function attempts(script: string, config: { writable?: boolean; cwd?: string; fixture?: string; parent?: string; access?: 'mac' | 'mac-ports' } = {}) {
     const words = `
 attempt() { name=$1; shift; result=$("$@" 2>&1); printf '%s\\t%s\\t%s\\n' "$name" "$?" "$(printf '%s' "$result" | tr '\\n\\t' '  ' | cut -c1-200)" >> "$HOME/attempts.tsv"; }
 export HOST_HOME=${JSON.stringify(home)} REPO=${JSON.stringify(repo)} TASK=${JSON.stringify(task)} LISTENER=${listenerPort}
@@ -135,6 +135,64 @@ attempt product-command "$SHEPHERDR_COMMAND" status
   }, 90_000)
 
   // Skipped without this JDK, the one common install the profile can read.
+  test('local-ports profile: a run reaches itself, but no port already held here, no other address and no file it could not before', async () => {
+    const service = (socket: Socket) => socket.end('host service\n')
+    const low = createServer(service), later = createServer(service)
+    await new Promise<void>((done, fail) => { low.once('error', fail); low.listen(30000 + Math.floor(Math.random() * 10000), '127.0.0.1', done) })
+    const ready = join(task, '.ready'), port = join(task, '.later-port')
+    try {
+      const run = attempts(`
+python=$(command -v python3)
+reach() { "$python" -I -c 'import socket,sys;s=socket.socket(socket.AF_INET6 if ":" in sys.argv[1] else socket.AF_INET);s.settimeout(3);s.connect((sys.argv[1],int(sys.argv[2])));print(s.recv(40).decode())' "$@"; }
+attempt own-listener "$python" -I -c 'import socket;l=socket.socket();l.bind(("127.0.0.1",0));l.listen(1);c=socket.socket();c.connect(l.getsockname());a,_=l.accept();a.sendall(b"own");print(c.recv(3).decode())'
+attempt own-udp "$python" -I -c 'import socket;r=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);r.bind(("0.0.0.0",0));s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.sendto(b"own",("127.0.0.1",r.getsockname()[1]));r.settimeout(3);print(r.recv(3).decode())'
+attempt held-port reach 127.0.0.1 "$LISTENER"
+attempt held-port-mapped reach ::ffff:127.0.0.1 "$LISTENER"
+attempt held-low-port reach 127.0.0.1 ${(low.address() as { port: number }).port}
+attempt internet reach 1.1.1.1 443
+attempt udp-outside "$python" -I -c 'import socket;socket.socket(socket.AF_INET,socket.SOCK_DGRAM).sendto(b"x",("1.1.1.1",53))'
+attempt control-socket "$python" -I -c 'import os,socket;socket.socket(socket.AF_UNIX).connect(os.environ["HOST_HOME"]+"/control.sock")'
+attempt read-ssh cat "$HOST_HOME/.ssh/id_scratch"
+attempt move-worktree mv "$TASK" "$HOME/moved-worktree"
+attempt worktree-reports-writable test -w "$TASK"
+attempt listen-every-address "$python" -I -c 'import socket;l=socket.socket();l.bind(("0.0.0.0",0));l.listen(1)'
+touch "$TASK/.ready"
+n=0; while [ ! -s "$TASK/.later-port" ] && [ $n -lt 200 ]; do sleep 0.1; n=$((n+1)); done
+attempt later-port reach 127.0.0.1 "$(cat "$TASK/.later-port")"
+`, { access: 'mac-ports' })
+      for (let n = 0; n < 1200 && !existsSync(ready); n++) await Bun.sleep(50)
+      await new Promise<void>(done => later.listen(0, '127.0.0.1', done))
+      writeFileSync(port, String((later.address() as { port: number }).port))
+      const rows = await run
+      for (const name of ['own-listener', 'own-udp', 'worktree-reports-writable']) expect([name, row(rows, name).code, row(rows, name).out]).toEqual([name, 0, expect.any(String)])
+      for (const name of ['held-port', 'held-port-mapped', 'held-low-port', 'internet', 'udp-outside']) { expect([name, row(rows, name).code === 0]).toEqual([name, false]); expect([name, row(rows, name).out]).toEqual([name, expect.stringContaining('not permitted')]) }
+      for (const name of ['control-socket', 'read-ssh', 'move-worktree']) expect([name, row(rows, name).code === 0]).toEqual([name, false])
+      // The limits docs/autopilot.md states. Both would be holes in the Mac sandbox profile, which keeps them closed.
+      expect(row(rows, 'listen-every-address').code).toBe(0)
+      expect(row(rows, 'later-port')).toMatchObject({ code: 0, out: expect.stringContaining('host service') })
+    } finally { low.close(); later.close(); rmSync(ready, { force: true }); rmSync(port, { force: true }) }
+  }, 120_000)
+  // Point this at an unpacked Gradle distribution. Offline, so it needs no allowed host: its daemon, its file lock socket and a worker it forks.
+  const gradle = process.env.SHEPHERDR_TEST_GRADLE
+  test.skipIf(!gradle)('local-ports profile: real Gradle builds with a daemon and a forked worker', async () => {
+    const project = join(root, 'gradle-task'); git('worktree', 'add', '-q', '-b', 'gradle-work', project)
+    cpSync(gradle!, join(project, 'gradle-dist'), { recursive: true, verbatimSymlinks: true })
+    writeFileSync(join(project, 'settings.gradle'), "rootProject.name = 'scratch'\n")
+    writeFileSync(join(project, 'build.gradle'), `import org.gradle.workers.*
+abstract class Say implements WorkAction<WorkParameters.None> { void execute() { println 'worker-ran' } }
+abstract class Fork extends DefaultTask { @Inject abstract WorkerExecutor getWorkers(); @TaskAction void go() { getWorkers().processIsolation().submit(Say) {} } }
+tasks.register('fork', Fork)
+`)
+    const rows = await attempts(`
+cd "\${TASK%/*}/gradle-task"
+attempt build sh -c './gradle-dist/bin/gradle --offline --no-watch-fs --console=plain fork > "$HOME/gradle.out" 2>&1 || { tail -5 "$HOME/gradle.out"; exit 1; }; grep -c worker-ran "$HOME/gradle.out"'
+attempt second-build sh -c './gradle-dist/bin/gradle --offline --no-watch-fs --console=plain fork --rerun-tasks > "$HOME/gradle.out" 2>&1 || { tail -5 "$HOME/gradle.out"; exit 1; }; grep -c "Starting a Gradle Daemon" "$HOME/gradle.out"'
+attempt host-service-from-gradle-still-closed "$(command -v python3)" -I -c 'import socket,os;socket.socket().connect(("127.0.0.1",int(os.environ["LISTENER"])))'
+`, { access: 'mac-ports', cwd: project })
+    expect(row(rows, 'build')).toMatchObject({ code: 0, out: '1' })
+    expect(row(rows, 'second-build')).toMatchObject({ code: 1, out: '0' }) // grep finding no new daemon: the first one answered.
+    expect(row(rows, 'host-service-from-gradle-still-closed').code).not.toBe(0)
+  }, 300_000)
   const java = '/opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home/bin/java'
   test.skipIf(!existsSync(java))('a JVM reaches only its own CONNECT port, in IPv4 mode, and never another loopback port', async () => {
     writeFileSync(join(task, 'Reach.java'), 'public class Reach { public static void main(String[] a) throws Exception { new java.net.Socket().connect(new java.net.InetSocketAddress(java.net.InetAddress.getByName(a[0]), Integer.parseInt(a[1])), 4000); } }\n')
@@ -153,6 +211,21 @@ attempt other-port-mapped-ipv4 jvm $ipv4 Reach.java ::ffff:127.0.0.1 "$LISTENER"
       expect(row(rows, 'own-port-ipv4').code).toBe(0) // The JVM itself works here, so the refusals below mean something.
       for (const name of ['own-port-default-sockets', 'other-port-default-sockets', 'other-port-mapped-default-sockets', 'other-port-ipv4', 'other-port-mapped-ipv4']) expect([name, row(rows, name).code === 0]).toEqual([name, false])
       expect(row(rows, 'other-port-mapped-default-sockets').out).toContain('Operation not permitted')
+    } finally { rmSync(join(task, 'Reach.java'), { force: true }) }
+  }, 90_000)
+  test.skipIf(!existsSync(java))('local-ports profile: a JVM reaches its CONNECT port with no flags of its own, and still no port already held', async () => {
+    writeFileSync(join(task, 'Reach.java'), 'public class Reach { public static void main(String[] a) throws Exception { new java.net.Socket().connect(new java.net.InetSocketAddress(a[0], Integer.parseInt(a[1])), 4000); } }\n')
+    try {
+      const rows = await attempts(`
+own=\${HTTPS_PROXY##*:}
+jvm() { said=$(${java} Reach.java "$@" 2>&1); code=$?; printf '%s' "$said" | grep -v 'Picked up'; return $code; }
+attempt own-port jvm localhost "$own"
+attempt held-port jvm localhost "$LISTENER"
+attempt held-port-literal jvm 127.0.0.1 "$LISTENER"
+attempt internet jvm 1.1.1.1 443
+`, { access: 'mac-ports' })
+      expect(row(rows, 'own-port').code).toBe(0)
+      for (const name of ['held-port', 'held-port-literal', 'internet']) { expect([name, row(rows, name).code === 0]).toEqual([name, false]); expect([name, row(rows, name).out]).toEqual([name, expect.stringContaining('not permitted')]) }
     } finally { rmSync(join(task, 'Reach.java'), { force: true }) }
   }, 90_000)
 
