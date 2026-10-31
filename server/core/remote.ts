@@ -54,7 +54,8 @@ export class CoreRemotes {
     assets('skills'); assets('skill-data')
     parts['bin/agent-browser'] = readFileSync(join(source, 'bin/agent-browser'), 'utf8').replace('node_modules/agent-browser/bin/', 'vendor/agent-browser/bin/')
     parts['vendor/agent-browser/LICENSE'] = readFileSync(join(packageRoot, 'LICENSE'), 'utf8')
-    const digest = createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 24)
+    // bin/shepherdr below names this Bun, and a helper folder is never rewritten: a new Bun path needs its own folder.
+    const digest = createHash('sha256').update(JSON.stringify({ parts, bun: metadata.bun })).digest('hex').slice(0, 24)
     const root = join(metadata.home, '.local/share/shepherdr-agents', this.installation, digest)
     parts['bin/shepherdr'] = `#!/bin/sh\nexec ${quote(metadata.bun)} ${quote(join(root, 'helper/core-cli.ts'))} "$@"\n`
 

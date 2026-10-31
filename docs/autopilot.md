@@ -17,7 +17,7 @@ time, wake reason and delivery/turn outcome; a turn ending is not a claim that t
 actual messages and saved progress carry its results; Shepherdr generates no separate status report.
 
 The ⋯ switch asks first, with what it replaces and spends and the limits now set. Where it can't run (a home space,
-not Linux, no usable bubblewrap, or its CLI missing or signed out) the switch is greyed with the reason, and
+the wrong permission profile for its system, no usable bubblewrap, or its CLI missing or signed out) the switch is greyed with the reason, and
 Settings → Autopilot shows the same line. Turning off is one tap.
 
 Turning ON closes/replaces the regular coordinator with a fresh selected Autopilot session. OFF starts a fresh
@@ -39,8 +39,8 @@ wrapper PATH are verified before Herdr starts any agent. A shell configuration t
 | Shepherdr chat reader, model/effort adapter | Yes | Yes | Not currently viable for coordinator chat; refused |
 | Shared Linux isolation, schedule, fresh mode replacement | Yes | Yes | Refused |
 | Isolated workspace: local Linux repository space with usable bubblewrap namespaces | Required | Required | — |
-| Mac sandbox profile on a local macOS repository space | Yes | Partly, see below | Refused |
-| Mac sandbox profile on a connected Mac | Nothing refuses it; not verified | Not verified | Refused |
+| Mac sandbox profile on a local macOS repository space | Yes | Refused for now, see below | Refused |
+| Mac sandbox profile on a connected Mac | Nothing refuses it; not verified | Refused for now, see below | Refused |
 | Home-space Autopilot | Refused | Refused | — |
 | Connected Linux machines | Nothing refuses them; not verified | Nothing refuses them; not verified | — |
 
@@ -57,7 +57,7 @@ proxy. This limits CONNECT destinations and their resolved public IPs; encrypted
 so another service hosted on the same IP may be reachable. Custom providers may need their public host added; a local provider is unsupported. Failure never enables
 host networking. Provider configuration is copied selectively: host MCP executors, hooks and installed plugins
 are not imported. The selected agent and reviewer login files are copied into the private home; the host login files are not overwritten.
-A login that cannot work in the isolated runtime needs the human; it never falls back to another account.
+A login that cannot work in the isolated runtime needs the human; it never falls back to another account. The Mac sandbox differs: Claude follows the host's live login (below).
 
 The gateway fixes command chat/cwd identity itself. A caller cannot choose another task, secret scope or permission
 profile. Secret values use the existing masked CLI flow, only for names explicitly in this profile. Settings,
@@ -77,7 +77,7 @@ need explicit retry, rather than being revived without their gateway.
 ## The Mac sandbox profile
 
 macOS has no namespaces, so **Isolated workspace** is refused there and you choose **Mac sandbox** instead (Settings →
-Autopilot → Permission profile). It is refused on Linux. Coordinator, workers and reviewers, Claude Code or Codex, all
+Autopilot → Permission profile). It is refused on Linux. Coordinator, workers and reviewers, on Claude Code for now, all
 run under one generated Seatbelt profile that denies by default, through `sandbox-exec`. If it can't start, Autopilot
 stays stopped; nothing runs unrestricted. It needs Bun 1.4.2 or newer on that machine, and `flock` (`brew install
 flock`) to adopt an existing task into a run. The gateway, exact-host allowlist, broker Git, secrets and limits are the
@@ -109,6 +109,8 @@ What it does not give you, compared with Linux:
   unless told otherwise. A JDK kept in the home folder, or linked there from `/Library/Java`, can't be read.
 - **There's no private `/tmp` or `/dev`.** `TMPDIR` points into the private home; a tool that hardcodes `/tmp` fails.
   Only named devices and the run's own terminal are open, so a tool that needs a new pseudo-terminal fails too.
+- **Shared memory, semaphores and system notifications aren't private.** An agent can open the host's named segments,
+  such as the notification center's, and post or read notifications.
 - **`sandbox-exec` is deprecated.** Apple marks it deprecated but still ships it and uses Seatbelt itself; Claude Code
   and Codex rely on it too. A future macOS could remove it, and Autopilot would then refuse to start on a Mac.
 
@@ -121,11 +123,11 @@ Apple's `trustd` is out of reach because it fetches URLs named in a certificate 
 Swift programs that verify TLS through the system fail. `xcrun` and the `/usr/bin` developer shims can't run, because their shared cache would steer the host's own tools;
 Xcode's own tools and its toolchain's compilers come first on `PATH` instead. iOS simulators and full Xcode builds are untested.
 
-**Codex is only partly proven here.** Its tools ran inside the profile against a local fake endpoint, and a real
-Codex turn answered through the gateway. With a current real model it uses a `codex-code-mode-host` helper, and macOS
-stopped that helper from starting inside the sandbox (`timed out negotiating with the code-mode host`), so that
-coordinator could not run commands. This wasn't solved. Autopilot's default reviewer is Codex too, so without a working
-Codex login set the reviewer to Claude Code. Rust and OpenSSL clients get their trust roots from `/etc/ssl/cert.pem`,
+**Codex is refused on this profile for now.** Its tools ran inside the profile against a local fake endpoint, and a real
+Codex turn answered through the gateway. With a current real model it uses a `codex-code-mode-host` helper, and inside the
+sandbox Codex gave up on it (`timed out negotiating with the code-mode host`), so that coordinator could not run
+commands. The cause is unknown and this wasn't solved, so Autopilot won't start with Codex as its agent or reviewer here.
+The default reviewer is Codex where it's signed in, so set the reviewer to Claude Code. Rust and OpenSSL clients get their trust roots from `/etc/ssl/cert.pem`,
 not the Keychain, so a private certificate authority isn't trusted.
 
 **Logins.** Claude Code on a Mac keeps its login in the Keychain, and the profile denies the Keychain. A process outside

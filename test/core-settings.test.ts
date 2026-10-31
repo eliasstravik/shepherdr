@@ -266,7 +266,12 @@ test('Autopilot says why it cannot run: home space, wrong profile for the system
   check(settings, 'box', ready, { platform: 'Darwin', sandbox: 'missing' })
   expect(settings.pilotBlock('p:box:one')).toBe('Isolated workspace needs Linux. box runs macOS: choose the Mac sandbox permission profile.')
   settings.set('autopilot.access', 'Mac sandbox', 'p:box:one')
+  expect(settings.pilotBlock('p:box:one')).toContain("Codex can't run commands") // The default reviewer, where it's signed in.
+  settings.set('reviewer.agent', 'Claude Code', 'p:box:one')
   expect(settings.pilotBlock('p:box:one')).toBeUndefined() // bubblewrap is missing on every Mac, and the Mac profile doesn't use it.
+  settings.set('autopilot.agent', 'Codex', 'p:box:one')
+  expect(settings.pilotBlock('p:box:one')).toContain("Codex can't run commands")
+  settings.set('autopilot.agent', 'Claude Code', 'p:box:one')
   check(settings, 'box', { claude: 'signed-out', codex: 'ready' }, { platform: 'Darwin', sandbox: 'missing' })
   expect(settings.pilotBlock('p:box:one')).toBe('Autopilot runs on Claude Code, which is not signed in on box.')
   check(settings, 'box', ready, { platform: 'Linux', sandbox: 'ok' })
