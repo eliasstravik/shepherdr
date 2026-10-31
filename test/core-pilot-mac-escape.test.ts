@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { copyFileSync, chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:net'
 import { join } from 'node:path'
+import { pilotMacQuarantined } from '../helper/core-pilot-mac.ts'
 import { pilotMacProcesses, pilotMacSweep, pilotMacVisible } from '../helper/core-pilot-mac-stop.ts'
 import { CoreRemotes } from '../server/core/remote.ts'
 import type { CoreFiles } from '../server/core/files.ts'
@@ -280,6 +281,20 @@ if os.fork() == 0:
     expect(await pilotMacVisible({ allowed, denied }, outside, 200)).toBe(false)
     outside.kill('SIGKILL'); await outside.exited
     expect(await pilotMacVisible({ allowed, denied }, outside)).toBe(true) // Already gone: nothing to stop.
+  }, 30_000)
+
+  test('a quarantined Codex helper is refused by name, with what clears it; an approved one is not', async () => {
+    const helper = join(root, 'bin/codex-code-mode-host'); writeFileSync(helper, '', { mode: 0o755 })
+    const flag = (word: string) => expect(Bun.spawnSync(['/usr/bin/xattr', '-w', 'com.apple.quarantine', `${word};6abe515b;;`, helper]).exitCode).toBe(0)
+    try {
+      expect(pilotMacQuarantined(helper)).toBe(false) // Not quarantined at all.
+      flag('03c1'); expect(pilotMacQuarantined(helper)).toBe(false)
+      flag('0381'); expect(pilotMacQuarantined(helper)).toBe(true)
+      const child = launch({ args: ['-c', 'exit 0'], kind: 'codex' })
+      const [out, code] = await Promise.all([new Response(child.stderr).text(), child.exited])
+      expect(code).not.toBe(0)
+      expect(out).toContain(`xattr -d com.apple.quarantine ${helper}`)
+    } finally { rmSync(helper, { force: true }) }
   }, 30_000)
 
   test('a connected Mac: the helper folder Shepherdr provisions there runs a contained launch', async () => {

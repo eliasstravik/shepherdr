@@ -143,6 +143,12 @@ export function pilotMacProfileInput(home: Pick<PilotHome, 'gateway'>, sandbox: 
     gateway: home.gateway, proxyPort, writable: sandbox.writable, masks, tty, developer: mac.developer, marker: mac.marker, sealed: [sandbox.cwd, sandbox.state, join(sandbox.state, '.claude'), file, temporary] }
 }
 /** Loopback is shared with the whole Mac, so unlike Linux's private relay this one passes CONNECT only: never /mail. */
+/** Quarantined and never approved, which macOS then hangs at start, in or out of any sandbox. 0x40 marks an approved one. */
+export function pilotMacQuarantined(path: string) {
+  const found = Bun.spawnSync(['/usr/bin/xattr', '-p', 'com.apple.quarantine', path], { stdin: 'ignore', stdout: 'pipe', stderr: 'ignore' })
+  const flags = found.exitCode === 0 ? parseInt(found.stdout.toString().split(';')[0]!, 16) : NaN
+  return !Number.isNaN(flags) && !(flags & 0x40)
+}
 export async function pilotMacRelay(gateway: string, idle = 10_000) {
   const peers = new Set<Socket>()
   const server = createServer(client => {

@@ -254,7 +254,7 @@ export class CoreSettings {
     if (mac && check?.seatbelt === 'missing') return `The Mac sandbox needs sandbox-exec, which is not on ${where}.`
     // The launcher enforces this too (helper/core-pilot-launch.ts).
     if (mac && check?.bun && Bun.semver.order(check.bun, '1.4.2') < 0) return `The Mac sandbox needs Bun 1.4.2 or newer on ${where}, not ${check.bun}.`
-    if (mac && [this.agent('autopilot', level).kind, kindOf(this.get('reviewer.agent', level))].includes('codex')) return "Codex can't run commands in the Mac sandbox yet. Choose Claude Code for Autopilot's agent and reviewer."
+    if (mac && check?.quarantined && [this.agent('autopilot', level).kind, kindOf(this.get('reviewer.agent', level))].includes('codex')) return `macOS holds Codex's helper in quarantine on ${where}, so Codex can't run commands. If you trust it, run xattr -d com.apple.quarantine ${check.quarantined} there, or choose Claude Code for Autopilot's agent and reviewer.`
     const kind = this.agent('autopilot', level).kind, state = check?.cli[kind]
     if (state && state !== 'ready') return `Autopilot runs on ${names[kind]}, which is ${state === 'missing' ? 'not installed' : 'not signed in'} on ${where}.`
   }

@@ -256,6 +256,7 @@ test('an answer it cannot read proves nothing: never picked, never warned about,
   expect(parseMachineCheck('/home/someone')).toBeUndefined()
   expect(parseMachineCheck('platform=Darwin\nseatbelt=ok\nbun=1.4.2\nsandbox=missing', 5)).toMatchObject({ seatbelt: 'ok', bun: '1.4.2' })
   expect(parseMachineCheck('platform=Darwin\nbun=not a version', 5)?.bun).toBeUndefined()
+  expect(parseMachineCheck('platform=Darwin\nquarantined=/cask/helper', 5)?.quarantined).toBe('/cask/helper')
   expect(parseMachineCheck('platform=Linux\nsandbox=ok\nclaude=\ncodex=error: unknown command', 5)).toEqual({ at: 5, platform: 'Linux', sandbox: 'ok', cli: { claude: undefined, codex: undefined } })
   expect(parseMachineCheck('platform=Linux\nclaude="loggedIn": false\ncodex=Logged in using ChatGPT')?.cli).toEqual({ claude: 'signed-out', codex: 'ready' })
   expect(parseMachineCheck('platform=Linux\nclaude="loggedIn": true\ncodex=Not logged in')?.cli).toEqual({ claude: 'ready', codex: 'signed-out' })
@@ -268,11 +269,13 @@ test('Autopilot says why it cannot run: home space, wrong profile for the system
   check(settings, 'box', ready, { platform: 'Darwin', sandbox: 'missing' })
   expect(settings.pilotBlock('p:box:one')).toBe('Isolated workspace needs Linux. box runs macOS: choose the Mac sandbox permission profile.')
   settings.set('autopilot.access', 'Mac sandbox', 'p:box:one')
-  expect(settings.pilotBlock('p:box:one')).toContain("Codex can't run commands") // The default reviewer, where it's signed in.
-  settings.set('reviewer.agent', 'Claude Code', 'p:box:one')
   expect(settings.pilotBlock('p:box:one')).toBeUndefined() // bubblewrap is missing on every Mac, and the Mac profile doesn't use it.
+  check(settings, 'box', ready, { platform: 'Darwin', sandbox: 'missing', quarantined: '/cask/codex-code-mode-host' })
+  expect(settings.pilotBlock('p:box:one')).toContain('xattr -d com.apple.quarantine /cask/codex-code-mode-host') // The default reviewer, where it's signed in.
+  settings.set('reviewer.agent', 'Claude Code', 'p:box:one')
+  expect(settings.pilotBlock('p:box:one')).toBeUndefined()
   settings.set('autopilot.agent', 'Codex', 'p:box:one')
-  expect(settings.pilotBlock('p:box:one')).toContain("Codex can't run commands")
+  expect(settings.pilotBlock('p:box:one')).toContain('xattr -d com.apple.quarantine')
   settings.set('autopilot.agent', 'Claude Code', 'p:box:one')
   check(settings, 'box', ready, { platform: 'Darwin', sandbox: 'missing', bun: '1.3.5' })
   expect(settings.pilotBlock('p:box:one')).toBe('The Mac sandbox needs Bun 1.4.2 or newer on box, not 1.3.5.')

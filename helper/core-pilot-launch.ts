@@ -6,7 +6,7 @@ import { existsSync, lstatSync, realpathSync, rmSync, writeFileSync } from 'node
 import { preparePilotHome, type PilotHome } from './core-pilot-home.ts'
 import { pilotNativeWorkspace } from './core-pilot-native.ts'
 import { pilotSandboxArgs, pilotSandboxChecks, type PilotSandbox } from './core-pilot-sandbox.ts'
-import { pilotMacPrepare, type PilotAccess, type PilotMacPrepared } from './core-pilot-mac.ts'
+import { pilotMacPrepare, pilotMacQuarantined, type PilotAccess, type PilotMacPrepared } from './core-pilot-mac.ts'
 import { pilotCoreBackend } from './core-pilot-backend.ts'
 import { runPilotRuntime } from './core-pilot-runtime.ts'
 import { readCredential } from '../server/core/home.ts'
@@ -45,6 +45,9 @@ function preparePilotMac(input: PilotPrepare): PilotPrepared {
   if (!binary || !existsSync('/usr/bin/sandbox-exec')) throw Error('The Mac sandbox needs sandbox-exec and the selected native CLI; no unrestricted fallback was started')
   // Bun 1.3 starts with an empty process.env under this profile, so nothing inside would find its gateway.
   if (Bun.semver.order(Bun.version, '1.4.2') < 0) throw Error(`The Mac sandbox needs Bun 1.4.2 or newer on this machine, not ${Bun.version}; no unrestricted fallback was started`)
+  // A cask leaves Codex's helper quarantined until approved, and nothing ever asks. Codex itself only says it timed out.
+  const held = input.kind === 'codex' && [realpathSync(binary), join(dirname(realpathSync(binary)), 'codex-code-mode-host')].find(pilotMacQuarantined)
+  if (held) throw Error(`macOS holds ${held} in quarantine, so Codex can't run commands. If you trust it, run xattr -d com.apple.quarantine ${held} and start again; no unrestricted fallback was started`)
   const hostHome = realpathSync(homedir()), home = preparePilotHome(input.parent, hostHome, join(import.meta.dir, '..'), input.kind, input.instructions, true)
   try {
     writeFileSync(join(home.control, 'settings.json'), input.settings, { mode: 0o600, flag: 'wx' })

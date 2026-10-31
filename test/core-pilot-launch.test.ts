@@ -56,11 +56,12 @@ test('contained reviewer wraps only native args and keeps its endpoint credentia
 test('a contained launch starts host Bun outside the worktree on either system, and its terminal still reports the worktree', async () => {
   const f = fixture(true), linux = fixture()
   try {
-    await expect(f.launch('codex', 'mac')).rejects.toThrow("Codex can't run commands in the Mac sandbox")
-    expect(f.submitted).toBe(false)
-    await f.launch('claude', 'mac')
+    await f.launch()
     expect(f.argv.slice(0, 4)).toEqual(['/bin/sh', '-c', 'cd "$0" && exec "$@"', join(f.home, 'sessions')])
     expect(f.cwd).toBe('/repo')
+    const review = JSON.parse(readFileSync(f.argv[6]!, 'utf8')), launch = JSON.parse(readFileSync(review.argv[2], 'utf8'))
+    expect(launch.args.slice(0, 3)).toEqual(['exec', '--json', '--dangerously-bypass-approvals-and-sandbox'])
+    expect(launch.args).not.toContain('--sandbox')
     await linux.launch()
     expect(linux.argv.slice(0, 4)).toEqual(['/bin/sh', '-c', 'cd "$0" && exec "$@"', join(linux.home, 'sessions')])
     expect(linux.cwd).toBe('/repo')
