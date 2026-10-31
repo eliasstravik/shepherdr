@@ -131,7 +131,7 @@ export class PilotProxy {
       guard.on('error', end)
       const meter = (incoming = false) => new Transform({ transform: (chunk, _encoding, done) => {
         const bytes = Buffer.from(chunk)
-        if (bytes.length > 256 * 1024) { done(Error('HTTPS chunk exceeded its bound')); return }
+        if (bytes.length > 1024 * 1024) { done(Error('HTTPS chunk exceeded its bound')); return } // One Bun read can reach 512 KiB on a fast download.
         void (async () => {
           if (incoming) await guard.ready
           for (let offset = 0; offset < bytes.length; offset += 64 * 1024) {

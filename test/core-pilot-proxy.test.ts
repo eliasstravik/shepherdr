@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { connect, createServer, type Socket, type NetConnectOpts } from 'node:net'
+import { Duplex } from 'node:stream'
 import { lookup } from 'node:dns/promises'
 import { PilotProxy, type PilotProxyBackend } from '../helper/core-pilot-proxy.ts'
 import { PilotRecords } from '../helper/core-pilot-records.ts'
@@ -79,6 +80,21 @@ test('tunnel bytes reserve shared allowance in both directions before reaching e
   } finally { await proxy.close(); await new Promise<void>(done => upstream.close(() => done())) }
 }))
 
+test('one large read from a fast download reaches the contained client whole', async () => fixture(async (root, records) => {
+  const socket = join(root, 'gateway.sock'), size = 600 * 1024
+  // A real socket reads this much at once only when Bun's loop is busy, so this peer always hands it over in one go.
+  const tcp = () => {
+    const peer = new Duplex({ read() {}, write(_bytes, _encoding, done) { peer.push(Buffer.alloc(size, 'x')); peer.push(null); done() } })
+    setImmediate(() => peer.emit('connect'))
+    return Object.assign(peer, { setTimeout: () => peer }) as unknown as Socket
+  }
+  const dns = (async () => [{ address: '1.1.1.1', family: 4 }]) as unknown as typeof lookup
+  const proxy = new PilotProxy(['api.openai.com'], records, backend(), dns, tcp)
+  try {
+    await proxy.listen(socket)
+    expect((await tunnel(socket, 'api.openai.com', undefined, clientHello('api.openai.com'))).length).toBeGreaterThan(size)
+  } finally { await proxy.close() }
+}))
 test('quota refusal closes a tunnel before unreserved incoming bytes reach the contained client', async () => fixture(async (root, records) => {
   const socket = join(root, 'gateway.sock'), received: Buffer[] = []
   const upstream = createServer(peer => peer.on('data', bytes => { received.push(Buffer.from(bytes)); peer.end('REPLY') }))
