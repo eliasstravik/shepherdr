@@ -3,6 +3,7 @@
 // Everything uses a scratch home and repository. It never reads the real login, and it reaches two public hosts.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { copyFileSync, chmodSync, cpSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { createSocket } from 'node:dgram'
 import { createServer, type Server, type Socket } from 'node:net'
 import { join } from 'node:path'
 import { pilotMacQuarantined } from '../helper/core-pilot-mac.ts'
@@ -139,6 +140,12 @@ attempt product-command "$SHEPHERDR_COMMAND" status
     const service = (socket: Socket) => socket.end('host service\n')
     const low = createServer(service), later = createServer(service)
     await new Promise<void>((done, fail) => { low.once('error', fail); low.listen(30000 + Math.floor(Math.random() * 10000), '127.0.0.1', done) })
+    // A host service on every address, sharing its port: the one a more specific local listener could take traffic from.
+    const shared = createServer(service), sharedPort = 40000 + Math.floor(Math.random() * 5000)
+    await new Promise<void>((done, fail) => { shared.once('error', fail); shared.listen(sharedPort, '0.0.0.0', done) })
+    // A UDP listener needs no listen(): the refusal comes when a datagram arrives, so keep sending one.
+    const sender = createSocket('udp4'), sending = setInterval(() => sender.send('x', 9999, '127.0.0.1'), 100)
+    const claim = "import socket,sys;s=socket.socket(socket.AF_INET6 if ':' in sys.argv[1] else socket.AF_INET);s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEPORT,1);s.bind((sys.argv[1],int(sys.argv[2])));s.listen(1)"
     const ready = join(task, '.ready'), port = join(task, '.later-port')
     try {
       const run = attempts(`
@@ -156,6 +163,16 @@ attempt read-ssh cat "$HOST_HOME/.ssh/id_scratch"
 attempt move-worktree mv "$TASK" "$HOME/moved-worktree"
 attempt worktree-reports-writable test -w "$TASK"
 attempt listen-every-address "$python" -I -c 'import socket;l=socket.socket();l.bind(("0.0.0.0",0));l.listen(1)'
+claim() { "$python" -I -c "${claim}" "$@"; }
+attempt take-held-port claim 127.0.0.1 "$LISTENER"
+attempt take-held-port-ipv6 claim ::1 "$LISTENER"
+attempt take-shared-port claim 127.0.0.1 ${sharedPort}
+attempt take-shared-port-every-address claim 0.0.0.0 ${sharedPort}
+attempt take-relay-port claim ::1 "\${HTTPS_PROXY##*:}"
+attempt take-low-port claim 127.0.0.1 7787
+attempt take-low-port-every-address claim 0.0.0.0 7787
+attempt take-low-udp "$python" -I -c 'import socket;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.bind(("127.0.0.1",9999));s.settimeout(3);s.recv(1)'
+attempt take-free-high-port claim 127.0.0.1 ${sharedPort + 1}
 touch "$TASK/.ready"
 n=0; while [ ! -s "$TASK/.later-port" ] && [ $n -lt 200 ]; do sleep 0.1; n=$((n+1)); done
 attempt later-port reach 127.0.0.1 "$(cat "$TASK/.later-port")"
@@ -167,10 +184,14 @@ attempt later-port reach 127.0.0.1 "$(cat "$TASK/.later-port")"
       for (const name of ['own-listener', 'own-udp', 'worktree-reports-writable']) expect([name, row(rows, name).code, row(rows, name).out]).toEqual([name, 0, expect.any(String)])
       for (const name of ['held-port', 'held-port-mapped', 'held-low-port', 'internet', 'udp-outside']) { expect([name, row(rows, name).code === 0]).toEqual([name, false]); expect([name, row(rows, name).out]).toEqual([name, expect.stringContaining('not permitted')]) }
       for (const name of ['control-socket', 'read-ssh', 'move-worktree']) expect([name, row(rows, name).code === 0]).toEqual([name, false])
+      // On the address a host service holds exactly, the system refuses at bind, before any rule. Elsewhere it's the profile.
+      for (const name of ['take-held-port', 'take-held-port-ipv6', 'take-shared-port', 'take-shared-port-every-address', 'take-relay-port', 'take-low-port', 'take-low-port-every-address', 'take-low-udp']) { expect([name, row(rows, name).code === 0]).toEqual([name, false]); expect([name, row(rows, name).out]).toEqual([name, expect.stringMatching(/not permitted|already in use/)]) }
+      expect(row(rows, 'take-shared-port').out).toContain('not permitted')
       // The limits docs/autopilot.md states. Both would be holes in the Mac sandbox profile, which keeps them closed.
       expect(row(rows, 'listen-every-address').code).toBe(0)
+      expect(row(rows, 'take-free-high-port').code).toBe(0)
       expect(row(rows, 'later-port')).toMatchObject({ code: 0, out: expect.stringContaining('host service') })
-    } finally { low.close(); later.close(); rmSync(ready, { force: true }); rmSync(port, { force: true }) }
+    } finally { low.close(); later.close(); shared.close(); clearInterval(sending); sender.close(); rmSync(ready, { force: true }); rmSync(port, { force: true }) }
   }, 120_000)
   // Point this at an unpacked Gradle distribution. Offline, so it needs no allowed host: its daemon, its file lock socket and a worker it forks.
   const gradle = process.env.SHEPHERDR_TEST_GRADLE

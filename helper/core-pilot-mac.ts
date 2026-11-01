@@ -27,8 +27,8 @@ export interface PilotMacProfile {
   /** The live login file and the directories leading to it: the host writes it, so the agent must not repoint them. */
   sealed: string[]
   build?: PilotMacBuild
-  /** Local ports this run may connect to, on the local-ports profile only. */
-  ports?: number[]
+  /** On the local-ports profile only: what this run may connect to, and what something else held when it launched. */
+  ports?: { open: number[]; tcp: number[]; udp: number[] }
 }
 const word = (text: string) => `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
 const quote = (path: string) => {
@@ -56,7 +56,7 @@ export function pilotMacReadProfile(roots: string[], bun: string) {
 const validPort = (port: number) => Number.isSafeInteger(port) && port >= 1 && port <= 65535
 /** Later rules win. Everything not named here is denied, including every other home file and control socket. */
 export function pilotMacProfile(input: PilotMacProfile) {
-  if (!validPort(input.proxyPort) || input.ports?.some(port => !validPort(port))) throw Error('Invalid sandbox proxy port')
+  if (![input.proxyPort, ...(input.ports ? [...input.ports.open, ...input.ports.tcp, ...input.ports.udp] : [])].every(validPort)) throw Error('Invalid sandbox proxy port')
   const read = [input.repo, input.cwd, ...input.git, input.state, input.control, ...(input.developer ? [input.developer] : []), ...(input.build?.read ?? [])], binaries = [input.bun, input.binary, ...input.companions]
   // Git metadata stays read-only even inside a writable worktree.
   const writable = [input.state, ...(input.writable ? [input.cwd] : [])]
@@ -84,9 +84,13 @@ export function pilotMacProfile(input: PilotMacProfile) {
     `(allow network-outbound (remote unix-socket (literal ${quote(input.gateway)})) (remote ip ${word(`localhost:${input.proxyPort}`)}))`,
     `(allow network-bind network-inbound (local unix-socket (subpath ${quote(input.state)})))`,
     `(allow network-outbound (remote unix-socket (subpath ${quote(input.state)})))`,
-    // Listening is all or nothing: "localhost" here still takes a bind on every address and a peer from another machine.
+    // "localhost" here still takes a bind on every address and a peer from another machine.
     // One rule per port: Seatbelt has no ranges, and it won't compile one rule holding thousands.
-    ...(input.ports ? ['(allow network-bind network-inbound (local ip "localhost:*"))', ...input.ports.map(port => `(allow network-outbound (remote ip "localhost:${port}"))`)] : []),
+    ...(input.ports ? ['(allow network-bind network-inbound (local ip "localhost:*"))', ...input.ports.open.map(port => `(allow network-outbound (remote ip "localhost:${port}"))`),
+      // A listener here would take a host client's connection, even from a service listening on every address. The
+      // kernel refuses a profile of about 32,000 port rules, so these can't be an allowed list as well.
+      ...Array.from({ length: PILOT_MAC_LOW_PORTS }, (_, index) => `(deny network-inbound (local ip "*:${index + 1}"))`),
+      ...input.ports.tcp.map(port => `(deny network-inbound (local tcp "*:${port}"))`), ...input.ports.udp.map(port => `(deny network-inbound (local udp "*:${port}"))`)] : []),
     '',
   ].join('\n')
 }
@@ -137,19 +141,24 @@ function pilotMacBuild(): PilotMacBuild {
 // A listener's port comes from the first range, and Kotlin's compile daemon picks from the second. Seatbelt can't tell
 // which listeners are this run's own, so a port something else listens on now stays closed; one taken later is reachable.
 const BUILD_PORTS = [[49152, 65535], [17001, 18000]] as const
-/** The port in one line of `netstat -an -p tcp`, if something listens on it. UDP numbers are a separate space, which a new TCP listener may take. */
-export function pilotMacHeldPort(line: string) {
-  const [protocol, , , local, , state] = line.trim().split(/\s+/)
-  if (!/^tcp[46]*$/.test(protocol ?? '') || state !== 'LISTEN') return
+const PILOT_MAC_LOW_PORTS = 10239
+/** The port in one line of `netstat -an`, if it's held: by a TCP listener, or by any bound UDP socket. */
+export function pilotMacHeldPort(line: string, protocol: 'tcp' | 'udp') {
+  const [name, , , local, , state] = line.trim().split(/\s+/)
+  if (!new RegExp(`^${protocol}[46]*$`).test(name ?? '') || (protocol === 'tcp' && state !== 'LISTEN')) return
   const port = Number(local?.split('.').at(-1))
   return validPort(port) ? port : undefined
 }
 /** Whoever owns them, which is why this asks netstat and not lsof. A failed read refuses the run. */
-export function pilotMacOpenPorts() {
-  const found = Bun.spawnSync(['/usr/sbin/netstat', '-an', '-p', 'tcp'], { stdout: 'pipe', stderr: 'ignore', stdin: 'ignore', timeout: 10_000 })
-  if (found.exitCode !== 0) throw Error('The Mac sandbox could not read which local ports are in use, so it was refused; no unrestricted fallback was started')
-  const held = new Set(found.stdout.toString().split('\n').map(pilotMacHeldPort))
-  return BUILD_PORTS.flatMap(([first, last]) => Array.from({ length: last - first + 1 }, (_, index) => first + index)).filter(port => !held.has(port))
+export function pilotMacPorts() {
+  const [tcp, udp] = (['tcp', 'udp'] as const).map(protocol => {
+    const found = Bun.spawnSync(['/usr/sbin/netstat', '-an', '-p', protocol], { stdout: 'pipe', stderr: 'ignore', stdin: 'ignore', timeout: 10_000 })
+    if (found.exitCode !== 0) throw Error('The Mac sandbox could not read which local ports are in use, so it was refused; no unrestricted fallback was started')
+    return [...new Set(found.stdout.toString().split('\n').map(line => pilotMacHeldPort(line, protocol)).filter(port => port !== undefined))]
+  }) as [number[], number[]]
+  // UDP numbers are a separate space, which a new TCP listener may take, so only TCP listeners close a port to connections.
+  const open = BUILD_PORTS.flatMap(([first, last]) => Array.from({ length: last - first + 1 }, (_, index) => first + index)).filter(port => !tcp.includes(port))
+  return { open, tcp, udp }
 }
 /** After the shared checks: point the launch files at real paths, then prove the profile can be generated. */
 export function pilotMacPrepare(home: PilotHome, sandbox: PilotSandbox, access?: PilotAccess): PilotMacPrepared {
@@ -178,7 +187,7 @@ export function pilotMacPrepare(home: PilotHome, sandbox: PilotSandbox, access?:
   pilotMacProfile(pilotMacProfileInput(home, sandbox, prepared, 1))
   return prepared
 }
-export function pilotMacProfileInput(home: Pick<PilotHome, 'gateway'>, sandbox: PilotSandbox, mac: PilotMacPrepared, proxyPort: number, tty?: string, ports?: number[]): PilotMacProfile {
+export function pilotMacProfileInput(home: Pick<PilotHome, 'gateway'>, sandbox: PilotSandbox, mac: PilotMacPrepared, proxyPort: number, tty?: string, ports?: PilotMacProfile['ports']): PilotMacProfile {
   const git = pilotGitPaths(sandbox.repo, sandbox.cwd)
   const masks = pilotProjectFiles([{ path: sandbox.repo, writable: false }, { path: sandbox.cwd, writable: sandbox.writable }, ...git.map(path => ({ path, writable: false }))])
   const { file, temporary } = pilotLoginPaths(sandbox.state), companion = join(sandbox.binary, '../codex-code-mode-host')
@@ -267,7 +276,7 @@ export async function startPilotMac(home: PilotHome, sandbox: PilotSandbox, mac:
     await login?.start()
     const named = Bun.spawnSync(['/usr/bin/tty'], { stdin: 'inherit', stdout: 'pipe', stderr: 'ignore' }), tty = named.exitCode === 0 ? named.stdout.toString().trim() : undefined
     const profile = join(home.root, 'profile.sb'), map = { control: sandbox.control, gateway: home.gateway, bun: sandbox.bun, binary: sandbox.binary, kind: sandbox.kind }
-    writeFileSync(profile, pilotMacProfile(pilotMacProfileInput(home, sandbox, mac, relay.port, tty, mac.build ? pilotMacOpenPorts() : undefined)), { mode: 0o600 })
+    writeFileSync(profile, pilotMacProfile(pilotMacProfileInput(home, sandbox, mac, relay.port, tty, mac.build ? pilotMacPorts() : undefined)), { mode: 0o600 })
     if (lstatSync(profile).nlink !== 1) throw Error('The sandbox profile changed while it was being written')
     // Thousands of port rules take seconds to compile before the sandbox exists.
     return { close, visible: child => pilotMacVisible(mac.marker, child, mac.build ? 60_000 : 5000), watcher: watcher.exited, usage: reading => hook.report(reading), env: pilotMacEnvironment({ state: sandbox.state, control: sandbox.control, gateway: home.gateway, proxyPort: relay.port, developer: mac.developer, build: mac.build }),

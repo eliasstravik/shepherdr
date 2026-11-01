@@ -143,7 +143,12 @@ that builds with Gradle, knowing these limits, none of which **Mac sandbox** has
   covers Shepherdr's web port and any host service already up. Something that starts afterwards on those ranges, such
   as a browser's debugging port or a dev server on an assigned port, can be reached until the next launch. So can
   another run's CONNECT port, and UDP services on those ranges whenever they started. Every other local port stays closed.
-- **A launch takes about 4 s longer.** Seatbelt has no port ranges, so the profile holds one rule per port and takes
+- **An agent can take a free local port.** It can't listen on a port below 10240, or on one anything held when it
+  launched, including through a service listening on every address. That keeps Shepherdr's web port safe across a
+  restart. On any other port it can listen first, so a host client that connects there, or a service that starts there
+  later, can reach the agent instead. So a test that needs a fixed port below 10240 fails here. The kernel refuses a
+  profile of about 32,000 port rules, so this can't be a list of allowed ports as well.
+- **A launch takes about 6 s longer.** Seatbelt has no port ranges, so the profile holds one rule per port and takes
   that long to compile.
 - **Traffic is counted ahead.** Each agent charges the shared HTTPS allowance in blocks of up to 8 MiB, so a run can
   show up to that much per agent that it didn't use. On a limit it charges only what's left, unless several agents
