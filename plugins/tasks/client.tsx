@@ -138,7 +138,7 @@ async function markDone(t: Task) {
 
 /**
  * A task's one menu, in its row's ⋯ and its chat's: Pin or Unpin (not for an archived task), Restart agent (an open one),
- * then the ways to end it: Stop (an open one with something to stop; it asks first), Done (one not done yet; it asks
+ * then the ways to end it: Stop (an open one, unless it is To do with no agent up; it asks first), Done (one not done yet; it asks
  * first when work would stay unmerged), Unarchive (an archived one), and Delete, which always asks first.
  */
 function TaskActions({ task: t, close }: { task: Task; close: () => void }) {
@@ -158,7 +158,7 @@ function TaskActions({ task: t, close }: { task: Task; close: () => void }) {
         </MenuItem>
       )}
       {t.status !== 'done' && !t.archived ? <RestartItem chat={t.agent?.chat ?? `${t.id}/Agent`} name={t.id} onPick={close} /> : null}
-      {t.status !== 'done' && !t.archived && (t.agent ? t.agent.running !== false : t.status !== 'todo') ? (
+      {t.status !== 'done' && !t.archived && (t.status !== 'todo' || t.agent?.running) ? (
         <MenuItem icon={<StopIcon className={ic} />} onClick={then(() => setConfirm({ t, kind: 'stop' }))}>
           Stop…
         </MenuItem>

@@ -191,7 +191,7 @@ export interface TaskAgent {
   cli: string
   /** Task status, or off when core cannot confirm the agent's machine; workflow remains separate. */
   status: Status
-  /** its process is up, so Stop has something to stop */
+  /** its process is up: a To do task may still have an agent to stop */
   running?: boolean
   age: string
   note: string
