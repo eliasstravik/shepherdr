@@ -9,7 +9,7 @@ import { basename, join } from 'node:path'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { Emitter, type Source, type SourceEvents } from '../source.ts'
-import { modelCommand, nameProblem, slugify, type Action, type AddSpace, type Artifact, type Chat, type Folders, type Message, type Question, type Snapshot, type Status, type Task } from '../../shared/types.ts'
+import { modelCommand, nameProblem, slugify, type Action, type AddSpace, type Artifact, type Chat, type Folders, type Message, type Need, type Question, type Snapshot, type Status, type Task } from '../../shared/types.ts'
 import { CoreSession } from './session.ts'
 import { CoreStore } from './store.ts'
 import { CoreFiles } from './files.ts'
@@ -48,7 +48,7 @@ import { CorePlugins } from './plugins.ts'
 import { CoreUnread } from './unread.ts'
 import { CoreCards } from './cards.ts'
 import { CorePilotMail } from './pilot-mail.ts'
-import { askText, clip, quickChoices, TITLE_MAX, BODY_MAX } from '../../shared/alerts.ts'
+import { askText, clip, lastReply, quickChoices, TITLE_MAX, BODY_MAX } from '../../shared/alerts.ts'
 import { CANCELLED, hookEnd, logEnd, NativeEnds, STOPPED } from './native-ends.ts'
 import { NATIVE_UNREADABLE, cardWords, nativeAnswer, nativeCards, nativeClosed, nativeReply, type NativeAsk, type PermissionAnswer } from './native-asks.ts'
 import type { CorePluginUpdates } from './plugin-updates.ts'
@@ -56,6 +56,8 @@ import type { ActivityAsk, WorktreeAsk } from '../../shared/types.ts'
 
 interface Machine { id: string; name: string; state: string; host?: string; version?: string; session?: string | null }
 interface Permission { id: string; chat: string; grant: string; question: Question; expires: number; settled?: boolean; allow?: boolean; at?: number; native?: NativeAsk; tool?: string; hash?: string; turn?: string; sub?: string }
+/** the most of an agent's last words a card with no question carries: its card shows a few lines */
+const NEED_TEXT = 1000
 interface PendingSend { id: string; chat: string; text: string; launch?: string; state: 'queued' | 'sending' | 'uncertain' | 'cancelled'; quiet?: boolean; work?: boolean }
 
 /** Product state is Shepherdr's; terminals, machine commands, files and agent children are core's. */
@@ -254,23 +256,55 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
   openPermissions(agent: CoreAgent) {
     return this.store.all<Permission>('permission').filter(item => item.chat === agent.chat && item.grant === agent.grant && !item.settled && item.expires > Date.now())
   }
+  /** What an agent with no card last said: what its reply answers. */
+  private lastWords(chat: string): Pick<Need, 'text' | 'reply'> {
+    const last = lastReply({ key: chat, cli: '', messages: this.logs.messages(chat) })
+    return last?.text ? { text: clip(last.text, NEED_TEXT), reply: last.id } : {}
+  }
+  /** Everything waiting on the human, oldest first: each agent's own open cards, and the plain waits with none. */
+  private needs(tasks: Task[]): Need[] {
+    const out: Need[] = []
+    const sentAt = (chat: string, id: string) => this.store.get<Message>(`message:${chat}`, id)?.at
+    const hidden = (chat: string) => { const task = this.tasks.forChat(chat); return !!task && !!tasks.find(view => view.id === task.id)?.archived }
+    for (const agent of this.agents.all()) {
+      if (!this.space(agent.space) || hidden(agent.chat)) continue
+      const need = { chat: agent.chat, place: agent.space, ...(this.tasks.forChat(agent.chat) ? { task: this.tasks.forChat(agent.chat)!.id } : {}) }
+      const card = (id: string, question: Question, at: number) => { if (!out.some(item => item.chat === agent.chat && item.id === id)) out.push({ ...need, id, at, question, tap: question.kind !== 'Plan' }) }
+      for (const item of this.openPermissions(agent)) card(item.id, item.question, sentAt(agent.chat, `permission-${item.id}`) ?? item.at ?? 0)
+      for (const item of this.questions.open(agent.chat)) card(item.id, item.question, sentAt(agent.chat, item.id) ?? 0)
+      for (const item of this.screens.open(agent.chat)) card(item.id, item.question, item.at)
+      for (const item of this.secrets.open(agent.chat)) out.push({ ...need, id: item.id, at: sentAt(agent.chat, item.id) ?? 0, secret: item.ask })
+      // a task's own agent waits by its task's status, below
+      const waits = need.task ? agent.chat !== this.tasks.get(need.task)!.chat && this.agents.terminal(agent)?.status?.state === 'blocked' : this.status(agent) === 'need'
+      // a coordinator's turn ending is no wait, unless it ended on a question; the question's own time keeps its card still
+      const asked = !need.task && this.status(agent) === 'idle' && this.tasks.lastWordsAsk(agent.chat)
+      if ((waits || asked) && !out.some(item => item.chat === agent.chat)) {
+        const words = this.lastWords(agent.chat)
+        out.push({ ...need, id: 'attention', at: (asked && words.reply && sentAt(agent.chat, words.reply)) || (agent.activityAt ?? agent.started ?? 0), ...words })
+      }
+    }
+    for (const view of tasks.filter(view => !view.archived)) {
+      const task = this.tasks.get(view.id)!, sent = task.workflow === 'ready' && task.mergeQuestion ? this.store.get<Message>(`message:${task.chat}`, task.mergeQuestion) : undefined
+      const question = sent?.question && this.cards.messages(task.chat, [sent])[0].question
+      // a merge asked of the human keeps its pick and Send
+      if (question && question.sent === undefined) out.push({ id: question.id, chat: task.chat, place: task.place, task: task.id, at: sent!.at ?? 0, question })
+      else if (view.status === 'need' && !out.some(item => item.chat === task.chat)) out.push({ id: 'attention', chat: task.chat, place: task.place, task: task.id, at: this.agents.get(task.chat)?.activityAt ?? task.updatedAt ?? 0, text: view.sub, ...this.lastWords(task.chat) })
+    }
+    return out.sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : 1))
+  }
   snapshot(): Snapshot {
     const spaces = this.spaces()
     const asks: Record<string, string> = {}
-    const attentionRequests: Record<string, string[]> = {}
-    for (const agent of this.agents.all()) {
-      if (this.store.get<CoreSpace>('space', agent.space)?.removed) continue
-      const requests = [...new Set([...this.openPermissions(agent).map(item => item.id), ...this.questions.open(agent.chat).map(item => item.id), ...this.screens.open(agent.chat).map(item => item.id), ...this.secrets.open(agent.chat).map(item => item.id)])]
-      if (requests.length) { attentionRequests[agent.chat] = requests; asks[agent.chat] = requests.at(-1)! }
-      else if (this.status(agent) === 'need') attentionRequests[agent.chat] = ['attention']
-    }
+    const tasks = this.tasks.all().filter(task => spaces.some(space => space.id === task.place)).map(task => this.tasks.view(task))
+    const needs = this.needs(tasks)
+    for (const need of needs) if (need.id !== 'attention') asks[need.chat] = need.id
     return {
       terminalTransport: 'core', name: 'Shepherdr', host: this.local.id, user: this.store.get<string>('setting', 'user') || this.human,
       ...this.places.present(spaces.map(space => ({ id: space.id, name: coreSpaceName(this, space), machine: space.machine, home: space.home,
         level: space.home ? space.machine === this.local.id ? 0 : 1 : 2, status: this.machineConnected(space.machine) ? this.status(this.agents.get(space.id)) : 'off', mode: space.mode, chat: space.id })),
       [{ id: `m:${this.local.id}`, machine: this.local.id, name: this.local.name, health: this.health.view(this.local.id), status: this.connected() ? 'idle' : 'off' },
         ...this.machines.map(machine => ({ id: `m:${machine.id}`, machine: machine.id, name: machine.name, health: this.health.view(machine.id), status: machine.state === 'connected' ? 'idle' as const : 'off' as const }))]),
-      tasks: this.tasks.all().filter(task => spaces.some(space => space.id === task.place)).map(task => this.tasks.view(task)), artifacts: this.artifacts.list().filter(artifact => spaces.some(space => space.id === artifact.place)), automations: this.automations.view(), asks, attentionRequests,
+      tasks, artifacts: this.artifacts.list().filter(artifact => spaces.some(space => space.id === artifact.place)), automations: this.automations.view(), asks, needs,
       settings: this.secrets.pages([...this.settings.sections(this.devices(), this.pushWarnings()).map(section => this.pilots.wakes.section(section)), this.plugins.section(this.pluginUpdates?.status()), { name: 'Machines', about: 'Every machine Shepherdr reaches, and how it is now.', rows: [
         { label: this.store.get<string>('name', `m:${this.local.id}`) || this.local.name, key: '', value: this.connected() ? 'Main · reachable' : "Main · can't reach", fixed: true },
         ...this.machines.map(machine => ({ label: this.store.get<string>('name', `m:${machine.id}`) || machine.name, key: '', value: this.machineConnected(machine.id) ? 'Reachable' : "Can't reach", fixed: true })),
@@ -331,12 +365,12 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
     if (!this.unread.saw(chat, message.at) || !this.space(chat) || !message.at || message.at < this.born || message.card || message.question) return
     this.emit('alert', { id: message.id, from: 'Shepherdr', title: clip(this.store.get<string>('name', chat) || this.space(chat)!.name, TITLE_MAX), body: clip(message.text || 'New message', BODY_MAX), go: { place: chat, focus: message.id }, message: true })
   }
-  forwardQuestion(chat: string, question: Question, answer?: string, where: 'space' | 'task' = 'task', outcome = 'Answered') {
+  forwardQuestion(chat: string, question: Question, answer?: string, outcome = 'Answered') {
     const task = this.tasks.forChat(chat)
     if (!task) return
     const id = `ask-${question.id}`, previous = this.store.get<Message>(`message:${task.place}`, id)
     this.post(task.place, { id, who: 'agent', at: previous?.at ?? Date.now(), card: { id, task: task.id, status: answer ? this.tasks.view(task).status : 'need', text: answer ? outcome : 'Needs you',
-      ask: { chat, questions: [question], open: answer === undefined, answered: answer === undefined ? undefined : { where, text: answer } } } })
+      ask: { chat, questions: [question], open: answer === undefined, answered: answer === undefined ? undefined : { where: 'task', text: answer } } } })
   }
   /** Cards a previous server held. The agent's own answer says only that it was refused; alone with that, it can give up on the work. */
   private closeInterrupted() {
@@ -362,7 +396,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
     this.settleAgent(permission)
     const message = this.store.get<Message>(`message:${permission.chat}`, `permission-${permission.id}`)
     this.post(permission.chat, { ...message, id: `permission-${permission.id}`, who: 'agent', question: permission.question, at: message?.at ?? Date.now() })
-    this.forwardQuestion(permission.chat, permission.question, reason, 'task', 'No longer waiting')
+    this.forwardQuestion(permission.chat, permission.question, reason, 'No longer waiting')
     if (!permission.native || permission.native.head === permission.id) this.clearAlert(permission.chat, reason)
     if (permission.native) {
       this.replyNative(permission.native, nativeClosed(reason))
@@ -466,7 +500,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
         this.settleAgent(permission)
         const message = this.store.get<Message>(`message:${action.chat}`, `permission-${permission.id}`)
         this.post(action.chat, { ...message, id: `permission-${permission.id}`, who: 'agent', question: permission.question, at: message?.at ?? Date.now() })
-        this.forwardQuestion(action.chat, permission.question, answer?.said ?? (allow ? 'Allow once' : 'Deny'), action.space ? 'space' : 'task')
+        this.forwardQuestion(action.chat, permission.question, answer?.said ?? (allow ? 'Allow once' : 'Deny'))
         if (native && answer) {
           const cards = this.nativeRows(native.head)
           if (cards.some(card => !card.settled)) return { answered: true }

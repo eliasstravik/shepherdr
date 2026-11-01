@@ -12,7 +12,7 @@ const acted: unknown[] = []
 class Stub extends Emitter<SourceEvents> {
   kind = 'demo' as const
   snapshot() {
-    return { name: 'x', host: 'h', places: [], tasks: [], automations: {}, artifacts: [], asks: {}, settings: [], user: 'u' }
+    return { name: 'x', host: 'h', places: [], tasks: [], automations: {}, artifacts: [], asks: {}, needs: [], settings: [], user: 'u' }
   }
   chat() {
     return undefined

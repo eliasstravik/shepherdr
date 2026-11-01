@@ -2,7 +2,7 @@
 // the real thing would, so every screen and case can be walked through without touching real agents.
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { apart, asEmoji, artifactQuote, cardMessage, modeCard, nameProblem, slugify, type Action, type ActivityAsk, type AddSpace, type Artifact, type Chat, type FolderEntry, type Folders, type Machine, type Message, type Place, type Snapshot, type Task, type TaskStatus, type TermScreen, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
+import { apart, asEmoji, artifactQuote, cardMessage, modeCard, nameProblem, slugify, type Action, type ActivityAsk, type AddSpace, type Artifact, type Chat, type FolderEntry, type Folders, type Machine, type Message, type Need, type Place, type Snapshot, type Task, type TaskStatus, type TermScreen, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
 import { Emitter, type Source, type SourceEvents } from '../source.ts'
 import * as D from './data.ts'
 import { ARTIFACT_DATA, ARTIFACT_HTML, thumb } from './artifacts.ts'
@@ -206,6 +206,21 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
 
   /* ---------- reading ---------- */
 
+  /** what waits on the human: each chat's open cards, and a task that waits with none */
+  private needs(): Need[] {
+    const open = (chat: string, place: string, task?: string): Need[] => (this.chats[chat]?.messages ?? []).flatMap((m) => m.question && m.question.sent === undefined && !m.question.closed
+      ? [{ id: m.question.id, chat, place, task, at: m.at ?? 0, question: m.question, tap: m.question.kind !== 'Plan' && !m.question.title.startsWith('Merge ') }] : [])
+    const waits = (chat: string, place: string, task: string | undefined, text?: string): Need[] => {
+      const cards = open(chat, place, task)
+      return cards.length ? cards : [{ id: 'attention', chat, place, task, at: 0, text }]
+    }
+    return [
+      ...this.places.flatMap((p) => (this.asks[p.id] ? waits(p.chat, p.id, undefined) : open(p.chat, p.id))),
+      ...this.tasks.filter((t) => t.status === 'need' && !t.archived).flatMap((t) => waits(t.agent?.chat ?? `${t.id}/Agent`, t.place, t.id, t.sub)),
+      ...this.tasks.filter((t) => t.status === 'ready' && !t.archived).flatMap((t) => open(t.agent?.chat ?? `${t.id}/Agent`, t.place, t.id)),
+    ].sort((a, b) => a.at - b.at)
+  }
+
   snapshot(): Snapshot {
     return {
       name: 'Shepherdr',
@@ -215,14 +230,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
       automations: this.automations,
       artifacts: this.artifacts,
       asks: this.asks,
-      attentionRequests: Object.fromEntries([
-        ...this.places.map((p) => [p.chat, [...new Set((this.chats[p.chat]?.messages ?? []).flatMap((m) => m.question && m.question.sent === undefined ? [m.question.id] : []))]] as [string, string[]]),
-        ...this.tasks.filter((t) => t.status === 'need' && !t.archived).map((t) => {
-          const key = t.agent?.chat ?? `${t.id}/Agent`
-          const ids = (this.chats[key]?.messages ?? []).flatMap((m) => m.question && m.question.sent === undefined ? [m.question.id] : [])
-          return [key, ids.length ? [...new Set(ids)] : ['attention']] as const
-        }),
-      ]),
+      needs: this.needs(),
       last: this.last(),
       read: this.read,
       settings: secretPages([...this.sections, ...Object.entries(this.bases).map(([id, base]) => repositorySection(id, id.split(':')[1], base))], this.vault.names()),

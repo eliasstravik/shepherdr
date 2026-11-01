@@ -539,7 +539,7 @@ export interface UpdateCard {
   red?: string
   /** its agent started again (text: "Restarted on Codex (GPT-6-Sol, high)") */
   restart?: boolean
-  /** a task that needs you: a copy of what it asks, answered here as in its own chat */
+  /** a task that needs you: a record of what it asks. It is answered in Needs you or its own chat, never here */
   ask?: CardAsk
 }
 
@@ -551,10 +551,31 @@ export interface CardAsk {
   questions?: Question[]
   /** a plain question with no choices: the agent's words, answered with a reply */
   reply?: { id: string; text: string }
-  /** once answered: where (in this card, in the task's chat or its terminal) and the words, if known */
+  /** once answered: where (older cards: 'space', answered on the card) and the words, if known */
   answered?: { where: 'space' | 'task' | 'terminal'; text?: string }
-  /** on screen: it still waits, so it takes an answer here */
+  /** on screen: it still waits, so the card leads to Needs you */
   open?: boolean
+}
+
+/** One thing waiting on the human, from any agent on any machine: its own card, never a forwarded copy. */
+export interface Need {
+  /** the request's id in its chat; 'attention' when the agent waits with no card */
+  id: string
+  /** the agent's chat, where the answer goes */
+  chat: string
+  place: string
+  /** the task it belongs to; none for a coordinator */
+  task?: string
+  /** when it began to wait (ms) */
+  at: number
+  question?: Question
+  secret?: SecretAsk
+  /** no card: what the agent last said, or why it waits, answered with a reply */
+  text?: string
+  /** no card: the message that text is, for the reply to quote */
+  reply?: string
+  /** a choice sends at once in the Needs you view; merges and plans keep their Send */
+  tap?: boolean
 }
 
 /** Done tasks newest first, at the end; the rest keep their order (a stable sort) */
@@ -880,8 +901,8 @@ export interface Snapshot {
   artifacts: Artifact[]
   /** open coordinator questions, by place id (a choice card's id, or "blocked" on the CLI's own menu): counted as waiting on you */
   asks: Record<string, string>
-  /** Unanswered request IDs by original chat, never forwarded copies. Optional for older machines/plugins. */
-  attentionRequests?: Record<string, string[]>
+  /** everything waiting on the human, oldest first, each once: what the Needs you view lists and every count counts */
+  needs: Need[]
   settings: SettingSection[]
   /** a source like demo marks its data as fictional */
   demo?: boolean
@@ -901,8 +922,7 @@ export type Action =
   | { type: 'plugin'; plugin: string; method: string; input?: unknown; cid: string }
   /** cid: the screen's own id for what it sent, which comes back on the message (Message.cid); reply: the id of the
       message it answers */
-  /** space: sent from a needs-you card in that space's chat (CardAsk) */
-  | { type: 'send'; chat: string; text: string; attachments?: string[]; cid?: string; reply?: string; space?: string }
+  | { type: 'send'; chat: string; text: string; attachments?: string[]; cid?: string; reply?: string }
   | { type: 'react'; chat: string; message: string; emoji: string }
   /** a secret kept at a level (all, m:<machine>, p:<machine>:<space>), or removed (null); kept on the main machine, so
       it names no chat or place to be passed on by. card: the agent's ask it answers, told once it is kept */
@@ -911,7 +931,7 @@ export type Action =
   | { type: 'secret-saved'; chat: string; card: string; name: string; level: string }
   /** fromAlert: a notification's button, which answers only the card the chat still waits on (an old alert's can't
       answer what came after, or a card already settled in words) */
-  | { type: 'answer'; chat: string; question: string; choice: number; choices?: number[]; note?: string; other?: string; fromAlert?: boolean; space?: string }
+  | { type: 'answer'; chat: string; question: string; choice: number; choices?: number[]; note?: string; other?: string; fromAlert?: boolean }
   | { type: 'page-send'; chat: string; page: string; text: string }
   | { type: 'page-note'; chat: string; page: string; note: string; target?: string }
   /** an artifact's page sent something, you noted on it, or wrote about it in its viewer: to its keeper. By its place,

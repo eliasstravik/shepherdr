@@ -87,11 +87,11 @@ export class CoreScreens {
     else row.question.via = 'terminal'
     this.settle(row, closed ?? 'Answered in the terminal', closed ? 'No longer waiting' : 'Answered')
   }
-  private settle(row: ScreenCard, words?: string, outcome?: string, where?: 'space' | 'task') {
+  private settle(row: ScreenCard, words?: string, outcome?: string) {
     this.source.store.set('screen-card', row.id, row)
     const message = this.source.store.get<Message>(`message:${row.chat}`, row.id)
     this.source.post(row.chat, { ...message, id: row.id, who: 'agent', question: row.question, at: message?.at ?? Date.now() })
-    this.source.forwardQuestion(row.chat, row.question, words, where, outcome)
+    this.source.forwardQuestion(row.chat, row.question, words, outcome)
   }
   async answer(action: Extract<Action, { type: 'answer' }>): Promise<boolean> {
     const row = this.source.store.get<ScreenCard>('screen-card', action.question)
@@ -107,7 +107,7 @@ export class CoreScreens {
       if (!read || !screen || screenText(read.text) !== row.all || JSON.stringify(screen.choices) !== JSON.stringify(row.question.choices)) throw new Refusal('That screen has changed, so nothing was pressed')
       await this.source.core.call('terminal.keys', { terminal: read.terminal.address, keys: pressKeys(screen.at, action.choice) })
       row.state = 'answered'; row.at = Date.now(); row.question.sent = action.choice
-      this.settle(row, row.question.choices[action.choice].label, 'Answered', action.space ? 'space' : 'task')
+      this.settle(row, row.question.choices[action.choice].label, 'Answered')
       return true
     } finally { this.pressing.delete(row.id) }
   }

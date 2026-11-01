@@ -40,6 +40,7 @@ import { Drawer as SlideDrawer, Stack } from './Stack.tsx'
 import { machineName, type Place, type Snapshot, type Task } from '@shared/types.ts'
 import {
   BackIcon,
+  BellIcon,
   ChatIcon,
   CrookIcon,
   CogIcon,
@@ -365,18 +366,24 @@ function PinButton() {
     >
       <KeepFiltersIcon className={ic} />
       {/* a narrow column has room for the lock alone */}
-      <span className="truncate @max-sm/side:hidden">{name}</span>
+      <span className="truncate @max-md/side:hidden">{name}</span>
     </button>
   )
 }
 
-/** Task requests in the panel’s scope, excluding coordinator requests. */
+/** Ready tasks in the panel’s scope. What needs you is counted once, on Needs you, so no two red numbers can differ. */
 function TaskAttention() {
   const snap = useSnap()!
   const view = useStore((s) => listView(s.ui, snap))
   const ids = snap.places.filter((p) => !view.chips.length || view.chips.includes(p.id) || view.chips.includes(`m:${p.machine}`)).map((p) => p.id)
-  const c = attentionCounts({ ...snap, asks: {}, attentionRequests: { ...snap.attentionRequests, ...Object.fromEntries(snap.places.map((p) => [p.chat, []])) } }, ids)
-  return <AttentionBadge need={c.need} ready={c.ready} scope="panel scope" />
+  const c = attentionCounts(snap, ids)
+  return <AttentionBadge need={registry.views.needs ? 0 : c.need} ready={c.ready} scope="panel scope" />
+}
+
+/** Everything that needs you, every space and machine: the sidebar's counts added up. */
+function NeedsAttention() {
+  const snap = useSnap()!
+  return <AttentionBadge need={snap.needs.length} ready={0} scope="everywhere" />
 }
 
 /** The lists' tasks, or their artifacts: what their chips hold */
@@ -387,24 +394,26 @@ function SideList({ snap }: { snap: Snapshot }) {
   const Tasks = registry.views.tasks
   const TasksMenu = registry.views.tasksMenu
   const Artifacts = registry.views.artifacts
-  const side = Artifacts ? shown : 'tasks'
+  const Needs = registry.views.needs
+  const side = (shown === 'artifacts' && Artifacts) || (shown === 'needs' && Needs) ? shown : 'tasks'
   return (
-    <section className="@container/side flex min-h-0 min-w-0 flex-1 flex-col border-l border-line" aria-label={side === 'tasks' ? 'Tasks' : 'Artifacts'}>
+    <section className="@container/side flex min-h-0 min-w-0 flex-1 flex-col border-l border-line" aria-label={side === 'tasks' ? 'Tasks' : side === 'needs' ? 'Needs you' : 'Artifacts'}>
       <Head>
         {/* Tasks | Artifacts as segmented tabs, so which one shows is plain; the chat beside it already names the place.
             What waits on you is counted on the Tasks tab itself, whichever tab shows, so the count never moves */}
-        {Artifacts ? (
+        {Artifacts || Needs ? (
           <div className="flex flex-1 items-center">
             <Tabs label="Show">
               {(
                 [
-                  ['tasks', 'Tasks'],
-                  ['artifacts', 'Artifacts'],
+                  ...(Needs ? [['needs', 'Needs you'] as const] : []),
+                  ['tasks', 'Tasks'] as const,
+                  ...(Artifacts ? [['artifacts', 'Artifacts'] as const] : []),
                 ] as const
               ).map(([k, l]) => (
                 <Tab key={k} on={side === k} onClick={() => setUI({ side: k })}>
                   {l}
-                  {k === 'tasks' ? <TaskAttention /> : null}
+                  {k === 'tasks' ? <TaskAttention /> : k === 'needs' ? <NeedsAttention /> : null}
                 </Tab>
               ))}
             </Tabs>
@@ -415,10 +424,10 @@ function SideList({ snap }: { snap: Snapshot }) {
             <TaskAttention />
           </div>
         )}
-        <PinButton />
+        {side === 'needs' ? null : <PinButton />}
         {side === 'tasks' && TasksMenu ? <TasksMenu key={view.key} place={place} /> : null}
       </Head>
-      <div className="min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain">{side === 'artifacts' && Artifacts ? <Artifacts placeId={place.id} /> : Tasks ? <Tasks placeId={place.id} /> : null}</div>
+      <div className="min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain">{side === 'needs' && Needs ? <Needs /> : side === 'artifacts' && Artifacts ? <Artifacts placeId={place.id} /> : Tasks ? <Tasks placeId={place.id} /> : null}</div>
     </section>
   )
 }
@@ -820,7 +829,7 @@ function PhoneHome({ snap }: { snap: Snapshot }) {
               <PlaceMenu place={place} />
             </>
           ) : (
-            <>
+            tab === 'needs' ? null : <>
               <PinButton />
               {tab === 'tasks' && TasksMenu ? <TasksMenu key={view.key} place={place} /> : null}
             </>
@@ -832,7 +841,7 @@ function PhoneHome({ snap }: { snap: Snapshot }) {
           {Chat ? <Chat chatKey={place.chat} placeholder={`Message ${place.name}…`} unreachable={unreachable(place, snap)} /> : null}
         </div>
       ) : (
-        <div className="min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain">{tab === 'artifacts' && Artifacts ? <Artifacts placeId={place.id} /> : Tasks ? <Tasks placeId={place.id} /> : null}</div>
+        <div className="min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain">{tab === 'needs' && registry.views.needs ? <registry.views.needs /> : tab === 'artifacts' && Artifacts ? <Artifacts placeId={place.id} /> : Tasks ? <Tasks placeId={place.id} /> : null}</div>
       )}
       {/* the keyboard is up: the message box sits right on it, so more of the chat shows */}
       {keyboard ? null : <PhoneBar />}
@@ -841,17 +850,18 @@ function PhoneHome({ snap }: { snap: Snapshot }) {
   )
 }
 
-/** Chat | Tasks | Artifacts and Search at the bottom of the phone */
+/** Chat | Needs you | Tasks | Artifacts and Search at the bottom of the phone */
 function PhoneBar() {
   const tab = useUI((u) => u.tab)
   return (
-    <div className="flex shrink-0 gap-2 px-4 pt-1 pb-[max(env(safe-area-inset-bottom),--spacing(4))]">
+    <div className="flex shrink-0 items-center gap-2 px-4 pt-1 pb-[max(env(safe-area-inset-bottom),--spacing(4))] max-[359px]:gap-1">
       {/* each tab as wide as its words and the rest shared out, so Tasks with its count gets the room it needs and the
           count never crowds the next tab */}
       <div role="group" aria-label="View" className="flex flex-1 rounded-full bg-bubble p-1">
         {(
           [
             ['chat', 'Chat', ChatIcon],
+            ...(registry.views.needs ? [['needs', 'Needs you', BellIcon] as const] : []),
             ['tasks', 'Tasks', TasksIcon],
             ...(registry.views.artifacts ? [['artifacts', 'Artifacts', PageIcon] as const] : []),
           ] as const
@@ -861,16 +871,16 @@ function PhoneBar() {
             type="button"
             aria-pressed={tab === k}
             onClick={() => setUI({ tab: k, pick: null, plus: null, menu: false })}
-            className="relative flex h-12 min-w-0 flex-auto items-center justify-center gap-1.5 rounded-full text-[0.875rem] whitespace-nowrap text-fg2 aria-pressed:bg-seg-on aria-pressed:text-fg aria-pressed:shadow-seg"
+            className="relative flex h-12 min-w-0 flex-auto items-center justify-center gap-1.5 rounded-full text-[0.875rem] whitespace-nowrap text-fg2 aria-pressed:bg-seg-on aria-pressed:text-fg aria-pressed:shadow-seg max-[359px]:gap-1"
           >
-            {/* a phone in Display Zoom (320px) has room for the words only */}
-            <Icon className={clsx(ic, 'max-[359px]:hidden')} />
-            {l}
-            {k === 'tasks' ? <TaskAttention /> : null}
+            {/* four tabs and Search: most phones have room for the words only, a phone in Display Zoom (320px) for fewer */}
+            <Icon className={clsx(ic, 'max-[479px]:hidden')} />
+            {k === 'needs' ? <>Needs<span className="max-[359px]:hidden"> you</span></> : l}
+            {k === 'tasks' ? <TaskAttention /> : k === 'needs' ? <NeedsAttention /> : null}
           </button>
         ))}
       </div>
-      <RoundButton label="Search" className="size-14" onClick={() => setUI({ search: true, searchScope: undefined })}>
+      <RoundButton label="Search" className="size-14 max-[359px]:size-12" onClick={() => setUI({ search: true, searchScope: undefined })}>
         <SearchIcon className={ic} />
       </RoundButton>
     </div>

@@ -89,7 +89,7 @@ test('a stuck agent shows its screen, counts as Needs you and stops reading as w
   expect(card.screen).toContain('do you trust this folder?')
   expect(card.choices.map(choice => choice.label)).toEqual(['No, exit', 'Yes, I trust this folder'])
   expect(source.status(saved())).toBe('need')
-  expect(source.snapshot().attentionRequests?.space).toEqual([card.id])
+  expect(source.snapshot().needs.map(need => need.id)).toEqual([card.id])
   expect(source.chat('space')?.working).toBe(false)
   expect(alerts).toHaveLength(1)
   await settle(started + 20_000)

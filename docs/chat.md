@@ -87,3 +87,21 @@ Every agent learns the chat lines, cards, artifacts and the `shepherdr` command 
 [skill/shepherdr-coordinator](../skill/shepherdr-coordinator/SKILL.md); task agents the way from brief to merged from
 [skill/shepherdr-agent](../skill/shepherdr-agent/SKILL.md). Their launch prompts (`server/core/agents.ts`) carry those skills and say who they are and
 their space (and a home space's machine duties) or task. `shepherdr help` lists the command.
+
+## Needs you
+
+Needs you sits beside the chat: a tab with Tasks and Artifacts on a wide screen, and in the bottom bar on a phone. It
+lists everything waiting on you, from every space on every machine, oldest first, each card once: questions,
+permissions, plans, merges, secrets, CLI screens, and agents that just wait for a reply, a coordinator too once it ends
+its turn on a question.
+
+- One tap answers a question or a permission, and presses a CLI screen's choice. Merges and plans keep their pick and
+  Send, and so does a card with a note typed.
+- The list stays still under your thumb. A new card only ever joins the end. A card answered, here or anywhere else,
+  keeps its place and its height until you leave Needs you, or tap Clear once none is open.
+- Every red count comes from this one list, so they can't differ: a space's count in the sidebar is its cards here,
+  those counts add up to the number on Needs you, and the app icon adds the Ready tasks. Tasks shows only Ready in its
+  tab, and a task with two cards counts as two in its Needs you group. A task whose merge waits on you is on both
+  lists: its card here, and its row under Ready in Tasks.
+- A card still lives in its agent's chat, and can be answered there too. A task's card in the coordinator's chat is
+  only a row saying what happened: while it waits, a tap on it opens Needs you.

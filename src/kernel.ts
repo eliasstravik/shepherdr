@@ -34,6 +34,8 @@ export interface Views {
   tasksMenu: FC<{ place: Place }>
   /** buttons in the sidebar's header beside the app's name: New section (places) */
   placesMenu: FC
+  /** everything waiting on the human, on every machine, each with its answer (needs) */
+  needs: FC
   /** the settings page */
   settings: FC
   /** ⌘K: search and jump (keyboard) */
@@ -182,10 +184,10 @@ export interface UI {
   place: string
   /** the open task: its agent's chat */
   task: string | null
-  /** phone: Chat, Tasks or Artifacts */
-  tab: 'chat' | 'tasks' | 'artifacts'
-  /** a wide screen's right-hand column: the place's Tasks or its Artifacts, remembered on this device */
-  side: 'tasks' | 'artifacts'
+  /** phone: Chat, Needs you, Tasks or Artifacts */
+  tab: 'chat' | 'needs' | 'tasks' | 'artifacts'
+  /** a wide screen's right-hand column: Needs you, the place's Tasks or its Artifacts, remembered on this device */
+  side: 'needs' | 'tasks' | 'artifacts'
   /** what the Tasks and Artifacts lists show (their chips) and whether it stays whatever place is picked, remembered
    *  on this device */
   lists: Lists
@@ -281,7 +283,7 @@ interface State {
 }
 
 function tabOf(t: string | null): UI['tab'] {
-  return t === 'tasks' || t === 'artifacts' ? t : 'chat'
+  return t === 'needs' || t === 'tasks' || t === 'artifacts' ? t : 'chat'
 }
 
 function deviceFor(w: number): Device {
@@ -330,7 +332,8 @@ const SIDE = 'shepherdr.side'
 
 function loadSide(): UI['side'] {
   try {
-    return localStorage.getItem(SIDE) === 'artifacts' ? 'artifacts' : 'tasks'
+    const side = localStorage.getItem(SIDE)
+    return side === 'artifacts' || side === 'needs' ? side : 'tasks'
   } catch {
     return 'tasks'
   }
@@ -1024,6 +1027,13 @@ export function deleteTask(t: Task, force = false): Promise<{ ok?: boolean; erro
  *  home space */
 export function removeSpace(placeId: string): Promise<{ ok?: boolean; error?: string; waiting?: boolean }> {
   return act({ type: 'space-remove', place: placeId })
+}
+
+/** Needs you beside the chat: the coordinator's card about a waiting task leads here */
+export function openNeeds() {
+  const { ui, snap } = state
+  if (!snap) return
+  setUI(ui.device === 'phone' ? { task: null, tab: 'needs', pick: null, plus: null, menu: false } : { task: ui.task && !taskInMiddle(ui, snap) ? null : ui.task, side: 'needs' })
 }
 
 /** What waits on you at a place: red counts its whole subtree, own only the place itself (its own coordinator's chat: the sidebar's count). */

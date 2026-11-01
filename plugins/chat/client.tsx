@@ -3,7 +3,7 @@
 // or is starting does it wait, and the bubble says why.
 import clsx from 'clsx'
 import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ComponentType, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, type RefObject } from 'react'
-import { act, chatName, definePlugin, getDraft, getState, goChat, has, holdReload, openItem, openTask, registry, setDraft, setOutbox, setUI, taskOf, useDraft, useSnap, useStore, useUI, type UI } from '@client/kernel.ts'
+import { act, chatName, definePlugin, getDraft, getState, goChat, has, holdReload, openItem, openNeeds, openTask, registry, setDraft, setOutbox, setUI, taskOf, useDraft, useSnap, useStore, useUI, type UI } from '@client/kernel.ts'
 import { keyOf, partsOf, priorOf, reasonOf, SEND_TIMEOUT, type Outgoing } from '@client/outbox.ts'
 import { AlertIcon, BackIcon, CameraIcon, CheckIcon, Count, DeleteIcon, dimmed, Dot, DownIcon, DownloadIcon, Empty, field, FileIcon, ic, IconButton, KeyIcon, LinkButton, LiveWave, MachineIcon, Menu, MenuItem, MenuSeparator, MenuSetting, MicIcon, ModeIcon, MoreIcon, NextIcon, PageIcon, PlanIcon, PlusIcon, Primary, QuestionIcon, ReplyIcon, RestartIcon, roundBtn, SearchIcon, SecretField, Sent, SmileIcon, Tab, Tabs, TextBox, UpIcon, useElapsed, XIcon } from '@client/ui.tsx'
 import { canDictate, dictate, dictSample, type Dictation } from '@client/dictation.ts'
@@ -1087,7 +1087,7 @@ function Card({ card: c, chat, at, press, keys, className }: { card: UpdateCard;
   const t = taskOf(snap, c.task)
   const task = c.task
   const line = (
-    <button type="button" data-anchor {...press} onClick={() => openTask(task)} className={clsx(cardBox, 'hover:bg-hover', className)}>
+    <button type="button" data-anchor data-needs-link={c.ask?.open && registry.views.needs ? '' : undefined} {...press} onClick={() => (c.ask?.open && registry.views.needs ? openNeeds() : openTask(task))} className={clsx(cardBox, 'hover:bg-hover', className)}>
       <Dot s={c.status ?? 'idle'} className="shrink-0" />
       <span className={cardLine}>
         <span className="truncate">
@@ -1103,27 +1103,11 @@ function Card({ card: c, chat, at, press, keys, className }: { card: UpdateCard;
       </span>
     </button>
   )
-  if (!c.ask) return line
-  return (
-    <>
-      {line}
-      <AskOnCard ask={c.ask} task={task} taskTitle={t?.name} space={chat} />
-    </>
-  )
+  return line
 }
 
-/** what a needs-you card's task asks, answered here as in the task's own chat: its question cards as they stand there,
-    or the agent's plain question with a reply box */
-function AskOnCard({ ask, task, taskTitle, space }: { ask: CardAsk; task: string; taskTitle?: string; space: string }) {
-  // the cards answer into the task's chat; the words that answered one show on it
-  const chat: Chat = { key: ask.chat, cli: '', messages: [] }
-  const source = { id: task, title: taskTitle }
-  if (ask.questions) return ask.questions.map((q) => <QuestionCard key={q.id} q={q} chat={chat} msg={q.id} from={task} space={space} source={source} />)
-  return ask.reply ? <ReplyOnCard ask={ask} reply={ask.reply} task={task} space={space} source={source} /> : null
-}
-
-/** a plain question, with no choices: its words, and a reply to it that goes to the task's agent */
-function ReplyOnCard({ ask, reply, task, space, source }: { ask: CardAsk; reply: NonNullable<CardAsk['reply']>; task: string; space: string; source: CardSource }) {
+/** an agent that waits with no card: its words, and a reply to it that goes to the agent */
+export function ReplyOnCard({ ask, reply, task, source }: { ask: CardAsk; reply: { id?: string; text: string }; task: string; source: CardSource }) {
   const [text, setText] = useDraft(`card-reply:${ask.chat}:${reply.id}`)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -1131,7 +1115,7 @@ function ReplyOnCard({ ask, reply, task, space, source }: { ask: CardAsk; reply:
     setBusy(true)
     setErr('')
     try {
-      const r = await act({ type: 'send', chat: ask.chat, text: text.trim(), reply: reply.id, space })
+      const r = await act({ type: 'send', chat: ask.chat, text: text.trim(), reply: reply.id })
       if (r?.ok === false) setErr(r.error ?? "That didn't go through.")
       else setText('')
     } catch {
@@ -1147,7 +1131,7 @@ function ReplyOnCard({ ask, reply, task, space, source }: { ask: CardAsk; reply:
       {a ? (
         <Sent>
           <CheckIcon className={ic} />
-          <span className="shrink-0">{a.where === 'space' ? 'Answered here ·' : 'Answered in'}</span>
+          <span className="shrink-0">Answered in</span>
           <LinkButton onClick={() => goChat(ask.chat)}>{`${task} chat`}</LinkButton>
           {a.text ? <span className="min-w-0 truncate text-fg2">“{a.text.replace(/\s+/g, ' ')}”</span> : null}
         </Sent>
@@ -1314,8 +1298,8 @@ function openTerminal(key: string) {
 
 const noteBox = clsx('min-h-10 w-full resize-none rounded-row bg-transparent px-3 py-[9px] placeholder:text-fg3 coarse:min-h-11 phone:min-h-11 phone:text-[1rem]', field)
 
-/** space: a copy of a task's question on its needs-you card in that space's chat, answered there */
-export function QuestionCard({ q, chat, msg, from, space, source }: { q: Question; chat: Chat; msg: string; from: string; space?: string; source?: CardSource }) {
+/** oneTap: in Needs you, a choice sends at once, unless the card asks for several or a note */
+export function QuestionCard({ q, chat, msg, from, source, oneTap }: { q: Question; chat: Chat; msg: string; from: string; source?: CardSource; oneTap?: boolean }) {
   // Unmarked cards always require a deliberate pick and Send, including all approval prompts.
   const [sel, setSel] = useState<number[]>([])
   // half-typed notes survive a reload
@@ -1333,7 +1317,8 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
   const picked = sel.length > 0 || !!other.trim()
   // Positive opt-in, plus structural exclusions: unknown kinds and older/plugin cards remain confirmed.
   const ordinary = q.ordinary === true && (q.kind === 'Form' || q.kind === 'Question') && !q.multi && !q.terminal && !q.screen && !q.steps && !q.reject && !q.noNote && q.noteRequiredFor === undefined && !q.id.startsWith('menu:')
-  const immediate = (ordinary && !composing && !note && !other || q.press === true) && !sent
+  const tap = ordinary || oneTap === true && !q.multi && q.noteRequiredFor === undefined
+  const immediate = (tap && !composing && !note && !other || q.press === true) && !sent
   const choose = (j: number) => setSel(q.multi ? (sel.includes(j) ? sel.filter((x) => x !== j) : [...sel, j]) : [j])
   const send = async (reject = false, choice = sel[0] ?? -1) => {
     if (sent || sending.current) return
@@ -1344,7 +1329,7 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
     setErr('')
     let accepted = false
     try {
-      const r = await act({ type: 'answer', chat: chat.key, question: q.id, choice: reject ? -1 : choice, choices: q.multi ? (reject ? [] : sel) : undefined, note: note.trim() || undefined, other: other.trim() || undefined, space })
+      const r = await act({ type: 'answer', chat: chat.key, question: q.id, choice: reject ? -1 : choice, choices: q.multi ? (reject ? [] : sel) : undefined, note: note.trim() || undefined, other: other.trim() || undefined })
       if (r?.ok === false) setErr(r.error ?? "That didn't go through.")
       else {
         accepted = true
@@ -1445,7 +1430,7 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
           {immediate && !q.noNote ? (
             <button type="button" disabled={busy} className="min-h-11 text-left text-accent" onClick={() => setComposing(true)}>Add a note</button>
           ) : null}
-          {(!q.other || ordinary) && !q.noNote && !immediate ? (
+          {(!q.other || tap) && !q.noNote && !immediate ? (
             <TextBox
               ref={noteRef}
               name="note"
@@ -1458,7 +1443,8 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
               onChange={setNote}
             />
           ) : null}
-          <div className="flex items-center justify-end gap-2">
+          {/* in Needs you, its room is kept: Sending… must not push the cards below under a thumb */}
+          <div className={clsx('flex items-center justify-end gap-2', oneTap && 'min-h-6')}>
             {err ? <span role="alert" className="mr-auto text-[0.75rem] text-need phone:text-[0.8125rem]">{err}</span> : null}
             {q.reject ? <button type="button" disabled={busy} onClick={() => send(true)}>{q.reject}</button> : null}
             {!immediate ? <Primary soft disabled={busy || !picked} onClick={() => send()}>
@@ -1477,7 +1463,7 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
 /** a masked box for a secret an agent asked for by name, and where it is kept (its space, its machine, Everywhere).
  *  The value goes once to the main machine and is never kept here, as a draft or otherwise; the agent is told it is
  *  there, by name only */
-function SecretCard({ ask, chat }: { ask: SecretAsk; chat: Chat }) {
+export function SecretCard({ ask, chat, source }: { ask: SecretAsk; chat: Chat; source?: CardSource }) {
   const [value, setValue] = useState('')
   const [level, setLevel] = useState(ask.levels[0]?.id ?? 'all')
   const [busy, setBusy] = useState(false)
@@ -1497,7 +1483,7 @@ function SecretCard({ ask, chat }: { ask: SecretAsk; chat: Chat }) {
     }
   }
   return (
-    <CardShell title={`Secret: ${ask.name}`} icon={KeyIcon}>
+    <CardShell title={`Secret: ${ask.name}`} icon={KeyIcon} source={source}>
       {ask.why ? <p className="text-pretty break-words">{ask.why}</p> : null}
       {ask.saved ? (
         <Sent>

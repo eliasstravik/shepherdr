@@ -1,35 +1,32 @@
 import { coordinatorRequestIds } from '../shared/attention.ts'
-import type { Message } from '../shared/types.ts'
+import type { Message, Need } from '../shared/types.ts'
 import { expect, test } from 'bun:test'
 import { attentionCounts } from '../src/attention.ts'
 import { DemoWorld } from '../server/demo/world.ts'
 
-test('attention counts requests once, Ready separately, and only within its named scope', () => {
+const need = (id: string, chat: string, place: string, task?: string): Need => ({ id, chat, place, task, at: 1 })
+
+test('every count is its own list: needs one per card, within its scope; Ready the Ready tasks', () => {
   const snap = new DemoWorld().snapshot()
-  delete snap.attentionRequests // Older peers remain compatible.
   const all = snap.places.map((p) => p.id)
-  const need = snap.tasks.filter((t) => t.status === 'need' && !t.archived)
   const ready = snap.tasks.filter((t) => t.status === 'ready' && !t.archived)
-  expect(attentionCounts(snap, all)).toEqual({ need: need.length + Object.keys(snap.asks).length, ready: ready.length })
-  // Copies of a task request must not make it count twice; archived work never counts.
-  snap.tasks.push({ ...need[0] }, { ...need[0], id: 'ARCHIVED', archived: 1 })
-  expect(attentionCounts(snap, [...all, ...all]).need).toBe(need.length + Object.keys(snap.asks).length)
-  const p = ready[0].place
-  expect(attentionCounts(snap, [p]).ready).toBe(ready.filter((t) => t.place === p).length)
+  expect(attentionCounts(snap, all)).toEqual({ need: snap.needs.length, ready: ready.length })
+  // the same scope named twice counts once
+  expect(attentionCounts(snap, [...all, ...all]).need).toBe(snap.needs.length)
+  // the spaces' own counts add up to Needs you's
+  expect(all.reduce((n, p) => n + attentionCounts(snap, [p]).need, 0)).toBe(snap.needs.length)
   expect(attentionCounts(snap, [])).toEqual({ need: 0, ready: 0 })
 })
 
-test('multiple questions count separately, copies once, answered requests disappear', () => {
+test('two cards of one task count as two, a Ready task with a merge to answer is on both lists, and answered cards go', () => {
   const snap = new DemoWorld().snapshot()
-  const need = snap.tasks.find((t) => t.status === 'need')!
-  const p = snap.places.find((p) => p.id === need.place)!
-  const key = need.agent?.chat ?? `${need.id}/Agent`
-  snap.tasks = [need, { ...need, id: 'READY', status: 'ready' }]
-  snap.asks = { [p.id]: 'coordinator-1' }
-  snap.attentionRequests = { [key]: ['question-1', 'question-2', 'question-1'], [p.chat]: ['coordinator-1', 'coordinator-2'] }
-  expect(attentionCounts(snap, [p.id])).toEqual({ need: 4, ready: 1 })
-  snap.attentionRequests[key] = ['question-2']
-  expect(attentionCounts(snap, [p.id])).toEqual({ need: 3, ready: 1 })
+  const task = snap.tasks.find((t) => t.status === 'need')!
+  const p = task.place
+  snap.tasks = [task, { ...task, id: 'READY', status: 'ready' }, { ...task, id: 'ASKED', status: 'ready' }]
+  snap.needs = [need('q1', 'T/Agent', p, task.id), need('q2', 'T/Agent', p, task.id), need('merge', 'ASKED/Agent', p, 'ASKED'), need('c1', p, p)]
+  expect(attentionCounts(snap, [p])).toEqual({ need: 4, ready: 2 })
+  snap.needs = snap.needs.slice(1)
+  expect(attentionCounts(snap, [p])).toEqual({ need: 3, ready: 2 })
 })
 
 test('coordinator questions survive later news, count separately and stop counting when answered', () => {

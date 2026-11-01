@@ -341,6 +341,13 @@ function noTasks(snap: Snapshot, list: ListView) {
 }
 
 /** The lists' tasks: what their chips hold (placeId, the place picked, is for plugins of old) */
+/** a Needs you group counts what its tasks wait for, card by card, as every other count does */
+const needCount = (snap: Snapshot, g: { key: string; count: number; tasks: Task[] }) => {
+  if (g.key !== 'need' && !g.key.endsWith('|need')) return g.count
+  const ids = new Set(g.tasks.map((t) => t.id))
+  return Math.max(g.count, snap.needs.filter((n) => n.task && ids.has(n.task)).length)
+}
+
 function TaskList(_: { placeId: string }) {
   const snap = useSnap()!
   const view = useStore((s) => listView(s.ui, snap))
@@ -410,7 +417,7 @@ function TaskList(_: { placeId: string }) {
               {g.kind === 'machine' ? (
                 <MachineHeading name={g.label} first={!i} count={g.count} fold={fold} />
               ) : (
-                <GroupHeading label={g.label} note={g.note} count={g.count} flip={`group:${g.key}`} fold={fold} />
+                <GroupHeading label={g.label} note={g.note} count={needCount(snap, g)} flip={`group:${g.key}`} fold={fold} />
               )}
               {g.shut ? null : g.tasks.length ? (
                 <List>

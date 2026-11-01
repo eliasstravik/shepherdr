@@ -20,7 +20,7 @@ export class CoreQuestions {
       row.question.closed = row.question.said
       this.source.store.set('question', row.id, row)
       this.source.post(chat, { id: row.id, who: 'agent', question: row.question, at: Date.now() })
-      this.source.forwardQuestion(chat, row.question, row.question.said, 'task', replaced ? 'Session replaced' : 'No longer waiting')
+      this.source.forwardQuestion(chat, row.question, row.question.said, replaced ? 'Session replaced' : 'No longer waiting')
       this.source.clearAlert(chat, row.question.said)
     }
   }
@@ -63,7 +63,7 @@ export class CoreQuestions {
     this.source.saveAndDeliver(row.chat, `answer-${row.id}`, tag('answer', { from: this.source.snapshot().user, question: question.title }, words), () => this.source.store.set('question', row.id, row))
     const message = this.source.store.get<Message>(`message:${row.chat}`, row.id)
     this.source.post(row.chat, { ...message, id: row.id, who: 'agent', question, at: message?.at ?? Date.now() })
-    this.source.forwardQuestion(row.chat, question, words, action.space ? 'space' : 'task')
+    this.source.forwardQuestion(row.chat, question, words)
     return true
   }
 }

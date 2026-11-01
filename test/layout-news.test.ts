@@ -36,12 +36,10 @@ describe.skipIf(!browser)('coordinator update history', () => {
           expect(await page.locator(pills('history-4')).getAttribute('aria-pressed')).toBe('true')
           const reply = page.locator('[data-msg="history-reply"]')
           expect(await reply.textContent()).toContain(history[4].text!)
-          const permission = page.locator('[data-whole="history-permission"] [data-card]')
-          expect(await permission.locator('[data-card-source]').textContent()).toBe('LV-3 · Upload page for files')
-          await permission.getByRole('button', { name: 'Allow', exact: true }).click()
-          expect(await permission.getByRole('button', { name: 'Send', exact: true }).isEnabled()).toBe(true)
-          // Picking does not send a permission; both unanswered cards retain their choices.
-          expect(await permission.getByRole('button', { name: 'Allow', exact: true }).getAttribute('aria-pressed')).toBe('true')
+          // A task's card is a row here, with nothing to answer: only the coordinator's own card has buttons.
+          const permission = page.locator('[data-whole="history-permission"]')
+          expect(await permission.locator('[data-card]').count()).toBe(0)
+          expect(await permission.locator('[data-needs-link]').count()).toBe(1)
           expect(await page.locator('[data-whole="history-question"] [data-card]').getByRole('button', { name: 'Blue', exact: true }).isEnabled()).toBe(true)
           await page.reload()
           await page.locator('[data-msg="history-39"]').waitFor()
