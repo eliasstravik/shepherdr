@@ -184,6 +184,7 @@ function TaskActions({ task: t, close }: { task: Task; close: () => void }) {
 /** The row's menu: beside a desktop's panes, Open in split view, then the task's own */
 function TaskMenu({ t, menu }: { t: Task; menu: RowMenuState }) {
   const desktop = useUI((u) => u.device === 'desktop')
+  const Actions = registry.views.taskActions ?? TaskActions
   return (
     <RowMenu menu={menu} label={t.id}>
       {desktop ? (
@@ -200,7 +201,7 @@ function TaskMenu({ t, menu }: { t: Task; menu: RowMenuState }) {
           <MenuSeparator />
         </>
       ) : null}
-      <TaskActions task={t} close={menu.close} />
+      <Actions task={t} close={menu.close} />
     </RowMenu>
   )
 }
