@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite'
+import { LOCK_WAIT } from './store.ts'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { chmodSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -69,7 +70,7 @@ export class Mailbox {
     const path = join(home, 'mailbox.sqlite')
     this.db = new Database(path, { create: true })
     chmodSync(path, 0o600)
-    this.db.exec(`PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;
+    this.db.exec(`PRAGMA busy_timeout=${LOCK_WAIT}; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;
       CREATE TABLE IF NOT EXISTS identity (id INTEGER PRIMARY KEY CHECK(id=1), server TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS grants (id TEXT PRIMARY KEY, chat TEXT NOT NULL, session TEXT NOT NULL,
         machine TEXT NOT NULL, actions TEXT NOT NULL, credential TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);

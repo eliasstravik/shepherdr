@@ -10,6 +10,7 @@ import { CoreNativeFile } from './native-file.ts'
 import { CoreReviewReader } from './review-reader.ts'
 import { chatMessages } from './chat.ts'
 import { activityOf } from '../activity.ts'
+import { guarded } from './guarded.ts'
 
 interface Cursor { initialized?: boolean; loading?: boolean; gap?: boolean; caughtUp?: boolean; ended?: boolean; path: string; file: CoreNativeFile; reader?: Reader; reset?: () => void }
 interface WaitingSnapshot { launch: string; started: number; path?: string; activity: number; waiting: boolean }
@@ -30,7 +31,11 @@ export class CoreLogs {
     private readonly changed: (chat: string) => void, private readonly error: (chat: string, message: string) => void,
     private readonly incoming: (chat: string, message: Message) => void = () => {}, private readonly observe: (agent: CoreAgent) => Promise<void> = async () => {},
     private readonly ended: (agent: CoreAgent, event: LogEvent) => void = () => {}) {}
-  start() { if (!this.timer) this.timer = setInterval(() => void this.poll(), 500); void this.poll() }
+  start() {
+    const poll = () => { void guarded('Log poll', () => this.poll()) }
+    if (!this.timer) this.timer = setInterval(poll, 500)
+    poll()
+  }
   stop() { clearInterval(this.timer); this.timer = undefined }
   async poll() {
     const jobs: Promise<void>[] = []

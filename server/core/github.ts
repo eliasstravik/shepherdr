@@ -4,6 +4,7 @@ import type { CoreSource } from './source.ts'
 import type { CoreSpace } from './model.ts'
 import { CoreGitHubPr } from './github-pr.ts'
 import { CoreGitHubMerges } from './github-merges.ts'
+import { guarded } from './guarded.ts'
 
 interface WorkflowRun { headSha: string; status: string; conclusion: string | null; url: string; workflowName: string; databaseId?: number }
 interface MainWatch { id: string; checked: number; red?: string; green?: string; notice?: string; error?: string }
@@ -43,7 +44,7 @@ export class CoreGitHub {
   start() {
     this.stopped = false
     this.prs.start()
-    const poll = () => { void this.tick().catch(error => this.source.store.set('meta', 'github-error', { at: Date.now(), error: String(error.message).slice(0, 1000) })) }
+    const poll = () => { void guarded('GitHub poll', () => this.tick().catch(error => this.source.store.set('meta', 'github-error', { at: Date.now(), error: String(error.message).slice(0, 1000) }))) }
     this.timer = setInterval(poll, 30000); poll()
   }
   stop() { this.stopped = true; this.prs.stop(); clearInterval(this.timer) }

@@ -8,6 +8,7 @@ import { buildId } from '../shared/build.ts'
 import { fileType } from '../shared/files.ts'
 import type { Action, AddSpace, ServerEvent, UpdateStatus, WorktreeAsk } from '../shared/types.ts'
 import { frameResponse, wrapPage } from './frame.ts'
+import { guarded } from './core/guarded.ts'
 import type { Source } from './source.ts'
 import type { Push } from './push.ts'
 
@@ -77,10 +78,12 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', updates
     if (snapTimer) return
     snapTimer = setTimeout(() => {
       snapTimer = null
-      const snapshot = source.snapshot()
-      const next = currentBuild()
-      if (next !== build) { build = next; for (const ws of live) send(ws, { type: 'build', id: build }) }
-      for (const ws of live) send(ws, { type: 'snapshot', snapshot })
+      void guarded('Snapshot', () => {
+        const snapshot = source.snapshot()
+        const next = currentBuild()
+        if (next !== build) { build = next; for (const ws of live) send(ws, { type: 'build', id: build }) }
+        for (const ws of live) send(ws, { type: 'snapshot', snapshot })
+      })
     }, 30)
   })
   source.on('chat', (key) => {

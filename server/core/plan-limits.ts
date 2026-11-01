@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CliLimits, CliLimitsRead, MachineLimits } from '../../shared/types.ts'
 import type { CoreSource } from './source.ts'
+import { guarded } from './guarded.ts'
 
 type Cli = keyof MachineLimits
 const CLIS: Cli[] = ['claude', 'codex']
@@ -32,7 +33,12 @@ export class CorePlanLimits {
   private readonly script = readFileSync(join(import.meta.dir, '../../helper/core-plan-limits.ts'), 'utf8') + '\nconsole.log(JSON.stringify(await read()))'
   constructor(private source: CoreSource) {}
   private on() { return !this.stopped && !this.source.quiescing && this.source.plugins?.has('limits') !== false }
-  start() { this.stopped = false; this.timer = setInterval(() => void this.refresh(), EVERY); void this.refresh() }
+  start() {
+    this.stopped = false
+    const refresh = () => { void guarded('Plan limits', () => this.refresh()) }
+    this.timer = setInterval(refresh, EVERY)
+    refresh()
+  }
   view(machine: string): MachineLimits | undefined {
     if (this.source.plugins?.has('limits') === false) return
     return this.source.store.get<MachineLimits>('plan-limits', machine)

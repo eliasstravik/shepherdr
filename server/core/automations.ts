@@ -10,6 +10,7 @@ import { kindOf } from './settings.ts'
 import type { CoreSource } from './source.ts'
 import type { CoreAgent } from './model.ts'
 import type { TaskNewsEvent, StallCause } from './news.ts'
+import { guarded } from './guarded.ts'
 
 const checked = <T>(run: () => T): T => { try { return run() } catch (error) { throw new Refusal((error as Error).message) } }
 
@@ -37,9 +38,10 @@ export class CoreAutomations {
       const task = this.source.tasks.all().find(task => task.automation === run.id)
       this.finish(run, task ? { task: task.id } : { error: 'Run interrupted; inspect tasks before running again' })
     }
-    this.timer = setInterval(() => { void this.scan() }, 5000)
-    this.source.on('snapshot', () => { if (!this.scanning) queueMicrotask(() => { void this.scan() }) })
-    void this.scan()
+    const scan = () => { void guarded('Automation scan', () => this.scan()) }
+    this.timer = setInterval(scan, 5000)
+    this.source.on('snapshot', () => { if (!this.scanning) queueMicrotask(scan) })
+    scan()
   }
   private finish(run: Run, result: { task?: string; error?: string }) {
     Object.assign(run, result, { state: 'done' })
@@ -58,10 +60,18 @@ export class CoreAutomations {
     this.busy.add(automation.id)
     const run: Run = queued ? { ...queued, at: Date.now(), state: 'starting' } : { id: randomUUID(), automation: automation.id, place: automation.place, at: Date.now(), timed, state: 'starting' }
     // Claim and advance its time cursor before any remote work. A lost response cannot launch it twice.
-    this.source.store.db.transaction(() => {
-      this.source.store.set('automation-run', run.id, run)
-      this.model.fired(automation, { error: 'Starting; inspect tasks if interrupted' }, run.at, timed)
-    })()
+    const { last, timed: was, runs, on } = automation
+    try {
+      this.source.store.db.transaction(() => {
+        this.source.store.set('automation-run', run.id, run)
+        this.model.fired(automation, { error: 'Starting; inspect tasks if interrupted' }, run.at, timed)
+      })()
+    } catch (error) {
+      // Nothing was claimed: still due, and not left starting for ever.
+      Object.assign(automation, { last, timed: was, runs, on })
+      this.busy.delete(automation.id)
+      throw error
+    }
     this.source.emit('snapshot')
     const work = (async () => {
       try {
@@ -73,7 +83,7 @@ export class CoreAutomations {
         this.finish(run, { task: task.id })
         return { task: task.id }
       } catch (error) { this.finish(run, { error: (error as Error).message }); throw error }
-      finally { this.busy.delete(automation.id); queueMicrotask(() => { void this.processQueue() }) }
+      finally { this.busy.delete(automation.id); queueMicrotask(() => { void this.nextQueued() }) }
     })()
     this.active.add(work)
     try { return await work } finally { this.active.delete(work) }
@@ -96,6 +106,7 @@ export class CoreAutomations {
   }
   /** Internal producers can atomically save their observation and its durable rule runs. */
   record(event: Happened, place: string) { this.source.store.db.transaction(() => this.enqueue(event, place))() }
+  private nextQueued() { return guarded('Automation queue', () => this.processQueue()) }
   private processQueue(): Promise<void> {
     if (this.processing) return this.processing
     if (this.stopped || this.source.quiescing || !this.source.connected()) return Promise.resolve()
@@ -155,8 +166,8 @@ export class CoreAutomations {
         })()
       }
       this.source.news?.deliver(now)
-      void this.processQueue()
-      for (const automation of this.model.dueNow(this.zone())) if (this.source.space(automation.place) && !this.source.places.removing(automation.place) && !this.busy.has(automation.id)) void this.fire(automation, true).catch(() => {})
+      void this.nextQueued()
+      for (const automation of this.model.dueNow(this.zone())) if (this.source.space(automation.place) && !this.source.places.removing(automation.place) && !this.busy.has(automation.id)) void guarded('Automation run', () => this.fire(automation, true))
     } finally { this.scanning = false }
   }
   async act(action: Extract<Action, { type: 'automation' }>) {
