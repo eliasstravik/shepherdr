@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { busy, judge, levels, meters, type Kind, type Sample, type Watch } from '../health.ts'
 import type { MachineHealth } from '../../shared/types.ts'
 import type { CoreSource } from './source.ts'
+import { guarded } from './guarded.ts'
 
 /** Bounded stateless sampling over core exec, never a per-machine service. */
 export class CoreHealth {
@@ -12,7 +13,12 @@ export class CoreHealth {
   private stopped = false
   private readonly script = readFileSync(join(import.meta.dir, '../../helper/core-health.ts'), 'utf8') + '\nconsole.log(JSON.stringify(await sample()))'
   constructor(private source: CoreSource) {}
-  start() { this.stopped = false; this.timer = setInterval(() => void this.refresh(), 30_000); void this.refresh() }
+  start() {
+    this.stopped = false
+    const refresh = () => { void guarded('Health sample', () => this.refresh()) }
+    this.timer = setInterval(refresh, 30_000)
+    refresh()
+  }
   private active(task: ReturnType<CoreSource['tasks']['all']>[number]) {
     if (task.archived) return false
     const main = this.source.agents.get(task.chat), terminal = main && this.source.agents.terminal(main)

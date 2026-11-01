@@ -9,6 +9,7 @@ import type { BrowserDown, BrowserUp, BrowserNote } from '../../shared/browser.t
 import { line } from '../common/chatlines.ts'
 import type { Action } from '../../shared/types.ts'
 import type { CoreClient } from './client.ts'
+import { guarded } from './guarded.ts'
 
 type Viewer = { send(raw: string): void; close(): void; buffered?(): number }
 interface Record { id: string; task: string; chat: string; launch: string; machine: string; key: string; name: string; terminal?: string; pid?: number; config: string; root: string; bun: string; driver?: 'agent' | 'you' }
@@ -23,8 +24,9 @@ export class CoreBrowsers {
   private scanning = false
   private lastScan = 0
   constructor(private source: CoreSource, private installation: string) {
-    this.timer = setInterval(() => this.reconcile(), 5000)
-    source.core.onChange(() => this.reconcile())
+    const reconcile = () => { void guarded('Browser check', () => this.reconcile()) }
+    this.timer = setInterval(reconcile, 5000)
+    source.core.onChange(reconcile)
   }
   private hub(task: string) {
     let hub = this.hubs.get(task)
@@ -214,7 +216,7 @@ export class CoreBrowsers {
       if (['merged', 'closed'].includes(task.workflow) || task.archived || this.source.plugins?.has('browser') === false) void this.close(record.task, task.workflow === 'merged' || task.workflow === 'closed').catch(() => {})
       else void this.connect(this.hub(task.id), true).catch(() => {})
     }
-    if (this.source.plugins?.has('browser') !== false && Date.now() - this.lastScan >= 30_000 && !this.scanning) void this.detectAgentBrowsers()
+    if (this.source.plugins?.has('browser') !== false && Date.now() - this.lastScan >= 30_000 && !this.scanning) void guarded('Browser check', () => this.detectAgentBrowsers())
     for (const hub of this.hubs.values()) if (hub.clients.size) void this.connect(hub).catch(error => this.error(hub, error.message))
   }
   /** Recover agent-only browser use from the wrapper's own usage mark, through core only. */

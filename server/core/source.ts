@@ -55,6 +55,7 @@ import { ownCommand } from './own-commands.ts'
 import { NATIVE_UNREADABLE, nativeAnswer, nativeCards, nativeClosed, nativeReply, permissionChoices, permissionWords, type NativeAsk, type PermissionAnswer } from './native-asks.ts'
 import type { CorePluginUpdates } from './plugin-updates.ts'
 import type { ActivityAsk, WorktreeAsk } from '../../shared/types.ts'
+import { guarded } from './guarded.ts'
 
 interface Machine { id: string; name: string; state: string; host?: string; version?: string; session?: string | null }
 interface Permission { id: string; chat: string; grant: string; question: Question; expires: number; settled?: boolean; allow?: boolean; at?: number; native?: NativeAsk; grants?: unknown[]; reply?: PermissionAnswer; tool?: string; hash?: string; turn?: string; sub?: string }
@@ -122,7 +123,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
     this.core = new CoreSession(config.socket)
     this.files = new CoreFiles(this.core, machine => this.route(machine))
     this.mailbox = new Mailbox(config.home, this.core, machine => this.route(machine), (grant, request, id) => this.mail(grant, request, id))
-    const changed = (chat: string) => { this.reconcilePermissions(chat); this.questions?.reconcile(chat); this.screens?.reconcile(chat); this.secrets?.reconcile(chat); this.emit('chat', chat); this.emit('snapshot'); void this.flush(chat); void this.tasks?.tick().catch(error => this.faults.set('queue', error.message)) }
+    const changed = (chat: string) => { this.reconcilePermissions(chat); this.questions?.reconcile(chat); this.screens?.reconcile(chat); this.secrets?.reconcile(chat); this.emit('chat', chat); this.emit('snapshot'); this.flushLater(chat); void this.tasks?.tick().catch(error => this.faults.set('queue', error.message)) }
     this.agents = new CoreAgents(config, installation, this.core, this.store, this.mailbox, machine => this.route(machine), changed, machine => this.machines.find(item => item.id === machine) ?? {})
     this.logs = new CoreLogs(this.agents, this.files, this.store, changed, (chat, message) => { this.faults.set(chat, message) }, (chat, message) => this.fresh(chat, message), agent => this.pilots.usage.observe(agent), (agent, event) => this.nativeEnded(agent, logEnd(event)))
     this.settings = new CoreSettings(this.store, this.files, () => this.spaces(), id => this.store.get<string>('name', `m:${id}`) || (id === this.local.id ? this.local.name : this.machineName(id) || id), () => { this.emit('snapshot'); this.plannedChanged() })
@@ -153,7 +154,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
     this.heartbeats = new CoreHeartbeats(this)
     this.voices = new CoreVoice(this)
     this.plugins = new CorePlugins(this)
-    this.core.onChange(() => { this.agents.reconcile(); this.emit('snapshot'); for (const agent of this.agents.all()) { this.reconcilePermissions(agent.chat); this.questions.reconcile(agent.chat); this.screens.reconcile(agent.chat); this.secrets.reconcile(agent.chat); void this.flush(agent.chat) } })
+    this.core.onChange(() => { void guarded('Core change', () => { this.agents.reconcile(); this.emit('snapshot'); for (const agent of this.agents.all()) { this.reconcilePermissions(agent.chat); this.questions.reconcile(agent.chat); this.screens.reconcile(agent.chat); this.secrets.reconcile(agent.chat); this.flushLater(agent.chat) } }) })
     this.core.onDocument(event => { void this.mailbox.event(String(event.params.data?.name ?? ''), event.params.machine).catch(error => this.faults.set('mailbox', error.message)) })
     this.core.onResync(() => { void this.refresh().then(() => this.mailbox.resync()).catch(error => this.faults.set('core', error.message)) })
   }
@@ -175,11 +176,11 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
     }
     await this.core.start(); await this.refresh(); this.human = await humanName(this.config.home, async () => (await this.files.exec(this.local.id, ['git', 'config', '--global', 'user.name'], undefined, undefined, 3)).toString('utf8')); this.tasks.recoverProviderFallbacks(); this.logs.start(); this.screens.start(); this.failedStarts.start(); this.automations.start(); this.health.start(); this.limits.start(); this.github.start()
     this.recovery = setInterval(() => {
-      if (!this.quiescing) void this.pilots.lifecycle.tick().then(() => this.pilots.completion.tick()).catch(error => this.faults.set('pilot-lifecycle', error.message))
-      if (!this.quiescing) { this.pilots.wakes.tick(); this.news.deliver() }
-      if (!this.quiescing) void this.providerRetries.tick().catch(error => this.faults.set('provider-retry', error.message))
-      if (!this.quiescing) void this.pilots.usage.poll().catch(error => this.faults.set('pilot-usage', error.message))
-      if (this.connected()) { void this.refresh().then(() => this.mailbox.resync()).catch(error => this.faults.set('core', error.message)); void this.tasks.tick().catch(error => this.faults.set('queue', error.message)); return }
+      if (!this.quiescing) void guarded('Autopilot lifecycle', () => this.pilots.lifecycle.tick().then(() => this.pilots.completion.tick()))
+      if (!this.quiescing) { void guarded('Autopilot wakes', () => this.pilots.wakes.tick()); void guarded('Task news', () => this.news.deliver()) }
+      if (!this.quiescing) void guarded('Provider retries', () => this.providerRetries.tick())
+      if (!this.quiescing) void guarded('Autopilot usage', () => this.pilots.usage.poll())
+      if (this.connected()) { void guarded('Core refresh', () => this.refresh().then(() => this.mailbox.resync())); void guarded('Task queue', () => this.tasks.tick()); return }
       if (this.recovering || this.core.current.error?.includes('requires core')) return
       this.recovering = true
       // Restart the configured, isolated core after a crash. This never updates binaries or stops holders.
@@ -615,8 +616,9 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
   }
   retry(chat: string) {
     if (this.quiescing) return
-    queueMicrotask(() => { if (!this.quiescing) void this.flush(chat) })
+    queueMicrotask(() => { if (!this.quiescing) this.flushLater(chat) })
   }
+  private flushLater(chat: string) { void guarded('Message delivery', () => this.flush(chat)) }
   private async flush(chat: string) {
     if (this.quiescing || this.sending.has(chat) || !this.connected()) return
     this.sending.add(chat)
@@ -845,7 +847,7 @@ Use hc for starting, messaging and waiting on core child agents. Never use a web
       this.store.set('pending-send', id, { id, chat, text, launch: agent.launch, state: 'queued', quiet, ...(work ? { work } : {}) } satisfies PendingSend)
       this.deliveryNotice({ id, chat, text, launch: agent.launch, state: 'queued', quiet })
     })()
-    queueMicrotask(() => { void this.flush(chat) })
+    queueMicrotask(() => this.flushLater(chat))
   }
   voice(chat: string, out: Parameters<CoreVoice['open']>[1]) {
     try { this.requirePlugin('voice'); return this.voices.open(chat, out) }

@@ -10,6 +10,7 @@ import { kindOf } from './settings.ts'
 import type { CoreSource } from './source.ts'
 import type { CoreAgent } from './model.ts'
 import type { TaskNewsEvent, StallCause } from './news.ts'
+import { guarded } from './guarded.ts'
 
 const checked = <T>(run: () => T): T => { try { return run() } catch (error) { throw new Refusal((error as Error).message) } }
 
@@ -37,9 +38,10 @@ export class CoreAutomations {
       const task = this.source.tasks.all().find(task => task.automation === run.id)
       this.finish(run, task ? { task: task.id } : { error: 'Run interrupted; inspect tasks before running again' })
     }
-    this.timer = setInterval(() => { void this.scan() }, 5000)
-    this.source.on('snapshot', () => { if (!this.scanning) queueMicrotask(() => { void this.scan() }) })
-    void this.scan()
+    const scan = () => { void guarded('Automation scan', () => this.scan()) }
+    this.timer = setInterval(scan, 5000)
+    this.source.on('snapshot', () => { if (!this.scanning) queueMicrotask(scan) })
+    scan()
   }
   private finish(run: Run, result: { task?: string; error?: string }) {
     Object.assign(run, result, { state: 'done' })
@@ -52,17 +54,29 @@ export class CoreAutomations {
     }
     this.source.emit('snapshot')
   }
-  async fire(automation: Automation, timed = false, queued?: Run) {
+  async fire(automation: Automation, timed = false, queued?: Run) { return this.launch(automation, this.claim(automation, timed, queued)) }
+  private claim(automation: Automation, timed: boolean, queued?: Run) {
     if (this.stopped || this.source.quiescing) throw new Refusal('Shepherdr is stopping; retry after reconnecting')
     if (this.busy.has(automation.id)) throw new Refusal('This automation is already starting a task')
     this.busy.add(automation.id)
     const run: Run = queued ? { ...queued, at: Date.now(), state: 'starting' } : { id: randomUUID(), automation: automation.id, place: automation.place, at: Date.now(), timed, state: 'starting' }
+    const { last, timed: was, runs, on } = automation
     // Claim and advance its time cursor before any remote work. A lost response cannot launch it twice.
-    this.source.store.db.transaction(() => {
-      this.source.store.set('automation-run', run.id, run)
-      this.model.fired(automation, { error: 'Starting; inspect tasks if interrupted' }, run.at, timed)
-    })()
+    try {
+      this.source.store.db.transaction(() => {
+        this.source.store.set('automation-run', run.id, run)
+        this.model.fired(automation, { error: 'Starting; inspect tasks if interrupted' }, run.at, timed)
+      })()
+    } catch (error) {
+      // Nothing was claimed: still due, and not left starting for ever.
+      Object.assign(automation, { last, timed: was, runs, on })
+      this.busy.delete(automation.id)
+      throw error
+    }
     this.source.emit('snapshot')
+    return run
+  }
+  private async launch(automation: Automation, run: Run) {
     const work = (async () => {
       try {
         const space = this.source.space(automation.place)
@@ -73,7 +87,7 @@ export class CoreAutomations {
         this.finish(run, { task: task.id })
         return { task: task.id }
       } catch (error) { this.finish(run, { error: (error as Error).message }); throw error }
-      finally { this.busy.delete(automation.id); queueMicrotask(() => { void this.processQueue() }) }
+      finally { this.busy.delete(automation.id); queueMicrotask(() => { void this.nextQueued() }) }
     })()
     this.active.add(work)
     try { return await work } finally { this.active.delete(work) }
@@ -92,10 +106,11 @@ export class CoreAutomations {
   }
   async event(event: Happened, place: string) {
     this.record(event, place)
-    return this.processQueue()
+    return this.nextQueued()
   }
   /** Internal producers can atomically save their observation and its durable rule runs. */
   record(event: Happened, place: string) { this.source.store.db.transaction(() => this.enqueue(event, place))() }
+  private nextQueued() { return guarded('Automation queue', () => this.processQueue()) }
   private processQueue(): Promise<void> {
     if (this.processing) return this.processing
     if (this.stopped || this.source.quiescing || !this.source.connected()) return Promise.resolve()
@@ -106,7 +121,9 @@ export class CoreAutomations {
         const automation = this.model.list.find(item => item.id === run.automation)
         if (!automation) { this.finish(run, { error: 'Automation removed before this queued event ran' }); continue }
         if (!automation.on || !this.source.space(automation.place) || this.source.places.removing(automation.place)) continue
-        try { await this.fire(automation, false, run) } catch {}
+        // A claim that fails ends this pass: the next would only wait out the same lock.
+        const claimed = this.claim(automation, false, run)
+        try { await this.launch(automation, claimed) } catch {}
       }
     })()
     this.processing = work.finally(() => { this.processing = undefined })
@@ -155,8 +172,12 @@ export class CoreAutomations {
         })()
       }
       this.source.news?.deliver(now)
-      void this.processQueue()
-      for (const automation of this.model.dueNow(this.zone())) if (this.source.space(automation.place) && !this.source.places.removing(automation.place) && !this.busy.has(automation.id)) void this.fire(automation, true).catch(() => {})
+      void this.nextQueued()
+      for (const automation of this.model.dueNow(this.zone())) if (this.source.space(automation.place) && !this.source.places.removing(automation.place) && !this.busy.has(automation.id)) {
+        // Outside the launch's guard: a failed claim ends this scan, or each due rule would wait out the same lock in turn.
+        const run = this.claim(automation, true)
+        void guarded('Automation run', () => this.launch(automation, run))
+      }
     } finally { this.scanning = false }
   }
   async act(action: Extract<Action, { type: 'automation' }>) {
@@ -198,5 +219,5 @@ export class CoreAutomations {
     return JSON.stringify(await this.act({ type: 'automation', place: space.id, name, op: op as 'pause' | 'resume' | 'run' | 'remove' }))
   }
   stop() { this.stopped = true; clearInterval(this.timer) }
-  async drain() { await this.processing; await Promise.allSettled([...this.active]) }
+  async drain() { await this.processing?.catch(() => {}); await Promise.allSettled([...this.active]) }
 }

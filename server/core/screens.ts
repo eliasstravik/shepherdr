@@ -6,6 +6,7 @@ import { Refusal } from './client.ts'
 import type { CoreAgent } from './model.ts'
 import { CLI_NAME } from './settings.ts'
 import type { CoreSource } from './source.ts'
+import { guarded } from './guarded.ts'
 
 interface ScreenCard { id: string; chat: string; launch: string; screen: string; all?: string; question: Question; state: 'open' | 'answered'; at: number }
 
@@ -24,7 +25,7 @@ export class CoreScreens {
   private last = new Map<string, { seen: string; shown: string }>()
   private pressing = new Set<string>()
   constructor(private readonly source: CoreSource) {}
-  start() { this.timer = setInterval(() => { if (!this.source.quiescing) void this.tick() }, POLL) }
+  start() { this.timer = setInterval(() => { if (!this.source.quiescing) void guarded('Screen check', () => this.tick()) }, POLL) }
   stop() { clearInterval(this.timer) }
   private cards() { return this.source.store.all<ScreenCard>('screen-card') }
   private waiting(row: ScreenCard) { const agent = this.source.agents.get(row.chat); return agent?.launch === row.launch && agent.state === 'starting' && this.source.agents.terminal(agent)?.state === 'live' }

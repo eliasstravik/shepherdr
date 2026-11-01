@@ -5,6 +5,10 @@ import { createHash } from 'node:crypto'
 import { prepareHome } from './home.ts'
 import { CoreError } from './client.ts'
 
+/** How long a statement waits out another connection's lock. The wait blocks the app's one thread, so it stays short:
+ *  a lock that outlasts it fails the statement, which its caller reports or a timer's next tick tries again. */
+export const LOCK_WAIT = 1000
+
 /** Shepherdr-owned product records. Process liveness always comes from core, not this store. */
 export class CoreStore {
   readonly db: Database
@@ -13,7 +17,7 @@ export class CoreStore {
     const path = join(home, 'state.sqlite')
     this.db = new Database(path, { create: true })
     chmodSync(path, 0o600)
-    this.db.exec(`PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;
+    this.db.exec(`PRAGMA busy_timeout=${LOCK_WAIT}; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;
       CREATE TABLE IF NOT EXISTS records (kind TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(kind,key));
       CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY, hash TEXT NOT NULL, result TEXT, error TEXT);
       CREATE TABLE IF NOT EXISTS counters (key TEXT PRIMARY KEY, value INTEGER NOT NULL);`)

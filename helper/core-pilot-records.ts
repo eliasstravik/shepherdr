@@ -18,7 +18,7 @@ export class PilotRecords {
     const file = join(this.root, '.capture.sqlite')
     if (existsSync(file)) this.privateFile(file)
     this.db = new Database(file, { create: true }); chmodSync(file, 0o600)
-    this.db.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS captures(path TEXT PRIMARY KEY, identity TEXT NOT NULL, offset INTEGER NOT NULL, pending TEXT)')
+    this.db.exec('PRAGMA busy_timeout=500; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS captures(path TEXT PRIMARY KEY, identity TEXT NOT NULL, offset INTEGER NOT NULL, pending TEXT)')
   }
   private directory(path: string) {
     if (!existsSync(path)) mkdirSync(path, { recursive: true, mode: 0o700 })

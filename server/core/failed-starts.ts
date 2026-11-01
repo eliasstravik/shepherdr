@@ -4,6 +4,7 @@ import type { CoreAgent } from './model.ts'
 import type { CoreTerminal } from './protocol.ts'
 import { CLI_NAME } from './settings.ts'
 import type { CoreSource } from './source.ts'
+import { guarded } from './guarded.ts'
 
 export interface ResumeStart { chat: string; launch: string; message: string }
 
@@ -19,7 +20,7 @@ export class CoreFailedStarts {
   private seen = new Set<string>()
   private settling = new Set<string>()
   constructor(private readonly source: CoreSource) {}
-  start() { this.timer = setInterval(() => { if (!this.source.quiescing) void this.tick() }, POLL) }
+  start() { this.timer = setInterval(() => { if (!this.source.quiescing) void guarded('Failed start check', () => this.tick()) }, POLL) }
   stop() { clearInterval(this.timer) }
   /** Its process ended and this hasn't yet said what that means: no one else should make news of it. */
   pending(agent: CoreAgent) { return agent.state === 'starting' && !agent.pilot && this.source.agents.terminal(agent)?.state === 'finished' }
