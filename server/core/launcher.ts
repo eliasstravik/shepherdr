@@ -73,7 +73,7 @@ async function withLock<T>(home: string, work: () => Promise<T>) {
 
 async function ensureCore(config: CoreConfig) {
   const result = spawnSync(config.binary, ['server', 'start'], { env: coreEnvironment(config), encoding: 'utf8', timeout: 15_000 })
-  if (result.status !== 0) throw new Error(`Core did not start: ${result.error?.message || result.stderr.trim() || 'install the pinned hc version first'}`)
+  if (result.status !== 0) throw new Error(`Core did not start: ${result.error?.message || result.stderr.trim() || 'install herdr-core (hc) first'}`)
   const core = await CoreClient.open(config.socket)
   core.close()
 }

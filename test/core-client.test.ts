@@ -3,10 +3,11 @@ import { createServer, type Socket } from 'node:net'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { CoreClient } from '../server/core/client.ts'
+import { CoreClient, type CoreError } from '../server/core/client.ts'
+import { coreVersionAccepted } from '../server/core/protocol.ts'
 import { CoreSession } from '../server/core/session.ts'
 
-const methods = ['terminal.run', 'terminal.list', 'terminal.get', 'terminal.label', 'terminal.attach', 'terminal.send', 'terminal.wait', 'events.subscribe', 'doc.get', 'doc.set', 'file.read', 'machine.exec']
+const methods = ['terminal.run', 'terminal.list', 'terminal.get', 'terminal.label', 'terminal.attach', 'terminal.send', 'terminal.wait', 'terminal.read', 'terminal.keys', 'terminal.interrupt', 'terminal.kill', 'events.subscribe', 'doc.get', 'doc.set', 'file.read', 'file.write', 'machine.exec', 'machine.list', 'server.status']
 function frame(channel: number, body: string | Buffer, kind = 0) {
   const bytes = Buffer.from(body)
   const header = Buffer.alloc(9)
@@ -18,7 +19,8 @@ const NO_REPLY = Symbol('no reply')
 
 
 async function fixture(run: (client: CoreClient, wire: { send(channel: number, body: string | Buffer, kind?: number): void }) => Promise<void>,
-  respond: (call: Call, socket: Socket) => unknown = () => ({}), command: boolean | { environment: import('../server/core/client.ts').CoreEnvironment; inherited: Record<string, string | undefined> } = false) {
+  respond: (call: Call, socket: Socket) => unknown = () => ({}), command: boolean | { environment: import('../server/core/client.ts').CoreEnvironment; inherited: Record<string, string | undefined> } = false,
+  core: { version?: string; generation?: number; framed?: boolean; methods?: string[]; schema?: string[]; schemaVersion?: string; refuse?: unknown } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'shep-core-'))
   const path = join(directory, 'core.sock')
   const sockets = new Set<Socket>()
@@ -33,7 +35,8 @@ async function fixture(run: (client: CoreClient, wire: { send(channel: number, b
         if (newline < 0) return
         const hello = JSON.parse(buffer.subarray(0, newline).toString()) as Call
         buffer = buffer.subarray(newline + 1); plain = false
-        socket.write(JSON.stringify({ jsonrpc: '2.0', id: hello.id, result: { version: '0.1.14', generation: 1, framed: true, core: { id: 'fixture', name: 'fixture' }, methods, features: [] } }) + '\n')
+        if (core.refuse) { socket.write(JSON.stringify({ jsonrpc: '2.0', id: hello.id, error: core.refuse }) + '\n'); plain = true; return }
+        socket.write(JSON.stringify({ jsonrpc: '2.0', id: hello.id, result: { version: core.version ?? '0.1.14', generation: core.generation ?? 1, framed: core.framed ?? true, core: { id: 'fixture', name: 'fixture' }, methods: core.methods ?? methods, features: [] } }) + '\n')
       }
       while (buffer.length >= 9) {
         const channel = buffer.readUInt32LE(0), kind = buffer[4], length = buffer.readUInt32LE(5)
@@ -42,7 +45,7 @@ async function fixture(run: (client: CoreClient, wire: { send(channel: number, b
         buffer = buffer.subarray(length + 9)
         if (channel === 0 && kind === 0) {
           const call = JSON.parse(payload.toString()) as Call
-          const result = call.method === 'rpc.discover' ? { info: { version: '0.1.14' }, methods: methods.map(name => ({ name })) } : respond(call, socket)
+          const result = call.method === 'rpc.discover' ? { info: { version: core.schemaVersion ?? core.version ?? '0.1.14' }, methods: (core.schema ?? core.methods ?? methods).map(name => ({ name })) } : respond(call, socket)
           if (result !== NO_REPLY) socket.write(frame(0, JSON.stringify({ jsonrpc: '2.0', id: call.id, result })))
         } else if (kind === 2) {
           // A real core can have already-sent DATA in flight before it sees the viewer's CLOSE.
@@ -71,6 +74,41 @@ async function fixture(run: (client: CoreClient, wire: { send(channel: number, b
     rmSync(directory, { recursive: true, force: true })
   }
 }
+
+const refused = (core: Parameters<typeof fixture>[3]) => fixture(async () => { throw new Error('connected') }, undefined, false, core).then(() => undefined, (error: CoreError) => error)
+
+test('core versions compare part by part from the minimum up, and anything else is refused', () => {
+  for (const version of ['0.1.14', '0.1.16', '0.1.100', '0.2.0', '1.0.0', '0.1.17-rc.1']) expect(coreVersionAccepted(version)).toBe(true)
+  for (const version of ['0.1.13', '0.1.9', '0.0.99', '0.1', 'hc 0.1.16', '', undefined, null, 16]) expect(coreVersionAccepted(version)).toBe(false)
+})
+
+test('a newer core of the same generation connects, its extra methods ignored', async () => {
+  for (const version of ['0.1.15', '0.1.16', '0.2.0']) {
+    let connected = false
+    await fixture(async client => { connected = await client.call<boolean>('terminal.get') }, () => true, false, { version, methods: [...methods, 'terminal.new'] })
+    expect(connected).toBe(true)
+  }
+})
+
+test('a core Shepherdr cannot use is refused for good, in words that say what to do', async () => {
+  const older = await refused({ version: '0.1.13' })
+  expect(older).toMatchObject({ kind: 'incompatible', message: 'Shepherdr needs herdr-core 0.1.14 or newer; this core is 0.1.13. Run hc update, then start Shepherdr again.' })
+  const generation = await refused({ version: '0.2.0', generation: 2 })
+  expect(generation?.kind).toBe('incompatible')
+  expect(generation?.message).toContain('this core is 0.2.0, generation 2. Update Shepherdr')
+  const lacks = await refused({ version: '0.1.16', methods: methods.filter(method => method !== 'doc.set' && method !== 'terminal.kill') })
+  expect(lacks).toMatchObject({ kind: 'incompatible', message: 'herdr-core 0.1.16 lacks what Shepherdr needs: terminal.kill, doc.set. Update hc and Shepherdr, then start Shepherdr again.' })
+  expect((await refused({ version: '0.1.16', schema: methods.slice(1) }))?.message).toContain('lacks what Shepherdr needs: terminal.run')
+  expect((await refused({ version: '0.1.16', framed: false }))?.message).toContain('lacks what Shepherdr needs: framed connections')
+  expect((await refused({ version: '0.1.16', schemaVersion: '0.1.2' }))?.message).toContain('this core is 0.1.2')
+})
+
+test('a real other-generation core refuses hello itself, and that is still a final, plain refusal', async () => {
+  const error = await refused({ refuse: { code: -32000, message: 'protocol generation 1 not supported', data: { kind: 'unsupported_generation', hint: 'this core speaks generation 2' } } })
+  expect(error?.kind).toBe('incompatible')
+  expect(error?.message).toContain('(this core speaks generation 2)')
+  expect(error?.message).toContain('Update Shepherdr')
+})
 
 test('closing a busy attach drains in-flight output and keeps other RPC alive', async () => {
   await fixture(async client => {

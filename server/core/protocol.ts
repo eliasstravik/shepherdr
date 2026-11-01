@@ -1,5 +1,6 @@
-/** herdr-core 0.1.14, protocol generation 1. See docs/core/implementation.md. */
-export const CORE_VERSION = '0.1.14'
+/** Oldest herdr-core this was built on, protocol generation 1. Core updates itself and its API only grows within a
+ * generation (schema/README.md in its repository), so newer ones pass; client.ts checks the generation and methods. */
+export const CORE_MINIMUM = '0.1.14'
 export const CORE_GENERATION = 1
 export const MAX_FRAME = 16 * 1024 * 1024
 export const FRAME = { data: 0, credit: 1, close: 2, resize: 3, focus: 4, facts: 5 } as const
@@ -39,6 +40,15 @@ export interface CoreHello {
   core: { id: string; name: string }
   methods: string[]
   features: string[]
+}
+
+/** CORE_MINIMUM or newer, part by part: 0.1.100 is newer than 0.1.14. Anything that is no version is refused. */
+export function coreVersionAccepted(version: unknown) {
+  const parts = (text: string) => text.match(/^(\d+)\.(\d+)\.(\d+)(?:[-+]\S*)?$/)?.slice(1).map(Number)
+  const found = typeof version === 'string' ? parts(version) : undefined, minimum = parts(CORE_MINIMUM)!
+  if (!found) return false
+  const differs = found.findIndex((part, index) => part !== minimum[index])
+  return differs < 0 || found[differs]! > minimum[differs]!
 }
 
 export function encodeFrame(channel: number, kind: number, payload: Uint8Array): Buffer {
