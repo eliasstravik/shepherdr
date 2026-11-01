@@ -18,7 +18,8 @@ const RETRY = 10_000 // a pressed choice has this long to leave the screen befor
 /** An agent with no session yet may be stopped at a screen of its CLI's own: folder trust, theme, sign-in, hooks, or one
  *  that CLI adds later. No hook reports those, so its screen goes to the chat as a card. `starting` only says no hook has
  *  been read yet, and they can run late: a CLI in a turn is not stopped, whatever its screen says, and
- *  words with nothing to choose only ever carry on from a card, as a sign-in link does. Words on a screen grant nothing:
+ *  words with nothing to choose only ever carry on from a card, with something to act on: a link to open, or a CLI
+ *  that says it has stopped. Words on a screen grant nothing:
  *  a card only shows them, and a human's tap presses what they read, as they could in the Terminal panel. Readiness
  *  stays the hooks' word. */
 export class CoreScreens {
@@ -73,7 +74,7 @@ export class CoreScreens {
     if (open && before.shown === shown && JSON.stringify([open.all, open.question.choices]) !== shown) { this.finish(open, 'The screen changed'); this.post(agent, seen, all, words, choices); return }
     if (open || cards.some(row => row.screen === seen && now - row.at < RETRY)) return
     for (const row of cards) if (row.state === 'open') this.finish(row)
-    if (!choices.length && !(words && cards.length)) return
+    if (!choices.length && !(words && cards.length && (/https?:\/\//.test(read.text) || read.terminal.status))) return
     await Promise.race([this.source.logs.catchUp(agent.chat), Bun.sleep(CATCH_UP)])
     const latest = this.source.agents.get(agent.chat)
     if (latest?.launch === agent.launch && latest.state === 'starting' && !this.inTurn(latest)) this.post(agent, seen, all, words, choices)

@@ -128,9 +128,28 @@ test('a real start-up screen with choices still shows, from a CLI that has repor
 test('words with nothing to tap come at once after a card, as a sign-in link does', async () => {
   await settle()
   await source.act({ type: 'answer', chat: 'space', question: open().id, choice: 1 })
-  screen = 'Paste code here if prompted >\n'
+  screen = 'Open https://example.com/sign-in\n\nPaste code here if prompted >\n'
   await settle(started + 12_000)
   expect(open().screen).toContain('Paste code here')
+})
+
+test('after a card, a status line is still no card, nor a Needs you, while the CLI has yet to report', async () => {
+  await settle()
+  await source.act({ type: 'answer', chat: 'space', question: open().id, choice: 1 })
+  screen = WORKING
+  await settle(started + 30_000)
+  expect(cards()).toHaveLength(1)
+  expect(source.status(saved())).toBe('work')
+  expect(source.snapshot().needs).toEqual([])
+})
+
+test('after a card, words alone come from a CLI that says it has stopped', async () => {
+  await settle()
+  await source.act({ type: 'answer', chat: 'space', question: open().id, choice: 1 })
+  screen = 'Ask Codex to do anything\n'
+  terminal = { ...terminal, status: { app: 'codex', state: 'idle' } }
+  await settle(started + 30_000)
+  expect(open().screen).toContain('Ask Codex')
 })
 
 test('a screen still moving waits; a blank one never shows', async () => {
@@ -291,19 +310,19 @@ test('an agent gone, or replaced, ends its card honestly', async () => {
 test('a new code on the same screen comes as a new card; a running timer does not', async () => {
   await settle()
   await source.act({ type: 'answer', chat: 'space', question: open().id, choice: 1 })
-  screen = 'Enter this code: 1234\n'
+  screen = 'Enter this code at https://example.com/device: 1234\n'
   await settle(started + 30_000)
   const id = open().id
-  screen = 'Enter this code: 5678\n'
+  screen = 'Enter this code at https://example.com/device: 5678\n'
   await settle(started + 40_000)
   expect(cards()).toHaveLength(3)
   expect(cards().find(card => card.id === id)?.closed).toBe('The screen changed')
-  expect(open().screen).toBe('Enter this code: 5678')
-  screen = 'Enter this code: 5678 · 11\n'
+  expect(open().screen).toBe('Enter this code at https://example.com/device: 5678')
+  screen = 'Enter this code at https://example.com/device: 5678 · 11\n'
   await source.screens.tick(started + 50_000)
-  screen = 'Enter this code: 5678 · 13\n'
+  screen = 'Enter this code at https://example.com/device: 5678 · 13\n'
   await source.screens.tick(started + 52_000)
-  expect(open().screen).toBe('Enter this code: 5678')
+  expect(open().screen).toBe('Enter this code at https://example.com/device: 5678')
 })
 
 test('one machine that doesn\'t answer holds up no other agent', async () => {
@@ -329,7 +348,7 @@ test('an open card closes on the next poll when its terminal has ended', async (
 test('after a card, a screen with no choices to read is still one, for the terminal', async () => {
   await settle()
   await source.act({ type: 'answer', chat: 'space', question: open().id, choice: 1 })
-  screen = 'Paste code here if prompted >\n'
+  screen = 'Open https://example.com/sign-in\n\nPaste code here if prompted >\n'
   await settle(started + 30_000)
   expect(open()).toMatchObject({ choices: [], terminal: true })
   await expect(source.act({ type: 'answer', chat: 'space', question: open().id, choice: 0 })).rejects.toThrow('answers')
