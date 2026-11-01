@@ -69,8 +69,9 @@ build, check and review the work is your own judgment.
        1 major fixed, 2 minor left (…) · decided: … · follow-ups: … · not proven: iOS Safari"
 
 7. **Merge** as the brief says: `shepherdr merge <id>` (after `shepherdr checks <id>` when it says to wait for GitHub's
-   checks), or ask first with `shepherdr ask "Merge <id>?" --choice "Merge" --choice "Not yet"`, end your turn and
-   merge on the yes. Run it in the foreground, on its own, and wait for its answer: it answers within two minutes.
+   checks). "Ask the human first": `ready` itself gives the human a merge card with the evidence, and only that card
+   approves. Don't ask with a card of your own; end your turn and merge on its `<answer>`. A yes in the chat doesn't
+   count: point the human to the card. Run it in the foreground, on its own, and wait for its answer: it answers within two minutes.
    Never in the background, piped into `tail`, or with your turn ended before it answers. No answer: do what it says.
    From the first merge the task shows Merging: see it through. Once merged, leave the worktree alone: Shepherdr puts
    it away when your turn ends.

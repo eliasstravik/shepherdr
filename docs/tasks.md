@@ -45,7 +45,7 @@
   characters, never by pasting the agent's message and never in a model's words: a standard reason (Plan to approve,
   Asks permission, Signed out, Question for you, Waits for your reply), or the agent's own question cut to fit
   (from its question tool, its choice card, or the last sentence of its last message that asks). The tasks list, the
-  card in its space's chat, alerts and coordinator news all say the same; the full message stays in the task's chat.
+  row in its space's chat, alerts and coordinator news all say the same; the full message stays in the task's chat.
 - A permission, question or plan card from the CLI lasts only as long as the CLI waits on it. Its own records say when
   that is over: the tool call's result or the turn's end, on Claude Code and Codex alike, and the hook the CLI stops
   when its prompt is declined. The card then closes with what happened (Answered in the terminal, Timed out in the CLI
@@ -116,7 +116,7 @@
 - A task with nothing to merge (an answer, research, or work no longer wanted) is closed: `shepherdr task close <id>
   [--summary "..."]`, or just ask its coordinator. Its agent stops, its space closes, its worktree and branch go when
   they hold nothing unsaved or unmerged (else they are kept, and it says so) and it shows in Done with its summary
-  (Nothing to merge by default); its card in the space's chat says so. An agent whose `shepherdr ready` finds no changes on
+  (Nothing to merge by default); its row in the space's chat says so. An agent whose `shepherdr ready` finds no changes on
   its branch goes straight to Done the same way.
 - `shepherdr task stop <id>` closes a task's agent and space. Its work stays: a worktree with unsaved or unmerged work
   is kept, one with none goes with its branch. Writing to the task opens its space again (or makes a fresh worktree)

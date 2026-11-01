@@ -9,7 +9,7 @@ import { basename, join } from 'node:path'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { Emitter, type Source, type SourceEvents } from '../source.ts'
-import { modelCommand, nameProblem, slugify, type Action, type AddSpace, type Artifact, type Chat, type Folders, type Message, type Need, type Question, type Snapshot, type Status, type Task } from '../../shared/types.ts'
+import { modelCommand, nameProblem, slugify, type Action, type AddSpace, type Artifact, type Chat, type Folders, type Message, type Need, type Question, type Snapshot, type Status, type Task, type UpdateCard } from '../../shared/types.ts'
 import { CoreSession } from './session.ts'
 import { CoreStore } from './store.ts'
 import { CoreFiles } from './files.ts'
@@ -20,7 +20,7 @@ import { prepareHome } from './home.ts'
 import type { CoreConfig } from './config.ts'
 import { coreEnvironment } from './config.ts'
 import type { AgentKind, CoreAgent, CoreSpace } from './model.ts'
-import { CoreTasks } from './tasks.ts'
+import { CoreTasks, type CoreTask } from './tasks.ts'
 import { CoreCommands } from './commands.ts'
 import { CoreTaskNews } from './news.ts'
 import { CoreQuestions } from './questions.ts'
@@ -362,15 +362,20 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
     this.emit('snapshot')
   }
   private fresh(chat: string, message: Message) {
-    if (!this.unread.saw(chat, message.at) || !this.space(chat) || !message.at || message.at < this.born || message.card || message.question) return
+    if (!this.unread.saw(chat, message.updated ?? message.at) || !this.space(chat) || !message.at || message.at < this.born || message.card || message.question) return
     this.emit('alert', { id: message.id, from: 'Shepherdr', title: clip(this.store.get<string>('name', chat) || this.space(chat)!.name, TITLE_MAX), body: clip(message.text || 'New message', BODY_MAX), go: { place: chat, focus: message.id }, message: true })
   }
   forwardQuestion(chat: string, question: Question, answer?: string, outcome = 'Answered') {
     const task = this.tasks.forChat(chat)
     if (!task) return
-    const id = `ask-${question.id}`, previous = this.store.get<Message>(`message:${task.place}`, id)
-    this.post(task.place, { id, who: 'agent', at: previous?.at ?? Date.now(), card: { id, task: task.id, status: answer ? this.tasks.view(task).status : 'need', text: answer ? outcome : 'Needs you',
-      ask: { chat, questions: [question], open: answer === undefined, answered: answer === undefined ? undefined : { where: 'task', text: answer } } } })
+    const asked = this.store.get<Message>(`message:${task.place}`, `task-row-${task.id}`)?.card?.ask?.questions ?? []
+    this.taskRow(task.place, task, { status: answer ? this.tasks.view(task).status : 'need', text: answer ? outcome : 'Needs you',
+      ask: { chat, questions: [...asked.filter(item => item.id !== question.id), question].slice(-20), open: answer === undefined, answered: answer === undefined ? undefined : { where: 'task', text: answer } } })
+  }
+  /** A task's one row in a chat: news changes it where it stands, and the chat still counts as unread. */
+  taskRow(chat: string, task: CoreTask, card: Omit<UpdateCard, 'id' | 'task'>, at = Date.now()) {
+    const id = `task-row-${task.id}`, previous = this.store.get<Message>(`message:${chat}`, id)
+    this.post(chat, { ...previous, id, who: 'agent', at: previous?.at ?? at, updated: at, card: { ...(previous?.card?.ask ? { ask: previous.card.ask } : {}), ...card, id, task: task.id } })
   }
   /** Cards a previous server held. The agent's own answer says only that it was refused; alone with that, it can give up on the work. */
   private closeInterrupted() {

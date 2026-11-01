@@ -62,6 +62,11 @@ export class CoreArtifacts {
       v: artifact.versions.at(-1)!.n, when: age(artifact.at), by: artifact.versions.at(-1)!.by, keeper: this.name(this.keeper(artifact)), thumb: artifact.thumb,
       chats: [...new Set(artifact.versions.map(version => version.chat))], versions: [...artifact.versions].reverse().map(version => ({ n: version.n, when: age(version.at), by: version.by, note: version.note, html: version.html, what: version.what })) }))
   }
+  /** the newest proof a task's agent made */
+  proof(chat: string) {
+    const artifact = this.source.store.all<Record>('core-artifact').filter(artifact => /\bproof\b/i.test(artifact.title) && artifact.versions.some(version => version.chat === chat)).sort((a, b) => b.at - a.at)[0]
+    return artifact && { id: artifact.id, title: artifact.title }
+  }
   page(id: string, n?: number) {
     const artifact = this.get(id), version = this.version(artifact, n)
     return { html: this.source.store.get<string>('artifact-html', `${id}:${version.html}`)!, data: version.data ? this.source.store.get<unknown>('artifact-data', `${id}:${version.data}`) : undefined,

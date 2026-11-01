@@ -394,7 +394,10 @@ export function chats(): Record<string, Chat> {
         m({
           who: 'agent',
           text: 'You asked to say yes before merging.',
-          question: { id: 'f2', title: 'Merge GTM-15?', kind: 'Form', choices: [{ label: 'Merge' }, { label: 'Not yet' }], to: 'GTM-15 agent' },
+          question: { id: 'f2', title: 'Merge GTM-15?', kind: 'Form', choices: [{ label: 'Merge' }, { label: 'Not yet' }], to: 'GTM-15 agent', evidence: {
+            commit: 'b08a268', summary: 'Webhooks are checked against the raw body with a constant-time compare.',
+            diff: { files: 3, added: 84, removed: 12, list: [{ path: 'server/webhooks/verify.ts', added: 61, removed: 2 }, { path: 'server/webhooks/index.ts', added: 9, removed: 10 }, { path: 'test/webhooks.test.ts', added: 14, removed: 0 }] },
+            checks: { state: 'passed', text: '4 passed' } } },
         }),
       ]),
       c('GTM-16/Agent', 'Claude Code', [

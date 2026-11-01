@@ -48,4 +48,20 @@ describe.skipIf(!browser)('coordinator update history', () => {
       }
     } finally { chat.messages = before }
   }, 30_000)
+
+  test("a task's row says what its task does now, with its live dot, and no stale word beside it", async () => {
+    const chat = world.chats['p:vm-str:~'], before = chat.messages
+    chat.messages = [...before, cardMessage({ id: 'task-row-LV-3', task: 'LV-3', status: 'ready', text: 'Ready: It works' }, Date.now())]
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 } })
+    try {
+      await page.goto(url())
+      const row = page.locator('[data-whole="task-row-LV-3"]')
+      await row.waitFor()
+      expect(await row.locator('[data-anchor]').textContent()).toContain('LV-3 Needs you')
+      expect(await row.locator('[data-needs-link]').count()).toBe(1)
+    } finally {
+      await page.close()
+      chat.messages = before
+    }
+  }, 30_000)
 })

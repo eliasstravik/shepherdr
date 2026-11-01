@@ -38,8 +38,8 @@ also has a side panel: its live core terminal, its files, its diff against main 
   on main with an empty first commit; files already there stay uncommitted). Either way it gets its own herdr space
   and coordinator, and opens. Only folders in your home are listed or made.
 - New messages show like Slack's unread, for coordinators' chats only: a coordinator's chat with something new from it
-  or Shepherdr that you haven't seen makes its space's row bold in the sidebar (a done task's last word comes as its
-  card in the space's chat, so it counts). A folded heading still shows the spaces under it with something new or a
+  or Shepherdr that you haven't seen makes its space's row bold in the sidebar (a task's row in the space's chat changing
+  counts too). A folded heading still shows the spaces under it with something new or a
   red count, and the open one, as a collapsed Slack section does. Headings carry no marks of their own. Having a chat on screen reads it,
   and the main machine keeps the marks, so every device shows the same; a row's menu has **Mark as read**. Tasks' chats never make a row bold: the tasks list shows each
   task's own status. A row's red count still shows what waits on you, a task's need ending as a card in its chat.
