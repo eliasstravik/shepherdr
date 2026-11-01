@@ -78,7 +78,7 @@ export function permissionWords(tool: string | undefined, input: unknown): Pick<
   switch (tool) {
     case 'Bash': return card('Run', text(value.command), value.description)
     case 'Write': return card('Write', baseName(path), path, value.content)
-    case 'Edit': return card('Edit', baseName(path), path, [`- ${text(value.old_string)}`, `+ ${text(value.new_string)}`].join('\n'))
+    case 'Edit': return card('Edit', baseName(path), path, value.replace_all === true && 'Every match in the file:', [`- ${text(value.old_string)}`, `+ ${text(value.new_string)}`].join('\n'))
     case 'NotebookEdit': return card('Edit', baseName(path), path, value.new_source)
     case 'Read': return card('Read', path)
     case 'Glob': case 'Grep': return card('Search', text(value.pattern), text(value.path))

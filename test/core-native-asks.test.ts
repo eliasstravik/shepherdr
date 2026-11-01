@@ -184,6 +184,7 @@ test('a permission card says what it would do in words, whole, never as code', (
   expect(permissionWords('WebFetch', { url: `https://x.dev/${'y'.repeat(200)}`, prompt: 'Sum it up' }).screen).toBe(`Sum it up\n\nhttps://x.dev/${'y'.repeat(200)}`)
   expect(permissionWords('Write', { file_path: '/w/a/b.txt', content: 'hi' })).toEqual({ title: 'Write: b.txt', screen: '/w/a/b.txt\n\nhi' })
   expect(permissionWords('Edit', { file_path: '/w/b.txt', old_string: 'a', new_string: 'b' })).toEqual({ title: 'Edit: b.txt', screen: '/w/b.txt\n\n- a\n+ b' })
+  expect(permissionWords('Edit', { file_path: '/w/b.txt', old_string: 'a', new_string: 'b', replace_all: true }).screen).toBe('/w/b.txt\n\nEvery match in the file:\n\n- a\n+ b')
   expect(permissionWords('WebFetch', { url: 'https://example.com/', prompt: 'Sum it up' })).toEqual({ title: 'Open: https://example.com/', screen: 'Sum it up' })
   expect(permissionWords('mcp__github__create_pull_request', { repo: 'a/b', draft: true, labels: ['x'] })).toEqual({ title: 'Use create pull request', screen: 'repo: a/b\ndraft: true\nlabels: ["x"]' })
   expect(permissionWords(undefined, undefined)).toEqual({ title: 'Use a tool', screen: undefined })
