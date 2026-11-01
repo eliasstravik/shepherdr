@@ -140,12 +140,14 @@ describe.skipIf(!browser)('no chat attention summary and quiet health', () => {
         if (width === 390) await page.getByRole('button', { name: 'Spaces' }).click()
         const chip = page.getByRole('button', { name: /^Plan limits: 12% left/ })
         await chip.waitFor()
-        expect(await chip.textContent()).toContain('ago') // The tightest number is hours old and says so at a glance.
+        const glance = await chip.textContent()
+        expect(glance).toContain('ago') // The tightest number is hours old and says so at a glance.
+        expect(glance).toContain('1 unknown') // The mac's Claude Code isn't hidden behind the numbers there are.
         await chip.click()
         const limits = page.getByRole('dialog', { name: 'Plan limits' })
         await limits.waitFor()
         const words = (await limits.textContent())!
-        for (const seen of ['On vm-str', 'On mac', 'Claude Code', 'Codex · Pro', 'Codex · Plus', '90% left', '59% left', '32% left', 'No plan limits', 'Last read failed: Codex took too long to answer', 'not read since']) expect(words).toContain(seen)
+        for (const seen of ['On vm-str', 'On mac', 'Claude Code', 'Codex · Pro', 'Codex · Plus', '90% left', '59% left', '32% left', 'On nas', 'No plan limits', 'Unknown. Can\'t read it safely here', 'Last read failed: Codex took too long to answer', 'not read since']) expect(words).toContain(seen)
         expect(words).toContain('Refills ')
         expect(words).not.toContain('88% left') // Refilled since it was read: no number claims to be now's.
         const box = (await limits.boundingBox())!

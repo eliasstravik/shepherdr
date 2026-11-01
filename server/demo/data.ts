@@ -51,9 +51,10 @@ export const limits = (): Record<string, MachineLimits> => ({
     codex: { state: 'ok', at: minutesAgo(2), plan: 'pro', windows: [{ name: 'Weekly', used: 68, resetsAt: inHours(72) }] },
   },
   mac: {
-    claude: { state: 'no-plan', at: minutesAgo(2) },
+    claude: { state: 'unknown', at: minutesAgo(2), why: "Can't read it safely here: bwrap is missing" },
     codex: { state: 'ok', at: minutesAgo(190), failed: 'Codex took too long to answer', plan: 'plus', windows: [{ name: '5-hour', used: 12, resetsAt: minutesAgo(10) }, { name: 'Weekly', used: 88, resetsAt: inHours(30) }] },
   },
+  nas: { codex: { state: 'no-plan', at: minutesAgo(2) } },
 })
 
 export function places(): Place[] {
@@ -72,7 +73,7 @@ export function machines(): Machine[] {
   return [
     { id: 'm:vm-str', machine: 'vm-str', name: 'vm-str', status: 'idle', health: HEALTH['vm-str'], limits: limits()['vm-str'] },
     { id: 'm:mac', machine: 'mac', name: 'mac', status: 'idle', health: HEALTH.mac, limits: limits().mac },
-    { id: 'm:nas', machine: 'nas', name: 'nas', status: 'off', unreachableSince: '14:02' },
+    { id: 'm:nas', machine: 'nas', name: 'nas', status: 'off', unreachableSince: '14:02', limits: limits().nas },
   ]
 }
 

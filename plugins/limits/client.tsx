@@ -10,8 +10,8 @@ import type { CliLimitsRead, LimitWindow, Machine, MachineLimits } from '@shared
 
 const NAME: Record<keyof MachineLimits, string> = { claude: 'Claude Code', codex: 'Codex' }
 const CLIS = Object.keys(NAME) as (keyof MachineLimits)[]
-/** past this the numbers say how old they are, even at a glance */
-const OLD = 30 * 60_000
+/** past a missed ten-minute read the numbers say how old they are, even at a glance */
+const OLD = 15 * 60_000
 const MINUTE = 60_000
 
 const left = (w: LimitWindow) => Math.max(0, Math.round(100 - w.used))
@@ -37,18 +37,21 @@ const when = (at: number) => new Date(at).toLocaleString([], { weekday: 'short',
 
 const reads = (m: Machine) => CLIS.flatMap((cli) => (m.limits?.[cli] ? [{ cli, read: m.limits[cli]! }] : []))
 
-/** for each CLI, its tightest window now: the same CLI on two machines counts once, at its tightest */
+/** for each CLI, its tightest window now: the same CLI on two machines counts once, at its tightest. unknown: reads
+ *  with no number to stand on now, which a healthy number beside them mustn't hide */
 function tightest(machines: Machine[], now: number) {
-  const out = new Map<keyof MachineLimits, { pct: number; at: number }>()
+  const out = new Map<keyof MachineLimits, { pct: number; at: number; failed?: string }>()
+  let unknown = 0
   for (const m of machines)
     for (const { cli, read } of reads(m)) {
-      if (read.state !== 'ok') continue
-      for (const w of read.windows.filter((x) => live(x, now))) {
+      const windows = read.state === 'ok' ? read.windows.filter((x) => live(x, now)) : []
+      if (read.state === 'unknown' || (read.state === 'ok' && !windows.length)) unknown++
+      for (const w of windows) {
         const was = out.get(cli)
-        if (!was || left(w) < was.pct) out.set(cli, { pct: left(w), at: read.at })
+        if (!was || left(w) < was.pct) out.set(cli, { pct: left(w), at: read.at, failed: read.state === 'ok' ? read.failed : undefined })
       }
     }
-  return out
+  return { clis: [...out.values()].sort((a, b) => a.pct - b.pct), unknown }
 }
 
 function useNow() {
@@ -65,11 +68,11 @@ function LimitsButton() {
   const now = useNow()
   const [open, setOpen] = useState(false)
   if (!machines.length) return null
-  const worst = [...tightest(machines, now).values()].sort((a, b) => a.pct - b.pct)
+  const { clis: worst, unknown } = tightest(machines, now)
   const least = worst[0]
   const lv = least ? level(least.pct) : 'ok'
-  const stale = least && now - least.at > OLD ? ` · ${ago(least.at, now)}` : ''
-  const said = least ? `${least.pct}% left${stale}` : 'unknown'
+  const stale = least && (now - least.at > OLD || least.failed) ? ` · ${ago(least.at, now)}` : ''
+  const said = least ? `${least.pct}% left${stale}${unknown ? ` · ${unknown} unknown` : ''}` : 'unknown'
   return (
     <>
       <button
@@ -85,6 +88,9 @@ function LimitsButton() {
             <span key={i} className="relative h-full w-[3px] overflow-hidden rounded-full bg-line2">
               <span className={clsx('absolute inset-x-0 bottom-0 h-(--fill) rounded-full', FILL[level(c.pct)])} style={{ '--fill': `${Math.max(8, c.pct)}%` } as CSSProperties} />
             </span>
+          ))}
+          {Array.from({ length: unknown }, (_, i) => (
+            <span key={`unknown-${i}`} className="h-full w-[3px] rounded-full bg-line2" />
           ))}
         </span>
         <span className={clsx('truncate tabular-nums', lv === 'ok' ? 'text-fg3 coarse:text-fg2' : WORD[lv])}>Limits {said}</span>
