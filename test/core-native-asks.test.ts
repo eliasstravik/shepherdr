@@ -184,6 +184,7 @@ test('a permission card says what it would do in words, whole, never as code', (
   expect(permissionWords('WebFetch', { url: `https://x.dev/${'y'.repeat(200)}`, prompt: 'Sum it up' }).screen).toBe(`Sum it up\n\nhttps://x.dev/${'y'.repeat(200)}`)
   expect(permissionWords('NotebookEdit', { notebook_path: '/w/n.ipynb', new_source: '', cell_id: 'c1', edit_mode: 'delete' }).screen).toBe('/w/n.ipynb\n\ncell_id: c1\nedit_mode: delete')
   expect(permissionWords('Bash', { command: 'ls', dangerouslyDisableSandbox: true }).screen).toBe('dangerouslyDisableSandbox: true')
+  expect(permissionWords('NotebookEdit', { notebook_path: '/w/n.ipynb', new_source: 'x'.repeat(20_000), cell_id: 'c1', edit_mode: 'replace' }).screen).toEndWith('\n\ncell_id: c1\nedit_mode: replace')
   expect(permissionWords('Write', { file_path: '/w/a/b.txt', content: 'hi' })).toEqual({ title: 'Write: b.txt', screen: '/w/a/b.txt\n\nhi' })
   expect(permissionWords('Edit', { file_path: '/w/b.txt', old_string: 'a', new_string: 'b' })).toEqual({ title: 'Edit: b.txt', screen: '/w/b.txt\n\n- a\n+ b' })
   expect(permissionWords('Edit', { file_path: '/w/b.txt', old_string: 'a', new_string: 'b', replace_all: true }).screen).toBe('/w/b.txt\n\nEvery match in the file:\n\n- a\n+ b')

@@ -77,7 +77,9 @@ export function permissionWords(tool: string | undefined, input: unknown): Pick<
   // A title cut short leaves its whole words below: two targets must never look the same.
   const card = (verb: string, what: string, ...more: unknown[]) => {
     const title = clip(what, TITLE)
-    return { title: `${verb}: ${title}`, screen: [...more, title !== what && what, fields(WORDED[tool!])].filter(Boolean).map(shownLine).join('\n\n').slice(0, SHOWN) || undefined }
+    const rest = fields(WORDED[tool!]).slice(0, SHOWN), words = [...more, title !== what && what].filter(Boolean).map(shownLine).join('\n\n')
+    // Long words are what gets cut: a field below them, like the cell a notebook edit lands in, always stays.
+    return { title: `${verb}: ${title}`, screen: [words.slice(0, SHOWN - rest.length), rest].filter(Boolean).join('\n\n') || undefined }
   }
   switch (tool) {
     case 'Bash': return card('Run', text(value.command), value.description)
