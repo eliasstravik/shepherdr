@@ -84,7 +84,7 @@ test('a merge card never shows the checks of another commit', async () => {
     tasks.git.remote = async () => 'github.test/o/r'
     tasks.git.ghRun = async () => ''
     let head = ''
-    tasks.git.pullRequest = (async (_repo: unknown, _branch: string, checks = true) => checks ? { headRefOid: 'b'.repeat(40), statusCheckRollup: [{ conclusion: 'SUCCESS' }] } : { number: 1, state: 'OPEN', isDraft: false, headRefOid: head = await tasks.git.head({ machine: task.machine, folder: task.folder }), baseRefName: 'main' }) as typeof tasks.git.pullRequest
+    tasks.git.pullRequest = (async (_repo: unknown, _branch: string, checks = true) => checks ? { headRefOid: 'b'.repeat(40), statusCheckRollup: [{ conclusion: 'SUCCESS' }] } : { number: 1, state: 'OPEN', isDraft: false, headRefOid: head = await tasks.git.head({ machine: task.machine, folder: task.folder }), baseRefName: 'main' }) as unknown as typeof tasks.git.pullRequest
     await tasks.ready(grant, task.id, 'Changed the example')
     const card = store.get<Message>(`message:${task.chat}`, tasks.get(task.id)!.mergeQuestion!)!.question!
     expect(head).toBeTruthy()

@@ -368,7 +368,8 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
   forwardQuestion(chat: string, question: Question, answer?: string, outcome = 'Answered') {
     const task = this.tasks.forChat(chat)
     if (!task) return
-    const asked = this.store.get<Message>(`message:${task.place}`, `task-row-${task.id}`)?.card?.ask?.questions ?? []
+    const was = this.store.get<Message>(`message:${task.place}`, `task-row-${task.id}`)?.card?.ask
+    const asked = was?.chat === chat ? was.questions ?? [] : [] // a row keeps one chat's questions: each resolves against its own
     this.taskRow(task.place, task, { status: answer ? this.tasks.view(task).status : 'need', text: answer ? outcome : 'Needs you',
       ask: { chat, questions: [...asked.filter(item => item.id !== question.id), question].slice(-20), open: answer === undefined, answered: answer === undefined ? undefined : { where: 'task', text: answer } } })
   }
