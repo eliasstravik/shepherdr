@@ -85,6 +85,8 @@ export const MAC_PROFILE = `(version 1)
 (allow file-write-data (literal "/dev/null") (literal "/dev/zero") (literal "/dev/tty"))`
 
 const SANDBOX = '/usr/bin/sandbox-exec'
+/** The seal shuts out the Keychain's daemons, where Codex finds the Mac's trusted certificates. This file holds them too. */
+const MAC_CERTIFICATES = '/etc/ssl/cert.pem'
 
 export function macSealArgs(command: string[], open: string) {
   return [SANDBOX, '-p', MAC_PROFILE, `-DOPEN=${open}`, '--', ...command]
@@ -319,7 +321,7 @@ async function codex(now: () => number, host: Host): Promise<CliLimits | undefin
     mkdirSync(state)
     for (const path of kept) symlinkSync(realpathSync(path), join(state, basename(path)))
     const command = quiet(host, [binary, 'app-server', '--disable', 'plugins', '-c', 'cli_auth_credentials_store="file"'])
-    return await askCodex(host, seal.wrap(command), { env: { ...host.env, CODEX_HOME: state, CODEX_SQLITE_HOME: state, TMPDIR: seal.open }, cwd: seal.open })
+    return await askCodex(host, seal.wrap(command), { env: { ...host.env, CODEX_HOME: state, CODEX_SQLITE_HOME: state, TMPDIR: seal.open, ...(host.exists(MAC_CERTIFICATES) ? { SSL_CERT_FILE: MAC_CERTIFICATES } : {}) }, cwd: seal.open })
   } finally { seal.close() }
 }
 
