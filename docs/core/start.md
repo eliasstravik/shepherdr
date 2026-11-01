@@ -7,7 +7,8 @@ for accepted, unverified limits. Stop and preserve legacy writers/state through 
 
 ## Requirements and installation
 
-- Bun 1.4.2 (the CI-pinned version), Git, and herdr-core **0.1.14**, generation 1.
+- Bun 1.4.2 (the CI-pinned version), Git, and herdr-core **0.1.14 or newer**, generation 1. A core that herdr-app or
+  `hc update` moved forward is fine.
 - Claude Code or Codex installed and signed in on each machine that runs agents.
 - Tailscale on the server and the devices opening the app.
 
@@ -22,7 +23,9 @@ Put this checkout's `bin` directory on PATH. The application is standalone:
 there is no terminal-herdr plugin installation and no herdr-app dependency.
 Core has its own `shepherdr` session, keeping these agents separate from a
 desktop client's default core session. The server checks hello and the live
-schema against its pinned core release before accepting work.
+schema before accepting work: the core's generation and every method Shepherdr
+uses. Core's API only grows within a generation, so a newer core passes; another
+generation, or one with a method missing, is refused with what to do.
 
 ## Manual control
 
@@ -44,10 +47,14 @@ previews must explicitly choose separate state, port and core session:
 
 ```sh
 shepherdr start --home /tmp/shepherdr-preview --port 17887 \
-  --core-session shepherdr-preview --core-bin /path/to/pinned/hc --no-plugin-updates
+  --core-session shepherdr-preview --core-bin /path/to/hc --no-plugin-updates
 shepherdr status --home /tmp/shepherdr-preview
 shepherdr stop --home /tmp/shepherdr-preview
 ```
+
+A new home's first start stops, listing them, if its core already has machines and neither `--core-session` nor
+`--core-socket` named that core: a separate home alone, or separate XDG folders alone, can still reach the same running
+core. A separate `--core-session` has no machines. See [Other machines](../machines.md).
 
 `--core-socket` can select an endpoint inside a private directory. Keep custom
 socket paths short. Never share the core socket over the network.

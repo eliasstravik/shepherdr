@@ -23,9 +23,18 @@ export interface JobRec extends Job {
   output?: string
 }
 
-/** a turn as the chat draws it: the rows that say most, and the step on now while it runs */
-export function lineOf(t: Turn, live = false): TurnActivity {
-  const steps = t.steps.map(shown)
+/** a step of a turn still open: words that say it is under way, or, held at a permission card, that it has not run */
+const underWay = (s: StepRec, held: boolean): StepRec => {
+  if (s.end) return s
+  const words = held ? (s.wants ?? s.doing) : s.doing
+  return { ...s, title: words, doing: words, unrun: held || undefined }
+}
+/** a turn's steps as they stand now */
+export const stepsNow = (t: Turn, held = false) => (t.end ? t.steps : t.steps.map((s) => underWay(s, held)))
+
+/** a turn as the chat draws it: the rows that say most, and the step on now while it runs. held: at a permission card */
+export function lineOf(t: Turn, live = false, held = false): TurnActivity {
+  const steps = stepsNow(t, held).map(shown)
   const failed = steps.filter((s) => s.failed).length
   const now = live ? (t.steps.findLast((s) => !s.end) ?? t.steps.at(-1)) : undefined
   return { id: t.id, at: t.at, end: live ? undefined : t.end, ...glance(rowsOf(steps)), steps: steps.length, now: now && shown(now), failed: failed || undefined }
@@ -84,6 +93,9 @@ export function activityOf(ev: LogEvent[]): { turns: Turn[]; open?: Turn; jobs: 
         if (e.drop) {
           x.t.steps.splice(x.t.steps.indexOf(x.s), 1)
           byId.delete(e.id)
+        } else if (e.refused) {
+          const words = (x.s.wants ?? x.s.doing).replace(/^Wants to/, 'Wanted to')
+          Object.assign(x.s, { end: e.at, title: words, doing: words, unrun: true, where: e.out ?? x.s.where })
         } else Object.assign(x.s, { end: e.at, failed: e.failed, where: e.out ?? x.s.where }, e.result ? { result: e.result } : {})
         break
       }

@@ -34,7 +34,7 @@ function fixture(kind: 'claude' | 'codex' = 'claude') {
   const called = (use: string, value: unknown = input, tool = 'Bash', at = Date.now() - 1) => hook({ event: 'PreToolUse', tool, use, input: toolHash(value), at })
   const log = (event: LogEvent) => (source as unknown as { logs: { apply(agent: CoreAgent, event: LogEvent): void } }).logs.apply(agent(), event)
   const card = (id: string) => source.chat(chat)!.messages.find(message => message.question?.id === id)!.question!
-  const forwarded = (id: string) => source.chat('space')?.messages.find(message => message.card?.ask?.questions?.[0].id === id)?.card
+  const forwarded = (id: string) => source.chat('space')?.messages.find(message => message.card?.ask?.questions?.some(question => question.id === id))?.card
   return { source, ask, hook, called, log, card, forwarded, agent, open: () => source.openPermissions(agent()), close() { source.stop(); source.mailbox.close(); source.store.close(); rmSync(home, { recursive: true, force: true }) } }
 }
 type Fixture = ReturnType<typeof fixture>
@@ -219,12 +219,12 @@ test('a hook the CLI stopped closes the card and clears everything with it', asy
     const alerts: Alert[] = []
     f.source.on('alert', alert => alerts.push(alert))
     const { id, reply } = f.ask()
-    expect(f.source.snapshot().attentionRequests?.[chat]).toEqual([id])
+    expect(f.source.snapshot().needs.filter(need => need.chat === chat).map(need => need.id)).toEqual([id])
     expect(f.forwarded(id)?.ask?.open).toBe(true)
     f.source.agents.terminal = (() => ({ state: 'live' })) as unknown as typeof f.source.agents.terminal
     await (f.source as unknown as { mail(grant: Grant, request: MailRequest, id: string): Promise<unknown> }).mail({ id: 'current', chat, session: 'one', machine: 'machine', actions: ['permission'] } as Grant, { action: 'permission', args: { cancel: id } } as unknown as MailRequest, randomUUID())
     await closed(f, id, reply, 'Declined or interrupted in the terminal')
-    expect(f.source.snapshot().attentionRequests?.[chat]).toBeUndefined()
+    expect(f.source.snapshot().needs.filter(need => need.chat === chat)).toEqual([])
     expect(f.source.snapshot().asks[chat]).toBeUndefined()
     expect(f.forwarded(id)).toMatchObject({ text: 'No longer waiting', ask: { open: false } })
     expect(f.source.tasks.view(f.source.tasks.get('EX-1')!).status).toBe('work')
@@ -320,7 +320,7 @@ test('a restart closes open cards and says in the chat and to the agent what was
     await closed(f, second.id, second.reply, 'Shepherdr restarted; ask again')
     const lines = f.source.chat(chat)!.messages.filter(message => message.id.startsWith('restart-denied-'))
     expect(lines).toHaveLength(1)
-    expect(lines[0].text).toContain('Bash: git push origin; Write: notes.txt')
+    expect(lines[0].text).toContain('Run: git push origin; Write: notes.txt')
     expect(lines[0].text).toContain('nobody refused it')
     expect(lines[0].text).not.toContain('Old session')
     await Bun.sleep(0)
@@ -379,7 +379,7 @@ test('a question and a secret stay open while the human can still answer, and cl
     f.source.questions.reconcile(chat); f.source.secrets.reconcile(chat)
     expect(f.card(question).closed).toBe('The task is done')
     expect(f.source.secrets.open(chat)).toHaveLength(0)
-    expect(f.source.snapshot().attentionRequests?.[chat]).toBeUndefined()
+    expect(f.source.snapshot().needs.filter(need => need.chat === chat)).toEqual([])
   } finally { f.close() }
 })
 

@@ -188,15 +188,6 @@ export function RestartHint(_props: { chatKey: string; cli: string }) {
 
 /* ---------- in the ⋯ menus ---------- */
 
-/** a task header's ⋯ (agentMenu): its agent, while the task is open */
-export function TaskRestartItem({ chatKey }: { chatKey: string }) {
-  const id = taskChatId(chatKey) ?? chatKey
-  const snap = useSnap()
-  const t = snap && taskOf(snap, id)
-  if (!t || t.status === 'done' || t.archived) return null
-  return <RestartItem chat={chatKey} name={id} onPick={() => setUI({ taskMenu: false })} />
-}
-
 /** a coordinator chat's top-right menu (placeMenu) */
 export function PlaceRestartItem({ place }: { place: Place }) {
   return <RestartItem chat={place.chat} name={place.name} onPick={() => setUI({ menu: false })} />

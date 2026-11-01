@@ -20,7 +20,7 @@ export class CoreQuestions {
       row.question.closed = row.question.said
       this.source.store.set('question', row.id, row)
       this.source.post(chat, { id: row.id, who: 'agent', question: row.question, at: Date.now() })
-      this.source.forwardQuestion(chat, row.question, row.question.said, 'task', replaced ? 'Session replaced' : 'No longer waiting')
+      this.source.forwardQuestion(chat, row.question, row.question.said, replaced ? 'Session replaced' : 'No longer waiting')
       this.source.clearAlert(chat, row.question.said)
     }
   }
@@ -32,7 +32,7 @@ export class CoreQuestions {
     const steps = p.opts.step ?? []
     if (!plan && !choices.length && !p.flags.has('other')) throw new Refusal('Give the question at least one --choice or --other')
     const question: Question = { id: randomUUID(), title: plan ? one(p, 'title') || 'Plan to approve' : p.words.slice(1).join(' '), kind: plan ? 'Plan' : 'Question',
-      ordinary: !plan && p.flags.has('ordinary') || undefined, multi: p.flags.has('multi') || undefined, other: p.flags.has('other') || undefined,
+      multi: p.flags.has('multi') || undefined, other: p.flags.has('other') || undefined,
       choices: plan ? [{ label: 'Approve the plan' }, { label: 'Send it back with a note' }] : choices.map(label => ({ label, description: p.opts.desc?.find(description => description.startsWith(label + '='))?.slice(label.length + 1) })),
       steps: plan ? steps : undefined, noteRequiredFor: plan ? 1 : undefined, to: grant.chat }
     if (!question.title.trim() || plan && !steps.length) throw new Refusal('Give the card its question or plan steps')
@@ -63,7 +63,7 @@ export class CoreQuestions {
     this.source.saveAndDeliver(row.chat, `answer-${row.id}`, tag('answer', { from: this.source.snapshot().user, question: question.title }, words), () => this.source.store.set('question', row.id, row))
     const message = this.source.store.get<Message>(`message:${row.chat}`, row.id)
     this.source.post(row.chat, { ...message, id: row.id, who: 'agent', question, at: message?.at ?? Date.now() })
-    this.source.forwardQuestion(row.chat, question, words, action.space ? 'space' : 'task')
+    this.source.forwardQuestion(row.chat, question, words)
     return true
   }
 }

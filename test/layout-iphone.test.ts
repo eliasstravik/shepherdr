@@ -52,8 +52,8 @@ describe.skipIf(!browser)('an iPhone', () => {
         }
       })
       expect(fit).toMatchObject({ whole: true, apart: true, beside: true, inside: true })
-      // 320px wide (Display Zoom) has room for the words only
-      expect(fit.icons).toEqual(fit.icons.map(() => phone !== 'iPhone SE'))
+      // four tabs and Search: a phone has room for the words only
+      expect(fit.icons).toEqual(fit.icons.map(() => false))
       await done(page)
     }, 30_000)
 

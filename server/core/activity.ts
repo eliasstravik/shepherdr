@@ -1,4 +1,4 @@
-import { activityOf, cutOutput, lineOf, outputFromLine, shown, type JobRec, type StepRec } from '../activity.ts'
+import { activityOf, cutOutput, lineOf, outputFromLine, shown, stepsNow, type JobRec, type StepRec } from '../activity.ts'
 import type { ActivityAnswer, ActivityAsk, Message } from '../../shared/types.ts'
 import { CoreNativeFile } from './native-file.ts'
 import { CoreChildSteps } from './child-steps.ts'
@@ -16,16 +16,18 @@ export class CoreActivity {
   constructor(private source: CoreSource) {}
   private events(chat: string) { return this.source.store.all<LogEvent>(`event:${chat}`) }
   private state(chat: string) { return activityOf(this.events(chat)) }
+  private held(chat: string) { const agent = this.source.agents.get(chat); return !!agent && this.source.openPermissions(agent).length > 0 }
   chat(chat: string, messages: Message[], live: boolean) {
-    const state = this.state(chat), output = [...messages]
+    const state = this.state(chat), output = [...messages], held = this.held(chat)
     const recorded = this.source.store.all<Message & { source?: string }>(`message:${chat}`)
     const visible = (id?: string) => id ? output.find(message => message.id === id || recorded.some(record => record.id === message.id && record.source === id)) : undefined
-    const ended = [...state.turns, ...(!live && state.open ? [{ ...state.open, end: Math.max(state.open.at, ...state.open.steps.map(step => step.end ?? step.at)) }] : [])]
-    for (const turn of ended) {
+    const ended = [...state.turns, ...(!live && !held && state.open ? [{ ...state.open, end: Math.max(state.open.at, ...state.open.steps.map(step => step.end ?? step.at)) }] : [])]
+    // At a permission card its turn is still open: what it is held on has not happened.
+    for (const turn of held && state.open ? [...ended, state.open] : ended) {
       if (!turn.steps.length) continue
       const reply = visible(turn.reply)
       if (!reply && !visible(turn.asked)) continue // Hidden news remains quiet, as in 2.0.
-      output.push({ id: `activity-${turn.id}`, who: 'agent', at: reply ? (reply.at ?? turn.at) - 0.5 : turn.end, activity: lineOf(turn) })
+      output.push({ id: `activity-${turn.id}`, who: 'agent', at: reply ? (reply.at ?? turn.at) - 0.5 : turn.end ?? Math.max(turn.at, ...turn.steps.map(step => step.end ?? step.at)), activity: lineOf(turn, false, turn === state.open) })
     }
     output.sort((a, b) => (a.at ?? 0) - (b.at ?? 0))
     return { messages: output, live: live && state.open ? lineOf(state.open, true) : undefined,
@@ -40,7 +42,7 @@ export class CoreActivity {
     const state = this.state(ask.chat), turns = [...state.turns, ...(state.open ? [state.open] : [])]
     if (ask.what === 'turn') {
       const turn = turns.find(turn => turn.id === ask.id)
-      return turn ? { steps: turn.steps.map(shown) } : { error: 'This turn is no longer available' }
+      return turn ? { steps: stepsNow(turn, turn === state.open && this.held(ask.chat)).map(shown) } : { error: 'This turn is no longer available' }
     }
     if (ask.what === 'output') {
       const step = [...turns.flatMap(turn => turn.steps), ...[...this.jobSteps.values()].filter(job => job.chat === ask.chat).flatMap(job => job.steps)].find(step => step.id === ask.id)

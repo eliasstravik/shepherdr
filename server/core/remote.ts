@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
-import { CORE_VERSION } from './protocol.ts'
+import { CORE_MINIMUM, coreVersionAccepted } from './protocol.ts'
 import type { CoreFiles } from './files.ts'
 import { CORE_ENVIRONMENT, type CoreEnvironment, type CoreEndpoint } from './client.ts'
 
@@ -30,10 +30,10 @@ export class CoreRemotes {
   }
   private async prepareNow(machine: string): Promise<RemoteRuntime> {
     const profile = this.profile(machine)
-    if (profile.version !== CORE_VERSION) throw new Error(`This machine must run core ${CORE_VERSION}; no binary or service was changed`)
+    if (!coreVersionAccepted(profile.version)) throw new Error(`This machine must run core ${CORE_MINIMUM} or newer; no binary or service was changed`)
     const bun = await this.bun(machine)
     const metadata = JSON.parse((await this.files.exec(machine, [bun, '-e', `const o=require('node:os'),f=require('node:fs');const hc=Bun.which('hc');if(!hc)throw Error('hc is missing from this core environment');const v=Bun.spawnSync([hc,'--version']);if(v.exitCode)throw Error('hc version failed');console.log(JSON.stringify({home:f.realpathSync(o.homedir()),bun:process.execPath,hc,path:process.env.PATH||'',version:v.stdout.toString().trim(),session:process.env.HC_SESSION,socket:process.env.HC_SOCKET,environment:Object.fromEntries(${JSON.stringify(CORE_ENVIRONMENT)}.map(k=>[k,process.env[k]??null])),platform:process.platform,arch:process.arch,musl:process.platform==='linux'&&(()=>{const p=Bun.spawnSync(['ldd','--version']);return /musl/i.test(p.stdout.toString()+p.stderr.toString())})()}))`])).toString('utf8')) as { home: string; bun: string; hc: string; path: string; version: string; session?: string; socket?: string; environment?: CoreEnvironment; platform: string; arch: string; musl: boolean }
-    if (!metadata.version.endsWith(` ${CORE_VERSION}`) && metadata.version !== CORE_VERSION) throw new Error(`Remote hc must be pinned to ${CORE_VERSION}; nothing was installed`)
+    if (!coreVersionAccepted(metadata.version.split(' ').at(-1))) throw new Error(`Remote hc must be ${CORE_MINIMUM} or newer; nothing was installed`)
     const source = join(import.meta.dir, '../..')
     const parts = Object.fromEntries(PARTS.map(path => [path, readFileSync(join(source, path), 'utf8')]))
     const packageRoot = join(source, 'node_modules/agent-browser')

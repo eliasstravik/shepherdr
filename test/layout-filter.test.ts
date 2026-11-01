@@ -132,6 +132,37 @@ describe.skipIf(!browser)('no chat attention summary and quiet health', () => {
     }
   })
 
+  test('plan limits: the foot beside Settings says the least left, a tap every window, its refill and its age', async () => {
+    for (const width of [390, 1440]) {
+      const page = await browser!.newPage({ viewport: { width, height: 900 } })
+      try {
+        await page.goto(`http://127.0.0.1:${server!.port}/?place=vm-str/home`)
+        if (width === 390) await page.getByRole('button', { name: 'Spaces' }).click()
+        const chip = page.getByRole('button', { name: /^Plan limits: 12% left/ })
+        await chip.waitFor()
+        const glance = await chip.textContent()
+        expect(glance).toContain('ago') // The tightest number is hours old and says so at a glance.
+        expect(glance).toContain('2 unknown') // The mac's Claude Code and its refilled window aren't hidden behind the numbers there are.
+        await chip.click()
+        const limits = page.getByRole('dialog', { name: 'Plan limits' })
+        await limits.waitFor()
+        const words = (await limits.textContent())!
+        for (const seen of ['On vm-str', 'On mac', 'Claude Code', 'Codex · Pro', 'Codex · Plus', '90% left', '59% left', '32% left', 'On nas', 'No plan limits', 'Unknown. Can\'t read it safely here', 'Last read failed: Codex took too long to answer', 'not read since']) expect(words).toContain(seen)
+        expect(words).toContain('Refills ')
+        expect(words).not.toContain('88% left') // Refilled since it was read: no number claims to be now's.
+        const box = (await limits.boundingBox())!
+        expect(box.x).toBeGreaterThanOrEqual(0)
+        expect(box.x + box.width).toBeLessThanOrEqual(width)
+        if (width === 1440) expect(box.width).toBeLessThanOrEqual(400)
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+        await page.keyboard.press('Escape')
+        await limits.waitFor({ state: 'detached' })
+      } finally {
+        await page.close()
+      }
+    }
+  })
+
   test('chat stays free of aggregate summaries with matching or filtered Tasks, preserving questions and health', async () => {
     const page = await browser!.newPage({ viewport: { width: 820, height: 1180 } })
     await page.goto(`http://127.0.0.1:${server!.port}/?place=p:mac:~`)
@@ -150,9 +181,10 @@ describe.skipIf(!browser)('no chat attention summary and quiet health', () => {
     await page.goto(`http://127.0.0.1:${server!.port}/?place=p:vm-str:gtm`)
     await page.getByText('Rerun CI on main?', { exact: true }).waitFor()
     expect(await page.locator('[data-attention]').count()).toBe(0)
-    expect(await page.getByText(/3 need you · 1 ready/).count()).toBe(0)
-    // Tasks still counts its own requests, excluding the coordinator question.
-    expect(await panel.getByLabel('2 needs you, 1 ready · panel scope', { exact: true }).count()).toBe(1)
+    expect(await page.getByText(/4 need you/).count()).toBe(0)
+    // What needs you is counted once, on Needs you, which holds the coordinator's question too; Tasks shows Ready alone.
+    expect(await panel.getByLabel(/^\d+ needs you, 0 ready · everywhere$/).count()).toBe(1)
+    expect(await panel.getByLabel('0 needs you, 1 ready · panel scope', { exact: true }).count()).toBe(1)
     await page.close()
   })
 })

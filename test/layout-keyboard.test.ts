@@ -53,7 +53,7 @@ describe.skipIf(!browser)('a focus ring is for the keyboard moving the focus', (
       expect(await more.evaluate((b) => b === document.activeElement && b.matches(':focus-visible'))).toBe(true)
       expect(await rings(page)).toEqual([])
       // a clicked button, and any key after it: Shift, a letter. The browser would show it (:focus-visible)
-      const heading = page.locator('section[aria-label="Tasks"] button').first()
+      const heading = page.locator('section[aria-label="Tasks"] button[aria-pressed="true"]').first()
       await heading.click()
       await page.keyboard.press('Shift')
       expect(await heading.evaluate((b) => b === document.activeElement && b.matches(':focus-visible'))).toBe(true)

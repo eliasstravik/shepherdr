@@ -32,7 +32,7 @@ try {
     const stopped = (signal: string) => { void coreRequest(endpoint, credential.mail, 'permission', { cancel: event.id, gone: signal === 'SIGHUP' }, { timeout: 4000 }).catch(() => {}).finally(() => process.exit(0)) }
     for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) process.once(signal, stopped)
     const answer = await coreRequest(endpoint, credential.mail, 'permission', {
-      id: event.id, tool: event.tool, input: input.tool_input, session: event.session, agent: event.agent, turn: event.turn, at: event.at,
+      id: event.id, tool: event.tool, input: input.tool_input, suggestions: input.permission_suggestions, session: event.session, agent: event.agent, turn: event.turn, at: event.at,
     }, { id: event.id, timeout: 3_500_000 }) as PermissionAnswer
     const { allow, ...reply } = answer
     console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: {

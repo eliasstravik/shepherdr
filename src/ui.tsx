@@ -69,6 +69,7 @@ export {
   QuestionMarkCircleIcon as QuestionIcon,
   RocketLaunchIcon as AutopilotIcon,
   ServerStackIcon as MachineIcon,
+  StopIcon,
   SunIcon as AppearanceIcon,
   TrashIcon as DeleteIcon,
   ViewColumnsIcon as SplitIcon,

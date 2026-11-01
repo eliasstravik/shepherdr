@@ -1,4 +1,4 @@
-import type { Message, Question } from '../../shared/types.ts'
+import type { MergeEvidence, Message, Question } from '../../shared/types.ts'
 import type { CoreSource } from './source.ts'
 
 /** Resolve original and forwarded card displays from private records, never from stale chat copies. */
@@ -21,6 +21,9 @@ export class CoreCards {
         const reason = task?.workflow === 'merged' ? 'This task is already merged' : 'This merge request is no longer current'
         return { ...question, sent: -1, said: reason, closed: reason }
       }
+      // What moved after the ready report: checks finish and a proof may come last.
+      const watch = this.source.store.get<{ head?: string; checks?: MergeEvidence['checks'] }>('github-pr', task.id), proof = this.source.artifacts.proof(chat)
+      if (question.evidence) return { ...question, evidence: { ...question.evidence, ...(watch?.checks && watch.head === merge.head ? { checks: watch.checks } : {}), ...(proof ? { proof } : {}) } }
     }
     const request = this.source.store.get<{ chat: string; grant: string; answered: boolean; question: Question }>('question', question.id)
     if (request?.chat === chat) {

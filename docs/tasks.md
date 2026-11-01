@@ -45,7 +45,7 @@
   characters, never by pasting the agent's message and never in a model's words: a standard reason (Plan to approve,
   Asks permission, Signed out, Question for you, Waits for your reply), or the agent's own question cut to fit
   (from its question tool, its choice card, or the last sentence of its last message that asks). The tasks list, the
-  card in its space's chat, alerts and coordinator news all say the same; the full message stays in the task's chat.
+  row in its space's chat, alerts and coordinator news all say the same; the full message stays in the task's chat.
 - A permission, question or plan card from the CLI lasts only as long as the CLI waits on it. Its own records say when
   that is over: the tool call's result or the turn's end, on Claude Code and Codex alike, and the hook the CLI stops
   when its prompt is declined. The card then closes with what happened (Answered in the terminal, Timed out in the CLI
@@ -53,6 +53,15 @@
   says why. With no such record it stays open, however long it waits. Shepherdr's own restart ends what it was waiting
   on: its open cards close as denied, and a line in the chat says what was denied and that nobody refused it, so the
   agent can ask again.
+- An agent's own Shepherdr commands never ask: not `shepherdr ask`, `ready` or `merge`. At each start Shepherdr allows that
+  launch's exact command path, verb by verb, without touching your CLI's settings: Claude Code in the settings it passes
+  at launch, Codex through its permission hook, where it runs outside Codex's sandbox because the sandbox can't reach
+  Shepherdr. Your Merge setting and merge approvals still apply. `secret run` (it runs any program) and `secret env` (it
+  writes a file) keep their card, as does the bare name `shepherdr`, a compound command, and a reviewer's commands.
+  Codex can only leave its sandbox with approval policy `on-request` in a folder it trusts, which is its default after
+  you trust a repo. With `approval_policy = "never"`, or in a folder it hasn't trusted such as the home space, sandboxed
+  Codex needs one setting: trust the folder, or set `sandbox_workspace_write.network_access = true` in Codex's config.
+  That setting opens the network and Shepherdr's core to every sandboxed command.
 - A turn cut off by the model's provider (overloaded, at capacity, a rate limit, a dropped connection) is no question
   for you: Shepherdr waits and tells the agent, task or coordinator, to carry on, after 1, 2, 4 and 8 minutes. Meanwhile
   a task stays Working, its line saying why and when (`Provider overloaded · retry in 2m`). Only when the fifth try is
@@ -84,8 +93,8 @@
 - The agent merges when its brief or you say so: `shepherdr merge <id>` squash-merges the branch into main.
   On GitHub that goes through its pull request (opened then if the agent never did), as soon as the agent's own quick
   checks pass (in Shepherdr: `bun run typecheck` only), without waiting for GitHub's checks: they still run on
-  every push to main (and on the pull request where a repo's checks do), and only a failure GitHub already shows at that commit stops the merge.
-  With Settings → How tasks work → Merge on "after GitHub checks", it merges only once GitHub's checks pass. Either way only
+  every push to main (and on the pull request where a repo's checks do), and only a check GitHub already shows at that commit as failed or still running stops the merge.
+  With Settings → How tasks work → Merge on "after GitHub checks", it merges only once GitHub's checks pass; Shepherdr's own repo merges this way, as its Check runs on every pull request. Either way only
   at the commit this machine has (`gh pr merge --squash --match-head-commit`), then its branch on GitHub is deleted
   and main here is pulled, so Shepherdr's own update sees the merge. Failed checks are sent back to the agent. A branch
   behind main is merged as it is: rebasing it would make a new commit and run all of GitHub's checks again, and again
@@ -113,27 +122,29 @@
   with its final commit unreviewed is refused and told to ask its coordinator, who gives it exactly one more with
   `shepherdr task review-more <id>`: you ask the coordinator, as for any task control. It works only once all are
   used, and `task show` records it (`reviewRoundsAdded`).
-- A task with nothing to merge (an answer, research, or work no longer wanted) is closed: `shepherdr task close <id>
-  [--summary "..."]`, or just ask its coordinator. Its agent stops, its space closes, its worktree and branch go when
+- One menu holds a task's controls: its row's ⋯ (a mouse finds it on hover; on a phone tap the ⋯ or hold the row) and its
+  chat's ⋯. It ends a task three ways: Stop, Done and Delete. Stop and Delete ask first; Done asks first only when
+  work would stay unmerged. It also holds Pin and Restart agent, and Unarchive on an archived task.
+- A task with nothing to merge (an answer, research, or work no longer wanted) is Done: Done in its menu, `shepherdr task
+  close <id> [--summary "..."]`, or just ask its coordinator. Its agent stops, its space closes, its worktree and branch go when
   they hold nothing unsaved or unmerged (else they are kept, and it says so) and it shows in Done with its summary
-  (Nothing to merge by default); its card in the space's chat says so. An agent whose `shepherdr ready` finds no changes on
+  (Nothing to merge by default); its row in the space's chat says so. An agent whose `shepherdr ready` finds no changes on
   its branch goes straight to Done the same way.
-- `shepherdr task stop <id>` closes a task's agent and space. Its work stays: a worktree with unsaved or unmerged work
+- Stop in its menu, or `shepherdr task stop <id>`, closes a task's agent and space and puts it in To do. Its work stays: a worktree with unsaved or unmerged work
   is kept, one with none goes with its branch. Writing to the task opens its space again (or makes a fresh worktree)
   and resumes its agent.
-- `shepherdr task delete <id>` removes a task for good, and only when you plainly ask its coordinator to: its agent
+- Delete in its menu, or `shepherdr task delete <id>`, removes a task for good; a coordinator does it only when you
+  plainly ask: its agent
   stops, its space closes (with anything else running there), its worktree, branch, chat log and record go, so it
   leaves every list, and nothing is posted. A worktree with uncommitted changes, or a branch with work main lacks, is
-  refused with what it holds, unless `--force`. A merged task can be deleted too: its commits stay on main. Its number
+  refused with what it holds, unless `--force` (the menu says what would be lost and offers Delete anyway). A merged task can be deleted too: its commits stay on main. Its number
   is never given out again.
-- Archive a task from its row's ⋯ (a mouse finds it on hover; on a phone, hold the row), or ask its coordinator
-  (`shepherdr task archive <id>`, only when you ask). It leaves every list and count but keeps its record, chat and
-  summary: ⌘K finds it, and **Archived · 12** at the bottom of the tasks list shows a space's archived tasks, the
-  latest first, each with Unarchive in its ⋯ (`shepherdr task unarchive <id>`). Archiving a working task asks first:
-  its agent stops, as with `task stop`, and its work stays. Writing to an archived task brings it back. Done tasks
-  (merged or closed) archive themselves after a week: Settings → Tasks → Archive Done after (`tasks.archiveAfter`: a
-  number of days, or off; each machine keeps its own). `shepherdr task list` leaves archived tasks out; `--archived`
-  lists them.
+- Archive is no longer a way to end a task, but nothing archived is lost. Done tasks (merged or closed) archive
+  themselves after a week: Settings → Tasks → Archive Done after (`tasks.archiveAfter`: a number of days, or off; each
+  machine keeps its own). An archived task, however it got there, leaves every list and count but keeps its record, chat
+  and summary: ⌘K finds it, and **Archived · 12** at the bottom of the tasks list shows a space's archived tasks, the
+  latest first, each with Unarchive and Delete in its ⋯ (`shepherdr task unarchive <id>`). Writing to an archived task
+  brings it back. `shepherdr task list` leaves archived tasks out; `--archived` lists them.
 - The field at the top of the Tasks and the Artifacts lists filters them as you type (F gets to it on a keyboard):
   tasks by id, title, status line or summary, Done and archived ones too; artifacts by title or the task that made
   them. Esc clears it.

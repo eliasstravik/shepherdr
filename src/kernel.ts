@@ -34,12 +34,16 @@ export interface Views {
   tasksMenu: FC<{ place: Place }>
   /** buttons in the sidebar's header beside the app's name: New section (places) */
   placesMenu: FC
+  /** everything waiting on the human, on every machine, each with its answer (needs) */
+  needs: FC
   /** the settings page */
   settings: FC
   /** ⌘K: search and jump (keyboard) */
   search: FC<{ onClose: () => void }>
   /** an artifact at its latest, filling the box it is in: a split view's pane (artifacts) */
   artifact: FC<{ artifactId: string }>
+  /** a task's own menu rows, in its row's ⋯ and its chat's: what to do with it and how to end it (Stop, Done, Delete) */
+  taskActions: FC<{ task: Task; close: () => void }>
 }
 
 /**
@@ -96,6 +100,8 @@ export interface Registry {
   overlays: FC[]
   /** a line under the top of the screen (voice call elsewhere, offline) */
   topBars: FC[]
+  /** beside Settings at the foot of the spaces list, on a phone in the drawer's: there whatever is open (plan limits) */
+  sideFoot: { order: number; View: FC }[]
   /** under the task list: place is its one space, else the place picked; list, what it shows (listView) */
   tasksFooter: FC<{ place: Place; list?: ListView }>[]
   /** keyboard: return true when handled */
@@ -112,6 +118,7 @@ export const registry: Registry = {
   messageEdge: [],
   chatTail: [],
   placeHeader: [],
+  sideFoot: [],
   placeMark: [],
   placeMenu: [],
   agentHeader: [],
@@ -154,6 +161,7 @@ export function installPlugins(plugins: ClientPlugin[], enabled: string[], user:
   registry.messageEdge.sort(byOrder)
   registry.chatTail.sort(byOrder)
   registry.placeHeader.sort(byOrder)
+  registry.sideFoot.sort(byOrder)
   registry.placeMark.sort(byOrder)
   registry.placeMenu.sort(byOrder)
   registry.agentHeader.sort(byOrder)
@@ -182,10 +190,10 @@ export interface UI {
   place: string
   /** the open task: its agent's chat */
   task: string | null
-  /** phone: Chat, Tasks or Artifacts */
-  tab: 'chat' | 'tasks' | 'artifacts'
-  /** a wide screen's right-hand column: the place's Tasks or its Artifacts, remembered on this device */
-  side: 'tasks' | 'artifacts'
+  /** phone: Chat, Needs you, Tasks or Artifacts */
+  tab: 'chat' | 'needs' | 'tasks' | 'artifacts'
+  /** a wide screen's right-hand column: Needs you, the place's Tasks or its Artifacts, remembered on this device */
+  side: 'needs' | 'tasks' | 'artifacts'
   /** what the Tasks and Artifacts lists show (their chips) and whether it stays whatever place is picked, remembered
    *  on this device */
   lists: Lists
@@ -281,7 +289,7 @@ interface State {
 }
 
 function tabOf(t: string | null): UI['tab'] {
-  return t === 'tasks' || t === 'artifacts' ? t : 'chat'
+  return t === 'needs' || t === 'tasks' || t === 'artifacts' ? t : 'chat'
 }
 
 function deviceFor(w: number): Device {
@@ -330,7 +338,8 @@ const SIDE = 'shepherdr.side'
 
 function loadSide(): UI['side'] {
   try {
-    return localStorage.getItem(SIDE) === 'artifacts' ? 'artifacts' : 'tasks'
+    const side = localStorage.getItem(SIDE)
+    return side === 'artifacts' || side === 'needs' ? side : 'tasks'
   } catch {
     return 'tasks'
   }
@@ -994,7 +1003,7 @@ export function archivedIn(snap: Snapshot, list: Pick<ListView, 'chips'>) {
   return snap.tasks.filter((t) => inList(snap, list.chips, t.place) && t.archived).sort((a, b) => b.archived! - a.archived!)
 }
 
-/** archive a task (its agent stops first) or bring it back */
+/** archive a task (its agent stops first) or bring it back; only Done tasks' own archiving, and plugins, still put one away */
 export function archiveTask(t: Task, on: boolean) {
   const key = t.agent?.chat ?? `${t.id}/Agent`
   return act({ type: 'archive', chat: key, on })
@@ -1008,6 +1017,11 @@ export function pinTask(t: Task, on: boolean) {
 /** pause a working task: its agent is interrupted and the task is To do until written to */
 export function pauseTask(t: Task) {
   return act({ type: 'pause', chat: t.agent?.chat ?? `${t.id}/Agent` })
+}
+
+/** stop a task: its agent goes, the task is To do and its work stays, until written to */
+export function stopTask(t: Task) {
+  return act({ type: 'stop', chat: t.agent?.chat ?? `${t.id}/Agent` })
 }
 
 /** mark a task done with nothing merged: refused (held: what it holds) while it holds unmerged work, unless force */
@@ -1024,6 +1038,13 @@ export function deleteTask(t: Task, force = false): Promise<{ ok?: boolean; erro
  *  home space */
 export function removeSpace(placeId: string): Promise<{ ok?: boolean; error?: string; waiting?: boolean }> {
   return act({ type: 'space-remove', place: placeId })
+}
+
+/** Needs you beside the chat: the coordinator's card about a waiting task leads here */
+export function openNeeds() {
+  const { ui, snap } = state
+  if (!snap) return
+  setUI(ui.device === 'phone' ? { task: null, tab: 'needs', pick: null, plus: null, menu: false } : { task: ui.task && !taskInMiddle(ui, snap) ? null : ui.task, side: 'needs' })
 }
 
 /** What waits on you at a place: red counts its whole subtree, own only the place itself (its own coordinator's chat: the sidebar's count). */

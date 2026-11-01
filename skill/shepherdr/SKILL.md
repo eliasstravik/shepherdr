@@ -17,6 +17,7 @@ and flag. Your role's own work is in its own skill (References).
 ## Command routing
 
 The launch prompt and `SHEPHERDR_COMMAND` name your authoritative authenticated command. Use that exact path.
+Write it out in full each time, not the bare name or the variable: only that form runs without a permission card.
 This standalone application talks to herdr-core through a private mailbox. Each launch receives its own
 `SHEPHERDR_CORE_CREDENTIAL` file reference: preserve it in tool environments, never read or print its contents.
 Remote commands use that machine’s core; they never contact a web URL, SSH worker, tunnel or legacy main.sock.
@@ -71,7 +72,7 @@ Each on a line of its own:
     <reply to="Can you check the flaky test?"/>
 
 `<reply to="…"/>` starts your reply and quotes the start of the message it answers. When a Shepherdr line needs no
-words and the human sees no card of it (a heartbeat with nothing to do too), your whole reply is only
+words (what a row or card already shows, a heartbeat with nothing to do), your whole reply is only
 `<no-reply>short reason</no-reply>`: the chat shows nothing.
 
 ### Asking
@@ -80,9 +81,8 @@ A question with a few answers is a choice card, then end your turn:
 
     shepherdr ask "Rerun CI on main?" --choice "Rerun it" --choice "Skip the flaky test" --choice "Leave it for now"
 
-`--ordinary` explicitly marks a simple ordinary question: its choice buttons send immediately, with an Add a note
-route for composing first. Never use it for permission, startup approval, plans or other approvals. Leave it off
-when unsure; unmarked cards keep pick-then-Send. `--multi` always keeps Send.
+A tap on a choice sends it at once, permissions and yes-or-no alike, with an Add a note route for composing first:
+so word each choice to stand alone. Plans, merges and `--multi` keep pick-then-Send. `--ordinary` is no longer needed.
 
 `--other` allows a typed answer, `--multi` several picks, `--desc "<choice>=<one line>"` explains a choice. A plan for
 the human's yes is `shepherdr plan <id> --step "…" --step "…"`, then end your turn.

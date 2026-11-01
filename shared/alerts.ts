@@ -19,18 +19,20 @@ export const clip = (text: string, n: number) => excerpt(text, n)
 /** the tag of a coordinator's open question: one alert per coordinator, as one per task */
 export const askTag = (place: string) => `ask:${place}`
 
-/** what waits on you everywhere: the count the app icon shows (each task and each coordinator's question once: the sidebar's own counts added up) and the tag of each
- *  thing, so alerts about what no longer waits can go */
-export function waiting(snap: Pick<Snapshot, 'places' | 'tasks' | 'asks'>): { count: number; tags: string[] } {
+/** what waits on you everywhere: the count the app icon shows (the sidebar's own counts added up: every need, and each
+ *  Ready task) and the tag of each thing, so alerts about what no longer waits can go */
+export function waiting(snap: Pick<Snapshot, 'places' | 'tasks' | 'asks' | 'needs'>): { count: number; tags: string[] } {
   const places = new Set(snap.places.map((p) => p.id))
   const tasks = snap.tasks.filter((t) => places.has(t.place) && !t.archived && (t.status === 'need' || t.status === 'ready')).map((t) => t.id)
   const asks = Object.keys(snap.asks).filter((p) => places.has(p) && snap.asks[p]).map(askTag)
-  return { count: tasks.length + asks.length, tags: [...tasks, ...asks] }
+  const needs = snap.needs.filter((n) => places.has(n.place))
+  const ready = snap.tasks.filter((t) => places.has(t.place) && !t.archived && t.status === 'ready')
+  return { count: needs.length + ready.length, tags: [...tasks, ...asks] }
 }
 
 /** the tags of the alerts that may stay: what still waits on you, less the chats on screen right now (a task's, a
  *  coordinator's: you opened its card) */
-export function keptTags(snap: Pick<Snapshot, 'places' | 'tasks' | 'asks'>, onScreen: string[]) {
+export function keptTags(snap: Pick<Snapshot, 'places' | 'tasks' | 'asks' | 'needs'>, onScreen: string[]) {
   const seen = new Set(onScreen.map((k) => taskChatId(k) ?? askTag(k)))
   return waiting(snap).tags.filter((t) => !seen.has(t))
 }
@@ -41,14 +43,18 @@ const short = (q: Question, i: number) => (q.noteRequiredFor === i ? q.choices[i
 /** the card's choices in short: "Approve the plan · Send it back" */
 export const choicesLine = (q: Question) => q.choices.map((_, i) => short(q, i)).join(' · ')
 
-/** the choices a notification button may send at once: not a pick of several, not one that needs a note, never a
- *  terminal menu (its first choices all say yes, and an old alert's button would press keys in whatever menu is up then);
+/** a choice sends on its own tap: not a pick of several or one that needs a note, and never a plan or a merge, which
+ *  stay a deliberate pick and Send. A note typed first brings Send back on any card. */
+export const sendsOnTap = (q: Question) => q.kind !== 'Plan' && !q.multi && q.noteRequiredFor === undefined && !q.evidence && !/^merge\b/i.test(q.title) && !q.id.startsWith('menu:')
+
+/** the choices a notification button may send at once: not a pick of several, not one that needs a note, not a grant
+ *  for good, never a terminal menu (its first choices all say yes, and an old alert's button would press keys in whatever menu is up then);
  *  two at most */
 export function quickChoices(q: Question): { label: string; choice: number }[] {
   if (q.multi || q.id.startsWith('menu:')) return []
   return q.choices
     .map((c, i) => ({ label: short(q, i), choice: i }))
-    .filter((c) => c.choice !== q.noteRequiredFor)
+    .filter((c) => c.choice !== q.noteRequiredFor && c.choice !== q.always)
     .slice(0, 2)
 }
 

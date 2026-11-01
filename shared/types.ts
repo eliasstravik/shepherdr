@@ -112,7 +112,32 @@ export interface Machine {
   connecting?: boolean
   /** how it is doing, sampled every 30 seconds */
   health?: MachineHealth
+  /** what is left of the plans its CLIs are signed in to: each machine has its own sign-ins */
+  limits?: MachineLimits
   herdrDown?: string
+}
+
+/** one window of a plan, as its CLI reports it: `used` is a share of it, 0-100 */
+export interface LimitWindow {
+  /** 5-hour, Weekly, Weekly (all models) */
+  name: string
+  used: number
+  /** when it refills (ms) */
+  resetsAt?: number
+  /** the CLI's own words, where they name no moment Shepherdr can read */
+  resets?: string
+}
+
+/** ok: read. no-plan: an API key or the like, with no plan to run out of. unknown: never a guess; why says what happened */
+export type CliLimits = { state: 'ok'; windows: LimitWindow[]; plan?: string } | { state: 'signed-out' | 'no-plan' } | { state: 'unknown'; why: string }
+
+/** at: when this was read (ms). failed: a later read didn't work, so what is here is that old */
+export type CliLimitsRead = CliLimits & { at: number; failed?: string }
+
+/** a CLI this machine doesn't have is left out; so are those with no such data (Pi) */
+export interface MachineLimits {
+  claude?: CliLimitsRead
+  codex?: CliLimitsRead
 }
 
 /** what Shepherdr measures on a machine, as one level each: a share of what it has (CPU: its 1-minute load over its
@@ -191,6 +216,8 @@ export interface TaskAgent {
   cli: string
   /** Task status, or off when core cannot confirm the agent's machine; workflow remains separate. */
   status: Status
+  /** its process is up: a To do task may still have an agent to stop */
+  running?: boolean
   age: string
   note: string
 }
@@ -269,8 +296,6 @@ export interface Question {
   id: string
   title: string
   kind: 'Form' | 'Question' | 'Plan'
-  /** Explicitly an ordinary question, never permission or approval. Missing means confirm. */
-  ordinary?: boolean
   steps?: string[]
   /** a plan in the CLI's own words, in Markdown */
   plan?: string
@@ -287,6 +312,8 @@ export interface Question {
   other?: boolean
   /** which choice needs a note to be sent (a plan sent back) */
   noteRequiredFor?: number
+  /** which choice allows this for good, as the CLI offered it: never on an alert's button, where its words don't fit */
+  always?: number
   /** no note box at all */
   noNote?: boolean
   to: string
@@ -302,6 +329,22 @@ export interface Question {
   asks?: string
   /** answered on its other copy (a task's question and its copy in its space's chat): where, and a link to that chat */
   elsewhere?: { label: string; chat: string; name: string }
+  /** a merge card: what the human approves, from Git, GitHub and the task's artifacts, never the agent's own words */
+  evidence?: MergeEvidence
+}
+
+/** what a merge card shows of the exact commit it approves */
+export interface MergeEvidence {
+  /** the commit, shortened */
+  commit: string
+  /** what the agent said changed */
+  summary?: string
+  /** none when Git could not say */
+  diff?: { files: number; added: number; removed: number; list: { path: string; added: number; removed: number }[] }
+  /** GitHub's checks on this commit, in words; failed and running say so, so a green one is never assumed */
+  checks: { state: 'passed' | 'failed' | 'running' | 'none' | 'unknown'; text: string }
+  /** the task's proof artifact */
+  proof?: { id: string; title: string }
 }
 
 /** an artifact: what an agent shows beyond words, kept in its place and updated as new versions */
@@ -369,6 +412,8 @@ export interface Reaction {
 export interface Message {
   id: string
   who: 'you' | 'agent'
+  /** a live row: when it last changed; at keeps its place in the chat */
+  updated?: number
   /** plain text (yours) or markdown (the agent's) */
   text?: string
   /** "Answered “Rerun CI on main?”" */
@@ -424,6 +469,8 @@ export interface StepWords {
   title: string
   /** while it runs: "Checking the task list" */
   doing: string
+  /** until it runs: "Wants to check the task list". A step logged before this came has none, and says what it is doing */
+  wants?: string
   /** what it is on, to group by: a file's name (read, edit), a search's words; may be empty */
   target: string
   /** the raw thing, one tap deeper: the command, a file's path, the pattern, the address */
@@ -445,6 +492,8 @@ export interface Step extends StepWords {
   /** when it ended; none while it runs */
   end?: number
   failed?: boolean
+  /** it has not run: it waits for your yes, or was refused. Its words already say so */
+  unrun?: boolean
   /** a test run's outcome: "41 passed", "2 failed, 39 passed" */
   result?: string
   /** it started this background job (Job.id) */
@@ -525,11 +574,12 @@ export interface UpdateCard {
   id: string
   /** the task it is about; none on a mode card */
   task?: string
-  /** the task's state when posted */
+  /** the task's state when last updated */
   status?: TaskStatus
   /** a mode card: the place's coordinator went on this mode (text: "on · works on its own"); an older one may say Manual */
   mode?: Mode
-  /** a few words on one line ("is merged"); a task's summary is in the task, never on its card */
+  /** a few words on one line ("Started"), or a task's state and its summary ("Ready: Dark mode works"); a task has one
+      such row in a chat, updated where it stands */
   text: string
   /** the task's pull request, linked from the card */
   pr?: { number: number; url: string }
@@ -539,7 +589,7 @@ export interface UpdateCard {
   red?: string
   /** its agent started again (text: "Restarted on Codex (GPT-6-Sol, high)") */
   restart?: boolean
-  /** a task that needs you: a copy of what it asks, answered here as in its own chat */
+  /** a task that needs you: a record of what it asks. It is answered in Needs you or its own chat, never here */
   ask?: CardAsk
 }
 
@@ -551,10 +601,29 @@ export interface CardAsk {
   questions?: Question[]
   /** a plain question with no choices: the agent's words, answered with a reply */
   reply?: { id: string; text: string }
-  /** once answered: where (in this card, in the task's chat or its terminal) and the words, if known */
+  /** once answered: where (older cards: 'space', answered on the card) and the words, if known */
   answered?: { where: 'space' | 'task' | 'terminal'; text?: string }
-  /** on screen: it still waits, so it takes an answer here */
+  /** on screen: it still waits, so the card leads to Needs you */
   open?: boolean
+}
+
+/** One thing waiting on the human, from any agent on any machine: its own card, never a forwarded copy. */
+export interface Need {
+  /** the request's id in its chat; 'attention' when the agent waits with no card */
+  id: string
+  /** the agent's chat, where the answer goes */
+  chat: string
+  place: string
+  /** the task it belongs to; none for a coordinator */
+  task?: string
+  /** when it began to wait (ms) */
+  at: number
+  question?: Question
+  secret?: SecretAsk
+  /** no card: what the agent last said, or why it waits, answered with a reply */
+  text?: string
+  /** no card: the message that text is, for the reply to quote */
+  reply?: string
 }
 
 /** Done tasks newest first, at the end; the rest keep their order (a stable sort) */
@@ -882,8 +951,8 @@ export interface Snapshot {
   artifacts: Artifact[]
   /** open coordinator questions, by place id (a choice card's id, or "blocked" on the CLI's own menu): counted as waiting on you */
   asks: Record<string, string>
-  /** Unanswered request IDs by original chat, never forwarded copies. Optional for older machines/plugins. */
-  attentionRequests?: Record<string, string[]>
+  /** everything waiting on the human, oldest first, each once: what the Needs you view lists and every count counts */
+  needs: Need[]
   settings: SettingSection[]
   /** a source like demo marks its data as fictional */
   demo?: boolean
@@ -901,10 +970,12 @@ export interface Snapshot {
 
 export type Action =
   | { type: 'plugin'; plugin: string; method: string; input?: unknown; cid: string }
+  /** read every machine's plan limits again, unless they were read a moment ago */
+  | { type: 'limits-check' }
   /** cid: the screen's own id for what it sent, which comes back on the message (Message.cid); reply: the id of the
-      message it answers */
-  /** space: sent from a needs-you card in that space's chat (CardAsk) */
-  | { type: 'send'; chat: string; text: string; attachments?: string[]; cid?: string; reply?: string; space?: string }
+      message it answers; human: said in the app itself, the only kind of message that can take back a merge yes. Scripts
+      leave it off */
+  | { type: 'send'; chat: string; text: string; attachments?: string[]; cid?: string; reply?: string; human?: boolean }
   | { type: 'react'; chat: string; message: string; emoji: string }
   /** a secret kept at a level (all, m:<machine>, p:<machine>:<space>), or removed (null); kept on the main machine, so
       it names no chat or place to be passed on by. card: the agent's ask it answers, told once it is kept */
@@ -913,7 +984,7 @@ export type Action =
   | { type: 'secret-saved'; chat: string; card: string; name: string; level: string }
   /** fromAlert: a notification's button, which answers only the card the chat still waits on (an old alert's can't
       answer what came after, or a card already settled in words) */
-  | { type: 'answer'; chat: string; question: string; choice: number; choices?: number[]; note?: string; other?: string; fromAlert?: boolean; space?: string }
+  | { type: 'answer'; chat: string; question: string; choice: number; choices?: number[]; note?: string; other?: string; fromAlert?: boolean }
   | { type: 'page-send'; chat: string; page: string; text: string }
   | { type: 'page-note'; chat: string; page: string; note: string; target?: string }
   /** an artifact's page sent something, you noted on it, or wrote about it in its viewer: to its keeper. By its place,
@@ -942,6 +1013,8 @@ export type Action =
   | { type: 'pin'; chat: string; on: boolean }
   /** pause a working task: its agent is interrupted (it stays alive) and the task is To do until written to */
   | { type: 'pause'; chat: string }
+  /** its agent goes and the task is To do; its work stays */
+  | { type: 'stop'; chat: string }
   /** what the restart sheet shows for a coordinator (chat: its place id) or a task's agent (ID/Agent): RestartInfo */
   | { type: 'restart-info'; chat: string }
   /** start a coordinator or a task's agent again on this CLI, model and effort (none: the CLI's own; no kind: all as

@@ -1,13 +1,21 @@
 import { randomUUID } from 'node:crypto'
 import type { CoreSource } from './source.ts'
 import type { CoreTask } from './tasks.ts'
+import type { MergeEvidence } from '../../shared/types.ts'
 
-interface Watch { id: string; pr: number; since: number; checked: number; seen: string[]; failed?: string; nudged?: string; needsWork?: boolean; error?: string }
+interface Watch { id: string; pr: number; since: number; checked: number; seen: string[]; failed?: string; nudged?: string; needsWork?: boolean; error?: string; head?: string; checks?: MergeEvidence['checks'] }
 interface Raw { id: number; user?: { login?: string }; body?: string | null; html_url: string; created_at?: string; submitted_at?: string | null; state?: string; path?: string; line?: number | null; original_line?: number | null; pull_request_review_id?: number | null }
 export interface GitHubComment { id: string; at: number; who: string; body: string; url: string; state?: string; where?: string }
 interface Notice { id: string; task: string; pr: number; since: number; launch: string; at: number; text: string; work: boolean; state: 'waiting' | 'queued' | 'cancelled' }
 const FAILED = new Set(['FAILURE', 'ERROR', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'STALE'])
 const PASSED = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED'])
+/** GitHub's checks in a few words for a merge card. Whatever hasn't passed or failed yet is running. */
+export function checkWords(checks: { conclusion?: string; state?: string }[]): MergeEvidence['checks'] {
+  if (!checks.length) return { state: 'none', text: 'None reported yet' }
+  const states = checks.map(check => (check.conclusion || check.state || '').toUpperCase())
+  const failed = states.filter(state => FAILED.has(state) || state === 'CANCELLED').length, passed = states.filter(state => PASSED.has(state)).length, running = checks.length - failed - passed
+  return { state: failed ? 'failed' : running ? 'running' : 'passed', text: [failed && `${failed} failed`, running && `${running} running`, passed && `${passed} passed`].filter(Boolean).join(', ') }
+}
 export function prComments(pages: unknown[], kind: 'r' | 'c' | 'i', reviews: Raw[] = []): GitHubComment[] {
   const rows = pages.flat()
   if (rows.length > 10000) throw Error('Too many GitHub comments for one bounded snapshot')
@@ -85,10 +93,11 @@ export class CoreGitHubPr {
       const seen = new Set(old?.seen), fresh = all.filter(comment => !seen.has(comment.id) && comment.at >= Math.floor(since / 1000) * 1000 && (comment.body || comment.state === 'CHANGES_REQUESTED'))
       const checks = failure && failure !== old?.failed ? failed.map(check => ({ name: (check.name || check.context || 'Check').slice(0, 160), url: (check.detailsUrl || check.targetUrl || '').slice(0, 1000) })) : []
       next.failed = failure ?? (green ? undefined : old?.failed); next.seen = all.map(comment => comment.id); if (checksError) next.error = checksError; else delete next.error
+      next.head = pr.headRefOid; next.checks = checked ? checkWords(checked.statusCheckRollup) : { state: 'unknown', text: "Couldn't read GitHub's checks" }
       next.needsWork = old?.needsWork || checks.length > 0 || fresh.length > 0
       const nudge = !next.needsWork && green && task.mergePolicy !== 'ask' && task.readyHead === pr.headRefOid &&
         (task.mergePolicy !== 'checks' || !!checked?.statusCheckRollup.length) && old?.nudged !== pr.headRefOid
-      if (!checks.length && !fresh.length && !nudge) { this.source.store.set('github-pr', task.id, next); return }
+      if (!checks.length && !fresh.length && !nudge) { this.source.store.set('github-pr', task.id, next); if (next.checks.text !== old?.checks?.text) this.source.emit('snapshot'); return }
       if (nudge) next.nudged = pr.headRefOid
       // Bound the native wake; the full published comments remain available through checks --comments.
       const comments = fresh.slice(0, 20).map(comment => ({ ...comment, body: comment.body.slice(0, 800), truncated: comment.body.length > 800 }))

@@ -69,8 +69,9 @@ build, check and review the work is your own judgment.
        1 major fixed, 2 minor left (…) · decided: … · follow-ups: … · not proven: iOS Safari"
 
 7. **Merge** as the brief says: `shepherdr merge <id>` (after `shepherdr checks <id>` when it says to wait for GitHub's
-   checks), or ask first with `shepherdr ask "Merge <id>?" --choice "Merge" --choice "Not yet"`, end your turn and
-   merge on the yes. Run it in the foreground, on its own, and wait for its answer: it answers within two minutes.
+   checks). "Ask the human first": `ready` itself gives the human a merge card with the evidence, and only that card
+   approves. Don't ask with a card of your own; end your turn and merge on its `<answer>`. A yes in the chat doesn't
+   count: point the human to the card. Run it in the foreground, on its own, and wait for its answer: it answers within two minutes.
    Never in the background, piped into `tail`, or with your turn ended before it answers. No answer: do what it says.
    From the first merge the task shows Merging: see it through. Once merged, leave the worktree alone: Shepherdr puts
    it away when your turn ends.
@@ -89,6 +90,8 @@ Done or the merge question.
 - News from GitHub after ready (a failed check, a review, a comment) is only passed on. A failure your change caused:
   fix it. One outside it (the base is red too): say so in one line. A clear wish that fits the brief: do it. Anything
   else goes to the human in one short message. Then `shepherdr ready` again.
+- A message while your merge card is open leaves it open and the task Ready. If you commit because of it, run
+  `shepherdr ready` again: its fresh card replaces the old one.
 - A red check you can't fix, or a must-fix finding left open: report it ready with that at the front of the facts, and
   don't merge.
 

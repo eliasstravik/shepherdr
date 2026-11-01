@@ -4,13 +4,14 @@ import { CoreError, Refusal } from './client.ts'
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { SUMMARY_MAX, TITLE_MAX, STATUS_MAX, slugify, type Action, type Question, type Task } from '../../shared/types.ts'
+import { SUMMARY_MAX, TITLE_MAX, STATUS_MAX, slugify, type Action, type MergeEvidence, type Question, type Task } from '../../shared/types.ts'
 import { CorePilotRepositories } from './pilot-repositories.ts'
 import { CoreTaskRelocation } from './task-relocation.ts'
 import { CoreTaskProcesses } from './task-processes.ts'
 import { mergeWords, taskOptions, validateTaskSettings } from './task-options.ts'
 import { CLI_NAME, kindOf } from './settings.ts'
 import { CoreGit } from './git.ts'
+import { checkWords } from './github-pr.ts'
 import { pickSpeed } from '../common/restart.ts'
 import type { CoreSource } from './source.ts'
 import type { AgentKind, CoreSpace } from './model.ts'
@@ -129,7 +130,7 @@ export class CoreTasks {
     const terminal = agent && this.source.agents.terminal(agent), nativeStatus = agent && this.source.status(agent)
     const waiting = agent && nativeStatus === 'idle' && this.source.logs?.waiting?.(agent)
     const provider = task.workflow === 'working' && agent && this.source.providerRetries?.get(agent)
-    const review = waiting && !provider && this.reviewRunning(task) && !this.lastWordsAsk(task)
+    const review = waiting && !provider && this.reviewRunning(task) && !this.lastWordsAsk(task.chat)
     const status = task.startError ? 'need' : task.workflow === 'merged' || task.workflow === 'closed' ? 'done' : task.workflow === 'ready' ? 'ready' : task.workflow === 'merging' ? 'merging'
       : task.workflow === 'queued' ? 'queued' : task.workflow === 'todo' || !agent ? 'todo' : nativeStatus === 'need' || waiting && !provider && !review || terminal?.state === 'finished' ? 'need' : 'work'
     const retryLine = provider ? `${provider.reason}${provider.due ? ` · retry in ${Math.max(1, Math.ceil((provider.due - Date.now()) / 60000))}m` : provider.over ? '' : ' · retrying'}` : undefined
@@ -140,12 +141,12 @@ export class CoreTasks {
     const taskAge = Number.isFinite(when) && when > 0 ? age(when) : task.age
     const agentAge = agent?.started && Number.isFinite(agent.started) ? age(agent.started) : taskAge
     const reviewLine = review && status === 'work' ? REVIEW_LINE : undefined
-    return { ...task, ...(reviewLine ? { waitsFor: 'review' as const, report: task.report && { ...task.report, msg: reviewLine } } : {}), age: taskAge, on: CLI_NAME[agent?.kind ?? task.kind], status, sub: task.capacity ? `Waiting: ${task.capacity}` : retryLine || reviewLine || task.sub, browser: agent?.browser ? { ready: this.source.machineConnected?.(task.machine) ?? true, hint: this.source.machineConnected?.(task.machine) === false ? 'This machine is reconnecting' : undefined } : { ready: false, hint: 'Start or restart the task agent to provision its shared browser' }, agent: agent ? { chat: task.chat, role: 'Agent', cli: CLI_NAME[agent.kind], status: nativeStatus === 'off' ? 'off' : status, age: agentAge, note: retryLine || reviewLine || task.report?.msg || '' } : undefined,
+    return { ...task, ...(reviewLine ? { waitsFor: 'review' as const, report: task.report && { ...task.report, msg: reviewLine } } : {}), age: taskAge, on: CLI_NAME[agent?.kind ?? task.kind], status, sub: task.capacity ? `Waiting: ${task.capacity}` : retryLine || reviewLine || task.sub, browser: agent?.browser ? { ready: this.source.machineConnected?.(task.machine) ?? true, hint: this.source.machineConnected?.(task.machine) === false ? 'This machine is reconnecting' : undefined } : { ready: false, hint: 'Start or restart the task agent to provision its shared browser' }, agent: agent ? { chat: task.chat, role: 'Agent', cli: CLI_NAME[agent.kind], status: nativeStatus === 'off' ? 'off' : status, running: !!terminal && terminal.state !== 'finished', age: agentAge, note: retryLine || reviewLine || task.report?.msg || '' } : undefined,
       state: status === 'done' ? task.workflow === 'closed' ? 'Done' : 'Merged' : status === 'ready' ? 'Ready' : status === 'need' ? 'Needs you' : status === 'queued' ? 'Queued' : status === 'todo' ? 'To do' : status === 'merging' ? 'Merging' : 'Working' }
   }
   /** A question put in plain words still needs the human, whatever else the agent waits for. */
-  private lastWordsAsk(task: CoreTask) {
-    const last = this.source.logs.messages(task.chat).findLast(message => message.text)
+  lastWordsAsk(chat: string) {
+    const last = this.source.logs.messages(chat).findLast(message => message.text)
     return last?.who === 'agent' && /\?(?=[\s*_`"')\]]|$)/.test(last.text!)
   }
   /** Its recorded reviewer is at work, or its report is on the way. A reviewer that asks, dies, stalls or ends without a report reaching the agent is no wait. */
@@ -333,7 +334,9 @@ export class CoreTasks {
     }
   }
 
-  async deliver(id: string, chat: string, message: string, internal = false) {
+  /** An open merge card stays until a tap or a fresh ready report. A yes given on it stays too, unless the human says more in the app. */
+  private mergeAsked(task: CoreTask, human: boolean) { return !!task.mergeQuestion && (task.approvedHead ? !human : !!this.source.store.get('merge-question', task.mergeQuestion)) }
+  async deliver(id: string, chat: string, message: string, internal = false, human = false) {
     return this.change(id, async () => {
       const task = this.get(id)
       if (!task) throw new Refusal('This task was removed; nothing was sent')
@@ -344,7 +347,7 @@ export class CoreTasks {
         const room = this.source.health?.room(task.machine, task.id)
         if (room) { task.capacity = room; if (['todo', 'queued'].includes(task.workflow)) task.workflow = 'queued'; this.save(task); throw new CoreError('busy', 'This message is saved until its machine has room') }
         task.reservedAt = Date.now(); task.reservedChats = [...new Set([...(task.reservedChats ?? []), chat])]
-        if (!internal && chat === task.chat && (task.workflow === 'ready' || task.workflow === 'todo')) { task.workflow = 'working'; delete task.readyHead; delete task.approvedHead; delete task.mergeQuestion }
+        if (!internal && chat === task.chat && (task.workflow === 'ready' && !this.mergeAsked(task, human) || task.workflow === 'todo')) { task.workflow = 'working'; delete task.readyHead; delete task.approvedHead; delete task.mergeQuestion }
         if (task.workflow === 'queued' && task.capacity && !(task.after ?? []).some(id => !['merged', 'closed'].includes(this.get(id)?.workflow || ''))) task.workflow = 'working'
         delete task.capacity; this.save(task); await this.label(task)
       }
@@ -422,8 +425,7 @@ export class CoreTasks {
       Buffer.from(JSON.stringify({ repo: task.repo, folder: task.folder, branch: task.branch })), 90)
   }
   private card(task: CoreTask, text: string) {
-    const id = randomUUID()
-    this.source.post(task.place, { id, who: 'agent', card: { id, task: task.id, status: this.view(task).status, text }, at: Date.now() })
+    this.source.taskRow(task.place, task, { status: this.view(task).status, text })
   }
   async ready(grant: Grant, id: string, summary: string, facts?: string) { return this.change(id, () => this.readyNow(grant, id, summary, facts)) }
   private async readyNow(grant: Grant, id: string, summary: string, facts?: string) {
@@ -438,7 +440,7 @@ export class CoreTasks {
       task.said = summary; task.facts = facts; task.workflow = 'closed'; task.status = 'done'; task.doneAt = Date.now(); task.outcome = 'done'; task.cleanupPending = true
       this.finishReceipt(task, grant)
       delete task.reservedAt; delete task.approvedHead; delete task.mergeQuestion; delete task.report
-      this.save(task); await this.label(task); this.card(task, summary)
+      this.save(task); await this.label(task); this.card(task, `Done: ${summary}`)
       return task
     }
     if (task.review.on && (!task.reviewReport || !task.reviewTurn || task.reviewHead !== task.readyHead)) throw new Refusal(`Complete a fresh review of this exact commit before reporting ready${this.roundsLeft(task) || this.reviewRunning(task) ? '' : `. ${this.roundsUsed(task)}`}`)
@@ -452,14 +454,26 @@ export class CoreTasks {
     }
     delete task.approvedHead
     task.said = summary; task.facts = facts; task.workflow = 'ready'; task.readyAt = Date.now(); delete task.reservedAt
-    this.save(task); await this.label(task); this.card(task, summary)
+    this.save(task); await this.label(task); this.card(task, `Ready: ${summary}`)
     if (task.mergePolicy === 'ask') {
-      const question: Question = { id: randomUUID(), title: `Merge ${task.id}?`, kind: 'Question', choices: [{ label: 'Merge' }, { label: 'Not yet' }], to: task.chat }
+      const question: Question = { id: randomUUID(), title: `Merge ${task.id}?`, kind: 'Question', choices: [{ label: 'Merge' }, { label: 'Not yet' }], to: task.chat, evidence: await this.evidence(task) }
       task.mergeQuestion = question.id; this.save(task)
       this.source.store.set('merge-question', question.id, { task: task.id, head: task.readyHead })
       this.source.post(task.chat, { id: question.id, who: 'agent', question, at: Date.now() })
     }
     return task
+  }
+  /** What a merge card shows. Evidence that can't be read says so, and never stops the ready report. */
+  private async evidence(task: CoreTask): Promise<MergeEvidence> {
+    const location = { machine: task.machine, folder: task.folder }, head = task.readyHead!
+    const evidence: MergeEvidence = { commit: head.slice(0, 7), summary: task.said, checks: { state: 'none', text: 'No pull request, so no GitHub checks' } }
+    try {
+      const rows = (await this.git.run(location, ['diff', '--no-renames', '--numstat', '-z', `${task.pr ? 'origin/' : ''}${task.base}...${head}`])).split('\0').filter(Boolean)
+      const files = rows.map(row => { const [added, removed, ...path] = row.split('\t'); return { path: path.join('\t').slice(0, 300), added: parseInt(added) || 0, removed: parseInt(removed) || 0 } })
+      evidence.diff = { files: files.length, added: files.reduce((sum, file) => sum + file.added, 0), removed: files.reduce((sum, file) => sum + file.removed, 0), list: files.slice(0, 50) }
+    } catch { /* the card says it couldn't read them */ }
+    if (task.pr) evidence.checks = await this.git.pullRequest(location, task.branch).then(pr => pr.headRefOid === head ? checkWords(pr.statusCheckRollup) : { state: 'unknown' as const, text: "GitHub's checks are for another commit" }).catch(() => ({ state: 'unknown' as const, text: "Couldn't read GitHub's checks" }))
+    return evidence
   }
   async answer(question: string, choice: number, chat: string): Promise<boolean> {
     const request = this.source.store.get<{ task: string }>('merge-question', question)
@@ -537,7 +551,7 @@ export class CoreTasks {
       }
       task.workflow = 'merged'; task.status = 'done'; task.doneAt = Date.now(); task.outcome = 'done'; task.cleanupPending = true
       this.finishReceipt(task, grant)
-      this.save(task); await this.label(task); this.card(task, task.said || 'Merged')
+      this.save(task); await this.label(task); this.card(task, task.said ? `Merged: ${task.said}` : 'Merged')
       await this.source.browsers?.close(task.id, true).catch(() => this.source.post(task.chat, { id: 'browser-cleanup-pending', who: 'agent', text: 'The task merged. Browser cleanup is waiting for its machine to reconnect.', at: Date.now() }))
       return task
     } finally {
@@ -554,7 +568,7 @@ export class CoreTasks {
       if (!commit || !/^[a-f0-9]{40,64}$/.test(commit)) throw new Refusal('GitHub has not confirmed its merge commit')
       task.mergeCommit = commit; task.externalMerge = true; task.baseSyncPending = true
       task.workflow = 'merged'; task.status = 'done'; task.doneAt = Date.now(); task.outcome = 'done'; task.cleanupPending = true
-      this.save(task); await this.label(task); this.card(task, task.said || 'Merged on GitHub')
+      this.save(task); await this.label(task); this.card(task, task.said ? `Merged on GitHub: ${task.said}` : 'Merged on GitHub')
       return true
     })
   }
@@ -629,6 +643,9 @@ export class CoreTasks {
         if (terminal?.state === 'live') await this.source.core.call('terminal.interrupt', { terminal: terminal.address })
         await this.source.browsers?.close(task.id)
         task.workflow = 'todo'; delete task.reservedAt; this.save(task); await this.label(task); return { ok: true }
+      case 'stop':
+        if (['merged', 'closed'].includes(task.workflow)) throw new Refusal('This task is Done; there is nothing to stop')
+        await this.stopNow(task); return { ok: true }
       case 'restart-info': return { ok: true, info: { role: 'task', space: this.source.space(task.place)?.name, on: { kind: agent?.kind ?? task.kind, model: agent?.model, effort: agent?.effort, speed: agent?.speed }, onKnown: !!agent,
         onWords: agent?.kind ?? task.kind, want: this.source.settings.agent('task', task.place), working: agent?.state === 'working',
         clis: this.source.settings.clis(task.place) } }
@@ -674,19 +691,22 @@ export class CoreTasks {
       const task = this.get(id)
       if (!task) throw new Refusal('No such task')
       this.assert(grant, task)
-      if (!['merged', 'closed'].includes(task.workflow)) { task.workflow = 'todo'; delete task.reservedAt; delete task.capacity; this.save(task) }
-      try {
-        await this.stopAgents(task)
-        if (!['merged', 'closed'].includes(task.workflow) && task.repo && task.folder && task.branch && task.base) {
-          const state = await this.held(task)
-          task.kept = state.held
-          if (!state.held.length) await this.putAway(task, state)
-        }
-        delete task.startError; this.save(task); await this.label(task)
-      }
-      catch (error) { task.startError = (error as Error).message; this.save(task); throw error }
-      return task
+      return this.stopNow(task)
     })
+  }
+  private async stopNow(task: CoreTask) {
+    if (!['merged', 'closed'].includes(task.workflow)) { task.workflow = 'todo'; delete task.reservedAt; delete task.capacity; this.save(task) }
+    try {
+      await this.stopAgents(task)
+      if (!['merged', 'closed'].includes(task.workflow) && task.repo && task.folder && task.branch && task.base) {
+        const state = await this.held(task)
+        task.kept = state.held
+        if (!state.held.length) await this.putAway(task, state)
+      }
+      delete task.startError; this.save(task); await this.label(task)
+    }
+    catch (error) { task.startError = (error as Error).message; this.save(task); throw error }
+    return task
   }
   async close(task: CoreTask, force = false, summary?: string, facts?: string) { return this.change(task.id, () => this.closeNow(task, force, summary, facts)) }
   private async closeNow(task: CoreTask, force = false, summary?: string, facts?: string) {
@@ -704,7 +724,7 @@ export class CoreTasks {
     if (summary !== undefined) task.said = summary.trim()
     if (facts !== undefined) task.facts = facts
     task.workflow = 'closed'; task.doneAt = Date.now(); task.outcome = 'done'; task.status = 'done'
-    this.save(task); await this.label(task); this.card(task, task.said || 'Marked done; nothing merged')
+    this.save(task); await this.label(task); this.card(task, task.said ? `Done: ${task.said}` : 'Marked done; nothing merged')
     return { ok: true, kept: remaining.held }
   }
   private async putAway(task: CoreTask, state: Awaited<ReturnType<CoreTasks['held']>>) {
@@ -971,9 +991,10 @@ export class CoreTasks {
     this.assert(grant, task)
     if (verb === 'task' && ['close', 'delete', 'archive', 'unarchive', 'pause', 'pin', 'unpin'].includes(sub)) {
       if (this.source.agents.get(grant.chat)?.role !== 'coordinator') throw new Refusal('Only a coordinator changes this task control, when the human asks')
+      if (sub === 'archive') throw new Refusal('Tasks end with task stop, close or delete; Done ones archive themselves')
       if (sub === 'close') { const summary = summaryOpts(parsed), result = await this.close(task, parsed.flags.has('force'), summary.said, summary.facts); return { ...text(result), code: result.ok ? 0 : 1 } }
       if (sub === 'delete') { const result = await this.remove(task, parsed.flags.has('force')); return { ...text(result), code: result.ok ? 0 : 1 } }
-      const action = sub === 'archive' || sub === 'unarchive' ? { type: 'archive' as const, on: sub === 'archive' }
+      const action = sub === 'unarchive' ? { type: 'archive' as const, on: false }
         : sub === 'pin' || sub === 'unpin' ? { type: 'pin' as const, on: sub === 'pin' } : { type: 'pause' as const }
       return text(await this.act({ ...action, chat: task.chat }))
     }

@@ -10,7 +10,7 @@ which is initialised fresh only after an approved backup/relocation of legacy st
 See the [cutover and rollback runbook](core/cutover.md).
 
 For an already deployed 2.1 installation, stop the app, replace its reviewed build,
-and start it again with the same home and pinned compatible core. Core agents remain
+and start it again with the same home and a compatible core. Core agents remain
 independent of the app. Retain the prior build and a consistent private state backup
 for rollback. Never run two application writers on one home. Plugins are rebuilt
 from the selected build/home; a failed plugin update keeps the working version.

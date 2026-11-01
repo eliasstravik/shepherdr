@@ -59,7 +59,7 @@ test('multiple original coordinator questions count separately; expired or repla
     for (const [id, grant, expires] of [['expired', 'current', at - 1], ['replaced', 'old', at + 60000]] as const) f.source.store.set('permission', id, { id, chat: space.id, grant, expires, settled: false,
       question: { id, title: id, choices: [{ label: 'Allow once' }, { label: 'Deny' }], to: space.id } })
     const snapshot = f.source.snapshot()
-    expect(snapshot.attentionRequests![space.id]).toEqual(['q1', 'q2'])
+    expect(snapshot.needs.map(need => need.id)).toEqual(['q1', 'q2'])
     expect(attentionCounts(snapshot, [space.id])).toEqual({ need: 2, ready: 0 })
     f.source.store.set('agent', space.id, { chat: space.id, space: space.id, machine: space.machine, role: 'coordinator', grant: 'replacement', launch: 'two', kind: 'claude', started: 1, state: 'idle' })
     expect(f.source.snapshot().asks[space.id]).toBeUndefined()

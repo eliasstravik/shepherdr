@@ -15,8 +15,10 @@ describe.skipIf(!browser)('attention count circles', () => {
       const template = saved.find((t) => t.status === 'ready')!
       const requests = world.chats[place].messages
       const asks = world.asks
-      // No coordinator request in the state matrix; scoped coordinator counting is checked below.
+      const others = world.places.filter((p) => p.id !== place && world.chats[p.chat]).map((p) => [p.chat, world.chats[p.chat].messages] as const)
+      // No coordinator request in the state matrix, in any space: Needs you counts them all. Scoped counting is checked below.
       world.chats[place].messages = []
+      for (const [chat] of others) world.chats[chat].messages = []
       world.asks = {}
       const tasks = (need: number, ready: number) => Array.from({ length: need + ready }, (_, i) => ({
         ...template, id: `BADGE-${i}`, place, status: i < need ? 'need' as const : 'ready' as const,
@@ -31,16 +33,26 @@ describe.skipIf(!browser)('attention count circles', () => {
             dispatchEvent(new StorageEvent('storage', { key: 'shepherdr.appearance' }))
           }, theme)
           for (const [need, ready] of [[0, 0], [1, 0], [0, 1], [2, 3], [12, 108]]) {
-            // Neither archived tasks nor tasks in a different space belong to this panel's counts.
-            world.tasks = [...tasks(need, ready), { ...template, id: 'ARCHIVED', place, archived: Date.now() }, { ...template, id: 'ELSEWHERE', place: 'p:mac:lilla-varlden' }]
+            // Neither archived tasks nor tasks in a different space belong to this panel's counts. Its agent's merge
+            // card would still wait on Needs you, which counts every space: only the agent's own chat holds one.
+            world.tasks = [...tasks(need, ready), { ...template, id: 'ARCHIVED', place, archived: Date.now() }, { ...template, id: 'ELSEWHERE', place: 'p:mac:lilla-varlden', agent: undefined }]
             world.emit('snapshot')
+            // Tasks counts Ready alone; what needs you has one number, on Needs you
             const panel = page.locator(`${badge}[aria-label$="panel scope"]`).filter({ visible: true }).first()
-            expect(await until(() => panel.count(), (n) => n === (need || ready ? 1 : 0))).toBe(need || ready ? 1 : 0)
+            const needs = page.locator(`${badge}[aria-label$="everywhere"]`).filter({ visible: true }).first()
+            expect(await until(() => panel.count(), (n) => n === (ready ? 1 : 0))).toBe(ready ? 1 : 0)
+            expect(await until(() => needs.count(), (n) => n === (need ? 1 : 0))).toBe(need ? 1 : 0)
             if (!need && !ready) continue
-            expect(await until(() => panel.getAttribute('aria-label'), (s) => s === `${need} needs you, ${ready} ready · panel scope`)).toBe(`${need} needs you, ${ready} ready · panel scope`)
-            expect(await panel.getAttribute('data-attention-badge')).toBe(need && ready ? 'both' : need ? 'need' : 'ready')
-            expect(await panel.locator(':scope > span').allTextContents()).toEqual([...(need ? [need > 9 ? '9+' : `${need}`] : []), ...(ready ? [ready > 9 ? '9+' : `${ready}`] : [])])
-            const geometry = await panel.evaluate((el) => {
+            if (ready) {
+              expect(await until(() => panel.getAttribute('aria-label'), (s) => s === `0 needs you, ${ready} ready · panel scope`)).toBe(`0 needs you, ${ready} ready · panel scope`)
+              expect(await panel.getAttribute('data-attention-badge')).toBe('ready')
+              expect(await panel.locator(':scope > span').allTextContents()).toEqual([ready > 9 ? '9+' : `${ready}`])
+            }
+            if (need) {
+              expect(await until(() => needs.getAttribute('aria-label'), (s) => s === `${need} needs you, 0 ready · everywhere`)).toBe(`${need} needs you, 0 ready · everywhere`)
+              expect(await needs.locator(':scope > span').allTextContents()).toEqual([need > 9 ? '9+' : `${need}`])
+            }
+            const geometry = await (ready ? panel : needs).evaluate((el) => {
               const b = el.getBoundingClientRect()
               return { w: b.width, h: b.height, radius: getComputedStyle(el).borderRadius, fits: [...el.children].every((c) => c.scrollWidth <= c.clientWidth), colour: getComputedStyle(el).color }
             })
@@ -64,18 +76,19 @@ describe.skipIf(!browser)('attention count circles', () => {
             expect(await page.getByText(/^Task updates ·/).count()).toBe(0)
           }
         }
-        // A coordinator question belongs to the space badge, never the Tasks badge.
+        // A coordinator question counts on its space and on Needs you, which agree.
         world.tasks = tasks(1, 1)
         world.chats[place].messages = requests
         world.asks = asks
         world.emit('snapshot')
-        const panel = page.locator(`${badge}[aria-label$="panel scope"]`).filter({ visible: true }).first()
-        expect(await until(() => panel.getAttribute('aria-label'), (s) => s === '1 needs you, 1 ready · panel scope')).toBe('1 needs you, 1 ready · panel scope')
+        const panel = page.locator(`${badge}[aria-label$="everywhere"]`).filter({ visible: true }).first()
+        expect(await until(() => panel.getAttribute('aria-label'), (s) => s === '2 needs you, 0 ready · everywhere')).toBe('2 needs you, 0 ready · everywhere')
         if (!await page.locator(`li[data-project="${place}"]`).isVisible()) await page.getByRole('button', { name: 'Spaces', exact: true }).click()
         expect(await until(() => page.locator(`li[data-project="${place}"] ${badge}`).getAttribute('aria-label'), (s) => s === '2 needs you, 1 ready · here')).toBe('2 needs you, 1 ready · here')
       } finally {
         world.tasks = saved
         world.chats[place].messages = requests
+        for (const [chat, messages] of others) world.chats[chat].messages = messages
         world.asks = asks
         world.emit('snapshot')
         await page.close()

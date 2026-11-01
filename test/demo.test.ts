@@ -119,13 +119,15 @@ describe('archiving', () => {
 })
 
 describe("a row's menu", () => {
-  test('pause, pin, mark done (asked first when work is unmerged) and delete (asked first when it holds work)', async () => {
+  test('stop, pause, pin, mark done (asked first when work is unmerged) and delete (asked first when it holds work)', async () => {
     const w = new DemoWorld()
     const t = (id: string) => w.snapshot().tasks.find((x) => x.id === id)
     expect(t('HP-202')!.status).toBe('work')
     expect(await w.act({ type: 'pause', chat: 'HP-202/Agent' })).toMatchObject({ ok: true })
     expect(t('HP-202')!.status).toBe('todo')
     expect(await w.act({ type: 'pause', chat: 'HP-202/Agent' })).toMatchObject({ ok: false })
+    expect(await w.act({ type: 'stop', chat: 'HP-202/Agent' })).toMatchObject({ ok: true })
+    expect(t('HP-202')!.status).toBe('todo')
     expect(await w.act({ type: 'pin', chat: 'HP-202/Agent', on: true })).toMatchObject({ ok: true })
     expect(t('HP-202')!.pinned).toBeNumber()
     await w.act({ type: 'archive', chat: 'HP-202/Agent', on: true })

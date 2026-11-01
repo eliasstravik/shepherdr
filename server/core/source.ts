@@ -9,7 +9,7 @@ import { basename, join } from 'node:path'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { Emitter, type Source, type SourceEvents } from '../source.ts'
-import { modelCommand, nameProblem, slugify, type Action, type AddSpace, type Artifact, type Chat, type Folders, type Message, type Question, type Snapshot, type Status, type Task } from '../../shared/types.ts'
+import { modelCommand, nameProblem, slugify, type Action, type AddSpace, type Artifact, type Chat, type Folders, type Message, type Need, type Question, type Snapshot, type Status, type Task, type UpdateCard } from '../../shared/types.ts'
 import { CoreSession } from './session.ts'
 import { CoreStore } from './store.ts'
 import { CoreFiles } from './files.ts'
@@ -20,7 +20,7 @@ import { prepareHome } from './home.ts'
 import type { CoreConfig } from './config.ts'
 import { coreEnvironment } from './config.ts'
 import type { AgentKind, CoreAgent, CoreSpace } from './model.ts'
-import { CoreTasks } from './tasks.ts'
+import { CoreTasks, type CoreTask } from './tasks.ts'
 import { CoreCommands } from './commands.ts'
 import { CoreTaskNews } from './news.ts'
 import { CoreQuestions } from './questions.ts'
@@ -42,21 +42,25 @@ import { CoreBrowsers } from './browsers.ts'
 import { CoreVoice } from './voice.ts'
 import { CoreHeartbeats } from './heartbeats.ts'
 import { CoreHealth } from './health.ts'
+import { CorePlanLimits } from './plan-limits.ts'
 import { CoreAutomations } from './automations.ts'
 import { CoreGitHub } from './github.ts'
 import { CorePlugins } from './plugins.ts'
 import { CoreUnread } from './unread.ts'
 import { CoreCards } from './cards.ts'
 import { CorePilotMail } from './pilot-mail.ts'
-import { askText, clip, quickChoices, TITLE_MAX, BODY_MAX } from '../../shared/alerts.ts'
+import { askText, clip, lastReply, quickChoices, TITLE_MAX, BODY_MAX } from '../../shared/alerts.ts'
 import { CANCELLED, hookEnd, logEnd, NativeEnds, STOPPED } from './native-ends.ts'
-import { NATIVE_UNREADABLE, cardWords, nativeAnswer, nativeCards, nativeClosed, nativeReply, type NativeAsk, type PermissionAnswer } from './native-asks.ts'
+import { ownCommand } from './own-commands.ts'
+import { NATIVE_UNREADABLE, nativeAnswer, nativeCards, nativeClosed, nativeReply, permissionChoices, permissionWords, type NativeAsk, type PermissionAnswer } from './native-asks.ts'
 import type { CorePluginUpdates } from './plugin-updates.ts'
 import type { ActivityAsk, WorktreeAsk } from '../../shared/types.ts'
 
 interface Machine { id: string; name: string; state: string; host?: string; version?: string; session?: string | null }
-interface Permission { id: string; chat: string; grant: string; question: Question; expires: number; settled?: boolean; allow?: boolean; at?: number; native?: NativeAsk; tool?: string; hash?: string; turn?: string; sub?: string }
-interface PendingSend { id: string; chat: string; text: string; launch?: string; state: 'queued' | 'sending' | 'uncertain' | 'cancelled'; quiet?: boolean; work?: boolean }
+interface Permission { id: string; chat: string; grant: string; question: Question; expires: number; settled?: boolean; allow?: boolean; at?: number; native?: NativeAsk; grants?: unknown[]; reply?: PermissionAnswer; tool?: string; hash?: string; turn?: string; sub?: string }
+/** the most of an agent's last words a card with no question carries: its card shows a few lines */
+const NEED_TEXT = 1000
+interface PendingSend { id: string; chat: string; text: string; launch?: string; state: 'queued' | 'sending' | 'uncertain' | 'cancelled'; quiet?: boolean; work?: boolean; human?: boolean }
 
 /** Product state is Shepherdr's; terminals, machine commands, files and agent children are core's. */
 export class CoreSource extends Emitter<SourceEvents> implements Source {
@@ -72,6 +76,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
   readonly voices: CoreVoice
   readonly heartbeats: CoreHeartbeats
   readonly health: CoreHealth
+  readonly limits: CorePlanLimits
   readonly automations: CoreAutomations
   readonly github: CoreGitHub
   readonly browsers: CoreBrowsers
@@ -144,6 +149,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
     this.automations = new CoreAutomations(this)
     this.github = new CoreGitHub(this)
     this.health = new CoreHealth(this)
+    this.limits = new CorePlanLimits(this)
     this.heartbeats = new CoreHeartbeats(this)
     this.voices = new CoreVoice(this)
     this.plugins = new CorePlugins(this)
@@ -167,7 +173,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
       if (agent.state === 'blocked' && !agent.permission) agent.state = 'working'
       this.store.set('agent', agent.chat, agent)
     }
-    await this.core.start(); await this.refresh(); this.human = await humanName(this.config.home, async () => (await this.files.exec(this.local.id, ['git', 'config', '--global', 'user.name'], undefined, undefined, 3)).toString('utf8')); this.tasks.recoverProviderFallbacks(); this.logs.start(); this.screens.start(); this.failedStarts.start(); this.automations.start(); this.health.start(); this.github.start()
+    await this.core.start(); await this.refresh(); this.human = await humanName(this.config.home, async () => (await this.files.exec(this.local.id, ['git', 'config', '--global', 'user.name'], undefined, undefined, 3)).toString('utf8')); this.tasks.recoverProviderFallbacks(); this.logs.start(); this.screens.start(); this.failedStarts.start(); this.automations.start(); this.health.start(); this.limits.start(); this.github.start()
     this.recovery = setInterval(() => {
       if (!this.quiescing) void this.pilots.lifecycle.tick().then(() => this.pilots.completion.tick()).catch(error => this.faults.set('pilot-lifecycle', error.message))
       if (!this.quiescing) { this.pilots.wakes.tick(); this.news.deliver() }
@@ -254,23 +260,55 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
   openPermissions(agent: CoreAgent) {
     return this.store.all<Permission>('permission').filter(item => item.chat === agent.chat && item.grant === agent.grant && !item.settled && item.expires > Date.now())
   }
+  /** What an agent with no card last said: what its reply answers. */
+  private lastWords(chat: string): Pick<Need, 'text' | 'reply'> {
+    const last = lastReply({ key: chat, cli: '', messages: this.logs.messages(chat) })
+    return last?.text ? { text: clip(last.text, NEED_TEXT), reply: last.id } : {}
+  }
+  /** Everything waiting on the human, oldest first: each agent's own open cards, and the plain waits with none. */
+  private needs(tasks: Task[]): Need[] {
+    const out: Need[] = []
+    const sentAt = (chat: string, id: string) => this.store.get<Message>(`message:${chat}`, id)?.at
+    const hidden = (chat: string) => { const task = this.tasks.forChat(chat); return !!task && !!tasks.find(view => view.id === task.id)?.archived }
+    for (const agent of this.agents.all()) {
+      if (!this.space(agent.space) || hidden(agent.chat)) continue
+      const need = { chat: agent.chat, place: agent.space, ...(this.tasks.forChat(agent.chat) ? { task: this.tasks.forChat(agent.chat)!.id } : {}) }
+      const card = (id: string, question: Question, at: number) => { if (!out.some(item => item.chat === agent.chat && item.id === id)) out.push({ ...need, id, at, question }) }
+      for (const item of this.openPermissions(agent)) card(item.id, item.question, sentAt(agent.chat, `permission-${item.id}`) ?? item.at ?? 0)
+      for (const item of this.questions.open(agent.chat)) card(item.id, item.question, sentAt(agent.chat, item.id) ?? 0)
+      for (const item of this.screens.open(agent.chat)) card(item.id, item.question, item.at)
+      for (const item of this.secrets.open(agent.chat)) out.push({ ...need, id: item.id, at: sentAt(agent.chat, item.id) ?? 0, secret: item.ask })
+      // a task's own agent waits by its task's status, below
+      const waits = need.task ? agent.chat !== this.tasks.get(need.task)!.chat && this.agents.terminal(agent)?.status?.state === 'blocked' : this.status(agent) === 'need'
+      // a coordinator's turn ending is no wait, unless it ended on a question; the question's own time keeps its card still
+      const asked = !need.task && this.status(agent) === 'idle' && this.tasks.lastWordsAsk(agent.chat)
+      if ((waits || asked) && !out.some(item => item.chat === agent.chat)) {
+        const words = this.lastWords(agent.chat)
+        out.push({ ...need, id: 'attention', at: (asked && words.reply && sentAt(agent.chat, words.reply)) || (agent.activityAt ?? agent.started ?? 0), ...words })
+      }
+    }
+    for (const view of tasks.filter(view => !view.archived)) {
+      const task = this.tasks.get(view.id)!, sent = task.workflow === 'ready' && task.mergeQuestion ? this.store.get<Message>(`message:${task.chat}`, task.mergeQuestion) : undefined
+      const question = sent?.question && this.cards.messages(task.chat, [sent])[0].question
+      // a merge asked of the human keeps its pick and Send
+      if (question && question.sent === undefined) out.push({ id: question.id, chat: task.chat, place: task.place, task: task.id, at: sent!.at ?? 0, question })
+      else if (view.status === 'need' && !out.some(item => item.chat === task.chat)) out.push({ id: 'attention', chat: task.chat, place: task.place, task: task.id, at: this.agents.get(task.chat)?.activityAt ?? task.updatedAt ?? 0, text: view.sub, ...this.lastWords(task.chat) })
+    }
+    return out.sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : 1))
+  }
   snapshot(): Snapshot {
     const spaces = this.spaces()
     const asks: Record<string, string> = {}
-    const attentionRequests: Record<string, string[]> = {}
-    for (const agent of this.agents.all()) {
-      if (this.store.get<CoreSpace>('space', agent.space)?.removed) continue
-      const requests = [...new Set([...this.openPermissions(agent).map(item => item.id), ...this.questions.open(agent.chat).map(item => item.id), ...this.screens.open(agent.chat).map(item => item.id), ...this.secrets.open(agent.chat).map(item => item.id)])]
-      if (requests.length) { attentionRequests[agent.chat] = requests; asks[agent.chat] = requests.at(-1)! }
-      else if (this.status(agent) === 'need') attentionRequests[agent.chat] = ['attention']
-    }
+    const tasks = this.tasks.all().filter(task => spaces.some(space => space.id === task.place)).map(task => this.tasks.view(task))
+    const needs = this.needs(tasks)
+    for (const need of needs) if (need.id !== 'attention') asks[need.chat] = need.id
     return {
       terminalTransport: 'core', name: 'Shepherdr', host: this.local.id, user: this.store.get<string>('setting', 'user') || this.human,
       ...this.places.present(spaces.map(space => ({ id: space.id, name: coreSpaceName(this, space), machine: space.machine, home: space.home,
         level: space.home ? space.machine === this.local.id ? 0 : 1 : 2, status: this.machineConnected(space.machine) ? this.status(this.agents.get(space.id)) : 'off', mode: space.mode, chat: space.id })),
-      [{ id: `m:${this.local.id}`, machine: this.local.id, name: this.local.name, health: this.health.view(this.local.id), status: this.connected() ? 'idle' : 'off' },
-        ...this.machines.map(machine => ({ id: `m:${machine.id}`, machine: machine.id, name: machine.name, health: this.health.view(machine.id), status: machine.state === 'connected' ? 'idle' as const : 'off' as const }))]),
-      tasks: this.tasks.all().filter(task => spaces.some(space => space.id === task.place)).map(task => this.tasks.view(task)), artifacts: this.artifacts.list().filter(artifact => spaces.some(space => space.id === artifact.place)), automations: this.automations.view(), asks, attentionRequests,
+      [{ id: `m:${this.local.id}`, machine: this.local.id, name: this.local.name, health: this.health.view(this.local.id), limits: this.limits.view(this.local.id), status: this.connected() ? 'idle' : 'off' },
+        ...this.machines.map(machine => ({ id: `m:${machine.id}`, machine: machine.id, name: machine.name, health: this.health.view(machine.id), limits: this.limits.view(machine.id), status: machine.state === 'connected' ? 'idle' as const : 'off' as const }))]),
+      tasks, artifacts: this.artifacts.list().filter(artifact => spaces.some(space => space.id === artifact.place)), automations: this.automations.view(), asks, needs,
       settings: this.secrets.pages([...this.settings.sections(this.devices(), this.pushWarnings()).map(section => this.pilots.wakes.section(section)), this.plugins.section(this.pluginUpdates?.status()), { name: 'Machines', about: 'Every machine Shepherdr reaches, and how it is now.', rows: [
         { label: this.store.get<string>('name', `m:${this.local.id}`) || this.local.name, key: '', value: this.connected() ? 'Main · reachable' : "Main · can't reach", fixed: true },
         ...this.machines.map(machine => ({ label: this.store.get<string>('name', `m:${machine.id}`) || machine.name, key: '', value: this.machineConnected(machine.id) ? 'Reachable' : "Can't reach", fixed: true })),
@@ -328,15 +366,21 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
     this.emit('snapshot')
   }
   private fresh(chat: string, message: Message) {
-    if (!this.unread.saw(chat, message.at) || !this.space(chat) || !message.at || message.at < this.born || message.card || message.question) return
+    if (!this.unread.saw(chat, message.updated ?? message.at) || !this.space(chat) || !message.at || message.at < this.born || message.card || message.question) return
     this.emit('alert', { id: message.id, from: 'Shepherdr', title: clip(this.store.get<string>('name', chat) || this.space(chat)!.name, TITLE_MAX), body: clip(message.text || 'New message', BODY_MAX), go: { place: chat, focus: message.id }, message: true })
   }
-  forwardQuestion(chat: string, question: Question, answer?: string, where: 'space' | 'task' = 'task', outcome = 'Answered') {
+  forwardQuestion(chat: string, question: Question, answer?: string, outcome = 'Answered') {
     const task = this.tasks.forChat(chat)
     if (!task) return
-    const id = `ask-${question.id}`, previous = this.store.get<Message>(`message:${task.place}`, id)
-    this.post(task.place, { id, who: 'agent', at: previous?.at ?? Date.now(), card: { id, task: task.id, status: answer ? this.tasks.view(task).status : 'need', text: answer ? outcome : 'Needs you',
-      ask: { chat, questions: [question], open: answer === undefined, answered: answer === undefined ? undefined : { where, text: answer } } } })
+    const was = this.store.get<Message>(`message:${task.place}`, `task-row-${task.id}`)?.card?.ask
+    const asked = was?.chat === chat ? was.questions ?? [] : [] // a row keeps one chat's questions: each resolves against its own
+    this.taskRow(task.place, task, { status: answer ? this.tasks.view(task).status : 'need', text: answer ? outcome : 'Needs you',
+      ask: { chat, questions: [...asked.filter(item => item.id !== question.id), question].slice(-20), open: answer === undefined, answered: answer === undefined ? undefined : { where: 'task', text: answer } } })
+  }
+  /** A task's one row in a chat: news changes it where it stands, and the chat still counts as unread. */
+  taskRow(chat: string, task: CoreTask, card: Omit<UpdateCard, 'id' | 'task'>, at = Date.now()) {
+    const id = `task-row-${task.id}`, previous = this.store.get<Message>(`message:${chat}`, id)
+    this.post(chat, { ...previous, id, who: 'agent', at: previous?.at ?? at, updated: at, card: { ...(previous?.card?.ask ? { ask: previous.card.ask } : {}), ...card, id, task: task.id } })
   }
   /** Cards a previous server held. The agent's own answer says only that it was refused; alone with that, it can give up on the work. */
   private closeInterrupted() {
@@ -347,7 +391,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
       // One line for a tool call: its first card may be answered already, with a later one still open.
       const call = permission.native?.head ?? permission.id
       if (this.agents.get(permission.chat)?.grant !== permission.grant || calls.has(call)) continue
-      calls.add(call); denied.set(permission.chat, [...denied.get(permission.chat) ?? [], cardWords(permission.question, !!permission.native, permission.tool)])
+      calls.add(call); denied.set(permission.chat, [...denied.get(permission.chat) ?? [], clip(permission.question.title, 120)])
     }
     for (const [chat, words] of denied) {
       const text = `Shepherdr restarted, so this was denied, though nobody refused it: ${words.join('; ')}. Ask again if it's still needed.`, id = `restart-denied-${randomUUID()}`
@@ -362,7 +406,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
     this.settleAgent(permission)
     const message = this.store.get<Message>(`message:${permission.chat}`, `permission-${permission.id}`)
     this.post(permission.chat, { ...message, id: `permission-${permission.id}`, who: 'agent', question: permission.question, at: message?.at ?? Date.now() })
-    this.forwardQuestion(permission.chat, permission.question, reason, 'task', 'No longer waiting')
+    this.forwardQuestion(permission.chat, permission.question, reason, 'No longer waiting')
     if (!permission.native || permission.native.head === permission.id) this.clearAlert(permission.chat, reason)
     if (permission.native) {
       this.replyNative(permission.native, nativeClosed(reason))
@@ -414,13 +458,14 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
 
   async act(action: Action): Promise<unknown> {
     if (this.quiescing) throw new Error('Shepherdr is stopping; retry after it reconnects')
-    const plugin = action.type.startsWith('artifact-') ? 'artifacts' : action.type === 'react' ? 'reactions' : action.type === 'browser-notes' ? 'browser' : ['keys', 'text'].includes(action.type) ? 'terminal' : action.type === 'call' ? 'voice' : action.type === 'autopilot-run' ? 'autopilot' : undefined
+    const plugin = action.type.startsWith('artifact-') ? 'artifacts' : action.type === 'react' ? 'reactions' : action.type === 'browser-notes' ? 'browser' : ['keys', 'text'].includes(action.type) ? 'terminal' : action.type === 'call' ? 'voice' : action.type === 'autopilot-run' ? 'autopilot' : action.type === 'limits-check' ? 'limits' : undefined
     if (plugin) this.requirePlugin(plugin)
     const handler = this.hooks.get(action.type)
     if (handler) return handler(action)
-    if ('chat' in action && this.tasks.forChat(action.chat) && ['pin', 'archive', 'pause', 'restart-info', 'restart', 'close', 'delete'].includes(action.type)) return this.tasks.act(action)
+    if ('chat' in action && this.tasks.forChat(action.chat) && ['pin', 'archive', 'pause', 'stop', 'restart-info', 'restart', 'close', 'delete'].includes(action.type)) return this.tasks.act(action)
     switch (action.type) {
       case 'plugin': return this.plugins.act(action)
+      case 'limits-check': return this.limits.refresh(60_000)
       case 'send': {
         if (!action.text.trim() && !action.attachments?.length) return {}
         const run = async () => {
@@ -433,7 +478,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
             if (modelCommand(text) !== undefined) throw new Error('/model would change every later agent on this device. Use Restart agent to change this one')
             const id = action.cid || randomUUID()
             this.store.db.transaction(() => {
-              this.store.set('pending-send', id, { id, chat: action.chat, text, state: 'queued' } satisfies PendingSend)
+              this.store.set('pending-send', id, { id, chat: action.chat, text, state: 'queued', ...(action.human ? { human: true } : {}) } satisfies PendingSend)
               this.post(action.chat, { id, cid: action.cid, who: 'you', text, at: Date.now(), waiting: true })
             })()
             await this.flush(action.chat)
@@ -458,22 +503,24 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
         if (!permission || permission.chat !== action.chat || permission.settled) throw new Refusal(permission?.question.closed ? `This card has closed: ${permission.question.closed}` : 'This request is no longer waiting for an answer')
         if (permission.expires <= Date.now() || this.agents.get(action.chat)?.grant !== permission.grant) throw new Error('This permission belongs to an expired or replaced agent session')
         const native = permission.native, answer = native && nativeAnswer(permission.question, action)
-        if (!native && action.choice !== 0 && action.choice !== 1) throw new Error('Choose Allow once or Deny')
-        const allow = answer ? answer.allow : action.choice === 0
+        const offered = permission.question.choices
+        if (!native && !offered[action.choice]) throw new Error('Choose one of the card’s answers')
+        const allow = answer ? answer.allow : action.choice < offered.length - 1
         permission.settled = true; permission.allow = allow; permission.question.sent = answer ? answer.sent : action.choice
+        permission.reply = { allow, ...(action.choice === permission.question.always ? { updatedPermissions: permission.grants } : {}) }
         if (native && answer) { native.answer = permission.question.said = answer.said }
         this.store.set('permission', permission.id, permission)
         this.settleAgent(permission)
         const message = this.store.get<Message>(`message:${action.chat}`, `permission-${permission.id}`)
         this.post(action.chat, { ...message, id: `permission-${permission.id}`, who: 'agent', question: permission.question, at: message?.at ?? Date.now() })
-        this.forwardQuestion(action.chat, permission.question, answer?.said ?? (allow ? 'Allow once' : 'Deny'), action.space ? 'space' : 'task')
+        this.forwardQuestion(action.chat, permission.question, answer?.said ?? offered[action.choice].label)
         if (native && answer) {
           const cards = this.nativeRows(native.head)
           if (cards.some(card => !card.settled)) return { answered: true }
           this.replyNative(native, nativeReply(native, cards, answer.sent, action.note?.trim()))
           return { answered: true }
         }
-        this.permissions.get(permission.id)?.({ allow }); this.permissions.delete(permission.id)
+        this.permissions.get(permission.id)?.(permission.reply); this.permissions.delete(permission.id)
         return { answered: true }
       }
       case 'mode':
@@ -591,7 +638,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
         item.state = 'sending'; this.store.set('pending-send', item.id, item)
         try {
           if (!item.id.startsWith('provider-retry-')) this.providerRetries.clear(chat)
-          if (task) await this.tasks.deliver(task.id, chat, item.text, !!item.launch && !item.work)
+          if (task) await this.tasks.deliver(task.id, chat, item.text, !!item.launch && !item.work, item.human)
           else if (agent && this.agents.terminal(agent)?.state === 'live') await this.agents.send(chat, item.text)
           else {
             if (space.mode === 'autopilot' || agent?.pilot) throw new Error('This contained coordinator has stopped; change mode or explicitly restart its contained run before sending')
@@ -649,7 +696,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
   task chat ID [--limit 1..100] [--before CURSOR]
   task start ID [MESSAGE] | task tell ID TEXT
   task queue ID --after ID,ID|none | task stop ID
-  task pause|pin|unpin|archive|unarchive ID (coordinator only, when the human asks)
+  task pause|pin|unpin|unarchive ID (coordinator only, when the human asks)
   task close|delete ID [--force] (coordinator only; force may discard held work on delete)
   task review-more ID (coordinator only; one more review round once all are used)
   status ID TEXT --done 0..100 --left 5m|1h20m
@@ -705,18 +752,20 @@ Use hc for starting, messaging and waiting on core child agents. Never use a web
 
   /** Internal dispatch after authenticating the current launch; cancellation always wins a later answer. */
   requestPermission(agent: CoreAgent, grant: Grant, request: MailRequest, requestId: string): Promise<unknown> | PermissionAnswer {
-    const input = request.args as { id?: string; tool?: string; input?: unknown; at?: number; agent?: string; turn?: string }
+    const input = request.args as { id?: string; tool?: string; input?: unknown; suggestions?: unknown; at?: number; agent?: string; turn?: string }
     if (typeof input.id !== 'string' || !/^[a-f0-9-]{36}$/.test(input.id) || input.id !== requestId) throw new Error('Invalid permission request identity')
     if (this.store.get(`permission-cancel:${grant.id}`, input.id)) return { allow: false }
     const previous = this.store.get<Permission>('permission', input.id)
     if (previous && (previous.grant !== grant.id || previous.chat !== grant.chat)) throw new Error('Permission id belongs to another session')
-    if (previous?.settled) return previous.native?.reply ?? { allow: previous.allow === true }
+    if (previous?.settled) return previous.native?.reply ?? previous.reply ?? { allow: previous.allow === true }
+    // Claude's settings say this before it asks; Codex has no such setting for one launch, only this hook.
+    if (agent.kind === 'codex' && agent.role !== 'reviewer' && !agent.pilot && agent.command && ownCommand(agent.command, input.tool, input.input)) return { allow: true }
     const native = agent.kind === 'claude' ? nativeCards(input.tool, input.input, input.id, agent.permissionMode) : undefined
     if (native && !native.questions.length) return NATIVE_UNREADABLE
-    const questions = native?.questions ?? [{ id: input.id, title: `${agent.kind === 'claude' ? 'Claude Code' : 'Codex'} asks to use ${String(input.tool || 'a tool').slice(0, 100)}`,
-      kind: 'Question' as const, choices: [{ label: 'Allow once' }, { label: 'Deny' }], to: grant.chat, noNote: true,
-      screen: JSON.stringify(input.input, null, 2)?.slice(0, 16_000) }]
-    const rows = questions.map((question): Permission => ({ id: question.id, chat: grant.chat, grant: grant.id, question, expires: request.expires, at: Number.isFinite(input.at) ? input.at : Date.now(), tool: input.tool, hash: toolHash(input.input), turn: input.turn, sub: input.agent, ...(native ? { native: { ...native.native, head: input.id! } } : {}) }))
+    const { cut, ...words } = permissionWords(input.tool, input.input)
+    const { grants, ...offered } = permissionChoices(agent.kind === 'claude' ? input.suggestions : undefined, cut)
+    const questions = native?.questions ?? [{ id: input.id, ...words, kind: 'Question' as const, ...offered, to: grant.chat, noNote: true }]
+    const rows = questions.map((question): Permission => ({ id: question.id, chat: grant.chat, grant: grant.id, question, expires: request.expires, at: Number.isFinite(input.at) ? input.at : Date.now(), tool: input.tool, hash: toolHash(input.input), turn: input.turn, sub: input.agent, ...(native ? { native: { ...native.native, head: input.id! } } : { grants }) }))
     const permission = rows[0], question = permission.question
     // Posting a card reconciles it, and after a reconnect its end can be on record already: the wait comes first.
     const answered = new Promise<PermissionAnswer>(resolve => {
@@ -736,7 +785,7 @@ Use hc for starting, messaging and waiting on core child agents. Never use a web
     if (!waiting()) return answered
     const task = this.tasks.forChat(grant.chat)
     this.emit('alert', { id: input.id, from: 'Shepherdr', ...(native ? askText(task?.id || this.space(agent.space)?.name || 'Shepherdr', question) : { title: question.title, body: 'Waiting for your permission' }), go: { place: agent.space, focus: input.id }, tag: grant.chat,
-      card: { chat: grant.chat, question: input.id, choices: native ? quickChoices(question) : question.choices.map((choice, index) => ({ label: choice.label, choice: index })) } })
+      card: { chat: grant.chat, question: input.id, choices: quickChoices(question) } })
     return answered
   }
 
@@ -813,6 +862,6 @@ Use hc for starting, messaging and waiting on core child agents. Never use a web
   async artifactThumb(id: string, dark: boolean) { if (!this.plugins.has('artifacts')) return null; try { return this.artifacts.thumb(id, dark) } catch { return null } }
   async upload(chat: string, name: string, data: Uint8Array) { return this.chats.upload(chat, name, data) }
   async attachment(chat: string, path: string) { return this.chats.attachment(chat, path) }
-  async drain() { this.quiescing = true; this.screens.stop(); this.failedStarts.stop(); this.pluginUpdates?.stop(); await this.pluginUpdates?.drain(); this.plugins.stop(); this.voices.stop(); this.automations.stop(); this.github.stop(); this.health.stop(); await this.github.drain(); await this.health.drain(); await this.automations.drain(); await this.pilots.usage.drain(); await this.pilots.lifecycle.drain(); await this.pilots.completion.drain(); return this.tasks.drain() }
-  stop() { clearInterval(this.recovery); this.screens.stop(); this.failedStarts.stop(); this.pluginUpdates?.stop(); this.plugins.stop(); this.voices.stop(); this.health.stop(); this.automations.stop(); this.github.stop(); this.logs.stop(); this.browsers.stop(); this.core.stop() }
+  async drain() { this.quiescing = true; this.screens.stop(); this.failedStarts.stop(); this.pluginUpdates?.stop(); await this.pluginUpdates?.drain(); this.plugins.stop(); this.voices.stop(); this.automations.stop(); this.github.stop(); this.health.stop(); this.limits.stop(); await this.github.drain(); await this.health.drain(); await this.limits.drain(); await this.automations.drain(); await this.pilots.usage.drain(); await this.pilots.lifecycle.drain(); await this.pilots.completion.drain(); return this.tasks.drain() }
+  stop() { clearInterval(this.recovery); this.screens.stop(); this.failedStarts.stop(); this.pluginUpdates?.stop(); this.plugins.stop(); this.voices.stop(); this.health.stop(); this.limits.stop(); this.automations.stop(); this.github.stop(); this.logs.stop(); this.browsers.stop(); this.core.stop() }
 }

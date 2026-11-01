@@ -59,7 +59,7 @@ test('a full machine queues new native starts and preserves a human message unti
     busy.workflow = 'todo'; source.store.set('task', busy.id, busy)
     await source.tasks.tick(); await Bun.sleep(0)
     expect(sent).toHaveLength(before)
-    // Ready agents also need a slot. A human change revokes their stale merge approval.
+    // Ready agents also need a slot. A change with no merge card behind it drops the ready commit.
     const ready = source.tasks.get(task.id)!; ready.workflow = 'ready'; ready.readyHead = 'old'; ready.approvedHead = 'old'; source.store.set('task', task.id, ready)
     busy.workflow = 'working'; source.store.set('task', busy.id, busy)
     await source.act({ type: 'send', cid: 'capacity-ready-agent-send', chat: task.chat, text: 'Change the ready task' }); await Bun.sleep(0)
