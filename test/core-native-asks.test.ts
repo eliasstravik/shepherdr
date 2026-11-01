@@ -184,7 +184,10 @@ test('a permission card says what it would do in words, whole, never as code', (
   expect(permissionWords('WebFetch', { url: `https://x.dev/${'y'.repeat(200)}`, prompt: 'Sum it up' }).screen).toBe(`Sum it up\n\nhttps://x.dev/${'y'.repeat(200)}`)
   expect(permissionWords('NotebookEdit', { notebook_path: '/w/n.ipynb', new_source: '', cell_id: 'c1', edit_mode: 'delete' }).screen).toBe('/w/n.ipynb\n\ncell_id: c1\nedit_mode: delete')
   expect(permissionWords('Bash', { command: 'ls', dangerouslyDisableSandbox: true }).screen).toBe('dangerouslyDisableSandbox: true')
-  expect(permissionWords('NotebookEdit', { notebook_path: '/w/n.ipynb', new_source: 'x'.repeat(20_000), cell_id: 'c1', edit_mode: 'replace' }).screen).toEndWith('\n\ncell_id: c1\nedit_mode: replace')
+  const notebook = permissionWords('NotebookEdit', { notebook_path: '/w/n.ipynb', new_source: 'x'.repeat(20_000), cell_id: 'c1', edit_mode: 'replace' })
+  expect(notebook.cut).toBe(true)
+  expect(notebook.screen).toStartWith('Too long to show in full')
+  expect(notebook.screen).toEndWith('\n\ncell_id: c1\nedit_mode: replace')
   expect(permissionWords('Write', { file_path: '/w/a/b.txt', content: 'hi' })).toEqual({ title: 'Write: b.txt', screen: '/w/a/b.txt\n\nhi' })
   expect(permissionWords('Edit', { file_path: '/w/b.txt', old_string: 'a', new_string: 'b' })).toEqual({ title: 'Edit: b.txt', screen: '/w/b.txt\n\n- a\n+ b' })
   expect(permissionWords('Edit', { file_path: '/w/b.txt', old_string: 'a', new_string: 'b', replace_all: true }).screen).toBe('/w/b.txt\n\nEvery match in the file:\n\n- a\n+ b')
@@ -248,6 +251,24 @@ test('a step held at its card says Wants to above the card, and in the turn open
     await reply
     expect(f.source.activities.chat(chat, messages, true).live!.rows.map(item => item.text)).toEqual(['Creating empty hello.txt'])
   } finally { f.close() }
+})
+
+test('a card too long to show whole can only deny: Allow never runs what was cut off', async () => {
+  for (const kind of ['claude', 'codex'] as const) {
+    const f = fixture(kind)
+    try {
+      const alerts: { card?: { choices: { label: string }[] } }[] = []
+      f.source.on('alert', alert => alerts.push(alert as typeof alerts[number]))
+      const { id, reply } = f.ask('Bash', { command: `${'x'.repeat(16_000)}; rm important.txt` }, Date.now(), [rule])
+      const card = f.source.chat(chat)!.messages.find(message => message.question?.id === id)!.question!
+      expect(card.choices.map(choice => choice.label)).toEqual(['Deny'])
+      expect(card.always).toBeUndefined()
+      expect(card.screen).toStartWith('Too long to show in full')
+      expect(alerts[0].card!.choices.map(choice => choice.label)).toEqual(['Deny'])
+      await f.source.act(answer(id, 0))
+      expect((await reply).allow).toBe(false)
+    } finally { f.close() }
+  }
 })
 
 test('Codex can\'t take a grant from a hook, so its card stays Allow once and Deny', () => {

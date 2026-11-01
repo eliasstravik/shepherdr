@@ -758,8 +758,9 @@ Use hc for starting, messaging and waiting on core child agents. Never use a web
     if (agent.kind === 'codex' && agent.role !== 'reviewer' && !agent.pilot && agent.command && ownCommand(agent.command, input.tool, input.input)) return { allow: true }
     const native = agent.kind === 'claude' ? nativeCards(input.tool, input.input, input.id, agent.permissionMode) : undefined
     if (native && !native.questions.length) return NATIVE_UNREADABLE
-    const { grants, ...offered } = permissionChoices(agent.kind === 'claude' ? input.suggestions : undefined)
-    const questions = native?.questions ?? [{ id: input.id, ...permissionWords(input.tool, input.input), kind: 'Question' as const, ...offered, to: grant.chat, noNote: true }]
+    const { cut, ...words } = permissionWords(input.tool, input.input)
+    const { grants, ...offered } = permissionChoices(agent.kind === 'claude' ? input.suggestions : undefined, cut)
+    const questions = native?.questions ?? [{ id: input.id, ...words, kind: 'Question' as const, ...offered, to: grant.chat, noNote: true }]
     const rows = questions.map((question): Permission => ({ id: question.id, chat: grant.chat, grant: grant.id, question, expires: request.expires, at: Number.isFinite(input.at) ? input.at : Date.now(), tool: input.tool, hash: toolHash(input.input), turn: input.turn, sub: input.agent, ...(native ? { native: { ...native.native, head: input.id! } } : { grants }) }))
     const permission = rows[0], question = permission.question
     // Posting a card reconciles it, and after a reconnect its end can be on record already: the wait comes first.

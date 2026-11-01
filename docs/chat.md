@@ -17,6 +17,7 @@ Every agent, coordinator or task agent, gets the same chat.
   what it allows and for how long, and leaves that to Claude Code to keep. Its auto mode choice isn't offered to hooks,
   so it stays in the terminal; a phone alert has only Allow once and Deny. Codex gives hooks neither, so its cards have
   Allow once and Deny; don't ask again for Codex is in its Terminal.
+  A request too long to show whole says so and offers only Deny, so nothing is allowed unread: allow it in its Terminal.
 - An agent stopped at its CLI's own screen before its session starts (trusting a folder, the theme, signing in, Codex's
   hooks, or anything a later CLI version adds) shows that screen in the chat as a card within about 10 seconds, and
   counts as Needs you. The card shows the choices it can read, and one tap presses that choice in the terminal. A

@@ -65,21 +65,27 @@ export function nativeReply(native: NativeAsk, cards: { question: Question; nati
 
 const SHOWN = 16_000
 const TITLE = 120
+const CUT = 'Too long to show in full, so this card can only deny it. To allow it, read it whole in the Terminal.'
 /** the fields each tool's card words already show: any other goes below them, so nothing it would do goes unread */
 const WORDED: Record<string, string[]> = { Bash: ['command', 'description'], Write: ['file_path', 'content'], Edit: ['file_path', 'old_string', 'new_string', 'replace_all'], NotebookEdit: ['notebook_path', 'new_source'],
   Read: ['file_path'], Glob: ['pattern', 'path'], Grep: ['pattern', 'path'], WebFetch: ['url', 'prompt'], WebSearch: ['query'] }
 const shownLine = (value: unknown) => typeof value === 'string' ? value : JSON.stringify(value)
 
+/** Words too long to show whole are cut, says so, and leave the fields below them: nothing is allowed unread. */
+const shown = (words: string, rest: string) => {
+  const whole = [words, rest].filter(Boolean).join('\n\n')
+  if (whole.length <= SHOWN) return { screen: whole || undefined }
+  return { cut: true, screen: [CUT, words.slice(0, Math.max(0, SHOWN - rest.length)), rest.slice(0, SHOWN)].filter(Boolean).join('\n\n') }
+}
+
 /** What a tool asks to do, as a human reads it: the title at a glance, and below it all it would touch, never code. */
-export function permissionWords(tool: string | undefined, input: unknown): Pick<Question, 'title' | 'screen'> {
+export function permissionWords(tool: string | undefined, input: unknown): Pick<Question, 'title' | 'screen'> & { cut?: boolean } {
   const value = record(input) ?? {}, path = text(value.file_path) || text(value.notebook_path)
   const fields = (worded: string[] = []) => Object.entries(value).filter(([key, item]) => !worded.includes(key) && item !== undefined && item !== null && item !== '').map(([key, item]) => `${key}: ${shownLine(item)}`).join('\n')
   // A title cut short leaves its whole words below: two targets must never look the same.
   const card = (verb: string, what: string, ...more: unknown[]) => {
     const title = clip(what, TITLE)
-    const rest = fields(WORDED[tool!]).slice(0, SHOWN), words = [...more, title !== what && what].filter(Boolean).map(shownLine).join('\n\n')
-    // Long words are what gets cut: a field below them, like the cell a notebook edit lands in, always stays.
-    return { title: `${verb}: ${title}`, screen: [words.slice(0, SHOWN - rest.length), rest].filter(Boolean).join('\n\n') || undefined }
+    return { title: `${verb}: ${title}`, ...shown([...more, title !== what && what].filter(Boolean).map(shownLine).join('\n\n'), fields(WORDED[tool!])) }
   }
   switch (tool) {
     case 'Bash': return card('Run', text(value.command), value.description)
@@ -91,7 +97,7 @@ export function permissionWords(tool: string | undefined, input: unknown): Pick<
     case 'WebFetch': return card('Open', text(value.url), value.prompt)
     case 'WebSearch': return card('Search the web', text(value.query))
   }
-  return { title: `Use ${clip(toolWords(tool || 'a tool'), TITLE)}`, screen: fields().slice(0, SHOWN) || undefined }
+  return { title: `Use ${clip(toolWords(tool || 'a tool'), TITLE)}`, ...shown('', fields()) }
 }
 
 const WHERE: Record<string, string> = { session: 'this session', localSettings: 'in this project', projectSettings: 'in this project', userSettings: 'on this device' }
@@ -114,8 +120,9 @@ function grantWords(grant: Record<string, unknown>) {
   return rules.every(Boolean) ? `${rules.join(', ')} ${where}` : undefined
 }
 
-/** A card's choices: the CLI's own "don't ask again" grants, all in one, between Allow once and Deny. Codex gives none. */
-export function permissionChoices(suggestions: unknown): { choices: Choice[]; always?: number; grants?: unknown[] } {
+/** A card's choices: the CLI's own "don't ask again" grants, all in one, between Allow once and Deny. Codex gives none. A cut card only denies. */
+export function permissionChoices(suggestions: unknown, cut?: boolean): { choices: Choice[]; always?: number; grants?: unknown[] } {
+  if (cut) return { choices: [{ label: 'Deny' }] }
   const offered = (Array.isArray(suggestions) ? suggestions.slice(0, 8) : []).flatMap(item => { const grant = record(item), said = grant && grantWords(grant); return said ? [{ grant, said }] : [] })
   if (!offered.length) return { choices: [{ label: 'Allow once' }, { label: 'Deny' }] }
   return { always: 1, grants: offered.map(item => item.grant), choices: [{ label: 'Allow once' }, { label: 'Don’t ask again', description: offered.map(item => item.said).join(' · ') }, { label: 'Deny' }] }
