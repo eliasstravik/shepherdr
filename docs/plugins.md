@@ -123,7 +123,8 @@ slots below are public: plugins outside the repo rely on them, so they change on
 
 - `setup(reg)` gets the registry of slots (`Registry` in `src/kernel.ts`, each one documented there):
   - views: `reg.views.places`, `placesMenu` (the sidebar header's buttons), `chat`, `needs`, `tasks`, `artifacts`,
-    `artifact` (one in a split view's pane), `tasksMenu`, `settings`, `search` (one each; the last plugin to set one wins)
+    `artifact` (one in a split view's pane), `tasksMenu`, `taskActions` (a task's own rows in its row's ⋯ and its
+    chat's), `settings`, `search` (one each; the last plugin to set one wins)
   - chats: `messageParts`, `messageEdge` (under and on a message's bubble), `chatTail` (after the messages),
     `chatBody` (replaces a chat's body while its `when` holds)
   - headers and menus: `placeHeader`, `placeMark`, `placeMenu` (a coordinator's), `agentHeader`, `agentMenu` (a task's)

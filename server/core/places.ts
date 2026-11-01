@@ -19,7 +19,7 @@ export class CorePlaces {
   private idle(place: string) {
     const active = this.source.tasks.all().filter(task => task.place === place && (this.source.tasks.busy(task.id) || new CoreTaskProcesses(this.source).runningChildren(task) || task.workflow === 'working' || task.workflow === 'merging' ||
       this.source.agents.all().some(agent => agent.chat.startsWith(task.id + '/') && this.source.agents.terminal(agent)?.state !== 'finished' && this.source.status(agent) !== 'idle')))
-    if (active.length) throw new Refusal(`${active.map(task => task.id).join(', ')} still has work running; pause or finish it first`)
+    if (active.length) throw new Refusal(`${active.map(task => task.id).join(', ')} still has work running; stop or finish it first`)
   }
   async remove(place: string) {
     if (this.source.quiescing) throw new Refusal('Shepherdr is stopping')

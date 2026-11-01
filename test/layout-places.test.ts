@@ -890,7 +890,7 @@ describe.skipIf(!browser)('removing a space', () => {
     await page.getByRole('menuitem', { name: 'Remove from Shepherdr…', exact: true }).click()
     const ask = page.getByRole('alertdialog', { name: 'herdr-projects can’t be removed yet' })
     await ask.waitFor()
-    expect(await ask.textContent()).toContain('HP-202 is still working. Pause it or let it finish first.')
+    expect(await ask.textContent()).toContain('HP-202 is still working. Stop it or let it finish first.')
     expect(await ask.getByRole('button', { name: 'Remove' }).count()).toBe(0)
     await ask.getByRole('button', { name: 'OK' }).click()
     await ask.waitFor({ state: 'detached' })

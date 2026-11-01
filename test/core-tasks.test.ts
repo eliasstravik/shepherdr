@@ -409,7 +409,9 @@ test('task controls require a coordinator and lists separate archived tasks in i
     source.store.set('task', 'OTHER-2', { ...task, id: 'OTHER-2', place: 'other' })
     expect(tasks.list(grant).map(t => t.id)).toEqual([task.id])
     await tasks.cli(grant, ['task', 'pin', task.id]); expect(tasks.get(task.id)?.pinned).toBeNumber()
-    await tasks.cli(grant, ['task', 'archive', task.id])
+    await expect(tasks.cli(grant, ['task', 'archive', task.id])).rejects.toThrow('task stop, close or delete')
+    expect(tasks.get(task.id)?.archived).toBeUndefined()
+    await tasks.act({ type: 'archive', chat: task.chat, on: true })
     expect(tasks.get(task.id)?.pinned).toBeUndefined()
     expect(tasks.list(grant)).toEqual([])
     expect(tasks.list(grant, true).map(t => t.id)).toEqual([task.id])
@@ -524,6 +526,7 @@ test('a clean research answer becomes Done without a code review and waits for n
     expect(tasks.get(task.id)?.cleanupPending).toBeUndefined()
     await expect(tasks.cli(grant, ['todo', task.id])).rejects.toThrow('Done')
     await expect(tasks.act({ type: 'pause', chat: task.chat })).rejects.toThrow('Done')
+    await expect(tasks.act({ type: 'stop', chat: task.chat })).rejects.toThrow('Done')
     await expect(tasks.deliver(task.id, task.chat, 'Start again')).rejects.toThrow('Done')
     await expect(tasks.act({ type: 'restart', chat: task.chat })).rejects.toThrow('Done')
   })
@@ -656,6 +659,16 @@ test('Stop removes a clean landed checkout and branch; reopening recreates them 
   expect(source.store.get(`message:${task.chat}`, 'retained')).toBeDefined()
   await tasks.git.ensureWorktree({ machine: task.machine, folder: repo }, worktree, task.branch, task.base)
   expect(readFileSync(join(worktree, 'example.txt'), 'utf8')).toBe('before\n')
+}))
+
+test('Stop from the app ends a task as the command does, and waits for a merge', () => withTask(async ({ tasks, task, worktree }) => {
+  writeFileSync(join(worktree, 'unfinished.txt'), 'UNFINISHED_BYTES\n')
+  await expect(tasks.act({ type: 'stop', chat: task.chat })).resolves.toEqual({ ok: true })
+  expect(tasks.get(task.id)).toMatchObject({ workflow: 'todo', kept: ['uncommitted changes', 'unmerged commits'] })
+  expect(readFileSync(join(worktree, 'unfinished.txt'), 'utf8')).toBe('UNFINISHED_BYTES\n')
+  ;(tasks as unknown as { merging: Set<string> }).merging.add(task.id)
+  await expect(tasks.act({ type: 'stop', chat: task.chat })).rejects.toThrow('finishing another action')
+  ;(tasks as unknown as { merging: Set<string> }).merging.delete(task.id)
 }))
 
 test('Stop preserves uncommitted bytes and unmerged commits for a later restart', () => withTask(async ({ tasks, task, grant, repo, worktree }) => {

@@ -51,7 +51,7 @@ space’s tasks. Ask its coordinator or the human to act there; never bypass own
 
 - Tasks are made only through you: when the human asks, or on Autopilot.
 - Only on the human's plain word, in any mode: delete a task (`--force` only to lose work they named), change
-  Settings, start work nobody asked for, force-push, merge past a brief's "ask me first", and remove, archive, pin or
+  Settings, start work nobody asked for, force-push, merge past a brief's "ask me first", and remove, pin or
   pause what they didn't ask for.
 - **Autopilot** runs a fresh selected agent under a shared permission profile. Heartbeat is the one plain-text
   brief: direction, priorities, constraints, evaluation, reporting, escalation and an optional stopping goal all

@@ -140,7 +140,7 @@ export class CoreTasks {
     const taskAge = Number.isFinite(when) && when > 0 ? age(when) : task.age
     const agentAge = agent?.started && Number.isFinite(agent.started) ? age(agent.started) : taskAge
     const reviewLine = review && status === 'work' ? REVIEW_LINE : undefined
-    return { ...task, ...(reviewLine ? { waitsFor: 'review' as const, report: task.report && { ...task.report, msg: reviewLine } } : {}), age: taskAge, on: CLI_NAME[agent?.kind ?? task.kind], status, sub: task.capacity ? `Waiting: ${task.capacity}` : retryLine || reviewLine || task.sub, browser: agent?.browser ? { ready: this.source.machineConnected?.(task.machine) ?? true, hint: this.source.machineConnected?.(task.machine) === false ? 'This machine is reconnecting' : undefined } : { ready: false, hint: 'Start or restart the task agent to provision its shared browser' }, agent: agent ? { chat: task.chat, role: 'Agent', cli: CLI_NAME[agent.kind], status: nativeStatus === 'off' ? 'off' : status, age: agentAge, note: retryLine || reviewLine || task.report?.msg || '' } : undefined,
+    return { ...task, ...(reviewLine ? { waitsFor: 'review' as const, report: task.report && { ...task.report, msg: reviewLine } } : {}), age: taskAge, on: CLI_NAME[agent?.kind ?? task.kind], status, sub: task.capacity ? `Waiting: ${task.capacity}` : retryLine || reviewLine || task.sub, browser: agent?.browser ? { ready: this.source.machineConnected?.(task.machine) ?? true, hint: this.source.machineConnected?.(task.machine) === false ? 'This machine is reconnecting' : undefined } : { ready: false, hint: 'Start or restart the task agent to provision its shared browser' }, agent: agent ? { chat: task.chat, role: 'Agent', cli: CLI_NAME[agent.kind], status: nativeStatus === 'off' ? 'off' : status, running: !!terminal && terminal.state !== 'finished', age: agentAge, note: retryLine || reviewLine || task.report?.msg || '' } : undefined,
       state: status === 'done' ? task.workflow === 'closed' ? 'Done' : 'Merged' : status === 'ready' ? 'Ready' : status === 'need' ? 'Needs you' : status === 'queued' ? 'Queued' : status === 'todo' ? 'To do' : status === 'merging' ? 'Merging' : 'Working' }
   }
   /** A question put in plain words still needs the human, whatever else the agent waits for. */
@@ -629,6 +629,9 @@ export class CoreTasks {
         if (terminal?.state === 'live') await this.source.core.call('terminal.interrupt', { terminal: terminal.address })
         await this.source.browsers?.close(task.id)
         task.workflow = 'todo'; delete task.reservedAt; this.save(task); await this.label(task); return { ok: true }
+      case 'stop':
+        if (['merged', 'closed'].includes(task.workflow)) throw new Refusal('This task is Done; there is nothing to stop')
+        await this.stopNow(task); return { ok: true }
       case 'restart-info': return { ok: true, info: { role: 'task', space: this.source.space(task.place)?.name, on: { kind: agent?.kind ?? task.kind, model: agent?.model, effort: agent?.effort, speed: agent?.speed }, onKnown: !!agent,
         onWords: agent?.kind ?? task.kind, want: this.source.settings.agent('task', task.place), working: agent?.state === 'working',
         clis: this.source.settings.clis(task.place) } }
@@ -674,19 +677,22 @@ export class CoreTasks {
       const task = this.get(id)
       if (!task) throw new Refusal('No such task')
       this.assert(grant, task)
-      if (!['merged', 'closed'].includes(task.workflow)) { task.workflow = 'todo'; delete task.reservedAt; delete task.capacity; this.save(task) }
-      try {
-        await this.stopAgents(task)
-        if (!['merged', 'closed'].includes(task.workflow) && task.repo && task.folder && task.branch && task.base) {
-          const state = await this.held(task)
-          task.kept = state.held
-          if (!state.held.length) await this.putAway(task, state)
-        }
-        delete task.startError; this.save(task); await this.label(task)
-      }
-      catch (error) { task.startError = (error as Error).message; this.save(task); throw error }
-      return task
+      return this.stopNow(task)
     })
+  }
+  private async stopNow(task: CoreTask) {
+    if (!['merged', 'closed'].includes(task.workflow)) { task.workflow = 'todo'; delete task.reservedAt; delete task.capacity; this.save(task) }
+    try {
+      await this.stopAgents(task)
+      if (!['merged', 'closed'].includes(task.workflow) && task.repo && task.folder && task.branch && task.base) {
+        const state = await this.held(task)
+        task.kept = state.held
+        if (!state.held.length) await this.putAway(task, state)
+      }
+      delete task.startError; this.save(task); await this.label(task)
+    }
+    catch (error) { task.startError = (error as Error).message; this.save(task); throw error }
+    return task
   }
   async close(task: CoreTask, force = false, summary?: string, facts?: string) { return this.change(task.id, () => this.closeNow(task, force, summary, facts)) }
   private async closeNow(task: CoreTask, force = false, summary?: string, facts?: string) {
@@ -971,9 +977,10 @@ export class CoreTasks {
     this.assert(grant, task)
     if (verb === 'task' && ['close', 'delete', 'archive', 'unarchive', 'pause', 'pin', 'unpin'].includes(sub)) {
       if (this.source.agents.get(grant.chat)?.role !== 'coordinator') throw new Refusal('Only a coordinator changes this task control, when the human asks')
+      if (sub === 'archive') throw new Refusal('Tasks end with task stop, close or delete; Done ones archive themselves')
       if (sub === 'close') { const summary = summaryOpts(parsed), result = await this.close(task, parsed.flags.has('force'), summary.said, summary.facts); return { ...text(result), code: result.ok ? 0 : 1 } }
       if (sub === 'delete') { const result = await this.remove(task, parsed.flags.has('force')); return { ...text(result), code: result.ok ? 0 : 1 } }
-      const action = sub === 'archive' || sub === 'unarchive' ? { type: 'archive' as const, on: sub === 'archive' }
+      const action = sub === 'unarchive' ? { type: 'archive' as const, on: false }
         : sub === 'pin' || sub === 'unpin' ? { type: 'pin' as const, on: sub === 'pin' } : { type: 'pause' as const }
       return text(await this.act({ ...action, chat: task.chat }))
     }

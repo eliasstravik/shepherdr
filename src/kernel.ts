@@ -42,6 +42,8 @@ export interface Views {
   search: FC<{ onClose: () => void }>
   /** an artifact at its latest, filling the box it is in: a split view's pane (artifacts) */
   artifact: FC<{ artifactId: string }>
+  /** a task's own menu rows, in its row's ⋯ and its chat's: what to do with it and how to end it (Stop, Done, Delete) */
+  taskActions: FC<{ task: Task; close: () => void }>
 }
 
 /**
@@ -997,7 +999,7 @@ export function archivedIn(snap: Snapshot, list: Pick<ListView, 'chips'>) {
   return snap.tasks.filter((t) => inList(snap, list.chips, t.place) && t.archived).sort((a, b) => b.archived! - a.archived!)
 }
 
-/** archive a task (its agent stops first) or bring it back */
+/** archive a task (its agent stops first) or bring it back; only Done tasks' own archiving, and plugins, still put one away */
 export function archiveTask(t: Task, on: boolean) {
   const key = t.agent?.chat ?? `${t.id}/Agent`
   return act({ type: 'archive', chat: key, on })
@@ -1011,6 +1013,11 @@ export function pinTask(t: Task, on: boolean) {
 /** pause a working task: its agent is interrupted and the task is To do until written to */
 export function pauseTask(t: Task) {
   return act({ type: 'pause', chat: t.agent?.chat ?? `${t.id}/Agent` })
+}
+
+/** stop a task: its agent goes, the task is To do and its work stays, until written to */
+export function stopTask(t: Task) {
+  return act({ type: 'stop', chat: t.agent?.chat ?? `${t.id}/Agent` })
 }
 
 /** mark a task done with nothing merged: refused (held: what it holds) while it holds unmerged work, unless force */
