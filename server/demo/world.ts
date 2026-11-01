@@ -209,7 +209,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
   /** what waits on the human: each chat's open cards, and a task that waits with none */
   private needs(): Need[] {
     const open = (chat: string, place: string, task?: string): Need[] => (this.chats[chat]?.messages ?? []).flatMap((m) => m.question && m.question.sent === undefined && !m.question.closed
-      ? [{ id: m.question.id, chat, place, task, at: m.at ?? 0, question: m.question, tap: m.question.kind !== 'Plan' && !m.question.title.startsWith('Merge ') }] : [])
+      ? [{ id: m.question.id, chat, place, task, at: m.at ?? 0, question: m.question }] : [])
     const waits = (chat: string, place: string, task: string | undefined, text?: string): Need[] => {
       const cards = open(chat, place, task)
       return cards.length ? cards : [{ id: 'attention', chat, place, task, at: 0, text }]

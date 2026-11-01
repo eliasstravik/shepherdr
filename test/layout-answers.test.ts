@@ -1,4 +1,4 @@
-// Choice cards: ordinary answers, deliberate approvals and accessible controls.
+// Choice cards: answers on one tap, deliberate approvals and accessible controls.
 import { describe, expect, test } from 'bun:test'
 import { layout } from './layout.ts'
 import type { Action } from '../shared/types.ts'
@@ -11,9 +11,9 @@ const { browser, server, world, url } = await layout()
 describe.skipIf(!browser)('answer cards', () => {
   const at = (q: string) => `http://127.0.0.1:${server!.port}/?${q}`
 
-  test('ordinary choice buttons send once; Add a note keeps a draft and explicit Send', async () => {
+  test('a choice button sends once; Add a note keeps a draft and explicit Send', async () => {
     const chat = world.chats['p:vm-str:~']
-    const q = { id: 'fast:q', title: 'Which colour?', kind: 'Form' as const, ordinary: true, choices: [{ label: 'Blue' }, { label: 'Green' }], to: 'home' }
+    const q = { id: 'fast:q', title: 'Which colour?', kind: 'Form' as const, choices: [{ label: 'Blue' }, { label: 'Green' }], to: 'home' }
     chat.messages.push({ id: 'fast-copy', who: 'agent', at: Date.now(), question: q })
     const sent: Action[] = []
     const act = world.act
@@ -50,7 +50,7 @@ describe.skipIf(!browser)('answer cards', () => {
       // A successful request stays locked while its answered snapshot is still on the way.
       await page.waitForTimeout(100)
       expect(await send.isDisabled()).toBe(true)
-      // A new ordinary card: Enter on the clearly named choice sends without a second Send.
+      // A new card: Enter on the clearly named choice sends without a second Send.
       chat.messages.find((m) => m.id === 'fast-copy')!.question = { ...q, id: 'fast:next' }
       await page.reload()
       await blue.focus()
@@ -69,22 +69,70 @@ describe.skipIf(!browser)('answer cards', () => {
     }
   }, 30_000)
 
-  test('a choice card starts with nothing picked: Send waits for a pick or a typed answer', async () => {
+  test('a typed answer brings Send back; emptied, its choices send on a tap again', async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     await page.goto(at('place=p:mac:lilla-varlden&task=LV-3'))
     const card = page.locator('[data-card]').filter({ hasText: 'Which upload limit?' })
     await card.waitFor()
     expect(await card.locator('[data-card-source]').count()).toBe(0)
-    expect(await card.locator('button[aria-pressed=true]').count()).toBe(0)
     const send = card.getByRole('button', { name: 'Send', exact: true })
-    expect(await send.isDisabled()).toBe(true)
+    expect(await send.count()).toBe(0)
     await card.getByRole('textbox', { name: 'Other answer' }).fill('1 GB')
     expect(await send.isDisabled()).toBe(false)
     await card.getByRole('textbox', { name: 'Other answer' }).fill('')
-    expect(await send.isDisabled()).toBe(true)
-    await card.getByRole('button', { name: /^50 MB per file/ }).click()
-    expect(await send.isDisabled()).toBe(false)
+    expect(await send.count()).toBe(0)
+    expect(await card.getByRole('button', { name: /^Send: 50 MB per file/ }).count()).toBe(1)
     await page.close()
+  }, 30_000)
+
+  for (const [name, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]] as const)
+    test(`a permission reads as words and sends on a tap in the chat, its Don't ask again saying what it allows (${name})`, async () => {
+      const chat = world.chats['p:vm-str:~']
+      const q = { id: 'perm:q', title: 'Run: touch hello.txt', kind: 'Question' as const, screen: 'Create empty hello.txt', noNote: true, always: 1, to: 'home',
+        choices: [{ label: 'Allow once' }, { label: 'Don’t ask again', description: 'Run touch hello.txt in this project' }, { label: 'Deny' }] }
+      chat.messages.push({ id: 'perm-copy', who: 'agent', at: Date.now(), question: q })
+      const sent: Action[] = []
+      const act = world.act
+      world.act = async (a: Action) => a.type === 'answer' ? (sent.push(a), { ok: true }) : act(a)
+      const page = await browser!.newPage({ viewport, hasTouch: name === 'phone' })
+      try {
+        await page.goto(url())
+        const card = page.locator('[data-whole="perm-copy"] [data-card]')
+        await card.waitFor()
+        expect(await card.locator('[data-card-title]').textContent()).toBe('Run: touch hello.txt')
+        expect(await card.textContent()).toContain('Create empty hello.txt')
+        expect(await card.getByRole('button', { name: 'Send', exact: true }).count()).toBe(0)
+        expect(await card.getByRole('button', { name: 'Add a note', exact: true }).count()).toBe(0)
+        await card.getByRole('button', { name: /^Send: Don’t ask again.*Run touch hello\.txt in this project/ }).click()
+        await until(() => sent.length === 1)
+        expect(sent[0]).toMatchObject({ type: 'answer', chat: chat.key, question: q.id, choice: 1 })
+      } finally {
+        world.act = act
+        chat.messages = chat.messages.filter((m) => m.id !== 'perm-copy')
+        await page.close()
+      }
+    }, 30_000)
+
+  test('a merge and a plan keep pick and Send in the chat', async () => {
+    const chat = world.chats['p:vm-str:~']
+    const cards = [
+      { id: 'merge-copy', question: { id: 'merge:q', title: 'Merge HP-9?', kind: 'Question' as const, choices: [{ label: 'Merge' }, { label: 'Not yet' }], to: 'home' } },
+      { id: 'plan-copy', question: { id: 'plan:q', title: 'Plan to approve', kind: 'Plan' as const, noteRequiredFor: 1, steps: ['One'], choices: [{ label: 'Approve the plan' }, { label: 'Send it back with a note' }], to: 'home' } },
+    ]
+    chat.messages.push(...cards.map((c) => ({ ...c, who: 'agent' as const, at: Date.now() })))
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 } })
+    try {
+      await page.goto(url())
+      for (const { id } of cards) {
+        const card = page.locator(`[data-whole="${id}"] [data-card]`)
+        await card.waitFor()
+        expect(await card.getByRole('button', { name: 'Send', exact: true }).count()).toBe(1)
+        expect(await card.getByRole('button', { name: /^Send: / }).count()).toBe(0)
+      }
+    } finally {
+      chat.messages = chat.messages.filter((m) => !cards.some((c) => c.id === m.id))
+      await page.close()
+    }
   }, 30_000)
 
   for (const [name, viewport] of [

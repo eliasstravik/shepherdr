@@ -271,8 +271,6 @@ export interface Question {
   id: string
   title: string
   kind: 'Form' | 'Question' | 'Plan'
-  /** Explicitly an ordinary question, never permission or approval. Missing means confirm. */
-  ordinary?: boolean
   steps?: string[]
   /** a plan in the CLI's own words, in Markdown */
   plan?: string
@@ -289,6 +287,8 @@ export interface Question {
   other?: boolean
   /** which choice needs a note to be sent (a plan sent back) */
   noteRequiredFor?: number
+  /** which choice allows this for good, as the CLI offered it: never on an alert's button, where its words don't fit */
+  always?: number
   /** no note box at all */
   noNote?: boolean
   to: string
@@ -444,6 +444,8 @@ export interface StepWords {
   title: string
   /** while it runs: "Checking the task list" */
   doing: string
+  /** until it runs: "Wants to check the task list". A step logged before this came has none, and says what it is doing */
+  wants?: string
   /** what it is on, to group by: a file's name (read, edit), a search's words; may be empty */
   target: string
   /** the raw thing, one tap deeper: the command, a file's path, the pattern, the address */
@@ -465,6 +467,8 @@ export interface Step extends StepWords {
   /** when it ended; none while it runs */
   end?: number
   failed?: boolean
+  /** it has not run: it waits for your yes, or was refused. Its words already say so */
+  unrun?: boolean
   /** a test run's outcome: "41 passed", "2 failed, 39 passed" */
   result?: string
   /** it started this background job (Job.id) */
@@ -595,8 +599,6 @@ export interface Need {
   text?: string
   /** no card: the message that text is, for the reply to quote */
   reply?: string
-  /** a choice sends at once in the Needs you view; merges and plans keep their Send */
-  tap?: boolean
 }
 
 /** Done tasks newest first, at the end; the rest keep their order (a stable sort) */

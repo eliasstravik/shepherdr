@@ -50,12 +50,12 @@ import { CoreCards } from './cards.ts'
 import { CorePilotMail } from './pilot-mail.ts'
 import { askText, clip, lastReply, quickChoices, TITLE_MAX, BODY_MAX } from '../../shared/alerts.ts'
 import { CANCELLED, hookEnd, logEnd, NativeEnds, STOPPED } from './native-ends.ts'
-import { NATIVE_UNREADABLE, cardWords, nativeAnswer, nativeCards, nativeClosed, nativeReply, type NativeAsk, type PermissionAnswer } from './native-asks.ts'
+import { NATIVE_UNREADABLE, nativeAnswer, nativeCards, nativeClosed, nativeReply, permissionChoices, permissionWords, type NativeAsk, type PermissionAnswer } from './native-asks.ts'
 import type { CorePluginUpdates } from './plugin-updates.ts'
 import type { ActivityAsk, WorktreeAsk } from '../../shared/types.ts'
 
 interface Machine { id: string; name: string; state: string; host?: string; version?: string; session?: string | null }
-interface Permission { id: string; chat: string; grant: string; question: Question; expires: number; settled?: boolean; allow?: boolean; at?: number; native?: NativeAsk; tool?: string; hash?: string; turn?: string; sub?: string }
+interface Permission { id: string; chat: string; grant: string; question: Question; expires: number; settled?: boolean; allow?: boolean; at?: number; native?: NativeAsk; grants?: unknown[]; reply?: PermissionAnswer; tool?: string; hash?: string; turn?: string; sub?: string }
 /** the most of an agent's last words a card with no question carries: its card shows a few lines */
 const NEED_TEXT = 1000
 interface PendingSend { id: string; chat: string; text: string; launch?: string; state: 'queued' | 'sending' | 'uncertain' | 'cancelled'; quiet?: boolean; work?: boolean }
@@ -269,7 +269,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
     for (const agent of this.agents.all()) {
       if (!this.space(agent.space) || hidden(agent.chat)) continue
       const need = { chat: agent.chat, place: agent.space, ...(this.tasks.forChat(agent.chat) ? { task: this.tasks.forChat(agent.chat)!.id } : {}) }
-      const card = (id: string, question: Question, at: number) => { if (!out.some(item => item.chat === agent.chat && item.id === id)) out.push({ ...need, id, at, question, tap: question.kind !== 'Plan' }) }
+      const card = (id: string, question: Question, at: number) => { if (!out.some(item => item.chat === agent.chat && item.id === id)) out.push({ ...need, id, at, question }) }
       for (const item of this.openPermissions(agent)) card(item.id, item.question, sentAt(agent.chat, `permission-${item.id}`) ?? item.at ?? 0)
       for (const item of this.questions.open(agent.chat)) card(item.id, item.question, sentAt(agent.chat, item.id) ?? 0)
       for (const item of this.screens.open(agent.chat)) card(item.id, item.question, item.at)
@@ -387,7 +387,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
       // One line for a tool call: its first card may be answered already, with a later one still open.
       const call = permission.native?.head ?? permission.id
       if (this.agents.get(permission.chat)?.grant !== permission.grant || calls.has(call)) continue
-      calls.add(call); denied.set(permission.chat, [...denied.get(permission.chat) ?? [], cardWords(permission.question, !!permission.native, permission.tool)])
+      calls.add(call); denied.set(permission.chat, [...denied.get(permission.chat) ?? [], clip(permission.question.title, 120)])
     }
     for (const [chat, words] of denied) {
       const text = `Shepherdr restarted, so this was denied, though nobody refused it: ${words.join('; ')}. Ask again if it's still needed.`, id = `restart-denied-${randomUUID()}`
@@ -498,22 +498,24 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
         if (!permission || permission.chat !== action.chat || permission.settled) throw new Refusal(permission?.question.closed ? `This card has closed: ${permission.question.closed}` : 'This request is no longer waiting for an answer')
         if (permission.expires <= Date.now() || this.agents.get(action.chat)?.grant !== permission.grant) throw new Error('This permission belongs to an expired or replaced agent session')
         const native = permission.native, answer = native && nativeAnswer(permission.question, action)
-        if (!native && action.choice !== 0 && action.choice !== 1) throw new Error('Choose Allow once or Deny')
-        const allow = answer ? answer.allow : action.choice === 0
+        const offered = permission.question.choices
+        if (!native && !offered[action.choice]) throw new Error('Choose one of the card’s answers')
+        const allow = answer ? answer.allow : action.choice < offered.length - 1
         permission.settled = true; permission.allow = allow; permission.question.sent = answer ? answer.sent : action.choice
+        permission.reply = { allow, ...(action.choice === permission.question.always ? { updatedPermissions: permission.grants } : {}) }
         if (native && answer) { native.answer = permission.question.said = answer.said }
         this.store.set('permission', permission.id, permission)
         this.settleAgent(permission)
         const message = this.store.get<Message>(`message:${action.chat}`, `permission-${permission.id}`)
         this.post(action.chat, { ...message, id: `permission-${permission.id}`, who: 'agent', question: permission.question, at: message?.at ?? Date.now() })
-        this.forwardQuestion(action.chat, permission.question, answer?.said ?? (allow ? 'Allow once' : 'Deny'))
+        this.forwardQuestion(action.chat, permission.question, answer?.said ?? offered[action.choice].label)
         if (native && answer) {
           const cards = this.nativeRows(native.head)
           if (cards.some(card => !card.settled)) return { answered: true }
           this.replyNative(native, nativeReply(native, cards, answer.sent, action.note?.trim()))
           return { answered: true }
         }
-        this.permissions.get(permission.id)?.({ allow }); this.permissions.delete(permission.id)
+        this.permissions.get(permission.id)?.(permission.reply); this.permissions.delete(permission.id)
         return { answered: true }
       }
       case 'mode':
@@ -745,18 +747,17 @@ Use hc for starting, messaging and waiting on core child agents. Never use a web
 
   /** Internal dispatch after authenticating the current launch; cancellation always wins a later answer. */
   requestPermission(agent: CoreAgent, grant: Grant, request: MailRequest, requestId: string): Promise<unknown> | PermissionAnswer {
-    const input = request.args as { id?: string; tool?: string; input?: unknown; at?: number; agent?: string; turn?: string }
+    const input = request.args as { id?: string; tool?: string; input?: unknown; suggestions?: unknown; at?: number; agent?: string; turn?: string }
     if (typeof input.id !== 'string' || !/^[a-f0-9-]{36}$/.test(input.id) || input.id !== requestId) throw new Error('Invalid permission request identity')
     if (this.store.get(`permission-cancel:${grant.id}`, input.id)) return { allow: false }
     const previous = this.store.get<Permission>('permission', input.id)
     if (previous && (previous.grant !== grant.id || previous.chat !== grant.chat)) throw new Error('Permission id belongs to another session')
-    if (previous?.settled) return previous.native?.reply ?? { allow: previous.allow === true }
+    if (previous?.settled) return previous.native?.reply ?? previous.reply ?? { allow: previous.allow === true }
     const native = agent.kind === 'claude' ? nativeCards(input.tool, input.input, input.id, agent.permissionMode) : undefined
     if (native && !native.questions.length) return NATIVE_UNREADABLE
-    const questions = native?.questions ?? [{ id: input.id, title: `${agent.kind === 'claude' ? 'Claude Code' : 'Codex'} asks to use ${String(input.tool || 'a tool').slice(0, 100)}`,
-      kind: 'Question' as const, choices: [{ label: 'Allow once' }, { label: 'Deny' }], to: grant.chat, noNote: true,
-      screen: JSON.stringify(input.input, null, 2)?.slice(0, 16_000) }]
-    const rows = questions.map((question): Permission => ({ id: question.id, chat: grant.chat, grant: grant.id, question, expires: request.expires, at: Number.isFinite(input.at) ? input.at : Date.now(), tool: input.tool, hash: toolHash(input.input), turn: input.turn, sub: input.agent, ...(native ? { native: { ...native.native, head: input.id! } } : {}) }))
+    const { grants, ...offered } = permissionChoices(agent.kind === 'claude' ? input.suggestions : undefined)
+    const questions = native?.questions ?? [{ id: input.id, ...permissionWords(input.tool, input.input), kind: 'Question' as const, ...offered, to: grant.chat, noNote: true }]
+    const rows = questions.map((question): Permission => ({ id: question.id, chat: grant.chat, grant: grant.id, question, expires: request.expires, at: Number.isFinite(input.at) ? input.at : Date.now(), tool: input.tool, hash: toolHash(input.input), turn: input.turn, sub: input.agent, ...(native ? { native: { ...native.native, head: input.id! } } : { grants }) }))
     const permission = rows[0], question = permission.question
     // Posting a card reconciles it, and after a reconnect its end can be on record already: the wait comes first.
     const answered = new Promise<PermissionAnswer>(resolve => {
@@ -776,7 +777,7 @@ Use hc for starting, messaging and waiting on core child agents. Never use a web
     if (!waiting()) return answered
     const task = this.tasks.forChat(grant.chat)
     this.emit('alert', { id: input.id, from: 'Shepherdr', ...(native ? askText(task?.id || this.space(agent.space)?.name || 'Shepherdr', question) : { title: question.title, body: 'Waiting for your permission' }), go: { place: agent.space, focus: input.id }, tag: grant.chat,
-      card: { chat: grant.chat, question: input.id, choices: native ? quickChoices(question) : question.choices.map((choice, index) => ({ label: choice.label, choice: index })) } })
+      card: { chat: grant.chat, question: input.id, choices: quickChoices(question) } })
     return answered
   }
 

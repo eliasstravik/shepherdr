@@ -4,9 +4,11 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { CoreSource } from '../server/core/source.ts'
-import { nativeAnswer, nativeCards, type PermissionAnswer } from '../server/core/native-asks.ts'
+import { nativeAnswer, nativeCards, permissionChoices, permissionWords, type PermissionAnswer } from '../server/core/native-asks.ts'
 import { toolHash } from '../server/core/envelope.ts'
 import type { AgentHook, CoreAgent } from '../server/core/model.ts'
+import type { LogEvent } from '../server/common/readers/types.ts'
+import { words } from '../shared/activity.ts'
 import type { Grant, MailRequest } from '../server/core/mailbox.ts'
 
 const chat = 'EX-1/Agent'
@@ -16,9 +18,9 @@ function fixture(kind: 'claude' | 'codex' = 'claude', permissionMode?: string) {
   source.store.set('space', 'space', { id: 'space', name: 'Example', machine: 'machine', folder: '/unused', prefix: 'EX', mode: 'regular', added: 1 })
   source.store.set('agent', chat, { chat, space: 'space', machine: 'machine', role: 'task', kind, launch: 'one', grant: 'current', state: 'working', started: 1, hook: '/unused', permissionMode })
   source.store.set('task', 'EX-1', { id: 'EX-1', chat, place: 'space', machine: 'machine', name: 'Example', folder: '/unused', workflow: 'todo', review: { on: false }, age: 'now', created: new Date().toISOString(), kind })
-  const ask = (tool: string, input: unknown, at = Date.now()) => {
+  const ask = (tool: string, input: unknown, at = Date.now(), suggestions?: unknown) => {
     const id = randomUUID(), agent = source.store.get<CoreAgent>('agent', chat)!
-    const reply = source.requestPermission(agent, { id: 'current', chat } as Grant, { args: { id, tool, input, at }, expires: Date.now() + 60_000 } as unknown as MailRequest, id) as Promise<PermissionAnswer> | PermissionAnswer
+    const reply = source.requestPermission(agent, { id: 'current', chat } as Grant, { args: { id, tool, input, at, suggestions }, expires: Date.now() + 60_000 } as unknown as MailRequest, id) as Promise<PermissionAnswer> | PermissionAnswer
     return { id, reply: Promise.resolve(reply) }
   }
   return { source, ask, close() { source.stop(); source.mailbox.close(); source.store.close(); rmSync(home, { recursive: true, force: true }) } }
@@ -149,5 +151,84 @@ test('an answer in the terminal closes the card, and earlier hooks do not', asyn
     expect((await reply).allow).toBe(false)
     const card = f.source.chat(chat)!.messages.find(message => message.question)!.question!
     expect(card.closed).toBe('Answered in the terminal')
+  } finally { f.close() }
+})
+
+const rule = { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'curl -sI https://example.com' }], behavior: 'allow', destination: 'localSettings' }
+
+test('a permission card says what it would do in words, whole, never as code', () => {
+  expect(permissionWords('Bash', { command: 'touch hello.txt', description: 'Create empty hello.txt' })).toEqual({ title: 'Run: touch hello.txt', screen: 'Create empty hello.txt' })
+  const long = `printf one\n${'x'.repeat(200)}`, cut = permissionWords('Bash', { command: long })
+  expect(cut.title.length).toBeLessThan(130)
+  expect(cut.screen).toBe(long)
+  expect(permissionWords('Write', { file_path: '/w/a/b.txt', content: 'hi' })).toEqual({ title: 'Write: b.txt', screen: '/w/a/b.txt\n\nhi' })
+  expect(permissionWords('Edit', { file_path: '/w/b.txt', old_string: 'a', new_string: 'b' })).toEqual({ title: 'Edit: b.txt', screen: '/w/b.txt\n\n- a\n+ b' })
+  expect(permissionWords('WebFetch', { url: 'https://example.com/', prompt: 'Sum it up' })).toEqual({ title: 'Open: https://example.com/', screen: 'Sum it up' })
+  expect(permissionWords('mcp__github__create_pull_request', { repo: 'a/b', draft: true, labels: ['x'] })).toEqual({ title: 'Use create pull request', screen: 'repo: a/b\ndraft: true\nlabels: ["x"]' })
+  expect(permissionWords(undefined, undefined)).toEqual({ title: 'Use a tool', screen: undefined })
+})
+
+test('the CLI\'s own grants become one choice between Allow once and Deny, each said in words', () => {
+  expect(permissionChoices(undefined)).toEqual({ choices: [{ label: 'Allow once' }, { label: 'Deny' }] })
+  expect(permissionChoices([rule]).choices.map(choice => choice.description ?? choice.label)).toEqual(['Allow once', 'Run curl -sI https://example.com in this project', 'Deny'])
+  const said = (grant: unknown) => permissionChoices([grant]).choices[1].description
+  expect(said({ type: 'addRules', rules: [{ toolName: 'WebFetch', ruleContent: 'domain:example.com' }], behavior: 'allow', destination: 'localSettings' })).toBe('example.com in this project')
+  expect(said({ type: 'addRules', rules: [{ toolName: 'Read', ruleContent: '//etc/**' }], behavior: 'allow', destination: 'session' })).toBe('Read /etc this session')
+  expect(said({ type: 'setMode', mode: 'acceptEdits', destination: 'session' })).toBe('All edits this session')
+  expect(said({ type: 'addDirectories', directories: ['/w'], destination: 'session' })).toBe('Files in /w this session')
+  // What the card can't say it doesn't offer.
+  for (const grant of [{ type: 'setMode', mode: 'bypassPermissions', destination: 'session' }, { ...rule, behavior: 'deny' }, { ...rule, destination: 'elsewhere' }, { type: 'removeRules' }, 'text', { ...rule, rules: [{ toolName: 'Bash', ruleContent: 'x'.repeat(2000) }] }])
+    expect(permissionChoices([grant]).choices).toHaveLength(2)
+})
+
+test('Don\'t ask again hands the CLI its own grants, for that reply alone; the alert offers only Allow once and Deny', async () => {
+  const f = fixture()
+  try {
+    const alerts: { card?: { choices: { label: string }[] } }[] = []
+    f.source.on('alert', alert => alerts.push(alert as typeof alerts[number]))
+    const again = f.ask('Bash', { command: 'curl -sI https://example.com' }, Date.now(), [rule, { type: 'somethingNew' }])
+    expect(f.source.chat(chat)!.messages.find(message => message.question)!.question).toMatchObject({ title: 'Run: curl -sI https://example.com', always: 1, kind: 'Question', noNote: true })
+    expect(alerts[0].card!.choices.map(choice => choice.label)).toEqual(['Allow once', 'Deny'])
+    await f.source.act(answer(again.id, 1))
+    expect(await again.reply).toEqual({ allow: true, updatedPermissions: [rule] })
+    // The same call again, after a dropped reply, gets the same answer.
+    const agent = f.source.store.get<CoreAgent>('agent', chat)!
+    expect(await f.source.requestPermission(agent, { id: 'current', chat } as Grant, { args: { id: again.id }, expires: Date.now() + 60_000 } as unknown as MailRequest, again.id)).toEqual({ allow: true, updatedPermissions: [rule] })
+    const once = f.ask('Bash', { command: 'ls' }, Date.now(), [rule])
+    await f.source.act(answer(once.id, 0))
+    expect(await once.reply).toEqual({ allow: true })
+    const no = f.ask('Bash', { command: 'ls' }, Date.now(), [rule])
+    await f.source.act(answer(no.id, 2))
+    expect(await no.reply).toEqual({ allow: false })
+    const off = f.ask('Bash', { command: 'ls' })
+    await expect(f.source.act(answer(off.id, 2))).rejects.toThrow('Choose one')
+    await f.source.act(answer(off.id, 1))
+    expect(await off.reply).toEqual({ allow: false })
+  } finally { f.close() }
+})
+
+test('a step held at its card says Wants to above the card, and in the turn opened', async () => {
+  const f = fixture()
+  try {
+    const log = (event: LogEvent) => f.source.store.set(`event:${chat}`, `${event.id}${event.kind}`, event)
+    log({ kind: 'turn-start', id: 'turn', at: 1 })
+    log({ kind: 'user', id: 'asked', at: 1, text: 'Make the file' })
+    log({ kind: 'step', id: 'touch', at: 2, step: 'run', tool: 'Bash', ...words('Create empty hello.txt') })
+    const messages = [{ id: 'asked', who: 'you' as const, text: 'Make the file', at: 1 }]
+    const { id, reply } = f.ask('Bash', { command: 'touch hello.txt' })
+    const row = f.source.activities.chat(chat, messages, false).messages.find(message => message.activity)!.activity!
+    expect(row.rows.map(item => item.text)).toEqual(['Wants to create empty hello.txt'])
+    expect(await f.source.activity({ chat, what: 'turn', id: 'turn' })).toMatchObject({ steps: [{ id: 'touch', title: 'Wants to create empty hello.txt', unrun: true }] })
+    await f.source.act(answer(id, 0))
+    await reply
+    expect(f.source.activities.chat(chat, messages, true).live!.rows.map(item => item.text)).toEqual(['Creating empty hello.txt'])
+  } finally { f.close() }
+})
+
+test('Codex can\'t take a grant from a hook, so its card stays Allow once and Deny', () => {
+  const f = fixture('codex')
+  try {
+    const { id } = f.ask('Bash', { command: 'touch a', description: 'Allow creating a?' }, Date.now(), [rule])
+    expect(f.source.chat(chat)!.messages.find(message => message.question?.id === id)!.question).toMatchObject({ title: 'Run: touch a', screen: 'Allow creating a?', choices: [{ label: 'Allow once' }, { label: 'Deny' }] })
   } finally { f.close() }
 })
