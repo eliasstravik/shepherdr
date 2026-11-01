@@ -126,12 +126,18 @@ export function claudeSealedLogin(text: string) {
   return JSON.stringify({ claudeAiOauth: login })
 }
 
-/** Where Claude Code keeps its login in the Keychain: its own name for a config folder that isn't the default. */
+/** Where Claude Code keeps its login in the Keychain: its own name for a folder that isn't the default. Its secure store's setting comes first, even empty. */
 export function claudeKeychainItem(env: Record<string, string | undefined>) {
-  const custom = env.CLAUDE_CONFIG_DIR?.normalize('NFC')
+  const custom = (env.CLAUDE_SECURESTORAGE_CONFIG_DIR ?? env.CLAUDE_CONFIG_DIR)?.normalize('NFC')
   let account = env.USER
   try { account ||= userInfo().username } catch {}
   return { service: `Claude Code-credentials${custom ? `-${createHash('sha256').update(custom).digest('hex').slice(0, 8)}` : ''}`, account: account && /^[a-zA-Z0-9._-]+$/.test(account) ? account : 'claude-code-user' }
+}
+
+/** The login file beside that Keychain item, by the same setting: empty is the default folder. */
+export function claudeLoginFile(env: Record<string, string | undefined>, config: string) {
+  const secure = env.CLAUDE_SECURESTORAGE_CONFIG_DIR
+  return join(secure === undefined ? config : secure || join(homedir(), '.claude'), '.credentials.json')
 }
 
 /** Codex renews by its token's expiry or, as a rule, every eight days. */
@@ -222,7 +228,7 @@ async function claude(now: () => number, host: Host): Promise<CliLimits | undefi
   if (missing) return { state: 'unknown', why: missing }
   const config = host.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
   if (!host.exists(config)) return { state: 'signed-out' }
-  const login = join(config, '.credentials.json')
+  const login = mac(host) ? claudeLoginFile(host.env, config) : join(config, '.credentials.json')
   const file = host.exists(login) ? readFileSync(login, 'utf8') : null
   const command = quiet(host, [binary, '-p', '/usage', '--output-format', 'json', '--no-session-persistence', '--setting-sources', '', '--strict-mcp-config'])
   if (!mac(host)) {

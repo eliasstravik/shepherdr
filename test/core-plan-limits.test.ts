@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { claudeKeychainItem, claudeLoginDue, claudeMacLogin, claudeReset, claudeSealedLogin, codexLoginDue, MAC_PROFILE, macSealArgs, parseClaude, parseCodex, read, sealArgs, type Host } from '../helper/core-plan-limits.ts'
+import { claudeKeychainItem, claudeLoginDue, claudeLoginFile, claudeMacLogin, claudeReset, claudeSealedLogin, codexLoginDue, MAC_PROFILE, macSealArgs, parseClaude, parseCodex, read, sealArgs, type Host } from '../helper/core-plan-limits.ts'
 import { CorePlanLimits, nextRead } from '../server/core/plan-limits.ts'
 import { CoreStore } from '../server/core/store.ts'
 import type { CoreSource } from '../server/core/source.ts'
@@ -98,7 +98,13 @@ test('the login a sealed CLI gets has no way to renew', () => {
 test('the Keychain item is named as Claude Code names it', () => {
   expect(claudeKeychainItem({ USER: 'elias' })).toEqual({ service: 'Claude Code-credentials', account: 'elias' })
   expect(claudeKeychainItem({ USER: 'el ias' }).account).toBe('claude-code-user')
-  expect(claudeKeychainItem({ USER: 'elias', CLAUDE_CONFIG_DIR: '/h/.other' }).service).toMatch(/^Claude Code-credentials-[0-9a-f]{8}$/)
+  const other = claudeKeychainItem({ USER: 'elias', CLAUDE_CONFIG_DIR: '/h/.other' }).service
+  expect(other).toMatch(/^Claude Code-credentials-[0-9a-f]{8}$/)
+  expect(claudeKeychainItem({ USER: 'elias', CLAUDE_SECURESTORAGE_CONFIG_DIR: '/h/.other', CLAUDE_CONFIG_DIR: '/h/.else' }).service).toBe(other) // Its secure store's setting comes first.
+  expect(claudeKeychainItem({ USER: 'elias', CLAUDE_SECURESTORAGE_CONFIG_DIR: '', CLAUDE_CONFIG_DIR: '/h/.other' }).service).toBe('Claude Code-credentials') // Even empty.
+  expect(claudeLoginFile({ CLAUDE_SECURESTORAGE_CONFIG_DIR: '/s' }, '/c')).toBe('/s/.credentials.json')
+  expect(claudeLoginFile({ CLAUDE_SECURESTORAGE_CONFIG_DIR: '' }, '/c')).toBe(join(homedir(), '.claude/.credentials.json'))
+  expect(claudeLoginFile({}, '/c')).toBe('/c/.credentials.json')
 })
 
 const RENEWAL = { state: 'unknown' as const, why: 'Its sign-in is due for renewal: the next agent here will do it' }
@@ -233,8 +239,15 @@ test('with a login in both places the CLI gets only the Keychain\'s, unrenewable
   expect(existsSync(state)).toBe(false)
 }, { keychain: [FRESH, 0], claude: DUE }))
 
-test('a login only in the file goes the same way; a custom secure store can\'t lead the CLI back to a real one', () => machine(async ({ host, started }) => {
-  host.env.CLAUDE_SECURESTORAGE_CONFIG_DIR = '/elsewhere'
+test('a custom secure store is the one checked, and the CLI can\'t be led back to it', () => machine(async ({ host, started, clis, dir }) => {
+  const store = join(dir, 'store')
+  mkdirSync(store)
+  writeFileSync(join(store, '.credentials.json'), DUE)
+  host.env.CLAUDE_SECURESTORAGE_CONFIG_DIR = store
+  expect((await read(() => NOW, host)).claude).toEqual(RENEWAL) // The default folder's login is fresh.
+  expect(clis().filter(words => words.includes('claude'))).toEqual([])
+  expect(started.find(entry => entry.argv.includes('find-generic-password'))!.argv).toContain(claudeKeychainItem({ CLAUDE_SECURESTORAGE_CONFIG_DIR: store }).service)
+  writeFileSync(join(store, '.credentials.json'), FRESH)
   await read(() => NOW, host)
   const run = started.find(entry => entry.argv.includes('/bin/claude'))!
   expect(JSON.parse(run.config!['.credentials.json']).claudeAiOauth.refreshToken).toBeUndefined()
