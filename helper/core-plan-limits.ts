@@ -179,13 +179,16 @@ const noSeal = (host: Host) => mac(host) ? (host.exists(SANDBOX) ? undefined : N
 async function openMacSeal(host: Host, tls = false) {
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'shepherdr-limits-'))), open = join(folder, 'open'), shut = join(folder, 'shut')
   const close = () => rmSync(folder, { recursive: true, force: true })
-  mkdirSync(open)
-  mkdirSync(shut)
-  const proof = host.spawn(macSealArgs(['/bin/sh', '-c', PROOF, 'proof', open, shut], open, tls), { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
-  const limit = setTimeout(() => proof.kill('SIGKILL'), 10_000)
-  const code = await proof.exited.finally(() => clearTimeout(limit))
-  if (code === 0 && !proof.signalCode && existsSync(join(open, 'proof')) && !existsSync(join(shut, 'proof'))) return { open, close, wrap: (command: string[]) => macSealArgs(command, open, tls) }
-  close()
+  let holds = false
+  try {
+    mkdirSync(open)
+    mkdirSync(shut)
+    const proof = host.spawn(macSealArgs(['/bin/sh', '-c', PROOF, 'proof', open, shut], open, tls), { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
+    const limit = setTimeout(() => proof.kill('SIGKILL'), 10_000)
+    const code = await proof.exited.finally(() => clearTimeout(limit))
+    holds = code === 0 && !proof.signalCode && existsSync(join(open, 'proof')) && !existsSync(join(shut, 'proof'))
+    return holds ? { open, close, wrap: (command: string[]) => macSealArgs(command, open, tls) } : undefined
+  } finally { if (!holds) close() }
 }
 
 /** The login as the CLI's own read sees it, kept in memory only. null: no such item. Anything else that isn't it refuses. */

@@ -104,6 +104,7 @@ test('the Keychain item is named as Claude Code names it', () => {
   expect(claudeKeychainItem({ USER: 'elias', CLAUDE_CONFIG_DIR: '/h/.other' }).service).toMatch(/^Claude Code-credentials-[0-9a-f]{8}$/)
 })
 
+const RENEWAL = { state: 'unknown', why: 'Its sign-in is due for renewal: the next agent here will do it' }
 const FRESH = JSON.stringify({ claudeAiOauth: { accessToken: 'secret-access', refreshToken: 'secret-refresh', expiresAt: NOW + 7 * 3_600_000 } })
 const DUE = JSON.stringify({ claudeAiOauth: { accessToken: 'secret-access', refreshToken: 'secret-refresh', expiresAt: NOW + 60_000 } })
 const CODEX_LOGIN = JSON.stringify({ tokens: { access_token: `x.${Buffer.from(JSON.stringify({ exp: (NOW + 3 * 86_400_000) / 1000 })).toString('base64url')}.x` }, last_refresh: new Date(NOW - 86_400_000).toISOString() })
@@ -115,7 +116,7 @@ const REPLIES: Record<string, string> = {
 interface Started { argv: string[]; env?: Record<string, string | undefined>; cwd?: string; state?: Record<string, string>; config?: Record<string, string> }
 
 /** A machine of any platform, with real login files in a folder and nothing real run: the seal's own proof is acted out as `seal` says. */
-async function machine(run: (context: { host: Host; started: Started[]; clis: () => string[]; dir: string; files: { claude: string; codex: string } }) => Promise<void>, options: { platform?: string; has?: string[]; sandbox?: boolean; seal?: 'holds' | 'leaks' | 'dead'; keychain?: [string, number]; claude?: string | null; codex?: string | null } = {}) {
+async function machine(run: (context: { host: Host; started: Started[]; clis: () => string[]; dir: string; files: { claude: string; codex: string } }) => Promise<void>, options: { platform?: string; has?: string[]; sandbox?: boolean; seal?: 'holds' | 'leaks' | 'dead' | 'throws'; keychain?: [string, number]; claude?: string | null; codex?: string | null } = {}) {
   const { platform = 'darwin', has = ['claude', 'codex'], sandbox = true, seal = 'holds', keychain = ['', 44], claude = FRESH, codex = CODEX_LOGIN } = options
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'shep-mac-'))), config = join(dir, 'claude'), home = join(dir, 'codex'), started: Started[] = []
   mkdirSync(config)
@@ -135,6 +136,7 @@ async function machine(run: (context: { host: Host; started: Started[]; clis: ()
       if (words[0] === '/bin/sh') {
         const [open, shut] = words.slice(4)
         if (seal === 'dead') return finished('', 71)
+        if (seal === 'throws') throw new Error('no such file')
         writeFileSync(join(open, 'proof'), '')
         if (seal === 'leaks') writeFileSync(join(shut, 'proof'), '')
         return finished('', 0)
@@ -197,14 +199,20 @@ for (const seal of ['dead', 'leaks'] as const) test(`a seal that ${seal === 'dea
   for (const entry of started.filter(entry => entry.argv[0] === '/usr/bin/sandbox-exec')) expect(existsSync(entry.argv.find(word => word.startsWith('-DOPEN='))!.slice(7))).toBe(false)
 }, { seal }))
 
+test('a seal that can\'t even be started leaves no folder behind, and no CLI runs', () => machine(async ({ host, clis, started }) => {
+  expect((await read(() => NOW, host)).claude).toEqual({ state: 'unknown', why: "Couldn't run it" })
+  expect(clis()).toEqual([])
+  for (const entry of started.filter(entry => entry.argv[0] === '/usr/bin/sandbox-exec')) expect(existsSync(entry.argv.find(word => word.startsWith('-DOPEN='))!.slice(7))).toBe(false)
+}, { seal: 'throws' }))
+
 test('a login due in the Keychain stops the CLI, whatever the file says', () => machine(async ({ host, clis, started }) => {
-  expect((await read(() => NOW, host)).claude).toMatchObject({ state: 'unknown', why: expect.stringContaining('due for renewal') })
+  expect((await read(() => NOW, host)).claude).toEqual(RENEWAL)
   expect(clis().filter(words => words.includes('claude'))).toEqual([])
   expect(started.filter(entry => entry.argv.join(' ').includes('Claude Code-credentials'))).toHaveLength(1)
 }, { keychain: [DUE, 0], claude: FRESH }))
 
 test('a login due in the file stops the CLI when the Keychain has none', () => machine(async ({ host, clis }) => {
-  expect((await read(() => NOW, host)).claude).toMatchObject({ state: 'unknown', why: expect.stringContaining('due for renewal') })
+  expect((await read(() => NOW, host)).claude).toEqual(RENEWAL)
   expect(clis().filter(words => words.includes('claude'))).toEqual([])
 }, { claude: DUE }))
 
@@ -256,7 +264,7 @@ test('Codex on a Mac gets a throwaway home with links to its login and config, a
 test('Codex on a Mac with a login due, or with no login file to check, isn\'t run', async () => {
   const due = JSON.stringify({ tokens: { access_token: 'x.e30.x' } })
   await machine(async ({ host, clis }) => {
-    expect((await read(() => NOW, host)).codex).toMatchObject({ state: 'unknown', why: expect.stringContaining('due for renewal') })
+    expect((await read(() => NOW, host)).codex).toEqual(RENEWAL)
     expect(clis().filter(words => words.includes('codex'))).toEqual([])
   }, { codex: due })
   await machine(async ({ host, clis }) => {
