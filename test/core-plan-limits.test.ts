@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { claudeLoginDue, claudeReset, codexLoginDue, parseClaude, parseCodex, sealArgs } from '../helper/core-plan-limits.ts'
+import { claudeKeychainItem, claudeLoginDue, claudeLoginFile, claudeMacLogin, claudeReset, claudeSealedLogin, codexLoginDue, MAC_PROFILE, macSealArgs, parseClaude, parseCodex, read, sealArgs, type Host } from '../helper/core-plan-limits.ts'
 import { CorePlanLimits, nextRead } from '../server/core/plan-limits.ts'
 import { CoreStore } from '../server/core/store.ts'
 import type { CoreSource } from '../server/core/source.ts'
@@ -71,6 +71,216 @@ test('a login near its end isn\'t read, since a seal can\'t save its renewal', (
   expect(codexLoginDue(codex(NOW + 60_000, 1), NOW)).toBe(true)
   expect(codexLoginDue('{"tokens":null}', NOW)).toBe(false) // An API key.
   expect(codexLoginDue('{"tokens":{}}', NOW)).toBe(true)
+})
+
+test('the Mac seal leaves only its throwaway folder writable and keeps the Keychain out of reach', () => {
+  const rules = MAC_PROFILE.split('\n')
+  expect(rules.slice(0, 5)).toEqual(['(version 1)', '(allow default)', '(deny file-write*)', '(deny user-preference-write)', '(deny process-exec (literal "/usr/bin/security"))']) // The last rule that matches wins.
+  expect(rules.filter(rule => rule.startsWith('(allow file-write*'))).toEqual(['(allow file-write* (subpath (param "OPEN")))'])
+  expect(rules.filter(rule => rule.startsWith('(allow')).join(' ').match(/"\/[^"]+"/g)).toEqual(['"/dev/null"', '"/dev/zero"', '"/dev/tty"']) // No real path but these devices.
+  expect(MAC_PROFILE).toContain('(deny mach-lookup (global-name "com.apple.SecurityServer") (global-name "com.apple.securityd.xpc"))')
+  expect(macSealArgs(['claude', '-p'], '/o')).toEqual(['/usr/bin/sandbox-exec', '-p', MAC_PROFILE, '-DOPEN=/o', '--', 'claude', '-p'])
+})
+
+test('a Mac\'s Keychain login decides; the file counts only when the Keychain has none', () => {
+  const login = '{"claudeAiOauth":{"expiresAt":1}}'
+  expect(claudeMacLogin(login, '{"claudeAiOauth":{"expiresAt":2}}')).toBe(login)
+  expect(claudeMacLogin(null, login)).toBe(login)
+  expect(claudeMacLogin('{"mcpOAuth":{}}', login)).toBe(login) // Not Claude Code's login.
+  expect(claudeMacLogin('{broken', login)).toBe('{broken') // Unreadable counts as due, next.
+  expect(claudeMacLogin(null, null)).toBeNull()
+})
+
+test('the login a sealed CLI gets has no way to renew', () => {
+  expect(JSON.parse(claudeSealedLogin(JSON.stringify({ claudeAiOauth: { accessToken: 'a', refreshToken: 'r', expiresAt: 5, scopes: ['x'], subscriptionType: 'max' }, mcpOAuth: { other: 1 } })))).toEqual({ claudeAiOauth: { accessToken: 'a', expiresAt: 5, scopes: ['x'], subscriptionType: 'max' } })
+})
+
+test('the Keychain item is named as Claude Code names it', () => {
+  expect(claudeKeychainItem({ USER: 'elias' })).toEqual({ service: 'Claude Code-credentials', account: 'elias' })
+  expect(claudeKeychainItem({ USER: 'el ias' }).account).toBe('claude-code-user')
+  const other = claudeKeychainItem({ USER: 'elias', CLAUDE_CONFIG_DIR: '/h/.other' }).service
+  expect(other).toMatch(/^Claude Code-credentials-[0-9a-f]{8}$/)
+  expect(claudeKeychainItem({ USER: 'elias', CLAUDE_SECURESTORAGE_CONFIG_DIR: '/h/.other', CLAUDE_CONFIG_DIR: '/h/.else' }).service).toBe(other) // Its secure store's setting comes first.
+  expect(claudeKeychainItem({ USER: 'elias', CLAUDE_SECURESTORAGE_CONFIG_DIR: '', CLAUDE_CONFIG_DIR: '/h/.other' }).service).toBe('Claude Code-credentials') // Even empty.
+  expect(claudeLoginFile({ CLAUDE_SECURESTORAGE_CONFIG_DIR: '/s' }, '/c')).toBe('/s/.credentials.json')
+  expect(claudeLoginFile({ CLAUDE_SECURESTORAGE_CONFIG_DIR: '' }, '/c')).toBe(join(homedir(), '.claude/.credentials.json'))
+  expect(claudeLoginFile({}, '/c')).toBe('/c/.credentials.json')
+})
+
+const RENEWAL = { state: 'unknown' as const, why: 'Its sign-in is due for renewal: the next agent here will do it' }
+const FRESH = JSON.stringify({ claudeAiOauth: { accessToken: 'secret-access', refreshToken: 'secret-refresh', expiresAt: NOW + 7 * 3_600_000 } })
+const DUE = JSON.stringify({ claudeAiOauth: { accessToken: 'secret-access', refreshToken: 'secret-refresh', expiresAt: NOW + 60_000 } })
+const CODEX_LOGIN = JSON.stringify({ tokens: { access_token: `x.${Buffer.from(JSON.stringify({ exp: (NOW + 3 * 86_400_000) / 1000 })).toString('base64url')}.x` }, last_refresh: new Date(NOW - 86_400_000).toISOString() })
+const REPLIES: Record<string, string> = {
+  claude: JSON.stringify({ result: 'Current week (all models): 10% used' }),
+  codex: `${JSON.stringify({ id: 2, result: { account: { type: 'chatgpt', planType: 'pro' } } })}\n${JSON.stringify({ id: 3, result: { rateLimits: { limitId: 'codex', primary: { usedPercent: 12, windowDurationMins: 300 } } } })}\n`,
+}
+
+interface Started { argv: string[]; env?: Record<string, string | undefined>; cwd?: string; state?: Record<string, string>; config?: Record<string, string> }
+
+/** A machine of any platform, with real login files in a folder and nothing real run: the seal's own proof is acted out as `seal` says. */
+async function machine(run: (context: { host: Host; started: Started[]; clis: () => string[]; dir: string; files: { claude: string; codex: string } }) => Promise<void>, options: { platform?: string; has?: string[]; sandbox?: boolean; seal?: 'holds' | 'leaks' | 'dead' | 'throws'; keychain?: [string, number]; claude?: string | null; codex?: string | null } = {}) {
+  const { platform = 'darwin', has = ['claude', 'codex'], sandbox = true, seal = 'holds', keychain = ['', 44], claude = FRESH, codex = CODEX_LOGIN } = options
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'shep-mac-'))), config = join(dir, 'claude'), home = join(dir, 'codex'), started: Started[] = []
+  mkdirSync(config)
+  mkdirSync(home)
+  writeFileSync(join(home, 'config.toml'), 'model = "x"')
+  if (claude !== null) writeFileSync(join(config, '.credentials.json'), claude)
+  if (codex !== null) writeFileSync(join(home, 'auth.json'), codex)
+  const finished = (stdout: string, code: number) => ({ stdin: { write() {}, flush() {} }, stdout: new Response(stdout).body!, exited: Promise.resolve(code), signalCode: null, kill() {} })
+  const host: Host = {
+    platform, env: { USER: 'me', CLAUDE_CONFIG_DIR: config, CODEX_HOME: home }, exists: path => path === '/usr/bin/sandbox-exec' ? sandbox : existsSync(path),
+    which: name => has.includes(name) ? `/bin/${name}` : null,
+    spawn(argv, spawned) {
+      const words = argv.includes('--') ? argv.slice(argv.indexOf('--') + 1) : argv
+      if (words[0] === '/usr/bin/security') { started.push({ argv }); return finished(keychain[0], keychain[1]) }
+      const entry: Started = { argv, env: spawned.env, cwd: spawned.cwd }
+      started.push(entry)
+      if (words[0] === '/bin/sh') {
+        const [open, shut] = words.slice(4)
+        if (seal === 'dead') return finished('', 71)
+        if (seal === 'throws') throw new Error('no such file')
+        writeFileSync(join(open, 'proof'), '')
+        if (seal === 'leaks') writeFileSync(join(shut, 'proof'), '')
+        return finished('', 0)
+      }
+      const state = spawned.env?.CODEX_HOME
+      const held = spawned.env?.CLAUDE_CONFIG_DIR
+      if (held && words[0] === '/bin/claude') entry.config = Object.fromEntries(readdirSync(held).map(name => [name, readFileSync(join(held, name), 'utf8')]))
+      if (state) entry.state = Object.fromEntries(readdirSync(state).filter(name => lstatSync(join(state, name)).isSymbolicLink()).map(name => [name, readlinkSync(join(state, name))]))
+      return finished(REPLIES[words[0].split('/').pop()!] ?? '', 0)
+    },
+  }
+  try { await run({ host, started, dir, files: { claude: join(config, '.credentials.json'), codex: join(home, 'auth.json') }, clis: () => started.map(entry => entry.argv.join(' ')).filter(words => /\/bin\/(claude|codex)/.test(words)) }) }
+  finally { rmSync(dir, { recursive: true, force: true }) }
+}
+
+test('a Mac runs both CLIs in sandbox-exec and never bwrap; the proof comes first', () => machine(async ({ host, started, dir }) => {
+  expect(await read(() => NOW, host)).toEqual({ claude: { state: 'ok', windows: [{ name: 'Weekly (all models)', used: 10 }] }, codex: { state: 'ok', plan: 'pro', windows: [{ name: '5-hour', used: 12 }] } })
+  const sealed = started.filter(entry => entry.argv[0] !== '/usr/bin/security')
+  expect(sealed.every(entry => entry.argv[0] === '/usr/bin/sandbox-exec')).toBe(true)
+  for (const cli of ['claude', 'codex']) {
+    const at = (test: (words: string) => boolean) => sealed.findIndex(entry => test(entry.argv.join(' ')))
+    const run = sealed[at(words => words.includes(`-- /bin/${cli}`))]
+    const open = run.argv.find(word => word.startsWith('-DOPEN='))!.slice(7)
+    expect(at(words => words.includes(`-DOPEN=${open}`) && words.includes('/bin/sh'))).toBeLessThan(sealed.indexOf(run))
+    expect(run.cwd).toBe(open)
+    expect(run.env?.TMPDIR).toBe(open)
+    expect(existsSync(open)).toBe(false) // Gone once read.
+  }
+  expect(readdirSync(dir).sort()).toEqual(['claude', 'codex'])
+}))
+
+test('Linux keeps bwrap, as it was: no sandbox-exec, no Keychain, no proof', () => machine(async ({ host, started, dir }) => {
+  await read(() => NOW, host)
+  const claude = started.find(entry => entry.argv.includes('/bin/claude'))!
+  expect(claude.argv).toEqual(sealArgs(['/bin/claude', '-p', '/usage', '--output-format', 'json', '--no-session-persistence', '--setting-sources', '', '--strict-mcp-config']))
+  expect(claude.env).toMatchObject({ TMPDIR: '/tmp', TZ: 'UTC' })
+  const codex = started.find(entry => entry.argv.includes('/bin/codex'))!
+  expect(codex.argv.slice(0, 1)).toEqual(['bwrap'])
+  expect(codex.argv.slice(codex.argv.indexOf('--') + 1)).toEqual(['/bin/codex', 'app-server', '--disable', 'plugins'])
+  expect(codex.argv).toContain(join(dir, 'codex', 'auth.json'))
+  expect(codex.env).toBeUndefined()
+  expect(started).toHaveLength(2)
+}, { platform: 'linux', has: ['claude', 'codex', 'bwrap'] }))
+
+test('Linux with no bwrap still says so and runs nothing', () => machine(async ({ host, started }) => {
+  expect(await read(() => NOW, host)).toEqual({ claude: { state: 'unknown', why: "Can't read it safely here: bwrap is missing" }, codex: { state: 'unknown', why: "Can't read it safely here: bwrap is missing" } })
+  expect(started).toEqual([])
+}, { platform: 'linux' }))
+
+test('a Mac with no sandbox-exec runs nothing, not even the Keychain read', () => machine(async ({ host, started }) => {
+  expect(await read(() => NOW, host)).toEqual({ claude: { state: 'unknown', why: "Can't read it safely here: sandbox-exec is missing" }, codex: { state: 'unknown', why: "Can't read it safely here: sandbox-exec is missing" } })
+  expect(started).toEqual([])
+}, { sandbox: false }))
+
+for (const seal of ['dead', 'leaks'] as const) test(`a seal that ${seal === 'dead' ? 'won\'t start' : 'lets a write through'} refuses: no CLI runs, and the folder goes`, () => machine(async ({ host, clis, started }) => {
+  const result = await read(() => NOW, host)
+  expect(result.claude).toEqual({ state: 'unknown', why: "Can't read it safely here: the Mac seal wouldn't hold" })
+  expect(result.codex).toEqual({ state: 'unknown', why: "Can't read it safely here: the Mac seal wouldn't hold" })
+  expect(clis()).toEqual([])
+  for (const entry of started.filter(entry => entry.argv[0] === '/usr/bin/sandbox-exec')) expect(existsSync(entry.argv.find(word => word.startsWith('-DOPEN='))!.slice(7))).toBe(false)
+}, { seal }))
+
+test('a seal that can\'t even be started leaves no folder behind, and no CLI runs', () => machine(async ({ host, clis, started }) => {
+  expect((await read(() => NOW, host)).claude).toEqual({ state: 'unknown', why: "Couldn't run it" })
+  expect(clis()).toEqual([])
+  for (const entry of started.filter(entry => entry.argv[0] === '/usr/bin/sandbox-exec')) expect(existsSync(entry.argv.find(word => word.startsWith('-DOPEN='))!.slice(7))).toBe(false)
+}, { seal: 'throws' }))
+
+test('a login due in the Keychain stops the CLI, whatever the file says', () => machine(async ({ host, clis, started }) => {
+  expect((await read(() => NOW, host)).claude).toEqual(RENEWAL)
+  expect(clis().filter(words => words.includes('claude'))).toEqual([])
+  expect(started.filter(entry => entry.argv.join(' ').includes('Claude Code-credentials'))).toHaveLength(1)
+}, { keychain: [DUE, 0], claude: FRESH }))
+
+test('a login due in the file stops the CLI when the Keychain has none', () => machine(async ({ host, clis }) => {
+  expect((await read(() => NOW, host)).claude).toEqual(RENEWAL)
+  expect(clis().filter(words => words.includes('claude'))).toEqual([])
+}, { claude: DUE }))
+
+test('a Keychain it can\'t read refuses, since the login might be there and due', () => machine(async ({ host, clis }) => {
+  expect((await read(() => NOW, host)).claude).toEqual({ state: 'unknown', why: "Couldn't check its sign-in in the Keychain, so it wasn't run" })
+  expect(clis().filter(words => words.includes('claude'))).toEqual([])
+}, { keychain: ['', 36] }))
+
+test('with a login in both places the CLI gets only the Keychain\'s, unrenewable, in a throwaway config; no token is in its words or environment', () => machine(async ({ host, started, dir }) => {
+  expect((await read(() => NOW, host)).claude).toMatchObject({ state: 'ok' })
+  const run = started.find(entry => entry.argv.includes('/bin/claude'))!
+  const state = run.env!.CLAUDE_CONFIG_DIR!
+  expect(state).toStartWith(run.cwd!)
+  expect(state).not.toStartWith(dir)
+  expect(Object.keys(run.config!)).toEqual(['.credentials.json']) // No real config, no link to one.
+  const { claudeAiOauth } = JSON.parse(FRESH)
+  expect(JSON.parse(run.config!['.credentials.json'])).toEqual({ claudeAiOauth: { accessToken: claudeAiOauth.accessToken, expiresAt: claudeAiOauth.expiresAt } })
+  expect(run.argv[2]).toBe(MAC_PROFILE)
+  expect(run.env!.PATH).toStartWith(join(run.cwd!, 'bin') + ':')
+  expect(JSON.stringify(started.map(({ argv, env, cwd }) => ({ argv, env, cwd })))).not.toContain('secret-')
+  expect(existsSync(state)).toBe(false)
+}, { keychain: [FRESH, 0], claude: DUE }))
+
+test('a custom secure store is the one checked, and the CLI can\'t be led back to it', () => machine(async ({ host, started, clis, dir }) => {
+  const store = join(dir, 'store')
+  mkdirSync(store)
+  writeFileSync(join(store, '.credentials.json'), DUE)
+  host.env.CLAUDE_SECURESTORAGE_CONFIG_DIR = store
+  expect((await read(() => NOW, host)).claude).toEqual(RENEWAL) // The default folder's login is fresh.
+  expect(clis().filter(words => words.includes('claude'))).toEqual([])
+  expect(started.find(entry => entry.argv.includes('find-generic-password'))!.argv).toContain(claudeKeychainItem({ CLAUDE_SECURESTORAGE_CONFIG_DIR: store }).service)
+  writeFileSync(join(store, '.credentials.json'), FRESH)
+  await read(() => NOW, host)
+  const run = started.find(entry => entry.argv.includes('/bin/claude'))!
+  expect(JSON.parse(run.config!['.credentials.json']).claudeAiOauth.refreshToken).toBeUndefined()
+  expect(run.env?.CLAUDE_SECURESTORAGE_CONFIG_DIR).toBeUndefined()
+}))
+
+test('no login anywhere: the CLI runs with none, to say so itself', () => machine(async ({ host, started }) => {
+  await read(() => NOW, host)
+  expect(started.find(entry => entry.argv.includes('/bin/claude'))!.config).toEqual({})
+}, { claude: null }))
+
+test('Codex on a Mac gets a throwaway home with links to its login and config, and stays off the Keychain', () => machine(async ({ host, started, files }) => {
+  await read(() => NOW, host)
+  const run = started.find(entry => entry.argv.includes('/bin/codex'))!
+  expect(run.env?.CODEX_HOME).not.toBe(join(files.codex, '..'))
+  expect(run.env?.CODEX_HOME).toStartWith(run.cwd!)
+  expect(run.env?.CODEX_SQLITE_HOME).toBe(run.env?.CODEX_HOME)
+  expect(run.state).toEqual({ 'auth.json': files.codex, 'config.toml': join(files.codex, '../config.toml') })
+  expect(run.argv.slice(-2)).toEqual(['-c', 'cli_auth_credentials_store="file"'])
+  expect(run.argv[2]).toBe(MAC_PROFILE)
+  expect(readFileSync(files.codex, 'utf8')).toBe(CODEX_LOGIN)
+}))
+
+test('Codex on a Mac with a login due, or with no login file to check, isn\'t run', async () => {
+  const due = JSON.stringify({ tokens: { access_token: 'x.e30.x' } })
+  await machine(async ({ host, clis }) => {
+    expect((await read(() => NOW, host)).codex).toEqual(RENEWAL)
+    expect(clis().filter(words => words.includes('codex'))).toEqual([])
+  }, { codex: due })
+  await machine(async ({ host, clis }) => {
+    expect((await read(() => NOW, host)).codex).toEqual({ state: 'unknown', why: "No Codex sign-in file here to check, so it wasn't run" })
+    expect(clis().filter(words => words.includes('codex'))).toEqual([])
+  }, { codex: null })
 })
 
 test('a failed read keeps the last good numbers at their age; anything else replaces them', () => {

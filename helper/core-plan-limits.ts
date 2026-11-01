@@ -1,9 +1,10 @@
 // A stateless read of each CLI's plan limits, invoked through machine.exec: never through a running agent. Claude Code's
 // own /usage and Codex's own account/rateLimits/read, each in its own short process, so nothing goes in a live chat.
 // Only percentages, reset times and the plan's name come back: no account, no raw output, no token.
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir, userInfo } from 'node:os'
+import { basename, join } from 'node:path'
 import type { CliLimits, LimitWindow } from '../shared/types.ts'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -69,6 +70,29 @@ export function sealArgs(command: string[], state?: { folder: string; over: stri
     ...(state ? ['--bind', state.folder, state.over, ...state.kept.flatMap(path => ['--ro-bind', path, path])] : []), '--chdir', '/tmp', '--', ...command]
 }
 
+/**
+ * bwrap's promise on a Mac: nothing real is writable but `OPEN`, a throwaway folder (a real path: rules match after links
+ * like /tmp are followed). A daemon's write is no file write here, so preferences are shut, and the Keychain, which one
+ * command both reads and writes, is out of reach altogether, its daemons too.
+ */
+export const MAC_PROFILE = `(version 1)
+(allow default)
+(deny file-write*)
+(deny user-preference-write)
+(deny process-exec (literal "/usr/bin/security"))
+(deny mach-lookup (global-name "com.apple.SecurityServer") (global-name "com.apple.securityd.xpc"))
+(allow file-write* (subpath (param "OPEN")))
+(allow file-write-data (literal "/dev/null") (literal "/dev/zero") (literal "/dev/tty"))`
+
+const SANDBOX = '/usr/bin/sandbox-exec'
+
+export function macSealArgs(command: string[], open: string) {
+  return [SANDBOX, '-p', MAC_PROFILE, `-DOPEN=${open}`, '--', ...command]
+}
+
+/** Sealed, it can write where it's open, can't where it's shut, and can't start the Keychain's command: nothing real is touched to learn that. */
+const PROOF = '/usr/bin/touch "$1/proof" && ! /usr/bin/touch "$2/proof" && ! /usr/bin/security list-keychains'
+
 const SOON = 60 * 60_000
 const WEEK = 7 * 86_400_000
 
@@ -83,6 +107,39 @@ export function claudeLoginDue(text: string, now: number) {
   } catch { return true }
 }
 
+/** A Mac's Keychain item may hold only other sign-ins (MCP servers): that isn't Claude Code's login. Unreadable counts as one. */
+function claudeLoginIn(text: string) {
+  try { return JSON.parse(text)?.claudeAiOauth !== undefined } catch { return true }
+}
+
+/** A Mac can hold a login in the Keychain and in .credentials.json. A renewal leaves the file behind, so the Keychain's decides. */
+export function claudeMacLogin(keychain: string | null, file: string | null) {
+  return keychain !== null && claudeLoginIn(keychain) ? keychain : file
+}
+
+/**
+ * What the sealed CLI signs in with on a Mac: that login with no way to renew it. The CLI can't turn it into a new one, even
+ * if the server refuses the old one early, so nothing can be rotated, lost or saved. Its short-lived token alone is on disk.
+ */
+export function claudeSealedLogin(text: string) {
+  const { refreshToken: _, ...login } = JSON.parse(text).claudeAiOauth
+  return JSON.stringify({ claudeAiOauth: login })
+}
+
+/** Where Claude Code keeps its login in the Keychain: its own name for a folder that isn't the default. Its secure store's setting comes first, even empty. */
+export function claudeKeychainItem(env: Record<string, string | undefined>) {
+  const custom = (env.CLAUDE_SECURESTORAGE_CONFIG_DIR ?? env.CLAUDE_CONFIG_DIR)?.normalize('NFC')
+  let account = env.USER
+  try { account ||= userInfo().username } catch {}
+  return { service: `Claude Code-credentials${custom ? `-${createHash('sha256').update(custom).digest('hex').slice(0, 8)}` : ''}`, account: account && /^[a-zA-Z0-9._-]+$/.test(account) ? account : 'claude-code-user' }
+}
+
+/** The login file beside that Keychain item, by the same setting: empty is the default folder. */
+export function claudeLoginFile(env: Record<string, string | undefined>, config: string) {
+  const secure = env.CLAUDE_SECURESTORAGE_CONFIG_DIR
+  return join(secure === undefined ? config : secure || join(homedir(), '.claude'), '.credentials.json')
+}
+
 /** Codex renews by its token's expiry or, as a rule, every eight days. */
 export function codexLoginDue(text: string, now: number) {
   try {
@@ -94,18 +151,65 @@ export function codexLoginDue(text: string, now: number) {
 }
 
 const DUE: CliLimits = { state: 'unknown', why: 'Its sign-in is due for renewal: the next agent here will do it' }
-const quiet = (command: string[]) => Bun.which('nice') ? ['nice', '-n', '19', ...command] : command
 const NO_SEAL = "Can't read it safely here: bwrap is missing"
+const NO_MAC_SEAL = "Can't read it safely here: sandbox-exec is missing"
+const SEAL_REFUSED: CliLimits = { state: 'unknown', why: "Can't read it safely here: the Mac seal wouldn't hold" }
+const NO_KEYCHAIN: CliLimits = { state: 'unknown', why: "Couldn't check its sign-in in the Keychain, so it wasn't run" }
+const NO_CODEX_FILE: CliLimits = { state: 'unknown', why: 'No Codex sign-in file here to check, so it wasn\'t run' }
 
-async function claude(now: () => number): Promise<CliLimits | undefined> {
-  const binary = Bun.which('claude')
-  if (!binary) return undefined
-  if (!Bun.which('bwrap')) return { state: 'unknown', why: NO_SEAL }
-  const config = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
-  if (!existsSync(config)) return { state: 'signed-out' }
-  const login = join(config, '.credentials.json')
-  if (existsSync(login) && claudeLoginDue(readFileSync(login, 'utf8'), now())) return DUE
-  const run = Bun.spawn(sealArgs(quiet([binary, '-p', '/usage', '--output-format', 'json', '--no-session-persistence', '--setting-sources', '', '--strict-mcp-config'])), { stdin: 'ignore', stdout: 'pipe', stderr: 'ignore', env: { ...process.env, TZ: 'UTC', TMPDIR: '/tmp' } })
+interface Run {
+  stdin: { write(text: string): unknown; flush(): unknown }
+  stdout: ReadableStream<Uint8Array>
+  exited: Promise<number>
+  signalCode: string | null
+  kill(signal?: string): void
+}
+interface RunOptions { stdin: 'ignore' | 'pipe'; stdout: 'ignore' | 'pipe'; stderr: 'ignore'; env?: Record<string, string | undefined>; cwd?: string }
+/** What a read needs from its machine, so each platform's path can be tried on any. */
+export interface Host {
+  platform: string
+  env: Record<string, string | undefined>
+  which(name: string): string | null
+  exists(path: string): boolean
+  spawn(argv: string[], options: RunOptions): Run
+}
+const HOST: Host = { platform: process.platform, env: process.env, which: name => Bun.which(name), exists: existsSync, spawn: (argv, options) => Bun.spawn(argv, options) as unknown as Run }
+
+const quiet = (host: Host, command: string[]) => host.which('nice') ? ['nice', '-n', '19', ...command] : command
+const mac = (host: Host) => host.platform === 'darwin'
+const noSeal = (host: Host) => mac(host) ? (host.exists(SANDBOX) ? undefined : NO_MAC_SEAL) : (host.which('bwrap') ? undefined : NO_SEAL)
+
+/** A throwaway folder, shown to be sealed by a real run before any CLI goes in. Undefined: no CLI runs. */
+async function openMacSeal(host: Host) {
+  const folder = realpathSync(mkdtempSync(join(tmpdir(), 'shepherdr-limits-'))), open = join(folder, 'open'), shut = join(folder, 'shut')
+  const close = () => rmSync(folder, { recursive: true, force: true })
+  let holds = false
+  try {
+    mkdirSync(open)
+    mkdirSync(shut)
+    const proof = host.spawn(macSealArgs(['/bin/sh', '-c', PROOF, 'proof', open, shut], open), { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
+    const limit = setTimeout(() => proof.kill('SIGKILL'), 10_000)
+    const code = await proof.exited.finally(() => clearTimeout(limit))
+    holds = code === 0 && !proof.signalCode && existsSync(join(open, 'proof')) && !existsSync(join(shut, 'proof'))
+    return holds ? { open, close, wrap: (command: string[]) => macSealArgs(command, open) } : undefined
+  } finally { if (!holds) close() }
+}
+
+/** The login as the CLI's own read sees it, kept in memory only. null: no such item. Anything else that isn't it refuses. */
+async function claudeKeychain(host: Host) {
+  const { service, account } = claudeKeychainItem(host.env)
+  const run = host.spawn(['/usr/bin/security', 'find-generic-password', '-a', account, '-w', '-s', service], { stdin: 'ignore', stdout: 'pipe', stderr: 'ignore' })
+  const limit = setTimeout(() => run.kill('SIGKILL'), 5_000)
+  try {
+    const [text, code] = await Promise.all([new Response(run.stdout).text(), run.exited])
+    if (code === 44) return null
+    if (code !== 0 || run.signalCode) throw new Error('Keychain')
+    return text.trim()
+  } finally { clearTimeout(limit) }
+}
+
+async function askClaude(host: Host, now: () => number, argv: string[], options: Pick<RunOptions, 'env' | 'cwd'>): Promise<CliLimits> {
+  const run = host.spawn(argv, { stdin: 'ignore', stdout: 'pipe', stderr: 'ignore', ...options })
   const limit = setTimeout(() => run.kill('SIGKILL'), 60_000)
   try {
     const text = await new Response(run.stdout).text()
@@ -117,18 +221,40 @@ async function claude(now: () => number): Promise<CliLimits | undefined> {
   } finally { clearTimeout(limit) }
 }
 
-async function codex(now: () => number): Promise<CliLimits | undefined> {
-  const binary = Bun.which('codex')
+async function claude(now: () => number, host: Host): Promise<CliLimits | undefined> {
+  const binary = host.which('claude')
   if (!binary) return undefined
-  if (!Bun.which('bwrap')) return { state: 'unknown', why: NO_SEAL }
-  const home = process.env.CODEX_HOME || join(homedir(), '.codex')
-  if (!existsSync(home)) return { state: 'signed-out' }
-  const login = join(home, 'auth.json')
-  if (existsSync(login) && codexLoginDue(readFileSync(login, 'utf8'), now())) return DUE
-  // Codex won't start without its own databases, so it gets empty ones. Plugin sync stays off: nothing here needs it.
-  const folder = mkdtempSync(join(tmpdir(), 'shepherdr-limits-'))
-  const kept = [login, join(home, 'config.toml')].filter(existsSync)
-  const run = Bun.spawn(sealArgs(quiet([binary, 'app-server', '--disable', 'plugins']), { folder, over: home, kept }), { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' })
+  const missing = noSeal(host)
+  if (missing) return { state: 'unknown', why: missing }
+  const config = host.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
+  if (!host.exists(config)) return { state: 'signed-out' }
+  const login = mac(host) ? claudeLoginFile(host.env, config) : join(config, '.credentials.json')
+  const file = host.exists(login) ? readFileSync(login, 'utf8') : null
+  const command = quiet(host, [binary, '-p', '/usage', '--output-format', 'json', '--no-session-persistence', '--setting-sources', '', '--strict-mcp-config'])
+  if (!mac(host)) {
+    if (file !== null && claudeLoginDue(file, now())) return DUE
+    return askClaude(host, now, sealArgs(command), { env: { ...host.env, TZ: 'UTC', TMPDIR: '/tmp' } })
+  }
+  let keychain: string | null
+  try { keychain = await claudeKeychain(host) } catch { return NO_KEYCHAIN }
+  const held = claudeMacLogin(keychain, file)
+  if (held !== null && claudeLoginDue(held, now())) return DUE
+  const seal = await openMacSeal(host)
+  if (!seal) return SEAL_REFUSED
+  // CLAUDE_CONFIG_DIR is a throwaway one, so no real config or login is even looked at. A Keychain read answers "no such
+  // item" here, as its real command can't start, and the CLI goes to the file: the one login above, in a 0700 folder.
+  try {
+    const state = join(seal.open, 'claude'), bin = join(seal.open, 'bin')
+    mkdirSync(state)
+    mkdirSync(bin)
+    writeFileSync(join(bin, 'security'), '#!/bin/sh\nexit 44\n', { mode: 0o700 })
+    if (held !== null && claudeLoginIn(held)) writeFileSync(join(state, '.credentials.json'), claudeSealedLogin(held), { mode: 0o600 })
+    return await askClaude(host, now, seal.wrap(command), { env: { ...host.env, CLAUDE_CONFIG_DIR: state, CLAUDE_SECURESTORAGE_CONFIG_DIR: undefined, PATH: `${bin}:${host.env.PATH ?? ''}`, TZ: 'UTC', TMPDIR: seal.open }, cwd: seal.open })
+  } finally { seal.close() }
+}
+
+async function askCodex(host: Host, argv: string[], options: Pick<RunOptions, 'env' | 'cwd'>): Promise<CliLimits> {
+  const run = host.spawn(argv, { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore', ...options })
   const limit = setTimeout(() => run.kill('SIGKILL'), 30_000)
   const send = (value: object) => { run.stdin.write(JSON.stringify(value) + '\n'); run.stdin.flush() }
   try {
@@ -163,13 +289,43 @@ async function codex(now: () => number): Promise<CliLimits | undefined> {
   } finally {
     clearTimeout(limit)
     run.kill('SIGKILL')
-    rmSync(folder, { recursive: true, force: true })
   }
 }
 
+async function codex(now: () => number, host: Host): Promise<CliLimits | undefined> {
+  const binary = host.which('codex')
+  if (!binary) return undefined
+  const missing = noSeal(host)
+  if (missing) return { state: 'unknown', why: missing }
+  const home = host.env.CODEX_HOME || join(homedir(), '.codex')
+  if (!host.exists(home)) return { state: 'signed-out' }
+  const login = join(home, 'auth.json')
+  if (host.exists(login) && codexLoginDue(readFileSync(login, 'utf8'), now())) return DUE
+  const kept = [login, join(home, 'config.toml')].filter(path => host.exists(path))
+  if (!mac(host)) {
+    // Codex won't start without its own databases, so it gets empty ones. Plugin sync stays off: nothing here needs it.
+    const folder = mkdtempSync(join(tmpdir(), 'shepherdr-limits-'))
+    try { return await askCodex(host, sealArgs(quiet(host, [binary, 'app-server', '--disable', 'plugins']), { folder, over: home, kept }), {}) }
+    finally { rmSync(folder, { recursive: true, force: true }) }
+  }
+  // A login kept in the Keychain has no file to check, and is filed under the home's path, so it wouldn't be found below.
+  if (!host.exists(login)) return NO_CODEX_FILE
+  const seal = await openMacSeal(host)
+  if (!seal) return SEAL_REFUSED
+  // Nothing can show a throwaway folder over ~/.codex here, so CODEX_HOME names one instead, with links to the real login
+  // and config: no copy of a login on disk, and a link can't be written through. The Keychain stays out of it.
+  try {
+    const state = join(seal.open, 'codex')
+    mkdirSync(state)
+    for (const path of kept) symlinkSync(realpathSync(path), join(state, basename(path)))
+    const command = quiet(host, [binary, 'app-server', '--disable', 'plugins', '-c', 'cli_auth_credentials_store="file"'])
+    return await askCodex(host, seal.wrap(command), { env: { ...host.env, CODEX_HOME: state, CODEX_SQLITE_HOME: state, TMPDIR: seal.open }, cwd: seal.open })
+  } finally { seal.close() }
+}
+
 /** A CLI this machine doesn't have is left out. */
-export async function read(now = () => Date.now()) {
+export async function read(now = () => Date.now(), host = HOST) {
   const safely = (work: Promise<CliLimits | undefined>) => work.catch((): CliLimits => ({ state: 'unknown', why: "Couldn't run it" }))
-  const [claudeCode, codexCli] = await Promise.all([safely(claude(now)), safely(codex(now))])
+  const [claudeCode, codexCli] = await Promise.all([safely(claude(now, host)), safely(codex(now, host))])
   return { claude: claudeCode, codex: codexCli }
 }
