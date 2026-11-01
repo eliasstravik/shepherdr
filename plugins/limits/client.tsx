@@ -156,6 +156,17 @@ function Details({ onClose }: { onClose: () => void }) {
     asked.current = true
     void act({ type: 'limits-check' }).catch(() => {}).finally(() => setReading(false))
   }, [])
+  // Esc closes it, before the keys below it can go back a screen too
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      e.stopPropagation()
+      onClose()
+    }
+    addEventListener('keydown', on, true)
+    return () => removeEventListener('keydown', on, true)
+  }, [onClose])
   const shown = machines.filter((m) => m.limits)
   return (
     <Sheet label="Plan limits" onClose={onClose} z="z-40" panel="tablet:max-w-sm desktop:max-w-sm phone:mt-auto phone:flex-none">
