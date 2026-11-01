@@ -46,7 +46,7 @@ test('a new home never takes on its core\'s machines unless its start names that
     expect(refused).toContain('--core-session default')
     expect(existsSync(home)).toBe(false)
 
-    mkdirSync(home)
+    mkdirSync(home, { mode: 0o700 })
     expect(await coreProblem(config, machines)).toContain('already has 2 machines')
     expect(await coreProblem(config, async () => [])).toBeUndefined()
 
