@@ -1,6 +1,6 @@
 // Fictional data for the demo source: the same world the frozen prototype shows, so a reviewer can put the
 // build and the prototype side by side. Nothing here is real.
-import { apart, type Artifact, type Automation, type Chat, type Machine, type MachineHealth, type Message, type Place, type SettingSection, type Task, type TaskAgent } from '../../shared/types.ts'
+import { apart, type Artifact, type Automation, type Chat, type Machine, type MachineHealth, type MachineLimits, type Message, type Place, type SettingSection, type Task, type TaskAgent } from '../../shared/types.ts'
 import { firstChecklist } from '../heartbeat.ts'
 import { nextWords, timeRule, timeWords } from '../common/trigger.ts'
 import { Settings } from '../common/settings.ts'
@@ -41,6 +41,21 @@ export const HEALTH: Record<string, MachineHealth> = {
 }
 
 
+const inHours = (hours: number) => Date.now() + hours * 3_600_000
+const minutesAgo = (minutes: number) => Date.now() - minutes * 60_000
+
+/** what is left of each machine's plans, the same shapes as the core's: the mac's Codex read last failed, so it is old */
+export const limits = (): Record<string, MachineLimits> => ({
+  'vm-str': {
+    claude: { state: 'ok', at: minutesAgo(2), windows: [{ name: '5-hour', used: 41, resetsAt: inHours(3.2) }, { name: 'Weekly (all models)', used: 10, resetsAt: inHours(120) }] },
+    codex: { state: 'ok', at: minutesAgo(2), plan: 'pro', windows: [{ name: 'Weekly', used: 68, resetsAt: inHours(72) }] },
+  },
+  mac: {
+    claude: { state: 'no-plan', at: minutesAgo(2) },
+    codex: { state: 'ok', at: minutesAgo(190), failed: 'Codex took too long to answer', plan: 'plus', windows: [{ name: '5-hour', used: 12, resetsAt: minutesAgo(10) }, { name: 'Weekly', used: 88, resetsAt: inHours(30) }] },
+  },
+})
+
 export function places(): Place[] {
   return [
     { id: VM, name: 'home', machine: 'vm-str', home: true, level: 0, status: 'need', mode: 'regular', chat: VM },
@@ -55,8 +70,8 @@ export function places(): Place[] {
 /** the machines, as headings over their spaces */
 export function machines(): Machine[] {
   return [
-    { id: 'm:vm-str', machine: 'vm-str', name: 'vm-str', status: 'idle', health: HEALTH['vm-str'] },
-    { id: 'm:mac', machine: 'mac', name: 'mac', status: 'idle', health: HEALTH.mac },
+    { id: 'm:vm-str', machine: 'vm-str', name: 'vm-str', status: 'idle', health: HEALTH['vm-str'], limits: limits()['vm-str'] },
+    { id: 'm:mac', machine: 'mac', name: 'mac', status: 'idle', health: HEALTH.mac, limits: limits().mac },
     { id: 'm:nas', machine: 'nas', name: 'nas', status: 'off', unreachableSince: '14:02' },
   ]
 }
@@ -540,7 +555,7 @@ export function settingStores() {
  *  one of the human's own, and a stand-up plugin of theirs (none failing: the screen would say so at its top, over
  *  every screen the tests measure) */
 export const DEMO_PLUGINS: PluginEntry[] = [
-  ...['places', 'coordinators', 'tasks', 'chat', 'reactions', 'artifacts', 'terminal', 'worktree', 'browser', 'health', 'alerts', 'keyboard', 'autopilot'].map((name) => ({ name, from: 'base' as const, on: true })),
+  ...['places', 'coordinators', 'tasks', 'chat', 'reactions', 'artifacts', 'terminal', 'worktree', 'browser', 'health', 'limits', 'alerts', 'keyboard', 'autopilot'].map((name) => ({ name, from: 'base' as const, on: true })),
   { name: 'voice', from: 'user', overrides: true, on: true },
   { name: 'standup', from: 'user', on: true },
 ]

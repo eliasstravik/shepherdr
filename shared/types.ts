@@ -112,7 +112,32 @@ export interface Machine {
   connecting?: boolean
   /** how it is doing, sampled every 30 seconds */
   health?: MachineHealth
+  /** what is left of the plans its CLIs are signed in to: each machine has its own sign-ins */
+  limits?: MachineLimits
   herdrDown?: string
+}
+
+/** one window of a plan, as its CLI reports it: `used` is a share of it, 0-100 */
+export interface LimitWindow {
+  /** 5-hour, Weekly, Weekly (all models) */
+  name: string
+  used: number
+  /** when it refills (ms) */
+  resetsAt?: number
+  /** the CLI's own words, where they name no moment Shepherdr can read */
+  resets?: string
+}
+
+/** ok: read. no-plan: an API key or the like, with no plan to run out of. unknown: never a guess; why says what happened */
+export type CliLimits = { state: 'ok'; windows: LimitWindow[]; plan?: string } | { state: 'signed-out' | 'no-plan' } | { state: 'unknown'; why: string }
+
+/** at: when this was read (ms). failed: a later read didn't work, so what is here is that old */
+export type CliLimitsRead = CliLimits & { at: number; failed?: string }
+
+/** a CLI this machine doesn't have is left out; so are those with no such data (Pi) */
+export interface MachineLimits {
+  claude?: CliLimitsRead
+  codex?: CliLimitsRead
 }
 
 /** what Shepherdr measures on a machine, as one level each: a share of what it has (CPU: its 1-minute load over its
@@ -943,6 +968,8 @@ export interface Snapshot {
 
 export type Action =
   | { type: 'plugin'; plugin: string; method: string; input?: unknown; cid: string }
+  /** read every machine's plan limits again, unless they were read a moment ago */
+  | { type: 'limits-check' }
   /** cid: the screen's own id for what it sent, which comes back on the message (Message.cid); reply: the id of the
       message it answers */
   | { type: 'send'; chat: string; text: string; attachments?: string[]; cid?: string; reply?: string }
