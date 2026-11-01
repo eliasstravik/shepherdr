@@ -6,8 +6,8 @@ by hand in the shared browser. GitHub runs the suites and production build.
 
 The rewrite branch's [Core rewrite workflow](../.github/workflows/core-rewrite.yml)
 checks this integration branch without deploying main. The Check workflow remains
-the full post-merge check. Neither installs services, changes private sharing,
-migrates state or publishes a release.
+the full check on every pull request to main and after each merge. Neither installs
+services, changes private sharing, migrates state or publishes a release.
 
 Use [isolated preview startup](core/start.md), with a separate home, port and core
 session. Never use live `~/.shepherdr` for development. The optional fictional demo
