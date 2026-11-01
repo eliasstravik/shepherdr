@@ -60,10 +60,13 @@ Both are their own short process, so nothing is typed into a running agent, and 
 structured usage request is marked experimental and its status line data needs a live session, so `/usage`'s printed
 words are read, in the one wording they have today. Words that no longer match show as Unknown, never a guess.
 
-Even a read makes Claude Code save `~/.claude.json`, so it runs in `bwrap` with that file and its `settings.json` mounted
-read-only. Its config folder stays writable, because a login refreshed but not saved signs the CLI out; a machine with
-no `bwrap` (a Mac) shows Claude Code's limits as Unknown. Codex runs the same way, with `config.toml` read-only and
-plugin sync off, or plainly without `bwrap`: it was seen writing only its own state and logs.
+Reads are read-only. Even a read makes Claude Code save `~/.claude.json`, so each runs in `bwrap` with the whole machine
+read-only; Codex won't start without writable state, so it gets a throwaway folder in place of its own, with its real
+`config.toml` and `auth.json` read-only inside and plugin sync off. A machine with no `bwrap` (a Mac) shows both as Unknown.
+
+A seal can't save a renewed login, and one renewed but not saved signs the CLI out. So a login within an hour of its end
+(Claude Code's last about eight hours), or a Codex one past seven days since its last renewal, isn't read: the next agent
+there renews it, and until then the last numbers stand with their age.
 
 A number always says how old it is. Once a window's reset time passes it says it has refilled and hasn't been read
 since. A read that fails keeps the last numbers, with their age and what went wrong; never-read shows Unknown.

@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { claudeReset, parseClaude, parseCodex, sealArgs } from '../helper/core-plan-limits.ts'
+import { claudeLoginDue, claudeReset, codexLoginDue, parseClaude, parseCodex, sealArgs } from '../helper/core-plan-limits.ts'
 import { CorePlanLimits, nextRead } from '../server/core/plan-limits.ts'
 import { CoreStore } from '../server/core/store.ts'
 import type { CoreSource } from '../server/core/source.ts'
@@ -24,6 +24,7 @@ test('a reset with no date is the next such time, and one past the new year is n
   expect(claudeReset('12am (UTC)', NOW)).toBe(Date.UTC(2026, 10, 2, 0, 0))
   expect(claudeReset('12pm (UTC)', NOW)).toBe(Date.UTC(2026, 10, 1, 12, 0))
   expect(claudeReset('Jan 2, 4pm (UTC)', Date.UTC(2026, 11, 30))).toBe(Date.UTC(2027, 0, 2, 16, 0))
+  expect(claudeReset('7am (UTC)', NOW + 30_000)).toBe(NOW) // Read within the very minute it names.
   expect(claudeReset('soon', NOW)).toBeUndefined()
 })
 
@@ -47,14 +48,29 @@ test('reads Codex\'s windows by their own length, with a limit of its own named'
   expect(parseCodex({ rateLimits: { limitId: 'codex', primary: null, secondary: null } }).state).toBe('unknown')
 })
 
-test('the seal leaves only the CLI\'s own folder writable, with its settings read-only inside it', () => {
-  const args = sealArgs(['claude', '-p', '/usage'], '/h/.claude', ['/h/.claude.json', '/h/.claude/settings.json'], '/tmp')
-  expect(args.slice(0, 3)).toEqual(['bwrap', '--ro-bind', '/'])
-  const at = (flag: string, path: string) => args.findIndex((word, i) => word === flag && args[i + 1] === path)
-  expect(at('--bind', '/h/.claude')).toBeGreaterThan(0)
-  expect(at('--ro-bind', '/h/.claude/settings.json')).toBeGreaterThan(at('--bind', '/h/.claude')) // Later mounts win.
-  expect(at('--ro-bind', '/h/.claude.json')).toBeGreaterThan(0)
-  expect(args.slice(-4)).toEqual(['--', 'claude', '-p', '/usage'])
+test('the seal leaves nothing real writable: state goes to a throwaway folder, with the real login and config read-only in it', () => {
+  expect(sealArgs(['claude', '-p', '/usage'])).toEqual(['bwrap', '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--tmpfs', '/tmp', '--share-net', '--die-with-parent', '--chdir', '/tmp', '--', 'claude', '-p', '/usage'])
+  const args = sealArgs(['codex'], { folder: '/tmp/x', over: '/h/.codex', kept: ['/h/.codex/auth.json', '/h/.codex/config.toml'] })
+  const at = (flag: string, from: string, to: string) => args.findIndex((word, i) => word === flag && args[i + 1] === from && args[i + 2] === to)
+  expect(at('--bind', '/tmp/x', '/h/.codex')).toBeGreaterThan(0)
+  expect(at('--ro-bind', '/h/.codex/config.toml', '/h/.codex/config.toml')).toBeGreaterThan(at('--bind', '/tmp/x', '/h/.codex')) // Later mounts win.
+  expect(args.filter(word => word === '--bind')).toHaveLength(1)
+})
+
+test('a login near its end isn\'t read, since a seal can\'t save its renewal', () => {
+  const claude = (expiresAt: unknown) => JSON.stringify({ claudeAiOauth: { expiresAt } })
+  expect(claudeLoginDue(claude(NOW + 7 * 3_600_000), NOW)).toBe(false)
+  expect(claudeLoginDue(claude(NOW + 60_000), NOW)).toBe(true)
+  expect(claudeLoginDue(claude('soon'), NOW)).toBe(true)
+  expect(claudeLoginDue('{}', NOW)).toBe(false) // Not an OAuth login: nothing to renew.
+  expect(claudeLoginDue('{broken', NOW)).toBe(true)
+  const token = (exp: number) => `x.${Buffer.from(JSON.stringify({ exp })).toString('base64url')}.x`
+  const codex = (exp: number, days: number) => JSON.stringify({ tokens: { access_token: token(exp / 1000) }, last_refresh: new Date(NOW - days * 86_400_000).toISOString() })
+  expect(codexLoginDue(codex(NOW + 3 * 86_400_000, 6), NOW)).toBe(false)
+  expect(codexLoginDue(codex(NOW + 3 * 86_400_000, 7.5), NOW)).toBe(true)
+  expect(codexLoginDue(codex(NOW + 60_000, 1), NOW)).toBe(true)
+  expect(codexLoginDue('{"tokens":null}', NOW)).toBe(false) // An API key.
+  expect(codexLoginDue('{"tokens":{}}', NOW)).toBe(true)
 })
 
 test('a failed read keeps the last good numbers at their age; anything else replaces them', () => {

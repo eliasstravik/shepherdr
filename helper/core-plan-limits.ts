@@ -1,7 +1,7 @@
 // A stateless read of each CLI's plan limits, invoked through machine.exec: never through a running agent. Claude Code's
 // own /usage and Codex's own account/rateLimits/read, each in its own short process, so nothing goes in a live chat.
 // Only percentages, reset times and the plan's name come back: no account, no raw output, no token.
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { CliLimits, LimitWindow } from '../shared/types.ts'
@@ -18,7 +18,7 @@ export function claudeReset(words: string, now: number): number | undefined {
   const today = new Date(now)
   if (!m[1]) {
     const at = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), hour, minute)
-    return at <= now ? at + 86_400_000 : at
+    return at + 60_000 <= now ? at + 86_400_000 : at // Its words stop at the minute: this minute is still today.
   }
   const at = (year: number) => Date.UTC(year, month, Number(m[2]), hour, minute)
   if (m[3]) return at(Number(m[3]))
@@ -61,26 +61,51 @@ export function parseCodex(result: { rateLimits?: CodexSnapshot | null; rateLimi
 }
 
 /**
- * The whole machine read-only but for `writable`, so a CLI that saves its state on every start can't touch `sealed`.
- * `writable` stays because a signed-in CLI may refresh its login: a refreshed login that can't be saved signs it out.
+ * The whole machine read-only: a CLI that saves its state on every start saves nothing real. `state` is a throwaway folder
+ * shown in place of a CLI's own, for a CLI that won't start without one, with only `kept` of what is really there.
  */
-export function sealArgs(command: string[], writable: string, sealed: string[], home = tmpdir()): string[] {
+export function sealArgs(command: string[], state?: { folder: string; over: string; kept: string[] }): string[] {
   return ['bwrap', '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--tmpfs', '/tmp', '--share-net', '--die-with-parent',
-    '--bind', writable, writable, ...sealed.flatMap(path => ['--ro-bind', path, path]), '--chdir', home, '--', ...command]
+    ...(state ? ['--bind', state.folder, state.over, ...state.kept.flatMap(path => ['--ro-bind', path, path])] : []), '--chdir', '/tmp', '--', ...command]
 }
 
-const present = (paths: string[]) => paths.filter(existsSync)
+const SOON = 60 * 60_000
+const WEEK = 7 * 86_400_000
+
+/**
+ * A seal can't save a refreshed login, and a login refreshed but not saved signs the CLI out. So a login near its end
+ * isn't read at all: the next real run of the CLI renews it, and until then the last numbers stand, with their age.
+ */
+export function claudeLoginDue(text: string, now: number) {
+  try {
+    const end = JSON.parse(text)?.claudeAiOauth?.expiresAt
+    return end !== undefined && !(end - SOON > now)
+  } catch { return true }
+}
+
+/** Codex renews by its token's expiry or, as a rule, every eight days. */
+export function codexLoginDue(text: string, now: number) {
+  try {
+    const auth = JSON.parse(text)
+    if (!auth?.tokens) return false
+    const end = JSON.parse(Buffer.from(auth.tokens.access_token.split('.')[1], 'base64url').toString('utf8')).exp * 1000
+    return !(end - SOON > now && now - Date.parse(auth.last_refresh) < WEEK)
+  } catch { return true }
+}
+
+const DUE: CliLimits = { state: 'unknown', why: 'Its sign-in is due for renewal: the next agent here will do it' }
 const quiet = (command: string[]) => Bun.which('nice') ? ['nice', '-n', '19', ...command] : command
+const NO_SEAL = "Can't read it safely here: bwrap is missing"
 
 async function claude(now: () => number): Promise<CliLimits | undefined> {
   const binary = Bun.which('claude')
   if (!binary) return undefined
-  // Unlike Codex, even a read saves ~/.claude.json: no seal, no read.
-  if (!Bun.which('bwrap')) return { state: 'unknown', why: "Can't read it safely here: bwrap is missing" }
+  if (!Bun.which('bwrap')) return { state: 'unknown', why: NO_SEAL }
   const config = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
   if (!existsSync(config)) return { state: 'signed-out' }
-  const sealed = present([join(process.env.CLAUDE_CONFIG_DIR || homedir(), '.claude.json'), join(config, 'settings.json'), join(config, 'settings.local.json')])
-  const run = Bun.spawn(sealArgs(quiet([binary, '-p', '/usage', '--output-format', 'json', '--no-session-persistence', '--setting-sources', '', '--strict-mcp-config']), config, sealed, '/tmp'), { stdin: 'ignore', stdout: 'pipe', stderr: 'ignore', env: { ...process.env, TZ: 'UTC', TMPDIR: '/tmp' } })
+  const login = join(config, '.credentials.json')
+  if (existsSync(login) && claudeLoginDue(readFileSync(login, 'utf8'), now())) return DUE
+  const run = Bun.spawn(sealArgs(quiet([binary, '-p', '/usage', '--output-format', 'json', '--no-session-persistence', '--setting-sources', '', '--strict-mcp-config'])), { stdin: 'ignore', stdout: 'pipe', stderr: 'ignore', env: { ...process.env, TZ: 'UTC', TMPDIR: '/tmp' } })
   const limit = setTimeout(() => run.kill('SIGKILL'), 60_000)
   try {
     const text = await new Response(run.stdout).text()
@@ -92,15 +117,18 @@ async function claude(now: () => number): Promise<CliLimits | undefined> {
   } finally { clearTimeout(limit) }
 }
 
-async function codex(): Promise<CliLimits | undefined> {
+async function codex(now: () => number): Promise<CliLimits | undefined> {
   const binary = Bun.which('codex')
   if (!binary) return undefined
+  if (!Bun.which('bwrap')) return { state: 'unknown', why: NO_SEAL }
   const home = process.env.CODEX_HOME || join(homedir(), '.codex')
   if (!existsSync(home)) return { state: 'signed-out' }
-  const config = join(home, 'config.toml'), scratch = mkdtempSync(join(tmpdir(), 'shepherdr-limits-'))
-  const server = quiet([binary, 'app-server', '--disable', 'plugins'])
-  // Plugin sync stays off: it has nothing to do with limits, and would rewrite Codex's plugin cache on every read.
-  const run = Bun.spawn(Bun.which('bwrap') ? sealArgs(server, home, present([config]), '/tmp') : server, { cwd: scratch, stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' })
+  const login = join(home, 'auth.json')
+  if (existsSync(login) && codexLoginDue(readFileSync(login, 'utf8'), now())) return DUE
+  // Codex won't start without its own databases, so it gets empty ones. Plugin sync stays off: nothing here needs it.
+  const folder = mkdtempSync(join(tmpdir(), 'shepherdr-limits-'))
+  const kept = [login, join(home, 'config.toml')].filter(existsSync)
+  const run = Bun.spawn(sealArgs(quiet([binary, 'app-server', '--disable', 'plugins']), { folder, over: home, kept }), { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' })
   const limit = setTimeout(() => run.kill('SIGKILL'), 30_000)
   const send = (value: object) => { run.stdin.write(JSON.stringify(value) + '\n'); run.stdin.flush() }
   try {
@@ -135,13 +163,13 @@ async function codex(): Promise<CliLimits | undefined> {
   } finally {
     clearTimeout(limit)
     run.kill('SIGKILL')
-    rmSync(scratch, { recursive: true, force: true })
+    rmSync(folder, { recursive: true, force: true })
   }
 }
 
 /** A CLI this machine doesn't have is left out. */
 export async function read(now = () => Date.now()) {
   const safely = (work: Promise<CliLimits | undefined>) => work.catch((): CliLimits => ({ state: 'unknown', why: "Couldn't run it" }))
-  const [claudeCode, codexCli] = await Promise.all([safely(claude(now)), safely(codex())])
+  const [claudeCode, codexCli] = await Promise.all([safely(claude(now)), safely(codex(now))])
   return { claude: claudeCode, codex: codexCli }
 }
