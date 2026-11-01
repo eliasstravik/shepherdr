@@ -53,6 +53,15 @@
   says why. With no such record it stays open, however long it waits. Shepherdr's own restart ends what it was waiting
   on: its open cards close as denied, and a line in the chat says what was denied and that nobody refused it, so the
   agent can ask again.
+- An agent's own Shepherdr commands never ask: not `shepherdr ask`, `ready` or `merge`. At each start Shepherdr allows that
+  launch's exact command path, verb by verb, without touching your CLI's settings: Claude Code in the settings it passes
+  at launch, Codex through its permission hook, where it runs outside Codex's sandbox because the sandbox can't reach
+  Shepherdr. Your Merge setting and merge approvals still apply. `secret run` (it runs any program) and `secret env` (it
+  writes a file) keep their card, as does the bare name `shepherdr`, a compound command, and a reviewer's commands.
+  Codex can only leave its sandbox with approval policy `on-request` in a folder it trusts, which is its default after
+  you trust a repo. With `approval_policy = "never"`, or in a folder it hasn't trusted such as the home space, sandboxed
+  Codex needs one setting: trust the folder, or set `sandbox_workspace_write.network_access = true` in Codex's config.
+  That setting opens the network and Shepherdr's core to every sandboxed command.
 - A turn cut off by the model's provider (overloaded, at capacity, a rate limit, a dropped connection) is no question
   for you: Shepherdr waits and tells the agent, task or coordinator, to carry on, after 1, 2, 4 and 8 minutes. Meanwhile
   a task stays Working, its line saying why and when (`Provider overloaded · retry in 2m`). Only when the fifth try is

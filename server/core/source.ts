@@ -50,6 +50,7 @@ import { CoreCards } from './cards.ts'
 import { CorePilotMail } from './pilot-mail.ts'
 import { askText, clip, lastReply, quickChoices, TITLE_MAX, BODY_MAX } from '../../shared/alerts.ts'
 import { CANCELLED, hookEnd, logEnd, NativeEnds, STOPPED } from './native-ends.ts'
+import { ownCommand } from './own-commands.ts'
 import { NATIVE_UNREADABLE, cardWords, nativeAnswer, nativeCards, nativeClosed, nativeReply, type NativeAsk, type PermissionAnswer } from './native-asks.ts'
 import type { CorePluginUpdates } from './plugin-updates.ts'
 import type { ActivityAsk, WorktreeAsk } from '../../shared/types.ts'
@@ -751,6 +752,8 @@ Use hc for starting, messaging and waiting on core child agents. Never use a web
     const previous = this.store.get<Permission>('permission', input.id)
     if (previous && (previous.grant !== grant.id || previous.chat !== grant.chat)) throw new Error('Permission id belongs to another session')
     if (previous?.settled) return previous.native?.reply ?? { allow: previous.allow === true }
+    // Claude's settings say this before it asks; Codex has no such setting for one launch, only this hook.
+    if (agent.kind === 'codex' && agent.role !== 'reviewer' && !agent.pilot && agent.command && ownCommand(agent.command, input.tool, input.input)) return { allow: true }
     const native = agent.kind === 'claude' ? nativeCards(input.tool, input.input, input.id, agent.permissionMode) : undefined
     if (native && !native.questions.length) return NATIVE_UNREADABLE
     const questions = native?.questions ?? [{ id: input.id, title: `${agent.kind === 'claude' ? 'Claude Code' : 'Codex'} asks to use ${String(input.tool || 'a tool').slice(0, 100)}`,

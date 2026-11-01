@@ -17,6 +17,7 @@ and flag. Your role's own work is in its own skill (References).
 ## Command routing
 
 The launch prompt and `SHEPHERDR_COMMAND` name your authoritative authenticated command. Use that exact path.
+Write it out in full each time, not the bare name or the variable: only that form runs without a permission card.
 This standalone application talks to herdr-core through a private mailbox. Each launch receives its own
 `SHEPHERDR_CORE_CREDENTIAL` file reference: preserve it in tool environments, never read or print its contents.
 Remote commands use that machine’s core; they never contact a web URL, SSH worker, tunnel or legacy main.sock.

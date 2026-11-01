@@ -102,7 +102,7 @@ Settings → Machines says how each one is, and each machine's home space shows 
 
 ### What permissions do the agents get?
 
-**Codex and Claude Code start with your own permission settings**, so each machine decides; Shepherdr adds only its hooks, and your settings are never touched. A permission prompt shows the task under `Needs you` (`Asks permission`), and a CLI's own startup screens (trusting a folder, signing in, Codex's hooks) come to the chat as a card. The brief's rules and the review are guidance, not a sandbox. [Tasks](docs/tasks.md) has the details.
+**Codex and Claude Code start with your own permission settings**, so each machine decides; Shepherdr adds only its hooks and allows its own commands, and your settings are never touched. A permission prompt shows the task under `Needs you` (`Asks permission`), and a CLI's own startup screens (trusting a folder, signing in, Codex's hooks) come to the chat as a card. The brief's rules and the review are guidance, not a sandbox. [Tasks](docs/tasks.md) has the details.
 
 ### Does Shepherdr send my work to a hosted service?
 

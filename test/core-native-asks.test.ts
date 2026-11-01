@@ -105,6 +105,24 @@ test('a card only takes an answer it offered', () => {
   expect(nativeAnswer(question, answer('id', -1, { other: ' Quince ' }))).toEqual({ allow: true, sent: -1, said: 'Quince' })
 })
 
+test('Codex is allowed its own command without a card, and nothing else', async () => {
+  const command = '/opt/shepherdr/bin/shepherdr'
+  const f = fixture('codex')
+  try {
+    f.source.store.set('agent', chat, { ...f.source.store.get<CoreAgent>('agent', chat)!, command })
+    expect(await f.ask('Bash', { command: `${command} ask "Rerun?" --choice Yes --choice No` }).reply).toEqual({ allow: true })
+    expect(f.source.store.all('permission')).toHaveLength(0)
+    f.ask('Bash', { command: `${command} secret run A -- rm -rf /` })
+    expect(open(f)).toHaveLength(1)
+    for (const change of [{ role: 'reviewer' }, { pilot: { run: 'run', home: '/h', captures: '/c' } }, { kind: 'claude' }] as Partial<CoreAgent>[]) {
+      f.source.store.set('agent', chat, { ...f.source.store.get<CoreAgent>('agent', chat)!, role: 'task', pilot: undefined, kind: 'codex', ...change })
+      const before = f.source.store.all('permission').length
+      f.ask('Bash', { command: `${command} ask x` })
+      expect(f.source.store.all('permission')).toHaveLength(before + 1)
+    }
+  } finally { f.close() }
+})
+
 test('other tools and other CLIs stay permissions, and an unreadable question reaches no one', async () => {
   expect(nativeCards('Bash', { command: 'ls' }, 'id')).toBeUndefined()
   const f = fixture()
