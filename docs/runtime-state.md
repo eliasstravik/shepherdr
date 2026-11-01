@@ -65,22 +65,26 @@ read-only; Codex won't start without writable state, so it gets a throwaway fold
 `config.toml` and `auth.json` read-only inside and plugin sync off. Without its seal a CLI is never run: it shows as
 Unknown, with why.
 
-A Mac has no `bwrap`, so the same promise comes from `/usr/bin/sandbox-exec`: every file write and preference write
-denied but in a throwaway folder, which is also each CLI's working and temporary folder. A short sealed run shows the
-seal holds (it writes where it's open and fails where it's shut, both in that folder) before any CLI goes in. A seal
-that won't start or doesn't hold refuses. Nothing can show a folder over `~/.codex` there, so `CODEX_HOME` names a
-throwaway home with links to the real `auth.json` and `config.toml`: a save lands in the throwaway home or is denied, no
-login is copied, and Codex is told to keep to the file. A Codex login kept only in the Keychain has no file to check, so
-it isn't run.
+A Mac has no `bwrap`, so the same promise comes from `/usr/bin/sandbox-exec`: every file and preference write denied
+but in a throwaway folder, which is also each CLI's working and temporary folder, and no way to run `security`, the
+Keychain's one command for reading and writing. A short sealed run shows the seal holds (it writes where it's open, fails
+where it's shut, and can't start `security`) before any CLI goes in. A seal that won't start or doesn't hold refuses.
+
+Claude Code runs there with a throwaway `CLAUDE_CONFIG_DIR` holding only its login with the renewal token taken out, so
+it can't renew at all, even if the server turns its token down early: no real config, Keychain item or login file is
+in its reach. The Keychain's login is the one used, as a renewal leaves any old `.credentials.json` behind; with none in
+the Keychain the file's is. A Keychain that can't be read refuses. The helper reads the login with `security` itself,
+holds it in memory, and writes only that short-lived token to the throwaway folder, which goes once it's read.
+
+Nothing can show a folder over `~/.codex` there, so `CODEX_HOME` names a throwaway home with links to the real
+`auth.json` and `config.toml`: a save lands in the throwaway home or is denied, no login is copied, and Codex is told to
+keep to the file. Its seal keeps the Keychain's daemons up, as it may need them for the system's certificates, and only
+`security` is shut. A Codex login kept only in the Keychain has no file to check, so it isn't run.
 
 A seal can't save a renewed login, and one renewed but not saved signs the CLI out. So a login within an hour of its end
 (Claude Code's last about eight hours), or a Codex one past seven days since its last renewal, isn't read: the next agent
-there renews it, and until then the last numbers stand with their age. Claude Code on a Mac keeps its login in the
-Keychain, and a renewal leaves any old `.credentials.json` behind. So the Keychain's login is the one checked and that
-file is hidden from the sealed CLI; with no login in the Keychain the file is checked instead, and a Keychain that can't
-be read refuses. The login stays in the helper's memory for that check. The Keychain itself can't be sealed, since
-reading and writing it are one command, so "login due" is what keeps a renewal from reaching it. A token the server
-turns down early is the case that check can't see.
+there renews it, and until then the last numbers stand with their age. The same holds for a Mac's Keychain login, whose
+token is no use to a read once it ends.
 
 ### Checking a Mac
 
@@ -100,7 +104,8 @@ It passes when each CLI's line is `"state":"ok"` with windows, the times say `un
 `~/.claude.json` by itself: only that line may differ) and the last line lists nothing. `Its sign-in is due for renewal`
 is the guard working: run it again once an agent has renewed. `the Mac seal wouldn't hold` or `Couldn't check its
 sign-in` is a safe refusal, and `Couldn't read Claude Code's answer` or `Codex stopped before answering` means a CLI
-wouldn't work sealed: report any of these rather than loosening the seal.
+wouldn't work sealed. `"signed-out"` for a CLI that is signed in means it didn't take the throwaway login. Report any of
+these rather than loosening the seal.
 
 A number always says how old it is. Once a window's reset time passes it says it has refilled and hasn't been read
 since. A read that fails keeps the last numbers, with their age and what went wrong; never-read shows Unknown.

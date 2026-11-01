@@ -2,7 +2,7 @@
 // own /usage and Codex's own account/rateLimits/read, each in its own short process, so nothing goes in a live chat.
 // Only percentages, reset times and the plan's name come back: no account, no raw output, no token.
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir, userInfo } from 'node:os'
 import { basename, join } from 'node:path'
 import type { CliLimits, LimitWindow } from '../shared/types.ts'
@@ -72,27 +72,28 @@ export function sealArgs(command: string[], state?: { folder: string; over: stri
 
 /**
  * bwrap's promise on a Mac: nothing real is writable but `OPEN`, a throwaway folder (a real path: rules match after links
- * like /tmp are followed). A write through a daemon is no file write here, so preferences are shut too. The Keychain can't
- * be: the CLI reads it with the same command that would write it, so there only "login due" stands in the way.
- * `HIDE` is a login the CLI must not fall back on.
+ * like /tmp are followed). A daemon's write is no file write here, so preferences are shut, and the Keychain, which one
+ * command both reads and writes, is out of reach altogether. `tls` leaves its daemons up for a CLI that may need them for
+ * the system's certificates: Codex, which is told to stay off the Keychain.
  */
-export function macProfile(hide = false) {
+export function macProfile(tls = false) {
   return `(version 1)
 (allow default)
 (deny file-write*)
 (deny user-preference-write)
-${hide ? '(deny file-read* (literal (param "HIDE")))\n' : ''}(allow file-write* (subpath (param "OPEN")))
+(deny process-exec (literal "/usr/bin/security"))
+${tls ? '' : '(deny mach-lookup (global-name "com.apple.SecurityServer") (global-name "com.apple.securityd.xpc"))\n'}(allow file-write* (subpath (param "OPEN")))
 (allow file-write-data (literal "/dev/null") (literal "/dev/zero") (literal "/dev/tty"))`
 }
 
 const SANDBOX = '/usr/bin/sandbox-exec'
 
-export function macSealArgs(command: string[], open: string, hide?: string) {
-  return [SANDBOX, '-p', macProfile(Boolean(hide)), `-DOPEN=${open}`, ...(hide ? [`-DHIDE=${hide}`] : []), '--', ...command]
+export function macSealArgs(command: string[], open: string, tls = false) {
+  return [SANDBOX, '-p', macProfile(tls), `-DOPEN=${open}`, '--', ...command]
 }
 
-/** Sealed, it can write where it's open, can't where it's shut, and can't read what's hidden: nothing real is touched to learn that. */
-const PROOF = '/usr/bin/touch "$1/proof" && ! /usr/bin/touch "$2/proof" && { [ -z "$3" ] || ! /bin/cat "$3"; }'
+/** Sealed, it can write where it's open, can't where it's shut, and can't start the Keychain's command: nothing real is touched to learn that. */
+const PROOF = '/usr/bin/touch "$1/proof" && ! /usr/bin/touch "$2/proof" && ! /usr/bin/security list-keychains'
 
 const SOON = 60 * 60_000
 const WEEK = 7 * 86_400_000
@@ -113,13 +114,18 @@ function claudeLoginIn(text: string) {
   try { return JSON.parse(text)?.claudeAiOauth !== undefined } catch { return true }
 }
 
+/** A Mac can hold a login in the Keychain and in .credentials.json. A renewal leaves the file behind, so the Keychain's decides. */
+export function claudeMacLogin(keychain: string | null, file: string | null) {
+  return keychain !== null && claudeLoginIn(keychain) ? keychain : file
+}
+
 /**
- * A Mac can hold a login in the Keychain and in .credentials.json. A renewed login leaves the file behind, so the Keychain's
- * decides, and the CLI is then shown only that one: whichever it would prefer, it runs on the login that was checked.
+ * What the sealed CLI signs in with on a Mac: that login with no way to renew it. The CLI can't turn it into a new one, even
+ * if the server refuses the old one early, so nothing can be rotated, lost or saved. Its short-lived token alone is on disk.
  */
-export function claudeMacLogin(keychain: string | null, file: string | null, now: number) {
-  const held = keychain !== null && claudeLoginIn(keychain), text = held ? keychain : file
-  return { due: text !== null && claudeLoginDue(text, now), hideFile: held && file !== null }
+export function claudeSealedLogin(text: string) {
+  const { refreshToken: _, ...login } = JSON.parse(text).claudeAiOauth
+  return JSON.stringify({ claudeAiOauth: login })
 }
 
 /** Where Claude Code keeps its login in the Keychain: its own name for a config folder that isn't the default. */
@@ -170,15 +176,15 @@ const mac = (host: Host) => host.platform === 'darwin'
 const noSeal = (host: Host) => mac(host) ? (host.exists(SANDBOX) ? undefined : NO_MAC_SEAL) : (host.which('bwrap') ? undefined : NO_SEAL)
 
 /** A throwaway folder, shown to be sealed by a real run before any CLI goes in. Undefined: no CLI runs. */
-async function openMacSeal(host: Host, hide?: string) {
+async function openMacSeal(host: Host, tls = false) {
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'shepherdr-limits-'))), open = join(folder, 'open'), shut = join(folder, 'shut')
   const close = () => rmSync(folder, { recursive: true, force: true })
   mkdirSync(open)
   mkdirSync(shut)
-  const proof = host.spawn(macSealArgs(['/bin/sh', '-c', PROOF, 'proof', open, shut, hide ?? ''], open, hide), { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
+  const proof = host.spawn(macSealArgs(['/bin/sh', '-c', PROOF, 'proof', open, shut], open, tls), { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
   const limit = setTimeout(() => proof.kill('SIGKILL'), 10_000)
   const code = await proof.exited.finally(() => clearTimeout(limit))
-  if (code === 0 && !proof.signalCode && existsSync(join(open, 'proof')) && !existsSync(join(shut, 'proof'))) return { open, close, wrap: (command: string[]) => macSealArgs(command, open, hide) }
+  if (code === 0 && !proof.signalCode && existsSync(join(open, 'proof')) && !existsSync(join(shut, 'proof'))) return { open, close, wrap: (command: string[]) => macSealArgs(command, open, tls) }
   close()
 }
 
@@ -224,13 +230,20 @@ async function claude(now: () => number, host: Host): Promise<CliLimits | undefi
   }
   let keychain: string | null
   try { keychain = await claudeKeychain(host) } catch { return NO_KEYCHAIN }
-  const { due, hideFile } = claudeMacLogin(keychain, file, now())
-  if (due) return DUE
-  const seal = await openMacSeal(host, hideFile ? realpathSync(login) : undefined)
+  const held = claudeMacLogin(keychain, file)
+  if (held !== null && claudeLoginDue(held, now())) return DUE
+  const seal = await openMacSeal(host)
   if (!seal) return SEAL_REFUSED
-  // Its secure store goes back to the one just checked. A Mac has no fresh /tmp to chdir to, so it runs in the open folder.
-  try { return await askClaude(host, now, seal.wrap(command), { env: { ...host.env, CLAUDE_SECURESTORAGE_CONFIG_DIR: undefined, TZ: 'UTC', TMPDIR: seal.open }, cwd: seal.open }) }
-  finally { seal.close() }
+  // CLAUDE_CONFIG_DIR is a throwaway one, so no real config or login is even looked at. A Keychain read answers "no such
+  // item" here, as its real command can't start, and the CLI goes to the file: the one login above, in a 0700 folder.
+  try {
+    const state = join(seal.open, 'claude'), bin = join(seal.open, 'bin')
+    mkdirSync(state)
+    mkdirSync(bin)
+    writeFileSync(join(bin, 'security'), '#!/bin/sh\nexit 44\n', { mode: 0o700 })
+    if (held !== null && claudeLoginIn(held)) writeFileSync(join(state, '.credentials.json'), claudeSealedLogin(held), { mode: 0o600 })
+    return await askClaude(host, now, seal.wrap(command), { env: { ...host.env, CLAUDE_CONFIG_DIR: state, CLAUDE_SECURESTORAGE_CONFIG_DIR: undefined, PATH: `${bin}:${host.env.PATH ?? ''}`, TZ: 'UTC', TMPDIR: seal.open }, cwd: seal.open })
+  } finally { seal.close() }
 }
 
 async function askCodex(host: Host, argv: string[], options: Pick<RunOptions, 'env' | 'cwd'>): Promise<CliLimits> {
@@ -290,7 +303,7 @@ async function codex(now: () => number, host: Host): Promise<CliLimits | undefin
   }
   // A login kept in the Keychain has no file to check, and is filed under the home's path, so it wouldn't be found below.
   if (!host.exists(login)) return NO_CODEX_FILE
-  const seal = await openMacSeal(host)
+  const seal = await openMacSeal(host, true)
   if (!seal) return SEAL_REFUSED
   // Nothing can show a throwaway folder over ~/.codex here, so CODEX_HOME names one instead, with links to the real login
   // and config: no copy of a login on disk, and a link can't be written through. The Keychain stays out of it.
