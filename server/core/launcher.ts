@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, openSync, closeSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { CoreClient } from './client.ts'
@@ -84,8 +85,55 @@ export function buildProblem(config: Pick<CoreConfig, 'plugins'>, root = join(im
   return `Shepherdr is not built, so its page cannot open. Nothing was started. Run bun run build in ${root}, then start again.`
 }
 
-async function start(config: CoreConfig, foreground: boolean) {
+/** The core this home runs on, saved as it is made or when a start names one. Homes from before this file have none. */
+function savedCore(home: string) {
+  try { return JSON.parse(readFileSync(join(home, 'core.json'), 'utf8')) as { session: string; socket: string } } catch { return undefined }
+}
+export function saveCore(config: CoreConfig) {
+  writeFileSync(join(config.home, 'core.json'), JSON.stringify({ session: config.session, socket: config.socket }), { mode: 0o600 })
+}
+/** Saved with the marker, not after a start that may fail: a retry must not read this as a home from before the file. */
+export function claimHome(config: CoreConfig) {
+  const fresh = typeof inspectHome(config.home) !== 'object'
   prepareHome(config.home)
+  if (fresh) saveCore(config)
+}
+
+/** A core's saved machines belong to whoever added them. A home takes them on only when a start names that core:
+ * HC_SESSION alone is inherited from any hc terminal, and XDG homes alone can still reach the same running core. */
+export async function coreProblem(config: CoreConfig, machines: () => Promise<{ name: string }[]>) {
+  if (config.chosenCore) return
+  const kind = inspectHome(config.home)
+  if (kind !== 'absent' && kind !== 'empty') {
+    const saved = savedCore(config.home)
+    if (saved && (saved.session !== config.session || saved.socket !== config.socket)) return `This home runs on core session ${saved.session} at ${saved.socket}, not ${config.session} at ${config.socket}. Nothing was started. Start it with --core-session ${saved.session} --core-socket ${saved.socket}.`
+    return
+  }
+  const found = await machines()
+  if (found.length) return `Core session ${config.session} already has ${found.length === 1 ? 'a machine' : `${found.length} machines`} (${found.map(machine => machine.name).join(', ')}), and a new Shepherdr would run commands on ${found.length === 1 ? 'it' : 'them'}. Nothing was started. For a trial, give it its own core: --core-session NAME. To use ${found.length === 1 ? 'this machine' : 'these machines'} here, say so: --core-session ${config.session}.`
+}
+
+/** A core that starts reconnects its saved machines, and every hc command starts it: its own file answers without that. */
+function savedMachines(config: CoreConfig) {
+  const state = process.env.XDG_STATE_HOME || join(homedir(), '.local/state')
+  try { return JSON.parse(readFileSync(join(state, 'herdr-core', config.session, 'machines.json'), 'utf8')) as { name: string }[] } catch { return [] }
+}
+
+export async function coreMachines(config: CoreConfig) {
+  const problem = buildProblem(config)
+  if (problem) throw new Error(problem)
+  const saved = savedMachines(config)
+  if (saved.length) return saved
+  await ensureCore(config)
+  const core = await CoreClient.open(config.socket)
+  try { return (await core.call<{ machines: { name: string }[] }>('machine.list')).machines } finally { core.close() }
+}
+
+async function start(config: CoreConfig, foreground: boolean) {
+  // Before prepareHome: a refused start leaves no marker for the next start to pass on.
+  const refused = await coreProblem(config, () => coreMachines(config))
+  if (refused) throw new Error(refused)
+  claimHome(config)
   await withLock(config.home, async () => {
     const record = runRecord(config.home)
     const confirmed = record && await health(record)
@@ -94,6 +142,7 @@ async function start(config: CoreConfig, foreground: boolean) {
     const problem = buildProblem(config)
     if (problem) throw new Error(problem)
     await ensureCore(config)
+    if (config.chosenCore) saveCore(config)
     const boot = randomUUID()
     const args = ['--home', config.home, '--port', String(config.port), '--core-bin', config.binary, '--core-session', config.session, '--core-socket', config.socket]
     if (config.plugins === false) args.push('--no-plugin-updates')
