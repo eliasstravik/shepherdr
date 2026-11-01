@@ -70,12 +70,13 @@ const shownLine = (value: unknown) => typeof value === 'string' ? value : JSON.s
 /** What a tool asks to do, as a human reads it: the title at a glance, and below it all it would touch, never code. */
 export function permissionWords(tool: string | undefined, input: unknown): Pick<Question, 'title' | 'screen'> {
   const value = record(input) ?? {}, path = text(value.file_path) || text(value.notebook_path)
-  const card = (verb: string, what: string, ...more: unknown[]) => ({ title: `${verb}: ${clip(what, TITLE)}`, screen: more.filter(Boolean).map(shownLine).join('\n\n').slice(0, SHOWN) || undefined })
+  // A title cut short leaves its whole words below: two targets must never look the same.
+  const card = (verb: string, what: string, ...more: unknown[]) => {
+    const title = clip(what, TITLE)
+    return { title: `${verb}: ${title}`, screen: [...more, title !== what && what].filter(Boolean).map(shownLine).join('\n\n').slice(0, SHOWN) || undefined }
+  }
   switch (tool) {
-    case 'Bash': {
-      const command = text(value.command), whole = clip(command, TITLE) === command
-      return card('Run', command, value.description, !whole && command)
-    }
+    case 'Bash': return card('Run', text(value.command), value.description)
     case 'Write': return card('Write', baseName(path), path, value.content)
     case 'Edit': return card('Edit', baseName(path), path, [`- ${text(value.old_string)}`, `+ ${text(value.new_string)}`].join('\n'))
     case 'NotebookEdit': return card('Edit', baseName(path), path, value.new_source)
