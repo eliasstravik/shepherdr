@@ -6,6 +6,7 @@ import { createServer, connect, type Server, type Socket } from 'node:net'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { PilotHome } from './core-pilot-home.ts'
+import type { PilotProxyBackend } from './core-pilot-proxy.ts'
 import type { PilotSandbox } from './core-pilot-sandbox.ts'
 import { pilotGitPaths, pilotProjectFiles } from './core-pilot-sandbox.ts'
 import { pilotHostLogin, pilotLoginPaths, PilotMacLogin, PilotUsageHook } from './core-pilot-mac-login.ts'
@@ -192,6 +193,28 @@ export function pilotMacQuarantined(path: string) {
 }
 /** Gradle resolves dependencies in parallel over many hosts, past what a native agent's gateway ever needs. A tunnel takes two sockets. */
 export const PILOT_MAC_BUILD_LIMITS = { sockets: 256, handshakes: 64 }
+/**
+ * A mailbox round trip takes at least 250 ms and the mailbox holds 32. Charged per read and checked per tunnel, a build
+ * crawls at about 250 KB/s per tunnel, then fills it, and the run's own authority check fails. So its tunnels share one
+ * check at a time, and charge ahead in blocks no bigger than the allowance has left.
+ */
+export function pilotMacBuildBackend(backend: PilotProxyBackend, now = Date.now): PilotProxyBackend {
+  let credit = 0, ask = 0, charging: Promise<void> | undefined, leased = -Infinity, leasing: Promise<void> | undefined
+  return { ...backend,
+    lease: async () => {
+      if (now() - leased < 5000) return
+      leasing ??= backend.lease(AbortSignal.timeout(15_000)).then(() => { leased = now() }).finally(() => { leasing = undefined })
+      await leasing
+    },
+    reserve: async bytes => {
+      while (credit < bytes) {
+        const amount = Math.max(bytes, ask)
+        charging ??= backend.reserve(amount, AbortSignal.timeout(15_000)).then(result => { credit += amount; ask = Math.min(8 * 1048576, (result && result.left) ?? 8 * 1048576) }).finally(() => { charging = undefined })
+        await charging
+      }
+      credit -= bytes
+    } }
+}
 /** Loopback is shared with the whole Mac, so unlike Linux's private relay this one passes CONNECT only: never /mail. */
 export async function pilotMacRelay(gateway: string, idle = 10_000, build = false) {
   const peers = new Set<Socket>(), slots = build ? PILOT_MAC_BUILD_LIMITS.sockets : 32

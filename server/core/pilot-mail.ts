@@ -55,7 +55,10 @@ export class CorePilotMail {
       return {}
     }
     this.policy.actor(runId, actor)
-    if (input.op === 'traffic') return { used: this.policy.traffic(runId, actor, input.bytes as number) }
+    if (input.op === 'traffic') {
+      const used = this.policy.traffic(runId, actor, input.bytes as number), limit = this.policy.get(runId)?.config.traffic
+      return { used, ...(limit ? { left: limit - used } : {}) }
+    }
     if (input.op !== 'hook') throw Error('Unknown contained operation')
     if (this.source.store.get(`permission-cancel:${grant.id}`, id)) return { allow: false }
     const event = pilotHook(input.input, id, agent.kind, agent.pilot.home, agent.pilot.captures)

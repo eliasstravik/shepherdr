@@ -3,7 +3,7 @@ import { pilotSandboxArgs, type PilotSandbox } from './core-pilot-sandbox.ts'
 import { PilotRecords } from './core-pilot-records.ts'
 import { PilotProxy, type PilotProxyBackend } from './core-pilot-proxy.ts'
 import type { PilotHome } from './core-pilot-home.ts'
-import { PILOT_MAC_BUILD_LIMITS, startPilotMac, type PilotMacPrepared, type PilotMacRun } from './core-pilot-mac.ts'
+import { PILOT_MAC_BUILD_LIMITS, pilotMacBuildBackend, startPilotMac, type PilotMacPrepared, type PilotMacRun } from './core-pilot-mac.ts'
 import { existsSync } from 'node:fs'
 
 export interface PilotRuntime {
@@ -32,7 +32,8 @@ export async function runPilotRuntime(input: PilotRuntime): Promise<number> {
   }
   const records = new PilotRecords(input.home.captures)
   let mac: PilotMacRun | undefined
-  const gateway = new PilotProxy(input.hosts, records, input.mac ? { ...input.backend, usage: reading => mac?.usage(reading) } : input.backend, undefined, undefined, input.mac?.build ? PILOT_MAC_BUILD_LIMITS : undefined)
+  const backend = input.mac ? { ...input.backend, usage: (reading: unknown) => mac?.usage(reading) } : input.backend
+  const gateway = input.mac?.build ? new PilotProxy(input.hosts, records, pilotMacBuildBackend(backend), undefined, undefined, PILOT_MAC_BUILD_LIMITS) : new PilotProxy(input.hosts, records, backend)
   const watching = new AbortController()
   let child: Bun.Subprocess<'inherit', 'inherit', 'inherit'> | undefined, exited = false, stopping = false, reason: Error | undefined
   let deadline: ReturnType<typeof setTimeout> | undefined

@@ -145,6 +145,9 @@ that builds with Gradle, knowing these limits, none of which **Mac sandbox** has
   another run's CONNECT port, and UDP services on those ranges whenever they started. Every other local port stays closed.
 - **A launch takes about 4 s longer.** Seatbelt has no port ranges, so the profile holds one rule per port and takes
   that long to compile.
+- **Traffic is counted ahead.** Each agent charges the shared HTTPS allowance in blocks of up to 8 MiB, so a run can
+  show up to that much per agent that it didn't use. On a limit it charges only what's left, unless several agents
+  charge at once, when the run can stop up to one block early.
 - **A port that closes after the launch stays closed.** If the system assigns one to a Gradle listener, that build
   fails with `Could not connect`; it's rare, and the next launch reads the ports again. Rerunning the build usually
   gets another port.

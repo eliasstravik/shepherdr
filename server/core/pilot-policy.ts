@@ -120,7 +120,7 @@ export class CorePilotPolicy {
   }
   traffic(id: string, actor: PilotActor, bytes: number, now = Date.now()) {
     const run = this.actor(id, actor, now)
-    if (!Number.isSafeInteger(bytes) || bytes < 1 || bytes > 256 * 1024 || !Number.isSafeInteger(run.traffic + bytes)) throw new Refusal('Invalid HTTPS traffic reservation')
+    if (!Number.isSafeInteger(bytes) || bytes < 1 || bytes > 64 * 1048576 || !Number.isSafeInteger(run.traffic + bytes)) throw new Refusal('Invalid HTTPS traffic reservation')
     if (run.config.traffic && bytes > run.config.traffic - run.traffic) {
       run.state = 'failed'; run.error = 'Autopilot reached its shared HTTPS allowance'; this.save(run); throw new Refusal(run.error)
     }

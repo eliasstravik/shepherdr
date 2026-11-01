@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pilotMacEnvironment, pilotMacHeldPort, pilotMacProfile, pilotMacReadProfile, pilotMacRelay, pilotMacText, type PilotMacProfile } from '../helper/core-pilot-mac.ts'
+import { pilotMacBuildBackend, pilotMacEnvironment, pilotMacHeldPort, pilotMacProfile, pilotMacReadProfile, pilotMacRelay, pilotMacText, type PilotMacProfile } from '../helper/core-pilot-mac.ts'
 import { connect, createServer } from 'node:net'
 import { pilotLiveLogin, pilotLoginPaths, PilotMacLogin, pilotUsageReading, PilotUsageHook, type PilotLoginSource } from '../helper/core-pilot-mac-login.ts'
 import { PilotProxy } from '../helper/core-pilot-proxy.ts'
@@ -54,6 +54,30 @@ test.skipIf(process.platform !== 'darwin')('a build run\'s relay answers on both
     expect(await reach(build.port, '127.0.0.1')).toBe('tunnel'); expect(await reach(build.port, '::1')).toBe('tunnel')
     expect(await reach(plain.port, '127.0.0.1')).toBe('tunnel'); expect(await reach(plain.port, '::1')).toBe('ECONNREFUSED')
   } finally { plain.close(); build.close(); upstream.close(); rmSync(root, { recursive: true, force: true }) }
+})
+test('a build charges traffic ahead in shared blocks, never past what the allowance has left', async () => {
+  const signal = new AbortController().signal, block = 8 * 1048576
+  const backendFor = (limit: number | undefined) => {
+    const asked: number[] = []; let used = 0
+    const backend = { cli: async () => ({ out: '', code: 0 }), secret: async () => ({ secrets: {} }), hook: async () => ({}), lease: async () => {},
+      reserve: async (bytes: number) => { asked.push(bytes); await Bun.sleep(1); used += bytes; if (limit && used > limit) throw Error('allowance reached'); return limit ? { left: limit - used } : {} } }
+    return { asked, build: pilotMacBuildBackend(backend) }
+  }
+  const open = backendFor(undefined)
+  await open.build.reserve(65536, signal); expect(open.asked).toEqual([65536]) // The first is exact: nothing is known about the allowance yet.
+  await Promise.all(Array.from({ length: 64 }, () => open.build.reserve(65536, signal)))
+  expect(open.asked).toEqual([65536, block]) // 64 reads, one round trip.
+  const small = backendFor(200_000)
+  await small.build.reserve(65536, signal); await small.build.reserve(65536, signal); await small.build.reserve(65536, signal)
+  expect(small.asked).toEqual([65536, 134464]) // Exactly what was left.
+  await small.build.reserve(3000, signal)
+  await expect(small.build.reserve(65536, signal)).rejects.toThrow('allowance reached')
+  let leases = 0, clock = 0
+  const backend = { ...backendFor(undefined).build, lease: async () => { leases++; await Bun.sleep(1) } }
+  const leasing = pilotMacBuildBackend(backend, () => clock)
+  await Promise.all(Array.from({ length: 40 }, () => leasing.lease(signal))); expect(leases).toBe(1)
+  clock = 4999; await leasing.lease(signal); expect(leases).toBe(1)
+  clock = 5000; await leasing.lease(signal); expect(leases).toBe(2)
 })
 test('later rules keep Git metadata and the live login read-only inside writable folders', () => {
   const text = profile(), write = text.indexOf('(allow file-write* '), seal = text.indexOf('(deny file-write* ')

@@ -16,7 +16,8 @@ export interface PilotProxyBackend {
   secret(names: string[], id: string, signal: AbortSignal): Promise<unknown>
   hook(input: unknown, id: string, signal: AbortSignal): Promise<unknown>
   lease(signal: AbortSignal): Promise<void>
-  reserve(bytes: number, signal: AbortSignal): Promise<void>
+  /** `left` is what the shared allowance still has, if it has a limit. */
+  reserve(bytes: number, signal: AbortSignal): Promise<{ left?: number } | void>
   /** Only where a backend offers it; the reading is agent-written and checked by whoever receives it. */
   usage?(reading: unknown): unknown
 }
