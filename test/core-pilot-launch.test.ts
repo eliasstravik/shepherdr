@@ -11,13 +11,13 @@ import type { Mailbox } from '../server/core/mailbox.ts'
 import type { CoreFiles } from '../server/core/files.ts'
 import type { CoreAgent } from '../server/core/model.ts'
 
-function fixture() {
+function fixture(mac = false) {
   const root = mkdtempSync(join(tmpdir(), 'shep-pilot-launch-')), home = join(root, 'app'), provider = join(root, 'provider')
   mkdirSync(home, { mode: 0o700 }); mkdirSync(provider, { mode: 0o700 })
   const store = new CoreStore(home)
-  let prepared: PilotPrepared | undefined, owned: PilotHome | undefined, argv: string[] = [], submitted = false, revoked = false, uncertain = false
-  const core = { current: { terminals: new Map() }, call: async (_method: string, input: { argv: string[] }) => {
-    submitted = true; argv = input.argv
+  let prepared: PilotPrepared | undefined, owned: PilotHome | undefined, argv: string[] = [], cwd: string | undefined, submitted = false, revoked = false, uncertain = false
+  const core = { current: { terminals: new Map() }, call: async (_method: string, input: { argv: string[]; cwd: string }) => {
+    submitted = true; argv = input.argv; cwd = input.cwd
     if (uncertain) throw Error('Core response lost')
     return { address: 't1', pid: 123 }
   } } as unknown as CoreSession
@@ -30,19 +30,19 @@ function fixture() {
     expect(args.at(-1)).toBe('prepare')
     owned = preparePilotHome(input.parent, provider, join(import.meta.dir, '..'), input.kind, input.instructions)
     const { root, state, control, captures, gateway } = owned
-    prepared = { paths: { root, state, control, captures, gateway }, bwrap: '/usr/bin/bwrap', sandbox: { cwd: input.cwd, repo: input.repo, home: '/home/inside', state, control, binary: process.execPath, bun: process.execPath, kind: input.kind, writable: input.writable, privateRoots: [] } }
+    prepared = { paths: { root, state, control, captures, gateway }, bwrap: '/usr/bin/bwrap', sandbox: { cwd: input.cwd, repo: input.repo, home: '/home/inside', state, control, binary: process.execPath, bun: process.execPath, kind: input.kind, writable: input.writable, privateRoots: [] }, ...(mac ? { mac: { marker: { allowed: '/marker-a', denied: '/marker-b' } } } : {}) }
     return Buffer.from(JSON.stringify(prepared))
   }
   const space = { id: 'space', name: 'Example', machine: 'machine', folder: '/repo', base: 'main', prefix: 'EX', mode: 'regular' as const, added: 1 }
-  const launch = (kind: 'claude' | 'codex' = 'codex') => agents.launch(space, 'EX-1/Reviewer-1', kind, 'Review only', { role: 'reviewer', readOnly: true, pilot: { run: 'run', hosts: ['chatgpt.com'], repo: '/repo' } })
-  return { root, home, store, agents, launch, get prepared() { return prepared! }, get argv() { return argv }, get submitted() { return submitted }, get revoked() { return revoked }, loseResponse() { uncertain = true }, close() { owned?.discard(); store.close(); rmSync(root, { recursive: true, force: true }) } }
+  const launch = (kind: 'claude' | 'codex' = 'codex', access?: 'mac') => agents.launch(space, 'EX-1/Reviewer-1', kind, 'Review only', { role: 'reviewer', readOnly: true, pilot: { run: 'run', hosts: ['chatgpt.com'], repo: '/repo', access } })
+  return { root, home, store, agents, launch, get prepared() { return prepared! }, get argv() { return argv }, get cwd() { return cwd }, get submitted() { return submitted }, get revoked() { return revoked }, loseResponse() { uncertain = true }, close() { owned?.discard(); store.close(); rmSync(root, { recursive: true, force: true }) } }
 }
 
 test('contained reviewer wraps only native args and keeps its endpoint credential outside mounted control', async () => {
   const f = fixture()
   try {
     const record = await f.launch()
-    const review = JSON.parse(readFileSync(f.argv[2]!, 'utf8'))
+    const review = JSON.parse(readFileSync(f.argv[6]!, 'utf8'))
     expect(review.argv[1]).toEndWith('/helper/core-pilot-launch.ts')
     const launch = JSON.parse(readFileSync(review.argv[2], 'utf8'))
     expect(launch.args.slice(0, 4)).toEqual(['exec', '--json', '--sandbox', 'read-only'])
@@ -51,6 +51,21 @@ test('contained reviewer wraps only native args and keeps its endpoint credentia
     expect(record).toMatchObject({ state: 'working', transcriptFormat: 'codex-exec', command: '/run/shepherdr/bin/shepherdr', pilot: { run: 'run', pending: true } })
     expect(record.browser).toBeUndefined()
   } finally { f.close() }
+})
+
+test('a contained launch starts host Bun outside the worktree on either system, and its terminal still reports the worktree', async () => {
+  const f = fixture(true), linux = fixture()
+  try {
+    await f.launch()
+    expect(f.argv.slice(0, 4)).toEqual(['/bin/sh', '-c', 'cd "$0" && exec "$@"', join(f.home, 'sessions')])
+    expect(f.cwd).toBe('/repo')
+    const review = JSON.parse(readFileSync(f.argv[6]!, 'utf8')), launch = JSON.parse(readFileSync(review.argv[2], 'utf8'))
+    expect(launch.args.slice(0, 3)).toEqual(['exec', '--json', '--dangerously-bypass-approvals-and-sandbox'])
+    expect(launch.args).not.toContain('--sandbox')
+    await linux.launch()
+    expect(linux.argv.slice(0, 4)).toEqual(['/bin/sh', '-c', 'cd "$0" && exec "$@"', join(linux.home, 'sessions')])
+    expect(linux.cwd).toBe('/repo')
+  } finally { f.close(); linux.close() }
 })
 
 test('a definite setup failure restores the earlier record, revokes the grant and discards only new private preparation', async () => {
@@ -75,8 +90,8 @@ test('a readonly Claude reviewer runs headlessly with inside hooks/settings and 
   const f = fixture()
   try {
     const record = await f.launch('claude')
-    expect(f.argv[1]).toEndWith('/helper/core-pilot-launch.ts')
-    const launch = JSON.parse(readFileSync(f.argv[2]!, 'utf8'))
+    expect(f.argv[5]).toEndWith('/helper/core-pilot-launch.ts')
+    const launch = JSON.parse(readFileSync(f.argv[6]!, 'utf8'))
     expect(launch.args).toContain('--print')
     expect(launch.args).toContain('/run/shepherdr/settings.json')
     expect(launch.args).toContain('/run/shepherdr/instructions.md')

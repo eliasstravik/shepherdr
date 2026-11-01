@@ -25,16 +25,17 @@ function providerFile(path: string, login: boolean) {
     return bytes.subarray(0, size).toString('utf8')
   } finally { closeSync(fd) }
 }
-export function preparePilotHome(parent: string, providerHome: string, source: string, kind: 'claude' | 'codex', instructions: string): PilotHome {
+/** `followsLogin`: the Mac backend keeps a live Claude login file itself, and needs its status-line helper inside. */
+export function preparePilotHome(parent: string, providerHome: string, source: string, kind: 'claude' | 'codex', instructions: string, followsLogin = false): PilotHome {
   directory(parent)
   if (!['claude', 'codex'].includes(kind) || Buffer.byteLength(instructions) > 2 * 1024 * 1024) throw Error('Invalid contained provider or instructions')
-  const root = mkdtempSync(join(parent, 'pilot-')), gatewayRoot = mkdtempSync(join(tmpdir(), 'shep-pilot-gw-'))
+  const root = mkdtempSync(join(parent, 'pilot-')), gatewayRoot = mkdtempSync(join(realpathSync(tmpdir()), 'shep-pilot-gw-'))
   const state = join(root, 'home'), control = join(root, 'control'), captures = join(root, 'captures')
   const closeGateway = () => rmSync(gatewayRoot, { recursive: true, force: true })
   const discard = () => { closeGateway(); rmSync(root, { recursive: true, force: true }) }
   try {
     for (const path of [state, control, captures, join(control, 'bin')]) mkdirSync(path, { mode: 0o700 })
-    const names = kind === 'claude' ? ['.claude/.credentials.json', '.claude/settings.json'] : ['.codex/auth.json', '.codex/config.toml']
+    const names = kind === 'claude' ? [...(followsLogin ? [] : ['.claude/.credentials.json']), '.claude/settings.json'] : ['.codex/auth.json', '.codex/config.toml']
     for (const name of names) {
       const config = name.endsWith('settings.json') || name.endsWith('config.toml')
       const text = providerFile(join(providerHome, name), !config)
@@ -56,7 +57,7 @@ export function preparePilotHome(parent: string, providerHome: string, source: s
         writeFileSync(join(state, '.claude/.claude.json'), JSON.stringify(prefs), { mode: 0o600, flag: 'wx' })
       }
     }
-    for (const name of HELPERS) writeFileSync(join(control, name === 'core-pilot-bootstrap.ts' ? 'bootstrap.ts' : name), readFileSync(join(source, 'helper', name)), { mode: 0o600, flag: 'wx' })
+    for (const name of followsLogin ? [...HELPERS, 'core-pilot-statusline.ts'] : HELPERS) writeFileSync(join(control, name === 'core-pilot-bootstrap.ts' ? 'bootstrap.ts' : name), readFileSync(join(source, 'helper', name)), { mode: 0o600, flag: 'wx' })
     for (const name of ['bun', kind, 'gateway.sock']) writeFileSync(join(control, name), '', { mode: 0o600, flag: 'wx' })
     if (kind === 'codex') writeFileSync(join(control, 'codex-code-mode-host'), '', { mode: 0o600, flag: 'wx' })
     writeFileSync(join(control, 'instructions.md'), instructions, { mode: 0o600, flag: 'wx' })

@@ -2,10 +2,11 @@
 // Invoked by documented core machine.exec (prepare) or a core-owned terminal (run), never a network worker.
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { lstatSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { preparePilotHome, type PilotHome } from './core-pilot-home.ts'
 import { pilotNativeWorkspace } from './core-pilot-native.ts'
-import { pilotSandboxArgs, type PilotSandbox } from './core-pilot-sandbox.ts'
+import { pilotSandboxArgs, pilotSandboxChecks, type PilotSandbox } from './core-pilot-sandbox.ts'
+import { pilotMacPrepare, pilotMacQuarantined, type PilotAccess, type PilotMacPrepared } from './core-pilot-mac.ts'
 import { pilotCoreBackend } from './core-pilot-backend.ts'
 import { runPilotRuntime } from './core-pilot-runtime.ts'
 import { readCredential } from '../server/core/home.ts'
@@ -16,11 +17,13 @@ export interface PilotPrepared {
   paths: Pick<PilotHome, 'root' | 'state' | 'control' | 'captures' | 'gateway'>
   sandbox: PilotSandbox
   bwrap: string
+  mac?: PilotMacPrepared
 }
 export interface PilotPrepare {
   parent: string; cwd: string; repo: string; kind: 'claude' | 'codex'; writable: boolean; instructions: string
   privateRoots: string[]
   settings: string
+  access?: PilotAccess
 }
 export interface PilotLaunch extends PilotPrepared { credential: string; args: string[]; hosts: string[]; deadline?: number }
 
@@ -34,9 +37,39 @@ export function discardPilotPrepared(prepared: PilotPrepared, parent: string) {
   rmSync(gateway, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true })
 }
 
+const validPrepare = (input: PilotPrepare) => !(!input || typeof input.parent !== 'string' || typeof input.cwd !== 'string' || typeof input.repo !== 'string' || typeof input.instructions !== 'string' || typeof input.settings !== 'string' || Buffer.byteLength(input.settings) > 128 * 1024 || typeof input.writable !== 'boolean' || !Array.isArray(input.privateRoots) || input.privateRoots.some(path => typeof path !== 'string'))
+function preparePilotMac(input: PilotPrepare): PilotPrepared {
+  if (!validPrepare(input)) throw Error('Invalid contained launch preparation')
+  JSON.parse(input.settings)
+  const binary = Bun.which(input.kind)
+  if (!binary || !existsSync('/usr/bin/sandbox-exec')) throw Error('The Mac sandbox needs sandbox-exec and the selected native CLI; no unrestricted fallback was started')
+  // Bun 1.3 starts with an empty process.env under this profile, so nothing inside would find its gateway.
+  if (Bun.semver.order(Bun.version, '1.4.2') < 0) throw Error(`The Mac sandbox needs Bun 1.4.2 or newer on this machine, not ${Bun.version}; no unrestricted fallback was started`)
+  // A cask leaves Codex's helper quarantined until approved, and nothing ever asks. Codex itself only says it timed out.
+  const held = input.kind === 'codex' && [realpathSync(binary), join(dirname(realpathSync(binary)), 'codex-code-mode-host')].find(pilotMacQuarantined)
+  if (held) throw Error(`macOS holds ${held} in quarantine, so Codex can't run commands. If you trust it, run xattr -d com.apple.quarantine ${held} and start again; no unrestricted fallback was started`)
+  const hostHome = realpathSync(homedir()), home = preparePilotHome(input.parent, hostHome, join(import.meta.dir, '..'), input.kind, input.instructions, true)
+  try {
+    writeFileSync(join(home.control, 'settings.json'), input.settings, { mode: 0o600, flag: 'wx' })
+    const protectedRoots = ['.shepherdr', '.shepherdr-legacy', '.codex', '.claude', '.ssh', '.local/share/shepherdr-agents'].map(path => join(hostHome, path))
+    const sandbox: PilotSandbox = { cwd: input.cwd, repo: input.repo, home: home.state, state: home.state, control: home.control, binary: realpathSync(binary), bun: realpathSync(process.execPath), kind: input.kind, writable: input.writable,
+      privateRoots: [...input.privateRoots, ...protectedRoots, home.root] }
+    pilotSandboxChecks(sandbox) // Refuse unsafe paths before the app records or launches this runtime.
+    pilotNativeWorkspace(home, input.cwd, input.kind)
+    const mac = pilotMacPrepare(home, sandbox, input.access)
+    const { root, state, control, captures, gateway } = home
+    return { paths: { root, state, control, captures, gateway }, sandbox, bwrap: '/usr/bin/sandbox-exec', mac }
+  } catch (error) { home.discard(); throw error }
+}
 export function preparePilotLaunch(input: PilotPrepare): PilotPrepared {
+  const access = input?.access ?? 'isolated'
+  if (process.platform === 'darwin') {
+    if (access === 'isolated') throw Error('The Isolated workspace profile needs Linux namespaces. On a Mac, choose the Mac sandbox permission profile; no unrestricted fallback was started')
+    return preparePilotMac(input)
+  }
+  if (access !== 'isolated') throw Error('The Mac sandbox permission profile needs macOS. Choose Isolated workspace; no unrestricted fallback was started')
   if (process.platform !== 'linux') throw Error('Isolated Autopilot requires Linux namespaces; no unrestricted fallback was started')
-  if (!input || typeof input.parent !== 'string' || typeof input.cwd !== 'string' || typeof input.repo !== 'string' || typeof input.instructions !== 'string' || typeof input.settings !== 'string' || Buffer.byteLength(input.settings) > 128 * 1024 || typeof input.writable !== 'boolean' || !Array.isArray(input.privateRoots) || input.privateRoots.some(path => typeof path !== 'string')) throw Error('Invalid contained launch preparation')
+  if (!validPrepare(input)) throw Error('Invalid contained launch preparation')
   JSON.parse(input.settings)
   const bwrap = Bun.which('bwrap'), binary = Bun.which(input.kind)
   if (!bwrap || !binary) throw Error('Install bubblewrap and the selected native CLI before isolated Autopilot')
@@ -61,7 +94,7 @@ export async function launchPilot(path: string, signal: AbortSignal) {
   const endpoint = credential.endpoint ?? credential.socket
   if (!endpoint) throw Error('Missing private core endpoint')
   const home: PilotHome = { ...input.paths, closeGateway: () => rmSync(gatewayRoot, { recursive: true, force: true }), discard: () => { throw Error('A launched runtime keeps its native history') } }
-  return runPilotRuntime({ home, sandbox: input.sandbox, bwrap: input.bwrap, args: input.args, hosts: input.hosts, deadline: input.deadline, signal,
+  return runPilotRuntime({ home, sandbox: input.sandbox, bwrap: input.bwrap, mac: input.mac, args: input.args, hosts: input.hosts, deadline: input.deadline, signal,
     backend: pilotCoreBackend(endpoint, credential.mail, input.sandbox.cwd) })
 }
 

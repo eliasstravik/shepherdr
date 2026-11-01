@@ -4,6 +4,8 @@ import { PilotCapture, type PilotCaptureResult } from './core-pilot-capture.ts'
 import { pilotGatewayRequest } from './core-pilot-gateway.ts'
 
 const peers = new Set<import('node:net').Socket>()
+// macOS has no private loopback: the host runs the proxy port there, and this relay stays closed.
+const outside = process.env.SHEPHERDR_PILOT_PROXY
 const relay = createServer(socket => {
   if (peers.size >= 16) { socket.destroy(); return }
   const upstream = connect('/run/shepherdr/gateway.sock')
@@ -13,10 +15,11 @@ const relay = createServer(socket => {
   socket.on('error', () => upstream.destroy()); upstream.on('error', () => socket.destroy())
   socket.pipe(upstream).pipe(socket)
 })
-await new Promise<void>((resolve, reject) => { relay.once('error', reject); relay.listen(18765, '127.0.0.1', resolve) })
+if (!outside) await new Promise<void>((resolve, reject) => { relay.once('error', reject); relay.listen(18765, '127.0.0.1', resolve) })
 const [binary, ...args] = process.argv.slice(2)
-const env = { ...process.env, HTTP_PROXY: 'http://127.0.0.1:18765', HTTPS_PROXY: 'http://127.0.0.1:18765', ALL_PROXY: 'http://127.0.0.1:18765',
-  http_proxy: 'http://127.0.0.1:18765', https_proxy: 'http://127.0.0.1:18765', NO_PROXY: '127.0.0.1', no_proxy: '127.0.0.1' }
+const proxy = outside ?? 'http://127.0.0.1:18765'
+const env = { ...process.env, HTTP_PROXY: proxy, HTTPS_PROXY: proxy, ALL_PROXY: proxy,
+  http_proxy: proxy, https_proxy: proxy, NO_PROXY: '127.0.0.1', no_proxy: '127.0.0.1' }
 
 const captures = new PilotCapture(process.env.HOME!, (packet, signal) => pilotGatewayRequest('capture', packet, { timeout: 2000, signal }))
 const observing = new AbortController()
@@ -43,5 +46,5 @@ do {
 } while (!complete && !deadline.aborted)
 if (!complete) process.stderr.write('Shepherdr: native transcript capture did not finish before exit.\n')
 for (const socket of peers) socket.destroy()
-relay.close()
+if (!outside) relay.close()
 process.exit(code)

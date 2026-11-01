@@ -24,7 +24,7 @@ Your space, by its role (your prompt says which):
 
 How to do the work inside a task is its agent's judgment, not yours. Use `shepherdr task add` for managed tasks;
 raw `hc` children are helpers, not managed tasks. Ordinary coordinators may use `hc` for helper messages and waits.
-An Isolated workspace coordinator uses only its managed gateway commands, never a host core socket.
+An Isolated workspace or Mac sandbox coordinator uses only its managed gateway commands, never a host core socket.
 
 Task reads may be paged. For `task list`, repeat with `--after` set to the returned `next` until absent.
 `task show` may return JSON text pieces: start with `--from 0`, concatenate `data` in order, and continue with

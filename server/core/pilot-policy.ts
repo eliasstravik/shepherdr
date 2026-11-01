@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto'
 import type { CoreStore } from './store.ts'
 import type { AgentKind } from './model.ts'
 import { Refusal } from './client.ts'
+import type { PilotAccess } from '../../helper/core-pilot-mac.ts'
 
+/** The permission profiles as the human reads them in Settings. */
+export const PILOT_ACCESS: Record<PilotAccess, string> = { isolated: 'Isolated workspace', mac: 'Mac sandbox', 'mac-ports': 'Mac sandbox with local ports' }
 export interface PilotHarness { kind: AgentKind; model?: string; effort?: string; speed?: string }
 export interface CorePilotConfig {
   harness: PilotHarness
@@ -10,6 +13,8 @@ export interface CorePilotConfig {
   hosts: string[]
   secrets: string[]
   approvals: string[]
+  /** Absent in runs saved before the Mac profile, which were all Isolated workspace. */
+  access?: PilotAccess
   parallel: number
   traffic?: number
   tokens?: number
@@ -47,7 +52,8 @@ function configuration(input: CorePilotConfig): CorePilotConfig {
   }
   if (!Array.isArray(input.secrets) || input.secrets.length > 128 || input.secrets.some(name => typeof name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name))) throw new Refusal('List available secrets by environment name')
   if (!Array.isArray(input.approvals) || input.approvals.some(value => value !== 'merge')) throw new Refusal('Human approval can require merge, or none')
-  return { harness: harness(input.harness), reviewer: harness(input.reviewer), hosts: pilotHosts(input.hosts), secrets: [...new Set(input.secrets)], approvals: [...new Set(input.approvals)],
+  if (input.access !== undefined && !['isolated', 'mac', 'mac-ports'].includes(input.access)) throw new Refusal('Choose an offered permission profile')
+  return { access: input.access, harness: harness(input.harness), reviewer: harness(input.reviewer), hosts: pilotHosts(input.hosts), secrets: [...new Set(input.secrets)], approvals: [...new Set(input.approvals)],
     parallel: input.parallel, traffic: input.traffic, tokens: input.tokens, runtime: input.runtime }
 }
 
@@ -114,7 +120,7 @@ export class CorePilotPolicy {
   }
   traffic(id: string, actor: PilotActor, bytes: number, now = Date.now()) {
     const run = this.actor(id, actor, now)
-    if (!Number.isSafeInteger(bytes) || bytes < 1 || bytes > 256 * 1024 || !Number.isSafeInteger(run.traffic + bytes)) throw new Refusal('Invalid HTTPS traffic reservation')
+    if (!Number.isSafeInteger(bytes) || bytes < 1 || bytes > 64 * 1048576 || !Number.isSafeInteger(run.traffic + bytes)) throw new Refusal('Invalid HTTPS traffic reservation')
     if (run.config.traffic && bytes > run.config.traffic - run.traffic) {
       run.state = 'failed'; run.error = 'Autopilot reached its shared HTTPS allowance'; this.save(run); throw new Refusal(run.error)
     }

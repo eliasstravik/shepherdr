@@ -16,7 +16,10 @@ export interface PilotProxyBackend {
   secret(names: string[], id: string, signal: AbortSignal): Promise<unknown>
   hook(input: unknown, id: string, signal: AbortSignal): Promise<unknown>
   lease(signal: AbortSignal): Promise<void>
-  reserve(bytes: number, signal: AbortSignal): Promise<void>
+  /** `left` is what the shared allowance still has, if it has a limit. */
+  reserve(bytes: number, signal: AbortSignal): Promise<{ left?: number } | void>
+  /** Only where a backend offers it; the reading is agent-written and checked by whoever receives it. */
+  usage?(reading: unknown): unknown
 }
 export class PilotProxy {
   private sockets = new Set<Socket>()
@@ -27,11 +30,11 @@ export class PilotProxy {
   private inode?: number
   private server = createServer({ maxHeaderSize: 16 * 1024, requestTimeout: 15_000, headersTimeout: 15_000 }, (req, res) => { void this.mail(req, res) })
   constructor(private hosts: string[], private records: PilotRecords, private backend: PilotProxyBackend,
-    private dns: (host: string, options: { all: true }) => Promise<LookupAddress[]> = lookup, private tcp: (options: NetConnectOpts) => Socket = connect) {
-    setMaxListeners(32, this.closing.signal)
+    private dns: (host: string, options: { all: true }) => Promise<LookupAddress[]> = lookup, private tcp: (options: NetConnectOpts) => Socket = connect, private limits = { sockets: 16, handshakes: 8 }) {
+    setMaxListeners(Math.max(32, limits.sockets), this.closing.signal)
     this.server.on('error', () => { this.closing.abort(); for (const socket of this.sockets) socket.destroy() })
     this.server.on('connection', socket => {
-      if (this.closing.signal.aborted || this.sockets.size >= 16) { socket.destroy(); return }
+      if (this.closing.signal.aborted || this.sockets.size >= this.limits.sockets) { socket.destroy(); return }
       this.track(socket)
     })
     this.server.on('connect', (req, client, head) => { void this.https(req, client as Socket, head) })
@@ -89,6 +92,9 @@ export class PilotProxy {
           answer = await this.backend.secret(names, input.id, cancel.signal); break
         }
         case 'hook': answer = await this.backend.hook(input.args, input.id, cancel.signal); break
+        case 'usage':
+          if (!this.backend.usage) throw Error('Only isolated product commands, hooks and native captures are available')
+          answer = this.backend.usage(input.args); break
         default: throw Error('Only isolated product commands, hooks and native captures are available')
       }
       this.reply(res, answer)
@@ -97,7 +103,7 @@ export class PilotProxy {
   }
   private async https(req: IncomingMessage, client: Socket, head: Buffer) {
     const match = req.url?.match(/^([a-z0-9.-]+):443$/i), host = match?.[1].toLowerCase()
-    if (!host || !this.hosts.includes(host) || this.closing.signal.aborted || this.handshakes >= 8 || head.length > 256 * 1024) { client.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return }
+    if (!host || !this.hosts.includes(host) || this.closing.signal.aborted || this.handshakes >= this.limits.handshakes || head.length > 256 * 1024) { client.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return }
     this.handshakes++
     const cancel = new AbortController(), stop = () => cancel.abort()
     this.closing.signal.addEventListener('abort', stop, { once: true }); client.once('close', stop)
@@ -126,7 +132,7 @@ export class PilotProxy {
       guard.on('error', end)
       const meter = (incoming = false) => new Transform({ transform: (chunk, _encoding, done) => {
         const bytes = Buffer.from(chunk)
-        if (bytes.length > 256 * 1024) { done(Error('HTTPS chunk exceeded its bound')); return }
+        if (bytes.length > 1024 * 1024) { done(Error('HTTPS chunk exceeded its bound')); return } // One Bun read can reach 512 KiB on a fast download.
         void (async () => {
           if (incoming) await guard.ready
           for (let offset = 0; offset < bytes.length; offset += 64 * 1024) {

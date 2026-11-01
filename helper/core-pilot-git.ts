@@ -143,7 +143,8 @@ export async function pilotGitCommand(input: PilotGitCommand) {
     const request = join(sshRoot, 'request.json'), helper = join(import.meta.dir, 'core-pilot-ssh.ts')
     validatePath(helper); validatePath(realpathSync(process.execPath))
     writeFileSync(request, JSON.stringify({ cwd, writableRoots: writable }), { mode: 0o600, flag: 'wx' })
-    const ssh = `${quote(realpathSync(process.execPath))} ${quote(helper)} ${quote(request)}`
+    // Git runs this in the worktree, whose bunfig.toml and .env are the agent's. Bun must start somewhere else.
+    const ssh = `cd ${quote(dirname(helper))} && ${quote(realpathSync(process.execPath))} ${quote(helper)} ${quote(request)}`
     const options = pilotGitOptions(keys, gh, ssh)
     // gh may invoke Git internally. Runtime configuration also applies to those subprocesses.
     const pairs = options.filter((_, n) => n % 2).map(value => { const split = value.indexOf('='); return [value.slice(0, split), value.slice(split + 1)] })

@@ -223,16 +223,16 @@ any user's SSH configuration. Private request/config copies are removed with the
 
 ## Isolated Autopilot prerequisites
 
-The contained workspace adapter currently requires Linux with working unprivileged
-user/mount/network namespaces, `bubblewrap` (`bwrap`) and `flock`. Ordinary native
+The Isolated workspace profile requires Linux with working unprivileged
+user/mount/network namespaces, `bubblewrap` (`bwrap`) and `flock`; on a Mac, the Mac
+sandbox profile in [Autopilot](../autopilot.md) replaces it. Ordinary native
 agent sessions and the app launcher do not use this boundary. Missing prerequisites
 refuse contained startup/adoption; there is no unrestricted fallback. The native
 Claude Code/Codex CLI and its account must already be installed on that machine.
 The build checks used Claude Code 2.1.314 and Codex 0.163.0; Codex's installed
 `codex-code-mode-host` companion is mounted with its CLI. Other native versions
-still need acceptance. Legacy 2.0's `server/live/autopilot-sandbox.ts` also refuses
-non-Linux contained startup; this preserves that platform limit. Ordinary macOS
-remote sessions still require their separate acceptance checks.
+still need acceptance. Ordinary macOS remote sessions still require their separate
+acceptance checks.
 No dependency installation or live service enablement is part of these checks.
 
 ### Ordinary Codex command access

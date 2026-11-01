@@ -15,7 +15,7 @@ test('contained artifact exports live in immutable control, return namespace pat
   try {
     const bytes = Buffer.alloc(2 * 1024 * 1024, 65)
     const path = await pilotArtifact({ ...f.input, op: 'export', name: '../../page.html', data: bytes.toString('base64') })
-    expect(path).toMatch(/^\/run\/shepherdr\/artifacts\/[a-f0-9]{16}-page.html$/)
+    expect(path).toMatch(process.platform === 'darwin' ? /\/control\/artifacts\/[a-f0-9]{16}-page.html$/ : /^\/run\/shepherdr\/artifacts\/[a-f0-9]{16}-page.html$/)
     expect(readFileSync(join(f.root, 'control/artifacts', basename(path)))).toEqual(bytes)
     await expect(pilotArtifact({ ...f.input, op: 'export', data: Buffer.alloc(bytes.length + 1).toString('base64') })).rejects.toThrow('over 2 MiB')
     await expect(pilotArtifact({ ...f.input, op: 'export', data: 'malformed===' })).rejects.toThrow('encoding')

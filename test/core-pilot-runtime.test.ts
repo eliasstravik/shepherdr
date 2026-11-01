@@ -17,7 +17,7 @@ function fixture() {
   return { root, marker, home, backend, bwrap, sandbox, close() { home.discard(); rmSync(root, { recursive: true, force: true }) } }
 }
 
-test('runtime requires confirmed authority before spawn and removes its private gateway on normal exit', async () => {
+test.skipIf(process.platform !== 'linux')('runtime requires confirmed authority before spawn and removes its private gateway on normal exit', async () => {
   const f = fixture()
   try {
     writeFileSync(f.bwrap, `#!/bin/sh\nprintf '%s' "$SHEPHERDR_CORE_CREDENTIAL" > '${f.marker}'\nexit 7\n`, { mode: 0o700 })
@@ -29,7 +29,7 @@ test('runtime requires confirmed authority before spawn and removes its private 
   } finally { f.close() }
 })
 
-test('refused initial lease never executes a process or leaves a gateway', async () => {
+test.skipIf(process.platform !== 'linux')('refused initial lease never executes a process or leaves a gateway', async () => {
   const f = fixture()
   try {
     writeFileSync(f.bwrap, `#!/bin/sh\ntouch '${f.marker}'\n`, { mode: 0o700 })
@@ -40,7 +40,7 @@ test('refused initial lease never executes a process or leaves a gateway', async
   } finally { f.close() }
 })
 
-test('the outside runtime deadline terminates its own holder and retains captured history', async () => {
+test.skipIf(process.platform !== 'linux')('the outside runtime deadline terminates its own holder and retains captured history', async () => {
   const f = fixture()
   try {
     writeFileSync(f.bwrap, '#!/bin/sh\nexec sleep 30\n', { mode: 0o700 })

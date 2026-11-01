@@ -50,7 +50,7 @@ export class CorePilotLifecycle {
     const agent = await this.source.agents.launch(space, place, harness.kind,
       `<mode>Fresh Autopilot coordinator. Same chat. Read the heartbeat checklist, inspect this space and act within your approved profile. Save progress and next step with shepherdr progress.\nSaved progress: ${progress || '(none)'}\nRecent chat (history only; do not repeat earlier requests):\n${recent}\nHeartbeat checklist:\n${this.source.heartbeats.read(space)}</mode>`,
       { ...harness, instructions: `${role}\nYou are isolated. Use the launch-provisioned shepherdr command for managed tasks, messages and reviews. No core socket or unrestricted fallback exists here. Git metadata is read-only; workers checkpoint through shepherdr checkpoint. Settings are a snapshot for this run.`,
-        pilot: { run: run.id, hosts: run.config.hosts, deadline: run.config.runtime ? run.started + run.config.runtime : undefined, repo: space.folder } })
+        pilot: { run: run.id, hosts: run.config.hosts, deadline: run.config.runtime ? run.started + run.config.runtime : undefined, repo: space.folder, access: run.config.access } })
     return agent
   }
   restart(place: string, harness?: PilotHarness) {

@@ -24,7 +24,7 @@ Every agent, coordinator or task agent, gets the same chat.
   screen with no choices to read may still be a slow start, so its card comes a few seconds later, and Open terminal
   is the way on. Each next screen is its own card. Nothing is pressed if the screen
   has changed since the card was drawn, and a card that goes unused closes when its answer comes from the terminal or
-  the agent starts. Outside Isolated workspaces Shepherdr pre-trusts nothing, and Codex asks in any new Git repository,
+  the agent starts. Outside Isolated workspaces and the Mac sandbox Shepherdr pre-trusts nothing, and Codex asks in any new Git repository,
   even on a machine set to bypass; its task worktrees share their repository's answer.
 - Claude Code's own question tool and plan approval are cards, never permissions: a question is a choice card with an
   Other answer, a plan is Plan to approve (stop asking, keep asking, or change the plan). The answer goes back to Claude

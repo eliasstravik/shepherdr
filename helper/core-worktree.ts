@@ -1,6 +1,6 @@
 // Stateless native worktree reader. Executed through documented core machine.exec; no listener or worker.
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { isAbsolute, join, relative, sep } from 'node:path'
+import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { lstatSync, realpathSync, statSync, openSync, closeSync, readSync, fstatSync, constants } from 'node:fs'
 import type { Diff, DiffFile, FileText, Patch, PullRequest, PrCheck, TreeFiles, WorktreeAsk } from '../shared/types.ts'
 
@@ -16,7 +16,8 @@ async function sh(argv: string[], cwd: string, options: { env?: Record<string, s
       literal: options.env?.GIT_LITERAL_PATHSPECS === '1', host: options.env?.GH_HOST, timeout: options.timeoutMs ?? 20000 }))
     argv = [guard.bun, guard.helper]
   }
-  const child = Bun.spawn(argv, { cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1', GIT_OPTIONAL_LOCKS: '0', GIT_PAGER: 'cat', ...options.env }, stdin, stdout: 'pipe', stderr: 'pipe' })
+  // Bun reads bunfig.toml and .env from where it starts, and this worktree is the agent's. The helper gets cwd on stdin.
+  const child = Bun.spawn(argv, { cwd: guard && argv[1] === guard.helper ? dirname(guard.helper) : cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1', GIT_OPTIONAL_LOCKS: '0', GIT_PAGER: 'cat', ...options.env }, stdin, stdout: 'pipe', stderr: 'pipe' })
   const timer = setTimeout(() => child.kill(), options.timeoutMs ?? 20000)
   let truncated = false
   const collect = async (stream: ReadableStream<Uint8Array>, max: number) => {

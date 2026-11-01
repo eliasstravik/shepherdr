@@ -58,8 +58,9 @@ export interface PilotSandbox {
   cwd: string; repo: string; home: string; state: string; control: string; binary: string; bun: string
   kind: 'claude' | 'codex'; writable: boolean; privateRoots: string[]
 }
-export function pilotSandboxArgs(input: PilotSandbox) {
-  const real = (path: string) => { const actual = realpathSync(path); if (actual !== resolve(path) || actual === '/') throw Error('Use a real private sandbox path'); return actual }
+const real = (path: string) => { const actual = realpathSync(path); if (actual !== resolve(path) || actual === '/') throw Error('Use a real private sandbox path'); return actual }
+/** The refusals shared by every backend: real private paths, no overlap with protected host state. */
+export function pilotSandboxChecks(input: PilotSandbox) {
   const cwd = real(input.cwd), repo = real(input.repo), state = real(input.state), control = real(input.control)
   for (const path of [state, control]) { const stat = lstatSync(path); if (!stat.isDirectory() || stat.mode & 0o077 || process.getuid && stat.uid !== process.getuid()) throw Error('Sandbox state and control must be private owned directories') }
   const git = pilotGitPaths(repo, cwd)
@@ -71,6 +72,10 @@ export function pilotSandboxArgs(input: PilotSandbox) {
   if (state === control || state.startsWith(control + '/') || control.startsWith(state + '/')) throw Error('Keep sandbox control outside its writable home')
   const home = resolve(input.home)
   if (home === '/' || !['claude', 'codex'].includes(input.kind)) throw Error('Invalid sandbox home or adapter')
+  return { cwd, repo, state, control, git, home }
+}
+export function pilotSandboxArgs(input: PilotSandbox) {
+  const { cwd, repo, state, control, git, home } = pilotSandboxChecks(input)
   const args = ['--die-with-parent', '--new-session', '--unshare-all', '--cap-drop', 'ALL', '--clearenv']
   for (const path of ['/usr', '/bin', '/lib', '/lib64']) if (existsSync(path)) args.push('--ro-bind', path, path)
   args.push('--dir', '/etc')

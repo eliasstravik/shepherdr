@@ -7,7 +7,7 @@ import { CORE_ENVIRONMENT, type CoreEnvironment, type CoreEndpoint } from './cli
 
 export interface RemoteRuntime { root: string; home: string; bun: string; hc: string; path: string; session?: string; socket?: string; environment?: CoreEnvironment; endpoint: CoreEndpoint; browser: string }
 const PARTS = ['helper/core-worktree-includes.ts', 'helper/core-worktree-move.ts', 'helper/core-cli.ts', 'helper/core-hook.ts', 'helper/core-review.ts', 'helper/core-secret.ts', 'helper/core-browser.ts', 'helper/core-browser-session.ts', 'server/browser-pick.ts', 'shared/browser.ts', 'server/core/browser-protocol.ts', 'server/core/home.ts', 'server/core/client.ts', 'server/core/protocol.ts', 'server/core/envelope.ts', 'server/core/mailbox.ts', 'server/core/request.ts']
-PARTS.push(...['artifact', 'inventory', 'native', 'path', 'ssh', 'git', 'backend', 'bootstrap', 'capture', 'cli', 'gateway', 'home', 'hook', 'launch', 'proxy', 'records', 'runtime', 'sandbox', 'tls'].map(name => `helper/core-pilot-${name}.ts`))
+PARTS.push(...['artifact', 'inventory', 'native', 'path', 'ssh', 'git', 'backend', 'bootstrap', 'capture', 'cli', 'gateway', 'home', 'hook', 'launch', 'proxy', 'records', 'runtime', 'sandbox', 'tls', 'mac', 'mac-login', 'mac-stop', 'statusline'].map(name => `helper/core-pilot-${name}.ts`))
 const quote = (text: string) => `'${text.replace(/'/g, `'"'"'`)}'`
 
 /** Provision only private agent helper files through core exec. No SSH client, listener, worker or service. */
@@ -54,7 +54,8 @@ export class CoreRemotes {
     assets('skills'); assets('skill-data')
     parts['bin/agent-browser'] = readFileSync(join(source, 'bin/agent-browser'), 'utf8').replace('node_modules/agent-browser/bin/', 'vendor/agent-browser/bin/')
     parts['vendor/agent-browser/LICENSE'] = readFileSync(join(packageRoot, 'LICENSE'), 'utf8')
-    const digest = createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 24)
+    // bin/shepherdr below names this Bun, and a helper folder is never rewritten: a new Bun path needs its own folder.
+    const digest = createHash('sha256').update(JSON.stringify({ parts, bun: metadata.bun })).digest('hex').slice(0, 24)
     const root = join(metadata.home, '.local/share/shepherdr-agents', this.installation, digest)
     parts['bin/shepherdr'] = `#!/bin/sh\nexec ${quote(metadata.bun)} ${quote(join(root, 'helper/core-cli.ts'))} "$@"\n`
 

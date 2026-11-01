@@ -8,10 +8,11 @@ import type { CoreFiles } from '../server/core/files.ts'
 /** Fake core transport, real private-file writer on CI. Never uses SSH or installed agent state. */
 for (const core of ['0.1.14', '0.1.16']) test(`remote helpers on core ${core} are immutable private files and launch credentials cannot follow symlinks`, async () => {
   const home = mkdtempSync(join(tmpdir(), 'shep-remote-'))
+  let bun = process.execPath
   const files = { exec: async (_machine: string, argv: string[], _cwd?: string, input?: Uint8Array) => {
     if (argv[0] === 'rm') { const result = Bun.spawnSync(argv); if(result.exitCode) throw Error(result.stderr.toString()); return result.stdout }
     if (argv[0] === 'sh') return Buffer.from(process.execPath)
-    if (argv[2].startsWith("const o=require")) return Buffer.from(JSON.stringify({ home, bun: process.execPath, hc: '/core/hc', path: '/core', version: `hc ${core}`, session: 'isolated', environment: { XDG_RUNTIME_DIR: '/private/runtime', XDG_STATE_HOME: '/private/state', XDG_CONFIG_HOME: null }, platform: process.platform, arch: process.arch, musl: false }))
+    if (argv[2].startsWith("const o=require")) return Buffer.from(JSON.stringify({ home, bun, hc: '/core/hc', path: '/core', version: `hc ${core}`, session: 'isolated', environment: { XDG_RUNTIME_DIR: '/private/runtime', XDG_STATE_HOME: '/private/state', XDG_CONFIG_HOME: null }, platform: process.platform, arch: process.arch, musl: false }))
     if (argv[2].startsWith('const {CoreClient}')) return Buffer.from('identity verified')
     const result = Bun.spawnSync(argv, { stdin: input ?? 'ignore' })
     if (result.exitCode) throw new Error(result.stderr.toString())
@@ -36,6 +37,11 @@ for (const core of ['0.1.14', '0.1.16']) test(`remote helpers on core ${core} ar
     await expect(remotes.privateFile('machine', runtime, link, 'overwrite')).rejects.toThrow()
     expect(readFileSync(credential, 'utf8')).toBe('private test token')
     await expect(remotes.privateFile('machine', runtime, join(home, 'outside'), 'no')).rejects.toThrow('outside')
+    // A Bun upgrade that changes its path, as version managers do, must not meet the old folder's launcher.
+    bun = join(home, 'upgraded-bun'); symlinkSync(process.execPath, bun)
+    const upgraded = await new CoreRemotes(files, 'installation', () => ({ version: '0.1.14' })).prepare('machine')
+    expect(upgraded.root).not.toBe(runtime.root)
+    expect(readFileSync(join(upgraded.root, 'bin/shepherdr'), 'utf8')).toContain(bun)
   } finally { rmSync(home, { recursive: true, force: true }) }
 })
 

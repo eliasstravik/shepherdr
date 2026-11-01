@@ -254,17 +254,50 @@ test('an answer it cannot read proves nothing: never picked, never warned about,
   // only a machine never checked keeps the plain order
   expect(settings.get('reviewer.agent', 'p:other:one')).toBe('Codex')
   expect(parseMachineCheck('/home/someone')).toBeUndefined()
+  expect(parseMachineCheck('platform=Darwin\nseatbelt=ok\nbun=1.4.2\nsandbox=missing', 5)).toMatchObject({ seatbelt: 'ok', bun: '1.4.2' })
+  expect(parseMachineCheck('platform=Darwin\nbun=not a version', 5)?.bun).toBeUndefined()
+  expect(parseMachineCheck('platform=Darwin\nquarantined=/cask/helper', 5)?.quarantined).toBe('/cask/helper')
   expect(parseMachineCheck('platform=Linux\nsandbox=ok\nclaude=\ncodex=error: unknown command', 5)).toEqual({ at: 5, platform: 'Linux', sandbox: 'ok', cli: { claude: undefined, codex: undefined } })
   expect(parseMachineCheck('platform=Linux\nclaude="loggedIn": false\ncodex=Logged in using ChatGPT')?.cli).toEqual({ claude: 'signed-out', codex: 'ready' })
   expect(parseMachineCheck('platform=Linux\nclaude="loggedIn": true\ncodex=Not logged in')?.cli).toEqual({ claude: 'ready', codex: 'signed-out' })
   expect(parseMachineCheck('platform=Linux\nclaude=missing\ncodex=missing')?.cli).toEqual({ claude: 'missing', codex: 'missing' })
 }))
 
-test('Autopilot says why it cannot run: home space, not Linux, no sandbox, or its CLI unusable', () => fixture(settings => {
+test('Autopilot says why it cannot run: home space, wrong profile for the system, no sandbox, or its CLI unusable', () => fixture(settings => {
   const ready = { claude: 'ready', codex: 'ready' } as const
   expect(settings.pilotBlock('p:box:one')).toBeUndefined()
   check(settings, 'box', ready, { platform: 'Darwin', sandbox: 'missing' })
-  expect(settings.pilotBlock('p:box:one')).toBe('Autopilot needs Linux. box runs macOS.')
+  expect(settings.pilotBlock('p:box:one')).toBe('Isolated workspace needs Linux. box runs macOS: choose the Mac sandbox permission profile.')
+  settings.set('autopilot.access', 'Mac sandbox', 'p:box:one')
+  expect(settings.pilotBlock('p:box:one')).toBeUndefined() // bubblewrap is missing on every Mac, and the Mac profile doesn't use it.
+  check(settings, 'box', ready, { platform: 'Darwin', sandbox: 'missing', quarantined: '/cask/codex-code-mode-host' })
+  expect(settings.pilotBlock('p:box:one')).toContain('xattr -d com.apple.quarantine /cask/codex-code-mode-host') // The default reviewer, where it's signed in.
+  settings.set('reviewer.agent', 'Claude Code', 'p:box:one')
+  expect(settings.pilotBlock('p:box:one')).toBeUndefined()
+  settings.set('autopilot.agent', 'Codex', 'p:box:one')
+  expect(settings.pilotBlock('p:box:one')).toContain('xattr -d com.apple.quarantine')
+  settings.set('autopilot.agent', 'Claude Code', 'p:box:one')
+  check(settings, 'box', ready, { platform: 'Darwin', sandbox: 'missing', bun: '1.3.5' })
+  expect(settings.pilotBlock('p:box:one')).toBe('The Mac sandbox needs Bun 1.4.2 or newer on box, not 1.3.5.')
+  // Its own machine launches on this app's Bun, whatever PATH finds there.
+  const { store } = settings as unknown as { store: CoreStore }
+  store.set('meta', 'local', { id: 'box' })
+  expect(settings.pilotBlock('p:box:one')).toBe(Bun.semver.order(Bun.version, '1.4.2') < 0 ? `The Mac sandbox needs Bun 1.4.2 or newer on box, not ${Bun.version}.` : undefined)
+  store.set('meta', 'local', { id: 'other' })
+  check(settings, 'box', ready, { platform: 'Darwin', sandbox: 'missing', bun: '1.4.2', seatbelt: 'missing' })
+  expect(settings.pilotBlock('p:box:one')).toContain('sandbox-exec')
+  check(settings, 'box', ready, { platform: 'Darwin', sandbox: 'missing', bun: '1.4.2', seatbelt: 'ok' })
+  expect(settings.pilotBlock('p:box:one')).toBeUndefined()
+  check(settings, 'box', { claude: 'signed-out', codex: 'ready' }, { platform: 'Darwin', sandbox: 'missing' })
+  expect(settings.pilotBlock('p:box:one')).toBe('Autopilot runs on Claude Code, which is not signed in on box.')
+  check(settings, 'box', ready, { platform: 'Linux', sandbox: 'ok' })
+  expect(settings.pilotBlock('p:box:one')).toBe('The Mac sandbox permission profile needs macOS. box runs Linux.')
+  settings.set('autopilot.access', 'Mac sandbox with local ports', 'p:box:one')
+  expect(settings.pilotBlock('p:box:one')).toBe('The Mac sandbox permission profile needs macOS. box runs Linux.')
+  settings.set('autopilot.access', 'Mac sandbox', 'p:box:one')
+  settings.set('autopilot.access', 'Isolated workspace', 'p:box:one')
+  check(settings, 'box', ready, { platform: 'FreeBSD', sandbox: 'missing' })
+  expect(settings.pilotBlock('p:box:one')).toBe('Autopilot needs Linux or macOS. box runs FreeBSD.')
   check(settings, 'box', ready, { platform: 'Linux', sandbox: 'missing' })
   expect(settings.pilotBlock('p:box:one')).toContain('bubblewrap')
   check(settings, 'box', ready, { platform: 'Linux', sandbox: 'blocked' })

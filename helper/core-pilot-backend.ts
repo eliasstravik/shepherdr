@@ -36,6 +36,6 @@ export function pilotCoreBackend(endpoint: CoreEndpoint, credential: MailCredent
       }
     },
     lease: async signal => { await call('pilot', { op: 'lease' }, randomUUID(), signal, 15_000) },
-    reserve: async (bytes, signal) => { await call('pilot', { op: 'traffic', bytes }, randomUUID(), signal, 15_000) },
+    reserve: (bytes, signal) => call('pilot', { op: 'traffic', bytes }, randomUUID(), signal, 15_000) as Promise<{ left?: number }>,
   }
 }

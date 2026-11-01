@@ -1,7 +1,7 @@
 // INSIDE the sandbox. This socket is the only product-command route; no core credential is present here.
 import { request } from 'node:http'
 import { randomUUID } from 'node:crypto'
-export type PilotGatewayAction = 'cli' | 'secret' | 'hook' | 'capture'
+export type PilotGatewayAction = 'cli' | 'secret' | 'hook' | 'capture' | 'usage'
 export interface PilotGatewayOptions { id?: string; timeout?: number; signal?: AbortSignal; socket?: string }
 export function pilotGatewayRequest<T>(action: PilotGatewayAction, args: unknown, options: PilotGatewayOptions = {}): Promise<T> {
   const id = options.id ?? randomUUID(), body = Buffer.from(JSON.stringify({ id, action, args }))
@@ -10,7 +10,7 @@ export function pilotGatewayRequest<T>(action: PilotGatewayAction, args: unknown
     let finished = false
     const done = (error?: Error, value?: T) => { if (finished) return; finished = true; clearTimeout(timer); options.signal?.removeEventListener('abort', abort); if (error) reject(error); else resolve(value!) }
     const abort = () => { const error = Error('Isolated command was cancelled'); done(error); req.destroy(error) }
-    const req = request({ socketPath: options.socket ?? '/run/shepherdr/gateway.sock', path: '/mail', method: 'POST', headers: { 'content-type': 'application/json', 'content-length': String(body.length) } }, response => {
+    const req = request({ socketPath: options.socket ?? process.env.SHEPHERDR_PILOT_GATEWAY ?? '/run/shepherdr/gateway.sock', path: '/mail', method: 'POST', headers: { 'content-type': 'application/json', 'content-length': String(body.length) } }, response => {
       const parts: Buffer[] = []; let size = 0
       response.on('data', chunk => {
         if (finished) return

@@ -39,7 +39,7 @@ test('contained traffic and hooks use the private actor and mapped capture tree'
   const f = fixture()
   try {
     f.activate()
-    expect(await f.mail({ op: 'traffic', bytes: 40, run: 'forged', chat: 'other' })).toEqual({ used: 40 })
+    expect(await f.mail({ op: 'traffic', bytes: 40, run: 'forged', chat: 'other' })).toEqual({ used: 40, left: 60 })
     await f.mail({ op: 'hook', input: { hook_event_name: 'SessionStart', session_id: 'native', transcript_path: '/home/inside/.claude/projects/repo/native.jsonl', chat: 'other' } })
     expect(f.source.agents.get('space')).toMatchObject({ session: 'native', transcript: '/private/captures/.claude/projects/repo/native.jsonl', state: 'idle' })
     await expect(f.mail({ op: 'hook', input: { hook_event_name: 'PermissionRequest', tool_input: 'x'.repeat(17_000) } })).rejects.toThrow('show in full')
