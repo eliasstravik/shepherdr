@@ -52,6 +52,10 @@ shepherdr status --home /tmp/shepherdr-preview
 shepherdr stop --home /tmp/shepherdr-preview
 ```
 
+A new home's first start stops, listing them, if its core already has machines and neither `--core-session` nor
+`--core-socket` named that core: a separate home alone, or separate XDG folders alone, can still reach the same running
+core. A separate `--core-session` has no machines. See [Other machines](../machines.md).
+
 `--core-socket` can select an endpoint inside a private directory. Keep custom
 socket paths short. Never share the core socket over the network.
 

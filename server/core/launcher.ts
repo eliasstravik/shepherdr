@@ -84,7 +84,27 @@ export function buildProblem(config: Pick<CoreConfig, 'plugins'>, root = join(im
   return `Shepherdr is not built, so its page cannot open. Nothing was started. Run bun run build in ${root}, then start again.`
 }
 
+/** A core's saved machines belong to whoever added them. A new home takes them on only when its start names that core:
+ * HC_SESSION alone is inherited from any hc terminal, and XDG homes alone can still reach the same running core. */
+export async function newHomeProblem(config: CoreConfig, machines: () => Promise<{ name: string }[]>) {
+  const kind = inspectHome(config.home)
+  if (config.chosenCore || kind !== 'absent' && kind !== 'empty') return
+  const found = await machines()
+  if (found.length) return `Core session ${config.session} already has ${found.length === 1 ? 'a machine' : `${found.length} machines`} (${found.map(machine => machine.name).join(', ')}), and a new Shepherdr would run commands on ${found.length === 1 ? 'it' : 'them'}. Nothing was started. For a trial, give it its own core: --core-session NAME. To use ${found.length === 1 ? 'this machine' : 'these machines'} here, say so: --core-session ${config.session}.`
+}
+
+async function coreMachines(config: CoreConfig) {
+  const problem = buildProblem(config)
+  if (problem) throw new Error(problem)
+  await ensureCore(config)
+  const core = await CoreClient.open(config.socket)
+  try { return (await core.call<{ machines: { name: string }[] }>('machine.list')).machines } finally { core.close() }
+}
+
 async function start(config: CoreConfig, foreground: boolean) {
+  // Before prepareHome: a refused start leaves no marker for the next start to pass on.
+  const refused = await newHomeProblem(config, () => coreMachines(config))
+  if (refused) throw new Error(refused)
   prepareHome(config.home)
   await withLock(config.home, async () => {
     const record = runRecord(config.home)
