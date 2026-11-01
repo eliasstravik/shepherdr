@@ -161,7 +161,7 @@ export class CorePilotPolicy {
     if (command === 'heartbeat' && !op || command === 'complete' && actor.role === 'coordinator' || command === 'checkpoint' && actor.role === 'task') return run
     if (command === 'secret' && ['list', 'ask', 'run', 'env'].includes(op)) return run // Secret names are separately checked against the run snapshot.
     if (command === 'task' && ['list', 'show', 'chat'].includes(op)) return run
-    if (command === 'task' && ['delete', 'archive', 'unarchive', 'pin', 'unpin'].includes(op) && actor.role === 'coordinator') return run
+    if (command === 'task' && ['delete', 'unarchive', 'pin', 'unpin'].includes(op) && actor.role === 'coordinator') return run
     if (command === 'task' && op === 'add' && actor.role === 'coordinator' && run.state === 'on') return run
     if (command === 'task' && op === 'start' && actor.role === 'coordinator' && run.state === 'on') return run
     if (command === 'task' && op === 'review-more' && actor.role === 'coordinator') return run // CoreTasks refuses any other role too.

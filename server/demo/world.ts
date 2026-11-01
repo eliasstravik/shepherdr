@@ -658,6 +658,13 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         this.emit('snapshot')
         return { ok: true }
       }
+      case 'stop': {
+        const t = this.task(a.chat.split('/')[0])
+        if (!t || t.status === 'done') return { ok: false, error: 'This task is Done; there is nothing to stop' }
+        Object.assign(t, { status: 'todo', sub: '', report: undefined, state: 'To do · stopped just now' })
+        this.emit('snapshot')
+        return { ok: true }
+      }
       case 'close': {
         const t = this.task(a.chat.split('/')[0])
         if (!t || t.status === 'done') return { ok: false, error: 'It is done already.' }
@@ -672,7 +679,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         if (pr?.home) return { ok: false, error: `${pr.name} is ${pr.machine}'s home space: it can be renamed, not removed.` }
         if (!pr) return { ok: false, error: 'That space is gone already.' }
         const working = this.tasks.filter((t) => t.place === pr.id && !t.archived && t.status === 'work').map((t) => t.id)
-        if (working.length) return { ok: false, error: `${working.join(', ')} ${working.length > 1 ? 'are' : 'is'} still working: pause or finish ${working.length > 1 ? 'them' : 'it'} first.` }
+        if (working.length) return { ok: false, error: `${working.join(', ')} ${working.length > 1 ? 'are' : 'is'} still working: stop or finish ${working.length > 1 ? 'them' : 'it'} first.` }
         // its tasks go with it (the live one keeps them, for when it is added again)
         this.places = this.places.filter((p) => p !== pr)
         this.tasks = this.tasks.filter((t) => t.place !== pr.id)

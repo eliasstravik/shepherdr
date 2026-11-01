@@ -113,27 +113,29 @@
   with its final commit unreviewed is refused and told to ask its coordinator, who gives it exactly one more with
   `shepherdr task review-more <id>`: you ask the coordinator, as for any task control. It works only once all are
   used, and `task show` records it (`reviewRoundsAdded`).
-- A task with nothing to merge (an answer, research, or work no longer wanted) is closed: `shepherdr task close <id>
-  [--summary "..."]`, or just ask its coordinator. Its agent stops, its space closes, its worktree and branch go when
+- One menu holds a task's controls: its row's ⋯ (a mouse finds it on hover; on a phone tap the ⋯ or hold the row) and its
+  chat's ⋯. It ends a task three ways: Stop, Done and Delete. Stop and Delete ask first; Done asks first only when
+  work would stay unmerged. It also holds Pin and Restart agent, and Unarchive on an archived task.
+- A task with nothing to merge (an answer, research, or work no longer wanted) is Done: Done in its menu, `shepherdr task
+  close <id> [--summary "..."]`, or just ask its coordinator. Its agent stops, its space closes, its worktree and branch go when
   they hold nothing unsaved or unmerged (else they are kept, and it says so) and it shows in Done with its summary
   (Nothing to merge by default); its card in the space's chat says so. An agent whose `shepherdr ready` finds no changes on
   its branch goes straight to Done the same way.
-- `shepherdr task stop <id>` closes a task's agent and space. Its work stays: a worktree with unsaved or unmerged work
+- Stop in its menu, or `shepherdr task stop <id>`, closes a task's agent and space and puts it in To do. Its work stays: a worktree with unsaved or unmerged work
   is kept, one with none goes with its branch. Writing to the task opens its space again (or makes a fresh worktree)
   and resumes its agent.
-- `shepherdr task delete <id>` removes a task for good, and only when you plainly ask its coordinator to: its agent
+- Delete in its menu, or `shepherdr task delete <id>`, removes a task for good; a coordinator does it only when you
+  plainly ask: its agent
   stops, its space closes (with anything else running there), its worktree, branch, chat log and record go, so it
   leaves every list, and nothing is posted. A worktree with uncommitted changes, or a branch with work main lacks, is
-  refused with what it holds, unless `--force`. A merged task can be deleted too: its commits stay on main. Its number
+  refused with what it holds, unless `--force` (the menu says what would be lost and offers Delete anyway). A merged task can be deleted too: its commits stay on main. Its number
   is never given out again.
-- Archive a task from its row's ⋯ (a mouse finds it on hover; on a phone, hold the row), or ask its coordinator
-  (`shepherdr task archive <id>`, only when you ask). It leaves every list and count but keeps its record, chat and
-  summary: ⌘K finds it, and **Archived · 12** at the bottom of the tasks list shows a space's archived tasks, the
-  latest first, each with Unarchive in its ⋯ (`shepherdr task unarchive <id>`). Archiving a working task asks first:
-  its agent stops, as with `task stop`, and its work stays. Writing to an archived task brings it back. Done tasks
-  (merged or closed) archive themselves after a week: Settings → Tasks → Archive Done after (`tasks.archiveAfter`: a
-  number of days, or off; each machine keeps its own). `shepherdr task list` leaves archived tasks out; `--archived`
-  lists them.
+- Archive is no longer a way to end a task, but nothing archived is lost. Done tasks (merged or closed) archive
+  themselves after a week: Settings → Tasks → Archive Done after (`tasks.archiveAfter`: a number of days, or off; each
+  machine keeps its own). An archived task, however it got there, leaves every list and count but keeps its record, chat
+  and summary: ⌘K finds it, and **Archived · 12** at the bottom of the tasks list shows a space's archived tasks, the
+  latest first, each with Unarchive and Delete in its ⋯ (`shepherdr task unarchive <id>`). Writing to an archived task
+  brings it back. `shepherdr task list` leaves archived tasks out; `--archived` lists them.
 - The field at the top of the Tasks and the Artifacts lists filters them as you type (F gets to it on a keyboard):
   tasks by id, title, status line or summary, Done and archived ones too; artifacts by title or the task that made
   them. Esc clears it.

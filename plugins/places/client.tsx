@@ -686,7 +686,7 @@ function RemoveBox({ p, snap }: { p: Place; snap: Snapshot }) {
     return (
       <Dialog title={`${p.name} can’t be removed yet`} safe cancel="OK" onCancel={cancel} buttons={null}>
         <p>
-          {and(working)} {working.length > 1 ? 'are' : 'is'} still working. Pause {working.length > 1 ? 'them' : 'it'} or let {working.length > 1 ? 'them' : 'it'} finish first.
+          {and(working)} {working.length > 1 ? 'are' : 'is'} still working. Stop {working.length > 1 ? 'them' : 'it'} or let {working.length > 1 ? 'them' : 'it'} finish first.
         </p>
       </Dialog>
     )

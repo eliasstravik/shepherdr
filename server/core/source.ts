@@ -452,7 +452,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
     if (plugin) this.requirePlugin(plugin)
     const handler = this.hooks.get(action.type)
     if (handler) return handler(action)
-    if ('chat' in action && this.tasks.forChat(action.chat) && ['pin', 'archive', 'pause', 'restart-info', 'restart', 'close', 'delete'].includes(action.type)) return this.tasks.act(action)
+    if ('chat' in action && this.tasks.forChat(action.chat) && ['pin', 'archive', 'pause', 'stop', 'restart-info', 'restart', 'close', 'delete'].includes(action.type)) return this.tasks.act(action)
     switch (action.type) {
       case 'plugin': return this.plugins.act(action)
       case 'send': {
@@ -683,7 +683,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
   task chat ID [--limit 1..100] [--before CURSOR]
   task start ID [MESSAGE] | task tell ID TEXT
   task queue ID --after ID,ID|none | task stop ID
-  task pause|pin|unpin|archive|unarchive ID (coordinator only, when the human asks)
+  task pause|pin|unpin|unarchive ID (coordinator only, when the human asks)
   task close|delete ID [--force] (coordinator only; force may discard held work on delete)
   task review-more ID (coordinator only; one more review round once all are used)
   status ID TEXT --done 0..100 --left 5m|1h20m

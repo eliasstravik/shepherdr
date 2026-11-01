@@ -23,7 +23,7 @@ export class CorePilotCommands {
     const run = this.run(agent)
     this.source.pilots.policy.command(run.id, this.source.pilots.actor(agent), words)
     const text = (value: unknown) => ({ out: (typeof value === 'string' ? value : JSON.stringify(value, null, 2)) + '\n', code: 0 })
-    if (command === 'help') return text('Contained Shepherdr: show, models, heartbeat, progress [TEXT], complete EVIDENCE, mode regular --why REASON, task add/list/show/chat/start/tell/queue/review-more/stop/pause/pin/unpin/archive/unarchive/close/delete, status, checkpoint MESSAGE, review, ready, pr, checks, merge, ask, plan, alert, secret list/ask/run/env, artifact new/update/check/list/show/remove. Every action stays inside this run’s profile; changing earlier tasks requires explicit task start.')
+    if (command === 'help') return text('Contained Shepherdr: show, models, heartbeat, progress [TEXT], complete EVIDENCE, mode regular --why REASON, task add/list/show/chat/start/tell/queue/review-more/stop/pause/pin/unpin/unarchive/close/delete, status, checkpoint MESSAGE, review, ready, pr, checks, merge, ask, plan, alert, secret list/ask/run/env, artifact new/update/check/list/show/remove. Every action stays inside this run’s profile; changing earlier tasks requires explicit task start.')
     if (command === 'show') return text(this.source.settings.describe(agent.space))
     if (command === 'models') return text(this.source.settings.clis(agent.space))
     if (command === 'heartbeat') return text(this.source.heartbeats.cli(agent, ['heartbeat']))

@@ -409,7 +409,7 @@ describe.skipIf(!browser)("a task's side panel", () => {
     await page.getByRole('button', { name: 'More', exact: true }).click()
     const menu = page.getByRole('menu', { name: 'More' })
     // like a coordinator's: Search in this chat first, then the items; no search button of its own in the header
-    expect(await menu.getByRole('menuitem').allTextContents()).toEqual(['Search in this chat', 'Open full search', 'Restart agent…', 'Terminal', 'Files', 'Diff', 'Pull request', 'Browser', 'Artifacts'])
+    expect(await menu.getByRole('menuitem').allTextContents()).toEqual(['Search in this chat', 'Open full search', 'Terminal', 'Files', 'Diff', 'Pull request', 'Browser', 'Artifacts', 'Pin', 'Restart agent…', 'Stop…', 'Done', 'Delete…'])
     expect(await page.getByRole('button', { name: 'Search in this chat' }).count()).toBe(0)
     // no PR: greyed out; opened, it says why
     await menu.locator('[role=menuitem][data-off]', { hasText: 'Pull request' }).click()

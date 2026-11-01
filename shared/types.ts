@@ -191,6 +191,8 @@ export interface TaskAgent {
   cli: string
   /** Task status, or off when core cannot confirm the agent's machine; workflow remains separate. */
   status: Status
+  /** its process is up, so Stop has something to stop */
+  running?: boolean
   age: string
   note: string
 }
@@ -960,6 +962,8 @@ export type Action =
   | { type: 'pin'; chat: string; on: boolean }
   /** pause a working task: its agent is interrupted (it stays alive) and the task is To do until written to */
   | { type: 'pause'; chat: string }
+  /** its agent goes and the task is To do; its work stays */
+  | { type: 'stop'; chat: string }
   /** what the restart sheet shows for a coordinator (chat: its place id) or a task's agent (ID/Agent): RestartInfo */
   | { type: 'restart-info'; chat: string }
   /** start a coordinator or a task's agent again on this CLI, model and effort (none: the CLI's own; no kind: all as
