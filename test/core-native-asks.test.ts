@@ -179,6 +179,9 @@ test('a permission card says what it would do in words, whole, never as code', (
   const long = `printf one\n${'x'.repeat(200)}`, cut = permissionWords('Bash', { command: long })
   expect(cut.title.length).toBeLessThan(130)
   expect(cut.screen).toBe(long)
+  const far = `/w/${'deep/'.repeat(40)}a.txt`
+  expect(permissionWords('Read', { file_path: far }).screen).toBe(far)
+  expect(permissionWords('WebFetch', { url: `https://x.dev/${'y'.repeat(200)}`, prompt: 'Sum it up' }).screen).toBe(`Sum it up\n\nhttps://x.dev/${'y'.repeat(200)}`)
   expect(permissionWords('Write', { file_path: '/w/a/b.txt', content: 'hi' })).toEqual({ title: 'Write: b.txt', screen: '/w/a/b.txt\n\nhi' })
   expect(permissionWords('Edit', { file_path: '/w/b.txt', old_string: 'a', new_string: 'b' })).toEqual({ title: 'Edit: b.txt', screen: '/w/b.txt\n\n- a\n+ b' })
   expect(permissionWords('WebFetch', { url: 'https://example.com/', prompt: 'Sum it up' })).toEqual({ title: 'Open: https://example.com/', screen: 'Sum it up' })
