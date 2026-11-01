@@ -32,7 +32,7 @@ export class CoreQuestions {
     const steps = p.opts.step ?? []
     if (!plan && !choices.length && !p.flags.has('other')) throw new Refusal('Give the question at least one --choice or --other')
     const question: Question = { id: randomUUID(), title: plan ? one(p, 'title') || 'Plan to approve' : p.words.slice(1).join(' '), kind: plan ? 'Plan' : 'Question',
-      ordinary: !plan && p.flags.has('ordinary') || undefined, multi: p.flags.has('multi') || undefined, other: p.flags.has('other') || undefined,
+      multi: p.flags.has('multi') || undefined, other: p.flags.has('other') || undefined,
       choices: plan ? [{ label: 'Approve the plan' }, { label: 'Send it back with a note' }] : choices.map(label => ({ label, description: p.opts.desc?.find(description => description.startsWith(label + '='))?.slice(label.length + 1) })),
       steps: plan ? steps : undefined, noteRequiredFor: plan ? 1 : undefined, to: grant.chat }
     if (!question.title.trim() || plan && !steps.length) throw new Refusal('Give the card its question or plan steps')

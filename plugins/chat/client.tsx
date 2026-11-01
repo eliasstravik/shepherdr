@@ -9,6 +9,7 @@ import { AlertIcon, BackIcon, CameraIcon, CheckIcon, Count, DeleteIcon, dimmed, 
 import { canDictate, dictate, dictSample, type Dictation } from '@client/dictation.ts'
 import { extOf, isImage } from '@shared/files.ts'
 import { modelCommand, modeName, taskChatId, type CardAsk, type Chat, type MergeEvidence, type Message, type Place, type Question, type ReplyQuote, type SecretAsk, type UpdateCard } from '@shared/types.ts'
+import { sendsOnTap } from '@shared/alerts.ts'
 import { buzz, mine, openBar, openPicker, quick, react } from '@plugins/reactions/client.tsx'
 import { EDGE } from '@client/gestures.ts'
 import { still, useArrive } from '@client/motion.ts'
@@ -1326,9 +1327,8 @@ function Evidence({ e, open }: { e: MergeEvidence; open: boolean }) {
   )
 }
 
-/** oneTap: in Needs you, a choice sends at once, unless the card asks for several or a note */
-export function QuestionCard({ q, chat, msg, from, source, oneTap }: { q: Question; chat: Chat; msg: string; from: string; source?: CardSource; oneTap?: boolean }) {
-  // Unmarked cards always require a deliberate pick and Send, including all approval prompts.
+/** steady: in Needs you, the card keeps its height while it sends */
+export function QuestionCard({ q, chat, msg, from, source, steady }: { q: Question; chat: Chat; msg: string; from: string; source?: CardSource; steady?: boolean }) {
   const [sel, setSel] = useState<number[]>([])
   // half-typed notes survive a reload
   const [note, setNote] = useDraft(`card:${chat.key}:${q.id}`)
@@ -1343,9 +1343,7 @@ export function QuestionCard({ q, chat, msg, from, source, oneTap }: { q: Questi
   // a plan sent back says what to change in the note
   const needNote = q.noteRequiredFor !== undefined && sel[0] === q.noteRequiredFor
   const picked = sel.length > 0 || !!other.trim()
-  // Positive opt-in, plus structural exclusions: unknown kinds and older/plugin cards remain confirmed.
-  const ordinary = q.ordinary === true && (q.kind === 'Form' || q.kind === 'Question') && !q.multi && !q.terminal && !q.screen && !q.steps && !q.reject && !q.noNote && q.noteRequiredFor === undefined && !q.id.startsWith('menu:')
-  const tap = ordinary || oneTap === true && !q.multi && q.noteRequiredFor === undefined
+  const tap = sendsOnTap(q)
   const immediate = (tap && !composing && !note && !other || q.press === true) && !sent
   const choose = (j: number) => setSel(q.multi ? (sel.includes(j) ? sel.filter((x) => x !== j) : [...sel, j]) : [j])
   const send = async (reject = false, choice = sel[0] ?? -1) => {
@@ -1473,7 +1471,7 @@ export function QuestionCard({ q, chat, msg, from, source, oneTap }: { q: Questi
             />
           ) : null}
           {/* in Needs you, its room is kept: Sending… must not push the cards below under a thumb */}
-          <div className={clsx('flex items-center justify-end gap-2', oneTap && 'min-h-6')}>
+          <div className={clsx('flex items-center justify-end gap-2', steady && 'min-h-6')}>
             {err ? <span role="alert" className="mr-auto text-[0.75rem] text-need phone:text-[0.8125rem]">{err}</span> : null}
             {q.reject ? <button type="button" disabled={busy} onClick={() => send(true)}>{q.reject}</button> : null}
             {!immediate ? <Primary soft disabled={busy || !picked} onClick={() => send()}>

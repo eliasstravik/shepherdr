@@ -12,6 +12,12 @@ Every agent, coordinator or task agent, gets the same chat.
   for the turn to end.
 - An agent whose saved session is gone starts anew by itself, in the same chat, with "Earlier session was gone, started
   a new one." Any other start that fails shows its CLI's own words as a line in the chat, and your next message tries again.
+- A permission card says what the agent wants in words (`Run: touch hello.txt`), with everything it would touch below.
+  Besides Allow once and Deny it offers what Claude Code offers in its terminal to stop asking: Don't ask again says
+  what it allows and for how long, and leaves that to Claude Code to keep. Its auto mode choice isn't offered to hooks,
+  so it stays in the terminal; a phone alert has only Allow once and Deny. Codex gives hooks neither, so its cards have
+  Allow once and Deny; don't ask again for Codex is in its Terminal.
+  A request too long to show whole says so and offers only Deny, so nothing is allowed unread: allow it in its Terminal.
 - An agent stopped at its CLI's own screen before its session starts (trusting a folder, the theme, signing in, Codex's
   hooks, or anything a later CLI version adds) shows that screen in the chat as a card within about 10 seconds, and
   counts as Needs you. The card shows the choices it can read, and one tap presses that choice in the terminal. A
@@ -41,7 +47,8 @@ Every agent, coordinator or task agent, gets the same chat.
   (the command, the path, the pattern) and its output or diff; no command line shows until then. The words come from
   the agent's own short description of a command (Claude Code's `description`), else from what the command runs
   (`git status` is `Checked git status`, `bun test` is `Ran tests`, an unknown program `Ran <its name>`), else the
-  tool. While a turn runs, one quiet line in place of the typing dots says what it does now and for how long
+  tool. A step that hasn't run says so: `Wants to create empty hello.txt` above its permission card, `Wanted to …` once
+  refused. While a turn runs, one quiet line in place of the typing dots says what it does now and for how long
   (`Checking the task list  12s`), coordinators' turns too (their header still says nothing of it). While work it
   started in the background runs (subagents, background shells and monitors, a headless `codex exec` or `claude -p`,
   which counts as a subagent), a small tag sits just above the message box (`1 subagent · 1 shell`), only in its own
@@ -95,8 +102,8 @@ lists everything waiting on you, from every space on every machine, oldest first
 permissions, plans, merges, secrets, CLI screens, and agents that just wait for a reply, a coordinator too once it ends
 its turn on a question.
 
-- One tap answers a question or a permission, and presses a CLI screen's choice. Merges and plans keep their pick and
-  Send, and so does a card with a note typed.
+- One tap answers a question or a permission, here and in the chat, and presses a CLI screen's choice. Merges, plans
+  and picks of several keep their pick and Send, and so does a card with a note typed.
 - The list stays still under your thumb. A new card only ever joins the end. A card answered, here or anywhere else,
   keeps its place and its height until you leave Needs you, or tap Clear once none is open.
 - Every red count comes from this one list, so they can't differ: a space's count in the sidebar is its cards here,

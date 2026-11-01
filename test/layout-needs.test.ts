@@ -87,11 +87,11 @@ describe.skipIf(!browser)('Needs you', () => {
       expect(await merge.getByRole('button', { name: 'Send', exact: true }).count()).toBe(1)
       const plan = page.locator('[data-need]').filter({ hasText: 'Plan for GTM-16' })
       expect(await plan.getByRole('button', { name: 'Send', exact: true }).count()).toBe(1)
-      const ordinary = page.locator('[data-need]').filter({ hasText: 'Rerun CI on main?' })
-      expect(await ordinary.getByRole('button', { name: 'Send', exact: true }).count()).toBe(0)
-      await ordinary.getByRole('button', { name: 'Add a note', exact: true }).click()
-      await ordinary.getByRole('textbox', { name: 'Note', exact: true }).fill('just once')
-      expect(await ordinary.getByRole('button', { name: 'Send', exact: true }).count()).toBe(1)
+      const yesNo = page.locator('[data-need]').filter({ hasText: 'Rerun CI on main?' })
+      expect(await yesNo.getByRole('button', { name: 'Send', exact: true }).count()).toBe(0)
+      await yesNo.getByRole('button', { name: 'Add a note', exact: true }).click()
+      await yesNo.getByRole('textbox', { name: 'Note', exact: true }).fill('just once')
+      expect(await yesNo.getByRole('button', { name: 'Send', exact: true }).count()).toBe(1)
     } finally { await page.close() }
   }, 30_000)
 

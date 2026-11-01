@@ -1,6 +1,7 @@
 import { Refusal } from './client.ts'
 import { clip } from '../../shared/alerts.ts'
-import type { Action, Question } from '../../shared/types.ts'
+import type { Action, Choice, Question } from '../../shared/types.ts'
+import { baseName, toolWords } from '../common/readers/steps.ts'
 
 /** What a PermissionRequest hook hands back to its CLI. Extra fields go into the hook's decision as they are. */
 export interface PermissionAnswer { allow: boolean; message?: string; updatedInput?: Record<string, unknown>; updatedPermissions?: unknown[] }
@@ -62,12 +63,70 @@ export function nativeReply(native: NativeAsk, cards: { question: Question; nati
   return { allow: true, updatedInput: input, updatedPermissions: [{ type: 'setMode', mode: sent === 0 ? native.stop : 'default', destination: 'session' }] }
 }
 
-/** A card in a few words: a question's own, or the tool and the first thing its input names (a command, a file, a link). */
-export function cardWords(question: Question, native: boolean, tool = 'a tool') {
-  if (native) return clip(question.title, 120)
-  let target: unknown
-  try { target = Object.values(JSON.parse(question.screen ?? '{}') as object).find(value => typeof value === 'string') } catch { /* cut short, so not JSON: the tool alone says enough */ }
-  return target ? `${tool}: ${clip(String(target).replace(/\s+/g, ' '), 120)}` : tool
+const SHOWN = 16_000
+const TITLE = 120
+const CUT = 'Too long to show in full, so this card can only deny it. To allow it, read it whole in the Terminal.'
+/** the fields each tool's card words already show: any other goes below them, so nothing it would do goes unread */
+const WORDED: Record<string, string[]> = { Bash: ['command', 'description'], Write: ['file_path', 'content'], Edit: ['file_path', 'old_string', 'new_string', 'replace_all'], NotebookEdit: ['notebook_path', 'new_source'],
+  Read: ['file_path'], Glob: ['pattern', 'path'], Grep: ['pattern', 'path'], WebFetch: ['url', 'prompt'], WebSearch: ['query'] }
+const shownLine = (value: unknown) => typeof value === 'string' ? value : JSON.stringify(value)
+
+/** Words too long to show whole are cut, says so, and leave the fields below them: nothing is allowed unread. */
+const shown = (words: string, rest: string) => {
+  const whole = [words, rest].filter(Boolean).join('\n\n')
+  if (whole.length <= SHOWN) return { screen: whole || undefined }
+  return { cut: true, screen: [CUT, words.slice(0, Math.max(0, SHOWN - rest.length)), rest.slice(0, SHOWN)].filter(Boolean).join('\n\n') }
 }
+
+/** What a tool asks to do, as a human reads it: the title at a glance, and below it all it would touch, never code. */
+export function permissionWords(tool: string | undefined, input: unknown): Pick<Question, 'title' | 'screen'> & { cut?: boolean } {
+  const value = record(input) ?? {}, path = text(value.file_path) || text(value.notebook_path)
+  const fields = (worded: string[] = []) => Object.entries(value).filter(([key, item]) => !worded.includes(key) && item !== undefined && item !== null && item !== '').map(([key, item]) => `${key}: ${shownLine(item)}`).join('\n')
+  // A title cut short leaves its whole words below: two targets must never look the same.
+  const card = (verb: string, what: string, ...more: unknown[]) => {
+    const title = clip(what, TITLE)
+    return { title: `${verb}: ${title}`, ...shown([...more, title !== what && what].filter(Boolean).map(shownLine).join('\n\n'), fields(WORDED[tool!])) }
+  }
+  switch (tool) {
+    case 'Bash': return card('Run', text(value.command), value.description)
+    case 'Write': return card('Write', baseName(path), path, value.content)
+    case 'Edit': return card('Edit', baseName(path), path, value.replace_all === true && 'Every match in the file:', [`- ${text(value.old_string)}`, `+ ${text(value.new_string)}`].join('\n'))
+    case 'NotebookEdit': return card('Edit', baseName(path), path, value.new_source)
+    case 'Read': return card('Read', path)
+    case 'Glob': case 'Grep': return card('Search', text(value.pattern), text(value.path))
+    case 'WebFetch': return card('Open', text(value.url), value.prompt)
+    case 'WebSearch': return card('Search the web', text(value.query))
+  }
+  return { title: `Use ${clip(toolWords(tool || 'a tool'), TITLE)}`, ...shown('', fields()) }
+}
+
+const WHERE: Record<string, string> = { session: 'this session', localSettings: 'in this project', projectSettings: 'in this project', userSettings: 'on this device' }
+const LONGEST_GRANT = 1000
+const ruleWords = (rule: Record<string, unknown>) => {
+  const tool = text(rule.toolName), content = text(rule.ruleContent), folder = /^\/(\/.*?)(?:\/\*\*)?$/.exec(content)?.[1]
+  if (!tool) return undefined
+  if (!content) return `all of ${tool}`
+  if (tool === 'Bash') return `Run ${content}`
+  return content.startsWith('domain:') ? content.slice(7) : `${tool} ${folder ?? content}`
+}
+/** What a grant allows, in words, or none for a grant the card couldn't say: nothing is allowed unread. */
+function grantWords(grant: Record<string, unknown>) {
+  const where = WHERE[text(grant.destination)]
+  if (!where || JSON.stringify(grant).length > LONGEST_GRANT) return undefined
+  if (grant.type === 'setMode') return grant.mode === 'acceptEdits' ? `All edits ${where}` : undefined
+  if (grant.type === 'addDirectories' && Array.isArray(grant.directories) && grant.directories.length) return `Files in ${grant.directories.map(text).join(', ')} ${where}`
+  if (grant.type !== 'addRules' || grant.behavior !== 'allow' || !Array.isArray(grant.rules) || !grant.rules.length) return undefined
+  const rules = grant.rules.map(rule => ruleWords(record(rule) ?? {}))
+  return rules.every(Boolean) ? `${rules.join(', ')} ${where}` : undefined
+}
+
+/** A card's choices: the CLI's own "don't ask again" grants, all in one, between Allow once and Deny. Codex gives none. A cut card only denies. */
+export function permissionChoices(suggestions: unknown, cut?: boolean): { choices: Choice[]; always?: number; grants?: unknown[] } {
+  if (cut) return { choices: [{ label: 'Deny' }] }
+  const offered = (Array.isArray(suggestions) ? suggestions.slice(0, 8) : []).flatMap(item => { const grant = record(item), said = grant && grantWords(grant); return said ? [{ grant, said }] : [] })
+  if (!offered.length) return { choices: [{ label: 'Allow once' }, { label: 'Deny' }] }
+  return { always: 1, grants: offered.map(item => item.grant), choices: [{ label: 'Allow once' }, { label: 'Don’t ask again', description: offered.map(item => item.said).join(' · ') }, { label: 'Deny' }] }
+}
+
 export const nativeClosed = (reason: string): PermissionAnswer => ({ allow: false, message: `Shepherdr closed this without an answer: ${reason}. Nothing was approved or chosen. Ask again if you still need it.` })
 export const NATIVE_UNREADABLE: PermissionAnswer = { allow: false, message: 'Shepherdr could not read this question. Ask it with shepherdr ask instead.' }

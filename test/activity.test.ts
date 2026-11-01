@@ -5,8 +5,8 @@ import { describe, expect, test } from 'bun:test'
 import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { glance, jobsWords, rowsOf, say, testResult, took } from '../shared/activity.ts'
-import { activityOf, cutOutput, lineOf } from '../server/activity.ts'
+import { glance, jobsWords, rowsOf, say, testResult, took, words } from '../shared/activity.ts'
+import { activityOf, cutOutput, lineOf, stepsNow } from '../server/activity.ts'
 import { ClaudeReader, readerFor } from '../server/common/readers/index.ts'
 import { notices } from '../server/common/readers/claude.ts'
 import { claudeStep, codexItem, commandSay, commandWords } from '../server/common/readers/steps.ts'
@@ -17,12 +17,12 @@ process.env.SHEPHERDR_HOME ??= mkdtempSync(join(tmpdir(), 'shep-act-'))
 
 describe('words', () => {
   test('an action said as a command reads done and doing; a word that is no verb stays', () => {
-    expect(say('Check the task list')).toEqual({ title: 'Checked the task list', doing: 'Checking the task list' })
-    expect(say('Run tests')).toEqual({ title: 'Ran tests', doing: 'Running tests' })
-    expect(say('Clone the repo and find the log code')).toEqual({ title: 'Cloned the repo and found the log code', doing: 'Cloning the repo and finding the log code' })
+    expect(say('Check the task list')).toEqual({ title: 'Checked the task list', doing: 'Checking the task list', wants: 'Wants to check the task list' })
+    expect(say('Run tests')).toEqual({ title: 'Ran tests', doing: 'Running tests', wants: 'Wants to run tests' })
+    expect(say('Clone the repo and find the log code')).toEqual({ title: 'Cloned the repo and found the log code', doing: 'Cloning the repo and finding the log code', wants: 'Wants to clone the repo and find the log code' })
     expect(say('Stop the demo').title).toBe('Stopped the demo')
     expect(say('Copy files').title).toBe('Copied files')
-    expect(say('TypeScript check')).toEqual({ title: 'TypeScript check', doing: 'TypeScript check' })
+    expect(say('TypeScript check')).toEqual({ title: 'TypeScript check', doing: 'TypeScript check', wants: 'Wants to: TypeScript check' })
   })
   test('a command in words, never its command line: the agent’s description first, else what it runs', () => {
     const t = (command: string, description?: string) => claudeStep('Bash', { command, description })!
@@ -105,6 +105,36 @@ describe('words', () => {
   })
 })
 
+describe('steps that have not run', () => {
+  const steps: LogEvent[] = [
+    { kind: 'turn-start', id: 't', at: 0 },
+    { kind: 'step', id: 'a', at: 1, step: 'edit', tool: 'Edit', ...words('Edit a.ts', 'a.ts') },
+    { kind: 'step-end', id: 'a', at: 2 },
+    { kind: 'step', id: 'b', at: 3, step: 'edit', tool: 'Edit', ...words('Edit b.ts', 'b.ts') },
+    { kind: 'step', id: 'c', at: 4, step: 'run', tool: 'Bash', ...words('Create empty hello.txt') },
+  ]
+  test('held at a permission card a step says what it wants, and never groups with what is done', () => {
+    const { open } = activityOf(steps)
+    expect(lineOf(open!, false, true).rows.map((r) => r.text)).toEqual(['Edited a.ts', 'Wants to edit b.ts', 'Wants to create empty hello.txt'])
+    expect(stepsNow(open!, true).map((s) => s.unrun)).toEqual([undefined, true, true])
+  })
+  test('once it runs it says what it is doing, and once over what it did', () => {
+    const { open } = activityOf(steps)
+    expect(lineOf(open!, true).rows.at(-1)!.text).toBe('Creating empty hello.txt')
+    expect(lineOf(activityOf([...steps, { kind: 'step-end', id: 'c', at: 5 }]).open!).rows.at(-1)!.text).toBe('Created empty hello.txt')
+  })
+  test('a step refused never says it was done, and is no error', () => {
+    const { open } = activityOf([...steps, { kind: 'step-end', id: 'c', at: 5, failed: true, refused: 'you' }])
+    const line = lineOf(open!, true)
+    expect(line.rows.at(-1)).toMatchObject({ text: 'Wanted to create empty hello.txt' })
+    expect(line.failed).toBeUndefined()
+  })
+  test('a step logged before these words came says what it was doing', () => {
+    const { open } = activityOf([{ kind: 'step', id: 'old', at: 1, step: 'run', tool: 'Bash', title: 'Ran it', doing: 'Running it', target: '' }])
+    expect(lineOf(open!, false, true).rows[0].text).toBe('Running it')
+  })
+})
+
 describe('folding', () => {
   const step = (id: string, at: number, x: Partial<Extract<LogEvent, { kind: 'step' }>> = {}): LogEvent => ({ kind: 'step', id, at, step: 'run', tool: 'Bash', title: `Ran ${id}`, doing: `Running ${id}`, target: '', ...x })
   test('steps fold by turn; a stand-in goes once over; the turn on now shows its step', () => {
@@ -180,6 +210,17 @@ describe('claude reader: steps and background work', () => {
     expect(ev.filter(e => e.kind === 'job-end')).toEqual([{ kind: 'job-end', id: 'wait1', at: expect.any(Number) }])
     expect(activityOf(ev).jobs).toEqual([])
   })
+  test('a card denied is a step refused, whether a person or Shepherdr closed it; an error of its own is not', () => {
+    const ev = parse([
+      use('a1', 'no', 'Bash', { command: 'touch a' }),
+      user('u1', [{ tool_use_id: 'no', type: 'tool_result', content: 'The human declined this request.', is_error: true }]),
+      use('a2', 'closed', 'Bash', { command: 'touch b' }),
+      user('u2', [{ tool_use_id: 'closed', type: 'tool_result', content: 'Shepherdr closed this without an answer: gone.', is_error: true }]),
+      use('a3', 'failed', 'Bash', { command: 'touch c' }),
+      user('u3', [{ tool_use_id: 'failed', type: 'tool_result', content: 'touch: cannot touch', is_error: true }]),
+    ])
+    expect(ev.flatMap((e) => (e.kind === 'step-end' ? [[e.id, e.refused]] : []))).toEqual([['no', 'you'], ['closed', 'you'], ['failed', undefined]])
+  })
   test('a tool call is a step, its result ends it and says where its output is; the question tool and a subagent’s calls are none', () => {
     const ev = parse([
       user('u1', 'Fix it', typed),
@@ -192,10 +233,10 @@ describe('claude reader: steps and background work', () => {
     ])
     const steps = ev.filter((e) => e.kind === 'step' || e.kind === 'step-end')
     expect(steps).toEqual([
-      { kind: 'step', id: 'toolu_1', at: expect.any(Number), step: 'run', tool: 'Bash', title: 'Ran the tests', doing: 'Running the tests', target: '', test: true, detail: 'cd /work/app && bun test' },
+      { kind: 'step', id: 'toolu_1', at: expect.any(Number), step: 'run', tool: 'Bash', title: 'Ran the tests', doing: 'Running the tests', wants: 'Wants to run the tests', target: '', test: true, detail: 'cd /work/app && bun test' },
       { kind: 'step-end', id: 'toolu_1', at: expect.any(Number), failed: undefined, out: { file: '/logs/p/S.jsonl', offset: 200 }, result: '3 passed' },
-      { kind: 'step', id: 'toolu_2', at: expect.any(Number), step: 'read', tool: 'Read', title: 'Read a.ts', doing: 'Reading a.ts', target: 'a.ts', detail: '/work/app/src/a.ts' },
-      { kind: 'step', id: 'toolu_5', at: expect.any(Number), step: 'other', tool: 'get_pr', title: 'Used get pr', doing: 'Using get pr', target: '' },
+      { kind: 'step', id: 'toolu_2', at: expect.any(Number), step: 'read', tool: 'Read', title: 'Read a.ts', doing: 'Reading a.ts', wants: 'Wants to read a.ts', target: 'a.ts', detail: '/work/app/src/a.ts' },
+      { kind: 'step', id: 'toolu_5', at: expect.any(Number), step: 'other', tool: 'get_pr', title: 'Used get pr', doing: 'Using get pr', wants: 'Wants to use get pr', target: '' },
     ])
   })
   test('a shell, a subagent and a monitor in the background are jobs until their notice says they are over', () => {
@@ -228,6 +269,16 @@ describe('claude reader: steps and background work', () => {
 const codexLine = (type: string, payload: object) => ({ timestamp: ts(), type, payload })
 
 describe('codex reader: steps and background work', () => {
+  test('a call the human denied on its card ends refused; words in a command\'s own output do not', () => {
+    const line = (payload: object, offset: number) => ({ offset, text: JSON.stringify({ timestamp: '2026-11-01T06:00:00Z', type: 'response_item', payload }) })
+    const call = (id: string) => ({ type: 'custom_tool_call', call_id: id, name: 'exec', input: 'x' })
+    const output = (id: string, text: string) => ({ type: 'custom_tool_call_output', call_id: id, output: [{ type: 'input_text', text }] })
+    const ev = readerFor('codex')!.parse([
+      line(call('a'), 0), line(output('a', 'exec_command failed: CreateProcess { message: "Rejected(\\"The human declined this request.\\")" }'), 1),
+      line(call('b'), 2), line(output('b', 'The human declined this request.'), 3),
+    ], '/logs/rollout.jsonl')
+    expect(ev.flatMap((e) => (e.kind === 'step-end' ? [[e.id, e.refused]] : []))).toEqual([['a', 'you'], ['b', undefined]])
+  })
   test('items logged once over are steps; the call that ran them goes once over; subagents are jobs', () => {
     const ev = readerFor('codex')!.parse(
       [

@@ -333,7 +333,7 @@ export class ClaudeReader implements Reader {
         s.steps.delete(b.tool_use_id)
         const said = typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.map((x: Json) => x?.text ?? '').join('\n') : ''
         const result = st.test ? testResult(said) : undefined
-        const refused = said.startsWith("The user doesn't want to proceed") ? 'you' as const : b.is_error === true && /^Permission [^\n]* denied\b/.test(said) ? 'cli' as const : undefined
+        const refused = said.startsWith("The user doesn't want to proceed") || /^(The human declined|Shepherdr (closed|could not))/.test(said) ? 'you' as const : b.is_error === true && /^Permission [^\n]* denied\b/.test(said) ? 'cli' as const : undefined
         out.push({ kind: 'step-end', id: b.tool_use_id, at: t, failed: b.is_error === true || undefined, out: { file, offset }, ...(result ? { result } : {}), ...(refused ? { refused } : {}) })
         if (this.sub) continue
         const r = l.toolUseResult

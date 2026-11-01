@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { CoreSource } from '../server/core/source.ts'
 import { attentionCounts } from '../src/attention.ts'
+import { sendsOnTap } from '../shared/alerts.ts'
 import type { Question } from '../shared/types.ts'
 
 const card = (id: string, extra: Partial<Question> = {}): Question => ({ id, title: id, kind: 'Question', choices: [{ label: 'Yes' }, { label: 'No' }], to: 'agent', ...extra })
@@ -53,7 +54,7 @@ test('a plan and a merge keep their Send; a merge shows in Needs you as its task
     f.source.store.set('merge-question', 'merge', { task: task.id, head: task.readyHead })
     f.source.post(task.chat, { id: 'merge', who: 'agent', question: card('merge'), at: 200 })
     const snap = f.source.snapshot()
-    expect(snap.needs.map(n => [n.id, !!n.tap])).toEqual([['plan', false], ['merge', false]])
+    expect(snap.needs.map(n => [n.id, sendsOnTap(n.question!)])).toEqual([['plan', false], ['merge', false]])
     expect(attentionCounts(snap, ['two'])).toEqual({ need: 1, ready: 1 })
     task.workflow = 'merged'; f.source.store.set('task', task.id, task)
     expect(f.source.snapshot().needs.map(n => n.id)).toEqual(['plan'])
@@ -65,7 +66,7 @@ test('an ordinary card sends on a tap; an archived task and a removed space wait
   try {
     f.ask('A-1/Agent', 'A-1', 'yes-no', 100)
     f.ask('B-1/Agent', 'B-1', 'gone', 200)
-    expect(f.source.snapshot().needs.find(n => n.id === 'yes-no')?.tap).toBe(true)
+    expect(sendsOnTap(f.source.snapshot().needs.find(n => n.id === 'yes-no')!.question!)).toBe(true)
     f.task('A-1', 'one', 'm1', { archived: 5 })
     expect(f.source.snapshot().needs.map(n => n.id)).toEqual(['gone'])
     f.source.store.set('space', 'two', { id: 'two', name: 'two', machine: 'm2', folder: '/two', prefix: 'B', mode: 'regular', added: 2, removed: 1 })
