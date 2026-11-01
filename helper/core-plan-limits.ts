@@ -73,23 +73,21 @@ export function sealArgs(command: string[], state?: { folder: string; over: stri
 /**
  * bwrap's promise on a Mac: nothing real is writable but `OPEN`, a throwaway folder (a real path: rules match after links
  * like /tmp are followed). A daemon's write is no file write here, so preferences are shut, and the Keychain, which one
- * command both reads and writes, is out of reach altogether. `tls` leaves its daemons up for a CLI that may need them for
- * the system's certificates: Codex, which is told to stay off the Keychain.
+ * command both reads and writes, is out of reach altogether, its daemons too.
  */
-export function macProfile(tls = false) {
-  return `(version 1)
+export const MAC_PROFILE = `(version 1)
 (allow default)
 (deny file-write*)
 (deny user-preference-write)
 (deny process-exec (literal "/usr/bin/security"))
-${tls ? '' : '(deny mach-lookup (global-name "com.apple.SecurityServer") (global-name "com.apple.securityd.xpc"))\n'}(allow file-write* (subpath (param "OPEN")))
+(deny mach-lookup (global-name "com.apple.SecurityServer") (global-name "com.apple.securityd.xpc"))
+(allow file-write* (subpath (param "OPEN")))
 (allow file-write-data (literal "/dev/null") (literal "/dev/zero") (literal "/dev/tty"))`
-}
 
 const SANDBOX = '/usr/bin/sandbox-exec'
 
-export function macSealArgs(command: string[], open: string, tls = false) {
-  return [SANDBOX, '-p', macProfile(tls), `-DOPEN=${open}`, '--', ...command]
+export function macSealArgs(command: string[], open: string) {
+  return [SANDBOX, '-p', MAC_PROFILE, `-DOPEN=${open}`, '--', ...command]
 }
 
 /** Sealed, it can write where it's open, can't where it's shut, and can't start the Keychain's command: nothing real is touched to learn that. */
@@ -176,18 +174,18 @@ const mac = (host: Host) => host.platform === 'darwin'
 const noSeal = (host: Host) => mac(host) ? (host.exists(SANDBOX) ? undefined : NO_MAC_SEAL) : (host.which('bwrap') ? undefined : NO_SEAL)
 
 /** A throwaway folder, shown to be sealed by a real run before any CLI goes in. Undefined: no CLI runs. */
-async function openMacSeal(host: Host, tls = false) {
+async function openMacSeal(host: Host) {
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'shepherdr-limits-'))), open = join(folder, 'open'), shut = join(folder, 'shut')
   const close = () => rmSync(folder, { recursive: true, force: true })
   let holds = false
   try {
     mkdirSync(open)
     mkdirSync(shut)
-    const proof = host.spawn(macSealArgs(['/bin/sh', '-c', PROOF, 'proof', open, shut], open, tls), { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
+    const proof = host.spawn(macSealArgs(['/bin/sh', '-c', PROOF, 'proof', open, shut], open), { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
     const limit = setTimeout(() => proof.kill('SIGKILL'), 10_000)
     const code = await proof.exited.finally(() => clearTimeout(limit))
     holds = code === 0 && !proof.signalCode && existsSync(join(open, 'proof')) && !existsSync(join(shut, 'proof'))
-    return holds ? { open, close, wrap: (command: string[]) => macSealArgs(command, open, tls) } : undefined
+    return holds ? { open, close, wrap: (command: string[]) => macSealArgs(command, open) } : undefined
   } finally { if (!holds) close() }
 }
 
@@ -306,7 +304,7 @@ async function codex(now: () => number, host: Host): Promise<CliLimits | undefin
   }
   // A login kept in the Keychain has no file to check, and is filed under the home's path, so it wouldn't be found below.
   if (!host.exists(login)) return NO_CODEX_FILE
-  const seal = await openMacSeal(host, true)
+  const seal = await openMacSeal(host)
   if (!seal) return SEAL_REFUSED
   // Nothing can show a throwaway folder over ~/.codex here, so CODEX_HOME names one instead, with links to the real login
   // and config: no copy of a login on disk, and a link can't be written through. The Keychain stays out of it.

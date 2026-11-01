@@ -67,7 +67,7 @@ Unknown, with why.
 
 A Mac has no `bwrap`, so the same promise comes from `/usr/bin/sandbox-exec`: every file and preference write denied
 but in a throwaway folder, which is also each CLI's working and temporary folder, and no way to run `security`, the
-Keychain's one command for reading and writing. A short sealed run shows the seal holds (it writes where it's open, fails
+Keychain's one command for reading and writing, or to reach the Keychain's daemons. A short sealed run shows the seal holds (it writes where it's open, fails
 where it's shut, and can't start `security`) before any CLI goes in. A seal that won't start or doesn't hold refuses.
 
 Claude Code runs there with a throwaway `CLAUDE_CONFIG_DIR` holding only its login with the renewal token taken out, so
@@ -78,8 +78,7 @@ holds it in memory, and writes only that short-lived token to the throwaway fold
 
 Nothing can show a folder over `~/.codex` there, so `CODEX_HOME` names a throwaway home with links to the real
 `auth.json` and `config.toml`: a save lands in the throwaway home or is denied, no login is copied, and Codex is told to
-keep to the file. Its seal keeps the Keychain's daemons up, as it may need them for the system's certificates, and only
-`security` is shut. A Codex login kept only in the Keychain has no file to check, so it isn't run.
+keep to the file. A Codex login kept only in the Keychain has no file to check, so it isn't run.
 
 A seal can't save a renewed login, and one renewed but not saved signs the CLI out. So a login within an hour of its end
 (Claude Code's last about eight hours), or a Codex one past seven days since its last renewal, isn't read: the next agent
