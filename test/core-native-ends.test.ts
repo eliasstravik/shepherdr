@@ -320,7 +320,7 @@ test('a restart closes open cards and says in the chat and to the agent what was
     await closed(f, second.id, second.reply, 'Shepherdr restarted; ask again')
     const lines = f.source.chat(chat)!.messages.filter(message => message.id.startsWith('restart-denied-'))
     expect(lines).toHaveLength(1)
-    expect(lines[0].text).toContain('Bash: git push origin; Write: notes.txt')
+    expect(lines[0].text).toContain('Run: git push origin; Write: notes.txt')
     expect(lines[0].text).toContain('nobody refused it')
     expect(lines[0].text).not.toContain('Old session')
     await Bun.sleep(0)

@@ -331,7 +331,7 @@ describe.skipIf(!browser)('grouped tasks and the keyboard', () => {
       await page.waitForSelector(taskRows)
       await page.getByRole('button', { name: 'Group tasks' }).click()
       await page.getByRole('menuitemradio', { name: /^Space/ }).click()
-      await page.locator('body').click({ position: { x: 600, y: 500 } })
+      await page.locator('body').click({ position: { x: 600, y: 20 } })
       // The footer has automation list items too; only task rows belong to the arrow-key order.
       const automations = page.locator('section[aria-label="Tasks"] li[aria-expanded]')
       expect(await automations.count()).toBe(3)
@@ -606,7 +606,7 @@ describe.skipIf(!browser)("a task's one menu", () => {
     await page.getByRole('menuitem', { name: 'Unarchive' }).click()
     await back.waitFor({ state: 'detached' })
     // Esc leaves the Archived view; the task is in its list again
-    await page.locator('body').click({ position: { x: 600, y: 500 } })
+    await page.locator('body').click({ position: { x: 600, y: 20 } })
     await page.keyboard.press('Escape')
     await tasks.locator('li', { hasText: 'GTM-11' }).waitFor()
     await world.act({ type: 'archive', chat: 'GTM-11/Agent', on: true })

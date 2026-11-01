@@ -51,7 +51,7 @@ import { CorePilotMail } from './pilot-mail.ts'
 import { askText, clip, lastReply, quickChoices, TITLE_MAX, BODY_MAX } from '../../shared/alerts.ts'
 import { CANCELLED, hookEnd, logEnd, NativeEnds, STOPPED } from './native-ends.ts'
 import { ownCommand } from './own-commands.ts'
-import { NATIVE_UNREADABLE, cardWords, nativeAnswer, nativeCards, nativeClosed, nativeReply, permissionChoices, permissionWords, type NativeAsk, type PermissionAnswer } from './native-asks.ts'
+import { NATIVE_UNREADABLE, nativeAnswer, nativeCards, nativeClosed, nativeReply, permissionChoices, permissionWords, type NativeAsk, type PermissionAnswer } from './native-asks.ts'
 import type { CorePluginUpdates } from './plugin-updates.ts'
 import type { ActivityAsk, WorktreeAsk } from '../../shared/types.ts'
 
