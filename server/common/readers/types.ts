@@ -53,7 +53,7 @@ export type LogEvent =
   | ({ kind: 'step'; id: string; at: number; step: StepKind; tool: string; end?: number; failed?: boolean; result?: string; out?: OutputAt } & StepWords)
   /** the step with this id is over; where its output is; a test run's outcome. `drop`: it only stood for the steps its CLI logs one by one
    *  once over (Codex's code mode runs several commands in one call): it goes, they stay. `refused`: it never ran, as
-   *  the human said no in the terminal or the CLI denied it itself */
+   *  the human said no, in the terminal or on its card, or the CLI denied it itself */
   | { kind: 'step-end'; id: string; at: number; failed?: boolean; out?: OutputAt; drop?: boolean; result?: string; refused?: 'you' | 'cli' }
   /** work it started in the background: a subagent, a shell, a monitor. `log` is a subagent's own log, `output` a
    *  shell's output file; `step` the step that started it */
