@@ -44,6 +44,39 @@ test('asks at once on two machines: both listed oldest first, each once, whateve
   } finally { f.close() }
 })
 
+test('with cards open, a message from outside leaves them unanswered in the chat and in Needs you, until the human taps', async () => {
+  const f = fixture()
+  try {
+    const sent: string[] = []
+    f.source.core.current.connected = true
+    f.source.agents.terminal = (() => ({ state: 'live', address: 't' })) as unknown as typeof f.source.agents.terminal
+    f.source.agents.send = async (_chat, text) => { sent.push(text) }
+    const merge = f.source.tasks.get('A-1')!
+    merge.workflow = 'ready'; merge.readyHead = 'a'.repeat(40); merge.mergeQuestion = 'merge'
+    f.source.store.set('task', merge.id, merge)
+    f.source.store.set('merge-question', 'merge', { task: merge.id, head: merge.readyHead })
+    f.source.post(merge.chat, { id: 'merge', who: 'agent', question: card('merge'), at: 100 })
+    f.ask('A-1/Agent', 'A-1', 'asked', 150)
+    f.ask('one', 'c', 'coordinator', 200)
+    const counts = () => attentionCounts(f.source.snapshot(), ['one'])
+    const before = counts()
+    await f.source.act({ type: 'send', chat: merge.chat, text: 'An alert from a script' })
+    await f.source.act({ type: 'send', chat: 'one', text: 'An alert from a script' })
+    await Bun.sleep(0)
+    expect(sent).toEqual(['An alert from a script', 'An alert from a script'])
+    expect(f.source.snapshot().needs.map(n => n.id)).toEqual(['merge', 'asked', 'coordinator'])
+    expect(counts()).toEqual(before)
+    for (const [chat, id] of [[merge.chat, 'asked'], [merge.chat, 'merge'], ['one', 'coordinator']]) {
+      const shown = f.source.chat(chat)!.messages.find(m => m.id === id)!.question!
+      expect(shown.sent).toBeUndefined(); expect(shown.said).toBeUndefined(); expect(shown.closed).toBeUndefined()
+    }
+    expect(f.source.tasks.view(f.source.tasks.get(merge.id)!).state).toBe('Ready')
+    await f.source.act({ type: 'answer', chat: 'one', question: 'coordinator', choice: 1 })
+    expect(f.source.snapshot().needs.map(n => n.id)).toEqual(['merge', 'asked'])
+    expect(f.source.chat('one')!.messages.find(m => m.id === 'coordinator')!.question).toMatchObject({ sent: 1, said: 'No' })
+  } finally { f.close() }
+})
+
 test('a plan and a merge keep their Send; a merge shows in Needs you as its task stays Ready', () => {
   const f = fixture()
   try {

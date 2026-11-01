@@ -488,13 +488,45 @@ test('close rechecks work written during shutdown and performs browser cleanup o
   })
 })
 
-test('GitHub follow-up work clears stale ready approval while an internal checks-ready nudge preserves it', async () => {
-  for (const internal of [false, true]) await withTask(async ({ tasks, task, grant }) => {
+test('no message closes a merge card or takes back its yes: only a tap or a fresh ready report does', async () => {
+  for (const words of ['<github>Observed follow-up</github>', 'A note for later', '<reaction from="Elias" emoji="👍" to="Ready"/>']) await withTask(async ({ tasks, task, grant }) => {
     await tasks.ready(grant, task.id, 'Changed example')
-    await tasks.answer(tasks.get(task.id)!.mergeQuestion!, 0, task.chat)
-    await tasks.deliver(task.id, task.chat, '<github>Observed follow-up</github>', internal)
-    expect(tasks.get(task.id)?.workflow).toBe(internal ? 'ready' : 'working')
-    expect(!!tasks.get(task.id)?.approvedHead).toBe(internal)
+    const card = tasks.get(task.id)!.mergeQuestion!
+    await tasks.deliver(task.id, task.chat, words)
+    expect(tasks.get(task.id)).toMatchObject({ workflow: 'ready', mergeQuestion: card })
+    expect(tasks.get(task.id)?.approvedHead).toBeUndefined()
+    await tasks.answer(card, 0, task.chat)
+    await tasks.deliver(task.id, task.chat, words)
+    expect(tasks.get(task.id)?.workflow).toBe('ready')
+    await tasks.merge(grant, task.id)
+    expect(tasks.get(task.id)?.workflow).toBe('merged')
+  })
+})
+
+test('a message after Not yet, or to a Ready task with no merge card, goes back to work', async () => {
+  await withTask(async ({ tasks, task, grant }) => {
+    await tasks.ready(grant, task.id, 'Changed example')
+    await tasks.answer(tasks.get(task.id)!.mergeQuestion!, 1, task.chat)
+    await tasks.deliver(task.id, task.chat, 'Change the example')
+    expect(tasks.get(task.id)).toMatchObject({ workflow: 'working' })
+    expect(tasks.get(task.id)?.readyHead).toBeUndefined()
+    task = tasks.get(task.id)!; task.mergePolicy = 'auto'; (tasks as unknown as { source: CoreSource }).source.store.set('task', task.id, task)
+    await tasks.ready(grant, task.id, 'Changed example')
+    await tasks.deliver(task.id, task.chat, 'Change it again')
+    expect(tasks.get(task.id)?.workflow).toBe('working')
+  })
+})
+
+test('a commit made after a note still stops the old card, and a fresh ready report replaces it', async () => {
+  await withTask(async ({ tasks, task, grant, worktree, git }) => {
+    await tasks.ready(grant, task.id, 'Changed example')
+    const old = tasks.get(task.id)!.mergeQuestion!
+    await tasks.deliver(task.id, task.chat, 'Say more in the example')
+    writeFileSync(join(worktree, 'example.txt'), 'more\n'); git(worktree, 'commit', '-am', 'more')
+    await expect(tasks.answer(old, 0, task.chat)).rejects.toThrow('changed after')
+    await tasks.ready(grant, task.id, 'Changed example again')
+    expect(tasks.get(task.id)?.mergeQuestion).not.toBe(old)
+    await expect(tasks.answer(old, 0, task.chat)).rejects.toThrow('no longer current')
   })
 })
 
