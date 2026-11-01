@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, openSync, closeSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { CoreClient } from './client.ts'
@@ -112,9 +113,17 @@ export async function coreProblem(config: CoreConfig, machines: () => Promise<{ 
   if (found.length) return `Core session ${config.session} already has ${found.length === 1 ? 'a machine' : `${found.length} machines`} (${found.map(machine => machine.name).join(', ')}), and a new Shepherdr would run commands on ${found.length === 1 ? 'it' : 'them'}. Nothing was started. For a trial, give it its own core: --core-session NAME. To use ${found.length === 1 ? 'this machine' : 'these machines'} here, say so: --core-session ${config.session}.`
 }
 
-async function coreMachines(config: CoreConfig) {
+/** A core that starts reconnects its saved machines, and every hc command starts it: its own file answers without that. */
+function savedMachines(config: CoreConfig) {
+  const state = process.env.XDG_STATE_HOME || join(homedir(), '.local/state')
+  try { return JSON.parse(readFileSync(join(state, 'herdr-core', config.session, 'machines.json'), 'utf8')) as { name: string }[] } catch { return [] }
+}
+
+export async function coreMachines(config: CoreConfig) {
   const problem = buildProblem(config)
   if (problem) throw new Error(problem)
+  const saved = savedMachines(config)
+  if (saved.length) return saved
   await ensureCore(config)
   const core = await CoreClient.open(config.socket)
   try { return (await core.call<{ machines: { name: string }[] }>('machine.list')).machines } finally { core.close() }

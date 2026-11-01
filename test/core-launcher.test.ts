@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { prepareHome } from '../server/core/home.ts'
 import { coreConfig } from '../server/core/config.ts'
-import { buildProblem, claimHome, coreProblem, launcherStatus, saveCore } from '../server/core/launcher.ts'
+import { buildProblem, claimHome, coreMachines, coreProblem, launcherStatus, saveCore } from '../server/core/launcher.ts'
 
 test('a live unconfirmed process never reports stopped or gets signaled', async () => {
   const home = mkdtempSync(join(tmpdir(), 'shep-launcher-'))
@@ -91,6 +91,27 @@ test('a new home never takes on its core\'s machines unless its start names that
     else process.env.HC_SESSION = inherited
     if (socket === undefined) delete process.env.HC_SOCKET
     else process.env.HC_SOCKET = socket
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a stopped core is never started just to learn its machines', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'shep-launcher-stopped-'))
+  const state = process.env.XDG_STATE_HOME
+  process.env.XDG_STATE_HOME = root
+  try {
+    const config = coreConfig(['--home', join(root, 'trial'), '--core-bin', join(root, 'no-such-hc'), '--no-plugin-updates'])
+    const saved = join(root, 'herdr-core', config.session)
+    mkdirSync(saved, { recursive: true })
+    writeFileSync(join(saved, 'machines.json'), JSON.stringify([{ name: 'mac-mini' }]))
+    expect(await coreProblem(config, () => coreMachines(config))).toContain('a machine (mac-mini)')
+
+    // No saved machines: ask core, which may be running on state this start cannot see.
+    writeFileSync(join(saved, 'machines.json'), '[]')
+    await expect(coreMachines(config)).rejects.toThrow('Core did not start')
+  } finally {
+    if (state === undefined) delete process.env.XDG_STATE_HOME
+    else process.env.XDG_STATE_HOME = state
     rmSync(root, { recursive: true, force: true })
   }
 })
