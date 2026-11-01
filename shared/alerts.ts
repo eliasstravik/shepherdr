@@ -43,14 +43,18 @@ const short = (q: Question, i: number) => (q.noteRequiredFor === i ? q.choices[i
 /** the card's choices in short: "Approve the plan · Send it back" */
 export const choicesLine = (q: Question) => q.choices.map((_, i) => short(q, i)).join(' · ')
 
-/** the choices a notification button may send at once: not a pick of several, not one that needs a note, never a
- *  terminal menu (its first choices all say yes, and an old alert's button would press keys in whatever menu is up then);
+/** a choice sends on its own tap: not a pick of several or one that needs a note, and never a plan or a merge, which
+ *  stay a deliberate pick and Send. A note typed first brings Send back on any card. */
+export const sendsOnTap = (q: Question) => q.kind !== 'Plan' && !q.multi && q.noteRequiredFor === undefined && !q.evidence && !/^merge\b/i.test(q.title) && !q.id.startsWith('menu:')
+
+/** the choices a notification button may send at once: not a pick of several, not one that needs a note, not a grant
+ *  for good, never a terminal menu (its first choices all say yes, and an old alert's button would press keys in whatever menu is up then);
  *  two at most */
 export function quickChoices(q: Question): { label: string; choice: number }[] {
   if (q.multi || q.id.startsWith('menu:')) return []
   return q.choices
     .map((c, i) => ({ label: short(q, i), choice: i }))
-    .filter((c) => c.choice !== q.noteRequiredFor)
+    .filter((c) => c.choice !== q.noteRequiredFor && c.choice !== q.always)
     .slice(0, 2)
 }
 

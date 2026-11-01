@@ -14,7 +14,7 @@ function NeedCard({ need, snap }: { need: Need; snap: Snapshot }) {
   const who = need.task ?? place?.name ?? need.chat
   const source = { id: who, title: task?.name }
   const chat: Chat = { key: need.chat, cli: '', messages: [] }
-  if (need.question) return <QuestionCard q={need.question} chat={chat} msg={need.question.id} from={who} source={source} oneTap={need.tap} />
+  if (need.question) return <QuestionCard q={need.question} chat={chat} msg={need.question.id} from={who} source={source} steady />
   if (need.secret) return <SecretCard ask={need.secret} chat={chat} source={source} />
   return <ReplyOnCard ask={{ chat: need.chat, open: true }} reply={{ id: need.reply, text: need.text || 'Waits for your reply' }} task={who} source={source} />
 }

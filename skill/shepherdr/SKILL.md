@@ -81,9 +81,8 @@ A question with a few answers is a choice card, then end your turn:
 
     shepherdr ask "Rerun CI on main?" --choice "Rerun it" --choice "Skip the flaky test" --choice "Leave it for now"
 
-`--ordinary` explicitly marks a simple ordinary question: its choice buttons send immediately, with an Add a note
-route for composing first. Never use it for permission, startup approval, plans or other approvals. Leave it off
-when unsure; unmarked cards keep pick-then-Send. `--multi` always keeps Send.
+A tap on a choice sends it at once, permissions and yes-or-no alike, with an Add a note route for composing first:
+so word each choice to stand alone. Plans, merges and `--multi` keep pick-then-Send. `--ordinary` is no longer needed.
 
 `--other` allows a typed answer, `--multi` several picks, `--desc "<choice>=<one line>"` explains a choice. A plan for
 the human's yes is `shepherdr plan <id> --step "…" --step "…"`, then end your turn.

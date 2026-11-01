@@ -215,7 +215,7 @@ export function diffCounts(diff: string): { added: number; removed: number } {
 const IMAGE = /\.(png|jpe?g|gif|webp|svg|bmp)$/i
 
 /** an MCP tool's name as words: "mcp__github__get_pr" -> "get pr" */
-const toolWords = (name: string) => (/^mcp__.+?__(.+)$/.exec(name)?.[1] ?? name).replace(/[_-]+/g, ' ').trim()
+export const toolWords = (name: string) => (/^mcp__.+?__(.+)$/.exec(name)?.[1] ?? name).replace(/[_-]+/g, ' ').trim()
 
 /** tools that are no step: the question tool and the plan show as cards, the tool search is the CLI's own business */
 const SKIP = new Set(['AskUserQuestion', 'ExitPlanMode', 'EnterPlanMode', 'ToolSearch'])

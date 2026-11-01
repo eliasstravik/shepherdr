@@ -40,7 +40,7 @@ describe.skipIf(!browser)('coordinator update history', () => {
           const permission = page.locator('[data-whole="history-permission"]')
           expect(await permission.locator('[data-card]').count()).toBe(0)
           expect(await permission.locator('[data-needs-link]').count()).toBe(1)
-          expect(await page.locator('[data-whole="history-question"] [data-card]').getByRole('button', { name: 'Blue', exact: true }).isEnabled()).toBe(true)
+          expect(await page.locator('[data-whole="history-question"] [data-card]').getByRole('button', { name: 'Send: Blue', exact: true }).isEnabled()).toBe(true)
           await page.reload()
           await page.locator('[data-msg="history-39"]').waitFor()
           expect(await page.locator('[data-messages] [data-whole]').evaluateAll((els) => els.map((el) => el.getAttribute('data-whole')))).toEqual(expected)

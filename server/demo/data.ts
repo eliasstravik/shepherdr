@@ -445,7 +445,7 @@ export function chats(): Record<string, Chat> {
         m({
           who: 'agent',
           text: 'One choice left.',
-          question: { id: 'f3', ordinary: true, title: 'Where should Pinned live?', kind: 'Form', choices: [{ label: 'A filter on the filter row' }, { label: 'Its own tab' }], to: 'HP-201 agent' },
+          question: { id: 'f3', title: 'Where should Pinned live?', kind: 'Form', choices: [{ label: 'A filter on the filter row' }, { label: 'Its own tab' }], to: 'HP-201 agent' },
         }),
       ]),
       c('HP-204/Agent', 'Claude Code', [
@@ -500,7 +500,6 @@ export function chats(): Record<string, Chat> {
           text: 'The data is wired up. One choice before I build the screen.',
           question: {
             id: 'f7',
-            ordinary: true,
             title: 'How should the devices show?',
             kind: 'Form',
             choices: [
