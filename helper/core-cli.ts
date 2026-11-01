@@ -2,8 +2,12 @@
 import { secretRun, secretEnv } from './core-secret.ts'
 import { readCredential } from '../server/core/home.ts'
 import { coreRequest } from '../server/core/request.ts'
-import type { CoreEndpoint } from '../server/core/client.ts'
+import { CoreError, type CoreEndpoint } from '../server/core/client.ts'
 import type { MailCredential } from '../server/core/envelope.ts'
+
+// Codex sets this for its sandbox, also on a command it runs outside. Inside, waiting out the retries would only hang.
+const sandboxed = process.env.CODEX_SANDBOX_NETWORK_DISABLED === '1'
+const SANDBOXED = 'Codex\'s sandbox keeps this command from reaching Shepherdr. Run it again with sandbox_permissions "require_escalated": Shepherdr allows that without a card. If Codex refuses, tell the human this machine needs one setting: Codex must trust this folder with its approval policy on-request, or have sandbox_workspace_write.network_access = true.'
 
 try {
   const path = process.env.SHEPHERDR_CORE_CREDENTIAL
@@ -19,7 +23,7 @@ try {
     if (args[1] === 'run' && !command.length) throw new Error('Put the command after --: secret run NAME -- COMMAND')
     const words = args[1] === 'run' ? args.slice(2, cut) : args.slice(2, args.findIndex((word, index) => index >= 2 && word.startsWith('--')) < 0 ? args.length : args.findIndex((word, index) => index >= 2 && word.startsWith('--')))
     const names = words.flatMap(word => word.split(',')).filter(Boolean)
-    const result = await coreRequest(credential.endpoint ?? credential.socket ?? (() => { throw new Error('Missing core endpoint') })(), credential.mail, 'secret', { names }, { timeout: 60_000 }) as { secrets: Record<string, string> }
+    const result = await coreRequest(credential.endpoint ?? credential.socket ?? (() => { throw new Error('Missing core endpoint') })(), credential.mail, 'secret', { names }, { timeout: 60_000, once: sandboxed }) as { secrets: Record<string, string> }
     if (args[1] === 'run') process.exit(await secretRun(command, result.secrets))
     const saved = secretEnv(args, result.secrets)
     process.stdout.write(saved.out); process.exit(saved.code)
@@ -33,7 +37,8 @@ try {
   }
   const result = await coreRequest(credential.endpoint ?? credential.socket ?? (() => { throw new Error('Missing core endpoint') })(), credential.mail, 'cli', { args, cwd: process.cwd(), ...(stdin !== undefined ? { stdin } : {}) }, {
     timeout: args[0] === 'merge' || args[0] === 'checks' || args[0] === 'artifact' ? 110_000 : 60_000,
+    once: sandboxed,
   }) as { out: string; code: number }
   process.stdout.write(result.out)
   process.exitCode = result.code
-} catch (error) { console.error((error as Error).message); process.exitCode = 1 }
+} catch (error) { console.error(sandboxed && error instanceof CoreError && ['unavailable', 'disconnected', 'closed'].includes(error.kind) ? SANDBOXED : (error as Error).message); process.exitCode = 1 }
