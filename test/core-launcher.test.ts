@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { prepareHome } from '../server/core/home.ts'
 import { coreConfig } from '../server/core/config.ts'
-import { buildProblem, launcherStatus, newHomeProblem } from '../server/core/launcher.ts'
+import { buildProblem, coreProblem, launcherStatus, saveCore } from '../server/core/launcher.ts'
 
 test('a live unconfirmed process never reports stopped or gets signaled', async () => {
   const home = mkdtempSync(join(tmpdir(), 'shep-launcher-'))
@@ -39,23 +39,36 @@ test('a new home never takes on its core\'s machines unless its start names that
     const home = join(root, 'trial')
     const config = coreConfig(['--home', home, '--port', '17941'])
     expect(config.chosenCore).toBe(false)
-    const refused = await newHomeProblem(config, machines)
+    const refused = await coreProblem(config, machines)
     expect(refused).toContain('2 machines (mac-mini, vps)')
     expect(refused).toContain('Nothing was started')
     expect(refused).toContain('--core-session default')
     expect(existsSync(home)).toBe(false)
 
     mkdirSync(home)
-    expect(await newHomeProblem(config, machines)).toContain('already has 2 machines')
-    expect(await newHomeProblem(config, async () => [])).toBeUndefined()
+    expect(await coreProblem(config, machines)).toContain('already has 2 machines')
+    expect(await coreProblem(config, async () => [])).toBeUndefined()
 
     const unasked = async () => { throw new Error('must not ask core') }
-    expect(await newHomeProblem(coreConfig(['--home', home, '--core-session', 'trial']), unasked)).toBeUndefined()
-    expect(await newHomeProblem(coreConfig(['--home', home, '--core-session', 'default']), unasked)).toBeUndefined()
-    expect(await newHomeProblem(coreConfig(['--home', home, '--core-socket', join(root, 'core.sock')]), unasked)).toBeUndefined()
+    expect(await coreProblem(coreConfig(['--home', home, '--core-session', 'trial']), unasked)).toBeUndefined()
+    expect(await coreProblem(coreConfig(['--home', home, '--core-session', 'default']), unasked)).toBeUndefined()
+    expect(await coreProblem(coreConfig(['--home', home, '--core-socket', join(root, 'core.sock')]), unasked)).toBeUndefined()
 
     prepareHome(home)
-    expect(await newHomeProblem(config, unasked)).toBeUndefined()
+    expect(await coreProblem(config, unasked)).toBeUndefined()
+
+    // A trial on its own core stays there: a later start with fewer words never lands on the shared one.
+    const trial = coreConfig(['--home', home, '--core-session', 'trial'])
+    saveCore(trial)
+    const restart = await coreProblem(config, unasked)
+    expect(restart).toContain('runs on core session trial, not default')
+    expect(restart).toContain(`--core-session trial --core-socket ${trial.socket}`)
+    expect(await coreProblem(trial, unasked)).toBeUndefined()
+
+    // A new home started with no flags is held to its session, not to a socket path its environment may move.
+    saveCore(config)
+    expect(await coreProblem({ ...config, socket: join(root, 'moved.sock') }, unasked)).toBeUndefined()
+    expect(await coreProblem({ ...config, session: 'other' }, unasked)).toContain('runs on core session default')
   } finally {
     if (inherited === undefined) delete process.env.HC_SESSION
     else process.env.HC_SESSION = inherited
