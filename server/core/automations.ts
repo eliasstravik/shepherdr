@@ -54,13 +54,14 @@ export class CoreAutomations {
     }
     this.source.emit('snapshot')
   }
-  async fire(automation: Automation, timed = false, queued?: Run) {
+  async fire(automation: Automation, timed = false, queued?: Run) { return this.launch(automation, this.claim(automation, timed, queued)) }
+  private claim(automation: Automation, timed: boolean, queued?: Run) {
     if (this.stopped || this.source.quiescing) throw new Refusal('Shepherdr is stopping; retry after reconnecting')
     if (this.busy.has(automation.id)) throw new Refusal('This automation is already starting a task')
     this.busy.add(automation.id)
     const run: Run = queued ? { ...queued, at: Date.now(), state: 'starting' } : { id: randomUUID(), automation: automation.id, place: automation.place, at: Date.now(), timed, state: 'starting' }
-    // Claim and advance its time cursor before any remote work. A lost response cannot launch it twice.
     const { last, timed: was, runs, on } = automation
+    // Claim and advance its time cursor before any remote work. A lost response cannot launch it twice.
     try {
       this.source.store.db.transaction(() => {
         this.source.store.set('automation-run', run.id, run)
@@ -73,6 +74,9 @@ export class CoreAutomations {
       throw error
     }
     this.source.emit('snapshot')
+    return run
+  }
+  private async launch(automation: Automation, run: Run) {
     const work = (async () => {
       try {
         const space = this.source.space(automation.place)
@@ -102,7 +106,7 @@ export class CoreAutomations {
   }
   async event(event: Happened, place: string) {
     this.record(event, place)
-    return this.processQueue()
+    return this.nextQueued()
   }
   /** Internal producers can atomically save their observation and its durable rule runs. */
   record(event: Happened, place: string) { this.source.store.db.transaction(() => this.enqueue(event, place))() }
@@ -117,7 +121,9 @@ export class CoreAutomations {
         const automation = this.model.list.find(item => item.id === run.automation)
         if (!automation) { this.finish(run, { error: 'Automation removed before this queued event ran' }); continue }
         if (!automation.on || !this.source.space(automation.place) || this.source.places.removing(automation.place)) continue
-        try { await this.fire(automation, false, run) } catch {}
+        // A claim that fails ends this pass: the next would only wait out the same lock.
+        const claimed = this.claim(automation, false, run)
+        try { await this.launch(automation, claimed) } catch {}
       }
     })()
     this.processing = work.finally(() => { this.processing = undefined })
@@ -167,7 +173,11 @@ export class CoreAutomations {
       }
       this.source.news?.deliver(now)
       void this.nextQueued()
-      for (const automation of this.model.dueNow(this.zone())) if (this.source.space(automation.place) && !this.source.places.removing(automation.place) && !this.busy.has(automation.id)) void guarded('Automation run', () => this.fire(automation, true))
+      for (const automation of this.model.dueNow(this.zone())) if (this.source.space(automation.place) && !this.source.places.removing(automation.place) && !this.busy.has(automation.id)) {
+        // Outside the launch's guard: a failed claim ends this scan, or each due rule would wait out the same lock in turn.
+        const run = this.claim(automation, true)
+        void guarded('Automation run', () => this.launch(automation, run))
+      }
     } finally { this.scanning = false }
   }
   async act(action: Extract<Action, { type: 'automation' }>) {
@@ -209,5 +219,5 @@ export class CoreAutomations {
     return JSON.stringify(await this.act({ type: 'automation', place: space.id, name, op: op as 'pause' | 'resume' | 'run' | 'remove' }))
   }
   stop() { this.stopped = true; clearInterval(this.timer) }
-  async drain() { await this.processing; await Promise.allSettled([...this.active]) }
+  async drain() { await this.processing?.catch(() => {}); await Promise.allSettled([...this.active]) }
 }

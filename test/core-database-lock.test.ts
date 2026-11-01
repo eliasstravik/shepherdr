@@ -107,6 +107,21 @@ test('a due automation whose claim fails stays due and is not left busy', async 
   } finally { scheduler.stop(); await scheduler.drain(); holder.close(); store.close() }
 })
 
+test('due automations under a lasting reader share one wait, not one each', async () => {
+  const dir = home(), store = new CoreStore(dir), holder = new Database(join(dir, 'state.sqlite'))
+  const space = { id: 'p:box:demo', name: 'demo', machine: 'box' }
+  const source = { store, places: { removing: () => false }, connected: () => true, machineConnected: () => true, agents: { get: () => undefined, terminal: () => undefined }, emit() {}, on() {}, settings: { get: () => 'UTC' }, spaces: () => [space], space: () => space, tasks: { all: () => [], busy: () => false } } as unknown as CoreSource
+  const scheduler = new CoreAutomations(source)
+  try {
+    for (const name of ['one', 'two', 'three', 'four']) scheduler.model.add({ place: space.id, name, trigger: { time: 'once 2020-01-01 00:00' }, task: { title: 'Check' } }, 0)
+    holder.exec('BEGIN'); holder.query('SELECT * FROM records').all()
+    const began = performance.now()
+    await expect(scheduler.scan()).rejects.toThrow('database is locked')
+    expect(performance.now() - began).toBeLessThan(LOCK_WAIT * 2.5)
+    expect(scheduler.model.list.every(automation => automation.on && !automation.runs)).toBe(true)
+  } finally { holder.exec('ROLLBACK'); scheduler.stop(); await scheduler.drain(); holder.close(); store.close() }
+})
+
 test('a timer scan under a lock that outlasts the wait fails, logs, and the app lives on to its next tick', async () => {
   // Timers only, as in the running app: a top-level await would keep Bun going past an unhandled failure.
   const dir = home(), root = join(import.meta.dir, '..')
