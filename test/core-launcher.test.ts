@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { prepareHome } from '../server/core/home.ts'
 import { coreConfig } from '../server/core/config.ts'
-import { buildProblem, coreProblem, launcherStatus, saveCore } from '../server/core/launcher.ts'
+import { buildProblem, claimHome, coreProblem, launcherStatus, saveCore } from '../server/core/launcher.ts'
 
 test('a live unconfirmed process never reports stopped or gets signaled', async () => {
   const home = mkdtempSync(join(tmpdir(), 'shep-launcher-'))
@@ -61,14 +61,23 @@ test('a new home never takes on its core\'s machines unless its start names that
     const trial = coreConfig(['--home', home, '--core-session', 'trial'])
     saveCore(trial)
     const restart = await coreProblem(config, unasked)
-    expect(restart).toContain('runs on core session trial, not default')
+    expect(restart).toContain('runs on core session trial at')
     expect(restart).toContain(`--core-session trial --core-socket ${trial.socket}`)
     expect(await coreProblem(trial, unasked)).toBeUndefined()
 
-    // A new home started with no flags is held to its session, not to a socket path its environment may move.
+    // Held to the session and the socket: either alone can be a different core with its own machines.
     saveCore(config)
-    expect(await coreProblem({ ...config, socket: join(root, 'moved.sock') }, unasked)).toBeUndefined()
-    expect(await coreProblem({ ...config, session: 'other' }, unasked)).toContain('runs on core session default')
+    expect(await coreProblem({ ...config, socket: join(root, 'moved.sock') }, unasked)).toContain('Nothing was started')
+    expect(await coreProblem({ ...config, session: 'other' }, unasked)).toContain('Nothing was started')
+
+    // A first start that fails after making the home still leaves its core: the retry is not a home from before the record.
+    const failed = coreConfig(['--home', join(root, 'failed'), '--core-session', 'trial'])
+    claimHome(failed)
+    expect(await coreProblem({ ...failed, chosenCore: false, session: 'default' }, unasked)).toContain('Nothing was started')
+    claimHome(failed)
+    saveCore({ ...failed, session: 'later' })
+    claimHome(failed)
+    expect(await coreProblem({ ...failed, chosenCore: false, session: 'later' }, unasked)).toBeUndefined()
   } finally {
     if (inherited === undefined) delete process.env.HC_SESSION
     else process.env.HC_SESSION = inherited
