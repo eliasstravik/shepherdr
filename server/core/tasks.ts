@@ -334,7 +334,9 @@ export class CoreTasks {
     }
   }
 
-  async deliver(id: string, chat: string, message: string, internal = false) {
+  /** An open merge card stays until a tap or a fresh ready report. A yes given on it stays too, unless the human says more in the app. */
+  private mergeAsked(task: CoreTask, human: boolean) { return !!task.mergeQuestion && (task.approvedHead ? !human : !!this.source.store.get('merge-question', task.mergeQuestion)) }
+  async deliver(id: string, chat: string, message: string, internal = false, human = false) {
     return this.change(id, async () => {
       const task = this.get(id)
       if (!task) throw new Refusal('This task was removed; nothing was sent')
@@ -345,7 +347,7 @@ export class CoreTasks {
         const room = this.source.health?.room(task.machine, task.id)
         if (room) { task.capacity = room; if (['todo', 'queued'].includes(task.workflow)) task.workflow = 'queued'; this.save(task); throw new CoreError('busy', 'This message is saved until its machine has room') }
         task.reservedAt = Date.now(); task.reservedChats = [...new Set([...(task.reservedChats ?? []), chat])]
-        if (!internal && chat === task.chat && (task.workflow === 'ready' || task.workflow === 'todo')) { task.workflow = 'working'; delete task.readyHead; delete task.approvedHead; delete task.mergeQuestion }
+        if (!internal && chat === task.chat && (task.workflow === 'ready' && !this.mergeAsked(task, human) || task.workflow === 'todo')) { task.workflow = 'working'; delete task.readyHead; delete task.approvedHead; delete task.mergeQuestion }
         if (task.workflow === 'queued' && task.capacity && !(task.after ?? []).some(id => !['merged', 'closed'].includes(this.get(id)?.workflow || ''))) task.workflow = 'working'
         delete task.capacity; this.save(task); await this.label(task)
       }

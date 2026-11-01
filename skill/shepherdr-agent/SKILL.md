@@ -90,6 +90,8 @@ Done or the merge question.
 - News from GitHub after ready (a failed check, a review, a comment) is only passed on. A failure your change caused:
   fix it. One outside it (the base is red too): say so in one line. A clear wish that fits the brief: do it. Anything
   else goes to the human in one short message. Then `shepherdr ready` again.
+- A message while your merge card is open leaves it open and the task Ready. If you commit because of it, run
+  `shepherdr ready` again: its fresh card replaces the old one.
 - A red check you can't fix, or a must-fix finding left open: report it ready with that at the front of the facts, and
   don't merge.
 

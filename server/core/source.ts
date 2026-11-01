@@ -60,7 +60,7 @@ interface Machine { id: string; name: string; state: string; host?: string; vers
 interface Permission { id: string; chat: string; grant: string; question: Question; expires: number; settled?: boolean; allow?: boolean; at?: number; native?: NativeAsk; grants?: unknown[]; reply?: PermissionAnswer; tool?: string; hash?: string; turn?: string; sub?: string }
 /** the most of an agent's last words a card with no question carries: its card shows a few lines */
 const NEED_TEXT = 1000
-interface PendingSend { id: string; chat: string; text: string; launch?: string; state: 'queued' | 'sending' | 'uncertain' | 'cancelled'; quiet?: boolean; work?: boolean }
+interface PendingSend { id: string; chat: string; text: string; launch?: string; state: 'queued' | 'sending' | 'uncertain' | 'cancelled'; quiet?: boolean; work?: boolean; human?: boolean }
 
 /** Product state is Shepherdr's; terminals, machine commands, files and agent children are core's. */
 export class CoreSource extends Emitter<SourceEvents> implements Source {
@@ -478,7 +478,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
             if (modelCommand(text) !== undefined) throw new Error('/model would change every later agent on this device. Use Restart agent to change this one')
             const id = action.cid || randomUUID()
             this.store.db.transaction(() => {
-              this.store.set('pending-send', id, { id, chat: action.chat, text, state: 'queued' } satisfies PendingSend)
+              this.store.set('pending-send', id, { id, chat: action.chat, text, state: 'queued', ...(action.human ? { human: true } : {}) } satisfies PendingSend)
               this.post(action.chat, { id, cid: action.cid, who: 'you', text, at: Date.now(), waiting: true })
             })()
             await this.flush(action.chat)
@@ -638,7 +638,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
         item.state = 'sending'; this.store.set('pending-send', item.id, item)
         try {
           if (!item.id.startsWith('provider-retry-')) this.providerRetries.clear(chat)
-          if (task) await this.tasks.deliver(task.id, chat, item.text, !!item.launch && !item.work)
+          if (task) await this.tasks.deliver(task.id, chat, item.text, !!item.launch && !item.work, item.human)
           else if (agent && this.agents.terminal(agent)?.state === 'live') await this.agents.send(chat, item.text)
           else {
             if (space.mode === 'autopilot' || agent?.pilot) throw new Error('This contained coordinator has stopped; change mode or explicitly restart its contained run before sending')

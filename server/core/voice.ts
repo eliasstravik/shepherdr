@@ -26,7 +26,7 @@ export class CoreVoice {
       name: `${machineName(this.source.snapshot().machines, own.machine)}:${own.name}`,
       send: async (text, to, command) => {
         const target = resolve(to)
-        const result = await this.source.act({ type: 'send', cid: command || randomUUID(), chat: target.key, text }) as { waiting?: boolean }
+        const result = await this.source.act({ type: 'send', cid: command || randomUUID(), chat: target.key, text, human: true }) as { waiting?: boolean }
         return result.waiting ? 'Saved for delivery. It has not been confirmed by the agent yet.' : 'Sent.'
       },
       read: async to => {

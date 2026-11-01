@@ -115,3 +115,6 @@ its turn on a question.
   Needs you. The coordinator speaks only when it has something to add.
 - A merge card shows what it approves: the commit, the files and lines changed, GitHub's checks as they stand and a
   link to the proof. Only Merge on that card approves that commit; a yes in the chat doesn't count, and the card says so.
+- A card stays open until it is answered on the card. A message in its chat, from you, a script, a coordinator or
+  GitHub, reaches the agent and never answers or closes it. Its agent's next `ready` replaces a merge card it left behind.
+  After Merge, only your own words in the app take that yes back; messages from outside don't.

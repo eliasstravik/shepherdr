@@ -1119,7 +1119,7 @@ export function ReplyOnCard({ ask, reply, task, source }: { ask: CardAsk; reply:
     setBusy(true)
     setErr('')
     try {
-      const r = await act({ type: 'send', chat: ask.chat, text: text.trim(), reply: reply.id })
+      const r = await act({ type: 'send', chat: ask.chat, text: text.trim(), reply: reply.id, human: true })
       if (r?.ok === false) setErr(r.error ?? "That didn't go through.")
       else setText('')
     } catch {
@@ -1553,7 +1553,7 @@ async function deliver(o: Outgoing) {
   // a reload now would cut it off on its way
   const release = holdReload()
   try {
-    const r = (await act({ type: 'send', chat: o.chat, text: o.text, attachments: o.files.map((f) => f.path), cid: o.cid, reply: o.reply?.id }, AbortSignal.timeout(SEND_TIMEOUT))) as {
+    const r = (await act({ type: 'send', chat: o.chat, text: o.text, attachments: o.files.map((f) => f.path), cid: o.cid, reply: o.reply?.id, human: true }, AbortSignal.timeout(SEND_TIMEOUT))) as {
       waiting?: boolean
       waitsFor?: Outgoing['waitsFor']
       at?: number
