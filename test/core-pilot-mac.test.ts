@@ -45,7 +45,7 @@ test('the local-ports profile opens only the ports it names, and the other profi
 test('each Mac profile says what it gives up, and only the local-ports one says the most', () => {
   expect(pilotAccessWarning('Isolated workspace')).toBe(''); expect(pilotAccessWarning(undefined)).toBe('')
   expect(pilotAccessWarning('Mac sandbox')).toContain('read their environments'); expect(pilotAccessWarning('Mac sandbox')).not.toContain('Local ports')
-  for (const words of ['read their environments', 'another machine', 'starts after it does', 'above 10239']) expect(pilotAccessWarning('Mac sandbox with local ports')).toContain(words)
+  for (const words of ['read their environments', 'another machine', 'allowance', 'instructions', 'starts after it does', 'above 10239']) expect(pilotAccessWarning('Mac sandbox with local ports')).toContain(words)
 })
 test('a port something else holds is read from netstat, whoever owns it', () => {
   expect(pilotMacHeldPort('tcp4       0      0  127.0.0.1.49435        *.*                    LISTEN', 'tcp')).toBe(49435)

@@ -637,7 +637,7 @@ export const doneNewestFirst = <T extends Pick<Task, 'status' | 'doneAt'>>(ts: T
 /** the row of a space's Autopilot settings that says why it can't run there */
 export const PILOT_BLOCKED = "Can't run"
 /** What a Mac permission profile gives up, by its Settings name: said where it's chosen, and again before a run starts. */
-export const pilotAccessWarning = (access?: string) => !access?.startsWith('Mac sandbox') ? '' : `Other processes stay visible, and an agent can read their environments, including a secret in use.${access === 'Mac sandbox with local ports' ? ' Local ports open for builds: another machine on your network can connect to whatever an agent listens on, past the HTTPS hosts, an agent can reach a local service that starts after it does, and it can take a free local port above 10239 before a host service does.' : ''}`
+export const pilotAccessWarning = (access?: string) => !access?.startsWith('Mac sandbox') ? '' : `Other processes stay visible, and an agent can read their environments, including a secret in use.${access === 'Mac sandbox with local ports' ? ' Local ports open for builds: another machine that can reach this Mac, on your network, tailnet or a forwarded port, can connect to whatever an agent listens on, past the HTTPS hosts and allowance, to read what it sends or give it instructions. An agent can reach a local service that starts after it does, and it can take a free local port above 10239 before a host service does.' : ''}`
 
 /** a typed /model: the words after it ('' for none); anything else: nothing. A CLI saves its own /model as the device's
  *  default for every later agent, so it never reaches one: it opens Restart, which changes this agent only */

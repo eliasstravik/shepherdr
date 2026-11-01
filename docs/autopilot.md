@@ -41,7 +41,7 @@ wrapper PATH are verified before Herdr starts any agent. A shell configuration t
 | Isolated workspace: local Linux repository space with usable bubblewrap namespaces | Required | Required | — |
 | Mac sandbox profile on a local macOS repository space | Yes | Once its helper is out of quarantine; real model not verified, see below | Refused |
 | Mac sandbox profile on a connected Mac | Nothing refuses it; not verified | Not verified | Refused |
-| Mac sandbox with local ports, for Gradle builds | Yes, on a local Mac; see its section below | Same as Mac sandbox; Gradle under it not verified with Codex | Refused |
+| Mac sandbox with local ports, for Gradle builds | Yes on a local Mac, see its section below; on a connected Mac nothing refuses it, not verified | Same as Mac sandbox; Gradle under it not verified with Codex | Refused |
 | Home-space Autopilot | Refused | Refused | — |
 | Connected Linux machines | Nothing refuses them; not verified | Nothing refuses them; not verified | — |
 
@@ -74,6 +74,23 @@ Turning OFF stops owned workers by default; “Turn off; let workers finish” k
 allowance/deadline. Unrelated earlier tasks are neither stopped nor relabelled. Native descendants stay inside their
 parent's namespace, and stopping that runtime kills the namespace. Server restart fails closed: old runs stop and
 need explicit retry, rather than being revived without their gateway.
+
+Access and limits are behind an expansion:
+
+- **Shared HTTPS allowance (MiB):** a hard cap on encrypted traffic through the gateway, both directions, including
+  coordinator, workers and reviewers. It measures network traffic, not tokens or money. A chunk that exceeds the
+  remaining allowance is refused. Exhaustion closes the run.
+- **Shared reported tokens:** an optional best-effort stop threshold using every transcript in the runtime homes,
+  including helpers and reviewers. Log bytes are captured from inside the namespace into host-owned storage, never
+  opened from an agent-supplied host path. Reports are delayed and agent-written, so they can overshoot or be missing; this
+  is not a hard token or money cap. No exact financial spending cap is offered.
+- **Shared runtime:** elapsed wall time since ON, including idle time. Every runtime gets the same absolute deadline
+  through an external timeout (on a Mac, the watcher above); the manager also checks it. This ends all descendants, not just a turn.
+- **Maximum parallel tasks:** the number of active managed Shepherdr tasks belonging to this run. It does not count
+  native helper processes as separate tasks; they share their parent's namespace, network allowance and deadline.
+
+The new `autopilot.*` settings, `autopilot-run` action, optional mode `keepWorkers` and optional
+`SettingRow.instructions` are additive. Existing plugin names, `definePlugin` and registry slots remain unchanged.
 
 ## The Mac sandbox profile
 
@@ -123,60 +140,15 @@ launchd, the pasteboard, Spotlight and preferences are out of reach. macOS refus
 and Codex's own are turned off inside and the outer profile is the boundary. A tool that builds its own sandbox fails
 too: for `xcodebuild`, pass `-IDEPackageSupportDisableManifestSandbox=1 -IDEPackageSupportDisablePluginExecutionSandbox=1`.
 Apple's `trustd` is out of reach because it fetches URLs named in a certificate from outside the sandbox, so Go and
-Swift programs that verify TLS through the system fail. `xcrun` and the `/usr/bin` developer shims can't run, because their shared cache would steer the host's own tools;
+Swift programs that verify TLS through the system fail. Rust and OpenSSL clients get their trust roots from
+`/etc/ssl/cert.pem`, not the Keychain, so a private certificate authority isn't trusted. `xcrun` and the `/usr/bin` developer shims can't run, because their shared cache would steer the host's own tools;
 Xcode's own tools and its toolchain's compilers come first on `PATH` instead. iOS simulators and full Xcode builds are untested.
-
-## Mac sandbox with local ports
-
-Gradle needs sockets of its own: a UDP lock socket, a daemon, and workers that connect back over TCP. Seatbelt has no
-private loopback to give it, so this separate profile opens a part of the shared one. Choose it only for a repository
-that builds with Gradle, knowing these limits, none of which **Mac sandbox** has:
-
-- **Another machine can connect to an agent.** Seatbelt can't confine a listener to loopback. An agent can listen on
-  every address, and any machine that can reach this Mac, on its network or tailnet, can connect and read what it
-  sends, past the gateway and its host list. A second machine reading from a contained listener confirmed this. The
-  agent still can't start that connection itself. Use it on networks you trust; macOS's firewall may block this, but
-  that isn't tested.
-- **A service that starts later is reachable.** An agent can connect to local ports 49152–65535, where the system
-  assigns a listener's port, and 17001–18000, where Kotlin's compile daemon picks one. Seatbelt can't tell which
-  listeners are the run's own, so each launch reads what listens now and closes those ports, whoever owns them. That
-  covers Shepherdr's web port and any host service already up. Something that starts afterwards on those ranges, such
-  as a browser's debugging port or a dev server on an assigned port, can be reached until the next launch. So can
-  another run's CONNECT port, and UDP services on those ranges whenever they started. Every other local port stays closed.
-- **An agent can take a free local port.** It can't listen on a port below 10240, or on one anything held when it
-  launched, including through a service listening on every address. That keeps Shepherdr's web port safe across a
-  restart. On any other port it can listen first, so a host client that connects there, or a service that starts there
-  later, can reach the agent instead. So a test that needs a fixed port below 10240 fails here. The kernel refuses a
-  profile of about 32,000 port rules, so this can't be a list of allowed ports as well.
-- **A launch takes about 6 s longer.** Seatbelt has no port ranges, so the profile holds one rule per port and takes
-  that long to compile.
-- **Traffic is counted ahead.** Each agent charges the shared HTTPS allowance in blocks of up to 8 MiB, so a run can
-  show up to that much per agent that it didn't use. On a limit it charges only what's left, unless several agents
-  charge at once, when the run can stop up to one block early.
-- **A port that closes after the launch stays closed.** If the system assigns one to a Gradle listener, that build
-  fails with `Could not connect`; it's rare, and the next launch reads the ports again. Rerunning the build usually
-  gets another port.
-
-Each agent's JVMs get `JAVA_TOOL_OPTIONS`, which every JVM prints a line about when it starts. It sends them through
-the gateway and gives them private home and temporary folders, and `GRADLE_USER_HOME` is private as well. So a build's
-caches start empty, and nothing reads the host's `~/.gradle`. JVMs reach each other over `::1`, because a plain JVM
-reaches `127.0.0.1` through an IPv4-mapped address that no rule can match without opening the internet. So a JVM
-connecting to the literal `127.0.0.1` fails, and `localhost` works; other programs can use either.
-
-`JAVA_HOME` is whatever `/usr/libexec/java_home` finds. JDKs in `~/Library/Java/JavaVirtualMachines` and the JDK
-folders mise and SDKMAN keep, and the Android SDK at `~/Library/Android/sdk`, are readable, and `ANDROID_HOME` points to
-that SDK. The SDK is read-only: install what a build needs before starting Autopilot. Add the hosts it downloads
-from to **Network hosts**. A Kotlin Android build here needed `services.gradle.org`, `github.com` and
-`release-assets.githubusercontent.com` (the wrapper), `plugins.gradle.org`, `plugins-artifacts.gradle.org`,
-`repo.maven.apache.org`, `dl.google.com` and `maven.google.com`. A file Git ignores, such as `google-services.json`, isn't
-in a worktree unless the project makes one. Android emulators, instrumented tests and Kotlin/Native builds are untested.
 
 **Codex needs its helper out of quarantine.** A current model runs commands through a `codex-code-mode-host` helper
 beside the CLI. A Homebrew cask leaves that helper quarantined and unapproved, and macOS then hangs it, in or out of a
 sandbox, so Codex says only `timed out negotiating with the code-mode host`. Autopilot refuses such an install and names
 what clears it: `xattr -d com.apple.quarantine <path>`, if you trust it. Cleared, real Codex ran commands through that
-helper inside this profile against a local fake endpoint; a real model hasn't been run that way. Rust and OpenSSL clients get their trust roots from `/etc/ssl/cert.pem`,
-not the Keychain, so a private certificate authority isn't trusted.
+helper inside this profile against a local fake endpoint; a real model hasn't been run that way.
 
 **Logins.** Claude Code on a Mac keeps its login in the Keychain, and the profile denies the Keychain. A process outside
 the sandbox writes the host's live login to a file in the private home, the only file Claude falls back to, and
@@ -198,22 +170,52 @@ Only those numbers cross, and an agent can write them, so treat them as a hint.
 
 To rerun the escape attempts on a Mac: `bun test test/core-pilot-mac-escape.test.ts`.
 
-Access and limits are behind an expansion:
+## Mac sandbox with local ports
 
-- **Shared HTTPS allowance (MiB):** a hard cap on encrypted traffic through the gateway, both directions, including
-  coordinator, workers and reviewers. It measures network traffic, not tokens or money. A chunk that exceeds the
-  remaining allowance is refused. Exhaustion closes the run.
-- **Shared reported tokens:** an optional best-effort stop threshold using every transcript in the runtime homes,
-  including helpers and reviewers. Log bytes are captured from inside the namespace into host-owned storage, never
-  opened from an agent-supplied host path. Reports are delayed and agent-written, so they can overshoot or be missing; this
-  is not a hard token or money cap. No exact financial spending cap is offered.
-- **Shared runtime:** elapsed wall time since ON, including idle time. Every runtime gets the same absolute deadline
-  through an external timeout (on a Mac, the watcher above); the manager also checks it. This ends all descendants, not just a turn.
-- **Maximum parallel tasks:** the number of active managed Shepherdr tasks belonging to this run. It does not count
-  native helper processes as separate tasks; they share their parent's namespace, network allowance and deadline.
+Gradle needs sockets of its own: a UDP lock socket, a daemon, and workers that connect back over TCP. Seatbelt has no
+private loopback to give it, so this separate profile opens a part of the shared one. Choose it only for a repository
+that builds with Gradle, knowing these limits, none of which **Mac sandbox** has:
 
-The new `autopilot.*` settings, `autopilot-run` action, optional mode `keepWorkers` and optional
-`SettingRow.instructions` are additive. Existing plugin names, `definePlugin` and registry slots remain unchanged.
+- **Another machine can connect to an agent.** Seatbelt can't confine a listener to loopback. An agent can listen on
+  every address, and any machine that can reach this Mac, on its network or tailnet, through a public address or a
+  forwarded port, can connect and read what it sends, past the gateway, its host list and the HTTPS allowance. The same
+  connection can bring instructions in. A second machine reading from a contained listener confirmed the reading. The
+  agent still can't start that connection itself. Use it on networks you trust; macOS's firewall may block this, but
+  that isn't tested.
+- **A service that starts later is reachable.** An agent can connect to local ports 49152–65535, where the system
+  assigns a listener's port, and 17001–18000, where Kotlin's compile daemon picks one. Seatbelt can't tell which
+  listeners are the run's own, so each launch reads what listens now and closes those ports, whoever owns them. That
+  covers Shepherdr's web port and any host service already up. Something that starts afterwards on those ranges, such
+  as a browser's debugging port or a dev server on an assigned port, can be reached until the next launch. So can
+  another run's CONNECT port, and UDP services on those ranges whenever they started. Every other local port stays closed.
+- **An agent can take a free local port.** It can't listen on a port below 10240, or on one anything held when it
+  launched, including through a service listening on every address. That keeps Shepherdr's web port safe across a
+  restart. On any other port it can listen first, so a host client that connects there, or a service that starts there
+  later, can reach the agent instead. So a test that needs a fixed port below 10240 fails here. The kernel refuses a
+  profile of about 32,000 port rules, so this can't be a list of allowed ports as well.
+- **A launch takes about 6 s longer.** Seatbelt has no port ranges, so the profile holds one rule per port and takes
+  that long to compile.
+- **Traffic is counted ahead.** Each agent charges the shared HTTPS allowance in blocks of up to 8 MiB, so a run can
+  show up to that much per agent that it didn't use. On a limit it charges only what's left, unless several agents
+  charge at once, when the run can stop up to one block early. Agents share one authority check every 5 s, so after a
+  run's authority ends, a tunnel can keep moving what's charged, and a new one can open, for up to about 10 s.
+- **A port that closes after the launch stays closed.** If the system assigns one to a Gradle listener, that build
+  fails with `Could not connect`; it's rare, and the next launch reads the ports again. Rerunning the build usually
+  gets another port.
+
+Each agent's JVMs get `JAVA_TOOL_OPTIONS`, which every JVM prints a line about when it starts. It sends them through
+the gateway and gives them private home and temporary folders, and `GRADLE_USER_HOME` is private as well. So a build's
+caches start empty, and nothing reads the host's `~/.gradle`. JVMs reach each other over `::1`, because a plain JVM
+reaches `127.0.0.1` through an IPv4-mapped address that no rule can match without opening the internet. So a JVM
+connecting to the literal `127.0.0.1` fails, and `localhost` works; other programs can use either.
+
+`JAVA_HOME` is whatever `/usr/libexec/java_home` finds. JDKs in `~/Library/Java/JavaVirtualMachines` and the JDK
+folders mise and SDKMAN keep, and the Android SDK at `~/Library/Android/sdk`, are readable, and `ANDROID_HOME` points to
+that SDK. The SDK is read-only: install what a build needs before starting Autopilot. Add the hosts it downloads
+from to **Network hosts**. A Kotlin Android build here needed `services.gradle.org`, `github.com` and
+`release-assets.githubusercontent.com` (the wrapper), `plugins.gradle.org`, `plugins-artifacts.gradle.org`,
+`repo.maven.apache.org`, `dl.google.com` and `maven.google.com`. A file Git ignores, such as `google-services.json`, isn't
+in a worktree unless the project makes one. Android emulators, instrumented tests and Kotlin/Native builds are untested.
 
 ## Automations
 
