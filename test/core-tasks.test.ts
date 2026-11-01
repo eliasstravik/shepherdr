@@ -75,6 +75,24 @@ test('a merge card carries the exact commit, its files and lines, and says plain
   })
 })
 
+test('a merge card never shows the checks of another commit', async () => {
+  await withTask(async ({ tasks, task, grant, repo, git }) => {
+    git(repo, 'update-ref', 'refs/remotes/origin/main', 'main')
+    task.pr = { number: 1, url: 'https://github.test/o/r/pull/1' }
+    const store = (tasks as unknown as { source: CoreSource }).source.store
+    store.set('task', task.id, task)
+    tasks.git.remote = async () => 'github.test/o/r'
+    tasks.git.ghRun = async () => ''
+    let head = ''
+    tasks.git.pullRequest = (async (_repo: unknown, _branch: string, checks = true) => checks ? { headRefOid: 'b'.repeat(40), statusCheckRollup: [{ conclusion: 'SUCCESS' }] } : { number: 1, state: 'OPEN', isDraft: false, headRefOid: head = await tasks.git.head({ machine: task.machine, folder: task.folder }), baseRefName: 'main' }) as typeof tasks.git.pullRequest
+    await tasks.ready(grant, task.id, 'Changed the example')
+    const card = store.get<Message>(`message:${task.chat}`, tasks.get(task.id)!.mergeQuestion!)!.question!
+    expect(head).toBeTruthy()
+    expect(card.evidence?.checks).toEqual({ state: 'unknown', text: "GitHub's checks are for another commit" })
+    expect(card.evidence?.diff?.files).toBe(1)
+  })
+})
+
 test('a changed commit invalidates an earlier merge card; caller labels cannot authorize another task', async () => {
   await withTask(async ({ tasks, task, grant, worktree, git }) => {
     await tasks.ready(grant, task.id, 'Changed the example')

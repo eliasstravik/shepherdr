@@ -13,7 +13,7 @@ const PASSED = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED'])
 export function checkWords(checks: { conclusion?: string; state?: string }[]): MergeEvidence['checks'] {
   if (!checks.length) return { state: 'none', text: 'None reported yet' }
   const states = checks.map(check => (check.conclusion || check.state || '').toUpperCase())
-  const failed = states.filter(state => FAILED.has(state)).length, passed = states.filter(state => PASSED.has(state)).length, running = checks.length - failed - passed
+  const failed = states.filter(state => FAILED.has(state) || state === 'CANCELLED').length, passed = states.filter(state => PASSED.has(state)).length, running = checks.length - failed - passed
   return { state: failed ? 'failed' : running ? 'running' : 'passed', text: [failed && `${failed} failed`, running && `${running} running`, passed && `${passed} passed`].filter(Boolean).join(', ') }
 }
 export function prComments(pages: unknown[], kind: 'r' | 'c' | 'i', reviews: Raw[] = []): GitHubComment[] {

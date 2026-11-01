@@ -470,7 +470,7 @@ export class CoreTasks {
       const files = rows.map(row => { const [added, removed, ...path] = row.split('\t'); return { path: path.join('\t').slice(0, 300), added: parseInt(added) || 0, removed: parseInt(removed) || 0 } })
       evidence.diff = { files: files.length, added: files.reduce((sum, file) => sum + file.added, 0), removed: files.reduce((sum, file) => sum + file.removed, 0), list: files.slice(0, 50) }
     } catch { /* the card says it couldn't read them */ }
-    if (task.pr) evidence.checks = await this.git.pullRequest(location, task.branch).then(pr => checkWords(pr.statusCheckRollup)).catch(() => ({ state: 'unknown' as const, text: "Couldn't read GitHub's checks" }))
+    if (task.pr) evidence.checks = await this.git.pullRequest(location, task.branch).then(pr => pr.headRefOid === head ? checkWords(pr.statusCheckRollup) : { state: 'unknown' as const, text: "GitHub's checks are for another commit" }).catch(() => ({ state: 'unknown' as const, text: "Couldn't read GitHub's checks" }))
     return evidence
   }
   async answer(question: string, choice: number, chat: string): Promise<boolean> {

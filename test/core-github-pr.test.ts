@@ -65,6 +65,7 @@ test('check words never make unfinished or failed checks look green', () => {
   expect(checkWords([])).toEqual({ state: 'none', text: 'None reported yet' })
   expect(checkWords([{ conclusion: 'SUCCESS' }, { state: 'SKIPPED' }])).toEqual({ state: 'passed', text: '2 passed' })
   expect(checkWords([{ conclusion: 'SUCCESS' }, { state: 'PENDING' }])).toEqual({ state: 'running', text: '1 running, 1 passed' })
+  expect(checkWords([{ conclusion: 'CANCELLED' }])).toEqual({ state: 'failed', text: '1 failed' })
   expect(checkWords([{ conclusion: 'FAILURE' }, {}, { conclusion: 'SUCCESS' }])).toEqual({ state: 'failed', text: '1 failed, 1 running, 1 passed' })
 })
 
