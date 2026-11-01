@@ -119,8 +119,8 @@ const REPLIES: Record<string, string> = {
 interface Started { argv: string[]; env?: Record<string, string | undefined>; cwd?: string; state?: Record<string, string>; config?: Record<string, string> }
 
 /** A machine of any platform, with real login files in a folder and nothing real run: the seal's own proof is acted out as `seal` says. */
-async function machine(run: (context: { host: Host; started: Started[]; clis: () => string[]; dir: string; files: { claude: string; codex: string } }) => Promise<void>, options: { platform?: string; has?: string[]; sandbox?: boolean; seal?: 'holds' | 'leaks' | 'dead' | 'throws'; keychain?: [string, number]; claude?: string | null; codex?: string | null } = {}) {
-  const { platform = 'darwin', has = ['claude', 'codex'], sandbox = true, seal = 'holds', keychain = ['', 44], claude = FRESH, codex = CODEX_LOGIN } = options
+async function machine(run: (context: { host: Host; started: Started[]; clis: () => string[]; dir: string; files: { claude: string; codex: string } }) => Promise<void>, options: { platform?: string; has?: string[]; sandbox?: boolean; certificates?: boolean; seal?: 'holds' | 'leaks' | 'dead' | 'throws'; keychain?: [string, number]; claude?: string | null; codex?: string | null } = {}) {
+  const { platform = 'darwin', has = ['claude', 'codex'], sandbox = true, certificates = false, seal = 'holds', keychain = ['', 44], claude = FRESH, codex = CODEX_LOGIN } = options
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'shep-mac-'))), config = join(dir, 'claude'), home = join(dir, 'codex'), started: Started[] = []
   mkdirSync(config)
   mkdirSync(home)
@@ -129,7 +129,7 @@ async function machine(run: (context: { host: Host; started: Started[]; clis: ()
   if (codex !== null) writeFileSync(join(home, 'auth.json'), codex)
   const finished = (stdout: string, code: number) => ({ stdin: { write() {}, flush() {} }, stdout: new Response(stdout).body!, exited: Promise.resolve(code), signalCode: null, kill() {} })
   const host: Host = {
-    platform, env: { USER: 'me', CLAUDE_CONFIG_DIR: config, CODEX_HOME: home }, exists: path => path === '/usr/bin/sandbox-exec' ? sandbox : existsSync(path),
+    platform, env: { USER: 'me', CLAUDE_CONFIG_DIR: config, CODEX_HOME: home }, exists: path => path === '/usr/bin/sandbox-exec' ? sandbox : path === '/etc/ssl/cert.pem' ? certificates : existsSync(path),
     which: name => has.includes(name) ? `/bin/${name}` : null,
     spawn(argv, spawned) {
       const words = argv.includes('--') ? argv.slice(argv.indexOf('--') + 1) : argv
@@ -270,6 +270,24 @@ test('Codex on a Mac gets a throwaway home with links to its login and config, a
   expect(run.argv[2]).toBe(MAC_PROFILE)
   expect(readFileSync(files.codex, 'utf8')).toBe(CODEX_LOGIN)
 }))
+
+test('Codex alone on a Mac is pointed at the certificates file, where there is one', async () => {
+  const sealed = async (options: Parameters<typeof machine>[1]) => {
+    const envs: Started['env'][] = []
+    await machine(async ({ host, started }) => {
+      await read(() => NOW, host)
+      envs.push(...['/bin/codex', '/bin/claude'].map(cli => started.find(entry => entry.argv.includes(cli))!.env))
+    }, options)
+    return envs
+  }
+  const [codex, claude] = await sealed({ certificates: true })
+  expect(codex?.SSL_CERT_FILE).toBe('/etc/ssl/cert.pem')
+  expect(claude).not.toHaveProperty('SSL_CERT_FILE')
+  expect((await sealed({ certificates: false }))[0]).not.toHaveProperty('SSL_CERT_FILE')
+  const [linuxCodex, linuxClaude] = await sealed({ certificates: true, platform: 'linux', has: ['claude', 'codex', 'bwrap'] })
+  expect(linuxCodex).toBeUndefined()
+  expect(linuxClaude).not.toHaveProperty('SSL_CERT_FILE')
+})
 
 test('Codex on a Mac with a login due, or with no login file to check, isn\'t run', async () => {
   const due = JSON.stringify({ tokens: { access_token: 'x.e30.x' } })

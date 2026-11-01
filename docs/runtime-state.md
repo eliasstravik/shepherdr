@@ -79,6 +79,7 @@ holds it in memory, and writes only that short-lived token to the throwaway fold
 Nothing can show a folder over `~/.codex` there, so `CODEX_HOME` names a throwaway home with links to the real
 `auth.json` and `config.toml`: a save lands in the throwaway home or is denied, no login is copied, and Codex is told to
 keep to the file. A Codex login kept only in the Keychain has no file to check, so it isn't run.
+Sealed, it can't reach the Keychain's daemons for the Mac's trusted certificates, so `SSL_CERT_FILE` names `/etc/ssl/cert.pem` where that file exists.
 
 A seal can't save a renewed login, and one renewed but not saved signs the CLI out. So a login within an hour of its end
 (Claude Code's last about eight hours), or a Codex one past seven days since its last renewal, isn't read: the next agent
