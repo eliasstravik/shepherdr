@@ -210,6 +210,17 @@ describe('claude reader: steps and background work', () => {
     expect(ev.filter(e => e.kind === 'job-end')).toEqual([{ kind: 'job-end', id: 'wait1', at: expect.any(Number) }])
     expect(activityOf(ev).jobs).toEqual([])
   })
+  test('a card denied is a step refused, whether a person or Shepherdr closed it; an error of its own is not', () => {
+    const ev = parse([
+      use('a1', 'no', 'Bash', { command: 'touch a' }),
+      user('u1', [{ tool_use_id: 'no', type: 'tool_result', content: 'The human declined this request.', is_error: true }]),
+      use('a2', 'closed', 'Bash', { command: 'touch b' }),
+      user('u2', [{ tool_use_id: 'closed', type: 'tool_result', content: 'Shepherdr closed this without an answer: gone.', is_error: true }]),
+      use('a3', 'failed', 'Bash', { command: 'touch c' }),
+      user('u3', [{ tool_use_id: 'failed', type: 'tool_result', content: 'touch: cannot touch', is_error: true }]),
+    ])
+    expect(ev.flatMap((e) => (e.kind === 'step-end' ? [[e.id, e.refused]] : []))).toEqual([['no', 'you'], ['closed', 'you'], ['failed', undefined]])
+  })
   test('a tool call is a step, its result ends it and says where its output is; the question tool and a subagent’s calls are none', () => {
     const ev = parse([
       user('u1', 'Fix it', typed),
@@ -258,6 +269,16 @@ describe('claude reader: steps and background work', () => {
 const codexLine = (type: string, payload: object) => ({ timestamp: ts(), type, payload })
 
 describe('codex reader: steps and background work', () => {
+  test('a call the human denied on its card ends refused; words in a command\'s own output do not', () => {
+    const line = (payload: object, offset: number) => ({ offset, text: JSON.stringify({ timestamp: '2026-11-01T06:00:00Z', type: 'response_item', payload }) })
+    const call = (id: string) => ({ type: 'custom_tool_call', call_id: id, name: 'exec', input: 'x' })
+    const output = (id: string, text: string) => ({ type: 'custom_tool_call_output', call_id: id, output: [{ type: 'input_text', text }] })
+    const ev = readerFor('codex')!.parse([
+      line(call('a'), 0), line(output('a', 'exec_command failed: CreateProcess { message: "Rejected(\\"The human declined this request.\\")" }'), 1),
+      line(call('b'), 2), line(output('b', 'The human declined this request.'), 3),
+    ], '/logs/rollout.jsonl')
+    expect(ev.flatMap((e) => (e.kind === 'step-end' ? [[e.id, e.refused]] : []))).toEqual([['a', 'you'], ['b', undefined]])
+  })
   test('items logged once over are steps; the call that ran them goes once over; subagents are jobs', () => {
     const ev = readerFor('codex')!.parse(
       [

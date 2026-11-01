@@ -163,7 +163,8 @@ export class CodexReader implements Reader {
           out.push({ kind: 'step', id, at: t, step, tool: String(p.name ?? ''), ...said })
         } else if (p.type === 'function_call_output' || p.type === 'custom_tool_call_output') {
           const id = String(p.call_id ?? '')
-          if (s.calls.delete(id)) out.push({ kind: 'step-end', id, at: t, out: { file, offset }, drop: s.items || undefined })
+          const refused = /Rejected\W{1,8}(The human declined|Shepherdr (closed|could not))/.test(JSON.stringify(p.output ?? ''))
+          if (s.calls.delete(id)) out.push({ kind: 'step-end', id, at: t, out: { file, offset }, drop: s.items || undefined, ...(refused ? { refused: 'you' as const } : {}) })
           if (s.open.get(id) !== 'output') continue
           s.open.delete(id)
           out.push({ kind: 'answered', id, at: t })
