@@ -279,6 +279,11 @@ test('Autopilot says why it cannot run: home space, wrong profile for the system
   settings.set('autopilot.agent', 'Claude Code', 'p:box:one')
   check(settings, 'box', ready, { platform: 'Darwin', sandbox: 'missing', bun: '1.3.5' })
   expect(settings.pilotBlock('p:box:one')).toBe('The Mac sandbox needs Bun 1.4.2 or newer on box, not 1.3.5.')
+  // Its own machine launches on this app's Bun, whatever PATH finds there.
+  const { store } = settings as unknown as { store: CoreStore }
+  store.set('meta', 'local', { id: 'box' })
+  expect(settings.pilotBlock('p:box:one')).toBe(Bun.semver.order(Bun.version, '1.4.2') < 0 ? `The Mac sandbox needs Bun 1.4.2 or newer on box, not ${Bun.version}.` : undefined)
+  store.set('meta', 'local', { id: 'other' })
   check(settings, 'box', ready, { platform: 'Darwin', sandbox: 'missing', bun: '1.4.2', seatbelt: 'missing' })
   expect(settings.pilotBlock('p:box:one')).toContain('sandbox-exec')
   check(settings, 'box', ready, { platform: 'Darwin', sandbox: 'missing', bun: '1.4.2', seatbelt: 'ok' })
