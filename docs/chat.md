@@ -21,8 +21,9 @@ Every agent, coordinator or task agent, gets the same chat.
 - An agent stopped at its CLI's own screen before its session starts (trusting a folder, the theme, signing in, Codex's
   hooks, or anything a later CLI version adds) shows that screen in the chat as a card within about 10 seconds, and
   counts as Needs you. The card shows the choices it can read, and one tap presses that choice in the terminal. A
-  screen with no choices to read may still be a slow start, so its card comes a few seconds later, and Open terminal
-  is the way on. Each next screen is its own card. Nothing is pressed if the screen
+  first screen with nothing to choose makes no card, for it may be a slow start. After a card, one with no choices to
+  read still comes if it holds a link, like a sign-in, or its CLI says it has stopped, and Open terminal is the way on. Each next screen is its own card. An agent
+  whose CLI reports a turn, running or just ended, never gets one. Nothing is pressed if the screen
   has changed since the card was drawn, and a card that goes unused closes when its answer comes from the terminal or
   the agent starts. Outside Isolated workspaces Shepherdr pre-trusts nothing, and Codex asks in any new Git repository,
   even on a machine set to bypass; its task worktrees share their repository's answer.

@@ -10,6 +10,8 @@ import type { Message, Question } from '../shared/types.ts'
 const TRUST = `Quick safety check: do you trust this folder?\n\n ❯ No, exit\n   Yes, I trust this folder\n\n Enter to confirm\n`
 const THEME = `Choose a style\n\n ❯ Dark mode\n   Light mode\n`
 const started = 1_000_000
+// a Claude Code status line word for word, from a live agent with helpers running: a screen Shepherdr once took for a stop
+const WORKING = '⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt · ← 4 agents\n'
 
 let home: string, source: CoreSource, screen: string, keys: string[][], alerts: unknown[], terminal: CoreTerminal
 const agent = { chat: 'space', space: 'space', machine: 'machine', role: 'coordinator', kind: 'claude', launch: 'one', grant: 'grant', hook: '/unused', state: 'starting', started } satisfies CoreAgent
@@ -54,20 +56,103 @@ test('a reviewer has no chat to show a card in, and Autopilot answers its own st
   expect(cards()).toEqual([])
 })
 
-test('words with nothing to tap may be a slow start, so they wait longer', async () => {
-  screen = 'Starting the servers (3s)\n'
+test('words with nothing to choose make no card and no Needs you, however long they stay', async () => {
+  for (const words of [WORKING, 'Starting the servers (3s)\n']) {
+    screen = words
+    await settle()
+    await settle(started + 600_000)
+    expect(cards()).toEqual([])
+    expect(alerts).toEqual([])
+    expect(source.status(saved())).toBe('work')
+    expect(source.snapshot().needs).toEqual([])
+  }
+})
+
+test('a CLI in a turn has no card, whatever its screen shows', async () => {
+  for (const state of ['working', 'done']) {
+    terminal = { ...terminal, status: { app: 'claude-code', state } }
+    // the last is its own prompt echoed back, wrapped, which reads like a menu
+    for (const words of [WORKING, TRUST, `❯ Start 4 helpers and\n  wait for them\n`]) {
+      screen = words
+      await settle(started + 30_000)
+      expect(cards()).toEqual([])
+      expect(source.snapshot().needs).toEqual([])
+    }
+  }
+  terminal = { ...terminal, status: { app: 'claude-code', state: 'working' } }
+  expect(source.status(saved())).toBe('work')
+})
+
+test('a CLI idle or blocked may still be stopped on a screen', async () => {
+  for (const state of ['idle', 'blocked']) {
+    source.store.all<Message>('message:space').forEach(message => source.store.delete('message:space', message.id))
+    source.store.all<{ id: string }>('screen-card').forEach(row => source.store.delete('screen-card', row.id))
+    terminal = { ...terminal, status: { app: 'codex', state } }
+    await settle()
+    expect(open().choices).toHaveLength(2)
+  }
+})
+
+test('a CLI in a turn closes an open card, as answered in the terminal', async () => {
+  await settle()
+  const id = open().id
+  expect(source.status(saved())).toBe('need')
+  terminal = { ...terminal, status: { app: 'claude-code', state: 'working' } }
+  await source.screens.tick(started + 20_000)
+  expect(cards().find(card => card.id === id)).toMatchObject({ sent: -1, via: 'terminal' })
+  expect(source.status(saved())).toBe('work')
+  expect(source.snapshot().needs).toEqual([])
+})
+
+test('hooks read late still stop a card: the agent\'s records are read before one goes up', async () => {
+  screen = 'Which?\n\n ❯ Yes\n   No\n'
+  source.logs.catchUp = async () => source.store.set('agent', 'space', { ...agent, state: 'working' })
   await settle()
   expect(cards()).toEqual([])
-  await settle(started + 30_000)
-  expect(open().screen).toContain('Starting the servers')
+})
+
+test('a slow machine holds a real card back only a moment', async () => {
+  source.logs.catchUp = () => new Promise(() => {})
+  await settle()
+  expect(open().screen).toContain('do you trust this folder?')
+})
+
+test('a real start-up screen with choices still shows, from a CLI that has reported nothing', async () => {
+  screen = TRUST
+  await settle()
+  expect(terminal.status).toBeUndefined()
+  expect(open().choices.map(choice => choice.label)).toEqual(['No, exit', 'Yes, I trust this folder'])
+  expect(source.status(saved())).toBe('need')
 })
 
 test('words with nothing to tap come at once after a card, as a sign-in link does', async () => {
   await settle()
   await source.act({ type: 'answer', chat: 'space', question: open().id, choice: 1 })
-  screen = 'Paste code here if prompted >\n'
+  screen = 'Open https://example.com/sign-in\n\nPaste code here if prompted >\n'
   await settle(started + 12_000)
   expect(open().screen).toContain('Paste code here')
+})
+
+test('after a card, a status line is still no card, nor a Needs you, while the CLI has yet to report', async () => {
+  await settle()
+  await source.act({ type: 'answer', chat: 'space', question: open().id, choice: 1 })
+  screen = WORKING
+  for (const status of [undefined, { app: 'claude-code', state: 'starting' }]) {
+    terminal = { ...terminal, status }
+    await settle(started + 30_000)
+    expect(cards()).toHaveLength(1)
+    expect(source.status(saved())).toBe('work')
+    expect(source.snapshot().needs).toEqual([])
+  }
+})
+
+test('after a card, words alone come from a CLI that says it has stopped', async () => {
+  await settle()
+  await source.act({ type: 'answer', chat: 'space', question: open().id, choice: 1 })
+  screen = 'Ask Codex to do anything\n'
+  terminal = { ...terminal, status: { app: 'codex', state: 'idle' } }
+  await settle(started + 30_000)
+  expect(open().screen).toContain('Ask Codex')
 })
 
 test('a screen still moving waits; a blank one never shows', async () => {
@@ -226,19 +311,21 @@ test('an agent gone, or replaced, ends its card honestly', async () => {
 })
 
 test('a new code on the same screen comes as a new card; a running timer does not', async () => {
-  screen = 'Enter this code: 1234\n'
+  await settle()
+  await source.act({ type: 'answer', chat: 'space', question: open().id, choice: 1 })
+  screen = 'Enter this code at https://example.com/device: 1234\n'
   await settle(started + 30_000)
   const id = open().id
-  screen = 'Enter this code: 5678\n'
+  screen = 'Enter this code at https://example.com/device: 5678\n'
   await settle(started + 40_000)
-  expect(cards()).toHaveLength(2)
+  expect(cards()).toHaveLength(3)
   expect(cards().find(card => card.id === id)?.closed).toBe('The screen changed')
-  expect(open().screen).toBe('Enter this code: 5678')
-  screen = 'Enter this code: 5678 · 11\n'
+  expect(open().screen).toBe('Enter this code at https://example.com/device: 5678')
+  screen = 'Enter this code at https://example.com/device: 5678 · 11\n'
   await source.screens.tick(started + 50_000)
-  screen = 'Enter this code: 5678 · 13\n'
+  screen = 'Enter this code at https://example.com/device: 5678 · 13\n'
   await source.screens.tick(started + 52_000)
-  expect(open().screen).toBe('Enter this code: 5678')
+  expect(open().screen).toBe('Enter this code at https://example.com/device: 5678')
 })
 
 test('one machine that doesn\'t answer holds up no other agent', async () => {
@@ -261,8 +348,10 @@ test('an open card closes on the next poll when its terminal has ended', async (
   expect(cards().find(card => card.id === id)?.closed).toBe('The agent stopped')
 })
 
-test('with no choices to read it is still a card, for the terminal', async () => {
-  screen = 'Paste code here if prompted >\n'
+test('after a card, a screen with no choices to read is still one, for the terminal', async () => {
+  await settle()
+  await source.act({ type: 'answer', chat: 'space', question: open().id, choice: 1 })
+  screen = 'Open https://example.com/sign-in\n\nPaste code here if prompted >\n'
   await settle(started + 30_000)
   expect(open()).toMatchObject({ choices: [], terminal: true })
   await expect(source.act({ type: 'answer', chat: 'space', question: open().id, choice: 0 })).rejects.toThrow('answers')
