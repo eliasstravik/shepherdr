@@ -1,7 +1,7 @@
 # Other machines
 
 Shepherdr connects only to its local herdr-core socket. Configure remotes with the
-pinned core's documented remote commands (`hc schema`/`hc --help`), using existing
+core's documented remote commands (`hc schema`/`hc --help`), using existing
 SSH authentication. Core owns the remote connection, combined events and qualified
 terminal identities. Shepherdr does not configure machine access or credentials.
 
@@ -9,7 +9,7 @@ Only Shepherdr-owned spaces and agents appear. Tasks are coordinator children wi
 outlive-parent enabled; workflow status remains separate from process liveness.
 Each machine needs Git, Bun and the chosen signed-in Claude Code/Codex CLI. Optional
 GitHub and browser capabilities need their existing tools/accounts too. See the
-[pinned requirements](core/start.md).
+[requirements](core/start.md).
 
 Remote agent commands use their own core's authenticated encrypted document mailbox.
 The server answers through core. Artifacts and files are read using core file/exec

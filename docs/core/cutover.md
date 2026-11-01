@@ -60,7 +60,7 @@ replace a Tailscale mapping as part of these checks.
    stop here and settle the concrete integration command before executing it.
 7. Start the reviewed standalone build with fresh `~/.shepherdr` and its dedicated core
    session. There is no JSON/SQLite/plugin/session import. Verify the new installation
-   marker and private state permissions, core schema pin, status and native agent run.
+   marker and private state permissions, core schema check, status and native agent run.
 8. Install/enable the reviewed background service only if included in deployment
    approval. Change the private Tailscale mapping only with that same explicit scope,
    after saving its prior configuration. Open the private HTTPS URL and verify phone,

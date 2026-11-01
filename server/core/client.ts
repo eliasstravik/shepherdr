@@ -1,7 +1,7 @@
 import { connect } from 'node:net'
 import { spawn } from 'node:child_process'
 import { Duplex } from 'node:stream'
-import { CORE_GENERATION, CORE_VERSION, FRAME, MAX_FRAME, FrameReader, encodeFrame, type CoreHello, type CoreNotification, type CoreSnapshot } from './protocol.ts'
+import { CORE_GENERATION, CORE_MINIMUM, FRAME, MAX_FRAME, FrameReader, coreVersionAccepted, encodeFrame, type CoreHello, type CoreNotification, type CoreSnapshot } from './protocol.ts'
 
 export class CoreError extends Error {
   constructor(readonly kind: string, message: string, readonly hint?: string) { super(message); this.name = 'CoreError' }
@@ -16,7 +16,10 @@ type Stream = { data(bytes: Buffer): void; close(reason: unknown): void }
 export const CORE_ENVIRONMENT = ['XDG_RUNTIME_DIR', 'XDG_STATE_HOME', 'XDG_CONFIG_HOME'] as const
 export type CoreEnvironment = Partial<Record<typeof CORE_ENVIRONMENT[number], string | null>>
 export type CoreEndpoint = string | { binary: string; session?: string; socket?: string; environment?: CoreEnvironment }
-const REQUIRED = ['terminal.run', 'terminal.list', 'terminal.get', 'terminal.label', 'terminal.attach', 'terminal.send', 'terminal.wait', 'events.subscribe', 'doc.get', 'doc.set', 'file.read', 'machine.exec']
+const REQUIRED = ['terminal.run', 'terminal.list', 'terminal.get', 'terminal.label', 'terminal.attach', 'terminal.send', 'terminal.wait', 'terminal.read', 'terminal.keys', 'terminal.interrupt', 'terminal.kill', 'events.subscribe', 'doc.get', 'doc.set', 'file.read', 'file.write', 'machine.exec', 'machine.list', 'server.status']
+const otherGeneration = (what: string) => new CoreError('incompatible', `Shepherdr speaks herdr-core generation ${CORE_GENERATION}, and ${what}. Update Shepherdr, or run it on a generation ${CORE_GENERATION} core in its own session with --core-bin and --core-session.`)
+const tooOld = (version: unknown) => new CoreError('incompatible', `Shepherdr needs herdr-core ${CORE_MINIMUM} or newer; this core is ${version}. Run hc update, then start Shepherdr again.`)
+const lacking = (version: unknown, missing: string[]) => new CoreError('incompatible', `herdr-core ${version} lacks what Shepherdr needs: ${missing.join(', ')}. Update hc and Shepherdr, then start Shepherdr again.`)
 
 /** One local Unix socket. No shell, SSH bridge, screen parsing, or retry of uncertain writes. */
 export class CoreClient {
@@ -81,12 +84,18 @@ export class CoreClient {
     try {
       // Only hello is sent in plain mode. Its reply switches parsing before buffered frames are consumed.
       client.upgradeId = client.next + 1
-      const hello = await client.call<CoreHello>('hello', { generation: CORE_GENERATION, framed: true })
-      if (hello.generation !== CORE_GENERATION || hello.version !== CORE_VERSION || !hello.framed || REQUIRED.some(method => !hello.methods.includes(method))) {
-        throw new CoreError('incompatible', `Shepherdr requires core ${CORE_VERSION}, generation ${CORE_GENERATION}; got ${hello.version}, generation ${hello.generation}`)
-      }
+      // A core of another generation answers hello with this error, not with its own generation.
+      const hello = await client.call<CoreHello>('hello', { generation: CORE_GENERATION, framed: true }).catch((error: Error) => {
+        throw error instanceof CoreError && error.kind === 'unsupported_generation' ? otherGeneration(`this core does not (${error.hint || error.message})`) : error
+      })
+      if (hello.generation !== CORE_GENERATION) throw otherGeneration(`this core is ${hello.version}, generation ${hello.generation}`)
+      if (!coreVersionAccepted(hello.version)) throw tooOld(hello.version)
+      const missing = REQUIRED.filter(method => !hello.methods.includes(method))
+      if (missing.length || !hello.framed) throw lacking(hello.version, hello.framed ? missing : [...missing, 'framed connections'])
       const schema = await client.call<{ info: { version: string }; methods: { name: string }[] }>('rpc.discover')
-      if (schema.info.version !== CORE_VERSION || REQUIRED.some(method => !schema.methods.some(item => item.name === method))) throw new CoreError('incompatible', 'Core schema does not match the pinned API')
+      if (!coreVersionAccepted(schema.info.version)) throw tooOld(schema.info.version)
+      const undescribed = REQUIRED.filter(method => !schema.methods.some(item => item.name === method))
+      if (undescribed.length) throw lacking(schema.info.version, undescribed)
       return client
     } catch (error) { client.close(); throw error }
   }

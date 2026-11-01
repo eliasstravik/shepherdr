@@ -8,7 +8,7 @@
 
 <p align="center"><a href="https://github.com/eliasstravik/shepherdr/blob/main/docs/core/start.md#requirements-and-installation"><img src="assets/buttons/install-shepherdr.svg" alt="Install Shepherdr" /></a></p>
 
-<p align="center"><sub>✓&nbsp;Free,&nbsp;MIT&nbsp;licensed &nbsp; ✓&nbsp;Runs&nbsp;on&nbsp;your&nbsp;machines,&nbsp;private&nbsp;on&nbsp;your&nbsp;tailnet &nbsp; ✓&nbsp;macOS&nbsp;and&nbsp;Linux,&nbsp;herdr-core&nbsp;0.1.14</sub></p>
+<p align="center"><sub>✓&nbsp;Free,&nbsp;MIT&nbsp;licensed &nbsp; ✓&nbsp;Runs&nbsp;on&nbsp;your&nbsp;machines,&nbsp;private&nbsp;on&nbsp;your&nbsp;tailnet &nbsp; ✓&nbsp;macOS&nbsp;and&nbsp;Linux,&nbsp;herdr-core&nbsp;0.1.14+</sub></p>
 
 <br />
 
@@ -88,7 +88,7 @@ Shepherdr doesn't update itself: it never follows main, so a merge can't change 
 
 ### Do I need to know how to code?
 
-You need to be comfortable in a terminal for the install. After that everything happens in the app: you write to coordinators and answer cards, and Settings holds the few defaults. You'll need macOS or Linux, herdr-core 0.1.14, Bun 1.4.2, Git, Tailscale to reach it from your other devices, and Claude Code or Codex, installed and signed in. `gh` (pull requests), Chrome for the shared browser and an ElevenLabs key for voice are optional. [Get started](docs/core/start.md#requirements-and-installation) covers the prerequisites.
+You need to be comfortable in a terminal for the install. After that everything happens in the app: you write to coordinators and answer cards, and Settings holds the few defaults. You'll need macOS or Linux, herdr-core 0.1.14 or newer, Bun 1.4.2, Git, Tailscale to reach it from your other devices, and Claude Code or Codex, installed and signed in. `gh` (pull requests), Chrome for the shared browser and an ElevenLabs key for voice are optional. [Get started](docs/core/start.md#requirements-and-installation) covers the prerequisites.
 
 ### How do I check that Shepherdr is running?
 
@@ -150,4 +150,4 @@ Nowhere until you want to: 2.0 and its data stay as they are, on the `v2.0` bran
 
 <p align="center"><a href="https://github.com/eliasstravik/shepherdr/blob/main/docs/core/start.md#requirements-and-installation"><img src="assets/buttons/install-shepherdr.svg" alt="Install Shepherdr" /></a></p>
 
-<p align="center"><sub>✓&nbsp;Free,&nbsp;MIT&nbsp;licensed &nbsp; ✓&nbsp;Runs&nbsp;on&nbsp;your&nbsp;machines,&nbsp;private&nbsp;on&nbsp;your&nbsp;tailnet &nbsp; ✓&nbsp;macOS&nbsp;and&nbsp;Linux,&nbsp;herdr-core&nbsp;0.1.14</sub></p>
+<p align="center"><sub>✓&nbsp;Free,&nbsp;MIT&nbsp;licensed &nbsp; ✓&nbsp;Runs&nbsp;on&nbsp;your&nbsp;machines,&nbsp;private&nbsp;on&nbsp;your&nbsp;tailnet &nbsp; ✓&nbsp;macOS&nbsp;and&nbsp;Linux,&nbsp;herdr-core&nbsp;0.1.14+</sub></p>
