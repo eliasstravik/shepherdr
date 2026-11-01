@@ -8,7 +8,7 @@ import { useState, useSyncExternalStore } from 'react'
 import { act, definePlugin, has, setUI, useSnap, useUI } from '@client/kernel.ts'
 import { Dialog } from '@client/rowmenu.tsx'
 import { ic, MenuItem, MenuSwitch, ModeIcon, Primary } from '@client/ui.tsx'
-import { PILOT_BLOCKED, type Place } from '@shared/types.ts'
+import { PILOT_BLOCKED, pilotAccessWarning, type Place } from '@shared/types.ts'
 
 /** Autopilot on, as a red pill with a dot: at the header's right, or after the subtitle on a phone; a tap opens the ⋯
  *  menu, where it is switched off. Nothing when off */
@@ -53,6 +53,7 @@ function AutopilotConfirm() {
   const [busy, setBusy] = useState(false)
   if (!place) return null
   const rows = snap!.settings.find((section) => section.name === 'Autopilot' && section.level === place.id)?.rows ?? []
+  const warning = pilotAccessWarning(rows.find((row) => row.key === 'autopilot.access')?.value)
   const close = () => {
     setError('')
     confirm(null)
@@ -75,6 +76,7 @@ function AutopilotConfirm() {
       <div data-autopilot-confirm className="flex flex-col gap-2.5 text-pretty">
         <p>A new coordinator replaces this one, in this chat. It wakes on a schedule and starts tasks by itself, even while you're away.</p>
         <p className="text-fg2">It spends your Claude Code or Codex allowance as it goes: {limitWords(rows)}. Settings → Autopilot sets the limits.</p>
+        {warning ? <p className="text-fg2">{warning}</p> : null}
         {error ? <p role="alert" className="text-need-fg">{error}</p> : null}
       </div>
     </Dialog>

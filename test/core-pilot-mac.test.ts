@@ -8,6 +8,7 @@ import { pilotLiveLogin, pilotLoginPaths, PilotMacLogin, pilotUsageReading, Pilo
 import { PilotProxy } from '../helper/core-pilot-proxy.ts'
 import { preparePilotLaunch } from '../helper/core-pilot-launch.ts'
 import { CorePilotPolicy } from '../server/core/pilot-policy.ts'
+import { pilotAccessWarning } from '../shared/types.ts'
 import '../server/core/settings.ts' // Loads first: pilot-settings.ts and settings.ts import each other.
 import { PILOT_SETTINGS } from '../server/core/pilot-settings.ts'
 
@@ -40,6 +41,11 @@ test('the local-ports profile opens only the ports it names, and the other profi
   for (const rule of ['(deny network-inbound (local tcp "*:50001"))', '(deny network-inbound (local udp "*:50002"))', '(deny network-inbound (local ip "*:1"))', '(deny network-inbound (local ip "*:7787"))', '(deny network-inbound (local ip "*:10239"))']) expect(text.indexOf(rule)).toBeGreaterThan(listen)
   expect(text).not.toContain('(local ip "*:10240")')
   for (const bad of [{ open: [70000], tcp: [], udp: [] }, { open: [], tcp: [0], udp: [] }, { open: [], tcp: [], udp: [1.5] }]) expect(() => profile({ build, ports: bad })).toThrow('port')
+})
+test('each Mac profile says what it gives up, and only the local-ports one says the most', () => {
+  expect(pilotAccessWarning('Isolated workspace')).toBe(''); expect(pilotAccessWarning(undefined)).toBe('')
+  expect(pilotAccessWarning('Mac sandbox')).toContain('read their environments'); expect(pilotAccessWarning('Mac sandbox')).not.toContain('Local ports')
+  for (const words of ['read their environments', 'another machine', 'starts after it does', 'above 10239']) expect(pilotAccessWarning('Mac sandbox with local ports')).toContain(words)
 })
 test('a port something else holds is read from netstat, whoever owns it', () => {
   expect(pilotMacHeldPort('tcp4       0      0  127.0.0.1.49435        *.*                    LISTEN', 'tcp')).toBe(49435)

@@ -279,6 +279,7 @@ describe.skipIf(!browser)("a place's Autopilot", () => {
       await sheet.waitFor()
       expect(await sheet.innerText()).toContain('replaces this one')
       expect(await sheet.innerText()).toContain('allowance')
+      expect(await sheet.innerText()).not.toContain('read their environments') // Only a Mac profile says this.
       expect(await pop.count()).toBe(0)
       await sheet.getByRole('button', { name: 'Cancel' }).click()
       await sheet.waitFor({ state: 'detached' })
