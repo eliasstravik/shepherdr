@@ -142,7 +142,7 @@ describe.skipIf(!browser)('no chat attention summary and quiet health', () => {
         await chip.waitFor()
         const glance = await chip.textContent()
         expect(glance).toContain('ago') // The tightest number is hours old and says so at a glance.
-        expect(glance).toContain('1 unknown') // The mac's Claude Code isn't hidden behind the numbers there are.
+        expect(glance).toContain('2 unknown') // The mac's Claude Code and its refilled window aren't hidden behind the numbers there are.
         await chip.click()
         const limits = page.getByRole('dialog', { name: 'Plan limits' })
         await limits.waitFor()

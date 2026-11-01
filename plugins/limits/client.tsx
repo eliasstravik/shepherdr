@@ -38,14 +38,15 @@ const when = (at: number) => new Date(at).toLocaleString([], { weekday: 'short',
 const reads = (m: Machine) => CLIS.flatMap((cli) => (m.limits?.[cli] ? [{ cli, read: m.limits[cli]! }] : []))
 
 /** for each CLI, its tightest window now: the same CLI on two machines counts once, at its tightest. unknown: reads
- *  with no number to stand on now, which a healthy number beside them mustn't hide */
+ *  and windows with no number to stand on now, which a healthy number beside them mustn't hide */
 function tightest(machines: Machine[], now: number) {
   const out = new Map<keyof MachineLimits, { pct: number; at: number; failed?: string }>()
   let unknown = 0
   for (const m of machines)
     for (const { cli, read } of reads(m)) {
       const windows = read.state === 'ok' ? read.windows.filter((x) => live(x, now)) : []
-      if (read.state === 'unknown' || (read.state === 'ok' && !windows.length)) unknown++
+      if (read.state === 'unknown') unknown++
+      else if (read.state === 'ok') unknown += read.windows.length - windows.length
       for (const w of windows) {
         const was = out.get(cli)
         if (!was || left(w) < was.pct) out.set(cli, { pct: left(w), at: read.at, failed: read.state === 'ok' ? read.failed : undefined })
@@ -71,8 +72,9 @@ function LimitsButton() {
   const { clis: worst, unknown } = tightest(machines, now)
   const least = worst[0]
   const lv = least ? level(least.pct) : 'ok'
-  const stale = least && (now - least.at > OLD || least.failed) ? ` · ${ago(least.at, now)}` : ''
-  const said = least ? `${least.pct}% left${stale}${unknown ? ` · ${unknown} unknown` : ''}` : 'unknown'
+  const stale = least && (now - least.at > OLD || least.failed) ? ` · ${span(now - least.at).split(' ')[0]} ago` : ''
+  const more = `${stale}${unknown ? ` · ${unknown} unknown` : ''}`
+  const said = least ? `${least.pct}% left${more}` : 'unknown'
   return (
     <>
       <button
@@ -93,7 +95,7 @@ function LimitsButton() {
             <span key={`unknown-${i}`} className="h-full w-[3px] rounded-full bg-line2" />
           ))}
         </span>
-        <span className={clsx('truncate tabular-nums', lv === 'ok' ? 'text-fg3 coarse:text-fg2' : WORD[lv])}>Limits {said}</span>
+        <span className={clsx('truncate tabular-nums', lv === 'ok' ? 'text-fg3 coarse:text-fg2' : WORD[lv])}>{least && more ? `${least.pct}%${more}` : `Limits ${said}`}</span>
       </button>
       {open ? createPortal(<Details onClose={() => setOpen(false)} />, document.querySelector('[data-device]') ?? document.body) : null}
     </>
