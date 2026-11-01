@@ -84,12 +84,18 @@ export function buildProblem(config: Pick<CoreConfig, 'plugins'>, root = join(im
   return `Shepherdr is not built, so its page cannot open. Nothing was started. Run bun run build in ${root}, then start again.`
 }
 
-/** The core this home started on, written once it is new or a start names one. Homes from before this file have none. */
+/** The core this home runs on, saved as it is made or when a start names one. Homes from before this file have none. */
 function savedCore(home: string) {
-  try { return JSON.parse(readFileSync(join(home, 'core.json'), 'utf8')) as { session: string; socket?: string } } catch { return undefined }
+  try { return JSON.parse(readFileSync(join(home, 'core.json'), 'utf8')) as { session: string; socket: string } } catch { return undefined }
 }
 export function saveCore(config: CoreConfig) {
-  writeFileSync(join(config.home, 'core.json'), JSON.stringify({ session: config.session, ...(config.chosenCore ? { socket: config.socket } : {}) }), { mode: 0o600 })
+  writeFileSync(join(config.home, 'core.json'), JSON.stringify({ session: config.session, socket: config.socket }), { mode: 0o600 })
+}
+/** Saved with the marker, not after a start that may fail: a retry must not read this as a home from before the file. */
+export function claimHome(config: CoreConfig) {
+  const fresh = typeof inspectHome(config.home) !== 'object'
+  prepareHome(config.home)
+  if (fresh) saveCore(config)
 }
 
 /** A core's saved machines belong to whoever added them. A home takes them on only when a start names that core:
@@ -99,7 +105,7 @@ export async function coreProblem(config: CoreConfig, machines: () => Promise<{ 
   const kind = inspectHome(config.home)
   if (kind !== 'absent' && kind !== 'empty') {
     const saved = savedCore(config.home)
-    if (saved && (saved.session !== config.session || saved.socket && saved.socket !== config.socket)) return `This home runs on core session ${saved.session}, not ${config.session}. Nothing was started. Start it with --core-session ${saved.session}${saved.socket ? ` --core-socket ${saved.socket}` : ''}.`
+    if (saved && (saved.session !== config.session || saved.socket !== config.socket)) return `This home runs on core session ${saved.session} at ${saved.socket}, not ${config.session} at ${config.socket}. Nothing was started. Start it with --core-session ${saved.session} --core-socket ${saved.socket}.`
     return
   }
   const found = await machines()
@@ -118,8 +124,7 @@ async function start(config: CoreConfig, foreground: boolean) {
   // Before prepareHome: a refused start leaves no marker for the next start to pass on.
   const refused = await coreProblem(config, () => coreMachines(config))
   if (refused) throw new Error(refused)
-  const fresh = typeof inspectHome(config.home) !== 'object'
-  prepareHome(config.home)
+  claimHome(config)
   await withLock(config.home, async () => {
     const record = runRecord(config.home)
     const confirmed = record && await health(record)
@@ -128,7 +133,7 @@ async function start(config: CoreConfig, foreground: boolean) {
     const problem = buildProblem(config)
     if (problem) throw new Error(problem)
     await ensureCore(config)
-    if (fresh || config.chosenCore) saveCore(config)
+    if (config.chosenCore) saveCore(config)
     const boot = randomUUID()
     const args = ['--home', config.home, '--port', String(config.port), '--core-bin', config.binary, '--core-session', config.session, '--core-socket', config.socket]
     if (config.plugins === false) args.push('--no-plugin-updates')
