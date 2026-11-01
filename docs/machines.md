@@ -9,7 +9,8 @@ A core session's machines are the ones added to that session (`HC_SESSION=shephe
 reaches every machine on its session: from start it runs health, CLI and plan-limit reads there, and it copies its
 agent helpers only when you start an agent there. So a new home never takes on machines by chance: if its core already
 has some, the first start stops and lists them until `--core-session` names a core, a new one for a trial or that same
-one to use them. A home that has started before keeps its core.
+one to use them. A home remembers its core, and a later start on another one stops and names it. Homes from
+before this check have no record and keep working as they are.
 
 Only Shepherdr-owned spaces and agents appear. Tasks are coordinator children with
 outlive-parent enabled; workflow status remains separate from process liveness.

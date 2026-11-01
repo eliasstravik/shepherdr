@@ -84,11 +84,24 @@ export function buildProblem(config: Pick<CoreConfig, 'plugins'>, root = join(im
   return `Shepherdr is not built, so its page cannot open. Nothing was started. Run bun run build in ${root}, then start again.`
 }
 
-/** A core's saved machines belong to whoever added them. A new home takes them on only when its start names that core:
+/** The core this home started on, written once it is new or a start names one. Homes from before this file have none. */
+function savedCore(home: string) {
+  try { return JSON.parse(readFileSync(join(home, 'core.json'), 'utf8')) as { session: string; socket?: string } } catch { return undefined }
+}
+export function saveCore(config: CoreConfig) {
+  writeFileSync(join(config.home, 'core.json'), JSON.stringify({ session: config.session, ...(config.chosenCore ? { socket: config.socket } : {}) }), { mode: 0o600 })
+}
+
+/** A core's saved machines belong to whoever added them. A home takes them on only when a start names that core:
  * HC_SESSION alone is inherited from any hc terminal, and XDG homes alone can still reach the same running core. */
-export async function newHomeProblem(config: CoreConfig, machines: () => Promise<{ name: string }[]>) {
+export async function coreProblem(config: CoreConfig, machines: () => Promise<{ name: string }[]>) {
+  if (config.chosenCore) return
   const kind = inspectHome(config.home)
-  if (config.chosenCore || kind !== 'absent' && kind !== 'empty') return
+  if (kind !== 'absent' && kind !== 'empty') {
+    const saved = savedCore(config.home)
+    if (saved && (saved.session !== config.session || saved.socket && saved.socket !== config.socket)) return `This home runs on core session ${saved.session}, not ${config.session}. Nothing was started. Start it with --core-session ${saved.session}${saved.socket ? ` --core-socket ${saved.socket}` : ''}.`
+    return
+  }
   const found = await machines()
   if (found.length) return `Core session ${config.session} already has ${found.length === 1 ? 'a machine' : `${found.length} machines`} (${found.map(machine => machine.name).join(', ')}), and a new Shepherdr would run commands on ${found.length === 1 ? 'it' : 'them'}. Nothing was started. For a trial, give it its own core: --core-session NAME. To use ${found.length === 1 ? 'this machine' : 'these machines'} here, say so: --core-session ${config.session}.`
 }
@@ -103,8 +116,9 @@ async function coreMachines(config: CoreConfig) {
 
 async function start(config: CoreConfig, foreground: boolean) {
   // Before prepareHome: a refused start leaves no marker for the next start to pass on.
-  const refused = await newHomeProblem(config, () => coreMachines(config))
+  const refused = await coreProblem(config, () => coreMachines(config))
   if (refused) throw new Error(refused)
+  const fresh = typeof inspectHome(config.home) !== 'object'
   prepareHome(config.home)
   await withLock(config.home, async () => {
     const record = runRecord(config.home)
@@ -114,6 +128,7 @@ async function start(config: CoreConfig, foreground: boolean) {
     const problem = buildProblem(config)
     if (problem) throw new Error(problem)
     await ensureCore(config)
+    if (fresh || config.chosenCore) saveCore(config)
     const boot = randomUUID()
     const args = ['--home', config.home, '--port', String(config.port), '--core-bin', config.binary, '--core-session', config.session, '--core-socket', config.socket]
     if (config.plugins === false) args.push('--no-plugin-updates')
