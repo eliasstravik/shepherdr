@@ -74,7 +74,7 @@ export class CoreScreens {
     if (open && before.shown === shown && JSON.stringify([open.all, open.question.choices]) !== shown) { this.finish(open, 'The screen changed'); this.post(agent, seen, all, words, choices); return }
     if (open || cards.some(row => row.screen === seen && now - row.at < RETRY)) return
     for (const row of cards) if (row.state === 'open') this.finish(row)
-    if (!choices.length && !(words && cards.length && (/https?:\/\//.test(read.text) || read.terminal.status))) return
+    if (!choices.length && !(words && cards.length && (/https?:\/\//.test(read.text) || ['idle', 'blocked'].includes(read.terminal.status?.state ?? '')))) return
     await Promise.race([this.source.logs.catchUp(agent.chat), Bun.sleep(CATCH_UP)])
     const latest = this.source.agents.get(agent.chat)
     if (latest?.launch === agent.launch && latest.state === 'starting' && !this.inTurn(latest)) this.post(agent, seen, all, words, choices)

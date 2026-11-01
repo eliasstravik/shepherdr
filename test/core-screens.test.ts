@@ -137,10 +137,13 @@ test('after a card, a status line is still no card, nor a Needs you, while the C
   await settle()
   await source.act({ type: 'answer', chat: 'space', question: open().id, choice: 1 })
   screen = WORKING
-  await settle(started + 30_000)
-  expect(cards()).toHaveLength(1)
-  expect(source.status(saved())).toBe('work')
-  expect(source.snapshot().needs).toEqual([])
+  for (const status of [undefined, { app: 'claude-code', state: 'starting' }]) {
+    terminal = { ...terminal, status }
+    await settle(started + 30_000)
+    expect(cards()).toHaveLength(1)
+    expect(source.status(saved())).toBe('work')
+    expect(source.snapshot().needs).toEqual([])
+  }
 })
 
 test('after a card, words alone come from a CLI that says it has stopped', async () => {
