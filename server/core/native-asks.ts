@@ -65,15 +65,19 @@ export function nativeReply(native: NativeAsk, cards: { question: Question; nati
 
 const SHOWN = 16_000
 const TITLE = 120
+/** the fields each tool's card words already show: any other goes below them, so nothing it would do goes unread */
+const WORDED: Record<string, string[]> = { Bash: ['command', 'description'], Write: ['file_path', 'content'], Edit: ['file_path', 'old_string', 'new_string', 'replace_all'], NotebookEdit: ['notebook_path', 'new_source'],
+  Read: ['file_path'], Glob: ['pattern', 'path'], Grep: ['pattern', 'path'], WebFetch: ['url', 'prompt'], WebSearch: ['query'] }
 const shownLine = (value: unknown) => typeof value === 'string' ? value : JSON.stringify(value)
 
 /** What a tool asks to do, as a human reads it: the title at a glance, and below it all it would touch, never code. */
 export function permissionWords(tool: string | undefined, input: unknown): Pick<Question, 'title' | 'screen'> {
   const value = record(input) ?? {}, path = text(value.file_path) || text(value.notebook_path)
+  const fields = (worded: string[] = []) => Object.entries(value).filter(([key, item]) => !worded.includes(key) && item !== undefined && item !== null && item !== '').map(([key, item]) => `${key}: ${shownLine(item)}`).join('\n')
   // A title cut short leaves its whole words below: two targets must never look the same.
   const card = (verb: string, what: string, ...more: unknown[]) => {
     const title = clip(what, TITLE)
-    return { title: `${verb}: ${title}`, screen: [...more, title !== what && what].filter(Boolean).map(shownLine).join('\n\n').slice(0, SHOWN) || undefined }
+    return { title: `${verb}: ${title}`, screen: [...more, title !== what && what, fields(WORDED[tool!])].filter(Boolean).map(shownLine).join('\n\n').slice(0, SHOWN) || undefined }
   }
   switch (tool) {
     case 'Bash': return card('Run', text(value.command), value.description)
@@ -85,8 +89,7 @@ export function permissionWords(tool: string | undefined, input: unknown): Pick<
     case 'WebFetch': return card('Open', text(value.url), value.prompt)
     case 'WebSearch': return card('Search the web', text(value.query))
   }
-  const rest = Object.entries(value).filter(([, item]) => item !== undefined && item !== null && item !== '')
-  return { title: `Use ${clip(toolWords(tool || 'a tool'), TITLE)}`, screen: rest.map(([key, item]) => `${key}: ${shownLine(item)}`).join('\n').slice(0, SHOWN) || undefined }
+  return { title: `Use ${clip(toolWords(tool || 'a tool'), TITLE)}`, screen: fields().slice(0, SHOWN) || undefined }
 }
 
 const WHERE: Record<string, string> = { session: 'this session', localSettings: 'in this project', projectSettings: 'in this project', userSettings: 'on this device' }
