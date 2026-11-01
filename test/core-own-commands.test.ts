@@ -24,7 +24,16 @@ test('Claude rules name the exact path, verb by verb, and never the commands tha
 })
 
 test('a path a rule cannot state literally gets no rule rather than a wider one', () => {
-  for (const path of ['/opt/*/shepherdr', '/opt/a b/shepherdr', '/opt/a(b)/shepherdr']) expect(ownRules(path)).toEqual([])
+  for (const path of ['/opt/*/shepherdr', '/opt/a(b)/shepherdr', `/opt/a'b/shepherdr`, '/opt/a"b/shepherdr', '/opt/$a/shepherdr']) expect(ownRules(path)).toEqual([])
+})
+
+test('a path with a space is allowed as it must be written, quoted', () => {
+  const path = '/home/me/My Projects/bin/shepherdr', rules = ownRules(path)
+  expect(rules).toContain(`Bash('${path}' ask:*)`)
+  expect(rules).toContain(`Bash("${path}" ask:*)`)
+  expect(rules.some(rule => rule.startsWith(`Bash(${path}`))).toBe(false)
+  expect(own(`'${path}' ask x`, 'Bash', path)).toBe(true)
+  expect(own(`"${path}" ask x`, 'Bash', path)).toBe(true)
 })
 
 test('a Codex request counts as own only when it is one plain call of the exact path', () => {

@@ -4,7 +4,12 @@ const OWN = ['help', 'show', 'models', 'set', 'unset', 'alert', 'space', 'task',
   'heartbeat', 'automation', 'todo', 'artifact', 'secret list', 'secret ask']
 
 /** Claude's allow rules for this exact path. A path a rule can't state literally gets none, never a wider rule. */
-export const ownRules = (command: string) => /^[\w@%+=:,./-]+$/.test(command) ? OWN.map(words => `Bash(${command} ${words}:*)`) : []
+export function ownRules(command: string) {
+  if (!/^[\w@%+=:,./ -]+$/.test(command)) return []
+  // A path with a space only works quoted, and Claude matches the quotes as written.
+  const forms = command.includes(' ') ? [`'${command}'`, `"${command}"`] : [command]
+  return forms.flatMap(form => OWN.map(words => `Bash(${form} ${words}:*)`))
+}
 
 // One plain word: no expansion, redirect, separator or line break can sit outside a quote, or $ and ` inside one.
 const WORD = /(?:[\w@%+=:,./-]+|'[^']*'|"(?:[^"\\$`]|\\["\\])*")+/y
