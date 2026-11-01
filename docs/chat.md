@@ -92,7 +92,8 @@ their space (and a home space's machine duties) or task. `shepherdr help` lists 
 
 Needs you sits beside the chat: a tab with Tasks and Artifacts on a wide screen, and in the bottom bar on a phone. It
 lists everything waiting on you, from every space on every machine, oldest first, each card once: questions,
-permissions, plans, merges, secrets, CLI screens, and agents that just wait for a reply.
+permissions, plans, merges, secrets, CLI screens, and agents that just wait for a reply, a coordinator too once it ends
+its turn on a question.
 
 - One tap answers a question or a permission, and presses a CLI screen's choice. Merges and plans keep their pick and
   Send, and so does a card with a note typed.

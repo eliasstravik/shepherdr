@@ -276,7 +276,12 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
       for (const item of this.secrets.open(agent.chat)) out.push({ ...need, id: item.id, at: sentAt(agent.chat, item.id) ?? 0, secret: item.ask })
       // a task's own agent waits by its task's status, below
       const waits = need.task ? agent.chat !== this.tasks.get(need.task)!.chat && this.agents.terminal(agent)?.status?.state === 'blocked' : this.status(agent) === 'need'
-      if (waits && !out.some(item => item.chat === agent.chat)) out.push({ ...need, id: 'attention', at: agent.activityAt ?? agent.started ?? 0, ...this.lastWords(agent.chat) })
+      // a coordinator's turn ending is no wait, unless it ended on a question; the question's own time keeps its card still
+      const asked = !need.task && this.status(agent) === 'idle' && this.tasks.lastWordsAsk(agent.chat)
+      if ((waits || asked) && !out.some(item => item.chat === agent.chat)) {
+        const words = this.lastWords(agent.chat)
+        out.push({ ...need, id: 'attention', at: (asked && words.reply && sentAt(agent.chat, words.reply)) || (agent.activityAt ?? agent.started ?? 0), ...words })
+      }
     }
     for (const view of tasks.filter(view => !view.archived)) {
       const task = this.tasks.get(view.id)!, sent = task.workflow === 'ready' && task.mergeQuestion ? this.store.get<Message>(`message:${task.chat}`, task.mergeQuestion) : undefined

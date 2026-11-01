@@ -85,6 +85,25 @@ test('an agent that waits with no card shows what it last said, and the reply qu
   } finally { f.close() }
 })
 
+test('a coordinator that ended its turn on a question waits; one that only reported does not', () => {
+  const f = fixture()
+  try {
+    f.source.status = () => 'idle'
+    f.source.post('one', { id: 'done', who: 'agent', text: 'A-1 is merged.', at: 100 })
+    expect(f.source.snapshot().needs).toEqual([])
+    f.source.post('one', { id: 'ask', who: 'agent', text: 'Should I start the next one?', at: 200 })
+    expect(f.source.snapshot().needs).toMatchObject([{ id: 'attention', chat: 'one', at: 200, text: 'Should I start the next one?', reply: 'ask' }])
+    expect(f.source.snapshot().needs[0].task).toBeUndefined()
+    expect(attentionCounts(f.source.snapshot(), ['one'])).toEqual({ need: 1, ready: 0 })
+    // still at work, it may yet answer itself
+    f.source.status = () => 'work'
+    expect(f.source.snapshot().needs).toEqual([])
+    f.source.status = () => 'idle'
+    f.source.post('one', { id: 'yes', who: 'you', text: 'Yes', at: 300 })
+    expect(f.source.snapshot().needs).toEqual([])
+  } finally { f.close() }
+})
+
 test('a reviewer blocked at its own screen with no card still counts', () => {
   const f = fixture()
   try {
