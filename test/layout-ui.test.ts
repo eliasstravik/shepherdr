@@ -221,10 +221,10 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
     expect(await presets.getByRole('button').allInnerTexts()).toEqual(['15 min', '30 min', '1 hour', 'Workdays'])
     expect(await presets.getByRole('button', { name: '30 min' }).getAttribute('aria-pressed')).toBe('true')
     await presets.getByRole('button', { name: 'Workdays' }).click()
-    await pilot.getByText('Every 30 minutes, 8:00-18:00, Monday to Friday (Stockholm)').waitFor()
+    await pilot.getByText('Every 30 minutes, 8:00-18:00, Monday to Friday (Stockholm)', { exact: true }).waitFor()
     expect(await presets.getByRole('button', { name: 'Workdays' }).getAttribute('aria-pressed')).toBe('true')
     await pilot.getByRole('button', { name: "Reset to Everywhere's" }).click()
-    await pilot.getByText('Every 30 minutes (Stockholm)').waitFor()
+    await pilot.getByText('Every 30 minutes (Stockholm)', { exact: true }).waitFor()
     // the news: all, or none that waits for the heartbeat
     const news = pilot.getByRole('group', { name: 'Events' })
     // in words, not the button of the same name
