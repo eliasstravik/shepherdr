@@ -96,7 +96,7 @@ test('a new home never takes on its core\'s machines unless its start names that
 })
 
 test('a stopped core is never started just to learn its machines', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'shep-launcher-stopped-'))
+  const root = mkdtempSync('/tmp/shep-launcher-stopped-') // A Mac's temporary folder would pass the core socket's length limit.
   const state = process.env.XDG_STATE_HOME
   process.env.XDG_STATE_HOME = root
   try {
