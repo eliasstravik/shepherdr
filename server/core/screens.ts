@@ -12,11 +12,13 @@ interface ScreenCard { id: string; chat: string; launch: string; screen: string;
 
 const FIRST_LOOK = 6000 // two matching reads, a poll or two apart, put a card with choices up by about 10 seconds
 const POLL = 2000
-const NO_CHOICES = 13_000 // with nothing to tap and no card yet, it may be a slow start: its first card comes a little later
+const CATCH_UP = 1500 // how long a card waits for the agent's hooks to be read: a slow machine holds it back no longer
 const RETRY = 10_000 // a pressed choice has this long to leave the screen before it is asked again
 
 /** An agent with no session yet may be stopped at a screen of its CLI's own: folder trust, theme, sign-in, hooks, or one
- *  that CLI adds later. No hook reports those, so its screen goes to the chat as a card. Words on a screen grant nothing:
+ *  that CLI adds later. No hook reports those, so its screen goes to the chat as a card. `starting` only says no hook has
+ *  been read yet, and they can run late: a CLI in a turn is not stopped, whatever its screen says, and
+ *  words with nothing to choose only ever carry on from a card, as a sign-in link does. Words on a screen grant nothing:
  *  a card only shows them, and a human's tap presses what they read, as they could in the Terminal panel. Readiness
  *  stays the hooks' word. */
 export class CoreScreens {
@@ -28,20 +30,22 @@ export class CoreScreens {
   start() { this.timer = setInterval(() => { if (!this.source.quiescing) void guarded('Screen check', () => this.tick()) }, POLL) }
   stop() { clearInterval(this.timer) }
   private cards() { return this.source.store.all<ScreenCard>('screen-card') }
-  private waiting(row: ScreenCard) { const agent = this.source.agents.get(row.chat); return agent?.launch === row.launch && agent.state === 'starting' && this.source.agents.terminal(agent)?.state === 'live' }
+  /** The CLI's own report of a turn running or just ended, helpers perhaps still at work: start-up screens send neither. */
+  private inTurn(agent: CoreAgent) { return ['working', 'done'].includes(this.source.agents.terminal(agent)?.status?.state ?? '') }
+  private waiting(row: ScreenCard) { const agent = this.source.agents.get(row.chat); return agent?.launch === row.launch && agent.state === 'starting' && this.source.agents.terminal(agent)?.state === 'live' && !this.inTurn(agent) }
   open(chat: string) { return this.cards().filter(row => row.chat === chat && row.state === 'open' && this.waiting(row)) }
   /** A card outlives its wait only as a record of how it ended. */
   reconcile(chat: string) {
     for (const row of this.cards()) {
       if (row.chat !== chat || row.state !== 'open' || this.waiting(row)) continue
       const agent = this.source.agents.get(chat)
-      this.finish(row, agent?.launch !== row.launch ? 'Session replaced' : agent.state === 'starting' ? 'The agent stopped' : undefined)
+      this.finish(row, agent?.launch !== row.launch ? 'Session replaced' : agent.state === 'starting' && !this.inTurn(agent) ? 'The agent stopped' : undefined)
     }
   }
   async tick(now = Date.now()) {
     if (!this.source.connected()) return
     for (const chat of new Set(this.cards().filter(row => row.state === 'open').map(row => row.chat))) this.reconcile(chat)
-    const starting = this.source.agents.all().filter(agent => agent.state === 'starting' && agent.role !== 'reviewer' && !agent.pilot && now - agent.started >= FIRST_LOOK)
+    const starting = this.source.agents.all().filter(agent => agent.state === 'starting' && agent.role !== 'reviewer' && !agent.pilot && now - agent.started >= FIRST_LOOK && !this.inTurn(agent))
     for (const launch of this.last.keys()) if (!starting.some(agent => agent.launch === launch)) this.last.delete(launch)
     // A machine out of reach shows as that, the next poll looks again, and it holds up no other agent's card.
     await Promise.allSettled(starting.filter(agent => !this.looking.has(agent.launch)).map(async agent => {
@@ -69,7 +73,10 @@ export class CoreScreens {
     if (open && before.shown === shown && JSON.stringify([open.all, open.question.choices]) !== shown) { this.finish(open, 'The screen changed'); this.post(agent, seen, all, words, choices); return }
     if (open || cards.some(row => row.screen === seen && now - row.at < RETRY)) return
     for (const row of cards) if (row.state === 'open') this.finish(row)
-    if (choices.length || words && (cards.length || now - agent.started >= NO_CHOICES)) this.post(agent, seen, all, words, choices)
+    if (!choices.length && !(words && cards.length)) return
+    await Promise.race([this.source.logs.catchUp(agent.chat), Bun.sleep(CATCH_UP)])
+    const latest = this.source.agents.get(agent.chat)
+    if (latest?.launch === agent.launch && latest.state === 'starting' && !this.inTurn(latest)) this.post(agent, seen, all, words, choices)
   }
   private post(agent: CoreAgent, screen: string, all: string, words: string, choices: Question['choices']) {
     const task = this.source.tasks.forChat(agent.chat), id = randomUUID(), cli = CLI_NAME[agent.kind]
