@@ -104,7 +104,7 @@ test('the Keychain item is named as Claude Code names it', () => {
   expect(claudeKeychainItem({ USER: 'elias', CLAUDE_CONFIG_DIR: '/h/.other' }).service).toMatch(/^Claude Code-credentials-[0-9a-f]{8}$/)
 })
 
-const RENEWAL = { state: 'unknown', why: 'Its sign-in is due for renewal: the next agent here will do it' }
+const RENEWAL = { state: 'unknown' as const, why: 'Its sign-in is due for renewal: the next agent here will do it' }
 const FRESH = JSON.stringify({ claudeAiOauth: { accessToken: 'secret-access', refreshToken: 'secret-refresh', expiresAt: NOW + 7 * 3_600_000 } })
 const DUE = JSON.stringify({ claudeAiOauth: { accessToken: 'secret-access', refreshToken: 'secret-refresh', expiresAt: NOW + 60_000 } })
 const CODEX_LOGIN = JSON.stringify({ tokens: { access_token: `x.${Buffer.from(JSON.stringify({ exp: (NOW + 3 * 86_400_000) / 1000 })).toString('base64url')}.x` }, last_refresh: new Date(NOW - 86_400_000).toISOString() })
