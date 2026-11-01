@@ -51,6 +51,8 @@ test('with cards open, a message from outside leaves them unanswered in the chat
     f.source.core.current.connected = true
     f.source.agents.terminal = (() => ({ state: 'live', address: 't' })) as unknown as typeof f.source.agents.terminal
     f.source.agents.send = async (_chat, text) => { sent.push(text) }
+    f.source.health.room = () => undefined
+    f.source.core.call = async <T>() => ({}) as T
     const merge = f.source.tasks.get('A-1')!
     merge.workflow = 'ready'; merge.readyHead = 'a'.repeat(40); merge.mergeQuestion = 'merge'
     f.source.store.set('task', merge.id, merge)
