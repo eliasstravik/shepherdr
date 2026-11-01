@@ -81,7 +81,7 @@ export class CoreBrowsers {
     }
     if (attachments.length > 20) throw Error('Send at most 20 note screenshots at once')
     const text = line.browserNotes(this.source.snapshot().user || 'You', { url: String(action.url || '').slice(0, 4096), title: action.title?.slice(0, 512), viewport: action.viewport }, notes)
-    return this.source.act({ type: 'send', cid: action.cid, chat: action.chat, text, attachments })
+    return this.source.act({ type: 'send', cid: action.cid, chat: action.chat, text, attachments, human: true })
   }
   private error(hub: Hub, message: string, gone = false) { this.broadcast(hub, { type: 'error', message, gone }) }
   private broadcast(hub: Hub, message: BrowserDown) {

@@ -503,6 +503,20 @@ test('no message closes a merge card or takes back its yes: only a tap or a fres
   })
 })
 
+test('the human saying more in the app after a yes takes it back; their word never closes an open card', async () => {
+  await withTask(async ({ tasks, task, grant }) => {
+    await tasks.ready(grant, task.id, 'Changed example')
+    const card = tasks.get(task.id)!.mergeQuestion!
+    await tasks.deliver(task.id, task.chat, 'A note for later', false, true)
+    expect(tasks.get(task.id)).toMatchObject({ workflow: 'ready', mergeQuestion: card })
+    await tasks.answer(card, 0, task.chat)
+    await tasks.deliver(task.id, task.chat, 'Stop, change this', false, true)
+    expect(tasks.get(task.id)?.workflow).toBe('working')
+    expect(tasks.get(task.id)?.approvedHead).toBeUndefined()
+    await expect(tasks.merge(grant, task.id)).rejects.toThrow('Report this exact commit ready')
+  })
+})
+
 test('a message after Not yet, or to a Ready task with no merge card, goes back to work', async () => {
   await withTask(async ({ tasks, task, grant }) => {
     await tasks.ready(grant, task.id, 'Changed example')
