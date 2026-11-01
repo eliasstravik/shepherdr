@@ -33,8 +33,9 @@ test('start refuses an unbuilt application and names the step; a Vite preview se
 test('a new home never takes on its core\'s machines unless its start names that core', async () => {
   const root = mkdtempSync(join(tmpdir(), 'shep-launcher-machines-'))
   const machines = async () => [{ name: 'mac-mini' }, { name: 'vps' }]
-  const inherited = process.env.HC_SESSION
+  const inherited = process.env.HC_SESSION, socket = process.env.HC_SOCKET
   process.env.HC_SESSION = 'default' // what any hc terminal hands down: never a choice
+  delete process.env.HC_SOCKET
   try {
     const home = join(root, 'trial')
     const config = coreConfig(['--home', home, '--port', '17941'])
@@ -70,6 +71,13 @@ test('a new home never takes on its core\'s machines unless its start names that
     expect(await coreProblem({ ...config, socket: join(root, 'moved.sock') }, unasked)).toContain('Nothing was started')
     expect(await coreProblem({ ...config, session: 'other' }, unasked)).toContain('Nothing was started')
 
+    // An inherited socket never overrides a named session; only --core-socket does.
+    process.env.HC_SOCKET = join(root, 'shared.sock')
+    expect(coreConfig(['--home', home]).socket).toBe(join(root, 'shared.sock'))
+    expect(coreConfig(['--home', home, '--core-session', 'trial']).socket).not.toBe(join(root, 'shared.sock'))
+    expect(coreConfig(['--home', home, '--core-session', 'trial', '--core-socket', join(root, 'mine.sock')]).socket).toBe(join(root, 'mine.sock'))
+    delete process.env.HC_SOCKET
+
     // A first start that fails after making the home still leaves its core: the retry is not a home from before the record.
     const failed = coreConfig(['--home', join(root, 'failed'), '--core-session', 'trial'])
     claimHome(failed)
@@ -81,6 +89,8 @@ test('a new home never takes on its core\'s machines unless its start names that
   } finally {
     if (inherited === undefined) delete process.env.HC_SESSION
     else process.env.HC_SESSION = inherited
+    if (socket === undefined) delete process.env.HC_SOCKET
+    else process.env.HC_SOCKET = socket
     rmSync(root, { recursive: true, force: true })
   }
 })

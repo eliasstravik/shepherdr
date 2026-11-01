@@ -19,10 +19,12 @@ export function coreConfig(args: string[]): CoreConfig {
   const session = options.get('--core-session') || process.env.HC_SESSION || 'shepherdr'
   if (!/^[a-zA-Z0-9_-]{1,24}$/.test(session)) throw new Error('Invalid core session')
   const runtime = process.env.XDG_RUNTIME_DIR || (process.getuid && existsSync(`/run/user/${process.getuid()}`) ? `/run/user/${process.getuid()}` : join(process.env.XDG_STATE_HOME || join(homedir(), '.local/state'), 'herdr-core', session))
-  const socket = resolve(options.get('--core-socket') || process.env.HC_SOCKET || join(runtime, 'herdr-core', `${session}.sock`))
+  // A named session is that session's own socket, never one inherited from the shell it was started in.
+  const inherited = options.has('--core-session') ? undefined : process.env.HC_SOCKET
+  const socket = resolve(options.get('--core-socket') || inherited || join(runtime, 'herdr-core', `${session}.sock`))
   // State-directory fallback stores the socket directly there, without an extra herdr-core component.
   const fallback = !process.env.XDG_RUNTIME_DIR && !(process.getuid && existsSync(`/run/user/${process.getuid()}`))
-  const endpoint = !options.has('--core-socket') && !process.env.HC_SOCKET && fallback ? join(runtime, `${session}.sock`) : socket
+  const endpoint = !options.has('--core-socket') && !inherited && fallback ? join(runtime, `${session}.sock`) : socket
   if (Buffer.byteLength(endpoint) > 100) throw new Error('Core socket path is too long; use --core-socket in a private directory')
   return { home, port, binary: options.get('--core-bin') || process.env.SHEPHERDR_CORE_BIN || 'hc', session, socket: endpoint, plugins: !args.includes('--no-plugin-updates'), chosenCore: options.has('--core-session') || options.has('--core-socket') }
 }
