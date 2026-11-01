@@ -850,11 +850,11 @@ function PhoneHome({ snap }: { snap: Snapshot }) {
   )
 }
 
-/** Chat | Tasks | Artifacts and Search at the bottom of the phone */
+/** Chat | Needs you | Tasks | Artifacts and Search at the bottom of the phone */
 function PhoneBar() {
   const tab = useUI((u) => u.tab)
   return (
-    <div className="flex shrink-0 gap-2 px-4 pt-1 pb-[max(env(safe-area-inset-bottom),--spacing(4))]">
+    <div className="flex shrink-0 items-center gap-2 px-4 pt-1 pb-[max(env(safe-area-inset-bottom),--spacing(4))] max-[359px]:gap-1">
       {/* each tab as wide as its words and the rest shared out, so Tasks with its count gets the room it needs and the
           count never crowds the next tab */}
       <div role="group" aria-label="View" className="flex flex-1 rounded-full bg-bubble p-1">
@@ -871,7 +871,7 @@ function PhoneBar() {
             type="button"
             aria-pressed={tab === k}
             onClick={() => setUI({ tab: k, pick: null, plus: null, menu: false })}
-            className="relative flex h-12 min-w-0 flex-auto items-center justify-center gap-1.5 rounded-full text-[0.875rem] whitespace-nowrap text-fg2 aria-pressed:bg-seg-on aria-pressed:text-fg aria-pressed:shadow-seg"
+            className="relative flex h-12 min-w-0 flex-auto items-center justify-center gap-1.5 rounded-full text-[0.875rem] whitespace-nowrap text-fg2 aria-pressed:bg-seg-on aria-pressed:text-fg aria-pressed:shadow-seg max-[359px]:gap-1"
           >
             {/* four tabs and Search: most phones have room for the words only, a phone in Display Zoom (320px) for fewer */}
             <Icon className={clsx(ic, 'max-[479px]:hidden')} />
@@ -880,7 +880,7 @@ function PhoneBar() {
           </button>
         ))}
       </div>
-      <RoundButton label="Search" className="size-14" onClick={() => setUI({ search: true, searchScope: undefined })}>
+      <RoundButton label="Search" className="size-14 max-[359px]:size-12" onClick={() => setUI({ search: true, searchScope: undefined })}>
         <SearchIcon className={ic} />
       </RoundButton>
     </div>

@@ -33,8 +33,9 @@ describe.skipIf(!browser)('attention count circles', () => {
             dispatchEvent(new StorageEvent('storage', { key: 'shepherdr.appearance' }))
           }, theme)
           for (const [need, ready] of [[0, 0], [1, 0], [0, 1], [2, 3], [12, 108]]) {
-            // Neither archived tasks nor tasks in a different space belong to this panel's counts.
-            world.tasks = [...tasks(need, ready), { ...template, id: 'ARCHIVED', place, archived: Date.now() }, { ...template, id: 'ELSEWHERE', place: 'p:mac:lilla-varlden' }]
+            // Neither archived tasks nor tasks in a different space belong to this panel's counts. Its agent's merge
+            // card would still wait on Needs you, which counts every space: only the agent's own chat holds one.
+            world.tasks = [...tasks(need, ready), { ...template, id: 'ARCHIVED', place, archived: Date.now() }, { ...template, id: 'ELSEWHERE', place: 'p:mac:lilla-varlden', agent: undefined }]
             world.emit('snapshot')
             // Tasks counts Ready alone; what needs you has one number, on Needs you
             const panel = page.locator(`${badge}[aria-label$="panel scope"]`).filter({ visible: true }).first()
