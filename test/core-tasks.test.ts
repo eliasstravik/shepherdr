@@ -6,7 +6,7 @@ import { CoreTasks, type CoreTask } from '../server/core/tasks.ts'
 import { CoreStore } from '../server/core/store.ts'
 import type { CoreSource } from '../server/core/source.ts'
 import type { Grant } from '../server/core/mailbox.ts'
-import type { Message } from '../shared/types.ts'
+import type { Message, UpdateCard } from '../shared/types.ts'
 import { seal, unseal, type MailCredential } from '../server/core/envelope.ts'
 
 /** Real local git on CI, fake core boundary; no provider credentials or network needed. */
@@ -42,6 +42,7 @@ async function withTask(run: (context: { tasks: CoreTasks; task: CoreTask; grant
     browsers: { close: async () => {} }, github: { prs: { comments: async () => [] } },
     core: { current: { terminals: new Map() }, call: async () => ({}) }, saveAndDeliver: (_chat: string, _id: string, _text: string, save: () => void) => save(), status: () => 'idle', connected: () => true, emit: () => {},
     post: (chat: string, message: Message) => store.set(`message:${chat}`, message.id, message),
+    taskRow: (chat: string, row: CoreTask, card: UpdateCard) => store.set(`message:${chat}`, `task-row-${row.id}`, { id: `task-row-${row.id}`, who: 'agent', card }),
   } as unknown as CoreSource
   const tasks = new CoreTasks(source)
   tasks.seedIncludes = async () => {} // Native include execution is covered separately in core-worktree-includes.
@@ -60,6 +61,35 @@ test('merge requires a human card approval for the exact ready commit', async ()
     expect(readFileSync(join(repo, 'example.txt'), 'utf8')).toBe('after\n')
     expect(tasks.get(task.id)?.workflow).toBe('merged')
     await expect(tasks.merge(grant, task.id)).resolves.toMatchObject({ workflow: 'merged' })
+  })
+})
+
+test('a merge card carries the exact commit, its files and lines, and says plainly when no checks exist', async () => {
+  await withTask(async ({ tasks, task, grant }) => {
+    await tasks.ready(grant, task.id, 'Changed the example')
+    const ready = tasks.get(task.id)!, store = (tasks as unknown as { source: CoreSource }).source.store
+    const card = store.get<Message>(`message:${task.chat}`, ready.mergeQuestion!)!.question!
+    expect(card.evidence).toEqual({ commit: ready.readyHead!.slice(0, 7), summary: 'Changed the example',
+      diff: { files: 1, added: 1, removed: 1, list: [{ path: 'example.txt', added: 1, removed: 1 }] },
+      checks: { state: 'none', text: 'No pull request, so no GitHub checks' } })
+  })
+})
+
+test('a merge card never shows the checks of another commit', async () => {
+  await withTask(async ({ tasks, task, grant, repo, git }) => {
+    git(repo, 'update-ref', 'refs/remotes/origin/main', 'main')
+    task.pr = { number: 1, url: 'https://github.test/o/r/pull/1' }
+    const store = (tasks as unknown as { source: CoreSource }).source.store
+    store.set('task', task.id, task)
+    tasks.git.remote = async () => 'github.test/o/r'
+    tasks.git.ghRun = async () => ''
+    let head = ''
+    tasks.git.pullRequest = (async (_repo: unknown, _branch: string, checks = true) => checks ? { headRefOid: 'b'.repeat(40), statusCheckRollup: [{ conclusion: 'SUCCESS' }] } : { number: 1, state: 'OPEN', isDraft: false, headRefOid: head = await tasks.git.head({ machine: task.machine, folder: task.folder }), baseRefName: 'main' }) as unknown as typeof tasks.git.pullRequest
+    await tasks.ready(grant, task.id, 'Changed the example')
+    const card = store.get<Message>(`message:${task.chat}`, tasks.get(task.id)!.mergeQuestion!)!.question!
+    expect(head).toBeTruthy()
+    expect(card.evidence?.checks).toEqual({ state: 'unknown', text: "GitHub's checks are for another commit" })
+    expect(card.evidence?.diff?.files).toBe(1)
   })
 })
 

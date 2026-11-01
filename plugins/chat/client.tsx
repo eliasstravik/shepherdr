@@ -3,12 +3,12 @@
 // or is starting does it wait, and the bubble says why.
 import clsx from 'clsx'
 import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ComponentType, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, type RefObject } from 'react'
-import { act, chatName, definePlugin, getDraft, getState, goChat, has, holdReload, openItem, openNeeds, openTask, registry, setDraft, setOutbox, setUI, taskOf, useDraft, useSnap, useStore, useUI, type UI } from '@client/kernel.ts'
+import { act, chatName, definePlugin, getDraft, getState, goChat, has, holdReload, openArtifact, openItem, openNeeds, openTask, registry, setDraft, setOutbox, setUI, taskOf, useDraft, useSnap, useStore, useUI, type UI } from '@client/kernel.ts'
 import { keyOf, partsOf, priorOf, reasonOf, SEND_TIMEOUT, type Outgoing } from '@client/outbox.ts'
 import { AlertIcon, BackIcon, CameraIcon, CheckIcon, Count, DeleteIcon, dimmed, Dot, DownIcon, DownloadIcon, Empty, field, FileIcon, ic, IconButton, KeyIcon, LinkButton, LiveWave, MachineIcon, Menu, MenuItem, MenuSeparator, MenuSetting, MicIcon, ModeIcon, MoreIcon, NextIcon, PageIcon, PlanIcon, PlusIcon, Primary, QuestionIcon, ReplyIcon, RestartIcon, roundBtn, SearchIcon, SecretField, Sent, SmileIcon, Tab, Tabs, TextBox, UpIcon, useElapsed, XIcon } from '@client/ui.tsx'
 import { canDictate, dictate, dictSample, type Dictation } from '@client/dictation.ts'
 import { extOf, isImage } from '@shared/files.ts'
-import { modelCommand, modeName, taskChatId, type CardAsk, type Chat, type Message, type Place, type Question, type ReplyQuote, type SecretAsk, type UpdateCard } from '@shared/types.ts'
+import { modelCommand, modeName, taskChatId, type CardAsk, type Chat, type MergeEvidence, type Message, type Place, type Question, type ReplyQuote, type SecretAsk, type UpdateCard } from '@shared/types.ts'
 import { buzz, mine, openBar, openPicker, quick, react } from '@plugins/reactions/client.tsx'
 import { EDGE } from '@client/gestures.ts'
 import { still, useArrive } from '@client/motion.ts'
@@ -1026,7 +1026,8 @@ function Row({ at, arrive, children }: { at: number; arrive: string; children: R
   )
 }
 
-const NOW: Record<string, string> = { done: 'done', work: 'working', ready: 'ready', merging: 'merging', queued: 'queued' }
+/** a task's row says what its task is doing now, when that moved on from the row's own words */
+const NOW: Record<string, string> = { need: 'Needs you', done: 'Done', work: 'Working', ready: 'Ready', merging: 'Merging', queued: 'Queued', todo: 'To do' }
 
 const cardBox = 'relative flex max-w-full items-center gap-2 self-start rounded-box px-3 py-2 text-left text-[0.9375rem] shadow-[inset_0_0_0_1px_var(--line2)]'
 /** the card's words on one line: cut short with an ellipsis where the chat is narrow, what follows them kept whole */
@@ -1086,18 +1087,20 @@ function Card({ card: c, chat, at, press, keys, className }: { card: UpdateCard;
     )
   const t = taskOf(snap, c.task)
   const task = c.task
+  const status = t?.status ?? c.status ?? 'idle'
+  const needs = (c.ask?.open || status === 'need') && registry.views.needs
+  const pr = c.pr ?? t?.pr
   const line = (
-    <button type="button" data-anchor data-needs-link={c.ask?.open && registry.views.needs ? '' : undefined} {...press} onClick={() => (c.ask?.open && registry.views.needs ? openNeeds() : openTask(task))} className={clsx(cardBox, 'hover:bg-hover', className)}>
-      <Dot s={c.status ?? 'idle'} className="shrink-0" />
+    <button type="button" data-anchor data-needs-link={needs ? '' : undefined} {...press} onClick={() => (needs ? openNeeds() : openTask(task))} className={clsx(cardBox, 'hover:bg-hover', className)}>
+      <Dot s={status} className="shrink-0" />
       <span className={cardLine}>
         <span className="truncate">
-          <b className="font-semibold">{c.task}</b> {c.text}
+          <b className="font-semibold">{c.task}</b> {t && t.status !== c.status ? NOW[t.status] ?? t.status : c.text}
         </span>
-        {t && t.status !== c.status ? <span className={cardAside}>&nbsp;· now {NOW[t.status] ?? t.status}</span> : null}
-        {c.pr ? (
+        {pr ? (
           // set apart like a task row's
           <span className={cardAside}>
-            &nbsp;· <PrOnCard pr={c.pr} />
+            &nbsp;· <PrOnCard pr={pr} />
           </span>
         ) : null}
       </span>
@@ -1298,6 +1301,31 @@ function openTerminal(key: string) {
 
 const noteBox = clsx('min-h-10 w-full resize-none rounded-row bg-transparent px-3 py-[9px] placeholder:text-fg3 coarse:min-h-11 phone:min-h-11 phone:text-[1rem]', field)
 
+const CHECKS: Record<MergeEvidence['checks']['state'], string> = { passed: 'text-ready-fg', failed: 'text-need-fg', running: 'text-work-fg', none: 'text-fg2', unknown: 'text-need-fg' }
+
+/** a merge card: what the human approves, and that this card is how */
+function Evidence({ e, open }: { e: MergeEvidence; open: boolean }) {
+  const label = 'shrink-0 w-14 text-fg2'
+  return (
+    <div data-evidence className="flex flex-col gap-1 text-[0.875rem] phone:text-[0.9375rem]">
+      {e.summary ? <p className="mb-1 text-pretty break-words">{e.summary}</p> : null}
+      <div className="flex gap-2"><span className={label}>Commit</span><code className="tabular-nums">{e.commit}</code></div>
+      {e.diff ? (
+        <details data-evidence-files className="min-w-0">
+          <summary className="flex cursor-pointer gap-2"><span className={label}>Files</span><span className="tabular-nums">{e.diff.files} changed, <span className="text-ready-fg">+{e.diff.added}</span> <span className="text-need-fg">−{e.diff.removed}</span></span></summary>
+          <ul className="mt-1 flex max-h-48 flex-col gap-0.5 overflow-auto pl-16 text-[0.8125rem]">
+            {e.diff.list.map((f) => <li key={f.path} className="flex items-baseline justify-between gap-2"><span className="min-w-0 break-all">{f.path}</span><span className="shrink-0 text-fg2 tabular-nums">+{f.added} −{f.removed}</span></li>)}
+            {e.diff.files > e.diff.list.length ? <li className="text-fg2">and {e.diff.files - e.diff.list.length} more</li> : null}
+          </ul>
+        </details>
+      ) : <div className="flex gap-2"><span className={label}>Files</span><span className="text-need-fg">Couldn't read the changes</span></div>}
+      <div className="flex gap-2"><span className={label}>Checks</span><span data-evidence-checks={e.checks.state} className={CHECKS[e.checks.state]}>{e.checks.text}</span></div>
+      <div className="flex gap-2"><span className={label}>Proof</span>{e.proof ? <LinkButton onClick={() => openArtifact(e.proof!.id)}>{e.proof.title}</LinkButton> : <span className="text-fg2">No proof artifact</span>}</div>
+      {open ? <p data-evidence-approve className="mt-1 text-[0.8125rem] text-fg2">Only this card approves the merge: pick Merge, then Send. A yes in the chat doesn't count.</p> : null}
+    </div>
+  )
+}
+
 /** oneTap: in Needs you, a choice sends at once, unless the card asks for several or a note */
 export function QuestionCard({ q, chat, msg, from, source, oneTap }: { q: Question; chat: Chat; msg: string; from: string; source?: CardSource; oneTap?: boolean }) {
   // Unmarked cards always require a deliberate pick and Send, including all approval prompts.
@@ -1353,6 +1381,7 @@ export function QuestionCard({ q, chat, msg, from, source, oneTap }: { q: Questi
     <CardShell title={q.title} plan={q.kind === 'Plan'} source={source}>
       {q.screen ? <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-fg2">{q.press ? q.screen.split(/(https?:\/\/\S+)/).map((part, j) => j % 2 ? <a key={j} href={part} target="_blank" rel="noreferrer" className="text-accent">{part}</a> : part) : q.screen}</pre> : null}
       {q.terminal && !sent && has('terminal') ? <button type="button" className="text-left text-accent" onClick={() => openTerminal(chat.key)}>Open terminal</button> : null}
+      {q.evidence ? <Evidence e={q.evidence} open={!sent} /> : null}
       {q.plan ? <div data-plan className="max-h-96 overflow-auto"><Markdown text={q.plan} /></div> : null}
       {q.steps ? (
         <ol className="flex list-decimal flex-col gap-0.5 pl-5">

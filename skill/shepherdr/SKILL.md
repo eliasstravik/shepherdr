@@ -71,7 +71,7 @@ Each on a line of its own:
     <reply to="Can you check the flaky test?"/>
 
 `<reply to="…"/>` starts your reply and quotes the start of the message it answers. When a Shepherdr line needs no
-words and the human sees no card of it (a heartbeat with nothing to do too), your whole reply is only
+words (what a row or card already shows, a heartbeat with nothing to do), your whole reply is only
 `<no-reply>short reason</no-reply>`: the chat shows nothing.
 
 ### Asking

@@ -103,5 +103,8 @@ its turn on a question.
   those counts add up to the number on Needs you, and the app icon adds the Ready tasks. Tasks shows only Ready in its
   tab, and a task with two cards counts as two in its Needs you group. A task whose merge waits on you is on both
   lists: its card here, and its row under Ready in Tasks.
-- A card still lives in its agent's chat, and can be answered there too. A task's card in the coordinator's chat is
-  only a row saying what happened: while it waits, a tap on it opens Needs you.
+- A card still lives in its agent's chat, and can be answered there too. A task has one row in the coordinator's chat,
+  updated where it stands: its live status and latest news, never a stack of copies. While it waits, a tap on it opens
+  Needs you. The coordinator speaks only when it has something to add.
+- A merge card shows what it approves: the commit, the files and lines changed, GitHub's checks as they stand and a
+  link to the proof. Only Merge on that card approves that commit; a yes in the chat doesn't count, and the card says so.

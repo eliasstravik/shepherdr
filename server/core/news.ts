@@ -44,8 +44,8 @@ export class CoreTaskNews {
       const id = `task-news-${randomUUID()}`, summary = words[event]
       const text = JSON.stringify({ task: task.id, title: task.name, event, status: this.source.tasks.view(task).status, space: space.name, machine: task.machine, ...(event === 'ready' ? { merge: mergeWords(task.mergePolicy) } : {}) }).replaceAll('<', '\\u003c').replaceAll('>', '\\u003e')
       this.source.store.set('task-news', id, { id, task: task.id, place: task.place, target, event, at, state: 'waiting', observed, text } satisfies Notice)
-      // Ordinary workflow cards already exist in the originating chat; failures/stalls need their own card.
-      if (target !== space.id || ['failed', 'stalled', 'needs-you'].includes(event)) this.source.post(target, { id, who: 'agent', card: { id, task: task.id, status: this.source.tasks.view(task).status, text: summary }, at })
+      // Ordinary workflow changes already updated the row in the originating chat; failures/stalls have no change of their own.
+      if (target !== space.id || ['failed', 'stalled', 'needs-you'].includes(event)) this.source.taskRow(target, task, { status: this.source.tasks.view(task).status, text: summary }, at)
     }
     // A machine-home or main-home Autopilot keeps its own configured wake rules, with the original space identity.
     for (const home of this.source.spaces().filter(item => item.home && item.mode === 'autopilot' && item.id !== space.id && (item.machine === task.machine || item.machine === this.source.localMachineId()))) {
@@ -81,7 +81,7 @@ export class CoreTaskNews {
       if (queued.has(target.id)) continue
       const agent = this.source.agents.get(target.id)
       if (!agent || agent.role !== 'coordinator' || agent.space !== target.id || agent.machine !== target.machine || agent.pilot || this.source.status(agent) !== 'idle' || this.source.agents.terminal(agent)?.state !== 'live') continue
-      this.source.saveAndDeliver(target.id, notice.id, `<news>${notice.text}\nObserved product news, not a new human request. The card is already in this chat. Explain briefly what it means and what the human needs; act only within existing authorization and your own task ownership. Main-home overview does not grant cross-space mutation authority.${notice.event === 'ready' ? MERGE_NOTE : ''}</news>`, () => {
+      this.source.saveAndDeliver(target.id, notice.id, `<news>${notice.text}\nObserved product news, not a new human request. The task's live row in this chat already shows this. Reply only with a no-reply marker unless you have something to add that the row doesn't say; act only within existing authorization and your own task ownership. Main-home overview does not grant cross-space mutation authority.${notice.event === 'ready' ? MERGE_NOTE : ''}</news>`, () => {
         notice.state = 'queued'; notice.launch = agent.launch; this.source.store.set('task-news', notice.id, notice); queued.add(target.id)
       }, true)
     }

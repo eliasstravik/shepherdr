@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { CoreStore } from '../server/core/store.ts'
-import { CoreGitHubPr, prComments } from '../server/core/github-pr.ts'
+import { checkWords, CoreGitHubPr, prComments } from '../server/core/github-pr.ts'
 import type { CoreSource } from '../server/core/source.ts'
 import type { CoreTask } from '../server/core/tasks.ts'
 const head = 'a'.repeat(40), since = Date.parse('2026-10-30T10:00:00.800Z')
@@ -27,7 +27,7 @@ async function fixture(run: (f: { source: CoreSource; monitor: CoreGitHubPr; tas
     tasks: { all: () => [task], get: (id: string) => id === task.id ? task : undefined, busy: () => false, git: {
       remote: async () => 'github.test/o/r', pullRequest: async () => ({ number: 1, state: 'OPEN', headRefOid: head, statusCheckRollup: checks }),
       gh: async (_repo: unknown, args: string[]) => [args.at(-1)?.includes('/issues/') ? notes : []],
-    } }, post: (chat: string, message: { id: string }) => store.set(`message:${chat}`, message.id, message),
+    } }, emit: () => {}, post: (chat: string, message: { id: string }) => store.set(`message:${chat}`, message.id, message),
     saveAndDeliver: (_chat: string, id: string, text: string, save: () => void, _quiet: boolean, work: boolean) => store.db.transaction(() => { save(); sent.push({ id, text, work }) })(),
   } as unknown as CoreSource
   const monitor = new CoreGitHubPr(source)
@@ -60,6 +60,20 @@ test('checks-ready nudge preserves Ready and never grants ask-mode approval or a
     await f.monitor.scan(since + 123000); expect(f.sent).toHaveLength(mode === 'ask' ? 0 : 1)
   })
 })
+
+test('check words never make unfinished or failed checks look green', () => {
+  expect(checkWords([])).toEqual({ state: 'none', text: 'None reported yet' })
+  expect(checkWords([{ conclusion: 'SUCCESS' }, { state: 'SKIPPED' }])).toEqual({ state: 'passed', text: '2 passed' })
+  expect(checkWords([{ conclusion: 'SUCCESS' }, { state: 'PENDING' }])).toEqual({ state: 'running', text: '1 running, 1 passed' })
+  expect(checkWords([{ conclusion: 'CANCELLED' }])).toEqual({ state: 'failed', text: '1 failed' })
+  expect(checkWords([{ conclusion: 'FAILURE' }, {}, { conclusion: 'SUCCESS' }])).toEqual({ state: 'failed', text: '1 failed, 1 running, 1 passed' })
+})
+
+test('the watch keeps the checks of the commit it read, for an open merge card', async () => fixture(async f => {
+  f.setChecks([{ conclusion: 'SUCCESS' }, { state: 'PENDING' }])
+  await f.monitor.watch(f.task, since + 1000)
+  expect(f.source.store.get('github-pr', f.task.id)).toMatchObject({ head, checks: { state: 'running', text: '1 running, 1 passed' } })
+}))
 
 test('busy agents retain unseen comments and stale native launches cannot receive them', async () => fixture(async f => {
   f.setNotes([raw(1)]); f.source.status = () => 'work'

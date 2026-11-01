@@ -95,6 +95,23 @@ describe.skipIf(!browser)('Needs you', () => {
     } finally { await page.close() }
   }, 30_000)
 
+  for (const width of [390, 1440]) test(`a merge card shows what it approves, and that it is the way to approve (${width}px)`, async () => {
+    const page = await open(width)
+    try {
+      const merge = page.locator('[data-need]').filter({ hasText: 'Merge GTM-15?' })
+      const evidence = merge.locator('[data-evidence]')
+      await evidence.waitFor()
+      expect(await evidence.textContent()).toContain('b08a268')
+      expect(await evidence.textContent()).toContain('3 changed')
+      expect(await evidence.locator('[data-evidence-checks="passed"]').textContent()).toBe('4 passed')
+      expect(await evidence.getByText('No proof artifact', { exact: true }).isVisible()).toBe(true)
+      expect(await evidence.locator('[data-evidence-approve]').textContent()).toContain("A yes in the chat doesn't count")
+      await evidence.locator('[data-evidence-files] summary').click()
+      expect(await evidence.getByText('server/webhooks/verify.ts', { exact: true }).isVisible()).toBe(true)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    } finally { await page.close() }
+  }, 30_000)
+
   test("a task's row in the coordinator's chat has no buttons, and leads to Needs you", async () => {
     const chat = world.chats[home]
     const q = chips('row:q', 'Allow writing files?')

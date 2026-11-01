@@ -47,6 +47,30 @@ test('task news reaches its own regular coordinator and main overview once, neve
   expect(f.source.logs.messages('main-home').some(message => message.card?.task === f.task.id)).toBe(true)
 }))
 
+test('one task keeps one row in each chat, updated where it stands, and the chat still shows as changed', () => fixture(async f => {
+  const rows = (chat: string) => f.source.logs.messages(chat).filter(message => message.card?.task === f.task.id)
+  const question = { id: 'one', title: 'Which?', kind: 'Question' as const, choices: [{ label: 'A' }], to: f.task.chat }
+  f.source.taskRow('app', f.task, { status: 'work', text: 'Started' }, 10)
+  f.source.forwardQuestion(f.task.chat, question)
+  f.source.forwardQuestion(f.task.chat, { ...question, id: 'two' })
+  f.source.forwardQuestion(f.task.chat, question, 'A')
+  f.source.taskRow('app', f.task, { status: 'ready', text: 'Ready: It works' }, 40)
+  f.source.news.record(f.task, 'merged', 50)
+  expect(rows('app')).toHaveLength(1)
+  expect(rows('main-home')).toHaveLength(1)
+  expect(rows('app')[0]).toMatchObject({ at: 10, updated: 40, card: { text: 'Ready: It works', status: 'ready' } })
+  expect(rows('app')[0].card!.ask!.questions!.map(item => item.id)).toEqual(['two', 'one'])
+  expect(rows('main-home')[0].card!.text).toBe('Merged')
+  expect(f.source.unread.last().app).toBeGreaterThan(10)
+}))
+
+test('news tells the coordinator the row already shows it, and to stay quiet unless it has more to say', () => fixture(async f => {
+  f.task.workflow = 'ready'; f.task.readyAt = 10; f.source.store.set('task', f.task.id, f.task)
+  f.source.news.record(f.task, 'ready', 10); f.source.news.deliver(10)
+  expect(f.sent[0].text).toContain('live row')
+  expect(f.sent[0].text).toContain('no-reply marker unless you have something to add')
+}))
+
 test('Ready news carries each task\'s real Merge setting, and other news does not', () => fixture(async f => {
   f.task.workflow = 'ready'; f.task.readyAt = 10
   for (const [policy, words] of [['ask', 'ask the human first'], ['checks', 'after GitHub checks'], ['auto', 'on its own']] as const) {

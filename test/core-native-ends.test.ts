@@ -34,7 +34,7 @@ function fixture(kind: 'claude' | 'codex' = 'claude') {
   const called = (use: string, value: unknown = input, tool = 'Bash', at = Date.now() - 1) => hook({ event: 'PreToolUse', tool, use, input: toolHash(value), at })
   const log = (event: LogEvent) => (source as unknown as { logs: { apply(agent: CoreAgent, event: LogEvent): void } }).logs.apply(agent(), event)
   const card = (id: string) => source.chat(chat)!.messages.find(message => message.question?.id === id)!.question!
-  const forwarded = (id: string) => source.chat('space')?.messages.find(message => message.card?.ask?.questions?.[0].id === id)?.card
+  const forwarded = (id: string) => source.chat('space')?.messages.find(message => message.card?.ask?.questions?.some(question => question.id === id))?.card
   return { source, ask, hook, called, log, card, forwarded, agent, open: () => source.openPermissions(agent()), close() { source.stop(); source.mailbox.close(); source.store.close(); rmSync(home, { recursive: true, force: true }) } }
 }
 type Fixture = ReturnType<typeof fixture>

@@ -304,6 +304,22 @@ export interface Question {
   asks?: string
   /** answered on its other copy (a task's question and its copy in its space's chat): where, and a link to that chat */
   elsewhere?: { label: string; chat: string; name: string }
+  /** a merge card: what the human approves, from Git, GitHub and the task's artifacts, never the agent's own words */
+  evidence?: MergeEvidence
+}
+
+/** what a merge card shows of the exact commit it approves */
+export interface MergeEvidence {
+  /** the commit, shortened */
+  commit: string
+  /** what the agent said changed */
+  summary?: string
+  /** none when Git could not say */
+  diff?: { files: number; added: number; removed: number; list: { path: string; added: number; removed: number }[] }
+  /** GitHub's checks on this commit, in words; failed and running say so, so a green one is never assumed */
+  checks: { state: 'passed' | 'failed' | 'running' | 'none' | 'unknown'; text: string }
+  /** the task's proof artifact */
+  proof?: { id: string; title: string }
 }
 
 /** an artifact: what an agent shows beyond words, kept in its place and updated as new versions */
@@ -371,6 +387,8 @@ export interface Reaction {
 export interface Message {
   id: string
   who: 'you' | 'agent'
+  /** a live row: when it last changed; at keeps its place in the chat */
+  updated?: number
   /** plain text (yours) or markdown (the agent's) */
   text?: string
   /** "Answered “Rerun CI on main?”" */
@@ -527,11 +545,12 @@ export interface UpdateCard {
   id: string
   /** the task it is about; none on a mode card */
   task?: string
-  /** the task's state when posted */
+  /** the task's state when last updated */
   status?: TaskStatus
   /** a mode card: the place's coordinator went on this mode (text: "on · works on its own"); an older one may say Manual */
   mode?: Mode
-  /** a few words on one line ("is merged"); a task's summary is in the task, never on its card */
+  /** a few words on one line ("Started"), or a task's state and its summary ("Ready: Dark mode works"); a task has one
+      such row in a chat, updated where it stands */
   text: string
   /** the task's pull request, linked from the card */
   pr?: { number: number; url: string }

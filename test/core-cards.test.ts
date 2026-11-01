@@ -53,6 +53,25 @@ test('permission expiry refreshes both chats and keeps its authority denied', as
   } finally { f.close() }
 })
 
+test('an open merge card shows the checks of its own commit and the proof that came after ready', () => {
+  const f = fixture(), head = 'a'.repeat(40), q = { ...question, id: 'merge-live', title: 'Merge EX-1?', evidence: { commit: 'aaaaaaa', checks: { state: 'running' as const, text: '1 running' } } }
+  try {
+    const task = f.source.tasks.get('EX-1')!
+    task.workflow = 'ready'; task.readyHead = head; task.mergeQuestion = q.id
+    f.source.store.set('task', task.id, task); f.source.store.set('merge-question', q.id, { task: task.id, head })
+    f.source.post(task.chat, { id: q.id, who: 'agent', question: q, at: 100 })
+    const shown = () => f.source.chat(task.chat)!.messages[0].question!.evidence!
+    f.source.store.set('github-pr', task.id, { head: 'b'.repeat(40), checks: { state: 'failed', text: '1 failed' } })
+    expect(shown().checks.text).toBe('1 running')
+    f.source.store.set('github-pr', task.id, { head, checks: { state: 'passed', text: '3 passed' } })
+    expect(shown().checks.text).toBe('3 passed')
+    expect(shown().proof).toBeUndefined()
+    f.source.store.set('core-artifact', 'pf', { id: 'pf', title: 'EX-1: Proof', place: 'space', at: 2, versions: [{ n: 1, at: 2, by: 'x', chat: task.chat, html: 1 }] })
+    f.source.store.set('core-artifact', 'no', { id: 'no', title: 'Other task: Proof', place: 'space', at: 3, versions: [{ n: 1, at: 3, by: 'x', chat: 'EX-2/Agent', html: 1 }] })
+    expect(shown().proof).toEqual({ id: 'pf', title: 'EX-1: Proof' })
+  } finally { f.close() }
+})
+
 test('merged and replaced merge cards close in original and forwarded chats without granting an answer', async () => {
   const f = fixture(), q = { ...question, id: 'merge-proof', title: 'Merge EX-1?', choices: [{ label: 'Merge' }, { label: 'Not yet' }] }
   try {

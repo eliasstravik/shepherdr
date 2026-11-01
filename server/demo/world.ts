@@ -335,8 +335,10 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     if (!t) return
     // done: a small card says so in its project's chat
     if (status === 'done' && t.status !== 'done') {
-      const card: UpdateCard = { id: `card-${t.id}-done`, task: t.id, status, text: 'is merged', pr: t.pr }
-      ;(this.chats[t.place]?.messages ?? []).push(cardMessage(card, Date.now() + seq))
+      const card: UpdateCard = { id: `card-${t.id}`, task: t.id, status, text: 'is merged', pr: t.pr }
+      const messages = this.chats[t.place]?.messages ?? [], row = messages.find((m) => m.card?.task === t.id)
+      if (row) row.card = card
+      else messages.push(cardMessage(card, Date.now() + seq))
       this.emit('chat', t.place)
     }
     // done: it finished now, so it tops its Done group

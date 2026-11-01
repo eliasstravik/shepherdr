@@ -4,13 +4,14 @@ import { CoreError, Refusal } from './client.ts'
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { SUMMARY_MAX, TITLE_MAX, STATUS_MAX, slugify, type Action, type Question, type Task } from '../../shared/types.ts'
+import { SUMMARY_MAX, TITLE_MAX, STATUS_MAX, slugify, type Action, type MergeEvidence, type Question, type Task } from '../../shared/types.ts'
 import { CorePilotRepositories } from './pilot-repositories.ts'
 import { CoreTaskRelocation } from './task-relocation.ts'
 import { CoreTaskProcesses } from './task-processes.ts'
 import { mergeWords, taskOptions, validateTaskSettings } from './task-options.ts'
 import { CLI_NAME, kindOf } from './settings.ts'
 import { CoreGit } from './git.ts'
+import { checkWords } from './github-pr.ts'
 import { pickSpeed } from '../common/restart.ts'
 import type { CoreSource } from './source.ts'
 import type { AgentKind, CoreSpace } from './model.ts'
@@ -422,8 +423,7 @@ export class CoreTasks {
       Buffer.from(JSON.stringify({ repo: task.repo, folder: task.folder, branch: task.branch })), 90)
   }
   private card(task: CoreTask, text: string) {
-    const id = randomUUID()
-    this.source.post(task.place, { id, who: 'agent', card: { id, task: task.id, status: this.view(task).status, text }, at: Date.now() })
+    this.source.taskRow(task.place, task, { status: this.view(task).status, text })
   }
   async ready(grant: Grant, id: string, summary: string, facts?: string) { return this.change(id, () => this.readyNow(grant, id, summary, facts)) }
   private async readyNow(grant: Grant, id: string, summary: string, facts?: string) {
@@ -438,7 +438,7 @@ export class CoreTasks {
       task.said = summary; task.facts = facts; task.workflow = 'closed'; task.status = 'done'; task.doneAt = Date.now(); task.outcome = 'done'; task.cleanupPending = true
       this.finishReceipt(task, grant)
       delete task.reservedAt; delete task.approvedHead; delete task.mergeQuestion; delete task.report
-      this.save(task); await this.label(task); this.card(task, summary)
+      this.save(task); await this.label(task); this.card(task, `Done: ${summary}`)
       return task
     }
     if (task.review.on && (!task.reviewReport || !task.reviewTurn || task.reviewHead !== task.readyHead)) throw new Refusal(`Complete a fresh review of this exact commit before reporting ready${this.roundsLeft(task) || this.reviewRunning(task) ? '' : `. ${this.roundsUsed(task)}`}`)
@@ -452,14 +452,26 @@ export class CoreTasks {
     }
     delete task.approvedHead
     task.said = summary; task.facts = facts; task.workflow = 'ready'; task.readyAt = Date.now(); delete task.reservedAt
-    this.save(task); await this.label(task); this.card(task, summary)
+    this.save(task); await this.label(task); this.card(task, `Ready: ${summary}`)
     if (task.mergePolicy === 'ask') {
-      const question: Question = { id: randomUUID(), title: `Merge ${task.id}?`, kind: 'Question', choices: [{ label: 'Merge' }, { label: 'Not yet' }], to: task.chat }
+      const question: Question = { id: randomUUID(), title: `Merge ${task.id}?`, kind: 'Question', choices: [{ label: 'Merge' }, { label: 'Not yet' }], to: task.chat, evidence: await this.evidence(task) }
       task.mergeQuestion = question.id; this.save(task)
       this.source.store.set('merge-question', question.id, { task: task.id, head: task.readyHead })
       this.source.post(task.chat, { id: question.id, who: 'agent', question, at: Date.now() })
     }
     return task
+  }
+  /** What a merge card shows. Evidence that can't be read says so, and never stops the ready report. */
+  private async evidence(task: CoreTask): Promise<MergeEvidence> {
+    const location = { machine: task.machine, folder: task.folder }, head = task.readyHead!
+    const evidence: MergeEvidence = { commit: head.slice(0, 7), summary: task.said, checks: { state: 'none', text: 'No pull request, so no GitHub checks' } }
+    try {
+      const rows = (await this.git.run(location, ['diff', '--no-renames', '--numstat', '-z', `${task.pr ? 'origin/' : ''}${task.base}...${head}`])).split('\0').filter(Boolean)
+      const files = rows.map(row => { const [added, removed, ...path] = row.split('\t'); return { path: path.join('\t').slice(0, 300), added: parseInt(added) || 0, removed: parseInt(removed) || 0 } })
+      evidence.diff = { files: files.length, added: files.reduce((sum, file) => sum + file.added, 0), removed: files.reduce((sum, file) => sum + file.removed, 0), list: files.slice(0, 50) }
+    } catch { /* the card says it couldn't read them */ }
+    if (task.pr) evidence.checks = await this.git.pullRequest(location, task.branch).then(pr => pr.headRefOid === head ? checkWords(pr.statusCheckRollup) : { state: 'unknown' as const, text: "GitHub's checks are for another commit" }).catch(() => ({ state: 'unknown' as const, text: "Couldn't read GitHub's checks" }))
+    return evidence
   }
   async answer(question: string, choice: number, chat: string): Promise<boolean> {
     const request = this.source.store.get<{ task: string }>('merge-question', question)
@@ -537,7 +549,7 @@ export class CoreTasks {
       }
       task.workflow = 'merged'; task.status = 'done'; task.doneAt = Date.now(); task.outcome = 'done'; task.cleanupPending = true
       this.finishReceipt(task, grant)
-      this.save(task); await this.label(task); this.card(task, task.said || 'Merged')
+      this.save(task); await this.label(task); this.card(task, task.said ? `Merged: ${task.said}` : 'Merged')
       await this.source.browsers?.close(task.id, true).catch(() => this.source.post(task.chat, { id: 'browser-cleanup-pending', who: 'agent', text: 'The task merged. Browser cleanup is waiting for its machine to reconnect.', at: Date.now() }))
       return task
     } finally {
@@ -554,7 +566,7 @@ export class CoreTasks {
       if (!commit || !/^[a-f0-9]{40,64}$/.test(commit)) throw new Refusal('GitHub has not confirmed its merge commit')
       task.mergeCommit = commit; task.externalMerge = true; task.baseSyncPending = true
       task.workflow = 'merged'; task.status = 'done'; task.doneAt = Date.now(); task.outcome = 'done'; task.cleanupPending = true
-      this.save(task); await this.label(task); this.card(task, task.said || 'Merged on GitHub')
+      this.save(task); await this.label(task); this.card(task, task.said ? `Merged on GitHub: ${task.said}` : 'Merged on GitHub')
       return true
     })
   }
@@ -710,7 +722,7 @@ export class CoreTasks {
     if (summary !== undefined) task.said = summary.trim()
     if (facts !== undefined) task.facts = facts
     task.workflow = 'closed'; task.doneAt = Date.now(); task.outcome = 'done'; task.status = 'done'
-    this.save(task); await this.label(task); this.card(task, task.said || 'Marked done; nothing merged')
+    this.save(task); await this.label(task); this.card(task, task.said ? `Done: ${task.said}` : 'Marked done; nothing merged')
     return { ok: true, kept: remaining.held }
   }
   private async putAway(task: CoreTask, state: Awaited<ReturnType<CoreTasks['held']>>) {
