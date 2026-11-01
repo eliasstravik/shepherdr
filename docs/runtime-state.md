@@ -44,6 +44,34 @@ hooks use the same core file/event interfaces as local agents, without an SSH lo
 mirror or daemon-proxy fallback. Native process liveness and explicit OSC status are
 separate from task workflow: an idle or ended turn does not mean the task is Done.
 
+## Plan limits
+
+How much of a plan is left and when it refills sit beside Settings, at the foot of the spaces list (in the drawer on a
+phone): a thin bar per CLI and the least left of any window, amber at 25% and red at 10%. A tap shows every window, each
+machine's own, and reads them again if they are over a minute old; otherwise each machine is read every ten minutes,
+at the lowest CPU priority. Each machine has its own sign-ins, so its numbers are shown under its name.
+
+| | Source | What comes back |
+|---|---|---|
+| Claude Code | `claude -p /usage` | whatever windows it prints: its 5-hour session while one runs, its weekly ones |
+| Codex | `codex app-server`, `account/rateLimits/read` | its primary and secondary windows and plan type |
+
+Both are their own short process, so nothing is typed into a running agent, and neither spends tokens. Claude Code's
+structured usage request is marked experimental and its status line data needs a live session, so `/usage`'s printed
+words are read, in the one wording they have today. Words that no longer match show as Unknown, never a guess.
+
+Reads are read-only. Even a read makes Claude Code save `~/.claude.json`, so each runs in `bwrap` with the whole machine
+read-only; Codex won't start without writable state, so it gets a throwaway folder in place of its own, with its real
+`config.toml` and `auth.json` read-only inside and plugin sync off. A machine with no `bwrap` (a Mac) shows both as Unknown.
+
+A seal can't save a renewed login, and one renewed but not saved signs the CLI out. So a login within an hour of its end
+(Claude Code's last about eight hours), or a Codex one past seven days since its last renewal, isn't read: the next agent
+there renews it, and until then the last numbers stand with their age.
+
+A number always says how old it is. Once a window's reset time passes it says it has refilled and hasn't been read
+since. A read that fails keeps the last numbers, with their age and what went wrong; never-read shows Unknown.
+Only percentages, reset times and the plan's name leave the machine. Pi and anything else with no such data is left out.
+
 The [acceptance record](core/implementation.md) names actual native versions, tested
 status/restart cases and remaining provider/device limits. No hard token or money cap
 is inferred from delayed native usage reports.

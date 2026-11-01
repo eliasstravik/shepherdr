@@ -100,6 +100,8 @@ export interface Registry {
   overlays: FC[]
   /** a line under the top of the screen (voice call elsewhere, offline) */
   topBars: FC[]
+  /** beside Settings at the foot of the spaces list, on a phone in the drawer's: there whatever is open (plan limits) */
+  sideFoot: { order: number; View: FC }[]
   /** under the task list: place is its one space, else the place picked; list, what it shows (listView) */
   tasksFooter: FC<{ place: Place; list?: ListView }>[]
   /** keyboard: return true when handled */
@@ -116,6 +118,7 @@ export const registry: Registry = {
   messageEdge: [],
   chatTail: [],
   placeHeader: [],
+  sideFoot: [],
   placeMark: [],
   placeMenu: [],
   agentHeader: [],
@@ -158,6 +161,7 @@ export function installPlugins(plugins: ClientPlugin[], enabled: string[], user:
   registry.messageEdge.sort(byOrder)
   registry.chatTail.sort(byOrder)
   registry.placeHeader.sort(byOrder)
+  registry.sideFoot.sort(byOrder)
   registry.placeMark.sort(byOrder)
   registry.placeMenu.sort(byOrder)
   registry.agentHeader.sort(byOrder)

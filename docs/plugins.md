@@ -47,7 +47,7 @@ change check. Browser/terminal, voice, artifacts/worktree, health and alert entr
 off ends existing calls. Full parity and production acceptance remain tracked in [the delivery record](core/implementation.md).
 
 Everything is a plugin: places, coordinators, tasks, chat, reactions, artifacts, terminal, worktree, browser, voice,
-health, alerts, keyboard, autopilot are the base ones, in `plugins/<name>/` and named in [plugins.json](../plugins.json).
+health, limits, alerts, keyboard, autopilot are the base ones, in `plugins/<name>/` and named in [plugins.json](../plugins.json).
 A task's side panel takes its items from plugins too (`taskPanel`: Terminal from terminal; Files, Diff and Pull request
 from worktree; Browser from browser). A plugin has a `client.tsx` (screen parts it adds to slots) and/or a `server.ts`.
 
@@ -135,7 +135,7 @@ slots below are public: plugins outside the repo rely on them, so they change on
     a CLI offers); legacy `model`/`effort` actions return a restart-required error rather than claim an unapplied
     change. `Chat.agent` is optional launch metadata, with `speed` added beside `model` and `effort`, not telemetry of
     terminal changes; `Chat.agent.runtime` is what native records say runs, with `speed` and `effortDefault` added.
-  - the screen: `taskPanel` (side panel items), `overlays`, `topBars`, `tasksFooter`, `keys` (keyboard handlers)
+  - the screen: `taskPanel` (side panel items), `overlays`, `topBars`, `sideFoot` (beside Settings), `tasksFooter`, `keys` (keyboard handlers)
   - the lists show what their chips hold, `listView(ui, snap)`: `tasks`, `artifacts` and `tasksMenu` still get the
     place picked (`placeId`, `place`), and `tasksFooter` also gets the `list` shown. `ListView.attention`
     optionally marks global Home’s default actionable view; explicit chips, locks and searches keep normal lists.

@@ -191,6 +191,9 @@ function SideFoot({ drawer }: { drawer?: boolean }) {
         <CogIcon className="size-4 shrink-0 text-fg3 coarse:text-fg2 phone:size-5 phone:text-fg2" />
         Settings
       </FootButton>
+      {registry.sideFoot.map(({ View }, i) => (
+        <View key={i} />
+      ))}
     </div>
   )
 }

@@ -42,6 +42,7 @@ import { CoreBrowsers } from './browsers.ts'
 import { CoreVoice } from './voice.ts'
 import { CoreHeartbeats } from './heartbeats.ts'
 import { CoreHealth } from './health.ts'
+import { CorePlanLimits } from './plan-limits.ts'
 import { CoreAutomations } from './automations.ts'
 import { CoreGitHub } from './github.ts'
 import { CorePlugins } from './plugins.ts'
@@ -75,6 +76,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
   readonly voices: CoreVoice
   readonly heartbeats: CoreHeartbeats
   readonly health: CoreHealth
+  readonly limits: CorePlanLimits
   readonly automations: CoreAutomations
   readonly github: CoreGitHub
   readonly browsers: CoreBrowsers
@@ -147,6 +149,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
     this.automations = new CoreAutomations(this)
     this.github = new CoreGitHub(this)
     this.health = new CoreHealth(this)
+    this.limits = new CorePlanLimits(this)
     this.heartbeats = new CoreHeartbeats(this)
     this.voices = new CoreVoice(this)
     this.plugins = new CorePlugins(this)
@@ -170,7 +173,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
       if (agent.state === 'blocked' && !agent.permission) agent.state = 'working'
       this.store.set('agent', agent.chat, agent)
     }
-    await this.core.start(); await this.refresh(); this.human = await humanName(this.config.home, async () => (await this.files.exec(this.local.id, ['git', 'config', '--global', 'user.name'], undefined, undefined, 3)).toString('utf8')); this.tasks.recoverProviderFallbacks(); this.logs.start(); this.screens.start(); this.failedStarts.start(); this.automations.start(); this.health.start(); this.github.start()
+    await this.core.start(); await this.refresh(); this.human = await humanName(this.config.home, async () => (await this.files.exec(this.local.id, ['git', 'config', '--global', 'user.name'], undefined, undefined, 3)).toString('utf8')); this.tasks.recoverProviderFallbacks(); this.logs.start(); this.screens.start(); this.failedStarts.start(); this.automations.start(); this.health.start(); this.limits.start(); this.github.start()
     this.recovery = setInterval(() => {
       if (!this.quiescing) void this.pilots.lifecycle.tick().then(() => this.pilots.completion.tick()).catch(error => this.faults.set('pilot-lifecycle', error.message))
       if (!this.quiescing) { this.pilots.wakes.tick(); this.news.deliver() }
@@ -303,8 +306,8 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
       terminalTransport: 'core', name: 'Shepherdr', host: this.local.id, user: this.store.get<string>('setting', 'user') || this.human,
       ...this.places.present(spaces.map(space => ({ id: space.id, name: coreSpaceName(this, space), machine: space.machine, home: space.home,
         level: space.home ? space.machine === this.local.id ? 0 : 1 : 2, status: this.machineConnected(space.machine) ? this.status(this.agents.get(space.id)) : 'off', mode: space.mode, chat: space.id })),
-      [{ id: `m:${this.local.id}`, machine: this.local.id, name: this.local.name, health: this.health.view(this.local.id), status: this.connected() ? 'idle' : 'off' },
-        ...this.machines.map(machine => ({ id: `m:${machine.id}`, machine: machine.id, name: machine.name, health: this.health.view(machine.id), status: machine.state === 'connected' ? 'idle' as const : 'off' as const }))]),
+      [{ id: `m:${this.local.id}`, machine: this.local.id, name: this.local.name, health: this.health.view(this.local.id), limits: this.limits.view(this.local.id), status: this.connected() ? 'idle' : 'off' },
+        ...this.machines.map(machine => ({ id: `m:${machine.id}`, machine: machine.id, name: machine.name, health: this.health.view(machine.id), limits: this.limits.view(machine.id), status: machine.state === 'connected' ? 'idle' as const : 'off' as const }))]),
       tasks, artifacts: this.artifacts.list().filter(artifact => spaces.some(space => space.id === artifact.place)), automations: this.automations.view(), asks, needs,
       settings: this.secrets.pages([...this.settings.sections(this.devices(), this.pushWarnings()).map(section => this.pilots.wakes.section(section)), this.plugins.section(this.pluginUpdates?.status()), { name: 'Machines', about: 'Every machine Shepherdr reaches, and how it is now.', rows: [
         { label: this.store.get<string>('name', `m:${this.local.id}`) || this.local.name, key: '', value: this.connected() ? 'Main · reachable' : "Main · can't reach", fixed: true },
@@ -455,13 +458,14 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
 
   async act(action: Action): Promise<unknown> {
     if (this.quiescing) throw new Error('Shepherdr is stopping; retry after it reconnects')
-    const plugin = action.type.startsWith('artifact-') ? 'artifacts' : action.type === 'react' ? 'reactions' : action.type === 'browser-notes' ? 'browser' : ['keys', 'text'].includes(action.type) ? 'terminal' : action.type === 'call' ? 'voice' : action.type === 'autopilot-run' ? 'autopilot' : undefined
+    const plugin = action.type.startsWith('artifact-') ? 'artifacts' : action.type === 'react' ? 'reactions' : action.type === 'browser-notes' ? 'browser' : ['keys', 'text'].includes(action.type) ? 'terminal' : action.type === 'call' ? 'voice' : action.type === 'autopilot-run' ? 'autopilot' : action.type === 'limits-check' ? 'limits' : undefined
     if (plugin) this.requirePlugin(plugin)
     const handler = this.hooks.get(action.type)
     if (handler) return handler(action)
     if ('chat' in action && this.tasks.forChat(action.chat) && ['pin', 'archive', 'pause', 'stop', 'restart-info', 'restart', 'close', 'delete'].includes(action.type)) return this.tasks.act(action)
     switch (action.type) {
       case 'plugin': return this.plugins.act(action)
+      case 'limits-check': return this.limits.refresh(60_000)
       case 'send': {
         if (!action.text.trim() && !action.attachments?.length) return {}
         const run = async () => {
@@ -858,6 +862,6 @@ Use hc for starting, messaging and waiting on core child agents. Never use a web
   async artifactThumb(id: string, dark: boolean) { if (!this.plugins.has('artifacts')) return null; try { return this.artifacts.thumb(id, dark) } catch { return null } }
   async upload(chat: string, name: string, data: Uint8Array) { return this.chats.upload(chat, name, data) }
   async attachment(chat: string, path: string) { return this.chats.attachment(chat, path) }
-  async drain() { this.quiescing = true; this.screens.stop(); this.failedStarts.stop(); this.pluginUpdates?.stop(); await this.pluginUpdates?.drain(); this.plugins.stop(); this.voices.stop(); this.automations.stop(); this.github.stop(); this.health.stop(); await this.github.drain(); await this.health.drain(); await this.automations.drain(); await this.pilots.usage.drain(); await this.pilots.lifecycle.drain(); await this.pilots.completion.drain(); return this.tasks.drain() }
-  stop() { clearInterval(this.recovery); this.screens.stop(); this.failedStarts.stop(); this.pluginUpdates?.stop(); this.plugins.stop(); this.voices.stop(); this.health.stop(); this.automations.stop(); this.github.stop(); this.logs.stop(); this.browsers.stop(); this.core.stop() }
+  async drain() { this.quiescing = true; this.screens.stop(); this.failedStarts.stop(); this.pluginUpdates?.stop(); await this.pluginUpdates?.drain(); this.plugins.stop(); this.voices.stop(); this.automations.stop(); this.github.stop(); this.health.stop(); this.limits.stop(); await this.github.drain(); await this.health.drain(); await this.limits.drain(); await this.automations.drain(); await this.pilots.usage.drain(); await this.pilots.lifecycle.drain(); await this.pilots.completion.drain(); return this.tasks.drain() }
+  stop() { clearInterval(this.recovery); this.screens.stop(); this.failedStarts.stop(); this.pluginUpdates?.stop(); this.plugins.stop(); this.voices.stop(); this.health.stop(); this.limits.stop(); this.automations.stop(); this.github.stop(); this.logs.stop(); this.browsers.stop(); this.core.stop() }
 }
