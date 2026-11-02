@@ -6,6 +6,7 @@ import { CoreLogs } from '../server/core/logs.ts'
 import { CoreStore } from '../server/core/store.ts'
 import type { CoreAgents } from '../server/core/agents.ts'
 import type { CoreFiles } from '../server/core/files.ts'
+import { runChild } from './child.ts'
 
 // A stable hooks file must not hold back appended native transcript records.
 test('stable hooks at EOF do not block subsequent native transcript lines', async () => {
@@ -16,9 +17,7 @@ test('stable hooks at EOF do not block subsequent native transcript lines', asyn
   writeFileSync(agent.transcript, assistant('first'))
   const faults: string[] = []
   const files = { exec: async (_machine: string, argv: string[], _cwd: string, input: Uint8Array) => {
-    const result = Bun.spawnSync(argv, { stdin: input })
-    if (result.exitCode) throw Error(result.stderr.toString())
-    return result.stdout
+    return runChild(argv, { input })
   } } as unknown as CoreFiles
   const agents = { all: () => [agent], get: () => agent, hook: () => {}, bun: async () => process.execPath } as unknown as CoreAgents
   const incoming: string[] = []
@@ -60,9 +59,7 @@ test('a stalled remote log does not block a local native transcript', async () =
   const updated = new Promise<void>(resolve => { arrived = resolve })
   const files = { exec: async (machine: string, argv: string[], _cwd: string, input: Uint8Array) => {
     if (machine === 'remote') { await blocked; throw Error('remote disconnected') }
-    const result = Bun.spawnSync(argv, { stdin: input })
-    if (result.exitCode) throw Error(result.stderr.toString())
-    return result.stdout
+    return runChild(argv, { input })
   } } as unknown as CoreFiles
   const agents = { all: () => [remote, local], get: (chat: string) => chat === 'local' ? local : remote, hook: () => {}, bun: async () => process.execPath } as unknown as CoreAgents
   const logs = new CoreLogs(agents, files, store, chat => { if (chat === 'local') arrived() }, () => {})
@@ -84,9 +81,7 @@ test('poll slots rotate so more than four chats on one machine all make progress
     writeFileSync(agent.transcript, JSON.stringify({ timestamp: '2026-10-29T12:00:00Z', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: agent.chat }] } }) + '\n')
   }
   const files = { exec: async (_machine: string, argv: string[], _cwd: string, input: Uint8Array) => {
-    const result = Bun.spawnSync(argv, { stdin: input })
-    if (result.exitCode) throw Error(result.stderr.toString())
-    return result.stdout
+    return runChild(argv, { input })
   } } as unknown as CoreFiles
   const logs = new CoreLogs({ all: () => agents, get: (chat: string) => agents.find(agent => agent.chat === chat), hook: () => {}, bun: async () => process.execPath } as unknown as CoreAgents, files, store, () => {}, () => {})
   try {
@@ -104,7 +99,7 @@ test('completion cleanup requires its private command receipt and later captured
   writeFileSync(agent.hook, '')
   writeFileSync(agent.transcript!, user('earlier') + final('old', 'Earlier reply'))
   const files = { exec: async (_machine: string, argv: string[], _cwd: string, input: Uint8Array) => {
-    const result = Bun.spawnSync(argv, { stdin: input }); if (result.exitCode) throw Error(result.stderr.toString()); return result.stdout
+    return runChild(argv, { input })
   } } as unknown as CoreFiles
   const agents = { all: () => [agent], get: () => agent, hook: () => { agent.state = 'idle' }, bun: async () => process.execPath } as unknown as CoreAgents
   store.set('task-cleanup-receipt', agent.chat, { launch: 'one', receipt: 'private-finish-token', seen: false, complete: false })
@@ -135,7 +130,7 @@ test('task waiting requires a captured current turn end and no open turn/backgro
   const event = (type: string, turn = 'turn', delta = 1, extra = {}) => JSON.stringify({ timestamp: new Date(now + delta).toISOString(), type: 'event_msg', payload: { type, turn_id: turn, ...extra } }) + '\n'
   writeFileSync(agent.hook, '')
   writeFileSync(agent.transcript!, event('task_started', 'old', -2) + event('task_complete', 'old', -1))
-  const files = { exec: async (_machine: string, argv: string[], _cwd: string, input: Uint8Array) => { const result = Bun.spawnSync(argv, { stdin: input }); if (result.exitCode) throw Error(result.stderr.toString()); return result.stdout } } as unknown as CoreFiles
+  const files = { exec: async (_machine: string, argv: string[], _cwd: string, input: Uint8Array) => runChild(argv, { input }) } as unknown as CoreFiles
   const agents = { all: () => [agent], get: () => agent, hook: () => {}, bun: async () => process.execPath } as unknown as CoreAgents
   let logs = new CoreLogs(agents, files, store, () => {}, () => {})
   try {
@@ -177,7 +172,7 @@ test('native runtime observations preserve launch policy and reject historical o
   store.set('agent', agent.chat, agent)
   const agents = { all: () => [store.get('agent', agent.chat)], get: () => store.get('agent', agent.chat), hook: () => {}, bun: async () => process.execPath } as unknown as CoreAgents
   const faults: string[] = []
-  const files = { exec: async (_machine: string, argv: string[], _cwd: string, input: Uint8Array) => { const result = Bun.spawnSync(argv, { stdin: input }); if (result.exitCode) throw Error(result.stderr.toString()); return result.stdout } } as unknown as CoreFiles
+  const files = { exec: async (_machine: string, argv: string[], _cwd: string, input: Uint8Array) => runChild(argv, { input }) } as unknown as CoreFiles
   const logs = new CoreLogs(agents, files, store, () => {}, (_chat, fault) => faults.push(fault))
   try {
     await logs.poll()

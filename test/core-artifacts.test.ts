@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { CoreSource } from '../server/core/source.ts'
 import type { CoreAgent, CoreSpace } from '../server/core/model.ts'
+import { runChild } from './child.ts'
 
 /** Real private files through a fake core exec boundary, on GitHub only. Checker fakes are not UI proof. */
 async function fixture(run: (source: CoreSource, agent: CoreAgent, root: string, shots: { light: string; dark: string }) => Promise<void>) {
@@ -17,9 +18,7 @@ async function fixture(run: (source: CoreSource, agent: CoreAgent, root: string,
   source.store.set('space', space.id, space); source.store.set('agent', agent.chat, agent)
   source.agents.bun = async () => process.execPath
   source.files.exec = async (_machine, argv, cwd, input) => {
-    const child = Bun.spawnSync(argv, { cwd, stdin: input ?? 'ignore', env: { ...process.env, HOME: root, USERPROFILE: root } })
-    if (child.exitCode) throw new Error(child.stderr.toString())
-    return Buffer.from(child.stdout)
+    return runChild(argv, { cwd, input, env: { ...process.env, HOME: root, USERPROFILE: root } })
   }
   const shots = { light: join(root, 'light.png'), dark: join(root, 'dark.png') }
   writeFileSync(shots.light, 'test picture'); writeFileSync(shots.dark, 'test picture dark')

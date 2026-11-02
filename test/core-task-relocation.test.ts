@@ -6,6 +6,7 @@ import { CoreSource } from '../server/core/source.ts'
 import { prepareHome } from '../server/core/home.ts'
 import { CoreTaskRelocation } from '../server/core/task-relocation.ts'
 import type { CoreTask } from '../server/core/tasks.ts'
+import { runChild } from './child.ts'
 
 async function fixture(run: (source: CoreSource, task: CoreTask, root: string) => Promise<void>) {
   const root = mkdtempSync(join(tmpdir(), 'shep-task-move-')), repo = join(root, 'repo'), folder = join(root, 'app/worktrees/old')
@@ -23,9 +24,7 @@ async function fixture(run: (source: CoreSource, task: CoreTask, root: string) =
   mkdirSync(join(root, 'app/sessions'), { mode: 0o700 })
   source.agents.browserRuntime = async () => ({ root: join(import.meta.dir, '..'), bun: process.execPath, bin: '/unused', sessions: join(root, 'app/sessions') })
   source.files.exec = async (_machine, argv, cwd, input) => {
-    const p = Bun.spawnSync(argv, { cwd, stdin: input ?? 'ignore' })
-    if (p.exitCode) throw Error(p.stderr.toString())
-    return Buffer.from(p.stdout)
+    return runChild(argv, { cwd, input })
   }
   try { await run(source, task, root) }
   finally { source.stop(); source.mailbox.close(); source.store.close(); rmSync(root, { recursive: true, force: true }) }

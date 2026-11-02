@@ -4,11 +4,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CoreNativeFile } from '../server/core/native-file.ts'
 import type { CoreFiles } from '../server/core/files.ts'
+import { runChild } from './child.ts'
 
 const files = { exec: async (_machine: string, argv: string[], _cwd: string, input: Uint8Array) => {
-  const result = Bun.spawnSync(argv, { stdin: input })
-  if (result.exitCode) throw Error(result.stderr.toString())
-  return result.stdout
+  return runChild(argv, { input })
 } } as unknown as CoreFiles
 
 async function fixture(run: (path: string) => Promise<void>) {

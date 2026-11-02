@@ -8,6 +8,7 @@ import type { CoreSource } from '../server/core/source.ts'
 import type { Grant } from '../server/core/mailbox.ts'
 import type { Message, UpdateCard } from '../shared/types.ts'
 import { seal, unseal, type MailCredential } from '../server/core/envelope.ts'
+import { runChild } from './child.ts'
 
 /** Real local git on CI, fake core boundary; no provider credentials or network needed. */
 async function withTask(run: (context: { tasks: CoreTasks; task: CoreTask; grant: Grant; repo: string; worktree: string; git: (cwd: string, ...args: string[]) => void; state: { terminal: string } }) => Promise<void>) {
@@ -33,9 +34,7 @@ async function withTask(run: (context: { tasks: CoreTasks; task: CoreTask; grant
   const source = {
     store, config: { home: store.home }, space: () => ({ id: 'space', name: 'demo', machine: 'machine', folder: repo, mode: 'regular', base: 'main', prefix: 'DEMO', added: 1 }), settings: { get: () => 'off' },
     files: { exec: async (_machine: string, argv: string[], cwd?: string, input?: Uint8Array) => {
-      const result = Bun.spawnSync(argv, { cwd, env, stdin: input ?? 'ignore' })
-      if (result.exitCode !== 0) throw new Error(result.stderr.toString())
-      return result.stdout
+      return runChild(argv, { cwd, env, input })
     } },
     agents: { all: () => [], get: (chat: string) => chat === task.chat ? { chat, launch: grant.session, grant: grant.id, role: 'task', machine: task.machine, space: task.place, kind: 'codex' } : undefined,
       terminal: () => ({ address: 't1', state: state.terminal }), send: async () => {} },
