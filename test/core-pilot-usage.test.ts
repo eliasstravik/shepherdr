@@ -8,6 +8,7 @@ import { pilotInventory } from '../helper/core-pilot-inventory.ts'
 import { CorePilotUsage, pilotReportedUsage } from '../server/core/pilot-usage.ts'
 import { CoreSource } from '../server/core/source.ts'
 import type { CoreAgent, CoreSpace } from '../server/core/model.ts'
+import { runChild } from './child.ts'
 
 const line = (type: string, payload: unknown) => JSON.stringify({ type, timestamp: '2026-10-30T00:00:00Z', payload }) + '\n'
 const capture = (records: PilotRecords, file: string, text: string) => records.write({ file, identity: '1:2:0', reset: true, offset: 0, data: Buffer.from(text).toString('base64') })
@@ -45,7 +46,7 @@ test('native usage includes helpers, survives reader restart, and discovers only
     // A parent-side copy of that provider message must not count its helper twice.
     capture(records, '.claude/projects/repo/parent.jsonl', helperUsage)
     source.agents.browserRuntime = async () => ({ root: join(import.meta.dir, '..'), bun: process.execPath, bin: '/unused', sessions: '/unused' })
-    source.files.exec = async (_machine, argv, cwd, input) => { const p = Bun.spawnSync(argv, { cwd, stdin: input ?? 'ignore' }); if (p.exitCode) throw Error(p.stderr.toString()); return Buffer.from(p.stdout) }
+    source.files.exec = async (_machine, argv, cwd, input) => runChild(argv, { cwd, input })
     const usage = new CorePilotUsage(source, () => now)
     await usage.observe(agent)
     expect(source.agents.get(agent.chat)?.transcript).toBe(join(captures, '.codex/sessions/main.jsonl'))

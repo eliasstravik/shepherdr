@@ -6,6 +6,7 @@ import { CoreSource } from '../server/core/source.ts'
 import { CorePilotRepositories } from '../server/core/pilot-repositories.ts'
 import type { Grant } from '../server/core/mailbox.ts'
 import type { CoreAgent, CoreSpace } from '../server/core/model.ts'
+import { runChild } from './child.ts'
 
 // Real Git and checked helper on GitHub; native provider launch is a recorded core boundary, not acceptance proof.
 test('managed workers and fresh reviewers inherit the private run and checked worktree boundary', async () => {
@@ -19,7 +20,7 @@ test('managed workers and fresh reviewers inherit the private run and checked wo
     execute(['git', 'init', '-b', 'main', repo]); execute(['git', 'config', 'user.name', 'Fixture'], repo); execute(['git', 'config', 'user.email', 'proof@example.invalid'], repo); writeFileSync(join(repo, 'base.txt'), 'before\n'); execute(['git', 'add', '.'], repo); execute(['git', 'commit', '-m', 'Base'], repo)
     source.store.set('space', space.id, space); source.core.current.connected = true
     source.store.set('health-sample', machine, { at: Date.now(), cores: 8, load: 0, memTotal: 1000, memUsed: 100, disks: [], gpus: [] })
-    source.files.exec = async (_machine, argv, cwd, input) => Buffer.from(execute(argv, cwd, input))
+    source.files.exec = async (_machine, argv, cwd, input) => runChild(argv, { cwd, env, input })
     source.core.call = async <T>(method: string) => { if (method !== 'terminal.label') throw Error(method); return {} as T }
     source.agents.pilotWorktreeRoot = async () => join(root, 'pilot-worktrees')
     source.agents.browserRuntime = async () => ({ root: join(import.meta.dir, '..'), bun: process.execPath, bin: '/unused', sessions: '/unused' })

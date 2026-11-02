@@ -4,6 +4,7 @@ import { dirname, join, relative } from 'node:path'
 import { tmpdir } from 'node:os'
 import { CoreRemotes, PARTS } from '../server/core/remote.ts'
 import type { CoreFiles } from '../server/core/files.ts'
+import { runChild } from './child.ts'
 
 /** Fake core transport, real private-file writer on CI. Never uses SSH or installed agent state. */
 for (const core of ['0.1.14', '0.1.16']) test(`remote helpers on core ${core} are immutable private files and launch credentials cannot follow symlinks`, async () => {
@@ -13,9 +14,7 @@ for (const core of ['0.1.14', '0.1.16']) test(`remote helpers on core ${core} ar
     if (argv[0] === 'sh') return Buffer.from(process.execPath)
     if (argv[2].startsWith("const o=require")) return Buffer.from(JSON.stringify({ home, bun: process.execPath, hc: '/core/hc', path: '/core', version: `hc ${core}`, session: 'isolated', environment: { XDG_RUNTIME_DIR: '/private/runtime', XDG_STATE_HOME: '/private/state', XDG_CONFIG_HOME: null }, platform: process.platform, arch: process.arch, musl: false }))
     if (argv[2].startsWith('const {CoreClient}')) return Buffer.from('identity verified')
-    const result = Bun.spawnSync(argv, { stdin: input ?? 'ignore' })
-    if (result.exitCode) throw new Error(result.stderr.toString())
-    return result.stdout
+    return runChild(argv, { input })
   } } as unknown as CoreFiles
   const remotes = new CoreRemotes(files, 'installation', () => ({ version: core }))
   try {

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { chatMessages } from '../server/core/chat.ts'
 import { CoreSource } from '../server/core/source.ts'
 import type { CoreSpace } from '../server/core/model.ts'
+import { runChild } from './child.ts'
 
 test('native attachment/reply lines and both reaction sides retain the original message identity', () => {
   const messages = chatMessages([
@@ -37,9 +38,7 @@ test('remote uploads cross core in bounded chunks, retain bytes and cannot borro
   const sizes: number[] = []
   source.files.exec = async (_machine, argv, cwd, input) => {
     sizes.push(input?.length ?? 0)
-    const child = Bun.spawnSync(argv, { cwd, stdin: input ?? 'ignore', env: { ...process.env, HOME: root, USERPROFILE: root } })
-    if (child.exitCode) throw new Error(child.stderr.toString())
-    return Buffer.from(child.stdout)
+    return runChild(argv, { cwd, input, env: { ...process.env, HOME: root, USERPROFILE: root } })
   }
   try {
     const bytes = Buffer.alloc(3 * 1024 * 1024, 17), path = await source.upload(space.id, 'proof"1.bin', bytes)

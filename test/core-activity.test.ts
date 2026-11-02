@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { CoreSource } from '../server/core/source.ts'
 import { outputFromLine } from '../server/activity.ts'
 import type { LogEvent } from '../server/common/readers/types.ts'
+import { runChild } from './child.ts'
 
 test('native activity renders before its reply and reads only a recorded output location through core', async () => {
   const root = mkdtempSync(join(tmpdir(), 'shep-activity-')), source = new CoreSource({ home: join(root, 'app'), port: 17887, session: 'test', socket: '/unused', binary: 'hc' })
@@ -16,9 +17,7 @@ test('native activity renders before its reply and reads only a recorded output 
   let calls = 0
   source.files.exec = async (_machine, argv, cwd, input) => {
     calls++
-    const child = Bun.spawnSync(argv, { cwd, stdin: input ?? 'ignore' })
-    if (child.exitCode) throw new Error(child.stderr.toString())
-    return Buffer.from(child.stdout)
+    return runChild(argv, { cwd, input })
   }
   const events: LogEvent[] = [
     { kind: 'turn-start', id: 'turn', at: 1 },
