@@ -1131,7 +1131,12 @@ export function ReplyOnCard({ ask, reply, task, source }: { ask: CardAsk; reply:
   const a = ask.answered
   return (
     <CardShell title={`${task} asks`} source={source}>
-      <div data-ask-text className="line-clamp-6 break-words whitespace-pre-wrap">{reply.text}</div>
+      {/* its words as the chat shows a reply: markdown, and a long one folds with Show more */}
+      <div data-ask-text className="min-w-0 break-words">
+        <Fold id={`ask:${ask.chat}:${reply.id ?? ''}`}>
+          <Markdown text={reply.text} />
+        </Fold>
+      </div>
       {a ? (
         <Sent>
           <CheckIcon className={ic} />

@@ -118,6 +118,12 @@ test('an agent that waits with no card shows what it last said, and the reply qu
     expect(f.source.snapshot().needs.find(n => n.task === 'A-1')).toMatchObject({ id: 'attention', text: 'Keep the old API around?', reply: 'said' })
     // nothing said yet: why it waits
     expect(f.source.snapshot().needs.find(n => n.task === 'B-1')).toMatchObject({ id: 'attention', text: 'Waits for your reply' })
+    // a long one keeps its lines and markdown, for its card to show; only a very long one is cut
+    const long = `**Fixed (commit \`8cb96b9\`):** the replay path.\n\n${'More words. '.repeat(100).trim()}`
+    f.source.post('A-1/Agent', { id: 'long', who: 'agent', text: long, at: 200 })
+    expect(f.source.snapshot().needs.find(n => n.task === 'A-1')?.text).toBe(long)
+    f.source.post('A-1/Agent', { id: 'huge', who: 'agent', text: 'x'.repeat(5000), at: 300 })
+    expect(f.source.snapshot().needs.find(n => n.task === 'A-1')?.text).toBe(`${'x'.repeat(3999)}…`)
   } finally { f.close() }
 })
 

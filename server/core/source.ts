@@ -59,8 +59,8 @@ import { guarded } from './guarded.ts'
 
 interface Machine { id: string; name: string; state: string; host?: string; version?: string; session?: string | null }
 interface Permission { id: string; chat: string; grant: string; question: Question; expires: number; settled?: boolean; allow?: boolean; at?: number; native?: NativeAsk; grants?: unknown[]; reply?: PermissionAnswer; tool?: string; hash?: string; turn?: string; sub?: string }
-/** the most of an agent's last words a card with no question carries: its card shows a few lines */
-const NEED_TEXT = 1000
+/** the most of an agent's last words a card with no question carries: its card shows them as markdown, folded when long */
+const NEED_TEXT = 4000
 interface PendingSend { id: string; chat: string; text: string; launch?: string; state: 'queued' | 'sending' | 'uncertain' | 'cancelled'; quiet?: boolean; work?: boolean; human?: boolean }
 
 /** Product state is Shepherdr's; terminals, machine commands, files and agent children are core's. */
@@ -264,7 +264,7 @@ export class CoreSource extends Emitter<SourceEvents> implements Source {
   /** What an agent with no card last said: what its reply answers. */
   private lastWords(chat: string): Pick<Need, 'text' | 'reply'> {
     const last = lastReply({ key: chat, cli: '', messages: this.logs.messages(chat) })
-    return last?.text ? { text: clip(last.text, NEED_TEXT), reply: last.id } : {}
+    return last?.text ? { text: last.text.length > NEED_TEXT ? `${last.text.slice(0, NEED_TEXT - 1).trimEnd()}…` : last.text, reply: last.id } : {}
   }
   /** Everything waiting on the human, oldest first: each agent's own open cards, and the plain waits with none. */
   private needs(tasks: Task[]): Need[] {
