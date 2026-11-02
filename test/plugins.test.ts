@@ -25,6 +25,7 @@ function fixture() {
   file(join(home, 'plugins', 'b', 'client.tsx'))
   file(join(home, 'plugins', 'c', 'client.tsx'))
   file(join(home, 'plugins', 'c', 'server.ts'))
+  for (const name of ['b', 'c']) file(join(home, 'plugins', name, 'shepherdr.json'), '{"api":2}')
   // not plugins: a folder with neither part, a name that isn't one, a loose file
   file(join(home, 'plugins', 'notes', 'README.md'))
   file(join(home, 'plugins', 'Bad Name', 'client.tsx'))
@@ -33,6 +34,20 @@ function fixture() {
 }
 
 describe('a build with the human’s own plugins', () => {
+  test('incompatible user parts are never imported; built-in replacements fall back', () => {
+    const { dir, home } = fixture()
+    rmSync(join(home, 'plugins', 'b', 'shepherdr.json'))
+    file(join(home, 'plugins', 'c', 'shepherdr.json'), '{"api":1}')
+    stageUserPlugins(dir, home)
+    writeRegistries(dir)
+    const client = readFileSync(join(dir, 'generated', 'client-plugins.ts'), 'utf8')
+    const server = readFileSync(join(dir, 'generated', 'server-plugins.ts'), 'utf8')
+    expect(client).toContain("import b from '../plugins/b/client.tsx'")
+    expect(client).not.toContain('../user-plugins/')
+    expect(server).not.toContain('../user-plugins/')
+    expect(pluginCatalog(dir).find(plugin => plugin.name === 'c')?.broken).toContain('Migrate this 2.0 plugin')
+    rmSync(dir, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true })
+  })
   test('one is added after the base ones; one with a base name replaces it, in its place', () => {
     const { dir, home } = fixture()
     stageUserPlugins(dir, home)

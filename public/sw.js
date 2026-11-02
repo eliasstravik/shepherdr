@@ -36,6 +36,8 @@ self.addEventListener('push', (e) => {
       .then((list) => {
         if (list.some((c) => c.visibilityState === 'visible')) return
         const tag = a.tag || a.id
+        // a push must show something: quietly, and gone at once, it leaves only the older alert's going
+        if (a.clear) return self.registration.showNotification(a.title, { tag, silent: true }).then(() => self.registration.getNotifications({ tag })).then((shown) => shown.forEach((n) => n.close()))
         const options = {
           body: a.body,
           tag,

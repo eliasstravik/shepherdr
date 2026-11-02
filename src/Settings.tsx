@@ -1,7 +1,7 @@
 // Settings: the app's few settings. Most are defaults set at three levels, All machines, a machine or a project, and
 // the most specific one set wins: how tasks work (what every new brief ends with), each kind of agent's app, model and
-// effort, Autopilot's heartbeat and checklist, a machine's limits. Settings opens on the level of the place it was opened from, and a
-// picker at its top switches; each row says where a value it doesn't set comes from, and one it sets can be reset.
+// effort, Autopilot's heartbeat and checklist, a machine's limits. Settings opens on Everywhere, a picker at its top switches,
+// and each row offers the space it was opened from; each row says where a value it doesn't set comes from, and one it sets can be reset.
 // Alerts and voice are one for all; a task has none of its own. Appearance is each device's own, as are the pages
 // plugins add (a desktop's keyboard shortcuts). A phone lists the sections in rounded groups, as iOS's Settings does, and a tap pushes one over
 // the list; a wider screen keeps the list down its side.
@@ -462,11 +462,16 @@ const ICONS: Record<string, ComponentType<{ className?: string }>> = {
 /** every level defaults are set at: Everywhere, then each machine and its spaces */
 export const levelsOf = (sections: SettingSection[]) => [...new Set(sections.flatMap((x) => (x.level && !x.global ? [x.level] : [])))]
 
-/** the level Settings edits: the one picked, else the space it was opened from's, else Everywhere */
+/** the level Settings edits: the one picked, else Everywhere: a default set without thinking must not stay with one space */
 export function levelOf(sections: SettingSection[], ui: UI) {
-  const levels = levelsOf(sections)
-  const want = ui.settings?.level ?? ui.place
-  return levels.includes(want) ? want : 'all'
+  const want = ui.settings?.level
+  return want && levelsOf(sections).includes(want) ? want : 'all'
+}
+
+/** the space Everywhere's rows offer: the one Settings was opened from */
+function spaceOf(snap: Snapshot, ui: UI) {
+  const level = levelOf(snap.settings, ui), place = snap.places.find((p) => p.id === ui.place)
+  return level === 'all' && place && levelsOf(snap.settings).includes(place.id) ? place : undefined
 }
 
 /** a level's name: Everywhere, a machine's, or a space's (with its machine's, where there are more machines) */
@@ -556,7 +561,7 @@ function AppearancePick({ phone }: { phone: boolean }) {
   return (
     <div role="radiogroup" aria-label="Appearance" className={phone ? clsx(card, 'overflow-hidden') : 'w-full'}>
       {APPEARANCES.map((a) => (
-        <label key={a} className={clsx(rowLook(phone), 'group cursor-pointer has-focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)]', phone && 'press')}>
+        <label key={a} className={clsx(rowLook(phone), 'group cursor-pointer keys:has-focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)]', phone && 'press')}>
           <input type="radio" name="appearance" value={a} checked={now === a} onChange={() => setAppearance(a)} className="sr-only" />
           <span className="flex min-w-0 flex-col">
             {LOOKS[a].label}
@@ -592,6 +597,20 @@ const follows = (row: SettingRow, value: string) => (row.inherits && value === r
 /** the rows whose few short choices sit side by side */
 const SEGMENTS = new Set(['notify', 'review.mustFix'])
 
+/** on Everywhere's rows: the way to the space Settings was opened from, and that it already sets its own */
+function SpaceOnly({ row }: { row: SettingRow }) {
+  const ui = useUI()
+  const snap = useSnap()!
+  const place = spaceOf(snap, ui)
+  const own = place && row.key ? snap.settings.find((x) => x.level === place.id && !x.global && x.rows.some((r) => r.key === row.key))?.rows.find((r) => r.key === row.key) : undefined
+  if (!own || row.fixed) return null
+  return (
+    <button type="button" onClick={() => setUI({ settings: { ...ui.settings!, level: place!.id } })} className="press-dim relative self-start text-left text-[0.75rem] text-fg2 underline decoration-fg3 underline-offset-2 after:absolute after:-inset-x-1 after:-inset-y-1.5 coarse:after:-inset-y-3 phone:text-[0.8125rem]">
+      {own.inherits ? `${place!.name} sets its own` : `For this space only: ${place!.name}`}
+    </button>
+  )
+}
+
 /** a page's settings: its rows under their group's heading (Tasks, Coordinators, Reviewer), and what it notes under them */
 function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phone: boolean; set: (key: string, value: string | null) => void; refused: (key: string) => string | undefined; clear: (key: string) => void; hint?: string }) {
   const [pilotError, setPilotError] = useState('')
@@ -606,9 +625,10 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
     <>
       {row.key in registry.settingActions ? <Small className="text-pretty">{row.value}</Small> : null}
       {row.hint ? <Small className="text-pretty">{row.hint}</Small> : null}
-      {/* the exact words it adds to every new brief, as it is set now */}
-      {row.line ? <details className="text-[0.8125rem] text-fg2"><summary className="cursor-pointer">Brief wording</summary><p className="text-pretty">Adds: “{row.line}”</p></details> : null}
+      {/* the exact words it adds to every new task's brief, as it is set now */}
+      {row.line ? <details className="text-[0.8125rem] text-fg2"><summary className="cursor-pointer">Words this adds to each new task</summary><p className="text-pretty">“{row.line}”</p></details> : null}
       {row.from ? <Small className="text-pretty">From {row.from}</Small> : null}
+      <SpaceOnly row={row} />
       {row.inherits ? (
         // set here: Reset, back to what it would be (its title says where that comes from)
         <Small className="text-pretty">
@@ -692,7 +712,7 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
       })}
       {page.note ? (
         <figure className="w-full">
-          <figcaption className={heading(phone)}>{page.noteTitle ?? 'Every new brief ends with'}</figcaption>
+          <figcaption className={heading(phone)}>{page.noteTitle ?? "Every new task's instructions end with"}</figcaption>
           <blockquote className={clsx('text-pretty whitespace-pre-wrap text-fg2', phone ? clsx(card, 'px-4 py-3 text-[0.9375rem]') : 'rounded-box bg-hover px-3 py-2.5 text-[0.8125rem]')}>{page.note}</blockquote>
         </figure>
       ) : null}
@@ -721,26 +741,37 @@ function SecretsList({ level, secrets, phone }: { level: string; secrets: { name
   const [sure, setSure] = useState<string | null>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [only, setOnly] = useState(false)
+  const ui = useUI()
+  const snap = useSnap()!
+  const place = spaceOf(snap, ui)
+  const own = snap.settings.find((x) => x.level === place?.id && x.secrets)?.secrets ?? []
   // another level's page: nothing half-typed comes along
   useEffect(() => {
     setOpen(null)
     setValue('')
     setSure(null)
+    setOnly(false)
   }, [level])
   const close = () => {
     setOpen(null)
     setName('')
     setValue('')
     setErr('')
+    setOnly(false)
   }
   const save = async (n: string, v: string | null) => {
     setBusy(true)
     setErr('')
     try {
-      const r = (await act({ type: 'secret', level, name: n, value: v })) as { ok?: boolean; error?: string }
+      const target = only && place ? place.id : level
+      const r = (await act({ type: 'secret', level: target, name: n, value: v })) as { ok?: boolean; error?: string }
       if (r?.ok === false) setErr(r.error ?? "That didn't go through.")
-      else if (v !== null) close()
-      else setSure(null)
+      else if (v !== null) {
+        close()
+        // there is where it is listed
+        if (target !== level) setUI({ settings: { ...ui.settings!, level: target } })
+      } else setSure(null)
     } catch {
       setErr("That didn't go through: Shepherdr can't be reached.")
     } finally {
@@ -750,6 +781,7 @@ function SecretsList({ level, secrets, phone }: { level: string; secrets: { name
   const box = (n: string) => (
     <div className="flex w-full flex-col gap-2">
       <SecretField label={n ? `New value for ${n}` : 'Value'} value={value} onChange={setValue} onEnter={() => (n || name) && value && save(n || name.trim(), value)} autoFocus={!!n} />
+      {!n && place ? <div className="flex min-h-9 items-center justify-between gap-3"><span className="min-w-0">For this space only: {place.name}</span><Switch label={`For this space only: ${place.name}`} on={only} onChange={setOnly} /></div> : null}
       <div className="flex items-center justify-end gap-2">
         {err ? <span role="status" className="mr-auto text-[0.75rem] text-need-fg phone:text-[0.8125rem]">{err}</span> : null}
         <Ghost onClick={close}>Cancel</Ghost>
@@ -830,6 +862,7 @@ function SecretsList({ level, secrets, phone }: { level: string; secrets: { name
       <p className={clsx('text-pretty text-fg3', phone ? 'px-4 text-[0.8125rem]' : 'text-[0.75rem]')}>
         Agents run commands with them by name (shepherdr secret run), and ask for one in their chat when they need it.
       </p>
+      {own.length ? <Small className="text-pretty">{place!.name} sets its own: {own.map((x) => x.name).join(', ')}. <button type="button" onClick={() => setUI({ settings: { ...ui.settings!, level: place!.id } })} className="press-dim underline decoration-fg3 underline-offset-2">Open</button></Small> : null}
     </div>
   )
 }
@@ -896,9 +929,15 @@ export default function Settings() {
       setRefused((r) => ({ ...r, [at(key)]: said }))
       return
     }
-    // set at the page's level: a machine's or a space's goes to that machine
-    const r = (await act({ type: 'setting', key, value, ...((page.targets?.[key] ?? page.level) ? { place: page.targets?.[key] ?? page.level } : {}) })) as { ok?: boolean; error?: string; waiting?: boolean }
-    setRefused((x) => ({ ...x, [at(key)]: r?.ok === false ? (r.error ?? 'Refused.') : r?.waiting ? `Set once ${machineName(snap.machines, page.machine)} is back.` : '' }))
+    try {
+      // set at the page's level: a machine's or a space's goes to that machine
+      const r = (await act({ type: 'setting', key, value, ...((page.targets?.[key] ?? page.level) ? { place: page.targets?.[key] ?? page.level } : {}) })) as { ok?: boolean; error?: string; waiting?: boolean }
+      setRefused((x) => ({ ...x, [at(key)]: r?.ok === false ? (r.error ?? 'Refused.') : r?.waiting ? `Set once ${machineName(snap.machines, page.machine)} is back.` : '' }))
+    } catch (error) {
+      let message = error instanceof Error ? error.message : 'That did not save. Try again.'
+      try { const body = JSON.parse(message); if (typeof body.error === 'string') message = body.error } catch {}
+      setRefused((x) => ({ ...x, [at(key)]: message }))
+    }
   }
   const close = () => setUI({ settings: null })
   const scroller = useRef<HTMLDivElement>(null)

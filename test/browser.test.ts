@@ -7,9 +7,9 @@ import { join } from 'node:path'
 
 const home = mkdtempSync(join(tmpdir(), 'shep-browser-'))
 process.env.SHEPHERDR_HOME = home
-const { Browsers, browserEnv, profileOf, usedMark, chromesIn, elapsed } = await import('../server/live/browser.ts')
-const { describe: describeEl } = await import('../server/live/pick.ts')
-const { line, parseBrowserNotes } = await import('../server/live/chatlines.ts')
+const { Browsers, browserEnv, profileOf, usedMark, chromesIn, elapsed } = await import('../server/demo/browser.ts')
+const { describe: describeEl } = await import('../server/browser-pick.ts')
+const { line, parseBrowserNotes } = await import('../server/common/chatlines.ts')
 const { toUrl, shortUrl } = await import('../shared/browser.ts')
 const { fit, keyEvent, pinAt, shotRect, toPage } = await import('../plugins/browser/input.ts')
 import { launch } from './chromium.ts'
@@ -277,6 +277,8 @@ describe('a task’s browser', () => {
       await until(() => streamSocks.size === 1)
       panel.end()
       expect((await b.closeIdle(now + 19 * MIN)).sort()).toEqual(['SHE-92', 'SHE-94'])
+      // Wait for killed fixture processes to disappear before asking ps for another sweep.
+      for (const p of [used, watched]) expect(await Promise.race([p.exited, wait(3000).then(() => 'running')])).not.toBe('running')
       // off: never
       expect(await b.closeIdle(now + 24 * 60 * MIN)).toEqual([])
       expect(off.exitCode).toBeNull()
@@ -287,10 +289,12 @@ describe('a task’s browser', () => {
 
   test('each agent command marks when its browser was used; Shepherdr’s own commands and other sessions don’t', async () => {
     const tmp = mkdtempSync(join(tmpdir(), 'shep-mark-'))
-    // the helper's wrapper on another machine, with a stand-in for the binary next to it
+    // The same pinned package wrapper is provisioned through core on every machine.
     mkdirSync(join(tmp, 'bin'))
-    cpSync(join(import.meta.dir, '..', 'helper', 'agent-browser'), join(tmp, 'bin', 'agent-browser'))
-    writeFileSync(join(tmp, 'bin', 'agent-browser-bin'), '#!/bin/sh\necho "ran $* with $AGENT_BROWSER_ARGS"\n', { mode: 0o755 })
+    cpSync(join(import.meta.dir, '..', 'bin', 'agent-browser'), join(tmp, 'bin', 'agent-browser'))
+    const packageBin = join(tmp, 'node_modules', 'agent-browser', 'bin')
+    mkdirSync(packageBin, { recursive: true })
+    for (const suffix of ['', '-musl']) writeFileSync(join(packageBin, `agent-browser-${process.platform}${suffix}-${process.arch}`), '#!/bin/sh\necho "ran $* with $AGENT_BROWSER_ARGS"\n', { mode: 0o755 })
     for (const bin of [join(tmp, 'bin', 'agent-browser'), join(import.meta.dir, '..', 'bin', 'agent-browser')]) {
       const profile = join(tmp, String(Math.random()), 'browser', 'SHE-5')
       const run = (env: Record<string, string>) => Bun.spawnSync(['sh', bin, '--version'], { env: { ...process.env, ...env }, stdout: 'pipe' })

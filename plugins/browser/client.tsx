@@ -6,7 +6,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Keyboar
 import { act, definePlugin, useUI } from '@client/kernel.ts'
 import { FitIcon, Ghost, GlobeIcon, ic, IconButton, PageBackIcon, PageForwardIcon, MarkUpIcon, Primary, ReloadIcon, Small, UnfitIcon, XIcon } from '@client/ui.tsx'
 import { shortUrl, type BrowserDown, type BrowserNote, type BrowserPick, type BrowserUp, type FrameMeta } from '@shared/browser.ts'
-import type { Task } from '@shared/types.ts'
+import type { Action, Task } from '@shared/types.ts'
 import { fit, keyEvent, modifiers, pinAt, shotRect, toPage, toPanel, type Rect, type Size } from './input.ts'
 
 type State = Extract<BrowserDown, { type: 'state' }>
@@ -31,30 +31,24 @@ const drop = (p: BrowserPick) => {
 }
 
 /** a note's shot, into the task chat's inbox on the task's machine (where it goes in as an attached file) */
-async function upload(chatKey: string, blob: Blob, element: string) {
+async function upload(chatKey: string, blob: Blob, element: string, number: number) {
   const slug = element.replace(/"[^"]*"?/g, '').trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 24) || 'element'
   const body = new FormData()
   body.append('chat', chatKey)
-  body.append('file', new File([blob], `note-${slug}.png`, { type: 'image/png' }))
+  body.append('file', new File([blob], `note-${number}-${slug}.png`, { type: 'image/png' }))
   const r = (await fetch('api/upload', { method: 'POST', body, headers: { 'x-shepherdr': '1' } })
     .then((x) => x.json())
     .catch(() => null)) as { path?: string } | null
   return r?.path ?? null
 }
 
-/** the link to the task's browser: frames go straight to the canvas, the rest into state. A task on another machine
- *  may share its stream on the tailnet: then frames and your input go straight there, and only the rest through the
- *  server (a stream that can't be reached falls back to the server's) */
+/** Frames and controls use Shepherdr's WebSocket; remote traffic stays inside core. */
 function useLink(task: string, onFrame: (data: string, meta: FrameMeta) => void, onPicked: (m: Extract<BrowserDown, { type: 'picked' }>) => void) {
   const [state, setState] = useState<State | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [ended, setEnded] = useState(false)
   const [hover, setHover] = useState<Rect | null>(null)
   const ws = useRef<WebSocket | null>(null)
-  const direct = useRef<{ url: string; ws: WebSocket; open: boolean } | null>(null)
-  /** links that could not be reached, and when: not tried again for a while */
-  const failed = useRef(new Map<string, number>())
-  const driver = useRef<State['driver']>('agent')
   const frame = useRef(onFrame)
   const picked = useRef(onPicked)
   frame.current = onFrame
@@ -74,9 +68,7 @@ function useLink(task: string, onFrame: (data: string, meta: FrameMeta) => void,
         if (m.type === 'frame') return frame.current(m.data, m.metadata)
         if (m.type === 'state') {
           setState(m)
-          driver.current = m.driver
           if (m.connected) setError(null)
-          straight(m.direct)
         } else if (m.type === 'error') {
           setError(m.message)
           // closed with its task: no coming back for it
@@ -95,45 +87,14 @@ function useLink(task: string, onFrame: (data: string, meta: FrameMeta) => void,
         wait = Math.min(wait * 2, 8000)
       }
     }
-    /** frames straight from the task's machine, when it shares them and they can be reached */
-    const straight = (url?: string) => {
-      if (direct.current?.url === url) return
-      direct.current?.ws.close()
-      direct.current = null
-      if (!url || Date.now() - (failed.current.get(url) ?? 0) < 30_000) return
-      const d = { url, ws: new WebSocket(url), open: false }
-      direct.current = d
-      d.ws.onopen = () => {
-        d.open = true
-        ws.current?.send(JSON.stringify({ type: 'direct', on: true } satisfies BrowserUp))
-      }
-      d.ws.onmessage = (e) => {
-        const m = JSON.parse(String(e.data)) as { type?: string; data?: string; metadata?: FrameMeta }
-        if (m.type === 'frame' && m.data && m.metadata) frame.current(m.data, m.metadata)
-      }
-      d.ws.onclose = () => {
-        if (direct.current !== d) return
-        direct.current = null
-        failed.current.set(url, Date.now())
-        if (ws.current?.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify({ type: 'direct', on: false } satisfies BrowserUp))
-      }
-    }
     open()
     return () => {
       gone = true
       clearTimeout(timer)
       ws.current?.close()
-      direct.current?.ws.close()
-      direct.current = null
     }
   }, [task])
   const send = useCallback((m: BrowserUp) => {
-    // your input goes straight to the task's machine when its frames come that way, and only while you drive
-    const d = direct.current
-    if (d?.open && m.type.startsWith('input_')) {
-      if (driver.current === 'you') d.ws.send(JSON.stringify(m))
-      return
-    }
     if (ws.current?.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify(m))
   }, [])
   /** start it again: the error goes until the server says how it went */
@@ -430,25 +391,31 @@ export function BrowserView({ task, chatKey }: { task: Task; chatKey: string }) 
   }
 
   const sending = useRef(false)
+  const preparedNotes = useRef<{ fingerprint: string; action: Extract<Action, { type: 'browser-notes' }> } | null>(null)
   const sendNotes = async () => {
     const all = draft?.pick && draft.comment.trim() ? [...notes, { comment: draft.comment.trim(), pick: draft.pick }] : notes
     if (!all.length || !st || sending.current) return
     sending.current = true
     try {
       await sendAll(all, st)
-    } finally {
+    } catch (error) { setHint((error as Error).message) } finally {
       sending.current = false
     }
   }
   const sendAll = async (all: BrowserNote[], st: State) => {
-    const out = await Promise.all(
-      all.map(async (n) => {
-        const blob = n.pick.thumb && shots.get(n.pick.thumb)
-        const shot = blob ? await upload(chatKey, blob, n.pick.element) : null
-        return { comment: n.comment, pick: { ...n.pick, thumb: undefined, ...(shot ? { shot } : {}) } }
-      }),
-    )
-    await act({ type: 'browser-notes', chat: chatKey, url: st.url, title: st.title || undefined, viewport: st.viewport, notes: out })
+    const fingerprint = JSON.stringify({ all, url: st.url, title: st.title, viewport: st.viewport })
+    if (preparedNotes.current?.fingerprint !== fingerprint) {
+      const out = await Promise.all(
+        all.map(async (n, index) => {
+          const blob = n.pick.thumb && shots.get(n.pick.thumb)
+          const shot = blob ? await upload(chatKey, blob, n.pick.element, index + 1) : null
+          return { comment: n.comment, pick: { ...n.pick, thumb: undefined, ...(shot ? { shot } : {}) } }
+        }),
+      )
+      preparedNotes.current = { fingerprint, action: { type: 'browser-notes', cid: crypto.randomUUID(), chat: chatKey, url: st.url, title: st.title || undefined, viewport: st.viewport, notes: out } }
+    }
+    await act(preparedNotes.current.action)
+    preparedNotes.current = null
     all.forEach((n) => drop(n.pick))
     if (draft?.pick) drop(draft.pick)
     setNotes(() => [])

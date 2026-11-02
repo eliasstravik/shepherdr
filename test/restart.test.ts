@@ -1,9 +1,9 @@
 // What a restart says and offers: the hint once Settings say other than what an agent runs on, a harness in words,
 // and what an agent taking over on another CLI is told.
 import { describe, expect, test } from 'bun:test'
-import { fitHarness, harnessProblem, harnessWords, launchHarness, restartInfo, recentChat, restartHint, sameHarness } from '../server/live/restart.ts'
-import { setModels, TABLE } from '../server/live/models.ts'
-import { restartLine, resumedLine } from '../server/live/prompts.ts'
+import { fitHarness, harnessProblem, harnessWords, launchHarness, pickSpeed, restartInfo, recentChat, restartHint, sameHarness } from '../server/common/restart.ts'
+import { setModels, TABLE } from '../server/common/models.ts'
+import { restartLine, resumedLine } from '../server/common/prompts.ts'
 
 describe('the restart hint', () => {
   test('says the first that differs: the CLI, the model, the effort', () => {
@@ -67,6 +67,13 @@ describe('what the agent is told', () => {
 })
 
 describe('visible launch settings and supported restart choices', () => {
+  test('a restart keeps the speed it was on unless one is picked; only offered speeds pass', () => {
+    expect(pickSpeed(undefined, 'fast')).toBe('fast')
+    expect(pickSpeed('normal', 'fast')).toBe('normal')
+    expect(pickSpeed('', 'fast')).toBeUndefined()
+    expect(() => pickSpeed('ludicrous')).toThrow('Choose Normal or Fast')
+    expect(restartInfo({ role: 'task', on: { kind: 'codex', speed: 'fast' }, want: { kind: 'codex' }, kinds: ['codex', 'pi'], working: false })).toMatchObject({ on: { speed: 'fast' }, clis: [{ kind: 'codex', speeds: ['normal', 'fast'] }, { kind: 'pi' }] })
+  })
   test('both roles keep recorded launch separate from inherited Settings', () => {
     for (const role of ['task', 'coordinator'] as const) {
       const info = restartInfo({ role, on: { kind: 'codex' }, want: { kind: 'claude', model: 'sonnet', effort: 'high' }, kinds: ['claude', 'codex'], working: true })

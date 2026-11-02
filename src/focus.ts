@@ -39,10 +39,39 @@ export function useDialogFocus(ref: RefObject<HTMLElement | null>, { focus = tru
   }, [])
 }
 
-/** Mark <html data-keys> while the keyboard was used last (a key since the last press of a pointer), for rings that
- *  keys should see and a mouse or finger shouldn't, wherever a browser puts the focus back by itself */
+// what takes typing: an arrow moves its caret and a key is a letter, not a checkbox's or a radio's
+const TYPED = 'input:not([type=checkbox], [type=radio]), textarea, [contenteditable=true], [data-term-screen]'
+
+/** The keyboard moved the focus, or the tasks' cursor (a place of its own, not the focus): that one's ring shows */
+export const keysMoved = (what: 'focus' | 'cursor' = 'focus') => {
+  document.documentElement.dataset.keys = what
+}
+
+/** Mark <html data-keys> while the keyboard moves the focus, for rings that keys should see and a mouse or finger
+ *  shouldn't: from a Tab, or an arrow that took the focus somewhere, until a pointer is pressed or something is typed.
+ *  A browser's own :focus-visible won't do: any key (Shift, ⌘ on the way to another app) turns it on for a clicked
+ *  button, and it follows a script's focus after typing */
 export function watchKeys() {
   const root = document.documentElement
-  addEventListener('keydown', (e: KeyboardEvent) => !e.metaKey && !e.ctrlKey && (root.dataset.keys = ''), true)
-  addEventListener('pointerdown', () => delete root.dataset.keys, true)
+  let arrow = false
+  addEventListener(
+    'keydown',
+    (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      arrow = /^(Arrow\w+|Home|End)$/.test(e.key)
+      if (e.key === 'Tab') keysMoved()
+      else if (!arrow && e.key !== 'Escape' && (e.target as Element).closest?.(TYPED)) delete root.dataset.keys
+    },
+    true,
+  )
+  addEventListener('keyup', () => (arrow = false), true)
+  addEventListener('focusin', () => arrow && keysMoved(), true)
+  addEventListener(
+    'pointerdown',
+    () => {
+      arrow = false
+      delete root.dataset.keys
+    },
+    true,
+  )
 }

@@ -169,7 +169,7 @@ function Tree({
           onFocus={() => setCur(n.path)}
           onClick={() => (setCur(n.path), n.kids ? flip(n) : onPick(n.path))}
           style={{ '--depth': depth } as CSSProperties}
-          className="press mx-1.5 flex h-8 w-[calc(100%---spacing(3))] items-center gap-1.5 rounded-row pr-2 pl-[calc(--spacing(1.5)+var(--depth)*--spacing(3.5))] text-left text-[0.8125rem] text-fg hover:bg-hover focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)] focus-visible:outline-none aria-selected:bg-sel aria-selected:hover:bg-sel coarse:h-11 phone:h-11 phone:text-[0.9375rem]"
+          className="press mx-1.5 flex h-8 w-[calc(100%---spacing(3))] items-center gap-1.5 rounded-row pr-2 pl-[calc(--spacing(1.5)+var(--depth)*--spacing(3.5))] text-left text-[0.8125rem] text-fg hover:bg-hover keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)] focus-visible:outline-none aria-selected:bg-sel aria-selected:hover:bg-sel coarse:h-11 phone:h-11 phone:text-[0.9375rem]"
         >
           {n.kids ? (
             <NextIcon className={clsx('size-3.5 shrink-0 text-fg3 motion-safe:transition-transform', open.has(n.path) && 'rotate-90')} />
@@ -352,7 +352,7 @@ function FilesView({ task }: { task: Task }) {
                     tabIndex={i ? -1 : 0}
                     aria-current={f === picked || undefined}
                     onClick={() => pick(f)}
-                    className="press mx-1.5 flex h-8 w-[calc(100%---spacing(3))] items-center gap-1.5 rounded-row px-2 text-left text-[0.8125rem] hover:bg-hover focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)] focus-visible:outline-none aria-current:bg-sel coarse:h-11 phone:h-11 phone:text-[0.9375rem]"
+                    className="press mx-1.5 flex h-8 w-[calc(100%---spacing(3))] items-center gap-1.5 rounded-row px-2 text-left text-[0.8125rem] hover:bg-hover keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)] focus-visible:outline-none aria-current:bg-sel coarse:h-11 phone:h-11 phone:text-[0.9375rem]"
                   >
                     <FileIcon className={clsx(ic, 'text-fg3')} />
                     <PathText path={f} />
@@ -671,7 +671,7 @@ function PrView({ task }: { task: Task }) {
                 })}
               </ul>
             ) : (
-              <Small className="text-fg3">No checks on it.</Small>
+              <Small className={pr.checksError ? "text-need" : "text-fg3"}>{pr.checksError || "No checks on it."}</Small>
             )}
           </div>
         </div>

@@ -1,15 +1,15 @@
 {
   "name": "shepherdr",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "license": "MIT",
   "type": "module",
-  "description": "Run many coding agents across machines from a phone, tablet or desktop. A herdr plugin.",
+  "description": "Private phone, tablet and desktop client for herdr-core.",
   "scripts": {
     "plugins": "bun scripts/build-plugins.ts",
     "build": "bun scripts/build-plugins.ts && vite build",
     "dev": "bun scripts/build-plugins.ts && vite",
-    "start": "bun server/main.ts",
+    "start": "bun server/core/launcher.ts start",
     "demo": "SHEPHERDR_SOURCE=demo bun server/main.ts",
     "typecheck": "bun scripts/build-plugins.ts && tsc --noEmit",
     "test": "bun scripts/test.ts",

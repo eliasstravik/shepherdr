@@ -8,6 +8,7 @@ import { buildId } from '../shared/build.ts'
 import { fileType } from '../shared/files.ts'
 import type { Action, AddSpace, ServerEvent, UpdateStatus, WorktreeAsk } from '../shared/types.ts'
 import { frameResponse, wrapPage } from './frame.ts'
+import { guarded } from './core/guarded.ts'
 import type { Source } from './source.ts'
 import type { Push } from './push.ts'
 
@@ -16,6 +17,7 @@ type Sock =
   | { kind: 'live'; chats: string[]; term: string | null; visible: boolean; push: string | null; link?: boolean }
   | { kind: 'voice'; chat: string; bridge?: ReturnType<NonNullable<Source['voice']>> }
   | { kind: 'browser'; task: string; bridge?: ReturnType<NonNullable<Source['browser']>> }
+  | { kind: 'terminal'; chat: string; bridge?: ReturnType<NonNullable<Source['terminal']>> }
 
 const FONT = join(import.meta.dir, '..', 'node_modules', 'inter-ui', 'variable', 'InterVariable.woff2')
 
@@ -27,18 +29,25 @@ export interface AppOptions {
   host?: string
   /** update.json: how the last update of Shepherdr went, shown on every screen */
   updates?: string
+  /** Standalone core launcher identity; absent in the legacy application. */
+  health?: () => unknown
+  /** A validated plugin build can replace presentation without restarting agents or the server. */
+  assets?: { dist: string }
 }
 
-export function startApp({ source, dist, push, port, host = '127.0.0.1', updates }: AppOptions) {
+export function startApp({ source, dist, push, port, host = '127.0.0.1', updates, health, assets }: AppOptions) {
   const live = new Set<ServerWebSocket<Sock>>()
-  const send = (ws: ServerWebSocket<Sock>, e: ServerEvent) => ws.send(JSON.stringify(e))
+  const send = (ws: ServerWebSocket<Sock>, e: ServerEvent) => {
+    if (ws.getBufferedAmount() > 1024 * 1024) { ws.close(1013, 'Reconnect for a fresh snapshot'); return }
+    ws.send(JSON.stringify(e))
+  }
 
   const calls = new Set<ServerWebSocket<Sock>>()
   /** about to restart for an update: no new voice call starts, so none is cut short */
   let draining = false
   // the build this server serves; a screen on another one reloads (it keeps what you were typing)
-  const index = join(dist, 'index.html')
-  const build = existsSync(index) ? buildId(readFileSync(index, 'utf8')) : ''
+  const currentBuild = () => { const index = join(assets?.dist || dist, 'index.html'); return existsSync(index) ? buildId(readFileSync(index, 'utf8')) : '' }
+  let build = currentBuild()
   let update = updates ? readUpdate(updates) : null
   if (updates) {
     mkdirSync(dirname(updates), { recursive: true })
@@ -69,8 +78,12 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', updates
     if (snapTimer) return
     snapTimer = setTimeout(() => {
       snapTimer = null
-      const snapshot = source.snapshot()
-      for (const ws of live) send(ws, { type: 'snapshot', snapshot })
+      void guarded('Snapshot', () => {
+        const snapshot = source.snapshot()
+        const next = currentBuild()
+        if (next !== build) { build = next; for (const ws of live) send(ws, { type: 'build', id: build }) }
+        for (const ws of live) send(ws, { type: 'snapshot', snapshot })
+      })
     }, 30)
   })
   source.on('chat', (key) => {
@@ -118,6 +131,10 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', updates
       if (path.startsWith('/api/') && path !== '/api/font/InterVariable.woff2' && !sameSite(req, path)) return new Response('forbidden', { status: 403 })
 
       if (path === '/api/ws') return srv.upgrade(req, { data: { kind: 'live', chats: [], term: null, visible: false, push: null } }) ? undefined : new Response('upgrade failed', { status: 400 })
+      if (path === '/api/terminal') {
+        if (!source.terminal) return new Response('no streaming terminal here', { status: 404 })
+        return srv.upgrade(req, { data: { kind: 'terminal', chat: q.get('chat') ?? '' } }) ? undefined : new Response('upgrade failed', { status: 400 })
+      }
       if (path === '/api/voice') return srv.upgrade(req, { data: { kind: 'voice', chat: q.get('chat') ?? '' } }) ? undefined : new Response('upgrade failed', { status: 400 })
       if (path === '/api/browser') {
         if (!source.browser) return new Response('no browser here', { status: 404 })
@@ -125,12 +142,13 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', updates
       }
 
       try {
+        if (path === '/api/health' && health) return json(health())
         if (path === '/api/chat') {
           const key = q.get('chat') ?? ''
           return json({ chat: source.chat(key) ?? null, status: source.chatStatus?.(key) })
         }
         if (path === '/api/snapshot') return json(source.snapshot())
-        // which Shepherdr answers: a start from another plugin folder or version stops it (scripts/plugin.ts)
+        // Diagnostic build identity; standalone lifecycle ownership comes from its private run record.
         if (path === '/api/version') return json(running())
         // the updater restarts the server only once it has stopped new calls and none is on; both at once, so no call
         // can start in between. It lifts the stop again while it waits for a call to end.
@@ -216,11 +234,13 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', updates
       } catch (e) {
         return json({ error: (e as Error).message }, 500)
       }
-      return serveStatic(dist, path)
+      return serveStatic(assets?.dist || dist, path)
     },
     websocket: {
       open(ws) {
-        if (ws.data.kind === 'live') {
+        if (ws.data.kind === 'terminal' && source.terminal) {
+          ws.data.bridge = source.terminal(ws.data.chat, { send: data => ws.send(data), close: () => ws.close(), buffered: () => ws.getBufferedAmount() })
+        } else if (ws.data.kind === 'live') {
           live.add(ws)
           send(ws, { type: 'snapshot', snapshot: source.snapshot() })
           send(ws, { type: 'build', id: build })
@@ -230,7 +250,7 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', updates
           ws.close()
         } else if (ws.data.kind === 'voice' && source.voice) {
           calls.add(ws)
-          ws.data.bridge = source.voice(ws.data.chat, { send: (d) => ws.send(d), close: () => ws.close() })
+          ws.data.bridge = source.voice(ws.data.chat, { send: (d) => ws.send(d), close: () => ws.close(), buffered: () => ws.getBufferedAmount() })
         } else if (ws.data.kind === 'browser' && source.browser) {
           ws.data.bridge = source.browser(ws.data.task, { send: (d) => ws.send(d), close: () => ws.close(), buffered: () => ws.getBufferedAmount() })
         }
@@ -256,7 +276,7 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', updates
           rewatch()
         } else if (d.kind === 'voice') {
           if (typeof msg !== 'string') d.bridge?.audio(msg.buffer.slice(msg.byteOffset, msg.byteOffset + msg.byteLength) as ArrayBuffer)
-        } else if (d.kind === 'browser') {
+        } else if (d.kind === 'browser' || d.kind === 'terminal') {
           if (typeof msg === 'string') d.bridge?.message(msg)
         }
       },
@@ -267,7 +287,7 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', updates
         } else if (ws.data.kind === 'voice') {
           calls.delete(ws)
           ws.data.bridge?.end()
-        } else if (ws.data.kind === 'browser') {
+        } else if (ws.data.kind === 'browser' || ws.data.kind === 'terminal') {
           ws.data.bridge?.end()
         }
       },

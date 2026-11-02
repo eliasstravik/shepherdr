@@ -86,7 +86,7 @@ describe.skipIf(!browser)('sections', () => {
       expect(world.order[idOf('Labs')]).toEqual(['p:vm-str:gtm'])
 
       // its count and bold go with it
-      expect(await gtm.getByLabel('3 need you here', { exact: true }).count()).toBe(1)
+      expect(await gtm.getByLabel('4 needs you, 1 ready · here', { exact: true }).count()).toBe(1)
 
       // a drag onto a heading moves it in: herdr-projects onto Clients, last; the heading lights up on the way
       const hp = page.locator('#places li[data-project="p:vm-str:herdr-projects"]')
@@ -231,8 +231,8 @@ describe.skipIf(!browser)('sections', () => {
     const page = await ctx.newPage()
     try {
       await page.goto(url())
-      await page.getByRole('button', { name: 'Places' }).first().click()
-      const nav = 'nav[aria-label="Places"]'
+      await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).first().click()
+      const nav = 'nav[aria-label="Spaces"]'
       await page.locator(`${nav} li`).first().waitFor()
       await settled(page)
       await page.getByRole('button', { name: 'New section' }).tap()

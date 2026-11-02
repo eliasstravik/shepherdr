@@ -5,8 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { colsOf, fitFont, frame, MAX, MIN, PAD } from '../plugins/terminal/screen.ts'
-import { herdr } from '../server/live/herdr.ts'
+import { colsOf, fitFont, foldedRows, foldShown, frame, GAP, MAX, MIN, PAD } from '../plugins/terminal/screen.ts'
 
 describe('the screen', () => {
   test("its width is the pane's; from an older machine (no size), the widest line without its colours", () => {
@@ -15,6 +14,36 @@ describe('the screen', () => {
     expect(colsOf({ ansi: 'x'.repeat(140), cols: 138, rows: 43 })).toBe(140)
     expect(colsOf({ ansi: '\x1b[38;2;1;2;3mabcdef\x1b[0m\r\nabc' })).toBe(6)
     expect(colsOf({ ansi: '' })).toBe(80)
+  })
+
+  test("a live screen's blank rows fold: all below its last line, a long run down to two, the cursor's row stays", () => {
+    /** x a line, c the cursor, . a blank row; what shows */
+    const shown = (screen: string) => {
+      const rows = [...screen]
+      const folded = foldedRows(rows.length, rows.indexOf('c'), (y) => rows[y] === 'x')
+      return rows.filter((_, y) => !folded[y]).join('')
+    }
+    expect(GAP).toBe(2)
+    // a CLI's prompt pinned to the last row of a tall terminal comes up under its newest line
+    expect(shown('x' + '.'.repeat(100) + 'c')).toBe('x..c')
+    // a program that has only drawn its first rows
+    expect(shown('xxc' + '.'.repeat(100))).toBe('xxc')
+    expect(shown('c....')).toBe('c')
+    // short gaps are the program's own
+    expect(shown('x..x')).toBe('x..x')
+    expect(shown('.'.repeat(20) + 'x')).toBe('..x')
+    expect(shown('x.....x.....c....')).toBe('x..x..c')
+  })
+
+  test('scrolled back, the history shows whole: a fold follows the rows on show, not the live screen', () => {
+    const lines = ['old', 'old', 'old', 'old', 'old', 'live', '', '', '', '', '> prompt']
+    const shown = (viewportY: number) => {
+      const rows = Array.from({ length: 6 }, () => ({ style: { display: '' } }))
+      const t = { rows: 6, buffer: { active: { baseY: 5, viewportY, cursorY: 5, getLine: (y: number) => ({ translateToString: () => lines[y] ?? '' }) } } }
+      return [foldShown(t, rows as unknown as HTMLElement[]), rows.map((r) => r.style.display)]
+    }
+    expect(shown(5)).toEqual([4, ['', '', '', 'none', 'none', '']])
+    expect(shown(0)).toEqual([6, ['', '', '', '', '', '']])
   })
 
   test('one write from a clear screen, no cursor, rows joined as a terminal moves; blank rows at the end go', () => {
@@ -32,38 +61,5 @@ describe('the screen', () => {
     // a phone's is below the floor: the screen pans sideways; a wide desktop's is above the cap
     expect(fitFont(390, 138, 0.6)).toBeLessThan(MIN)
     expect(fitFont(1600, 80, 0.6)).toBeGreaterThan(MAX)
-  })
-})
-
-describe("herdr's pane size", () => {
-  const dir = mkdtempSync(join(tmpdir(), 'shep-sock-'))
-  const path = join(dir, 'herdr.sock')
-  const asked: { method: string; params: Record<string, unknown> }[] = []
-  const server = createServer((sock) => {
-    sock.on('data', (d) => {
-      const req = JSON.parse(d.toString().trim())
-      asked.push(req)
-      const panes = [
-        { pane_id: 'w1:p1', rect: { x: 0, y: 0, width: 90, height: 40 } },
-        { pane_id: 'w1:p2', rect: { x: 91, y: 0, width: 47, height: 40 } },
-      ]
-      sock.end(`${JSON.stringify({ id: req.id, result: { type: 'pane_layout', layout: { panes } } })}\n`)
-    })
-  })
-  const listening = new Promise<void>((r) => server.listen(path, r))
-  const before = process.env.HERDR_SOCKET_PATH
-  afterAll(() => {
-    server.close()
-    rmSync(dir, { recursive: true, force: true })
-    if (before === undefined) delete process.env.HERDR_SOCKET_PATH
-    else process.env.HERDR_SOCKET_PATH = before
-  })
-
-  test("is its own rect in its tab's layout, in cells", async () => {
-    await listening
-    process.env.HERDR_SOCKET_PATH = path
-    expect(await herdr.size('w1:p2')).toEqual({ cols: 47, rows: 40 })
-    expect(asked.at(-1)).toMatchObject({ method: 'pane.layout', params: { pane_id: 'w1:p2' } })
-    expect(await herdr.size('w9:p9')).toBeNull()
   })
 })

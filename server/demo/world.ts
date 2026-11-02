@@ -2,23 +2,23 @@
 // the real thing would, so every screen and case can be walked through without touching real agents.
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { apart, asEmoji, artifactQuote, cardMessage, modeCard, nameProblem, slugify, type Action, type ActivityAsk, type AddSpace, type Artifact, type Chat, type FolderEntry, type Folders, type Machine, type Message, type Place, type Snapshot, type Task, type TaskStatus, type TermScreen, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
+import { apart, asEmoji, artifactQuote, cardMessage, modeCard, nameProblem, slugify, type Action, type ActivityAsk, type AddSpace, type Artifact, type Chat, type FolderEntry, type Folders, type Machine, type Message, type Need, type Place, type Snapshot, type Task, type TaskStatus, type TermScreen, type UpdateCard, type WorktreeAsk } from '../../shared/types.ts'
 import { Emitter, type Source, type SourceEvents } from '../source.ts'
 import * as D from './data.ts'
 import { ARTIFACT_DATA, ARTIFACT_HTML, thumb } from './artifacts.ts'
 import { DEMO_PRS, demoWorktree } from './code.ts'
 import { demoActivity } from './activity.ts'
-import { settingsBlock } from '../live/prompts.ts'
-import { CLI_NAME, repositorySection, defaultOf, kindOf } from '../live/settings.ts'
-import { harnessProblem, harnessWords, restartClis } from '../live/restart.ts'
-import { nextWords } from '../live/trigger.ts'
-import { secretPages, Vault } from '../live/secrets.ts'
+import { settingsBlock } from '../common/prompts.ts'
+import { CLI_NAME, repositorySection, defaultOf, kindOf } from '../common/settings.ts'
+import { harnessProblem, harnessWords, restartClis } from '../common/restart.ts'
+import { nextWords } from '../common/trigger.ts'
+import { secretPages, Vault } from '../common/secrets.ts'
 
 const DEFAULT_WAYS = { review: defaultOf('brief.review') !== 'off', mustFix: defaultOf('review.mustFix')!, rounds: Number.parseInt(defaultOf('review.rounds')!, 10), merge: defaultOf('brief.merge')!, waitChecks: defaultOf('brief.merge') === 'after GitHub checks' }
 const DEFAULT_REVIEWER = { kind: kindOf(defaultOf('reviewer.agent')!)! }
-import { excerpt } from '../live/chatlines.ts'
-import { TABLE } from '../live/models.ts'
-import { Browsers } from '../live/browser.ts'
+import { excerpt } from '../common/chatlines.ts'
+import { TABLE } from '../common/models.ts'
+import { Browsers } from '../demo/browser.ts'
 import { shortUrl } from '../../shared/browser.ts'
 import { deleteSection, moveSpace, newSection, PINNED, renameSection, sectionProblem, setOrder, sortPlaces, type PlaceOrder, type SectionDefs } from '../../shared/order.ts'
 
@@ -40,7 +40,7 @@ function demoPath(path: string) {
     if (seg === '..') parts.pop()
     else parts.push(seg)
   }
-  if (path.trim().startsWith('/')) throw new Error('Only folders in your home can be added.')
+  if (path.trim().startsWith('/')) throw new Error('Choose a folder in your home.')
   return ['~', ...parts].join('/')
 }
 
@@ -206,6 +206,21 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
 
   /* ---------- reading ---------- */
 
+  /** what waits on the human: each chat's open cards, and a task that waits with none */
+  private needs(): Need[] {
+    const open = (chat: string, place: string, task?: string): Need[] => (this.chats[chat]?.messages ?? []).flatMap((m) => m.question && m.question.sent === undefined && !m.question.closed
+      ? [{ id: m.question.id, chat, place, task, at: m.at ?? 0, question: m.question }] : [])
+    const waits = (chat: string, place: string, task: string | undefined, text?: string): Need[] => {
+      const cards = open(chat, place, task)
+      return cards.length ? cards : [{ id: 'attention', chat, place, task, at: 0, text }]
+    }
+    return [
+      ...this.places.flatMap((p) => (this.asks[p.id] ? waits(p.chat, p.id, undefined) : open(p.chat, p.id))),
+      ...this.tasks.filter((t) => t.status === 'need' && !t.archived).flatMap((t) => waits(t.agent?.chat ?? `${t.id}/Agent`, t.place, t.id, t.sub)),
+      ...this.tasks.filter((t) => t.status === 'ready' && !t.archived).flatMap((t) => open(t.agent?.chat ?? `${t.id}/Agent`, t.place, t.id)),
+    ].sort((a, b) => a.at - b.at)
+  }
+
   snapshot(): Snapshot {
     return {
       name: 'Shepherdr',
@@ -215,14 +230,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
       automations: this.automations,
       artifacts: this.artifacts,
       asks: this.asks,
-      attentionRequests: Object.fromEntries([
-        ...this.places.map((p) => [p.chat, [...new Set((this.chats[p.chat]?.messages ?? []).flatMap((m) => m.question && m.question.sent === undefined ? [m.question.id] : []))]] as [string, string[]]),
-        ...this.tasks.filter((t) => t.status === 'need' && !t.archived).map((t) => {
-          const key = t.agent?.chat ?? `${t.id}/Agent`
-          const ids = (this.chats[key]?.messages ?? []).flatMap((m) => m.question && m.question.sent === undefined ? [m.question.id] : [])
-          return [key, ids.length ? [...new Set(ids)] : ['attention']] as const
-        }),
-      ]),
+      needs: this.needs(),
       last: this.last(),
       read: this.read,
       settings: secretPages([...this.sections, ...Object.entries(this.bases).map(([id, base]) => repositorySection(id, id.split(':')[1], base))], this.vault.names()),
@@ -327,8 +335,10 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
     if (!t) return
     // done: a small card says so in its project's chat
     if (status === 'done' && t.status !== 'done') {
-      const card: UpdateCard = { id: `card-${t.id}-done`, task: t.id, status, text: 'is merged', pr: t.pr }
-      ;(this.chats[t.place]?.messages ?? []).push(cardMessage(card, Date.now() + seq))
+      const card: UpdateCard = { id: `card-${t.id}`, task: t.id, status, text: 'is merged', pr: t.pr }
+      const messages = this.chats[t.place]?.messages ?? [], row = messages.find((m) => m.card?.task === t.id)
+      if (row) row.card = card
+      else messages.push(cardMessage(card, Date.now() + seq))
       this.emit('chat', t.place)
     }
     // done: it finished now, so it tops its Done group
@@ -636,7 +646,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         const problem = harnessProblem({ kind, model: a.model, effort: a.effort })
         if (problem) return { ok: false, error: problem }
         const words = harnessWords({ kind, model: a.model, effort: a.effort })
-        c.agent = { kind, model: a.model, effort: a.effort }
+        c.agent = { kind, model: a.model, effort: a.effort, speed: a.speed || undefined }
         c.cli = CLI_NAME[kind] ?? kind
         c.restart = undefined
         c.messages.push(cardMessage({ id: `restart-${id()}`, restart: true, text: `Restarted on ${words}` }, Date.now() + seq))
@@ -647,6 +657,13 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         const t = this.task(a.chat.split('/')[0])
         if (!t || t.status !== 'work') return { ok: false, error: 'It isn’t working.' }
         Object.assign(t, { status: 'todo', sub: '', report: undefined, state: 'To do · paused just now' })
+        this.emit('snapshot')
+        return { ok: true }
+      }
+      case 'stop': {
+        const t = this.task(a.chat.split('/')[0])
+        if (!t || t.status === 'done') return { ok: false, error: 'This task is Done; there is nothing to stop' }
+        Object.assign(t, { status: 'todo', sub: '', report: undefined, state: 'To do · stopped just now' })
         this.emit('snapshot')
         return { ok: true }
       }
@@ -664,7 +681,7 @@ export class DemoWorld extends Emitter<SourceEvents> implements Source {
         if (pr?.home) return { ok: false, error: `${pr.name} is ${pr.machine}'s home space: it can be renamed, not removed.` }
         if (!pr) return { ok: false, error: 'That space is gone already.' }
         const working = this.tasks.filter((t) => t.place === pr.id && !t.archived && t.status === 'work').map((t) => t.id)
-        if (working.length) return { ok: false, error: `${working.join(', ')} ${working.length > 1 ? 'are' : 'is'} still working: pause or finish ${working.length > 1 ? 'them' : 'it'} first.` }
+        if (working.length) return { ok: false, error: `${working.join(', ')} ${working.length > 1 ? 'are' : 'is'} still working: stop or finish ${working.length > 1 ? 'them' : 'it'} first.` }
         // its tasks go with it (the live one keeps them, for when it is added again)
         this.places = this.places.filter((p) => p !== pr)
         this.tasks = this.tasks.filter((t) => t.place !== pr.id)

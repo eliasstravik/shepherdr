@@ -28,7 +28,9 @@ function toPcm16(input: Float32Array, from: number): ArrayBuffer {
 }
 
 function play(buf: ArrayBuffer) {
-  if (!ctx) return void waiting.push(buf)
+  if (buf.byteLength % 2 || buf.byteLength > 512 * 1024) return false
+  if (!ctx) { if (waiting.reduce((bytes, item) => bytes + item.byteLength, 0) + buf.byteLength > 512 * 1024) return false; waiting.push(buf); return true }
+  if (sources.length >= 128 || playAt - ctx.currentTime > 30) return false
   const pcm = new Int16Array(buf)
   const audio = ctx.createBuffer(1, pcm.length, RATE)
   const ch = audio.getChannelData(0)
@@ -41,6 +43,7 @@ function play(buf: ArrayBuffer) {
   playAt += audio.duration
   sources.push(src)
   src.onended = () => (sources = sources.filter((x) => x !== src))
+  return true
 }
 
 let sources: AudioBufferSourceNode[] = []
@@ -56,7 +59,8 @@ export async function startCall(chatKey: string, onError: (message: string) => v
   ws.onmessage = (e) => {
     if (e.data instanceof ArrayBuffer) {
       phase = 'listening'
-      return play(e.data)
+      if (!play(e.data)) { stopCall(); onError('Voice audio could not keep up. Start a new call.') }
+      return
     }
     const m = JSON.parse(String(e.data)) as { type: string; message?: string; state?: typeof phase }
     if (m.type === 'state' && m.state) {
@@ -76,6 +80,8 @@ export async function startCall(chatKey: string, onError: (message: string) => v
   // The microphone first, then the audio: an iPhone sets its sound up for playing only when the audio comes first,
   // and the microphone then sends silence. Its voice waits until the audio is there.
   const call = ws
+  call.onclose = () => { if (ws === call) { stopCall(); onError('The voice call disconnected. Start a new call.') } }
+  call.onerror = () => { if (ws === call) { stopCall(); onError('The voice connection failed. Start a new call.') } }
   let stream: MediaStream | null = null
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
@@ -84,24 +90,25 @@ export async function startCall(chatKey: string, onError: (message: string) => v
   }
   // the call ended while the phone asked for the microphone
   if (ws !== call) return stream?.getTracks().forEach((t) => t.stop())
+  mic = stream
   const c = (ctx = new AudioContext())
   c.resume().catch(() => undefined)
   theirs = meter(c)
   theirs.connect(c.destination)
   if (stream) {
-    mic = stream
     const src = c.createMediaStreamSource(stream)
     yours = meter(c)
     src.connect(yours)
     node = c.createScriptProcessor(4096, 1, 1)
     node.onaudioprocess = (e) => {
       if (muted || ws?.readyState !== WebSocket.OPEN) return
+      if (ws.bufferedAmount > 1024 * 1024) { stopCall(); onError('Voice connection is too slow. Start a new call.'); return }
       ws.send(toPcm16(e.inputBuffer.getChannelData(0), c.sampleRate))
     }
     src.connect(node)
     node.connect(c.destination)
   }
-  waiting.splice(0).forEach(play)
+  for (const audio of waiting.splice(0)) if (!play(audio)) { stopCall(); onError('Voice audio could not keep up. Start a new call.'); break }
 }
 
 export function muteCall(on: boolean) {
@@ -129,7 +136,9 @@ export function stopCall() {
   node?.disconnect()
   mic?.getTracks().forEach((t) => t.stop())
   ctx?.close().catch(() => undefined)
-  ws?.close()
+  const closing = ws
+  ws = null
+  closing?.close()
   node = null
   mic = null
   ctx = null

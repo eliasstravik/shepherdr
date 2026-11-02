@@ -62,7 +62,7 @@ describe.skipIf(!browser)('an artifact in the side panel', () => {
     const page = await browser!.newPage({ viewport: { width: 1600, height: 900 } })
     await page.goto(at('place=vm-str/home'))
     const side = page.getByRole('region', { name: 'Tasks', exact: true })
-    await side.getByRole('button', { name: 'Lock filters: keep them when switching spaces' }).click()
+    await side.getByRole('button', { name: 'Keep filters: hold them when switching space' }).click()
     await page.getByRole('button', { name: /^gtm\b/ }).click()
     await page.getByRole('textbox', { name: 'Message gtm…' }).waitFor()
     // LV-3's artifact full screen over gtm, then beside it
@@ -73,7 +73,7 @@ describe.skipIf(!browser)('an artifact in the side panel', () => {
     await dialog.getByRole('button', { name: 'Show in side panel' }).click()
     const shown = page.getByRole('region', { name: 'Artifacts', exact: true }).getByRole('region', { name: 'Upload page draft' })
     await shown.locator('iframe').waitFor()
-    expect(await page.getByRole('button', { name: 'Locked: unlock filters to follow the space picked' }).isVisible()).toBe(true)
+    expect(await page.getByRole('button', { name: 'Filters kept: tap to follow the space picked' }).isVisible()).toBe(true)
     expect(await page.getByRole('textbox', { name: 'Message gtm…' }).isVisible()).toBe(true)
     // another place picked: the pinned list keeps it
     await page.getByRole('button', { name: /^herdr-projects\b/ }).click()

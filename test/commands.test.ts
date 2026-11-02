@@ -1,7 +1,8 @@
-// A slash command typed in a chat (server/live/commands.ts): what counts as one, which start another session, and a
+// A slash command typed in a chat (server/common/commands.ts): what counts as one, which start another session, and a
 // menu or view it opened in the terminal, read off screens captured from Claude Code 2.1.310.
 import { describe, expect, test } from 'bun:test'
-import { isCommand, leftAtPrompt, sameCommand, startsSession, viewNote, viewOnScreen } from '../server/live/commands.ts'
+import { modelCommand } from '../shared/types.ts'
+import { isCommand, leftAtPrompt, sameCommand, startsSession, viewNote, viewOnScreen } from '../server/common/commands.ts'
 
 describe('a slash command', () => {
   test('is a /name and its arguments, as typed; a path or plain words are not', () => {
@@ -94,5 +95,14 @@ describe('a menu or view it opened', () => {
     const usage = viewNote('/usage', viewOnScreen(USAGE, '/usage')!)
     expect(usage).toStartWith('`/usage` opened this in the terminal:\n\n```\nCurrent session')
     expect(usage).toEndWith('Closed it, so your next message goes in.')
+  })
+})
+
+describe('/model', () => {
+  test('is caught with or without a name, in any case, and nothing else is', () => {
+    expect(modelCommand('/model')).toBe('')
+    expect(modelCommand(' /model sonnet ')).toBe('sonnet')
+    expect(modelCommand('/MODEL Opus 5.5')).toBe('Opus 5.5')
+    for (const t of ['/models', '/model-x', 'use /model sonnet', '/usage', 'model']) expect(modelCommand(t)).toBeUndefined()
   })
 })

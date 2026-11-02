@@ -13,7 +13,30 @@ export function dayLabel(at: number, now = new Date()) {
 }
 
 /** a reply's words as they read, without its markdown: a link by its words, no marks around them */
-const plain = (s: string) => s.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`#>~]/g, '')
+function underscores(s: string) {
+  const stack: { at: number; size: number }[] = [], omit = new Set<number>()
+  const word = (char: string) => /[\p{L}\p{N}_]/u.test(char)
+  for (let i = 0; i < s.length; i++) if (s[i] === '_') {
+    const at = i
+    while (s[i + 1] === '_') i++
+    const size = i - at + 1, before = s[at - 1] || '', after = s[i + 1] || ''
+    if (size > 2) continue
+    if (before && !/\s/.test(before) && !word(after) && stack.at(-1)?.size === size) {
+      omit.add(stack.pop()!.at); omit.add(at)
+    } else if (!word(before) && after && !/\s/.test(after)) stack.push({ at, size })
+  }
+  return s.replace(/_+/g, (run, at: number) => omit.has(at) ? '' : run)
+}
+const plain = (s: string) => {
+  const words = (part: string) => underscores(part.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')).replace(/[*`#>~]/g, '')
+  // Code and underscores inside identifiers are literal visible words, not emphasis marks.
+  let text = '', from = 0
+  for (const match of s.matchAll(/(`+)([\s\S]*?)\1/g)) {
+    text += words(s.slice(from, match.index)) + match[2]
+    from = match.index + match[0].length
+  }
+  return text + words(s.slice(from))
+}
 
 /** what a message can be found by: its words, a file's name, a card's title */
 export const messageText = (m: Message) => [m.text && plain(m.text), m.file?.name, m.question?.title].filter(Boolean).join('\n')

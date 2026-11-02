@@ -87,7 +87,7 @@ describe.skipIf(!browser)('adding a space', () => {
     const ctx = await browser!.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
     const page = await ctx.newPage()
     await page.goto(url())
-    await page.getByRole('button', { name: 'Places' }).tap()
+    await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).tap()
     // a finger always sees each machine's +; mac's opens the dialog on mac
     await page.getByRole('button', { name: 'New space on mac' }).tap()
     const dialog = page.getByRole('dialog', { name: 'New space' })
@@ -135,10 +135,10 @@ describe.skipIf(!browser)('the place header', () => {
     expect(d.dots).toBe(0)
     expect(Math.abs(d.title.left - d.reading.left - 20)).toBeLessThan(0.5)
     await desk.close()
-    // a tablet: the title right after the Places button
+    // a tablet: the title right after the Spaces button
     const tablet = await browser!.newPage({ viewport: { width: 900, height: 800 } })
     await tablet.goto(url())
-    const places = await tablet.getByRole('button', { name: 'Places' }).first().boundingBox()
+    const places = await tablet.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).first().boundingBox()
     const t = await head(tablet)
     expect(t.dots).toBe(0)
     expect(Math.abs(t.title.left - (places!.x + places!.width) - 10)).toBeLessThan(0.5)
@@ -146,7 +146,7 @@ describe.skipIf(!browser)('the place header', () => {
     // a phone: the name centred on the screen
     const phone = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true })
     await phone.goto(url())
-    await phone.getByRole('button', { name: 'Places' }).first().waitFor()
+    await phone.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).first().waitFor()
     const p = await head(phone)
     expect(p.dots).toBe(0)
     expect(p.icon!.right).toBeLessThanOrEqual(p.name.left)
@@ -168,8 +168,8 @@ describe.skipIf(!browser)('the Tasks header', () => {
         const st = getComputedStyle(b)
         return { pressed: b.getAttribute('aria-pressed'), bg: st.backgroundColor, shadow: st.boxShadow }
       }
-      const [tasks, artifacts] = [...tabs.querySelectorAll('button')]
-      const count = tasks.querySelector('[data-attention-badge]')
+      const [needs, tasks, artifacts] = [...tabs.querySelectorAll('button')]
+      const count = needs.querySelector('[data-attention-badge]')
       return {
         text: bar.textContent,
         tabs: rect(tabs),
@@ -177,7 +177,7 @@ describe.skipIf(!browser)('the Tasks header', () => {
         chatBar: rect(chatBar),
         tasks: shown(tasks),
         artifacts: shown(artifacts),
-        tab: rect(tasks),
+        tab: rect(needs),
         count: count ? rect(count) : null,
         chevron: rect(col.querySelector('[data-heading="Needs you"] svg')!),
       }
@@ -196,7 +196,7 @@ describe.skipIf(!browser)('the Tasks header', () => {
           await page.getByText('Needs you', { exact: true }).first().waitFor()
           const t = await head(page)
           // The tabs keep separate Needs you / Ready counts and the approved filter lock.
-          expect(t.text).toMatch(/^Tasks[\d+]*ArtifactsLock$/)
+          expect(t.text).toMatch(/^Needs you[\d+]*Tasks[\d+]*ArtifactsKeep filters$/)
           expect(t.text).not.toContain('·')
           expect(await page.getByText('everything under it').count()).toBe(0)
           // the shown tab is plainly picked: filled and edged; the other is bare
@@ -210,7 +210,7 @@ describe.skipIf(!browser)('the Tasks header', () => {
           expect(Math.abs((t.tabs.top + t.tabs.bottom) / 2 - (t.bar.top + t.bar.bottom) / 2)).toBeLessThan(1)
           // the tabs start where the list's group headings do: at their chevrons (the rows' dots), past the icon's own inset
           expect(Math.abs(t.tabs.left - t.chevron.left)).toBeLessThan(4)
-          // what waits on you is counted inside the Tasks tab, centred on its line and clear of its end
+          // what waits on you is counted inside the Needs you tab, centred on its line and clear of its end
           expect(t.count).not.toBeNull()
           expect(Math.abs((t.count!.top + t.count!.bottom) / 2 - (t.tab.top + t.tab.bottom) / 2)).toBeLessThan(0.5)
           expect(t.tab.right - t.count!.right).toBeGreaterThanOrEqual(8)

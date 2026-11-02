@@ -83,3 +83,12 @@ export class Push {
     }
   }
 }
+
+/** A public device label; never expose a subscription endpoint or raw user agent. */
+export function deviceName(ua: string) {
+  if (/iPhone|Android.*Mobile/.test(ua)) return 'a phone'
+  if (/iPad|Android/.test(ua)) return 'a tablet'
+  if (/Mac OS X/.test(ua)) return 'a Mac'
+  if (/Windows/.test(ua)) return 'a PC'
+  return 'a computer'
+}

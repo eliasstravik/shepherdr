@@ -3,12 +3,13 @@
 // or is starting does it wait, and the bubble says why.
 import clsx from 'clsx'
 import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ComponentType, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, type RefObject } from 'react'
-import { act, chatName, definePlugin, getDraft, getState, goChat, has, holdReload, openTask, registry, setDraft, setOutbox, setUI, taskOf, useDraft, useSnap, useStore, useUI, type UI } from '@client/kernel.ts'
+import { act, chatName, definePlugin, getDraft, getState, goChat, has, holdReload, openArtifact, openItem, openNeeds, openTask, registry, setDraft, setOutbox, setUI, taskOf, useDraft, useSnap, useStore, useUI, type UI } from '@client/kernel.ts'
 import { keyOf, partsOf, priorOf, reasonOf, SEND_TIMEOUT, type Outgoing } from '@client/outbox.ts'
 import { AlertIcon, BackIcon, CameraIcon, CheckIcon, Count, DeleteIcon, dimmed, Dot, DownIcon, DownloadIcon, Empty, field, FileIcon, ic, IconButton, KeyIcon, LinkButton, LiveWave, MachineIcon, Menu, MenuItem, MenuSeparator, MenuSetting, MicIcon, ModeIcon, MoreIcon, NextIcon, PageIcon, PlanIcon, PlusIcon, Primary, QuestionIcon, ReplyIcon, RestartIcon, roundBtn, SearchIcon, SecretField, Sent, SmileIcon, Tab, Tabs, TextBox, UpIcon, useElapsed, XIcon } from '@client/ui.tsx'
 import { canDictate, dictate, dictSample, type Dictation } from '@client/dictation.ts'
 import { extOf, isImage } from '@shared/files.ts'
-import { modeName, type CardAsk, type Chat, type Message, type Place, type Question, type ReplyQuote, type SecretAsk, type UpdateCard } from '@shared/types.ts'
+import { modelCommand, modeName, taskChatId, type CardAsk, type Chat, type MergeEvidence, type Message, type Place, type Question, type ReplyQuote, type SecretAsk, type UpdateCard } from '@shared/types.ts'
+import { sendsOnTap } from '@shared/alerts.ts'
 import { buzz, mine, openBar, openPicker, quick, react } from '@plugins/reactions/client.tsx'
 import { EDGE } from '@client/gestures.ts'
 import { still, useArrive } from '@client/motion.ts'
@@ -20,7 +21,7 @@ import { Markdown } from './markdown.tsx'
 import { answeredBy, cancelReply, canReply, isArtifact, jumpTo, startReply } from './reply.ts'
 import { typing, working } from './typing.ts'
 import { JobsSheet, JobsTag, LiveLine, TurnLine } from './activity.tsx'
-import { AgentControls, PlaceRestartItem, RestartSheet, TaskRestartItem } from '@client/restart.tsx'
+import { AgentControls, AgentLine, openRestart, PlaceRestartItem, RestartSheet } from '@client/restart.tsx'
 
 /* ---------- messages ---------- */
 
@@ -63,7 +64,12 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
   }, [selecting])
   const keys = canReact
     ? {
-        onKeyDown: (e: KeyboardEvent) => e.key === 'Enter' && e.target === e.currentTarget && openBar(chat.key, msg.id),
+        onKeyDown: (e: KeyboardEvent) => {
+          if (e.key !== 'Enter' || e.target !== e.currentTarget) return
+          e.preventDefault()
+          e.stopPropagation()
+          openBar(chat.key, msg.id)
+        },
         tabIndex: 0,
         'aria-label': 'Message: press Enter to react',
       }
@@ -1026,7 +1032,8 @@ function Row({ at, arrive, children }: { at: number; arrive: string; children: R
   )
 }
 
-const NOW: Record<string, string> = { done: 'done', work: 'working', ready: 'ready', merging: 'merging', queued: 'queued' }
+/** a task's row says what its task is doing now, when that moved on from the row's own words */
+const NOW: Record<string, string> = { need: 'Needs you', done: 'Done', work: 'Working', ready: 'Ready', merging: 'Merging', queued: 'Queued', todo: 'To do' }
 
 const cardBox = 'relative flex max-w-full items-center gap-2 self-start rounded-box px-3 py-2 text-left text-[0.9375rem] shadow-[inset_0_0_0_1px_var(--line2)]'
 /** the card's words on one line: cut short with an ellipsis where the chat is narrow, what follows them kept whole */
@@ -1086,44 +1093,30 @@ function Card({ card: c, chat, at, press, keys, className }: { card: UpdateCard;
     )
   const t = taskOf(snap, c.task)
   const task = c.task
+  const status = t?.status ?? c.status ?? 'idle'
+  const needs = (c.ask?.open || status === 'need') && registry.views.needs
+  const pr = c.pr ?? t?.pr
   const line = (
-    <button type="button" data-anchor {...press} onClick={() => openTask(task)} className={clsx(cardBox, 'hover:bg-hover', className)}>
-      <Dot s={c.status ?? 'idle'} className="shrink-0" />
+    <button type="button" data-anchor data-needs-link={needs ? '' : undefined} {...press} onClick={() => (needs ? openNeeds() : openTask(task))} className={clsx(cardBox, 'hover:bg-hover', className)}>
+      <Dot s={status} className="shrink-0" />
       <span className={cardLine}>
         <span className="truncate">
-          <b className="font-semibold">{c.task}</b> {c.text}
+          <b className="font-semibold">{c.task}</b> {t && t.status !== c.status ? NOW[t.status] ?? t.status : c.text}
         </span>
-        {t && t.status !== c.status ? <span className={cardAside}>&nbsp;· now {NOW[t.status] ?? t.status}</span> : null}
-        {c.pr ? (
+        {pr ? (
           // set apart like a task row's
           <span className={cardAside}>
-            &nbsp;· <PrOnCard pr={c.pr} />
+            &nbsp;· <PrOnCard pr={pr} />
           </span>
         ) : null}
       </span>
     </button>
   )
-  if (!c.ask) return line
-  return (
-    <>
-      {line}
-      <AskOnCard ask={c.ask} task={task} taskTitle={t?.name} space={chat} />
-    </>
-  )
+  return line
 }
 
-/** what a needs-you card's task asks, answered here as in the task's own chat: its question cards as they stand there,
-    or the agent's plain question with a reply box */
-function AskOnCard({ ask, task, taskTitle, space }: { ask: CardAsk; task: string; taskTitle?: string; space: string }) {
-  // the cards answer into the task's chat; the words that answered one show on it
-  const chat: Chat = { key: ask.chat, cli: '', messages: [] }
-  const source = { id: task, title: taskTitle }
-  if (ask.questions) return ask.questions.map((q) => <QuestionCard key={q.id} q={q} chat={chat} msg={q.id} from={task} space={space} source={source} />)
-  return ask.reply ? <ReplyOnCard ask={ask} reply={ask.reply} task={task} space={space} source={source} /> : null
-}
-
-/** a plain question, with no choices: its words, and a reply to it that goes to the task's agent */
-function ReplyOnCard({ ask, reply, task, space, source }: { ask: CardAsk; reply: NonNullable<CardAsk['reply']>; task: string; space: string; source: CardSource }) {
+/** an agent that waits with no card: its words, and a reply to it that goes to the agent */
+export function ReplyOnCard({ ask, reply, task, source }: { ask: CardAsk; reply: { id?: string; text: string }; task: string; source: CardSource }) {
   const [text, setText] = useDraft(`card-reply:${ask.chat}:${reply.id}`)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -1131,7 +1124,7 @@ function ReplyOnCard({ ask, reply, task, space, source }: { ask: CardAsk; reply:
     setBusy(true)
     setErr('')
     try {
-      const r = await act({ type: 'send', chat: ask.chat, text: text.trim(), reply: reply.id, space })
+      const r = await act({ type: 'send', chat: ask.chat, text: text.trim(), reply: reply.id, human: true })
       if (r?.ok === false) setErr(r.error ?? "That didn't go through.")
       else setText('')
     } catch {
@@ -1147,7 +1140,7 @@ function ReplyOnCard({ ask, reply, task, space, source }: { ask: CardAsk; reply:
       {a ? (
         <Sent>
           <CheckIcon className={ic} />
-          <span className="shrink-0">{a.where === 'space' ? 'Answered here ·' : 'Answered in'}</span>
+          <span className="shrink-0">Answered in</span>
           <LinkButton onClick={() => goChat(ask.chat)}>{`${task} chat`}</LinkButton>
           {a.text ? <span className="min-w-0 truncate text-fg2">“{a.text.replace(/\s+/g, ' ')}”</span> : null}
         </Sent>
@@ -1302,14 +1295,45 @@ export function CardShell({ title, plan, icon, action, source, children }: { tit
 function answeredHow(q: Question) {
   if (q.via === 'chat') return 'Answered in chat'
   if (q.via === 'terminal') return 'Answered in the terminal'
-  return q.sent === -1 && !q.said ? 'Answered' : `Sent to ${q.to}`
+  return q.sent === -1 && !q.said ? 'Answered' : 'Sent'
+}
+
+/** a task's terminal is in its panel, a space's in its chat */
+function openTerminal(key: string) {
+  if (!key.includes('/')) return setUI({ term: key, arts: null, kb: true })
+  goChat(key)
+  openItem('terminal')
 }
 
 const noteBox = clsx('min-h-10 w-full resize-none rounded-row bg-transparent px-3 py-[9px] placeholder:text-fg3 coarse:min-h-11 phone:min-h-11 phone:text-[1rem]', field)
 
-/** space: a copy of a task's question on its needs-you card in that space's chat, answered there */
-export function QuestionCard({ q, chat, msg, from, space, source }: { q: Question; chat: Chat; msg: string; from: string; space?: string; source?: CardSource }) {
-  // Unmarked cards always require a deliberate pick and Send, including all approval prompts.
+const CHECKS: Record<MergeEvidence['checks']['state'], string> = { passed: 'text-ready-fg', failed: 'text-need-fg', running: 'text-work-fg', none: 'text-fg2', unknown: 'text-need-fg' }
+
+/** a merge card: what the human approves, and that this card is how */
+function Evidence({ e, open }: { e: MergeEvidence; open: boolean }) {
+  const label = 'shrink-0 w-14 text-fg2'
+  return (
+    <div data-evidence className="flex flex-col gap-1 text-[0.875rem] phone:text-[0.9375rem]">
+      {e.summary ? <p className="mb-1 text-pretty break-words">{e.summary}</p> : null}
+      <div className="flex gap-2"><span className={label}>Commit</span><code className="tabular-nums">{e.commit}</code></div>
+      {e.diff ? (
+        <details data-evidence-files className="min-w-0">
+          <summary className="flex cursor-pointer gap-2"><span className={label}>Files</span><span className="tabular-nums">{e.diff.files} changed, <span className="text-ready-fg">+{e.diff.added}</span> <span className="text-need-fg">−{e.diff.removed}</span></span></summary>
+          <ul className="mt-1 flex max-h-48 flex-col gap-0.5 overflow-auto pl-16 text-[0.8125rem]">
+            {e.diff.list.map((f) => <li key={f.path} className="flex items-baseline justify-between gap-2"><span className="min-w-0 break-all">{f.path}</span><span className="shrink-0 text-fg2 tabular-nums">+{f.added} −{f.removed}</span></li>)}
+            {e.diff.files > e.diff.list.length ? <li className="text-fg2">and {e.diff.files - e.diff.list.length} more</li> : null}
+          </ul>
+        </details>
+      ) : <div className="flex gap-2"><span className={label}>Files</span><span className="text-need-fg">Couldn't read the changes</span></div>}
+      <div className="flex gap-2"><span className={label}>Checks</span><span data-evidence-checks={e.checks.state} className={CHECKS[e.checks.state]}>{e.checks.text}</span></div>
+      <div className="flex gap-2"><span className={label}>Proof</span>{e.proof ? <LinkButton onClick={() => openArtifact(e.proof!.id)}>{e.proof.title}</LinkButton> : <span className="text-fg2">No proof artifact</span>}</div>
+      {open ? <p data-evidence-approve className="mt-1 text-[0.8125rem] text-fg2">Only this card approves the merge: pick Merge, then Send. A yes in the chat doesn't count.</p> : null}
+    </div>
+  )
+}
+
+/** steady: in Needs you, the card keeps its height while it sends */
+export function QuestionCard({ q, chat, msg, from, source, steady }: { q: Question; chat: Chat; msg: string; from: string; source?: CardSource; steady?: boolean }) {
   const [sel, setSel] = useState<number[]>([])
   // half-typed notes survive a reload
   const [note, setNote] = useDraft(`card:${chat.key}:${q.id}`)
@@ -1319,14 +1343,13 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
   const [composing, setComposing] = useState(false)
   const [err, setErr] = useState('')
   const noteRef = useRef<HTMLTextAreaElement>(null)
-  const sent = q.sent !== undefined
+  const sent = q.sent !== undefined || !!q.closed
   const by = answeredBy(q, chat, msg)
   // a plan sent back says what to change in the note
   const needNote = q.noteRequiredFor !== undefined && sel[0] === q.noteRequiredFor
   const picked = sel.length > 0 || !!other.trim()
-  // Positive opt-in, plus structural exclusions: unknown kinds and older/plugin cards remain confirmed.
-  const ordinary = q.ordinary === true && (q.kind === 'Form' || q.kind === 'Question') && !q.multi && !q.terminal && !q.screen && !q.steps && !q.reject && !q.noNote && q.noteRequiredFor === undefined && !q.id.startsWith('menu:')
-  const immediate = ordinary && !sent && !composing && !note && !other
+  const tap = sendsOnTap(q)
+  const immediate = (tap && !composing && !note && !other || q.press === true) && !sent
   const choose = (j: number) => setSel(q.multi ? (sel.includes(j) ? sel.filter((x) => x !== j) : [...sel, j]) : [j])
   const send = async (reject = false, choice = sel[0] ?? -1) => {
     if (sent || sending.current) return
@@ -1337,7 +1360,7 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
     setErr('')
     let accepted = false
     try {
-      const r = await act({ type: 'answer', chat: chat.key, question: q.id, choice: reject ? -1 : choice, choices: q.multi ? (reject ? [] : sel) : undefined, note: note.trim() || undefined, other: other.trim() || undefined, space })
+      const r = await act({ type: 'answer', chat: chat.key, question: q.id, choice: reject ? -1 : choice, choices: q.multi ? (reject ? [] : sel) : undefined, note: note.trim() || undefined, other: other.trim() || undefined })
       if (r?.ok === false) setErr(r.error ?? "That didn't go through.")
       else {
         accepted = true
@@ -1359,8 +1382,10 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
   }, [composing])
   return (
     <CardShell title={q.title} plan={q.kind === 'Plan'} source={source}>
-      {q.screen ? <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-fg2">{q.screen}</pre> : null}
-      {q.terminal && has('terminal') ? <button type="button" className="text-left text-accent" onClick={() => setUI({ term: chat.key, arts: null, kb: true })}>Open terminal</button> : null}
+      {q.screen ? <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-fg2">{q.press ? q.screen.split(/(https?:\/\/\S+)/).map((part, j) => j % 2 ? <a key={j} href={part} target="_blank" rel="noreferrer" className="text-accent">{part}</a> : part) : q.screen}</pre> : null}
+      {q.terminal && !sent && has('terminal') ? <button type="button" className="text-left text-accent" onClick={() => openTerminal(chat.key)}>Open terminal</button> : null}
+      {q.evidence ? <Evidence e={q.evidence} open={!sent} /> : null}
+      {q.plan ? <div data-plan className="max-h-96 overflow-auto"><Markdown text={q.plan} /></div> : null}
       {q.steps ? (
         <ol className="flex list-decimal flex-col gap-0.5 pl-5">
           {q.steps.map((x) => (
@@ -1368,9 +1393,10 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
           ))}
         </ol>
       ) : null}
-      {immediate && !sent ? <p className="text-[0.8125rem] text-fg2">Choose an answer to send it now.</p> : null}
+      {immediate && !q.press ? <p className="text-[0.8125rem] text-fg2">Choose an answer to send it now.</p> : null}
       {q.choices.map((c, j) => {
         const on = sent ? q.sent === j : sel.includes(j)
+        const word = immediate && !q.press ? `Send: ${c.label}` : c.label
         return (
           <button
             key={j}
@@ -1394,11 +1420,11 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
             />}
             {c.description ? (
               <span>
-                <span className="block">{immediate ? `Send: ${c.label}` : c.label}</span>
-                <span className="block text-[0.75rem]/[18px] text-fg2 phone:text-[0.8125rem]/5">{c.description}</span>
+                <span className="block">{word}</span>
+                <span className="block whitespace-pre-line text-[0.75rem]/[18px] text-fg2 phone:text-[0.8125rem]/5">{c.description}</span>
               </span>
             ) : (
-              (immediate ? `Send: ${c.label}` : c.label)
+              word
             )}
           </button>
         )
@@ -1420,23 +1446,23 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
         />
       ) : null}
       {sent ? (
-        <Sent>
-          <CheckIcon className={ic} />
-          <span className="shrink-0">{q.elsewhere?.label ?? answeredHow(q)}</span>
+        <Sent className={q.closed ? 'text-fg2!' : undefined}>
+          {q.closed ? <XIcon className={ic} /> : <CheckIcon className={ic} />}
+          <span className="shrink-0">{q.closed ? 'Closed' : q.elsewhere?.label ?? answeredHow(q)}</span>
           {/* answered on its other copy: a link to that chat */}
-          {q.elsewhere ? <LinkButton onClick={() => goChat(q.elsewhere!.chat)}>{q.elsewhere.name}</LinkButton> : null}
+          {q.elsewhere && !q.closed ? <LinkButton onClick={() => goChat(q.elsewhere!.chat)}>{q.elsewhere.name}</LinkButton> : null}
           {/* the words it was answered with, on one line (a message in the chat shows as its quote, below) */}
-          {q.said && q.via !== 'chat' ? <span className="min-w-0 truncate text-fg2">“{q.said.replace(/\s+/g, ' ')}”</span> : null}
+          {q.closed ? <span className="min-w-0 text-pretty text-fg2">{q.closed}</span> : q.said && q.via !== 'chat' ? <span className="min-w-0 truncate text-fg2">“{q.said.replace(/\s+/g, ' ')}”</span> : null}
         </Sent>
       ) : null}
       {/* the message that answered it, as a reply's quote: a tap jumps to it */}
       {by ? <Quote q={by} chat={chat.key} from={from} you={false} loose label="Answered by" /> : null}
       {sent || (q.terminal && !q.choices.length) ? null : (
         <>
-          {immediate ? (
+          {immediate && !q.noNote ? (
             <button type="button" disabled={busy} className="min-h-11 text-left text-accent" onClick={() => setComposing(true)}>Add a note</button>
           ) : null}
-          {(!q.other || ordinary) && !q.noNote && !immediate ? (
+          {(!q.other || tap) && !q.noNote && !immediate ? (
             <TextBox
               ref={noteRef}
               name="note"
@@ -1449,7 +1475,8 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
               onChange={setNote}
             />
           ) : null}
-          <div className="flex items-center justify-end gap-2">
+          {/* in Needs you, its room is kept: Sending… must not push the cards below under a thumb */}
+          <div className={clsx('flex items-center justify-end gap-2', steady && 'min-h-6')}>
             {err ? <span role="alert" className="mr-auto text-[0.75rem] text-need phone:text-[0.8125rem]">{err}</span> : null}
             {q.reject ? <button type="button" disabled={busy} onClick={() => send(true)}>{q.reject}</button> : null}
             {!immediate ? <Primary soft disabled={busy || !picked} onClick={() => send()}>
@@ -1468,7 +1495,7 @@ export function QuestionCard({ q, chat, msg, from, space, source }: { q: Questio
 /** a masked box for a secret an agent asked for by name, and where it is kept (its space, its machine, Everywhere).
  *  The value goes once to the main machine and is never kept here, as a draft or otherwise; the agent is told it is
  *  there, by name only */
-function SecretCard({ ask, chat }: { ask: SecretAsk; chat: Chat }) {
+export function SecretCard({ ask, chat, source }: { ask: SecretAsk; chat: Chat; source?: CardSource }) {
   const [value, setValue] = useState('')
   const [level, setLevel] = useState(ask.levels[0]?.id ?? 'all')
   const [busy, setBusy] = useState(false)
@@ -1488,7 +1515,7 @@ function SecretCard({ ask, chat }: { ask: SecretAsk; chat: Chat }) {
     }
   }
   return (
-    <CardShell title={`Secret: ${ask.name}`} icon={KeyIcon}>
+    <CardShell title={`Secret: ${ask.name}`} icon={KeyIcon} source={source}>
       {ask.why ? <p className="text-pretty break-words">{ask.why}</p> : null}
       {ask.saved ? (
         <Sent>
@@ -1531,7 +1558,7 @@ async function deliver(o: Outgoing) {
   // a reload now would cut it off on its way
   const release = holdReload()
   try {
-    const r = (await act({ type: 'send', chat: o.chat, text: o.text, attachments: o.files.map((f) => f.path), cid: o.cid, reply: o.reply?.id }, AbortSignal.timeout(SEND_TIMEOUT))) as {
+    const r = (await act({ type: 'send', chat: o.chat, text: o.text, attachments: o.files.map((f) => f.path), cid: o.cid, reply: o.reply?.id, human: true }, AbortSignal.timeout(SEND_TIMEOUT))) as {
       waiting?: boolean
       waitsFor?: Outgoing['waitsFor']
       at?: number
@@ -1633,6 +1660,13 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
     const t = text.trim()
     if (!t && !files.length) return
     const reply = getState().ui.reply[chatKey]
+    const model = reply ? undefined : modelCommand(t)
+    if (model !== undefined) {
+      setText('')
+      const place = getState().snap?.places.find((p) => p.chat === chatKey)
+      openRestart(chatKey, place?.name ?? taskChatId(chatKey) ?? chatKey, true, model)
+      return
+    }
     setText('')
     setUI((u) => {
       const { [chatKey]: _, ...replies } = u.reply
@@ -1654,7 +1688,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
   }
   return (
     // what goes with the box (send, +, a file's x, its menu) leaves the box the focus: a phone's keyboard stays up
-    <div data-kb data-keep-box className={clsx('mx-auto w-full max-w-read shrink-0 px-4 pt-2', keyboard && device === 'phone' ? 'pb-1.5' : 'pb-4')}>
+    <div data-kb data-keep-box className={clsx('mx-auto w-full max-w-read shrink-0 px-4 pt-2', keyboard && device === 'phone' ? 'pb-1' : 'pb-2.5')}>
       {registry.composerAbove.map(({ View }, i) => (
         <View key={i} chatKey={chatKey} cli={cli} />
       ))}
@@ -1761,6 +1795,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
           )}
         </div>
       </div>
+      <AgentLine chatKey={chatKey} cli={cli} />
     </div>
   )
 }
@@ -2360,7 +2395,7 @@ function FindItem({ chatKey }: { chatKey: string }) {
         Search in this chat
       </MenuItem>
       {registry.views.search ? <MenuItem icon={<SearchIcon className={ic} />} onClick={() => setUI({ search: true, searchScope: { kind: 'chat', id: chatKey }, menu: false, taskMenu: false })}>
-        Search this chat and beyond
+        Open full search
       </MenuItem> : null}
     </>
   )
@@ -2442,7 +2477,7 @@ export default definePlugin({
       },
     })
     reg.placeMenu.push({ order: 50, View: ({ place }) => <FindItem chatKey={place.chat} /> }, { order: 55, joined: true, View: PlaceRestartItem })
-    reg.agentMenu.push({ order: 50, View: FindItem }, { order: 55, View: TaskRestartItem })
+    reg.agentMenu.push({ order: 50, View: FindItem })
     reg.overlays.push(RestartSheet)
     reg.composerAbove.push({ order: 20, View: Attachments }, { order: 30, View: PlusMenu })
     reg.overlays.push(Photo)

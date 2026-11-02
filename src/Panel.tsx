@@ -139,7 +139,7 @@ function ItemBody({ item, task, chatKey }: { item: PanelItem; task: Task; chatKe
 
 /** The task header's ⋯, like a coordinator's: what plugins put first (Search in this chat), then the items, each a
  *  full-screen sheet on a phone or tablet and its tab on a desktop; one with nothing to show is greyed, and opens all
- *  the same, to say why */
+ *  the same, to say why. Last, the same task actions its row's ⋯ has */
 export function TaskMenu({ task, chatKey, pane }: { task: Task; chatKey: string; pane?: number }) {
   const ui = useUI()
   // split, it opens in the focused pane (a click in a pane focuses it first), or the open task's on the right; a
@@ -147,7 +147,8 @@ export function TaskMenu({ task, chatKey, pane }: { task: Task; chatKey: string;
   const items = registry.taskPanel
   const split = panesHere(ui).length > 0
   const open = ui.taskMenu && (pane === undefined ? !split || ui.split.pane < 0 : ui.split.pane === pane)
-  if (!registry.agentMenu.length && !items.length) return null
+  const Actions = registry.views.taskActions
+  if (!registry.agentMenu.length && !items.length && !Actions) return null
   const B = ui.device === 'phone' ? RoundButton : IconButton
   return (
     <div className="relative">
@@ -161,7 +162,7 @@ export function TaskMenu({ task, chatKey, pane }: { task: Task; chatKey: string;
         <MoreIcon className={ic} />
       </B>
       {open ? (
-        <Menu label="More" onClose={() => setUI({ taskMenu: false })} className="absolute top-full right-0 z-21 mt-1.5 max-w-[calc(100vw-24px)] origin-top-right">
+        <Menu label="More" onClose={() => setUI({ taskMenu: false })} className="absolute top-full right-0 z-21 mt-1.5 max-h-[calc(100dvh-5rem)] max-w-[calc(100vw-24px)] origin-top-right overflow-y-auto">
           {registry.agentMenu.map(({ View }, i) => (
             <Fragment key={i}>
               <View chatKey={chatKey} />
@@ -178,6 +179,12 @@ export function TaskMenu({ task, chatKey, pane }: { task: Task; chatKey: string;
               <MenuItem icon={<SplitIcon className={ic} />} onClick={() => openSplit({ kind: 'task', id: task.id })}>
                 Open in split view
               </MenuItem>
+            </>
+          ) : null}
+          {Actions ? (
+            <>
+              <MenuSeparator />
+              <Actions task={task} close={() => setUI({ taskMenu: false })} />
             </>
           ) : null}
         </Menu>

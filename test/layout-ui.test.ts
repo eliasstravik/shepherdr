@@ -12,10 +12,10 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
     ['desktop', { width: 1440, height: 900 }],
     ['tablet', { width: 1024, height: 768 }],
   ] as const)
-    test(`nothing pops up a tooltip on hover: no title on any button, row or icon (${name})`, async () => {
+    test(`hover titles stay limited to the verified legacy attention, target and filter hints (${name})`, async () => {
       const page = await browser!.newPage({ viewport, hasTouch: name === 'tablet' })
       // an artifact frame's title only names it to screen readers
-      const titled = () => page.evaluate(() => [...document.querySelectorAll('[title]:not(iframe), svg title')].map((e) => e.outerHTML.slice(0, 120)))
+      const titled = () => page.evaluate(() => [...document.querySelectorAll('[title]:not(iframe):not([data-attention-badge]):not([title^="Merges into "]):not([aria-label^="Keep filters:"]):not([aria-label^="Filters kept:"]), svg title')].map((e) => e.outerHTML.slice(0, 120)))
       await page.goto(at('place=p:mac:lilla-varlden&task=LV-3'))
       await page.locator('[data-card]').first().waitFor()
       expect(await titled()).toEqual([])
@@ -49,7 +49,7 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
   test("a tablet's first key adds Keyboard shortcuts to Settings, and the page shown stays in view", async () => {
     const page = await browser!.newPage({ viewport: { width: 834, height: 1112 }, hasTouch: true })
     await page.goto(at('place=vm-str/home'))
-    await page.getByRole('button', { name: 'Places' }).click()
+    await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).click()
     await page.getByRole('button', { name: 'Settings', exact: true }).click()
     const nav = page.getByRole('navigation', { name: 'Sections' })
     expect(await nav.getByRole('button', { name: 'Keyboard shortcuts' }).count()).toBe(0)
@@ -66,7 +66,7 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
   test("a phone's Settings lists its sections in groups, as iOS's does; one opens over the list and Back goes back to it", async () => {
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
     await page.goto(at('place=vm-str/home'))
-    await page.getByRole('button', { name: 'Places' }).click()
+    await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).click()
     await page.getByRole('button', { name: 'Settings', exact: true }).click()
     const settings = page.getByRole('region', { name: 'Settings' })
     const list = settings.getByRole('navigation', { name: 'Sections' })
@@ -80,8 +80,8 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
       expect(r.x + r.width).toBeLessThanOrEqual(390.5)
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
-    // opened from a space, it sets that space's defaults; the picker switches to a machine's, another space's or Everywhere
-    await settings.getByRole('button', { name: 'Editing: home · vm-str' }).click()
+    // whichever space it was opened from, it starts on Everywhere; the picker switches to a machine's or a space's
+    await settings.getByRole('button', { name: 'Editing: Everywhere' }).click()
     await page.getByRole('menuitemradio', { name: 'gtm · vm-str' }).click()
     await settings.getByRole('button', { name: 'Editing: gtm · vm-str' }).waitFor()
     // a space has no Machine page: a machine's capacity is its own
@@ -129,7 +129,7 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
       await page.goto(at(`place=${encodeURIComponent(gtm.id)}`))
       await page.getByRole('button', { name: 'Settings', exact: true }).click()
       const settings = page.getByRole('region', { name: 'Settings' })
-      const pick = settings.getByRole('button', { name: 'Editing: gtm · vm-str' })
+      const pick = settings.getByRole('button', { name: 'Editing: Everywhere' })
       await pick.click()
       const menu = page.getByRole('menu', { name: 'Choices' })
       await menu.waitFor()
@@ -146,7 +146,8 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
       const [allX, machineX, projectX] = [await textX('Everywhere'), await textX('vm-str'), await textX('gtm · vm-str')]
       expect(machineX).toBeGreaterThan(allX)
       expect(projectX).toBeGreaterThan(machineX)
-      expect(await menu.getByRole('menuitemradio', { name: 'gtm · vm-str' }).getAttribute('aria-checked')).toBe('true')
+      // Settings opens on Everywhere, wherever it was opened from
+      expect(await menu.getByRole('menuitemradio', { name: 'Everywhere', exact: true }).getAttribute('aria-checked')).toBe('true')
       // too many to show whole: it scrolls, the menu stays on the screen
       const box = (await menu.boundingBox())!
       expect(box.y + box.height).toBeLessThanOrEqual(800)
@@ -180,9 +181,9 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
       // a phone on its side: the menu fits the room it has, and scrolls
       const phone = await browser!.newPage({ viewport: { width: 600, height: 360 }, hasTouch: true, isMobile: true })
       await phone.goto(at(`place=${encodeURIComponent(gtm.id)}`))
-      await phone.getByRole('button', { name: 'Places' }).click()
+      await phone.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).click()
       await phone.getByRole('button', { name: 'Settings', exact: true }).click()
-      await phone.getByRole('button', { name: 'Editing: gtm · vm-str' }).click()
+      await phone.getByRole('button', { name: 'Editing: Everywhere' }).click()
       const small = phone.getByRole('menu', { name: 'Choices' })
       await small.waitFor()
       await settled(phone)
@@ -201,10 +202,12 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
   test("Settings → Autopilot: one Heartbeat, schedule/events, agent and collapsed access (phone)", async () => {
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
     await page.goto(at(`place=${encodeURIComponent('p:vm-str:gtm')}`))
-    await page.getByRole('button', { name: 'Places' }).click()
+    await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).click()
     await page.getByRole('button', { name: 'Settings', exact: true }).click()
     const settings = page.getByRole('region', { name: 'Settings' })
     const list = settings.getByRole('navigation', { name: 'Sections' })
+    await settings.getByRole('button', { name: 'Editing: Everywhere' }).click()
+    await page.getByRole('menuitemradio', { name: 'gtm · vm-str' }).click()
     await settings.getByRole('button', { name: 'Editing: gtm · vm-str' }).waitFor()
     await list.getByRole('button', { name: 'Autopilot' }).click()
     const pilot = settings.getByRole('region', { name: 'Autopilot' })
@@ -218,10 +221,10 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
     expect(await presets.getByRole('button').allInnerTexts()).toEqual(['15 min', '30 min', '1 hour', 'Workdays'])
     expect(await presets.getByRole('button', { name: '30 min' }).getAttribute('aria-pressed')).toBe('true')
     await presets.getByRole('button', { name: 'Workdays' }).click()
-    await pilot.getByText('Every 30 minutes, 8:00-18:00, Monday to Friday (Stockholm)').waitFor()
+    await pilot.getByText('Every 30 minutes, 8:00-18:00, Monday to Friday (Stockholm)', { exact: true }).waitFor()
     expect(await presets.getByRole('button', { name: 'Workdays' }).getAttribute('aria-pressed')).toBe('true')
     await pilot.getByRole('button', { name: "Reset to Everywhere's" }).click()
-    await pilot.getByText('Every 30 minutes (Stockholm)').waitFor()
+    await pilot.getByText('Every 30 minutes (Stockholm)', { exact: true }).waitFor()
     // the news: all, or none that waits for the heartbeat
     const news = pilot.getByRole('group', { name: 'Events' })
     // in words, not the button of the same name
@@ -260,12 +263,12 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
       const ctx = await browser!.newContext({ viewport: { width: 375, height: 812 }, hasTouch: true, isMobile: true, colorScheme })
       const page = await ctx.newPage()
       await page.goto(at(`place=${encodeURIComponent('p:vm-str:~')}`))
-      await page.getByRole('button', { name: 'Places' }).click()
+      await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).click()
       await page.getByRole('button', { name: 'Settings', exact: true }).click()
       const settings = page.getByRole('region', { name: 'Settings' })
       const list = settings.getByRole('navigation', { name: 'Sections' })
       // a machine's own defaults: picked, as a machine has no space of its own to open them from
-      await settings.getByRole('button', { name: 'Editing: home · vm-str' }).click()
+      await settings.getByRole('button', { name: 'Editing: Everywhere' }).click()
       await page.getByRole('menuitemradio', { name: 'vm-str', exact: true }).click()
       await settings.getByRole('button', { name: 'Editing: vm-str' }).waitFor()
       const open = async (name: string) => {
@@ -322,7 +325,7 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
         bg: getComputedStyle(document.body).backgroundColor,
       }))
     expect((await look()).theme).toBe('light')
-    await page.getByRole('button', { name: 'Places' }).click()
+    await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).click()
     await page.getByRole('button', { name: 'Settings', exact: true }).click()
     await page.getByRole('button', { name: 'Appearance System' }).click()
     await page.getByRole('radiogroup', { name: 'Appearance' }).getByText('Dark', { exact: true }).click()
@@ -339,7 +342,7 @@ describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
     await page.exposeFunction('seenTheme', (t: string) => seen.push(t))
     await page.addInitScript(() => document.addEventListener('readystatechange', () => document.readyState === 'interactive' && (window as unknown as { seenTheme: (t: string) => void }).seenTheme(document.documentElement.dataset.theme ?? '')))
     await page.reload()
-    await page.getByRole('button', { name: 'Places' }).waitFor()
+    await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).waitFor()
     expect(seen[0]).toBe('dark')
     expect((await look()).bar).toBe('#0b0b0d')
     // an artifact opens in the app's dark, and is told when it changes

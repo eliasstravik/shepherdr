@@ -3,6 +3,7 @@
     "places",
     "coordinators",
     "tasks",
+    "needs",
     "chat",
     "reactions",
     "artifacts",
@@ -11,6 +12,7 @@
     "browser",
     "voice",
     "health",
+    "limits",
     "alerts",
     "keyboard",
     "autopilot"

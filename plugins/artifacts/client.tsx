@@ -138,7 +138,7 @@ function PanelArtifact({ art, onBack, onClose }: { art: Artifact; onBack: () => 
           <BackIcon className={ic} />
         </IconButton>
         <div className="flex min-w-0 flex-1 items-baseline gap-2">
-          <div className="min-w-0 shrink truncate font-semibold">{art.title}</div>
+          <div className="line-clamp-2 min-w-0 shrink font-semibold break-words">{art.title}</div>
           <div className="shrink-0 text-xs text-fg2 tabular-nums phone:text-sm">v{art.v}</div>
         </div>
         <IconButton label="Open full screen" className="rounded-full!" onClick={() => openArtifact(art.id)}>
@@ -328,7 +328,7 @@ function ArtifactCard({ msg, chat, from }: { msg: Message; chat: Chat; from: str
         )}
       >
         <PageIcon className={ic} />
-        <b className="min-w-0 flex-1 truncate font-medium text-fg">{art.title}</b>
+        <b className="line-clamp-3 min-w-0 flex-1 font-medium break-words text-fg">{art.title}</b>
         <span className="shrink-0 text-fg3 tabular-nums">v{post.v} · newer below</span>
       </button>
     )
@@ -352,14 +352,15 @@ function ArtifactPanel({ art, you, from, className }: { art: Artifact; you: bool
         you ? 'rounded-bubble rounded-br-[6px]' : 'rounded-bubble rounded-bl-[6px]',
       )}
     >
-      <div className={clsx('flex items-center gap-2 py-1 pr-1 pl-3 text-[0.75rem] text-fg2 phone:py-0 phone:text-[0.8125rem]', you ? 'bg-reply' : 'bg-bubble')}>
+      <div className={clsx('@container/card flex items-center gap-2 py-1 pr-1 pl-3 text-[0.75rem] text-fg2 phone:py-0 phone:text-[0.8125rem]', you ? 'bg-reply' : 'bg-bubble')}>
         <PageIcon className={ic} />
-        <button type="button" onClick={(e) => (splitClick(e) ? openSplit({ kind: 'artifact', id: art.id }) : openArtifact(art.id))} className="min-w-0 flex-1 self-stretch truncate text-left font-medium text-fg">
-          {art.title}
+        <button type="button" onClick={(e) => (splitClick(e) ? openSplit({ kind: 'artifact', id: art.id }) : openArtifact(art.id))} className="min-w-0 flex-1 self-stretch py-1 text-left font-medium break-words text-fg">
+          {/* a task's name in the title takes more than the narrow card's one line */}
+          <span className="line-clamp-3 leading-4 phone:leading-[1.125rem]">{art.title}</span>
         </button>
         <span className="max-w-[55%] shrink-0 truncate tabular-nums">
-          {/* a phone's narrow card keeps its title: where it is from gives way */}
-          <span className="phone:hidden">{from} · </span>v{art.v} · {art.when}
+          {/* a narrow card keeps its title: where it is from gives way */}
+          <span className="phone:hidden @max-md/card:hidden">{from} · </span>v{art.v} · {art.when}
         </span>
         <IconButton label="Show in side panel" onClick={() => showInPanel(art.id)}>
           <PanelIcon className={ic} />
@@ -438,14 +439,13 @@ function Viewer() {
     const target = pick ? `${pick.text ? `"${pick.text.slice(0, 60)}" ` : ''}(${last}${pick.component ? ` in ${pick.component}` : ''})` : undefined
     const r = (await act(pick ? { type: 'artifact-note', place: art.place, artifact: art.id, v: shown, note: t, target } : { type: 'artifact-say', place: art.place, artifact: art.id, v: shown, text: t }).catch(() => ({ ok: false }))) as {
       ok?: boolean
-      to?: string
       error?: string
     }
     if (r.ok === false) return setSaid(r.error ?? "That didn't go through. Try again.")
     setText('')
     setPick(null)
     setMarkup(false)
-    setSaid(`Sent to ${r.to ?? art.keeper}. A new version shows here when it's in.`)
+    setSaid("Sent. A new version shows here when it's in.")
   }
   const del = async () => {
     const r = (await act({ type: 'artifact-delete', place: art.place, artifact: art.id }).catch(() => ({ ok: false }))) as { ok?: boolean; error?: string } | undefined
@@ -467,7 +467,7 @@ function Viewer() {
           </IconButton>
           {/* the title whole first, then the version and when, cut short; a phone's bar has room for them only under it */}
           <div className="flex min-w-0 flex-1 items-baseline gap-2 phone:flex-col phone:items-stretch phone:gap-0">
-            <div className="min-w-0 truncate font-semibold phone:leading-5">{art.title}</div>
+            <div className="line-clamp-2 min-w-0 font-semibold break-words phone:leading-5">{art.title}</div>
             <div className="min-w-0 shrink-[100] truncate text-xs text-fg2 tabular-nums phone:text-[0.8125rem]/4">
               v{shown} · {ver?.by ?? art.by} · {ver?.when ?? art.when}
             </div>
@@ -752,7 +752,7 @@ function ArtifactList(_: { placeId: string }) {
                     </>
                   }
                 >
-                  {a.title}
+                  <span className="line-clamp-3 whitespace-normal break-words">{a.title}</span>
                 </RowText>
               </Row>
             )
@@ -792,7 +792,7 @@ function ChatArtifacts({ chatKey }: { chatKey: string }) {
               </>
             }
           >
-            {a.title}
+            <span className="line-clamp-3 whitespace-normal break-words">{a.title}</span>
           </RowText>
         </Row>
       ))}

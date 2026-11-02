@@ -17,10 +17,10 @@ export function toggleCall(chatKey: string) {
   ;(document.activeElement as HTMLElement | null)?.blur?.()
   setUI({ call: chatKey, callStarted: Date.now(), callMuted: false, callError: null, focus: null, plus: null })
   act({ type: 'call', chat: chatKey, on: true })
-  startCall(chatKey, (message) => {
+  void startCall(chatKey, (message) => {
     endCall()
     setUI({ callError: message })
-  })
+  }).catch(() => { endCall(); setUI({ callError: 'Audio could not start on this device.' }) })
 }
 
 export function endCall() {

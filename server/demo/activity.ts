@@ -2,7 +2,7 @@
 // a test run, a headless reviewer) with what each does. Times count back from when the demo started.
 import { glance, rowsOf } from '../../shared/activity.ts'
 import type { ActivityAnswer, ActivityAsk, Job, Step, TurnActivity } from '../../shared/types.ts'
-import { claudeStep, codexItem, commandSay, type Said } from '../live/readers/steps.ts'
+import { claudeStep, codexItem, commandSay, type Said } from '../common/readers/steps.ts'
 
 const T0 = Date.now()
 const ago = (s: number) => T0 - s * 1000

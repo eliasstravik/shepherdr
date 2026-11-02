@@ -300,7 +300,7 @@ function AddDialog() {
             />
           ))}
           {/* a name nothing matches is a new folder: the line under the list says so */}
-          {listed && !rows.length && (listed.error || !leaf) ? (
+          {listed && !rows.length && (listed.error ? listed.error !== t?.error : !leaf) ? (
             <li className="px-2 py-2 text-[0.8125rem] text-fg2 phone:text-[0.9375rem]">{listed.error ?? (listed.data?.exists === false ? 'No folder here yet.' : 'No folders in here.')}</li>
           ) : null}
         </ul>

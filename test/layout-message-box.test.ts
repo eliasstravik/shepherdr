@@ -539,14 +539,14 @@ describe.skipIf(!browser)('the keyboard, like iMessage and Slack', () => {
       await touch('touchEnd')
       // the drawer is out once it has stopped sliding and the app has it open (until then a swipe can't shut it)
       await page.waitForFunction(() => {
-        const nav = document.querySelector('nav[aria-label=Places]')!
+        const nav = document.querySelector('nav[aria-label=Spaces]')!
         return Math.round(nav.getBoundingClientRect().left) === 0 && !nav.closest('[inert]')
       }, null, { polling: 50 })
       expect(await focused(page)).toBe('message')
       // (a swipe left shuts the drawer again: gone, and shut in the app too, or its shade still takes the next touch)
       await slide([300, y0], [20, y0])
       await page.waitForFunction(() => {
-        const nav = document.querySelector('nav[aria-label=Places]')!
+        const nav = document.querySelector('nav[aria-label=Spaces]')!
         return nav.getBoundingClientRect().right <= 0 && !!nav.closest('[inert]')
       }, null, { polling: 50 })
       expect(await focused(page)).toBe('message')

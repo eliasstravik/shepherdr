@@ -109,9 +109,12 @@ const useOpen = () =>
 
 const quiet = 'text-[0.8125rem]/5 text-fg3 phone:text-[0.875rem]/5'
 
-function KindIcon({ kind, failed }: { kind: StepKind; failed?: boolean }) {
+/** a test run's outcome in its words: "Ran the tests: 2 failed, 39 passed" */
+const testsFailed = (r: StepRow) => /\b\d+ failed\b/.test(r.text)
+
+function KindIcon({ kind, failed, loud }: { kind: StepKind; failed?: boolean; loud?: boolean }) {
   const I = failed ? ExclamationTriangleIcon : ICON[kind]
-  return <I aria-hidden className={clsx('size-4 h-lh shrink-0', failed ? 'fill-[var(--need)]' : 'fill-[var(--fg3)]')} />
+  return <I aria-hidden className={clsx('size-4 h-lh shrink-0', failed && loud ? 'fill-[var(--need)]' : 'fill-[var(--fg3)]')} />
 }
 
 /** lines an edit added and removed: "+12 −3" */
@@ -171,7 +174,7 @@ function RowSteps({ chat, what, id, ids, live }: { chat: string; what: 'turn' | 
   if ('error' in d) return <p className={quiet}>{d.error}</p>
   if (!('steps' in d)) return null
   const steps = d.steps.filter((s) => ids.includes(s.id))
-  if (!steps.length) return <p className={quiet}>It is no longer in its log.</p>
+  if (!steps.length) return <p className={quiet}>{d.catchingUp ? 'Loading the rest of this log…' : d.warning || 'It is no longer in its log.'}</p>
   return (
     <ul role="list" className="flex flex-col gap-2">
       {steps.map((s) => (
@@ -193,10 +196,11 @@ function Row({ r, chat, what, id, live }: { r: StepRow; chat: string; what: 'tur
         onClick={() => setOn(!on)}
         className={clsx('flex min-w-0 cursor-pointer items-start gap-2 rounded-row px-1.5 py-0.5 text-left hover:bg-hover hover:text-fg2 phone:py-2', quiet, on && 'text-fg2')}
       >
-        <KindIcon kind={r.kind} failed={!!r.failed} />
+        {/* a step that errored is often harmless (a search that found nothing): only failed tests are loud */}
+        <KindIcon kind={r.kind} failed={!!r.failed} loud={testsFailed(r)} />
         <span className={clsx('min-w-0 flex-1', on ? 'break-words' : 'truncate')}>{r.text}</span>
         <Lines added={r.added} removed={r.removed} />
-        {r.failed && !r.text.includes('failed') ? <span className="shrink-0 text-[var(--need)]">failed</span> : null}
+        {r.failed && !testsFailed(r) ? <span className="shrink-0">had an error</span> : null}
       </button>
       {on ? (
         <div className="flex flex-col gap-1 py-1 pr-1.5 pl-7.5">
@@ -225,8 +229,12 @@ function AllRows({ chat, what, id, live, fallback }: { chat: string; what: 'turn
   if (d && 'output' in d) return <Output chat={chat} id={id} job live={live} />
   const rows = d && 'steps' in d ? rowsOf(d.steps) : fallback
   if (!rows) return <p className={clsx(quiet, 'px-1.5 py-0.5')}>Loading…</p>
-  if (!rows.length) return <p className={clsx(quiet, 'px-1.5 py-0.5')}>No steps yet.</p>
-  return <Rows rows={rows} chat={chat} what={what} id={id} live={live} />
+  const detail = d && 'steps' in d ? d : undefined
+  return <>
+    {detail?.warning ? <p className={clsx(quiet, 'px-1.5 py-0.5')}>{detail.warning}</p> : null}
+    {rows.length ? <Rows rows={rows} chat={chat} what={what} id={id} live={live} /> : detail?.catchingUp ? null : <p className={clsx(quiet, 'px-1.5 py-0.5')}>No steps yet.</p>}
+    {detail?.catchingUp ? <p className={clsx(quiet, 'px-1.5 py-0.5')}>Loading the rest of this log…</p> : null}
+  </>
 }
 
 /** the background work: each piece, what it does now and how long it has run; a tap opens its own steps or output */

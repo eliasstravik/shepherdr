@@ -34,6 +34,7 @@ describe.skipIf(!browser)('artifacts', () => {
 
   /** an artifact of its own in HP-201's chat, by the agent or by you; gone again after the test */
   const posted: string[] = []
+  const LONG = 'SHE-120: Keep all 32 chars of a task name · Proof'
   const post = (id: string, title: string, html: string, who: 'agent' | 'you' = 'agent') => {
     ARTIFACT_HTML[id] = { 1: html }
     world.artifacts.push({ id, title, place: 'p:vm-str:herdr-projects', at: 1, v: 1, when: 'now', by: 'HP-201 agent', keeper: 'HP-201 agent', versions: [{ n: 1, when: 'now', by: 'HP-201 agent', html: 1 }] })
@@ -68,7 +69,7 @@ describe.skipIf(!browser)('artifacts', () => {
 
   test('a card spans the chat column, and a fixed-size design is scaled to its width, keeping its shape', async () => {
     post('zz2', 'Wide poster', `<meta name="shepherdr-size" content="1200x600"><style>body{background:#c2410c}</style>`)
-    for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 }]) {
+    for (const viewport of [{ width: 360, height: 780 }, { width: 1280, height: 800 }]) {
       const page = await browser!.newPage({ viewport })
       await page.goto(at('place=p%3Avm-str%3Aherdr-projects&task=HP-201'))
       const card = page.locator('[data-card]').filter({ hasText: 'Wide poster' })
@@ -289,7 +290,7 @@ describe.skipIf(!browser)('artifacts', () => {
     await dialog.getByText('v1 · LV-3 agent').waitFor()
     await dialog.getByRole('textbox').fill('Make the button bigger')
     await dialog.getByRole('button', { name: 'Send', exact: true }).click()
-    await dialog.getByText('Sent to LV-3 agent.').waitFor()
+    await dialog.getByText("Sent. A new version shows here when it's in.").waitFor()
     expect(world.chat('LV-3/Agent').messages.find((m) => m.text === 'Make the button bigger')).toMatchObject({ who: 'you', answered: 'About "Upload page draft"' })
     await dialog.getByText('Updated to v2').waitFor({ timeout: 8000 })
     await dialog.getByText('v2 · LV-3 agent').waitFor()
@@ -330,6 +331,27 @@ describe.skipIf(!browser)('artifacts', () => {
     await page.waitForTimeout(300)
     expect(await frame.locator('body').evaluate(() => (window as unknown as { kept?: number }).kept)).toBe(1)
     await page.close()
+  }, 30_000)
+
+  test("a task's full name in a title is not cut on the chat card or in the list, on a phone or a desktop", async () => {
+    post('zz-long', LONG, '<p>Proof</p>')
+    const whole = (loc: ReturnType<Page['locator']>) => loc.evaluate((el) => el.scrollHeight <= el.clientHeight + 1)
+    for (const viewport of [{ width: 360, height: 780 }, { width: 1280, height: 800 }]) {
+      const page = await browser!.newPage({ viewport })
+      await page.goto(at('place=p%3Avm-str%3Aherdr-projects&task=HP-201'))
+      const card = page.locator('[data-card]', { hasText: LONG }).locator('button span.line-clamp-3').first()
+      await card.waitFor()
+      expect(await whole(card)).toBe(true)
+      await page.close()
+      const list = await browser!.newPage({ viewport })
+      await list.goto(at('place=p%3Avm-str%3Aherdr-projects'))
+      await list.getByRole('button', { name: 'Artifacts' }).first().click()
+      const row = list.getByText(LONG).first()
+      await row.waitFor()
+      expect(await whole(row)).toBe(true)
+      await list.close()
+    }
+    unpost()
   }, 30_000)
 })
 

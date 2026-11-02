@@ -1,6 +1,7 @@
 // The sidebars and places: modes, the ⋯ menu, the places tree, one machine or many, in a real browser (layout.ts).
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import type { Page } from 'playwright-core'
+import { PILOT_BLOCKED } from '../shared/types.ts'
 import { layout, settled, type Box } from './layout.ts'
 
 const { browser, world, server, url } = await layout()
@@ -32,15 +33,15 @@ describe.skipIf(!browser)('sidebars', () => {
   test('drag an inner edge to resize, double-click to reset; this device remembers (desktop)', async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 800 } })
     await page.goto(url())
-    await page.getByRole('separator', { name: 'Resize places' }).waitFor()
+    await page.getByRole('separator', { name: 'Resize spaces' }).waitFor()
     expect(await width(page, places)).toBe(260)
     expect(await width(page, tasks)).toBe(400)
-    await drag(page, 'Resize places', 80)
+    await drag(page, 'Resize spaces', 80)
     await drag(page, 'Resize tasks', -100)
     expect(await width(page, places)).toBe(340)
     expect(await width(page, tasks)).toBe(500)
     // no wider than their max, and the chat keeps its room
-    await drag(page, 'Resize places', 400)
+    await drag(page, 'Resize spaces', 400)
     expect(await width(page, places)).toBe(400)
     // the arrow keys resize a focused edge
     await page.getByRole('separator', { name: 'Resize tasks' }).focus()
@@ -48,10 +49,10 @@ describe.skipIf(!browser)('sidebars', () => {
     await settled(page)
     expect(await width(page, tasks)).toBe(516)
     await page.reload()
-    await page.getByRole('separator', { name: 'Resize places' }).waitFor()
+    await page.getByRole('separator', { name: 'Resize spaces' }).waitFor()
     expect(await width(page, places)).toBe(400)
     expect(await width(page, tasks)).toBe(516)
-    await page.getByRole('separator', { name: 'Resize places' }).dblclick()
+    await page.getByRole('separator', { name: 'Resize spaces' }).dblclick()
     await page.getByRole('separator', { name: 'Resize tasks' }).dblclick()
     await settled(page)
     expect(await width(page, places)).toBe(260)
@@ -62,16 +63,16 @@ describe.skipIf(!browser)('sidebars', () => {
   test('places hides with its toggle, ⌘B, or dragged narrow, and comes back as wide as it was (desktop)', async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 800 } })
     await page.goto(url())
-    const hide = page.getByRole('button', { name: 'Hide Places' })
-    const show = page.getByRole('button', { name: 'Show Places' })
-    await drag(page, 'Resize places', 60)
+    const hide = page.getByRole('button', { name: 'Hide Spaces' })
+    const show = page.getByRole('button', { name: 'Show Spaces' })
+    await drag(page, 'Resize spaces', 60)
     expect(await width(page, places)).toBe(320)
     // the toggle at the top of places; hidden, the chat's header keeps the place's name and the toggle
     await hide.click()
     await settled(page)
     expect(await page.$eval(places, (n) => n.parentElement!.getBoundingClientRect().width)).toBe(0)
     expect(await page.$eval(places, (n) => n.parentElement!.inert)).toBe(true)
-    expect(await page.getByRole('separator', { name: 'Resize places' }).count()).toBe(0)
+    expect(await page.getByRole('separator', { name: 'Resize spaces' }).count()).toBe(0)
     expect(await page.locator('section').first().getByText('home', { exact: true }).isVisible()).toBe(true)
     expect(await page.locator('section').first().getByText('Home · every machine', { exact: true }).isVisible()).toBe(true)
     expect(await show.getAttribute('aria-expanded')).toBe('false')
@@ -89,7 +90,7 @@ describe.skipIf(!browser)('sidebars', () => {
     await settled(page)
     expect(await hide.isVisible()).toBe(true)
     // dragged narrow enough, it snaps shut; it stays shut after a reload
-    await drag(page, 'Resize places', -200)
+    await drag(page, 'Resize spaces', -200)
     await settled(page)
     expect(await show.isVisible()).toBe(true)
     await page.reload()
@@ -101,7 +102,7 @@ describe.skipIf(!browser)('sidebars', () => {
     await page.keyboard.press('?')
     const settings = page.getByRole('region', { name: 'Settings' })
     expect(await settings.getByRole('button', { name: 'Keyboard shortcuts' }).getAttribute('aria-current')).toBe('page')
-    expect(await settings.getByText('Show or hide Places').count()).toBe(1)
+    expect(await settings.getByText('Show or hide Spaces').count()).toBe(1)
     await page.keyboard.press('?')
     expect(await settings.count()).toBe(0)
     await show.click()
@@ -113,7 +114,7 @@ describe.skipIf(!browser)('sidebars', () => {
   test('while dragging, the chat beside reflows with every move: nothing overlaps it, nothing jumps on letting go (desktop)', async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 800 } })
     await page.goto(url())
-    await page.getByRole('separator', { name: 'Resize places' }).waitFor()
+    await page.getByRole('separator', { name: 'Resize spaces' }).waitFor()
     /** the chat's content (its right edge) against the columns either side of it */
     const edges = () =>
       page.evaluate(() => {
@@ -125,7 +126,7 @@ describe.skipIf(!browser)('sidebars', () => {
           tasks: Math.round(document.querySelector('section[aria-label="Tasks"]')!.getBoundingClientRect().left),
         }
       })
-    for (const [name, dx] of [['Resize tasks', -300], ['Resize tasks', 60], ['Resize places', 120]] as const) {
+    for (const [name, dx] of [['Resize tasks', -300], ['Resize tasks', 60], ['Resize spaces', 120]] as const) {
       const b = (await page.getByRole('separator', { name }).boundingBox())!
       await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2)
       await page.mouse.down()
@@ -149,29 +150,29 @@ describe.skipIf(!browser)('sidebars', () => {
       await page.setViewportSize({ width: w, height: 850 })
       await settled(page)
       const docked = w >= 1180
-      expect(await page.getByRole('button', { name: 'Hide Places', exact: true }).count()).toBe(docked ? 1 : 0)
-      expect(await page.getByRole('button', { name: 'Places', exact: true }).count()).toBe(docked ? 0 : 1)
+      expect(await page.getByRole('button', { name: 'Hide Spaces', exact: true }).count()).toBe(docked ? 1 : 0)
+      expect(await page.getByRole('button', { name: 'Spaces', exact: true }).count()).toBe(docked ? 0 : 1)
       expect(await page.locator('[data-messages]').first().evaluate((e) => e.getBoundingClientRect().width)).toBeGreaterThanOrEqual(480)
       if (!docked) {
-        await page.getByRole('button', { name: 'Places', exact: true }).click()
-        await page.getByRole('navigation', { name: 'Places' }).waitFor()
+        await page.getByRole('button', { name: 'Spaces', exact: true }).click()
+        await page.locator('nav[aria-label="Spaces"]:not(#places)').waitFor()
         await page.getByRole('button', { name: 'Close', exact: true }).click()
       }
     }
     await drag(page, 'Resize tasks', -300)
     await page.setViewportSize({ width: 1180, height: 850 })
     await settled(page)
-    expect(await page.getByRole('button', { name: 'Places', exact: true }).count()).toBe(1)
+    expect(await page.getByRole('button', { name: 'Spaces', exact: true }).count()).toBe(1)
     expect(await page.locator('[data-messages]').first().evaluate((e) => e.getBoundingClientRect().width)).toBeGreaterThanOrEqual(480)
     await page.reload()
-    await page.getByRole('button', { name: 'Places', exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Spaces', exact: true }).waitFor()
     await page.setViewportSize({ width: 1920, height: 850 })
-    await page.getByRole('button', { name: 'Hide Places', exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Hide Spaces', exact: true }).waitFor()
     expect(await width(page, tasks)).toBe(700)
     // Explicitly hidden places and task tools stay hidden on wider windows.
-    await page.getByRole('button', { name: 'Hide Places', exact: true }).click()
+    await page.getByRole('button', { name: 'Hide Spaces', exact: true }).click()
     await page.setViewportSize({ width: 2560, height: 850 })
-    await page.getByRole('button', { name: 'Show Places', exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Show Spaces', exact: true }).waitFor()
     expect(await page.locator('#task-panel').count()).toBe(0)
     await page.close()
   }, 30_000)
@@ -179,14 +180,14 @@ describe.skipIf(!browser)('sidebars', () => {
   test('a drawer open while widening does not reopen when the window narrows again', async () => {
     const page = await browser!.newPage({ viewport: { width: 1100, height: 850 } })
     await page.goto(url())
-    await page.getByRole('button', { name: 'Places', exact: true }).click()
+    await page.getByRole('button', { name: 'Spaces', exact: true }).click()
     await page.getByRole('button', { name: 'Close', exact: true }).waitFor()
     await page.setViewportSize({ width: 1180, height: 850 })
-    await page.getByRole('button', { name: 'Hide Places', exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Hide Spaces', exact: true }).waitFor()
     await page.setViewportSize({ width: 1100, height: 850 })
     await settled(page)
     expect(await page.getByRole('button', { name: 'Close', exact: true }).count()).toBe(0)
-    await page.getByRole('button', { name: 'Places', exact: true }).click()
+    await page.getByRole('button', { name: 'Spaces', exact: true }).click()
     await page.getByRole('button', { name: 'Close', exact: true }).waitFor()
     await page.close()
   })
@@ -195,22 +196,46 @@ describe.skipIf(!browser)('sidebars', () => {
     const tablet = await browser!.newPage({ viewport: { width: 900, height: 800 } })
     await tablet.goto(url())
     await tablet.getByRole('separator', { name: 'Resize tasks' }).waitFor()
-    expect(await tablet.getByRole('separator', { name: 'Resize places' }).count()).toBe(0)
-    expect(await tablet.getByRole('button', { name: /^(Hide|Show) Places$/ }).count()).toBe(0)
+    expect(await tablet.getByRole('separator', { name: 'Resize spaces' }).count()).toBe(0)
+    expect(await tablet.getByRole('button', { name: /^(Hide|Show) Spaces$/ }).count()).toBe(0)
     const before = await width(tablet, tasks)
     await drag(tablet, 'Resize tasks', -40)
     expect(await width(tablet, tasks)).toBe(Math.min(before + 40, 900 - 480))
     await tablet.close()
     const phone = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true })
     await phone.goto(url())
-    await phone.getByRole('button', { name: 'Places' }).waitFor()
+    await phone.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).waitFor()
     expect(await phone.getByRole('separator').count()).toBe(0)
-    expect(await phone.getByRole('button', { name: /^(Hide|Show) Places$/ }).count()).toBe(0)
+    expect(await phone.getByRole('button', { name: /^(Hide|Show) Spaces$/ }).count()).toBe(0)
     await phone.close()
   }, 30_000)
 })
 
 describe.skipIf(!browser)("a place's Autopilot", () => {
+  test('where it cannot run, the switch is greyed with the reason and asks nothing', async () => {
+    const was = world.sections
+    const reason = 'Autopilot needs Linux. mac runs macOS.'
+    world.sections = was.map((s) => (s.name === 'Autopilot' && s.level === 'p:vm-str:~' ? { ...s, rows: [{ label: PILOT_BLOCKED, key: '', value: reason, fixed: true }, ...s.rows] } : s))
+    world.emit('snapshot')
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    try {
+      await page.goto(url())
+      await page.getByRole('button', { name: 'Menu', exact: true }).click()
+      const pop = page.getByRole('menu', { name: 'Menu' })
+      const sw = pop.getByRole('menuitemcheckbox', { name: 'Autopilot' })
+      await sw.waitFor()
+      expect(await sw.isDisabled()).toBe(true)
+      await pop.getByText(reason).waitFor()
+      // the whole reason, on a phone, not cut off
+      expect(await pop.getByText(reason).evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true)
+      expect(await page.getByRole('alertdialog').count()).toBe(0)
+    } finally {
+      await page.close()
+      world.sections = was
+      world.emit('snapshot')
+    }
+  }, 30_000)
+
   for (const [name, opts] of [
     ['phone, dark', { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, colorScheme: 'dark' }],
     ['phone, light', { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, colorScheme: 'light' }],
@@ -235,7 +260,7 @@ describe.skipIf(!browser)("a place's Autopilot", () => {
       const pop = page.getByRole('menu', { name: 'Menu' })
       const sw = pop.getByRole('menuitemcheckbox', { name: 'Autopilot' })
       await sw.waitFor()
-      expect(await pop.getByRole('menuitem').allTextContents()).toEqual([expect.stringContaining('Search in this chat'), 'Restart agent…', expect.stringContaining('Terminal'), 'Artifacts'])
+      expect(await pop.getByRole('menuitem').allTextContents()).toEqual([expect.stringContaining('Search in this chat'), 'Open full search', 'Restart agent…', expect.stringContaining('Terminal'), 'Artifacts'])
       expect(await pop.locator('[role=group]').count()).toBe(0)
       expect(await sw.getAttribute('aria-checked')).toBe('false')
       expect(await pop.getByText('Off: does what you ask').count()).toBe(1)
@@ -248,9 +273,24 @@ describe.skipIf(!browser)("a place's Autopilot", () => {
       const [menu, s] = [(await pop.boundingBox())!, (await sw.boundingBox())!]
       expect(s.x).toBeGreaterThanOrEqual(menu.x)
       expect(s.x + s.width).toBeLessThanOrEqual(menu.x + menu.width + 0.5)
-      // on: the pill shows, red, and the switch says so; the menu stays open
+      // a tap only asks: what it replaces and spends, and Cancel leaves it off
       await sw.click()
+      const sheet = page.getByRole('alertdialog', { name: /^Turn on Autopilot/ })
+      await sheet.waitFor()
+      expect(await sheet.innerText()).toContain('replaces this one')
+      expect(await sheet.innerText()).toContain('allowance')
+      expect(await pop.count()).toBe(0)
+      await sheet.getByRole('button', { name: 'Cancel' }).click()
+      await sheet.waitFor({ state: 'detached' })
+      expect(await pill.count()).toBe(0)
+      // on: the pill shows, red, and the switch says so
+      await page.getByRole('button', { name: 'Menu', exact: true }).click()
+      await sw.click()
+      await sheet.getByRole('button', { name: 'Turn on' }).click()
       await pill.waitFor()
+      await sheet.waitFor({ state: 'detached' })
+      await page.getByRole('button', { name: 'Menu', exact: true }).click()
+      await sw.waitFor()
       expect(await sw.getAttribute('aria-checked')).toBe('true')
       expect(await pill.innerText()).toBe('Autopilot')
       expect(await pill.getAttribute('aria-label')).toBe('Autopilot is on. Change it')
@@ -273,8 +313,8 @@ describe.skipIf(!browser)("a place's Autopilot", () => {
       const page = await ctx.newPage()
       await page.goto(url())
       // a phone's places are in its drawer
-      const side = opts.viewport.width < 600 ? 'nav[aria-label="Places"]' : '#places'
-      if (side !== '#places') await page.getByRole('button', { name: 'Places' }).first().click()
+      const side = opts.viewport.width < 600 ? 'nav[aria-label="Spaces"]' : '#places'
+      if (side !== '#places') await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).first().click()
       await page.waitForSelector(`${side} li`)
       await settled(page)
       const rows = () =>
@@ -328,7 +368,7 @@ describe.skipIf(!browser)("a place's Autopilot", () => {
     await page.getByRole('menuitem', { name: 'File or photo' }).waitFor()
     expect(await page.getByRole('combobox', { name: 'Model' }).count()).toBe(0)
     expect(await page.getByRole('group', { name: 'Mode', exact: true }).count()).toBe(0)
-    expect(await page.locator('[data-agent-controls] [role=menuitem]').count()).toBe(3)
+    expect(await page.locator('[data-agent-controls] [role=menuitem]').count()).toBe(4)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     await page.close()
   }, 30_000)
@@ -432,6 +472,8 @@ describe.skipIf(!browser)('the ⋯ menu is one design', () => {
     await page.keyboard.press('ArrowDown')
     expect(await focused()).toBe('Search in this chat')
     await page.keyboard.press('ArrowDown')
+    expect(await focused()).toBe('Open full search')
+    await page.keyboard.press('ArrowDown')
     expect(await focused()).toBe('Restart agent…')
     await page.keyboard.press('ArrowDown')
     expect(await focused()).toBe('Terminal')
@@ -458,8 +500,8 @@ describe.skipIf(!browser)('places, calm like Slack', () => {
     page.$$eval(`${sel} li`, (ls) =>
       ls.map((l) => {
         const name = l.querySelector('button > span')!
-        const badge = l.querySelector('span[aria-label$="need you here"]')
-        return { name: name.textContent, count: badge ? Number(badge.textContent) : 0, bold: Number(getComputedStyle(name).fontWeight) >= 600, dots: l.querySelectorAll('.dot').length, text: l.textContent }
+        const badge = l.querySelector('[data-attention-badge]')
+        return { name: name.textContent, count: badge ? [...badge.children].reduce((sum, part) => sum + Number(part.textContent), 0) : 0, bold: Number(getComputedStyle(name).fontWeight) >= 600, dots: l.querySelectorAll('.dot').length, text: l.textContent }
       }),
     )
   const check = (rs: Awaited<ReturnType<typeof rows>>) => {
@@ -481,9 +523,9 @@ describe.skipIf(!browser)('places, calm like Slack', () => {
     await desk.close()
     const phone = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true })
     await phone.goto(url())
-    await phone.getByRole('button', { name: 'Places' }).first().click()
-    await phone.waitForSelector('nav[aria-label="Places"] li')
-    check(await rows(phone, 'nav[aria-label="Places"]'))
+    await phone.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).first().click()
+    await phone.waitForSelector('nav[aria-label="Spaces"] li')
+    check(await rows(phone, 'nav[aria-label="Spaces"]'))
     await phone.close()
   }, 30_000)
 
@@ -496,8 +538,8 @@ describe.skipIf(!browser)('places, calm like Slack', () => {
       const page = await ctx.newPage()
       await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('m:vm-str')}`)
       const phone = opts.viewport.width < 600
-      const side = phone ? 'nav[aria-label="Places"]' : '#places'
-      if (phone) await page.getByRole('button', { name: 'Places' }).first().click()
+      const side = phone ? 'nav[aria-label="Spaces"]' : '#places'
+      if (phone) await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).first().click()
       await page.waitForSelector(`${side} li`)
       const rs = await page.$$eval(`${side} li`, (ls) =>
         ls.map((l) => {
@@ -556,11 +598,11 @@ describe.skipIf(!browser)('places, calm like Slack', () => {
       }
       // Settings' place picker: its value and each choice with its place's icon
       await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}`)
-      if (phone) await page.getByRole('button', { name: 'Places' }).first().click()
-      await page.getByRole('navigation', { name: 'Places' }).getByRole('button', { name: 'Settings', exact: true }).click()
+      if (phone) await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).first().click()
+      await page.getByRole('navigation', { name: /^(Show |Hide )?Spaces$/ }).getByRole('button', { name: 'Settings', exact: true }).click()
       const pick = page.getByRole('button', { name: /^Editing: / }).first()
       await pick.waitFor()
-      expect(await pick.locator('[data-icon]').getAttribute('data-icon')).toBe('hash')
+      expect(await pick.locator('[data-icon]').getAttribute('data-icon')).toBe('layers')
       await pick.click()
       const menu = page.getByRole('menu', { name: 'Choices' })
       expect(await menu.getByRole('menuitemradio').evaluateAll((ms) => ms.slice(0, 6).map((m) => m.querySelector('[data-icon]')?.getAttribute('data-icon')))).toEqual(['layers', 'server', 'hash', 'hash', 'server', 'hash'])
@@ -599,7 +641,7 @@ describe.skipIf(!browser)('the places tree', () => {
     expect(at()).toBe('vm-str/home')
     expect(await row(page, 'mac').getAttribute('aria-current')).toBeNull()
     expect(await row(page, 'mac').locator('[aria-current]').count()).toBe(0)
-    expect(await page.locator('#places li[data-heading="m:mac"] [data-autopilot], #places li[data-heading="m:mac"] [aria-label$="need you here"]').count()).toBe(0)
+    expect(await page.locator('#places li[data-heading="m:mac"] [data-autopilot], #places li[data-heading="m:mac"] [data-attention-badge]').count()).toBe(0)
     await row(page, 'mac').getByRole('button', { name: 'mac', exact: true }).click()
     await page.getByRole('button', { name: "Hide mac's spaces" }).waitFor()
     expect(at()).toBe('vm-str/home')
@@ -616,7 +658,7 @@ describe.skipIf(!browser)('the places tree', () => {
     await page.locator('#places li', { hasText: 'quiet' }).waitFor({ state: 'detached' })
     expect(await page.locator('#places li[data-project][data-machine="m:vm-str"]').count()).toBe(0)
     expect(await page.locator('#places li[aria-current], #places li:has([aria-current])').count()).toBe(0)
-    expect(await row(page, 'vm-str').locator('span[aria-label$="need you here"]').count()).toBe(0)
+    expect(await row(page, 'vm-str').locator('[data-attention-badge]').count()).toBe(0)
     expect(await row(page, 'vm-str').getByRole('img', { name: 'Something in it waits on you' }).count()).toBe(1)
     expect(at()).toBe('vm-str/home')
     // the screen remembers it, and the chevron brings them back
@@ -646,7 +688,7 @@ describe.skipIf(!browser)('the places tree', () => {
     // quiet stays open, out of sight; gtm and herdr-projects wait on you, so the heading has a red dot, not a count
     expect(await names()).toEqual(['mac', 'home', 'lilla-varlden', 'nas', 'home', 'vm-str'])
     expect(at()).toBe('vm-str/quiet')
-    expect(await row(page, 'vm-str').locator('span[aria-label$="need you here"]').count()).toBe(0)
+    expect(await row(page, 'vm-str').locator('[data-attention-badge]').count()).toBe(0)
     expect(await row(page, 'vm-str').getByRole('img', { name: 'Something in it waits on you' }).count()).toBe(1)
     // remembered; Alt+↑ from the hidden one goes to the space shown above where it sits, and leaves the fold as it is
     await page.reload()
@@ -690,7 +732,7 @@ describe.skipIf(!browser)('the places tree', () => {
     await page.waitForSelector('#places li')
     await row(page, 'vm-str').hover()
     const side = await box(page, '#places')
-    for (const sel of ['#places button[aria-label="New space on vm-str"]', '#places [aria-label$="need you here"]', '#places li:has-text("herdr-projects")']) {
+    for (const sel of ['#places button[aria-label="New space on vm-str"]', '#places [data-attention-badge]', '#places li:has-text("herdr-projects")']) {
       expect((await box(page, sel)).right).toBeLessThanOrEqual(side.right)
     }
     await page.close()
@@ -739,9 +781,9 @@ describe.skipIf(!browser)('a single machine', () => {
       // the phone drawer
       const phone = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true })
       await phone.goto(url())
-      await phone.getByRole('button', { name: 'Places' }).first().click()
-      await phone.waitForSelector('nav[aria-label="Places"] li')
-      const drawer = await sidebar(phone, 'nav[aria-label="Places"]')
+      await phone.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).first().click()
+      await phone.waitForSelector('nav[aria-label="Spaces"] li')
+      const drawer = await sidebar(phone, 'nav[aria-label="Spaces"]')
       expect(drawer).not.toContain('All machines')
       expect(drawer.slice(drawer.indexOf('vm-str'), drawer.indexOf('Settings'))).toEqual(['vm-str', 'home', 'gtm', 'herdr-projects'])
       await phone.close()
@@ -809,8 +851,13 @@ describe.skipIf(!browser)('removing a space', () => {
       await page.keyboard.press('Escape')
       await ask.waitFor({ state: 'detached' })
       expect(await more.evaluate((b) => b === document.activeElement)).toBe(true)
-      // its ring shows as the keyboard was used last, and goes at the press of a pointer
+      // no ring for that: it was the mouse's menu. It shows once the keyboard moves the focus back to it, and goes at
+      // the press of a pointer
       const ring = () => more.evaluate((b) => getComputedStyle(b).boxShadow)
+      expect(await ring()).toBe('none')
+      await page.keyboard.press('Tab')
+      await page.keyboard.press('Shift+Tab')
+      expect(await more.evaluate((b) => b === document.activeElement)).toBe(true)
       expect(await ring()).not.toBe('none')
       await page.evaluate(() => dispatchEvent(new PointerEvent('pointerdown')))
       expect(await ring()).toBe('none')
@@ -843,7 +890,7 @@ describe.skipIf(!browser)('removing a space', () => {
     await page.getByRole('menuitem', { name: 'Remove from Shepherdr…', exact: true }).click()
     const ask = page.getByRole('alertdialog', { name: 'herdr-projects can’t be removed yet' })
     await ask.waitFor()
-    expect(await ask.textContent()).toContain('HP-202 is still working. Pause it or let it finish first.')
+    expect(await ask.textContent()).toContain('HP-202 is still working. Stop it or let it finish first.')
     expect(await ask.getByRole('button', { name: 'Remove' }).count()).toBe(0)
     await ask.getByRole('button', { name: 'OK' }).click()
     await ask.waitFor({ state: 'detached' })
@@ -857,8 +904,8 @@ describe.skipIf(!browser)('removing a space', () => {
     const page = await ctx.newPage()
     try {
       await page.goto(url())
-      await page.getByRole('button', { name: 'Places' }).first().click()
-      const row = page.locator('nav[aria-label="Places"] li', { hasText: 'lilla-varlden' })
+      await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).first().click()
+      const row = page.locator('nav[aria-label="Spaces"] li', { hasText: 'lilla-varlden' })
       await row.waitFor()
       expect(await row.getByRole('button', { name: 'More for lilla-varlden' }).isVisible()).toBe(false)
       // the drawer has slid in
@@ -951,8 +998,8 @@ describe.skipIf(!browser)('the order of places', () => {
     const page = await ctx.newPage()
     try {
       await page.goto(url())
-      await page.getByRole('button', { name: 'Places' }).first().click()
-      const nav = 'nav[aria-label="Places"]'
+      await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).first().click()
+      const nav = 'nav[aria-label="Spaces"]'
       const row = page.locator(`${nav} li`, { hasText: 'herdr-projects' })
       await row.waitFor()
       await settled(page)

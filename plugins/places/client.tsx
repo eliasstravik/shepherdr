@@ -26,7 +26,7 @@ import clsx from 'clsx'
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type LiHTMLAttributes, type ReactNode } from 'react'
 import { act, counts, definePlugin, getState, goPlace, manyMachines, openSplit, placeOf, removeSpace, setUI, splitClick, useSnap, useUI, type Pane, type UI } from '@client/kernel.ts'
 import { and, Dialog, RowMenu, RowMenuButton, useRowMenu } from '@client/rowmenu.tsx'
-import { BackIcon, BellIcon, BellSlashIcon, AttentionBadge, DeleteIcon, DownIcon, HashIcon, ic, IconButton, List, MenuItem, MenuLabel, MenuSeparator, MenuSetting, Meta, NextIcon, PinnedIcon, PinTaskIcon, PlusIcon, Primary, ReadIcon, RemoveProjectIcon, RenameIcon, rowClass, RowText, SectionIcon, ServerIcon, SplitIcon, TasksIcon, UnpinIcon } from '@client/ui.tsx'
+import { BackIcon, BellIcon, BellSlashIcon, AttentionBadge, attentionWords, DeleteIcon, DownIcon, HashIcon, ic, IconButton, List, MenuItem, MenuLabel, MenuSeparator, MenuSetting, Meta, NextIcon, PinnedIcon, PinTaskIcon, PlusIcon, Primary, ReadIcon, RemoveProjectIcon, RenameIcon, rowClass, RowText, SectionIcon, ServerIcon, SplitIcon, TasksIcon, UnpinIcon } from '@client/ui.tsx'
 import { MarkRead, markPlaceRead, muted, placeUnread } from '@client/unread.ts'
 import { RestartItem } from '@client/restart.tsx'
 import { NOTIFY, NOTIFY_KEY, notifyOf, notifyRow } from '@shared/alerts.ts'
@@ -308,7 +308,7 @@ function Heading({ id, label, folds, icon: mark, shut, held, className, children
           aria-expanded={!shut}
           // a finger held to open its menu folds nothing
           onClick={() => !held?.() && toggleFold(id)}
-          className="flex min-w-0 flex-1 cursor-pointer text-left outline-none after:absolute after:inset-0 after:rounded-[inherit] focus-visible:after:shadow-[inset_0_0_0_1.5px_var(--focus)]"
+          className="flex min-w-0 flex-1 cursor-pointer text-left outline-none after:absolute after:inset-0 after:rounded-[inherit] keys:focus-visible:after:shadow-[inset_0_0_0_1.5px_var(--focus)]"
         >
           <RowText className="font-medium text-fg2">{label}</RowText>
         </button>
@@ -331,6 +331,8 @@ function PlaceMenu({ p, snap, menu, unread, onRename, children }: { p: Place; sn
   const [moving, setMoving] = useState(false)
   const now = notifyOf(snap, p.id)
   const row = notifyRow(snap, p.id)
+  const { ownNeed, ownReady } = counts(snap, p.id)
+  const attention = p.status === 'off' || p.connecting ? '' : attentionWords(ownNeed, ownReady)
   const pick = (v: string) => act({ type: 'setting', key: NOTIFY_KEY, value: row?.inherits?.value === v ? null : v, place: p.id })
   const desktop = useUI((u) => u.device === 'desktop')
   const split = (pane: Pane) => () => {
@@ -345,6 +347,7 @@ function PlaceMenu({ p, snap, menu, unread, onRename, children }: { p: Place; sn
     )
   return (
     <RowMenu menu={menu} label={p.name} className="min-w-[min(16rem,calc(100%-0.5rem))]!">
+      {attention ? <MenuLabel>{attention}</MenuLabel> : null}
       {desktop ? (
         <>
           <MenuItem icon={<SplitIcon className={ic} />} onClick={split({ kind: 'place', id: p.id })}>
@@ -550,7 +553,7 @@ function Go({ p, said, sel, sort, onClick, children }: { p: Place; said: string;
       aria-keyshortcuts={sort && sort.ids.length > 1 ? 'Alt+Shift+ArrowUp Alt+Shift+ArrowDown' : undefined}
       onKeyDown={sort ? (e) => moveKey(e, p.id, sort) : undefined}
       onClick={onClick ?? ((e) => openPlace(p.id, e))}
-      className="flex min-w-0 flex-1 cursor-pointer text-left outline-none after:absolute after:inset-0 after:rounded-[inherit] focus-visible:after:shadow-[inset_0_0_0_1.5px_var(--focus)]"
+      className="flex min-w-0 flex-1 cursor-pointer text-left outline-none after:absolute after:inset-0 after:rounded-[inherit] keys:focus-visible:after:shadow-[inset_0_0_0_1.5px_var(--focus)]"
     >
       {children}
     </button>
@@ -683,7 +686,7 @@ function RemoveBox({ p, snap }: { p: Place; snap: Snapshot }) {
     return (
       <Dialog title={`${p.name} can’t be removed yet`} safe cancel="OK" onCancel={cancel} buttons={null}>
         <p>
-          {and(working)} {working.length > 1 ? 'are' : 'is'} still working. Pause {working.length > 1 ? 'them' : 'it'} or let {working.length > 1 ? 'them' : 'it'} finish first.
+          {and(working)} {working.length > 1 ? 'are' : 'is'} still working. Stop {working.length > 1 ? 'them' : 'it'} or let {working.length > 1 ? 'them' : 'it'} finish first.
         </p>
       </Dialog>
     )

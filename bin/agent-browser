@@ -14,7 +14,7 @@ if [ ! -f "$b" ]; then
   exit 127
 fi
 [ -x "$b" ] || chmod +x "$b" 2>/dev/null
-# a task's browser was used now: Shepherdr closes one left idle (server/live/browser.ts closeIdle)
+# a task's browser was used now: Shepherdr closes one left idle (core browser-session closeIdle)
 if [ -n "$AGENT_BROWSER_PROFILE" ]; then
   # pages see prefers-reduced-motion: reduce, so they don't animate (Chrome draws them in software); an agent turns it
   # off for its browser with set media no-preference. Asked for here, so every command on a session asks the same

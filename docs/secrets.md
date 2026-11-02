@@ -1,46 +1,54 @@
-# Agent secret access
+# Agent secret access in 2.1
 
-`secret run` and `secret env` require a fresh per-agent 256-bit capability. General CLI access, loopback, Host,
-forwarding headers and `helper/main.sock` are not authentication. The HTTP adapter reads a bearer Authorization
-header; it never accepts proof in the request body. Only the worker that issued a capability can validate it.
+Use secrets by name. The human adds, replaces and removes values in Settings → Secrets, at Everywhere,
+machine or space scope; the most specific scope wins. An agent requests a masked input card with
+`shepherdr secret ask NAME --why "purpose"`, then ends its turn. Values never belong in chat or artifacts.
 
-The worker provisions it only after finding the actual agent CLI process through herdr. Its private in-memory
-record binds it to that process launch, exact agent/coordinator/reviewer chat, and a fixed chain: that agent's space,
-its owning machine, Everywhere. Retrieval ignores the request's chat, cwd and flags when choosing levels. The current
-server-owned scope must still match. Home/main coordinators receive their home-space chain, not every space or
-machine. A child reviewer can use its parent's credential for the same space; a separately launched reviewer gets
-its own credential. Remote workers have separate authorities and their own machine chains, even though the vault
-is stored on the main machine.
+`secret run NAME -- COMMAND` obtains the requested names through the current launch’s authenticated core
+mailbox and adds values only to the child environment. Its output masks exact values, including values split
+across output chunks. Masking is a safety net, not permission to print secrets. `secret env NAME --file .env`
+requires an existing Git repository that ignores the target and writes an owner-only plain file. Prefer `run`.
+Remove an env file with a plain removal command that does not print its contents. Do not use a native
+read/edit/patch/delete tool that previews the file or its removed lines: that preview is outside the helper’s
+output masking and can enter the native transcript and raw terminal. Core attach remains the real terminal.
 
-`agentEnv` passes only an opaque `SHEPHERDR_SECRET_FILE` reference to the launch environment (including Codex's shell
-policy). The capability is written via stdin over the existing private SSH connection, never in launch arguments,
-agent records, prompt text or CLI output. `helper/route.pl --bind PID` reads JSON on stdin, creates owner-only files
-in owner-only `~/.shepherdr/helper/routes` and `credentials` directories, and binds them to the process start stamp.
-The CLI obtains proof from a live ancestor's binding or that explicit credential reference. Folder/chat routing may
-choose the command's destination, but cannot grant a credential. The helper carries Authorization unchanged through
-main.sock and the SSH forward; there is no `local=true` bypass. The transient bearer environment variable is removed
-before running the user's command. Private Shepherdr state cannot be imported into browser-visible artifacts, even
-through symlinks. Snapshots, names, list output and secret cards contain no values.
+## Authority and transport
 
-Capabilities rotate on a new launch or changed scope, are revoked on finish/forget/relaunch and observed agent loss,
-and all expire on worker restart. Revoked files are inert; stale files also fail their live-process check. Route repair
-reprovisions running agents without restarting them. Credentials deliberately are not persisted in the server's
-records. Owner-only files protect against other OS users, not hostile code already running as the same OS user:
-that code can read the vault itself. Use separate OS accounts/machines when agents must be mutually untrusted.
+Each launch receives a fresh 256-bit AES-GCM mailbox capability. The server privately binds it to the installation,
+launch, chat, machine and permitted actions. The launch environment carries only the owner-only file reference
+`SHEPHERDR_CORE_CREDENTIAL`, including Codex’s shell policy. Preserve that reference in tool environments without
+reading or printing its contents. Never borrow another launch’s credential. The launch prompt and
+`SHEPHERDR_COMMAND` select the owning command; remembered paths from an earlier start are superseded.
 
-## Upgrade and compatibility
+Requests and replies are encrypted/authenticated documents in that machine’s core. The server reads them through
+its local core socket and the documented remote API. There is no SSH worker, tunnel, main.sock or HTTP secret
+retrieval endpoint. Labels, request text, cwd, a chosen chat and possession of the socket’s address grant no mailbox
+authority. The private grant and current agent launch/process binding are checked before dispatch. Durable request
+receipts prevent repeated actions after lost responses; uncertain outcomes are reported rather than guessed.
 
-Deploy the updated server and helper together. Until provisioning succeeds, secret retrieval fails closed. No
-unauthenticated terminal or legacy helper fallback exists. Ordinary CLI commands and secret names/input keep their
-syntax. Human terminals without an agent credential can still manage names and values through Settings and existing
-set/rm commands; secret run/env must run from an authenticated agent session.
+Secret scope comes from the private agent record: its space, its owning machine, then Everywhere. Main/home task
+overview access does not widen that scope. Separately launched reviewers receive no secret permission and cannot
+retrieve values. A child process of an ordinary agent can inherit that agent’s capability; it is the same authority,
+not a new reviewer grant. Isolated workspace agents reach only their fixed gateway and the run’s explicit secret
+allowlist. They cannot read a host core socket or credential.
 
-Existing agents with their own process ancestry are repaired automatically on the next route refresh (about 30 s).
-Older shared tool executors cannot be authenticated by chat/cwd alone. They must carry the session's provisioned
-`SHEPHERDR_SECRET_FILE` from its launch environment; if it is missing, a planned agent restart is required to inherit
-it. Do not copy another session's credential, print its contents, or restart a working agent without approval. A
-custom `--url` target deliberately drops inherited credentials; it must provision its own authenticated session.
+Grants rotate/revoke on replacement and explicit lifecycle changes. They persist privately across an application
+restart so a still-running core agent can reconnect; server restart alone does not grant a new identity. A stopped,
+replaced or unconfirmed actor fails closed. An old agent missing its reference needs a planned restart; never repair
+it by copying a different session’s file. The secret transport never writes plaintext values into core docs, product snapshots or chat records.
+This does not redact arbitrary native tool output when an agent disobeys the no-print rule.
+The vault and mailbox database belong to the selected private application home.
 
-Only `bun run typecheck` runs on agent machines. Regression suites use temporary fake vaults, homes, credentials,
-loopback servers and Unix sockets; GitHub runs them after merge. They cover no/invalid/revoked proof, raw TCP
-forwarding, spoofed headers, scope forgery, rotation, worker isolation and repo/helper secret-run transport.
+Core is not a sandbox. Its socket allows shell/file access as the owning account, and owner-only files do not
+protect ordinary agents from hostile code already running as that same account. Use the supported isolated profile
+or separate accounts/machines for the required boundary. The browser never receives a core socket or raw RPC.
+
+## Installation and legacy
+
+The permanent 2.1 home is `~/.shepherdr`; build previews use a separate home. Backing up/relocating live 2.0 state is
+an explicit later cutover action. The 2.0 worker/capability implementation remains on `v2.0` and is incompatible
+with this mailbox transport. Install/start instructions are in [core/start.md](core/start.md).
+
+Only `bun run typecheck` runs on this development VM. GitHub runs regression suites using temporary homes,
+synthetic secrets and private fake/core endpoints. Existing real acceptance used a synthetic demo value, not a human
+credential; full production acceptance remains in [the delivery record](core/implementation.md).

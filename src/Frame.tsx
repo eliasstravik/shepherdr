@@ -76,7 +76,7 @@ export function PlacesColumn({ children }: { children: ReactNode }) {
   const drawn = useStore((s) => placesDrawn(s.ui, s.snap))
   return (
     <div className="min-w-0 overflow-hidden" inert={!drawn}>
-      <nav id="places" aria-label="Places" className="flex h-full w-(--left-open) flex-col overflow-y-auto border-r border-line bg-well">
+      <nav id="places" aria-label="Spaces" className="flex h-full w-(--left-open) flex-col overflow-y-auto border-r border-line bg-well">
         {children}
       </nav>
     </div>
@@ -192,7 +192,7 @@ function Resizer({ side, places, panel, frame, now }: { side: 'left' | 'right' |
       ref={sep}
       role="separator"
       aria-orientation="vertical"
-      aria-label={side === 'left' ? 'Resize places' : side === 'right' ? 'Resize tasks' : 'Resize the task panel'}
+      aria-label={side === 'left' ? 'Resize spaces' : side === 'right' ? 'Resize tasks' : 'Resize the task panel'}
       aria-controls={side === 'left' ? 'places' : side === 'panel' ? 'task-panel' : undefined}
       aria-valuemin={span.min}
       aria-valuemax={max}
@@ -225,7 +225,7 @@ export function PlacesToggle({ when, drawer = false }: { when: 'open' | 'closed'
   const desktop = useUI((u) => u.device === 'desktop')
   const drawerOpen = useUI((u) => u.drawer)
   if ((!docked && (!drawer || !desktop || when === 'open')) || (docked && open !== (when === 'open'))) return null
-  const label = !docked ? 'Places' : open ? 'Hide Places' : 'Show Places'
+  const label = !docked ? 'Spaces' : open ? 'Hide Spaces' : 'Show Spaces'
   return (
     <IconButton
       label={label}

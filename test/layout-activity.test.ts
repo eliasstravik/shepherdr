@@ -3,12 +3,30 @@
 import { describe, expect, test } from 'bun:test'
 import { layout } from './layout.ts'
 
-const { browser, server } = await layout()
+const { browser, server, world } = await layout()
 const at = (q: string) => `http://127.0.0.1:${server?.port}/?${q}`
 const HP202 = at('place=p%3Avm-str%3Aherdr-projects&task=HP-202')
 const GTM15 = at('place=p%3Avm-str%3Agtm&task=GTM-15')
 
 describe.skipIf(!browser)('activity', () => {
+  test('a step that errored stays quiet and says so; only failed tests are red', async () => {
+    const chat = world.chats['GTM-15/Agent'], old = chat.messages
+    const row = { kind: 'search' as const, steps: [] }
+    chat.messages = [...old, { id: 'quiet-step', who: 'agent', at: Date.now(), text: 'Nothing to change.', activity: { id: 'quiet', at: Date.now(), steps: 2, failed: 2, rows: [
+      { ...row, key: 'a', text: 'Searched for failed', failed: 1 },
+      { ...row, key: 'b', text: 'Ran the tests: 1 failed', failed: 1 },
+    ] } }]
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 } })
+    try {
+      await page.goto(GTM15)
+      const rows = page.locator('[data-row="a"] > button, [data-row="b"] > button')
+      await rows.first().waitFor()
+      expect((await rows.nth(0).innerText()).replace(/\s+/g, ' ')).toBe('Searched for failed had an error')
+      const fill = (i: number) => rows.nth(i).locator('svg').evaluate((s) => getComputedStyle(s).fill)
+      expect(await fill(0)).not.toBe(await fill(1))
+    } finally { chat.messages = old; await page.close() }
+  })
+
   test('a finished turn is a few quiet rows in words before its reply; a row opens to its command and output, a diff in its colours (phone)', async () => {
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
     await page.goto(GTM15)
@@ -111,4 +129,18 @@ describe.skipIf(!browser)('activity', () => {
     expect(await row.innerText()).not.toMatch(/agent|shell|running/)
     await page.close()
   }, 30_000)
+})
+
+describe.skipIf(!browser)('activity log catch-up', () => {
+  test('the background job sheet shows incomplete history honestly', async () => {
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    await page.route('**/api/activity?*', route => route.fulfill({ json: { steps: [], catchingUp: true, warning: 'A native log record exceeds the 64 MiB display limit and was skipped.' } }))
+    await page.goto(HP202)
+    await page.locator('button[data-jobs]').tap()
+    await page.getByRole('button', { name: /Review the mute fix/ }).tap()
+    await page.getByText('Loading the rest of this log…').waitFor()
+    await page.getByText('A native log record exceeds the 64 MiB display limit and was skipped.').waitFor()
+    expect(await page.getByText('No steps yet.').count()).toBe(0)
+    await page.close()
+  })
 })

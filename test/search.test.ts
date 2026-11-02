@@ -87,3 +87,16 @@ describe('unified search identities, scope and privacy', () => {
     expect(searchExcerpt('A'.repeat(500) + 'target word', 'target')).toContain('target word')
   })
 })
+
+test('search preserves literal identifiers and code while stripping surrounding emphasis', () => {
+  const messages: Message[] = [
+    { id: 'native', who: 'agent', text: 'UNREAD_AFTER_OK and _private_var' },
+    { id: 'code', who: 'agent', text: 'Call `__init__` or `a*b`.' },
+    { id: 'format', who: 'agent', text: '_some words_ and __other words__' },
+  ]
+  expect(findIn(messages, 'UNREAD_AFTER_OK')).toEqual(['native'])
+  expect(findIn(messages, '_private_var')).toEqual(['native'])
+  expect(findIn(messages, '__init__')).toEqual(['code'])
+  expect(findIn(messages, 'a*b')).toEqual(['code'])
+  expect(findIn(messages, 'some words and other words')).toEqual(['format'])
+})

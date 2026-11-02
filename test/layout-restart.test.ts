@@ -6,7 +6,7 @@ const { browser, world, server } = await layout({ everything: true })
 
 describe.skipIf(!browser)('restarting an agent', () => {
   test('Settings mismatches show no banner and do not restart either role', async () => {
-    const p = world.snapshot().places.find((x) => !x.home)!
+    const p = world.snapshot().places.find((x) => x.id === world.tasks.find(task => task.id === 'GTM-17')!.place)!
     for (const task of [false, true]) {
       const key = task ? 'GTM-17/Agent' : p.chat
       const c = world.chats[key]
@@ -15,13 +15,13 @@ describe.skipIf(!browser)('restarting an agent', () => {
       const cards = c.messages.filter((m) => m.card?.restart).length
       const page = await browser!.newPage({ viewport: { width: 390, height: 844 } })
       await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent(p.id)}${task ? '&task=GTM-17' : ''}`)
-      const controls = page.locator('[data-agent-controls]').last()
-      await page.locator('[data-composer]').last().waitFor()
+      const controls = page.locator('[data-agent-controls]:visible').last()
+      await page.locator('[data-composer]:visible').last().waitFor()
       expect(await controls.count()).toBe(0)
-      await page.locator('[data-composer] button[aria-label="Attach files and more"]').last().click()
+      await page.locator('[data-composer]:visible button[aria-label="Attach files and more"]').last().click()
       await controls.waitFor()
       expect(await page.locator('[data-restart-hint]').count()).toBe(0)
-      expect(await controls.getByRole('menuitem').count()).toBe(3)
+      expect(await controls.getByRole('menuitem').count()).toBe(4)
       expect(JSON.stringify(c.agent)).toBe(before)
       expect(c.messages.filter((m) => m.card?.restart).length).toBe(cards)
       await page.close()
@@ -42,7 +42,7 @@ describe.skipIf(!browser)('restarting an agent', () => {
     expect(await sheet.getByRole('switch').count()).toBe(0)
     await sheet.getByRole('button', { name: /^Agent: / }).click()
     await page.getByRole('menuitemradio', { name: 'Codex' }).click()
-    expect(await sheet.textContent()).toContain('Codex starts a new session with this chat, the brief and branch.')
+    expect(await sheet.textContent()).toContain('Codex starts a new session with this chat, its instructions and branch.')
     await sheet.getByRole('button', { name: /^Model: / }).click()
     await page.getByRole('menuitemradio', { name: 'GPT-6-Sol', exact: true }).click()
     await sheet.getByRole('button', { name: /^Effort: / }).click()
@@ -53,8 +53,29 @@ describe.skipIf(!browser)('restarting an agent', () => {
     await page.close()
   }, 30_000)
 
+  test('/model in a chat opens Restart for this agent, its model picked; nothing reaches the CLI', async () => {
+    const p = world.snapshot().places.find((x) => x.id === world.tasks.find(task => task.id === 'GTM-17')!.place)!
+    const sent = world.chats[p.chat].messages.length
+    const page = await browser!.newPage({ viewport: { width: 1280, height: 800 } })
+    await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent(p.id)}`)
+    const box = page.locator('[data-composer]:visible textarea').last()
+    await box.fill('/model sonnet')
+    await box.press('Enter')
+    const sheet = page.getByRole('alertdialog', { name: 'Restart coordinator?' })
+    await sheet.locator('[data-restart]').waitFor()
+    expect(await sheet.textContent()).toContain('Changes this agent only')
+    await sheet.getByRole('button', { name: /^Model: Sonnet/ }).waitFor()
+    expect(await box.inputValue()).toBe('')
+    expect(await sheet.getByRole('switch').count()).toBe(1)
+    expect(await sheet.getByRole('switch').getAttribute('aria-checked')).toBe('false')
+    await sheet.getByRole('button', { name: 'Cancel' }).click()
+    await sheet.waitFor({ state: 'detached' })
+    expect(world.chats[p.chat].messages.length).toBe(sent)
+    await page.close()
+  }, 30_000)
+
   test('the sheet fits a phone, and Cancel leaves the agent as it was', async () => {
-    const p = world.snapshot().places.find((x) => !x.home)!
+    const p = world.snapshot().places.find((x) => x.id === world.tasks.find(task => task.id === 'GTM-17')!.place)!
     const ctx = await browser!.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
     const page = await ctx.newPage()
     await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent(p.id)}`)
@@ -75,7 +96,7 @@ describe.skipIf(!browser)('restarting an agent', () => {
   }, 30_000)
 
   test('saving defaults is optional, scoped to the role, and sent only when selected', async () => {
-    const p = world.snapshot().places.find((x) => !x.home)!
+    const p = world.snapshot().places.find((x) => x.id === world.tasks.find(task => task.id === 'GTM-17')!.place)!
     for (const task of [false, true]) {
       const chat = task ? 'GTM-17/Agent' : p.chat
       world.chats[chat].agent = { kind: 'codex' }
@@ -91,14 +112,16 @@ describe.skipIf(!browser)('restarting an agent', () => {
       })
       await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent(p.id)}${task ? '&task=GTM-17' : ''}`)
       for (const save of [false, true]) {
-        await page.locator('[data-composer] button[aria-label="Attach files and more"]').last().click()
-        await page.locator('[data-agent-controls]').last().getByRole('menuitem', { name: /^Model:/ }).click()
+        await page.locator('[data-composer]:visible button[aria-label="Attach files and more"]').last().click()
+        await page.locator('[data-agent-controls]:visible').last().getByRole('menuitem', { name: /^Model:/ }).click()
         const sheet = page.getByRole('alertdialog')
         await sheet.locator('[data-restart]').waitFor()
         if (!save) expect(await sheet.getByRole('switch').count()).toBe(0)
         await sheet.getByRole('button', { name: /^Effort: / }).click()
         await page.getByRole('menuitemradio', { name: save ? 'Low' : 'High', exact: true }).click()
-        const toggle = sheet.getByRole('switch', { name: `Use for future ${task ? 'task agents' : 'coordinators'} in ${p.name}` })
+        const toggle = sheet.getByRole('switch')
+        expect(await toggle.count()).toBe(1)
+        expect(await toggle.getAttribute('aria-label')).toBe(`Use for future ${task ? 'task agents' : 'coordinators'} in ${p.name}`)
         expect(await toggle.getAttribute('aria-checked')).toBe('false')
         if (save) await toggle.click()
         await sheet.getByRole('button', { name: 'Restart', exact: true }).click()
@@ -108,5 +131,21 @@ describe.skipIf(!browser)('restarting an agent', () => {
       await page.close()
     }
   }, 30_000)
+
+  test('machine-qualified task IDs retain their header PR and restart menu', async () => {
+    const original = world.tasks.find(task => task.id === 'GTM-17')!
+    const id = 'box/GTM-901', chat = `${id}/Agent`
+    world.tasks.push({ ...original, id, status: 'work', pr: { number: 901, url: 'https://github.com/example/repo/pull/901' }, agent: { ...original.agent!, chat } })
+    world.chats[chat] = { ...world.chats['GTM-17/Agent'], key: chat }
+    const page = await browser!.newPage({ viewport: { width: 390, height: 844 } })
+    try {
+      await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent(original.place)}&task=${encodeURIComponent(id)}`)
+      await page.locator('[data-pr="901"]').waitFor()
+      await page.getByRole('button', { name: 'More', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'Restart agent…', exact: true }).click()
+      await page.getByRole('alertdialog').locator('[data-restart]').waitFor()
+      expect(await page.getByRole('alertdialog').textContent()).toContain(id)
+    } finally { await page.close(); world.tasks = world.tasks.filter(task => task.id !== id); delete world.chats[chat] }
+  })
 
 })

@@ -142,7 +142,8 @@ describe.skipIf(!browser)('reactions on a phone', () => {
     expect(tall.menu!.top).toBeGreaterThanOrEqual(tall.copy.bottom)
     await page.keyboard.press('Escape')
     await gone()
-    // a short screen (the keyboard up): the message shrinks so every emoji stays on it; shorter still, the menu gives way
+    // a short screen (the keyboard up, so no bottom bar): the message shrinks so every emoji stays on it; shorter still, the menu gives way
+    const noBar = await page.addStyleTag({ content: 'div:has(> [aria-label="View"]) { display: none }' })
     for (const [h, menu] of [
       [300, true],
       [240, false],
@@ -183,6 +184,7 @@ describe.skipIf(!browser)('reactions on a phone', () => {
       await page.keyboard.press('Escape')
       await gone()
     }
+    await noBar.evaluate((tag) => (tag as Element).remove())
     await page.evaluate(() => document.documentElement.style.setProperty('--app-h', '844px'))
     await page.$eval('[data-msg="long-agent"]', (m) => m.scrollIntoView({ block: 'center' }))
     await page.waitForTimeout(350)

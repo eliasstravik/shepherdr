@@ -6,8 +6,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 process.env.SHEPHERDR_HOME = mkdtempSync(join(tmpdir(), 'shep-health-'))
-const H = await import('../server/live/health.ts')
-const { Settings, machineNote } = await import('../server/live/settings.ts')
+const H = await import('../server/health.ts')
+const { sample } = await import('../helper/core-health.ts')
+const { Settings, machineNote } = await import('../server/common/settings.ts')
 
 const limits = () => new Settings().machine()
 const at = (load: number, memPct = 40, disk = 50, gpus: { name: string; util: number; memPct: number }[] = []) => ({
@@ -30,13 +31,12 @@ describe('reading the machine', () => {
     expect(H.parseGpus('')).toEqual([])
   })
 
-  test('a real sample of this machine: cores, load, memory, and home and /tmp once each', () => {
-    const s = H.sample()
+  test('a real sample of this machine: cores, load, memory, and home and /tmp once each', async () => {
+    const s = await sample()
     expect(s.cores).toBeGreaterThan(0)
     expect(s.memTotal).toBeGreaterThan(s.memUsed)
     expect(s.disks.length).toBeGreaterThanOrEqual(1)
     expect(new Set(s.disks.map((d) => d.dev)).size).toBe(s.disks.length)
-    expect(H.summary(s)).toMatch(/^CPU \d+% \(load [\d.]+ on \d+ cores\) · Memory \d+% \(\d+ GB of \d+ GB\) · Disk /)
   })
 })
 
@@ -113,37 +113,7 @@ describe('limits', () => {
     expect(m[0].detail).toBe('load 20.0 on 16 cores')
   })
 
-  test('the watch: what was told is kept, so a restart tells nothing again while it is still over', () => {
-    let kept = {}
-    const store = { read: () => kept, write: (w: object) => (kept = w) }
-    const told: string[] = []
-    const mon = () => new H.Monitor(limits, () => true, (e) => told.push(`${e.kind} ${e.what}`), () => at(1, 95), store)
-    mon().tick(0)
-    expect(told).toEqual(['memory over'])
-    mon().tick(60_000)
-    expect(told).toEqual(['memory over'])
-  })
-})
 
-describe('what uses it most', () => {
-  test("each process with its task, by the worktree it runs in, and each task's share", () => {
-    const procs = [
-      { pid: 1, cpu: 310, rss: 2 * 2 ** 30, cmd: 'bun test', cwd: '/w/she-1/src' },
-      { pid: 2, cpu: 90, rss: 2 ** 29, cmd: 'claude', cwd: '/w/she-1' },
-      { pid: 3, cpu: 80, rss: 2 ** 28, cmd: 'vite', cwd: '/w/she-2' },
-      { pid: 4, cpu: 20, rss: 2 ** 20, cmd: 'sshd', cwd: '/' },
-    ]
-    const lines = H.procLines(procs, [{ id: 'SHE-1', worktree: '/w/she-1' }, { id: 'SHE-2', worktree: '/w/she-2' }, { id: 'SHE-3', worktree: '/w/she-1x' }], 'cpu')
-    expect(lines[0]).toBe('Tasks among them: SHE-1 400% CPU, SHE-2 80% CPU.')
-    expect(lines).toContain('  310% CPU  bun test  (SHE-1)')
-    expect(lines).toContain('  20% CPU  sshd')
-  })
-
-  test('this machine, measured over a moment', async () => {
-    const top = await H.topProcs('memory', 3, 50)
-    expect(top.length).toBeGreaterThan(0)
-    expect(top[0].rss).toBeGreaterThan(0)
-  })
 })
 
 test("each machine's note gives the limits in its own numbers", () => {

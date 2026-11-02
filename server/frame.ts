@@ -1,7 +1,7 @@
 // Wraps an artifact's page for a sealed frame: Shepherdr's colours for light and dark, a size reporter, its data, the
 // Send bridge (a form's Send becomes one line typed into its keeper's terminal) and Mark up. The response carries a
 // sandbox CSP, so the page never runs with Shepherdr's origin, even opened directly, and loads nothing at all.
-import { CHECK_PROBE } from './live/artifacts.ts'
+import { CHECK_PROBE } from './artifact-check.ts'
 
 /** Shepherdr's dark colours: by the device's own mode, or the appearance the app has (the shepherdr-dark or -light
  *  class, which the app sends again when it changes) */

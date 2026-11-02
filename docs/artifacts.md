@@ -10,4 +10,6 @@
   forms and buttons send their answers to that agent, but only once you've tapped the page. Every artifact is checked at phone width, light and dark,
   before you see it: one whose scripts break, or that reaches for the network, is sent back to its agent. It runs
   sealed off: no network, no access to the app or your data, everything inline. Artifacts stay until you delete one
-  (its ⋯ menu); each keeps its last 20 versions.
+  (its ⋯ menu); each keeps its last 20 versions. An artifact a task's agent makes always names its task, then what it
+  is (`SHE-2: Stop Goes in note on every send · Proof`), so you can tell what it was for; Shepherdr puts the name in
+  when the agent left it out. Artifacts made earlier keep their titles.

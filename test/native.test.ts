@@ -10,10 +10,10 @@ describe.skipIf(!browser)('Back inside the app (phone)', () => {
   test('task, then place, then the places list it was picked from; the browser Back too', async () => {
     const { ctx, page } = await phone()
     await page.goto(at('place=vm-str/home'))
-    await page.getByRole('button', { name: 'Places' }).click()
+    await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).click()
     await settled(page)
     expect(await drawerOpen(page)).toBe(true)
-    await page.locator('nav[aria-label=Places]').getByText('gtm', { exact: true }).click()
+    await page.locator('nav[aria-label=Spaces]').getByText('gtm', { exact: true }).click()
     await settled(page)
     expect(query(page).get('place')).toBe('vm-str/gtm')
     await page.getByRole('button', { name: 'Tasks' }).click()
@@ -49,7 +49,7 @@ describe.skipIf(!browser)('Back inside the app (phone)', () => {
     await page.getByRole('dialog', { name: 'Search or jump to' }).getByRole('button', { name: 'Close' }).click()
     // the steps went back out: what's ahead of us is gone the moment anything new opens
     await page.waitForFunction(() => (history.state as { key: string }).key.includes('"p:vm-str:gtm",null'), null, { polling: 50 })
-    await page.getByRole('button', { name: 'Places' }).click()
+    await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).click()
     await settled(page)
     expect(await page.evaluate(() => history.length)).toBe(before + 1)
     await ctx.close()
@@ -63,14 +63,14 @@ describe.skipIf(!browser)('Back inside the app (phone)', () => {
     await settled(page)
     expect(query(page).get('place')).toBe('vm-str/gtm')
     expect(query(page).get('task')).toBeNull()
-    await page.getByRole('button', { name: 'Places' }).waitFor()
+    await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).waitFor()
     await ctx.close()
   }, 30_000)
 
   test('settings, search and an artifact are steps; Android back closes them', async () => {
     const { ctx, page } = await phone()
     await page.goto(at('place=vm-str/home'))
-    await page.getByRole('button', { name: 'Places' }).click()
+    await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).click()
     await page.getByRole('button', { name: 'Settings' }).click()
     await page.getByRole('region', { name: 'Settings' }).waitFor()
     await page.goBack()

@@ -50,16 +50,17 @@ function ing(v: string) {
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
-/** an action said as a command ("Check the task list") as done and as doing: "Checked the task list", "Checking the
- *  task list". Words that don't start with a verb it knows stay as they are. */
-export function say(words: string): { title: string; doing: string } {
+/** an action said as a command ("Check the task list") as done, as doing and as not begun: "Checked the task list",
+ *  "Checking the task list", "Wants to check the task list". Words that don't start with a verb it knows stay as they
+ *  are. */
+export function say(words: string): { title: string; doing: string; wants: string } {
   const t = words.replace(/\s+/g, ' ').trim().replace(/[.…]+$/, '')
   const m = /^([A-Za-z]+)\b(.*)$/.exec(t)
   const v = m?.[1].toLowerCase()
-  if (!m || !v || !VERBS.has(v)) return { title: cap(t), doing: cap(t) }
+  if (!m || !v || !VERBS.has(v)) return { title: cap(t), doing: cap(t), wants: `Wants to: ${t}` }
   // a second action after "and" goes the same way: "Clone the repo and find the code"
   const rest = (f: (v: string) => string) => m[2].replace(/\b(and(?: then)?) ([a-z]+)\b/g, (x, and: string, w: string) => (VERBS.has(w) ? `${and} ${f(w)}` : x))
-  return { title: cap(past(v)) + rest(past), doing: cap(ing(v)) + rest(ing) }
+  return { title: cap(past(v)) + rest(past), doing: cap(ing(v)) + rest(ing), wants: `Wants to ${v}${m[2]}` }
 }
 
 /** a step's words from an action said as a command: say() with what it is on, and the rest */
@@ -98,7 +99,7 @@ export function rowsOf(steps: Step[]): StepRow[] {
   const rows: (StepRow & { group: Step[] })[] = []
   const by = new Map<string, StepRow & { group: Step[] }>()
   for (const s of steps) {
-    const grouped = (s.kind === 'read' && s.target && s.tool !== 'WebFetch') || (s.kind === 'edit' && s.target) || (s.kind === 'search' && s.target)
+    const grouped = !s.unrun && ((s.kind === 'read' && s.target && s.tool !== 'WebFetch') || (s.kind === 'edit' && s.target) || (s.kind === 'search' && s.target))
     const key = grouped ? s.kind : `${s.kind}:${stepText(s)}`
     let r = by.get(key)
     if (!r) {

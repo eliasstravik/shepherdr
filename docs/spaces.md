@@ -1,6 +1,6 @@
 # Spaces
 
-Run many coding agents across machines from a phone, tablet or desktop. Shepherdr is a herdr plugin: one private web
+Run many coding agents across machines from a phone, tablet or desktop. Shepherdr is a standalone herdr-core client: one private web
 app on your tailnet (installable on a phone) with your spaces in a sidebar, as herdr has them: a space is a folder on
 a machine plus a name, with its own coordinator. Each machine is a section, as Slack's: its emoji (a server icon without
 one) and its name, both set in its ⋯ menu's Rename machine and kept for every device, with its spaces under it, its
@@ -17,7 +17,7 @@ pick; × takes one off and **+ Filter** adds a space or a machine from the sideb
 the chips while the middle changes (a task from them opens in the middle); unpinned, they follow again. Chips and pin
 are remembered on the device; a phone's scroll sideways. Every agent, coordinator or
 task agent, gets the same chat: replies, reactions, files, search, talk-to-type, voice calls and artifacts. A task's chat
-also has a side panel: its live herdr terminal, its files, its diff against main and its pull request.
+also has a side panel: its live core terminal, its files, its diff against main and its pull request.
 
 - Every machine has at least one space: its **home space**, at its home folder (~), named `home`. It can be renamed
   but not removed; it comes first under its machine until dragged, and moves like any space. Its coordinator also looks after the machine: health, load and
@@ -38,8 +38,8 @@ also has a side panel: its live herdr terminal, its files, its diff against main
   on main with an empty first commit; files already there stay uncommitted). Either way it gets its own herdr space
   and coordinator, and opens. Only folders in your home are listed or made.
 - New messages show like Slack's unread, for coordinators' chats only: a coordinator's chat with something new from it
-  or Shepherdr that you haven't seen makes its space's row bold in the sidebar (a done task's last word comes as its
-  card in the space's chat, so it counts). A folded heading still shows the spaces under it with something new or a
+  or Shepherdr that you haven't seen makes its space's row bold in the sidebar (a task's row in the space's chat changing
+  counts too). A folded heading still shows the spaces under it with something new or a
   red count, and the open one, as a collapsed Slack section does. Headings carry no marks of their own. Having a chat on screen reads it,
   and the main machine keeps the marks, so every device shows the same; a row's menu has **Mark as read**. Tasks' chats never make a row bold: the tasks list shows each
   task's own status. A row's red count still shows what waits on you, a task's need ending as a card in its chat.
@@ -74,12 +74,6 @@ also has a side panel: its live herdr terminal, its files, its diff against main
   into one, or back under its machine; a drag onto a section's heading or among its spaces does the same. A section
   folds, drags among its peers, and its ⋯ renames it (emoji and name) or deletes it: its spaces go back where they
   were. Pinned is one of them that can't be deleted.
-- From before spaces (projects, machine coordinators and an All machines coordinator): the first start moves it all
-  over once (`server/live/migrate.ts`). Projects become spaces with their ids, names and chats (`projects.json` becomes
-  `spaces.json`); each machine coordinator's chat moves into that machine's home space, and All machines' into the main
-  machine's home space, which takes over its jobs; modes, settings, pins, unread marks, heartbeats and artifacts
-  follow. A pinned machine becomes its pinned home space. `shepherdr project …` and `--project` still work, as
-  `space`.
 
 - A repository space starts with the base detected when it was added (usually `origin/HEAD`, then main or master).
   Change it under **Settings → Repository → Base branch**, or with

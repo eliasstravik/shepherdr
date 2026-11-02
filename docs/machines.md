@@ -1,68 +1,39 @@
 # Other machines
 
-Shepherdr is installed once, on the main machine. Every other machine you save in herdr's Remote shows up on its own
-(`herdr machine add <ssh target>`, which also sets up herdr there): its spaces (its home space at least), tasks and
-chats, with their coordinators, run from the main machine. The other machine needs only herdr, git, perl and the agent CLIs (gh for
-pull requests of GitHub repos); nothing to install by hand.
+Shepherdr connects only to its local herdr-core socket. Configure remotes with the
+core's documented remote commands (`hc schema`/`hc --help`), using existing
+SSH authentication. Core owns the remote connection, combined events and qualified
+terminal identities. Shepherdr does not configure machine access or credentials.
 
-- How: the main machine runs each one from a worker process of its own (`~/.shepherdr/machines/<name>/`). Agents,
-  panes, worktrees and live events go through herdr's own remote bridge; git, the Files and Diff panels and merges
-  run over SSH (one shared connection); the agents' logs and Claude Code's hook events are copied over as they grow.
-- The helper: Shepherdr puts a small folder there over SSH, `~/.shepherdr/helper/`: the `shepherdr` command for its
-  agents (it reaches Shepherdr through an SSH tunnel from the main machine, so the API stays off the network), the
-  hook recorder, the log copier, a health reader, the skills, and the pinned agent-browser with Chrome. A new machine
-  gets it as soon as herdr has it saved; it is put there again whenever Shepherdr updates and its copy changed.
-- `shepherdr doctor` (on the main machine) checks every machine, puts the helper there again, starts its worker again
-  and says what is missing. Settings → Machines says how each one is: Ready, Putting the helper there…, Can't reach it
-  (and why), or what it needs.
-- A task's shared browser runs on the task's own machine, next to its app. Where that machine can run `tailscale
-  serve`, your screen takes the browser's frames and sends your input straight to it over the tailnet (the main
-  machine only hands out the link, under a path no one can guess); elsewhere they come through the main machine.
-- A machine that can't be reached says `Can't reach` on its heading; its chats keep what they last showed and what you
-  send waits until it is back.
-- From before: a machine that had its own copy of Shepherdr reporting to this one gives its spaces, tasks and chats
-  to the main machine the first time it is reached, and that copy is turned off in its herdr (`herdr plugin disable
-  shepherdr`; its files stay). `config.json`'s `"main"` and `peers.json` are no longer used.
+A core session's machines are the ones added to that session (`HC_SESSION=shepherdr hc machine add …`). The app
+reaches every machine on its session: from start it runs health, CLI and plan-limit reads there, and it copies its
+agent helpers only when you start an agent there. So a new home never takes on machines by chance: if its core already
+has some, the first start stops and lists them, without starting a stopped core, until `--core-session` names a core,
+a new one for a trial or that same one to use them. A home remembers its core, and a later start on another one stops
+and names it. A machine added to a core is added for every home on it, so give a trial its own core. Homes from before
+this check have no record and keep working as they are.
 
-## Health and limits
+Only Shepherdr-owned spaces and agents appear. Tasks are coordinator children with
+outlive-parent enabled; workflow status remains separate from process liveness.
+Each machine needs Git, Bun and the chosen signed-in Claude Code/Codex CLI. Optional
+GitHub and browser capabilities need their existing tools/accounts too. See the
+[requirements](core/start.md).
 
-Each machine watches its own health: every 30 seconds it reads its 1-minute load against its cores, memory in use,
-how full home and /tmp are, a GPU's use (nvidia-smi, where there is one) and whether herdr answers. A small meter at
-the top right of its home space's chat shows it (thin bars, the numbers in words where there is room; grey while all is
-well, amber while new tasks wait, red past an alert limit), and a tap shows the numbers, the tasks at work against
-the limit, herdr, and its settings. Settings → Each machine → its name holds its limits, each machine keeping its
-own, scaled to its cores and memory: limit working tasks by Number of tasks, Machine load or Both (Both); max tasks
-working at once (10); new tasks wait while the load is over 1× the cores or memory over 80%; its coordinator is told
-when the load stays over 1.5× the cores for 2 minutes, memory or a disk is over 90%, or herdr stops answering.
-- **Room for tasks** (Shepherdr enforces it): a task added, or told to go (a queued task's go, or a coordinator's
-  `task tell` to one that waits), waits as Queued, `Waiting for a free slot` or `Waiting for the machine`, with no
-  agent started yet, and starts by itself once there's room, oldest first; while load counts, one at a time, 30
-  seconds apart. Only working tasks count. Your own message to a task starts it at once.
-- **Alerts** (the coordinator decides): past a limit, a card shows in the machine's home space and its coordinator (and
-  the main machine's home space's) gets the numbers and what uses the machine most, by task; once more when it
-  is back under. The shepherdr-coordinator skill says what to weigh: pause or queue tasks, clean the disk, or tell
-  you. Shepherdr never pauses a running task itself.
-- **herdr gone**: its socket refusing is said plainly ("herdr isn't answering"), never `connect ECONNREFUSED …`; the
-  machine's heading says `herdr down` (as it says a limit it is over), its chats say messages wait until it is
-  back, and its home space's coordinator hears what happened once herdr answers again.
+Remote agent commands use their own core's authenticated encrypted document mailbox.
+The server answers through core. Artifacts and files are read using core file/exec
+APIs. Browser frames, controls and terminal traffic use core children/attach and the
+application's bounded WebSocket connection. No SSH mirror, tunnel, worker, extra
+machine listener or remote HTTP bridge is installed.
 
-## Recovering a dropped link
+On disconnect, saved chats remain visible and queued messages wait. After missed
+events or core restart, the app takes an authoritative snapshot and rereads logs;
+core has no event replay. Unknown outcomes are not reported as successful actions.
 
-Workers retry failed herdr reads, event subscriptions, log mirrors and the helper's return tunnel without restarting
-remote herdr or its agents. Retries start after 3 seconds and double to a 30-second cap; the herdr polling clock can
-add up to 2 seconds. A minute of successful reads or an established subscription/tunnel resets the delay.
-Log mirrors count success from received file data; a quiet mirror can retain its previous retry delay.
-SSH's keepalive detects silent transport
-loss after roughly a minute (15-second probes, four missed replies); connection setup has a 10-second timeout.
-Herdr bridges use fresh SSH connections instead of reusing a potentially stuck ControlMaster. Commands and file
-reads still share SSH, whose keepalive expires a dead master; failed DNS lookups are retried by new SSH processes.
+Health is sampled through bounded core exec on each connected machine. Settings
+retain task-capacity, load, memory and alert limits. A stale sample is shown as stale;
+a remote connection failure is distinct from an agent finishing or a task being Done.
 
-The main server checks each worker every 5 seconds. A worker is healthy only when its snapshot also says herdr is
-reachable; an idle machine is healthy. After 3 continuous minutes of failed HTTP or herdr health, the main server
-replaces its local worker. It lets that worker finish any merge and exit before starting another, forcing only that
-local process off after the merge drain deadline plus 30 seconds. Remote herdr, agents, tasks and sessions stay put.
-Repeated replacements have a 3-minute cooldown, doubling to at most 15 minutes, reset after a minute of health.
-An outage can outlast these limits: retries continue until SSH, DNS and herdr work again. Removal/disable cancels
-pending starts; shutdown cancels the worker's retry loops. Main-server updates intentionally leave workers running
-so the next main server can take them back. Logs record link loss, recovery and worker replacement, without repeated
-retry alerts. No automatic recovery turns on a machine disabled in herdr.
+Actual same-host two-core and isolated SSH-loopback acceptance are recorded separately
+from external-machine acceptance. The selected external target is vm-ssa; configured
+access was unavailable, so that test is unverified, not passed. See the
+[acceptance evidence](core/implementation.md).

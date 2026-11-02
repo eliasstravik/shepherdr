@@ -24,6 +24,7 @@ describe.skipIf(!browser)('pinned spaces', () => {
 
   test("a space's ⋯ moves it to Pinned, out of the tree, spaces only; it walks, drags, folds and unpins back (desktop)", async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 800 } })
+    page.setDefaultTimeout(10_000) // Surface the failing locator before the enclosing test deadline.
     try {
       await page.goto(url())
       await page.waitForSelector('#places li')
@@ -49,8 +50,8 @@ describe.skipIf(!browser)('pinned spaces', () => {
       expect(await page.getByRole('menuitem', { name: 'Pin', exact: true }).count()).toBe(0)
       await page.keyboard.press('Escape')
       // its count and bold, once
-      expect(await page.locator('#places').getByLabel('1 need you here', { exact: true }).count()).toBe(1)
-      expect(await proj.getByLabel('1 need you here', { exact: true }).count()).toBe(1)
+      expect(await page.locator('#places').getByLabel('1 needs you, 0 ready · here', { exact: true }).count()).toBe(1)
+      expect(await proj.getByLabel('1 needs you, 0 ready · here', { exact: true }).count()).toBe(1)
       expect(Number(await proj.locator('button > span').evaluate((s) => getComputedStyle(s).fontWeight))).toBeGreaterThanOrEqual(600)
 
       // Unpin puts it back in its place in the tree
@@ -148,10 +149,11 @@ describe.skipIf(!browser)('pinned spaces', () => {
     world.order = { pinned: ['p:mac:lilla-varlden', 'p:vm-str:~'] }
     world.emit('snapshot')
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+    page.setDefaultTimeout(10_000) // Surface the failing locator before the enclosing test deadline.
     try {
       await page.goto(url())
-      await page.getByRole('button', { name: 'Places' }).first().click()
-      const nav = 'nav[aria-label="Places"]'
+      await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).first().click()
+      const nav = 'nav[aria-label="Spaces"]'
       await page.locator(`${nav} li[data-pin]`).first().waitFor()
       await settled(page)
       // moved out of the tree; the machines stay, vm-str with the spaces not pinned

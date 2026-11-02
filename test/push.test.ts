@@ -3,7 +3,7 @@ import webpush from 'web-push'
 import { createECDH, randomBytes } from 'node:crypto'
 import { Push, pushContact, DEFAULT_PUSH_CONTACT } from '../server/push.ts'
 import { writeJson, readJson } from '../server/store.ts'
-import { Settings } from '../server/live/settings.ts'
+import { Settings } from '../server/common/settings.ts'
 
 const alert = { id: 'fake', from: 'fake', go: { place: '~' }, title: 'Test', body: 'Only fake delivery', tag: 'test' }
 const sub = (id: string) => ({ endpoint: `https://push.example/${id}`, keys: { auth: 'private', p256dh: 'private' } })

@@ -62,11 +62,11 @@ export function Search({ onClose }: { onClose: () => void }) {
   }, [sourceKeys, retry])
   const ordered = useMemo(() => ({ ...snap, places: shownPlaces(snap) }), [snap])
   const results = useMemo(() => searchResults(ordered, scope, settled, chats), [ordered, scope, settled, chats])
-  const groups = kinds.filter(k => !kind || kind === k).map(k => ({ kind: k, all: results.filter(h => h.kind === k) }))
+  const groups = kinds.filter(k => !kind || kind === k).map(k => ({ kind: k, all: q === settled ? results.filter(h => h.kind === k) : [] }))
   const list = groups.flatMap(g => g.all.slice(0, limit))
   const current = list.find(hit => hit.key === selected) ?? list[0]
   useEffect(() => { document.getElementById(`search-hit-${current?.key}`)?.scrollIntoView({ block: 'nearest' }) }, [current?.key])
-  const pick = (hit?: SearchHit, query = settled) => { if (hit) { onClose(); openHit(hit, query) } }
+  const pick = (hit?: SearchHit, query = settled) => { if (hit && query === q) { onClose(); openHit(hit, query) } }
   const changeScope = (s: SearchScope) => { setScope(s); setSelected(null); setLimit(8) }
   const chip = 'min-h-9 shrink-0 rounded-full border border-line2 px-3 text-sm focus-visible:outline-accent aria-pressed:border-accent aria-pressed:text-accent phone:min-h-12 phone:text-base'
   const scopeOptions: { label: string; scope: SearchScope }[] = [
@@ -108,7 +108,7 @@ export function Search({ onClose }: { onClose: () => void }) {
         {!group.all.length ? <p className="px-3 py-2 text-sm text-fg3">{group.kind === 'Messages' && !coverage.finished ? 'Still loading…' : 'No matches'}</p> : null}
         {group.all.length > limit ? <button type="button" className="min-h-11 px-3 text-sm text-accent" onClick={() => setLimit(n => n + 20)}>Show more {group.kind.toLowerCase()} ({group.all.length - limit})</button> : null}
       </div>)}
-      {!list.length && coverage.finished ? <p className="px-3 py-4 text-sm text-fg2">Nothing found in this scope. Try Everywhere or fewer words.</p> : null}
+      {!list.length && coverage.finished && q === settled ? <p className="px-3 py-4 text-sm text-fg2">Nothing found in this scope. Try Everywhere or fewer words.</p> : null}
     </div>
   </Sheet>
 }

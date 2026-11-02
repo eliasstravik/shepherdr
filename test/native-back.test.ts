@@ -38,7 +38,7 @@ describe.skipIf(!browser)('swipes back (phone)', () => {
   test('settings and a task\'s side panel screens swipe back too, from across them or their very edge', async () => {
     const { ctx, page, swipe } = await phone()
     await page.goto(at('place=vm-str/home'))
-    await page.getByRole('button', { name: 'Places' }).click()
+    await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).click()
     await page.getByRole('button', { name: 'Settings' }).click()
     const settings = page.getByRole('region', { name: 'Settings' })
     await settings.waitFor()
@@ -46,7 +46,7 @@ describe.skipIf(!browser)('swipes back (phone)', () => {
     await swipe(150, 400, 385, 400, 150)
     await settings.waitFor({ state: 'detached' })
     // a phone's settings section goes back to their list, from across it or its very edge, one step at a time
-    await page.getByRole('button', { name: 'Places' }).click()
+    await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).click()
     await page.getByRole('button', { name: 'Settings' }).click()
     await settings.waitFor()
     for (const x of [150, 3]) {

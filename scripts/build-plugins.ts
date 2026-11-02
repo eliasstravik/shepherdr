@@ -6,8 +6,10 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const root = join(import.meta.dir, '..')
+// Also imported by Vite's Node config loader, where Bun's import.meta.dir is absent.
+const root = fileURLToPath(new URL('../', import.meta.url))
 const NAME = /^[a-z][a-z0-9-]*$/
 
 export function readPluginList(dir = root): string[] {
@@ -61,7 +63,7 @@ export function stageUserPlugins(dir: string, home = userHome()) {
   const from = join(home, 'plugins')
   for (const n of existsSync(from) ? readdirSync(from) : []) {
     const d = join(from, n)
-    if (NAME.test(n) && statSync(d).isDirectory() && isPlugin(d)) cpSync(d, join(into, n), { recursive: true, filter: (f) => !f.endsWith('/.git') })
+    if (NAME.test(n) && statSync(d).isDirectory() && isPlugin(d)) cpSync(d, join(into, n), { recursive: true, filter: (f) => !f.endsWith('/.git') && !f.endsWith('/node_modules') })
   }
   writeStaged(dir, { off: readOff(home), broken: {} })
 }
@@ -89,8 +91,13 @@ export interface PluginEntry {
  *  the human's own, A to Z. */
 export function pluginCatalog(dir = root): PluginEntry[] {
   const base = readPluginList(dir)
-  const user = stagedPlugins(dir)
-  const { off, broken } = readStaged(dir)
+  const { off, broken: stagedBroken } = readStaged(dir)
+  const broken = { ...stagedBroken }
+  const user = stagedPlugins(dir).filter(name => {
+    try { if (JSON.parse(readFileSync(join(dir, 'user-plugins', name, 'shepherdr.json'), 'utf8')).api === 2) return true } catch { /* incompatible, never import either part */ }
+    broken[name] = { error: 'Needs a shepherdr.json manifest with { "api": 2 }. Migrate this 2.0 plugin using docs/plugins.md.' }
+    return false
+  })
   const names = [...base, ...[...user, ...Object.keys(broken)].filter((n) => !base.includes(n)).sort()].filter((n, i, all) => all.indexOf(n) === i)
   return names.map((name) => {
     const mine = user.includes(name)

@@ -182,7 +182,7 @@ describe.skipIf(!browser)('replies', () => {
     await slide(at2.left + 40, at2.top + 16, 110, 6)
     await page.waitForSelector(`${strip}:has-text("It is the clock.")`)
     // a slide right on a message is a reply, never the places drawer coming out
-    expect(await page.$eval('nav[aria-label=Places]', (n) => n.getBoundingClientRect().right)).toBeLessThanOrEqual(0)
+    expect(await page.$eval('nav[aria-label=Spaces]', (n) => n.getBoundingClientRect().right)).toBeLessThanOrEqual(0)
     // one slim line inside the round box, over the words: it starts in line with the + icon, its x over send
     expect(await page.$(`[data-composer] ${strip}`)).not.toBeNull()
     expect(await page.$eval(strip, (b) => b.textContent)).toContain('Replying to home')
@@ -448,6 +448,39 @@ describe.skipIf(!browser)('what the best chats do', () => {
 
 
 describe.skipIf(!browser)('held messages', () => {
+  test('an ordinary message never shows a waiting note, on phone or desktop', async () => {
+    for (const [i, width] of [390, 1440].entries()) {
+      const page = await browser!.newPage({ viewport: { width, height: 844 } })
+      let release = () => {}
+      try {
+        await page.goto(url())
+        const box = page.getByRole('textbox', { name: /Message/ })
+        await box.waitFor()
+        await page.evaluate(() => {
+          const look = () => {
+            const said = [...document.querySelectorAll('[data-you]')].some((el) => /Goes in once|Waiting for your answer/.test(el.textContent ?? ''))
+            if (said) (window as Window & { noted?: boolean }).noted = true
+          }
+          new MutationObserver(look).observe(document.body, { subtree: true, childList: true, characterData: true })
+        })
+        sending.hold = new Promise((r) => (release = r))
+        await box.fill(`Nothing holds this ${i}`)
+        await page.getByRole('button', { name: 'Send' }).click()
+        await page.locator('[data-you] [data-anchor]').filter({ hasText: `Nothing holds this ${i}` }).waitFor()
+        release()
+        sending.hold = null
+        await page.waitForFunction(
+          (t) => [...document.querySelectorAll('[data-you] [data-anchor]')].some((e) => e.textContent === t && !e.closest('[data-msg]')!.getAttribute('data-msg')!.startsWith('out:')),
+          `Nothing holds this ${i}`,
+        )
+        expect(await page.evaluate(() => !!(window as Window & { noted?: boolean }).noted)).toBe(false)
+      } finally {
+        release()
+        sending.hold = null
+        await page.close()
+      }
+    }
+  }, 30_000)
   test('links to the blocking question without answering or offering Send now', async () => {
     const page = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true })
     try {

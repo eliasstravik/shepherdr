@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { Settings, setForTask } from '../server/live/settings.ts'
-import { privatePrompt } from '../server/live/prompts.ts'
+import { Settings, setForTask } from '../server/common/settings.ts'
+import { privatePrompt } from '../server/common/prompts.ts'
 
 const settings = () => new Settings({ everywhere: {}, machine: {}, spaces: {} })
 

@@ -42,7 +42,8 @@ function HealthButton({ place }: { place: Place }) {
   const phone = useUI((u) => u.device === 'phone')
   const [open, setOpen] = useState(false)
   if (!place.home || !m || !h) return null
-  const said = `${m.name}: ${healthWords(h)}${h.herdr ? '' : ", herdr isn't answering"}`
+  const engine = h.engine || 'herdr'
+  const said = `${m.name}: ${healthWords(h)}${h.herdr ? '' : `, ${engine} isn't answering`}`
   const B = phone ? RoundButton : IconButton
   return (
     <div className="relative">
@@ -55,7 +56,7 @@ function HealthButton({ place }: { place: Place }) {
       >
         <Bars meters={h.meters} />
         <span className={clsx('text-[0.75rem] whitespace-nowrap', worst(h) === 'over' ? 'text-need-fg' : worst(h) === 'busy' ? 'text-work-fg' : 'text-fg3', phone && worst(h) === 'ok' && 'sr-only')}>
-          {phone ? (worst(h) === 'ok' ? 'Health' : '!') : !h.herdr ? "herdr isn't answering" : worst(h) === 'over' ? 'Limit crossed' : worst(h) === 'busy' ? 'Busy' : 'Health'}
+          {phone ? (worst(h) === 'ok' ? 'Health' : '!') : !h.herdr ? `${engine} isn't answering` : worst(h) === 'over' ? 'Limit crossed' : worst(h) === 'busy' ? 'Busy' : 'Health'}
         </span>
       </B>
       {open ? <Details m={m} h={h} onClose={() => setOpen(false)} /> : null}
@@ -113,7 +114,7 @@ function Details({ m, h, onClose }: { m: Machine; h: MachineHealth; onClose: () 
         </div>
         {h.held && h.heldWhy ? <dd className="-mt-1 text-right text-[0.75rem] text-work-fg phone:text-[0.8125rem]">{h.heldWhy}</dd> : null}
         <div className="flex justify-between gap-3">
-          <dt className="font-medium">herdr</dt>
+          <dt className="font-medium">{h.engine || 'herdr'}</dt>
           <dd className={h.herdr ? 'text-fg2' : 'text-need-fg'}>{h.herdr ? 'Answering' : "Isn't answering"}</dd>
         </div>
       </dl>

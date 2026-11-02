@@ -1,6 +1,6 @@
 // Each CLI's models and effort levels, as read from the CLI itself (models.ts): what its output looks like here
 import { describe, expect, test } from 'bun:test'
-import { effortFor, findModel, helpLevels, nearest, parseClaude, parseCodex, parsePi, setModels } from '../server/live/models.ts'
+import { effortFor, findModel, helpLevels, nearest, parseClaude, parseCodex, parsePi, setModels } from '../server/common/models.ts'
 
 describe('reading what each CLI takes', () => {
   test("Claude Code's catalog: the newest of each family, its levels by capability, older ones by id", () => {

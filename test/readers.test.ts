@@ -3,9 +3,9 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { appendFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { claudeLogPath, findClaudeLog, findCodexLog, findPiLog, piSessionDir } from '../server/live/readers/find.ts'
-import { LogTail, readerFor } from '../server/live/readers/index.ts'
-import type { LogEvent } from '../server/live/readers/types.ts'
+import { claudeLogPath, findClaudeLog, findCodexLog, findPiLog, piSessionDir } from '../server/common/readers/find.ts'
+import { LogTail, readerFor } from '../server/common/readers/index.ts'
+import type { LogEvent } from '../server/common/readers/types.ts'
 
 const parse = (cli: string, objs: object[]) =>
   readerFor(cli)!.parse(
@@ -96,7 +96,7 @@ describe('claude reader', () => {
       'turn-end:turn-msg_B',
     ])
     expect(ev[0]).toMatchObject({ kind: 'session', sessionId: S })
-    expect(ev.filter((e) => e.kind !== 'usage' && e.kind !== 'turn-start' && !STEPS.has(e.kind))[5].id).toBe('msg_B')
+    expect(ev.find((e) => e.kind === 'agent' && e.text.includes('The button is blue now.'))?.id).toBe('msg_B')
   })
 
   test('a command Claude Code runs itself reads as typed, with what it printed as its answer, and starts no turn', () => {
@@ -340,11 +340,11 @@ describe('codex reader', () => {
       'answered:call_async',
       'user:It is called Example',
     ])
-    expect(ev[1]).toMatchObject({
+    expect(ev.find(e => e.kind === 'question' && e.id === 'call_sync')).toMatchObject({
       tool: 'request_user_input',
       items: [{ header: 'Scope', question: 'Which pages?', multiSelect: false, allowCustom: true, options: [{ label: 'All' }, { label: 'Home' }] }],
     })
-    expect(ev[3]).toMatchObject({ tool: 'request_user_input_async', items: [{ question: 'What is the site called?', options: [], allowCustom: true }] })
+    expect(ev.find(e => e.kind === 'question' && e.id === 'call_async')).toMatchObject({ tool: 'request_user_input_async', items: [{ question: 'What is the site called?', options: [], allowCustom: true }] })
   })
 })
 

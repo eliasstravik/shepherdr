@@ -45,7 +45,7 @@ export function ListChips({ alone }: { alone?: boolean }) {
                   type="button"
                   aria-label={`Remove ${name}`}
                   onClick={() => setChips(chips.filter((x) => x !== c))}
-                  className="press relative grid size-6 shrink-0 place-items-center rounded-full text-fg3 hover:bg-hover hover:text-fg focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] focus-visible:outline-none phone:size-9 phone:after:absolute phone:after:-inset-y-1 phone:after:inset-x-0 phone:after:content-['']"
+                  className="press relative grid size-6 shrink-0 place-items-center rounded-full text-fg3 hover:bg-hover hover:text-fg keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] focus-visible:outline-none phone:size-9 phone:after:absolute phone:after:-inset-y-1 phone:after:inset-x-0 phone:after:content-['']"
                 >
                   <XIcon className="size-3.5" />
                 </button>
@@ -81,7 +81,7 @@ function AddChip({ snap, chips }: { snap: Snapshot; chips: string[] }) {
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="press flex h-7 items-center gap-1 rounded-full py-1 pr-2.5 pl-1.5 text-[0.8125rem] whitespace-nowrap text-fg2 shadow-[inset_0_0_0_1px_var(--line2)] hover:bg-hover hover:text-fg focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] focus-visible:outline-none aria-expanded:bg-hover phone:relative phone:h-9 phone:pr-3 phone:pl-2 phone:text-[0.9375rem] phone:after:absolute phone:after:-inset-y-1 phone:after:inset-x-0 phone:after:content-['']"
+        className="press flex h-7 items-center gap-1 rounded-full py-1 pr-2.5 pl-1.5 text-[0.8125rem] whitespace-nowrap text-fg2 shadow-[inset_0_0_0_1px_var(--line2)] hover:bg-hover hover:text-fg keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] focus-visible:outline-none aria-expanded:bg-hover phone:relative phone:h-9 phone:pr-3 phone:pl-2 phone:text-[0.9375rem] phone:after:absolute phone:after:-inset-y-1 phone:after:inset-x-0 phone:after:content-['']"
       >
         <PlusIcon className={ic} />
         Filter

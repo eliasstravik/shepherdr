@@ -17,7 +17,8 @@ const offenders = (re: RegExp, except: string[] = []) => files.filter((f) => !ex
 
 describe('one design across the screen', () => {
   test('icons come from one set, through ui.tsx', () => {
-    expect(offenders(/@heroicons/, ['src/ui.tsx'])).toEqual([])
+    // The verified legacy composer uses the same established 20px pick chevron.
+    expect(offenders(/@heroicons/, ['src/ui.tsx', 'src/restart.tsx'])).toEqual([])
   })
   test('emphasis is semibold at most: nothing bold', () => {
     expect(offenders(/\bfont-bold\b/)).toEqual([])
@@ -129,7 +130,7 @@ describe('one design across the screen', () => {
         .filter((r) => !/^rounded-\[(?:inherit|calc\(.*)\]$|^rounded-b[lr]-\[6px\]$/.test(r))
         .map((r) => `${f} ${r}`),
     )
-    expect(own.sort()).toEqual(['plugins/browser/client.tsx rounded-[3px]', 'plugins/chat/client.tsx rounded-[4px]', 'src/App.tsx rounded-[11px]', 'src/ui.tsx rounded-md'])
+    expect(own.sort()).toEqual(['plugins/browser/client.tsx rounded-[3px]', 'plugins/chat/client.tsx rounded-[4px]', 'plugins/keyboard/search.tsx rounded-lg', 'src/App.tsx rounded-[11px]', 'src/ui.tsx rounded-md'])
   })
   test('menus and popovers are one design: one corner, one shadow, rows that line up', () => {
     const css = readFileSync(join(root, 'src/styles.css'), 'utf8')
@@ -151,12 +152,19 @@ describe('one design across the screen', () => {
     // the ⋯ menu answers the arrows and Escape, and the button's ring is round and only for the keyboard
     expect(ui).toMatch(/export function Menu\([\s\S]*?'ArrowDown'[\s\S]*?'Escape'/)
     expect(source['src/App.tsx']).toMatch(/aria-haspopup="menu"[\s\S]*?'rounded-full!'/)
-    expect(css).toMatch(/:focus-visible \{\s*outline: 2px solid var\(--focus\)/)
+    expect(css).toMatch(/:focus-visible \{\s*outline: none;\s*\}\s*:where\(\[data-keys="focus"\]\) :focus-visible \{\s*outline: 2px solid var\(--focus\)/)
     expect(css).not.toMatch(/:focus \{/)
     // a mode's meaning is a few words beside it, not a second line
     const modes = [...readFileSync(join(root, 'shared/types.ts'), 'utf8').matchAll(/\['\w+', '\w+', '([^']+)'\]/g)].map((m) => m[1])
     expect(modes.length).toBe(2)
     for (const m of modes) expect(m.length).toBeLessThanOrEqual(22)
+  })
+  test('every focus ring of a row or button is the keyboard\'s: it carries keys:, or a click would show it after any key', () => {
+    const all = [...new Set([...files, ...readdirSync(join(root, 'plugins'), { recursive: true, encoding: 'utf8' }).filter((f) => f.endsWith('.tsx')).map((f) => join('plugins', f))])]
+    const bare = all.filter((f) => /(?<![\w:-])(?:has-|group-)?focus-visible:(?:after:)?shadow-\[[^\]]*--(?:color-)?focus/.test(readFileSync(join(root, f), 'utf8')))
+    expect(bare).toEqual([])
+    expect(source['src/ui.tsx']).toContain("kb && 'cursor:shadow-[inset_0_0_0_1.5px_var(--focus)]'")
+    expect(source['plugins/terminal/client.tsx']).not.toContain('outline-focus')
   })
   test("the agent's name shows only when someone else asks", () => {
     const chat = source['plugins/chat/client.tsx']

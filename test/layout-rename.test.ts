@@ -9,6 +9,7 @@ const { browser, world, url } = await layout()
 describe.skipIf(!browser)('renaming spaces and machines', () => {
   test('a space renames in its row, a machine in Rename machine: Enter keeps it, Escape does not, a name taken or against the rules is refused; it shows in the header, tasks and search (desktop)', async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 800 } })
+    page.setDefaultTimeout(10_000) // Surface the failing locator before the enclosing test deadline.
     try {
       await page.goto(url().replace('place=vm-str/home', 'place=vm-str/gtm'))
       const places = page.locator('#places')
@@ -73,7 +74,10 @@ describe.skipIf(!browser)('renaming spaces and machines', () => {
       // new names
       await places.locator('li[data-project="p:vm-str:~"]').getByRole('button', { name: /^home/ }).click()
       const tasks = page.locator('section[aria-label="Tasks"]')
-      await tasks.getByRole('button', { name: 'Remove home · Work VM' }).click()
+      // Home already includes every machine; explicitly choose Everything to
+      // inspect ordinary tasks too, beyond its default attention-only view.
+      await tasks.getByRole('button', { name: 'Filter', exact: true }).click()
+      await page.getByRole('menuitemcheckbox', { name: 'Everything', exact: true }).click()
       await tasks.locator('li', { hasText: 'Work VM · go-to-market' }).first().waitFor()
 
       // a home space is renamed as any space, by the same rules
@@ -102,9 +106,9 @@ describe.skipIf(!browser)('renaming spaces and machines', () => {
       const ctx = await browser!.newContext(opts)
       const page = await ctx.newPage()
       const phone = device === 'phone'
-      const list = phone ? 'nav[aria-label="Places"]' : '#places'
+      const list = phone ? 'nav[aria-label="Spaces"]' : '#places'
       const open = async () => {
-        if (phone && !(await page.locator(list).isVisible())) await page.getByRole('button', { name: 'Places' }).first().click()
+        if (phone && !(await page.locator(list).isVisible())) await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).first().click()
         await page.locator(`${list} li[data-heading="m:mac"]`).dispatchEvent('contextmenu')
         await page.getByRole('menuitem', { name: 'Rename machine…' }).click()
         await page.getByRole('dialog', { name: 'Rename machine' }).waitFor()
@@ -112,7 +116,7 @@ describe.skipIf(!browser)('renaming spaces and machines', () => {
       const icon = () => page.locator(`${list} li[data-heading="m:mac"] [data-icon]`).first()
       try {
         await page.goto(url())
-        if (phone) await page.getByRole('button', { name: 'Places' }).first().click()
+        if (phone) await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).first().click()
         await page.locator(`${list} li[data-heading="m:mac"]`).waitFor()
         await settled(page)
         expect(await icon().getAttribute('data-icon')).toBe('server')
@@ -141,7 +145,7 @@ describe.skipIf(!browser)('renaming spaces and machines', () => {
         await dialog.getByRole('button', { name: 'Save' }).click()
         await dialog.waitFor({ state: 'detached' })
         expect(world.machines.find((m) => m.id === 'm:mac')?.emoji).toBe('🚀')
-        if (phone && !(await page.locator(list).isVisible())) await page.getByRole('button', { name: 'Places' }).first().click()
+        if (phone && !(await page.locator(list).isVisible())) await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).first().click()
         await page.waitForFunction((sel) => document.querySelector(`${sel} li[data-heading="m:mac"] [data-icon]`)?.textContent === '🚀', list)
         expect(await icon().getAttribute('data-icon')).toBe('emoji')
         // its emoji sits where the server was: the name doesn't move
@@ -159,7 +163,7 @@ describe.skipIf(!browser)('renaming spaces and machines', () => {
         await dialog.getByRole('button', { name: 'Save' }).click()
         await dialog.waitFor({ state: 'detached' })
         expect(world.machines.find((m) => m.id === 'm:mac')?.emoji).toBeUndefined()
-        if (phone && !(await page.locator(list).isVisible())) await page.getByRole('button', { name: 'Places' }).first().click()
+        if (phone && !(await page.locator(list).isVisible())) await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).first().click()
         await page.locator(`${list} li[data-heading="m:mac"] [data-icon="server"]`).waitFor()
       } finally {
         await world.act({ type: 'rename', id: 'm:mac', name: '', emoji: '' })
@@ -172,8 +176,8 @@ describe.skipIf(!browser)('renaming spaces and machines', () => {
     const page = await ctx.newPage()
     try {
       await page.goto(url())
-      await page.getByRole('button', { name: 'Places' }).first().click()
-      const row = page.locator('nav[aria-label="Places"] li[data-project="p:mac:lilla-varlden"]')
+      await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).first().click()
+      const row = page.locator('nav[aria-label="Spaces"] li[data-project="p:mac:lilla-varlden"]')
       await row.waitFor()
       await settled(page)
       const b = (await row.boundingBox())!

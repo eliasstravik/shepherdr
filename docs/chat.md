@@ -5,17 +5,39 @@ Every agent, coordinator or task agent, gets the same chat.
 - Pick a space; write to its coordinator. Ask it for a task; tasks are created only through a coordinator.
 - What you send shows in the chat the moment you tap Send, faded until it is in. If it can't go through, it says so
   under the message, with Retry and Remove; it is still there after a reload.
-- Write to a busy agent any time: it goes in at once and steers the agent mid-turn (Claude Code, Codex and pi take it
+- Write to a busy agent any time: it goes in at once and steers the agent mid-turn (Claude Code and Codex take it
   at their next step). It waits only while the agent shows a menu or permission prompt, where typed text could pick an
-  option (the bubble says so, and it goes in once the prompt is answered), or while the agent is still starting.
-  Commands like /compact or a model change wait for the turn to end.
-- Startup trust and MCP approval prompts appear as choice cards, even before the first message. The card keeps the
-  CLI's screen text and offers Open terminal if it cannot read the choices. Answers are checked before messages go
-  in. Only task worktrees Shepherdr creates are pre-trusted in Claude Code and Codex; a space you picked still asks.
-- A slash command you type (`/clear`, `/new`, `/compact`, `/model sonnet`, a custom one) goes into the agent's CLI as
+  option (the bubble says so, and it goes in once the prompt is answered), or while the agent is still starting or
+  its machine is out of reach; only then does the bubble carry a note. Commands like /compact or a model change wait
+  for the turn to end.
+- An agent whose saved session is gone starts anew by itself, in the same chat, with "Earlier session was gone, started
+  a new one." Any other start that fails shows its CLI's own words as a line in the chat, and your next message tries again.
+- A permission card says what the agent wants in words (`Run: touch hello.txt`), with everything it would touch below.
+  Besides Allow once and Deny it offers what Claude Code offers in its terminal to stop asking: Don't ask again says
+  what it allows and for how long, and leaves that to Claude Code to keep. Its auto mode choice isn't offered to hooks,
+  so it stays in the terminal; a phone alert has only Allow once and Deny. Codex gives hooks neither, so its cards have
+  Allow once and Deny; don't ask again for Codex is in its Terminal.
+  A request too long to show whole says so and offers only Deny, so nothing is allowed unread: allow it in its Terminal.
+- An agent stopped at its CLI's own screen before its session starts (trusting a folder, the theme, signing in, Codex's
+  hooks, or anything a later CLI version adds) shows that screen in the chat as a card within about 10 seconds, and
+  counts as Needs you. The card shows the choices it can read, and one tap presses that choice in the terminal. A
+  first screen with nothing to choose makes no card, for it may be a slow start. After a card, one with no choices to
+  read still comes if it holds a link, like a sign-in, or its CLI says it has stopped, and Open terminal is the way on. Each next screen is its own card. An agent
+  whose CLI reports a turn, running or just ended, never gets one. Nothing is pressed if the screen
+  has changed since the card was drawn, and a card that goes unused closes when its answer comes from the terminal or
+  the agent starts. Outside Isolated workspaces Shepherdr pre-trusts nothing, and Codex asks in any new Git repository,
+  even on a machine set to bypass; its task worktrees share their repository's answer.
+- Claude Code's own question tool and plan approval are cards, never permissions: a question is a choice card with an
+  Other answer, a plan is Plan to approve (stop asking, keep asking, or change the plan). The answer goes back to Claude
+  through its permission hook, so nothing is typed into its screen. Handled in the terminal instead, the card closes.
+  Codex's own question tool (`request_user_input`, by default offered only in its Plan mode) has no card yet: answer it
+  in Terminal.
+- `/model` (with or without a name) never reaches the CLI, which would save it as the device's default for every later
+  agent. It opens Restart agent instead, with the model you named picked, and that changes this agent only.
+- Any other slash command you type (`/clear`, `/new`, `/compact`, a custom one) goes into the agent's CLI as
   you typed it, once its turn is over, and the CLI runs it. The chat shows it as you typed it, and what the CLI printed
   as its answer. After `/clear` or `/new` a quiet New session line starts the new session, whose log the chat reads
-  from then on. A menu or view the command opens in the terminal (`/model` alone, `/usage`) comes into the chat and is
+  from then on. A menu or view the command opens in the terminal (`/usage`) comes into the chat and is
   closed, so your next message goes in; one that asks a question (Codex's `/new`: where should the new conversation
   run?) is a card to answer, and what you write meanwhile waits for it. A command the CLI didn't run fails with Retry.
 - Every chat shows what its agent does, calmly and in plain words (Claude Code and Codex, read from their logs). Just
@@ -26,7 +48,8 @@ Every agent, coordinator or task agent, gets the same chat.
   (the command, the path, the pattern) and its output or diff; no command line shows until then. The words come from
   the agent's own short description of a command (Claude Code's `description`), else from what the command runs
   (`git status` is `Checked git status`, `bun test` is `Ran tests`, an unknown program `Ran <its name>`), else the
-  tool. While a turn runs, one quiet line in place of the typing dots says what it does now and for how long
+  tool. A step that hasn't run says so: `Wants to create empty hello.txt` above its permission card, `Wanted to …` once
+  refused. While a turn runs, one quiet line in place of the typing dots says what it does now and for how long
   (`Checking the task list  12s`), coordinators' turns too (their header still says nothing of it). While work it
   started in the background runs (subagents, background shells and monitors, a headless `codex exec` or `claude -p`,
   which counts as a subagent), a small tag sits just above the message box (`1 subagent · 1 shell`), only in its own
@@ -57,7 +80,9 @@ Every agent, coordinator or task agent, gets the same chat.
   (open or shut, width and tab remembered on the device); on a phone or tablet the same items in the task header's ⋯,
   each a full-screen sheet that Back closes (on a desktop its ⋯ lists them too). Every chat's ⋯, a task's or a
   coordinator's, starts with **Search in this chat**. All of it is read only. Terminal is the agent's live herdr terminal: click
-  it and every key goes in, Esc too; `Ctrl+`` ` opens it and goes back to the chat. Files lists the worktree (tracked
+  it and every key goes in, Esc too; `Ctrl+`` ` opens it and goes back to the chat. It is drawn at the terminal's own
+  size, whoever watches: opening a view never resizes the agent, a phone and a desktop see the same screen, a narrow
+  view pans sideways and a pinch (or `Ctrl` and the wheel) zooms. Files lists the worktree (tracked
   files and new ones git doesn't ignore), finds one by name and shows it highlighted. Diff shows what the task changed
   against where it left main, committed or not: its files as a tree with lines added and taken out, and each file's
   unified diff. Pull request shows the task's PR on GitHub (state, checks, a link), asked of `gh` on the remote's own
@@ -68,5 +93,29 @@ Every agent, coordinator or task agent, gets the same chat.
 Every agent learns the chat lines, cards, artifacts and the `shepherdr` command from
 [skill/shepherdr](../skill/shepherdr/SKILL.md); coordinators their tasks, news, merges and Autopilot from
 [skill/shepherdr-coordinator](../skill/shepherdr-coordinator/SKILL.md); task agents the way from brief to merged from
-[skill/shepherdr-agent](../skill/shepherdr-agent/SKILL.md). Their prompts (`server/live/prompts.ts`) say only who they are,
-their space (and a home space's machine duties) or task, and which skills to read. `shepherdr help` lists the command.
+[skill/shepherdr-agent](../skill/shepherdr-agent/SKILL.md). Their launch prompts (`server/core/agents.ts`) carry those skills and say who they are and
+their space (and a home space's machine duties) or task. `shepherdr help` lists the command.
+
+## Needs you
+
+Needs you sits beside the chat: a tab with Tasks and Artifacts on a wide screen, and in the bottom bar on a phone. It
+lists everything waiting on you, from every space on every machine, oldest first, each card once: questions,
+permissions, plans, merges, secrets, CLI screens, and agents that just wait for a reply, a coordinator too once it ends
+its turn on a question.
+
+- One tap answers a question or a permission, here and in the chat, and presses a CLI screen's choice. Merges, plans
+  and picks of several keep their pick and Send, and so does a card with a note typed.
+- The list stays still under your thumb. A new card only ever joins the end. A card answered, here or anywhere else,
+  keeps its place and its height until you leave Needs you, or tap Clear once none is open.
+- Every red count comes from this one list, so they can't differ: a space's count in the sidebar is its cards here,
+  those counts add up to the number on Needs you, and the app icon adds the Ready tasks. Tasks shows only Ready in its
+  tab, and a task with two cards counts as two in its Needs you group. A task whose merge waits on you is on both
+  lists: its card here, and its row under Ready in Tasks.
+- A card still lives in its agent's chat, and can be answered there too. A task has one row in the coordinator's chat,
+  updated where it stands: its live status and latest news, never a stack of copies. While it waits, a tap on it opens
+  Needs you. The coordinator speaks only when it has something to add.
+- A merge card shows what it approves: the commit, the files and lines changed, GitHub's checks as they stand and a
+  link to the proof. Only Merge on that card approves that commit; a yes in the chat doesn't count, and the card says so.
+- A card stays open until it is answered on the card. A message in its chat, from you, a script, a coordinator or
+  GitHub, reaches the agent and never answers or closes it. Its agent's next `ready` replaces a merge card it left behind.
+  After Merge, only your own words in the app take that yes back; messages from outside don't.

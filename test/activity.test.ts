@@ -5,25 +5,24 @@ import { describe, expect, test } from 'bun:test'
 import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { glance, jobsWords, rowsOf, say, testResult, took } from '../shared/activity.ts'
-import { activityOf, cutOutput, lineOf } from '../server/live/activity.ts'
-import { ClaudeReader, readerFor } from '../server/live/readers/index.ts'
-import { notices } from '../server/live/readers/claude.ts'
-import { claudeStep, codexItem, commandSay, commandWords } from '../server/live/readers/steps.ts'
+import { glance, jobsWords, rowsOf, say, testResult, took, words } from '../shared/activity.ts'
+import { activityOf, cutOutput, lineOf, stepsNow } from '../server/activity.ts'
+import { ClaudeReader, readerFor } from '../server/common/readers/index.ts'
+import { notices } from '../server/common/readers/claude.ts'
+import { claudeStep, codexItem, commandSay, commandWords } from '../server/common/readers/steps.ts'
 import type { Step } from '../shared/types.ts'
-import type { LogEvent } from '../server/live/readers/types.ts'
+import type { LogEvent } from '../server/common/readers/types.ts'
 
 process.env.SHEPHERDR_HOME ??= mkdtempSync(join(tmpdir(), 'shep-act-'))
-const { Chats } = await import('../server/live/chats.ts')
 
 describe('words', () => {
   test('an action said as a command reads done and doing; a word that is no verb stays', () => {
-    expect(say('Check the task list')).toEqual({ title: 'Checked the task list', doing: 'Checking the task list' })
-    expect(say('Run tests')).toEqual({ title: 'Ran tests', doing: 'Running tests' })
-    expect(say('Clone the repo and find the log code')).toEqual({ title: 'Cloned the repo and found the log code', doing: 'Cloning the repo and finding the log code' })
+    expect(say('Check the task list')).toEqual({ title: 'Checked the task list', doing: 'Checking the task list', wants: 'Wants to check the task list' })
+    expect(say('Run tests')).toEqual({ title: 'Ran tests', doing: 'Running tests', wants: 'Wants to run tests' })
+    expect(say('Clone the repo and find the log code')).toEqual({ title: 'Cloned the repo and found the log code', doing: 'Cloning the repo and finding the log code', wants: 'Wants to clone the repo and find the log code' })
     expect(say('Stop the demo').title).toBe('Stopped the demo')
     expect(say('Copy files').title).toBe('Copied files')
-    expect(say('TypeScript check')).toEqual({ title: 'TypeScript check', doing: 'TypeScript check' })
+    expect(say('TypeScript check')).toEqual({ title: 'TypeScript check', doing: 'TypeScript check', wants: 'Wants to: TypeScript check' })
   })
   test('a command in words, never its command line: the agent’s description first, else what it runs', () => {
     const t = (command: string, description?: string) => claudeStep('Bash', { command, description })!
@@ -106,6 +105,36 @@ describe('words', () => {
   })
 })
 
+describe('steps that have not run', () => {
+  const steps: LogEvent[] = [
+    { kind: 'turn-start', id: 't', at: 0 },
+    { kind: 'step', id: 'a', at: 1, step: 'edit', tool: 'Edit', ...words('Edit a.ts', 'a.ts') },
+    { kind: 'step-end', id: 'a', at: 2 },
+    { kind: 'step', id: 'b', at: 3, step: 'edit', tool: 'Edit', ...words('Edit b.ts', 'b.ts') },
+    { kind: 'step', id: 'c', at: 4, step: 'run', tool: 'Bash', ...words('Create empty hello.txt') },
+  ]
+  test('held at a permission card a step says what it wants, and never groups with what is done', () => {
+    const { open } = activityOf(steps)
+    expect(lineOf(open!, false, true).rows.map((r) => r.text)).toEqual(['Edited a.ts', 'Wants to edit b.ts', 'Wants to create empty hello.txt'])
+    expect(stepsNow(open!, true).map((s) => s.unrun)).toEqual([undefined, true, true])
+  })
+  test('once it runs it says what it is doing, and once over what it did', () => {
+    const { open } = activityOf(steps)
+    expect(lineOf(open!, true).rows.at(-1)!.text).toBe('Creating empty hello.txt')
+    expect(lineOf(activityOf([...steps, { kind: 'step-end', id: 'c', at: 5 }]).open!).rows.at(-1)!.text).toBe('Created empty hello.txt')
+  })
+  test('a step refused never says it was done, and is no error', () => {
+    const { open } = activityOf([...steps, { kind: 'step-end', id: 'c', at: 5, failed: true, refused: 'you' }])
+    const line = lineOf(open!, true)
+    expect(line.rows.at(-1)).toMatchObject({ text: 'Wanted to create empty hello.txt' })
+    expect(line.failed).toBeUndefined()
+  })
+  test('a step logged before these words came says what it was doing', () => {
+    const { open } = activityOf([{ kind: 'step', id: 'old', at: 1, step: 'run', tool: 'Bash', title: 'Ran it', doing: 'Running it', target: '' }])
+    expect(lineOf(open!, false, true).rows[0].text).toBe('Running it')
+  })
+})
+
 describe('folding', () => {
   const step = (id: string, at: number, x: Partial<Extract<LogEvent, { kind: 'step' }>> = {}): LogEvent => ({ kind: 'step', id, at, step: 'run', tool: 'Bash', title: `Ran ${id}`, doing: `Running ${id}`, target: '', ...x })
   test('steps fold by turn; a stand-in goes once over; the turn on now shows its step', () => {
@@ -167,6 +196,31 @@ const turnEnd = (uuid: string) => ({ parentUuid: null, ...base, type: 'system', 
 
 describe('claude reader: steps and background work', () => {
   const parse = (objs: object[], reader = readerFor('claude')!) => reader.parse(objs.map((o, i) => ({ text: JSON.stringify(o), offset: i * 100 })), '/logs/p/S.jsonl')
+  test('successful native TaskStop ends only its matching job; failed or mismatched results do not', () => {
+    const ev = parse([
+      use('a1', 'start', 'Bash', { command: 'sleep 120', run_in_background: true }),
+      result('u1', 'start', 'Command running in background', { backgroundTaskId: 'wait1' }),
+      use('a2', 'stop-failed', 'TaskStop', { task_id: 'wait1' }),
+      result('u2', 'stop-failed', 'Could not stop task', { task_id: 'wait1', message: 'Could not stop task' }),
+      use('a3', 'stop-wrong', 'TaskStop', { task_id: 'other' }),
+      result('u3', 'stop-wrong', 'Wrong task', { task_id: 'wait1', message: 'Successfully stopped task: wait1 (sleep 120)' }),
+      use('a4', 'stop-ok', 'TaskStop', { task_id: 'wait1' }),
+      result('u4', 'stop-ok', 'Stopped', { task_id: 'wait1', task_type: 'local_bash', command: 'sleep 120', message: 'Successfully stopped task: wait1 (sleep 120)' }),
+    ])
+    expect(ev.filter(e => e.kind === 'job-end')).toEqual([{ kind: 'job-end', id: 'wait1', at: expect.any(Number) }])
+    expect(activityOf(ev).jobs).toEqual([])
+  })
+  test('a card denied is a step refused, whether a person or Shepherdr closed it; an error of its own is not', () => {
+    const ev = parse([
+      use('a1', 'no', 'Bash', { command: 'touch a' }),
+      user('u1', [{ tool_use_id: 'no', type: 'tool_result', content: 'The human declined this request.', is_error: true }]),
+      use('a2', 'closed', 'Bash', { command: 'touch b' }),
+      user('u2', [{ tool_use_id: 'closed', type: 'tool_result', content: 'Shepherdr closed this without an answer: gone.', is_error: true }]),
+      use('a3', 'failed', 'Bash', { command: 'touch c' }),
+      user('u3', [{ tool_use_id: 'failed', type: 'tool_result', content: 'touch: cannot touch', is_error: true }]),
+    ])
+    expect(ev.flatMap((e) => (e.kind === 'step-end' ? [[e.id, e.refused]] : []))).toEqual([['no', 'you'], ['closed', 'you'], ['failed', undefined]])
+  })
   test('a tool call is a step, its result ends it and says where its output is; the question tool and a subagent’s calls are none', () => {
     const ev = parse([
       user('u1', 'Fix it', typed),
@@ -179,10 +233,10 @@ describe('claude reader: steps and background work', () => {
     ])
     const steps = ev.filter((e) => e.kind === 'step' || e.kind === 'step-end')
     expect(steps).toEqual([
-      { kind: 'step', id: 'toolu_1', at: expect.any(Number), step: 'run', tool: 'Bash', title: 'Ran the tests', doing: 'Running the tests', target: '', test: true, detail: 'cd /work/app && bun test' },
+      { kind: 'step', id: 'toolu_1', at: expect.any(Number), step: 'run', tool: 'Bash', title: 'Ran the tests', doing: 'Running the tests', wants: 'Wants to run the tests', target: '', test: true, detail: 'cd /work/app && bun test' },
       { kind: 'step-end', id: 'toolu_1', at: expect.any(Number), failed: undefined, out: { file: '/logs/p/S.jsonl', offset: 200 }, result: '3 passed' },
-      { kind: 'step', id: 'toolu_2', at: expect.any(Number), step: 'read', tool: 'Read', title: 'Read a.ts', doing: 'Reading a.ts', target: 'a.ts', detail: '/work/app/src/a.ts' },
-      { kind: 'step', id: 'toolu_5', at: expect.any(Number), step: 'other', tool: 'get_pr', title: 'Used get pr', doing: 'Using get pr', target: '' },
+      { kind: 'step', id: 'toolu_2', at: expect.any(Number), step: 'read', tool: 'Read', title: 'Read a.ts', doing: 'Reading a.ts', wants: 'Wants to read a.ts', target: 'a.ts', detail: '/work/app/src/a.ts' },
+      { kind: 'step', id: 'toolu_5', at: expect.any(Number), step: 'other', tool: 'get_pr', title: 'Used get pr', doing: 'Using get pr', wants: 'Wants to use get pr', target: '' },
     ])
   })
   test('a shell, a subagent and a monitor in the background are jobs until their notice says they are over', () => {
@@ -215,6 +269,16 @@ describe('claude reader: steps and background work', () => {
 const codexLine = (type: string, payload: object) => ({ timestamp: ts(), type, payload })
 
 describe('codex reader: steps and background work', () => {
+  test('a call the human denied on its card ends refused; words in a command\'s own output do not', () => {
+    const line = (payload: object, offset: number) => ({ offset, text: JSON.stringify({ timestamp: '2026-11-01T06:00:00Z', type: 'response_item', payload }) })
+    const call = (id: string) => ({ type: 'custom_tool_call', call_id: id, name: 'exec', input: 'x' })
+    const output = (id: string, text: string) => ({ type: 'custom_tool_call_output', call_id: id, output: [{ type: 'input_text', text }] })
+    const ev = readerFor('codex')!.parse([
+      line(call('a'), 0), line(output('a', 'exec_command failed: CreateProcess { message: "Rejected(\\"The human declined this request.\\")" }'), 1),
+      line(call('b'), 2), line(output('b', 'The human declined this request.'), 3),
+    ], '/logs/rollout.jsonl')
+    expect(ev.flatMap((e) => (e.kind === 'step-end' ? [[e.id, e.refused]] : []))).toEqual([['a', 'you'], ['b', undefined]])
+  })
   test('items logged once over are steps; the call that ran them goes once over; subagents are jobs', () => {
     const ev = readerFor('codex')!.parse(
       [
@@ -243,136 +307,3 @@ describe('codex reader: steps and background work', () => {
 })
 
 /* ---------- a chat built from a log ---------- */
-
-function world(kind: 'claude' | 'codex', status: () => string, runs: () => string | undefined = () => undefined) {
-  const dir = mkdtempSync(join(tmpdir(), 'shep-act-log-'))
-  const log = join(dir, `${S}.jsonl`)
-  writeFileSync(log, '')
-  const agents = {
-    record: () => ({ kind, logs: [log], sessionId: S, cwd: '/work/app' }),
-    status,
-    stillRuns: runs,
-    background: runs,
-    reviewers: { list: () => [] },
-    sentLately: () => [],
-    waiting: () => [],
-    typedSince: () => [],
-    failedLately: () => [],
-    holdOf: () => undefined,
-    info: () => undefined,
-  }
-  const chats = new Chats(agents as never, (k) => k, () => 'You')
-  const add = (...objs: object[]) => appendFileSync(log, objs.map((o) => `${JSON.stringify(o)}\n`).join(''))
-  return { chats, add, dir, log }
-}
-
-describe('a chat from its log', () => {
-  test('a turn’s rows sit just before its last reply; its steps and output come when asked', () => {
-    let st = 'working'
-    const w = world('claude', () => st)
-    w.add(
-      user('u1', 'Fix the test', typed),
-      use('a1', 'toolu_1', 'Bash', { command: 'bun test' }),
-      result('u2', 'toolu_1', '1 fail\n\x1b[31mexpected 2\x1b[0m'),
-      said('a2', 'msg_r1', { type: 'text', text: 'Looking.' }),
-      use('a3', 'toolu_2', 'Edit', { file_path: '/work/app/a.ts', old_string: 'x', new_string: 'y' }),
-    )
-    // the turn runs: its step on now
-    let c = w.chats.chat('T-1/Agent')
-    expect(c.live).toMatchObject({ steps: 2, now: { id: 'toolu_2', kind: 'edit', doing: 'Editing a.ts' } })
-    expect(c.messages.some((m) => m.activity)).toBe(false)
-    w.add(result('u3', 'toolu_2', 'ok', { structuredPatch: [{ oldStart: 3, oldLines: 1, newStart: 3, newLines: 1, lines: ['-x', '+y'] }] }), said('a4', 'msg_r2', { type: 'text', text: 'Fixed.' }, 'end_turn'), turnEnd('s1'))
-    st = 'idle'
-    c = w.chats.chat('T-1/Agent')
-    expect(c.live).toBeUndefined()
-    const at = c.messages.findIndex((m) => m.activity)
-    expect(c.messages.map((m) => m.text ?? 'activity')).toEqual(['Fix the test', 'Looking.', 'activity', 'Fixed.'])
-    const a = c.messages[at].activity!
-    expect(a.rows.map((r) => [r.text, r.failed, r.added, r.removed])).toEqual([
-      ['Ran tests: 1 failed', undefined, undefined, undefined],
-      ['Edited a.ts', undefined, 1, 1],
-    ])
-    const steps = w.chats.activity({ chat: 'T-1/Agent', what: 'turn', id: a.id })
-    expect('steps' in steps && steps.steps.map((s) => [s.kind, s.title, s.detail, s.output])).toEqual([
-      ['run', 'Ran tests', 'bun test', true],
-      ['edit', 'Edited a.ts', '/work/app/a.ts', true],
-    ])
-    expect(w.chats.activity({ chat: 'T-1/Agent', what: 'output', id: 'toolu_1' })).toEqual({ output: '1 fail\nexpected 2' })
-    // an edit's output is its diff
-    expect(w.chats.activity({ chat: 'T-1/Agent', what: 'output', id: 'toolu_2' })).toEqual({ output: '@@ -3,1 +3,1 @@\n-x\n+y' })
-  })
-
-  test('news it answered with nothing shows no line', () => {
-    const w = world('claude', () => 'idle')
-    w.add(
-      user('u1', '<shepherdr><heartbeat>Look around.</heartbeat></shepherdr>', { origin: { kind: 'human' } }),
-      use('a1', 'toolu_1', 'Bash', { command: 'shepherdr task list' }),
-      result('u2', 'toolu_1', 'none'),
-      said('a2', 'msg_r1', { type: 'text', text: '<no-reply>nothing to do</no-reply>' }, 'end_turn'),
-      turnEnd('s1'),
-    )
-    expect(w.chats.chat('p:x').messages.filter((m) => m.activity)).toEqual([])
-  })
-
-  test('background work shows while it runs, with what each does now, and opens to its steps or output', () => {
-    let runs: string | undefined = 'agents'
-    const w = world('claude', () => 'idle', () => runs)
-    const sub = join(w.dir, S, 'subagents')
-    mkdirSync(sub, { recursive: true })
-    writeFileSync(join(sub, 'agent-ag1.jsonl'), `${JSON.stringify(use('b1', 'toolu_9', 'Read', { file_path: '/w/call.ts' }, { isSidechain: true }))}\n`)
-    const out = join(w.dir, 'bsh1.output')
-    writeFileSync(out, '✓ starts a call\n✓ mute keeps the call\n')
-    w.add(
-      user('u1', 'Check it', typed),
-      use('a1', 'toolu_1', 'Bash', { command: 'bun run test voice', run_in_background: true }),
-      result('u2', 'toolu_1', `Command running in background with ID: bsh1. Output is being written to: ${out}. You will be notified.`, { backgroundTaskId: 'bsh1' }),
-      use('a2', 'toolu_2', 'Agent', { description: 'Review the mute fix', run_in_background: true }),
-      result('u3', 'toolu_2', 'Async agent launched successfully.', { isAsync: true, agentId: 'ag1', description: 'Review the mute fix' }),
-      said('a3', 'msg_r1', { type: 'text', text: 'Both run.' }, 'end_turn'),
-      turnEnd('s1'),
-    )
-    const c = w.chats.chat('T-2/Agent')
-    expect(c.jobs?.map((j) => [j.kind, j.title, j.now, j.more])).toEqual([
-      ['shell', 'Running tests', '✓ mute keeps the call', 'output'],
-      ['agent', 'Review the mute fix', 'Reading call.ts', 'steps'],
-    ])
-    expect(w.chats.activity({ chat: 'T-2/Agent', what: 'job', id: 'bsh1' })).toEqual({ output: '✓ starts a call\n✓ mute keeps the call' })
-    const steps = w.chats.activity({ chat: 'T-2/Agent', what: 'job', id: 'ag1' })
-    expect('steps' in steps && steps.steps.map((s) => s.title)).toEqual(['Read call.ts'])
-    // a push only when something changed
-    expect(w.chats.jobsChanged('T-2/Agent')).toBe(true)
-    expect(w.chats.jobsChanged('T-2/Agent')).toBe(false)
-    appendFileSync(out, '✓ hang up ends the call\n')
-    expect(w.chats.jobsChanged('T-2/Agent')).toBe(true)
-    // its session says nothing runs any more: none, whatever the log missed
-    runs = undefined
-    expect(w.chats.chat('T-2/Agent').jobs).toBeUndefined()
-  })
-})
-
-describe('a long chat log', () => {
-  test('is read a piece at a time: the server answers between pieces, and the chat comes whole', async () => {
-    const w = world('claude', () => 'idle')
-    // about 12 MB: a long-lived coordinator's log
-    const pad = 'x'.repeat(20_000)
-    for (let i = 0; i < 600; i++) w.add(user(`u${i}`, `prompt ${i}`, typed), said(`a${i}`, `msg_${i}`, { type: 'text', text: `reply ${i} ${pad}` }, 'end_turn'))
-    let ticks = 0
-    const tick = setInterval(() => ticks++, 0)
-    const done = new Promise<void>((r) => (w.chats.onRead = () => r()))
-    expect(w.chats.pull('T-1/Agent')).toBe(true)
-    // the first pull read only a piece
-    const first = w.chats.chat('T-1/Agent').messages.length
-    expect(first).toBeGreaterThan(0)
-    expect(first).toBeLessThan(1200)
-    await done
-    clearInterval(tick)
-    expect(ticks).toBeGreaterThan(1)
-    const msgs = w.chats.chat('T-1/Agent').messages
-    expect(msgs).toHaveLength(1200)
-    expect(msgs.at(-1)?.text).toStartWith('reply 599 ')
-    // what it writes next is read as before
-    w.add(user('u600', 'one more', typed))
-    expect(w.chats.pull('T-1/Agent')).toBe(true)
-    expect(w.chats.chat('T-1/Agent').messages.at(-1)?.text).toBe('one more')
-  })
-})

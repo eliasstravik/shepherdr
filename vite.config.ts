@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, type Plugin } from 'vite'
+import { pluginCatalog } from './scripts/build-plugins.ts'
 
 const at = (p: string) => fileURLToPath(new URL(p, import.meta.url))
 
@@ -15,7 +16,9 @@ const pluginParts = (): Plugin => ({
     if (!id.startsWith('@plugins/')) return null
     const rest = id.slice('@plugins/'.length)
     const mine = at(`./user-plugins/${rest}`)
-    return this.resolve(existsSync(mine) ? mine : at(`./plugins/${rest}`), importer, { skipSelf: true })
+    // Vite bundles imported helpers into node_modules/.vite-temp: pass this config's original root explicitly.
+    const compatible = pluginCatalog(at('./')).some(plugin => plugin.name === rest.split('/')[0] && plugin.from === 'user' && plugin.on)
+    return this.resolve(compatible && existsSync(mine) ? mine : at(`./plugins/${rest}`), importer, { skipSelf: true })
   },
 })
 
@@ -25,5 +28,5 @@ export default defineConfig({
   plugins: [pluginParts(), react(), tailwindcss()],
   resolve: { alias: { '@shared': at('./shared'), '@client': at('./src') } },
   build: { outDir: 'dist', emptyOutDir: true, chunkSizeWarningLimit: 900 },
-  server: { host: '127.0.0.1', proxy: { '/api': { target: 'http://127.0.0.1:7787', ws: true } } },
+  server: { host: '127.0.0.1', allowedHosts: ['.ts.net'], proxy: { '/api': { target: process.env.SHEPHERDR_API_URL || 'http://127.0.0.1:7787', ws: true } } },
 })

@@ -14,6 +14,6 @@
     "baseUrl": ".",
     "paths": { "@shared/*": ["shared/*"], "@client/*": ["src/*"], "@plugins/*": ["plugins/*"] }
   },
-  "include": ["shared", "server", "plugins", "scripts", "src", "test", "vite.config.ts"],
+  "include": ["shared", "server", "plugins", "scripts", "src", "test", "helper/core-*.ts", "vite.config.ts"],
   "exclude": ["user-plugins"]
 }

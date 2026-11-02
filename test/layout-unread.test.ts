@@ -90,8 +90,8 @@ describe.skipIf(!browser)('unread and notify', () => {
     // another device (a phone) sees the same, and reading the space there clears it on the desktop too
     const phone = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true })
     await phone.goto(url())
-    await phone.getByRole('button', { name: 'Places' }).first().click()
-    const drawer = 'nav[aria-label="Places"]'
+    await phone.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).first().click()
+    const drawer = 'nav[aria-label="Spaces"]'
     await phone.waitForSelector(`${drawer} li`)
     await settled(phone)
     expect(await said(phone, drawer, mac)).toBe('home, home space')
@@ -131,8 +131,8 @@ describe.skipIf(!browser)('unread and notify', () => {
 
     const phone = await browser!.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true })
     await phone.goto(url().replace('place=vm-str/home', 'place=mac/lilla-varlden'))
-    await phone.getByRole('button', { name: 'Places' }).first().click()
-    const drawer = 'nav[aria-label="Places"]'
+    await phone.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).first().click()
+    const drawer = 'nav[aria-label="Spaces"]'
     await phone.waitForSelector(`${drawer} li`)
     await settled(phone)
     await plain(phone, drawer)
@@ -206,7 +206,7 @@ describe.skipIf(!browser)('unread and notify', () => {
     const ctx = await browser!.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
     const page = await ctx.newPage()
     await page.goto(url())
-    await page.getByRole('button', { name: 'Places' }).first().click()
+    await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).first().click()
     const hold = async (sel: string) => {
       const row = page.locator(sel)
       await row.waitFor()
@@ -219,11 +219,11 @@ describe.skipIf(!browser)('unread and notify', () => {
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
     }
     // the heading: New space and Rename section, nothing of a chat
-    await hold('nav[aria-label="Places"] li[data-heading="m:mac"]')
+    await hold('nav[aria-label="Spaces"] li[data-heading="m:mac"]')
     await page.getByRole('menuitem', { name: 'New space…' }).waitFor()
     expect(await page.getByRole('menu').getByRole('button', { name: /^All/ }).count()).toBe(0)
     await page.keyboard.press('Escape')
-    await hold('nav[aria-label="Places"] li[data-project="p:mac:~"]')
+    await hold('nav[aria-label="Spaces"] li[data-project="p:mac:~"]')
     await page.getByRole('menu').getByRole('button', { name: /^All/ }).tap()
     // the hold didn't open it
     expect(page.url()).not.toContain('mac%2Fhome')

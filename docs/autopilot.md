@@ -16,6 +16,10 @@ waits for the next heartbeat. Run now queues a wake until the coordinator is idl
 time, wake reason and delivery/turn outcome; a turn ending is not a claim that the goal succeeded. The coordinator's
 actual messages and saved progress carry its results; Shepherdr generates no separate status report.
 
+The ⋯ switch asks first, with what it replaces and spends and the limits now set. Where it can't run (a home space,
+not Linux, no usable bubblewrap, or its CLI missing or signed out) the switch is greyed with the reason, and
+Settings → Autopilot shows the same line. Turning off is one tap.
+
 Turning ON closes/replaces the regular coordinator with a fresh selected Autopilot session. OFF starts a fresh
 regular coordinator using normal defaults. The chat key, old transcripts, queued human messages and saved progress
 stay. During replacement, messages wait and new launches are blocked. Old-run events are discarded. Failed starts
@@ -30,12 +34,12 @@ wrapper PATH are verified before Herdr starts any agent. A shell configuration t
 
 ## Capabilities and limits
 
-| Runtime | Claude Code | Codex | pi | Other Herdr agents |
-| --- | --- | --- | --- | --- |
-| Shepherdr chat reader, model/effort adapter | Yes | Yes | Yes | Not currently viable for coordinator chat; refused |
-| Shared Linux isolation, schedule, fresh mode replacement | Yes | Yes | Yes | Refused |
-| Local Linux repository space with usable bubblewrap namespaces | Required | Required | Required | — |
-| Remote workers, macOS, home-space Autopilot | Currently refused | Currently refused | Currently refused | — |
+| Runtime | Claude Code | Codex | Other Herdr agents |
+| --- | --- | --- | --- |
+| Shepherdr chat reader, model/effort adapter | Yes | Yes | Not currently viable for coordinator chat; refused |
+| Shared Linux isolation, schedule, fresh mode replacement | Yes | Yes | Refused |
+| Local Linux repository space with usable bubblewrap namespaces | Required | Required | — |
+| Remote workers, macOS, home-space Autopilot | Currently refused | Currently refused | — |
 
 The **Isolated workspace** profile uses bubblewrap PID, mount, user and network namespaces, drops capabilities,
 clears inherited environment and starts with a private provider home. It applies to the whole process tree,
@@ -83,3 +87,22 @@ Access and limits are behind an expansion:
 
 The new `autopilot.*` settings, `autopilot-run` action, optional mode `keepWorkers` and optional
 `SettingRow.instructions` are additive. Existing plugin names, `definePlugin` and registry slots remain unchanged.
+
+## Automations
+
+An automation is separate from Autopilot and needs neither its switch nor Linux: a repository space's saved task and
+a trigger that adds that task again, each time with a fresh agent of its own. Nothing runs in the coordinator's chat,
+and the new task goes through the usual start, review and merge. It runs with nobody watching.
+
+Ask a space's coordinator for one in your own words. It turns them into the trigger, tells you back when it will run,
+and keeps it with `shepherdr automation add` (`edit`, `list`, `pause`, `resume`, `run`, `remove`); only a coordinator
+can add or edit one, and a home space has none. The trigger is the same kind as the heartbeat's: a time rule in the
+Settings time zone (`every weekday at 9`), events, or both. The events are a task `added`, `ready`, `failed`,
+`needs-you`, `merged` or `stalled`, and `main-red`, all of which can be narrowed by space, branch or title, plus a
+machine's `health` (a meter crossing its alert limit or coming back). It hears its own space (`health`: its own machine) unless a rule names another. A task an automation
+added never counts as `added`; its later events count as any task's.
+
+Once a space has one, its tasks list ends with **Automations**: each shows when it runs, its next runs, the task it
+adds and its last runs, with Run now, Pause (or Resume) and Remove. A failed run says why there. A start cut off by a
+stopped server is never started a second time: its task shows in Last runs, or if none is found the run says it was
+interrupted, so check the tasks before running it again. Events that were waiting to run still run after a restart.

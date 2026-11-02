@@ -17,6 +17,7 @@ import {
   toggleWide,
   type UI,
 } from '@client/kernel.ts'
+import { keysMoved } from '@client/focus.ts'
 import { toggleDictation } from '@plugins/chat/client.tsx'
 import { ALT, CTRL, Kbd, KeyboardIcon, MOD, SHIFT } from '@client/ui.tsx'
 import { rowLook, sectionOf } from '@client/Settings.tsx'
@@ -26,11 +27,11 @@ export const KEYS: [string[], string][] = [
   [['↑', '↓'], 'Move in tasks (or J, K)'],
   [['Enter'], 'Open'],
   [['Esc'], 'Back'],
-  [['[', ']'], 'Previous or next place'],
-  [[ALT, '↑', '↓'], 'Place above or below in Places, from the message box too'],
+  [['[', ']'], 'Previous or next space'],
+  [[ALT, '↑', '↓'], 'Space above or below in Spaces, from the message box too'],
   [[ALT, SHIFT, '↑', '↓'], 'Move a focused machine or space up or down'],
   [[MOD, 'K'], 'Search and jump'],
-  [[MOD, 'B'], 'Show or hide Places'],
+  [[MOD, 'B'], 'Show or hide Spaces'],
   [[MOD, 'Click'], 'Open a space, task or artifact in split view'],
   [['F'], "Focus on a task: hide its coordinator's chat, or show it again"],
   [[SHIFT, 'F'], 'Widen the Task panel, or narrow it again'],
@@ -142,8 +143,9 @@ export default definePlugin({
         }
         // an artifact full screen keeps the keys: the chat behind it is out of reach
         if (ui.viewer) return false
-        if ((k === 'ArrowDown' || k === 'j') && list) return go({ cur: Math.min(list.length - 1, ui.cur + 1) })
-        if ((k === 'ArrowUp' || k === 'k') && list) return go({ cur: Math.max(0, ui.cur - 1) })
+        const move = (cur: number) => (keysMoved('cursor'), go({ cur }))
+        if ((k === 'ArrowDown' || k === 'j') && list) return move(Math.min(list.length - 1, ui.cur + 1))
+        if ((k === 'ArrowUp' || k === 'k') && list) return move(Math.max(0, ui.cur - 1))
         if (k === 'Enter' && list && list[ui.cur] && !(e.target as HTMLElement)?.closest?.('button, a, [role=button]')) return go({ task: list[ui.cur].id, cur: 0 })
         if (k === '[' || k === ']') {
           const places = shownPlaces(snap)

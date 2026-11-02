@@ -15,8 +15,8 @@ export const settled = (page: Page) =>
   page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getTiming().iterations !== Infinity).map((a) => a.finished.catch(() => {}))))
 
 /** where the places drawer's left edge is: 0 open, its minus width shut */
-export const drawerAt = (page: Page) => page.$eval('nav[aria-label=Places]', (n) => Math.round(n.getBoundingClientRect().left))
-export const drawerOpen = async (page: Page) => (await page.$('[inert] > nav[aria-label=Places]')) === null && (await drawerAt(page)) === 0
+export const drawerAt = (page: Page) => page.$eval('nav[aria-label=Spaces]', (n) => Math.round(n.getBoundingClientRect().left))
+export const drawerOpen = async (page: Page) => (await page.$('[inert] > nav[aria-label=Spaces]')) === null && (await drawerAt(page)) === 0
 export const query = (page: Page) => new URL(page.url()).searchParams
 
 /** a browser and the demo world served to it, closed once the file's tests are done */
@@ -63,7 +63,7 @@ const phoneIn = (browser: Browser) => async (o: { width?: number; height?: numbe
     for (const [x, y] of pts.slice(1)) {
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y }] })
       await page.waitForTimeout(20)
-      at.push(await page.$eval('nav[aria-label=Places]', (n) => n.getBoundingClientRect().right))
+      at.push(await page.$eval('nav[aria-label=Spaces]', (n) => n.getBoundingClientRect().right))
     }
     return { at, up: () => cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }) }
   }

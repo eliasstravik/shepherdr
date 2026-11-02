@@ -25,7 +25,8 @@ export {
   ArrowUpIcon as UpIcon,
   ArrowUturnLeftIcon as ReplyIcon,
   BellIcon,
-  BoltIcon as EffortIcon,
+  BoltIcon as SpeedIcon,
+  SignalIcon as EffortIcon,
   BookmarkIcon as PinTaskIcon,
   BookmarkSlashIcon as UnpinIcon,
   Bars3BottomLeftIcon as SelectIcon,
@@ -55,7 +56,7 @@ export {
   FolderOpenIcon,
   GlobeAltIcon as GlobeIcon,
   ListBulletIcon as TasksIcon,
-  LockClosedIcon as LockIcon,
+  FunnelIcon as KeepFiltersIcon,
   MagnifyingGlassIcon as SearchIcon,
   MicrophoneIcon as MicIcon,
   MinusCircleIcon,
@@ -68,6 +69,7 @@ export {
   QuestionMarkCircleIcon as QuestionIcon,
   RocketLaunchIcon as AutopilotIcon,
   ServerStackIcon as MachineIcon,
+  StopIcon,
   SunIcon as AppearanceIcon,
   TrashIcon as DeleteIcon,
   ViewColumnsIcon as SplitIcon,
@@ -527,6 +529,9 @@ export function Count({ n, className, label }: { n: number; className?: string; 
   )
 }
 
+/** what the badge's two colours count, in words: a space's menu says it, as a finger gets no hover */
+export const attentionWords = (need: number, ready: number) => [need ? `${need} need${need === 1 ? 's' : ''} you` : '', ready ? `${ready} ready` : ''].filter(Boolean).join(' · ')
+
 /** One notification, with separate counts: needs you on the left, ready on the right.
  * Cap each printed count independently; the accessible name always keeps the exact numbers. */
 export function AttentionBadge({ need, ready, scope }: { need: number; ready: number; scope: string }) {
@@ -808,15 +813,16 @@ export function MenuSetting({ name, icon, choices, note }: { name: string; icon:
  * red when on (the colour of what it turns on, as the header's pill), and the whole row flips it. A note, when given, is
  * one quiet line under it.
  */
-export function MenuSwitch({ name, icon, on, note, onClick }: { name: string; icon: ReactNode; on: boolean; note?: string; onClick: () => void }) {
+export function MenuSwitch({ name, icon, on, note, disabled, onClick }: { name: string; icon: ReactNode; on: boolean; note?: string; disabled?: boolean; onClick: () => void }) {
   return (
     <div className="flex flex-col">
       <button
         type="button"
         role="menuitemcheckbox"
         aria-checked={on}
+        disabled={disabled}
         onClick={onClick}
-        className="group row-pop press flex h-8 w-full items-center gap-2 px-2 text-left whitespace-nowrap hover:bg-hover focus-visible:bg-hover focus-visible:outline-offset-[-2px] coarse:h-11 phone:h-11 phone:gap-3 phone:px-3"
+        className="group row-pop press flex h-8 w-full items-center gap-2 px-2 text-left whitespace-nowrap hover:bg-hover focus-visible:bg-hover focus-visible:outline-offset-[-2px] disabled:pointer-events-none disabled:opacity-50 coarse:h-11 phone:h-11 phone:gap-3 phone:px-3"
       >
         <span className="grid size-4 shrink-0 place-items-center text-fg2 max-[359px]:hidden">{icon}</span>
         <span className="min-w-0 flex-1 truncate">{name}</span>
@@ -825,7 +831,7 @@ export function MenuSwitch({ name, icon, on, note, onClick }: { name: string; ic
           <span className="aspect-square w-1/2 rounded-full bg-white shadow-xs ring-1 ring-black/5 transition-transform duration-200 ease-in-out group-aria-checked:translate-x-full" />
         </span>
       </button>
-      {note ? <Small className="truncate pr-2 pb-1 pl-8 text-fg3! tabular-nums phone:pr-3 phone:pl-10 max-[359px]:pl-2">{note}</Small> : null}
+      {note ? <Small className={clsx('pr-2 pb-1 pl-8 text-fg3! tabular-nums phone:pr-3 phone:pl-10 max-[359px]:pl-2', disabled ? 'max-w-72 text-pretty' : 'truncate')}>{note}</Small> : null}
     </div>
   )
 }
@@ -857,9 +863,9 @@ export function MenuItem({ className, children, icon, hint, ...p }: Btn & { icon
 export function rowClass(sel?: boolean, kb?: boolean, dense?: boolean) {
   return clsx(
     dense ? 'min-h-7 text-[0.9375rem]/5 phone:text-base/6' : 'min-h-8',
-    'press relative flex cursor-pointer items-center gap-2 rounded-row px-2 text-fg hover:bg-hover focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] focus-visible:outline-none coarse:min-h-11 phone:min-h-12 phone:px-3',
+    'press relative flex cursor-pointer items-center gap-2 rounded-row px-2 text-fg hover:bg-hover keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] focus-visible:outline-none coarse:min-h-11 phone:min-h-12 phone:px-3',
     sel && 'bg-sel hover:bg-sel',
-    kb && 'shadow-[inset_0_0_0_1.5px_var(--focus)]',
+    kb && 'cursor:shadow-[inset_0_0_0_1.5px_var(--focus)]',
   )
 }
 
@@ -1098,7 +1104,7 @@ export function FootButton({ className, children, ...p }: Btn) {
     <button
       type="button"
       className={clsx(
-        'press flex min-h-8 items-center gap-2 rounded-row px-2 text-left text-fg2 hover:bg-hover hover:text-fg focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] focus-visible:outline-none coarse:min-h-11 coarse:text-fg phone:min-h-12 phone:text-fg phone:gap-3 phone:px-3',
+        'press flex min-h-8 items-center gap-2 rounded-row px-2 text-left text-fg2 hover:bg-hover hover:text-fg keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] focus-visible:outline-none coarse:min-h-11 coarse:text-fg phone:min-h-12 phone:text-fg phone:gap-3 phone:px-3',
         className,
       )}
       {...p}

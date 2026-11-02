@@ -52,8 +52,8 @@ describe.skipIf(!browser)('an iPhone', () => {
         }
       })
       expect(fit).toMatchObject({ whole: true, apart: true, beside: true, inside: true })
-      // 320px wide (Display Zoom) has room for the words only
-      expect(fit.icons).toEqual(fit.icons.map(() => phone !== 'iPhone SE'))
+      // four tabs and Search: a phone has room for the words only
+      expect(fit.icons).toEqual(fit.icons.map(() => false))
       await done(page)
     }, 30_000)
 
@@ -74,7 +74,7 @@ describe.skipIf(!browser)('an iPhone', () => {
     await page.getByRole('button', { name: 'Tasks', exact: false }).first().click()
     await page.getByRole('searchbox', { name: 'Filter tasks' }).waitFor()
     await check(page, 'tasks')
-    await page.getByRole('button', { name: 'Places' }).click()
+    await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).click()
     await page.getByRole('button', { name: 'New space on vm-str' }).click()
     await page.getByRole('combobox', { name: 'Folder' }).waitFor()
     await check(page, 'new space')
@@ -101,7 +101,7 @@ describe.skipIf(!browser)('an iPhone', () => {
   test("a space's menu, held in the drawer, stays on the screen, however narrow", async () => {
     for (const phone of ['iPhone SE (3rd gen)', 'iPhone SE'] as const) {
       const page = await open(phone, 'place=vm-str/gtm')
-      await page.getByRole('button', { name: 'Places' }).click()
+      await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).click()
       const row = page.locator('nav li:has(button[aria-label^="gtm,"])').first()
       await row.waitFor()
       await settled(page)
@@ -130,7 +130,7 @@ describe.skipIf(!browser)('an iPhone', () => {
 
   test("New space with the keyboard up keeps the folders in view; Cancel and Create come back once it's down", async () => {
     const page = await open('iPhone SE (3rd gen)', 'place=vm-str/gtm')
-    await page.getByRole('button', { name: 'Places' }).click()
+    await page.getByRole('button', { name: /^(Show |Hide )?Spaces$/ }).click()
     await page.getByRole('button', { name: 'New space on vm-str' }).click()
     const folder = page.getByRole('combobox', { name: 'Folder' })
     await folder.waitFor()
