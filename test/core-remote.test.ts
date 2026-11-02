@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { tmpdir } from 'node:os'
-import { CoreRemotes } from '../server/core/remote.ts'
+import { CoreRemotes, PARTS } from '../server/core/remote.ts'
 import type { CoreFiles } from '../server/core/files.ts'
 
 /** Fake core transport, real private-file writer on CI. Never uses SSH or installed agent state. */
@@ -48,4 +48,15 @@ test('a machine on a core older than the minimum is refused before anything is i
   await expect(new CoreRemotes(files, 'installation', () => ({ version: '0.1.13' })).prepare('machine')).rejects.toThrow('must run core 0.1.14 or newer; no binary or service was changed')
   await expect(new CoreRemotes(files, 'installation', () => ({})).prepare('machine')).rejects.toThrow('must run core 0.1.14 or newer')
   await expect(new CoreRemotes(files, 'installation', () => ({ version: '0.1.16' })).prepare('machine')).rejects.toThrow('Remote hc must be 0.1.14 or newer; nothing was installed')
+})
+
+test('every relative import of a remote helper part ships with it', () => {
+  const root = join(import.meta.dir, '..'), transpiler = new Bun.Transpiler({ loader: 'ts' })
+  const missing: string[] = []
+  for (const part of PARTS) for (const { path } of transpiler.scanImports(readFileSync(join(root, part), 'utf8').replace(/^#!.*/, ''))) {
+    if (!path.startsWith('.')) continue
+    const target = relative(root, join(root, dirname(part), path))
+    if (!PARTS.includes(target)) missing.push(`${part} → ${target}`)
+  }
+  expect(missing).toEqual([])
 })
