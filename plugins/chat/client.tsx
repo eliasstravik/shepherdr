@@ -175,8 +175,9 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
                   })()}
                 </> : msg.waitsFor === 'queued' ? <>
                   {waitLine(msg.waitsFor)}.{' '}
-                  {/* Claude Code sends what it queued at once on Ctrl+Enter, stopping its turn; with nothing queued it does nothing */}
-                  <LinkButton onClick={() => act({ type: 'keys', chat: chat.key, keys: ['ctrl+enter'] })}>Send now</LinkButton>
+                  {/* Claude Code sends what it queued at once on Ctrl+Enter, stopping its turn; with nothing queued it does nothing. Sent as
+                      the key's xterm bytes, as typed: no key name the terminal core must know */}
+                  <LinkButton onClick={() => act({ type: 'text', chat: chat.key, text: '\x1b[27;5;13~' })}>Send now</LinkButton>
                 </> : waitLine(msg.waitsFor)}</div> : null}
                 {msg.text ? <div ref={text} data-text>{you ? <YourText text={msg.text} /> : <Fold id={msg.id}><Markdown text={msg.text} /></Fold>}</div> : null}
               </div>,
