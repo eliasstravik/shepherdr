@@ -63,8 +63,10 @@ jobs:
           done
       - name: tests (repo rules, installer, herdr-task)
         run: python3 -m unittest discover -s test -v
-      - name: installer dry run into a throwaway home
+      - name: installer into a brand-new throwaway home (dry run, install, doctor, uninstall)
         run: |
           root=$(mktemp -d)
-          mkdir -p "$root/.config/herdr-app"
           ./install.sh --root "$root" --dry-run --yes
+          ./install.sh --root "$root" --yes
+          python3 bin/shepherdr doctor --root "$root"
+          python3 bin/shepherdr uninstall --root "$root"

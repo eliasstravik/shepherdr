@@ -21,7 +21,7 @@ import sys
 import threading
 import time
 
-from .base import addon_off, bundle, ENTRY, Fail, guard, HOME, hc_json, now, PACKAGE, run, STORE
+from .base import addon_off, sync_held, bundle, ENTRY, Fail, guard, HOME, hc_json, now, PACKAGE, run, STORE
 from .news import news_send, send_or_hold, typing
 
 
@@ -42,10 +42,6 @@ SYNC_DEBOUNCE_MS = 30000        # files changed here: wait until they stay put t
 SYNC_RETRY_MS = 10 * 60000      # a machine whose sync failed: tried again after this
 REACH_EVERY_MS = 5 * 60000      # the scheduler refreshes the reach map this often
 REACH_DEPTH = 3                 # hops the map follows past this machine
-# Shepherdr's installer (bin/shepherdr) puts this file here while it replaces helpers or
-# templates, and removes it once `shepherdr doctor` finds the install whole: until then the
-# scheduler sends nothing, so a half-done or wrong copy never reaches every machine.
-SYNC_HOLD = os.path.join(HOME, ".herdr", "sync-hold")
 
 
 def _read(path):
@@ -314,7 +310,9 @@ def _save_state(update):
 
 
 def sync(names=None, op="install", force=False):
-    """Every connected machine (or those named), all at once: {version, machines: [...]}."""
+    """Every connected machine (or those named), all at once: {version, machines: [...]}. While
+    an install holds copies (base.sync_held), an install round sends nothing: each is "held"."""
+    held = sync_held() if op != "check" else None
     m = manifest()
     links = {x["name"]: x for x in connected_machines()}
     if names:
@@ -325,6 +323,9 @@ def sync(names=None, op="install", force=False):
     out = {}
 
     def one(name):
+        if held:
+            out[name] = {"machine": name, "state": "held", "details": [f"{held} (shepherdr doctor lets it go)"], "version": m["version"]}
+            return
         out[name] = sync_machine(name, m, op, force) if links[name].get("state") == "connected" else \
             {"machine": name, "state": "unreachable", "details": [f"herdr-core link {links[name].get('state')}"], "version": m["version"]}
     threads = [threading.Thread(target=one, args=(n,)) for n in targets]
@@ -357,7 +358,7 @@ def cmd_machines(args):
         else:
             print(f"Tools here: version {r['version']}." if r["machines"] else "No other machines connected here.")
             for x in r["machines"]:
-                word = {"current": "current", "source": "holds the source (left alone)", "drift": "out of date", "failed": "failed", "unreachable": "can't reach"}.get(x["state"], x["state"])
+                word = {"current": "current", "source": "holds the source (left alone)", "drift": "out of date", "failed": "failed", "unreachable": "can't reach", "held": "held"}.get(x["state"], x["state"])
                 more = f" (updated {len(x['changed'])} file(s))" if x.get("changed") else ""
                 print(f"  {x['machine']}: {word}{more}" + "".join(f"\n      {d}" for d in x["details"]))
         if args.check and any(x["state"] not in ("current", "source") for x in r["machines"]):
@@ -394,12 +395,12 @@ def machines_pass(report):
     """Each round: after the tools here change (once they've stayed put SYNC_DEBOUNCE_MS), and
     when a machine connects, syncs the machines that need it; refreshes the reach map every
     REACH_EVERY_MS. Both run detached: the round never waits on another machine. No syncs while
-    the machines add-on is off or an install holds them (SYNC_HOLD)."""
+    the machines add-on is off or an install holds them (base.SYNC_HOLD)."""
     ms = connected_machines()
     version = manifest()["version"]
     t = now()
     due = []
-    held = addon_off("machines") or os.path.exists(SYNC_HOLD)
+    held = addon_off("machines") or sync_held()
 
     def look(d):
         if d.get("seen") != version:

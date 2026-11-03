@@ -1001,6 +1001,20 @@ def cmd_guide(_o):
 
 # ---- another machine ------------------------------------------------------------------------
 
+# Shepherdr's installer holds every copy of the helpers to other machines (this file, removed by
+# `shepherdr doctor` once the install is whole), as herdr-task's base.sync_held.
+SYNC_HOLD = os.path.join(HOME, ".herdr", "sync-hold")
+
+
+def sync_held():
+    """Why copies to other machines wait now (the hold's first line), or None."""
+    try:
+        with open(SYNC_HOLD) as f:
+            return f.readline().strip() or "held by Shepherdr's installer"
+    except OSError:
+        return None
+
+
 def remote(machine, argv):
     """Runs herdr-artifact on the machine that holds the folder, installing it there first."""
     me_ = os.path.realpath(__file__)
@@ -1016,6 +1030,10 @@ def remote(machine, argv):
         installed = False
 
     def install():
+        held = sync_held()
+        if held:
+            raise Fail(f"herdr-artifact isn't current on {machine}, and copies to other machines wait: {held}. "
+                       "Run `shepherdr doctor` once the install is whole.")
         r = subprocess.run(["hc", "file", "write", "--on", machine, target], input=body, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if r.returncode != 0:
             raise Fail(f"Couldn't install herdr-artifact on {machine}: {r.stderr.decode().strip()}")
@@ -1024,7 +1042,8 @@ def remote(machine, argv):
         with open(mark, "w") as f:
             f.write(digest)
 
-    if not installed:
+    # Held (sync_held): no copy goes; the copy already there runs.
+    if not installed and not sync_held():
         install()
     call = ["hc", "exec", "--on", machine, "--", "sh", "-c", 'exec "$HOME/.local/bin/herdr-artifact" "$@"', "herdr-artifact", *argv]
     r = run(call)

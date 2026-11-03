@@ -28,6 +28,22 @@ class Fail(Exception):
     pass
 
 
+# Shepherdr's installer (bin/shepherdr) puts this file here while it replaces helpers or templates,
+# and removes it once `shepherdr doctor` finds the install whole. Until then nothing copies a helper
+# to another machine: not the sync, not a command's self-copy (cli.remote, herdr-artifact's,
+# herdr-secret's install --on), so a half-done or wrong copy never reaches every machine.
+SYNC_HOLD = os.path.join(HOME, ".herdr", "sync-hold")
+
+
+def sync_held():
+    """Why copies to other machines wait now (the hold's first line), or None."""
+    try:
+        with open(SYNC_HOLD) as f:
+            return f.readline().strip() or "held by Shepherdr's installer"
+    except OSError:
+        return None
+
+
 # Shepherdr's add-ons (lib/addons.json): one the person switched off in Shepherdr settings >
 # Window is in Everywhere's "off" (~/.herdr/shepherdr.json, or HERDR_TASK_SETTINGS), and its
 # background work here stops (autopilot, browsers, the sync to other machines).

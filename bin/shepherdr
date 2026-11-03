@@ -314,7 +314,8 @@ def apply_mod(r, mod, acts, rec, gone):
         exchange(stage, target)
         shutil.rmtree(stage)
     else:
-        # mod.json comes with main.js: the folder appears whole.
+        # mod.json comes with main.js: the folder appears whole (mods/ made first on a fresh home).
+        os.makedirs(os.path.dirname(target), exist_ok=True)
         os.rename(stage, target)
 
 

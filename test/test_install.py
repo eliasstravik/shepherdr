@@ -126,6 +126,19 @@ class Install(unittest.TestCase):
         run("uninstall", "--root", self.root)
         self.assertEqual(open(self.p(APP, "mods/jump/main.js")).read(), "// someone's own jump\n")
 
+    def test_fresh_root(self):
+        # A brand-new home: no Herdr folder, no mods/, no .local/bin yet.
+        root = tempfile.mkdtemp(prefix="shepherdr-fresh-")
+        try:
+            run("install", "--root", root, "--yes")
+            self.assertTrue(os.path.isfile(os.path.join(root, APP, "mods/tasks/mod.json")))
+            self.assertTrue(os.path.islink(os.path.join(root, ".local/bin/shepherdr")))
+            self.assertIn("whole", run("doctor", "--root", root).stdout)
+            run("uninstall", "--root", root)
+            self.assertFalse(os.path.exists(os.path.join(root, APP, "mods/tasks")))
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_dry_run_writes_nothing(self):
         run("install", "--root", self.root, "--dry-run")
         self.assertEqual(tree(self.root), self.before)

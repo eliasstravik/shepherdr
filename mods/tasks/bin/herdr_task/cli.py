@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import sys
 
-from .base import bundle, Fail, guard, run, STORE, VERSION
+from .base import bundle, Fail, guard, run, STORE, sync_held, VERSION
 from .agents import LINE_MAX, SUMMARY_MAX
 from .launch import cmd_allow, name_tabs
 from .commands import (
@@ -30,7 +30,7 @@ def install_secret(machine):
     """herdr-secret goes along to another machine (its `install --on`: no values, only the
     command), so agents there can ask for and use secrets. Best effort, again when it changed."""
     path = shutil.which("herdr-secret")
-    if not path:
+    if not path or sync_held():
         return
     with open(os.path.realpath(path), "rb") as f:
         digest = hashlib.sha1(f.read()).hexdigest()
@@ -62,6 +62,10 @@ def remote(machine, argv):
         installed = False
 
     def install():
+        held = sync_held()
+        if held:
+            raise Fail(f"herdr-task isn't current on {machine}, and copies to other machines wait: {held}. "
+                       "Run `shepherdr doctor` once the install is whole.")
         guard(["hc"])
         r = subprocess.run(["hc", "file", "write", "--on", machine, target], input=body, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if r.returncode != 0:
@@ -71,7 +75,8 @@ def remote(machine, argv):
         with open(mark, "w") as f:
             f.write(digest)
 
-    if not installed:
+    # Held (base.sync_held): no copy goes; the copy already there runs.
+    if not installed and not sync_held():
         install()
     install_secret(machine)
     if argv[:1] == ["tick"]:

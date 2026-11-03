@@ -62,8 +62,10 @@ Herdr there.
 
 Nothing to install by hand. herdr-task copies itself, `herdr-artifact`, `herdr-secret`, `herdr-browser` and the role
 instructions to every connected machine (`herdr-task machines sync --check` shows what it would do). While an install
-or update replaces one of those, `~/.herdr/sync-hold` keeps it from sending anything until `shepherdr doctor` finds
-the install whole, so a half-done copy never reaches every machine. Turning the Other machines add-on off stops the
+or update replaces one of those, `~/.herdr/sync-hold` stops every copy to another machine until `shepherdr doctor`
+finds the install whole: the scheduler's sync, `herdr-task machines sync` (it says "held"), herdr-task's and
+herdr-artifact's own copy when they run a command there (the copy already there runs instead), and
+`herdr-secret install --on`. So a half-done copy never reaches every machine. Turning the Other machines add-on off stops the
 sync too.
 
 ## Uninstall
