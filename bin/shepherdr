@@ -1,0 +1,799 @@
+#!/usr/bin/env python3
+"""Shepherdr's installer: puts the Shepherdr layout, its mods and helpers into a Herdr app home.
+
+  shepherdr install    [--root DIR] [--adopt] [--guard] [--keys ask|keep|ours] [--no-hooks] [--dry-run] [--yes]
+  shepherdr update     the same, from the checkout it was installed from (git pull it first)
+  shepherdr uninstall  [--root DIR] [--dry-run]
+  shepherdr doctor     [--root DIR]: checks the install; once it's whole, lets the sync to other machines go
+  shepherdr version
+
+What goes where (each under --root, default your home):
+  .config/herdr-app/mods/<mod>          the add-ons' mods (lib/addons.json lists them), one swap per mod
+  .config/herdr-app/layouts/shepherdr.json, lib/, bin/
+  .config/herdr-app/keys.json           our keys merged in: free ones added, a key you use asked about first
+  .config/herdr-core/templates/*.md     the Assistant's, worker's and reviewer's instructions
+  .local/bin/{herdr-task,herdr-artifact,herdr-secret,herdr-browser,shepherdr}   links into the above
+  .local/bin/herdr-app                  with --guard: a guard that refuses a window with another home
+  ~/.claude/settings.json, ~/.codex/hooks.json   the question-card hooks (not with --no-hooks)
+
+Never overwritten: a mod, layout or lib file that isn't ours (it refuses, naming each; --adopt backs
+them up and takes them over), a key you set (unless you say yes), a file you changed since the last
+install (the new copy goes beside it as <file>.new). Everything it replaces goes to
+.config/herdr-app/.shepherdr-backup/<time>/ first; uninstall puts it back. What it installed is
+recorded in .config/herdr-app/data/shepherdr/installed.json (a sha256 per file), so running it again
+changes only what changed. While it replaces a helper or template, .herdr/sync-hold keeps
+herdr-task from sending them to other machines until `shepherdr doctor` finds the install whole.
+"""
+
+import argparse
+import ctypes
+import ctypes.util
+import datetime
+import hashlib
+import json
+import os
+import pwd
+import shutil
+import subprocess
+import sys
+import tempfile
+
+VERSION = "3.0.0"
+HERDR_APP_MIN = "0.1.12"
+HC_MIN = "0.1.17"
+
+APP, BIN, TPL, HERDR = ".config/herdr-app", ".local/bin", ".config/herdr-core/templates", ".herdr"
+RECORD = f"{APP}/data/shepherdr/installed.json"
+HOLD = f"{HERDR}/sync-hold"
+# Helpers on the PATH: their name, and where the link leads (under the app home).
+LINKS = {"herdr-task": "mods/tasks/bin/herdr-task", "herdr-artifact": "mods/artifacts/bin/herdr-artifact",
+         "herdr-secret": "bin/herdr-secret", "herdr-browser": "bin/herdr-browser", "shepherdr": "bin/shepherdr"}
+# Written by Herdr into each mod (editor types): never ours, never touched.
+GENERATED = {"gpui-kit.d.ts", "jsconfig.json"}
+SKIP = {"__pycache__", ".DS_Store"}
+# Layout blocks Herdr's mods point at whatever is shown now (a task's terminal, an opened artifact):
+# compared without them, so a layout in use still counts as unchanged.
+LIVE_BLOCKS = ("tasks-thread-term", "artifacts-view-body")
+HOOKS = [  # (file under home, event, entry): the question and permission cards (the "needs" add-on)
+    (".claude/settings.json", "SessionStart",
+     {"matcher": "^(startup|resume|clear|compact)$", "hooks": [{"type": "command", "command": "sh '{app}/mods/chat/session-note.sh'", "timeout": 10}]}),
+    (".claude/settings.json", "PermissionRequest",
+     {"hooks": [{"type": "command", "command": "sh '{app}/mods/chat/ask-hook.sh'", "timeout": 1800}]}),
+    (".codex/hooks.json", "SessionStart",
+     {"hooks": [{"type": "command", "command": "sh '{app}/mods/chat/session-note.sh'", "timeout": 10}]}),
+]
+
+
+class Stop(Exception):
+    pass
+
+
+def say(*a):
+    print(*a, flush=True)
+
+
+def real_home():
+    try:
+        return pwd.getpwuid(os.getuid()).pw_dir
+    except KeyError:
+        return os.path.expanduser("~")
+
+
+def sha_bytes(b):
+    return hashlib.sha256(b).hexdigest()
+
+
+def read(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except (FileNotFoundError, IsADirectoryError, NotADirectoryError):
+        return None
+
+
+def layout_bytes(b):
+    """A layout as compared: its live blocks blanked (see LIVE_BLOCKS)."""
+    try:
+        d = json.loads(b)
+    except ValueError:
+        return b
+
+    def walk(n):
+        if isinstance(n, dict):
+            if n.get("id") in LIVE_BLOCKS:
+                n["content"] = None
+            for v in n.values():
+                walk(v)
+        elif isinstance(n, list):
+            for v in n:
+                walk(v)
+    walk(d)
+    return json.dumps(d, sort_keys=True).encode()
+
+
+def fsha(rel, b):
+    """A file's sha256 as recorded: a layout's without its live blocks."""
+    if b is None:
+        return None
+    return sha_bytes(layout_bytes(b) if rel.startswith(f"{APP}/layouts/") else b)
+
+
+def version_tuple(v):
+    out = []
+    for p in (v or "").strip().split("."):
+        digits = "".join(c for c in p if c.isdigit())
+        out.append(int(digits) if digits else 0)
+    return tuple(out)
+
+
+def atomic_write(path, data, mode=None):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".shepherdr-", dir=os.path.dirname(path))
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    if mode is not None:
+        os.chmod(tmp, mode)
+    os.replace(tmp, path)
+
+
+def exchange(a, b):
+    """Swaps two folders in one step (Linux renameat2, macOS renamex_np), so Herdr sees one change
+    per mod. Elsewhere: two renames, a moment apart."""
+    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    if sys.platform.startswith("linux") and hasattr(libc, "renameat2"):
+        if libc.renameat2(-100, os.fsencode(a), -100, os.fsencode(b), 2) == 0:  # AT_FDCWD, RENAME_EXCHANGE
+            return
+    elif sys.platform == "darwin" and hasattr(libc, "renamex_np"):
+        if libc.renamex_np(os.fsencode(a), os.fsencode(b), 2) == 0:  # RENAME_SWAP
+            return
+    tmp = f"{b}.shepherdr-swap"
+    os.rename(b, tmp)
+    os.rename(a, b)
+    os.rename(tmp, a)
+
+
+# ---- the source ---------------------------------------------------------------------------------
+
+def find_source(given, record):
+    for cand in [given, os.path.dirname(os.path.dirname(os.path.realpath(__file__))), (record or {}).get("source")]:
+        if cand and os.path.isfile(os.path.join(cand, "install.sh")) and os.path.isfile(os.path.join(cand, "lib", "addons.json")):
+            return os.path.realpath(cand)
+    raise Stop("no Shepherdr checkout found: run ./install.sh from one, or pass --source <checkout>")
+
+
+def walk_files(top):
+    """Files under top, relative, skipping caches and Herdr's generated files."""
+    out = []
+    for d, dirs, files in os.walk(top):
+        dirs[:] = sorted(x for x in dirs if x not in SKIP)
+        for f in sorted(files):
+            if f in SKIP or f in GENERATED or f.endswith(".pyc"):
+                continue
+            out.append(os.path.relpath(os.path.join(d, f), top))
+    return out
+
+
+def source_items(src):
+    """What the checkout installs: [(group, rel under root, source path)]. group: a mod's name,
+    or "layout", "lib", "bin", "template"."""
+    manifest = json.load(open(os.path.join(src, "lib", "addons.json")))
+    mods = list(manifest["core"]["mods"]) + [m for a in manifest["addons"] for m in a.get("mods", [])]
+    items = []
+    for m in mods:
+        top = os.path.join(src, "mods", m)
+        if not os.path.isdir(top):
+            raise Stop(f"lib/addons.json names mods/{m}, which isn't in {src}")
+        items += [(m, f"{APP}/mods/{m}/{f}", os.path.join(top, f)) for f in walk_files(top)]
+    for name in manifest["core"]["layouts"]:
+        items.append(("layout", f"{APP}/layouts/{name}.json", os.path.join(src, "layouts", f"{name}.json")))
+    for f in walk_files(os.path.join(src, "lib")):
+        if not f.startswith(".last"):
+            items.append(("lib", f"{APP}/lib/{f}", os.path.join(src, "lib", f)))
+    for f in walk_files(os.path.join(src, "bin")):
+        items.append(("bin", f"{APP}/bin/{f}", os.path.join(src, "bin", f)))
+    for f in sorted(os.listdir(os.path.join(src, "templates"))):
+        if f.endswith(".md"):
+            items.append(("template", f"{TPL}/{f}", os.path.join(src, "templates", f)))
+    return manifest, mods, items
+
+
+# ---- the record ---------------------------------------------------------------------------------
+
+def load_record(root):
+    try:
+        with open(os.path.join(root, RECORD)) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def save_record(root, rec):
+    atomic_write(os.path.join(root, RECORD), (json.dumps(rec, indent=2, sort_keys=True) + "\n").encode())
+
+
+# ---- install ------------------------------------------------------------------------------------
+
+class Run:
+    def __init__(self, root, dry):
+        self.root, self.dry = root, dry
+        self.stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        self.backup_dir = os.path.join(root, APP, ".shepherdr-backup", self.stamp)
+        n = 1
+        while os.path.exists(self.backup_dir):
+            n += 1
+            self.backup_dir = os.path.join(root, APP, ".shepherdr-backup", f"{self.stamp}-{n}")
+        self.backed = False
+        self.notes = []
+
+    def p(self, rel):
+        return os.path.join(self.root, rel)
+
+    def backup(self, rel, move=False):
+        """Keeps what is at rel (a file, link or folder) under this run's backup folder."""
+        path = self.p(rel)
+        if not os.path.lexists(path):
+            return None
+        dest = os.path.join(self.backup_dir, rel)
+        if self.dry:
+            return dest
+        self.backed = True
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        if move:
+            os.rename(path, dest)
+        elif os.path.islink(path):
+            os.symlink(os.readlink(path), dest)
+        elif os.path.isdir(path):
+            shutil.copytree(path, dest, symlinks=True)
+        else:
+            shutil.copy2(path, dest)
+        return dest
+
+
+def plan_files(r, rec, items, adopt):
+    """For each source file: what to do. -> (actions, clashes). An action: (rel, how, data, mode)
+    with how one of new, update, same, adopt, keep (the person's; .new beside it)."""
+    files = (rec or {}).get("files", {})
+    actions, clashes = [], []
+    for group, rel, srcpath in items:
+        data = read(srcpath)
+        mode = os.stat(srcpath).st_mode & 0o777
+        cur = read(r.p(rel))
+        want = fsha(rel, data)
+        have = fsha(rel, cur)
+        if cur is None:
+            how = "new"
+        elif have == want:
+            how = "same"
+        elif rel in files and files[rel] == have:
+            how = "update"
+        elif rel in files or group == "template":
+            how = "keep"
+        elif adopt:
+            how = "adopt"
+        else:
+            how = "clash"
+            clashes.append(rel)
+        actions.append((group, rel, how, data, mode))
+    return actions, clashes
+
+
+def apply_mod(r, mod, acts, rec, gone):
+    """Puts one mod's changes in place in one swap. gone: recorded files no longer shipped."""
+    target = r.p(f"{APP}/mods/{mod}")
+    changes = [a for a in acts if a[2] in ("new", "update", "adopt", "keep")] + gone
+    if not changes:
+        return
+    if r.dry:
+        return
+    stage_root = r.p(f"{APP}/.shepherdr-stage")
+    os.makedirs(stage_root, exist_ok=True)
+    stage = os.path.join(stage_root, mod)
+    shutil.rmtree(stage, ignore_errors=True)
+    exists = os.path.isdir(target)
+    if exists:
+        shutil.copytree(target, stage, symlinks=True)
+    else:
+        os.makedirs(stage)
+    adopted = any(a[2] == "adopt" for a in acts)
+    for group, rel, how, data, mode in acts:
+        sub = os.path.relpath(rel, f"{APP}/mods/{mod}")
+        dest = os.path.join(stage, sub)
+        if how == "keep":
+            atomic_write(dest + ".new", data, mode)
+        elif how in ("new", "update", "adopt"):
+            atomic_write(dest, data, mode)
+    for rel in gone:
+        sub = os.path.relpath(rel, f"{APP}/mods/{mod}")
+        try:
+            os.remove(os.path.join(stage, sub))
+        except FileNotFoundError:
+            pass
+    if exists:
+        if adopted:
+            rec.setdefault("replaced", {}).setdefault(f"{APP}/mods/{mod}", r.backup(f"{APP}/mods/{mod}"))
+        exchange(stage, target)
+        shutil.rmtree(stage)
+    else:
+        # mod.json comes with main.js: the folder appears whole.
+        os.rename(stage, target)
+
+
+def merge_keys(r, src, rec, mode, yes):
+    """Our keys into keys.json: free ones added, ours from before updated, one the person set
+    asked about (or by --keys). One write. -> the record's keys."""
+    ours = json.load(open(os.path.join(src, "keys.json")))
+    path = r.p(f"{APP}/keys.json")
+    text = read(path)
+    try:
+        have = json.loads(text) if text else {}
+    except ValueError:
+        raise Stop(f"{path} isn't valid JSON: fix it first, Herdr can't read it either")
+    old = (rec or {}).get("keys", {})
+    out = dict(old)
+    changed = False
+    asked = sys.stdin.isatty() and not yes and mode == "ask"
+    for ctx, keys in ours.items():
+        for key, value in keys.items():
+            name = f"{ctx} {key}"
+            cur = have.get(ctx, {}).get(key)
+            if cur == value:
+                out.setdefault(name, {"value": value, "was": None, "added": False})
+                continue
+            mine = name in old and cur == old[name]["value"]
+            if cur is None or mine:
+                take = True
+            elif mode == "ours":
+                take = True
+            elif asked:
+                ans = input(f"keys.json: {ctx} {key} is \"{cur}\". Replace it with Shepherdr's \"{value}\"? [y/N] ")
+                take = ans.strip().lower() in ("y", "yes")
+            else:
+                take = False
+            if not take:
+                r.notes.append(f"kept your key {ctx} {key} = \"{cur}\" (Shepherdr's: \"{value}\"; --keys ours takes it)")
+                continue
+            was = old[name]["was"] if mine else cur
+            out[name] = {"value": value, "was": was, "added": was is None}
+            have.setdefault(ctx, {})[key] = value
+            changed = True
+    if changed and not r.dry:
+        if text is not None:
+            r.backup(f"{APP}/keys.json")
+        atomic_write(path, (json.dumps(have, indent=2, ensure_ascii=False) + "\n").encode())
+    return out, changed
+
+
+def link_helpers(r, rec):
+    app = r.p(APP)
+    links = {}
+    for name, target in LINKS.items():
+        rel, dest = f"{BIN}/{name}", os.path.join(app, target)
+        path = r.p(rel)
+        links[name] = dest
+        if os.path.islink(path) and os.path.realpath(path) == os.path.realpath(dest):
+            continue
+        if r.dry:
+            say(f"  link {rel} -> {dest}")
+            continue
+        if os.path.lexists(path):
+            r.backup(rel, move=True)
+            (rec.setdefault("replaced", {})).setdefault(rel, os.path.join(r.backup_dir, rel))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.symlink(dest, path)
+    return links
+
+
+def install_guard(r, src, rec):
+    rel = f"{BIN}/herdr-app"
+    path, data = r.p(rel), read(os.path.join(src, "guard", "herdr-app"))
+    if read(path) == data:
+        return
+    real = os.path.join(r.root, ".local/share/herdr-app/herdr-app")
+    if not os.path.exists(real):
+        r.notes.append(f"--guard skipped: the real app isn't at {real} (the guard runs that one)")
+        return
+    if r.dry:
+        say(f"  guard {rel}")
+        return
+    if os.path.lexists(path):
+        r.backup(rel, move=True)
+        rec.setdefault("replaced", {}).setdefault(rel, os.path.join(r.backup_dir, rel))
+    atomic_write(path, data, 0o755)
+    rec.setdefault("files", {})[rel] = fsha(rel, data)
+
+
+def add_hooks(r, rec):
+    app = r.p(APP)
+    done = []
+    by_file = {}
+    for f, event, entry in HOOKS:
+        by_file.setdefault(f, []).append((event, entry))
+    for f, entries in by_file.items():
+        path = r.p(f)
+        if not os.path.isdir(os.path.dirname(path)):
+            continue  # that CLI isn't installed here
+        text = read(path)
+        try:
+            d = json.loads(text) if text else {}
+        except ValueError:
+            r.notes.append(f"hooks: {path} isn't valid JSON, left alone; add the hooks by hand (docs/install.md)")
+            continue
+        changed = False
+        for event, entry in entries:
+            entry = json.loads(json.dumps(entry).replace("{app}", app))
+            cmd = entry["hooks"][0]["command"]
+            script = cmd.split("/mods/chat/")[-1]
+            lst = d.setdefault("hooks", {}).setdefault(event, [])
+            if any(script in h.get("command", "") and "/mods/chat/" in h.get("command", "") for e in lst for h in e.get("hooks", [])):
+                done.append([f, event, cmd])
+                continue
+            lst.append(entry)
+            done.append([f, event, cmd])
+            changed = True
+        if changed and not r.dry:
+            if text is not None:
+                r.backup(f)
+            else:
+                rec.setdefault("created", []).append(f)
+            atomic_write(path, (json.dumps(d, indent=2) + "\n").encode())
+            if f.startswith(".codex"):
+                r.notes.append("Codex asks once to trust its new hook: say yes in its Hooks screen")
+    return done
+
+
+def check_tools(root_is_home):
+    """Herdr's versions (when it's here) and the programs Shepherdr needs. -> (problems, notes)."""
+    bad, notes = [], []
+    if sys.version_info < (3, 8):
+        bad.append("python3 3.8 or newer")
+    for name, want in (("herdr-app", HERDR_APP_MIN), ("hc", HC_MIN)):
+        exe = shutil.which(name)
+        if not exe:
+            (bad if root_is_home else notes).append(f"{name} {want} or newer isn't on the PATH")
+            continue
+        try:
+            out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=20).stdout
+        except (OSError, subprocess.SubprocessError):
+            out = ""
+        have = out.split()[-1] if out.split() else ""
+        if version_tuple(have) < version_tuple(want):
+            (bad if root_is_home else notes).append(f"{name} is {have or 'unknown'}: Shepherdr {VERSION} needs {want} or newer")
+    for name in ("git",):
+        if not shutil.which(name):
+            bad.append(f"{name} isn't on the PATH")
+    optional = {"gh": "pull requests (tasks)", "agent-browser": "the task browser (0.41.1)", "node": "the task browser",
+                "bun": "voice calls and dictation", "pw-record": "dictation", "whisper-cli": "dictation"}
+    for name, what in optional.items():
+        if not shutil.which(name):
+            notes.append(f"optional: {name} isn't on the PATH ({what})")
+    return bad, notes
+
+
+def cmd_install(a, update=False):
+    root = os.path.realpath(a.root or real_home())
+    home = root == os.path.realpath(real_home())
+    rec = load_record(root)
+    if update and not rec:
+        raise Stop(f"Shepherdr isn't installed under {root}: run install first")
+    src = find_source(a.source, rec)
+    r = Run(root, a.dry_run)
+    bad, notes = check_tools(home)
+    if bad and not a.force:
+        raise Stop("can't install yet:\n  " + "\n  ".join(bad) + "\n(--force installs anyway)")
+    if not os.path.isdir(r.p(APP)):
+        if home:
+            raise Stop(f"{r.p(APP)} isn't there: open Herdr once first, so it writes its home")
+        r.notes.append(f"{r.p(APP)} didn't exist: made (a scratch root)")
+    manifest, mods, items = source_items(src)
+    actions, clashes = plan_files(r, rec, items, a.adopt)
+    if clashes:
+        shown = "\n  ".join(clashes[:40]) + (f"\n  ... and {len(clashes) - 40} more" if len(clashes) > 40 else "")
+        raise Stop(f"these are someone else's (not installed by Shepherdr, and different):\n  {shown}\n"
+                   "Nothing was changed. Rename your own mods, or run with --adopt to back these up and take them over.")
+    old_files = (rec or {}).get("files", {})
+    shipped = {x[1] for x in actions}
+    gone = [rel for rel in old_files if rel.startswith(f"{APP}/") and rel not in shipped and not rel.startswith(f"{APP}/keys")
+            and rel != f"{BIN}/herdr-app" and fsha(rel, read(r.p(rel))) == old_files[rel]]
+    counts = {}
+    for x in actions:
+        counts[x[2]] = counts.get(x[2], 0) + 1
+    say(f"Shepherdr {VERSION} {'update' if update else 'install'} from {src}")
+    say(f"  into {root}{' (dry run: nothing is written)' if a.dry_run else ''}")
+    say("  files: " + ", ".join(f"{n} {k}" for k, n in sorted(counts.items())) + (f", {len(gone)} removed" if gone else ""))
+    touches_tools = any(x[2] in ("new", "update", "adopt") and (x[0] in ("template", "bin") or x[1].endswith(("/bin/herdr-task", "/bin/herdr-artifact"))
+                                                                  or "/bin/herdr_task/" in x[1]) for x in actions)
+    if a.dry_run:
+        for g, rel, how, _, _ in actions:
+            if how != "same":
+                say(f"  {how:7} {rel}")
+        for rel in gone:
+            say(f"  remove  {rel}")
+    # The sync to other machines waits until doctor finds this whole.
+    if touches_tools and not a.dry_run:
+        atomic_write(r.p(HOLD), f"held by shepherdr {VERSION} install at {r.stamp}: run `shepherdr doctor`\n".encode())
+        r.notes.append("the sync to other machines is held until `shepherdr doctor` finds the install whole")
+    rec = rec or {}
+    files = dict(old_files)
+    # Mods: one swap each.
+    for m in mods:
+        acts = [x for x in actions if x[0] == m]
+        mg = [rel for rel in gone if rel.startswith(f"{APP}/mods/{m}/")]
+        apply_mod(r, m, acts, rec, mg)
+    # Everything else, file by file (none of it reloads a mod).
+    for g, rel, how, data, mode in actions:
+        if g in mods:
+            continue
+        if r.dry:
+            continue
+        if how == "adopt":
+            rec.setdefault("replaced", {}).setdefault(rel, r.backup(rel))
+        elif how == "update" and g == "template":
+            r.backup(rel)
+        if how == "keep":
+            atomic_write(r.p(rel) + ".new", data, mode)
+            r.notes.append(f"kept your {rel}; Shepherdr's is beside it as {os.path.basename(rel)}.new")
+        elif how in ("new", "update", "adopt"):
+            atomic_write(r.p(rel), data, mode)
+    for rel in gone:
+        if not rel.startswith(f"{APP}/mods/") and not r.dry:
+            os.remove(r.p(rel))
+    for g, rel, how, data, mode in actions:
+        if how != "keep":
+            files[rel] = fsha(rel, data)
+    for rel in gone:
+        files.pop(rel, None)
+    rec["files"] = files
+    rec["mods"] = {m: True for m in mods}
+    rec["keys"], keys_changed = merge_keys(r, src, rec, a.keys, a.yes)
+    rec["links"] = link_helpers(r, rec)
+    if a.guard:
+        install_guard(r, src, rec)
+    if not a.no_hooks:
+        rec["hooks"] = add_hooks(r, rec)
+    rec.update({"version": VERSION, "source": src, "at": r.stamp, "root": root})
+    if a.dry_run:
+        say("  keys.json: " + ("would change" if keys_changed else "nothing to add"))
+    else:
+        save_record(r.root, rec)
+        shutil.rmtree(r.p(f"{APP}/.shepherdr-stage"), ignore_errors=True)
+    for n in r.notes + notes:
+        say(f"  - {n}")
+    if not a.dry_run:
+        if r.backed:
+            say(f"  backup of what it replaced: {r.backup_dir}")
+        say("  done. Next: `shepherdr doctor`" + ("" if home else f" --root {root}") + ", then pick the Shepherdr layout in Herdr (Ctrl+Shift+L).")
+    return 0
+
+
+# ---- doctor -------------------------------------------------------------------------------------
+
+def cmd_doctor(a):
+    root = os.path.realpath(a.root or real_home())
+    home = root == os.path.realpath(real_home())
+    rec = load_record(root)
+    if not rec:
+        raise Stop(f"Shepherdr isn't installed under {root}")
+    r = Run(root, True)
+    bad, warn = [], []
+    for rel, sha in sorted(rec.get("files", {}).items()):
+        have = read(r.p(rel))
+        if have is None:
+            bad.append(f"missing: {rel}")
+        elif fsha(rel, have) != sha:
+            warn.append(f"changed since install (kept): {rel}")
+    for name, dest in rec.get("links", {}).items():
+        path = r.p(f"{BIN}/{name}")
+        if not os.path.islink(path) or os.path.realpath(path) != os.path.realpath(dest):
+            bad.append(f"link {BIN}/{name} doesn't lead to {dest}")
+    sync = r.p(f"{APP}/bin/sync-shared")
+    if os.path.isfile(sync):
+        p = subprocess.run([sys.executable, sync, "--check"], capture_output=True, text=True)
+        if p.returncode != 0:
+            bad.append("shared lib copies differ: " + (p.stderr.strip() or p.stdout.strip()).replace("\n", "; "))
+    pkg = r.p(f"{APP}/mods/tasks/bin/herdr_task")
+    for f in sorted(os.listdir(pkg)) if os.path.isdir(pkg) else []:
+        if f.endswith(".py"):
+            try:
+                compile(read(os.path.join(pkg, f)), os.path.join(pkg, f), "exec")
+            except SyntaxError as e:
+                bad.append(f"herdr-task doesn't compile: {e}")
+    for rel in ("layouts/shepherdr.json", "keys.json"):
+        try:
+            json.load(open(r.p(f"{APP}/{rel}")))
+        except (OSError, ValueError) as e:
+            bad.append(f"{APP}/{rel}: {e}")
+    for f, event, cmd in rec.get("hooks", []):
+        if cmd not in (read(r.p(f)) or b"").decode(errors="replace").replace("\\'", "'"):
+            warn.append(f"hook missing in {f} ({event}): questions from that CLI won't reach the chat")
+    t_bad, t_notes = check_tools(home)
+    bad += t_bad
+    model = r.p(f"{APP}/data/whisper/ggml-base.bin")
+    if not os.path.isfile(model):
+        warn.append(f"dictation's model isn't there: `shepherdr whisper` downloads it ({APP}/data/whisper/ggml-base.bin, 148 MB)")
+    say(f"Shepherdr {rec.get('version')} under {root} (from {rec.get('source')}, {rec.get('at')})")
+    for x in bad:
+        say(f"  ✗ {x}")
+    for x in warn + t_notes:
+        say(f"  - {x}")
+    hold = r.p(HOLD)
+    if bad:
+        if os.path.exists(hold):
+            say("  the sync to other machines stays held until these are fixed")
+        return 1
+    if os.path.exists(hold):
+        os.remove(hold)
+        say("  ✓ whole: the sync to other machines may go again")
+    else:
+        say("  ✓ whole")
+    return 0
+
+
+# ---- uninstall ----------------------------------------------------------------------------------
+
+def cmd_uninstall(a):
+    root = os.path.realpath(a.root or real_home())
+    rec = load_record(root)
+    if not rec:
+        raise Stop(f"Shepherdr isn't installed under {root}")
+    r = Run(root, a.dry_run)
+    kept = []
+    files = rec.get("files", {})
+    # Mods: a folder holding only our unchanged files (and Herdr's generated ones) goes in one step.
+    for m in rec.get("mods", {}):
+        top = r.p(f"{APP}/mods/{m}")
+        if not os.path.isdir(top):
+            continue
+        mine = {rel for rel in files if rel.startswith(f"{APP}/mods/{m}/")}
+        changed = [rel for rel in mine if fsha(rel, read(r.p(rel))) not in (None, files[rel])]
+        extra = [f for f in walk_files(top) if f"{APP}/mods/{m}/{f}" not in mine and not f.endswith(".new")]
+        if changed or extra:
+            kept.append(f"{APP}/mods/{m} (yours too: {', '.join(sorted(changed + extra)[:4])})")
+            continue
+        if not a.dry_run:
+            r.backup(f"{APP}/mods/{m}", move=True)
+    for rel, sha in files.items():
+        if rel.startswith(f"{APP}/mods/") or rel == f"{BIN}/herdr-app":
+            continue
+        path = r.p(rel)
+        if fsha(rel, read(path)) == sha and not a.dry_run:
+            r.backup(rel, move=True)
+        elif read(path) is not None and fsha(rel, read(path)) != sha:
+            kept.append(rel)
+    # Keys: ours removed, the person's from before put back.
+    path = r.p(f"{APP}/keys.json")
+    try:
+        have = json.loads(read(path) or b"{}")
+    except ValueError:
+        have = None
+    if have is not None:
+        for name, k in rec.get("keys", {}).items():
+            ctx, key = name.split(" ", 1)
+            if have.get(ctx, {}).get(key) != k["value"] or not (k.get("added") or k.get("was")):
+                continue
+            if k.get("was") is None:
+                have[ctx].pop(key, None)
+                if not have[ctx]:
+                    del have[ctx]
+            else:
+                have[ctx][key] = k["was"]
+        if not a.dry_run:
+            r.backup(f"{APP}/keys.json")
+            atomic_write(path, (json.dumps(have, indent=2, ensure_ascii=False) + "\n").encode())
+    # Links and the guard: ours removed, anything they replaced put back.
+    for name, dest in rec.get("links", {}).items():
+        p = r.p(f"{BIN}/{name}")
+        if os.path.islink(p) and os.path.realpath(p) == os.path.realpath(dest) and not a.dry_run:
+            os.remove(p)
+    g = r.p(f"{BIN}/herdr-app")
+    if f"{BIN}/herdr-app" in files and fsha("", read(g)) == files[f"{BIN}/herdr-app"] and not a.dry_run:
+        os.remove(g)
+    for rel, saved in rec.get("replaced", {}).items():
+        if os.path.lexists(saved) and not os.path.lexists(r.p(rel)) and not a.dry_run:
+            os.makedirs(os.path.dirname(r.p(rel)), exist_ok=True)
+            os.rename(saved, r.p(rel))
+    # Hooks: our entries out.
+    for f in {h[0] for h in rec.get("hooks", [])}:
+        p = r.p(f)
+        try:
+            d = json.loads(read(p) or b"{}")
+        except ValueError:
+            continue
+        for event, lst in list(d.get("hooks", {}).items()):
+            d["hooks"][event] = [e for e in lst if not any(f"{r.p(APP)}/mods/chat/" in h.get("command", "") for h in e.get("hooks", []))]
+            if not d["hooks"][event]:
+                del d["hooks"][event]
+        if d.get("hooks") == {}:
+            del d["hooks"]
+        if not a.dry_run:
+            r.backup(f)
+            if not d and f in rec.get("created", []):
+                os.remove(p)
+            else:
+                atomic_write(p, (json.dumps(d, indent=2) + "\n").encode())
+    if not a.dry_run:
+        try:
+            os.remove(r.p(HOLD))
+        except FileNotFoundError:
+            pass
+        os.remove(r.p(RECORD))
+        # Folders that only held ours.
+        for rel in (f"{APP}/data/shepherdr", f"{APP}/bin", f"{APP}/lib"):
+            for d, _, _ in sorted(os.walk(r.p(rel)), reverse=True):
+                try:
+                    os.rmdir(d)
+                except OSError:
+                    pass
+    say(f"Shepherdr uninstalled from {root}{' (dry run)' if a.dry_run else ''}. Your data/, ~/.herdr and your own changes stay.")
+    for k in kept:
+        say(f"  kept (changed or yours): {k}")
+    if r.backed:
+        say(f"  everything removed is in {r.backup_dir}")
+    say("  In Herdr, switch to another layout (Ctrl+Shift+L) if Shepherdr's was showing.")
+    return 0
+
+
+# ---- whisper ------------------------------------------------------------------------------------
+
+def cmd_whisper(a):
+    """Dictation's model (lib/addons.json, the voice add-on): downloaded once, checked by its sha256."""
+    root = os.path.realpath(a.root or real_home())
+    m = next(x for x in json.load(open(os.path.join(find_source(a.source, load_record(root)), "lib", "addons.json")))["addons"] if x["id"] == "voice")["model"]
+    dest = os.path.join(root, APP, m["path"])
+    if os.path.isfile(dest) and sha_bytes(read(dest)) == m["sha256"]:
+        say(f"already there: {dest}")
+        return 0
+    tmp = dest + ".part"
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    say(f"downloading {m['url']} ...")
+    if subprocess.run(["curl", "-fL", "--retry", "3", "-o", tmp, m["url"]]).returncode != 0:
+        raise Stop("download failed")
+    if sha_bytes(read(tmp)) != m["sha256"]:
+        os.remove(tmp)
+        raise Stop("the download's sha256 doesn't match: not kept")
+    os.replace(tmp, dest)
+    say(f"kept: {dest}")
+    return 0
+
+
+def main(argv):
+    ap = argparse.ArgumentParser(prog="shepherdr", description="Install, update, check or remove Shepherdr in Herdr.")
+    sub = ap.add_subparsers(dest="cmd")
+    for name in ("install", "update", "uninstall", "doctor", "whisper"):
+        c = sub.add_parser(name)
+        c.add_argument("--root", help="install under this folder instead of your home (a scratch try: it mirrors "
+                                      ".config/herdr-app, .local/bin and .config/herdr-core/templates)")
+        c.add_argument("--source", help="the Shepherdr checkout to install from (default: this script's, else the last one)")
+        if name in ("install", "update", "uninstall"):
+            c.add_argument("--dry-run", action="store_true", help="say what would change, change nothing")
+        if name in ("install", "update"):
+            c.add_argument("--adopt", action="store_true", help="files by these names that aren't Shepherdr's: back them up and take them over")
+            c.add_argument("--guard", action="store_true", help="also put the herdr-app guard on the PATH (refuses a window with another home)")
+            c.add_argument("--keys", choices=["ask", "keep", "ours"], default="ask", help="a key you already use: ask (default; keep without a terminal), keep yours, or take ours")
+            c.add_argument("--no-hooks", action="store_true", help="leave Claude Code's and Codex's settings alone")
+            c.add_argument("--yes", action="store_true", help="ask nothing (keys: keep yours unless --keys ours)")
+            c.add_argument("--force", action="store_true", help="install although a check failed")
+    sub.add_parser("version")
+    a = ap.parse_args(argv)
+    try:
+        if a.cmd == "install":
+            return cmd_install(a)
+        if a.cmd == "update":
+            return cmd_install(a, update=True)
+        if a.cmd == "uninstall":
+            return cmd_uninstall(a)
+        if a.cmd == "doctor":
+            return cmd_doctor(a)
+        if a.cmd == "whisper":
+            return cmd_whisper(a)
+        if a.cmd == "version":
+            say(f"shepherdr {VERSION}")
+            return 0
+        ap.print_help()
+        return 2
+    except Stop as e:
+        print(f"shepherdr: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
