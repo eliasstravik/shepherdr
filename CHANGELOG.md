@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.0.0 (unreleased)
+## 3.0.0
 
 Shepherdr becomes a layout for the Herdr desktop app.
 
