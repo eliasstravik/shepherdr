@@ -1,7 +1,10 @@
 # Updating and legacy
 
-2.1 runs independently on herdr-core. It is not installed or updated through
-`herdr plugin update`. Use reviewed source/builds and the [standalone start guide](core/start.md).
+2.1 runs independently on herdr-core. Use reviewed source/builds and the
+[standalone start guide](core/start.md). Its herdr plugin has the id `shepherdr`, not 2.0's
+`herdr-projects`, so `herdr plugin update` never moves a 2.0 install onto 2.1. One installed
+with `herdr plugin install` updates with `herdr plugin install eliasstravik/shepherdr --ref`
+and the next reviewed release.
 Do not follow main with an automatic source supervisor.
 
 The complete legacy 2.0 implementation and its instructions remain on `v2.0`.

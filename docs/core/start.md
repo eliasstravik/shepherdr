@@ -19,8 +19,11 @@ bun install --frozen-lockfile
 bun run build
 ```
 
-Put this checkout's `bin` directory on PATH. The application is standalone:
-there is no terminal-herdr plugin installation and no herdr-app dependency.
+Put this checkout's `bin` directory on PATH. The application is standalone, with no
+herdr-app dependency. Terminal herdr can install it as a plugin instead
+(`herdr plugin install eliasstravik/shepherdr --ref vX.Y.Z`, a reviewed release): it
+builds the same way, starts Shepherdr when herdr starts, and adds Start, Stop and
+status actions. It needs herdr-core all the same.
 Core has its own `shepherdr` session, keeping these agents separate from a
 desktop client's default core session. The server checks hello and the live
 schema before accepting work: the core's generation and every method Shepherdr
