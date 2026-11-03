@@ -1,0 +1,34 @@
+#!/bin/sh
+# herdr-app guard (HERD-55): opens the Herdr window only in the account's own environment.
+# A window started with another HOME, HERDR_APP_HOME, herdr-core session or XDG folder can still
+# reach this machine's core and every connected machine, and overwrite their spaces. So with no
+# arguments (the window, headless too) this refuses unless all of them are the real ones.
+# Subcommands (check, status, shot, do, ls, ...) pass through unchanged.
+# The real app: ~/.local/share/herdr-app/herdr-app (its updates replace that file, not this).
+# Undo: ln -sfn ~/.local/share/herdr-app/herdr-app ~/.local/bin/herdr-app
+uid=$(id -u)
+home=$(getent passwd "$uid" 2>/dev/null | cut -d: -f6)
+[ -n "$home" ] || home=$(cd ~ && pwd -P)
+REAL="$home/.local/share/herdr-app/herdr-app"
+
+case "${1-}" in
+  ?*) exec "$REAL" "$@" ;;
+esac
+
+# Same folder, after links and trailing slashes.
+same() { [ "$(cd "$1" 2>/dev/null && pwd -P)" = "$(cd "$2" 2>/dev/null && pwd -P)" ]; }
+why=""
+if [ -n "${HOME-}" ] && ! same "$HOME" "$home"; then why="HOME is $HOME, not $home"
+elif [ -n "${HERDR_APP_HOME-}" ] && ! same "$HERDR_APP_HOME" "$home/.config/herdr-app"; then why="HERDR_APP_HOME is $HERDR_APP_HOME"
+elif [ -n "${HC_SESSION-}" ] && [ "$HC_SESSION" != default ]; then why="HC_SESSION is $HC_SESSION"
+elif [ -n "${HC_SOCKET-}" ] && [ "$HC_SOCKET" != "/run/user/$uid/herdr-core/default.sock" ]; then why="HC_SOCKET is $HC_SOCKET"
+elif [ -n "${XDG_CONFIG_HOME-}" ] && ! same "$XDG_CONFIG_HOME" "$home/.config"; then why="XDG_CONFIG_HOME is $XDG_CONFIG_HOME"
+elif [ -n "${XDG_STATE_HOME-}" ] && ! same "$XDG_STATE_HOME" "$home/.local/state"; then why="XDG_STATE_HOME is $XDG_STATE_HOME"
+elif [ -n "${XDG_DATA_HOME-}" ] && ! same "$XDG_DATA_HOME" "$home/.local/share"; then why="XDG_DATA_HOME is $XDG_DATA_HOME"
+elif [ -n "${XDG_RUNTIME_DIR-}" ] && [ "$XDG_RUNTIME_DIR" != "/run/user/$uid" ]; then why="XDG_RUNTIME_DIR is $XDG_RUNTIME_DIR"
+fi
+if [ -n "$why" ]; then
+  echo "herdr-app: refusing to open a window: $why. A window with another home or core session can overwrite every machine's spaces. Open it with the real environment." >&2
+  exit 1
+fi
+exec "$REAL"

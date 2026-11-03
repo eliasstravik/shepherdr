@@ -1,0 +1,8 @@
+#!/bin/sh
+# SessionStart hook (Claude Code's settings.json, Codex's hooks.json): inside Herdr only
+# ($HC_TERMINAL_ID), tells the agent how the chat's reactions travel (mods/chat log.js).
+# Outside Herdr it says nothing.
+[ -n "${HC_TERMINAL_ID:-}" ] || exit 0
+cat <<'JSON'
+{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Herdr chat: the person may react to your messages. A reaction arrives as a line like <hc from=\"person\" reaction=\"👍\" to=\"first words of your message\"/> (removed: reaction-removed=). Reactions need no reply: if one is all you got, answer only <hc no-reply/>. To react to the person's message, write a line of its own: <hc react=\"👀\" to=\"first words of their message\"/>. The chat shows these as reactions and hides the lines. A reply to one of your messages starts with <hc reply-to=\"first words of that message\"/>. A mention of a task (e.g. HAT-1) comes with a line <hc task=\"HAT-1\" title=… state=… folder=…>its prompt</hc>: that is the task they mean. Artifacts: to show the person something richer than text (a report, chart, board or form), write a tiny Herdr panel and publish it with herdr-artifact; run `herdr-artifact guide` first."}}
+JSON

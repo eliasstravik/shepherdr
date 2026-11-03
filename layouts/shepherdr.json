@@ -1,0 +1,339 @@
+{
+  "id": "root",
+  "cloned_from": {
+    "name": "main",
+    "version": "0.1.11"
+  },
+  "type": "row",
+  "children": [
+    {
+      "id": "sidebar",
+      "type": "column",
+      "children": [
+        {
+          "id": "brand",
+          "type": "block",
+          "content": {
+            "mod": "workspace-chrome"
+          },
+          "size": {
+            "px": 46
+          },
+          "window_drag": true
+        },
+        {
+          "id": "sidebar-lists",
+          "type": "column",
+          "children": [
+            {
+              "id": "spaces",
+              "type": "block",
+              "content": {
+                "mod": "spaces-chat"
+              },
+              "size": {
+                "weight": 1.0193114280700684
+              },
+              "min": 90
+            }
+          ]
+        },
+        {
+          "id": "sidebar-footer",
+          "type": "block",
+          "content": {
+            "mod": "workspace-chrome-shepherdr",
+            "props": {
+              "footer": true
+            }
+          },
+          "size": {
+            "px": 97
+          }
+        }
+      ],
+      "size": {
+        "px": 391
+      },
+      "min": 44,
+      "max": 480,
+      "background": "chrome",
+      "resizable": false
+    },
+    {
+      "id": "work",
+      "type": "column",
+      "children": [
+        {
+          "id": "tabs",
+          "type": "block",
+          "content": {
+            "mod": "tabs-tasks"
+          },
+          "size": {
+            "px": 42
+          },
+          "window_drag": true
+        },
+        {
+          "id": "work-body",
+          "type": "row",
+          "children": [
+            {
+              "id": "main",
+              "type": "block",
+              "content": {
+                "tab": "active",
+                "pane": {
+                  "header": {
+                    "content": {
+                      "mod": "pane-chat"
+                    },
+                    "reveal": "always",
+                    "height": 30,
+                    "position": "top"
+                  },
+                  "background": "background",
+                  "border": {
+                    "width": 1,
+                    "color": "border"
+                  },
+                  "focus": {
+                    "width": 1,
+                    "color": "accent"
+                  },
+                  "radius": 10,
+                  "gap": 8,
+                  "lone": true
+                }
+              }
+            },
+            {
+              "id": "panel",
+              "type": "column",
+              "children": [
+                {
+                  "id": "panel-body",
+                  "type": "stack",
+                  "children": [
+                    {
+                      "id": "files",
+                      "type": "block",
+                      "content": {
+                        "mod": "files"
+                      }
+                    },
+                    {
+                      "id": "changes",
+                      "type": "block",
+                      "content": {
+                        "mod": "changes"
+                      }
+                    },
+                    {
+                      "id": "tasks",
+                      "type": "stack",
+                      "children": [
+                        {
+                          "id": "tasks-list",
+                          "type": "block",
+                          "content": {
+                            "mod": "tasks"
+                          }
+                        },
+                        {
+                          "id": "tasks-thread",
+                          "type": "column",
+                          "children": [
+                            {
+                              "id": "tasks-thread-head",
+                              "type": "block",
+                              "content": {
+                                "mod": "chat",
+                                "props": {
+                                  "panel": true,
+                                  "head": true
+                                }
+                              },
+                              "size": {
+                                "px": 127
+                              }
+                            },
+                            {
+                              "id": "tasks-thread-body",
+                              "type": "stack",
+                              "children": [
+                                {
+                                  "id": "tasks-thread-chat",
+                                  "type": "block",
+                                  "content": {
+                                    "mod": "chat",
+                                    "props": {
+                                      "panel": true
+                                    }
+                                  }
+                                },
+                                {
+                                  "id": "tasks-thread-term",
+                                  "type": "block",
+                                  "content": {
+                                    "agent": "focused"
+                                  }
+                                },
+                                {
+                                  "id": "tasks-thread-files",
+                                  "type": "block",
+                                  "content": {
+                                    "mod": "task-files"
+                                  }
+                                },
+                                {
+                                  "id": "tasks-thread-changes",
+                                  "type": "block",
+                                  "content": {
+                                    "mod": "task-changes"
+                                  }
+                                },
+                                {
+                                  "id": "tasks-thread-pr",
+                                  "type": "block",
+                                  "content": {
+                                    "mod": "task-pr"
+                                  }
+                                },
+                                {
+                                  "id": "tasks-thread-browser",
+                                  "type": "column",
+                                  "children": [
+                                    {
+                                      "id": "tasks-thread-browser-host",
+                                      "type": "block",
+                                      "content": {
+                                        "mod": "task-browser"
+                                      }
+                                    }
+                                  ]
+                                }
+                              ],
+                              "active": "tasks-thread-chat"
+                            }
+                          ],
+                          "background": "background",
+                          "border": {
+                            "width": 1,
+                            "color": "border"
+                          },
+                          "radius": 10,
+                          "resizable": false
+                        }
+                      ],
+                      "active": "tasks-list"
+                    },
+                    {
+                      "id": "artifacts",
+                      "type": "stack",
+                      "children": [
+                        {
+                          "id": "artifacts-list",
+                          "type": "block",
+                          "content": {
+                            "mod": "artifacts"
+                          }
+                        },
+                        {
+                          "id": "artifacts-view",
+                          "type": "column",
+                          "children": [
+                            {
+                              "id": "artifacts-view-head",
+                              "type": "block",
+                              "content": {
+                                "mod": "artifacts",
+                                "props": {
+                                  "head": true
+                                }
+                              },
+                              "size": {
+                                "px": 42
+                              }
+                            },
+                            {
+                              "id": "artifacts-view-body",
+                              "type": "block",
+                              "content": {
+                                "mod": "artifacts"
+                              }
+                            }
+                          ],
+                          "background": "background",
+                          "border": {
+                            "width": 1,
+                            "color": "border"
+                          },
+                          "radius": 10,
+                          "resizable": false
+                        }
+                      ],
+                      "active": "artifacts-list"
+                    }
+                  ],
+                  "active": "tasks"
+                }
+              ],
+              "size": {
+                "px": 510
+              },
+              "min": 280,
+              "max": 900
+            }
+          ],
+          "padding": 8,
+          "gap": 8,
+          "floating": [
+            {
+              "id": "chat-call",
+              "content": {
+                "mod": "chat-call"
+              },
+              "edge": "top",
+              "align": "center"
+            },
+            {
+              "id": "toasts",
+              "content": {
+                "mod": "toasts"
+              },
+              "edge": "bottom",
+              "align": "end"
+            }
+          ]
+        },
+        {
+          "id": "status",
+          "type": "block",
+          "content": {
+            "mod": "workspace-status-chat"
+          },
+          "size": {
+            "px": 28
+          }
+        }
+      ],
+      "resizable": false
+    }
+  ],
+  "background": "canvas",
+  "terminal_padding": [
+    14,
+    12
+  ],
+  "divider": {
+    "width": 1,
+    "color": "border"
+  },
+  "titlebar": "none",
+  "traffic_lights": [
+    12,
+    16
+  ]
+}

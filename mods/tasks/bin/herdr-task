@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+"""herdr-task: Herdr's tasks, the one way to change them.
+
+A task is a name and a prompt that belongs to one folder: the repo root when the folder is in
+git (a linked worktree counts as its main repo), else the folder itself. Each folder's tasks are
+one JSON file on the machine where the folder lives, ~/.herdr/tasks/<slug>.json, never inside a
+repo. Every write takes the file's lock and replaces it atomically, so the Tasks panel, agents and
+coordinators never clash.
+
+States: todo -> (queued ->) running -> ready (its agent said it's finished, with a summary: "looks
+done, your call"; a worktree task's work waits to merge, in a GitHub repo as a pull request) -> done,
+which only the person decides (Accept in the Tasks panel: `herdr-task accept`, merging first when
+there is something to merge). A started task waits as "queued" while the tasks
+it comes after aren't done or the folder already runs its maximum; `tick` starts it later.
+"Stopped" is not stored: a running task whose agents are all gone. Every agent started for a task
+carries the hc label herdr.task=<key> (key: <slug>#<id>), which is how it is found. A worktree
+task becomes done by itself once its branch or pull request is merged, wherever that happened.
+"""
+
+import os
+import sys
+
+# Its package beside it (or inside it, as a zipapp); no __pycache__ in the mod's folder.
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+
+from herdr_task.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main())
