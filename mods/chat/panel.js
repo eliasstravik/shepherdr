@@ -22,7 +22,8 @@
 
 import { div, svg } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { shared, setShared, terminals, agents, run, theme, exec, appHome, home, readTextFile, writeTextFile, notify, layout, openOverlay } from "herdr";
+import { shared, setShared, run, theme, exec, appHome, home, readTextFile, writeTextFile, notify, layout, openOverlay } from "herdr";
+import { terminals, agents } from "./live.js";
 import { taskDot, ownProgress, estimated } from "./dot.js";
 import { button, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { on as addonOn } from "./addons.js";
@@ -338,7 +339,7 @@ export class PanelHost {
     if (shownNow === PR && !hasPr && this.rec) cx.timer.after(0, () => showWorkerChat());
     const segs = [
       { key: "chat", label: "Chat", on: shownNow === CHAT, fn: () => showWorkerChat() },
-      { key: "term", label: "Terminal", on: shownNow === TERM, dead: !live, tip: live ? null : "Its agent isn't running", fn: (cx) => this.toTerminal(addr, cx) },
+      { key: "term", label: "Terminal", on: shownNow === TERM, dead: !live, tip: live ? null : "Not running", fn: (cx) => this.toTerminal(addr, cx) },
       { key: "files", label: "Files", on: shownNow === FILES, fn: pick(FILES) },
       { key: "changes", label: "Changes", on: shownNow === CHANGES, fn: pick(CHANGES) },
       ...(hasPr ? [{ key: "pr", label: "Pull request", on: shownNow === PR, fn: pick(PR) }] : []),

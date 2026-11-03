@@ -88,15 +88,6 @@ function detail(a) {
   return a.events?.length ? "On events" : "Run now only";
 }
 
-function tip(a) {
-  const where = "Heartbeat, schedule and Run now: Shepherdr settings › Autopilot.";
-  if (!a?.on) return `Autopilot is off. Click to turn it on: the Assistant wakes on its own and works from its heartbeat. ${where}`;
-  const every = typeof a.every === "string" ? a.every : a.every?.text;
-  const wakes = [every, a.events?.length ? `on ${a.events.join(", ")}` : null].filter(Boolean).join(" and ") || "only on Run now";
-  const next = a.next_run ? ` Next wake ${new Date(a.next_run).toLocaleDateString("en", { weekday: "short" })} ${hm(new Date(a.next_run))}.` : "";
-  return `Autopilot is on: wakes ${wakes}.${next} Click to turn it off. ${where}`;
-}
-
 // The switch as Shepherdr settings draws its toggles, header-sized; the knob slides.
 function knob(t, on, pane) {
   return div().relative().w(28).h(16).flex_none().rounded(8).bg(on ? t.accent : t.hover)
@@ -110,7 +101,8 @@ export function apChip(view, t, space, pane, compact) {
   return h_flex().id(`ap-${pane}`).flex_none().w(compact ? CHIP_COMPACT_W : CHIP_W).h(CHIP_H).gap(7).items_center()
     .text_size(TEXT.label).cursor_pointer()
     .on_click((_e, cx) => { cx.stop_propagation(); apToggle(view, space, cx); })
-    .tooltip(tip(a))
+    // Tooltips are a name at most (DECISIONS.md): only the compact switch, which hides its word.
+    .when(compact, (el) => el.tooltip("Autopilot"))
     .child(knob(t, on, pane))
     .when(!compact, (el) => el
       .child(div().flex_none().font_medium().text_color(on ? t.foreground : t.muted).child("Autopilot"))

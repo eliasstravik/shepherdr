@@ -67,7 +67,7 @@ function iconBtn(id, icon, tip, act, t, off = false) {
   return div().id(id).size(32).flex_none().flex().items_center().justify_center().rounded(RADIUS.control)
     .text_color(off ? t.border : t.muted)
     .when(!off, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)).on_click((_e, cx) => { cx.stop_propagation(); act(cx); cx.notify(); }))
-    .tooltip(tip)
+    .when(!off && Boolean(tip), (el) => el.tooltip(tip))
     .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
     .child(svg(icon).size(16));
 }
@@ -76,7 +76,7 @@ function textBtn(id, icon, label, tip, act, on, t) {
   return h_flex().id(id).h(32).flex_none().pl(icon ? 8 : 10).pr(10).gap(6).items_center().rounded(RADIUS.control).cursor_pointer()
     .text_size(TEXT.body).font_medium().text_color(on ? t.foreground : t.muted).when(Boolean(on), (el) => el.bg(t.selected))
     .hover((s) => s.bg(on ? t.selected : t.hover).text_color(t.foreground))
-    .tooltip(tip)
+    .when(Boolean(tip), (el) => el.tooltip(tip))
     .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
     .on_click((_e, cx) => { cx.stop_propagation(); act(cx); cx.notify(); })
     .when(Boolean(icon), (el) => el.child(svg(icon).size(16).flex_none()))
@@ -111,20 +111,20 @@ export function artifactBar(view, a, handle) {
       .when(busy || !stepper, (el) => el.child(div().flex_none().text_size(TEXT.label).text_color(t.muted)
         .child(busy ? "Opening…" : `v${shown}${me?.at ? ` · ${ago(me.at)}` : ""}`))))
     .when(stepper, (el) => el
-      .child(iconBtn("v-prev", "mods/chat-image/chevron-left.svg", prev ? `v${prev}` : "The oldest kept version", (cx) => step(view, a, prev, cx), t, !prev || busy))
+      .child(iconBtn("v-prev", "mods/chat-image/chevron-left.svg", `v${prev}`, (cx) => step(view, a, prev, cx), t, !prev || busy))
       .child(div().id("v-label").h(32).px(4).flex_none().flex().items_center().text_size(TEXT.label).text_color(older ? t.foreground : t.muted)
-        .tooltip(me ? [`v${shown}`, me.note, me.at ? ago(me.at) : null].filter(Boolean).join(" · ") : `v${shown}`)
+        .when(Boolean(me?.at), (el) => el.tooltip(ago(me.at)))
         .child(`v${shown} of ${latest}`))
-      .child(iconBtn("v-next", "mods/chat-image/chevron-right.svg", next ? `v${next}` : "The latest", (cx) => step(view, a, next === latest ? null : next, cx), t, !next || busy))
+      .child(iconBtn("v-next", "mods/chat-image/chevron-right.svg", `v${next}`, (cx) => step(view, a, next === latest ? null : next, cx), t, !next || busy))
       // An older one: "v2 of 5 · Latest ›".
       .when(older && !busy, (el) => el.child(div().px(2).text_size(TEXT.label).text_color(t.dim).child("·"))
-        .child(textBtn("latest", null, "Latest ›", `Show v${latest}`, (cx) => step(view, a, null, cx), false, t)))
+        .child(textBtn("latest", null, "Latest ›", `v${latest}`, (cx) => step(view, a, null, cx), false, t)))
       .child(rule(t)))
-    .child(textBtn("markup", "mods/chat-image/markup.svg", marking ? "Done" : "Mark up", marking ? "Done marking up" : "Point at a spot and write what should change",
+    .child(textBtn("markup", "mods/chat-image/markup.svg", marking ? "Done" : "Mark up", null,
       () => setShared(MARKUP, marking ? null : { mod: a.mod, where: "viewer", at: Date.now() }), marking, t))
     .child(rule(t))
     .when(!a.modal && hasSidebarView(), (el) => el
-      .child(iconBtn("sidebar", "mods/chat-image/panel-right.svg", "Open in the sidebar", () => {
+      .child(iconBtn("sidebar", "mods/chat-image/panel-right.svg", "Open in sidebar", () => {
         if (marking) setShared(MARKUP, null);
         const done = showInSidebar({ ...a, latest });
         if (done) done.then(() => closeOverlay(props()?.overlay));

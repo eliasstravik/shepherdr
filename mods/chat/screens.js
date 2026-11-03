@@ -12,7 +12,8 @@
 // choice), all (screenText), seen (sameScreen), state: "open" | "answered" | "closed", how,
 // opened, changed }.
 
-import { hc, shared, setShared, terminals } from "herdr";
+import { hc, shared, setShared } from "herdr";
+import { terminals } from "./live.js";
 import { headStrip, linkCtl } from "./cards.js";
 
 // ---- reading a screen (screen-card.ts) ---------------------------------------------------------

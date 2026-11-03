@@ -138,7 +138,7 @@ function card(m, t) {
         .bg(t.solid).text_color(t.solid_foreground)
         .when(!text || m.sending, (el) => el.opacity(0.45))
         .when(Boolean(text) && !m.sending, (el) => el.cursor_pointer().hover((s) => s.opacity(0.88)))
-        .tooltip(m.spot ? "Send the note  Enter" : "Send  Enter")
+        .tooltip("Send  Enter")
         .on_click((_e, cx) => send(m, cx))
         .child(svg("mods/artifacts/send.svg").size(16))));
 }

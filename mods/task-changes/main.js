@@ -190,7 +190,6 @@ export default class Changes extends View {
         .when(del > 0, (e) => e.child(div().flex_none().text_color(t.ansi1).child(`−${del.toLocaleString()}`)))
         .child(div().flex_1())
         .when(Boolean(this.vs), (e) => e.child(h_flex().id("changes-vs").min_w(0).gap(4).items_center().text_color(t.dim)
-          .tooltip(this.vs.label ? `What this task changed since it left ${this.vs.label}, committed or not` : "What isn't committed")
           .child(svg("mods/workspace-chrome/git-compare.svg").size(12).flex_none())
           .child(div().min_w(0).truncate().child(this.vs.label ? `Against ${this.vs.label}` : "Uncommitted")))))
       .child(v_flex().id("changes-list").flex_none().h(Math.min(200, Math.max(44, n * 28 + 12))).overflow_y_scrollbar().p(6).border_b(1).border_color(t.border).children(this.files.map((f) => {

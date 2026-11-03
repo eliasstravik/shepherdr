@@ -64,9 +64,9 @@ export function where(s) {
 
 // ---- asks -----------------------------------------------------------------------------------
 
-// What a terminal asks for: [{ name, why }].
-export function asksOf(address) {
-  const l = terminals().find((x) => x.address === address)?.labels ?? {};
+// What a terminal asks for: [{ name, why }]. ts: terminals(), when the caller has them already.
+export function asksOf(address, ts = terminals()) {
+  const l = ts.find((x) => x.address === address)?.labels ?? {};
   return Object.keys(l).filter((k) => k.startsWith(ASK) && NAME.test(k.slice(ASK.length)) && l[k])
     .sort().map((k) => ({ name: k.slice(ASK.length), why: l[k] === "-" ? "" : String(l[k]) }));
 }
@@ -141,9 +141,10 @@ export async function remove(name, scope) {
 // ---- another machine's agents ---------------------------------------------------------------
 // A remote herdr-secret run/env/list puts herdr.secret.want on its terminal and waits on a FIFO;
 // herdr-secret serve answers it from here over hc. Called from render: each request once.
+// ts: terminals(), when the caller has them already.
 const served = new Set();
-export function serveRemote() {
-  for (const t of terminals()) {
+export function serveRemote(ts = terminals()) {
+  for (const t of ts) {
     const w = t.labels?.[WANT];
     if (!w || !String(t.address).includes("/") || served.has(w)) continue;
     served.add(w);

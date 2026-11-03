@@ -24,7 +24,8 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, TextareaState, Textarea, Scrollbar, VirtualListScrollHandle, TextView, v_virtual_list, InputState, Input } from "gpui-base";
-import { agents, panes, terminals, spaces, focused, props, run, theme, home, hc, exec, shared, setShared, watchFolder, window, settings, playSound, notify, appHome, readTextFile, writeTextFile, nextCommand, openOverlay, knownAgents } from "herdr";
+import { focused, props, run, theme, home, hc, exec, shared, setShared, watchFolder, window, settings, playSound, notify, appHome, readTextFile, writeTextFile, nextCommand, openOverlay, knownAgents } from "herdr";
+import { agents, panes, terminals, spaces, inRender } from "./live.js";
 import * as fs from "fs/promises";
 import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names } from "./log.js";
 import { words } from "./asks.js";
@@ -1651,11 +1652,21 @@ export default class Chat extends View {
   // The tasks a message mentions: by their id (HAT-1, from herdr-task's `ref`) or as #4.
   mentioned(text) {
     const t = String(text ?? "");
-    return (this.tasks ?? []).filter((x) => {
+    // Every message asks on every render: kept per text until the task list changes (HERD-94).
+    if (this.mentionsOf !== this.tasks) { this.mentionsOf = this.tasks; this.mentions = new Map(); }
+    const known = this.mentions.get(t);
+    if (known) return known;
+    const low = t.toLowerCase();
+    const found = (this.tasks ?? []).filter((x) => {
+      // Only a message with the task's ref in it is worth a pattern.
+      if (!low.includes(String(x.ref ? x.ref : `#${x.id}`).toLowerCase())) return false;
       // HAT-1 as written (or #HAT-1); a task without a prefix only as #4, never a bare number.
       const ref = x.ref ? `#?${String(x.ref).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` : `#${x.id}`;
       return new RegExp(`(^|[\\s(])${ref}\\b`, "i").test(t);
     });
+    if (this.mentions.size > 1000) this.mentions.clear();
+    this.mentions.set(t, found);
+    return found;
   }
 
   // One tag line per task the message mentions, for the agent: what it is and where.
@@ -1697,6 +1708,11 @@ export default class Chat extends View {
     const space = this.assistant();
     const inline = new Map(), extra = [];
     if (!space) return { inline, extra };
+    // A space's tasks make hundreds of lines: the last render's, unless what they're made of
+    // changed (HERD-94: a render past Herdr's 50 ms is stopped).
+    const sig = [space, this.spaceTasks, items, items.length, items[items.length - 1]?.id, this.start,
+      (this.wasks ?? []).map((a) => a.ref).join(","), [...this.accepting].join(",")];
+    if (this.newsMemo?.sig.every((v, i) => v === sig[i])) return this.newsMemo.out;
     const tasks = new Map();
     for (const x of this.spaceTasks ?? []) if ((x.space ?? x.queue?.space) === space && x.ref && !tasks.has(x.ref)) tasks.set(x.ref, x);
     const all = [], said = new Set();
@@ -1712,10 +1728,10 @@ export default class Chat extends View {
     for (const e of all) { last.set(e.ref, e); if (e.event === "ready") lastReady.set(e.ref, e); }
     this.needsAt = new Map();
     for (const e of all) if ((e.event === "needs-you" || e.event === "failed") && Number.isFinite(e.at)) this.needsAt.set(e.ref, [...(this.needsAt.get(e.ref) ?? []), e.at]);
-    const order = [];
+    const order = [], ordered = new Set();
     for (const e of all) {
       const x = tasks.get(e.ref);
-      if (!order.includes(e.ref)) order.push(e.ref);
+      if (!ordered.has(e.ref)) { ordered.add(e.ref); order.push(e.ref); }
       const asks = (this.wasks ?? []).some((a) => a.ref === e.ref);
       // Needs you, still: its words in red, and its card open just under it.
       const live = last.get(e.ref) === e && (e.event === "needs-you" || e.event === "failed") && (x?.status === "needs" || asks);
@@ -1726,6 +1742,7 @@ export default class Chat extends View {
       if (e.made) extra.push({ at: e.at, row }); else inline.set(e.id, row);
     }
     this.taskOrder = order;
+    this.newsMemo = { sig, out: { inline, extra } };
     return { inline, extra };
   }
 
@@ -3543,7 +3560,13 @@ export default class Chat extends View {
     return c || (this.swapping ? this.lastPane : null);
   }
 
+  // One copy of Herdr's live lists for the whole render (live.js): a render past Herdr's 50 ms
+  // is stopped, and the chat then shows "This view could not be re-rendered".
   render(cx) {
+    return inRender(() => this.draw(cx));
+  }
+
+  draw(cx) {
     if (this.host) return this.host.render(cx);
     // The pane getting focus (opened, clicked, gone to) puts the keyboard in the message box.
     const mine = this.myPane();
@@ -3673,7 +3696,7 @@ export default class Chat extends View {
     // agents using one are answered from here (secrets.js serveRemote()).
     this.sasks = this.addr ? this.secretCards.items(this.addr) : [];
     this.secretCards.prepare([...this.sasks, ...this.wasks.filter((a) => a.secret).map((a) => a.secret)], cx);
-    secrets.serveRemote();
+    secrets.serveRemote(terminals());
     if (this.focusSecret) {
       const ask = this.sasks.find((a) => !a.kept) ?? this.wasks.find((a) => a.secret)?.secret;
       if (Date.now() - this.focusSecret > 5000) this.focusSecret = null;

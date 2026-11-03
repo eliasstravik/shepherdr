@@ -8,6 +8,7 @@
 
 import { InputState } from "gpui-base";
 import * as secrets from "./secrets.js";
+import { terminals } from "./live.js";
 import { headStrip } from "./cards.js";
 import { green } from "./ui.js";
 
@@ -25,7 +26,7 @@ export class SecretCards {
 
   // What to show for a terminal: its asks, then those just kept.
   items(address) {
-    const now = Date.now(), out = secrets.asksOf(address).map((a) => ({ address, ...a }));
+    const now = Date.now(), out = secrets.asksOf(address, terminals()).map((a) => ({ address, ...a }));
     for (const [k, v] of this.kept) {
       if (now - v.at > KEPT_FOR) { this.kept.delete(k); continue; }
       if (v.address === address && !out.some((a) => a.name === v.name)) out.push({ address, name: v.name, why: v.why, kept: v.where });
