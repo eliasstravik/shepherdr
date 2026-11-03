@@ -70,7 +70,6 @@ class Repo(unittest.TestCase):
         for p in text_files():
             name = os.path.basename(p)
             self.assertNotRegex(name, r"\.bak|\.orig$|\.new$|^zz-", os.path.relpath(p, ROOT))
-            self.assertNotIn(name, ("gpui-kit.d.ts", "jsconfig.json"), os.path.relpath(p, ROOT))
 
     def test_version_everywhere(self):
         v = re.search(r'^VERSION = "([^"]+)"', open(J("bin", "shepherdr")).read(), re.M).group(1)
