@@ -194,6 +194,8 @@ export function startApp({ source, dist, push, port, host = '127.0.0.1', updates
           const a = await source.artifact(id, v)
           if (part === 'raw') return a ? json(a) : json({ error: 'No such artifact' }, 404)
           if (part === 'data') return a ? json({ data: a.data ?? null }) : json({ error: 'No such artifact' }, 404)
+          // one file to keep: the page with its data and our colours, as it shows in a frame
+          if (part === 'download') return a ? attachment(new Blob([wrapPage(a.html, { sent: a.sent, data: a.data })]), `${q.get('name') || id}.html`, true) : new Response('no such artifact', { status: 404 })
           if (!a) return new Response('no such artifact', { status: 404 })
           return frameResponse(wrapPage(a.html, { sent: a.sent, data: a.data, big: q.has('full'), phone: q.get('device') === 'phone', theme: q.get('theme') === 'dark' ? 'dark' : q.get('theme') === 'light' ? 'light' : undefined }))
         }

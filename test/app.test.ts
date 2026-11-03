@@ -284,4 +284,13 @@ describe('artifacts', () => {
     expect((await fetch(`${base}/api/artifacts/zz99`)).status).toBe(404)
     expect((await fetch(`${base}/api/artifacts/zz99/thumb`)).status).toBe(404)
   })
+  test('a download is one file: the page with its data, named after it, never shown in place', async () => {
+    const r = await fetch(`${base}/api/artifacts/ab12/download?v=2&name=${encodeURIComponent('Weekly board')}`)
+    expect(r.status).toBe(200)
+    expect(r.headers.get('content-disposition')).toBe("attachment; filename*=UTF-8''Weekly%20board.html")
+    const html = await r.text()
+    expect(html).toStartWith('<!doctype html>')
+    expect(html).toContain('\\u003c/script>')
+    expect((await fetch(`${base}/api/artifacts/zz99/download?v=1`)).status).toBe(404)
+  })
 })

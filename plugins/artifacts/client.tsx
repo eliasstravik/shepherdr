@@ -41,6 +41,7 @@ import {
   CheckIcon,
   ClockIcon,
   dimmed,
+  DownloadIcon,
   Empty,
   FilterBox,
   Ghost,
@@ -529,6 +530,20 @@ function Viewer() {
                 {menu === 'more' && device === 'desktop' ? (
                   <MenuItem icon={<SplitIcon className={ic} />} onClick={() => openSplit({ kind: 'artifact', id: art.id })}>
                     Open in split view
+                  </MenuItem>
+                ) : null}
+                {menu === 'more' ? (
+                  <MenuItem
+                    icon={<DownloadIcon className={ic} />}
+                    onClick={() => {
+                      setMenu(null)
+                      const a = document.createElement('a')
+                      a.href = `${frameUrl(art.id, shown!, false, device, '/download')}&name=${encodeURIComponent(art.title)}`
+                      a.download = `${art.title}.html`
+                      a.click()
+                    }}
+                  >
+                    Download
                   </MenuItem>
                 ) : null}
                 {menu === 'more' ? (
