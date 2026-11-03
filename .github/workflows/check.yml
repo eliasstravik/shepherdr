@@ -56,7 +56,11 @@ jobs:
       - name: JSON parses
         run: for f in keys.json layouts/*.json lib/addons.json $(find mods -name '*.json'); do python3 -m json.tool "$f" > /dev/null || exit 1; done
       - name: shell scripts parse
-        run: for f in install.sh guard/herdr-app $(find mods -name '*.sh'); do sh -n "$f" || exit 1; done
+        # each with the shell its first line names (bash scripts use bash-only syntax; sh is dash here)
+        run: |
+          for f in install.sh guard/herdr-app $(find mods -name '*.sh'); do
+            case "$(head -1 "$f")" in *bash*) bash -n "$f" ;; *) sh -n "$f" ;; esac || { echo "::error file=$f::doesn't parse"; exit 1; }
+          done
       - name: tests (repo rules, installer, herdr-task)
         run: python3 -m unittest discover -s test -v
       - name: installer dry run into a throwaway home
