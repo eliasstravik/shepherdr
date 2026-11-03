@@ -4,29 +4,24 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 
 ## Tests
 
-- No tests on this machine: it keeps the CPU for herdr, the server and the agents. While you work and before you
-  merge, run only `bun run typecheck` (seconds). Don't run `bun run test`, `bun test`, `bun run test changed`,
-  `bun run check` or any browser test here.
-- Check what you changed on the screen by hand in your shared browser, for the proof.
-- GitHub runs the whole check (types, every test with the browser tests, the build) on every pull request to main,
-  docs-only ones too, and again after each merge: the Check workflow (`.github/workflows/check.yml`), which skips a
-  push to main that changes only docs. Each push to a pull request runs it again and costs Actions minutes.
-- Merging waits for the pull request's check in this repo: `shepherdr checks <id>` shows it, and `shepherdr merge <id>`
-  goes once it is green. A red main reaches the coordinator, who has it fixed forward. A failure's log is
-  `gh run view <run> --log-failed`.
-- A branch with no pull request can still be checked by hand, `gh workflow run check.yml --ref <branch>` then
-  `gh run watch`: it costs Actions minutes, so only for rare cases.
-- Still write tests with your change: GitHub runs them. A new browser test goes in the `layout-*.test.ts` file of its
-  topic (setup in `test/layout.ts`); split a file that grows past about 20 s.
-- If someone runs tests here by hand anyway, they run at the lowest priority and never touch `~/.shepherdr`.
+- Quick checks are fine here (seconds): `bin/sync-shared --check`, `python3 -m unittest discover -s test` and the
+  `node --check` loop in [docs/develop.md](docs/develop.md). The installer tests use throwaway roots only.
+- Never run herdr-app or herdr-task with a changed `HOME` or `HERDR_APP_HOME`, never start a second herdr-app window,
+  and never install into the real `~/.config/herdr-app` for a try: use `./install.sh --root <scratch>`. A window or
+  scheduler on another home can overwrite every machine's spaces.
+- `herdr-app check <mod folder>` runs a mod's `init()` for real: never for `shepherdr-settings` (its init pushes
+  settings to other machines).
+- GitHub runs the whole check on every pull request to main and after each merge: the Check workflow
+  (`.github/workflows/check.yml`). Merging waits for it. A failure's log is `gh run view <run> --log-failed`.
+- Still write tests with your change: the installer's in `test/test_install.py`, the repo's rules in
+  `test/test_repo.py`, herdr-task's in `test/test_herdr_task.py`.
 
-## Plugins
+## Add-ons
 
-- `definePlugin` (`src/kernel.ts`, `server/plugin-api.ts`) and the slots of `Registry` (`src/kernel.ts`) are a public
-  contract: the human's own plugins in `~/.shepherdr/plugins` rely on them ([docs/plugins.md](docs/plugins.md), Your
-  own plugins). Change them with care, keep old names working where you can, update that page's list, and say so in
-  your done summary.
-- A plugin the human asks you to make for them goes in `~/.shepherdr/plugins/<name>/`, never in the repo.
+- `lib/addons.json` lists every mod by add-on; a new mod goes in one (the tests check). Shared modules have one
+  source in `lib/`: edit it, run `bin/sync-shared`. The add-ons' switches and how they work: [docs/addons.md](docs/addons.md).
+- Mod names, the layout's node ids and `keys.json` contexts are what people's state and keys hang on: change them
+  with care and say so in your done summary.
 
 ## README
 
