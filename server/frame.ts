@@ -127,10 +127,11 @@ const BRIDGE = `
     var el = e.target, r = el.getBoundingClientRect();
     post({ shepherdr: 'pick', text: (el.innerText || el.value || '').trim().slice(0, 80), selector: selector(el), component: component(el), x: r.right, y: r.top });
   }, true);
-  /* a link never takes the frame anywhere: a web link opens in a new tab of its own, an anchor in the page scrolls */
+  /* a link never takes the frame anywhere: a web link opens in a new tab of its own, an anchor in the page scrolls;
+     a page opened on its own (downloaded) is no frame, and its links work as on any page */
   document.addEventListener('click', function(e){
     var a = e.target && e.target.closest && e.target.closest('a[href]');
-    if (!a || e.defaultPrevented) return;
+    if (!a || e.defaultPrevented || parent === window) return;
     var href = a.getAttribute('href') || '';
     if (href.charAt(0) === '#') return;
     e.preventDefault();
