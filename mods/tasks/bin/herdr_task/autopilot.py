@@ -9,7 +9,7 @@ import json
 import os
 import time
 
-from .base import Fail, hc_json, HOME, now, run, STORE
+from .base import addon_off, Fail, hc_json, HOME, now, run, STORE
 from .settings import bare
 from .agents import agent_running, status_word
 from .launch import caller_labels, coordinator_in
@@ -253,7 +253,10 @@ def events_for(space, a):
 
 def autopilot_pass(report):
     """The scheduler's round: due schedules and heard events queue a wake; a waiting wake goes to
-    its idle Assistant; a delivered one is settled when its turn ends."""
+    its idle Assistant; a delivered one is settled when its turn ends. Nothing while the
+    autopilot add-on is off."""
+    if addon_off("autopilot"):
+        return
     with state() as d:
         for space, a in d["spaces"].items():
             if not a.get("on"):

@@ -28,6 +28,19 @@ class Fail(Exception):
     pass
 
 
+# Shepherdr's add-ons (lib/addons.json): one the person switched off in Shepherdr settings >
+# Window is in Everywhere's "off" (~/.herdr/shepherdr.json, or HERDR_TASK_SETTINGS), and its
+# background work here stops (autopilot, browsers, the sync to other machines).
+def addon_off(name):
+    path = os.environ.get("HERDR_TASK_SETTINGS") or os.path.join(HOME, ".herdr", "shepherdr.json")
+    try:
+        with open(path) as f:
+            off = (json.load(f).get("everywhere") or {}).get("off")
+    except (OSError, ValueError, AttributeError):
+        return False
+    return isinstance(off, list) and name in off
+
+
 def now():
     return int(time.time() * 1000)
 

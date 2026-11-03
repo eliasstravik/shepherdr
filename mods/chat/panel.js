@@ -25,6 +25,7 @@ import { h_flex, v_flex } from "gpui-base";
 import { shared, setShared, terminals, agents, run, theme, exec, appHome, home, readTextFile, writeTextFile, notify, layout, openOverlay } from "herdr";
 import { taskDot, ownProgress, estimated } from "./dot.js";
 import { button, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
+import { on as addonOn } from "./addons.js";
 
 // The task header's shared left edge, and task ids in the Tasks list's monospace (mods/tasks).
 const EDGE = 12, ID_FONT = "JetBrains Mono";
@@ -342,7 +343,7 @@ export class PanelHost {
       { key: "changes", label: "Changes", on: shownNow === CHANGES, fn: pick(CHANGES) },
       ...(hasPr ? [{ key: "pr", label: "Pull request", on: shownNow === PR, fn: pick(PR) }] : []),
       // The task's own browser, watched live (mods/task-browser), when the layout has it.
-      ...(find(layout(), BROWSER) ? [{ key: "browser", label: "Browser", on: shownNow === BROWSER, fn: pick(BROWSER) }] : []),
+      ...(find(layout(), BROWSER) && addonOn("browser") ? [{ key: "browser", label: "Browser", on: shownNow === BROWSER, fn: pick(BROWSER) }] : []),
     ];
     // Three rows on one left edge (EDGE): a slim bar (‹ Tasks; base, Pin, Accept), the task (its
     // dot, id and title, and under them what its agent is doing), then the switcher.

@@ -18,6 +18,7 @@ import { h_flex } from "gpui-base";
 import { panes, terminals, props, run, theme, home, exec, hc, notify, nextCommand, shared, setShared } from "herdr";
 import { apSpace, apWatch, apPoll, apChip, apHeartbeatLink, COMPACT_BELOW } from "./autopilot.js";
 import { button as uiButton, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
+import { on as addonOn } from "./addons.js";
 
 const CHAT = "chat";
 const LABEL = "herdr.chat";
@@ -214,8 +215,9 @@ export default class Pane extends View {
     const st = p.status;
     const pane = self.pane;
     const canSwitch = chatMode ? Boolean(entry) || Boolean(lazy) : chatty(self);
-    // An Assistant (chat or terminal): its Autopilot switch after the folder.
-    const apFor = apSpace(agent ?? (chatMode ? null : self.terminal), lazy || null);
+    // An Assistant (chat or terminal): its Autopilot switch after the folder (none while the
+    // Autopilot add-on is off).
+    const apFor = addonOn("autopilot") ? apSpace(agent ?? (chatMode ? null : self.terminal), lazy || null) : null;
     apWatch(this, apFor, cx);
     return h_flex()
       .id(`pane-head-${pane}`)

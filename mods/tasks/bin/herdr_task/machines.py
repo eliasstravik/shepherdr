@@ -21,7 +21,7 @@ import sys
 import threading
 import time
 
-from .base import bundle, ENTRY, Fail, guard, HOME, hc_json, now, PACKAGE, run, STORE
+from .base import addon_off, bundle, ENTRY, Fail, guard, HOME, hc_json, now, PACKAGE, run, STORE
 from .news import news_send, send_or_hold, typing
 
 
@@ -42,6 +42,10 @@ SYNC_DEBOUNCE_MS = 30000        # files changed here: wait until they stay put t
 SYNC_RETRY_MS = 10 * 60000      # a machine whose sync failed: tried again after this
 REACH_EVERY_MS = 5 * 60000      # the scheduler refreshes the reach map this often
 REACH_DEPTH = 3                 # hops the map follows past this machine
+# Shepherdr's installer (bin/shepherdr) puts this file here while it replaces helpers or
+# templates, and removes it once `shepherdr doctor` finds the install whole: until then the
+# scheduler sends nothing, so a half-done or wrong copy never reaches every machine.
+SYNC_HOLD = os.path.join(HOME, ".herdr", "sync-hold")
 
 
 def _read(path):
@@ -389,11 +393,13 @@ def _busy(name):
 def machines_pass(report):
     """Each round: after the tools here change (once they've stayed put SYNC_DEBOUNCE_MS), and
     when a machine connects, syncs the machines that need it; refreshes the reach map every
-    REACH_EVERY_MS. Both run detached: the round never waits on another machine."""
+    REACH_EVERY_MS. Both run detached: the round never waits on another machine. No syncs while
+    the machines add-on is off or an install holds them (SYNC_HOLD)."""
     ms = connected_machines()
     version = manifest()["version"]
     t = now()
     due = []
+    held = addon_off("machines") or os.path.exists(SYNC_HOLD)
 
     def look(d):
         if d.get("seen") != version:
@@ -404,7 +410,7 @@ def machines_pass(report):
             e = known.setdefault(m["name"], {})
             was = e.get("link")
             e["link"] = m.get("state")
-            if m.get("state") != "connected" or not stable:
+            if m.get("state") != "connected" or not stable or held:
                 continue
             if e.get("synced") != version and (was != "connected" or e.get("synced_try") != version or t - e.get("at", 0) >= SYNC_RETRY_MS):
                 due.append(m["name"])

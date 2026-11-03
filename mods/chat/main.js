@@ -45,6 +45,7 @@ import { markRead, onScreen, unread } from "./unread.js";
 import { notifies } from "./notify.js";
 import { ScreenWatch, screenStrips, openCard, cardsOf, starting, cliOf } from "./screens.js";
 import { dayLabel, dayOf } from "./days.js";
+import { on as addonOn } from "./addons.js";
 
 // Messages a page of history holds: the newest page first, earlier ones as the person scrolls up.
 const PAGE = 200;
@@ -481,8 +482,9 @@ export default class Chat extends View {
           continue;
         }
         if (focused()?.pane !== this.myPane()) continue;
-        if (c === "dictate") this.toggleDictation(cx);
-        if (c === "call") this.toggleCall(cx);
+        // Voice off (Shepherdr settings > Window > Add-ons): its keys do nothing.
+        if (c === "dictate" && addonOn("voice")) this.toggleDictation(cx);
+        if (c === "call" && addonOn("voice")) this.toggleCall(cx);
         if (c === "mute") this.callMute(cx);
         if (c === "find") this.openFind(cx);
         cx.notify();
@@ -1835,8 +1837,10 @@ export default class Chat extends View {
     if (time) add("time", time.length > 5 ? 82 : 38, 0, { hover: true, text: time });
     for (const a of bar.acts) add(a, ACT, ACT_GAP, { hover: true });
     const pills = () => (bar.pills ?? []).forEach((p, i) => add(`pill:${p.emoji}`, PILL, i ? PILL_GAP : PILL_EDGE, { pill: p }));
-    if (bar.side === "user") { add("react", ACT, ACT_GAP, { hover: true }); pills(); }
-    else { pills(); add("react", ACT, bar.pills?.length ? PILL_EDGE : ACT_GAP, { hover: true }); }
+    // Reactions off (an add-on): no smiley; the pills already there still show.
+    const react = addonOn("reactions");
+    if (bar.side === "user") { if (react) add("react", ACT, ACT_GAP, { hover: true }); pills(); }
+    else { pills(); if (react) add("react", ACT, bar.pills?.length ? PILL_EDGE : ACT_GAP, { hover: true }); }
     const x0 = bar.side === "user" ? right - at : left;
     for (const p of parts) p.x += x0;
     return { x: x0, w: at, parts };
@@ -3435,9 +3439,10 @@ export default class Chat extends View {
         .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.blocked).child(rec === "idle" ? this.dict.error ?? "" : ""))
         .when(Boolean(this.addr), (el) => el.children(this.pickParts(t, true)))
         .when(!this.addr && this.phase === "fresh" && Boolean(this.choice?.sel) && Boolean(cx), (el) => el.child(this.freshPick(t, cx)))
-        .child(this.round("chat-mic", "mods/chat/mic.svg", t, "ghost", (cx) => this.toggleDictation(cx)))
-        // Nothing to send: the same button starts a call, also while the agent works.
-        .child(empty && ready && !blocked && this.addr
+        .when(addonOn("voice"), (el) => el.child(this.round("chat-mic", "mods/chat/mic.svg", t, "ghost", (cx) => this.toggleDictation(cx))))
+        // Nothing to send: the same button starts a call, also while the agent works (unless the
+        // Voice add-on is off).
+        .child(empty && ready && !blocked && this.addr && addonOn("voice")
           ? this.round("chat-send", "mods/chat/audio-lines.svg", t, "call", (cx) => this.toggleCall(cx))
           : this.round("chat-send", "mods/chat/send.svg", t, can ? "solid" : "off", can ? (cx) => this.send(cx) : null)))));
   }

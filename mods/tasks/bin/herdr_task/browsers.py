@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import time
 
-from .base import HOME, STORE
+from .base import addon_off, HOME, STORE
 
 ROOT = os.path.join(HOME, ".herdr", "browser")
 IDLE_MIN = 10
@@ -21,8 +21,9 @@ YOU_FRESH_S = 120  # as herdr-browser: a take-over the panel stopped refreshing 
 
 
 def browser_path():
-    """herdr-browser on PATH (~/.local/bin), else None: then workers aren't told about a browser."""
-    return shutil.which("herdr-browser")
+    """herdr-browser on PATH (~/.local/bin), else None: then workers aren't told about a browser
+    (also while the browser add-on is off)."""
+    return None if addon_off("browser") else shutil.which("herdr-browser")
 
 
 def browser_line():

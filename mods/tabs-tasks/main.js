@@ -1,12 +1,13 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { panes, run, openOverlay, theme, window, shared, layout, settings, nextCommand, readTextFile, appHome } from "herdr";
+import { panes, run, openOverlay, theme, window, shared, setShared, layout, settings, nextCommand, readTextFile, appHome, home } from "herdr";
 import { spacesWithChats as spaces, sweep } from "./parked.js";
 import { agentIn, isCoordinatorTab, closeTab, watchNewSpaces, newSpace, openCoordinator, renameTab, renameSpace } from "./coordinator.js";
 import { startTick, tickOnChange } from "./tick.js";
 import { startInbox, count as inboxCount, countsByTab, readyCount, readyByTab, showInbox, toAlert } from "./inbox.js";
 import { serveRemote } from "./secrets.js";
 import { countBadge, H, TEXT, RADIUS } from "./ui.js";
+import { on as addonOn } from "./addons.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -28,6 +29,13 @@ export default class Tabs extends View {
     startTick(cx);
     // What needs the person, for Tasks' "Needs you" and the red counts (inbox.js).
     startInbox(cx);
+    // The add-ons switched off (lib/addons.js): Everywhere's "off" in ~/.herdr/shepherdr.json, as
+    // the settings window last saved it (or pushed it here), into shared state the mods read.
+    readTextFile(`${home()}/.herdr/shepherdr.json`).then((s) => {
+      const list = JSON.parse(s ?? "{}")?.everywhere?.off;
+      const want = Array.isArray(list) ? list : [];
+      if (JSON.stringify(want) !== JSON.stringify(shared("addons.off") ?? [])) setShared("addons.off", want);
+    }).catch(() => {});
     // Ctrl+Shift+W comes here so a coordinator with live workers asks first, like its x.
     // At most 5 s per wait (one pending nextCommand), so a reload's old build ends at its next
     // cx use instead of staying in memory.
@@ -151,8 +159,9 @@ export default class Tabs extends View {
       ? Math.max(10, (root.traffic_lights[0] + 64) / settings().zoom - (sidebar?.hidden ? 0 : sidebar?.size?.px ?? 0))
       : 10;
     const panel = find(root, "panel"), body = find(root, "panel-body");
-    // Tasks and Artifacts are always offered, beside whichever of Files and Changes are on.
-    const enabled = [...(shared("workspace.panels") ?? ["files", "changes"]), "tasks", "artifacts"];
+    // Tasks and Artifacts are offered (Artifacts unless its add-on is off), beside whichever of
+    // Files and Changes are on.
+    const enabled = [...(shared("workspace.panels") ?? ["files", "changes"]), "tasks", ...(addonOn("artifacts") ? ["artifacts"] : [])];
     this.syncPanel(space, panel, body, enabled);
     // The side panels' buttons, one style for all: icon first; the label when the bar has room
     // (the open one keeps its label); a count after the icon (Tasks': what needs the person, red,
@@ -182,7 +191,7 @@ export default class Tabs extends View {
       .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
       .when(enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))
       .child(panelButton("tasks", "Tasks", "mods/tasks/tasks.svg", [counts ? inboxCount() : 0, greens ? readyCount() : 0]))
-      .child(panelButton("artifacts", "Artifacts", "mods/artifacts/artifacts.svg"))
+      .when(enabled.includes("artifacts"), el => el.child(panelButton("artifacts", "Artifacts", "mods/artifacts/artifacts.svg")))
       .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/tabs-tasks/win-min.svg").size(16) : "−", () => run("window.minimize")))
         .child(button("maximize", w.platform === "windows" ? svg(`mods/tabs-tasks/${w.maximized ? "win-restore" : "win-max"}.svg`).size(16) : "□", () => run("window.maximize")))
         .child(button("close-window", w.platform === "windows" ? svg("mods/tabs-tasks/win-close.svg").size(16) : svg("mods/pane/close.svg").size(13), () => run("window.close"))));

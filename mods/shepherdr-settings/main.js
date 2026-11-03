@@ -18,6 +18,7 @@ import { props, theme, spaces, machines, home, exec, readTextFile, writeTextFile
 import { SHEPHERDR_FILE, SHEPHERDR_DEFAULTS, LOCAL_MACHINE, shepherdrFor, shepherdrLayers, machineOfSpace } from "./coordinator.js";
 import * as models from "./settings.js";
 import { layoutSection } from "./layout.js";
+import { manifest } from "./addons.js";
 import { secretsInit, secretsSection } from "./secrets-section.js";
 import { baseInit, baseRow } from "./base-branch.js";
 import { autopilotInit, autopilotSection } from "./autopilot-section.js";
@@ -102,6 +103,9 @@ export default class ShepherdrSettings extends View {
     this.bb = baseInit(this);
     // Autopilot: per space, kept by herdr-task (autopilot-section.js).
     this.ap = autopilotInit(this, cx);
+    // The add-ons Window's switches offer (lib/addons.json, layout.js).
+    this.addons = null;
+    cx.spawn(async (cx) => { this.addons = await manifest(); cx.notify(); });
     // The two notes' text boxes: saved a moment after typing stops, on leaving the box, and on
     // close; "Saved" shows dim for a moment after.
     this.notes = {};
