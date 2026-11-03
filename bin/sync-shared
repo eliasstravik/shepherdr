@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""Keeps the mods' copies of shared modules equal to their one source in lib/.
+
+A mod can only import files inside its own folder (Herdr refuses symlinks and ../ paths that
+resolve outside it), so a module several mods use is copied into each. lib/<file> is the source;
+lib/COPIES names the mods that carry a copy. Edit lib/<file>, never a copy, then run this.
+
+  bin/sync-shared                 copy every lib file into its mods
+  bin/sync-shared --check         change nothing; exit 1 if any copy differs from lib
+  bin/sync-shared --from <copy>   a copy was edited by hand: make it the source, then sync
+
+A copy that differs from both lib and what this last wrote there (lib/.last/) was edited by
+hand: it is never overwritten; the run fails and names it (keep its change with --from, or move
+the change into lib/<file>).
+"""
+import hashlib, os, shutil, sys
+
+HOME = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+LIB, MODS = os.path.join(HOME, "lib"), os.path.join(HOME, "mods")
+LAST = os.path.join(LIB, ".last")
+
+
+def read(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except FileNotFoundError:
+        return None
+
+
+def copies():
+    out = {}
+    with open(os.path.join(LIB, "COPIES")) as f:
+        for line in f:
+            line = line.split("#", 1)[0].strip()
+            if line:
+                name, mods = line.split(":", 1)
+                out[name.strip()] = mods.split()
+    return out
+
+
+def write(path, data):
+    tmp = f"{path}.sync-{os.getpid()}"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.replace(tmp, path)
+
+
+def main(argv):
+    check = "--check" in argv
+    table = copies()
+    if "--from" in argv:
+        src = os.path.realpath(argv[argv.index("--from") + 1])
+        name = os.path.basename(src)
+        if name not in table or os.path.basename(os.path.dirname(src)) not in table[name]:
+            sys.exit(f"sync-shared: {src} is not a copy listed in lib/COPIES")
+        shutil.copyfile(src, os.path.join(LIB, name))
+        print(f"lib/{name} <- {os.path.relpath(src, HOME)}")
+
+    bad, made = [], []
+    for name, mods in table.items():
+        lib = read(os.path.join(LIB, name))
+        if lib is None:
+            bad.append(f"lib/{name} is missing")
+            continue
+        last = read(os.path.join(LAST, name))
+        for mod in mods:
+            path = os.path.join(MODS, mod, name)
+            rel = os.path.relpath(path, HOME)
+            if not os.path.isdir(os.path.dirname(path)):
+                bad.append(f"{rel}: mods/{mod} is gone (remove it from lib/COPIES)")
+                continue
+            have = read(path)
+            if have == lib:
+                continue
+            if check:
+                bad.append(f"{rel} differs from lib/{name}")
+            elif have is None or have == last:
+                write(path, lib)
+                made.append(rel)
+            else:
+                bad.append(f"{rel} was edited by hand: keep it with `bin/sync-shared --from {rel}`, or move the change into lib/{name}")
+        if not check:
+            os.makedirs(LAST, exist_ok=True)
+            write(os.path.join(LAST, name), lib)
+        # A copy made by hand in a mod lib/COPIES doesn't list (same name, same start).
+        head = lib.split(b"\n", 1)[0]
+        for mod in sorted(os.listdir(MODS)):
+            path = os.path.join(MODS, mod, name)
+            if mod not in mods and (read(path) or b"").split(b"\n", 1)[0] == head:
+                bad.append(f"mods/{mod}/{name} looks like a copy of lib/{name}: add {mod} to lib/COPIES")
+
+    for rel in made:
+        print(f"synced {rel}")
+    if bad:
+        print("sync-shared: " + ("copies out of sync" if check else "not synced") + ":", file=sys.stderr)
+        for b in bad:
+            print(f"  {b}", file=sys.stderr)
+        sys.exit(1)
+    if check:
+        print(f"sync-shared: all {sum(len(m) for m in table.values())} copies match lib/")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

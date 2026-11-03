@@ -1,0 +1,21 @@
+# Shared modules: lib/<file> is the source, copied by bin/sync-shared into each mod listed.
+# A mod can only import files in its own folder, so each needs its own copy.
+coordinator.js: coordinator menu-tasks new-menu-tasks newspace shepherdr-settings tabs-tasks tasks
+inbox.js: spaces-chat tabs-tasks tasks workspace-status-chat
+asks.js: chat spaces-chat tabs-tasks tasks workspace-status-chat
+parked.js: chat spaces-chat tabs-tasks workspace-status-chat
+unread.js: chat spaces-chat
+agent.js: chat newspace shepherdr-settings
+settings.js: chat newspace shepherdr-settings
+dot.js: chat jump tasks
+tasklists.js: jump tasks
+taskwhere.js: task-files task-changes task-pr task-browser
+emoji-data.js: chat-react spaces-chat
+notify.js: chat spaces-chat tabs-tasks tasks shepherdr-settings workspace-status-chat
+spacelog.js: coordinator menu-tasks new-menu-tasks newspace shepherdr-settings tabs-tasks tasks spaces-chat
+secrets.js: chat shepherdr-settings tabs-tasks
+machines.js: spaces-chat shepherdr-settings
+ui.js: accept-card artifacts chat chat-call chat-image chat-models chat-react coordinator jump toasts menu-tasks new-menu-tasks newspace pane-chat shepherdr-settings spaces-chat tabs-tasks task-browser task-changes task-files task-pr tasks tasks-menu workspace-chrome-shepherdr workspace-status-chat confirm-chat prompt-chat machine-add-chat keybinds
+artview.js: accept-card artifacts chat chat-image jump
+artifact-sidebar.js: chat-image jump
+addons.js: chat pane-chat shepherdr-settings tabs-tasks

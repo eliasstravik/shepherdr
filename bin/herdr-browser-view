@@ -1,0 +1,578 @@
+#!/usr/bin/env node
+// herdr-browser-view: a task's browser, live in a terminal (HERD-69). The Tasks panel's Browser view
+// (mods/task-browser) runs it in a terminal of its own and shows that terminal in a layout block.
+//   herdr-browser-view --task <slug#id> [--worker <terminal>]
+//
+// Frames: Chrome's own screencast (CDP Page.startScreencast, PNG, scaled by Chrome to the
+// terminal's pixel size), drawn with the Kitty graphics protocol as one image replaced in place
+// (Herdr's terminals decode PNG only; agent-browser's stream is JPEG). Chrome sends a frame only
+// when the page changes, and the next one only after this one is drawn, at most FPS a second.
+// Everything else goes through agent-browser's stream for the session (127.0.0.1 only): the
+// active tab, its address, and the person's mouse and keys (its input channel).
+// The person's first click, scroll or key takes the browser over ("You're driving"): the task's
+// agent is told to hold off (herdr-browser refuses its acting commands while <name>.you is fresh),
+// and told again when it's handed back (Hand back, focus elsewhere, or IDLE_DRIVE_MS quiet).
+// It ends by itself when the panel stops refreshing <name>.view (the panel closed or reloaded).
+"use strict";
+const { spawn, execFile } = require("child_process");
+const fs = require("fs");
+const path = require("path");
+const { StringDecoder } = require("string_decoder");
+
+const FPS = 24;
+const IDLE_DRIVE_MS = 60000;
+const HEARTBEAT_STALE_MS = 15000;
+
+const args = process.argv.slice(2);
+const opt = (k) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : null; };
+const task = opt("--task");
+const worker = opt("--worker");
+if (!task) { process.stderr.write("herdr-browser-view --task <slug#id> [--worker <terminal>]\n"); process.exit(2); }
+const name = task.replace(/[^A-Za-z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-/, "").replace(/-$/, "");
+const HOME = process.env.HOME;
+const ROOT = path.join(HOME, ".herdr", "browser");
+const BIN = path.join(HOME, ".config", "herdr-app", "bin", "herdr-browser");
+const file = (ext) => path.join(ROOT, name + ext);
+
+// ---- small helpers ----
+
+function run(cmd, argv, input) {
+  return new Promise((resolve) => {
+    const p = execFile(cmd, argv, { timeout: 30000, maxBuffer: 8 << 20 }, (err, stdout, stderr) =>
+      resolve({ code: err ? (typeof err.code === "number" ? err.code : 1) : 0, stdout: String(stdout), stderr: String(stderr) }));
+    if (input != null) { p.stdin.end(input); }
+  });
+}
+const ab = (...a) => run(BIN, ["--own", "--task", task, ...a]);
+const json = (s) => { try { return JSON.parse(s); } catch { return null; } };
+const touch = (f) => { const t = new Date(); fs.utimes(f, t, t, (e) => { if (e) fs.writeFile(f, "", () => {}); }); };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const out = process.stdout;
+const w = (s) => out.write(s);
+
+// ---- state ----
+
+const S = {
+  state: "checking",   // checking | closed | opening | live | error
+  why: "",
+  cols: out.columns || 80, rows: out.rows || 24,
+  cellW: 0, cellH: 0,  // px, from CSI 16 t
+  pixelMouse: false,   // SGR-pixels (1016) is on
+  url: "", title: "",
+  target: null,        // the active tab's targetId (from the stream)
+  page: null,          // { w, h } CSS px of the frame's viewport
+  rect: null,          // where the picture is, in terminal px { x, y, w, h }
+  imgCells: null,      // { col, row, cols, rows }
+  driving: false, told: false, lastInput: 0, focused: true,
+  buttons: [],         // status-bar buttons: { x0, x1, row, fn }
+  down: null,          // the held mouse button
+  lastClick: { at: 0, x: 0, y: 0, n: 0 },
+  drawn: false,
+  frames: 0,
+};
+
+// ---- terminal ----
+
+function setup() {
+  w("\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[2J");
+  w("\x1b[?1003h\x1b[?1006h\x1b[?1004h\x1b[?2004h\x1b[>1u");
+  w("\x1b[?1016h\x1b[?1016$p");   // pixel mouse, and ask whether it took
+  w("\x1b[16t");                   // cell size
+  if (process.stdin.isTTY) process.stdin.setRawMode(true);
+}
+let restored = false;
+function restore() {
+  if (restored) return;
+  restored = true;
+  try {
+    out.write("\x1b_Ga=d,d=A,q=2\x1b\\\x1b[<u\x1b[?2004l\x1b[?1004l\x1b[?1016l\x1b[?1006l\x1b[?1003l\x1b[?7h\x1b[?25h\x1b[?1049l");
+  } catch {}
+}
+async function quit(code = 0) {
+  stopDriving("quit");
+  restore();
+  try { await waitTold(); } catch {}
+  process.exit(code);
+}
+process.on("SIGTERM", () => quit(0));
+process.on("SIGHUP", () => quit(0));
+process.on("SIGINT", () => quit(0));
+process.on("exit", restore);
+process.on("SIGWINCH", () => { S.cols = out.columns; S.rows = out.rows; w("\x1b[16t"); layoutPicture(true); paint(); });
+
+// The picture fitted whole into the area above the status bar, centred across, at the top.
+function layoutPicture(force) {
+  if (!S.cellW || !S.cellH) return;
+  const areaRows = Math.max(1, S.rows - 1), areaW = S.cols * S.cellW, areaH = areaRows * S.cellH;
+  const prev = JSON.stringify(S.imgCells);
+  if (!S.page) { S.imgCells = null; S.rect = null; }
+  else {
+    const s = Math.min(areaW / S.page.w, areaH / S.page.h);
+    const cols = Math.max(1, Math.min(S.cols, Math.round((S.page.w * s) / S.cellW)));
+    const rows = Math.max(1, Math.min(areaRows, Math.round((S.page.h * s) / S.cellH)));
+    const col = Math.floor((S.cols - cols) / 2);
+    S.imgCells = { col, row: 0, cols, rows };
+    S.rect = { x: col * S.cellW, y: 0, w: cols * S.cellW, h: rows * S.cellH };
+  }
+  if (force || JSON.stringify(S.imgCells) !== prev) {
+    w("\x1b_Ga=d,d=A,q=2\x1b\\\x1b[2J");
+    S.drawn = false;
+    cdp.restartCast();
+  }
+}
+
+// The PNG (base64) as image 1, placement 1, over the picture's cells: replaced in place each frame.
+function drawFrame(b64, done) {
+  const c = S.imgCells;
+  if (!c) return done();
+  let s = `\x1b7\x1b[${c.row + 1};${c.col + 1}H`;
+  const CH = 4096;
+  for (let i = 0; i < b64.length; i += CH) {
+    const chunk = b64.slice(i, i + CH), more = i + CH < b64.length ? 1 : 0;
+    s += i === 0
+      ? `\x1b_Ga=T,f=100,t=d,i=1,p=1,q=2,C=1,z=-1,c=${c.cols},r=${c.rows},m=${more};${chunk}\x1b\\`
+      : `\x1b_Gm=${more};${chunk}\x1b\\`;
+  }
+  s += "\x1b8";
+  S.drawn = true;
+  S.frames++;
+  if (out.write(s)) done(); else out.once("drain", done);
+}
+
+// ---- the status bar (and the centred notes when there's no picture) ----
+
+const ESC = (c) => `\x1b[${c}m`;
+function paint() {
+  S.buttons = [];
+  const r = S.rows;
+  if (S.state !== "live") {
+    w("\x1b_Ga=d,d=A,q=2\x1b\\\x1b[2J");
+    S.drawn = false;
+    const lines = {
+      checking: ["Looking for this task's browser…"],
+      opening: ["Opening the browser…"],
+      closed: ["This task's browser isn't open.", "Its agent opens it when it checks a page; it closes after a while unused."],
+      error: [S.why || "The browser didn't answer."],
+    }[S.state] ?? [];
+    const top = Math.max(0, Math.floor((r - 1) / 2) - lines.length);
+    lines.forEach((l, i) => { l = l.slice(0, S.cols - 2); w(`\x1b[${top + i + 1};${Math.max(1, Math.floor((S.cols - l.length) / 2) + 1)}H${i ? ESC(2) : ""}${l}${ESC(0)}`); });
+    if (S.state === "closed" || S.state === "error") {
+      const btns = [[" Open browser ", () => openBrowser(false)], [" Open in a window ", () => openBrowser(true)]];
+      const total = btns.reduce((n, [l]) => n + l.length + 2, 0);
+      let x = Math.max(0, Math.floor((S.cols - total) / 2));
+      const row = top + lines.length + 1;
+      for (const [l, fn] of btns) { button(row, x, l, fn, true); x += l.length + 2; }
+    }
+  }
+  bar();
+}
+
+function button(row, x, label, fn, boxed) {
+  w(`\x1b[${row + 1};${x + 1}H${boxed ? ESC(7) : ESC("4;34")}${label}${ESC(0)}`);
+  S.buttons.push({ row, x0: x, x1: x + label.length, fn });
+}
+
+function bar() {
+  const row = S.rows - 1, W = S.cols;
+  w(`\x1b[${row + 1};1H\x1b[2K`);
+  const live = S.state === "live";
+  const left = live ? (S.driving ? [ESC("1;33"), "● You're driving"] : [ESC(32), "● Live"]) : [ESC(2), "○ Off"];
+  const btns = [];
+  if (live && S.driving) btns.push(["Hand back", () => stopDriving("button")]);
+  if (live) btns.push(["‹ Back", () => cdp.back()], ["↻ Reload", () => cdp.reload()]);
+  btns.push(["⧉ Window", () => openBrowser(true)]);
+  const keys = live ? "Alt+← back · Ctrl+R reload" : "";
+  const bw = btns.reduce((n, [l]) => n + l.length + 2, 0);
+  const lw = left[1].length + 3;
+  let room = W - lw - bw - 1;
+  const showKeys = keys && room - keys.length - 3 > 16;
+  if (showKeys) room -= keys.length + 3;
+  const url = (S.url || "").replace(/^https?:\/\//, "");
+  const u = url.length > room ? url.slice(0, Math.max(0, room - 1)) + "…" : url;
+  w(` ${left[0]}${left[1]}${ESC(0)}  ${ESC(2)}${u}${ESC(0)}`);
+  let x = W - bw - (showKeys ? keys.length + 3 : 0);
+  if (showKeys) { w(`\x1b[${row + 1};${x + 1}H${ESC(2)}${keys}${ESC(0)}`); x += keys.length + 3; }
+  for (const [l, fn] of btns) { button(row, x, l, fn, false); x += l.length + 2; }
+}
+
+function setState(st, why = "") {
+  if (S.state === st && S.why === why) return;
+  S.state = st; S.why = why;
+  if (st !== "live") { stopDriving("off"); S.page = null; S.imgCells = null; S.rect = null; }
+  paint();
+}
+
+// ---- agent-browser: is it open, its stream ----
+
+let streamWs = null;
+async function check() {
+  for (;;) {
+    if (S.state !== "live" && S.state !== "opening") {
+      const l = await ab("session", "list", "--json");
+      const sessions = json(l.stdout)?.data?.sessions;
+      if (l.code !== 0 || !Array.isArray(sessions)) setState("error", (l.stderr || l.stdout).trim().split("\n")[0] || "agent-browser didn't answer.");
+      else if (!sessions.includes(`herdr-${name}`)) setState("closed");
+      else await connect();
+    }
+    await sleep(S.state === "live" ? 3000 : 4000);
+  }
+}
+
+async function connect() {
+  let st = json((await ab("stream", "status", "--json")).stdout)?.data;
+  if (st && !st.enabled) { await ab("stream", "enable"); st = json((await ab("stream", "status", "--json")).stdout)?.data; }
+  const port = Number(st?.port);
+  const cdpUrl = (await ab("get", "cdp-url")).stdout.trim();
+  if (!port || !/^ws:\/\/127\.0\.0\.1:/.test(cdpUrl)) { setState("error", "The browser's stream isn't on."); return; }
+  await new Promise((resolve) => {
+    // Pacing by ack, never acked: the stream sends no pictures of its own here, only the rest.
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/?pacing=ack&maxFps=1`);
+    streamWs = ws;
+    ws.onopen = () => { setState("live"); cdp.open(cdpUrl); resolve(); };
+    ws.onerror = () => resolve();
+    ws.onclose = () => {
+      if (streamWs !== ws) return;
+      streamWs = null;
+      cdp.close();
+      if (S.state === "live") setState("checking");
+      resolve();
+    };
+    ws.onmessage = (e) => {
+      const j = json(typeof e.data === "string" ? e.data : "");
+      if (!j) return;
+      if (j.type === "tabs") {
+        const t = (j.tabs || []).find((x) => x.active);
+        if (t) { S.url = t.url || S.url; S.title = t.title || ""; if (t.targetId !== S.target) { S.target = t.targetId; cdp.follow(); } bar(); }
+      } else if (j.type === "url") { S.url = String(j.url || ""); bar(); }
+    };
+  });
+}
+
+function send(msg) {
+  if (streamWs && streamWs.readyState === 1) streamWs.send(JSON.stringify(msg));
+}
+
+// ---- CDP: the active tab's screencast, Back and Reload ----
+
+const cdp = {
+  ws: null, id: 0, pend: new Map(), session: null, sessionTarget: null, pending: null, drawing: false, lastDraw: 0, timer: null,
+  open(url) {
+    this.close();
+    const ws = new WebSocket(url);
+    this.ws = ws;
+    ws.onopen = () => this.follow();
+    ws.onclose = () => { if (this.ws === ws) { this.ws = null; this.session = null; } };
+    ws.onerror = () => {};
+    ws.onmessage = (e) => {
+      const j = json(typeof e.data === "string" ? e.data : "");
+      if (!j) return;
+      if (j.id) { const f = this.pend.get(j.id); this.pend.delete(j.id); f?.(j); return; }
+      if (j.method === "Page.screencastFrame" && j.sessionId === this.session) this.frame(j.params);
+      else if (j.method === "Target.detachedFromTarget" && j.params?.sessionId === this.session) { this.session = null; this.sessionTarget = null; }
+    };
+  },
+  close() { const ws = this.ws; this.ws = null; this.session = null; this.sessionTarget = null; this.pend.clear(); try { ws?.close(); } catch {} },
+  call(method, params = {}, session = this.session) {
+    return new Promise((resolve) => {
+      if (!this.ws || this.ws.readyState !== 1) return resolve({});
+      const id = ++this.id;
+      this.pend.set(id, resolve);
+      this.ws.send(JSON.stringify({ id, method, params, ...(session ? { sessionId: session } : {}) }));
+    });
+  },
+  // The stream's active tab, screencast: a new tab (or a new size) starts it again.
+  async follow() {
+    if (!this.ws || this.ws.readyState !== 1 || !S.target || this.sessionTarget === S.target) return;
+    const old = this.session;
+    this.sessionTarget = S.target;
+    this.session = null;
+    if (old) this.call("Target.detachFromTarget", { sessionId: old }, null);
+    const a = await this.call("Target.attachToTarget", { targetId: S.target, flatten: true }, null);
+    if (this.sessionTarget !== S.target) return;
+    this.session = a.result?.sessionId ?? null;
+    this.restartCast();
+  },
+  async restartCast() {
+    const s = this.session;
+    if (!s || !S.cellW) return;
+    const areaW = S.cols * S.cellW, areaH = Math.max(1, S.rows - 1) * S.cellH;
+    await this.call("Page.stopScreencast", {}, s);
+    await this.call("Page.startScreencast", { format: "png", maxWidth: Math.round(areaW), maxHeight: Math.round(areaH), everyNthFrame: 1 }, s);
+  },
+  // The newest frame waits here; one older and not drawn yet is dropped (acked unseen). Drawn at
+  // most FPS a second, each once the one before is out; Chrome sends more only as they're acked.
+  frame(p) {
+    const s = this.session;
+    if (this.pending) this.call("Page.screencastFrameAck", { sessionId: this.pending.p.sessionId }, this.pending.s);
+    this.pending = { p, s };
+    this.pump();
+  },
+  pump() {
+    if (this.drawing || !this.pending) return;
+    const wait = this.lastDraw + 1000 / FPS - Date.now();
+    if (wait > 0) { if (!this.timer) this.timer = setTimeout(() => { this.timer = null; this.pump(); }, wait); return; }
+    const { p, s } = this.pending;
+    this.pending = null;
+    if (s !== this.session) return;
+    const m = p.metadata || {}, page = { w: Math.round(m.deviceWidth), h: Math.round(m.deviceHeight) };
+    if (!S.page || page.w !== S.page.w || page.h !== S.page.h) { S.page = page; layoutPicture(false); }
+    this.drawing = true;
+    this.lastDraw = Date.now();
+    drawFrame(p.data, () => {
+      this.drawing = false;
+      if (this.session === s) this.call("Page.screencastFrameAck", { sessionId: p.sessionId }, s);
+      this.pump();
+    });
+  },
+  back() { this.call("Runtime.evaluate", { expression: "history.back()" }); },
+  forward() { this.call("Runtime.evaluate", { expression: "history.forward()" }); },
+  reload() { this.call("Page.reload", {}); },
+};
+
+async function openBrowser(headed) {
+  if (S.state === "opening") return;
+  const wasLive = S.state === "live";
+  if (!wasLive) setState("opening");
+  // Headed: the same session and profile relaunched with its window shown, on the page it was on.
+  const r = await ab(...(headed ? ["--headed"] : []), "open", S.url || "about:blank");
+  if (r.code !== 0) setState("error", (r.stderr || r.stdout).trim().split("\n")[0] || "The browser didn't start.");
+  else if (!wasLive) setState("checking");
+}
+
+// ---- driving: the person's input, and telling the agent ----
+
+let telling = Promise.resolve();
+const waitTold = () => Promise.race([telling, sleep(4000)]);
+async function workerState() {
+  if (!worker) return null;
+  const g = json((await run("hc", ["get", worker, "--json"])).stdout);
+  return g ? { working: g.status?.state === "working", claude: g.status?.app === "claude-code" || g.labels?.["herdr.agent"] === "claude" } : null;
+}
+function tell(text, onlyIfWorking) {
+  telling = telling.then(async () => {
+    const ws = await workerState();
+    if (!ws || (onlyIfWorking && !ws.working)) return false;
+    const r = await run("hc", ["send", worker, text]);
+    if (r.code !== 0) return false;
+    // Mid-turn, Claude Code's "send now" so it takes the words at once.
+    if (ws.claude && ws.working) {
+      for (let i = 0; i < 4; i++) {
+        const s = await run("hc", ["read", worker, "--lines", "40"]);
+        if (/ctrl\+enter to send now/i.test(s.stdout)) { await run("hc", ["keys", worker, "ctrl+enter"]); break; }
+        await sleep(150);
+      }
+    }
+    return true;
+  }).catch(() => false);
+  return telling;
+}
+
+function startDriving() {
+  S.lastInput = Date.now();
+  if (S.driving || S.state !== "live") return;
+  S.driving = true;
+  touch(file(".you"));
+  bar();
+  tell("<browser>The person took over your browser in Herdr and is using it now. Hold off driving it until they hand it back (your acting commands are refused meanwhile; snapshot, screenshot and get still work).</browser>", true)
+    .then((sent) => { if (sent) S.told = true; });
+}
+function stopDriving(_why) {
+  if (!S.driving) return;
+  S.driving = false;
+  try { fs.rmSync(file(".you"), { force: true }); } catch {}
+  if (S.state === "live" || S.state === "checking") bar();
+  telling.then(() => {
+    if (!S.told) return;
+    S.told = false;
+    tell("<browser>The person handed your browser back. Snapshot it before you drive it again: they may have changed the page.</browser>", false);
+  });
+}
+
+// ---- input: mouse, keys, paste, replies ----
+
+const CDP_MODS = (shift, alt, ctrl, meta) => (alt ? 1 : 0) | (ctrl ? 2 : 0) | (meta ? 4 : 0) | (shift ? 8 : 0);
+
+function toPage(px, py) {
+  const r = S.rect;
+  if (!r || !S.page || px < r.x || py < r.y || px >= r.x + r.w || py >= r.y + r.h) return null;
+  return { x: Math.round(((px - r.x) / r.w) * S.page.w), y: Math.round(((py - r.y) / r.h) * S.page.h) };
+}
+
+let lastMove = 0;
+function mouse(b, x, y, release) {
+  // x, y: pixels from the top left (SGR-pixels), else the cell's centre.
+  const px = S.pixelMouse ? x - 1 : (x - 0.5) * (S.cellW || 10), py = S.pixelMouse ? y - 1 : (y - 0.5) * (S.cellH || 20);
+  const cell = { col: Math.floor(px / (S.cellW || 10)), row: Math.floor(py / (S.cellH || 20)) };
+  const mods = CDP_MODS(b & 4, b & 8, b & 16, false);
+  const motion = b & 32, wheel = b & 64, btn = b & 3;
+  const names = ["left", "middle", "right"];
+  if (!motion && !wheel && !release) {
+    const hit = S.buttons.find((k) => k.row === cell.row && cell.col >= k.x0 && cell.col < k.x1);
+    if (hit) { hit.fn(); return; }
+  }
+  const p = toPage(px, py);
+  if (wheel) {
+    if (!p) return;
+    startDriving();
+    const d = 80, dx = btn === 2 ? -d : btn === 3 ? d : 0, dy = btn === 0 ? -d : btn === 1 ? d : 0;
+    return send({ type: "input_mouse", eventType: "mouseWheel", x: p.x, y: p.y, deltaX: dx, deltaY: dy, modifiers: mods });
+  }
+  if (motion) {
+    // Moves (hover, drags) only while the person drives, at most 60 a second.
+    if (!S.driving || !p || Date.now() - lastMove < 16) return;
+    lastMove = Date.now();
+    const held = S.down;
+    return send({ type: "input_mouse", eventType: "mouseMoved", x: p.x, y: p.y, modifiers: mods,
+      button: held ?? "none", buttons: held === "left" ? 1 : held === "right" ? 2 : held === "middle" ? 4 : 0 });
+  }
+  if (btn === 3 && !release) return;
+  if (!p) { if (release && S.down) { S.down = null; } return; }
+  const button = release ? (S.down ?? names[btn] ?? "left") : names[btn] ?? "left";
+  if (!release) {
+    startDriving();
+    const lc = S.lastClick, now = Date.now();
+    const n = now - lc.at < 450 && Math.abs(lc.x - p.x) < 6 && Math.abs(lc.y - p.y) < 6 ? Math.min(lc.n + 1, 3) : 1;
+    S.lastClick = { at: now, x: p.x, y: p.y, n };
+    S.down = button;
+  } else {
+    S.lastInput = Date.now();
+    S.down = null;
+  }
+  send({ type: "input_mouse", eventType: release ? "mouseReleased" : "mousePressed", x: p.x, y: p.y, button,
+    buttons: release ? 0 : button === "left" ? 1 : button === "right" ? 2 : 4, clickCount: S.lastClick.n, modifiers: mods });
+}
+
+// Chrome's names and codes for the keys that type nothing.
+const SPECIAL = {
+  Enter: 13, Tab: 9, Backspace: 8, Escape: 27, Delete: 46, Insert: 45, Home: 36, End: 35, PageUp: 33, PageDown: 34,
+  ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39,
+  F1: 112, F2: 113, F3: 114, F4: 115, F5: 116, F6: 117, F7: 118, F8: 119, F9: 120, F10: 121, F11: 122, F12: 123,
+};
+const KITTY_CODE = { 13: "Enter", 9: "Tab", 127: "Backspace", 8: "Backspace", 27: "Escape" };
+const CSI_LETTER = { A: "ArrowUp", B: "ArrowDown", C: "ArrowRight", D: "ArrowLeft", H: "Home", F: "End", P: "F1", Q: "F2", R: "F3", S: "F4" };
+const CSI_TILDE = { 2: "Insert", 3: "Delete", 5: "PageUp", 6: "PageDown", 7: "Home", 8: "End", 15: "F5", 17: "F6", 18: "F7", 19: "F8", 20: "F9", 21: "F10", 23: "F11", 24: "F12" };
+
+// One key: its DOM name (a character, or one of SPECIAL) and kitty-style modifiers (1 + bits).
+function key(k, m = 1) {
+  const bits = m - 1, shift = bits & 1, alt = bits & 2, ctrl = bits & 4, meta = bits & 8;
+  // A shifted letter as a kitty key code (its base key): the capital it types.
+  if (shift && !ctrl && !alt && !meta && /^[a-z]$/.test(k)) k = k.toUpperCase();
+  // The viewer's own: Back, Forward, Reload.
+  if (alt && k === "ArrowLeft") return cdp.back();
+  if (alt && k === "ArrowRight") return cdp.forward();
+  if ((ctrl && !alt && (k === "r" || k === "R")) || k === "F5") return cdp.reload();
+  // Ctrl+V: the desktop's clipboard (the browser's own is a different one).
+  if (ctrl && !alt && !shift && (k === "v" || k === "V")) return pasteClipboard();
+  startDriving();
+  const mods = CDP_MODS(shift, alt, ctrl, meta);
+  let down;
+  if (SPECIAL[k]) down = { key: k, code: k, windowsVirtualKeyCode: SPECIAL[k], ...(k === "Enter" && !ctrl && !alt ? { text: "\r" } : {}) };
+  else if (ctrl || alt || meta) {
+    const ch = k.length === 1 ? k : "";
+    down = { key: ch, code: /^[a-z]$/i.test(ch) ? `Key${ch.toUpperCase()}` : /^[0-9]$/.test(ch) ? `Digit${ch}` : "",
+      windowsVirtualKeyCode: /^[a-z0-9]$/i.test(ch) ? ch.toUpperCase().charCodeAt(0) : 0 };
+  } else down = { key: k, text: k, ...( /^[a-z]$/i.test(k) ? { code: `Key${k.toUpperCase()}`, windowsVirtualKeyCode: k.toUpperCase().charCodeAt(0) } : {}) };
+  const { text, ...up } = down;
+  send({ type: "input_keyboard", eventType: "keyDown", ...down, modifiers: mods });
+  send({ type: "input_keyboard", eventType: "keyUp", ...up, modifiers: mods });
+}
+
+function insertText(text) {
+  if (!text) return;
+  startDriving();
+  ab("keyboard", "inserttext", text);
+}
+async function pasteClipboard() {
+  const r = await run("wl-paste", ["-n", "-t", "text"]);
+  if (r.code === 0 && r.stdout) insertText(r.stdout);
+}
+
+const dec = new StringDecoder("utf8");
+let buf = "", escTimer = null;
+process.stdin.on("data", (d) => { buf += dec.write(d); parse(); });
+
+function parse() {
+  clearTimeout(escTimer);
+  while (buf.length) {
+    if (buf[0] !== "\x1b") {
+      const ch = String.fromCodePoint(buf.codePointAt(0));
+      buf = buf.slice(ch.length);
+      if (ch === "\r" || ch === "\n") key("Enter");
+      else if (ch === "\t") key("Tab");
+      else if (ch === "\x7f" || ch === "\b") key("Backspace");
+      else if (ch.charCodeAt(0) < 32) key(String.fromCharCode(ch.charCodeAt(0) + 96), 5);
+      else key(ch);
+      continue;
+    }
+    let m;
+    if (buf.startsWith("\x1b[200~")) {
+      const end = buf.indexOf("\x1b[201~");
+      if (end < 0) break;
+      insertText(buf.slice(6, end));
+      buf = buf.slice(end + 6);
+    } else if ((m = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])/.exec(buf))) {
+      buf = buf.slice(m[0].length);
+      mouse(+m[1], +m[2], +m[3], m[4] === "m");
+    } else if ((m = /^\x1b\[\?(\d+);(\d+)\$y/.exec(buf))) {
+      buf = buf.slice(m[0].length);
+      if (m[1] === "1016") { S.pixelMouse = m[2] === "1" || m[2] === "3"; }
+    } else if ((m = /^\x1b\[(\d+);(\d+);(\d+)t/.exec(buf))) {
+      buf = buf.slice(m[0].length);
+      if (m[1] === "6") {
+        const h = +m[2], wd = +m[3], changed = h !== S.cellH || wd !== S.cellW;
+        S.cellH = h; S.cellW = wd;
+        if (changed) { layoutPicture(true); paint(); }
+      }
+    } else if ((m = /^\x1b\[([\d;:]*)([A-Za-z~])/.exec(buf))) {
+      buf = buf.slice(m[0].length);
+      csi(m[1], m[2]);
+    } else if ((m = /^\x1bO([A-Z])/.exec(buf))) {
+      buf = buf.slice(m[0].length);
+      if (CSI_LETTER[m[1]]) key(CSI_LETTER[m[1]]);
+    } else if (buf.length >= 2 && buf[1] !== "[" && buf[1] !== "O") {
+      const ch = String.fromCodePoint(buf.codePointAt(1));
+      buf = buf.slice(1 + ch.length);
+      key(ch, 3);
+    } else if (buf.length > 64 || (buf.length >= 2 && !/^\x1b[\[O][\x20-\x7e]*$/.test(buf))) {
+      buf = buf.slice(1);
+    } else {
+      // A lone Escape, or the rest of a sequence still on its way.
+      escTimer = setTimeout(() => { if (buf === "\x1b") { buf = ""; key("Escape"); } else if (buf) { buf = buf.slice(1); parse(); } }, 40);
+      break;
+    }
+  }
+}
+
+function csi(params, fin) {
+  const p = params.split(";").map((x) => x.split(":")[0]);
+  const m = Number(p[1] || 1);
+  if (fin === "I" && !params) { S.focused = true; return; }
+  if (fin === "O" && !params) { S.focused = false; stopDriving("blur"); return; }
+  if (fin === "u") {
+    const code = Number(p[0]);
+    const k = KITTY_CODE[code] ?? (code >= 32 ? String.fromCodePoint(code) : null);
+    if (k) key(k, m);
+    return;
+  }
+  if (fin === "~") { const k = CSI_TILDE[Number(p[0])]; if (k) key(k, m); return; }
+  if (CSI_LETTER[fin]) key(CSI_LETTER[fin], m);
+}
+
+// ---- beats ----
+
+setInterval(() => {
+  // The panel refreshes <name>.view while it shows this; stale, the viewer isn't wanted.
+  fs.stat(file(".view"), (e, st) => { if (e || Date.now() - st.mtimeMs > HEARTBEAT_STALE_MS) quit(0); });
+  if (S.driving) {
+    if (Date.now() - S.lastInput > IDLE_DRIVE_MS) stopDriving("idle");
+    else touch(file(".you"));
+  }
+}, 2000);
+// Watching keeps the browser from closing idle (herdr-task tick reads <name>.used).
+setInterval(() => { if (S.state === "live") touch(file(".used")); }, 30000);
+
+setup();
+paint();
+// No answer to the cell-size question: a guess, so the picture still shows.
+setTimeout(() => { if (!S.cellW) { S.cellW = 9; S.cellH = 18; layoutPicture(true); paint(); } }, 800);
+check();

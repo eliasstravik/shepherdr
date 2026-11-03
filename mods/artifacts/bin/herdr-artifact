@@ -1,0 +1,1144 @@
+#!/usr/bin/env python3
+"""herdr-artifact: Herdr's artifacts, the one way to make and change them.
+
+An artifact is a tiny Herdr mod (main.js, maybe more .js and .svg files) an agent writes to show
+the person something: a report, a dashboard, a form, a small tool. It belongs to one folder, like
+a task: the repo root in git (a linked worktree counts as its main repo), else the folder itself.
+Each folder's artifacts are listed in ~/.herdr/artifacts/<slug>.json on the machine where the
+folder lives; every version's files are kept in ~/.herdr/artifacts/files/<id>/v<n>/ (the last 20).
+The current version is installed as the mod mods/art-<id>/ of the Herdr app on that machine (a
+remote artifact is pulled into this window's app as art-<machine>-<id> when it's opened).
+
+Every write takes the folder list's lock and replaces it atomically. Publishing first checks the
+mod with `herdr-app check`, so a broken artifact never reaches the person.
+"""
+
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+import re
+import secrets
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+VERSION = "1"
+HOME = os.path.expanduser("~")
+STORE = os.path.join(HOME, ".herdr", "artifacts")
+FILES = os.path.join(STORE, "files")
+APP = os.environ.get("HERDR_APP_HOME") or os.path.join(HOME, ".config", "herdr-app")
+GUIDE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "ARTIFACTS.md")
+# Mark up (the person points at a spot and writes to the agent), laid over every installed artifact.
+MARKUP = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "markup.js")
+NOTES = os.path.join(STORE, "notes")
+NARROW = 320
+KEEP = 20
+MAX_FILES = 200
+MAX_BYTES = 4 * 1024 * 1024
+# What a mod folder may hold: code, text and pictures. No binaries, no node_modules.
+ALLOWED = {".js", ".mjs", ".json", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".md", ".txt", ".csv", ".ttf", ".otf"}
+SKIP = {"jsconfig.json", "gpui-kit.d.ts", "herdr.d.ts", "artifact.js", "artifact-main.js", "artifact-markup.js", ".version"}
+
+
+class Fail(Exception):
+    pass
+
+
+def now():
+    return int(time.time() * 1000)
+
+
+def run(args, cwd=None, input=None):
+    return subprocess.run(args, cwd=cwd, input=input, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          universal_newlines=input is None or isinstance(input, str))
+
+
+def git(cwd, *args):
+    r = run(["git", "-C", cwd, *args])
+    return r.returncode == 0, r.stdout.strip()
+
+
+# ---- where a folder's artifacts live (the same rule as herdr-task) ----------------------------
+
+def locate(path):
+    path = os.path.realpath(os.path.expanduser(path or os.getcwd()))
+    if not os.path.isdir(path):
+        raise Fail(f"No such folder: {path}")
+    ok, out = git(path, "rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel")
+    lines = out.split("\n") if ok else []
+    if len(lines) == 2:
+        common, top = lines
+        main = common[:-5] if common.endswith("/.git") else top
+        return {"folder": main, "kind": "repo", "name": os.path.basename(main) or "/"}
+    return {"folder": path, "kind": "folder", "name": "~" if path == HOME else (os.path.basename(path) or "/")}
+
+
+def slug_of(folder):
+    rel = os.path.relpath(folder, HOME) if folder == HOME or folder.startswith(HOME + "/") else folder
+    s = re.sub(r"[^A-Za-z0-9._-]+", "-", "home" if rel == "." else rel.strip("/")).strip("-")
+    return s or "root"
+
+
+def store_path(folder):
+    slug = slug_of(folder)
+    p = os.path.join(STORE, slug + ".json")
+    if os.path.exists(p):
+        try:
+            with open(p) as f:
+                if json.load(f).get("folder") not in (None, folder):
+                    slug = f"{slug}-{hashlib.sha1(folder.encode()).hexdigest()[:6]}"
+                    p = os.path.join(STORE, slug + ".json")
+        except (OSError, ValueError):
+            pass
+    return slug, p
+
+
+class Store:
+    """One folder's artifacts, locked while open."""
+
+    def __init__(self, loc, write=True):
+        self.loc, self.write = loc, write
+        self.slug, self.path = store_path(loc["folder"])
+        self.dirty = False
+
+    def __enter__(self):
+        os.makedirs(STORE, exist_ok=True)
+        self.lock = open(os.path.join(STORE, "." + os.path.basename(self.path) + ".lock"), "a")
+        fcntl.flock(self.lock, fcntl.LOCK_EX if self.write else fcntl.LOCK_SH)
+        try:
+            with open(self.path) as f:
+                self.data = json.load(f)
+        except FileNotFoundError:
+            self.data = {}
+        except ValueError:
+            raise Fail(f"{self.path} isn't valid JSON. Fix it first.")
+        d = self.data
+        d.update(version=1, folder=self.loc["folder"], kind=self.loc["kind"], name=self.loc["name"], slug=self.slug)
+        d.setdefault("artifacts", [])
+        return self
+
+    def __exit__(self, kind, *_):
+        try:
+            if kind is None and self.dirty and self.write:
+                fd, tmp = tempfile.mkstemp(dir=STORE, prefix=".tmp-")
+                with os.fdopen(fd, "w") as f:
+                    json.dump(self.data, f, indent=1)
+                    f.write("\n")
+                os.replace(tmp, self.path)
+        finally:
+            fcntl.flock(self.lock, fcntl.LOCK_UN)
+            self.lock.close()
+
+    def find(self, ref):
+        for a in self.data["artifacts"]:
+            if a["id"] == ref:
+                return a
+        raise Fail(f"No artifact {ref!r} in {self.loc['name']}. `herdr-artifact list` shows them.")
+
+
+def find_anywhere(ref):
+    """The folder list that holds an artifact id, on this machine."""
+    for f in sorted(os.listdir(STORE)) if os.path.isdir(STORE) else []:
+        if not f.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(STORE, f)) as fh:
+                d = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if any(a.get("id") == ref for a in d.get("artifacts") or []):
+            return {"folder": d["folder"], "kind": d.get("kind", "folder"), "name": d.get("name", "")}
+    raise Fail(f"No artifact {ref!r} on this machine. `herdr-artifact list --all` shows them.")
+
+
+# ---- who is publishing --------------------------------------------------------------------
+
+def me():
+    """This terminal's address and its task, from herdr-core: {terminal, task}."""
+    t = os.environ.get("HC_TERMINAL_ID") or None
+    task = None
+    if t:
+        r = run(["hc", "ls", "--json"])
+        try:
+            rows = json.loads(r.stdout)
+            rows = rows if isinstance(rows, list) else rows.get("terminals", [])
+        except ValueError:
+            rows = []
+        row = next((x for x in rows if x.get("address") == t), None)
+        key = (row or {}).get("labels", {}).get("herdr.task")
+        if key and "#" in key:
+            slug, n = key.rsplit("#", 1)
+            try:
+                with open(os.path.join(HOME, ".herdr", "tasks", slug + ".json")) as f:
+                    prefix = json.load(f).get("prefix")
+                task = f"{prefix}-{n}" if prefix else f"#{n}"
+            except (OSError, ValueError):
+                task = f"#{n}"
+    return {"terminal": t, "task": task}
+
+
+# ---- files -------------------------------------------------------------------------------
+
+def gather(src):
+    """The files of a mod folder to keep, relative paths. Fails on anything a mod can't hold."""
+    src = os.path.realpath(os.path.expanduser(src))
+    if os.path.isfile(src) and os.path.basename(src) == "main.js":
+        src = os.path.dirname(src)
+    if not os.path.isfile(os.path.join(src, "main.js")):
+        raise Fail(f"{src} has no main.js. An artifact is a folder with a main.js (`herdr-artifact new <dir>` makes one).")
+    out, size = [], 0
+    for root, dirs, names in os.walk(src):
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d != "node_modules"]
+        for n in names:
+            rel = os.path.relpath(os.path.join(root, n), src)
+            if n.startswith(".") or n in SKIP or n.endswith(".error"):
+                continue
+            if os.path.splitext(n)[1].lower() not in ALLOWED:
+                raise Fail(f"{rel}: an artifact holds only .js, .json, .svg, pictures, fonts and text.")
+            size += os.path.getsize(os.path.join(root, n))
+            out.append(rel)
+    if len(out) > MAX_FILES or size > MAX_BYTES:
+        raise Fail(f"Too big: {len(out)} files, {size // 1024} KB (at most {MAX_FILES} files, {MAX_BYTES // 1048576} MB).")
+    return src, sorted(out)
+
+
+def copy_files(src, files, dst):
+    for rel in files:
+        os.makedirs(os.path.dirname(os.path.join(dst, rel)), exist_ok=True)
+        shutil.copy2(os.path.join(src, rel), os.path.join(dst, rel))
+
+
+def helper(art, mod, agent, machine=None):
+    """artifact.js, written into the installed mod: who made it and how to answer them."""
+    return f"""// Written by herdr-artifact each time this artifact is installed. Don't edit: it's replaced.
+import {{ hc }} from "herdr";
+
+export const id = {json.dumps(art["id"])};
+export const title = {json.dumps(art["title"])};
+export const version = {art["version"]};
+/** The newest version when this one was installed (an older version shows only when picked). */
+export const latest = {art.get("latest") or art["version"]};
+export const folder = {json.dumps(art["folder"])};
+/** The machine the artifact (and its agent) is on, null for this one. */
+export const machine = {json.dumps(machine)};
+/** This mod's folder, for image() and svg(): asset("chart.svg") -> "mods/{mod}/chart.svg". */
+export const dir = "mods/{mod}";
+export const asset = (name) => `${{dir}}/${{name}}`;
+/** The agent that made it (a terminal address), or null. */
+export const agent = {json.dumps(agent)};
+
+/** Sends text to the agent that made this artifact, as a message it reads like the person's.
+ *  Resolves true when it was delivered, false when that agent is gone. Call it from a click. */
+export async function reply(text) {{
+  if (!agent) return false;
+  const body = `<hc from="artifact" id="${{id}}" version="${{version}}" title=${{JSON.stringify(title)}}>\\n${{text}}\\n</hc>`;
+  const r = await hc(["send", agent, body]);
+  return r.code === 0;
+}}
+"""
+
+
+WRAPPER = """// Written by herdr-artifact: the artifact (artifact-main.js) with Mark up laid over it
+// (artifact-markup.js). Don't edit: it's replaced.
+import Artifact from "./artifact-main.js";
+import { markupInit, markupWrap } from "./artifact-markup.js";
+
+export default class MarkedArtifact extends Artifact {
+  init(props, cx) {
+    if (super.init) super.init(props, cx);
+    this.__herdrMark = markupInit(cx);
+  }
+  render(cx) {
+    return markupWrap(this.__herdrMark, super.render(cx), cx);
+  }
+}
+"""
+
+
+def wrap_markup(dst):
+    """Lays Mark up over an installed artifact: its main.js becomes artifact-main.js under a
+    wrapper. Without the markup template (an old copy on another machine) it stays as it is."""
+    if not os.path.isfile(MARKUP):
+        return
+    os.replace(os.path.join(dst, "main.js"), os.path.join(dst, "artifact-main.js"))
+    shutil.copy2(MARKUP, os.path.join(dst, "artifact-markup.js"))
+    with open(os.path.join(dst, "main.js"), "w") as f:
+        f.write(WRAPPER)
+
+
+def write_mod(src, files, art, mod, agent, machine=None):
+    """Installs files as the Herdr app's mod `mod`, replacing the old one in one move."""
+    mods = os.path.join(APP, "mods")
+    if not os.path.isdir(mods):
+        return None
+    tmp = os.path.join(mods, f".{mod}.new-{secrets.token_hex(3)}")
+    copy_files(src, files, tmp)
+    wrap_markup(tmp)
+    meta = {}
+    try:
+        with open(os.path.join(tmp, "mod.json")) as f:
+            meta = json.load(f)
+    except (OSError, ValueError):
+        pass
+    meta["place"] = "none"
+    with open(os.path.join(tmp, "mod.json"), "w") as f:
+        json.dump(meta, f, indent=2)
+    with open(os.path.join(tmp, "artifact.js"), "w") as f:
+        f.write(helper(art, mod, agent, machine))
+    with open(os.path.join(tmp, ".version"), "w") as f:
+        # The version, and which Mark up it carries (a newer one reinstalls it on the next open).
+        f.write(f"{art['version']} {markup_hash() if os.path.isfile(os.path.join(tmp, 'artifact-markup.js')) else ''}".strip() + "\n")
+    dst = os.path.join(mods, mod)
+    old = None
+    if os.path.exists(dst):
+        old = os.path.join(mods, f".{mod}.old-{secrets.token_hex(3)}")
+        os.rename(dst, old)
+    os.rename(tmp, dst)
+    if old:
+        shutil.rmtree(old, ignore_errors=True)
+    return dst
+
+
+# The check sees the artifact in light and in dark: a staged copy's `herdr` imports go through this
+# shim, whose theme() is a light (or dark) preset from themes(). Plain `herdr-app check`, nothing
+# else: no second app, no other home.
+SHIM = """export * from "herdr";
+import * as H from "herdr";
+const LIGHT = %s;
+const all = H.themes();
+const pick = all.find((t) => t.light === LIGHT && t.name === (LIGHT ? "paper" : "graphite")) ?? all.find((t) => t.light === LIGHT);
+export function theme() { return pick?.colors ?? H.theme(); }
+export function settings() { return { ...H.settings(), dark: !LIGHT }; }
+"""
+SHIM_NAME = ".herdr-check-theme.js"
+IMPORT = re.compile(r"""(\bfrom\s*|\bimport\s*\(?\s*)(["'])herdr\2""")
+
+
+def stage_theme(stage, light):
+    """Points every .js file's `herdr` import at the shim for `light` (True / False)."""
+    with open(os.path.join(stage, SHIM_NAME), "w") as f:
+        f.write(SHIM % ("true" if light else "false"))
+    for root, _dirs, names in os.walk(stage):
+        for n in names:
+            if not n.endswith((".js", ".mjs")) or n == SHIM_NAME:
+                continue
+            p = os.path.join(root, n)
+            rel = os.path.relpath(os.path.join(stage, SHIM_NAME), root)
+            rel = rel if rel.startswith(".") else "./" + rel
+            with open(p) as f:
+                text = f.read()
+            new = IMPORT.sub(lambda m: f"{m.group(1)}{m.group(2)}{rel}{m.group(2)}", text)
+            if new != text:
+                with open(p, "w") as f:
+                    f.write(new)
+
+
+def check(src, files, art):
+    """herdr-app check on a staged copy (with its artifact.js), in light and in dark.
+    Returns (error text or None, [warnings])."""
+    if not shutil.which("herdr-app"):
+        return None, []
+    specs = {}
+    with tempfile.TemporaryDirectory(prefix="herdr-artifact-") as d:
+        for look in ("dark", "light"):
+            stage = os.path.join(d, look, f"art-{art['id']}")
+            copy_files(src, files, stage)
+            with open(os.path.join(stage, "artifact.js"), "w") as f:
+                f.write(helper(art, f"art-{art['id']}", None))
+            if look == "light":
+                stage_theme(stage, True)
+            r = run(["herdr-app", "check", stage, "--print-spec"])
+            if r.returncode != 0:
+                text = r.stderr.strip() or r.stdout.strip() or "herdr-app check failed"
+                text = "\n".join(l for l in text.replace(stage + "/", "").replace(SHIM_NAME, "herdr").splitlines()
+                                 if not l.startswith("check failed:")).strip()
+                return (f"In {look}: {text}" if look == "light" else text), []
+            specs[look] = r.stdout
+    try:
+        return None, review(specs)
+    except Exception:  # a spec this version can't read: the load check above still stands
+        return None, []
+
+
+# ---- what the check reads in the built UI ------------------------------------------------------
+# `herdr-app check --print-spec` prints the element tree: one element a line, indented, its style
+# calls after it (`.p[Number(16.0)] .bg[Str("#17191d")]`), text as `text "..."`.
+
+def spec_args(s):
+    out = []
+    for m in re.finditer(r'(Number|Str|Bool)\((".*?(?<!\\)"|[^)]*)\)', s):
+        kind, v = m.groups()
+        if kind == "Number":
+            try:
+                out.append(float(v))
+            except ValueError:
+                out.append(v)
+        elif kind == "Str":
+            try:
+                out.append(json.loads(v))
+            except ValueError:
+                out.append(v.strip('"'))
+        else:
+            out.append(v == "true")
+    return out
+
+
+def spec_calls(rest):
+    """The `.name[args]` calls of one line; `:hover(...)` and other `:` parts are skipped."""
+    calls, i, n = {}, 0, len(rest)
+    while i < n:
+        c = rest[i]
+        if c in ".:" and i + 1 < n and (rest[i + 1].isalpha() or rest[i + 1] == "_"):
+            j = i + 1
+            while j < n and (rest[j].isalnum() or rest[j] == "_"):
+                j += 1
+            name, args = rest[i + 1:j], []
+            if j < n and rest[j] in "[(":
+                open_, close = rest[j], "]" if rest[j] == "[" else ")"
+                depth, k, quote = 0, j, False
+                while k < n:
+                    ch = rest[k]
+                    if ch == '"' and rest[k - 1] != "\\":
+                        quote = not quote
+                    elif not quote and ch == open_:
+                        depth += 1
+                    elif not quote and ch == close:
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    k += 1
+                args = spec_args(rest[j + 1:k])
+                j = k + 1
+            if c == ".":
+                calls[name] = args
+            i = j
+        else:
+            i += 1
+    return calls
+
+
+def parse_spec(text):
+    root = {"name": "root", "calls": {}, "kids": [], "text": None}
+    stack = [(-1, root)]
+    for line in text.splitlines():
+        if not line.strip() or line.startswith("check "):
+            continue
+        ind = len(line) - len(line.lstrip(" "))
+        body = line.strip()
+        if body.startswith('text "'):
+            try:
+                txt = json.loads(body[5:])
+            except ValueError:
+                txt = body[6:-1]
+            node = {"name": "text", "calls": {}, "kids": [], "text": txt}
+        else:
+            name, _, rest = body.partition(" ")
+            node = {"name": name, "calls": spec_calls(rest), "kids": [], "text": None}
+        while stack[-1][0] >= ind:
+            stack.pop()
+        stack[-1][1]["kids"].append(node)
+        stack.append((ind, node))
+    return root["kids"][0] if root["kids"] else None
+
+
+def num(calls, name, default=0.0):
+    v = calls.get(name)
+    return v[0] if v and isinstance(v[0], (int, float)) else default
+
+
+def words(node, limit=40):
+    """The first text inside an element, to name it."""
+    if node["text"]:
+        return node["text"].strip()[:limit]
+    for k in node["kids"]:
+        w = words(k, limit)
+        if w:
+            return w
+    return ""
+
+
+def label(node):
+    ident = node["calls"].get("id")
+    w = words(node)
+    return f"“{w}”" if w else (f"#{ident[0]}" if ident else node["name"])
+
+
+def min_width(node):
+    """About the narrowest the element can get: fixed widths and rows of them, plus padding.
+    Text wraps; truncated, clipped and min_w(0) elements shrink. Returns (px, element that sets it)."""
+    c = node["calls"]
+    if node["name"] == "text":
+        return 0.0, None
+    fixed = max(num(c, "w"), num(c, "size"), num(c, "min_w"))
+    pad = num(c, "p") * 2 + num(c, "px") * 2 + num(c, "pl") + num(c, "pr")
+    pad += 2 * (num(c, "border") or (1 if "border_1" in c else 2 if "border_2" in c else 0))
+    shrinks = any(k in c for k in ("truncate", "overflow_hidden", "overflow_x_hidden", "overflow_scroll", "overflow_x_scroll",
+                                   "overflow_x_scrollbar", "overflow_scrollbar"))
+    kids = [min_width(k) for k in node["kids"]]
+    row = node["name"] == "h_flex" or "flex_row" in c or ("flex" in c and "flex_col" not in c and node["name"] == "div")
+    if not kids or shrinks:
+        content, who = 0.0, None
+    elif row and "flex_wrap" not in c:
+        gap = num(c, "gap_x") or num(c, "gap")
+        content = sum(k[0] for k in kids) + gap * (len(kids) - 1)
+        who = node if sum(1 for k in kids if k[0] > 0) > 1 else max(kids, key=lambda k: k[0])[1]
+    else:
+        content, who = max(kids, key=lambda k: k[0])
+    content += pad
+    if "min_w" in c and num(c, "min_w") == 0 and "w" not in c and "size" not in c:
+        return 0.0, None
+    if fixed >= content:
+        return fixed, (node if fixed > 0 else None)
+    return content, who
+
+
+def rgba(color):
+    s = str(color or "").strip().lstrip("#")
+    if not re.fullmatch(r"[0-9a-fA-F]{3,8}", s) or len(s) not in (3, 4, 6, 8):
+        return None
+    if len(s) in (3, 4):
+        s = "".join(ch * 2 for ch in s)
+    r, g, b = (int(s[i:i + 2], 16) for i in (0, 2, 4))
+    a = int(s[6:8], 16) / 255 if len(s) == 8 else 1.0
+    return r, g, b, a
+
+
+def over(top, under):
+    r, g, b, a = top
+    return tuple(round(top[i] * a + under[i] * (1 - a)) for i in range(3)) + (1.0,)
+
+
+def contrast(x, y):
+    def lum(c):
+        def ch(v):
+            v /= 255
+            return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+        return 0.2126 * ch(c[0]) + 0.7152 * ch(c[1]) + 0.0722 * ch(c[2])
+    a, b = sorted((lum(x), lum(y)), reverse=True)
+    return (a + 0.05) / (b + 0.05)
+
+
+def hard_to_read(node, fg=None, bg=None, out=None):
+    """Text whose color is too close to what's behind it: [(text, fg, bg, ratio)]."""
+    out = [] if out is None else out
+    c = node["calls"]
+    if "bg" in c and rgba(c["bg"][0] if c["bg"] else None):
+        mine = rgba(c["bg"][0])
+        bg = over(mine, bg) if bg else (mine if mine[3] >= 1 else None)
+    if "text_color" in c and rgba(c["text_color"][0] if c["text_color"] else None):
+        fg = rgba(c["text_color"][0])
+    if node["name"] == "text" and node["text"] and node["text"].strip() and fg and bg:
+        shown = over(fg, bg)
+        ratio = contrast(shown, bg)
+        if ratio < 2.2:
+            out.append((node["text"].strip()[:40], "#%02x%02x%02x" % shown[:3], "#%02x%02x%02x" % bg[:3], ratio))
+    for k in node["kids"]:
+        hard_to_read(k, fg, bg, out)
+    return out
+
+
+def review(specs):
+    """What the check found in the built UI, as warnings for the agent."""
+    warn = []
+    dark = parse_spec(specs.get("dark", ""))
+    if dark is not None:
+        w, who = min_width(dark)
+        if w > NARROW:
+            row = who is not None and (who["name"] == "h_flex" or "flex" in who["calls"]) and len(who["kids"]) > 1
+            where = f" {'The row with ' if row else ''}{label(who)} is too wide." if who is not None else ""
+            warn.append(f"At {NARROW} px wide it doesn't fit: it needs about {round(w)} px.{where} Let it wrap, shrink or scroll.")
+    for look in ("light", "dark"):
+        tree = parse_spec(specs.get(look, ""))
+        if tree is None:
+            continue
+        seen = set()
+        # Behind the panel: the block's theme background and foreground (graphite / paper).
+        base = ("#ffffff", "#1b1b1e") if look == "light" else ("#17191d", "#eeeeef")
+        for text, fg, bg, ratio in hard_to_read(tree, rgba(base[1]), rgba(base[0])):
+            if text in seen:
+                continue
+            seen.add(text)
+            warn.append(f"In {look}, “{text}” is hard to read: {fg} on {bg} ({ratio:.1f}:1). Use theme() colors.")
+            if len(seen) >= 4:
+                break
+    return warn[:8]
+
+
+# ---- commands ----------------------------------------------------------------------------
+
+def public(a):
+    return {k: a.get(k) for k in ("id", "title", "version", "folder", "publisher", "task", "at", "created", "versions", "files")}
+
+
+def cmd_publish(o):
+    src, files = gather(o.dir)
+    who = me()
+    loc = find_anywhere(o.id) if o.id and not o.folder else locate(o.folder)
+    with Store(loc) as s:
+        if o.id:
+            art = s.find(o.id)
+            title = o.title or art["title"]
+        else:
+            if not o.title:
+                raise Fail("Give it a title: --title \"Coverage by package\".")
+            title = o.title
+            base = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:24].strip("-") or "artifact"
+            while True:
+                aid = f"{base}-{secrets.token_hex(2)}"
+                if not os.path.exists(os.path.join(FILES, aid)):
+                    break
+            art = {"id": aid, "created": now(), "versions": []}
+            s.data["artifacts"].insert(0, art)
+        # A task's agent names its task first: "HAT-2: Coverage by package".
+        task = o.task or art.get("task") or who["task"]
+        if task and not title.upper().startswith(task.upper()):
+            title = f"{task}: {title}"
+        v = (art["versions"][-1]["v"] if art["versions"] else 0) + 1
+        draft = dict(art, title=title, version=v, folder=loc["folder"])
+        err, warnings = check(src, files, draft)
+        if err:
+            if not o.id:
+                s.data["artifacts"].remove(art)
+            raise Fail(f"herdr-app check failed, nothing was published:\n{err}")
+        keep = os.path.join(FILES, art["id"], f"v{v}")
+        copy_files(src, files, keep)
+        at = now()
+        art.update(title=title, version=v, folder=loc["folder"], publisher=who["terminal"], task=task, at=at, files=files)
+        art["versions"].append({"v": v, "at": at, "publisher": who["terminal"], **({"note": o.note} if o.note else {})})
+        for old in art["versions"][:-KEEP]:
+            shutil.rmtree(os.path.join(FILES, art["id"], f"v{old['v']}"), ignore_errors=True)
+        art["versions"] = art["versions"][-KEEP:]
+        # Newest first.
+        s.data["artifacts"].remove(art)
+        s.data["artifacts"].insert(0, art)
+        s.dirty = True
+        installed = write_mod(keep, files, art, f"art-{art['id']}", who["terminal"])
+        prune_versions(art)
+    out = dict(public(art), mod=f"art-{art['id']}", installed=bool(installed), warnings=warnings)
+    if o.json:
+        print(json.dumps(out))
+    else:
+        print(f"Published {art['id']} v{v}: {title}")
+        print("The person sees it in the Artifacts panel; your chat shows a card for it.")
+        if warnings:
+            print(f"\nThe check (light, dark, {NARROW} px wide) found what to fix, then update it:")
+            for w in warnings:
+                print(f"  - {w}")
+        else:
+            print(f"Checked in light and dark and at {NARROW} px wide: nothing to fix. (The check reads the built UI; it doesn't take a picture.)")
+    return 0
+
+
+def version_mod(base, v):
+    """An older version's mod: art-<id>--v3 (ids never hold "--")."""
+    return f"{base}--v{v}"
+
+
+def prune_versions(art, base=None):
+    """Removes installed older versions no longer kept (the last 20 are)."""
+    mods = os.path.join(APP, "mods")
+    base = base or f"art-{art['id']}"
+    kept = {str(v["v"]) for v in art.get("versions") or []}
+    try:
+        names = os.listdir(mods)
+    except OSError:
+        return
+    for n in names:
+        if n.startswith(base + "--v") and n[len(base) + 3:] not in kept:
+            shutil.rmtree(os.path.join(mods, n), ignore_errors=True)
+
+
+def cmd_list(o):
+    if o.all:
+        lists = []
+        for f in sorted(os.listdir(STORE)) if os.path.isdir(STORE) else []:
+            if f.endswith(".json"):
+                try:
+                    with open(os.path.join(STORE, f)) as fh:
+                        lists.append(json.load(fh))
+                except (OSError, ValueError):
+                    pass
+        arts = sorted((a for d in lists for a in d.get("artifacts") or []), key=lambda a: -(a.get("at") or 0))
+        out = {"artifacts": [public(a) for a in arts]}
+    else:
+        loc = locate(o.folder)
+        with Store(loc, write=False) as s:
+            out = {"folder": loc["folder"], "name": loc["name"], "store": s.path, "slug": s.slug,
+                   "artifacts": [public(a) for a in s.data["artifacts"]]}
+    if o.json:
+        print(json.dumps(out))
+        return 0
+    if not out["artifacts"]:
+        print("No artifacts.")
+    for a in out["artifacts"]:
+        print(f"{a['id']:<32} v{a['version']:<3} {a['title']}")
+    return 0
+
+
+def cmd_where(o):
+    loc = locate(o.folder)
+    slug, path = store_path(loc["folder"])
+    print(json.dumps(dict(loc, store=path, slug=slug, files=FILES)))
+    return 0
+
+
+def cmd_show(o):
+    loc = find_anywhere(o.id)
+    with Store(loc, write=False) as s:
+        a = s.find(o.id)
+    if o.json:
+        print(json.dumps(public(a)))
+    else:
+        print(f"{a['title']}  ({a['id']}, v{a['version']})")
+        for v in reversed(a["versions"]):
+            print(f"  v{v['v']}  {time.strftime('%Y-%m-%d %H:%M', time.localtime(v['at'] / 1000))}  {v.get('note', '')}")
+    return 0
+
+
+def cmd_rm(o):
+    loc = find_anywhere(o.id)
+    with Store(loc) as s:
+        a = s.find(o.id)
+        s.data["artifacts"].remove(a)
+        s.dirty = True
+    shutil.rmtree(os.path.join(FILES, o.id), ignore_errors=True)
+    shutil.rmtree(os.path.join(APP, "mods", f"art-{o.id}"), ignore_errors=True)
+    prune_versions({"id": o.id, "versions": []})
+    print(json.dumps({"removed": o.id}) if o.json else f"Removed {o.id}.")
+    return 0
+
+
+def as_version(a, v):
+    """The record as version v shows it (v None: the latest). Fails when v isn't kept."""
+    if not v or v == a["version"]:
+        return dict(a, latest=a["version"])
+    if not any(x["v"] == v for x in a.get("versions") or []) or not os.path.isdir(os.path.join(FILES, a["id"], f"v{v}")):
+        raise Fail(f"v{v} of {a['id']} isn't kept (only the last {KEEP} versions are). `herdr-artifact show {a['id']}` lists them.")
+    return dict(a, version=v, latest=a["version"], files=None)
+
+
+def cmd_pack(o):
+    """A version's files (default: the current one) as a tar on stdout, with its record (for pull)."""
+    loc = find_anywhere(o.id)
+    with Store(loc, write=False) as s:
+        a = as_version(s.find(o.id), o.version)
+    d = os.path.join(FILES, a["id"], f"v{a['version']}")
+    with open(os.path.join(d, ".record.json"), "w") as f:
+        json.dump(dict(public(a), latest=a["latest"]), f)
+    sys.stdout.flush()
+    return subprocess.call(["tar", "-C", d, "-cf", "-", "."])
+
+
+def markup_hash():
+    try:
+        with open(MARKUP, "rb") as f:
+            return hashlib.sha1(f.read()).hexdigest()[:12]
+    except OSError:
+        return ""
+
+
+def current(mod, version):
+    """Whether the installed mod is this version with this app's Mark up."""
+    try:
+        with open(os.path.join(APP, "mods", mod, ".version")) as f:
+            got = f.read().split()
+    except OSError:
+        return False
+    h = markup_hash()
+    return got == [str(version), h] if h else got[:1] == [str(version)]
+
+
+def pull(aid, machine, version=None):
+    """Copies another machine's artifact into this window's app as art-<machine>-<id> (an older
+    version as art-<machine>-<id>--v<n>), unless it's already there. Returns the mod name."""
+    base = f"art-{re.sub(r'[^A-Za-z0-9_-]+', '-', machine)}-{aid}"
+    if version:
+        # pack --version needs this herdr-artifact there: --on installs it when it differs.
+        run([sys.executable, os.path.realpath(__file__), "--on", machine, "--version"])
+    with tempfile.TemporaryDirectory(prefix="herdr-artifact-") as d:
+        p = subprocess.run(["hc", "exec", "--on", machine, "--", "sh", "-c", 'exec "$HOME/.local/bin/herdr-artifact" pack "$@"', "x", aid,
+                            *(["--version", str(version)] if version else [])],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if p.returncode != 0:
+            raise Fail(f"Couldn't fetch {aid} from {machine}: {p.stderr.decode().strip() or 'herdr-artifact missing there?'}")
+        t = subprocess.run(["tar", "-C", d, "-xf", "-"], input=p.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if t.returncode != 0:
+            raise Fail(f"Couldn't unpack {aid} from {machine}.")
+        with open(os.path.join(d, ".record.json")) as f:
+            art = json.load(f)
+        latest = art.get("latest") or art["version"]
+        mod = base if art["version"] == latest else version_mod(base, art["version"])
+        if current(mod, art["version"]):
+            return mod
+        _, files = gather(d)
+        agent = f"{machine}/{art['publisher']}" if art.get("publisher") else None
+        write_mod(d, files, art, mod, agent, machine)
+    return mod
+
+
+def local_mod(aid, version=None):
+    """This machine's artifact as this app's mod art-<id> (an older version as art-<id>--v<n>),
+    written if it isn't there yet (or was installed before this app's Mark up)."""
+    loc = find_anywhere(aid)
+    with Store(loc, write=False) as s:
+        a = as_version(s.find(aid), version)
+    mod = f"art-{aid}" if a["version"] == a["latest"] else version_mod(f"art-{aid}", a["version"])
+    if not current(mod, a["version"]):
+        d = os.path.join(FILES, a["id"], f"v{a['version']}")
+        write_mod(d, a.get("files") or gather(d)[1], a, mod, a.get("publisher"))
+    return mod
+
+
+# ---- notes from the person (the viewer's Mark up) ------------------------------------------------
+
+def live_terminals():
+    r = run(["hc", "ls", "--json"])
+    try:
+        d = json.loads(r.stdout)
+    except ValueError:
+        return set()
+    rows = d if isinstance(d, list) else d.get("terminals", [])
+    return {x.get("address") for x in rows if x.get("state", "live") == "live"}
+
+
+def task_worker(task, folder, live):
+    """The live worker of a task ("HERD-47") of this folder, or None."""
+    prefix, _, n = (task or "").rpartition("-")
+    if not prefix or not n.isdigit():
+        return None
+    tdir = os.path.join(HOME, ".herdr", "tasks")
+    for f in sorted(os.listdir(tdir)) if os.path.isdir(tdir) else []:
+        if not f.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(tdir, f)) as fh:
+                d = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if d.get("folder") != folder or (d.get("prefix") or "").upper() != prefix.upper():
+            continue
+        t = next((x for x in d.get("tasks") or [] if str(x.get("id")) == n), None)
+        for ag in reversed((t or {}).get("agents") or []):
+            if ag.get("role") not in ("reviewer",) and ag.get("address") in live:
+                return ag["address"]
+    return None
+
+
+def keeper(a, folder):
+    """Who keeps an artifact: the agent that published it, while it runs; else its task's worker."""
+    live = live_terminals()
+    if a.get("publisher") in live:
+        return a["publisher"], "made it"
+    w = task_worker(a.get("task"), folder, live)
+    if w:
+        return w, f"works on {a['task']}"
+    raise Fail("The agent that made this artifact has ended" + (f", and {a['task']} has no agent running" if a.get("task") else "") + ".")
+
+
+def attr(s):
+    return re.sub(r"[<>]", "", str(s)).replace('"', "”")
+
+
+def crop_shot(shot, panel, area, out):
+    """The artifact's panel cut from a window shot (logical px rects), the spot outlined. The shot is
+    at the window's physical size: its scale is the shot's width over the window's (window.json),
+    snapped to a quarter."""
+    r = run(["magick", "identify", "-format", "%w", shot])
+    try:
+        pw = int(r.stdout.strip())
+        with open(os.path.join(APP, "window.json")) as f:
+            ww = float(json.load(f)["bounds"][2])
+        scale = max(1.0, round(pw / ww * 4) / 4)
+    except (ValueError, OSError, KeyError, IndexError, TypeError, ZeroDivisionError):
+        return False
+    px, py, pw_, ph = (round(v * scale) for v in panel)
+    ax, ay, aw, ah = ((v - o) * scale for v, o in zip(area, (panel[0], panel[1], 0, 0)))
+    if aw < 8 * scale and ah < 8 * scale:
+        cx, cy = ax + aw / 2, ay + ah / 2
+        draw = f"circle {cx:.0f},{cy:.0f} {cx + 14 * scale:.0f},{cy:.0f}"
+    else:
+        draw = f"rectangle {ax:.0f},{ay:.0f} {ax + aw:.0f},{ay + ah:.0f}"
+    r = run(["magick", shot, "-crop", f"{pw_}x{ph}+{px}+{py}", "+repage", "-fill", "none", "-stroke", "#2f81f7",
+             "-strokewidth", str(max(2, round(2 * scale))), "-draw", draw, out])
+    return r.returncode == 0 and os.path.isfile(out)
+
+
+def rect(s):
+    try:
+        v = [float(x) for x in s.split(",")]
+    except ValueError:
+        raise Fail(f"Not a rect (x,y,w,h): {s}")
+    if len(v) != 4:
+        raise Fail(f"Not a rect (x,y,w,h): {s}")
+    return v
+
+
+def cmd_note(o):
+    """The person's note on an artifact (the viewer's Mark up), sent to the agent that keeps it."""
+    image = o.image
+    if o.shot:
+        os.makedirs(NOTES, exist_ok=True)
+        for f in os.listdir(NOTES):  # a day later they go
+            try:
+                if os.path.getmtime(os.path.join(NOTES, f)) < time.time() - 86400:
+                    os.remove(os.path.join(NOTES, f))
+            except OSError:
+                pass
+        out = os.path.join(NOTES, f"{o.id}-v{o.version or 0}-{now()}.png")
+        try:
+            if o.panel and o.area and crop_shot(o.shot, rect(o.panel), rect(o.area), out):
+                image = out
+        finally:
+            try:
+                os.remove(o.shot)
+            except OSError:
+                pass
+    if o.machine:
+        args = ["note", o.id, "--text", o.text, "--json"] + (["--version", str(o.version)] if o.version else []) + (["--spot", o.spot] if o.spot else [])
+        if image:
+            rel = f".herdr/artifacts/notes/{os.path.basename(image)}"
+            with open(image, "rb") as f:
+                w = subprocess.run(["hc", "file", "write", "--on", o.machine, rel], input=f.read(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if w.returncode == 0:
+                args += ["--image", f"~/{rel}"]
+        # Through --on, which installs this herdr-artifact there first.
+        r = run([sys.executable, os.path.realpath(__file__), "--on", o.machine, *args])
+        try:
+            out = json.loads(r.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            raise Fail(r.stderr.strip() or f"Couldn't reach {o.machine}.")
+        if out.get("error"):
+            raise Fail(out["error"])
+        out["to"] = f"{o.machine}/{out['to']}"
+        print(json.dumps(out) if o.json else f"Sent to {out['to']}.")
+        return 0
+    loc = find_anywhere(o.id)
+    with Store(loc, write=False) as s:
+        a = s.find(o.id)
+    v = o.version or a["version"]
+    to, why = keeper(a, loc["folder"])
+    on = f' on="{attr(o.spot)}"' if o.spot else ""
+    lines = [o.text.strip()]
+    if v != a["version"]:
+        lines.append(f"(Written on v{v}; the latest is v{a['version']}.)")
+    if image:
+        lines.append(f"The artifact as they saw it, the spot outlined in blue: {image}")
+    body = f'<hc from="artifact" id="{attr(a["id"])}" version="{v}" title="{attr(a["title"])}"{on}>\n' + "\n\n".join(lines) + "\n</hc>"
+    r = run(["hc", "send", to, body])
+    if r.returncode != 0:
+        raise Fail(r.stderr.strip() or r.stdout.strip() or f"Couldn't send it to {to}.")
+    out = {"to": to, "why": why, "version": v, "image": image}
+    print(json.dumps(out) if o.json else f"Sent to {to} ({why}).")
+    return 0
+
+
+def cmd_pull(o):
+    mod = pull(o.id, o.machine, o.version) if o.machine else local_mod(o.id, o.version)
+    print(json.dumps({"mod": mod}) if o.json else mod)
+    return 0
+
+
+def cmd_open(o):
+    """Shows an artifact in this window: beside a pane, or in a new tab."""
+    mod = pull(o.id, o.machine) if o.machine else local_mod(o.id)
+    if o.tab:
+        args = ["herdr-app", "do", "tab.new", "--mod", mod]
+    else:
+        args = ["herdr-app", "do", "pane.split", "--direction", o.direction, "--mod", mod] + (["--pane", o.beside] if o.beside else [])
+    r = run(args)
+    if r.returncode != 0:
+        raise Fail(r.stdout.strip() or r.stderr.strip() or "herdr-app couldn't open it")
+    print(r.stdout.strip() if o.json else f"Opened {mod}.")
+    return 0
+
+
+EXAMPLE = '''import { View, div } from "gpui-kit";
+import { v_flex, h_flex } from "gpui-base";
+import { theme } from "herdr";
+import { reply } from "./artifact.js";
+
+// No title here: the viewer shows it right above this panel.
+export default class Artifact extends View {
+  init() { this.sent = false; }
+
+  render() {
+    const t = theme();
+    return v_flex().size_full().p(16).gap(12).bg(t.background).text_color(t.foreground).text_size(13)
+      .child(div().text_color(t.muted).child("Replace this with what you want to show."))
+      .child(h_flex().gap(8)
+        .child(div().id("ok").px(12).py(6).rounded(6).bg(t.solid).text_color(t.solid_foreground)
+          .cursor_pointer().hover((s) => s.opacity(0.9))
+          .on_click((_e, cx) => cx.spawn(async (cx) => { this.sent = await reply("Looks good."); cx.notify(); }))
+          .child(this.sent ? "Sent" : "Looks good")));
+  }
+}
+'''
+
+
+def cmd_new(o):
+    d = os.path.realpath(os.path.expanduser(o.dir))
+    if os.path.exists(os.path.join(d, "main.js")):
+        raise Fail(f"{d}/main.js exists already.")
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "main.js"), "w") as f:
+        f.write(EXAMPLE)
+    # So editors know the herdr and gpui-kit modules while the agent writes it.
+    with open(os.path.join(d, "jsconfig.json"), "w") as f:
+        json.dump({"compilerOptions": {"checkJs": True, "paths": {"gpui-kit": [os.path.join(APP, "gpui-kit.d.ts")], "herdr": [os.path.join(APP, "herdr.d.ts")]}}}, f, indent=2)
+    print(f"Wrote {d}/main.js. Edit it, then: herdr-artifact publish {o.dir} --title \"...\"")
+    return 0
+
+
+def cmd_guide(_o):
+    with open(GUIDE) as f:
+        sys.stdout.write(f.read())
+    return 0
+
+
+# ---- another machine ------------------------------------------------------------------------
+
+# Shepherdr's installer holds every copy of the helpers to other machines (this file, removed by
+# `shepherdr doctor` once the install is whole), as herdr-task's base.sync_held.
+SYNC_HOLD = os.path.join(HOME, ".herdr", "sync-hold")
+
+
+def sync_held():
+    """Why copies to other machines wait now (the hold's first line), or None."""
+    try:
+        with open(SYNC_HOLD) as f:
+            return f.readline().strip() or "held by Shepherdr's installer"
+    except OSError:
+        return None
+
+
+def remote(machine, argv):
+    """Runs herdr-artifact on the machine that holds the folder, installing it there first."""
+    me_ = os.path.realpath(__file__)
+    with open(me_, "rb") as f:
+        body = f.read()
+    digest = hashlib.sha1(body).hexdigest()
+    mark = os.path.join(STORE, ".remote", machine)
+    target = ".local/bin/herdr-artifact"
+    try:
+        with open(mark) as f:
+            installed = f.read().strip() == digest
+    except OSError:
+        installed = False
+
+    def install():
+        held = sync_held()
+        if held:
+            raise Fail(f"herdr-artifact isn't current on {machine}, and copies to other machines wait: {held}. "
+                       "Run `shepherdr doctor` once the install is whole.")
+        r = subprocess.run(["hc", "file", "write", "--on", machine, target], input=body, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if r.returncode != 0:
+            raise Fail(f"Couldn't install herdr-artifact on {machine}: {r.stderr.decode().strip()}")
+        subprocess.run(["hc", "exec", "--on", machine, "--", "chmod", "+x", target], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        os.makedirs(os.path.dirname(mark), exist_ok=True)
+        with open(mark, "w") as f:
+            f.write(digest)
+
+    # Held (sync_held): no copy goes; the copy already there runs.
+    if not installed and not sync_held():
+        install()
+    call = ["hc", "exec", "--on", machine, "--", "sh", "-c", 'exec "$HOME/.local/bin/herdr-artifact" "$@"', "herdr-artifact", *argv]
+    r = run(call)
+    if r.returncode == 127 or ("not found" in r.stderr and not r.stdout):
+        install()
+        r = run(call)
+    sys.stderr.write(r.stderr)
+    sys.stdout.write(r.stdout)
+    return r.returncode
+
+
+def main():
+    argv = sys.argv[1:]
+    if argv[:1] == ["--on"] and len(argv) > 1:
+        try:
+            return remote(argv[1], argv[2:])
+        except Fail as e:
+            print(json.dumps({"error": str(e)}) if "--json" in argv else f"herdr-artifact: {e}", file=sys.stdout if "--json" in argv else sys.stderr)
+            return 1
+    if argv[:1] == ["--version"]:
+        print(VERSION)
+        return 0
+
+    p = argparse.ArgumentParser(prog="herdr-artifact", description="Herdr's artifacts: tiny Herdr panels an agent makes to show the person something.",
+                                epilog="`herdr-artifact guide` explains how to write one. Another machine's folder: herdr-artifact --on <machine> <command> ...")
+    sub = p.add_subparsers(dest="cmd")
+
+    def cmd(name, fn, help):
+        c = sub.add_parser(name, help=help)
+        c.add_argument("--json", action="store_true", help="JSON output")
+        c.set_defaults(fn=fn)
+        return c
+
+    c = cmd("publish", cmd_publish, "check a mod folder and publish it (a new artifact, or with --id a new version)")
+    c.add_argument("dir", help="the folder with main.js")
+    c.add_argument("--title", help="what it is, for people (needed for a new one)")
+    c.add_argument("--id", help="an artifact's id: publish a new version of it")
+    c.add_argument("--folder", help="the folder it belongs to (default: here)")
+    c.add_argument("--task", help="the task it's for (default: this agent's task)")
+    c.add_argument("--note", help="what changed in this version")
+    c = cmd("update", cmd_publish, "publish a new version of an artifact (publish --id)")
+    c.add_argument("id")
+    c.add_argument("dir")
+    c.add_argument("--title")
+    c.add_argument("--note")
+    c.set_defaults(folder=None, task=None)
+    c = cmd("list", cmd_list, "a folder's artifacts, newest first")
+    c.add_argument("--folder")
+    c.add_argument("--all", action="store_true", help="every folder's on this machine")
+    c = cmd("show", cmd_show, "an artifact and its versions")
+    c.add_argument("id")
+    c = cmd("rm", cmd_rm, "delete an artifact and its versions")
+    c.add_argument("id")
+    c = cmd("new", cmd_new, "write a starting main.js into a folder")
+    c.add_argument("dir")
+    cmd("guide", cmd_guide, "how to write an artifact")
+    c = cmd("where", cmd_where, "where a folder's artifacts are listed")
+    c.add_argument("--folder")
+    c = cmd("open", cmd_open, "show an artifact in this window")
+    c.add_argument("id")
+    c.add_argument("--from", dest="machine", help="the machine it's on (default: this one)")
+    c.add_argument("--beside", help="a pane to open it beside (default: the focused one)")
+    c.add_argument("--direction", default="right", choices=["right", "down"])
+    c.add_argument("--tab", action="store_true", help="in a new tab instead")
+    c = cmd("note", cmd_note, "send the person's note on an artifact to the agent that keeps it (the viewer's Mark up)")
+    c.add_argument("id")
+    c.add_argument("--text", required=True, help="what the person wrote")
+    c.add_argument("--version", type=int, help="the version they were looking at (default: the latest)")
+    c.add_argument("--spot", help="where on it, in words")
+    c.add_argument("--image", help="a picture of it, a path the agent can read")
+    c.add_argument("--shot", help="a window shot (herdr-app shot) to cut the panel from; removed after")
+    c.add_argument("--panel", help="the panel in the shot, logical px: x,y,w,h")
+    c.add_argument("--area", help="the marked spot in the shot, logical px: x,y,w,h")
+    c.add_argument("--from", dest="machine", help="the machine the artifact is on (default: this one)")
+    c = cmd("pull", cmd_pull, argparse.SUPPRESS)
+    c.add_argument("id")
+    c.add_argument("--from", dest="machine", help="the machine it's on (default: this one)")
+    c.add_argument("--version", type=int, help="an older version (default: the latest)")
+    c = cmd("pack", cmd_pack, argparse.SUPPRESS)
+    c.add_argument("id")
+    c.add_argument("--version", type=int)
+
+    o = p.parse_args(argv)
+    if not o.cmd:
+        p.print_help()
+        return 0
+    try:
+        return o.fn(o)
+    except Fail as e:
+        if getattr(o, "json", False):
+            print(json.dumps({"error": str(e)}))
+        else:
+            print(f"herdr-artifact: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,11 +1,11 @@
-# The whole check (types, every test with the browser ones, the build) on GitHub's runners, on every pull request to
-# main and every push to main (a merge): the full suite runs here, not on the machine the agents work on (AGENTS.md). A
-# task waits for its pull request's run before it merges, and Shepherdr tells the coordinator when main goes red. A
-# branch with no pull request can still be checked by hand: gh workflow run check.yml --ref <branch>.
+# Shepherdr 3.0's check on GitHub's runners, on every pull request to main and every push to main (a merge). A task
+# waits for its pull request's run before it merges. A branch with no pull request can still be checked by hand:
+# gh workflow run check.yml --ref <branch>.
 #
-# Lean, as GitHub bills each job by the minute, rounded up: the types and the build share one job, and the tests run
-# split over three runners (bun test --shard, balanced by each file's time on the last run), which also note which
-# lines of the screen each browser test runs. Whatever doesn't change between runs comes from the cache.
+# One lean job (GitHub bills by the minute): the shared lib copies, every mod's JavaScript parsed, the TypeScript
+# helpers built, the Python compiled, the repo's own rules (test_repo), the installer against throwaway roots
+# (test_install: install, again, update, clash, adopt, uninstall, dry run) and herdr-task's commands.
+# herdr-app check needs Herdr's window runtime, which a runner doesn't have: mods are checked on a person's machine.
 name: Check
 
 on:
@@ -20,98 +20,53 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # refs/pull/<n>/merge on a pull request, refs/heads/main on a merge: each only ever cancels its own older run
   group: check-${{ github.ref }}
-  # a newer push makes an older run moot: its verdict covers the older commits too
   cancel-in-progress: true
 
-env:
-  # tests that make commits need someone to make them, whatever HOME they run with
-  GIT_AUTHOR_NAME: CI
-  GIT_AUTHOR_EMAIL: ci@localhost
-  GIT_COMMITTER_NAME: CI
-  GIT_COMMITTER_EMAIL: ci@localhost
-  # each file's time on the last run, which balances the shards (scripts/test.ts keeps it there)
-  TIMINGS: node_modules/.cache/shepherdr-test/timings.json
-
 jobs:
-  types:
-    name: types and build
+  check:
+    name: check
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
-      - uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: bun-${{ runner.os }}-
-      - run: bun install --frozen-lockfile
-      - run: bun run typecheck
-      - run: bun run build
-
-  test:
-    name: test (${{ matrix.shard }}/3)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      # every shard finishes, so one run shows every failure
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.2
-      - uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: bun-${{ runner.os }}-
-      - run: bun install --frozen-lockfile
-      # Real Autopilot namespace enforcement tests use fake agents and no provider credentials.
-      - run: sudo apt-get update -qq && sudo apt-get install -y bubblewrap
-      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      # Chromium's headless shell for playwright-core, at the version it wants (the runner has the libraries it needs),
-      # and WebKit, Safari's engine, for an iPhone's tests (layout-iphone.test.ts), with the libraries it needs
-      - id: playwright
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-shell-webkit-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-      - if: steps.playwright.outputs.cache-hit != 'true'
-        run: bun x playwright-core install --only-shell chromium && bun x playwright-core install webkit
-      - run: bun x playwright-core install-deps webkit
-      # the screen the browser tests open (test/web.ts), built from these files: a build of other files is left unused
-      - uses: actions/cache@v4
-        with:
-          path: node_modules/.cache/shepherdr-test/dist-*
-          key: screen-maps-${{ hashFiles('index.html', 'vite.config.ts', 'tsconfig.json', 'package.json', 'bun.lock', 'plugins.json', 'src/**', 'plugins/**', 'shared/**', 'public/**') }}
-      # the newest times any shard saved: each carries every file's time forward, with its own files' fresh ones
-      - uses: actions/cache/restore@v4
-        with:
-          path: ${{ env.TIMINGS }}
-          key: test-timings-${{ github.run_id }}
-          restore-keys: test-timings-
-      # Which lines of the screen each of this shard's browser tests runs, for the test runs on the agents' machine: a
-      # change to the screen there runs only the browser tests that reach it (test/screen-map.ts puts the shards' maps
-      # of main's newest green run together)
-      - run: bun run test --shard=${{ matrix.shard }}/3 --map=screen-map.json
-      - if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: screen-map-${{ matrix.shard }}
-          path: screen-map.json
-          if-no-files-found: ignore
-          retention-days: 30
-      # only a help: it never fails the check
-      - if: always()
-        uses: actions/cache/save@v4
-        continue-on-error: true
-        with:
-          path: ${{ env.TIMINGS }}
-          key: test-timings-${{ github.run_id }}-${{ matrix.shard }}
+      - name: shared lib copies match lib/
+        run: python3 bin/sync-shared --check
+      - name: JavaScript parses
+        run: |
+          fail=0
+          for f in $(find mods lib -name '*.js'); do
+            node --input-type=module --check < "$f" || { echo "::error file=$f::doesn't parse"; fail=1; }
+          done
+          exit $fail
+      - name: TypeScript helpers build
+        run: |
+          for f in $(find mods -name '*.ts'); do
+            bun build --no-bundle --target bun "$f" > /dev/null || exit 1
+          done
+      - name: JSON parses
+        run: for f in keys.json layouts/*.json lib/addons.json $(find mods -name '*.json'); do python3 -m json.tool "$f" > /dev/null || exit 1; done
+      - name: shell scripts parse
+        # each with the shell its first line names (bash scripts use bash-only syntax; sh is dash here)
+        run: |
+          for f in install.sh guard/herdr-app $(find mods -name '*.sh'); do
+            case "$(head -1 "$f")" in *bash*) bash -n "$f" ;; *) sh -n "$f" ;; esac || { echo "::error file=$f::doesn't parse"; exit 1; }
+          done
+      - name: tests (repo rules, installer, herdr-task)
+        run: python3 -m unittest discover -s test -v
+      - name: installer into a brand-new throwaway home (dry run, install, doctor, uninstall)
+        run: |
+          root=$(mktemp -d)
+          ./install.sh --root "$root" --dry-run --yes
+          ./install.sh --root "$root" --yes
+          python3 bin/shepherdr doctor --root "$root"
+          python3 bin/shepherdr uninstall --root "$root"

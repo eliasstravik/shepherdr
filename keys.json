@@ -1,0 +1,42 @@
+{
+  "global": {
+    "alt-1": "tab.select:1",
+    "alt-2": "tab.select:2",
+    "alt-3": "tab.select:3",
+    "alt-4": "tab.select:4",
+    "alt-5": "tab.select:5",
+    "alt-6": "tab.select:6",
+    "alt-7": "tab.select:7",
+    "alt-8": "tab.select:8",
+    "alt-9": "tab.select:9",
+    "alt-left": "tab.prev",
+    "alt-right": "tab.next",
+    "alt-down": "space.next",
+    "alt-up": "space.prev",
+    "alt-enter": "pane.split:right",
+    "alt-shift-enter": "pane.split:down",
+    "alt-escape": "pane.close",
+    "ctrl-alt-left": "pane.go:left",
+    "ctrl-alt-down": "pane.go:down",
+    "ctrl-alt-up": "pane.go:up",
+    "ctrl-alt-right": "pane.go:right",
+    "ctrl-k": "mod.open:jump",
+    "ctrl-shift-k": "mod.open:jump",
+    "ctrl-shift-/": "mod.open:keybinds",
+    "ctrl-shift-?": "mod.open:keybinds"
+  },
+  "terminal": {
+    "ctrl-v": "terminal.paste"
+  },
+  "mod:chat": {
+    "ctrl-shift-d": "chat.dictate",
+    "ctrl-shift-space": "chat.call",
+    "ctrl-f": "chat.find"
+  },
+  "layout:shepherdr": {
+    "ctrl-shift-w": "tabs-tasks.close",
+    "ctrl-shift-n": "tabs-tasks.newspace",
+    "f2": "tabs-tasks.rename-tab",
+    "shift-f2": "tabs-tasks.rename-space"
+  }
+}

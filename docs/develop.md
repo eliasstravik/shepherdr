@@ -1,39 +1,59 @@
 # Develop
 
-Read [AGENTS.md](../AGENTS.md). On the shared agent VM, run only `bun run typecheck`.
-Do not run local test suites, browser suites or full build checks. Inspect UI changes
-by hand in the shared browser. GitHub runs the suites and production build.
-
-The rewrite branch's [Core rewrite workflow](../.github/workflows/core-rewrite.yml)
-checks this integration branch without deploying main. The Check workflow remains
-the full check on every pull request to main and after each merge. Neither installs
-services, changes private sharing, migrates state or publishes a release.
-
-Use [isolated preview startup](core/start.md), with a separate home, port and core
-session. Never use live `~/.shepherdr` for development. The optional fictional demo
-uses `SHEPHERDR_SOURCE=demo bun server/main.ts`; it is UI fixture data, not acceptance
-proof. Its optional browser is local-only, without any remote sharing or SSH code.
-Vite can proxy an isolated app through `SHEPHERDR_API_URL`.
-Codex keeps one trust fingerprint per hook slot for all Shepherdr installs, so trusting hooks in a second checkout
-untrusts the first; a preview or moved checkout will do this.
-
 ```text
-server/core/       core client, product state, tasks and standalone lifecycle
-server/common/     shared log readers, parsers, vault and demo formatting
-server/demo/       fictional UI world and optional local demo browser
-server/app.ts      private HTTP/WebSocket app
-src/               existing screen kernel and shared presentation
-plugins/           built-in plugin parts
-helper/core-*.ts   immutable authenticated helpers executed through core
-bin/shepherdr      standalone lifecycle/human control or authenticated agent mailbox
-bin/agent-browser  pinned shared-browser wrapper
-skill/             agent and coordinator guides
+layouts/shepherdr.json   the layout (two live blocks shipped blank: tasks-thread-term, artifacts-view-body)
+mods/<name>/             the 29 mods, installed as they are (names fixed: data/<mod> state follows them)
+lib/                     shared modules, one source each; bin/sync-shared copies them into the mods in lib/COPIES
+lib/addons.json          the add-ons: mods, blocks, keys, helpers, needs (docs/addons.md)
+bin/shepherdr            the installer (install, update, uninstall, doctor, whisper); ./install.sh runs it
+bin/                     herdr-secret, herdr-browser, herdr-browser-view, sync-shared (installed to the app's bin/)
+mods/tasks/bin/          herdr-task (entry) and its herdr_task package
+mods/artifacts/bin/      herdr-artifact
+templates/               assistant.md, worker.md, reviewer.md (herdr-core templates)
+guard/herdr-app          the window guard (--guard)
+keys.json                Shepherdr's keys, merged into the person's
+test/                    python tests: repo rules, the installer in throwaway roots, herdr-task
+scripts/parity.py        a scratch install against this machine's live Herdr home, file by file
+RECIPE.md, preview.png   the herdr.dev listing (repo topic herdr-layout)
 ```
 
-Write meaningful unit, integration and layout regressions for GitHub. New UI cases
-belong in their topic's `layout-*.test.ts` file. Core protocol fakes test boundaries;
-they do not replace real native-agent or device acceptance.
+## Rules
 
-Task IDs and workflow records live in the selected application's private SQLite
-store. Prefix/next-number changes are per repository space and only move forward.
-No 2.0 JSON/task-ID import is performed. See [state and cutover](core/cutover.md).
+- Edit `lib/<file>`, never a mod's copy, then run `bin/sync-shared`; `bin/sync-shared --check` must pass.
+- A new mod: add it to an add-on in `lib/addons.json` (the tests fail otherwise), write its `mod.json` before or
+  with `main.js`, and list it in `lib/COPIES` for each shared module it imports.
+- Nothing personal: no absolute home paths (use `home()`, `appHome()`, `$HOME`), no machine or account names, no
+  live terminal or artifact ids in the layout. `test/test_repo.py` checks.
+- Version: `VERSION` in `bin/shepherdr`, the top of `CHANGELOG.md`, `RECIPE.md` and the README say the same.
+
+## Checks
+
+Quick, fine on any machine (seconds):
+
+```bash
+bin/sync-shared --check
+python3 -m unittest discover -s test            # herdr-task's command test runs only on CI
+for f in $(find mods lib -name '*.js'); do node --input-type=module --check < "$f"; done
+```
+
+GitHub runs these and more on every pull request (`.github/workflows/check.yml`). `herdr-app check <mod folder>`
+needs the window's runtime and runs a mod's `init()` for real (it can reach the live app): only on a person's
+machine, and never for `shepherdr-settings` (its init pushes settings to other machines).
+
+## Parity check (a machine that runs these mods by hand)
+
+```bash
+./install.sh --root /tmp/shep-try --yes          # into a scratch root holding a fresh Herdr home
+python3 scripts/parity.py /tmp/shep-try          # every difference with the live ~/.config/herdr-app
+```
+
+Never point `--root` at the real home for a try, and never start Herdr or herdr-task with a changed `HOME` or
+`HERDR_APP_HOME`: a window or scheduler on another home can overwrite every machine's spaces.
+
+## The herdr.dev listing (at release, with the person's yes)
+
+- The repo root is the listed layout folder: `layouts/shepherdr.json`, `mods/`, `RECIPE.md`, `preview.png`,
+  `keys.json`. herdr.dev reads the recipe's title and first paragraph.
+- Repo topics: add `herdr-layout` (the listing), keep `herdr` and `shepherdr`, and drop `herdr-plugin` (the
+  terminal-plugin card; `herdr-plugin.toml` is gone from main, 2.1 stays installable from `v2.1`).
+- Tag `v3.0.0` and the GitHub release only after the person says yes; patch bumps after that.

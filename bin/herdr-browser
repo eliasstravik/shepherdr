@@ -1,0 +1,105 @@
+#!/bin/sh
+# herdr-browser: a Herdr task's own browser (HERD-57). agent-browser at the version Herdr pins, on
+# the task's own session and profile, so every agent of a task drives the same browser and its
+# sign-ins stay with the task:
+#   session  herdr-<task>               (agent-browser --session)
+#   profile  ~/.herdr/browser/<task>    (a Chrome profile folder: cookies and sign-ins kept)
+# <task> is the task's herdr.task key (<slug>#<id>) made safe for a name: ".config-herdr-app#57"
+# is "config-herdr-app-57". Which task: --task <key>, else $HERDR_BROWSER_TASK (herdr-task gives
+# its workers that), else the herdr.task label of the terminal it runs in ($HC_TERMINAL_ID).
+#
+# Beside the profile, plain files Herdr reads (herdr-task tick, the task panel's Browser view):
+#   <task>.task   the task's key, so a tick can find its task again
+#   <task>.used   touched by every agent command: tick closes a browser idle past its setting
+#   <task>.you    the person drives it (Take over in the panel): acting commands are refused while
+#                 it is fresh (the panel touches it every 30 s), so the agent holds off
+# --own: Herdr's own commands (the panel); they don't count as the agent using it, nor get refused.
+# --name: prints the session and profile it would use, as JSON, and runs nothing.
+
+PIN=0.41.1
+root="$HOME/.herdr/browser"
+task=${HERDR_BROWSER_TASK-}
+own=
+while :; do
+  case "${1-}" in
+    --task) task=${2-}; shift 2 || exit 2 ;;
+    --own) own=1; shift ;;
+    --name) show=1; shift ;;
+    *) break ;;
+  esac
+done
+if [ -z "$task" ] && [ -n "${HC_TERMINAL_ID-}" ]; then
+  task=$(hc get "$HC_TERMINAL_ID" --json 2>/dev/null | python3 -c 'import json,sys
+try: print((json.load(sys.stdin).get("labels") or {}).get("herdr.task") or "")
+except Exception: pass' 2>/dev/null)
+fi
+if [ -z "$task" ]; then
+  echo "herdr-browser: which task's browser? Run it from a task's agent, or pass --task <slug#id>." >&2
+  exit 2
+fi
+name=$(printf %s "$task" | sed 's/[^A-Za-z0-9_-]/-/g; s/--*/-/g; s/^-//; s/-$//')
+session="herdr-$name"
+profile="$root/$name"
+if [ -n "${show-}" ]; then
+  printf '{"task":"%s","session":"%s","profile":"%s","pin":"%s"}\n' "$task" "$session" "$profile" "$PIN"
+  exit 0
+fi
+
+# Its session and profile are Herdr's: another one would start a second browser beside it.
+for a in "$@"; do
+  case "$a" in
+    --session|--session=*|--profile|--profile=*|--cdp|--cdp=*|--auto-connect|--namespace|--namespace=*)
+      echo "herdr-browser: $a isn't needed: this task's browser is always session $session (profile $profile)." >&2
+      exit 2 ;;
+  esac
+done
+
+# The pinned version: two versions on one session keep restarting its daemon. Asked once per
+# binary (its path and change time), then kept.
+bin=${HERDR_BROWSER_BIN:-$(command -v agent-browser)}
+if [ -z "$bin" ]; then
+  echo "herdr-browser: agent-browser isn't installed here. Install it: npm i -g agent-browser@$PIN, then agent-browser install (Chrome)." >&2
+  exit 127
+fi
+mkdir -p "$root" 2>/dev/null && chmod 700 "$root" 2>/dev/null
+real=$(readlink -f "$bin" 2>/dev/null || echo "$bin")
+stamp="$real $(stat -c %Y "$real" 2>/dev/null || stat -f %m "$real" 2>/dev/null)"
+ver=
+[ -f "$root/.version" ] && ver=$(awk -v s="$stamp" 'substr($0, 1, length(s)) == s { print $NF }' "$root/.version")
+if [ -z "$ver" ]; then
+  ver=$("$bin" --version 2>/dev/null | awk '{ print $NF }')
+  [ -n "$ver" ] && printf '%s %s\n' "$stamp" "$ver" > "$root/.version"
+fi
+if [ "$ver" != "$PIN" ]; then
+  echo "herdr-browser: Herdr runs agent-browser $PIN; this machine has ${ver:-an unknown version} ($bin). Install it: npm i -g agent-browser@$PIN" >&2
+  exit 127
+fi
+
+# The first word that isn't a flag: what the command does.
+verb=
+for a in "$@"; do case "$a" in -*) ;; *) verb=$a; break ;; esac; done
+
+if [ -z "$own" ]; then
+  # The person drives it now: only looking is allowed.
+  you="$root/$name.you"
+  if [ -f "$you" ] && [ -n "$(find "$you" -mmin -2 2>/dev/null)" ]; then
+    case "$verb" in
+      snapshot|screenshot|get|is|session|stream|console|errors|""|help|--help) ;;
+      *)
+        echo "herdr-browser: the person took over this task's browser in Herdr and is using it now. Hold off: don't drive it until they hand it back (snapshot, screenshot and get still work). Check again in a minute, or ask in your chat." >&2
+        exit 3 ;;
+    esac
+  fi
+  touch "$root/$name.used" 2>/dev/null
+fi
+[ -f "$root/$name.task" ] || printf '%s\n' "$task" > "$root/$name.task"
+
+# Pages see prefers-reduced-motion (Chrome draws them in software, so an animation costs a core);
+# an agent whose page must move turns it off with: set media no-preference.
+export AGENT_BROWSER_ARGS="${AGENT_BROWSER_ARGS:---force-prefers-reduced-motion}"
+# The session's stream (read when its daemon starts) carries the tab, its address and the person's
+# input for Herdr's Browser view; its pictures come from Chrome directly (bin/herdr-browser-view),
+# so the stream's own are kept small and cheap.
+export AGENT_BROWSER_STREAM_MAX_WIDTH="${AGENT_BROWSER_STREAM_MAX_WIDTH:-320}"
+export AGENT_BROWSER_STREAM_QUALITY="${AGENT_BROWSER_STREAM_QUALITY:-40}"
+exec "$bin" --session "$session" --profile "$profile" "$@"
