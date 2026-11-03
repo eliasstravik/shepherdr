@@ -52,7 +52,7 @@ class Install(unittest.TestCase):
 
     def test_install_again_update_uninstall(self):
         out = run("install", "--root", self.root, "--yes").stdout
-        self.assertIn(" new", out)
+        self.assertRegex(out, r"files: \d+ new\n")
         rec = json.load(open(self.p(APP, "data/shepherdr/installed.json")))
         self.assertEqual(rec["version"], "3.0.0")
         self.assertTrue(os.path.isfile(self.p(APP, "mods/tasks/bin/herdr-task")))
@@ -74,7 +74,7 @@ class Install(unittest.TestCase):
 
         # Again: nothing changes, no hold.
         again = run("install", "--root", self.root, "--yes").stdout
-        self.assertNotIn(" new", again)
+        self.assertRegex(again, r"files: \d+ same\n", "a second run changes nothing")
         self.assertFalse(os.path.exists(self.p(".herdr/sync-hold")))
 
         # A file the person changed is kept, the new one goes beside it.
