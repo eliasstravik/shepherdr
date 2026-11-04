@@ -117,7 +117,7 @@ In `~/.herdr/` on each machine: tasks (`~/.herdr/tasks`), worktrees, artifacts, 
 
 ### Can I use several machines?
 
-Yes. Shepherdr is installed once, in the Herdr app on your main machine. Every other machine you add to herdr-core (`hc machine add <ssh target>`, or Add machine in the sidebar) shows up in the sidebar on its own, with its spaces, tasks and Assistants. herdr-task copies itself, its helpers and the role instructions there, and keeps them current. It needs herdr-core, Python, Git and your agent CLI, and nothing of Shepherdr's installed by hand.
+Yes. Shepherdr is installed once, in the Herdr app on your main machine. Every other machine you add to herdr-core (`hc machine add <ssh target>`, or Add machine in the sidebar) shows up in the sidebar on its own, with its spaces, tasks and Assistants. herdr-task copies itself, its helpers and the role instructions there, and keeps them current. It needs herdr-core, Python, Git and your agent CLI, and nothing of Shepherdr's installed by hand. The web app can be served from one of them that stays on (a Mac mini, a cloud VM): Shepherdr settings → Web → Serve from, or `shepherdr web serve-from <machine>`; [Web](docs/web.md) has how.
 
 ### Do I have to start every task through an Assistant?
 

@@ -798,10 +798,55 @@ def cmd_uninstall_web(a, root):
 
 # ---- doctor -------------------------------------------------------------------------------------
 
+def serve_check(root):
+    """Serve from: which machine serves the web app (what the service last wrote, web.json), and /shepherdr shared here
+    only while this machine serves it. Returns (bad, notes)."""
+    try:
+        w = json.load(open(os.path.join(root, HERDR, "shepherdr", "web.json")))
+    except (OSError, ValueError):
+        return [], ["the service hasn't said where the web app is served yet (~/.herdr/shepherdr/web.json)"]
+    sv = w.get("serve") or {}
+    host = sv.get("host")
+    notes = [f"web app: served from {host or 'this machine'}" + (f", {w['link']}" if w.get("link") else "")]
+    bad = []
+    if sv.get("error"):
+        bad.append(f"the last move didn't finish: {sv['error']}")
+    if w.get("why"):
+        notes.append(f"web app: {w['why']}")
+    if host and not sv.get("reachable"):
+        notes.append(f"{host} can't be reached now: this machine keeps its own copy of the shared data until it's back")
+    tailscale = shutil.which("tailscale")
+    if host and tailscale:
+        p = subprocess.run([tailscale, "serve", "status", "--json"], capture_output=True, text=True)
+        try:
+            for web in (json.loads(p.stdout or "{}").get("Web") or {}).values():
+                if ((web.get("Handlers") or {}).get("/shepherdr") or {}).get("Proxy", "").endswith(":7788"):
+                    bad.append(f"/shepherdr is still shared from here while {host} serves it: two links")
+        except ValueError:
+            pass
+    return bad, notes
+
+
 def cmd_doctor(a):
     root = os.path.realpath(a.root or real_home())
     home = root == os.path.realpath(real_home())
     rec = load_record(root)
+    if not rec and os.path.isfile(os.path.join(root, WEB_RECORD)):
+        # web only: its files and links, and where the web app is served from
+        rec = json.load(open(os.path.join(root, WEB_RECORD)))
+        r = Run(root, True)
+        bad = [f"missing: {rel}" for rel in sorted(rec.get("files", {})) if read(r.p(rel)) is None]
+        bad += [f"link {BIN}/{n} doesn't lead to {d}" for n, d in rec.get("links", {}).items()
+                if not os.path.islink(r.p(f"{BIN}/{n}")) or os.path.realpath(r.p(f"{BIN}/{n}")) != os.path.realpath(d)]
+        s_bad, s_notes = serve_check(root) if home else ([], [])
+        say(f"Shepherdr {rec.get('version')} (web only) under {root} (from {rec.get('source')}, {rec.get('at')})")
+        for x in bad + s_bad:
+            say(f"  ✗ {x}")
+        for x in s_notes:
+            say(f"  - {x}")
+        if not bad + s_bad:
+            say("  ✓ whole")
+        return 1 if bad + s_bad else 0
     if not rec:
         raise Stop(f"Shepherdr isn't installed under {root}")
     r = Run(root, True)
@@ -838,6 +883,10 @@ def cmd_doctor(a):
             warn.append(f"hook missing in {f} ({event}): questions from that CLI won't reach the chat")
     t_bad, t_notes = check_tools(home)
     bad += t_bad
+    if home:
+        s_bad, s_notes = serve_check(root)
+        bad += s_bad
+        t_notes += s_notes
     model = r.p(f"{APP}/data/whisper/ggml-base.bin")
     if not os.path.isfile(model):
         warn.append(f"dictation's model isn't there: `shepherdr whisper` downloads it ({APP}/data/whisper/ggml-base.bin, 148 MB)")
