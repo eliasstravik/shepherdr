@@ -20,13 +20,14 @@ import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { exec, shared, setShared, appHome, home, machines, knownAgents, readTextFile } from "herdr";
 import { heading } from "./ui.js";
+// The meters, their levels and the start limits: core/machines.js, shared with the web app.
+import { HOLD, ALERT, settingsKey, holdOf, nextRead, healthMeters } from "./core/machines.js";
+export { HOLD, ALERT, settingsKey, holdOf, healthMeters };
 
 const KEY = "machines.stats";
 const HEALTH_EVERY = 45000, LIMITS_EVERY = 10 * 60000, ROUND = 30000;
 // A number older than this says how old it is.
 const OLD = 15 * 60000;
-export const HOLD = { start_load: 1, start_memory: 80, start_disk: 90 };
-export const ALERT = { load: 1.5, memory: 90, disk: 90 };
 // The CLIs with a usage source; any other installed agent says "No usage info".
 const READS = { claude: "Claude Code", codex: "Codex" };
 
@@ -39,13 +40,6 @@ let running = false;
 export const allStats = () => { const v = shared(KEY); return v && typeof v === "object" ? v : {}; };
 export const statsOf = (machine) => allStats()[mkey(machine)] ?? null;
 
-// A machine's start limits: Everywhere's, then its own (as herdr-task's machine_limits). Settings
-// keys machines by name, "local" for this computer.
-export const settingsKey = (machine) => machine ?? "local";
-export function holdOf(cfg, machine) {
-  return { ...HOLD, ...(cfg?.everywhere?.machine ?? {}), ...(cfg?.machines?.[settingsKey(machine)]?.machine ?? {}) };
-}
-
 // Run the reader on one machine. Rejects when it can't.
 async function read(machine, withLimits) {
   script ??= await readTextFile(SCRIPT());
@@ -56,12 +50,6 @@ async function read(machine, withLimits) {
   const line = String(r.stdout ?? "").split("\n").find((l) => l.startsWith("{"));
   if (!line) throw new Error((r.stderr || "No answer").trim().split("\n").pop().slice(0, 120));
   return JSON.parse(line);
-}
-
-// A read that didn't work keeps the last good numbers, marked as failed: never a guess.
-function nextRead(prev, fresh) {
-  if (fresh.state === "unknown" && prev?.state === "ok") return { ...prev, failed: fresh.why };
-  return fresh;
 }
 
 // One round over every machine that's due (or all of them, `force`), side by side; one write.
@@ -120,20 +108,6 @@ export function startPolling(cx) {
 // ---- what the numbers mean ------------------------------------------------------------------
 
 // ok: quiet; busy: over its start limit (new tasks wait); over: past its alert limit.
-export function healthMeters(s) {
-  const h = s?.health;
-  if (!h) return [];
-  const hold = { ...HOLD, ...(s.hold ?? {}) };
-  const lv = (v, start, alert) => (v > alert ? "over" : start !== null && start !== undefined && v > start ? "busy" : "ok");
-  const gb = (b) => `${Math.round(b / 2 ** 30)} GB`;
-  return [
-    { name: "CPU", pct: h.cpu, level: lv(h.load, hold.start_load === null ? null : hold.start_load * h.cores, ALERT.load * h.cores),
-      detail: `Load ${Number(h.load).toFixed(1)} on ${h.cores} cores` },
-    { name: "Memory", pct: h.memory, level: lv(h.memory, hold.start_memory, ALERT.memory), detail: `${gb(h.mem_used)} of ${gb(h.mem_total)}` },
-    ...(h.disks?.length ? [{ name: "Disk", pct: h.disk, level: lv(h.disk, hold.start_disk, ALERT.disk),
-      detail: h.disks.map((d) => `${d.path} ${d.pct}% · ${d.free_gb} GB free`).join(" · ") }] : []),
-  ];
-}
 const RANK = { ok: 0, busy: 1, over: 2 };
 const worst = (levels) => levels.reduce((a, b) => (RANK[b] > RANK[a] ? b : a), "ok");
 export const healthLevel = (s) => worst(healthMeters(s).map((m) => m.level));

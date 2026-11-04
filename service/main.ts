@@ -30,6 +30,7 @@ import { Artifacts } from "./artifacts.ts";
 import { Settings } from "./settings.ts";
 import { Secrets } from "./secrets.ts";
 import { Agents } from "./agents.ts";
+import { Machines } from "./machines.ts";
 import { Push } from "./push.ts";
 import { dictate } from "./dictate.ts";
 import { sh, exec } from "./model.ts";
@@ -77,6 +78,10 @@ function alertNew(snap: any) {
   alerted = new Set(now.keys());
 }
 compat.agents = new Agents(hub);
+const machines = new Machines(hub, () => model.machineNames());
+machines.onChange = () => model.rebuild();
+compat.machineStats = (m) => machines.of(m);
+machines.start();
 const secrets = new Secrets(hub);
 compat.secrets = secrets;
 (compat as any).terminalsOf = (a: string) => hub.terminals.get(a);

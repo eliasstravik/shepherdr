@@ -79,6 +79,9 @@ export class Compat {
   shared: { value(key: string): any; set(key: string, value: unknown): Promise<unknown> } | null = null;
   host = "";
 
+  /** A machine's health and plan limits (service/machines.ts), set by main. */
+  machineStats: ((m: string | null) => any) | null = null;
+
   /** The model menu and restarts (service/agents.ts), set by main. */
   agents: { info(addr: string, reader: any): Promise<unknown>; restart(addr: string, reader: any, pick: any): Promise<string> } | null = null;
 
@@ -132,7 +135,7 @@ export class Compat {
     const chats = new Map<string, string>();
     const machines: Machine[] = input.machines.map((m) => {
       const key = m.here ? host : m.name;
-      return { id: `m:${key}`, machine: key, name: key, status: m.state === "connected" ? "idle" : "off" };
+      return { id: `m:${key}`, machine: key, name: key, status: m.state === "connected" ? "idle" : "off", ...(this.machineStats?.(m.here ? null : m.name) ?? {}) } as Machine;
     });
     const placeOf = (r: Row) => spaces.find((s) => (s.machine ?? null) === (r.machine ?? null) && s.folder === r.folder)?.id ?? "";
 

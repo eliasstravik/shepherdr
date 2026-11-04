@@ -67,6 +67,9 @@ export class Model {
     this.timer ??= setTimeout(() => { this.timer = null; this.build(); }, 150);
   }
 
+  /** The connected other machines. */
+  machineNames() { return this.machines; }
+
   /** Builds again soon (something the snapshot shows changed outside: an ask). */
   rebuild() { this.soon(); }
 
