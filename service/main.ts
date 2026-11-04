@@ -26,6 +26,7 @@ import { terminalBridge } from "./terminal.ts";
 import { worktree } from "./worktree.ts";
 import { browserRelay } from "./browser.ts";
 import { Artifacts } from "./artifacts.ts";
+import { Settings } from "./settings.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const WEB = process.env.SHEPHERDR_WEB_DIR || join(ROOT, "web", "dist");
@@ -50,6 +51,9 @@ const compat = new Compat();
 const model = new Model(hub, live);
 live.chats = new Chats(hub);
 live.compat = compat;
+const settings = new Settings();
+settings.on(() => model.rebuild());
+settings.start();
 const artifacts = new Artifacts();
 compat.artifacts = artifacts;
 artifacts.on(() => model.rebuild());
@@ -63,6 +67,7 @@ jobs.watched = () => live.watched();
 jobs.start();
 model.onBuild = (b) => live.setSnapshot(compat.snapshot({
   host: me?.host ?? "this machine", user: me?.name ?? "You", spaces: b.spaces, sections: b.sections, rows: b.rows, artifacts: artifacts.list,
+  settings: settings.sections(me ? `https://${me.dns}/shepherdr/` : null),
   machines: [{ name: me?.host ?? "this machine", here: true, state: "connected" }, ...b.machines.map((name) => ({ name, here: false, state: "connected" }))],
 }));
 model.start();
@@ -149,6 +154,10 @@ const server = Bun.serve<{ who: string }>({
     }
     if (path === "/api/action" && req.method === "POST") {
       const body = await req.json().catch(() => null);
+      if (body?.type === "setting" && typeof body.key === "string") {
+        try { settings.set(body.key, typeof body.value === "string" ? body.value : null); return json({ ok: true }); }
+        catch (err) { return new Response((err as Error).message, { status: 400 }); }
+      }
       try { return json(await act(hub, body, compat)); } catch (err) { return new Response((err as Error).message, { status: 400 }); }
     }
     if (path.startsWith("/api/")) return json({ error: "not found" }, 404);

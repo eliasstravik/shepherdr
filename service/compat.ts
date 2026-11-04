@@ -3,7 +3,7 @@
 // shapes 2.1's screen reads (web/shared/types.ts: Snapshot, Chat), and its chat keys back into terminals.
 //   a space's chat (its Assistant):  p:<space id, "/" as ":">     a task's chat:  <task id>/worker
 // A task id is its ref ("SHEP-7"), "<machine>:<ref>" on another machine, as 2.1 wrote them.
-import type { Snapshot, Place, Task, Need, Section, Machine, Chat, Message, Status, TaskStatus, StepKind, ActivityAnswer, Question, Artifact } from "../web/shared/types.ts";
+import type { Snapshot, Place, Task, Need, Section, Machine, Chat, Message, Status, TaskStatus, StepKind, ActivityAnswer, Question, Artifact, SettingSection } from "../web/shared/types.ts";
 import * as T from "../core/tasks.js";
 import type { Where } from "./worktree.ts";
 
@@ -77,7 +77,7 @@ export class Compat {
 
   addrOf(key: string) { return this.chats.get(key) ?? null; }
 
-  snapshot(input: { host: string; user: string; machines: { name: string; here: boolean; state: string }[]; spaces: Space[]; sections: any[]; rows: Row[]; artifacts?: any[] }): Snapshot {
+  snapshot(input: { host: string; user: string; machines: { name: string; here: boolean; state: string }[]; spaces: Space[]; sections: any[]; rows: Row[]; artifacts?: any[]; settings?: SettingSection[] }): Snapshot {
     const { host, spaces, rows } = input;
     const chats = new Map<string, string>();
     const machines: Machine[] = input.machines.map((m) => {
@@ -144,7 +144,7 @@ export class Compat {
 
     this.chats = chats;
     this.last = {
-      terminalTransport: "core", name: "Shepherdr", host, user: input.user, places, machines, tasks, automations: {}, asks: {}, needs, settings: [],
+      terminalTransport: "core", name: "Shepherdr", host, user: input.user, places, machines, tasks, automations: {}, asks: {}, needs, settings: input.settings ?? [],
       artifacts: (input.artifacts ?? []).map((a) => artifactOf(a, spaces)),
       sections, last, read,
     };
