@@ -9,7 +9,9 @@ test("a space's menu is the window's: Notify, Mark as read when unread, Pin, Ren
     ["Notify", "—", "Mark as read", "Unpin", "Rename…", "Space settings…", "—", "New worktree", "Open worktree", "Remove worktree", "—", "Close…"]);
   expect(words(spaceMenu({ git: "main" }))).not.toContain("Remove worktree");
   // Notify's quiet note under its choices, the same in the window's menu and the web's
-  expect(spaceMenu()[0].note).toBe("Tasks alert either way.");});
+  expect(spaceMenu()[0].note).toBe("Tasks alert either way.");
+  // a space with no Assistant's tab yet (any machine) offers to start one, first after Notify
+  expect(words(spaceMenu({ assistant: false })).slice(0, 4)).toEqual(["Notify", "—", "Start Assistant", "Pin"]);});
 
 test("the sidebar's other menus and a task row's", () => {
   expect(words(addMenu())).toEqual(["New space", "New section"]);
@@ -31,7 +33,8 @@ test("a tab's menu (the tab bar's): Rename…, Edit instructions… on an Assist
 test("the + menu's words: the Assistant's row, the agents it offers, and a tab's name", () => {
   expect(assistantRow({ open: true })).toEqual({ label: "Show Assistant", hint: "", enabled: true });
   expect(assistantRow()).toEqual({ label: "Assistant", hint: "C", enabled: true });
-  expect(assistantRow({ remote: true })).toEqual({ label: "Assistant", hint: "This computer only", enabled: false });
+  // another machine's space starts its Assistant there, as here (SHEP-8)
+  expect(assistantRow({ remote: true })).toEqual({ label: "Assistant", hint: "C", enabled: true });
   const list = agentChoices([{ key: "a", installed: false }, { key: "b", installed: true }, { key: "c", installed: false }, { key: "d", installed: false }]);
   expect(list.map((a) => a.key)).toEqual(["b", "a", "c"]);
   expect(list.map(agentHint)).toEqual(["1", "Not installed", "Not installed"]);

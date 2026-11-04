@@ -114,7 +114,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Fast | M zap, "Fast", switch (where the model has it) | S same | ✓ |
 | Permissions | M shield, "Permissions", current mode, chevron → sub-menu with checks | S same (restart passes `perm`) | ✓ |
 | Restart | M "Restart with Opus · High" only when something differs | S same words | ✓ |
-| Another machine's Assistant | M rows dim with "This computer only" | S same (D `remote`) | ✓ |
+| Another machine's Assistant | M row as here: it runs on that machine (SHEP-8) | S same | ✓ |
 
 ## Over the box: working, needs you, helpers
 

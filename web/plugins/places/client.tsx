@@ -14,7 +14,7 @@ import { openWorktree } from '@client/screens/Worktree.tsx'
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type LiHTMLAttributes, type ReactNode } from 'react'
 import { act, counts, definePlugin, getState, goPlace, manyMachines, openSplit, placeOf, removeSpace, setUI, splitClick, useSnap, useUI, type Pane, type UI } from '@client/kernel.ts'
 import { Dialog, RowMenu, RowMenuButton, useRowMenu } from '@client/rowmenu.tsx'
-import { BackIcon, BellIcon, CogIcon, BellSlashIcon, AttentionBadge, attentionWords, DeleteIcon, DownIcon, HashIcon, ic, IconButton, List, MenuItem, MenuLabel, MenuSeparator, MenuSetting, Meta, MonitorIcon, NextIcon, PinnedIcon, PinTaskIcon, PlusIcon, Primary, ReadIcon, RemoveProjectIcon, RenameIcon, rowClass, RowText, SectionIcon, ServerIcon, SplitIcon, TasksIcon, UnpinIcon } from '@client/ui.tsx'
+import { BackIcon, BellIcon, CogIcon, BellSlashIcon, AttentionBadge, attentionWords, DeleteIcon, DownIcon, HashIcon, ic, IconButton, List, MenuItem, MenuLabel, MenuSeparator, MenuSetting, Meta, ModelIcon, MonitorIcon, NextIcon, PinnedIcon, PinTaskIcon, PlusIcon, Primary, ReadIcon, RemoveProjectIcon, RenameIcon, rowClass, RowText, SectionIcon, ServerIcon, SplitIcon, TasksIcon, UnpinIcon } from '@client/ui.tsx'
 import { HealthDot, MachineMeter } from '@plugins/health/client.tsx'
 import { toast } from '@plugins/alerts/toasts.tsx'
 import { MarkRead, markPlaceRead, muted, placeUnread } from '@client/unread.ts'
@@ -394,7 +394,7 @@ function Heading({ id, label, folds, icon: mark, shut, held, toggle, dim, classN
 /** the icon a core menu item names (core/menus.js), drawn with the web's own */
 const MENU_ICONS: Record<string, (p: { className?: string }) => ReactNode> = {
   plus: PlusIcon, 'folder-plus': SectionIcon, 'check-check': ReadIcon, pin: PinTaskIcon, 'pin-off': UnpinIcon, 'square-pen': RenameIcon,
-  settings: CogIcon, 'git-branch': SplitIcon, x: RemoveProjectIcon, 'trash-2': DeleteIcon,
+  settings: CogIcon, 'git-branch': SplitIcon, x: RemoveProjectIcon, 'trash-2': DeleteIcon, network: ModelIcon,
 }
 type CoreItem = { id?: string; label?: string; icon?: string; sep?: boolean; setting?: boolean; note?: string }
 /** a core menu (core/menus.js, the window's too) as the web draws it: its items in order, each done by `acts` */
@@ -411,15 +411,16 @@ function CoreMenuItems({ items, acts, setting }: { items: CoreItem[]; acts: Reco
   )
 }
 
-/** A space's menu, as the window's (core/menus.js spaceMenu): Notify, Mark as read while it has something new, Pin or
- *  Unpin, Rename…, Space settings…, its worktrees where it is a repo, and Close… */
+/** A space's menu, as the window's (core/menus.js spaceMenu): Notify, Start Assistant while it has none (on any
+ *  machine: its chat, whose first message starts it there), Mark as read while it has something new, Pin or Unpin,
+ *  Rename…, Space settings…, its worktrees where it is a repo, and Close… */
 function PlaceMenu({ p, snap, menu, unread, onClose }: { p: Place; snap: Snapshot; menu: ReturnType<typeof useRowMenu>; unread: boolean; onClose: () => void }) {
   const now = notifyOf(snap, p.id)
   const row = notifyRow(snap, p.id)
   const pick = (v: string) => act({ type: 'setting', key: NOTIFY_KEY, value: row?.inherits?.value === v ? null : v, place: p.id })
   const pinned = groupOf(snap, usePending(), p) === PINNED
   const then = (f: () => void) => () => { menu.close(); setTimeout(f) }
-  const items = (MN.spaceMenu as (o: object) => CoreItem[])({ unread, pinned, git: p.git ?? null })
+  const items = (MN.spaceMenu as (o: object) => CoreItem[])({ unread, pinned, git: p.git ?? null, assistant: !!(p.assistantTab?.id || p.assistantTab?.live) })
   return (
     <RowMenu menu={menu} label={p.name} className="min-w-[min(17rem,calc(100%-0.5rem))]!">
       <CoreMenuItems items={items}
@@ -427,6 +428,7 @@ function PlaceMenu({ p, snap, menu, unread, onClose }: { p: Place; snap: Snapsho
           note={items.find((x) => x.setting)?.note}
           choices={NOTIFY.map((v) => ({ label: v, on: now === v, onClick: () => void pick(v).catch(() => undefined) }))} />}
         acts={{
+          assistant: then(() => { goPlace(p.id); setUI({ term: null, arts: null }) }),
           read: then(() => markPlaceRead(snap, [p])),
           pin: then(() => moveTo(p.id, PINNED)), unpin: then(() => moveTo(p.id, `m:${p.machine}`)),
           rename: then(() => openRename(p.id)),
