@@ -50,6 +50,10 @@ const KEEP_OUT = 24 * 60 * 60_000
 const KEEP_WAITING = 30 * 60_000
 
 const words = (s: string) => s.replace(/\s+/g, ' ').trim()
+/** how much earlier than the server's clock the agent's log may stamp it: its machine's clock may differ a little */
+const SLACK = 5000
+/** a file as the log has it: on another machine it landed in a folder of its own there (hc put), under its own name */
+const sameFile = (a: string | undefined, b: string) => a === b || (!!a && a.split('/').pop() === b.split('/').pop())
 
 /** what this chat now shows of the pending ones. One that came back from the agent's log goes: by its id, or (from a
  *  machine on an older Shepherdr, or after its restart) by the very same message of yours: its words and files, new
@@ -96,7 +100,7 @@ export function settle(out: Outgoing[], chat: Chat, now = Date.now()): Outgoing[
  *  the same words and the same files */
 function sameAs(o: Outgoing, chat: Chat, taken: Set<string>): string[] | null {
   const prior = new Set(o.prior ?? [])
-  const fresh = chat.messages.filter((m) => m.who === 'you' && !m.cid && !m.answered && !m.waiting && !prior.has(m.id) && !taken.has(m.id) && (m.at ?? 0) >= o.serverAt! - 500)
+  const fresh = chat.messages.filter((m) => m.who === 'you' && !m.cid && !m.answered && !m.waiting && !prior.has(m.id) && !taken.has(m.id) && (m.at ?? 0) >= o.serverAt! - SLACK)
   const ids: string[] = []
   if (o.text) {
     const m = fresh.find((m) => !!m.text && words(m.text) === words(o.text))
@@ -104,7 +108,7 @@ function sameAs(o: Outgoing, chat: Chat, taken: Set<string>): string[] | null {
     ids.push(m.id)
   }
   for (const f of o.files) {
-    const m = fresh.find((m) => m.file?.path === f.path && !ids.includes(m.id))
+    const m = fresh.find((m) => sameFile(m.file?.path, f.path) && !ids.includes(m.id))
     if (!m) return null
     ids.push(m.id)
   }

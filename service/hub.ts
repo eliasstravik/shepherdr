@@ -29,6 +29,18 @@ export class Hub {
     return (await this.core()).call<T>(method, params, timeout);
   }
 
+  /** The person's words into a terminal, as hc send pastes them, but with no caller: hc send names its parent process
+   *  as the sender, and another machine's core wraps a message from one in <hc from="<core>/ppid:…"> ("Another agent").
+   *  Sent with none, it lands as plain input from the person, here and on any machine. -> hc send's own result shape:
+   *  code 0, else its error ({ error: { kind, message } }) on stderr, for core/send.js's refusal(). */
+  async send(terminal: string, text: string): Promise<{ code: number; stdout: string; stderr: string }> {
+    const fail = (kind: string | null, message: string) => ({ code: 1, stdout: "", stderr: JSON.stringify({ error: { kind, message } }) });
+    if (!this.client) return fail("unavailable", "herdr-core isn't answering here.");
+    // it waits for a person to pause typing there (~3 s), so longer than a plain call
+    try { return { code: 0, stdout: JSON.stringify(await this.call("terminal.send", { terminal, text }, 120_000)), stderr: "" }; }
+    catch (e: any) { return fail(e?.kind ?? null, e?.message ?? String(e)); }
+  }
+
   private async connect(): Promise<CoreClient> {
     let delay = 500;
     for (;;) {

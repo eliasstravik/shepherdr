@@ -104,7 +104,7 @@ export class AgentWatch {
       const msg = lostMessage({ ref, template });
       if (t.state === "live") {
         // hc send pastes the line into the shell and presses Enter
-        const r = await this.hc(["send", addr, [...fresh, msg].map(shellWord).join(" ")]);
+        const r = await this.hub.send(addr, [...fresh, msg].map(shellWord).join(" "));
         if (r.code !== 0) throw new Error((r.stderr ?? "").trim() || "It didn't go through.");
       } else {
         // herdr-task would resume the same gone session again: its task starts it anew
