@@ -9,7 +9,7 @@
 
 import { div } from "gpui-kit";
 import { InputState } from "gpui-base";
-import { allow, deny, answer, answers, chatAbout, release } from "./asks.js";
+import { allow, deny, answer, answers, chatAbout, release } from "./core/asks.js";
 
 // A card's first strip. opts: { who ("Claude", "HERD-12"), asks (false: what follows `who`
 // instead, e.g. "Kept"), dot (its color; default red), links ([ctl] at the right) }.

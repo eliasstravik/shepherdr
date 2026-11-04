@@ -1,0 +1,119 @@
+// Shepherdr's background work that doesn't hang on what a window shows, run here once for every client:
+// - the task tick (herdr-task tick: queued tasks start, merged ones are done) every 15 s and 2 s after a task's agent
+//   changes, and about once a minute the automations scheduler's check, here and on each machine with tasks;
+// - another machine's agent asking for a secret (herdr.secret.want): herdr-secret serve answers it from the vault here;
+// - a chat open on a web page: the question hook's flag (data/chat-asks/open/<terminal>), so its cards come to the page.
+// The window sees this service running (GET /api/health: jobs) and leaves the same work to it (lib/service.js), and
+// takes it back when the service is gone: one runs it at a time. While the installed window can't do that yet (a
+// 3.0 layout), the service runs none of it.
+import { existsSync, readdirSync, utimesSync, writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import type { Hub } from "./hub.ts";
+import { HOME } from "./paths.ts";
+
+const APP = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
+const ASKS = join(APP, "data", "chat-asks", "open");
+
+/** A helper by its installed path (systemd's PATH has no ~/.local/bin). */
+function tool(name: string, inApp: string) {
+  for (const p of [join(APP, inApp), join(HOME, ".local", "bin", name)]) if (existsSync(p)) return p;
+  return name;
+}
+
+async function run(cmd: string[]) {
+  try {
+    const p = Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore", stdin: "ignore" });
+    return (await p.exited) === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Whether the window installed here leaves this work to the service: no window at all, or one whose tab bar asks first. */
+export function windowLeavesIt() {
+  if (process.env.SHEPHERDR_JOBS === "off") return false;
+  if (process.env.SHEPHERDR_JOBS === "on") return true;
+  if (!existsSync(join(APP, "mods"))) return true;
+  return existsSync(join(APP, "mods", "tabs-tasks", "service.js"));
+}
+
+export class Jobs {
+  readonly on = windowLeavesIt();
+  private ticking = false;
+  private rounds = 0;
+  private soon: ReturnType<typeof setTimeout> | null = null;
+  private seen = "";
+  private served = new Set<string>();
+  /** terminals a web page shows now (service/live.ts tells) */
+  watched: () => string[] = () => [];
+
+  constructor(private hub: Hub) {}
+
+  start() {
+    if (!this.on) { console.log("background work: left to the window (its layout predates the service)"); return; }
+    console.log("background work: here");
+    setInterval(() => void this.tick(), 15_000);
+    void this.tick();
+    this.hub.on((e) => {
+      if (e.type === "reset" || ("terminal" in e && e.terminal)) { this.onChange(); this.serveSecrets(); }
+    });
+    setInterval(() => this.flags(), 4000);
+  }
+
+  private async tick() {
+    if (this.ticking) return;
+    this.ticking = true;
+    try {
+      const cli = tool("herdr-task", "mods/tasks/bin/herdr-task");
+      const ensure = this.rounds++ % 4 === 0;
+      await run([cli, "tick", "--json"]);
+      if (ensure) await run([cli, "scheduler", "--ensure", "--json"]);
+      let remote: string[] = [];
+      try { remote = readdirSync(join(HOME, ".herdr", "tasks", ".remote")); } catch {}
+      for (const m of remote.filter((x) => /^[\w.-]+$/.test(x))) {
+        await run([cli, "--on", m, "tick", "--json"]);
+        if (ensure) await run([cli, "--on", m, "scheduler", "--ensure", "--json"]);
+      }
+    } finally {
+      this.ticking = false;
+    }
+  }
+
+  /** A task's agent that finishes, stops or ends: a tick two seconds later (as the window's tickOnChange). */
+  private onChange() {
+    const now = [...this.hub.terminals.values()].filter((k) => k.labels?.["herdr.task"])
+      .map((k) => `${k.address}:${k.state}:${typeof k.status === "object" ? k.status?.state : k.status}`).join(",");
+    if (now === this.seen) return;
+    const first = !this.seen;
+    this.seen = now;
+    if (first || this.soon) return;
+    this.soon = setTimeout(() => { this.soon = null; void this.tick(); }, 2000);
+  }
+
+  /** Each remote request for a secret, once (herdr-secret serve also refuses a second answer). */
+  private serveSecrets() {
+    for (const t of this.hub.terminals.values()) {
+      const w = t.labels?.["herdr.secret.want"];
+      if (!w || !t.address.includes("/") || this.served.has(w)) continue;
+      this.served.add(w);
+      void run([tool("herdr-secret", "bin/herdr-secret"), "serve", t.address]);
+    }
+    if (this.served.size > 200) this.served.clear();
+  }
+
+  /** The hook asks a chat only while its flag is fresh (ask-hook.sh: 15 s): a page showing a local Claude agent's chat
+   *  keeps it so. */
+  private flags() {
+    const now = new Date();
+    for (const a of new Set(this.watched())) {
+      const t: any = this.hub.terminals.get(a);
+      if (!t || a.includes("/") || !/^[\w.-]+$/.test(a) || t.state !== "live") continue;
+      if ((t.status?.app ?? t.foreground?.name) !== "claude" && t.status?.app !== "claude-code") continue;
+      try {
+        mkdirSync(ASKS, { recursive: true });
+        const f = join(ASKS, a);
+        if (existsSync(f)) utimesSync(f, now, now); else writeFileSync(f, "");
+      } catch {}
+    }
+  }
+}

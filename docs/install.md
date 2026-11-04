@@ -1,6 +1,6 @@
 # Install
 
-Shepherdr 3.0.0 is a layout for the Herdr app plus its mods, helpers and role instructions. One script puts them in
+Shepherdr 3.1.0 is a layout for the Herdr app plus its mods, helpers and role instructions, and a web app for your tailnet ([Web](web.md)). One script puts them in
 place, never overwrites what you made yourself, and keeps a backup of anything it replaces.
 
 ## Requirements
@@ -8,6 +8,7 @@ place, never overwrites what you made yourself, and keeps a backup of anything i
 - macOS or Linux, the Herdr app 0.1.12 or newer (`herdr-app --version`) with herdr-core 0.1.17 or newer
   (`hc --version`). Open Herdr once first, so it writes its home (`~/.config/herdr-app`).
 - python3 3.8 or newer, git, and Claude Code or Codex, installed and signed in.
+- bun (the service and the web app), and Tailscale for the web app.
 - Optional, per add-on: `gh` (pull requests), agent-browser 0.41.1, node and Chrome (the task browser), bun,
   `pw-record` and whisper.cpp (`whisper-cli`) for dictation, an ElevenLabs key for voice calls.
 

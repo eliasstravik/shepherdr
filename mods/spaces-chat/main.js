@@ -23,8 +23,11 @@ import { Rename } from "./rename.js";
 import { unreadSpaces, readShown } from "./unread.js";
 import { muted } from "./notify.js";
 import { MachinePopup, openMachine, openMachineSettings } from "./machine-popup.js";
-import { startPolling, allStats, healthMeters, healthWords, planRows, bars, colorOf } from "./machines.js";
+import { startPolling, allStats, healthMeters, bars } from "./machines.js";
+// The meter's tooltip and the red dot's words: the shared core's (the web's machine header says the same).
+import { meterWords, healthErrorWords } from "./core/machines.js";
 import { countBadge, red, H, TEXT, RADIUS } from "./ui.js";
+import { spaceName, gitTail, tilde, sharedNames } from "./core/spaces.js";
 
 const POPUPS = { add: Menu, space: Menu, section: Menu, icon: IconPicker, rename: Rename, machine: MachinePopup };
 
@@ -62,12 +65,8 @@ const rowHeight = ({ tree }) => (tree ? 28 : 30);
 const ANY = "\u0000any";
 const where = (s, ps) => JSON.stringify([s.machine ?? null, place(s, ps)]);
 const base = (path) => path.replace(/\/+$/, "").split("/").pop();
-// A home folder, here or on another machine (whose home() isn't known here), and a path from it.
-const HOME_AT = /^\/(home\/[^/]+|Users\/[^/]+|root)(?=\/|$)/;
-const isHome = (path) => path.replace(/\/+$/, "") === home() || HOME_AT.test(path) && !path.replace(HOME_AT, "").replace(/\/+$/, "");
-const tilde = (path) => path.replace(HOME_AT, "~");
-// Two spaces with one name on one machine: each shows its folder.
-const nameKey = (r) => `${r.w.machine ?? ""}\u0000${r.name.toLowerCase()}`;
+// A home folder, here or on another machine (whose home() isn't known here), and a path from it (tilde), and the spaces
+// two on one machine share a name with, which show their folder (sharedNames): the shared core's, as the web's rows.
 // Changes made outside Herdr (an editor's save, a commit in another app): looked
 // for this often, in repos the list shows, while the window is in front.
 const FALLBACK = 60000;
@@ -288,8 +287,8 @@ export default class Spaces extends View {
   // own (a space in /tmp/488b3d00 is "488b3d00", not its Assistant's "~"). A space named "~" (as
   // our New space and the tab bar once named home ones) counts as unnamed.
   nameOf(w, g, at) {
-    if ((w.named && w.name !== "~") || !at) return w.name;
-    return isHome(at) ? "Home" : g?.name ?? base(at);
+    if (!at) return w.name;
+    return spaceName(w, { at, repo: g?.name ?? null, home: home(), named: Boolean(w.named) });
   }
 
   // The spaces shown, in Herdr's order, each with its git, where it is and its name: { w, i, g, at, name }.
@@ -329,9 +328,7 @@ export default class Spaces extends View {
   grouped(t, collapsed) {
     const visible = this.visible();
     // Names two spaces on one machine share (a worktree under its repo aside: its branch shows).
-    const count = new Map();
-    for (const r of visible) if (!r.g?.linked) count.set(nameKey(r), (count.get(nameKey(r)) ?? 0) + 1);
-    this.dup = new Set([...count].filter(([, n]) => n > 1).map(([k]) => k));
+    this.dup = sharedNames(visible.map((r) => ({ id: r.w.id, machine: r.w.machine, name: r.name, linked: Boolean(r.g?.linked) })));
     const pins = collapsed ? [] : data().pinned;
     const all = visible.filter((r) => !pins.includes(r.w.id));
     const rows = this.ordered(all);
@@ -392,7 +389,7 @@ export default class Spaces extends View {
               .child(svg("mods/workspace-chrome/plus.svg").size(14)))
             .child(this.meter(m, t))))
           .when(connected && Boolean(health?.error), el => el.child(div().id(`machine-dot-${m ?? "local"}`).size(6).rounded(3).flex_none().bg(red())
-            .tooltip(`Couldn't read its health: ${health.error}`)))
+            .tooltip(healthErrorWords(health.error))))
           .child(svg(`mods/workspace-chrome/chevron-${folded ? "right" : "down"}.svg`).size(12).flex_none().text_color(t.dim)));
       const own = !collapsed && sectionsOf(m).length;
       // An empty machine is just its header: its + makes a space.
@@ -409,8 +406,7 @@ export default class Spaces extends View {
     const id = `machine-meter-${m ?? "local"}`;
     if (!s?.health) return div().id(id);
     const meters = healthMeters(s);
-    const plans = planRows(s).filter((r) => typeof r.pct === "number");
-    const words = [healthWords(s), ...plans.map((r) => `${r.name} ${r.pct}% left`)].join(" · ");
+    const words = meterWords(s);
     return h_flex().id(id).flex_none().h(20).px(4).gap(4).items_center().rounded(RADIUS.control).cursor_pointer()
       .hover((st) => st.bg(t.hover))
       .tooltip(words)
@@ -600,11 +596,8 @@ export default class Spaces extends View {
   // branch goes when the name already says it (a worktree is named after its branch),
   // and master/main go: nearly every space is on one.
   gitTail(g, tree, name, t, tag) {
-    const raw = g.branch ?? "detached";
-    const same = (a) => a.toLowerCase() === name.toLowerCase();
-    const branch = same(raw) || raw === "master" || raw === "main" ? "" : raw;
-    const repo = tree || same(g.name) ? "" : g.name;
-    const where = [tag, repo, branch].filter(Boolean).join(" \u00b7 ");
+    // the words are the shared core's (the web's row says the same)
+    const { where } = gitTail(g, { name, tree: Boolean(tree), tag });
     return h_flex()
       .flex_1()
       .min_w(0)
@@ -623,7 +616,7 @@ export default class Spaces extends View {
   row({ w, i, g, tree, end, pinned, tag, at, name }, t) {
     const on = w.active;
     // Another space here has its name: its folder, dim, says which.
-    const label = [tag, this.dup?.has(nameKey({ w, name })) && at ? tilde(at) : null].filter(Boolean).join(" \u00b7 ") || null;
+    const label = [tag, this.dup?.has(w.id) && at ? tilde(at) : null].filter(Boolean).join(" \u00b7 ") || null;
     const fresh = this.unread.has(w.id);
     // Notify Off (notify.js): muted, as Slack's muted channels: dimmed, a crossed-out bell; its
     // counts still show.

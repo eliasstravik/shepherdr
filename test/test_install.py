@@ -1,5 +1,6 @@
 """The installer against scratch roots (--root): install, run again, update with a changed file,
 clashes, --adopt, uninstall. Never touches the real home."""
+import re
 import json
 import os
 import shutil
@@ -54,7 +55,7 @@ class Install(unittest.TestCase):
         out = run("install", "--root", self.root, "--yes").stdout
         self.assertRegex(out, r"files: \d+ new\n")
         rec = json.load(open(self.p(APP, "data/shepherdr/installed.json")))
-        self.assertEqual(rec["version"], "3.0.0")
+        self.assertEqual(rec["version"], "3.1.0")
         self.assertTrue(os.path.isfile(self.p(APP, "mods/tasks/bin/herdr-task")))
         self.assertTrue(os.path.isfile(self.p(APP, "layouts/shepherdr.json")))
         self.assertEqual(os.path.realpath(self.p(".local/bin/herdr-task")), os.path.realpath(self.p(APP, "mods/tasks/bin/herdr-task")))
@@ -108,6 +109,51 @@ class Install(unittest.TestCase):
             else:
                 self.assertEqual(after[k], v, k)
         self.assertFalse(os.path.lexists(self.p(".local/bin/herdr-task")))
+
+    def test_service_unit_and_files(self):
+        """The service and the shared core land in .local/share/shepherdr; a scratch root gets the unit file only
+        (nothing is started), and uninstall takes both away."""
+        out = run("install", "--root", self.root, "--yes").stdout
+        if "needs bun" in out:
+            self.skipTest("bun isn't installed here")
+        self.assertTrue(os.path.isfile(self.p(".local/share/shepherdr/service/main.ts")))
+        self.assertFalse(any(f.endswith(".test.ts") for f in os.listdir(self.p(".local/share/shepherdr/service"))))
+        # every relative import the installed service runs resolves inside what was installed (bun can start it)
+        share = self.p(".local/share/shepherdr")
+        for d, _, files in os.walk(share):
+            if "/web/dist" in d:
+                continue
+            for f in files:
+                if not f.endswith((".ts", ".js")):
+                    continue
+                for m in re.finditer(r'^import (?!type )[^;]*?from ["\'](\.{1,2}/[^"\']+)["\']', open(os.path.join(d, f)).read(), re.M):
+                    self.assertTrue(os.path.isfile(os.path.normpath(os.path.join(d, m.group(1)))), f"{os.path.relpath(os.path.join(d, f), share)} imports {m.group(1)}, not installed")
+        unit = self.p("Library/LaunchAgents/dev.shepherdr.service.plist") if sys.platform == "darwin" else self.p(".config/systemd/user/shepherdr.service")
+        text = open(unit).read()
+        self.assertIn(self.p(".local/share/shepherdr/service/main.ts"), text)
+        self.assertNotIn("funnel", text)
+        run("uninstall", "--root", self.root)
+        self.assertFalse(os.path.exists(unit))
+        self.assertFalse(os.path.exists(self.p(".local/share/shepherdr/service/main.ts")))
+
+    def test_web_only(self):
+        """install --web: the service, the web app, herdr-task and the helpers under .local/share/shepherdr, linked from
+        .local/bin; nothing in herdr-app; herdr-task runs from there; uninstall takes it all back out."""
+        root = tempfile.mkdtemp(prefix="shepherdr-web-")
+        try:
+            run("install", "--web", "--root", root, "--yes", "--force")
+            share = os.path.join(root, ".local/share/shepherdr")
+            self.assertFalse(os.path.exists(os.path.join(root, APP)))
+            self.assertTrue(os.path.isfile(os.path.join(share, "service/main.ts")))
+            self.assertEqual(os.path.realpath(os.path.join(root, ".local/bin/herdr-task")), os.path.realpath(os.path.join(share, "mods/tasks/bin/herdr-task")))
+            self.assertTrue(os.path.isfile(os.path.join(share, "mods/artifacts/recipe-view.js")))
+            p = subprocess.run([sys.executable, os.path.join(share, "mods/tasks/bin/herdr-task"), "--help"], capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            run("uninstall", "--root", root)
+            self.assertFalse(os.path.exists(os.path.join(share, "service/main.ts")))
+            self.assertFalse(os.path.lexists(os.path.join(root, ".local/bin/herdr-task")))
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
 
     def test_clash_refuses_then_adopt(self):
         own = self.p(APP, "mods/jump")

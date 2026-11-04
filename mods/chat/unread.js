@@ -12,30 +12,18 @@
 import { terminals, panes, focused, window, shared, hc } from "herdr";
 import { muted } from "./notify.js";
 
-export const READ = "herdr.chat.read";
+// The rules (which terminal is a space's Assistant, the turn read, unread) are core/spaces.js, shared with
+// the service and the web app.
+export { READ } from "./core/spaces.js";
+import { READ, assistantOf as assistantIn, isUnread } from "./core/spaces.js";
 
-const machineOf = (address) => (address.includes("/") ? address.split("/")[0] : null);
-
-// A space's Assistant: the live coordinator terminal labelled for it, on the space's machine
-// (labels hold that machine's own ids, without the "<machine>/" an app id has).
-export function assistantOf(space, ts = terminals()) {
-  const id = String(space.id).split("/").pop();
-  return ts.find((k) => k.state === "live" && k.labels?.["herdr.role"] === "coordinator"
-    && k.labels?.["herdr.coordinator.space"] === id && machineOf(k.address) === (space.machine ?? null)) ?? null;
-}
-
-// The turn last read. Before any mark: the turn Herdr last saw it done at (mods/chat's "chat.seen").
-function readTurn(k) {
-  const mark = Number(k.labels?.[READ]);
-  return Number.isFinite(mark) ? mark : (shared("chat.seen") ?? {})[k.address] ?? 0;
-}
+export const assistantOf = (space, ts = terminals()) => assistantIn(space, ts);
 
 // What a mark sent already covers, until the core has it.
 const asked = new Map();
 
 export function unread(k) {
-  if (!k || k.labels?.["herdr.role"] !== "coordinator") return false;
-  return (k.turn ?? 0) > Math.max(readTurn(k), asked.get(k.address) ?? 0);
+  return isUnread(k, shared("chat.seen") ?? {}, asked.get(k?.address) ?? 0);
 }
 
 // The ids of the spaces whose Assistant has something new. A muted one (Notify: Off) never is.

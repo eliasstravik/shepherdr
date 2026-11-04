@@ -267,25 +267,29 @@ def main():
     auto_cmd("show", "one automation")
     auto_cmd("pause", "stop it firing")
     auto_cmd("resume", "let it fire again")
-    ap = sub.add_parser("autopilot", help="a space's Assistant woken on a schedule or by events, with its heartbeat").add_subparsers(dest="autopilot")
+    ap = sub.add_parser("autopilot", help="a space's Assistant woken on a schedule or by events, with the heartbeat "
+                        "(one schedule, events and heartbeat for every space; each space switches it on)").add_subparsers(dest="autopilot")
 
-    def ap_cmd(name, help):
+    def ap_cmd(name, help, space=True, everywhere=False):
         c = ap.add_parser(name, help=help)
-        c.add_argument("--space", help="the space (default: the Assistant's own)")
+        if space:
+            c.add_argument("--space", help="the space (default: the Assistant's own)")
+        if everywhere:
+            c.add_argument("--everywhere", action="store_true", help="the schedule and events every space works from")
         c.add_argument("--json", action="store_true")
         c.set_defaults(fn=cmd_autopilot)
         return c
-    ap_cmd("show", "this space's Autopilot: when it wakes, next and last wake, progress")
-    c = ap.add_parser("list", help="every space's Autopilot on this machine")
+    ap_cmd("show", "this space's Autopilot (or --everywhere: the one schedule and events): when it wakes, next and last wake, progress", everywhere=True)
+    c = ap.add_parser("list", help="the schedule and events every space works from, and each space's Autopilot on this machine")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_autopilot)
-    ap_cmd("on", "turn it on (no schedule or events yet: hourly; makes the heartbeat file)")
-    ap_cmd("off", "turn it off")
-    c = ap_cmd("set", "when it wakes")
+    ap_cmd("on", "turn it on in this space (makes the heartbeat file)")
+    ap_cmd("off", "turn it off in this space")
+    c = ap_cmd("set", "when every space on Autopilot wakes (the same in every space: --everywhere; --space refuses)", everywhere=True)
     c.add_argument("--every", help=HOW + ' "" or off: no schedule.')
     c.add_argument("--on", help="task events that wake it, comma-separated (\"\": none): " + ", ".join(EVENTS))
     ap_cmd("run-now", "wake its Assistant now (queued until it is idle)")
-    ap_cmd("heartbeat", "the heartbeat file's path (made with a starter when missing)")
+    ap_cmd("heartbeat", "the heartbeat file every space works from (made with a starter when missing)", everywhere=True)
     c = sub.add_parser("progress", help="an Assistant on Autopilot saves its progress and next step: progress \"Started HAT-4; next: check its review\"")
     c.add_argument("text")
     c.add_argument("--space")

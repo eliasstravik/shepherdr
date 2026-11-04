@@ -20,20 +20,14 @@
 import { readFileSync, writeFileSync, readdirSync, rmSync, statSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+import { API, agentSpec, opening, replyLine, statusLine, envLines, apiError } from "./core/voice.js";
 
 const [dir, addr, name] = process.argv.slice(2);
 if (!dir || !addr) { console.error("usage: bun voice.ts <call folder> <agent address> <agent name>"); process.exit(2); }
 const HOME = process.env.HERDR_APP_HOME || join(process.env.HOME ?? "", ".config/herdr-app");
 const SECRETS = join(HOME, "secrets");
-const API = "https://api.elevenlabs.io/v1";
 const who = name || "the coding agent";
 
-const PROMPT = `You are the voice of a chat with a coding agent (${who}) in the Herdr app. The person talks to you hands-free while the coding agent works in a terminal.
-- Talk with the person naturally and briefly. Answer small talk, questions about what is going on, and clarifications yourself.
-- Only when the person wants the coding agent to do or know something, call send_to_agent with their request in their own words (tidy it, keep every detail). Never send greetings, chit-chat, thanks, or anything the person says to you about the call. If unsure whether something is meant for the agent, ask the person.
-- After sending, say in a few words that you passed it on.
-- Messages that start with [Update] come from Herdr, not the person: never send them to the coding agent. Tell the person what they say, briefly: summarize a reply in one or two sentences in plain speech (no code, no paths read out letter by letter), and say plainly when the agent needs them.
-- To answer "what is it doing?" or "what did it say?", call read_chat first. Never make up what the agent said or did.`;
 
 let ended = false;
 let ws: WebSocket | null = null;
@@ -81,22 +75,14 @@ function vaultKey(name: string): string {
 }
 
 function envFile(file: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  let text = "";
-  try { text = readFileSync(file, "utf8"); } catch { return out; }
-  for (const line of text.split("\n")) {
-    const m = /^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-    if (m) out[m[1]] = m[2].replace(/^["']|["']$/g, "");
-  }
-  return out;
+  try { return envLines(readFileSync(file, "utf8")); } catch { return {}; }
 }
 
 async function api(path: string, key: string, init: RequestInit = {}) {
   const r = await fetch(`${API}${path}`, { ...init, redirect: "error", signal: AbortSignal.timeout(15000),
     headers: { "xi-api-key": key, "content-type": "application/json", ...(init.headers ?? {}) } });
   if (!r.ok) {
-    const body = (await r.text().catch(() => "")).slice(0, 300).replace(/[A-Za-z0-9_-]{32,}/g, "…");
-    throw new Error(`ElevenLabs said ${r.status}${body ? `: ${body}` : ""}`);
+    throw new Error(apiError(r.status, await r.text().catch(() => "")));
   }
   return r.json();
 }
@@ -107,28 +93,7 @@ async function agentId(key: string) {
   const saved = envFile(file);
   const tag = createHash("sha256").update(key).digest("hex").slice(0, 16);
   if (saved.ELEVENLABS_AGENT_ID && (!saved.ELEVENLABS_KEY_TAG || saved.ELEVENLABS_KEY_TAG === tag)) return saved.ELEVENLABS_AGENT_ID;
-  const tool = (n: string, description: string, props: Record<string, { type: string; description: string }>, required: string[]) =>
-    ({ type: "client", name: n, description, expects_response: true, response_timeout_secs: 20, parameters: { type: "object", properties: props, required } });
-  const r = await api("/convai/agents/create", key, { method: "POST", body: JSON.stringify({
-    name: "Herdr chat",
-    conversation_config: {
-      agent: {
-        first_message: "Hi, I'm listening.",
-        language: "en",
-        prompt: { prompt: PROMPT, tools: [
-          tool("send_to_agent", "Pass the person's request to the coding agent as a chat message. Only for what is meant for the coding agent.", { text: { type: "string", description: "The request, in the person's words" } }, ["text"]),
-          tool("read_chat", "Read the coding agent's status and its last messages.", {}, []),
-        ] },
-      },
-      asr: { user_input_audio_format: "pcm_16000" },
-      tts: { agent_output_audio_format: "pcm_16000" },
-    },
-    platform_settings: {
-      auth: { enable_auth: true },
-      overrides: { conversation_config_override: { agent: { prompt: { prompt: true }, first_message: true } } },
-      privacy: { record_voice: false, retention_days: 0 },
-    },
-  }) }) as { agent_id?: string };
+  const r = await api("/convai/agents/create", key, { method: "POST", body: JSON.stringify(agentSpec(who)) }) as { agent_id?: string };
   if (typeof r.agent_id !== "string" || !/^[\w-]{1,200}$/.test(r.agent_id)) throw new Error("ElevenLabs didn't make the voice agent.");
   mkdirSync(SECRETS, { recursive: true, mode: 0o700 });
   writeFileSync(file, `# The "Herdr chat" voice agent, made by the chat mod with ELEVENLABS_API_KEY.\nELEVENLABS_AGENT_ID=${r.agent_id}\nELEVENLABS_KEY_TAG=${tag}\n`, { mode: 0o600 });
@@ -219,10 +184,8 @@ function readChat() {
   try { return readFileSync(join(dir, "recent.txt"), "utf8").slice(-12000) || "Nothing yet."; } catch { return "Nothing yet."; }
 }
 
-function say(kind: "context" | "speak", text: string) {
-  if (ws?.readyState !== WebSocket.OPEN) return;
-  if (kind === "context") ws.send(JSON.stringify({ type: "contextual_update", text }));
-  else ws.send(JSON.stringify({ type: "user_message", text }));
+function send(line: object) {
+  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(line));
 }
 
 let lastStatus: string | null = null;
@@ -237,12 +200,11 @@ function inbox() {
     if (!m) continue;
     if (m.type === "hangup") return end();
     if (m.type === "mute") { muted = Boolean(m.on); state(); }
-    if (m.type === "reply" && typeof m.text === "string") say("speak", `[Update] ${who} replied in the chat: """${m.text.slice(0, 3000)}""" Tell the person what it says, briefly.`);
+    if (m.type === "reply" && typeof m.text === "string") send(replyLine(who, m.text));
     if (m.type === "status" && m.status !== lastStatus) {
       lastStatus = m.status;
-      if (m.status === "working") say("context", `[Update] ${who} is working now.`);
-      else if (m.status === "blocked") say("speak", `[Update] ${who} needs the person${m.asking ? `: ${String(m.asking).slice(0, 600)}` : " to answer something in the terminal"}. Tell them, briefly.`);
-      else if (m.status === "idle" || m.status === "done") say("context", `[Update] ${who} finished and is waiting.`);
+      const line = statusLine(who, m.status, m.asking);
+      if (line) send(line);
     }
   }
 }
@@ -261,8 +223,7 @@ async function main() {
   if (ended) return;
   ws = new WebSocket(signed_url);
   ws.onopen = () => {
-    ws!.send(JSON.stringify({ type: "conversation_initiation_client_data",
-      conversation_config_override: { agent: { prompt: { prompt: PROMPT }, first_message: `You're on a call about ${who}. Go ahead.` } } }));
+    ws!.send(JSON.stringify(opening(who)));
   };
   ws.onmessage = async (e) => {
     if (ended) return;

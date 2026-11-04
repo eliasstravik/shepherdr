@@ -1,0 +1,98 @@
+// Autopilot's words and picks, the same in the window (Settings › Autopilot: mods/shepherdr-settings/autopilot-section.js;
+// the header's switch: mods/pane-chat/autopilot.js) and on the web (service/compat.ts, web/plugins/coordinators).
+// One setting for every space, as Tasks is: Everywhere's heartbeat, schedule and events. A space has only its own on or
+// off, from the switch in its Assistant's header. herdr-task keeps the data (mods/tasks/bin/herdr_task/autopilot.py,
+// ~/.herdr/tasks/.autopilot.json: "everywhere" {every, events}, and per space its on/off and how its wakes go; the
+// heartbeat is one file, everywhere.md). pilotFor() is herdr-task's resolve(), for the header, which reads the file
+// itself, and for a space herdr-task has no record of yet; core/autopilot.cases.json holds the cases both sides are
+// tested on (core/autopilot.test.js, test/test_herdr_task.py).
+// Shared core: the source is core/autopilot.js; bin/sync-shared copies it into the mods in lib/COPIES.
+
+export const TITLE = "Autopilot";
+export const ABOUT = "How Autopilot works in every space. Turn it on in a space with the switch in its Assistant's header: "
+  + "its Assistant then wakes on a schedule or when something happens to its tasks, and works from the heartbeat.";
+
+// Each row's label and its line under it.
+export const ROWS = {
+  heartbeat: { label: "Heartbeat", about: "What it works from: direction, priorities, limits and when to stop." },
+  every: { label: "Schedule", about: "When it wakes by itself." },
+  events: { label: "Events", about: "These wake a space's Assistant at once when they happen to its tasks." },
+};
+
+// The schedule's picks (herdr-task's --every words); anything else is Custom.
+export const PRESETS = [["", "Off"], ["every 30 minutes", "Every 30 min"], ["every 60 minutes", "Every hour"], ["weekdays 9:00", "Weekdays 9:00"]];
+export const CUSTOM = "Custom…";
+export const CUSTOM_PLACEHOLDER = "Every 2 hours on weekdays";
+export const CUSTOM_HINT = "Like \"every 2 hours on weekdays from 8:00 to 18:00\". Saved when you leave the box.";
+// The task events that wake it (herdr-task's EVENTS, in its order).
+export const EVENTS = [["added", "Added"], ["ready", "Ready"], ["failed", "Failed"], ["needs-you", "Needs you"], ["merged", "Merged"], ["stalled", "Stalled"]];
+
+// The heartbeat box: saved a moment after typing stops, and on leaving it; "Saved" shows dim for a moment after.
+export const SAVED = "Saved";
+export const SAVE_AFTER_MS = 600;
+export const NO_HEARTBEAT = "Couldn't make the heartbeat file.";
+
+// The heartbeat as herdr-task first writes it (autopilot.py STARTER): unchanged, it counts as not written.
+export const STARTER = `Direction: what Autopilot works toward in this space.
+
+Priorities:
+-
+
+Constraints: what it must not do (e.g. never merge; ask before anything risky).
+
+Reporting: what to tell me after a wake, and when to alert me.
+
+Stopping goal (optional): a finite goal; when it's proven, Autopilot turns itself off.
+`;
+
+// Everywhere's until set (herdr-task: everywhere_default).
+export const DEFAULT = { every: "every 60 minutes", events: [] };
+
+const textOf = (e) => (e && typeof e === "object" ? e.text ?? null : e || null);
+const has = (o, k) => Object.prototype.hasOwnProperty.call(o ?? {}, k) && o[k] !== undefined;
+// Events in herdr-task's order, each once.
+export const eventsIn = (list) => EVENTS.map(([v]) => v).filter((v) => (list ?? []).includes(v));
+
+// Everywhere's schedule (its words as written) and events, from the file's "everywhere" (or herdr-task's view of it).
+export function everywhereOf(file) {
+  const e = file?.everywhere ?? {};
+  return { every: has(e, "every") ? textOf(e.every) : DEFAULT.every, events: eventsIn(has(e, "events") ? e.events : DEFAULT.events),
+    ...(e.trigger ? { trigger: e.trigger } : {}) };
+}
+
+// What applies in a space: its own on/off (off until switched on), Everywhere's schedule and events (anything a space
+// held of its own before is ignored). Everything else its record holds (next_run, pending, last_wake, progress…) comes
+// along as it is. file.spaces: the file's map, or herdr-task's list of views.
+export function pilotFor(file, space) {
+  const list = file?.spaces;
+  const a = (Array.isArray(list) ? list.find((v) => v.space === space) : list?.[space]) ?? {};
+  const e = everywhereOf(file);
+  return { ...a, space, on: Boolean(a.on), every: e.every, events: e.events, ...(e.trigger && !a.trigger ? { trigger: e.trigger } : {}) };
+}
+
+// A schedule's pick: its preset's value, else null (Custom).
+export const presetOf = (every) => {
+  const v = String(every ?? "").trim().toLowerCase();
+  return PRESETS.find(([x]) => x === v)?.[0] ?? null;
+};
+
+export function when(ms, today = new Date()) {
+  if (!ms) return "";
+  const d = new Date(ms);
+  const hm = `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+  if (d.toDateString() === today.toDateString()) return `Today ${hm}`;
+  return `${d.toLocaleDateString("en", { weekday: "short", month: "short", day: "numeric" })} ${hm}`;
+}
+
+// What follows "Autopilot" in an Assistant's header while on: waking (a wake's turn runs), queued (waits for an idle
+// Assistant), the next scheduled wake, else what wakes it. Nothing while off.
+export function headerDetail(a, now = Date.now()) {
+  if (!a?.on) return "";
+  if (a.inflight) return "Waking";
+  if (a.pending) return "Queued";
+  if (a.next_run) {
+    const d = new Date(a.next_run);
+    return a.next_run - now < 86400000 ? `Next ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}` : `Next ${d.toLocaleDateString("en", { weekday: "short" })}`;
+  }
+  return a.events?.length ? "On events" : "Run now only";
+}

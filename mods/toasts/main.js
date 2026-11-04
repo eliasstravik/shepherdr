@@ -10,14 +10,12 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { placement, run, shared, setShared, theme } from "herdr";
 import { TOASTS, TEXT, RADIUS, red, amber, green } from "./ui.js";
+// How many, how wide, how long and in which color: core/toasts.js, shared with the web app's toasts.
+import { SHOWN, WIDTH, LINES, BODY_MAX, tone, clip, unexpired } from "./core/toasts.js";
 
-const SHOWN = 3;
-const WIDTH = 360;
-const LINE = 18;    // the body's line height: 3 lines at most
-const TIMEOUT = { alert: 20000, error: 12000, warning: 10000 };
+const LINE = 18;    // the body's line height: LINES (3) lines at most
 
-const color = (level, t) => (level === "alert" || level === "error" ? red() : level === "warning" ? amber() : level === "success" ? green() : t.accent);
-const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
+const color = (level, t) => ({ red: red(), amber: amber(), green: green() }[tone(level)] ?? t.accent);
 
 export default class Toasts extends View {
   init(_props, cx) {
@@ -25,8 +23,8 @@ export default class Toasts extends View {
     // Expiry: once a second, and only writes when one goes.
     cx.timer.every(1000, () => {
       if (placement()?.hovered) return;
-      const now = Date.now(), list = shared(TOASTS) ?? [];
-      const left = list.filter((n) => now - n.at < (n.timeout ?? TIMEOUT[n.level] ?? 6000));
+      const list = shared(TOASTS) ?? [];
+      const left = unexpired(list);
       if (left.length !== list.length) setShared(TOASTS, left);
     });
   }
@@ -46,8 +44,8 @@ export default class Toasts extends View {
       .child(div().size(8).mt(5).flex_none().rounded(4).bg(color(n.level, t)))
       .child(v_flex().flex_1().min_w(0).gap(2)
         .child(div().min_w(0).truncate().text_size(TEXT.body).font_semibold().text_color(t.foreground).child(String(n.title ?? "")))
-        .when(Boolean(n.body), (el) => el.child(div().max_h(LINE * 3).overflow_hidden().line_height(`${LINE}px`)
-          .text_size(TEXT.label).text_color(t.muted).child(clip(String(n.body), 140)))))
+        .when(Boolean(n.body), (el) => el.child(div().max_h(LINE * LINES).overflow_hidden().line_height(`${LINE}px`)
+          .text_size(TEXT.label).text_color(t.muted).child(clip(String(n.body), BODY_MAX)))))
       // The X's place is always kept, so nothing moves when it shows.
       .child(div().id(`toast-x-${n.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(RADIUS.control)
         .when(on, (el) => el.cursor_pointer().text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground))

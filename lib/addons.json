@@ -5,7 +5,7 @@
     "one with \"switch\": true can be turned off in Shepherdr settings > Window. The off list is shared",
     "\"addons.off\" (the window's mods, lib/addons.js) and \"off\" in ~/.herdr/shepherdr.json (herdr-task).",
     "An add-on without a switch is always on in 3.0.0: splitting it from the panels it lives in comes later.",
-    "mods: folders under mods/. blocks: layout node ids it fills. keys: \"<context> <key>\" in keys.json.",
+    "mods: folders under mods/. blocks: layout node ids it fills. keys: \"<context> <key>\" in keys.json. web: the web app's plugins (web/plugins), left out while it is off.",
     "helpers: links put in ~/.local/bin. templates: ~/.config/herdr-core/templates. needs: other add-ons."
   ],
   "core": {
@@ -48,23 +48,27 @@
       "keys": ["global ctrl-k", "global ctrl-shift-k", "global ctrl-shift-/", "global ctrl-shift-?"] },
     { "id": "artifacts", "title": "Artifacts", "switch": true,
       "about": "Reports and draft screens from agents, beside the chat, with markup. Off: no Artifacts panel button.",
-      "mods": ["artifacts"], "blocks": ["artifacts", "artifacts-list", "artifacts-view"], "helpers": ["herdr-artifact"] },
+      "mods": ["artifacts"], "blocks": ["artifacts", "artifacts-list", "artifacts-view"], "helpers": ["herdr-artifact"], "web": ["artifacts"] },
     { "id": "voice", "title": "Voice and dictation", "switch": true, "needs": ["chat"],
       "about": "Call an Assistant and talk (an ElevenLabs key), and dictate into the box (whisper.cpp). Off: no call or mic buttons.",
-      "mods": ["chat-call"], "blocks": ["chat-call"], "keys": ["mod:chat ctrl-shift-d", "mod:chat ctrl-shift-space"],
+      "mods": ["chat-call"], "blocks": ["chat-call"], "keys": ["mod:chat ctrl-shift-d", "mod:chat ctrl-shift-space"], "web": ["voice"],
       "model": { "path": "data/whisper/ggml-base.bin",
         "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
         "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe" } },
     { "id": "reactions", "title": "Reactions", "switch": true, "needs": ["chat"],
       "about": "React to an agent's message with an emoji. Off: no smiley button (agents' own reactions still show).",
-      "mods": ["chat-react"] },
+      "mods": ["chat-react"], "web": ["reactions"] },
     { "id": "browser", "title": "Task browser", "switch": true, "needs": ["tasks"],
       "about": "Each task gets its own browser you can watch and take over. Off: no Browser tab, and workers aren't given one.",
-      "mods": ["task-browser"], "blocks": ["tasks-thread-browser"], "helpers": ["herdr-browser"] },
+      "mods": ["task-browser"], "blocks": ["tasks-thread-browser"], "helpers": ["herdr-browser"], "web": ["browser"] },
     { "id": "autopilot", "title": "Autopilot", "switch": true, "needs": ["assistants"],
-      "about": "An Assistant works on its own between your messages, from its heartbeat. Off: no Autopilot switch, and no wake-ups." },
+      "about": "An Assistant works on its own between your messages, from its heartbeat. Off: no Autopilot switch, and no wake-ups.",
+      "web": ["autopilot"] },
     { "id": "machines", "title": "Other machines", "switch": true, "needs": ["tasks"],
       "about": "Keeps herdr-task, its helpers and the role templates the same on every connected machine. Off: nothing is sent.",
-      "mods": ["machine-add-chat"] }
+      "mods": ["machine-add-chat"] },
+    { "id": "web", "title": "Web", "switch": true,
+      "about": "Shepherdr in your browser on phone, tablet and desktop, private to your tailnet. Off: the web app stops; the service keeps working.",
+      "service": true }
   ]
 }

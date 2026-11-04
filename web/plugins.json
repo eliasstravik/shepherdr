@@ -1,0 +1,20 @@
+{
+  "plugins": [
+    "places",
+    "coordinators",
+    "tasks",
+    "needs",
+    "chat",
+    "reactions",
+    "artifacts",
+    "terminal",
+    "worktree",
+    "browser",
+    "voice",
+    "health",
+    "limits",
+    "alerts",
+    "keyboard",
+    "autopilot"
+  ]
+}

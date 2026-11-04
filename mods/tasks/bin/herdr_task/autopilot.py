@@ -20,15 +20,23 @@ from .automations import EVENTS, events_in, HOW, next_run, parse_every, parse_on
 
 
 # ---- autopilot ------------------------------------------------------------------------------
-# Per space, in STORE/.autopilot.json (the sidebar's menu and Settings read it; only herdr-task
-# writes it, under its lock):
-#   {"version": 1, "spaces": {"<space id>": {
-#      "on", "name", "folder", "every" (an --every rule), "events" ([--on events]), "next_run",
+# Everywhere's, and per space, in STORE/.autopilot.json (Settings, the header's switch and the web
+# read it; only herdr-task writes it, under its lock):
+#   {"version": 2,
+#    "everywhere": {"every" (an --every rule, or null), "events" ([--on events])},
+#    "spaces": {"<space id>": {
+#      "on" (its Assistant header's switch), "name", "folder", "next_run",
+#      "applied" (what last applied: sync() acts on a change),
 #      "pending" ({reasons, at}: a wake waiting for its Assistant to be idle),
 #      "inflight" ({at, reason, to, turn}: a wake delivered, its turn not ended yet),
 #      "last_wake" ({at, reason, outcome}), "wakes" (the last 10 of those),
 #      "progress" ({text, at}), "completed" ({text, at}), "seen" (events_in's record per folder)}}}
-# The heartbeat is plain text the person writes: HEARTBEATS/<space id>.md.
+# One setting for every space, as Tasks is: every space works from Everywhere's schedule, events
+# and heartbeat; a space has only its own on/off (resolve(); the same rule as core/autopilot.js
+# pilotFor, tested on core/autopilot.cases.json). A schedule or events a space held of its own
+# before (version 1) are dropped on the next read.
+# The heartbeat is plain text the person writes: HEARTBEATS/everywhere.md (a space's own old
+# HEARTBEATS/<space id>.md is no longer read).
 
 STATE = os.path.join(STORE, ".autopilot.json")
 HEARTBEATS = os.environ.get("HERDR_AUTOPILOT_HOME") or os.path.join(HOME, ".config", "herdr-core", "autopilot")
@@ -49,17 +57,40 @@ Stopping goal (optional): a finite goal; when it's proven, Autopilot turns itsel
 """
 
 
-def heartbeat_path(space):
-    return os.path.join(HEARTBEATS, f"{bare(space)}.md")
+def heartbeat_path(space=None):
+    """The heartbeat every space's wakes bring: Everywhere's one file."""
+    return os.path.join(HEARTBEATS, "everywhere.md")
 
 
-def ensure_heartbeat(space):
-    p = heartbeat_path(space)
+def heartbeat_words(path):
+    try:
+        with open(path) as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def ensure_heartbeat():
+    p = heartbeat_path()
     if not os.path.exists(p):
         os.makedirs(HEARTBEATS, exist_ok=True)
         with open(p, "w") as f:
             f.write(STARTER)
     return p
+
+
+def everywhere_default():
+    return {"every": parse_every(DEFAULT_EVERY), "events": []}
+
+
+def migrate(d):
+    """One setting for every space: what a space held of its own (version 1's schedule and events,
+    a switch on Everywhere) no longer applies, and goes."""
+    for a in d.get("spaces", {}).values():
+        a.pop("every", None)
+        a.pop("events", None)
+    (d.get("everywhere") or {}).pop("on", None)
+    d["version"] = 2
 
 
 @contextlib.contextmanager
@@ -70,8 +101,11 @@ def state(write=True):
     fcntl.flock(lock, fcntl.LOCK_EX if write else fcntl.LOCK_SH)
     try:
         d = read_list(STATE) or {}
-        d.setdefault("version", 1)
         d.setdefault("spaces", {})
+        migrate(d)
+        e = d.setdefault("everywhere", {})
+        for k, v in everywhere_default().items():
+            e.setdefault(k, v)
         yield d
         if write:
             tmp = f"{STATE}.{os.getpid()}.tmp"
@@ -83,32 +117,44 @@ def state(write=True):
         lock.close()
 
 
+def local_spaces():
+    """This computer's spaces in the window's list: [{id, name, folder}] ([] when it can't say)."""
+    try:
+        r = run(["herdr-app", "ls"])
+        return [x for x in json.loads(r.stdout).get("spaces") or []
+                if x.get("id") and "/" not in x["id"] and not x.get("machine")]
+    except (Fail, ValueError, OSError, AttributeError):
+        return []
+
+
+def folder_of(folder):
+    try:
+        return locate(folder)["folder"] if folder else None
+    except Fail:
+        return folder
+
+
 def space_info(space):
     """(name, task folder) of a space on this computer, from the window's list; (None, None) when
     the window doesn't know it."""
-    r = run(["herdr-app", "ls"])
-    try:
-        sp = next((x for x in json.loads(r.stdout).get("spaces") or [] if x.get("id") == space), None)
-    except ValueError:
-        sp = None
+    sp = next((x for x in local_spaces() if x.get("id") == space), None)
     if not sp:
         return None, None
-    folder = sp.get("folder")
-    try:
-        folder = locate(folder)["folder"] if folder else None
-    except Fail:
-        pass
-    return sp.get("name"), folder
+    return sp.get("name"), folder_of(sp.get("folder"))
 
 
 def my_space(args):
-    """--space, else the caller's (an Assistant's own: its pane's, or its chat's)."""
+    """--space, else the caller's (an Assistant's own: its pane's, or its chat's). None: --everywhere."""
+    if getattr(args, "everywhere", False):
+        if getattr(args, "space", None):
+            raise Fail("Pass --space or --everywhere, not both.")
+        return None
     if getattr(args, "space", None):
         return bare(args.space)
     labels = caller_labels()
     sp = labels.get("herdr.space") or labels.get("herdr.coordinator.space")
     if not sp:
-        raise Fail("Which space? Run this as the space's Assistant, or pass --space <space id>.")
+        raise Fail("Which space? Run this as the space's Assistant, or pass --space <space id> (or --everywhere).")
     return bare(sp)
 
 
@@ -116,20 +162,79 @@ def when(ms):
     return datetime.datetime.fromtimestamp(ms / 1000).strftime("%a %H:%M") if ms else None
 
 
-def view(space, a):
-    v = {k: a.get(k) for k in ("on", "name", "folder", "events", "next_run", "pending", "inflight", "last_wake",
-                               "wakes", "progress", "completed")}
-    v.update(space=space, every=(a.get("every") or {}).get("text"), heartbeat=heartbeat_path(space),
-             trigger=trigger_words({"every": a.get("every"), "on": a.get("events")}) if (a.get("every") or a.get("events")) else "Only Run now")
+def resolve(d, a):
+    """What applies in a space (its record `a`, None: Everywhere's own): {on, every, events}: its own
+    on/off (off until switched on), Everywhere's schedule and events (anything else it holds is
+    ignored)."""
+    e = {**everywhere_default(), **{k: v for k, v in (d.get("everywhere") or {}).items() if k in ("every", "events")}}
+    return {"on": bool((a or {}).get("on")), "every": e["every"], "events": [x for x in EVENTS if x in (e["events"] or [])]}
+
+
+def trigger_of(eff):
+    return trigger_words({"every": eff["every"], "on": eff["events"]}) if (eff["every"] or eff["events"]) else "Only Run now"
+
+
+def sync(d):
+    """Acts on what changed in what applies to each space (its switch, or Everywhere's schedule and
+    events): turned on (a fresh start: next wake, events from now on), off (nothing waits), a new
+    schedule or events."""
+    for a in d["spaces"].values():
+        eff = resolve(d, a)
+        sig = {"on": eff["on"], "every": (eff["every"] or {}).get("text"), "events": eff["events"]}
+        was = a.get("applied")
+        a["applied"] = sig
+        if was is None:
+            if sig["on"] and not a.get("next_run"):
+                a["next_run"] = next_run(eff["every"], now())
+            continue
+        if sig["on"] and not was.get("on"):
+            a.pop("completed", None)
+            a.pop("seen", None)
+            a["next_run"] = next_run(eff["every"], now())
+        elif not sig["on"] and was.get("on"):
+            a.pop("pending", None)
+            a.pop("inflight", None)
+            a["next_run"] = None
+        elif sig["on"] and sig["every"] != was.get("every"):
+            a["next_run"] = next_run(eff["every"], now())
+        if sig["events"] != was.get("events"):
+            a.pop("seen", None)
+
+
+def view(d, space, a):
+    """A space's Autopilot as the screens read it: its switch, Everywhere's schedule, events and
+    heartbeat, and the rest of its record."""
+    a = a or {}
+    eff = resolve(d, a)
+    v = {k: a.get(k) for k in ("name", "folder", "next_run", "pending", "inflight", "last_wake", "wakes", "progress", "completed")}
+    v.update(space=space, on=eff["on"], every=(eff["every"] or {}).get("text"), events=eff["events"],
+             heartbeat=heartbeat_path(), trigger=trigger_of(eff))
     return v
 
 
+def everywhere_view(d):
+    e = resolve(d, None)
+    return {"everywhere": True, "space": None, "every": (e["every"] or {}).get("text"), "events": e["events"],
+            "heartbeat": heartbeat_path(), "trigger": trigger_of(e)}
+
+
+def shown_name(v):
+    """A space as the screens call it (core/spaces.js spaceName): never "~"."""
+    name = v.get("name")
+    if name and name != "~":
+        return name
+    folder = (v.get("folder") or "").rstrip("/")
+    return "Home" if not folder or folder == HOME.rstrip("/") else os.path.basename(folder)
+
+
 def line_of(v):
+    if v.get("everywhere"):
+        return f"Every space: {v['trigger']}, from {v['heartbeat'].replace(HOME, '~', 1)}"
     state_word = "on" if v["on"] else "off"
     nxt = f", next {when(v['next_run'])}" if v["on"] and v.get("next_run") else ""
     last = v.get("last_wake")
     last = f"; last {when(last['at'])} ({last['reason']}): {last['outcome']}" if last else ""
-    return f"{v.get('name') or v['space']}: Autopilot {state_word} ({v['trigger']}{nxt}){last}"
+    return f"{shown_name(v)}: Autopilot {state_word} ({v['trigger']}{nxt}){last}"
 
 
 def log_wake(a, reason, outcome, at=None):
@@ -150,12 +255,8 @@ def queue(a, reason):
 
 def message(space, a, reasons):
     """The wake: one tagged message (the chat shows none of it, only the Assistant's answer)."""
-    path = heartbeat_path(space)
-    try:
-        with open(path) as f:
-            beat = f.read().strip()
-    except OSError:
-        beat = ""
+    path = heartbeat_path()
+    beat = heartbeat_words(path).strip()
     if beat == STARTER.strip():
         beat = ""  # the starter, never filled in
     if len(beat) > HEARTBEAT_MAX:
@@ -230,9 +331,10 @@ def settle(a):
         log_wake(a, f["reason"], outcome, f["at"])
 
 
-def events_for(space, a):
+def events_for(space, a, events):
     """Task events since the last look that concern this space (its tasks, or its folder's tasks
-    not started anywhere yet): ["event:ready HAT-4", ...]. Records only, the first look."""
+    not started anywhere yet) among `events` (what applies there): ["event:ready HAT-4", ...].
+    Records only, the first look."""
     seen_all = a.setdefault("seen", {})
     out = []
     for p in store_files():
@@ -246,7 +348,7 @@ def events_for(space, a):
         with Store(locate(d["folder"]), write=False) as s:
             for ev, t in events_in(s, seen_all.setdefault(s.slug, {})):
                 # Added while a wake is at work: its own doing, not news.
-                if ev in a.get("events") and mine(t) and not (ev == "added" and a.get("inflight")):
+                if ev in events and mine(t) and not (ev == "added" and a.get("inflight")):
                     out.append(f"event:{ev} {s.ref(t)}")
     return out
 
@@ -258,75 +360,88 @@ def autopilot_pass(report):
     if addon_off("autopilot"):
         return
     with state() as d:
+        sync(d)
         for space, a in d["spaces"].items():
-            if not a.get("on"):
+            eff = resolve(d, a)
+            if not eff["on"]:
                 continue
             settle(a)
-            if a.get("every") and a.get("next_run") and now() >= a["next_run"]:
-                a["next_run"] = next_run(a["every"], now())
+            if eff["every"] and a.get("next_run") and now() >= a["next_run"]:
+                a["next_run"] = next_run(eff["every"], now())
                 queue(a, "schedule")
-            if a.get("events"):
-                for why in events_for(space, a):
+            if eff["events"]:
+                for why in events_for(space, a, eff["events"]):
                     queue(a, why)
             if deliver(space, a) == "delivered":
                 report.setdefault("autopilot", []).append({"space": space, "to": a["inflight"]["to"], "why": a["inflight"]["reason"]})
 
 
-def any_on():
-    return any(a.get("on") for a in ((read_list(STATE) or {}).get("spaces") or {}).values())
+def any_on(d=None):
+    """Whether Autopilot is on in any space here."""
+    d = d if d is not None else (read_list(STATE) or {})
+    return any(a.get("on") for a in (d.get("spaces") or {}).values())
 
 
 # ---- commands -------------------------------------------------------------------------------
+
+PER_SPACE = "Autopilot is switched on per space, with the switch in its Assistant's header: pass --space."
+SAME_EVERYWHERE = "The schedule and events are the same in every space: set them with --everywhere."
+
 
 def cmd_autopilot(args):
     sub = args.autopilot
     if sub == "list":
         with state(write=False) as d:
-            out = [view(sp, a) for sp, a in d["spaces"].items()]
+            out = {"everywhere": everywhere_view(d), "spaces": [view(d, sp, a) for sp, a in d["spaces"].items()]}
         if args.json:
             print(json.dumps(out))
         else:
-            print("\n".join(line_of(v) for v in out) if out else "No space has Autopilot set up.")
+            print("\n".join([line_of(out["everywhere"])] + [line_of(v) for v in out["spaces"]]))
         return
-    space = my_space(args)
+    # Everywhere's (the schedule, events and heartbeat every space works from), or a space's switch.
+    if sub == "set" and not getattr(args, "everywhere", False):
+        raise Fail(SAME_EVERYWHERE)
+    space = None if sub == "heartbeat" else my_space(args)
+    if space is None and sub in ("on", "off", "run-now"):
+        raise Fail(PER_SPACE if sub != "run-now" else "Run now wakes one space's Assistant: pass --space.")
     msg = ""
     with state(write=sub != "show") as d:
-        a = d["spaces"].setdefault(space, {"on": False, "events": [], "every": None})
-        if sub != "show" and not a.get("folder"):
-            a["name"], a["folder"] = space_info(space)
+        e = d["everywhere"]
+        a = None
+        if space is not None:
+            a = d["spaces"].get(space)
+            if a is None:
+                a = {} if sub == "show" else d["spaces"].setdefault(space, {})
+            if sub != "show" and not a.get("folder"):
+                a["name"], a["folder"] = space_info(space)
         if sub == "on":
-            if not a.get("every") and not a.get("events"):
-                a["every"] = parse_every(DEFAULT_EVERY)
             a["on"] = True
-            a.pop("completed", None)
-            a["next_run"] = next_run(a.get("every"), now())
-            a.pop("seen", None)  # events from now on, not old ones
-            ensure_heartbeat(space)
-            msg = f"Autopilot is on: {trigger_words({'every': a.get('every'), 'on': a.get('events')})}."
+            ensure_heartbeat()
+            sync(d)
+            msg = f"Autopilot is on: {trigger_of(resolve(d, a))}."
         elif sub == "off":
             a["on"] = False
-            a.pop("pending", None)
-            a.pop("inflight", None)
-            a["next_run"] = None
+            sync(d)
             msg = "Autopilot is off."
         elif sub == "set":
             if args.every is not None:
-                e = args.every.strip()
-                a["every"] = parse_every(e) if e and e.lower() not in ("off", "none", "never") else None
-                a["next_run"] = next_run(a["every"], now()) if a.get("on") else None
+                x = args.every.strip()
+                e["every"] = parse_every(x) if x and x.lower() not in ("off", "none", "never") else None
             if args.on is not None:
-                a["events"] = parse_on(args.on)
-                a.pop("seen", None)
-            msg = f"Autopilot wakes: {trigger_words({'every': a.get('every'), 'on': a.get('events')}) if (a.get('every') or a.get('events')) else 'only on Run now'}."
+                e["events"] = parse_on(args.on)
+            sync(d)
+            eff = resolve(d, None)
+            msg = f"Autopilot wakes every space it's on in: {trigger_of(eff) if (eff['every'] or eff['events']) else 'only on Run now'}."
         elif sub == "run-now":
-            if not a.get("on"):
+            if not resolve(d, a)["on"]:
                 raise Fail("Autopilot is off in this space: turn it on first.")
+            sync(d)
             queue(a, "run now")
             got = deliver(space, a)
             msg = "Woke its Assistant." if got == "delivered" else f"Queued: {(a.get('pending') or {}).get('note') or 'it goes when its Assistant is idle'}."
         elif sub == "heartbeat":
-            msg = ensure_heartbeat(space)
-        v = view(space, a)
+            msg = ensure_heartbeat()
+        v = everywhere_view(d) if space is None else view(d, space, a)
     say(args, v, msg or line_of(v))
 
 
@@ -336,12 +451,14 @@ def cmd_progress(args):
     text = " ".join(args.text.split()) if "\n" not in args.text else args.text.strip()
     if not text:
         raise Fail("Say what was done and what's next.")
+    if space is None:
+        raise Fail("Progress is a space's: run this as its Assistant, or pass --space.")
     with state() as d:
         a = d["spaces"].get(space)
-        if not a:
+        if a is None:
             raise Fail("This space has no Autopilot.")
         a["progress"] = {"text": text[:4000], "at": now()}
-        v = view(space, a)
+        v = view(d, space, a)
     say(args, v, "Progress saved." + ("" if v["on"] else " (Autopilot is off here.)"))
 
 
@@ -350,9 +467,11 @@ def cmd_complete(args):
     space = my_space(args)
     if not args.evidence.strip():
         raise Fail("Give the evidence that the goal is met.")
+    if space is None:
+        raise Fail("A goal is a space's: run this as its Assistant, or pass --space.")
     with state() as d:
         a = d["spaces"].get(space)
-        if not a or not a.get("on"):
+        if a is None or not resolve(d, a)["on"]:
             raise Fail("Autopilot isn't on in this space.")
         a.update(on=False, next_run=None, completed={"text": args.evidence.strip()[:4000], "at": now()})
         a.pop("pending", None)
@@ -364,5 +483,6 @@ def cmd_complete(args):
             a["wakes"][-1] = w
         else:
             log_wake(a, (f or {}).get("reason") or "complete", "Goal complete: Autopilot turned off")
-        v = view(space, a)
+        sync(d)
+        v = view(d, space, a)
     say(args, v, "Goal complete: Autopilot is now off in this space. Tell the person, with the evidence.")

@@ -6,8 +6,12 @@ import { agentIn, isCoordinatorTab, closeTab, watchNewSpaces, newSpace, openCoor
 import { startTick, tickOnChange } from "./tick.js";
 import { startInbox, count as inboxCount, countsByTab, readyCount, readyByTab, showInbox, toAlert } from "./inbox.js";
 import { serveRemote } from "./secrets.js";
+import { watchService } from "./service.js";
+import { startBridge } from "./bridge.js";
 import { countBadge, H, TEXT, RADIUS } from "./ui.js";
 import { on as addonOn } from "./addons.js";
+// A tab's name (what runs in it while Herdr named it): core/menus.js, as the web app's tab bar names it.
+import { tabName } from "./core/menus.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -25,7 +29,11 @@ export default class Tabs extends View {
     cx.timer.every(5000, () => sweep());
     this.pressed = null;
     this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}");
-    // Tasks' queue and merge watcher (mods/tasks owns it).
+    // Shepherdr's service, which does the background work while it runs (lib/service.js).
+    watchService(cx);
+    // The person's pins, sidebar sections, icons and Notify, in step with the web app (lib/bridge.js).
+    startBridge(cx);
+    // Tasks' queue and merge watcher (mods/tasks owns it): left to the service while it runs.
     startTick(cx);
     // What needs the person, for Tasks' "Needs you" and the red counts (inbox.js).
     startInbox(cx);
@@ -135,7 +143,7 @@ export default class Tabs extends View {
     const tabsShown = shared("tabbar.tabs") !== false;
     const item = (c, i) => {
       const program = panes().find(p => p.tab === c.id && p.program?.agent)?.program ?? panes().find(p => p.tab === c.id)?.program;
-      const name = /^tb\d+$/.test(c.name) ? program?.name ?? "Terminal" : c.name;
+      const name = tabName(c.name, program?.name);
       return h_flex().id(`tab-${c.id}`).h(H.sm).px(8).gap(6).rounded(RADIUS.control).items_center().flex_none().text_size(TEXT.body)
         .border(1).border_color(c.active ? t.border : t.chrome).bg(c.active ? t.raised : t.chrome).text_color(c.active ? t.foreground : t.muted)
         .cursor_pointer().hover(s => s.bg(t.hover))

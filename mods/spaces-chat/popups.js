@@ -14,6 +14,7 @@ import { NOTIFY, notifyOf, setNotify } from "./notify.js";
 import { openRename, openNewSection, openRenameMachine } from "./rename.js";
 import { logSpace } from "./spacelog.js";
 import { menuRow, segmented, TEXT, openSettings } from "./ui.js";
+import { addMenu, spaceMenu, machineMenu, sectionMenu } from "./core/menus.js";
 
 const ROW = 32, PAD = 5, SEP = 9, W = 210;
 // The Notify setting (a space's menu): its labeled row, then a small note under it. A menu with it
@@ -27,7 +28,7 @@ const icon = (name) => (name.includes("/") ? name : `mods/workspace-chrome/${nam
 function closeSpace(id, name) {
   const w = spaces().find((s) => s.id === id);
   openOverlay({ mod: "confirm-chat", kind: "dialog", width: 400, height: 168, props: {
-    title: `Close \u201c${name ?? w?.name ?? "this space"}\u201d?`,
+    title: `Close “${name ?? w?.name ?? "this space"}”?`,
     detail: "Its tabs close and every program in them ends.",
     verb: "Close space",
     command: { name: "space.close", args: { id, confirmed: true } } } });
@@ -52,40 +53,28 @@ export function openMenu(view, p, at = "pointer") {
   openOverlay({ mod: "spaces-chat", kind: "popup", width, height: heightOf(items), at, props: { view, ...p } });
 }
 
-// Each menu's items: { label, icon, hint, act }, or { sep: true }.
+// Each menu's items: { label, icon, hint, act }, or { sep: true }: core/menus.js's lists (the web app builds its menus
+// from the same ones), each item done here.
+const MENU_ICON = { "check-check": "mods/spaces-chat/check-check.svg", "trash-2": "mods/spaces-chat/trash-2.svg" };
+const built = (list, acts) => list.map((it) => (it.sep ? it : it.setting ? { ...acts[it.id], note: it.note } : { label: it.label, icon: MENU_ICON[it.icon] ?? it.icon, act: acts[it.id] }));
 const ITEMS = {
   // The machine header's +.
-  add: (p) => [
-    { label: "New space", icon: "plus", act: () => newSpace(p.machine) },
-    { label: "New section", icon: "folder-plus", act: () => openNewSection(p.machine) },
-  ],
-  space: (p) => [
+  add: (p) => built(addMenu(), { "new-space": () => newSpace(p.machine), "new-section": () => openNewSection(p.machine) }),
+  space: (p) => built(spaceMenu({ unread: p.unread, pinned: isPinned(p.space), git: p.git }), {
     // Its Assistant's Notify (notify.js), as Shepherdr's: picked in place, the menu stays open.
-    { notify: p.space },
-    { sep: true },
-    ...(p.unread ? [{ label: "Mark as read", icon: "mods/spaces-chat/check-check.svg", act: () => markRead(assistantOf({ id: p.space, machine: p.machine })) }] : []),
-    isPinned(p.space)
-      ? { label: "Unpin", icon: "pin-off", act: () => pin(p.space, false) }
-      : { label: "Pin", icon: "pin", act: () => pin(p.space) },
-    { label: "Rename\u2026", icon: "square-pen", act: () => openRename({ space: p.space, name: p.name }) },
+    notify: { notify: p.space },
+    read: () => markRead(assistantOf({ id: p.space, machine: p.machine })),
+    pin: () => pin(p.space), unpin: () => pin(p.space, false),
+    rename: () => openRename({ space: p.space, name: p.name }),
     // Its own settings: the Settings window, scoped to this space.
-    { label: "Space settings…", icon: "settings", act: () => openSettings({ space: p.space }) },
-    ...(p.git ? [{ sep: true },
-      { label: "New worktree", icon: "git-branch", act: () => worktree(p.space, "new") },
-      { label: "Open worktree", icon: "git-branch", act: () => worktree(p.space, "open") }] : []),
-    ...(p.git === "linked" ? [{ label: "Remove worktree", icon: "git-branch", act: () => worktree(p.space, "remove") }] : []),
-    { sep: true },
-    { label: "Close\u2026", icon: "x", act: () => closeSpace(p.space, p.name) },
-  ],
+    settings: () => openSettings({ space: p.space }),
+    "worktree-new": () => worktree(p.space, "new"), "worktree-open": () => worktree(p.space, "open"), "worktree-remove": () => worktree(p.space, "remove"),
+    close: () => closeSpace(p.space, p.name),
+  }),
   // A machine header's right-click: its name and emoji (rename.js).
-  machine: (p) => [
-    { label: "Rename\u2026", icon: "square-pen", act: () => openRenameMachine(p.machine) },
-  ],
-  section: (p) => [
-    { label: "Rename\u2026", icon: "square-pen", act: () => openRename({ section: p.section }) },
-    // At once; its toast offers Undo (sections.js).
-    { label: "Delete", icon: "mods/spaces-chat/trash-2.svg", act: () => deleteSection(p.section) },
-  ],
+  machine: (p) => built(machineMenu(), { rename: () => openRenameMachine(p.machine) }),
+  // Delete is at once; its toast offers Undo (sections.js).
+  section: (p) => built(sectionMenu(), { rename: () => openRename({ section: p.section }), delete: () => deleteSection(p.section) }),
 };
 
 function worktree(space, action) {
@@ -131,7 +120,7 @@ export class Menu {
       })
       .children(all.map((it, k) => {
         if (it.sep) return div().id(`sep-${k}`).mx(7).my(4).h(1).flex_none().bg(t.border);
-        if (it.notify) return notifySetting(it.notify, t);
+        if (it.notify) return notifySetting(it.notify, t, it.note);
         const i = ++n;
         return menuRow(`mi-${i}`, it.label, { icon: it.icon ? icon(it.icon) : null, hint: it.hint, onClick: () => this.choose(i) })
           .when(i === this.at, (el) => el.bg(t.selected));
@@ -143,7 +132,7 @@ export class Menu {
 // choices at the right (ui.js segmented: each as wide as its words, never cut; the picked one a soft
 // pill). Under it, on the text column, a quiet note. Picked in place: the menu stays open.
 // A pick that is what Everywhere gives goes back to following it.
-function notifySetting(space, t) {
+function notifySetting(space, t, note) {
   const now = notifyOf(space);
   return v_flex().id("notify").flex_none()
     .child(h_flex().h(SETTING).px(ROW_X).gap(ICON_GAP).items_center().text_size(TEXT.body).text_color(t.foreground)
@@ -151,5 +140,5 @@ function notifySetting(space, t) {
       .child(div().flex_1().min_w(0).child("Notify"))
       .child(segmented("notify", NOTIFY.map((v) => [v, v]), now, (v) => setNotify(space, v))))
     .child(h_flex().h(NOTE).pl(TEXT_X).pr(ROW_X).pb(4).items_center()
-      .child(div().flex_1().min_w(0).truncate().text_size(TEXT.id).text_color(t.dim).child("Tasks alert either way.")));
+      .child(div().flex_1().min_w(0).truncate().text_size(TEXT.id).text_color(t.dim).child(note)));
 }

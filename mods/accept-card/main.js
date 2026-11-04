@@ -15,11 +15,12 @@ import { v_flex, h_flex } from "gpui-base";
 import { openViewer } from "./artview.js";
 import { appHome, closeOverlay, exec, notify, openOverlay, props, shared, setShared, theme } from "herdr";
 import { dialogFooter, green, red, amber, H, RADIUS, TEXT } from "./ui.js";
+// The card's words, the summary cut and the details as bullets: core/accept.js, shared with the web app's card.
+import { ACCEPT, words, readable, commitsLine, filesLine, moreLine, proofTitle, whereNow } from "./core/accept.js";
+
+export { words, readable };
 
 const CLI = () => `${appHome()}/mods/tasks/bin/herdr-task`;
-// herdr-task ready's SUMMARY_MAX (as Shepherdr's): an older, longer summary shows its first
-// sentence and folds the rest under Details.
-const SUMMARY_MAX = 160;
 const MONO = "JetBrains Mono";
 
 async function task(p, args) {
@@ -29,64 +30,6 @@ async function task(p, args) {
   try { out = JSON.parse(r.stdout || "null"); } catch {}
   if (r.code !== 0 || !out || out.error) throw new Error(out?.error || r.stderr?.trim().split("\n").pop() || "herdr-task failed");
   return out;
-}
-
-// { summary, details }: a summary written before the limit, too long to read at a glance, keeps
-// its first sentence (or its first words) up top and the whole text under Details.
-export function words(e) {
-  const said = String(e?.summary ?? "").replace(/\s+/g, " ").trim();
-  const details = String(e?.details ?? "").trim();
-  if (said.length <= SUMMARY_MAX || details) return { summary: said, details };
-  const head = said.slice(0, SUMMARY_MAX);
-  const stop = Math.max(head.lastIndexOf(". "), head.lastIndexOf("! "), head.lastIndexOf("? "));
-  const cut = stop >= 40 ? head.slice(0, stop + 1) : `${head.slice(0, Math.max(head.lastIndexOf(" "), 40)).trim()}…`;
-  return { summary: cut, details: e.summary.trim() };
-}
-
-const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-// Details to read, as markdown. An agent's own markdown (bullets, headings, code blocks) stays as
-// written. Older plain text, one dense paragraph or plain lines, becomes short bullets: split at
-// "; " and at sentence ends outside brackets, without their end punctuation, a leftover fragment
-// of one or two words joined to the bullet before, and only clear paths (a folder and a file
-// with its extension, or ~/ ./ /) as code; other file names stay plain words.
-const MARKDOWN = /^\s*(?:[-*+]\s|\d+[.)]\s|#{1,6}\s|```|>\s)/m;
-const PATH = /(^|[\s(,;:"'])((?:~|\.{1,2})?\/?[\w.@-]+(?:\/[\w.@-]+)+\/?)(?=$|[\s),;:"'.!?])/g;
-const ABBR = /(?:^|\s)(?:e\.g|i\.e|etc|vs|cf|approx|incl|[A-Za-z])\.$/i;
-
-const codify = (s) => s.replace(PATH, (m, pre, tok) => {
-  const end = tok.match(/\.+$/)?.[0] ?? "";
-  const path = tok.slice(0, tok.length - end.length);
-  const clear = /^(?:~|\.{1,2})?\//.test(path) || path.endsWith("/") || /\.[A-Za-z]{1,5}$/.test(path);
-  return clear ? `${pre}\`${path}\`${end}` : m;
-});
-
-function sentences(line) {
-  const out = [];
-  let cur = "", depth = 0;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    cur += c;
-    if (c === "(" || c === "[") depth++;
-    else if (c === ")" || c === "]") depth = Math.max(0, depth - 1);
-    else if (depth === 0 && (c === ";" || (/[.!?]/.test(c) && /^\s/.test(line[i + 1] ?? "") && !ABBR.test(cur)))) {
-      out.push(cur);
-      cur = "";
-    }
-  }
-  out.push(cur);
-  return out.map((s) => s.trim().replace(/[;.,:]+$/, "").trim()).filter(Boolean);
-}
-
-export function readable(text) {
-  const s = String(text ?? "").trim();
-  if (!s || MARKDOWN.test(s)) return s;
-  const items = [];
-  for (const x of s.split(/\n+/).flatMap((l) => sentences(l.trim()))) {
-    if (items.length && x.split(/\s+/).length < 3) items[items.length - 1] += `; ${x}`;
-    else items.push(x);
-  }
-  return items.length < 2 ? codify(s) : items.map((x) => `- ${codify(x)}`).join("\n");
 }
 
 // Markdown drawn here rather than by TextView, whose code spans pad like spaces ("( crook.svg ,"):
@@ -187,7 +130,7 @@ export default class AcceptCard extends View {
     const p = props() ?? {};
     // Opened without a task (the palette's mod.open, say): nothing to approve, so it goes.
     if (!p.ref || !p.folder) {
-      this.error = "No task to accept.";
+      this.error = ACCEPT.noTask;
       cx.timer.after(0, () => this.close());
       return;
     }
@@ -259,17 +202,17 @@ export default class AcceptCard extends View {
 
   // Changes: one line of counts, then its newest commits and its biggest files by name.
   changes(t, e) {
-    if (e.git === false) return div().text_color(t.muted).child("Not a git folder.");
+    if (e.git === false) return div().text_color(t.muted).child(ACCEPT.notGit);
     const c = e.commits ?? { count: 0, list: [] }, d = e.diff;
-    if (!c.count && !d?.files) return div().text_color(t.muted).child("No commits.");
+    if (!c.count && !d?.files) return div().text_color(t.muted).child(ACCEPT.noCommits);
     const counts = h_flex().gap(8).items_center().flex_wrap()
-      .child(div().text_color(t.foreground).child(plural(c.count, "commit")))
+      .child(div().text_color(t.foreground).child(commitsLine(c.count)))
       .when(Boolean(d), (el) => el
         .child(div().text_color(t.dim).child("·"))
-        .child(div().text_color(t.foreground).child(`${plural(d.files, "file")} changed`))
+        .child(div().text_color(t.foreground).child(filesLine(d.files)))
         .child(div().font_family(MONO).text_size(TEXT.label).text_color(green()).child(`+${d.added}`))
         .child(div().font_family(MONO).text_size(TEXT.label).text_color(red()).child(`−${d.removed}`)))
-      .when(!d, (el) => el.child(div().text_color(red()).child("· Couldn't read the files")));
+      .when(!d, (el) => el.child(div().text_color(red()).child(ACCEPT.noFiles)));
     const commit = (x) => h_flex().gap(8).min_w(0).items_center()
       .child(div().flex_none().font_family(MONO).text_size(12).text_color(t.dim).child(x.sha))
       .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(x.subject));
@@ -277,13 +220,13 @@ export default class AcceptCard extends View {
     return v_flex().gap(8).min_w(0)
       .child(counts)
       .when(c.list.length > 0, (el) => el.child(v_flex().gap(3).min_w(0).children(c.list.map(commit))
-        .when(c.count > c.list.length, (el) => el.child(div().text_size(12).text_color(t.dim).child(`And ${c.count - c.list.length} more`)))))
+        .when(c.count > c.list.length, (el) => el.child(div().text_size(12).text_color(t.dim).child(moreLine(c.count - c.list.length))))))
       .when(Boolean(d?.list?.length), (el) => el.child(v_flex().gap(2).min_w(0).children(d.list.map(file))
-        .when(d.files > d.list.length, (el) => el.child(div().text_size(12).text_color(t.dim).child(`And ${d.files - d.list.length} more`)))));
+        .when(d.files > d.list.length, (el) => el.child(div().text_size(12).text_color(t.dim).child(moreLine(d.files - d.list.length))))));
   }
 
   checks(t, e) {
-    const c = e.checks ?? { state: "none", text: "No GitHub checks here" };
+    const c = e.checks ?? { state: "none", text: ACCEPT.noChecks };
     const color = { passed: green(), failed: red(), running: amber(), unknown: red() }[c.state] ?? t.muted;
     return h_flex().gap(8).items_center()
       .when(c.state !== "none", (el) => el.child(div().size(7).flex_none().rounded(4).bg(color)))
@@ -292,13 +235,13 @@ export default class AcceptCard extends View {
 
   // Proof: a row that looks pressable, opening the artifact in a modal.
   proof(t, e) {
-    if (!e.proof) return div().text_color(t.muted).child("No proof artifact.");
+    if (!e.proof) return div().text_color(t.muted).child(ACCEPT.noProof);
     return h_flex().id("open-proof").w_full().h(32).px(10).gap(8).items_center().rounded(RADIUS.card)
       .border_1().border_color(t.border).bg(t.surface).cursor_pointer().hover((s) => s.bg(t.hover))
       .on_click((_e, cx) => { cx.stop_propagation(); this.openProof(cx); cx.notify(); })
       .child(div().flex_1().min_w(0).truncate().text_color(t.foreground)
-        .child(this.opening ? "Opening…" : e.proof.title.replace(/^[A-Z]+-\d+:\s*/, "")))
-      .child(div().flex_none().text_size(TEXT.label).text_color(t.muted).child("Open"))
+        .child(this.opening ? ACCEPT.opening : proofTitle(e.proof.title)))
+      .child(div().flex_none().text_size(TEXT.label).text_color(t.muted).child(ACCEPT.open))
       .child(svg("mods/chat-image/external-link.svg").size(13).flex_none().text_color(t.muted));
   }
 
@@ -310,15 +253,14 @@ export default class AcceptCard extends View {
         .hover((s) => s.text_color(t.foreground))
         .on_click((_e, cx) => { cx.stop_propagation(); this.details = !open; cx.notify(); })
         .child(svg(`mods/workspace-chrome/chevron-${open ? "down" : "right"}.svg`).size(13).flex_none())
-        .child(div().text_size(TEXT.label).font_medium().child("Details")))
+        .child(div().text_size(TEXT.label).font_medium().child(ACCEPT.details)))
       .when(open, (el) => el.child(div().w_full().pl(19).child(mdView(t, readable(text)))));
   }
 
   // No longer Ready: where it is now, calmly (a dot in its color, no red error).
   where(t, x) {
     const done = x.state === "done";
-    const text = done ? (x.accepted_at ? "Already accepted." : "Already done.")
-      : `Not ready right now: it's in ${x.status_text ?? x.state}.`;
+    const text = whereNow(x);
     return h_flex().gap(8).items_center()
       .child(div().size(7).flex_none().rounded(4).bg(done ? green() : t.muted))
       .child(div().text_color(t.foreground).child(text));
@@ -341,13 +283,13 @@ export default class AcceptCard extends View {
     const settled = Boolean(x && !ready);
     const w = e ? words(e) : null;
     const body = !x
-      ? div().text_color(this.error ? red() : t.dim).child(this.error ?? "Reading the task…")
+      ? div().text_color(this.error ? red() : t.dim).child(this.error ?? ACCEPT.reading)
       : v_flex().w_full().gap(16).pb(4)
         .child(div().max_w(560).text_size(TEXT.body).line_height("20px").text_color(w.summary ? t.foreground : t.muted)
-          .child(w.summary || "No summary."))
-        .child(this.section(t, "Changes", this.changes(t, e)))
-        .child(this.section(t, "Checks", this.checks(t, e)))
-        .child(this.section(t, "Proof", this.proof(t, e)))
+          .child(w.summary || ACCEPT.noSummary))
+        .child(this.section(t, ACCEPT.changes, this.changes(t, e)))
+        .child(this.section(t, ACCEPT.checks, this.checks(t, e)))
+        .child(this.section(t, ACCEPT.proof, this.proof(t, e)))
         .when(Boolean(w.details), (el) => el.child(this.detailsSection(t, w.details)));
     return v_flex().id("accept-card").track_focus(this.handle)
       .on_key_down((ev, cx) => {
@@ -360,7 +302,7 @@ export default class AcceptCard extends View {
       .child(h_flex().flex_none().gap(12).items_start()
         .child(v_flex().flex_1().min_w(0).gap(4)
           .child(div().text_size(TEXT.title).font_semibold().text_color(t.foreground)
-            .child(!p.ref ? "Accept" : settled ? p.ref : `Accept ${p.ref}?`))
+            .child(!p.ref ? ACCEPT.accept : settled ? p.ref : ACCEPT.title(p.ref)))
           .child(div().min_w(0).truncate().text_color(t.muted).child(x?.title ?? p.title ?? "")))
         .child(div().mt(-2).mr(-6).child(this.closeButton(t))))
       .child(div().id("accept-body").flex_1().min_h(0).overflow_y_scrollbar().pr(6).child(body))
@@ -369,8 +311,8 @@ export default class AcceptCard extends View {
         .when(settled, (el) => el.child(this.where(t, x)))
         // The dialog's one footer (ui.js): Cancel, then Accept; only Close once there's nothing
         // to accept.
-        .child(settled ? dialogFooter({ onCancel: () => this.close(), cancelLabel: "Close" })
-          : dialogFooter({ onCancel: () => this.close(),
-            primary: { id: "accept", label: this.busy ? "Accepting…" : "Accept", disabled: !(ready && !this.busy), onClick: (_e, cx) => this.accept(cx) } })));
+        .child(settled ? dialogFooter({ onCancel: () => this.close(), cancelLabel: ACCEPT.close })
+          : dialogFooter({ onCancel: () => this.close(), cancelLabel: ACCEPT.cancel,
+            primary: { id: "accept", label: this.busy ? ACCEPT.accepting : ACCEPT.accept, disabled: !(ready && !this.busy), onClick: (_e, cx) => this.accept(cx) } })));
   }
 }

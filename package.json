@@ -1,0 +1,39 @@
+{
+  "name": "shepherdr",
+  "version": "3.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Shepherdr's always-on service and its web app (phone, tablet, desktop), beside the Herdr layout.",
+  "scripts": {
+    "service": "bun service/main.ts",
+    "dev": "vite --config web/vite.config.ts",
+    "build": "vite build --config web/vite.config.ts",
+    "test": "bun test service core web",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@heroicons/react": "2.2.0",
+    "clsx": "2.1.1",
+    "inter-ui": "4.1.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "@xterm/addon-unicode11": "0.9.0",
+    "@xterm/xterm": "6.0.0",
+    "dompurify": "3.4.17",
+    "highlight.js": "11.11.1",
+    "marked": "18.1.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@types/bun": "1.4.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "vite": "8.3.5",
+    "emojibase-data": "17.0.0",
+    "playwright-core": "1.63.0"
+  }
+}

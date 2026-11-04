@@ -16,27 +16,22 @@ import { machines, home, readTextFile, setShared } from "herdr";
 import { HOLD, machineDetails, pollNow } from "./machines.js";
 import { LOCAL_MACHINE } from "./coordinator.js";
 import { TEXT, button, link, toggleSwitch } from "./ui.js";
+// The rows' words, a machine block's and Home Assistant's lines: core/settings.js, shared with the web app.
+import { MACHINES, OLD_NAMES, SECTIONS, CHANGED_HERE, RESET, SAME_AS_ALL_MACHINES, machinesOwn, homeAbout, machineLabel } from "./core/settings.js";
 
 const pct = (v) => (v == null ? "Off" : `${v}%`);
+const words = (field) => MACHINES.limits.find((l) => l.field === field);
 const LIMITS = [
-  { field: "start_memory", title: "Memory busy above", about: "New tasks there wait while more memory is in use.",
-    step: 5, lo: 10, hi: 100, fmt: pct },
-  { field: "start_load", title: "CPU busy above", about: "The 1-minute load, as a share of all its cores.",
-    step: 0.25, lo: 0.25, hi: 4, fmt: (v) => (v == null ? "Off" : `${Math.round(v * 100)}%`) },
-  { field: "start_disk", title: "Disk busy above", about: "Its home or /tmp, whichever is fuller.",
-    step: 5, lo: 10, hi: 100, fmt: pct },
+  { ...words("start_memory"), step: 5, lo: 10, hi: 100, fmt: pct },
+  { ...words("start_load"), step: 0.25, lo: 0.25, hi: 4, fmt: (v) => (v == null ? "Off" : `${Math.round(v * 100)}%`) },
+  { ...words("start_disk"), step: 5, lo: 10, hi: 100, fmt: pct },
 ];
 const CAPS = [0, 1, 2, 4, 8, 16, 32];
 const OPTION_DEFAULTS = { low_priority: true, worker_memory: 0 };
 const FIELDS = [...LIMITS.map((l) => l.field), "low_priority", "worker_memory"];
-// What the old machine scope could hold, as the person knows it.
-const OLD_NAMES = { coordinator: "Assistant", worker: "Workers", reviewer: "Reviewer", backup: "Backup agent",
-  automations: "Run automations", merge: "Merge", review_rounds: "Review", must_fix: "Must fix", proof: "Proof",
-  max_running: "Tasks at once", archive_after: "Archive Done after", worktrees: "Worktrees",
-  start_notes: "When a task starts", finish_notes: "When a task finishes", base: "Base branch" };
 
 const toMachine = (key) => (key === LOCAL_MACHINE ? null : key); // machines.js: null is this computer
-const label = (key) => (key === LOCAL_MACHINE ? "This computer" : key);
+const label = machineLabel;
 const keysNow = () => [LOCAL_MACHINE, ...machines().filter((m) => m.name && !m.temporary).map((m) => m.name)];
 
 // Reads plan limits older than a minute the first time the section shows.
@@ -76,14 +71,10 @@ function homeRow(view, t, k) {
     if (!on) make();
     view._homeAt = 0;
   };
-  const about = !on ? "Off: nobody watches its disk, load and processes."
-    : st?.assistant ? "Its home space's Assistant watches its disk, load and processes."
-    : st?.space ? "Its home Assistant starts when you first write to it."
-    : st?.error ? "Couldn't read it now. Trying again every minute."
-    : "No home space there.";
+  const about = homeAbout(on, st);
   const missing = on && !st?.space && !st?.error && view._home;
-  return view.row(t, "Home Assistant", about, h_flex().gap(10).items_center()
-    .when(Boolean(missing), (el) => el.child(button(`home-make-${k}`, "Make home space", { onClick: () => make() })))
+  return view.row(t, MACHINES.home.title, about, h_flex().gap(10).items_center()
+    .when(Boolean(missing), (el) => el.child(button(`home-make-${k}`, MACHINES.home.make, { onClick: () => make() })))
     .child(toggleSwitch(`home-${k}`, on, set)));
 }
 
@@ -112,12 +103,12 @@ function limitRows(view, t, key) {
     const row = h_flex().gap(6).items_center().text_size(TEXT.label);
     if (key) {
       return f in own
-        ? row.child(div().text_color(t.muted).child("Changed here")).child(div().text_color(t.dim).child("·"))
-          .child(link(`ml-reset-${id(f)}`, "Reset", (_e, cx) => write(view, key, f, undefined, cx)))
-        : row.child(div().text_color(t.dim).child("Same as all machines"));
+        ? row.child(div().text_color(t.muted).child(CHANGED_HERE)).child(div().text_color(t.dim).child("·"))
+          .child(link(`ml-reset-${id(f)}`, RESET, (_e, cx) => write(view, key, f, undefined, cx)))
+        : row.child(div().text_color(t.dim).child(SAME_AS_ALL_MACHINES));
     }
     const n = Object.values(view.cfg.machines ?? {}).filter((m) => f in (m?.machine ?? {})).length;
-    return n ? row.child(div().text_color(t.dim).child(n === 1 ? "1 machine uses its own" : `${n} machines use their own`)) : null;
+    return n ? row.child(div().text_color(t.dim).child(machinesOwn(n))) : null;
   };
   // Set to what it would be anyway: on a machine, it follows all machines again.
   const put = (f, v, cx) => write(view, key, f, key && JSON.stringify(v) === JSON.stringify(base(f)) ? undefined : v, cx);
@@ -130,9 +121,9 @@ function limitRows(view, t, key) {
   const cap = Number(valueOf("worker_memory")) || 0;
   const capStep = (d) => (_e, cx) => put("worker_memory", CAPS[Math.max(0, Math.min(CAPS.length - 1, CAPS.findIndex((c) => c >= cap) + d))], cx);
   rows.push(
-    view.row(t, "Workers run at low priority", "Task agents start below the Assistant and your apps, and are ended first when memory runs out.",
+    view.row(t, MACHINES.low.title, MACHINES.low.about,
       toggleSwitch(`ml-${id("low")}`, low, (next, _e, cx) => put("low_priority", next, cx)), null, null, line("low_priority")),
-    view.row(t, "Memory cap per worker", "A worker over it is slowed down, not ended. Applies to tasks started after a change.",
+    view.row(t, MACHINES.cap.title, MACHINES.cap.about,
       view.stepper(t, `ml-${id("cap")}`, cap ? `${cap} GB` : "Off", capStep(-1), capStep(1)), null, null, line("worker_memory")));
   return rows;
 }
@@ -156,20 +147,19 @@ function machineBlock(view, t, k) {
     .child(div().pt(26).pb(10).text_size(TEXT.body).font_semibold().text_color(t.foreground).child(label(k)))
     .child(div().pb(12).border_b(1).border_color(t.border).child(machineDetails(t, toMachine(k))))
     .child(homeRow(view, t, k))
-    .when(!open, (el) => el.child(view.row(t, "Limits", "Same as all machines.",
-      button(`ml-own-${k}`, "Set its own", { onClick: () => { view._machOpen[k] = true; } }))))
+    .when(!open, (el) => el.child(view.row(t, MACHINES.own.title, MACHINES.own.about,
+      button(`ml-own-${k}`, MACHINES.own.button, { onClick: () => { view._machOpen[k] = true; } }))))
     .when(Boolean(open), (el) => el.children(limitRows(view, t, k)))
-    .when(oldNames.length > 0, (el) => el.child(view.row(t, "Set before for its spaces",
-      `${oldNames.join(", ")}. These still apply to its spaces unless a space sets its own.`,
-      button(`ml-old-${k}`, "Reset", { onClick: dropOld }))));
+    .when(oldNames.length > 0, (el) => el.child(view.row(t, MACHINES.old.title, MACHINES.old.about(oldNames),
+      button(`ml-old-${k}`, RESET, { onClick: dropOld }))));
 }
 
 export function machinesSection(view, t, cx) {
   readHome(view, cx);
   askOnce(view, cx);
   return v_flex()
-    .child(view.title(t, "Machines"))
-    .child(view.heading(t, "When new tasks wait, on every machine"))
+    .child(view.title(t, SECTIONS.find((s) => s.id === "machines").title))
+    .child(view.heading(t, MACHINES.heading))
     .children(limitRows(view, t, null))
     .children(keysNow().map((k) => machineBlock(view, t, k)));
 }

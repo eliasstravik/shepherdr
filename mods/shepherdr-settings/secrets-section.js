@@ -10,12 +10,14 @@ import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { spaces, machines, terminals } from "herdr";
 import * as vault from "./secrets.js";
 import { TEXT, RADIUS, H } from "./ui.js";
+// Every word on the page: core/settings.js, shared with the web app.
+import { SECRETS as W, SECTIONS, EVERYWHERE as EVERYWHERE_WORD } from "./core/settings.js";
 
 const EVERYWHERE = { scope: "everywhere", machine: null, space: null };
 
 // The section's state, made in the window's init (boxes need a live host call).
 export function secretsInit(cx) {
-  const s = { name: InputState.new({ placeholder: "GITHUB_TOKEN" }), value: InputState.new({ placeholder: "Paste the value" }),
+  const s = { name: InputState.new({ placeholder: W.namePlaceholder }), value: InputState.new({ placeholder: W.valuePlaceholder }),
     scope: EVERYWHERE, open: false, list: null, err: "", note: "", busy: false, confirm: null };
   s.value.set_masked(true);
   s.name.on("change", (_e, cx) => { s.err = ""; cx.notify(); });
@@ -32,15 +34,15 @@ export function secretsInit(cx) {
 function save(s, cx) {
   const name = s.name.value().trim(), value = s.value.value();
   if (s.busy) return;
-  if (!vault.NAME.test(name)) { s.err = "Name it like an environment variable: letters, digits and _, such as GITHUB_TOKEN."; cx.notify(); return; }
-  if (!value) { s.err = "Paste the value first."; cx.notify(); return; }
+  if (!vault.NAME.test(name)) { s.err = W.badName; cx.notify(); return; }
+  if (!value) { s.err = W.noValue; cx.notify(); return; }
   s.busy = true;
   cx.spawn(async (cx) => {
     try {
       await vault.keep(name, s.scope, value);
       s.value.set_value("");
       s.name.set_value("");
-      s.note = `Kept ${name} for ${vault.where(s.scope)}.`;
+      s.note = W.keptNote(name, vault.where(s.scope));
       s.err = "";
     } catch (e) { s.err = String(e?.message ?? e); }
     s.busy = false;
@@ -50,9 +52,9 @@ function save(s, cx) {
 
 // Every scope there is: Everywhere, each machine, each space.
 function scopes() {
-  const out = [{ ...EVERYWHERE, label: "Everywhere", group: "" }];
-  for (const m of [null, ...machines().map((m) => m.name).filter(Boolean)]) out.push({ scope: "machine", machine: m, space: null, label: vault.machineName(m), group: "Machine" });
-  for (const sp of spaces()) out.push({ scope: "space", machine: null, space: sp.id, label: sp.name, sub: sp.machine ?? "", group: "Space" });
+  const out = [{ ...EVERYWHERE, label: EVERYWHERE_WORD, group: "" }];
+  for (const m of [null, ...machines().map((m) => m.name).filter(Boolean)]) out.push({ scope: "machine", machine: m, space: null, label: vault.machineName(m), group: W.machine });
+  for (const sp of spaces()) out.push({ scope: "space", machine: null, space: sp.id, label: sp.name, sub: sp.machine ?? "", group: W.space });
   return out;
 }
 
@@ -77,12 +79,12 @@ export function secretsSection(view, t) {
   const group = (g) => all.filter((x) => x.group === g);
   const picker = h_flex().id("sec-scope").h(H.lg).pl(10).pr(6).gap(6).items_center().rounded(RADIUS.control).border_1().border_color(t.border).bg(t.raised)
     .cursor_pointer().hover((st) => st.bg(t.hover)).on_click((_e, cx) => { s.open = !s.open; cx.notify(); })
-    .child(div().max_w(150).truncate().text_size(TEXT.body).text_color(t.foreground).child(picked.group === "Space" ? `Space ${picked.label}` : picked.label))
+    .child(div().max_w(150).truncate().text_size(TEXT.body).text_color(t.foreground).child(picked.group === W.space ? `Space ${picked.label}` : picked.label))
     .child(svg("mods/workspace-chrome/chevron-down.svg").size(12).text_color(t.dim));
   const menu = v_flex().id("sec-scope-menu").absolute().top(66).right(0).w(260).max_h(300).overflow_y_scroll().p(5).rounded(8).bg(t.popover)
     .border_1().border_color(t.border).shadow_md()
     .child(item(all[0]))
-    .children(["Machine", "Space"].flatMap((g) => [div().px(9).pt(8).pb(3).text_size(11).font_medium().text_color(t.dim).child(g), ...group(g).map(item)]));
+    .children([W.machine, W.space].flatMap((g) => [div().px(9).pt(8).pb(3).text_size(11).font_medium().text_color(t.dim).child(g), ...group(g).map(item)]));
 
   // Agents waiting on one: the form fills with its name and their narrowest scope.
   const asks = vault.allAsks();
@@ -90,9 +92,9 @@ export function secretsSection(view, t) {
   const askRows = asks.map((a) => h_flex().w_full().gap(12).py(10).items_center().border_b(1).border_color(t.border)
     .child(div().size(7).flex_none().rounded(4).bg(t.blocked))
     .child(v_flex().flex_1().min_w(0).gap(2)
-      .child(div().text_size(TEXT.body).text_color(t.foreground).child(`${who(a)} asks for ${a.name}`))
+      .child(div().text_size(TEXT.body).text_color(t.foreground).child(W.asks(who(a), a.name)))
       .when(Boolean(a.why), (el) => el.child(div().text_size(TEXT.label).text_color(t.dim).child(a.why))))
-    .child(small(`sec-give-${a.address}-${a.name}`, "Give it", (cx) => {
+    .child(small(`sec-give-${a.address}-${a.name}`, W.give, (cx) => {
       const lv = vault.levels(a.address)[0];
       s.name.set_value(a.name);
       s.scope = { scope: lv.scope, machine: lv.machine, space: lv.space };
@@ -101,17 +103,17 @@ export function secretsSection(view, t) {
 
   const form = v_flex().relative().gap(8).py(12).border_b(1).border_color(t.border)
     .child(h_flex().gap(8).items_center()
-      .child(v_flex().gap(4).child(div().text_size(TEXT.label).text_color(t.dim).child("Name")).child(field(s.name, 190, true)))
-      .child(v_flex().flex_1().min_w(0).gap(4).child(div().text_size(TEXT.label).text_color(t.dim).child("Value")).child(field(s.value, null, false)))
-      .child(v_flex().gap(4).child(div().text_size(TEXT.label).text_color(t.dim).child("For")).child(picker)))
+      .child(v_flex().gap(4).child(div().text_size(TEXT.label).text_color(t.dim).child(W.name)).child(field(s.name, 190, true)))
+      .child(v_flex().flex_1().min_w(0).gap(4).child(div().text_size(TEXT.label).text_color(t.dim).child(W.value)).child(field(s.value, null, false)))
+      .child(v_flex().gap(4).child(div().text_size(TEXT.label).text_color(t.dim).child(W.for)).child(picker)))
     .child(h_flex().gap(8).items_center()
       .child(div().flex_1().min_w(0).text_size(TEXT.label).line_height("17px").text_color(s.err ? t.blocked : t.dim)
-        .child(s.err || s.note || "The same name again replaces it there."))
+        .child(s.err || s.note || W.hint))
       .child(h_flex().id("sec-save").h(H.sm).px(8).flex_none().items_center().rounded(RADIUS.control).text_size(TEXT.label).font_medium()
         .when(Boolean(s.name.value().trim() && s.value.value()) && !s.busy, (el) => el.cursor_pointer().bg(t.solid).text_color(t.solid_foreground).hover((st) => st.opacity(0.88))
           .on_click((_e, cx) => save(s, cx)))
         .when(!(s.name.value().trim() && s.value.value()) || s.busy, (el) => el.bg(t.raised).text_color(t.dim))
-        .child(s.busy ? "Saving…" : "Save")))
+        .child(s.busy ? W.saving : W.save)))
     .when(s.open, (el) => el.child(menu));
 
   const list = s.list ?? [];
@@ -122,31 +124,31 @@ export function secretsSection(view, t) {
       .child(svg("mods/shepherdr-settings/key.svg").size(14).flex_none().text_color(t.dim))
       .child(div().flex_1().min_w(0).truncate().text_size(TEXT.body).font_family("JetBrains Mono").text_color(t.foreground).child(e.name))
       .child(div().max_w(180).truncate().text_size(TEXT.label).text_color(t.muted).child(vault.where(e)))
-      .child(small(`sec-replace-${k}`, "Replace", () => {
+      .child(small(`sec-replace-${k}`, W.replace, () => {
         s.name.set_value(e.name);
         s.scope = { scope: e.scope, machine: e.machine, space: e.space };
-        s.note = `Paste the new value for ${e.name}.`;
+        s.note = W.pasteNew(e.name);
         s.value.focus();
       }, "ghost"))
       .child(s.confirm === k
-        ? h_flex().gap(4).child(small(`sec-rm-yes-${k}`, "Remove", (cx) => {
+        ? h_flex().gap(4).child(small(`sec-rm-yes-${k}`, W.remove, (cx) => {
             s.confirm = null;
             cx.spawn(async (cx) => {
-              try { await vault.remove(e.name, e); s.note = `Removed ${e.name} from ${vault.where(e)}.`; } catch (err) { s.err = String(err?.message ?? err); }
+              try { await vault.remove(e.name, e); s.note = W.removedNote(e.name, vault.where(e)); } catch (err) { s.err = String(err?.message ?? err); }
               s.reload(cx);
             });
-          }, "danger")).child(small(`sec-rm-no-${k}`, "Keep", () => { s.confirm = null; }, "ghost"))
-        : small(`sec-rm-${k}`, "Remove", () => { s.confirm = k; }, "ghost"));
+          }, "danger")).child(small(`sec-rm-no-${k}`, W.keep, () => { s.confirm = null; }, "ghost"))
+        : small(`sec-rm-${k}`, W.remove, () => { s.confirm = k; }, "ghost"));
   });
 
   return v_flex()
-    .child(view.title(t, "Secrets"))
-    .child(div().text_size(TEXT.label).line_height("17px").text_color(t.dim).child("Agents use these by name and never see them."))
-    .when(asks.length > 0, (el) => el.child(view.heading(t, "Asked for")).children(askRows))
-    .child(view.heading(t, "Add"))
+    .child(view.title(t, SECTIONS.find((x) => x.id === "secrets").title))
+    .child(div().text_size(TEXT.label).line_height("17px").text_color(t.dim).child(W.about))
+    .when(asks.length > 0, (el) => el.child(view.heading(t, W.asked)).children(askRows))
+    .child(view.heading(t, W.add))
     .child(form)
-    .child(view.heading(t, "Kept"))
-    .when(s.list === null, (el) => el.child(div().py(10).text_size(TEXT.body).text_color(t.dim).child("Loading…")))
-    .when(s.list !== null && !rows.length, (el) => el.child(div().py(10).text_size(TEXT.body).text_color(t.dim).child("None. An agent that needs one asks in its chat.")))
+    .child(view.heading(t, W.kept))
+    .when(s.list === null, (el) => el.child(div().py(10).text_size(TEXT.body).text_color(t.dim).child(W.loading)))
+    .when(s.list !== null && !rows.length, (el) => el.child(div().py(10).text_size(TEXT.body).text_color(t.dim).child(W.none)))
     .children(rows);
 }

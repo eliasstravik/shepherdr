@@ -1,0 +1,29 @@
+{
+  "about": "What applies in a space, from .autopilot.json: core/autopilot.js pilotFor() and herdr-task's resolve() must both give `expect` (core/autopilot.test.js, test/test_herdr_task.py). One setting for every space: Everywhere's schedule and events; a space has only its own on/off.",
+  "cases": [
+    {
+      "name": "nothing set: off, Everywhere's defaults",
+      "file": { "version": 2, "spaces": {} },
+      "space": "sp1",
+      "expect": { "on": false, "every": "every 60 minutes", "events": [] }
+    },
+    {
+      "name": "switched on in its header: Everywhere's schedule and events",
+      "file": { "version": 2, "everywhere": { "every": { "text": "weekdays 9:00" }, "events": ["failed", "ready"] }, "spaces": { "sp1": { "on": true, "name": "web" } } },
+      "space": "sp1",
+      "expect": { "on": true, "every": "weekdays 9:00", "events": ["ready", "failed"] }
+    },
+    {
+      "name": "a space's old schedule and events no longer apply",
+      "file": { "version": 1, "everywhere": { "every": null, "events": ["merged"] }, "spaces": { "sp1": { "on": true, "every": { "text": "every 30 minutes" }, "events": ["ready"] } } },
+      "space": "sp1",
+      "expect": { "on": true, "every": null, "events": ["merged"] }
+    },
+    {
+      "name": "Everywhere can't turn a space on",
+      "file": { "version": 2, "everywhere": { "on": true, "every": { "text": "every 60 minutes" }, "events": [] }, "spaces": { "sp2": { "on": true } } },
+      "space": "sp1",
+      "expect": { "on": false, "every": "every 60 minutes", "events": [] }
+    }
+  ]
+}

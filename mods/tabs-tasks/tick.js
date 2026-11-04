@@ -7,12 +7,14 @@
 
 import { exec, appHome, terminals, spaces, run } from "herdr";
 import { coordinatorTab } from "./coordinator.js";
+import { serviceRuns } from "./service.js";
 
 const CLI = () => `${appHome()}/mods/tasks/bin/herdr-task`;
 let running = false, soon = false, seen = null, rounds = 0;
 
 async function tick() {
-  if (running) return;
+  // Shepherdr's service ticks while it runs (lib/service.js).
+  if (running || serviceRuns()) return;
   running = true;
   try {
     // About once a minute: the automations scheduler (herdr-automations) runs where automations are.

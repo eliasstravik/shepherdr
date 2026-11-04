@@ -5,7 +5,8 @@
 // them runs here.
 //
 // The switch: "Autopilot", and when on its next wake dim after it. No menu: the heartbeat, the
-// schedule and Run now live in Shepherdr settings › Autopilot. It always turns on when clicked;
+// schedule and the events, one setting for every space, live in Shepherdr settings › Autopilot
+// (core/autopilot.js pilotFor: this space's switch, Everywhere's rest). It always turns on when clicked;
 // while its heartbeat is still empty a "Write a heartbeat" link after it opens that page. The
 // control is the same width in every state, so nothing in the header moves when it flips.
 
@@ -13,6 +14,7 @@ import { div } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { link, TEXT, openSettings, toast, plainError } from "./ui.js";
 import { terminals, theme, home, appHome, exec, readTextFile, notify, shared, setShared } from "herdr";
+import { pilotFor, headerDetail } from "./core/autopilot.js";
 
 const FILE = () => `${home()}/.herdr/tasks/.autopilot.json`;
 const CLI = () => `${appHome()}/mods/tasks/bin/herdr-task`;
@@ -39,7 +41,8 @@ export function apPoll(view, cx) {
   if (!space || view.apBusy) return;
   cx.spawn(async (cx) => {
     let a = null;
-    try { a = JSON.parse((await readTextFile(FILE())) ?? "{}")?.spaces?.[space] ?? { on: false }; } catch { a = { on: false }; }
+    // What applies here: the space's own, else Everywhere's (core/autopilot.js, herdr-task's rule).
+    try { a = pilotFor(JSON.parse((await readTextFile(FILE())) ?? "{}"), space); } catch { a = { on: false }; }
     if (view.apFor !== space || view.apBusy) return;
     // On with its heartbeat maybe empty: looked at now and then (about every 30 s) until written.
     if (a.on && view.apBlank !== false && (view.apBeat = (view.apBeat ?? 0) + 1) % 8 === 1) checkBlank(view, space, cx);
@@ -71,22 +74,8 @@ export function apWatch(view, space, cx) {
   if (space) cx.timer.after(0, (cx) => apPoll(view, cx));
 }
 
-function hm(d) {
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
-// What follows "Autopilot" while on: waking (a wake's turn runs), queued (waits for an idle
-// Assistant), the next scheduled wake, else what wakes it. Nothing while off.
-function detail(a) {
-  if (!a?.on) return "";
-  if (a.inflight) return "Waking";
-  if (a.pending) return "Queued";
-  if (a.next_run) {
-    const d = new Date(a.next_run);
-    return a.next_run - Date.now() < 86400000 ? `Next ${hm(d)}` : `Next ${d.toLocaleDateString("en", { weekday: "short" })}`;
-  }
-  return a.events?.length ? "On events" : "Run now only";
-}
+// What follows "Autopilot" while on (core/autopilot.js, the web's header too).
+const detail = (a) => headerDetail(a);
 
 // The switch as Shepherdr settings draws its toggles, header-sized; the knob slides.
 function knob(t, on, pane) {
@@ -133,7 +122,8 @@ async function blankHeartbeat(file) {
   return Boolean(starter) && text.trim() === starter.trim();
 }
 
-const openAutopilot = (space) => openSettings({ space, section: "autopilot" });
+// Settings › Autopilot: one setting for every space (Everywhere's page).
+const openAutopilot = (_space) => openSettings({ section: "autopilot" });
 
 // "Write a heartbeat": after the switch while it's on and its heartbeat is still empty.
 export function apHeartbeatLink(view, space, pane) {

@@ -3,3 +3,6 @@ __pycache__/
 *.pyc
 gpui-kit.d.ts
 jsconfig.json
+node_modules/
+web/dist/
+web/generated/

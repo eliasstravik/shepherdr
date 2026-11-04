@@ -1,5 +1,23 @@
 # Changelog
 
+## 3.1.0
+
+Shepherdr is also a web app again: phone first, tablet and desktop too, on the same data as the window.
+
+- The web app, at `https://<this machine>/shepherdr/` on your tailnet only (Tailscale identity, never funnel): 2.1's
+  design with 3.0's features. Spaces and sections, each space's Assistant and other tabs, chats with cards (several
+  questions on one card too), Needs you, Tasks and a task's view (chat, terminal, changes, browser), the Accept card,
+  artifacts with markup, reactions, dictation and voice calls, search, push alerts, 3.0's keys, and every Settings
+  page (Agents, Tasks, Autopilot, Notify, Secrets, Machines, Window, Web), per space where 3.0 has it.
+- One always-on service (Bun, `127.0.0.1:7788`, systemd or launchd) serves it and takes over the background work from
+  the window, so nothing runs twice. Web edits to settings reach other machines as the window's do.
+- One shared core (`core/`): the mods and the service use the same logic; `lib/features.json` lists every feature's
+  Herdr side, web side and shared logic, and CI checks them.
+- Native on both sides: artifacts as recipes drawn by the window and as HTML (`herdr-artifact convert` for older
+  ones); the task browser in Kitty and as a live view on the web.
+- Add-ons switch both sides: an off add-on is left out of the web app too. Web is an add-on of its own.
+- `./install.sh` installs the layout and the web app; `./install.sh --web` the web app alone, without the window.
+
 ## 3.0.0
 
 Shepherdr becomes a layout for the Herdr desktop app.

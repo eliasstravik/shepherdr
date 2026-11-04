@@ -10,7 +10,7 @@ J = lambda *p: os.path.join(ROOT, *p)
 
 
 def text_files():
-    for top in ("mods", "lib", "bin", "templates", "guard", "layouts"):
+    for top in ("mods", "lib", "bin", "templates", "guard", "layouts", "service", "core", "web/src"):
         for d, dirs, files in os.walk(J(top)):
             dirs[:] = [x for x in dirs if x != "__pycache__"]
             for f in files:
@@ -71,9 +71,151 @@ class Repo(unittest.TestCase):
             name = os.path.basename(p)
             self.assertNotRegex(name, r"\.bak|\.orig$|\.new$|^zz-", os.path.relpath(p, ROOT))
 
+    def test_mod_imports_resolve(self):
+        """Every relative import in a mod names a file inside that mod (shared copies included): a moved module
+        (lib/ to core/) can't leave a mod pointing at nothing. herdr-app check would catch it too, but runs init()."""
+        imp = re.compile(r'''(?:^|\n)\s*(?:import|export)\s[^'";]*?from\s+["'](\.{1,2}/[^"']+)["']|import\(\s*["'](\.{1,2}/[^"']+)["']''')
+        for m in os.listdir(J("mods")):
+            top = J("mods", m)
+            for d, dirs, files in os.walk(top):
+                dirs[:] = [x for x in dirs if x not in ("__pycache__", "bin")]
+                for f in files:
+                    if not f.endswith(".js"):
+                        continue
+                    src = open(os.path.join(d, f), encoding="utf-8").read()
+                    for a, b in imp.findall(src):
+                        if (m, f) in (("artifacts", "markup.js"), ("artifacts", "recipe-view.js")) and (a or b) in ("./artifact.js", "./artifact-main.js", "./recipe.js", "./recipe-data.js"):
+                            continue  # copied into each installed artifact, where herdr-artifact writes these
+                        target = os.path.normpath(os.path.join(d, a or b))
+                        self.assertTrue(target.startswith(top + os.sep), f"{os.path.relpath(os.path.join(d, f), ROOT)}: {a or b} leaves the mod")
+                        self.assertTrue(os.path.isfile(target), f"{os.path.relpath(os.path.join(d, f), ROOT)}: {a or b} isn't there")
+
+    def test_core_is_plain(self):
+        """core/ runs in the window, the service and the browser: no Herdr, GPUI, Node or Bun imports."""
+        if not os.path.isdir(J("core")):
+            return
+        for f in os.listdir(J("core")):
+            if f.endswith(".js") and not f.endswith(".test.js"):
+                src = open(J("core", f), encoding="utf-8").read()
+                for spec in re.findall(r'''from\s+["']([^"']+)["']''', src):
+                    self.assertTrue(spec.startswith("./"), f"core/{f} imports {spec}")
+
+    def test_autopilot_from_one_core(self):
+        """Settings › Autopilot (one setting for every space) takes its words, picks and rule from core/autopilot.js on
+        both sides: the window's section and header, and the web app's service, never their own copies."""
+        uses = {
+            J("mods", "shepherdr-settings", "autopilot-section.js"): ["AP.ROWS", "AP.PRESETS", "AP.EVENTS", "AP.ABOUT", "AP.SAVED"],
+            J("mods", "pane-chat", "autopilot.js"): ["pilotFor", "headerDetail"],
+            J("service", "compat.ts"): ["AP.ROWS", "AP.PRESETS", "AP.EVENTS", "AP.ABOUT"],
+            J("service", "model.ts"): ["pilotFor", "everywhereOf"],
+        }
+        for path, names in uses.items():
+            text = open(path).read()
+            self.assertRegex(text, r"core/autopilot\.js", f"{os.path.relpath(path, ROOT)} doesn't read core/autopilot.js")
+            for n in names:
+                self.assertIn(n, text, f"{os.path.relpath(path, ROOT)} doesn't use {n}")
+            for words in ("Its Assistant wakes on a schedule", "When it wakes by itself", '"Every 30 min"', '["needs-you", "Needs you"]'):
+                self.assertNotIn(words, text, f"{os.path.relpath(path, ROOT)} has its own copy of {words!r}")
+
+    def test_task_views_from_one_core(self):
+        """The Tasks panel's rows and the task view's Files, Changes and Pull request read their words and rules from
+        core on both sides (core/tasks.js, core/needs.js, core/worktree.js): the web app keeps no copy of its own."""
+        uses = {
+            J("web", "plugins", "tasks", "client.tsx"): ["@core/tasks.js", "@core/needs.js", "TK.capital", "ND.fit", "TK.day", "TK.STATUS", "ND.REASONS"],
+            J("web", "plugins", "worktree", "client.tsx"): ["@core/worktree.js", "W.VIEW_WORDS", "W.CHANGE_WORDS", "W.CHECK_WORDS", "W.PR_STATES", "W.checksLine"],
+            J("service", "worktree.ts"): ["core/worktree.js", "VIEW_WORDS", "LIST_DIR", "dirEntries", "MARK_ARGS"],
+        }
+        for path, names in uses.items():
+            text = open(path, encoding="utf-8").read()
+            for n in names:
+                self.assertIn(n, text, f"{os.path.relpath(path, ROOT)} doesn't use {n}")
+        web = open(J("web", "plugins", "worktree", "client.tsx"), encoding="utf-8").read()
+        for words in ("Loading files…", "Asking GitHub…", "No checks on it.", "Select a file to see its changes."):
+            self.assertNotIn(words, web, f"web/plugins/worktree has its own copy of {words!r}")
+
+    def test_parity_has_no_open_rows(self):
+        """docs/parity/: every element of every surface matches the window (✓) or is a web-only form with its reason
+        (◇); a row still marked ✗ fails, and every surface in docs/parity.md has its page."""
+        index = open(J("docs", "parity.md")).read()
+        for page in re.findall(r"\(parity/([\w-]+\.md)\)", index):
+            text = open(J("docs", "parity", page)).read()
+            rows = [l for l in text.splitlines() if l.startswith("|") and not set(l) <= set("|-: ")]
+            self.assertTrue(rows, f"docs/parity/{page} has no rows")
+            for l in rows:
+                self.assertNotIn("✗", l, f"docs/parity/{page}: still differs: {l[:120]}")
+
+    def test_menus_from_one_list(self):
+        """The sidebar's and a task row's menus are core/menus.js's lists on both sides: the window's mods and the web
+        app build them from it (3.0 decides what each menu offers; the web only draws it)."""
+        uses = {
+            J("mods", "spaces-chat", "popups.js"): ["addMenu", "spaceMenu", "machineMenu", "sectionMenu"],
+            J("mods", "tasks-menu", "main.js"): ["taskMenu"],
+            J("web", "plugins", "places", "client.tsx"): ["addMenu", "spaceMenu", "machineMenu", "sectionMenu"],
+        }
+        for path, names in uses.items():
+            text = open(path).read()
+            self.assertRegex(text, r"core/menus\.js", f"{os.path.relpath(path, ROOT)} doesn't build from core/menus.js")
+            for n in names:
+                self.assertIn(n, text, f"{os.path.relpath(path, ROOT)} doesn't use {n}")
+
+    def test_tab_bar_from_one_list(self):
+        """The tab bar's + menu, a tab's menu, Switch agent, a tab's name and the header's End agent are core/menus.js's
+        on both sides (mods/new-menu-tasks, menu-tasks, coordinator, tabs-tasks, pane-chat and the web app's
+        coordinators plugin), and the header's Autopilot words core/autopilot.js's: neither side keeps its own copy."""
+        uses = {
+            J("mods", "new-menu-tasks", "main.js"): ["NEW_MENU", "assistantRow", "agentChoices", "agentHint"],
+            J("mods", "menu-tasks", "main.js"): ["tabMenu", "appMenu"],
+            J("mods", "coordinator", "main.js"): ["SWITCH_AGENT"],
+            J("mods", "tabs-tasks", "main.js"): ["tabName"],
+            J("mods", "pane-chat", "main.js"): ["endAgent"],
+            J("web", "plugins", "coordinators", "client.tsx"): ["NEW_MENU", "assistantRow", "agentChoices", "agentHint", "tabMenu", "SWITCH_AGENT", "endAgent", "headerDetail", "appMenu", "openKeybinds"],
+            J("service", "compat.ts"): ["tabName"],
+        }
+        for path, names in uses.items():
+            text = open(path).read()
+            self.assertRegex(text, r"core/menus\.js", f"{os.path.relpath(path, ROOT)} doesn't read core/menus.js")
+            for n in names:
+                self.assertIn(n, text, f"{os.path.relpath(path, ROOT)} doesn't use {n}")
+            for words in ('"Show Assistant"', "'Show Assistant'", '"Start an agent"', "'Start an agent'", '"This computer only"', '"Edit instructions…"', "'Edit instructions…'", '"Close tab"', "'Close tab'", '"End agent"', "'End agent'"):
+                self.assertNotIn(words, text, f"{os.path.relpath(path, ROOT)} has its own copy of {words}")
+
+    def test_features_have_both_sides(self):
+        """lib/features.json: every feature has its shared logic, a Herdr side and a web side, every file it names is
+        there, and every mod belongs to a feature."""
+        feats = json.load(open(J("lib", "features.json")))["features"]
+        ids = [f["id"] for f in feats]
+        self.assertEqual(len(ids), len(set(ids)), "a feature id is listed twice")
+        addons = {"core"} | {a["id"] for a in self.addons["addons"]}
+        for f in feats:
+            name = f["id"]
+            self.assertIn(f["addon"], addons, f"{name}: no add-on {f['addon']}")
+            self.assertTrue(f["core"] or f.get("service") or f.get("view_only"), f"{name}: no shared logic")
+            for c in f["core"]:
+                self.assertTrue(os.path.isfile(J("core", f"{c}.js")), f"{name}: no core/{c}.js")
+            for c in f.get("service", []):
+                self.assertTrue(os.path.isfile(J("service", c)), f"{name}: no service/{c}")
+            herdr = f.get("herdr", {})
+            self.assertTrue(herdr.get("mods") or herdr.get("builtin"), f"{name}: no Herdr side")
+            for m in herdr.get("mods", []):
+                self.assertTrue(os.path.isdir(J("mods", m)), f"{name}: no mod {m}")
+            self.assertTrue(f.get("web", {}).get("files"), f"{name}: no web side")
+            for w in f["web"]["files"]:
+                self.assertTrue(os.path.isfile(J("web", w)), f"{name}: no web/{w}")
+            for k in ("herdr", "desktop", "tablet", "phone"):
+                self.assertTrue(f.get("forms", {}).get(k), f"{name}: no {k} form")
+            # a release has every feature on both sides: nothing left "planned"
+            self.assertNotIn("planned", f, f"{name}: still planned ({f.get('planned')})")
+        used = {m for f in feats for m in f.get("herdr", {}).get("mods", [])}
+        self.assertEqual(sorted(set(os.listdir(J("mods"))) - used), [], "a mod belongs to no feature")
+        screens = J("web", "src", "screens")
+        named = {w for f in feats for w in f["web"]["files"]}
+        for n in os.listdir(screens) if os.path.isdir(screens) else []:
+            if n.endswith(".tsx"):
+                self.assertIn(f"src/screens/{n}", named, f"web/src/screens/{n} belongs to no feature")
+
     def test_version_everywhere(self):
         v = re.search(r'^VERSION = "([^"]+)"', open(J("bin", "shepherdr")).read(), re.M).group(1)
-        self.assertEqual(v, "3.0.0")
+        self.assertEqual(v, "3.1.0")
         self.assertRegex(open(J("CHANGELOG.md")).read(), rf"(?m)^## {re.escape(v)}\b", "CHANGELOG's newest entry")
         self.assertIn(v, open(J("RECIPE.md")).read())
         self.assertIn(v, open(J("README.md")).read())

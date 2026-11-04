@@ -8,7 +8,7 @@
 
 <p align="center"><a href="https://github.com/eliasstravik/shepherdr/blob/main/docs/install.md"><img src="assets/buttons/install-shepherdr.svg" alt="Install Shepherdr" /></a></p>
 
-<p align="center"><sub>✓&nbsp;Free,&nbsp;MIT&nbsp;licensed &nbsp; ✓&nbsp;Runs&nbsp;on&nbsp;your&nbsp;machines,&nbsp;inside&nbsp;the&nbsp;Herdr&nbsp;app &nbsp; ✓&nbsp;Shepherdr&nbsp;3.0.0,&nbsp;herdr-app&nbsp;0.1.12+</sub></p>
+<p align="center"><sub>✓&nbsp;Free,&nbsp;MIT&nbsp;licensed &nbsp; ✓&nbsp;Runs&nbsp;on&nbsp;your&nbsp;machines,&nbsp;inside&nbsp;the&nbsp;Herdr&nbsp;app &nbsp; ✓&nbsp;Shepherdr&nbsp;3.1.0,&nbsp;herdr-app&nbsp;0.1.12+</sub></p>
 
 <br />
 
@@ -40,7 +40,7 @@ Each space's Assistant chat is in the middle and its tasks on the right, by what
 
 ### 🧩 Make it yours: everything is an add-on
 
-Tasks, Assistants, chat, artifacts, voice, reactions, the task browser, Autopilot, other machines: every part of Shepherdr is an add-on made of Herdr mods, listed in one file with what it needs. Switch Artifacts, Voice, Reactions, the Task browser, Autopilot or the sync to other machines off in Shepherdr settings → Window; the rest is always on in 3.0.0. Your own mods and layouts sit beside Shepherdr's in your Herdr folder and are never touched: an update replaces only the files it put there and you didn't change, and keeps a copy of anything it replaces. Herdr's themes and keys stay yours. [Add-ons](docs/addons.md) lists each one and its switch.
+Tasks, Assistants, chat, artifacts, voice, reactions, the task browser, Autopilot, other machines: every part of Shepherdr is an add-on made of Herdr mods, listed in one file with what it needs. Switch Artifacts, Voice, Reactions, the Task browser, Autopilot, the sync to other machines or the web app off in Shepherdr settings → Window; the rest is always on in 3.1.0. Your own mods and layouts sit beside Shepherdr's in your Herdr folder and are never touched: an update replaces only the files it put there and you didn't change, and keeps a copy of anything it replaces. Herdr's themes and keys stay yours. [Add-ons](docs/addons.md) lists each one and its switch.
 
 ### ⚡ Stop briefing every agent yourself
 
@@ -137,7 +137,7 @@ The small engine under the Herdr app, with the `hc` command. It holds your agent
 
 ### How is 3.0 different from 2.1?
 
-2.1 was its own web app beside herdr-core, opened in a browser over your tailnet. 3.0 lives inside the Herdr desktop app: a layout and its mods, installed with `./install.sh` and listed on herdr.dev. The ideas are the same (spaces, an Assistant per space, tasks in worktrees, cards, artifacts, Autopilot), but it's a new build: 2.1's data in `~/.shepherdr` isn't carried over, and 2.1's plugins don't run in it. A web app for phone and tablet comes back in 3.1, on the same data as the window.
+2.1 was its own web app beside herdr-core, opened in a browser over your tailnet. 3.0 lives inside the Herdr desktop app: a layout and its mods, installed with `./install.sh` and listed on herdr.dev. The ideas are the same (spaces, an Assistant per space, tasks in worktrees, cards, artifacts, Autopilot), but it's a new build: 2.1's data in `~/.shepherdr` isn't carried over, and 2.1's plugins don't run in it. 3.1 brings back a web app for phone and tablet, on the same data as the window.
 
 ### I'm on 2.1 or 2.0. Where did my version go?
 
@@ -149,4 +149,4 @@ Nowhere: 2.1 is on the `v2.1` branch and 2.0 on the `v2.0` branch, each with its
 
 <p align="center"><a href="https://github.com/eliasstravik/shepherdr/blob/main/docs/install.md"><img src="assets/buttons/install-shepherdr.svg" alt="Install Shepherdr" /></a></p>
 
-<p align="center"><sub>✓&nbsp;Free,&nbsp;MIT&nbsp;licensed &nbsp; ✓&nbsp;Runs&nbsp;on&nbsp;your&nbsp;machines,&nbsp;inside&nbsp;the&nbsp;Herdr&nbsp;app &nbsp; ✓&nbsp;Shepherdr&nbsp;3.0.0,&nbsp;herdr-app&nbsp;0.1.12+</sub></p>
+<p align="center"><sub>✓&nbsp;Free,&nbsp;MIT&nbsp;licensed &nbsp; ✓&nbsp;Runs&nbsp;on&nbsp;your&nbsp;machines,&nbsp;inside&nbsp;the&nbsp;Herdr&nbsp;app &nbsp; ✓&nbsp;Shepherdr&nbsp;3.1.0,&nbsp;herdr-app&nbsp;0.1.12+</sub></p>

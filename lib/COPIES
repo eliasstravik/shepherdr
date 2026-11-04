@@ -1,19 +1,47 @@
 # Shared modules: lib/<file> is the source, copied by bin/sync-shared into each mod listed.
 # A mod can only import files in its own folder, so each needs its own copy.
+# core/<file>: the shared core (core/ beside lib/), copied to mods/<mod>/core/<file>; the service and the web app
+# load the same file from core/.
 coordinator.js: coordinator menu-tasks new-menu-tasks newspace shepherdr-settings tabs-tasks tasks
 inbox.js: spaces-chat tabs-tasks tasks workspace-status-chat
-asks.js: chat spaces-chat tabs-tasks tasks workspace-status-chat
+core/voice.js: chat
+core/accept.js: accept-card
+core/toasts.js: toasts
+core/menus.js: spaces-chat tasks-menu menu-tasks new-menu-tasks pane-chat tabs-tasks coordinator
+core/asks.js: chat jump spaces-chat tabs-tasks tasks workspace-status-chat toasts
+core/needs.js: chat jump spaces-chat tabs-tasks tasks workspace-status-chat toasts
+core/tasks.js: chat jump tasks
+core/notify.js: chat spaces-chat tabs-tasks tasks shepherdr-settings workspace-status-chat
 parked.js: chat spaces-chat tabs-tasks workspace-status-chat
 unread.js: chat spaces-chat
 agent.js: chat newspace shepherdr-settings
 settings.js: chat newspace shepherdr-settings
 dot.js: chat jump tasks
-tasklists.js: jump tasks
+core/tasklists.js: jump tasks
+core/chat-log.js: chat
+core/chat-view.js: chat
+core/screens.js: chat
+core/send.js: chat
+core/spaces.js: chat spaces-chat shepherdr-settings jump
+core/autopilot.js: pane-chat shepherdr-settings
+core/chat-reader.js: chat
+core/worktree.js: task-changes task-pr
+core/recipe.js: artifacts
+core/newspace.js: newspace
+core/machine-add.js: machine-add-chat
+core/keys.js: keybinds
+core/machines.js: spaces-chat shepherdr-settings
+core/slash.js: chat
+core/agents.js: chat newspace shepherdr-settings coordinator
+core/settings.js: chat newspace shepherdr-settings coordinator
+core/secrets.js: chat shepherdr-settings tabs-tasks
 taskwhere.js: task-files task-changes task-pr task-browser
 emoji-data.js: chat-react spaces-chat
 notify.js: chat spaces-chat tabs-tasks tasks shepherdr-settings workspace-status-chat
 spacelog.js: coordinator menu-tasks new-menu-tasks newspace shepherdr-settings tabs-tasks tasks spaces-chat
 secrets.js: chat shepherdr-settings tabs-tasks
+service.js: chat shepherdr-settings tabs-tasks
+bridge.js: tabs-tasks
 machines.js: spaces-chat shepherdr-settings
 ui.js: accept-card artifacts chat chat-call chat-image chat-models chat-react coordinator jump toasts menu-tasks new-menu-tasks newspace pane-chat shepherdr-settings spaces-chat tabs-tasks task-browser task-changes task-files task-pr tasks tasks-menu workspace-chrome-shepherdr workspace-status-chat confirm-chat prompt-chat machine-add-chat keybinds
 artview.js: accept-card artifacts chat chat-image jump

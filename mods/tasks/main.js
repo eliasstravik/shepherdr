@@ -16,49 +16,26 @@ import { spaces, panes, agents, terminals, machines, exec, readTextFile, watchFo
 // What needs the person, from every space and machine (lib/inbox.js, shared; the tab
 // bar runs its engine): agents asking or waiting, task problems, failed automations, merges.
 import { items as needs, ASKS, toAgent, reasonOf, reqReason, REASONS, fit } from "./inbox.js";
-import { words } from "./asks.js";
-import { taskDot, ownProgress, estimated } from "./dot.js";
-import { READ_LISTS, taskLists } from "./tasklists.js";
+import { words } from "./core/asks.js";
+import { taskDot, ownProgress } from "./dot.js";
+// The rules for a task's status, order and words: shared with the web app (core/tasks.js).
+import { RANK, STATUS, RANK_OF, ORDER, GROUP_BY, groupBy, machineOf, machineName, refOf, taskKey, autoPrefix, place,
+  queueReason, reportOf as report, secondLine, leftOf, order, matches, day, ago, capital, short } from "./core/tasks.js";
+import { READ_LISTS, taskLists } from "./core/tasklists.js";
 import { button, TEXT, H, RADIUS, red, amber } from "./ui.js";
 
 const CLI = () => `${appHome()}/mods/tasks/bin/herdr-task`;
-const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
-// A task's status, one of seven (as herdr-task shows them), derived from its record and its
-// agents' own Herdr status; in this order within a group.
-const STATUS = { needs: "Needs you", working: "Working", merging: "Merging", ready: "Ready", queued: "Queued", todo: "To do", done: "Done" };
-const RANK_OF = Object.fromEntries(["needs", "ready", "merging", "working", "queued", "todo", "done"].map((id, i) => [id, i]));
 const DONE_SHOWN = 5; // Done rows a group shows before "Show N more"
-// The list's order: its groups, and the filter row's chips.
-const ORDER = ["needs", "ready", "merging", "working", "queued", "todo", "done", "automations"];
 // Task ids in a monospace column (Herdr ships JetBrains Mono: each character is 0.6 em wide).
 const ID_FONT = "JetBrains Mono", ID_SIZE = TEXT.id, ID_CHAR = ID_SIZE * 0.6;
-const machineOf = (address) => (address?.includes("/") ? address.split("/")[0] : null);
-// A machine as people read it (the Spaces sidebar's words): its name, or This computer.
-const machineName = (m) => m ?? "This computer";
-// How the list can be grouped (the ⋯ menu's Group by; Shepherdr's GROUP_WORDS). "folder" was Space's old key.
-export const GROUP_BY = ["status", "space", "machine", "machine-space"];
-const groupBy = (v) => (v === "folder" ? "space" : GROUP_BY.includes(v) ? v : "status");
 // Every list in ~/.herdr/tasks on a machine is read with READ_LISTS and kept by taskLists (one
 // rule with herdr-task's: tasklists.js).
-// A list's task id: HAT-4 (a list from before prefixes has herdr-task's own: load()).
-const refOf = (list, task) => `${list.prefix}-${task.id}`;
 // Pinned tasks, as Pinned spaces (mods/spaces-chat): a view choice, never a change to the task.
 // Shared "tasks.pinned" = ["<machine, empty here>:<folder>#<id>"] (shared.json: survives
 // restarts); the task chat's header (mods/chat/panel.js) and a row's right-click menu
 // (mods/tasks-menu) pin with the same keys.
 const PINS = "tasks.pinned";
-const taskKey = (list, task) => `${list.machine ?? ""}:${list.folder}#${task.id}`;
 const pinnedKeys = () => { const v = shared(PINS); return Array.isArray(v) ? v : []; };
-
-// herdr-task's auto_prefix: the initials of the folder name's words (herdr-app-ttt -> HAT, up to
-// 5), or a single word's first 4 letters (shepherdr -> SHEP); at least 2 letters.
-function autoPrefix(folder) {
-  const name = String(folder ?? "").split("/").filter(Boolean).pop() ?? "";
-  const ws = name.replace(/([a-z])([A-Z])/g, "$1 $2").split(/[^A-Za-z]+/).filter(Boolean);
-  let p = ws.length > 1 ? ws.map((w) => w[0]).join("").slice(0, 5) : (ws[0] ?? "").slice(0, 4);
-  if (p.length < 2) p = ws.join("").length >= 2 ? ws.join("").slice(0, 2) : "TASK";
-  return p.toUpperCase();
-}
 
 // The space a list's folder is (a space on its machine working there), and its place in the
 // sidebar's order: the list goes by that space's name, else its folder's.
@@ -79,6 +56,8 @@ async function cli(machine, [command, ...args], folder) {
   if (r.code !== 0 || !out || out.error) throw new Error(out?.error || r.stderr?.trim() || "herdr-task failed");
   return out;
 }
+
+export { GROUP_BY };
 
 export default class Tasks extends View {
   init(_props, cx) {
@@ -222,57 +201,18 @@ export default class Tasks extends View {
       });
   }
 
-  // A task's status (its section), why it needs the person, and its live agents. The same rules
-  // as herdr-task's task_status(): its record, then its agents' own status.
+  // A task's status (its section), why it needs the person, and its live agents: core/tasks.js's
+  // place(), with what Herdr knows live (its agents now, whether its machine has loaded).
   place(list, task) {
     const st = task.state;
     const live = st === "running" || st === "ready" ? this.live(list, task) : [];
     const loaded = machines().find((m) => (m.name ?? null) === (list.machine ?? null))?.layout !== "loading";
-    const status = live.reduce((s, a) => ((RANK[a.status] ?? 0) > (RANK[s] ?? 0) ? a.status : s), null);
-    const states = live.map((a) => a.status);
-    let section = ["todo", "queued", "done"].includes(st) ? st : null, needs = null, why = null;
-    const need = (kind, text) => { section = "needs"; needs = kind; why = text; };
-    if (section) return { list, task, live, status, section, needs, why };
-    // Cut off by its model's provider (herdr-task tick): Working while Herdr waits to tell it to
-    // carry on ("Provider overloaded · Retry in 2m"); Needs you once the tries are used up.
-    const retry = st === "running" && task.retry && live.some((a) => a.address === task.retry.address) && !states.includes("blocked") ? task.retry : null;
-    // Something Herdr found that only the person can sort out: failing checks, a conflict.
-    if (task.attention) need("attention", task.attention);
-    else if (retry?.over) need("provider", retry.reason);
-    else if (retry) { section = "working"; why = retryLine(retry); }
-    // Why it waits: herdr-task's words (its agent's own status line, its question or last words),
-    // kept on the task by its scheduler (task.waits), else the standard reason.
-    else if (states.includes("blocked")) need("asks", task.waits ?? REASONS.question);
-    else if (st === "ready") {
-      section = (task.merge_requested && live.length) || (task.auto_merge && task.pr && !task.merged) ? "merging" : "ready";
-      // As herdr-task's: a pull request that merges by itself once GitHub's checks pass.
-      if (section === "merging" && !(task.merge_requested && live.length)) why = "Merges once its checks pass";
-    }
-    // Its agents' terminals aren't known yet (the machine is loading): no verdict yet.
-    else if (states.some((x) => x !== "idle" && x !== "done") || (!live.length && !loaded)) section = "working";
-    // Just started (herdr-task's starting()): its terminal still runs the shell that starts the
-    // agent, or the agent is idle before its first message lands.
-    else if (starting(task)) section = "working";
-    // Quiet without saying ready (herdr-task ready): alive, it ended its turn (on what: task.waits);
-    // its process gone, the agent stopped.
-    else if (live.length) need("reply", task.waits ?? REASONS.reply);
-    else need("stopped", REASONS.stopped);
-    return { list, task, live, status, section, needs, why };
+    return place(list, task, { live, loaded });
   }
 
-  // Why a queued task waits: the tasks it comes after that aren't done, else the folder is full.
+  // Why a queued task waits (core/tasks.js): the tasks it comes after, else the folder is full.
   queueReason(list, task) {
-    const byId = new Map(list.tasks.map((x) => [x.id, x]));
-    const wait = (task.after ?? []).filter((i) => byId.has(i) && byId.get(i).state !== "done");
-    // Another folder's or machine's task (herdr-task --after WEB-2, vm-b:HAT-12): its state as
-    // herdr-task last read it ("gone": removed, it holds nothing up).
-    const ext = (task.after_ext ?? []).filter((x) => !["done", "gone"].includes(x.state)).map((x) => x.ref);
-    if (wait.length || ext.length) return `after ${[...wait.map((i) => refOf(list, { id: i })), ...ext].join(", ")}`;
-    // In plain words, as herdr-task's queue_reason: the folder's limit, else its machine too busy
-    // (herdr-task tick's "held": "vm-a's memory is 92% full", HERD-40).
-    const n = list.tasks.filter((x) => x.state === "running" && this.live(list, x).length).length;
-    if (n >= (list.config?.max_running ?? 10)) return `Waits: ${n === 1 ? "1 task is" : `${n} tasks are`} running here`;
-    return task.held ? `Waits: ${task.held}` : "Starts soon";
+    return queueReason(list, task, list.tasks.filter((x) => x.state === "running" && this.live(list, x).length).length);
   }
 
   // Herdr cuts off a render that takes too long ("interrupted"): one render reads terminals(),
@@ -517,10 +457,7 @@ export default class Tasks extends View {
   // doing (or a provider retry's line); Queued, what it waits for; Ready, when it got there (its
   // summary is the Accept card's, never this line's).
   statusLine(p, w = reportOf(p.task, p.section, p.live)) {
-    const { section } = p;
-    return section === "needs" || section === "merging" ? p.why : section === "working" ? p.why ?? w?.text ?? null
-      : section === "queued" ? this.queueReason(p.list, p.task)
-      : section === "ready" ? (p.task.ready_at ? `Ready ${ago(p.task.ready_at)}` : "Ready to accept") : null;
+    return secondLine(p, w, p.section === "queued" ? this.queueReason(p.list, p.task) : null);
   }
 
   // Archived (herdr-task's archive_pass), unless its agent works or asks again: someone wrote to
@@ -818,7 +755,7 @@ export default class Tasks extends View {
     // why; Queued, what it waits for ("after HERD-3"); Merging, why it waits. Never on the right.
     const w = reportOf(task, section, live);
     const sub = this.statusLine(p, w);
-    const left = section === "working" && !p.why && w?.left != null ? short(w.left) : null;
+    const left = leftOf(p, w);
     // Pin / Unpin in its right-click menu (not an archived task's: archived ones drop out of Pinned).
     const key = taskKey(list, task);
     return this.line(`task-${key}`, {
@@ -930,14 +867,6 @@ export default class Tasks extends View {
   }
 }
 
-// Whether every word typed is in one of these, any case (Shepherdr's matches(): its lists' filters).
-function matches(q, ...fields) {
-  const words = String(q).toLowerCase().split(/\s+/).filter(Boolean);
-  const all = fields.filter((f) => f != null && f !== "").join(" ").toLowerCase();
-  return words.every((w) => all.includes(w));
-}
-
-// A search field's key, at its end while it is empty: F, as a small key cap.
 const searchKey = (t) => h_flex().h(18).px(5).mr(3).flex_none().items_center().rounded(4).border_1().border_color(t.border)
   .font_family(ID_FONT).text_size(TEXT.id).text_color(t.dim).child("F");
 
@@ -949,30 +878,7 @@ function bindSearchKeys(cx, context) {
   try { cx.bind_keys([{ keystroke: "escape", action: `${context}_clear`, context: `${context} > Input` }]); } catch {}
 }
 
-// Sort within a section: the newest activity first; to do in the order they were added.
-function order(section) {
-  if (section === "todo") return (a, b) => a.task.id - b.task.id;
-  if (section === "done") return (a, b) => (b.task.done_at ?? 0) - (a.task.done_at ?? 0);
-  return (a, b) => (b.task.ready_at ?? b.task.started ?? 0) - (a.task.ready_at ?? a.task.started ?? 0);
-}
-
 const tilde = (p, h) => (h && (p === h || p.startsWith(h + "/")) ? `~${p.slice(h.length)}` : p);
-
-// "9:00" today, "Tue 9:00" this week, else "Nov 12 9:00".
-function day(ms) {
-  const d = new Date(ms), today = new Date();
-  const hm = `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
-  if (d.toDateString() === today.toDateString()) return hm;
-  // Within the week: its day; further: its date ("Nov 12").
-  if (Math.abs(ms - Date.now()) < 6 * 86400000) return `${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()]} ${hm}`;
-  return `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()]} ${d.getDate()} ${hm}`;
-}
-
-function ago(ms, suffix = true) {
-  const m = Math.floor((Date.now() - ms) / 60000);
-  const s = m < 1 ? "<1m" : m < 60 ? `${m}m` : m < 1440 ? `${Math.floor(m / 60)}h` : `${Math.floor(m / 1440)}d`;
-  return suffix ? (m < 1 ? "just now" : `${s} ago`) : s;
-}
 
 // An agent's name: the one it was given (hc --name), else its program's.
 function agentName(address) {
@@ -1002,43 +908,7 @@ function accepting(key) {
 // Needs you's mark, whatever is needed: Shepherdr's red dot. What is needed shows in the row's words only.
 const needDot = () => taskDot("needs");
 
-// A provider retry's line (herdr-task's retry_line): "Provider overloaded · Retry in 2m".
-function retryLine(r) {
-  return r.due ? `${r.reason} · Retry in ${Math.max(1, Math.ceil((r.due - Date.now()) / 60000))}m` : `${r.reason} · Retrying`;
-}
-
-// What a task's agent last said (herdr-task status), as shown: { text, done, left (minutes), paused };
-// none once it's ready or waits for a go or other tasks. Its minutes count down while it works and
-// stop while it waits on the person (herdr-task notes when: progress.paused_at). An agent that
-// reports progress itself (OSC 7501 progress, its terminal's `report`) gives the % done, and its
-// message is the line until it says one through herdr-task status.
+// What a task's agent last said (core/tasks.js reportOf), with the progress its own terminal reports.
 export function reportOf(task, section, live = []) {
-  const p = task.progress;
-  if (task.state !== "running" || !["working", "needs"].includes(section)) return null;
-  const own = ownProgress(live.map((a) => a.address));
-  const text = p?.text || own?.msg || null;
-  if (!text && !own) return null;
-  const done = own ? own.pct : p?.done ?? null;
-  let left = null;
-  if (estimated(p, done)) {
-    const rem = Math.max(0, p.left - ((p.paused_at ?? Date.now()) - (p.at ?? Date.now())));
-    left = rem < 60000 ? 0 : Math.ceil(rem / 60000);
-  }
-  return { text, done, left, paused: section === "needs" };
-}
-
-// Every second line starts with a capital ("After HERD-14"), an agent's own words too; a word
-// already in mixed case ("iOS") is left as it is.
-const capital = (s) => (/^[a-z](?![A-Z])/.test(String(s)) ? s[0].toUpperCase() + s.slice(1) : s);
-
-// Minutes left, as Shepherdr writes them under the dot: "6m", "<1m", "2h".
-const short = (n) => (n < 1 ? "<1m" : n < 60 ? `${n}m` : `${Math.round(n / 60)}h`);
-
-// An agent was started for the task under STARTING_MS ago and hasn't ended (as herdr-task's).
-const STARTING_MS = 90000;
-function starting(task) {
-  const last = task.agents?.[task.agents.length - 1];
-  if (last?.ended) return false;
-  const at = Math.max(0, ...[task.started, last?.at, task.review?.at].filter((x) => typeof x === "number"));
-  return Date.now() - at < STARTING_MS;
+  return report(task, section, ownProgress(live.map((a) => a.address)));
 }
