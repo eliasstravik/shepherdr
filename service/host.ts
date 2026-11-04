@@ -32,6 +32,8 @@ export class Host {
   private busy = false;
   private said = "";
   private wrote = { text: "", at: 0 };
+  /** each machine's system (uname), asked once through herdr-core for one with no node record: by id */
+  private systems = new Map<string, string>();
 
   constructor(private hub: Hub, private version: string) {}
 
@@ -104,7 +106,7 @@ export class Host {
 
   /** The machines the picker offers: this one, then every linked one, with its state and what it runs. */
   choices(): (MachineRow & { os: string | null; serves: boolean })[] {
-    const os = (id: string | null) => (id ? this.nodes.get(id)?.os ?? null : null);
+    const os = (id: string | null) => (id ? this.nodes.get(id)?.os ?? this.systems.get(id) ?? null : null);
     const hostId = this.record?.id ?? this.me?.id ?? null;
     return [
       { name: this.me?.name ?? "", id: this.me?.id ?? null, state: "connected", here: true, os: process.platform, serves: !this.record || hostId === this.me?.id },
@@ -143,6 +145,12 @@ export class Host {
       // hand it on to each machine this one links whose record is older (one that answered)
       if (best) for (const t of there) if (t.host && (Number(t.host.value?.at) || 0) < best.at)
         await this.hub.call("doc.set", { name: HOST_DOC, value: best, version: t.host.version, on: t.m }).catch(() => {});
+      // the picker says each machine's system: ask the ones with no service of their own, once
+      await Promise.all(there.filter((t) => { const id = this.machines.get(t.m)?.id; return id && !this.nodes.has(id) && !this.systems.has(id); }).map(async (t) => {
+        const r = await this.hub.call<{ code: number; stdout: string }>("machine.exec", { on: t.m, argv: ["uname", "-s"], timeout: 10 }, 15_000).catch(() => null);
+        const word = r?.code === 0 ? Buffer.from(r.stdout ?? "", "base64").toString().trim().toLowerCase() : "";
+        if (word) this.systems.set(this.machines.get(t.m)!.id!, word);
+      }));
       this.record = best ? { id: String(best.id), at: Number(best.at), by: best.by } : null;
       this.hostNode = this.serving() ? null : this.nodes.get(this.record!.id) ?? null;
       // who this machine is, for the others: when it changed, else once a minute (so they know the service runs)
@@ -157,7 +165,7 @@ export class Host {
     } finally {
       this.busy = false;
     }
-    const now = JSON.stringify([this.record, this.hostNode?.links, this.hostNode?.link, this.reachable(), [...this.machines], [...this.nodes.keys()]]);
+    const now = JSON.stringify([this.record, this.hostNode?.links, this.hostNode?.link, this.reachable(), [...this.machines], [...this.nodes.keys()], [...this.systems]]);
     if (now !== this.said) { this.said = now; this.emit(); }
   }
 }
