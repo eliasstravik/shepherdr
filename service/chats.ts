@@ -1,23 +1,14 @@
 // The chats web pages have open: each followed from the agent's own log with the shared core's ChatReader (the
 // same reading as the window's chat), read every second while someone watches, dropped a minute after the last
-// page leaves. A page gets the whole conversation when it opens a chat, then the whole again on each change (a
-// chat is at most KEEP records).
+// page leaves. A page is told when it opens a chat and on each change (it sends what it shows: compat.ts).
 import type { Hub } from "./hub.ts";
 import { sh } from "./model.ts";
 import { ChatReader } from "../core/chat-reader.js";
 
-type Watcher = (addr: string, msg: string) => void;
+/** A page following a chat: told the reader (and the terminal now) each time the conversation changes. */
+export type Watcher = (reader: ChatReader, terminal: any) => void;
 
-type Followed = { reader: ChatReader; pages: Set<Watcher>; busy: boolean; idleSince: number | null; text: string };
-
-/** What a page draws from a conversation item: the item's own words and marks, nothing of the log's internals. */
-function shown(x: any) {
-  switch (x.kind) {
-    case "tools": return { kind: "tools", id: x.id, steps: x.steps.map((s: any) => ({ kind: s.kind, line: s.line, count: s.count ?? 1, done: s.out != null })) };
-    case "ask": return { kind: "ask", id: x.id, text: x.text ?? x.title ?? "", at: x.at ?? null, closed: x.closed ?? null };
-    default: return { ...x };
-  }
-}
+type Followed = { reader: ChatReader; pages: Set<Watcher>; busy: boolean; idleSince: number | null; ready: boolean };
 
 export class Chats {
   private followed = new Map<string, Followed>();
@@ -32,10 +23,10 @@ export class Chats {
 
   watch(addr: string, page: Watcher) {
     let f = this.followed.get(addr);
-    if (!f) this.followed.set(addr, (f = { reader: new ChatReader(this.io, addr), pages: new Set(), busy: false, idleSince: null, text: "" }));
+    if (!f) this.followed.set(addr, (f = { reader: new ChatReader(this.io, addr), pages: new Set(), busy: false, idleSince: null, ready: false }));
     f.pages.add(page);
     f.idleSince = null;
-    if (f.text) page(addr, f.text);
+    if (f.ready) page(f.reader, this.hub.terminals.get(addr));
     void this.tick(addr);
   }
 
@@ -60,7 +51,7 @@ export class Chats {
       const t = this.hub.terminals.get(addr);
       let changed = await f.reader.locate(t);
       if (await f.reader.pull()) changed = true;
-      if (changed || !f.text) this.publish(addr, f);
+      if (changed || !f.ready) this.publish(addr, f);
     } catch (err) {
       console.error(`chat ${addr}: ${(err as Error).message}`);
     } finally {
@@ -69,13 +60,8 @@ export class Chats {
   }
 
   private publish(addr: string, f: Followed) {
-    const r = f.reader, t: any = this.hub.terminals.get(addr);
-    const text = JSON.stringify({
-      type: "chat", addr, state: r.state, kind: r.kind, top: r.start === 0, status: t?.status?.state ?? null,
-      items: (r.conv?.items ?? []).map(shown),
-    });
-    if (text === f.text) return;
-    f.text = text;
-    for (const page of f.pages) page(addr, text);
+    f.ready = true;
+    const t = this.hub.terminals.get(addr);
+    for (const page of f.pages) page(f.reader, t);
   }
 }

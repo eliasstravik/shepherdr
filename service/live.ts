@@ -5,10 +5,11 @@ import type { Hub } from "./hub.ts";
 import type { Store } from "./store.ts";
 import type { Me } from "./tailscale.ts";
 
-type WS = ServerWebSocket<{ who: string; chats?: Set<string>; send?: (addr: string, msg: string) => void }>;
+import type { Chats, Watcher } from "./chats.ts";
+import type { Compat } from "./compat.ts";
 
-/** What a page asks for over its socket besides views: the chats it has open. */
-export type Pages = { watch(addr: string, page: (addr: string, msg: string) => void): void; unwatch(addr: string, page: (addr: string, msg: string) => void): void; earlier(addr: string): Promise<void> };
+// A page's socket: the chats it follows (by 2.1's chat key), each with the terminal and the watcher it holds.
+type WS = ServerWebSocket<{ who: string; chats?: Map<string, { addr: string; watcher: Watcher }> }>;
 
 export class Live {
   private pages = new Set<WS>();
@@ -16,7 +17,9 @@ export class Live {
   private pending = new Set<string>();
   private timer: ReturnType<typeof setTimeout> | null = null;
 
-  chats: Pages | null = null;
+  chats: Chats | null = null;
+  compat: Compat | null = null;
+  private snap: string | null = null;
 
   constructor(private hub: Hub, private store: Store, private me: () => Me | null, private version: string) {
     hub.on((e) => {
@@ -32,26 +35,48 @@ export class Live {
     const me = this.me();
     ws.send(JSON.stringify({ type: "hello", version: this.version, login: ws.data.who, machine: me?.host ?? null, link: me ? `https://${me.dns}/shepherdr/` : null }));
     for (const [name, text] of this.views) ws.send(`{"type":"view","name":${JSON.stringify(name)},"value":${text}}`);
+    if (this.snap) ws.send(this.snap);
     if (!this.views.has("state")) void this.store.load().then((d) => this.put("state", d));
   }
 
   leave(ws: WS) {
     this.pages.delete(ws);
-    for (const a of ws.data.chats ?? []) this.chats?.unwatch(a, ws.data.send!);
+    for (const w of ws.data.chats?.values() ?? []) this.chats?.unwatch(w.addr, w.watcher);
+  }
+
+  /** 2.1's snapshot: everything the screen lists, whole, each time it changes. */
+  setSnapshot(snapshot: unknown) {
+    const text = JSON.stringify({ type: "snapshot", snapshot });
+    if (text === this.snap) return;
+    this.snap = text;
+    for (const ws of this.pages) if (ws.getBufferedAmount() < 1 << 20) ws.send(text);
+  }
+
+  /** The chats a page has open now (2.1 sends their keys): followed until it closes them. */
+  private watch(ws: WS, keys: string[]) {
+    const chats = this.chats, compat = this.compat;
+    if (!chats || !compat) return;
+    const want = new Map<string, string>();
+    for (const k of keys.slice(0, 8)) { const a = compat.addrOf(k); if (a) want.set(k, a); }
+    ws.data.chats ??= new Map();
+    for (const [k, w] of ws.data.chats) if (want.get(k) !== w.addr) { chats.unwatch(w.addr, w.watcher); ws.data.chats.delete(k); }
+    for (const [k, addr] of want) {
+      if (ws.data.chats.has(k)) continue;
+      let sent = "";
+      const watcher: Watcher = (reader, t) => {
+        const text = JSON.stringify({ type: "chat", chat: compat.chat(k, reader, t) });
+        if (text !== sent && ws.readyState === 1) { sent = text; ws.send(text); }
+      };
+      ws.data.chats.set(k, { addr, watcher });
+      chats.watch(addr, watcher);
+    }
   }
 
   message(ws: WS, text: string) {
     let m: any;
     try { m = JSON.parse(text); } catch { return; }
     if (m?.type === "ping") ws.send(JSON.stringify({ type: "pong", at: m.at ?? null }));
-    else if (m?.type === "watch" && Array.isArray(m.chats) && this.chats) {
-      // The chats this page has open now (at most a few: one per pane).
-      const want = new Set<string>(m.chats.filter((a: unknown) => typeof a === "string" && /^[\w.-]+(\/[\w.-]+)?$/.test(a)).slice(0, 6));
-      ws.data.chats ??= new Set();
-      ws.data.send ??= (_addr, msg) => { if (ws.readyState === 1) ws.send(msg); };
-      for (const a of ws.data.chats) if (!want.has(a)) { this.chats.unwatch(a, ws.data.send); ws.data.chats.delete(a); }
-      for (const a of want) if (!ws.data.chats.has(a)) { ws.data.chats.add(a); this.chats.watch(a, ws.data.send); }
-    } else if (m?.type === "earlier" && typeof m.addr === "string" && ws.data.chats?.has(m.addr)) void this.chats?.earlier(m.addr);
+    else if (m?.type === "watch" && Array.isArray(m.chats)) this.watch(ws, m.chats.filter((k: unknown) => typeof k === "string" && k.length < 200));
   }
 
   /** Sets a view; pages hear about it shortly after, once, if it really changed. */

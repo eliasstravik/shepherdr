@@ -5,6 +5,7 @@ import type { Hub } from "./hub.ts";
 import { sendBody, messageBody, refusal } from "../core/send.js";
 import { kindOf } from "../core/chat-reader.js";
 import { READ } from "../core/spaces.js";
+import type { Compat } from "./compat.ts";
 
 const ADDR = /^([\w.-]+\/)?t[0-9a-z]+$/;
 const REF = /^[A-Z][A-Z0-9]*-\d+$/;
@@ -35,7 +36,19 @@ function taskOf(b: any) {
   return { ref, folder, machine };
 }
 
-export async function act(hub: Hub, b: any): Promise<unknown> {
+export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
+  // 2.1's screen names a chat by its key (compat.ts): its terminal here.
+  const chat = (key: unknown) => {
+    const a = typeof key === "string" ? compat.addrOf(key) : null;
+    if (!a) throw new Error("That chat isn't here any more.");
+    return a;
+  };
+  if (b?.type === "send" && typeof b.chat === "string") b = { ...b, addr: chat(b.chat), quote: b.replyText ?? null };
+  else if (b?.type === "stop" && typeof b.chat === "string") b = { ...b, addr: chat(b.chat) };
+  else if (b?.type === "read" && b.chats && typeof b.chats === "object") {
+    for (const key of Object.keys(b.chats).slice(0, 20)) { const a = compat.addrOf(key); if (a) await act(hub, { type: "read", addr: a }, compat); }
+    return { ok: true };
+  }
   switch (b?.type) {
     case "send": {
       const a = addr(b.addr);

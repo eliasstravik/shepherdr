@@ -35,6 +35,9 @@ export class Model {
   private shared: any = {};
   private timer: ReturnType<typeof setTimeout> | null = null;
 
+  /** Told each build: what the screen's snapshot is made from (compat.ts). */
+  onBuild: ((b: { spaces: any[]; sections: any[]; rows: any[]; machines: string[] }) => void) | null = null;
+
   constructor(private hub: Hub, private live: Live) {}
 
   start() {
@@ -139,5 +142,6 @@ export class Model {
       };
     });
     this.live.put("spaces", { spaces, sections: bar.sections });
+    this.onBuild?.({ spaces, sections: bar.sections, rows, machines: this.machines });
   }
 }

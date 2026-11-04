@@ -10,8 +10,38 @@
     "allowImportingTsExtensions": true,
     "allowJs": true,
     "resolveJsonModule": true,
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": ["bun"]
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "bun"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": [
+        "web/shared/*"
+      ],
+      "@client/*": [
+        "web/src/*"
+      ],
+      "@plugins/*": [
+        "web/plugins/*"
+      ],
+      "@core/*": [
+        "core/*"
+      ]
+    }
   },
-  "include": ["service", "web/src", "web/vite.config.ts", "core"]
+  "include": [
+    "service",
+    "web/src",
+    "web/shared",
+    "web/plugins",
+    "web/generated",
+    "web/vite.config.ts",
+    "web/build-plugins.ts",
+    "core"
+  ]
 }
