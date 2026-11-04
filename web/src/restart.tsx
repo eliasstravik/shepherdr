@@ -381,7 +381,7 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
   )
 }
 
-/** Under the message box, as the window's model button: what its agent runs on ("Opus 5.5 · High"), a chevron; it opens
+/** In the message box, as the window's model button: what its agent runs on ("Opus 5.5 · High"), a chevron; it opens
  *  the model menu */
 export function AgentLine({ chatKey, cli }: { chatKey: string; cli: string }) {
   const words = useStore((s) => s.chats[chatKey]?.agent?.words)
@@ -390,18 +390,22 @@ export function AgentLine({ chatKey, cli }: { chatKey: string; cli: string }) {
   if (!words) return <OldAgentLine chatKey={chatKey} cli={cli} />
   // a narrow chat drops "· 1M" first, as the window's
   const shown = phone ? words.replace(/\s*·\s*1M\b/, '') : words
+  // in the box's row, before the mic (as the window's): the menu opens over the box, at its right (the box holds it)
   return (
-    <div className="relative mt-1 flex justify-end pr-1">
+    <>
       <button type="button" data-agent-line aria-haspopup="menu" aria-expanded={open?.chat === chatKey}
         onClick={() => setMenuOpen(open?.chat === chatKey ? null : { chat: chatKey })}
-        className="flex h-6 items-center gap-1 rounded-[6px] pr-[5px] pl-2 text-[0.75rem] font-medium whitespace-nowrap text-fg2 hover:bg-hover hover:text-fg phone:h-9">
-        {shown}
+        className={agentPick}>
+        <span className="min-w-0 truncate">{shown}</span>
         <DownIcon className="size-3 shrink-0" />
       </button>
       {open?.chat === chatKey ? <ModelMenu key={`${chatKey}|${open.typed ?? ''}`} chat={chatKey} typed={open.typed} /> : null}
-    </div>
+    </>
   )
 }
+
+/** the box's model button: as tall as its round buttons, its words cut only when the row has no room left */
+const agentPick = 'flex h-[34px] min-w-0 items-center gap-1 rounded-full pr-2 pl-2.5 text-[0.75rem] font-medium whitespace-nowrap text-fg2 hover:bg-hover hover:text-fg phone:h-11 phone:pr-2.5 phone:pl-3 phone:text-[0.8125rem]'
 
 /** what it runs on, before the chat has heard it from the agent's log */
 function OldAgentLine({ chatKey, cli }: { chatKey: string; cli: string }) {
@@ -428,9 +432,10 @@ function OldAgentLine({ chatKey, cli }: { chatKey: string; cli: string }) {
       data-agent-line
       aria-label={`Runs on: ${words}. Change it`}
       onClick={() => openRestart(chatKey, taskChatId(chatKey) ?? 'this space', true)}
-      className="press-dim relative mt-1 flex h-4 w-full justify-start pl-3 text-left text-xs/4 text-fg3 after:absolute after:-inset-y-1.5 after:inset-x-0"
+      className={agentPick}
     >
-      {planned ? <span className="min-w-0 truncate italic">{planned}</span> : bits.length ? [...seen, ...requested].map(part) : `${cli} · Not known yet`}
+      {planned ? <span className="min-w-0 truncate italic">{planned}</span> : bits.length ? [...seen, ...requested].map(part) : <span className="min-w-0 truncate">{`${cli} · Not known yet`}</span>}
+      <DownIcon className="size-3 shrink-0" />
     </button>
   )
 }

@@ -41,6 +41,15 @@ test("a shell run in the background is a job until its end is queued for the age
   expect((await conv([...start, user(note("t1", "b111", "failed"), { origin: { kind: "task-notification" } })])).bg).toEqual([]);
 });
 
+test("a background call that never started (cancelled, denied, failed) is no job", async () => {
+  // SHEP-20: the person cancelled it; its result is an error with no task id, and it showed for hours
+  const c = await conv([
+    call("t5", "Bash", { command: "./watch.sh", description: "Keep watching SHEP-10", run_in_background: true }),
+    user([{ type: "tool_result", content: "The user doesn't want to take this action right now.", is_error: true, tool_use_id: "t5" }], { toolUseResult: "The user doesn't want to take this action right now." }),
+  ]);
+  expect(c.bg).toEqual([]);
+});
+
 test("a command moved to the background mid-run, and a watcher, are jobs; the agent's TaskStop ends one", async () => {
   const c = await conv([
     call("t2", "Bash", { command: "bun test", description: "Run the tests" }),
@@ -68,6 +77,9 @@ test("the processes have the last say: a job no process holds open is gone", () 
   b.read("claude", 1, "ok\nF /tmp/claude-1/p/s/tasks/b111.output\n", 60000);
   // t2's file is closed: stopped in its terminal, or a watcher that timed out; t3 has no task id yet
   expect(b.list("claude", c).map((j) => [j.id, j.path ?? null])).toEqual([["t1", "/tmp/claude-1/p/s/tasks/b111.output"], ["t3", null]]);
+  // a minute on, still no task id: no file vouches for it, so it goes
+  b.read("claude", 1, "ok\nF /tmp/claude-1/p/s/tasks/b111.output\n", 62000)
+  expect(b.list("claude", c).map((j) => j.id)).toEqual(["t1"]);
   // a look that didn't work (the machine out of reach): the log says again
   b.read("claude", 1, "", 61000);
   expect(b.list("claude", c).length).toBe(3);

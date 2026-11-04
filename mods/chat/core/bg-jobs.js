@@ -121,8 +121,10 @@ export class BgJobs {
     }
     const path = (task) => (s?.files ? [...s.files].find((f) => f.endsWith(`/tasks/${task}.output`)) : undefined);
     return (conv?.bg ?? []).filter((j) => {
-      // No look (yet, or it failed), no task id yet, or started after the last look: the log says.
-      if (!s?.files || !j.task || (j.at ?? 0) > s.at - 2000) return true;
+      // No look (yet, or it failed), or started after the last look: the log says.
+      if (!s?.files || (j.at ?? 0) > s.at - 2000) return true;
+      // No task id yet: no output file vouches for it, so only for a minute (its call still waiting for an answer).
+      if (!j.task) return (j.at ?? 0) > s.at - 60000;
       return Boolean(path(j.task));
     }).map((j) => ({ ...j, ...(j.task && path(j.task) ? { path: path(j.task) } : {}) }));
   }
