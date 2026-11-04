@@ -6,6 +6,7 @@ import { ChevronUpDownIcon, MagnifyingGlassIcon, XMarkIcon } from '@heroicons/re
 import type { Status, Task, Report } from '@shared/types.ts'
 import { TALKING, type Sample } from './meter.ts'
 import { useMotion } from './motion.ts'
+import { useStore } from './kernel.ts'
 
 export {
   AdjustmentsHorizontalIcon as ModeIcon,
@@ -534,7 +535,10 @@ export const attentionWords = (need: number, ready: number) => [need ? `${need} 
 
 /** One notification, with separate counts: needs you on the left, ready on the right.
  * Cap each printed count independently; the accessible name always keeps the exact numbers. */
-export function AttentionBadge({ need, ready, scope }: { need: number; ready: number; scope: string }) {
+export function AttentionBadge({ need: allNeed, ready: allReady, scope }: { need: number; ready: number; scope: string }) {
+  // Settings › Window's Red counts and Green counts, as the window follows them
+  const look = useStore((s) => s.snap?.look)
+  const need = look?.red === false ? 0 : allNeed, ready = look?.green === false ? 0 : allReady
   if (!need && !ready) return null
   const split = need > 0 && ready > 0
   const label = `${need} needs you, ${ready} ready · ${scope}`

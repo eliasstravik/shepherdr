@@ -1342,7 +1342,8 @@ export function placesDrawn(ui: UI, snap: Snapshot | null, width = innerWidth) {
 
 /** open an item: the panel's tab on a desktop, a full-screen sheet on a phone or tablet */
 export function openItem(id: string) {
-  setUI((ui) => (ui.device === 'desktop' ? { sidebars: { ...showPanel(ui.sidebars, true, innerWidth), item: id }, taskMenu: false } : { sheet: id, taskMenu: false, plus: null, pick: null }))
+  // as 3.0's task view: the open task's tab, in place (on every device)
+  setUI({ sheet: id, taskMenu: false, plus: null, pick: null })
 }
 
 /** close the sheet (its step in the history goes too) */

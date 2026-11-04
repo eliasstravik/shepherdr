@@ -93,6 +93,10 @@ function automationsBySpace(list: any[], spaces: Space[]) {
   return out;
 }
 
+/** Settings › Window's look switches, each on unless set to false (as the window reads them). */
+export const LOOK = { tabs: "tabbar.tabs", worktrees: "sidebar.worktrees", unread: "sidebar.unread", red: "counts.red", green: "counts.green", filters: "tasks.filters", place: "tasks.place", helpers: "chat.helpers" } as const;
+export const lookOf = (value: (k: string) => unknown) => Object.fromEntries(Object.entries(LOOK).map(([k, key]) => [k, value(key) !== false])) as Record<keyof typeof LOOK, boolean>;
+
 function artifactOf(a: any, spaces: Space[], program: (addr: string) => string | null = () => null): Artifact {
   // its store is a folder: the space in it, else none (it shows with All)
   const place = spaces.find((s) => !s.machine && s.folder === a.folder)?.id ?? "";
@@ -179,6 +183,9 @@ export class Compat {
       : { id: a.id, title: w.title, kind: "Question", to: key, ...(detail ? { plan: detail } : {}), choices: [{ label: "Allow" }, { label: "Deny" }] };
   }
   last: Snapshot | null = null;
+  /** chat key -> the files its messages show (a chat's images): the only ones /api/file serves for it */
+  files = new Map<string, Set<string>>();
+  fileOf(key: string, path: string) { return this.files.get(key)?.has(path) ? path : null; }
 
   addrOf(key: string) { return this.chats.get(key) ?? null; }
 
@@ -274,11 +281,13 @@ export class Compat {
     const n = this.shared?.value("notify") ?? {};
     const level = (s: Space) => spaceLevel(n, s.id), parent = (s: Space) => machineLevel(n, machineOfSpace(s.id));
     const notify: SettingSection[] = [
-      { name: "Notify", level: "all", rows: [{ label: "Notify", key: "notify", value: everywhereOf(n), options: [...NOTIFY] },
+      { name: "Notify", level: "all", rows: [{ label: "Notify", key: "notify", value: everywhereOf(n), options: [...NOTIFY],
+        // as the window's Everywhere: the spaces that set their own
+        ...(spaces.some((s) => spaceOwn(n, s.id)) ? { others: spaces.filter((s) => spaceOwn(n, s.id)).map((s) => ({ id: s.id, name: places.find((p) => p.id === s.id)?.name ?? s.name })) } : {}) },
         // push alerts on this phone or browser: 2.1's alerts action (it asks the device, then tells the service)
         { label: "Alerts on this device", key: "alerts", value: "", options: ["Turn on"] }] },
       ...spaces.map((s) => ({ name: "Notify", level: s.id, rows: [{ label: "Notify", key: "notify", value: level(s), options: [...NOTIFY],
-        ...(spaceOwn(n, s.id) ? { inherits: { value: parent(s), from: "Everywhere" } } : { from: "Everywhere" }) }] })),
+        ...(spaceOwn(n, s.id) ? { inherits: { value: parent(s), from: "everywhere" } } : { from: "everywhere" }) }] })),
     ];
 
     // Autopilot (3.0's Settings › Autopilot): Everywhere lists the spaces on this machine, each space's page has its
@@ -298,6 +307,8 @@ export class Compat {
       terminalTransport: "core", name: "Shepherdr", host, user: input.user, places, machines, tasks, automations: automationsBySpace(input.automations ?? [], spaces), asks: {}, needs, settings: [...(input.settings ?? []), ...notify],
       artifacts: (input.artifacts ?? []).map((a) => artifactOf(a, spaces, (addr) => { const k = kindOfTerm((this as any).terminalsOf?.(addr)); return k ? CLI_NAMES[k] ?? k : null; })),
       sections, last, read, off: input.offPlugins ?? [],
+      // the Window page's look switches (shared keys the window reads too): the web follows the same ones
+      look: lookOf((k) => this.shared?.value(k)),
     };
     return this.last;
   }
@@ -310,7 +321,18 @@ export class Compat {
     for (const x of reader.conv?.items ?? []) {
       if (x.at) at = x.at;
       const reactions = reactionsOf(reader.conv?.reactions?.get(x.id));
-      if (x.kind === "user" && x.text) messages.push({ id: x.id, who: "you", text: x.text, at: x.at, ...(x.replyTo ? { reply: { text: x.replyTo } } : {}), ...reactions } as Message);
+      if (x.kind === "user" && (x.text || x.paths?.length || x.images)) {
+        if (x.text) messages.push({ id: x.id, who: "you", text: x.text, at: x.at, ...(x.replyTo ? { reply: { text: x.replyTo } } : {}), ...reactions } as Message);
+        // the images sent with it, shown in the chat as the window shows them (each a message of its own, 2.1's way);
+        // only files a chat names are ever served (fileOf)
+        for (const [i, path] of (x.paths ?? []).entries()) {
+          (this.files.get(key) ?? this.files.set(key, new Set()).get(key)!).add(path);
+          messages.push({ id: `${x.id}:f${i}`, who: "you", at: x.at, file: { name: path.split("/").pop() ?? "image", path } } as Message);
+        }
+        // images Claude Code didn't say the source of: how many, as the window's line says
+        const unseen = (x.images ?? 0) - (x.paths?.length ?? 0);
+        if (unseen > 0) messages.push({ id: `${x.id}:n`, who: "you", at: x.at, text: unseen === 1 ? "1 image" : `${unseen} images` } as Message);
+      }
       else if (x.kind === "agent" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at, ...reactions });
       else if (x.kind === "error" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at });
       else if (x.kind === "news" && x.ref) {

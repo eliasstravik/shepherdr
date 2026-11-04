@@ -229,6 +229,15 @@ const server = Bun.serve<{ who: string }>({
       if (!body || typeof body.key !== "string" || !/^[a-z][\w.-]{0,63}$/.test(body.key)) return json({ error: "bad key" }, 400);
       return json(await store.set(body.key, body.value ?? null));
     }
+    // a file a chat shows (an image sent in it), on this machine: only one that chat's messages name
+    if (path === "/api/file") {
+      const key = url.searchParams.get("chat") ?? "", want = url.searchParams.get("path") ?? "";
+      const at = compat.fileOf(key, want);
+      if (!at || !at.startsWith("/") || at.includes("/../") || !existsSync(at) || (compat.addrOf(key) ?? "").includes("/")) return json({ error: "not found" }, 404);
+      const f = Bun.file(at);
+      return new Response(f, { headers: { "content-type": f.type || "application/octet-stream", "cache-control": "private, max-age=3600",
+        ...(url.searchParams.get("download") ? { "content-disposition": `attachment; filename="${at.split("/").pop()!.replace(/"/g, "")}"` } : {}) } });
+    }
     // a recipe artifact's files (the web's recipe view asks api/artifacts/<id>/recipe?v=, /file/<path>?v=)
     const art = /^\/api\/artifacts\/([\w.-]+)\/(recipe|file\/(.+))$/.exec(path);
     if (art) {

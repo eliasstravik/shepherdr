@@ -36,7 +36,7 @@ import {
 } from './kernel.ts'
 import { PANE_MIN } from './panes.ts'
 import { ChatColumn, Frame, PanelColumn, PlacesColumn, PlacesToggle } from './Frame.tsx'
-import { PanelSheet, TaskPanel, TaskTabs } from './Panel.tsx'
+import { PanelSheet, TabBody, TaskPanel, TaskTabs } from './Panel.tsx'
 import { openAccept } from './screens/Accept.tsx'
 import { Drawer as SlideDrawer, Stack } from './Stack.tsx'
 import { machineName, type Place, type Snapshot, type Task } from '@shared/types.ts'
@@ -468,7 +468,7 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
         {g ? <TaskTabs task={task} /> : null}
         {/* no bar under a task's chat: the message box keeps clear of the home indicator itself */}
         <div className={clsx('flex min-h-0 flex-1 flex-col', !keyboard && 'pb-[env(safe-area-inset-bottom)]')}>
-          <Scroll chat={!!g}>{body}</Scroll>
+          <Scroll chat={!!g}>{g ? <TabBody task={task} chatKey={g.chat}>{body}</TabBody> : body}</Scroll>
         </div>
       </section>
     )
@@ -514,7 +514,7 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
         </div>
       </Head>
       {g ? <TaskTabs task={task} /> : null}
-      <Scroll chat={!!g}>{body}</Scroll>
+      <Scroll chat={!!g}>{g ? <TabBody task={task} chatKey={g.chat}>{body}</TabBody> : body}</Scroll>
     </section>
   )
 }

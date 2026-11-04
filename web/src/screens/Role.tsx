@@ -35,6 +35,7 @@ function AgentSheet({ o }: { o: Extract<Open, { kind: 'role' }> }) {
   const [model, setModel] = useState(o.pick?.model ?? '')
   const [effort, setEffort] = useState(o.pick?.effort ?? '')
   const [speed, setSpeed] = useState(o.pick?.fast ? 'fast' : '')
+  const [perm, setPerm] = useState((o.pick as { perm?: string | null } | null)?.perm ?? '')
   useEffect(() => {
     act({ type: 'role-info' } as never).then((r: any) => (r.clis ? setClis(r.clis) : setError(r.error ?? 'Could not read the agents.')), (e: Error) => setError(e.message))
   }, [])
@@ -52,12 +53,12 @@ function AgentSheet({ o }: { o: Extract<Open, { kind: 'role' }> }) {
     <Dialog title={o.title} onCancel={close}
       buttons={<>
         {o.pick ? <Ghost disabled={busy} onClick={() => save(null)}>Use default</Ghost> : null}
-        <Primary autoFocus disabled={!clis || busy} onClick={() => save(JSON.stringify({ agent: kind, model: model || null, effort: effort || null, fast: speed === 'fast' && (cli?.speeds?.length ?? 0) > 1 }))}>{busy ? 'Saving…' : 'Save'}</Primary>
+        <Primary autoFocus disabled={!clis || busy} onClick={() => save(JSON.stringify({ agent: kind, model: model || null, effort: effort || null, fast: speed === 'fast' && (cli?.speeds?.length ?? 0) > 1, perm: perm || cli?.permDefault || null }))}>{busy ? 'Saving…' : 'Save'}</Primary>
       </>}>
       {clis ? (
         <div className="flex flex-col gap-2.5 text-fg phone:gap-1">
           <Line label="Agent">
-            <Pick label="Agent" value={cli?.name ?? kind} options={clis.map((c) => c.name)} onPick={(n) => { setKind(clis.find((c) => c.name === n)!.kind); setModel(''); setEffort(''); setSpeed('') }} />
+            <Pick label="Agent" value={cli?.name ?? kind} options={clis.map((c) => c.name)} onPick={(n) => { const next = clis.find((c) => c.name === n)!; const full = perm === 'bypassPermissions' || perm === 'full'; setKind(next.kind); setModel(''); setEffort(''); setSpeed(''); setPerm(full ? (next.kind === 'claude' ? 'bypassPermissions' : 'full') : '') }} />
           </Line>
           <Line label="Model">
             {cli?.models?.length ? <Pick label="Model" value={label(model)} options={[DEFAULT, ...cli.models.map((m) => m.label)]} onPick={(l) => { const id = cli.models!.find((m) => m.label === l)?.id ?? ''; setModel(id); if (!(cli.models!.find((m) => m.id === id)?.efforts ?? []).includes(effort)) setEffort('') }} /> : <span className="text-fg3">Default</span>}
@@ -68,6 +69,11 @@ function AgentSheet({ o }: { o: Extract<Open, { kind: 'role' }> }) {
           {cli?.speeds && cli.speeds.length > 1 ? (
             <Line label="Speed">
               <Pick label="Speed" value={speed || DEFAULT} options={[DEFAULT, ...cli.speeds]} ordered onPick={(v) => setSpeed(v === DEFAULT ? '' : v)} />
+            </Line>
+          ) : null}
+          {cli?.perms?.length ? (
+            <Line label="Permissions">
+              <Pick label="Permissions" value={cli.perms.find((p) => p.id === (perm || cli.permDefault))?.label ?? 'Default'} options={cli.perms.map((p) => p.label)} onPick={(l) => setPerm(cli.perms!.find((p) => p.label === l)?.id ?? '')} />
             </Line>
           ) : null}
           <p className="text-sm text-fg3">For agents started from now on. Running ones keep theirs.</p>

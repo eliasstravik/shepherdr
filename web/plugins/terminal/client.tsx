@@ -302,11 +302,13 @@ function TerminalView({ chatKey, panel }: { chatKey: string; panel?: boolean }) 
  *  shows as its own toggle */
 function PlaceTerm({ place }: { place: Place }) {
   const ui = useUI()
+  const tabsShown = useStore((s) => s.snap?.look?.tabs !== false)
   const on = ui.term === place.chat || !!ui.term?.startsWith('t:')
   const go = (term: string | null) => setUI({ term, arts: null, menu: false, plus: null, pick: null })
   return (
     <>
-    {(place.tabs ?? []).map((t) => (
+    {/* Settings › Window › Show tabs off: the space's other tabs aren't listed */}
+    {(tabsShown ? place.tabs ?? [] : []).map((t) => (
       <MenuItem key={t.term} icon={<TermIcon className={ic} />} onClick={() => go(t.term)}>
         {t.name}
       </MenuItem>
@@ -319,7 +321,7 @@ function PlaceTerm({ place }: { place: Place }) {
       ]} />
     ) : null}
     {/* the tab menu's items follow under a line, only when there are tabs above it */}
-    {(place.tabs ?? []).length || ui.device === 'phone' ? <MenuSeparator /> : null}
+    {(tabsShown && (place.tabs ?? []).length) || ui.device === 'phone' ? <MenuSeparator /> : null}
     </>
   )
 }

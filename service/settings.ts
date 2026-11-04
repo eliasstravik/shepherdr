@@ -37,6 +37,7 @@ const LIMITS = [
   { field: "start_disk", label: "Disk busy above", about: "Its home or /tmp, whichever is fuller.", min: 10, max: 100, step: 5, scale: 1 },
 ];
 const CAPS = [0, 1, 2, 4, 8, 16, 32];
+const FIELDS = ["start_memory", "start_load", "start_disk", "low_priority", "worker_memory"];
 const MACHINE_DEFAULTS: Record<string, unknown> = { ...HOLD, low_priority: true, worker_memory: 0 };
 const ON = (v: unknown) => (v ? "on" : "off");
 
@@ -108,6 +109,7 @@ export class Settings {
 
   sections(link: string | null, spaces: Scope[] = [], machines: string[] = [], host = LOCAL): SettingSection[] {
     this.host = host;
+    this.scopes = spaces;
     this.machineNames = machines;
     const out: SettingSection[] = [];
     for (const s of [null, ...spaces]) out.push(this.agents(s), this.tasks(s));
@@ -117,10 +119,18 @@ export class Settings {
     return out;
   }
 
-  private follows(scope: Scope | null, p: { own: boolean; parent: unknown }, word: (v: any) => string): Partial<SettingRow> {
-    if (!scope) return {};
-    return p.own ? { inherits: { value: word(p.parent), from: "Everywhere" } } : { from: "Everywhere" };
+  /** Under a row, as the window's: in a space "Changed here · Reset" or "Same as everywhere"; on Everywhere the spaces
+   *  that use their own (section, field: where the row's value is kept). */
+  private follows(scope: Scope | null, p: { own: boolean; parent: unknown }, word: (v: any) => string, section?: string, field?: string | null): Partial<SettingRow> {
+    if (!scope) {
+      if (!section) return {};
+      const others = this.scopes.filter((sc) => { const l = this.file.spaces?.[sc.id]; const v = field ? l?.[section]?.[field] : l?.[section]; return v !== undefined && v !== null; })
+        .map((sc) => ({ id: sc.id, name: sc.name }));
+      return others.length ? { others } : {};
+    }
+    return p.own ? { inherits: { value: word(p.parent), from: "everywhere" } } : { from: "everywhere" };
   }
+  private scopes: Scope[] = [];
 
   private agents(s: Scope | null): SettingSection {
     const scope = s?.id ?? null;
@@ -131,12 +141,12 @@ export class Settings {
       // unset: what it runs anyway, as the window's model button says it (the worker's CLI's own default model)
       const words = (v: any) => (v ? line(v) : r.id === "reviewer" ? `Other CLI (${NAMES[other]})` : this.cliDefaults[worker] || "Default");
       // on Everywhere its row has "Edit instructions" too: the file every agent of the role is told first (the same for every space)
-      return { label: r.title, key: `role.${r.id}`, value: words(p.value), agent: { role: r.id, pick: p.value ?? null }, hint: r.about, ...(s ? {} : { file: r.file }), ...this.follows(s, p, words) } as SettingRow;
+      return { label: r.title, key: `role.${r.id}`, value: words(p.value), agent: { role: r.id, pick: p.value ?? null }, hint: r.about, ...(s ? {} : { file: r.file }), ...this.follows(s, p, words, r.id, null) } as SettingRow;
     });
     // Backup: the other CLI takes over a task once when its agent can't go on (on: unset or a CLI; off: "off")
     const b = this.pick(scope, "backup", "agent");
     rows.push({ label: "Backup agent", key: "backup.agent", value: ON(b.value !== "off"), options: ["on", "off"], hint: "The other CLI takes over a task once when its agent can't go on.",
-      ...this.follows(s, b, (v) => ON(v !== "off")) });
+      ...this.follows(s, b, (v) => ON(v !== "off"), "backup", "agent") });
     return { name: "Agents", level: scope ?? "all", rows };
   }
 
@@ -146,12 +156,12 @@ export class Settings {
       const p = this.pick(scope, section, field);
       const words = (v: any) => wordFor(choices, v);
       return Array.isArray(choices)
-        ? { label, key: `${section}.${field}`, value: words(p.value), options: choices.map(([, w]: any) => w), ...this.follows(s, p, words) }
-        : { label, key: `${section}.${field}`, value: String(p.value), num: { min: choices.min, max: choices.max, unit: "tasks", one: "task" }, ...this.follows(s, p, String) };
+        ? { label, key: `${section}.${field}`, value: words(p.value), options: choices.map(([, w]: any) => w), ...this.follows(s, p, words, section, field) }
+        : { label, key: `${section}.${field}`, value: String(p.value), num: { min: choices.min, max: choices.max, unit: "tasks", one: "task" }, ...this.follows(s, p, String, section, field) };
     });
     for (const n of NOTES) {
       const p = this.pick(scope, "tasks", `${n.id}_notes`);
-      rows.push({ label: n.title, key: `tasks.${n.id}_notes`, value: p.value ?? "", multiline: true, hint: n.about, group: "Notes", ...this.follows(s, p, (v) => v ?? "") });
+      rows.push({ label: n.title, key: `tasks.${n.id}_notes`, value: p.value ?? "", multiline: true, hint: n.about, group: "Notes", ...this.follows(s, p, (v) => v ?? "", "tasks", `${n.id}_notes`) });
     }
     return { name: "Tasks", level: scope ?? "all", rows };
   }
@@ -163,19 +173,33 @@ export class Settings {
     const own = m ? layer.machine ?? {} : every;
     const base = (f: string) => (f in every ? every[f] : MACHINE_DEFAULTS[f]);
     const val = (f: string) => (f in own ? own[f] : base(f));
-    const from = (f: string, word: (v: any) => string): Partial<SettingRow> => (!m ? {} : f in own ? { inherits: { value: word(base(f)), from: "All machines" } } : { from: "All machines" });
+    // as the window's: on a machine "Changed here · Reset" or "Same as all machines"; for all machines how many use their own
+    const ownCount = (f: string) => Object.values(this.file.machines ?? {}).filter((x: any) => f in (x?.machine ?? {})).length;
+    const from = (f: string, word: (v: any) => string): Partial<SettingRow> => (!m ? (ownCount(f) ? { machinesOwn: ownCount(f) } : {}) : f in own ? { inherits: { value: word(base(f)), from: "all machines" } } : { from: "all machines" });
+    // a machine without limits of its own shows "Limits · Same as all machines" and Set its own, which opens its rows
+    const ownLimits = !!m && FIELDS.some((f) => f in own);
+    const hidden = m && !ownLimits ? { hidden: `limits@${m}` } : {};
     // a machine's own rows say which machine (key@machine); the heading is its name, as the window's blocks
     const at = m ? `@${m}` : "";
     const group = m ? (m === LOCAL ? "This computer" : m) : "When new tasks wait, on every machine";
     const rows: SettingRow[] = LIMITS.map((l) => {
       const word = (v: any) => (v == null ? "off" : String(Math.round(Number(v) * l.scale)));
-      return { label: l.label, key: `machine.${l.field}${at}`, value: word(val(l.field)), hint: l.about, num: { min: l.min, max: l.max, step: l.step, unit: "%", one: "%", off: true }, group, ...from(l.field, word) };
+      return { label: l.label, key: `machine.${l.field}${at}`, value: word(val(l.field)), hint: l.about, num: { min: l.min, max: l.max, step: l.step, unit: "%", one: "%", off: true }, group, ...hidden, ...from(l.field, word) };
     });
     rows.push({ label: "Workers run at low priority", key: `machine.low_priority${at}`, value: ON(val("low_priority") !== false), options: ["on", "off"],
-      hint: "Task agents start below the Assistant and your apps, and are ended first when memory runs out.", group, ...from("low_priority", (v) => ON(v !== false)) });
+      hint: "Task agents start below the Assistant and your apps, and are ended first when memory runs out.", group, ...hidden, ...from("low_priority", (v) => ON(v !== false)) });
     const gb = (v: any) => (Number(v) ? `${Number(v)} GB` : "Off");
     rows.push({ label: "Memory cap per worker", key: `machine.worker_memory${at}`, value: gb(val("worker_memory")), options: CAPS.map(gb),
-      hint: "A worker over it is slowed down, not ended. Applies to tasks started after a change.", group, ...from("worker_memory", gb) });
+      hint: "A worker over it is slowed down, not ended. Applies to tasks started after a change.", group, ...hidden, ...from("worker_memory", gb) });
+    if (m && !ownLimits) rows.push({ label: "Limits", key: "", value: "", hint: "Same as all machines.", reveals: `limits@${m}`, group } as SettingRow);
+    // what a machine set for all its spaces before (the old machine scope): it still applies there, until Reset
+    const OLD: Record<string, string> = { coordinator: "Assistant", worker: "Workers", reviewer: "Reviewer", backup: "Backup agent", automations: "Run automations",
+      merge: "Merge", review_rounds: "Review", must_fix: "Must fix", proof: "Proof", max_running: "Tasks at once", archive_after: "Archive Done after",
+      worktrees: "Worktrees", start_notes: "When a task starts", finish_notes: "When a task finishes", base: "Base branch" };
+    const old = m ? Object.entries(layer).filter(([k]) => !["machine", "home"].includes(k))
+      .flatMap(([k, v]: [string, any]) => (["tasks", "automations"].includes(k) && v && typeof v === "object" ? Object.keys(v).map((f) => (k === "automations" ? k : f)) : [k])) : [];
+    if (old.length) rows.push({ label: "Set before for its spaces", key: `machine.old${at}`, value: "", button: "Reset", group,
+      hint: `${[...new Set(old.map((x) => OLD[x] ?? x))].join(", ")}. These still apply to its spaces unless a space sets its own.` } as SettingRow);
     if (m) {
       const home = typeof layer.home === "boolean" ? layer.home : m === LOCAL;
       rows.unshift({ label: "Home Assistant", key: `machine.home${at}`, value: ON(home), options: ["on", "off"], group,
@@ -231,7 +255,11 @@ export class Settings {
     if (machine !== null || key.startsWith("machine.")) {
       if (!key.startsWith("machine.")) throw new Error("That setting can't be changed here.");
       const layer = machine ? ((next.machines ??= {})[machine] ??= {}) : (next.everywhere ??= {});
-      if (field === "home") {
+      if (field === "old") {
+        // Reset of what a machine set for all its spaces before: only its own rows and Home Assistant stay
+        if (!machine) throw new Error("That is set per machine.");
+        for (const k of Object.keys(layer)) if (!["machine", "home"].includes(k)) delete layer[k];
+      } else if (field === "home") {
         if (!machine) throw new Error("Home Assistant is set per machine.");
         const on = word === "on";
         if (on === (machine === LOCAL)) delete layer.home; else layer.home = on;
@@ -264,9 +292,10 @@ export class Settings {
         try { v = JSON.parse(word); } catch { throw new Error("Not an agent."); }
         const ok = (x: unknown) => x == null || (typeof x === "string" && /^[\w.\[\]-]{1,60}$/.test(x));
         if (!["claude", "codex"].includes(v?.agent) || !ok(v.model) || !ok(v.effort)) throw new Error("Pick Claude Code or Codex.");
-        // the permission mode isn't picked on the web: the one it had stays (null: the CLI's own default)
-        const was = (space ? file.spaces?.[space] : file.everywhere)?.[field];
-        v = { agent: v.agent, model: v.model ?? null, effort: v.effort ?? null, fast: !!v.fast, perm: was?.agent === v.agent ? was.perm ?? null : null };
+        // its permission mode, as the window's Permissions pick (one of the CLI's modes; none: the CLI's own default)
+        const PERM: Record<string, string[]> = { claude: ["manual", "auto", "acceptEdits", "plan", "bypassPermissions"], codex: ["read-only", "auto", "full"] };
+        if (v.perm != null && !PERM[v.agent].includes(v.perm)) throw new Error("Not one of its permission modes.");
+        v = { agent: v.agent, model: v.model ?? null, effort: v.effort ?? null, fast: !!v.fast, perm: v.perm ?? null };
       }
       put(field, null, v);
     } else if (key === "backup.agent") {

@@ -137,6 +137,13 @@ function ItemBody({ item, task, chatKey }: { item: PanelItem; task: Task; chatKe
   return <item.View key={`${task.id}|${item.id}`} task={task} chatKey={chatKey} />
 }
 
+/** A task view's body: its chat, or the tab picked (Terminal, Files, Changes…) in its place, as 3.0's task view */
+export function TabBody({ task, chatKey, children }: { task: Task; chatKey: string; children: ReactNode }) {
+  const sheet = useUI((u) => u.sheet)
+  const item = sheet ? itemsFor(task).find((i) => i.id === sheet) : undefined
+  return item ? <div className="flex min-h-0 flex-1 flex-col"><ItemBody key={item.id} item={item} task={task} chatKey={chatKey} /></div> : <>{children}</>
+}
+
 /** A task's items as 3.0's task view has them: only those it has now (a pull request's once it has one) */
 export const itemsFor = (task: Task) => registry.taskPanel.filter((i) => i.id !== 'pr' || !!task.pr)
 
@@ -146,8 +153,8 @@ export function TaskTabs({ task }: { task: Task }) {
   const ui = useUI()
   const items = itemsFor(task)
   if (!items.length) return null
-  const desktop = ui.device === 'desktop'
-  const on = desktop ? (ui.sidebars.panelOpen ? itemOf(ui.sidebars.item)?.id : 'chat') : (ui.sheet ?? 'chat')
+  // as 3.0's: a tab switches the view in place, under the same header (never another panel)
+  const on = ui.sheet && items.some((i) => i.id === ui.sheet) ? ui.sheet : 'chat'
   const tab = (id: string, label: string, off: string | null, go: () => void) => (
     <button key={id} type="button" role="tab" aria-selected={on === id} data-off={off ? '' : undefined} title={off ?? undefined} onClick={go}
       className="relative inline-flex h-7 shrink-0 items-center rounded-full px-2.5 text-[0.8125rem] whitespace-nowrap text-fg2 after:absolute after:-inset-y-2 after:inset-x-0 hover:bg-hover aria-selected:bg-sel aria-selected:text-fg data-off:text-fg3 coarse:h-9 phone:h-9 phone:px-3 phone:text-[0.875rem]">
@@ -156,7 +163,7 @@ export function TaskTabs({ task }: { task: Task }) {
   )
   return (
     <div role="tablist" aria-label={`${task.id} views`} className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line px-3 py-1.5 [scrollbar-width:none] phone:px-4">
-      {tab('chat', 'Chat', null, () => (desktop ? ui.sidebars.panelOpen && togglePanel() : closeSheet()))}
+      {tab('chat', 'Chat', null, closeSheet)}
       {items.map((i) => <ItemTab key={i.id} item={i} task={task} tab={tab} />)}
     </div>
   )
@@ -164,7 +171,7 @@ export function TaskTabs({ task }: { task: Task }) {
 
 function ItemTab({ item, task, tab }: { item: PanelItem; task: Task; tab: (id: string, label: string, off: string | null, go: () => void) => ReactNode }) {
   const off = item.useOff?.(task) ?? null
-  return <>{tab(item.id, item.label, off, () => openItem(item.id))}</>
+  return <>{tab(item.id, item.label, off, () => setUI({ sheet: item.id, taskMenu: false, plus: null, pick: null }))}</>
 }
 
 /** An item open over the whole screen (phone and tablet), from the task header's ⋯: pushed over the chat, Back or a
@@ -175,7 +182,8 @@ export function PanelSheet() {
   const task = snap && taskOf(snap, ui.task)
   const g = snap && agentChat(ui, snap)
   const item = ui.sheet ? registry.taskPanel.find((i) => i.id === ui.sheet) : undefined
-  const open = ui.device !== 'desktop' && !!task && !!g && !!item
+  // the task view's tabs show their views in place now (TabBody): this sheet is only for a task without its tabs
+  const open = false && ui.device !== 'desktop' && !!task && !!g && !!item
   // a keyboard (a tablet's) closes it with Esc, unless a box or menu has it
   useEffect(() => {
     if (!open) return

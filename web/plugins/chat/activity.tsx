@@ -358,7 +358,9 @@ export function LiveLine({ chat }: { chat: Chat }) {
 /** what runs in the background, just above the message box (so it never scrolls away); a tap shows each piece */
 export function JobsTag({ chatKey }: { chatKey: string; cli: string }) {
   const jobs = useStore((s) => s.chats[chatKey]?.jobs)
-  if (!jobs?.length) return null
+  // Settings › Window › Show subagents above the chat box off: none
+  const shown = useStore((s) => s.snap?.look?.helpers !== false)
+  if (!jobs?.length || !shown) return null
   return (
     <div className="flex justify-center pb-1.5">
       <button

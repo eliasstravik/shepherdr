@@ -923,29 +923,25 @@
   }
 }
 
-/* A single circular notification. A seam separates the categories even without colour.
-   Two 16px halves fit 9+ at 11px; phones get two 18px halves at 13px. */
+/* A count badge, as the window's (mods/spaces-chat countBadge): a 16px pill, 11px semibold tabular digits, red for
+   what needs you and green for what is ready; both at once share one pill, split by a 1px seam. A phone's is 18px. */
 .attention-badge {
   display: inline-flex;
-  width: 22px;
-  height: 22px;
+  height: 16px;
   flex-shrink: 0;
+  gap: 1px;
   overflow: hidden;
-  border-radius: 50%;
+  border-radius: 8px;
   font-size: 11px;
   font-weight: 600;
-  line-height: 1;
+  line-height: 16px;
   font-variant-numeric: tabular-nums;
   vertical-align: middle;
   color: white;
 }
-.attention-badge > span { display: grid; flex: 1; min-width: 0; place-items: center; }
+.attention-badge > span { display: grid; min-width: 16px; padding: 0 4px; place-items: center; }
 .attention-badge-need { background: var(--need-fg); }
 .attention-badge-ready { background: var(--ready-fg); }
-.attention-badge-split { width: 32px; height: 32px; }
-.attention-badge-split > span + span { border-left: 1px solid var(--bg); }
 [data-theme="dark"] .attention-badge { color: black; }
-[data-device="phone"] .attention-badge { width: 26px; height: 26px; font-size: 13px; }
-[data-device="phone"] .attention-badge-split { width: 36px; height: 36px; }
-/* Keep the circle inside the existing segmented control's outline. */
-[role="group"]:has(> button .attention-badge-split) > button { min-height: 32px; }
+[data-device="phone"] .attention-badge { height: 18px; border-radius: 9px; font-size: 12px; line-height: 18px; }
+[data-device="phone"] .attention-badge > span { min-width: 18px; padding: 0 5px; }

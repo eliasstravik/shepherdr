@@ -84,41 +84,56 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
   // the open task, or the focused pane's in split view
   const sel = useUI((u) => u.task === t.id || (panesHere(u)[u.split.pane]?.kind === 'task' && panesHere(u)[u.split.pane].id === t.id))
   const kb = useUI((u) => u.kb && !u.task && u.cur === ix)
-  // as 3.0's row: its second line (core/tasks.js secondLine), where it is at the end
+  // as 3.0's row (mods/tasks line()): its second line (core/tasks.js secondLine), where it is, and Accept on a Ready one
   const sub = t.sub || undefined
   const at = where?.join(' · ')
+  const accept = t.status === 'ready' && !t.archived
+  const two = !!sub || accept
   // archived: a quiet ring, or a done task's check; the status it was put away with stays in its chat
   const dot = t.archived ? (t.status === 'done' ? 'done' : 'idle') : t.status
+  // minutes left, under the dot (amber), while it works
+  const left = !t.archived && t.status === 'work' && t.report?.eta !== undefined ? `${t.report.eta}m` : null
+  // its menu (Pin or Unpin) on a right click, or a finger held on it, as the window's right click
   const menu = useRowMenu()
-  // while its ⋯ shows, the age gives it its place
-  const shy = menu.open ? 'invisible' : '[@media(hover:hover)]:group-hover:invisible [@media(hover:hover)]:group-has-focus-visible:invisible'
+  const place = at ? <span className="min-w-0 shrink truncate text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{at}</span> : null
   return (
-    <li data-flip={t.id} className={clsx(rowClass(sel, kb), 'group p-0! select-none [-webkit-touch-callout:none]', menu.open && !sel && 'bg-hover')} {...menu.press}>
-      {/* the whole row is one button (it opens the task); its ⋯ sits over its end, a button of its own */}
+    <li data-flip={t.id} className={clsx(rowClass(sel, kb), 'group relative p-0! select-none [-webkit-touch-callout:none]', menu.open && !sel && 'bg-hover')} {...menu.press}>
+      {/* the whole row opens the task: one button stretched under it; Accept sits over it, a button of its own */}
       <button
         type="button"
         aria-current={sel || undefined}
+        aria-label={`${t.id} ${t.name}${sub ? `, ${sub}` : ''}`}
         // with ⌘ (Ctrl off a Mac), beside the focused pane in split view
         onClick={(e) => !menu.held() && (splitClick(e) ? openSplit({ kind: 'task', id: t.id }) : openTask(t.id))}
-        className={clsx(
-          // where nothing hovers its ⋯ always shows, past the age
-          'flex min-h-[inherit] min-w-0 flex-1 cursor-pointer gap-2 rounded-[inherit] px-2 text-left outline-none keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)] phone:px-3 [@media(hover:none)]:pr-9!',
-          sub ? 'items-start py-1.5 [&>.dot]:mt-[3px] phone:[&>.dot]:mt-1' : 'items-center',
-        )}
-      >
-        <TaskDot s={dot} w={t.archived ? undefined : t.report} />
-        <RowText sub={sub}>
-          <span className="text-fg3">{t.id}</span> {t.name}
-        </RowText>
-        {at ? <Meta className={clsx(shy, t.status === 'ready' && !t.archived && 'mr-16 phone:mr-20')}>{at}</Meta> : null}
-      </button>
-      {/* as Shepherdr 3's Tasks panel: a Ready row has Accept inline */}
-      {t.status === 'ready' && !t.archived ? (
-        <button type="button" onClick={() => openAccept(t.id)} className="press-dim absolute top-1/2 right-9 z-1 h-6 -translate-y-1/2 rounded-full bg-fg px-2.5 text-xs font-medium text-bg phone:right-11 phone:h-8 phone:px-3 phone:text-sm">
-          Accept
-        </button>
-      ) : null}
-      <RowMenuButton menu={menu} always label="More for this task" className={clsx('absolute right-1 z-1 phone:right-1.5', sub ? 'top-1.5 phone:top-2.5' : 'top-1/2 -translate-y-1/2')} />
+        className="absolute inset-0 cursor-pointer rounded-[inherit] outline-none keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)]"
+      />
+      {/* what the row shows is said by its button's label: only Accept is read on its own */}
+      <div className={clsx('pointer-events-none relative flex min-h-[inherit] w-full min-w-0 gap-2.5 px-2 phone:px-3', two ? 'items-start py-1.5' : 'items-center')}>
+        <span aria-hidden className="flex w-3.5 shrink-0 flex-col items-center">
+          <span className="grid h-[18px] place-items-center phone:h-5"><TaskDot s={dot} w={t.archived ? undefined : t.report} /></span>
+          {two && left ? <span className="mt-0.5 font-mono text-[0.6875rem]/4 font-semibold text-work-fg tabular-nums">{left}</span> : null}
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span aria-hidden className="flex h-[18px] min-w-0 items-center gap-2 phone:h-5">
+            <span className="shrink-0 font-mono text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{t.id}</span>
+            <span className="min-w-16 flex-auto truncate text-fg">{t.name}</span>
+            {/* one line: where it is at the end; it gives way before the title is cut */}
+            {!two ? place : null}
+          </span>
+          {two ? (
+            <span className="flex h-5 min-w-0 items-center gap-2 phone:h-7">
+              {sub ? <span aria-hidden className="min-w-0 shrink truncate text-[0.75rem] text-fg2 phone:text-[0.8125rem]">{sub}</span> : null}
+              <span aria-hidden className="flex min-w-0 flex-1 justify-end">{place}</span>
+              {accept ? (
+                <button type="button" onClick={() => openAccept(t.id)}
+                  className="press-dim pointer-events-auto relative z-1 h-5 shrink-0 rounded-full bg-fg px-2 text-[0.75rem] font-medium text-bg after:absolute after:-inset-1.5 phone:h-7 phone:px-3 phone:text-[0.8125rem]">
+                  Accept
+                </button>
+              ) : null}
+            </span>
+          ) : null}
+        </span>
+      </div>
       {menu.open ? <TaskMenu t={t} menu={menu} /> : null}
     </li>
   )
@@ -152,6 +167,8 @@ function TaskMenu({ t, menu }: { t: Task; menu: RowMenuState }) {
 function whereOf(snap: Snapshot, t: Task, names: TaskGroup['names']) {
   const p = placeOf(snap, t.place)
   const m = names.machine && p.machine !== snap.host ? snap.machines?.find((x) => x.machine === p.machine) : undefined
+  // Settings › Window › Show space on task rows off: no place on the right
+  if (snap.look?.place === false) return []
   return [m?.name, names.project ? (t.listName || p.name) : undefined].filter((x): x is string => !!x)
 }
 
@@ -176,10 +193,16 @@ function agentNeeds(snap: Snapshot): AgentNeed[] {
 function AgentNeedRow({ n }: { n: AgentNeed }) {
   return (
     <li className={clsx(rowClass(false, false), 'p-0!')}>
-      <button type="button" onClick={() => goChat(n.chat)} className="flex min-h-[inherit] min-w-0 flex-1 cursor-pointer items-start gap-2 rounded-[inherit] px-2 py-1.5 text-left outline-none keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)] phone:px-3 [&>.dot]:mt-[3px] phone:[&>.dot]:mt-1">
-        <TaskDot s="need" />
-        <RowText sub={n.why}>{n.who}</RowText>
-        {n.where ? <Meta>{n.where}</Meta> : null}
+      {/* the same grid as a task's row: who on the first line, why and where it is on the second */}
+      <button type="button" onClick={() => goChat(n.chat)} className="flex min-h-[inherit] w-full min-w-0 cursor-pointer items-start gap-2.5 rounded-[inherit] px-2 py-1.5 text-left outline-none keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)] phone:px-3">
+        <span className="grid h-[18px] w-3.5 shrink-0 place-items-center phone:h-5"><TaskDot s="need" /></span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="h-[18px] truncate text-fg phone:h-5">{n.who}</span>
+          <span className="flex h-5 min-w-0 items-center gap-2 phone:h-7">
+            <span className="min-w-0 shrink truncate text-[0.75rem] text-fg2 phone:text-[0.8125rem]">{n.why}</span>
+            {n.where ? <span className="flex min-w-0 flex-1 justify-end"><span className="min-w-0 truncate text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{n.where}</span></span> : null}
+          </span>
+        </span>
       </button>
     </li>
   )
@@ -187,7 +210,12 @@ function AgentNeedRow({ n }: { n: AgentNeed }) {
 
 /** The filter row (3.0's): All statuses, then Needs you, Working and Ready while they hold something, then More with
  *  the rest that do (and Automations) */
-function StatusFilters({ counts, filter }: { counts: Record<string, number>; filter: string }) {
+function StatusFilters(p: { counts: Record<string, number>; filter: string }) {
+  // Settings › Window › Status filters in Tasks off: no row
+  return useSnap()?.look?.filters === false ? null : <StatusFilterRow {...p} />
+}
+
+function StatusFilterRow({ counts, filter }: { counts: Record<string, number>; filter: string }) {
   const [open, setOpen] = useState(false)
   // as 3.0's: never wraps, never scrolls; a chip that doesn't fit goes in More (widths estimated, about 7.5px a letter)
   const row = useRef<HTMLDivElement>(null)

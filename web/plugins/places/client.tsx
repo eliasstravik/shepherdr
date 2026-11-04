@@ -197,7 +197,7 @@ function BranchIcon({ className }: { className?: string }) {
 /** a worktree space's mark (├─ or └─) where it sits under its repo's own space, as the window's sidebar nests them */
 const treeMark = new Map<string, string>()
 /** a list's spaces with each repo's worktree spaces moved under its own space when both are in it (3.0's order) */
-function nest(list: Place[]): Place[] {
+function nest(list: Place[], hide = false, shown: string | null = null): Place[] {
   const mains = new Set(list.filter((p) => p.git === 'main').map((p) => p.repo))
   const nested = (p: Place) => p.git === 'linked' && mains.has(p.repo)
   const out: Place[] = []
@@ -209,7 +209,9 @@ function nest(list: Place[]): Place[] {
     if (p.git !== 'main' || placed.has(p.repo)) continue
     placed.add(p.repo)
     const kids = list.filter((k) => nested(k) && k.repo === p.repo)
-    kids.forEach((k, n) => { out.push(k); treeMark.set(k.id, n === kids.length - 1 ? '└─' : '├─') })
+    // Settings › Window › Worktrees in the sidebar off: a repo's worktree spaces aren't listed, but for the one shown
+    const listed = kids.filter((k) => !hide || k.id === shown)
+    listed.forEach((k, n) => { out.push(k); treeMark.set(k.id, n === listed.length - 1 ? '└─' : '├─') })
   }
   return out
 }
@@ -232,7 +234,7 @@ function placeTree(snap: Snapshot, fold: string[], mine: PlaceOrder) {
   const group = (id: string, out: boolean, fits: (p: Place) => boolean): Group[] => {
     const s = sections.get(id)
     if (!s) return []
-    const spaces = nest(take(lists[id], fits))
+    const spaces = nest(take(lists[id], fits), snap.look?.worktrees === false, getState().ui.place)
     const shut = fold.includes(id)
     return [{ s, spaces, shut, shown: shut || out ? [] : spaces }]
   }
@@ -243,7 +245,7 @@ function placeTree(snap: Snapshot, fold: string[], mine: PlaceOrder) {
     if (!m) return []
     const shut = fold.includes(m.id)
     const fits = (p: Place) => p.machine === m.machine
-    const spaces = nest(take(lists[m.id], fits))
+    const spaces = nest(take(lists[m.id], fits), snap.look?.worktrees === false, getState().ui.place)
     const inside = (lists[sectionsIn(m.id)] ?? []).flatMap((s) => group(s, shut, fits))
     return [{ m, spaces, shut, shown: shut ? [] : spaces, sections: inside, all: [...spaces, ...inside.flatMap((g) => g.spaces)] }]
   })
@@ -287,7 +289,8 @@ function usePlaceRow({ p, snap, where }: { p: Place; snap: Snapshot; where?: str
   const sel = useUI((u) => u.place === p.id)
   const c = counts(snap, p.id)
   const n = c.own
-  const fresh = placeUnread(snap, p)
+  // Settings › Window › Bold unread spaces off: nothing bold
+  const fresh = placeUnread(snap, p) && snap.look?.unread !== false
   const quiet = muted(snap, p.id)
   const off = p.status === 'off' && !p.connecting
   // 3.0's row: no Autopilot mark (the chat's header has its switch); after the name only what's unusual: its machine

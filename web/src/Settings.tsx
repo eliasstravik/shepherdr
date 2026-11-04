@@ -666,8 +666,12 @@ function SpaceOnly({ row }: { row: SettingRow }) {
 function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phone: boolean; set: (key: string, value: string | null) => void; refused: (key: string) => string | undefined; clear: (key: string) => void; hint?: string }) {
   const [pilotError, setPilotError] = useState('')
   const [running, setRunning] = useState(false)
+  // a machine's own limits, opened by its Set its own (3.0's: shown once it has any, or once asked for)
+  const [revealed, setRevealed] = useState<string[]>([])
+  // the "N spaces use their own" lists open now
+  const [listed, setListed] = useState<string[]>([])
   const groups: { name?: string; rows: Page['rows'] }[] = []
-  for (const row of page.rows) {
+  for (const row of page.rows.filter((r) => !r.hidden || revealed.includes(r.hidden)).filter((r) => !r.reveals || !revealed.includes(r.reveals))) {
     if (groups.length && groups.at(-1)!.name === row.group) groups.at(-1)!.rows.push(row)
     else groups.push({ name: row.group, rows: [row] })
   }
@@ -678,21 +682,34 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
       {row.hint ? <Small className="text-pretty">{row.hint}</Small> : null}
       {/* the exact words it adds to every new task's brief, as it is set now */}
       {row.line ? <details className="text-[0.8125rem] text-fg2"><summary className="cursor-pointer">Words this adds to each new task</summary><p className="text-pretty">“{row.line}”</p></details> : null}
-      {row.from ? <Small className="text-pretty">From {row.from}</Small> : null}
+      {/* as the window's: "Same as everywhere" / "Changed here · Reset"; on Everywhere the spaces that set their own */}
+      {row.from && !row.inherits ? <Small className="text-pretty">Same as {row.from}</Small> : null}
       {row.inherits ? (
-        // set here: Reset, back to what it would be (its title says where that comes from)
-        <Small className="text-pretty">
-          <span className="font-medium text-accent">Set here</span>
-          <span className="block">Inherits {row.multiline ? (row.inherits.value ? 'private rules' : 'no private rules') : row.num ? numShown(row.inherits.value, row.num) : row.trigger ? (row.trigger.presets.find((p) => p.value === row.inherits!.value)?.label ?? 'Custom rule') : shown(row.inherits.value)} · {row.inherits.from}</span>
-          {row.trigger && !row.trigger.presets.some((p) => p.value === row.inherits!.value) ? <details><summary className="cursor-pointer">Inherited rule</summary><span className="[overflow-wrap:anywhere]">{row.inherits.value}</span></details> : null}
-          <button
-            type="button"
-            title={`Set here. Back to ${row.inherits.from === 'Default' ? 'the default' : row.inherits.from}'s`}
-            onClick={() => set(row.key, null)}
-            className="press-dim relative font-medium text-accent after:absolute after:-inset-x-1 after:-inset-y-1.5 coarse:after:-inset-y-3"
-          >
-            Reset to {row.multiline ? (row.inherits.value ? 'private rules' : 'no private rules') : row.num ? numShown(row.inherits.value, row.num) : row.trigger ? (row.inherits.from === 'Default' ? 'the default' : `${row.inherits.from}'s`) : shown(row.inherits.value)}
+        <Small className="flex flex-wrap items-center gap-1 text-pretty">
+          <span className="text-fg2">Changed here</span>
+          <span aria-hidden>·</span>
+          <button type="button" title={`Back to what ${row.inherits.from} has`} onClick={() => set(row.key, null)}
+            className="press-dim relative font-medium text-accent after:absolute after:-inset-x-1 after:-inset-y-1.5 coarse:after:-inset-y-3">
+            Reset
           </button>
+        </Small>
+      ) : null}
+      {row.machinesOwn ? <Small className="text-pretty">{row.machinesOwn === 1 ? '1 machine uses its own' : `${row.machinesOwn} machines use their own`}</Small> : null}
+      {row.others?.length ? (
+        <Small className="flex flex-col gap-1 text-pretty">
+          <button type="button" aria-expanded={listed.includes(row.key)} onClick={() => setListed((l) => (l.includes(row.key) ? l.filter((k) => k !== row.key) : [...l, row.key]))}
+            className="press-dim relative self-start text-left text-accent after:absolute after:-inset-x-1 after:-inset-y-1.5 coarse:after:-inset-y-3">
+            {row.others.length === 1 ? '1 space uses its own' : `${row.others.length} spaces use their own`}
+          </button>
+          {listed.includes(row.key) ? (
+            <span className="flex flex-wrap gap-x-3 gap-y-1">
+              {row.others.map((o) => (
+                <button key={o.id} type="button" onClick={() => setUI((u) => ({ settings: { ...(u.settings ?? { section: 0 }), level: o.id } }))} className="press-dim text-left text-fg2 underline decoration-fg3 underline-offset-2">
+                  {o.name}
+                </button>
+              ))}
+            </span>
+          ) : null}
         </Small>
       ) : null}
       {row.warn ? <Small className="text-pretty whitespace-pre-line text-need-fg!">{row.warn}</Small> : null}
@@ -746,13 +763,13 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
                 </div>
               ) : (
                 // on a phone, a row's segments fill a line of their own under its label
-                <div key={row.key || row.label} className={clsx(rowLook(phone), row.inherits && 'border-l-2 border-accent pl-3', phone && SEGMENTS.has(row.key) && 'flex-col items-stretch! gap-2.5 pb-3!')}>
+                <div key={row.key || row.reveals || row.label} className={clsx(rowLook(phone), row.inherits && 'border-l-2 border-accent pl-3', phone && SEGMENTS.has(row.key) && 'flex-col items-stretch! gap-2.5 pb-3!')}>
                   <dt className="flex min-w-0 flex-1 flex-col">
                     {row.label}
                     {under(row)}
                   </dt>
                   <dd className={clsx('flex min-w-0 shrink-0 flex-col', phone && SEGMENTS.has(row.key) ? 'items-stretch' : 'max-w-[65%] items-end')}>
-                    <Control row={row} phone={phone} level={page.level} set={(x) => set(row.key, follows(row, x))} edit={() => clear(row.key)} />
+                    {row.reveals ? <Ghost onClick={() => setRevealed((r) => [...r, row.reveals!])}>Set its own</Ghost> : row.button ? <Ghost onClick={() => set(row.key, null)}>{row.button}</Ghost> : <Control row={row} phone={phone} level={page.level} set={(x) => set(row.key, follows(row, x))} edit={() => clear(row.key)} />}
                   </dd>
                 </div>
               ),

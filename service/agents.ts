@@ -42,8 +42,9 @@ export class Agents {
     const dflt: any = { claude, codex };
     return ["claude", "codex"].map((k) => {
       const m = menuFor(k, dflt[k], null);
+      // its permission modes, and the one a new agent gets unless picked (the CLI's own: Claude Code's settings mode)
       return { kind: k, name: NAMES[k], models: m.models.map((x: any) => ({ id: x.id, label: x.name, efforts: x.efforts, ...(x.defaultEffort ? { defaultEffort: x.defaultEffort } : {}) })),
-        speeds: m.models.some((x: any) => x.fast) ? ["normal", "fast"] : ["normal"] };
+        speeds: m.models.some((x: any) => x.fast) ? ["normal", "fast"] : ["normal"], perms: m.perms ?? [], permDefault: k === "claude" ? dflt.claude?.mode ?? "manual" : "auto" };
     });
   }
 

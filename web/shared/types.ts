@@ -735,6 +735,9 @@ export interface RestartCli {
   defaultEffort?: string
   /** the speeds it can start on: normal, fast */
   speeds?: string[]
+  /** its permission modes (Settings › Agents), and the one a new agent gets unless picked */
+  perms?: { id: string; label: string }[]
+  permDefault?: string
 }
 
 /** what the restart sheet shows: what its agent runs on now and what Settings say for its role (what it restarts with
@@ -800,6 +803,16 @@ export interface SettingRow {
   options?: string[]
   /** a role's agent (Settings › Agents): its button opens the agent picker; pick: what is set, null for the default */
   agent?: { role: string; pick: { agent: string; model?: string | null; effort?: string | null; fast?: boolean } | null }
+  /** on Everywhere: the spaces that set their own (3.0's "2 spaces use their own", each opening its settings) */
+  others?: { id: string; name: string }[]
+  /** on all machines: how many machines set their own ("1 machine uses its own") */
+  machinesOwn?: number
+  /** shown only once the row that reveals this opens it (a machine's own limits, behind Set its own) */
+  hidden?: string
+  /** a row that is one button (its words): pressing it sets the row's key back (null), as the window's Reset rows */
+  button?: string
+  /** a "Set its own" row: it opens the rows hidden under this name */
+  reveals?: string
   /** a file edited in a sheet (an instructions template): its name */
   file?: string
   /** several picks at once, saved comma-joined (Autopilot's events) */
@@ -985,6 +998,9 @@ export interface Snapshot {
   /** everything waiting on the human, oldest first, each once: what the Needs you view lists and every count counts */
   needs: Need[]
   settings: SettingSection[]
+  /** Settings › Window's look switches, as the window follows them: the space's tabs, worktree spaces in the sidebar,
+   *  bold unread spaces, red and green counts, the Tasks status filters, the space on task rows, subagents above the box */
+  look?: { tabs: boolean; worktrees: boolean; unread: boolean; red: boolean; green: boolean; filters: boolean; place: boolean; helpers: boolean }
   /** the web app's plugins left out (their add-on is off in Settings › Window): a page started with others reloads */
   off?: string[]
   /** a source like demo marks its data as fictional */
