@@ -2,6 +2,7 @@
 // space's own, kept in Shepherdr settings with the rest (service/settings.ts writes them); herdr-task checks a schedule's
 // words first, and wakes the spaces switched on in their Assistant's header (service/actions.ts mode). Its refusal is
 // said as herdr-task says it.
+import * as APc from "../core/autopilot.js";
 
 async function task(args: string[]) {
   const p = Bun.spawn(["herdr-task", "autopilot", ...args, "--json"], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
@@ -12,11 +13,17 @@ async function task(args: string[]) {
   return json;
 }
 
-/** A schedule's words as Settings keeps them ("" for none), once herdr-task knows them; refused as it says. */
+/** A schedule's words as Settings keeps them ("" for none), once herdr-task knows them; refused as it says. A
+ *  herdr-task from before `check` (a machine not updated yet) takes only the picks. */
 export async function checkEvery(words: string) {
   const v = words.trim().slice(0, 200);
   if (!v) return "";
-  return String((await task(["check", "--every", v]))?.every ?? "");
+  try { return String((await task(["check", "--every", v]))?.every ?? ""); }
+  catch (err) {
+    if (!/invalid choice/.test((err as Error).message)) throw err;
+    if ((APc as any).presetOf(v) !== null) return v;
+    throw new Error("herdr-task here is older than this page: update Shepherdr to save your own schedule's words.");
+  }
 }
 
 /** Wakes a space's Assistant now (queued until it is idle). */

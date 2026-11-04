@@ -127,7 +127,9 @@ export class Model {
         const p = Bun.spawn(["herdr-task", "autopilot", "list", "--json"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
         const out = JSON.parse(await new Response(p.stdout).text() || "{}");
         const e = out.everywhere ?? {};
-        this.pilotEverywhere = { ...everywhereOf({ everywhere: e }), trigger: e.trigger ?? undefined, words: e.heartbeat_text ?? STARTER };
+        // a herdr-task from before Settings kept the heartbeat gives only its file
+        const file = (f: string | null) => { try { return f && existsSync(f) ? readFileSync(f, "utf8") : STARTER; } catch { return STARTER; } };
+        this.pilotEverywhere = { ...everywhereOf({ everywhere: e }), trigger: e.trigger ?? undefined, words: e.heartbeat_text ?? file(e.heartbeat ?? null) };
         const list = Array.isArray(out.spaces) ? out.spaces : [];
         this.autopilot = Object.fromEntries(list.map((a: any) => [a.space, a]));
       } catch {}
