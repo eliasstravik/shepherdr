@@ -17,6 +17,8 @@ export const WORDS = {
   showMore: "Show more",
   showLess: "Show less",
   queued: "Queued · Sends when the agent is free",
+  // typed while it works: in its CLI's queue, taken at its next step (Claude Code's own queue)
+  inQueue: "Queued · it reads it at its next step",
   sendNow: "Send now",
   ended: "This task's agent has ended.",
   resuming: "Resuming…",

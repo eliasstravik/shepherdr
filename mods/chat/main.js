@@ -33,7 +33,7 @@ import { words, howAnswered } from "./core/asks.js";
 // The rows' words and rules the web app's chat draws by too (core/chat-view.js).
 import { WORDS, clock, senderName, briefLabel, newsWords, resolveArtifacts, unsigned, fitThumbs, bandActs, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
 // Sending the person's words, as the web app does (core/send.js).
-import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine, mentionedIn } from "./core/send.js";
+import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine, mentionedIn, sendTyped } from "./core/send.js";
 import { AskCards, linkCtl } from "./cards.js";
 import * as strips from "./strips.js";
 import { button, red, green, amber, H, RADIUS, TEXT, toast, toastWho, plainError } from "./ui.js";
@@ -1256,7 +1256,8 @@ export default class Chat extends View {
       try {
         const paths = await attach.deliver(msg.files, this.addr, this.machine);
         p.sent = [body, ...paths].filter(Boolean).join("\n\n");
-        r = await hc(["send", this.addr, p.sent]);
+        // (a message with pictures: its Enter again if Claude Code lost it, sendTyped())
+        r = await sendTyped(this.sendIo(cx), this.addr, this.kind, p.sent);
         // Its own dialog is open in its terminal (a question or a permission with no card
         // here): the words answer it the "Reply instead…" way.
         if (r.code !== 0 && refusal(r).kind === "blocked" && (this.kind === "claude" || this.kind === "codex")) r = await this.replyInstead(p.sent, cx);
@@ -2501,14 +2502,26 @@ export default class Chat extends View {
     while (ti < tasks.length) { dated(tasks[ti].at); put(tasks[ti++]); }
     // Words that answered a card, shown at once, until the log has them right after their
     // question (log.js answers()): they are the newest thing said, so they go last.
-    if (this.replied.length || this.pending.length) dated(Date.now());
+    // What was typed while it works (here, in the web app or its terminal) waits in its CLI's
+    // queue until it takes it at its next step: shown at once, quietly, as Queued.
+    const st = this.status();
+    const queue = st === "working" || st === "blocked" ? this.conv?.queued?.() ?? [] : [];
+    const inQueue = new Set(queue.map((q) => norm(q.text)));
+    if (this.replied.length || this.pending.length || queue.length) dated(Date.now());
     for (const r of this.replied) out.push({ kind: "user", id: `rp:${r.id}`, text: r.text });
     for (const p of this.pending) {
       const from = out.length;
       if (p.replyTo) out.push({ kind: "replyref", id: `rr:${p.id}`, to: p.replyTo, of: p.id, side: "user" });
-      out.push({ kind: "pending", id: p.id, text: p.text, files: p.files, failed: p.failed, late: p.late, waiting: p.waiting, delivered: p.delivered });
+      const queued = p.delivered && inQueue.has(norm(p.text)) ? WORDS.inQueue : undefined;
+      out.push({ kind: "pending", id: p.id, text: p.text, files: p.files, failed: p.failed, late: p.late, waiting: p.waiting ?? queued, delivered: p.delivered });
       if (p.paths?.length) out.push({ kind: "imgs", id: `i:${p.id}`, paths: p.paths, faded: !p.delivered });
       block(from, p.id);
+    }
+    for (const q of queue) {
+      if (this.pending.some((p) => norm(p.text) === norm(q.text))) continue;
+      const from = out.length;
+      out.push({ kind: "pending", id: `q:${q.id}`, text: q.text, files: q.images ? [imagesLine(q.images)] : [], delivered: true, waiting: WORDS.inQueue });
+      block(from, `q:${q.id}`);
     }
     if (this.note) out.push({ kind: "note", id: this.note.id, text: this.note.text });
     if (out.length) out.push({ kind: "end", id: "end" });
