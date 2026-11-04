@@ -613,11 +613,11 @@ export class Compat {
     } catch {}
     // the first row: the log's very start, or earlier pages to load as it scrolls up
     const head = reader.start === 0 ? { top: true } : reader.start ? { earlier: true } : {};
-    // the window's lines over the box: what it does while it works (its log's call, else its status report), only
-    // waiting (no spinner); asking in its terminal with no card here (Needs you)
-    const report = typeof t?.report?.msg === "string" ? t.report.msg.trim() : "";
+    // the window's lines over the box: what it does while it works (its log's call, else its CLI's status report:
+    // core/chat-view.js, as the window's), only waiting (no spinner); asking in its terminal with no card here (Needs you)
+    const report = CV.reportMsg(t);
     const cards = messages.some((m) => (m.question && !m.question.closed) || m.secret);
-    const under = st === "working" ? { doing: reader.conv?.doing ?? (report && !/^answer:/i.test(report) ? report : ""), ...(reader.conv?.waiting ? { waits: true } : {}) }
+    const under = st === "working" ? { doing: CV.doingWords(reader.conv, report) ?? "", ...(reader.conv?.waiting ? { waits: true } : {}) }
       : st === "blocked" && !cards ? { blocked: report.replace(/^answer:\s*/i, "") } : {};
     // a note under the conversation (a lost session being started again: service/watch.ts)
     const note = addr ? watch?.notes?.get(addr)?.text : undefined;

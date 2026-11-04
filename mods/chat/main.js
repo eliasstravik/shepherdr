@@ -31,7 +31,7 @@ import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names }
 import { BgJobs } from "./core/bg-jobs.js";
 import { words, howAnswered } from "./core/asks.js";
 // The rows' words and rules the web app's chat draws by too (core/chat-view.js).
-import { WORDS, clock, senderName, briefLabel, newsWords, resolveArtifacts, unsigned, fitThumbs, bandActs, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
+import { WORDS, clock, senderName, briefLabel, newsWords, resolveArtifacts, unsigned, fitThumbs, bandActs, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
 // Sending the person's words, as the web app does (core/send.js).
 import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine, mentionedIn, sendTyped } from "./core/send.js";
 import { AskCards, linkCtl } from "./cards.js";
@@ -2940,8 +2940,8 @@ export default class Chat extends View {
 
   // What the agent says it waits for (its status report), e.g. "Do you prefer tea or coffee? (Tea · Coffee)".
   asking() {
-    const msg = terminals().find((x) => x.address === this.addr)?.report?.msg;
-    return typeof msg === "string" && msg.trim() ? msg.replace(/^answer:\s*/i, "").trim() : null;
+    const msg = reportMsg(terminals().find((x) => x.address === this.addr));
+    return msg ? msg.replace(/^answer:\s*/i, "").trim() : null;
   }
 
   // ---- what sits under the conversation -----------------------------------------------------
@@ -2964,9 +2964,9 @@ export default class Chat extends View {
       // What it is doing, in plain words, for how long, and Stop. The line has the composer box's
       // edges (same width and padding), so Stop's right edge is the box's.
       const secs = Math.max(0, Math.floor((Date.now() - (this.workingSince ?? Date.now())) / 1000));
-      const report = terminals().find((x) => x.address === this.addr)?.report?.msg;
-      const doing = this.stopping ? WORDS.stopping
-        : this.conv?.doing ?? (typeof report === "string" && report.trim() && !/^answer:/i.test(report) ? report.trim() : WORDS.working);
+      // (core/chat-view.js: the web app's working line says the same)
+      const report = reportMsg(terminals().find((x) => x.address === this.addr));
+      const doing = this.stopping ? WORDS.stopping : doingWords(this.conv, report) ?? WORDS.working;
       // Only waiting (hc wait, a sleep, a monitor, a helper it waits on): calm, no spinner; a
       // message wakes it (or comes in at once).
       const waiting = this.waitingNow() && !this.stopping;

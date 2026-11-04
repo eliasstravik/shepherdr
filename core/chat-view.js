@@ -81,6 +81,17 @@ export const artifactLine = (v) => `Artifact · v${v}`;
 // m:ss, for the working line, a recording and a call.
 export const elapsed = (secs) => `${Math.floor(Math.max(0, secs) / 60)}:${String(Math.floor(Math.max(0, secs)) % 60).padStart(2, "0")}`;
 
+// What the agent's CLI says it does or waits for now (its status report: Claude Code's "Computing build times", a
+// question's "answer: …"), from its terminal. The window's terminals() hands it over as `report`; herdr-core's own
+// record (the service's) keeps it in `status`, an object while the CLI reports one. "" when it says nothing.
+export function reportMsg(t) {
+  for (const r of [t?.report, t?.status]) if (r && typeof r === "object" && typeof r.msg === "string" && r.msg.trim()) return r.msg.trim();
+  return "";
+}
+// The working line's words: the call its log has open now, else its status report (not a question), else null
+// (the line says Working).
+export const doingWords = (conv, report) => conv?.doing ?? (report && !/^answer:/i.test(report) ? report : null);
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const dayStart = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();

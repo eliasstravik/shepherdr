@@ -6,6 +6,7 @@
 import type { Hub } from "./hub.ts";
 import { sh } from "./model.ts";
 import { ChatReader } from "../core/chat-reader.js";
+import { reportMsg } from "../core/chat-view.js";
 
 /** A page following a chat: told the reader (and the terminal now) each time the conversation changes. */
 export type Watcher = (reader: ChatReader, terminal: any) => void;
@@ -14,7 +15,9 @@ type Followed = { reader: ChatReader; pages: Set<Watcher>; busy: boolean; idleSi
   /** a change came while it was being read: read once more after */
   again?: boolean;
   /** its terminal's watch-only stream, and a read it asked for soon */
-  stream?: { close(): void } | null; soon?: ReturnType<typeof setTimeout> | null; last?: number };
+  stream?: { close(): void } | null; soon?: ReturnType<typeof setTimeout> | null; last?: number;
+  /** what its CLI said it does when last told (the working line's words while no call is open in its log) */
+  said?: string };
 
 /** a screen that keeps drawing (a spinner) asks for a read at most this often */
 const NUDGE = 200;
@@ -128,6 +131,9 @@ export class Chats {
       let changed = await f.reader.locate(t);
       if (await f.reader.pull()) changed = true;
       if (await f.reader.lookJobs()) changed = true;
+      // its CLI says it does something else now (a status change, no new line in its log): told too
+      const said = reportMsg(t);
+      if (said !== f.said) { f.said = said; changed = true; }
       if (changed || !f.ready) this.publish(addr, f);
     } catch (err) {
       console.error(`chat ${addr}: ${(err as Error).message}`);

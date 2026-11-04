@@ -10,7 +10,8 @@ purpose (phone navigation, touch instead of right-click, a browser key the brows
 with why.
 
 Where both sides can read the same words or items from `core/`, they do, with a test, so they can't drift apart
-(`core/menus.js`, `core/settings.js`, `core/spaces.js`, `core/tasks.js`, …).
+(`core/menus.js`, `core/settings.js`, `core/spaces.js`, `core/tasks.js`, `core/chat-view.js` for the chat's words and its
+working line, `core/bg-jobs.js` for the background jobs over the box, …).
 
 | Surface | Window | Web | Page |
 |---|---|---|---|
