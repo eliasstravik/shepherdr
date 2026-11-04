@@ -53,5 +53,5 @@ export function ownProgress(addresses) {
   return null;
 }
 
-// Minutes left show only once they're a real estimate (core/tasks.js, shared with the web app).
-export { ESTIMATE_PCT, estimated } from "./core/tasks.js";
+// Minutes left show once the agent gave them (core/tasks.js, shared with the web app).
+export { estimated } from "./core/tasks.js";

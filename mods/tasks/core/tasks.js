@@ -116,14 +116,9 @@ export function queueReason(list, task, running) {
   return task.held ? `Waits: ${task.held}` : "Starts soon";
 }
 
-// Minutes left show only once they're a real estimate, never a first guess (DECISIONS.md): the
-// agent says it's at least ESTIMATE_PCT done, or, giving no %, it's on its second report or later
-// (progress.n, counted by herdr-task status). Herdr never shows more than the agent said.
-export const ESTIMATE_PCT = 15;
-export function estimated(p, done = p?.done) {
-  if (typeof p?.left !== "number") return false;
-  return typeof done === "number" ? done >= ESTIMATE_PCT : (p.n ?? 1) >= 2;
-}
+// Minutes left show from the agent's very first estimate on: a rough guess beats none (DECISIONS.md,
+// SHEP-13). Herdr never shows more than the agent said.
+export const estimated = (p) => typeof p?.left === "number";
 
 // What a task's agent last said (herdr-task status), as shown: { text, done, left (minutes), paused };
 // none once it's ready or waits for a go or other tasks. Its minutes count down while it works and
@@ -137,7 +132,7 @@ export function reportOf(task, section, own = null, now = Date.now()) {
   if (!text && !own) return null;
   const done = own ? own.pct : p?.done ?? null;
   let left = null;
-  if (estimated(p, done)) {
+  if (estimated(p)) {
     const rem = Math.max(0, p.left - ((p.paused_at ?? now) - (p.at ?? now)));
     left = rem < 60000 ? 0 : Math.ceil(rem / 60000);
   }
@@ -190,5 +185,5 @@ export function secondLine(p, w, queued = null, now = Date.now()) {
     : section === "ready" ? (p.task.ready_at ? `Ready ${ago(p.task.ready_at, true, now)}` : "Ready to accept") : null;
 }
 
-// The minutes left under a working row's dot ("6m"), only once they're a real estimate.
+// The minutes left under a working row's dot ("6m"), once its agent gave them.
 export const leftOf = (p, w) => (p.section === "working" && !p.why && w?.left != null ? short(w.left) : null);

@@ -301,6 +301,60 @@ class BackToWork(unittest.TestCase):
         self.commands.cmd_accept(self.args())
         self.assertEqual((t["state"], t.get("merged")), ("done", True))
 
+    # A pull request its agent opened itself (SHEP-13: "a pull request for branch ... already exists"):
+    # ready and Accept adopt it, never fail on it.
+    def github_has(self, prs):
+        """GitHub with these open pull requests for the branch; opening another fails as gh does."""
+        import herdr_task.github as github
+        calls = []
+
+        def fake(*a, **k):
+            calls.append(a[:2])
+            if a[:2] == ("pr", "list"):
+                return True, json.dumps(prs), ""
+            if a[:2] == ("pr", "create"):
+                return False, "", "a pull request for branch \"b\" into branch \"main\" already exists"
+            return True, "", ""
+        for mod, name, value in ((github, "gh", fake), (github, "git", lambda *a: (True, "abc", ""))):
+            p = self.mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        return github, calls
+
+    def test_ready_adopts_the_open_pull_request(self):
+        github, calls = self.github_has([{"number": 599, "url": "https://github.com/o/r/pull/599", "isCrossRepository": False, "baseRefName": "main", "headRefOid": "abc"}])
+        t = self.ready(mode="worktree", worktree="/w", branch="b")
+        self.assertEqual(github.pr_open(self.store, t, "o/r", "Done.")["number"], 599)
+        self.assertEqual(t["pr"], {"number": 599, "url": "https://github.com/o/r/pull/599", "repo": "o/r"})
+        self.assertNotIn(("pr", "create"), calls)
+        self.assertIn(("pr", "comment"), calls)  # the summary still reaches it
+
+    def test_ready_never_adopts_a_forks_or_another_ones(self):
+        mine = {"number": 599, "url": "https://github.com/o/r/pull/599", "isCrossRepository": False, "baseRefName": "main", "headRefOid": "abc"}
+        for other in ({"isCrossRepository": True}, {"baseRefName": "dev"}, {"headRefOid": "f00"}):
+            github, calls = self.github_has([{**mine, **other}])
+            t = self.ready(mode="worktree", worktree="/w", branch="b")
+            with self.assertRaises(self.commands.Fail):
+                github.pr_open(self.store, t, "o/r")
+            self.assertNotIn("pr", t, other)
+
+    def test_ready_opens_one_when_there_is_none(self):
+        github, calls = self.github_has([])
+        t = self.ready(mode="worktree", worktree="/w", branch="b")
+        with self.assertRaises(self.commands.Fail):
+            github.pr_open(self.store, t, "o/r")
+        self.assertIn(("pr", "create"), calls)
+
+    def test_accept_adopts_the_open_pull_request(self):
+        self.github_has([{"number": 599, "url": "https://github.com/o/r/pull/599", "isCrossRepository": False, "baseRefName": "main", "headRefOid": "abc"}])
+        t = self.ready(mode="worktree", worktree="/w", branch="b",
+                       attention="Couldn't open a pull request: a pull request for branch \"b\" already exists")
+        self.merging([{"state": "MERGED", "mergeCommit": {"oid": "f00"}}], [])
+        with self.mock.patch.object(self.commands, "github", lambda s: "o/r"):
+            self.commands.cmd_accept(self.args())
+        self.assertEqual((t["state"], t["pr"]["number"]), ("done", 599))
+        self.assertNotIn("attention", t)
+
     def test_the_tick_clears_a_failed_merge(self):
         t = self.pr_task()
         t["attention"], t["pr"]["checked"] = "GitHub didn't merge it: GraphQL: Something went wrong", 0
@@ -308,6 +362,45 @@ class BackToWork(unittest.TestCase):
         with self.mock.patch.object(self.tick, "pr_view", lambda t: fine), self.mock.patch.object(self.tick, "pr_news", lambda *a: None):
             self.tick.facts(self.store, t, {"attention": [], "done": []})
         self.assertNotIn("attention", t)  # Ready, its Accept back
+
+
+class TimeLeft(unittest.TestCase):
+    """Every status gives the time left, a rough guess beats none (SHEP-13): the minutes show from
+    the first one, one without --left asks for it, and every brief and template says so. In memory."""
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.commands as commands
+        self.commands, self.said = commands, []
+        self.store = Store([{"id": 7, "title": "Web client", "state": "running", "agents": []}])
+        for name, value in (("open_store", lambda args, write=True: self.store), ("view", lambda s, t, live=None: {}),
+                            ("live_agents", lambda key: []), ("say", lambda args, data, text: self.said.append(text))):
+            p = mock.patch.object(commands, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def status(self, left=None, done=None):
+        import argparse
+        self.commands.cmd_status(argparse.Namespace(id="SHEP-7", json=False, folder=None, text="Starting", done=done, left=left))
+        return self.said[-1]
+
+    def test_the_first_status_shows_its_minutes(self):
+        from herdr_task.output import report_of
+        self.status("20m", 0)
+        self.assertEqual(report_of(self.store.find(7), "working")["left"], 20)
+
+    def test_a_status_without_left_asks_for_it(self):
+        self.assertIn("Add --left", self.status())
+        self.assertNotIn("Add --left", self.status("20m"))
+
+    def test_every_brief_and_template_says_always(self):
+        from herdr_task import templates
+        launch = open(os.path.join(BIN, "herdr_task", "launch.py")).read()
+        for words in (templates.WORKER_MD, open(os.path.join(ROOT, "templates", "worker.md")).read(), launch):
+            self.assertNotIn("real estimate", words)
+            self.assertIn("rough guess beats none", words)
+        self.assertIn(templates.WORKER_MD_BEFORE_LEFT, templates.OLD_WORKERS)  # an unedited old one gets today's
 
 
 class Store:

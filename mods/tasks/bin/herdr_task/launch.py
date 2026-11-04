@@ -317,8 +317,8 @@ def closing_line(s, task, parent=None, argv=None):
                  f"--folder {shlex.quote(s.loc['folder'])} --report \"<its findings in a line>\"` (at most {rounds} rounds); "
                  f"ready refuses a final commit no round was recorded on.")
     text += (f" At the start and at each natural step, say how it's going: `{ht} status {s.ref(task)} --folder {shlex.quote(s.loc['folder'])} "
-             f"\"<what you're doing now, at most {LINE_MAX} characters>\" --done <% of the whole task>`; add `--left <about how long is left, like 5m>` "
-             f"only once you know the work well enough for a real estimate (not at the start).")
+             f"\"<what you're doing now, at most {LINE_MAX} characters>\" --done <% of the whole task> --left <your best guess of how long is left, like 20m>`: "
+             f"always give `--left`, from your very first status on, and update it at every step; a rough guess beats none.")
     text += (f" Only for what truly can't wait, `{ht} alert \"<what, a few words>\" --body \"<why>\"` reaches the person at once "
              f"(a toast and a sound); a question waits in your chat instead.")
     text += (f" Your herdr-task command is {ht}: write that full path each time (never the bare name), as one plain command; "

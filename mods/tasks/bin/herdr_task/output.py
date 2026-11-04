@@ -52,16 +52,10 @@ def progress_clock(s, task, status):
         s.dirty = True
 
 
-# Minutes left show only once they're a real estimate, never a first guess (as lib/dot.js
-# estimated()): at least ESTIMATE_PCT done, or, giving no %, the agent's second report or later.
-ESTIMATE_PCT = 15
-
-
+# Minutes left show from the agent's very first estimate on, a rough guess beats none (as
+# core/tasks.js estimated(), SHEP-13).
 def estimated(p):
-    if not isinstance(p.get("left"), (int, float)):
-        return False
-    done = p.get("done")
-    return done >= ESTIMATE_PCT if isinstance(done, (int, float)) else p.get("n", 1) >= 2
+    return isinstance(p.get("left"), (int, float))
 
 
 def report_of(task, status):

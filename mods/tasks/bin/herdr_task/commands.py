@@ -19,7 +19,7 @@ from .agents import (
     agent_running, busy_again, detail, fit, LINE_MAX, live_agents, ready_turns, STATUSES, SUMMARY_MAX, WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
-from .github import finish, gh, github, merged_here, pr_open, pr_pending, pr_problem, pr_view, update_main, watch_main
+from .github import finish, gh, github, merged_here, pr_adopt, pr_open, pr_pending, pr_problem, pr_view, update_main, watch_main
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
     own_path, parent_for, resume_argv, retag_tabs, tab_title, task_tabs,
@@ -467,14 +467,15 @@ def cmd_status(args):
         if t["state"] not in ("running", "ready"):
             raise Fail(f"{s.ref(t)} isn't being worked on ({STATUSES.get(t['state'], t['state'])}); nothing to report.")
         shown = fit(text)
-        # set: when it was said ("at" moves on while it waits, for the minutes left); n: its how-manyth
-        # report, so minutes with no % show only from the second (output.estimated()).
-        n = (t.get("progress") or {}).get("n", 1 if t.get("progress") else 0) + 1
-        t["progress"] = {"text": shown, "at": now(), "set": now(), "n": n, **({"done": args.done} if args.done is not None else {}),
+        # set: when it was said ("at" moves on while it waits, for the minutes left).
+        t["progress"] = {"text": shown, "at": now(), "set": now(), **({"done": args.done} if args.done is not None else {}),
                          **({"left": left} if left is not None else {})}
         s.dirty = True
         v = view(s, t, [detail(k) for k in live_agents(s.key(t))])
     note = f" Cut to {LINE_MAX} characters: \"{shown}\". Keep it shorter next time." if shown != text else ""
+    # Every status gives the time left, a rough guess beats none (SHEP-13): one without it asks for it.
+    if left is None:
+        note += " Add --left with your best guess of the time left (like 20m) to every status."
     say(args, {**v, "cut": shown != text}, f"{s.ref(t)}: {shown}" + (f" · {args.done}%" if args.done is not None else "")
         + (f" · ~{minutes(round(left / 60000))} left" if left is not None else "") + "." + note)
 
@@ -529,8 +530,7 @@ def back_to_work(s, t, why, said=WORKING_AGAIN):
     for k in ("ready_turns", "merge_requested"):
         t.pop(k, None)
     t["back"] = {"at": now(), "why": why}
-    # n 0: its agent's own next report is its first (minutes left only from a second one).
-    t["progress"] = {"text": fit(said), "at": now(), "set": now(), "n": 0}
+    t["progress"] = {"text": fit(said), "at": now(), "set": now()}
     s.dirty = True
     return True
 
@@ -909,6 +909,11 @@ def cmd_accept(args):
         # (saved), and refused after the store is.
         if busy_again(t, [detail(k) for k in live_agents(s.key(t))]):
             back = back_to_work(s, t, "its agent is at work again")
+        # One its agent opened itself, which ready couldn't open again ("already exists"): adopted.
+        elif (not t.get("pr") and "already exists" in (t.get("attention") or "")
+              and (repo := github(s)) and pr_adopt(t, repo)):
+            t.pop("attention", None)
+            s.dirty = True
         # A pull request's problems are read fresh (merge_now()): one fixed since, or a merge that
         # failed once, doesn't stand in the way. Without one, only a failed try doesn't.
         elif t.get("attention") and not t.get("pr") and not t["attention"].startswith(("Couldn't ask for the merge", MERGE_FAILED)):
