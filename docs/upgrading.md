@@ -8,6 +8,9 @@ shepherdr update
 shepherdr doctor
 ```
 
+A web-only install (`./install.sh --web`) updates the same way: `shepherdr update` reads what was installed and
+updates web only. `shepherdr doctor` says how this install updates. The web app is rebuilt when it's out of date.
+
 Only files Shepherdr put there and you haven't changed are replaced; yours stay, with the new copy beside them as
 `.new`. Each mod is swapped in one step, so Herdr reloads it once. Agents keep running in herdr-core. Until
 `shepherdr doctor` passes, the sync to other machines waits (`~/.herdr/sync-hold`).

@@ -12,9 +12,13 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHEPHERDR = os.path.join(ROOT, "bin", "shepherdr")
 APP = ".config/herdr-app"
+CI = os.environ.get("CI") == "true"
 
 
-def run(*args, ok=True):
+def run(*args, ok=True, build=False):
+    # the web app is built by its own test (a fresh clone); the others install this checkout's as it is
+    if args and args[0] in ("install", "update") and not build:
+        args = (*args, "--no-build")
     p = subprocess.run([sys.executable, SHEPHERDR, *args], capture_output=True, text=True, stdin=subprocess.DEVNULL)
     if ok and p.returncode != 0:
         raise AssertionError(f"shepherdr {' '.join(args)} failed:\n{p.stdout}\n{p.stderr}")
@@ -182,6 +186,130 @@ class Install(unittest.TestCase):
         finally:
             shutil.rmtree(root, ignore_errors=True)
             shutil.rmtree(src, ignore_errors=True)
+
+    def test_update_web_only(self):
+        """A web-only install updates web only (the record says so), and doctor says how; one whose source is gone says
+        that instead of updating from itself."""
+        import io
+        import tarfile
+        from importlib.machinery import SourceFileLoader
+        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        root, src = tempfile.mkdtemp(prefix="shepherdr-web-"), tempfile.mkdtemp(prefix="shepherdr-src-")
+        try:
+            run("install", "--web", "--root", root, "--yes", "--force")
+            share = os.path.join(root, ".local/share/shepherdr")
+            os.remove(os.path.join(share, "service/main.ts"))
+            out = run("update", "--root", root, "--yes", "--force").stdout
+            self.assertIn("web-only update", out)
+            self.assertTrue(os.path.isfile(os.path.join(share, "service/main.ts")))
+            self.assertFalse(os.path.exists(os.path.join(root, APP)), "a web-only update doesn't install the layout")
+            self.assertIn("to update:", run("doctor", "--root", root).stdout)
+            self.assertIn("shepherdr update", run("doctor", "--root", root).stdout)
+            # installed from a copy that's gone since: no update from the installed folder itself
+            tarfile.open(fileobj=io.BytesIO(sh.pack(ROOT))).extractall(src)
+            run("install", "--web", "--root", root, "--source", src, "--yes", "--force")
+            shutil.rmtree(src)
+            p = run("update", "--root", root, "--yes", "--force", ok=False)
+            self.assertEqual(p.returncode, 1)
+            self.assertIn("is gone", p.stderr)
+            self.assertIn("is gone", run("doctor", "--root", root).stdout)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+            shutil.rmtree(src, ignore_errors=True)
+
+    def test_update_needs_an_install(self):
+        p = run("update", "--root", self.root, "--yes", ok=False)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("isn't installed", p.stderr)
+
+    def test_web_stale(self):
+        """When the installer builds the web app: missing, or older than anything it's built from (not its outputs);
+        a source without web/src (an installed folder) never."""
+        from importlib.machinery import SourceFileLoader
+        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        src = tempfile.mkdtemp(prefix="shepherdr-stale-")
+        try:
+            def put(rel, t):
+                os.makedirs(os.path.dirname(os.path.join(src, rel)), exist_ok=True)
+                open(os.path.join(src, rel), "w").close()
+                os.utime(os.path.join(src, rel), (t, t))
+            self.assertIsNone(sh.web_stale(src))
+            put("web/src/App.tsx", 100)
+            put("core/host.js", 100)
+            put("package.json", 100)
+            self.assertEqual(sh.web_stale(src), "isn't built")
+            put("web/dist/index.html", 200)
+            put("web/generated/client-plugins.ts", 300)
+            put("web/node_modules/x.js", 300)
+            self.assertIsNone(sh.web_stale(src))
+            put("core/host.js", 300)
+            self.assertEqual(sh.web_stale(src), "is older than core/host.js")
+            put("core/host.js", 100)
+            put("package.json", 300)
+            self.assertEqual(sh.web_stale(src), "is older than package.json")
+        finally:
+            shutil.rmtree(src, ignore_errors=True)
+
+    @unittest.skipUnless(CI or os.environ.get("SHEPHERDR_FRESH_CLONE") == "1",
+                         "on CI (or SHEPHERDR_FRESH_CLONE=1): it downloads the web app's packages and builds it")
+    def test_fresh_clone_builds_the_web_app(self):
+        """A fresh clone (what git has, no web/dist, no node_modules) installs into a scratch root with a working page:
+        the installer builds the web app, and every file the page loads is there."""
+        import threading
+        import urllib.request
+        from functools import partial
+        from html.parser import HTMLParser
+        from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+        clone, root = tempfile.mkdtemp(prefix="shepherdr-clone-"), tempfile.mkdtemp(prefix="shepherdr-root-")
+        try:
+            # a clone's files: what git tracks, and what it would (new files not committed yet), never what it ignores
+            names = subprocess.run(["git", "-C", ROOT, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                                   capture_output=True, text=True, check=True).stdout.split("\0")
+            for n in filter(None, names):
+                if os.path.isfile(os.path.join(ROOT, n)):
+                    os.makedirs(os.path.dirname(os.path.join(clone, n)), exist_ok=True)
+                    shutil.copy2(os.path.join(ROOT, n), os.path.join(clone, n))
+            self.assertFalse(os.path.exists(os.path.join(clone, "web/dist")))
+            p = subprocess.run(["sh", os.path.join(clone, "install.sh"), "--root", root, "--yes"],
+                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
+            self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+            self.assertIn("the web app isn't built: building it", p.stdout)
+            self.assertNotIn("serves no page", p.stdout)
+            dist = os.path.join(root, ".local/share/shepherdr/web/dist")
+
+            class Refs(HTMLParser):
+                found = []
+
+                def handle_starttag(self, tag, attrs):
+                    a = dict(attrs)
+                    for k in ("src", "href"):
+                        if a.get(k) and not a[k].startswith(("http:", "https:", "data:", "#")):
+                            self.found.append(a[k])
+            # served as the service serves it, under a path (relative base): the page and every file it loads
+            srv = ThreadingHTTPServer(("127.0.0.1", 0), partial(SimpleHTTPRequestHandler, directory=dist))
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            try:
+                base = f"http://127.0.0.1:{srv.server_port}/"
+                page = urllib.request.urlopen(base).read().decode()
+                self.assertIn('id="root"', page)
+                refs = Refs()
+                refs.feed(page)
+                self.assertTrue(any(r.endswith(".js") for r in refs.found), refs.found)
+                for ref in refs.found:
+                    with urllib.request.urlopen(base + ref.lstrip("./")) as r:
+                        self.assertEqual(r.status, 200, ref)
+                        self.assertTrue(r.read(), ref)
+            finally:
+                srv.shutdown()
+                srv.server_close()
+            # and again: nothing to build now
+            p = subprocess.run(["sh", os.path.join(clone, "install.sh"), "--root", root, "--yes"],
+                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
+            self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+            self.assertNotIn("building it", p.stdout)
+        finally:
+            shutil.rmtree(clone, ignore_errors=True)
+            shutil.rmtree(root, ignore_errors=True)
 
     def test_clash_refuses_then_adopt(self):
         own = self.p(APP, "mods/jump")

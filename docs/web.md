@@ -39,7 +39,8 @@ connection it came on). A page from anywhere else can't change anything: writes 
 ## Install
 
 `./install.sh` installs the window's layout and the web app. `./install.sh --web` installs the web app alone (no
-Herdr window): its spaces are the service's own. Shepherdr settings → Window → Add-ons → Web turns the web app off
+Herdr window): its spaces are the service's own. Either builds the web app from a fresh clone (with Bun, installed
+from bun.sh if it's missing), and `shepherdr update` updates the same kind. Shepherdr settings → Window → Add-ons → Web turns the web app off
 and on; the service keeps its background work either way.
 
 ## Serve from an always-on machine
