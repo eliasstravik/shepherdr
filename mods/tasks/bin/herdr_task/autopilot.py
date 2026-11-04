@@ -52,7 +52,8 @@ HEARTBEATS = os.environ.get("HERDR_AUTOPILOT_HOME") or os.path.join(HOME, ".conf
 DEFAULT_EVERY = "every 60 minutes"
 REMOTE_WAIT = 30                 # seconds another machine has to answer
 PENDING_MAX_MS = 6 * 3600000     # a wake that found no Assistant this long: missed
-TURN_MAX_MS = 3 * 3600000        # a wake's turn not seen ending this long: closed anyway
+TURN_MAX_MS = 3600000            # a wake's turn not seen ending this long: closed anyway
+IDLE_AFTER_MS = 120000           # a wake this old whose Assistant sits idle: its turn ended
 HEARTBEAT_MAX = 8000             # characters of the heartbeat in a wake (the rest: read the file)
 # The heartbeat Everywhere has until someone writes one: a real one, ready as it is in any project
 # (core/autopilot.js STARTER, the same words). The person edits it, Everywhere's or a space's own, to steer.
@@ -523,8 +524,11 @@ def settle(a):
     if not f:
         return
     k = hc_json("get", f["to"]) or {}
-    gone = k.get("state") != "live"
-    ended = (k.get("turn") or 0) > f["turn"] and status_word(k) != "working"
+    gone = k.get("state") != "live" or not agent_running(k)
+    # Its turn counted, or (should the count miss it) the Assistant idle a while after the wake:
+    # closed either way, so the header leaves "Waking" and the next wake can go.
+    st = status_word(k)
+    ended = st != "working" and ((k.get("turn") or 0) > f["turn"] or (st in ("idle", "done") and now() - f["at"] > IDLE_AFTER_MS))
     if not (gone or ended or now() - f["at"] > TURN_MAX_MS):
         return
     a.pop("inflight")
@@ -680,6 +684,7 @@ def cmd_autopilot(args):
             if not a.get("on"):
                 raise Fail("Autopilot is off in this space: turn it on first.")
             sync(d)
+            settle(a)  # a wake whose turn has ended never holds this one back
             queue(a, "run now")
             got = deliver(space, a)
             msg = "Woke its Assistant." if got == "delivered" else f"Queued: {(a.get('pending') or {}).get('note') or 'it goes when its Assistant is idle'}."
