@@ -27,7 +27,8 @@ import { openWorktree } from '@client/screens/Worktree.tsx'
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type LiHTMLAttributes, type ReactNode } from 'react'
 import { act, counts, definePlugin, getState, goPlace, manyMachines, openSplit, placeOf, removeSpace, setUI, splitClick, useSnap, useUI, type Pane, type UI } from '@client/kernel.ts'
 import { and, Dialog, RowMenu, RowMenuButton, useRowMenu } from '@client/rowmenu.tsx'
-import { BackIcon, BellIcon, BellSlashIcon, AttentionBadge, attentionWords, DeleteIcon, DownIcon, HashIcon, ic, IconButton, List, MenuItem, MenuLabel, MenuSeparator, MenuSetting, Meta, NextIcon, PinnedIcon, PinTaskIcon, PlusIcon, Primary, ReadIcon, RemoveProjectIcon, RenameIcon, rowClass, RowText, SectionIcon, ServerIcon, SplitIcon, TasksIcon, UnpinIcon } from '@client/ui.tsx'
+import { BackIcon, BellIcon, CogIcon, BellSlashIcon, AttentionBadge, attentionWords, DeleteIcon, DownIcon, HashIcon, ic, IconButton, List, MenuItem, MenuLabel, MenuSeparator, MenuSetting, Meta, NextIcon, PinnedIcon, PinTaskIcon, PlusIcon, Primary, ReadIcon, RemoveProjectIcon, RenameIcon, rowClass, RowText, SectionIcon, ServerIcon, SplitIcon, TasksIcon, UnpinIcon } from '@client/ui.tsx'
+import { MachineMeter } from '@plugins/health/client.tsx'
 import { MarkRead, markPlaceRead, muted, placeUnread } from '@client/unread.ts'
 import { RestartItem } from '@client/restart.tsx'
 import { NOTIFY, NOTIFY_KEY, notifyOf, notifyRow } from '@shared/alerts.ts'
@@ -35,7 +36,9 @@ import { kept, PINNED, sectionsIn, TOP, type PlaceOrder } from '@shared/order.ts
 import { machineName, NAME_MAX, nameProblem, slugify, type Machine, type Place, type Section, type Snapshot } from '@shared/types.ts'
 import { AddSpace, asTyped, openAddSpace } from './add.tsx'
 import { dragging, press } from './drag.ts'
-import { openDeleteSection, openNewSection, openRename, SectionDialogs } from './section.tsx'
+import { openNewSection, openRename, SectionDialogs } from './section.tsx'
+import * as MN from '@core/menus.js'
+import * as SPc from '@core/spaces.js'
 
 /* ---------- folded sections (Pinned, the machines), remembered on this device ---------- */
 
@@ -179,6 +182,38 @@ interface Group {
   shown: Place[]
 }
 
+/** a git branch (the window's branch.svg): a worktree space's icon where it sits under its repo */
+function BranchIcon({ className }: { className?: string }) {
+  return (
+    <svg aria-hidden viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" className={className}>
+      <circle cx="4.5" cy="3.5" r="1.5" />
+      <circle cx="4.5" cy="12.5" r="1.5" />
+      <circle cx="11.5" cy="5.5" r="1.5" />
+      <path d="M4.5 5v6M11.5 7c0 2.5-3 3-7 4" />
+    </svg>
+  )
+}
+
+/** a worktree space's mark (├─ or └─) where it sits under its repo's own space, as the window's sidebar nests them */
+const treeMark = new Map<string, string>()
+/** a list's spaces with each repo's worktree spaces moved under its own space when both are in it (3.0's order) */
+function nest(list: Place[]): Place[] {
+  const mains = new Set(list.filter((p) => p.git === 'main').map((p) => p.repo))
+  const nested = (p: Place) => p.git === 'linked' && mains.has(p.repo)
+  const out: Place[] = []
+  const placed = new Set<string | undefined>()
+  for (const p of list) {
+    if (nested(p)) continue
+    out.push(p)
+    treeMark.delete(p.id)
+    if (p.git !== 'main' || placed.has(p.repo)) continue
+    placed.add(p.repo)
+    const kids = list.filter((k) => nested(k) && k.repo === p.repo)
+    kids.forEach((k, n) => { out.push(k); treeMark.set(k.id, n === kids.length - 1 ? '└─' : '├─') })
+  }
+  return out
+}
+
 /** the sidebar as it shows: the sections at the top (Pinned while it holds any), then each machine with its own spaces
  *  and its sections. A space shows once, where it sits; one just dragged or moved shows there at once. A folded section
  *  hides every space in it, a folded machine its sections too. */
@@ -197,7 +232,7 @@ function placeTree(snap: Snapshot, fold: string[], mine: PlaceOrder) {
   const group = (id: string, out: boolean, fits: (p: Place) => boolean): Group[] => {
     const s = sections.get(id)
     if (!s) return []
-    const spaces = take(lists[id], fits)
+    const spaces = nest(take(lists[id], fits))
     const shut = fold.includes(id)
     return [{ s, spaces, shut, shown: shut || out ? [] : spaces }]
   }
@@ -208,7 +243,7 @@ function placeTree(snap: Snapshot, fold: string[], mine: PlaceOrder) {
     if (!m) return []
     const shut = fold.includes(m.id)
     const fits = (p: Place) => p.machine === m.machine
-    const spaces = take(lists[m.id], fits)
+    const spaces = nest(take(lists[m.id], fits))
     const inside = (lists[sectionsIn(m.id)] ?? []).flatMap((s) => group(s, shut, fits))
     return [{ m, spaces, shut, shown: shut ? [] : spaces, sections: inside, all: [...spaces, ...inside.flatMap((g) => g.spaces)] }]
   })
@@ -255,7 +290,10 @@ function usePlaceRow({ p, snap, where }: { p: Place; snap: Snapshot; where?: str
   const fresh = placeUnread(snap, p)
   const quiet = muted(snap, p.id)
   const off = p.status === 'off' && !p.connecting
-  const pilot = p.mode === 'autopilot' && !off
+  // 3.0's row: no Autopilot mark (the chat's header has its switch); after the name only what's unusual: its machine
+  // (in Pinned), its repo and branch, ↑ahead ↓behind (core/spaces.js gitTail, as the window's)
+  const pilot = false
+  const tail = p.git ? (SPc.gitTail as (g: object, o: object) => { where: string; ahead: number; behind: number })({ name: p.gitName, branch: p.branch, ahead: p.ahead, behind: p.behind }, { name: p.name, tree: !!treeMark.get(p.id), tag: where ?? null }) : { where: where ?? '', ahead: 0, behind: 0 }
   return {
     sel,
     // what the row says aloud, its count and offline too
@@ -267,17 +305,23 @@ function usePlaceRow({ p, snap, where }: { p: Place; snap: Snapshot; where?: str
       <>
         <span aria-hidden data-autopilot={pilot || undefined} className={clsx('mode-pill mark', !pilot && 'invisible')} />
         {/* Shepherdr 3: a space's own icon (an emoji) where it has one */}
-        {p.emoji ? <span aria-hidden className={clsx(icon, 'grid place-items-center text-[0.9375rem] leading-none')}>{p.emoji}</span> : <HashIcon className={clsx(icon, off || quiet ? 'text-fg3' : sel || n || fresh ? 'text-fg' : 'text-fg2')} />}
+        {treeMark.get(p.id) ? <BranchIcon className={clsx(icon, 'text-fg3')} /> : p.emoji ? <span aria-hidden className={clsx(icon, 'grid place-items-center text-[0.9375rem] leading-none')}>{p.emoji}</span> : <HashIcon className={clsx(icon, off || quiet ? 'text-fg3' : sel || n || fresh ? 'text-fg' : 'text-fg2')} />}
       </>
     ),
     name: (
       <RowText className={off || quiet ? 'text-fg3' : n || fresh ? 'font-semibold text-fg' : sel ? 'text-fg' : 'text-fg2'}>
         {p.name}
-        {where ? <span className="font-normal text-fg3"> · {where}</span> : null}
       </RowText>
     ),
     end: (
       <>
+        {tail.where || tail.ahead || tail.behind ? (
+          <span className="flex min-w-0 shrink items-center gap-1 text-[0.75rem] text-fg3 tabular-nums phone:text-[0.8125rem]">
+            {tail.where ? <span className="min-w-0 truncate">{tail.where}</span> : null}
+            {tail.ahead ? <span className="shrink-0 text-ready-fg">↑{tail.ahead}</span> : null}
+            {tail.behind ? <span className="shrink-0 text-need-fg">↓{tail.behind}</span> : null}
+          </span>
+        ) : null}
         {quiet ? <BellSlashIcon aria-hidden className={clsx(ic, 'text-fg3')} /> : null}
         {p.connecting || off ? null : <AttentionBadge need={c.ownNeed} ready={c.ownReady} scope="here" />}
       </>
@@ -326,150 +370,54 @@ const NOTIFY_HINT: Record<(typeof NOTIFY)[number], string> = {
   Off: 'nothing from its coordinator, and its row stays quiet',
 }
 
-/** A space's menu: its coordinator's Notify (a choice that is what it would get anyway goes back to following it), Mark
- *  as read (its own chat, as its row shows it), Pin, Restart agent (its coordinator), Move to section (the menu turns into where it may go), Rename, and
- *  what the row adds (Remove, but for a home space) */
-function PlaceMenu({ p, snap, menu, unread, onRename, children }: { p: Place; snap: Snapshot; menu: ReturnType<typeof useRowMenu>; unread: boolean; onRename?: () => void; children?: ReactNode }) {
-  const [moving, setMoving] = useState(false)
+/** the icon a core menu item names (core/menus.js), drawn with the web's own */
+const MENU_ICONS: Record<string, (p: { className?: string }) => ReactNode> = {
+  plus: PlusIcon, 'folder-plus': SectionIcon, 'check-check': ReadIcon, pin: PinTaskIcon, 'pin-off': UnpinIcon, 'square-pen': RenameIcon,
+  settings: CogIcon, 'git-branch': SplitIcon, x: RemoveProjectIcon, 'trash-2': DeleteIcon,
+}
+type CoreItem = { id?: string; label?: string; icon?: string; sep?: boolean; setting?: boolean }
+/** a core menu (core/menus.js, the window's too) as the web draws it: its items in order, each done by `acts` */
+function CoreMenuItems({ items, acts, setting }: { items: CoreItem[]; acts: Record<string, () => void>; setting?: ReactNode }) {
+  return (
+    <>
+      {items.map((it, i) => {
+        if (it.sep) return i ? <MenuSeparator key={`sep${i}`} /> : null
+        if (it.setting) return <Fragment key={it.id}>{setting}</Fragment>
+        const Icon = MENU_ICONS[it.icon ?? '']
+        return <MenuItem key={it.id} icon={Icon ? <Icon className={ic} /> : undefined} onClick={acts[it.id!]}>{it.label}</MenuItem>
+      })}
+    </>
+  )
+}
+
+/** A space's menu, as the window's (core/menus.js spaceMenu): Notify, Mark as read while it has something new, Pin or
+ *  Unpin, Rename…, Space settings…, its worktrees where it is a repo, and Close… */
+function PlaceMenu({ p, snap, menu, unread, onClose }: { p: Place; snap: Snapshot; menu: ReturnType<typeof useRowMenu>; unread: boolean; onClose: () => void }) {
   const now = notifyOf(snap, p.id)
   const row = notifyRow(snap, p.id)
-  const { ownNeed, ownReady } = counts(snap, p.id)
-  const attention = p.status === 'off' || p.connecting ? '' : attentionWords(ownNeed, ownReady)
   const pick = (v: string) => act({ type: 'setting', key: NOTIFY_KEY, value: row?.inherits?.value === v ? null : v, place: p.id })
-  const desktop = useUI((u) => u.device === 'desktop')
-  const split = (pane: Pane) => () => {
-    menu.close()
-    openSplit(pane)
-  }
-  if (moving)
-    return (
-      <RowMenu menu={menu} label={`Move ${p.name} to section`} className="min-w-[min(16rem,calc(100%-0.5rem))]!">
-        <MoveItems p={p} snap={snap} menu={menu} onBack={() => setMoving(false)} />
-      </RowMenu>
-    )
+  const pinned = groupOf(snap, usePending(), p) === PINNED
+  const then = (f: () => void) => () => { menu.close(); setTimeout(f) }
+  const items = (MN.spaceMenu as (o: object) => CoreItem[])({ unread, pinned, git: p.git ?? null })
   return (
     <RowMenu menu={menu} label={p.name} className="min-w-[min(16rem,calc(100%-0.5rem))]!">
-      {attention ? <MenuLabel>{attention}</MenuLabel> : null}
-      {desktop ? (
-        <>
-          <MenuItem icon={<SplitIcon className={ic} />} onClick={split({ kind: 'place', id: p.id })}>
-            Open in split view
-          </MenuItem>
-          <MenuItem icon={<TasksIcon className={ic} />} onClick={split({ kind: 'tasks', id: p.id })}>
-            Open its tasks in split view
-          </MenuItem>
-          <MenuSeparator />
-        </>
-      ) : null}
-      <MenuSetting
-        name="Notify"
-        icon={now === 'Off' ? <BellSlashIcon className={ic} /> : <BellIcon className={ic} />}
-        choices={NOTIFY.map((v) => ({ label: v, hint: NOTIFY_HINT[v], on: now === v, onClick: () => void pick(v).catch(() => undefined) }))}
-      />
-      <MenuItem
-        icon={<ReadIcon className={ic} />}
-        disabled={!unread}
-        className="disabled:pointer-events-none disabled:text-fg3"
-        onClick={() => {
-          menu.close()
-          markPlaceRead(snap, [p])
-        }}
-      >
-        Mark as read
-      </MenuItem>
-      <PinItem p={p} snap={snap} menu={menu} />
-      <RestartItem chat={p.chat} name={p.name} onPick={menu.close} />
-      {/* Shepherdr 3: a space moves between sections by dragging it, never from a menu */}
-      <MenuItem icon={<SplitIcon className={ic} />} onClick={() => { menu.close(); openWorktree({ place: p.id, name: p.name, op: 'new' }) }}>New worktree…</MenuItem>
-      <MenuItem icon={<SplitIcon className={ic} />} onClick={() => { menu.close(); openWorktree({ place: p.id, name: p.name, op: 'open' }) }}>Open worktree…</MenuItem>
-      {p.worktree ? (
-        <MenuItem icon={<RemoveProjectIcon className={ic} />} onClick={() => { menu.close(); openWorktree({ place: p.id, name: p.name, op: 'remove' }) }}>Remove worktree…</MenuItem>
-      ) : null}
-      {onRename ? (
-        <MenuItem
-          icon={<RenameIcon className={ic} />}
-          onClick={() => {
-            menu.close()
-            // once the menu has given the focus back to the ⋯: the name's box takes it then
-            setTimeout(onRename)
-          }}
-        >
-          Rename
-        </MenuItem>
-      ) : null}
-      {children ? (
-        <>
-          <MenuSeparator />
-          {children}
-        </>
-      ) : null}
+      <CoreMenuItems items={items}
+        setting={<MenuSetting name="Notify" icon={now === 'Off' ? <BellSlashIcon className={ic} /> : <BellIcon className={ic} />}
+          choices={NOTIFY.map((v) => ({ label: v, hint: NOTIFY_HINT[v], on: now === v, onClick: () => void pick(v).catch(() => undefined) }))} />}
+        acts={{
+          read: then(() => markPlaceRead(snap, [p])),
+          pin: then(() => moveTo(p.id, PINNED)), unpin: then(() => moveTo(p.id, `m:${p.machine}`)),
+          rename: then(() => openRename(p.id)),
+          settings: then(() => setUI({ settings: { section: getState().ui.device === 'phone' ? null : 0, level: p.id }, drawer: false })),
+          'worktree-new': then(() => openWorktree({ place: p.id, name: p.name, op: 'new' })),
+          'worktree-open': then(() => openWorktree({ place: p.id, name: p.name, op: 'open' })),
+          'worktree-remove': then(() => openWorktree({ place: p.id, name: p.name, op: 'remove' })),
+          close: then(onClose),
+        }} />
     </RowMenu>
   )
 }
 
-/** Move to section: back first, then its machine's sections, those at the top (Pinned too), and its machine itself (no
- *  section); where it is now says Here */
-function MoveItems({ p, snap, menu, onBack }: { p: Place; snap: Snapshot; menu: ReturnType<typeof useRowMenu>; onBack: () => void }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const here = groupOf(snap, usePending(), p)
-  const m = snap.machines?.find((x) => x.machine === p.machine)
-  const all = snap.sections ?? []
-  useEffect(() => ref.current?.querySelector<HTMLElement>('[role=menuitem]:not(:disabled)')?.focus({ preventScroll: true }), [])
-  const item = (id: string, name: string, mark: ReactNode) => (
-    <MenuItem
-      key={id}
-      icon={mark}
-      disabled={id === here}
-      hint={id === here ? 'Here' : undefined}
-      className="disabled:pointer-events-none disabled:text-fg3"
-      onClick={() => {
-        menu.close()
-        moveTo(p.id, id)
-      }}
-    >
-      {name}
-    </MenuItem>
-  )
-  const own = all.filter((s) => s.machine === p.machine)
-  return (
-    <div ref={ref} className="contents">
-      <MenuItem icon={<BackIcon className={ic} />} className="text-fg2" onClick={onBack}>
-        Move to section
-      </MenuItem>
-      <MenuSeparator />
-      {own.length && m ? (
-        <>
-          <MenuLabel>In {m.name}</MenuLabel>
-          {own.map((s) => item(s.id, s.name, <SectionMark s={s} />))}
-        </>
-      ) : null}
-      <MenuLabel>At the top</MenuLabel>
-      {all.filter((s) => !s.machine).map((s) => item(s.id, s.name, <SectionMark s={s} />))}
-      {m ? (
-        <>
-          <MenuSeparator />
-          {item(m.id, m.name, <MachineMark m={m} />)}
-        </>
-      ) : null}
-    </div>
-  )
-}
-
-/** Pin (to Pinned, at the end) or Unpin (back under its machine, where it was): a space's, wherever it sits */
-function PinItem({ p, snap, menu }: { p: Place; snap: Snapshot; menu: ReturnType<typeof useRowMenu> }) {
-  const on = groupOf(snap, usePending(), p) === PINNED
-  return (
-    <MenuItem
-      icon={on ? <UnpinIcon className={ic} /> : <PinTaskIcon className={ic} />}
-      onClick={() => {
-        menu.close()
-        moveTo(p.id, on ? `m:${p.machine}` : PINNED)
-      }}
-    >
-      {on ? 'Unpin' : 'Pin'}
-    </MenuItem>
-  )
-}
 
 /**
  * Renaming a space, in its row: its name becomes a box, Enter (or leaving it) keeps the new name, Escape
@@ -578,7 +526,7 @@ function Space({ p, snap, sort, at }: { p: Place; snap: Snapshot; sort: Sort; at
   const rename = useRename(p, snap)
   // Shift+F2 (3.0's rename-space): the shown space's row takes its name box
   useEffect(() => {
-    const on = (e: Event) => (e as CustomEvent<string>).detail === p.id && rename.start()
+    const on = (e: Event) => (e as CustomEvent<string>).detail === p.id && openRename(p.id)
     addEventListener('shepherdr:rename', on)
     return () => removeEventListener('shepherdr:rename', on)
   }, [p.id, rename.start])
@@ -596,7 +544,7 @@ function Space({ p, snap, sort, at }: { p: Place; snap: Snapshot; sort: Sort; at
       data-pin={group === PINNED ? p.id : undefined}
       data-home={p.home || undefined}
       data-drop={group}
-      className={clsx(rowClass(r.sel, false, true), dragged, dropBefore, indent[at], 'group select-none [-webkit-touch-callout:none]', menu.open && !r.sel && 'bg-hover')}
+      className={clsx(rowClass(r.sel, false, true), dragged, dropBefore, indent[at], treeMark.get(p.id) && 'pl-[51px] phone:pl-[56px]', 'group select-none [-webkit-touch-callout:none]', menu.open && !r.sel && 'bg-hover')}
       onPointerDown={
         rename.editing
           ? undefined
@@ -621,20 +569,7 @@ function Space({ p, snap, sort, at }: { p: Place; snap: Snapshot; sort: Sort; at
       {still ? null : <RowMenuButton menu={menu} label={`More for ${p.name}`} className="relative z-1 -mr-1 phone:-mr-1.5 phone:size-8" />}
       <span className={clsx('contents', !still && 'untucked:hidden')}>{r.end}</span>
       {menu.open ? (
-        <PlaceMenu p={p} snap={snap} menu={menu} unread={r.fresh} onRename={rename.start}>
-          {p.home ? null : (
-            <MenuItem
-              icon={<RemoveProjectIcon className={ic} />}
-              onClick={() => {
-                menu.close()
-                // once the menu has given the focus back to the ⋯, which takes it again when the question goes
-                setTimeout(() => setRemoving(p))
-              }}
-            >
-              Close…
-            </MenuItem>
-          )}
-        </PlaceMenu>
+        <PlaceMenu p={p} snap={snap} menu={menu} unread={r.fresh} onClose={() => setRemoving(p)} />
       ) : null}
     </li>
   )
@@ -762,42 +697,17 @@ function MachineHeading({ m, snap, shut, spaces, sort, className }: { m: Machine
       onContextMenu={off ? undefined : (e) => (dragging() ? e.preventDefault() : menu.press.onContextMenu(e))}
     >
       {off ? null : <AddButton machine={m.machine} name={m.name} />}
+      {off ? null : <MachineMeter m={m} />}
       {off ? null : <RowMenuButton menu={menu} label={`More for ${m.name}`} className="relative z-1 -mr-1 phone:-mr-1.5 phone:size-8" />}
       <span className={clsx('contents', !off && !warn && 'untucked:hidden')}>
         {warn ? <Meta className="text-need-fg!">{warn}</Meta> : null}
-        {m.connecting ? <Meta>Connecting…</Meta> : off && !herdr ? <Meta>Can't reach</Meta> : null}
+        {m.connecting ? <Meta>Connecting…</Meta> : off && !herdr ? <Meta>Offline</Meta> : null}
         {shut && !off ? <Inside snap={snap} spaces={spaces} /> : null}
       </span>
       {menu.open ? (
         <RowMenu menu={menu} label={m.name} className="min-w-56!">
-          <MenuItem
-            icon={<PlusIcon className={ic} />}
-            onClick={() => {
-              menu.close()
-              openAddSpace(m.machine)
-            }}
-          >
-            New space…
-          </MenuItem>
-          <MenuItem
-            icon={<SectionIcon className={ic} />}
-            onClick={() => {
-              menu.close()
-              // once the menu has given the focus back to the ⋯, which takes it again when the dialog goes
-              setTimeout(() => openNewSection(m.machine))
-            }}
-          >
-            New section…
-          </MenuItem>
-          <MenuItem
-            icon={<RenameIcon className={ic} />}
-            onClick={() => {
-              menu.close()
-              setTimeout(() => openRename(m.id))
-            }}
-          >
-            Rename machine…
-          </MenuItem>
+          {/* a machine's own menu, as the window's (core/menus.js): its name and emoji */}
+          <CoreMenuItems items={MN.machineMenu() as CoreItem[]} acts={{ rename: () => { menu.close(); setTimeout(() => openRename(m.id)) } }} />
         </RowMenu>
       ) : null}
     </Heading>
@@ -825,45 +735,35 @@ function SectionHeading({ g, snap, sort, keep, at, className }: { g: Group; snap
       className={clsx(dragged, dropHeading, at === 'inner' && 'pl-5 phone:pl-6', className, menu.open && 'bg-hover')}
       // Pinned out of sight while it holds nothing keeps its place among them
       onPointerDown={(e) => press(e, { id: s.id, siblings: sort.ids, level: 'section', drop: (ids) => reorder(sort.under, keep ? kept(keep, ids) : ids), hold: menu.hold, lift: menu.close, release: menu.release })}
-      onContextMenu={(e) => (dragging() ? e.preventDefault() : menu.press.onContextMenu(e))}
+      onContextMenu={pinned ? undefined : (e) => (dragging() ? e.preventDefault() : menu.press.onContextMenu(e))}
     >
-      <RowMenuButton menu={menu} label={`More for ${s.name}`} className="relative z-1 -mr-1 phone:-mr-1.5 phone:size-8" />
+      {/* Pinned has no menu in the window */}
+      {pinned ? null : <RowMenuButton menu={menu} label={`More for ${s.name}`} className="relative z-1 -mr-1 phone:-mr-1.5 phone:size-8" />}
       <span className="contents untucked:hidden">{g.shut ? <Inside snap={snap} spaces={g.spaces} /> : null}</span>
       {menu.open ? (
         <RowMenu menu={menu} label={s.name} className="min-w-56!">
-          <MenuItem
-            icon={<RenameIcon className={ic} />}
-            onClick={() => {
-              menu.close()
-              setTimeout(() => openRename(s.id))
-            }}
-          >
-            Rename section…
-          </MenuItem>
-          {pinned ? null : (
-          <MenuItem
-            icon={<DeleteIcon className={ic} />}
-            onClick={() => {
-              menu.close()
-              setTimeout(() => openDeleteSection(s.id))
-            }}
-          >
-            Delete section…
-          </MenuItem>
-          )}
+          {/* as the window's (core/menus.js): Rename…, and Delete at once (its spaces go back under their machines) */}
+          <CoreMenuItems items={MN.sectionMenu() as CoreItem[]} acts={{
+            rename: () => { menu.close(); setTimeout(() => openRename(s.id)) },
+            delete: () => { menu.close(); void act({ type: 'section', op: 'delete', id: s.id }).catch(() => undefined) },
+          }} />
         </RowMenu>
       ) : null}
     </Heading>
   )
 }
 
-/** the sidebar header's +: a new section at the top */
+/** an open section with no spaces in it: where they go, as the window's */
+function EmptySection({ inner }: { inner: boolean }) {
+  return <li className={clsx('flex min-h-7 items-center text-[0.75rem] text-fg3 phone:min-h-9 phone:text-[0.8125rem]', inner ? indent.inner : indent.top)}>Drag spaces here</li>
+}
+
+/** the sidebar header's +: New space or section, as the window's (for the shown space's machine) */
 function NewSection() {
-  return (
-    <IconButton label="New section" onClick={() => openNewSection()}>
-      <PlusIcon className={ic} />
-    </IconButton>
-  )
+  const snap = useSnap()
+  const place = useUI((u) => u.place)
+  const m = snap?.machines?.find((x) => x.machine === snap.places.find((p) => p.id === place)?.machine) ?? snap?.machines?.[0]
+  return m ? <span className="contents [&>button]:mr-0! [&>button]:static! [&>button]:opacity-100! [&>button]:pointer-events-auto!"><AddButton machine={m.machine} name={m.name} label="New space or section" /></span> : null
 }
 
 /** on a folded section's heading, what its hidden spaces hold: a red dot where something waits on you in one, else a
@@ -897,19 +797,35 @@ function Fold({ label, id, shut }: { label: string; id: string; shut: boolean })
 }
 
 /** + on a machine's heading: a new space there. A mouse finds it on hover; a finger always sees it. */
-function AddButton({ machine, name }: { machine: string; name: string }) {
+function AddButton({ machine, name, label }: { machine: string; name: string; label?: string }) {
+  const menu = useRowMenu({ beside: true })
   return (
-    <button
-      type="button"
-      aria-label={`New space on ${name}`}
-      onClick={(e) => {
-        e.stopPropagation()
-        openAddSpace(machine)
-      }}
-      className="hit relative z-1 -mr-1 grid size-6 shrink-0 place-items-center rounded-full text-fg3 hover:bg-sel hover:text-fg tucked:pointer-events-none tucked:absolute tucked:opacity-0 phone:-mr-1.5 phone:size-8"
-    >
-      <PlusIcon className={ic} />
-    </button>
+    <>
+      <button
+        type="button"
+        aria-label={label ?? `New space or section on ${name}`}
+        title="New space or section"
+        aria-haspopup="menu"
+        aria-expanded={!!menu.open}
+        onClick={(e) => {
+          e.stopPropagation()
+          if (menu.open) menu.close()
+          else menu.show(e.currentTarget.closest('li') ?? e.currentTarget.parentElement)
+        }}
+        className="hit relative z-1 -mr-1 grid size-6 shrink-0 place-items-center rounded-full text-fg3 hover:bg-sel hover:text-fg aria-expanded:bg-sel tucked:not-aria-expanded:pointer-events-none tucked:not-aria-expanded:absolute tucked:not-aria-expanded:opacity-0 phone:-mr-1.5 phone:size-8"
+      >
+        <PlusIcon className={ic} />
+      </button>
+      {menu.open ? (
+        <RowMenu menu={menu} label={`New on ${name}`} className="min-w-48!">
+          {/* the window's + (core/menus.js addMenu) */}
+          <CoreMenuItems items={MN.addMenu() as CoreItem[]} acts={{
+            'new-space': () => { menu.close(); openAddSpace(machine) },
+            'new-section': () => { menu.close(); setTimeout(() => openNewSection(machine)) },
+          }} />
+        </RowMenu>
+      ) : null}
+    </>
   )
 }
 
@@ -968,6 +884,7 @@ function Places() {
           {top.map((g, i) => (
             <Fragment key={g.s.id}>
               <SectionHeading g={g} snap={snap} sort={{ under: TOP, ids: tops }} keep={listsOf(snap)[TOP]} at="top" className={i ? 'mt-3 phone:mt-4' : undefined} />
+              {!g.shut && !g.spaces.length ? <EmptySection inner={false} /> : null}
               {g.shown.map((p) => (
                 <Space key={p.id} p={p} snap={snap} at="top" sort={{ under: g.s.id, ids: g.shown.map((x) => x.id) }} />
               ))}
@@ -988,6 +905,7 @@ function Places() {
               : sections.map((g) => (
                   <Fragment key={g.s.id}>
                     <SectionHeading g={g} snap={snap} sort={{ under: sectionsIn(m.id), ids: sections.map((x) => x.s.id) }} at="inner" />
+                    {!g.shut && !g.spaces.length ? <EmptySection inner /> : null}
                     {g.shown.map((p) => (
                       <Space key={p.id} p={p} snap={snap} at="inner" sort={{ under: g.s.id, ids: g.shown.map((x) => x.id) }} />
                     ))}

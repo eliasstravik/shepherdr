@@ -100,6 +100,20 @@ class Repo(unittest.TestCase):
                 for spec in re.findall(r'''from\s+["']([^"']+)["']''', src):
                     self.assertTrue(spec.startswith("./"), f"core/{f} imports {spec}")
 
+    def test_menus_from_one_list(self):
+        """The sidebar's and a task row's menus are core/menus.js's lists on both sides: the window's mods and the web
+        app build them from it (3.0 decides what each menu offers; the web only draws it)."""
+        uses = {
+            J("mods", "spaces-chat", "popups.js"): ["addMenu", "spaceMenu", "machineMenu", "sectionMenu"],
+            J("mods", "tasks-menu", "main.js"): ["taskMenu"],
+            J("web", "plugins", "places", "client.tsx"): ["addMenu", "spaceMenu", "machineMenu", "sectionMenu"],
+        }
+        for path, names in uses.items():
+            text = open(path).read()
+            self.assertRegex(text, r"core/menus\.js", f"{os.path.relpath(path, ROOT)} doesn't build from core/menus.js")
+            for n in names:
+                self.assertIn(n, text, f"{os.path.relpath(path, ROOT)} doesn't use {n}")
+
     def test_features_have_both_sides(self):
         """lib/features.json: every feature has its shared logic, a Herdr side and a web side, every file it names is
         there, and every mod belongs to a feature."""

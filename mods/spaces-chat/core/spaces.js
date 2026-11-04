@@ -104,6 +104,27 @@ export function withSectionName(d, id, name, icon) {
   return x;
 }
 
+// Only what's unusual after a space's name in the sidebar: "herdr · spike", with ↑ahead ↓behind beside it. The repo or
+// branch goes when the name already says it (a worktree is named after its branch), and master/main go: nearly every
+// space is on one. g: { name (repo), branch, ahead, behind }; tree: nested under its repo; tag: its machine, in Pinned.
+export function gitTail(g, { name = "", tree = false, tag = null } = {}) {
+  const raw = g?.branch ?? "detached";
+  const same = (a) => String(a ?? "").toLowerCase() === String(name).toLowerCase();
+  const branch = same(raw) || raw === "master" || raw === "main" ? "" : raw;
+  const repo = tree || same(g?.name) ? "" : g?.name ?? "";
+  return { where: [tag, repo, branch].filter(Boolean).join(" \u00b7 "), ahead: g?.ahead ?? 0, behind: g?.behind ?? 0 };
+}
+
+// A machine's own name and emoji in the sidebar (machines[""] is this computer's): empty name goes back to its own.
+export function withMachineLook(d, machine, name, icon) {
+  const x = tidyBar(d), k = machine ?? "";
+  const m = { ...(x.machines[k] ?? {}) };
+  if (name) m.name = name; else delete m.name;
+  if (icon !== undefined) { if (icon) m.icon = icon; else delete m.icon; }
+  if (Object.keys(m).length) x.machines[k] = m; else delete x.machines[k];
+  return x;
+}
+
 export function withIcon(d, space, icon) {
   const x = tidyBar(d);
   if (icon) x.icons[space] = icon; else delete x.icons[space];

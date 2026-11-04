@@ -38,7 +38,7 @@ export class Model {
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   /** Told each build: what the screen's snapshot is made from (compat.ts). */
-  onBuild: ((b: { spaces: any[]; sections: any[]; rows: any[]; machines: string[] }) => void) | null = null;
+  onBuild: ((b: { spaces: any[]; sections: any[]; rows: any[]; machines: string[]; automations: any[] }) => void) | null = null;
 
   /** The service's shared document (the person's pins, sidebar and Notify, in step with the window: lib/bridge.js). */
   doc: () => Record<string, any> = () => ({});
@@ -68,6 +68,28 @@ export class Model {
   }
 
   private spaces: any[] = [];
+  /** Each space folder's git, as the window's sidebar reads it: { name (the repo), linked (a worktree), repo }, null:
+   *  not a repo. Read once, then again each minute. */
+  private git = new Map<string, { info: { name: string; linked: boolean; repo: string; branch?: string | null; ahead?: number; behind?: number } | null; at: number }>();
+  private async readGit(spaces: any[]) {
+    const due = spaces.filter((s) => s.folder && Date.now() - (this.git.get(`${s.machine ?? ""}|${s.folder}`)?.at ?? 0) > 60_000);
+    await Promise.all(due.slice(0, 12).map(async (s) => {
+      const key = `${s.machine ?? ""}|${s.folder}`;
+      this.git.set(key, { info: this.git.get(key)?.info ?? null, at: Date.now() });
+      // as the window's sidebar reads it: its repo, and its branch and ahead/behind (no optional locks: reads only)
+      const r = await exec(this.hub, ["sh", "-c", 'cd "$1" 2>/dev/null && git rev-parse --show-toplevel --path-format=absolute --git-common-dir 2>/dev/null && git --no-optional-locks -c core.fsmonitor=false status --porcelain=v2 --branch -uno 2>/dev/null | grep "^# branch\\."', "git", s.folder], s.machine ?? null, 20).catch(() => null);
+      const [top, repo, ...rest] = (r?.stdout ?? "").trim().split("\n");
+      const name = repo ? (repo.endsWith("/.git") ? repo.slice(0, -5) : repo.replace(/\.git$/, "")).split("/").pop()! : "";
+      let branch: string | null = null, ahead = 0, behind = 0;
+      for (const l of rest) {
+        if (l.startsWith("# branch.head ")) branch = l.slice(14) === "(detached)" ? null : l.slice(14);
+        else if (l.startsWith("# branch.ab ")) { const [a, b] = l.slice(12).split(" "); ahead = Math.abs(parseInt(a, 10)) || 0; behind = Math.abs(parseInt(b, 10)) || 0; }
+      }
+      this.git.set(key, { info: top && repo ? { name, linked: repo !== `${top}/.git`, repo, branch, ahead, behind } : null, at: Date.now() });
+    }));
+    if (due.length) this.soon();
+  }
+  gitOf(s: any) { return this.git.get(`${s.machine ?? ""}|${s.folder}`)?.info ?? null; }
   /** A space as last built (its id, name, machine, folder), or undefined. */
   spaceById(id: string) { return this.spaces.find((s) => s.id === id); }
 
@@ -180,6 +202,7 @@ export class Model {
         section: bar.sections.find((x: any) => (x.spaces ?? []).includes(s.id))?.id ?? null,
         assistant: k?.address ?? null, assistantStatus: (k as any)?.status?.state ?? null,
         autopilot: !s.machine && this.autopilot[s.id]?.on ? { next: this.autopilot[s.id].next_run ?? null } : null,
+        git: this.gitOf(s),
         pilot: s.machine ? null : this.autopilot[s.id] ?? { on: false, events: [], every: null, trigger: "Only Run now" },
         unread: isUnread(k, seen) && spaceLevel(this.value("notify") ?? {}, s.id) !== "Off",
         red: here.filter((r) => r.section === "needs").length + ((k as any)?.status?.state === "blocked" ? 1 : 0),
@@ -187,7 +210,10 @@ export class Model {
       };
     });
     this.spaces = spaces;
+    void this.readGit(spaces);
     this.live.put("spaces", { spaces, sections: bar.sections });
-    this.onBuild?.({ spaces, sections: bar.sections, rows, machines: this.machines });
+    // each list's automations (herdr-task auto), with the folder and machine they belong to, for 3.0's Automations group
+    const automations = lists.flatMap((l: any) => (Array.isArray(l.automations) ? l.automations : []).map((a: any) => ({ ...a, folder: l.folder, machine: l.machine ?? null })));
+    this.onBuild?.({ spaces, sections: bar.sections, rows, machines: this.machines, automations });
   }
 }

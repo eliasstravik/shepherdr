@@ -527,27 +527,27 @@ export function withPluginErrors(sections: SettingSection[], errors: Record<stri
 
 /** the list of pages, in groups: the defaults of the level picked (what agents are told, only words in their prompts,
  *  apart from how Shepherdr runs, with what is one for all), this device's own, and what is only shown */
+/** the window's Settings sections, in its order; a space's own settings show only its own ones (Autopilot only for a
+ *  space on this computer, which is where it has an Autopilot page) */
+const ORDER = ['Agents', 'Tasks', 'Autopilot', 'Notify', 'Secrets', 'Machines', 'Window', 'Web']
+const SPACE_PAGES = new Set(['Agents', 'Tasks', 'Notify', 'Secrets', 'Autopilot'])
+
 function groupsOf(sections: SettingSection[], ui: UI): { name: string; pages: Page[] }[] {
   const level = levelOf(sections, ui)
-  // Present one delivery page without changing stored keys or the server/plugin section contract.
-  const delivery = sections.find((x) => x.global && x.name === 'Alerts and voice')
-  const scoped = sections.filter((x) => x.level === level && !x.global).map((x): Page => x.name === 'Notify' ? {
-    ...x, name: 'Notify',
-    targets: Object.fromEntries((delivery?.rows.filter((r) => !r.key.startsWith('voice.')) ?? []).map((r) => [r.key, delivery!.level ?? 'all'])),
+  const space = level !== 'all'
+  const notify = (x: SettingSection): Page => x.name === 'Notify' ? {
+    ...x,
     // Shepherdr 3's words: what reaches you from a space's Assistant
     about: 'All: every message from its Assistant. Needs me: its questions and alerts. Off: nothing, and its row stays quiet. Tasks reach you either way.',
-    rows: [...x.rows, ...(delivery?.rows.filter((r) => !r.key.startsWith('voice.')).map((r) => ({ ...r, group: 'Devices · Everywhere' })) ?? [])],
-  } : x)
-  const globals = sections.filter((x) => x.global).map((x): Page => x === delivery ? {
-    ...x, name: 'Voice', rows: x.rows.filter((r) => r.key.startsWith('voice.')),
-  } : x)
+  } : x
+  const pages = [...sections.filter((x) => x.level === level && !x.global), ...(space ? [] : sections.filter((x) => x.global))]
+    .filter((x) => ORDER.includes(x.name) && (!space || SPACE_PAGES.has(x.name)))
+    .map(notify)
+    .sort((a, b) => ORDER.indexOf(a.name) - ORDER.indexOf(b.name))
   const own = registry.settingsPages.filter((x) => x.when(ui)).map(({ name, about, Icon, View }): Page => ({ name, about, Icon, View, device: true, rows: [] }))
   return [
-    { name: 'What agents are told', pages: scoped.filter((x) => x.told) },
-    // what is one for all (alerts and voice) runs Shepherdr too, whatever level is picked: its page says so
-    { name: 'How Shepherdr runs', pages: [...scoped.filter((x) => !x.told), ...globals] },
+    { name: space ? 'Space settings' : 'Settings', pages },
     { name: 'This device', pages: [APPEARANCE, ...own] },
-    { name: 'About', pages: sections.filter((x) => !x.level && !x.global) },
   ].filter((g) => g.pages.length)
 }
 
@@ -603,9 +603,14 @@ function Control({ row, phone, set, edit, level }: { row: SettingRow; phone: boo
   const options = row.options ?? []
   const action = row.key in registry.settingActions
   // a role's agent: its words, and a sheet to pick another (Settings › Agents)
-  if (row.agent) return <Ghost onClick={() => openRole({ kind: 'role', level: level ?? 'all', key: row.key, title: row.label, pick: row.agent!.pick })} className="max-w-full"><span className="truncate">{row.value}</span></Ghost>
-  // a file every agent of a role is told first: edited in a sheet
-  if (row.file) return <Ghost onClick={() => openRole({ kind: 'file', role: row.key.split('.')[1], title: row.label, file: row.file! })}>Edit</Ghost>
+  // a role's agent (its model button) and, on Everywhere, Edit instructions: the file every agent of the role is told first
+  if (row.agent)
+    return (
+      <span className="flex max-w-full flex-wrap items-center justify-end gap-1.5">
+        <Ghost onClick={() => openRole({ kind: 'role', level: level ?? 'all', key: row.key, title: row.label, pick: row.agent!.pick })} className="max-w-full"><span className="truncate">{row.value}</span></Ghost>
+        {row.file ? <Ghost onClick={() => openRole({ kind: 'file', role: row.key.split('.')[1], title: TOLD[row.key.split('.')[1]] ?? row.label, file: row.file! })}>Edit instructions</Ghost> : null}
+      </span>
+    )
   const only = !row.num && !row.text && !row.multi && !action && options.length <= 1 && (options[0] ?? row.value) === row.value
   if (row.fixed || !row.key || only) return <span className="text-right text-pretty text-fg2 [overflow-wrap:anywhere]">{shown(row.value)}</span>
   if (row.num) return <NumberValue label={row.label} value={row.value} num={row.num} onEdit={edit} onSave={set} />
@@ -629,6 +634,9 @@ function Control({ row, phone, set, edit, level }: { row: SettingRow; phone: boo
   if (SEGMENTS.has(row.key)) return <Segments label={row.label} value={row.value} options={options} onPick={set} fill={phone} />
   return <Pick label={row.label} plain={phone} value={row.value} options={options} onPick={set} />
 }
+
+/** the instructions' titles, as the window's */
+const TOLD: Record<string, string> = { coordinator: 'What every Assistant is told first', worker: 'What every worker is told first', reviewer: 'What every reviewer is told first' }
 
 /** a value set here that is what the row would follow anyway unsets it: it follows again */
 const follows = (row: SettingRow, value: string) => (row.inherits && value === row.inherits.value ? null : value)
@@ -667,7 +675,6 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
       {/* the exact words it adds to every new task's brief, as it is set now */}
       {row.line ? <details className="text-[0.8125rem] text-fg2"><summary className="cursor-pointer">Words this adds to each new task</summary><p className="text-pretty">“{row.line}”</p></details> : null}
       {row.from ? <Small className="text-pretty">From {row.from}</Small> : null}
-      <SpaceOnly row={row} />
       {row.inherits ? (
         // set here: Reset, back to what it would be (its title says where that comes from)
         <Small className="text-pretty">
@@ -869,7 +876,7 @@ function SecretsList({ level, secrets, phone }: { level: string; secrets: { name
           <div className={clsx(rowLook(phone), 'flex-col items-stretch! gap-2 py-3!')}>
             <input
               aria-label="Name"
-              placeholder="NAME, like GITHUB_TOKEN"
+              placeholder="GITHUB_TOKEN"
               autoComplete="off"
               autoCapitalize="characters"
               autoCorrect="off"
@@ -883,7 +890,7 @@ function SecretsList({ level, secrets, phone }: { level: string; secrets: { name
           </div>
         ) : (
           <div className={rowLook(phone)}>
-            <dt className="min-w-0 flex-1 text-fg2">{secrets.length ? null : 'None here yet.'}</dt>
+            <dt className="min-w-0 flex-1 text-fg2">{secrets.length ? null : 'None. An agent that needs one asks in its chat.'}</dt>
             <dd>
               <Ghost
                 onClick={() => {
@@ -899,7 +906,7 @@ function SecretsList({ level, secrets, phone }: { level: string; secrets: { name
       </dl>
       {err && open === null ? <Small role="status" className="text-need-fg!">{err}</Small> : null}
       <p className={clsx('text-pretty text-fg3', phone ? 'px-4 text-[0.8125rem]' : 'text-[0.75rem]')}>
-        Agents run commands with them by name (shepherdr secret run), and ask for one in their chat when they need it.
+        Agents use these by name and never see them.
       </p>
       {own.length ? <Small className="text-pretty">{place!.name} sets its own: {own.map((x) => x.name).join(', ')}. <button type="button" onClick={() => setUI({ settings: { ...ui.settings!, level: place!.id } })} className="press-dim underline decoration-fg3 underline-offset-2">Open</button></Small> : null}
     </div>
@@ -934,32 +941,6 @@ export default function Settings() {
   const [refused, setRefused] = useState<Record<string, string>>({})
   const at = (key: string) => `${page.level ?? ''}|${key}`
   const level = levelOf(snap.settings, ui)
-  const levels = levelsOf(snap.settings)
-  const name = (l: string) => levelName(l, snap.settings, snap)
-  const pickLevel = (l: string) => setUI({ settings: { ...s, level: l } })
-  // the picker is the sidebar's tree: Everywhere, then each machine with its spaces under it, in its order
-  const order = ['all', ...(snap.machines ?? []).flatMap((m) => [m.id, ...snap.places.filter((p) => p.machine === m.machine).map((p) => p.id)])]
-  const rank = (l: string) => (order.includes(l) ? order.indexOf(l) : Infinity)
-  const tree = [...levels].sort((a, b) => rank(a) - rank(b))
-  const inTree = (l: string) => {
-    return { depth: l === 'all' ? 0 : l.startsWith('m:') ? 1 : 2, name: name(l) }
-  }
-  const levelPick = (where: string) =>
-    levels.length > 1 ? (
-      <Pick
-        label="Editing"
-        value={level}
-        options={tree}
-        show={name}
-        depth={inTree}
-        icon={(l) => <PlaceIcon level={inTree(l).depth} className={clsx(ic, 'text-fg2')} />}
-        onPick={pickLevel}
-        ordered
-        left={where !== 'phone'}
-        plain={where === 'phone'}
-        className={where === 'nav' ? 'px-0.5' : undefined}
-      />
-    ) : null
   const set = async (key: string, value: string | null) => {
     const own = registry.settingActions[key]
     if (own) {
@@ -986,12 +967,16 @@ export default function Settings() {
     requestAnimationFrame(() => scroller.current && (scroller.current.scrollTop = 0))
   }
   const clear = (key: string) => refused[at(key)] && setRefused((r) => ({ ...r, [at(key)]: '' }))
+  // a space's own settings say so, as the window's: "Only for <space> on <machine>", and Everywhere goes back
+  const spacePlace = level !== 'all' ? snap.places.find((p) => p.id === level) : undefined
   const body = <>
-    <div className={clsx('flex min-w-0 flex-wrap items-center gap-2 border-b border-line px-6 py-3', phone && 'px-4')}>
-      <span className="text-fg2">Editing:</span>
-      {page.device ? <span>This device</span> : page.global || !page.level ? <span>Everywhere</span> : levelPick(phone ? 'phone' : 'content') ?? <span>{name(level)}</span>}
-    </div>
-    <PageBody key={`${page.level ?? ''}|${page.name}`} page={page} phone={phone} set={set} refused={(key) => refused[at(key)]} clear={clear} hint={page.rows.some((r) => r.key === 'space.base') ? 'This repository’s branch for new tasks.' : page.level && !page.global && page.name !== 'Task IDs' && page.name !== 'Autopilot' ? levelHint(page.level, snap) : undefined} /></>
+    {spacePlace && !page.device ? (
+      <div className={clsx('flex min-w-0 items-center gap-3 border-b border-line bg-well px-6 py-2.5', phone && 'px-4')}>
+        <span className="min-w-0 flex-1 truncate text-fg2">Only for {spacePlace.name} on {machineName(snap.machines, spacePlace.machine)}</span>
+        <Ghost onClick={() => setUI({ settings: { ...s, level: 'all' } })}>Everywhere</Ghost>
+      </div>
+    ) : null}
+    <PageBody key={`${page.level ?? ''}|${page.name}`} page={page} phone={phone} set={set} refused={(key) => refused[at(key)]} clear={clear} /></>
 
   if (phone) {
     const list = (
@@ -1002,17 +987,10 @@ export default function Settings() {
               <BackIcon className={ic} />
             </RoundButton>
           }
-          name="Settings"
+          name={spacePlace ? 'Space settings' : 'Settings'}
         />
         <nav aria-label="Sections" className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain bg-canvas">
           <div className="flex flex-col gap-6 px-4 pt-4 pb-[calc(env(safe-area-inset-bottom)+--spacing(8))]">
-            {/* which level's defaults the two groups below set */}
-            {levels.length > 1 ? (
-              <div className={clsx(card, 'flex min-h-12 items-center justify-between gap-3 px-4')}>
-                <span>Editing:</span>
-                {levelPick('phone')}
-              </div>
-            ) : null}
             {groups.map((g) => (
               <div key={g.name}>
                 <h3 className={heading(true)}>{g.name}</h3>
@@ -1052,7 +1030,7 @@ export default function Settings() {
                     </RoundButton>
                   }
                   name={page.name}
-                  kind={page.device ? 'This device' : page.global ? 'Everywhere' : page.level ? name(page.level) : undefined}
+                  kind={page.device ? 'This device' : spacePlace ? spacePlace.name : undefined}
                 />
                 <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain bg-canvas">{body}</div>
               </section>
@@ -1075,7 +1053,7 @@ export default function Settings() {
           </IconButton>
         ) : null}
         <PlacesToggle when="closed" drawer />
-        <Who name="Settings" />
+        <Who name={spacePlace ? 'Space settings' : 'Settings'} />
         {tablet ? null : (
           <IconButton label="Close" onClick={close}>
             <XIcon className={ic} />

@@ -86,6 +86,18 @@ export interface Place {
   githubRemote?: boolean
   /** herdr on its machine isn't answering, since then ("14:02"): its agents can't hear anything */
   herdrDown?: string
+  /** its folder's git, as the window's sidebar reads it: a repo's own folder (main) or one of its worktrees (linked) */
+  git?: 'main' | 'linked'
+  /** its repo (the common .git folder): worktree spaces nest under their repo's main space */
+  repo?: string
+  /** its chat's header under its name, as 3.0's pane header: "Assistant · Claude Code", and the folder it works in */
+  header?: string
+  where?: string
+  /** its repo's name, branch (null: detached) and commits ahead of and behind its upstream, as the window's row */
+  gitName?: string
+  branch?: string | null
+  ahead?: number
+  behind?: number
 }
 
 /** A machine, as a heading over its spaces in the sidebar: no chat, nothing to open. How it is doing shows on it and in

@@ -242,7 +242,7 @@ export function AgentLine({ chatKey, cli }: { chatKey: string; cli: string }) {
       type="button"
       data-agent-line
       aria-label={`Runs on: ${words}. Change it`}
-      onClick={() => setUI({ plus: chatKey })}
+      onClick={() => openRestart(chatKey, taskChatId(chatKey) ?? 'this space', true)}
       className="press-dim relative mt-1 flex h-4 w-full justify-start pl-3 text-left text-xs/4 text-fg3 after:absolute after:-inset-y-1.5 after:inset-x-0"
     >
       {planned ? <span className="min-w-0 truncate italic">{planned}</span> : bits.length ? [...seen, ...requested].map(part) : `${cli} · Not known yet`}

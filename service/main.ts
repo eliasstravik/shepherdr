@@ -88,7 +88,7 @@ machines.start();
 const secrets = new Secrets(hub);
 compat.secrets = secrets;
 (compat as any).terminalsOf = (a: string) => hub.terminals.get(a);
-let secretNames: { name: string; at: number }[] = [];
+let secretNames: { name: string; at: number; space: string | null }[] = [];
 const refreshSecrets = async () => { secretNames = await secrets.names(); model.rebuild(); };
 void refreshSecrets();
 setInterval(() => void refreshSecrets(), 30_000);
@@ -114,9 +114,12 @@ compat.shared = { value: (k) => model.value(k), set: (k, v) => store.set(k, v) }
 store.on(() => model.rebuild());
 void store.load().catch(() => {});
 model.onBuild = (b) => live.setSnapshot(alertNewAnd(compat.snapshot({
-  host: me?.host ?? "this machine", user: me?.name ?? "You", spaces: b.spaces, sections: b.sections, rows: b.rows, artifacts: artifacts.list,
+  host: me?.host ?? "this machine", user: me?.name ?? "You", spaces: b.spaces, sections: b.sections, rows: b.rows, artifacts: artifacts.list, automations: b.automations,
   settings: [...settings.sections(me ? `https://${me.dns}/shepherdr/` : null, b.spaces.map((s: any) => ({ id: s.id, name: s.name, machine: s.machine ?? null })), b.machines, me?.host ?? "this machine"),
-    { name: "Secrets", level: "all", rows: [], secrets: secretNames }, windowSection((k) => model.value(k))], off: offList(), offPlugins: offPlugins(),
+    { name: "Secrets", level: "all", rows: [], secrets: secretNames.filter((x) => !x.space) },
+    // each space's own, as 3.0's Space settings › Secrets
+    ...b.spaces.map((s: any) => ({ name: "Secrets", level: s.id, rows: [], secrets: secretNames.filter((x) => x.space === s.id) })),
+    windowSection((k) => model.value(k))], off: offList(), offPlugins: offPlugins(),
   machines: [{ name: me?.host ?? "this machine", here: true, state: "connected" }, ...b.machines.map((name) => ({ name, here: false, state: "connected" }))],
 })));
 model.start();

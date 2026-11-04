@@ -1,23 +1,20 @@
-// Tasks: a place's tasks grouped Needs you / Ready / Working / To do / Done, or as this device chose in the header's ⋯
-// (groups.ts). Each heading folds what is under it away, remembered per view on this device. A row says where its task
-// is (machine, space) only where the view and its heading don't. A task opens straight into its one
-// agent's chat, and its dot here is that agent's. A To do task's agent waits for its next message, like any
-// chat. Tasks are added only by asking a coordinator. To do always shows, empty or not, so the human sees it
-// exists; the other groups, and Automations, only when they hold something; pinned tasks sit above them all, in Pinned.
-// A task's one menu (TaskActions) sits in its row's ⋯ (a mouse finds it on hover or a right click; a finger taps the ⋯ or
-// holds the row) and in its chat's ⋯. It ends a task three ways: Stop (To do, its work kept), Done and Delete. Done tasks
-// file themselves in the Archived view at the bottom of the list, out of every list and count; Unarchive brings one back.
+// Tasks, as Shepherdr 3's Tasks panel (mods/tasks): every task on every machine, Pinned first, then Needs you
+// (tasks and what any agent asks), then by the header's Group by (Status, Space, Machine, Machine › Space; kept on this
+// device). A filter row picks one status (All statuses, Needs you, Working, Ready, the rest under More). Each heading
+// folds what is under it away. A row says where its task is, as far as the grouping doesn't; a Ready row has Accept. A
+// row's menu only pins it (core/menus.js taskMenu, the window's too); the Assistant does the rest. Done tasks archive
+// themselves: the Archived row at the bottom opens them.
 import clsx from 'clsx'
 import { openAccept } from '@client/screens/Accept.tsx'
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import {
   act,
   archivedIn,
-  archiveTask,
   definePlugin,
-  closeTask,
-  deleteTask,
   filteredGroups,
+  goChat,
+  setTaskFilter,
+  tasksIn,
   namesFor,
   filterOf,
   getState,
@@ -32,13 +29,11 @@ import {
   placeOf,
   registry,
   setFilter,
-  setChips,
   setGroup,
   setUI,
   toggleAllDone,
   toggleShut,
   shownGroups,
-  stopTask,
   taskOf,
   useSnap,
   useStore,
@@ -47,15 +42,12 @@ import {
   type ListView,
   type TaskGroup,
 } from '@client/kernel.ts'
-import { ListChips } from '@client/chips.tsx'
 import { keysMoved } from '@client/focus.ts'
 import {
   ArchivedIcon,
   BackIcon,
-  CheckCircleIcon,
   CheckIcon,
   ClockIcon,
-  DeleteIcon,
   DownIcon,
   Empty,
   FilterBox,
@@ -66,28 +58,22 @@ import {
   Menu,
   MenuItem,
   MenuLabel,
-  MenuSeparator,
   Meta,
   MoreIcon,
   NextIcon,
   PinTaskIcon,
-  Primary,
   RoundButton,
   Row,
   rowClass,
   RowText,
-  SplitIcon,
-  StopIcon,
   taskLine,
   TaskDot,
-  UnarchiveIcon,
   UnpinIcon,
-  Who,
 } from '@client/ui.tsx'
-import { taskChatId, type Automation, type Place, type Snapshot, type Task } from '@shared/types.ts'
+import { doneNewestFirst, taskChatId, type Automation, type Place, type Snapshot, type Task } from '@shared/types.ts'
 import { useFlip } from '@client/motion.ts'
-import { and, Dialog, RowMenu, RowMenuButton, useRowMenu, type RowMenuState } from '@client/rowmenu.tsx'
-import { RestartItem } from '@client/restart.tsx'
+import { RowMenu, RowMenuButton, useRowMenu, type RowMenuState } from '@client/rowmenu.tsx'
+import * as MN from '@core/menus.js'
 
 /**
  * A task, with one line under its title (taskLine). Working, its pie fills with the % done its agent reported and the minutes
@@ -98,7 +84,9 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
   // the open task, or the focused pane's in split view
   const sel = useUI((u) => u.task === t.id || (panesHere(u)[u.split.pane]?.kind === 'task' && panesHere(u)[u.split.pane].id === t.id))
   const kb = useUI((u) => u.kb && !u.task && u.cur === ix)
-  const sub = taskLine(t, where)
+  // as 3.0's row: its second line (core/tasks.js secondLine), where it is at the end
+  const sub = t.sub || undefined
+  const at = where?.join(' · ')
   // archived: a quiet ring, or a done task's check; the status it was put away with stays in its chat
   const dot = t.archived ? (t.status === 'done' ? 'done' : 'idle') : t.status
   const menu = useRowMenu()
@@ -122,7 +110,7 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
         <RowText sub={sub}>
           <span className="text-fg3">{t.id}</span> {t.name}
         </RowText>
-        {t.status === 'ready' && !t.archived ? null : <Meta className={shy}>{t.age}</Meta>}
+        {at ? <Meta className={clsx(shy, t.status === 'ready' && !t.archived && 'mr-16 phone:mr-20')}>{at}</Meta> : null}
       </button>
       {/* as Shepherdr 3's Tasks panel: a Ready row has Accept inline */}
       {t.status === 'ready' && !t.archived ? (
@@ -136,217 +124,26 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
   )
 }
 
-/** Done: at once when nothing would be left unmerged; else it asks first (and says why when it can't be done) */
-async function markDone(t: Task) {
-  const r = await closeTask(t).catch((e: Error) => ({ ok: false, error: e.message, held: undefined }))
-  if (r.held?.length) setConfirm({ t, kind: 'close', held: r.held })
-  else if (r.ok === false) setConfirm({ t, kind: 'close', held: [], error: r.error || 'It could not be marked done.' })
-}
-
-/**
- * A task's one menu, in its row's ⋯ and its chat's: Pin or Unpin (not for an archived task), Restart agent (an open one),
- * then the ways to end it: Stop (an open one, unless it is To do with no agent up; it asks first), Done (one not done yet; it asks
- * first when work would stay unmerged), Unarchive (an archived one), and Delete, which always asks first.
- */
+/** A task's one menu, in its row's ⋯ and its chat's, as 3.0's (core/menus.js taskMenu): Pin or Unpin */
 function TaskActions({ task: t, close }: { task: Task; close: () => void }) {
-  const then = (f: () => unknown) => () => {
-    close()
-    f()
-  }
   return (
     <>
-      {t.archived ? null : t.pinned ? (
-        <MenuItem icon={<UnpinIcon className={ic} />} onClick={then(() => pinTask(t, false).catch(() => undefined))}>
-          Unpin
+      {(MN.taskMenu as (o: object) => { label: string; icon: string }[])({ pinned: !!t.pinned }).map((it) => (
+        <MenuItem key={it.label} icon={t.pinned ? <UnpinIcon className={ic} /> : <PinTaskIcon className={ic} />} onClick={() => { close(); void pinTask(t, !t.pinned).catch(() => undefined) }}>
+          {it.label}
         </MenuItem>
-      ) : (
-        <MenuItem icon={<PinTaskIcon className={ic} />} onClick={then(() => pinTask(t, true).catch(() => undefined))}>
-          Pin
-        </MenuItem>
-      )}
-      {t.status !== 'done' && !t.archived ? <RestartItem chat={t.agent?.chat ?? `${t.id}/Agent`} name={t.id} onPick={close} /> : null}
-      {t.status !== 'done' && !t.archived && (t.status !== 'todo' || t.agent?.running) ? (
-        <MenuItem icon={<StopIcon className={ic} />} onClick={then(() => setConfirm({ t, kind: 'stop' }))}>
-          Stop…
-        </MenuItem>
-      ) : null}
-      {t.status !== 'done' ? (
-        <MenuItem icon={<CheckCircleIcon className={ic} />} onClick={then(() => markDone(t))}>
-          Done
-        </MenuItem>
-      ) : null}
-      {t.archived ? (
-        <MenuItem icon={<UnarchiveIcon className={ic} />} onClick={then(() => archiveTask(t, false).catch(() => undefined))}>
-          Unarchive
-        </MenuItem>
-      ) : null}
-      <MenuSeparator />
-      <MenuItem icon={<DeleteIcon className={ic} />} className="text-need-fg" onClick={then(() => setConfirm({ t, kind: 'delete' }))}>
-        Delete…
-      </MenuItem>
+      ))}
     </>
   )
 }
 
-/** The row's menu: beside a desktop's panes, Open in split view, then the task's own */
+/** The row's menu: the task's own (Pin or Unpin) */
 function TaskMenu({ t, menu }: { t: Task; menu: RowMenuState }) {
-  const desktop = useUI((u) => u.device === 'desktop')
   const Actions = registry.views.taskActions ?? TaskActions
   return (
     <RowMenu menu={menu} label={t.id}>
-      {desktop ? (
-        <>
-          <MenuItem
-            icon={<SplitIcon className={ic} />}
-            onClick={() => {
-              menu.close()
-              openSplit({ kind: 'task', id: t.id })
-            }}
-          >
-            Open in split view
-          </MenuItem>
-          <MenuSeparator />
-        </>
-      ) : null}
       <Actions task={t} close={menu.close} />
     </RowMenu>
-  )
-}
-
-/* ---------- stopping and deleting a task ask first ---------- */
-
-type Confirming = { t: Task; kind: 'stop' | 'delete' } | { t: Task; kind: 'close'; held: string[]; error?: string }
-let confirming: Confirming | null = null
-const confirmListeners = new Set<() => void>()
-function setConfirm(c: Confirming | null) {
-  confirming = c
-  confirmListeners.forEach((f) => f())
-}
-
-/** "Stop SHE-12?", "Mark SHE-12 done?" or "Delete SHE-12?" */
-function ConfirmTask() {
-  const [, bump] = useState(0)
-  useEffect(() => {
-    const f = () => bump((n) => n + 1)
-    confirmListeners.add(f)
-    return () => void confirmListeners.delete(f)
-  }, [])
-  const snap = useSnap()
-  // the task as it is now: it may have stopped working while this was up
-  const c = confirming
-  const t = c && snap ? (snap.tasks.find((x) => x.id === c.t.id) ?? c.t) : c?.t
-  if (!c || !t) return null
-  // a new question each time, its own state fresh
-  if (c.kind === 'close') return <ConfirmClose key={`c:${t.id}`} t={t} held={c.held} failed={c.error} />
-  return c.kind === 'delete' ? <ConfirmDelete key={`d:${t.id}`} t={t} /> : <ConfirmStop key={`s:${t.id}`} t={t} />
-}
-
-const cancel = () => setConfirm(null)
-
-/** "Stop SHE-12?": its agent goes and it is To do; its work stays. It says why when it can't be stopped */
-function ConfirmStop({ t }: { t: Task }) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const go = async () => {
-    setBusy(true)
-    setError(null)
-    const r: { ok?: boolean; error?: string } = await stopTask(t).catch((e: Error) => ({ ok: false, error: e.message }))
-    setBusy(false)
-    if (r.ok === false) return setError(r.error || 'It could not be stopped.')
-    setConfirm(null)
-  }
-  return (
-    <Dialog
-      onCancel={cancel}
-      title={`Stop ${t.id}?`}
-      buttons={
-        <Primary autoFocus disabled={busy} onClick={go}>
-          {busy ? 'Stopping…' : 'Stop'}
-        </Primary>
-      }
-    >
-      <p>{t.status === 'work' ? 'Its agent is working; this ends that. ' : ''}It goes to To do. Its work stays, and writing to it starts it again.</p>
-      {error ? <p className="mt-1.5 text-need-fg">{error}</p> : null}
-    </Dialog>
-  )
-}
-
-/** "Mark SHE-12 done?" when it holds work main lacks: that stays in its worktree and branch, but nothing is merged.
- *  failed: it could not be marked done, and this says why */
-function ConfirmClose({ t, held, failed }: { t: Task; held: string[]; failed?: string }) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(failed ?? null)
-  const go = async () => {
-    setBusy(true)
-    const r = await closeTask(t, true).catch((e: Error) => ({ ok: false, error: e.message }))
-    setBusy(false)
-    if (r.ok === false) return setError(r.error || 'It could not be marked done.')
-    setConfirm(null)
-  }
-  return (
-    <Dialog
-      onCancel={cancel}
-      title={failed ? `${t.id} wasn’t marked done` : `Mark ${t.id} done?`}
-      safe={!held.length}
-      cancel={held.length ? 'Cancel' : 'OK'}
-      buttons={
-        held.length ? (
-          <Primary autoFocus disabled={busy} onClick={go}>
-            {busy ? 'Marking done…' : 'Done'}
-          </Primary>
-        ) : null
-      }
-    >
-      {held.length ? <p>It holds {and(held)}. Nothing is merged; its worktree and branch keep that work.</p> : null}
-      {error ? <p className="mt-1.5 text-need-fg">{error}</p> : null}
-    </Dialog>
-  )
-}
-
-/**
- * "Delete SHE-12?": it goes for good, with its agent, worktree, branch and chat. A task that holds work the branch
- * hasn't landed (or uncommitted changes) is refused first; then it says what would be lost and offers to delete anyway.
- */
-function ConfirmDelete({ t }: { t: Task }) {
-  const [busy, setBusy] = useState(false)
-  const [held, setHeld] = useState<string[] | null>(null)
-  // its agent was stopped while it was looked at again: it waits for a message to go on
-  const [stopped, setStopped] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const go = async () => {
-    setBusy(true)
-    setError(null)
-    const r = await deleteTask(t, !!held).catch((e: Error) => ({ ok: false, error: e.message, held: undefined, stopped: false }))
-    setBusy(false)
-    if (r.held?.length) {
-      setStopped(!!r.stopped)
-      return setHeld(r.held)
-    }
-    if (r.ok === false) return setError(r.error || 'It could not be deleted.')
-    setConfirm(null)
-    // its chat was open: it is gone, so back to the place
-    if (getState().ui.task === t.id) setUI({ task: null })
-  }
-  return (
-    <Dialog
-      onCancel={cancel}
-      safe
-      title={`Delete ${t.id}?`}
-      buttons={
-        <Primary className="bg-need-fg! text-white! dark:text-black!" disabled={busy} onClick={go}>
-          {busy ? 'Deleting…' : held ? 'Delete anyway' : 'Delete'}
-        </Primary>
-      }
-    >
-      {held ? (
-        <p>
-          It holds {and(held)}.{stopped ? ' Its agent was stopped; writing to it starts it again.' : ''} Deleting it anyway loses that work for good.
-        </p>
-      ) : (
-        <p>Its agent, worktree, branch and chat go for good. This can’t be undone.</p>
-      )}
-      {error ? <p className="mt-1.5 text-need-fg">{error}</p> : null}
-    </Dialog>
   )
 }
 
@@ -354,20 +151,105 @@ function ConfirmDelete({ t }: { t: Task }) {
  *  heading says it ("vm-str · gtm") */
 function whereOf(snap: Snapshot, t: Task, names: TaskGroup['names']) {
   const p = placeOf(snap, t.place)
-  const m = names.machine ? snap.machines?.find((x) => x.machine === p.machine) : undefined
+  const m = names.machine && p.machine !== snap.host ? snap.machines?.find((x) => x.machine === p.machine) : undefined
   return [m?.name, names.project ? p.name : undefined].filter((x): x is string => !!x)
 }
 
-/** what to ask for a task where none is: the one space's coordinator, else any */
-function noTasks(snap: Snapshot, list: ListView) {
-  const one = list.level === 2 ? snap.places.find((p) => p.id === list.chips[0]) : undefined
-  return one ? `No tasks yet. Ask ${one.name} to add one.` : 'No tasks yet. Ask an Assistant to add one.'
+/** 3.0's statuses (core/tasks.js ORDER) as the web's task statuses, and their words */
+const FILTER_STATUS: Record<string, Task['status']> = { working: 'work', merging: 'merging', ready: 'ready', queued: 'queued', todo: 'todo', done: 'done' }
+const FILTER_WORDS: Record<string, string> = { needs: 'Needs you', working: 'Working', merging: 'Merging', ready: 'Ready', queued: 'Queued', todo: 'To do', done: 'Done', automations: 'Automations' }
+const FILTER_ORDER = ['needs', 'ready', 'merging', 'working', 'queued', 'todo', 'done', 'automations']
+/** the chips that show beside All statuses before More, as far as there is room (3.0's filterRow) */
+const PRIMARY = ['needs', 'working', 'ready']
+
+/** what an agent asks that is no task's (an Assistant's question, a secret, its turn waiting): a Needs you row */
+type AgentNeed = { id: string; chat: string; who: string; why: string; where?: string }
+function agentNeeds(snap: Snapshot): AgentNeed[] {
+  return snap.needs.filter((n) => !n.task && n.chat).map((n) => {
+    const p = snap.places.find((x) => x.id === n.place)
+    const m = p && p.machine !== snap.host ? snap.machines?.find((x) => x.machine === p.machine)?.name : undefined
+    return { id: n.id, chat: n.chat, who: p ? `${p.name} Assistant` : 'Agent', why: n.question?.title ?? (n.secret ? `Wants the secret ${n.secret.name}` : n.text || 'Waits for your reply'), where: [m, p?.name].filter(Boolean).join(' · ') || undefined }
+  })
 }
 
-/** The lists' tasks: what their chips hold (placeId, the place picked, is for plugins of old) */
-/** a Needs you group counts what its tasks wait for, card by card, as every other count does */
+/** an agent's Needs you row: a tap opens its chat */
+function AgentNeedRow({ n }: { n: AgentNeed }) {
+  return (
+    <li className={clsx(rowClass(false, false), 'p-0!')}>
+      <button type="button" onClick={() => goChat(n.chat)} className="flex min-h-[inherit] min-w-0 flex-1 cursor-pointer items-start gap-2 rounded-[inherit] px-2 py-1.5 text-left outline-none keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)] phone:px-3 [&>.dot]:mt-[3px] phone:[&>.dot]:mt-1">
+        <TaskDot s="need" />
+        <RowText sub={n.why}>{n.who}</RowText>
+        {n.where ? <Meta>{n.where}</Meta> : null}
+      </button>
+    </li>
+  )
+}
+
+/** The filter row (3.0's): All statuses, then Needs you, Working and Ready while they hold something, then More with
+ *  the rest that do (and Automations) */
+function StatusFilters({ counts, filter }: { counts: Record<string, number>; filter: string }) {
+  const [open, setOpen] = useState(false)
+  // as 3.0's: never wraps, never scrolls; a chip that doesn't fit goes in More (widths estimated, about 7.5px a letter)
+  const row = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(360)
+  useLayoutEffect(() => {
+    const el = row.current
+    if (!el) return
+    const seen = new ResizeObserver(() => setWidth(el.clientWidth))
+    seen.observe(el)
+    return () => seen.disconnect()
+  }, [])
+  const est = (text: string, n: number) => 24 + text.length * 7.5 + (n ? 6 + String(n).length * 8 : 0)
+  const chips = FILTER_ORDER.filter((k) => counts[k] || k === filter)
+  const primary = PRIMARY.filter((k) => chips.includes(k))
+  const shown: string[] = []
+  let room = width - 8 - est('All statuses', 0)
+  for (const [i, k] of primary.entries()) {
+    const w = est(FILTER_WORDS[k], counts[k] ?? 0)
+    if (w + (chips.length > primary.length || i < primary.length - 1 ? 70 : 0) > room) break
+    shown.push(k)
+    room -= w
+  }
+  const more = chips.filter((k) => !shown.includes(k))
+  const picked = more.includes(filter) ? filter : null
+  const chip = (k: string, label: string, n: number) => (
+    <button key={k} type="button" aria-pressed={filter === k} onClick={() => setTaskFilter(k)}
+      className="press inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[0.8125rem] text-fg2 hover:bg-hover hover:text-fg aria-pressed:bg-sel aria-pressed:text-fg coarse:h-9 phone:h-9 phone:px-3 phone:text-[0.875rem]">
+      {label}
+      {n ? <span className="text-fg3 tabular-nums">{n}</span> : null}
+    </button>
+  )
+  return (
+    <div ref={row} role="group" aria-label="Status" className="flex items-center gap-0.5 px-1.5 pt-1.5 phone:px-2">
+      {chip('all', 'All statuses', 0)}
+      {shown.map((k) => chip(k, FILTER_WORDS[k], counts[k] ?? 0))}
+      {more.length ? (
+        <div className="relative shrink-0">
+          <button type="button" aria-haspopup="menu" aria-expanded={open} aria-pressed={!!picked} onClick={() => setOpen(!open)}
+            className="press inline-flex h-7 items-center gap-1 rounded-full pr-2 pl-2.5 text-[0.8125rem] text-fg2 hover:bg-hover hover:text-fg aria-expanded:bg-hover aria-pressed:bg-sel aria-pressed:text-fg coarse:h-9 phone:h-9 phone:text-[0.875rem]">
+            {picked ? FILTER_WORDS[picked] : 'More'}
+            {picked && counts[picked] ? <span className="text-fg3 tabular-nums">{counts[picked]}</span> : null}
+            <DownIcon aria-hidden className="size-3.5 text-fg3" />
+          </button>
+          {open ? (
+            <Menu label="More statuses" onClose={() => setOpen(false)} className="absolute top-full left-0 z-21 mt-1.5 max-w-[calc(100vw-24px)] origin-top-left">
+              {more.map((k) => (
+                <MenuItem key={k} role="menuitemradio" aria-checked={filter === k} icon={filter === k ? <CheckIcon className={ic} /> : null} hint={counts[k] ? String(counts[k]) : undefined}
+                  onClick={() => { setOpen(false); setTaskFilter(k) }}>
+                  {FILTER_WORDS[k]}
+                </MenuItem>
+              ))}
+            </Menu>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** a Needs you group counts what its tasks wait for, card by card, and what agents ask beside them */
 const needCount = (snap: Snapshot, g: { key: string; count: number; tasks: Task[] }) => {
-  if (g.key !== 'need' && !g.key.endsWith('|need')) return g.count
+  if (g.key !== 'need') return g.count
   const ids = new Set(g.tasks.map((t) => t.id))
   return Math.max(g.count, snap.needs.filter((n) => n.task && ids.has(n.task)).length)
 }
@@ -380,45 +262,66 @@ function TaskList(_: { placeId: string }) {
   const allDone = useUI((u) => u.allDone)
   const shut = useUI((u) => u.shut)
   const archived = useUI((u) => u.archived === key)
+  const wanted = useUI((u) => u.taskFilter)
   const q = useUI((u) => filterOf(u, view.search, 'tasks'))
-  // the footer's place: the one space shown, else the place picked
-  const place = placeOf(snap, view.level === 2 ? view.chips[0] : getState().ui.place)
+  const place = placeOf(snap, getState().ui.place)
   const by = groupFor(chosen, view.level)
-  // a task moving to another group glides there; a new one fades in; what a filter, Show all, a fold or a chip leaves
-  // just shows
+  // a task moving to another group glides there; a new one fades in; what a filter, Show more or a fold leaves just shows
   const list = useRef<HTMLDivElement>(null)
-  useFlip(list, `${key}|${by}|${q}|${allDone.join()}|${shut.join()}`)
+  useFlip(list, `${key}|${by}|${q}|${wanted}|${allDone.join()}|${shut.join()}`)
   if (archived) return <ArchivedList list={view} />
-  // filtering, Done and archived tasks are in it too, each group whole and open, folded shut or not
-  const groups = q
-    ? filteredGroups(snap, view, q, { groups: chosen }).map((g) => ({ ...g, count: g.tasks.length, more: 0, less: false, shut: false }))
-    : shownGroups(snap, view, { groups: chosen, allDone, shut })
-  // what the keyboard walks: the rows on screen
-  const order = groups.flatMap((g) => g.tasks)
-  const footer = q ? null : registry.tasksFooter.map((F, i) => <F key={i} place={place} list={view} />)
-  if (!groups.length && !q && !archivedIn(snap, view).length)
+  const loaded = !!snap.places.length || !!snap.tasks.length
+  const asks = agentNeeds(snap).filter((n) => !q || [n.who, n.why, n.where].join(' ').toLowerCase().includes(q.toLowerCase()))
+  const live = tasksIn(snap, view)
+  const automations = Object.values(snap.automations ?? {}).flat()
+  // the chips' counts: what each status holds now (Needs you: its tasks and what agents ask)
+  const counts: Record<string, number> = { needs: live.filter((t) => t.status === 'need').length + agentNeeds(snap).length, automations: automations.length }
+  for (const [k, st] of Object.entries(FILTER_STATUS)) counts[k] = live.filter((t) => t.status === st).length
+  const filter = FILTER_ORDER.includes(wanted) && (counts[wanted] || q) ? wanted : 'all'
+  const footer = q || filter !== 'all' ? null : registry.tasksFooter.map((F, i) => <F key={i} place={place} list={view} />)
+  // one status picked: its rows alone, no headings
+  if (filter !== 'all') {
+    const rows = filter === 'needs' ? live.filter((t) => t.status === 'need') : filter === 'automations' ? [] : live.filter((t) => t.status === FILTER_STATUS[filter])
+    const found = (q ? rows.filter((t) => filteredGroups(snap, view, q).some((g) => g.tasks.includes(t))) : filter === 'done' ? doneNewestFirst(rows) : rows)
+    const what = filter === 'needs' ? 'tasks that need you' : filter === 'automations' ? 'automations' : `${FILTER_WORDS[filter]} tasks`
     return (
       <>
-        <ListChips alone />
-        <Empty>{view.attention ? 'No tasks need you or are ready.' : noTasks(snap, view)}</Empty>
-        {view.attention ? <LinkButton onClick={() => setChips(view.chips)}>Show all tasks</LinkButton> : null}
-        {footer}
+        <TaskFilter listKey={view.search} order={found} />
+        <StatusFilters counts={counts} filter={filter} />
+        <div ref={list} className="relative pt-1">
+          {found.length || (filter === 'needs' && asks.length) ? (
+            <List>
+              {found.map((t, i) => <TaskRow key={t.id} t={t} ix={i} where={whereOf(snap, t, { machine: true, project: true })} />)}
+              {filter === 'needs' ? asks.map((n) => <AgentNeedRow key={n.id} n={n} />) : null}
+            </List>
+          ) : filter === 'automations' ? registry.tasksFooter.slice(0, 1).map((F, i) => <F key={i} place={place} list={view} />) : <Empty className="pt-3 text-fg3">No {what} match “{q}”.</Empty>}
+        </div>
       </>
     )
+  }
+  // searching, Done and archived tasks are in it too, each group whole and open, folded shut or not
+  let groups = q
+    ? filteredGroups(snap, view, q, { groups: chosen }).map((g) => ({ ...g, count: g.tasks.length, more: 0, less: false, shut: false }))
+    : shownGroups(snap, view, { groups: chosen, allDone, shut })
+  // Needs you holds what agents ask too: a group of its own after Pinned when no task needs you
+  if (asks.length && !groups.some((g) => g.key === 'need')) {
+    const at = groups[0]?.key === 'pinned' ? 1 : 0
+    groups = [...groups.slice(0, at), { key: 'need', label: 'Needs you', tasks: [], names: namesFor(view.level), count: 0, more: 0, less: false, shut: !q && shut.includes(`${key}|need`) }, ...groups.slice(at)]
+  }
+  // what the keyboard walks: the rows on screen
+  const order = groups.flatMap((g) => g.tasks)
   const machines = [...new Set(groups.flatMap((g) => (g.machine ? [g.machine.id] : [])))]
   const machineShut = (id: string) => !q && shut.includes(`${key}|m:${id}`)
+  const nothing = !groups.length && !archivedIn(snap, view).length && !automations.length
   return (
     <>
       <TaskFilter listKey={view.search} order={order} />
-      {view.attention && !q ? <div className="flex items-center justify-between gap-2 px-3 pt-2 text-[0.8125rem] text-fg2 phone:px-4 phone:text-[0.9375rem]">
-        <span>Actionable · all machines</span>
-        <LinkButton onClick={() => setChips(view.chips)}>Show all tasks</LinkButton>
-      </div> : null}
-      {/* one flat run of keyed parts: a group showing or going never makes the ones after it start over; only the
-          rows and what sits between them glide (data-flip), never what holds them, so no move adds to another */}
+      {/* the filter row, once there is anything to filter */}
+      {nothing && !q ? null : <StatusFilters counts={counts} filter="all" />}
       <div ref={list} className="relative">
+        {!loaded ? <Empty className="pt-3 text-fg3">Reading tasks…</Empty> : null}
         {groups.flatMap((g, i) => {
-          // All machines: a machine's name over its groups, once, with how many tasks they hold
+          // Machine › Space: a machine's name over its groups, once, with how many tasks they hold
           const m = g.machine
           const head =
             m && m.id !== groups[i - 1]?.machine?.id ? (
@@ -430,30 +333,25 @@ function TaskList(_: { placeId: string }) {
                 fold={q ? undefined : { shut: machineShut(m.id), toggle: (all) => toggleShut(key, `m:${m.id}`, all ? machines.filter((x) => x !== m.id).map((x) => `m:${x}`) : []) }}
               />
             ) : null
-          // a machine folded shut shows its name alone
           if (m && machineShut(m.id)) return [head]
-          // its siblings: the groups under the same machine (or under none)
           const siblings = () => groups.filter((x) => x !== g && x.machine?.id === m?.id).map((x) => x.key)
           const fold: Fold | undefined = q ? undefined : { shut: g.shut, toggle: (all) => toggleShut(key, g.key, all ? siblings() : []) }
+          const extra = g.key === 'need' ? asks : []
           return [
             head,
             <div key={g.key}>
               {g.kind === 'machine' ? (
                 <MachineHeading name={g.label} first={!i} count={g.count} fold={fold} />
               ) : (
-                <GroupHeading label={g.label} note={g.note} count={needCount(snap, g)} flip={`group:${g.key}`} fold={fold} />
+                <GroupHeading label={g.label} note={g.note} count={needCount(snap, g) + extra.length} flip={`group:${g.key}`} fold={fold} />
               )}
-              {g.shut ? null : g.tasks.length ? (
+              {g.shut ? null : (
                 <List>
                   {g.tasks.map((t) => (
                     <TaskRow key={t.id} t={t} ix={order.indexOf(t)} where={whereOf(snap, t, g.names)} />
                   ))}
+                  {extra.map((n) => <AgentNeedRow key={n.id} n={n} />)}
                 </List>
-              ) : (
-                // only To do shows empty; with no tasks at all it says how one comes
-                <div data-flip={`empty:${g.key}`}>
-                  <Empty className="pt-0.5 text-fg3">{order.length ? 'No tasks to do yet. Ask an Assistant to add one.' : noTasks(snap, view)}</Empty>
-                </div>
               )}
               {g.more || g.less ? (
                 <div data-flip={`more:${g.key}`}>
@@ -463,7 +361,9 @@ function TaskList(_: { placeId: string }) {
             </div>,
           ]
         })}
-        {q && !groups.length ? <Empty className="pt-3 text-fg3">No tasks match “{q}”. Try another search or change the filters.</Empty> : null}
+        {/* nothing at all: said once, never "yet" (3.0's) */}
+        {loaded && nothing && !q ? <Empty className="pt-3 text-fg3">{snap.tasks.length ? 'Nothing to do.' : 'No tasks on any machine. Ask an Assistant to plan some.'}</Empty> : null}
+        {q && !groups.length ? <Empty className="pt-3 text-fg3">No tasks match “{q}”.</Empty> : null}
         {footer}
       </div>
     </>
@@ -552,13 +452,11 @@ function TaskFilter({ listKey, order }: { listKey: string; order: Task[] }) {
           openTask(order[Math.max(0, cur)].id)
         }
       }}
-    >
-      <ListChips />
-    </FilterBox>
+    />
   )
 }
 
-/** Under a group cut to its latest Done tasks, "Show all 96"; once they all show, "Show less": a quiet row, not a call to act */
+/** Under a group cut to its latest Done tasks, "Show 91 more"; once they all show, "Show less": a quiet row, not a call to act */
 function DoneToggle({ more, onClick }: { more: number; onClick: () => void }) {
   return (
     <div className="px-1.5 phone:px-2">
@@ -568,7 +466,7 @@ function DoneToggle({ more, onClick }: { more: number; onClick: () => void }) {
         className="press flex min-h-8 items-center gap-1 rounded-full px-2.5 text-[0.75rem] font-medium text-fg3 hover:text-fg2 keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] focus-visible:outline-none coarse:min-h-11 phone:min-h-11 phone:px-3 phone:text-[0.875rem]"
         onClick={onClick}
       >
-        {more ? `Show all ${more}` : 'Show less'}
+        {more ? `Show ${more} more` : 'Show less'}
         <DownIcon aria-hidden className={clsx('size-3.5 shrink-0', !more && 'rotate-180')} />
       </button>
     </div>
@@ -632,16 +530,15 @@ function TasksMenu(_: { place: Place }) {
   const view = useStore((s) => listView(s.ui, snap))
   const level = view.level
   const chosen = useUI((u) => u.groups)
-  const by = view.attention ? 'project' : groupFor(chosen, level)
+  const by = groupFor(chosen, level)
   const phone = useUI((u) => u.device === 'phone')
   const [open, setOpen] = useState(false)
   const choices = groupChoices(level)
-  if (choices.length < 2) return null
   const B = phone ? RoundButton : IconButton
   return (
     <div className="relative">
       <B
-        label="Group tasks"
+        label="Group by"
         aria-haspopup="menu"
         aria-expanded={open}
         className={clsx('rounded-full!', phone ? 'aria-expanded:bg-line2' : 'aria-expanded:bg-hover')}
@@ -650,7 +547,7 @@ function TasksMenu(_: { place: Place }) {
         <MoreIcon className={ic} />
       </B>
       {open ? (
-        <Menu label="Group tasks" onClose={() => setOpen(false)} className="absolute top-full right-0 z-21 mt-1.5 max-w-[calc(100vw-24px)] origin-top-right">
+        <Menu label="Group by" onClose={() => setOpen(false)} className="absolute top-full right-0 z-21 mt-1.5 max-w-[calc(100vw-24px)] origin-top-right">
           <div role="group" aria-label="Group by">
             <MenuLabel>Group by</MenuLabel>
             {choices.map((c) => (
@@ -671,31 +568,6 @@ function TasksMenu(_: { place: Place }) {
         </Menu>
       ) : null}
     </div>
-  )
-}
-
-/** a task's pull request, small in its chat's header: a tap opens it on GitHub */
-function PrLink({ chatKey }: { chatKey: string }) {
-  const snap = useSnap()!
-  const ui = useUI()
-  const id = taskChatId(chatKey)
-  const pr = id ? taskOf(snap, id)?.pr : undefined
-  if (!pr) return null
-  const phone = ui.device === 'phone'
-  return (
-    <a
-      href={pr.url}
-      target="_blank"
-      rel="noreferrer"
-      data-pr={pr.number}
-      className={clsx(
-        'press-dim inline-flex shrink-0 items-center rounded-full font-medium whitespace-nowrap text-fg2 tabular-nums',
-        phone ? 'h-11 bg-bubble px-3.5 text-[0.9375rem]' : 'h-7 px-2.5 text-[0.8125rem] shadow-[inset_0_0_0_1px_var(--line2)] hover:bg-hover',
-      )}
-    >
-      {/* a phone's header has room for the number alone */}
-      {phone ? `#${pr.number}` : `PR #${pr.number}`}
-    </a>
   )
 }
 
@@ -829,7 +701,5 @@ export default definePlugin({
     reg.views.tasksMenu = TasksMenu
     reg.views.taskActions = TaskActions
     reg.tasksFooter.push(Automations, ArchivedLink)
-    reg.overlays.push(ConfirmTask)
-    reg.agentHeader.push({ order: 40, View: PrLink })
-  },
+    },
 })

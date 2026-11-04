@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState, type HTMLAttributes } from 'react
 import type { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { act, agentChat, definePlugin, getState, openItem, placeOf, setUI, shownItem, useStore, useUI } from '@client/kernel.ts'
-import { CTRL, ic, MenuItem, shortcut, Small, TermIcon } from '@client/ui.tsx'
+import { CTRL, ic, MenuItem, shortcut, Small, Tab, Tabs, TermIcon } from '@client/ui.tsx'
 import type { Place, TermScreen } from '@shared/types.ts'
 import { connectTerminal, streamInput } from './stream.ts'
 import { colsOf, fitFont, foldShown, frame, LINE, MAX, MIN, PAD, ZOOM } from './screen.ts'
@@ -298,25 +298,39 @@ function TerminalView({ chatKey, panel }: { chatKey: string; panel?: boolean }) 
   )
 }
 
+/** the space's other tabs (3.0's tab bar), each its terminal; on a phone also Chat or Terminal, which a wider header
+ *  shows as its own toggle */
 function PlaceTerm({ place }: { place: Place }) {
   const ui = useUI()
   const on = ui.term === place.chat || !!ui.term?.startsWith('t:')
+  const go = (term: string | null) => setUI({ term, arts: null, menu: false, plus: null, pick: null })
   return (
     <>
-    {/* Shepherdr 3: the space's other tabs, each its terminal */}
-    {!on ? (place.tabs ?? []).map((t) => (
-      <MenuItem key={t.term} icon={<TermIcon className={ic} />} onClick={() => setUI({ term: t.term, arts: null, menu: false, plus: null, pick: null })}>
+    {(place.tabs ?? []).map((t) => (
+      <MenuItem key={t.term} icon={<TermIcon className={ic} />} onClick={() => go(t.term)}>
         {t.name}
       </MenuItem>
-    )) : null}
-    <MenuItem
-      icon={<TermIcon className={ic} />}
-      hint={ui.device === 'desktop' ? shortcut(CTRL, '`') : null}
-      onClick={() => setUI({ term: on ? null : place.chat, arts: null, menu: false, plus: null, pick: null })}
-    >
-      {on ? 'Back to the chat' : 'Terminal'}
-    </MenuItem>
+    ))}
+    {ui.device === 'phone' ? (
+      <MenuItem icon={<TermIcon className={ic} />} onClick={() => go(on ? null : place.chat)}>
+        {on ? 'Chat' : 'Terminal'}
+      </MenuItem>
+    ) : null}
     </>
+  )
+}
+
+/** 3.0's Chat | Terminal in the Assistant's header (a desktop's or tablet's) */
+function ChatOrTerminal({ place }: { place: Place }) {
+  const device = useUI((u) => u.device)
+  const term = useUI((u) => u.term === place.chat)
+  if (device === 'phone') return null
+  const go = (t: boolean) => setUI({ term: t ? place.chat : null, arts: null, menu: false, plus: null, pick: null })
+  return (
+    <Tabs label="Chat or terminal" className="shrink-0">
+      <Tab on={!term} onClick={() => go(false)}>Chat</Tab>
+      <Tab on={term} title={shortcut(CTRL, '`')} onClick={() => go(true)}>Terminal</Tab>
+    </Tabs>
   )
 }
 
@@ -330,6 +344,7 @@ export default definePlugin({
   name: 'terminal',
   setup(reg) {
     reg.placeMenu.push({ order: 60, View: PlaceTerm })
+    reg.placeHeader.push({ order: 15, View: ChatOrTerminal })
     reg.taskPanel.push({ id: 'terminal', order: 10, label: 'Terminal', Icon: TermIcon, View: ({ chatKey }) => <TerminalView chatKey={chatKey} panel /> })
     reg.chatBody.push({ when: (ui, key) => ui.term === key, View: TerminalView })
     // Shepherdr 3: one of the space's other tabs, in place of its chat (t:<terminal>)

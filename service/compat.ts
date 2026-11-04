@@ -6,6 +6,10 @@
 import type { Snapshot, Place, Task, Need, Section, Machine, Chat, Message, Status, TaskStatus, StepKind, ActivityAnswer, Question, Artifact, SettingSection } from "../web/shared/types.ts";
 import * as T from "../core/tasks.js";
 import * as SPc from "../core/spaces.js";
+import { kindOf as kindOfTerm } from "../core/chat-reader.js";
+const CLI_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex" };
+import * as MNc from "../core/menus.js";
+const { machineLabel } = MNc as any;
 import { HOME } from "./paths.ts";
 const { spaceName } = SPc as any;
 import type { Where } from "./worktree.ts";
@@ -76,9 +80,23 @@ export function activity(reader: any, id: string): ActivityAnswer {
 
 /** An artifact (herdr-artifact list) as 2.1's: its versions newest first, which space it belongs to (its folder's,
  *  here), and whether the web can draw it (a recipe) or only the window (an older GPUI one). */
-function artifactOf(a: any, spaces: Space[]): Artifact {
+/** herdr-task's automations as each space's (by its folder): the window's row words, its name, Paused or Didn't
+ *  start, and when it runs next */
+function automationsBySpace(list: any[], spaces: Space[]) {
+  const out: Record<string, any[]> = {};
+  for (const a of list) {
+    const s = spaces.find((x) => (x.machine ?? null) === (a.machine ?? null) && x.folder === a.folder);
+    if (!s) continue;
+    const next = !a.last_error && !a.paused && a.next_run ? [new Date(a.next_run).toLocaleString("en", { weekday: "short", hour: "numeric", minute: "2-digit" })] : [];
+    (out[s.id] ??= []).push({ name: a.title ?? a.id, when: a.last_error ? "Didn't start" : a.paused ? "Paused" : a.when ?? "", what: a.title ?? "", on: !a.paused, next });
+  }
+  return out;
+}
+
+function artifactOf(a: any, spaces: Space[], program: (addr: string) => string | null = () => null): Artifact {
   const place = spaces.find((s) => !s.machine && s.folder === a.folder)?.id ?? spaces.find((s) => !s.machine)?.id ?? "";
-  const by = a.task ? `${a.task} agent` : a.publisher ? "an agent" : "";
+  // 3.0's row: "v3 · Claude Code · 2h ago": the program of the agent that published it while it runs, else nothing
+  const by = (a.publisher && program(a.publisher)) || "";
   const recipe = (a.files ?? []).includes("recipe.json") && !(a.files ?? []).includes("main.js");
   return {
     id: a.id, title: a.title, place, v: a.version, at: a.at, when: ago(a.at, false), by, keeper: "", kind: recipe ? "recipe" : "gpui",
@@ -163,15 +181,16 @@ export class Compat {
 
   addrOf(key: string) { return this.chats.get(key) ?? null; }
 
-  snapshot(input: { host: string; user: string; machines: { name: string; here: boolean; state: string }[]; spaces: Space[]; sections: any[]; rows: Row[]; artifacts?: any[]; settings?: SettingSection[]; off?: string[]; offPlugins?: string[] }): Snapshot {
+  snapshot(input: { host: string; user: string; machines: { name: string; here: boolean; state: string }[]; spaces: Space[]; sections: any[]; rows: Row[]; artifacts?: any[]; settings?: SettingSection[]; off?: string[]; offPlugins?: string[]; automations?: any[] }): Snapshot {
     const { host, spaces, rows } = input;
     this.host = host;
     this.rows = rows;
     this.spaceList = spaces;
     const chats = new Map<string, string>();
     const machines: Machine[] = input.machines.map((m) => {
-      const key = m.here ? host : m.name;
-      return { id: `m:${key}`, machine: key, name: key, status: m.state === "connected" ? "idle" : "off", ...(this.machineStats?.(m.here ? null : m.name) ?? {}) } as Machine;
+      // named as the window's sidebar names it: the person's name for it, else its own; this computer "This computer"
+      const key = m.here ? host : m.name, look = (this.shared?.value("spaces-chat") ?? {}).machines?.[m.here ? "" : m.name] ?? {};
+      return { id: `m:${key}`, machine: key, name: machineLabel(m.here ? null : m.name, look.name), ownName: m.here ? "This computer" : m.name, ...(look.icon ? { emoji: look.icon } : {}), status: m.state === "connected" ? "idle" : "off", ...(this.machineStats?.(m.here ? null : m.name) ?? {}) } as Machine;
     });
     const placeOf = (r: Row) => spaces.find((s) => (s.machine ?? null) === (r.machine ?? null) && s.folder === r.folder)?.id ?? "";
 
@@ -181,8 +200,13 @@ export class Compat {
       // its other tabs: each tab's first terminal, opened by the key t:<address> (the Assistant's tab is its chat)
       const tabs = (s.tabs ?? []).map((t: any) => ({ name: t.name || "Tab", addr: (t.terminals ?? [])[0] })).filter((t: any) => t.addr && t.addr !== s.assistant)
         .map((t: any) => { chats.set(`t:${t.addr}`, t.addr); return { name: t.name, term: `t:${t.addr}` }; });
-      const name = spaceName(s, { home: s.machine ? null : HOME });
-      return { id: s.id, name, ...(s.icon ? { emoji: s.icon } : {}), ...(/\/\.herdr\/worktrees\//.test(s.folder) ? { worktree: true } : {}), machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", mode: s.autopilot ? "autopilot" : "regular", chat: key, ...(tabs.length ? { tabs } : {}) };
+      const name = spaceName(s, { home: s.machine ? null : HOME, repo: s.git?.name ?? null });
+      // what 3.0's pane header says under it: "Assistant · Claude Code" (just "Assistant" until it has started), and the
+      // folder it works in, home shortened to ~
+      const kind = s.assistant ? kindOfTerm((this as any).terminalsOf?.(s.assistant)) : null;
+      const header = `Assistant${kind ? ` · ${CLI_NAMES[kind] ?? kind}` : ""}`;
+      const where = s.machine ? s.folder : s.folder === HOME ? "~" : s.folder.startsWith(HOME + "/") ? `~${s.folder.slice(HOME.length)}` : s.folder;
+      return { id: s.id, name, ...(s.icon ? { emoji: s.icon } : {}), ...(s.git ? { git: s.git.linked ? "linked" : "main", repo: s.git.repo, gitName: s.git.name, branch: s.git.branch ?? null, ahead: s.git.ahead ?? 0, behind: s.git.behind ?? 0 } : {}), ...(s.git?.linked ? { worktree: true } : {}), machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", mode: s.autopilot ? "autopilot" : "regular", chat: key, header, where, ...(tabs.length ? { tabs } : {}) };
     });
 
     this.tasks = new Map(rows.map((r) => [taskId(r), { ref: r.ref, folder: r.folder, machine: r.machine ?? null, key: `${r.slug}#${r.id}`, pin: r.key,
@@ -267,8 +291,8 @@ export class Compat {
 
     this.chats = chats;
     this.last = {
-      terminalTransport: "core", name: "Shepherdr", host, user: input.user, places, machines, tasks, automations: {}, asks: {}, needs, settings: [...(input.settings ?? []), ...notify],
-      artifacts: (input.artifacts ?? []).map((a) => artifactOf(a, spaces)),
+      terminalTransport: "core", name: "Shepherdr", host, user: input.user, places, machines, tasks, automations: automationsBySpace(input.automations ?? [], spaces), asks: {}, needs, settings: [...(input.settings ?? []), ...notify],
+      artifacts: (input.artifacts ?? []).map((a) => artifactOf(a, spaces, (addr) => { const k = kindOfTerm((this as any).terminalsOf?.(addr)); return k ? CLI_NAMES[k] ?? k : null; })),
       sections, last, read, off: input.offPlugins ?? [],
     };
     return this.last;

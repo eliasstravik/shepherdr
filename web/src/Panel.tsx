@@ -1,8 +1,8 @@
-// An open task's side panel: its items (Terminal, Files, Diff, Pull request; plugins add them) as tabs in a column
-// right of the task's chat on a desktop, or as rows of the task header's ⋯ menu opening a full-screen sheet on a phone
-// or tablet (on a desktop the ⋯ lists them too, opening their tab). A coordinator chat has none.
+// An open task's views, as 3.0's task view: Chat, then its items (Terminal, Files, Changes, Pull request, Browser;
+// plugins add them) as tabs under its header (TaskTabs). On a desktop an item shows in a column right of the chat, on
+// a phone or tablet over it, full screen. A coordinator chat has none.
 import clsx from 'clsx'
-import { Fragment, useEffect, useLayoutEffect, useRef, type KeyboardEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { agentChat, closeSheet, focusHere, openItem, openSplit, panesHere, paneToPanel, placeOf, registry, setUI, taskInMiddle, taskOf, toggleFocus, togglePanel, toggleWide, useSnap, useStore, useUI, type PanelItem } from './kernel.ts'
 import type { Task } from '@shared/types.ts'
 import { Pushed } from './Stack.tsx'
@@ -77,7 +77,7 @@ export function TaskPanel({ task }: { task: Task }) {
           onScroll={(e) => edges(e.currentTarget)}
           className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [--fade-l:0px] [--fade-r:0px] [mask-image:linear-gradient(to_right,transparent,#000_var(--fade-l),#000_calc(100%-var(--fade-r)),transparent)] data-more-l:[--fade-l:1.5rem] data-more-r:[--fade-r:1.5rem]"
         >
-          {registry.taskPanel.map((i) => (
+          {itemsFor(task).map((i) => (
             <PanelTab key={i.id} item={i} task={task} on={i.id === item.id} />
           ))}
         </div>
@@ -137,69 +137,34 @@ function ItemBody({ item, task, chatKey }: { item: PanelItem; task: Task; chatKe
   return <item.View key={`${task.id}|${item.id}`} task={task} chatKey={chatKey} />
 }
 
-/** The task header's ⋯, like a coordinator's: what plugins put first (Search in this chat), then the items, each a
- *  full-screen sheet on a phone or tablet and its tab on a desktop; one with nothing to show is greyed, and opens all
- *  the same, to say why. Last, the same task actions its row's ⋯ has */
-export function TaskMenu({ task, chatKey, pane }: { task: Task; chatKey: string; pane?: number }) {
+/** A task's items as 3.0's task view has them: only those it has now (a pull request's once it has one) */
+export const itemsFor = (task: Task) => registry.taskPanel.filter((i) => i.id !== 'pr' || !!task.pr)
+
+/** The task view's tabs, as 3.0's (Chat, Terminal, Files, Changes, Pull request, Browser): Chat is its chat; another
+ *  opens its view, in the side panel on a desktop and over the chat on a phone or tablet */
+export function TaskTabs({ task }: { task: Task }) {
   const ui = useUI()
-  // split, it opens in the focused pane (a click in a pane focuses it first), or the open task's on the right; a
-  // pane's items open the task on the right, its side panel beside it
-  const items = registry.taskPanel
-  const split = panesHere(ui).length > 0
-  const open = ui.taskMenu && (pane === undefined ? !split || ui.split.pane < 0 : ui.split.pane === pane)
-  const Actions = registry.views.taskActions
-  if (!registry.agentMenu.length && !items.length && !Actions) return null
-  const B = ui.device === 'phone' ? RoundButton : IconButton
+  const items = itemsFor(task)
+  if (!items.length) return null
+  const desktop = ui.device === 'desktop'
+  const on = desktop ? (ui.sidebars.panelOpen ? itemOf(ui.sidebars.item)?.id : 'chat') : (ui.sheet ?? 'chat')
+  const tab = (id: string, label: string, off: string | null, go: () => void) => (
+    <button key={id} type="button" role="tab" aria-selected={on === id} data-off={off ? '' : undefined} title={off ?? undefined} onClick={go}
+      className="relative inline-flex h-7 shrink-0 items-center rounded-full px-2.5 text-[0.8125rem] whitespace-nowrap text-fg2 after:absolute after:-inset-y-2 after:inset-x-0 hover:bg-hover aria-selected:bg-sel aria-selected:text-fg data-off:text-fg3 coarse:h-9 phone:h-9 phone:px-3 phone:text-[0.875rem]">
+      {label}
+    </button>
+  )
   return (
-    <div className="relative">
-      <B
-        label="More"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className={clsx('rounded-full!', ui.device === 'phone' ? 'aria-expanded:bg-line2' : 'aria-expanded:bg-hover')}
-        onClick={() => setUI({ taskMenu: !open, plus: null, pick: null })}
-      >
-        <MoreIcon className={ic} />
-      </B>
-      {open ? (
-        <Menu label="More" onClose={() => setUI({ taskMenu: false })} className="absolute top-full right-0 z-21 mt-1.5 max-h-[calc(100dvh-5rem)] max-w-[calc(100vw-24px)] origin-top-right overflow-y-auto">
-          {registry.agentMenu.map(({ View }, i) => (
-            <Fragment key={i}>
-              <View chatKey={chatKey} />
-              {i === registry.agentMenu.length - 1 && items.length ? <MenuSeparator /> : null}
-            </Fragment>
-          ))}
-          {items.map((i) => (
-            <TaskMenuRow key={i.id} item={i} task={task} pane={pane} />
-          ))}
-          {/* the open task, beside the panes (desktop) */}
-          {pane === undefined && ui.device === 'desktop' ? (
-            <>
-              <MenuSeparator />
-              <MenuItem icon={<SplitIcon className={ic} />} onClick={() => openSplit({ kind: 'task', id: task.id })}>
-                Open in split view
-              </MenuItem>
-            </>
-          ) : null}
-          {Actions ? (
-            <>
-              <MenuSeparator />
-              <Actions task={task} close={() => setUI({ taskMenu: false })} />
-            </>
-          ) : null}
-        </Menu>
-      ) : null}
+    <div role="tablist" aria-label={`${task.id} views`} className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line px-3 py-1.5 [scrollbar-width:none] phone:px-4">
+      {tab('chat', 'Chat', null, () => (desktop ? ui.sidebars.panelOpen && togglePanel() : closeSheet()))}
+      {items.map((i) => <ItemTab key={i.id} item={i} task={task} tab={tab} />)}
     </div>
   )
 }
 
-function TaskMenuRow({ item, task, pane }: { item: PanelItem; task: Task; pane?: number }) {
+function ItemTab({ item, task, tab }: { item: PanelItem; task: Task; tab: (id: string, label: string, off: string | null, go: () => void) => ReactNode }) {
   const off = item.useOff?.(task) ?? null
-  return (
-    <MenuItem icon={<item.Icon className={ic} />} data-off={off ? '' : undefined} className={clsx(off && 'text-fg3')} onClick={() => (pane === undefined ? openItem(item.id) : paneToPanel(pane, item.id))}>
-      {item.label}
-    </MenuItem>
-  )
+  return <>{tab(item.id, item.label, off, () => openItem(item.id))}</>
 }
 
 /** An item open over the whole screen (phone and tablet), from the task header's ⋯: pushed over the chat, Back or a

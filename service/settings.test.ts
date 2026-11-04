@@ -80,3 +80,15 @@ test("a machine that isn't connected, a prototype key, or an unreadable file is 
   expect(readFileSync(file, "utf8")).toBe("{ half");
   writeFileSync(file, before);
 });
+
+test("Machines is one page as the window's: every machine's limits, then each machine's block (key@machine)", () => {
+  const s = new Settings();
+  s.start();
+  const page = s.sections(null, [], ["vm"], "box").filter((x) => x.name === "Machines");
+  expect(page.length).toBe(1);
+  expect(page[0].rows.find((r) => r.key === "machine.home@local")).toMatchObject({ group: "This computer", value: "on" });
+  expect(page[0].rows.find((r) => r.key === "machine.home@vm")).toMatchObject({ group: "vm", value: "off" });
+  s.set("machine.worker_memory@vm", "8 GB");
+  const f = JSON.parse(readFileSync(file, "utf8"));
+  expect(f.machines.vm.machine.worker_memory).toBe(8);
+});

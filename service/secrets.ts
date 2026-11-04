@@ -29,6 +29,9 @@ function scope(level: string): { args: string[]; words: string } {
   const ok = (x: string) => /^[\w.-]*$/.test(x);
   const m = /^m:(.*)$/.exec(level);
   if (m && ok(m[1])) return { args: m[1] ? ["--machine", m[1]] : ["--machine"], words: m[1] || "This computer" };
+  // a space by its own id (3.0's Space settings: "sp…", another machine's "<machine>/sp…")
+  const own = /^(?:([\w.-]+)\/)?(sp[\w-]+)$/.exec(level);
+  if (own) return { args: ["--space", level], words: "this space" };
   const p = /^p:([^:]*):([\w.-]+)$/.exec(level);
   if (p && ok(p[1])) return { args: ["--space", p[1] ? `${p[1]}/${p[2]}` : p[2]], words: "this space" };
   throw new Error("Not a place a secret can be kept.");
@@ -43,9 +46,13 @@ export class Secrets {
       .flatMap((t) => asksIn(t.labels).map((a: any) => ({ address: t.address, ...a })));
   }
 
-  async names(): Promise<{ name: string; at: number }[]> {
+  /** Every kept secret by name: Everywhere's, and each space's (by its id as the snapshot has it). */
+  async names(): Promise<{ name: string; at: number; space: string | null }[]> {
     const r = await run(["names", "--json"]);
-    try { return (JSON.parse(r.out) as any[]).filter((e) => e.scope === "everywhere").map((e) => ({ name: e.name, at: e.at ?? 0 })); } catch { return []; }
+    try {
+      return (JSON.parse(r.out) as any[]).filter((e) => e.scope === "everywhere" || e.scope === "space")
+        .map((e) => ({ name: e.name, at: e.at ?? 0, space: e.scope === "space" ? (e.machine ? `${e.machine}/${e.space}` : e.space) : null }));
+    } catch { return []; }
   }
 
   /** Keeps a value (or removes it: null), then tells each agent that asked for it there, by name. */

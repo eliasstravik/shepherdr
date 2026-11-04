@@ -8,12 +8,12 @@ import { openAccept } from '@client/screens/Accept.tsx'
 import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ComponentType, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, type RefObject } from 'react'
 import { act, chatName, definePlugin, getDraft, getState, goChat, has, holdReload, openArtifact, openItem, openNeeds, openTask, registry, setDraft, setOutbox, setUI, taskOf, useDraft, useSnap, useStore, useUI, type UI } from '@client/kernel.ts'
 import { keyOf, partsOf, priorOf, reasonOf, SEND_TIMEOUT, type Outgoing } from '@client/outbox.ts'
-import { AlertIcon, BackIcon, CameraIcon, CheckIcon, Count, DeleteIcon, dimmed, Dot, DownIcon, DownloadIcon, Empty, field, FileIcon, ic, IconButton, KeyIcon, LinkButton, LiveWave, MachineIcon, Menu, MenuItem, MenuSeparator, MenuSetting, MicIcon, ModeIcon, MoreIcon, NextIcon, PageIcon, PlanIcon, PlusIcon, Primary, QuestionIcon, ReplyIcon, RestartIcon, roundBtn, SearchIcon, SecretField, Sent, SmileIcon, Tab, Tabs, TextBox, UpIcon, useElapsed, XIcon } from '@client/ui.tsx'
+import { AlertIcon, BackIcon, CameraIcon, CheckIcon, CopyIcon, Count, DeleteIcon, dimmed, Dot, DownIcon, DownloadIcon, Empty, field, FileIcon, ic, IconButton, KeyIcon, LinkButton, LiveWave, MachineIcon, Menu, MenuItem, MenuSeparator, MenuSetting, MicIcon, ModeIcon, MoreIcon, NextIcon, PageIcon, PlanIcon, PlusIcon, Primary, QuestionIcon, ReplyIcon, RestartIcon, roundBtn, SearchIcon, SecretField, Sent, SmileIcon, Tab, Tabs, TextBox, UpIcon, useElapsed, XIcon } from '@client/ui.tsx'
 import { canDictate, dictate, dictSample, type Dictation } from '@client/dictation.ts'
 import { extOf, isImage } from '@shared/files.ts'
 import { modelCommand, modeName, taskChatId, type CardAsk, type Chat, type MergeEvidence, type Message, type Place, type Question, type ReplyQuote, type SecretAsk, type UpdateCard } from '@shared/types.ts'
 import { sendsOnTap } from '@shared/alerts.ts'
-import { buzz, mine, openBar, openPicker, quick, react } from '@plugins/reactions/client.tsx'
+import { buzz, ForkIcon, mine, openBar, openPicker, quick, react, RewindIcon } from '@plugins/reactions/client.tsx'
 import { EDGE } from '@client/gestures.ts'
 import { still, useArrive } from '@client/motion.ts'
 import { draggingFiles, dropped, named, pasted } from './paste.ts'
@@ -24,7 +24,7 @@ import { Markdown } from './markdown.tsx'
 import { answeredBy, cancelReply, canReply, isArtifact, jumpTo, startReply } from './reply.ts'
 import { typing, working } from './typing.ts'
 import { JobsSheet, JobsTag, LiveLine, TurnLine } from './activity.tsx'
-import { AgentControls, AgentLine, openRestart, PlaceRestartItem, RestartSheet } from '@client/restart.tsx'
+import { AgentControls, AgentLine, openRestart, RestartSheet } from '@client/restart.tsx'
 
 /* ---------- messages ---------- */
 
@@ -176,7 +176,7 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
                     const blocker = chat.messages.findLast((m) => m.question?.sent === undefined && !!m.question && !m.waiting)
                     return blocker ? <LinkButton onClick={() => jumpTo(chat.key, blocker.id, { card: true })}>Go to question</LinkButton> : null
                   })()}
-                </> : waitLine(msg.waitsFor)}</div> : null}
+                </> : msg.waitsFor === 'turn' && msg.cid ? <Queued chat={chat.key} cid={msg.cid} text={msg.text ?? ''} /> : waitLine(msg.waitsFor)}</div> : null}
                 {msg.text ? <div ref={text} data-text>{you ? <YourText text={msg.text} /> : <Fold id={msg.id}><Markdown text={msg.text} /></Fold>}</div> : null}
               </div>,
               true,
@@ -207,6 +207,22 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
         {out?.state === 'failed' && last ? <NotSent out={out} /> : null}
       </div>
     </>
+  )
+}
+
+/** one held until the agent is free (the window's queued message): Send now, Edit (back in the box), × (taken back) */
+function Queued({ chat, cid, text }: { chat: string; cid: string; text: string }) {
+  const btn = 'relative font-medium text-fg after:absolute after:-inset-x-1.5 after:-inset-y-2.5 hover:underline'
+  const take = (then?: () => void) => void act({ type: 'held-drop', cid } as never).then(() => { removeOut(cid); then?.() }, () => undefined)
+  return (
+    <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+      <span>Queued · Sends when the agent is free</span>
+      <span className="flex items-center gap-3 whitespace-nowrap">
+        <button type="button" className={btn} onClick={() => void act({ type: 'held-now', cid } as never).catch(() => undefined)}>Send now</button>
+        <button type="button" className={btn} onClick={() => take(() => { setDraft(chat, text); setUI({ focus: chat }) })}>Edit</button>
+        <button type="button" aria-label="Remove" className={btn} onClick={() => take()}><XIcon className="size-3.5" /></button>
+      </span>
+    </span>
   )
 }
 
@@ -434,7 +450,18 @@ function SwipeHint() {
   )
 }
 
-/** with a mouse, a smiley and a reply arrow beside the message (like Slack and WhatsApp on the web) */
+/** Copy, then "Copied" for a moment */
+function CopyButton({ text, className }: { text: string; className: string }) {
+  const [done, setDone] = useState(false)
+  return (
+    <button type="button" aria-label={done ? 'Copied' : 'Copy'} title={done ? 'Copied' : 'Copy'} className={className}
+      onClick={() => { navigator.clipboard?.writeText(text).catch(() => {}); setDone(true); setTimeout(() => setDone(false), 1200) }}>
+      {done ? <CheckIcon className={ic} /> : <CopyIcon className={ic} />}
+    </button>
+  )
+}
+
+/** with a mouse, the window's hover band beside the message: the smiley, Reply, Copy, Rewind or Fork */
 function Beside({ msg, chat, you, picked, react, reply, more, name, over }: { msg: Message; chat: string; you: boolean; picked: boolean; react: boolean; reply: boolean; more?: () => void; name?: string; over?: boolean }) {
   if (!react && !reply && !more) return null
   const btn = over
@@ -462,6 +489,19 @@ function Beside({ msg, chat, you, picked, react, reply, more, name, over }: { ms
         <button type="button" aria-label={name ? `Reply to ${name}` : 'Reply'} onClick={() => startReply(chat, msg)} className={btn}>
           <ReplyIcon className={ic} />
         </button>
+      ) : null}
+      {/* as the window's hover band: Copy, then Rewind on yours (not a /command) or Fork on the agent's */}
+      {reply && msg.text && !over ? <CopyButton text={msg.text} className={btn} /> : null}
+      {reply && msg.text && !over && !msg.card && !(you && msg.text.trimStart().startsWith('/')) ? (
+        you ? (
+          <button type="button" aria-label="Rewind" title="Rewind" onClick={() => void act({ type: 'rewind', chat, message: msg.id } as never).catch((e: Error) => alert(e.message))} className={btn}>
+            <RewindIcon className={ic} />
+          </button>
+        ) : (
+          <button type="button" aria-label="Fork" title="Fork" onClick={() => void act({ type: 'fork', chat } as never).catch((e: Error) => alert(e.message))} className={btn}>
+            <ForkIcon className={ic} />
+          </button>
+        )
       ) : null}
       {more ? (
         <button type="button" aria-label={name ? `More for ${name}` : 'More'} aria-haspopup="menu" onClick={more} className={clsx(btn, picked && !over && 'bg-hover text-fg2')}>
@@ -1224,7 +1264,15 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
   return (
     // a finger sliding a message left moves them all (--peek), and each one's time comes in at the right, like iMessage
     <div ref={list} data-messages className="mx-auto flex w-full max-w-read flex-1 flex-col gap-3.5 px-5 pt-5 pb-3 phone:px-4">
-      {!rows.length ? <Empty className="p-0!">No messages yet. Write to start.</Empty> : null}
+      {!rows.length ? (
+        // the window's empty Assistant chat
+        chat.key.startsWith('p:') ? (
+          <Empty className="p-0!">
+            <span className="block font-medium text-fg">What should the Assistant do?</span>
+            <span className="block">It plans the work, starts a task for each part and keeps you posted.</span>
+          </Empty>
+        ) : <Empty className="p-0!">No messages yet. Write to start.</Empty>
+      ) : null}
       {rows.map((it) => {
         const at = it.at > 1e12 ? it.at : 0
         const d = at ? new Date(at).toDateString() : day
@@ -1896,8 +1944,9 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                     }
                     if (e.key === 'Escape') {
                       e.preventDefault()
-                      // a reply is dropped first, then the box lets go
+                      // a reply is dropped first; an empty box stops a working agent (the window's Esc); then the box lets go
                       if (getState().ui.reply[chatKey]) return cancelReply(chatKey)
+                      if (!text.trim() && getState().chats[chatKey]?.working) return void act({ type: 'stop', chat: chatKey }).catch(() => undefined)
                       ref.current?.blur()
                       setUI({ focus: null })
                     }
@@ -2170,10 +2219,10 @@ function PlusOpen({ chatKey, file, photo }: { chatKey: string; file: RefObject<H
       /* cancelled */
     }
   }
-  const cli = useChat(chatKey)?.cli ?? 'Agent'
   const settings = snap ? registry.composerSettings.filter((x) => x.when(snap, chatKey)) : []
   return (
     <Menu label="Attach files and more" tabs onClose={close} className="mb-2 w-fit max-w-full origin-bottom-left">
+      {/* the window's paperclip: Attach files (and a phone's camera); the model is the line under the box */}
       <MenuItem
         icon={<FileIcon className={ic} />}
         onClick={() => {
@@ -2181,13 +2230,13 @@ function PlusOpen({ chatKey, file, photo }: { chatKey: string; file: RefObject<H
           file.current?.click()
         }}
       >
-        File or photo
+        Attach files
       </MenuItem>
-      <MenuItem icon={<CameraIcon className={ic} />} onClick={screenshot}>
-        {phone ? 'Take a photo' : 'Screenshot'}
-      </MenuItem>
-      <MenuSeparator />
-      <AgentControls chatKey={chatKey} cli={cli} />
+      {phone ? (
+        <MenuItem icon={<CameraIcon className={ic} />} onClick={screenshot}>
+          Take a photo
+        </MenuItem>
+      ) : null}
       {settings.map(({ View }, i) => (
         <View key={i} chatKey={chatKey} />
       ))}
@@ -2519,6 +2568,33 @@ function StickToBottom({ chatKey, children }: { chatKey: string; children: React
 
 /* ---------- the chat ---------- */
 
+/** the message box's words, as the window's: "Reply instead…" while a card asks; else to the Assistant, a task by its
+ *  id, or the agent of one of the space's tabs */
+function placeholderOf(chatKey: string, chat: Chat | undefined, fallback: string) {
+  if (chat?.messages.some((m) => m.question && m.question.sent === undefined && !m.question.closed)) return 'Reply instead…'
+  if (chatKey.startsWith('p:')) return 'Message the Assistant'
+  const task = taskChatId(chatKey)
+  if (task) return `Message ${task}`
+  return chatKey.startsWith('t:') ? `Message ${({ claude: 'Claude Code', codex: 'Codex' } as Record<string, string>)[chat?.cli ?? ''] ?? 'the agent'}` : fallback
+}
+
+/** a task whose agent has ended: the window's line and its Resume, in place of the message box */
+function Ended({ chatKey }: { chatKey: string }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const resume = async () => {
+    setBusy(true); setError('')
+    try { await act({ type: 'task-resume', chat: chatKey } as never) } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
+  }
+  return (
+    <div className="mx-auto flex w-full max-w-read items-center gap-3 px-5 pt-2 pb-[max(env(safe-area-inset-bottom),--spacing(3))] text-[0.8125rem] text-fg2 phone:text-[0.9375rem]">
+      <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-fg3" />
+      <p className="min-w-0 flex-1 text-pretty">{error || "This task's agent has ended."}</p>
+      <Primary soft disabled={busy} onClick={() => void resume()}>{busy ? 'Resuming…' : 'Resume'}</Primary>
+    </div>
+  )
+}
+
 function ChatView({ chatKey, placeholder, unreachable }: { chatKey: string; placeholder: string; unreachable?: string }) {
   const from = useStore((s) => chatName(s.snap!, chatKey))
   const chat = useChat(chatKey)
@@ -2537,22 +2613,8 @@ function ChatView({ chatKey, placeholder, unreachable }: { chatKey: string; plac
         ) : null}
         <Messages chat={chat ?? { key: chatKey, cli: 'Claude Code', messages: [] }} from={from} />
       </StickToBottom>
-      <Composer chatKey={chatKey} placeholder={placeholder} cli={chat?.cli ?? 'Claude Code'} />
+      {chat?.finished && taskChatId(chatKey) ? <Ended chatKey={chatKey} /> : <Composer chatKey={chatKey} placeholder={placeholderOf(chatKey, chat, placeholder)} cli={chat?.cli ?? 'Claude Code'} />}
     </DropFiles>
-  )
-}
-
-/** Search in this chat, first in a chat's ⋯ menu (a coordinator's or a task's) */
-function FindItem({ chatKey }: { chatKey: string }) {
-  return (
-    <>
-      <MenuItem icon={<SearchIcon className={ic} />} onClick={() => openFind(chatKey)}>
-        Search in this chat
-      </MenuItem>
-      {registry.views.search ? <MenuItem icon={<SearchIcon className={ic} />} onClick={() => setUI({ search: true, searchScope: { kind: 'chat', id: chatKey }, menu: false, taskMenu: false })}>
-        Open full search
-      </MenuItem> : null}
-    </>
   )
 }
 
@@ -2631,8 +2693,8 @@ export default definePlugin({
         return true
       },
     })
-    reg.placeMenu.push({ order: 50, View: ({ place }) => <FindItem chatKey={place.chat} /> }, { order: 55, joined: true, View: PlaceRestartItem })
-    reg.agentMenu.push({ order: 50, View: FindItem })
+    // 3.0 finds in a chat with Ctrl+F (its find bar), and restarts or switches an Assistant from its tab menu
+    // (coordinators): no Search or Restart items here
     reg.overlays.push(RestartSheet)
     reg.composerAbove.push({ order: 20, View: Attachments }, { order: 30, View: PlusMenu })
     reg.overlays.push(Photo)

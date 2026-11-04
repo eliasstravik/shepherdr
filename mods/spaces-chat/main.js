@@ -25,7 +25,7 @@ import { muted } from "./notify.js";
 import { MachinePopup, openMachine, openMachineSettings } from "./machine-popup.js";
 import { startPolling, allStats, healthMeters, healthWords, planRows, bars, colorOf } from "./machines.js";
 import { countBadge, red, H, TEXT, RADIUS } from "./ui.js";
-import { spaceName } from "./core/spaces.js";
+import { spaceName, gitTail } from "./core/spaces.js";
 
 const POPUPS = { add: Menu, space: Menu, section: Menu, icon: IconPicker, rename: Rename, machine: MachinePopup };
 
@@ -600,11 +600,8 @@ export default class Spaces extends View {
   // branch goes when the name already says it (a worktree is named after its branch),
   // and master/main go: nearly every space is on one.
   gitTail(g, tree, name, t, tag) {
-    const raw = g.branch ?? "detached";
-    const same = (a) => a.toLowerCase() === name.toLowerCase();
-    const branch = same(raw) || raw === "master" || raw === "main" ? "" : raw;
-    const repo = tree || same(g.name) ? "" : g.name;
-    const where = [tag, repo, branch].filter(Boolean).join(" \u00b7 ");
+    // the words are the shared core's (the web's row says the same)
+    const { where } = gitTail(g, { name, tree: Boolean(tree), tag });
     return h_flex()
       .flex_1()
       .min_w(0)

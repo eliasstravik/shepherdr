@@ -108,7 +108,8 @@ export class Settings {
     this.machineNames = machines;
     const out: SettingSection[] = [];
     for (const s of [null, ...spaces]) out.push(this.agents(s), this.tasks(s));
-    out.push(this.machines(null), ...[LOCAL, ...machines].map((m) => this.machines(m)));
+    // Machines, as the window's page: the limits for every machine, then each machine's block
+    out.push({ name: "Machines", level: "all", rows: [null, LOCAL, ...machines].flatMap((m) => this.machines(m)) });
     out.push({ name: "Web", global: true, rows: [{ label: "Link", key: "web.link", value: link ?? "Tailscale isn't running here", fixed: true }] });
     return out;
   }
@@ -125,14 +126,13 @@ export class Settings {
     const rows: SettingRow[] = ROLES.map((r) => {
       const p = this.pick(scope, r.id, null);
       const words = (v: any) => (v ? line(v) : r.id === "reviewer" ? `Other CLI (${NAMES[other]})` : "Default");
-      return { label: r.title, key: `role.${r.id}`, value: words(p.value), agent: { role: r.id, pick: p.value ?? null }, hint: r.about, ...this.follows(s, p, words) } as SettingRow;
+      // on Everywhere its row has "Edit instructions" too: the file every agent of the role is told first (the same for every space)
+      return { label: r.title, key: `role.${r.id}`, value: words(p.value), agent: { role: r.id, pick: p.value ?? null }, hint: r.about, ...(s ? {} : { file: r.file }), ...this.follows(s, p, words) } as SettingRow;
     });
     // Backup: the other CLI takes over a task once when its agent can't go on (on: unset or a CLI; off: "off")
     const b = this.pick(scope, "backup", "agent");
     rows.push({ label: "Backup agent", key: "backup.agent", value: ON(b.value !== "off"), options: ["on", "off"], hint: "The other CLI takes over a task once when its agent can't go on.",
       ...this.follows(s, b, (v) => ON(v !== "off")) });
-    // the instructions every agent of a role is told first: one file each, the same for every space
-    if (!s) for (const r of ROLES) rows.push({ label: r.told, key: `template.${r.id}`, value: "", file: r.file, group: "Instructions" } as SettingRow);
     return { name: "Agents", level: scope ?? "all", rows };
   }
 
@@ -154,27 +154,30 @@ export class Settings {
 
   /** Machines: when new tasks wait and how task agents run, for every machine (null) or one's own; a machine's page
    *  has its Home Assistant too. */
-  private machines(m: string | null): SettingSection {
+  private machines(m: string | null): SettingRow[] {
     const every = this.file.everywhere?.machine ?? {}, layer = m ? this.file.machines?.[m] ?? {} : {};
     const own = m ? layer.machine ?? {} : every;
     const base = (f: string) => (f in every ? every[f] : MACHINE_DEFAULTS[f]);
     const val = (f: string) => (f in own ? own[f] : base(f));
     const from = (f: string, word: (v: any) => string): Partial<SettingRow> => (!m ? {} : f in own ? { inherits: { value: word(base(f)), from: "All machines" } } : { from: "All machines" });
+    // a machine's own rows say which machine (key@machine); the heading is its name, as the window's blocks
+    const at = m ? `@${m}` : "";
+    const group = m ? (m === LOCAL ? "This computer" : m) : "When new tasks wait, on every machine";
     const rows: SettingRow[] = LIMITS.map((l) => {
       const word = (v: any) => (v == null ? "off" : String(Math.round(Number(v) * l.scale)));
-      return { label: l.label, key: `machine.${l.field}`, value: word(val(l.field)), hint: l.about, num: { min: l.min, max: l.max, step: l.step, unit: "%", one: "%", off: true }, group: "When new tasks wait", ...from(l.field, word) };
+      return { label: l.label, key: `machine.${l.field}${at}`, value: word(val(l.field)), hint: l.about, num: { min: l.min, max: l.max, step: l.step, unit: "%", one: "%", off: true }, group, ...from(l.field, word) };
     });
-    rows.push({ label: "Workers run at low priority", key: "machine.low_priority", value: ON(val("low_priority") !== false), options: ["on", "off"],
-      hint: "Task agents start below the Assistant and your apps, and are ended first when memory runs out.", group: "How task agents run", ...from("low_priority", (v) => ON(v !== false)) });
+    rows.push({ label: "Workers run at low priority", key: `machine.low_priority${at}`, value: ON(val("low_priority") !== false), options: ["on", "off"],
+      hint: "Task agents start below the Assistant and your apps, and are ended first when memory runs out.", group, ...from("low_priority", (v) => ON(v !== false)) });
     const gb = (v: any) => (Number(v) ? `${Number(v)} GB` : "Off");
-    rows.push({ label: "Memory cap per worker", key: "machine.worker_memory", value: gb(val("worker_memory")), options: CAPS.map(gb),
-      hint: "A worker over it is slowed down, not ended. Applies to tasks started after a change.", group: "How task agents run", ...from("worker_memory", gb) });
+    rows.push({ label: "Memory cap per worker", key: `machine.worker_memory${at}`, value: gb(val("worker_memory")), options: CAPS.map(gb),
+      hint: "A worker over it is slowed down, not ended. Applies to tasks started after a change.", group, ...from("worker_memory", gb) });
     if (m) {
       const home = typeof layer.home === "boolean" ? layer.home : m === LOCAL;
-      rows.unshift({ label: "Home Assistant", key: "machine.home", value: ON(home), options: ["on", "off"], hint: home ? "Its home space's Assistant watches its disk, load and processes." : "Off: nobody watches its disk, load and processes." });
+      rows.unshift({ label: "Home Assistant", key: `machine.home${at}`, value: ON(home), options: ["on", "off"], group,
+        hint: home ? "Its home space's Assistant watches its disk, load and processes." : "Off: nobody watches its disk, load and processes." });
     }
-    // this computer is "local" in the file, its name on the page
-    return { name: "Machines", level: m ? `m:${m === LOCAL ? this.host : m}` : "all", rows };
+    return rows;
   }
 
   /** The instructions file every agent of a role is told first. */
@@ -192,6 +195,9 @@ export class Settings {
    *  the file keeps. null: back to what it follows. scope: the space's name, machine and repo folder (herdr-task
    *  finds a space's settings by its folder). */
   set(key: string, word: string | null, level = "all", scope?: Scope | null) {
+    // a machine's own row on the Machines page: machine.<field>@<machine>
+    const atMachine = /^(machine\.[a-z_]+)@([\w.-]+)$/.exec(key);
+    if (atMachine) { key = atMachine[1]; level = `m:${atMachine[2]}`; }
     const file = readSettings();
     const next = structuredClone(file);
     const machine = level.startsWith("m:") ? (level.slice(2) === this.host ? LOCAL : level.slice(2)) : null;

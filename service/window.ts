@@ -54,7 +54,7 @@ export function windowSection(value: (key: string) => unknown): SettingSection {
     const hint = !stop.length ? a.about : now ? `${a.about} ${names(stop)} need${n ? "s" : ""} it: turn ${n ? "that" : "them"} off first.` : `${a.about} Needs ${names(stop)}: turn ${n ? "it" : "them"} on first.`;
     rows.push({ label: a.title, key: `addon.${a.id}`, value: now ? "on" : "off", options: stop.length ? [now ? "on" : "off"] : ["on", "off"], hint, group: "Add-ons" });
   }
-  return { name: "Window", global: true, about: "How the Herdr window looks, and which add-ons Shepherdr runs, here and on the web.", rows };
+  return { name: "Window", global: true, rows };
 }
 
 /** A switch flipped on the web. setShared: the service's shared document (the bridge brings it to the window). */

@@ -242,6 +242,9 @@ export interface UI {
   shut: string[]
   /** the lists (by their key) whose tasks column shows their Archived tasks instead */
   archived: string | null
+  /** the Tasks panel's status filter, as 3.0's chips: all, needs, working, merging, ready, queued, todo, done or
+   *  automations; kept on this device */
+  taskFilter: string
   /** what each list is filtered by, while typed: "place|tasks", "place|artifacts" (*pinned for the pinned chips) */
   filter: Record<string, string>
   /** message id with the reaction bar open */
@@ -288,8 +291,25 @@ interface State {
   ui: UI
 }
 
+// Shepherdr 3 has no Needs you view: what needs you is the Tasks panel's first section (an old link's tab goes there)
 function tabOf(t: string | null): UI['tab'] {
-  return t === 'needs' || t === 'tasks' || t === 'artifacts' ? t : 'chat'
+  return t === 'needs' ? 'tasks' : t === 'tasks' || t === 'artifacts' ? t : 'chat'
+}
+
+const TASK_FILTER = 'shepherdr.taskFilter'
+const FILTERS = ['all', 'needs', 'working', 'merging', 'ready', 'queued', 'todo', 'done', 'automations']
+function loadTaskFilter(): string {
+  try {
+    const v = localStorage.getItem(TASK_FILTER) ?? 'all'
+    return FILTERS.includes(v) ? v : 'all'
+  } catch {
+    return 'all'
+  }
+}
+/** pick the Tasks panel's status filter (3.0's chips and More), remembered on this device */
+export function setTaskFilter(f: string) {
+  try { localStorage.setItem(TASK_FILTER, f) } catch { /* private window: All statuses next time */ }
+  setUI({ taskFilter: f, cur: 0 })
 }
 
 function deviceFor(w: number): Device {
@@ -339,7 +359,7 @@ const SIDE = 'shepherdr.side'
 function loadSide(): UI['side'] {
   try {
     const side = localStorage.getItem(SIDE)
-    return side === 'artifacts' || side === 'needs' ? side : 'tasks'
+    return side === 'artifacts' ? side : 'tasks'
   } catch {
     return 'tasks'
   }
@@ -392,6 +412,7 @@ let state: State = {
     allDone: loadAllDone(),
     shut: loadShut(),
     archived: null,
+    taskFilter: loadTaskFilter(),
     filter: {},
     pick: null,
     pickChat: null,
@@ -1047,7 +1068,8 @@ export function removeSpace(placeId: string): Promise<{ ok?: boolean; error?: st
 export function openNeeds() {
   const { ui, snap } = state
   if (!snap) return
-  setUI(ui.device === 'phone' ? { task: null, tab: 'needs', pick: null, plus: null, menu: false } : { task: ui.task && !taskInMiddle(ui, snap) ? null : ui.task, side: 'needs' })
+  // 3.0: the Tasks panel, its Needs you
+  setUI(ui.device === 'phone' ? { task: null, tab: 'tasks', taskFilter: 'all', pick: null, plus: null, menu: false } : { task: ui.task && !taskInMiddle(ui, snap) ? null : ui.task, side: 'tasks', taskFilter: 'all' })
 }
 
 /** What waits on you at a place: red counts its whole subtree, own only the place itself (its own coordinator's chat: the sidebar's count). */
@@ -1136,9 +1158,9 @@ export function orderedTasks(snap: Snapshot, list: ListView) {
 
 /** what a space is, under its name in its header: a home space keeps its machine (the main machine's every machine) */
 export function placeKind(snap: Snapshot, p: Place) {
-  const on = machineName(snap.machines, p.machine)
-  if (p.home) return !manyMachines(snap) ? 'Home space' : p.level === 0 ? 'Home · every machine' : `Home · ${on}`
-  return manyMachines(snap) ? `Space on ${on}` : 'Space'
+  // 3.0's pane header: "Assistant · Claude Code" and the folder it works in (its machine too, where there are more)
+  const on = manyMachines(snap) && p.machine !== snap.host ? ` · ${machineName(snap.machines, p.machine)}` : ''
+  return `${p.header ?? 'Assistant'}${p.where ? ` · ${p.where}` : ''}${on}`
 }
 
 /** the open task's agent, whose chat is on screen */
@@ -1228,7 +1250,7 @@ let lastList: { snap: Snapshot; lists: Lists; place: string; view: ListView } | 
 /** the lists as they show now: the same object while nothing they hang on changes, so a part can pick it */
 export function listView(ui: UI, snap: Snapshot): ListView {
   if (lastList && lastList.snap === snap && lastList.lists === ui.lists && lastList.place === ui.place) return lastList.view
-  const view = { ...listOf(snap, listChips(ui, snap)), search: listsPinned(ui, snap) ? '*pinned' : ui.place, attention: !!placeOf(snap, ui.place).home && placeOf(snap, ui.place).machine === snap.host && !listsPinned(ui, snap) && ui.lists.at !== ui.place }
+  const view = { ...listOf(snap, listChips(ui, snap)), search: listsPinned(ui, snap) ? '*pinned' : ui.place, attention: false }
   lastList = { snap, lists: ui.lists, place: ui.place, view }
   return view
 }

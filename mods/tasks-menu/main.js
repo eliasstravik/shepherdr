@@ -14,6 +14,7 @@ import { View, div } from "gpui-kit";
 import { v_flex } from "gpui-base";
 import { props, closeOverlay, theme, shared, setShared } from "herdr";
 import { menuRow, heading, TEXT } from "./ui.js";
+import { taskMenu } from "./core/menus.js";
 
 // Shepherdr's GROUP_WORDS. "folder" was Space's old key.
 const GROUPS = [{ key: "status", label: "Status" }, { key: "space", label: "Space" },
@@ -23,7 +24,7 @@ const GROUPS = [{ key: "status", label: "Status" }, { key: "space", label: "Spac
 function sections() {
   const p = props() ?? {};
   if (p.menu === "row") return [{ title: null, checks: false, current: null,
-    items: [{ key: "pin", label: p.on ? "Unpin" : "Pin", icon: `mods/workspace-chrome/${p.on ? "pin-off" : "pin"}.svg` }],
+    items: taskMenu({ pinned: p.on }).map((it) => ({ key: "pin", label: it.label, icon: `mods/workspace-chrome/${it.icon}.svg` })),
     pick: () => {
       const v = shared("tasks.pinned");
       const rest = (Array.isArray(v) ? v : []).filter((k) => k !== p.key);

@@ -10,9 +10,10 @@ import { kindOf } from "../core/chat-reader.js";
 import * as AGa from "../core/agents.js";
 const { sessionOf, forkArgv } = AGa as any;
 import * as SP from "../core/spaces.js";
-const { READ, withMove, withSection, withoutSection, withSectionName, withIcon } = SP as any;
+const { READ, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook } = SP as any;
 import type { Compat } from "./compat.ts";
 import { worktreeAct } from "./worktrees.ts";
+import { exec } from "./model.ts";
 
 const APP = process.env.HERDR_APP_HOME || join(homedir(), ".config", "herdr-app");
 const ATTACH = join(process.env.HERDR_APP_HOME || join(homedir(), ".config", "herdr-app"), "data", "chat-attach");
@@ -21,7 +22,7 @@ const REF = /^[A-Z][A-Z0-9]*-\d+$/;
 const MACHINE = /^[\w.-]+$/;
 
 // Messages held until their agent is free, sent in order, each once.
-const held: { addr: string; kind: string; body: string; hub: Hub }[] = [];
+const held: { addr: string; kind: string; body: string; hub: Hub; cid?: string; now?: boolean }[] = [];
 let draining: ReturnType<typeof setInterval> | null = null, busy = false;
 function drain() {
   draining ??= setInterval(async () => {
@@ -32,7 +33,7 @@ function drain() {
       for (const m of [...held]) {
         const st = (m.hub.terminals.get(m.addr) as any)?.status?.state;
         const alive = m.hub.terminals.get(m.addr)?.state === "live";
-        if (alive && (st === "working" || st === "blocked")) continue;
+        if (alive && !m.now && (st === "working" || st === "blocked")) continue;
         const i = held.indexOf(m);
         if (i < 0) continue;
         held.splice(i, 1);
@@ -152,6 +153,12 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const name = b.name.trim().slice(0, 80);
     const icon = typeof b.emoji === "string" ? b.emoji.slice(0, 16) || null : undefined;
     if (sec(b.id)) { await sh.set("spaces-chat", withSectionName(bar(), sec(b.id), name, icon)); return { ok: true }; }
+    if (b.id.startsWith("m:")) {
+      // a machine's own name and emoji in the sidebar, as the window's Rename… (this computer is the snapshot's host)
+      const key = b.id.slice(2);
+      await sh.set("spaces-chat", withMachineLook(bar(), key === compat.host ? null : key, name, icon ?? null));
+      return { ok: true };
+    }
     // a space: its icon is ours; its name is Herdr's (the window renames it, when it runs)
     if (icon !== undefined) await sh.set("spaces-chat", withIcon(bar(), b.id, icon));
     if (name) {
@@ -203,6 +210,40 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (r.code !== 0) throw new Error("It didn't close: the Herdr window needs to be open.");
     return { ok: true };
   }
+  if ((b?.type === "held-now" || b?.type === "held-drop") && typeof b.cid === "string") {
+    // a queued message (the window's Send now and ×): sent at once, or taken back unsent
+    const m = held.find((x) => x.cid === b.cid);
+    if (!m) throw new Error("That message has gone in already.");
+    if (b.type === "held-drop") held.splice(held.indexOf(m), 1);
+    else { m.now = true; drain(); }
+    return { ok: true };
+  }
+  if (b?.type === "tab-rename" && typeof b.place === "string" && typeof b.name === "string") {
+    // the Assistant tab's Rename… (3.0's tab menu): Herdr names the tab
+    const a = compat.addrOf(`p:${b.place.replace("/", ":")}`), t: any = a ? hub.terminals.get(a) : null;
+    const tab = t?.labels?.["herdr.coordinator.tab"], name = b.name.trim().slice(0, 80);
+    if (!tab) throw new Error("This space has no Assistant tab.");
+    if (!name) throw new Error("Type a name first.");
+    const r = await run(["herdr-app", "do", "tab.rename", "--id", tab, "--name", name]);
+    if (r.code !== 0) throw new Error("Renaming a tab needs the Herdr window open.");
+    return { ok: true };
+  }
+  if ((b?.type === "tab-agents" || b?.type === "tab-new") && typeof b.place === "string") {
+    // the tab bar's + (3.0's new-menu): a terminal, or an agent, as a new tab of the space, in its folder
+    const sp = compat.spaceOf(b.place);
+    if (!sp) throw new Error("That space isn't here any more.");
+    const AGENTS: Record<string, { name: string; run: string[] }> = { claude: { name: "Claude Code", run: ["claude"] }, codex: { name: "Codex", run: ["codex"] } };
+    if (b.type === "tab-agents") {
+      const r = await exec(hub, ["sh", "-c", 'for c in "$@"; do command -v "$c" >/dev/null 2>&1 && echo "$c"; done', "agents", ...Object.keys(AGENTS)], sp.machine).catch(() => null);
+      const have = new Set((r?.stdout ?? "").split("\n").filter(Boolean));
+      return { ok: true, agents: Object.entries(AGENTS).map(([kind, a]) => ({ kind, name: a.name, installed: have.has(kind) })) };
+    }
+    const a = typeof b.kind === "string" ? AGENTS[b.kind] : null;
+    if (b.kind != null && !a) throw new Error("Not an agent Shepherdr knows.");
+    const r = await run(["herdr-app", "do", "tab.new", "--space", sp.id, "--folder", sp.folder || "~", ...(a ? ["--name", a.name, "--argv", JSON.stringify(a.run)] : [])]);
+    if (r.code !== 0) throw new Error("A new tab opens in the Herdr window: it needs the window open.");
+    return { ok: true };
+  }
   if (b?.type === "space-remove" && typeof b.place === "string" && compat.shared) {
     // Close a space: the window closes its own (herdr-app do space.close); the service forgets one of its own and ends its Assistant
     const own = Array.isArray(compat.shared.value("spaces")) ? compat.shared.value("spaces") : [];
@@ -249,7 +290,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     b = { ...b, addr: a, quote: quoted, tags };
   }
   else if (b?.type === "stop" && typeof b.chat === "string") b = { ...b, addr: chat(b.chat) };
-  else if ((b?.type === "close" || b?.type === "delete" || b?.type === "archive") && typeof b.chat === "string") {
+  else if ((b?.type === "close" || b?.type === "delete" || b?.type === "archive" || b?.type === "task-resume") && typeof b.chat === "string") {
     // a task's row menu: its chat key is "<task>/worker" (or 2.1's "/Agent")
     const t = compat.taskOf(b.chat.split("/")[0]);
     if (!t) throw new Error("That task isn't here any more.");
@@ -301,7 +342,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       const body = [messageBody({ text, quote: typeof b.quote === "string" ? b.quote.slice(0, 2000) : null, tags: typeof b.tags === "string" ? b.tags : "" }), ...files].filter(Boolean).join("\n\n");
       // held on purpose (Ctrl+Enter, a long press): it goes once the agent stops working
       const st = (hub.terminals.get(a) as any)?.status?.state;
-      if (b.hold && (st === "working" || st === "blocked")) { held.push({ addr: a, kind: kindOf(t) ?? "", body, hub }); drain(); return { ok: true, waiting: true, waitsFor: "turn" }; }
+      if (b.hold && (st === "working" || st === "blocked")) { held.push({ addr: a, kind: kindOf(t) ?? "", body, hub, cid: typeof b.cid === "string" ? b.cid.slice(0, 80) : undefined }); drain(); return { ok: true, waiting: true, waitsFor: "turn" }; }
       const r = await sendBody(io, a, kindOf(t) ?? "", body);
       if (r.code !== 0) throw new Error(refusal(r).message);
       return { ok: true };
@@ -329,6 +370,15 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       try { out = JSON.parse(r.stdout); } catch {}
       if (r.code !== 0 || out?.error) throw new Error(out?.error || r.stderr.trim() || "herdr-task accept failed");
       return out ?? { ok: true };
+    }
+    case "task-resume": {
+      // an ended task's Resume (the window's): herdr-task starts its agent again on its session
+      const { ref, folder, machine } = taskOf(b);
+      const r = await task(["resume", ref], folder, machine);
+      let out: any = null;
+      try { out = JSON.parse(r.stdout); } catch {}
+      if (r.code !== 0 || out?.error || !out?.terminal) throw new Error(out?.error || r.stderr.trim().split("\n").pop() || "Its agent didn't start.");
+      return { ok: true, terminal: out.terminal };
     }
     // the person's own calls on a task, as herdr-task makes them: done, removed, or back from the archive
     case "close": case "delete": case "archive": {

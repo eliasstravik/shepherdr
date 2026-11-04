@@ -49,7 +49,7 @@ function Slot({ held, snap }: { held: HeldNeed; snap: Snapshot }) {
   )
 }
 
-function NeedsList() {
+export function NeedsList() {
   const snap = useSnap()!
   // kept while the view is open: leaving it and coming back starts oldest first again, without what no longer waits
   const held = useRef<HeldNeed[]>([])
@@ -71,7 +71,7 @@ function NeedsList() {
 
 export default definePlugin({
   name: 'needs',
-  setup(reg) {
-    reg.views.needs = NeedsList
-  },
+  // Shepherdr 3 has no Needs you view: what needs you is the Tasks panel's first section (plugins/tasks), and each card
+  // stays in its chat. NeedsList is kept for plugins of the human's own.
+  setup() {},
 })

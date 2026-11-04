@@ -32,7 +32,6 @@ import {
   useStore,
   useUI,
 } from '@client/kernel.ts'
-import { ListChips } from '@client/chips.tsx'
 import { DictationBox, toggleDictation, useChat } from '@plugins/chat/client.tsx'
 import { canDictate } from '@client/dictation.ts'
 import { useDialogFocus } from '@client/focus.ts'
@@ -40,6 +39,7 @@ import { useMotion } from '@client/motion.ts'
 import { isDark, useDark } from '@client/theme.ts'
 import {
   BackIcon,
+  NextIcon,
   CheckIcon,
   ClockIcon,
   dimmed,
@@ -76,6 +76,44 @@ export type Pick = { text: string; selector: string; component?: string; x: numb
 
 const frameUrl = (id: string, v: number, full: boolean, device: string, part = '', theme = '') =>
   `api/artifacts/${encodeURIComponent(id)}${part}?v=${v}${full ? '&full=1' : ''}&device=${device}${theme ? `&theme=${theme}` : ''}`
+
+/** how long ago, as the window says it: "just now", "5m ago", "2h ago", "3d ago" */
+export function ago(ms: number) {
+  const m = Math.floor((Date.now() - ms) / 60000)
+  if (m < 1) return 'just now'
+  return m < 60 ? `${m}m ago` : m < 1440 ? `${Math.floor(m / 60)}h ago` : `${Math.floor(m / 1440)}d ago`
+}
+
+/** which version, who made it and when: "v3 · Claude Code · 2h ago" (the window's) */
+const detailOf = (a: Artifact) => [`v${a.v}`, a.by, a.at ? ago(a.at) : null].filter(Boolean).join(' · ')
+
+/** the version stepper the window's artifact bars have: ‹ v2 of 5 ›, then "· Latest ›" while an older one shows */
+function Stepper({ art, shown, onStep }: { art: Artifact; shown: number; onStep: (n: number | undefined) => void }) {
+  const kept = [...art.versions.map((x) => x.n)].sort((a, b) => a - b)
+  const latest = art.v
+  const older = shown < latest
+  const prev = kept.filter((n) => n < shown).pop()
+  const next = kept.find((n) => n > shown)
+  const me = art.versions.find((x) => x.n === shown)
+  if (kept.length <= 1 && !older) return <div className="shrink-0 text-xs text-fg2 tabular-nums phone:text-[0.8125rem]">v{shown}{me?.when ? ` · ${me.when}` : ''}</div>
+  return (
+    <div className="flex shrink-0 items-center text-xs tabular-nums phone:text-[0.8125rem]">
+      <IconButton label={prev ? `v${prev}` : 'No older version'} disabled={!prev} className="rounded-full! disabled:opacity-40" onClick={() => prev && onStep(prev)}>
+        <BackIcon className={ic} />
+      </IconButton>
+      <span className={clsx('px-0.5', older ? 'text-fg' : 'text-fg2')}>v{shown} of {latest}</span>
+      <IconButton label={next ? `v${next}` : 'No newer version'} disabled={!next} className="rounded-full! disabled:opacity-40" onClick={() => next && onStep(next === latest ? undefined : next)}>
+        <NextIcon className={ic} />
+      </IconButton>
+      {older ? (
+        <>
+          <span className="px-1 text-fg3">·</span>
+          <button type="button" className="press-dim rounded-full px-1.5 py-1 font-medium text-focus hover:bg-hover" onClick={() => onStep(undefined)}>Latest ›</button>
+        </>
+      ) : null}
+    </div>
+  )
+}
 
 /** the version whose HTML a version shows (one that brought only data shows the HTML before it) */
 const htmlOf = (a: Artifact, n: number) => a.versions.find((x) => x.n === n)?.html ?? n
@@ -123,38 +161,35 @@ function useShown(key: string) {
 export function showInPanel(id: string) {
   const { ui, snap } = getState()
   if (!snap) return
-  const g = agentChat(ui, snap)
   if (ui.viewer) closeArtifact()
-  if (ui.device === 'desktop' && ui.task && g && !taskInMiddle(ui, snap)) {
-    setShown(`chat:${g.chat}`, id)
-    return openItem('artifacts')
-  }
   setShown(`list:${listView(ui, snap).key}`, id)
   setUI(ui.device === 'phone' ? { task: null, tab: 'artifacts', pick: null, plus: null, menu: false } : { task: ui.task && !taskInMiddle(ui, snap) ? null : ui.task, side: 'artifacts' })
 }
 
-/** An artifact filling a side panel at its width, under its own bar: back to the list, full screen, and close */
-function PanelArtifact({ art, onBack, onClose }: { art: Artifact; onBack: () => void; onClose: () => void }) {
+/** Mark up from the side panel: the viewer opens marking up (a phone's or browser's frame is too small to mark in) */
+let markOnOpen = false
+
+/** An artifact in the side panel, under the window's sidebar bar: ‹ Artifacts back to the list, its title, which
+ *  version (‹ v2 of 5 ›, · Latest ›), and Mark up, which opens it full screen to mark it up there */
+function PanelArtifact({ art, onBack }: { art: Artifact; onBack: () => void }) {
+  const [v, setV] = useState<number | undefined>(undefined)
+  const shown = v && art.versions.some((x) => x.n === v) ? v : art.v
   return (
     <div role="region" aria-label={art.title} className="flex h-full min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center gap-1 border-b border-line py-1 pr-2 pl-1 coarse:py-0.5">
-        <IconButton label="Back to Artifacts" className="rounded-full!" onClick={onBack}>
+      <div className="flex shrink-0 items-center gap-1.5 border-b border-line py-1 pr-2 pl-1 coarse:py-0.5">
+        <button type="button" onClick={onBack} className="press-dim flex h-8 shrink-0 items-center gap-0.5 rounded-full pr-2 pl-1 text-[0.8125rem] text-fg2 hover:bg-hover hover:text-fg phone:h-11 phone:text-[0.9375rem]">
           <BackIcon className={ic} />
-        </IconButton>
-        <div className="flex min-w-0 flex-1 items-baseline gap-2">
-          <div className="line-clamp-2 min-w-0 shrink font-semibold break-words">{art.title}</div>
-          <div className="shrink-0 text-xs text-fg2 tabular-nums phone:text-sm">v{art.v}</div>
-        </div>
-        <IconButton label="Open full screen" className="rounded-full!" onClick={() => openArtifact(art.id)}>
-          <OpenIcon className={ic} />
-        </IconButton>
-        <IconButton label="Close" className="rounded-full!" onClick={onClose}>
-          <XIcon className={ic} />
-        </IconButton>
+          Artifacts
+        </button>
+        <div className="min-w-0 flex-1 truncate font-semibold">{art.title}</div>
+        <Stepper art={art} shown={shown} onStep={setV} />
+        <Ghost onClick={() => { markOnOpen = true; openArtifact(art.id, shown === art.v ? undefined : shown) }} className="shrink-0">
+          <MarkUpIcon /> Mark up
+        </Ghost>
       </div>
       <div className="relative min-h-0 flex-1">
         <div className="absolute inset-0">
-          <ArtifactFrame art={art} v={art.v} full />
+          <ArtifactFrame art={art} v={shown} full />
         </div>
       </div>
     </div>
@@ -342,7 +377,7 @@ function PageFrame({
 }
 
 /** the newest post of an artifact in a chat shows it; earlier ones fold to a line, so a chat never repeats big frames */
-function ArtifactCard({ msg, chat, from }: { msg: Message; chat: Chat; from: string }) {
+function ArtifactCard({ msg, chat }: { msg: Message; chat: Chat; from: string }) {
   const snap = useSnap()!
   const post = msg.artifact
   if (!post) return null
@@ -352,72 +387,33 @@ function ArtifactCard({ msg, chat, from }: { msg: Message; chat: Chat; from: str
   const gap = msg.text && 'mt-2'
   if (!art)
     return (
-      <div className={clsx(gap, 'flex max-w-full items-center gap-2 rounded-full px-3.5 py-2 text-[0.8125rem] text-fg3 shadow-[inset_0_0_0_1px_var(--line)] phone:text-[0.9375rem]')}>
+      <div className={clsx(gap, 'flex max-w-full items-center gap-1.5 text-[0.75rem] text-fg3 phone:text-[0.8125rem]')}>
         <PageIcon className={ic} />
         This artifact was deleted.
       </div>
     )
+  // an earlier publish of it: a quiet line, as the window's chat ("Published <title> v2"), that opens that version
   if (later)
     return (
-      <button
-        type="button"
-        onClick={() => openArtifact(art.id, post.v)}
-        className={clsx(
-          gap,
-          'flex max-w-full items-center gap-2 rounded-full px-3.5 py-2 text-left text-[0.8125rem] text-fg2 shadow-[inset_0_0_0_1px_var(--line2)] hover:bg-hover phone:min-h-11 phone:text-[0.9375rem]',
-        )}
-      >
+      <button type="button" onClick={() => openArtifact(art.id, post.v)}
+        className={clsx(gap, 'press-dim flex max-w-full items-center gap-1.5 rounded-row text-left text-[0.75rem] text-fg3 hover:bg-hover hover:text-fg2 phone:min-h-11 phone:text-[0.8125rem]')}>
         <PageIcon className={ic} />
-        <b className="line-clamp-3 min-w-0 flex-1 font-medium break-words text-fg">{art.title}</b>
-        <span className="shrink-0 text-fg3 tabular-nums">v{post.v} · newer below</span>
+        <span className="min-w-0 truncate">Published {art.title} v{post.v}</span>
       </button>
     )
-  return <ArtifactPanel art={art} you={msg.who === 'you'} from={msg.who === 'you' ? 'You' : from} className={gap} />
-}
-
-/** The newest post of an artifact: the whole width of the chat, the page edge to edge under one slim row (its title,
- *  version and Open). The row has the sender's bubble shade and the card a bubble's corners, the small one pointing at
- *  whoever sent it, so it reads as theirs as plainly as a bubble does. */
-function ArtifactPanel({ art, you, from, className }: { art: Artifact; you: boolean; from: string; className?: string | false }) {
-  const [more, setMore] = useState(false)
-  const desktop = useUI((u) => u.device === 'desktop')
+  // its latest publish: the window's card, its title, "Artifact · v3" and Open
   return (
-    <div
-      data-card
-      data-you={you ? '' : undefined}
-      className={clsx(
-        'relative w-full cursor-default overflow-hidden bg-bg',
-        className,
-        'after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:shadow-[inset_0_0_0_1px_var(--line2)]',
-        you ? 'rounded-bubble rounded-br-[6px]' : 'rounded-bubble rounded-bl-[6px]',
-      )}
-    >
-      <div className={clsx('@container/card flex items-center gap-2 py-1 pr-1 pl-3 text-[0.75rem] text-fg2 phone:py-0 phone:text-[0.8125rem]', you ? 'bg-reply' : 'bg-bubble')}>
+    <button type="button" data-card onClick={(e) => (splitClick(e) ? openSplit({ kind: 'artifact', id: art.id }) : openArtifact(art.id))}
+      className={clsx(gap, 'press flex w-full max-w-[420px] items-center gap-2.5 rounded-box bg-bubble px-2.5 py-2 text-left shadow-[inset_0_0_0_1px_var(--line2)] hover:bg-hover')}>
+      <span className="grid size-8 shrink-0 place-items-center rounded-row bg-bg text-fg2 phone:size-10">
         <PageIcon className={ic} />
-        <button type="button" onClick={(e) => (splitClick(e) ? openSplit({ kind: 'artifact', id: art.id }) : openArtifact(art.id))} className="min-w-0 flex-1 self-stretch py-1 text-left font-medium break-words text-fg">
-          {/* a task's name in the title takes more than the narrow card's one line */}
-          <span className="line-clamp-3 leading-4 phone:leading-[1.125rem]">{art.title}</span>
-        </button>
-        <span className="max-w-[55%] shrink-0 truncate tabular-nums">
-          {/* a narrow card keeps its title: where it is from gives way */}
-          <span className="phone:hidden @max-md/card:hidden">{from} · </span>v{art.v} · {art.when}
-        </span>
-        <IconButton label="Show in side panel" onClick={() => showInPanel(art.id)}>
-          <PanelIcon className={ic} />
-        </IconButton>
-        {desktop ? (
-          <IconButton label="Open in split view" onClick={() => openSplit({ kind: 'artifact', id: art.id })}>
-            <SplitIcon className={ic} />
-          </IconButton>
-        ) : null}
-        <IconButton label="Open full screen" onClick={() => openArtifact(art.id)}>
-          <OpenIcon className={ic} />
-        </IconButton>
-      </div>
-      <ArtifactFrame art={art} v={art.v} onMore={setMore} />
-      {/* the page goes on below: it scrolls inside the card */}
-      {more ? <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-linear-to-t from-bg to-transparent" /> : null}
-    </div>
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate font-medium">{art.title}</span>
+        <span className="text-[0.75rem] text-fg3 tabular-nums phone:text-[0.8125rem]">Artifact · v{post.v}</span>
+      </span>
+      <span className="grid h-7 shrink-0 place-items-center rounded-row bg-bg px-2.5 text-[0.8125rem] font-medium shadow-[inset_0_0_0_1px_var(--line2)] phone:h-9">Open</span>
+    </button>
   )
 }
 
@@ -426,40 +422,24 @@ function ArtifactPanel({ art, you, from, className }: { art: Artifact; you: bool
 function Viewer() {
   const v = useUI((u) => u.viewer)
   const device = useUI((u) => u.device)
-  const dict = useUI((u) => u.dict)
   const snap = useSnap()
-  // what you write to its keeper, kept like any draft (talk to type writes it too)
-  const draft = useDraftOf(v ? `art:${v.artifact}` : '')
   const art = v && snap?.artifacts?.find((a) => a.id === v.artifact)
   const [markup, setMarkup] = useState(false)
   const [pick, setPick] = useState<Pick | null>(null)
-  const [menu, setMenu] = useState<'versions' | 'more' | 'delete' | null>(null)
+  const [text, setText] = useState('')
   const [said, setSaid] = useState('')
-  const [fresh, setFresh] = useState<number | null>(null)
-  /** the latest version this viewer has shown, of which artifact */
-  const seen = useRef<{ id: string; v: number } | null>(null)
-  // a version no longer kept (the last 20 are) shows the latest, and says so
-  const gone = !!(art && v?.v && !art.versions.some((x) => x.n === v.v))
-  const shown = gone ? art?.v : (v?.v ?? art?.v)
+  const [failed, setFailed] = useState(false)
+  const [sending, setSending] = useState(false)
+  // a version no longer kept (the last 20 are) shows the latest
+  const shown = art && v?.v && art.versions.some((x) => x.n === v.v) ? v.v : art?.v
   useEffect(() => {
-    setMarkup(false)
+    // Mark up from the side panel opens it marking up
+    setMarkup(markOnOpen)
+    markOnOpen = false
     setPick(null)
-    setMenu(null)
+    setText('')
     setSaid('')
-    setFresh(null)
   }, [v?.artifact])
-  // following the latest: say so when a new version comes in
-  useEffect(() => {
-    if (!art) return
-    const was = seen.current
-    seen.current = { id: art.id, v: art.v }
-    if (!v?.v && was?.id === art.id && art.v > was.v) setFresh(art.v)
-  }, [art?.id, art?.v, v?.v])
-  useEffect(() => {
-    if (!fresh) return
-    const t = setTimeout(() => setFresh(null), 4000)
-    return () => clearTimeout(t)
-  }, [fresh])
   if (!v) return null
   const phone = device === 'phone'
   if (!art || !shown)
@@ -468,212 +448,111 @@ function Viewer() {
         <div className="rounded-box bg-bg px-5 py-4 shadow-dialog">{snap ? 'This artifact was deleted.' : 'Opening…'}</div>
       </div>
     )
-  const key = `art:${art.id}`
-  const text = draft ?? ''
-  const setText = (t: string) => setDraft(key, t)
-  const ver = art.versions.find((x) => x.n === shown)
+  const keeper = art.keeper || 'the agent'
+  // Mark up's Send, as the window's: to the agent that keeps it, about the marked spot or all of it
   const send = async () => {
     const t = text.trim()
-    if (!t) return
+    if (!t || sending) return
     const last = pick?.selector.split(' > ').pop() ?? ''
     const target = pick ? `${pick.text ? `"${pick.text.slice(0, 60)}" ` : ''}(${last}${pick.component ? ` in ${pick.component}` : ''})` : undefined
+    setSending(true)
+    setFailed(false)
+    setSaid('Sending…')
     const r = (await act(pick ? { type: 'artifact-note', place: art.place, artifact: art.id, v: shown, note: t, target } : { type: 'artifact-say', place: art.place, artifact: art.id, v: shown, text: t }).catch(() => ({ ok: false }))) as {
       ok?: boolean
       error?: string
     }
-    if (r.ok === false) return setSaid(r.error ?? "That didn't go through. Try again.")
+    setSending(false)
+    if (r.ok === false) {
+      setFailed(true)
+      return setSaid(r.error ?? "That didn't go through. Try again.")
+    }
     setText('')
     setPick(null)
-    setMarkup(false)
-    setSaid("Sent. A new version shows here when it's in.")
+    setSaid(`Sent to ${keeper}. A new version shows here when it's in.`)
   }
-  const del = async () => {
-    const r = (await act({ type: 'artifact-delete', place: art.place, artifact: art.id }).catch(() => ({ ok: false }))) as { ok?: boolean; error?: string } | undefined
-    if (r?.ok === false) {
-      setMenu(null)
-      return setSaid(r.error ?? "Couldn't delete it. Try again.")
-    }
-    closeArtifact()
-  }
+  const line = said || (pick ? 'A note on the marked spot.' : `${device === 'desktop' ? 'Click' : 'Tap'} a spot, or write to ${keeper} about all of it.`)
   // round, like every header's buttons; grey circles on a phone
   const barBtn = phone ? 'rounded-full! bg-bubble' : 'rounded-full!'
   return (
     <ViewerShell label={art.title} phone={phone}>
-      {/* the whole screen is the page's, but for a slim bar on top and the box to its keeper below */}
+      {/* the whole screen is the page's, but for a slim bar on top (the window's artifact viewer bar) */}
       <div className="flex w-full min-w-0 flex-col overflow-hidden pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]">
         <div className="flex shrink-0 items-center gap-1.5 border-b border-line pt-[calc(env(safe-area-inset-top)+--spacing(1))] pr-2 pb-1 pl-4 phone:gap-2 phone:px-3">
-          <IconButton label="Close" onClick={closeArtifact} className={clsx(barBtn, 'desktop:hidden tablet:hidden')}>
-            <XIcon className={ic} />
-          </IconButton>
-          {/* the title whole first, then the version and when, cut short; a phone's bar has room for them only under it */}
-          <div className="flex min-w-0 flex-1 items-baseline gap-2 phone:flex-col phone:items-stretch phone:gap-0">
-            <div className="line-clamp-2 min-w-0 font-semibold break-words phone:leading-5">{art.title}</div>
-            <div className="min-w-0 shrink-[100] truncate text-xs text-fg2 tabular-nums phone:text-[0.8125rem]/4">
-              v{shown} · {ver?.by ?? art.by} · {ver?.when ?? art.when}
-            </div>
-          </div>
-          <div className="relative">
-            <IconButton label="Versions" aria-haspopup="menu" aria-expanded={menu === 'versions'} className={clsx(barBtn, 'w-auto! px-2 gap-1 inline-flex!')} onClick={() => setMenu(menu === 'versions' ? null : 'versions')}>
-              <ClockIcon className={ic} /><span className="phone:hidden">Version </span><span>v{shown}</span>
-            </IconButton>
-            {menu === 'versions' ? (
-              <Popover onClose={() => setMenu(null)} label="Versions">
-                <MenuLabel>Versions</MenuLabel>
-                {art.versions.map((x) => (
-                  <MenuItem
-                    key={x.n}
-                    role="menuitemradio"
-                    aria-checked={x.n === shown}
-                    icon={x.n === shown ? <CheckIcon className={ic} /> : <span className={ic} />}
-                    hint={x.when}
-                    onClick={() => {
-                      setMenu(null)
-                      setPick(null)
-                      openArtifact(art.id, x.n === art.v ? undefined : x.n)
-                    }}
-                  >
-                    <span className="block min-w-0 truncate">
-                      v{x.n}
-                      {x.n === art.v ? ' · latest' : ''}
-                      {x.note ? ` · ${x.note}` : x.what === 'data' ? ' · new data' : x.what === 'title' ? ' · new title' : ''}
-                    </span>
-                  </MenuItem>
-                ))}
-              </Popover>
-            ) : null}
-          </div>
+          <PageIcon className={clsx(ic, 'shrink-0 text-fg2 phone:hidden')} />
+          <div className="min-w-0 flex-1 truncate font-semibold">{art.title}</div>
+          <Stepper art={art} shown={shown} onStep={(n) => { setPick(null); openArtifact(art.id, n) }} />
           <IconButton
-            label={markup ? 'Done marking up' : 'Mark up'}
+            label={markup ? 'Done' : 'Mark up'}
             pressed={markup}
             className={clsx(barBtn, 'w-auto! px-2 gap-1 inline-flex! aria-pressed:bg-[color-mix(in_srgb,var(--accent)_16%,var(--bg))]')}
             onClick={() => {
               setMarkup(!markup)
-              if (markup) setPick(null)
+              setPick(null)
+              setSaid('')
             }}
           >
             <MarkUpIcon /><span className="phone:hidden">{markup ? 'Done' : 'Mark up'}</span>
           </IconButton>
-          <div className="relative">
-            <IconButton label="More" aria-haspopup="menu" aria-expanded={menu === 'more' || menu === 'delete'} className={barBtn} onClick={() => setMenu(menu ? null : 'more')}>
-              <MoreIcon className={ic} />
+          {/* beside the chat, in the Artifacts panel */}
+          {phone ? null : (
+            <IconButton label="Open in sidebar" onClick={() => showInPanel(art.id)} className="rounded-full!">
+              <PanelIcon className={ic} />
             </IconButton>
-            {menu === 'more' || menu === 'delete' ? (
-              <Popover onClose={() => setMenu(null)} label="More">
-                <MenuLabel>Made in {placeOf(snap!, art.place).name}</MenuLabel>
-                <MenuSeparator />
-                {menu === 'more' ? (
-                  <MenuItem icon={<PanelIcon className={ic} />} onClick={() => showInPanel(art.id)}>
-                    {phone ? 'Show in Artifacts tab' : 'Show in side panel'}
-                  </MenuItem>
-                ) : null}
-                {menu === 'more' && device === 'desktop' ? (
-                  <MenuItem icon={<SplitIcon className={ic} />} onClick={() => openSplit({ kind: 'artifact', id: art.id })}>
-                    Open in split view
-                  </MenuItem>
-                ) : null}
-                {menu === 'more' ? (
-                  <MenuItem className="text-need!" onClick={() => setMenu('delete')}>
-                    Delete artifact
-                  </MenuItem>
-                ) : (
-                  <MenuItem className="text-need!" onClick={del}>
-                    Delete “{art.title}” for good
-                  </MenuItem>
-                )}
-              </Popover>
-            ) : null}
-          </div>
-          {/* beside the chat, at the side panel's width, to keep chatting while you look */}
-          <IconButton label="Show in side panel" onClick={() => showInPanel(art.id)} className="rounded-full! phone:hidden">
-            <PanelIcon className={ic} />
-          </IconButton>
-          <IconButton label="Close" onClick={closeArtifact} className="rounded-full! phone:hidden">
+          )}
+          <IconButton label="Close" onClick={closeArtifact} className={barBtn}>
             <XIcon className={ic} />
           </IconButton>
         </div>
-        {gone ? (
-          <div className="shrink-0 bg-well px-4 py-1.5 text-[0.8125rem] text-fg2 phone:text-[0.9375rem]">v{v.v} is no longer kept, only the last 20 versions are. This is the latest.</div>
-        ) : v.v && v.v !== art.v ? (
-          <div className="flex shrink-0 items-center gap-2 bg-well px-4 py-1.5 text-[0.8125rem] text-fg2 phone:text-[0.9375rem]">
-            <span className="min-w-0 flex-1 truncate">An older version: v{v.v} of {art.v}.</span>
-            <button type="button" className="shrink-0 font-medium text-focus hover:underline" onClick={() => openArtifact(art.id)}>
-              Show the latest
-            </button>
-          </div>
-        ) : null}
         <div className={clsx('relative min-h-0 flex-1', markup && 'cursor-crosshair outline-2 -outline-offset-[6px] outline-focus outline-dashed')}>
           <div className="absolute inset-0">
-            <ArtifactFrame art={art} v={shown} full markup={markup} onPick={(p) => setPick(p)} />
+            <ArtifactFrame art={art} v={shown} full markup={markup} onPick={(p) => { setPick(p); setSaid('') }} />
           </div>
           {pick ? <MarkBadge x={pick.x} y={pick.y} /> : null}
-          {fresh ? (
-            <div role="status" className="absolute top-3 left-1/2 -translate-x-1/2 rounded-full bg-fg px-3 py-1 text-[0.8125rem] font-medium text-bg shadow-toast phone:text-[0.9375rem]">
-              Updated to v{fresh}
-            </div>
-          ) : null}
-        </div>
-        <div className="shrink-0 border-t border-line px-3 pt-2 pb-[max(env(safe-area-inset-bottom),--spacing(2))]">
-          {pick ? (
-            <div className="flex items-center gap-1.5 pb-1.5 text-[0.75rem] text-fg2 phone:text-[0.8125rem]">
-              <span className="min-w-0 flex-1 truncate">
-                A note on <b className="font-medium text-fg">{pick.text ? `“${pick.text.slice(0, 40)}”` : 'what you picked'}</b>
-              </span>
-              <button type="button" className="shrink-0 font-medium text-focus hover:underline" onClick={() => setPick(null)}>
-                Not on that
-              </button>
-            </div>
-          ) : said ? (
-            <div role="status" className="pb-1.5 text-[0.75rem] text-fg2 phone:text-[0.8125rem]">
-              {said}
-            </div>
-          ) : markup ? (
-            <div className="pb-1.5 text-[0.75rem] text-fg2 phone:text-[0.8125rem]">{device === 'desktop' ? 'Click' : 'Tap'} what should change.</div>
-          ) : null}
-          {/* the chat's message box: a pill, the same round buttons */}
-          <div className="round-box flex items-end gap-1 bg-bg p-1.5 pl-3.5 shadow-box has-[textarea:focus]:shadow-box-focus phone:pl-4">
-            {dict === key ? (
-              <DictationBox />
-            ) : (
-              <>
+          {markup ? (
+            // the window's markup card: what it's about, Clear spot, the note and Send
+            <div className="absolute inset-x-2.5 bottom-[max(env(safe-area-inset-bottom),--spacing(2.5))] flex flex-col gap-1.5 rounded-box bg-bg p-2 shadow-dialog">
+              <div className="flex items-start gap-2 px-0.5 text-[0.75rem] phone:text-[0.8125rem]">
+                <p className={clsx('min-w-0 flex-1 text-pretty', failed ? 'text-need-fg' : 'text-fg2')} role={said ? 'status' : undefined}>{line}</p>
+                {pick && !said ? (
+                  <button type="button" className="shrink-0 font-medium text-focus hover:underline" onClick={() => setPick(null)}>Clear spot</button>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-1.5">
                 <TextBox
-                  label={pick ? 'Note' : `Message ${art.keeper}`}
-                  data-chat={key}
+                  label="Note"
                   value={text}
                   onChange={(t) => {
                     setText(t)
-                    if (said) setSaid('')
+                    if (said && !sending) setSaid('')
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey && !phone) {
                       e.preventDefault()
-                      send()
+                      void send()
                     }
-                    // the box lets go first; Esc again closes the viewer
+                    // Esc drops the spot, then ends marking up
                     if (e.key === 'Escape') {
                       e.preventDefault()
-                      e.currentTarget.blur()
+                      if (pick) setPick(null)
+                      else setMarkup(false)
                     }
                   }}
-                  placeholder={pick ? 'What should change?' : phone ? 'Ask for a change…' : `Ask ${art.keeper} for a change…`}
-                  className="max-h-40 min-h-[34px] min-w-0 flex-1 bg-transparent py-[7px] outline-none placeholder:text-fg3 phone:min-h-11 phone:py-2.5 phone:text-[1rem]"
+                  placeholder="What should change?"
+                  className="max-h-32 min-h-8 min-w-0 flex-1 rounded-row bg-bg px-2.5 py-1.5 shadow-[inset_0_0_0_1px_var(--line2)] outline-none placeholder:text-fg3 focus:shadow-[inset_0_0_0_1.5px_var(--focus)] phone:min-h-11 phone:text-[1rem]"
                 />
-                {canDictate() ? (
-                  <IconButton label="Talk to type" className={roundBtn} onClick={() => toggleDictation(key)}>
-                    <MicIcon className={ic} />
-                  </IconButton>
-                ) : null}
                 <button
                   type="button"
-                  aria-label={pick ? 'Send the note' : 'Send'}
-                  disabled={!text.trim()}
-                  onClick={send}
-                  className={clsx('press-dim relative grid size-[34px] shrink-0 place-items-center rounded-full bg-fg text-bg after:absolute after:-inset-1.5 phone:size-11', dimmed)}
+                  aria-label="Send"
+                  disabled={!text.trim() || sending}
+                  onClick={() => void send()}
+                  className={clsx('press-dim relative grid size-8 shrink-0 place-items-center rounded-row bg-fg text-bg after:absolute after:-inset-1.5 phone:size-11', dimmed)}
                 >
                   <UpIcon className={ic} />
                 </button>
-              </>
-            )}
-          </div>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </ViewerShell>
@@ -694,75 +573,48 @@ function ViewerShell({ label, phone, children }: { label: string; phone: boolean
   )
 }
 
-function Popover({ label, onClose, children }: { label: string; onClose: () => void; children: React.ReactNode }) {
-  return (
-    <Menu label={label} onClose={onClose} className="absolute top-full right-0 z-21 mt-1.5 max-h-[60dvh] w-max max-w-[min(320px,calc(100vw-24px))] origin-top-right overflow-y-auto">
-      {children}
-    </Menu>
-  )
+
+
+/** "All" in the list's bar: every folder's artifacts, or the shown space's (the window's toggle), kept on this device */
+const ALL = 'shepherdr.artifactsAll'
+let allOn = (() => { try { return localStorage.getItem(ALL) === '1' } catch { return false } })()
+const allListeners = new Set<() => void>()
+function setAll(on: boolean) {
+  allOn = on
+  try { localStorage.setItem(ALL, on ? '1' : '0') } catch { /* private window */ }
+  allListeners.forEach((l) => l())
 }
 
-/** The check's picture of it, in the screen's own theme */
-function Thumb({ art }: { art: Artifact }) {
-  const [broken, setBroken] = useState(false)
-  const dark = useDark()
-  const box = 'h-9 w-12 shrink-0 overflow-hidden rounded-row bg-well outline-1 -outline-offset-1 outline-line2 phone:h-11 phone:w-14'
-  if (!art.thumb || broken)
-    return (
-      <span className={clsx(box, 'grid place-items-center text-fg3')}>
-        <PageIcon className={ic} />
-      </span>
-    )
-  const url = (dark: boolean) => `api/artifacts/${encodeURIComponent(art.id)}/thumb?v=${art.v}${dark ? '&dark=1' : ''}`
-  return (
-    <span className={box}>
-      <img src={url(dark)} alt="" loading="lazy" onError={() => setBroken(true)} className="size-full object-cover object-top" />
-    </span>
-  )
-}
-
-/** The lists' artifacts, newest first: what their chips hold (placeId, the place picked, is for plugins of old) */
+/** The Artifacts panel, as the window's: "Artifacts", the space's folder or All folders, the All toggle, "Filter
+ *  artifacts" (F), and each artifact with "v3 · its maker · 2h ago" ("Open · " while it shows); newest first */
 function ArtifactList(_: { placeId: string }) {
   const snap = useSnap()!
   const view = useStore((s) => listView(s.ui, snap))
+  const place = useUI((u) => u.place)
   const open = useUI((u) => u.viewer?.artifact)
+  const all = useSyncExternalStore((l) => (allListeners.add(l), () => void allListeners.delete(l)), () => allOn)
   const value = useUI((u) => u.filter[`${view.search}|artifacts`] ?? '')
-  const q = useUI((u) => filterOf(u, view.search, 'artifacts'))
+  const q = useUI((u) => filterOf(u, view.search, 'artifacts')).trim()
   // its key, where there is a keyboard
   const keys = useUI((u) => u.device === 'desktop' || u.kb)
-  // one space shown: its own artifacts need no name of where they are
-  const one = view.level === 2 ? snap.places.find((p) => p.id === view.chips[0]) : undefined
+  const here = placeOf(snap, place)
   const key = `list:${view.key}`
-  // one shown in the panel, from anywhere, takes the list's place
+  // one shown in the panel takes the list's place
   const shown = useShown(key)
-  const all = artifactsIn(snap, view)
-  const whereOf = (a: Artifact) => {
-    const at = placeOf(snap, a.place)
-    return a.place !== one?.id && at.id === a.place ? at.name : null
-  }
-  // by its title, the task (or coordinator) that made it, and the place it lives in
-  const list = q ? all.filter((a) => matches(q, a.title, a.by, whereOf(a) ?? undefined)) : all
-  if (shown)
-    return (
-      <PanelArtifact
-        art={shown}
-        onBack={() => setShown(key, null)}
-        // closed, the panel goes back to what shows beside the chat most: the tasks (a phone's chat)
-        onClose={() => {
-          setShown(key, null)
-          setUI((u) => (u.device === 'phone' ? { tab: 'chat' } : { side: 'tasks' }))
-        }}
-      />
-    )
-  if (!all.length && !q)
-    return (
-      <>
-        <ListChips alone />
-        <Empty className="pt-3">No artifacts yet. Ask {one ? one.name : 'an Assistant'} for one: a report, a dashboard, a draft screen. Every agent can make them.</Empty>
-      </>
-    )
+  const items = (snap.artifacts ?? []).filter((a) => all || a.place === here.id).sort((a, b) => b.at - a.at)
+  const folderOf = (a: Artifact) => placeOf(snap, a.place).name
+  // by its title, who made it, and (with All) its folder
+  const list = q ? items.filter((a) => matches(q, a.title, a.by, all ? folderOf(a) : undefined)) : items
+  if (shown) return <PanelArtifact art={shown} onBack={() => setShown(key, null)} />
   return (
     <>
+      <div className="flex items-center gap-2 px-3 pt-2 phone:px-4">
+        <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-fg3 phone:text-[0.9375rem]">{all ? 'All folders' : here.name}</span>
+        <button type="button" aria-pressed={all} onClick={() => setAll(!all)}
+          className="press-dim h-7 shrink-0 rounded-full px-2.5 text-[0.8125rem] font-medium text-fg2 hover:bg-hover hover:text-fg aria-pressed:bg-sel aria-pressed:text-fg coarse:h-9 phone:h-9 phone:text-[0.875rem]">
+          All
+        </button>
+      </div>
       <FilterBox
         label="Filter artifacts"
         hint={keys ? 'F' : undefined}
@@ -774,117 +626,32 @@ function ArtifactList(_: { placeId: string }) {
             openArtifact(list[0].id)
           }
         }}
-      >
-        <ListChips />
-      </FilterBox>
-      {list.length ? (
+      />
+      {!items.length ? (
+        <div className="flex flex-col items-center gap-1.5 px-5 pt-7 pb-4 text-center">
+          <PageIcon className={clsx(ic, 'text-fg3')} />
+          <p className="pt-1 font-medium">No artifacts.</p>
+          <p className="max-w-64 text-[0.8125rem] text-pretty text-fg2 phone:text-[0.9375rem]">
+            {all ? 'Reports, boards and forms agents make show here.' : `Reports, boards and forms agents make for ${here.name} show here. Ask an agent to make one.`}
+          </p>
+        </div>
+      ) : list.length ? (
         <List className="pt-1">
-          {list.map((a) => {
-            const where = whereOf(a)
-            return (
-              <Row key={a.id} two sel={open === a.id} onActivate={() => openArtifact(a.id)} className="gap-3! py-2!">
-                <Thumb art={a} />
-                <RowText
-                  sub={
-                    <>
-                      {where ? <span className="text-fg3">{where} · </span> : null}
-                      v{a.v} · {a.by} · {a.when}
-                    </>
-                  }
-                >
-                  <span className="line-clamp-3 whitespace-normal break-words">{a.title}</span>
-                </RowText>
-              </Row>
-            )
-          })}
+          {list.map((a) => (
+            <Row key={a.id} two sel={open === a.id} onActivate={() => openArtifact(a.id)} className="gap-3! py-2!">
+              <PageIcon className={clsx(ic, 'mt-0.5 shrink-0 self-start', open === a.id ? 'text-focus' : 'text-fg3')} />
+              <RowText sub={<>{open === a.id ? 'Open · ' : ''}{detailOf(a)}</>}>
+                <span className="block truncate">{a.title}</span>
+              </RowText>
+              {all ? <span className="max-w-36 shrink-0 truncate self-start text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{folderOf(a)}</span> : null}
+            </Row>
+          ))}
         </List>
       ) : (
-        <Empty className="pt-3 text-fg3">No artifacts match “{q}”. Try another search or change the filters.</Empty>
+        <p className="px-5 pt-7 text-center text-[0.8125rem] text-fg3 phone:text-[0.9375rem]">No artifacts match “{q}”.</p>
       )}
     </>
   )
-}
-
-/** A chat's artifacts, newest first: the ones it made or updated, and any posted in it */
-function useChatArtifacts(chatKey: string) {
-  const all = useSnap()?.artifacts
-  const chat = useChat(chatKey)
-  return useMemo(() => {
-    const posted = new Set(chat?.messages.flatMap((m) => (m.artifact ? [m.artifact.id] : [])))
-    return (all ?? []).filter((a) => a.chats?.includes(chatKey) || posted.has(a.id))
-  }, [all, chat, chatKey])
-}
-
-/** The artifacts of one chat, from its ⋯: a task's in its side panel, a coordinator's in place of its chat */
-function ChatArtifacts({ chatKey }: { chatKey: string }) {
-  const list = useChatArtifacts(chatKey)
-  const open = useUI((u) => u.viewer?.artifact)
-  if (!list.length) return <Empty className="pt-3">No artifacts in this chat yet. Ask for one: a report, a dashboard, a draft screen.</Empty>
-  return (
-    <List className="pt-1.5">
-      {list.map((a) => (
-        <Row key={a.id} two sel={open === a.id} onActivate={() => openArtifact(a.id)} className="gap-3! py-2!">
-          <Thumb art={a} />
-          <RowText
-            sub={
-              <>
-                v{a.v} · {a.when}
-              </>
-            }
-          >
-            <span className="line-clamp-3 whitespace-normal break-words">{a.title}</span>
-          </RowText>
-        </Row>
-      ))}
-    </List>
-  )
-}
-
-/** A coordinator chat flipped to its artifacts: the list, and the way back to the chat */
-function PlaceArtifacts({ chatKey }: { chatKey: string }) {
-  return (
-    <div className="min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain">
-      <div className="mx-auto w-full max-w-[720px] pb-4">
-        <div className="flex items-center justify-between gap-2 px-4 pt-3 phone:px-5">
-          <h2 className="text-[0.8125rem] font-medium text-fg2 phone:text-[0.9375rem]">Artifacts in this chat</h2>
-          <Ghost onClick={() => setUI({ arts: null })}>Back to the chat</Ghost>
-        </div>
-        <ChatArtifacts chatKey={chatKey} />
-      </div>
-    </div>
-  )
-}
-
-/** Artifacts in a coordinator's ⋯, under Terminal: greyed while its chat has none, and opens all the same, to say so */
-function PlaceArtifactsItem({ place }: { place: { chat: string } }) {
-  const on = useUI((u) => u.arts === place.chat)
-  const off = !on && !useChatArtifacts(place.chat).length
-  return (
-    <MenuItem
-      icon={<PageIcon className={ic} />}
-      data-off={off ? '' : undefined}
-      className={clsx(off && 'text-fg3')}
-      onClick={() => setUI({ arts: on ? null : place.chat, term: null, menu: false, plus: null, pick: null })}
-    >
-      {on ? 'Back to the chat' : 'Artifacts'}
-    </MenuItem>
-  )
-}
-
-/** a task's Artifacts tab: its chat's, or one shown in the panel */
-function TaskArtifacts({ chatKey }: { chatKey: string }) {
-  const key = `chat:${chatKey}`
-  const shown = useShown(key)
-  const device = useUI((u) => u.device)
-  if (!shown) return <ChatArtifacts chatKey={chatKey} />
-  return <PanelArtifact art={shown} onBack={() => setShown(key, null)} onClose={() => (setShown(key, null), device === 'desktop' ? togglePanel() : closeSheet())} />
-}
-
-/** a task's side panel item: greyed while its chat has none and none is shown there */
-function useTaskOff(task: Task) {
-  const none = !useChatArtifacts(task.agent?.chat ?? '').length
-  const shown = useShown(`chat:${task.agent?.chat ?? ''}`)
-  return none && !shown ? `${task.id}'s chat has no artifacts yet.` : null
 }
 
 export default definePlugin({
@@ -892,19 +659,6 @@ export default definePlugin({
   setup(reg) {
     reg.views.artifacts = ArtifactList
     reg.views.artifact = SplitArtifact
-    reg.taskPanel.push({ id: 'artifacts', order: 60, label: 'Artifacts', Icon: PageIcon, useOff: useTaskOff, View: TaskArtifacts })
-    reg.placeMenu.push({ order: 70, joined: true, View: PlaceArtifactsItem })
-    reg.chatBody.push({ when: (ui, key) => ui.arts === key && ui.term !== key, View: PlaceArtifacts })
-    reg.keys.push({
-      order: 0,
-      // Esc goes back from a coordinator's artifacts to its chat
-      handle: ({ e, ui }) => {
-        if (!ui.arts || e.key !== 'Escape' || ui.viewer || ui.menu || (e.target as HTMLElement | null)?.closest?.('input, textarea, [role=menu]')) return false
-        e.preventDefault()
-        setUI({ arts: null })
-        return true
-      },
-    })
     reg.messageParts.push({ order: 50, View: ArtifactCard })
     reg.overlays.push(Viewer)
   },

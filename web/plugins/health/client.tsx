@@ -8,6 +8,7 @@ import { definePlugin, setUI, useSnap, useUI } from '@client/kernel.ts'
 import { settingsPageOf } from '@client/Settings.tsx'
 import { IconButton, NextIcon, RoundButton, ic, useDismiss } from '@client/ui.tsx'
 import type { HealthLevel, HealthMeter, Machine, MachineHealth, Place } from '@shared/types.ts'
+import { MachinePlans } from '@plugins/limits/client.tsx'
 
 /** a meter's colour: quiet while all is well */
 const FILL: Record<HealthLevel, string> = { ok: 'bg-fg3', busy: 'bg-work', over: 'bg-need' }
@@ -118,6 +119,7 @@ function Details({ m, h, onClose }: { m: Machine; h: MachineHealth; onClose: () 
           <dd className={h.herdr ? 'text-fg2' : 'text-need-fg'}>{h.herdr ? 'Answering' : "Isn't answering"}</dd>
         </div>
       </dl>
+      <MachinePlans m={m} />
       {page !== undefined ? (
         <button
           type="button"
@@ -135,9 +137,27 @@ function Details({ m, h, onClose }: { m: Machine; h: MachineHealth; onClose: () 
   )
 }
 
+/** a machine header's meter (3.0's sidebar): CPU, memory and disk as thin bars, a red dot when its health couldn't be
+ *  read; a tap opens its popup: the numbers, the tasks at work, and each CLI's plan left */
+export function MachineMeter({ m }: { m: Machine }) {
+  const h = m.health
+  const [open, setOpen] = useState(false)
+  if (!h) return null
+  const said = `${m.name}: ${healthWords(h)}${h.herdr ? '' : `, ${h.engine || 'herdr'} isn't answering`}`
+  return (
+    <span className="relative z-1 flex">
+      <button type="button" aria-label={said} title={said} aria-haspopup="dialog" aria-expanded={open}
+        onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
+        className="hit grid h-6 place-items-center rounded-full px-1 hover:bg-sel aria-expanded:bg-sel phone:h-8">
+        <Bars meters={h.meters} />
+      </button>
+      {open ? <Details m={m} h={h} onClose={() => setOpen(false)} /> : null}
+    </span>
+  )
+}
+
+// 3.0 shows a machine's health in the sidebar (MachineMeter), not over a space's chat
 export default definePlugin({
   name: 'health',
-  setup(reg) {
-    reg.placeHeader.push({ order: 5, View: HealthButton })
-  },
+  setup() {},
 })

@@ -17,7 +17,7 @@ import {
   PencilSquareIcon,
   WrenchIcon,
 } from '@heroicons/react/16/solid'
-import { useStore } from '@client/kernel.ts'
+import { act, useStore } from '@client/kernel.ts'
 import { Sheet, SheetClose } from '@client/Stack.tsx'
 import { countJobs, jobsWords, rowsOf, stepText, took } from '@shared/activity.ts'
 import type { ActivityAnswer, Chat, Job, Step, StepKind, StepRow, TurnActivity } from '@shared/types.ts'
@@ -339,6 +339,10 @@ export function LiveLine({ chat }: { chat: Chat }) {
         <span className="min-w-0 truncate text-fg2">{now ? (now.end ? stepText(now) : now.doing) : 'Thinking'}</span>
         <span className="shrink-0 tabular-nums">{took(Date.now() - a.at)}</span>
         {a.steps ? <Chevron on={on} /> : null}
+      </button>
+      {/* the window's working line ends in Stop (Esc in the message box) */}
+      <button type="button" onClick={() => void act({ type: 'stop', chat: chat.key }).catch(() => undefined)} className={clsx('flex items-center gap-1.5 hover:text-fg2', quiet)}>
+        Stop <kbd className="rounded-[4px] px-1 font-sans text-[0.6875rem] text-fg3 shadow-[inset_0_0_0_1px_var(--line2)] coarse:hidden">Esc</kbd>
       </button>
       {on ? (
         <div className="w-full max-w-[560px] border-l-2 border-line pl-1.5">

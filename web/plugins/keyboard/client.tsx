@@ -1,80 +1,62 @@
 import { Search } from './search.tsx'
-// Keyboard: on a desktop everything works without a mouse. ? opens the list of keys in Settings; ⌘K (Ctrl+K off a Mac) searches and jumps.
-import {
-  closeArtifact,
-  definePlugin,
-  getState,
-  panelHere,
-  has,
-  keysChat,
-  listView,
-  orderedTasks,
-  shownPlaces,
-  setUI,
-  taskOf,
-  toggleFocus,
-  togglePlaces,
-  toggleWide,
-  type UI,
-} from '@client/kernel.ts'
-import { keysMoved } from '@client/focus.ts'
+// Keys, as the window's: Herdr's and Shepherdr's keys (keys.json) that mean something on the web, under the window's
+// Keybinds names (Ctrl+Shift+? lists them). Those a browser keeps for itself (Ctrl+Tab, Ctrl+1–9, Ctrl+Shift+N, T, W)
+// stay the window's. Ctrl+K jumps.
+import { closeArtifact, definePlugin, has, keysChat, setUI, togglePlaces, type UI } from '@client/kernel.ts'
 import { toggleDictation } from '@plugins/chat/client.tsx'
 import { openFind } from '@plugins/chat/find.tsx'
 import { toggleCall } from '@plugins/voice/client.tsx'
-import { ALT, CTRL, Kbd, KeyboardIcon, MOD, SHIFT } from '@client/ui.tsx'
+import { ALT, CTRL, Kbd, KeyboardIcon, SHIFT } from '@client/ui.tsx'
 import { rowLook, sectionOf } from '@client/Settings.tsx'
-import type { Snapshot } from '@shared/types.ts'
 
-export const KEYS: [string[], string][] = [
-  [['↑', '↓'], 'Move in tasks (or J, K)'],
-  [['Enter'], 'Open'],
-  [['Esc'], 'Back'],
-  [['[', ']'], 'Previous or next space'],
-  [[ALT, '↑', '↓'], 'Space above or below in Spaces, from the message box too'],
-  [[ALT, SHIFT, '↑', '↓'], 'Move a focused machine or space up or down'],
-  [[MOD, 'K'], 'Search and jump'],
-  [[MOD, 'B'], 'Show or hide Spaces'],
-  [[MOD, 'Click'], 'Open a space, task or artifact in split view'],
-  [['F'], "Focus on a task: hide its Assistant's chat, or show it again"],
-  [[SHIFT, 'F'], 'Widen the Task panel, or narrow it again'],
-  [['/'], 'Write a message'],
-  [['F'], 'Filter the tasks or artifacts (Esc clears it)'],
-  [['T'], 'Talk to type: Enter puts it in the box, Esc drops it'],
-  [['V'], 'Voice call (V again ends it)'],
-  [['M'], 'Mute or unmute the call'],
-  [['E'], 'React to the last message'],
-  [[CTRL, '`'], "Terminal and back: a task's in its Task panel"],
-  [[','], 'Settings'],
-  [['N'], 'New space'],
-  [['A'], 'Attach a file'],
-  [['Tab'], 'Move through buttons, form choices and Send'],
-  [['?'], 'These shortcuts'],
-  // 3.0's window keys, the same on the web
-  [[ALT, '1–9'], "The space's tabs: 1 its chat, then each other tab's terminal"],
-  [[ALT, '←', '→'], 'Previous or next tab'],
-  [[CTRL, 'F'], 'Search in this chat'],
-  [[CTRL, SHIFT, 'K'], 'Search and jump'],
-  [[CTRL, SHIFT, 'D'], 'Dictate into the message box'],
-  [[CTRL, SHIFT, 'Space'], 'Voice call'],
-  [[SHIFT, 'F2'], 'Rename this space'],
-  [[CTRL, SHIFT, '?'], 'These shortcuts'],
+/** the Keybinds list: each section's keys and the window's words for them */
+export const KEYS: [string, [string[], string][]][] = [
+  ['Tabs', [
+    [[ALT, '1–9'], 'Tab 1–9'],
+    [[ALT, '→'], 'Next tab'],
+    [[ALT, '←'], 'Previous tab'],
+    [[ALT, ']'], 'Next tab'],
+    [[ALT, '['], 'Previous tab'],
+  ]],
+  ['Spaces', [
+    [[ALT, '↓'], 'Next space'],
+    [[ALT, '↑'], 'Previous space'],
+    [[SHIFT, 'F2'], 'Rename space'],
+  ]],
+  ['App', [
+    [[CTRL, 'K'], 'Jump to a space, task or artifact'],
+    [[CTRL, SHIFT, 'K'], 'Jump to a space, task or artifact'],
+    [[CTRL, SHIFT, '?'], 'Keybinds'],
+    [[CTRL, SHIFT, 'B'], 'Show or hide the sidebar'],
+    [[CTRL, ','], 'Settings'],
+    [[CTRL, 'F'], 'Find in the chat'],
+    [[CTRL, SHIFT, 'D'], 'Dictate'],
+    [[CTRL, SHIFT, 'Space'], 'Start a call'],
+  ]],
 ]
 
-const SHORTCUTS = 'Keyboard shortcuts'
+const SHORTCUTS = 'Keybinds'
 
-/** Settings' Keyboard shortcuts page (a desktop's): each key beside what it does, in Settings' own rows */
+/** Settings' Keybinds page (a desktop's): each section's keys beside what they do, in Settings' own rows */
 function Shortcuts({ phone }: { phone: boolean }) {
   return (
-    <dl className="w-full">
-      {KEYS.map(([k, l]) => (
-        <div key={l} className={rowLook(phone)}>
-          <dt className="min-w-0">{l}</dt>
-          <dd className="shrink-0">
-            <Kbd keys={k} />
-          </dd>
-        </div>
+    <div className="flex w-full flex-col gap-5">
+      {KEYS.map(([section, keys]) => (
+        <section key={section}>
+          <h3 className="pb-1 text-[0.75rem] font-medium text-fg3">{section}</h3>
+          <dl className="w-full">
+            {keys.map(([k, l]) => (
+              <div key={k.join('+')} className={rowLook(phone)}>
+                <dt className="min-w-0">{l}</dt>
+                <dd className="shrink-0">
+                  <Kbd keys={k} />
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </section>
       ))}
-    </dl>
+    </div>
   )
 }
 
@@ -85,7 +67,8 @@ const typing = (e: KeyboardEvent) => {
   return el?.closest?.('input, textarea, select, [contenteditable=true]')
 }
 
-function back(ui: UI, snap: Snapshot): Partial<UI> | null {
+/** Esc: what is open on top closes, as the window's overlays */
+function back(ui: UI): Partial<UI> | null {
   if (ui.adding) return { adding: false }
   if (ui.drawer) return { drawer: false }
   if (ui.settings) return { settings: null }
@@ -94,9 +77,8 @@ function back(ui: UI, snap: Snapshot): Partial<UI> | null {
   if (ui.photo) return { photo: null }
   if (ui.viewer) return (closeArtifact(), {})
   if (ui.pick) return { pick: null }
-  if (ui.focus) return { focus: null }
-  if (ui.task) return { cur: Math.max(0, orderedTasks(snap, listView(ui, snap)).findIndex((t) => t.id === ui.task)), task: null }
-  if (ui.archived) return { archived: null, cur: 0 }
+  if (ui.task) return { task: null }
+  if (ui.archived) return { archived: null }
   return null
 }
 
@@ -104,7 +86,7 @@ export default definePlugin({
   name: 'keyboard',
   setup(reg) {
     // a desktop's, and a tablet's once a key was pressed on it (an iPad with a keyboard)
-    reg.settingsPages.push({ name: SHORTCUTS, about: 'Everything works without a mouse.', Icon: KeyboardIcon, when: (ui) => ui.device === 'desktop' || (ui.device === 'tablet' && ui.kb), View: Shortcuts })
+    reg.settingsPages.push({ name: SHORTCUTS, about: 'The keys that work here. Others are the Herdr window\'s.', Icon: KeyboardIcon, when: (ui) => ui.device === 'desktop' || (ui.device === 'tablet' && ui.kb), View: Shortcuts })
     reg.views.search = Search
     reg.keys.push({
       order: 10,
@@ -139,110 +121,57 @@ export default definePlugin({
           return true
         }
         // Alt+1–9 and Alt+←/→: the space's tabs, its chat first, then each other tab's terminal (3.0's tab bar)
-        if (e.altKey && !e.ctrlKey && !e.metaKey && (/^Digit[1-9]$/.test(e.code) || (!typing(e) && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')))) {
+        if (e.altKey && !e.ctrlKey && !e.metaKey && (/^Digit[1-9]$/.test(e.code) || e.code === 'BracketLeft' || e.code === 'BracketRight' || (!typing(e) && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')))) {
           const place = snap.places.find((p) => p.id === ui.place)
           if (!place) return false
           const tabs = [null, ...(place.tabs ?? []).map((t) => t.term)]
           const now = Math.max(0, tabs.indexOf(ui.term?.startsWith('t:') ? ui.term : null))
-          const to = e.code.startsWith('Digit') ? Number(e.code.slice(5)) - 1 : (now + (e.code === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length
+          const to = e.code.startsWith('Digit') ? Number(e.code.slice(5)) - 1 : (now + (e.code === 'ArrowRight' || e.code === 'BracketRight' ? 1 : tabs.length - 1)) % tabs.length
           if (to >= tabs.length) return false
           e.preventDefault()
           setUI({ term: tabs[to], task: null, arts: null, menu: false, plus: null, pick: null, kb: true })
           return true
         }
-        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        // Ctrl+K and Ctrl+Shift+K: Jump (⌘K on a Mac too)
+        if ((e.metaKey || e.ctrlKey) && !e.altKey && e.code === 'KeyK') {
           e.preventDefault()
           setUI({ search: !ui.search, searchScope: undefined, focus: null })
           return true
         }
-        // a key pressed is a keyboard's: a tablet's (an iPad with one) gets the keys a desktop has
+        // Jump keeps Esc to itself
         if (ui.search) {
-          // Esc closes it wherever the focus is in it (its x, its list), not only from the box
           if (e.key !== 'Escape') return false
           e.preventDefault()
           setUI({ search: false })
           return true
         }
-        // works while typing too, like ⌘K: the message box has no bold
-        if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'b') {
+        if (e.ctrlKey && e.shiftKey && !e.altKey && e.code === 'KeyB') {
           e.preventDefault()
-          // a tablet's places are in its drawer
+          // a tablet's spaces are in its drawer
           if (ui.device === 'desktop') togglePlaces()
           else setUI({ drawer: !ui.drawer })
           return true
         }
-        if (typing(e)) return false
-        if (e.metaKey || e.ctrlKey || e.altKey) return false
-        const k = e.key
-        const go = (p: Partial<UI>) => {
+        if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key === ',') {
           e.preventDefault()
-          setUI({ ...p, kb: true })
+          setUI({ settings: ui.settings ? null : { section: ui.device === 'phone' ? null : 0 }, kb: true })
           return true
         }
-        // the Add a project dialog keeps the keys to itself
-        if (ui.adding) return k === 'Escape' ? go({ adding: false }) : false
-        const task = taskOf(snap, ui.task)
-        const list = task ? null : orderedTasks(snap, listView(ui, snap))
-        if (k === '?') {
-          // Settings at its Keyboard shortcuts page, and shut again from there
-          const section = sectionOf(SHORTCUTS, snap.settings, { ...ui, kb: true })
-          if (section < 0) return false
-          return go({ settings: ui.settings?.section === section ? null : { section } })
-        }
-        if (k === 'Escape') {
-          const b = back(ui, snap)
-          return b ? go(b) : false
-        }
-        // an artifact full screen keeps the keys: the chat behind it is out of reach
-        if (ui.viewer) return false
-        const move = (cur: number) => (keysMoved('cursor'), go({ cur }))
-        if ((k === 'ArrowDown' || k === 'j') && list) return move(Math.min(list.length - 1, ui.cur + 1))
-        if ((k === 'ArrowUp' || k === 'k') && list) return move(Math.max(0, ui.cur - 1))
-        if (k === 'Enter' && list && list[ui.cur] && !(e.target as HTMLElement)?.closest?.('button, a, [role=button]')) return go({ task: list[ui.cur].id, cur: 0 })
-        if (k === '[' || k === ']') {
-          const places = shownPlaces(snap)
-          const i = places.findIndex((p) => p.id === ui.place)
-          const n = places.length
-          if (!n) return false
-          return go({ place: places[(i + (k === ']' ? 1 : n - 1)) % n].id, task: null, cur: 0 })
-        }
-        if (k === 'n' && has('places')) return go({ adding: true })
-        if (k === 'f' && task && ui.device !== 'phone') {
+        if (e.key === 'Escape' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          const b = back(ui)
+          if (!b) return false
           e.preventDefault()
-          toggleFocus()
+          setUI({ ...b, kb: true })
           return true
         }
-        if (k === 'F' && panelHere(ui, snap)) {
-          e.preventDefault()
-          toggleWide()
-          return true
-        }
-        if (k === ',') return go({ settings: ui.settings ? null : { section: ui.device === 'phone' ? null : 0 } })
-        // split, the focused pane's
-        const chatKey = keysChat(ui, snap)
-        if (k === '/') return go({ focus: chatKey })
-        if (k === 'f' && !task) {
+        if (typing(e) || e.metaKey || e.ctrlKey || e.altKey) return false
+        // F: the shown list's filter (Tasks, Artifacts), as the window's panels
+        if (e.key === 'f' || e.key === 'F') {
           const box = document.querySelector<HTMLInputElement>('input[name=filter]')
           if (!box) return false
           e.preventDefault()
           box.focus()
           return true
-        }
-        if (k === 't') {
-          e.preventDefault()
-          toggleDictation(chatKey)
-          return true
-        }
-        if (k === 'a') {
-          e.preventDefault()
-          setUI({ plus: chatKey, kb: true })
-          setTimeout(() => document.querySelector<HTMLInputElement>(`input[name=file][data-chat="${CSS.escape(chatKey)}"]`)?.click(), 0)
-          return true
-        }
-        if (k === 'e') {
-          const msgs = getState().chats[chatKey]?.messages ?? []
-          const m = [...msgs].reverse().find((x) => x.who === 'agent')
-          return m ? go({ pick: ui.pick === m.id ? null : m.id }) : false
         }
         return false
       },

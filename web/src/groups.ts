@@ -86,7 +86,8 @@ export function saveShut(keys: string[]) {
 
 /** the ways a list's tasks can be grouped, by its level (0 more machines', 1 one machine's, 2 one space's) */
 export function groupChoices(level: number): GroupBy[] {
-  return level === 0 ? GROUP_BY : level === 1 ? ['status', 'project'] : ['status']
+  // 3.0's Group by: Status, Space, then Machine and Machine › Space while more than one machine has tasks
+  return level === 0 ? ['status', 'project', 'machine', 'machine-project'] : level === 1 ? ['status', 'project'] : ['status']
 }
 
 export function groupFor(groups: Groups, level: number): GroupBy {
@@ -110,9 +111,9 @@ export interface TaskGroup {
 
 /**
  * Tasks in their groups, in the order they show (archived ones left out). Pinned tasks first, in a Pinned group in
- * status order, and in no other group. Then by status: Needs you, Ready, Working, Queued, To do, Done, the empty
- * ones left out but To do. By machine or by project: one group each, in the sidebar's order, its tasks in that same
- * status order (Needs you first). Machine › Project: each machine in the sidebar's order, its projects' groups under
+ * status order, and in no other group. Then by status: Needs you, Ready, Merging, Working, Queued, To do, Done, the
+ * empty ones left out. By machine or by project: Needs you first, then one group each, in the sidebar's order, its tasks
+ * in that same status order. Machine › Project: each machine in the sidebar's order, its projects' groups under
  * it. Done tasks are newest finished first. level: the view's (0 All machines, 1 a machine, 2 a space), which says
  * what its rows needn't.
  */
@@ -121,11 +122,16 @@ export function groupTasks(places: Place[], machineList: Machine[], ts: Task[], 
   const all = doneNewestFirst(GROUPS.flatMap(([s]) => ts.filter((t) => t.status === s && !t.archived)))
   const pinned = all.filter((t) => t.pinned)
   const top: TaskGroup[] = pinned.length ? [{ key: 'pinned', label: 'Pinned', tasks: pinned, names: namesFor(level) }] : []
-  const rest = all.filter((t) => !t.pinned)
+  let rest = all.filter((t) => !t.pinned)
   const machineOf = new Map(places.map((p) => [p.id, p.machine]))
   const machines = machineList
   const onMachine = (m: Machine) => rest.filter((t) => machineOf.get(t.place) === m.machine)
-  if (by === 'status') return [...top, ...GROUPS.map(([s, label]) => ({ key: s, label, tasks: rest.filter((t) => t.status === s), names: namesFor(level) })).filter((g) => g.tasks.length || g.key === 'todo')]
+  // as 3.0's: a group shows only when it holds something (To do too)
+  if (by === 'status') return [...top, ...GROUPS.map(([s, label]) => ({ key: s, label, tasks: rest.filter((t) => t.status === s), names: namesFor(level) })).filter((g) => g.tasks.length)]
+  // 3.0: whatever the grouping, Needs you comes first (after Pinned), and its tasks aren't shown again below
+  const needs = rest.filter((t) => t.status === 'need')
+  if (needs.length) top.push({ key: 'need', label: 'Needs you', tasks: needs, names: namesFor(level) })
+  rest = rest.filter((t) => t.status !== 'need')
   if (by === 'machine' && level === 0) {
     // one on no machine in the list (none should be) still shows, last, as by status
     const lost = rest.filter((t) => !machines.some((m) => m.machine === machineOf.get(t.place)))
@@ -162,7 +168,7 @@ function projectGroups(places: Place[], machines: Machine[], ts: Task[], level: 
 /** a group's Done tasks shown before Show all */
 export const DONE_SHOWN = 5
 
-/** A group as it shows: at most DONE_SHOWN of its Done tasks until Show all; more is how many Done it has then, less
+/** A group as it shows: at most DONE_SHOWN of its Done tasks until Show all; more is how many Done are hidden then, less
  * that all show and Show less would cut them short again */
 export function shownGroup(g: TaskGroup, all: boolean, shut = false): TaskGroup & { count: number; more: number; less: boolean; shut: boolean } {
   // folded shut, none show, but its count stays
@@ -172,5 +178,5 @@ export function shownGroup(g: TaskGroup, all: boolean, shut = false): TaskGroup 
   if (g.key === 'pinned' || done.length <= DONE_SHOWN) return { ...g, count: g.tasks.length, more: 0, less: false, shut }
   if (all) return { ...g, count: g.tasks.length, more: 0, less: true, shut }
   const hide = new Set(done.slice(DONE_SHOWN))
-  return { ...g, tasks: g.tasks.filter((t) => !hide.has(t)), count: g.tasks.length, more: done.length, less: false, shut }
+  return { ...g, tasks: g.tasks.filter((t) => !hide.has(t)), count: g.tasks.length, more: hide.size, less: false, shut }
 }

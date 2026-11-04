@@ -151,23 +151,6 @@ export default definePlugin({
     reg.composerIdle = CallButton
     reg.composerLive.push({ when: (ui, chatKey) => ui.call === chatKey, View: CallBox })
     reg.topBars.push(CallBar, CallError)
-    reg.keys.push({
-      order: 50,
-      handle: ({ e, ui, snap }) => {
-        // not while you type anywhere (search, the emoji search, an artifact's box) or something is open over the chat
-        const typing = (e.target as HTMLElement | null)?.closest?.('input, textarea, select, [contenteditable="true"]')
-        if (ui.device !== 'desktop' || ui.focus || typing || ui.search || ui.viewer || ui.settings || ui.adding || ui.pick || e.metaKey || e.ctrlKey || e.altKey) return false
-        if (e.key === 'm' && ui.call) {
-          e.preventDefault()
-          toggleMute()
-          return true
-        }
-        if (e.key !== 'v') return false
-        e.preventDefault()
-        toggleCall(agentChat(ui, snap)?.chat ?? placeOf(snap, ui.place).chat)
-        setUI({ kb: true })
-        return true
-      },
-    })
+    // 3.0 calls with Ctrl+Shift+Space (the keyboard plugin): no V or M keys of its own
   },
 })

@@ -1,114 +1,190 @@
+// Jump (Ctrl+K), as the window's: one box over spaces, tasks and artifacts (and machines, once there are others), each
+// group with its count, newest first, eight rows and then "Show N more". Every word typed is in the row somewhere.
+import clsx from 'clsx'
 import { useEffect, useMemo, useState } from 'react'
-import { getState, goChat, goPlace, keysChat, listView, openArtifact, openTask, placeOf, setUI, shownPlaces, useSnap } from '@client/kernel.ts'
-import { Sheet, SheetClose } from '@client/Stack.tsx'
-import { ic, PlaceIcon, SearchIcon } from '@client/ui.tsx'
-import type { Chat } from '@shared/types.ts'
-import { jumpTo } from '@plugins/chat/reply.ts'
-import { searchChats, searchResults, type SearchHit, type SearchKind, type SearchScope } from './search-data.ts'
-import { loadSearchChats } from './search-load.ts'
+import { goPlace, openArtifact, openTask, setUI, useSnap, getState, listView } from '@client/kernel.ts'
+import { Sheet } from '@client/Stack.tsx'
+import { ic, PageIcon, SearchIcon, ServerIcon } from '@client/ui.tsx'
+import type { Snapshot, TaskStatus } from '@shared/types.ts'
 
-const kinds: SearchKind[] = ['Spaces', 'Tasks', 'Messages', 'Artifacts']
+type Kind = 'space' | 'task' | 'artifact' | 'machine'
+const KINDS: Kind[] = ['space', 'task', 'artifact', 'machine']
+const GROUP: Record<Kind, string> = { space: 'Spaces', task: 'Tasks', artifact: 'Artifacts', machine: 'Machines' }
+const SHOWN = 8
+const STATUS: Record<TaskStatus, string> = { need: 'Needs you', work: 'Working', merging: 'Merging', ready: 'Ready', queued: 'Queued', todo: 'To do', done: 'Done' } as Record<TaskStatus, string>
+const DOT: Partial<Record<TaskStatus, string>> = { need: 'bg-need', work: 'bg-work', merging: 'bg-work', ready: 'bg-ready' }
 
-/** Navigate by stable identity, never a display name or row number. Wait for the destination chat to mount. */
-function openHit(hit: SearchHit, q: string) {
-  if (hit.artifact) { goPlace(hit.place); openArtifact(hit.artifact); return }
-  if (hit.message && hit.chat) {
-    goChat(hit.chat)
-    setUI({ find: { chat: hit.chat, q, id: hit.message } })
-    const started = Date.now()
-    const seek = () => {
-      if (getState().ui.find?.id !== hit.message) return
-      if (jumpTo(hit.chat!, hit.message!)) return
-      if (Date.now() - started < 8000) setTimeout(seek, 100)
-    }
-    requestAnimationFrame(seek)
-    return
+type Item = { kind: Kind; key: string; label: string; sub: string; at: number; icon?: string; ref?: string; status?: TaskStatus; go: () => void }
+
+/** every word typed is in one of these, any case */
+const matches = (q: string, ...fields: (string | undefined | null)[]) => {
+  const all = fields.filter(Boolean).join(' ').toLowerCase()
+  return q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => all.includes(w))
+}
+const capital = (s: string) => (/^[a-z](?![A-Z])/.test(s) ? s[0].toUpperCase() + s.slice(1) : s)
+/** "now", "5m ago", "3h ago", "2d ago", else the date */
+function ago(at: number) {
+  if (!at) return null
+  const m = Math.floor((Date.now() - at) / 60000)
+  if (m < 1) return 'now'
+  if (m < 60) return `${m}m ago`
+  if (m < 1440) return `${Math.floor(m / 60)}h ago`
+  if (m < 10080) return `${Math.floor(m / 1440)}d ago`
+  return new Date(at).toLocaleDateString()
+}
+
+function itemsOf(snap: Snapshot, q: string): Item[] {
+  const out: Item[] = []
+  const machines = snap.machines ?? []
+  const remote = machines.length > 1
+  const machineName = (m?: string) => machines.find((x) => x.machine === m)?.name ?? m ?? 'This computer'
+  const placeName = (id: string) => snap.places.find((p) => p.id === id)?.name
+  for (const p of snap.places) {
+    // 3.0's Jump: "<machine> · <folder>"
+    const where = [machineName(p.machine), p.where].filter(Boolean).join(' · ')
+    if (q && !matches(q, p.name, machineName(p.machine), p.where)) continue
+    out.push({ kind: 'space', key: `s:${p.id}`, label: p.name, icon: p.emoji ?? '#', sub: where, at: 0, go: () => goPlace(p.id) })
   }
-  if (hit.task) {
-    openTask(hit.task)
-    const { ui, snap } = getState()
-    if (snap?.tasks.find(t => t.id === hit.task)?.archived) setUI({ archived: listView(ui, snap).key })
-  } else goPlace(hit.place)
+  for (const t of snap.tasks) {
+    if (t.archived && !q) continue
+    const place = [placeName(t.place), remote ? machineName(snap.places.find((p) => p.id === t.place)?.machine) : null].filter(Boolean).join(' · ')
+    const line = t.sub ?? t.said ?? ''
+    if (q && !matches(q, t.id, t.name, line, place)) continue
+    out.push({
+      kind: 'task', key: `t:${t.id}`, ref: t.id, label: t.name, status: t.status,
+      sub: [t.archived ? 'Archived' : STATUS[t.status], line && capital(line.split('\n')[0]), place].filter(Boolean).join(' · '),
+      at: t.archived ?? t.doneAt ?? 0,
+      go: () => {
+        openTask(t.id)
+        const { ui, snap } = getState()
+        if (t.archived && snap) setUI({ archived: listView(ui, snap).key })
+      },
+    })
+  }
+  for (const a of snap.artifacts ?? []) {
+    const place = placeName(a.place)
+    const task = /^(\S+) agent$/.exec(a.by)?.[1]
+    if (q && !matches(q, a.title, a.id, task, place)) continue
+    out.push({ kind: 'artifact', key: `a:${a.id}`, label: a.title || a.id, sub: [task, place, `v${a.v}`, ago(a.at)].filter(Boolean).join(' · '), at: a.at ?? 0, go: () => openArtifact(a.id) })
+  }
+  if (remote)
+    for (const m of machines) {
+      const n = snap.places.filter((p) => p.machine === m.machine).length
+      if (q && !matches(q, m.name)) continue
+      const first = snap.places.find((p) => p.machine === m.machine)
+      out.push({
+        kind: 'machine', key: `m:${m.machine}`, label: m.name, sub: [`${n} space${n === 1 ? '' : 's'}`, m.status === 'off' ? 'Offline' : null].filter(Boolean).join(' · '), at: 0,
+        go: () => (first ? goPlace(first.id) : setUI({ settings: { section: 0 } })),
+      })
+    }
+  // newest first in each group; spaces keep the sidebar's order (a stable sort)
+  return out.sort((a, b) => b.at - a.at)
 }
 
 export function Search({ onClose }: { onClose: () => void }) {
-  const snap = useSnap()!
-  const [origin] = useState(() => {
-    const ui = getState().ui
-    const chat = ui.searchScope?.kind === 'chat' ? ui.searchScope.id : keysChat(ui, snap)
-    const task = snap.tasks.find(t => (t.agent?.chat ?? `${t.id}/Agent`) === chat)
-    const p = snap.places.find(p => p.chat === chat || p.id === task?.place) ?? placeOf(snap, ui.place)
-    return { place: p, chat }
-  })
-  const [scope, setScope] = useState<SearchScope>(() => getState().ui.searchScope ?? { kind: 'all' })
-  const [kind, setKind] = useState<SearchKind | null>(null)
+  const snap = useSnap()
   const [q, setQ] = useState('')
-  const [settled, setSettled] = useState('')
-  const [selected, setSelected] = useState<string | null>(null)
-  const [limit, setLimit] = useState(8)
-  const [retry, setRetry] = useState(0)
-  const [chats, setChats] = useState<Record<string, Chat>>({})
-  const [coverage, setCoverage] = useState({ done: 0, missing: [] as string[], finished: false })
-  const sources = useMemo(() => searchChats(snap, scope), [snap, scope])
-  const sourceKeys = JSON.stringify(sources.map(c => c.key))
-  useEffect(() => {
-    const timer = setTimeout(() => setSettled(q), 120)
-    return () => clearTimeout(timer)
-  }, [q])
-  useEffect(() => {
-    setChats({})
-    setCoverage({ done: 0, missing: [], finished: false })
-    return loadSearchChats(JSON.parse(sourceKeys), chat => setChats(old => ({ ...old, [chat.key]: chat })), (done, missing, finished) => setCoverage({ done, missing, finished }))
-  }, [sourceKeys, retry])
-  const ordered = useMemo(() => ({ ...snap, places: shownPlaces(snap) }), [snap])
-  const results = useMemo(() => searchResults(ordered, scope, settled, chats), [ordered, scope, settled, chats])
-  const groups = kinds.filter(k => !kind || kind === k).map(k => ({ kind: k, all: q === settled ? results.filter(h => h.kind === k) : [] }))
-  const list = groups.flatMap(g => g.all.slice(0, limit))
-  const current = list.find(hit => hit.key === selected) ?? list[0]
-  useEffect(() => { document.getElementById(`search-hit-${current?.key}`)?.scrollIntoView({ block: 'nearest' }) }, [current?.key])
-  const pick = (hit?: SearchHit, query = settled) => { if (hit && query === q) { onClose(); openHit(hit, query) } }
-  const changeScope = (s: SearchScope) => { setScope(s); setSelected(null); setLimit(8) }
-  const chip = 'min-h-9 shrink-0 rounded-full border border-line2 px-3 text-sm focus-visible:outline-accent aria-pressed:border-accent aria-pressed:text-accent phone:min-h-12 phone:text-base'
-  const scopeOptions: { label: string; scope: SearchScope }[] = [
-    { label: 'Everywhere', scope: { kind: 'all' } },
-    { label: 'This chat', scope: { kind: 'chat', id: origin.chat } },
-    { label: `Space: ${origin.place.name}`, scope: { kind: 'space', id: origin.place.id } },
-    { label: `Machine: ${snap.machines.find(m => m.machine === origin.place.machine)?.name ?? origin.place.machine}`, scope: { kind: 'machine', id: origin.place.machine } },
-  ]
-  return <Sheet label="Search or jump to" onClose={onClose} panel="max-w-[640px]">
-    <div className="flex shrink-0 items-center gap-2 border-b border-line pr-2 pl-4">
-      <SearchIcon className={`${ic} text-fg3`} />
-      <input autoFocus name="search" role="combobox" aria-expanded="true" aria-controls="search-list" aria-activedescendant={current ? `search-hit-${current.key}` : undefined} aria-label="Search or jump to" placeholder="Search spaces, tasks, messages, artifacts" value={q}
-        onChange={e => { setQ(e.target.value); setSelected(null); setLimit(8) }}
-        onKeyDown={e => {
-          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setSelected(list[Math.max(0, Math.min(list.length - 1, list.findIndex(h => h.key === current?.key) + (e.key === 'ArrowDown' ? 1 : -1)))]?.key ?? null) }
-          else if (e.key === 'Enter') {
-            const freshResults = q === settled ? [] : searchResults(ordered, scope, q, chats)
-            const firstKind = kind ?? kinds.find(k => freshResults.some(h => h.kind === k))
-            const fresh = q === settled ? current : freshResults.find(h => h.kind === firstKind)
-            pick(fresh, q)
-          }
-          else if (e.key === 'Escape') onClose()
-        }} className="h-[52px] min-w-0 flex-1 bg-transparent outline-none placeholder:text-fg3 phone:text-[1rem]" />
-      <SheetClose onClose={onClose} />
-    </div>
-    <div className="shrink-0 space-y-2 border-b border-line p-3">
-      <div role="group" aria-label="Search scope" className="flex gap-2 overflow-x-auto pb-1">{scopeOptions.map(o => <button type="button" key={o.scope.kind} className={chip} aria-pressed={JSON.stringify(o.scope) === JSON.stringify(scope)} onClick={() => changeScope(o.scope)}>{o.label}</button>)}</div>
-      <div role="group" aria-label="Result types" className="flex gap-2 overflow-x-auto pb-1">{[null, ...kinds].map(k => <button type="button" key={k ?? 'all'} className={chip} aria-pressed={kind === k} onClick={() => { setKind(k); setSelected(null); setLimit(8) }}>{k ?? 'All types'}</button>)}</div>
-      <p role="status" className="text-xs text-fg2 phone:text-sm">{scopeOptions.find(o => JSON.stringify(o.scope) === JSON.stringify(scope))?.label} · {!q.trim() ? 'Recent items · ' : ''}{q !== settled ? 'Filtering… · ' : ''}{coverage.finished ? `Read ${coverage.done} of ${sources.length} chats` : `Loading messages… ${coverage.done} of ${sources.length} chats`}</p>
-      {coverage.missing.length > 0 ? <div className="text-xs text-fg2 phone:text-sm">{coverage.missing.length} chats could not be refreshed. Results may be incomplete or out of date. <button type="button" className="min-h-11 underline" onClick={() => setRetry(n => n + 1)}>Retry</button></div> : null}
-      {snap.machines.some(m => m.status === 'off' && sources.some(c => snap.places.some(p => p.id === c.place && p.machine === m.machine))) ? <p className="text-xs text-fg2 phone:text-sm">Unavailable machines: {snap.machines.filter(m => m.status === 'off' && sources.some(c => snap.places.some(p => p.id === c.place && p.machine === m.machine))).map(m => m.name).join(', ')}. Saved items may be out of date.</p> : null}
-    </div>
-    <div id="search-list" role="listbox" aria-label="Search results" aria-busy={!coverage.finished || q !== settled} className="max-h-[60vh] min-h-0 overflow-y-auto overscroll-contain p-2 phone:max-h-none phone:flex-1 phone:pb-[calc(env(safe-area-inset-bottom)+8px)]">
-      {groups.filter(group => group.all.length || (group.kind === 'Messages' && !coverage.finished)).map(group => <div role="group" aria-label={group.kind} key={group.kind}>
-        <h3 className="px-3 pt-3 pb-1 text-xs font-medium text-fg2 tabular-nums phone:text-sm">{group.kind} · {group.all.length}</h3>
-        {group.all.slice(0, limit).map(hit => <div role="option" tabIndex={0} aria-selected={hit.key === current?.key} key={hit.key} id={`search-hit-${hit.key}`} onClick={() => pick(hit)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(hit) } }} className="min-h-14 cursor-pointer rounded-lg px-3 py-2 hover:bg-well focus:outline-accent aria-selected:bg-well">
-          <p className="flex items-start gap-2 text-sm phone:text-base">{hit.kind === 'Spaces' ? <PlaceIcon level={2} className={`${ic} shrink-0`} /> : null}<span className="line-clamp-2 min-w-0 break-words">{hit.label}</span></p><p className="truncate text-xs text-fg2 phone:text-sm">{hit.context}{hit.at > 1e12 ? ` · ${new Date(hit.at).toLocaleDateString()}` : ''}</p>
-        </div>)}
-        {!group.all.length ? <p className="px-3 py-2 text-sm text-fg3">{group.kind === 'Messages' && !coverage.finished ? 'Still loading…' : 'No matches'}</p> : null}
-        {group.all.length > limit ? <button type="button" className="min-h-11 px-3 text-sm text-accent" onClick={() => setLimit(n => n + 20)}>Show more {group.kind.toLowerCase()} ({group.all.length - limit})</button> : null}
-      </div>)}
-      {!list.length && coverage.finished && q === settled ? <p className="px-3 py-4 text-sm text-fg2">Nothing found in this scope. Try Everywhere or fewer words.</p> : null}
-    </div>
-  </Sheet>
+  const [more, setMore] = useState<Set<Kind>>(new Set())
+  const [sel, setSel] = useState<string | null>(null)
+  const query = q.trim()
+  const rows = useMemo(() => {
+    if (!snap) return []
+    const all = itemsOf(snap, query)
+    const list: ({ head: Kind; count: number } | { more: Kind; count: number } | Item)[] = []
+    for (const kind of KINDS) {
+      const mine = all.filter((x) => x.kind === kind)
+      if (!mine.length) continue
+      list.push({ head: kind, count: mine.length })
+      const shown = more.has(kind) ? mine : mine.slice(0, SHOWN)
+      list.push(...shown)
+      if (mine.length > shown.length) list.push({ more: kind, count: mine.length - shown.length })
+    }
+    return list
+  }, [snap, query, more])
+  const pickable = rows.filter((r) => !('head' in r)) as (Item | { more: Kind; count: number })[]
+  const keyOf = (r: Item | { more: Kind }) => ('more' in r ? `more:${r.more}` : r.key)
+  const at = Math.max(0, pickable.findIndex((r) => keyOf(r) === sel))
+  const cur = pickable[at]
+  useEffect(() => { if (cur) document.getElementById(`jump-${keyOf(cur)}`)?.scrollIntoView({ block: 'nearest' }) }, [cur && keyOf(cur)])
+  const go = (r?: Item | { more: Kind; count: number }) => {
+    if (!r) return
+    if ('more' in r) {
+      setMore(new Set([...more, r.more]))
+      setSel(null)
+      return
+    }
+    onClose()
+    r.go()
+  }
+  const move = (d: number) => {
+    if (!pickable.length) return
+    setSel(keyOf(pickable[Math.max(0, Math.min(pickable.length - 1, at + d))]))
+  }
+  return (
+    <Sheet label="Jump" onClose={onClose} panel="max-w-[640px]">
+      <div className="flex shrink-0 items-center gap-2.5 border-b border-line px-4">
+        <SearchIcon className={clsx(ic, 'text-fg3')} />
+        <input
+          autoFocus
+          name="search"
+          role="combobox"
+          aria-expanded="true"
+          aria-controls="jump-list"
+          aria-activedescendant={cur ? `jump-${keyOf(cur)}` : undefined}
+          aria-label="Search spaces, tasks, artifacts"
+          placeholder="Search spaces, tasks, artifacts"
+          value={q}
+          onChange={(e) => { setQ(e.target.value); setSel(null); setMore(new Set()) }}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown' || (e.key === 'n' && e.ctrlKey)) { e.preventDefault(); move(1) }
+            else if (e.key === 'ArrowUp' || (e.key === 'p' && e.ctrlKey)) { e.preventDefault(); move(-1) }
+            else if (e.key === 'Enter') { e.preventDefault(); go(cur) }
+            else if (e.key === 'Escape') onClose()
+          }}
+          className="h-12 min-w-0 flex-1 bg-transparent outline-none placeholder:text-fg3 phone:h-14 phone:text-[1rem]"
+        />
+      </div>
+      <div id="jump-list" role="listbox" aria-label="Results" className="max-h-[60vh] min-h-0 overflow-y-auto overscroll-contain p-1.5 phone:max-h-none phone:flex-1 phone:pb-[calc(env(safe-area-inset-bottom)+8px)]">
+        {!rows.length ? (
+          <p className="grid h-30 place-items-center text-[0.8125rem] text-fg3 phone:text-[0.9375rem]">{!snap ? 'Reading tasks and artifacts…' : query ? 'Nothing found. Try fewer words.' : 'Nothing here.'}</p>
+        ) : (
+          rows.map((r) => {
+            if ('head' in r)
+              return (
+                <h3 key={`h:${r.head}`} className="flex gap-1.5 px-2.5 pt-2.5 pb-1 text-[0.75rem] font-medium text-fg3 tabular-nums phone:text-[0.8125rem]">
+                  {GROUP[r.head]}
+                  <span>{r.count}</span>
+                </h3>
+              )
+            const k = keyOf(r)
+            if ('more' in r)
+              return (
+                <button key={k} id={`jump-${k}`} type="button" role="option" aria-selected={cur && keyOf(cur) === k} onClick={() => go(r)}
+                  className="flex h-9 w-full items-center rounded-row px-2.5 text-[0.8125rem] text-focus hover:bg-hover aria-selected:bg-hover phone:h-11 phone:text-[0.9375rem]">
+                  Show {r.count} more
+                </button>
+              )
+            return (
+              <div key={k} id={`jump-${k}`} role="option" tabIndex={-1} aria-selected={cur && keyOf(cur) === k} onClick={() => go(r)}
+                className="flex min-h-12 cursor-pointer items-center gap-2.5 rounded-row px-2.5 py-1.5 hover:bg-hover aria-selected:bg-hover phone:min-h-14">
+                <span className="grid w-4 shrink-0 place-items-center text-fg3">
+                  {r.kind === 'task' ? <span className={clsx('size-2 rounded-full', (r.status && DOT[r.status]) ?? 'bg-fg3')} />
+                    : r.kind === 'artifact' ? <PageIcon className={ic} />
+                      : r.kind === 'machine' ? <ServerIcon className={ic} />
+                        : <span className="text-[0.9375rem]">{r.icon}</span>}
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="flex min-w-0 items-baseline gap-2">
+                    {r.ref ? <span className="shrink-0 font-mono text-[0.6875rem] text-fg3">{r.ref}</span> : null}
+                    <span className="truncate text-[0.875rem] phone:text-[1rem]">{r.label}</span>
+                  </span>
+                  {r.sub ? <span className="truncate text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{r.sub}</span> : null}
+                </span>
+              </div>
+            )
+          })
+        )}
+      </div>
+    </Sheet>
+  )
 }

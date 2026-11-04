@@ -74,8 +74,8 @@ export function FindBar({ chatKey }: { chatKey: string }) {
           ref={input}
           name="find"
           type="search"
-          aria-label="Search in this chat"
-          placeholder="Search in this chat"
+          aria-label="Find in chat"
+          placeholder="Find in chat"
           autoComplete="off"
           enterKeyHint="search"
           value={q}

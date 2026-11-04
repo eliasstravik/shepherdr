@@ -191,9 +191,20 @@ function Details({ onClose }: { onClose: () => void }) {
   )
 }
 
+/** one machine's plans, in its machine popup (the sidebar's machine meter, as the window's): what each CLI has left */
+export function MachinePlans({ m }: { m: Machine }) {
+  const now = useNow()
+  const shown = reads(m)
+  if (!shown.length) return null
+  return (
+    <div className="mt-3 flex flex-col gap-3 border-t border-line pt-3">
+      {shown.map(({ cli, read }) => <Cli key={cli} cli={cli} read={read} now={now} />)}
+    </div>
+  )
+}
+
+// 3.0 has no plan bars at the sidebar's foot: each machine's are in its popup (MachinePlans)
 export default definePlugin({
   name: 'limits',
-  setup(reg) {
-    reg.sideFoot.push({ order: 5, View: LimitsButton })
-  },
+  setup() {},
 })
