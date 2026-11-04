@@ -6,7 +6,7 @@
 // and says how it goes in web.json. The web app's twin: its Settings › Web row and screens/ServeFrom.tsx.
 import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { home, readTextFile } from "herdr";
+import { home, appHome, readTextFile } from "herdr";
 import { button, menuRow, red, TEXT, RADIUS, H } from "./ui.js";
 import { on } from "./addons.js";
 // The page's words and its state line: core/settings.js and core/host.js, shared with the web app.
@@ -14,6 +14,8 @@ import { WEB, SECTIONS, webState } from "./core/settings.js";
 import { SERVE } from "./core/host.js";
 
 let web = null, readAt = 0, loaded = false;
+// image() takes a path inside the app's folder: the service writes the QR picture's whole path
+const inApp = (p) => (p.startsWith(`${appHome()}/`) ? p.slice(appHome().length + 1) : p);
 // the list open, the line picked (waiting for Move it), and what the service said to it
 let open = false, picked = null, said = "";
 
@@ -85,5 +87,5 @@ export function webSection(view, t) {
       .child(view.row(t, WEB.link, w.link, button("web-copy", WEB.copy, { onClick: (_e, cx) => cx.write_to_clipboard(w.link) })))
       .when(Boolean(w.qr), (el) => el.child(v_flex().py(12).gap(8)
         .child(div().text_size(13).text_color(t.muted).child(WEB.phone))
-        .child(h_flex().child(image(w.qr).size(168).rounded(8))))));
+        .child(h_flex().child(image(inApp(w.qr)).size(168).rounded(8))))));
 }
