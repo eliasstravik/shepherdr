@@ -609,9 +609,11 @@ function ViewerShell({ label, phone, children }: { label: string; phone: boolean
 
 
 
-/** "All" in the list's bar: every folder's artifacts, or the shown space's (the window's toggle), kept on this device */
-const ALL = 'shepherdr.artifactsAll'
-let allOn = (() => { try { return localStorage.getItem(ALL) === '1' } catch { return false } })()
+/** "All" in the list's bar: every folder's artifacts (the default, like Tasks), or the shown space's (the window's
+ *  toggle), kept on this device. A new key: a choice saved under the old one ('shepherdr.artifactsAll', off by
+ *  default) starts over on All. */
+const ALL = 'shepherdr.artifactsAllFolders'
+let allOn = (() => { try { localStorage.removeItem('shepherdr.artifactsAll'); return localStorage.getItem(ALL) !== '0' } catch { return true } })()
 const allListeners = new Set<() => void>()
 function setAll(on: boolean) {
   allOn = on

@@ -37,7 +37,7 @@ export default class Artifacts extends View {
     this.store = null;    // { folder, name, store, machine }
     this.items = [];
     this.error = null;
-    this.all = false;
+    this.all = true;      // every folder's, like Tasks; the toggle narrows it to this space's
     this.opening = null;
     // The search field (Shepherdr's "Filter artifacts"): by title or the task that made them, as
     // you type. Esc clears it; F gets to it while the list holds the keyboard.
