@@ -113,3 +113,15 @@ test("another machine's ask answered there first: it closes here with how", asyn
   rmSync(join(td, "req", "t13.1700000001.9.json"));
   await expect(asks.answer("m4/t13.1700000001.9", { choice: 0 })).rejects.toThrow("answered already");
 });
+
+test("an agent asking with a card needs you once: its card, not a second need for its waiting too", () => {
+  put("t21.100.1", { tool_name: "AskUserQuestion", tool_input: { questions: [{ question: "Can I take the window?", header: "Go", options: [{ label: "Yes" }, { label: "No" }] }] } });
+  const asks = new Asks();
+  asks.start();
+  const c = new Compat() as any;
+  c.asks = asks;
+  const row = { section: "needs", worker: "t21", ref: "SHEP-17", machine: "m3", folder: "/x", slug: "x", id: 17, title: "Reactions", sub: "Question for you" };
+  const snap = c.snapshot({ host: "mini", user: "me", machines: [], spaces: [], sections: [], rows: [row, { ...row, worker: "t22", ref: "SHEP-18", id: 18 }] });
+  // SHEP-17's card is its one need; SHEP-18 waits with no card
+  expect(snap.needs.map((n: any) => [n.chat, n.id === "attention"])).toEqual([["m3:SHEP-18/worker", true], ["m3:SHEP-17/worker", false]]);
+});

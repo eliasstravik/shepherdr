@@ -180,7 +180,8 @@ function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, di
       <div className={clsx('pointer-events-none relative flex min-h-[inherit] w-full min-w-0 gap-2.5 px-2 phone:px-3', two ? 'items-start py-1.5' : 'items-center')}>
         <span aria-hidden className="flex w-3.5 shrink-0 flex-col items-center">
           <span className="grid h-[18px] place-items-center phone:h-5">{glyph}</span>
-          {two && left ? <span className="mt-0.5 font-mono text-[0.6875rem]/4 font-semibold text-work-fg tabular-nums">{left}</span> : null}
+          {/* level with the second line, as the window's: as tall as it, under the glyph */}
+          {two && left ? <span className="mt-0.5 flex h-5 items-center font-mono text-[0.6875rem] font-semibold whitespace-nowrap text-work-fg tabular-nums phone:h-7">{left}</span> : null}
         </span>
         <span aria-hidden={!!onOpen} className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="flex h-[18px] min-w-0 items-center gap-2 phone:h-5">
@@ -188,13 +189,24 @@ function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, di
             <span className={clsx('min-w-16 flex-auto truncate', dim ? 'text-fg2' : 'text-fg')}>{title}</span>
             {meta ? <span className="shrink-0 pl-1 text-[0.75rem] text-fg3 tabular-nums phone:text-[0.8125rem]">{meta}</span> : null}
             {/* one line: where it is at the end; it gives way before the title is cut */}
-            {!two && place ? <span className={clsx('flex min-w-0 shrink-[1000] justify-end', !meta && 'pl-1')}>{place}</span> : null}
+            {/* on a phone whole or not at all, as on the second line */}
+            {!two && place ? (
+              <span className={clsx('flex h-full min-w-0 shrink-[1000] items-center justify-end phone:flex-wrap phone:content-start phone:overflow-hidden', !meta && 'pl-1')}>
+                <span className="grow" />
+                <span className="flex h-full min-w-0 items-center phone:shrink-0">{place}</span>
+              </span>
+            ) : null}
           </span>
           {two ? (
             <span className="flex h-5 min-w-0 items-center gap-2 phone:h-7">
               {idCol ? <span style={idCol} className="shrink-0 font-mono text-[0.75rem] phone:text-[0.8125rem]" /> : null}
               {shown ? <span className="min-w-0 shrink truncate text-[0.75rem] text-fg2 phone:text-[0.8125rem]">{shown}</span> : null}
-              <span className="flex min-w-0 flex-1 justify-end">{place}</span>
+              {/* where it is takes the room the status line leaves; on a phone whole or not at all (it drops under the
+                  line, out of sight), never a cut "shep…" */}
+              <span className="flex h-full min-w-0 flex-1 items-center justify-end phone:flex-wrap phone:content-start phone:overflow-hidden">
+                {place ? <span className="grow" /> : null}
+                {place ? <span className="flex h-full min-w-0 items-center phone:shrink-0">{place}</span> : null}
+              </span>
               {action}
             </span>
           ) : null}

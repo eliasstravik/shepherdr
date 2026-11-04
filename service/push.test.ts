@@ -38,6 +38,9 @@ test("alerts say what the window's toasts say", () => {
   const a = [...alertsOf(snap()).values()];
   expect(a.map((x) => x.title)).toEqual(["tt-repo Assistant · Needs you", "HERD-5 · Needs you", "HERD-4 · Finished", "HERD-4 · Stuck"]);
   expect(a[0].body).toBe("Rerun CI?");
+  // another machine's task by its machine's name, never its raw id ("m3:HERD-6")
+  const far = { ...snap(), machines: [{ machine: "m3", name: "MacBook" }], needs: [{ id: "q3", chat: "m3:HERD-6/worker", place: "sp1", task: "m3:HERD-6" }], tasks: [], alerts: [] };
+  expect([...alertsOf(far).values()].map((x) => x.title)).toEqual(["HERD-6 on MacBook · Needs you"]);
   // Notify Off: nothing from its Assistant; tasks as always
   expect([...alertsOf(snap("Off")).values()].map((x) => x.title)).toEqual(["HERD-5 · Needs you", "HERD-4 · Finished", "HERD-4 · Stuck"]);
 });

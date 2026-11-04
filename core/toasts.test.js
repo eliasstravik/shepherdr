@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { SHOWN, NEEDS_YOU, FINISHED, toastTitle, assistantWho, needReason, withToast, unexpired, tone } from "./toasts.js";
+import { SHOWN, NEEDS_YOU, FINISHED, toastTitle, assistantWho, taskWho, together, needReason, withToast, unexpired, tone } from "./toasts.js";
 import { REASONS } from "./needs.js";
 
 const root = join(import.meta.dir, "..");
@@ -11,6 +11,22 @@ test("titles say who and what, as the window's", () => {
   expect(toastTitle("HERD-4", NEEDS_YOU)).toBe("HERD-4 · Needs you");
   expect(toastTitle(assistantWho("tt-repo"), FINISHED)).toBe("tt-repo Assistant · Finished");
   expect(assistantWho(null)).toBe("Assistant");
+  // this computer's task by its ref alone; another machine's with that machine's name
+  expect(taskWho("SHEP-17", null)).toBe("SHEP-17");
+  expect(toastTitle(taskWho("SHEP-17", "MacBook"), NEEDS_YOU)).toBe("SHEP-17 on MacBook · Needs you");
+});
+
+test("one event is one toast: the same key takes the old one's place", () => {
+  let l = withToast([], { title: "a", body: "Question for you", key: "need:x" }, 1000, "t1");
+  l = withToast(l, { title: "b" }, 1001, "t2");
+  l = withToast(l, { title: "a", body: "Rerun CI?", key: "need:x" }, 1002, "t3");
+  expect(l.map((n) => [n.id, n.body ?? null])).toEqual([["t2", null], ["t1", "Rerun CI?"]]);
+});
+
+test("several at once in one line", () => {
+  expect(together([{ need: true, task: true }, { need: true, task: true }])).toBe("2 tasks need you");
+  expect(together([{ need: true, task: true }, { need: true }])).toBe("2 need you");
+  expect(together([{ need: true }, {}, {}])).toBe("3 updates");
 });
 
 test("why it needs you", () => {

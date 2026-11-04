@@ -2,7 +2,8 @@
 // worker and the screen. An iPhone shows no buttons on an alert, so its words alone must let you decide from the lock
 // screen: the title says the task and what it needs, the body the question or the card's choices.
 import { excerpt } from './excerpt.ts'
-import { splitFacts, taskChatId, type Alert, type Chat, type Message, type Question, type Snapshot } from './types.ts'
+import { machineName, splitFacts, taskChatId, type Alert, type Chat, type Message, type Question, type Snapshot } from './types.ts'
+import * as T from '../../core/toasts.js'
 
 /** about what an iPhone's lock screen shows of a title (one line) and of a body (a few lines) */
 export const TITLE_MAX = 40
@@ -15,6 +16,13 @@ const summaryOf = (t: { said?: string; title: string }) => (t.said && splitFacts
 
 /** one line of plain words, cut with an ellipsis */
 export const clip = (text: string, n: number) => excerpt(text, n)
+
+/** who a task's agent is in a toast or an alert, as the window names it (core/toasts.js taskWho): its ref on this
+ *  computer ("SHEP-17"), with its machine's name on another ("SHEP-17 on Mac mini"); never the raw "m3:SHEP-17" */
+export function taskWho(snap: Pick<Snapshot, 'machines'>, id: string): string {
+  const at = id.lastIndexOf(':')
+  return at < 0 ? id : T.taskWho(id.slice(at + 1), machineName(snap.machines, id.slice(0, at)))
+}
 
 /** the tag of a coordinator's open question: one alert per coordinator, as one per task */
 export const askTag = (place: string) => `ask:${place}`

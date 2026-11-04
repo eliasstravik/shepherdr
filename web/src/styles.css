@@ -210,6 +210,14 @@
       height: 16px;
     }
   }
+  /* a phone's toast comes in from above, calmly */
+  --animate-toast-in: toast-in 0.2s ease-out;
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(-8px);
+    }
+  }
 }
 
 @layer base {

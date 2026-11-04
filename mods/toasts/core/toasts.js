@@ -30,8 +30,18 @@ export const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…
 export const NEEDS_YOU = "Needs you";
 export const FINISHED = "Finished";
 export const toastTitle = (who, what) => `${who} · ${what}`;
-// Who an Assistant is, by its space's name ("tt-repo Assistant"); a task's agent is its task's ref ("HERD-4").
+// Who an Assistant is, by its space's name ("tt-repo Assistant"); a task's agent is its task's ref ("HERD-4"), on
+// another machine with that machine's name, as the chat names an agent there (core/chat-view.js): "HERD-4 on vm".
 export const assistantWho = (spaceName) => (spaceName ? `${spaceName} Assistant` : "Assistant");
+export const taskWho = (ref, machine) => (machine ? `${ref} on ${machine}` : ref);
+
+// Several toasts at once, in one line (a phone shows one toast): "2 tasks need you" when each is a task needing
+// you, "2 need you" when an Assistant is among them, else "3 updates".
+export function together(list) {
+  const n = list.length;
+  if (list.every((x) => x.need)) return `${n} ${list.every((x) => x.task) ? "tasks " : ""}need you`;
+  return `${n} updates`;
+}
 
 // Why an agent needs the person, as a Needs you toast's body says it (the web app's and the service's need: { question?:
 // { kind, title }, secret?: { name }, text? }): its question, a plan to approve, the secret it asks for, or what it
@@ -42,10 +52,12 @@ export function needReason(n) {
   return n?.text || REASONS.question;
 }
 
-// The list with a new toast added (newest last): older than KEEP_MS go, and only the last KEEP stay beside it.
+// The list with a new toast added (newest last): older than KEEP_MS go, and only the last KEEP stay beside it. One with
+// the same key (one event: an agent needing you, told twice as it learns more) takes the old one's place and id.
 export function withToast(list, n, at = Date.now(), id = `${at.toString(36)}${Math.random().toString(36).slice(2, 6)}`) {
-  const kept = (list ?? []).filter((x) => at - x.at < KEEP_MS).slice(-KEEP);
-  return [...kept, { ...n, level: n.level ?? "info", id, at }];
+  const same = n.key ? (list ?? []).find((x) => x.key === n.key) : null;
+  const kept = (list ?? []).filter((x) => x !== same && at - x.at < KEEP_MS).slice(-KEEP);
+  return [...kept, { ...n, level: n.level ?? "info", id: same?.id ?? id, at }];
 }
 
 // The toasts left at `now`: each goes after its time.
