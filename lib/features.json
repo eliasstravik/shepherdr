@@ -8,186 +8,1061 @@
     "addon: the add-on in lib/addons.json; off there means off on both sides. view_only: per-device look, no core."
   ],
   "features": [
-    { "id": "spaces", "addon": "core", "title": "Spaces sidebar", "core": ["spaces", "machines", "unread", "notify"],
-      "herdr": { "mods": ["spaces-chat", "workspace-chrome-shepherdr"] }, "web": { "screens": ["Spaces"] },
-      "forms": { "herdr": "Sidebar: machines, Pinned, sections, unread, red/green counts, icons, drag between sections",
-        "desktop": "Left sidebar, resizable, drag to move", "tablet": "Drawer from the left (menu or edge swipe)",
-        "phone": "Drawer (edge swipe); long-press then drag to move" }, "planned": true },
-    { "id": "space-actions", "addon": "core", "title": "Space actions", "core": ["spaces", "notify", "actions"],
-      "herdr": { "mods": ["spaces-chat", "confirm-chat", "prompt-chat"] }, "web": { "screens": ["SpaceMenu"] },
-      "forms": { "herdr": "Right-click: Mark read, Pin, Rename + icon, Notify, worktrees, Close, Space settings",
-        "desktop": "Right-click or ⋯ menu, dialogs", "tablet": "⋯ or long-press menu",
-        "phone": "Long-press: action sheet; rename in a sheet" }, "planned": true },
-    { "id": "new-space", "addon": "core", "title": "New space", "core": ["spaces", "actions"],
-      "herdr": { "mods": ["newspace", "new-menu-tasks"] }, "web": { "screens": ["NewSpace"] },
-      "forms": { "herdr": "Dialog: folder, recents, Browse, icon, make it a git repo", "desktop": "Dialog with folder browser",
-        "tablet": "Dialog", "phone": "Full-screen sheet with folder browser" }, "planned": true },
-    { "id": "tabs", "addon": "core", "title": "Tabs in a space", "core": ["spaces"],
-      "herdr": { "mods": ["tabs-tasks"] }, "web": { "screens": ["Tabs"] },
-      "forms": { "herdr": "Tab bar: Assistant first, counts, dots, drag, rename, close, + menu",
-        "desktop": "Tab strip under the space header", "tablet": "Same, scrolls sideways",
-        "phone": "Space title opens a tab switcher sheet" }, "planned": true },
-    { "id": "panes", "addon": "core", "title": "Panes and pane header", "core": ["spaces"],
-      "herdr": { "mods": ["pane-chat"] }, "web": { "screens": ["Panes"] },
-      "forms": { "herdr": "Split, zoom, close, Chat | Terminal switch", "desktop": "Up to 3 panes side by side, Chat | Terminal switch",
-        "tablet": "2 side by side in landscape, 1 in portrait", "phone": "One at a time; Chat | Terminal in the top bar" }, "planned": true },
-    { "id": "status", "addon": "core", "title": "Status bar", "core": ["inbox", "machines"],
-      "herdr": { "mods": ["workspace-status-chat"] }, "web": { "screens": ["StatusBar"] },
-      "forms": { "herdr": "Machine, branch, Needs you badge", "desktop": "Header chips", "tablet": "Header chips",
-        "phone": "Top-bar subtitle; badge on the Needs you tab" }, "planned": true },
-    { "id": "notifications", "addon": "core", "title": "Notifications", "core": ["notify", "events"],
-      "herdr": { "mods": ["toasts"] }, "web": { "screens": ["Toasts"] },
-      "forms": { "herdr": "Toasts with sound, click to go there", "desktop": "Toast in the page; push when no screen shows Shepherdr",
-        "tablet": "Same", "phone": "Top toast, push, app badge" }, "planned": true },
-    { "id": "menus", "addon": "core", "title": "Menus and dialogs", "core": ["actions"],
-      "herdr": { "mods": ["menu-tasks", "new-menu-tasks", "confirm-chat", "prompt-chat"] }, "web": { "screens": ["Menus"] },
-      "forms": { "herdr": "+ menu, context menus, confirm and prompt dialogs", "desktop": "Menus on right-click or ⋯, dialogs",
-        "tablet": "Popovers", "phone": "Action sheets, bottom-sheet confirms" }, "planned": true },
-    { "id": "settings", "addon": "core", "title": "Shepherdr settings", "core": ["settings"],
-      "herdr": { "mods": ["shepherdr-settings"] }, "web": { "screens": ["Settings"] },
-      "forms": { "herdr": "Dialog: Agents, Tasks, Autopilot, Notify, Secrets, Machines, Window, Web",
-        "desktop": "Page with a side list", "tablet": "Same", "phone": "Grouped list, pages slide in" }, "planned": true },
-    { "id": "frame", "addon": "core", "title": "App frame", "core": [], "view_only": true,
-      "herdr": { "mods": ["workspace-chrome-shepherdr"] }, "web": { "screens": ["Frame"] },
-      "forms": { "herdr": "Search, sidebar toggle, Settings and Shepherdr buttons, Add machine",
-        "desktop": "Header and sidebar footer", "tablet": "Header", "phone": "Top bar and the More sheet" }, "planned": true },
-    { "id": "theme", "addon": "core", "title": "Theme", "core": [], "view_only": true,
-      "herdr": { "mods": ["menu-tasks"] }, "web": { "screens": ["Theme"] },
-      "forms": { "herdr": "Herdr's themes in the menu", "desktop": "System, Light or Dark", "tablet": "Same", "phone": "Same" }, "planned": true },
-    { "id": "terminals", "addon": "core", "title": "Live terminals", "core": ["terminals"],
-      "herdr": { "builtin": "terminal panes" }, "web": { "screens": ["Terminal"] },
-      "forms": { "herdr": "Native terminals in panes", "desktop": "Live terminal; typing goes through", "tablet": "Same",
-        "phone": "Live terminal, fit to width, key row (Esc, Tab, arrows, Ctrl-C, Enter)" }, "planned": true },
-
-    { "id": "tasks-list", "addon": "tasks", "title": "Tasks list", "core": ["tasks", "dot", "inbox"],
-      "herdr": { "mods": ["tasks"] }, "web": { "screens": ["Tasks"] },
-      "forms": { "herdr": "Groups, filters, group by, search (F), dots and %, Accept on Ready rows, automations, archived",
-        "desktop": "Right column", "tablet": "Column beside the chat", "phone": "Tasks tab in the bottom bar" }, "planned": true },
-    { "id": "task-view", "addon": "tasks", "title": "Task view", "core": ["tasks"],
-      "herdr": { "mods": ["tasks", "chat"] }, "web": { "screens": ["Task"] },
-      "forms": { "herdr": "Header (Pin, Accept, status); Chat, Terminal, Files, Changes, Pull request, Browser",
-        "desktop": "Side panel with those tabs", "tablet": "Slides over the list, with Back",
-        "phone": "Own screen; tabs in a scrolling switcher" }, "planned": true },
-    { "id": "accept", "addon": "tasks", "title": "Accept card", "core": ["tasks", "artifacts"],
-      "herdr": { "mods": ["accept-card"] }, "web": { "screens": ["Accept"] },
-      "forms": { "herdr": "Summary, changes, checks, proof, details; Accept merges", "desktop": "Dialog; proof opens over it",
-        "tablet": "Dialog", "phone": "Tall bottom sheet; proof opens over it" }, "planned": true },
-    { "id": "task-files", "addon": "tasks", "title": "Files", "core": ["worktree"],
-      "herdr": { "mods": ["task-files"] }, "web": { "screens": ["Files"] },
-      "forms": { "herdr": "File tree with previews", "desktop": "Tree and preview side by side", "tablet": "Tree, then preview",
-        "phone": "Tree, then full-screen preview" }, "planned": true },
-    { "id": "task-changes", "addon": "tasks", "title": "Changes", "core": ["worktree"],
-      "herdr": { "mods": ["task-changes"] }, "web": { "screens": ["Changes"] },
-      "forms": { "herdr": "Changed files, +/−, diff per file", "desktop": "Split diff", "tablet": "Unified diff",
-        "phone": "Unified diff, wrapped lines" }, "planned": true },
-    { "id": "task-pr", "addon": "tasks", "title": "Pull request", "core": ["github"],
-      "herdr": { "mods": ["task-pr"] }, "web": { "screens": ["PullRequest"] },
-      "forms": { "herdr": "State, checks (failed first), link", "desktop": "Panel", "tablet": "Panel", "phone": "Screen" }, "planned": true },
-    { "id": "task-menu", "addon": "tasks", "title": "Pin from a row", "core": ["tasks", "state"],
-      "herdr": { "mods": ["tasks-menu"] }, "web": { "screens": ["TaskMenu"] },
-      "forms": { "herdr": "Right-click a row: Pin/Unpin, group by, filters", "desktop": "Right-click or ⋯", "tablet": "Long-press",
-        "phone": "Long-press: sheet" }, "planned": true },
-
-    { "id": "assistant", "addon": "assistants", "title": "Assistant per space", "core": ["spaces", "coordinator"],
-      "herdr": { "mods": ["coordinator"] }, "web": { "screens": ["Assistant"] },
-      "forms": { "herdr": "Chat tab first; switch agent, restart, edit instructions, close (stop workers or let them finish)",
-        "desktop": "Main chat of the space", "tablet": "Main chat", "phone": "The Chat tab of the bottom bar" }, "planned": true },
-    { "id": "news", "addon": "assistants", "title": "Task news", "core": ["news"],
-      "herdr": { "mods": ["chat"] }, "web": { "screens": ["News"] },
-      "forms": { "herdr": "News lines in the Assistant chat; Accept on Ready", "desktop": "Same lines, inline Accept", "tablet": "Same",
-        "phone": "Same; Accept opens the sheet" }, "planned": true },
-
-    { "id": "timeline", "addon": "chat", "title": "Chat timeline", "core": ["chat"],
-      "herdr": { "mods": ["chat"] }, "web": { "screens": ["Chat"] },
-      "forms": { "herdr": "History paging, Markdown, code copy, tool rows, folds, day lines, quiet lines",
-        "desktop": "Same, reading width", "tablet": "Same", "phone": "Same, full width" }, "planned": true },
-    { "id": "composer", "addon": "chat", "title": "Composer", "core": ["chat", "actions"],
-      "herdr": { "mods": ["chat"] }, "web": { "screens": ["Composer"] },
-      "forms": { "herdr": "Send mid-turn, Ctrl+Enter holds, Up recalls, drafts, / commands, #task mentions, Stop chip",
-        "desktop": "Same keys", "tablet": "Same with a keyboard",
-        "phone": "Same box; long-press Send holds; drafts kept on the device" }, "planned": true },
-    { "id": "message-actions", "addon": "chat", "title": "Message actions", "core": ["chat", "actions"],
-      "herdr": { "mods": ["chat"] }, "web": { "screens": ["MessageActions"] },
-      "forms": { "herdr": "Hover row: time, Reply, Copy, Fork or Rewind, React", "desktop": "Hover row, same order",
-        "tablet": "Tap a message to show its row", "phone": "Long-press: sheet; swipe right to reply" }, "planned": true },
-    { "id": "attachments", "addon": "chat", "title": "Attachments and images", "core": ["chat", "files"],
-      "herdr": { "mods": ["chat", "chat-image"] }, "web": { "screens": ["Attach", "ImageViewer"] },
-      "forms": { "herdr": "Paperclip, paste, drop; image viewer with zoom", "desktop": "Same; viewer with wheel zoom",
-        "tablet": "Same; pinch zoom", "phone": "Camera or photos; viewer with pinch and swipe" }, "planned": true },
-    { "id": "models", "addon": "chat", "title": "Model menu", "core": ["agents"],
-      "herdr": { "mods": ["chat-models"] }, "web": { "screens": ["Models"] },
-      "forms": { "herdr": "Model, effort, Fast, permissions, Restart when changed", "desktop": "Popover", "tablet": "Popover",
-        "phone": "Bottom sheet" }, "planned": true },
-    { "id": "subagents", "addon": "chat", "title": "Subagents above the box", "core": ["chat"],
-      "herdr": { "mods": ["chat"] }, "web": { "screens": ["Subagents"] },
-      "forms": { "herdr": "List of the CLI's own subagents", "desktop": "Same", "tablet": "Same", "phone": "Folds to one line" }, "planned": true },
-    { "id": "find", "addon": "chat", "title": "Find in chat", "core": ["chat"],
-      "herdr": { "mods": ["chat"] }, "web": { "screens": ["Find"] },
-      "forms": { "herdr": "Ctrl+F, count, up/down", "desktop": "Ctrl+F", "tablet": "Search button",
-        "phone": "Search button in the top bar" }, "planned": true },
-
-    { "id": "cards", "addon": "needs", "title": "Cards in the chat", "core": ["asks", "cards"],
-      "herdr": { "mods": ["chat"] }, "web": { "screens": ["Cards"] },
-      "forms": { "herdr": "Permission, plan, question, start-screen cards; typing answers them",
-        "desktop": "Same cards in the timeline", "tablet": "Same", "phone": "Same, big buttons" }, "planned": true },
-
-    { "id": "secrets", "addon": "secrets", "title": "Secret cards and vault", "core": ["secrets"],
-      "herdr": { "mods": ["chat", "shepherdr-settings"] }, "web": { "screens": ["SecretCard"] },
-      "forms": { "herdr": "Masked card in the chat; Settings › Secrets", "desktop": "Same; value goes straight to the vault",
-        "tablet": "Same", "phone": "Same; masked field, nothing kept in the browser" }, "planned": true },
-
-    { "id": "jump", "addon": "keyboard", "title": "Jump", "core": ["search"],
-      "herdr": { "mods": ["jump"] }, "web": { "screens": ["Jump"] },
-      "forms": { "herdr": "Ctrl+K: spaces, tasks, artifacts, machines", "desktop": "Ctrl+K or ⌘K",
-        "tablet": "Same with a keyboard; Search button", "phone": "Search button in the bottom bar, full screen" }, "planned": true },
-    { "id": "keys", "addon": "keyboard", "title": "Keys list", "core": ["keys"],
-      "herdr": { "mods": ["keybinds"] }, "web": { "screens": ["Keys"] },
-      "forms": { "herdr": "Ctrl+Shift+? dialog", "desktop": "? opens the web keys", "tablet": "Same with a keyboard",
-        "phone": "Not shown (no keyboard)" }, "planned": true },
-
-    { "id": "artifacts", "addon": "artifacts", "title": "Artifacts list and viewer", "core": ["artifacts", "recipe"],
-      "herdr": { "mods": ["artifacts", "chat-image"] }, "web": { "screens": ["Artifacts", "ArtifactView"] },
-      "forms": { "herdr": "Sidebar list; viewer over the pane; versions; Mark up", "desktop": "Artifacts column; viewer over the chat",
-        "tablet": "Same", "phone": "Artifacts tab; full-screen viewer" }, "planned": true },
-    { "id": "markup", "addon": "artifacts", "title": "Mark up and answers", "core": ["artifacts"],
-      "herdr": { "mods": ["artifacts"] }, "web": { "screens": ["Markup"] },
-      "forms": { "herdr": "Point or drag, write a note; choices reply to the agent", "desktop": "Click or drag over a block",
-        "tablet": "Tap a block", "phone": "Tap a block, note in a sheet" }, "planned": true },
-
-    { "id": "dictation", "addon": "voice", "title": "Dictation", "core": ["voice"],
-      "herdr": { "mods": ["chat"] }, "web": { "screens": ["Dictation"] },
-      "forms": { "herdr": "Mic, level wave, Cancel/Done (whisper.cpp)", "desktop": "Mic; audio goes to the service's whisper.cpp",
-        "tablet": "Same", "phone": "Same; big mic button" }, "planned": true },
-    { "id": "call", "addon": "voice", "title": "Voice call", "core": ["voice"],
-      "herdr": { "mods": ["chat-call", "chat"] }, "web": { "screens": ["Call"] },
-      "forms": { "herdr": "Call an Assistant (ElevenLabs), mute, call bar", "desktop": "Same, through the service", "tablet": "Same",
-        "phone": "Full-width call bar" }, "planned": true },
-
-    { "id": "reactions", "addon": "reactions", "title": "Reactions", "core": ["chat"],
-      "herdr": { "mods": ["chat-react"] }, "web": { "screens": ["Reactions"] },
-      "forms": { "herdr": "Pills under messages; picker with search and recents", "desktop": "Popover picker", "tablet": "Popover",
-        "phone": "Sheet with recents on top" }, "planned": true },
-
-    { "id": "browser", "addon": "browser", "title": "Live browser", "core": ["browser"],
-      "herdr": { "mods": ["task-browser"] }, "web": { "screens": ["Browser"] },
-      "forms": { "herdr": "In the task's terminal viewer (Kitty), take over with mouse and keys",
-        "desktop": "Live stream in the page; click, scroll, type", "tablet": "Same with touch",
-        "phone": "Full-screen stream, pinch zoom, keyboard button" }, "planned": true },
-
-    { "id": "autopilot", "addon": "autopilot", "title": "Autopilot", "core": ["autopilot"],
-      "herdr": { "mods": ["pane-chat", "shepherdr-settings"] }, "web": { "screens": ["Autopilot"] },
-      "forms": { "herdr": "Switch in the Assistant header; Settings › Autopilot", "desktop": "Same switch and page", "tablet": "Same",
-        "phone": "Switch in the chat's menu; settings page" }, "planned": true },
-
-    { "id": "machines", "addon": "machines", "title": "Machines", "core": ["machines"],
-      "herdr": { "mods": ["machine-add-chat", "spaces-chat"] }, "web": { "screens": ["Machines"] },
-      "forms": { "herdr": "Health meter, plan limits, home Assistant, Add machine, tools kept in step",
-        "desktop": "Machine headers in the sidebar; Add machine dialog (terminal for passwords)", "tablet": "Same",
-        "phone": "Machine rows in the drawer; sheets" }, "planned": true },
-
-    { "id": "web", "addon": "web", "title": "Web on/off, link, QR", "core": ["settings"],
-      "herdr": { "mods": ["shepherdr-settings"] }, "web": { "screens": ["WebSettings"] },
-      "forms": { "herdr": "Settings › Web: on/off, link, QR code", "desktop": "Settings › Web (this device)", "tablet": "Same",
-        "phone": "Same; how to add it to the home screen" }, "planned": true }
+    {
+      "id": "spaces",
+      "addon": "core",
+      "title": "Spaces sidebar",
+      "core": [
+        "spaces",
+        "machines",
+        "unread",
+        "notify"
+      ],
+      "herdr": {
+        "mods": [
+          "spaces-chat",
+          "workspace-chrome-shepherdr"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Spaces"
+        ]
+      },
+      "forms": {
+        "herdr": "Sidebar: machines, Pinned, sections, unread, red/green counts, icons, drag between sections",
+        "desktop": "Left sidebar, resizable, drag to move",
+        "tablet": "Drawer from the left (menu or edge swipe)",
+        "phone": "Drawer (edge swipe); long-press then drag to move"
+      },
+      "planned": true
+    },
+    {
+      "id": "space-actions",
+      "addon": "core",
+      "title": "Space actions",
+      "core": [
+        "spaces",
+        "notify",
+        "actions"
+      ],
+      "herdr": {
+        "mods": [
+          "spaces-chat",
+          "confirm-chat",
+          "prompt-chat"
+        ]
+      },
+      "web": {
+        "screens": [
+          "SpaceMenu"
+        ]
+      },
+      "forms": {
+        "herdr": "Right-click: Mark read, Pin, Rename + icon, Notify, worktrees, Close, Space settings",
+        "desktop": "Right-click or ⋯ menu, dialogs",
+        "tablet": "⋯ or long-press menu",
+        "phone": "Long-press: action sheet; rename in a sheet"
+      },
+      "planned": true
+    },
+    {
+      "id": "new-space",
+      "addon": "core",
+      "title": "New space",
+      "core": [
+        "spaces",
+        "actions"
+      ],
+      "herdr": {
+        "mods": [
+          "newspace",
+          "new-menu-tasks"
+        ]
+      },
+      "web": {
+        "screens": [
+          "NewSpace"
+        ]
+      },
+      "forms": {
+        "herdr": "Dialog: folder, recents, Browse, icon, make it a git repo",
+        "desktop": "Dialog with folder browser",
+        "tablet": "Dialog",
+        "phone": "Full-screen sheet with folder browser"
+      },
+      "planned": true
+    },
+    {
+      "id": "tabs",
+      "addon": "core",
+      "title": "Tabs in a space",
+      "core": [
+        "spaces"
+      ],
+      "herdr": {
+        "mods": [
+          "tabs-tasks"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Tabs"
+        ]
+      },
+      "forms": {
+        "herdr": "Tab bar: Assistant first, counts, dots, drag, rename, close, + menu",
+        "desktop": "Tab strip under the space header",
+        "tablet": "Same, scrolls sideways",
+        "phone": "Space title opens a tab switcher sheet"
+      },
+      "planned": true
+    },
+    {
+      "id": "panes",
+      "addon": "core",
+      "title": "Panes and pane header",
+      "core": [
+        "spaces"
+      ],
+      "herdr": {
+        "mods": [
+          "pane-chat"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Panes"
+        ]
+      },
+      "forms": {
+        "herdr": "Split, zoom, close, Chat | Terminal switch",
+        "desktop": "Up to 3 panes side by side, Chat | Terminal switch",
+        "tablet": "2 side by side in landscape, 1 in portrait",
+        "phone": "One at a time; Chat | Terminal in the top bar"
+      },
+      "planned": true
+    },
+    {
+      "id": "status",
+      "addon": "core",
+      "title": "Status bar",
+      "core": [
+        "inbox",
+        "machines"
+      ],
+      "herdr": {
+        "mods": [
+          "workspace-status-chat"
+        ]
+      },
+      "web": {
+        "screens": [
+          "StatusBar"
+        ]
+      },
+      "forms": {
+        "herdr": "Machine, branch, Needs you badge",
+        "desktop": "Header chips",
+        "tablet": "Header chips",
+        "phone": "Top-bar subtitle; badge on the Needs you tab"
+      },
+      "planned": true
+    },
+    {
+      "id": "notifications",
+      "addon": "core",
+      "title": "Notifications",
+      "core": [
+        "notify",
+        "events"
+      ],
+      "herdr": {
+        "mods": [
+          "toasts"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Toasts"
+        ]
+      },
+      "forms": {
+        "herdr": "Toasts with sound, click to go there",
+        "desktop": "Toast in the page; push when no screen shows Shepherdr",
+        "tablet": "Same",
+        "phone": "Top toast, push, app badge"
+      },
+      "planned": true
+    },
+    {
+      "id": "menus",
+      "addon": "core",
+      "title": "Menus and dialogs",
+      "core": [
+        "actions"
+      ],
+      "herdr": {
+        "mods": [
+          "menu-tasks",
+          "new-menu-tasks",
+          "confirm-chat",
+          "prompt-chat"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Menus"
+        ]
+      },
+      "forms": {
+        "herdr": "+ menu, context menus, confirm and prompt dialogs",
+        "desktop": "Menus on right-click or ⋯, dialogs",
+        "tablet": "Popovers",
+        "phone": "Action sheets, bottom-sheet confirms"
+      },
+      "planned": true
+    },
+    {
+      "id": "settings",
+      "addon": "core",
+      "title": "Shepherdr settings",
+      "core": [
+        "settings"
+      ],
+      "herdr": {
+        "mods": [
+          "shepherdr-settings"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Settings"
+        ]
+      },
+      "forms": {
+        "herdr": "Dialog: Agents, Tasks, Autopilot, Notify, Secrets, Machines, Window, Web",
+        "desktop": "Page with a side list",
+        "tablet": "Same",
+        "phone": "Grouped list, pages slide in"
+      },
+      "planned": true
+    },
+    {
+      "id": "frame",
+      "addon": "core",
+      "title": "App frame",
+      "core": [],
+      "view_only": true,
+      "herdr": {
+        "mods": [
+          "workspace-chrome-shepherdr"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Frame"
+        ]
+      },
+      "forms": {
+        "herdr": "Search, sidebar toggle, Settings and Shepherdr buttons, Add machine",
+        "desktop": "Header and sidebar footer",
+        "tablet": "Header",
+        "phone": "Top bar and the More sheet"
+      },
+      "planned": true
+    },
+    {
+      "id": "theme",
+      "addon": "core",
+      "title": "Theme",
+      "core": [],
+      "view_only": true,
+      "herdr": {
+        "mods": [
+          "menu-tasks"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Theme"
+        ]
+      },
+      "forms": {
+        "herdr": "Herdr's themes in the menu",
+        "desktop": "System, Light or Dark",
+        "tablet": "Same",
+        "phone": "Same"
+      },
+      "planned": true
+    },
+    {
+      "id": "terminals",
+      "addon": "core",
+      "title": "Live terminals",
+      "core": [
+        "terminals"
+      ],
+      "herdr": {
+        "builtin": "terminal panes"
+      },
+      "web": {
+        "screens": [
+          "Terminal"
+        ]
+      },
+      "forms": {
+        "herdr": "Native terminals in panes",
+        "desktop": "Live terminal; typing goes through",
+        "tablet": "Same",
+        "phone": "Live terminal, fit to width, key row (Esc, Tab, arrows, Ctrl-C, Enter)"
+      },
+      "planned": true
+    },
+    {
+      "id": "tasks-list",
+      "addon": "tasks",
+      "title": "Tasks list",
+      "core": [
+        "tasks",
+        "dot",
+        "inbox"
+      ],
+      "herdr": {
+        "mods": [
+          "tasks"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Tasks"
+        ]
+      },
+      "forms": {
+        "herdr": "Groups, filters, group by, search (F), dots and %, Accept on Ready rows, automations, archived",
+        "desktop": "Right column",
+        "tablet": "Column beside the chat",
+        "phone": "Tasks tab in the bottom bar"
+      },
+      "planned": true
+    },
+    {
+      "id": "task-view",
+      "addon": "tasks",
+      "title": "Task view",
+      "core": [
+        "tasks"
+      ],
+      "herdr": {
+        "mods": [
+          "tasks",
+          "chat"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Task"
+        ]
+      },
+      "forms": {
+        "herdr": "Header (Pin, Accept, status); Chat, Terminal, Files, Changes, Pull request, Browser",
+        "desktop": "Side panel with those tabs",
+        "tablet": "Slides over the list, with Back",
+        "phone": "Own screen; tabs in a scrolling switcher"
+      },
+      "planned": true
+    },
+    {
+      "id": "accept",
+      "addon": "tasks",
+      "title": "Accept card",
+      "core": [
+        "tasks",
+        "artifacts"
+      ],
+      "herdr": {
+        "mods": [
+          "accept-card"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Accept"
+        ]
+      },
+      "forms": {
+        "herdr": "Summary, changes, checks, proof, details; Accept merges",
+        "desktop": "Dialog; proof opens over it",
+        "tablet": "Dialog",
+        "phone": "Tall bottom sheet; proof opens over it"
+      },
+      "planned": true
+    },
+    {
+      "id": "task-files",
+      "addon": "tasks",
+      "title": "Files",
+      "core": [
+        "worktree"
+      ],
+      "herdr": {
+        "mods": [
+          "task-files"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Files"
+        ]
+      },
+      "forms": {
+        "herdr": "File tree with previews",
+        "desktop": "Tree and preview side by side",
+        "tablet": "Tree, then preview",
+        "phone": "Tree, then full-screen preview"
+      },
+      "planned": true
+    },
+    {
+      "id": "task-changes",
+      "addon": "tasks",
+      "title": "Changes",
+      "core": [
+        "worktree"
+      ],
+      "herdr": {
+        "mods": [
+          "task-changes"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Changes"
+        ]
+      },
+      "forms": {
+        "herdr": "Changed files, +/−, diff per file",
+        "desktop": "Split diff",
+        "tablet": "Unified diff",
+        "phone": "Unified diff, wrapped lines"
+      },
+      "planned": true
+    },
+    {
+      "id": "task-pr",
+      "addon": "tasks",
+      "title": "Pull request",
+      "core": [
+        "github"
+      ],
+      "herdr": {
+        "mods": [
+          "task-pr"
+        ]
+      },
+      "web": {
+        "screens": [
+          "PullRequest"
+        ]
+      },
+      "forms": {
+        "herdr": "State, checks (failed first), link",
+        "desktop": "Panel",
+        "tablet": "Panel",
+        "phone": "Screen"
+      },
+      "planned": true
+    },
+    {
+      "id": "task-menu",
+      "addon": "tasks",
+      "title": "Pin from a row",
+      "core": [
+        "tasks",
+        "state"
+      ],
+      "herdr": {
+        "mods": [
+          "tasks-menu"
+        ]
+      },
+      "web": {
+        "screens": [
+          "TaskMenu"
+        ]
+      },
+      "forms": {
+        "herdr": "Right-click a row: Pin/Unpin, group by, filters",
+        "desktop": "Right-click or ⋯",
+        "tablet": "Long-press",
+        "phone": "Long-press: sheet"
+      },
+      "planned": true
+    },
+    {
+      "id": "assistant",
+      "addon": "assistants",
+      "title": "Assistant per space",
+      "core": [
+        "spaces",
+        "coordinator"
+      ],
+      "herdr": {
+        "mods": [
+          "coordinator"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Assistant"
+        ]
+      },
+      "forms": {
+        "herdr": "Chat tab first; switch agent, restart, edit instructions, close (stop workers or let them finish)",
+        "desktop": "Main chat of the space",
+        "tablet": "Main chat",
+        "phone": "The Chat tab of the bottom bar"
+      },
+      "planned": true
+    },
+    {
+      "id": "news",
+      "addon": "assistants",
+      "title": "Task news",
+      "core": [
+        "news"
+      ],
+      "herdr": {
+        "mods": [
+          "chat"
+        ]
+      },
+      "web": {
+        "screens": [
+          "News"
+        ]
+      },
+      "forms": {
+        "herdr": "News lines in the Assistant chat; Accept on Ready",
+        "desktop": "Same lines, inline Accept",
+        "tablet": "Same",
+        "phone": "Same; Accept opens the sheet"
+      },
+      "planned": true
+    },
+    {
+      "id": "timeline",
+      "addon": "chat",
+      "title": "Chat timeline",
+      "core": [
+        "chat"
+      ],
+      "herdr": {
+        "mods": [
+          "chat"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Chat"
+        ]
+      },
+      "forms": {
+        "herdr": "History paging, Markdown, code copy, tool rows, folds, day lines, quiet lines",
+        "desktop": "Same, reading width",
+        "tablet": "Same",
+        "phone": "Same, full width"
+      },
+      "planned": true
+    },
+    {
+      "id": "composer",
+      "addon": "chat",
+      "title": "Composer",
+      "core": [
+        "chat",
+        "actions"
+      ],
+      "herdr": {
+        "mods": [
+          "chat"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Composer"
+        ]
+      },
+      "forms": {
+        "herdr": "Send mid-turn, Ctrl+Enter holds, Up recalls, drafts, / commands, #task mentions, Stop chip",
+        "desktop": "Same keys",
+        "tablet": "Same with a keyboard",
+        "phone": "Same box; long-press Send holds; drafts kept on the device"
+      },
+      "planned": true
+    },
+    {
+      "id": "message-actions",
+      "addon": "chat",
+      "title": "Message actions",
+      "core": [
+        "chat",
+        "actions"
+      ],
+      "herdr": {
+        "mods": [
+          "chat"
+        ]
+      },
+      "web": {
+        "screens": [
+          "MessageActions"
+        ]
+      },
+      "forms": {
+        "herdr": "Hover row: time, Reply, Copy, Fork or Rewind, React",
+        "desktop": "Hover row, same order",
+        "tablet": "Tap a message to show its row",
+        "phone": "Long-press: sheet; swipe right to reply"
+      },
+      "planned": true
+    },
+    {
+      "id": "attachments",
+      "addon": "chat",
+      "title": "Attachments and images",
+      "core": [
+        "chat",
+        "files"
+      ],
+      "herdr": {
+        "mods": [
+          "chat",
+          "chat-image"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Attach",
+          "ImageViewer"
+        ]
+      },
+      "forms": {
+        "herdr": "Paperclip, paste, drop; image viewer with zoom",
+        "desktop": "Same; viewer with wheel zoom",
+        "tablet": "Same; pinch zoom",
+        "phone": "Camera or photos; viewer with pinch and swipe"
+      },
+      "planned": true
+    },
+    {
+      "id": "models",
+      "addon": "chat",
+      "title": "Model menu",
+      "core": [
+        "agents"
+      ],
+      "herdr": {
+        "mods": [
+          "chat-models"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Models"
+        ]
+      },
+      "forms": {
+        "herdr": "Model, effort, Fast, permissions, Restart when changed",
+        "desktop": "Popover",
+        "tablet": "Popover",
+        "phone": "Bottom sheet"
+      },
+      "planned": true
+    },
+    {
+      "id": "subagents",
+      "addon": "chat",
+      "title": "Subagents above the box",
+      "core": [
+        "chat"
+      ],
+      "herdr": {
+        "mods": [
+          "chat"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Subagents"
+        ]
+      },
+      "forms": {
+        "herdr": "List of the CLI's own subagents",
+        "desktop": "Same",
+        "tablet": "Same",
+        "phone": "Folds to one line"
+      },
+      "planned": true
+    },
+    {
+      "id": "find",
+      "addon": "chat",
+      "title": "Find in chat",
+      "core": [
+        "chat"
+      ],
+      "herdr": {
+        "mods": [
+          "chat"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Find"
+        ]
+      },
+      "forms": {
+        "herdr": "Ctrl+F, count, up/down",
+        "desktop": "Ctrl+F",
+        "tablet": "Search button",
+        "phone": "Search button in the top bar"
+      },
+      "planned": true
+    },
+    {
+      "id": "cards",
+      "addon": "needs",
+      "title": "Cards in the chat",
+      "core": [
+        "asks",
+        "cards"
+      ],
+      "herdr": {
+        "mods": [
+          "chat"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Cards"
+        ]
+      },
+      "forms": {
+        "herdr": "Permission, plan, question, start-screen cards; typing answers them",
+        "desktop": "Same cards in the timeline",
+        "tablet": "Same",
+        "phone": "Same, big buttons"
+      },
+      "planned": true
+    },
+    {
+      "id": "secrets",
+      "addon": "secrets",
+      "title": "Secret cards and vault",
+      "core": [
+        "secrets"
+      ],
+      "herdr": {
+        "mods": [
+          "chat",
+          "shepherdr-settings"
+        ]
+      },
+      "web": {
+        "screens": [
+          "SecretCard"
+        ]
+      },
+      "forms": {
+        "herdr": "Masked card in the chat; Settings › Secrets",
+        "desktop": "Same; value goes straight to the vault",
+        "tablet": "Same",
+        "phone": "Same; masked field, nothing kept in the browser"
+      },
+      "planned": true
+    },
+    {
+      "id": "jump",
+      "addon": "keyboard",
+      "title": "Jump",
+      "core": [
+        "search"
+      ],
+      "herdr": {
+        "mods": [
+          "jump"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Jump"
+        ]
+      },
+      "forms": {
+        "herdr": "Ctrl+K: spaces, tasks, artifacts, machines",
+        "desktop": "Ctrl+K or ⌘K",
+        "tablet": "Same with a keyboard; Search button",
+        "phone": "Search button in the bottom bar, full screen"
+      },
+      "planned": true
+    },
+    {
+      "id": "keys",
+      "addon": "keyboard",
+      "title": "Keys list",
+      "core": [
+        "keys"
+      ],
+      "herdr": {
+        "mods": [
+          "keybinds"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Keys"
+        ]
+      },
+      "forms": {
+        "herdr": "Ctrl+Shift+? dialog",
+        "desktop": "? opens the web keys",
+        "tablet": "Same with a keyboard",
+        "phone": "Not shown (no keyboard)"
+      },
+      "planned": true
+    },
+    {
+      "id": "artifacts",
+      "addon": "artifacts",
+      "title": "Artifacts list and viewer",
+      "core": [
+        "artifacts",
+        "recipe"
+      ],
+      "herdr": {
+        "mods": [
+          "artifacts",
+          "chat-image"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Artifacts",
+          "ArtifactView",
+          "Recipe"
+        ]
+      },
+      "forms": {
+        "herdr": "Sidebar list; viewer over the pane; versions; Mark up",
+        "desktop": "Artifacts column; viewer over the chat",
+        "tablet": "Same",
+        "phone": "Artifacts tab; full-screen viewer"
+      },
+      "planned": true
+    },
+    {
+      "id": "markup",
+      "addon": "artifacts",
+      "title": "Mark up and answers",
+      "core": [
+        "artifacts"
+      ],
+      "herdr": {
+        "mods": [
+          "artifacts"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Markup"
+        ]
+      },
+      "forms": {
+        "herdr": "Point or drag, write a note; choices reply to the agent",
+        "desktop": "Click or drag over a block",
+        "tablet": "Tap a block",
+        "phone": "Tap a block, note in a sheet"
+      },
+      "planned": true
+    },
+    {
+      "id": "dictation",
+      "addon": "voice",
+      "title": "Dictation",
+      "core": [
+        "voice"
+      ],
+      "herdr": {
+        "mods": [
+          "chat"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Dictation"
+        ]
+      },
+      "forms": {
+        "herdr": "Mic, level wave, Cancel/Done (whisper.cpp)",
+        "desktop": "Mic; audio goes to the service's whisper.cpp",
+        "tablet": "Same",
+        "phone": "Same; big mic button"
+      },
+      "planned": true
+    },
+    {
+      "id": "call",
+      "addon": "voice",
+      "title": "Voice call",
+      "core": [
+        "voice"
+      ],
+      "herdr": {
+        "mods": [
+          "chat-call",
+          "chat"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Call"
+        ]
+      },
+      "forms": {
+        "herdr": "Call an Assistant (ElevenLabs), mute, call bar",
+        "desktop": "Same, through the service",
+        "tablet": "Same",
+        "phone": "Full-width call bar"
+      },
+      "planned": true
+    },
+    {
+      "id": "reactions",
+      "addon": "reactions",
+      "title": "Reactions",
+      "core": [
+        "chat"
+      ],
+      "herdr": {
+        "mods": [
+          "chat-react"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Reactions"
+        ]
+      },
+      "forms": {
+        "herdr": "Pills under messages; picker with search and recents",
+        "desktop": "Popover picker",
+        "tablet": "Popover",
+        "phone": "Sheet with recents on top"
+      },
+      "planned": true
+    },
+    {
+      "id": "browser",
+      "addon": "browser",
+      "title": "Live browser",
+      "core": [
+        "browser"
+      ],
+      "herdr": {
+        "mods": [
+          "task-browser"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Browser"
+        ]
+      },
+      "forms": {
+        "herdr": "In the task's terminal viewer (Kitty), take over with mouse and keys",
+        "desktop": "Live stream in the page; click, scroll, type",
+        "tablet": "Same with touch",
+        "phone": "Full-screen stream, pinch zoom, keyboard button"
+      },
+      "planned": true
+    },
+    {
+      "id": "autopilot",
+      "addon": "autopilot",
+      "title": "Autopilot",
+      "core": [
+        "autopilot"
+      ],
+      "herdr": {
+        "mods": [
+          "pane-chat",
+          "shepherdr-settings"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Autopilot"
+        ]
+      },
+      "forms": {
+        "herdr": "Switch in the Assistant header; Settings › Autopilot",
+        "desktop": "Same switch and page",
+        "tablet": "Same",
+        "phone": "Switch in the chat's menu; settings page"
+      },
+      "planned": true
+    },
+    {
+      "id": "machines",
+      "addon": "machines",
+      "title": "Machines",
+      "core": [
+        "machines"
+      ],
+      "herdr": {
+        "mods": [
+          "machine-add-chat",
+          "spaces-chat"
+        ]
+      },
+      "web": {
+        "screens": [
+          "Machines"
+        ]
+      },
+      "forms": {
+        "herdr": "Health meter, plan limits, home Assistant, Add machine, tools kept in step",
+        "desktop": "Machine headers in the sidebar; Add machine dialog (terminal for passwords)",
+        "tablet": "Same",
+        "phone": "Machine rows in the drawer; sheets"
+      },
+      "planned": true
+    },
+    {
+      "id": "web",
+      "addon": "web",
+      "title": "Web on/off, link, QR",
+      "core": [
+        "settings"
+      ],
+      "herdr": {
+        "mods": [
+          "shepherdr-settings"
+        ]
+      },
+      "web": {
+        "screens": [
+          "WebSettings"
+        ]
+      },
+      "forms": {
+        "herdr": "Settings › Web: on/off, link, QR code",
+        "desktop": "Settings › Web (this device)",
+        "tablet": "Same",
+        "phone": "Same; how to add it to the home screen"
+      },
+      "planned": true
+    }
   ]
 }

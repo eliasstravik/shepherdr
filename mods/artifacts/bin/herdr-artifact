@@ -34,6 +34,11 @@ APP = os.environ.get("HERDR_APP_HOME") or os.path.join(HOME, ".config", "herdr-a
 GUIDE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "ARTIFACTS.md")
 # Mark up (the person points at a spot and writes to the agent), laid over every installed artifact.
 MARKUP = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "markup.js")
+# A recipe artifact (recipe.json, Shepherdr 3.1) is drawn by the shared recipe view: copied into its installed mod.
+RECIPE_VIEW = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "recipe-view.js")
+RECIPE_CORE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "core", "recipe.js")
+RECIPE_TYPES = {"heading", "text", "list", "table", "chart", "stats", "image", "pair", "code", "callout", "columns", "tabs",
+                "details", "divider", "choice", "form", "button"}
 NOTES = os.path.join(STORE, "notes")
 NARROW = 320
 KEEP = 20
@@ -188,8 +193,8 @@ def gather(src):
     src = os.path.realpath(os.path.expanduser(src))
     if os.path.isfile(src) and os.path.basename(src) == "main.js":
         src = os.path.dirname(src)
-    if not os.path.isfile(os.path.join(src, "main.js")):
-        raise Fail(f"{src} has no main.js. An artifact is a folder with a main.js (`herdr-artifact new <dir>` makes one).")
+    if not os.path.isfile(os.path.join(src, "main.js")) and not os.path.isfile(os.path.join(src, "recipe.json")):
+        raise Fail(f"{src} has no recipe.json (or main.js). An artifact is a folder with a recipe.json (`herdr-artifact new <dir>` makes one).")
     out, size = [], 0
     for root, dirs, names in os.walk(src):
         dirs[:] = [d for d in dirs if not d.startswith(".") and d != "node_modules"]
@@ -204,6 +209,61 @@ def gather(src):
     if len(out) > MAX_FILES or size > MAX_BYTES:
         raise Fail(f"Too big: {len(out)} files, {size // 1024} KB (at most {MAX_FILES} files, {MAX_BYTES // 1048576} MB).")
     return src, sorted(out)
+
+
+def is_recipe(files):
+    return "recipe.json" in files and "main.js" not in files
+
+
+def recipe_problems(src, files):
+    """What's wrong with a recipe.json, in words (core/recipe.js's problems(), its main rules)."""
+    try:
+        with open(os.path.join(src, "recipe.json")) as f:
+            r = json.load(f)
+    except (OSError, ValueError) as e:
+        return [f"recipe.json isn't valid JSON: {e}"]
+    if not isinstance(r, dict) or r.get("recipe") != 1:
+        return ['recipe.json needs "recipe": 1.']
+    out = []
+
+    def walk(blocks, at):
+        if not isinstance(blocks, list):
+            out.append(f"{at or 'blocks'}: must be a list of blocks.")
+            return
+        for i, b in enumerate(blocks):
+            where = f"{at}{i + 1}"
+            if not isinstance(b, dict) or b.get("type") not in RECIPE_TYPES:
+                out.append(f"block {where}: type must be one of {', '.join(sorted(RECIPE_TYPES))}.")
+                continue
+            for x in ([b.get("src")] if b["type"] == "image" else [(b.get("before") or {}).get("src"), (b.get("after") or {}).get("src")] if b["type"] == "pair" else []):
+                if not isinstance(x, str) or x not in files:
+                    out.append(f"block {where} ({b['type']}): {x!r} isn't a file beside recipe.json.")
+            if b["type"] == "columns":
+                for j, c in enumerate(b.get("columns") or []):
+                    walk(c, f"{where}.{j + 1}.")
+            elif b["type"] == "tabs":
+                for j, t in enumerate(b.get("tabs") or []):
+                    walk((t or {}).get("blocks"), f"{where}.{j + 1}.")
+            elif b["type"] == "details":
+                walk(b.get("blocks"), f"{where}.")
+    if not r.get("blocks"):
+        return ['"blocks" must be a list with at least one block.']
+    walk(r["blocks"], "")
+    return out
+
+
+def recipe_parts(dst):
+    """The shared recipe view in an installed (or checked) recipe artifact: main.js draws recipe.json natively."""
+    shutil.copy2(RECIPE_VIEW, os.path.join(dst, "recipe-view.js"))
+    shutil.copy2(RECIPE_CORE, os.path.join(dst, "recipe.js"))
+    # the recipe as a module the view imports at once (a check then draws every block, not an empty panel)
+    with open(os.path.join(dst, "recipe.json")) as f:
+        data = f.read()
+    with open(os.path.join(dst, "recipe-data.js"), "w") as f:
+        f.write(f"// Written by herdr-artifact from recipe.json.\nexport default {data.strip()};\n")
+    with open(os.path.join(dst, "main.js"), "w") as f:
+        f.write('// Written by herdr-artifact: this artifact is a recipe (recipe.json), drawn by the shared recipe view.\n'
+                'export { default } from "./recipe-view.js";\n')
 
 
 def copy_files(src, files, dst):
@@ -277,6 +337,8 @@ def write_mod(src, files, art, mod, agent, machine=None):
         return None
     tmp = os.path.join(mods, f".{mod}.new-{secrets.token_hex(3)}")
     copy_files(src, files, tmp)
+    if is_recipe(files):
+        recipe_parts(tmp)
     wrap_markup(tmp)
     meta = {}
     try:
@@ -340,6 +402,10 @@ def stage_theme(stage, light):
 def check(src, files, art):
     """herdr-app check on a staged copy (with its artifact.js), in light and in dark.
     Returns (error text or None, [warnings])."""
+    if is_recipe(files):
+        bad = recipe_problems(src, files)
+        if bad:
+            return "\n".join(bad[:20]), []
     if not shutil.which("herdr-app"):
         return None, []
     specs = {}
@@ -347,6 +413,8 @@ def check(src, files, art):
         for look in ("dark", "light"):
             stage = os.path.join(d, look, f"art-{art['id']}")
             copy_files(src, files, stage)
+            if is_recipe(files):
+                recipe_parts(stage)
             with open(os.path.join(stage, "artifact.js"), "w") as f:
                 f.write(helper(art, f"art-{art['id']}", None))
             if look == "light":

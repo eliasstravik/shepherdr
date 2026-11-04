@@ -84,7 +84,7 @@ class Repo(unittest.TestCase):
                         continue
                     src = open(os.path.join(d, f), encoding="utf-8").read()
                     for a, b in imp.findall(src):
-                        if (m, f) == ("artifacts", "markup.js") and (a or b) in ("./artifact.js", "./artifact-main.js"):
+                        if (m, f) in (("artifacts", "markup.js"), ("artifacts", "recipe-view.js")) and (a or b) in ("./artifact.js", "./artifact-main.js", "./recipe.js", "./recipe-data.js"):
                             continue  # copied into each installed artifact, where herdr-artifact writes these
                         target = os.path.normpath(os.path.join(d, a or b))
                         self.assertTrue(target.startswith(top + os.sep), f"{os.path.relpath(os.path.join(d, f), ROOT)}: {a or b} leaves the mod")
