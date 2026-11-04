@@ -16,7 +16,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Header title | main.js:169 "Artifacts", semibold | A:652 | ✓ |
 | Folder name | main.js:170 the store's name from `herdr-artifact where` (repo main folder, "~" at home) | A:653 `place.store.name` (service/compat.ts `artifactStore`, same rule as `locate()`) | ✓ (from the space's folder; the window starts from its focused pane's cwd, which is the same folder unless a terminal `cd`'d elsewhere) |
 | With All: "All folders" | main.js:170 | A:653 | ✓ |
-| All toggle | main.js:171 a toggle "All" | A:654 pressed button "All" | ✓ (kept on this device; the window's resets with the panel) |
+| All toggle | main.js:171 a toggle "All" | A:654 pressed button "All" | ✓ (on by default on both sides, like Tasks; kept on this device; the window's resets to on with the panel) |
 | Which artifacts | main.js:104-107 the store's list, or `list --all` | A:644 `a.folder === store.folder`, or all | ✓ |
 | Other machines' artifacts | main.js:104 reads the store on the space's machine (`herdr-artifact --on`, `readTextFile(…, { on })`) | service/artifacts.ts `readThere()` reads every registry there through herdr-core's `machine.exec` (as mods/jump and mods/chat do), each marked with its machine; the list matches by `store` ("machine\|folder"); recipe and pictures come from there (`&on=`), a note goes through `herdr-artifact --on` | ✓ |
 | Filter box | main.js:44,198-218 "Filter artifacts", magnifier, F while empty and unfocused, X "Clear" | A:660 FilterBox: same placeholder, F hint hidden on focus, Clear | ✓ |

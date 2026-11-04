@@ -133,6 +133,16 @@ class Repo(unittest.TestCase):
         for words in ("Loading files…", "Asking GitHub…", "No checks on it.", "Select a file to see its changes."):
             self.assertNotIn(words, web, f"web/plugins/worktree has its own copy of {words!r}")
 
+    def test_artifacts_open_on_all(self):
+        """The Artifacts panel opens on All (every folder), like Tasks, in the window and the web; a saved web choice
+        lives under a new key, so one saved under the old default ('shepherdr.artifactsAll') starts over on All."""
+        win = open(J("mods", "artifacts", "main.js"), encoding="utf-8").read()
+        self.assertIn("this.all = true;", win)
+        self.assertNotIn("this.all = false;", win)
+        web = open(J("web", "plugins", "artifacts", "client.tsx"), encoding="utf-8").read()
+        self.assertIn("const ALL = 'shepherdr.artifactsAllFolders'", web)
+        self.assertIn("localStorage.getItem(ALL) !== '0'", web)
+
     def test_parity_has_no_open_rows(self):
         """docs/parity/: every element of every surface matches the window (✓) or is a web-only form with its reason
         (◇); a row still marked ✗ fails, and every surface in docs/parity.md has its page."""
