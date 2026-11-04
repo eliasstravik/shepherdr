@@ -1,82 +1,60 @@
-# Settings › Autopilot (Everywhere and each space)
+# Settings › Autopilot
 
-A redesign of both sides, asked for by the person: Autopilot is set Everywhere (every space on this computer), and a
-space follows Everywhere until it sets its own, as the other Settings pages do. Made from the window's mod
-(`mods/shepherdr-settings/autopilot-section.js`) and herdr-task's data (`mods/tasks/bin/herdr_task/autopilot.py`).
-✓ matches, ◇ a web-only form on purpose (why), ✗ still differs.
+The person's decision (DECISIONS.md): Autopilot works like Tasks, one setting the same across every space. Settings ›
+Autopilot sets only how it works, on Everywhere's page: the heartbeat, the schedule and the events. There is no on/off
+switch, no Run now, no list of spaces, no space's own page and no "Same as everywhere" there. A space is switched on or
+off only by the switch in its Assistant's header, and then works from the one heartbeat, schedule and events. Made
+from the window's mod (`mods/shepherdr-settings/autopilot-section.js`) and herdr-task's data
+(`mods/tasks/bin/herdr_task/autopilot.py`). ✓ matches, ◇ a web-only form on purpose (why), ✗ still differs.
 
-Shared, so the two can't drift: `core/autopilot.js` holds the page's words (title, about lines, each row's label and
-line for Everywhere and for a space, Run now, the facts, the spaces list, the Custom box's example), the schedule's
-picks, the events, herdr-task's starter heartbeat, Everywhere's defaults and the inherit rule (`pilotFor`); the window's
+Shared, so the two can't drift: `core/autopilot.js` holds the page's words (title, about line, each row's label and
+line, the Custom box's example, Saved), the schedule's picks, the events, herdr-task's starter heartbeat, the default
+schedule, the rule for what applies in a space (`pilotFor`) and the header's detail words (`headerDetail`). The window's
 section and header (`mods/pane-chat/autopilot.js`), the service (`service/compat.ts`, `service/model.ts`,
 `service/autopilot.ts`) and the web (`web/src/Settings.tsx`, `web/plugins/coordinators/client.tsx`) read it.
-`core/autopilot.cases.json` holds the inherit rule's cases: `core/autopilot.test.js` checks `pilotFor` on them and
-`test/test_herdr_task.py` herdr-task's `resolve()`; the bun test also checks the starter, events and default schedule
-are herdr-task's, and `test/test_repo.py` (test_autopilot_from_one_core) that the window and the service read the core
-and keep no copy of its words.
+`core/settings.js` SECTIONS has Autopilot without the space flag, so neither side's Space settings lists it.
+`core/autopilot.cases.json` holds the rule's cases: `core/autopilot.test.js` checks `pilotFor` on them (and that
+SECTIONS keeps Autopilot out of Space settings, and that the starter, events and default schedule are herdr-task's),
+`test/test_herdr_task.py` checks herdr-task's `resolve()` and commands, and `test/test_repo.py`
+(test_autopilot_from_one_core) that the window and the service read the core and keep no copy of its words.
 
 ## The data (herdr-task)
 
-`~/.herdr/tasks/.autopilot.json` is version 2: `everywhere` ({on, every, events}) and `spaces`, where a key a space
-holds (on, every, events) is its own and a missing one follows Everywhere's. The heartbeat is
-`~/.config/herdr-core/autopilot/everywhere.md`, and a space's own `<space id>.md` once it has words (not blank, not the
-starter). Version 1 files move on their own: a space that was on keeps all three as its own; one that was off keeps
-only a schedule or events it changed, so it follows Everywhere. `sync()` acts on what changed in what applies to a
-space (on: a fresh next wake and events from now; off: nothing waits; a new schedule: a new next wake), whether the
-change was Everywhere's or its own. While Everywhere is on, the scheduler gives each space on this computer a record
-(it looks at the window's list about once a minute), so every space that follows it is woken.
+`~/.herdr/tasks/.autopilot.json`: `everywhere` ({every, events}, the one schedule and events) and `spaces`, where a
+space keeps only its own `on` and how its wakes go (next_run, pending, inflight, last_wake, progress). The heartbeat is
+one file, `~/.config/herdr-core/autopilot/everywhere.md`. A schedule or events a space held of its own before (version
+1), and a switch on Everywhere, are dropped on the next read; a space's old `<space id>.md` is no longer read.
 
 | Command | What it does |
 |---|---|
-| `herdr-task autopilot show --space <id>` / `--everywhere` | what applies, `own` (which of on, every, events, heartbeat the space sets itself), next and last wake, progress |
-| `herdr-task autopilot list [--json]` | `{everywhere, spaces}`; the text says each space's name (never `~`) and `[its own: …; the rest from Everywhere]` |
-| `on`, `off`, `set --every … --on …` with `--space` or `--everywhere` | a space's value equal to Everywhere's is unset (it follows again), as Settings' rows do |
-| `reset --space <id> [--only on,every,events,heartbeat]` | back to Everywhere's; its own heartbeat is kept as `<id>.md.old` |
-| `heartbeat --space <id> [--own]` / `--everywhere` | the file that applies; `--own` makes the space's own from Everywhere's words |
-| `complete` | turns Autopilot off in that space as its own value (Everywhere's stays on; Reset follows it again) |
+| `herdr-task autopilot on` / `off` `--space <id>` | a space's switch (the header's); `--everywhere` refuses: "Autopilot is switched on per space, with the switch in its Assistant's header: pass --space." |
+| `herdr-task autopilot set --everywhere --every … --on …` | the one schedule and events; without `--everywhere` it refuses: "The schedule and events are the same in every space: set them with --everywhere." |
+| `herdr-task autopilot heartbeat` | the one heartbeat file (made with the starter when missing) |
+| `herdr-task autopilot show --space <id>` / `--everywhere`, `list [--json]` | a space's switch, the one schedule and events, next and last wake, progress; `list` is `{everywhere, spaces}`, its text first `Every space: Every hour, from ~/.config/herdr-core/autopilot/everywhere.md`, then each space by name (never `~`) |
+| `run-now --space <id>`, `progress`, `complete` | as before, per space |
 
-## Everywhere's page
-
-| Element | Window (file:line, exact words/control) | Web (file:line) | State |
-|---|---|---|---|
-| Title | `Autopilot` (`autopilot-section.js:130`, `AP.TITLE`) | the page's name `Autopilot` (`service/compat.ts:377`) | ✓ |
-| About | `For every space on this computer, unless one sets its own. Its Assistant wakes on a schedule or when something happens to its tasks, and works from the heartbeat.` (`:131`, `AP.EVERYWHERE_ABOUT`) | `about: AP.EVERYWHERE_ABOUT` (`compat.ts:377`) | ✓ |
-| Loading | `Loading…` until herdr-task answers (`:80`) | the snapshot always holds Everywhere's (defaults until read) | ◇ the service reads herdr-task before the page exists |
-| Autopilot switch | `Autopilot` · `On in every space that doesn't set its own.` · switch (`:132`) | `autopilot.on` row, on/off → Switch (`compat.ts:51`, `Settings.tsx` Control) | ✓ |
-| Heartbeat | `Heartbeat` · `What it works from: direction, priorities, limits and when to stop.` · `Edit` opens Everywhere's file in the instructions editor (`:133`, `:165`) | `autopilot.heartbeat` doc row: the same line, the file's words in an editor as wide as the page, its path on top, Save / Undo (`compat.ts:52`, `Settings.tsx` DocValue) | ◇ the web edits the file in place (it has no separate editor window) |
-| Schedule | `Schedule` · `When it wakes by itself.` · segmented `Off`, `Every 30 min`, `Every hour`, `Weekdays 9:00`, `Custom…` (`:134`, `AP.PRESETS`, `AP.CUSTOM`) | trigger row: its words and next wake, the same picks as segments (a pick list on a phone, more than 4) (`compat.ts:54`, `Settings.tsx` TriggerValue) | ✓ |
-| Custom box | placeholder `Every 2 hours on weekdays`, line `Like "every 2 hours on weekdays from 8:00 to 18:00". Saved when you leave the box.`, refusal in red in its place (`:120`) | `TextValue placeholder={AP.CUSTOM_PLACEHOLDER}`, `AP.CUSTOM_HINT`; a refusal under the row (`Settings.tsx` TriggerValue, `under()`) | ✓ |
-| Events | `Events` · `These wake a space's Assistant at once when they happen to its tasks.` · chips `Added`, `Ready`, `Failed`, `Needs you`, `Merged`, `Stalled` (`:136`, `AP.EVENTS`) | `multi` chips, segments on a phone (`compat.ts:56`, `Settings.tsx` Control) | ✓ |
-| Under each row | `1 space uses its own` / `N spaces use their own`, opening the list of them, each opening its settings (`main.js` scopeLine, `sc()` `:86`, `AP.ownIn`) | `others` (`compat.ts:47`, `Settings.tsx` under()) | ✓ |
-| Spaces heading | `Spaces`, then `Each space on this computer. Open one to give it its own.` (`:154`) | `group: AP.SPACES`, `groupHint: AP.SPACES_HINT` (`compat.ts:380`, `Settings.tsx` groupHint) | ✓ |
-| No spaces | `No spaces on this computer yet.` (`:155`) | one row with `AP.NO_SPACES` (`compat.ts:381`) | ✓ |
-| A space's row | its name as the sidebar calls it (core/spaces.js `spaceName`: `Home`, `tt-repo`, never `~`), under it `On · Every hour · Next Today 10:00` or `Off` (`AP.summary`), at right `Same as everywhere` or `Its own: Schedule, Events` (`AP.ownWords`), chevron; the row opens that space's settings (`:156`) | `open` row: the place's name (spaceName), the summary under it, the own words at right (after the summary on a phone), chevron; it opens the space's level (`compat.ts:379`, `Settings.tsx` row.open) | ✓ |
-| Refusal | herdr-task's words in red under the rows (`:138`) | under the row that was set (`Settings.tsx` refused) | ✓ |
-| Kept fresh | read again every 4 s while shown (`:49`) | the service reads herdr-task when the task folder changes and after each change | ◇ the web is pushed changes instead of polling |
-| Add-on off | no Autopilot page (Settings › Window) | no Autopilot sections (`compat.ts` pilotOn) | ✓ |
-
-## A space's page
+## The page
 
 | Element | Window (file:line, exact words/control) | Web (file:line) | State |
 |---|---|---|---|
-| Opens from | a space's row on Everywhere's page, `N spaces use their own`, its sidebar menu's Space settings, the header's `Write a heartbeat` (`main.js` pickScope) | the same rows (level = the space), `others` links, the header's link (`web/plugins/coordinators/client.tsx` openAutopilot) | ✓ |
-| Banner | `Only for tt-repo on This computer` + `Everywhere` (`main.js` banner; scopeName now uses spaceName, never `~`) | `Only for {place.name} on {machine}` + `Everywhere` (`Settings.tsx` spacePlace) | ✓ |
-| About | `Its Assistant wakes on a schedule or when something happens to its tasks, and works from the heartbeat.` (`:131`, `AP.ABOUT`) | `about: AP.ABOUT` (`compat.ts:383`) | ✓ |
-| Autopilot switch | `Autopilot` · `On for this space's Assistant.` · switch (`:132`) | `autopilot.on` row (`compat.ts:51`) | ✓ |
-| Heartbeat, following Everywhere | `Same as everywhere` · `Set its own` makes its own from Everywhere's words and opens it (`:127`, `:165`) | Everywhere's words in the editor, `Same as everywhere`; saving other words makes its own (`service/autopilot.ts` heartbeat `--own`) | ◇ the web edits in place: saving is Set its own |
-| Heartbeat, its own | `Changed here · Reset` · `Edit` (`:126`) | `Changed here · Reset` (`inherits`), its file's path on top; saving Everywhere's words, or Reset, follows Everywhere again | ✓ |
-| Schedule, Events, switch: scope line | `Same as everywhere` or `Changed here · Reset` (`sc()` `:86`, `reset --only <field>`) | `from: "everywhere"` / `inherits` (`compat.ts:47`), Reset → `reset --only` (`service/autopilot.ts:30`) | ✓ |
-| Setting Everywhere's value here | unsets its own (herdr-task `set_own`) | the same (`follows()` and herdr-task) | ✓ |
-| Run now | `Run now` · `Wakes it now, or as soon as it's idle.` / `Turn Autopilot on first.` · button, off: disabled (`:140`) | `autopilot.run` button row with the same line, `disabled` while off (`compat.ts:60`, `Settings.tsx` row.button) | ✓ |
-| Next wake | `Off.` / `Waiting: <note>.` / `Today 10:00 · Schedule` / `On events only.` / `Only on Run now.` (`AP.facts`) | fixed row from `AP.facts` (`compat.ts:61`) | ✓ |
-| Last wake | `Today 9:00 · Event: ready · Turn ended, progress saved` / `Never.` (`AP.facts`) | the same | ✓ |
-| Progress | `<text> (Today 9:00)` / `None. The Assistant saves it after each wake.` (`AP.facts`) | the same | ✓ |
-| Another machine's space | no Autopilot page there (`main.js` shows: `space: "local"`) | no section for it (`model.ts` pilot null) | ✓ |
+| Where | Settings › Autopilot, Everywhere's pages only; not in Space settings (`core/settings.js` SECTIONS) | the same list (`Settings.tsx` SPACE_PAGES from `ST.SECTIONS`) | ✓ |
+| Title | `Autopilot` (`autopilot-section.js`, `AP.TITLE`) | the page's name (`service/compat.ts` pilot section) | ✓ |
+| About | `How Autopilot works in every space. Turn it on in a space with the switch in its Assistant's header: its Assistant then wakes on a schedule or when something happens to its tasks, and works from the heartbeat.` (`AP.ABOUT`) | `about: AP.ABOUT` | ✓ |
+| Loading | `Loading…` until herdr-task answers | the snapshot always holds it (defaults until read) | ◇ the service reads herdr-task before the page exists |
+| Heartbeat row | `Heartbeat` · `What it works from: direction, priorities, limits and when to stop.` (`AP.ROWS.heartbeat`) | the same (`pilotRows`, hint) | ✓ |
+| Heartbeat box | its file small in monospace on top (`~/.config/herdr-core/autopilot/everywhere.md`), `Saved` a moment after a save; a monospace plain-text box, 4 lines, growing to 12; saved 600 ms after typing stops, on leaving it, and on closing Settings (`beatBox`, `saveBeat`, `autopilotFlush`) | `NoteBox mono`: the file small in monospace on top, a monospace box 4 lines tall growing to 10, saved 500 ms after typing stops and on leaving it, `Saved` beside the title a moment (`Settings.tsx` NoteBox) | ✓ |
+| Missing file | made with herdr-task's starter, shown in the box | the starter's words shown; the file is made on the first save (`service/autopilot.ts`) | ✓ |
+| Schedule | `Schedule` · `When it wakes by itself.` · segmented `Off`, `Every 30 min`, `Every hour`, `Weekdays 9:00`, `Custom…` (`AP.PRESETS`, `AP.CUSTOM`) | trigger row: its words, the same picks as segments (a pick list on a phone) (`Settings.tsx` TriggerValue) | ✓ |
+| Custom box | placeholder `Every 2 hours on weekdays`, `Like "every 2 hours on weekdays from 8:00 to 18:00". Saved when you leave the box.`, a refusal in red in its place | `TextValue placeholder={AP.CUSTOM_PLACEHOLDER}`, `AP.CUSTOM_HINT`; a refusal under the row | ✓ |
+| Events | `Events` · `These wake a space's Assistant at once when they happen to its tasks.` · chips `Added`, `Ready`, `Failed`, `Needs you`, `Merged`, `Stalled` (`AP.EVENTS`) | `multi` chips, segments on a phone | ✓ |
+| Refusal | herdr-task's words in red under the rows | under the row that was set | ✓ |
+| No switch, no Run now, no spaces | none on the page | none (`compat.ts` one section, level `all`) | ✓ |
+| Add-on off | no Autopilot page (Settings › Window) | no Autopilot section (`compat.ts` pilotOn) | ✓ |
 
-## The header's switch (what applies)
+## The header's switch
 
 | Element | Window | Web | State |
 |---|---|---|---|
-| On or off | what applies in the space: its own, else Everywhere's (`mods/pane-chat/autopilot.js` apPoll, `pilotFor`) | `place.pilot` from `model.ts` pilotOf (herdr-task's view, else `pilotFor`) | ✓ |
-| Detail | `Waking`, `Queued`, `Next 10:00`, `Next Wed`, `On events`, `Run now only` (`headerDetail`) | `AP.headerDetail` (`web/plugins/coordinators/client.tsx`) | ✓ |
-| Flipping it | sets the space's own (equal to Everywhere's: follows again) | the same herdr-task call (`service/actions.ts` mode) | ✓ |
+| On or off | the space's own switch (`mods/pane-chat/autopilot.js` apPoll, `pilotFor`) | `place.pilot` from `model.ts` pilotOf | ✓ |
+| Detail | `Waking`, `Queued`, `Next 10:00`, `Next Wed`, `On events`, `Run now only` (`headerDetail`, from the one schedule and events) | `AP.headerDetail` (`web/plugins/coordinators/client.tsx`) | ✓ |
+| `Write a heartbeat` | while on and the one heartbeat is still the starter; opens Settings › Autopilot (Everywhere's) | the same; opens Everywhere's Autopilot page | ✓ |

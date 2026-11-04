@@ -5,7 +5,8 @@
 // them runs here.
 //
 // The switch: "Autopilot", and when on its next wake dim after it. No menu: the heartbeat, the
-// schedule and Run now live in Shepherdr settings › Autopilot. It always turns on when clicked;
+// schedule and the events, one setting for every space, live in Shepherdr settings › Autopilot
+// (core/autopilot.js pilotFor: this space's switch, Everywhere's rest). It always turns on when clicked;
 // while its heartbeat is still empty a "Write a heartbeat" link after it opens that page. The
 // control is the same width in every state, so nothing in the header moves when it flips.
 
@@ -121,7 +122,8 @@ async function blankHeartbeat(file) {
   return Boolean(starter) && text.trim() === starter.trim();
 }
 
-const openAutopilot = (space) => openSettings({ space, section: "autopilot" });
+// Settings › Autopilot: one setting for every space (Everywhere's page).
+const openAutopilot = (_space) => openSettings({ section: "autopilot" });
 
 // "Write a heartbeat": after the switch while it's on and its heartbeat is still empty.
 export function apHeartbeatLink(view, space, pane) {

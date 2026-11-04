@@ -10,7 +10,8 @@ import { NAMES, levelName, current, rowFor, menuFor } from "./agents.js";
 export const SECTIONS = [
   { id: "agents", title: "Agents", icon: "bot", space: true },
   { id: "tasks", title: "Tasks", icon: "list-checks", space: true },
-  { id: "autopilot", title: "Autopilot", icon: "plane", space: "local" },
+  // one setting for every space (core/autopilot.js): a space only switches it on, in its Assistant's header
+  { id: "autopilot", title: "Autopilot", icon: "plane" },
   { id: "notify", title: "Notify", icon: "bell", space: true },
   { id: "secrets", title: "Secrets", icon: "key", space: true },
   { id: "machines", title: "Machines", icon: "network" },
@@ -53,7 +54,7 @@ export const INSTRUCTIONS = {
     coordinator: "Every Assistant uses this. Repo-specific rules go in the repo's AGENTS.md or CLAUDE.md. Changes apply when an Assistant restarts.",
     worker: "Every worker gets this first. Repo-specific rules go in the repo's AGENTS.md or CLAUDE.md. Changes apply to the next task that starts.",
     reviewer: "Every reviewer gets this first. Repo-specific rules go in the repo's AGENTS.md or CLAUDE.md. Changes apply to the next review.",
-    heartbeat: "This space's Autopilot heartbeat, plain text: its Assistant gets it on every wake. Changes apply from the next wake.",
+    heartbeat: "Autopilot's heartbeat, plain text, the same in every space: an Assistant on Autopilot gets it on every wake. Changes apply from the next wake.",
   },
 };
 export const USE_OTHER_CLI = "Use other CLI";

@@ -736,35 +736,22 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
           {name === 'Access and limits' ? <summary className={clsx(heading(phone), 'cursor-pointer')}>Access and limits</summary> : null}
           {name && name !== 'Access and limits' ? <h3 className={machine ? clsx('pb-2.5 font-semibold', phone && 'px-4') : heading(phone)}>{name}</h3> : null}
           {machine ? <div className={clsx('pb-3', phone ? clsx(card, 'mb-2 px-4 py-3') : 'border-b border-line')}><MachineDetails m={snapMachine(machine)} /></div> : null}
-          {rows[0]?.groupHint ? <p className={clsx('text-pretty text-fg3', phone ? 'px-4 pb-1.5 text-[0.9375rem]' : 'pb-1 text-[0.8125rem]')}>{rows[0].groupHint}</p> : null}
           <dl className={phone ? card : undefined}>
             {rows.map((row) =>
-              row.open ? (
-                // a row that opens another level's page (Autopilot's spaces, each its own settings), as the window's
-                <div key={`open:${row.open}`} className={clsx(rowLook(phone), 'p-0!')}>
-                  <button type="button" onClick={() => setUI((u) => ({ settings: { ...(u.settings ?? { section: 0 }), level: row.open! } }))}
-                    className={clsx('press flex w-full min-w-0 items-center gap-3 text-left', phone ? 'min-h-12 px-4 py-2.5' : 'py-2.5')}>
-                    <span className="flex min-w-0 flex-1 flex-col">
-                      <span className="truncate">{row.label}</span>
-                      <Small className="truncate tabular-nums">{phone && row.hint ? `${row.value} · ${row.hint}` : row.value}</Small>
-                    </span>
-                    {row.hint && !phone ? <Small className="shrink-0">{row.hint}</Small> : null}
-                    <NextIcon className={clsx(ic, 'shrink-0 text-fg3')} />
-                  </button>
-                </div>
-              ) : row.multiline && row.key.startsWith('tasks.') ? (
-                // Tasks' notes, as the window's: the title and its line, then a box as wide as the page, saved as you type
+              (row.multiline && row.key.startsWith('tasks.')) || row.doc ? (
+                // Tasks' notes and Autopilot's heartbeat, as the window's: the title and its line, then a box as wide as
+                // the page (the heartbeat's monospace, its file small on top), saved as you type
                 <div key={row.key} className={clsx(rowLook(phone), 'flex-col items-stretch! gap-2.5 pb-3!')}>
-                  <NoteBox row={row} under={under(row)} save={(x) => set(row.key, follows(row, x))} />
+                  <NoteBox row={row} under={under(row)} mono={!!row.doc} save={(x) => set(row.key, follows(row, x))} />
                 </div>
-              ) : row.doc || row.multiline ? (
+              ) : row.multiline ? (
                 <div key={row.key} className={clsx(rowLook(phone), 'flex-col items-stretch! gap-2.5 pb-3!', row.inherits && 'border-l-2 border-accent pl-3')}>
                   <dt className="flex min-w-0 flex-col">
                     {row.label}
                     {under(row)}
                   </dt>
                   <dd>
-                    <DocValue label={row.label} file={row.multiline ? (row.key.endsWith('_notes') ? 'Every task here' : 'Private · this role only') : (row.file ?? 'HEARTBEAT.md')} privateRules={row.multiline} empty={row.key.endsWith('_notes') ? 'Empty: nothing extra' : undefined} phone={phone} value={row.value} onSave={(x) => set(row.key, follows(row, x))} />
+                    <DocValue label={row.label} file={row.key.endsWith('_notes') ? 'Every task here' : 'Private · this role only'} privateRules={row.multiline} empty={row.key.endsWith('_notes') ? 'Empty: nothing extra' : undefined} phone={phone} value={row.value} onSave={(x) => set(row.key, follows(row, x))} />
                     {row.instructions ? <p className="mt-3 whitespace-pre-wrap text-base leading-relaxed [overflow-wrap:anywhere]">{row.instructions}</p> : null}
                   </dd>
                 </div>
@@ -814,7 +801,7 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
 
 /** Tasks' note (When a task starts / finishes), as the window's: its title and line, then a box as wide as the page,
  *  its example dim while empty, saved a moment after typing stops and on leaving it; "Saved" beside its title a moment */
-function NoteBox({ row, under, save }: { row: SettingRow; under: ReactNode; save: (v: string) => void }) {
+function NoteBox({ row, under, save, mono = false }: { row: SettingRow; under: ReactNode; save: (v: string) => void; mono?: boolean }) {
   const [v, setV] = useState(row.value)
   const [saved, setSaved] = useState(false)
   const typing = useRef(false)
@@ -843,12 +830,15 @@ function NoteBox({ row, under, save }: { row: SettingRow; under: ReactNode; save
         </dt>
         {saved ? <Small className="shrink-0">{ST.SAVED}</Small> : null}
       </div>
-      <dd>
-        <TextBox label={row.label} value={v} placeholder={row.placeholder}
+      <dd className="flex flex-col gap-1.5">
+        {/* Autopilot's heartbeat: its file, small, over a monospace box (the window's) */}
+        {row.file ? <Small className="truncate font-mono">{row.file}</Small> : null}
+        <TextBox label={row.label} value={v} placeholder={row.placeholder} spellCheck={!mono}
           onFocus={() => (typing.current = true)}
           onBlur={() => { typing.current = false; flush() }}
           onChange={(x) => { setV(x); pending.current = x; clearTimeout(later.current); later.current = setTimeout(flush, 500) }}
-          className="max-h-[calc(10lh+1rem)] min-h-[calc(3lh+1rem)] w-full overflow-y-auto rounded-row bg-bg px-2.5 py-2 shadow-[inset_0_0_0_1px_var(--line2)] outline-none placeholder:text-fg3 focus:shadow-box-focus phone:text-[1rem]" />
+          className={clsx('max-h-[calc(10lh+1rem)] w-full overflow-y-auto rounded-row bg-bg px-2.5 py-2 shadow-[inset_0_0_0_1px_var(--line2)] outline-none placeholder:text-fg3 focus:shadow-box-focus',
+            mono ? 'min-h-[calc(4lh+1rem)] font-mono text-[0.8125rem]/5 phone:text-[0.875rem]/[1.375rem]' : 'min-h-[calc(3lh+1rem)] phone:text-[1rem]')} />
       </dd>
     </>
   )

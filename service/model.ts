@@ -115,12 +115,12 @@ export class Model {
   }
 
   private autopilot: Record<string, any> = {};
-  /** Everywhere's Autopilot on this machine (its switch, schedule, events, heartbeat file and words) */
+  /** Autopilot's one setting on this machine (Everywhere's schedule, events, heartbeat file and its words) */
   pilotEverywhere: any = { ...everywhereOf(null), words: STARTER };
   private reading: Promise<void> | null = null;
-  /** Everywhere's Autopilot and each space's on this machine, as herdr-task tells it (what applies and what the space
-   *  sets itself, when it wakes, next and last wake, progress), with the heartbeat's words (its own, else Everywhere's;
-   *  a file not made yet reads as herdr-task's starter, as the window's Edit opens it). One read at a time. */
+  /** Autopilot's one setting and each space's on this machine, as herdr-task tells it (its switch, next and last wake,
+   *  progress), with the heartbeat's words (a file not made yet reads as herdr-task's starter, as the window's box
+   *  opens it). One read at a time. */
   readAutopilot() {
     return this.reading ??= (async () => {
       try {
@@ -129,14 +129,16 @@ export class Model {
         const words = (file: string | null) => { try { return file && existsSync(file) ? readFileSync(file, "utf8") : STARTER; } catch { return STARTER; } };
         const e = out.everywhere ?? {};
         this.pilotEverywhere = { ...everywhereOf({ everywhere: e }), heartbeat: e.heartbeat ?? null, words: words(e.heartbeat ?? null) };
-        this.autopilot = Object.fromEntries((Array.isArray(out.spaces) ? out.spaces : []).map((a: any) => [a.space, { ...pilotFor({ spaces: [a] }, a.space), words: words(a.heartbeat) }]));
+        const list = Array.isArray(out.spaces) ? out.spaces : [];
+        this.autopilot = Object.fromEntries(list.map((a: any) => [a.space, pilotFor({ everywhere: e, spaces: list }, a.space)]));
       } catch {}
     })().finally(() => { this.reading = null; });
   }
 
-  /** What applies in a space on this machine: herdr-task's view, else Everywhere's (one it has no record of yet). */
+  /** What applies in a space on this machine: its switch (off until herdr-task has a record of it), the one schedule,
+   *  events and heartbeat. */
   pilotOf(id: string) {
-    return this.autopilot[id] ?? { ...pilotFor({ everywhere: this.pilotEverywhere }, id), words: this.pilotEverywhere.words, heartbeat: this.pilotEverywhere.heartbeat };
+    return { ...(this.autopilot[id] ?? pilotFor({ everywhere: this.pilotEverywhere }, id)), words: this.pilotEverywhere.words, heartbeat: this.pilotEverywhere.heartbeat };
   }
 
   private readShared() {

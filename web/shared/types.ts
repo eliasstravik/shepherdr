@@ -928,11 +928,8 @@ export interface SettingRow {
   hidden?: string
   /** a row that is one button (its words): pressing it sets the row's key back (null), as the window's Reset rows */
   button?: string
-  /** its button can't be pressed now (Autopilot's Run now while it is off) */
+  /** its control can't be used now */
   disabled?: boolean
-  /** a row that opens another level's page, as the window's rows that open a space's own settings (Autopilot's
-   *  spaces): that level's id */
-  open?: string
   /** a "Set its own" row: it opens the rows hidden under this name */
   reveals?: string
   /** a file edited in a sheet (an instructions template): its name */
@@ -944,8 +941,6 @@ export interface SettingRow {
   num?: { min: number; max: number; step?: number; unit?: string; one?: string; off?: boolean; zero?: boolean }
   /** the small heading it sits under (Tasks, Coordinators) */
   group?: string
-  /** a line under that heading (the first row of its group says it) */
-  groupHint?: string
   /** not set at this level: where its value comes from (All machines, a machine's name) */
   from?: string
   /** set at this level: the value a reset goes back to, and where that comes from (Default at All machines) */

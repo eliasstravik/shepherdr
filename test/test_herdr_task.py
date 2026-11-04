@@ -60,17 +60,14 @@ class Autopilot(unittest.TestCase):
             raise AssertionError("ran a program")
         for name, value in (("STORE", store), ("STATE", os.path.join(store, ".autopilot.json")),
                             ("HEARTBEATS", os.path.join(self.tmp, "beats")), ("run", never), ("hc_json", never),
-                            ("folder_of", lambda f: f),
-                            ("local_spaces", lambda: [{"id": "sp1", "name": "~", "folder": self.folder}]),
                             ("space_info", lambda s: ("~", self.folder) if s == "sp1" else (None, None))):
             p = mock.patch.object(ap, name, value)
             p.start()
             self.addCleanup(p.stop)
-        ap._listed[0] = 0
 
     def cmd(self, sub, **kw):
         import argparse
-        args = argparse.Namespace(autopilot=sub, json=True, space=None, everywhere=False, every=None, on=None, only=None, own=False)
+        args = argparse.Namespace(autopilot=sub, json=True, space=None, everywhere=False, every=None, on=None)
         for k, v in kw.items():
             setattr(args, k, v)
         out = self.io.StringIO()
@@ -83,108 +80,84 @@ class Autopilot(unittest.TestCase):
         with open(os.path.join(ROOT, "core", "autopilot.cases.json")) as f:
             cases = json.load(f)["cases"]
         for c in cases:
-            eff, own = self.ap.resolve(c["file"], c["file"]["spaces"].get(c["space"]))
-            got = {"on": eff["on"], "every": (eff["every"] or {}).get("text"), "events": eff["events"], "own": own}
+            eff = self.ap.resolve(c["file"], c["file"]["spaces"].get(c["space"]))
+            got = {"on": eff["on"], "every": (eff["every"] or {}).get("text"), "events": eff["events"]}
             self.assertEqual(got, c["expect"], c["name"])
 
-    def test_version_1_keeps_what_was_on(self):
+    def test_a_spaces_old_settings_go(self):
+        """Version 1's per-space schedule and events (and a switch on Everywhere) go on the next
+        read; a space keeps its on/off and how its wakes went."""
         os.makedirs(self.ap.STORE)
-        hourly, weekdays = self.ap.parse_every("every 60 minutes"), self.ap.parse_every("weekdays 9:00")
         with open(self.ap.STATE, "w") as f:
-            json.dump({"version": 1, "spaces": {
+            json.dump({"version": 1, "everywhere": {"on": True}, "spaces": {
                 "on1": {"on": True, "every": self.ap.parse_every("every 30 minutes"), "events": ["ready"], "next_run": 5},
-                "off1": {"on": False, "every": hourly, "events": []},
-                "off2": {"on": False, "every": weekdays, "events": []}}}, f)
-        with self.ap.state() as d:
+                "off1": {"on": False, "every": self.ap.parse_every("weekdays 9:00"), "events": []}}}, f)
+        with self.ap.state():
             pass
         with open(self.ap.STATE) as f:
             d = json.load(f)
         self.assertEqual(d["version"], 2)
-        self.assertEqual(d["everywhere"]["on"], False)
-        self.assertEqual(set(d["spaces"]["on1"]) >= {"on", "every", "events"}, True)
-        self.assertFalse({"on", "every", "events"} & set(d["spaces"]["off1"]))
-        self.assertEqual([k for k in ("on", "every", "events") if k in d["spaces"]["off2"]], ["every"])
-        out = self.cmd("list")
-        on1 = next(v for v in out["spaces"] if v["space"] == "on1")
-        self.assertEqual((on1["on"], on1["every"], on1["events"], on1["next_run"]), (True, "every 30 minutes", ["ready"], 5))
+        self.assertNotIn("on", d["everywhere"])
+        self.assertEqual(d["spaces"]["on1"]["on"], True)
+        for a in d["spaces"].values():
+            self.assertFalse({"every", "events"} & set(a))
+        on1 = next(v for v in self.cmd("list")["spaces"] if v["space"] == "on1")
+        self.assertEqual((on1["on"], on1["every"], on1["events"]), (True, "every 60 minutes", []))
 
-    def test_everywhere_and_a_spaces_own(self):
+    def test_one_setting_for_every_space(self):
         e = self.cmd("set", everywhere=True, every="every 30 minutes", on="ready")
-        self.assertEqual((e["everywhere"], e["every"], e["events"], e["on"]), (True, "every 30 minutes", ["ready"], False))
-        self.cmd("on", everywhere=True)
+        self.assertEqual((e["everywhere"], e["every"], e["events"]), (True, "every 30 minutes", ["ready"]))
         v = self.cmd("show", space="sp1")
-        self.assertEqual((v["on"], v["every"], v["events"]), (True, "every 30 minutes", ["ready"]))
-        self.assertEqual(v["own"], {"on": False, "every": False, "events": False, "heartbeat": False})
-        self.assertTrue(v["next_run"], "on from Everywhere: its next wake is set")
-        self.assertEqual(v["heartbeat"], self.ap.heartbeat_path(None))
-        # its own schedule; set back to Everywhere's, it follows again
-        v = self.cmd("set", space="sp1", every="weekdays 9:00")
-        self.assertEqual((v["every"], v["own"]["every"]), ("weekdays 9:00", True))
-        v = self.cmd("set", space="sp1", every="every 30 minutes")
-        self.assertFalse(v["own"]["every"])
-        # off here while on everywhere; on again follows Everywhere
-        v = self.cmd("off", space="sp1")
-        self.assertEqual((v["on"], v["own"]["on"], v["next_run"]), (False, True, None))
+        self.assertEqual((v["on"], v["every"], v["events"]), (False, "every 30 minutes", ["ready"]))
+        # switched on in its header: Everywhere's schedule, a next wake
         v = self.cmd("on", space="sp1")
-        self.assertEqual((v["on"], v["own"]["on"]), (True, False))
+        self.assertEqual((v["on"], v["every"], v["heartbeat"]), (True, "every 30 minutes", self.ap.heartbeat_path()))
+        self.assertTrue(v["next_run"])
+        self.assertTrue(os.path.exists(self.ap.heartbeat_path()))
         # Everywhere's schedule changes reach it
-        v0 = self.cmd("show", space="sp1")["next_run"]
+        v0 = v["next_run"]
         self.cmd("set", everywhere=True, every="weekdays 9:00")
         v = self.cmd("show", space="sp1")
         self.assertEqual(v["every"], "weekdays 9:00")
         self.assertNotEqual(v["next_run"], v0)
-        # Everywhere off: off here too
-        self.cmd("off", everywhere=True)
-        v = self.cmd("show", space="sp1")
+        # a space can't set its own; Everywhere can't switch spaces on or off
+        with self.assertRaises(self.ap.Fail) as no:
+            self.cmd("set", space="sp1", every="every 30 minutes")
+        self.assertIn("--everywhere", str(no.exception))
+        for sub in ("on", "off", "run-now"):
+            with self.assertRaises(self.ap.Fail):
+                self.cmd(sub, everywhere=True)
+        v = self.cmd("off", space="sp1")
         self.assertEqual((v["on"], v["next_run"]), (False, None))
-        listed = self.cmd("list")
-        self.assertEqual(listed["everywhere"]["on"], False)
-        self.assertEqual([x["space"] for x in listed["spaces"]], ["sp1"])
+        self.assertEqual([x["space"] for x in self.cmd("list")["spaces"]], ["sp1"])
 
-    def test_heartbeat_and_reset(self):
-        self.cmd("on", everywhere=True)
-        with open(self.ap.heartbeat_path(None), "w") as f:
+    def test_one_heartbeat(self):
+        path = self.cmd("heartbeat")["heartbeat"]
+        self.assertEqual(path, self.ap.heartbeat_path())
+        with open(path) as f:
+            self.assertEqual(f.read(), self.ap.STARTER)
+        with open(path, "w") as f:
             f.write("Ship the docs.\n")
-        self.assertEqual(self.cmd("heartbeat", space="sp1")["heartbeat"], self.ap.heartbeat_path(None))
-        mine = self.cmd("heartbeat", space="sp1", own=True)["heartbeat"]
-        self.assertEqual(mine, self.ap.heartbeat_path("sp1"))
-        with open(mine) as f:
-            self.assertEqual(f.read(), "Ship the docs.\n")
-        with open(mine, "w") as f:
-            f.write("Only the API docs.\n")
-        self.cmd("set", space="sp1", on="failed")
-        v = self.cmd("show", space="sp1")
-        self.assertEqual(v["own"], {"on": False, "every": False, "events": True, "heartbeat": True})
-        self.assertIn("Only the API docs.", self.ap.message("sp1", {}, ["run now"]))
-        v = self.cmd("reset", space="sp1", only="heartbeat")
-        self.assertFalse(v["own"]["heartbeat"])
-        self.assertTrue(os.path.exists(mine + ".old"))
         self.assertIn("Ship the docs.", self.ap.message("sp1", {}, ["run now"]))
-        v = self.cmd("reset", space="sp1")
-        self.assertEqual(v["own"], {"on": False, "every": False, "events": False, "heartbeat": False})
-        with self.assertRaises(self.ap.Fail):
-            self.cmd("run-now", everywhere=True)
 
-    def test_complete_turns_off_only_here(self):
+    def test_complete_turns_it_off(self):
         import argparse
-        self.cmd("on", everywhere=True)
+        self.cmd("on", space="sp1")
         out = self.io.StringIO()
         with self.redirect(out):
             self.ap.cmd_complete(argparse.Namespace(space="sp1", evidence="All docs merged.", json=True))
         v = json.loads(out.getvalue())
-        self.assertEqual((v["on"], v["own"]["on"]), (False, True))
-        self.assertTrue(self.cmd("list")["everywhere"]["on"])
+        self.assertEqual((v["on"], v["completed"]["text"]), (False, "All docs merged."))
 
     def test_list_names_a_space_as_the_screens_do(self):
-        self.cmd("on", everywhere=True)
+        self.cmd("on", space="sp1")
         args = __import__("argparse").Namespace(autopilot="list", json=False)
         out = self.io.StringIO()
         with self.redirect(out):
             self.ap.cmd_autopilot(args)
         lines = out.getvalue().splitlines()
-        self.assertTrue(lines[0].startswith("Everywhere: Autopilot on"), lines)
+        self.assertTrue(lines[0].startswith("Every space: Every hour"), lines)
         self.assertTrue(lines[1].startswith("tt-repo: Autopilot on"), lines)
-        self.assertIn("[all from Everywhere]", lines[1])
 
 
 if __name__ == "__main__":

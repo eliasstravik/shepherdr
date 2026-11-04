@@ -40,32 +40,22 @@ export type Space = any;
 const SECTION: Record<string, TaskStatus> = { needs: "need", working: "work", merging: "merging", ready: "ready", queued: "queued", todo: "todo", done: "done" };
 const AGENT: Record<string, Status> = { blocked: "need", working: "work", done: "idle", idle: "idle" };
 
-// Autopilot's words, picks and inherit rule: core/autopilot.js, the window's Settings › Autopilot's too
+// Autopilot's words and picks: core/autopilot.js, the window's Settings › Autopilot's too
 const AP = APc as any;
 const tilde = (p: string | null) => (p && p.startsWith(HOME + "/") ? `~${p.slice(HOME.length)}` : p ?? undefined);
 
-/** Settings › Autopilot's rows, as the window's (mods/shepherdr-settings/autopilot-section.js), for Everywhere (e: null)
- *  or a space (a: what applies there, e: Everywhere's): its switch, heartbeat, schedule (picks or its own words) and
- *  events. Under each, on Everywhere the spaces that set their own (others), in a space "Same as everywhere" or
- *  "Changed here · Reset" (back to Everywhere's value). A space's page then has Run now and how its wakes go. */
-function pilotRows(a: any, e: any | null, others: (field: string) => { id: string; name: string }[]) {
-  const at = e ? "space" : "all", on = !!a.on, R = AP.ROWS;
-  const scope = (field: string, everywhere: string) => !e ? (others(field).length ? { others: others(field) } : {})
-    : a.own?.[field] ? { inherits: { value: everywhere, from: "everywhere" } } : { from: "everywhere" };
-  const events = (list: string[]) => AP.eventsIn(list).join(",");
-  const rows: any[] = [
-    { label: R.on.label, key: "autopilot.on", value: on ? "on" : "off", options: ["on", "off"], hint: R.on[at], ...scope("on", e?.on ? "on" : "off") },
-    { label: R.heartbeat.label, key: "autopilot.heartbeat", value: a.words ?? "", doc: true, hint: R.heartbeat[at], file: tilde(a.heartbeat),
-      ...scope("heartbeat", e?.words ?? "") },
-    { label: R.every.label, key: "autopilot.every", value: a.every ?? "", text: true, hint: R.every[at], ...scope("every", e?.every ?? ""),
-      trigger: { words: a.trigger ?? "Only Run now", next: on && a.next_run ? [AP.when(a.next_run)] : [], presets: AP.PRESETS.map(([value, label]: string[]) => ({ label, value })) } },
-    { label: R.events.label, key: "autopilot.events", value: events(a.events), multi: AP.EVENTS.map(([value, label]: string[]) => ({ value, label })),
-      hint: R.events[at], ...scope("events", events(e?.events ?? [])) },
+/** Settings › Autopilot's rows, as the window's (mods/shepherdr-settings/autopilot-section.js): one setting for every
+ *  space, as Tasks is: the heartbeat (its file's words), the schedule (picks or its own words) and the events. A space
+ *  only switches it on, in its Assistant's header. e: Everywhere's, from herdr-task (model.ts pilotEverywhere). */
+function pilotRows(e: any) {
+  const R = AP.ROWS;
+  return [
+    { label: R.heartbeat.label, key: "autopilot.heartbeat", value: e.words ?? "", doc: true, hint: R.heartbeat.about, file: tilde(e.heartbeat ?? null) },
+    { label: R.every.label, key: "autopilot.every", value: e.every ?? "", text: true, hint: R.every.about,
+      trigger: { words: e.trigger ?? "Only Run now", next: [], presets: AP.PRESETS.map(([value, label]: string[]) => ({ label, value })) } },
+    { label: R.events.label, key: "autopilot.events", value: AP.eventsIn(e.events).join(","), multi: AP.EVENTS.map(([value, label]: string[]) => ({ value, label })),
+      hint: R.events.about },
   ];
-  if (e) rows.push(
-    { label: R.run.label, key: "autopilot.run", value: "", button: R.run.label, disabled: !on, hint: on ? R.run.on : R.run.off },
-    ...AP.facts(a).map(([label, value]: string[]) => ({ label, key: "", fixed: true, value })));
-  return rows;
 }
 
 /** What an Assistant's header shows of its Autopilot (3.0's switch): on, the next wake, queued or waking, its events,
@@ -390,25 +380,11 @@ export class Compat {
       }),
     ];
 
-    // Autopilot (3.0's Settings › Autopilot, herdr-task keeps it all): Everywhere's switch, heartbeat, schedule and
-    // events for every space on this machine, then the spaces by name, each opening its own page; a space's page has
-    // the same rows ("Same as everywhere" / "Changed here · Reset"), Run now and how its wakes go.
-    // the Autopilot add-on off: no page, no switch (Settings › Window)
+    // Autopilot (3.0's Settings › Autopilot, herdr-task keeps it): one setting for every space, Everywhere's page only;
+    // a space switches it on in its Assistant's header. The Autopilot add-on off: no page, no switch (Settings › Window)
     const pilotOn = !(input.off ?? []).includes("autopilot");
-    const local = pilotOn ? spaces.filter((s) => s.pilot) : [];
-    const pilotName = (s: Space) => places.find((p) => p.id === s.id)?.name ?? s.name;
     const ev = input.pilot ?? { ...AP.everywhereOf(null), words: AP.STARTER };
-    const ownIn = (field: string) => local.filter((s) => s.pilot.own?.[field]).map((s) => ({ id: s.id, name: pilotName(s) }));
-    const pilots: SettingSection[] = [
-      { name: "Autopilot", level: "all", about: AP.EVERYWHERE_ABOUT, rows: [
-        ...pilotRows(ev, null, ownIn),
-        ...(local.length ? local.map((s, i) => ({ label: pilotName(s), key: "", value: AP.summary(s.pilot), hint: AP.ownWords(s.pilot), open: s.id,
-          group: AP.SPACES, ...(i ? {} : { groupHint: AP.SPACES_HINT }) }))
-          : [{ label: AP.NO_SPACES, key: "", value: "", fixed: true, group: AP.SPACES }]),
-      ] } as SettingSection,
-      ...local.map((s) => ({ name: "Autopilot", level: s.id, about: AP.ABOUT, rows: pilotRows(s.pilot, ev, () => []) }) as SettingSection),
-    ];
-    if (pilotOn) notify.push(...pilots);
+    if (pilotOn) notify.push({ name: "Autopilot", level: "all", about: AP.ABOUT, rows: pilotRows(ev) } as SettingSection);
 
     this.chats = chats;
     this.last = {

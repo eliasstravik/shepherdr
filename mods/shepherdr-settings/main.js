@@ -21,7 +21,7 @@ import { layoutSection } from "./layout.js";
 import { manifest } from "./addons.js";
 import { secretsInit, secretsSection } from "./secrets-section.js";
 import { baseInit, baseRow } from "./base-branch.js";
-import { autopilotInit, autopilotSection } from "./autopilot-section.js";
+import { autopilotInit, autopilotSection, autopilotFlush } from "./autopilot-section.js";
 import { spaceName } from "./core/spaces.js";
 import { NOTIFY, NOTIFY_DEFAULT, notifyMachine, notifyMachineOwn, notifyOf, notifyOwn, notifyEverywhere,
   setNotifyEverywhere, setNotifyMachine, setNotify } from "./notify.js";
@@ -79,7 +79,7 @@ export default class ShepherdrSettings extends View {
     this.secFor();
     // Tasks > Base branch, a space's (base-branch.js).
     this.bb = baseInit(this);
-    // Autopilot: per space, kept by herdr-task (autopilot-section.js).
+    // Autopilot: one setting for every space, kept by herdr-task (autopilot-section.js).
     this.ap = autopilotInit(this, cx);
     // The add-ons Window's switches offer (lib/addons.json, layout.js).
     this.addons = null;
@@ -361,7 +361,7 @@ export default class ShepherdrSettings extends View {
   // Escape, a click beside the window, and Herdr's own close: a note typed a moment ago is
   // still saved.
   close() {
-    const saving = this.flushNotes();
+    const saving = Promise.all([this.flushNotes(), autopilotFlush(this)]);
     this.sec?.value.set_value("");
     closeOverlay(props().overlay);
     return saving;

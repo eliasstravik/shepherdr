@@ -21,9 +21,8 @@ def ensure_scheduler(quiet=False):
     herdr-automations, outside Herdr's spaces."""
     need = any((d := read_list(p) or {}).get("automations") or any(t.get("state") in ("queued", "running", "ready") for t in d.get("tasks") or [])
                for p in store_files())
-    # A space on Autopilot (STORE/.autopilot.json: Everywhere's, or a space's own) is woken by it too.
-    ap = read_list(os.path.join(STORE, ".autopilot.json")) or {}
-    need = need or bool((ap.get("everywhere") or {}).get("on")) or any((v or {}).get("on") for v in (ap.get("spaces") or {}).values())
+    # A space on Autopilot (STORE/.autopilot.json) is woken by it too.
+    need = need or any((v or {}).get("on") for v in ((read_list(os.path.join(STORE, ".autopilot.json")) or {}).get("spaces") or {}).values())
     # Where the window lives it also saves the backups (backup_pass), so it always runs there.
     need = need or os.path.isdir(os.path.join(APP_HOME, "mods"))
     k = hc_json("get", SCHEDULER)

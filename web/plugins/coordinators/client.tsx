@@ -30,11 +30,11 @@ const MN = MNc as any, AP = APc as any
 /** something the Herdr window does went wrong: said as the window's toasts say it */
 const failed = (title: string) => (e: Error) => toast({ title, body: e.message, level: 'error' })
 
-/** Settings › Autopilot for a space ("Write a heartbeat") */
-function openAutopilot(place: Place) {
+/** Settings › Autopilot ("Write a heartbeat"): one setting for every space, so Everywhere's page */
+function openAutopilot(_place: Place) {
   const s = getState()
-  const i = s.snap ? sectionOf('Autopilot', s.snap.settings, { ...s.ui, settings: { section: 0, level: place.id } }) : -1
-  setUI({ settings: { section: Math.max(0, i), level: place.id }, drawer: false, menu: false })
+  const i = s.snap ? sectionOf('Autopilot', s.snap.settings, { ...s.ui, settings: { section: 0, level: 'all' } }) : -1
+  setUI({ settings: { section: Math.max(0, i), level: 'all' }, drawer: false, menu: false })
 }
 
 /** The header's Autopilot switch (3.0's): flips at once, herdr-task's answer says the rest (a refusal goes back, with a
