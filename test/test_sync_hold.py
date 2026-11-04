@@ -37,6 +37,9 @@ class Calls:
 
     def __call__(self, args, *a, **k):
         self.calls.append(list(args))
+        # herdr-task's look for its source there (cli.remote_run): the other machine holds none
+        if list(args[-3:-1]) == ["test", "-d"]:
+            return types.SimpleNamespace(returncode=1, stdout="", stderr="")
         return types.SimpleNamespace(returncode=self.code, stdout="", stderr="")
 
     def writes(self):
