@@ -18,8 +18,9 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { theme, props, setShared, closeOverlay } from "herdr";
+import { KINDS } from "./core/kinds.js";
 
-const AGENTS = ["claude", "codex"];
+const AGENTS = Object.keys(KINDS);
 const LEVEL = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra", none: "None" };
 const LONG = { xhigh: "Extra high" };
 // Sizes, as the chat counts them for the overlay's height (mods/chat openPicker).
@@ -64,8 +65,9 @@ export default class ModelMenu extends View {
     if (m.agent !== was.agent) {
       // Another agent: its own permission modes; full access stays full access.
       const full = was.perm === "bypassPermissions" || was.perm === "full";
-      next.perm = full ? (m.agent === "claude" ? "bypassPermissions" : "full") : this.p.permDefault?.[m.agent] ?? null;
-      next.fast = Boolean(this.p.menus?.[m.agent]?.fastLocked);
+      const fullId = m.agent === "claude" ? "bypassPermissions" : "full";
+      next.perm = full && this.p.menus?.[m.agent]?.perms?.some((x) => x.id === fullId) ? fullId : this.p.permDefault?.[m.agent] ?? null;
+      next.fast = Boolean(this.p.menus?.[m.agent]?.fastLocked && m.fast);
     }
     this.sel = next;
   }

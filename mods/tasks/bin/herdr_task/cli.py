@@ -135,7 +135,7 @@ def main():
         c.add_argument("--finish-notes", help="this task's own \"When a task finishes\" notes, replacing the folder's (\"\": the folder's)")
 
     def task_opts(c):
-        c.add_argument("--agent", help="the CLI its agent runs (claude, codex, ...; default: Settings' Workers)")
+        c.add_argument("--agent", help="the CLI its agent runs (claude, codex, pi, pii, grok, hermes, amp, cursor; default: Settings' Workers)")
         c.add_argument("--model", help="its agent's model, an id or alias (default: Settings'; \"default\": the CLI's own)")
         c.add_argument("--effort", help="its agent's effort: low, medium, high, xhigh, max... (default: Settings')")
         c.add_argument("--reviewer", help="the CLI its agent's review uses (default: Settings' Reviewer, else the other CLI)")
@@ -148,7 +148,7 @@ def main():
                                       "setting, else the folder's current branch)")
 
     def agent_opts(c):
-        c.add_argument("--agent", help="agent key (claude, codex, ...)")
+        c.add_argument("--agent", help="agent key (claude, codex, pi, pii, grok, hermes, amp, cursor, or a program on PATH)")
         c.add_argument("--argv", help="how to start it, as a JSON list (default from --agent)")
 
     cmd("where", cmd_where, "the task folder and store for a folder", id=False)

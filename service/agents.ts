@@ -9,7 +9,7 @@ import { sh } from "./model.ts";
 import * as AG from "../core/agents.js";
 import { kindOf } from "../core/chat-reader.js";
 
-const { DEFAULTS, parseDefaults, current, menuFor, rowFor, argvFor, sessionOf, NAMES, line } = AG as any;
+const { DEFAULTS, defaultsArgs, parseDefaults, current, menuFor, rowFor, argvFor, sessionOf, NAMES, line, AGENTS, installedOf, permDefault } = AG as any;
 const APP = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
 
 async function run(cmd: string[]) {
@@ -22,8 +22,15 @@ export class Agents {
   constructor(private hub: Hub) {}
 
   private async defaults(kind: string, machine: string | null) {
-    const r = await sh(this.hub, DEFAULTS, ["defaults", kind], machine).catch(() => null);
+    const r = await sh(this.hub, DEFAULTS, defaultsArgs(kind), machine).catch(() => null);
     return parseDefaults(kind, r?.stdout ?? "");
+  }
+
+  /** Every kind's own settings on a machine (lib/kinds.json's kinds: Claude Code's and Codex's settings; for the others
+   *  whether the command is there), by kind. */
+  private async allDefaults(machine: string | null): Promise<Record<string, any>> {
+    const each = await Promise.all((AGENTS as string[]).map((k) => this.defaults(k, machine)));
+    return Object.fromEntries((AGENTS as string[]).map((k, i) => [k, each[i]]));
   }
 
   /** A CLI's own settings on a machine as last read (the chat's model button reads them on every change, as the
@@ -45,29 +52,31 @@ export class Agents {
     if (!t) throw new Error("That agent isn't here any more.");
     const machine = addr.includes("/") ? addr.split("/")[0] : null;
     const kind = kindOf(t) ?? reader?.kind ?? "claude";
-    const [claude, codex, have] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine),
+    const [dflts, have] = await Promise.all([this.allDefaults(machine),
       sh(this.hub, 'for c in "$@"; do command -v "$c" >/dev/null 2>&1 && echo "$c"; done', ["agents", "claude", "codex"], machine).then((r: any) => new Set(String(r?.stdout ?? "").split("\n").filter(Boolean)), () => null)]);
-    const dflts: any = { claude, codex };
+    const { claude } = dflts;
+    // installed: Claude Code and Codex when found on PATH (have), the other kinds as their defaults say
+    const installed: Record<string, boolean> = installedOf(null, dflts);
+    if (have) for (const k of ["claude", "codex"]) installed[k] = have.has(k);
     let meta = reader?.conv?.meta ?? {};
     // a resumed conversation's log names the model it ran on before: until this process writes, its arguments say
     if (t.created_ms && meta.at && meta.at < t.created_ms) meta = { used: meta.used, window: meta.window };
     const c = current(kind, t.foreground?.argv ?? t.argv ?? [], meta, dflts[kind]);
     const row = rowFor(kind, c);
-    const menus = Object.fromEntries(["claude", "codex"].filter((k) => k === kind || !have || have.has(k)).map((k) => [k, menuFor(k, dflts[k], k === kind ? row : null)]));
+    const menus = Object.fromEntries((AGENTS as string[]).filter((k) => k === kind || installed[k]).map((k) => [k, menuFor(k, dflts[k], k === kind ? row : null)]));
     return { current: { agent: kind, model: row, effort: c.effort ?? null, fast: !!c.fast, perm: c.perm ?? null }, menus,
-      permDefault: { claude: claude?.mode ?? "manual", codex: "auto" }, remote: machine && !t.labels?.["herdr.task"] ? "This computer only" : null };
+      permDefault: Object.fromEntries((AGENTS as string[]).map((k) => [k, permDefault(k, dflts[k])])), remote: machine && !t.labels?.["herdr.task"] ? "This computer only" : null };
   }
 
   /** Each CLI's own settings here (Settings › Agents' model menu: core/settings.js choicesFrom). */
   async ownDefaults() {
-    const [claude, codex] = await Promise.all([this.defaults("claude", null), this.defaults("codex", null)]);
-    return { claude, codex };
+    return this.allDefaults(null);
   }
 
   /** What an unset role runs, in the window's words ("Opus 5.5 · 1M · High"): each CLI's own defaults here. */
   async defaultLines(): Promise<Record<string, string>> {
     const out: Record<string, string> = {};
-    for (const k of ["claude", "codex"]) {
+    for (const k of AGENTS as string[]) {
       const d: any = await this.defaults(k, null).catch(() => null);
       if (d) out[k] = line({ agent: k, model: d.model, effort: d.effort ?? d.per?.[String(d.model ?? "").replace(/\[1m\]$/, "")] ?? null, fast: d.fast }).split(" · ").slice(1).join(" · ");
     }
@@ -76,13 +85,14 @@ export class Agents {
 
   /** What each CLI offers on a machine (null: here), as the restart sheet lists them. */
   async choices(machine: string | null) {
-    const [claude, codex] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine)]);
-    const dflt: any = { claude, codex };
-    return ["claude", "codex"].map((k) => {
+    const dflt: any = await this.allDefaults(machine);
+    // Claude Code and Codex always (as before); the other kinds when their command is on that machine
+    const installed = { ...installedOf(null, dflt), claude: true, codex: true };
+    return (AGENTS as string[]).filter((k) => installed[k]).map((k) => {
       const m = menuFor(k, dflt[k], null);
       // its permission modes, and the one a new agent gets unless picked (the CLI's own: Claude Code's settings mode)
       return { kind: k, name: NAMES[k], models: m.models.map((x: any) => ({ id: x.id, label: x.name, efforts: x.efforts, ...(x.defaultEffort ? { defaultEffort: x.defaultEffort } : {}) })),
-        speeds: m.models.some((x: any) => x.fast) ? ["normal", "fast"] : ["normal"], perms: m.perms ?? [], permDefault: k === "claude" ? dflt.claude?.mode ?? "manual" : "auto" };
+        speeds: m.models.some((x: any) => x.fast) ? ["normal", "fast"] : ["normal"], perms: m.perms ?? [], permDefault: permDefault(k, dflt[k]) };
     });
   }
 
@@ -92,10 +102,11 @@ export class Agents {
     if (!t) throw new Error("That agent isn't here any more.");
     const machine = addr.includes("/") ? addr.split("/")[0] : null;
     const kind = kindOf(t) ?? "claude";
-    const [claude, codex] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine)]);
-    const dflt: any = { claude, codex };
+    const dflt: any = await this.allDefaults(machine);
+    // Claude Code and Codex always (as before), the one running, and the other kinds whose command is on that machine
+    const installed = { ...installedOf(null, dflt), claude: true, codex: true };
     const c = current(kind, t.foreground?.argv ?? t.argv ?? [], reader?.conv?.meta ?? {}, dflt[kind]);
-    const clis = ["claude", "codex"].map((k) => {
+    const clis = (AGENTS as string[]).filter((k) => k === kind || installed[k]).map((k) => {
       const m = menuFor(k, dflt[k], k === kind ? c.model : null);
       return { kind: k, name: NAMES[k], models: m.models.map((x: any) => ({ id: x.id, label: x.name, efforts: x.efforts, ...(x.defaultEffort ? { defaultEffort: x.defaultEffort } : {}) })),
         speeds: m.models.some((x: any) => x.fast) ? ["normal", "fast"] : ["normal"] };

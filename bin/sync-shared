@@ -60,9 +60,33 @@ def write(path, data):
     os.replace(tmp, path)
 
 
+# core/kinds.js is written from lib/kinds.json (the agent kinds, one table for Python, the mods, the service and the
+# web app); lib/COPIES then copies both as any other shared file.
+KINDS_JS = os.path.join(HOME, "core", "kinds.js")
+KINDS_HEAD = (b"// The agent kinds, as lib/kinds.json has them. Written by bin/sync-shared: edit lib/kinds.json, never this.\n"
+              b"// Shared core: core/agents.js reads it; bin/sync-shared copies it into the mods in lib/COPIES.\n"
+              b"export const KINDS = ")
+
+
+def kinds_js():
+    import json
+    src = read(os.path.join(LIB, "kinds.json"))
+    if src is None:
+        return None
+    table = {k: v for k, v in json.loads(src).items() if not k.startswith("_")}
+    return KINDS_HEAD + json.dumps(table, indent=2, ensure_ascii=False).encode() + b";\n"
+
+
 def main(argv):
     check = "--check" in argv
     table = copies()
+    want = kinds_js()
+    if want is not None and read(KINDS_JS) != want:
+        if check:
+            print("sync-shared: core/kinds.js is not what lib/kinds.json says: run bin/sync-shared", file=sys.stderr)
+            sys.exit(1)
+        write(KINDS_JS, want)
+        print("wrote core/kinds.js from lib/kinds.json")
     if "--from" in argv:
         src = os.path.realpath(argv[argv.index("--from") + 1])
         name = os.path.basename(src)

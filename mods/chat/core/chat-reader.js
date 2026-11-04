@@ -6,12 +6,16 @@
 
 import { FIND, LOG, Conversation, records, resultText } from "./chat-log.js";
 import { BgJobs } from "./bg-jobs.js";
+import { KINDS as TABLE } from "./kinds.js";
 
 export const PAGE = 200;
 export const KEEP = 2000;
-export const KINDS = { "claude-code": "claude", claude: "claude", codex: "codex" };
+// A terminal's app or foreground name -> the kind (lib/kinds.json): "claude-code" and "claude" -> claude, "codex",
+// each other kind by its key and its program ("cursor-agent" -> cursor).
+export const KINDS = { "claude-code": "claude", ...Object.fromEntries(Object.keys(TABLE).map((k) => [k, k])),
+  ...Object.fromEntries(Object.keys(TABLE).map((k) => [TABLE[k].run[0], k])) };
 
-// The CLI a terminal runs, as the chat knows them ("claude", "codex"), else null.
+// The CLI a terminal runs, as the chat knows them ("claude", "codex", "pi", ...), else null.
 export const kindOf = (t) => KINDS[t?.status?.app] ?? KINDS[t?.foreground?.name] ?? null;
 
 export class ChatReader {

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- More coding CLIs as task agents: pi and pii (with `--model provider/id`, e.g. ClawRouter's `clawrouter/claude-opus-5-5-200k`,
+  and `--thinking`), grok, hermes, amp and cursor-agent, beside Claude Code and Codex. One table, `lib/kinds.json`,
+  says how each is started, given a model and reasoning level, resumed and forked; herdr-task (`add --agent pi --model …
+  --effort high`, start, resume, switch, the reviewer's default), the model pickers (chat, New space, Settings) and the
+  web app's restart sheet read it. `bin/sync-shared` writes `core/kinds.js` from it. Pi's session is found in its
+  per-folder log directory.
+
 ## 3.1.1
 
 Fixes and small wishes on top of 3.1.0.

@@ -60,7 +60,7 @@ const PAGE = 200;
 const KEEP = 2000;
 // The conversation's width at most, in px: lines stay readable in a wide pane.
 const COLUMN = 760;
-const KINDS = { "claude-code": "claude", claude: "claude", codex: "codex" };
+const KINDS = { "claude-code": "claude", ...Object.fromEntries(agent.AGENTS.map((k) => [k, k])), ...Object.fromEntries(agent.AGENTS.map((k) => [agent.KINDS[k].run[0], k])) };
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 // The role templates' folder on the machine a command runs on (sh -c prefix: $dir).
 const TEMPLATE = 'dir="$HOME/.config/herdr-core/templates"; ';
@@ -2204,19 +2204,20 @@ export default class Chat extends View {
       try {
         const stale = !this.pickCache || Date.now() - this.pickCache.at > 60000 || this.pickCache.machine !== this.machine;
         if (stale) {
-          const [claude, codex, known] = await Promise.all([agent.defaults("claude", this.machine), agent.defaults("codex", this.machine),
-            knownAgents({ on: this.machine }).catch(() => [])]);
-          const prog = (key) => known.find((a) => a.key === key || (a.run ?? [])[0] === key);
-          this.pickCache = { at: Date.now(), machine: this.machine, dflts: { claude, codex },
-            icons: Object.fromEntries(["claude", "codex"].map((k) => [k, { icon: prog(k)?.icon ?? null, tint: Boolean(prog(k)?.tint) }])),
-            installed: Object.fromEntries(["claude", "codex"].map((k) => [k, prog(k) ? prog(k).installed !== false : true])) };
+          const [known, ...each] = await Promise.all([knownAgents({ on: this.machine }).catch(() => []),
+            ...agent.AGENTS.map((k) => agent.defaults(k, this.machine))]);
+          const dflts = Object.fromEntries(agent.AGENTS.map((k, i) => [k, each[i]]));
+          const prog = (key) => known.find((a) => a.key === key || (a.run ?? [])[0] === agent.KINDS[key].run[0]);
+          this.pickCache = { at: Date.now(), machine: this.machine, dflts,
+            icons: Object.fromEntries(agent.AGENTS.map((k) => [k, { icon: prog(k)?.icon ?? null, tint: Boolean(prog(k)?.tint) }])),
+            installed: agent.installedOf(known, dflts) };
         }
         const { dflts, icons, installed } = this.pickCache;
         if (this.kind) dflts[this.kind] = this.dflt ?? dflts[this.kind];
         const remote = this.machine && !this.t?.labels?.["herdr.task"] ? "This computer only" : null;
         const currentRow = agent.rowFor(c.agent, c);
         // Installed agents only (and always the one running).
-        const menus = Object.fromEntries(["claude", "codex"].filter((k) => k === c.agent || installed[k])
+        const menus = Object.fromEntries(agent.AGENTS.filter((k) => k === c.agent || installed[k])
           .map((k) => [k, agent.menuFor(k, dflts[k], k === c.agent ? currentRow : null)]));
         // As tall as the menu can get (chat-models' sizes): border and padding, Model header and
         // rows, separator, Reasoning header and levels, Fast, Permissions, Restart.
@@ -2226,7 +2227,7 @@ export default class Chat extends View {
           at: at ? { x: Math.max(8, at.x - W + 90), y: Math.max(8, at.y - H - 10) } : "pointer",
           props: { pane: this.pickKey(), remote, height: H, select: name ? findModel(menus, name) : null,
             current: { agent: c.agent, model: currentRow, effort: c.effort ?? null, fast: c.fast, perm: c.perm ?? null },
-            menus, icons, permDefault: { claude: dflts.claude?.mode ?? "manual", codex: "auto" } } });
+            menus, icons, permDefault: Object.fromEntries(agent.AGENTS.map((k) => [k, agent.permDefault(k, dflts[k])])) } });
       } finally {
         this.picking = false;
         cx.notify();
@@ -2591,7 +2592,7 @@ export default class Chat extends View {
 
   // Whose ask a card shows: the CLI's short name ("Claude asks").
   cli() {
-    return this.kind === "codex" ? "Codex" : "Claude";
+    return this.kind === "codex" ? "Codex" : this.kind === "claude" || !this.kind ? "Claude" : agent.NAMES[this.kind] ?? this.kind;
   }
 
   // The empty box's words: whom it writes to.

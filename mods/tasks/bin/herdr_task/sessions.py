@@ -7,6 +7,7 @@ import shutil
 
 from .base import HOME, run
 from .agents import agent_running, detail
+from . import kinds as K
 
 
 # ---- agent sessions -------------------------------------------------------------------------
@@ -20,9 +21,22 @@ def kids(pid):
     return out
 
 
-def session_of(pid):
+def session_of(pid, kind=None, cwd=None, since=None):
     """(session id, log path) of the agent process pid (or a child), as mods/chat/log.js finds it:
-    Claude Code names its session in ~/.claude/sessions/<pid>.json; Codex holds its rollout open."""
+    Claude Code names its session in ~/.claude/sessions/<pid>.json; Codex holds its rollout open.
+    Pi (kinds.json sessions.byCwd) writes one log per session in a folder named after its working
+    directory: the newest one written since the agent started (`since`, epoch seconds) is its."""
+    if kind and (K.kind(kind) or {}).get("sessions", {}) and (K.kind(kind)["sessions"] or {}).get("byCwd"):
+        d = K.session_dir(kind, cwd)
+        logs = []
+        for n in os.listdir(d) if d and os.path.isdir(d) else []:
+            f = os.path.join(d, n)
+            if K.session_id(kind, f) and (since is None or os.path.getmtime(f) >= since - 5):
+                logs.append(f)
+        if logs:
+            log = max(logs, key=os.path.getmtime)
+            return K.session_id(kind, log), log
+        return None, None
     for p in [str(pid)] + kids(pid):
         j = os.path.join(HOME, ".claude", "sessions", p + ".json")
         if os.path.isfile(j):
@@ -65,7 +79,8 @@ def refresh_sessions(s, task, live):
         a = next((a for a in task["agents"] if a["address"] == k["address"]), None)
         if not pid or not a or not agent_running(k):
             continue
-        sid, log = session_of(pid)
+        sid, log = session_of(pid, a.get("agent"), (k.get("foreground") or {}).get("cwd") or k.get("cwd"),
+                              a["at"] / 1000 if isinstance(a.get("at"), (int, float)) and a["at"] > 1e11 else a.get("at"))
         if sid and (a.get("session"), a.get("log")) != (sid, log):
             a["session"], a["log"] = sid, log
             s.dirty = True

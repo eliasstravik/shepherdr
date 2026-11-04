@@ -1,0 +1,127 @@
+{
+  "_": [
+    "The agent kinds (coding CLIs) Shepherdr starts, one table for herdr-task (Python) and the",
+    "mods, service and web app (bin/sync-shared writes core/kinds.js from this file; both are copied per lib/COPIES).",
+    "name: as the person reads it.  run: the argv that starts it (herdr-task adds the rest).",
+    "model: the flag that picks a model, or null when the CLI has none (amp: its mode is the model).",
+    "effort: the flag that sets reasoning and its levels; style: flag (--thinking high),",
+    "  config (codex: -c model_reasoning_effort=\"high\"), bracket (cursor-agent: model[effort=high]).",
+    "resume: how a saved session comes back: flag (--resume <id>), sub (codex resume <id>),",
+    "  thread (amp threads continue <id>).  fork: the flag that copies a session instead, if any:",
+    "  a string takes the id (pi --fork <id>); { \"flag\", \"style\": \"switch\" } goes with resume",
+    "  (claude, grok: --resume <id> --fork-session).",
+    "full: the flags that give it full access (no permission prompts), [] when it has none.",
+    "perms: the permission modes the picker offers (id, label); the two CLIs with rich modes",
+    "  (claude, codex) keep their own handling in core/agents.js and settings.py.",
+    "models: what the picker lists (id as the flag gets it, name); any other id can be typed.",
+    "defaultEffort: the level that applies when none is chosen, if known.",
+    "sessions: where the CLI writes its logs: dir, and (pi) that the folder is named after the cwd;",
+    "  id: the regex whose group 1 is the session id in a log's file name.",
+    "status: whether it can run herdr-task's own verbs without asking (claude: --settings allow",
+    "  rules, codex: a PermissionRequest hook); other CLIs start with full access instead when",
+    "  the role's perm says so, else ask the person."
+  ],
+  "claude": {
+    "name": "Claude Code", "run": ["claude"],
+    "model": "--model", "effort": { "flag": "--effort", "style": "flag", "levels": ["low", "medium", "high", "xhigh", "max"] },
+    "resume": { "style": "flag", "flag": "--resume" }, "fork": "--fork-session",
+    "full": ["--dangerously-skip-permissions"],
+    "perms": [{ "id": "manual", "label": "Ask" }, { "id": "auto", "label": "Auto" }, { "id": "acceptEdits", "label": "Accept edits" },
+      { "id": "plan", "label": "Plan" }, { "id": "bypassPermissions", "label": "Full access" }],
+    "models": [
+      { "id": "opus", "name": "Opus 5.5", "match": ["opus", "claude-opus-5-5"] },
+      { "id": "opus[1m]", "name": "Opus 5.5 · 1M", "match": ["opus[1m]", "claude-opus-5-5[1m]"] },
+      { "id": "claude-fable-5-1", "name": "Fable 5.1", "match": ["fable", "claude-fable-5-1"] },
+      { "id": "sonnet", "name": "Sonnet 5.5", "match": ["sonnet", "claude-sonnet-5-5"] },
+      { "id": "haiku", "name": "Haiku 5.5", "match": ["haiku", "claude-haiku-5-5"] }
+    ],
+    "sessions": { "dir": "~/.claude/projects", "id": "([0-9a-f-]{36})\\.jsonl$" },
+    "status": "settings"
+  },
+  "codex": {
+    "name": "Codex", "run": ["codex", "--no-daemon"],
+    "model": "-m", "effort": { "flag": "model_reasoning_effort", "style": "config", "levels": ["low", "medium", "high", "xhigh"] },
+    "resume": { "style": "sub", "sub": "resume" }, "fork": null,
+    "full": ["--dangerously-bypass-approvals-and-sandbox"],
+    "perms": [{ "id": "read-only", "label": "Read only" }, { "id": "auto", "label": "Auto" }, { "id": "full", "label": "Full access" }],
+    "models": [],
+    "sessions": { "dir": "~/.codex/sessions", "id": "rollout-.*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\\.jsonl$" },
+    "status": "hook"
+  },
+  "pi": {
+    "name": "Pi", "run": ["pi"],
+    "model": "--model", "effort": { "flag": "--thinking", "style": "flag", "levels": ["off", "minimal", "low", "medium", "high", "xhigh", "max"] },
+    "resume": { "style": "flag", "flag": "--session" }, "fork": "--fork",
+    "full": [],
+    "perms": [],
+    "models": [
+      { "id": "clawrouter/claude-opus-5-5-200k", "name": "Opus 5.5 · ClawRouter" },
+      { "id": "clawrouter/claude-fable-5-1", "name": "Fable 5.1 · ClawRouter" },
+      { "id": "clawrouter/claude-haiku-5-5-100k", "name": "Haiku 5.5 · ClawRouter" },
+      { "id": "clawrouter/gpt-6.1-sol", "name": "GPT-6.1 Sol · ClawRouter" },
+      { "id": "clawrouter/gpt-6-luna", "name": "GPT-6 Luna · ClawRouter" },
+      { "id": "clawrouter/xai/grok-4.6", "name": "Grok 4.6 · ClawRouter" }
+    ],
+    "defaultEffort": "medium",
+    "sessions": { "dir": "~/.pi/agent/sessions", "byCwd": true, "id": "_([0-9a-f-]{36})\\.jsonl$" },
+    "status": "none"
+  },
+  "pii": {
+    "name": "Pi (fork)", "run": ["pii"],
+    "model": "--model", "effort": { "flag": "--thinking", "style": "flag", "levels": ["off", "minimal", "low", "medium", "high", "xhigh", "max"] },
+    "resume": { "style": "flag", "flag": "--session" }, "fork": "--fork",
+    "full": [],
+    "perms": [],
+    "models": [
+      { "id": "clawrouter/claude-opus-5-5-200k", "name": "Opus 5.5 · ClawRouter" },
+      { "id": "clawrouter/claude-fable-5-1", "name": "Fable 5.1 · ClawRouter" },
+      { "id": "clawrouter/claude-haiku-5-5-100k", "name": "Haiku 5.5 · ClawRouter" },
+      { "id": "clawrouter/gpt-6.1-sol", "name": "GPT-6.1 Sol · ClawRouter" },
+      { "id": "clawrouter/gpt-6-luna", "name": "GPT-6 Luna · ClawRouter" },
+      { "id": "clawrouter/xai/grok-4.6", "name": "Grok 4.6 · ClawRouter" }
+    ],
+    "defaultEffort": "medium",
+    "sessions": { "dir": "~/.pi/pii/sessions", "byCwd": true, "id": "_([0-9a-f-]{36})\\.jsonl$" },
+    "status": "none"
+  },
+  "grok": {
+    "name": "Grok", "run": ["grok"],
+    "model": "--model", "effort": { "flag": "--reasoning-effort", "style": "flag", "levels": ["low", "medium", "high"] },
+    "resume": { "style": "flag", "flag": "--resume" }, "fork": { "flag": "--fork-session", "style": "switch" },
+    "full": ["--always-approve"],
+    "perms": [{ "id": "manual", "label": "Ask" }, { "id": "full", "label": "Full access" }],
+    "models": [],
+    "sessions": null,
+    "status": "none"
+  },
+  "hermes": {
+    "name": "Hermes", "run": ["hermes"],
+    "model": "-m", "effort": { "flag": "--reasoning", "style": "flag", "levels": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] },
+    "resume": { "style": "flag", "flag": "--resume" }, "fork": null,
+    "full": ["--yolo"],
+    "perms": [{ "id": "manual", "label": "Ask" }, { "id": "full", "label": "Full access" }],
+    "models": [],
+    "sessions": null,
+    "status": "none"
+  },
+  "amp": {
+    "name": "Amp", "run": ["amp"],
+    "model": null, "effort": { "flag": "--mode", "style": "flag", "levels": ["low", "medium", "high", "ultra"] },
+    "resume": { "style": "thread", "sub": ["threads", "continue"] }, "fork": null,
+    "full": [],
+    "perms": [],
+    "models": [],
+    "sessions": null,
+    "status": "none"
+  },
+  "cursor": {
+    "name": "Cursor", "run": ["cursor-agent"],
+    "model": "--model", "effort": { "flag": null, "style": "bracket", "levels": ["low", "medium", "high"] },
+    "resume": { "style": "flag", "flag": "--resume" }, "fork": null,
+    "full": [],
+    "perms": [{ "id": "manual", "label": "Ask" }, { "id": "plan", "label": "Plan" }],
+    "models": [],
+    "sessions": null,
+    "status": "none"
+  }
+}

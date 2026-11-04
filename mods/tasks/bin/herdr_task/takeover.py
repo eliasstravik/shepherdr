@@ -6,6 +6,7 @@ import re
 
 from .base import APP_HOME, git, hc_json, now, run, STORE
 from .settings import AGENTS, argv_for, settings_for
+from . import kinds as K
 from .agents import fit, from_person, log_tail, said
 from .provider import provider_cut, provider_error
 from .launch import brief, launch, parent_for
@@ -27,7 +28,7 @@ if command -v codex >/dev/null 2>&1; then echo "codex=$($limit codex login statu
 """
 # In the login shell agents start in, so its PATH has what mise, nvm or a profile put there.
 LOGIN = 'if command -v bash >/dev/null 2>&1; then exec bash -lc "$1"; else exec sh -lc "$1"; fi'
-NAMES = {"claude": "Claude Code", "codex": "Codex"}
+NAMES = {k: v["name"] for k, v in K.kinds().items()}
 
 
 def cli_state(word):
@@ -137,6 +138,10 @@ def backup_for(s, t, running):
     other = {"claude": "codex", "codex": "claude"}.get(running)
     if other and here_state(other) == "ready":
         return other, None
+    # Another kind: the backup is Claude Code or Codex, whichever is ready here.
+    for other in ("claude", "codex"):
+        if other != running and here_state(other) == "ready":
+            return other, None
     return None, "no backup"
 
 

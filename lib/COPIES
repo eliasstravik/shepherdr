@@ -33,6 +33,7 @@ core/keys.js: keybinds
 core/machines.js: spaces-chat shepherdr-settings
 core/slash.js: chat
 core/agents.js: chat newspace shepherdr-settings coordinator
+core/kinds.js: chat chat-models newspace shepherdr-settings coordinator
 core/settings.js: chat newspace shepherdr-settings coordinator
 core/host.js: chat newspace shepherdr-settings coordinator
 core/secrets.js: chat shepherdr-settings tabs-tasks
@@ -50,3 +51,4 @@ artifact-sidebar.js: chat-image jump
 addons.js: chat pane-chat shepherdr-settings tabs-tasks
 live.js: chat coordinator jump menu-tasks new-menu-tasks newspace pane-chat shepherdr-settings spaces-chat tabs-tasks tasks workspace-status-chat
 core/bg-jobs.js: chat
+kinds.json: tasks/bin/herdr_task

@@ -120,7 +120,10 @@ const readDefaults = async () => {
   try {
     let check: any = {};
     try { check = JSON.parse(readFileSync(join(HOME, ".herdr", "cli-check.json"), "utf8"))?.machines?.[""] ?? {}; } catch {}
-    settings.choices = SC.choicesFrom(await compat.agents!.ownDefaults(), { claude: check.claude !== "missing", codex: check.codex !== "missing" });
+    const dflts: any = await compat.agents!.ownDefaults();
+    // Claude Code and Codex as herdr-task's check found them; the other kinds (lib/kinds.json) when their command is here
+    const installed = Object.fromEntries(Object.keys(dflts).map((k) => [k, check[k] === "missing" ? false : k === "claude" || k === "codex" || Boolean(dflts[k]?.installed)]));
+    settings.choices = SC.choicesFrom(dflts, installed);
     model.rebuild();
   } catch {}
 };

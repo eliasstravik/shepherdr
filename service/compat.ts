@@ -17,7 +17,6 @@ const { SCREEN } = SCc as any;
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 const APP_HOME = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
-const CLI_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex" };
 import * as MNc from "../core/menus.js";
 import * as APc from "../core/autopilot.js";
 const { machineLabel } = MNc as any;
@@ -26,6 +25,8 @@ const { spaceName } = SPc as any;
 import type { Where } from "./worktree.ts";
 import * as AGc from "../core/agents.js";
 const { current, rowFor, menuFor, modelName, levelName, NAMES } = AGc as any;
+// each kind's name (lib/kinds.json: Claude Code, Codex, Pi, ...)
+const CLI_NAMES: Record<string, string> = NAMES;
 import * as NF from "../core/notify.js";
 const { NOTIFY, everywhereOf, spaceLevel, machineLevel, machineOfSpace, spaceOwn, machineOwn } = NF as any;
 // Settings › Notify's words, the window's own (core/settings.js)
@@ -181,7 +182,7 @@ export class Compat {
   machineStats: ((m: string | null) => any) | null = null;
 
   /** The model menu and restarts (service/agents.ts), set by main. */
-  agents: { info(addr: string, reader: any): Promise<unknown>; restart(addr: string, reader: any, pick: any): Promise<string>; choices(machine: string | null): Promise<unknown>; ownDefaults(): Promise<{ claude: unknown; codex: unknown }> } | null = null;
+  agents: { info(addr: string, reader: any): Promise<unknown>; restart(addr: string, reader: any, pick: any): Promise<string>; choices(machine: string | null): Promise<unknown>; ownDefaults(): Promise<Record<string, unknown>> } | null = null;
 
   /** Agents' secret asks (service/secrets.ts), set by main. */
   secrets: { asks(): { address: string; name: string; why: string }[] } | null = null;

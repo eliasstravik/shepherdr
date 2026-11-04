@@ -3,7 +3,7 @@
 // web app's Settings say the same. herdr-task reads the file (herdr_task/settings.py: settings_for); its defaults are
 // DEFAULTS there and here.
 // Shared core: the source is core/settings.js; bin/sync-shared copies it into the mods in lib/COPIES.
-import { NAMES, levelName, current, rowFor, menuFor } from "./agents.js";
+import { AGENTS, NAMES, levelName, current, rowFor, menuFor, permDefault as permOf } from "./agents.js";
 import { SERVE } from "./host.js";
 
 // ---- the frame -------------------------------------------------------------------------------------------------
@@ -62,7 +62,11 @@ export const USE_OTHER_CLI = "Use other CLI";
 export const LOADING_AGENTS = "Loading agents…";
 // An unset Reviewer's button: what runs, the other CLI.
 export const otherCliWords = (cli) => `Other CLI (${NAMES[cli] ?? cli})`;
-export const otherCli = (worker) => (worker === "codex" ? "claude" : "codex");
+// The other CLI than the worker's, for an unset Reviewer and Backup: of the kinds `menus` offers (installed here),
+// Claude Code first, then Codex, then the table's order (as herdr-task's other_cli); without menus, or when none
+// other is installed, Codex (Claude Code when the worker is Codex).
+export const otherCli = (worker, menus = null) =>
+  (menus && AGENTS.find((k) => k !== worker && menus[k])) ?? (worker === "codex" ? "claude" : "codex");
 export const BACKUP = { title: "Backup agent", about: "The other CLI takes over a task once when its agent can't go on." };
 // The machines where the other CLI can't take over (herdr-task's check, ~/.herdr/cli-check.json's machines: this
 // computer is ""), in one line. m: the scope's machine ("local" or its name), null for Everywhere (every machine).
@@ -83,8 +87,8 @@ export function modelLabel(menus, sel) {
 // What the agents offer, from each CLI's own settings (agents.js parseDefaults) and which are installed:
 // { menus, permDefault, defaults } (defaults: the first installed CLI's own, what an unset role runs).
 export function choicesFrom(dflts, installed = { claude: true, codex: true }) {
-  const menus = Object.fromEntries(["claude", "codex"].filter((k) => installed[k]).map((k) => [k, menuFor(k, dflts[k])]));
-  const permDefault = { claude: dflts.claude?.mode ?? "manual", codex: "auto" };
+  const menus = Object.fromEntries(AGENTS.filter((k) => installed[k]).map((k) => [k, menuFor(k, dflts[k])]));
+  const permDefault = Object.fromEntries(AGENTS.map((k) => [k, permOf(k, dflts[k])]));
   const first = menus.claude ? "claude" : Object.keys(menus)[0] ?? "claude";
   const c = current(first, [], {}, dflts[first]);
   const model = rowFor(first, c) ?? menus[first]?.models?.[0]?.id ?? null;
@@ -93,7 +97,7 @@ export function choicesFrom(dflts, installed = { claude: true, codex: true }) {
 // What a role's model button starts from: its own choice, else for the Reviewer the other CLI, else the defaults.
 export function roleSel(role, own, choices, worker) {
   if (own) return { sel: { ...own }, unset: false };
-  const o = otherCli(worker);
+  const o = otherCli(worker, choices?.menus);
   if (role === "reviewer" && choices?.menus?.[o])
     return { sel: { agent: o, model: choices.menus[o].models[0]?.id ?? null, effort: null, fast: false, perm: choices.permDefault?.[o] ?? null }, unset: true };
   return { sel: choices?.defaults ? { ...choices.defaults } : null, unset: true };
@@ -107,9 +111,12 @@ export function chooseModel(menus, permDefault, sel, agent, id) {
   if (next.effort && !m.efforts.includes(next.effort)) next.effort = null;
   if (!m.fast) next.fast = false;
   if (agent !== sel.agent) {
+    // a kind with no full-access mode (pi, amp, cursor) gets its default instead
     const full = sel.perm === "bypassPermissions" || sel.perm === "full";
-    next.perm = full ? (agent === "claude" ? "bypassPermissions" : "full") : permDefault?.[agent] ?? null;
-    next.fast = Boolean(menus[agent]?.fastLocked);
+    const fullId = agent === "claude" ? "bypassPermissions" : "full";
+    next.perm = full && menus[agent]?.perms?.some((p) => p.id === fullId) ? fullId : permDefault?.[agent] ?? null;
+    // Fast as the CLI has it (Codex's service_tier in its config); a kind with no Fast stays off
+    next.fast = Boolean(menus[agent]?.fastLocked && m.fast);
   }
   return next;
 }

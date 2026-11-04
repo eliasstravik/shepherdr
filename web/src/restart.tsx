@@ -265,9 +265,11 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
     if (!m.fast) next.fast = false
     if (m.agent !== was.agent) {
       // another agent: its own permission modes; full access stays full access
+      // (core/settings.js chooseModel: a kind with no full-access mode or no Fast, pi say, gets its own default)
       const full = was.perm === 'bypassPermissions' || was.perm === 'full'
-      next.perm = full ? (m.agent === 'claude' ? 'bypassPermissions' : 'full') : d.permDefault[m.agent] ?? null
-      next.fast = !!d.menus[m.agent]?.fastLocked
+      const fullId = m.agent === 'claude' ? 'bypassPermissions' : 'full'
+      next.perm = full && d.menus[m.agent]?.perms?.some((p) => p.id === fullId) ? fullId : d.permDefault[m.agent] ?? null
+      next.fast = !!d.menus[m.agent]?.fastLocked && !!m.fast
     }
     return next
   }

@@ -181,7 +181,7 @@ export class Settings {
       const button = (v: any) => {
         if (!this.choices) return LOADING_AGENTS;
         const { sel, unset } = roleSel(r.id, v ?? null, this.choices, worker);
-        return unset && r.id === "reviewer" && sel ? otherCliWords(otherCli(worker)) : sel ? modelLabel(menus, sel) : LOADING_AGENTS;
+        return unset && r.id === "reviewer" && sel ? otherCliWords(otherCli(worker, menus)) : sel ? modelLabel(menus, sel) : LOADING_AGENTS;
       };
       const { sel, unset } = roleSel(r.id, p.value ?? null, this.choices, worker);
       // on Everywhere its row has "Edit instructions" too (the same for every space), and a set Reviewer "Use other CLI"
@@ -193,7 +193,7 @@ export class Settings {
     // machine where the other CLI can't is one more line under it
     const b = this.pick(scope, "backup", "agent");
     const on = b.value !== "off";
-    const problem = on ? backupProblem(this.checks, s ? b.machine : null, b.value && b.value !== "off" ? b.value : otherCli(worker)) : "";
+    const problem = on ? backupProblem(this.checks, s ? b.machine : null, b.value && b.value !== "off" ? b.value : otherCli(worker, menus)) : "";
     rows.push({ label: BACKUP.title, key: "backup.agent", value: ON(on), options: ["on", "off"], hint: problem ? `${BACKUP.about}\n${problem}` : BACKUP.about,
       ...this.follows(s, b, (v) => ON(v !== "off"), "backup", "agent") });
     return { name: title("agents"), level: scope ?? "all", rows };

@@ -7,10 +7,11 @@ import re
 import shutil
 
 from .base import Fail, HOME, MAX_RUNNING
+from . import kinds as K
 
 
-# What each agent key starts by default. Unknown keys run as themselves; --argv overrides.
-AGENTS = {"claude": ["claude"], "codex": ["codex", "--no-daemon"]}
+# What each agent key starts by default (kinds.json's run). Unknown keys run as themselves; --argv overrides.
+AGENTS = {k: list(v["run"]) for k, v in K.kinds().items()}
 
 
 # ---- the person's settings ------------------------------------------------------------------
@@ -125,6 +126,13 @@ def argv_for(pick):
         elif perm:
             a += ["-s", "workspace-write", "-a", "on-request"]
         return a
+    # Every other kind (pi, pii, grok, hermes, amp, cursor): kinds.json says how its flags are spelt.
+    try:
+        a = K.start_argv(agent, pick)
+    except ValueError as e:
+        raise Fail(str(e))
+    if a is not None:
+        return a
     return [agent] if agent else None
 
 
@@ -157,14 +165,20 @@ def worker_argv(s, task, space=None, agent=None):
 def argv_model(argv):
     """(model, effort) an agent's argv asks for, as argv_for writes them; None where it doesn't."""
     model = effort = None
+    k = K.kind(K.key_of(argv)) or {}
+    eflag = ((k.get("effort") or {}).get("flag") if (k.get("effort") or {}).get("style") == "flag" else None) or "--effort"
     for i, a in enumerate(argv[:-1]):
         nxt = argv[i + 1]
         if a in ("--model", "-m"):
             model = nxt
-        elif a == "--effort":
+        elif a == eflag:
             effort = nxt
         elif a in ("-c", "--config") and nxt.startswith("model_reasoning_effort="):
             effort = nxt.split("=", 1)[1].strip("\"'")
+    if model and (k.get("effort") or {}).get("style") == "bracket":
+        m = re.search(r"\[effort=([^\]]*)\]$", model)
+        if m:
+            model, effort = model[:m.start()], m.group(1)
     return model, effort
 
 
@@ -197,7 +211,7 @@ MERGE_VALUES = {"ask": "ask", "ask me first": "ask", "ask first": "ask", "ask th
                 "auto": "auto", "on its own": "auto", "merge it": "auto", "at once": "auto"}
 MUST_VALUES = {"blocker": "blocker", "blockers": "blocker", "critical": "blocker", "major": "major",
                "minor": "minor", "trivial": "minor", "everything": "minor"}
-EFFORTS = {"none", "minimal", "lowest", "low", "medium", "high", "xhigh", "max", "ultra"}
+EFFORTS = {"off", "none", "minimal", "lowest", "low", "medium", "high", "xhigh", "max", "ultra"}
 ONOFF = {"on": "on", "yes": "on", "true": "on", "1": "on", "off": "off", "no": "off", "false": "off", "0": "off"}
 
 
@@ -234,6 +248,10 @@ def set_task(t, key, value):
         sets[field] = MERGE_VALUES[low]
     else:
         # Agents, models and efforts are the task's own fields (worker_pick reads them).
+        if field in ("agent", "reviewer") and not K.kind(low) and not shutil.which(v):
+            raise Fail(f"{field} is one of {', '.join(K.kinds())} (or a program on PATH), not {v!r}.")
+        if field in ("agent", "reviewer") and K.kind(low):
+            v = low
         if field in ("effort", "reviewer_effort") and low not in EFFORTS:
             raise Fail(f"{field.replace('_', ' ')} is one of {', '.join(sorted(EFFORTS))} (or default).")
         sets.pop(field, None)
@@ -268,9 +286,12 @@ def by_layer(s, space, section, key, value, default):
 
 
 def other_cli(agent):
-    """The reviewer by default: the other CLI than the task agent's where it's installed, else its own."""
-    other = {"claude": "codex", "codex": "claude"}.get(agent)
-    return other if other and shutil.which(other) else agent
+    """The reviewer by default: another CLI than the task agent's where it's installed (Claude Code
+    and Codex first, as before, then the other kinds in kinds.json's order), else its own."""
+    for other in ["claude", "codex"] + [k for k in K.kinds() if k not in ("claude", "codex")]:
+        if other != agent and shutil.which(K.kinds()[other]["run"][0]):
+            return other
+    return agent
 
 
 def task_settings(s, t, space=None, argv=None):
@@ -378,7 +399,8 @@ def agent_argv(key, argv_json=None):
 
 
 def agent_key(argv):
-    return os.path.basename(argv[0])
+    """The kind an argv runs ("cursor-agent" -> "cursor"), else its program's name."""
+    return K.key_of(argv)
 
 
 def bare(i):

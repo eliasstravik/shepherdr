@@ -698,7 +698,8 @@
       "addon": "chat",
       "title": "Model menu",
       "core": [
-        "agents"
+        "agents",
+        "kinds"
       ],
       "herdr": {
         "mods": [

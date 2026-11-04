@@ -3,6 +3,8 @@
 // or is starting does it wait, and the bubble says why.
 import clsx from 'clsx'
 import * as SL from '@core/slash.js'
+import * as AG from '@core/agents.js'
+const { NAMES } = AG as unknown as { NAMES: Record<string, string> }
 const { typing: slashTyping, match: slashMatch } = SL as any
 import { openAccept } from '@client/screens/Accept.tsx'
 import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ComponentType, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, type RefObject } from 'react'
@@ -1251,7 +1253,8 @@ function askHead(q: Question, chat: Chat) {
   // a task worker's, in its Assistant's chat: headed by its task, its own chat a link (no terminal link)
   if (q.by) return { who: q.by.ref, links: [{ label: 'Open chat', fn: () => goChat(q.by!.chat) }] }
   const terminal = () => void act({ type: 'answer', chat: chat.key, question: q.id, terminal: true } as never).then(() => openTerminal(chat.key), () => undefined)
-  return { who: chat.cli === 'codex' ? 'Codex' : 'Claude', links: [{ label: 'Answer in terminal', fn: terminal }] }
+  // the CLI's short name ("Claude asks"), each kind's from lib/kinds.json
+  return { who: !chat.cli || chat.cli === 'claude' ? 'Claude' : NAMES[chat.cli] ?? chat.cli, links: [{ label: 'Answer in terminal', fn: terminal }] }
 }
 
 /** a questions card's "Chat about this": no answer; the agent hears the person wants to talk it over, and the box

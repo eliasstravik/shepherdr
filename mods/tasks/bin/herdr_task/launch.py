@@ -17,6 +17,7 @@ import time
 
 from .base import ENTRY, Fail, git, hc_json, now, run, WORKTREES
 from .settings import agent_key, ASSISTANT_TEMPLATES, bare, notes, notes_part, review_limits, settings_block
+from . import kinds as K
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
 from .github import finish, remote_of
@@ -63,7 +64,9 @@ def own_rules(path):
 
 
 def own_argv(argv):
-    """An agent's argv with its own herdr-task commands allowed (Claude Code and Codex)."""
+    """An agent's argv with its own herdr-task commands allowed (Claude Code's --settings allow rules,
+    Codex's PermissionRequest hook). The other kinds have no such hook: they run as given, and their
+    brief asks them to run those commands."""
     path, out = own_path(), list(argv)
     k = agent_key(out)
     if k == "claude":
@@ -150,12 +153,9 @@ def cmd_allow(args):
 
 
 def resume_argv(argv, session):
-    k = agent_key(argv)
-    if k == "claude":
-        return argv + ["--resume", session]
-    if k == "codex":
-        return [argv[0], "resume"] + argv[1:] + [session]
-    return None
+    """argv continuing `session`, as kinds.json spells it for that CLI (claude --resume <id>, codex
+    resume <id>, pi --session <log>, amp threads continue <id>); None when it can't."""
+    return K.resume_argv(argv, session)
 
 
 def in_shell(argv):
