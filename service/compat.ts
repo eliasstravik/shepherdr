@@ -3,7 +3,7 @@
 // shapes 2.1's screen reads (web/shared/types.ts: Snapshot, Chat), and its chat keys back into terminals.
 //   a space's chat (its Assistant):  p:<space id, "/" as ":">     a task's chat:  <task id>/worker
 // A task id is its ref ("SHEP-7"), "<machine>:<ref>" on another machine, as 2.1 wrote them.
-import type { Snapshot, Place, Task, Need, Section, Machine, Chat, Message, Status, TaskStatus } from "../web/shared/types.ts";
+import type { Snapshot, Place, Task, Need, Section, Machine, Chat, Message, Status, TaskStatus, StepKind, ActivityAnswer } from "../web/shared/types.ts";
 import * as T from "../core/tasks.js";
 
 const { ago } = T as any;
@@ -16,6 +16,16 @@ const AGENT: Record<string, Status> = { blocked: "need", working: "work", done: 
 
 export const placeKey = (spaceId: string) => `p:${spaceId.replace("/", ":")}`;
 export const taskId = (r: Row) => (r.machine ? `${r.machine}:${r.ref}` : r.ref);
+
+const STEP: Record<string, StepKind> = { run: "run", read: "read", edit: "edit", search: "search", web: "web", agent: "agent" };
+const stepRow = (s: any, i: number) => ({ key: `${s.id ?? i}`, kind: STEP[s.kind] ?? "other", text: s.count > 1 ? `${s.line} ×${s.count}` : s.line });
+
+/** All of a tools row's steps, for 2.1's "N more" (GET api/activity?chat&what=turn&id). */
+export function activity(reader: any, id: string): ActivityAnswer {
+  const x = (reader?.conv?.items ?? []).find((i: any) => i.id === id && i.kind === "tools");
+  if (!x) return { error: "That turn isn't in the chat any more." };
+  return { steps: x.steps.map((s: any, i: number) => ({ id: `${s.id ?? i}`, kind: STEP[s.kind] ?? "other", tool: s.kind, at: 0, end: 1, title: s.line, doing: s.line, target: "" })) };
+}
 
 export class Compat {
   /** chat key -> terminal address, from the last build */
@@ -87,13 +97,20 @@ export class Compat {
     return this.last;
   }
 
-  /** A followed conversation (core/chat-reader.js) as 2.1's Chat. */
+  /** A followed conversation (core/chat-reader.js) as 2.1's Chat. A run of tool calls (3.0's tools row) is 2.1's turn
+   *  rows: the first three, then "N more" (activity()). */
   chat(key: string, reader: any, t: any): Chat {
     const messages: Message[] = [];
+    let at = 0;
     for (const x of reader.conv?.items ?? []) {
+      if (x.at) at = x.at;
       if (x.kind === "user" && x.text) messages.push({ id: x.id, who: "you", text: x.text, at: x.at, ...(x.replyTo ? { reply: { text: x.replyTo } } : {}) } as Message);
       else if (x.kind === "agent" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at });
       else if (x.kind === "error" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at });
+      else if (x.kind === "tools" && x.steps?.length) {
+        const rows = x.steps.map(stepRow);
+        messages.push({ id: x.id, who: "agent", at, activity: { id: x.id, at, end: at, rows: rows.slice(0, 3), steps: x.steps.length, ...(rows.length > 3 ? { more: rows.length - 3 } : {}) } });
+      }
     }
     const st = t?.status?.state ?? null;
     return { key, messages, working: st === "working", cli: reader.kind === "codex" ? "codex" : "claude", ...(reader.pinned || (t && t.state !== "live") ? { finished: true } : {}) };

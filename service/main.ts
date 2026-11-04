@@ -19,7 +19,7 @@ import { Live } from "./live.ts";
 import { Model } from "./model.ts";
 import { Chats } from "./chats.ts";
 import { act } from "./actions.ts";
-import { Compat } from "./compat.ts";
+import { Compat, activity } from "./compat.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const WEB = process.env.SHEPHERDR_WEB_DIR || join(ROOT, "web", "dist");
@@ -98,6 +98,11 @@ const server = Bun.serve<{ who: string }>({
       const body = await req.json().catch(() => null);
       if (!body || typeof body.key !== "string" || !/^[a-z][\w.-]{0,63}$/.test(body.key)) return json({ error: "bad key" }, 400);
       return json(await store.set(body.key, body.value ?? null));
+    }
+    if (path === "/api/activity") {
+      const addr = compat.addrOf(url.searchParams.get("chat") ?? "");
+      const r = addr ? live.chats?.reader(addr) : null;
+      return json(activity(r, url.searchParams.get("id") ?? ""));
     }
     if (path === "/api/action" && req.method === "POST") {
       const body = await req.json().catch(() => null);

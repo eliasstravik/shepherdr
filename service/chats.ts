@@ -44,6 +44,9 @@ export class Chats {
     if (!f.pages.size) f.idleSince = Date.now();
   }
 
+  /** The reader of a chat someone follows now, else null. */
+  reader(addr: string) { return this.followed.get(addr)?.reader ?? null; }
+
   async earlier(addr: string) {
     const f = this.followed.get(addr);
     if (f && (await f.reader.earlier())) this.publish(addr, f);
