@@ -6,6 +6,8 @@
 import type { Snapshot, Place, Task, Need, Section, Machine, Chat, Message, Status, TaskStatus, StepKind, ActivityAnswer, Question, Artifact, SettingSection } from "../web/shared/types.ts";
 import * as T from "../core/tasks.js";
 import type { Where } from "./worktree.ts";
+import * as AGc from "../core/agents.js";
+const { current, rowFor, menuFor, modelName } = AGc as any;
 import * as NF from "../core/notify.js";
 const { NOTIFY, everywhereOf, spaceLevel, machineLevel, machineOfSpace, spaceOwn } = NF as any;
 
@@ -62,6 +64,9 @@ export class Compat {
   /** The person's shared choices (service/store.ts, its document) and their values now, set by main. */
   shared: { value(key: string): any; set(key: string, value: unknown): Promise<unknown> } | null = null;
   host = "";
+
+  /** The model menu and restarts (service/agents.ts), set by main. */
+  agents: { info(addr: string, reader: any): Promise<unknown>; restart(addr: string, reader: any, pick: any): Promise<string> } | null = null;
 
   /** Agents' secret asks (service/secrets.ts), set by main. */
   secrets: { asks(): { address: string; name: string; why: string }[] } | null = null;
@@ -231,6 +236,13 @@ export class Compat {
     const st = t?.status?.state ?? null;
     // the CLI's own subagents still at work, above the box (3.0: the helpers list)
     const jobs = (reader.conv?.running?.() ?? []).map((h: any, i: number) => ({ id: `h${i}`, kind: "agent", title: h.desc, at: h.at ?? Date.now() }));
-    return { key, messages, ...(jobs.length ? { jobs } : {}), working: st === "working", cli: reader.kind === "codex" ? "codex" : "claude", ...(reader.pinned || (t && t.state !== "live") ? { finished: true } : {}) };
+    // what it runs on, for the line under the box (core/agents.js: the window's model button says the same)
+    let agent: any;
+    try {
+      const kind = reader.kind ?? "claude", c = current(kind, t?.foreground?.argv ?? t?.argv ?? [], reader.conv?.meta ?? {}, {});
+      const row = rowFor(kind, c), label = menuFor(kind, {}).models.find((m: any) => m.id === row)?.name ?? modelName(c.model);
+      if (c.model) agent = { kind, model: c.model, modelLabel: label, ...(c.effort ? { effort: c.effort } : {}), runtime: { model: c.model, modelLabel: label, ...(c.effort ? { effort: c.effort } : {}), speed: c.fast ? "fast" : "normal", source: "session", at: Date.now() } };
+    } catch {}
+    return { key, messages, ...(agent ? { agent } : {}), ...(jobs.length ? { jobs } : {}), working: st === "working", cli: reader.kind === "codex" ? "codex" : "claude", ...(reader.pinned || (t && t.state !== "live") ? { finished: true } : {}) };
   }
 }

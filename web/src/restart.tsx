@@ -223,9 +223,10 @@ export function AgentLine({ chatKey, cli }: { chatKey: string; cli: string }) {
   const agent = useStore((s) => s.chats[chatKey]?.agent)
   const { model, effort, speed } = runsOn(agent)
   const plan = agent?.planned
-  const planned = plan && `${plan.model ? model!.text : `${cli} default`}${plan.effort ? ` · ${effort!.text.toLowerCase()}` : ''}, from Settings`
+  const planned = plan && `${plan.model ? model!.text : `${cli} default`}${plan.effort ? ` · ${effort!.text}` : ''}, from Settings`
   // Normal that runs is left out: only a speed out of the ordinary earns its place on the line
-  const bits = [model, effort && { ...effort, text: effort.text.toLowerCase() }, speed?.text === 'Normal' && !speed.requested ? undefined : speed].filter((w): w is Worn => !!w)
+  // Shepherdr 3: labels start with a capital ("Opus 5.5 · 1M · High")
+  const bits = [model, effort, speed?.text === 'Normal' && !speed.requested ? undefined : speed].filter((w): w is Worn => !!w)
   const seen = bits.filter((w) => !w.requested), requested = bits.filter((w) => w.requested)
   const words = planned ?? ([...seen.map((w) => w.text), requested.length ? `Asked for: ${requested.map((w) => w.text).join(' · ')}` : ''].filter(Boolean).join(' · ') || `${cli} · Not known yet`)
   // a long model id is what gives way: effort and speed stay in view

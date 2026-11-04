@@ -681,7 +681,7 @@
       "addon": "chat",
       "title": "Model menu",
       "core": [
-        "tasks"
+        "agents"
       ],
       "herdr": {
         "mods": [
@@ -699,7 +699,9 @@
         "tablet": "Popover",
         "phone": "Bottom sheet"
       },
-      "planned": "The model menu"
+      "service": [
+        "agents.ts"
+      ]
     },
     {
       "id": "subagents",

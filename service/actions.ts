@@ -110,6 +110,15 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim().split("\n").pop() || "Autopilot didn't change.");
     return { ok: true };
   }
+  if ((b?.type === "restart-info" || b?.type === "restart") && typeof b.chat === "string" && compat.agents) {
+    // the model menu: what it runs on and its choices; a restart on another model, effort, speed or CLI
+    const a = chat(b.chat), reader = compat.reader?.(a);
+    if (b.type === "restart-info") return compat.agents.info(a, reader);
+    if (!["claude", "codex"].includes(b.kind)) throw new Error("Pick Claude Code or Codex.");
+    const opt = (v: unknown) => (typeof v === "string" && /^[\w.\[\]-]{1,60}$/.test(v) ? v : undefined);
+    const next = await compat.agents.restart(a, reader, { kind: b.kind, model: opt(b.model), effort: opt(b.effort), speed: opt(b.speed) });
+    return { ok: true, terminal: next };
+  }
   if (b?.type === "keys" && typeof b.chat === "string" && Array.isArray(b.keys) && b.keys.length <= 32 && b.keys.every((k: unknown) => typeof k === "string" && k.length <= 40)) {
     const res = await hc(["keys", chat(b.chat), ...b.keys]);
     return { ok: res.code === 0 };

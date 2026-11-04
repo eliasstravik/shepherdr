@@ -29,6 +29,7 @@ import { browserRelay } from "./browser.ts";
 import { Artifacts } from "./artifacts.ts";
 import { Settings } from "./settings.ts";
 import { Secrets } from "./secrets.ts";
+import { Agents } from "./agents.ts";
 import { Push } from "./push.ts";
 import { dictate } from "./dictate.ts";
 import * as NF from "../core/notify.js";
@@ -70,6 +71,7 @@ function alertNew(snap: any) {
   if (alerted) for (const [k, a] of now) if (!alerted.has(k)) void push.send({ ...a, badge: (snap.needs?.length ?? 0) + (snap.tasks ?? []).filter((t: any) => t.status === "ready" && !t.archived).length, open: [...now.values()].filter((x) => x.waits).map((x) => x.tag) });
   alerted = new Set(now.keys());
 }
+compat.agents = new Agents(hub);
 const secrets = new Secrets(hub);
 compat.secrets = secrets;
 (compat as any).terminalsOf = (a: string) => hub.terminals.get(a);
