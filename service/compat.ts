@@ -72,6 +72,27 @@ export const taskId = (r: Row) => (r.machine ? `${r.machine}:${r.ref}` : r.ref);
 
 // a news event's dot: what the task was at that moment
 const NEWS: Record<string, TaskStatus> = { added: "todo", queued: "queued", started: "work", needs: "need", asks: "need", stalled: "need", failed: "need", ready: "ready", merging: "merging", merged: "done", done: "done", closed: "done" };
+type Sent = { cid: string; text: string; files: string[]; at: number };
+const said = (v: string) => v.replace(/\s+/g, " ").trim();
+const base = (p: string) => p.split("/").pop() ?? p;
+
+/** The page's id for one of the person's messages in the log: what it sent lately with the same words (the paths of
+ *  its files after them taken off; pictures come as markers Claude Code took out), read from when it began to go in.
+ *  Each send is one message (taken). */
+export function sentAs(sends: Sent[], x: { text?: string; at?: number; images?: number; paths?: string[] }, taken: Set<string>): string | undefined {
+  const at = x.at ?? 0;
+  const s = sends.find((s) => {
+    if (taken.has(s.cid) || at < s.at - 5000 || at - s.at > 30 * 60_000) return false;
+    const names = new Set(s.files.map(base));
+    const lines = String(x.text ?? "").split("\n");
+    const words = said(lines.filter((l) => !(/^[/~]/.test(l.trim()) && names.has(base(l.trim())))).join("\n"));
+    // (files alone: no words on either side)
+    return words === said(s.text) && (!!words || s.files.length > 0);
+  });
+  if (s) taken.add(s.cid);
+  return s?.cid;
+}
+
 // a message's reactions as 2.1 shows them: yours, the agent's, or both
 function reactionsOf(list?: { emoji: string; by: string }[]) {
   if (!list?.length) return {};
@@ -234,8 +255,8 @@ export class Compat {
   fileOf(key: string, path: string) { return this.files.get(key)?.has(path) ? path : null; }
   /** agent address -> what pages sent it lately (service/actions.ts): a message waiting in its CLI's queue is known
    *  again by its words, and shows with the page's id and files */
-  sends = new Map<string, { cid: string; text: string; files: string[]; at: number }[]>();
-  noteSend(addr: string, s: { cid: string; text: string; files: string[]; at: number }) {
+  sends = new Map<string, Sent[]>();
+  noteSend(addr: string, s: Sent) {
     this.sends.set(addr, [...(this.sends.get(addr) ?? []).filter((x) => Date.now() - x.at < 30 * 60_000), s].slice(-20));
   }
 
@@ -468,6 +489,8 @@ export class Compat {
     const template = t?.template ?? null, task = Boolean(t?.labels?.["herdr.task"]);
     const mentionable = this.tasksFor(key);
     const own = this.chats.get(key);
+    // what pages sent it, known again in the log: the page's id comes back on it
+    const sends = (own && this.sends.get(own)) || [], takenSends = new Set<string>();
     const asking = !!own && (this.asks?.of(own) ?? []).some((a: any) => a.words?.kind === "questions");
     // an Assistant started from its chat with the person's words: what they asked (data/chat-first, as the window's)
     const ft = reader.start === 0 && items[0]?.kind === "user" ? this.firstTask(t, own)?.trim() : null;
@@ -489,21 +512,23 @@ export class Compat {
         const restart = /^<restart>/.test(x.text ?? "");
         messages.push({ id: x.id, who: "you", at: x.at, text: restart ? x.text.replace(/<\/?restart>/g, "") : x.from ? unsigned(x.text) : x.text, brief: { label: brief, ...(restart ? { bare: true } : {}) } });
       } else if (x.kind === "user" && (x.text || x.paths?.length || x.images)) {
+        const sentCid = sends.length && !x.from ? sentAs(sends, x, takenSends) : undefined;
+        const cid = sentCid ? { cid: sentCid } : {};
         // the tasks it mentions, as chips under it (core/send.js: the same matching as the window's)
         const chips = x.text ? mentionedIn(x.text, mentionable) : [];
         const mentions = chips.length ? { mentions: chips.map((r: any) => ({ task: machine ? `${machine}:${r.ref}` : r.ref, ref: r.ref ?? `#${r.id}`, title: r.title })) } : {};
         // what it replies to: the message it names, which a press on its line brings into view (the window's goTo)
         const to = x.replyTo ? items.slice(0, i).reverse().find((y: any) => (y.kind === "user" || y.kind === "agent") && y.text && names(y.text, String(x.replyTo).slice(0, 60))) : null;
-        if (x.text) messages.push({ id: x.id, who: "you", text: x.text, at: x.at, ...(x.replyTo ? { reply: { text: x.replyTo, ...(to ? { id: to.id, who: to.kind === "user" ? "you" : "agent" } : {}) } } : {}), ...reactions, ...mentions } as Message);
+        if (x.text) messages.push({ id: x.id, who: "you", text: x.text, at: x.at, ...cid, ...(x.replyTo ? { reply: { text: x.replyTo, ...(to ? { id: to.id, who: to.kind === "user" ? "you" : "agent" } : {}) } } : {}), ...reactions, ...mentions } as Message);
         // the images sent with it, under its words as the window shows them; only files a chat names are ever served
         // (fileOf)
         for (const [n, path] of (x.paths ?? []).entries()) {
           (this.files.get(key) ?? this.files.set(key, new Set()).get(key)!).add(path);
-          messages.push({ id: `${x.id}:f${n}`, who: "you", at: x.at, file: { name: path.split("/").pop() ?? "image", path } } as Message);
+          messages.push({ id: `${x.id}:f${n}`, who: "you", at: x.at, ...cid, file: { name: path.split("/").pop() ?? "image", path } } as Message);
         }
         // images Claude Code didn't say the source of: how many, as the window's paperclip line
         const unseen = (x.images ?? 0) - (x.paths?.length ?? 0);
-        if (unseen > 0) messages.push({ id: `${x.id}:n`, who: "you", at: x.at, images: unseen } as Message);
+        if (unseen > 0) messages.push({ id: `${x.id}:n`, who: "you", at: x.at, ...cid, images: unseen } as Message);
       }
       else if (x.kind === "agent" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at, ...reactions });
       else if (x.kind === "error" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at, error: true });
