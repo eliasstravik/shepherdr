@@ -61,6 +61,17 @@ export class Compat {
 
   taskOf(id: string) { return this.tasks.get(id) ?? null; }
 
+  private rows: Row[] = [];
+  private spaceList: Space[] = [];
+  /** The tasks a chat's messages can mention (#HAT-1): its folder's, on its machine, as the window's chat has them. */
+  tasksFor(chatKey: string) {
+    const t = chatKey.endsWith("/worker") ? this.rows.find((r) => taskId(r) === chatKey.slice(0, -7)) : null;
+    const s = !t ? this.spaceList.find((x) => placeKey(x.id) === chatKey) : null;
+    const machine = t ? t.machine ?? null : s?.machine ?? null, folder = t ? t.folder : s?.folder;
+    return this.rows.filter((r) => (r.machine ?? null) === machine && r.folder === folder)
+      .map((r) => ({ ref: r.ref, id: r.id, title: r.title, status_text: r.sub ?? r.section, why: r.why, folder: r.folder, prompt: r.prompt, state: r.section }));
+  }
+
   /** The person's shared choices (service/store.ts, its document) and their values now, set by main. */
   shared: { value(key: string): any; set(key: string, value: unknown): Promise<unknown> } | null = null;
   host = "";
@@ -113,6 +124,8 @@ export class Compat {
   snapshot(input: { host: string; user: string; machines: { name: string; here: boolean; state: string }[]; spaces: Space[]; sections: any[]; rows: Row[]; artifacts?: any[]; settings?: SettingSection[] }): Snapshot {
     const { host, spaces, rows } = input;
     this.host = host;
+    this.rows = rows;
+    this.spaceList = spaces;
     const chats = new Map<string, string>();
     const machines: Machine[] = input.machines.map((m) => {
       const key = m.here ? host : m.name;

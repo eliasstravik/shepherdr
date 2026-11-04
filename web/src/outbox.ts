@@ -13,6 +13,8 @@ export interface Outgoing {
   reply?: ReplyQuote & { id: string }
   /** when Send (or Retry) was tapped, by this screen's clock */
   at: number
+  /** Shepherdr 3: held on purpose (Ctrl+Enter, or a long press on Send): it goes once the agent stops working */
+  hold?: boolean
   /** sending: on its way; sent: in (or waiting for the agent), until it comes back; failed: it didn't go through */
   state: 'sending' | 'sent' | 'failed'
   /** the agent shows a menu or is starting (or its machine is out of reach): it goes in once it can */

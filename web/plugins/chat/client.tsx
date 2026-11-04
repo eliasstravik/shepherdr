@@ -1562,7 +1562,7 @@ async function deliver(o: Outgoing) {
   // a reload now would cut it off on its way
   const release = holdReload()
   try {
-    const r = (await act({ type: 'send', chat: o.chat, text: o.text, attachments: o.files.map((f) => f.path), cid: o.cid, reply: o.reply?.id, human: true }, AbortSignal.timeout(SEND_TIMEOUT))) as {
+    const r = (await act({ type: 'send', chat: o.chat, text: o.text, attachments: o.files.map((f) => f.path), cid: o.cid, reply: o.reply?.id, human: true, ...(o.hold ? { hold: true } : {}) } as never, AbortSignal.timeout(SEND_TIMEOUT))) as {
       waiting?: boolean
       waitsFor?: Outgoing['waitsFor']
       at?: number
@@ -1660,7 +1660,9 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
     fades(el)
     // and again when the box comes back after talking to type or a call: it is a new textarea then
   }, [text, width, room, !!live])
-  const send = () => {
+  const held = useRef(false)
+  const holdTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const send = (hold = false) => {
     const t = text.trim()
     if (!t && !files.length) return
     const reply = getState().ui.reply[chatKey]
@@ -1686,6 +1688,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
       at: Date.now(),
       state: 'sending',
       prior: priorOf(getState().chats[chatKey]),
+      ...(hold ? { hold: true } : {}),
     }
     setOutbox((all) => [...all, out])
     deliver(out)
@@ -1747,7 +1750,8 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey && device === 'desktop' && !e.nativeEvent.isComposing) {
                       e.preventDefault()
-                      send()
+                      // Shepherdr 3: Ctrl+Enter holds it until the agent is free
+                      send(e.ctrlKey || e.metaKey)
                     }
                     if (e.key === 'Escape') {
                       e.preventDefault()
@@ -1782,7 +1786,13 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                   <button
                     type="button"
                     aria-label="Send"
+                    // Shepherdr 3 on a phone: a long press on Send holds it until the agent is free (the phone's Ctrl+Enter)
+                    onPointerDown={() => { held.current = false; holdTimer.current = setTimeout(() => { held.current = true; buzz(); send(true) }, 500) }}
+                    onPointerUp={() => clearTimeout(holdTimer.current)}
+                    onPointerLeave={() => clearTimeout(holdTimer.current)}
+                    onContextMenu={(e) => e.preventDefault()}
                     onClick={() => {
+                      if (held.current) return
                       // a light tap from the phone as it goes, like ChatGPT's
                       if (matchMedia('(pointer: coarse)').matches) buzz()
                       send()

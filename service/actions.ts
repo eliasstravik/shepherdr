@@ -4,7 +4,7 @@
 import type { Hub } from "./hub.ts";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { sendBody, messageBody, refusal, reactionLine } from "../core/send.js";
+import { sendBody, messageBody, refusal, reactionLine, mentionedIn, taskTag } from "../core/send.js";
 import { kindOf } from "../core/chat-reader.js";
 import * as SP from "../core/spaces.js";
 const { READ, withMove, withSection, withoutSection, withSectionName, withIcon } = SP as any;
@@ -14,6 +14,22 @@ const ATTACH = join(process.env.HERDR_APP_HOME || join(homedir(), ".config", "he
 const ADDR = /^([\w.-]+\/)?t[0-9a-z]+$/;
 const REF = /^[A-Z][A-Z0-9]*-\d+$/;
 const MACHINE = /^[\w.-]+$/;
+
+// Messages held until their agent is free, sent in order, each once.
+const held: { addr: string; kind: string; body: string; hub: Hub }[] = [];
+let draining: ReturnType<typeof setInterval> | null = null;
+function drain() {
+  draining ??= setInterval(async () => {
+    for (const m of [...held]) {
+      const st = (m.hub.terminals.get(m.addr) as any)?.status?.state;
+      if (m.hub.terminals.get(m.addr)?.state !== "live") { held.splice(held.indexOf(m), 1); continue; }
+      if (st === "working" || st === "blocked") continue;
+      held.splice(held.indexOf(m), 1);
+      await sendBody({ hc, sleep: (ms: number) => Bun.sleep(ms), status: () => (m.hub.terminals.get(m.addr) as any)?.status?.state ?? null }, m.addr, m.kind, m.body).catch(() => null);
+    }
+    if (!held.length && draining) { clearInterval(draining); draining = null; }
+  }, 1000);
+}
 
 async function run(cmd: string[]) {
   const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
@@ -123,7 +139,13 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const res = await hc(["keys", chat(b.chat), ...b.keys]);
     return { ok: res.code === 0 };
   }
-  if (b?.type === "send" && typeof b.chat === "string") b = { ...b, addr: chat(b.chat), quote: b.replyText ?? null };
+  if (b?.type === "send" && typeof b.chat === "string") {
+    // what it replies to (2.1 names the message by id) and the tasks it mentions, as the window's chat sends them
+    const a = chat(b.chat), r = compat.reader?.(a);
+    const quoted = typeof b.reply === "string" ? r?.conv?.items?.find((x: any) => x.id === b.reply)?.text ?? null : null;
+    const tags = mentionedIn(String(b.text ?? ""), compat.tasksFor(b.chat)).map((x: any) => taskTag(x, x.ref ?? `#${x.id}`)).join("");
+    b = { ...b, addr: a, quote: quoted, tags };
+  }
   else if (b?.type === "stop" && typeof b.chat === "string") b = { ...b, addr: chat(b.chat) };
   else if ((b?.type === "evidence" || b?.type === "accept") && typeof b.task === "string") {
     const t = compat.taskOf(b.task);
@@ -159,7 +181,10 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
         if (put.code !== 0 || !landed) throw new Error("A file didn't reach that machine.");
         files.push(landed);
       }
-      const body = [messageBody({ text, quote: typeof b.quote === "string" ? b.quote.slice(0, 2000) : null }), ...files].filter(Boolean).join("\n\n");
+      const body = [messageBody({ text, quote: typeof b.quote === "string" ? b.quote.slice(0, 2000) : null, tags: typeof b.tags === "string" ? b.tags : "" }), ...files].filter(Boolean).join("\n\n");
+      // held on purpose (Ctrl+Enter, a long press): it goes once the agent stops working
+      const st = (hub.terminals.get(a) as any)?.status?.state;
+      if (b.hold && (st === "working" || st === "blocked")) { held.push({ addr: a, kind: kindOf(t) ?? "", body, hub }); drain(); return { ok: true, waiting: true, waitsFor: "turn" }; }
       const r = await sendBody(io, a, kindOf(t) ?? "", body);
       if (r.code !== 0) throw new Error(refusal(r).message);
       return { ok: true };

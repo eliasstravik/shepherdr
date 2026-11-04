@@ -30,7 +30,7 @@ import * as fs from "fs/promises";
 import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names } from "./core/chat-log.js";
 import { words, howAnswered } from "./core/asks.js";
 // Sending the person's words, as the web app does (core/send.js).
-import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine } from "./core/send.js";
+import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine, mentionedIn } from "./core/send.js";
 import { AskCards, linkCtl } from "./cards.js";
 import * as strips from "./strips.js";
 import { button, red, green, amber, H, RADIUS, TEXT, toast, toastWho, plainError } from "./ui.js";
@@ -1635,14 +1635,8 @@ export default class Chat extends View {
     if (this.mentionsOf !== this.tasks) { this.mentionsOf = this.tasks; this.mentions = new Map(); }
     const known = this.mentions.get(t);
     if (known) return known;
-    const low = t.toLowerCase();
-    const found = (this.tasks ?? []).filter((x) => {
-      // Only a message with the task's ref in it is worth a pattern.
-      if (!low.includes(String(x.ref ? x.ref : `#${x.id}`).toLowerCase())) return false;
-      // HAT-1 as written (or #HAT-1); a task without a prefix only as #4, never a bare number.
-      const ref = x.ref ? `#?${String(x.ref).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` : `#${x.id}`;
-      return new RegExp(`(^|[\\s(])${ref}\\b`, "i").test(t);
-    });
+    // core/send.js: the same matching as the web app's
+    const found = mentionedIn(t, this.tasks);
     if (this.mentions.size > 1000) this.mentions.clear();
     this.mentions.set(t, found);
     return found;
