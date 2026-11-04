@@ -3,7 +3,7 @@
 // above the message box while background work runs (subagents, shells). A row opens to its command, output or diff;
 // nothing streams by default, nothing flashes, and no command line shows until asked for.
 import clsx from 'clsx'
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   ChevronDownIcon,
   ChevronLeftIcon,
@@ -131,12 +131,15 @@ const Lines = ({ added, removed }: { added?: number; removed?: number }) =>
     </span>
   ) : null
 
-function Output({ chat, id, job, live }: { chat: string; id: string; job?: boolean; live?: boolean }) {
+/** what a step or job printed; `tail`: a running job's last lines, kept scrolled to the newest (as the window's 8) */
+function Output({ chat, id, job, live, tail }: { chat: string; id: string; job?: boolean; live?: boolean; tail?: boolean }) {
   const g = useActivity(chat, job ? 'job' : 'output', id, live ? 2000 : 0)
   const d = g.data
   const text = !d ? 'Loading…' : 'error' in d ? d.error : 'output' in d ? d.output || '(no output)' : ''
+  const box = useRef<HTMLPreElement>(null)
+  useEffect(() => { if (tail && box.current) box.current.scrollTop = box.current.scrollHeight }, [tail, text])
   return (
-    <pre data-output className="max-h-72 overflow-auto rounded-row bg-well px-3 py-2 font-mono text-[0.75rem]/5 whitespace-pre-wrap text-fg2">
+    <pre ref={box} data-output className={clsx(tail ? 'max-h-40' : 'max-h-72', 'overflow-auto rounded-row bg-well px-3 py-2 font-mono text-[0.75rem]/5 whitespace-pre-wrap text-fg2')}>
       {/* a diff reads in its colours */}
       {text.split('\n').map((l, i) => (
         <span key={i} className={clsx('block', /^\+(?!\+\+)/.test(l) && 'text-[var(--ready)]', /^-(?!--)/.test(l) && 'text-[var(--need)]')}>
@@ -444,7 +447,7 @@ function JobLine({ j, chat, open, toggle }: { j: Job; chat: string; open: boolea
       {open ? (
         <div className="flex flex-col items-start gap-1.5 pt-1 pb-1.5 pl-5">
           {j.command ? <code className="block max-h-16 w-full overflow-hidden font-mono text-[0.71875rem]/[1.125rem] break-all whitespace-pre-wrap text-fg2">{j.command}</code> : null}
-          {j.more === 'output' ? <div className="w-full"><Output chat={chat} id={j.id} job live /></div> : null}
+          {j.more === 'output' ? <div className="w-full"><Output chat={chat} id={j.id} job live tail /></div> : null}
           {j.stop ? (
             <button type="button" onClick={stop} disabled={stopping}
               className="flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] pr-2.5 pl-2 text-[0.78125rem] font-medium text-fg shadow-[inset_0_0_0_1px_var(--line2)] enabled:hover:bg-hover disabled:text-fg3 phone:h-9">

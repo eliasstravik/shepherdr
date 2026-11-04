@@ -360,7 +360,7 @@ export class PanelHost {
     // Their height is the "tasks-thread-head" block's size in layouts/shepherdr.json (127): keep them in step.
     return v_flex().id("thread-head-rows").size_full().pt(8).pb(12).gap(12).bg(t.background).border_b(1).border_color(t.border)
       .child(v_flex().flex_none().gap(8)
-        .child(this.barRow(t, st))
+        .child(this.barRow(t, st, addr))
         .child(this.taskBlock(t, { want, st, addr })))
       .child(h_flex().id("thread-views").flex_none().px(EDGE).overflow_x_scroll()
         .child(this.switcher(t, segs)));
@@ -368,7 +368,7 @@ export class PanelHost {
 
   // The slim bar: ‹ Tasks back to the list on the left (its chevron on the shared edge, its hover
   // reaching past it), and on the right the task's base, Pin and Accept.
-  barRow(t, st) {
+  barRow(t, st, addr) {
     return h_flex().id("thread-bar").h(24).flex_none().pl(EDGE - 6).pr(EDGE).gap(4).items_center()
       .child(h_flex().id("thread-back").h(24).pl(2).pr(8).gap(2).flex_none().items_center().rounded(RADIUS.control).cursor_pointer()
         .text_size(TEXT.label).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
