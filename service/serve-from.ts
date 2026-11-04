@@ -93,7 +93,7 @@ if (!there || there.version !== VERSION || (there.build && there.build !== BUILD
   const err = await new Response(p.stderr).text();
   if ((await p.exited) !== 0) fail(err.trim().split("\n").pop()?.replace(/^shepherdr: /, "") || `couldn't install it on ${to}`);
   for (let i = 0; i < 60 && !(there?.build === BUILD); i++) { await Bun.sleep(2000); there = await node(to); }
-  if (!there) fail(`Shepherdr's web service on ${to ?? "this computer"} hasn't started: \`shepherdr doctor\` there says why.`);
+  if (there?.build !== BUILD) fail(`Shepherdr's web service on ${to ?? "this computer"} hasn't started again: \`shepherdr doctor\` there says why.`);
 }
 
 // ---- 2. the link there --------------------------------------------------------------------------------------------

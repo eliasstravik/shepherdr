@@ -45,6 +45,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 VERSION = "3.1.0"
 HERDR_APP_MIN = "0.1.12"
@@ -309,7 +310,17 @@ def install_service(r, rec, home):
     if sys.platform == "darwin":
         target = f"gui/{os.getuid()}"
         subprocess.run(["launchctl", "bootout", f"{target}/{AGENT}"], capture_output=True)
-        ok = subprocess.run(["launchctl", "bootstrap", target, r.p(rel)], capture_output=True).returncode == 0
+        # bootout returns before the old one is gone, and bootstrap refuses until it is: wait, then try a few times
+        for _ in range(20):
+            if subprocess.run(["launchctl", "print", f"{target}/{AGENT}"], capture_output=True).returncode != 0:
+                break
+            time.sleep(0.5)
+        ok = False
+        for _ in range(4):
+            ok = subprocess.run(["launchctl", "bootstrap", target, r.p(rel)], capture_output=True).returncode == 0
+            if ok:
+                break
+            time.sleep(1)
     else:
         subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
         ok = subprocess.run(["systemctl", "--user", "enable", "shepherdr.service"], capture_output=True).returncode == 0
