@@ -138,7 +138,7 @@ export function Recipe({ recipe, asset, reply, onNote }: Props) {
   // each block can be pointed at for a note (Mark up)
   const wrap = (b: Block) => (
     <section key={b.id} data-block={b.id} onClick={onNote ? (e) => { e.stopPropagation(); onNote(b) } : undefined}
-      className={clsx('min-w-0', onNote && 'cursor-crosshair rounded-[var(--row-radius)] outline-offset-4 hover:outline hover:outline-2 hover:outline-dashed hover:outline-[var(--focus)]')}>
+      className={clsx('min-w-0', onNote && 'cursor-crosshair rounded-[var(--row-radius)] outline-offset-4 [&:hover:not(:has([data-block]:hover))]:outline [&:hover:not(:has([data-block]:hover))]:outline-2 [&:hover:not(:has([data-block]:hover))]:outline-dashed [&:hover:not(:has([data-block]:hover))]:outline-[var(--focus)]')}>
       {one(b)}
     </section>
   )

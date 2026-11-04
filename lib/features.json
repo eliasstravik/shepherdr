@@ -926,7 +926,6 @@
         "tablet": "Tap a block",
         "phone": "Tap a block, note in a sheet"
       },
-      "planned": "Not tried on the web yet",
       "service": [
         "artifacts.ts"
       ]
@@ -1007,7 +1006,6 @@
         "tablet": "Popover",
         "phone": "Sheet with recents on top"
       },
-      "planned": "Not tried on the web yet",
       "service": [
         "actions.ts"
       ]
