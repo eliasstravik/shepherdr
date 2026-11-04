@@ -82,7 +82,7 @@ export async function sendTyped(io, addr, kind, body) {
   let back = false, last = null;
   const sent = going.finally(() => { back = true; });
   for (let i = 0; i < 20 && !back; i++) {
-    await Promise.race([io.sleep(150), sent.catch(() => null)]);
+    await Promise.race([io.sleep(100), sent.catch(() => null)]);
     if (back) break;
     const box = inputLine((await io.hc(["read", addr, "--lines", "0"]).catch(() => null))?.stdout);
     if (box && /\[Image #\d+\]/.test(box) && box === last) { await io.hc(["keys", addr, "enter"]).catch(() => null); break; }
