@@ -2,11 +2,14 @@
 // person's words to an agent, stop it, mark an Assistant read, accept a Ready task, read a task's evidence.
 // Anything else is refused. Inputs are checked here; commands run with argument lists, never a shell line.
 import type { Hub } from "./hub.ts";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { sendBody, messageBody, refusal, reactionLine } from "../core/send.js";
 import { kindOf } from "../core/chat-reader.js";
 import { READ } from "../core/spaces.js";
 import type { Compat } from "./compat.ts";
 
+const ATTACH = join(process.env.HERDR_APP_HOME || join(homedir(), ".config", "herdr-app"), "data", "chat-attach");
 const ADDR = /^([\w.-]+\/)?t[0-9a-z]+$/;
 const REF = /^[A-Z][A-Z0-9]*-\d+$/;
 const MACHINE = /^[\w.-]+$/;
@@ -86,12 +89,23 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
   switch (b?.type) {
     case "send": {
       const a = addr(b.addr);
-      const text = str(b.text).trim();
-      if (!text) throw new Error("nothing to send");
+      const text = str(b.text ?? "").trim();
+      if (!text && !(Array.isArray(b.attachments) && b.attachments.length)) throw new Error("nothing to send");
       const t = hub.terminals.get(a);
       if (!t || t.state !== "live") throw new Error("That agent isn't running.");
       const io = { hc, sleep: (ms: number) => Bun.sleep(ms), status: () => (hub.terminals.get(a) as any)?.status?.state ?? null };
-      const body = messageBody({ text, quote: typeof b.quote === "string" ? b.quote.slice(0, 2000) : null });
+      // files sent with it: their paths after the words, as the window's chat sends them (copied first to another machine)
+      const files: string[] = [];
+      for (const p of Array.isArray(b.attachments) ? b.attachments.slice(0, 20) : []) {
+        if (typeof p !== "string" || !p.startsWith(ATTACH + "/") || p.includes("/../")) throw new Error("That file isn't one sent from here.");
+        if (!a.includes("/")) { files.push(p); continue; }
+        const put = await hc(["put", a, p, "--json"]);
+        let landed: string | null = null;
+        try { landed = JSON.parse(put.stdout || "{}").path ?? null; } catch {}
+        if (put.code !== 0 || !landed) throw new Error("A file didn't reach that machine.");
+        files.push(landed);
+      }
+      const body = [messageBody({ text, quote: typeof b.quote === "string" ? b.quote.slice(0, 2000) : null }), ...files].filter(Boolean).join("\n\n");
       const r = await sendBody(io, a, kindOf(t) ?? "", body);
       if (r.code !== 0) throw new Error(refusal(r).message);
       return { ok: true };

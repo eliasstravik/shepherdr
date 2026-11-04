@@ -60,7 +60,7 @@ export class Live {
     const chats = this.chats, compat = this.compat;
     if (!chats || !compat) return;
     const want = new Map<string, string>();
-    for (const k of keys.slice(0, 8)) { const a = compat.addrOf(k); if (a) want.set(k, a); }
+    for (const k of keys.slice(0, 40)) { const a = compat.addrOf(k); if (a) want.set(k, a); }
     ws.data.chats ??= new Map();
     for (const [k, w] of ws.data.chats) if (want.get(k) !== w.addr) { chats.unwatch(w.addr, w.watcher); ws.data.chats.delete(k); }
     for (const [k, addr] of want) {

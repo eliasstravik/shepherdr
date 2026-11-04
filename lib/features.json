@@ -667,7 +667,9 @@
         "tablet": "Same; pinch zoom",
         "phone": "Camera or photos; viewer with pinch and swipe"
       },
-      "planned": "Uploads from the web"
+      "service": [
+        "actions.ts"
+      ]
     },
     {
       "id": "models",
@@ -819,8 +821,7 @@
         "desktop": "Ctrl+K or ⌘K",
         "tablet": "Same with a keyboard; Search button",
         "phone": "Search button in the bottom bar, full screen"
-      },
-      "planned": "Not tried on the web yet"
+      }
     },
     {
       "id": "keys",

@@ -5,7 +5,7 @@
 //   bun service/main.ts            run it (systemd and launchd run exactly this)
 //   SHEPHERDR_PORT=7788            the port on 127.0.0.1
 //   SHEPHERDR_WEB=on|off           serve the web app and share it on the tailnet (default on)
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { randomBytes } from "node:crypto";
 import { DATA, SOCK, TOKEN, PORT, HOME, ensureData } from "./paths.ts";
@@ -162,6 +162,18 @@ const server = Bun.serve<{ who: string }>({
       const v = Number(url.searchParams.get("v"));
       if (art[2] === "recipe") { const r = artifacts.recipe(art[1], v); return r ? json(r) : json({ error: "No recipe here." }, 404); }
       return artifacts.file(art[1], v, decodeURIComponent(art[3]));
+    }
+    if (path === "/api/upload" && req.method === "POST") {
+      // a file from the message box (+, the camera, a paste or a drop): kept where the window keeps pasted ones,
+      // data/chat-attach, until it goes with a message as its path (another machine's agent gets a copy there)
+      const form = await req.formData().catch(() => null);
+      const f = form?.get("file");
+      if (!(f instanceof File) || f.size > 25 * 1024 * 1024) return json({ error: "A file of at most 25 MB." }, 400);
+      const dir = join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "data", "chat-attach");
+      mkdirSync(dir, { recursive: true });
+      const name = `web-${Date.now().toString(36)}-${(f.name || "file").replace(/[^\w.-]+/g, "-").replace(/^[-.]+/, "").slice(-80) || "file"}`;
+      await Bun.write(join(dir, name), f);
+      return json({ path: join(dir, name), name: f.name });
     }
     if (path === "/api/worktree") {
       const t = compat.taskOf(url.searchParams.get("task") ?? "");
