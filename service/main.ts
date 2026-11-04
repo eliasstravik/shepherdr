@@ -29,6 +29,7 @@ import { browserRelay } from "./browser.ts";
 import { Artifacts } from "./artifacts.ts";
 import { Settings } from "./settings.ts";
 import { Secrets } from "./secrets.ts";
+import { Push } from "./push.ts";
 import * as NF from "../core/notify.js";
 const { withEverywhere, withSpace } = NF as any;
 
@@ -56,6 +57,18 @@ const model = new Model(hub, live);
 live.chats = new Chats(hub);
 live.compat = compat;
 compat.reader = (a) => live.chats?.reader(a) ?? null;
+const push = new Push(() => (me ? `https://${me.dns}` : "https://herdr.dev"));
+live.onVisible = (v) => { push.visible = v; };
+// what was already waiting or ready when the service started: no alert for it
+let alerted: Set<string> | null = null;
+const alertNewAnd = (snap: any) => { try { alertNew(snap); } catch {} return snap; };
+function alertNew(snap: any) {
+  const now = new Map<string, any>();
+  for (const n of snap.needs ?? []) now.set(`need:${n.chat}:${n.id}`, { title: `${n.task ?? snap.places.find((p: any) => p.id === n.place)?.name ?? "An agent"} · Needs you`, body: n.text ?? n.question?.title ?? (n.secret ? `Asks for ${n.secret.name}` : ""), tag: n.task ?? n.chat, waits: true });
+  for (const t of snap.tasks ?? []) if (t.status === "ready" && !t.archived) now.set(`ready:${t.id}`, { title: `${t.id} · Ready`, body: t.name, tag: t.id, url: `./#accept=${encodeURIComponent(t.id)}` });
+  if (alerted) for (const [k, a] of now) if (!alerted.has(k)) void push.send({ ...a, badge: (snap.needs?.length ?? 0) + (snap.tasks ?? []).filter((t: any) => t.status === "ready" && !t.archived).length, open: [...now.values()].filter((x) => x.waits).map((x) => x.tag) });
+  alerted = new Set(now.keys());
+}
 const secrets = new Secrets(hub);
 compat.secrets = secrets;
 (compat as any).terminalsOf = (a: string) => hub.terminals.get(a);
@@ -81,11 +94,11 @@ model.doc = () => store.doc.value;
 compat.shared = { value: (k) => model.value(k), set: (k, v) => store.set(k, v) };
 store.on(() => model.rebuild());
 void store.load().catch(() => {});
-model.onBuild = (b) => live.setSnapshot(compat.snapshot({
+model.onBuild = (b) => live.setSnapshot(alertNewAnd(compat.snapshot({
   host: me?.host ?? "this machine", user: me?.name ?? "You", spaces: b.spaces, sections: b.sections, rows: b.rows, artifacts: artifacts.list,
   settings: [...settings.sections(me ? `https://${me.dns}/shepherdr/` : null), { name: "Secrets", level: "all", rows: [], secrets: secretNames }],
   machines: [{ name: me?.host ?? "this machine", here: true, state: "connected" }, ...b.machines.map((name) => ({ name, here: false, state: "connected" }))],
-}));
+})));
 model.start();
 
 // The Web add-on (Shepherdr settings > Window > Add-ons, Everywhere's "off" in ~/.herdr/shepherdr.json): off, the web
@@ -188,6 +201,11 @@ const server = Bun.serve<{ who: string }>({
       const name = `web-${Date.now().toString(36)}-${(f.name || "file").replace(/[^\w.-]+/g, "-").replace(/^[-.]+/, "").slice(-80) || "file"}`;
       await Bun.write(join(dir, name), f);
       return json({ path: join(dir, name), name: f.name });
+    }
+    if (path === "/api/push/key") return json({ key: await push.key() });
+    if (path === "/api/push/subscribe" && req.method === "POST") {
+      const body = await req.json().catch(() => null);
+      try { push.subscribe(body?.sub, body?.device); return json({ ok: true }); } catch (err) { return json({ error: (err as Error).message }, 400); }
     }
     if (path === "/api/worktree") {
       const t = compat.taskOf(url.searchParams.get("task") ?? "");

@@ -188,7 +188,9 @@
         "tablet": "Same",
         "phone": "Top toast, push, app badge"
       },
-      "planned": "Toasts and push from the service"
+      "service": [
+        "push.ts"
+      ]
     },
     {
       "id": "menus",
@@ -398,7 +400,6 @@
         "tablet": "Dialog",
         "phone": "Tall bottom sheet; proof opens over it"
       },
-      "planned": "Its proof opens in the viewer",
       "service": [
         "actions.ts"
       ]
@@ -723,7 +724,9 @@
         "tablet": "Same",
         "phone": "Folds to one line"
       },
-      "planned": "The subagents list above the box"
+      "service": [
+        "compat.ts"
+      ]
     },
     {
       "id": "find",

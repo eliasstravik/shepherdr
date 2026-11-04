@@ -183,7 +183,9 @@ export class Compat {
     const n = this.shared?.value("notify") ?? {};
     const level = (s: Space) => spaceLevel(n, s.id), parent = (s: Space) => machineLevel(n, machineOfSpace(s.id));
     const notify: SettingSection[] = [
-      { name: "Notify", level: "all", rows: [{ label: "Notify", key: "notify", value: everywhereOf(n), options: [...NOTIFY] }] },
+      { name: "Notify", level: "all", rows: [{ label: "Notify", key: "notify", value: everywhereOf(n), options: [...NOTIFY] },
+        // push alerts on this phone or browser: 2.1's alerts action (it asks the device, then tells the service)
+        { label: "Alerts on this device", key: "alerts", value: "", options: ["Turn on"] }] },
       ...spaces.map((s) => ({ name: "Notify", level: s.id, rows: [{ label: "Notify", key: "notify", value: level(s), options: [...NOTIFY],
         ...(spaceOwn(n, s.id) ? { inherits: { value: parent(s), from: "Everywhere" } } : { from: "Everywhere" }) }] })),
     ];

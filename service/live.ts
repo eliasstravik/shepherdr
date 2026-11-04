@@ -9,7 +9,7 @@ import type { Chats, Watcher } from "./chats.ts";
 import type { Compat } from "./compat.ts";
 
 // A page's socket: the chats it follows (by 2.1's chat key), each with the terminal and the watcher it holds.
-type WS = ServerWebSocket<{ who: string; chats?: Map<string, { addr: string; watcher: Watcher }> }>;
+type WS = ServerWebSocket<{ who: string; chats?: Map<string, { addr: string; watcher: Watcher }>; push?: string | null; visible?: boolean }>;
 
 export class Live {
   private pages = new Set<WS>();
@@ -18,6 +18,8 @@ export class Live {
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   chats: Chats | null = null;
+  /** told which devices have the app on screen (they get no push) */
+  onVisible: ((endpoints: Set<string>) => void) | null = null;
   compat: Compat | null = null;
   private snap: string | null = null;
 
@@ -42,8 +44,13 @@ export class Live {
   /** The terminals web pages show now. */
   watched() { return [...this.pages].flatMap((ws) => [...(ws.data.chats?.values() ?? [])].map((w) => w.addr)); }
 
+  private visibleNow() {
+    this.onVisible?.(new Set([...this.pages].filter((w) => w.data.visible && w.data.push).map((w) => w.data.push!)));
+  }
+
   leave(ws: WS) {
     this.pages.delete(ws);
+    this.visibleNow();
     for (const w of ws.data.chats?.values() ?? []) this.chats?.unwatch(w.addr, w.watcher);
   }
 
@@ -79,7 +86,12 @@ export class Live {
     let m: any;
     try { m = JSON.parse(text); } catch { return; }
     if (m?.type === "ping") ws.send(JSON.stringify({ type: "pong", at: m.at ?? null }));
-    else if (m?.type === "watch" && Array.isArray(m.chats)) this.watch(ws, m.chats.filter((k: unknown) => typeof k === "string" && k.length < 200));
+    else if (m?.type === "watch" && Array.isArray(m.chats)) {
+      this.watch(ws, m.chats.filter((k: unknown) => typeof k === "string" && k.length < 200));
+      ws.data.push = typeof m.push === "string" ? m.push : null;
+      ws.data.visible = m.visible !== false;
+      this.visibleNow();
+    }
   }
 
   /** Sets a view; pages hear about it shortly after, once, if it really changed. */
