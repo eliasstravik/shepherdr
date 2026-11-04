@@ -1677,7 +1677,7 @@ function retry(cid: string) {
   const s = getState()
   const o = s.outbox.find((x) => x.cid === cid)
   if (!o) return
-  const again: Outgoing = { ...o, cid: o.lost ? newCid() : o.cid, state: 'sending', error: undefined, lost: undefined, waiting: undefined, waitsFor: undefined, queued: undefined, serverAt: undefined, wentAt: undefined, busyAt: undefined, at: Date.now(), prior: priorOf(s.chats[o.chat]) }
+  const again: Outgoing = { ...o, cid: o.lost ? newCid() : o.cid, state: 'sending', error: undefined, lost: undefined, waiting: undefined, waitsFor: undefined, queued: undefined, serverAt: undefined, wentAt: undefined, busyAt: undefined, pastAt: undefined, at: Date.now(), prior: priorOf(s.chats[o.chat]) }
   setOutbox((all) => all.map((x) => (x.cid === cid ? again : x)))
   deliver(again)
 }

@@ -36,6 +36,8 @@ export interface Outgoing {
   error?: string
   /** it went in but never showed in the chat: Retry sends it as a new message */
   lost?: boolean
+  /** when the chat first showed a newer message of yours than it, by this screen's clock: the log moved past it */
+  pastAt?: number
 }
 
 /** how long Send waits for the server to answer */
@@ -44,6 +46,9 @@ export const SEND_TIMEOUT = 20_000
 export const KEEP_SENT = 2 * 60_000
 /** and after this however long its agent seems to work (one that stays working for good would keep it forever) */
 const KEEP_BUSY = 30 * 60_000
+/** one the log moved past without it (it came back changed: two messages in one, its pictures as markers) goes after
+ *  this: it is in the chat already, as the agent got it */
+export const KEEP_PAST = 60_000
 /** a screen keeps no pending one longer than this */
 const KEEP_OUT = 24 * 60 * 60_000
 /** one waiting that the chat never showed waiting (a machine out of reach) fails after this */
@@ -88,7 +93,11 @@ export function settle(out: Outgoing[], chat: Chat, now = Date.now()): Outgoing[
     }
     if (o.state === 'sending' || o.waiting || o.serverAt === undefined) return [o]
     const parts = sameAs(o, chat, taken)
-    if (!parts) return [o]
+    if (!parts) {
+      if (o.pastAt || !(o.state === 'sent' || o.lost) || !movedPast(o, chat)) return [o]
+      changed = true
+      return [{ ...o, pastAt: now }]
+    }
     for (const id of parts) taken.add(id)
     changed = true
     return []
@@ -124,13 +133,23 @@ function sameAs(o: Outgoing, chat: Chat, taken: Set<string>): string[] | null {
     break
   }
   if (o.text && !ids.length) return null
+  // its words came back: its pictures may come as files or only as how many there were (Claude Code's "[Image #1]")
+  const said = ids[0]
   for (const f of o.files) {
     if (named.has(f.path)) continue
     const m = fresh.find((m) => sameFile(m.file?.path, f.path) && !ids.includes(m.id))
-    if (!m) return null
-    ids.push(m.id)
+    if (m) ids.push(m.id)
+    else if (!said) return null
   }
+  // and what came with its words is its own (its files, its "2 images" line)
+  if (said) for (const m of fresh) if (m.id.startsWith(`${said}:`) && !ids.includes(m.id)) ids.push(m.id)
   return ids.length ? ids : null
+}
+
+/** the chat shows a message of yours newer than it (the agent takes them in order): it won't come back as it was */
+function movedPast(o: Outgoing, chat: Chat) {
+  const prior = new Set(o.prior ?? [])
+  return chat.messages.some((m) => m.who === 'you' && !m.waiting && !prior.has(m.id) && (m.at ?? 0) > o.serverAt! + SLACK)
 }
 
 /** your latest messages a chat shows now (older ones are long before anything you send next): none of them is it */
@@ -141,12 +160,17 @@ export function priorOf(chat: Chat | undefined): string[] {
     .map((m) => m.id)
 }
 
-/** what didn't go through in time fails, keeping its words and files for Retry: one still sending long after its time
+/** one the log moved past goes; what didn't go through in time fails, keeping its words and files for Retry: one still sending long after its time
  *  (the screen reloaded while it was on its way), one that went in but never showed in the chat (counted from when its
  *  agent last worked: a working CLI keeps it until its next step), and one waiting for a machine out of reach for long */
 export function expire(out: Outgoing[], now: number, working: (chat: string) => boolean = () => false): Outgoing[] {
   let changed = false
-  const next = out.map((o) => {
+  const next = out.flatMap((o) => {
+    // the log moved past it a while ago: it is in the chat as the agent got it
+    if (o.pastAt && now - o.pastAt > KEEP_PAST) {
+      changed = true
+      return []
+    }
     const fail = (error: string, lost?: boolean) => {
       changed = true
       return { ...o, state: 'failed' as const, error, lost }
@@ -205,10 +229,13 @@ export function reasonOf(e: unknown): string {
   return msg ? (msg.length > 80 ? `${msg.slice(0, 79)}…` : msg) : 'Something went wrong.'
 }
 
-const STORE = 'shepherdr.outbox'
+// .2: once, every screen drops what it kept under the old name (ones with pictures that never matched, SHEP-22)
+const STORE = 'shepherdr.outbox.2'
+const OLD = ['shepherdr.outbox']
 
 export function loadOutbox(): Outgoing[] {
   try {
+    for (const k of OLD) localStorage.removeItem(k)
     const v = JSON.parse(localStorage.getItem(STORE) ?? '[]')
     return Array.isArray(v) ? prune(v, Date.now()) : []
   } catch {
