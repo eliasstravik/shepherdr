@@ -19,7 +19,7 @@ from .agents import (
     agent_running, busy_again, detail, fit, LINE_MAX, live_agents, ready_turns, STATUSES, SUMMARY_MAX, WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
-from .github import finish, gh, github, merged_here, pr_open, pr_pending, pr_problem, pr_view, update_main, watch_main
+from .github import finish, gh, github, merged_here, pr_adopt, pr_open, pr_pending, pr_problem, pr_view, update_main, watch_main
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
     own_path, parent_for, resume_argv, retag_tabs, tab_title, task_tabs,
@@ -909,6 +909,11 @@ def cmd_accept(args):
         # (saved), and refused after the store is.
         if busy_again(t, [detail(k) for k in live_agents(s.key(t))]):
             back = back_to_work(s, t, "its agent is at work again")
+        # One its agent opened itself, which ready couldn't open again ("already exists"): adopted.
+        elif (not t.get("pr") and (t.get("attention") or "").startswith("Couldn't open a pull request")
+              and (repo := github(s)) and pr_adopt(t, repo)):
+            t.pop("attention", None)
+            s.dirty = True
         # A pull request's problems are read fresh (merge_now()): one fixed since, or a merge that
         # failed once, doesn't stand in the way. Without one, only a failed try doesn't.
         elif t.get("attention") and not t.get("pr") and not t["attention"].startswith(("Couldn't ask for the merge", MERGE_FAILED)):

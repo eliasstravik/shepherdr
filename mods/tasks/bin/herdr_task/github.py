@@ -39,7 +39,8 @@ def remote_of(main):
 
 
 def pr_open(s, task, repo, summary=None):
-    """Pushes the task's branch and opens its pull request (or keeps the open one)."""
+    """Pushes the task's branch and opens its pull request (or keeps the open one, also one opened
+    by hand or by its agent for the branch: SHEP-13's "already exists")."""
     wt, br = task["worktree"], task["branch"]
     ok, _, err = git(wt, "push", "--force-with-lease", "-u", remote_of(s.loc["folder"]), br)
     if not ok:
@@ -51,6 +52,10 @@ def pr_open(s, task, repo, summary=None):
             if summary:
                 gh("pr", "comment", str(pr["number"]), "--repo", repo, "--body", summary)
             return pr
+    if pr_adopt(task, repo):
+        if summary:
+            gh("pr", "comment", str(task["pr"]["number"]), "--repo", repo, "--body", summary)
+        return task["pr"]
     body = (task.get("prompt") or "").strip() or task["title"]
     if summary:
         body += "\n\n## Summary\n\n" + summary.strip()
@@ -63,6 +68,19 @@ def pr_open(s, task, repo, summary=None):
     url = out.split()[-1]
     task["pr"] = {"number": int(url.rstrip("/").split("/")[-1]), "url": url, "repo": repo}
     return task["pr"]
+
+
+def pr_adopt(task, repo):
+    """The open pull request for the task's branch, opened by hand or by its agent, recorded on the
+    task; None when there is none (SHEP-13: ready failed with "already exists")."""
+    ok, out, _ = gh("pr", "list", "--repo", repo, "--head", task["branch"], "--state", "open", "--json", "number,url")
+    try:
+        found = json.loads(out)[0] if ok and out else None
+    except (ValueError, IndexError, TypeError):
+        found = None
+    if found:
+        task["pr"] = {"number": found["number"], "url": found["url"], "repo": repo}
+    return task.get("pr") if found else None
 
 
 BAD = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
