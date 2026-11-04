@@ -70,3 +70,19 @@ test("a pin made on the laptop is the mini's pin, in the mini's words, and back"
   await laptop.poll();
   await expect(onLaptop.load()).rejects.toThrow("can't be reached");
 });
+
+test("a machine this one only links can't make itself the host; a record from the future doesn't count", async () => {
+  const w = world();
+  const laptop = new Host(w.hub("L") as any, "t");
+  w.docs.M.set("shepherdr.host", { value: { id: "M", at: Date.now() }, version: 1 });
+  await laptop.poll();
+  expect(laptop.serving()).toBe(true);                 // the mini's own claim: not believed by the laptop
+  w.docs.L.set("shepherdr.host", { value: { id: "M", at: Date.now() + 3_600_000 }, version: 1 });
+  await laptop.poll();
+  expect(laptop.serving()).toBe(true);                 // an hour ahead: not a real record
+  w.docs.L.set("shepherdr.host", { value: { id: "M", at: 5 }, version: 2 });
+  w.docs.M.set("shepherdr.host", { value: { id: "L", at: 9 }, version: 2 });
+  await laptop.poll();
+  expect(laptop.serving()).toBe(true);                 // the host itself handed it back
+  expect(w.docs.L.get("shepherdr.host")?.value).toEqual({ id: "L", at: 9 });
+});

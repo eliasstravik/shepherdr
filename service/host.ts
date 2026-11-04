@@ -1,6 +1,7 @@
 // Serve from (core/host.js): which machine serves the web app and holds the truth, as this service sees it. Every
-// 15 s it reads the host record here and on each connected machine, keeps the newest here and hands it on to the
-// machines that had an older one (a machine asleep at the move learns it when it wakes), and says who it is in its
+// 15 s it reads the host record here and the host's own (it hands a move on), keeps the newest here and hands it on
+// to the machines it links that had an older one (a machine asleep at the move learns it when it wakes), and says
+// who it is in its
 // own node record (its id, its names for the machines it links, its link). Not the host: the host's node record says
 // its names, so the shared data can be moved between the two machines' words.
 import { readdirSync } from "node:fs";
@@ -127,15 +128,20 @@ export class Host {
       const ml = await this.hub.call<{ machines: any[] }>("machine.list", {});
       this.machines = new Map((ml.machines ?? []).filter((m) => !m.temporary).map((m) => [String(m.name), { id: m.id ? String(m.id) : null, state: String(m.state ?? "") }]));
       const connected = [...this.machines].filter(([, m]) => m.state === "connected").map(([n]) => n);
-      // the record here and on every connected machine, and each one's node record
+      // Whom to believe: the record here (whatever can write this machine's documents can run anything here anyway),
+      // and a newer one from the machine that serves now (it hands a move on). Never one from any other machine: a box
+      // this one only links (a VM running agents) can't make itself the host. A record from the future doesn't count.
       const here = await this.get(HOST_DOC, null).catch(() => null);
       const there = await Promise.all(connected.map(async (m) => ({ m, host: await this.get(HOST_DOC, m).catch(() => null), node: await this.get(NODE_DOC, m).catch(() => null) })));
       this.nodes = new Map(there.filter((t) => nodeAlive(t.node?.value)).map((t) => [String(t.node!.value.id), t.node!.value as Node]));
-      const best = newestHost([here?.value, ...there.map((t) => t.host?.value)]);
+      const sane = (r: any) => (r && Number(r.at) <= Date.now() + 60_000 && (r.id === this.me!.id || [...this.machines.values()].some((m) => m.id === r.id)) ? r : null);
+      const mine = sane(here?.value);
+      const nowHost = mine && mine.id !== this.me.id ? there.find((t) => this.machines.get(t.m)?.id === mine.id) : null;
+      const best = newestHost([mine, sane(nowHost?.host?.value)]);
       if (best && JSON.stringify(best) !== JSON.stringify(here?.value ?? null))
         await this.hub.call("doc.set", { name: HOST_DOC, value: best, version: here?.version ?? 0 }).catch(() => {});
-      // hand it on to each machine whose record is older (one that answered)
-      if (best) for (const t of there) if (t.host && (t.host.value?.at ?? 0) < best.at)
+      // hand it on to each machine this one links whose record is older (one that answered)
+      if (best) for (const t of there) if (t.host && (Number(t.host.value?.at) || 0) < best.at)
         await this.hub.call("doc.set", { name: HOST_DOC, value: best, version: t.host.version, on: t.m }).catch(() => {});
       this.record = best ? { id: String(best.id), at: Number(best.at), by: best.by } : null;
       this.hostNode = this.serving() ? null : this.nodes.get(this.record!.id) ?? null;
