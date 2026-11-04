@@ -119,8 +119,9 @@ class Artifacts(unittest.TestCase):
             self.publish(self.panel(), title="Plan", custom=True, task="HAT-2")
         a = self.only()[0]
         a["versions"][0].pop("kind")  # as one made before versions had kinds
+        a["at"] = 5
         with A.Store(A.locate(self.folder)) as s:
-            s.data["artifacts"] = [a]
+            s.data["artifacts"] = [a, {"id": "newer-1a2b", "title": "Newer", "version": 1, "versions": [], "at": 9}]
             s.dirty = True
         d = os.path.join(self.dir, "as-recipe")
         os.makedirs(d)
@@ -132,6 +133,9 @@ class Artifacts(unittest.TestCase):
         self.assertEqual((b["publisher"], b["task"], b["title"]), ("t1", "HAT-2", "HAT-2: Plan"))
         self.assertEqual([(x["v"], x["kind"]) for x in b["versions"]], [(1, "custom"), (2, "recipe")])
         self.assertIn("recipe", b["versions"][1]["note"])
+        # its time and place in the list stay
+        self.assertEqual(b["at"], 5)
+        self.assertEqual([x["id"] for x in self.only()], [a["id"], "newer-1a2b"])
 
     def test_convert_leaves_a_panel_that_answers_clicks_to_a_hand(self):
         d = self.panel()

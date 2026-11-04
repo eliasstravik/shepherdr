@@ -716,15 +716,17 @@ def cmd_publish(o):
         for x in art["versions"]:
             if "kind" not in x and version_kind(art["id"], x["v"]):
                 x["kind"] = version_kind(art["id"], x["v"])
-        art.update(title=title, version=v, folder=loc["folder"], publisher=publisher, task=task, at=at, files=files)
+        # a conversion keeps the artifact's time and place in the list (only its version is new)
+        art.update(title=title, version=v, folder=loc["folder"], publisher=publisher, task=task, at=art.get("at", at) if as_maker else at, files=files)
         art["versions"].append({"v": v, "at": at, "publisher": publisher, "kind": "custom" if custom else "recipe",
                                 **({"note": o.note} if o.note else {})})
         for old in art["versions"][:-KEEP]:
             shutil.rmtree(os.path.join(FILES, art["id"], f"v{old['v']}"), ignore_errors=True)
         art["versions"] = art["versions"][-KEEP:]
         # Newest first.
-        s.data["artifacts"].remove(art)
-        s.data["artifacts"].insert(0, art)
+        if not as_maker:
+            s.data["artifacts"].remove(art)
+            s.data["artifacts"].insert(0, art)
         s.dirty = True
         installed = None if getattr(o, "no_install", False) else write_mod(keep, files, art, f"art-{art['id']}", publisher)
         prune_versions(art)
