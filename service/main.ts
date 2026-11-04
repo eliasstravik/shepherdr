@@ -30,6 +30,7 @@ import { Artifacts } from "./artifacts.ts";
 import { Settings } from "./settings.ts";
 import { Secrets } from "./secrets.ts";
 import { Push } from "./push.ts";
+import { dictate } from "./dictate.ts";
 import * as NF from "../core/notify.js";
 const { withEverywhere, withSpace } = NF as any;
 
@@ -201,6 +202,9 @@ const server = Bun.serve<{ who: string }>({
       const name = `web-${Date.now().toString(36)}-${(f.name || "file").replace(/[^\w.-]+/g, "-").replace(/^[-.]+/, "").slice(-80) || "file"}`;
       await Bun.write(join(dir, name), f);
       return json({ path: join(dir, name), name: f.name });
+    }
+    if (path === "/api/dictate" && req.method === "POST") {
+      try { return json({ text: await dictate(await req.blob()) }); } catch (err) { return json({ error: (err as Error).message }, 400); }
     }
     if (path === "/api/push/key") return json({ key: await push.key() });
     if (path === "/api/push/subscribe" && req.method === "POST") {

@@ -1,5 +1,5 @@
-// Talk to type: the browser's own speech recognition hears you while a meter on the microphone draws the wave. What
-// it heard waits until you are done, then goes into the box to edit; cancel drops it.
+// Talk to type: the microphone records while a meter on it draws the wave; on Done the service writes it down
+// (whisper.cpp, as the window's dictation), and the words go into the box to edit; cancel drops it.
 import { levelOf, meter, TALKING, type Sample } from './meter.ts'
 
 type Rec = {
@@ -25,8 +25,7 @@ let current: Dictation | null = null
 let level: AnalyserNode | null = null
 
 export function canDictate() {
-  const w = window as unknown as Record<string, unknown>
-  return Boolean(w.SpeechRecognition || w.webkitSpeechRecognition)
+  return typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
 }
 
 /** for the wave: how loud you are right now */
@@ -35,19 +34,15 @@ export function dictSample(): Sample {
   return { level: l, who: l > TALKING ? 'you' : null }
 }
 
-/** Starts listening. `end` gets what was heard when it finishes, or null when cancelled. */
+/** Starts listening. `end` gets what was heard when it finishes, or null when cancelled. Shepherdr 3: the phone records,
+ *  the service writes it down with whisper.cpp (the window's dictation, the same words on every phone browser). */
 export function dictate(end: (text: string | null) => void): Dictation {
   current?.cancel()
-  const w = window as unknown as Record<string, new () => Rec>
-  const R = w.SpeechRecognition || w.webkitSpeechRecognition
-  const heard: string[] = []
   let state: 'on' | 'finishing' | 'over' = 'on'
-  let blocked = false
-  let quick = 0
-  let startedAt = 0
   let mic: MediaStream | null = null
   let ctx: AudioContext | null = null
-  let rec: Rec | null = null
+  let rec: MediaRecorder | null = null
+  const chunks: Blob[] = []
   const close = (text: string | null) => {
     if (state === 'over') return
     state = 'over'
@@ -61,47 +56,25 @@ export function dictate(end: (text: string | null) => void): Dictation {
     finish() {
       if (state !== 'on') return
       state = 'finishing'
-      rec?.stop()
-      // the last words normally come within a moment; don't wait on a browser that never says it stopped
-      setTimeout(() => close(heard.join(' ')), 2500)
+      if (!rec || rec.state === 'inactive') return close('')
+      rec.onstop = async () => {
+        const audio = new Blob(chunks, { type: rec?.mimeType || 'audio/webm' })
+        try {
+          const r = await fetch('api/dictate', { method: 'POST', body: audio, headers: { 'x-shepherdr': '1', 'content-type': audio.type } }).then((x) => x.json())
+          close(r.text ?? '')
+        } catch {
+          close('')
+        }
+      }
+      rec.stop()
     },
     cancel() {
       if (state === 'over') return
-      rec?.abort()
+      if (rec && rec.state !== 'inactive') { rec.onstop = null; rec.stop() }
       close(null)
     },
   }
   current = self
-  if (!R) {
-    queueMicrotask(() => close(null))
-    return self
-  }
-  const listen = () => {
-    startedAt = Date.now()
-    try {
-      rec!.start()
-    } catch {
-      close(heard.join(' '))
-    }
-  }
-  rec = new R()
-  rec.lang = navigator.language || 'en-US'
-  rec.continuous = true
-  rec.interimResults = false
-  rec.onresult = (e) => {
-    for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) heard.push(e.results[i][0].transcript.trim())
-  }
-  rec.onerror = (e) => {
-    if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'audio-capture') blocked = true
-  }
-  rec.onend = () => {
-    // a browser stops by itself after a pause: keep listening until Done, unless it keeps stopping straight away
-    quick = Date.now() - startedAt < 1000 ? quick + 1 : 0
-    if (state === 'on' && !blocked && quick < 3) return listen()
-    close(heard.join(' '))
-  }
-  listen()
-  // the wave's own ear on the microphone
   navigator.mediaDevices
     ?.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
     .then((stream) => {
@@ -110,7 +83,10 @@ export function dictate(end: (text: string | null) => void): Dictation {
       ctx = new AudioContext()
       level = meter(ctx)
       ctx.createMediaStreamSource(stream).connect(level)
+      rec = new MediaRecorder(stream)
+      rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data) }
+      rec.start(1000)
     })
-    .catch(() => undefined)
+    .catch(() => close(null))
   return self
 }

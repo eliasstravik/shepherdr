@@ -938,7 +938,9 @@
         "tablet": "Same",
         "phone": "Same; big mic button"
       },
-      "planned": "Dictation through the service's whisper.cpp"
+      "service": [
+        "dictate.ts"
+      ]
     },
     {
       "id": "call",
