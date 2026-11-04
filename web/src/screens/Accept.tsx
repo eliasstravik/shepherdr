@@ -4,7 +4,7 @@
 // A task no longer Ready says where it is now, with only Close. On a phone it slides up as a sheet.
 import clsx from 'clsx'
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import { act } from '../kernel.ts'
+import { act, openArtifact } from '../kernel.ts'
 import { Dialog } from '../rowmenu.tsx'
 import { Primary } from '../ui.tsx'
 import { Markdown } from '@plugins/chat/markdown.tsx'
@@ -134,10 +134,11 @@ export function AcceptCard() {
             </Section>
             <Section label="Proof">
               {e.proof ? (
-                // opens in the artifact viewer once artifacts are on the web (3.1.0 phase 6)
-                <p className="flex h-9 items-center gap-2 rounded-[var(--row-radius)] bg-well px-2.5 shadow-soft phone:h-11">
+                // the proof artifact over the card, in the viewer
+                <button type="button" onClick={() => openArtifact(e.proof!.id)} className="press-dim flex h-9 w-full items-center gap-2 rounded-[var(--row-radius)] bg-well px-2.5 text-left shadow-soft hover:bg-hover phone:h-11">
                   <span className="min-w-0 flex-1 truncate">{e.proof.title.replace(/^[A-Z]+-\d+:\s*/, '')}</span>
-                </p>
+                  <span className="shrink-0 text-xs text-fg3">Open</span>
+                </button>
               ) : <p className="text-fg3">No proof artifact.</p>}
             </Section>
             {e.details ? (
