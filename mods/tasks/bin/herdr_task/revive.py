@@ -109,12 +109,16 @@ def lost_message(ref=None, template=None):
     return msg
 
 
-def shell_line(shell, cwd, env, argv):
+def shell_line(shell, cwd, env, argv, direct=False):
     """The line typed into the recovered shell: into the agent's folder, then the agent. POSIX shells
-    and fish (3.1+) take `&&` and VAR=value before a command; others get the agent alone."""
+    and fish (3.1+) take `&&` and VAR=value before a command; others get the agent alone. `direct`:
+    it started without the person's shell, so their aliases and functions (a claude() adding flags)
+    stay out now too (`command`)."""
     words = " ".join(shlex.quote(str(a)) for a in argv)
     if os.path.basename(shell or "") not in ("bash", "zsh", "sh", "dash", "ksh", "fish"):
         return words
+    if direct:
+        words = f"command {words}"
     pre = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in sorted((env or {}).items()))
     cmd = f"{pre} {words}" if pre else words
     return f"cd {shlex.quote(cwd)} && {cmd}" if cwd else cmd
@@ -156,8 +160,11 @@ def record_of(k):
     pid = fg.get("pid")
     if not pid:
         return None
-    # Its launch argv says how it started; one typed into a shell (argv: the shell) has only its process's.
+    # Its launch argv says how it started (in the person's shell, as a task's agent, or not); one typed
+    # into a shell (argv: the shell) has only its process's.
     kind, argv = base_argv(k.get("argv"))
+    launch = k.get("argv") or []
+    shell = any(os.path.basename(str(a)) in SHELLS for a in launch[:launch.index(argv[0])]) if kind else True
     if not kind:
         kind, argv = base_argv(fg.get("argv"))
         if kind:
@@ -168,7 +175,7 @@ def record_of(k):
     if not sid:
         return None
     return {"kind": kind, "session": sid, "log": log, "argv": argv, "cwd": fg.get("cwd") or k.get("cwd"),
-            "pid": k.get("pid"), "working": status_word(k) in ("working", "blocked")}
+            "pid": k.get("pid"), "working": status_word(k) in ("working", "blocked"), "shell": shell}
 
 
 def task_record(k):
@@ -189,7 +196,7 @@ def task_record(k):
     if (k.get("labels") or {}).get("herdr.role") != "reviewer":
         argv = own_argv(argv)
     return {"kind": kind, "session": a.get("session"), "log": a.get("log"), "argv": argv, "cwd": k.get("cwd"),
-            "pid": None, "working": t.get("state") == "running"}
+            "pid": None, "working": t.get("state") == "running", "shell": True}
 
 
 def template_of(name="assistant"):
@@ -218,7 +225,8 @@ def bare_shell(k):
 
 
 def plan(k, rec, running):
-    """What to type into `k` now: (how, argv) or None. `running`: the sessions agents run here now."""
+    """What to type into `k` now: (how, argv, direct) or None (direct: shell_line's). `running`: the
+    sessions agents run here now."""
     labels = k.get("labels") or {}
     assistant = labels.get("herdr.role") == "coordinator" or k.get("template") in ASSISTANT_TEMPLATES
     if rec and rec.get("pid") == k.get("pid"):
@@ -235,15 +243,16 @@ def plan(k, rec, running):
             return None
         rec = task_record(k) if labels.get("herdr.task") else None
     if rec and rec.get("session") and rec["session"] in running:
-        return ("running", None)
+        return ("running", None, False)
     if rec and rec.get("session") and rec.get("log") and os.path.isfile(rec["log"]):
-        return ("resume", resume_argv(rec["kind"], rec["argv"], rec["session"], CUT if rec.get("working") else None))
+        return ("resume", resume_argv(rec["kind"], rec["argv"], rec["session"], CUT if rec.get("working") else None), not rec.get("shell"))
     # Its session is gone: a new one, with the handover (and an Assistant's role, its template's words).
     command, template = template_of() if assistant else (None, None)
     argv = (rec or {}).get("argv") or (shlex.split(command) if command else None)
     if not argv:
         return None
-    return ("fresh", [*argv, lost_message(task_ref(k), template)])
+    # Without a record, an Assistant starts as its template does: without the person's shell.
+    return ("fresh", [*argv, lost_message(task_ref(k), template)], not (rec or {}).get("shell"))
 
 
 def revive_pass(report):
@@ -267,11 +276,11 @@ def revive_pass(report):
         step = plan(k, rec, running)
         if not step:
             continue
-        how, argv = step
+        how, argv, direct = step
         rec = dict(rec or {}, pid=k.get("pid"), how=how, sent=now())
         if argv:
             shell = (k.get("argv") or [""])[0]
-            r = run(["hc", "send", k["address"], shell_line(shell, rec.get("cwd") or k.get("cwd"), env_of(k), argv)])
+            r = run(["hc", "send", k["address"], shell_line(shell, rec.get("cwd") or k.get("cwd"), env_of(k), argv, direct)])
             if r.returncode != 0:
                 report.setdefault("revive_failed", []).append({"terminal": k["address"], "why": (r.stderr or r.stdout).strip()})
                 continue

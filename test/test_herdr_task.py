@@ -586,12 +586,12 @@ class Revive(unittest.TestCase):
         self.assistant()
         self.tick()
         rec = json.loads(self.terms["t1"]["labels"]["herdr.resume"])
-        self.assertEqual((rec["session"], rec["argv"], rec["pid"]), ("S1", ["claude", "--model", "opus"], 100))
+        self.assertEqual((rec["session"], rec["argv"], rec["pid"], rec["shell"]), ("S1", ["claude", "--model", "opus"], 100, False))
         self.assertEqual(self.sent, [])
         self.crash("t1")
         report = self.tick()
         self.assertEqual(report["revived"], [{"terminal": "t1", "how": "resume", "session": "S1"}])
-        self.assertEqual(self.sent, [("t1", "cd /home/me/app && claude --model opus --resume S1")])
+        self.assertEqual(self.sent, [("t1", "cd /home/me/app && command claude --model opus --resume S1")])
         # Once: the next tick types nothing again, even while the agent starts.
         self.tick()
         self.assertEqual(len(self.sent), 1)
@@ -620,7 +620,7 @@ class Revive(unittest.TestCase):
         with self.mock.patch.object(self.r, "template_of", lambda name="assistant": ("claude", "---\ncommand: claude\n---\nYou are the Assistant.")):
             self.tick()
         line = self.sent[0][1]
-        self.assertTrue(line.startswith("cd /home/me/app && claude --model opus '<restart>Your earlier session is gone"), line)
+        self.assertTrue(line.startswith("cd /home/me/app && command claude --model opus '<restart>Your earlier session is gone"), line)
         self.assertIn("You are the Assistant.", line)
         self.assertNotIn("--resume", line)
 
@@ -666,9 +666,19 @@ class Revive(unittest.TestCase):
             self.tick()
             self.tick()
         self.assertEqual(len(self.sent), 1)
-        self.assertTrue(self.sent[0][1].startswith("cd /home/me && claude '<restart>"), self.sent[0][1])
+        self.assertTrue(self.sent[0][1].startswith("cd /home/me && command claude '<restart>"), self.sent[0][1])
 
     def test_other_terminals_are_left_alone(self):
         self.terms["t9"] = {"address": "t9", "state": "live", "pid": 9, "argv": ["/bin/bash"], "foreground": {"pid": 9, "name": "bash"}, "labels": {}}
         self.tick()
         self.assertEqual((self.sent, self.terms["t9"]["labels"]), ([], {}))
+
+    def test_one_typed_into_a_shell_comes_back_the_same_way(self):
+        """An Assistant the person restarted by hand in its shell (claude -c): its process's flags, through the shell again."""
+        self.assistant()
+        t = self.terms["t1"]
+        t.update(argv=["/bin/bash"], foreground={"pid": 101, "name": "claude", "argv": ["/opt/claude", "--dangerously-skip-permissions", "-c"], "cwd": "/home/me"})
+        self.tick()
+        self.crash("t1")
+        self.tick()
+        self.assertEqual(self.sent, [("t1", "cd /home/me && claude --dangerously-skip-permissions --resume S1")])
