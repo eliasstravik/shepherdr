@@ -13,9 +13,10 @@ source is core/<file> beside lib/, and each mod's copy is mods/<mod>/core/<file>
 
 A copy that differs from both lib and what this last wrote there (lib/.last/) was edited by
 hand: it is never overwritten; the run fails and names it (keep its change with --from, or move
-the change into lib/<file>).
+the change into lib/<file>). A fresh checkout or worktree has no lib/.last: what git last
+committed of the source stands in for it (a copy equal to that is ours, not hand-edited).
 """
-import hashlib, os, shutil, sys
+import hashlib, os, shutil, subprocess, sys
 
 HOME = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 LIB, MODS = os.path.join(HOME, "lib"), os.path.join(HOME, "mods")
@@ -29,6 +30,16 @@ def read(path):
             return f.read()
     except FileNotFoundError:
         return None
+
+
+def committed(name):
+    """The source as git last committed it (HEAD), or None outside a checkout."""
+    rel = os.path.relpath(src_of(name), HOME)
+    try:
+        r = subprocess.run(["git", "-C", HOME, "show", f"HEAD:{rel}"], capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout if r.returncode == 0 else None
 
 
 def copies():
@@ -70,6 +81,8 @@ def main(argv):
             bad.append(f"{os.path.relpath(src_of(name), HOME)} is missing")
             continue
         last = read(os.path.join(LAST, name))
+        if last is None:
+            last = committed(name)
         for mod in mods:
             path = os.path.join(MODS, mod, name)
             rel = os.path.relpath(path, HOME)
