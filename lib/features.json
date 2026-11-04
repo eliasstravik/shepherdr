@@ -788,7 +788,6 @@
         "tablet": "Same",
         "phone": "Same, big buttons"
       },
-      "planned": "Questions with several steps (one question works)",
       "service": [
         "asks.ts"
       ]

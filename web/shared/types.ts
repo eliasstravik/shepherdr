@@ -296,6 +296,8 @@ export interface Automation {
 export interface Choice {
   label: string
   description?: string
+  /** the agent marked it (Recommended) */
+  recommended?: boolean
 }
 
 export interface Question {
@@ -303,6 +305,8 @@ export interface Question {
   title: string
   kind: 'Form' | 'Question' | 'Plan'
   steps?: string[]
+  /** several questions on one card (3.0's): a step for each, then one to check the answers and Submit */
+  parts?: { title: string; header?: string; multi?: boolean; choices: Choice[] }[]
   /** a plan in the CLI's own words, in Markdown */
   plan?: string
   /** CLI prompt context, read from its visible screen. */

@@ -1338,8 +1338,112 @@ function Evidence({ e, open }: { e: MergeEvidence; open: boolean }) {
   )
 }
 
+const optionLook = 'group press relative flex min-h-10 w-full items-center gap-2.5 rounded-row px-3 py-2 text-left shadow-[inset_0_0_0_1px_var(--line2)] enabled:hover:bg-hover disabled:cursor-default disabled:opacity-40 aria-pressed:shadow-[inset_0_0_0_1.5px_var(--fg)] disabled:aria-pressed:opacity-100 coarse:min-h-11 phone:min-h-12'
+
+/** several questions on one card, as 3.0's: a step for each (its header), its options, Other…, then a step to check
+ *  the answers, each opening its question again, and one Submit */
+function StepsCard({ q, chat, source, steady }: { q: Question & { parts: NonNullable<Question['parts']> }; chat: Chat; source?: CardSource; steady?: boolean }) {
+  const n = q.parts.length
+  const [step, setStep] = useState(0)
+  const [picks, setPicks] = useState<number[][]>(() => q.parts.map(() => []))
+  // an Other answer per question: null while it isn't picked
+  const [others, setOthers] = useState<(string | null)[]>(() => q.parts.map(() => null))
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const sent = q.sent !== undefined || !!q.closed
+  const answerOf = (i: number) => (others[i] !== null && others[i]!.trim() ? others[i]!.trim() : picks[i].map((k) => q.parts[i].choices[k].label).join(', '))
+  const done = q.parts.every((_, i) => answerOf(i))
+  const pick = (i: number, k: number) => {
+    const multi = q.parts[i].multi
+    setPicks((p) => p.map((x, j) => (j !== i ? x : multi ? (x.includes(k) ? x.filter((y) => y !== k) : [...x, k].sort((a, b) => a - b)) : [k])))
+    if (!multi) {
+      setOthers((o) => o.map((x, j) => (j === i ? null : x)))
+      // one pick moves on: to the next question, or to the answers
+      setStep(i < n - 1 ? i + 1 : n)
+    }
+  }
+  const submit = async () => {
+    if (!done || busy) return
+    setBusy(true); setErr('')
+    try {
+      const r = await act({ type: 'answer', chat: chat.key, question: q.id, answers: q.parts.map((_, i) => answerOf(i)) } as never)
+      if ((r as { ok?: boolean })?.ok === false) { setErr((r as { error?: string }).error ?? "That didn't go through."); setBusy(false) }
+    } catch (e) { setErr(reasonOf(e)); setBusy(false) }
+  }
+  const part = step < n ? q.parts[step] : null
+  return (
+    <CardShell title={q.title} source={source}>
+      <div role="tablist" aria-label="Questions" className="flex flex-wrap gap-1.5">
+        {[...q.parts.map((p, i) => p.header || `Question ${i + 1}`), 'Submit'].map((label, i) => (
+          <button key={i} type="button" role="tab" aria-selected={i === step} disabled={sent} onClick={() => setStep(i)}
+            className="press inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[0.8125rem] text-fg2 shadow-[inset_0_0_0_1px_var(--line2)] aria-selected:bg-fg aria-selected:text-bg aria-selected:shadow-none coarse:h-9 phone:h-9">
+            {i < n && answerOf(i) ? <CheckIcon className="size-3.5" /> : null}{label}
+          </button>
+        ))}
+      </div>
+      {sent ? null : part ? (
+        <>
+          <p className="text-pretty font-medium">{part.title}</p>
+          {part.multi ? <p className="text-[0.8125rem] text-fg2">Pick any that apply.</p> : null}
+          {part.choices.map((c, k) => (
+            <button key={k} type="button" aria-pressed={picks[step].includes(k)} disabled={busy} onClick={() => pick(step, k)} className={optionLook}>
+              <span aria-hidden="true" className={clsx('size-4 shrink-0 shadow-[inset_0_0_0_1.5px_var(--fg3)] group-aria-pressed:shadow-[inset_0_0_0_5px_var(--fg)]', part.multi ? 'rounded-[4px]' : 'rounded-full')} />
+              <span>
+                <span className="block">{c.label}{c.recommended ? <span className="ml-1.5 text-[0.75rem] text-fg2">Recommended</span> : null}</span>
+                {c.description ? <span className="block whitespace-pre-line text-[0.75rem]/[18px] text-fg2 phone:text-[0.8125rem]/5">{c.description}</span> : null}
+              </span>
+            </button>
+          ))}
+          <button type="button" aria-pressed={others[step] !== null} disabled={busy} className={optionLook}
+            onClick={() => { setOthers((o) => o.map((x, j) => (j === step ? (x === null ? '' : null) : x))); if (!part.multi) setPicks((p) => p.map((x, j) => (j === step ? [] : x))) }}>
+            <span aria-hidden="true" className={clsx('size-4 shrink-0 shadow-[inset_0_0_0_1.5px_var(--fg3)] group-aria-pressed:shadow-[inset_0_0_0_5px_var(--fg)]', part.multi ? 'rounded-[4px]' : 'rounded-full')} />
+            Other…
+          </button>
+          {others[step] !== null ? (
+            <input autoFocus aria-label="Your answer" placeholder="Your answer" className={noteBox} value={others[step]!}
+              onChange={(e) => setOthers((o) => o.map((x, j) => (j === step ? e.target.value : x)))}
+              onKeyDown={(e) => e.key === 'Enter' && others[step]!.trim() && setStep(step + 1)} />
+          ) : null}
+          {step < n - 1 || part.multi || others[step] !== null ? (
+            <div className="flex justify-end"><button type="button" className="min-h-9 px-2 text-accent" onClick={() => setStep(step + 1)}>Next</button></div>
+          ) : null}
+        </>
+      ) : (
+        // the answers to check, each opening its question again
+        <ul className="flex flex-col gap-1">
+          {q.parts.map((p, i) => (
+            <li key={i}>
+              <button type="button" onClick={() => setStep(i)} className="press flex w-full flex-col rounded-row px-2 py-1.5 text-left hover:bg-hover">
+                <span className="text-[0.8125rem] text-fg2">{p.header || p.title}</span>
+                <span className={clsx('text-pretty', !answerOf(i) && 'text-need-fg')}>{answerOf(i) || 'Not answered'}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {sent ? (
+        <Sent className={q.closed ? 'text-fg2!' : undefined}>
+          {q.closed ? <XIcon className={ic} /> : <CheckIcon className={ic} />}
+          <span className="shrink-0">{q.closed ? 'Closed' : answeredHow(q)}</span>
+          {q.closed ? <span className="min-w-0 text-pretty text-fg2">{q.closed}</span> : null}
+        </Sent>
+      ) : step === n ? (
+        <div className={clsx('flex items-center justify-end gap-2', steady && 'min-h-6')}>
+          {err ? <span role="alert" className="mr-auto text-[0.75rem] text-need phone:text-[0.8125rem]">{err}</span> : null}
+          <Primary soft disabled={busy || !done} onClick={() => void submit()}>{busy ? 'Sending…' : 'Submit'}</Primary>
+        </div>
+      ) : null}
+    </CardShell>
+  )
+}
+
 /** steady: in Needs you, the card keeps its height while it sends */
-export function QuestionCard({ q, chat, msg, from, source, steady }: { q: Question; chat: Chat; msg: string; from: string; source?: CardSource; steady?: boolean }) {
+export function QuestionCard(props: { q: Question; chat: Chat; msg: string; from: string; source?: CardSource; steady?: boolean }) {
+  const { q } = props
+  return q.parts && q.parts.length > 1 ? <StepsCard {...props} q={{ ...q, parts: q.parts }} /> : <OneQuestionCard {...props} />
+}
+
+function OneQuestionCard({ q, chat, msg, from, source, steady }: { q: Question; chat: Chat; msg: string; from: string; source?: CardSource; steady?: boolean }) {
   const [sel, setSel] = useState<number[]>([])
   // half-typed notes survive a reload
   const [note, setNote] = useDraft(`card:${chat.key}:${q.id}`)

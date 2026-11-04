@@ -42,3 +42,17 @@ test("a question's pick goes back as its answer; a plan sent back says why", () 
   expect(() => asks.answer("t7.100.1", { choice: 0 })).toThrow();
   expect(existsSync(join(dir, "end", "t7.100.1"))).toBe(true);
 });
+
+test("several questions: one card with a part for each, answered all at once in order", () => {
+  put("t9.100.1", { tool_name: "AskUserQuestion", tool_input: { questions: [
+    { question: "Which color?", header: "Color", options: [{ label: "Red (Recommended)" }, { label: "Blue" }] },
+    { question: "Which sizes?", header: "Size", multiSelect: true, options: [{ label: "S" }, { label: "M" }] }] } });
+  const asks = new Asks();
+  asks.start();
+  const q = new Compat().question(asks.of("t9")[0], "p:sp1");
+  expect(q).toMatchObject({ title: "2 questions", parts: [{ title: "Which color?", header: "Color", choices: [{ label: "Red", recommended: true }, { label: "Blue" }] }, { title: "Which sizes?", multi: true }] });
+  expect(() => asks.answer("t9.100.1", { answers: ["Red"] })).toThrow();
+  asks.answer("t9.100.1", { answers: ["Red", "S, M"] });
+  const out = JSON.parse(readFileSync(join(dir, "ans", "t9.100.1.json"), "utf8")).hookSpecificOutput.decision;
+  expect(out.updatedInput.answers).toEqual({ "Which color?": "Red", "Which sizes?": "S, M" });
+});

@@ -49,12 +49,17 @@ export class Asks {
   of(terminal: string) { return [...this.open.values()].filter((a) => a.terminal === terminal); }
 
   /** Answers it as the window's card would: a permission or plan allowed or declined, a question's pick. */
-  answer(id: string, a: { choice?: number; choices?: number[]; note?: string; other?: string }) {
+  answer(id: string, a: { choice?: number; choices?: number[]; note?: string; other?: string; answers?: string[] }) {
     const ask = this.open.get(id);
     if (!ask) throw new Error("That question was answered already.");
     const w = ask.words;
     let out: string;
-    if (w.kind === "questions") {
+    if (w.kind === "questions" && w.questions.length > 1) {
+      // the multi-step card: each question's answer in order, all of them
+      const got = (a.answers ?? []).map((x) => String(x ?? "").trim());
+      if (got.length !== w.questions.length || got.some((x) => !x)) throw new Error("Answer every question first.");
+      out = answers(ask.req, Object.fromEntries(w.questions.map((q: any, i: number) => [q.text, got[i]])));
+    } else if (w.kind === "questions") {
       const q = w.questions[0];
       const picked = a.other ? [a.other] : (a.choices ?? (a.choice != null ? [a.choice] : [])).map((i) => q.options[i]?.name).filter(Boolean);
       if (!picked.length) throw new Error("Pick an answer first.");

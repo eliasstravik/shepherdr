@@ -141,9 +141,12 @@ export class Compat {
     const w = a.words;
     if (w.kind === "questions") {
       const q = w.questions[0];
-      return { id: a.id, title: q.text, kind: "Question", to: key, multi: q.multi, other: true,
-        choices: q.options.map((o: any) => ({ label: o.name, ...(o.description ? { description: o.description } : {}) })),
-        ...(w.questions.length > 1 ? { steps: w.questions.map((x: any) => x.header || x.text) } : {}) };
+      const choices = (x: any) => x.options.map((o: any) => ({ label: o.name, ...(o.description ? { description: o.description } : {}), ...(o.recommended ? { recommended: true } : {}) }));
+      // several questions: one card with a step for each, then one to check the answers (3.0's card)
+      if (w.questions.length > 1)
+        return { id: a.id, title: `${w.questions.length} questions`, kind: "Question", to: key, choices: [], other: true,
+          parts: w.questions.map((x: any) => ({ title: x.text, header: x.header || undefined, multi: x.multi, choices: choices(x) })) };
+      return { id: a.id, title: q.text, kind: "Question", to: key, multi: q.multi, other: true, choices: choices(q) };
     }
     // the request word for word in a code block whose fence no run of backticks in it can close; one too long to show
     // whole says so (and can't be allowed from here: service/asks.ts)
