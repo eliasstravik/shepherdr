@@ -43,6 +43,14 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (!a) throw new Error("That chat isn't here any more.");
     return a;
   };
+  if (b?.type === "answer" && typeof b.question === "string") {
+    // a hook ask's card (its id is the request's): answered as the window's card answers it
+    if (!compat.asks) throw new Error("No questions here.");
+    (compat.asks as any).answer(str(b.question, 200), { choice: typeof b.choice === "number" ? b.choice : undefined,
+      choices: Array.isArray(b.choices) ? b.choices.filter((n: unknown) => typeof n === "number") : undefined,
+      note: typeof b.note === "string" ? b.note.slice(0, 4000) : undefined, other: typeof b.other === "string" ? b.other.slice(0, 4000) : undefined });
+    return { ok: true };
+  }
   if (b?.type === "send" && typeof b.chat === "string") b = { ...b, addr: chat(b.chat), quote: b.replyText ?? null };
   else if (b?.type === "stop" && typeof b.chat === "string") b = { ...b, addr: chat(b.chat) };
   else if ((b?.type === "evidence" || b?.type === "accept") && typeof b.task === "string") {

@@ -59,6 +59,9 @@ export class Model {
     this.timer ??= setTimeout(() => { this.timer = null; this.build(); }, 150);
   }
 
+  /** Builds again soon (something the snapshot shows changed outside: an ask). */
+  rebuild() { this.soon(); }
+
   private async refresh() {
     try {
       const r = await this.hub.call<{ machines: any[] }>("machine.list", {});

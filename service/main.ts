@@ -20,6 +20,7 @@ import { Model } from "./model.ts";
 import { Chats } from "./chats.ts";
 import { act } from "./actions.ts";
 import { Compat, activity } from "./compat.ts";
+import { Asks } from "./asks.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const WEB = process.env.SHEPHERDR_WEB_DIR || join(ROOT, "web", "dist");
@@ -44,6 +45,10 @@ const compat = new Compat();
 const model = new Model(hub, live);
 live.chats = new Chats(hub);
 live.compat = compat;
+const asks = new Asks();
+compat.asks = asks;
+asks.on(() => { model.rebuild(); live.chats?.refreshAll(); });
+asks.start();
 model.onBuild = (b) => live.setSnapshot(compat.snapshot({
   host: me?.host ?? "this machine", user: me?.name ?? "You", spaces: b.spaces, sections: b.sections, rows: b.rows,
   machines: [{ name: me?.host ?? "this machine", here: true, state: "connected" }, ...b.machines.map((name) => ({ name, here: false, state: "connected" }))],

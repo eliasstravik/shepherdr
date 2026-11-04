@@ -28,7 +28,7 @@ import { focused, props, run, theme, home, hc, exec, shared, setShared, watchFol
 import { agents, panes, terminals, spaces, inRender } from "./live.js";
 import * as fs from "fs/promises";
 import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names } from "./core/chat-log.js";
-import { words } from "./core/asks.js";
+import { words, howAnswered } from "./core/asks.js";
 // Sending the person's words, as the web app does (core/send.js).
 import { refusal, taskTag, messageBody, replyInstead, steerNow } from "./core/send.js";
 import { AskCards, linkCtl } from "./cards.js";
@@ -145,15 +145,6 @@ const SIGNED = /^\s*(?:\*\*)?(?:[Mm]essage\s+)?[Ff]rom\s+([A-Z][\w.-]*(?:\s+[\w.
 const signedBy = (text) => SIGNED.exec(String(text ?? ""))?.[1]?.trim() || null;
 const unsigned = (text) => String(text ?? "").replace(SIGNED, "");
 
-function howAnswered(ask, text, where) {
-  let d = null;
-  try { d = JSON.parse(text).hookSpecificOutput?.decision; } catch {}
-  if (!d) return null;
-  const plan = ask.words.kind === "plan";
-  if (d.behavior === "allow") return `${plan ? "Approved" : d.updatedInput ? "Answered" : "Allowed"} ${where}`;
-  if (ask.words.kind === "questions") return `Left to talk over ${where}`;
-  return plan ? `Sent back to planning ${where}` : `Denied ${where}`;
-}
 // An answer to a waiting hook (ask-hook.sh prints it as Claude's decision), the one way every
 // copy of a card delivers. First how it went (the hook's end/<id>), for the ask's other copies:
 // they read it once the request is gone.

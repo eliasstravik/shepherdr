@@ -3,7 +3,7 @@
 // shapes 2.1's screen reads (web/shared/types.ts: Snapshot, Chat), and its chat keys back into terminals.
 //   a space's chat (its Assistant):  p:<space id, "/" as ":">     a task's chat:  <task id>/worker
 // A task id is its ref ("SHEP-7"), "<machine>:<ref>" on another machine, as 2.1 wrote them.
-import type { Snapshot, Place, Task, Need, Section, Machine, Chat, Message, Status, TaskStatus, StepKind, ActivityAnswer } from "../web/shared/types.ts";
+import type { Snapshot, Place, Task, Need, Section, Machine, Chat, Message, Status, TaskStatus, StepKind, ActivityAnswer, Question } from "../web/shared/types.ts";
 import * as T from "../core/tasks.js";
 
 const { ago } = T as any;
@@ -34,6 +34,24 @@ export class Compat {
   private tasks = new Map<string, { ref: string; folder: string; machine: string | null }>();
 
   taskOf(id: string) { return this.tasks.get(id) ?? null; }
+
+  /** Open hook asks (service/asks.ts), set by main: they show as cards in their chat and in Needs you. */
+  asks: { of(terminal: string): any[]; open: Map<string, any> } | null = null;
+
+  /** A hook ask as 2.1's question card (core/asks.js words: a permission, a plan, or a question). */
+  question(a: any, key: string): Question {
+    const w = a.words;
+    if (w.kind === "questions") {
+      const q = w.questions[0];
+      return { id: a.id, title: q.text, kind: "Question", to: key, multi: q.multi, other: true,
+        choices: q.options.map((o: any) => ({ label: o.name, ...(o.description ? { description: o.description } : {}) })),
+        ...(w.questions.length > 1 ? { steps: w.questions.map((x: any) => x.header || x.text) } : {}) };
+    }
+    const detail = w.detail ? "```\n" + w.detail + "\n```" : undefined;
+    return w.kind === "plan"
+      ? { id: a.id, title: w.title, kind: "Plan", to: key, plan: w.detail, choices: [{ label: "Approve" }, { label: "Keep planning" }], noteRequiredFor: 1 }
+      : { id: a.id, title: w.title, kind: "Question", to: key, ...(detail ? { plan: detail } : {}), choices: [{ label: "Allow" }, { label: "Deny" }] };
+  }
   last: Snapshot | null = null;
 
   addrOf(key: string) { return this.chats.get(key) ?? null; }
@@ -79,6 +97,16 @@ export class Compat {
       ...spaces.filter((s) => s.assistantStatus === "blocked").map((s) => ({ id: "attention", chat: placeKey(s.id), place: s.id, at: Date.now(), text: "Waits for you" })),
     ];
 
+    // hook asks waiting on the person: each a Need with its card
+    const keyOf = new Map([...chats].map(([k, a]) => [a, k]));
+    for (const a of this.asks?.open.values() ?? []) {
+      const key = keyOf.get(a.terminal);
+      if (!key) continue;
+      const task = key.endsWith("/worker") ? key.slice(0, -7) : undefined;
+      const place = task ? tasks.find((x) => x.id === task)?.place ?? "" : places.find((p) => p.chat === key)?.id ?? "";
+      needs.push({ id: a.id, chat: key, place, ...(task ? { task } : {}), at: a.at, question: this.question(a, key) });
+    }
+
     const pinned = spaces.filter((s) => s.pinned).map((s) => s.id);
     const sections: Section[] = [
       ...(pinned.length ? [{ id: "pinned", name: "Pinned", spaces: pinned }] : []),
@@ -112,6 +140,9 @@ export class Compat {
         messages.push({ id: x.id, who: "agent", at, activity: { id: x.id, at, end: at, rows: rows.slice(0, 3), steps: x.steps.length, ...(rows.length > 3 ? { more: rows.length - 3 } : {}) } });
       }
     }
+    // what the agent asks now, as cards at the end of its chat
+    const addr = this.chats.get(key);
+    for (const a of addr ? this.asks?.of(addr) ?? [] : []) messages.push({ id: `ask:${a.id}`, who: "agent", at: a.at, question: this.question(a, key) });
     const st = t?.status?.state ?? null;
     return { key, messages, working: st === "working", cli: reader.kind === "codex" ? "codex" : "claude", ...(reader.pinned || (t && t.state !== "live") ? { finished: true } : {}) };
   }

@@ -44,6 +44,9 @@ export class Chats {
     if (!f.pages.size) f.idleSince = Date.now();
   }
 
+  /** Tells every page its chats again (what they show changed outside the logs: an ask). */
+  refreshAll() { for (const [addr, f] of this.followed) if (f.ready) this.publish(addr, f); }
+
   /** The reader of a chat someone follows now, else null. */
   reader(addr: string) { return this.followed.get(addr)?.reader ?? null; }
 

@@ -83,3 +83,15 @@ export const answers = (req, map) => out({ behavior: "allow", updatedInput: { ..
 export const chatAbout = () => deny("The person wants to talk about these questions before answering. Don't ask them again now: wait for their message in the chat and answer it.");
 // No decision: Claude shows its own prompt in the terminal.
 export const release = () => "";
+
+// How a card's answer went, for its quiet line ("Allowed in the chat"); null for no decision (the terminal asks
+// instead). ask: { words }, text: the hook's answer, where: "in the chat", "in the task's chat"...
+export function howAnswered(ask, text, where) {
+  let d = null;
+  try { d = JSON.parse(text).hookSpecificOutput?.decision; } catch {}
+  if (!d) return null;
+  const plan = ask.words.kind === "plan";
+  if (d.behavior === "allow") return `${plan ? "Approved" : d.updatedInput ? "Answered" : "Allowed"} ${where}`;
+  if (ask.words.kind === "questions") return `Left to talk over ${where}`;
+  return plan ? `Sent back to planning ${where}` : `Denied ${where}`;
+}
