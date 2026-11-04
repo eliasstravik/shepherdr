@@ -330,6 +330,62 @@ class Autopilot(unittest.TestCase):
         self.assertEqual([v["space"] for v in self.cmd("list", here=True)["spaces"]], ["sp1", "sp2"])
         self.assertEqual(self.sent, [])
 
+    def wake(self, ago, turn=3):
+        """sp1 on, with a wake delivered to t9 `ago` ms back (its turn then: `turn`)."""
+        self.cmd("on", space="sp1")
+        with self.ap.state() as d:
+            a = d["spaces"]["sp1"]
+            a["inflight"] = {"at": self.ap.now() - ago, "reason": "schedule", "to": "t9", "turn": turn}
+            self.ap.log_wake(a, "schedule", "Delivered", a["inflight"]["at"])
+
+    def settled(self, k):
+        """settle() with the Assistant as `k` (hc get's): the wake left, if its turn ended."""
+        from unittest import mock
+        k = {"state": "live", "foreground": {"name": "claude"}, **k}
+        with mock.patch.object(self.ap, "hc_json", lambda *a: k), self.ap.state() as d:
+            self.ap.settle(d["spaces"]["sp1"])
+            return d["spaces"]["sp1"]
+
+    def test_a_wake_ends_with_its_turn(self):
+        """SHEP-34: the header leaves "Waking" once the wake's turn ends, by its count or, should
+        that miss it, the Assistant idle a while; else after the timeout."""
+        done = {"turn": 4, "status": {"state": "done"}}
+        self.wake(5000)
+        self.assertIn("inflight", self.settled({"turn": 4, "status": {"state": "working"}}))
+        a = self.settled(done)
+        self.assertNotIn("inflight", a)
+        self.assertEqual(a["last_wake"]["outcome"], "Turn ended, no progress saved")
+        self.assertEqual(self.cmd("show", space="sp1")["inflight"], None)
+        # its turn not counted: idle a while after the wake ends it, not at once
+        self.wake(5000)
+        self.assertIn("inflight", self.settled({"turn": 3, "status": {"state": "idle"}}))
+        self.wake(self.ap.IDLE_AFTER_MS + 1000)
+        self.assertNotIn("inflight", self.settled({"turn": 3, "status": {"state": "idle"}}))
+        # asking the person something: still its wake, until the timeout
+        self.wake(self.ap.IDLE_AFTER_MS + 1000)
+        self.assertIn("inflight", self.settled({"turn": 3, "status": {"state": "blocked"}}))
+        self.wake(self.ap.TURN_MAX_MS + 1000)
+        self.assertEqual(self.settled({"turn": 3, "status": {"state": "working"}})["last_wake"]["outcome"],
+                         "No turn end seen, no progress saved")
+        # its agent quit (a shell left) or its terminal gone
+        self.wake(5000)
+        self.assertEqual(self.settled({"foreground": {"name": "bash"}, "turn": 3})["last_wake"]["outcome"],
+                         "Assistant stopped, no progress saved")
+
+    def test_run_now_goes_after_a_wake_whose_turn_ended(self):
+        """A wake the scheduler hasn't closed yet never holds Run now back."""
+        from unittest import mock
+        self.wake(5000)
+        k = {"state": "live", "foreground": {"name": "claude"}, "turn": 4, "status": {"state": "done"}}
+        sent = []
+        with mock.patch.object(self.ap, "hc_json", lambda *a: k), mock.patch.object(self.ap, "coordinator_in", lambda s: "t9"), \
+                mock.patch.object(self.ap, "typing", lambda *a: False), \
+                mock.patch.object(self.ap, "news_send", lambda to, m, check=True: sent.append(to) or True):
+            v = self.cmd("run-now", space="sp1")
+        self.assertEqual(sent, ["t9"])
+        self.assertEqual((v["inflight"]["reason"], v["inflight"]["turn"]), ("run now", 4))
+        self.assertEqual([w["outcome"] for w in v["wakes"]], ["Turn ended, no progress saved", "Delivered"])
+
 
 class RemoteInstall(unittest.TestCase):
     """herdr-task --on installs itself on the other machine first, never over a machine that holds its source."""
@@ -370,6 +426,44 @@ class RemoteInstall(unittest.TestCase):
         self.assertEqual(self.wrote, [])
         self.assertEqual(sum(1 for a in self.ran if "test" in a), 1)  # asked once, then remembered
         self.assertEqual(self.ran[-1][-3:], ["autopilot", "list", "--json"])
+
+
+class SchedulerRound(unittest.TestCase):
+    """The scheduler's round (automations.one_pass) and the window's or service's tick share one lock,
+    both every 15 s. SHEP-34: a round that found the tick holding it skipped, and in step with the
+    tick it skipped every time, so no autopilot wake was ever closed (the header stuck on "Waking")."""
+
+    def test_a_round_waits_for_the_tick_and_runs(self):
+        import fcntl
+        import threading
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.automations as au
+        import herdr_task.autopilot as ap
+        import herdr_task.home as home
+        store = tempfile.mkdtemp()
+        ran = []
+        patches = [mock.patch.object(au, "STORE", store), mock.patch.object(au, "SEEN", os.path.join(store, ".seen.json")),
+                   mock.patch.object(au, "store_files", lambda *a: []), mock.patch.object(ap, "autopilot_pass", ran.append),
+                   mock.patch.object(home, "home_pass", lambda r: None)]
+        patches += [mock.patch.object(au, n, lambda *a, **k: None) for n in (
+            "retry_pass", "archive_pass", "news_pass", "end_done_pass", "memory_guard", "backup_pass", "cli_check_pass", "machines_pass")]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        # a tick holds the lock as the round starts, and lets go a moment later
+        tick = open(os.path.join(store, ".tick.lock"), "a")
+        fcntl.flock(tick, fcntl.LOCK_EX)
+        threading.Timer(0.5, lambda: (fcntl.flock(tick, fcntl.LOCK_UN), tick.close())).start()
+        au.one_pass({})
+        self.assertEqual(len(ran), 1, "the round gave way to the tick and skipped autopilot")
+        self.assertTrue(os.path.exists(os.path.join(store, ".seen.json")))
+        # a lock held past the wait: this round skips, the scheduler tries again in 15 s
+        with open(os.path.join(store, ".tick.lock"), "a") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            with mock.patch.object(au, "LOCK_WAIT_S", 0.3):
+                au.one_pass({})
+        self.assertEqual(len(ran), 1)
 
 
 class BackToWork(unittest.TestCase):

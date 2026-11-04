@@ -401,12 +401,30 @@ def automations_pass(s, seen, report):
 SEEN = os.path.join(STORE, ".seen.json")
 
 
+LOCK_WAIT_S = 60  # a round waits this long for a tick to finish (one takes about a second)
+
+
+def take_lock(f, wait):
+    """f's lock, waiting up to `wait` seconds for whoever holds it; False if still held."""
+    end = time.monotonic() + wait
+    while True:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            if time.monotonic() >= end:
+                return False
+            time.sleep(0.2)
+
+
 def one_pass(report):
-    """The scheduler's round: every folder with automations or tasks waiting on something."""
+    """The scheduler's round: every folder with automations or tasks waiting on something. It
+    waits for a tick that holds the lock rather than skipping: the window's (or the service's)
+    tick also comes every 15 s, and once in step with it a round that gave way skipped every time
+    (SHEP-34: no autopilot or automations ran for as long as they stayed in step)."""
     lock = open(os.path.join(STORE, ".tick.lock"), "a")
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
+    if not take_lock(lock, LOCK_WAIT_S):
+        lock.close()
         return
     try:
         seen_all = read_list(SEEN) or {}
