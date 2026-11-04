@@ -147,6 +147,14 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const next = await compat.agents.restart(a, reader, { kind: b.kind, model: opt(b.model), effort: opt(b.effort), speed: opt(b.speed) });
     return { ok: true, terminal: next };
   }
+  if (b?.type === "machine-add" && typeof b.target === "string") {
+    // another machine by ssh (hc machine add); one that asks something once (a password, a new host key) needs a terminal
+    const target = b.target.trim();
+    if (!/^[\w.@:-]{1,200}$/.test(target)) throw new Error("A host, like vps or me@10.0.0.7.");
+    const r = await run(["hc", "machine", "add", target, "--install", "--json"]);
+    if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim().split("\n").pop() || `Couldn't reach ${target}: add it once in a terminal (hc machine add ${target}).`);
+    return { ok: true };
+  }
   if (b?.type === "worktree" && typeof b.place === "string" && compat.shared) {
     const sp = compat.spaceOf(b.place);
     if (!sp) throw new Error("That space isn't here any more.");

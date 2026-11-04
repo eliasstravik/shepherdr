@@ -1062,7 +1062,7 @@
       "addon": "machines",
       "title": "Machines",
       "core": [
-        "spaces"
+        "machines"
       ],
       "herdr": {
         "mods": [
@@ -1072,7 +1072,8 @@
       },
       "web": {
         "files": [
-          "plugins/health/client.tsx"
+          "plugins/health/client.tsx",
+          "src/screens/AddMachine.tsx"
         ]
       },
       "forms": {
@@ -1081,7 +1082,9 @@
         "tablet": "Same",
         "phone": "Machine rows in the drawer; sheets"
       },
-      "planned": "Health, plan limits and Add machine"
+      "service": [
+        "machines.ts"
+      ]
     },
     {
       "id": "web",
