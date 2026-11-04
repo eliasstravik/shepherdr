@@ -63,6 +63,8 @@ export interface Place {
   emoji?: string
   /** Shepherdr 3: the space is a git worktree of another (Remove worktree) */
   worktree?: boolean
+  /** Shepherdr 3: the space's other tabs (a terminal or an agent each), by name, with the key their terminal opens by */
+  tabs?: { name: string; term: string }[]
   /** its name, Slack-channel style ("my-project"), unique on its machine: the slug its links and commands use */
   name: string
   /** the machine it is on (its key: herdr's label for it) */

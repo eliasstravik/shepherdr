@@ -300,8 +300,15 @@ function TerminalView({ chatKey, panel }: { chatKey: string; panel?: boolean }) 
 
 function PlaceTerm({ place }: { place: Place }) {
   const ui = useUI()
-  const on = ui.term === place.chat
+  const on = ui.term === place.chat || !!ui.term?.startsWith('t:')
   return (
+    <>
+    {/* Shepherdr 3: the space's other tabs, each its terminal */}
+    {!on ? (place.tabs ?? []).map((t) => (
+      <MenuItem key={t.term} icon={<TermIcon className={ic} />} onClick={() => setUI({ term: t.term, arts: null, menu: false, plus: null, pick: null })}>
+        {t.name}
+      </MenuItem>
+    )) : null}
     <MenuItem
       icon={<TermIcon className={ic} />}
       hint={ui.device === 'desktop' ? shortcut(CTRL, '`') : null}
@@ -309,6 +316,7 @@ function PlaceTerm({ place }: { place: Place }) {
     >
       {on ? 'Back to the chat' : 'Terminal'}
     </MenuItem>
+    </>
   )
 }
 
@@ -324,6 +332,8 @@ export default definePlugin({
     reg.placeMenu.push({ order: 60, View: PlaceTerm })
     reg.taskPanel.push({ id: 'terminal', order: 10, label: 'Terminal', Icon: TermIcon, View: ({ chatKey }) => <TerminalView chatKey={chatKey} panel /> })
     reg.chatBody.push({ when: (ui, key) => ui.term === key, View: TerminalView })
+    // Shepherdr 3: one of the space's other tabs, in place of its chat (t:<terminal>)
+    reg.chatBody.push({ when: (ui) => !!ui.term?.startsWith('t:'), View: ({ chatKey: _ }: { chatKey: string }) => <TerminalView chatKey={useUI((u) => u.term!)} /> })
     reg.keys.push({
       order: 0,
       handle: ({ e, ui, snap }) => {

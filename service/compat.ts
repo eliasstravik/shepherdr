@@ -142,8 +142,11 @@ export class Compat {
     const places: Place[] = spaces.map((s) => {
       const key = placeKey(s.id);
       if (s.assistant) chats.set(key, s.assistant);
+      // its other tabs: each tab's first terminal, opened by the key t:<address> (the Assistant's tab is its chat)
+      const tabs = (s.tabs ?? []).map((t: any) => ({ name: t.name || "Tab", addr: (t.terminals ?? [])[0] })).filter((t: any) => t.addr && t.addr !== s.assistant)
+        .map((t: any) => { chats.set(`t:${t.addr}`, t.addr); return { name: t.name, term: `t:${t.addr}` }; });
       const name = s.name || (s.folder.split("/").filter(Boolean).pop() ?? "home");
-      return { id: s.id, name, ...(s.icon ? { emoji: s.icon } : {}), ...(/\/\.herdr\/worktrees\//.test(s.folder) ? { worktree: true } : {}), machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", mode: s.autopilot ? "autopilot" : "regular", chat: key };
+      return { id: s.id, name, ...(s.icon ? { emoji: s.icon } : {}), ...(/\/\.herdr\/worktrees\//.test(s.folder) ? { worktree: true } : {}), machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", mode: s.autopilot ? "autopilot" : "regular", chat: key, ...(tabs.length ? { tabs } : {}) };
     });
 
     this.tasks = new Map(rows.map((r) => [taskId(r), { ref: r.ref, folder: r.folder, machine: r.machine ?? null, key: `${r.slug}#${r.id}`, pin: r.key,

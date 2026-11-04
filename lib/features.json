@@ -110,7 +110,7 @@
       },
       "web": {
         "files": [
-          "src/App.tsx"
+          "plugins/terminal/client.tsx"
         ]
       },
       "forms": {
@@ -119,7 +119,9 @@
         "tablet": "Same, scrolls sideways",
         "phone": "Space title opens a tab switcher sheet"
       },
-      "planned": "A space's other tabs"
+      "service": [
+        "compat.ts"
+      ]
     },
     {
       "id": "panes",
@@ -144,7 +146,9 @@
         "tablet": "2 side by side in landscape, 1 in portrait",
         "phone": "One at a time; Chat | Terminal in the top bar"
       },
-      "planned": "Chat | Terminal for any agent, not only tasks"
+      "service": [
+        "compat.ts"
+      ]
     },
     {
       "id": "status",
