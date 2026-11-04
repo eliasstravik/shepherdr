@@ -7,6 +7,7 @@ inbox.js: spaces-chat tabs-tasks tasks workspace-status-chat
 core/asks.js: chat jump spaces-chat tabs-tasks tasks workspace-status-chat
 core/needs.js: chat jump spaces-chat tabs-tasks tasks workspace-status-chat
 core/tasks.js: chat jump tasks
+core/notify.js: chat spaces-chat tabs-tasks tasks shepherdr-settings workspace-status-chat
 parked.js: chat spaces-chat tabs-tasks workspace-status-chat
 unread.js: chat spaces-chat
 agent.js: chat newspace shepherdr-settings
