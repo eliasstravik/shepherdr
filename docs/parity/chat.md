@@ -68,7 +68,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Copy / Copied | W copy icon, check for 1.5 s | R:42 copy icon, check for 1.5 s | ✓ |
 | Rewind (yours, not a /command, not another agent's) | W:1914 the CLI's /rewind, then the terminal | R:42 `bandActs` from core; action `rewind`, then the terminal | ✓ |
 | Fork (agent's) | W:1934 new tab with the CLI's fork | R:42 action `fork` | ✓ |
-| Reactions (pills) | W:2627 always shown: emoji + count; agent's: pills then smiley; yours: smiley then pills | R:42 + X:66 Pills with count 1/2 | ✓ |
+| Reactions (pills) | W:2707 always shown, 20 px tall in the 22 px row: emoji + count, flush under the bubble's outer edge; each side the other's mirror: yours time, reply, copy, rewind, smiley, pills; the agent's pills, smiley, fork, copy, reply, time | R:42 + X:66 Pills with count 1/2, the same order and edge | ✓ |
 | Smiley | W:1852 opens the emoji picker | R:42 → `openPicker` (the full picker) | ✓ |
 | Newest reply while working | W:2477 no band yet | C:1084 `writing` | ✓ |
 | What you just sent | W pending rows have no band | C:102 no band while in the outbox | ✓ |

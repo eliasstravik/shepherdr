@@ -15,11 +15,12 @@ import { ForkIcon, openPicker, RewindIcon } from '@plugins/reactions/client.tsx'
 import { Markdown } from './markdown.tsx'
 import { jumpTo, startReply } from './reply.ts'
 
-const { WORDS, clock, bandActs, imagesLine, fitThumbs, THUMB_GAP, questionsBelow } = CV as unknown as {
+const { WORDS, clock, bandActs, bandOrder, imagesLine, fitThumbs, THUMB_GAP, questionsBelow } = CV as unknown as {
   WORDS: Record<string, string>
   questionsBelow: (n: number) => string
   clock: (at?: number) => string
   bandActs: (side: 'user' | 'agent', text?: string, o?: { from?: string | null; fork?: boolean }) => string[]
+  bandOrder: (side: 'user' | 'agent', acts: string[], o?: { time?: boolean; react?: boolean }) => string[]
   imagesLine: (n: number) => string
   fitThumbs: (sizes: ({ w: number; h: number } | null)[], width?: number) => { boxes: { w: number; h: number }[]; h: number }
   THUMB_GAP: number
@@ -35,9 +36,11 @@ export const onTerminal = (fn: (chat: string) => void) => void (showTerminal = f
 
 /* ---------- the band under a message ---------- */
 
-/** ONE row under a message, on its side: the time (dim), Reply, Copy, Rewind (yours, not a /command) or Fork (the
- *  agent's); then on the agent's its reactions and the smiley furthest right, on yours the smiley and then the
- *  reactions, flush under the bubble's edge. The reactions always show; the rest while the pointer is on the message,
+/** ONE row under a message, on its side, its reactions flush under the bubble's outer edge with the smiley beside
+ *  them, each side the other's mirror: on yours the time (dim), Reply, Copy, Rewind (not on a /command), the smiley
+ *  and then the reactions (furthest right); on the agent's the reactions (furthest left), the smiley, Fork, Copy,
+ *  Reply and then the time.
+ *  The reactions always show; the rest while the pointer is on the message,
  *  in room that is always kept, so nothing moves. A finger holds the message instead (its own bar). */
 export function Band({ msg, chat, cli }: { msg: Message; chat: string; cli?: boolean }) {
   const you = msg.who === 'you'
@@ -68,12 +71,14 @@ export function Band({ msg, chat, cli }: { msg: Message; chat: string; cli?: boo
       <SmileIcon className="size-3.5" />
     </button>
   ) : null
-  const pillRow = pills ? <span className="flex flex-wrap items-center gap-1 px-1.5">{pills}</span> : null
+  // as the window's: the pills 4px apart, 6px from the smiley (the band's own 2px gap and 4px here)
+  const pillRow = pills ? <span key="pills" className={clsx('flex flex-wrap items-center gap-1', you ? 'pl-1' : 'pr-1')}>{pills}</span> : null
+  const stamp = time ? <time key="time" dateTime={new Date(msg.at!).toISOString()} className={clsx('shrink-0 text-[0.71875rem] text-fg3 tabular-nums', you ? 'pr-1' : 'pl-1', hover)}>{time}</time> : null
+  // the order is core's, as the window's: each side the other's mirror
+  const part = (what: string) => (what === 'time' ? stamp : what === 'react' ? smiley : what === 'pills' ? pillRow : icon(what))
   return (
     <div data-band className={clsx('mt-1 flex min-h-[22px] max-w-full flex-wrap items-center gap-0.5', you ? 'justify-end self-end' : 'justify-start self-start')}>
-      {time ? <time dateTime={new Date(msg.at!).toISOString()} className={clsx('shrink-0 text-[0.71875rem] text-fg3 tabular-nums', you ? 'pr-1' : 'pl-0.5 pr-1', hover)}>{time}</time> : null}
-      {acts.map(icon)}
-      {you ? <>{smiley}{pillRow}</> : <>{pillRow}{smiley}</>}
+      {bandOrder(you ? 'user' : 'agent', acts, { time: !!time, react }).map(part)}
     </div>
   )
 }

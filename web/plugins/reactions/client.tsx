@@ -76,9 +76,9 @@ function Pills({ msg, chat }: { msg: Message; chat: { key: string } }) {
         aria-pressed={yours}
         onClick={() => react(chat.key, msg.id, r.emoji)}
         className={clsx(
-          // a ring of the page's colour cuts each pill out of the bubble's edge; on a phone a finger finds it 8px above
-          // and below too, 44px in all
-          "relative inline-flex h-6 items-center gap-[3px] rounded-full px-[7px] text-[0.8125rem] phone:h-7 phone:px-2 phone:text-[0.9375rem] phone:after:absolute phone:after:-inset-y-2 phone:after:inset-x-0 phone:after:content-['']",
+          // a ring of the page's colour cuts each pill out of the bubble's edge; 20px tall as the window's, inside the
+          // band's 22px row on the icons' center line; on a phone a finger finds it 10px above and below too, 44px in all
+          "relative inline-flex h-5 items-center gap-[3px] rounded-full px-[7px] text-[0.8125rem] phone:h-6 phone:px-2 phone:text-[0.875rem] phone:after:absolute phone:after:-inset-y-2.5 phone:after:inset-x-0 phone:after:content-['']",
           yours
             ? clsx(YOURS, 'shadow-[0_0_0_2px_var(--bg),inset_0_0_0_1.5px_var(--accent)]')
             : 'bg-bg shadow-[0_0_0_2px_var(--bg),inset_0_0_0_1px_var(--line2)] hover:bg-[color-mix(in_srgb,var(--fg)_4%,var(--bg))]',
