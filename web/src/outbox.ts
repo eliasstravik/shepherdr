@@ -96,18 +96,36 @@ export function settle(out: Outgoing[], chat: Chat, now = Date.now()): Outgoing[
   return changed ? next : out
 }
 
+/** a message's words without the paths of the files sent with it, and which files those are: a file the agent got as a
+ *  path (not a picture) comes in its words, on a line of its own after them */
+function unfiled(text: string, files: Outgoing['files']) {
+  const named = new Set<string>()
+  const rest = text.split('\n').filter((line) => {
+    const l = line.trim()
+    const f = /^[/~]/.test(l) ? files.find((f) => !named.has(f.path) && sameFile(l, f.path)) : undefined
+    if (f) named.add(f.path)
+    return !f
+  })
+  return { words: words(rest.join('\n')), named }
+}
+
 /** the chat's own messages that are this one, without its id: each part new since you sent it, read after it went in,
  *  the same words and the same files */
 function sameAs(o: Outgoing, chat: Chat, taken: Set<string>): string[] | null {
   const prior = new Set(o.prior ?? [])
   const fresh = chat.messages.filter((m) => m.who === 'you' && !m.cid && !m.answered && !m.waiting && !prior.has(m.id) && !taken.has(m.id) && (m.at ?? 0) >= o.serverAt! - SLACK)
   const ids: string[] = []
-  if (o.text) {
-    const m = fresh.find((m) => !!m.text && words(m.text) === words(o.text))
-    if (!m) return null
+  let named = new Set<string>()
+  for (const m of o.text || o.files.length ? fresh : []) {
+    const u = m.text ? unfiled(m.text, o.files) : null
+    if (!u || u.words !== words(o.text) || (!o.text && !u.named.size)) continue
     ids.push(m.id)
+    named = u.named
+    break
   }
+  if (o.text && !ids.length) return null
   for (const f of o.files) {
+    if (named.has(f.path)) continue
     const m = fresh.find((m) => sameFile(m.file?.path, f.path) && !ids.includes(m.id))
     if (!m) return null
     ids.push(m.id)

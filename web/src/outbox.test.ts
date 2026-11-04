@@ -34,3 +34,15 @@ test('without the server time it waits', () => {
   const out = [sent({ serverAt: undefined })]
   expect(settle(out, chat([{ id: 'u2', who: 'you', text: 'cool', at: 10_800 }]))).toBe(out)
 })
+
+test('a file the agent got as a path: on a line after the words, where it landed', () => {
+  const o = sent({ text: 'web file test', files: [{ name: 'n.txt', path: '~/.config/herdr-app/data/chat-attach/web-1-n.txt' }] })
+  expect(settle([o], chat([{ id: 'u2', who: 'you', at: 10_800, text: 'web file test\n\n/var/state/herdr-core/files/t1/web-1-n.txt' }]))).toEqual([])
+  const alone = sent({ text: '', files: o.files })
+  expect(settle([alone], chat([{ id: 'u2', who: 'you', at: 10_800, text: '/var/state/herdr-core/files/t1/web-1-n.txt' }]))).toEqual([])
+})
+
+test('other words with its path are not it', () => {
+  const out = [sent({ text: 'web file test', files: [{ name: 'n.txt', path: '~/a/web-1-n.txt' }] })]
+  expect(settle(out, chat([{ id: 'u2', who: 'you', at: 10_800, text: 'something else\n/b/web-1-n.txt' }]))).toBe(out)
+})
