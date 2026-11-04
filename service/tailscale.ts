@@ -66,7 +66,8 @@ export async function share(dns: string, port: number): Promise<string | null> {
   return r.ok ? null : "tailscale serve failed";
 }
 
-export async function unshare(dns: string): Promise<void> {
+/** Stops sharing /shepherdr. port: only when it leads to this service (another one's share is left alone). */
+export async function unshare(dns: string, port?: number): Promise<void> {
   const now = await served(dns);
-  if (now.proxy) await run(["serve", `--https=${now.port ?? 443}`, "--set-path", MOUNT, "off"]);
+  if (now.proxy && (port === undefined || now.proxy === `http://127.0.0.1:${port}`)) await run(["serve", `--https=${now.port ?? 443}`, "--set-path", MOUNT, "off"]);
 }

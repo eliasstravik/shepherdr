@@ -5,6 +5,8 @@
 //   bun service/main.ts            run it (systemd and launchd run exactly this)
 //   SHEPHERDR_PORT=7788            the port on 127.0.0.1
 //   SHEPHERDR_WEB=on|off           serve the web app and share it on the tailnet (default on)
+// Serve from (service/host.ts): one machine serves the web app and holds the shared data; on the others the service
+// reads and writes it there, keeps their settings in step (service/sync.ts) and doesn't share /shepherdr.
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -16,6 +18,8 @@ import { whoami, share, served, unshare, type Me } from "./tailscale.ts";
 import { qrFile } from "./qr.ts";
 import { Hub } from "./hub.ts";
 import { Store } from "./store.ts";
+import { Host } from "./host.ts";
+import { Sync } from "./sync.ts";
 import { Live } from "./live.ts";
 import { Model } from "./model.ts";
 import { setPilot, runPilot } from "./autopilot.ts";
@@ -45,6 +49,8 @@ import * as SL from "../core/slash.js";
 import * as SCORE from "../core/settings.js";
 const SC = SCORE as any;
 const { SCAN, scanned, commandList, MENU } = SL as any;
+import * as HCORE from "../core/host.js";
+const { serveChoice } = HCORE as any;
 import * as NF from "../core/notify.js";
 const { withEverywhere, withSpace } = NF as any;
 
@@ -63,7 +69,10 @@ if (!existsSync(TOKEN)) writeFileSync(TOKEN, randomBytes(24).toString("hex") + "
 const token = readFileSync(TOKEN, "utf8").trim();
 
 const hub = new Hub();
-const store = new Store(hub);
+const host = new Host(hub, VERSION);
+await Promise.race([host.start(), Bun.sleep(10_000)]);
+const store = new Store(hub, host);
+new Sync(hub, host).start();
 let me: Me | null = await whoami();
 const g: Gate = { owner: me?.login ?? null, dns: me?.dns ?? null, port: PORT, token };
 const live = new Live(hub, store, () => me, VERSION);
@@ -75,6 +84,9 @@ compat.reader = (a) => live.chats?.reader(a) ?? null;
 // the chat scrolled to its top: the page before (as the window's loadEarlier)
 (compat as any).earlier = (a: string) => live.chats?.earlier(a);
 const push = new Push(() => (me ? `https://${me.dns}` : "https://herdr.dev"));
+// only the machine that serves the web app sends push alerts (its pages subscribed there): never two of one alert
+const pushSend = push.send.bind(push);
+push.send = ((a: any) => (host.serving() ? pushSend(a) : Promise.resolve())) as typeof push.send;
 live.onVisible = (v) => { push.visible = v; };
 // what was already waiting or ready when the service started: no alert for it
 let alerted: Set<string> | null = null;
@@ -113,7 +125,7 @@ const readDefaults = async () => {
   } catch {}
 };
 // Settings › Web: what the service last said of the web app (tailnet() below), its QR code as a picture
-let webNow: { on: boolean; link: string | null; why: string | null; qr: string | null } | null = null;
+let webNow: { on: boolean; link: string | null; why: string | null; qr: string | null; serve?: any } | null = null;
 // Settings › Secrets, as the window's: each kept secret with where it is, and each agent's waiting ask with its name and
 // its narrowest scope (its space, else its machine), which Give it fills in
 function secretsPage(spaces: any[]) {
@@ -170,7 +182,7 @@ const watch = new AgentWatch(hub, hcRun, {
 });
 (compat as any).watch = watch;
 watch.start();
-const jobs = new Jobs(hub);
+const jobs = new Jobs(hub, host);
 jobs.watched = () => live.watched();
 jobs.start();
 model.doc = () => store.doc.value;
@@ -202,29 +214,65 @@ function webOn() {
 // Tailscale can come up after the service: look again now and then, and keep /shepherdr shared while web is on. What
 // the window's Shepherdr settings > Web shows goes into ~/.herdr/shepherdr/web.json (the link, its QR code).
 let wasOn: boolean | null = null;
+// Serve from: a move this service started (shepherdr web serve-from), until it ends; what went wrong, for a while
+let moving: { to: string; at: number; error?: string } | null = null;
 async function tailnet() {
   me = await whoami();
   g.owner = me?.login ?? null;
   g.dns = me?.dns ?? null;
-  const on = webOn();
-  const link = me ? `https://${me.dns}/shepherdr/` : null;
-  let why: string | null = me ? null : "Tailscale isn't running here";
-  if (me && on) {
+  const on = webOn(), serving = host.serving();
+  const own = me ? `https://${me.dns}/shepherdr/` : null;
+  host.link = own;
+  // another machine serves it: its link (the window's Settings › Web shows it and its QR code); this one isn't shared
+  const link = serving ? own : host.hostLink();
+  let why: string | null = me || !serving ? null : "Tailscale isn't running here";
+  if (me && on && serving) {
     const s = await served(me.dns);
     if (s.funnel) { why = "Funnel is on for this machine: the web app stays off until it's off"; g.owner = null; }
     else why = await share(me.dns, PORT);
-  } else if (me && !on && wasOn !== false) await unshare(me.dns);
-  wasOn = on;
+  } else if (me && (!on || !serving) && wasOn !== false) await unshare(me.dns, PORT);
+  if (!serving && !link) why = host.reachable() ? "The machine serving the web app hasn't said its link yet." : "The machine serving the web app can't be reached now.";
+  wasOn = on && serving;
   let qr: string | null = null;
   try { if (link && on && !why) qr = qrFile(existsSync(join(APP_DATA, "..")) ? APP_DATA : DATA, link); } catch {}
-  writeFileSync(join(DATA, "web.json"), JSON.stringify({ on, link, qr, why, at: Date.now() }) + "\n");
+  const serve = serveNow();
+  writeFileSync(join(DATA, "web.json"), JSON.stringify({ on, link, qr, why, serve, at: Date.now() }) + "\n");
   let picture: string | null = null;
   try { if (qr) picture = `data:image/svg+xml;base64,${Buffer.from(readFileSync(qr)).toString("base64")}`; } catch {}
   const was = JSON.stringify(webNow);
-  webNow = { on, link, why, qr: picture };
+  webNow = { on, link, why, qr: picture, serve };
   if (JSON.stringify(webNow) !== was) model.rebuild();
   if (why) console.error(why);
 }
+
+/** Settings › Web's Serve from: every machine with its words, which one serves, and a move under way. */
+function serveNow() {
+  const rows = host.choices().map((m) => ({ name: m.name, here: !!m.here, state: m.state, os: m.os, serves: m.serves, label: serveChoice(m) }));
+  const by = rows.find((r) => r.serves);
+  return { rows, host: by ? (by.here ? null : by.name) : null, reachable: host.reachable(), moving: moving && !moving.error ? moving.to : null, error: moving?.error ?? null };
+}
+
+/** Moves the web app to a machine (null: this one): the installer does it (bin/shepherdr web serve-from). */
+async function serveFrom(machine: string | null) {
+  if (moving && !moving.error) throw new Error(`Already moving it to ${moving.to}.`);
+  const target = machine ?? host.me?.name ?? "here";
+  moving = { to: target, at: Date.now() };
+  void tailnet();
+  const cli = [join(HOME, ".local", "bin", "shepherdr"), join(ROOT, "bin", "shepherdr")].find(existsSync) ?? "shepherdr";
+  try {
+    const p = Bun.spawn([cli, "web", "serve-from", machine ?? "here", "--json"], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+    const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
+    if ((await p.exited) !== 0) throw new Error(err.trim().split("\n").pop()?.replace(/^shepherdr: /, "") || "The move didn't finish.");
+    moving = null;
+    void out;
+  } catch (err) {
+    moving = { to: target, at: Date.now(), error: (err as Error).message };
+    setTimeout(() => { if (moving?.error) { moving = null; void tailnet(); } }, 60_000);
+  }
+  await host.poll();
+  await tailnet();
+}
+host.on(() => { void tailnet(); model.rebuild(); });
 await tailnet();
 setInterval(tailnet, 60_000);
 
@@ -263,9 +311,14 @@ const server = Bun.serve<{ who: string }>({
     const url = new URL(req.url);
     const path = url.pathname.startsWith("/shepherdr/") ? url.pathname.slice(10) : url.pathname;
     // the window asks this (lib/service.js): while jobs is true it leaves its background work to the service
-    if (path === "/api/health") return json({ ok: true, version: VERSION, core: hub.up, jobs: jobs.on && hub.up });
+    if (path === "/api/health") return json({ ok: true, version: VERSION, core: hub.up, jobs: jobs.on && hub.up, serving: host.serving(), host: host.hubName() ?? null, reachable: host.reachable() });
     // the Web add-on switched off: nothing for the tailnet (this machine's own callers still get the API)
     if (req.headers.has("tailscale-user-login") && !webOn()) return new Response("Shepherdr's web app is off (Shepherdr settings › Window › Add-ons).", { status: 404 });
+    // another machine serves it now (Serve from): a page that still comes here goes there
+    if (req.headers.has("tailscale-user-login") && !host.serving()) {
+      const there = host.hostLink();
+      return there ? Response.redirect(there, 302) : new Response("Shepherdr's web app is served from another machine now.", { status: 404 });
+    }
     const socket = path === "/api/ws" || path === "/api/terminal" || path === "/api/browser" || path === "/api/voice";
     const viaTailnet = req.headers.has("tailscale-user-login");
     const pass = gate(req, g, socket, viaTailnet && trustedPeer(srv.requestIP(req)?.port, PORT));
@@ -300,10 +353,17 @@ const server = Bun.serve<{ who: string }>({
     if (path === "/api/file") {
       const key = url.searchParams.get("chat") ?? "", want = url.searchParams.get("path") ?? "";
       const at = compat.fileOf(key, want);
-      if (!at || !at.startsWith("/") || at.includes("/../") || !existsSync(at) || (compat.addrOf(key) ?? "").includes("/")) return json({ error: "not found" }, 404);
+      const addr = compat.addrOf(key) ?? "", on = addr.includes("/") ? addr.split("/")[0] : null;
+      if (!at || !at.startsWith("/") || at.includes("/../") || (!on && !existsSync(at))) return json({ error: "not found" }, 404);
+      const named = { "cache-control": "private, max-age=3600", ...(url.searchParams.get("download") ? { "content-disposition": `attachment; filename="${at.split("/").pop()!.replace(/"/g, "")}"` } : {}) };
+      if (on) {
+        // a chat on another machine (one this machine serves the web app for): the file there, through herdr-core
+        const r = await hub.call<{ code: number; stdout: string; truncated?: boolean }>("machine.exec", { on, argv: ["cat", "--", at], timeout: 30 }, 35_000).catch(() => null);
+        if (!r || r.code !== 0 || r.truncated) return json({ error: "not found" }, 404);
+        return new Response(Buffer.from(r.stdout, "base64"), { headers: { "content-type": Bun.file(at).type || "application/octet-stream", ...named } });
+      }
       const f = Bun.file(at);
-      return new Response(f, { headers: { "content-type": f.type || "application/octet-stream", "cache-control": "private, max-age=3600",
-        ...(url.searchParams.get("download") ? { "content-disposition": `attachment; filename="${at.split("/").pop()!.replace(/"/g, "")}"` } : {}) } });
+      return new Response(f, { headers: { "content-type": f.type || "application/octet-stream", ...named } });
     }
     // a recipe artifact's files (the web's recipe view asks api/artifacts/<id>/recipe?v=, /file/<path>?v=; &on=<machine>
     // for another machine's, read there)
@@ -452,6 +512,14 @@ const server = Bun.serve<{ who: string }>({
         catch (err) { return json({ ok: false, error: (err as Error).message }); }
       }
       if (body?.type === "limits-check") { await machines.checkNow(); return json({ ok: true }); }
+      if (body?.type === "serve-from") {
+        // Settings › Web's Serve from: the move runs on (the page sees it in Settings › Web as it goes)
+        const m = typeof body.machine === "string" && body.machine && body.machine !== host.me?.name ? body.machine : null;
+        if (m !== null && !host.machines.has(m)) return json({ ok: false, error: "That machine isn't linked." });
+        if (moving && !moving.error) return json({ ok: false, error: `Already moving it to ${moving.to}.` });
+        void serveFrom(m).catch(() => {});
+        return json({ ok: true });
+      }
       if (body?.type === "role-info") {
         // Settings › Agents' model menu (the window's, settings mode): every installed CLI's models, levels, Fast and
         // permission modes

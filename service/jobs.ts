@@ -1,14 +1,19 @@
 // Shepherdr's background work that doesn't hang on what a window shows, run here once for every client:
 // - the task tick (herdr-task tick: queued tasks start, merged ones are done) every 15 s and 2 s after a task's agent
-//   changes, and about once a minute the automations scheduler's check, here and on each machine with tasks;
+//   changes, and about once a minute the automations scheduler's check, here and on other machines with tasks: every
+//   service ticks its own machine; the machine that serves the web app (Serve from, service/host.ts tickOn) ticks the
+//   others that have no service of their own, and another service does that only while the host can't be reached
+//   (herdr-task's own lock keeps two ticks of one machine from ever running at once);
 // - another machine's agent asking for a secret (herdr.secret.want): herdr-secret serve answers it from the vault here;
-// - a chat open on a web page: the question hook's flag (data/chat-asks/open/<terminal>), so its cards come to the page.
+// - a chat open on a web page: the question hook's flag (data/chat-asks/open/<terminal>), so its cards come to the page
+//   (another machine's agent: its flag there, through herdr-core).
 // The window sees this service running (GET /api/health: jobs) and leaves the same work to it (lib/service.js), and
 // takes it back when the service is gone: one runs it at a time. While the installed window can't do that yet (a
 // 3.0 layout), the service runs none of it.
 import { existsSync, readdirSync, utimesSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Hub } from "./hub.ts";
+import type { Host } from "./host.ts";
 import { HOME } from "./paths.ts";
 
 const APP = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
@@ -46,8 +51,9 @@ export class Jobs {
   private served = new Set<string>();
   /** terminals a web page shows now (service/live.ts tells) */
   watched: () => string[] = () => [];
+  private flagged = new Map<string, number>();
 
-  constructor(private hub: Hub) {}
+  constructor(private hub: Hub, private host: Host | null = null) {}
 
   start() {
     if (!this.on) { console.log("background work: left to the window (its layout predates the service)"); return; }
@@ -69,8 +75,9 @@ export class Jobs {
       await run([cli, "tick", "--json"]);
       if (ensure) await run([cli, "scheduler", "--ensure", "--json"]);
       let remote: string[] = [];
-      try { remote = readdirSync(join(HOME, ".herdr", "tasks", ".remote")); } catch {}
-      for (const m of remote.filter((x) => /^[\w.-]+$/.test(x))) {
+      if (this.host) remote = this.host.tickOn();
+      else try { remote = readdirSync(join(HOME, ".herdr", "tasks", ".remote")).filter((x) => /^[\w.-]+$/.test(x) && !x.endsWith(".secret")); } catch {}
+      for (const m of remote) {
         await run([cli, "--on", m, "tick", "--json"]);
         if (ensure) await run([cli, "--on", m, "scheduler", "--ensure", "--json"]);
       }
@@ -107,8 +114,16 @@ export class Jobs {
     const now = new Date();
     for (const a of new Set(this.watched())) {
       const t: any = this.hub.terminals.get(a);
-      if (!t || a.includes("/") || !/^[\w.-]+$/.test(a) || t.state !== "live") continue;
+      if (!t || !/^([\w.-]+\/)?[\w.-]+$/.test(a) || t.state !== "live") continue;
       if ((t.status?.app ?? t.foreground?.name) !== "claude" && t.status?.app !== "claude-code") continue;
+      if (a.includes("/")) {
+        // another machine's agent: its flag there, every 8 s at most
+        const [m, id] = a.split("/");
+        if (Date.now() - (this.flagged.get(a) ?? 0) < 8000) continue;
+        this.flagged.set(a, Date.now());
+        void this.hub.call("machine.exec", { on: m, argv: ["sh", "-c", 'd="${HERDR_APP_HOME:-$HOME/.config/herdr-app}/data/chat-asks/open"; mkdir -p "$d" && touch "$d/$1"', "sh", id], timeout: 10 }, 15_000).catch(() => {});
+        continue;
+      }
       try {
         mkdirSync(ASKS, { recursive: true });
         const f = join(ASKS, a);
