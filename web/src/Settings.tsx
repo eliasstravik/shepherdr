@@ -742,7 +742,7 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
               (row.multiline && row.key.startsWith('tasks.')) || row.doc ? (
                 // Tasks' notes and Autopilot's heartbeat, as the window's: the title and its line, then a box as wide as
                 // the page (the heartbeat's monospace, its file small on top), saved as you type
-                <div key={row.key} className={clsx(rowLook(phone), 'flex-col items-stretch! gap-2.5 pb-3!')}>
+                <div key={row.key} className={clsx(rowLook(phone), 'flex-col items-stretch! gap-2.5 pb-3!', row.inherits && 'border-l-2 border-accent pl-3')}>
                   <NoteBox row={row} under={under(row)} mono={!!row.doc} save={(x) => set(row.key, follows(row, x))} />
                 </div>
               ) : row.multiline ? (
