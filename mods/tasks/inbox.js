@@ -32,7 +32,7 @@
 // Shared: the source is lib/inbox.js; bin/sync-shared copies it into each mod in lib/COPIES.
 // Edit lib/inbox.js, never a mod's copy, then run bin/sync-shared.
 
-import { words } from "./asks.js";
+import { words } from "./core/asks.js";
 import { notifies, spaceOfTerminal } from "./notify.js";
 import { toast, toastWho as whoOf } from "./ui.js";
 import { exec, appHome, home, terminals, agents, panes, spaces, focused, shared, setShared, watchFolder, readTextFile, writeTextFile, playSound, settings, run, layout } from "herdr";

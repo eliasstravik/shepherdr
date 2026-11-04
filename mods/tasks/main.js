@@ -16,9 +16,9 @@ import { spaces, panes, agents, terminals, machines, exec, readTextFile, watchFo
 // What needs the person, from every space and machine (lib/inbox.js, shared; the tab
 // bar runs its engine): agents asking or waiting, task problems, failed automations, merges.
 import { items as needs, ASKS, toAgent, reasonOf, reqReason, REASONS, fit } from "./inbox.js";
-import { words } from "./asks.js";
+import { words } from "./core/asks.js";
 import { taskDot, ownProgress, estimated } from "./dot.js";
-import { READ_LISTS, taskLists } from "./tasklists.js";
+import { READ_LISTS, taskLists } from "./core/tasklists.js";
 import { button, TEXT, H, RADIUS, red, amber } from "./ui.js";
 
 const CLI = () => `${appHome()}/mods/tasks/bin/herdr-task`;

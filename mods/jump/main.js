@@ -22,7 +22,7 @@ import { View } from "gpui-kit";
 import { h_flex, v_flex, InputState, Input, VirtualListScrollHandle, v_virtual_list, Scrollbar } from "gpui-base";
 import { spaces, machines, terminals, agents, layout, layouts, exec, home, run, theme, props, closeOverlay, shared, setShared } from "herdr";
 import { taskDot } from "./dot.js";
-import { READ_LISTS, taskLists } from "./tasklists.js";
+import { READ_LISTS, taskLists } from "./core/tasklists.js";
 import { openViewer, showViewer, chatArea } from "./artview.js";
 import { showInSidebar, hasSidebarView } from "./artifact-sidebar.js";
 import { TEXT, RADIUS } from "./ui.js";

@@ -76,7 +76,7 @@ const server = Bun.serve<{ who: string }>({
     if (path === "/api/health") return json({ ok: true, version: VERSION, core: hub.up });
     const socket = path === "/api/ws";
     const viaTailnet = req.headers.has("tailscale-user-login");
-    const pass = gate(req, g, socket, viaTailnet && trustedPeer(srv.requestIP(req)?.port));
+    const pass = gate(req, g, socket, viaTailnet && trustedPeer(srv.requestIP(req)?.port, PORT));
     if (!pass.ok) return new Response(pass.why, { status: pass.status });
     if (socket) return srv.upgrade(req, { data: { who: pass.who } }) ? undefined : new Response("upgrade failed", { status: 400 });
     if (path === "/api/me") return json({ login: pass.who, via: pass.via, machine: me?.host ?? null, link: me ? `https://${me.dns}/shepherdr/` : null, version: VERSION });

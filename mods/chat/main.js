@@ -27,8 +27,8 @@ import { v_flex, h_flex, TextareaState, Textarea, Scrollbar, VirtualListScrollHa
 import { focused, props, run, theme, home, hc, exec, shared, setShared, watchFolder, window, settings, playSound, notify, appHome, readTextFile, writeTextFile, nextCommand, openOverlay, knownAgents } from "herdr";
 import { agents, panes, terminals, spaces, inRender } from "./live.js";
 import * as fs from "fs/promises";
-import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names } from "./log.js";
-import { words } from "./asks.js";
+import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names } from "./core/chat-log.js";
+import { words } from "./core/asks.js";
 import { AskCards, linkCtl } from "./cards.js";
 import * as strips from "./strips.js";
 import { button, red, green, amber, H, RADIUS, TEXT, toast, toastWho, plainError } from "./ui.js";

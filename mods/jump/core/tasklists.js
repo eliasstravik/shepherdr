@@ -1,6 +1,6 @@
 // Every folder's task list in a machine's ~/.herdr/tasks, as the Tasks and Jump panels read them.
-// Shared: the source is lib/tasklists.js; bin/sync-shared copies it into each mod in lib/COPIES.
-// Edit lib/tasklists.js, never a mod's copy, then run bin/sync-shared.
+// Shared core: the source is core/tasklists.js (the window's mods, the service and the web app all use it);
+// bin/sync-shared copies it into each mod in lib/COPIES. Edit core/tasklists.js, never a copy, then run bin/sync-shared.
 //
 // The rule (herdr-task's is_task_list in mods/tasks/bin/herdr_task/store.py; keep them equal): a
 // file there is a task list only when it's a JSON object with a string "folder" and a list

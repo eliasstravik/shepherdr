@@ -71,6 +71,35 @@ class Repo(unittest.TestCase):
             name = os.path.basename(p)
             self.assertNotRegex(name, r"\.bak|\.orig$|\.new$|^zz-", os.path.relpath(p, ROOT))
 
+    def test_mod_imports_resolve(self):
+        """Every relative import in a mod names a file inside that mod (shared copies included): a moved module
+        (lib/ to core/) can't leave a mod pointing at nothing. herdr-app check would catch it too, but runs init()."""
+        imp = re.compile(r'''(?:^|\n)\s*(?:import|export)\s[^'";]*?from\s+["'](\.{1,2}/[^"']+)["']|import\(\s*["'](\.{1,2}/[^"']+)["']''')
+        for m in os.listdir(J("mods")):
+            top = J("mods", m)
+            for d, dirs, files in os.walk(top):
+                dirs[:] = [x for x in dirs if x not in ("__pycache__", "bin")]
+                for f in files:
+                    if not f.endswith(".js"):
+                        continue
+                    src = open(os.path.join(d, f), encoding="utf-8").read()
+                    for a, b in imp.findall(src):
+                        if (m, f) == ("artifacts", "markup.js") and (a or b) in ("./artifact.js", "./artifact-main.js"):
+                            continue  # copied into each installed artifact, where herdr-artifact writes these
+                        target = os.path.normpath(os.path.join(d, a or b))
+                        self.assertTrue(target.startswith(top + os.sep), f"{os.path.relpath(os.path.join(d, f), ROOT)}: {a or b} leaves the mod")
+                        self.assertTrue(os.path.isfile(target), f"{os.path.relpath(os.path.join(d, f), ROOT)}: {a or b} isn't there")
+
+    def test_core_is_plain(self):
+        """core/ runs in the window, the service and the browser: no Herdr, GPUI, Node or Bun imports."""
+        if not os.path.isdir(J("core")):
+            return
+        for f in os.listdir(J("core")):
+            if f.endswith(".js"):
+                src = open(J("core", f), encoding="utf-8").read()
+                for spec in re.findall(r'''from\s+["']([^"']+)["']''', src):
+                    self.assertTrue(spec.startswith("./"), f"core/{f} imports {spec}")
+
     def test_features_have_both_sides(self):
         """lib/features.json: every feature has its core, a Herdr side and a web side; every mod and every web screen
         belongs to a feature; once a feature is built (no "planned"), the files it names are there."""

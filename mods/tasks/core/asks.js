@@ -1,8 +1,8 @@
 // What Claude asks the person through the PermissionRequest hook (ask-hook.sh), in words for
 // the chat's card, and the hook's answers. Nothing is allowed unread, and nothing is too long
 // to answer in the chat: the card shows the whole request, scrolling inside itself.
-// Shared: the source is lib/asks.js; bin/sync-shared copies it into each mod in lib/COPIES.
-// Edit lib/asks.js, never a mod's copy, then run bin/sync-shared.
+// Shared core: the source is core/asks.js (the window's mods, the service and the web app all use it);
+// bin/sync-shared copies it into each mod in lib/COPIES. Edit core/asks.js, never a copy, then run bin/sync-shared.
 
 // A card shows up to this many lines (the whole of any real request), each up to LINE characters.
 const SHOWN = 2000, LINE = 2000;

@@ -1,3 +1,5 @@
+// Shared core: the source is core/chat-log.js (was mods/chat/log.js); the chat mod, the service and the web
+// app read agents' logs with it. bin/sync-shared copies it into mods/chat/core/. Edit it here, never a copy.
 // Finding an agent's own session log and reading it as a conversation.
 // Claude Code: ~/.claude/sessions/<pid>.json names the session its process writes, so the
 // log is ~/.claude/projects/*/<sessionId>.jsonl. Codex keeps its rollout file open, so the

@@ -1,14 +1,17 @@
 # Shared modules: lib/<file> is the source, copied by bin/sync-shared into each mod listed.
 # A mod can only import files in its own folder, so each needs its own copy.
+# core/<file>: the shared core (core/ beside lib/), copied to mods/<mod>/core/<file>; the service and the web app
+# load the same file from core/.
 coordinator.js: coordinator menu-tasks new-menu-tasks newspace shepherdr-settings tabs-tasks tasks
 inbox.js: spaces-chat tabs-tasks tasks workspace-status-chat
-asks.js: chat spaces-chat tabs-tasks tasks workspace-status-chat
+core/asks.js: chat spaces-chat tabs-tasks tasks workspace-status-chat
 parked.js: chat spaces-chat tabs-tasks workspace-status-chat
 unread.js: chat spaces-chat
 agent.js: chat newspace shepherdr-settings
 settings.js: chat newspace shepherdr-settings
 dot.js: chat jump tasks
-tasklists.js: jump tasks
+core/tasklists.js: jump tasks
+core/chat-log.js: chat
 taskwhere.js: task-files task-changes task-pr task-browser
 emoji-data.js: chat-react spaces-chat
 notify.js: chat spaces-chat tabs-tasks tasks shepherdr-settings workspace-status-chat
