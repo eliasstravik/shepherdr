@@ -264,6 +264,7 @@ function waitLine(why: Message['waitsFor']) {
   if (why === 'menu') return 'Waiting for your answer above.'
   if (why === 'start') return 'Goes in once the agent has started'
   if (why === 'turn') return 'Goes in once the agent finishes this step'
+  if (why === 'queue') return WORDS.inQueue
   return 'Goes in once it can be reached'
 }
 
@@ -537,8 +538,13 @@ const tucks = 'shadow-[0_0_0_2px_var(--bg)]'
 
 /* ---------- attachments: each one a message of its own; pictures as small tiles side by side, anything else as a file tile ---------- */
 
+/** pictures picked on this screen, by their file's name (the name stays when the agent's machine gets a copy): drawn
+ *  from the device itself, at once, in the box, in the bubble on its way and once the chat has it */
+const previews = new Map<string, string>()
+const baseName = (path: string) => path.split('/').pop() ?? path
+
 export const fileUrl = (chat: string, path: string, download = false) =>
-  `api/file?chat=${encodeURIComponent(chat)}&path=${encodeURIComponent(path)}${download ? '&download=1' : ''}`
+  (!download && previews.get(baseName(path))) || `api/file?chat=${encodeURIComponent(chat)}&path=${encodeURIComponent(path)}${download ? '&download=1' : ''}`
 
 /** a picture on its own, with no words: it shows as a tile, and the viewer pages through every one in the chat */
 export const isPicture = (m: Message) => !!m.file && !m.text && !m.answered && isImage(m.file.name)
@@ -1644,7 +1650,10 @@ async function deliver(o: Outgoing) {
   // a reload now would cut it off on its way
   const release = holdReload()
   try {
-    const r = (await act({ type: 'send', chat: o.chat, text: o.text, attachments: o.files.map((f) => f.path), cid: o.cid, reply: o.reply?.id, human: true, ...(o.hold ? { hold: true } : {}) } as never, AbortSignal.timeout(SEND_TIMEOUT))) as {
+    // a file still uploading goes once it is up
+    const files = o.files.some((f) => uploads.has(f.path)) ? await uploaded(o.files) : o.files
+    if (files !== o.files) patch(() => ({ files }))
+    const r = (await act({ type: 'send', chat: o.chat, text: o.text, attachments: files.map((f) => f.path), cid: o.cid, reply: o.reply?.id, human: true, ...(o.hold ? { hold: true } : {}) } as never, AbortSignal.timeout(SEND_TIMEOUT))) as {
       waiting?: boolean
       waitsFor?: Outgoing['waitsFor']
       at?: number
@@ -2124,25 +2133,46 @@ function Pending({ f, chatKey, onRemove }: { f: { name: string; path?: string };
   )
 }
 
-/** files from +, a paste or a drop: each uploads to the agent's machine and waits in the message box until it is sent */
+/** a file still uploading, by the stand-in path it waits in the box with: its path once uploaded (none: it failed) */
+const uploads = new Map<string, Promise<string | undefined>>()
+
+/** the paths a message's files went up to, once each has (Send can come before an upload is done) */
+async function uploaded(files: Outgoing['files']) {
+  const paths = await Promise.all(files.map((f) => uploads.get(f.path) ?? f.path))
+  if (paths.some((p) => !p)) throw new Error("A file didn't upload.")
+  return files.map((f, i) => ({ ...f, path: paths[i]! }))
+}
+
+/** files from +, a paste or a drop: each shows in the message box at once (a picture as itself, from the device) while
+ *  it uploads to Shepherdr, and waits there until it is sent */
 async function attach(chatKey: string, list: File[]) {
   if (!list.length) return
   const release = holdReload()
-  let added: { name: string; path?: string }[]
-  try {
-    added = await Promise.all(
-      list.map(async (f) => {
-        const body = new FormData()
-        body.append('chat', chatKey)
-        body.append('file', f)
-        const r = await fetch('api/upload', { method: 'POST', body, headers: { 'x-shepherdr': '1' } }).then((x) => x.json()).catch(() => null)
-        return { name: f.name, path: r?.path as string | undefined }
-      }),
-    )
-  } finally {
-    release()
-  }
+  const added = list.map((f) => {
+    const id = `upload:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    const url = isImage(f.name) ? URL.createObjectURL(f) : null
+    if (url) previews.set(id, url)
+    const up = fetch('api/upload', { method: 'POST', body: form(chatKey, f), headers: { 'x-shepherdr': '1' } })
+      .then((x) => x.json())
+      .then((r) => r?.path as string | undefined, () => undefined)
+      .then((path) => {
+        if (path && url) previews.set(baseName(path), url)
+        // in the box still: its real path (none: it shows as a file that didn't go up)
+        setUI((u) => ({ files: { ...u.files, [chatKey]: (u.files[chatKey] ?? []).map((x) => (x.path === id ? { name: x.name, path } : x)) } }))
+        return path
+      })
+    uploads.set(id, up)
+    return { name: f.name, path: id }
+  })
   setUI((u) => ({ plus: null, files: { ...u.files, [chatKey]: [...(u.files[chatKey] ?? []), ...added] } }))
+  await Promise.all(added.map((a) => uploads.get(a.path))).finally(release)
+}
+
+function form(chatKey: string, f: File) {
+  const body = new FormData()
+  body.append('chat', chatKey)
+  body.append('file', f)
+  return body
 }
 
 /** the + menu, and the device's file pickers it opens: they stay once the menu has closed, to hear what was picked */

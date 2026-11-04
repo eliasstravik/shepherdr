@@ -62,6 +62,8 @@ BEGIN { pos = base; first = base; msgs = 0 }
     if (match(line, /<task-id>[^<]+/)) k = substr(line, RSTART + 9, RLENGTH - 9)
     if (match(line, /<status>[^<]+/)) st = substr(line, RSTART + 8, RLENGTH - 8)
     print off "\tN\t" u " " k " " st
+    # and as a place in the queue below
+    if (length(line) <= 262144) print off "\tJ\t" line
     next
   }
   if ((claude && index(line, "\"tool_result\"")) || (codex && (index(head, "\"function_call_output\"") || index(head, "\"custom_tool_call_output\"")))) {
@@ -75,6 +77,14 @@ BEGIN { pos = base; first = base; msgs = 0 }
     print off "\tR\t" ids
     # An answer to a question, or words that declined a request: read whole (answers()).
     if (claude && length(line) <= 262144 && ((index(line, "\"answers\":{") && index(line, "\"questions\":[")) || index(line, "wrote in the chat instead: "))) print off "\tJ\t" line
+    next
+  }
+  # The queue of messages typed while Claude Code works: what goes in (the words of the person)
+  # and what comes out, so the chat shows them queued at once. (No apostrophes: X is quoted.)
+  if (index(head, "\"type\":\"queue-operation\"")) {
+    if (count || length(line) > 262144) next
+    gsub(/"data":"[^"]*"/, "\"data\":\"\"", line)
+    print off "\tJ\t" line
     next
   }
   keep = 0
@@ -405,6 +415,9 @@ export class Conversation {
     // run on its own is done when its task-notification comes.
     this.helpers = new Map();
     this.questions = new Map();
+    // Claude Code's queue of what was typed while it works, in order: { id, raw, at, text?,
+    // images? } (text only for the person's words; a job's end has a place too).
+    this.queue = [];
   }
 
   push(item) {
@@ -448,6 +461,9 @@ export class Conversation {
 
   user(id, u) {
     this.waiting = false;
+    // taken from the queue: it shows as said now
+    const q = u?.text ? this.queue.findIndex((x) => x.text === u.text) : -1;
+    if (q >= 0) this.queue.splice(q, 1);
     for (const r of u?.reactions ?? []) this.react("you", r);
     // Task news: an item per line, at the moment Herdr told it.
     (u?.news ?? []).forEach((n, i) => this.push({ kind: "news", id: `${id}:n${i}`, at: u.at, ...n }));
@@ -463,6 +479,29 @@ export class Conversation {
     }
     this.push({ kind: "user", id, text, replyTo, from: u.from, at: u.at, images: u.images || 0 });
     this.doing = null;
+  }
+
+  // A change to Claude Code's queue: enqueue adds, dequeue takes the oldest, remove takes that
+  // one (taken in mid-turn).
+  queueOp(l, off) {
+    const c = typeof l.content === "string" ? l.content : "";
+    if (l.operation === "enqueue") {
+      // its pictures are "[Image #1]" markers in the words there
+      const images = (c.match(/\[Image #\d+\]/g) ?? []).length;
+      const u = c && !c.includes("<task-notification>") ? claudeUser(c.replace(/\[Image #\d+\]\s*/g, "")) : null;
+      if (u || images) this.queue.push({ id: `q${off}`, raw: c, at: time(l.timestamp), text: u?.text ?? "", images });
+      else this.queue.push({ id: `q${off}`, raw: c, at: time(l.timestamp) });
+      if (this.queue.length > 50) this.queue.shift();
+    } else if (l.operation === "dequeue" || !c) this.queue.shift();
+    else {
+      const i = this.queue.findIndex((x) => x.raw === c);
+      if (i >= 0) this.queue.splice(i, 1);
+    }
+  }
+
+  // What the person typed that waits in the queue for the agent to take: [{ id, text, images, at }].
+  queued() {
+    return this.queue.filter((x) => x.text !== undefined);
   }
 
   // The helpers still running: [{ desc }]. One silent for three hours is taken as gone (its
@@ -588,6 +627,7 @@ export class Conversation {
 
   claude(l, off) {
     if (l.isSidechain) return;
+    if (l.type === "queue-operation") { this.queueOp(l, off); return; }
     if (l.type === "user" && l.origin?.kind === "task-notification") {
       // A helper or a background job finished (Claude Code tells the agent so): it's done.
       const c = l.message?.content;

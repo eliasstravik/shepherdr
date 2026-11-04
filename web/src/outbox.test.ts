@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { settle, type Outgoing } from './outbox.ts'
+import { partsOf, settle, type Outgoing } from './outbox.ts'
 import type { Chat } from '@shared/types.ts'
 
 // What you sent comes back from the agent's log without its id: it takes the pending one's place by its words, files
@@ -45,4 +45,15 @@ test('a file the agent got as a path: on a line after the words, where it landed
 test('other words with its path are not it', () => {
   const out = [sent({ text: 'web file test', files: [{ name: 'n.txt', path: '~/a/web-1-n.txt' }] })]
   expect(settle(out, chat([{ id: 'u2', who: 'you', at: 10_800, text: 'something else\n/b/web-1-n.txt' }]))).toBe(out)
+})
+
+test("in the CLI's queue (typed while it works): it shows there, quietly, then the real one takes its place", () => {
+  const queued = chat([{ id: 'q9', who: 'you', text: 'cool', at: 10_100, waiting: true, waitsFor: 'queue', cid: 'c1' }])
+  const [o] = settle([sent()], queued)
+  expect(o).toMatchObject({ state: 'sent', waiting: true, queued: true })
+  expect(partsOf(o, queued)).toEqual([])
+  // taken: it shows again until the log has it, then goes
+  const [back] = settle([o], chat([]), 11_000)
+  expect(back).toMatchObject({ wentAt: 11_000 })
+  expect(settle([back], chat([{ id: 'u2', who: 'you', text: 'cool', at: 10_900 }]))).toEqual([])
 })

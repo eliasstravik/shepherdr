@@ -7,7 +7,7 @@
 //   SHEPHERDR_WEB=on|off           serve the web app and share it on the tailnet (default on)
 // Serve from (service/host.ts): one machine serves the web app and holds the shared data; on the others the service
 // reads and writes it there, keeps their settings in step (service/sync.ts) and doesn't share /shepherdr.
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { randomBytes } from "node:crypto";
 import { DATA, SOCK, TOKEN, PORT, HOME, ensureData } from "./paths.ts";
@@ -208,6 +208,8 @@ model.start();
 // app stops and /shepherdr is no longer shared; the service keeps its background work.
 const SETTINGS = process.env.HERDR_TASK_SETTINGS || join(HOME, ".herdr", "shepherdr.json");
 const APP_DATA = join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "data", "shepherdr");
+/** where files from a page's message box are kept (the window keeps pasted ones there too) */
+const ATTACH = join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "data", "chat-attach");
 function webOn() {
   if (process.env.SHEPHERDR_WEB === "off") return false;
   try { return !(JSON.parse(readFileSync(SETTINGS, "utf8"))?.everywhere?.off ?? []).includes("web"); } catch { return true; }
@@ -357,11 +359,13 @@ const server = Bun.serve<{ who: string }>({
       if (!body || typeof body.key !== "string" || !/^[a-z][\w.-]{0,63}$/.test(body.key)) return json({ error: "bad key" }, 400);
       return json(await store.set(body.key, body.value ?? null));
     }
-    // a file a chat shows (an image sent in it), on this machine: only one that chat's messages name
+    // a file a chat shows (an image sent in it), on this machine: only one that chat's messages name, or one uploaded
+    // here (/api/upload: in the message box, or on its way to an agent on another machine)
     if (path === "/api/file") {
       const key = url.searchParams.get("chat") ?? "", want = url.searchParams.get("path") ?? "";
-      const at = compat.fileOf(key, want);
-      const addr = compat.addrOf(key) ?? "", on = addr.includes("/") ? addr.split("/")[0] : null;
+      const upload = want.startsWith(ATTACH + "/") && !want.slice(ATTACH.length + 1).includes("/") && !!statSync(want, { throwIfNoEntry: false })?.isFile();
+      const at = upload ? want : compat.fileOf(key, want);
+      const addr = compat.addrOf(key) ?? "", on = !upload && addr.includes("/") ? addr.split("/")[0] : null;
       if (!at || !at.startsWith("/") || at.includes("/../") || (!on && !existsSync(at))) return json({ error: "not found" }, 404);
       const named = { "cache-control": "private, max-age=3600", ...(url.searchParams.get("download") ? { "content-disposition": `attachment; filename="${at.split("/").pop()!.replace(/"/g, "")}"` } : {}) };
       if (on) {
@@ -390,7 +394,7 @@ const server = Bun.serve<{ who: string }>({
       const form = await req.formData().catch(() => null);
       const f = form?.get("file");
       if (!(f instanceof File) || f.size > 25 * 1024 * 1024) return json({ error: "A file of at most 25 MB." }, 400);
-      const dir = join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "data", "chat-attach");
+      const dir = ATTACH;
       mkdirSync(dir, { recursive: true });
       const name = `web-${Date.now().toString(36)}-${(f.name || "file").replace(/[^\w.-]+/g, "-").replace(/^[-.]+/, "").slice(-80) || "file"}`;
       await Bun.write(join(dir, name), f);

@@ -232,6 +232,12 @@ export class Compat {
   /** chat key -> the files its messages show (a chat's images): the only ones /api/file serves for it */
   files = new Map<string, Set<string>>();
   fileOf(key: string, path: string) { return this.files.get(key)?.has(path) ? path : null; }
+  /** agent address -> what pages sent it lately (service/actions.ts): a message waiting in its CLI's queue is known
+   *  again by its words, and shows with the page's id and files */
+  sends = new Map<string, { cid: string; text: string; files: string[]; at: number }[]>();
+  noteSend(addr: string, s: { cid: string; text: string; files: string[]; at: number }) {
+    this.sends.set(addr, [...(this.sends.get(addr) ?? []).filter((x) => Date.now() - x.at < 30 * 60_000), s].slice(-20));
+  }
 
   addrOf(key: string) { return this.chats.get(key) ?? null; }
 
@@ -521,8 +527,19 @@ export class Compat {
       }
     }
     while (mi < made.length) messages.push(newsLine(made[mi++]));
-    // what the agent asks now, as cards at the end of its chat
     const addr = this.chats.get(key);
+    // what was typed while it works, waiting in its CLI's queue until it takes it (at its next step): shown at once,
+    // quietly; one a page sent comes back with its id and files
+    const busy = t?.status?.state === "working" || t?.status?.state === "blocked";
+    for (const q of busy ? reader.conv?.queued?.() ?? [] : []) {
+      const words = (v: string) => v.replace(/\s+/g, " ").trim();
+      const s = (this.sends.get(addr ?? "") ?? []).find((x) => words(x.text) === words(q.text) && x.at <= q.at + 5000 && q.at - x.at < 10 * 60_000);
+      const mark = { who: "you" as const, at: q.at, waiting: true, waitsFor: "queue" as const, ...(s ? { cid: s.cid } : {}) };
+      if (q.text) messages.push({ id: q.id, text: q.text, ...mark } as Message);
+      for (const [n, path] of (s?.files ?? []).entries()) messages.push({ id: `${q.id}:f${n}`, file: { name: path.split("/").pop() ?? "image", path }, ...mark } as Message);
+      if (!s && q.images) messages.push({ id: `${q.id}:n`, images: q.images, ...mark } as Message);
+    }
+    // what the agent asks now, as cards at the end of its chat
     for (const a of addr ? this.asks?.of(addr) ?? [] : []) messages.push({ id: `ask:${a.id}`, who: "agent", at: a.at, question: this.question(a, key) });
     for (const a of (this.secrets?.asks() ?? []).filter((x) => x.address === addr)) messages.push({ id: `secret:${a.address}:${a.name}`, who: "agent", at: Date.now(), secret: this.secretAsk(a) } as Message);
     // asks that closed, as the window's quiet lines ("✓ Run: npm test · Allowed in the chat"); a question's own line is

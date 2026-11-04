@@ -62,12 +62,41 @@ export async function steerNow(io, addr) {
   }
 }
 
+// A picture's path on a line of its own, as a sent file goes after the words.
+const PICTURE = /^[/~]\S*\.(png|jpe?g|gif|webp|bmp|heic)$/im;
+
+// Claude Code's input box: the last line of its screen starting with its prompt mark.
+export function inputLine(screen) {
+  const lines = String(screen ?? "").split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) if (lines[i].startsWith("❯")) return lines[i].trim();
+  return null;
+}
+
+// hc send for one CLI. Claude Code reads the pictures a pasted message names before it takes
+// Enter: an Enter that comes meanwhile is lost, and the message sits in its box ("[Image #1]
+// words") until the next one pushes it in (hc send says so only ~5 s later). While hc send is on
+// its way, a box still holding the pictures, the same on two looks, gets its Enter.
+export async function sendTyped(io, addr, kind, body) {
+  const going = io.hc(["send", addr, body]);
+  if (kind !== "claude" || !PICTURE.test(body)) return going;
+  let back = false, last = null;
+  const sent = going.finally(() => { back = true; });
+  for (let i = 0; i < 20 && !back; i++) {
+    await Promise.race([io.sleep(100), sent.catch(() => null)]);
+    if (back) break;
+    const box = inputLine((await io.hc(["read", addr, "--lines", "0"]).catch(() => null))?.stdout);
+    if (box && /\[Image #\d+\]/.test(box) && box === last) { await io.hc(["keys", addr, "enter"]).catch(() => null); break; }
+    last = box;
+  }
+  return sent;
+}
+
 // The person's reaction to a message, as the agent reads it (on: added, else removed).
 export const reactionLine = (emoji, text, on = true) => `<hc from="person" ${on ? "reaction" : "reaction-removed"}="${emoji}" to="${excerpt(text)}"/>`;
 
 // Sends the body. kind: "claude", "codex" or another CLI. -> hc's result (code 0: it's in the agent's terminal).
 export async function sendBody(io, addr, kind, body) {
-  let r = await io.hc(["send", addr, body]);
+  let r = await sendTyped(io, addr, kind, body);
   if (r.code !== 0 && refusal(r).kind === "blocked" && (kind === "claude" || kind === "codex")) r = await replyInstead(io, addr, body);
   if (r.code === 0 && kind === "claude") await steerNow(io, addr);
   return r;

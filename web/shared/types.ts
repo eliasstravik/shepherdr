@@ -538,8 +538,8 @@ export interface Message {
    *  it at once, so an ordinary message never has this) */
   waiting?: boolean
   /** why it waits: a menu is up (typed text could pick an option), the agent is starting, a CLI command waits for the
-   *  turn to end, or nothing here: its machine is out of reach */
-  waitsFor?: 'menu' | 'start' | 'turn'
+   *  turn to end, it is in the CLI's own queue until its next step, or nothing here: its machine is out of reach */
+  waitsFor?: 'menu' | 'start' | 'turn' | 'queue'
   /** an attached file: each one is a message of its own, right after the text it came with */
   file?: { name: string; path: string }
   /** the id the screen gave what you sent: it showed it at once, and this message takes its place */

@@ -509,22 +509,25 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       if (!t || t.state !== "live") throw new Error("That agent isn't running.");
       const io = { hc: asPerson(hub), sleep: (ms: number) => Bun.sleep(ms), status: () => (hub.terminals.get(a) as any)?.status?.state ?? null };
       // files sent with it: their paths after the words, as the window's chat sends them (copied first to another machine)
-      const files: string[] = [];
-      for (const p of Array.isArray(b.attachments) ? b.attachments.slice(0, 20) : []) {
-        if (typeof p !== "string" || !p.startsWith(ATTACH + "/") || p.includes("/../")) throw new Error("That file isn't one sent from here.");
-        if (!a.includes("/")) { files.push(p); continue; }
+      const sent: string[] = Array.isArray(b.attachments) ? b.attachments.slice(0, 20) : [];
+      for (const p of sent) if (typeof p !== "string" || !p.startsWith(ATTACH + "/") || p.includes("/../")) throw new Error("That file isn't one sent from here.");
+      // all at once
+      const files = await Promise.all(sent.map(async (p) => {
+        if (!a.includes("/")) return p;
         const put = await hc(["put", a, p, "--json"]);
         let landed: string | null = null;
         try { landed = JSON.parse(put.stdout || "{}").path ?? null; } catch {}
         if (put.code !== 0 || !landed) throw new Error("A file didn't reach that machine.");
-        files.push(landed);
-      }
+        return landed;
+      }));
       const body = [messageBody({ text, quote: typeof b.quote === "string" ? b.quote.slice(0, 2000) : null, tags: typeof b.tags === "string" ? b.tags : "" }), ...files].filter(Boolean).join("\n\n");
       // held on purpose (Ctrl+Enter, a long press): it goes once the agent stops working
       const st = (hub.terminals.get(a) as any)?.status?.state;
       if (b.hold && (st === "working" || st === "blocked")) { held.push({ addr: a, kind: kindOf(t) ?? "", body, hub, cid: typeof b.cid === "string" ? b.cid.slice(0, 80) : undefined }); drain(); return { ok: true, waiting: true, waitsFor: "turn" }; }
       // when it began to go in, by this clock: the page knows it again in the chat by it (web/src/outbox.ts sameAs)
       const at = Date.now();
+      // what it was, so the chat knows it again while it waits in the CLI's queue
+      if (typeof b.cid === "string") compat.noteSend?.(a, { cid: b.cid.slice(0, 80), text, files: sent, at });
       const r = await sendBody(io, a, kindOf(t) ?? "", body);
       if (r.code !== 0) throw new Error(refusal(r).message);
       return { ok: true, at };
