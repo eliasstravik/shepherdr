@@ -14,7 +14,7 @@ import { DATA, SOCK, TOKEN, PORT, HOME, ensureData } from "./paths.ts";
 import { holdLock } from "./lock.ts";
 import { gate, type Gate } from "./auth.ts";
 import { trustedPeer } from "./peer.ts";
-import { whoami, share, served, unshare, type Me } from "./tailscale.ts";
+import { whoami, share, served, unshare, restoreShare, type Me } from "./tailscale.ts";
 import { qrFile } from "./qr.ts";
 import { Hub } from "./hub.ts";
 import { Store } from "./store.ts";
@@ -230,7 +230,11 @@ async function tailnet() {
     const s = await served(me.dns);
     if (s.funnel) { why = "Funnel is on for this machine: the web app stays off until it's off"; g.owner = null; }
     else why = await share(me.dns, PORT);
-  } else if (me && (!on || !serving) && wasOn !== false) await unshare(me.dns, PORT);
+  } else if (me && (!on || !serving) && wasOn !== false) {
+    await unshare(me.dns, PORT);
+    // moved away: what the move here set aside is shared again (shepherdr web serve-from --take-link)
+    if (!serving) await restoreShare(join(DATA, "replaced-share.json"));
+  }
   if (!serving && !link) why = host.reachable() ? "The machine serving the web app hasn't said its link yet." : "The machine serving the web app can't be reached now.";
   wasOn = on && serving;
   let qr: string | null = null;

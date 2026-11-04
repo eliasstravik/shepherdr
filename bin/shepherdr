@@ -5,6 +5,9 @@
   shepherdr update     the same, from the checkout it was installed from (git pull it first)
   shepherdr install --web               web only: herdr-core, herdr-task, the helpers, the service and the web app
                                         under .local/share/shepherdr (no herdr-app)
+  shepherdr web serve-from <machine|here> [--take-link]   serve the web app from another machine linked over
+                                        herdr-core (an always-on Mac mini or cloud VM), installing it there; here: back
+  shepherdr web status                  which machine serves it, and its link
   shepherdr uninstall  [--root DIR] [--dry-run]
   shepherdr doctor     [--root DIR]: checks the install; once it's whole, lets the sync to other machines go
   shepherdr version
@@ -212,7 +215,8 @@ def source_items(src):
 
 
 def service_items(src):
-    """The service (its TypeScript runs on Bun as it is), the shared core and the built web app."""
+    """The service (its TypeScript runs on Bun as it is), the shared core and the built web app; and what makes that
+    folder a source for a web-only install on another machine (Serve from: `shepherdr web install-on` packs it)."""
     items = [("service", f"{SHARE}/package.json", os.path.join(src, "package.json")),
              # which add-ons the web app leaves out while off (Settings › Window)
              ("service", f"{SHARE}/lib/addons.json", os.path.join(src, "lib", "addons.json"))]
@@ -224,6 +228,16 @@ def service_items(src):
     dist = os.path.join(src, "web", "dist")
     for f in walk_files(dist) if os.path.isfile(os.path.join(dist, "index.html")) else []:
         items.append(("service", f"{SHARE}/web/dist/{f}", os.path.join(dist, f)))
+    # herdr-task, herdr-artifact and the helpers, the role instructions and the installer: a web-only install links
+    # its helpers here; on any install the folder is a whole source to install another machine from
+    for top in ("mods/tasks/bin", "mods/artifacts/bin", "bin", "templates"):
+        for f in walk_files(os.path.join(src, top)):
+            if top != "templates" or f.endswith(".md"):
+                items.append(("service", f"{SHARE}/{top}/{f}", os.path.join(src, top, f)))
+    for f in ("mods/artifacts/recipe-view.js", "mods/artifacts/markup.js", "install.sh"):
+        items.append(("service", f"{SHARE}/{f}", os.path.join(src, f)))
+    # recipe-view.js imports it from beside itself
+    items.append(("service", f"{SHARE}/mods/artifacts/core/recipe.js", os.path.join(src, "core", "recipe.js")))
     return items
 
 
@@ -683,11 +697,6 @@ WEB_RECORD = f"{SHARE}/installed.json"
 
 def web_items(src):
     items = service_items(src)
-    for top in ("mods/tasks/bin", "mods/artifacts/bin", "bin"):
-        for f in walk_files(os.path.join(src, top)):
-            items.append(("tools", f"{SHARE}/{top}/{f}", os.path.join(src, top, f)))
-    for f in ("mods/artifacts/recipe-view.js", "mods/artifacts/markup.js", "core/recipe.js"):
-        items.append(("tools", f"{SHARE}/{f}" if not f.startswith("core/") else f"{SHARE}/mods/artifacts/{f}", os.path.join(src, f)))
     for f in sorted(os.listdir(os.path.join(src, "templates"))):
         if f.endswith(".md"):
             items.append(("template", f"{TPL}/{f}", os.path.join(src, "templates", f)))
@@ -736,6 +745,9 @@ def cmd_install_web(a):
         os.makedirs(os.path.dirname(r.p(rel)), exist_ok=True)
         os.symlink(dest, r.p(rel))
     rec.update({"files": files, "links": links, "version": VERSION, "source": src, "at": r.stamp, "root": root, "web": True})
+    # what this run replaced (an older herdr-task, the helpers…): uninstall puts it back
+    if r.backed:
+        rec["backups"] = [*rec.get("backups", []), r.backup_dir]
     install_service(r, rec, home)
     if not a.dry_run:
         atomic_write(r.p(WEB_RECORD), (json.dumps(rec, indent=2, sort_keys=True) + "\n").encode())
@@ -760,6 +772,19 @@ def cmd_uninstall_web(a, root):
     for rel, sha in rec.get("files", {}).items():
         if fsha(rel, read(r.p(rel))) == sha and not a.dry_run:
             os.remove(r.p(rel))
+    # what the installs replaced, back where it was (the oldest copy of each)
+    for b in reversed(rec.get("backups", [])) if not a.dry_run else []:
+        for rel in walk_files(b) + [os.path.relpath(os.path.join(d, x), b) for d, ds, _ in os.walk(b) for x in ds if os.path.islink(os.path.join(d, x))]:
+            src, dest = os.path.join(b, rel), r.p(rel)
+            if os.path.lexists(dest) and not os.path.islink(dest) and rel.startswith(SHARE):
+                continue
+            if os.path.lexists(dest):
+                os.remove(dest)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            os.rename(src, dest)
+            say(f"  put back {rel}")
+    if root == os.path.realpath(real_home()) and not a.dry_run:
+        restore_share(root)
     if not a.dry_run:
         os.remove(r.p(WEB_RECORD))
         for d, _, _ in sorted(os.walk(r.p(SHARE)), reverse=True):
@@ -969,6 +994,109 @@ def cmd_whisper(a):
     return 0
 
 
+# ---- web: Serve from --------------------------------------------------------------------------------
+
+def restore_share(root):
+    """/shepherdr as it was before a move here took it (serve-from --take-link kept it in replaced-share.json)."""
+    f = os.path.join(root, HERDR, "shepherdr", "replaced-share.json")
+    try:
+        old = json.load(open(f))
+    except (OSError, ValueError):
+        return
+    tailscale = shutil.which("tailscale")
+    if not tailscale or not str(old.get("port", "")).isdigit() or not str(old.get("proxy", "")).startswith("http://127.0.0.1:"):
+        return
+    subprocess.run([tailscale, "serve", f"--https={old['port']}", "--set-path", "/shepherdr", "off"], capture_output=True)
+    if subprocess.run([tailscale, "serve", "--bg", f"--https={old['port']}", "--set-path", "/shepherdr", old["proxy"]], capture_output=True).returncode == 0:
+        os.remove(f)
+        say(f"  /shepherdr is shared to {old['proxy']} again, as before")
+
+
+def web_source():
+    """A whole source for a web-only install: this machine's installed service folder (every 3.1.1 install keeps one),
+    else the checkout."""
+    share = os.path.join(real_home(), SHARE)
+    if os.path.isfile(os.path.join(share, "install.sh")) and os.path.isfile(os.path.join(share, "web", "dist", "index.html")):
+        return share
+    src = find_source(None, load_record(real_home()) or None)
+    if not os.path.isfile(os.path.join(src, "web", "dist", "index.html")):
+        raise Stop(f"the web app isn't built in {src} (bun install && bun run build)")
+    return src
+
+
+def pack(src):
+    """The web-only install as one .tar.gz, laid out as its source (what service_items installs, by its own names)."""
+    import io
+    import tarfile
+    buf = io.BytesIO()
+    seen = set()
+    with tarfile.open(fileobj=buf, mode="w:gz") as t:
+        for _g, rel, path in web_items(src):
+            name = rel[len(SHARE) + 1:] if rel.startswith(SHARE + "/") else os.path.relpath(path, src)
+            if name in seen or not os.path.isfile(path):
+                continue
+            seen.add(name)
+            t.add(path, arcname=name, recursive=False)
+    return buf.getvalue()
+
+
+# On the other machine (hc exec has a bare PATH there): Bun when missing (its own installer, into ~/.bun), the pack
+# unpacked as a source beside the service, then its own installer, web only.
+INSTALL_THERE = r"""set -e
+export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+command -v python3 >/dev/null || { echo "python3 isn't installed there" >&2; exit 3; }
+command -v hc >/dev/null || { echo "herdr-core (hc) isn't installed there" >&2; exit 3; }
+if [ -f "$HOME/.config/herdr-app/data/shepherdr/installed.json" ]; then
+  echo "Shepherdr's whole layout is installed there: update it there (./install.sh), then move again" >&2; exit 5; fi
+if ! command -v bun >/dev/null; then
+  echo "installing Bun (bun.sh) there"
+  curl -fsSL https://bun.sh/install | bash >/dev/null 2>&1 || { echo "couldn't install Bun there (https://bun.sh)" >&2; exit 4; }
+fi
+d="$HOME/.local/share/shepherdr-src"
+rm -rf "$d.new"; mkdir -p "$d.new"; tar xzf - -C "$d.new"
+rm -rf "$d"; mv "$d.new" "$d"
+python3 "$d/bin/shepherdr" install --web --yes --source "$d"
+"""
+
+
+def cmd_web_install_on(a):
+    """Installs (or updates) the web-only part on a machine linked over herdr-core; here: on this machine."""
+    if a.machine in ("here", None):
+        if load_record(real_home()) or os.path.isfile(os.path.join(real_home(), WEB_RECORD)):
+            say("Shepherdr's service is installed here.")
+            return 0
+        a.source, a.root, a.dry_run, a.force = web_source(), None, False, False
+        return cmd_install_web(a)
+    src = web_source()
+    body = pack(src)
+    say(f"  sending Shepherdr {VERSION} ({len(body) // 1024} KB) to {a.machine}")
+    r = subprocess.run(["hc", "exec", "--on", a.machine, "--stdin", "--timeout", "600", "--", "sh", "-c", INSTALL_THERE],
+                       input=body, capture_output=True)
+    for line in r.stdout.decode(errors="replace").splitlines():
+        say(f"  {a.machine}: {line}")
+    if r.returncode != 0:
+        raise Stop((r.stderr.decode(errors="replace").strip().splitlines() or [f"the install on {a.machine} failed"])[-1])
+    return 0
+
+
+def cmd_web(a):
+    if a.action == "install-on":
+        return cmd_web_install_on(a)
+    if a.action in ("serve-from", "status"):
+        if a.action == "serve-from" and not a.machine:
+            raise Stop("which machine? shepherdr web serve-from <machine|here> (hc machine ls lists them)")
+        bun = bun_path()
+        script = next((p for p in (os.path.join(real_home(), SHARE, "service", "serve-from.ts"),
+                                   os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "service", "serve-from.ts"))
+                       if os.path.isfile(p)), None)
+        if not bun or not script:
+            raise Stop("Shepherdr's service isn't installed here (it needs Bun): ./install.sh first")
+        argv = [bun, script, a.action] + ([a.machine] if a.machine else []) + (["--take-link"] if a.take_link else []) + (["--json"] if a.json else [])
+        env = {**os.environ, "SHEPHERDR_CLI": os.path.realpath(__file__)}
+        return subprocess.run(argv, env=env).returncode
+    raise Stop("shepherdr web serve-from <machine|here> [--take-link] | shepherdr web status")
+
+
 def main(argv):
     ap = argparse.ArgumentParser(prog="shepherdr", description="Install, update, check or remove Shepherdr in Herdr.")
     sub = ap.add_subparsers(dest="cmd")
@@ -987,6 +1115,11 @@ def main(argv):
             c.add_argument("--yes", action="store_true", help="ask nothing (keys: keep yours unless --keys ours)")
             c.add_argument("--force", action="store_true", help="install although a check failed")
             c.add_argument("--web", action="store_true", help="web only: no herdr-app (the service, the web app, herdr-task and the helpers)")
+    w = sub.add_parser("web", help="where the web app is served from (Serve from)")
+    w.add_argument("action", choices=["serve-from", "status", "install-on"])
+    w.add_argument("machine", nargs="?", help="a machine linked over herdr-core (hc machine ls), or here")
+    w.add_argument("--take-link", action="store_true", help="that machine's /shepherdr is shared to something else: set it aside (moving away puts it back)")
+    w.add_argument("--json", action="store_true")
     sub.add_parser("version")
     a = ap.parse_args(argv)
     try:
@@ -1000,6 +1133,8 @@ def main(argv):
             return cmd_doctor(a)
         if a.cmd == "whisper":
             return cmd_whisper(a)
+        if a.cmd == "web":
+            return cmd_web(a)
         if a.cmd == "version":
             say(f"shepherdr {VERSION}")
             return 0
