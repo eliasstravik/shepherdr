@@ -180,6 +180,8 @@ export class Model {
         key: taskKey(list, task), ref: refOf(list, task), title: task.title, section: p.section, needs: p.needs,
         sub: secondLine(p, w, p.section === "queued" ? queueReason(list, task, running) : null), left: leftOf(p, w), pct: w?.done ?? null,
         machine: list.machine, folder: list.folder, slug: list.slug, id: task.id, list: list.name,
+        // the space whose Assistant started it (herdr-task keeps it): the window counts and lists it there
+        space: task.space ? (list.machine ? `${list.machine}/${task.space}` : task.space) : null,
         worker, archived: !!task.archived, pinned: pins.has(taskKey(list, task)),
         started: task.started ?? null, ready_at: task.ready_at ?? null, done_at: task.done_at ?? null,
         summary: task.summary ?? null, pr: task.pr ?? null, prompt: String(task.prompt ?? "").slice(0, 500), why: p.why ?? null,
@@ -196,7 +198,8 @@ export class Model {
     const fromDocs = [null, ...this.machines].flatMap((m) => spacesFromDoc(this.docs.get(m), m));
     const spaces = [...fromDocs, ...own.filter((x: any) => !fromDocs.some((y: any) => y.id === x.id))].map((s: any, at: number) => {
       const k = assistantOf(s, terminals as any[]);
-      const here = rows.filter((r) => (r.machine ?? null) === (s.machine ?? null) && r.folder === s.folder && !r.archived);
+      // a task belongs to the space that started it, else to the space in its folder (as the window's counts)
+      const here = rows.filter((r) => !r.archived && (r.space ? r.space === s.id : (r.machine ?? null) === (s.machine ?? null) && r.folder === s.folder));
       return {
         ...s, at, icon: bar.icons[s.id] ?? null, pinned: bar.pinned.includes(s.id),
         section: bar.sections.find((x: any) => (x.spaces ?? []).includes(s.id))?.id ?? null,

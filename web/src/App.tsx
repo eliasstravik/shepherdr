@@ -172,7 +172,7 @@ export function SearchBox() {
         className="press-dim flex h-8 flex-1 items-center gap-2 rounded-full bg-bg px-3 text-left text-[0.8125rem] text-fg3 shadow-[inset_0_0_0_1px_var(--line2)] coarse:h-11 phone:h-11 phone:text-[1rem]"
       >
         <SearchIcon className={ic} />
-        <span className="min-w-0 truncate">Search or jump to</span>
+        <span className="min-w-0 truncate">Search</span>
         {device !== 'phone' ? <kbd className="ml-auto font-sans text-[0.6875rem] text-fg3">{shortcut(MOD, 'K')}</kbd> : null}
       </button>
     </div>

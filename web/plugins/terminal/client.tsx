@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState, type HTMLAttributes } from 'react
 import type { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { act, agentChat, definePlugin, getState, openItem, placeOf, setUI, shownItem, useStore, useUI } from '@client/kernel.ts'
-import { CTRL, ic, MenuItem, shortcut, Small, Tab, Tabs, TermIcon } from '@client/ui.tsx'
+import { CTRL, ic, MenuItem, MenuSeparator, MenuSetting, shortcut, Small, Tab, Tabs, TermIcon } from '@client/ui.tsx'
 import type { Place, TermScreen } from '@shared/types.ts'
 import { connectTerminal, streamInput } from './stream.ts'
 import { colsOf, fitFont, foldShown, frame, LINE, MAX, MIN, PAD, ZOOM } from './screen.ts'
@@ -311,11 +311,15 @@ function PlaceTerm({ place }: { place: Place }) {
         {t.name}
       </MenuItem>
     ))}
+    {/* a phone's header has no room for 3.0's Chat | Terminal: it sits here, as the same two choices */}
     {ui.device === 'phone' ? (
-      <MenuItem icon={<TermIcon className={ic} />} onClick={() => go(on ? null : place.chat)}>
-        {on ? 'Chat' : 'Terminal'}
-      </MenuItem>
+      <MenuSetting name="Show" icon={<TermIcon className={ic} />} choices={[
+        { label: 'Chat', on: !on, onClick: () => go(null) },
+        { label: 'Terminal', on, onClick: () => go(place.chat) },
+      ]} />
     ) : null}
+    {/* the tab menu's items follow under a line, only when there are tabs above it */}
+    {(place.tabs ?? []).length || ui.device === 'phone' ? <MenuSeparator /> : null}
     </>
   )
 }

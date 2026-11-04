@@ -103,6 +103,9 @@ export class Settings {
   }
 
   /** Every page at every level: Agents and Tasks (Everywhere and each space), Machines (all and each machine), Web. */
+  /** What an unset role runs, per CLI, in the window's words (set by the service from each CLI's own settings). */
+  cliDefaults: Record<string, string> = {};
+
   sections(link: string | null, spaces: Scope[] = [], machines: string[] = [], host = LOCAL): SettingSection[] {
     this.host = host;
     this.machineNames = machines;
@@ -125,7 +128,8 @@ export class Settings {
     const other = worker === "codex" ? "claude" : "codex";
     const rows: SettingRow[] = ROLES.map((r) => {
       const p = this.pick(scope, r.id, null);
-      const words = (v: any) => (v ? line(v) : r.id === "reviewer" ? `Other CLI (${NAMES[other]})` : "Default");
+      // unset: what it runs anyway, as the window's model button says it (the worker's CLI's own default model)
+      const words = (v: any) => (v ? line(v) : r.id === "reviewer" ? `Other CLI (${NAMES[other]})` : this.cliDefaults[worker] || "Default");
       // on Everywhere its row has "Edit instructions" too: the file every agent of the role is told first (the same for every space)
       return { label: r.title, key: `role.${r.id}`, value: words(p.value), agent: { role: r.id, pick: p.value ?? null }, hint: r.about, ...(s ? {} : { file: r.file }), ...this.follows(s, p, words) } as SettingRow;
     });

@@ -152,7 +152,7 @@ function TaskMenu({ t, menu }: { t: Task; menu: RowMenuState }) {
 function whereOf(snap: Snapshot, t: Task, names: TaskGroup['names']) {
   const p = placeOf(snap, t.place)
   const m = names.machine && p.machine !== snap.host ? snap.machines?.find((x) => x.machine === p.machine) : undefined
-  return [m?.name, names.project ? p.name : undefined].filter((x): x is string => !!x)
+  return [m?.name, names.project ? (t.listName || p.name) : undefined].filter((x): x is string => !!x)
 }
 
 /** 3.0's statuses (core/tasks.js ORDER) as the web's task statuses, and their words */

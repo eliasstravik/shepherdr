@@ -47,7 +47,7 @@ function itemsOf(snap: Snapshot, q: string): Item[] {
   }
   for (const t of snap.tasks) {
     if (t.archived && !q) continue
-    const place = [placeName(t.place), remote ? machineName(snap.places.find((p) => p.id === t.place)?.machine) : null].filter(Boolean).join(' · ')
+    const place = [t.listName || placeName(t.place), remote ? machineName(snap.places.find((p) => p.id === t.place)?.machine) : null].filter(Boolean).join(' · ')
     const line = t.sub ?? t.said ?? ''
     if (q && !matches(q, t.id, t.name, line, place)) continue
     out.push({

@@ -26,6 +26,7 @@ import {
   DownIcon,
   Ghost,
   GlobeIcon,
+  SplitIcon,
   Head,
   ic,
   IconButton,
@@ -464,13 +465,16 @@ const ICONS: Record<string, ComponentType<{ className?: string }>> = {
   'Time zone': ClockIcon,
   Machine: MachineIcon,
   Browser: GlobeIcon,
-  Notify: ChatIcon,
+  Notify: BellIcon,
   Notifications: BellIcon,
   Voice: ChatIcon,
   'Alerts and voice': BellIcon,
   Appearance: AppearanceIcon,
   Plugins: PluginIcon,
   Machines: MachineIcon,
+  // 3.0's icons for these: the window's layout, and a globe
+  Window: SplitIcon,
+  Web: GlobeIcon,
   Secrets: KeyIcon,
 }
 

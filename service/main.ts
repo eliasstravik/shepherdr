@@ -93,6 +93,10 @@ const refreshSecrets = async () => { secretNames = await secrets.names(); model.
 void refreshSecrets();
 setInterval(() => void refreshSecrets(), 30_000);
 const settings = new Settings();
+// what an unset role runs, in the window's words, read again every ten minutes
+const readDefaults = async () => { try { settings.cliDefaults = await new Agents(hub).defaultLines(); model.rebuild(); } catch {} };
+setTimeout(() => void readDefaults(), 3000);
+setInterval(() => void readDefaults(), 10 * 60_000);
 // a change made on the web goes to the other machines' herdr-task as the window's does (one push at a time)
 let pushing: Promise<unknown> = Promise.resolve();
 onWritten((file) => { pushing = pushing.then(() => Promise.all(model.machineNames().map((m) => exec(hub, ["sh", "-c", PUSH, "sh", pushBody(file, m)], m).catch(() => null)))); });

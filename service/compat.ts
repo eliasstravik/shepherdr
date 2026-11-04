@@ -94,7 +94,8 @@ function automationsBySpace(list: any[], spaces: Space[]) {
 }
 
 function artifactOf(a: any, spaces: Space[], program: (addr: string) => string | null = () => null): Artifact {
-  const place = spaces.find((s) => !s.machine && s.folder === a.folder)?.id ?? spaces.find((s) => !s.machine)?.id ?? "";
+  // its store is a folder: the space in it, else none (it shows with All)
+  const place = spaces.find((s) => !s.machine && s.folder === a.folder)?.id ?? "";
   // 3.0's row: "v3 · Claude Code · 2h ago": the program of the agent that published it while it runs, else nothing
   const by = (a.publisher && program(a.publisher)) || "";
   const recipe = (a.files ?? []).includes("recipe.json") && !(a.files ?? []).includes("main.js");
@@ -192,7 +193,10 @@ export class Compat {
       const key = m.here ? host : m.name, look = (this.shared?.value("spaces-chat") ?? {}).machines?.[m.here ? "" : m.name] ?? {};
       return { id: `m:${key}`, machine: key, name: machineLabel(m.here ? null : m.name, look.name), ownName: m.here ? "This computer" : m.name, ...(look.icon ? { emoji: look.icon } : {}), status: m.state === "connected" ? "idle" : "off", ...(this.machineStats?.(m.here ? null : m.name) ?? {}) } as Machine;
     });
-    const placeOf = (r: Row) => spaces.find((s) => (s.machine ?? null) === (r.machine ?? null) && s.folder === r.folder)?.id ?? "";
+    // a task's space: the one that started it (herdr-task keeps it), else the one in its folder, as the window places it
+    // what its row says it is in, as the window's Tasks: the space working in its list's folder, else the list's name
+    const placeName = (r: Row) => places.find((p) => spaces.find((s) => s.id === p.id && (s.machine ?? null) === (r.machine ?? null) && s.folder === r.folder))?.name ?? r.list ?? "";
+    const placeOf = (r: Row) => (r.space && spaces.some((s) => s.id === r.space) ? r.space : spaces.find((s) => (s.machine ?? null) === (r.machine ?? null) && s.folder === r.folder)?.id ?? "");
 
     const places: Place[] = spaces.map((s) => {
       const key = placeKey(s.id);
@@ -216,7 +220,7 @@ export class Compat {
       if (r.worker) chats.set(`${id}/worker`, r.worker);
       else if (r.lastLog) chats.set(`${id}/worker`, `log:${r.machine ?? ""}|${r.lastLog.kind}|${r.lastLog.path}`);
       const t: Task = {
-        id, name: r.title, status: SECTION[r.section] ?? "todo", place: placeOf(r), age: r.started ? ago(r.started, false) : "",
+        id, name: r.title, status: SECTION[r.section] ?? "todo", place: placeOf(r), listName: placeName(r), age: r.started ? ago(r.started, false) : "",
         state: r.section, on: r.machine ?? host, created: "",
         ...(r.sub ? { sub: r.sub } : {}),
         ...(r.done_at ? { doneAt: r.done_at } : {}),

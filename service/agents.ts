@@ -26,6 +26,16 @@ export class Agents {
     return parseDefaults(kind, r?.stdout ?? "");
   }
 
+  /** What an unset role runs, in the window's words ("Opus 5.5 · 1M · High"): each CLI's own defaults here. */
+  async defaultLines(): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    for (const k of ["claude", "codex"]) {
+      const d: any = await this.defaults(k, null).catch(() => null);
+      if (d) out[k] = line({ agent: k, model: d.model, effort: d.effort ?? d.per?.[String(d.model ?? "").replace(/\[1m\]$/, "")] ?? null, fast: d.fast }).split(" · ").slice(1).join(" · ");
+    }
+    return out;
+  }
+
   /** What each CLI offers on a machine (null: here), as the restart sheet lists them. */
   async choices(machine: string | null) {
     const [claude, codex] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine)]);

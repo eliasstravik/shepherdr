@@ -218,6 +218,6 @@ export default definePlugin({
   setup(reg) {
     reg.placeHeader.push({ order: 10, View: AutopilotHeader }, { order: 20, View: PlusButton })
     reg.overlays.push(CloseAssistant, TabRename)
-    reg.placeMenu.push({ order: 80, View: TabItems })
+    reg.placeMenu.push({ order: 80, View: TabItems, joined: true })
   },
 })
