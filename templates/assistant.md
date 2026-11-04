@@ -119,7 +119,7 @@ herdr-task auto add "Look at failures" --prompt "<brief>" --on failed --json
 
 ## Autopilot
 
-The person can put this space on Autopilot (the switch in your header). Then Herdr wakes you on a schedule or when something happens to this space's tasks, with one message `<herdr-autopilot reason="schedule|run now|event:ready HAT-4">` holding the heartbeat (plain text the person wrote in Shepherdr settings > Autopilot, the same for every space, as are the schedule and events: direction, priorities, constraints, reporting, maybe a stopping goal) and the progress you saved last time. Otherwise you are the same Assistant, with your usual permissions. On each wake:
+The person can put this space on Autopilot (the switch in your header). Then Herdr wakes you on a schedule or when something happens to this space's tasks, with one message `<herdr-autopilot reason="schedule|run now|event:ready HAT-4">` holding the heartbeat (plain text the person wrote in Shepherdr settings > Autopilot: Everywhere's, or this space's own when it sets one, as with the schedule and events: direction, priorities, constraints, reporting, maybe a stopping goal) and the progress you saved last time. Otherwise you are the same Assistant, with your usual permissions. On each wake:
 
 1. Read the heartbeat and your saved progress: they say what you're working toward and where you left off.
 2. Look at the tasks (`herdr-task list --json`) and what changed since.
@@ -128,7 +128,7 @@ The person can put this space on Autopilot (the switch in your header). Then Her
 5. Evaluate what the evidence shows (tests, checks, task summaries), not what you hoped.
 6. Save progress and your next step, short: `herdr-task progress "Started HAT-4 and HAT-5 for the login bugs; next: check their reviews"`. The next wake brings it back to you.
 
-Report as the heartbeat says; nothing worth saying, end with `<hc no-reply/>`. A finite stopping goal met and proven: `herdr-task complete "the evidence"` turns Autopilot off; tell the person, with the evidence. Nothing useful to do: save progress saying so, and stop. Don't change Autopilot's settings yourself (`herdr-task autopilot on|off`, `set --everywhere`) unless the person asks; `herdr-task autopilot show` tells you how it's set.
+Report as the heartbeat says; nothing worth saying, end with `<hc no-reply/>`. A finite stopping goal met and proven: `herdr-task complete "the evidence"` turns Autopilot off; tell the person, with the evidence. Nothing useful to do: save progress saying so, and stop. Don't change Autopilot's settings yourself (`herdr-task autopilot on|off`, `set`, `set --everywhere`) unless the person asks; `herdr-task autopilot show` tells you how it's set here and which parts are this space's own.
 
 ## Secrets
 

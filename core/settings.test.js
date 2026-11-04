@@ -57,5 +57,7 @@ test("Backup's warning, an add-on's line and Web's state, in the window's words"
   expect(S.addonAbout("Calls.", false, ["Voice", "Chat"])).toBe("Calls. Needs Voice, Chat: turn them on first.");
   expect(S.webState(true, true, null)).toBe("Off. Turn it on under Window › Add-ons.");
   expect(S.onlyFor("web", "This computer")).toBe("Only for web on This computer");
-  expect(S.spacesOwn(1)).toBe("1 space uses its own");
+  expect(S.spacesOwn(1)).toBe("1 space sets its own");
+  expect(S.sameAs("everywhere", null)).toBe("Inherited from Everywhere");
+  expect(S.sameAs("machine", "vm")).toBe("Inherited from vm");
 });

@@ -115,30 +115,35 @@ export class Model {
   }
 
   private autopilot: Record<string, any> = {};
-  /** Autopilot's one setting on this machine (Everywhere's schedule, events, heartbeat file and its words) */
+  /** Autopilot as Everywhere has it on this machine (herdr-task's view: its schedule, events, heartbeat's words and
+   *  what wakes it in words) */
   pilotEverywhere: any = { ...everywhereOf(null), words: STARTER };
   private reading: Promise<void> | null = null;
-  /** Autopilot's one setting and each space's on this machine, as herdr-task tells it (its switch, next and last wake,
-   *  progress), with the heartbeat's words (a file not made yet reads as herdr-task's starter, as the window's box
-   *  opens it). One read at a time. */
+  /** Everywhere's Autopilot and each space's on this machine, as herdr-task tells it (what applies there, its own or
+   *  Everywhere's, its switch, next and last wake, progress, the heartbeat's words). One read at a time. */
   readAutopilot() {
     return this.reading ??= (async () => {
       try {
         const p = Bun.spawn(["herdr-task", "autopilot", "list", "--json"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
         const out = JSON.parse(await new Response(p.stdout).text() || "{}");
-        const words = (file: string | null) => { try { return file && existsSync(file) ? readFileSync(file, "utf8") : STARTER; } catch { return STARTER; } };
         const e = out.everywhere ?? {};
-        this.pilotEverywhere = { ...everywhereOf({ everywhere: e }), heartbeat: e.heartbeat ?? null, words: words(e.heartbeat ?? null) };
+        // a herdr-task from before Settings kept the heartbeat gives only its file
+        const file = (f: string | null) => { try { return f && existsSync(f) ? readFileSync(f, "utf8") : STARTER; } catch { return STARTER; } };
+        this.pilotEverywhere = { ...everywhereOf({ everywhere: e }), trigger: e.trigger ?? undefined, words: e.heartbeat_text ?? file(e.heartbeat ?? null) };
         const list = Array.isArray(out.spaces) ? out.spaces : [];
-        this.autopilot = Object.fromEntries(list.map((a: any) => [a.space, pilotFor({ everywhere: e, spaces: list }, a.space)]));
+        this.autopilot = Object.fromEntries(list.map((a: any) => [a.space, a]));
       } catch {}
     })().finally(() => { this.reading = null; });
   }
 
-  /** What applies in a space on this machine: its switch (off until herdr-task has a record of it), the one schedule,
-   *  events and heartbeat. */
+  /** A space's Autopilot as herdr-task has it, when it has a record of it. */
+  pilotKnown(id: string) { return this.autopilot[id] ?? null; }
+
+  /** What applies in a space on this machine: its switch (off until herdr-task has a record of it), its schedule,
+   *  events and heartbeat's words (its own or Everywhere's). */
   pilotOf(id: string) {
-    return { ...(this.autopilot[id] ?? pilotFor({ everywhere: this.pilotEverywhere }, id)), words: this.pilotEverywhere.words, heartbeat: this.pilotEverywhere.heartbeat };
+    const a = this.autopilot[id] ?? pilotFor({ everywhere: this.pilotEverywhere }, id);
+    return { ...a, words: a.heartbeat_text ?? this.pilotEverywhere.words };
   }
 
   private readShared() {

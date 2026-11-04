@@ -1,29 +1,267 @@
 {
-  "about": "What applies in a space, from .autopilot.json: core/autopilot.js pilotFor() and herdr-task's resolve() must both give `expect` (core/autopilot.test.js, test/test_herdr_task.py). One setting for every space: Everywhere's schedule and events; a space has only its own on/off.",
+  "about": "What applies in a space, from .autopilot.json (`file`: each space's switch, and Everywhere's schedule and events from before Settings kept them) and Shepherdr settings (`settings`: ~/.herdr/shepherdr.json's \"autopilot\", Everywhere's and each space's own): core/autopilot.js pilotFor() and herdr-task's resolve() must both give `expect` (core/autopilot.test.js, test/test_herdr_task.py). A space's own wins, else Everywhere's in Settings, else Everywhere's from before, else the defaults; a space has its own on/off.",
   "cases": [
     {
       "name": "nothing set: off, Everywhere's defaults",
-      "file": { "version": 2, "spaces": {} },
+      "file": {
+        "version": 2,
+        "spaces": {}
+      },
       "space": "sp1",
-      "expect": { "on": false, "every": "every 60 minutes", "events": [] }
+      "expect": {
+        "on": false,
+        "every": "every 60 minutes",
+        "events": [],
+        "own": []
+      }
     },
     {
-      "name": "switched on in its header: Everywhere's schedule and events",
-      "file": { "version": 2, "everywhere": { "every": { "text": "weekdays 9:00" }, "events": ["failed", "ready"] }, "spaces": { "sp1": { "on": true, "name": "web" } } },
+      "name": "switched on in its header: Everywhere's schedule and events from before",
+      "file": {
+        "version": 2,
+        "everywhere": {
+          "every": {
+            "text": "weekdays 9:00"
+          },
+          "events": [
+            "failed",
+            "ready"
+          ]
+        },
+        "spaces": {
+          "sp1": {
+            "on": true,
+            "name": "web"
+          }
+        }
+      },
       "space": "sp1",
-      "expect": { "on": true, "every": "weekdays 9:00", "events": ["ready", "failed"] }
+      "expect": {
+        "on": true,
+        "every": "weekdays 9:00",
+        "events": [
+          "ready",
+          "failed"
+        ],
+        "own": []
+      }
     },
     {
-      "name": "a space's old schedule and events no longer apply",
-      "file": { "version": 1, "everywhere": { "every": null, "events": ["merged"] }, "spaces": { "sp1": { "on": true, "every": { "text": "every 30 minutes" }, "events": ["ready"] } } },
+      "name": "a space's old schedule and events in .autopilot.json no longer apply",
+      "file": {
+        "version": 1,
+        "everywhere": {
+          "every": null,
+          "events": [
+            "merged"
+          ]
+        },
+        "spaces": {
+          "sp1": {
+            "on": true,
+            "every": {
+              "text": "every 30 minutes"
+            },
+            "events": [
+              "ready"
+            ]
+          }
+        }
+      },
       "space": "sp1",
-      "expect": { "on": true, "every": null, "events": ["merged"] }
+      "expect": {
+        "on": true,
+        "every": null,
+        "events": [
+          "merged"
+        ],
+        "own": []
+      }
     },
     {
       "name": "Everywhere can't turn a space on",
-      "file": { "version": 2, "everywhere": { "on": true, "every": { "text": "every 60 minutes" }, "events": [] }, "spaces": { "sp2": { "on": true } } },
+      "file": {
+        "version": 2,
+        "everywhere": {
+          "on": true,
+          "every": {
+            "text": "every 60 minutes"
+          },
+          "events": []
+        },
+        "spaces": {
+          "sp2": {
+            "on": true
+          }
+        }
+      },
       "space": "sp1",
-      "expect": { "on": false, "every": "every 60 minutes", "events": [] }
+      "expect": {
+        "on": false,
+        "every": "every 60 minutes",
+        "events": [],
+        "own": []
+      }
+    },
+    {
+      "name": "Everywhere's in Settings wins over the one from before",
+      "file": {
+        "version": 2,
+        "everywhere": {
+          "every": {
+            "text": "weekdays 9:00"
+          },
+          "events": [
+            "ready"
+          ]
+        },
+        "spaces": {
+          "sp1": {
+            "on": true
+          }
+        }
+      },
+      "settings": {
+        "everywhere": {
+          "autopilot": {
+            "every": "every 30 minutes",
+            "events": [
+              "merged"
+            ]
+          }
+        }
+      },
+      "space": "sp1",
+      "expect": {
+        "on": true,
+        "every": "every 30 minutes",
+        "events": [
+          "merged"
+        ],
+        "own": []
+      }
+    },
+    {
+      "name": "a space's own schedule wins; its events follow Everywhere's",
+      "file": {
+        "version": 2,
+        "spaces": {
+          "sp1": {
+            "on": true
+          },
+          "sp2": {
+            "on": true
+          }
+        }
+      },
+      "settings": {
+        "everywhere": {
+          "autopilot": {
+            "every": "every 60 minutes",
+            "events": [
+              "ready"
+            ]
+          }
+        },
+        "spaces": {
+          "sp1": {
+            "autopilot": {
+              "every": "weekdays 9:00",
+              "heartbeat": "Ship it."
+            }
+          }
+        }
+      },
+      "space": "sp1",
+      "expect": {
+        "on": true,
+        "every": "weekdays 9:00",
+        "events": [
+          "ready"
+        ],
+        "own": [
+          "every",
+          "heartbeat"
+        ]
+      }
+    },
+    {
+      "name": "another space follows Everywhere's",
+      "file": {
+        "version": 2,
+        "spaces": {
+          "sp1": {
+            "on": true
+          },
+          "sp2": {
+            "on": true
+          }
+        }
+      },
+      "settings": {
+        "everywhere": {
+          "autopilot": {
+            "every": "every 60 minutes",
+            "events": [
+              "ready"
+            ]
+          }
+        },
+        "spaces": {
+          "sp1": {
+            "autopilot": {
+              "every": "weekdays 9:00"
+            }
+          }
+        }
+      },
+      "space": "sp2",
+      "expect": {
+        "on": true,
+        "every": "every 60 minutes",
+        "events": [
+          "ready"
+        ],
+        "own": []
+      }
+    },
+    {
+      "name": "a space with no schedule of its own (\"\") and no events wakes only on Run now",
+      "file": {
+        "version": 2,
+        "spaces": {
+          "sp1": {
+            "on": true
+          }
+        }
+      },
+      "settings": {
+        "everywhere": {
+          "autopilot": {
+            "events": [
+              "ready"
+            ]
+          }
+        },
+        "spaces": {
+          "sp1": {
+            "autopilot": {
+              "every": "",
+              "events": []
+            }
+          }
+        }
+      },
+      "space": "sp1",
+      "expect": {
+        "on": true,
+        "every": null,
+        "events": [],
+        "own": [
+          "every",
+          "events"
+        ]
+      }
     }
   ]
 }

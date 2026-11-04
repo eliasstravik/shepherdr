@@ -17,7 +17,7 @@ import { HOLD, machineDetails, pollNow } from "./machines.js";
 import { LOCAL_MACHINE } from "./coordinator.js";
 import { TEXT, button, link, toggleSwitch } from "./ui.js";
 // The rows' words, a machine block's and Home Assistant's lines: core/settings.js, shared with the web app.
-import { MACHINES, OLD_NAMES, SECTIONS, CHANGED_HERE, RESET, SAME_AS_ALL_MACHINES, machinesOwn, homeAbout, machineLabel } from "./core/settings.js";
+import { MACHINES, OLD_NAMES, SECTIONS, SET_FOR_MACHINE, RESET, SAME_AS_ALL_MACHINES, machinesOwn, homeAbout, machineLabel } from "./core/settings.js";
 
 const pct = (v) => (v == null ? "Off" : `${v}%`);
 const words = (field) => MACHINES.limits.find((l) => l.field === field);
@@ -92,7 +92,7 @@ function write(view, key, field, value, cx) {
 }
 
 // The five rows, for all machines (key null) or one machine's own. Under each: on all machines,
-// how many set their own; on a machine, "Same as all machines" or "Changed here · Reset".
+// how many set their own; on a machine, "Inherited from all machines" or "Set for this machine · Reset".
 function limitRows(view, t, key) {
   const every = view.cfg.everywhere?.machine ?? {};
   const own = key ? view.cfg.machines?.[key]?.machine ?? {} : every;
@@ -103,7 +103,7 @@ function limitRows(view, t, key) {
     const row = h_flex().gap(6).items_center().text_size(TEXT.label);
     if (key) {
       return f in own
-        ? row.child(div().text_color(t.muted).child(CHANGED_HERE)).child(div().text_color(t.dim).child("·"))
+        ? row.child(div().text_color(t.muted).child(SET_FOR_MACHINE)).child(div().text_color(t.dim).child("·"))
           .child(link(`ml-reset-${id(f)}`, RESET, (_e, cx) => write(view, key, f, undefined, cx)))
         : row.child(div().text_color(t.dim).child(SAME_AS_ALL_MACHINES));
     }
