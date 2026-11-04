@@ -15,6 +15,8 @@
         document.documentElement.dataset.theme = dark ? 'dark' : 'light'
         document.querySelector('meta[name=theme-color]').content = dark ? '#0b0b0d' : '#ffffff'
       })()
+      /* a link's #part (#accept=SHEP-7), kept before the app's own address takes the bar */
+      window.shepherdrLink = location.hash
     </script>
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />

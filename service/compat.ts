@@ -20,6 +20,10 @@ export const taskId = (r: Row) => (r.machine ? `${r.machine}:${r.ref}` : r.ref);
 export class Compat {
   /** chat key -> terminal address, from the last build */
   private chats = new Map<string, string>();
+  /** task id -> where herdr-task finds it */
+  private tasks = new Map<string, { ref: string; folder: string; machine: string | null }>();
+
+  taskOf(id: string) { return this.tasks.get(id) ?? null; }
   last: Snapshot | null = null;
 
   addrOf(key: string) { return this.chats.get(key) ?? null; }
@@ -40,6 +44,7 @@ export class Compat {
       return { id: s.id, name, machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", mode: "regular", chat: key };
     });
 
+    this.tasks = new Map(rows.map((r) => [taskId(r), { ref: r.ref, folder: r.folder, machine: r.machine ?? null }]));
     const tasks: Task[] = rows.filter((r) => r.section !== "done" || (r.done_at && Date.now() - r.done_at < 7 * 86400000)).map((r) => {
       const id = taskId(r);
       if (r.worker) chats.set(`${id}/worker`, r.worker);

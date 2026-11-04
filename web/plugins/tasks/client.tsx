@@ -8,6 +8,7 @@
 // holds the row) and in its chat's ⋯. It ends a task three ways: Stop (To do, its work kept), Done and Delete. Done tasks
 // file themselves in the Archived view at the bottom of the list, out of every list and count; Unarchive brings one back.
 import clsx from 'clsx'
+import { openAccept } from '@client/screens/Accept.tsx'
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   act,
@@ -121,8 +122,14 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
         <RowText sub={sub}>
           <span className="text-fg3">{t.id}</span> {t.name}
         </RowText>
-        <Meta className={shy}>{t.age}</Meta>
+        {t.status === 'ready' && !t.archived ? null : <Meta className={shy}>{t.age}</Meta>}
       </button>
+      {/* as Shepherdr 3's Tasks panel: a Ready row has Accept inline */}
+      {t.status === 'ready' && !t.archived ? (
+        <button type="button" onClick={() => openAccept(t.id)} className="press-dim absolute top-1/2 right-9 z-1 h-6 -translate-y-1/2 rounded-full bg-fg px-2.5 text-xs font-medium text-bg phone:right-11 phone:h-8 phone:px-3 phone:text-sm">
+          Accept
+        </button>
+      ) : null}
       <RowMenuButton menu={menu} always label="More for this task" className={clsx('absolute right-1 z-1 phone:right-1.5', sub ? 'top-1.5 phone:top-2.5' : 'top-1/2 -translate-y-1/2')} />
       {menu.open ? <TaskMenu t={t} menu={menu} /> : null}
     </li>
