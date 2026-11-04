@@ -12,7 +12,11 @@ import { shared, setShared, home, readTextFile } from "herdr";
 export const KEYS = ["tasks.pinned", "spaces-chat", "notify", "addons.off", "tabbar.tabs", "sidebar.worktrees", "sidebar.unread", "counts.red",
   "counts.green", "tasks.filters", "tasks.place", "chat.helpers", "coordinator.auto"];
 const STATE = "http://127.0.0.1:7788/api/state";
-const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+// the same value whatever order its keys are in (herdr-core keeps a document's keys sorted, a mod writes its own order;
+// another machine's words come back in another): never a change by itself
+const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === "object"
+  ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
+const same = (a, b) => JSON.stringify(canon(a ?? null)) === JSON.stringify(canon(b ?? null));
 let started = false, token = null;
 // What each key last was on both sides (in step), so a change knows where it came from.
 const last = new Map();
