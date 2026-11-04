@@ -175,10 +175,16 @@ export const SERVE = {
   about: "The machine that serves the web app. An always-on one keeps it up while this computer sleeps.",
   here: "This computer",
   moving: (m) => `Moving the web app to ${m}…`,
-  failed: "Couldn't move it",
+  failed: (why) => `Couldn't move it: ${why}`,
   offline: "Offline",
-  back: "Serve from this computer",
-  elsewhere: (m) => `Served from ${m}. This computer's window stays in step with it.`,
+  elsewhere: (m) => `On, served from ${m} and private to your tailnet. This computer stays in step with it.`,
+  unreachable: (m) => `Served from ${m}, which can't be reached now. This computer keeps its own copy until it's back.`,
+  // the pick, confirmed (the window's inline confirm, the web's dialog)
+  confirm: (m, here) => (here ? "Serve the web app from this computer?" : `Serve the web app from ${m}?`),
+  detail: (m, here) => (here
+    ? "Its link moves here and the other machine stops sharing it. Pins and settings come along."
+    : `Shepherdr's web service is installed or updated on ${m}, its link moves there and this computer stops sharing it. Pins and settings come along.`),
+  verb: "Move it",
 };
 
 /** A machine's line in the picker: "mac-mini · macOS", "vm-demo · Linux · Offline". */

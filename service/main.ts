@@ -485,6 +485,15 @@ const server = Bun.serve<{ who: string }>({
         try { await runPilot(body.place); await model.readAutopilot(); model.rebuild(); return json({ ok: true }); }
         catch (err) { return json({ ok: false, error: (err as Error).message }); }
       }
+      if (body?.type === "setting" && body.key === "web.serve") {
+        // Settings › Web's Serve from, confirmed: the machine by its line in the picker
+        const row = serveNow().rows.find((r) => r.label === body.value);
+        if (!row) return json({ ok: false, error: "That machine isn't linked." });
+        if (row.serves) return json({ ok: true });
+        if (moving && !moving.error) return json({ ok: false, error: `Already moving it to ${moving.to}.` });
+        void serveFrom(row.here ? null : row.name).catch(() => {});
+        return json({ ok: true });
+      }
       if (body?.type === "setting" && typeof body.key === "string" && /^(window|addon)\./.test(body.key)) {
         try { await setWindow(body.key, typeof body.value === "string" ? body.value : null, (k, v) => store.set(k, v)); return json({ ok: true }); }
         catch (err) { return json({ ok: false, error: (err as Error).message }); }

@@ -4,6 +4,7 @@
 // DEFAULTS there and here.
 // Shared core: the source is core/settings.js; bin/sync-shared copies it into the mods in lib/COPIES.
 import { NAMES, levelName, current, rowFor, menuFor } from "./agents.js";
+import { SERVE } from "./host.js";
 
 // ---- the frame -------------------------------------------------------------------------------------------------
 // The pages, in the window's order. space: a space's own settings have it too ("local": only a space on this computer).
@@ -229,8 +230,11 @@ export function addonAbout(about, now, stop) {
 // ---- Web -------------------------------------------------------------------------------------------------------
 export const WEB = { title: "Shepherdr on the web", link: "Link", copy: "Copy", phone: "Open it on your phone" };
 // The Web page's state line: off (the Web add-on), not read yet, no service, or what the service last said (web.json).
+// Served from another machine (Serve from, core/host.js): says which; a move under way says that first.
 export const webState = (off, loaded, w) => (off ? "Off. Turn it on under Window › Add-ons." : !loaded ? "Reading…"
-  : !w ? "Shepherdr's service isn't running here." : w.why ? w.why : "On, private to your tailnet.");
+  : !w ? "Shepherdr's service isn't running here." : w.serve?.moving ? SERVE.moving(w.serve.moving)
+  : w.serve?.host && !w.serve.reachable ? SERVE.unreachable(w.serve.host) : w.why ? w.why
+  : w.serve?.host ? SERVE.elsewhere(w.serve.host) : "On, private to your tailnet.");
 
 // ---- the rows' choices -----------------------------------------------------------------------------------------
 export const MERGE = [["ask", "On Accept"], ["checks", "After checks pass"], ["auto", "Right away"]];

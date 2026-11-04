@@ -1129,6 +1129,38 @@
         "settings.ts",
         "qr.ts"
       ]
+    },
+    {
+      "id": "serve-from",
+      "addon": "web",
+      "title": "Serve from: the web app from any linked machine",
+      "core": [
+        "host",
+        "settings"
+      ],
+      "herdr": {
+        "mods": [
+          "shepherdr-settings"
+        ]
+      },
+      "web": {
+        "files": [
+          "src/Settings.tsx",
+          "src/screens/ServeFrom.tsx"
+        ]
+      },
+      "forms": {
+        "herdr": "Settings \u203a Web: Serve from, a list of this computer and every linked machine, confirmed under it",
+        "desktop": "Settings \u203a Web: Serve from, a pick list, confirmed in a dialog",
+        "tablet": "Same",
+        "phone": "Same, the dialog as a sheet"
+      },
+      "service": [
+        "host.ts",
+        "store.ts",
+        "sync.ts",
+        "serve-from.ts"
+      ]
     }
   ]
 }

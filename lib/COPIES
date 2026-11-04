@@ -34,6 +34,7 @@ core/machines.js: spaces-chat shepherdr-settings
 core/slash.js: chat
 core/agents.js: chat newspace shepherdr-settings coordinator
 core/settings.js: chat newspace shepherdr-settings coordinator
+core/host.js: chat newspace shepherdr-settings coordinator
 core/secrets.js: chat shepherdr-settings tabs-tasks
 taskwhere.js: task-files task-changes task-pr task-browser
 emoji-data.js: chat-react spaces-chat

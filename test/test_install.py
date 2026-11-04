@@ -121,7 +121,8 @@ class Install(unittest.TestCase):
         # every relative import the installed service runs resolves inside what was installed (bun can start it)
         share = self.p(".local/share/shepherdr")
         for d, _, files in os.walk(share):
-            if "/web/dist" in d:
+            # the built page, and the helpers' files kept beside it (herdr-artifact's, run by Herdr, never by bun)
+            if "/web/dist" in d or "/mods/" in d:
                 continue
             for f in files:
                 if not f.endswith((".ts", ".js")):
