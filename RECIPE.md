@@ -41,9 +41,12 @@ Left to right, on the theme's `canvas` background, no title bar:
   shown.
 - Ctrl+K opens Jump (spaces, tasks, artifacts), Ctrl+Shift+? the keys list, Ctrl+Shift+D dictates, Ctrl+Shift+Space
   calls the Assistant, Ctrl+F finds in the chat. Alt+1…9 pick a tab, Alt+Up/Down a space, Alt+Enter splits.
-- Shepherdr settings (the sidebar foot): Agents, Tasks, Autopilot, Notify, Secrets, Machines and Window. Window holds
-  the look switches and the add-on switches: Artifacts, Voice and dictation, Reactions, Task browser, Autopilot and
-  Other machines can be turned off; the rest is always on in 3.1.0.
+- Shepherdr settings (the sidebar foot): Agents, Tasks, Autopilot, Notify, Secrets, Machines, Window and Web. Window
+  holds the look switches and the add-on switches: Artifacts, Voice and dictation, Reactions, Task browser, Autopilot,
+  Other machines and Web can be turned off; the rest is always on in 3.1.0. Web shows the web app's link and Serve
+  from, the machine that serves it.
+- The web app (`https://<this machine>/shepherdr/`, your tailnet only): the same spaces, Assistants, tasks, cards,
+  artifacts and settings on a phone, a tablet or another browser, on the same data.
 
 ## Built from
 
@@ -58,6 +61,9 @@ Left to right, on the theme's `canvas` background, no title bar:
 - Programs: `herdr-task` (mods/tasks/bin, Python: the tasks and their scheduler), `herdr-artifact`
   (mods/artifacts/bin), `herdr-secret` and `herdr-browser` (bin/), linked into `~/.local/bin`; the role instructions
   in `~/.config/herdr-core/templates` (assistant.md, worker.md, reviewer.md); `keys.json`.
+- The web app: `web/` (React), served with the background work by one always-on service (`service/`, Bun on
+  `127.0.0.1:7788`, systemd or launchd) and shared with `tailscale serve`; `core/` holds the logic it shares with the
+  mods. `./install.sh --web` installs it alone.
 - The mods run programs (`exec`: herdr-task, git, gh, hc, agent-browser, whisper.cpp, bun), read files outside their
   folders (`~/.herdr`, the agents' logs, `~/.config/herdr-core/templates`) and reach the network through those
   programs (GitHub, ElevenLabs for voice, Hugging Face once for the dictation model).
@@ -70,9 +76,9 @@ Left to right, on the theme's `canvas` background, no title bar:
   back out). `./install.sh --dry-run` shows everything first.
 - Mod names are fixed (`chat`, `tasks`, …): their state in `data/<mod>` and pane names follow them. The installer
   refuses a folder by the same name that isn't Shepherdr's.
-- Needs python3 3.8+ and git; gh for pull requests, agent-browser 0.41.1 and node for the task browser, bun, pw-record
-  and whisper.cpp for voice and dictation (`shepherdr whisper` downloads the model, 148 MB), an ElevenLabs key for
-  calls. Claude Code or Codex as the agents.
+- Needs python3 3.8+ and git; bun and Tailscale for the web app; gh for pull requests, agent-browser 0.41.1 and node
+  for the task browser, bun, pw-record and whisper.cpp for voice and dictation (`shepherdr whisper` downloads the
+  model, 148 MB), an ElevenLabs key for calls. Claude Code or Codex as the agents.
 - Two blocks are rewritten while you use it (`tasks-thread-term` points at the shown task's terminal,
   `artifacts-view-body` at the opened artifact): ship them blank.
 

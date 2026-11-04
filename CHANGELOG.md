@@ -17,6 +17,15 @@ Shepherdr is also a web app again: phone first, tablet and desktop too, on the s
   ones); the task browser in Kitty and as a live view on the web.
 - Add-ons switch both sides: an off add-on is left out of the web app too. Web is an add-on of its own.
 - `./install.sh` installs the layout and the web app; `./install.sh --web` the web app alone, without the window.
+- Serve from: the web app can be served from any linked machine that stays on (a Mac mini, a cloud VM), picked in
+  Shepherdr settings → Web or with `shepherdr web serve-from <machine>`; the background work and alerts follow it,
+  once. `shepherdr doctor` says where it's served.
+- Every space gets its Assistant, on other machines too: a new space there opens on its Assistant's chat, started on
+  that machine with its CLI. A space with none offers Start Assistant in its menu; an offline machine is said
+  plainly, and its Assistant starts once it's back.
+- A Ready task that goes back to work (a new message, `herdr-task fix` or `resume`) shows as Working again, with no
+  Accept until its next ready, and its Assistant hears so. Accept retries a merge that failed once.
+- Herdr's Apache license ships beside the mods that began as copies of Herdr's own (LICENSE-herdr, NOTICE).
 
 ## 3.0.0
 
