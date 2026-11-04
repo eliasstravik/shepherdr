@@ -70,6 +70,11 @@ function headerPilot(a: any) {
 export const placeKey = (spaceId: string) => `p:${spaceId.replace("/", ":")}`;
 export const taskId = (r: Row) => (r.machine ? `${r.machine}:${r.ref}` : r.ref);
 
+/** What a space's tasks give its Assistant's news lines (newsTimeline: their status, ready and done): a chat is only
+ *  read again when its conversation moves, so a task accepted or done since shows by this changing (SHEP-29: a
+ *  Ready line kept its Accept after the task was done) */
+export const newsKey = (rows: Row[]) => JSON.stringify(rows.filter((r) => r.space && r.ref).map((r) => [r.space, r.ref, r.section, r.ready_at, r.done_at]));
+
 // a news event's dot: what the task was at that moment
 const NEWS: Record<string, TaskStatus> = { added: "todo", queued: "queued", started: "work", needs: "need", asks: "need", stalled: "need", failed: "need", ready: "ready", merging: "merging", merged: "done", done: "done", closed: "done" };
 type Sent = { cid: string; text: string; files: string[]; at: number };

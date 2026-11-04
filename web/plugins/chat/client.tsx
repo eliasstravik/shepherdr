@@ -241,7 +241,7 @@ function Held({ chatKey }: { chatKey: string }) {
   const ghost = 'flex h-[22px] shrink-0 items-center rounded-[6px] px-2 text-[0.75rem] font-medium text-fg2 hover:bg-hover hover:text-fg phone:h-9'
   const take = (cid: string, then?: () => void) => void act({ type: 'held-drop', cid } as never).then(() => { removeOut(cid); then?.() }, () => { removeOut(cid); then?.() })
   return (
-    <div className="flex flex-col gap-1 pb-1.5">
+    <div className="flex flex-col gap-1">
       {[...rows.values()].map((r) => (
         <div key={r.cid} data-held className="flex h-10 items-center gap-2 rounded-[8px] bg-bg pr-1 pl-2.5 shadow-[inset_0_0_0_1px_var(--line2)] phone:h-12">
           <ClockIcon aria-hidden className="size-3.5 shrink-0 fill-[var(--fg3)]" />
@@ -1705,7 +1705,7 @@ function SlashList({ chatKey, text, pick }: { chatKey: string; text: string; pic
   const shown = slashMatch(list, word)
   if (!shown.length) return null
   return (
-    <div role="listbox" aria-label="Commands" className="mb-1.5 overflow-hidden rounded-box bg-bg p-1 shadow-menu">
+    <div role="listbox" aria-label="Commands" className="overflow-hidden rounded-box bg-bg p-1 shadow-menu">
       {shown.map((c: { name: string; about: string }) => (
         <button key={c.name} type="button" role="option" aria-selected={false} onMouseDown={(e) => e.preventDefault()} onClick={() => pick(c.name)}
           className="flex w-full min-w-0 items-baseline gap-2 rounded-row px-2.5 py-1.5 text-left hover:bg-hover phone:py-2.5">
@@ -1729,7 +1729,7 @@ function TaskList({ chatKey, text, pick }: { chatKey: string; text: string; pick
   const list = (snap.tasks ?? []).filter((t) => t.place === place && (!q || refOf(t.id).toLowerCase().includes(q) || t.name.toLowerCase().includes(q))).slice(0, 8)
   if (!list.length) return null
   return (
-    <div role="listbox" aria-label="Tasks" className="mb-1.5 overflow-hidden rounded-box bg-bg p-1 shadow-menu">
+    <div role="listbox" aria-label="Tasks" className="overflow-hidden rounded-box bg-bg p-1 shadow-menu">
       {list.map((t) => (
         <button key={t.id} type="button" role="option" aria-selected={false} onMouseDown={(e) => e.preventDefault()} onClick={() => pick(text.replace(/\n+$/, '').replace(/#[\w-]*$/, `${refOf(t.id)} `))}
           className="flex w-full min-w-0 items-baseline gap-2.5 rounded-row px-2.5 py-1.5 text-left hover:bg-hover phone:py-2.5">
@@ -1845,8 +1845,9 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
     deliver(out)
   }
   return (
-    // what goes with the box (send, +, a file's x, its menu) leaves the box the focus: a phone's keyboard stays up
-    <div data-kb data-keep-box className={clsx('mx-auto w-full max-w-read shrink-0 px-4 pt-2', keyboard && device === 'phone' ? 'pb-1' : 'pb-2.5')}>
+    // what goes with the box (send, +, a file's x, its menu) leaves the box the focus: a phone's keyboard stays up. What
+    // shows over the box (working, queued, jobs, lists) is a stack with one gap, none of its own: as the window's
+    <div data-kb data-keep-box className={clsx('mx-auto flex w-full max-w-read shrink-0 flex-col gap-2 px-4 pt-2', keyboard && device === 'phone' ? 'pb-1' : 'pb-2.5')}>
       {registry.composerAbove.map(({ View }, i) => (
         <View key={i} chatKey={chatKey} cli={cli} />
       ))}
@@ -2078,7 +2079,7 @@ function Attachments({ chatKey }: { chatKey: string }) {
       ref={row}
       role="list"
       aria-label="Attached files"
-      className="-mx-4 mb-2 flex gap-2 overflow-x-auto overscroll-x-contain px-4 motion-safe:scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="-mx-4 flex shrink-0 gap-2 overflow-x-auto overscroll-x-contain px-4 motion-safe:scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       {files.map((f, i) => (
         <Pending key={`${f.path ?? f.name}-${i}`} f={f} chatKey={chatKey} onRemove={() => remove(f)} />
@@ -2221,7 +2222,7 @@ function PlusOpen({ chatKey, file, photo }: { chatKey: string; file: RefObject<H
   }
   const settings = snap ? registry.composerSettings.filter((x) => x.when(snap, chatKey)) : []
   return (
-    <Menu label={WORDS.attach} tabs onClose={close} className="mb-2 w-fit max-w-full origin-bottom-left">
+    <Menu label={WORDS.attach} tabs onClose={close} className="w-fit max-w-full origin-bottom-left">
       {/* a phone's paperclip: Attach files, or its camera; the model is the button in the box */}
       <MenuItem
         icon={<FileIcon className={ic} />}

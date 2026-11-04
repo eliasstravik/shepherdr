@@ -182,9 +182,9 @@ function Worktree({ o }: { o: NonNullable<Open> }) {
           </>
         )}
         {error ? <p role="alert" className="text-need-fg">{error}</p> : null}
-        <p className="mt-1 text-right text-[0.6875rem] text-fg3 coarse:hidden">{keys}</p>
+        <p className="mt-1 text-right text-[0.6875rem] text-fg3 pointer-coarse:hidden">{keys}</p>
         {/* a touch screen has no Enter or Esc to press: the same two as buttons */}
-        <div className="mt-1 hidden justify-end gap-2 coarse:flex phone:*:flex-1 phone:*:justify-center">
+        <div className="mt-1 flex justify-end gap-2 not-pointer-coarse:hidden phone:*:flex-1 phone:*:justify-center">
           <Ghost className="h-[34px] text-sm! phone:h-11 phone:text-base!" onClick={close}>{blocked || opening_ ? 'Close' : 'Cancel'}</Ghost>
           {!blocked && !opening_ ? (
             <Primary disabled={busy} onClick={() => void go()} className={remove ? 'bg-need-fg! text-white! dark:text-black!' : undefined}>

@@ -27,7 +27,7 @@ import { windowSection, setWindow, offList, offPlugins } from "./window.ts";
 import { Chats } from "./chats.ts";
 import { act, hc as hcRun } from "./actions.ts";
 import { AgentWatch } from "./watch.ts";
-import { Compat, activity } from "./compat.ts";
+import { Compat, activity, newsKey } from "./compat.ts";
 import { Asks } from "./asks.ts";
 import { Jobs } from "./jobs.ts";
 import { terminalBridge } from "./terminal.ts";
@@ -191,7 +191,7 @@ model.doc = () => store.doc.value;
 compat.shared = { value: (k) => model.value(k), set: (k, v) => store.set(k, v) };
 store.on(() => model.rebuild());
 void store.load().catch(() => {});
-model.onBuild = (b) => live.setSnapshot(alertNewAnd(compat.snapshot({
+const snapshotOf = (b: Parameters<NonNullable<typeof model.onBuild>>[0]) => live.setSnapshot(alertNewAnd(compat.snapshot({
   host: me?.host ?? "this machine", user: me?.name ?? "You", spaces: b.spaces, sections: b.sections, rows: b.rows, artifacts: artifacts.list, automations: b.automations,
   settings: [...settings.sections(webNow ?? (me ? `https://${me.dns}/shepherdr/` : null), b.spaces.map((s: any) => ({ id: s.id, name: s.name, machine: s.machine ?? null })), b.machines, me?.host ?? "this machine"),
     // Secrets, as the window's page (Everywhere's and each space's own): every kept secret and where, and the agents
@@ -202,6 +202,15 @@ model.onBuild = (b) => live.setSnapshot(alertNewAnd(compat.snapshot({
   // every machine the window's sidebar lists: one not connected reads "Offline" (or "Connecting…") under its header
   machines: [{ name: me?.host ?? "this machine", here: true, state: "connected" }, ...b.known.map((m) => ({ name: m.name, here: false, state: m.state }))],
 })));
+// a task that moved on (accepted, done) changes its news lines in its Assistant's chat, whose conversation may not move:
+// open chats are told again (compat.chat reads the rows the snapshot just took)
+let newsWas: string | null = null;
+model.onBuild = (b) => {
+  snapshotOf(b);
+  const now = newsKey(b.rows);
+  if (newsWas !== null && now !== newsWas) live.chats?.refreshAll();
+  newsWas = now;
+};
 model.start();
 
 // The Web add-on (Shepherdr settings > Window > Add-ons, Everywhere's "off" in ~/.herdr/shepherdr.json): off, the web
