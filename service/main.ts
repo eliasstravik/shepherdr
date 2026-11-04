@@ -24,6 +24,7 @@ import { Asks } from "./asks.ts";
 import { Jobs } from "./jobs.ts";
 import { terminalBridge } from "./terminal.ts";
 import { worktree } from "./worktree.ts";
+import { browserRelay } from "./browser.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const WEB = process.env.SHEPHERDR_WEB_DIR || join(ROOT, "web", "dist");
@@ -99,10 +100,16 @@ const server = Bun.serve<{ who: string }>({
     const path = url.pathname.startsWith("/shepherdr/") ? url.pathname.slice(10) : url.pathname;
     // the window asks this (lib/service.js): while jobs is true it leaves its background work to the service
     if (path === "/api/health") return json({ ok: true, version: VERSION, core: hub.up, jobs: jobs.on && hub.up });
-    const socket = path === "/api/ws" || path === "/api/terminal";
+    const socket = path === "/api/ws" || path === "/api/terminal" || path === "/api/browser";
     const viaTailnet = req.headers.has("tailscale-user-login");
     const pass = gate(req, g, socket, viaTailnet && trustedPeer(srv.requestIP(req)?.port, PORT));
     if (!pass.ok) return new Response(pass.why, { status: pass.status });
+    if (path === "/api/browser") {
+      // a task's browser (2.1's Browser panel): this machine's tasks
+      const t = compat.taskOf(url.searchParams.get("task") ?? "");
+      if (!t || t.machine) return new Response("no such browser here", { status: 404 });
+      return srv.upgrade(req, { data: { who: pass.who, browser: t.key } as any }) ? undefined : new Response("upgrade failed", { status: 400 });
+    }
     if (path === "/api/terminal") {
       // a live terminal (2.1's terminal plugin): only a running one a chat names
       const term = compat.addrOf(url.searchParams.get("chat") ?? "");
@@ -139,7 +146,9 @@ const server = Bun.serve<{ who: string }>({
   websocket: {
     open(ws) {
       const d: any = ws.data;
-      if (d.term) d.bridge = terminalBridge(hub, d.term, { send: (x) => { ws.send(x); }, close: () => ws.close(), buffered: () => ws.getBufferedAmount() });
+      const page = { send: (x: any) => { ws.send(x); }, close: () => ws.close(), buffered: () => ws.getBufferedAmount() };
+      if (d.term) d.bridge = terminalBridge(hub, d.term, page);
+      else if (d.browser) d.bridge = browserRelay(d.browser, page);
       else live.join(ws);
     },
     message(ws, msg) { const d: any = ws.data; if (d.bridge) d.bridge.message(String(msg)); else live.message(ws, String(msg)); },
