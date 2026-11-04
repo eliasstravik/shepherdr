@@ -83,9 +83,9 @@ const THUMB = 56, THUMB_GAP = 6;
 const WAVE_BAR = 3, WAVE_GAP = 2;
 // ONE row under each message, its band (a list row of its own), on the message's side (left
 // for the agent, right for the person), the reaction pills flush under the bubble's outer edge
-// and the smiley to add one beside them: on the agent's the pills (furthest left), the smiley,
-// then the time (dim), reply, copy, fork; on the person's, mirrored, the time, reply, copy,
-// rewind, the smiley and then the pills (furthest right). The pills always show; the rest only while the pointer is on the message, in room
+// and the smiley to add one beside them, each side the other's mirror: on the person's the time
+// (dim), reply, copy, rewind, the smiley and then the pills (furthest right); on the agent's the
+// pills (furthest left), the smiley, fork, copy, reply and then the time. The pills always show; the rest only while the pointer is on the message, in room
 // that is always kept, so nothing moves. barLayout() places every part; hitBar() reads the
 // same places.
 // One even rhythm on a 4 px scale (spaced()): under every message its band, always kept: BAND_IN
@@ -1842,16 +1842,20 @@ export default class Chat extends View {
     // Many pills in a narrow pane: the time goes first, so the row stays inside the column.
     const room = right - left, timeW = time ? (time.length > 5 ? 82 : 38) + ACT_GAP : 0;
     const need = bar.acts.length * (ACT + ACT_GAP) + ACT + (bar.pills?.length ?? 0) * (PILL + PILL_EDGE);
-    const acts = () => {
-      if (time && need + timeW <= room) add("time", timeW - ACT_GAP, ACT_GAP, { hover: true, text: time });
-      for (const a of bar.acts) add(a, ACT, ACT_GAP, { hover: true });
+    const withTime = time && need + timeW <= room;
+    // The time and the icons; on the agent's side mirrored: the icons reversed, then the time.
+    const acts = (mirror) => {
+      const stamp = () => { if (withTime) add("time", timeW - ACT_GAP, ACT_GAP, { hover: true, text: time }); };
+      if (!mirror) stamp();
+      for (const a of mirror ? [...bar.acts].reverse() : bar.acts) add(a, ACT, ACT_GAP, { hover: true });
+      if (mirror) stamp();
     };
     // The pills PILL_GAP apart, PILL_EDGE from what comes before or after them.
     const pills = () => (bar.pills ?? []).forEach((p, i) => add(`pill:${p.emoji}`, PILL, i ? PILL_GAP : PILL_EDGE, { pill: p }));
     // Reactions off (an add-on): no smiley; the pills already there still show.
     const react = addonOn("reactions");
-    if (bar.side === "user") { acts(); if (react) add("react", ACT, ACT_GAP, { hover: true }); pills(); }
-    else { pills(); if (react) add("react", ACT, PILL_EDGE, { hover: true }); acts(); }
+    if (bar.side === "user") { acts(false); if (react) add("react", ACT, ACT_GAP, { hover: true }); pills(); }
+    else { pills(); if (react) add("react", ACT, PILL_EDGE, { hover: true }); acts(true); }
     const x0 = bar.side === "user" ? right - at : left;
     for (const p of parts) p.x += x0;
     return { x: x0, w: at, parts };
