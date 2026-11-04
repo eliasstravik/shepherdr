@@ -244,7 +244,8 @@
       },
       "web": {
         "files": [
-          "src/Settings.tsx"
+          "src/Settings.tsx",
+          "src/screens/Role.tsx"
         ]
       },
       "forms": {
@@ -253,7 +254,7 @@
         "tablet": "Same",
         "phone": "Grouped list, pages slide in"
       },
-      "planned": "Agents and Window pages (Tasks, Notify, Autopilot, Secrets, Machines and Web work)",
+      "planned": "Window page (Agents, Tasks, Notify, Autopilot, Secrets, Machines and Web work)",
       "service": [
         "settings.ts"
       ]

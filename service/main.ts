@@ -110,7 +110,8 @@ store.on(() => model.rebuild());
 void store.load().catch(() => {});
 model.onBuild = (b) => live.setSnapshot(alertNewAnd(compat.snapshot({
   host: me?.host ?? "this machine", user: me?.name ?? "You", spaces: b.spaces, sections: b.sections, rows: b.rows, artifacts: artifacts.list,
-  settings: [...settings.sections(me ? `https://${me.dns}/shepherdr/` : null), { name: "Secrets", level: "all", rows: [], secrets: secretNames }],
+  settings: [...settings.sections(me ? `https://${me.dns}/shepherdr/` : null, b.spaces.map((s: any) => ({ id: s.id, name: s.name, machine: s.machine ?? null })), b.machines, me?.host ?? "this machine"),
+    { name: "Secrets", level: "all", rows: [], secrets: secretNames }],
   machines: [{ name: me?.host ?? "this machine", here: true, state: "connected" }, ...b.machines.map((name) => ({ name, here: false, state: "connected" }))],
 })));
 model.start();
@@ -284,8 +285,22 @@ const server = Bun.serve<{ who: string }>({
         catch (err) { return json({ ok: false, error: (err as Error).message }); }
       }
       if (body?.type === "setting" && typeof body.key === "string") {
-        try { settings.set(body.key, typeof body.value === "string" ? body.value : null); return json({ ok: true }); }
-        catch (err) { return new Response((err as Error).message, { status: 400 }); }
+        try {
+          // a space's own: its name, machine and repo folder go with it (herdr-task finds a space's settings by folder)
+          const level = typeof body.place === "string" ? body.place : "all";
+          const sp = level !== "all" && !level.startsWith("m:") ? model.spaceById(level) : null;
+          const folder = sp ? (await exec(hub, ["git", "-C", sp.folder || "~", "rev-parse", "--show-toplevel"], sp.machine ?? null).catch(() => null))?.stdout.trim() || sp.folder : null;
+          settings.set(body.key, typeof body.value === "string" ? body.value : null, level, sp ? { id: sp.id, name: sp.name, machine: sp.machine ?? null, folder } : null);
+          return json({ ok: true });
+        } catch (err) { return json({ ok: false, error: (err as Error).message }); }
+      }
+      if (body?.type === "template" && typeof body.role === "string") {
+        try { return json({ ok: true, text: settings.template(body.role, typeof body.text === "string" ? body.text : undefined) }); }
+        catch (err) { return json({ ok: false, error: (err as Error).message }); }
+      }
+      if (body?.type === "role-info") {
+        try { return json({ ok: true, clis: await compat.agents!.choices(null) }); }
+        catch (err) { return json({ ok: false, error: (err as Error).message }); }
       }
       try { return json(await act(hub, body, compat)); } catch (err) { return new Response((err as Error).message, { status: 400 }); }
     }

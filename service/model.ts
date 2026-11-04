@@ -67,6 +67,10 @@ export class Model {
     this.timer ??= setTimeout(() => { this.timer = null; this.build(); }, 150);
   }
 
+  private spaces: any[] = [];
+  /** A space as last built (its id, name, machine, folder), or undefined. */
+  spaceById(id: string) { return this.spaces.find((s) => s.id === id); }
+
   /** The connected other machines. */
   machineNames() { return this.machines; }
 
@@ -182,6 +186,7 @@ export class Model {
         green: here.filter((r) => r.section === "ready").length,
       };
     });
+    this.spaces = spaces;
     this.live.put("spaces", { spaces, sections: bar.sections });
     this.onBuild?.({ spaces, sections: bar.sections, rows, machines: this.machines });
   }

@@ -780,6 +780,10 @@ export interface SettingRow {
   warn?: string
   /** pick list values */
   options?: string[]
+  /** a role's agent (Settings › Agents): its button opens the agent picker; pick: what is set, null for the default */
+  agent?: { role: string; pick: { agent: string; model?: string | null; effort?: string | null; fast?: boolean } | null }
+  /** a file edited in a sheet (an instructions template): its name */
+  file?: string
   /** several picks at once, saved comma-joined (Autopilot's events) */
   multi?: { value: string; label: string }[]
   /** a number from min to max (step: what it goes up by, 1 when none), with its unit (plural, and one: singular);

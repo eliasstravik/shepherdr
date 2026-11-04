@@ -6,6 +6,7 @@
 // plugins add (a desktop's keyboard shortcuts). A phone lists the sections in rounded groups, as iOS's Settings does, and a tap pushes one over
 // the list; a wider screen keeps the list down its side.
 import clsx from 'clsx'
+import { openRole } from './screens/Role.tsx'
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type FC, type ReactNode } from 'react'
 import { machineName, type SettingRow, type SettingSection, type Snapshot } from '@shared/types.ts'
 import { act, registry, setUI, useSnap, useUI, type UI } from './kernel.ts'
@@ -400,7 +401,7 @@ function TriggerValue({ row, phone, onPick }: { row: SettingRow & { trigger: Non
 
 /** a whole file's words (a coordinator's HEARTBEAT.md): an editor as wide as the page that grows with them, its
  *  name on top; Save (⌘S, Ctrl+S) and Undo show once it changed, Undo putting back what is saved */
-function DocValue({ value, onSave, label, file, phone, privateRules = false }: { value: string; onSave: (v: string) => void; label: string; file: string; phone: boolean; privateRules?: boolean }) {
+function DocValue({ value, onSave, label, file, phone, privateRules = false, empty }: { value: string; onSave: (v: string) => void; label: string; file: string; phone: boolean; privateRules?: boolean; empty?: string }) {
   const [v, setV] = useState(value)
   useEffect(() => setV(value), [value])
   const changed = v !== value
@@ -423,7 +424,7 @@ function DocValue({ value, onSave, label, file, phone, privateRules = false }: {
         value={v}
         onChange={setV}
         spellCheck={false}
-        placeholder={privateRules ? 'Empty: no private rules for this role' : 'Empty: nothing to go through'}
+        placeholder={empty ?? (privateRules ? 'Empty: no private rules for this role' : 'Empty: nothing to go through')}
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === 's') {
             e.preventDefault()
@@ -494,8 +495,11 @@ export function levelName(level: string, sections: SettingSection[], snap: Pick<
   const [kind, key, space] = level.split(':')
   const machine = machineName(snap.machines, key)
   if (kind === 'm') return machine
-  const name = snap.places.find((p) => p.id === level)?.name ?? (space === '~' ? 'home' : space)
   const machines = new Set(levelsOf(sections).filter((l) => l.startsWith('m:')))
+  // 3.0's spaces: a level is the space's own id
+  const place = snap.places.find((p) => p.id === level)
+  if (place && kind !== 'p') return machines.size > 1 && place.machine ? `${place.name} · ${machineName(snap.machines, place.machine)}` : place.name
+  const name = place?.name ?? (space === '~' ? 'home' : space)
   return machines.size > 1 ? `${name} · ${machine}` : name
 }
 
@@ -504,8 +508,11 @@ function levelHint(level: string, snap: Pick<Snapshot, 'places' | 'machines'>) {
   if (level === 'all') return 'For every machine and space, unless one sets its own.'
   const [kind, key, space] = level.split(':')
   const machine = machineName(snap.machines, key)
-  if (kind === 'm') return `For ${machine} and its spaces. The rest follows Everywhere.`
-  return `For ${snap.places.find((p) => p.id === level)?.name ?? space}. The rest follows ${machine}, then Everywhere.`
+  // 3.0's levels: Everywhere, then a space; a machine's page holds only what is that machine's
+  if (kind === 'm') return `For ${machine} only. The rest follows All machines.`
+  const place = snap.places.find((p) => p.id === level)
+  if (place) return `For ${place.name}. The rest follows Everywhere.`
+  return `For ${space}. The rest follows ${machine}, then Everywhere.`
 }
 
 /** Settings → Plugins with what failed on this screen too: a plugin of the human's own that threw here */
@@ -592,9 +599,13 @@ function AppearancePick({ phone }: { phone: boolean }) {
 /** a row's control, by what its value is: on or off a switch, two or three short words segments, a number a stepper,
  *  free words a box, a list a menu; one with no other choice, or only shown,
  *  its words */
-function Control({ row, phone, set, edit }: { row: SettingRow; phone: boolean; set: (value: string) => void; edit: () => void }) {
+function Control({ row, phone, set, edit, level }: { row: SettingRow; phone: boolean; set: (value: string) => void; edit: () => void; level?: string }) {
   const options = row.options ?? []
   const action = row.key in registry.settingActions
+  // a role's agent: its words, and a sheet to pick another (Settings › Agents)
+  if (row.agent) return <Ghost onClick={() => openRole({ kind: 'role', level: level ?? 'all', key: row.key, title: row.label, pick: row.agent!.pick })} className="max-w-full"><span className="truncate">{row.value}</span></Ghost>
+  // a file every agent of a role is told first: edited in a sheet
+  if (row.file) return <Ghost onClick={() => openRole({ kind: 'file', role: row.key.split('.')[1], title: row.label, file: row.file! })}>Edit</Ghost>
   const only = !row.num && !row.text && !row.multi && !action && options.length <= 1 && (options[0] ?? row.value) === row.value
   if (row.fixed || !row.key || only) return <span className="text-right text-pretty text-fg2 [overflow-wrap:anywhere]">{shown(row.value)}</span>
   if (row.num) return <NumberValue label={row.label} value={row.value} num={row.num} onEdit={edit} onSave={set} />
@@ -707,7 +718,7 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
                     {under(row)}
                   </dt>
                   <dd>
-                    <DocValue label={row.label} file={row.multiline ? 'Private · this role only' : 'HEARTBEAT.md'} privateRules={row.multiline} phone={phone} value={row.value} onSave={(x) => set(row.key, row.multiline ? follows(row, x) : x)} />
+                    <DocValue label={row.label} file={row.multiline ? (row.key.endsWith('_notes') ? 'Every task here' : 'Private · this role only') : 'HEARTBEAT.md'} privateRules={row.multiline} empty={row.key.endsWith('_notes') ? 'Empty: nothing extra' : undefined} phone={phone} value={row.value} onSave={(x) => set(row.key, row.multiline ? follows(row, x) : x)} />
                     {row.instructions ? <p className="mt-3 whitespace-pre-wrap text-base leading-relaxed [overflow-wrap:anywhere]">{row.instructions}</p> : null}
                   </dd>
                 </div>
@@ -730,7 +741,7 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
                     {under(row)}
                   </dt>
                   <dd className={clsx('flex min-w-0 shrink-0 flex-col', phone && SEGMENTS.has(row.key) ? 'items-stretch' : 'max-w-[65%] items-end')}>
-                    <Control row={row} phone={phone} set={(x) => set(row.key, follows(row, x))} edit={() => clear(row.key)} />
+                    <Control row={row} phone={phone} level={page.level} set={(x) => set(row.key, follows(row, x))} edit={() => clear(row.key)} />
                   </dd>
                 </div>
               ),
