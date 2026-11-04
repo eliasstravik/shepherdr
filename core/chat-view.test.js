@@ -59,6 +59,7 @@ describe("rows", () => {
   test("a task's news line: what happened and the rest, without its id and title", () => {
     expect(newsWords({ ref: "HERD-4", event: "needs-you", text: "HERD-4 needs you: Needs a go (Fix login)" }, { title: "Fix login" })).toEqual({ mark: "needs", what: "needs you", text: "Needs a go" });
     expect(newsWords({ ref: "HERD-4", event: "ready", text: "HERD-4 is ready: Fix login · It works" }, { title: "Fix login" })).toEqual({ mark: "ready", what: "ready", text: "It works" });
+    expect(newsWords({ ref: "HERD-4", event: "working-again", text: "HERD-4 is working again: resumed (Fix login)" }, { title: "Fix login" })).toEqual({ mark: "started", what: "working again", text: "resumed" });
     expect(newsWords({ ref: "HERD-4", event: "done", text: "HERD-4 is done (Fix login)" }, { title: "Fix login" })).toEqual({ mark: "done", what: "done", text: "Fix login" });
     expect(newsWords({ ref: "HERD-4", event: "started", made: true }, { title: "Fix login" })).toEqual({ mark: "started", what: "started", text: "Fix login" });
   });

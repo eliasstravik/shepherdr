@@ -73,6 +73,8 @@ def task_status(task, live):
         return ("needs", "provider", r.get("reason")) if r.get("over") else ("working", None, retry_line(r))
     if "blocked" in states:
         return "needs", "asks", REASONS["question"]
+    if busy_again(task, live):
+        return "working", None, WORKING_AGAIN
     if st == "ready":
         if task.get("merge_requested") and live:
             return "merging", None, None
@@ -94,6 +96,33 @@ def task_status(task, live):
 
 
 STOPPED = "Agent stopped"
+
+
+# ---- a Ready task back at work ----------------------------------------------------------------
+# A Ready task whose agent takes up work again (a message in its chat from anyone, herdr-task fix
+# or resume) is Working again until its next ready (as core/tasks.js busyAgain()). Herdr counts
+# an agent's finished turns (hc's "turn"): ready keeps, per agent, the turn it is on once the one
+# it said ready in has ended (ready_turns); working on that turn or a later one is new work.
+WORKING_AGAIN = "Working again"
+
+
+def ready_turns(live):
+    """At ready: {address: the first turn that is new work} for its agents now."""
+    return {k["address"]: (k.get("turn") or 0) + (1 if status_word(k) == "working" else 0)
+            for k in live if k.get("address")}
+
+
+def busy_again(task, live):
+    """A Ready task whose agent is at work again since it said ready. Not while it merges as
+    asked (the merge is its work), nor a reviewer's turn. A ready said before turns were kept:
+    any work once STARTING_MS have passed."""
+    if task["state"] != "ready" or task.get("merge_requested"):
+        return False
+    seen = task.get("ready_turns")
+    if seen is None and now() - (task.get("ready_at") or 0) < STARTING_MS:
+        return False
+    return any(status_word(k) == "working" and (k.get("labels") or {}).get("herdr.role") != "reviewer"
+               and (k.get("turn") or 0) >= (seen or {}).get(k.get("address"), 0) for k in live)
 
 
 def status_word(k):

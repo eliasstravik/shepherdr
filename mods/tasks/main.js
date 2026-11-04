@@ -197,7 +197,7 @@ export default class Tasks extends View {
         const chat = k.labels?.["herdr.chat"];
         const pane = (f.panes ??= panes()).find((p) => p.terminal === k.address)?.pane ?? (chat ? (m ? `${m}/${chat}` : chat) : null);
         return { address: k.address, status: st, program: a?.program ?? k.program, tab: tab && m ? `${m}/${tab}` : tab, pane,
-          role: k.labels?.["herdr.role"] ?? "worker" };
+          role: k.labels?.["herdr.role"] ?? "worker", turn: k.turn };
       });
   }
 

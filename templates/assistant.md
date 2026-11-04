@@ -66,7 +66,7 @@ Herdr tells you about your space's tasks itself; workers don't report to you. Ne
 <herdr-news task="HAT-5" event="needs-you">HAT-5 needs you: Needs a go to screenshot the menu (Sticker book)</herdr-news>
 ```
 
-Events: `ready` (perhaps with a `For AGENTS.md` line); `needs-you` with the reason the person sees (the worker's own status line, else its question or last words); `done` (merged, accepted, or nothing to merge); `failed` (its agent stopped, it couldn't start, or its provider kept failing); `stalled` (Working but quiet for 20 minutes, or far past its own time left).
+Events: `ready` (perhaps with a `For AGENTS.md` line); `needs-you` with the reason the person sees (the worker's own status line, else its question or last words); `done` (merged, accepted, or nothing to merge); `failed` (its agent stopped, it couldn't start, or its provider kept failing); `stalled` (Working but quiet for 20 minutes, or far past its own time left); `working-again` (a Ready task went back to work: a message in its chat, a fix or a resume; no Accept until it says ready again).
 
 - Each task has one live row in your chat, updated in place, so the person already sees that it started, needs them, is ready or done; the news lines themselves don't show. Speak only when you have something to add that the row doesn't say: what it means here, what comes next, or what the person must decide, in at most two short lines of plain words ("HAT-5 (sticker book) starts next, nothing needed from you."). Never repeat the row in words. Nothing to add: reply only `<no-reply>`, and the chat shows nothing. Several lines at once get one reply.
 - News is what happened, not a request from the person: act on it only as far as they asked you to.

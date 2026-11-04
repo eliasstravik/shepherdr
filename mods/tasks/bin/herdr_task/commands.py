@@ -15,7 +15,9 @@ from .settings import (
     agent_argv, agent_key, bare, merge_policy, review_limits, set_opts, settings_block, settings_for, space_base,
     task_settings, worker_argv, worktrees_on,
 )
-from .agents import agent_running, detail, fit, LINE_MAX, live_agents, STATUSES, SUMMARY_MAX
+from .agents import (
+    agent_running, busy_again, detail, fit, LINE_MAX, live_agents, ready_turns, STATUSES, SUMMARY_MAX, WORKING_AGAIN,
+)
 from .sessions import refresh_sessions
 from .github import finish, gh, github, merged_here, pr_open, pr_pending, pr_problem, pr_view, update_main, watch_main
 from .launch import (
@@ -156,6 +158,10 @@ def cmd_show(args):
         t = s.find(args.id)
         live = [detail(k) for k in live_agents(s.key(t))]
         refresh_sessions(s, t, live)
+        # Back at work since it said ready: saved at once, so the Accept card (which reads this)
+        # says it's Working, not Ready.
+        if busy_again(t, live):
+            back_to_work(s, t, "its agent is at work again")
         v = view(s, t, live)
         if t["state"] == "queued":
             v["reason"] = queue_reason(s, t)
@@ -306,8 +312,10 @@ def cmd_ready(args):
                 # "For AGENTS.md": what the next agent would need about setting up or testing this
                 # repo; the Assistant decides whether it goes into the repo's AGENTS.md.
                 t["agents_md"] = note[:300]
-            for k in ("attention", "fix_requested", "progress", "retry", "review_out"):
+            for k in ("attention", "fix_requested", "progress", "retry", "review_out", "back"):
                 t.pop(k, None)
+            # Its agents' turns now: a later turn of theirs takes it back to work (busy_again()).
+            t["ready_turns"] = ready_turns(live_agents(s.key(t)))
             s.dirty = True
     if refused:
         raise Fail(refused)
@@ -509,6 +517,22 @@ def cmd_alert(args):
     if r.returncode != 0:
         raise Fail((r.stderr or r.stdout).strip() or "hc label failed")
     say(args, alert, "Alert sent.")
+
+
+def back_to_work(s, t, why, said=WORKING_AGAIN):
+    """A Ready task taken back to work (herdr-task fix or resume, or its agent at work again):
+    Working, its status line saying so until its agent reports, and no Accept until its next
+    ready. why: what took it back, for its Assistant's news ("SHEP-7 is working again: why")."""
+    if t["state"] != "ready":
+        return False
+    t["state"] = "running"
+    for k in ("ready_turns", "merge_requested"):
+        t.pop(k, None)
+    t["back"] = {"at": now(), "why": why}
+    # n 0: its agent's own next report is its first (minutes left only from a second one).
+    t["progress"] = {"text": fit(said), "at": now(), "set": now(), "n": 0}
+    s.dirty = True
+    return True
 
 
 def finalize(s, t):
@@ -724,6 +748,7 @@ def cmd_resume(args):
         space = bare(args.space) if args.space else (t.get("space") or default_space())
         if t["state"] == "done":
             t["state"] = "running"
+        back_to_work(s, t, "resumed")
         a, resumed = start_again(s, t, space, args.agent, args.argv, parent=args.parent)
         v = view(s, t)
     say(args, {**v, "terminal": a["address"], "space": space, "parent": a.get("parent"), "resumed": resumed},
@@ -787,6 +812,9 @@ def local_merge_msg(s, t):
             f"5. Run: herdr-task done {s.ref(t)} --folder {q(main)}")
 
 
+MERGE_FAILED = "GitHub didn't merge it"  # a merge that failed: never in the way of the next try
+
+
 def merge_now(s, t):
     """Merges the task's pull request on GitHub (squash) and tidies up here. Returns why it
     couldn't, or None when it's merged (and the task done)."""
@@ -804,8 +832,14 @@ def merge_now(s, t):
             return "Checks are still running."
         ok, _, err = gh("pr", "merge", n, "--repo", repo, "--squash", "--delete-branch",
                         "--match-head-commit", v.get("headRefOid") or "")
-        if not ok:
-            t["attention"] = f"GitHub didn't merge it: {err}"
+        # A one-off GitHub error can come after the merge went through: asked again.
+        again = None if ok else pr_view(t)
+        if not ok and (again or {}).get("state") == "MERGED":
+            v = again
+        elif not ok:
+            t["attention"] = f"{MERGE_FAILED}: {err}"
+            # The next tick reads the pull request at once (merged by hand meanwhile: done).
+            t["pr"]["checked"] = 0
             return t["attention"]
     watch_main(s, t, ((v.get("mergeCommit") or {}).get("oid")) if v.get("state") == "MERGED" else None)
     update_main(s, t)
@@ -866,13 +900,26 @@ def cmd_accept(args):
     once when there is nothing to merge, else merged first, as the merge settings say how: a pull
     request is squash-merged on GitHub (or merges once its checks pass); a local branch is
     fast-forwarded when it can be, else its agent merges it (rebase, checks) and marks it done."""
-    error, how, sent, started = None, "done", None, False
+    error, how, sent, started, back = None, "done", None, False, False
     with open_store(args) as s:
         t = s.find(args.id)
         if t["state"] != "ready":
             raise Fail(f"{s.ref(t)} isn't ready ({t['state']}); only a Ready task can be accepted.")
-        if t.get("attention"):
+        # Its agent at work again since it said ready: never accepted half done. Working again
+        # (saved), and refused after the store is.
+        if busy_again(t, [detail(k) for k in live_agents(s.key(t))]):
+            back = back_to_work(s, t, "its agent is at work again")
+        # A pull request's problems are read fresh (merge_now()): one fixed since, or a merge that
+        # failed once, doesn't stand in the way. Without one, only a failed try doesn't.
+        elif t.get("attention") and not t.get("pr") and not t["attention"].startswith(("Couldn't ask for the merge", MERGE_FAILED)):
             raise Fail(f"{s.ref(t)} needs attention first: {t['attention']}")
+    if back:
+        raise Fail(f"{s.ref(t)} is working again: its agent took up more work after it said ready. Accept it once it says ready again.")
+    with open_store(args) as s:
+        t = s.find(args.id)
+        if t["state"] != "ready":
+            raise Fail(f"{s.ref(t)} isn't ready ({t['state']}); only a Ready task can be accepted.")
+        t.pop("attention", None)
         wt = t.get("worktree") if t.get("mode") == "worktree" else None
         t["accepted_at"] = now()
         s.dirty = True
@@ -922,6 +969,7 @@ def cmd_fix(args):
         t["fix_requested"] = now()
         s.dirty = True
         sent, started = tell(s, t, msg, args)
+        back_to_work(s, t, f"asked to fix: {problem}", f"Fixing: {problem}")
         v = view(s, t)
     say(args, {**v, "terminal": sent, "new_agent": started},
         f"{s.ref(t)}: asked {sent} to fix it" + (" (a new agent)" if started else ""))

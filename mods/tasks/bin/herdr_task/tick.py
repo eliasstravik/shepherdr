@@ -10,7 +10,7 @@ import time
 
 from .base import Fail, guard, hc_json, now, PR_EVERY, run, SHELLS, STORE
 from .settings import machine_name, worker_argv
-from .agents import agent_log, agent_running, detail, held_ask, live_agents, status_word, task_status
+from .agents import agent_log, agent_running, busy_again, detail, held_ask, live_agents, status_word, task_status
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import refresh_sessions, session_of
 from .github import finish, merged_here, pr_pending, pr_problem, pr_view, watch_main
@@ -20,7 +20,7 @@ from .queues import machine_hold, refresh_ext, running_count, set_hold, waiting_
 from .archive import archive_pass
 from .browsers import browser_pass
 from .output import progress_clock, say
-from .commands import begin, merge_now
+from .commands import back_to_work, begin, merge_now, MERGE_FAILED
 from .news import news_pass, typing
 from .takeover import cant_go_on, takeover
 from .ghnews import main_pass, pr_deliver, pr_news
@@ -54,7 +54,7 @@ def facts(s, t, report):
             if problem:
                 t["attention"] = problem
                 report["attention"].append(t["id"])
-            elif t.get("attention", "").startswith(("Checks failing", "It conflicts", "The pull request was closed")):
+            elif t.get("attention", "").startswith(("Checks failing", "It conflicts", "The pull request was closed", MERGE_FAILED)):
                 t.pop("attention")
     elif merged_here(s, t):
         t["merged"] = True
@@ -62,10 +62,22 @@ def facts(s, t, report):
         report["done"].append(t["id"])
 
 
+def back_pass(s, t, report):
+    """A Ready task whose agent took up work again (a message from anyone in its chat) is Working
+    again until its next ready (busy_again()); its Assistant hears it (news: working-again)."""
+    live = live_agents(s.key(t))
+    # Cheap while nothing works: hc ls alone; its records in full (roles) only then.
+    if any(status_word(k) == "working" for k in live) and busy_again(t, [detail(k) for k in live]):
+        back_to_work(s, t, "its agent is at work again")
+        report.setdefault("working_again", []).append(s.ref(t))
+
+
 def tick_store(s, report):
-    """One folder's turn: merged tasks become done, auto-merges go when they can, and queued
-    tasks start while there's room."""
+    """One folder's turn: Ready tasks back at work are Working again, merged tasks become done,
+    auto-merges go when they can, and queued tasks start while there's room."""
     for t in s.data["tasks"]:
+        if t["state"] == "ready":
+            back_pass(s, t, report)
         if t.get("worktree") and t["state"] in ("running", "ready"):
             facts(s, t, report)
             if t["state"] == "ready" and (t.get("pr") or {}).get("news"):
@@ -363,7 +375,7 @@ def cmd_tick(args):
         d = read_list(p)
         tasks = (d or {}).get("tasks") or []
         if not d or not os.path.isdir(d.get("folder") or "") or not (d.get("main_watch") or any(
-                t.get("state") == "queued" or (t.get("worktree") and t.get("state") in ("running", "ready")) for t in tasks)):
+                t.get("state") in ("queued", "ready") or (t.get("worktree") and t.get("state") == "running") for t in tasks)):
             continue
         with Store(locate(d["folder"])) as s:
             tick_store(s, report)

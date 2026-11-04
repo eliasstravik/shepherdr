@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { place, queueReason, reportOf, estimated, order, ago, autoPrefix, refOf, taskKey, matches } from "./tasks.js";
+import { readFileSync } from "node:fs";
+import { place, queueReason, reportOf, estimated, order, ago, autoPrefix, refOf, taskKey, matches, busyAgain, secondLine, WORKING_AGAIN } from "./tasks.js";
 import { REASONS, fit } from "./needs.js";
 
 const NOW = 1_800_000_000_000;
@@ -68,4 +69,26 @@ test("order, words and keys", () => {
   expect(taskKey({ machine: null, folder: "/f" }, { id: 7 })).toBe(":/f#7");
   expect(matches("ship web", "SHEP-7", "Ship the Web client")).toBe(true);
   expect(fit("one two three four five six seven eight nine ten eleven")).toBe("one two three four five six seven eight…");
+});
+
+// The same cases herdr-task's busy_again() passes (test/test_herdr_task.py).
+const back = JSON.parse(readFileSync(new URL("./back-to-work.cases.json", import.meta.url), "utf8"));
+
+describe("a Ready task back at work (as herdr-task's busy_again)", () => {
+  for (const c of back.cases) test(c.name, () => expect(busyAgain(c.task, c.live, back.now)).toBe(c.expect));
+  test("it shows Working, saying so, with no Ready line", () => {
+    const task = { id: 7, state: "ready", ready_at: back.now - 600_000, ready_turns: { t1: 5 } };
+    const p = place(list([task]), task, { live: [{ address: "t1", status: "working", turn: 5 }], now: back.now });
+    expect(p).toMatchObject({ section: "working", why: WORKING_AGAIN });
+    expect(secondLine(p, null, null, back.now)).toBe(WORKING_AGAIN);
+  });
+  test("still Ready while it ends the turn it said ready in, or once idle", () => {
+    const task = { id: 7, state: "ready", ready_at: back.now - 5_000, ready_turns: { t1: 5 } };
+    expect(place(list([task]), task, { live: [{ address: "t1", status: "working", turn: 4 }], now: back.now }).section).toBe("ready");
+    expect(place(list([task]), task, { live: [{ address: "t1", status: "idle", turn: 5 }], now: back.now }).section).toBe("ready");
+  });
+  test("asking the person while back at work needs them", () => {
+    const task = { id: 7, state: "ready", ready_at: back.now - 600_000, ready_turns: { t1: 5 } };
+    expect(place(list([task]), task, { live: [{ address: "t1", status: "blocked", turn: 5 }], now: back.now }).section).toBe("needs");
+  });
 });
