@@ -743,10 +743,13 @@ def cmd_whisper(a):
     if os.path.isfile(dest) and sha_bytes(read(dest)) == m["sha256"]:
         say(f"already there: {dest}")
         return 0
+    if not m["url"].startswith("https://"):
+        raise Stop("refusing to download over a non-https url (manifest may be compromised)")
     tmp = dest + ".part"
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     say(f"downloading {m['url']} ...")
-    if subprocess.run(["curl", "-fL", "--retry", "3", "-o", tmp, m["url"]]).returncode != 0:
+    if subprocess.run(["curl", "-fL", "--proto", "=https", "--proto-redir", "=https",
+                        "--retry", "3", "-o", tmp, m["url"]]).returncode != 0:
         raise Stop("download failed")
     if sha_bytes(read(tmp)) != m["sha256"]:
         os.remove(tmp)
