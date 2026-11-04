@@ -688,7 +688,7 @@ export default definePlugin({
   setup(reg) {
     reg.taskPanel.push(
       { id: 'files', order: 20, label: 'Files', Icon: FolderIcon, useOff: mergedOff, View: FilesView },
-      { id: 'diff', order: 30, label: 'Diff', Icon: DiffIcon, useOff: mergedOff, View: DiffView },
+      { id: 'diff', order: 30, label: 'Changes', Icon: DiffIcon, useOff: mergedOff, View: DiffView },
       { id: 'pr', order: 40, label: 'Pull request', Icon: PrIcon, useOff: usePrOff, View: PrView },
     )
   },

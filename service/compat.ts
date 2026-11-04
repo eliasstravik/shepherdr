@@ -5,6 +5,7 @@
 // A task id is its ref ("SHEP-7"), "<machine>:<ref>" on another machine, as 2.1 wrote them.
 import type { Snapshot, Place, Task, Need, Section, Machine, Chat, Message, Status, TaskStatus, StepKind, ActivityAnswer, Question } from "../web/shared/types.ts";
 import * as T from "../core/tasks.js";
+import type { Where } from "./worktree.ts";
 
 const { ago } = T as any;
 
@@ -33,7 +34,7 @@ export class Compat {
   /** chat key -> terminal address, from the last build */
   private chats = new Map<string, string>();
   /** task id -> where herdr-task finds it */
-  private tasks = new Map<string, { ref: string; folder: string; machine: string | null }>();
+  private tasks = new Map<string, { ref: string; folder: string; machine: string | null; where: Where }>();
 
   taskOf(id: string) { return this.tasks.get(id) ?? null; }
 
@@ -77,7 +78,8 @@ export class Compat {
       return { id: s.id, name, machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", mode: "regular", chat: key };
     });
 
-    this.tasks = new Map(rows.map((r) => [taskId(r), { ref: r.ref, folder: r.folder, machine: r.machine ?? null }]));
+    this.tasks = new Map(rows.map((r) => [taskId(r), { ref: r.ref, folder: r.folder, machine: r.machine ?? null,
+      where: { folder: r.worktree, machine: r.machine ?? null, base: r.base, start: r.start, branch: r.branch, pr: r.pr } }]));
     const tasks: Task[] = rows.filter((r) => r.section !== "done" || (r.done_at && Date.now() - r.done_at < 7 * 86400000)).map((r) => {
       const id = taskId(r);
       if (r.worker) chats.set(`${id}/worker`, r.worker);
@@ -88,6 +90,7 @@ export class Compat {
         ...(r.sub ? { sub: r.sub } : {}),
         ...(r.done_at ? { doneAt: r.done_at } : {}),
         ...(r.pr ? { pr: { number: r.pr.number, url: r.pr.url } } : {}),
+        ...(r.branch ? { branch: r.branch } : {}), ...(r.base ? { base: r.base } : {}),
         ...(r.pinned ? { pinned: 1 } : {}),
         ...(r.archived ? { archived: r.done_at ?? 1 } : {}),
         ...(r.section === "working" && r.pct != null ? { report: { msg: r.sub ?? "", progress: r.pct, ...(r.left ? { eta: parseInt(r.left) || 0 } : {}) } } : {}),

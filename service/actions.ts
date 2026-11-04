@@ -56,7 +56,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
   else if ((b?.type === "evidence" || b?.type === "accept") && typeof b.task === "string") {
     const t = compat.taskOf(b.task);
     if (!t) throw new Error("That task isn't here any more.");
-    b = { ...b, ...t };
+    b = { ...b, ref: t.ref, folder: t.folder, machine: t.machine };
   }
   else if (b?.type === "read" && b.chats && typeof b.chats === "object") {
     for (const key of Object.keys(b.chats).slice(0, 20)) { const a = compat.addrOf(key); if (a) await act(hub, { type: "read", addr: a }, compat); }

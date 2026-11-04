@@ -7,6 +7,8 @@ import { v_flex, h_flex, Scrollbar, v_virtual_list } from "gpui-base";
 import { exec, readTextFile, watchFolder, theme, settings } from "herdr";
 import { where, shown, CHANGES } from "./taskwhere.js";
 import { green, amber, red, RADIUS, TEXT } from "./ui.js";
+// The fork point and the changed files, as the web app's Diff reads them (core/worktree.js).
+import { READ, against, changedFiles } from "./core/worktree.js";
 
 // A file's change as a colored dot, its word on hover: added green, changed amber, deleted red
 // (a merge conflict red too).
@@ -17,9 +19,6 @@ function location() {
   return { cwd: w?.folder ?? null, on: w?.machine ?? null, base: w?.base ?? null, start: w?.start ?? null, task: w?.terminal ?? null };
 }
 const key = () => JSON.stringify(location());
-// Reads write nothing under .git (no index refresh or lock, no fsmonitor cookie):
-// the folder watch would see it, and every refresh would start the next one.
-const READ = ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "diff.autoRefreshIndex=false"];
 const countLines = (text) => text ? text.split("\n").length - Number(text.endsWith("\n")) : 0;
 
 // Numbers each diff line once, so a frame only draws the rows on screen.
@@ -34,21 +33,6 @@ function diffRows(lines) {
     if (kind === " ") { old++; return { kind, number: next++, text: line.slice(1) || " " }; }
     return { kind: "", text: line };
   });
-}
-
-// Where the task left its base: the fork point with its base branch, unless the base already
-// holds all of it (merged), then the commit it started from. Neither: its last commit (only
-// what isn't committed shows, as Herdr's Changes).
-async function against(git, { base, start }) {
-  const head = (await git(["rev-parse", "--verify", "HEAD"])).stdout?.trim();
-  if (!head) return null;
-  if (base) {
-    const mb = await git(["merge-base", "HEAD", base]);
-    const at = mb.code === 0 ? mb.stdout.trim() : null;
-    if (at && at !== head) return { rev: at, label: base };
-  }
-  if (start && start !== head && (await git(["cat-file", "-e", `${start}^{commit}`])).code === 0) return { rev: start, label: base ?? start.slice(0, 7) };
-  return { rev: "HEAD", label: null };
 }
 
 export default class Changes extends View {
@@ -96,19 +80,7 @@ export default class Changes extends View {
           git(["ls-files", "--others", "--exclude-standard", "-z"]),
         ]);
         for (const r of [names, nums, fresh]) if (r.code !== 0) throw new Error(r.stderr);
-        const stats = {};
-        for (const entry of nums.stdout.split("\0")) {
-          const [a, d, ...parts] = entry.split("\t");
-          if (parts.length) stats[parts.join("\t")] = { add: Number(a) || 0, del: Number(d) || 0, binary: a === "-" };
-        }
-        const files = [], parts = names.stdout.split("\0");
-        for (let i = 0; i + 1 < parts.length; i += 2) {
-          const xy = parts[i], path = parts[i + 1];
-          const s = xy.startsWith("U") ? "U" : xy.startsWith("D") ? "D" : xy.startsWith("A") ? "A" : "M";
-          files.push({ path, status: s, fresh: false, ...(stats[path] ?? { add: 0, del: 0 }) });
-        }
-        for (const path of fresh.stdout.split("\0").filter(Boolean)) files.push({ path, status: "A", fresh: true, add: 0, del: 0 });
-        files.sort((a, b) => a.path.localeCompare(b.path));
+        const files = changedFiles(names.stdout, nums.stdout, fresh.stdout);
         if (key() !== context) return;
         this.limited = files.length > 1000;
         this.root = root; this.on = on; this.vs = vs; this.files = files.slice(0, 1000); this.error = null;

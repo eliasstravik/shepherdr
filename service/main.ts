@@ -23,6 +23,7 @@ import { Compat, activity } from "./compat.ts";
 import { Asks } from "./asks.ts";
 import { Jobs } from "./jobs.ts";
 import { terminalBridge } from "./terminal.ts";
+import { worktree } from "./worktree.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const WEB = process.env.SHEPHERDR_WEB_DIR || join(ROOT, "web", "dist");
@@ -115,6 +116,12 @@ const server = Bun.serve<{ who: string }>({
       const body = await req.json().catch(() => null);
       if (!body || typeof body.key !== "string" || !/^[a-z][\w.-]{0,63}$/.test(body.key)) return json({ error: "bad key" }, 400);
       return json(await store.set(body.key, body.value ?? null));
+    }
+    if (path === "/api/worktree") {
+      const t = compat.taskOf(url.searchParams.get("task") ?? "");
+      if (!t) return json({ error: "No such task." }, 404);
+      try { return json(await worktree(hub, t.where, url.searchParams.get("what") ?? "", url.searchParams.get("path") ?? undefined)); }
+      catch (err) { return json({ error: (err as Error).message }, 400); }
     }
     if (path === "/api/activity") {
       const addr = compat.addrOf(url.searchParams.get("chat") ?? "");

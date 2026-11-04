@@ -127,6 +127,7 @@ export class Model {
         worker, archived: !!task.archived, pinned: pins.has(taskKey(list, task)),
         started: task.started ?? null, ready_at: task.ready_at ?? null, done_at: task.done_at ?? null,
         summary: task.summary ?? null, pr: task.pr ?? null,
+        worktree: task.worktree ?? list.folder, base: task.base ?? null, start: task.start ?? null, branch: task.branch ?? null,
         lastLog: !worker && last?.log ? { path: last.log, kind: last.agent ?? "claude" } : null,
       };
     }));

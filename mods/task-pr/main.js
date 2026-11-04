@@ -6,40 +6,19 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { exec, theme, shared, setShared } from "herdr";
 import { where, shown, PR } from "./taskwhere.js";
+// gh's answer in words, as the web app's Pull request reads it (core/worktree.js).
+import { PR_FIELDS, prOf, checksLine } from "./core/worktree.js";
 
-const FIELDS = "number,title,state,isDraft,url,headRefName,baseRefName,additions,deletions,changedFiles,statusCheckRollup";
 const EVERY = 30000;
-
-// A check, as Shepherdr sorts them: pass, fail, pending (running or waiting) or skip.
-function checkOf(c) {
-  if (c.__typename === "StatusContext") {
-    const s = String(c.state ?? "").toUpperCase();
-    return { name: c.context ?? "Status", url: c.targetUrl || null,
-      state: s === "SUCCESS" ? "pass" : s === "PENDING" || s === "EXPECTED" ? "pending" : "fail" };
-  }
-  const done = String(c.status ?? "").toUpperCase() === "COMPLETED", end = String(c.conclusion ?? "").toUpperCase();
-  return { name: c.name ?? c.workflowName ?? "Check", workflow: c.workflowName || null, url: c.detailsUrl || null,
-    state: !done ? "pending" : end === "SUCCESS" ? "pass" : end === "SKIPPED" || end === "NEUTRAL" ? "skip" : "fail" };
-}
-
-// "1 failed · 2 running · 3 passed"
-function checksLine(cs) {
-  const n = (s) => cs.filter((c) => c.state === s).length;
-  return [[n("fail"), "failed"], [n("pending"), "running"], [n("pass"), "passed"], [n("skip"), "skipped"]]
-    .filter(([k]) => k).map(([k, w]) => `${k} ${w}`).join(" · ");
-}
-
-// Failed first, then running, passed, skipped: what needs a look sits on top.
-const ORDER = { fail: 0, pending: 1, pass: 2, skip: 3 };
 
 // Asks gh: { pr } or { why } (nothing to show, and why) or { error }.
 async function ask(w) {
   const on = w.machine ?? undefined;
   let r;
   if (w.pr?.number && w.pr?.repo) {
-    r = await exec("gh", ["pr", "view", String(w.pr.number), "--repo", w.pr.repo, "--json", FIELDS], { on });
+    r = await exec("gh", ["pr", "view", String(w.pr.number), "--repo", w.pr.repo, "--json", PR_FIELDS], { on });
   } else if (w.branch) {
-    r = await exec("gh", ["pr", "view", w.branch, "--json", FIELDS], { cwd: w.folder, on }).catch(() => null);
+    r = await exec("gh", ["pr", "view", w.branch, "--json", PR_FIELDS], { cwd: w.folder, on }).catch(() => null);
     if (!r) return { why: "This task has no pull request." };
   } else {
     return { why: "This task works in its folder, with no branch of its own, so it has no pull request." };
@@ -49,11 +28,7 @@ async function ask(w) {
     if (!w.pr && /no pull requests? found|not a git repository|none of the git remotes|no git remotes/i.test(err)) return { why: "This task has no pull request." };
     return { error: err.split("\n")[0] || "GitHub didn't answer." };
   }
-  const d = JSON.parse(r.stdout);
-  const state = d.state === "MERGED" ? "merged" : d.state === "CLOSED" ? "closed" : d.isDraft ? "draft" : "open";
-  const checks = (d.statusCheckRollup ?? []).map(checkOf).sort((a, b) => ORDER[a.state] - ORDER[b.state] || a.name.localeCompare(b.name));
-  return { pr: { number: d.number, title: d.title, url: d.url, state, head: d.headRefName, base: d.baseRefName,
-    add: d.additions ?? 0, del: d.deletions ?? 0, files: d.changedFiles ?? 0, checks } };
+  return { pr: prOf(JSON.parse(r.stdout)) };
 }
 
 export default class PullRequest extends View {
