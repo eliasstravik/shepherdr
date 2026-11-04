@@ -6,6 +6,8 @@ import { v_flex, h_flex } from "gpui-base";
 import { home, readTextFile } from "herdr";
 import { button } from "./ui.js";
 import { on } from "./addons.js";
+// The page's words and its state line: core/settings.js, shared with the web app.
+import { WEB, SECTIONS, webState } from "./core/settings.js";
 
 let web = null, readAt = 0, loaded = false;
 
@@ -22,14 +24,13 @@ function current(view) {
 export function webSection(view, t) {
   const w = current(view);
   const off = !on("web");
-  const state = off ? "Off. Turn it on under Window › Add-ons." : !loaded ? "Reading…" : !w ? "Shepherdr's service isn't running here."
-    : w.why ? w.why : "On, private to your tailnet.";
+  const state = webState(off, loaded, w);
   return v_flex()
-    .child(view.title(t, "Web"))
-    .child(view.row(t, "Shepherdr on the web", state, div()))
+    .child(view.title(t, SECTIONS.find((s) => s.id === "web").title))
+    .child(view.row(t, WEB.title, state, div()))
     .when(Boolean(!off && w?.link && !w?.why), (el) => el
-      .child(view.row(t, "Link", w.link, button("web-copy", "Copy", { onClick: (_e, cx) => cx.write_to_clipboard(w.link) })))
+      .child(view.row(t, WEB.link, w.link, button("web-copy", WEB.copy, { onClick: (_e, cx) => cx.write_to_clipboard(w.link) })))
       .when(Boolean(w.qr), (el) => el.child(v_flex().py(12).gap(8)
-        .child(div().text_size(13).text_color(t.muted).child("Open it on your phone"))
+        .child(div().text_size(13).text_color(t.muted).child(WEB.phone))
         .child(h_flex().child(image(w.qr).size(168).rounded(8))))));
 }

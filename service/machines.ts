@@ -48,7 +48,11 @@ export class Machines {
         if (line) {
           const d = JSON.parse(line);
           out.health = d.health;
+          delete out.error;
           if (d.limits) { out.limits = Object.fromEntries(Object.entries(d.limits).map(([k, v]) => [k, nextRead(was.limits?.[k], v)])); out.limitsAt = Date.now(); }
+        } else {
+          // as the window's (lib/machines.js): why it couldn't, its header's red dot; the last numbers stay
+          out.error = String(r?.stderr || "No answer").trim().split("\n").pop()!.slice(0, 120) || "No answer";
         }
         this.stats.set(m, out);
       }));
@@ -58,15 +62,23 @@ export class Machines {
     }
   }
 
-  /** 2.1's health and limits for a machine (null: here). */
+  /** The window's own reads (its shared "machines.stats"): the agents installed on each machine, which only it knows. */
+  windowStats: () => Record<string, any> | null = () => null;
+
+  /** 2.1's health and limits for a machine (null: here), and `stats`: the reads as the window keeps them, which the web's
+   *  machine header and popup read with core/machines.js, as the window's do. */
   of(m: string | null) {
     const s = this.stats.get(m);
-    if (!s?.health) return {};
+    if (!s) return {};
+    const agents = this.windowStats()?.[m ?? ""]?.agents;
+    const stats = { at: s.at, ...(s.error ? { error: s.error } : {}), ...(s.limitsAt ? { limitsAt: s.limitsAt } : {}), hold: s.hold,
+      ...(s.health ? { health: s.health } : {}), ...(s.limits ? { limits: s.limits } : {}), ...(Array.isArray(agents) ? { agents } : {}) };
+    if (!s.health) return { stats };
     const health = { engine: "core", herdr: true, working: 0, held: 0, at: new Date(s.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       meters: healthMeters(s).map((x: any) => ({ name: x.name, pct: x.pct, detail: x.detail, level: x.level })) };
     const limits = s.limits ? Object.fromEntries(Object.entries<any>(s.limits).map(([k, v]) => [k, v.state === "ok"
       ? { state: "ok", plan: v.plan, at: v.at ?? s.limitsAt, windows: (v.windows ?? []).map((w: any) => ({ name: w.name, used: w.used, ...(w.resets_at ? { resetsAt: w.resets_at } : {}) })) }
       : { state: v.state ?? "unknown", why: v.why ?? "", at: v.at ?? s.limitsAt }])) : undefined;
-    return { health, ...(limits ? { limits } : {}) };
+    return { health, stats, ...(limits ? { limits } : {}) };
   }
 }

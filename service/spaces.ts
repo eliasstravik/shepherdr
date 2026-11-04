@@ -2,12 +2,15 @@
 // is the window's: it makes it (herdr-app do space.new), names it as New space does, and gives it its Assistant (new
 // spaces get one). A web-only install has no window: its spaces are the service's own list (the shared document's
 // "spaces"), each with an Assistant started here from the assistant template, labelled as the window labels one.
-// Folders for the New space dialog are read on the space's machine (no hidden ones; a repo is a folder with .git).
+// Folders for the New space dialog are read on the space's machine (no hidden ones; a repo is a folder with .git); its
+// words and rules are core/newspace.js, the window's New space's too.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Hub } from "./hub.ts";
 import { HOME } from "./paths.ts";
 import { exec } from "./model.ts";
+import * as NS from "../core/newspace.js";
+import * as SP from "../core/spaces.js";
 
 const APP = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
 export const withWindow = () => existsSync(join(APP, "mods", "spaces-chat"));
@@ -33,28 +36,66 @@ export async function folders(hub: Hub, machine: string | null, path: string, ho
   return { path: tilde(abs ?? path), exists: !!abs && (dir === "1" || existsSync(abs)), dir: dir === "1", repo: repo ? tilde(repo) : null, entries: entries.slice(0, 300), ...(rows.length > 300 ? { more: true } : {}) };
 }
 
-/** Makes a space at path on machine (null: here); create: a new folder made a git repo first, as New space's toggle. */
-export async function newSpace(hub: Hub, opts: { machine: string | null; path: string; name?: string; create?: boolean; store: { value(k: string): any; set(k: string, v: unknown): Promise<unknown> } }) {
-  const { machine, path, create } = opts;
-  if (!path || path.includes("\0")) throw new Error("Pick a folder.");
-  if (create) {
-    const r = await exec(hub, ["sh", "-c", 'p="$1"; case "$p" in "~"*) p="$HOME${p#\\~}";; esac; mkdir -p "$p" && cd "$p" && { [ -e .git ] || { git init -q && git commit -q --allow-empty -m "Start"; }; } && pwd', "new", path], machine);
-    if (r.code !== 0) throw new Error("That folder couldn't be made.");
+/** A machine's home folder (null: this computer's), or null when it can't be reached. */
+export async function homeOf(hub: Hub, machine: string | null) {
+  if (!machine) return HOME;
+  const r = await exec(hub, ["sh", "-c", 'printf %s "$HOME"'], machine).catch(() => null);
+  return r && r.code === 0 && r.stdout.startsWith("/") ? r.stdout : null;
+}
+
+/** What New space opens with on a machine (as coordinator.js newSpace finds it first): its home, its recent folders
+ *  (its terminals' folders as their repo's top, newest first, at most 8) and where the field starts (`at`: the
+ *  shown space's folder, when it is on that machine). */
+export async function newSpaceInfo(hub: Hub, machine: string | null, at: string | null) {
+  const home = await homeOf(hub, machine);
+  if (!home) throw new Error(`Couldn't reach ${machine}. Try New space again once it's connected.`);
+  const there = (a: string) => (machine ? a.startsWith(`${machine}/`) : !a.includes("/"));
+  const paths = NS.recentCandidates([...hub.terminals.values()].filter((t) => there(t.address))
+    .map((t) => ({ cwd: (t.foreground as { cwd?: string } | undefined)?.cwd ?? t.cwd, at: t.created_ms })));
+  const r = paths.length ? await exec(hub, ["sh", "-c", NS.REPO_TOPS, "x", ...paths], machine).catch(() => null) : null;
+  const recent = NS.recentFrom(r?.stdout ?? "").filter((p: string) => !NS.scratch(p));
+  return { home, recent, start: NS.startFolder(at, recent, home) };
+}
+
+/** Makes a space at path on machine (null: here), as the window's New space (mods/newspace, coordinator.js
+ *  createSpace): a missing folder is made, makeRepo makes a folder outside git a repo (main, an empty first commit), it
+ *  is named as Herdr names it ("Home" at home, else its repo's or folder's name; unnamed: left to follow its folder, as
+ *  a worktree's), and `icon` is kept as the sidebar's Rename keeps it. */
+export async function newSpace(hub: Hub, opts: { machine: string | null; path: string; name?: string; unnamed?: boolean; makeRepo?: boolean; icon?: string | null; store: { value(k: string): any; set(k: string, v: unknown): Promise<unknown> } }) {
+  const { machine } = opts;
+  if (!opts.path || opts.path.includes("\0")) throw new Error("Pick a folder.");
+  const home = (await homeOf(hub, machine)) ?? "";
+  const abs = NS.pathOf(opts.path, home);
+  if (!abs) throw new Error("Pick a folder.");
+  const git = (args: string[]) => exec(hub, ["git", "-C", abs, ...args], machine);
+  if ((await exec(hub, ["test", "-d", abs], machine)).code !== 0) {
+    const r = await exec(hub, ["mkdir", "-p", "--", abs], machine);
+    if (r.code !== 0) throw new Error(r.stderr.trim().split("\n").pop() || NS.WORDS.cantMake(NS.tilde(abs, home)));
   }
-  const abs = (await exec(hub, ["sh", "-c", 'p="$1"; case "$p" in "~"*) p="$HOME${p#\\~}";; esac; cd "$p" 2>/dev/null && pwd', "abs", path], machine)).stdout.trim();
-  if (!abs) throw new Error("That folder isn't there.");
-  const name = (opts.name || abs.split("/").filter(Boolean).pop() || "home").slice(0, 60);
+  let top = (await git(["rev-parse", "--show-toplevel"]).catch(() => null))?.stdout.trim() || "";
+  if (opts.makeRepo && !top && NS.offersRepo(abs, false, home)) {
+    for (const args of NS.NEW_REPO) {
+      const r = await git(args);
+      if (r.code !== 0) throw new Error(NS.WORDS.cantRepo(r.stderr.trim().split("\n").pop()));
+    }
+    top = abs;
+  }
+  const name = (opts.name || NS.placeName(abs, top, home)).slice(0, 80);
+  const iconOf = (id: string) => (opts.icon ? opts.store.set("spaces-chat", SP.withIcon(opts.store.value("spaces-chat"), id, opts.icon)) : null);
   if (withWindow()) {
-    const r = await run(["herdr-app", "do", "space.new", "--folder", abs, "--name", name, ...(machine ? ["--machine", machine] : [])]);
+    const r = await run(["herdr-app", "do", "space.new", "--folder", abs, ...(opts.unnamed ? [] : ["--name", name]), ...(machine ? ["--machine", machine] : [])]);
     let out: any = {};
     try { out = JSON.parse(r.out || "{}"); } catch {}
     if (r.code !== 0 || !out.space) throw new Error("A new space opens in the Herdr window: it needs the window open.");
-    return machine ? `${machine}/${out.space}` : out.space as string;
+    const place = machine ? `${machine}/${out.space}` : out.space as string;
+    await iconOf(place);
+    return place;
   }
   // no window: the service's own space, and its Assistant from the assistant template
   const id = `sp${crypto.randomUUID().replace(/-/g, "")}`;
   const list = Array.isArray(opts.store.value("spaces")) ? opts.store.value("spaces") : [];
   await opts.store.set("spaces", [...list, { id, name, folder: abs, machine, at: Date.now() }]);
+  await iconOf(machine ? `${machine}/${id}` : id);
   // Settings › Window › Assistant in new spaces off: it opens without one
   if (opts.store.value("coordinator.auto") === false) return machine ? `${machine}/${id}` : id;
   await run(["hc", "run", "--bg", "--keep", "--no-parent", ...(machine ? ["--on", machine] : []), "--cwd", abs,

@@ -5,12 +5,12 @@
 // row's menu only pins it (core/menus.js taskMenu, the window's too); the Assistant does the rest. Done tasks archive
 // themselves: the Archived row at the bottom opens them.
 import clsx from 'clsx'
-import { openAccept } from '@client/screens/Accept.tsx'
-import { Fragment, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { openAccept, useAccepting } from '@client/screens/Accept.tsx'
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import {
-  act,
   archivedIn,
   definePlugin,
+  matches,
   filteredGroups,
   goChat,
   setTaskFilter,
@@ -39,6 +39,7 @@ import {
   useStore,
   useUI,
   type GroupBy,
+  type Groups,
   type ListView,
   type TaskGroup,
 } from '@client/kernel.ts'
@@ -47,13 +48,11 @@ import {
   ArchivedIcon,
   BackIcon,
   CheckIcon,
-  ClockIcon,
   DownIcon,
   Empty,
   FilterBox,
   ic,
   IconButton,
-  LinkButton,
   List,
   Menu,
   MenuItem,
@@ -63,17 +62,42 @@ import {
   NextIcon,
   PinTaskIcon,
   RoundButton,
-  Row,
   rowClass,
-  RowText,
-  taskLine,
   TaskDot,
   UnpinIcon,
 } from '@client/ui.tsx'
-import { doneNewestFirst, taskChatId, type Automation, type Place, type Snapshot, type Task } from '@shared/types.ts'
+import { doneNewestFirst, machineName, type Automation, type Place, type Snapshot, type Task } from '@shared/types.ts'
 import { useFlip } from '@client/motion.ts'
-import { RowMenu, RowMenuButton, useRowMenu, type RowMenuState } from '@client/rowmenu.tsx'
+import { RowMenu, useRowMenu, type RowMenuState } from '@client/rowmenu.tsx'
 import * as MN from '@core/menus.js'
+import * as TK from '@core/tasks.js'
+import * as ND from '@core/needs.js'
+
+// the window's words for a row (core/tasks.js, core/needs.js): every second line starts with a capital and is at most
+// 40 characters, cut at a word (the whole of it on hover); an automation's next run as "9:00", "Tue 9:00", "Nov 12 9:00"
+const capital = TK.capital as (s: string) => string
+const fit = ND.fit as (s: string) => string
+const day = TK.day as (ms: number) => string
+const REASONS = ND.REASONS as Record<string, string>
+const STATUS = TK.STATUS as Record<string, string>
+/** a task's id as its row shows it: its list's ref, without the machine ("SHEP-7"; the machine is in where it is) */
+const refOf = (id: string) => id.slice(id.lastIndexOf(':') + 1)
+
+/** the id column's width (characters): as wide as the longest id anywhere in the list, so every title lines up (the
+ *  window's idWidth) */
+const IdWidth = createContext(0)
+
+/** the window's automation mark (mods/tasks/repeat.svg, lucide's repeat) */
+function RepeatIcon({ className }: { className?: string }) {
+  return (
+    <svg aria-hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="m17 2 4 4-4 4" />
+      <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+      <path d="m7 22-4-4 4-4" />
+      <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+    </svg>
+  )
+}
 
 /**
  * A task, with one line under its title (taskLine). Working, its pie fills with the % done its agent reported and the minutes
@@ -84,57 +108,99 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
   // the open task, or the focused pane's in split view
   const sel = useUI((u) => u.task === t.id || (panesHere(u)[u.split.pane]?.kind === 'task' && panesHere(u)[u.split.pane].id === t.id))
   const kb = useUI((u) => u.kb && !u.task && u.cur === ix)
-  // as 3.0's row (mods/tasks line()): its second line (core/tasks.js secondLine), where it is, and Accept on a Ready one
-  const sub = t.sub || undefined
-  const at = where?.join(' · ')
-  const accept = t.status === 'ready' && !t.archived
-  const two = !!sub || accept
-  // archived: a quiet ring, or a done task's check; the status it was put away with stays in its chat
-  const dot = t.archived ? (t.status === 'done' ? 'done' : 'idle') : t.status
-  // minutes left, under the dot (amber), while it works
-  const left = !t.archived && t.status === 'work' && t.report?.eta !== undefined ? `${t.report.eta}m` : null
-  // its menu (Pin or Unpin) on a right click, or a finger held on it, as the window's right click
+  // its menu (Pin or Unpin) on a right click, or a finger held on it, as the window's right click (not an archived
+  // task's: archived ones drop out of Pinned)
   const menu = useRowMenu()
-  const place = at ? <span className="min-w-0 shrink truncate text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{at}</span> : null
+  const busy = useAccepting(t.id) || !!t.accepting
+  // as 3.0's row (mods/tasks row()): Accept, the compact one, on a Ready row's second line; "Accepting…" while its
+  // accept runs
+  const accept =
+    t.status === 'ready' && !t.archived ? (
+      <button type="button" disabled={busy} onClick={() => openAccept(t.id)}
+        className="press-dim pointer-events-auto relative z-1 h-5 shrink-0 rounded-full bg-fg px-2 text-[0.75rem] font-medium whitespace-nowrap text-bg after:absolute after:-inset-1.5 disabled:opacity-60 phone:h-7 phone:px-3 phone:text-[0.8125rem]">
+        {busy ? 'Accepting…' : 'Accept'}
+      </button>
+    ) : null
   return (
-    <li data-flip={t.id} className={clsx(rowClass(sel, kb), 'group relative p-0! select-none [-webkit-touch-callout:none]', menu.open && !sel && 'bg-hover')} {...menu.press}>
-      {/* the whole row opens the task: one button stretched under it; Accept sits over it, a button of its own */}
-      <button
-        type="button"
-        aria-current={sel || undefined}
-        aria-label={`${t.id} ${t.name}${sub ? `, ${sub}` : ''}`}
-        // with ⌘ (Ctrl off a Mac), beside the focused pane in split view
-        onClick={(e) => !menu.held() && (splitClick(e) ? openSplit({ kind: 'task', id: t.id }) : openTask(t.id))}
-        className="absolute inset-0 cursor-pointer rounded-[inherit] outline-none keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)]"
-      />
+    <Line
+      flip={t.id}
+      sel={sel}
+      kb={kb}
+      // its pie: the % done, while it works; an archived one is a done task's check
+      glyph={<TaskDot s={t.archived ? 'done' : t.status} w={t.archived || !t.report ? undefined : { ...t.report, eta: undefined }} />}
+      ref_={refOf(t.id)}
+      title={t.name}
+      sub={t.sub}
+      left={t.status === 'work' && !t.archived ? t.left : undefined}
+      dim={t.status === 'done'}
+      where={where?.join(' · ')}
+      action={accept}
+      // with ⌘ (Ctrl off a Mac), beside the focused pane in split view
+      onOpen={(e) => !menu.held() && (splitClick(e) ? openSplit({ kind: 'task', id: t.id }) : openTask(t.id))}
+      menu={t.archived ? undefined : menu}
+    >
+      {menu.open && !t.archived ? <TaskMenu t={t} menu={menu} /> : null}
+    </Line>
+  )
+}
+
+/**
+ * One row, as the window's (mods/tasks line()): the glyph, the dim id in its fixed column, then the title, which owns
+ * the first line. Anything else goes on a second line that starts where the title does: why it needs you or what its
+ * agent does (at most 40 characters, the whole of it on hover), then at its end where it is and the button (Accept),
+ * so where it is never sits under the button. A row with nothing to say under its title is one line, where it is dim
+ * at its end. `meta`: a short note at the first line's end (an automation's next run). `left`: the minutes left, small
+ * under the glyph. `tip`: the title's hover (an automation's error).
+ */
+function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, dim, meta, where, action, tip, onOpen, menu, children }: {
+  flip?: string; sel?: boolean; kb?: boolean; glyph: ReactNode; ref_?: string; title: string; sub?: string; left?: string; dim?: boolean; meta?: string
+  where?: string; action?: ReactNode; tip?: string; onOpen?: (e: MouseEvent) => void; menu?: RowMenuState; children?: ReactNode
+}) {
+  const idCh = useContext(IdWidth)
+  const said = sub ? capital(sub) : undefined
+  const shown = said ? fit(said) : undefined
+  const two = !!shown || !!action
+  const place = where ? <span className="min-w-0 shrink truncate text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{where}</span> : null
+  // the id column: as wide as the longest id in the list (the second line starts under the title too)
+  const idCol = ref_ && idCh ? { width: `${idCh}ch` } : undefined
+  return (
+    <li data-flip={flip} className={clsx(rowClass(sel, kb), 'group relative p-0! select-none [-webkit-touch-callout:none]', menu?.open && !sel && 'bg-hover')} {...(menu?.press ?? {})}>
+      {/* the whole row opens it: one button stretched under it; Accept sits over it, a button of its own */}
+      {onOpen ? (
+        <button
+          type="button"
+          aria-current={sel || undefined}
+          aria-label={`${ref_ ? `${ref_} ` : ''}${title}${said ? `, ${said}` : ''}${meta ? `, ${meta}` : ''}`}
+          title={[tip, shown !== said ? said : undefined].filter(Boolean).join(' · ') || title}
+          onClick={onOpen}
+          className="absolute inset-0 cursor-pointer rounded-[inherit] outline-none keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)]"
+        />
+      ) : null}
       {/* what the row shows is said by its button's label: only Accept is read on its own */}
       <div className={clsx('pointer-events-none relative flex min-h-[inherit] w-full min-w-0 gap-2.5 px-2 phone:px-3', two ? 'items-start py-1.5' : 'items-center')}>
         <span aria-hidden className="flex w-3.5 shrink-0 flex-col items-center">
-          <span className="grid h-[18px] place-items-center phone:h-5"><TaskDot s={dot} w={t.archived ? undefined : t.report} /></span>
+          <span className="grid h-[18px] place-items-center phone:h-5">{glyph}</span>
           {two && left ? <span className="mt-0.5 font-mono text-[0.6875rem]/4 font-semibold text-work-fg tabular-nums">{left}</span> : null}
         </span>
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span aria-hidden className="flex h-[18px] min-w-0 items-center gap-2 phone:h-5">
-            <span className="shrink-0 font-mono text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{t.id}</span>
-            <span className="min-w-16 flex-auto truncate text-fg">{t.name}</span>
+        <span aria-hidden={!!onOpen} className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="flex h-[18px] min-w-0 items-center gap-2 phone:h-5">
+            {ref_ ? <span style={idCol} className="shrink-0 font-mono text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{ref_}</span> : null}
+            <span className={clsx('min-w-16 flex-auto truncate', dim ? 'text-fg2' : 'text-fg')}>{title}</span>
+            {meta ? <span className="shrink-0 pl-1 text-[0.75rem] text-fg3 tabular-nums phone:text-[0.8125rem]">{meta}</span> : null}
             {/* one line: where it is at the end; it gives way before the title is cut */}
-            {!two ? place : null}
+            {!two && place ? <span className={clsx('flex min-w-0 shrink-[1000] justify-end', !meta && 'pl-1')}>{place}</span> : null}
           </span>
           {two ? (
             <span className="flex h-5 min-w-0 items-center gap-2 phone:h-7">
-              {sub ? <span aria-hidden className="min-w-0 shrink truncate text-[0.75rem] text-fg2 phone:text-[0.8125rem]">{sub}</span> : null}
-              <span aria-hidden className="flex min-w-0 flex-1 justify-end">{place}</span>
-              {accept ? (
-                <button type="button" onClick={() => openAccept(t.id)}
-                  className="press-dim pointer-events-auto relative z-1 h-5 shrink-0 rounded-full bg-fg px-2 text-[0.75rem] font-medium text-bg after:absolute after:-inset-1.5 phone:h-7 phone:px-3 phone:text-[0.8125rem]">
-                  Accept
-                </button>
-              ) : null}
+              {idCol ? <span style={idCol} className="shrink-0 font-mono text-[0.75rem] phone:text-[0.8125rem]" /> : null}
+              {shown ? <span className="min-w-0 shrink truncate text-[0.75rem] text-fg2 phone:text-[0.8125rem]">{shown}</span> : null}
+              <span className="flex min-w-0 flex-1 justify-end">{place}</span>
+              {action}
             </span>
           ) : null}
         </span>
       </div>
-      {menu.open ? <TaskMenu t={t} menu={menu} /> : null}
+      {children}
     </li>
   )
 }
@@ -179,32 +245,41 @@ const FILTER_ORDER = ['needs', 'ready', 'merging', 'working', 'queued', 'todo', 
 /** the chips that show beside All statuses before More, as far as there is room (3.0's filterRow) */
 const PRIMARY = ['needs', 'working', 'ready']
 
-/** what an agent asks that is no task's (an Assistant's question, a secret, its turn waiting): a Needs you row */
-type AgentNeed = { id: string; chat: string; who: string; why: string; where?: string }
+/** what needs you that is no task's: an agent asking (an Assistant's question, a secret, its turn waiting), or an
+ *  automation that didn't run or didn't start its task (the window's inbox items) */
+type AgentNeed = { id: string; chat?: string; who: string; why: string; where?: string; auto?: Automation }
 function agentNeeds(snap: Snapshot): AgentNeed[] {
-  return snap.needs.filter((n) => !n.task && n.chat).map((n) => {
+  const where = (machine: string | null | undefined, name?: string) => {
+    const m = machine && machine !== snap.host ? snap.machines?.find((x) => x.machine === machine)?.name ?? machine : undefined
+    return [m, name].filter(Boolean).join(' · ') || undefined
+  }
+  const asks = snap.needs.filter((n) => !n.task && n.chat).map((n) => {
     const p = snap.places.find((x) => x.id === n.place)
-    const m = p && p.machine !== snap.host ? snap.machines?.find((x) => x.machine === p.machine)?.name : undefined
-    return { id: n.id, chat: n.chat, who: p ? `${p.name} Assistant` : 'Agent', why: n.question?.title ?? (n.secret ? `Wants the secret ${n.secret.name}` : n.text || 'Waits for your reply'), where: [m, p?.name].filter(Boolean).join(' · ') || undefined }
+    // why, in the window's words (core/needs.js REASONS, reqReason): a plan, a permission's own words, a question
+    const q = n.question
+    const why = q ? (q.kind === 'Plan' ? REASONS.plan : fit(q.title) || (q.choices?.[0]?.label === 'Allow' ? REASONS.permission : REASONS.question))
+      : n.secret ? fit(`Wants the secret ${n.secret.name}`) : REASONS.question
+    // an agent's item: its name (a space's agent is its Assistant), where it is: its machine and space
+    return { id: n.id, chat: n.chat, who: 'Assistant', why, where: where(p?.machine, p?.name) }
   })
+  // an automation goes by its name, with no id: "Didn't run" or "Didn't start its task"
+  const autos = Object.values(snap.automations ?? {}).flat().filter((a) => a.error)
+    .map((a) => ({ id: `auto:${a.machine ?? ''}:${a.listName}:${a.name}`, who: a.name, why: a.failed === 'fire' ? "Didn't run" : "Didn't start its task", where: where(a.machine, a.listName), auto: a }))
+  return [...asks, ...autos]
 }
 
-/** an agent's Needs you row: a tap opens its chat */
-function AgentNeedRow({ n }: { n: AgentNeed }) {
+/** a Needs you row of no task: an agent's opens its chat; a failed automation's opens the Automations group */
+function AgentNeedRow({ n, listKey }: { n: AgentNeed; listKey: string }) {
+  const shut = useUI((u) => u.shut.includes(`${listKey}|automations`))
   return (
-    <li className={clsx(rowClass(false, false), 'p-0!')}>
-      {/* the same grid as a task's row: who on the first line, why and where it is on the second */}
-      <button type="button" onClick={() => goChat(n.chat)} className="flex min-h-[inherit] w-full min-w-0 cursor-pointer items-start gap-2.5 rounded-[inherit] px-2 py-1.5 text-left outline-none keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)] phone:px-3">
-        <span className="grid h-[18px] w-3.5 shrink-0 place-items-center phone:h-5"><TaskDot s="need" /></span>
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="h-[18px] truncate text-fg phone:h-5">{n.who}</span>
-          <span className="flex h-5 min-w-0 items-center gap-2 phone:h-7">
-            <span className="min-w-0 shrink truncate text-[0.75rem] text-fg2 phone:text-[0.8125rem]">{n.why}</span>
-            {n.where ? <span className="flex min-w-0 flex-1 justify-end"><span className="min-w-0 truncate text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{n.where}</span></span> : null}
-          </span>
-        </span>
-      </button>
-    </li>
+    <Line
+      glyph={n.auto ? <RepeatIcon className="size-3.5 text-need" /> : <TaskDot s="need" />}
+      title={n.who}
+      sub={n.why}
+      where={n.where}
+      tip={n.auto?.error}
+      onOpen={() => (n.chat ? goChat(n.chat) : shut && toggleShut(listKey, 'automations'))}
+    />
   )
 }
 
@@ -275,18 +350,54 @@ function StatusFilterRow({ counts, filter }: { counts: Record<string, number>; f
   )
 }
 
-/** a Needs you group counts what its tasks wait for, card by card, and what agents ask beside them */
-const needCount = (snap: Snapshot, g: { key: string; count: number; tasks: Task[] }) => {
-  if (g.key !== 'need') return g.count
-  const ids = new Set(g.tasks.map((t) => t.id))
-  return Math.max(g.count, snap.needs.filter((n) => n.task && ids.has(n.task)).length)
+/** a task the search finds, as the window's (mods/tasks found()): by its id, title, status line or pull request's
+ *  number, or where it is: its space or list, and machine */
+function found(snap: Snapshot, t: Task, q: string) {
+  const p = placeOf(snap, t.place)
+  return matches(q, refOf(t.id), t.name, t.sub, t.report?.msg, t.pr && `#${t.pr.number}`, t.listName, p.name, machineName(snap.machines, t.on))
 }
 
-function TaskList(_: { placeId: string }) {
+/** what an automation's row says of where it is, as far as the grouping doesn't say it (the window's names) */
+function autoWhere(snap: Snapshot, a: Automation, names: { machine: boolean; project: boolean }) {
+  if (snap.look?.place === false) return undefined
+  const m = names.machine && a.machine && a.machine !== snap.host ? machineName(snap.machines, a.machine) || a.machine : undefined
+  return [m, names.project ? a.listName : undefined].filter(Boolean).join(' · ') || undefined
+}
+
+/** An automation (herdr-task auto), as the window's row (mods/tasks autoRow): its mark, its name (no id), when it runs
+ *  next at the first line's end; on the second line why it won't run as planned (Didn't start, the error on the
+ *  title's hover; Paused). A tap opens the task it added last. Only agents add or change automations. */
+function AutoRow({ a, where }: { a: Automation; where?: string }) {
+  return (
+    <Line
+      glyph={<RepeatIcon className={clsx('size-3.5', a.error ? 'text-need' : 'text-fg3')} />}
+      title={a.name}
+      dim={!a.on}
+      sub={a.error ? "Didn't start" : !a.on ? 'Paused' : undefined}
+      meta={a.nextAt ? day(a.nextAt) : undefined}
+      where={where}
+      tip={a.error}
+      onOpen={a.task ? () => openTask(a.task!) : undefined}
+    />
+  )
+}
+
+function TaskList(props: { placeId: string }) {
+  const snap = useSnap()!
+  // ids sit in a column as wide as the longest one anywhere here, so every title lines up (the window's idWidth)
+  const idCh = Math.max(0, ...snap.tasks.map((t) => refOf(t.id).length))
+  return (
+    <IdWidth.Provider value={idCh}>
+      <TaskListBody {...props} />
+    </IdWidth.Provider>
+  )
+}
+
+function TaskListBody(_: { placeId: string }) {
   const snap = useSnap()!
   const view = useStore((s) => listView(s.ui, snap))
   const key = view.key
-  const chosen = useUI((u) => u.groups)
+  const chosen = grouping(useUI((u) => u.groups), snap)
   const allDone = useUI((u) => u.allDone)
   const shut = useUI((u) => u.shut)
   const archived = useUI((u) => u.archived === key)
@@ -299,37 +410,46 @@ function TaskList(_: { placeId: string }) {
   useFlip(list, `${key}|${by}|${q}|${wanted}|${allDone.join()}|${shut.join()}`)
   if (archived) return <ArchivedList list={view} />
   const loaded = !!snap.places.length || !!snap.tasks.length
-  const asks = agentNeeds(snap).filter((n) => !q || [n.who, n.why, n.where].join(' ').toLowerCase().includes(q.toLowerCase()))
-  const live = tasksIn(snap, view)
-  const automations = Object.values(snap.automations ?? {}).flat()
-  // the chips' counts: what each status holds now (Needs you: its tasks and what agents ask)
-  const counts: Record<string, number> = { needs: live.filter((t) => t.status === 'need').length + agentNeeds(snap).length, automations: automations.length }
+  // what the search field holds: only what matches it shows, in its group (the window's matches())
+  const asks = agentNeeds(snap).filter((n) => !q || matches(q, n.who, n.why, n.where))
+  const live = tasksIn(snap, view).filter((t) => !q || found(snap, t, q))
+  const autos = Object.values(snap.automations ?? {}).flat().filter((a) => !q || matches(q, a.name, a.listName, a.machine ? machineName(snap.machines, a.machine) : undefined))
+  // the chips' counts: what each status holds now, as far as the search lets it (Needs you: its tasks and what else
+  // needs you)
+  const counts: Record<string, number> = { needs: live.filter((t) => t.status === 'need').length + asks.length, automations: autos.length }
   for (const [k, st] of Object.entries(FILTER_STATUS)) counts[k] = live.filter((t) => t.status === st).length
-  const filter = FILTER_ORDER.includes(wanted) && (counts[wanted] || q) ? wanted : 'all'
+  // Settings › Window › Status filters off: no row, all shown
+  const filters = snap.look?.filters !== false
+  const filter = filters && FILTER_ORDER.includes(wanted) && (counts[wanted] || q) ? wanted : 'all'
+  // what rows say of where they are: all of it in a flat list or by status; by machine, the space; by space, nothing
+  const names = filter !== 'all' || by === 'status' ? { machine: true, project: true } : by === 'machine' ? { machine: false, project: true } : { machine: false, project: false }
   const footer = q || filter !== 'all' ? null : registry.tasksFooter.map((F, i) => <F key={i} place={place} list={view} />)
   // one status picked: its rows alone, no headings
   if (filter !== 'all') {
     const rows = filter === 'needs' ? live.filter((t) => t.status === 'need') : filter === 'automations' ? [] : live.filter((t) => t.status === FILTER_STATUS[filter])
-    const found = (q ? rows.filter((t) => filteredGroups(snap, view, q).some((g) => g.tasks.includes(t))) : filter === 'done' ? doneNewestFirst(rows) : rows)
-    const what = filter === 'needs' ? 'tasks that need you' : filter === 'automations' ? 'automations' : `${FILTER_WORDS[filter]} tasks`
+    const shown = filter === 'done' ? doneNewestFirst(rows) : rows
+    const what = filter === 'needs' ? 'tasks that need you' : filter === 'automations' ? 'automations' : `${STATUS[filter]} tasks`
+    const any = shown.length || (filter === 'needs' && asks.length) || (filter === 'automations' && autos.length)
     return (
       <>
-        <TaskFilter listKey={view.search} order={found} />
+        <TaskFilter listKey={view.search} order={shown} />
         <StatusFilters counts={counts} filter={filter} />
         <div ref={list} className="relative pt-1">
-          {found.length || (filter === 'needs' && asks.length) ? (
+          {any ? (
             <List>
-              {found.map((t, i) => <TaskRow key={t.id} t={t} ix={i} where={whereOf(snap, t, { machine: true, project: true })} />)}
-              {filter === 'needs' ? asks.map((n) => <AgentNeedRow key={n.id} n={n} />) : null}
+              {shown.map((t, i) => <TaskRow key={t.id} t={t} ix={i} where={whereOf(snap, t, names)} />)}
+              {filter === 'needs' ? asks.map((n) => <AgentNeedRow key={n.id} n={n} listKey={key} />) : null}
+              {filter === 'automations' ? autos.map((a) => <AutoRow key={`${a.machine ?? ''}:${a.listName}:${a.name}`} a={a} where={autoWhere(snap, a, names)} />) : null}
             </List>
-          ) : filter === 'automations' ? registry.tasksFooter.slice(0, 1).map((F, i) => <F key={i} place={place} list={view} />) : <Empty className="pt-3 text-fg3">No {what} match “{q}”.</Empty>}
+          ) : <Empty className="pt-3 text-fg3">No {what} match “{q}”.</Empty>}
         </div>
       </>
     )
   }
   // searching, Done and archived tasks are in it too, each group whole and open, folded shut or not
   let groups = q
-    ? filteredGroups(snap, view, q, { groups: chosen }).map((g) => ({ ...g, count: g.tasks.length, more: 0, less: false, shut: false }))
+    ? filteredGroups(snap, view, '', { groups: chosen }).map((g) => ({ ...g, tasks: g.tasks.filter((t) => found(snap, t, q)) })).filter((g) => g.tasks.length)
+      .map((g) => ({ ...g, count: g.tasks.length, more: 0, less: false, shut: false }))
     : shownGroups(snap, view, { groups: chosen, allDone, shut })
   // Needs you holds what agents ask too: a group of its own after Pinned when no task needs you
   if (asks.length && !groups.some((g) => g.key === 'need')) {
@@ -340,15 +460,28 @@ function TaskList(_: { placeId: string }) {
   const order = groups.flatMap((g) => g.tasks)
   const machines = [...new Set(groups.flatMap((g) => (g.machine ? [g.machine.id] : [])))]
   const machineShut = (id: string) => !q && shut.includes(`${key}|m:${id}`)
-  const nothing = !groups.length && !archivedIn(snap, view).length && !automations.length
+  const nothing = !groups.length && !autos.length
+  // searching, the archived tasks that match come last, after the automations
+  const archivedGroup = groups.find((g) => g.key === 'archived')
+  const autoShut = !q && shut.includes(`${key}|automations`)
+  const autoGroup = autos.length ? (
+    <div key="automations" data-flip="automations">
+      <GroupHeading label="Automations" count={autos.length} flip="group:automations" fold={q ? undefined : { shut: autoShut, toggle: () => toggleShut(key, 'automations') }} />
+      {autoShut ? null : (
+        <List>
+          {autos.map((a) => <AutoRow key={`${a.machine ?? ''}:${a.listName}:${a.name}`} a={a} where={autoWhere(snap, a, names)} />)}
+        </List>
+      )}
+    </div>
+  ) : null
   return (
     <>
       <TaskFilter listKey={view.search} order={order} />
-      {/* the filter row, once there is anything to filter */}
-      {nothing && !q ? null : <StatusFilters counts={counts} filter="all" />}
+      {/* the filter row: All statuses, and a chip for each status that holds something now */}
+      <StatusFilters counts={counts} filter="all" />
       <div ref={list} className="relative">
         {!loaded ? <Empty className="pt-3 text-fg3">Reading tasks…</Empty> : null}
-        {groups.flatMap((g, i) => {
+        {groups.filter((g) => g !== archivedGroup).flatMap((g, i) => {
           // Machine › Space: a machine's name over its groups, once, with how many tasks they hold
           const m = g.machine
           const head =
@@ -371,14 +504,14 @@ function TaskList(_: { placeId: string }) {
               {g.kind === 'machine' ? (
                 <MachineHeading name={g.label} first={!i} count={g.count} fold={fold} />
               ) : (
-                <GroupHeading label={g.label} note={g.note} count={needCount(snap, g) + extra.length} flip={`group:${g.key}`} fold={fold} />
+                <GroupHeading label={g.label} note={g.note} count={g.count + extra.length} flip={`group:${g.key}`} fold={fold} />
               )}
               {g.shut ? null : (
                 <List>
                   {g.tasks.map((t) => (
                     <TaskRow key={t.id} t={t} ix={order.indexOf(t)} where={whereOf(snap, t, g.names)} />
                   ))}
-                  {extra.map((n) => <AgentNeedRow key={n.id} n={n} />)}
+                  {extra.map((n) => <AgentNeedRow key={n.id} n={n} listKey={key} />)}
                 </List>
               )}
               {g.more || g.less ? (
@@ -389,9 +522,19 @@ function TaskList(_: { placeId: string }) {
             </div>,
           ]
         })}
+        {/* Automations: their own group, last */}
+        {autoGroup}
         {/* nothing at all: said once, never "yet" (3.0's) */}
         {loaded && nothing && !q ? <Empty className="pt-3 text-fg3">{snap.tasks.length ? 'Nothing to do.' : 'No tasks on any machine. Ask an Assistant to plan some.'}</Empty> : null}
-        {q && !groups.length ? <Empty className="pt-3 text-fg3">No tasks match “{q}”.</Empty> : null}
+        {archivedGroup ? (
+          <div key="archived">
+            <GroupHeading label="Archived" count={archivedGroup.tasks.length} flip="group:archived" />
+            <List>
+              {archivedGroup.tasks.map((t) => <TaskRow key={t.id} t={t} ix={order.indexOf(t)} where={whereOf(snap, t, { machine: true, project: true })} />)}
+            </List>
+          </div>
+        ) : null}
+        {q && !groups.length && !autos.length ? <Empty className="pt-3 text-fg3">No tasks match “{q}”.</Empty> : null}
         {footer}
       </div>
     </>
@@ -521,32 +664,60 @@ function ArchivedLink({ list }: { place: Place; list?: ListView }) {
   )
 }
 
-/** A list's archived tasks, the latest archived first: each opens its chat; its ⋯ (or a held finger) brings it back */
+/** The Archived view, as the window's: the search field stays (it narrows them too; no filter row), Back to the
+ *  tasks (Esc too), its heading and count, then the archived tasks, the latest archived first */
 function ArchivedList({ list: view }: { list: ListView }) {
   const snap = useSnap()!
-  const list = archivedIn(snap, view)
+  const q = useUI((u) => filterOf(u, view.search, 'tasks'))
+  const list = archivedIn(snap, view).filter((t) => !q || found(snap, t, q))
+  const back = () => setUI({ archived: null, cur: 0 })
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || (e.target as HTMLElement)?.closest?.('input, textarea, [role=menu], [role=dialog]')) return
+      e.preventDefault()
+      back()
+    }
+    addEventListener('keydown', on)
+    return () => removeEventListener('keydown', on)
+  }, [])
   return (
-    <div>
-      {/* one header row, as a group's: Back to the tasks, its name and how many */}
-      <div className="flex min-h-9 items-center gap-1 pt-2 pr-4 pl-1.5 text-[0.75rem] font-medium text-fg3 phone:pt-2.5 phone:pr-5 phone:pl-2 phone:text-[0.875rem]">
-        <IconButton label="Back to tasks" onClick={() => setUI({ archived: null, cur: 0 })}>
-          <BackIcon className={ic} />
-        </IconButton>
-        <h3 className="min-w-0 flex-1 truncate">Archived</h3>
-        {list.length ? <span className="shrink-0 tabular-nums">{list.length}</span> : null}
+    <>
+      <TaskFilter listKey={view.search} order={list} />
+      <div>
+        {/* one header row, as a group's: Back to the tasks, its name and how many */}
+        <div className="flex min-h-9 items-center gap-1 pt-2 pr-4 pl-1.5 text-[0.75rem] font-medium text-fg3 phone:pt-2.5 phone:pr-5 phone:pl-2 phone:text-[0.875rem]">
+          <IconButton label="Back to tasks" onClick={back}>
+            <BackIcon className={ic} />
+          </IconButton>
+          <h3 className="min-w-0 flex-1 truncate">Archived</h3>
+          {list.length ? <span className="shrink-0 tabular-nums">{list.length}</span> : null}
+        </div>
+        {list.length ? (
+          <List>
+            {list.map((t, i) => (
+              <TaskRow key={t.id} t={t} ix={i} where={whereOf(snap, t, { machine: true, project: true })} />
+            ))}
+          </List>
+        ) : (
+          <Empty className="pt-0.5 text-fg3">{q ? `No archived tasks match “${q}”.` : 'No archived tasks. Done tasks come here on their own.'}</Empty>
+        )}
+        <Empty className="pt-3 text-fg3">Archived tasks keep their chat and summary. Search finds them too.</Empty>
       </div>
-      {list.length ? (
-        <List>
-          {list.map((t, i) => (
-            <TaskRow key={t.id} t={t} ix={i} where={whereOf(snap, t, namesFor(view.level))} />
-          ))}
-        </List>
-      ) : (
-        <Empty className="pt-0.5 text-fg3">No archived tasks. Done tasks come here on their own.</Empty>
-      )}
-      <Empty className="pt-3 text-fg3">Archived tasks keep their chat and summary. Search finds them too.</Empty>
-    </div>
+    </>
   )
+}
+
+/** more than one machine has tasks or automations: only then can the list go by machine (the window's `multi`) */
+function multiMachine(snap: Snapshot) {
+  return new Set([...snap.tasks.map((t) => t.on), ...Object.values(snap.automations ?? {}).flat().map((a) => a.machine || snap.host)]).size > 1
+}
+
+/** the grouping as the list shows it: by machine with one machine is by status, Machine › Space by space (the
+ *  window's; the choice itself is kept) */
+function grouping(g: Groups, snap: Snapshot): Groups {
+  if (multiMachine(snap)) return g
+  const one = (b: GroupBy): GroupBy => (b === 'machine' ? 'status' : b === 'machine-project' ? 'project' : b)
+  return { all: one(g.all), machine: one(g.machine) }
 }
 
 const GROUP_WORDS: Record<GroupBy, string> = { status: 'Status', machine: 'Machine', project: 'Space', 'machine-project': 'Machine › Space' }
@@ -557,11 +728,12 @@ function TasksMenu(_: { place: Place }) {
   const snap = useSnap()!
   const view = useStore((s) => listView(s.ui, snap))
   const level = view.level
-  const chosen = useUI((u) => u.groups)
+  const chosen = grouping(useUI((u) => u.groups), snap)
   const by = groupFor(chosen, level)
   const phone = useUI((u) => u.device === 'phone')
   const [open, setOpen] = useState(false)
-  const choices = groupChoices(level)
+  // the machine ones only while more than one machine has tasks (the window's)
+  const choices = groupChoices(level).filter((c) => multiMachine(snap) || !c.startsWith('machine'))
   const B = phone ? RoundButton : IconButton
   return (
     <div className="relative">
@@ -599,135 +771,13 @@ function TasksMenu(_: { place: Place }) {
   )
 }
 
-/** when it ran, short: "Today 9:00", "Mon 2 Nov 9:00" */
-function ranAt(ms: number) {
-  const d = new Date(ms)
-  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-  return d.toDateString() === new Date().toDateString() ? `Today ${time}` : `${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })} ${time}`
-}
-
-const small = 'text-[0.8125rem] phone:text-[0.9375rem]'
-
-/**
- * A space's automations, at the bottom once it has one (everything, every space's): its name, then when it runs.
- * A tap shows the task it adds and its last runs, and lets you run it now, pause or remove it. Each run adds a new task with a
- * fresh agent. Only agents add or change them, through the shepherdr command, when asked in the chat: none, no section.
- */
-function Automations({ place, list }: { place: Place; list?: ListView }) {
-  const snap = useSnap()!
-  // each space the chips name has its own; everything (no chips), every space's, each with its name; a machine's, none
-  const all = !!list && !list.chips.length
-  const spaces = !list ? [place] : all ? snap.places : list.chips.flatMap((c) => snap.places.filter((p) => p.id === c))
-  return spaces.map((p) => <SpaceAutomations key={p.id} place={p} note={all || spaces.length > 1 ? p.name : undefined} />)
-}
-
-function SpaceAutomations({ place, note }: { place: Place; note?: string }) {
-  const snap = useSnap()!
-  const [open, setOpen] = useState<string | null>(null)
-  // it folds away like the task groups above it
-  const shut = useUI((u) => u.shut.includes(`${place.id}|automations`))
-  const list = snap.automations[place.id] ?? []
-  if (!list.length) return null
-  return (
-    <div data-flip={note ? `automations:${place.id}` : 'automations'}>
-      <GroupHeading label="Automations" note={note} count={list.length} fold={{ shut, toggle: () => toggleShut(place.id, 'automations') }} />
-      {shut ? null : (
-        <List>
-          {list.map((a) => {
-            const on = open === a.name
-            const id = `automation-${place.id}-${a.name}`.replace(/[^\w-]/g, '-')
-            return (
-              <Fragment key={a.name}>
-                <Row two aria-expanded={on} aria-controls={id} onActivate={() => setOpen(on ? null : a.name)}>
-                  {/* a clock, not a box: an automation runs on its own, there is nothing to tick; as wide as a status dot */}
-                  <ClockIcon className={clsx(ic, '-mx-px h-lh text-fg3 phone:mx-0', !a.on && 'opacity-50')} />
-                  <RowText sub={`${a.on ? '' : 'Paused · '}${a.when}`}>{a.name}</RowText>
-                  <DownIcon aria-hidden className={clsx(ic, 'h-lh text-fg3', on && 'rotate-180')} />
-                </Row>
-                {on ? <AutomationDetail id={id} place={place} a={a} /> : null}
-              </Fragment>
-            )
-          })}
-        </List>
-      )}
-    </div>
-  )
-}
-
-/** An open automation: when (its trigger in words) and its next runs, the task it adds in full, its last runs, and what you can do with it; lined up with its
- *  name */
-function AutomationDetail({ id, place, a }: { id: string; place: Place; a: Automation }) {
-  const [error, setError] = useState('')
-  const pending = useRef<{ op: string; cid: string } | null>(null)
-  const sending = useRef(false)
-  const run = async (op: 'run' | 'pause' | 'resume' | 'remove') => {
-    if (sending.current) return
-    if (pending.current && pending.current.op !== op) { setError('Confirm the previous action before changing this automation.'); return }
-    const command = pending.current ||= { op, cid: crypto.randomUUID() }
-    sending.current = true
-    try {
-      const r = (await act({ type: 'automation', cid: command.cid, place: place.id, op, name: a.name })) as { ok?: boolean; error?: string } | undefined
-      if (r?.ok === false) setError(r.error ?? 'Refused.')
-      else { pending.current = null; setError('') }
-    } catch { setError('The action was not confirmed. Try the same action again to check its result.') }
-    finally { sending.current = false }
-  }
-  return (
-    <li id={id} className="pr-2 pb-2 pl-8 phone:pr-3 phone:pl-9">
-      <dl className={clsx('grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1', small)}>
-        <dt className="font-medium text-fg">When</dt>
-        <dd className="text-fg2">
-          {a.when}
-          {a.on ? '' : ' (paused)'}
-        </dd>
-        {a.next.length ? (
-          <>
-            <dt className="font-medium text-fg">Next</dt>
-            <dd className="text-fg2 tabular-nums">{a.next.join(' · ')}</dd>
-          </>
-        ) : null}
-        <dt className="font-medium text-fg">Task</dt>
-        <dd className="text-pretty break-words text-fg2">{a.what}</dd>
-        {a.brief ? (
-          <>
-            <dt className="font-medium text-fg">Instructions</dt>
-            <dd className="text-pretty break-words whitespace-pre-wrap text-fg2">{a.brief}</dd>
-          </>
-        ) : null}
-        <dt className="font-medium text-fg">Last runs</dt>
-        <dd className="text-fg2">
-          {a.runs.length
-            ? a.runs.slice(0, 3).map((r) => (
-                <div key={r.at}>
-                  {ranAt(r.at)} ·{' '}
-                  {r.task ? (
-                    <button type="button" className="press-dim text-focus hover:underline" onClick={() => openTask(r.task!)}>
-                      {r.task}
-                    </button>
-                  ) : (
-                    <span className="text-need">failed: {r.error}</span>
-                  )}
-                </div>
-              ))
-            : 'Not run yet'}
-        </dd>
-      </dl>
-      {error ? <div className={clsx('mt-1 text-need', small)}>{error}</div> : null}
-      <div className={clsx('mt-1.5 flex flex-wrap gap-x-4 gap-y-1 phone:mt-2', small)}>
-        <LinkButton onClick={() => run('run')}>Run now</LinkButton>
-        <LinkButton onClick={() => run(a.on ? 'pause' : 'resume')}>{a.on ? 'Pause' : 'Resume'}</LinkButton>
-        <LinkButton onClick={() => run('remove')}>Remove</LinkButton>
-      </div>
-    </li>
-  )
-}
-
 export default definePlugin({
   name: 'tasks',
   setup(reg) {
     reg.views.tasks = TaskList
     reg.views.tasksMenu = TasksMenu
     reg.views.taskActions = TaskActions
-    reg.tasksFooter.push(Automations, ArchivedLink)
-    },
+    // the window's Automations group is the list's own (last, before Archived): only the Archived row is a footer
+    reg.tasksFooter.push(ArchivedLink)
+  },
 })

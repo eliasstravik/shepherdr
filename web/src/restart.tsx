@@ -3,10 +3,10 @@ import clsx from 'clsx'
 import { ChevronUpDownIcon } from '@heroicons/react/20/solid'
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { taskChatId, type Chat, type Place, type RestartCli, type RestartInfo } from '@shared/types.ts'
-import { act, setUI, taskOf, useSnap, useStore } from './kernel.ts'
+import { act, setUI, taskOf, useSnap, useStore, useUI } from './kernel.ts'
 import { Dialog } from './rowmenu.tsx'
 import { Pick, shown, Switch, TextValue } from './Settings.tsx'
-import { EffortIcon, ic, MenuItem, ModelIcon, ModeIcon, Primary, RestartIcon, SpeedIcon } from './ui.tsx'
+import { CheckIcon, DownIcon, EffortIcon, ic, Menu, MenuItem, ModelIcon, ModeIcon, NextIcon, Primary, RestartIcon, SpeedIcon } from './ui.tsx'
 
 /* ---------- the sheet ---------- */
 
@@ -218,8 +218,193 @@ function SpeedWords({ speed }: { speed: Worn }) {
   return <><SpeedIcon aria-hidden="true" className="mr-0.5 inline size-3 align-[-1.5px]" />{speed.text}</>
 }
 
-/** Always on show under the message box: what its agent really runs on, a tap from the menu that changes it */
+/* ---------- the window's model button and menu (mods/chat pickParts, mods/chat-models) ---------- */
+
+type MenuModel = { id: string; name: string; efforts: string[]; defaultEffort?: string | null; fast?: boolean }
+type AgentMenu = { name: string; models: MenuModel[]; perms?: { id: string; label: string }[]; fastLocked?: boolean }
+type MenuPick = { agent: string; model: string | null; effort: string | null; fast: boolean; perm: string | null }
+type MenuData = { current: MenuPick; menus: Record<string, AgentMenu>; permDefault: Record<string, string>; remote: string | null }
+
+/** the menu open: its chat, and the model a typed /model named */
+let menuOpen: { chat: string; typed?: string } | null = null
+const menuListeners = new Set<() => void>()
+const setMenuOpen = (v: typeof menuOpen) => { menuOpen = v; menuListeners.forEach((f) => f()) }
+const useMenuOpen = () => useSyncExternalStore((f) => (menuListeners.add(f), () => void menuListeners.delete(f)), () => menuOpen)
+
+/** open the model menu over a chat's model button; typed: the model a /model named ('' for none) */
+export function openModelMenu(chat: string, typed?: string) {
+  setMenuOpen({ chat, typed })
+}
+
+/** the row a typed name means (/model sonnet, /model gpt-5), as the window's chat finds it */
+function findModel(menus: Record<string, AgentMenu>, name?: string) {
+  if (!name) return null
+  const n = (s: string) => String(s ?? '').toLowerCase().replace(/[^a-z0-9.]+/g, '')
+  const q = n(name)
+  const rows = Object.entries(menus).flatMap(([a, m]) => m.models.map((r) => ({ agent: a, model: r.id, keys: [n(r.id), n(r.name)] })))
+  const hit = rows.find((r) => r.keys.includes(q)) ?? rows.find((r) => r.keys.some((k) => q && k.startsWith(q)))
+  return hit ? { agent: hit.agent, model: hit.model } : null
+}
+
+const LEVEL: Record<string, string> = { minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra', none: 'None' }
+
+/** Model (every installed agent's; picking another agent's switches agent), Reasoning (that model's levels), Fast
+ *  (where the model has it), Permissions (a small sub-menu), and, only when a choice differs from what runs now, one
+ *  Restart button */
+function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
+  const [data, setData] = useState<MenuData | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [sel, setSel] = useState<MenuPick | null>(null)
+  const [perms, setPerms] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const close = () => setMenuOpen(null)
+  const models = (d: MenuData) => Object.entries(d.menus).flatMap(([agent, m]) => m.models.map((x) => ({ ...x, agent })))
+  const choose = (d: MenuData, was: MenuPick, m: MenuModel & { agent: string }): MenuPick => {
+    const next = { ...was, agent: m.agent, model: m.id }
+    if (next.effort && !m.efforts.includes(next.effort)) next.effort = null
+    if (!m.fast) next.fast = false
+    if (m.agent !== was.agent) {
+      // another agent: its own permission modes; full access stays full access
+      const full = was.perm === 'bypassPermissions' || was.perm === 'full'
+      next.perm = full ? (m.agent === 'claude' ? 'bypassPermissions' : 'full') : d.permDefault[m.agent] ?? null
+      next.fast = !!d.menus[m.agent]?.fastLocked
+    }
+    return next
+  }
+  useEffect(() => {
+    act({ type: 'model-menu', chat } as never)
+      .then((r: { menu?: MenuData; error?: string }) => {
+        if (!r.menu) return setError(r.error || "Couldn't read what it runs on.")
+        setData(r.menu)
+        const pre = findModel(r.menu.menus, typed)
+        const m = pre && models(r.menu).find((x) => x.agent === pre.agent && x.id === pre.model)
+        setSel(m ? choose(r.menu, r.menu.current, m) : r.menu.current)
+      })
+      .catch((e: Error) => setError(e.message))
+  }, [chat, typed])
+  const model = (s: MenuPick) => data?.menus[s.agent]?.models.find((m) => m.id === s.model) ?? null
+  const level = (s: MenuPick) => s.effort ?? model(s)?.defaultEffort ?? null
+  const changes = () => {
+    if (!data || !sel || data.remote) return []
+    const w = data.current, out: string[] = []
+    if (sel.agent !== w.agent || sel.model !== w.model) out.push(model(sel)?.name ?? sel.model ?? '')
+    if (level(sel) && level(sel) !== level(w)) out.push(LEVEL[level(sel)!] ?? level(sel)!)
+    if (sel.fast !== w.fast) out.push(sel.fast ? 'Fast' : 'Standard')
+    if (sel.perm && sel.perm !== w.perm) out.push(data.menus[sel.agent]?.perms?.find((x) => x.id === sel.perm)?.label ?? sel.perm)
+    return out
+  }
+  const restart = async () => {
+    if (!sel) return
+    setBusy(true)
+    setError(null)
+    const r = await act({ type: 'restart', chat, kind: sel.agent, model: sel.model ?? '', effort: level(sel) ?? '', speed: sel.fast ? 'fast' : 'normal', perm: sel.perm ?? '' } as never).catch((e: Error) => ({ ok: false, error: e.message }))
+    setBusy(false)
+    if ((r as { ok?: boolean }).ok === false) return setError((r as { error?: string }).error || "The agent didn't restart.")
+    close()
+  }
+  const remote = data?.remote ?? null
+  const menu = sel ? data?.menus[sel.agent] : undefined
+  const m = sel ? model(sel) : null
+  const on = sel ? level(sel) : null
+  const perm = sel ? menu?.perms?.find((x) => x.id === sel.perm) : undefined
+  const ch = changes()
+  const row = 'flex min-h-[31px] w-full items-center gap-2.5 rounded-[7px] px-[9px] text-left enabled:hover:bg-hover disabled:text-fg3 coarse:min-h-11'
+  const head = (t: string) => <div className="px-[9px] pt-2 pb-1 text-[0.6875rem] text-fg3">{t}</div>
+  return (
+    <Menu label="Model" onClose={close} className="absolute right-0 bottom-full z-30 mb-2 w-[300px] max-w-[calc(100vw-2rem)] origin-bottom-right">
+      <div data-model-menu className="relative flex flex-col text-[0.8rem]">
+        {!data || !sel ? (
+          <p className={clsx('px-[9px] py-2 text-fg3', error && 'text-need-fg')}>{error ?? 'Reading what it runs on…'}</p>
+        ) : (
+          <>
+            {head('Model')}
+            {models(data).map((x) => (
+              <button key={`${x.agent}-${x.id}`} type="button" role="menuitemradio" aria-checked={x.agent === sel.agent && x.id === sel.model} disabled={!!remote} className={row} onClick={() => setSel(choose(data, sel, x))}>
+                {/* the agent's own mark, Herdr's icon (web/public/agents, from the window's icons) */}
+                <img src={`agents/${x.agent}.svg`} alt="" aria-hidden className="size-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">{x.name}</span>
+                {remote ? <span className="shrink-0 text-[0.6875rem] text-fg3">{remote}</span> : null}
+                <span className="grid size-3.5 shrink-0 place-items-center">{x.agent === sel.agent && x.id === sel.model ? <CheckIcon className="size-3.5" /> : null}</span>
+              </button>
+            ))}
+            <div className="px-1 py-1"><div className="h-px bg-line" /></div>
+            {head('Reasoning')}
+            <div className="px-1 py-[3px]">
+              <div role="radiogroup" aria-label="Reasoning" className={clsx('flex h-7 gap-0.5 rounded-[7px] bg-sel p-0.5 coarse:h-10', remote && 'opacity-50')}>
+                {(m?.efforts ?? []).map((e) => (
+                  <button key={e} type="button" role="radio" aria-checked={on === e} disabled={!!remote} onClick={() => setSel({ ...sel, effort: e })}
+                    className={clsx('min-w-0 flex-1 truncate rounded-[5px] text-[0.71875rem]', on === e ? 'bg-bg font-medium text-fg shadow-soft' : 'text-fg2 enabled:hover:text-fg')}>
+                    {LEVEL[e] ?? e}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {m?.fast && !menu?.fastLocked ? (
+              <button type="button" role="menuitemcheckbox" aria-checked={sel.fast} disabled={!!remote} className={row} onClick={() => setSel({ ...sel, fast: !sel.fast })}>
+                <SpeedIcon className="size-3.5 shrink-0 text-fg3" />
+                <span className="flex-1">Fast</span>
+                <span aria-hidden className={clsx('relative h-4 w-7 shrink-0 rounded-full transition-colors', sel.fast ? 'bg-accent' : 'bg-line2')}>
+                  <span className={clsx('absolute top-0.5 size-3 rounded-full bg-bg transition-[left]', sel.fast ? 'left-3.5' : 'left-0.5')} />
+                </span>
+              </button>
+            ) : null}
+            {menu?.perms?.length ? (
+              <button type="button" aria-haspopup="menu" aria-expanded={perms} disabled={!!remote} className={clsx(row, perms && 'bg-hover')} onClick={() => setPerms(!perms)}>
+                <ModeIcon className="size-3.5 shrink-0 text-fg3" />
+                <span className="flex-1">Permissions</span>
+                <span className="shrink-0 text-[0.75rem] text-fg3">{perm?.label ?? ''}</span>
+                <NextIcon className="size-3 shrink-0 text-fg3" />
+              </button>
+            ) : null}
+            {perms && menu?.perms ? (
+              <div role="menu" aria-label="Permissions" className="absolute right-1 bottom-9 z-10 w-[180px] rounded-[8px] bg-bg p-[5px] shadow-menu">
+                {menu.perms.map((x) => (
+                  <button key={x.id} type="button" role="menuitemradio" aria-checked={sel.perm === x.id} className={row} onClick={() => { setSel({ ...sel, perm: x.id }); setPerms(false) }}>
+                    <span className="flex-1">{x.label}</span>
+                    <span className="grid size-3.5 shrink-0 place-items-center">{sel.perm === x.id ? <CheckIcon className="size-3.5" /> : null}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {error ? <p className="px-[9px] pt-1 text-[0.75rem] text-need-fg">{error}</p> : null}
+            {ch.length ? (
+              <div className="pt-[5px]">
+                <button type="button" disabled={busy} onClick={() => void restart()} className="press-dim h-7 w-full truncate rounded-[7px] bg-fg px-2.5 text-[0.78125rem] font-medium text-bg disabled:opacity-60 coarse:h-11">
+                  {busy ? 'Restarting…' : `Restart with ${ch.join(' · ')}`}
+                </button>
+              </div>
+            ) : null}
+          </>
+        )}
+      </div>
+    </Menu>
+  )
+}
+
+/** Under the message box, as the window's model button: what its agent runs on ("Opus 5.5 · High"), a chevron; it opens
+ *  the model menu */
 export function AgentLine({ chatKey, cli }: { chatKey: string; cli: string }) {
+  const words = useStore((s) => s.chats[chatKey]?.agent?.words)
+  const open = useMenuOpen()
+  const phone = useUI((u) => u.device === 'phone')
+  if (!words) return <OldAgentLine chatKey={chatKey} cli={cli} />
+  // a narrow chat drops "· 1M" first, as the window's
+  const shown = phone ? words.replace(/\s*·\s*1M\b/, '') : words
+  return (
+    <div className="relative mt-1 flex justify-end pr-1">
+      <button type="button" data-agent-line aria-haspopup="menu" aria-expanded={open?.chat === chatKey}
+        onClick={() => setMenuOpen(open?.chat === chatKey ? null : { chat: chatKey })}
+        className="flex h-6 items-center gap-1 rounded-[6px] pr-[5px] pl-2 text-[0.75rem] font-medium whitespace-nowrap text-fg2 hover:bg-hover hover:text-fg phone:h-9">
+        {shown}
+        <DownIcon className="size-3 shrink-0" />
+      </button>
+      {open?.chat === chatKey ? <ModelMenu key={`${chatKey}|${open.typed ?? ''}`} chat={chatKey} typed={open.typed} /> : null}
+    </div>
+  )
+}
+
+/** what it runs on, before the chat has heard it from the agent's log */
+function OldAgentLine({ chatKey, cli }: { chatKey: string; cli: string }) {
   const agent = useStore((s) => s.chats[chatKey]?.agent)
   const { model, effort, speed } = runsOn(agent)
   const plan = agent?.planned

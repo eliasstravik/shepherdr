@@ -23,6 +23,8 @@ import { h_flex, v_flex, InputState, Input, VirtualListScrollHandle, v_virtual_l
 import { spaces, machines, terminals, agents, layout, layouts, exec, home, run, theme, props, closeOverlay, shared, setShared } from "herdr";
 import { taskDot } from "./dot.js";
 import { READ_LISTS, taskLists } from "./core/tasklists.js";
+// A space's name as the sidebar (and the web app) says it: never "~" (core/spaces.js).
+import { spaceName } from "./core/spaces.js";
 import { openViewer, showViewer, chatArea } from "./artview.js";
 import { showInSidebar, hasSidebarView } from "./artifact-sidebar.js";
 import { TEXT, RADIUS } from "./ui.js";
@@ -43,6 +45,10 @@ const STATUS = { needs: "Needs you", working: "Working", merging: "Merging", rea
 // The Tasks panel's reads (tasklists.js: READ_LISTS, taskLists); every artifact registry the
 // same way.
 const READ_ARTS = 'cd "$HOME/.herdr/artifacts" 2>/dev/null || exit 0; for f in *.json .*.json; do [ -f "$f" ] && cat "$f" && printf "\\n\\036\\n"; done; true';
+// Each folder's git repo (its common .git folder), a line each: "<folder>\t<common dir>", for a space's name.
+const READ_REPOS = 'for f in "$@"; do r=$(git -C "$f" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); printf "%s\\t%s\\n" "$f" "$r"; done; true';
+// The repo's name from its common .git folder (as the service's model.ts and the sidebar name it).
+const repoName = (common) => (common ? (common.endsWith("/.git") ? common.slice(0, -5) : common.replace(/\.git$/, "")).split("/").filter(Boolean).pop() ?? null : null);
 
 // herdr-task's auto_prefix, for a list from before prefixes (as mods/tasks/main.js).
 function autoPrefix(folder) {
@@ -104,6 +110,7 @@ export default class Jump extends View {
     this.openedAt = Date.now(); // a chat's box letting go of the keyboard about now had it (chatArea())
     this.lists = new Map(); // "" (this computer) or a machine -> its task lists
     this.arts = new Map();  // the same -> its artifacts, each with { machine, folder }
+    this.repos = new Map(); // "<machine>|<folder>" -> its git repo's name (null: not a repo)
     this.loading = new Set();
     this.more = new Set();  // groups showing every row
     this.sel = null;        // the selected row's key
@@ -126,7 +133,13 @@ export default class Jump extends View {
     const k = machine ?? "", on = machine ? { on: machine } : {};
     this.loading.add(k);
     try {
-      const [lists, arts] = await Promise.all([exec("sh", ["-c", READ_LISTS], on), exec("sh", ["-c", READ_ARTS], on)]);
+      const folders = [...new Set(spaces().filter((s) => (s.machine ?? null) === machine && s.folder).map((s) => s.folder))];
+      const [lists, arts, repos] = await Promise.all([exec("sh", ["-c", READ_LISTS], on), exec("sh", ["-c", READ_ARTS], on),
+        folders.length ? exec("sh", ["-c", READ_REPOS, "repos", ...folders], on).catch(() => null) : null]);
+      for (const line of (repos?.stdout ?? "").split("\n")) {
+        const [f, common] = line.split("\t");
+        if (f) this.repos.set(`${k}|${f}`, repoName(common));
+      }
       this.lists.set(k, taskLists(lists.stdout)
         .map((d) => ({ ...d, machine, prefix: d.prefix || autoPrefix(d.folder), tasks: Array.isArray(d.tasks) ? d.tasks : [] })));
       const found = [];
@@ -139,6 +152,12 @@ export default class Jump extends View {
     }
     this.loading.delete(k);
     cx.notify();
+  }
+
+  // What a space is called, as the sidebar says it: its own name, else its repo's or its folder's, "Home" at home.
+  nameOf(s) {
+    const repo = this.repos.get(`${s.machine ?? ""}|${s.folder}`) ?? null;
+    return spaceName(s, { repo, home: s.machine ? null : home(), named: Boolean(s.named) });
   }
 
   // The space working in a folder on a machine, by name.
@@ -174,26 +193,27 @@ export default class Jump extends View {
     const remote = machines().some((m) => m.name);
     for (const s of spaces()) {
       const where = [remote ? machineName(s.machine) : null, tilde(s.folder) || "~"].filter(Boolean).join(" · ");
-      if (q && !matches(q, s.name, s.folder, tilde(s.folder), machineName(s.machine))) continue;
+      const name = this.nameOf(s);
+      if (q && !matches(q, name, s.folder, tilde(s.folder), machineName(s.machine))) continue;
       const at = Math.max(0, ...s.tabs.map((t) => t.changed_at ?? 0));
-      out.push({ kind: "space", key: `s:${s.id}`, id: s.id, icon: icons[s.id] ?? "#", label: s.name, sub: where, at, active: s.active, status: s.status });
+      out.push({ kind: "space", key: `s:${s.id}`, id: s.id, icon: icons[s.id] ?? "#", label: name, sub: where, at, active: s.active, status: s.status });
     }
     for (const [, lists] of this.lists) for (const list of lists) for (const task of list.tasks) {
       if (task.archived && !q) continue;
       const ref = `${list.prefix}-${task.id}`;
       const space = this.spaceAt(list.machine, list.folder);
-      const place = [space?.name ?? list.name, remote ? machineName(list.machine) : null].filter(Boolean).join(" · ");
+      const place = [space ? this.nameOf(space) : list.name, remote ? machineName(list.machine) : null].filter(Boolean).join(" · ");
       const live = task.state === "running" || task.state === "ready" ? this.live(list, task) : [];
       const status = this.status(task, live);
       const line = status === "working" ? task.progress?.text : status === "needs" ? task.waits ?? task.attention : task.summary;
-      if (q && !matches(q, ref, task.title, task.progress?.text, task.summary, task.waits, task.attention, space?.name, list.name, machineName(list.machine))) continue;
+      if (q && !matches(q, ref, task.title, task.progress?.text, task.summary, task.waits, task.attention, space ? this.nameOf(space) : null, list.name, machineName(list.machine))) continue;
       const at = Math.max(0, ...[task.archived, task.done_at, task.ready_at, task.progress?.at, task.started, task.created].filter((x) => typeof x === "number"));
       out.push({ kind: "task", key: `t:${list.machine ?? ""}:${list.slug}#${task.id}`, ref, label: task.title, live, status, pct: task.progress?.done,
         sub: [task.archived ? "Archived" : STATUS[status], line && capital(String(line).split("\n")[0]), place].filter(Boolean).join(" · "), at });
     }
     for (const [, arts] of this.arts) for (const a of arts) {
       const space = this.spaceAt(a.machine, a.folder ?? a.regFolder);
-      const place = space?.name ?? a.regName ?? tilde(a.folder);
+      const place = space ? this.nameOf(space) : a.regName ?? tilde(a.folder);
       if (q && !matches(q, a.title, a.id, a.task, place, tilde(a.folder), remote ? machineName(a.machine) : null)) continue;
       out.push({ kind: "artifact", key: `a:${a.machine ?? ""}:${a.id}`, art: a, label: a.title || a.id,
         sub: [a.task, place, remote ? machineName(a.machine) : null, `v${a.version ?? 1}`, ago(a.at)].filter(Boolean).join(" · "), at: a.at ?? 0 });

@@ -12,25 +12,11 @@ import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { hc, exec, home, readTextFile, theme, props, closeOverlay, openOverlay } from "herdr";
 import { button, TEXT, RADIUS, H, red, green } from "./ui.js";
 
-const I = (name) => `mods/workspace-chrome/${name}.svg`;
+// The words, the ssh config's hosts and when an add needs a terminal: core/machine-add.js, shared with
+// the web app's Add machine.
+import { WORDS as W, parseConfig, hostSub, failure, needsTerminal, isAdded, terminalName, command, MAC_CHECK, MAC_SETTING } from "./core/machine-add.js";
 
-// Host entries people can pick: named ones, not patterns.
-function parseConfig(text) {
-  const hosts = [];
-  let cur = null;
-  for (const raw of (text ?? "").split("\n")) {
-    const m = raw.trim().match(/^([^\s#=]+)\s*=?\s*(.*)$/);
-    if (!m) continue;
-    const [key, value] = [m[1].toLowerCase(), m[2].trim()];
-    if (key === "host" || key === "match") {
-      const names = key === "host" ? value.split(/\s+/).filter((h) => h && !/[*?!]/.test(h)) : [];
-      cur = names.length ? { alias: names[0], aliases: names.slice(1), hostname: null, user: null } : null;
-      if (cur) hosts.push(cur);
-    } else if (cur && key === "hostname") cur.hostname = value;
-    else if (cur && key === "user") cur.user = value;
-  }
-  return hosts;
-}
+const I = (name) => `mods/workspace-chrome/${name}.svg`;
 
 export default class MachineAdd extends View {
   init(_props, cx) {
@@ -38,7 +24,7 @@ export default class MachineAdd extends View {
     this.added = [];
     this.state = {}; // target -> "adding" | "terminal" | "manual" (no terminal opened) | error text
     this.typed = "";
-    this.input = InputState.new({ placeholder: "user@host" });
+    this.input = InputState.new({ placeholder: W.placeholder });
     this.input.on("change", (_e, cx) => { this.typed = this.input.value(); cx.notify(); });
     this.input.on("submit", (_e, cx) => this.add(this.typed, cx));
     this.inputFocused = true;
@@ -81,7 +67,7 @@ export default class MachineAdd extends View {
   }
 
   isAdded(target) {
-    return this.added.some((m) => m.target === target || m.name === target || m.host === target);
+    return isAdded(this.added, target);
   }
 
   add(target, cx) {
@@ -91,22 +77,17 @@ export default class MachineAdd extends View {
     cx.notify();
     cx.spawn(async (cx) => {
       const r = await hc(["machine", "add", target, "--json"]).catch((e) => ({ code: 1, stderr: String(e), stdout: "" }));
-      let why = null;
-      try {
-        why = r.code === 0 ? null : (JSON.parse(r.stdout || r.stderr).error ?? { message: (r.stderr || r.stdout).trim() });
-      } catch {
-        why = { message: (r.stderr || r.stdout || "It didn't answer.").trim() };
-      }
+      const why = failure(r);
       if (!why) {
         delete this.state[target];
         this.input.set_value("");
         this.typed = "";
         await this.refresh();
         await this.checkMac(target);
-      } else if (["hc_missing", "incompatible", "login_needed", "auth_failed", "host_key"].includes(why.kind) || /password|passphrase|host key|permission denied|login/i.test(why.message ?? "")) {
+      } else if (needsTerminal(why)) {
         this.state[target] = "terminal";
         await this.inTerminal(target);
-      } else this.state[target] = why.message || "It didn't work.";
+      } else this.state[target] = why.message || W.failed;
       await this.refresh();
       cx.notify();
     });
@@ -118,7 +99,7 @@ export default class MachineAdd extends View {
   async checkMac(target) {
     const m = this.added.find((x) => x.target === target || x.name === target);
     if (!m) return;
-    const r = await exec("sh", ["-c", 'uname; command -v herdr-core || echo "$HOME/.local/bin/herdr-core"'], { on: m.name }).catch(() => null);
+    const r = await exec("sh", ["-c", MAC_CHECK], { on: m.name }).catch(() => null);
     const [os, core] = (r?.stdout ?? "").trim().split("\n");
     if (os === "Darwin") this.macs[target] = { name: m.name, core: core ?? "~/.local/bin/herdr-core" };
   }
@@ -127,21 +108,21 @@ export default class MachineAdd extends View {
   macCard(t, target) {
     const mac = this.macs[target];
     return v_flex().mx(10).mb(8).p(12).gap(8).rounded(RADIUS.card).bg(t.raised).border_1().border_color(t.border)
-      .child(div().text_size(TEXT.body).font_semibold().text_color(t.foreground).child(`${mac.name} is a Mac: allow its folders once`))
+      .child(div().text_size(TEXT.body).font_semibold().text_color(t.foreground).child(W.macTitle(mac.name)))
       .child(div().text_size(TEXT.label).line_height("18px").text_color(t.muted)
-        .child("macOS asks on the Mac's own screen before an agent reads Desktop, Documents or Downloads, and waits until someone answers. Give herdr-core Full Disk Access there and it never asks again: in the list, press + and pick this file:"))
+        .child(W.macAbout))
       .child(div().px(8).py(4).rounded(RADIUS.control).bg(t.background).border_1().border_color(t.border).text_size(TEXT.label).text_color(t.foreground).child(mac.core))
       .child(h_flex().gap(8).items_center()
-        .child(button(`ma-mac-${target}`, `Open the setting on ${mac.name}`, { onClick: () => {
-          exec("open", ["x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"], { on: mac.name }).catch(() => null);
+        .child(button(`ma-mac-${target}`, W.macOpen(mac.name), { onClick: () => {
+          exec("open", [MAC_SETTING], { on: mac.name }).catch(() => null);
           this.opened[target] = true;
         } }))
-        .when(Boolean(this.opened[target]), (el) => el.child(div().text_size(TEXT.label).text_color(t.dim).child("It's open on the Mac's screen."))));
+        .when(Boolean(this.opened[target]), (el) => el.child(div().text_size(TEXT.label).text_color(t.dim).child(W.macOpened))));
   }
 
   // The same add in a terminal, for what only the person can answer.
   async inTerminal(target) {
-    const r = await hc(["run", "--bg", "--json", "--no-parent", "--name", `add-${target.replace(/[^a-z0-9_-]/gi, "-").toLowerCase()}`.slice(0, 32), "--", "hc", "machine", "add", target]).catch(() => null);
+    const r = await hc(["run", "--bg", "--json", "--no-parent", "--name", terminalName(target), "--", "hc", "machine", "add", target]).catch(() => null);
     let address = null;
     try {
       address = r?.code === 0 ? JSON.parse(r.stdout).address : null;
@@ -173,9 +154,9 @@ export default class MachineAdd extends View {
       const copied = this.copied === target;
       return h_flex().pl(pad).pb(6).gap(10).items_center()
         .child(div().flex_1().min_w(0).text_size(TEXT.label).line_height("17px").text_color(t.muted)
-          .child("Herdr couldn't open a terminal for this. Copy the command, then run it in any terminal."))
-        .child(button(`ma-copy-${target}`, copied ? "Copied" : "Copy command", { icon: `mods/chat/${copied ? "check" : "copy"}.svg`,
-          onClick: (_e, cx) => { cx.write_to_clipboard(`hc machine add ${target}`); this.copied = target; } }));
+          .child(W.manual))
+        .child(button(`ma-copy-${target}`, copied ? W.copied : W.copy, { icon: `mods/chat/${copied ? "check" : "copy"}.svg`,
+          onClick: (_e, cx) => { cx.write_to_clipboard(command(target)); this.copied = target; } }));
     }
     if (typeof st !== "string" || ["adding", "terminal"].includes(st)) return null;
     return div().pl(pad).pb(6).text_size(TEXT.label).text_color(red()).child(st);
@@ -202,7 +183,7 @@ export default class MachineAdd extends View {
       .text_size(12.5)
       .text_color(t.muted)
       .child(svg(I("server")).size(14))
-      .child(div().flex_1().child(`Adding ${props().target}: answer it here`))
+      .child(div().flex_1().child(W.bar(props().target)))
       .child(
         div()
           .id("ma-bar-close")
@@ -224,12 +205,12 @@ export default class MachineAdd extends View {
     const st = this.state[target];
     const done = this.isAdded(target);
     const right = done
-      ? h_flex().gap(5).items_center().text_size(TEXT.label).text_color(green()).child(svg(I("circle-check")).size(14)).child("Added")
+      ? h_flex().gap(5).items_center().text_size(TEXT.label).text_color(green()).child(svg(I("circle-check")).size(14)).child(W.added)
       : st === "adding"
-        ? h_flex().gap(6).items_center().text_size(TEXT.label).text_color(t.muted).child(svg(I("spinner")).size(14).text_color(t.working).spin(900)).child("Connecting")
+        ? h_flex().gap(6).items_center().text_size(TEXT.label).text_color(t.muted).child(svg(I("spinner")).size(14).text_color(t.working).spin(900)).child(W.connecting)
         : st === "terminal"
-          ? div().text_size(TEXT.label).text_color(t.muted).child("Waiting in its terminal")
-          : button(`ma-add-${target}`, "Add", { onClick: (_e, cx) => this.add(target, cx) });
+          ? div().text_size(TEXT.label).text_color(t.muted).child(W.waiting)
+          : button(`ma-add-${target}`, W.add, { onClick: (_e, cx) => this.add(target, cx) });
     const idle = !done && !st;
     return v_flex()
       .flex_none()
@@ -264,16 +245,16 @@ export default class MachineAdd extends View {
       .p(18)
       .bg(t.popover)
       .text_color(t.foreground)
-      .child(div().text_size(TEXT.title).font_semibold().child("Add machine"))
+      .child(div().text_size(TEXT.title).font_semibold().child(W.title))
       .child(
         div()
           .pt(6)
           .text_size(TEXT.body)
           .line_height("19px")
           .text_color(t.muted)
-          .child("A VPS, a Mac mini, a box at home: Herdr reaches it over ssh, and agents there keep running while your laptop sleeps."),
+          .child(W.about),
       )
-      .child(div().pt(16).pb(6).text_size(TEXT.label).font_medium().text_color(t.dim).child(hosts.length ? "From your ssh config" : "Your ssh config lists no hosts"))
+      .child(div().pt(16).pb(6).text_size(TEXT.label).font_medium().text_color(t.dim).child(hosts.length ? W.fromConfig : W.noHosts))
       .child(
         v_flex()
           .id("ma-hosts")
@@ -283,11 +264,11 @@ export default class MachineAdd extends View {
           .overflow_y_scroll()
           .children(
             this.hosts === null
-              ? [div().px(10).py(8).text_size(TEXT.label).text_color(t.dim).child("Reading your ssh config\u2026")]
-              : hosts.map((h) => this.row(t, h.alias, h.alias, [h.user, h.hostname].filter(Boolean).join("@") || (h.aliases.length ? `also ${h.aliases.join(", ")}` : ""))),
+              ? [div().px(10).py(8).text_size(TEXT.label).text_color(t.dim).child(W.reading)]
+              : hosts.map((h) => this.row(t, h.alias, h.alias, hostSub(h))),
           ),
       )
-      .child(div().pt(14).pb(6).text_size(TEXT.label).font_medium().text_color(t.dim).child("Or type how ssh reaches it"))
+      .child(div().pt(14).pb(6).text_size(TEXT.label).font_medium().text_color(t.dim).child(W.orType))
       .child(
         h_flex()
           .gap(8)
@@ -306,7 +287,7 @@ export default class MachineAdd extends View {
               .text_color(t.foreground),
           )
           // The dialog's one primary.
-          .child(button("ma-add-typed", "Add", { kind: "primary", size: "lg", disabled: !this.typed.trim(), onClick: (_e, cx) => this.add(this.typed, cx) })),
+          .child(button("ma-add-typed", W.add, { kind: "primary", size: "lg", disabled: !this.typed.trim(), onClick: (_e, cx) => this.add(this.typed, cx) })),
       )
       .when(Boolean(this.typed.trim() && this.note(t, this.typed.trim(), 0)), (el) => el.child(this.note(t, this.typed.trim(), 0).pt(6)));
   }

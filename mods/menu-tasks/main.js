@@ -7,6 +7,7 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec, knownAgents, window } from "herdr";
 import { TEXT, menuRow } from "./ui.js";
+import { tabMenu, appMenu } from "./core/menus.js";
 import { rectOf, besideRow, agentIn, coordinatorIn, isCoordinator, isCoordinatorTab, entryFor, restartAgent, closeTab, taskOf, switchTask, renameTab, renameSpace, closeSpace } from "./coordinator.js";
 
 // Where a space is now: its first terminal's live folder, else where it was made.
@@ -57,13 +58,16 @@ function items(p, git, known) {
       // A coordinator tab, with its agent or still waiting for the person's first message.
       const coordTab = isCoordinatorTab(tg.id);
       const restartable = agent && (taskOf(agent) || (coord ? !agent.labels?.["herdr.agent"] || entryFor(agent, known ?? []) : entryFor(agent, known ?? [])));
-      return [
-        ["Rename\u2026", "tab.rename", { id: tg.id }],
-        ...(coordTab ? [["Edit instructions\u2026", "coordinator.edit", { tab: tg.id, terminal: coord?.address }]] : []),
-        ...(agent && known?.some((a) => a.installed) ? [["Switch agent", "coordinator.switch", { terminal: agent.address }]] : []),
-        ...(restartable ? [["Restart", "coordinator.restart", { terminal: agent.address }]] : []),
-        ["Close tab", "tab.close", { id: tg.id }],
-      ];
+      // Its rows and words: core/menus.js's tabMenu (the web app's tab menu reads the same list).
+      const does = {
+        rename: ["tab.rename", { id: tg.id }],
+        instructions: ["coordinator.edit", { tab: tg.id, terminal: coord?.address }],
+        switch: ["coordinator.switch", { terminal: agent?.address }],
+        restart: ["coordinator.restart", { terminal: agent?.address }],
+        close: ["tab.close", { id: tg.id }],
+      };
+      return tabMenu({ assistant: coordTab, switchable: Boolean(agent && known?.some((a) => a.installed)), restartable: Boolean(restartable) })
+        .filter((it) => !it.sep).map((it) => [it.label, ...does[it.id]]);
     }
     case "space":
       return [
@@ -73,16 +77,11 @@ function items(p, git, known) {
         ["Close\u2026", "space.close", { id: tg.id }],
       ];
     default:
-      return [
-        // The New space dialog (mods/newspace) on the shown space's machine, through the tab bar.
-        ["New space", "tabs-tasks.newspace", {}],
-        // Our own keys list (mods/keybinds): plain names, grouped. Herdr's help shows raw ids.
-        ["Keybinds", "mod.open", { name: "keybinds" }],
-        ["Theme: Graphite", "app.theme", { name: "graphite" }],
-        ["Theme: Ink", "app.theme", { name: "ink" }],
-        ["Theme: Moss", "app.theme", { name: "moss" }],
-        ["Theme: Atom One Dark", "app.theme", { name: "atom-one-dark" }],
-      ];
+      // Its rows and words: core/menus.js's appMenu (the web app's tab bar offers the same, but the themes).
+      return appMenu().filter((it) => !it.sep).map((it) =>
+        // The New space dialog (mods/newspace) on the shown space's machine, through the tab bar; our own keys list
+        // (mods/keybinds): plain names, grouped (Herdr's help shows raw ids); Herdr's themes.
+        it.id === "new-space" ? [it.label, "tabs-tasks.newspace", {}] : it.id === "keybinds" ? [it.label, "mod.open", { name: "keybinds" }] : [it.label, "app.theme", { name: it.theme }]);
   }
 }
 

@@ -59,7 +59,9 @@ export function Frame({ places, tasks, panel, children }: { places?: boolean; ta
             ? 'grid-cols-[var(--left)_minmax(0,1fr)_var(--right)]'
             : places
               ? 'grid-cols-[var(--left)_minmax(0,1fr)]'
-              : 'grid-cols-[minmax(0,1fr)_var(--right)]',
+              : tasks
+                ? 'grid-cols-[minmax(0,1fr)_var(--right)]'
+                : 'grid-cols-[minmax(0,1fr)]',
       )}
     >
       {children}

@@ -63,7 +63,12 @@ export function browserRelay(task: string, page: Page) {
             ws.onerror = () => ws.close();
           });
         }
-      } else if (!ended) { state = { ...state, connected: false }; show(); }
+      } else if (!ended) {
+        // no session: the window's view says the browser isn't open (its agent opens it when it checks a page)
+        state = { ...state, connected: false, ...(Array.isArray(sessions) ? { closed: true } : { closed: false, error: "agent-browser didn't answer." }) } as typeof state;
+        show();
+      }
+      if (Array.isArray(sessions) && sessions.includes(`herdr-${name}`)) state = { ...state, closed: false, error: undefined } as typeof state;
       await Bun.sleep(3000);
     }
   }
@@ -83,6 +88,10 @@ export function browserRelay(task: string, page: Page) {
       } else if (m.type === "take") take();
       else if (m.type === "handback") handBack();
       else if (m.type === "start") void connect();
+      // the window's view's ‹ Back, ↻ Reload (Alt+←, Ctrl+R) and Open browser, as Herdr's own commands (--own)
+      else if (m.type === "back") void ab(task, ["back"]);
+      else if (m.type === "reload") void ab(task, ["reload"]);
+      else if (m.type === "open") void ab(task, ["open", state.url || "about:blank"]).then(() => connect());
     },
     end() {
       if (ended) return;

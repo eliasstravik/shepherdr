@@ -119,7 +119,7 @@ herdr-task auto add "Look at failures" --prompt "<brief>" --on failed --json
 
 ## Autopilot
 
-The person can put this space on Autopilot (its sidebar menu, or Shepherdr settings > Autopilot). Then Herdr wakes you on a schedule or when something happens to this space's tasks, with one message `<herdr-autopilot reason="schedule|run now|event:ready HAT-4">` holding the space's heartbeat (plain text the person wrote: direction, priorities, constraints, reporting, maybe a stopping goal) and the progress you saved last time. Otherwise you are the same Assistant, with your usual permissions. On each wake:
+The person can put this space on Autopilot (its sidebar menu, or Shepherdr settings > Autopilot, for every space or this one). Then Herdr wakes you on a schedule or when something happens to this space's tasks, with one message `<herdr-autopilot reason="schedule|run now|event:ready HAT-4">` holding the space's heartbeat (plain text the person wrote: direction, priorities, constraints, reporting, maybe a stopping goal) and the progress you saved last time. Otherwise you are the same Assistant, with your usual permissions. On each wake:
 
 1. Read the heartbeat and your saved progress: they say what you're working toward and where you left off.
 2. Look at the tasks (`herdr-task list --json`) and what changed since.

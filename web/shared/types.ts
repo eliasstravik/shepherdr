@@ -54,17 +54,42 @@ export function nameProblem(name: string, taken: string[] = []): string | undefi
   return undefined
 }
 
+/** what a tab's agent is doing, as Herdr's status: a spinner, needs you, done (a dot), or nothing */
+export type TabState = 'working' | 'blocked' | 'done' | 'idle'
+/** a space's tab other than its Assistant's (Shepherdr 3's tab bar) */
+export interface PlaceTab {
+  id?: string
+  name: string
+  named?: boolean
+  term: string
+  cli?: string
+  state?: TabState
+  where?: string
+  /** what its pane header calls it: "Claude Code", the program in front ("zsh"), else "Shell" */
+  prog?: string
+  /** the known agent it runs (the window's knownAgents key: "claude", "opencode", …): it can restart and switch */
+  agent?: string
+}
+
 /** A space: a folder on a machine with a name and its own coordinator, as herdr's spaces. Every machine has its home
  *  space (its home folder, ~), always first under it and never removed: its coordinator also keeps an eye on the
  *  machine, and the main machine's on every machine. Spaces are the only places with a chat. */
 export interface Place {
   id: string
+  /** nobody named it: Herdr names it after its folder (its Rename field starts empty, this name its placeholder) */
+  unnamed?: boolean
   /** Shepherdr 3: the space's icon, an emoji the person picked (none: #) */
   emoji?: string
   /** Shepherdr 3: the space is a git worktree of another (Remove worktree) */
   worktree?: boolean
-  /** Shepherdr 3: the space's other tabs (a terminal or an agent each), by name, with the key their terminal opens by */
-  tabs?: { name: string; term: string }[]
+  /** Shepherdr 3: the space's other tabs (a terminal or an agent each), by name, with the key their terminal opens by;
+   *  as 3.0's tab bar: Herdr's tab id, whether a name was given, the agent CLI in it, its status and its folder */
+  tabs?: PlaceTab[]
+  /** Shepherdr 3: its Assistant's own tab, first in the tab bar (live: its agent runs) */
+  assistantTab?: { id?: string; name: string; named: boolean; state: TabState; live: boolean; cli?: string; agent?: string }
+  /** Shepherdr 3: its Autopilot as the Assistant's header shows it (this computer's spaces): on, its next wake, queued
+   *  (pending) or waking (inflight), its events, and blank: its heartbeat still unwritten */
+  pilot?: { on: boolean; next_run: number | null; pending: boolean; inflight: boolean; events: string[]; blank: boolean }
   /** its name, Slack-channel style ("my-project"), unique on its machine: the slug its links and commands use */
   name: string
   /** the machine it is on (its key: herdr's label for it) */
@@ -93,6 +118,11 @@ export interface Place {
   /** its chat's header under its name, as 3.0's pane header: "Assistant · Claude Code", and the folder it works in */
   header?: string
   where?: string
+  /** where its artifacts are kept (its repo's main folder, else its own) and that folder's name, as the window's
+   *  Artifacts header ("~" at home) */
+  store?: { folder: string; name: string; key?: string }
+  /** when something in its tabs last changed state (ms; Herdr's tab changed_at): Jump lists spaces newest first */
+  changedAt?: number
   /** its repo's name, branch (null: detached) and commits ahead of and behind its upstream, as the window's row */
   gitName?: string
   branch?: string | null
@@ -133,6 +163,25 @@ export interface Machine {
   /** what is left of the plans its CLIs are signed in to: each machine has its own sign-ins */
   limits?: MachineLimits
   herdrDown?: string
+  /** the machine Shepherdr runs on ("This computer"): a monitor in the sidebar, the others a server */
+  here?: boolean
+  /** its reads as the window keeps them (shared "machines.stats"): its header's meter and red dot and its popup read
+   *  them with core/machines.js, as the window's do */
+  stats?: MachineStats
+}
+
+/** one machine's reads, the window's shape (lib/machines.js): health and limits as machine.py gives them */
+export interface MachineStats {
+  /** when it was last read (ms) */
+  at?: number
+  /** why the last read failed: the header's red dot */
+  error?: string
+  limitsAt?: number
+  hold?: Record<string, number | null>
+  health?: Record<string, unknown>
+  limits?: Record<string, { state: string; at: number; windows?: { name: string; used: number; resets_at?: number; resets?: string }[]; plan?: string; account?: string; why?: string; failed?: string }>
+  /** the agent CLIs installed there (one without a usage source says "No usage info.") */
+  agents?: { key: string; name: string }[]
 }
 
 /** one window of a plan, as its CLI reports it: `used` is a share of it, 0-100 */
@@ -212,8 +261,8 @@ export function splitFacts(said: string, facts?: string): { said: string; facts?
 export interface Report {
   /** at most STATUS_MAX characters: what it is doing right now */
   msg: string
-  /** 0-100: how far through the whole task it is */
-  progress: number
+  /** 0-100: how far through the whole task it is; none when its agent gave no % */
+  progress?: number
   /** minutes left, counted down while it works; 0 for under a minute; none when it gave none */
   eta?: number
   /** the agent waits on you or is blocked: the report stays as it was */
@@ -249,11 +298,17 @@ export interface Task {
   place: string
   /** second line in lists */
   sub?: string
+  /** Working: the minutes left under its row's dot, in the window's words ("6m", "<1m", "2h"), once a real estimate */
+  left?: string
+  /** Ready, its accept under way from the window's Accept card: its row and header say "Accepting…" */
+  accepting?: boolean
   /** still Working, its turn over: what Shepherdr itself knows it waits for */
   waitsFor?: 'review'
   age: string
   /** when a Done task finished (ms): the Done group shows newest first */
   doneAt?: number
+  /** its latest news (ms): started, ready or done, as Jump orders tasks */
+  at?: number
   branch?: string
   /** destination captured when this task was added */
   base?: string
@@ -303,7 +358,17 @@ export interface Automation {
   /** its next runs by its time rule, in words ("Tomorrow 9:00"); none while paused or without one */
   next: string[]
   /** its latest runs, newest first: when (ms), and the task it added or why it couldn't */
-  runs: { at: number; task?: string; error?: string }[]
+  runs?: { at: number; task?: string; error?: string }[]
+  /** why it didn't run as planned (its last error's message), and which way: it didn't run, or didn't start its task */
+  error?: string
+  failed?: 'fire' | 'start'
+  /** when it runs next (ms): none while paused or failed */
+  nextAt?: number
+  /** the task it added last (its id): a tap on its row opens it */
+  task?: string
+  /** where it is, as its row says it: the space in its folder, else its list's name; and its machine (none: this computer) */
+  listName?: string
+  machine?: string | null
 }
 
 /** A question card: built-in choice cards, a CLI's own menus, plans. */
@@ -328,6 +393,8 @@ export interface Question {
   terminal?: boolean
   /** A CLI's own menu: a tap presses that choice at once. */
   press?: boolean
+  /** a task worker's ask in its Assistant's chat (3.0's): headed by its task, "Open chat" goes to its own chat */
+  by?: { ref: string; title?: string; chat: string }
   /** A terminal checkbox prompt can be declined without enabling any of its choices. */
   reject?: string
   choices: Choice[]
@@ -389,6 +456,15 @@ export interface Artifact {
   /** who its Send, notes and messages go to: the agent that made the latest version, or the place's coordinator once
    *  that agent's task is over */
   keeper: string
+  /** the folder it is kept for, and that folder's name ("~" at home): the list's All shows it */
+  folder?: string
+  folderName?: string
+  /** "<machine>|<folder>": the store it is in, as a space's store.key names it */
+  store?: string
+  /** the machine it is kept on, when another (its files come from there) */
+  machine?: string
+  /** the task whose agent made it (SHEP-7) */
+  task?: string
   /** the check's picture of it, for the list */
   thumb?: boolean
   /** the chats its kept versions came from (a chat's ⋯ → Artifacts) */
@@ -399,6 +475,8 @@ export interface Artifact {
 
 export interface ArtifactVersion {
   n: number
+  /** when it came (ms) */
+  at?: number
   when: string
   by: string
   note?: string
@@ -471,6 +549,25 @@ export interface Message {
   activity?: TurnActivity
   /** a secret the agent asked for (shepherdr secret ask): a masked box to give it in */
   secret?: SecretAsk
+  /** 3.0's quiet row for a message the person didn't type: a launch brief ("New session", "Task brief") or one
+   *  another agent sent ("Message from Reviewer"); its words (text) open under it. bare: no preview (a fresh start) */
+  brief?: { label: string; bare?: boolean }
+  /** 3.0's task news line in an Assistant's chat (core/chat-view.js newsWords): its mark, what happened, the rest;
+   *  live: still needs you (red); accept: the newest ready line of a task still Ready */
+  news?: { task: string; ref: string; mark: 'started' | 'needs' | 'ready' | 'done' | 'other'; what: string; text: string; live?: boolean; accept?: boolean }
+  /** the agent's own question as the log has it (3.0's "Asked you" box): open, answered, or closed without one */
+  asked?: 'open' | 'answered' | 'dismissed'
+  /** an error the CLI wrote: red words, no bubble */
+  error?: boolean
+  /** images sent with it that the chat can't show, as 3.0's paperclip line ("1 image") */
+  images?: number
+  /** a publish the artifacts' registry doesn't list yet ("Publishing an artifact…") */
+  publishing?: boolean
+  /** 3.0's quiet line for an ask or start screen that closed: what it asked and how it went ("Run: npm test · Allowed
+   *  in the chat") */
+  ended?: string
+  /** the tasks your message mentions (#HAT-1), as 3.0's chips under it: a press opens the task */
+  mentions?: { task: string; ref: string; title: string }[]
   at?: number
 }
 
@@ -479,6 +576,8 @@ export interface Message {
 export interface SecretAsk {
   id: string
   name: string
+  /** a task worker's, in its Assistant's chat: its task */
+  by?: { ref: string; title?: string; chat: string }
   /** why the agent needs it, in its words */
   why?: string
   /** where it may be kept, the agent's space first: a level's id (p:<machine>:<space>, m:<machine>, all) and its name */
@@ -527,6 +626,8 @@ export interface Step extends StepWords {
   job?: string
   /** its raw output can be read (activityOf, what: 'output') */
   output?: boolean
+  /** 3.0's open tools row: the first lines it printed (core/chat-reader.js results) */
+  out?: string
 }
 
 /** A turn's steps grouped into rows that read at a glance: "Edited 2 files: app.ts, panel.tsx", "Ran tests: 41 passed" */
@@ -561,6 +662,8 @@ export interface TurnActivity {
   now?: Step
   /** how many failed */
   failed?: number
+  /** 3.0's tools row, closed: "Read 3 files, ran 2 commands" (core/chat-log.js summary) */
+  summary?: string
 }
 
 /** Work an agent started in the background that still runs */
@@ -698,6 +801,20 @@ export interface Chat {
   failed?: { cid: string; error: string }[]
   /** finished agent: writing resumes it */
   finished?: boolean
+  /** 3.0's first row: the log is read from its start ("Start of conversation"), or earlier pages are left to load
+   *  as the chat scrolls up ("Loading earlier…") */
+  top?: boolean
+  earlier?: boolean
+  /** 3.0's working line over the box: what it does now (empty: "Working"); waits: only waiting (a clock, no spinner) */
+  doing?: string
+  waits?: boolean
+  /** 3.0's Needs you card over the box: it asks in its terminal and no card here asks for it; what it says it waits
+   *  for, or empty */
+  blocked?: string
+  /** a note at the conversation's end (a lost session being started again) */
+  note?: string
+  /** 3.0's notice instead of the conversation: opening it, not a chat agent, its log not found, its agent ended */
+  notice?: 'opening' | 'unsupported' | 'none' | 'ended'
   /** the turn that runs now: how far it got and its step on now, drawn as one quiet line at the end of the chat */
   live?: TurnActivity
   /** what it started in the background that still runs: subagents, shells, headless agents */
@@ -706,7 +823,7 @@ export interface Chat {
   /** what this CLI lets the + menu change; only what it supports is listed */
   controls?: ChatControls
   /** Recorded launch values, never inferred from Settings. Missing values are CLI defaults, not observed telemetry. */
-  agent?: { kind: string; model?: string; modelLabel?: string; effort?: string; speed?: string; runtime?: AgentRuntime; planned?: PlannedAgent }
+  agent?: { kind: string; model?: string; modelLabel?: string; effort?: string; speed?: string; runtime?: AgentRuntime; planned?: PlannedAgent; /** the window's model button: "Opus 5.5 · High" */ words?: string }
   /** Settings for its role now say something else than what its agent runs on: a calm hint offers a restart */
   restart?: RestartHint
 }
@@ -802,7 +919,7 @@ export interface SettingRow {
   /** pick list values */
   options?: string[]
   /** a role's agent (Settings › Agents): its button opens the agent picker; pick: what is set, null for the default */
-  agent?: { role: string; pick: { agent: string; model?: string | null; effort?: string | null; fast?: boolean } | null }
+  agent?: RoleAgent
   /** on Everywhere: the spaces that set their own (3.0's "2 spaces use their own", each opening its settings) */
   others?: { id: string; name: string }[]
   /** on all machines: how many machines set their own ("1 machine uses its own") */
@@ -811,6 +928,11 @@ export interface SettingRow {
   hidden?: string
   /** a row that is one button (its words): pressing it sets the row's key back (null), as the window's Reset rows */
   button?: string
+  /** its button can't be pressed now (Autopilot's Run now while it is off) */
+  disabled?: boolean
+  /** a row that opens another level's page, as the window's rows that open a space's own settings (Autopilot's
+   *  spaces): that level's id */
+  open?: string
   /** a "Set its own" row: it opens the rows hidden under this name */
   reveals?: string
   /** a file edited in a sheet (an instructions template): its name */
@@ -822,12 +944,43 @@ export interface SettingRow {
   num?: { min: number; max: number; step?: number; unit?: string; one?: string; off?: boolean; zero?: boolean }
   /** the small heading it sits under (Tasks, Coordinators) */
   group?: string
+  /** a line under that heading (the first row of its group says it) */
+  groupHint?: string
   /** not set at this level: where its value comes from (All machines, a machine's name) */
   from?: string
   /** set at this level: the value a reset goes back to, and where that comes from (Default at All machines) */
   inherits?: { value: string; from: string }
   /** the exact line it adds to every new brief's Settings block, as it is set now (What agents are told) */
   line?: string
+  /** the window's stepper: − and + step through these words, low to high (stepFrom: where a value off the list
+   *  starts from) */
+  steps?: string[]
+  stepFrom?: string
+  /** what an empty box says, dim (a note's example, Base branch's "Its branch now: main") */
+  placeholder?: string
+  /** a button beside its control (Home Assistant's Make home space): pressing it sets key to "on" */
+  extra?: { label: string; key: string }
+  /** words a Copy button beside it copies (Web's link) */
+  copy?: string
+  /** a machine's block starts here (Settings › Machines): its health and plans first ("local": this computer) */
+  details?: string
+}
+
+/** Settings › Agents: a role's model button. sel: what it shows and the menu starts from; unset: no choice of its own
+ *  (it runs the CLI's defaults, or the Reviewer the other CLI); other: "Use other CLI" shows beside it */
+export interface RoleAgent {
+  role: string
+  pick: AgentPick | null
+  sel?: AgentPick | null
+  unset?: boolean
+  other?: boolean
+}
+export interface AgentPick { agent: string; model?: string | null; effort?: string | null; fast?: boolean; perm?: string | null }
+
+/** Settings › Agents' model menu, as the window's (mods/chat-models, settings mode; core/agents.js menuFor) */
+export interface ModelMenus {
+  menus: Record<string, { name: string; models: { id: string; name: string; efforts: string[]; defaultEffort?: string | null; fast?: boolean }[]; perms: { id: string; label: string }[]; fastLocked?: boolean }>
+  permDefault: Record<string, string>
 }
 
 /** a trigger setting as Settings shows it: in plain words, its next runs (a time rule's), and a few ready-made values
@@ -857,6 +1010,12 @@ export interface SettingSection {
   told?: boolean
   /** the secrets kept at its level, by name (Secrets): added, replaced and removed in masked boxes */
   secrets?: { name: string; at: number }[]
+  /** Settings › Secrets, as the window's: every kept secret with where it is kept, and the agents waiting on one */
+  vault?: { name: string; at: number; scope: 'everywhere' | 'machine' | 'space'; machine: string | null; space: string | null; where: string }[]
+  asks?: { address: string; name: string; why: string; who: string; scope: string }[]
+  /** Web: its QR code (an SVG picture's data URL) and the words over it */
+  qr?: string
+  qrTitle?: string
 }
 
 export interface Alert {
@@ -947,6 +1106,8 @@ export interface DiffFile {
 /** what a task changed against its base (main): committed or not */
 export interface Diff {
   base: string
+  /** what it is compared with, as the window's Changes says it ("Against main"); none: only what isn't committed */
+  against?: string | null
   files: DiffFile[]
   add: number
   del: number
@@ -964,6 +1125,8 @@ export interface PrCheck {
   name: string
   state: 'pass' | 'fail' | 'pending' | 'skip'
   url?: string
+  /** its workflow's name, on hover after its word */
+  workflow?: string
 }
 
 /** a task's pull request on GitHub */
@@ -972,13 +1135,19 @@ export interface PullRequest {
   title: string
   state: 'open' | 'draft' | 'merged' | 'closed'
   url: string
+  /** its branch and where it merges ("task/7 → main"), and the size of the change */
+  head?: string
+  base?: string
+  add?: number
+  del?: number
+  files?: number
   checks: PrCheck[]
   /** Missing access or unreadable checks is different from no checks reported. */
   checksError?: string
 }
 
 /** what the side panel asks of a task's worktree */
-export type WorktreeAsk = { task: string } & ({ what: 'files' } | { what: 'file'; path: string } | { what: 'diff' } | { what: 'patch'; path: string } | { what: 'pr' })
+export type WorktreeAsk = { task: string } & ({ what: 'dir'; path?: string } | { what: 'marks' } | { what: 'files' } | { what: 'file'; path: string } | { what: 'diff' } | { what: 'patch'; path: string } | { what: 'pr' })
 
 export interface Snapshot {
   terminalTransport?: 'core'
@@ -1001,6 +1170,8 @@ export interface Snapshot {
   /** Settings › Window's look switches, as the window follows them: the space's tabs, worktree spaces in the sidebar,
    *  bold unread spaces, red and green counts, the Tasks status filters, the space on task rows, subagents above the box */
   look?: { tabs: boolean; worktrees: boolean; unread: boolean; red: boolean; green: boolean; filters: boolean; place: boolean; helpers: boolean }
+  /** Shepherdr 3: Herdr's side panels the tab bar offers beside Tasks (shared "workspace.panels": "files", "changes") */
+  panels?: string[]
   /** the web app's plugins left out (their add-on is off in Settings › Window): a page started with others reloads */
   off?: string[]
   /** a source like demo marks its data as fictional */
@@ -1012,6 +1183,9 @@ export interface Snapshot {
   /** how far you have read each chat (ms), the same on every device; '*': since when read marks are kept, so anything
    *  older counts as read */
   read?: Record<string, number>
+  /** the agents' own alerts (herdr-task alert), one per agent, as the window's toasts say them (service/push.ts
+   *  agentAlerts): "HERD-4 · <title>" over its body, its chat, and whether it reaches the person (its space's Notify) */
+  alerts?: { id: string; at: number; title: string; body: string; chat?: string; place?: string; notify: boolean }[]
   /** the sidebar's sections, as Slack's, each with its spaces in the human's order: the top ones first (Pinned, id
    *  'pinned', among them), then each machine's, its machine in order (shared/order.ts) */
   sections?: Section[]
@@ -1087,6 +1261,8 @@ export type Action =
       machines); renamed with 'rename'. Kept as the order is */
   | { type: 'section'; op: 'new'; name: string; emoji?: string; machine?: string }
   | { type: 'section'; op: 'delete'; id: string }
+  /** the last section deleted, back in its place (its toast's Undo, as the window's) */
+  | { type: 'section'; op: 'restore' }
   /** a machine's or space's name as it shows everywhere ('' gives it back its own); kept by the main machine (id,
       not place: never sent on to another), and nothing else changes: its folder, repo, herdr space and task ids stay */
   /** a machine's or section's emoji too: '' takes it away, none leaves it */

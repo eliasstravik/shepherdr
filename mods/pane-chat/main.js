@@ -19,6 +19,8 @@ import { panes, terminals, props, run, theme, home, exec, hc, notify, nextComman
 import { apSpace, apWatch, apPoll, apChip, apHeartbeatLink, COMPACT_BELOW } from "./autopilot.js";
 import { button as uiButton, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { on as addonOn } from "./addons.js";
+// "End Claude Code?" and its buttons: core/menus.js (the web app's header asks in the same words).
+import { endAgent } from "./core/menus.js";
 
 const CHAT = "chat";
 const LABEL = "herdr.chat";
@@ -244,16 +246,16 @@ export default class Pane extends View {
       .when(st === "done", el => el.child(div().size(7).flex_none().rounded(4).bg(t.done)))
       // Ending a chat's agent asks first, in place of the hover buttons.
       .when(Boolean(entry) && this.ending === true, el => el
-        .child(div().flex_none().whitespace_nowrap().text_color(t.foreground).child(`End ${prog}?`))
-        .child(uiButton(`ph-end-no-${pane}`, "Cancel", { kind: "plain", onClick: () => { this.ending = false; } }))
-        .child(uiButton(`ph-end-${pane}`, "End agent", { kind: "primary", onClick: () => this.closeChat(pane) })))
+        .child(div().flex_none().whitespace_nowrap().text_color(t.foreground).child(endAgent(prog).ask))
+        .child(uiButton(`ph-end-no-${pane}`, endAgent(prog).cancel, { kind: "plain", onClick: () => { this.ending = false; } }))
+        .child(uiButton(`ph-end-${pane}`, endAgent(prog).verb, { kind: "primary", onClick: () => this.closeChat(pane) })))
       // Hover buttons come before the switch so Chat | Terminal never moves.
       .when(this.hovered && !(entry && this.ending === true), el => el
         .child(this.button(t, `ph-r-${pane}`, "split-right", "pane.split", { direction: "right", pane }))
         .child(this.button(t, `ph-d-${pane}`, "split-down", "pane.split", { direction: "down", pane }))
         .child(this.button(t, `ph-z-${pane}`, self.zoomed ? "unzoom" : "zoom", "pane.zoom", { pane }))
         .when(!entry, el => el.child(this.button(t, `ph-x-${pane}`, "close", "pane.close", { pane })))
-        .when(Boolean(entry), el => el.child(this.button(t, `ph-x-${pane}`, "close", null, null, () => { this.ending = true; }).tooltip(`End ${prog}`))))
+        .when(Boolean(entry), el => el.child(this.button(t, `ph-x-${pane}`, "close", null, null, () => { this.ending = true; }).tooltip(endAgent(prog).tip))))
       .when(canSwitch, (el) => el.child(this.switcher(t, `ph-mode-${pane}`, chatMode,
         (cx) => this.toChat(self, cx),
         // No agent yet: the chat starts it (no first message) and then shows its terminal.

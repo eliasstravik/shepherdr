@@ -15,13 +15,15 @@ const BAR = { light: '#ffffff', dark: '#0b0b0d' }
 const system = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null
 const listeners = new Set<() => void>()
 
+// Settings has no Appearance page now (the window has none: it follows Herdr's theme, the web the device's light or
+// dark), so a pick kept from before goes, and the device's own mode applies.
 function stored(): Appearance {
   try {
-    const v = localStorage.getItem(KEY)
-    return v === 'light' || v === 'dark' ? v : 'system'
+    localStorage.removeItem(KEY)
   } catch {
-    return 'system'
+    /* private window */
   }
+  return 'system'
 }
 
 let picked = stored()

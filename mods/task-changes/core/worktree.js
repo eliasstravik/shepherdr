@@ -64,6 +64,65 @@ export function checksLine(cs) {
 // Failed first, then running, passed, skipped: what needs a look sits on top.
 export const CHECK_ORDER = { fail: 0, pending: 1, pass: 2, skip: 3 };
 
+// The side views' words, as the window's mods show them (task-files, task-changes, task-pr): the web app's Files,
+// Changes and Pull request say the same (core/worktree.test.js checks the mods still say these).
+export const VIEW_WORDS = {
+  allFiles: "All files",
+  loadingFiles: "Loading files…",
+  noFiles: "No files",
+  noFolder: "No folder for this task",
+  folderGone: "This task's folder can't be read. It may have been removed after the task finished.",
+  limited: "File list limited to 500 entries per folder and 5,000 total",
+  loadingFile: "Loading file…",
+  fileGone: "This file is no longer available.",
+  binaryFile: "Binary file · No text preview",
+  cantPreview: "Can't preview this file. It's binary, too large or unreadable.",
+  truncated: "… (file truncated)",
+  loadingChanges: "Loading changes…",
+  notGit: "This task's folder isn't a git repository.",
+  noCommits: "This repository has no commits.",
+  uncommitted: "Uncommitted",
+  noUncommitted: "No uncommitted changes",
+  pickChange: "Select a file to see its changes.",
+  cantDiff: "Can't preview this diff. It's too large or unreadable.",
+  binaryDiff: "Binary file · No text diff",
+  binaryChanged: "Binary file changed",
+  noTextDiff: "No text diff available",
+  firstThousand: "Showing the first 1,000 changed files",
+  askingGitHub: "Asking GitHub…",
+  noPr: "This task has no pull request.",
+  noBranch: "This task works in its folder, with no branch of its own, so it has no pull request.",
+  openOnGitHub: "Open on GitHub",
+  copyLink: "Copy link",
+  copied: "Copied",
+  checks: "Checks",
+  noChecks: "No checks on it.",
+};
+// A change's word, and a check's: on hover.
+export const CHANGE_WORDS = { A: "Added", M: "Changed", D: "Deleted", U: "Conflict" };
+export const CHECK_WORDS = { pass: "Passed", fail: "Failed", pending: "Running", skip: "Skipped" };
+export const PR_STATES = { open: "Open", draft: "Draft", merged: "Merged", closed: "Closed" };
+// "No changes against main", "Against main"; "3 files"
+export const noChanges = (label) => (label ? `No changes against ${label}` : VIEW_WORDS.noUncommitted);
+export const againstLine = (label) => (label ? `Against ${label}` : VIEW_WORDS.uncommitted);
+export const filesCount = (n) => `${n.toLocaleString("en")} ${n === 1 ? "file" : "files"}`;
+
+// A folder's entries, as the window's Files lists them (one folder at a time, .git left out, at most PER_FOLDER and
+// TOTAL in all): sh -c LIST_DIR files <folder> prints "<d|f>\0<name>\0" each, and fails when it isn't a folder.
+export const PER_FOLDER = 500, TOTAL = 5000;
+export const LIST_DIR = 'n=0; for p in "$1"/* "$1"/.[!.]* "$1"/..?*; do [ -e "$p" ] || [ -L "$p" ] || continue; name=${p##*/}; [ "$name" = .git ] && continue; if [ -d "$p" ]; then kind=d; else kind=f; fi; printf "%s\\0%s\\0" "$kind" "$name"; n=$((n+1)); [ "$n" -gt 500 ] && break; done; test -d "$1"';
+// Its entries, folders first, then by name.
+export function dirEntries(stdout) {
+  const fields = String(stdout).split("\0"), out = [];
+  for (let i = 0; i + 1 < fields.length; i += 2) out.push({ name: fields[i + 1], dir: fields[i] === "d" });
+  return out.sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name));
+}
+// The letter beside a changed file in Files (git status --porcelain=v1 -z): A new, U conflict, D deleted, else M.
+export const MARK_ARGS = ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all"];
+export function markOf(xy) {
+  return xy === "??" || xy.includes("A") ? "A" : xy.includes("U") ? "U" : xy.includes("D") ? "D" : "M";
+}
+
 // gh pr view's JSON as the views show it.
 export function prOf(d) {
   const state = d.state === "MERGED" ? "merged" : d.state === "CLOSED" ? "closed" : d.isDraft ? "draft" : "open";

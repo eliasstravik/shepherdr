@@ -7,7 +7,8 @@ import { exec } from "./model.ts";
 import * as W from "../core/worktree.js";
 import type { Diff, DiffFile, FileText, Patch, PullRequest, TreeFiles } from "../web/shared/types.ts";
 
-const { READ, against, changedFiles, PR_FIELDS, prOf } = W as any;
+const { READ, against, changedFiles, PR_FIELDS, prOf, VIEW_WORDS, LIST_DIR, dirEntries, MARK_ARGS, markOf, PER_FOLDER } = W as any;
+import { HOME } from "./paths.ts";
 
 export type Where = { folder: string; machine: string | null; base?: string | null; start?: string | null; branch?: string | null; pr?: { number: number; repo?: string } | null };
 
@@ -27,15 +28,43 @@ export async function worktree(hub: Hub, w: Where, what: string, path?: string):
   const git = (args: string[]) => sh(["git", ...READ, ...args]);
 
   if (what === "pr") {
+    // as the window's Pull request (mods/task-pr ask()): { pr }, or { why } there's none, or { error }
+    if (!w.pr?.number && !w.branch) return { why: VIEW_WORDS.noBranch };
     const r = w.pr?.number && w.pr.repo ? await sh(["gh", "pr", "view", String(w.pr.number), "--repo", w.pr.repo, "--json", PR_FIELDS])
-      : w.branch ? await sh(["gh", "pr", "view", w.branch, "--json", PR_FIELDS]) : null;
-    const err = r ? (r.stderr || r.stdout).trim() : "";
-    // as the window's Pull request: no PR is said plainly, not as an error from gh
-    if (!r || (!w.pr && /no pull requests? found|not a git repository|none of the git remotes|no git remotes/i.test(err))) return { error: "This task has no pull request." };
-    if (r.code !== 0) return { error: err.split("\n")[0] || "GitHub didn't answer." };
+      : await sh(["gh", "pr", "view", w.branch!, "--json", PR_FIELDS]).catch(() => null);
+    if (!r) return { why: VIEW_WORDS.noPr };
+    const err = (r.stderr || r.stdout).trim();
+    if (r.code !== 0) {
+      if (!w.pr && /no pull requests? found|not a git repository|none of the git remotes|no git remotes/i.test(err)) return { why: VIEW_WORDS.noPr };
+      return { error: err.split("\n")[0] || "GitHub didn't answer." };
+    }
     const p = prOf(JSON.parse(r.stdout));
-    const pr: PullRequest = { number: p.number, title: p.title, state: p.state, url: p.url, checks: p.checks.map((c: any) => ({ name: c.name, state: c.state, ...(c.url ? { url: c.url } : {}) })) };
-    return pr;
+    const pr: PullRequest = { number: p.number, title: p.title, state: p.state, url: p.url, head: p.head, base: p.base, add: p.add, del: p.del, files: p.files,
+      checks: p.checks.map((c: any) => ({ name: c.name, state: c.state, ...(c.url ? { url: c.url } : {}), ...(c.workflow ? { workflow: c.workflow } : {}) })) };
+    return { pr };
+  }
+  if (what === "dir") {
+    // one folder of the task's (the window's Files lists them one at a time, as you open them)
+    const p = path ? inside(path) : "";
+    const r = await sh(["sh", "-c", LIST_DIR, "files", p ? `${w.folder}/${p}` : w.folder], "/").catch(() => null);
+    if (!r || r.code !== 0) return { error: VIEW_WORDS.folderGone };
+    const all = dirEntries(r.stdout);
+    // where it is, as the window's bar says it: home as ~, another machine's as machine:folder
+    const root = w.machine ? `${w.machine}:${w.folder}` : w.folder === HOME ? "~" : w.folder.startsWith(HOME + "/") ? `~${w.folder.slice(HOME.length)}` : w.folder;
+    return { root, entries: all.slice(0, PER_FOLDER), ...(all.length > PER_FOLDER ? { limited: true } : {}) };
+  }
+  if (what === "marks") {
+    // the letter beside each changed file in Files, by its path inside the task's folder
+    const top = await sh(["git", "rev-parse", "--show-prefix"]).catch(() => null);
+    if (!top || top.code !== 0) return { marks: {} };
+    const prefix = top.stdout.trim();
+    const st = await sh(["git", ...MARK_ARGS]);
+    const marks: Record<string, string> = {};
+    if (st.code === 0) for (const e of st.stdout.split("\0").filter(Boolean).slice(0, 5000)) {
+      const p = e.slice(3);
+      if (p.startsWith(prefix)) marks[p.slice(prefix.length)] = markOf(e.slice(0, 2));
+    }
+    return { marks };
   }
   if (what === "files") {
     const r = await git(["ls-files", "--cached", "--others", "--exclude-standard", "-z"]);
@@ -46,15 +75,18 @@ export async function worktree(hub: Hub, w: Where, what: string, path?: string):
   }
   if (what === "file") {
     const p = inside(path);
-    const r = await sh(["sh", "-c", 'f="$1"; [ -f "$f" ] || exit 3; wc -c < "$f"; head -c "$2" "$f"', "file", p, String(MAX_TEXT)]);
-    if (r.code !== 0) return { error: "That file isn't there." };
+    const r = await sh(["sh", "-c", 'f="$1"; [ -f "$f" ] || exit 3; wc -c < "$f"; head -c "$2" "$f"', "file", p, String(MAX_TEXT)]).catch(() => null);
+    if (!r || r.code !== 0) return { error: VIEW_WORDS.fileGone };
     const nl = r.stdout.indexOf("\n");
     const size = Number(r.stdout.slice(0, nl).trim()) || 0, text = r.stdout.slice(nl + 1);
     const out: FileText = text.includes("\0") ? { path: p, size, binary: true } : { path: p, size, text, ...(size > MAX_TEXT ? { tooBig: true } : {}) };
     return out;
   }
+  // as the window's Changes: not a git folder, or gone (a finished task's worktree is removed), said plainly
+  const top = await sh(["git", "rev-parse", "--show-toplevel"]).catch(() => null);
+  if (top?.code !== 0) return { error: top && (await sh(["test", "-d", w.folder]).catch(() => null))?.code === 0 ? VIEW_WORDS.notGit : VIEW_WORDS.folderGone };
   const vs = await against(git, { base: w.base ?? null, start: w.start ?? null });
-  if (!vs) return { error: "This repository has no commits." };
+  if (!vs) return { error: VIEW_WORDS.noCommits };
   if (what === "diff") {
     const [names, nums, fresh] = await Promise.all([
       git(["diff", vs.rev, "--name-status", "-z", "--no-renames"]),
@@ -64,7 +96,7 @@ export async function worktree(hub: Hub, w: Where, what: string, path?: string):
     if ([names, nums, fresh].some((r) => r.code !== 0)) return { error: "This task's changes can't be read." };
     const files: DiffFile[] = changedFiles(names.stdout, nums.stdout, fresh.stdout).slice(0, 1000)
       .map((f: any) => ({ path: f.path, status: STATUS[f.status] ?? "modified", add: f.add, del: f.del, ...(f.binary ? { binary: true } : {}) }));
-    const out: Diff = { base: vs.label ?? "its last commit", files, add: files.reduce((n, f) => n + f.add, 0), del: files.reduce((n, f) => n + f.del, 0) };
+    const out: Diff = { base: vs.label ?? "its last commit", against: vs.label ?? null, files, add: files.reduce((n, f) => n + f.add, 0), del: files.reduce((n, f) => n + f.del, 0) };
     return out;
   }
   if (what === "patch") {
@@ -76,5 +108,5 @@ export async function worktree(hub: Hub, w: Where, what: string, path?: string):
     const out: Patch = { path: p, text: text.slice(0, MAX_TEXT), ...(text.length > MAX_TEXT ? { tooBig: true } : {}), ...(/^Binary files/m.test(text) ? { binary: true } : {}) };
     return out;
   }
-  throw new Error("Ask for files, file, diff, patch or pr.");
+  throw new Error("Ask for dir, marks, files, file, diff, patch or pr.");
 }

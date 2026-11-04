@@ -1,7 +1,7 @@
 // An artifact's recipe drawn as the web's own HTML (core/recipe.js says what each block is; the window draws the same
 // file in GPUI). In 2.1's look: its tokens, type and corners; charts as SVG; Markdown through the chat's renderer.
-// A choice, a form or a button sends its words to the agent that made it (reply). A block can be pointed at for a
-// note (onNote): its id goes with the words, so the agent knows which.
+// A choice, a form or a button sends its words to the agent that made it (reply), once: then it says "Sent", as the
+// window's (mods/artifacts/recipe-view.js). Mark up lays its own layer over the whole recipe (plugins/artifacts).
 import clsx from 'clsx'
 import { useState, type ReactNode } from 'react'
 import { Markdown } from '@plugins/chat/markdown.tsx'
@@ -9,7 +9,10 @@ import { Primary } from '../ui.tsx'
 import * as R from '@core/recipe.js'
 
 type Block = any
-type Props = { recipe: { blocks: Block[] }; asset: (src: string) => string; reply?: (text: string) => Promise<unknown>; onNote?: (b: Block) => void }
+type Props = { recipe: { blocks: Block[] }; asset: (src: string) => string; reply?: (text: string) => Promise<unknown> }
+
+/** the window's words when a recipe can't be read */
+export const UNREADABLE = "This artifact's recipe can't be read."
 
 const { chartShapes, choiceReply, formReply } = R as any
 const PALETTE = ['var(--accent)', 'var(--focus)', 'var(--ready)', 'var(--work)', 'var(--merged)', 'var(--need)']
@@ -81,13 +84,23 @@ function Form({ b, reply }: { b: Block; reply?: Props['reply'] }) {
         <label key={f.name} className={clsx('flex gap-2', f.kind === 'checkbox' ? 'items-center' : 'flex-col')}>
           {f.kind === 'checkbox' ? <input type="checkbox" checked={!!v[f.name]} onChange={(e) => setV({ ...v, [f.name]: e.target.checked })} className="size-4" /> : null}
           <span className="text-fg2">{f.label ?? f.name}</span>
-          {f.kind === 'textarea' ? <textarea rows={3} className={field} value={String(v[f.name] ?? '')} onChange={(e) => setV({ ...v, [f.name]: e.target.value })} />
+          {f.kind === 'textarea' ? <textarea rows={3} className={field} placeholder={f.label ?? f.name} value={String(v[f.name] ?? '')} onChange={(e) => setV({ ...v, [f.name]: e.target.value })} />
             : f.kind === 'select' ? <select className={field} value={String(v[f.name] ?? '')} onChange={(e) => setV({ ...v, [f.name]: e.target.value })}><option value="" />{(f.options ?? []).map((o: string) => <option key={o}>{o}</option>)}</select>
-            : f.kind === 'checkbox' ? null : <input className={field} value={String(v[f.name] ?? '')} onChange={(e) => setV({ ...v, [f.name]: e.target.value })} />}
+            : f.kind === 'checkbox' ? null : <input className={field} placeholder={f.label ?? f.name} value={String(v[f.name] ?? '')} onChange={(e) => setV({ ...v, [f.name]: e.target.value })} />}
         </label>
       ))}
       <Primary type="submit" disabled={sent || !reply} className="self-start">{sent ? 'Sent' : b.submit ?? 'Send'}</Primary>
     </form>
+  )
+}
+
+/** a press sends its reply, once: "<label> · Sent" */
+function Button({ b, reply }: { b: Block; reply?: Props['reply'] }) {
+  const [sent, setSent] = useState(false)
+  return (
+    <Primary disabled={sent || !reply} onClick={async () => { await reply?.(b.reply); setSent(true) }} className="self-start">
+      {sent ? `${b.label} · Sent` : b.label}
+    </Primary>
   )
 }
 
@@ -105,7 +118,7 @@ function Tabs({ b, render }: { b: Block; render: (bs: Block[]) => ReactNode }) {
   )
 }
 
-export function Recipe({ recipe, asset, reply, onNote }: Props) {
+export function Recipe({ recipe, asset, reply }: Props) {
   const one = (b: Block): ReactNode => {
     switch (b.type) {
       case 'heading': { const H = (`h${Math.min(3, Math.max(1, b.level ?? 2)) + 1}`) as 'h2'; return <H className={clsx('font-semibold text-balance', (b.level ?? 2) <= 1 ? 'text-xl' : 'text-base')}>{b.text}</H> }
@@ -131,14 +144,12 @@ export function Recipe({ recipe, asset, reply, onNote }: Props) {
       case 'divider': return <hr className="border-line" />
       case 'choice': return <Choice b={b} reply={reply} />
       case 'form': return <Form b={b} reply={reply} />
-      case 'button': return <Primary disabled={!reply} onClick={() => reply?.(b.reply)} className="self-start">{b.label}</Primary>
+      case 'button': return <Button b={b} reply={reply} />
     }
     return null
   }
-  // each block can be pointed at for a note (Mark up)
   const wrap = (b: Block) => (
-    <section key={b.id} data-block={b.id} onClick={onNote ? (e) => { e.stopPropagation(); onNote(b) } : undefined}
-      className={clsx('min-w-0', onNote && 'cursor-crosshair rounded-[var(--row-radius)] outline-offset-4 [&:hover:not(:has([data-block]:hover))]:outline [&:hover:not(:has([data-block]:hover))]:outline-2 [&:hover:not(:has([data-block]:hover))]:outline-dashed [&:hover:not(:has([data-block]:hover))]:outline-[var(--focus)]')}>
+    <section key={b.id} data-block={b.id} className="min-w-0">
       {one(b)}
     </section>
   )

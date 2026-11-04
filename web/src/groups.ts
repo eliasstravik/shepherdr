@@ -153,14 +153,21 @@ export function groupTasks(places: Place[], machineList: Machine[], ts: Task[], 
 /** what rows must say of where each task is, in a view of this level grouped by nothing that says it */
 export const namesFor = (level: number) => ({ machine: level === 0, project: level < 2 })
 
-/** one group per space, in the sidebar's order. On All machines, each says its machine after its name. */
+/** one group per task list, as the window's by space (mods/tasks spaceGroup): each list goes by the space working in its
+ *  folder, in the sidebar's order, a list no space works in after them, by its own name (Task.listName says which; a
+ *  task's place is the space that started it, which may be another's). On All machines, each says its machine after
+ *  its name. */
 function projectGroups(places: Place[], machines: Machine[], ts: Task[], level: number): TaskGroup[] {
   const out: TaskGroup[] = []
-  for (const p of places) {
-    const tasks = ts.filter((t) => t.place === p.id)
-    if (!tasks.length) continue
-    const machine = level === 0 ? machines.find((m) => m.machine === p.machine)?.name : undefined
-    out.push({ key: p.id, label: p.name, note: machine, tasks, names: { machine: false, project: false } })
+  const listOf = (t: Task) => `${t.on}|${t.listName ?? places.find((p) => p.id === t.place)?.name ?? ''}`
+  const lists = [...new Set(ts.map(listOf))]
+  const at = (k: string) => { const i = places.findIndex((p) => `${p.machine}|${p.name}` === k); return i < 0 ? places.length : i }
+  for (const k of lists.sort((a, b) => at(a) - at(b))) {
+    const tasks = ts.filter((t) => listOf(t) === k)
+    const [on, name] = [k.slice(0, k.indexOf('|')), k.slice(k.indexOf('|') + 1)]
+    const p = places.find((x) => `${x.machine}|${x.name}` === k)
+    const machine = level === 0 ? machines.find((m) => m.machine === on)?.name : undefined
+    out.push({ key: p?.id ?? `list:${k}`, label: name, note: machine, tasks, names: { machine: false, project: false } })
   }
   return out
 }

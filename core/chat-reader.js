@@ -4,7 +4,7 @@
 // script on the agent's machine (null: here).
 // Shared core: the source is core/chat-reader.js.
 
-import { FIND, LOG, Conversation, records } from "./chat-log.js";
+import { FIND, LOG, Conversation, records, resultText } from "./chat-log.js";
 
 export const PAGE = 200;
 export const KEEP = 2000;
@@ -110,6 +110,23 @@ export class ChatReader {
       this.rebuild();
     } else this.conv.feed(recs);
     return true;
+  }
+
+  // What a tools row's calls printed, read from the log only when the row opens (as the window's chat
+  // loadResults()): -> Map step id -> its first lines ("" when none).
+  async results(steps) {
+    const out = new Map();
+    const want = (steps ?? []).filter((s) => s.out !== undefined);
+    if (!want.length || !this.path) return out;
+    const offs = [...new Set(want.map((s) => s.out))].slice(0, 40);
+    const r = await this.log(["results", this.path, ...offs.map(String)]);
+    for (const part of String(r.stdout ?? "").split("\x1e").slice(1)) {
+      const nl = part.indexOf("\n");
+      const off = Number(part.slice(0, nl));
+      const line = part.slice(nl + 1).replace(/\n$/, "");
+      for (const s of want) if (s.out === off) out.set(s.id, resultText(line, s.id) ?? "");
+    }
+    return out;
   }
 
   // The page before what is read. -> true when there was one.

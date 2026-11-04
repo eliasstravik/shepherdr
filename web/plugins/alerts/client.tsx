@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { definePlugin, openLink, setPushEndpoint, useSnap, useStore, visibleChats } from '@client/kernel.ts'
 import { keptTags, waiting } from '@shared/alerts.ts'
+import { Toasts } from './toasts.tsx'
 
 /** Ask this device for push alerts (the app must be installed to the home screen on an iPhone). */
 export async function subscribePush(): Promise<string> {
@@ -58,7 +59,8 @@ export default definePlugin({
   name: 'alerts',
   setup(reg) {
     reg.settingActions.alerts = subscribePush
-    reg.overlays.push(Keeper)
+    // the window's toasts while the app is on screen (push alerts while it isn't)
+    reg.overlays.push(Keeper, Toasts)
     if (!('serviceWorker' in navigator)) return
     navigator.serviceWorker
       .register('sw.js')

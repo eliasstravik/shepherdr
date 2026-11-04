@@ -8,7 +8,9 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { props, closeOverlay, openOverlay, theme } from "herdr";
 import { openSettings, TEXT, RADIUS } from "./ui.js";
-import { machineDetails, pollNow, statsOf, span } from "./machines.js";
+import { machineDetails, pollNow, statsOf } from "./machines.js";
+// Its header's words are the shared core's (the web's machine popup says the same).
+import { freshWords } from "./core/machines.js";
 import { machineLook } from "./sections.js";
 
 export const MACHINE_POPUP = { width: 320, height: 480 };
@@ -40,7 +42,7 @@ export class MachinePopup {
     const m = p.machine ?? null;
     const look = machineLook(m);
     const at = statsOf(m)?.at;
-    const fresh = this.reading ? "Updating\u2026" : at ? (Date.now() - at < 60000 ? "Updated just now" : `Updated ${span(Date.now() - at)} ago`) : "";
+    const fresh = freshWords(at, this.reading);
     return v_flex().id("machine-popup").track_focus(this.handle).size_full().min_h(0).bg(t.popover)
       .on_key_down((e, cx) => { if (e.key === "escape") { closeOverlay(p.overlay); cx.stop_propagation(); } })
       .child(h_flex().flex_none().h(HEAD).px(14).gap(8).items_center().border_b(1).border_color(t.border)

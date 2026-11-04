@@ -58,6 +58,10 @@ export type BrowserDown =
       /** on another machine: its stream, shared on the tailnet straight from there (wss://…); the panel takes frames
        *  and its input that way when it can reach it, else through the server as before */
       direct?: string
+      /** no session: the task's browser isn't open (the window's "This task's browser isn't open.") */
+      closed?: boolean
+      /** agent-browser didn't answer: why */
+      error?: string
     }
   | { type: 'picked'; id: number; pick?: BrowserPick; error?: string }
   | { type: 'hover'; box: BrowserPick['box'] | null }
@@ -86,6 +90,8 @@ export type BrowserUp =
   | { type: 'reload' }
   | { type: 'take' }
   | { type: 'handback' }
+  /** the window's Open browser: the task's own session opened (only from a closed view) */
+  | { type: 'open' }
   | { type: 'pick'; id: number; x: number; y: number }
   | { type: 'hover'; x: number; y: number }
   /** fit the page to the panel, or back to agent-browser's own size */

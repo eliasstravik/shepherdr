@@ -2,9 +2,11 @@
 // folds it again. Search and a reply's quote open a folded reply when they jump into it.
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { DownIcon } from '@client/ui.tsx'
+import { WORDS } from './rows.tsx'
 
-/** taller than this (px) it folds, to 300px (max-h-75) */
-const FOLD_AT = 640
+/** as the window's: past 28 lines (of 21px) it folds, to its first 20 */
+const FOLD_AT = 28 * 21
+const FOLD_TO = 20 * 21
 
 /** the replies opened (by their message id), kept while the screen is: a chat drawn again keeps them open */
 const opened = new Set<string>()
@@ -54,7 +56,8 @@ export function Fold({ id, children }: { id: string; children: ReactNode }) {
       <div
         ref={box}
         data-folded={folded ? '' : undefined}
-        className={folded ? 'max-h-75 overflow-hidden [mask-image:linear-gradient(#000_calc(100%-64px),transparent)]' : undefined}
+        style={folded ? { maxHeight: FOLD_TO } : undefined}
+        className={folded ? 'overflow-hidden [mask-image:linear-gradient(#000_calc(100%-32px),transparent)]' : undefined}
       >
         <div ref={inner}>{children}</div>
       </div>
@@ -68,7 +71,7 @@ export function Fold({ id, children }: { id: string; children: ReactNode }) {
           }}
           className="relative mt-1 flex items-center gap-1 text-[0.8125rem] font-medium text-fg2 after:absolute after:-inset-x-2 after:-inset-y-2.5 hover:text-fg phone:text-[0.9375rem]"
         >
-          {folded ? 'Show more' : 'Show less'}
+          {folded ? WORDS.showMore : WORDS.showLess}
           <DownIcon className={folded ? 'size-4' : 'size-4 rotate-180'} />
         </button>
       ) : null}

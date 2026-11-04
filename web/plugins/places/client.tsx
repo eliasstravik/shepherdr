@@ -1,34 +1,22 @@
-// Spaces in the sidebar like Slack's channels, under their machines as Slack's sections. Calm like Slack's: no status
-// marks, a space's name in bold where something new came in its coordinator's chat that you haven't read
-// (src/unread.ts), with a red count where something waits on you there (a task's ends as a card in its space's chat). A
-// folded section hides every space in it, the open one too; a quiet dot on its heading says something in it is unread
-// (grey) or waits on you (red). A space whose machine Shepherdr can't reach is greyed, and so is a muted one (Notify: Off), its count still
-// red. A space whose coordinator is on Autopilot says so with a red dot in its round tint just before its name (its
-// header's pill without the word); every row keeps that room, so names stay in line, and off it says nothing.
-// Machines are sections, as Slack's, each with its emoji (a server without one): a small chevron at the left edge folds
-// what is under them, a tap anywhere on one does the same, and nothing opens: they have no chat. Each space's # sits
-// under its heading's name, as a Slack channel's does. A machine's heading has a + and a ⋯ (New space, New section,
-// Rename machine: its emoji and name, section.tsx) and says when it can't be reached or struggles. Rows are Slack's: 28px
-// of 15px text with a mouse; a ⋯ and + take no room until the pointer is over the row, where they take the count's
-// place. Going to a space opens the sections it sits in. Each space's menu (its ⋯ or a right click; a finger holds the
-// row) sets its coordinator's Notify (All, Needs me, Off: Everywhere's is the default in Settings), marks it read, pins
-// it, moves it to a section, renames it in the row (the space rules: lowercase, no spaces) and removes it from
-// Shepherdr, as `shepherdr space remove` does: its folder stays on disk. A home space can't be removed.
-// Sections only organize spaces (shared/order.ts), as Slack's: one at the top (the header's +) holds any machine's, its
-// machine after a space's name; one in a machine (its ⋯) only that machine's, one small step in. Pinned is one at the top
-// that can't be deleted, showing while it holds any. A space moves into one (it isn't copied) from its menu's Move to
-// section or by a drag onto its heading or among its spaces; out again, or with its section deleted, it is back where it
-// was under its machine. A section's ⋯ renames or deletes it.
-// Machines, sections and spaces, the home spaces too, show A to Z (a home space first, a new section last) until dragged
-// into another order (drag.ts; Alt+Shift+↑/↓ on a focused space), which the main machine keeps for every device.
-// Alt+↑/↓ (Option on a Mac) goes to the space above or below as they show, from anywhere.
+// The sidebar's spaces, as 3.0's (mods/spaces-chat main.js; docs/parity/sidebar.md lists each element): a "Spaces"
+// heading with its + (New space or section on the shown space's machine), Pinned (while it holds any), then each
+// machine: its header (its emoji, a monitor for this computer or a server; its name; connected: its +, its meter and a
+// red dot when its health couldn't be read; not: "Offline" or "Connecting…", dimmed and folded until tapped open), its
+// spaces in no section, then its sections. A space's row: its # (or emoji), its name (bold while its Assistant has
+// something new, dimmed with a crossed-out bell when muted), after it only what's unusual (its machine in Pinned, its
+// folder where another space there has its name, its repo and branch, ↑ahead ↓behind), and its red and green counts.
+// Worktree spaces nest under their repo's own. A folded section (Pinned too) still shows the space you're in and its
+// unread ones, and adds up its counts on its heading. Menus are core/menus.js's, the window's too: a right click (or a
+// finger held, or the ⋯) opens them. Spaces drag among their own, into a section or Pinned, or back to their machine's
+// top; machines and sections keep their place. Alt+↑/↓ goes to the space above or below as they show.
 import clsx from 'clsx'
 import { openWorktree } from '@client/screens/Worktree.tsx'
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type LiHTMLAttributes, type ReactNode } from 'react'
 import { act, counts, definePlugin, getState, goPlace, manyMachines, openSplit, placeOf, removeSpace, setUI, splitClick, useSnap, useUI, type Pane, type UI } from '@client/kernel.ts'
-import { and, Dialog, RowMenu, RowMenuButton, useRowMenu } from '@client/rowmenu.tsx'
-import { BackIcon, BellIcon, CogIcon, BellSlashIcon, AttentionBadge, attentionWords, DeleteIcon, DownIcon, HashIcon, ic, IconButton, List, MenuItem, MenuLabel, MenuSeparator, MenuSetting, Meta, NextIcon, PinnedIcon, PinTaskIcon, PlusIcon, Primary, ReadIcon, RemoveProjectIcon, RenameIcon, rowClass, RowText, SectionIcon, ServerIcon, SplitIcon, TasksIcon, UnpinIcon } from '@client/ui.tsx'
-import { MachineMeter } from '@plugins/health/client.tsx'
+import { Dialog, RowMenu, RowMenuButton, useRowMenu } from '@client/rowmenu.tsx'
+import { BackIcon, BellIcon, CogIcon, BellSlashIcon, AttentionBadge, attentionWords, DeleteIcon, DownIcon, HashIcon, ic, IconButton, List, MenuItem, MenuLabel, MenuSeparator, MenuSetting, Meta, MonitorIcon, NextIcon, PinnedIcon, PinTaskIcon, PlusIcon, Primary, ReadIcon, RemoveProjectIcon, RenameIcon, rowClass, RowText, SectionIcon, ServerIcon, SplitIcon, TasksIcon, UnpinIcon } from '@client/ui.tsx'
+import { HealthDot, MachineMeter } from '@plugins/health/client.tsx'
+import { toast } from '@plugins/alerts/toasts.tsx'
 import { MarkRead, markPlaceRead, muted, placeUnread } from '@client/unread.ts'
 import { RestartItem } from '@client/restart.tsx'
 import { NOTIFY, NOTIFY_KEY, notifyOf, notifyRow } from '@shared/alerts.ts'
@@ -38,6 +26,7 @@ import { AddSpace, asTyped, openAddSpace } from './add.tsx'
 import { dragging, press } from './drag.ts'
 import { openNewSection, openRename, SectionDialogs } from './section.tsx'
 import * as MN from '@core/menus.js'
+import * as CF from '@core/confirm.js'
 import * as SPc from '@core/spaces.js'
 
 /* ---------- folded sections (Pinned, the machines), remembered on this device ---------- */
@@ -81,6 +70,26 @@ function useFolded() {
     () => folded,
   )
 }
+
+/** machines that can't be reached, opened anyway (as the window's: one offline starts folded; a tap opens it for now,
+ *  not kept) */
+let openedOff: string[] = []
+function toggleOff(id: string) {
+  openedOff = openedOff.includes(id) ? openedOff.filter((x) => x !== id) : [...openedOff, id]
+  for (const l of listeners) l()
+}
+function useOpenedOff() {
+  return useSyncExternalStore(
+    (l) => {
+      listeners.add(l)
+      return () => listeners.delete(l)
+    },
+    () => openedOff,
+  )
+}
+
+/** a machine Shepherdr can't reach (Offline, or Connecting…): no +, no meter, folded until opened */
+const offline = (m: Machine) => m.status === 'off' || !!m.connecting
 
 /* ---------- the order you dragged or moved, shown at once until the server's snapshot has it ---------- */
 
@@ -219,8 +228,11 @@ function nest(list: Place[], hide = false, shown: string | null = null): Place[]
 /** the sidebar as it shows: the sections at the top (Pinned while it holds any), then each machine with its own spaces
  *  and its sections. A space shows once, where it sits; one just dragged or moved shows there at once. A folded section
  *  hides every space in it, a folded machine its sections too. */
-function placeTree(snap: Snapshot, fold: string[], mine: PlaceOrder) {
+function placeTree(snap: Snapshot, fold: string[], mine: PlaceOrder, opened: string[] = openedOff) {
   const lists = { ...listsOf(snap), ...mine }
+  // a folded section (Pinned too) still shows the space you're in and its unread ones, as the window's (and Slack's)
+  const here = getState().ui.place
+  const stays = (p: Place) => p.id === here || (snap.look?.unread !== false && placeUnread(snap, p))
   const places = new Map(snap.places.map((p) => [p.id, p]))
   const sections = new Map((snap.sections ?? []).map((s) => [s.id, s]))
   const seen = new Set<string>()
@@ -236,14 +248,15 @@ function placeTree(snap: Snapshot, fold: string[], mine: PlaceOrder) {
     if (!s) return []
     const spaces = nest(take(lists[id], fits), snap.look?.worktrees === false, getState().ui.place)
     const shut = fold.includes(id)
-    return [{ s, spaces, shut, shown: shut || out ? [] : spaces }]
+    return [{ s, spaces, shut, shown: out ? [] : shut ? spaces.filter(stays) : spaces }]
   }
   const top = (lists[TOP] ?? []).flatMap((id) => group(id, false, () => true)).filter((g) => g.s.id !== PINNED || g.spaces.length)
   const machines = new Map((snap.machines ?? []).map((m) => [m.id, m]))
   const tree = (lists.all ?? []).flatMap((id) => {
     const m = machines.get(id)
     if (!m) return []
-    const shut = fold.includes(m.id)
+    // one that can't be reached starts folded, and a tap opens it for now (the window's)
+    const shut = offline(m) ? !opened.includes(m.id) : fold.includes(m.id)
     const fits = (p: Place) => p.machine === m.machine
     const spaces = nest(take(lists[m.id], fits), snap.look?.worktrees === false, getState().ui.place)
     const inside = (lists[sectionsIn(m.id)] ?? []).flatMap((s) => group(s, shut, fits))
@@ -252,6 +265,9 @@ function placeTree(snap: Snapshot, fold: string[], mine: PlaceOrder) {
   return { top, tree }
 }
 
+/** every machine open, the offline ones too */
+const allOpen = (snap: Snapshot) => (snap.machines ?? []).map((m) => m.id)
+
 /** the spaces of the sidebar as they show, top to bottom */
 function shownIds({ top, tree }: ReturnType<typeof placeTree>) {
   return [...top.flatMap((g) => g.shown), ...tree.flatMap((t) => [...t.shown, ...t.sections.flatMap((g) => g.shown)])].map((p) => p.id)
@@ -259,7 +275,7 @@ function shownIds({ top, tree }: ReturnType<typeof placeTree>) {
 
 /** the sections a space sits in: its section at the top, or its machine and its section there */
 function branchesOf(snap: Snapshot, id: string) {
-  const { top, tree } = placeTree(snap, [], pending)
+  const { top, tree } = placeTree(snap, [], pending, allOpen(snap))
   const g = top.find((x) => x.spaces.some((p) => p.id === id))
   if (g) return [g.s.id]
   const t = tree.find((x) => x.all.some((p) => p.id === id))
@@ -282,9 +298,14 @@ function mayGo(snap: Snapshot, p: Place, group: string) {
 
 /* ---------- rows ---------- */
 
-/** what every space's row shows: its name, bold when something new came in its coordinator's chat or waits on you
- *  there (with its count: a task waiting on you ends as a card in its space's chat), or that its machine can't be
- *  reached; dimmed when muted, as Slack's muted channels, its count still red */
+/** the spaces whose name another on their machine has: each shows its folder (core/spaces.js, as the window's rows) */
+function sharedNames(snap: Snapshot) {
+  return (SPc.sharedNames as (rows: object[]) => Set<string>)(snap.places.map((p) => ({ id: p.id, machine: p.machine, name: p.name, linked: p.git === 'linked' })))
+}
+
+/** what every space's row shows, as the window's (mods/spaces-chat main.js row): its name, bold and bright while its
+ *  Assistant has something new (unread), bright where it is open; dimmed when muted (Notify: Off), a crossed-out bell
+ *  after it, its counts still showing; then what needs you there (red) and its tasks in Ready (green) */
 function usePlaceRow({ p, snap, where }: { p: Place; snap: Snapshot; where?: string }) {
   const sel = useUI((u) => u.place === p.id)
   const c = counts(snap, p.id)
@@ -294,9 +315,11 @@ function usePlaceRow({ p, snap, where }: { p: Place; snap: Snapshot; where?: str
   const quiet = muted(snap, p.id)
   const off = p.status === 'off' && !p.connecting
   // 3.0's row: no Autopilot mark (the chat's header has its switch); after the name only what's unusual: its machine
-  // (in Pinned), its repo and branch, ↑ahead ↓behind (core/spaces.js gitTail, as the window's)
+  // (in Pinned), its folder where another space on its machine has its name, its repo and branch, ↑ahead ↓behind
+  // (core/spaces.js gitTail, as the window's)
   const pilot = false
-  const tail = p.git ? (SPc.gitTail as (g: object, o: object) => { where: string; ahead: number; behind: number })({ name: p.gitName, branch: p.branch, ahead: p.ahead, behind: p.behind }, { name: p.name, tree: !!treeMark.get(p.id), tag: where ?? null }) : { where: where ?? '', ahead: 0, behind: 0 }
+  const label = [where, sharedNames(snap).has(p.id) && p.where ? (SPc.tilde as (x: string) => string)(p.where) : null].filter(Boolean).join(' · ') || null
+  const tail = p.git ? (SPc.gitTail as (g: object, o: object) => { where: string; ahead: number; behind: number })({ name: p.gitName, branch: p.branch, ahead: p.ahead, behind: p.behind }, { name: p.name, tree: !!treeMark.get(p.id), tag: label }) : { where: label ?? '', ahead: 0, behind: 0 }
   return {
     sel,
     // what the row says aloud, its count and offline too
@@ -308,11 +331,11 @@ function usePlaceRow({ p, snap, where }: { p: Place; snap: Snapshot; where?: str
       <>
         <span aria-hidden data-autopilot={pilot || undefined} className={clsx('mode-pill mark', !pilot && 'invisible')} />
         {/* Shepherdr 3: a space's own icon (an emoji) where it has one */}
-        {treeMark.get(p.id) ? <BranchIcon className={clsx(icon, 'text-fg3')} /> : p.emoji ? <span aria-hidden className={clsx(icon, 'grid place-items-center text-[0.9375rem] leading-none')}>{p.emoji}</span> : <HashIcon className={clsx(icon, off || quiet ? 'text-fg3' : sel || n || fresh ? 'text-fg' : 'text-fg2')} />}
+        {treeMark.get(p.id) ? <BranchIcon className={clsx(icon, 'text-fg3')} /> : p.emoji ? <span aria-hidden className={clsx(icon, 'grid place-items-center text-[0.9375rem] leading-none', quiet && 'opacity-50')}>{p.emoji}</span> : <HashIcon className={clsx(icon, fresh ? 'text-fg' : sel && !quiet ? 'text-fg2' : 'text-fg3')} />}
       </>
     ),
     name: (
-      <RowText className={off || quiet ? 'text-fg3' : n || fresh ? 'font-semibold text-fg' : sel ? 'text-fg' : 'text-fg2'}>
+      <RowText className={fresh ? 'font-semibold text-fg' : quiet ? 'text-fg3' : sel ? 'text-fg' : 'text-fg2'}>
         {p.name}
       </RowText>
     ),
@@ -326,7 +349,7 @@ function usePlaceRow({ p, snap, where }: { p: Place; snap: Snapshot; where?: str
           </span>
         ) : null}
         {quiet ? <BellSlashIcon aria-hidden className={clsx(ic, 'text-fg3')} /> : null}
-        {p.connecting || off ? null : <AttentionBadge need={c.ownNeed} ready={c.ownReady} scope="here" />}
+        <AttentionBadge need={c.ownNeed} ready={c.ownReady} scope="here" />
       </>
     ),
   }
@@ -346,20 +369,21 @@ const indent = {
 /** a section's heading (Pinned, a machine): its chevron, its icon (Pinned's pin; a machine's emoji or server) and its word. A tap anywhere on it folds
  *  what is under it, as its chevron does; it goes nowhere, as Slack's sections don't. What it adds (a machine's +, ⋯
  *  and how it is) comes after its name. */
-function Heading({ id, label, folds, icon: mark, shut, held, className, children, ...rest }: { id: string; label: string; folds: string; icon: ReactNode; shut: boolean; held?: () => boolean; className?: string; children?: ReactNode } & Omit<LiHTMLAttributes<HTMLLIElement>, 'children'>) {
+function Heading({ id, label, folds, icon: mark, shut, held, toggle, dim, className, children, ...rest }: { id: string; label: string; folds: string; icon: ReactNode; shut: boolean; held?: () => boolean; toggle?: () => void; dim?: boolean; className?: string; children?: ReactNode } & Omit<LiHTMLAttributes<HTMLLIElement>, 'children'>) {
+  const flip = toggle ?? (() => toggleFold(id))
   return (
     <li data-heading={id} className={clsx(rowClass(false, false, true), 'group gap-1.5 select-none [-webkit-touch-callout:none]', className)} {...rest}>
-      <Fold label={`${shut ? 'Show' : 'Hide'} ${folds}`} id={id} shut={shut} />
+      <Fold label={`${shut ? 'Show' : 'Hide'} ${folds}`} shut={shut} toggle={flip} />
       {mark}
       <h2 className="contents">
         <button
           type="button"
           aria-expanded={!shut}
           // a finger held to open its menu folds nothing
-          onClick={() => !held?.() && toggleFold(id)}
+          onClick={() => !held?.() && flip()}
           className="flex min-w-0 flex-1 cursor-pointer text-left outline-none after:absolute after:inset-0 after:rounded-[inherit] keys:focus-visible:after:shadow-[inset_0_0_0_1.5px_var(--focus)]"
         >
-          <RowText className="font-medium text-fg2">{label}</RowText>
+          <RowText className={clsx('font-medium', dim ? 'text-fg3' : 'text-fg2')}>{label}</RowText>
         </button>
       </h2>
       {children}
@@ -367,18 +391,12 @@ function Heading({ id, label, folds, icon: mark, shut, held, className, children
   )
 }
 
-const NOTIFY_HINT: Record<(typeof NOTIFY)[number], string> = {
-  All: "every new message from its Assistant",
-  'Needs me': "its coordinator's questions and alerts",
-  Off: 'nothing from its coordinator, and its row stays quiet',
-}
-
 /** the icon a core menu item names (core/menus.js), drawn with the web's own */
 const MENU_ICONS: Record<string, (p: { className?: string }) => ReactNode> = {
   plus: PlusIcon, 'folder-plus': SectionIcon, 'check-check': ReadIcon, pin: PinTaskIcon, 'pin-off': UnpinIcon, 'square-pen': RenameIcon,
   settings: CogIcon, 'git-branch': SplitIcon, x: RemoveProjectIcon, 'trash-2': DeleteIcon,
 }
-type CoreItem = { id?: string; label?: string; icon?: string; sep?: boolean; setting?: boolean }
+type CoreItem = { id?: string; label?: string; icon?: string; sep?: boolean; setting?: boolean; note?: string }
 /** a core menu (core/menus.js, the window's too) as the web draws it: its items in order, each done by `acts` */
 function CoreMenuItems({ items, acts, setting }: { items: CoreItem[]; acts: Record<string, () => void>; setting?: ReactNode }) {
   return (
@@ -403,10 +421,11 @@ function PlaceMenu({ p, snap, menu, unread, onClose }: { p: Place; snap: Snapsho
   const then = (f: () => void) => () => { menu.close(); setTimeout(f) }
   const items = (MN.spaceMenu as (o: object) => CoreItem[])({ unread, pinned, git: p.git ?? null })
   return (
-    <RowMenu menu={menu} label={p.name} className="min-w-[min(16rem,calc(100%-0.5rem))]!">
+    <RowMenu menu={menu} label={p.name} className="min-w-[min(17rem,calc(100%-0.5rem))]!">
       <CoreMenuItems items={items}
-        setting={<MenuSetting name="Notify" icon={now === 'Off' ? <BellSlashIcon className={ic} /> : <BellIcon className={ic} />}
-          choices={NOTIFY.map((v) => ({ label: v, hint: NOTIFY_HINT[v], on: now === v, onClick: () => void pick(v).catch(() => undefined) }))} />}
+        setting={<MenuSetting name="Notify" named icon={now === 'Off' ? <BellSlashIcon className={ic} /> : <BellIcon className={ic} />}
+          note={items.find((x) => x.setting)?.note}
+          choices={NOTIFY.map((v) => ({ label: v, on: now === v, onClick: () => void pick(v).catch(() => undefined) }))} />}
         acts={{
           read: then(() => markPlaceRead(snap, [p])),
           pin: then(() => moveTo(p.id, PINNED)), unpin: then(() => moveTo(p.id, `m:${p.machine}`)),
@@ -515,10 +534,10 @@ function Go({ p, said, sel, sort, onClick, children }: { p: Place; said: string;
   )
 }
 
-/** a space's row clicked: there, or with ⌘ (Ctrl off a Mac) beside the focused pane, in split view */
-function openPlace(id: string, e: { metaKey: boolean; ctrlKey: boolean }) {
-  if (splitClick(e)) openSplit({ kind: 'place', id })
-  else goPlace(id)
+/** a space's row clicked: there */
+function openPlace(id: string, _e?: { metaKey: boolean; ctrlKey: boolean }) {
+  // the window's row selects its space, whatever key is held (no split view from the sidebar)
+  goPlace(id)
 }
 
 /** A space: its name (going there, a button stretched over the row), its ⋯ and its count. Its menu opens from the ⋯,
@@ -537,8 +556,8 @@ function Space({ p, snap, sort, at }: { p: Place; snap: Snapshot; sort: Sort; at
   const group = sort.under
   const r = usePlaceRow({ p: { ...p, name: rename.name }, snap, where: top && manyMachines(snap) ? machineName(snap.machines, p.machine) : undefined })
   const menu = useRowMenu({ beside: true })
-  const off = p.status === 'off'
-  const still = off || rename.editing
+  // its menu opens whatever its machine is doing, as the window's right-click
+  const still = rename.editing
   return (
     <li
       data-machine={top ? undefined : `m:${p.machine}`}
@@ -558,7 +577,7 @@ function Space({ p, snap, sort, at }: { p: Place; snap: Snapshot; sort: Sort; at
                 level: 'project',
                 drop: (ids) => reorder(group, ids),
                 into: { group, may: (g) => mayGo(snap, p, g), go: (g, before) => moveTo(p.id, g, before) },
-                ...(off ? {} : { hold: menu.hold, lift: menu.close, release: menu.release }),
+                hold: menu.hold, lift: menu.close, release: menu.release,
               })
       }
       onContextMenu={still ? undefined : (e) => (dragging() ? e.preventDefault() : menu.press.onContextMenu(e))}
@@ -595,9 +614,8 @@ function setRemoving(p: Place | null) {
 }
 
 /**
- * "Remove gtm from Shepherdr?": the folder and its code stay on disk; Shepherdr forgets it and its coordinator closes.
- * Its open tasks hide with it and come back when it is added again. While one of its tasks is working it can't be
- * removed: it says which, and changes by itself once they stop.
+ * Close a space, as the window's confirm asks it (mods/confirm-chat): "Close “gtm”?", "Its tabs close and every
+ * program in them ends.", Close space; then the window's own close (space.close, confirmed).
  */
 function ConfirmRemove() {
   const p = useSyncExternalStore(
@@ -615,9 +633,6 @@ function ConfirmRemove() {
 function RemoveBox({ p, snap }: { p: Place; snap: Snapshot }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const mine = snap.tasks.filter((t) => t.place === p.id && !t.archived)
-  const working = mine.filter((t) => t.status === 'work').map((t) => t.id)
-  const open = mine.filter((t) => t.status !== 'done').map((t) => t.id)
   const cancel = () => setRemoving(null)
   const go = async () => {
     setBusy(true)
@@ -630,34 +645,28 @@ function RemoveBox({ p, snap }: { p: Place; snap: Snapshot }) {
     const home = snap.places.find((x) => x.home && x.machine === p.machine)
     if (getState().ui.place === p.id && home) goPlace(home.id)
   }
-  if (working.length)
-    return (
-      <Dialog title={`${p.name} can’t be removed yet`} safe cancel="OK" onCancel={cancel} buttons={null}>
-        <p>
-          {and(working)} {working.length > 1 ? 'are' : 'is'} still working. Stop {working.length > 1 ? 'them' : 'it'} or let {working.length > 1 ? 'them' : 'it'} finish first.
-        </p>
-      </Dialog>
-    )
+  // the window's confirm (mods/confirm-chat, its words core/confirm.js): no other question first
   return (
     <Dialog
-      title={`Close ${p.name}?`}
+      title={CF.CLOSE_SPACE.title(p.name)}
       safe
       onCancel={cancel}
       buttons={
-        <Primary className="bg-need-fg! text-white! dark:text-black!" disabled={busy} onClick={go}>
-          {busy ? 'Removing…' : 'Remove'}
+        <Primary disabled={busy} onClick={go}>
+          {CF.CLOSE_SPACE.verb}
         </Primary>
       }
     >
-      <p>Its folder and files stay. Its Assistant and terminals close.</p>
+      <p>{CF.CLOSE_SPACE.detail}</p>
       {error ? <p className="mt-1.5 text-need-fg">{error}</p> : null}
     </Dialog>
   )
 }
 
-/** A machine's mark: its emoji, or a server without one */
+/** A machine's mark: its emoji, or a monitor (this computer) or a server without one; faded while it can't be reached */
 function MachineMark({ m }: { m: Machine }) {
-  return m.emoji ? <Emoji e={m.emoji} /> : <ServerIcon className={clsx(icon, 'text-fg3')} />
+  const Plain = m.here ? MonitorIcon : ServerIcon
+  return m.emoji ? <span className={clsx('contents', offline(m) && '*:opacity-50')}><Emoji e={m.emoji} /></span> : <Plain className={clsx(icon, 'text-fg3')} />
 }
 
 /** A section's mark: Pinned's pin, its emoji, or a folder without one */
@@ -673,18 +682,14 @@ function Emoji({ e }: { e: string }) {
   )
 }
 
-/** A machine's heading: its chevron folds its spaces and sections away, as a tap on it does; nothing opens. Its emoji
- *  (a server without one) before its name. It says when it can't be reached or struggles, and has a + (New space there)
- *  and a ⋯ (New space, New section in it, Rename machine). It drags among the machines, all it holds with it; a space of
- *  its own dropped on it goes back under it. */
-function MachineHeading({ m, snap, shut, spaces, sort, className }: { m: Machine; snap: Snapshot; shut: boolean; spaces: Place[]; sort: Sort; className?: string }) {
+/** A machine's heading, as the window's (mods/spaces-chat main.js): its emoji (a monitor for this computer, a server for
+ *  another without one) and its name; a tap folds its spaces and sections away, nothing opens. Connected: its + (New
+ *  space, New section there) and its meter, a red dot when its health couldn't be read. Not connected: "Offline" (or
+ *  "Connecting…"), dimmed and folded, a tap opening it for now. Its menu renames it. It stays in its place (machines
+ *  don't drag); a space of its own dropped on it goes back to its top. */
+function MachineHeading({ m, shut, className }: { m: Machine; shut: boolean; className?: string }) {
   const menu = useRowMenu({ beside: true })
-  const off = m.status === 'off' && !m.connecting
-  // a machine past an alert limit says which, quietly in red; all well, it says nothing (what it said last while it
-  // connects again after a restart: not news)
-  const herdr = !m.connecting && m.herdrDown
-  const over = m.health?.meters.find((x) => x.level === 'over')
-  const warn = herdr ? 'herdr down' : over ? `${over.name} ${over.pct}%` : ''
+  const off = offline(m)
   return (
     <Heading
       id={m.id}
@@ -693,20 +698,20 @@ function MachineHeading({ m, snap, shut, spaces, sort, className }: { m: Machine
       icon={<MachineMark m={m} />}
       held={menu.held}
       shut={shut}
+      dim={off}
+      toggle={off ? () => toggleOff(m.id) : undefined}
       data-machine={m.id}
       data-drop={m.id}
-      className={clsx(dragged, dropHeading, className, menu.open && 'bg-hover')}
-      onPointerDown={(e) => press(e, { id: m.id, siblings: sort.ids, level: 'machine', drop: (ids) => reorder(sort.under, ids), ...(off ? {} : { hold: menu.hold, lift: menu.close, release: menu.release }) })}
-      onContextMenu={off ? undefined : (e) => (dragging() ? e.preventDefault() : menu.press.onContextMenu(e))}
+      className={clsx(dropHeading, className, menu.open && 'bg-hover')}
+      // only its menu: a finger held on it opens it (machines keep their place)
+      onPointerDown={(e) => press(e, { id: m.id, siblings: [m.id], level: 'machine', drop: () => {}, hold: menu.hold, lift: menu.close, release: menu.release })}
+      onContextMenu={(e) => (dragging() ? e.preventDefault() : menu.press.onContextMenu(e))}
     >
+      {off ? <Meta>{m.connecting ? 'Connecting…' : 'Offline'}</Meta> : null}
       {off ? null : <AddButton machine={m.machine} name={m.name} />}
       {off ? null : <MachineMeter m={m} />}
-      {off ? null : <RowMenuButton menu={menu} label={`More for ${m.name}`} className="relative z-1 -mr-1 phone:-mr-1.5 phone:size-8" />}
-      <span className={clsx('contents', !off && !warn && 'untucked:hidden')}>
-        {warn ? <Meta className="text-need-fg!">{warn}</Meta> : null}
-        {m.connecting ? <Meta>Connecting…</Meta> : off && !herdr ? <Meta>Offline</Meta> : null}
-        {shut && !off ? <Inside snap={snap} spaces={spaces} /> : null}
-      </span>
+      {off ? null : <HealthDot m={m} />}
+      <RowMenuButton menu={menu} label={`More for ${m.name}`} className="relative z-1 -mr-1 phone:-mr-1.5 phone:size-8" />
       {menu.open ? (
         <RowMenu menu={menu} label={m.name} className="min-w-56!">
           {/* a machine's own menu, as the window's (core/menus.js): its name and emoji */}
@@ -717,10 +722,11 @@ function MachineHeading({ m, snap, shut, spaces, sort, className }: { m: Machine
   )
 }
 
-/** A section's heading, at the top or in a machine: its mark and name, folding its spaces away. It drags among the
- *  sections beside it, its spaces with it; a space dropped on it goes in, last. Its ⋯ renames or deletes it; Pinned
- *  only renames (its pin stays), and shows while it holds any. */
-function SectionHeading({ g, snap, sort, keep, at, className }: { g: Group; snap: Snapshot; sort: Sort; keep?: string[]; at: 'top' | 'inner'; className?: string }) {
+/** A section's heading, at the top (Pinned) or in a machine, as the window's: its mark and name, a tap folding its
+ *  spaces away (the one you're in and its unread ones stay); folded, what needs you in them (red) and their tasks in
+ *  Ready (green). Sections keep their place (they don't drag); a space dropped on one goes in, last. Its menu renames or
+ *  deletes it; Pinned has none, and shows while it holds any. */
+function SectionHeading({ g, snap, at, className }: { g: Group; snap: Snapshot; at: 'top' | 'inner'; className?: string }) {
   const menu = useRowMenu({ beside: true })
   const { s } = g
   const pinned = s.id === PINNED
@@ -735,20 +741,20 @@ function SectionHeading({ g, snap, sort, keep, at, className }: { g: Group; snap
       data-section={s.id}
       data-machine={at === 'inner' ? `m:${s.machine}` : undefined}
       data-drop={s.id}
-      className={clsx(dragged, dropHeading, at === 'inner' && 'pl-5 phone:pl-6', className, menu.open && 'bg-hover')}
-      // Pinned out of sight while it holds nothing keeps its place among them
-      onPointerDown={(e) => press(e, { id: s.id, siblings: sort.ids, level: 'section', drop: (ids) => reorder(sort.under, keep ? kept(keep, ids) : ids), hold: menu.hold, lift: menu.close, release: menu.release })}
+      className={clsx(dropHeading, at === 'inner' && 'pl-5 phone:pl-6', className, menu.open && 'bg-hover')}
+      // only its menu: a finger held on it opens it (sections keep their place)
+      onPointerDown={pinned ? undefined : (e) => press(e, { id: s.id, siblings: [s.id], level: 'section', drop: () => {}, hold: menu.hold, lift: menu.close, release: menu.release })}
       onContextMenu={pinned ? undefined : (e) => (dragging() ? e.preventDefault() : menu.press.onContextMenu(e))}
     >
       {/* Pinned has no menu in the window */}
       {pinned ? null : <RowMenuButton menu={menu} label={`More for ${s.name}`} className="relative z-1 -mr-1 phone:-mr-1.5 phone:size-8" />}
-      <span className="contents untucked:hidden">{g.shut ? <Inside snap={snap} spaces={g.spaces} /> : null}</span>
+      <span className={clsx('contents', !pinned && 'untucked:hidden')}>{g.shut ? <Inside snap={snap} spaces={g.spaces} /> : null}</span>
       {menu.open ? (
         <RowMenu menu={menu} label={s.name} className="min-w-56!">
-          {/* as the window's (core/menus.js): Rename…, and Delete at once (its spaces go back under their machines) */}
+          {/* as the window's (core/menus.js): Rename…, and Delete at once, its toast offering Undo */}
           <CoreMenuItems items={MN.sectionMenu() as CoreItem[]} acts={{
             rename: () => { menu.close(); setTimeout(() => openRename(s.id)) },
-            delete: () => { menu.close(); void act({ type: 'section', op: 'delete', id: s.id }).catch(() => undefined) },
+            delete: () => { menu.close(); void deleteSection(s).catch(() => undefined) },
           }} />
         </RowMenu>
       ) : null}
@@ -761,27 +767,38 @@ function EmptySection({ inner }: { inner: boolean }) {
   return <li className={clsx('flex min-h-7 items-center text-[0.75rem] text-fg3 phone:min-h-9 phone:text-[0.8125rem]', inner ? indent.inner : indent.top)}>Drag spaces here</li>
 }
 
-/** the sidebar header's +: New space or section, as the window's (for the shown space's machine) */
-function NewSection() {
+/** the "Spaces" heading over the list, as the window's: its word, and its + (New space or section, on the shown space's
+ *  machine) */
+function SpacesHeading() {
   const snap = useSnap()
   const place = useUI((u) => u.place)
   const m = snap?.machines?.find((x) => x.machine === snap.places.find((p) => p.id === place)?.machine) ?? snap?.machines?.[0]
-  return m ? <span className="contents [&>button]:mr-0! [&>button]:static! [&>button]:opacity-100! [&>button]:pointer-events-auto!"><AddButton machine={m.machine} name={m.name} label="New space or section" /></span> : null
+  return (
+    <div className="flex h-8 items-center justify-between pr-2.5 pl-4 text-[0.75rem] font-medium text-fg3 phone:h-10 phone:pr-3.5 phone:pl-5 phone:text-[0.8125rem]">
+      <h2>Spaces</h2>
+      {m ? <span className="flex"><AddButton machine={m.machine} name={m.name} label="New space or section" /></span> : null}
+    </div>
+  )
 }
 
-/** on a folded section's heading, what its hidden spaces hold: a red dot where something waits on you in one, else a
- *  grey one where one is unread; nothing all read. Quiet as a mark, not a count: the spaces have those. */
+/** on a folded section's heading (Pinned too), as the window's: what needs you in its spaces (red) and their tasks in
+ *  Ready (green), added up */
 function Inside({ snap, spaces }: { snap: Snapshot; spaces: Place[] }) {
-  const on = spaces.filter((p) => p.status !== 'off')
-  const needs = on.some((p) => counts(snap, p.id).own)
-  const fresh = !needs && on.some((p) => placeUnread(snap, p))
-  if (!needs && !fresh) return null
-  const said = needs ? 'Something in it waits on you' : 'Something in it is unread'
-  return <span role="img" aria-label={said} data-inside={needs ? 'needs' : 'unread'} className={clsx('mx-1.5 size-2 shrink-0 rounded-full phone:size-2.5', needs ? 'bg-need' : 'bg-fg2')} />
+  const need = spaces.reduce((n, p) => n + counts(snap, p.id).ownNeed, 0)
+  const ready = spaces.reduce((n, p) => n + counts(snap, p.id).ownReady, 0)
+  return <AttentionBadge need={need} ready={ready} scope="in it" />
+}
+
+/** a section's Delete (its menu), as the window's: at once, then a toast whose tap puts it back */
+async function deleteSection(s: Section) {
+  const r = (await act({ type: 'section', op: 'delete', id: s.id })) as { ok?: boolean }
+  if (r?.ok === false) return
+  const words = (SPc.sectionDeletedToast as (name: string) => { title: string; body: string })(s.name)
+  toast({ ...words, level: 'info', timeout: 8000, go: () => void act({ type: 'section', op: 'restore' }).catch(() => undefined) })
 }
 
 /** the chevron before a heading's name: folds what is under it away */
-function Fold({ label, id, shut }: { label: string; id: string; shut: boolean }) {
+function Fold({ label, shut, toggle }: { label: string; shut: boolean; toggle: () => void }) {
   const Icon = shut ? NextIcon : DownIcon
   return (
     <button
@@ -790,7 +807,7 @@ function Fold({ label, id, shut }: { label: string; id: string; shut: boolean })
       aria-expanded={!shut}
       onClick={(e) => {
         e.stopPropagation()
-        toggleFold(id)
+        toggle()
       }}
       className="hit relative z-1 -ml-0.5 grid size-4 shrink-0 place-items-center rounded-full text-fg3 hover:bg-sel hover:text-fg phone:-ml-1 phone:size-5"
     >
@@ -799,7 +816,8 @@ function Fold({ label, id, shut }: { label: string; id: string; shut: boolean })
   )
 }
 
-/** + on a machine's heading: a new space there. A mouse finds it on hover; a finger always sees it. */
+/** + on a connected machine's heading (and the Spaces heading's, for the shown space's machine), always there as the
+ *  window's: New space or New section there */
 function AddButton({ machine, name, label }: { machine: string; name: string; label?: string }) {
   const menu = useRowMenu({ beside: true })
   return (
@@ -815,7 +833,7 @@ function AddButton({ machine, name, label }: { machine: string; name: string; la
           if (menu.open) menu.close()
           else menu.show(e.currentTarget.closest('li') ?? e.currentTarget.parentElement)
         }}
-        className="hit relative z-1 -mr-1 grid size-6 shrink-0 place-items-center rounded-full text-fg3 hover:bg-sel hover:text-fg aria-expanded:bg-sel tucked:not-aria-expanded:pointer-events-none tucked:not-aria-expanded:absolute tucked:not-aria-expanded:opacity-0 phone:-mr-1.5 phone:size-8"
+        className="hit relative z-1 -mr-1 grid size-6 shrink-0 place-items-center rounded-full text-fg3 hover:bg-sel hover:text-fg aria-expanded:bg-sel phone:-mr-1.5 phone:size-8"
       >
         <PlusIcon className={ic} />
       </button>
@@ -844,7 +862,7 @@ function stepPlace(e: KeyboardEvent, ui: UI, snap: Snapshot) {
   e.preventDefault()
   // from where it sits with every section open: the open space may be in a folded one
   const shown = new Set(shownIds(placeTree(snap, folded, pending)))
-  const all = shownIds(placeTree(snap, [], pending))
+  const all = shownIds(placeTree(snap, [], pending, allOpen(snap)))
   const i = all.indexOf(ui.place)
   const id = e.key === 'ArrowUp' ? all.slice(0, Math.max(0, i)).findLast((x) => shown.has(x)) : all.slice(i + 1).find((x) => shown.has(x))
   if (!id) return true
@@ -858,12 +876,9 @@ function Places() {
   const place = useUI((u) => u.place)
   const fold = useFolded()
   const mine = usePending()
-  const { top, tree } = placeTree(snap, fold, mine)
-  useEffect(() => {
-    // one gone to from the sidebar itself (a click, Alt+↑/↓) was in sight already: the sidebar stays as it is
-    if (seen !== null && seen !== place && !shownIds(placeTree(snap, folded, pending)).includes(place)) unfold(branchesOf(snap, place))
-    seen = place
-  }, [place])
+  const opened = useOpenedOff()
+  const { top, tree } = placeTree(snap, fold, mine, opened)
+  // going to a space folds nothing open, as the window's: a folded section shows the space you're in anyway (placeTree)
   useEffect(() => {
     // a list the snapshot has as it was dragged or moved shows from it again
     const now = listsOf(snap)
@@ -877,16 +892,14 @@ function Places() {
     )
     if (Object.keys(left).length !== Object.keys(pending).length) setPending(left)
   }, [snap])
-  const tops = top.map((g) => g.s.id)
-  const machines = tree.map((x) => x.m.id)
   return (
     <>
+      <SpacesHeading />
       {top.length ? (
-        // one list, so a section drags among the others, as the machines do below
-        <List className="pt-1">
+        <List>
           {top.map((g, i) => (
             <Fragment key={g.s.id}>
-              <SectionHeading g={g} snap={snap} sort={{ under: TOP, ids: tops }} keep={listsOf(snap)[TOP]} at="top" className={i ? 'mt-3 phone:mt-4' : undefined} />
+              <SectionHeading g={g} snap={snap} at="top" className={i ? 'mt-3 phone:mt-4' : undefined} />
               {!g.shut && !g.spaces.length ? <EmptySection inner={false} /> : null}
               {g.shown.map((p) => (
                 <Space key={p.id} p={p} snap={snap} at="top" sort={{ under: g.s.id, ids: g.shown.map((x) => x.id) }} />
@@ -895,11 +908,11 @@ function Places() {
           ))}
         </List>
       ) : null}
-      {/* one list, so a machine drags among the others; each a section of its own, apart as those at the top are */}
-      <List className={top.length ? 'pt-3 phone:pt-4' : 'pt-1'}>
-        {tree.map(({ m, shut, shown, sections, all }, i) => (
+      {/* the machines, each a section of its own, apart as those at the top are */}
+      <List className={top.length ? 'pt-3 phone:pt-4' : undefined}>
+        {tree.map(({ m, shut, shown, sections }, i) => (
           <Fragment key={m.id}>
-            <MachineHeading m={m} snap={snap} shut={shut} spaces={all} sort={{ under: 'all', ids: machines }} className={i ? 'mt-3 phone:mt-4' : undefined} />
+            <MachineHeading m={m} shut={shut} className={i ? 'mt-3 phone:mt-4' : undefined} />
             {shown.map((p) => (
               <Space key={p.id} p={p} snap={snap} at="machine" sort={{ under: m.id, ids: shown.map((x) => x.id) }} />
             ))}
@@ -907,7 +920,7 @@ function Places() {
               ? null
               : sections.map((g) => (
                   <Fragment key={g.s.id}>
-                    <SectionHeading g={g} snap={snap} sort={{ under: sectionsIn(m.id), ids: sections.map((x) => x.s.id) }} at="inner" />
+                    <SectionHeading g={g} snap={snap} at="inner" />
                     {!g.shut && !g.spaces.length ? <EmptySection inner /> : null}
                     {g.shown.map((p) => (
                       <Space key={p.id} p={p} snap={snap} at="inner" sort={{ under: g.s.id, ids: g.shown.map((x) => x.id) }} />
@@ -925,7 +938,6 @@ export default definePlugin({
   name: 'places',
   setup(reg) {
     reg.views.places = Places
-    reg.views.placesMenu = NewSection
     reg.overlays.push(AddSpace, ConfirmRemove, MarkRead, SectionDialogs)
     reg.keys.push({ order: 1, handle: ({ e, ui, snap }) => stepPlace(e, ui, snap) })
   },

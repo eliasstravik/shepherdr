@@ -55,6 +55,18 @@ export class Secrets {
     } catch { return []; }
   }
 
+  /** Every kept secret with where it is kept, as the window's Settings › Secrets lists them: Everywhere, a machine
+   *  (null: this computer) or a space (its id as the snapshot has it). */
+  async entries(): Promise<{ name: string; at: number; scope: "everywhere" | "machine" | "space"; machine: string | null; space: string | null }[]> {
+    const r = await run(["names", "--json"]);
+    try {
+      return (JSON.parse(r.out) as any[]).filter((e) => ["everywhere", "machine", "space"].includes(e.scope)).map((e) => ({
+        name: e.name, at: e.at ?? 0, scope: e.scope,
+        machine: e.scope === "machine" ? e.machine || null : null,
+        space: e.scope === "space" ? (e.machine && !String(e.space).includes("/") ? `${e.machine}/${e.space}` : e.space) : null }));
+    } catch { return []; }
+  }
+
   /** Keeps a value (or removes it: null), then tells each agent that asked for it there, by name. */
   async keep(level: string, name: string, value: string | null, card?: { address: string }) {
     if (!NAME.test(name)) throw new Error("Name it like an environment variable: GITHUB_TOKEN.");

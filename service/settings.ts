@@ -8,34 +8,34 @@ import { dirname, join } from "node:path";
 import { HOME } from "./paths.ts";
 import * as C from "../core/settings.js";
 import * as M from "../core/machines.js";
-import * as AG from "../core/agents.js";
 import type { SettingRow, SettingSection } from "../web/shared/types.ts";
 
-const { TASK_ROWS, DEFAULTS, wordFor, valueFor } = C as any;
+const { TASK_ROWS, DEFAULTS, wordFor, valueFor, ROLES: CORE_ROLES, NOTES: CORE_NOTES, ABOUT, BACKUP, BASE, MACHINES, OLD_NAMES, SECTIONS,
+  WEB, modelLabel, roleSel, otherCli, otherCliWords, backupProblem, homeAbout, webState, sameAs, LOADING_AGENTS, RESET, machineLabel } = C as any;
 const { HOLD } = M as any;
-const { line, NAMES } = AG as any;
 const FILE = process.env.HERDR_TASK_SETTINGS || join(HOME, ".herdr", "shepherdr.json");
 const TEMPLATES = join(HOME, ".config", "herdr-core", "templates");
+// herdr-task's check of each machine's CLIs (installed, signed in), and its home round (each machine's home space)
+const CLI_CHECK = join(HOME, ".herdr", "cli-check.json");
+const HOME_ROUND = join(HOME, ".herdr", "tasks", ".home.json");
 const LOCAL = "local";
+const title = (id: string) => SECTIONS.find((s: any) => s.id === id).title as string;
+const readJson = (f: string) => { try { return JSON.parse(readFileSync(f, "utf8")) ?? {}; } catch { return {}; } };
 
 /** A space Settings can scope to: its id (machine/id for another machine's), name, machine, and repo folder. */
 export type Scope = { id: string; name: string; machine: string | null; folder?: string | null };
 
-export const ROLES = [
-  { id: "coordinator", title: "Assistant", about: "Plans the work and starts a task for each part.", file: "assistant.md", told: "What every Assistant is told first" },
-  { id: "worker", title: "Workers", about: "Do one task each.", file: "worker.md", told: "What every worker is told first" },
-  { id: "reviewer", title: "Reviewer", about: "Checks each task's work before it's ready.", file: "reviewer.md", told: "What every reviewer is told first" },
-];
-const NOTES = [
-  { id: "start", title: "When a task starts", about: "Steps its agent does before the work." },
-  { id: "finish", title: "When a task finishes", about: "Steps its agent does before it says the task is ready." },
-];
+export const ROLES: { id: string; title: string; about: string; file: string; told: string }[] = CORE_ROLES;
+const NOTES: { id: string; title: string; about: string; example: string }[] = CORE_NOTES;
 // Machines: when new tasks wait (each a percent; CPU as a share of all cores), and how task agents run
-const LIMITS = [
-  { field: "start_memory", label: "Memory busy above", about: "New tasks there wait while more memory is in use.", min: 10, max: 100, step: 5, scale: 1 },
-  { field: "start_load", label: "CPU busy above", about: "The 1-minute load, as a share of all its cores.", min: 25, max: 400, step: 25, scale: 100 },
-  { field: "start_disk", label: "Disk busy above", about: "Its home or /tmp, whichever is fuller.", min: 10, max: 100, step: 5, scale: 1 },
-];
+const LIMIT_STEPS: Record<string, { min: number; max: number; step: number; scale: number }> = {
+  start_memory: { min: 10, max: 100, step: 5, scale: 1 },
+  start_load: { min: 25, max: 400, step: 25, scale: 100 },
+  start_disk: { min: 10, max: 100, step: 5, scale: 1 },
+};
+const LIMITS = MACHINES.limits.map((l: any) => ({ ...l, label: l.title, ...LIMIT_STEPS[l.field] })) as { field: string; label: string; about: string; min: number; max: number; step: number; scale: number }[];
+// a stepper's choices in words, low to high (the window's − and + step through them)
+const range = (lo: number, hi: number, by: number, word: (n: number) => string) => Array.from({ length: Math.floor((hi - lo) / by) + 1 }, (_, i) => word(lo + i * by));
 const CAPS = [0, 1, 2, 4, 8, 16, 32];
 const FIELDS = ["start_memory", "start_load", "start_disk", "low_priority", "worker_memory"];
 const MACHINE_DEFAULTS: Record<string, unknown> = { ...HOLD, low_priority: true, worker_memory: 0 };
@@ -95,75 +95,128 @@ export class Settings {
   }
 
   private layer(scope: string | null) { return scope ? this.file.spaces?.[scope] : this.file.everywhere; }
-  /** A field as a scope sees it: its own, else Everywhere's, else the default; and whether the scope sets it. */
+  /** A field as a scope sees it, as the window's chain: its own, else what its machine set for its spaces before
+   *  (the old machine scope), else Everywhere's, else the default; whether the scope sets it; and what it follows. */
   private pick(scope: string | null, section: string, field: string | null) {
-    const at = (l: any) => (field ? l?.[section]?.[field] : l?.[section]);
-    const own = at(this.layer(scope)), every = at(this.file.everywhere);
+    const at = (l: any) => { const v = field ? l?.[section]?.[field] : l?.[section]; return v === null ? undefined : v; };
+    const m = scope ? (scope.includes("/") ? scope.split("/")[0] : LOCAL) : null;
+    const own = scope ? at(this.layer(scope)) : undefined, mach = m ? at(this.file.machines?.[m]) : undefined, every = at(this.file.everywhere);
     const dflt = field ? DEFAULTS[section]?.[field] ?? null : null;
-    return { value: own ?? (scope ? every : undefined) ?? dflt, own: scope ? own !== undefined && own !== null : false, parent: every ?? dflt };
+    const parent = mach ?? every ?? dflt;
+    return { value: scope ? own ?? parent : every ?? dflt, own: own !== undefined, parent, level: mach !== undefined ? "machine" : "everywhere", machine: m };
   }
 
-  /** Every page at every level: Agents and Tasks (Everywhere and each space), Machines (all and each machine), Web. */
-  /** What an unset role runs, per CLI, in the window's words (set by the service from each CLI's own settings). */
-  cliDefaults: Record<string, string> = {};
+  /** What the agents offer (core/settings.js choicesFrom: menus, permission defaults, what an unset role runs), set by
+   *  the service from each CLI's own settings; null until read. */
+  choices: any = null;
+  /** The branch a space's folder has checked out (Base branch's empty box says it), by space id; fetchBranch reads one. */
+  branches: Record<string, string> = {};
+  fetchBranch: ((s: Scope) => Promise<string>) | null = null;
+  private asked = new Set<string>();
 
-  sections(link: string | null, spaces: Scope[] = [], machines: string[] = [], host = LOCAL): SettingSection[] {
+  /** Every page at every level: Agents and Tasks (Everywhere and each space), Machines (all and each machine), Web.
+   *  web: what the service last said of the web app (web.json: on, link, why, its QR picture's SVG). */
+  sections(web: { on: boolean; link: string | null; why: string | null; qr?: string | null } | string | null, spaces: Scope[] = [], machines: string[] = [], host = LOCAL): SettingSection[] {
     this.host = host;
     this.scopes = spaces;
     this.machineNames = machines;
+    // herdr-task's CLI check and home round, read again at most every 10 s (the snapshot is built often)
+    if (Date.now() - this.readAt > 10_000) {
+      this.readAt = Date.now();
+      this.checks = readJson(CLI_CHECK)?.machines ?? {};
+      this.homes = readJson(HOME_ROUND)?.machines ?? {};
+    }
     const out: SettingSection[] = [];
     for (const s of [null, ...spaces]) out.push(this.agents(s), this.tasks(s));
     // Machines, as the window's page: the limits for every machine, then each machine's block
-    out.push({ name: "Machines", level: "all", rows: [null, LOCAL, ...machines].flatMap((m) => this.machines(m)) });
-    out.push({ name: "Web", global: true, rows: [{ label: "Link", key: "web.link", value: link ?? "Tailscale isn't running here", fixed: true }] });
+    out.push({ name: title("machines"), level: "all", rows: [null, LOCAL, ...machines].flatMap((m) => this.machines(m)) });
+    out.push(this.web(typeof web === "string" ? { on: true, link: web, why: null } : web ?? { on: true, link: null, why: "Tailscale isn't running here" }));
     return out;
+  }
+  private checks: Record<string, any> = {};
+  private readAt = 0;
+  private homes: Record<string, any> | null = null;
+
+  /** Web, as the window's page: the web app's state, then its link (Copy) and its QR code to open it on a phone. */
+  private web(w: { on: boolean; link: string | null; why: string | null; qr?: string | null }): SettingSection {
+    const rows: SettingRow[] = [{ label: WEB.title, key: "", value: "", hint: webState(!w.on, true, w), fixed: true }];
+    const shown = w.on && w.link && !w.why;
+    if (shown) rows.push({ label: WEB.link, key: "web.link", value: "", hint: w.link!, copy: w.link!, fixed: true });
+    return { name: title("web"), global: true, rows, ...(shown && w.qr ? { qr: w.qr, qrTitle: WEB.phone } : {}) };
   }
 
   /** Under a row, as the window's: in a space "Changed here · Reset" or "Same as everywhere"; on Everywhere the spaces
    *  that use their own (section, field: where the row's value is kept). */
-  private follows(scope: Scope | null, p: { own: boolean; parent: unknown }, word: (v: any) => string, section?: string, field?: string | null): Partial<SettingRow> {
+  private follows(scope: Scope | null, p: { own: boolean; parent: unknown; level?: string; machine?: string | null }, word: (v: any) => string, section?: string, field?: string | null): Partial<SettingRow> {
     if (!scope) {
       if (!section) return {};
       const others = this.scopes.filter((sc) => { const l = this.file.spaces?.[sc.id]; const v = field ? l?.[section]?.[field] : l?.[section]; return v !== undefined && v !== null; })
         .map((sc) => ({ id: sc.id, name: sc.name }));
       return others.length ? { others } : {};
     }
-    return p.own ? { inherits: { value: word(p.parent), from: "everywhere" } } : { from: "everywhere" };
+    // "Same as everywhere", or the machine a value set before still comes from (its words without "Same as ")
+    const from = sameAs(p.level, p.machine).replace(/^Same as /, "");
+    return p.own ? { inherits: { value: word(p.parent), from } } : { from };
   }
   private scopes: Scope[] = [];
 
   private agents(s: Scope | null): SettingSection {
     const scope = s?.id ?? null;
     const worker = this.pick(scope, "worker", null).value?.agent ?? "claude";
-    const other = worker === "codex" ? "claude" : "codex";
+    const menus = this.choices?.menus;
     const rows: SettingRow[] = ROLES.map((r) => {
       const p = this.pick(scope, r.id, null);
-      // unset: what it runs anyway, as the window's model button says it (the worker's CLI's own default model)
-      const words = (v: any) => (v ? line(v) : r.id === "reviewer" ? `Other CLI (${NAMES[other]})` : this.cliDefaults[worker] || "Default");
-      // on Everywhere its row has "Edit instructions" too: the file every agent of the role is told first (the same for every space)
-      return { label: r.title, key: `role.${r.id}`, value: words(p.value), agent: { role: r.id, pick: p.value ?? null }, hint: r.about, ...(s ? {} : { file: r.file }), ...this.follows(s, p, words, r.id, null) } as SettingRow;
+      // as the window's model button: what it runs, "Opus 5.5 · 1M · High"; an unset Reviewer says "Other CLI (Codex)"
+      const button = (v: any) => {
+        if (!this.choices) return LOADING_AGENTS;
+        const { sel, unset } = roleSel(r.id, v ?? null, this.choices, worker);
+        return unset && r.id === "reviewer" && sel ? otherCliWords(otherCli(worker)) : sel ? modelLabel(menus, sel) : LOADING_AGENTS;
+      };
+      const { sel, unset } = roleSel(r.id, p.value ?? null, this.choices, worker);
+      // on Everywhere its row has "Edit instructions" too (the same for every space), and a set Reviewer "Use other CLI"
+      return { label: r.title, key: `role.${r.id}`, value: button(p.value), hint: r.about,
+        agent: { role: r.id, pick: p.value ?? null, sel, unset, other: !s && r.id === "reviewer" && !unset },
+        ...(s ? {} : { file: r.file }), ...this.follows(s, p, button, r.id, null) } as SettingRow;
     });
-    // Backup: the other CLI takes over a task once when its agent can't go on (on: unset or a CLI; off: "off")
+    // Backup: the other CLI takes over a task once when its agent can't go on (on: unset or a CLI; off: "off"); a
+    // machine where the other CLI can't is one more line under it
     const b = this.pick(scope, "backup", "agent");
-    rows.push({ label: "Backup agent", key: "backup.agent", value: ON(b.value !== "off"), options: ["on", "off"], hint: "The other CLI takes over a task once when its agent can't go on.",
+    const on = b.value !== "off";
+    const problem = on ? backupProblem(this.checks, s ? b.machine : null, b.value && b.value !== "off" ? b.value : otherCli(worker)) : "";
+    rows.push({ label: BACKUP.title, key: "backup.agent", value: ON(on), options: ["on", "off"], hint: problem ? `${BACKUP.about}\n${problem}` : BACKUP.about,
       ...this.follows(s, b, (v) => ON(v !== "off"), "backup", "agent") });
-    return { name: "Agents", level: scope ?? "all", rows };
+    return { name: title("agents"), level: scope ?? "all", rows };
   }
 
   private tasks(s: Scope | null): SettingSection {
     const scope = s?.id ?? null;
-    const rows: SettingRow[] = TASK_ROWS.map(([section, field, label, choices]: any) => {
+    // Must fix shows only while there is a review
+    const rounds = Number(this.pick(scope, "tasks", "review_rounds").value) || 0;
+    const rows: SettingRow[] = TASK_ROWS.filter(([, field]: any) => field !== "must_fix" || rounds > 0).map(([section, field, label, choices]: any) => {
       const p = this.pick(scope, section, field);
       const words = (v: any) => wordFor(choices, v);
+      const key = `${section}.${field}`;
       return Array.isArray(choices)
-        ? { label, key: `${section}.${field}`, value: words(p.value), options: choices.map(([, w]: any) => w), ...this.follows(s, p, words, section, field) }
-        : { label, key: `${section}.${field}`, value: String(p.value), num: { min: choices.min, max: choices.max, unit: "tasks", one: "task" }, ...this.follows(s, p, String, section, field) };
+        ? { label, key, value: words(p.value), options: choices.map(([, w]: any) => w), hint: ABOUT[key], ...this.follows(s, p, words, section, field) }
+        // a count: the window's − and + (Tasks at once)
+        : { label, key, value: String(p.value), steps: range(choices.min, choices.max, 1, String), hint: ABOUT[key], ...this.follows(s, p, String, section, field) };
     });
+    // Base branch, a space's only (as the window's): its box, empty for the branch the folder has checked out
+    if (s) {
+      const p = this.pick(scope, "tasks", "base");
+      if (!(s.id in this.branches) && !this.asked.has(s.id) && this.fetchBranch) {
+        this.asked.add(s.id);
+        void this.fetchBranch(s).then((b) => { this.branches[s.id] = b; for (const fn of this.listeners) fn(); }).catch(() => {});
+      }
+      const at = rows.findIndex((r) => r.key === "automations.enabled");
+      rows.splice(at, 0, { label: BASE.title, key: "tasks.base", value: String(p.value ?? "").trim(), text: true, hint: BASE.about,
+        placeholder: BASE.empty(this.branches[s.id] ?? ""), ...this.follows(s, p, (v) => v || BASE.follows, "tasks", "base") });
+    }
     for (const n of NOTES) {
       const p = this.pick(scope, "tasks", `${n.id}_notes`);
-      rows.push({ label: n.title, key: `tasks.${n.id}_notes`, value: p.value ?? "", multiline: true, hint: n.about, group: "Notes", ...this.follows(s, p, (v) => v ?? "", "tasks", `${n.id}_notes`) });
+      rows.push({ label: n.title, key: `tasks.${n.id}_notes`, value: p.value ?? "", multiline: true, hint: n.about, placeholder: n.example, ...this.follows(s, p, (v) => v ?? "", "tasks", `${n.id}_notes`) });
     }
-    return { name: "Tasks", level: scope ?? "all", rows };
+    return { name: title("tasks"), level: scope ?? "all", rows };
   }
 
   /** Machines: when new tasks wait and how task agents run, for every machine (null) or one's own; a machine's page
@@ -181,29 +234,32 @@ export class Settings {
     const hidden = m && !ownLimits ? { hidden: `limits@${m}` } : {};
     // a machine's own rows say which machine (key@machine); the heading is its name, as the window's blocks
     const at = m ? `@${m}` : "";
-    const group = m ? (m === LOCAL ? "This computer" : m) : "When new tasks wait, on every machine";
+    const group = m ? machineLabel(m) : MACHINES.heading;
+    // the window's steppers: "Off" or "80%", − and + stepping through the choices (from the default when off)
     const rows: SettingRow[] = LIMITS.map((l) => {
-      const word = (v: any) => (v == null ? "off" : String(Math.round(Number(v) * l.scale)));
-      return { label: l.label, key: `machine.${l.field}${at}`, value: word(val(l.field)), hint: l.about, num: { min: l.min, max: l.max, step: l.step, unit: "%", one: "%", off: true }, group, ...hidden, ...from(l.field, word) };
+      const word = (v: any) => (v == null ? "Off" : `${Math.round(Number(v) * l.scale)}%`);
+      return { label: l.label, key: `machine.${l.field}${at}`, value: word(val(l.field)), hint: l.about, steps: range(l.min, l.max, l.step, (n) => `${n}%`),
+        stepFrom: word(HOLD[l.field]), group, ...hidden, ...from(l.field, word) };
     });
-    rows.push({ label: "Workers run at low priority", key: `machine.low_priority${at}`, value: ON(val("low_priority") !== false), options: ["on", "off"],
-      hint: "Task agents start below the Assistant and your apps, and are ended first when memory runs out.", group, ...hidden, ...from("low_priority", (v) => ON(v !== false)) });
+    rows.push({ label: MACHINES.low.title, key: `machine.low_priority${at}`, value: ON(val("low_priority") !== false), options: ["on", "off"],
+      hint: MACHINES.low.about, group, ...hidden, ...from("low_priority", (v) => ON(v !== false)) });
     const gb = (v: any) => (Number(v) ? `${Number(v)} GB` : "Off");
-    rows.push({ label: "Memory cap per worker", key: `machine.worker_memory${at}`, value: gb(val("worker_memory")), options: CAPS.map(gb),
-      hint: "A worker over it is slowed down, not ended. Applies to tasks started after a change.", group, ...hidden, ...from("worker_memory", gb) });
-    if (m && !ownLimits) rows.push({ label: "Limits", key: "", value: "", hint: "Same as all machines.", reveals: `limits@${m}`, group } as SettingRow);
+    rows.push({ label: MACHINES.cap.title, key: `machine.worker_memory${at}`, value: gb(val("worker_memory")), steps: CAPS.map(gb),
+      hint: MACHINES.cap.about, group, ...hidden, ...from("worker_memory", gb) });
+    if (m && !ownLimits) rows.push({ label: MACHINES.own.title, key: "", value: "", hint: MACHINES.own.about, reveals: `limits@${m}`, group } as SettingRow);
     // what a machine set for all its spaces before (the old machine scope): it still applies there, until Reset
-    const OLD: Record<string, string> = { coordinator: "Assistant", worker: "Workers", reviewer: "Reviewer", backup: "Backup agent", automations: "Run automations",
-      merge: "Merge", review_rounds: "Review", must_fix: "Must fix", proof: "Proof", max_running: "Tasks at once", archive_after: "Archive Done after",
-      worktrees: "Worktrees", start_notes: "When a task starts", finish_notes: "When a task finishes", base: "Base branch" };
     const old = m ? Object.entries(layer).filter(([k]) => !["machine", "home"].includes(k))
       .flatMap(([k, v]: [string, any]) => (["tasks", "automations"].includes(k) && v && typeof v === "object" ? Object.keys(v).map((f) => (k === "automations" ? k : f)) : [k])) : [];
-    if (old.length) rows.push({ label: "Set before for its spaces", key: `machine.old${at}`, value: "", button: "Reset", group,
-      hint: `${[...new Set(old.map((x) => OLD[x] ?? x))].join(", ")}. These still apply to its spaces unless a space sets its own.` } as SettingRow);
+    if (old.length) rows.push({ label: MACHINES.old.title, key: `machine.old${at}`, value: "", button: RESET, group,
+      hint: MACHINES.old.about([...new Set(old.map((x) => OLD_NAMES[x] ?? x))]) } as SettingRow);
     if (m) {
+      // Home Assistant: its line says what herdr-task's home round last found; a machine without a home space has
+      // Make home space beside the switch
       const home = typeof layer.home === "boolean" ? layer.home : m === LOCAL;
-      rows.unshift({ label: "Home Assistant", key: `machine.home${at}`, value: ON(home), options: ["on", "off"], group,
-        hint: home ? "Its home space's Assistant watches its disk, load and processes." : "Off: nobody watches its disk, load and processes." });
+      const st = this.homes?.[m];
+      const missing = home && !st?.space && !st?.error && this.homes !== null;
+      rows.unshift({ label: MACHINES.home.title, key: `machine.home${at}`, value: ON(home), options: ["on", "off"], group, details: m,
+        hint: homeAbout(home, st), ...(missing ? { extra: { label: MACHINES.home.make, key: `machine.makehome${at}` } } : {}) });
     }
     return rows;
   }
@@ -267,7 +323,7 @@ export class Settings {
         const l = LIMITS.find((x) => x.field === field);
         let v: unknown;
         if (word === null) v = undefined;
-        else if (l) v = word === "off" || word === "" ? null : Math.max(l.min, Math.min(l.max, Number(word))) / l.scale;
+        else if (l) v = /^off$/i.test(word) || word === "" ? null : Math.max(l.min, Math.min(l.max, Number.parseFloat(word))) / l.scale;
         else if (field === "low_priority") v = word === "on";
         else if (field === "worker_memory") { const n = word === "Off" ? 0 : parseInt(word, 10); v = CAPS.includes(n) ? n : NaN; }
         else throw new Error("That setting can't be changed here.");
@@ -283,6 +339,10 @@ export class Settings {
       if (value === undefined || (typeof value === "number" && !Number.isFinite(value))) throw new Error("Not one of its choices.");
       if (!Array.isArray(choices) && value !== null) value = Math.max(choices.min, Math.min(choices.max, Math.round(value)));
       put(section, field, value);
+    } else if (key === "tasks.base") {
+      // a space's own (the service checked the branch is there first); empty: back to the folder's branch
+      if (!space) throw new Error("A base branch is set per space.");
+      put("tasks", "base", word?.trim() ? word.trim() : null);
     } else if (section === "tasks" && /^(start|finish)_notes$/.test(field)) {
       put("tasks", field, word === null ? null : word.slice(0, 8000));
     } else if (section === "role" && ROLES.some((r) => r.id === field)) {

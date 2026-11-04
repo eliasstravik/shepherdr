@@ -23,8 +23,10 @@ import { Fold } from './fold.tsx'
 import { Markdown } from './markdown.tsx'
 import { answeredBy, cancelReply, canReply, isArtifact, jumpTo, startReply } from './reply.ts'
 import { typing, working } from './typing.ts'
-import { JobsSheet, JobsTag, LiveLine, TurnLine } from './activity.tsx'
-import { AgentControls, AgentLine, openRestart, RestartSheet } from '@client/restart.tsx'
+import { JobsSheet, JobsTag, NeedsYou, TurnLine, WorkingLine } from './activity.tsx'
+import { ClockIcon, PaperClipIcon } from '@heroicons/react/16/solid'
+import { AskedRow, Band, BriefRow, Chips, EndedRow, ErrorRow, NoteRow, Notice, HeadRow, ImagesLine, NewsRow, onTerminal, PublishingRow, questionsBelow, ReplyLine, Thumbs, WORDS } from './rows.tsx'
+import { AgentLine, openModelMenu, openRestart, RestartSheet } from '@client/restart.tsx'
 
 /* ---------- messages ---------- */
 
@@ -42,8 +44,10 @@ export function From({ children }: { children: ReactNode }) {
   return <div className="mb-0.5 text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{children}</div>
 }
 
-/** out: what you just sent, not back from the agent's log yet (last: its last bubble, which says when it failed) */
-function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from: string; out?: Outgoing; last?: boolean }) {
+/** out: what you just sent, not back from the agent's log yet (last: its last bubble, which says when it failed);
+ *  pics: the images sent with it, under its words as the window shows them; writing: the agent's newest reply while it
+ *  works, which waits for its band */
+function Bubble({ msg, chat, from, out, last, pics, images, writing }: { msg: Message; chat: Chat; from: string; out?: Outgoing; last?: boolean; pics?: Message[]; images?: number; writing?: boolean }) {
   const you = msg.who === 'you'
   // an artifact's card on its own is held, reacted to and replied to as a whole, like a bubble
   const art = isArtifact(msg)
@@ -81,31 +85,42 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
   const body = !!(msg.text || msg.answered || msg.waiting)
   const reacted = !!msg.reactions?.length
   const edge = registry.messageEdge.map(({ View }, i) => <View key={i} msg={msg} chat={chat} />)
-  // reactions sit on the bubble's bottom right corner, yours and the agent's alike (like iMessage and WhatsApp); a row
-  // wider than a short bubble grows toward the middle of the screen, never off it
-  const pills = reacted ? <div className="relative -mt-2 flex max-w-full flex-wrap justify-end gap-1 self-end pr-2.5 pl-1 phone:-mt-2.5">{edge}</div> : null
-  // a reply's quote rides on its first part: the words, or the file when there are none
-  const quote = msg.reply ? <Quote q={msg.reply} chat={chat.key} from={from} you={you} /> : null
+  // the window's reply line: the message it answers, in one dim line over it
+  const quote = msg.reply ? <ReplyLine q={msg.reply} chat={chat.key} you={you} /> : null
   const wide = !!msg.artifact
   const parts = registry.messageParts.map(({ View }, i) => <View key={i} msg={msg} chat={chat} from={from} />)
+  // the images sent with it, as the window's: whole, their shape kept, on its side; a press opens the viewer
+  const [width, setWidth] = useState(0)
+  const shots = pics?.length ? (
+    <Thumbs
+      files={pics.map((m) => ({ name: m.file!.name, path: m.file!.path, url: fileUrl(chat.key, m.file!.path) }))}
+      chat={chat.key} you={you} faded={!!out && out.state === 'sending'} width={width}
+      open={(i) => setUI({ photo: out ? { chat: chat.key, file: pics[i].file } : { chat: chat.key, msg: pics[i].id } })}
+    />
+  ) : null
+  // its band: what you just sent gets one once it's in the conversation; the agent's newest waits while it writes
+  const band = msg.text && !msg.card && !art && !out && !writing && !msg.waiting ? <Band msg={msg} chat={chat.key} cli={chat.cli !== ''} /> : null
   const unit = (anchor: ReactNode, quoted?: boolean) => (
     <div
       data-msg={msg.id}
       data-chat={chat.key}
       data-you={you ? '' : undefined}
+      ref={(el) => { if (el && pics?.length) { const w = el.parentElement?.parentElement?.clientWidth ?? 0; if (w && Math.abs(w - width) > 1) setWidth(w) } }}
       className={clsx(
         'group/msg relative flex flex-col',
-        you ? 'self-end' : 'self-start',
-        // an artifact's card keeps the chat's width, less the room for the smiley and reply arrow beside it (a folded
-        // one is as wide as its line)
-        art ? 'max-w-full has-[[data-card]]:w-full pointer-fine:has-[[data-card]]:w-[calc(100%-4rem)]' : !wide ? 'max-w-full' : you ? 'max-w-[88%]' : 'max-w-[92%] phone:max-w-[96%]',
+        you ? 'self-end items-end' : 'self-start items-start',
+        // an artifact's card keeps the chat's width (a folded one is as wide as its line)
+        art ? 'max-w-full has-[[data-card]]:w-full' : 'max-w-full',
       )}
     >
       {replies ? <SwipeHint /> : null}
       {quoted ? quote : null}
       {anchor}
-      {pills}
-      <Beside msg={msg} chat={chat.key} you={you} picked={picked || menu} react={canReact} reply={replies} more={pending && (() => setMenu(true))} />
+      {anchor && body ? <Chips msg={msg} /> : null}
+      {anchor && body ? shots : null}
+      {anchor && body && images ? <ImagesLine n={images} /> : null}
+      {band}
+      {!band && reacted && !art ? <div className="mt-1 flex flex-wrap gap-1">{edge}</div> : null}
       {pending && menu ? <PendingMenu out={pending} onClose={() => setMenu(false)} /> : null}
     </div>
   )
@@ -155,7 +170,7 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
                   // after Select text it selects, though the app's chrome around it doesn't
                   selecting && 'select-text',
                   touchFor(replies && !selecting),
-                  picked ? 'shadow-[inset_0_0_0_1.5px_var(--line2),0_0_0_2px_var(--bg)]' : quote && tucks,
+                  picked && 'shadow-[inset_0_0_0_1.5px_var(--line2),0_0_0_2px_var(--bg)]',
                 )}
               >
                 {msg.answered ? (
@@ -176,7 +191,7 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
                     const blocker = chat.messages.findLast((m) => m.question?.sent === undefined && !!m.question && !m.waiting)
                     return blocker ? <LinkButton onClick={() => jumpTo(chat.key, blocker.id, { card: true })}>Go to question</LinkButton> : null
                   })()}
-                </> : msg.waitsFor === 'turn' && msg.cid ? <Queued chat={chat.key} cid={msg.cid} text={msg.text ?? ''} /> : waitLine(msg.waitsFor)}</div> : null}
+                </> : waitLine(msg.waitsFor)}</div> : null}
                 {msg.text ? <div ref={text} data-text>{you ? <YourText text={msg.text} /> : <Fold id={msg.id}><Markdown text={msg.text} /></Fold>}</div> : null}
               </div>,
               true,
@@ -210,19 +225,36 @@ function Bubble({ msg, chat, from, out, last }: { msg: Message; chat: Chat; from
   )
 }
 
-/** one held until the agent is free (the window's queued message): Send now, Edit (back in the box), × (taken back) */
-function Queued({ chat, cid, text }: { chat: string; cid: string; text: string }) {
-  const btn = 'relative font-medium text-fg after:absolute after:-inset-x-1.5 after:-inset-y-2.5 hover:underline'
-  const take = (then?: () => void) => void act({ type: 'held-drop', cid } as never).then(() => { removeOut(cid); then?.() }, () => undefined)
+/** held until the agent is free (Ctrl+Enter, a long press on Send): not in the conversation yet */
+const isHeld = (m: Message) => !!m.waiting && m.waitsFor === 'turn' && !!m.cid
+const heldOut = (o: Outgoing) => o.state !== 'failed' && (o.hold || o.waitsFor === 'turn')
+
+/** the window's held messages (mods/chat queued()): a row each over the box, a clock, its words, "Queued · Sends when
+ *  the agent is free", Send now, Edit (back in the box), × (taken back) */
+function Held({ chatKey }: { chatKey: string }) {
+  const msgs = useStore((s) => s.chats[chatKey]?.messages)
+  const outbox = useStore((s) => s.outbox)
+  const rows = new Map<string, { cid: string; text: string; files: string[] }>()
+  for (const m of msgs ?? []) if (isHeld(m)) rows.set(m.cid!, { cid: m.cid!, text: m.text ?? '', files: m.file ? [m.file.name] : [] })
+  for (const o of outbox) if (o.chat === chatKey && heldOut(o) && !rows.has(o.cid)) rows.set(o.cid, { cid: o.cid, text: o.text, files: o.files.map((f) => f.name) })
+  if (!rows.size) return null
+  const ghost = 'flex h-[22px] shrink-0 items-center rounded-[6px] px-2 text-[0.75rem] font-medium text-fg2 hover:bg-hover hover:text-fg phone:h-9'
+  const take = (cid: string, then?: () => void) => void act({ type: 'held-drop', cid } as never).then(() => { removeOut(cid); then?.() }, () => { removeOut(cid); then?.() })
   return (
-    <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
-      <span>Queued · Sends when the agent is free</span>
-      <span className="flex items-center gap-3 whitespace-nowrap">
-        <button type="button" className={btn} onClick={() => void act({ type: 'held-now', cid } as never).catch(() => undefined)}>Send now</button>
-        <button type="button" className={btn} onClick={() => take(() => { setDraft(chat, text); setUI({ focus: chat }) })}>Edit</button>
-        <button type="button" aria-label="Remove" className={btn} onClick={() => take()}><XIcon className="size-3.5" /></button>
-      </span>
-    </span>
+    <div className="flex flex-col gap-1 pb-1.5">
+      {[...rows.values()].map((r) => (
+        <div key={r.cid} data-held className="flex h-10 items-center gap-2 rounded-[8px] bg-bg pr-1 pl-2.5 shadow-[inset_0_0_0_1px_var(--line2)] phone:h-12">
+          <ClockIcon aria-hidden className="size-3.5 shrink-0 fill-[var(--fg3)]" />
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate text-[0.78125rem] text-fg">{r.text || r.files.join(', ')}</span>
+            <span className="truncate text-[0.75rem] text-fg3">{WORDS.queued}</span>
+          </span>
+          <button type="button" className={ghost} onClick={() => void act({ type: 'held-now', cid: r.cid } as never).catch(() => undefined)}>{WORDS.sendNow}</button>
+          <button type="button" className={ghost} onClick={() => take(r.cid, () => { const now = (getDraft(chatKey) ?? '').trim(); setDraft(chatKey, now ? `${r.text}\n\n${now}` : r.text); setUI({ focus: chatKey }) })}>Edit</button>
+          <button type="button" aria-label="Remove" className="grid size-[22px] shrink-0 place-items-center rounded-[6px] text-fg3 hover:bg-hover hover:text-fg phone:size-9" onClick={() => take(r.cid)}><XIcon className="size-3" /></button>
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -450,68 +482,6 @@ function SwipeHint() {
   )
 }
 
-/** Copy, then "Copied" for a moment */
-function CopyButton({ text, className }: { text: string; className: string }) {
-  const [done, setDone] = useState(false)
-  return (
-    <button type="button" aria-label={done ? 'Copied' : 'Copy'} title={done ? 'Copied' : 'Copy'} className={className}
-      onClick={() => { navigator.clipboard?.writeText(text).catch(() => {}); setDone(true); setTimeout(() => setDone(false), 1200) }}>
-      {done ? <CheckIcon className={ic} /> : <CopyIcon className={ic} />}
-    </button>
-  )
-}
-
-/** with a mouse, the window's hover band beside the message: the smiley, Reply, Copy, Rewind or Fork */
-function Beside({ msg, chat, you, picked, react, reply, more, name, over }: { msg: Message; chat: string; you: boolean; picked: boolean; react: boolean; reply: boolean; more?: () => void; name?: string; over?: boolean }) {
-  if (!react && !reply && !more) return null
-  const btn = over
-    ? 'grid size-7 place-items-center rounded-full bg-black/55 text-white backdrop-blur-sm hover:bg-black/70'
-    : 'grid size-7 place-items-center rounded-full text-fg3 hover:bg-hover hover:text-fg2'
-  return (
-    <div
-      className={clsx(
-        'absolute hidden items-center gap-0.5 transition-opacity focus-within:opacity-100 pointer-fine:flex',
-        over ? 'top-1 right-1 gap-1' : clsx('top-1.5', you ? 'right-full mr-1 flex-row-reverse' : 'left-full ml-1'),
-        picked ? 'opacity-100' : 'opacity-0 group-hover/msg:opacity-100',
-      )}
-    >
-      {react ? (
-        <button
-          type="button"
-          aria-label={name ? `React to ${name}` : 'React'}
-          onClick={(e) => openBar(chat, msg.id, e.detail ? { x: e.clientX, y: e.clientY, touch: false } : undefined)}
-          className={clsx(btn, picked && !over && 'bg-hover text-fg2')}
-        >
-          <SmileIcon className={ic} />
-        </button>
-      ) : null}
-      {reply ? (
-        <button type="button" aria-label={name ? `Reply to ${name}` : 'Reply'} onClick={() => startReply(chat, msg)} className={btn}>
-          <ReplyIcon className={ic} />
-        </button>
-      ) : null}
-      {/* as the window's hover band: Copy, then Rewind on yours (not a /command) or Fork on the agent's */}
-      {reply && msg.text && !over ? <CopyButton text={msg.text} className={btn} /> : null}
-      {reply && msg.text && !over && !msg.card && !(you && msg.text.trimStart().startsWith('/')) ? (
-        you ? (
-          <button type="button" aria-label="Rewind" title="Rewind" onClick={() => void act({ type: 'rewind', chat, message: msg.id } as never).catch((e: Error) => alert(e.message))} className={btn}>
-            <RewindIcon className={ic} />
-          </button>
-        ) : (
-          <button type="button" aria-label="Fork" title="Fork" onClick={() => void act({ type: 'fork', chat } as never).catch((e: Error) => alert(e.message))} className={btn}>
-            <ForkIcon className={ic} />
-          </button>
-        )
-      ) : null}
-      {more ? (
-        <button type="button" aria-label={name ? `More for ${name}` : 'More'} aria-haspopup="menu" onClick={more} className={clsx(btn, picked && !over && 'bg-hover text-fg2')}>
-          <MoreIcon className={ic} />
-        </button>
-      ) : null}
-    </div>
-  )
-}
-
 /** a tap on a quote (or the box's reply line) jumps to the message it answers and lights it up; a div with the
     button role, not a button: a button leaves its width out of its parent's */
 function jumps(chat: string, q: ReplyQuote, label: string) {
@@ -603,127 +573,26 @@ export function albumRows(n: number) {
  *  corners rounded like a bubble's (the small one points at whoever sent them) */
 function Album({ msgs, chat, from, out, last: lastPart }: { msgs: Message[]; chat: Chat; from: string; out?: Outgoing; last?: boolean }) {
   const you = msgs[0].who === 'you'
-  const rows = albumRows(msgs.length)
-  const cols = Math.max(...rows)
-  // the sixth tile is covered too: +N counts every picture not seen
-  const more = msgs.length > 6 ? msgs.length - 5 : 0
-  const big = 'var(--bubble-radius)'
-  const small = '4px'
-  let i = 0
+  // the window's images row: each whole, its shape kept, on the sender's side (core/chat-view.js fitThumbs)
+  const box = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(0)
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setWidth(el.clientWidth))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
   return (
-    <>
+    <div ref={box} data-slide className={clsx('flex w-full flex-col', you ? 'items-end' : 'items-start', 'transition-opacity duration-200', (msgs[0].waiting || out?.state === 'sending') && 'opacity-60')}>
       {msgs[0].newSession ? <SessionLine /> : null}
-      <div
-        role="group"
-        data-slide
-        aria-label={msgs.length > 1 ? `${msgs.length} pictures` : undefined}
-        style={msgs.length > 1 ? ({ '--cols': cols } as CSSProperties) : undefined}
-        className={clsx(
-          'relative flex max-w-full flex-col gap-[3px] [--tile:--spacing(21)] phone:[--tile:--spacing(22)]',
-          msgs.length > 1 && 'w-[calc(var(--tile)*var(--cols)+3px*(var(--cols)-1))]',
-          you ? 'self-end' : 'self-start',
-          'transition-opacity duration-200',
-          (msgs[0].waiting || out?.state === 'sending') && 'opacity-60',
-        )}
-      >
-        {canReply(msgs[0], out) ? <SwipeHint /> : null}
-        {msgs[0].reply ? <Quote q={msgs[0].reply} chat={chat.key} from={from} you={you} /> : null}
-        {rows.map((len, r) => (
-          <div key={r} className={clsx('flex gap-[3px]', you && 'justify-end')}>
-            {Array.from({ length: len }, (_, c) => {
-              const m = msgs[i++]
-              const last = r === rows.length - 1
-              // the album's outer corners are a bubble's; the ones between tiles are small
-              const radius = [
-                !r && !c ? big : small,
-                !r && c === len - 1 ? big : small,
-                last && c === len - 1 ? (you ? '6px' : big) : small,
-                last && !c ? (you ? big : '6px') : small,
-              ].join(' ')
-              return <Tile key={keyOf(m)} msg={m} chat={chat} you={you} radius={radius} single={msgs.length === 1} more={i === 6 ? more : 0} out={out} />
-            })}
-          </div>
-        ))}
-      </div>
-      {out?.state === 'failed' && lastPart ? <NotSent out={out} className="-mt-2.5 self-end" /> : null}
-    </>
-  )
-}
-
-/** one picture in an album, a message of its own: a tap opens it full screen; a hold (or the smiley on it, with a
- *  mouse) reacts, and its reactions sit in its bottom right corner */
-function Tile({ msg, chat, you, radius, single, more, out }: { msg: Message; chat: Chat; you: boolean; radius: string; single: boolean; more: number; out?: Outgoing }) {
-  const f = msg.file!
-  // a picture this browser can't show (HEIC on most desktops) is a file tile, or a small one in an album
-  const [broken, setBroken] = useState(false)
-  // one on its way isn't a message yet: nothing to react to
-  const canReact = has('reactions') && !msg.waiting && !out
-  const replies = canReply(msg, out)
-  const picked = usePicked(msg.id, chat.key)
-  // one on its way offers only Remove, as a bubble does
-  const [menu, setMenu] = useState(false)
-  const pending = out && out.state !== 'failed' ? out : undefined
-  const hold = useHold(canReact ? (at) => openBar(chat.key, msg.id, at) : pending ? () => setMenu(true) : null, replies ? () => startReply(chat.key, msg) : null)
-  const edge = msg.reactions?.length ? registry.messageEdge.map(({ View }, i) => <View key={i} msg={msg} chat={chat} />) : null
-  const smiley = (beside: boolean) => (
-    <>
-      <Beside msg={msg} chat={chat.key} you={you} picked={picked || menu} react={canReact} reply={replies} more={pending && (() => setMenu(true))} name={f.name} over={!beside} />
-      {pending && menu ? <PendingMenu out={pending} onClose={() => setMenu(false)} /> : null}
-    </>
-  )
-  // on its own it is a file tile like any other file, its reactions on its bottom right corner as on a bubble
-  if (broken && single)
-    return (
-      <div data-msg={msg.id} data-chat={chat.key} data-you={you ? '' : undefined} className="group/msg relative flex max-w-full flex-col">
-        <div data-anchor {...hold} className={clsx('relative max-w-full select-none [-webkit-touch-callout:none]', (canReact || pending) && pressable, touchFor(replies))}>
-          <FileTile name={f.name} chat={chat.key} path={f.path} />
-        </div>
-        {edge ? <div className="relative -mt-2 flex max-w-full flex-wrap justify-end gap-1 self-end pr-2.5 pl-1 phone:-mt-2.5">{edge}</div> : null}
-        {smiley(true)}
-      </div>
-    )
-  const frame = 'relative block overflow-hidden bg-bubble after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:shadow-[inset_0_0_0_1px_var(--line)]'
-  return (
-    <div data-msg={msg.id} data-chat={chat.key} data-you={you ? '' : undefined} className={clsx('group/msg relative min-w-0', !single && 'h-(--tile) flex-1')}>
-      {broken ? (
-        <a
-          data-anchor
-          href={fileUrl(chat.key, f.path, true)}
-          download={f.name}
-          aria-label={`Download ${f.name}`}
-          {...hold}
-          style={{ borderRadius: radius }}
-          className={clsx(frame, 'grid size-full place-items-center text-fg2 select-none [-webkit-touch-callout:none] hover:text-fg', (canReact || pending) && pressable, touchFor(replies))}
-        >
-          <span className="grid justify-items-center gap-0.5 text-[0.6875rem] phone:text-[0.75rem]">
-            <FileIcon className={ic} />
-            {extOf(f.name).toUpperCase()}
-          </span>
-        </a>
-      ) : (
-        <button
-          data-anchor
-          type="button"
-          aria-label={more ? `Open ${f.name} and ${more - 1} more` : `Open ${f.name}`}
-          {...hold}
-          // one on its way isn't a message yet: it opens on its own, like a file in the message box
-          onClick={() => setUI({ photo: out ? { chat: chat.key, file: f } : { chat: chat.key, msg: msg.id } })}
-          style={{ borderRadius: radius }}
-          className={clsx(frame, 'select-none [-webkit-touch-callout:none]', (canReact || pending) && pressable, touchFor(replies), !single && 'size-full', picked && 'outline-2 outline-offset-2 outline-(--line2)')}
-        >
-          <img
-            src={fileUrl(chat.key, f.path)}
-            alt={f.name}
-            draggable={false}
-            onError={() => setBroken(true)}
-            className={single ? 'block max-h-32 max-w-44 min-h-16 min-w-16 object-cover phone:max-h-36 phone:max-w-48' : 'size-full object-cover'}
-          />
-          {more ? <span className="absolute inset-0 grid place-items-center bg-black/45 text-[1.25rem] font-semibold text-white tabular-nums">+{more}</span> : null}
-        </button>
-      )}
-      {/* reactions sit in the tile's corner: an album has no bubble edge of its own to hang them from */}
-      {edge ? <div className="pointer-events-none absolute right-1 bottom-1 flex w-max max-w-[calc(var(--tile,100%)*3)] flex-wrap-reverse justify-end gap-1 *:pointer-events-auto">{edge}</div> : null}
-      {smiley(false)}
+      {msgs[0].reply ? <ReplyLine q={msgs[0].reply} chat={chat.key} you={you} /> : null}
+      <Thumbs
+        files={msgs.map((m) => ({ name: m.file!.name, path: m.file!.path, url: fileUrl(chat.key, m.file!.path) }))}
+        chat={chat.key} you={you} width={width}
+        open={(i) => setUI({ photo: out ? { chat: chat.key, file: msgs[i].file } : { chat: chat.key, msg: msgs[i].id } })}
+      />
+      {out?.state === 'failed' && lastPart ? <NotSent out={out} className="self-end" /> : null}
     </div>
   )
 }
@@ -1232,30 +1101,47 @@ function PrOnCard({ pr, className }: { pr: { number: number; url: string }; clas
 const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: string }) {
   const outbox = useStore((s) => s.outbox)
   type Item = { at: number; msg: Message; out?: Outgoing; last?: boolean } | { at: number; album: Message[]; out?: Outgoing; last?: boolean }
-  const items: Item[] = chat.messages.map((msg) => ({ at: msg.at ?? 0, msg }))
+  // held messages aren't in the conversation yet: they are rows over the box (Held), as the window's
+  const items: Item[] = chat.messages.filter((m) => !isHeld(m)).map((msg) => ({ at: msg.at ?? 0, msg }))
   items.sort((a, b) => a.at - b.at)
   // what you just sent comes last, in one list with the rest: when it comes back it keeps its place in the list, so
   // nothing is drawn again (a picture doesn't load twice)
   for (const out of outbox) {
-    if (out.chat !== chat.key) continue
+    if (out.chat !== chat.key || heldOut(out)) continue
     const parts = partsOf(out, chat)
     parts.forEach((msg, i) => items.push({ at: out.at, msg, out, last: i === parts.length - 1 }))
   }
-  // pictures sent together (they share their time) sit side by side, like an album
-  const rows: Item[] = []
+  // as the window's rows: images sent with words go under them (an album of their own when they came alone); the
+  // quiet lines (tools, a brief or another agent's message, task news, a publish on its way) sit tight together, one
+  // block; every block is the same gap from the next
+  type Quiet = { at: number; quiet: Message[] }
+  const rows: (Item | Quiet)[] = []
+  const pics = new Map<Message, Message[]>()
+  const imgLines = new Map<Message, number>()
+  const isQuiet = (m: Message) => !!(m.activity || m.brief || m.news || m.publishing || m.ended)
   for (const it of items) {
     const last = rows.at(-1)
-    if (!('msg' in it) || !isPicture(it.msg)) rows.push(it)
-    else {
-      const m = it.msg
-      const prev = last && 'album' in last ? last.album.at(-1)! : null
-      if (prev && prev.who === m.who && !m.newSession && !!prev.waiting === !!m.waiting && m.at === prev.at && prev.cid === m.cid) {
-        const album = last as Extract<Item, { album: Message[] }>
-        album.album.push(m)
-        album.last = it.last
-      } else rows.push({ at: it.at, album: [m], out: it.out, last: it.last })
+    if ('msg' in it && isQuiet(it.msg)) {
+      if (last && 'quiet' in last) last.quiet.push(it.msg)
+      else rows.push({ at: it.at, quiet: [it.msg] })
+      continue
     }
+    const words = last && 'msg' in last && last.msg.text && !last.msg.card ? last.msg : null
+    const together = (m: Message) => !!words && words.who === m.who && words.at === m.at && words.cid === m.cid
+    if ('msg' in it && it.msg.images && together(it.msg)) { imgLines.set(words!, it.msg.images); continue }
+    if (!('msg' in it) || !isPicture(it.msg)) { rows.push(it); continue }
+    const m = it.msg
+    if (together(m)) { pics.set(words!, [...(pics.get(words!) ?? []), m]); continue }
+    const prev = last && 'album' in last ? last.album.at(-1)! : null
+    if (prev && prev.who === m.who && !m.newSession && !!prev.waiting === !!m.waiting && m.at === prev.at && prev.cid === m.cid) {
+      const album = last as Extract<Item, { album: Message[] }>
+      album.album.push(m)
+      album.last = it.last
+    } else rows.push({ at: it.at, album: [m], out: it.out, last: it.last })
   }
+  // the agent's newest reply while it works: it may still be writing it, so its band waits
+  const tail = chat.messages.findLast((m) => !m.question && !m.secret)
+  const writing = chat.working && tail?.who === 'agent' && tail.text && !tail.brief && !tail.news ? tail.id : null
   const newAt = useContext(NewAt)
   // a message just sent, or just in, rises into place
   const list = useRef<HTMLDivElement>(null)
@@ -1263,37 +1149,59 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
   let day = ''
   return (
     // a finger sliding a message left moves them all (--peek), and each one's time comes in at the right, like iMessage
-    <div ref={list} data-messages className="mx-auto flex w-full max-w-read flex-1 flex-col gap-3.5 px-5 pt-5 pb-3 phone:px-4">
-      {!rows.length ? (
-        // the window's empty Assistant chat
+    <div ref={list} data-messages className="mx-auto flex w-full max-w-read flex-1 flex-col gap-4 px-5 pt-5 pb-3 phone:px-4">
+      <HeadRow chat={chat} />
+      {!rows.length && !chat.top && !chat.earlier ? (
+        // the window's empty Assistant chat; any other agent's, its notice
         chat.key.startsWith('p:') ? (
           <Empty className="p-0!">
-            <span className="block font-medium text-fg">What should the Assistant do?</span>
-            <span className="block">It plans the work, starts a task for each part and keeps you posted.</span>
+            <span className="block font-medium text-fg">{WORDS.emptyTitle}</span>
+            <span className="block">{WORDS.emptyBody}</span>
           </Empty>
-        ) : <Empty className="p-0!">No messages yet. Write to start.</Empty>
+        ) : (
+          <Empty className="p-0!">
+            <span className="block font-medium text-fg">No messages</span>
+            <span className="block">Write to the agent below.</span>
+          </Empty>
+        )
       ) : null}
       {rows.map((it) => {
         const at = it.at > 1e12 ? it.at : 0
         const d = at ? new Date(at).toDateString() : day
         const dated = !!at && d !== day
         day = d
-        const first = 'album' in it ? it.album[0].id : it.msg.id
-        const key = keyOf('album' in it ? it.album[0] : it.msg)
+        const head = 'quiet' in it ? it.quiet[0] : 'album' in it ? it.album[0] : it.msg
+        const first = head.id
+        const key = keyOf(head)
         return (
           <Fragment key={key}>
             {dated ? <DateLine at={at} /> : null}
             {newAt === first ? <NewLine /> : null}
             <Row at={at} arrive={key}>
-              {'album' in it ? (
+              {'quiet' in it ? (
+                <div data-quiet className="flex w-full flex-col">
+                  {it.quiet.map((m) => (
+                    <div key={m.id} data-msg={m.id} data-chat={chat.key} className="w-full">
+                      {m.activity ? <TurnLine a={m.activity} chat={chat.key} /> : m.brief ? <BriefRow msg={m} /> : m.news ? <NewsRow msg={m} /> : m.ended ? <EndedRow msg={m} /> : <PublishingRow />}
+                    </div>
+                  ))}
+                </div>
+              ) : 'album' in it ? (
                 <Album msgs={it.album} chat={chat} from={from} out={it.out} last={it.last} />
+              ) : it.msg.error ? (
+                <ErrorRow msg={it.msg} />
+              ) : it.msg.asked ? (
+                <AskedRow msg={it.msg} />
+              ) : it.msg.images ? (
+                <ImagesLine n={it.msg.images} />
               ) : (
-                <Bubble msg={it.msg} chat={chat} from={from} out={it.out} last={it.last} />
+                <Bubble msg={it.msg} chat={chat} from={from} out={it.out} last={it.last} pics={pics.get(it.msg)} images={imgLines.get(it.msg)} writing={writing === it.msg.id} />
               )}
             </Row>
           </Fragment>
         )
       })}
+      {chat.note ? <NoteRow text={chat.note} /> : null}
       {registry.chatTail.map(({ View }, i) => (
         <View key={i} chat={chat} from={from} />
       ))}
@@ -1301,24 +1209,6 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
   )
 })
 
-/** while the agent works, the step it is on in one quiet line; three soft dots in the agent's bubble (like iMessage) where
- *  its log says nothing of its turn */
-function Typing({ chat, from }: { chat: Chat; from: string }) {
-  // the step it is on now, in place of the dots: in a turn it began itself too (news, its background work woke it),
-  // so it never looks idle while it works
-  if (working(chat)) return <LiveLine chat={chat} />
-  if (!typing(chat)) return null
-  return (
-    <div role="status" className="typing self-start rounded-bubble rounded-bl-[6px] bg-bubble px-3.5 py-2 text-fg3 phone:px-4 phone:py-2.5">
-      <span className="sr-only">{`${from} is working`}</span>
-      <span aria-hidden className="flex h-lh items-center gap-1">
-        <i />
-        <i />
-        <i />
-      </span>
-    </div>
-  )
-}
 
 /* ---------- question cards: forms, a CLI's own questions, plans ---------- */
 
@@ -1326,10 +1216,20 @@ function Typing({ chat, from }: { chat: Chat; from: string }) {
  *  question mark, or a list for a plan. The title wraps onto as many lines as it needs, the mark on its first line */
 type CardSource = { id: string; title?: string }
 
-export function CardShell({ title, plan, icon, action, source, children }: { title: string; plan?: boolean; icon?: ComponentType<{ className?: string }>; action?: ReactNode; source?: CardSource; children: ReactNode }) {
+export function CardShell({ title, plan, icon, action, source, head, children }: { title: string; plan?: boolean; icon?: ComponentType<{ className?: string }>; action?: ReactNode; source?: CardSource; head?: { who: string; links: { label: string; fn: () => void }[] }; children: ReactNode }) {
   const Icon = icon ?? (plan ? PlanIcon : QuestionIcon)
   return (
     <div data-card className="mt-2 w-[440px] max-w-full cursor-default overflow-hidden rounded-box bg-bg shadow-[inset_0_0_0_1px_var(--line2)]">
+      {/* the window's card header: a red dot, "Claude asks", quiet links at the right */}
+      {head ? (
+        <div data-card-head className="flex items-center gap-2 px-3 pt-2 text-[0.75rem] phone:text-[0.8125rem]">
+          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-need" />
+          <span className="min-w-0 flex-1 truncate font-medium text-fg2">{`${head.who} asks`}</span>
+          {head.links.map((l) => (
+            <button key={l.label} type="button" onClick={l.fn} className="shrink-0 text-fg3 hover:text-fg hover:underline">{l.label}</button>
+          ))}
+        </div>
+      ) : null}
       {source ? (
         <div data-card-source className="px-3 pt-2 text-[0.8125rem] break-words text-fg2">
           <span className="font-semibold">{source.id}</span>{source.title ? ` · ${source.title}` : ''}
@@ -1341,6 +1241,29 @@ export function CardShell({ title, plan, icon, action, source, children }: { tit
         {action}
       </div>
       <div className="flex flex-col gap-2 p-3">{children}</div>
+    </div>
+  )
+}
+
+/** a hook ask's card header, as the window's: whose ask ("Claude asks"), and "Answer in terminal" (no decision here:
+ *  the CLI asks in its terminal, which then shows) */
+function askHead(q: Question, chat: Chat) {
+  // a task worker's, in its Assistant's chat: headed by its task, its own chat a link (no terminal link)
+  if (q.by) return { who: q.by.ref, links: [{ label: 'Open chat', fn: () => goChat(q.by!.chat) }] }
+  const terminal = () => void act({ type: 'answer', chat: chat.key, question: q.id, terminal: true } as never).then(() => openTerminal(chat.key), () => undefined)
+  return { who: chat.cli === 'codex' ? 'Codex' : 'Claude', links: [{ label: 'Answer in terminal', fn: terminal }] }
+}
+
+/** a questions card's "Chat about this": no answer; the agent hears the person wants to talk it over, and the box
+ *  takes the words (a worker's: its own chat) */
+function ChatAbout({ q, chat }: { q: Question; chat: Chat }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <button type="button" onClick={() => void act({ type: 'answer', chat: chat.key, question: q.id, talk: true } as never).then(() => (q.by ? goChat(q.by.chat) : setUI({ focus: chat.key })), () => undefined)}
+        className="self-start text-[0.8125rem] font-medium text-fg2 hover:text-fg hover:underline">
+        Chat about this
+      </button>
+      <span className="text-[0.75rem] text-fg3">{q.by ? 'Or write to it in its own chat.' : 'Or type your answer below.'}</span>
     </div>
   )
 }
@@ -1425,7 +1348,7 @@ function StepsCard({ q, chat, source, steady }: { q: Question & { parts: NonNull
   }
   const part = step < n ? q.parts[step] : null
   return (
-    <CardShell title={q.title} source={source}>
+    <CardShell title={q.title} source={source} head={q.sent !== undefined || q.closed ? undefined : askHead(q, chat)}>
       <div role="tablist" aria-label="Questions" className="flex flex-wrap gap-1.5">
         {[...q.parts.map((p, i) => p.header || `Question ${i + 1}`), 'Submit'].map((label, i) => (
           <button key={i} type="button" role="tab" aria-selected={i === step} disabled={sent} onClick={() => setStep(i)}
@@ -1544,9 +1467,9 @@ function OneQuestionCard({ q, chat, msg, from, source, steady }: { q: Question; 
     if (composing) noteRef.current?.focus()
   }, [composing])
   return (
-    <CardShell title={q.title} plan={q.kind === 'Plan'} source={source}>
+    <CardShell title={q.title} plan={q.kind === 'Plan'} source={source} head={sent ? undefined : askHead(q, chat)}>
       {q.screen ? <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-fg2">{q.press ? q.screen.split(/(https?:\/\/\S+)/).map((part, j) => j % 2 ? <a key={j} href={part} target="_blank" rel="noreferrer" className="text-accent">{part}</a> : part) : q.screen}</pre> : null}
-      {q.terminal && !sent && has('terminal') ? <button type="button" className="text-left text-accent" onClick={() => openTerminal(chat.key)}>Open terminal</button> : null}
+      {q.terminal && !sent && has('terminal') ? <button type="button" className="text-left text-accent" onClick={() => openTerminal(chat.key)}>{WORDS.openTerminal}</button> : null}
       {q.evidence ? <Evidence e={q.evidence} open={!sent} /> : null}
       {q.plan ? <div data-plan className="max-h-96 overflow-auto"><Markdown text={q.plan} /></div> : null}
       {q.steps ? (
@@ -1556,10 +1479,9 @@ function OneQuestionCard({ q, chat, msg, from, source, steady }: { q: Question; 
           ))}
         </ol>
       ) : null}
-      {immediate && !q.press ? <p className="text-[0.8125rem] text-fg2">Choose an answer to send it now.</p> : null}
       {q.choices.map((c, j) => {
         const on = sent ? q.sent === j : sel.includes(j)
-        const word = immediate && !q.press ? `Send: ${c.label}` : c.label
+        const word = c.label
         return (
           <button
             key={j}
@@ -1597,9 +1519,9 @@ function OneQuestionCard({ q, chat, msg, from, source, steady }: { q: Question; 
           name="other"
           disabled={busy}
           data-kept
-          aria-label="Other answer"
+          aria-label="Other…"
           className={noteBox}
-          placeholder="Other: type your own answer…"
+          placeholder="Other…"
           value={other}
           onChange={(e) => {
             setOther(e.target.value)
@@ -1608,6 +1530,7 @@ function OneQuestionCard({ q, chat, msg, from, source, steady }: { q: Question; 
           }}
         />
       ) : null}
+      {q.other && !sent ? <ChatAbout q={q} chat={chat} /> : null}
       {sent ? (
         <Sent className={q.closed ? 'text-fg2!' : undefined}>
           {q.closed ? <XIcon className={ic} /> : <CheckIcon className={ic} />}
@@ -1785,6 +1708,31 @@ function SlashList({ chatKey, text, pick }: { chatKey: string; text: string; pic
   )
 }
 
+/** "#4" at the end of the box, as the window's: the chat's space's tasks, by number or title; a tap puts its id in */
+function TaskList({ chatKey, text, pick }: { chatKey: string; text: string; pick: (text: string) => void }) {
+  const snap = useSnap()
+  const h = /(?:^|\s)#([\w-]*)$/.exec(text.replace(/\n+$/, ''))
+  if (!h || !snap) return null
+  const own = taskChatId(chatKey)
+  const place = own ? taskOf(snap, own)?.place : snap.places.find((p) => p.chat === chatKey)?.id
+  const q = h[1].toLowerCase()
+  const refOf = (id: string) => id.split(':').pop() ?? id
+  const list = (snap.tasks ?? []).filter((t) => t.place === place && (!q || refOf(t.id).toLowerCase().includes(q) || t.name.toLowerCase().includes(q))).slice(0, 8)
+  if (!list.length) return null
+  return (
+    <div role="listbox" aria-label="Tasks" className="mb-1.5 overflow-hidden rounded-box bg-bg p-1 shadow-menu">
+      {list.map((t) => (
+        <button key={t.id} type="button" role="option" aria-selected={false} onMouseDown={(e) => e.preventDefault()} onClick={() => pick(text.replace(/\n+$/, '').replace(/#[\w-]*$/, `${refOf(t.id)} `))}
+          className="flex w-full min-w-0 items-baseline gap-2.5 rounded-row px-2.5 py-1.5 text-left hover:bg-hover phone:py-2.5">
+          <span className="shrink-0 font-medium">{refOf(t.id)}</span>
+          <span className="min-w-0 flex-1 truncate text-fg2">{t.name}</span>
+          {t.state ? <span className="shrink-0 text-[0.6875rem] text-fg3">{t.state}</span> : null}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder: string; cli: string }) {
   const [text, setText] = useDraft(chatKey)
   const files = useUI((u) => u.files[chatKey]) ?? noFiles
@@ -1850,15 +1798,21 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
   }, [text, width, room, !!live])
   const held = useRef(false)
   const holdTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  // Up in an empty box: which earlier message shows (-1: none), and its words (editing them makes it a new one)
+  const recall = useRef(-1)
+  const recalled = useRef('')
   const send = (hold = false) => {
     const t = text.trim()
     if (!t && !files.length) return
+    recall.current = -1
     const reply = getState().ui.reply[chatKey]
     const model = reply ? undefined : modelCommand(t)
     if (model !== undefined) {
       setText('')
       const place = getState().snap?.places.find((p) => p.chat === chatKey)
-      openRestart(chatKey, place?.name ?? taskChatId(chatKey) ?? chatKey, true, model)
+      // as the window's: /model never reaches the CLI; it opens the model menu, that model chosen
+      if (getState().chats[chatKey]?.agent?.words) openModelMenu(chatKey, model)
+      else openRestart(chatKey, place?.name ?? taskChatId(chatKey) ?? chatKey, true, model)
       return
     }
     setText('')
@@ -1888,6 +1842,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
         <View key={i} chatKey={chatKey} cli={cli} />
       ))}
       <SlashList chatKey={chatKey} text={text} pick={(name) => { setText(`/${name} `); ref.current?.focus() }} />
+      <TaskList chatKey={chatKey} text={text} pick={(next) => { setText(next); ref.current?.focus() }} />
       {/* a pill: the corners are half its one-line height, so one line has round ends; taller, the buttons keep their
           size and spot in the bottom corners, with the same curve around them (like iMessage) */}
       <div data-composer className="round-box bg-bg p-1.5 shadow-box has-[textarea:focus]:shadow-box-focus">
@@ -1899,13 +1854,14 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
           ) : (
             <>
               {registry.composerPlus ? (
+                // the window's paperclip: the device's file picker; a phone's also offers its camera (a menu)
                 <IconButton
-                  label="Attach files and more"
+                  label={WORDS.attach}
                   className={roundBtn}
                   pressed={plus}
-                  onClick={() => setUI({ plus: plus ? null : chatKey })}
+                  onClick={() => device === 'phone' ? setUI({ plus: plus ? null : chatKey }) : document.querySelector<HTMLInputElement>(`input[name=file][data-chat="${CSS.escape(chatKey)}"]`)?.click()}
                 >
-                  <PlusIcon className={ic} />
+                  <PaperClipIcon className={ic} />
                 </IconButton>
               ) : null}
               <div className="relative col-start-2 flex min-w-0 self-stretch">
@@ -1937,6 +1893,22 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                   onFocus={() => setUI({ focus: chatKey })}
                   onBlur={() => getState().ui.focus === chatKey && setUI({ focus: null })}
                   onKeyDown={(e) => {
+                    // as the window's: Up in an empty box (or one showing a recalled message) brings back your earlier
+                    // messages, newest first; Down goes back toward the empty box
+                    if ((e.key === 'ArrowUp' && (!text || recall.current >= 0)) || (e.key === 'ArrowDown' && recall.current >= 0)) {
+                      if (recall.current >= 0 && text !== recalled.current) recall.current = -1
+                      else {
+                        const mine = [...new Set((getState().chats[chatKey]?.messages ?? []).filter((m) => m.who === 'you' && m.text && !m.brief).map((m) => m.text!).reverse())]
+                        const next = recall.current + (e.key === 'ArrowUp' ? 1 : -1)
+                        if (mine.length && next >= -1 && next < mine.length) {
+                          e.preventDefault()
+                          recall.current = next
+                          recalled.current = next < 0 ? '' : mine[next]
+                          setText(recalled.current)
+                          return
+                        }
+                      }
+                    }
                     if (e.key === 'Enter' && !e.shiftKey && device === 'desktop' && !e.nativeEvent.isComposing) {
                       e.preventDefault()
                       // Shepherdr 3: Ctrl+Enter holds it until the agent is free
@@ -2221,8 +2193,8 @@ function PlusOpen({ chatKey, file, photo }: { chatKey: string; file: RefObject<H
   }
   const settings = snap ? registry.composerSettings.filter((x) => x.when(snap, chatKey)) : []
   return (
-    <Menu label="Attach files and more" tabs onClose={close} className="mb-2 w-fit max-w-full origin-bottom-left">
-      {/* the window's paperclip: Attach files (and a phone's camera); the model is the line under the box */}
+    <Menu label={WORDS.attach} tabs onClose={close} className="mb-2 w-fit max-w-full origin-bottom-left">
+      {/* a phone's paperclip: Attach files, or its camera; the model is the button under the box */}
       <MenuItem
         icon={<FileIcon className={ic} />}
         onClick={() => {
@@ -2230,7 +2202,7 @@ function PlusOpen({ chatKey, file, photo }: { chatKey: string; file: RefObject<H
           file.current?.click()
         }}
       >
-        Attach files
+        {WORDS.attach}
       </MenuItem>
       {phone ? (
         <MenuItem icon={<CameraIcon className={ic} />} onClick={screenshot}>
@@ -2317,17 +2289,18 @@ export function DictationBox() {
   const t = useElapsed(ui.dictStarted)
   return (
     <>
-      <IconButton label="Cancel" className={roundBtn} onClick={cancelDictation}>
+      {/* as the window's recording row: the red X throws it away, the wave, "Recording" (or "Writing") and the time,
+          Done in Send's spot */}
+      <button type="button" aria-label="Cancel" disabled={ui.dictDone} onClick={cancelDictation}
+        className={clsx('press-dim relative grid size-[34px] shrink-0 place-items-center rounded-full bg-need text-white after:absolute after:-inset-1.5 phone:size-11', dimmed)}>
         <XIcon className={ic} />
-      </IconButton>
-      <p className="flex shrink-0 items-center gap-2 pr-1 pl-2 text-[0.8125rem] text-fg2 tabular-nums phone:text-[0.9375rem]">
-        <span aria-hidden="true" className="size-2 rounded-full bg-need motion-safe:animate-pulse" />
-        <span role="status" className="sr-only">
-          {ui.dictDone ? 'Putting it in the box' : 'Recording'}
-        </span>
-        {t}
+      </button>
+      <LiveWave sample={dictSample} label="Your voice" className="mx-1.5 flex-1" />
+      <p className="flex shrink-0 items-center gap-1.5 pr-1 text-[0.8125rem] phone:text-[0.9375rem]">
+        {ui.dictDone ? null : <span aria-hidden="true" className="size-2 rounded-full bg-need" />}
+        <span role="status" className="font-medium text-fg">{ui.dictDone ? 'Writing' : 'Recording'}</span>
+        <span className="font-mono text-[0.75rem] text-fg3 tabular-nums">{t}</span>
       </p>
-      <LiveWave sample={dictSample} label="Your voice" className="mr-1.5 flex-1" />
       <button
         type="button"
         aria-label="Done: put it in the box"
@@ -2396,6 +2369,9 @@ function StickToBottom({ chatKey, children }: { chatKey: string; children: React
   const jumping = useRef(0)
   const [away, setAway] = useState(false)
   const [newAt, setNewAt] = useState<string | null>(null)
+  // the cards waiting on you (they sit at the chat's end, so below what's shown when it's read further up)
+  const questionIds = useStore((s) => (s.chats[chatKey]?.messages ?? []).filter((m) => (m.question && m.question.sent === undefined && !m.question.closed) || (m.secret && !m.secret.saved)).map((m) => m.id).join('\n'))
+  const questions = questionIds ? questionIds.split('\n').map((id) => ({ id })) : []
   // the agent's messages, and how many of them you had seen at the bottom
   const replies = useStore((s) => (s.chats[chatKey]?.messages ?? []).filter((m) => m.who === 'agent' && !m.waiting).map((m) => m.id).join('\n'))
   const ids = replies ? replies.split('\n') : []
@@ -2549,16 +2525,16 @@ function StickToBottom({ chatKey, children }: { chatKey: string; children: React
           ChatGPT) */}
       {away ? <div aria-hidden="true" data-fade-under-jump className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-linear-to-b from-transparent to-bg to-55%" /> : null}
       {away ? (
+        // the window's pill: a card waiting below what's shown is pointed to ("1 question below", a red dot), else Latest
         <button
           type="button"
-          aria-label={unread ? `${unread} new ${unread === 1 ? 'reply' : 'replies'}: jump to the latest` : 'Jump to the latest'}
-          onClick={toBottom}
-          // in the middle, over the gap between the two sides' bubbles, as in ChatGPT and Slack
-          className="absolute bottom-2 left-1/2 z-10 grid size-10 -translate-x-1/2 place-items-center rounded-full bg-bg text-fg2 shadow-menu hover:text-fg phone:size-11"
+          aria-label={questions.length ? questionsBelow(questions.length) : unread ? `${unread} new ${unread === 1 ? 'reply' : 'replies'}: ${WORDS.latest}` : WORDS.latest}
+          onClick={() => (questions.length ? jumpTo(chatKey, questions[0].id, { card: true }) : toBottom())}
+          className="absolute bottom-2.5 left-1/2 z-10 flex h-[26px] -translate-x-1/2 items-center gap-[5px] rounded-full bg-bg px-2.5 text-[0.75rem] text-fg2 shadow-menu hover:text-fg phone:h-9 phone:text-[0.8125rem]"
         >
-          <DownIcon className={ic} />
-          {/* centred on the button's edge at its top right, a ring of the page around it so it reads clear of the
-              button's shadow */}
+          {questions.length ? <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-need" /> : null}
+          <DownIcon className="size-3 shrink-0" />
+          {questions.length ? questionsBelow(questions.length) : WORDS.latest}
           <Count n={unread} className="absolute -top-0.75 -right-0.75 shadow-[0_0_0_2px_var(--bg)] phone:-top-1 phone:-right-1" />
         </button>
       ) : null}
@@ -2571,7 +2547,8 @@ function StickToBottom({ chatKey, children }: { chatKey: string; children: React
 /** the message box's words, as the window's: "Reply instead…" while a card asks; else to the Assistant, a task by its
  *  id, or the agent of one of the space's tabs */
 function placeholderOf(chatKey: string, chat: Chat | undefined, fallback: string) {
-  if (chat?.messages.some((m) => m.question && m.question.sent === undefined && !m.question.closed)) return 'Reply instead…'
+  // a card asks, or the agent asks in its terminal: words written here answer it
+  if (chat?.blocked !== undefined || chat?.messages.some((m) => m.question && m.question.sent === undefined && !m.question.closed)) return WORDS.replyInstead
   if (chatKey.startsWith('p:')) return 'Message the Assistant'
   const task = taskChatId(chatKey)
   if (task) return `Message ${task}`
@@ -2589,8 +2566,8 @@ function Ended({ chatKey }: { chatKey: string }) {
   return (
     <div className="mx-auto flex w-full max-w-read items-center gap-3 px-5 pt-2 pb-[max(env(safe-area-inset-bottom),--spacing(3))] text-[0.8125rem] text-fg2 phone:text-[0.9375rem]">
       <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-fg3" />
-      <p className="min-w-0 flex-1 text-pretty">{error || "This task's agent has ended."}</p>
-      <Primary soft disabled={busy} onClick={() => void resume()}>{busy ? 'Resuming…' : 'Resume'}</Primary>
+      <p className="min-w-0 flex-1 text-pretty">{error || WORDS.ended}</p>
+      <Primary soft disabled={busy} onClick={() => void resume()}>{busy ? WORDS.resuming : 'Resume'}</Primary>
     </div>
   )
 }
@@ -2600,6 +2577,10 @@ function ChatView({ chatKey, placeholder, unreachable }: { chatKey: string; plac
   const chat = useChat(chatKey)
   const override = useUI((u) => registry.chatBody.find((b) => b.when(u, chatKey)))
   if (override) return <override.View chatKey={chatKey} />
+  // the window's notice instead of the conversation (opening, not a chat agent, not found, ended); a chat not heard
+  // from yet is opening (a space's empty Assistant chat is its own state: no agent yet)
+  const shown = chat?.notice ? chat : !chat && !chatKey.startsWith('p:') ? ({ key: chatKey, cli: '', messages: [], notice: 'opening' } as Chat) : null
+  if (shown) return <div className="flex min-h-0 flex-1 flex-col"><Notice chat={shown} resume={() => act({ type: 'task-resume', chat: chatKey } as never)} /></div>
   return (
     <DropFiles chatKey={chatKey}>
       <FindBar chatKey={chatKey} />
@@ -2673,12 +2654,13 @@ export default definePlugin({
   name: 'chat',
   setup(reg) {
     reg.views.chat = ChatView
-    reg.chatTail.push({ order: 90, View: Typing })
-    reg.messageParts.push({ order: 10, View: ({ msg, chat }) => (msg.activity ? <TurnLine a={msg.activity} chat={chat.key} /> : null) })
+    // the window's lines under the conversation, over the box: working (Stop · Esc) or Needs you, then the helpers
+    reg.composerAbove.push({ order: 5, View: WorkingLine }, { order: 6, View: NeedsYou }, { order: 8, View: Held })
     reg.composerAbove.push({ order: 10, View: JobsTag })
+    onTerminal(openTerminal)
     reg.overlays.push(JobsSheet)
     reg.messageParts.push({ order: 60, View: ({ msg, chat, from }) => (msg.question ? <QuestionCard q={msg.question} chat={chat} msg={msg.id} from={from} /> : null) })
-    reg.messageParts.push({ order: 61, View: ({ msg, chat }) => (msg.secret ? <SecretCard ask={msg.secret} chat={chat} /> : null) })
+    reg.messageParts.push({ order: 61, View: ({ msg, chat }) => (msg.secret ? <SecretCard ask={msg.secret} chat={chat} source={msg.secret.by ? { id: msg.secret.by.ref, title: msg.secret.by.title } : undefined} /> : null) })
     reg.composerPlus = PlusMenu
     reg.composerMic = Mic
     reg.composerLive.push({ when: (ui, chatKey) => ui.dict === chatKey, View: DictationBox })

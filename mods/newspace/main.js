@@ -29,7 +29,8 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Popup } from "gpui-base";
 import { props, theme, home, exec, pickFolder, closeOverlay, openOverlay, shared, setShared, spaces, focused } from "herdr";
 import { dialogFooter, button, TEXT, RADIUS } from "./ui.js";
-import { NEWSPACE as K, NEWSPACE_SHOWN, readShepherdr, shepherdrFor, LOCAL_MACHINE, autoCoordinator } from "./coordinator.js";
+import { NEWSPACE as K, readShepherdr, shepherdrFor, LOCAL_MACHINE, autoCoordinator } from "./coordinator.js";
+import * as N from "./core/newspace.js";
 
 // The suggestions' width (the field's: the dialog's 460 less its padding, the icon, Browse… and the gaps).
 const LIST_W = 290;
@@ -37,24 +38,12 @@ const LIST_W = 290;
 const PICK = "spaces-chat.iconpick";
 // The home folder paths are shown from: the dialog's machine's (props.home).
 let HOME = home();
-// Builders' scratch folders (under /tmp, a scratchpad): nobody's work, never offered.
-const scratch = (p) => /^\/(private\/)?(var\/)?tmp(\/|$)/.test(p) || /\/scratchpad(\/|$)/.test(p);
-const tilde = (p) => (p === HOME ? "~" : p.startsWith(HOME + "/") ? "~" + p.slice(HOME.length) : p);
-const untilde = (p) => (p === "~" ? HOME : p.startsWith("~/") ? HOME + p.slice(1) : p);
-const base = (p) => (p === HOME ? "Home" : p.split("/").filter(Boolean).pop() ?? p);
-const parent = (p) => p.replace(/\/[^/]+\/?$/, "") || "/";
-// A folder's subfolders, hidden ones left out, sorted.
-// A new repo, as Shepherdr's (server/core/new-repository.ts): main, one empty commit, no hooks or
-// signing in the way.
-const NEW_REPO = [["init", "-q", "--initial-branch=main"],
-  ["-c", "user.useConfigOnly=false", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "First commit"]];
-const SUBFOLDERS = 'cd "$1" 2>/dev/null || exit 1; for d in */; do [ -d "$d" ] && printf "%s\\n" "${d%/}"; done; true';
-
-// The folder a field's text names, or null when it isn't a path (a filter word).
-const pathOf = (text) => {
-  const f = text.trim();
-  return /^[~/]/.test(f) ? untilde(f.length > 1 ? f.replace(/\/+$/, "") : f) : null;
-};
+// Builders' scratch folders, paths from HOME, a new repo (main, one empty commit), a folder's
+// subfolders and the words: core/newspace.js, shared with the web app's New space.
+const tilde = (p) => N.tilde(p, HOME);
+const base = (p) => N.base(p, HOME);
+const pathOf = (text) => N.pathOf(text, HOME);
+const { scratch, parent, NEW_REPO, SUBFOLDERS, WORDS: W } = N;
 
 export default class NewSpace extends View {
   init(_props, cx) {
@@ -72,7 +61,7 @@ export default class NewSpace extends View {
     this.error = "";
     this.icon = null; // an emoji, null: "#"
     this.picked = shared(PICK)?.at ?? 0;
-    this.input = InputState.new({ placeholder: "~/path/to/folder", value: tilde(this.defaultFolder()) });
+    this.input = InputState.new({ placeholder: W.placeholder, value: tilde(this.defaultFolder()) });
     this.text = this.input.value();
     // Typing opens the suggestions (a combobox): they close once one is picked, or on Esc.
     this.input.on("change", (_e, cx) => {
@@ -121,7 +110,7 @@ export default class NewSpace extends View {
   // Whether "Make it a git repo" shows for the field's folder: known not to be in one, not home.
   offersRepo() {
     const p = this.folder();
-    return Boolean(p) && p !== HOME && p !== "/" && this.repo.get(p) === false;
+    return N.offersRepo(p, this.repo.get(p), HOME);
   }
 
   // Where exec runs: the dialog's machine.
@@ -142,14 +131,11 @@ export default class NewSpace extends View {
   }
 
   // The suggestions: recent folders matching what's typed (all of them for an empty field), at
-  // most NEWSPACE_SHOWN, the field's own folder left out.
+  // most core's SHOWN (coordinator.js NEWSPACE_SHOWN, the height's), the field's own folder left out.
   rows() {
     if (this.browse) return this.browse.rows ?? [];
     const all = [...this.extra, ...this.recent.filter((p) => !this.extra.includes(p))];
-    const word = this.text.trim().toLowerCase();
-    const p = pathOf(this.text);
-    return all.filter((f) => f !== p && (!word || tilde(f).toLowerCase().includes(word) || base(f).toLowerCase().includes(word)))
-      .slice(0, NEWSPACE_SHOWN).map((path) => ({ path }));
+    return N.suggestions(all, this.text, HOME).map((path) => ({ path }));
   }
 
   // The folder Create space makes the space in: the field's, once it's known whether it exists
@@ -192,7 +178,7 @@ export default class NewSpace extends View {
     cx.spawn(async (cx) => {
       const r = await exec("sh", ["-c", SUBFOLDERS, "x", dir], this.on()).catch(() => null);
       if (this.browse?.dir !== dir) return;
-      if (!r || r.code !== 0) { this.browse = null; this.listOpen = false; this.error = `Couldn't list ${tilde(dir)} on ${this.machine}.`; return cx.notify(); }
+      if (!r || r.code !== 0) { this.browse = null; this.listOpen = false; this.error = W.cantList(tilde(dir), this.machine); return cx.notify(); }
       const kids = r.stdout.split("\n").filter(Boolean).map((n) => `${dir.replace(/\/+$/, "")}/${n}`);
       for (const k of kids) this.exists.set(k, true);
       this.browse.rows = [...(dir === "/" ? [] : [{ path: parent(dir), up: true }]), ...kids.map((path) => ({ path }))];
@@ -230,13 +216,13 @@ export default class NewSpace extends View {
       try {
         if (this.exists.get(folder) === false) {
           const r = await exec("mkdir", ["-p", "--", folder], this.on());
-          if (r.code !== 0) throw new Error(r.stderr.trim().split("\n").pop() || `Couldn't make ${tilde(folder)}.`);
+          if (r.code !== 0) throw new Error(r.stderr.trim().split("\n").pop() || W.cantMake(tilde(folder)));
           this.exists.set(folder, true);
         }
         if (this.offersRepo() && this.makeRepo) {
           for (const args of NEW_REPO) {
             const r = await exec("git", args, { ...this.on(), cwd: folder });
-            if (r.code !== 0) throw new Error(`Couldn't make it a git repo: ${r.stderr.trim().split("\n").pop() || "git failed"}`);
+            if (r.code !== 0) throw new Error(W.cantRepo(r.stderr.trim().split("\n").pop()));
           }
           this.repo.set(folder, true);
         }
@@ -295,12 +281,12 @@ export default class NewSpace extends View {
         .child(div().size(14).flex_none().flex().items_center().justify_center().border_1().rounded(3)
           .border_color(on ? t.accent : t.input).bg(on ? t.accent : t.background)
           .when(on, (el) => el.child(svg("mods/workspace-chrome/check.svg").size(10).text_color(t.background))))
-        .child(div().flex_none().text_color(t.foreground).child("Make it a git repo"))
-        .child(div().min_w(0).truncate().text_color(t.dim).child("so each task gets its own worktree"));
+        .child(div().flex_none().text_color(t.foreground).child(W.makeRepo))
+        .child(div().min_w(0).truncate().text_color(t.dim).child(W.makeRepoWhy));
     }
     if (folder && this.repo.get(folder) === true)
       return line.text_color(t.dim).child(svg("mods/workspace-chrome/git-branch.svg").size(13).flex_none())
-        .child(div().min_w(0).truncate().child("A git repo: each task gets its own worktree"));
+        .child(div().min_w(0).truncate().child(W.isRepo));
     return line;
   }
 
@@ -314,12 +300,12 @@ export default class NewSpace extends View {
     }
     const rows = this.listOpen ? this.rows() : [];
     // Browsing another machine: its folder is listing, or has no subfolders.
-    const empty = this.listOpen && this.browse && !rows.some((r) => !r.up) ? (this.browse.rows ? "No folders inside" : "Loading…") : "";
+    const empty = this.listOpen && this.browse && !rows.some((r) => !r.up) ? (this.browse.rows ? W.empty : W.loading) : "";
     const field = pathOf(this.text);
     const folder = this.folder();
     // Under the field, one quiet line: a folder that isn't there yet is made on Create. Its room is
     // kept, so the dialog keeps its height either way; an error goes beside the buttons, in red.
-    const note = field && this.exists.get(field) === false ? "This folder doesn't exist. It will be created." : "";
+    const note = field && this.exists.get(field) === false ? W.missing : "";
     const input = Input.new(this.input).w_full().h(K.field).px(10).items_center().rounded(RADIUS.control).border(1)
       .border_color(this.focused ? t.accent : t.input).bg(t.background).text_color(t.foreground);
     // The suggestions hang under the field in the window's top layer, only while they're open.
@@ -330,10 +316,10 @@ export default class NewSpace extends View {
     const panel = v_flex().id("newspace").w_full().flex_none().p(K.pad).rounded(10).border(1).border_color(t.border).bg(t.popover).shadow_lg().text_size(13)
       .on_key_down((e, cx) => this.key(e, cx))
       .on_mouse_down("left", (_e, cx) => { if (this.listOpen) { this.listOpen = false; this.browse = null; this.hi = -1; cx.notify(); } })
-      .child(h_flex().h(K.title).flex_none().gap(6).items_baseline().text_size(TEXT.title).font_semibold().text_color(t.foreground).child("New space")
-        .when(Boolean(this.machine), (el) => el.child(div().min_w(0).truncate().font_normal().text_color(t.dim).child(`on ${this.machine}`))))
+      .child(h_flex().h(K.title).flex_none().gap(6).items_baseline().text_size(TEXT.title).font_semibold().text_color(t.foreground).child(W.title)
+        .when(Boolean(this.machine), (el) => el.child(div().min_w(0).truncate().font_normal().text_color(t.dim).child(W.on(this.machine)))))
       .child(div().h(K.section).flex_none())
-      .child(div().h(K.label).flex_none().text_size(TEXT.label).text_color(t.dim).child("Icon and folder"))
+      .child(div().h(K.label).flex_none().text_size(TEXT.label).text_color(t.dim).child(W.label))
       .child(div().h(K.gap).flex_none())
       // The icon (as the Rename dialog's), the field and Browse…: the desktop's own folder picker
       // here, the list on another machine.
@@ -344,13 +330,13 @@ export default class NewSpace extends View {
           .on_click((_e, cx) => { this.pickIcon(this.iconAt); cx.notify(); })
           .child(this.icon ? div().text_size(16).child(this.icon) : div().text_size(16).text_color(t.muted).child("#")))
         .child(list)
-        .child(button("browse", "Browse\u2026", { size: "lg", onClick: (_e, cx) => this.choose(cx) })))
+        .child(button("browse", W.browse, { size: "lg", onClick: (_e, cx) => this.choose(cx) })))
       .child(div().h(20).flex_none().pt(4).text_size(TEXT.label).text_color(t.dim).child(note))
       .child(div().h(4).flex_none())
       .child(this.repoLine(t, folder))
       .child(div().h(K.section).flex_none())
       .child(dialogFooter({ onCancel: () => this.close(), note: this.error, error: true,
-        primary: { id: "create", label: this.busy ? "Creating…" : "Create space", disabled: !folder || this.busy, onClick: (_e, cx) => this.create(cx) } }));
+        primary: { id: "create", label: this.busy ? W.creating : W.create, disabled: !folder || this.busy, onClick: (_e, cx) => this.create(cx) } }));
     // The overlay is the panel at its tallest; the panel sits in its middle.
     return v_flex().size_full().justify_center().child(panel);
   }

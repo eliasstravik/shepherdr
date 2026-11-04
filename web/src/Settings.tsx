@@ -1,19 +1,27 @@
-// Settings: the app's few settings. Most are defaults set at three levels, All machines, a machine or a project, and
-// the most specific one set wins: how tasks work (what every new brief ends with), each kind of agent's app, model and
-// effort, Autopilot's heartbeat and checklist, a machine's limits. Settings opens on Everywhere, a picker at its top switches,
-// and each row offers the space it was opened from; each row says where a value it doesn't set comes from, and one it sets can be reset.
-// Alerts and voice are one for all; a task has none of its own. Appearance is each device's own, as are the pages
-// plugins add (a desktop's keyboard shortcuts). A phone lists the sections in rounded groups, as iOS's Settings does, and a tap pushes one over
-// the list; a wider screen keeps the list down its side.
+// Settings, as the window's (mods/shepherdr-settings): its pages in its order (Agents, Tasks, Autopilot, Notify, Secrets,
+// Machines, Window, Web), Everywhere's, or a space's own ("Space settings", with "Only for <space> on <machine>" and
+// Everywhere at the top). Each row says, as the window's, "Same as everywhere" or "Changed here · Reset", and on
+// Everywhere which spaces use their own. Every title, line and button word is core/settings.js's, the window's own.
+// The web follows the device's light or dark (the window follows Herdr's theme): no page of its own here. A phone
+// lists the pages in one rounded group, as iOS's Settings does, and a tap pushes one over the list; a wider screen
+// keeps the list down its side.
 import clsx from 'clsx'
-import { openRole } from './screens/Role.tsx'
+import { ModelButton, openRole } from './screens/Role.tsx'
+import { MachineDetails } from './MachineDetails.tsx'
+// The window's words for every page: core/settings.js (mods/shepherdr-settings reads the same)
+import * as STc from '@core/settings.js'
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const ST = STc as any
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type FC, type ReactNode } from 'react'
 import { machineName, type SettingRow, type SettingSection, type Snapshot } from '@shared/types.ts'
 import { act, registry, setUI, useSnap, useUI, type UI } from './kernel.ts'
+// Autopilot's schedule words (Custom…, its example), the window's: core/autopilot.js
+import * as APc from '@core/autopilot.js'
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const AP = APc as any
 import { usePluginErrors } from './guard.tsx'
 import { PlacesToggle } from './Frame.tsx'
 import { Stack } from './Stack.tsx'
-import { APPEARANCES, setAppearance, useAppearance, type Appearance } from './theme.ts'
 import {
   AppearanceIcon,
   AutopilotIcon,
@@ -34,6 +42,7 @@ import {
   MachineIcon,
   Menu,
   MenuItem,
+  MenuLabel,
   MinusIcon,
   ModelIcon,
   NextIcon,
@@ -43,7 +52,6 @@ import {
   PluginIcon,
   PlusIcon,
   RoundButton,
-  SecretField,
   Small,
   field,
   Tab,
@@ -225,18 +233,19 @@ function Choices({
 const numShown = (v: string, num: NonNullable<SettingRow['num']>) => (v === 'off' ? 'Off' : v.replace(/^(\d+(?:\.\d+)?)(\s*).*$/, (_, n, sp) => `${n}${num.unit ? `${sp}${Number(n) === 1 && num.one ? num.one : num.unit}` : ''}`))
 
 /** a value you type: a box as wide as its words, saved when you leave it (Enter too) */
-export function TextValue({ value, onSave, onEdit, label }: { value: string; onSave: (v: string) => void; onEdit: () => void; label: string }) {
+export function TextValue({ value, onSave, onEdit, label, placeholder }: { value: string; onSave: (v: string) => void; onEdit: () => void; label: string; placeholder?: string }) {
   const [v, setV] = useState(value)
   useEffect(() => setV(value), [value])
   return (
     // as tall and round as the pickers beside it, its edge a shade darker while you type (a text box's look)
     <span className="relative inline-flex h-7 max-w-full items-center rounded-full shadow-[inset_0_0_0_1px_var(--line2)] has-focus:shadow-box-focus coarse:h-9 phone:h-9">
       <span aria-hidden="true" className="invisible block truncate px-2.5 whitespace-pre">
-        {v || ' '}
+        {v || placeholder || ' '}
       </span>
       <input
         name={label}
         aria-label={label}
+        placeholder={placeholder}
         value={v}
         onFocus={onEdit}
         onChange={(e) => setV(e.target.value)}
@@ -249,15 +258,16 @@ export function TextValue({ value, onSave, onEdit, label }: { value: string; onS
 }
 
 /** on or off: the track grey off, green on, its knob sliding across (iOS's) */
-export function Switch({ on, label, onChange }: { on: boolean; label: string; onChange: (on: boolean) => void }) {
+export function Switch({ on, label, onChange, disabled }: { on: boolean; label: string; onChange: (on: boolean) => void; disabled?: boolean }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={on}
       aria-label={label}
+      disabled={disabled}
       onClick={() => onChange(!on)}
-      className="group relative inline-flex w-9 shrink-0 rounded-full bg-line2 p-0.5 shadow-[inset_0_0_0_1px_var(--line)] transition-colors duration-200 ease-in-out after:absolute after:-inset-2 aria-checked:bg-ready aria-checked:shadow-none coarse:w-12 phone:w-12"
+      className="group relative inline-flex w-9 shrink-0 rounded-full bg-line2 p-0.5 shadow-[inset_0_0_0_1px_var(--line)] transition-colors duration-200 ease-in-out after:absolute after:-inset-2 disabled:cursor-default disabled:opacity-40 aria-checked:bg-ready aria-checked:shadow-none coarse:w-12 phone:w-12"
     >
       <span className="aspect-square w-1/2 rounded-full bg-white shadow-xs ring-1 ring-black/5 transition-transform duration-200 ease-in-out group-aria-checked:translate-x-full" />
     </button>
@@ -376,7 +386,7 @@ function TriggerValue({ row, phone, onPick }: { row: SettingRow & { trigger: Non
   // a row that takes its own words (Autopilot's schedule) has Custom… too: a box for any rule, saved as you leave it
   const [custom, setCustom] = useState(false)
   const preset = t.presets.find((p) => p.value === row.value)
-  const picked = custom || (row.text && !preset) ? 'Custom…' : (preset?.label ?? '')
+  const picked = custom || (row.text && !preset) ? AP.CUSTOM : (preset?.label ?? '')
   return (
     <div className="flex flex-col gap-2.5">
       <div className="flex flex-col gap-0.5">
@@ -384,15 +394,15 @@ function TriggerValue({ row, phone, onPick }: { row: SettingRow & { trigger: Non
         {t.next.length ? <Small className="tabular-nums">Next: {t.next.join(' · ')}</Small> : null}
       </div>
       {(() => {
-        const options = [...t.presets.map((p) => p.label), ...(row.text ? ['Custom…'] : [])]
-        const pick = (l: string) => { if (l === 'Custom…') return setCustom(true); setCustom(false); onPick(t.presets.find((p) => p.label === l)!.value) }
+        const options = [...t.presets.map((p) => p.label), ...(row.text ? [AP.CUSTOM] : [])]
+        const pick = (l: string) => { if (l === AP.CUSTOM) return setCustom(true); setCustom(false); onPick(t.presets.find((p) => p.label === l)!.value) }
         // more picks than a phone's line holds: a pick list
         return phone && options.length > 4 ? <Pick label={row.label} plain value={picked} options={options} onPick={pick} /> : <Segments label={row.label} value={picked} options={options} fill={phone} onPick={pick} />
       })()}
-      {row.text && picked === 'Custom…' ? (
+      {row.text && picked === AP.CUSTOM ? (
         <div className="flex flex-col gap-1 [&>span:first-child]:w-full">
-          <TextValue label={`${row.label} rule`} value={preset ? '' : row.value} onEdit={() => {}} onSave={(v) => { setCustom(false); onPick(v) }} />
-          <Small className="text-pretty">Like “every 2 hours on weekdays from 8:00 to 18:00”. Saved when you leave the box.</Small>
+          <TextValue label={`${row.label} rule`} placeholder={AP.CUSTOM_PLACEHOLDER} value={preset ? '' : row.value} onEdit={() => {}} onSave={(v) => { setCustom(false); onPick(v) }} />
+          <Small className="text-pretty">{AP.CUSTOM_HINT}</Small>
         </div>
       ) : null}
       {row.text ? null : <Small className="text-pretty">{row.key === 'heartbeat.on' ? 'Other news waits for the next heartbeat. ' : ''}Ask the Assistant for anything else.</Small>}
@@ -438,21 +448,12 @@ function DocValue({ value, onSave, label, file, phone, privateRules = false, emp
   )
 }
 
-/** a page of settings: one of the server's sections (set Everywhere), or this device's own (Appearance, or a plugin's
- *  drawn by its View) */
+/** a page of settings: one of the server's sections, or a plugin's drawn by its View */
 interface Page extends SettingSection {
   targets?: Record<string, string>
   device?: boolean
   Icon?: ComponentType<{ className?: string }>
   View?: FC<{ phone: boolean }>
-}
-
-const APPEARANCE: Page = { name: 'Appearance', device: true, about: 'How Shepherdr looks on this device. Your other devices keep their own.', rows: [] }
-
-const LOOKS: Record<Appearance, { label: string; hint?: string }> = {
-  system: { label: 'System', hint: "Light or dark, as this device's own setting is" },
-  light: { label: 'Light' },
-  dark: { label: 'Dark' },
 }
 
 const ICONS: Record<string, ComponentType<{ className?: string }>> = {
@@ -485,12 +486,6 @@ export const levelsOf = (sections: SettingSection[]) => [...new Set(sections.fla
 export function levelOf(sections: SettingSection[], ui: UI) {
   const want = ui.settings?.level
   return want && levelsOf(sections).includes(want) ? want : 'all'
-}
-
-/** the space Everywhere's rows offer: the one Settings was opened from */
-function spaceOf(snap: Snapshot, ui: UI) {
-  const level = levelOf(snap.settings, ui), place = snap.places.find((p) => p.id === ui.place)
-  return level === 'all' && place && levelsOf(snap.settings).includes(place.id) ? place : undefined
 }
 
 /** a level's name: Everywhere, a machine's, or a space's (with its machine's, where there are more machines) */
@@ -533,26 +528,20 @@ export function withPluginErrors(sections: SettingSection[], errors: Record<stri
  *  apart from how Shepherdr runs, with what is one for all), this device's own, and what is only shown */
 /** the window's Settings sections, in its order; a space's own settings show only its own ones (Autopilot only for a
  *  space on this computer, which is where it has an Autopilot page) */
-const ORDER = ['Agents', 'Tasks', 'Autopilot', 'Notify', 'Secrets', 'Machines', 'Window', 'Web']
-const SPACE_PAGES = new Set(['Agents', 'Tasks', 'Notify', 'Secrets', 'Autopilot'])
+const ORDER: string[] = ST.SECTIONS.map((s: { title: string }) => s.title)
+const SPACE_PAGES = new Set<string>(ST.SECTIONS.filter((s: { space?: unknown }) => s.space).map((s: { title: string }) => s.title))
 
+/** the window's pages, one list under its title ("Settings", or a space's own "Space settings"): no other group, as
+ *  the window has none (Herdr's own look and keys are the window's elsewhere; the web follows the device's light or
+ *  dark). A plugin's own page, if one adds any, comes after them. */
 function groupsOf(sections: SettingSection[], ui: UI): { name: string; pages: Page[] }[] {
   const level = levelOf(sections, ui)
   const space = level !== 'all'
-  const notify = (x: SettingSection): Page => x.name === 'Notify' ? {
-    ...x,
-    // Shepherdr 3's words: what reaches you from a space's Assistant
-    about: 'All: every message from its Assistant. Needs me: its questions and alerts. Off: nothing, and its row stays quiet. Tasks reach you either way.',
-  } : x
   const pages = [...sections.filter((x) => x.level === level && !x.global), ...(space ? [] : sections.filter((x) => x.global))]
     .filter((x) => ORDER.includes(x.name) && (!space || SPACE_PAGES.has(x.name)))
-    .map(notify)
     .sort((a, b) => ORDER.indexOf(a.name) - ORDER.indexOf(b.name))
   const own = registry.settingsPages.filter((x) => x.when(ui)).map(({ name, about, Icon, View }): Page => ({ name, about, Icon, View, device: true, rows: [] }))
-  return [
-    { name: space ? 'Space settings' : 'Settings', pages },
-    { name: 'This device', pages: [APPEARANCE, ...own] },
-  ].filter((g) => g.pages.length)
+  return [{ name: space ? ST.SPACE_TITLE : ST.TITLE, pages: [...pages, ...own] }].filter((g) => g.pages.length)
 }
 
 /** where a page sits in the list of them (for ui.settings.section), or -1 where it doesn't show */
@@ -581,44 +570,55 @@ export const rowLook = (phone: boolean) =>
     : 'flex min-h-12 items-center justify-between gap-3 py-2 not-first:border-t not-first:border-line'
 const heading = (phone: boolean) => (phone ? 'px-4 pb-1.5 text-[0.8125rem] text-fg2' : 'pb-1 text-[0.75rem] font-medium text-fg3')
 
-/** Appearance: System, Light or Dark, kept on this device */
-function AppearancePick({ phone }: { phone: boolean }) {
-  const now = useAppearance()
+/** the window's stepper: − its value + (a count, a percent, a size), stepping through the row's choices; a value off
+ *  the list (Off) steps from where the row says */
+function Stepper({ row, set }: { row: SettingRow; set: (value: string) => void }) {
+  const steps = row.steps ?? []
+  const at = steps.indexOf(row.value)
+  const from = at >= 0 ? at : Math.max(0, steps.indexOf(row.stepFrom ?? ''))
+  const go = (by: number) => {
+    const next = steps[Math.max(0, Math.min(steps.length - 1, (at >= 0 ? at : from) + by))]
+    if (next !== undefined && next !== row.value) set(next)
+  }
   return (
-    <div role="radiogroup" aria-label="Appearance" className={phone ? clsx(card, 'overflow-hidden') : 'w-full'}>
-      {APPEARANCES.map((a) => (
-        <label key={a} className={clsx(rowLook(phone), 'group cursor-pointer keys:has-focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)]', phone && 'press')}>
-          <input type="radio" name="appearance" value={a} checked={now === a} onChange={() => setAppearance(a)} className="sr-only" />
-          <span className="flex min-w-0 flex-col">
-            {LOOKS[a].label}
-            {LOOKS[a].hint ? <Small className="text-pretty">{LOOKS[a].hint}</Small> : null}
-          </span>
-          <CheckIcon className={clsx(ic, 'text-accent group-not-has-checked:invisible')} />
-        </label>
-      ))}
-    </div>
+    <span className="inline-flex items-center gap-1.5">
+      <Step label={`Less: ${row.label}`} onClick={() => go(-1)} disabled={at === 0}>
+        <MinusIcon className={ic} />
+      </Step>
+      <span className="inline-flex h-7 min-w-14 items-center justify-center rounded-full px-2.5 whitespace-nowrap tabular-nums shadow-[inset_0_0_0_1px_var(--line2)] coarse:h-9 phone:h-9">{row.value}</span>
+      <Step label={`More: ${row.label}`} onClick={() => go(1)} disabled={at === steps.length - 1}>
+        <PlusIcon className={ic} />
+      </Step>
+    </span>
   )
 }
 
-/** a row's control, by what its value is: on or off a switch, two or three short words segments, a number a stepper,
- *  free words a box, a list a menu; one with no other choice, or only shown,
- *  its words */
+/** a row's control, by what its value is: on or off a switch, a few short words segments, a count or a limit the
+ *  window's stepper, free words a box, a list a menu; one with no other choice, or only shown, its words */
 function Control({ row, phone, set, edit, level }: { row: SettingRow; phone: boolean; set: (value: string) => void; edit: () => void; level?: string }) {
   const options = row.options ?? []
   const action = row.key in registry.settingActions
-  // a role's agent: its words, and a sheet to pick another (Settings › Agents)
-  // a role's agent (its model button) and, on Everywhere, Edit instructions: the file every agent of the role is told first
-  if (row.agent)
+  // a role's agent: the window's model button, and on Everywhere "Use other CLI" (a set Reviewer) and Edit
+  // instructions (the file every agent of the role is told first)
+  if (row.agent) {
+    const role = row.key.split('.')[1]
+    const told = ST.ROLES.find((r: { id: string }) => r.id === role)?.told ?? row.label
     return (
       <span className="flex max-w-full flex-wrap items-center justify-end gap-1.5">
-        <Ghost onClick={() => openRole({ kind: 'role', level: level ?? 'all', key: row.key, title: row.label, pick: row.agent!.pick })} className="max-w-full"><span className="truncate">{row.value}</span></Ghost>
-        {row.file ? <Ghost onClick={() => openRole({ kind: 'file', role: row.key.split('.')[1], title: TOLD[row.key.split('.')[1]] ?? row.label, file: row.file! })}>Edit instructions</Ghost> : null}
+        <ModelButton row={row} level={level ?? 'all'} />
+        {row.agent.other ? <Ghost onClick={() => set(null as unknown as string)}>{ST.USE_OTHER_CLI}</Ghost> : null}
+        {row.file ? <Ghost onClick={() => openRole({ kind: 'file', role, title: told, file: row.file! })}>{ST.EDIT_INSTRUCTIONS}</Ghost> : null}
       </span>
     )
-  const only = !row.num && !row.text && !row.multi && !action && options.length <= 1 && (options[0] ?? row.value) === row.value
+  }
+  // Web's link: Copy beside it
+  if (row.copy) return <CopyButton text={row.copy} />
+  if (row.steps) return <Stepper row={row} set={set} />
+  const onOff = options.length === 2 && options.every((o) => /^(on|off)$/i.test(o))
+  const only = !row.num && !row.text && !row.multi && !action && !onOff && options.length <= 1 && (options[0] ?? row.value) === row.value
   if (row.fixed || !row.key || only) return <span className="text-right text-pretty text-fg2 [overflow-wrap:anywhere]">{shown(row.value)}</span>
   if (row.num) return <NumberValue label={row.label} value={row.value} num={row.num} onEdit={edit} onSave={set} />
-  if (row.text) return <TextValue label={row.label} value={row.value} onEdit={edit} onSave={set} />
+  if (row.text) return <TextValue label={row.label} value={row.value} placeholder={row.placeholder} onEdit={edit} onSave={set} />
   if (row.multi) {
     // chips that each turn on or off (3.0's Autopilot events)
     const on = new Set(row.value.split(',').filter(Boolean))
@@ -634,38 +634,36 @@ function Control({ row, phone, set, edit, level }: { row: SettingRow; phone: boo
   }
   // an action (alerts: turn them on for this device) is a button, its row's value the words under its label
   if (action) return <Ghost onClick={() => set(options[0])}>{options[0]}</Ghost>
-  if (options.length === 2 && options.includes('on') && options.includes('off')) return <Switch label={row.label} on={row.value === 'on'} onChange={(on) => set(on ? 'on' : 'off')} />
+  // on or off: the window's switch (its words On/Off or on/off), greyed where it can't flip now (an add-on another needs)
+  if (onOff) {
+    const [yes, no] = /^on$/i.test(options[0]) ? options : [options[1], options[0]]
+    const sw = <Switch label={row.label} on={row.value === yes} disabled={row.disabled} onChange={(on) => set(on ? yes : no)} />
+    // Home Assistant's Make home space, beside its switch
+    return row.extra ? <span className="flex items-center gap-2.5"><Ghost onClick={() => setExtra(row.extra!.key)}>{row.extra.label}</Ghost>{sw}</span> : sw
+  }
   if (SEGMENTS.has(row.key)) return <Segments label={row.label} value={row.value} options={options} onPick={set} fill={phone} />
   return <Pick label={row.label} plain={phone} value={row.value} options={options} onPick={set} />
 }
 
-/** the instructions' titles, as the window's */
-const TOLD: Record<string, string> = { coordinator: 'What every Assistant is told first', worker: 'What every worker is told first', reviewer: 'What every reviewer is told first' }
+/** a row's extra button (Make home space): its own key, set at once */
+const setExtra = (key: string) => void act({ type: 'setting', key, value: 'on' } as never)
+
+/** Copy, as the window's Web › Link */
+function CopyButton({ text }: { text: string }) {
+  return <Ghost onClick={() => void navigator.clipboard?.writeText(text).catch(() => {})}>{ST.WEB.copy}</Ghost>
+}
 
 /** a value set here that is what the row would follow anyway unsets it: it follows again */
 const follows = (row: SettingRow, value: string) => (row.inherits && value === row.inherits.value ? null : value)
 
-/** the rows whose few short choices sit side by side */
-const SEGMENTS = new Set(['notify', 'review.mustFix', 'autopilot.events'])
-
-/** on Everywhere's rows: the way to the space Settings was opened from, and that it already sets its own */
-function SpaceOnly({ row }: { row: SettingRow }) {
-  const ui = useUI()
-  const snap = useSnap()!
-  const place = spaceOf(snap, ui)
-  const own = place && row.key ? snap.settings.find((x) => x.level === place.id && !x.global && x.rows.some((r) => r.key === row.key))?.rows.find((r) => r.key === row.key) : undefined
-  if (!own || row.fixed) return null
-  return (
-    <button type="button" onClick={() => setUI({ settings: { ...ui.settings!, level: place!.id } })} className="press-dim relative self-start text-left text-[0.75rem] text-fg2 underline decoration-fg3 underline-offset-2 after:absolute after:-inset-x-1 after:-inset-y-1.5 coarse:after:-inset-y-3 phone:text-[0.8125rem]">
-      {own.inherits ? `${place!.name} sets its own` : `For this space only: ${place!.name}`}
-    </button>
-  )
-}
+/** the rows whose few short choices sit side by side, as the window's segmented controls */
+const SEGMENTS = new Set(['notify', 'tasks.merge', 'tasks.review_rounds', 'tasks.must_fix', 'tasks.archive_after', 'autopilot.events'])
 
 /** a page's settings: its rows under their group's heading (Tasks, Coordinators, Reviewer), and what it notes under them */
 function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phone: boolean; set: (key: string, value: string | null) => void; refused: (key: string) => string | undefined; clear: (key: string) => void; hint?: string }) {
-  const [pilotError, setPilotError] = useState('')
-  const [running, setRunning] = useState(false)
+  // a machine's block's details: this computer ("local") or another by its key
+  const machines = useSnap()?.machines ?? []
+  const snapMachine = (key: string) => machines.find((m) => (key === ST.LOCAL ? m.here : !m.here && (m.machine === key || m.name === key)))
   // a machine's own limits, opened by its Set its own (3.0's: shown once it has any, or once asked for)
   const [revealed, setRevealed] = useState<string[]>([])
   // the "N spaces use their own" lists open now
@@ -679,27 +677,28 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
   const under = (row: SettingRow) => (
     <>
       {row.key in registry.settingActions ? <Small className="text-pretty">{row.value}</Small> : null}
-      {row.hint ? <Small className="text-pretty">{row.hint}</Small> : null}
+      {/* its line; a second (Backup's "Can't on vm: Codex is signed out.") under it, as the window's */}
+      {row.hint ? <Small className="text-pretty whitespace-pre-line">{row.hint}</Small> : null}
       {/* the exact words it adds to every new task's brief, as it is set now */}
       {row.line ? <details className="text-[0.8125rem] text-fg2"><summary className="cursor-pointer">Words this adds to each new task</summary><p className="text-pretty">“{row.line}”</p></details> : null}
       {/* as the window's: "Same as everywhere" / "Changed here · Reset"; on Everywhere the spaces that set their own */}
       {row.from && !row.inherits ? <Small className="text-pretty">Same as {row.from}</Small> : null}
       {row.inherits ? (
         <Small className="flex flex-wrap items-center gap-1 text-pretty">
-          <span className="text-fg2">Changed here</span>
+          <span className="text-fg2">{ST.CHANGED_HERE}</span>
           <span aria-hidden>·</span>
           <button type="button" title={`Back to what ${row.inherits.from} has`} onClick={() => set(row.key, null)}
             className="press-dim relative font-medium text-accent after:absolute after:-inset-x-1 after:-inset-y-1.5 coarse:after:-inset-y-3">
-            Reset
+            {ST.RESET}
           </button>
         </Small>
       ) : null}
-      {row.machinesOwn ? <Small className="text-pretty">{row.machinesOwn === 1 ? '1 machine uses its own' : `${row.machinesOwn} machines use their own`}</Small> : null}
+      {row.machinesOwn ? <Small className="text-pretty">{ST.machinesOwn(row.machinesOwn)}</Small> : null}
       {row.others?.length ? (
         <Small className="flex flex-col gap-1 text-pretty">
           <button type="button" aria-expanded={listed.includes(row.key)} onClick={() => setListed((l) => (l.includes(row.key) ? l.filter((k) => k !== row.key) : [...l, row.key]))}
             className="press-dim relative self-start text-left text-accent after:absolute after:-inset-x-1 after:-inset-y-1.5 coarse:after:-inset-y-3">
-            {row.others.length === 1 ? '1 space uses its own' : `${row.others.length} spaces use their own`}
+            {ST.spacesOwn(row.others.length)}
           </button>
           {listed.includes(row.key) ? (
             <span className="flex flex-wrap gap-x-3 gap-y-1">
@@ -727,26 +726,45 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
         {page.about ? <p className={clsx('text-pretty text-fg2', phone ? 'text-[0.9375rem]' : 'text-[0.8125rem]')}>{page.about}</p> : null}
         {hint ? <p className={clsx('text-pretty text-fg3', phone ? 'text-[0.9375rem]' : 'text-[0.8125rem]')}>{hint}</p> : null}
       </div>
-      {page.name === 'Autopilot' && page.level && page.level !== 'all' && !page.level.startsWith('m:') ? <div className="flex flex-col items-start gap-2"><Ghost disabled={running || page.rows.find((r) => r.key === 'autopilot.on')?.value === 'off'} onClick={async () => { setRunning(true); try { const result = await act({ type: 'autopilot-run', place: page.level! }); setPilotError(result.error ?? '') } finally { setRunning(false) } }}>{running ? 'Queuing…' : 'Run now'}</Ghost>{pilotError ? <p role="alert" className="text-need">{pilotError}</p> : null}</div> : null}
-      {page === APPEARANCE ? <AppearancePick phone={phone} /> : null}
-      {page.secrets && page.level ? <SecretsList level={page.level} secrets={page.secrets} phone={phone} /> : null}
+      {page.vault && page.level ? <SecretsPage level={page.level} page={page} phone={phone} /> : null}
       {page.View ? <page.View phone={phone} /> : null}
       {groups.map(({ name, rows }, g) => {
         const Group = name === 'Access and limits' ? 'details' : 'div'
+        // a machine's block (Settings › Machines): its name, then its health and plans, then its rows
+        const machine = rows[0]?.details
         return <Group key={name ?? g} className="w-full">
           {name === 'Access and limits' ? <summary className={clsx(heading(phone), 'cursor-pointer')}>Access and limits</summary> : null}
-          {name && name !== 'Access and limits' ? <h3 className={heading(phone)}>{name}</h3> : null}
+          {name && name !== 'Access and limits' ? <h3 className={machine ? clsx('pb-2.5 font-semibold', phone && 'px-4') : heading(phone)}>{name}</h3> : null}
+          {machine ? <div className={clsx('pb-3', phone ? clsx(card, 'mb-2 px-4 py-3') : 'border-b border-line')}><MachineDetails m={snapMachine(machine)} /></div> : null}
+          {rows[0]?.groupHint ? <p className={clsx('text-pretty text-fg3', phone ? 'px-4 pb-1.5 text-[0.9375rem]' : 'pb-1 text-[0.8125rem]')}>{rows[0].groupHint}</p> : null}
           <dl className={phone ? card : undefined}>
             {rows.map((row) =>
-              row.doc || row.multiline ? (
+              row.open ? (
+                // a row that opens another level's page (Autopilot's spaces, each its own settings), as the window's
+                <div key={`open:${row.open}`} className={clsx(rowLook(phone), 'p-0!')}>
+                  <button type="button" onClick={() => setUI((u) => ({ settings: { ...(u.settings ?? { section: 0 }), level: row.open! } }))}
+                    className={clsx('press flex w-full min-w-0 items-center gap-3 text-left', phone ? 'min-h-12 px-4 py-2.5' : 'py-2.5')}>
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate">{row.label}</span>
+                      <Small className="truncate tabular-nums">{phone && row.hint ? `${row.value} · ${row.hint}` : row.value}</Small>
+                    </span>
+                    {row.hint && !phone ? <Small className="shrink-0">{row.hint}</Small> : null}
+                    <NextIcon className={clsx(ic, 'shrink-0 text-fg3')} />
+                  </button>
+                </div>
+              ) : row.multiline && row.key.startsWith('tasks.') ? (
+                // Tasks' notes, as the window's: the title and its line, then a box as wide as the page, saved as you type
+                <div key={row.key} className={clsx(rowLook(phone), 'flex-col items-stretch! gap-2.5 pb-3!')}>
+                  <NoteBox row={row} under={under(row)} save={(x) => set(row.key, follows(row, x))} />
+                </div>
+              ) : row.doc || row.multiline ? (
                 <div key={row.key} className={clsx(rowLook(phone), 'flex-col items-stretch! gap-2.5 pb-3!', row.inherits && 'border-l-2 border-accent pl-3')}>
                   <dt className="flex min-w-0 flex-col">
                     {row.label}
-                    {row.doc ? <Small className="text-pretty">What to do, how to judge progress, when to report or ask you, and when to stop.</Small> : null}
                     {under(row)}
                   </dt>
                   <dd>
-                    <DocValue label={row.label} file={row.multiline ? (row.key.endsWith('_notes') ? 'Every task here' : 'Private · this role only') : 'HEARTBEAT.md'} privateRules={row.multiline} empty={row.key.endsWith('_notes') ? 'Empty: nothing extra' : undefined} phone={phone} value={row.value} onSave={(x) => set(row.key, row.multiline ? follows(row, x) : x)} />
+                    <DocValue label={row.label} file={row.multiline ? (row.key.endsWith('_notes') ? 'Every task here' : 'Private · this role only') : (row.file ?? 'HEARTBEAT.md')} privateRules={row.multiline} empty={row.key.endsWith('_notes') ? 'Empty: nothing extra' : undefined} phone={phone} value={row.value} onSave={(x) => set(row.key, follows(row, x))} />
                     {row.instructions ? <p className="mt-3 whitespace-pre-wrap text-base leading-relaxed [overflow-wrap:anywhere]">{row.instructions}</p> : null}
                   </dd>
                 </div>
@@ -769,7 +787,7 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
                     {under(row)}
                   </dt>
                   <dd className={clsx('flex min-w-0 shrink-0 flex-col', phone && SEGMENTS.has(row.key) ? 'items-stretch' : 'max-w-[65%] items-end')}>
-                    {row.reveals ? <Ghost onClick={() => setRevealed((r) => [...r, row.reveals!])}>Set its own</Ghost> : row.button ? <Ghost onClick={() => set(row.key, null)}>{row.button}</Ghost> : <Control row={row} phone={phone} level={page.level} set={(x) => set(row.key, follows(row, x))} edit={() => clear(row.key)} />}
+                    {row.reveals ? <Ghost onClick={() => setRevealed((r) => [...r, row.reveals!])}>{ST.MACHINES.own.button}</Ghost> : row.button ? <Ghost disabled={row.disabled} onClick={() => set(row.key, null)}>{row.button}</Ghost> : <Control row={row} phone={phone} level={page.level} set={(x) => set(row.key, follows(row, x))} edit={() => clear(row.key)} />}
                   </dd>
                 </div>
               ),
@@ -777,6 +795,13 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
           </dl>
         </Group>
       })}
+      {page.qr ? (
+        // Web: the link's QR code, to open it on a phone (the window's)
+        <figure className="flex w-full flex-col gap-2">
+          <figcaption className={clsx('text-fg2', phone ? 'px-4 text-[0.9375rem]' : 'text-[0.8125rem]')}>{page.qrTitle}</figcaption>
+          <img src={page.qr} alt={page.qrTitle ?? ''} className={clsx('size-[168px] rounded-row bg-white', phone && 'mx-4')} />
+        </figure>
+      ) : null}
       {page.note ? (
         <figure className="w-full">
           <figcaption className={heading(phone)}>{page.noteTitle ?? "Every new task's instructions end with"}</figcaption>
@@ -787,149 +812,184 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
   )
 }
 
-/** how long ago, in a word or two */
-function ago(at: number) {
-  const m = Math.max(0, Math.round((Date.now() - at) / 60_000))
-  if (m < 1) return 'just now'
-  if (m < 60) return `${m} min ago`
-  const h = Math.round(m / 60)
-  if (h < 24) return `${h} h ago`
-  const d = Math.round(h / 24)
-  return d === 1 ? 'yesterday' : `${d} days ago`
+/** Tasks' note (When a task starts / finishes), as the window's: its title and line, then a box as wide as the page,
+ *  its example dim while empty, saved a moment after typing stops and on leaving it; "Saved" beside its title a moment */
+function NoteBox({ row, under, save }: { row: SettingRow; under: ReactNode; save: (v: string) => void }) {
+  const [v, setV] = useState(row.value)
+  const [saved, setSaved] = useState(false)
+  const typing = useRef(false)
+  const pending = useRef<string | null>(null)
+  const later = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const now = useRef({ value: row.value, save })
+  now.current = { value: row.value, save }
+  useEffect(() => { if (!typing.current) setV(row.value) }, [row.value])
+  const flush = () => {
+    clearTimeout(later.current)
+    const x = pending.current
+    pending.current = null
+    if (x === null || x === now.current.value) return
+    now.current.save(x)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
+  // Settings closed or another page: a note typed a moment ago is still saved
+  useEffect(() => () => flush(), [])
+  return (
+    <>
+      <div className="flex items-start gap-3">
+        <dt className="flex min-w-0 flex-1 flex-col">
+          {row.label}
+          {under}
+        </dt>
+        {saved ? <Small className="shrink-0">{ST.SAVED}</Small> : null}
+      </div>
+      <dd>
+        <TextBox label={row.label} value={v} placeholder={row.placeholder}
+          onFocus={() => (typing.current = true)}
+          onBlur={() => { typing.current = false; flush() }}
+          onChange={(x) => { setV(x); pending.current = x; clearTimeout(later.current); later.current = setTimeout(flush, 500) }}
+          className="max-h-[calc(10lh+1rem)] min-h-[calc(3lh+1rem)] w-full overflow-y-auto rounded-row bg-bg px-2.5 py-2 shadow-[inset_0_0_0_1px_var(--line2)] outline-none placeholder:text-fg3 focus:shadow-box-focus phone:text-[1rem]" />
+      </dd>
+    </>
+  )
 }
 
-/** a level's secrets, by name: each replaced or removed, and new ones added, in masked boxes. Values never come here:
- *  they only go, once, to be kept on the main machine */
-function SecretsList({ level, secrets, phone }: { level: string; secrets: { name: string; at: number }[]; phone: boolean }) {
-  // the name being replaced, or '' for a new one; none: no box open
-  const [open, setOpen] = useState<string | null>(null)
+/** Secrets, as the window's page (secrets-section.js): what it is, the agents waiting on one (Give it fills the form
+ *  in), Add (Name, Value, For: Everywhere, a machine or a space; a space's own page starts on that space), and every
+ *  kept secret with where it is, each to Replace or Remove. Values never come here: they only go, once, to the vault on
+ *  the main machine. */
+function SecretsPage({ level, page, phone }: { level: string; page: Page; phone: boolean }) {
+  const W = ST.SECRETS
+  const snap = useSnap()!
+  const vault = page.vault ?? []
+  const asks = page.asks ?? []
+  const spaceIds = new Set(levelsOf(snap.settings))
+  const scopes: { level: string; label: string; sub?: string; group: string }[] = [
+    { level: 'all', label: ST.EVERYWHERE, group: '' },
+    { level: 'm:', label: ST.THIS_COMPUTER, group: W.machine },
+    ...snap.machines.filter((m) => !m.here).map((m) => ({ level: `m:${m.machine}`, label: m.machine, group: W.machine })),
+    ...snap.places.filter((p) => spaceIds.has(p.id)).map((p) => ({ level: p.id, label: p.name, sub: p.id.includes('/') ? p.machine : '', group: W.space })),
+  ]
+  const [scope, setScope] = useState(level)
   const [name, setName] = useState('')
   const [value, setValue] = useState('')
-  const [sure, setSure] = useState<string | null>(null)
   const [err, setErr] = useState('')
+  const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
-  const [only, setOnly] = useState(false)
-  const ui = useUI()
-  const snap = useSnap()!
-  const place = spaceOf(snap, ui)
-  const own = snap.settings.find((x) => x.level === place?.id && x.secrets)?.secrets ?? []
-  // another level's page: nothing half-typed comes along
-  useEffect(() => {
-    setOpen(null)
-    setValue('')
-    setSure(null)
-    setOnly(false)
-  }, [level])
-  const close = () => {
-    setOpen(null)
-    setName('')
-    setValue('')
-    setErr('')
-    setOnly(false)
-  }
-  const save = async (n: string, v: string | null) => {
+  const [sure, setSure] = useState<string | null>(null)
+  const [picking, setPicking] = useState(false)
+  const valueBox = useRef<HTMLInputElement>(null)
+  // another page (a space's own): the form starts on it, nothing half-typed comes along
+  useEffect(() => { setScope(level); setValue(''); setErr(''); setNote('') }, [level])
+  const picked = scopes.find((x) => x.level === scope) ?? scopes[0]
+  const save = async () => {
+    const n = name.trim()
+    if (busy) return
+    if (!/^[A-Za-z_][A-Za-z0-9_]{0,99}$/.test(n)) return setErr(W.badName)
+    if (!value) return setErr(W.noValue)
     setBusy(true)
-    setErr('')
     try {
-      const target = only && place ? place.id : level
-      const r = (await act({ type: 'secret', level: target, name: n, value: v })) as { ok?: boolean; error?: string }
+      const r = (await act({ type: 'secret', level: scope, name: n, value })) as { ok?: boolean; error?: string }
       if (r?.ok === false) setErr(r.error ?? "That didn't go through.")
-      else if (v !== null) {
-        close()
-        // there is where it is listed
-        if (target !== level) setUI({ settings: { ...ui.settings!, level: target } })
-      } else setSure(null)
-    } catch {
-      setErr("That didn't go through: Shepherdr can't be reached.")
-    } finally {
-      setBusy(false)
-    }
+      else { setName(''); setValue(''); setErr(''); setNote(W.keptNote(n, picked.group === W.space ? `Space ${picked.label}` : picked.label)) }
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
   }
-  const box = (n: string) => (
-    <div className="flex w-full flex-col gap-2">
-      <SecretField label={n ? `New value for ${n}` : 'Value'} value={value} onChange={setValue} onEnter={() => (n || name) && value && save(n || name.trim(), value)} autoFocus={!!n} />
-      {!n && place ? <div className="flex min-h-9 items-center justify-between gap-3"><span className="min-w-0">For this space only: {place.name}</span><Switch label={`For this space only: ${place.name}`} on={only} onChange={setOnly} /></div> : null}
-      <div className="flex items-center justify-end gap-2">
-        {err ? <span role="status" className="mr-auto text-[0.75rem] text-need-fg phone:text-[0.8125rem]">{err}</span> : null}
-        <Ghost onClick={close}>Cancel</Ghost>
-        <Ghost disabled={busy || !value || (!n && !name.trim())} onClick={() => save(n || name.trim(), value)} className="bg-fg text-bg! shadow-none! enabled:hover:bg-fg">
-          Save
-        </Ghost>
-      </div>
-    </div>
-  )
+  const remove = async (e: (typeof vault)[number]) => {
+    setSure(null)
+    const at = e.scope === 'everywhere' ? 'all' : e.scope === 'machine' ? `m:${e.machine ?? ''}` : e.space!
+    try {
+      const r = (await act({ type: 'secret', level: at, name: e.name, value: null })) as { ok?: boolean; error?: string }
+      if (r?.ok === false) setErr(r.error ?? "That didn't go through.")
+      else setNote(W.removedNote(e.name, e.where))
+    } catch (x) { setErr(x instanceof Error ? x.message : String(x)) }
+  }
+  const sub = clsx(heading(phone), 'pt-4')
+  const box = clsx('h-9 w-full min-w-0 rounded-row bg-bg px-2.5 outline-none placeholder:text-fg3 coarse:h-11 phone:h-11 phone:text-[1rem]', field)
   return (
-    <div className="flex w-full flex-col gap-1.5">
-      <dl className={phone ? card : undefined}>
-        {secrets.map((x) => (
-          <div key={x.name} className={clsx(rowLook(phone), open === x.name && 'flex-col items-stretch! gap-2.5 pb-3!')}>
-            <dt className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate font-mono text-[0.8125rem] phone:text-[0.9375rem]">{x.name}</span>
-              <Small>Saved {ago(x.at)}</Small>
-            </dt>
-            <dd className={clsx('flex shrink-0 items-center gap-1.5', open === x.name && 'w-full')}>
-              {open === x.name ? (
-                box(x.name)
-              ) : sure === x.name ? (
-                <>
-                  <Ghost onClick={() => setSure(null)}>Keep</Ghost>
-                  <Ghost disabled={busy} onClick={() => save(x.name, null)} className="text-need-fg!">
-                    Remove it
-                  </Ghost>
-                </>
-              ) : (
-                <>
-                  <Ghost
-                    onClick={() => {
-                      close()
-                      setOpen(x.name)
-                    }}
-                  >
-                    Replace
-                  </Ghost>
-                  <Ghost onClick={() => setSure(x.name)}>Remove</Ghost>
-                </>
-              )}
-            </dd>
+    <div className="flex w-full flex-col">
+      <p className={clsx('text-pretty text-fg3', phone ? 'px-4 text-[0.9375rem]' : 'text-[0.8125rem]')}>{W.about}</p>
+      {asks.length ? (
+        <>
+          <h3 className={sub}>{W.asked}</h3>
+          <div className={phone ? card : undefined}>
+            {asks.map((a) => (
+              <div key={`${a.address}|${a.name}`} className={rowLook(phone)}>
+                <span className="size-[7px] shrink-0 rounded-full bg-need" />
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate">{W.asks(a.who, a.name)}</span>
+                  {a.why ? <Small className="truncate">{a.why}</Small> : null}
+                </span>
+                <Ghost onClick={() => { setName(a.name); setScope(a.scope); setNote(''); setErr(''); valueBox.current?.focus() }}>{W.give}</Ghost>
+              </div>
+            ))}
           </div>
-        ))}
-        {open === '' ? (
-          <div className={clsx(rowLook(phone), 'flex-col items-stretch! gap-2 py-3!')}>
-            <input
-              aria-label="Name"
-              placeholder="GITHUB_TOKEN"
-              autoComplete="off"
-              autoCapitalize="characters"
-              autoCorrect="off"
-              spellCheck={false}
-              autoFocus
-              value={name}
-              onChange={(e) => setName(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_'))}
-              className={clsx('min-h-10 w-full min-w-0 rounded-row bg-transparent px-3 py-[9px] font-mono placeholder:font-sans placeholder:text-fg3 coarse:min-h-11 phone:min-h-11 phone:text-[1rem]', field)}
-            />
-            {box('')}
+        </>
+      ) : null}
+      <h3 className={sub}>{W.add}</h3>
+      <div className={clsx('flex flex-col gap-2 py-3', phone ? clsx(card, 'px-4') : 'border-b border-line')}>
+        <div className={clsx('flex gap-2', phone ? 'flex-col' : 'items-end')}>
+          <label className={clsx('flex flex-col gap-1', !phone && 'w-[190px] shrink-0')}>
+            <Small>{W.name}</Small>
+            <input value={name} onChange={(e) => { setName(e.target.value); setErr('') }} placeholder={W.namePlaceholder} autoComplete="off" autoCapitalize="characters" autoCorrect="off" spellCheck={false} className={clsx(box, 'font-mono')} />
+          </label>
+          <label className="flex min-w-0 flex-1 flex-col gap-1">
+            <Small>{W.value}</Small>
+            <input ref={valueBox} type="password" value={value} onChange={(e) => { setValue(e.target.value); setErr('') }} onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && void save()}
+              placeholder={W.valuePlaceholder} autoComplete="off" spellCheck={false} data-1p-ignore data-lpignore="true" className={box} />
+          </label>
+          <div className="relative flex shrink-0 flex-col gap-1">
+            <Small>{W.for}</Small>
+            <Ghost aria-haspopup="menu" aria-expanded={picking} onClick={() => setPicking(!picking)} className="h-9! max-w-full justify-between pr-1.5 coarse:h-11! phone:h-11!">
+              <span className="max-w-[150px] truncate phone:max-w-none">{picked.group === W.space ? `Space ${picked.label}` : picked.label}</span>
+              <DownIcon className={ic} />
+            </Ghost>
+            {picking ? (
+              <Menu label={W.for} select onClose={() => setPicking(false)} className="absolute top-full right-0 z-10 mt-1 max-h-[300px] w-[260px] max-w-[calc(100vw-2rem)] origin-top-right overflow-y-auto">
+                {[scopes[0], null, ...scopes.filter((x) => x.group === W.machine), null, ...scopes.filter((x) => x.group === W.space)].map((x, i) =>
+                  x === null ? <MenuLabel key={`g${i}`}>{i === 1 ? W.machine : W.space}</MenuLabel> : (
+                    <MenuItem key={x.level} role="menuitemradio" aria-checked={x.level === scope} icon={x.level === scope ? <CheckIcon className={ic} /> : null} hint={x.sub || undefined}
+                      onClick={() => { setScope(x.level); setPicking(false) }}>
+                      {x.label}
+                    </MenuItem>
+                  ))}
+              </Menu>
+            ) : null}
           </div>
-        ) : (
-          <div className={rowLook(phone)}>
-            <dt className="min-w-0 flex-1 text-fg2">{secrets.length ? null : 'None. An agent that needs one asks in its chat.'}</dt>
-            <dd>
-              <Ghost
-                onClick={() => {
-                  close()
-                  setOpen('')
-                }}
-              >
-                Add a secret
-              </Ghost>
-            </dd>
-          </div>
-        )}
-      </dl>
-      {err && open === null ? <Small role="status" className="text-need-fg!">{err}</Small> : null}
-      <p className={clsx('text-pretty text-fg3', phone ? 'px-4 text-[0.8125rem]' : 'text-[0.75rem]')}>
-        Agents use these by name and never see them.
-      </p>
-      {own.length ? <Small className="text-pretty">{place!.name} sets its own: {own.map((x) => x.name).join(', ')}. <button type="button" onClick={() => setUI({ settings: { ...ui.settings!, level: place!.id } })} className="press-dim underline decoration-fg3 underline-offset-2">Open</button></Small> : null}
+        </div>
+        <div className="flex items-center gap-2">
+          <Small role="status" className={clsx('min-w-0 flex-1 text-pretty', err && 'text-need-fg!')}>{err || note || W.hint}</Small>
+          <Ghost disabled={busy || !name.trim() || !value} onClick={() => void save()} className="bg-fg text-bg! shadow-none! enabled:hover:bg-fg">{busy ? W.saving : W.save}</Ghost>
+        </div>
+      </div>
+      <h3 className={sub}>{W.kept}</h3>
+      <div className={phone ? card : undefined}>
+        {!vault.length ? <p className={clsx(rowLook(phone), 'text-fg3')}>{W.none}</p> : null}
+        {[...vault].sort((a, b) => a.name.localeCompare(b.name) || a.scope.localeCompare(b.scope)).map((e) => {
+          const k = `${e.name}|${e.scope}|${e.machine ?? ''}|${e.space ?? ''}`
+          return (
+            <div key={k} className={rowLook(phone)}>
+              <KeyIcon className={clsx(ic, 'text-fg3')} />
+              <span className="min-w-0 flex-1 truncate font-mono text-[0.8125rem] phone:text-[0.9375rem]">{e.name}</span>
+              <Small className="max-w-[180px] shrink truncate">{e.where}</Small>
+              <span className="flex shrink-0 items-center gap-1">
+                <Ghost className="shadow-none!" onClick={() => {
+                  setName(e.name)
+                  setScope(e.scope === 'everywhere' ? 'all' : e.scope === 'machine' ? `m:${e.machine ?? ''}` : e.space!)
+                  setNote(W.pasteNew(e.name))
+                  setErr('')
+                  valueBox.current?.focus()
+                }}>{W.replace}</Ghost>
+                {sure === k ? (
+                  <>
+                    <Ghost onClick={() => void remove(e)} className="bg-need text-bg! shadow-none! enabled:hover:bg-need">{W.remove}</Ghost>
+                    <Ghost className="shadow-none!" onClick={() => setSure(null)}>{W.keep}</Ghost>
+                  </>
+                ) : <Ghost className="shadow-none!" onClick={() => setSure(k)}>{W.remove}</Ghost>}
+              </span>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -957,7 +1017,6 @@ export default function Settings() {
   })
   const phone = ui.device === 'phone'
   const tablet = ui.device === 'tablet'
-  const appearance = useAppearance()
   // what was refused, by page and key: each machine's page has the same keys
   const [refused, setRefused] = useState<Record<string, string>>({})
   const at = (key: string) => `${page.level ?? ''}|${key}`
@@ -990,11 +1049,16 @@ export default function Settings() {
   const clear = (key: string) => refused[at(key)] && setRefused((r) => ({ ...r, [at(key)]: '' }))
   // a space's own settings say so, as the window's: "Only for <space> on <machine>", and Everywhere goes back
   const spacePlace = level !== 'all' ? snap.places.find((p) => p.id === level) : undefined
+  // its machine as the window says it ("This computer" here), and its folder under it, dim
+  const spaceWhere = spacePlace ? (spacePlace.id.includes('/') ? spacePlace.machine : ST.THIS_COMPUTER) : ''
   const body = <>
     {spacePlace && !page.device ? (
-      <div className={clsx('flex min-w-0 items-center gap-3 border-b border-line bg-well px-6 py-2.5', phone && 'px-4')}>
-        <span className="min-w-0 flex-1 truncate text-fg2">Only for {spacePlace.name} on {machineName(snap.machines, spacePlace.machine)}</span>
-        <Ghost onClick={() => setUI({ settings: { ...s, level: 'all' } })}>Everywhere</Ghost>
+      <div className={clsx('flex min-w-0 items-center gap-3 rounded-box bg-hover px-3 py-2', phone ? 'mx-4 mt-4' : 'mx-6 mt-5 max-w-[672px]')}>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate">{ST.onlyFor(spacePlace.name, spaceWhere)}</span>
+          {spacePlace.where ? <Small className="truncate">{spacePlace.where}</Small> : null}
+        </span>
+        <Ghost onClick={() => setUI({ settings: { ...s, level: 'all' } })}>{ST.EVERYWHERE}</Ghost>
       </div>
     ) : null}
     <PageBody key={`${page.level ?? ''}|${page.name}`} page={page} phone={phone} set={set} refused={(key) => refused[at(key)]} clear={clear} /></>
@@ -1008,14 +1072,14 @@ export default function Settings() {
               <BackIcon className={ic} />
             </RoundButton>
           }
-          name={spacePlace ? 'Space settings' : 'Settings'}
+          name={spacePlace ? ST.SPACE_TITLE : ST.TITLE}
         />
         <nav aria-label="Sections" className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain bg-canvas">
           <div className="flex flex-col gap-6 px-4 pt-4 pb-[calc(env(safe-area-inset-bottom)+--spacing(8))]">
+            {/* the window's pages in one list, under the title above (no group of this device's own) */}
             {groups.map((g) => (
               <div key={g.name}>
-                <h3 className={heading(true)}>{g.name}</h3>
-                <ul role="list" className={clsx(card, 'overflow-hidden')}>
+                <ul role="list" aria-label={g.name} className={clsx(card, 'overflow-hidden')}>
                   {g.pages.map((p) => {
                     const Icon = iconOf(p)
                     return (
@@ -1023,7 +1087,6 @@ export default function Settings() {
                         <button type="button" onClick={() => go(pages.indexOf(p))} className="press flex min-h-12 w-full items-center gap-3 px-4 text-left">
                           <Icon className={clsx(ic, 'text-fg2')} />
                           <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                          {p === APPEARANCE ? <span className="text-fg2">{LOOKS[appearance].label}</span> : null}
                           <NextIcon className={clsx(ic, 'text-fg3')} />
                         </button>
                       </li>
@@ -1051,7 +1114,7 @@ export default function Settings() {
                     </RoundButton>
                   }
                   name={page.name}
-                  kind={page.device ? 'This device' : spacePlace ? spacePlace.name : undefined}
+                  kind={spacePlace && !page.device ? spacePlace.name : undefined}
                 />
                 <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain bg-canvas">{body}</div>
               </section>
@@ -1074,7 +1137,7 @@ export default function Settings() {
           </IconButton>
         ) : null}
         <PlacesToggle when="closed" drawer />
-        <Who name={spacePlace ? 'Space settings' : 'Settings'} />
+        <Who name={spacePlace ? ST.SPACE_TITLE : ST.TITLE} />
         {tablet ? null : (
           <IconButton label="Close" onClick={close}>
             <XIcon className={ic} />
@@ -1084,8 +1147,7 @@ export default function Settings() {
       <div className="grid min-h-0 flex-1 grid-cols-[220px_minmax(0,1fr)]">
         <nav aria-label="Sections" className="flex touch-pan-y flex-col gap-4 overflow-y-auto overscroll-contain border-r border-line px-2 py-3">
           {groups.map((g) => (
-            <div key={g.name} className="flex flex-col gap-px">
-              <h3 className="px-2.5 pb-1 text-[0.75rem] font-medium text-fg3">{g.name}</h3>
+            <div key={g.name} role="group" aria-label={g.name} className="flex flex-col gap-px">
               {g.pages.map((p) => {
                 const Icon = iconOf(p)
                 const i = pages.indexOf(p)

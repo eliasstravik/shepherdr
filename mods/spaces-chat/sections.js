@@ -11,6 +11,7 @@
 
 import { shared, setShared, spaces, machines } from "herdr";
 import { toast } from "./ui.js";
+import { DELETED, deletedSection, sectionDeletedToast, withRestoredSection } from "./core/spaces.js";
 
 const KEY = "spaces-chat";
 
@@ -60,16 +61,14 @@ export const unfoldSection = (id) => change(id, (s) => ({ ...s, folded: false })
 // Its spaces go back to the top; no space closes. A toast offers Undo for a few seconds: its click
 // runs spaces-chat.undo-section (main.js), which puts the section back as it was from shared
 // "spaces-chat.deleted" = { section, at } (the last one deleted).
-const DELETED = "spaces-chat.deleted";
+// The kept section, its toast's words and the Undo are the shared core's (core/spaces.js): the web's Delete does the same.
 export function deleteSection(id) {
   const d = data();
-  const at = d.sections.findIndex((s) => s.id === id);
-  if (at < 0) return;
-  const section = d.sections[at];
-  setShared(DELETED, { section, at });
+  const gone = deletedSection(d, id);
+  if (!gone) return;
+  setShared(DELETED, gone);
   save({ ...d, sections: d.sections.filter((s) => s.id !== id) });
-  toast({ title: `Deleted the section \u201c${section.name}\u201d`, body: "Its spaces moved up to the machine. Click to undo.",
-    level: "info", timeout: 8000, action: { name: "spaces-chat.undo-section" } });
+  toast({ ...sectionDeletedToast(gone.section.name), level: "info", timeout: 8000, action: { name: "spaces-chat.undo-section" } });
 }
 
 // Undo: back in its place, with those of its spaces no other section took meanwhile.
@@ -79,10 +78,7 @@ export function restoreSection() {
   setShared(DELETED, null);
   const d = data();
   if (d.sections.some((s) => s.id === gone.section.id)) return;
-  const filed = new Set(d.sections.flatMap((s) => s.spaces));
-  const sections = [...d.sections];
-  sections.splice(Math.min(gone.at, sections.length), 0, { ...gone.section, spaces: gone.section.spaces.filter((x) => !filed.has(x)) });
-  save({ ...d, sections });
+  save({ ...d, sections: withRestoredSection(d, gone).sections });
 }
 
 export function setIcon(space, emoji) {

@@ -34,7 +34,9 @@ test("a space's own values go in its layer with its folder, and Reset drops them
   let f = JSON.parse(readFileSync(file, "utf8"));
   expect(f.spaces.sp2).toEqual({ folder: "/repo", name: "web", tasks: { merge: "auto" }, worker: { agent: "codex", model: "gpt-5", effort: "high", fast: false, perm: null } });
   const tasks = s.sections(null, [scope]).find((x) => x.name === "Tasks" && x.level === "sp2")!;
-  expect(tasks.rows.find((r) => r.key === "tasks.merge")).toMatchObject({ value: "Right away", inherits: { from: "Everywhere" } });
+  // as the window's: "Changed here · Reset", Reset back to Everywhere's; Base branch only in a space's own
+  expect(tasks.rows.find((r) => r.key === "tasks.merge")).toMatchObject({ value: "Right away", inherits: { from: "everywhere" } });
+  expect(tasks.rows.find((r) => r.key === "tasks.base")).toMatchObject({ label: "Base branch", text: true, placeholder: "Its current branch" });
   s.set("tasks.merge", null, "sp2", scope);
   f = JSON.parse(readFileSync(file, "utf8"));
   expect(f.spaces.sp2.tasks).toBeUndefined();
@@ -91,4 +93,26 @@ test("Machines is one page as the window's: every machine's limits, then each ma
   s.set("machine.worker_memory@vm", "8 GB");
   const f = JSON.parse(readFileSync(file, "utf8"));
   expect(f.machines.vm.machine.worker_memory).toBe(8);
+  // the window's steppers: "Off"/"80%" stepping through percents; a percent back from the page sets the file's units
+  const load = s.sections(null, [], ["vm"], "box").find((x) => x.name === "Machines")!.rows.find((r) => r.key === "machine.start_load")!;
+  expect(load.steps?.[0]).toBe("25%");
+  s.set("machine.start_load", "175%", "all");
+  expect(JSON.parse(readFileSync(file, "utf8")).everywhere.machine.start_load).toBe(1.75);
+});
+
+test("Agents and Tasks say the window's words: the model button, Other CLI, Must fix only with a review", async () => {
+  const C: any = await import("../core/settings.js");
+  const s = new Settings();
+  s.start();
+  s.choices = C.choicesFrom({ claude: { model: "opus[1m]", effort: "high", per: {} }, codex: { models: [{ id: "gpt-5", label: "GPT-5", efforts: ["low", "high"] }] } });
+  const agents = s.sections(null).find((x) => x.name === "Agents" && x.level === "all")!;
+  expect(agents.rows.map((r) => r.label)).toEqual(["Assistant", "Workers", "Reviewer", "Backup agent"]);
+  expect(agents.rows[0].value).toBe("Opus 5.5 · 1M · High");
+  expect(agents.rows[2]).toMatchObject({ value: "Other CLI (Codex)", agent: { unset: true, other: false } });
+  const tasks = s.sections(null).find((x) => x.name === "Tasks" && x.level === "all")!;
+  expect(tasks.rows.some((r) => r.key === "tasks.must_fix")).toBe(false);
+  expect(tasks.rows.find((r) => r.key === "tasks.max_running")).toMatchObject({ hint: C.ABOUT["tasks.max_running"], steps: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"] });
+  const web = s.sections({ on: true, link: "https://box/shepherdr/", why: null }).find((x) => x.name === "Web")!;
+  expect(web.rows.map((r) => r.label)).toEqual(["Shepherdr on the web", "Link"]);
+  expect(web.rows[0].hint).toBe("On, private to your tailnet.");
 });

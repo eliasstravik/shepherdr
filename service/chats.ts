@@ -47,6 +47,9 @@ export class Chats {
   /** Tells every page its chats again (what they show changed outside the logs: an ask). */
   refreshAll() { for (const [addr, f] of this.followed) if (f.ready) this.publish(addr, f); }
 
+  /** The agents whose chats pages follow now (a page open on them). */
+  addresses() { return [...this.followed].filter(([, f]) => f.pages.size).map(([a]) => a); }
+
   /** The reader of a chat someone follows now, else null. */
   reader(addr: string) { return this.followed.get(addr)?.reader ?? null; }
 

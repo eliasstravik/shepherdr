@@ -29,6 +29,8 @@ import { agents, panes, terminals, spaces, inRender } from "./live.js";
 import * as fs from "fs/promises";
 import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names } from "./core/chat-log.js";
 import { words, howAnswered } from "./core/asks.js";
+// The rows' words and rules the web app's chat draws by too (core/chat-view.js).
+import { WORDS, clock, senderName, briefLabel, newsWords, resolveArtifacts, unsigned, fitThumbs, bandActs, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
 // Sending the person's words, as the web app does (core/send.js).
 import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine, mentionedIn } from "./core/send.js";
 import { AskCards, linkCtl } from "./cards.js";
@@ -71,7 +73,7 @@ const assistant = (k) => k?.labels?.["herdr.role"] === "coordinator";
 const ROUND = 28, TEXT_ROW = 34;
 // Image thumbnails: the box's files are squares this many px, this far apart; under sent
 // messages each image keeps its shape, fitted in THUMB_ONE (one image) or THUMB_MANY (w, h).
-const THUMB = 56, THUMB_GAP = 6, THUMB_ONE = [320, 220], THUMB_MANY = [200, 140];
+const THUMB = 56, THUMB_GAP = 6;
 // The live row's level wave: each bar's width and the gap between bars, in px.
 const WAVE_BAR = 3, WAVE_GAP = 2;
 // ONE row under each message, its band (a list row of its own), on the message's side (left
@@ -91,16 +93,12 @@ const ACT = 22, ACT_GAP = 2, BAND_IN = 4, ACT_ROW = BAND_IN + ACT, GAP = 16;
 // inside the row's top and bottom edges (QUIET_PY, then the small text's own leading; the
 // baseline sits a little higher than the caps sit low), measured from the window.
 const QUIET_PY = 1, QUIET_IN = { top: 5, bottom: 6 };
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 // A long reply folds (Show more) when it would run past FOLD_TALL lines, to its first FOLD
 // lines; LINE_H is a reply's line in px. Its words are measured as they draw, so one that
 // turns out shorter than it looked isn't folded after all.
 const FOLD = 20, FOLD_TALL = 28, LINE_H = 21;
-// Claude Code: "No conversation found with session ID: …". Codex: "ERROR: No saved session found with ID …".
-const LOST = /\bno (?:saved )?(?:conversation|session|rollout)\b.*\bfound\b|\b(?:conversation|session)\b.*\bnot found\b/i;
-// What a new agent hears when its earlier session is gone (Shepherdr's words); the chat shows it
-// as one quiet line (brief()).
-const FRESH = "Your earlier session is gone, so this is a new one that remembers none of it. Check what is already here and preserve existing work.";
+// A session that is gone (LOST), what the new agent hears (lostMessage) and the chat's note: core/chat-view.js, as
+// the service restarts one for the web app.
 // The picker's row a typed name means (/model sonnet, /model claude-opus-5-5, /model gpt-5):
 // { agent, model }, or null. `menus`: agent.js menuFor() per agent.
 function findModel(menus, name) {
@@ -112,14 +110,6 @@ function findModel(menus, name) {
 }
 // About how many lines words take at a width (px), for a row's height before it's measured.
 const wrapLines = (text, width) => String(text ?? "").split("\n").reduce((n, l) => n + Math.max(1, Math.ceil((l.length * 7) / Math.max(120, width))), 0);
-const shellWord = (s) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${String(s).replace(/'/g, `'"'"'`)}'`);
-// A message's time: 14:05 today, else 3 Nov 14:05.
-function clock(at) {
-  if (!at) return "";
-  const d = new Date(at), now = new Date();
-  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  return d.toDateString() === now.toDateString() ? hm : `${d.getDate()} ${MONTHS[d.getMonth()]} ${hm}`;
-}
 const ICONS = { copy: "copy", reply: "reply", rewind: "rewind", fork: "git-fork", react: "smile-plus" };
 // Reaction pills: this wide, this far apart; and the gap before the first and after the last.
 const PILL = 46, PILL_GAP = 4, PILL_EDGE = 6;
@@ -138,12 +128,6 @@ const threads = () => Object.fromEntries(Object.entries(shared("chat.threads") ?
 const threadOf = (terminal) => Object.entries(threads()).find(([, v]) => v?.terminal === terminal)?.[0] ?? null;
 // How a card's answer went, for its quiet line ("Allowed in the chat"); null for no decision
 // (the terminal asks instead).
-// A message another agent sent with hc often names its sender in its first words ("From HERD-76
-// (t12u?): …"). The quiet row already says who, so its preview starts after them; the name
-// stands in when the sender's address is unknown (sender()).
-const SIGNED = /^\s*(?:\*\*)?(?:[Mm]essage\s+)?[Ff]rom\s+([A-Z][\w.-]*(?:\s+[\w.-]+){0,2}?)\s*(?:\([^)\n]{0,40}\))?\s*:(?:\*\*)?\s*/;
-const signedBy = (text) => SIGNED.exec(String(text ?? ""))?.[1]?.trim() || null;
-const unsigned = (text) => String(text ?? "").replace(SIGNED, "");
 
 // An answer to a waiting hook (ask-hook.sh prints it as Claude's decision), the one way every
 // copy of a card delivers. First how it went (the hook's end/<id>), for the ask's other copies:
@@ -347,7 +331,7 @@ export default class Chat extends View {
     // Find in the chat (Ctrl+F): open, the current match.
     this.finding = false;
     this.findIdx = 0;
-    this.findBox = InputState.new({ placeholder: "Find in chat" });
+    this.findBox = InputState.new({ placeholder: WORDS.find });
     this.findBox.on("change", (_e, cx) => { this.findIdx = 0; this.findJump = true; cx.notify(); });
     // "Show thinking" is gone: so is its stored setting.
     if (shared("chat.showThinking") != null) cx.timer.after(0, () => setShared("chat.showThinking", null));
@@ -881,19 +865,14 @@ export default class Chat extends View {
   // (a task's worker) gets the new agent typed into that shell: the same terminal, labels and
   // task. One whose terminal ended starts again the way the model picker restarts (agent.js).
   async lostSession(t, kind, fresh, cx) {
-    let msg = `<restart>${FRESH}</restart>`;
     // A task's worker: its task's id (herdr-task names its agents hat-4-fix-login).
     const named = /^([a-z][a-z0-9]*)-(\d+)(?:-|$)/.exec(t.name ?? "");
     const ref = this.workerTasks().get(t.address)?.ref ?? (t.labels?.["herdr.task"] && named ? `${named[1].toUpperCase()}-${named[2]}` : null);
-    if (ref) msg += `\n\nYou work on task ${ref}: read its brief with \`herdr-task show ${ref}\` and carry on from what is already done.`;
-    if (assistant(t) && !t.address.includes("/")) {
-      // An Assistant's role is in its first message (its template): it gets that again.
-      const tpl = await readTextFile(`${home()}/.config/herdr-core/templates/assistant.md`).catch(() => null);
-      const body = String(tpl ?? "").split(/^---[ \t]*$/m).slice(2).join("---").trim();
-      if (body) msg = `${msg}\n\n${body}`;
-    }
+    // An Assistant's role is in its first message (its template): it gets that again.
+    const template = assistant(t) && !t.address.includes("/") ? await readTextFile(`${home()}/.config/herdr-core/templates/assistant.md`).catch(() => null) : null;
+    const msg = lostMessage({ ref, template });
     const mine = t.address === this.addr;
-    if (mine) { this.note = { id: `note-${Date.now()}`, text: "Earlier session was gone, starting a new one…" }; cx.notify(); }
+    if (mine) { this.note = { id: `note-${Date.now()}`, text: WORDS.sessionGone }; cx.notify(); }
     try {
       if (t.state === "live") {
         // hc send pastes the line into the shell and presses Enter.
@@ -908,9 +887,9 @@ export default class Chat extends View {
         const next = await agent.restart(t, { argv: [...fresh, msg], resume: true, base: fresh }, pane);
         this.follow_to(next);
       }
-      if (mine) this.note = { id: `note-${Date.now()}`, text: "Earlier session was gone, started a new one." };
+      if (mine) this.note = { id: `note-${Date.now()}`, text: sessionStarted };
     } catch (e) {
-      if (mine) this.note = { id: `note-${Date.now()}`, text: `Earlier session was gone, and a new one didn't start: ${String(e?.message ?? e)}` };
+      if (mine) this.note = { id: `note-${Date.now()}`, text: sessionFailed(String(e?.message ?? e)) };
     } finally {
       this.swapping = false;
     }
@@ -1523,9 +1502,9 @@ export default class Chat extends View {
   fresh(t) {
     const starting = this.phase === "starting";
     return v_flex().flex_1().min_h(0).items_center().justify_center().px(24).gap(6)
-      .child(div().text_size(TEXT.title).font_medium().text_color(t.foreground).child(starting ? "Starting the Assistant…" : "What should the Assistant do?"))
+      .child(div().text_size(TEXT.title).font_medium().text_color(t.foreground).child(starting ? WORDS.startingAssistant : WORDS.emptyTitle))
       .child(div().max_w(380).text_center().text_size(TEXT.label).text_color(t.dim)
-        .child("It plans the work, starts a task for each part and keeps you posted."));
+        .child(WORDS.emptyBody));
   }
 
   // ---- find (Ctrl+F) ----------------------------------------------------------------------------
@@ -1591,7 +1570,7 @@ export default class Chat extends View {
     const matches = this.findMatches(rows);
     const total = matches.reduce((n, m) => n + m.n, 0);
     const q = this.findQuery();
-    const count = !q ? "" : total ? `${Math.min(this.findIdx, total - 1) + 1} of ${total}` : "No matches";
+    const count = !q ? "" : total ? `${Math.min(this.findIdx, total - 1) + 1} of ${total}` : WORDS.noMatches;
     const icon = (id, path, fn) => div().id(id).size(22).flex_none().flex().items_center().justify_center().rounded(6).cursor_pointer()
       .text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground))
       .on_click((_e, cx) => { cx.stop_propagation(); fn(cx); cx.notify(); })
@@ -1608,7 +1587,7 @@ export default class Chat extends View {
       .when(Boolean(this.start), (el) => el.child(h_flex().id("find-earlier").h(22).px(8).flex_none().items_center().rounded(6).cursor_pointer()
         .text_size(12).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
         .on_click((_e, cx) => { cx.stop_propagation(); this.loadEarlier(cx); })
-        .child(this.loadingEarlier ? "Loading…" : "Search earlier")))
+        .child(this.loadingEarlier ? "Loading…" : WORDS.searchEarlier)))
       .child(icon("find-prev", "mods/chat/chevron-up.svg", (cx) => this.findStep(-1, rows, cx)))
       .child(icon("find-next", "mods/chat/chevron-down.svg", (cx) => this.findStep(1, rows, cx)))
       .child(icon("find-x", "mods/chat/x.svg", (cx) => this.closeFind(cx)));
@@ -1709,7 +1688,7 @@ export default class Chat extends View {
       // Accept on the newest ready line while the task is still Ready.
       const accept = lastReady.get(e.ref) === e && x?.status === "ready" && !asks;
       const row = { kind: "tasknews", id: e.id, ref: e.ref, task: x ?? null, taskId: x?.id ?? null, folder: x?.folder ?? null, title: x?.title ?? "",
-        ...this.newsWords(e, x), live, asks: live && asks, accept, busy: accept && this.accepting.has(e.ref) };
+        ...newsWords(e, x), live, asks: live && asks, accept, busy: accept && this.accepting.has(e.ref) };
       if (e.made) extra.push({ at: e.at, row }); else inline.set(e.id, row);
     }
     this.taskOrder = order;
@@ -1717,31 +1696,7 @@ export default class Chat extends View {
     return { inline, extra };
   }
 
-  // A news line's words: { mark (its dot), what (happened), text (the rest) }. Herdr's line is
-  // "HERD-4 needs you: Needs a go (Fix login)", "HERD-4 is ready: Fix login · summary", ...:
-  // without the id and the title, split at its first ": ".
-  newsWords(e, x) {
-    const mark = { started: "started", "needs-you": "needs", failed: "needs", ready: "ready", done: "done" }[e.event] ?? "other";
-    const title = x?.title ?? "", one = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
-    if (e.made) return { mark, what: e.event, text: e.event === "ready" ? one(x?.summary) || title : title };
-    let s = one(e.text);
-    if (s.startsWith(`${e.ref} `)) s = s.slice(e.ref.length + 1);
-    // Every line but ready's ends with the title in brackets.
-    let named = title;
-    if (e.event !== "ready") {
-      const m = title && s.endsWith(` (${one(title)})`) ? [null, one(title)] : / \(([^()]*)\)$/.exec(s);
-      if (m) { named = m[1]; s = s.slice(0, s.length - m[1].length - 3); }
-    }
-    const i = s.indexOf(": ");
-    const what = (i < 0 ? s : s.slice(0, i)).replace(/^is /, "") || e.event;
-    let text = i < 0 ? "" : s.slice(i + 2);
-    if (e.event === "ready") {
-      text = text.replace(/ · For AGENTS\.md: .*$/, "");
-      if (title && text.startsWith(one(title))) text = text.slice(one(title).length).replace(/^ · /, "") || one(title);
-    }
-    if (e.event === "done") text = named;
-    return { mark, what, text };
-  }
+  // A news line's words: core/chat-view.js newsWords(), as the web app's chat has them.
 
   // A task chip: its worker's chat in the Tasks panel, else the task list there.
   // k: the task itself, when known (ids repeat across folders).
@@ -2448,7 +2403,7 @@ export default class Chat extends View {
         // Its actions in a band row under it (the row above draws them too: band()).
         if (x.text) {
           const bar = { id: `b:${x.id}`, of: x.id, target: x.text, text: x.text, side: "user", at: x.at, pills: this.pills(x.id),
-            acts: ["reply", "copy", ...(/^\//.test(x.text) || x.from ? [] : ["rewind"])] };
+            acts: bandActs("user", x.text, { from: x.from }) };
           out[out.length - 1] = { ...out[out.length - 1], bar };
           out.push({ kind: "band", id: `ab:${x.id}`, bar });
         }
@@ -2476,7 +2431,7 @@ export default class Chat extends View {
         // under its last row.
         if (!(working && i === items.length - 1) && out.length > first) {
           const bar = { id: `b:${x.id}`, of: x.id, target: x.text, text: x.text, side: "agent", at: x.at, pills: this.pills(x.id),
-            acts: ["reply", "copy", ...(this.kind ? ["fork"] : [])] };
+            acts: bandActs("agent", x.text, { fork: Boolean(this.kind) }) };
           out[out.length - 1] = { ...out[out.length - 1], bar };
           out.push({ kind: "band", id: `ab:${x.id}`, bar });
         }
@@ -2570,22 +2525,8 @@ export default class Chat extends View {
   // outside any terminal (from="<machine>/ppid:123") or one gone goes by the name it signed
   // the message with (text: "From HERD-76: …"), else "Another agent".
   sender(from, text = null) {
-    const [addr, ...rest] = String(from ?? "").trim().split(/\s+/);
-    const signed = signedBy(text);
-    if (addr === "person") return "You";
-    if (/(^|\/)ppid:\d+$/.test(addr ?? "")) return signed || "Another agent";
-    if (!/^([\w.-]+\/)?t\d[0-9a-z]*$/.test(addr ?? "")) return String(from);
-    // A bare address is on the machine of the agent it was sent to.
-    const full = !addr.includes("/") && this.machine ? `${this.machine}/${addr}` : addr;
-    const k = terminals().find((x) => x.address === full);
-    const l = k?.labels ?? {}, name = rest.join(" ") || k?.name || "";
-    const machine = full.includes("/") ? full.split("/")[0] : null;
-    const away = machine && machine !== this.machine ? ` on ${machine}` : "";
-    if (l["herdr.role"] === "reviewer" || /\breview/i.test(name)) return "Reviewer";
-    if (l["herdr.role"] === "coordinator" || /^coord/i.test(name)) return `Assistant${away}`;
-    const task = this.workerTasks().get(full)?.ref ?? /^([a-z][a-z0-9]*)-(\d+)(?:-|$)/i.exec(name)?.slice(1, 3).join("-").toUpperCase();
-    if (task) return `${task}${away}`;
-    return `${name || signed || "Another agent"}${away}`;
+    // core/chat-view.js: the web app's chat names senders the same way.
+    return senderName(from, text, { find: (a) => terminals().find((x) => x.address === a), machine:this.machine, taskOf: (a) => this.workerTasks().get(a)?.ref ?? null });
   }
 
   // Whose ask a card shows: the CLI's short name ("Claude asks").
@@ -2604,14 +2545,8 @@ export default class Chat extends View {
   // first message when the agent was started from a template (a coordinator), as a handoff, or
   // for a task (herdr-task); and any message another agent sent with hc.
   brief(x, i) {
-    if (x.from) return `Message from ${this.sender(x.from, x.text)}`;
-    if (i !== 0 || this.start !== 0) return null;
-    if (/^<restart>/.test(x.text ?? "")) return "New session";
-    const tpl = this.t?.template ?? null;
-    if (/^You are taking over this tab/.test(x.text ?? "") || /^herdr-handoff/.test(tpl ?? "")) return "Handoff from the previous agent";
-    if (tpl) return "New session";
-    if (this.t?.labels?.["herdr.task"]) return "Task brief";
-    return null;
+    // core/chat-view.js: the web app's chat labels them the same way.
+    return briefLabel(x, i, { start: this.start, template: this.t?.template ?? null, task: Boolean(this.t?.labels?.["herdr.task"]), sender: (f, t) => this.sender(f, t) });
   }
 
   // What a row's height depends on: measured once per key and width.
@@ -2727,22 +2662,22 @@ export default class Chat extends View {
       case "gap":
         return div().w_full().h(x.h);
       case "top":
-        return pad(div().w_full().text_center().text_size(12).text_color(t.dim).child("Start of conversation"));
+        return pad(div().w_full().text_center().text_size(12).text_color(t.dim).child(WORDS.top));
       case "loading":
-        return pad(div().w_full().text_center().text_size(12).text_color(t.dim).child("Loading earlier…"));
+        return pad(div().w_full().text_center().text_size(12).text_color(t.dim).child(WORDS.loading));
       case "note":
         return pad(div().w_full().text_center().text_size(12).text_color(t.muted).child(x.text));
       case "user":
         return pad(v_flex().w_full().items_end().gap(3)
           .when(Boolean(x.from), (el) => el.child(div().text_size(12).text_color(t.dim).child(`From ${this.sender(x.from, x.text)}`)))
           .when(Boolean(x.text), (el) => el.child(bubble(x.text, false)))
-          .when(x.images > (x.paths?.length ?? 0), (el) => el.child(fileLine(x.images === 1 ? "1 image" : `${x.images} images`))));
+          .when(x.images > (x.paths?.length ?? 0), (el) => el.child(fileLine(imagesLine(x.images)))));
       case "pending":
         return pad(v_flex().w_full().items_end().gap(3)
           .when(Boolean(x.text), (el) => el.child(bubble(x.text, !x.delivered || Boolean(x.failed))))
           .when(x.files?.length > 0, (el) => el.child(fileLine(x.files.join(", "))))
-          .when(Boolean(x.failed), (el) => el.child(div().text_size(12).text_color(t.blocked).cursor_pointer().child(`Not sent: ${String(x.failed).replace(/\.$/, "")}. Click to try again.`)))
-          .when(!x.failed && x.late, (el) => el.child(div().text_size(12).text_color(t.dim).child("Not in the conversation. Check the terminal."))));
+          .when(Boolean(x.failed), (el) => el.child(div().text_size(12).text_color(t.blocked).cursor_pointer().child(notSent(x.failed))))
+          .when(!x.failed && x.late, (el) => el.child(div().text_size(12).text_color(t.dim).child(WORDS.late))));
       case "replyref":
         // The message this one answers, in one dim line above it.
         return col(h_flex().w_full().h(18).justify_end().child(h_flex().max_w(Math.floor(Math.min(this.width, COLUMN) * 0.6)).gap(5).items_center()
@@ -2788,7 +2723,7 @@ export default class Chat extends View {
         // Show more / Show less, under the reply's bubble, in line with its words (clickRow()).
         return col(h_flex().w_full().h(22).pl(12).child(h_flex().h(22).gap(4).items_center().cursor_pointer()
           .text_size(12.5).font_medium().text_color(t.muted).hover((s) => s.text_color(t.foreground))
-          .child(x.open ? "Show less" : "Show more")
+          .child(x.open ? WORDS.showLess : WORDS.showMore)
           .child(svg(`mods/chat/chevron-${x.open ? "up" : "down"}.svg`).size(14).flex_none())), 18, 2);
       case "day":
         return col(div().w_full().text_center().text_size(12).font_medium().text_color(t.dim).child(x.text), 18, 0);
@@ -2806,14 +2741,14 @@ export default class Chat extends View {
         // A "Published" line opens its artifact (clickRow): the pointer and a hover say so.
         if (x.pending || x.line) return col(h_flex().w_full().py(QUIET_PY).gap(6).items_center().text_size(12).text_color(t.dim).child(icon(12))
           .when(Boolean(x.art) && !x.pending, (el) => el.rounded(8).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.muted)))
-          .child(div().min_w(0).truncate().child(x.pending ? "Publishing an artifact…" : `Published ${x.title} v${x.v}`)), 18, 0);
+          .child(div().min_w(0).truncate().child(x.pending ? WORDS.publishing : published(x.title, x.v))), 18, 0);
         // The whole card opens it (rows take no handlers; clickRow).
         return pad(h_flex().w_full().max_w(420).gap(10).items_center().px(10).py(8).rounded(10).cursor_pointer()
           .bg(t.surface).border_1().border_color(t.border).hover((s) => s.bg(t.hover))
           .child(div().size(32).flex_none().flex().items_center().justify_center().rounded(8).bg(t.raised).text_color(t.muted).child(icon(16)))
           .child(v_flex().flex_1().min_w(0).gap(1)
             .child(div().font_medium().text_color(t.foreground).truncate().child(x.title))
-            .child(div().text_size(12).text_color(t.dim).child(`Artifact · v${x.version}`)))
+            .child(div().text_size(12).text_color(t.dim).child(artifactLine(x.version))))
           .child(h_flex().h(28).px(10).flex_none().items_center().rounded(7).border_1().border_color(t.input).bg(t.background)
             .text_size(12.5).font_medium().text_color(t.foreground).child("Open")));
       }
@@ -2842,7 +2777,7 @@ export default class Chat extends View {
         // Red while its dialog is open; once it's gone (answered, or closed without an answer), calm.
         return pad(v_flex().w_full().gap(4).px(12).py(10).rounded(10).border_1().border_color(t.border)
           .child(div().text_size(12).font_medium().text_color(x.closed ? t.dim : t.blocked)
-            .child(x.closed === "answered" ? "Asked you · Answered" : x.closed ? "Asked you · Closed without an answer" : "Asked you"))
+            .child(x.closed === "answered" ? WORDS.askedAnswered : x.closed ? WORDS.askedClosed : WORDS.asked))
           .child(div().text_color(x.closed ? t.muted : t.foreground).child(TextView.markdown(`${pre}chat-md-${x.id}`, x.text).selectable(true))));
       case "error":
         return pad(div().w_full().text_size(12.5).text_color(t.blocked).child(x.text));
@@ -2956,8 +2891,8 @@ export default class Chat extends View {
       // edges (same width and padding), so Stop's right edge is the box's.
       const secs = Math.max(0, Math.floor((Date.now() - (this.workingSince ?? Date.now())) / 1000));
       const report = terminals().find((x) => x.address === this.addr)?.report?.msg;
-      const doing = this.stopping ? "Stopping…"
-        : this.conv?.doing ?? (typeof report === "string" && report.trim() && !/^answer:/i.test(report) ? report.trim() : "Working");
+      const doing = this.stopping ? WORDS.stopping
+        : this.conv?.doing ?? (typeof report === "string" && report.trim() && !/^answer:/i.test(report) ? report.trim() : WORDS.working);
       // Only waiting (hc wait, a sleep, a monitor, a helper it waits on): calm, no spinner; a
       // message wakes it (or comes in at once).
       const waiting = this.waitingNow() && !this.stopping;
@@ -2966,7 +2901,7 @@ export default class Chat extends View {
         .when(!waiting, (el) => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
         .child(div().flex_1().min_w(0).truncate().child(doing))
         .child(div().flex_none().font_family(settings().font_family ?? "JetBrains Mono").text_size(11.5).text_color(t.dim)
-          .child(`${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`))
+          .child(elapsed(secs)))
         .child(h_flex().id("chat-stop").h(22).px(8).gap(6).flex_none().items_center().rounded(6).border_1().border_color(t.input)
           .text_size(12).text_color(t.muted)
           .when(this.stopping, (el) => el.opacity(0.45))
@@ -2981,9 +2916,9 @@ export default class Chat extends View {
         .bg(t.surface).border_1().border_color(t.border)
         .child(div().size(8).flex_none().rounded(4).bg(t.blocked))
         .child(v_flex().flex_1().min_w(0).gap(2)
-          .child(div().font_medium().text_color(t.foreground).child("Needs you"))
-          .child(div().text_size(12).text_color(t.muted).child(this.asking() ?? "The agent is asking something in the terminal.")))
-        .child(this.button("chat-open-terminal", "Open terminal", "mods/workspace-chrome/terminal.svg", "primary", t, () => this.toTerminal())));
+          .child(div().font_medium().text_color(t.foreground).child(WORDS.needsYou))
+          .child(div().text_size(12).text_color(t.muted).child(this.asking() ?? WORDS.askingInTerminal)))
+        .child(this.button("chat-open-terminal", WORDS.openTerminal,"mods/workspace-chrome/terminal.svg", "primary", t, () => this.toTerminal())));
     }
     return null;
   }
@@ -3063,8 +2998,8 @@ export default class Chat extends View {
         .child(svg("mods/chat/clock.svg").size(14).flex_none().text_color(t.dim))
         .child(v_flex().flex_1().min_w(0)
           .child(div().truncate().text_size(12.5).text_color(t.foreground).child(m.label ?? (m.text || m.files.map((f) => f.name).join(", "))))
-          .child(div().truncate().text_size(12).text_color(t.dim).child("Queued · Sends when the agent is free")))
-        .child(ghost(`queued-now-${m.id}`, "Send now", (cx) => this.sendQueued(m, cx)))
+          .child(div().truncate().text_size(12).text_color(t.dim).child(WORDS.queued)))
+        .child(ghost(`queued-now-${m.id}`, WORDS.sendNow,(cx) => this.sendQueued(m, cx)))
         .child(ghost(`queued-edit-${m.id}`, "Edit", (cx) => this.editQueued(m, cx)))
         .child(div().id(`queued-x-${m.id}`).size(22).flex_none().flex().items_center().justify_center().rounded(6).cursor_pointer().text_color(t.dim)
           .hover((s) => s.bg(t.hover).text_color(t.foreground))
@@ -3132,18 +3067,10 @@ export default class Chat extends View {
   // THUMB_MANY, never above its own size, all shrunk together when the row would pass the
   // column. A quiet box until its size is known. { boxes: [{ path, w, h }], h: the row's height }.
   fitThumbs(paths) {
-    const [mw, mh] = paths.length > 1 ? THUMB_MANY : THUMB_ONE;
-    let boxes = paths.map((path) => {
-      const v = this.views[path];
-      if (!v) return { path, w: Math.round(mh * 4 / 3), h: mh };
-      const k = Math.min(1, mw / v.w, mh / v.h);
-      return { path, w: Math.max(24, Math.round(v.w * k)), h: Math.max(24, Math.round(v.h * k)) };
-    });
+    // core/chat-view.js: the web app's chat sizes them the same way.
     const { left, right } = this.edges();
-    const total = boxes.reduce((n, b) => n + b.w, 0) + THUMB_GAP * (boxes.length - 1);
-    const k = Math.min(1, (right - left) / Math.max(1, total));
-    if (k < 1) boxes = boxes.map((b) => ({ ...b, w: Math.floor(b.w * k), h: Math.floor(b.h * k) }));
-    return { boxes, h: Math.max(24, ...boxes.map((b) => b.h)) };
+    const fit = fitThumbs(paths.map((p) => this.views[p] ?? null), right - left);
+    return { boxes: fit.boxes.map((b, i) => ({ ...b, path: paths[i] })), h: fit.h };
   }
 
   // One of those: the whole image, rounded, a faint edge drawn over it.
@@ -3288,7 +3215,7 @@ export default class Chat extends View {
         .child(div().text_size(12.5).font_medium().text_color(t.foreground).child(word))
         // Digits of one width, so the time doesn't jiggle.
         .child(div().font_family(settings().font_family ?? "JetBrains Mono").text_size(12).text_color(t.dim)
-          .child(`${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`)))
+          .child(elapsed(secs))))
       .child(right);
   }
 
@@ -3352,8 +3279,8 @@ export default class Chat extends View {
     // A thread whose worker ended: read-only now.
     if (this.thread && this.ended) return div().flex_none().w_full().max_w(COLUMN + 28).mx_auto().px(14).pt(8)
       .child(h_flex().w_full().h(36).px(12).gap(8).items_center().rounded(10).border_1().border_color(t.border)
-        .text_size(12.5).text_color(t.dim).child(div().size(6).flex_none().rounded(3).bg(t.dim)).child(div().flex_1().child("This task's agent has ended."))
-        .when(Boolean(this.taskKey), (el) => el.child(this.button("chat-resume", this.resuming ? "Resuming…" : "Resume", null, "primary", t, (cx) => this.resumeTask(cx)))));
+        .text_size(12.5).text_color(t.dim).child(div().size(6).flex_none().rounded(3).bg(t.dim)).child(div().flex_1().child(WORDS.ended))
+        .when(Boolean(this.taskKey), (el) => el.child(this.button("chat-resume", this.resuming ? WORDS.resuming : "Resume",null, "primary", t, (cx) => this.resumeTask(cx)))));
     // An open card, or the agent's own dialog in its terminal, doesn't lock the box: words
     // written there answer it ("Reply instead…"). Only a call waits until it's free.
     const blocked = st === "blocked" && !this.asks.length;
@@ -3416,14 +3343,14 @@ export default class Chat extends View {
         .child(Textarea.new(this.box).w_full().text_size(13).text_color(t.foreground)
           .when(Boolean(this.boxSpare && this.lineH), (el) => el.mb(-this.lineH)))
         .when(!this.box.value().trim(), (el) => el.child(div().absolute().top(9).left(12).text_size(13).text_color(t.dim)
-          .child(this.asks.length || st === "blocked" ? "Reply instead…" : this.placeholder()))))
+          .child(this.asks.length || st === "blocked" ? WORDS.replyInstead : this.placeholder()))))
       // While recording: the recording row. Else one row, on the right: what the agent runs on
       // (opens the picker), dictation, Send (or Call). Send never turns into Stop: while the
       // agent works it still sends (or queues) and calls; Stop is on the working line above.
       .when(rec !== "idle", (el) => el.child(this.recordingRow(t)))
       .when(rec === "idle", (el) => el.child(h_flex().h(36).pl(6).pr(6).gap(4).items_center()
         // Attach on the left, as ChatGPT and Claude have it: the desktop's file picker.
-        .child(this.round("chat-attach", "mods/chat/paperclip.svg", t, "ghost", (cx) => this.pickFiles(cx)).tooltip("Attach files"))
+        .child(this.round("chat-attach", "mods/chat/paperclip.svg", t, "ghost", (cx) => this.pickFiles(cx)).tooltip(WORDS.attach))
         .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.blocked).child(rec === "idle" ? this.dict.error ?? "" : ""))
         .when(Boolean(this.addr), (el) => el.children(this.pickParts(t, true)))
         .when(!this.addr && this.phase === "fresh" && Boolean(this.choice?.sel) && Boolean(cx), (el) => el.child(this.freshPick(t, cx)))
@@ -3476,23 +3403,8 @@ export default class Chat extends View {
   // published from a few seconds before the call to five minutes after, not already taken.
   // Map item id -> { id, title, version (its latest), v (this publish's), latest }.
   resolveArts(items) {
-    const out = new Map();
-    const calls = items.filter((x) => x.kind === "artifact");
-    if (!calls.length || !this.arts?.length) return out;
-    const me = String(this.addr ?? "").split("/").pop();
-    const vs = this.arts.flatMap((a) => (a.versions ?? []).filter((v) => v.publisher === me).map((v) => ({ a, v }))).sort((p, q) => p.v.at - q.v.at);
-    const used = new Set();
-    for (const x of calls) {
-      const at = x.at ?? 0;
-      const hit = vs.find(({ a, v }) => !used.has(`${a.id}:${v.v}`) && v.at >= at - 5000 && v.at <= at + 300000);
-      if (!hit) continue;
-      used.add(`${hit.a.id}:${hit.v.v}`);
-      out.set(x.id, { id: hit.a.id, title: hit.a.title, version: hit.a.version, v: hit.v.v });
-    }
-    const last = new Map();
-    for (const [k, r] of out) last.set(r.id, k);
-    for (const [k, r] of out) r.latest = last.get(r.id) === k;
-    return out;
+    // core/chat-view.js: the web app's chat finds them the same way.
+    return resolveArtifacts(items, this.arts, String(this.addr ?? "").split("/").pop());
   }
 
   // Every artifact on the agent's machine (~/.herdr/artifacts, one registry per folder): read
@@ -3645,20 +3557,18 @@ export default class Chat extends View {
     if (this.phase === "fresh") {
       return root.child(this.fresh(t)).child(this.composer(t, null, cx)).child(div().flex_none().h(12));
     }
-    if (!this.addr && !starting) return root.child(this.notice(t, "No agent to show", "This chat pane isn't tied to an agent.", [
+    if (!this.addr && !starting) return root.child(this.notice(t, WORDS.noAgent, WORDS.noAgentBody, [
       this.button("chat-close", "Close", null, "secondary", t, () => this.closeSelf())]));
     // A thread whose worker ended before its conversation was read: the same quiet words.
-    if (this.phase === "ended" && this.thread) return root.child(this.notice(t, "This task's agent has ended", null, [
-      ...(this.taskKey ? [this.button("chat-resume", this.resuming ? "Resuming…" : "Resume", null, "primary", t, (cx) => this.resumeTask(cx))] : []),
+    if (this.phase === "ended" && this.thread) return root.child(this.notice(t, WORDS.taskEnded, null, [
+      ...(this.taskKey ? [this.button("chat-resume", this.resuming ? WORDS.resuming : "Resume",null, "primary", t, (cx) => this.resumeTask(cx))] : []),
       this.button("chat-close", this.inner ? "Back to tasks" : "Close", null, "secondary", t, () => this.closeSelf())]));
-    if (this.phase === "ended" && !this.swapping) return root.child(this.notice(t, "This agent has ended", null, [
+    if (this.phase === "ended" && !this.swapping) return root.child(this.notice(t, WORDS.agentEnded, null, [
       this.button("chat-close", "Close chat", null, "secondary", t, () => this.closeSelf())]));
-    const open = this.button("chat-open-terminal", "Open terminal", "mods/workspace-chrome/terminal.svg", "primary", t, () => this.toTerminal());
-    if (this.phase === "unsupported") return root.child(this.notice(t, "No chat for this agent",
-      "Chat reads Claude Code's and Codex's own session logs. This agent works in its terminal only.", [open]));
-    if (this.phase === "none") return root.child(this.notice(t, "Can't find this conversation",
-      "Chat reads the agent's own session log, and Herdr can't tell which one this agent writes. Rather than show the wrong one, it shows none.", [open]));
-    if ((this.phase === "finding" && !starting) || this.phase === "ended") return root.child(this.notice(t, this.swapping ? "Restarting the agent…" : "Opening the conversation…", null));
+    const open = this.button("chat-open-terminal", WORDS.openTerminal,"mods/workspace-chrome/terminal.svg", "primary", t, () => this.toTerminal());
+    if (this.phase === "unsupported") return root.child(this.notice(t, WORDS.unsupported, WORDS.unsupportedBody, [open]));
+    if (this.phase === "none") return root.child(this.notice(t, WORDS.notFound, WORDS.notFoundBody, [open]));
+    if ((this.phase === "finding" && !starting) || this.phase === "ended") return root.child(this.notice(t, this.swapping ? WORDS.restarting : WORDS.opening, null));
 
     this.sizeBox();
     // An Assistant's chat: its tasks' workers' asks, before the rows (their live rows say so).
@@ -3764,7 +3674,7 @@ export default class Chat extends View {
         .when(!this.pinned, (el) => {
           // Scrolled up: a card waiting below what's shown is pointed to; else the newest.
           const below = rows.map((r, i) => (r.kind === "cardstrip" && r.first && i >= (this.range?.end ?? rows.length) ? i : -1)).filter((i) => i >= 0);
-          const label = below.length === 1 ? "1 question below" : below.length ? `${below.length} questions below` : "Latest";
+          const label = questionsBelow(below.length);
           return el.child(h_flex().absolute().bottom(10).left(0).right(0).justify_center()
             .child(h_flex().id("chat-latest").h(26).px(10).gap(5).items_center().rounded(13).cursor_pointer()
               .bg(t.popover).border_1().border_color(t.border).shadow_md().text_size(12).text_color(t.muted)

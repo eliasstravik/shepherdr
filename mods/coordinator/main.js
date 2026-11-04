@@ -9,6 +9,10 @@ import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
 import { props, theme, settings, terminals, knownAgents, closeOverlay, home, exec, readTextFile, writeTextFile, watchFolder } from "herdr";
 import { coordinatorIn, workersOf, entryFor, restartAgent, closeCoordinator, taskOf, switchTask } from "./coordinator.js";
 import { TEXT, H, RADIUS, button as uiButton, heading, dialogFooter } from "./ui.js";
+// Switch agent's words: core/menus.js (the web app's Switch agent reads the same).
+import { SWITCH_AGENT } from "./core/menus.js";
+// The instructions view's words (its note per role, Saved., Done): core/settings.js (the web app's editor reads the same).
+import { INSTRUCTIONS } from "./core/settings.js";
 
 // The instructions view edits props.file (default: the assistant template); props.role picks its note.
 // Panes saved before the roles became templates name the old files: they open the templates.
@@ -17,12 +21,7 @@ const MOVED = () => ({ [`${TEMPLATES()}/coordinator.md`]: `${TEMPLATES()}/assist
   [`${home()}/.herdr/instructions/worker.md`]: `${TEMPLATES()}/worker.md`, [`${home()}/.herdr/instructions/reviewer.md`]: `${TEMPLATES()}/reviewer.md` });
 const FILE = () => { const f = props()?.file ?? `${TEMPLATES()}/assistant.md`; return MOVED()[f] ?? f; };
 const DIR = () => FILE().split("/").slice(0, -1).join("/");
-const NOTES = {
-  coordinator: "Every Assistant uses this. Repo-specific rules go in the repo's AGENTS.md or CLAUDE.md. Changes apply when an Assistant restarts.",
-  worker: "Every worker gets this first. Repo-specific rules go in the repo's AGENTS.md or CLAUDE.md. Changes apply to the next task that starts.",
-  reviewer: "Every reviewer gets this first. Repo-specific rules go in the repo's AGENTS.md or CLAUDE.md. Changes apply to the next review.",
-  heartbeat: "This space's Autopilot heartbeat, plain text: its Assistant gets it on every wake. Changes apply from the next wake.",
-};
+const NOTES = INSTRUCTIONS.notes;
 const NOTE = () => NOTES[props()?.role] ?? NOTES.coordinator;
 
 export default class Coordinator extends View {
@@ -90,9 +89,9 @@ export default class Coordinator extends View {
         this.raw = text;
         this.saved = text;
         this.error = null;
-        this.status = "Saved.";
+        this.status = INSTRUCTIONS.saved;
       } catch (e) {
-        this.error = `Not saved: ${e?.message ?? e}`;
+        this.error = INSTRUCTIONS.notSaved(e?.message ?? e);
       }
       cx.notify();
     });
@@ -115,8 +114,8 @@ export default class Coordinator extends View {
     const p = props();
     return v_flex().size_full().min_h(0).bg(t.background)
       .when(Boolean(p?.overlay), (el) => el.child(h_flex().flex_none().h(44).pl(16).pr(8).gap(12).items_center().border_b(1).border_color(t.border)
-        .child(div().flex_1().min_w(0).truncate().text_size(TEXT.body).font_semibold().text_color(t.foreground).child(p.title ?? "Instructions"))
-        .child(uiButton("instructions-done", "Done", { kind: "primary", onClick: () => closeOverlay(p.overlay) }))))
+        .child(div().flex_1().min_w(0).truncate().text_size(TEXT.body).font_semibold().text_color(t.foreground).child(p.title ?? INSTRUCTIONS.title))
+        .child(uiButton("instructions-done", INSTRUCTIONS.done, { kind: "primary", onClick: () => closeOverlay(p.overlay) }))))
       .child(this.code
         ? div().flex_1().min_h(0).px(6).pt(6).child(Editor.new(this.code))
         : div().flex_1())
@@ -145,8 +144,8 @@ export default class Coordinator extends View {
         const a = /^[1-9]$/.test(e.key) ? list[Number(e.key) - 1] : null;
         if (a) pick(a);
       })
-      .child(div().px(8).child(heading("Switch agent")))
-      .when(this.agents === null, (el) => el.child(div().px(8).py(6).text_color(t.dim).child("Checking installed agents…")))
+      .child(div().px(8).child(heading(SWITCH_AGENT.title)))
+      .when(this.agents === null, (el) => el.child(div().px(8).py(6).text_color(t.dim).child(SWITCH_AGENT.loading)))
       .children(list.map((a, i) => {
         const on = a === current;
         return h_flex().id(`agent-${a.key}`).h(H.lg).px(8).gap(8).rounded(RADIUS.control).items_center().flex_none()
@@ -155,7 +154,7 @@ export default class Coordinator extends View {
           .child(div().size(16).flex_none().flex().items_center().justify_center()
             .child(a.tint ? svg(a.icon).size(14).flex_none().text_color(on ? t.dim : t.foreground) : image(a.icon).size(14).flex_none()))
           .child(div().flex_1().min_w(0).truncate().child(a.name))
-          .child(div().flex_none().text_size(TEXT.label).text_color(t.dim).child(on ? "Current" : i < 9 ? String(i + 1) : ""));
+          .child(div().flex_none().text_size(TEXT.label).text_color(t.dim).child(on ? SWITCH_AGENT.current : i < 9 ? String(i + 1) : ""));
       }));
   }
 

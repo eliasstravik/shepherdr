@@ -1,0 +1,41 @@
+{
+  "about": "What applies in a space, from .autopilot.json: core/autopilot.js pilotFor() and herdr-task's resolve() must both give `expect` (core/autopilot.test.js, test/test_herdr_task.py).",
+  "cases": [
+    {
+      "name": "nothing set anywhere: Everywhere's defaults",
+      "file": { "version": 2, "spaces": {} },
+      "space": "sp1",
+      "expect": { "on": false, "every": "every 60 minutes", "events": [], "own": { "on": false, "every": false, "events": false } }
+    },
+    {
+      "name": "a space with no own values follows Everywhere",
+      "file": { "version": 2, "everywhere": { "on": true, "every": { "text": "weekdays 9:00" }, "events": ["ready"] }, "spaces": { "sp1": { "name": "web" } } },
+      "space": "sp1",
+      "expect": { "on": true, "every": "weekdays 9:00", "events": ["ready"], "own": { "on": false, "every": false, "events": false } }
+    },
+    {
+      "name": "off here while on everywhere",
+      "file": { "version": 2, "everywhere": { "on": true, "every": { "text": "every 30 minutes" }, "events": [] }, "spaces": { "sp1": { "on": false } } },
+      "space": "sp1",
+      "expect": { "on": false, "every": "every 30 minutes", "events": [], "own": { "on": true, "every": false, "events": false } }
+    },
+    {
+      "name": "its own switch and schedule, Everywhere's events",
+      "file": { "version": 2, "everywhere": { "on": false, "every": null, "events": ["failed", "ready"] }, "spaces": { "sp1": { "on": true, "every": { "text": "every 30 minutes" } } } },
+      "space": "sp1",
+      "expect": { "on": true, "every": "every 30 minutes", "events": ["ready", "failed"], "own": { "on": true, "every": true, "events": false } }
+    },
+    {
+      "name": "its own schedule Off and no events, while Everywhere has both",
+      "file": { "version": 2, "everywhere": { "on": true, "every": { "text": "weekdays 9:00" }, "events": ["ready"] }, "spaces": { "sp1": { "every": null, "events": [] } } },
+      "space": "sp1",
+      "expect": { "on": true, "every": null, "events": [], "own": { "on": false, "every": true, "events": true } }
+    },
+    {
+      "name": "a space the file doesn't know yet",
+      "file": { "version": 2, "everywhere": { "on": true, "every": { "text": "every 60 minutes" }, "events": ["merged"] }, "spaces": { "sp2": { "on": false } } },
+      "space": "sp1",
+      "expect": { "on": true, "every": "every 60 minutes", "events": ["merged"], "own": { "on": false, "every": false, "events": false } }
+    }
+  ]
+}

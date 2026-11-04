@@ -15,6 +15,8 @@ import * as S from "../core/spaces.js";
 const { spacesFromDoc, sidebarOf, assistantOf, isUnread } = S as any;
 import * as N from "../core/notify.js";
 const { spaceLevel } = N as any;
+import * as AP from "../core/autopilot.js";
+const { everywhereOf, pilotFor, STARTER } = AP as any;
 
 const SHARED = join(HOME, ".config", "herdr-app", "shared.json");
 const SHELL = /^(ba|z|fi|da|k|tc|c)?sh$|^nu$|^pwsh$/;
@@ -34,11 +36,12 @@ export class Model {
   private lists = new Map<string | null, List[]>();   // machine (null: here) -> its task lists
   private docs = new Map<string | null, any>();       // machine -> its herdr-app document
   private machines: string[] = [];                    // connected other machines
+  private known: { name: string; state: string }[] = []; // every other machine, with its state (the sidebar's headers)
   private shared: any = {};
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   /** Told each build: what the screen's snapshot is made from (compat.ts). */
-  onBuild: ((b: { spaces: any[]; sections: any[]; rows: any[]; machines: string[]; automations: any[] }) => void) | null = null;
+  onBuild: ((b: { spaces: any[]; sections: any[]; rows: any[]; machines: string[]; known: { name: string; state: string }[]; automations: any[] }) => void) | null = null;
 
   /** The service's shared document (the person's pins, sidebar and Notify, in step with the window: lib/bridge.js). */
   doc: () => Record<string, any> = () => ({});
@@ -103,6 +106,8 @@ export class Model {
     try {
       const r = await this.hub.call<{ machines: any[] }>("machine.list", {});
       this.machines = r.machines.filter((m) => m.state === "connected").map((m) => m.name);
+      // every machine the window's sidebar lists, connected or not (a temporary one aside): an offline one reads "Offline"
+      this.known = r.machines.filter((m) => !m.temporary).map((m) => ({ name: m.name, state: String(m.state ?? "") }));
     } catch {}
     this.readShared();
     await Promise.all([this.readAutopilot(), this.readDocs(), this.readLists(null), ...this.machines.map((m) => this.readLists(m))]);
@@ -110,21 +115,28 @@ export class Model {
   }
 
   private autopilot: Record<string, any> = {};
+  /** Everywhere's Autopilot on this machine (its switch, schedule, events, heartbeat file and words) */
+  pilotEverywhere: any = { ...everywhereOf(null), words: STARTER };
   private reading: Promise<void> | null = null;
-  /** Each space's Autopilot on this machine, as herdr-task tells it (when it wakes, next and last wake, progress), with
-   *  its heartbeat file's words. One read at a time. */
+  /** Everywhere's Autopilot and each space's on this machine, as herdr-task tells it (what applies and what the space
+   *  sets itself, when it wakes, next and last wake, progress), with the heartbeat's words (its own, else Everywhere's;
+   *  a file not made yet reads as herdr-task's starter, as the window's Edit opens it). One read at a time. */
   readAutopilot() {
     return this.reading ??= (async () => {
       try {
         const p = Bun.spawn(["herdr-task", "autopilot", "list", "--json"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
-        const list = JSON.parse(await new Response(p.stdout).text() || "[]") as any[];
-        this.autopilot = Object.fromEntries(list.map((a) => {
-          let heartbeat = "";
-          try { heartbeat = a.heartbeat && existsSync(a.heartbeat) ? readFileSync(a.heartbeat, "utf8") : ""; } catch {}
-          return [a.space, { ...a, words: heartbeat }];
-        }));
+        const out = JSON.parse(await new Response(p.stdout).text() || "{}");
+        const words = (file: string | null) => { try { return file && existsSync(file) ? readFileSync(file, "utf8") : STARTER; } catch { return STARTER; } };
+        const e = out.everywhere ?? {};
+        this.pilotEverywhere = { ...everywhereOf({ everywhere: e }), heartbeat: e.heartbeat ?? null, words: words(e.heartbeat ?? null) };
+        this.autopilot = Object.fromEntries((Array.isArray(out.spaces) ? out.spaces : []).map((a: any) => [a.space, { ...pilotFor({ spaces: [a] }, a.space), words: words(a.heartbeat) }]));
       } catch {}
     })().finally(() => { this.reading = null; });
+  }
+
+  /** What applies in a space on this machine: herdr-task's view, else Everywhere's (one it has no record of yet). */
+  pilotOf(id: string) {
+    return this.autopilot[id] ?? { ...pilotFor({ everywhere: this.pilotEverywhere }, id), words: this.pilotEverywhere.words, heartbeat: this.pilotEverywhere.heartbeat };
   }
 
   private readShared() {
@@ -179,6 +191,9 @@ export class Model {
       return {
         key: taskKey(list, task), ref: refOf(list, task), title: task.title, section: p.section, needs: p.needs,
         sub: secondLine(p, w, p.section === "queued" ? queueReason(list, task, running) : null), left: leftOf(p, w), pct: w?.done ?? null,
+        // what its agent last said (core reportOf), as the window's task header shows it: working, and frozen while it
+        // needs the person
+        said: w?.text ? { text: w.text, done: w.done ?? null, left: w.left ?? null, paused: !!w.paused } : null,
         machine: list.machine, folder: list.folder, slug: list.slug, id: task.id, list: list.name,
         // the space whose Assistant started it (herdr-task keeps it): the window counts and lists it there
         space: task.space ? (list.machine ? `${list.machine}/${task.space}` : task.space) : null,
@@ -202,11 +217,14 @@ export class Model {
       const here = rows.filter((r) => !r.archived && (r.space ? r.space === s.id : (r.machine ?? null) === (s.machine ?? null) && r.folder === s.folder));
       return {
         ...s, at, icon: bar.icons[s.id] ?? null, pinned: bar.pinned.includes(s.id),
+        // when something in its tabs last changed state (Herdr's tab changed_at: its terminals' status times), for
+        // Jump's newest-first spaces
+        changedAt: Math.max(0, ...(s.tabs ?? []).flatMap((t: any) => t.terminals ?? []).map((a: string) => Number((this.hub.terminals.get(a) as any)?.status_ms) || 0)),
         section: bar.sections.find((x: any) => (x.spaces ?? []).includes(s.id))?.id ?? null,
         assistant: k?.address ?? null, assistantStatus: (k as any)?.status?.state ?? null,
-        autopilot: !s.machine && this.autopilot[s.id]?.on ? { next: this.autopilot[s.id].next_run ?? null } : null,
+        autopilot: !s.machine && this.pilotOf(s.id).on ? { next: this.pilotOf(s.id).next_run ?? null } : null,
         git: this.gitOf(s),
-        pilot: s.machine ? null : this.autopilot[s.id] ?? { on: false, events: [], every: null, trigger: "Only Run now" },
+        pilot: s.machine ? null : this.pilotOf(s.id),
         unread: isUnread(k, seen) && spaceLevel(this.value("notify") ?? {}, s.id) !== "Off",
         red: here.filter((r) => r.section === "needs").length + ((k as any)?.status?.state === "blocked" ? 1 : 0),
         green: here.filter((r) => r.section === "ready").length,
@@ -216,7 +234,7 @@ export class Model {
     void this.readGit(spaces);
     this.live.put("spaces", { spaces, sections: bar.sections });
     // each list's automations (herdr-task auto), with the folder and machine they belong to, for 3.0's Automations group
-    const automations = lists.flatMap((l: any) => (Array.isArray(l.automations) ? l.automations : []).map((a: any) => ({ ...a, folder: l.folder, machine: l.machine ?? null })));
-    this.onBuild?.({ spaces, sections: bar.sections, rows, machines: this.machines, automations });
+    const automations = lists.flatMap((l: any) => (Array.isArray(l.automations) ? l.automations : []).map((a: any) => ({ ...a, folder: l.folder, machine: l.machine ?? null, list: l.name })));
+    this.onBuild?.({ spaces, sections: bar.sections, rows, machines: this.machines, known: this.known, automations });
   }
 }

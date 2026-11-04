@@ -86,7 +86,8 @@ function Pills({ msg, chat }: { msg: Message; chat: { key: string } }) {
         )}
       >
         {r.emoji}
-        {r.by === 'both' ? <small className="text-[0.6875rem] text-fg2 tabular-nums phone:text-[0.75rem]">2</small> : null}
+        {/* as the window's pill: how many reacted (you, the agent, or both) */}
+        <small className={clsx('text-[0.6875rem] font-medium tabular-nums phone:text-[0.75rem]', yours ? 'text-fg' : 'text-fg2')}>{r.by === 'both' ? 2 : 1}</small>
       </button>
     )
   })
@@ -483,7 +484,8 @@ function Picker({ msg, chat, sheet }: { msg: Message; chat: string; sheet: boole
 /** every emoji to pick from: a search, a skin tone, the groups (frequently used first) as tabs over one scrolling grid,
  *  and (with a hint) the one under the pointer named at the foot. The reactions' picker, and anything else picking one
  *  (a machine's emoji). */
-export function EmojiChooser({ onPick, chosen, focus, hint }: { onPick: (e: string) => void; chosen?: (e: string) => boolean; focus?: boolean; hint?: string }) {
+/** plain: the window's icon picker (spaces-chat icon.js), with no Frequently used and no skin tone */
+export function EmojiChooser({ onPick, chosen, focus, hint, plain }: { onPick: (e: string) => void; chosen?: (e: string) => boolean; focus?: boolean; hint?: string; plain?: boolean }) {
   const grid = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLInputElement>(null)
   const [groups, setGroups] = useState<Group[] | null>(null)
@@ -492,7 +494,7 @@ export function EmojiChooser({ onPick, chosen, focus, hint }: { onPick: (e: stri
   const [tones, setTones] = useState(false)
   const [on, setOn] = useState(0)
   const [hover, setHover] = useState<Emoji | null>(null)
-  const used = useMemo(() => frequent(), [])
+  const used = useMemo(() => (plain ? [] : frequent()), [plain])
   useEffect(() => {
     loadEmoji().then(setGroups)
     // a phone keeps its keyboard down until you tap the search
@@ -553,8 +555,8 @@ export function EmojiChooser({ onPick, chosen, focus, hint }: { onPick: (e: stri
           <input
             ref={input}
             name="emoji-search"
-            aria-label="Search emoji"
-            placeholder="Search emoji"
+            aria-label="Search all emoji"
+            placeholder="Search all emoji"
             autoComplete="off"
             enterKeyHint="go"
             value={q}
@@ -563,6 +565,7 @@ export function EmojiChooser({ onPick, chosen, focus, hint }: { onPick: (e: stri
             className="min-w-0 flex-1 bg-transparent text-fg outline-none placeholder:text-fg3 phone:text-[1rem]"
           />
         </label>
+        {plain ? null : (
         <button
           type="button"
           aria-label="Skin tone"
@@ -572,6 +575,7 @@ export function EmojiChooser({ onPick, chosen, focus, hint }: { onPick: (e: stri
         >
           {TONES[skin]}
         </button>
+        )}
       </div>
       {tones ? (
         <div role="group" aria-label="Skin tone" className="flex shrink-0 justify-end gap-0.5 px-2 pb-1">
@@ -621,7 +625,7 @@ export function EmojiChooser({ onPick, chosen, focus, hint }: { onPick: (e: stri
           found.length ? (
             <div className={clsx(gridCls, 'pt-1')}>{found.slice(0, 160).map((x) => cell(x, x.e))}</div>
           ) : (
-            <div className="p-6 text-center text-[0.8125rem] text-fg2 phone:text-[0.9375rem]">No emoji found for “{q.trim()}”</div>
+            <div className="p-6 text-center text-[0.8125rem] text-fg2 phone:text-[0.9375rem]">No emoji found</div>
           )
         ) : (
           sections.map((s) => (

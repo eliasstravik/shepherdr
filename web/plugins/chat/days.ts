@@ -1,16 +1,9 @@
 // Plain rules the chat draws by, kept apart so tests can run them without a screen.
 import type { Message } from '@shared/types.ts'
 
-/** a day's line between messages: Today, Yesterday, a weekday this week, else its date (and year, if not this one) */
-export function dayLabel(at: number, now = new Date()) {
-  const d = new Date(at)
-  const start = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
-  const days = Math.round((start(now) - start(d)) / 864e5)
-  if (days === 0) return 'Today'
-  if (days === 1) return 'Yesterday'
-  if (days > 1 && days < 7) return d.toLocaleDateString([], { weekday: 'long' })
-  return d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) })
-}
+/** a day's line between messages: Today, Yesterday, a weekday this week, else its date (and year, if not this one),
+ *  as the window's chat has it (core/chat-view.js) */
+export { dayLabel } from '@core/chat-view.js'
 
 /** a reply's words as they read, without its markdown: a link by its words, no marks around them */
 function underscores(s: string) {

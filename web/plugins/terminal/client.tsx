@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState, type HTMLAttributes } from 'react
 import type { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { act, agentChat, definePlugin, getState, openItem, placeOf, setUI, shownItem, useStore, useUI } from '@client/kernel.ts'
-import { CTRL, ic, MenuItem, MenuSeparator, MenuSetting, shortcut, Small, Tab, Tabs, TermIcon } from '@client/ui.tsx'
+import { CTRL, ic, MenuItem, MenuSeparator, MenuSetting, ModelIcon, shortcut, Small, Tab, Tabs, TermIcon } from '@client/ui.tsx'
 import type { Place, TermScreen } from '@shared/types.ts'
 import { connectTerminal, streamInput } from './stream.ts'
 import { colsOf, fitFont, foldShown, frame, LINE, MAX, MIN, PAD, ZOOM } from './screen.ts'
@@ -298,30 +298,44 @@ function TerminalView({ chatKey, panel }: { chatKey: string; panel?: boolean }) 
   )
 }
 
-/** the space's other tabs (3.0's tab bar), each its terminal; on a phone also Chat or Terminal, which a wider header
- *  shows as its own toggle */
+/** A phone has no room for 3.0's tab bar: its ⋯ lists the space's tabs (the Assistant's first, the shown one ticked),
+ *  then Chat or Terminal, which a wider header shows as its own switch. Wider, the tab bar has the tabs. */
 function PlaceTerm({ place }: { place: Place }) {
   const ui = useUI()
   const tabsShown = useStore((s) => s.snap?.look?.tabs !== false)
-  const on = ui.term === place.chat || !!ui.term?.startsWith('t:')
+  if (ui.device !== 'phone') return null
+  const other = !!ui.term?.startsWith('t:') && (place.tabs ?? []).some((t) => t.term === ui.term)
+  const on = ui.term === place.chat
   const go = (term: string | null) => setUI({ term, arts: null, menu: false, plus: null, pick: null })
+  const tabs = [{ term: null as string | null, name: place.assistantTab?.name ?? 'Assistant', cli: place.assistantTab?.cli }, ...(place.tabs ?? [])]
   return (
     <>
-    {/* Settings › Window › Show tabs off: the space's other tabs aren't listed */}
-    {(tabsShown ? place.tabs ?? [] : []).map((t) => (
-      <MenuItem key={t.term} icon={<TermIcon className={ic} />} onClick={() => go(t.term)}>
-        {t.name}
-      </MenuItem>
-    ))}
-    {/* a phone's header has no room for 3.0's Chat | Terminal: it sits here, as the same two choices */}
-    {ui.device === 'phone' ? (
-      <MenuSetting name="Show" icon={<TermIcon className={ic} />} choices={[
-        { label: 'Chat', on: !on, onClick: () => go(null) },
-        { label: 'Terminal', on, onClick: () => go(place.chat) },
-      ]} />
-    ) : null}
-    {/* the tab menu's items follow under a line, only when there are tabs above it */}
-    {(tabsShown && (place.tabs ?? []).length) || ui.device === 'phone' ? <MenuSeparator /> : null}
+      {/* Settings › Window › Show tabs off: the space's tabs aren't listed */}
+      {tabsShown && tabs.length > 1
+        ? tabs.map((t) => {
+            const shown = t.term ? ui.term === t.term : !other
+            return (
+              <MenuItem key={t.term ?? 'assistant'} role="menuitemradio" aria-checked={shown} icon={t.cli ? <ModelIcon className={ic} /> : <TermIcon className={ic} />} hint={shown ? '✓' : undefined} onClick={() => go(t.term ?? (on ? place.chat : null))}>
+                {t.name}
+              </MenuItem>
+            )
+          })
+        : null}
+      {/* the shown tab's Chat | Terminal, as the same two choices (another tab's: Claude Code's and Codex's) */}
+      {other ? (
+        ['claude', 'codex'].includes(place.tabs?.find((t) => t.term === ui.term)?.cli ?? '') ? (
+          <MenuSetting name="Show" icon={<TermIcon className={ic} />} choices={(['chat', 'terminal'] as const).map((v) => ({
+            label: v === 'chat' ? 'Chat' : 'Terminal', on: (ui.tabView?.[ui.term!] ?? 'terminal') === v,
+            onClick: () => setUI((u) => ({ tabView: { ...u.tabView, [u.term!]: v }, menu: false })),
+          }))} />
+        ) : null
+      ) : (
+        <MenuSetting name="Show" icon={<TermIcon className={ic} />} choices={[
+          { label: 'Chat', on: !on, onClick: () => go(null) },
+          { label: 'Terminal', on, onClick: () => go(place.chat) },
+        ]} />
+      )}
+      <MenuSeparator />
     </>
   )
 }
@@ -330,7 +344,22 @@ function PlaceTerm({ place }: { place: Place }) {
 function ChatOrTerminal({ place }: { place: Place }) {
   const device = useUI((u) => u.device)
   const term = useUI((u) => u.term === place.chat)
+  const shown = useUI((u) => (u.term?.startsWith('t:') ? u.term : null))
+  const view = useUI((u) => (shown ? u.tabView?.[shown] : undefined))
   if (device === 'phone') return null
+  if (shown) {
+    // another tab: Claude Code's and Codex's have it too (3.0's pane header: a chat reads their own session logs)
+    const tab = place.tabs?.find((t) => t.term === shown)
+    if (!tab || !['claude', 'codex'].includes(tab.cli ?? '')) return null
+    const chat = view === 'chat'
+    const pick = (v: 'chat' | 'terminal') => setUI((ui) => ({ tabView: { ...ui.tabView, [shown]: v }, menu: false, pick: null }))
+    return (
+      <Tabs label="Chat or terminal" className="shrink-0">
+        <Tab on={chat} onClick={() => pick('chat')}>Chat</Tab>
+        <Tab on={!chat} onClick={() => pick('terminal')}>Terminal</Tab>
+      </Tabs>
+    )
+  }
   const go = (t: boolean) => setUI({ term: t ? place.chat : null, arts: null, menu: false, plus: null, pick: null })
   return (
     <Tabs label="Chat or terminal" className="shrink-0">
@@ -354,7 +383,7 @@ export default definePlugin({
     reg.taskPanel.push({ id: 'terminal', order: 10, label: 'Terminal', Icon: TermIcon, View: ({ chatKey }) => <TerminalView chatKey={chatKey} panel /> })
     reg.chatBody.push({ when: (ui, key) => ui.term === key, View: TerminalView })
     // Shepherdr 3: one of the space's other tabs, in place of its chat (t:<terminal>)
-    reg.chatBody.push({ when: (ui) => !!ui.term?.startsWith('t:'), View: ({ chatKey: _ }: { chatKey: string }) => <TerminalView chatKey={useUI((u) => u.term!)} /> })
+    reg.chatBody.push({ when: (ui) => !!ui.term?.startsWith('t:') && ui.tabView?.[ui.term] !== 'chat', View: ({ chatKey: _ }: { chatKey: string }) => <TerminalView chatKey={useUI((u) => u.term!)} /> })
     reg.keys.push({
       order: 0,
       handle: ({ e, ui, snap }) => {

@@ -35,10 +35,16 @@ export function toHtml(text: string) {
     btn.type = 'button'
     btn.setAttribute('data-copy', '')
     btn.setAttribute('aria-label', 'Copy code')
-    // our own two icons, fixed strings
-    btn.innerHTML = COPY + DONE
+    // our own two icons, fixed strings, and the window's words beside them
+    btn.innerHTML = `${COPY}${DONE}<span class="copy">Copy</span><span class="done">Copied</span>`
+    // as the window's code block: a bar over it with its language ("code" when it names none) and Copy
+    const head = document.createElement('div')
+    head.className = 'code-head'
+    const lang = document.createElement('span')
+    lang.textContent = /\blanguage-([\w+#.-]+)/.exec(pre.querySelector('code')?.className ?? '')?.[1] ?? 'code'
+    head.append(lang, btn)
     pre.replaceWith(box)
-    box.append(btn, pre)
+    box.append(head, pre)
   }
   for (const code of root.querySelectorAll('code')) {
     // a bit of code inside a link is the link's

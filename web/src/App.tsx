@@ -1,4 +1,5 @@
 import { attentionCounts } from './attention.ts'
+import { StatusBar } from './status.tsx'
 // The layout: places | coordinator chat | tasks or artifacts on a desktop (sidebars resize, places hides), and an open
 // task's side panel after them (focus hides places and the chat, for the task); chat | tasks or artifacts with places in a drawer on a tablet; one column with a
 // Chat | Tasks | Artifacts switch on a phone, where a task's panel items open as sheets. Every part inside comes from a
@@ -37,7 +38,11 @@ import {
 import { PANE_MIN } from './panes.ts'
 import { ChatColumn, Frame, PanelColumn, PlacesColumn, PlacesToggle } from './Frame.tsx'
 import { PanelSheet, TabBody, TaskPanel, TaskTabs } from './Panel.tsx'
-import { openAccept } from './screens/Accept.tsx'
+import { openAccept, useAccepting } from './screens/Accept.tsx'
+import * as TK from '@core/tasks.js'
+
+/** a line's first letter a capital, as the window writes every reason (core/tasks.js) */
+const capital = TK.capital as (s: string) => string
 import { Drawer as SlideDrawer, Stack } from './Stack.tsx'
 import { machineName, type Place, type Snapshot, type Task } from '@shared/types.ts'
 import {
@@ -107,6 +112,8 @@ export default function App() {
         ))}
         {search && registry.views.search ? <registry.views.search onClose={() => setUI({ search: false })} /> : null}
       </div>
+      {/* the window's status bar: machine, branch, Needs you (status.tsx) */}
+      {device !== 'phone' ? <StatusBar /> : null}
     </div>
   )
 }
@@ -149,33 +156,26 @@ function useKeyboard() {
 
 /* ---------- pieces of the frame ---------- */
 
+/** the sidebar's top row, as the window's (workspace-chrome-shepherdr): the mark and name, a search button (Jump,
+ *  Ctrl+K) and the sidebar toggle */
 export function Brand() {
   const snap = useSnap()!
-  const Menu = registry.views.placesMenu
   return (
-    <div className="flex items-center gap-2 px-3.5 pt-3 pb-0.5 text-[0.9375rem] font-semibold desktop:pr-2.5 phone:px-5 phone:pt-3 phone:pb-1 phone:text-[1.125rem]">
-      <CrookIcon className="size-6" />
+    <div className="flex items-center gap-1 px-3.5 pt-3 pb-0.5 text-[0.9375rem] font-semibold desktop:pr-2.5 phone:px-5 phone:pt-3 phone:pb-1 phone:text-[1.125rem]">
+      <CrookIcon className="mr-1 size-6" />
       <span className="min-w-0 flex-1 truncate">{snap.name}</span>
-      {Menu ? <Menu /> : null}
+      <SearchButton />
       <PlacesToggle when="open" />
     </div>
   )
 }
 
-export function SearchBox() {
-  const device = useUI((u) => u.device)
+/** the brand row's search: Jump (core keys' Ctrl+K), as the window's magnifier */
+function SearchButton() {
   return (
-    <div className="flex items-center gap-1.5 px-2.5 pt-2.5 pb-1.5">
-      <button
-        type="button"
-        onClick={() => setUI({ search: true, searchScope: undefined, drawer: false })}
-        className="press-dim flex h-8 flex-1 items-center gap-2 rounded-full bg-bg px-3 text-left text-[0.8125rem] text-fg3 shadow-[inset_0_0_0_1px_var(--line2)] coarse:h-11 phone:h-11 phone:text-[1rem]"
-      >
-        <SearchIcon className={ic} />
-        <span className="min-w-0 truncate">Search</span>
-        {device !== 'phone' ? <kbd className="ml-auto font-sans text-[0.6875rem] text-fg3">{shortcut(MOD, 'K')}</kbd> : null}
-      </button>
-    </div>
+    <IconButton label="Search" title={`Search · ${shortcut(MOD, 'K')}`} onClick={() => setUI({ search: true, searchScope: undefined, drawer: false })}>
+      <SearchIcon className={ic} />
+    </IconButton>
   )
 }
 
@@ -209,7 +209,6 @@ function Sidebar() {
   return (
     <PlacesColumn>
       <Brand />
-      <SearchBox />
       {P ? <P /> : null}
       <SideFoot />
     </PlacesColumn>
@@ -232,7 +231,6 @@ function Drawer() {
       panel={phone ? 'w-[84%] pt-[env(safe-area-inset-top)]' : 'w-[320px]'}
     >
       <Brand />
-      <SearchBox />
       {P ? <P /> : null}
       <SideFoot drawer />
     </SlideDrawer>
@@ -303,28 +301,36 @@ function PlaceMarks({ place }: { place: Place }) {
 function PlaceColumn({ place, pane }: { place: Place; pane?: number }) {
   const snap = useSnap()!
   const Chat = registry.views.chat
+  const term = useUI((u) => u.term)
+  // 3.0's pane header: what runs in the shown tab ("Assistant · Claude Code"; another tab's program) and its folder,
+  // then the Autopilot switch; past the gap its status, × and Chat | Terminal (placeHeader, by order). The space is
+  // named by the sidebar and the tab bar, as in the window.
+  const tab = term?.startsWith('t:') ? place.tabs?.find((t) => t.term === term) : undefined
+  const name = tab ? (tab.prog ?? 'Shell') : (place.header ?? 'Assistant')
+  const where = tab ? tab.where : place.where
+  // another agent tab switched to Chat shows its own chat (its terminal otherwise: the terminal plugin's chatBody)
+  const tabChat = useUI((u) => (tab && u.tabView?.[tab.term] === 'chat' ? tab.term : null))
   return (
     <section data-drawer-from className="@container/place flex min-h-0 min-w-0 flex-1 flex-col">
-      <Head conversation>
+      <Head conversation className="group/head">
         <MenuButton />
         {pane ? null : <PlacesToggle when="closed" />}
-        <Who
-          name={
-            <>
-              <PlaceIcon level={2} className="mr-1.5 inline-block align-[-2px] text-fg2" />
-              {place.name}
-            </>
-          }
-          kind={placeKind(snap, place)}
-        />
-        {registry.placeHeader.map(({ View }, i) => (
+        <div className="flex min-w-0 shrink items-center gap-2.5">
+          <Who name={name} kind={where || undefined} />
+        </div>
+        {registry.placeHeader.filter((h) => h.order <= 10).map(({ View }, i) => (
+          <View key={i} place={place} />
+        ))}
+        <div className="flex-1" />
+        {registry.placeHeader.filter((h) => h.order > 10).map(({ View }, i) => (
           <View key={i} place={place} />
         ))}
         <PlaceMarks place={place} />
-        <PlaceMenu place={place} pane={pane} />
         {pane === undefined ? null : <PaneButtons i={pane} />}
       </Head>
-      {Chat ? <Chat chatKey={place.chat} placeholder="Message the Assistant" unreachable={unreachable(place, snap)} /> : null}
+      {Chat ? (
+        tabChat ? <Chat key={tabChat} chatKey={tabChat} placeholder={`Message ${tab?.prog ?? 'the agent'}`} /> : <Chat chatKey={place.chat} placeholder="Message the Assistant" unreachable={unreachable(place, snap)} />
+      ) : null}
     </section>
   )
 }
@@ -378,38 +384,27 @@ function SideList({ snap }: { snap: Snapshot }) {
   const TasksMenu = registry.views.tasksMenu
   const Artifacts = registry.views.artifacts
   const Needs = registry.views.needs
-  const side = (shown === 'artifacts' && Artifacts) || (shown === 'needs' && Needs) ? shown : 'tasks'
+  // Herdr's own Files and Changes, the space's folder (the tab bar's buttons, as shared "workspace.panels" has them)
+  const Space = registry.views.spacePanel
+  const herdr = (shown === 'files' || shown === 'changes') && Space && (snap.panels ?? ['files', 'changes']).includes(shown) ? shown : null
+  const side = herdr ?? ((shown === 'artifacts' && Artifacts) || (shown === 'needs' && Needs) ? shown : 'tasks')
+  const title = { tasks: 'Tasks', needs: 'Needs you', artifacts: 'Artifacts', files: 'Files', changes: 'Changes' }[side]
   return (
-    <section className="@container/side flex min-h-0 min-w-0 flex-1 flex-col border-l border-line" aria-label={side === 'tasks' ? 'Tasks' : side === 'needs' ? 'Needs you' : 'Artifacts'}>
+    <section className="@container/side flex min-h-0 min-w-0 flex-1 flex-col border-l border-line" aria-label={title}>
       <Head>
-        {/* Tasks | Artifacts as segmented tabs, so which one shows is plain; the chat beside it already names the place.
-            What waits on you is counted on the Tasks tab itself, whichever tab shows, so the count never moves */}
-        {Artifacts || Needs ? (
-          <div className="flex flex-1 items-center">
-            <Tabs label="Show">
-              {(
-                [
-                  ...(Needs ? [['needs', 'Needs you'] as const] : []),
-                  ['tasks', 'Tasks'] as const,
-                  ...(Artifacts ? [['artifacts', 'Artifacts'] as const] : []),
-                ] as const
-              ).map(([k, l]) => (
-                <Tab key={k} on={side === k} onClick={() => setUI({ side: k })}>
-                  {l}
-                  {k === 'tasks' ? <TaskAttention /> : k === 'needs' ? <NeedsAttention /> : null}
-                </Tab>
-              ))}
-            </Tabs>
-          </div>
-        ) : (
-          <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            <h2 className="min-w-0 truncate font-semibold">Tasks</h2>
-            <TaskAttention />
-          </div>
-        )}
+        {/* 3.0's side panel: its name over it; which one shows (and what needs you, counted) is the tab bar's buttons */}
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+          <h2 className="min-w-0 truncate font-semibold">{title}</h2>
+        </div>
         {side === 'tasks' && TasksMenu ? <TasksMenu key={view.key} place={place} /> : null}
       </Head>
-      <div className="min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain">{side === 'needs' && Needs ? <Needs /> : side === 'artifacts' && Artifacts ? <Artifacts placeId={place.id} /> : Tasks ? <Tasks placeId={place.id} /> : null}</div>
+      {herdr && Space ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <Space place={place} what={herdr} />
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain">{side === 'needs' && Needs ? <Needs /> : side === 'artifacts' && Artifacts ? <Artifacts placeId={place.id} /> : Tasks ? <Tasks placeId={place.id} /> : null}</div>
+      )}
     </section>
   )
 }
@@ -426,17 +421,31 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
   const desktop = useUI((u) => u.device === 'desktop')
   const keyboard = useUI((u) => u.keyboard)
   const coordinator = placeOf(snap, task.place).name
-  // as 3.0's task header: where it merges, its pin, and Accept once it is Ready; then its tabs (TaskTabs)
-  const target = task.base ? <span className="shrink-0 truncate text-[0.8125rem] text-fg3 phone:text-[0.875rem]" title={`Merges into ${task.base}`}>→ {task.base}</span> : null
+  const accepting = useAccepting(task.id) || !!task.accepting
+  // as 3.0's task header (mods/chat/panel.js barRow): where it merges, Pin / Unpin (not an archived task's), and Accept
+  // once it is Ready ("Accepting…" while its accept runs); then its tabs (TaskTabs)
+  const target = task.base ? <span className="max-w-40 shrink-0 truncate text-[0.8125rem] text-fg2 phone:text-[0.875rem]" title={`Merges into ${task.base}`}>→ {task.base}</span> : null
   const tools = (
     <>
       {target}
-      <IconButton label={task.pinned ? 'Unpin' : 'Pin'} pressed={!!task.pinned} onClick={() => void pinTask(task, !task.pinned).catch(() => undefined)}>
-        {task.pinned ? <UnpinIcon className={ic} /> : <PinTaskIcon className={ic} />}
-      </IconButton>
-      {task.status === 'ready' && !task.archived ? <Primary soft onClick={() => openAccept(task.id)}>Accept</Primary> : null}
+      {task.archived && task.status === 'done' ? null : (
+        <IconButton label={task.pinned ? 'Unpin' : 'Pin'} pressed={!!task.pinned} onClick={() => void pinTask(task, !task.pinned).catch(() => undefined)}>
+          {task.pinned ? <UnpinIcon className={ic} /> : <PinTaskIcon className={ic} />}
+        </IconButton>
+      )}
+      {task.status === 'ready' && !task.archived ? <Primary soft disabled={accepting} onClick={() => openAccept(task.id)}>{accepting ? 'Accepting…' : 'Accept'}</Primary> : null}
     </>
   )
+  // its id, in the list's monospace, before its title (as the window's), and under them what its agent is doing
+  const ref = task.id.slice(task.id.lastIndexOf(':') + 1)
+  const named = (
+    <span className="flex min-w-0 items-baseline gap-2">
+      <span className="shrink-0 font-mono text-[0.8125rem] font-normal text-fg3">{ref}</span>
+      <span className="min-w-0 truncate">{task.name}</span>
+    </span>
+  )
+  // (working with no % yet, or a provider retry's line: its row's words, as the window's header says them)
+  const said = task.report ? <ReportLine w={task.report} head /> : task.status === 'work' && task.sub ? <span className="truncate">{task.sub}</span> : undefined
   // in focus it sits at the window's edge: no line there
   const focus = useStore((s) => focusHere(s.ui, s.snap))
   // split, a click on the open task on the right gives it the focus (the keys work on its chat)
@@ -444,9 +453,8 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
   const body = g ? (
     Chat ? <Chat chatKey={g.chat} placeholder={agentPlaceholder(task, g.status === 'done' || finished)} /> : null
   ) : (
-    <Empty>
-      {task.status === 'todo' || task.status === 'work' || task.status === 'queued' ? `${task.id} is starting: its chat opens here in a moment.` : `${task.id}'s agent didn't start: its chat opens here once it does. Ask ${coordinator} about it.`}
-    </Empty>
+    // never started: why it waits, as the window's (a queued one's reason, else that it hasn't started)
+    <Empty>{task.status === 'queued' && task.sub ? capital(task.sub) : "This task hasn't started."}</Empty>
   )
   if (phone)
     return (
@@ -461,14 +469,14 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
           p={task.report?.progress}
           name={task.name}
           expandName
-          kind={g ? `${task.id} · ${g.cli}` : task.id}
+          kind={<span className="font-mono">{ref}</span>}
           right={tools}
           report={task.report}
         />
-        {g ? <TaskTabs task={task} /> : null}
+        <TaskTabs task={task} />
         {/* no bar under a task's chat: the message box keeps clear of the home indicator itself */}
         <div className={clsx('flex min-h-0 flex-1 flex-col', !keyboard && 'pb-[env(safe-area-inset-bottom)]')}>
-          <Scroll chat={!!g}>{g ? <TabBody task={task} chatKey={g.chat}>{body}</TabBody> : body}</Scroll>
+          <Scroll chat><TabBody task={task} chatKey={g?.chat ?? ''}>{body}</TabBody></Scroll>
         </div>
       </section>
     )
@@ -506,15 +514,15 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
           Tasks
         </button>
         <Dot s={task.status} p={task.report?.progress} halo />
-        {/* its name leads, the words a narrow column has room for; its id starts the line under it */}
-        <Who name={task.name} kind={task.report ? <span className="flex min-w-0 gap-1">{task.id} ·<ReportLine w={task.report} head /></span> : `${task.id} · ${g ? `${g.cli} · ${coordinator}` : coordinator}`} />
+        {/* its id and title, the words a narrow column has room for; what its agent is doing under them (the window's) */}
+        <Who name={named} kind={said} />
         {/* its buttons close together, as a toolbar's, so the name keeps the room */}
         <div className="flex shrink-0 items-center gap-1">
           {tools}
         </div>
       </Head>
-      {g ? <TaskTabs task={task} /> : null}
-      <Scroll chat={!!g}>{g ? <TabBody task={task} chatKey={g.chat}>{body}</TabBody> : body}</Scroll>
+      <TaskTabs task={task} />
+      <Scroll chat><TabBody task={task} chatKey={g?.chat ?? ''}>{body}</TabBody></Scroll>
     </section>
   )
 }
@@ -529,9 +537,14 @@ function Middle({ snap }: { snap: Snapshot }) {
   const place = placeOf(snap, useUI((u) => u.place))
   const task = useStore((s) => (taskInMiddle(s.ui, s.snap) ? taskOf(snap, s.ui.task) : null))
   const panes = useUI(panesHere)
+  const TabBar = registry.views.tabBar
   return (
     <ChatColumn>
-      {panes.length ? <Split snap={snap} panes={panes} /> : task ? <TaskPage key={task.id} task={task} middle /> : <PlaceColumn place={place} />}
+      {/* 3.0's tab bar over it: the shown space's tabs, its + and the side panels' buttons */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {TabBar ? <TabBar place={place} /> : null}
+        {panes.length ? <Split snap={snap} panes={panes} /> : task ? <TaskPage key={task.id} task={task} middle /> : <PlaceColumn place={place} />}
+      </div>
     </ChatColumn>
   )
 }
@@ -724,6 +737,12 @@ function WideLayout({ snap }: { snap: Snapshot }) {
   const docked = useStore((s) => placesDocked(s.ui, s.snap))
   // the open task whose side panel has a column here
   const panel = useUI((u) => (panelHere(u, snap) ? u.task : null))
+  const shut = useUI((u) => !!u.sideShut)
+  // a task opened (a toast, Jump, a card) shows the panel it opens in again, as the window's
+  const opened = useUI((u) => u.task)
+  useEffect(() => {
+    if (opened && getState().ui.sideShut) setUI({ sideShut: false, side: 'tasks' })
+  }, [opened])
   const Settings = registry.views.settings
   if (settings && Settings && desktop)
     return (
@@ -734,12 +753,13 @@ function WideLayout({ snap }: { snap: Snapshot }) {
       </Frame>
     )
   if (desktop) {
-    const task = panel ? taskOf(snap, panel) : null
+    // the tab bar's open panel button pressed again hides the right-hand column (and an open task's panel with it)
+    const task = panel && !shut ? taskOf(snap, panel) : null
     return (
-      <Frame places tasks panel={!!task}>
+      <Frame places tasks={!shut} panel={!!task}>
         <Sidebar />
         <Middle snap={snap} />
-        <TaskColumn snap={snap} />
+        {shut ? null : <TaskColumn snap={snap} />}
         {!docked ? <Drawer /> : null}
         {task ? (
           <PanelColumn>
@@ -753,9 +773,9 @@ function WideLayout({ snap }: { snap: Snapshot }) {
   return (
     <Stack
       base={
-        <Frame tasks>
+        <Frame tasks={!shut}>
           <Middle snap={snap} />
-          <TaskColumn snap={snap} />
+          {shut ? null : <TaskColumn snap={snap} />}
           <Drawer />
         </Frame>
       }
@@ -784,6 +804,8 @@ function PhoneHome({ snap }: { snap: Snapshot }) {
   const view = useStore((s) => listView(s.ui, snap))
   const tab = useUI((u) => u.tab)
   const keyboard = useUI((u) => u.keyboard)
+  // the space's other agent tab picked in ⋯ and shown as its chat
+  const tabChat = useUI((u) => (u.term?.startsWith('t:') && u.tabView?.[u.term] === 'chat' ? u.term : null))
   const Chat = registry.views.chat
   const Tasks = registry.views.tasks
   const TasksMenu = registry.views.tasksMenu
@@ -812,7 +834,9 @@ function PhoneHome({ snap }: { snap: Snapshot }) {
       />
       {tab === 'chat' ? (
         <div className="flex min-h-0 flex-1 flex-col">
-          {Chat ? <Chat chatKey={place.chat} placeholder="Message the Assistant" unreachable={unreachable(place, snap)} /> : null}
+          {Chat ? (
+            tabChat ? <Chat key={tabChat} chatKey={tabChat} placeholder={`Message ${place.tabs?.find((t) => t.term === tabChat)?.prog ?? 'the agent'}`} /> : <Chat chatKey={place.chat} placeholder="Message the Assistant" unreachable={unreachable(place, snap)} />
+          ) : null}
         </div>
       ) : (
         <div className="min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain">{tab === 'needs' && registry.views.needs ? <registry.views.needs /> : tab === 'artifacts' && Artifacts ? <Artifacts placeId={place.id} /> : Tasks ? <Tasks placeId={place.id} /> : null}</div>

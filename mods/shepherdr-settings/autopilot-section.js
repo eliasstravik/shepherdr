@@ -1,37 +1,47 @@
-// The Autopilot section (DECISIONS.md, "Shepherdr gaps being closed": Autopilot, no sandbox): per
-// space, its Assistant wakes on a schedule or on task events, and each wake brings it the space's
-// heartbeat (plain text) and its saved progress. Otherwise it's the same regular Assistant.
-// herdr-task keeps it (`herdr-task autopilot ...`, its scheduler wakes it); this only shows it and
-// asks herdr-task to change it. Everywhere lists the spaces; a row opens that space's own
-// settings (the same window, scoped to it), where its switch, heartbeat and schedule are.
+// The Autopilot section (DECISIONS.md, "Shepherdr gaps being closed": Autopilot, no sandbox): a
+// space's Assistant wakes on a schedule or on task events, and each wake brings it the heartbeat
+// (plain text) and its saved progress. Otherwise it's the same regular Assistant.
+// Everywhere's page sets it for every space on this computer: its switch, heartbeat, schedule and
+// events, each with "N spaces use their own" under it, then the spaces by name with what applies
+// there; a row opens that space's own settings (the same window, scoped to it), where each row says
+// "Same as everywhere" or "Changed here · Reset", as the other pages do, with Run now and how its
+// wakes went. herdr-task keeps it (`herdr-task autopilot ...`, its scheduler wakes it); this shows it
+// and asks herdr-task to change it. Words, picks and the inherit rule: core/autopilot.js (the web's).
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { spaces, exec, appHome } from "herdr";
+import { spaces, exec, appHome, home } from "herdr";
 import { TEXT, RADIUS, H, button, clickable, segmented, toggleSwitch } from "./ui.js";
+import * as AP from "./core/autopilot.js";
+import { spaceName } from "./core/spaces.js";
 
 const CLI = () => `${appHome()}/mods/tasks/bin/herdr-task`;
-const EVENTS = [["added", "Added"], ["ready", "Ready"], ["failed", "Failed"], ["needs-you", "Needs you"], ["merged", "Merged"], ["stalled", "Stalled"]];
 const local = () => spaces().filter((s) => !s.machine && !s.id.includes("/"));
+const CUSTOM = "custom";
 
-function when(ms) {
-  if (!ms) return "";
-  const d = new Date(ms), today = new Date();
-  const hm = `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
-  if (d.toDateString() === today.toDateString()) return `Today ${hm}`;
-  return `${d.toLocaleDateString("en", { weekday: "short", month: "short", day: "numeric" })} ${hm}`;
-}
-const reasonWords = (r) => (r === "schedule" ? "Schedule" : r === "run now" ? "Run now" : String(r ?? "").replace(/^event:(\S+)/, (_m, e) => `Event: ${e}`));
+// What applies in a space: herdr-task's view of it, else Everywhere's (a space it has no record of yet).
+const pilotOf = (ap, space) => ap.list.spaces[space] ?? AP.pilotFor({ everywhere: ap.list.everywhere }, space);
+// A space as the sidebar calls it (never "~"); its task folder names its repo.
+const nameOf = (ap, s) => {
+  const folder = ap.list?.spaces[s.id]?.folder;
+  return spaceName(s, { home: home(), named: Boolean(s.named), repo: folder ? folder.replace(/\/+$/, "").split("/").pop() : null });
+};
+// herdr-task's words for where a change goes: this space, or Everywhere.
+const target = (view) => (view.scope ? ["--space", view.scope] : ["--everywhere"]);
 
 // The section's state, made in the window's init (the box needs a live host call).
 export function autopilotInit(view, cx) {
-  const ap = { list: null, every: InputState.new({ placeholder: "Every 2 hours on weekdays" }), everyFor: undefined, err: "", busy: false, custom: false };
+  const ap = { list: null, every: InputState.new({ placeholder: AP.CUSTOM_PLACEHOLDER }), everyFor: undefined, err: "", busy: false, custom: false };
   ap.every.on("submit", (_e, cx) => saveEvery(view, cx));
   ap.every.on("blur", (_e, cx) => saveEvery(view, cx));
   ap.every.on("change", (_e, cx) => { ap.err = ""; cx.notify(); });
   ap.reload = (cx) => cx.spawn(async (cx) => {
     const r = await exec(CLI(), ["autopilot", "list", "--json"]).catch(() => null);
-    try { ap.list = Object.fromEntries(JSON.parse(r?.stdout ?? "[]").map((v) => [v.space, v])); } catch { ap.list ??= {}; }
+    try {
+      const out = JSON.parse(r?.stdout ?? "");
+      ap.list = { everywhere: { ...AP.everywhereOf({ everywhere: out.everywhere }), heartbeat: out.everywhere?.heartbeat },
+        spaces: Object.fromEntries((out.spaces ?? []).map((v) => [v.space, AP.pilotFor({ spaces: [v] }, v.space)])) };
+    } catch { ap.list ??= { everywhere: AP.everywhereOf(null), spaces: {} }; }
     cx.notify();
   });
   ap.reload(cx);
@@ -40,78 +50,59 @@ export function autopilotInit(view, cx) {
   return ap;
 }
 
-// herdr-task autopilot <args> for a space; its refusal shows under the settings.
-function act(view, space, args, cx) {
+// herdr-task autopilot <args> for this scope (Everywhere's or the space's); its refusal shows under
+// the settings. Everywhere's change reaches every space, so all of it is read again.
+function act(view, args, cx) {
   const ap = view.ap;
   ap.busy = true;
   cx.spawn(async (cx) => {
-    const r = await exec(CLI(), ["autopilot", ...args, "--space", space, "--json"]).catch((e) => ({ code: 1, stdout: "", stderr: String(e?.message ?? e) }));
+    const r = await exec(CLI(), ["autopilot", ...args, ...target(view), "--json"]).catch((e) => ({ code: 1, stdout: "", stderr: String(e?.message ?? e) }));
     let out = null;
     try { out = JSON.parse(r.stdout); } catch {}
     ap.err = r.code === 0 ? "" : (out?.error ?? (r.stderr || "herdr-task failed").replace(/^herdr-task: /, "").trim());
-    if (out && !out.error) ap.list = { ...(ap.list ?? {}), [space]: out };
     ap.busy = false;
-    cx.notify();
+    ap.reload(cx);
   });
 }
 
 function saveEvery(view, cx) {
-  const space = view.scope, ap = view.ap;
-  if (!space || ap.everyFor !== space) return;
+  const ap = view.ap, key = view.scope ?? "";
+  if (!ap.list || ap.everyFor !== key) return;
   const v = ap.every.value().trim();
-  if (v === (ap.list?.[space]?.every ?? "")) return;
-  act(view, space, ["set", "--every", v], cx);
+  const a = view.scope ? pilotOf(ap, view.scope) : ap.list.everywhere;
+  if (v === (a.every ?? "")) return;
+  act(view, ["set", "--every", v], cx);
 }
 
-// `view`: the settings window (its title, row and stepper pieces).
+// `view`: the settings window (its title, row, scope line and stepper pieces).
 export function autopilotSection(view, t, cx) {
   const ap = view.ap;
-  if (!ap.list) return v_flex().child(view.title(t, "Autopilot")).child(div().text_size(TEXT.label).text_color(t.dim).child("Loading…"));
-  return view.scope ? spaceSettings(view, t, cx) : overview(view, t);
-}
-
-const ABOUT = "Its Assistant wakes on a schedule or when something happens to its tasks, and works from the heartbeat.";
-// The schedule's presets (herdr-task's --every words); anything else is Custom.
-const PRESETS = [["", "Off"], ["every 30 minutes", "Every 30 min"], ["every 60 minutes", "Every hour"], ["weekdays 9:00", "Weekdays 9:00"]];
-const CUSTOM = "custom";
-
-// Everywhere: each space on this computer, how its Autopilot is; a row opens that space's.
-function overview(view, t) {
-  const ap = view.ap;
-  return v_flex()
-    .child(view.title(t, "Autopilot"))
-    .child(div().pb(8).text_size(TEXT.label).line_height("17px").text_color(t.dim).child(`Per space. ${ABOUT}`))
-    .children(local().map((s) => {
-      const a = ap.list[s.id];
-      const on = Boolean(a?.on);
-      const sub = on ? ["On", a.trigger, a.next_run ? `Next ${when(a.next_run)}` : null].filter(Boolean).join(" · ") : "Off";
-      return clickable(h_flex().id(`ap-open-${s.id}`).w_full().px(10).py(10).gap(12).items_center()
-        .child(v_flex().flex_1().min_w(0).gap(2)
-          .child(div().truncate().text_size(TEXT.body).font_medium().text_color(t.foreground).child(s.name))
-          .child(div().truncate().text_size(TEXT.label).text_color(on ? t.muted : t.dim).child(sub)))
-        .child(svg("mods/workspace-chrome/chevron-right.svg").size(14).flex_none().text_color(t.dim)),
-        (_e, cx) => view.pickScope(s.id, cx));
-    }));
-}
-
-function spaceSettings(view, t, cx) {
-  const ap = view.ap, space = view.scope;
-  const a = ap.list[space] ?? { on: false, events: [], every: null };
+  if (!ap.list) return v_flex().child(view.title(t, AP.TITLE)).child(div().text_size(TEXT.label).text_color(t.dim).child("Loading…"));
+  const space = view.scope, at = space ? "space" : "all";
+  const a = space ? pilotOf(ap, space) : ap.list.everywhere;
+  const views = local().map((s) => ({ ...pilotOf(ap, s.id), name: nameOf(ap, s) }));
+  // Under each row: in a space, "Same as everywhere" or "Changed here · Reset"; on Everywhere, the
+  // spaces that set their own.
+  const sc = (field) => space
+    ? { id: `ap-${field}`, mine: Boolean(a.own?.[field]), from: AP.SAME, reset: (cx) => act(view, ["reset", "--only", field], cx) }
+    : { id: `ap-${field}`, others: AP.ownIn(views, field, (v) => v.name) };
   const on = Boolean(a.on);
-  // The Custom box shows this space's rule: after a switch of space, and when the saved rule
+
+  // The Custom box shows this scope's rule: after a switch of scope, and when the saved rule
   // changes (a save here, or the Assistant's); never while it's only being typed in.
-  const key = `${space}|${a.every ?? ""}`;
+  const key = `${space ?? ""}|${a.every ?? ""}`;
   if (ap.everyKey !== key) {
     ap.everyKey = key;
     ap.custom = false;
-    cx.timer.after(0, (cx) => { ap.everyFor = space; ap.every.set_value(a.every ?? ""); cx.notify(); });
+    ap.err = "";
+    cx.timer.after(0, (cx) => { ap.everyFor = space ?? ""; ap.every.set_value(a.every ?? ""); cx.notify(); });
   }
   const saved = String(a.every ?? "").trim().toLowerCase();
-  const preset = ap.custom ? CUSTOM : PRESETS.some(([v]) => v === saved) ? saved : CUSTOM;
+  const preset = ap.custom ? CUSTOM : AP.presetOf(saved) ?? CUSTOM;
   const pick = (v, _e, cx) => {
-    if (v === CUSTOM) { ap.custom = true; ap.everyFor = space; ap.every.focus(); return; }
+    if (v === CUSTOM) { ap.custom = true; ap.everyFor = space ?? ""; ap.every.focus(); return; }
     ap.custom = false;
-    if (v !== saved) act(view, space, ["set", "--every", v], cx);
+    if (v !== saved) act(view, ["set", "--every", v], cx);
   };
   const events = new Set(a.events ?? []);
   const chip = ([id, label]) => {
@@ -122,46 +113,65 @@ function spaceSettings(view, t, cx) {
       .when(!picked, (el) => el.text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground)))
       .on_click((_e, cx) => {
         const next = picked ? [...events].filter((e) => e !== id) : [...events, id];
-        act(view, space, ["set", "--on", next.join(",")], cx);
+        act(view, ["set", "--on", AP.eventsIn(next).join(",")], cx);
       })
       .child(label);
   };
-  const fact = (label, value) => h_flex().gap(16).py(6).items_start()
-    .child(div().w(96).flex_none().text_size(TEXT.body).font_medium().text_color(t.foreground).child(label))
-    .child(div().flex_1().min_w(0).text_size(TEXT.body).line_height("19px").text_color(t.muted).child(value));
-  const last = a.last_wake;
-  const pending = a.pending;
   const customBox = preset === CUSTOM ? v_flex().gap(6)
     .child(div().w_full().h(H.lg).px(9).flex().items_center().rounded(RADIUS.control).border_1().border_color(ap.err ? t.blocked : t.input).bg(t.background)
       .child(Input.new(ap.every).w_full().text_size(TEXT.body).text_color(t.foreground)))
-    .child(div().text_size(TEXT.label).line_height("17px").text_color(ap.err ? t.blocked : t.dim)
-      .child(ap.err || "Like \"every 2 hours on weekdays from 8:00 to 18:00\". Saved when you leave the box.")) : null;
+    .child(div().text_size(TEXT.label).line_height("17px").text_color(ap.err ? t.blocked : t.dim).child(ap.err || AP.CUSTOM_HINT)) : null;
+  // The heartbeat: Everywhere's, or this space's own; a space that follows Everywhere's makes its own.
+  const beat = !space || a.own?.heartbeat
+    ? button("ap-heartbeat", AP.HEARTBEAT_EDIT, { onClick: (_e, cx) => editHeartbeat(view, space, false, cx) })
+    : button("ap-heartbeat", AP.SET_OWN, { onClick: (_e, cx) => editHeartbeat(view, space, true, cx) });
+
   return v_flex()
-    .child(view.title(t, "Autopilot"))
-    .child(view.row(t, "Autopilot", ABOUT, toggleSwitch("ap-on", on, (_next, _e, cx) => act(view, space, [on ? "off" : "on"], cx))))
-    .child(view.row(t, "Heartbeat", "What it works from: direction, priorities, limits and when to stop.",
-      button("ap-heartbeat", "Edit", { onClick: (_e, cx) => editHeartbeat(view, space, cx) })))
-    .child(view.row(t, "Schedule", "When it wakes by itself.",
-      segmented("ap-every", [...PRESETS, [CUSTOM, "Custom…"]], preset, pick), null, customBox))
+    .child(view.title(t, AP.TITLE))
+    .child(div().pb(8).text_size(TEXT.label).line_height("17px").text_color(t.dim).child(space ? AP.ABOUT : AP.EVERYWHERE_ABOUT))
+    .child(view.row(t, AP.ROWS.on.label, AP.ROWS.on[at], toggleSwitch("ap-on", on, (_next, _e, cx) => act(view, [on ? "off" : "on"], cx)), sc("on")))
+    .child(view.row(t, AP.ROWS.heartbeat.label, AP.ROWS.heartbeat[at], beat, sc("heartbeat")))
+    .child(view.row(t, AP.ROWS.every.label, AP.ROWS.every[at],
+      segmented("ap-every", [...AP.PRESETS, [CUSTOM, AP.CUSTOM]], preset, pick), sc("every"), customBox))
+    .child(view.row(t, AP.ROWS.events.label, AP.ROWS.events[at], null, sc("events"),
+      h_flex().gap(6).flex_wrap().children(AP.EVENTS.map(chip))))
     .when(Boolean(ap.err) && preset !== CUSTOM, (el) => el.child(div().pt(6).text_size(TEXT.label).text_color(t.blocked).child(ap.err)))
-    .child(view.row(t, "Events", "These wake it at once when they happen to this space's tasks.", null, null,
-      h_flex().gap(6).flex_wrap().children(EVENTS.map(chip))))
-    .child(view.row(t, "Run now", on ? "Wakes it now, or as soon as it's idle." : "Turn Autopilot on first.",
-      button("ap-run", "Run now", { disabled: !on, onClick: (_e, cx) => act(view, space, ["run-now"], cx) })))
-    .child(v_flex().pt(14)
-      .child(fact("Next wake", !on ? "Off." : pending ? `Waiting: ${pending.note ?? "goes when its Assistant is idle"}.`
-        : a.next_run ? `${when(a.next_run)} · Schedule` : events.size ? "On events only." : "Only on Run now."))
-      .child(fact("Last wake", last ? `${when(last.at)} · ${reasonWords(last.reason)} · ${last.outcome}` : "Never."))
-      .child(fact("Progress", a.progress ? `${a.progress.text} (${when(a.progress.at)})` : "None. The Assistant saves it after each wake.")));
+    .when(Boolean(space), (el) => el
+      .child(view.row(t, AP.ROWS.run.label, on ? AP.ROWS.run.on : AP.ROWS.run.off,
+        button("ap-run", AP.ROWS.run.label, { disabled: !on, onClick: (_e, cx) => act(view, ["run-now"], cx) })))
+      .child(v_flex().pt(14).children(AP.facts(a).map(([label, value]) => fact(t, label, value)))))
+    .when(!space, (el) => el.child(spacesList(view, t, views)));
 }
 
-// Makes the file when it's missing (with a starter), then opens it as Instructions does.
-function editHeartbeat(view, space, cx) {
+const fact = (t, label, value) => h_flex().gap(16).py(6).items_start()
+  .child(div().w(96).flex_none().text_size(TEXT.body).font_medium().text_color(t.foreground).child(label))
+  .child(div().flex_1().min_w(0).text_size(TEXT.body).line_height("19px").text_color(t.muted).child(value));
+
+// Everywhere's page, under its rows: each space on this computer, by its name, how its Autopilot is
+// and what it sets itself; a row opens that space's own settings.
+function spacesList(view, t, views) {
+  return v_flex()
+    .child(view.heading(t, AP.SPACES))
+    .child(div().pb(4).text_size(TEXT.label).line_height("17px").text_color(t.dim).child(views.length ? AP.SPACES_HINT : AP.NO_SPACES))
+    .children(views.map((v) => clickable(h_flex().id(`ap-open-${v.space}`).w_full().px(10).py(10).gap(12).items_center()
+      .child(v_flex().flex_1().min_w(0).gap(2)
+        .child(div().truncate().text_size(TEXT.body).font_medium().text_color(t.foreground).child(v.name))
+        .child(div().truncate().text_size(TEXT.label).text_color(v.on ? t.muted : t.dim).child(AP.summary(v))))
+      .child(div().flex_none().text_size(TEXT.label).text_color(t.dim).child(AP.ownWords(v)))
+      .child(svg("mods/workspace-chrome/chevron-right.svg").size(14).flex_none().text_color(t.dim)),
+    (_e, cx) => view.pickScope(v.space, cx))));
+}
+
+// Opens the heartbeat that applies here as Instructions does: Everywhere's, or this space's own
+// (own: made from Everywhere's words when it has none). herdr-task makes a missing file with a starter.
+function editHeartbeat(view, space, own, cx) {
   cx.spawn(async (cx) => {
-    const r = await exec(CLI(), ["autopilot", "heartbeat", "--space", space, "--json"]).catch(() => null);
+    const args = ["autopilot", "heartbeat", ...(space ? ["--space", space] : ["--everywhere"]), ...(own ? ["--own"] : []), "--json"];
+    const r = await exec(CLI(), args).catch(() => null);
     let file = null;
     try { file = JSON.parse(r?.stdout ?? "").heartbeat; } catch {}
-    if (!file) { view.ap.err = "Couldn't make the heartbeat file."; cx.notify(); return; }
-    view.edit({ id: "heartbeat", file, title: "Heartbeat" });
+    if (!file) { view.ap.err = AP.NO_HEARTBEAT; cx.notify(); return; }
+    view.edit({ id: "heartbeat", file, title: AP.ROWS.heartbeat.label });
+    view.ap.reload(cx);
   });
 }

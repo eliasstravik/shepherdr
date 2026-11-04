@@ -4,8 +4,9 @@
 import clsx from 'clsx'
 import { useEffect, useState } from 'react'
 import { act, agentChat, chatName, definePlugin, getState, goChat, placeOf, setUI, useSnap, useStore, useUI, visibleChats } from '@client/kernel.ts'
-import { EndCallIcon, ic, IconButton, LiveWave, MicIcon, MicOffIcon, roundBtn, useElapsed, WaveIcon, Waves, XIcon } from '@client/ui.tsx'
+import { ic, IconButton, LiveWave, MicIcon, MicOffIcon, roundBtn, useElapsed, WaveIcon, Waves, XIcon } from '@client/ui.tsx'
 import { cancelDictation } from '@plugins/chat/client.tsx'
+import { sectionOf } from '@client/Settings.tsx'
 import { callPhase, callSample, muteCall, startCall, stopCall } from './call.ts'
 
 export function toggleCall(chatKey: string) {
@@ -19,8 +20,38 @@ export function toggleCall(chatKey: string) {
   act({ type: 'call', chat: chatKey, on: true })
   void startCall(chatKey, (message) => {
     endCall()
+    // no key yet: the window's card over the box says where it goes (callBar), not an error
+    if (/ElevenLabs key/i.test(message)) return void (help = chatKey, helpers.forEach((f) => f()))
     setUI({ callError: message })
   }).catch(() => { endCall(); setUI({ callError: 'Audio could not start on this device.' }) })
+}
+
+/** the chat whose call couldn't start for want of a key: the card over its box */
+let help: string | null = null
+const helpers = new Set<() => void>()
+
+/** as the window's (mods/chat callBar): why a call can't start, where the key goes, Open Secrets */
+function CallHelp({ chatKey }: { chatKey: string }) {
+  const [, tick] = useState(0)
+  useEffect(() => { const f = () => tick((x) => x + 1); helpers.add(f); return () => void helpers.delete(f) }, [])
+  const settings = useStore((s) => s.snap?.settings)
+  if (help !== chatKey) return null
+  const close = () => { help = null; helpers.forEach((f) => f()) }
+  return (
+    <div role="status" className="mb-1.5 flex flex-col gap-2 rounded-[8px] bg-bubble px-3 py-2.5 shadow-[inset_0_0_0_1px_var(--line2)]">
+      <div className="flex items-center gap-2">
+        <span className="flex-1 font-medium text-fg">Voice calls need an ElevenLabs key</span>
+        <IconButton label="Close" className="rounded-full!" onClick={close}><XIcon className={ic} /></IconButton>
+      </div>
+      <p className="text-[0.8125rem] text-fg2">Add your key in Settings › Secrets as ELEVENLABS_API_KEY, then press the call button again.</p>
+      <div>
+        <button type="button" onClick={() => { close(); setUI({ settings: { section: Math.max(0, sectionOf('Secrets', settings ?? [], getState().ui)) }, drawer: false }) }}
+          className="press-dim h-7 rounded-[7px] bg-bg px-2.5 text-[0.78125rem] font-medium text-fg shadow-[inset_0_0_0_1px_var(--line2)] hover:bg-hover phone:h-10">
+          Open Secrets
+        </button>
+      </div>
+    </div>
+  )
 }
 
 export function endCall() {
@@ -95,7 +126,8 @@ function CallBox({ chatKey }: { chatKey: string }) {
         onClick={endCall}
         className="press-dim relative grid size-[34px] shrink-0 place-items-center rounded-full bg-need text-white after:absolute after:-inset-1.5 phone:size-11"
       >
-        <EndCallIcon className={ic} />
+        {/* the window's red round X */}
+        <XIcon className={ic} />
       </button>
     </>
   )
@@ -124,8 +156,9 @@ function CallLine({ call }: { call: string }) {
       <button type="button" className={clsx(callBtn, 'shadow-[inset_0_0_0_1px_color-mix(in_srgb,currentColor_40%,transparent)]')} onClick={() => goChat(call)}>
         Go back
       </button>
-      <button type="button" className={clsx(callBtn, 'bg-need-fg text-white dark:text-black')} onClick={endCall}>
-        End call
+      {/* the window's hang-up: a red round X ("End call") */}
+      <button type="button" aria-label="End call" title="End call" className="press-dim relative grid size-8 shrink-0 place-items-center rounded-full bg-need text-white after:absolute after:-inset-1.5 phone:size-11" onClick={endCall}>
+        <XIcon className={ic} />
       </button>
     </div>
   )
@@ -151,6 +184,7 @@ export default definePlugin({
     reg.composerIdle = CallButton
     reg.composerLive.push({ when: (ui, chatKey) => ui.call === chatKey, View: CallBox })
     reg.topBars.push(CallBar, CallError)
+    reg.composerAbove.push({ order: 7, View: CallHelp })
     // 3.0 calls with Ctrl+Shift+Space (the keyboard plugin): no V or M keys of its own
   },
 })

@@ -26,6 +26,44 @@ export class Agents {
     return parseDefaults(kind, r?.stdout ?? "");
   }
 
+  /** A CLI's own settings on a machine as last read (the chat's model button reads them on every change, as the
+   *  window's chat keeps them: this.dflt), read again in the background at most once a minute. */
+  private known = new Map<string, { at: number; value: any }>();
+  cached(kind: string, machine: string | null) {
+    const k = `${machine ?? ""}|${kind}`, was = this.known.get(k);
+    if (!was || Date.now() - was.at > 60_000) {
+      this.known.set(k, { at: Date.now(), value: was?.value ?? null });
+      void this.defaults(kind, machine).then((value) => this.known.set(k, { at: Date.now(), value }), () => undefined);
+    }
+    return was?.value ?? null;
+  }
+
+  /** The window's model menu (mods/chat openPicker → mods/chat-models) for the agent at addr: what it runs on, each
+   *  installed CLI's models, levels, Fast and permission modes; remote: why it can't restart from here */
+  async menu(addr: string, reader: any) {
+    const t: any = this.hub.terminals.get(addr);
+    if (!t) throw new Error("That agent isn't here any more.");
+    const machine = addr.includes("/") ? addr.split("/")[0] : null;
+    const kind = kindOf(t) ?? reader?.kind ?? "claude";
+    const [claude, codex, have] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine),
+      sh(this.hub, 'for c in "$@"; do command -v "$c" >/dev/null 2>&1 && echo "$c"; done', ["agents", "claude", "codex"], machine).then((r: any) => new Set(String(r?.stdout ?? "").split("\n").filter(Boolean)), () => null)]);
+    const dflts: any = { claude, codex };
+    let meta = reader?.conv?.meta ?? {};
+    // a resumed conversation's log names the model it ran on before: until this process writes, its arguments say
+    if (t.created_ms && meta.at && meta.at < t.created_ms) meta = { used: meta.used, window: meta.window };
+    const c = current(kind, t.foreground?.argv ?? t.argv ?? [], meta, dflts[kind]);
+    const row = rowFor(kind, c);
+    const menus = Object.fromEntries(["claude", "codex"].filter((k) => k === kind || !have || have.has(k)).map((k) => [k, menuFor(k, dflts[k], k === kind ? row : null)]));
+    return { current: { agent: kind, model: row, effort: c.effort ?? null, fast: !!c.fast, perm: c.perm ?? null }, menus,
+      permDefault: { claude: claude?.mode ?? "manual", codex: "auto" }, remote: machine && !t.labels?.["herdr.task"] ? "This computer only" : null };
+  }
+
+  /** Each CLI's own settings here (Settings › Agents' model menu: core/settings.js choicesFrom). */
+  async ownDefaults() {
+    const [claude, codex] = await Promise.all([this.defaults("claude", null), this.defaults("codex", null)]);
+    return { claude, codex };
+  }
+
   /** What an unset role runs, in the window's words ("Opus 5.5 · 1M · High"): each CLI's own defaults here. */
   async defaultLines(): Promise<Record<string, string>> {
     const out: Record<string, string> = {};
@@ -67,12 +105,12 @@ export class Agents {
   }
 
   /** Restarts it on the picked CLI, model, effort and speed; resolves with the new agent's address. */
-  async restart(addr: string, reader: any, pick: { kind: string; model?: string; effort?: string; speed?: string }) {
+  async restart(addr: string, reader: any, pick: { kind: string; model?: string; effort?: string; speed?: string; perm?: string }) {
     const t: any = this.hub.terminals.get(addr);
     if (!t || t.state !== "live") throw new Error("That agent isn't running.");
     const kind = kindOf(t) ?? "claude";
     const old = { agent: kind, argv: t.foreground?.argv ?? t.argv ?? [], session: sessionOf(kind, reader?.path ?? null) };
-    const built = argvFor({ agent: pick.kind, model: pick.model, effort: pick.effort, fast: pick.speed === "fast", perm: current(kind, old.argv, {}, {}).perm }, old);
+    const built = argvFor({ agent: pick.kind, model: pick.model, effort: pick.effort, fast: pick.speed === "fast", perm: pick.perm ?? current(kind, old.argv, {}, {}).perm }, old);
     const pane = t.labels?.["herdr.chat"] ?? "";
     const task = t.labels?.["herdr.task"];
     if (task) {

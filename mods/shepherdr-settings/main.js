@@ -22,53 +22,29 @@ import { manifest } from "./addons.js";
 import { secretsInit, secretsSection } from "./secrets-section.js";
 import { baseInit, baseRow } from "./base-branch.js";
 import { autopilotInit, autopilotSection } from "./autopilot-section.js";
+import { spaceName } from "./core/spaces.js";
 import { NOTIFY, NOTIFY_DEFAULT, notifyMachine, notifyMachineOwn, notifyOf, notifyOwn, notifyEverywhere,
   setNotifyEverywhere, setNotifyMachine, setNotify } from "./notify.js";
 import { machinesSection } from "./machines-section.js";
 import { TEXT, RADIUS, H, button, link, toggleSwitch, segmented } from "./ui.js";
 import { webSection } from "./web-section.js";
+// Every page's, row's and button's words, and the rows' choices: core/settings.js, shared with the web app.
+// herdr-task's merge policy (MERGE): "ask" waits for the person's Accept (which merges), the others merge without it.
+// NOTES: what a task's agent is told to do first and last (tasks.start_notes / finish_notes): herdr-task puts them
+// into its starting prompt; Herdr runs nothing itself.
+import { SECTIONS, ROLES, NOTES, MERGE, MUST_FIX, ROUNDS, ARCHIVE, ABOUT, BACKUP, NOTIFY_ABOUT, TITLE, SPACE_TITLE,
+  EVERYWHERE, CHANGED_HERE, RESET, EDIT_INSTRUCTIONS, USE_OTHER_CLI, LOADING_AGENTS, SAVED, sameAs as sameAsWords,
+  spacesOwn, onlyFor, otherCliWords, backupProblem, notifyMachineAbout, machineLabel, TASK_ROWS } from "./core/settings.js";
 
 const I = (name) => `mods/shepherdr-settings/${name}.svg`;
-// space: shown in a space's own settings too ("local": only for a space on this computer).
-const SECTIONS = [
-  { id: "agents", title: "Agents", icon: "bot", space: true },
-  { id: "tasks", title: "Tasks", icon: "list-checks", space: true },
-  { id: "autopilot", title: "Autopilot", icon: "plane", space: "local" },
-  { id: "notify", title: "Notify", icon: "bell", space: true },
-  { id: "secrets", title: "Secrets", icon: "key", space: true },
-  { id: "machines", title: "Machines", icon: "network" },
-  { id: "window", title: "Window", icon: "layout" },
-  { id: "web", title: "Web", icon: "globe" },
-];
+// A page's title, and a Tasks row's (by its key, section.field).
+const page = (id) => SECTIONS.find((s) => s.id === id).title;
+const rowTitle = (key) => TASK_ROWS.find(([s, f]) => `${s}.${f}` === key)[2];
 // Pages that moved: older openers still name them.
 const MOVED = { layout: "window", instructions: "agents", automations: "tasks" };
 const TEMPLATES = () => `${home()}/.config/herdr-core/templates`;
-const ROLES = [
-  { id: "coordinator", title: "Assistant", about: "Plans the work and starts a task for each part.", file: "assistant.md",
-    told: "What every Assistant is told first" },
-  { id: "worker", title: "Workers", about: "Do one task each.", file: "worker.md", told: "What every worker is told first" },
-  { id: "reviewer", title: "Reviewer", about: "Checks each task's work before it's ready.", file: "reviewer.md",
-    told: "What every reviewer is told first" },
-];
-// herdr-task's merge policy: "ask" waits for the person's Accept (which merges), the others
-// merge without it.
-const MERGE = [["ask", "On Accept"], ["checks", "After checks pass"], ["auto", "Right away"]];
-const NAME = { claude: "Claude Code", codex: "Codex" };
 const CLI_CHECK = () => `${home()}/.herdr/cli-check.json`;
-const MUST_FIX = [["blocker", "Blockers"], ["major", "Major and up"], ["minor", "Everything"]];
-const ROUNDS = [[0, "Off"], [1, "1 round"], [2, "2 rounds"], [3, "3 rounds"]];
-const ARCHIVE = [[0, "Off"], [1, "1 day"], [3, "3 days"], [7, "1 week"], [30, "1 month"]];
-// What a task's agent is told to do first and last (tasks.start_notes / finish_notes): herdr-task
-// puts them into its starting prompt; Herdr runs nothing itself.
-const NOTES = [
-  { id: "start", title: "When a task starts", about: "Steps its agent does before the work.",
-    example: "Install packages, copy .env from the main folder" },
-  { id: "finish", title: "When a task finishes", about: "Steps its agent does before it says the task is ready.",
-    example: "Stop the dev server you started, delete temp files" },
-];
 const tilde = (p) => (p && p.startsWith(home() + "/") ? "~" + p.slice(home().length) : p ?? "");
-// Machines by key: "local" (this computer) or the name hc gives it.
-const machineLabel = (key) => (key === LOCAL_MACHINE ? "This computer" : key);
 const machineKeys = () => [LOCAL_MACHINE, ...machines().filter((m) => m.name && !m.temporary).map((m) => m.name)];
 const spaceById = (id) => spaces().find((s) => s.id === id);
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -258,18 +234,20 @@ export default class ShepherdrSettings extends View {
 
   // "Same as everywhere", or the machine a value set before still comes from.
   sameAs(level, key) {
-    return level === "machine" ? `Same as ${machineLabel(key)}` : "Same as everywhere";
+    return sameAsWords(level, key);
   }
 
   scopeName(scope = this.scope) {
-    if (!scope) return "Everywhere";
-    return spaceById(scope)?.name ?? this.cfg.spaces?.[scope]?.name ?? "This space";
+    if (!scope) return EVERYWHERE;
+    // As the sidebar calls it (core/spaces.js): never "~".
+    const s = spaceById(scope);
+    return s ? spaceName(s, { home: home(), named: Boolean(s.named) }) : this.cfg.spaces?.[scope]?.name ?? "This space";
   }
 
   // The spaces that set their own value for a setting: [{ id, name }].
   ownSpaces(key, field) {
     return Object.entries(this.cfg.spaces ?? {}).filter(([, v]) => this.valueIn(v, key, field) !== undefined)
-      .map(([id, v]) => ({ id, name: spaceById(id)?.name ?? v?.name ?? id }));
+      .map(([id, v]) => ({ id, name: spaceById(id) ? this.scopeName(id) : v?.name ?? id }));
   }
 
   // A row's scope facts (scopeLine() draws them): in a space, whether it's changed there; on
@@ -427,15 +405,15 @@ export default class ShepherdrSettings extends View {
     const line = h_flex().gap(6).items_center().text_size(TEXT.label);
     if (this.scope) {
       return sc.mine
-        ? line.child(div().text_color(t.muted).child("Changed here")).child(div().text_color(t.dim).child("·"))
-          .child(link(`reset-${sc.id}`, "Reset", (_e, cx) => sc.reset(cx)))
+        ? line.child(div().text_color(t.muted).child(CHANGED_HERE)).child(div().text_color(t.dim).child("·"))
+          .child(link(`reset-${sc.id}`, RESET, (_e, cx) => sc.reset(cx)))
         : line.child(div().text_color(t.dim).child(sc.from));
     }
     if (!sc.others?.length) return null;
     const open = this.listOpen === sc.id;
     const n = sc.others.length;
     return v_flex().gap(4)
-      .child(line.child(link(`own-${sc.id}`, n === 1 ? "1 space uses its own" : `${n} spaces use their own`,
+      .child(line.child(link(`own-${sc.id}`, spacesOwn(n),
         () => { this.listOpen = open ? null : sc.id; })))
       .when(open, (el) => el.child(h_flex().flex_wrap().gap(12).children(sc.others.map((o) => spaceById(o.id)
         ? link(`own-${sc.id}-${o.id}`, o.name, (_e, cx) => this.pickScope(o.id, cx))
@@ -469,17 +447,17 @@ export default class ShepherdrSettings extends View {
     // Machines that set their own before machine scope went: still applied, shown with Reset.
     const ownMachines = sc ? [] : Object.entries(st.machines ?? {}).filter(([, v]) => NOTIFY.includes(v));
     return v_flex()
-      .child(this.title(t, "Notify"))
-      .child(this.row(t, "Notify", "What reaches you from a space's Assistant. Tasks always alert.",
+      .child(this.title(t, page("notify")))
+      .child(this.row(t, page("notify"), NOTIFY_ABOUT,
         segmented("notify", NOTIFY.map((v) => [v, v]), value, (v) => pick(v)), facts))
-      .children(ownMachines.map(([key, v]) => this.row(t, machineLabel(key), `Its spaces use ${v}.`,
-        button(`notify-reset-${key}`, "Reset", { kind: "plain", onClick: () => setNotifyMachine(key, null) }))));
+      .children(ownMachines.map(([key, v]) => this.row(t, machineLabel(key), notifyMachineAbout(v),
+        button(`notify-reset-${key}`, RESET, { kind: "plain", onClick: () => setNotifyMachine(key, null) }))));
   }
 
   agents(t, cx) {
     this.saveRoles(cx);
     return v_flex()
-      .child(this.title(t, "Agents"))
+      .child(this.title(t, page("agents")))
       .children(ROLES.map((r) => this.roleRow(t, r, cx)))
       .child(this.backupRow(t));
   }
@@ -488,12 +466,12 @@ export default class ShepherdrSettings extends View {
   // An unset Reviewer's button says what runs: "Other CLI (Codex)".
   roleRow(t, r, cx) {
     const c = this.roles[r.id];
-    const label = r.id === "reviewer" && c?.unset ? `Other CLI (${NAME[this.otherCli()]})` : undefined;
+    const label = r.id === "reviewer" && c?.unset ? otherCliWords(this.otherCli()) : undefined;
     const control = h_flex().gap(8).items_center()
-      .child(c?.sel ? models.modelButton(t, c, { label }, cx) : div().text_size(TEXT.label).text_color(t.dim).child("Loading agents…"))
+      .child(c?.sel ? models.modelButton(t, c, { label }, cx) : div().text_size(TEXT.label).text_color(t.dim).child(LOADING_AGENTS))
       .when(!this.scope && r.id === "reviewer" && c && !c.unset,
-        (el) => el.child(button("reviewer-other", "Use other CLI", { kind: "plain", onClick: (_e, cx) => this.reset("reviewer", null, cx) })))
-      .when(!this.scope, (el) => el.child(button(`edit-${r.id}`, "Edit instructions",
+        (el) => el.child(button("reviewer-other", USE_OTHER_CLI, { kind: "plain", onClick: (_e, cx) => this.reset("reviewer", null, cx) })))
+      .when(!this.scope, (el) => el.child(button(`edit-${r.id}`, EDIT_INSTRUCTIONS,
         { onClick: () => this.edit({ id: r.id, title: r.told, file: `${TEMPLATES()}/${r.file}` }) })));
     return this.row(t, r.title, r.about, control, this.scoped(r.id, null));
   }
@@ -508,17 +486,15 @@ export default class ShepherdrSettings extends View {
     const other = value && value !== "off" ? value : this.otherCli();
     // The machines this scope reaches (the check names this computer ""): all of them for Everywhere.
     const m = this.scope ? machineOfSpace(this.scope) : null;
-    const here = Object.entries(this.clis ?? {}).filter(([k]) => m === null || k === (m === LOCAL_MACHINE ? "" : m));
-    const bad = on ? here.filter(([, c]) => c[other] === "missing" || c[other] === "signed-out") : [];
-    const problem = bad.map(([k, c]) => `Can't on ${k || "this computer"}: ${NAME[other] ?? other} is ${c[other] === "missing" ? "not installed" : "signed out"}.`).join(" ");
-    const about = "The other CLI takes over a task once when its agent can't go on.";
+    const problem = on ? backupProblem(this.clis, m, other) : "";
+    const about = BACKUP.about;
     // Turning it on follows what it would get anyway when that is on, else names the other CLI.
     const flip = (_next, _e, cx) => {
       if (on) return this.set("backup", "agent", "off", cx);
       const inh = this.inherited("backup", "agent").value;
       this.set("backup", "agent", inh !== "off" ? inh : this.otherCli(), cx);
     };
-    return this.row(t, "Backup agent", problem ? v_flex().gap(2)
+    return this.row(t, BACKUP.title, problem ? v_flex().gap(2)
       .child(div().text_size(TEXT.label).line_height("17px").text_color(t.dim).child(about))
       .child(div().text_size(TEXT.label).line_height("17px").text_color(t.dim).child(problem)) : about,
       toggleSwitch("backup", on, flip), this.scoped("backup", "agent"));
@@ -533,33 +509,33 @@ export default class ShepherdrSettings extends View {
     const autoOn = shepherdrFor(this.cfg, this.scope).automations.enabled !== false;
     const base = baseRow(this, t);
     return v_flex()
-      .child(this.title(t, "Tasks"))
-      .child(this.row(t, "Merge", "Who merges a task once it's Ready: you, by accepting it, or Herdr.",
+      .child(this.title(t, page("tasks")))
+      .child(this.row(t, rowTitle("tasks.merge"), ABOUT["tasks.merge"],
         segmented("merge", MERGE, k.merge, (v, _e, cx) => this.set("tasks", "merge", v, cx)), this.scoped("tasks", "merge")))
-      .child(this.row(t, "Review", "A task's agent has its work reviewed and fixes what's found.",
+      .child(this.row(t, rowTitle("tasks.review_rounds"), ABOUT["tasks.review_rounds"],
         segmented("rounds", withValue(ROUNDS, rounds, roundsWord), rounds, (v, _e, cx) => this.set("tasks", "review_rounds", v, cx)),
         this.scoped("tasks", "review_rounds")))
-      .when(rounds > 0, (el) => el.child(this.row(t, "Must fix", "What the agent fixes before it says ready. It lists the rest.",
+      .when(rounds > 0, (el) => el.child(this.row(t, rowTitle("tasks.must_fix"), ABOUT["tasks.must_fix"],
         segmented("mustfix", MUST_FIX, k.must_fix, (v, _e, cx) => this.set("tasks", "must_fix", v, cx)), this.scoped("tasks", "must_fix"))))
       // As Shepherdr's task agents: one artifact of real proof the Accept card links to. Only a
       // line in each brief's Settings block (herdr-task's Proof line); a task may turn it off.
-      .child(this.row(t, "Proof", "Each task shows real proof of its work in one artifact, linked from Accept.",
+      .child(this.row(t, rowTitle("tasks.proof"), ABOUT["tasks.proof"],
         toggleSwitch("proof", k.proof !== false, (next, _e, cx) => this.set("tasks", "proof", next, cx)), this.scoped("tasks", "proof")))
-      .child(this.row(t, "Tasks at once", "Per folder. More wait their turn and start by themselves.",
+      .child(this.row(t, rowTitle("tasks.max_running"), ABOUT["tasks.max_running"],
         this.stepper(t, "running", k.max_running, step("max_running", -1, 1, 10), step("max_running", 1, 1, 10)),
         this.scoped("tasks", "max_running")))
       // Done tasks archive themselves after this many days (herdr-task's tick): out of every list
       // and count, still kept. 0 is Off.
-      .child(this.row(t, "Archive Done after", "Done tasks move to Archived, with their chat and summary.",
+      .child(this.row(t, rowTitle("tasks.archive_after"), ABOUT["tasks.archive_after"],
         segmented("archive", withValue(ARCHIVE, days, daysWord), days, (v, _e, cx) => this.set("tasks", "archive_after", v, cx)),
         this.scoped("tasks", "archive_after")))
       // Per repo (a space's scope is its repo): off, its tasks work in the folder itself, as in a
       // folder without git, and the Assistant queues tasks that touch the same files.
-      .child(this.row(t, "Worktrees", "In a git repo, each task gets its own worktree and branch.",
+      .child(this.row(t, rowTitle("tasks.worktrees"), ABOUT["tasks.worktrees"],
         toggleSwitch("worktrees", k.worktrees !== false, (next, _e, cx) => this.set("tasks", "worktrees", next, cx)),
         this.scoped("tasks", "worktrees")))
       .when(Boolean(base), (el) => el.child(base))
-      .child(this.row(t, "Run automations", "Tasks an agent set to start on a schedule or an event.",
+      .child(this.row(t, rowTitle("automations.enabled"), ABOUT["automations.enabled"],
         toggleSwitch("auto", autoOn, (next, _e, cx) => this.set("automations", "enabled", next, cx)),
         this.scoped("automations", "enabled")))
       .children(NOTES.map((n) => this.noteRow(t, n)));
@@ -576,7 +552,7 @@ export default class ShepherdrSettings extends View {
         .text_size(TEXT.body).line_height("19px").text_color(t.foreground))
       .when(!note.box.value(), (el) => el.child(div().absolute().top(9).left(11).right(11)
         .text_size(TEXT.body).line_height("19px").text_color(t.dim).child(n.example)));
-    return this.row(t, n.title, n.about, saved ? div().text_size(TEXT.label).text_color(t.dim).child("Saved") : null, sc, box);
+    return this.row(t, n.title, n.about, saved ? div().text_size(TEXT.label).text_color(t.dim).child(SAVED) : null, sc, box);
   }
 
   // The window's top: in a space's own settings, which space, and the way to Everywhere's.
@@ -586,9 +562,9 @@ export default class ShepherdrSettings extends View {
     const folder = tilde(this.folders[this.scope] ?? s?.folder);
     return h_flex().w_full().mb(18).px(12).py(9).gap(12).items_center().rounded(RADIUS.card).bg(t.raised)
       .child(v_flex().flex_1().min_w(0).gap(2)
-        .child(div().text_size(TEXT.body).text_color(t.foreground).child(`Only for ${this.scopeName()} on ${where}`))
+        .child(div().text_size(TEXT.body).text_color(t.foreground).child(onlyFor(this.scopeName(), where)))
         .when(Boolean(folder), (el) => el.child(div().truncate().text_size(TEXT.label).text_color(t.dim).child(folder))))
-      .child(button("to-everywhere", "Everywhere", { kind: "plain", onClick: (_e, cx) => this.pickScope(null, cx) }));
+      .child(button("to-everywhere", EVERYWHERE, { kind: "plain", onClick: (_e, cx) => this.pickScope(null, cx) }));
   }
 
   render(cx) {
@@ -601,7 +577,7 @@ export default class ShepherdrSettings extends View {
       .child(div().flex_1().text_size(TEXT.body).text_color(on ? t.foreground : t.muted).child(title));
     const nav = v_flex().flex_none().w(190).h_full().p(10).gap(2).border_r(1).border_color(t.border)
       .child(div().px(10).pt(6).pb(12).text_size(TEXT.title).font_semibold().text_color(t.foreground)
-        .child(this.scope ? "Space settings" : "Settings"))
+        .child(this.scope ? SPACE_TITLE : TITLE))
       .children(SECTIONS.filter((s) => this.shows(s.id)).map((s) => navRow(s.id, s.title, I(s.icon), s.id === this.section, (_e, cx) => {
         this.section = s.id;
         this.listOpen = null;

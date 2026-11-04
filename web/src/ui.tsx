@@ -213,6 +213,16 @@ export function ServerIcon({ className }: { className?: string }) {
   )
 }
 
+/** this computer: a monitor on its stand (the window's monitor.svg), as its sidebar marks it */
+export function MonitorIcon({ className }: { className?: string }) {
+  return (
+    <svg data-icon="monitor" viewBox="0 0 24 24" aria-hidden="true" className={outline(className)} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="12" rx="2.5" />
+      <path d="M8.5 20h7M12 16v4" />
+    </svg>
+  )
+}
+
 /** All machines: layers stacked */
 export function LayersIcon({ className }: { className?: string }) {
   return (
@@ -386,19 +396,18 @@ export function Dot({ s, halo, p, frozen, className }: { s: Status; halo?: boole
     <span
       className={clsx('dot', s, halo && 'halo', className)}
       style={pie ? ({ '--p': `${Math.max(4, p)}%` } as CSSProperties) : undefined}
-      aria-label={pie ? `${STATUS_WORD[s]}, ${p}% done` : frozen ? `${STATUS_WORD[s]}, ${frozen.progress}% done` : STATUS_WORD[s]}
+      aria-label={pie ? `${STATUS_WORD[s]}, ${p}% done` : frozen?.progress !== undefined ? `${STATUS_WORD[s]}, ${frozen.progress}% done` : STATUS_WORD[s]}
       role="img"
     />
   )
 }
 
-/** The minutes left an agent reported, counted down: "~6 min", "~1 h 20 min", "<1 min" */
+/** The minutes left an agent reported, counted down, as the window's task header says them (mods/chat/panel.js
+ *  reportLine): "~6 min", "~2 h", "<1 min" */
 export function minutesLeft(eta: number) {
   if (eta < 1) return '<1 min'
   if (eta < 60) return `~${eta} min`
-  const h = Math.floor(eta / 60)
-  const m = eta % 60
-  return h >= 10 || !m ? `~${h} h` : `~${h} h ${m} min`
+  return `~${Math.round(eta / 60)} h`
 }
 
 /** The minutes left as few letters as fit under a dot: "<1m", "12m", "2h" */
@@ -426,12 +435,12 @@ export function TaskDot({ s, w }: { s: Status; w?: Report }) {
   )
 }
 
-/** The quiet words at the end of an agent's status line. In a header: the minutes left ("~12 min", "~12 min left" when
- *  wide), or frozen while it waits on you, the % it stopped at. In a row nothing: the minutes sit under the dot, which keeps the %. */
-function reportEnd(w: Report, head: boolean, left: boolean) {
+/** The quiet words at the end of an agent's status line. In a header: the minutes left ("~12 min", as the window's), or
+ *  frozen while it waits on you, the % it stopped at. In a row nothing: the minutes sit under the dot, which keeps the %. */
+function reportEnd(w: Report, head: boolean, _left: boolean) {
   if (!head) return ''
-  if (w.paused) return `${w.progress}%`
-  return w.eta !== undefined ? `${minutesLeft(w.eta)}${left ? ' left' : ''}` : ''
+  if (w.paused) return w.progress !== undefined ? `${w.progress}%` : ''
+  return w.eta !== undefined ? minutesLeft(w.eta) : ''
 }
 
 /**
@@ -769,7 +778,7 @@ export function MenuSeparator() {
  * tabs on a phone (a CLI's models, its effort levels) make it a row with its name and the choice it is on, which opens
  * the device's own picker.
  */
-export function MenuSetting({ name, icon, choices, note }: { name: string; icon: ReactNode; choices: { label: string; on: boolean; hint?: string; onClick: () => void }[]; note?: string }) {
+export function MenuSetting({ name, icon, choices, note, named }: { name: string; icon: ReactNode; choices: { label: string; on: boolean; hint?: string; onClick: () => void }[]; note?: string; named?: boolean }) {
   const long = choices.length > 3 || choices.reduce((n, c) => n + c.label.length, 0) > 24
   const on = Math.max(0, choices.findIndex((c) => c.on))
   const row = long ? (
@@ -794,9 +803,11 @@ export function MenuSetting({ name, icon, choices, note }: { name: string; icon:
       <span className="grid size-4 shrink-0 place-items-center text-fg2 max-[359px]:hidden">
         {icon}
       </span>
-      <Tabs label={name} className="min-w-0 flex-1">
+      {/* named (the window's Notify row): its word, then its choices at the right, each whole */}
+      {named ? <span className="min-w-0 flex-1 truncate">{name}</span> : null}
+      <Tabs label={name} className={named ? 'shrink-0' : 'min-w-0 flex-1'}>
         {choices.map((c) => (
-          <Tab key={c.label} fill on={c.on} aria-label={c.hint ? `${c.label}: ${c.hint}` : undefined} onClick={c.onClick}>
+          <Tab key={c.label} fill={!named} on={c.on} aria-label={c.hint ? `${c.label}: ${c.hint}` : undefined} onClick={c.onClick}>
             {c.label}
           </Tab>
         ))}

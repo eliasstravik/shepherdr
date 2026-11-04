@@ -73,7 +73,8 @@
       "addon": "core",
       "title": "New space",
       "core": [
-        "spaces"
+        "spaces",
+        "newspace"
       ],
       "herdr": {
         "mods": [
@@ -854,7 +855,7 @@
       "addon": "keyboard",
       "title": "Keys list",
       "core": [
-        "tasks"
+        "keys"
       ],
       "herdr": {
         "mods": [
@@ -868,7 +869,7 @@
       },
       "forms": {
         "herdr": "Ctrl+Shift+? dialog",
-        "desktop": "? opens the web keys",
+        "desktop": "Ctrl+Shift+? dialog: the window's keys that work in a browser",
         "tablet": "Same with a keyboard",
         "phone": "Not shown (no keyboard)"
       }
@@ -907,7 +908,8 @@
       "addon": "artifacts",
       "title": "Mark up and answers",
       "core": [
-        "recipe"
+        "recipe",
+        "markup"
       ],
       "herdr": {
         "mods": [
@@ -922,9 +924,9 @@
       },
       "forms": {
         "herdr": "Point or drag, write a note; choices reply to the agent",
-        "desktop": "Click or drag over a block",
-        "tablet": "Tap a block",
-        "phone": "Tap a block, note in a sheet"
+        "desktop": "Click a spot or drag over an area, in the viewer or the sidebar; choices reply to the agent",
+        "tablet": "Tap a spot or drag over an area",
+        "phone": "Tap a spot or drag over an area, in the full-screen viewer"
       },
       "service": [
         "artifacts.ts"
@@ -1044,6 +1046,7 @@
       "addon": "autopilot",
       "title": "Autopilot",
       "core": [
+        "autopilot",
         "settings"
       ],
       "herdr": {
@@ -1074,7 +1077,8 @@
       "addon": "machines",
       "title": "Machines",
       "core": [
-        "machines"
+        "machines",
+        "machine-add"
       ],
       "herdr": {
         "mods": [

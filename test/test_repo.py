@@ -100,6 +100,50 @@ class Repo(unittest.TestCase):
                 for spec in re.findall(r'''from\s+["']([^"']+)["']''', src):
                     self.assertTrue(spec.startswith("./"), f"core/{f} imports {spec}")
 
+    def test_autopilot_from_one_core(self):
+        """Settings › Autopilot's words, picks and inherit rule are core/autopilot.js's on both sides: the window's
+        section and header, and the web app's service, never their own copies."""
+        uses = {
+            J("mods", "shepherdr-settings", "autopilot-section.js"): ["AP.ROWS", "AP.PRESETS", "AP.EVENTS", "pilotFor", "AP.facts"],
+            J("mods", "pane-chat", "autopilot.js"): ["pilotFor", "headerDetail"],
+            J("service", "compat.ts"): ["AP.ROWS", "AP.PRESETS", "AP.EVENTS", "AP.facts", "AP.EVERYWHERE_ABOUT"],
+            J("service", "model.ts"): ["pilotFor", "everywhereOf"],
+        }
+        for path, names in uses.items():
+            text = open(path).read()
+            self.assertRegex(text, r"core/autopilot\.js", f"{os.path.relpath(path, ROOT)} doesn't read core/autopilot.js")
+            for n in names:
+                self.assertIn(n, text, f"{os.path.relpath(path, ROOT)} doesn't use {n}")
+            for words in ("Its Assistant wakes on a schedule", "When it wakes by itself", '"Every 30 min"', '["needs-you", "Needs you"]'):
+                self.assertNotIn(words, text, f"{os.path.relpath(path, ROOT)} has its own copy of {words!r}")
+
+    def test_task_views_from_one_core(self):
+        """The Tasks panel's rows and the task view's Files, Changes and Pull request read their words and rules from
+        core on both sides (core/tasks.js, core/needs.js, core/worktree.js): the web app keeps no copy of its own."""
+        uses = {
+            J("web", "plugins", "tasks", "client.tsx"): ["@core/tasks.js", "@core/needs.js", "TK.capital", "ND.fit", "TK.day", "TK.STATUS", "ND.REASONS"],
+            J("web", "plugins", "worktree", "client.tsx"): ["@core/worktree.js", "W.VIEW_WORDS", "W.CHANGE_WORDS", "W.CHECK_WORDS", "W.PR_STATES", "W.checksLine"],
+            J("service", "worktree.ts"): ["core/worktree.js", "VIEW_WORDS", "LIST_DIR", "dirEntries", "MARK_ARGS"],
+        }
+        for path, names in uses.items():
+            text = open(path, encoding="utf-8").read()
+            for n in names:
+                self.assertIn(n, text, f"{os.path.relpath(path, ROOT)} doesn't use {n}")
+        web = open(J("web", "plugins", "worktree", "client.tsx"), encoding="utf-8").read()
+        for words in ("Loading files…", "Asking GitHub…", "No checks on it.", "Select a file to see its changes."):
+            self.assertNotIn(words, web, f"web/plugins/worktree has its own copy of {words!r}")
+
+    def test_parity_has_no_open_rows(self):
+        """docs/parity/: every element of every surface matches the window (✓) or is a web-only form with its reason
+        (◇); a row still marked ✗ fails, and every surface in docs/parity.md has its page."""
+        index = open(J("docs", "parity.md")).read()
+        for page in re.findall(r"\(parity/([\w-]+\.md)\)", index):
+            text = open(J("docs", "parity", page)).read()
+            rows = [l for l in text.splitlines() if l.startswith("|") and not set(l) <= set("|-: ")]
+            self.assertTrue(rows, f"docs/parity/{page} has no rows")
+            for l in rows:
+                self.assertNotIn("✗", l, f"docs/parity/{page}: still differs: {l[:120]}")
+
     def test_menus_from_one_list(self):
         """The sidebar's and a task row's menus are core/menus.js's lists on both sides: the window's mods and the web
         app build them from it (3.0 decides what each menu offers; the web only draws it)."""
@@ -113,6 +157,27 @@ class Repo(unittest.TestCase):
             self.assertRegex(text, r"core/menus\.js", f"{os.path.relpath(path, ROOT)} doesn't build from core/menus.js")
             for n in names:
                 self.assertIn(n, text, f"{os.path.relpath(path, ROOT)} doesn't use {n}")
+
+    def test_tab_bar_from_one_list(self):
+        """The tab bar's + menu, a tab's menu, Switch agent, a tab's name and the header's End agent are core/menus.js's
+        on both sides (mods/new-menu-tasks, menu-tasks, coordinator, tabs-tasks, pane-chat and the web app's
+        coordinators plugin), and the header's Autopilot words core/autopilot.js's: neither side keeps its own copy."""
+        uses = {
+            J("mods", "new-menu-tasks", "main.js"): ["NEW_MENU", "assistantRow", "agentChoices", "agentHint"],
+            J("mods", "menu-tasks", "main.js"): ["tabMenu", "appMenu"],
+            J("mods", "coordinator", "main.js"): ["SWITCH_AGENT"],
+            J("mods", "tabs-tasks", "main.js"): ["tabName"],
+            J("mods", "pane-chat", "main.js"): ["endAgent"],
+            J("web", "plugins", "coordinators", "client.tsx"): ["NEW_MENU", "assistantRow", "agentChoices", "agentHint", "tabMenu", "SWITCH_AGENT", "endAgent", "headerDetail", "appMenu", "openKeybinds"],
+            J("service", "compat.ts"): ["tabName"],
+        }
+        for path, names in uses.items():
+            text = open(path).read()
+            self.assertRegex(text, r"core/menus\.js", f"{os.path.relpath(path, ROOT)} doesn't read core/menus.js")
+            for n in names:
+                self.assertIn(n, text, f"{os.path.relpath(path, ROOT)} doesn't use {n}")
+            for words in ('"Show Assistant"', "'Show Assistant'", '"Start an agent"', "'Start an agent'", '"This computer only"', '"Edit instructions…"', "'Edit instructions…'", '"Close tab"', "'Close tab'", '"End agent"', "'End agent'"):
+                self.assertNotIn(words, text, f"{os.path.relpath(path, ROOT)} has its own copy of {words}")
 
     def test_features_have_both_sides(self):
         """lib/features.json: every feature has its shared logic, a Herdr side and a web side, every file it names is

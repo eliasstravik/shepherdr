@@ -44,6 +44,11 @@ export interface Views {
   artifact: FC<{ artifactId: string }>
   /** a task's own menu rows, in its row's ⋯ and its chat's: what to do with it and how to end it (Stop, Done, Delete) */
   taskActions: FC<{ task: Task; close: () => void }>
+  /** 3.0's tab bar over the middle (desktop and tablet): the space's tabs, its +, and the side panels' buttons
+   *  (coordinators) */
+  tabBar: FC<{ place: Place }>
+  /** 3.0's Files and Changes side panels: the shown space's folder (coordinators, with the worktree plugin's views) */
+  spacePanel: FC<{ place: Place; what: 'files' | 'changes' }>
 }
 
 /**
@@ -193,7 +198,11 @@ export interface UI {
   /** phone: Chat, Needs you, Tasks or Artifacts */
   tab: 'chat' | 'needs' | 'tasks' | 'artifacts'
   /** a wide screen's right-hand column: Needs you, the place's Tasks or its Artifacts, remembered on this device */
-  side: 'needs' | 'tasks' | 'artifacts'
+  side: 'needs' | 'tasks' | 'artifacts' | 'files' | 'changes'
+  /** the tab bar's open panel button pressed again: the right-hand column hides, as 3.0's side panel (wide screens) */
+  sideShut?: boolean
+  /** a space's other agent tabs (t:<address>) shown as their chat rather than their terminal (3.0's Chat | Terminal) */
+  tabView?: Record<string, 'chat' | 'terminal'>
   /** what the Tasks and Artifacts lists show (their chips) and whether it stays whatever place is picked, remembered
    *  on this device */
   lists: Lists
@@ -359,7 +368,7 @@ const SIDE = 'shepherdr.side'
 function loadSide(): UI['side'] {
   try {
     const side = localStorage.getItem(SIDE)
-    return side === 'artifacts' ? side : 'tasks'
+    return side === 'artifacts' || side === 'files' || side === 'changes' ? side : 'tasks'
   } catch {
     return 'tasks'
   }
@@ -843,7 +852,8 @@ document.addEventListener('visibilitychange', () => watchVisible())
 function watchVisible() {
   if (!ws || ws.readyState !== WebSocket.OPEN || !state.snap) return
   const keys = visibleChats(state.ui, state.snap)
-  const term = state.ui.term ?? panelTerm(state.ui, state.snap)
+  // (another agent tab shown as its chat streams no terminal)
+  const term = (state.ui.term && state.ui.tabView?.[state.ui.term] !== 'chat' ? state.ui.term : null) ?? panelTerm(state.ui, state.snap)
   const visible = document.visibilityState === 'visible'
   const next = JSON.stringify({ keys, term, visible, pushEndpoint })
   if (next === watched) return
@@ -1170,7 +1180,7 @@ export function agentChat(ui: UI, snap: Snapshot) {
 
 /** whether a chat is still there: a space's coordinator's, or a task's agent's (an archived task's too) */
 export function chatIn(snap: Snapshot) {
-  const keys = new Set([...snap.places.map((p) => p.chat), ...snap.tasks.flatMap((t) => (t.agent ? [t.agent.chat] : []))])
+  const keys = new Set([...snap.places.flatMap((p) => [p.chat, ...(p.tabs ?? []).map((t) => t.term)]), ...snap.tasks.flatMap((t) => (t.agent ? [t.agent.chat] : []))])
   return (key: string) => keys.has(key)
 }
 
@@ -1185,7 +1195,9 @@ export function chatName(snap: Snapshot, key: string) {
 }
 
 export function visibleChats(ui: UI, snap: Snapshot): string[] {
-  const place = placeOf(snap, ui.place).chat
+  // a space's other agent tab shown as its chat (3.0's Chat | Terminal) takes the place of its Assistant's chat
+  const tabChat = ui.term?.startsWith('t:') && ui.tabView?.[ui.term] === 'chat' ? ui.term : null
+  const place = tabChat ?? placeOf(snap, ui.place).chat
   const ag = agentChat(ui, snap)?.chat
   // a phone shows one chat (with a task open, its place's chat waits under it as it last was, unseen)
   if (ui.device === 'phone') return [ui.task ? ag : ui.tab === 'chat' && !ui.settings ? place : null].filter(Boolean) as string[]

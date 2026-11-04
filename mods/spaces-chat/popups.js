@@ -28,7 +28,7 @@ const icon = (name) => (name.includes("/") ? name : `mods/workspace-chrome/${nam
 function closeSpace(id, name) {
   const w = spaces().find((s) => s.id === id);
   openOverlay({ mod: "confirm-chat", kind: "dialog", width: 400, height: 168, props: {
-    title: `Close \u201c${name ?? w?.name ?? "this space"}\u201d?`,
+    title: `Close “${name ?? w?.name ?? "this space"}”?`,
     detail: "Its tabs close and every program in them ends.",
     verb: "Close space",
     command: { name: "space.close", args: { id, confirmed: true } } } });
@@ -56,7 +56,7 @@ export function openMenu(view, p, at = "pointer") {
 // Each menu's items: { label, icon, hint, act }, or { sep: true }: core/menus.js's lists (the web app builds its menus
 // from the same ones), each item done here.
 const MENU_ICON = { "check-check": "mods/spaces-chat/check-check.svg", "trash-2": "mods/spaces-chat/trash-2.svg" };
-const built = (list, acts) => list.map((it) => (it.sep ? it : it.setting ? acts[it.id] : { label: it.label, icon: MENU_ICON[it.icon] ?? it.icon, act: acts[it.id] }));
+const built = (list, acts) => list.map((it) => (it.sep ? it : it.setting ? { ...acts[it.id], note: it.note } : { label: it.label, icon: MENU_ICON[it.icon] ?? it.icon, act: acts[it.id] }));
 const ITEMS = {
   // The machine header's +.
   add: (p) => built(addMenu(), { "new-space": () => newSpace(p.machine), "new-section": () => openNewSection(p.machine) }),
@@ -120,7 +120,7 @@ export class Menu {
       })
       .children(all.map((it, k) => {
         if (it.sep) return div().id(`sep-${k}`).mx(7).my(4).h(1).flex_none().bg(t.border);
-        if (it.notify) return notifySetting(it.notify, t);
+        if (it.notify) return notifySetting(it.notify, t, it.note);
         const i = ++n;
         return menuRow(`mi-${i}`, it.label, { icon: it.icon ? icon(it.icon) : null, hint: it.hint, onClick: () => this.choose(i) })
           .when(i === this.at, (el) => el.bg(t.selected));
@@ -132,7 +132,7 @@ export class Menu {
 // choices at the right (ui.js segmented: each as wide as its words, never cut; the picked one a soft
 // pill). Under it, on the text column, a quiet note. Picked in place: the menu stays open.
 // A pick that is what Everywhere gives goes back to following it.
-function notifySetting(space, t) {
+function notifySetting(space, t, note) {
   const now = notifyOf(space);
   return v_flex().id("notify").flex_none()
     .child(h_flex().h(SETTING).px(ROW_X).gap(ICON_GAP).items_center().text_size(TEXT.body).text_color(t.foreground)
@@ -140,5 +140,5 @@ function notifySetting(space, t) {
       .child(div().flex_1().min_w(0).child("Notify"))
       .child(segmented("notify", NOTIFY.map((v) => [v, v]), now, (v) => setNotify(space, v))))
     .child(h_flex().h(NOTE).pl(TEXT_X).pr(ROW_X).pb(4).items_center()
-      .child(div().flex_1().min_w(0).truncate().text_size(TEXT.id).text_color(t.dim).child("Tasks alert either way.")));
+      .child(div().flex_1().min_w(0).truncate().text_size(TEXT.id).text_color(t.dim).child(note)));
 }

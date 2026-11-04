@@ -1,17 +1,18 @@
-// "Rename machine", "New section" and "Rename section", as Slack's: a machine's heading's ⋯ renames it or makes a
-// section in it, the sidebar header's + makes one at the top, a section's ⋯ renames it. One field: its emoji (a tap opens
-// every emoji below it, with Remove emoji while it has one) and its name (the × empties it), then Cancel and Save. A
-// machine's name empty goes back to its own; a section needs one, its own among its peers. The main machine keeps them,
-// so every device shows them; a machine with no emoji shows a server, a section a folder. Deleting a section asks first:
-// its spaces go back under their machines.
+// "Rename space", "Rename machine", "New section" and "Rename section", as the window's one Rename dialog
+// (mods/spaces-chat rename.js): a space's or machine's Rename…, a machine's + New section, a section's Rename…. "Icon
+// and name": the icon (a click opens every emoji, with the way back to the plain mark at the bottom) and the name, then
+// Cancel and Save (Create section). A machine's or space's name empty goes back to its own; a section needs one, its own
+// among its peers. The main machine keeps them, so every device shows them; with no emoji a space shows #, a machine a
+// server (this computer a monitor), a section a folder. Deleting a section asks first: its spaces go back under their
+// machines.
 import clsx from 'clsx'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { act, useSnap } from '@client/kernel.ts'
 import { Dialog } from '@client/rowmenu.tsx'
 import { Sheet, SheetClose } from '@client/Stack.tsx'
-import { Ghost, ic, Primary, SectionIcon, ServerIcon, SmileIcon, Who, XIcon } from '@client/ui.tsx'
+import { Ghost, ic, MonitorIcon, Primary, SectionIcon, ServerIcon, Who } from '@client/ui.tsx'
 import { PINNED, sectionProblem, type SectionDefs } from '@shared/order.ts'
-import { machineName, NAME_MAX, type Snapshot } from '@shared/types.ts'
+import { NAME_MAX, type Snapshot } from '@shared/types.ts'
 import { EmojiChooser } from '@plugins/reactions/client.tsx'
 
 /** what the dialog is on: renaming a machine or section (its id), or a new section at the top ('') or in a machine (its
@@ -59,12 +60,68 @@ export function SectionDialogs() {
     return <NameDialog key={`new:${o.make}`} snap={snap} kind="new" machine={o.make || undefined} />
   }
   const m = snap.machines?.find((x) => x.id === o.rename)
-  if (m) return <NameDialog key={m.id} snap={snap} kind="machine" id={m.id} own={m.ownName ?? m.machine} name={m.name} emoji={m.emoji} />
+  if (m) {
+    const own = m.ownName ?? m.machine
+    return <NameDialog key={m.id} snap={snap} kind="machine" id={m.id} own={own} here={m.machine === snap.host} name={m.name !== own ? m.name : ''} emoji={m.emoji} />
+  }
   const s = snap.sections?.find((x) => x.id === o.rename)
-  return s ? <NameDialog key={s.id} snap={snap} kind="section" id={s.id} name={s.name} emoji={s.emoji} machine={s.machine} /> : null
+  if (s) return <NameDialog key={s.id} snap={snap} kind="section" id={s.id} name={s.name} emoji={s.emoji} machine={s.machine} />
+  // a space: the name given it (empty when nobody named it: what the sidebar shows is the placeholder, and saving it
+  // empty keeps that)
+  const p = snap.places.find((x) => x.id === o.rename)
+  return p ? <NameDialog key={p.id} snap={snap} kind="space" id={p.id} own={p.name} name={p.unnamed ? '' : p.name} emoji={p.emoji} /> : null
 }
 
-function NameDialog({ snap, kind, id, own, name: was = '', emoji: had = '', machine }: { snap: Snapshot; kind: 'machine' | 'section' | 'new'; id?: string; own?: string; name?: string; emoji?: string; machine?: string }) {
+/** what stands for it in the sidebar without an emoji: "#" (a space), the folder (a section), the server or monitor (a
+ *  machine), as the window's Rename dialog shows it */
+export type IconKind = 'space' | 'section' | 'server' | 'monitor'
+
+function PlainIcon({ kind }: { kind: IconKind }) {
+  if (kind === 'space') return <span aria-hidden className="text-[1rem] leading-none text-fg3">#</span>
+  const I = kind === 'section' ? SectionIcon : kind === 'server' ? ServerIcon : MonitorIcon
+  return <I className={clsx(ic, 'text-fg3')} />
+}
+
+/** the icon button left of a Rename or New space field: the emoji, else its plain mark; a click opens the picker */
+export function IconChoice({ kind, emoji, open, onClick }: { kind: IconKind; emoji: string; open: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={emoji ? `Icon ${emoji}` : 'Icon'}
+      aria-expanded={open}
+      onClick={onClick}
+      className="press grid size-9 shrink-0 place-items-center rounded-full bg-bg text-[1rem] leading-none shadow-[inset_0_0_0_1px_var(--line2)] hover:bg-hover aria-expanded:bg-sel phone:size-11 phone:text-[1.125rem]"
+    >
+      {emoji || <PlainIcon kind={kind} />}
+    </button>
+  )
+}
+
+/** the icon picker (the window's spaces-chat icon.js): every emoji with a search, and at the bottom the way back to the
+ *  plain mark ("Reset to #", "Reset to folder", "Reset to server icon"), there while one is picked */
+export function IconPicker({ kind, emoji, onPick }: { kind: IconKind; emoji: string; onPick: (e: string) => void }) {
+  const reset = kind === 'space' ? 'Reset to #' : kind === 'section' ? 'Reset to folder' : `Reset to ${kind} icon`
+  return (
+    <div className="flex h-[320px] min-h-0 shrink flex-col overflow-hidden rounded-box shadow-[inset_0_0_0_1px_var(--line)] phone:h-[300px]">
+      <EmojiChooser plain onPick={onPick} chosen={(e) => e === emoji} />
+      <button
+        type="button"
+        disabled={!emoji}
+        onClick={() => onPick('')}
+        className="flex h-9 shrink-0 items-center gap-2 border-t border-line px-3 text-left text-[0.8125rem] text-fg hover:bg-hover disabled:text-fg3 disabled:hover:bg-transparent coarse:h-11 phone:text-[0.9375rem]"
+      >
+        <PlainIcon kind={kind} />
+        {reset}
+      </button>
+    </div>
+  )
+}
+
+/** Rename space, Rename section, Rename machine and New section, as the window's (mods/spaces-chat rename.js): "Icon and
+ *  name", the icon left of the field (a click opens the picker), the field starting with its text selected; Enter
+ *  saves, Esc cancels. A section needs a name its machine's other sections don't have; a machine's or a space's empty
+ *  name goes back to its own (the placeholder). */
+function NameDialog({ snap, kind, id, own, here, name: was = '', emoji: had = '', machine }: { snap: Snapshot; kind: 'machine' | 'section' | 'new' | 'space'; id?: string; own?: string; here?: boolean; name?: string; emoji?: string; machine?: string }) {
   const [name, setName] = useState(was)
   const [emoji, setEmoji] = useState(had)
   const [picking, setPicking] = useState(false)
@@ -90,25 +147,23 @@ function NameDialog({ snap, kind, id, own, name: was = '', emoji: had = '', mach
   }, [])
   const typed = name.replace(/\s+/g, ' ').trim()
   const isMachine = kind === 'machine'
-  // Pinned keeps its pin, and empty goes back to its own name
+  const isSection = kind === 'section' || kind === 'new'
+  // Pinned keeps its pin (no icon), and empty goes back to its own name
   const pinned = id === PINNED
-  const problem = isMachine
-    ? typed && (snap.machines ?? []).some((x) => x.id !== id && x.name.toLowerCase() === typed.toLowerCase())
-      ? 'Another machine has that name.'
-      : undefined
-    : typed
-      ? sectionProblem(defsOf(snap), typed, machine, id)
-      : undefined
-  const changed = (isMachine ? typed || own : pinned ? typed || 'Pinned' : typed) !== was || emoji !== had
-  const can = !busy && !problem && changed && (isMachine || pinned || !!typed)
-  const title = isMachine ? 'Rename machine' : kind === 'new' ? 'New section' : 'Rename section'
-  const where = machine ? `In ${machineName(snap.machines, machine)}` : 'At the top, for any machine’s spaces'
+  const title = kind === 'new' ? 'New section' : isMachine ? 'Rename machine' : kind === 'section' ? 'Rename section' : 'Rename space'
+  const iconKind: IconKind = isMachine ? (here ? 'monitor' : 'server') : isSection ? 'section' : 'space'
   const save = async () => {
-    if (!can) return !changed && !busy && !problem ? close() : undefined
+    if (busy) return
+    // the window's checks, on Save: a section needs a name, its own among its machine's
+    if (isSection && !pinned) {
+      if (!typed) return setError('A section needs a name.')
+      if (sectionProblem(defsOf(snap), typed, machine, id)) return setError('Another section here has this name.')
+    }
+    if (typed === was && emoji === had) return close()
     setBusy(true)
     setError(null)
-    const action = kind === 'new' ? ({ type: 'section', op: 'new', name: typed, emoji, ...(machine ? { machine } : {}) } as const) : ({ type: 'rename', id: id!, name: typed, emoji } as const)
-    const r = (await act(action).catch((e: Error) => ({ ok: false, error: e.message }))) as { ok?: boolean; error?: string }
+    const action = kind === 'new' ? ({ type: 'section', op: 'new', name: typed, emoji, ...(machine ? { machine } : {}) } as const) : ({ type: 'rename', id: id!, name: typed, emoji, ...(kind === 'space' && !typed && was ? { unname: true } : {}) } as const)
+    const r = (await act(action as never).catch((e: Error) => ({ ok: false, error: e.message }))) as { ok?: boolean; error?: string }
     setBusy(false)
     if (r.ok === false) return setError(r.error || 'It could not be saved.')
     close()
@@ -118,38 +173,30 @@ function NameDialog({ snap, kind, id, own, name: was = '', emoji: had = '', mach
     setPicking(false)
     input.current?.focus({ preventScroll: true })
   }
-  const Plain = isMachine ? ServerIcon : SectionIcon
   return (
-    <Sheet label={title} onClose={close} panel="max-w-[440px]">
+    <Sheet label={title} onClose={close} panel="max-w-[420px]">
       <div className="flex min-h-[52px] shrink-0 items-center gap-2.5 border-b border-line pr-3 pl-4">
-        <Who name={title} kind={isMachine ? `The machine ${own}` : where} />
+        <Who name={title} />
         <SheetClose onClose={close} />
       </div>
       <form
-        className="flex min-h-0 flex-col gap-3 px-4 pt-4 pb-4 phone:gap-4"
+        className="flex min-h-0 flex-col gap-1.5 px-4 pt-3.5 pb-4"
         onSubmit={(e) => {
           e.preventDefault()
           void save()
         }}
       >
-        <div className={clsx('flex h-10 shrink-0 items-center gap-1 rounded-row bg-bg pr-1.5 pl-1 shadow-[inset_0_0_0_1px_var(--line2)] has-[input:focus]:shadow-[inset_0_0_0_1.5px_var(--focus)] coarse:h-11 phone:h-12', problem && 'shadow-[inset_0_0_0_1.5px_var(--color-need-fg)]!', pinned && 'pl-3')}>
-          {pinned ? null : (
-          <button
-            type="button"
-            aria-label={emoji ? `Emoji ${emoji}: change it` : 'Pick an emoji'}
-            aria-expanded={picking}
-            onClick={() => setPicking(!picking)}
-            className="grid size-8 shrink-0 place-items-center rounded-full text-[1.125rem] leading-none text-fg3 hover:bg-hover hover:text-fg aria-expanded:bg-sel phone:size-10 phone:text-[1.25rem]"
-          >
-            {emoji || <SmileIcon className={ic} />}
-          </button>
-          )}
+        <label htmlFor="rename-name" className="text-[0.75rem] font-medium text-fg3 phone:text-[0.875rem]">
+          Icon and name
+        </label>
+        <div className="flex shrink-0 items-center gap-2">
+          {pinned ? null : <IconChoice kind={iconKind} emoji={emoji} open={picking} onClick={() => setPicking(!picking)} />}
           <input
             ref={input}
-            name="section-name"
-            aria-label={isMachine ? 'Machine name' : 'Section name'}
-            aria-invalid={!!problem || undefined}
-            placeholder={isMachine ? own : pinned ? 'Pinned' : 'e.g. Clients'}
+            id="rename-name"
+            name="rename-name"
+            aria-invalid={!!error || undefined}
+            placeholder={isMachine ? own : isSection ? (pinned ? 'Pinned' : 'Section name') : own || 'Space name'}
             autoComplete="off"
             spellCheck={false}
             enterKeyHint="done"
@@ -159,62 +206,17 @@ function NameDialog({ snap, kind, id, own, name: was = '', emoji: had = '', mach
               setName(e.target.value)
               setError(null)
             }}
-            className="h-full min-w-0 flex-1 bg-transparent px-1 text-fg outline-none placeholder:text-fg3 phone:text-[1rem]"
+            className="h-9 w-full min-w-0 flex-1 rounded-full bg-bg px-3 shadow-[inset_0_0_0_1px_var(--line2)] outline-none placeholder:text-fg3 focus:shadow-box-focus aria-invalid:shadow-[inset_0_0_0_1.5px_var(--color-need-fg)] phone:h-11 phone:px-3.5 phone:text-[1rem]"
           />
-          {name ? (
-            <button
-              type="button"
-              aria-label="Clear the name"
-              onClick={() => {
-                setName('')
-                input.current?.focus()
-              }}
-              className="relative grid size-6 shrink-0 place-items-center rounded-full text-fg3 hover:bg-hover hover:text-fg phone:size-9 phone:after:absolute phone:after:-inset-1 phone:after:content-['']"
-            >
-              <XIcon className={ic} />
-            </button>
-          ) : null}
         </div>
-        {picking ? (
-          <div className="flex h-[320px] min-h-0 shrink flex-col overflow-hidden rounded-box shadow-[inset_0_0_0_1px_var(--line)] phone:h-[300px]">
-            {emoji ? (
-              <button type="button" onClick={() => pick('')} className="flex h-9 shrink-0 items-center gap-2 border-b border-line px-3 text-left text-[0.8125rem] text-fg2 hover:bg-hover hover:text-fg coarse:h-11 phone:text-[0.9375rem]">
-                <Plain className={ic} />
-                Remove emoji: show a {isMachine ? 'server' : 'folder'}
-              </button>
-            ) : null}
-            <EmojiChooser onPick={pick} chosen={(e) => e === emoji} />
-          </div>
-        ) : null}
-        <p className="min-h-5 text-[0.8125rem] text-fg2 phone:text-[0.9375rem]">
-          {problem ? (
-            <span className="text-need-fg">{problem}</span>
-          ) : error ? (
-            <span className="text-need-fg">{error}</span>
-          ) : isMachine ? (
-            typed ? (
-              'Only the name that shows changes.'
-            ) : (
-              `Empty, it goes back to ${own}.`
-            )
-          ) : kind === 'new' ? (
-            machine ? (
-              `Holds ${machineName(snap.machines, machine)}’s spaces. Move one in from its ⋯ or drag it here.`
-            ) : (
-              'Holds spaces from any machine. Move one in from its ⋯ or drag it here.'
-            )
-          ) : pinned && !typed ? (
-            'Empty, it goes back to Pinned.'
-          ) : (
-            'Only the name that shows changes.'
-          )}
-        </p>
-        <div className="flex justify-end gap-2 phone:flex-col-reverse phone:*:w-full phone:*:justify-center">
-          <Ghost className="h-[34px] text-sm! phone:h-11 phone:text-base!" onClick={close}>
+        {picking ? <div className="mt-1.5 flex min-h-0 flex-col"><IconPicker kind={iconKind} emoji={emoji} onPick={pick} /></div> : null}
+        <div className="mt-3.5 flex items-center justify-end gap-2 phone:flex-wrap phone:*:justify-center">
+          <p role={error ? 'alert' : undefined} className="min-w-0 flex-1 truncate text-[0.75rem] text-need-fg phone:basis-full phone:text-[0.875rem]">{error}</p>
+          <Ghost className="h-[34px] text-sm! phone:h-11 phone:flex-1 phone:text-base!" onClick={close}>
             Cancel
           </Ghost>
-          <Primary type="submit" disabled={!can}>
-            {busy ? 'Saving…' : kind === 'new' ? 'Create' : 'Save'}
+          <Primary type="submit" disabled={busy} className="phone:flex-1">
+            {kind === 'new' ? 'Create section' : 'Save'}
           </Primary>
         </div>
       </form>

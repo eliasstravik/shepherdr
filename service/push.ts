@@ -5,6 +5,64 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DATA } from "./paths.ts";
+import * as T from "../core/toasts.js";
+import { notifies } from "../web/shared/alerts.ts";
+
+/**
+ * What each push alert says, as the window's toasts (core/toasts.js): an agent that needs you, "HERD-4 · Needs you" or
+ * "tt-repo Assistant · Needs you", why under it (an Assistant only by its space's Notify); a task whose agent finished,
+ * ready to accept, "HERD-4 · Finished" under its name, a tap opening its Accept card. Keyed so each goes once.
+ */
+export function alertsOf(snap: any): Map<string, { title: string; body: string; tag: string; waits?: true; url?: string }> {
+  const now = new Map<string, { title: string; body: string; tag: string; waits?: true; url?: string }>();
+  const who = (n: any) => n.task ?? T.assistantWho(snap.places?.find((p: any) => p.id === n.place)?.name);
+  for (const n of snap.needs ?? []) {
+    if (snap.settings && !notifies(snap, { go: { place: n.place }, task: n.task ? true : undefined })) continue;
+    now.set(`need:${n.chat}:${n.id}`, { title: T.toastTitle(who(n), T.NEEDS_YOU), body: T.needReason(n), tag: n.task ?? n.chat, waits: true });
+  }
+  for (const t of snap.tasks ?? []) if (t.status === "ready" && !t.archived)
+    now.set(`ready:${t.id}`, { title: T.toastTitle(t.id, T.FINISHED), body: t.name, tag: t.id, url: `./#accept=${encodeURIComponent(t.id)}` });
+  // an agent's own alert (herdr-task alert), as its toast: a task's always, an Assistant's by its space's Notify
+  for (const a of snap.alerts ?? []) if (a.notify) now.set(`alert:${a.id}`, { title: a.title, body: a.body, tag: `alert:${a.id}` });
+  return now;
+}
+
+/**
+ * The agents' own alerts (`herdr-task alert "<title>" --body "<why>"`: the core label herdr.alert = { id, at, title,
+ * body, task?, about? } on the agent's terminal), as the window's toasts say them (lib/inbox.js agentAlerts): "<who> ·
+ * <title>" (60 characters at most) over its body (300), the chat it is from, and whether it reaches the person (a
+ * task's agent or an alert about a task always; an Assistant's by its space's Notify). chatOf: a terminal's chat key.
+ */
+export function agentAlerts(terminals: Iterable<any>, snap: any, chatOf: (address: string) => string | null, home: string) {
+  const out: { id: string; at: number; title: string; body: string; chat?: string; place?: string; notify: boolean }[] = [];
+  const all = [...terminals];
+  for (const k of all) {
+    let a: any = null;
+    try { a = JSON.parse(k?.labels?.["herdr.alert"] ?? "null"); } catch {}
+    if (!a?.id) continue;
+    const chat = chatOf(k.address) ?? undefined;
+    const task = chat?.includes("/") ? snap.tasks?.find((t: any) => t.id === chat.slice(0, chat.lastIndexOf("/"))) : null;
+    const coord = !task && chat ? snap.places?.find((p: any) => p.chat === chat) : null;
+    const ref = a.task ?? task?.id ?? (k.labels?.["herdr.task"] ? (/^([a-z][a-z0-9]*-\d+)/.exec(k.name ?? "")?.[1] ?? "").toUpperCase() : "");
+    const who = ref || (k.labels?.["herdr.role"] === "coordinator" || coord ? T.assistantWho(coord?.name) : k.program?.name ?? "Agent");
+    const place = task?.place ?? coord?.id;
+    const notify = Boolean(a.about || task || k.labels?.["herdr.task"] || !place || notifies(snap, { go: { place } }));
+    out.push({ id: String(a.id), at: Number(a.at) || 0, title: T.clip(T.toastTitle(who, String(a.title ?? "")), 60), body: T.clip(String(a.body ?? ""), 300), ...(chat ? { chat } : {}), ...(place ? { place } : {}), notify });
+  }
+  // Assistants here that their model's provider kept cutting off (herdr-task tick's .retries.json), once per cut, as
+  // the window's (lib/inbox.js readRetries): "<who> · <why>", "Write to it to carry on, or restart it."
+  let rows: Record<string, any> = {};
+  try { rows = JSON.parse(readFileSync(join(home, ".herdr", "tasks", ".retries.json"), "utf8")) ?? {}; } catch {}
+  const live = new Map([...all].map((k) => [k.address, k]));
+  for (const r of Object.values(rows)) {
+    if (r?.role !== "coordinator" || !r.over || !r.reason || r.stale || live.get(r.address)?.state !== "live") continue;
+    const chat = chatOf(r.address) ?? undefined;
+    const coord = chat ? snap.places?.find((p: any) => p.chat === chat) : null;
+    out.push({ id: `provider:${r.address}:${r.cut}`, at: Number(r.at) || 0, title: T.toastTitle(T.assistantWho(coord?.name), String(r.reason)), body: PROVIDER_BODY, ...(chat ? { chat } : {}), ...(coord ? { place: coord.id } : {}), notify: true });
+  }
+  return out;
+}
+export const PROVIDER_BODY = "Write to it to carry on, or restart it.";
 
 type Sub = { endpoint: string; keys: { p256dh: string; auth: string }; device?: string; at: number };
 

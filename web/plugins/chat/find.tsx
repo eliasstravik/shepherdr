@@ -1,8 +1,9 @@
 // Search in a chat, like WhatsApp and Slack: a bar over the messages finds words in them, newest first. Every match is
 // marked; the arrows (or Enter and Shift+Enter) step through them, each one brought into view (opened, if folded) and
 // lit up. Esc or the x closes it.
-import { useEffect, useMemo, useRef } from 'react'
-import { getState, setUI, useStore, useUI } from '@client/kernel.ts'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { act, getState, setUI, useStore, useUI } from '@client/kernel.ts'
+import { WORDS } from './rows.tsx'
 import { DownIcon, ic, IconButton, roundBtn, SearchIcon, XIcon } from '@client/ui.tsx'
 import { findIn } from './days.ts'
 import { jumpTo } from './reply.ts'
@@ -41,6 +42,8 @@ function mark(chat: string, q: string) {
 export function FindBar({ chatKey }: { chatKey: string }) {
   const f = useUI((u) => (u.find?.chat === chatKey ? u.find : null))
   const msgs = useStore((s) => s.chats[chatKey]?.messages)
+  const earlier = useStore((s) => !!s.chats[chatKey]?.earlier)
+  const [loading, setLoading] = useState(false)
   const input = useRef<HTMLInputElement>(null)
   const q = f?.q ?? ''
   const found = useMemo(() => findIn(msgs ?? [], q), [msgs, q])
@@ -74,8 +77,8 @@ export function FindBar({ chatKey }: { chatKey: string }) {
           ref={input}
           name="find"
           type="search"
-          aria-label="Find in chat"
-          placeholder="Find in chat"
+          aria-label={WORDS.find}
+          placeholder={WORDS.find}
           autoComplete="off"
           enterKeyHint="search"
           value={q}
@@ -95,8 +98,15 @@ export function FindBar({ chatKey }: { chatKey: string }) {
         />
         {q.trim() ? (
           <span role="status" className="shrink-0 px-1 text-[0.75rem] whitespace-nowrap text-fg2 tabular-nums phone:text-[0.8125rem]">
-            {found.length ? `${pos + 1} of ${found.length}` : 'No matches'}
+            {found.length ? `${pos + 1} of ${found.length}` : WORDS.noMatches}
           </span>
+        ) : null}
+        {/* the log's earlier pages, not loaded yet: the window's Search earlier */}
+        {earlier ? (
+          <button type="button" disabled={loading} onClick={() => { setLoading(true); void act({ type: 'earlier', chat: chatKey } as never).finally(() => setLoading(false)) }}
+            className="h-[26px] shrink-0 rounded-[6px] px-2 text-[0.75rem] text-fg2 hover:bg-hover hover:text-fg phone:h-9 phone:text-[0.8125rem]">
+            {loading ? 'Loading…' : WORDS.searchEarlier}
+          </button>
         ) : null}
         <IconButton label="Older match" disabled={found.length < 2} className={roundBtn} onClick={() => step(1)}>
           <DownIcon className={`${ic} rotate-180`} />

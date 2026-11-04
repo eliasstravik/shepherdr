@@ -8,7 +8,9 @@ import {
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  ClockIcon,
   CommandLineIcon,
+  StopIcon,
   CpuChipIcon,
   DocumentTextIcon,
   ExclamationTriangleIcon,
@@ -21,6 +23,9 @@ import { act, useStore } from '@client/kernel.ts'
 import { Sheet, SheetClose } from '@client/Stack.tsx'
 import { countJobs, jobsWords, rowsOf, stepText, took } from '@shared/activity.ts'
 import type { ActivityAnswer, Chat, Job, Step, StepKind, StepRow, TurnActivity } from '@shared/types.ts'
+import * as CV from '@core/chat-view.js'
+import { showTerminal, WORDS } from './rows.tsx'
+const { elapsed } = CV as unknown as { elapsed: (secs: number) => string }
 
 /* ---------- words ---------- */
 
@@ -306,49 +311,105 @@ const Chevron = ({ on }: { on?: boolean }) => <ChevronDownIcon aria-hidden class
 
 /* ---------- a turn's rows ---------- */
 
-/** a finished turn's steps: the rows that say most, at most three, in plain words, a thin line at their left; "4 more"
- *  shows the rest. Each row opens to what it ran and printed. */
+/** 3.0's tools row: calls in a row, between the agent's words, as one quiet line ("› Read 3 files, ran 2 commands",
+ *  core/chat-log.js summary); it opens to each call's line and the first lines it printed, read only then */
 export function TurnLine({ a, chat }: { a: TurnActivity; chat: string }) {
-  const [all, setAll] = useState(false)
+  const [open, setOpen] = useState(false)
+  const Chev = open ? ChevronDownIcon : ChevronRightIcon
   return (
-    <div data-activity={a.id} className="flex w-full max-w-[560px] flex-col border-l-2 border-line pl-1.5">
-      {all ? <AllRows chat={chat} what="turn" id={a.id} fallback={a.rows} /> : <Rows rows={a.rows} chat={chat} what="turn" id={a.id} />}
-      {a.more ? (
-        <button type="button" data-more aria-expanded={all} onClick={() => setAll(!all)} className={clsx('flex cursor-pointer items-start gap-2 self-start rounded-row px-1.5 py-0.5 text-left hover:bg-hover hover:text-fg2 phone:py-2', quiet)}>
-          <Chevron on={all} />
-          <span>{all ? 'Show less' : `${a.more} more · ${took((a.end ?? a.at) - a.at, false)}`}</span>
-        </button>
-      ) : null}
+    <div data-activity={a.id} className="flex w-full flex-col">
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}
+        className="flex w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-[7px] px-1.5 py-px text-left text-[0.75rem]/5 text-fg3 hover:bg-hover phone:py-1.5 phone:text-[0.8125rem]/5">
+        <Chev aria-hidden className="size-3 shrink-0 fill-current" />
+        <span className="min-w-0 flex-1 truncate">{a.summary ?? `${a.steps} steps`}</span>
+      </button>
+      {open ? <ToolSteps a={a} chat={chat} /> : null}
     </div>
   )
 }
 
-/* ---------- the live line, while a turn runs ---------- */
-
-/** what it does now in words ("Checking the task list") and for how long, in one quiet line where the typing dots would
- *  be; a tap shows the turn's rows so far */
-export function LiveLine({ chat }: { chat: Chat }) {
-  useTick()
-  const [on, setOn] = useState(false)
-  const a = chat.live!
-  const now = a.now
+/** an open tools row: each call's line, and under it what it printed (asked of the server as the row opens) */
+function ToolSteps({ a, chat }: { a: TurnActivity; chat: string }) {
+  const g = useActivity(chat, 'turn', a.id)
+  const d = g.data
+  const steps: { id: string; line: string; out?: string }[] = d && 'steps' in d ? d.steps.map((s) => ({ id: s.id, line: s.title, out: s.out })) : a.rows.map((r) => ({ id: r.key, line: r.text }))
   return (
-    <div role="status" data-live className="flex w-full flex-col items-start gap-1">
-      <button type="button" aria-expanded={on} onClick={() => setOn(!on)} className={clsx('flex max-w-full min-w-0 cursor-pointer items-center gap-2 text-left hover:text-fg2', quiet)}>
-        <span aria-hidden className="live-dot size-1.5 shrink-0 rounded-full bg-[var(--work)]" />
-        <span className="min-w-0 truncate text-fg2">{now ? (now.end ? stepText(now) : now.doing) : 'Thinking'}</span>
-        <span className="shrink-0 tabular-nums">{took(Date.now() - a.at)}</span>
-        {a.steps ? <Chevron on={on} /> : null}
-      </button>
-      {/* the window's working line ends in Stop (Esc in the message box) */}
-      <button type="button" onClick={() => void act({ type: 'stop', chat: chat.key }).catch(() => undefined)} className={clsx('flex items-center gap-1.5 hover:text-fg2', quiet)}>
-        Stop <kbd className="rounded-[4px] px-1 font-sans text-[0.6875rem] text-fg3 shadow-[inset_0_0_0_1px_var(--line2)] coarse:hidden">Esc</kbd>
-      </button>
-      {on ? (
-        <div className="w-full max-w-[560px] border-l-2 border-line pl-1.5">
-          <AllRows chat={chat.key} what="turn" id={a.id} live fallback={a.rows} />
+    <div className="flex flex-col gap-[3px] pt-1 pb-0.5 pl-[24px] text-[0.75rem] text-fg2 phone:text-[0.8125rem]">
+      {d && 'error' in d ? <p className="text-fg3">{d.error}</p> : null}
+      {steps.map((s) => (
+        <div key={s.id} className="flex min-w-0 flex-col">
+          {s.line.split('\n').map((l, i) => <div key={i} className="truncate">{l}</div>)}
+          {s.out != null ? (
+            <div data-output className="mt-px mb-[3px] ml-0.5 border-l border-line pl-2 font-mono text-[0.71875rem] text-fg3">
+              {(s.out || ' ').split('\n').map((l, i) => <div key={i} className="truncate">{l || ' '}</div>)}
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      ))}
+    </div>
+  )
+}
+
+/* ---------- the window's lines over the box ---------- */
+
+/** a turn's clock: when this page first saw the agent working */
+const since = new Map<string, number>()
+
+/** while the agent works: what it is doing in plain words, for how long, and Stop (Esc in an empty box); only waiting
+ *  (a wait, a sleep, a helper it waits on): a calm clock, no spinner */
+export function WorkingLine({ chatKey }: { chatKey: string }) {
+  const chat = useStore((s) => s.chats[chatKey])
+  // the Assistant this chat is starting (its first message started it), before it says anything
+  const starting = useStore((s) => chatKey.startsWith('p:') && !s.chats[chatKey]?.messages.length && s.outbox.some((o) => o.chat === chatKey && o.state !== 'failed'))
+  const [stopping, setStopping] = useState(false)
+  const on = !!chat?.working && !chat.finished
+  useTick(on)
+  useEffect(() => { if (!on) { since.delete(chatKey); setStopping(false) } else if (!since.has(chatKey)) since.set(chatKey, Date.now()) }, [on, chatKey])
+  if (starting && !on)
+    return (
+      <div role="status" data-working className="flex h-[30px] items-center gap-2 px-0.5 text-[0.75rem] text-fg2 phone:text-[0.8125rem]">
+        <span aria-hidden className="live-dot size-1.5 shrink-0 rounded-full bg-[var(--work)]" />
+        <span className="min-w-0 flex-1 truncate">{WORDS.startingAssistant}</span>
+      </div>
+    )
+  if (!on) return null
+  const secs = Math.floor((Date.now() - (since.get(chatKey) ?? Date.now())) / 1000)
+  const waits = !!chat.waits && !stopping
+  const stop = () => {
+    setStopping(true)
+    void act({ type: 'stop', chat: chatKey }).catch(() => setStopping(false))
+  }
+  return (
+    <div role="status" data-working className="flex h-[30px] items-center gap-2 px-0.5 text-[0.75rem] text-fg2 phone:text-[0.8125rem]">
+      {waits ? <ClockIcon aria-hidden className="size-3 shrink-0 fill-[var(--fg3)]" /> : <span aria-hidden className="live-dot size-1.5 shrink-0 rounded-full bg-[var(--work)]" />}
+      <span className="min-w-0 flex-1 truncate">{stopping ? WORDS.stopping : chat.doing || WORDS.working}</span>
+      <span className="shrink-0 font-mono text-[0.71875rem] text-fg3 tabular-nums">{elapsed(secs)}</span>
+      <button type="button" onClick={stop} disabled={stopping}
+        className="flex h-[22px] shrink-0 items-center gap-1.5 rounded-[6px] px-2 text-[0.75rem] text-fg2 shadow-[inset_0_0_0_1px_var(--line2)] enabled:hover:bg-hover enabled:hover:text-fg disabled:opacity-45 phone:h-8">
+        <StopIcon aria-hidden className="size-2 shrink-0 fill-current" />
+        Stop
+        <kbd className="font-sans text-[0.6875rem] text-fg3 coarse:hidden">Esc</kbd>
+      </button>
+    </div>
+  )
+}
+
+/** the agent asks in its terminal and no card here asks for it: Needs you, what it says it waits for, Open terminal */
+export function NeedsYou({ chatKey }: { chatKey: string }) {
+  const blocked = useStore((s) => s.chats[chatKey]?.blocked)
+  if (blocked === undefined) return null
+  return (
+    <div role="alert" className="mb-1.5 flex items-center gap-2.5 rounded-[10px] bg-bubble px-3 py-2.5 shadow-[inset_0_0_0_1px_var(--line2)]">
+      <span aria-hidden className="size-2 shrink-0 rounded-full bg-need" />
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="font-medium text-fg">{WORDS.needsYou}</span>
+        <span className="text-[0.75rem] text-fg2 phone:text-[0.8125rem]">{blocked || WORDS.askingInTerminal}</span>
+      </span>
+      <button type="button" onClick={() => showTerminal(chatKey)}
+        className="press-dim flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] bg-fg pr-2.5 pl-2 text-[0.78125rem] font-medium text-bg phone:h-10">
+        <CommandLineIcon aria-hidden className="size-3.5 fill-current" />
+        {WORDS.openTerminal}
+      </button>
     </div>
   )
 }
@@ -360,18 +421,32 @@ export function JobsTag({ chatKey }: { chatKey: string; cli: string }) {
   const jobs = useStore((s) => s.chats[chatKey]?.jobs)
   // Settings › Window › Show subagents above the chat box off: none
   const shown = useStore((s) => s.snap?.look?.helpers !== false)
+  const [all, setAll] = useState(false)
+  useTick(!!jobs?.length && shown)
   if (!jobs?.length || !shown) return null
+  // as the window's (mods/chat background()): the CLI's helpers at work, one row each (a spinner, its name, how long);
+  // past five, four rows and "+N more" opens the rest
+  const open = all || jobs.length <= 5
+  const list = open ? jobs : jobs.slice(0, 4)
+  const ago = (at: number) => {
+    const s = Math.max(0, Math.floor((Date.now() - at) / 1000))
+    return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${Math.floor(s / 3600)}h`
+  }
   return (
-    <div className="flex justify-center pb-1.5">
-      <button
-        type="button"
-        data-jobs
-        onClick={() => openJobs({ chat: chatKey })}
-        className="inline-flex max-w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-full bg-bubble py-1 pr-2.5 pl-2 text-[0.8125rem]/5 text-fg2 hover:text-fg phone:text-[0.875rem]/5"
-      >
-        <span aria-hidden className="live-dot size-1.5 shrink-0 rounded-full bg-[var(--work)]" />
-        <span className="truncate">{jobsWords(countJobs(jobs))}</span>
-      </button>
+    <div data-jobs className="flex flex-col px-0.5 pb-1">
+      {list.map((j) => (
+        <div key={j.id} className="flex h-6 items-center gap-2 text-[0.75rem] phone:h-8 phone:text-[0.8125rem]">
+          <span aria-hidden className="live-dot size-1.5 shrink-0 rounded-full bg-[var(--work)]" />
+          <span className="min-w-0 flex-1 truncate font-medium text-fg">{j.title}</span>
+          <span className="shrink-0 font-mono text-[0.71875rem] text-fg3 tabular-nums">{ago(j.at)}</span>
+        </div>
+      ))}
+      {!open ? (
+        <button type="button" onClick={() => setAll(true)} className="flex h-[22px] items-center gap-1.5 self-start rounded-[6px] px-1.5 text-[0.75rem] text-fg2 hover:bg-hover hover:text-fg phone:h-8">
+          <ChevronDownIcon aria-hidden className="size-3 fill-current" />
+          {`+${jobs.length - 4} more`}
+        </button>
+      ) : null}
     </div>
   )
 }

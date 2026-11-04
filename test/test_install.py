@@ -1,5 +1,6 @@
 """The installer against scratch roots (--root): install, run again, update with a changed file,
 clashes, --adopt, uninstall. Never touches the real home."""
+import re
 import json
 import os
 import shutil
@@ -117,6 +118,16 @@ class Install(unittest.TestCase):
             self.skipTest("bun isn't installed here")
         self.assertTrue(os.path.isfile(self.p(".local/share/shepherdr/service/main.ts")))
         self.assertFalse(any(f.endswith(".test.ts") for f in os.listdir(self.p(".local/share/shepherdr/service"))))
+        # every relative import the installed service runs resolves inside what was installed (bun can start it)
+        share = self.p(".local/share/shepherdr")
+        for d, _, files in os.walk(share):
+            if "/web/dist" in d:
+                continue
+            for f in files:
+                if not f.endswith((".ts", ".js")):
+                    continue
+                for m in re.finditer(r'^import (?!type )[^;]*?from ["\'](\.{1,2}/[^"\']+)["\']', open(os.path.join(d, f)).read(), re.M):
+                    self.assertTrue(os.path.isfile(os.path.normpath(os.path.join(d, m.group(1)))), f"{os.path.relpath(os.path.join(d, f), share)} imports {m.group(1)}, not installed")
         unit = self.p("Library/LaunchAgents/dev.shepherdr.service.plist") if sys.platform == "darwin" else self.p(".config/systemd/user/shepherdr.service")
         text = open(unit).read()
         self.assertIn(self.p(".local/share/shepherdr/service/main.ts"), text)

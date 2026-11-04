@@ -54,6 +54,16 @@ export function spacesFromDoc(doc, machine = null) {
 // where it is (`at`): a home folder reads "Home", a repo its name, any other folder its own. Never "~" (as New space
 // and the tab bar once named home ones: that counts as unnamed). named: false when Herdr named it itself.
 const HOME_AT = /^\/(home\/[^/]+|Users\/[^/]+|root)(?=\/|$)/;
+// A folder as the sidebar shows it, from a home folder here or on another machine: "~/dev/app".
+export const tilde = (path) => String(path ?? "").replace(HOME_AT, "~");
+// Two spaces with one name on one machine (a worktree under its repo aside: its branch shows): each shows its folder.
+// rows: [{ id, machine, name, linked }]; the ids whose name another shares.
+export function sharedNames(rows) {
+  const key = (r) => `${r.machine ?? ""}\u0000${String(r.name).toLowerCase()}`;
+  const count = new Map();
+  for (const r of rows) if (!r.linked) count.set(key(r), (count.get(key(r)) ?? 0) + 1);
+  return new Set(rows.filter((r) => (count.get(key(r)) ?? 0) > 1).map((r) => r.id));
+}
 export const isHomeFolder = (path, home = null) => { const p = String(path ?? "").replace(/\/+$/, ""); return (!!home && p === home) || (HOME_AT.test(p) && !p.replace(HOME_AT, "")); };
 export function spaceName(s, { at = s?.folder, repo = null, home = null, named = true } = {}) {
   if ((named && s?.name && s.name !== "~") || !at) return s?.name && s.name !== "~" ? s.name : "Home";
@@ -95,6 +105,22 @@ export function withSection(d, { id, name, machine = null, icon = null }) {
 export function withoutSection(d, id) {
   const x = tidyBar(d);
   x.sections = x.sections.filter((s) => s.id !== id);
+  return x;
+}
+
+// A section deleted (its menu's Delete, at once): what to keep for its Undo (shared "spaces-chat.deleted"), and its toast.
+export const DELETED = "spaces-chat.deleted";
+export function deletedSection(d, id) {
+  const at = (d?.sections ?? []).findIndex((s) => s.id === id);
+  return at < 0 ? null : { section: d.sections[at], at };
+}
+export const sectionDeletedToast = (name) => ({ title: `Deleted the section “${name}”`, body: "Its spaces moved up to the machine. Click to undo." });
+// Undo: back in its place, with those of its spaces no other section took meanwhile.
+export function withRestoredSection(d, gone) {
+  const x = tidyBar(d);
+  if (!gone?.section || x.sections.some((s) => s.id === gone.section.id)) return x;
+  const filed = new Set(x.sections.flatMap((s) => s.spaces ?? []));
+  x.sections.splice(Math.min(gone.at, x.sections.length), 0, { ...gone.section, spaces: (gone.section.spaces ?? []).filter((s) => !filed.has(s)) });
   return x;
 }
 

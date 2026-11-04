@@ -4,18 +4,38 @@
 // whichever answers first wins (the hook reads one answer, then the card closes everywhere).
 import { watch, readdirSync, readFileSync, writeFileSync, renameSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { HOME } from "./paths.ts";
+import { DATA, HOME } from "./paths.ts";
 import * as A from "../core/asks.js";
 
-const { words, allow, deny, answers, howAnswered } = A as any;
+const { words, allow, deny, answers, howAnswered, release, chatAbout } = A as any;
 const DIR = join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "data", "chat-asks");
 const ID = /^[\w.-]+$/;
 
 export type Ask = { id: string; terminal: string; at: number; req: any; words: any };
 
+/** An ask that closed, as the window's chat keeps it for its quiet line ("✓ Run: npm test · Allowed in the chat"):
+ *  what it asked and how it went (the hook's end/<id>, else "No longer waiting"), at its moment. */
+export type AskEnd = { id: string; terminal: string; title: string; how: string; at: number; kind: string };
+const ENDS = join(DATA, "ask-ends.json");
+// When an ask was made: its id is <terminal>.<seconds>.<pid> (ask-hook.sh), at the end of that second (the window's askAt)
+const askAt = (id: string) => { const p = id.split("."); const s = Number(p[p.length - 2]); return Number.isFinite(s) && s > 1e9 ? s * 1000 + 999 : Date.now(); };
+
 export class Asks {
   open = new Map<string, Ask>();
+  /** closed asks, newest last, the last 200 (kept across restarts in the service's data) */
+  ends: AskEnd[] = (() => { try { return JSON.parse(readFileSync(ENDS, "utf8")) ?? []; } catch { return []; } })();
   private listeners = new Set<() => void>();
+
+  /** The closed asks of an agent, for its chat's quiet lines. */
+  endsOf(terminal: string) { return this.ends.filter((e) => e.terminal === terminal); }
+
+  private ended(a: Ask) {
+    if (this.ends.some((e) => e.id === a.id)) return;
+    let how = "";
+    try { how = readFileSync(join(DIR, "end", a.id), "utf8").trim(); } catch {}
+    this.ends = [...this.ends, { id: a.id, terminal: a.terminal, title: a.words?.title ?? "", how: how || "No longer waiting", at: askAt(a.id), kind: a.words?.kind ?? "" }].slice(-200);
+    try { writeFileSync(`${ENDS}.tmp`, JSON.stringify(this.ends)); renameSync(`${ENDS}.tmp`, ENDS); } catch {}
+  }
 
   on(fn: () => void) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
 
@@ -42,6 +62,12 @@ export class Asks {
       } catch {}
     }
     const changed = next.size !== this.open.size || [...next.keys()].some((k) => !this.open.has(k));
+    // gone: its quiet line, with how it went
+    for (const [id, a] of this.open) if (!next.has(id)) this.ended(a);
+    // the hook writes how a moment after the request goes: a line still saying "No longer waiting" learns it
+    for (const e of this.ends) if (e.how === "No longer waiting" && Date.now() - e.at < 120_000) {
+      try { const how = readFileSync(join(DIR, "end", e.id), "utf8").trim(); if (how) e.how = how; } catch {}
+    }
     this.open = next;
     if (changed) for (const fn of this.listeners) fn();
   }
@@ -49,12 +75,16 @@ export class Asks {
   of(terminal: string) { return [...this.open.values()].filter((a) => a.terminal === terminal); }
 
   /** Answers it as the window's card would: a permission or plan allowed or declined, a question's pick. */
-  answer(id: string, a: { choice?: number; choices?: number[]; note?: string; other?: string; answers?: string[] }) {
+  answer(id: string, a: { choice?: number; choices?: number[]; note?: string; other?: string; answers?: string[]; terminal?: boolean; talk?: boolean }) {
     const ask = this.open.get(id);
     if (!ask) throw new Error("That question was answered already.");
     const w = ask.words;
     let out: string;
-    if (w.kind === "questions" && w.questions.length > 1) {
+    // the window's card links: "Answer in terminal" (no decision: the CLI asks in its terminal) and a questions card's
+    // "Chat about this" (Claude hears the person wants to talk it over first)
+    if (a.terminal) out = release();
+    else if (a.talk && w.kind === "questions") out = chatAbout();
+    else if (w.kind === "questions" && w.questions.length > 1) {
       // the multi-step card: each question's answer in order, all of them
       const got = (a.answers ?? []).map((x) => String(x ?? "").trim());
       if (got.length !== w.questions.length || got.some((x) => !x)) throw new Error("Answer every question first.");
@@ -77,6 +107,7 @@ export class Asks {
     writeFileSync(`${file}.tmp`, out);
     renameSync(`${file}.tmp`, file);
     this.open.delete(id);
+    this.ended(ask);
     for (const fn of this.listeners) fn();
   }
 }

@@ -7,6 +7,8 @@ import { div } from "gpui-kit";
 import { v_flex, InputState, Input } from "gpui-base";
 import { exec, spaces } from "herdr";
 import { shepherdrFor } from "./coordinator.js";
+// The row's words and the branch-name check: core/settings.js, shared with the web app.
+import { BASE, branchShape } from "./core/settings.js";
 
 const spaceOf = (id) => spaces().find((s) => s.id === id);
 
@@ -33,9 +35,9 @@ function save(view, b, cx) {
   if (want === valueOf(view)) return cx.notify();
   if (!want) return view.reset("tasks", "base", cx);
   cx.spawn(async (cx) => {
-    const ok = !/^-|[\s~^:?*[\\]|\.\.|@\{/.test(want) && (await Promise.all([`refs/heads/${want}`, `refs/remotes/origin/${want}`]
+    const ok = branchShape(want) && (await Promise.all([`refs/heads/${want}`, `refs/remotes/origin/${want}`]
       .map((ref) => git(view, ["show-ref", "--verify", "--quiet", ref])))).some((r) => r?.code === 0);
-    if (!ok) b.err = `There's no branch “${want}” here or on origin.`;
+    if (!ok) b.err = BASE.missing(want);
     else { b.err = ""; view.set("tasks", "base", want, cx); }
     cx.notify();
   });
@@ -64,10 +66,9 @@ export function baseRow(view, t) {
     .child(Input.new(b.box).w_full().h(30).px(10).rounded(7).border_1().border_color(b.err ? t.blocked : b.focus ? t.accent : t.input)
       .bg(t.background).text_size(13).text_color(t.foreground))
     .when(empty, (el) => el.child(div().absolute().top(6).left(11).right(11).truncate().text_size(13).text_color(t.dim)
-      .child(now ? `Its branch now: ${now}` : "Its current branch")));
+      .child(BASE.empty(now))));
   // A branch that isn't there says so under the box, in its words, and isn't saved.
   const control = v_flex().items_end().gap(5).child(box)
     .when(Boolean(b.err), (el) => el.child(div().w(200).text_size(12).line_height("17px").text_color(t.blocked).child(b.err)));
-  return view.row(t, "Base branch", "New tasks branch from it and merge into it. Empty: the branch the folder has checked out.",
-    control, view.scoped("tasks", "base", (v) => v || "the folder's branch"));
+  return view.row(t, BASE.title, BASE.about, control, view.scoped("tasks", "base", (v) => v || BASE.follows));
 }

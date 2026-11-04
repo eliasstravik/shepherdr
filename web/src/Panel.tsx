@@ -140,9 +140,13 @@ function ItemBody({ item, task, chatKey }: { item: PanelItem; task: Task; chatKe
 /** A task view's body: its chat, or the tab picked (Terminal, Files, Changes…) in its place, as 3.0's task view */
 export function TabBody({ task, chatKey, children }: { task: Task; chatKey: string; children: ReactNode }) {
   const sheet = useUI((u) => u.sheet)
-  const item = sheet ? itemsFor(task).find((i) => i.id === sheet) : undefined
+  // its agent ended while its terminal showed: back to its chat, which stays to read (the window's)
+  const item = sheet && !(sheet === 'terminal' && !termRunning(task)) ? itemsFor(task).find((i) => i.id === sheet) : undefined
   return item ? <div className="flex min-h-0 flex-1 flex-col"><ItemBody key={item.id} item={item} task={task} chatKey={chatKey} /></div> : <>{children}</>
 }
+
+/** the task's agent runs: its Terminal can open (the window's Terminal is dim, "Not running", once it has ended) */
+const termRunning = (task: Task) => !!task.agent?.running
 
 /** A task's items as 3.0's task view has them: only those it has now (a pull request's once it has one) */
 export const itemsFor = (task: Task) => registry.taskPanel.filter((i) => i.id !== 'pr' || !!task.pr)
@@ -154,24 +158,20 @@ export function TaskTabs({ task }: { task: Task }) {
   const items = itemsFor(task)
   if (!items.length) return null
   // as 3.0's: a tab switches the view in place, under the same header (never another panel)
-  const on = ui.sheet && items.some((i) => i.id === ui.sheet) ? ui.sheet : 'chat'
-  const tab = (id: string, label: string, off: string | null, go: () => void) => (
-    <button key={id} type="button" role="tab" aria-selected={on === id} data-off={off ? '' : undefined} title={off ?? undefined} onClick={go}
-      className="relative inline-flex h-7 shrink-0 items-center rounded-full px-2.5 text-[0.8125rem] whitespace-nowrap text-fg2 after:absolute after:-inset-y-2 after:inset-x-0 hover:bg-hover aria-selected:bg-sel aria-selected:text-fg data-off:text-fg3 coarse:h-9 phone:h-9 phone:px-3 phone:text-[0.875rem]">
+  const on = ui.sheet && items.some((i) => i.id === ui.sheet) && !(ui.sheet === 'terminal' && !termRunning(task)) ? ui.sheet : 'chat'
+  // dead: it can't open now (the window's disabled segment, its reason on hover): only Terminal, once its agent ended
+  const tab = (id: string, label: string, dead: string | null, go: () => void) => (
+    <button key={id} type="button" role="tab" aria-selected={on === id} aria-disabled={dead ? true : undefined} data-off={dead ? '' : undefined} title={dead ?? undefined} onClick={dead ? undefined : go}
+      className="relative inline-flex h-7 shrink-0 items-center rounded-full px-2.5 text-[0.8125rem] whitespace-nowrap text-fg2 after:absolute after:-inset-y-2 after:inset-x-0 hover:bg-hover aria-selected:bg-sel aria-selected:text-fg data-off:cursor-default data-off:text-fg3 data-off:hover:bg-transparent coarse:h-9 phone:h-9 phone:px-3 phone:text-[0.875rem]">
       {label}
     </button>
   )
   return (
     <div role="tablist" aria-label={`${task.id} views`} className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line px-3 py-1.5 [scrollbar-width:none] phone:px-4">
       {tab('chat', 'Chat', null, closeSheet)}
-      {items.map((i) => <ItemTab key={i.id} item={i} task={task} tab={tab} />)}
+      {items.map((i) => tab(i.id, i.label, i.id === 'terminal' && !termRunning(task) ? 'Not running' : null, () => setUI({ sheet: i.id, taskMenu: false, plus: null, pick: null })))}
     </div>
   )
-}
-
-function ItemTab({ item, task, tab }: { item: PanelItem; task: Task; tab: (id: string, label: string, off: string | null, go: () => void) => ReactNode }) {
-  const off = item.useOff?.(task) ?? null
-  return <>{tab(item.id, item.label, off, () => setUI({ sheet: item.id, taskMenu: false, plus: null, pick: null }))}</>
 }
 
 /** An item open over the whole screen (phone and tablet), from the task header's ⋯: pushed over the chat, Back or a

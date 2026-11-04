@@ -1,6 +1,6 @@
 // @ts-nocheck: WebCrypto buffer types are too narrow for a test written byte by byte
 import { expect, test } from "bun:test";
-import { encrypt } from "./push.ts";
+import { encrypt, alertsOf, agentAlerts } from "./push.ts";
 
 // decrypting as the browser would (RFC 8291) gives back the alert
 test("an alert encrypted for a subscription decrypts with its keys", async () => {
@@ -23,4 +23,28 @@ test("an alert encrypted for a subscription decrypts with its keys", async () =>
   const plain = new Uint8Array(await s.decrypt({ name: "AES-GCM", iv: nonce }, await s.importKey("raw", cek, "AES-GCM", false, ["decrypt"]), sealed));
   expect(plain[plain.length - 1]).toBe(2);
   expect(new TextDecoder().decode(plain.slice(0, -1))).toBe('{"title":"SHEP-7 needs you"}');
+});
+
+// the window's toast words: who and what, an Assistant by its space, its Notify followed
+test("alerts say what the window's toasts say", () => {
+  const place = (level: string) => ({ name: "Notify", level: "sp1", rows: [{ key: "notify", value: level }] });
+  const snap = (level = "Needs me") => ({
+    places: [{ id: "sp1", name: "tt-repo", chat: "sp1" }],
+    tasks: [{ id: "HERD-4", name: "Fix login", status: "ready", place: "sp1" }],
+    needs: [{ id: "q1", chat: "sp1", place: "sp1", question: { kind: "Question", title: "Rerun CI?" } }, { id: "q2", chat: "HERD-5/worker", place: "sp1", task: "HERD-5" }],
+    settings: [place(level)],
+    alerts: [{ id: "a1", title: "HERD-4 · Stuck", body: "why", notify: true }],
+  });
+  const a = [...alertsOf(snap()).values()];
+  expect(a.map((x) => x.title)).toEqual(["tt-repo Assistant · Needs you", "HERD-5 · Needs you", "HERD-4 · Finished", "HERD-4 · Stuck"]);
+  expect(a[0].body).toBe("Rerun CI?");
+  // Notify Off: nothing from its Assistant; tasks as always
+  expect([...alertsOf(snap("Off")).values()].map((x) => x.title)).toEqual(["HERD-5 · Needs you", "HERD-4 · Finished", "HERD-4 · Stuck"]);
+});
+
+test("an agent's own alert, from its label", () => {
+  const snap = { places: [{ id: "sp1", name: "tt-repo", chat: "sp1" }], tasks: [], settings: [] };
+  const terms = [{ address: "t1", state: "live", labels: { "herdr.role": "coordinator", "herdr.alert": JSON.stringify({ id: "x", at: 5, title: "Can't wait", body: "Look now" }) } }];
+  const out = agentAlerts(terms, snap, (a) => (a === "t1" ? "sp1" : null), "/nonexistent");
+  expect(out).toEqual([{ id: "x", at: 5, title: "tt-repo Assistant · Can't wait", body: "Look now", chat: "sp1", place: "sp1", notify: true }]);
 });

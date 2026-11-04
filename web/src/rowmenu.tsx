@@ -5,7 +5,7 @@ import clsx from 'clsx'
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { useUI } from './kernel.ts'
 import { useMotion } from './motion.ts'
-import { Ghost, ic, Menu, MoreIcon } from './ui.tsx'
+import { Ghost, ic, Menu, MoreIcon, XIcon } from './ui.tsx'
 
 /** how long a finger holds a row before its menu opens */
 export const HOLD_MS = 450
@@ -140,8 +140,10 @@ export function RowMenu({ menu, label, className, children }: { menu: RowMenuSta
  * The shade and box every question sits in: it grows in like any dialog (slides up on a phone), and goes the same way.
  * Escape or a tap on the shade cancels; Tab stays inside it; the focus goes back to where it was once it closes.
  * safe: Cancel takes the focus, so Enter loses nothing.
+ * The window's larger cards (the Accept card): sub, a muted line under the title; closer, the × at its top right that
+ * closes it as Cancel does; foot, lines over the buttons that stay put while the body scrolls; wide, 640 across.
  */
-export function Dialog({ title, children, buttons, safe, cancel = 'Cancel', onCancel }: { title: string; children: ReactNode; buttons: ReactNode; safe?: boolean; cancel?: string; onCancel: () => void }) {
+export function Dialog({ title, sub, closer, foot, wide, children, buttons, safe, cancel = 'Cancel', onCancel }: { title: string; sub?: ReactNode; closer?: boolean; foot?: ReactNode; wide?: boolean; children: ReactNode; buttons: ReactNode; safe?: boolean; cancel?: string; onCancel: () => void }) {
   const phone = useUI((u) => u.device === 'phone')
   const shade = useRef<HTMLDivElement>(null)
   const box = useRef<HTMLDivElement>(null)
@@ -171,13 +173,24 @@ export function Dialog({ title, children, buttons, safe, cancel = 'Cancel', onCa
   }, [opener])
   return (
     <div ref={shade} className="absolute inset-0 z-30 flex items-start justify-center bg-black/35 px-6 py-12 phone:items-end phone:p-3 phone:pb-[max(env(safe-area-inset-bottom),--spacing(3))]" onClick={(e) => e.target === e.currentTarget && onCancel()}>
-      <div ref={box} data-panel role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-desc" className="w-full max-w-[400px] rounded-box bg-bg p-5 shadow-dialog phone:max-w-none">
-        <h2 id="confirm-title" className="font-semibold">
-          {title}
-        </h2>
+      <div ref={box} data-panel role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-desc" className={clsx('w-full rounded-box bg-bg p-5 shadow-dialog phone:max-w-none', wide ? 'max-w-[640px]' : 'max-w-[400px]')}>
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <h2 id="confirm-title" className="font-semibold">
+              {title}
+            </h2>
+            {sub ? <p className="mt-0.5 truncate text-fg3">{sub}</p> : null}
+          </div>
+          {closer ? (
+            <button type="button" aria-label="Close" onClick={onCancel} className="-mt-1 -mr-1.5 grid size-7 shrink-0 place-items-center rounded-full text-fg3 hover:bg-hover hover:text-fg phone:size-9">
+              <XIcon className={ic} />
+            </button>
+          ) : null}
+        </div>
         <div id="confirm-desc" className="mt-1.5 text-pretty text-fg2">
           {children}
         </div>
+        {foot ? <div className="mt-4 flex flex-col gap-2.5">{foot}</div> : null}
         <div className="mt-5 flex justify-end gap-2 phone:flex-col-reverse phone:*:w-full phone:*:justify-center">
           <Ghost autoFocus={safe} className="h-[34px] text-sm! phone:h-11 phone:text-base!" onClick={onCancel}>
             {cancel}
