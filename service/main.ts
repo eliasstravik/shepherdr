@@ -16,6 +16,9 @@ import { whoami, share, served, type Me } from "./tailscale.ts";
 import { Hub } from "./hub.ts";
 import { Store } from "./store.ts";
 import { Live } from "./live.ts";
+import { Model } from "./model.ts";
+import { Chats } from "./chats.ts";
+import { act } from "./actions.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const WEB = process.env.SHEPHERDR_WEB_DIR || join(ROOT, "web", "dist");
@@ -36,6 +39,8 @@ const store = new Store(hub);
 let me: Me | null = await whoami();
 const g: Gate = { owner: me?.login ?? null, dns: me?.dns ?? null, port: PORT, token };
 const live = new Live(hub, store, () => me, VERSION);
+new Model(hub, live).start();
+live.chats = new Chats(hub);
 
 // Tailscale can come up after the service: look again now and then, and keep /shepherdr shared while web is on.
 const webOn = process.env.SHEPHERDR_WEB !== "off";
@@ -85,6 +90,10 @@ const server = Bun.serve<{ who: string }>({
       const body = await req.json().catch(() => null);
       if (!body || typeof body.key !== "string" || !/^[a-z][\w.-]{0,63}$/.test(body.key)) return json({ error: "bad key" }, 400);
       return json(await store.set(body.key, body.value ?? null));
+    }
+    if (path === "/api/action" && req.method === "POST") {
+      const body = await req.json().catch(() => null);
+      try { return json(await act(hub, body)); } catch (err) { return json({ error: (err as Error).message }, 400); }
     }
     if (path.startsWith("/api/")) return json({ error: "not found" }, 404);
     if (!webOn) return new Response("Shepherdr's web app is off (Shepherdr settings › Web).", { status: 404 });

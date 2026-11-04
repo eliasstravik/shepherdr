@@ -5,13 +5,18 @@ import type { Hub } from "./hub.ts";
 import type { Store } from "./store.ts";
 import type { Me } from "./tailscale.ts";
 
-type WS = ServerWebSocket<{ who: string }>;
+type WS = ServerWebSocket<{ who: string; chats?: Set<string>; send?: (addr: string, msg: string) => void }>;
+
+/** What a page asks for over its socket besides views: the chats it has open. */
+export type Pages = { watch(addr: string, page: (addr: string, msg: string) => void): void; unwatch(addr: string, page: (addr: string, msg: string) => void): void; earlier(addr: string): Promise<void> };
 
 export class Live {
   private pages = new Set<WS>();
   private views = new Map<string, string>();   // name -> its JSON, as last sent
   private pending = new Set<string>();
   private timer: ReturnType<typeof setTimeout> | null = null;
+
+  chats: Pages | null = null;
 
   constructor(private hub: Hub, private store: Store, private me: () => Me | null, private version: string) {
     hub.on((e) => {
@@ -30,12 +35,23 @@ export class Live {
     if (!this.views.has("state")) void this.store.load().then((d) => this.put("state", d));
   }
 
-  leave(ws: WS) { this.pages.delete(ws); }
+  leave(ws: WS) {
+    this.pages.delete(ws);
+    for (const a of ws.data.chats ?? []) this.chats?.unwatch(a, ws.data.send!);
+  }
 
   message(ws: WS, text: string) {
     let m: any;
     try { m = JSON.parse(text); } catch { return; }
     if (m?.type === "ping") ws.send(JSON.stringify({ type: "pong", at: m.at ?? null }));
+    else if (m?.type === "watch" && Array.isArray(m.chats) && this.chats) {
+      // The chats this page has open now (at most a few: one per pane).
+      const want = new Set<string>(m.chats.filter((a: unknown) => typeof a === "string" && /^[\w.-]+(\/[\w.-]+)?$/.test(a)).slice(0, 6));
+      ws.data.chats ??= new Set();
+      ws.data.send ??= (_addr, msg) => { if (ws.readyState === 1) ws.send(msg); };
+      for (const a of ws.data.chats) if (!want.has(a)) { this.chats.unwatch(a, ws.data.send); ws.data.chats.delete(a); }
+      for (const a of want) if (!ws.data.chats.has(a)) { ws.data.chats.add(a); this.chats.watch(a, ws.data.send); }
+    } else if (m?.type === "earlier" && typeof m.addr === "string" && ws.data.chats?.has(m.addr)) void this.chats?.earlier(m.addr);
   }
 
   /** Sets a view; pages hear about it shortly after, once, if it really changed. */
