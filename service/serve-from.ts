@@ -14,6 +14,7 @@ import { CoreClient } from "./hc/client.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as HC from "../core/host.js";
+import { buildId } from "./build.ts";
 
 const { HOST_DOC, NODE_DOC, newestHost, nodeAlive, renamer, relocateDoc, relocateSettings } = HC as any;
 const VERSION = JSON.parse(readFileSync(join(import.meta.dir, "..", "package.json"), "utf8")).version as string;
@@ -82,14 +83,16 @@ const was = from as string | null;
 if (from && !connected.includes(from)) say(`${from} (serving now) is offline: its shared data stays as this machine last had it.`);
 
 // ---- 1. the service there -----------------------------------------------------------------------------------------
+// what this machine would send: its own build (the other one runs another: send it again, even at one version)
+const BUILD = buildId();
 let there = await node(to);
-if (!there || there.version !== VERSION) {
+if (!there || there.version !== VERSION || (there.build && there.build !== BUILD) || (!there.build && to !== null)) {
   say(`Installing Shepherdr's web service on ${to ?? "this computer"}…`);
   const cli = process.env.SHEPHERDR_CLI || "shepherdr";
   const p = Bun.spawn([cli, "web", "install-on", to ?? "here"], { stdout: json ? "pipe" : "inherit", stderr: "pipe", stdin: "ignore" });
   const err = await new Response(p.stderr).text();
   if ((await p.exited) !== 0) fail(err.trim().split("\n").pop()?.replace(/^shepherdr: /, "") || `couldn't install it on ${to}`);
-  for (let i = 0; i < 60 && !(there?.version === VERSION); i++) { await Bun.sleep(2000); there = await node(to); }
+  for (let i = 0; i < 60 && !(there?.build === BUILD); i++) { await Bun.sleep(2000); there = await node(to); }
   if (!there) fail(`Shepherdr's web service on ${to ?? "this computer"} hasn't started: \`shepherdr doctor\` there says why.`);
 }
 

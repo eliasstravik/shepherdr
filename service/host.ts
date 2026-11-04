@@ -8,11 +8,14 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Hub } from "./hub.ts";
 import { HOME } from "./paths.ts";
+import { buildId } from "./build.ts";
+
+const BUILD = buildId();
 import * as HC from "../core/host.js";
 
 const { HOST_DOC, NODE_DOC, newestHost, nodeAlive, renamer } = HC as any;
 
-export type Node = { id: string; name: string; os: string; version: string; link: string | null; serving: boolean; links: Record<string, string>; remotes: string[]; at: number };
+export type Node = { id: string; name: string; os: string; version: string; build?: string; link: string | null; serving: boolean; links: Record<string, string>; remotes: string[]; at: number };
 export type MachineRow = { name: string; id: string | null; state: string; here?: boolean };
 
 export class Host {
@@ -66,7 +69,7 @@ export class Host {
   node(): Node {
     const links: Record<string, string> = {};
     for (const [name, m] of this.machines) if (m.id) links[name] = m.id;
-    return { id: this.me?.id ?? "", name: this.me?.name ?? "", os: process.platform, version: this.version, link: this.link, serving: this.serving(), links,
+    return { id: this.me?.id ?? "", name: this.me?.name ?? "", os: process.platform, version: this.version, build: BUILD, link: this.link, serving: this.serving(), links,
       remotes: this.remotes().map((n) => links[n]).filter(Boolean), at: Date.now() };
   }
 

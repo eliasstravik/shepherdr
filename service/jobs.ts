@@ -34,11 +34,13 @@ async function run(cmd: string[]) {
   }
 }
 
-/** Whether the window installed here leaves this work to the service: no window at all, or one whose tab bar asks first. */
+/** Whether the window installed here leaves this work to the service: no Shepherdr window at all, or one whose tab bar
+ *  asks first. */
 export function windowLeavesIt() {
   if (process.env.SHEPHERDR_JOBS === "off") return false;
   if (process.env.SHEPHERDR_JOBS === "on") return true;
-  if (!existsSync(join(APP, "mods"))) return true;
+  // no Shepherdr layout installed here (no Herdr at all, or Herdr's own mods only): no window here does it
+  if (!existsSync(join(APP, "data", "shepherdr", "installed.json"))) return true;
   return existsSync(join(APP, "mods", "tabs-tasks", "service.js"));
 }
 
