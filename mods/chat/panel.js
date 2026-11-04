@@ -25,6 +25,7 @@ import { h_flex, v_flex } from "gpui-base";
 import { shared, setShared, run, theme, exec, appHome, home, readTextFile, writeTextFile, notify, layout, openOverlay } from "herdr";
 import { terminals, agents } from "./live.js";
 import { taskDot, ownProgress, estimated } from "./dot.js";
+import { busyAgain } from "./core/tasks.js";
 import { button, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { on as addonOn } from "./addons.js";
 
@@ -143,10 +144,18 @@ export class PanelHost {
     if (JSON.stringify(rec) !== JSON.stringify(this.rec)) { this.rec = rec; cx.notify(); }
   }
 
-  // Ready and nothing in the way (as the list's Ready group): not asking, no problem, not already merging.
-  acceptable(st) {
+  // Ready and nothing in the way (as the list's Ready group): not asking, no problem, not already merging, not
+  // back at work.
+  acceptable(st, addr) {
     const r = this.rec;
-    return Boolean(r && r.state === "ready" && !r.attention && st !== "blocked" && !r.merge_requested && !(r.auto_merge && r.pr && !r.merged));
+    return Boolean(r && r.state === "ready" && !r.attention && st !== "blocked" && !r.merge_requested && !(r.auto_merge && r.pr && !r.merged))
+      && !this.again(st, addr);
+  }
+
+  // Its worker took up work again since it said ready (core/tasks.js busyAgain()): Working, no Accept.
+  again(st, addr) {
+    const r = this.rec, k = addr ? terminals().find((x) => x.address === addr) : null;
+    return Boolean(r && k) && busyAgain(r, [{ address: addr, status: st, turn: k.turn, role: k.labels?.["herdr.role"] ?? "worker" }]);
   }
 
   // Accept shows what you approve first: the Accept card (mods/accept-card) runs herdr-task
@@ -189,7 +198,7 @@ export class PanelHost {
     const starting = !last?.ended && Date.now() - Math.max(0, ...[r.started, last?.at].filter((x) => typeof x === "number")) < 90000;
     const s = ["todo", "queued", "done"].includes(r.state) ? r.state
       : r.attention || st === "blocked" || r.retry?.over ? "needs"
-      : r.state === "ready" ? ((r.merge_requested && live) || (r.auto_merge && r.pr && !r.merged) ? "merging" : "ready")
+      : r.state === "ready" && !this.again(st, addr) ? ((r.merge_requested && live) || (r.auto_merge && r.pr && !r.merged) ? "merging" : "ready")
       : st === "working" || r.retry || starting ? "working" : "needs";
     return taskDot(s, { pct: ownProgress([addr])?.pct ?? r.progress?.done, halo: true });
   }
@@ -373,7 +382,7 @@ export class PanelHost {
       // Pin / Unpin, as the task's row in the list (not an archived task's).
       .when(Boolean(this.rec && !(this.rec.archived && this.rec.state === "done")), (el) => el.child(this.pinButton(t)))
       // Accept: the header's one primary button (merges first when there's something to merge).
-      .when(this.acceptable(st), (el) => el.child(button("thread-accept", this.accepting ? "Accepting…" : "Accept",
+      .when(this.acceptable(st, addr), (el) => el.child(button("thread-accept", this.accepting ? "Accepting…" : "Accept",
         { kind: "primary", disabled: this.accepting, onClick: (_e, cx) => this.accept(cx) })));
   }
 

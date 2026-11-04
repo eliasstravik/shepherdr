@@ -23,6 +23,7 @@ import { h_flex, v_flex, InputState, Input, VirtualListScrollHandle, v_virtual_l
 import { spaces, machines, terminals, agents, layout, layouts, exec, home, run, theme, props, closeOverlay, shared, setShared } from "herdr";
 import { taskDot } from "./dot.js";
 import { READ_LISTS, taskLists } from "./core/tasklists.js";
+import { busyAgain } from "./core/tasks.js";
 // A space's name as the sidebar (and the web app) says it: never "~" (core/spaces.js).
 import { spaceName } from "./core/spaces.js";
 import { openViewer, showViewer, chatArea } from "./artview.js";
@@ -171,7 +172,7 @@ export default class Jump extends View {
     const shown = new Map(agents().map((a) => [a.address, a]));
     return terminals().filter((k) => k.state === "live" && k.labels?.["herdr.task"] === key && machineOf(k.address) === m)
       .filter((k) => k.program?.key !== "shell" && !k.program?.shell)
-      .map((k) => ({ address: k.address, status: shown.get(k.address)?.status ?? k.status, role: k.labels?.["herdr.role"] ?? "worker" }));
+      .map((k) => ({ address: k.address, status: shown.get(k.address)?.status ?? k.status, turn: k.turn, role: k.labels?.["herdr.role"] ?? "worker" }));
   }
 
   // A task's status as the Tasks panel names it, in short (its full rules: tasks/main.js place()).
@@ -179,7 +180,8 @@ export default class Jump extends View {
     const st = task.state;
     if (["todo", "queued", "done"].includes(st)) return st;
     if (task.attention || live.some((a) => a.status === "blocked")) return "needs";
-    if (st === "ready") return task.merge_requested && live.length ? "merging" : "ready";
+    // Back at work after it said ready (core/tasks.js busyAgain()): Working.
+    if (st === "ready" && !busyAgain(task, live)) return task.merge_requested && live.length ? "merging" : "ready";
     if (live.some((a) => a.status === "working")) return "working";
     const last = task.agents?.[task.agents.length - 1];
     const started = Math.max(0, ...[task.started, last?.at].filter((x) => typeof x === "number"));

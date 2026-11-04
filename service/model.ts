@@ -166,12 +166,13 @@ export class Model {
   /** A task's agents now: live terminals labelled with its key, on the folder's machine, not shells. */
   private agentsOf(list: List, task: any) {
     const key = `${list.slug}#${task.id}`;
-    const out: { address: string; status: string | null; role: string }[] = [];
+    const out: { address: string; status: string | null; role: string; turn: number }[] = [];
     for (const k of this.hub.terminals.values()) {
       if (k.state !== "live" || k.labels?.["herdr.task"] !== key || machineOf(k.address) !== (list.machine ?? null)) continue;
       const st = typeof k.status === "object" ? k.status?.state ?? null : null;
       if (!st && SHELL.test(String((k as any).foreground?.name ?? ""))) continue;
-      out.push({ address: k.address, status: st, role: k.labels?.["herdr.role"] ?? "worker" });
+      // turn: its finished turns, for a Ready task back at work (core busyAgain())
+      out.push({ address: k.address, status: st, role: k.labels?.["herdr.role"] ?? "worker", turn: Number((k as any).turn) || 0 });
     }
     return out;
   }

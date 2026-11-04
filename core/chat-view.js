@@ -157,7 +157,7 @@ export function briefLabel(x, i, { start = null, template = null, task = false, 
 // a go (Fix login)", "HERD-4 is ready: Fix login · summary", ...: without the id and the title, split at its first
 // ": ". e: { ref, event, text, made } (made: from the task's own record, not a line Herdr sent); x: the task.
 export function newsWords(e, x) {
-  const mark = { started: "started", "needs-you": "needs", failed: "needs", ready: "ready", done: "done" }[e.event] ?? "other";
+  const mark = { started: "started", "working-again": "started", "needs-you": "needs", failed: "needs", ready: "ready", done: "done" }[e.event] ?? "other";
   const title = x?.title ?? "", one = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
   if (e.made) return { mark, what: e.event, text: e.event === "ready" ? one(x?.summary) || title : title };
   let s = one(e.text);

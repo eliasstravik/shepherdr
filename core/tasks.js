@@ -42,6 +42,19 @@ export function starting(task, now = Date.now()) {
   return now - at < STARTING_MS;
 }
 
+// A Ready task whose agent took up work again since it said ready (a message in its chat from anyone,
+// herdr-task fix or resume) is Working again until its next ready, as herdr-task's busy_again(). Herdr counts an
+// agent's finished turns (its terminal's turn): ready keeps, per agent, the turn it is on once the one it said
+// ready in has ended (task.ready_turns); working on that turn or a later one is new work. Not while it merges as
+// asked, nor a reviewer's turn; a ready said before turns were kept: any work once STARTING_MS have passed.
+export const WORKING_AGAIN = "Working again";
+export function busyAgain(task, live, now = Date.now()) {
+  if (task.state !== "ready" || task.merge_requested) return false;
+  const seen = task.ready_turns;
+  if (!seen && now - (task.ready_at ?? 0) < STARTING_MS) return false;
+  return live.some((a) => a.status === "working" && a.role !== "reviewer" && (a.turn ?? 0) >= (seen?.[a.address] ?? 0));
+}
+
 // A provider retry's line (herdr-task's retry_line): "Provider overloaded · Retry in 2m".
 export function retryLine(r, now = Date.now()) {
   return r.due ? `${r.reason} · Retry in ${Math.max(1, Math.ceil((r.due - now) / 60000))}m` : `${r.reason} · Retrying`;
@@ -49,7 +62,8 @@ export function retryLine(r, now = Date.now()) {
 
 // A task's status (its section), why it needs the person, and its live agents. live: its agents now
 // ([{ address, status, ... }], only while it runs or is ready); loaded: false while its machine's agents
-// aren't known yet. The same rules as herdr-task's task_status(): its record, then its agents' own status.
+// aren't known yet; each { address, status, turn, role }. The same rules as herdr-task's task_status(): its record,
+// then its agents' own status.
 export function place(list, task, { live = [], loaded = true, now = Date.now() } = {}) {
   const st = task.state;
   if (!(st === "running" || st === "ready")) live = [];
@@ -68,6 +82,8 @@ export function place(list, task, { live = [], loaded = true, now = Date.now() }
   // Why it waits: herdr-task's words (its agent's own status line, its question or last words),
   // kept on the task by its scheduler (task.waits), else the standard reason.
   else if (states.includes("blocked")) need("asks", task.waits ?? REASONS.question);
+  // Back at work after it said ready: no Accept until it says ready again.
+  else if (busyAgain(task, live, now)) { section = "working"; why = WORKING_AGAIN; }
   else if (st === "ready") {
     section = (task.merge_requested && live.length) || (task.auto_merge && task.pr && !task.merged) ? "merging" : "ready";
     // As herdr-task's: a pull request that merges by itself once GitHub's checks pass.
