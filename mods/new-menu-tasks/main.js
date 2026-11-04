@@ -48,11 +48,11 @@ export default class NewMenu extends View {
     const space = spaces().find(s => s.active);
     const installed = this.agents.filter(a => a.installed);
     const choices = agentChoices(this.agents);
-    // One coordinator per space: once there is one, the row goes to it. Here only: the template is on this machine.
+    // One coordinator per space: once there is one, the row goes to it. On another machine it runs there.
     const coordTab = coordinatorTab(space);
     const coordinate = () => coordTab ? run("tab.select", { id: coordTab.id }) : requestCoordinator(space);
-    const canCoordinate = Boolean(coordTab || (space && !space.machine));
-    const aRow = assistantRow({ open: Boolean(coordTab), remote: Boolean(space?.machine) });
+    const canCoordinate = Boolean(coordTab || space);
+    const aRow = assistantRow({ open: Boolean(coordTab) });
     return v_flex().min_h(0).w_full().h(209 + Math.min(10, Math.max(1, choices.length)) * H.lg).bg(t.popover).p(5).text_size(TEXT.body)
       .id("new-menu").track_focus(this.handle)
       .on_key_down((e) => {

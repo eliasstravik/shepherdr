@@ -2,7 +2,7 @@
 # A mod can only import files in its own folder, so each needs its own copy.
 # core/<file>: the shared core (core/ beside lib/), copied to mods/<mod>/core/<file>; the service and the web app
 # load the same file from core/.
-coordinator.js: coordinator menu-tasks new-menu-tasks newspace shepherdr-settings tabs-tasks tasks
+coordinator.js: coordinator menu-tasks new-menu-tasks newspace shepherdr-settings spaces-chat tabs-tasks tasks
 inbox.js: spaces-chat tabs-tasks tasks workspace-status-chat
 core/voice.js: chat
 core/accept.js: accept-card

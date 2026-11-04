@@ -189,12 +189,11 @@ const assistantOpen = (p: Place) => !!(p.assistantTab?.id || p.assistantTab?.liv
 const Quiet = ({ children }: { children: ReactNode }) => <div className="px-2 py-1.5 pl-8 text-fg3 phone:px-3 phone:pl-10">{children}</div>
 
 /** 3.0's + menu (core/menus.js NEW_MENU): Terminal; the Assistant (Show Assistant once the space has its tab; on another
- *  machine's space: this computer only); Start an agent: the installed ones (1 to 9), then up to two that aren't ("Not
+ *  machine's space it runs there); Start an agent: the installed ones (1 to 9), then up to two that aren't ("Not
  *  installed"); then New space, New worktree…, Open worktree… */
 function PlusItems({ place, done }: { place: Place; done: () => void }) {
-  const snap = useSnap()!
   const { agents, failed: off } = useAgents(place)
-  const row = MN.assistantRow({ open: assistantOpen(place), remote: place.machine !== snap.host })
+  const row = MN.assistantRow({ open: assistantOpen(place) })
   const choices: Agent[] = MN.agentChoices(agents ?? [])
   const installed = choices.filter((a) => a.installed)
   const newTab = (kind?: string) => {

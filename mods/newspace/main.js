@@ -226,14 +226,14 @@ export default class NewSpace extends View {
           }
           this.repo.set(folder, true);
         }
-        // Shepherdr settings' coordinator (this computer's, else Everywhere's) when set; {}: the
-        // template's own agent.
-        const choice = { ...(shepherdrFor(await readShepherdr(), `m:${LOCAL_MACHINE}`).coordinator ?? {}) };
+        // Shepherdr settings' coordinator (the space's machine's, else Everywhere's) when set; {}:
+        // the template's own agent. On another machine the Assistant runs there (mods/chat
+        // startAgent), with what is installed there when the one chosen isn't.
+        const choice = { ...(shepherdrFor(await readShepherdr(), `m:${this.machine ?? LOCAL_MACHINE}`).coordinator ?? {}) };
         // The tab bar makes it (coordinator.js watchNewSpaces): this dialog goes as the view moves.
-        // Shepherdr settings' "Open the Assistant" off (shared "coordinator.auto" false), or a space
-        // on another machine (the Assistant runs on this computer only): settings null, so the
-        // space keeps Herdr's own first tab and gets no Assistant.
-        const assistant = autoCoordinator() && !this.machine;
+        // Shepherdr settings' "Open the Assistant" off (shared "coordinator.auto" false): settings
+        // null, so the space keeps Herdr's own first tab and gets no Assistant.
+        const assistant = autoCoordinator();
         setShared("newspace.createreq", { folder, machine: this.machine, settings: assistant ? choice : null, icon: this.icon, at: Date.now() });
         this.close();
         return;

@@ -47,6 +47,22 @@ function drain() {
   }, 1000);
 }
 
+// An Assistant's first message for a space whose machine is offline (the window's chat does the same): kept here and
+// sent again, so the Assistant starts there once the machine is back. One per space, the latest words; a day at most.
+const starts = new Map<string, { b: any; hub: Hub; compat: Compat; at: number }>();
+let startTimer: ReturnType<typeof setInterval> | null = null;
+function startWhenBack() {
+  startTimer ??= setInterval(async () => {
+    const up = new Set((await addedMachines()).filter((m: any) => m.state === "connected").map((m: any) => m.name));
+    for (const [space, w] of [...starts]) {
+      const machine = space.split("/")[0];
+      if (Date.now() - w.at > 86_400_000) starts.delete(space);
+      else if (up.has(machine)) { starts.delete(space); await act(w.hub, w.b, w.compat).catch(() => null); }
+    }
+    if (!starts.size && startTimer) { clearInterval(startTimer); startTimer = null; }
+  }, 15_000);
+}
+
 async function run(cmd: string[]) {
   const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   const [stdout, stderr] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
@@ -400,6 +416,13 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (!text) throw new Error("nothing to send");
     const files = Array.isArray(b.attachments) && !sp.machine ? b.attachments.filter((p: unknown) => typeof p === "string" && p.startsWith(ATTACH + "/") && !p.includes("/../")) : [];
     const task = [text, ...files].join("\n\n");
+    // its machine offline: it waits (the web shows it waiting to be reached) and starts once the machine is back
+    if (sp.machine && !(await addedMachines()).some((m: any) => m.name === sp.machine && m.state === "connected")) {
+      const was = starts.get(space)?.b.text;
+      starts.set(space, { b: { ...b, text: was ? `${was}\n\n${text}` : text }, hub, compat, at: Date.now() });
+      startWhenBack();
+      return { ok: true, waiting: true };
+    }
     const labels = slot
       ? ["--label", `herdr.chat=${rec.pane}`, "--label", `herdr.chat.slot=${slot}`, "--label", `herdr.chat.origin=slot:${slot}`, "--label", "herdr.role=coordinator",
         "--label", `herdr.coordinator.space=${bare}`, ...(rec.tab ? ["--label", `herdr.coordinator.tab=${String(rec.tab).split("/").pop()}`] : [])]

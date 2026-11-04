@@ -66,7 +66,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 |---|---|---|---|
 | Terminal | NM:66 `NEW_MENU.terminal`, key hint (tab.new) | C:188 `NEW_MENU.terminal` → `tab-new` | ✓ |
 | Terminal's key hint | NM:66 Ctrl+Shift+T | none | ◇ a key the browser keeps |
-| Assistant row | NM:67 `assistantRow`: "Show Assistant" with its tab, else "Assistant" hint C; another machine's space "This computer only", greyed | C:188 the same row (`assistantOpen`: its tab, or its agent running) | ✓ |
+| Assistant row | NM:67 `assistantRow`: "Show Assistant" with its tab, else "Assistant" hint C, on every machine's space (its Assistant runs there) | C:188 the same row (`assistantOpen`: its tab, or its agent running) | ✓ |
 | Assistant row does | NM:53 tab.select, or a new Assistant tab | C:188 shows the space's chat (its first message starts the Assistant, as the window's new tab does) | ✓ |
 | C and 1–9 | NM:58 | C:164 useMenuKeys | ✓ |
 | "Start an agent" | NM:69 | C:188 MenuLabel | ✓ |

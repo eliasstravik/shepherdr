@@ -24,7 +24,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, TextareaState, Textarea, Scrollbar, VirtualListScrollHandle, TextView, v_virtual_list, InputState, Input } from "gpui-base";
-import { focused, props, run, theme, home, hc, exec, shared, setShared, watchFolder, window, settings, playSound, notify, appHome, readTextFile, writeTextFile, nextCommand, openOverlay, knownAgents } from "herdr";
+import { focused, props, run, theme, home, hc, exec, shared, setShared, watchFolder, window, settings, playSound, notify, appHome, readTextFile, writeTextFile, nextCommand, openOverlay, knownAgents, machines } from "herdr";
 import { agents, panes, terminals, spaces, inRender } from "./live.js";
 import * as fs from "fs/promises";
 import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names } from "./core/chat-log.js";
@@ -61,6 +61,10 @@ const KEEP = 2000;
 const COLUMN = 760;
 const KINDS = { "claude-code": "claude", claude: "claude", codex: "codex" };
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
+// The role templates' folder on the machine a command runs on (sh -c prefix: $dir).
+const TEMPLATE = 'dir="$HOME/.config/herdr-core/templates"; ';
+// Whether a machine's layout is here now (it's connected); this computer always is.
+const online = (machine) => !machine || machines().find((m) => m.name === machine)?.layout === "ready";
 const same = (a, b) => norm(a) === norm(b);
 // When an ask was made: its id is <terminal>.<seconds>.<pid> (ask-hook.sh), taken at the end of
 // that second so it sits after what was said in it.
@@ -1367,6 +1371,14 @@ export default class Chat extends View {
   // An empty slot chat whose agent is running after all: follow it, as if found at the start.
   adoptSlot(cx) {
     if (this.addr || this.phase !== "fresh") return;
+    // Messages that waited for their machine (startAgent): once it's back, they start it as one.
+    const waited = this.pending.filter((p) => p.waiting);
+    if (waited.length && online(waited[0].machine)) {
+      this.pending = this.pending.filter((p) => !p.waiting);
+      const [first, ...rest] = waited.map((p) => p.msg);
+      this.startAgent({ ...first, text: [first, ...rest].map((m) => m.text).join("\n\n"), files: [first, ...rest].flatMap((m) => m.files) }, cx);
+      return;
+    }
     const a = this.slotAgent();
     if (!a) return;
     this.addr = a;
@@ -1413,23 +1425,35 @@ export default class Chat extends View {
     const p = msg ? { id: `pending-${msg.id}`, text: msg.text, replyTo: msg.quote ? excerpt(msg.quote.text, 80) : null, files: msg.files.filter((f) => !f.image).map((f) => f.name),
       paths: msg.files.filter((f) => f.image).map((f) => f.path), at: Date.now(), sent: task, match: norm(msg.text).slice(0, 60) || null } : { failed: null };
     if (msg) this.pending.push(p);
+    // Its machine offline: said plainly under the message, which starts it once the machine is
+    // back (adoptSlot); nothing is lost meanwhile.
+    if (machine && !online(machine)) {
+      if (msg) Object.assign(p, { waiting: WORDS.offline(machine), machine, msg });
+      else toast({ title: `${machine} is offline`, body: "Its Assistant starts when it's back." });
+      cx.notify();
+      return;
+    }
     this.phase = "starting";
     cx.notify();
     cx.spawn(async (cx) => {
       // Chosen settings (the New space dialog, props.settings): the template's words with that
-      // agent and its flags, as a one-off template (as restart.sh does). Here only for now.
+      // agent and its flags, as a one-off template (as restart.sh does), written beside the
+      // template on the machine it runs on. There, an agent that isn't installed leaves the
+      // template's own command (what that machine's sync put there).
       let launch = template, oneOff = null;
       const st = this.choice?.sel ?? props()?.settings;
-      if (st?.agent && !machine) {
+      const on = machine ? { on: machine } : {};
+      const there = !machine || !st?.agent ? true : (await knownAgents(on).catch(() => []))
+        .some((a) => (a.key === st.agent || (a.run ?? [])[0] === st.agent) && a.installed !== false);
+      if (st?.agent && there) {
         const built = agent.argvFor(st, { agent: null, argv: [] });
         const q = (a) => (/^[\w@%+=:,./-]+$/.test(a) ? a : `'${String(a).replace(/'/g, "'\\''")}'`);
-        const dir = `${home()}/.config/herdr-core/templates`;
-        const src = (await exec("cat", [`${dir}/${template}.md`]).catch(() => null))?.stdout ?? "";
+        const src = (await exec("sh", ["-c", TEMPLATE + 'cat "$dir/$1.md"', "x", template], on).catch(() => null))?.stdout ?? "";
         const body = src.replace(/^---\n[\s\S]*?\n---\n?/, "");
         if (body.trim()) {
           oneOff = `herdr-${template}-${Date.now().toString(36)}`;
           const file = `---\nname: ${oneOff}\ndescription: A one-off ${template} start with chosen settings (mods/chat), removed after use.\ncommand: ${built.argv.map(q).join(" ")}\n---\n${body}`;
-          await exec("sh", ["-c", 'printf "%s" "$2" > "$1"', "x", `${dir}/${oneOff}.md`, file]);
+          await exec("sh", ["-c", TEMPLATE + 'printf "%s" "$2" > "$dir/$1.md"', "x", oneOff, file], on);
           launch = oneOff;
         }
       }
@@ -1440,7 +1464,7 @@ export default class Chat extends View {
         ...(rec?.tab ? ["--label", `herdr.coordinator.tab=${String(rec.tab).split("/").pop()}`] : []),
         launch, ...(task ? [task] : [])];
       const r = await hc(args).catch((e) => ({ code: 1, stderr: String(e?.message ?? e), stdout: "" }));
-      if (oneOff) exec("rm", ["-f", `${home()}/.config/herdr-core/templates/${oneOff}.md`]);
+      if (oneOff) exec("sh", ["-c", TEMPLATE + 'rm -f "$dir/$1.md"', "x", oneOff], on);
       let out = {};
       try { out = JSON.parse(r.stdout || "{}"); } catch {}
       if (r.code !== 0 || !out.address) {
@@ -1478,14 +1502,14 @@ export default class Chat extends View {
   // Before the first message: what the agent will start on (the model button in the box), from
   // props.settings (Shepherdr settings, given when its tab opened), else the CLI's own default.
   // A pick there just changes it: nothing runs yet, so nothing is lost. Kept per slot, so a
-  // reload keeps it. This computer only (startAgent uses it only here).
+  // reload keeps it. On another machine, what is installed there.
   loadChoice(cx) {
     const space = spaces().find((x) => x.id === (props()?.space ?? this.slotRec()?.space));
-    if (space?.machine || this.choice) return;
+    if (this.choice) return;
     this.choice = { sel: null, data: null };
     cx.spawn(async (cx) => {
       try {
-        const data = await choices.loadChoices(null);
+        const data = await choices.loadChoices(space?.machine ?? null);
         let kept = null;
         try { kept = JSON.parse(localStorage.getItem(`choice:${this.slot}`) ?? "null"); } catch {}
         const st = kept?.agent ? kept : props()?.settings;
@@ -2446,7 +2470,7 @@ export default class Chat extends View {
     for (const p of this.pending) {
       const from = out.length;
       if (p.replyTo) out.push({ kind: "replyref", id: `rr:${p.id}`, to: p.replyTo, of: p.id, side: "user" });
-      out.push({ kind: "pending", id: p.id, text: p.text, files: p.files, failed: p.failed, late: p.late, delivered: p.delivered });
+      out.push({ kind: "pending", id: p.id, text: p.text, files: p.files, failed: p.failed, late: p.late, waiting: p.waiting, delivered: p.delivered });
       if (p.paths?.length) out.push({ kind: "imgs", id: `i:${p.id}`, paths: p.paths, faded: !p.delivered });
       block(from, p.id);
     }
@@ -2555,7 +2579,7 @@ export default class Chat extends View {
     const found = q && String(x.text ?? x.code ?? "").toLowerCase().includes(q.toLowerCase()) ? `|f:${q}` : "";
     const open = (x.kind === "tools" || x.kind === "brief") && this.opened.has(x.id);
     const shown = open && x.steps ? x.steps.filter((s) => this.results.get(s.id) != null).length : 0;
-    return `${x.id}|${x.kind}${x.closed ? `.${x.closed}` : ""}|${open ? `o${x.steps?.length ?? 1}.${shown}` : ""}|${x.text?.length ?? x.code?.length ?? 0}|${x.from ? 1 : 0}${x.failed ? 1 : 0}${x.late ? 1 : 0}${x.images ? 1 : 0}${x.files?.length ?? 0}|${x.paths?.length ?? 0}${x.paths?.every((p) => this.views[p]) ? "v" : ""}|${(x.pills ?? []).map((p) => p.emoji + (p.you ? 1 : 0) + (p.agent ? 1 : 0)).join("")}|${x.bar ? "b" : ""}${x.kind === "artifact" ? `|a${x.version ?? ""}${x.line ? "l" : ""}${x.pending ? "p" : ""}` : ""}${x.kind === "tasknews" ? `|${x.accept ? "a" : ""}` : ""}${x.kind === "cardstrip" ? `|cs${x.sig}${x.first ? "F" : ""}${x.last ? "L" : ""}` : ""}|${x.clip ? `c${x.clip}` : ""}${x.open ? "o" : ""}${x.kind === "day" ? x.text : ""}|${x.top0 ? "T" : ""}${x.bot0 ? "B" : ""}${x.h ?? ""}${found}`;
+    return `${x.id}|${x.kind}${x.closed ? `.${x.closed}` : ""}|${open ? `o${x.steps?.length ?? 1}.${shown}` : ""}|${x.text?.length ?? x.code?.length ?? 0}|${x.from ? 1 : 0}${x.failed ? 1 : 0}${x.late ? 1 : 0}${x.waiting ? 1 : 0}${x.images ? 1 : 0}${x.files?.length ?? 0}|${x.paths?.length ?? 0}${x.paths?.every((p) => this.views[p]) ? "v" : ""}|${(x.pills ?? []).map((p) => p.emoji + (p.you ? 1 : 0) + (p.agent ? 1 : 0)).join("")}|${x.bar ? "b" : ""}${x.kind === "artifact" ? `|a${x.version ?? ""}${x.line ? "l" : ""}${x.pending ? "p" : ""}` : ""}${x.kind === "tasknews" ? `|${x.accept ? "a" : ""}` : ""}${x.kind === "cardstrip" ? `|cs${x.sig}${x.first ? "F" : ""}${x.last ? "L" : ""}` : ""}|${x.clip ? `c${x.clip}` : ""}${x.open ? "o" : ""}${x.kind === "day" ? x.text : ""}|${x.top0 ? "T" : ""}${x.bot0 ? "B" : ""}${x.h ?? ""}${found}`;
   }
 
   // A row's height before it is measured: bands and gaps are as tall as spaced() made them.
@@ -2677,7 +2701,8 @@ export default class Chat extends View {
           .when(Boolean(x.text), (el) => el.child(bubble(x.text, !x.delivered || Boolean(x.failed))))
           .when(x.files?.length > 0, (el) => el.child(fileLine(x.files.join(", "))))
           .when(Boolean(x.failed), (el) => el.child(div().text_size(12).text_color(t.blocked).cursor_pointer().child(notSent(x.failed))))
-          .when(!x.failed && x.late, (el) => el.child(div().text_size(12).text_color(t.dim).child(WORDS.late))));
+          .when(!x.failed && x.late, (el) => el.child(div().text_size(12).text_color(t.dim).child(WORDS.late)))
+          .when(!x.failed && Boolean(x.waiting), (el) => el.child(div().text_size(12).text_color(t.dim).child(x.waiting))));
       case "replyref":
         // The message this one answers, in one dim line above it.
         return col(h_flex().w_full().h(18).justify_end().child(h_flex().max_w(Math.floor(Math.min(this.width, COLUMN) * 0.6)).gap(5).items_center()

@@ -28,6 +28,7 @@ import { startPolling, allStats, healthMeters, bars } from "./machines.js";
 import { meterWords, healthErrorWords } from "./core/machines.js";
 import { countBadge, red, H, TEXT, RADIUS } from "./ui.js";
 import { spaceName, gitTail, tilde, sharedNames } from "./core/spaces.js";
+import { coordinatorTab } from "./coordinator.js";
 
 const POPUPS = { add: Menu, space: Menu, section: Menu, icon: IconPicker, rename: Rename, machine: MachinePopup };
 
@@ -279,7 +280,8 @@ export default class Spaces extends View {
 
   // The space's own menu (popups.js).
   menu(w, g, name, e) {
-    openMenu("space", { space: w.id, name, machine: w.machine ?? null, git: g ? (g.linked ? "linked" : "main") : null, unread: this.unread.has(w.id), row: rectOf(e) });
+    openMenu("space", { space: w.id, name, machine: w.machine ?? null, git: g ? (g.linked ? "linked" : "main") : null, unread: this.unread.has(w.id),
+      assistant: Boolean(coordinatorTab(w)), row: rectOf(e) });
   }
 
   // What a space is called: the name the person gave it, else after where it is now (`at`), as

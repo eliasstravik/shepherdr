@@ -15,6 +15,7 @@ import { openRename, openNewSection, openRenameMachine } from "./rename.js";
 import { logSpace } from "./spacelog.js";
 import { menuRow, segmented, TEXT, openSettings } from "./ui.js";
 import { addMenu, spaceMenu, machineMenu, sectionMenu } from "./core/menus.js";
+import { requestCoordinator } from "./coordinator.js";
 
 const ROW = 32, PAD = 5, SEP = 9, W = 210;
 // The Notify setting (a space's menu): its labeled row, then a small note under it. A menu with it
@@ -55,12 +56,15 @@ export function openMenu(view, p, at = "pointer") {
 
 // Each menu's items: { label, icon, hint, act }, or { sep: true }: core/menus.js's lists (the web app builds its menus
 // from the same ones), each item done here.
-const MENU_ICON = { "check-check": "mods/spaces-chat/check-check.svg", "trash-2": "mods/spaces-chat/trash-2.svg" };
+const MENU_ICON = { "check-check": "mods/spaces-chat/check-check.svg", "trash-2": "mods/spaces-chat/trash-2.svg", network: "mods/coordinator/network.svg" };
 const built = (list, acts) => list.map((it) => (it.sep ? it : it.setting ? { ...acts[it.id], note: it.note } : { label: it.label, icon: MENU_ICON[it.icon] ?? it.icon, act: acts[it.id] }));
 const ITEMS = {
   // The machine header's +.
   add: (p) => built(addMenu(), { "new-space": () => newSpace(p.machine), "new-section": () => openNewSection(p.machine) }),
-  space: (p) => built(spaceMenu({ unread: p.unread, pinned: isPinned(p.space), git: p.git }), {
+  space: (p) => built(spaceMenu({ unread: p.unread, pinned: isPinned(p.space), git: p.git, assistant: p.assistant !== false }), {
+    // No Assistant's tab yet (on any machine): the tab bar opens it, on the space's machine, taking
+    // one already running there (coordinator.js openCoordinator); the view goes to it.
+    assistant: () => requestCoordinator({ id: p.space }),
     // Its Assistant's Notify (notify.js), as Shepherdr's: picked in place, the menu stays open.
     notify: { notify: p.space },
     read: () => markRead(assistantOf({ id: p.space, machine: p.machine })),

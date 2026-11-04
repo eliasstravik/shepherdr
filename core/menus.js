@@ -11,12 +11,14 @@ export const addMenu = () => [
   { id: "new-section", label: "New section", icon: "folder-plus" },
 ];
 
-// git: null (not a repo), "main" (a repo's own folder) or "linked" (one of its worktrees).
-export function spaceMenu({ unread = false, pinned = false, git = null } = {}) {
+// git: null (not a repo), "main" (a repo's own folder) or "linked" (one of its worktrees). assistant: false when the
+// space has no Assistant's tab yet (on any machine): Start Assistant opens it, taking one already running there.
+export function spaceMenu({ unread = false, pinned = false, git = null, assistant = true } = {}) {
   return [
     // its Assistant's Notify, picked in place (the menu stays open), a quiet note under it
     { id: "notify", label: "Notify", setting: true, note: "Tasks alert either way." },
     sep,
+    ...(assistant ? [] : [{ id: "assistant", label: "Start Assistant", icon: "network" }]),
     ...(unread ? [{ id: "read", label: "Mark as read", icon: "check-check" }] : []),
     pinned ? { id: "unpin", label: "Unpin", icon: "pin-off" } : { id: "pin", label: "Pin", icon: "pin" },
     { id: "rename", label: "Rename…", icon: "square-pen" },
@@ -69,10 +71,9 @@ export const NEW_MENU = {
   terminal: "Terminal", agents: "Start an agent", loading: "Checking installed agents…", failed: "Couldn't load agents",
   notInstalled: "Not installed", space: "New space", worktreeNew: "New worktree…", worktreeOpen: "Open worktree…",
 };
-// open: the space has its Assistant's tab (the row goes to it); remote: the space is on another machine (an Assistant
-// starts from this computer's template, so only here). Its key is C.
-export const assistantRow = ({ open = false, remote = false } = {}) =>
-  ({ label: open ? "Show Assistant" : "Assistant", hint: open ? "" : remote ? "This computer only" : "C", enabled: open || !remote });
+// open: the space has its Assistant's tab (the row goes to it). On another machine's space too: its Assistant runs
+// there, from that machine's assistant template. Its key is C.
+export const assistantRow = ({ open = false } = {}) => ({ label: open ? "Show Assistant" : "Assistant", hint: open ? "" : "C", enabled: true });
 // The installed agents (keys 1 to 9, in order), then at most two that aren't.
 export const agentChoices = (agents) => [...agents.filter((a) => a.installed), ...agents.filter((a) => !a.installed).slice(0, 2)];
 export const agentHint = (a, i) => (a.installed ? (i < 9 ? String(i + 1) : "") : NEW_MENU.notInstalled);
