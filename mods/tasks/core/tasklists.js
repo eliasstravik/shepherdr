@@ -14,6 +14,16 @@ export const READ_LISTS = 'cd "$HOME/.herdr/tasks" 2>/dev/null || exit 0; for f 
 
 export const isTaskList = (d) => !!d && typeof d === "object" && !Array.isArray(d) && typeof d.folder === "string" && Array.isArray(d.tasks);
 
+// One of READ_LISTS's files by its name (".autopilot.json": that machine's Autopilot), parsed; null when it isn't there.
+export function fileIn(stdout, name) {
+  for (const x of (stdout ?? "").split("\n@@herdr-task-list@@\n")) {
+    const nl = x.indexOf("\n");
+    if (x.slice(0, nl) !== name) continue;
+    try { return JSON.parse(x.slice(nl + 1)); } catch { return null; }
+  }
+  return null;
+}
+
 // READ_LISTS's output -> [{ slug, ...list }], task lists only.
 export function taskLists(stdout) {
   const out = [];

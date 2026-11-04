@@ -32,7 +32,8 @@ in `.autopilot.json` (version 1) are dropped on the next read.
 | `herdr-task autopilot set [--space <id> \| --everywhere] --every … --on … --heartbeat …` | writes that level in Shepherdr settings; `default` drops a field there, so it follows Everywhere's again; refused on a copy the window pushed |
 | `herdr-task autopilot check --every …` | a schedule's words checked without saving (the window's and the web's Custom box) |
 | `herdr-task autopilot heartbeat [--space <id>]` | the heartbeat that applies (`heartbeat_text`, `heartbeat_from`: space, everywhere or file), and the old file (made with the starter when missing; an earlier version's starter, never edited, becomes today's on any `autopilot` command) |
-| `herdr-task autopilot show --space <id>` / `--everywhere`, `list [--json]` | what applies there, `own` (the fields the space sets itself), next and last wake, progress; `list` is `{everywhere, spaces}`, its text first `Everywhere: Every hour`, then each space by name (never `~`), with "its own schedule" where it has one |
+| `herdr-task autopilot show --space <id>` / `--everywhere`, `list [--here] [--json]` | what applies there, `own` (the fields the space sets itself), next and last wake, progress; `list` is `{everywhere, spaces}`, its text first `Everywhere: Every hour`, then every space the window lists by name (never `~`), this machine's then each other machine's (`exedev on vm-stravik`, asked there at once; `can't tell, … didn't answer` when it's away), with "its own schedule" where it has one; `--here`: this machine's only |
+| Another machine's space (`--space vm/sp1`) | `on`, `off`, `run-now`, `show`, `heartbeat` are done by herdr-task on that machine (installed there first when it isn't this one's), told the space's name and folder from the window here; its own record and scheduler wake it there, so a wake is never sent twice and goes on while this machine sleeps. `set` writes this machine's settings under `vm/sp1`, which reach it with the rest. `on` and `run-now` start that machine's scheduler when it isn't running |
 | `run-now --space <id>`, `progress`, `complete` | as before, per space |
 
 ## The page
@@ -59,6 +60,6 @@ in `.autopilot.json` (version 1) are dropped on the next read.
 
 | Element | Window | Web | State |
 |---|---|---|---|
-| On or off | the space's own switch (`mods/pane-chat/autopilot.js` apPoll, `pilotFor`) | `place.pilot` from `model.ts` pilotOf | ✓ |
+| On or off | the space's own switch (`mods/pane-chat/autopilot.js` apPoll, `pilotFor`); another machine's from its file there (read over herdr-core about every 12 s), flipped through herdr-task | `place.pilot` from `model.ts` pilotOf (another machine's file comes with its lists) | ✓ |
 | Detail | `Waking`, `Queued`, `Next 10:00`, `Next Wed`, `On events`, `Run now only` (`headerDetail`, from the space's own schedule and events, else Everywhere's) | `AP.headerDetail` (`web/plugins/coordinators/client.tsx`) | ✓ |
 | `Write a heartbeat` | while on and the heartbeat that applies is empty (herdr-task's `blank`; the starter is a real one); opens Settings › Autopilot on that space | the same; opens that space's Autopilot page | ✓ |

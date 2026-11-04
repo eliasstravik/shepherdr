@@ -48,16 +48,17 @@ def install_secret(machine):
             f.write(digest)
 
 
-def remote(machine, argv):
-    """Runs herdr-task on the machine that holds the folder (installing it there first), then
-    names a new tab from here, where the window is."""
+def remote_run(machine, argv, timeout=None):
+    """herdr-task on another machine (installed there first when it isn't this one): its run,
+    output kept. timeout: seconds before herdr-core gives up on it."""
     body = bundle()
     digest = hashlib.sha1(body).hexdigest()
     mark = os.path.join(STORE, ".remote", machine)
     target = ".local/bin/herdr-task"
     try:
         with open(mark) as f:
-            installed = f.read().strip() == digest
+            # "source": it holds herdr-task's source, and runs its own
+            installed = f.read().strip() in (digest, "source")
     except OSError:
         installed = False
 
@@ -67,6 +68,13 @@ def remote(machine, argv):
             raise Fail(f"herdr-task isn't current on {machine}, and copies to other machines wait: {held}. "
                        "Run `shepherdr doctor` once the install is whole.")
         guard(["hc"])
+        # A machine with Herdr's own install (its window's) holds herdr-task's source: copies come from there, it's
+        # never written to (machines.py, the same rule). Its link ~/.local/bin/herdr-task leads into that install.
+        if run(["hc", "exec", "--on", machine, "--", "test", "-d", ".config/herdr-app/mods/tasks/bin/herdr_task"]).returncode == 0:
+            os.makedirs(os.path.dirname(mark), exist_ok=True)
+            with open(mark, "w") as f:
+                f.write("source")
+            return
         r = subprocess.run(["hc", "file", "write", "--on", machine, target], input=body, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if r.returncode != 0:
             raise Fail(f"Couldn't install herdr-task on {machine}: {r.stderr.decode().strip()}")
@@ -79,15 +87,23 @@ def remote(machine, argv):
     if not installed and not sync_held():
         install()
     install_secret(machine)
-    if argv[:1] == ["tick"]:
-        # Its start limits live in Settings here, where the window is (HERD-40).
-        from .settings import machine_limits
-        argv = [*argv, "--machine", machine, "--hold", json.dumps(machine_limits(machine))]
-    call = ["hc", "exec", "--on", machine, "--", "sh", "-c", 'exec "$HOME/.local/bin/herdr-task" "$@"', "herdr-task", *argv]
+    wait = ["--timeout", str(timeout)] if timeout else []
+    call = ["hc", "exec", "--on", machine, *wait, "--", "sh", "-c", 'exec "$HOME/.local/bin/herdr-task" "$@"', "herdr-task", *argv]
     r = run(call)
     if r.returncode == 127 or "not found" in r.stderr and not r.stdout:
         install()
         r = run(call)
+    return r
+
+
+def remote(machine, argv):
+    """Runs herdr-task on the machine that holds the folder (installing it there first), then
+    names a new tab from here, where the window is."""
+    if argv[:1] == ["tick"]:
+        # Its start limits live in Settings here, where the window is (HERD-40).
+        from .settings import machine_limits
+        argv = [*argv, "--machine", machine, "--hold", json.dumps(machine_limits(machine))]
+    r = remote_run(machine, argv)
     sys.stderr.write(r.stderr)
     out = r.stdout
     if r.returncode == 0 and "--json" in argv:
@@ -276,11 +292,15 @@ def main():
             c.add_argument("--space", help="the space (default: the Assistant's own)")
         if everywhere:
             c.add_argument("--everywhere", action="store_true", help="Everywhere's: what every space works from unless it sets its own")
+        # A space on another machine is done there (autopilot.forward), told its name and folder from the window here.
+        c.add_argument("--name", help=argparse.SUPPRESS)
+        c.add_argument("--space-folder", help=argparse.SUPPRESS)
         c.add_argument("--json", action="store_true")
         c.set_defaults(fn=cmd_autopilot)
         return c
     ap_cmd("show", "this space's Autopilot (or --everywhere): when it wakes and from what heartbeat, its own or Everywhere's, next and last wake, progress", everywhere=True)
-    c = ap.add_parser("list", help="Everywhere's schedule and events, and each space's Autopilot on this machine")
+    c = ap.add_parser("list", help="Everywhere's schedule and events, and each space's Autopilot, on this machine and every machine the window lists")
+    c.add_argument("--here", action="store_true", help="only this machine's spaces")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_autopilot)
     ap_cmd("on", "turn it on in this space (makes the heartbeat file)")

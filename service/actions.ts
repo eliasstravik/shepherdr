@@ -244,9 +244,12 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     return { ok: true };
   }
   if (b?.type === "mode" && typeof b.place === "string" && (b.mode === "autopilot" || b.mode === "regular")) {
-    // Autopilot: herdr-task's, per space on this machine (a plain switch, as the window's header)
-    if (b.place.includes("/")) throw new Error("Autopilot is set on that space's own machine.");
-    const r = await run(["herdr-task", "autopilot", b.mode === "autopilot" ? "on" : "off", "--space", b.place, "--json"]);
+    // Autopilot: herdr-task's, per space (a plain switch, as the window's header); another machine's ("vm/sp1") is
+    // switched by herdr-task there, told its folder from here, and its own scheduler wakes it
+    if (!/^([\w.-]+\/)?[\w-]+$/.test(b.place)) throw new Error("bad space");
+    const folder = compat.spaceOf(b.place)?.folder;
+    const r = await run(["herdr-task", "autopilot", b.mode === "autopilot" ? "on" : "off", "--space", b.place,
+      ...(b.place.includes("/") && folder ? ["--space-folder", folder] : []), "--json"]);
     if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim().split("\n").pop() || "Autopilot didn't change.");
     return { ok: true };
   }

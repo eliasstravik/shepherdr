@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { Hub } from "./hub.ts";
 import type { Live } from "./live.ts";
 import { HOME } from "./paths.ts";
-import { READ_LISTS, taskLists } from "../core/tasklists.js";
+import { READ_LISTS, taskLists, fileIn } from "../core/tasklists.js";
 import * as T from "../core/tasks.js";
 // The core is plain JavaScript; its defaults read as narrow types to TypeScript.
 const { place, refOf, taskKey, autoPrefix, reportOf, secondLine, leftOf, queueReason, machineOf } = T as any;
@@ -16,9 +16,10 @@ const { spacesFromDoc, sidebarOf, assistantOf, isUnread } = S as any;
 import * as N from "../core/notify.js";
 const { spaceLevel } = N as any;
 import * as AP from "../core/autopilot.js";
-const { everywhereOf, pilotFor, STARTER, currentBeat } = AP as any;
+const { everywhereOf, pilotFor, levelOf, STARTER, currentBeat } = AP as any;
 
 const SHARED = join(HOME, ".config", "herdr-app", "shared.json");
+const SETTINGS = process.env.HERDR_TASK_SETTINGS || join(HOME, ".herdr", "shepherdr.json");
 const SHELL = /^(ba|z|fi|da|k|tc|c)?sh$|^nu$|^pwsh$/;
 
 /** Runs a command on a machine through herdr-core (null: here). Output comes back base64. */
@@ -115,6 +116,11 @@ export class Model {
   }
 
   private autopilot: Record<string, any> = {};
+  /** Each other machine's Autopilot file (its ~/.herdr/tasks/.autopilot.json, read with its lists): its spaces' switches
+   *  and wakes, kept and woken there. */
+  private pilots = new Map<string, any>();
+  /** Shepherdr settings as this machine has them (each space's own Autopilot, another machine's by "vm/sp1"). */
+  private settings: any = {};
   /** Autopilot as Everywhere has it on this machine (herdr-task's view: its schedule, events, heartbeat's words and
    *  what wakes it in words) */
   pilotEverywhere: any = { ...everywhereOf(null), words: STARTER };
@@ -123,9 +129,15 @@ export class Model {
    *  Everywhere's, its switch, next and last wake, progress, the heartbeat's words). One read at a time. */
   readAutopilot() {
     return this.reading ??= (async () => {
+      try { this.settings = JSON.parse(readFileSync(SETTINGS, "utf8")) ?? {}; } catch {}
       try {
-        const p = Bun.spawn(["herdr-task", "autopilot", "list", "--json"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
-        const out = JSON.parse(await new Response(p.stdout).text() || "{}");
+        // this machine's own (--here: other machines' are read with their lists); a herdr-task from before --here lists only its own
+        const listed = async (args: string[]) => {
+          const p = Bun.spawn(["herdr-task", "autopilot", "list", ...args, "--json"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+          const text = await new Response(p.stdout).text();
+          return (await p.exited) === 0 ? text : null;
+        };
+        const out = JSON.parse((await listed(["--here"])) ?? (await listed([])) ?? "{}");
         const e = out.everywhere ?? {};
         // a herdr-task from before Settings kept the heartbeat gives only its file
         const file = (f: string | null) => { try { return f && existsSync(f) ? currentBeat(readFileSync(f, "utf8")) : STARTER; } catch { return STARTER; } };
@@ -142,8 +154,24 @@ export class Model {
   /** What applies in a space on this machine: its switch (off until herdr-task has a record of it), its schedule,
    *  events and heartbeat's words (its own or Everywhere's). */
   pilotOf(id: string) {
+    const cut = id.indexOf("/");
+    if (cut > 0) {
+      // another machine's: its own record there, what applies by this machine's settings (pushed to it as its own);
+      // with no heartbeat in Settings it works from its machine's file, made with the starter when switched on
+      const file = this.pilots.get(id.slice(0, cut)) ?? {};
+      const a = pilotFor({ ...file, spaces: { [id]: file.spaces?.[id.slice(cut + 1)] ?? {} } }, id, this.settings);
+      const words = levelOf(this.settings, id).heartbeat ?? levelOf(this.settings).heartbeat ?? STARTER;
+      return { ...a, words };
+    }
     const a = this.autopilot[id] ?? pilotFor({ everywhere: this.pilotEverywhere }, id);
     return { ...a, words: a.heartbeat_text ?? this.pilotEverywhere.words };
+  }
+
+  /** A space's Autopilot read again now (its switch flipped, or woken): this machine's, or its machine's lists. */
+  async readPilot(id: string) {
+    const cut = id.indexOf("/");
+    await (cut > 0 ? this.readLists(id.slice(0, cut)) : this.readAutopilot());
+    this.soon();
   }
 
   private readShared() {
@@ -164,6 +192,7 @@ export class Model {
     try {
       const r = await sh(this.hub, READ_LISTS, [], m);
       if (r.code !== 0) return;
+      if (m) this.pilots.set(m, fileIn(r.stdout, ".autopilot.json") ?? {});
       this.lists.set(m, taskLists(r.stdout).map((d: any) => ({ ...d, machine: m, prefix: d.prefix || autoPrefix(d.folder), tasks: Array.isArray(d.tasks) ? d.tasks : [] })));
     } catch {}
   }
@@ -230,9 +259,9 @@ export class Model {
         changedAt: Math.max(0, ...(s.tabs ?? []).flatMap((t: any) => t.terminals ?? []).map((a: string) => Number((this.hub.terminals.get(a) as any)?.status_ms) || 0)),
         section: bar.sections.find((x: any) => (x.spaces ?? []).includes(s.id))?.id ?? null,
         assistant: k?.address ?? null, assistantStatus: (k as any)?.status?.state ?? null,
-        autopilot: !s.machine && this.pilotOf(s.id).on ? { next: this.pilotOf(s.id).next_run ?? null } : null,
+        autopilot: this.pilotOf(s.id).on ? { next: this.pilotOf(s.id).next_run ?? null } : null,
         git: this.gitOf(s),
-        pilot: s.machine ? null : this.pilotOf(s.id),
+        pilot: this.pilotOf(s.id),
         unread: isUnread(k, seen) && spaceLevel(this.value("notify") ?? {}, s.id) !== "Off",
         red: here.filter((r) => r.section === "needs").length + ((k as any)?.status?.state === "blocked" ? 1 : 0),
         green: here.filter((r) => r.section === "ready").length,

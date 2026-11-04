@@ -7,6 +7,7 @@ import datetime
 import fcntl
 import json
 import os
+import re
 import time
 
 from .base import addon_off, Fail, hc_json, HOME, now, run, STORE
@@ -16,6 +17,7 @@ from .launch import caller_labels, coordinator_in
 from .store import locate, read_list, Store, store_files
 from .output import say
 from .news import news_send, typing
+from .scheduler import ensure_scheduler
 from .automations import EVENTS, events_in, HOW, next_run, parse_every, parse_on, trigger_words
 
 
@@ -40,10 +42,15 @@ from .automations import EVENTS, events_in, HOW, next_run, parse_every, parse_on
 #      "last_wake" ({at, reason, outcome}), "wakes" (the last 10 of those),
 #      "progress" ({text, at}), "completed" ({text, at}), "seen" (events_in's record per folder)}}}
 # A schedule or events a space held of its own in version 1 are dropped on the next read.
+# Each machine keeps its own spaces' records and its own scheduler wakes them (their Assistants run
+# there): a space on another machine ("vm/sp1" here) is switched, shown and woken by herdr-task on
+# that machine (forward()), never from here, so a wake is never sent twice and goes on while this
+# computer sleeps. `list` asks every machine the window lists.
 
 STATE = os.path.join(STORE, ".autopilot.json")
 HEARTBEATS = os.environ.get("HERDR_AUTOPILOT_HOME") or os.path.join(HOME, ".config", "herdr-core", "autopilot")
 DEFAULT_EVERY = "every 60 minutes"
+REMOTE_WAIT = 30                 # seconds another machine has to answer
 PENDING_MAX_MS = 6 * 3600000     # a wake that found no Assistant this long: missed
 TURN_MAX_MS = 3 * 3600000        # a wake's turn not seen ending this long: closed anyway
 HEARTBEAT_MAX = 8000             # characters of the heartbeat in a wake (the rest: read the file)
@@ -173,14 +180,119 @@ def state(write=True):
         lock.close()
 
 
-def local_spaces():
-    """This computer's spaces in the window's list: [{id, name, folder}] ([] when it can't say)."""
+def window_spaces():
+    """Every space in the window's list on this computer, other machines' too ("vm/sp1", with its
+    machine): [{id, machine, name, folder}]; None when no window here can say (a VM has none)."""
     try:
         r = run(["herdr-app", "ls"])
-        return [x for x in json.loads(r.stdout).get("spaces") or []
-                if x.get("id") and "/" not in x["id"] and not x.get("machine")]
+        return [x for x in json.loads(r.stdout).get("spaces") or [] if x.get("id")]
     except (Fail, ValueError, OSError, AttributeError):
-        return []
+        return None
+
+
+def local_spaces():
+    """This computer's spaces in the window's list: [{id, name, folder}] ([] when it can't say)."""
+    return [x for x in window_spaces() or [] if "/" not in x["id"] and not x.get("machine")]
+
+
+def machine_of(space):
+    """(machine, its id there) of a space as this computer names it: "vm/sp1" -> ("vm", "sp1");
+    this computer's own -> (None, its id)."""
+    m, cut, rest = (space or "").partition("/")
+    return (m, rest) if cut else (None, space)
+
+
+def there(v, machine):
+    """Another machine's view of one of its spaces, named as this computer names it."""
+    if v.get("space") and "/" not in v["space"]:
+        v["space"] = f"{machine}/{v['space']}"
+    v["machine"] = machine
+    return v
+
+
+def forward(args, machine, space):
+    """A space on another machine: herdr-task there switches, wakes or shows it (installed there
+    first when it isn't this one), told the space's name and folder (given, else from the window
+    here: a machine without a window can't say them). Its view, named as this computer names it."""
+    from .cli import remote_run
+    argv = ["autopilot", args.autopilot, "--space", space, "--json"]
+    if args.autopilot in ("on", "off", "run-now"):
+        w = {"name": getattr(args, "name", None), "folder": getattr(args, "space_folder", None)}
+        if not w["folder"]:
+            w = next((x for x in window_spaces() or [] if x["id"] == f"{machine}/{space}"), None) or {}
+        told = [x for flag, v in (("--name", w.get("name")), ("--space-folder", w.get("folder"))) if v for x in (flag, v)]
+    else:
+        told = []
+    r = remote_run(machine, argv + told, timeout=REMOTE_WAIT)
+    if told and "unrecognized arguments" in r.stderr:
+        # a machine running its own older herdr-task (it has a window: it knows its spaces itself)
+        r = remote_run(machine, argv, timeout=REMOTE_WAIT)
+    try:
+        v = json.loads(r.stdout)
+    except ValueError:
+        v = None
+    if not isinstance(v, dict):
+        why = ((r.stderr or r.stdout).strip().splitlines() or ["no answer"])[-1].replace("herdr-task: ", "")
+        raise Fail(f"Couldn't reach {machine}: {why}")
+    if v.get("error"):
+        raise Fail(v["error"])
+    return there(v, machine)
+
+
+def remote_lists(machines):
+    """Each other machine's own spaces (`autopilot list --here` there), asked at once:
+    {machine: its list, or {"error": why}}."""
+    from concurrent.futures import ThreadPoolExecutor
+    from .cli import remote_run
+
+    def one(m):
+        try:
+            r = remote_run(m, ["autopilot", "list", "--here", "--json"], timeout=REMOTE_WAIT)
+            if "unrecognized arguments" in r.stderr:
+                # its own older herdr-task, whose list holds only its own spaces
+                r = remote_run(m, ["autopilot", "list", "--json"], timeout=REMOTE_WAIT)
+            d = json.loads(r.stdout)
+            if isinstance(d, dict) and not d.get("error"):
+                return d
+            return {"error": (d or {}).get("error") if isinstance(d, dict) else "no answer"}
+        except (Fail, ValueError, OSError) as e:
+            return {"error": str(e) or "no answer"}
+    if not machines:
+        return {}
+    with ThreadPoolExecutor(max_workers=min(8, len(machines))) as ex:
+        return dict(zip(machines, ex.map(one, machines)))
+
+
+def list_all(here_only=False):
+    """{everywhere, spaces}: each space the window lists, this computer's from its own records
+    (one it no longer lists left out; every record where no window can say), then each other
+    machine's as that machine has it (off where it has none; unreachable: why)."""
+    win = window_spaces()
+    with state(write=False) as d:
+        ev = everywhere_view(d)
+        if win is None:
+            mine = list(d["spaces"].items())
+        else:
+            mine = [(x["id"], d["spaces"].get(x["id"]) or {"name": x.get("name"), "folder": x.get("folder")})
+                    for x in win if "/" not in x["id"] and not x.get("machine")]
+        spaces = [view(d, sp, a) for sp, a in mine]
+    if here_only or not win:
+        return {"everywhere": ev, "spaces": spaces}
+    others = {}
+    for x in win:
+        m, sp = machine_of(x["id"])
+        if m:
+            others.setdefault(m, []).append((sp, x))
+    for m, out in remote_lists(list(others)).items():
+        views = {v.get("space"): v for v in out.get("spaces") or []}
+        for sp, x in others[m]:
+            v = views.get(sp) or {"space": sp, "on": False, "own": [],
+                                  "trigger": (out.get("everywhere") or ev).get("trigger")}
+            v["name"], v["folder"] = v.get("name") or x.get("name"), v.get("folder") or x.get("folder")
+            if out.get("error"):
+                v["unreachable"] = out["error"]
+            spaces.append(there(v, m))
+    return {"everywhere": ev, "spaces": spaces}
 
 
 def folder_of(folder):
@@ -307,17 +419,21 @@ def everywhere_view(d, cfg=None):
 
 
 def shown_name(v):
-    """A space as the screens call it (core/spaces.js spaceName): never "~"."""
+    """A space as the screens call it (core/spaces.js spaceName): never "~"; another machine's
+    with that machine after it."""
     name = v.get("name")
-    if name and name != "~":
-        return name
-    folder = (v.get("folder") or "").rstrip("/")
-    return "Home" if not folder or folder == HOME.rstrip("/") else os.path.basename(folder)
+    if not name or name == "~":
+        folder = (v.get("folder") or "").rstrip("/")
+        # a home folder anywhere (core/spaces.js isHomeFolder: /home/<you>, /Users/<you>, /root)
+        name = "Home" if not folder or folder == HOME.rstrip("/") or re.fullmatch(r"/(home|Users)/[^/]+|/root", folder) else os.path.basename(folder)
+    return f"{name} on {v['machine']}" if v.get("machine") else name
 
 
 def line_of(v):
     if v.get("everywhere"):
         return f"Everywhere: {v['trigger']}" + (", no heartbeat yet" if v.get("blank") else "")
+    if v.get("unreachable"):
+        return f"{shown_name(v)}: can't tell, {v['machine']} didn't answer"
     state_word = "on" if v["on"] else "off"
     nxt = f", next {when(v['next_run'])}" if v["on"] and v.get("next_run") else ""
     last = v.get("last_wake")
@@ -502,8 +618,7 @@ def cmd_autopilot(args):
     sub = args.autopilot
     ensure_heartbeat(make=False)  # an earlier version's starter in the file: today's, before anyone reads it
     if sub == "list":
-        with state(write=False) as d:
-            out = {"everywhere": everywhere_view(d), "spaces": [view(d, sp, a) for sp, a in d["spaces"].items()]}
+        out = list_all(getattr(args, "here", False))
         if args.json:
             print(json.dumps(out))
         else:
@@ -519,9 +634,19 @@ def cmd_autopilot(args):
         say(args, v, v["trigger"])
         return
     # Everywhere's (what every space works from unless it sets its own), a space's own, or its switch.
+    machine, there_id = machine_of(getattr(args, "space", None) if not getattr(args, "everywhere", False) else None)
     if sub == "set":
         vals = set_values(args)
-        write_autopilot(my_space(args), vals)
+        # Settings name another machine's space as this computer does ("vm/sp1"); it gets its copy from here.
+        write_autopilot(args.space if machine else my_space(args), vals)
+        if machine:
+            v = {"space": args.space, "machine": machine, "own": [k for k, x in vals.items() if x is not None]}
+            say(args, v, f"Saved for this space; {machine} follows it once Settings reaches it.")
+            return
+    if machine:
+        v = forward(args, machine, there_id)
+        say(args, v, line_of(v))
+        return
     space = None if sub == "heartbeat" and not getattr(args, "space", None) else my_space(args)
     if space is None and sub in ("on", "off", "run-now"):
         raise Fail(PER_SPACE if sub != "run-now" else "Run now wakes one space's Assistant: pass --space.")
@@ -533,7 +658,9 @@ def cmd_autopilot(args):
             if a is None:
                 a = {} if sub in ("show", "heartbeat") else d["spaces"].setdefault(space, {})
             if sub not in ("show", "heartbeat") and not a.get("folder"):
-                a["name"], a["folder"] = space_info(space)
+                # Told by the machine whose window lists it (forward()), else this one's window.
+                told = (getattr(args, "name", None), getattr(args, "space_folder", None))
+                a["name"], a["folder"] = (told[0], folder_of(told[1])) if told[1] else space_info(space)
         if sub == "on":
             a["on"] = True
             ensure_heartbeat()
@@ -559,6 +686,9 @@ def cmd_autopilot(args):
         elif sub == "heartbeat":
             ensure_heartbeat()
         v = everywhere_view(d) if space is None else view(d, space, a)
+    if sub in ("on", "run-now"):
+        # This machine's scheduler wakes it (a machine with no window or service starts none by itself).
+        ensure_scheduler(quiet=True)
     say(args, v, msg or line_of(v))
 
 

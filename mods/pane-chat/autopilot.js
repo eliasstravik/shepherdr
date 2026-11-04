@@ -1,8 +1,9 @@
 // Autopilot in an Assistant's header (DECISIONS.md, "Shepherdr gaps being closed": a plain on/off
 // switch on the left, right after the agent name and folder). herdr-task keeps it (`herdr-task
 // autopilot ...`, its scheduler wakes the Assistant) in ~/.herdr/tasks/.autopilot.json; this reads
-// that file and asks herdr-task to change it. This computer's spaces only: the scheduler that wakes
-// them runs here.
+// that file and asks herdr-task to change it. Another machine's space ("vm/sp1") the same, from
+// that machine's file: herdr-task here hands its switch to herdr-task there, whose scheduler wakes
+// it (its Assistant runs there).
 //
 // The switch: "Autopilot", and when on its next wake dim after it. No menu: the heartbeat, the
 // schedule and the events, Everywhere's or this space's own, live in Shepherdr settings › Autopilot
@@ -25,15 +26,33 @@ const CLI = () => `${appHome()}/mods/tasks/bin/herdr-task`;
 export const CHIP_W = 150, CHIP_COMPACT_W = 28, COMPACT_BELOW = 480;
 const CHIP_H = 22;
 
-// The space whose Assistant runs in this terminal (or waits in this lazy slot), else null.
+// The space whose Assistant runs in this terminal (or waits in this lazy slot), else null; another
+// machine's as "vm/sp1".
 export function apSpace(address, lazy) {
-  if (lazy) return lazy.space && !String(lazy.space).includes("/") ? lazy.space : null;
-  if (!address || address.includes("/")) return null;
+  if (lazy) return lazy.space ? String(lazy.space) : null;
+  if (!address) return null;
   const l = terminals().find((x) => x.address === address)?.labels ?? {};
   if (l["herdr.role"] !== "coordinator") return null;
-  // As herdr-task finds an Assistant's own space (my_space).
+  // As herdr-task finds an Assistant's own space (my_space): its label is its id on its own machine.
   const sp = l["herdr.space"] ?? l["herdr.coordinator.space"];
-  return sp && !sp.includes("/") ? sp : null;
+  const m = address.includes("/") ? address.slice(0, address.indexOf("/")) : null;
+  return !sp ? null : m ? `${m}/${sp.split("/").pop()}` : sp.includes("/") ? null : sp;
+}
+
+// Another machine's space: (its machine, its id there); null for this computer's.
+const remoteOf = (space) => (space.includes("/") ? { machine: space.slice(0, space.indexOf("/")), id: space.slice(space.indexOf("/") + 1) } : null);
+// Its machine's file, read there each third poll (about every 12 s): herdr-core asks it over the link.
+const READ = 'cat "$HOME/.herdr/tasks/.autopilot.json" 2>/dev/null || true';
+async function fileOf(view, space) {
+  const r = remoteOf(space);
+  if (!r) return JSON.parse((await readTextFile(FILE())) ?? "{}");
+  if (view.apFile && view.apFile.space === space && (view.apTick = (view.apTick ?? 0) + 1) % 3) return view.apFile.file;
+  const out = (await exec("sh", ["-c", READ], { on: r.machine })).stdout;
+  const d = JSON.parse(out || "{}");
+  // Named as this computer names it, so this space's own settings here (by "vm/sp1") apply.
+  const file = { ...d, spaces: { [space]: d?.spaces?.[r.id] ?? {} } };
+  view.apFile = { space, file };
+  return file;
 }
 
 const sig = (a) => JSON.stringify([a?.on, a?.next_run, Boolean(a?.pending), Boolean(a?.inflight), a?.every, a?.events]);
@@ -47,7 +66,7 @@ export function apPoll(view, cx) {
     // What applies here: the space's own, else Everywhere's (core/autopilot.js, herdr-task's rule).
     let cfg = null;
     try { cfg = JSON.parse((await readTextFile(SETTINGS())) ?? "{}"); } catch {}
-    try { a = pilotFor(JSON.parse((await readTextFile(FILE())) ?? "{}"), space, cfg); } catch { a = { on: false }; }
+    try { a = pilotFor(await fileOf(view, space), space, cfg); } catch { a = view.ap ?? { on: false }; }
     if (view.apFor !== space || view.apBusy) return;
     // On with its heartbeat maybe empty: looked at now and then (about every 30 s) until written.
     if (a.on && view.apBlank !== false && (view.apBeat = (view.apBeat ?? 0) + 1) % 8 === 1) checkBlank(view, space, cx);
@@ -73,6 +92,7 @@ function checkBlank(view, space, cx) {
 export function apWatch(view, space, cx) {
   const bump = shared("autopilot.at") ?? 0;
   if (space === view.apFor && bump === view.apBump) return;
+  if (space !== view.apFor || bump !== view.apBump) view.apFile = null;
   if (space !== view.apFor) { view.ap = null; view.apBlank = null; view.apBeat = 0; }
   view.apFor = space;
   view.apBump = bump;

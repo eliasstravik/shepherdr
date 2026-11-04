@@ -65,14 +65,20 @@ class Autopilot(unittest.TestCase):
         self.addCleanup(p.stop)
         for name, value in (("STORE", store), ("STATE", os.path.join(store, ".autopilot.json")),
                             ("HEARTBEATS", os.path.join(self.tmp, "beats")), ("run", never), ("hc_json", never),
-                            ("space_info", lambda s: ("~", self.folder) if s == "sp1" else (None, None))):
+                            ("space_info", lambda s: ("~", self.folder) if s == "sp1" else (None, None)),
+                            ("window_spaces", lambda: None), ("ensure_scheduler", self.scheduler)):
             p = mock.patch.object(ap, name, value)
             p.start()
             self.addCleanup(p.stop)
 
+    def scheduler(self, quiet=False):
+        self.schedulers = getattr(self, "schedulers", 0) + 1
+        return {}
+
     def cmd(self, sub, **kw):
         import argparse
-        args = argparse.Namespace(autopilot=sub, json=True, space=None, everywhere=False, every=None, on=None, heartbeat=None)
+        args = argparse.Namespace(autopilot=sub, json=True, space=None, everywhere=False, every=None, on=None, heartbeat=None,
+                                  name=None, space_folder=None, here=False)
         for k, v in kw.items():
             setattr(args, k, v)
         out = self.io.StringIO()
@@ -233,6 +239,137 @@ class Autopilot(unittest.TestCase):
         lines = out.getvalue().splitlines()
         self.assertTrue(lines[0].startswith("Everywhere: Every hour"), lines)
         self.assertTrue(lines[1].startswith("tt-repo: Autopilot on"), lines)
+
+    def test_on_starts_this_machines_scheduler(self):
+        self.cmd("on", space="sp1")
+        self.assertEqual(getattr(self, "schedulers", 0), 1)
+        self.cmd("off", space="sp1")
+        self.assertEqual(self.schedulers, 1)
+
+    def test_a_folder_told_from_another_machines_window(self):
+        # A VM has no window: the machine whose window lists the space says its name and folder.
+        v = self.cmd("on", space="sp7", name="exedev", space_folder=self.folder)
+        self.assertEqual((v["on"], v["name"], v["folder"]), (True, "exedev", self.folder))
+
+    def remote(self, answers):
+        """herdr-task on other machines, as cli.remote_run runs it: answers[machine](argv) -> its JSON out."""
+        from unittest import mock
+        import subprocess
+        import herdr_task.cli as cli
+        self.sent = []
+
+        def run(machine, argv, timeout=None):
+            self.sent.append((machine, argv))
+            out = answers[machine](argv)
+            return subprocess.CompletedProcess(argv, 0 if out is not None else 1, json.dumps(out) if out is not None else "", "" if out is not None else "hc: unreachable")
+        p = mock.patch.object(cli, "remote_run", run)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_another_machines_space_is_switched_there(self):
+        from unittest import mock
+        win = [{"id": "sp1", "name": "~", "folder": self.folder},
+               {"id": "vm/sp9", "machine": "vm", "name": "exedev", "folder": "/home/exedev"}]
+        p = mock.patch.object(self.ap, "window_spaces", lambda: win)
+        p.start()
+        self.addCleanup(p.stop)
+        self.remote({"vm": lambda argv: {"space": "sp9", "on": argv[1] == "on", "name": "exedev", "trigger": "Every hour"}})
+        v = self.cmd("on", space="vm/sp9")
+        self.assertEqual(self.sent, [("vm", ["autopilot", "on", "--space", "sp9", "--json", "--name", "exedev", "--space-folder", "/home/exedev"])])
+        self.assertEqual((v["space"], v["machine"], v["on"]), ("vm/sp9", "vm", True))
+        # Nothing here wakes it: no record of it on this machine, and this machine's scheduler isn't asked.
+        self.assertFalse(os.path.exists(self.ap.STATE))
+        self.assertEqual(getattr(self, "schedulers", 0), 0)
+        self.cmd("run-now", space="vm/sp9")
+        self.assertEqual(self.sent[-1][1][:4], ["autopilot", "run-now", "--space", "sp9"])
+
+    def test_another_machines_refusal_is_said_here(self):
+        self.remote({"vm": lambda argv: {"error": "Autopilot is off in this space: turn it on first."}})
+        with self.assertRaises(self.ap.Fail) as e:
+            self.cmd("run-now", space="vm/sp9")
+        self.assertIn("turn it on first", str(e.exception))
+        self.remote({"vm": lambda argv: None})
+        with self.assertRaises(self.ap.Fail) as e:
+            self.cmd("off", space="vm/sp9")
+        self.assertIn("Couldn't reach vm", str(e.exception))
+
+    def test_another_machines_space_is_set_here_by_its_full_id(self):
+        self.remote({})
+        v = self.cmd("set", space="vm/sp9", every="every 2 hours")
+        with open(self.settings_file) as f:
+            self.assertEqual(json.load(f)["spaces"]["vm/sp9"]["autopilot"], {"every": "every 2 hours"})
+        self.assertEqual((v["space"], v["own"], self.sent), ("vm/sp9", ["every"], []))
+
+    def test_list_holds_every_machines_spaces(self):
+        from unittest import mock
+        self.cmd("on", space="sp1")
+        self.cmd("on", space="spgone")  # a space the window no longer lists
+        win = [{"id": "sp1", "name": "~", "folder": self.folder}, {"id": "sp2", "name": "docs", "folder": "/tmp/docs"},
+               {"id": "vm/sp9", "machine": "vm", "name": "exedev", "folder": "/home/exedev"},
+               {"id": "vm/sp8", "machine": "vm", "name": "~", "folder": "/home/exedev/dev/game"},
+               {"id": "mini/sp5", "machine": "mini", "name": "Home", "folder": "/Users/me"}]
+        p = mock.patch.object(self.ap, "window_spaces", lambda: win)
+        p.start()
+        self.addCleanup(p.stop)
+        self.remote({"vm": lambda argv: {"everywhere": {"trigger": "Every hour"},
+                                         "spaces": [{"space": "sp9", "on": True, "trigger": "Every hour", "next_run": None, "own": []}]},
+                     "mini": lambda argv: None})
+        out = self.cmd("list")
+        self.assertEqual(sorted(m for m, _ in self.sent), ["mini", "vm"])
+        self.assertTrue(all(argv == ["autopilot", "list", "--here", "--json"] for _, argv in self.sent))
+        got = {v["space"]: v for v in out["spaces"]}
+        self.assertEqual(list(got), ["sp1", "sp2", "vm/sp9", "vm/sp8", "mini/sp5"])
+        self.assertEqual([got[k]["on"] for k in ("sp1", "sp2", "vm/sp9", "vm/sp8")], [True, False, True, False])
+        self.assertTrue(got["mini/sp5"].get("unreachable"))
+        lines = [self.ap.line_of(v) for v in out["spaces"]]
+        self.assertTrue(lines[2].startswith("exedev on vm: Autopilot on"), lines)
+        self.assertTrue(lines[3].startswith("game on vm: Autopilot off"), lines)
+        self.assertEqual(lines[4], "Home on mini: can't tell, mini didn't answer")
+        # --here: this machine's only, nothing asked elsewhere
+        self.sent = []
+        self.assertEqual([v["space"] for v in self.cmd("list", here=True)["spaces"]], ["sp1", "sp2"])
+        self.assertEqual(self.sent, [])
+
+
+class RemoteInstall(unittest.TestCase):
+    """herdr-task --on installs itself on the other machine first, never over a machine that holds its source."""
+
+    def setUp(self):
+        from unittest import mock
+        import subprocess
+        sys.path.insert(0, BIN)
+        import herdr_task.cli as cli
+        self.cli, self.store, self.ran, self.wrote = cli, tempfile.mkdtemp(), [], []
+        self.source = False
+
+        def run(argv, cwd=None, check=False):
+            self.ran.append(argv)
+            code = 0 if argv[:2] != ["hc", "exec"] or "test" not in argv else (0 if self.source else 1)
+            return subprocess.CompletedProcess(argv, code, "{}" if "test" not in argv else "", "")
+
+        def write(argv, **kw):
+            self.wrote.append(argv)
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
+        for name, value in (("run", run), ("STORE", self.store), ("sync_held", lambda: None), ("guard", lambda a: None),
+                            ("install_secret", lambda m: None)):
+            p = mock.patch.object(cli, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        p = mock.patch.object(cli.subprocess, "run", write)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_a_machine_without_the_source_gets_this_copy(self):
+        self.cli.remote_run("vm", ["autopilot", "list", "--json"])
+        self.assertEqual(self.wrote[0][:5], ["hc", "file", "write", "--on", "vm"])
+
+    def test_a_machine_holding_the_source_is_never_written_to(self):
+        self.source = True
+        self.cli.remote_run("mini", ["autopilot", "list", "--json"])
+        self.cli.remote_run("mini", ["autopilot", "list", "--json"])
+        self.assertEqual(self.wrote, [])
+        self.assertEqual(sum(1 for a in self.ran if "test" in a), 1)  # asked once, then remembered
+        self.assertEqual(self.ran[-1][-3:], ["autopilot", "list", "--json"])
 
 
 class BackToWork(unittest.TestCase):
