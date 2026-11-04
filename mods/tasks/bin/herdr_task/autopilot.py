@@ -10,7 +10,7 @@ import os
 import time
 
 from .base import addon_off, Fail, hc_json, HOME, now, run, STORE
-from .settings import bare
+from .settings import autopilot_layers, bare, read_settings, write_autopilot
 from .agents import agent_running, status_word
 from .launch import caller_labels, coordinator_in
 from .store import locate, read_list, Store, store_files
@@ -20,10 +20,18 @@ from .automations import EVENTS, events_in, HOW, next_run, parse_every, parse_on
 
 
 # ---- autopilot ------------------------------------------------------------------------------
-# Everywhere's, and per space, in STORE/.autopilot.json (Settings, the header's switch and the web
-# read it; only herdr-task writes it, under its lock):
+# How it wakes is a setting, kept with the others in Shepherdr settings (~/.herdr/shepherdr.json,
+# which the window pushes to every machine and the web's host keeps in step): "autopilot" =
+# {"every" (an --every rule as written, "" for none), "events" ([--on events]), "heartbeat" (its
+# words)} in "everywhere", and a space's own in "spaces"[its id]: what a space sets wins, what it
+# doesn't follows Everywhere's (resolve(); the same rule as core/autopilot.js pilotFor, tested on
+# core/autopilot.cases.json). Before Settings kept it, Everywhere's schedule and events were in
+# .autopilot.json's "everywhere" and the heartbeat in HEARTBEATS/everywhere.md: still read where
+# Settings sets none.
+# Each space's switch and how its wakes go, in STORE/.autopilot.json (the header's switch and the
+# web read it; only herdr-task writes it, under its lock):
 #   {"version": 2,
-#    "everywhere": {"every" (an --every rule, or null), "events" ([--on events])},
+#    "everywhere": {"every", "events"} (from before Settings kept them),
 #    "spaces": {"<space id>": {
 #      "on" (its Assistant header's switch), "name", "folder", "next_run",
 #      "applied" (what last applied: sync() acts on a change),
@@ -31,12 +39,7 @@ from .automations import EVENTS, events_in, HOW, next_run, parse_every, parse_on
 #      "inflight" ({at, reason, to, turn}: a wake delivered, its turn not ended yet),
 #      "last_wake" ({at, reason, outcome}), "wakes" (the last 10 of those),
 #      "progress" ({text, at}), "completed" ({text, at}), "seen" (events_in's record per folder)}}}
-# One setting for every space, as Tasks is: every space works from Everywhere's schedule, events
-# and heartbeat; a space has only its own on/off (resolve(); the same rule as core/autopilot.js
-# pilotFor, tested on core/autopilot.cases.json). A schedule or events a space held of its own
-# before (version 1) are dropped on the next read.
-# The heartbeat is plain text the person writes: HEARTBEATS/everywhere.md (a space's own old
-# HEARTBEATS/<space id>.md is no longer read).
+# A schedule or events a space held of its own in version 1 are dropped on the next read.
 
 STATE = os.path.join(STORE, ".autopilot.json")
 HEARTBEATS = os.environ.get("HERDR_AUTOPILOT_HOME") or os.path.join(HOME, ".config", "herdr-core", "autopilot")
@@ -58,7 +61,7 @@ Stopping goal (optional): a finite goal; when it's proven, Autopilot turns itsel
 
 
 def heartbeat_path(space=None):
-    """The heartbeat every space's wakes bring: Everywhere's one file."""
+    """Everywhere's heartbeat file from before Settings kept it (read while Settings has none)."""
     return os.path.join(HEARTBEATS, "everywhere.md")
 
 
@@ -68,6 +71,21 @@ def heartbeat_words(path):
             return f.read()
     except OSError:
         return ""
+
+
+def heartbeat_of(space=None, cfg=None):
+    """(words, where) of the heartbeat a space works from (None: Everywhere's): its own in Shepherdr
+    settings ("space"), else Everywhere's there ("everywhere"), else Everywhere's file ("file")."""
+    every, own = autopilot_layers(read_settings() if cfg is None else cfg, space)
+    for layer, where in ((own, "space"), (every, "everywhere")):
+        if isinstance(layer.get("heartbeat"), str):
+            return layer["heartbeat"], where
+    return heartbeat_words(heartbeat_path()), "file"
+
+
+def blank(words):
+    """A heartbeat nobody wrote: empty, or the starter as it came."""
+    return not words.strip() or words.strip() == STARTER.strip()
 
 
 def ensure_heartbeat():
@@ -162,24 +180,50 @@ def when(ms):
     return datetime.datetime.fromtimestamp(ms / 1000).strftime("%a %H:%M") if ms else None
 
 
-def resolve(d, a):
-    """What applies in a space (its record `a`, None: Everywhere's own): {on, every, events}: its own
-    on/off (off until switched on), Everywhere's schedule and events (anything else it holds is
-    ignored)."""
+def rule_of(x):
+    """A schedule as Settings keeps it (its words; "" or off: none) as a rule; False: not one."""
+    if x is None or isinstance(x, dict):
+        return x
+    t = str(x).strip()
+    if not t or t.lower() in ("off", "none", "never"):
+        return None
+    try:
+        return parse_every(t)
+    except Fail:
+        return False
+
+
+def resolve(d, a, space=None, cfg=None):
+    """What applies in a space (its record `a` and id; None: Everywhere's own): {on, every, events,
+    own}: its own on/off (off until switched on); the schedule and events it sets in Shepherdr
+    settings (cfg, read when not given), else Everywhere's there, else Everywhere's from before
+    (.autopilot.json), else the defaults. own: the fields the space sets itself."""
     e = {**everywhere_default(), **{k: v for k, v in (d.get("everywhere") or {}).items() if k in ("every", "events")}}
-    return {"on": bool((a or {}).get("on")), "every": e["every"], "events": [x for x in EVENTS if x in (e["events"] or [])]}
+    every, mine = autopilot_layers(read_settings() if cfg is None else cfg, space)
+    own = []
+    for layer, is_own in ((every, False), (mine, True)):
+        if "every" in layer and rule_of(layer["every"]) is not False:
+            e["every"] = rule_of(layer["every"])
+            own += ["every"] if is_own else []
+        if isinstance(layer.get("events"), list):
+            e["events"] = layer["events"]
+            own += ["events"] if is_own else []
+    if isinstance(mine.get("heartbeat"), str):
+        own.append("heartbeat")
+    return {"on": bool((a or {}).get("on")), "every": e["every"], "events": [x for x in EVENTS if x in (e["events"] or [])], "own": own}
 
 
 def trigger_of(eff):
     return trigger_words({"every": eff["every"], "on": eff["events"]}) if (eff["every"] or eff["events"]) else "Only Run now"
 
 
-def sync(d):
-    """Acts on what changed in what applies to each space (its switch, or Everywhere's schedule and
-    events): turned on (a fresh start: next wake, events from now on), off (nothing waits), a new
-    schedule or events."""
-    for a in d["spaces"].values():
-        eff = resolve(d, a)
+def sync(d, cfg=None):
+    """Acts on what changed in what applies to each space (its switch, or its schedule and events,
+    its own or Everywhere's): turned on (a fresh start: next wake, events from now on), off
+    (nothing waits), a new schedule or events."""
+    cfg = read_settings() if cfg is None else cfg
+    for space, a in d["spaces"].items():
+        eff = resolve(d, a, space, cfg)
         sig = {"on": eff["on"], "every": (eff["every"] or {}).get("text"), "events": eff["events"]}
         was = a.get("applied")
         a["applied"] = sig
@@ -201,21 +245,27 @@ def sync(d):
             a.pop("seen", None)
 
 
-def view(d, space, a):
-    """A space's Autopilot as the screens read it: its switch, Everywhere's schedule, events and
-    heartbeat, and the rest of its record."""
+def view(d, space, a, cfg=None):
+    """A space's Autopilot as the screens read it: its switch, the schedule, events and heartbeat
+    that apply there (own: the ones it sets itself; heartbeat_from: "space", "everywhere" or
+    "file"), and the rest of its record. heartbeat: Everywhere's file from before."""
     a = a or {}
-    eff = resolve(d, a)
+    cfg = read_settings() if cfg is None else cfg
+    eff = resolve(d, a, space, cfg)
+    words, where = heartbeat_of(space, cfg)
     v = {k: a.get(k) for k in ("name", "folder", "next_run", "pending", "inflight", "last_wake", "wakes", "progress", "completed")}
-    v.update(space=space, on=eff["on"], every=(eff["every"] or {}).get("text"), events=eff["events"],
-             heartbeat=heartbeat_path(), trigger=trigger_of(eff))
+    v.update(space=space, on=eff["on"], every=(eff["every"] or {}).get("text"), events=eff["events"], own=eff["own"],
+             heartbeat=heartbeat_path(), heartbeat_text=words, heartbeat_from=where, blank=blank(words), trigger=trigger_of(eff))
     return v
 
 
-def everywhere_view(d):
-    e = resolve(d, None)
+def everywhere_view(d, cfg=None):
+    cfg = read_settings() if cfg is None else cfg
+    e = resolve(d, None, None, cfg)
+    words, where = heartbeat_of(None, cfg)
     return {"everywhere": True, "space": None, "every": (e["every"] or {}).get("text"), "events": e["events"],
-            "heartbeat": heartbeat_path(), "trigger": trigger_of(e)}
+            "heartbeat": heartbeat_path(), "heartbeat_text": words, "heartbeat_from": where, "blank": blank(words),
+            "trigger": trigger_of(e)}
 
 
 def shown_name(v):
@@ -229,12 +279,16 @@ def shown_name(v):
 
 def line_of(v):
     if v.get("everywhere"):
-        return f"Every space: {v['trigger']}, from {v['heartbeat'].replace(HOME, '~', 1)}"
+        return f"Everywhere: {v['trigger']}" + (", no heartbeat yet" if v.get("blank") else "")
     state_word = "on" if v["on"] else "off"
     nxt = f", next {when(v['next_run'])}" if v["on"] and v.get("next_run") else ""
     last = v.get("last_wake")
     last = f"; last {when(last['at'])} ({last['reason']}): {last['outcome']}" if last else ""
-    return f"{shown_name(v)}: Autopilot {state_word} ({v['trigger']}{nxt}){last}"
+    own = f"; its own {', '.join(OWN_WORDS[k] for k in v.get('own') or [])}" if v.get("own") else ""
+    return f"{shown_name(v)}: Autopilot {state_word} ({v['trigger']}{nxt}){own}{last}"
+
+
+OWN_WORDS = {"every": "schedule", "events": "events", "heartbeat": "heartbeat"}
 
 
 def log_wake(a, reason, outcome, at=None):
@@ -255,12 +309,13 @@ def queue(a, reason):
 
 def message(space, a, reasons):
     """The wake: one tagged message (the chat shows none of it, only the Assistant's answer)."""
+    beat, where = heartbeat_of(space)
+    beat = "" if blank(beat) else beat.strip()  # the starter, never filled in
     path = heartbeat_path()
-    beat = heartbeat_words(path).strip()
-    if beat == STARTER.strip():
-        beat = ""  # the starter, never filled in
+    src = {"space": "this space's own, Shepherdr settings > Autopilot",
+           "everywhere": "Everywhere's, Shepherdr settings > Autopilot"}.get(where, path.replace(HOME, "~", 1))
     if len(beat) > HEARTBEAT_MAX:
-        beat = beat[:HEARTBEAT_MAX] + f"\n… (cut here: read the rest in {path})"
+        beat = beat[:HEARTBEAT_MAX] + (f"\n… (cut here: read the rest in {path})" if where == "file" else "\n… (cut here)")
     p = a.get("progress")
     prog = f"Saved progress ({when(p['at'])}):\n{p['text']}" if p else "Saved progress: none yet (this is the first wake)."
     why = reasons[0] + (f" (also: {', '.join(reasons[1:])})" if len(reasons) > 1 else "")
@@ -271,7 +326,7 @@ def message(space, a, reasons):
             "herdr-task progress \"...\". When the heartbeat's stopping goal is met and proven: "
             "herdr-task complete \"evidence\" (this turns Autopilot off). Nothing useful to do: save progress saying so, "
             "and stop.\n\n"
-            f"Heartbeat ({path.replace(HOME, '~', 1)}):\n{beat or '(not written yet: tell the person Autopilot has no heartbeat yet, and do nothing else)'}\n\n"
+            f"Heartbeat ({src}):\n{beat or '(not written yet: tell the person Autopilot has no heartbeat yet, and do nothing else)'}\n\n"
             f"{prog}")
     body = body.replace("</herdr-autopilot", "</ herdr-autopilot")
     reason = reasons[0].replace('"', "'")
@@ -359,10 +414,11 @@ def autopilot_pass(report):
     autopilot add-on is off."""
     if addon_off("autopilot"):
         return
+    cfg = read_settings()
     with state() as d:
-        sync(d)
+        sync(d, cfg)
         for space, a in d["spaces"].items():
-            eff = resolve(d, a)
+            eff = resolve(d, a, space, cfg)
             if not eff["on"]:
                 continue
             settle(a)
@@ -385,7 +441,23 @@ def any_on(d=None):
 # ---- commands -------------------------------------------------------------------------------
 
 PER_SPACE = "Autopilot is switched on per space, with the switch in its Assistant's header: pass --space."
-SAME_EVERYWHERE = "The schedule and events are the same in every space: set them with --everywhere."
+
+
+def set_values(args):
+    """set's --every, --on and --heartbeat as Settings keeps them; "default" unsets one at that
+    level, so it follows the level above again."""
+    out = {}
+    dflt = lambda x: x.strip().lower() == "default"
+    if args.every is not None:
+        x = args.every.strip()
+        out["every"] = None if dflt(x) else "" if not x or x.lower() in ("off", "none", "never") else parse_every(x)["text"]
+    if args.on is not None:
+        out["events"] = None if dflt(args.on) else parse_on(args.on)
+    if getattr(args, "heartbeat", None) is not None:
+        out["heartbeat"] = None if dflt(args.heartbeat) else args.heartbeat[:HEARTBEAT_MAX]
+    if not out:
+        raise Fail("Give --every, --on or --heartbeat (\"default\": follow Everywhere's again).")
+    return out
 
 
 def cmd_autopilot(args):
@@ -398,49 +470,55 @@ def cmd_autopilot(args):
         else:
             print("\n".join([line_of(out["everywhere"])] + [line_of(v) for v in out["spaces"]]))
         return
-    # Everywhere's (the schedule, events and heartbeat every space works from), or a space's switch.
-    if sub == "set" and not getattr(args, "everywhere", False):
-        raise Fail(SAME_EVERYWHERE)
-    space = None if sub == "heartbeat" else my_space(args)
+    if sub == "check":
+        # a schedule as Settings would keep it, checked without saving
+        x = (args.every or "").strip()
+        r = rule_of(x) if x.lower() not in ("off", "none", "never", "") else None
+        if r is False:
+            parse_every(x)  # says why
+        v = {"every": (r or {}).get("text"), "trigger": trigger_of({"every": r, "events": []}) if r else "Off"}
+        say(args, v, v["trigger"])
+        return
+    # Everywhere's (what every space works from unless it sets its own), a space's own, or its switch.
+    if sub == "set":
+        vals = set_values(args)
+        write_autopilot(my_space(args), vals)
+    space = None if sub == "heartbeat" and not getattr(args, "space", None) else my_space(args)
     if space is None and sub in ("on", "off", "run-now"):
         raise Fail(PER_SPACE if sub != "run-now" else "Run now wakes one space's Assistant: pass --space.")
     msg = ""
-    with state(write=sub != "show") as d:
-        e = d["everywhere"]
+    with state(write=sub not in ("show", "heartbeat")) as d:
         a = None
         if space is not None:
             a = d["spaces"].get(space)
             if a is None:
-                a = {} if sub == "show" else d["spaces"].setdefault(space, {})
-            if sub != "show" and not a.get("folder"):
+                a = {} if sub in ("show", "heartbeat") else d["spaces"].setdefault(space, {})
+            if sub not in ("show", "heartbeat") and not a.get("folder"):
                 a["name"], a["folder"] = space_info(space)
         if sub == "on":
             a["on"] = True
             ensure_heartbeat()
             sync(d)
-            msg = f"Autopilot is on: {trigger_of(resolve(d, a))}."
+            msg = f"Autopilot is on: {trigger_of(resolve(d, a, space))}."
         elif sub == "off":
             a["on"] = False
             sync(d)
             msg = "Autopilot is off."
         elif sub == "set":
-            if args.every is not None:
-                x = args.every.strip()
-                e["every"] = parse_every(x) if x and x.lower() not in ("off", "none", "never") else None
-            if args.on is not None:
-                e["events"] = parse_on(args.on)
             sync(d)
-            eff = resolve(d, None)
-            msg = f"Autopilot wakes every space it's on in: {trigger_of(eff) if (eff['every'] or eff['events']) else 'only on Run now'}."
+            eff = resolve(d, a, space)
+            how = trigger_of(eff) if (eff["every"] or eff["events"]) else "only on Run now"
+            msg = f"Autopilot wakes every space that follows Everywhere: {how}." if space is None else \
+                f"Autopilot wakes this space: {how}" + (f" (its own {', '.join(OWN_WORDS[k] for k in eff['own'])})." if eff["own"] else " (Everywhere's).")
         elif sub == "run-now":
-            if not resolve(d, a)["on"]:
+            if not a.get("on"):
                 raise Fail("Autopilot is off in this space: turn it on first.")
             sync(d)
             queue(a, "run now")
             got = deliver(space, a)
             msg = "Woke its Assistant." if got == "delivered" else f"Queued: {(a.get('pending') or {}).get('note') or 'it goes when its Assistant is idle'}."
         elif sub == "heartbeat":
-            msg = ensure_heartbeat()
+            ensure_heartbeat()
         v = everywhere_view(d) if space is None else view(d, space, a)
     say(args, v, msg or line_of(v))
 
@@ -471,7 +549,7 @@ def cmd_complete(args):
         raise Fail("A goal is a space's: run this as its Assistant, or pass --space.")
     with state() as d:
         a = d["spaces"].get(space)
-        if a is None or not resolve(d, a)["on"]:
+        if a is None or not a.get("on"):
             raise Fail("Autopilot isn't on in this space.")
         a.update(on=False, next_run=None, completed={"text": args.evidence.strip()[:4000], "at": now()})
         a.pop("pending", None)

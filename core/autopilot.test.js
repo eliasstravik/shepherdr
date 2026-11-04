@@ -1,14 +1,14 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { pilotFor, everywhereOf, headerDetail, presetOf, STARTER, EVENTS, PRESETS } from "./autopilot.js";
+import { pilotFor, everywhereOf, headerDetail, presetOf, levelOf, blankBeat, STARTER, EVENTS, PRESETS } from "./autopilot.js";
 import { SECTIONS } from "./settings.js";
 
 const { cases } = JSON.parse(readFileSync(new URL("./autopilot.cases.json", import.meta.url), "utf8"));
 
 for (const c of cases) {
   test(`what applies in a space: ${c.name}`, () => {
-    const a = pilotFor(c.file, c.space);
-    expect({ on: a.on, every: a.every, events: a.events }).toEqual(c.expect);
+    const a = pilotFor(c.file, c.space, c.settings ?? null);
+    expect({ on: a.on, every: a.every, events: a.events, own: a.own }).toEqual(c.expect);
   });
 }
 
@@ -32,8 +32,16 @@ test("the header's words", () => {
   expect(presetOf("every 2 hours")).toBe(null);
 });
 
-test("Autopilot is one setting: not in a space's own settings", () => {
-  expect(SECTIONS.find((s) => s.id === "autopilot").space).toBeFalsy();
+test("a space's own settings have Autopilot", () => {
+  expect(SECTIONS.find((s) => s.id === "autopilot").space).toBeTruthy();
+});
+
+test("a level holds only what it sets", () => {
+  const settings = { everywhere: { autopilot: { every: "", events: null } }, spaces: { sp1: { autopilot: { heartbeat: "Go." } } } };
+  expect(levelOf(settings)).toEqual({ every: "" });
+  expect(levelOf(settings, "sp1")).toEqual({ heartbeat: "Go." });
+  expect(levelOf(settings, "sp2")).toEqual({});
+  expect([blankBeat(""), blankBeat(STARTER), blankBeat("Ship.")]).toEqual([true, true, false]);
 });
 
 test("the starter heartbeat, events and default schedule are herdr-task's", () => {

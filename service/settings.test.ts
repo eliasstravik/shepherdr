@@ -34,13 +34,43 @@ test("a space's own values go in its layer with its folder, and Reset drops them
   let f = JSON.parse(readFileSync(file, "utf8"));
   expect(f.spaces.sp2).toEqual({ folder: "/repo", name: "web", tasks: { merge: "auto" }, worker: { agent: "codex", model: "gpt-5", effort: "high", fast: false, perm: null } });
   const tasks = s.sections(null, [scope]).find((x) => x.name === "Tasks" && x.level === "sp2")!;
-  // as the window's: "Changed here · Reset", Reset back to Everywhere's; Base branch only in a space's own
-  expect(tasks.rows.find((r) => r.key === "tasks.merge")).toMatchObject({ value: "Right away", inherits: { from: "everywhere" } });
+  // as the window's: "Set for this space · Reset", Reset back to Everywhere's; Base branch only in a space's own
+  expect(tasks.rows.find((r) => r.key === "tasks.merge")).toMatchObject({ value: "Right away", inherits: { from: "Everywhere" } });
   expect(tasks.rows.find((r) => r.key === "tasks.base")).toMatchObject({ label: "Base branch", text: true, placeholder: "Its current branch" });
   s.set("tasks.merge", null, "sp2", scope);
   f = JSON.parse(readFileSync(file, "utf8"));
   expect(f.spaces.sp2.tasks).toBeUndefined();
   expect(() => s.set("tasks.merge", "Right away", "sp3", null)).toThrow();
+});
+
+test("Autopilot: Everywhere's unless a space sets its own, kept with the rest and sent to its machine", async () => {
+  const { pushBody } = await import("./settings.ts");
+  const s = new Settings();
+  s.start();
+  const web = { id: "sp4", name: "web", machine: null, folder: "/web" }, api = { id: "pi/sp5", name: "api", machine: "pi", folder: "/api" };
+  const pilot = { everywhere: { every: "every 60 minutes", events: ["ready"], words: "Keep it green." } };
+  s.set("autopilot.every", "weekdays 9:00", "pi/sp5", api);
+  s.set("autopilot.heartbeat", "Only the API.", "pi/sp5", api);
+  s.set("autopilot.events", "merged,ready", "all");
+  let f = JSON.parse(readFileSync(file, "utf8"));
+  expect(f.spaces["pi/sp5"].autopilot).toEqual({ every: "weekdays 9:00", heartbeat: "Only the API." });
+  expect(f.everywhere.autopilot).toEqual({ events: ["ready", "merged"] });
+  expect(JSON.parse(pushBody(f, "pi")).spaces.sp5.autopilot.every).toBe("weekdays 9:00");
+  const page = (level: string) => s.sections(null, [web, api], ["pi"], "box", pilot).find((x) => x.name === "Autopilot" && x.level === level)!;
+  const row = (level: string, key: string) => page(level).rows.find((r) => r.key === key)!;
+  expect(row("pi/sp5", "autopilot.every")).toMatchObject({ value: "weekdays 9:00", inherits: { value: "Every hour", from: "Everywhere" } });
+  expect(row("pi/sp5", "autopilot.events")).toMatchObject({ value: "ready,merged", from: "Everywhere" });
+  expect(row("sp4", "autopilot.every")).toMatchObject({ value: "every 60 minutes", from: "Everywhere" });
+  expect(row("sp4", "autopilot.heartbeat")).toMatchObject({ value: "Keep it green." });
+  expect(row("all", "autopilot.every").others).toEqual([{ id: "pi/sp5", name: "api" }]);
+  expect(() => s.set("autopilot.events", "lunch", "all")).toThrow();
+  // Reset: back to Everywhere's
+  s.set("autopilot.every", null, "pi/sp5", api);
+  s.set("autopilot.heartbeat", null, "pi/sp5", api);
+  f = JSON.parse(readFileSync(file, "utf8"));
+  expect(f.spaces["pi/sp5"].autopilot).toBeUndefined();
+  // without its add-on, no page
+  expect(s.sections(null, [web], [], "box", null).some((x) => x.name === "Autopilot")).toBe(false);
 });
 
 test("machine limits: percents on the page, the file's own units, and this computer as local", () => {

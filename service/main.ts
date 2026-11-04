@@ -22,7 +22,7 @@ import { Host } from "./host.ts";
 import { Sync } from "./sync.ts";
 import { Live } from "./live.ts";
 import { Model } from "./model.ts";
-import { setPilot, runPilot } from "./autopilot.ts";
+import { checkEvery, runPilot } from "./autopilot.ts";
 import { windowSection, setWindow, offList, offPlugins } from "./window.ts";
 import { Chats } from "./chats.ts";
 import { act, hc as hcRun } from "./actions.ts";
@@ -193,12 +193,14 @@ store.on(() => model.rebuild());
 void store.load().catch(() => {});
 const snapshotOf = (b: Parameters<NonNullable<typeof model.onBuild>>[0]) => live.setSnapshot(alertNewAnd(compat.snapshot({
   host: me?.host ?? "this machine", user: me?.name ?? "You", spaces: b.spaces, sections: b.sections, rows: b.rows, artifacts: artifacts.list, automations: b.automations,
-  settings: [...settings.sections(webNow ?? (me ? `https://${me.dns}/shepherdr/` : null), b.spaces.map((s: any) => ({ id: s.id, name: s.name, machine: s.machine ?? null })), b.machines, me?.host ?? "this machine"),
+  settings: [...settings.sections(webNow ?? (me ? `https://${me.dns}/shepherdr/` : null), b.spaces.map((s: any) => ({ id: s.id, name: s.name, machine: s.machine ?? null })), b.machines, me?.host ?? "this machine",
+    // Settings › Autopilot (Everywhere's and each space's own), while its add-on is on
+    offList().includes("autopilot") ? null : { everywhere: model.pilotEverywhere, trigger: (id) => model.pilotKnown(id)?.trigger }),
     // Secrets, as the window's page (Everywhere's and each space's own): every kept secret and where, and the agents
     // waiting on one
     ...[{ id: "all" }, ...b.spaces].map((s: any) => ({ name: "Secrets", level: s.id, rows: [], ...secretsPage(b.spaces),
       secrets: secretNames.filter((x) => (s.id === "all" ? !x.space : x.space === s.id)) })),
-    windowSection((k) => model.value(k))], off: offList(), offPlugins: offPlugins(), pilot: model.pilotEverywhere,
+    windowSection((k) => model.value(k))], off: offList(), offPlugins: offPlugins(),
   // every machine the window's sidebar lists: one not connected reads "Offline" (or "Connecting…") under its header
   machines: [{ name: me?.host ?? "this machine", here: true, state: "connected" }, ...b.known.map((m) => ({ name: m.name, here: false, state: m.state }))],
 })));
@@ -500,10 +502,6 @@ const server = Bun.serve<{ who: string }>({
         await store.set("notify", (NF as any).withMachine(model.value("notify") ?? {}, body.key.slice("notify.machine@".length), null));
         return json({ ok: true });
       }
-      if (body?.type === "setting" && typeof body.key === "string" && body.key.startsWith("autopilot.") && typeof body.place === "string") {
-        try { await setPilot(body.place, body.key, typeof body.value === "string" ? body.value : null); await model.readAutopilot(); model.rebuild(); return json({ ok: true }); }
-        catch (err) { return json({ ok: false, error: (err as Error).message }); }
-      }
       if (body?.type === "autopilot-run" && typeof body.place === "string") {
         try { await runPilot(body.place); await model.readAutopilot(); model.rebuild(); return json({ ok: true }); }
         catch (err) { return json({ ok: false, error: (err as Error).message }); }
@@ -527,7 +525,9 @@ const server = Bun.serve<{ who: string }>({
           const level = typeof body.place === "string" ? body.place : "all";
           const sp = level !== "all" && !level.startsWith("m:") ? model.spaceById(level) : null;
           const folder = sp ? (await exec(hub, ["git", "-C", sp.folder || "~", "rev-parse", "--show-toplevel"], sp.machine ?? null).catch(() => null))?.stdout.trim() || sp.folder : null;
-          const value = typeof body.value === "string" ? body.value : null;
+          let value = typeof body.value === "string" ? body.value : null;
+          // Autopilot's schedule: herdr-task knows its words first (Custom…), as the window's
+          if (body.key === "autopilot.every" && value !== null) value = await checkEvery(value);
           // Home Assistant's Make home space (and turning it on), as the window's: herdr-task's home round makes one
           const home = /^machine\.(makehome|home)@([\w.-]+)$/.exec(body.key);
           if (home && (home[1] === "makehome" || value === "on")) await store.set("home.makereq", { machine: home[2] === "local" ? null : home[2], at: Date.now() });
@@ -540,6 +540,7 @@ const server = Bun.serve<{ who: string }>({
             if (!there) return json({ ok: false, error: SC.BASE.missing(want) });
           }
           settings.set(body.key, value, level, sp ? { id: sp.id, name: sp.name, machine: sp.machine ?? null, folder } : null);
+          if (body.key.startsWith("autopilot.")) { await model.readAutopilot(); model.rebuild(); }
           return json({ ok: true });
         } catch (err) { return json({ ok: false, error: (err as Error).message }); }
       }

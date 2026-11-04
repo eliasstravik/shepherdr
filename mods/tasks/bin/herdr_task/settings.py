@@ -33,6 +33,58 @@ LEVELS = ["blocker", "major", "minor"]
 LOCAL_MACHINE = "local"
 
 
+def read_settings():
+    """The settings file as it is ({} when there is none or it can't be read)."""
+    try:
+        with open(SETTINGS) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def autopilot_layers(d, space=None):
+    """(Everywhere's, the space's own) Autopilot in a settings file d: {every, events, heartbeat},
+    each only when set. A space is found by its id on this machine (a pushed copy holds this
+    machine's spaces by their bare ids, as herdr-task names them)."""
+    def part(layer):
+        a = (layer or {}).get("autopilot") if isinstance(layer, dict) else None
+        return {k: v for k, v in a.items() if k in ("every", "events", "heartbeat") and v is not None} if isinstance(a, dict) else {}
+    return part(d.get("everywhere")), part((d.get("spaces") or {}).get(space) if space else None)
+
+
+def write_autopilot(space, values):
+    """Sets Autopilot fields at one level of the settings file (space None: Everywhere's); a value
+    None unsets it there, so it follows the level above again. Refused on a copy the window
+    pushed here: the window's machine holds the truth and would put its own back."""
+    d = read_settings()
+    if d.get("pushed_from"):
+        raise Fail("This machine's Shepherdr settings are a copy from the machine whose window sets them: change Autopilot in Settings there.")
+    if space:
+        layer = (d.setdefault("spaces", {})).setdefault(space, {})
+    else:
+        layer = d.setdefault("everywhere", {})
+    a = dict(layer.get("autopilot") or {})
+    for k, v in values.items():
+        if v is None:
+            a.pop(k, None)
+        else:
+            a[k] = v
+    if a:
+        layer["autopilot"] = a
+    else:
+        layer.pop("autopilot", None)
+    if space and not layer:
+        d["spaces"].pop(space, None)
+    d["version"] = 1
+    os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
+    tmp = f"{SETTINGS}.{os.getpid()}.tmp"
+    with open(tmp, "w") as f:
+        json.dump(d, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, SETTINGS)
+
+
 def settings_layers(s, space=None):
     """(Everywhere's, this machine's, this folder's) raw settings, least specific first: the
     folder's are those of the space working in it (--space's when several do)."""

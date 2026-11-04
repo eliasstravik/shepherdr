@@ -41,8 +41,8 @@ class HerdrTask(unittest.TestCase):
 
 
 class Autopilot(unittest.TestCase):
-    """Autopilot's Everywhere and each space's own (herdr_task/autopilot.py), in a throwaway store and
-    heartbeat folder: herdr-app and hc are never run (the window's spaces are given)."""
+    """Autopilot's Everywhere and each space's own (herdr_task/autopilot.py), in a throwaway store,
+    heartbeat folder and settings file: herdr-app and hc are never run (the window's spaces are given)."""
 
     def setUp(self):
         import contextlib
@@ -58,6 +58,11 @@ class Autopilot(unittest.TestCase):
 
         def never(*a, **k):
             raise AssertionError("ran a program")
+        import herdr_task.settings as settings
+        self.settings_file = os.path.join(self.tmp, "shepherdr.json")
+        p = mock.patch.object(settings, "SETTINGS", self.settings_file)
+        p.start()
+        self.addCleanup(p.stop)
         for name, value in (("STORE", store), ("STATE", os.path.join(store, ".autopilot.json")),
                             ("HEARTBEATS", os.path.join(self.tmp, "beats")), ("run", never), ("hc_json", never),
                             ("space_info", lambda s: ("~", self.folder) if s == "sp1" else (None, None))):
@@ -67,7 +72,7 @@ class Autopilot(unittest.TestCase):
 
     def cmd(self, sub, **kw):
         import argparse
-        args = argparse.Namespace(autopilot=sub, json=True, space=None, everywhere=False, every=None, on=None)
+        args = argparse.Namespace(autopilot=sub, json=True, space=None, everywhere=False, every=None, on=None, heartbeat=None)
         for k, v in kw.items():
             setattr(args, k, v)
         out = self.io.StringIO()
@@ -80,8 +85,8 @@ class Autopilot(unittest.TestCase):
         with open(os.path.join(ROOT, "core", "autopilot.cases.json")) as f:
             cases = json.load(f)["cases"]
         for c in cases:
-            eff = self.ap.resolve(c["file"], c["file"]["spaces"].get(c["space"]))
-            got = {"on": eff["on"], "every": (eff["every"] or {}).get("text"), "events": eff["events"]}
+            eff = self.ap.resolve(c["file"], c["file"]["spaces"].get(c["space"]), c["space"], c.get("settings", {}))
+            got = {"on": eff["on"], "every": (eff["every"] or {}).get("text"), "events": eff["events"], "own": eff["own"]}
             self.assertEqual(got, c["expect"], c["name"])
 
     def test_a_spaces_old_settings_go(self):
@@ -104,11 +109,14 @@ class Autopilot(unittest.TestCase):
         on1 = next(v for v in self.cmd("list")["spaces"] if v["space"] == "on1")
         self.assertEqual((on1["on"], on1["every"], on1["events"]), (True, "every 60 minutes", []))
 
-    def test_one_setting_for_every_space(self):
+    def test_everywhere_unless_a_space_sets_its_own(self):
         e = self.cmd("set", everywhere=True, every="every 30 minutes", on="ready")
         self.assertEqual((e["everywhere"], e["every"], e["events"]), (True, "every 30 minutes", ["ready"]))
+        # kept in Shepherdr settings, with everything else there
+        with open(self.settings_file) as f:
+            self.assertEqual(json.load(f)["everywhere"]["autopilot"], {"every": "every 30 minutes", "events": ["ready"]})
         v = self.cmd("show", space="sp1")
-        self.assertEqual((v["on"], v["every"], v["events"]), (False, "every 30 minutes", ["ready"]))
+        self.assertEqual((v["on"], v["every"], v["events"], v["own"]), (False, "every 30 minutes", ["ready"], []))
         # switched on in its header: Everywhere's schedule, a next wake
         v = self.cmd("on", space="sp1")
         self.assertEqual((v["on"], v["every"], v["heartbeat"]), (True, "every 30 minutes", self.ap.heartbeat_path()))
@@ -120,10 +128,22 @@ class Autopilot(unittest.TestCase):
         v = self.cmd("show", space="sp1")
         self.assertEqual(v["every"], "weekdays 9:00")
         self.assertNotEqual(v["next_run"], v0)
-        # a space can't set its own; Everywhere can't switch spaces on or off
-        with self.assertRaises(self.ap.Fail) as no:
-            self.cmd("set", space="sp1", every="every 30 minutes")
-        self.assertIn("--everywhere", str(no.exception))
+        # its own schedule wins there (and gets its own next wake); its events still follow Everywhere's
+        v = self.cmd("set", space="sp1", every="every 2 hours")
+        self.assertEqual((v["every"], v["events"], v["own"]), ("every 2 hours", ["ready"], ["every"]))
+        self.assertEqual(self.cmd("show", space="sp2")["every"], "weekdays 9:00")
+        self.cmd("set", everywhere=True, every="every 60 minutes")
+        self.assertEqual(self.cmd("show", space="sp1")["every"], "every 2 hours")
+        # "default": back to Everywhere's
+        v = self.cmd("set", space="sp1", every="default")
+        self.assertEqual((v["every"], v["own"]), ("every 60 minutes", []))
+        with open(self.settings_file) as f:
+            self.assertNotIn("sp1", json.load(f).get("spaces", {}))
+        # a schedule that isn't one is refused, and one written by hand is passed over
+        with self.assertRaises(self.ap.Fail):
+            self.cmd("set", space="sp1", every="whenever")
+        self.assertEqual(self.ap.resolve({}, {}, "sp1", {"spaces": {"sp1": {"autopilot": {"every": "whenever"}}}})["every"]["text"], "every 60 minutes")
+        # Everywhere can't switch spaces on or off
         for sub in ("on", "off", "run-now"):
             with self.assertRaises(self.ap.Fail):
                 self.cmd(sub, everywhere=True)
@@ -131,14 +151,35 @@ class Autopilot(unittest.TestCase):
         self.assertEqual((v["on"], v["next_run"]), (False, None))
         self.assertEqual([x["space"] for x in self.cmd("list")["spaces"]], ["sp1"])
 
-    def test_one_heartbeat(self):
-        path = self.cmd("heartbeat")["heartbeat"]
-        self.assertEqual(path, self.ap.heartbeat_path())
-        with open(path) as f:
+    def test_heartbeats(self):
+        """Everywhere's file from before, until Settings has one; a space's own wins there."""
+        v = self.cmd("heartbeat")
+        self.assertEqual((v["heartbeat"], v["heartbeat_from"], v["blank"]), (self.ap.heartbeat_path(), "file", True))
+        with open(v["heartbeat"]) as f:
             self.assertEqual(f.read(), self.ap.STARTER)
-        with open(path, "w") as f:
+        with open(v["heartbeat"], "w") as f:
             f.write("Ship the docs.\n")
         self.assertIn("Ship the docs.", self.ap.message("sp1", {}, ["run now"]))
+        self.cmd("set", everywhere=True, heartbeat="Keep the tests green.")
+        self.cmd("set", space="sp1", heartbeat="Only the web app.")
+        one, two = self.ap.message("sp1", {}, ["run now"]), self.ap.message("sp2", {}, ["run now"])
+        self.assertIn("Only the web app.", one)
+        self.assertIn("this space's own", one)
+        self.assertIn("Keep the tests green.", two)
+        self.assertNotIn("Ship the docs.", two)
+        self.assertEqual(self.cmd("heartbeat", space="sp1")["heartbeat_from"], "space")
+        self.assertEqual(self.cmd("show", space="sp1")["own"], ["heartbeat"])
+
+    def test_check_and_pushed_copies(self):
+        self.assertEqual(self.cmd("check", every="Weekdays 9:00")["every"], "Weekdays 9:00")
+        self.assertEqual(self.cmd("check", every="off")["every"], None)
+        with self.assertRaises(self.ap.Fail):
+            self.cmd("check", every="whenever")
+        # a copy the window pushed here: its machine holds the truth
+        with open(self.settings_file, "w") as f:
+            json.dump({"pushed_from": "herdr-app", "here": "vm"}, f)
+        with self.assertRaises(self.ap.Fail):
+            self.cmd("set", space="sp1", every="every 2 hours")
 
     def test_complete_turns_it_off(self):
         import argparse
@@ -156,7 +197,7 @@ class Autopilot(unittest.TestCase):
         with self.redirect(out):
             self.ap.cmd_autopilot(args)
         lines = out.getvalue().splitlines()
-        self.assertTrue(lines[0].startswith("Every space: Every hour"), lines)
+        self.assertTrue(lines[0].startswith("Everywhere: Every hour"), lines)
         self.assertTrue(lines[1].startswith("tt-repo: Autopilot on"), lines)
 
 

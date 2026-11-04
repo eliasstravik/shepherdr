@@ -7,12 +7,14 @@ import { NAMES, levelName, current, rowFor, menuFor } from "./agents.js";
 import { SERVE } from "./host.js";
 
 // ---- the frame -------------------------------------------------------------------------------------------------
-// The pages, in the window's order. space: a space's own settings have it too ("local": only a space on this computer).
+// The pages, in the window's order. space: a space's own settings have it too ("local": only a space on this computer);
+// the others are one setting for every space (docs/settings.md says which and why).
 export const SECTIONS = [
   { id: "agents", title: "Agents", icon: "bot", space: true },
   { id: "tasks", title: "Tasks", icon: "list-checks", space: true },
-  // one setting for every space (core/autopilot.js): a space only switches it on, in its Assistant's header
-  { id: "autopilot", title: "Autopilot", icon: "plane" },
+  // Everywhere's heartbeat, schedule and events, and a space's own (core/autopilot.js); a space switches it on in its
+  // Assistant's header
+  { id: "autopilot", title: "Autopilot", icon: "plane", space: true },
   { id: "notify", title: "Notify", icon: "bell", space: true },
   { id: "secrets", title: "Secrets", icon: "key", space: true },
   { id: "machines", title: "Machines", icon: "network" },
@@ -29,14 +31,33 @@ export const machineLabel = (key) => (key === LOCAL || key == null ? THIS_COMPUT
 // A space's own settings, at their top: which space, and on which machine.
 export const onlyFor = (space, machine) => `Only for ${space} on ${machine}`;
 
+// ---- the level switch ------------------------------------------------------------------------------------------
+// At the top of each page a space can set its own of: what the page sets, Everywhere's or one space's, and a picker
+// to change it (Everywhere, then every space, by machine). A page that is one for every space says so instead.
+export const LEVEL = {
+  label: "Applies to",
+  everywhere: "Every space, unless it sets its own.",
+  space: (machine) => `Only this space, on ${machine}. What it doesn't set is inherited from Everywhere.`,
+  find: "Find a space…",
+  spaces: "Spaces",
+  none: "No space matches.",
+  global: "The same for every space.",
+};
+
 // ---- under a row -----------------------------------------------------------------------------------------------
-// In a space: "Changed here · Reset" or "Same as everywhere"; on Everywhere, the spaces that set their own.
-export const CHANGED_HERE = "Changed here";
+// In a space: "Set for this space · Reset" or "Inherited from Everywhere"; on Everywhere, the spaces that set their
+// own. On a machine's own rows (Machines): "Set for this machine · Reset" or "Inherited from all machines".
+export const CHANGED_HERE = "Set for this space";
+export const SET_FOR_MACHINE = "Set for this machine";
 export const RESET = "Reset";
-export const sameAs = (level, key) => (level === "machine" ? `Same as ${machineLabel(key)}` : "Same as everywhere");
-export const spacesOwn = (n) => (n === 1 ? "1 space uses its own" : `${n} spaces use their own`);
+export const RESET_TIP = (from) => `Back to ${from}'s`;
+// where an inherited value comes from: Everywhere, or the machine a value set before still comes from
+export const fromWord = (level, key) => (level === "machine" ? machineLabel(key) : EVERYWHERE);
+export const inheritedFrom = (from) => `Inherited from ${from}`;
+export const sameAs = (level, key) => inheritedFrom(fromWord(level, key));
+export const spacesOwn = (n) => (n === 1 ? "1 space sets its own" : `${n} spaces set their own`);
 export const machinesOwn = (n) => (n === 1 ? "1 machine uses its own" : `${n} machines use their own`);
-export const SAME_AS_ALL_MACHINES = "Same as all machines";
+export const SAME_AS_ALL_MACHINES = "Inherited from all machines";
 
 // ---- Agents ----------------------------------------------------------------------------------------------------
 export const ROLES = [
@@ -55,7 +76,7 @@ export const INSTRUCTIONS = {
     coordinator: "Every Assistant uses this. Repo-specific rules go in the repo's AGENTS.md or CLAUDE.md. Changes apply when an Assistant restarts.",
     worker: "Every worker gets this first. Repo-specific rules go in the repo's AGENTS.md or CLAUDE.md. Changes apply to the next task that starts.",
     reviewer: "Every reviewer gets this first. Repo-specific rules go in the repo's AGENTS.md or CLAUDE.md. Changes apply to the next review.",
-    heartbeat: "Autopilot's heartbeat, plain text, the same in every space: an Assistant on Autopilot gets it on every wake. Changes apply from the next wake.",
+    heartbeat: "Autopilot's heartbeat, plain text: an Assistant on Autopilot gets it on every wake. Changes apply from the next wake.",
   },
 };
 export const USE_OTHER_CLI = "Use other CLI";

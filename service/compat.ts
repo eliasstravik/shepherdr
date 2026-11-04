@@ -42,28 +42,12 @@ const AGENT: Record<string, Status> = { blocked: "need", working: "work", done: 
 
 // Autopilot's words and picks: core/autopilot.js, the window's Settings › Autopilot's too
 const AP = APc as any;
-const tilde = (p: string | null) => (p && p.startsWith(HOME + "/") ? `~${p.slice(HOME.length)}` : p ?? undefined);
-
-/** Settings › Autopilot's rows, as the window's (mods/shepherdr-settings/autopilot-section.js): one setting for every
- *  space, as Tasks is: the heartbeat (its file's words), the schedule (picks or its own words) and the events. A space
- *  only switches it on, in its Assistant's header. e: Everywhere's, from herdr-task (model.ts pilotEverywhere). */
-function pilotRows(e: any) {
-  const R = AP.ROWS;
-  return [
-    { label: R.heartbeat.label, key: "autopilot.heartbeat", value: e.words ?? "", doc: true, hint: R.heartbeat.about, file: tilde(e.heartbeat ?? null) },
-    { label: R.every.label, key: "autopilot.every", value: e.every ?? "", text: true, hint: R.every.about,
-      trigger: { words: e.trigger ?? "Only Run now", next: [], presets: AP.PRESETS.map(([value, label]: string[]) => ({ label, value })) } },
-    { label: R.events.label, key: "autopilot.events", value: AP.eventsIn(e.events).join(","), multi: AP.EVENTS.map(([value, label]: string[]) => ({ value, label })),
-      hint: R.events.about },
-  ];
-}
 
 /** What an Assistant's header shows of its Autopilot (3.0's switch): on, the next wake, queued or waking, its events,
  *  and whether its heartbeat is still empty (unchanged from herdr-task's starter: "Write a heartbeat") */
 function headerPilot(a: any) {
-  const words = String(a?.words ?? "").trim();
   return { on: !!a?.on, next_run: a?.next_run ?? null, pending: !!a?.pending, inflight: !!a?.inflight, events: a?.events ?? [],
-    blank: !words || words === String((APc as any).STARTER).trim() };
+    blank: AP.blankBeat(a?.words) };
 }
 
 
@@ -267,7 +251,7 @@ export class Compat {
 
   addrOf(key: string) { return this.chats.get(key) ?? null; }
 
-  snapshot(input: { host: string; user: string; machines: { name: string; here: boolean; state: string }[]; spaces: Space[]; sections: any[]; rows: Row[]; artifacts?: any[]; settings?: SettingSection[]; off?: string[]; offPlugins?: string[]; automations?: any[]; pilot?: any }): Snapshot {
+  snapshot(input: { host: string; user: string; machines: { name: string; here: boolean; state: string }[]; spaces: Space[]; sections: any[]; rows: Row[]; artifacts?: any[]; settings?: SettingSection[]; off?: string[]; offPlugins?: string[]; automations?: any[] }): Snapshot {
     const { host, spaces, rows } = input;
     this.host = host;
     this.rows = rows;
@@ -416,18 +400,13 @@ export class Compat {
         // push alerts on this phone or browser: 2.1's alerts action (it asks the device, then tells the service)
         { label: "Alerts on this device", key: "alerts", value: "", options: ["Turn on"] }] },
       ...spaces.map((s) => {
-        // "Same as everywhere", or its machine's own set before
-        const m = machineOfSpace(s.id), from = STc.sameAs(machineOwn(n, m) ? "machine" : "everywhere", m).replace(/^Same as /, "");
+        // "Inherited from Everywhere", or its machine's own set before
+        const m = machineOfSpace(s.id), from = STc.fromWord(machineOwn(n, m) ? "machine" : "everywhere", m);
         return { name: "Notify", level: s.id, rows: [{ label: "Notify", key: "notify", value: level(s), options: [...NOTIFY], hint: STc.NOTIFY_ABOUT,
           ...(spaceOwn(n, s.id) ? { inherits: { value: parent(s), from } } : { from }) }] };
       }),
     ];
 
-    // Autopilot (3.0's Settings › Autopilot, herdr-task keeps it): one setting for every space, Everywhere's page only;
-    // a space switches it on in its Assistant's header. The Autopilot add-on off: no page, no switch (Settings › Window)
-    const pilotOn = !(input.off ?? []).includes("autopilot");
-    const ev = input.pilot ?? { ...AP.everywhereOf(null), words: AP.STARTER };
-    if (pilotOn) notify.push({ name: "Autopilot", level: "all", about: AP.ABOUT, rows: pilotRows(ev) } as SettingSection);
 
     this.chats = chats;
     this.last = {

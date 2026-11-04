@@ -1,16 +1,20 @@
 // Autopilot's words and picks, the same in the window (Settings › Autopilot: mods/shepherdr-settings/autopilot-section.js;
 // the header's switch: mods/pane-chat/autopilot.js) and on the web (service/compat.ts, web/plugins/coordinators).
-// One setting for every space, as Tasks is: Everywhere's heartbeat, schedule and events. A space has only its own on or
-// off, from the switch in its Assistant's header. herdr-task keeps the data (mods/tasks/bin/herdr_task/autopilot.py,
-// ~/.herdr/tasks/.autopilot.json: "everywhere" {every, events}, and per space its on/off and how its wakes go; the
-// heartbeat is one file, everywhere.md). pilotFor() is herdr-task's resolve(), for the header, which reads the file
+// Set as Tasks is: Everywhere's heartbeat, schedule and events, and a space's own where it sets one (Shepherdr settings,
+// ~/.herdr/shepherdr.json "autopilot" = { every, events, heartbeat } in "everywhere" and in "spaces"[id], travelling
+// to every machine with the rest). A space switches it on or off in its Assistant's header. herdr-task keeps each
+// space's switch and how its wakes go (mods/tasks/bin/herdr_task/autopilot.py, ~/.herdr/tasks/.autopilot.json, whose
+// "everywhere" {every, events} and the heartbeat file everywhere.md are Everywhere's from before Settings kept them,
+// still read where Settings sets none). pilotFor() is herdr-task's resolve(), for the header, which reads the files
 // itself, and for a space herdr-task has no record of yet; core/autopilot.cases.json holds the cases both sides are
 // tested on (core/autopilot.test.js, test/test_herdr_task.py).
 // Shared core: the source is core/autopilot.js; bin/sync-shared copies it into the mods in lib/COPIES.
 
 export const TITLE = "Autopilot";
-export const ABOUT = "How Autopilot works in every space. Turn it on in a space with the switch in its Assistant's header: "
+export const ABOUT = "How Autopilot works. Turn it on in a space with the switch in its Assistant's header: "
   + "its Assistant then wakes on a schedule or when something happens to its tasks, and works from the heartbeat.";
+// The fields a space can set its own of (Shepherdr settings' "autopilot").
+export const FIELDS = ["heartbeat", "every", "events"];
 
 // Each row's label and its line under it.
 export const ROWS = {
@@ -47,6 +51,8 @@ Stopping goal (optional): a finite goal; when it's proven, Autopilot turns itsel
 
 // Everywhere's until set (herdr-task: everywhere_default).
 export const DEFAULT = { every: "every 60 minutes", events: [] };
+// A heartbeat nobody wrote: empty, or the starter as it came (herdr-task: blank).
+export const blankBeat = (words) => !String(words ?? "").trim() || String(words).trim() === STARTER.trim();
 
 const textOf = (e) => (e && typeof e === "object" ? e.text ?? null : e || null);
 const has = (o, k) => Object.prototype.hasOwnProperty.call(o ?? {}, k) && o[k] !== undefined;
@@ -60,14 +66,33 @@ export function everywhereOf(file) {
     ...(e.trigger ? { trigger: e.trigger } : {}) };
 }
 
-// What applies in a space: its own on/off (off until switched on), Everywhere's schedule and events (anything a space
-// held of its own before is ignored). Everything else its record holds (next_run, pending, last_wake, progress…) comes
-// along as it is. file.spaces: the file's map, or herdr-task's list of views.
-export function pilotFor(file, space) {
+// A level's Autopilot in Shepherdr settings (null: Everywhere's), only what it sets: { every, events, heartbeat }.
+export function levelOf(settings, space = null) {
+  const a = (space ? settings?.spaces?.[space] : settings?.everywhere)?.autopilot;
+  if (!a || typeof a !== "object") return {};
+  return Object.fromEntries(FIELDS.filter((k) => a[k] !== undefined && a[k] !== null).map((k) => [k, a[k]]));
+}
+const ruleText = (x) => { const t = String(x ?? "").trim(); return !t || /^(off|none|never)$/i.test(t) ? null : t; };
+
+// What applies in a space: its own on/off (off until switched on); the schedule and events it sets in Shepherdr
+// settings, else Everywhere's there, else Everywhere's from before (file.everywhere), else the defaults; own: what it
+// sets itself. Everything else its record holds (next_run, pending, last_wake, progress…) comes along as it is.
+// file.spaces: the file's map, or herdr-task's list of views (already what applies: taken as they are).
+export function pilotFor(file, space, settings = null) {
   const list = file?.spaces;
-  const a = (Array.isArray(list) ? list.find((v) => v.space === space) : list?.[space]) ?? {};
+  if (Array.isArray(list)) {
+    const v = list.find((x) => x.space === space);
+    if (v) return v;
+  }
+  const a = (Array.isArray(list) ? null : list?.[space]) ?? {};
   const e = everywhereOf(file);
-  return { ...a, space, on: Boolean(a.on), every: e.every, events: e.events, ...(e.trigger && !a.trigger ? { trigger: e.trigger } : {}) };
+  const own = [];
+  for (const [layer, mine] of [[levelOf(settings), false], [levelOf(settings, space), true]]) {
+    if (typeof layer.every === "string") { e.every = ruleText(layer.every); if (mine) own.push("every"); }
+    if (Array.isArray(layer.events)) { e.events = eventsIn(layer.events); if (mine) own.push("events"); }
+    if (mine && typeof layer.heartbeat === "string") own.push("heartbeat");
+  }
+  return { ...a, space, on: Boolean(a.on), every: e.every, events: e.events, own, ...(e.trigger && !a.trigger ? { trigger: e.trigger } : {}) };
 }
 
 // A schedule's pick: its preset's value, else null (Custom).
