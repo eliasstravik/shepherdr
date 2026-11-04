@@ -217,6 +217,35 @@ class Install(unittest.TestCase):
             shutil.rmtree(root, ignore_errors=True)
             shutil.rmtree(src, ignore_errors=True)
 
+    def test_update_runs_the_new_installer(self):
+        """`shepherdr update` is the installed (old) copy: after a release it hands over to the source's installer, so
+        one run records the new version (SHEP-28 had to run it twice)."""
+        src = tempfile.mkdtemp(prefix="shepherdr-src-")
+        try:
+            s = os.path.join(src, "s")
+            shutil.copytree(ROOT, s, ignore=shutil.ignore_patterns(".git", "node_modules"))
+            run("install", "--root", self.root, "--source", s, "--yes")
+            installed = self.p(APP, "bin/shepherdr")
+            self.assertTrue(os.path.isfile(installed))
+            # the release: a new version in the source, the installed copy still the old one
+            new = os.path.join(s, "bin/shepherdr")
+            with open(new) as f:
+                text = f.read()
+            with open(new, "w") as f:
+                f.write(re.sub(r'^VERSION = "[^"]*"', 'VERSION = "9.9.9"', text, count=1, flags=re.M))
+            p = subprocess.run([sys.executable, installed, "update", "--root", self.root, "--yes", "--no-build"],
+                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
+            self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+            self.assertIn("Shepherdr 9.9.9 update", p.stdout)
+            self.assertEqual(json.load(open(self.p(APP, "data/shepherdr/installed.json")))["version"], "9.9.9")
+            # now the same installer: it runs itself
+            p = subprocess.run([sys.executable, installed, "update", "--root", self.root, "--yes", "--no-build"],
+                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
+            self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+            self.assertNotIn("runs it", p.stdout)
+        finally:
+            shutil.rmtree(src, ignore_errors=True)
+
     def test_update_needs_an_install(self):
         p = run("update", "--root", self.root, "--yes", ok=False)
         self.assertEqual(p.returncode, 1)

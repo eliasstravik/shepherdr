@@ -1248,6 +1248,36 @@ def cmd_web(a):
     raise Stop("shepherdr web serve-from <machine|here> [--take-link] | shepherdr web status")
 
 
+def hand_over(a, argv):
+    """`shepherdr update` runs the installed copy, which a pull doesn't change: installing with it wrote the old version
+    (and its old steps), so it took a second run to say the new one. When the source's own installer is another, it
+    does the install instead, told where its source is."""
+    if os.environ.get("SHEPHERDR_HANDED_OVER"):
+        return
+    root = os.path.realpath(a.root or real_home())
+    rec = load_record(root)
+    if a.web or (a.cmd == "update" and not rec):
+        try:
+            web = json.load(open(os.path.join(root, WEB_RECORD)))
+        except (OSError, ValueError):
+            web = {}
+        given = a.source or web.get("source")
+    else:
+        given = a.source
+    try:
+        src = find_source(given, rec) if given or rec else None
+    except Stop:
+        return
+    me, new = os.path.realpath(__file__), os.path.join(src or "", "bin", "shepherdr")
+    if not src or not os.path.isfile(new) or os.path.realpath(new) == me or read(new) == read(me):
+        return
+    say(f"(the installer in {src} runs it: it's the newer one)")
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os.execve(sys.executable, [sys.executable, new, *argv, *([] if a.source else ["--source", src])],
+              dict(os.environ, SHEPHERDR_HANDED_OVER="1"))
+
+
 def main(argv):
     ap = argparse.ArgumentParser(prog="shepherdr", description="Install, update, check or remove Shepherdr in Herdr.")
     sub = ap.add_subparsers(dest="cmd")
@@ -1275,6 +1305,8 @@ def main(argv):
     sub.add_parser("version")
     a = ap.parse_args(argv)
     try:
+        if a.cmd in ("install", "update"):
+            hand_over(a, argv)
         if a.cmd == "install":
             return cmd_install_web(a) if a.web else cmd_install(a)
         if a.cmd == "update":

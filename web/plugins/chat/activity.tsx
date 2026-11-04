@@ -359,7 +359,8 @@ function ToolSteps({ a, chat }: { a: TurnActivity; chat: string }) {
 /** a turn's clock: when this page first saw the agent working */
 const since = new Map<string, number>()
 
-/** while the agent works: what it is doing in plain words, for how long, and Stop (Esc in an empty box); only waiting
+/** while the agent works: what it is doing in plain words, for how long, and Stop (Esc in an empty box; the hint only
+ *  where there are keys), its edges the box's as the window's; only waiting
  *  (a wait, a sleep, a helper it waits on): a calm clock, no spinner */
 export function WorkingLine({ chatKey }: { chatKey: string }) {
   const chat = useStore((s) => s.chats[chatKey])
@@ -371,7 +372,7 @@ export function WorkingLine({ chatKey }: { chatKey: string }) {
   useEffect(() => { if (!on) { since.delete(chatKey); setStopping(false) } else if (!since.has(chatKey)) since.set(chatKey, Date.now()) }, [on, chatKey])
   if (starting && !on)
     return (
-      <div role="status" data-working className="flex h-[30px] items-center gap-2 px-0.5 text-[0.75rem] text-fg2 phone:text-[0.8125rem]">
+      <div role="status" data-working className="flex h-[30px] items-center gap-2 text-[0.75rem] text-fg2 coarse:h-10 phone:h-10 phone:text-[0.8125rem]">
         <span aria-hidden className="live-dot size-1.5 shrink-0 rounded-full bg-[var(--work)]" />
         <span className="min-w-0 flex-1 truncate">{WORDS.startingAssistant}</span>
       </div>
@@ -384,15 +385,15 @@ export function WorkingLine({ chatKey }: { chatKey: string }) {
     void act({ type: 'stop', chat: chatKey }).catch(() => setStopping(false))
   }
   return (
-    <div role="status" data-working className="flex h-[30px] items-center gap-2 px-0.5 text-[0.75rem] text-fg2 phone:text-[0.8125rem]">
+    <div role="status" data-working className="flex h-[30px] items-center gap-2 text-[0.75rem] text-fg2 coarse:h-10 phone:h-10 phone:text-[0.8125rem]">
       {waits ? <ClockIcon aria-hidden className="size-3 shrink-0 fill-[var(--fg3)]" /> : <span aria-hidden className="live-dot size-1.5 shrink-0 rounded-full bg-[var(--work)]" />}
       <span className="min-w-0 flex-1 truncate">{stopping ? WORDS.stopping : chat.doing || WORDS.working}</span>
       <span className="shrink-0 font-mono text-[0.71875rem] text-fg3 tabular-nums">{elapsed(secs)}</span>
       <button type="button" onClick={stop} disabled={stopping}
-        className="flex h-[22px] shrink-0 items-center gap-1.5 rounded-[6px] px-2 text-[0.75rem] text-fg2 shadow-[inset_0_0_0_1px_var(--line2)] enabled:hover:bg-hover enabled:hover:text-fg disabled:opacity-45 phone:h-8">
+        className="flex h-[22px] shrink-0 items-center gap-1.5 rounded-[6px] px-2 text-[0.75rem] text-fg2 shadow-[inset_0_0_0_1px_var(--line2)] enabled:hover:bg-hover enabled:hover:text-fg disabled:opacity-45 coarse:h-8 phone:h-8">
         <StopIcon aria-hidden className="size-2 shrink-0 fill-current" />
         Stop
-        <kbd className="font-sans text-[0.6875rem] text-fg3 coarse:hidden">Esc</kbd>
+        <kbd className="font-sans text-[0.6875rem] text-fg3 pointer-coarse:hidden">Esc</kbd>
       </button>
     </div>
   )
@@ -403,7 +404,7 @@ export function NeedsYou({ chatKey }: { chatKey: string }) {
   const blocked = useStore((s) => s.chats[chatKey]?.blocked)
   if (blocked === undefined) return null
   return (
-    <div role="alert" className="mb-1.5 flex items-center gap-2.5 rounded-[10px] bg-bubble px-3 py-2.5 shadow-[inset_0_0_0_1px_var(--line2)]">
+    <div role="alert" className="flex items-center gap-2.5 rounded-[10px] bg-bubble px-3 py-2.5 shadow-[inset_0_0_0_1px_var(--line2)]">
       <span aria-hidden className="size-2 shrink-0 rounded-full bg-need" />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="font-medium text-fg">{WORDS.needsYou}</span>
@@ -477,7 +478,7 @@ export function JobsTag({ chatKey }: { chatKey: string; cli: string }) {
   const open = more || jobs.length <= 5
   const list = open ? jobs : jobs.slice(0, 4)
   return (
-    <div data-jobs className="flex flex-col px-0.5 pb-1">
+    <div data-jobs className="flex flex-col">
       {list.map((j) =>
         j.kind === 'shell' || j.kind === 'monitor' ? (
           <JobLine key={j.id} j={j} chat={chatKey} open={opened === j.id} toggle={() => setOpened(opened === j.id ? null : j.id)} />

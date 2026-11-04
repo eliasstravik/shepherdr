@@ -10,7 +10,7 @@ import { act, has, openTask, registry } from '@client/kernel.ts'
 import { CheckIcon, CopyIcon, PageIcon, ReplyIcon, SmileIcon, TermIcon } from '@client/ui.tsx'
 import * as CV from '@core/chat-view.js'
 import type { Chat, Message, ReplyQuote } from '@shared/types.ts'
-import { openAccept } from '@client/screens/Accept.tsx'
+import { openAccept, useAccepting } from '@client/screens/Accept.tsx'
 import { ForkIcon, openPicker, RewindIcon } from '@plugins/reactions/client.tsx'
 import { Markdown } from './markdown.tsx'
 import { jumpTo, startReply } from './reply.ts'
@@ -139,9 +139,11 @@ export function BriefRow({ msg }: { msg: Message }) {
 }
 
 /** a task's news line: its mark, the id, what happened, then its words, dim; a needs-you line still waiting in red.
- *  The line opens the task; a Ready one's Accept sits at its right end */
+ *  The line opens the task; a Ready one's Accept sits at its right end ("Accepting…" while it runs, as the window's),
+ *  gone once the task moved on (the service tells the chat again then) */
 export function NewsRow({ msg }: { msg: Message }) {
   const n = msg.news!
+  const busy = useAccepting(n.task)
   const tick = (c: string) => (
     <span className={clsx('grid size-3 place-items-center rounded-full text-white', c)}>
       <TickIcon className="size-2.5" />
@@ -156,9 +158,9 @@ export function NewsRow({ msg }: { msg: Message }) {
       <span className={clsx('shrink-0', n.live ? 'text-need' : 'text-fg2')}>{n.what}</span>
       {n.text ? <><span className="shrink-0">·</span><span className="min-w-0 flex-1 truncate">{n.text}</span></> : <span className="flex-1" />}
       {n.accept ? (
-        <button type="button" onClick={(e) => { e.stopPropagation(); openAccept(n.task) }}
-          className="press-dim ml-1 h-5 shrink-0 rounded-[6px] bg-fg px-2 text-[0.6875rem]/5 font-medium text-bg phone:h-7 phone:px-2.5 phone:text-xs/7">
-          Accept
+        <button type="button" disabled={busy} onClick={(e) => { e.stopPropagation(); openAccept(n.task) }}
+          className="press-dim ml-1 h-5 shrink-0 rounded-[6px] bg-fg px-2 text-[0.6875rem]/5 font-medium text-bg disabled:opacity-60 phone:h-7 phone:px-2.5 phone:text-xs/7">
+          {busy ? 'Accepting…' : 'Accept'}
         </button>
       ) : null}
     </div>

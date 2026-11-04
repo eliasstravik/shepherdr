@@ -38,7 +38,7 @@ function CallHelp({ chatKey }: { chatKey: string }) {
   if (help !== chatKey) return null
   const close = () => { help = null; helpers.forEach((f) => f()) }
   return (
-    <div role="status" className="mb-1.5 flex flex-col gap-2 rounded-[8px] bg-bubble px-3 py-2.5 shadow-[inset_0_0_0_1px_var(--line2)]">
+    <div role="status" className="flex flex-col gap-2 rounded-[8px] bg-bubble px-3 py-2.5 shadow-[inset_0_0_0_1px_var(--line2)]">
       <div className="flex items-center gap-2">
         <span className="flex-1 font-medium text-fg">Voice calls need an ElevenLabs key</span>
         <IconButton label="Close" className="rounded-full!" onClick={close}><XIcon className={ic} /></IconButton>

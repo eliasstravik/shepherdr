@@ -456,6 +456,8 @@ export function TabMenuItems({ place, tab, close }: { place: Place; tab: BarTab;
   const snap = useSnap()!
   const { agents } = useAgents(place)
   const [sub, setSub] = useState(false)
+  // 1–9 pick an agent from the keys: their hints only where there are keys
+  const keys = useUI((u) => u.device === 'desktop' || u.kb)
   const installed = (agents ?? []).filter((a) => a.installed)
   const chat = tab.term ?? place.chat
   // an agent runs in it, on this machine (the window restarts through this machine's core)
@@ -486,7 +488,7 @@ export function TabMenuItems({ place, tab, close }: { place: Place; tab: BarTab;
         {agents === null ? <Quiet>{S.loading}</Quiet> : installed.map((a, i) => {
           const on = a.kind === tab.agent
           return (
-            <MenuItem key={a.kind} icon={<ModelIcon className={ic} />} disabled={on} hint={on ? S.current : i < 9 ? String(i + 1) : undefined} onClick={() => pick(a)} className="disabled:text-fg3">
+            <MenuItem key={a.kind} icon={<ModelIcon className={ic} />} disabled={on} hint={on ? S.current : keys && i < 9 ? String(i + 1) : undefined} onClick={() => pick(a)} className="disabled:text-fg3">
               {a.name}
             </MenuItem>
           )
