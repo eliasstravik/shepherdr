@@ -3,7 +3,7 @@
 Mission control for your coding agents inside Herdr: your spaces in a sidebar, each with its own Assistant you talk to
 as a chat, and a Tasks panel on the right that shows which task needs you, which is ready and which is still working.
 You tell the Assistant what needs doing; it turns it into tasks, each run by its own agent in its own git worktree,
-and asks you on a card when it needs a decision. Shepherdr 3.0.0, for herdr-app 0.1.12 and herdr-core 0.1.17 or newer.
+and asks you on a card when it needs a decision. Shepherdr 3.1.0, for herdr-app 0.1.12 and herdr-core 0.1.17 or newer.
 
 ![Shepherdr](preview.png)
 
@@ -43,7 +43,7 @@ Left to right, on the theme's `canvas` background, no title bar:
   calls the Assistant, Ctrl+F finds in the chat. Alt+1…9 pick a tab, Alt+Up/Down a space, Alt+Enter splits.
 - Shepherdr settings (the sidebar foot): Agents, Tasks, Autopilot, Notify, Secrets, Machines and Window. Window holds
   the look switches and the add-on switches: Artifacts, Voice and dictation, Reactions, Task browser, Autopilot and
-  Other machines can be turned off; the rest is always on in 3.0.0.
+  Other machines can be turned off; the rest is always on in 3.1.0.
 
 ## Built from
 

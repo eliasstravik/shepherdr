@@ -124,6 +124,8 @@ class Repo(unittest.TestCase):
                 self.assertTrue(os.path.isfile(J("web", w)), f"{name}: no web/{w}")
             for k in ("herdr", "desktop", "tablet", "phone"):
                 self.assertTrue(f.get("forms", {}).get(k), f"{name}: no {k} form")
+            # a release has every feature on both sides: nothing left "planned"
+            self.assertNotIn("planned", f, f"{name}: still planned ({f.get('planned')})")
         used = {m for f in feats for m in f.get("herdr", {}).get("mods", [])}
         self.assertEqual(sorted(set(os.listdir(J("mods"))) - used), [], "a mod belongs to no feature")
         screens = J("web", "src", "screens")
@@ -134,7 +136,7 @@ class Repo(unittest.TestCase):
 
     def test_version_everywhere(self):
         v = re.search(r'^VERSION = "([^"]+)"', open(J("bin", "shepherdr")).read(), re.M).group(1)
-        self.assertEqual(v, "3.0.0")
+        self.assertEqual(v, "3.1.0")
         self.assertRegex(open(J("CHANGELOG.md")).read(), rf"(?m)^## {re.escape(v)}\b", "CHANGELOG's newest entry")
         self.assertIn(v, open(J("RECIPE.md")).read())
         self.assertIn(v, open(J("README.md")).read())

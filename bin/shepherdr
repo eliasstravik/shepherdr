@@ -43,7 +43,7 @@ import subprocess
 import sys
 import tempfile
 
-VERSION = "3.0.0"  # 3.1.0 with its CHANGELOG, README and RECIPE at the end of the 3.1.0 work
+VERSION = "3.1.0"
 HERDR_APP_MIN = "0.1.12"
 HC_MIN = "0.1.17"
 
