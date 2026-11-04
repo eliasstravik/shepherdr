@@ -26,6 +26,7 @@ import { NOTIFY, NOTIFY_DEFAULT, notifyMachine, notifyMachineOwn, notifyOf, noti
   setNotifyEverywhere, setNotifyMachine, setNotify } from "./notify.js";
 import { machinesSection } from "./machines-section.js";
 import { TEXT, RADIUS, H, button, link, toggleSwitch, segmented } from "./ui.js";
+import { webSection } from "./web-section.js";
 
 const I = (name) => `mods/shepherdr-settings/${name}.svg`;
 // space: shown in a space's own settings too ("local": only for a space on this computer).
@@ -37,6 +38,7 @@ const SECTIONS = [
   { id: "secrets", title: "Secrets", icon: "key", space: true },
   { id: "machines", title: "Machines", icon: "network" },
   { id: "window", title: "Window", icon: "layout" },
+  { id: "web", title: "Web", icon: "globe" },
 ];
 // Pages that moved: older openers still name them.
 const MOVED = { layout: "window", instructions: "agents", automations: "tasks" };
@@ -610,6 +612,7 @@ export default class ShepherdrSettings extends View {
       : this.section === "tasks" ? this.tasks(t)
       : this.section === "secrets" ? secretsSection(this, t)
       : this.section === "window" ? layoutSection(this, t)
+      : this.section === "web" ? webSection(this, t)
       : this.section === "notify" ? this.notify(t)
       : this.section === "autopilot" ? autopilotSection(this, t, cx)
       : machinesSection(this, t, cx);

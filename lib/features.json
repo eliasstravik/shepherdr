@@ -1084,9 +1084,9 @@
         "tablet": "Same",
         "phone": "Same; how to add it to the home screen"
       },
-      "planned": "The QR code and the on/off switch (the link shows)",
       "service": [
-        "settings.ts"
+        "settings.ts",
+        "qr.ts"
       ]
     }
   ]

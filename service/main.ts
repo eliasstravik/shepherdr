@@ -8,11 +8,12 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { randomBytes } from "node:crypto";
-import { DATA, SOCK, TOKEN, PORT, ensureData } from "./paths.ts";
+import { DATA, SOCK, TOKEN, PORT, HOME, ensureData } from "./paths.ts";
 import { holdLock } from "./lock.ts";
 import { gate, type Gate } from "./auth.ts";
 import { trustedPeer } from "./peer.ts";
-import { whoami, share, served, type Me } from "./tailscale.ts";
+import { whoami, share, served, unshare, type Me } from "./tailscale.ts";
+import { qrFile } from "./qr.ts";
 import { Hub } from "./hub.ts";
 import { Store } from "./store.ts";
 import { Live } from "./live.ts";
@@ -53,7 +54,7 @@ live.chats = new Chats(hub);
 live.compat = compat;
 compat.reader = (a) => live.chats?.reader(a) ?? null;
 const settings = new Settings();
-settings.on(() => model.rebuild());
+settings.on(() => { model.rebuild(); void tailnet(); });
 settings.start();
 const artifacts = new Artifacts();
 compat.artifacts = artifacts;
@@ -73,17 +74,35 @@ model.onBuild = (b) => live.setSnapshot(compat.snapshot({
 }));
 model.start();
 
-// Tailscale can come up after the service: look again now and then, and keep /shepherdr shared while web is on.
-const webOn = process.env.SHEPHERDR_WEB !== "off";
+// The Web add-on (Shepherdr settings > Window > Add-ons, Everywhere's "off" in ~/.herdr/shepherdr.json): off, the web
+// app stops and /shepherdr is no longer shared; the service keeps its background work.
+const SETTINGS = process.env.HERDR_TASK_SETTINGS || join(HOME, ".herdr", "shepherdr.json");
+const APP_DATA = join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "data", "shepherdr");
+function webOn() {
+  if (process.env.SHEPHERDR_WEB === "off") return false;
+  try { return !(JSON.parse(readFileSync(SETTINGS, "utf8"))?.everywhere?.off ?? []).includes("web"); } catch { return true; }
+}
+
+// Tailscale can come up after the service: look again now and then, and keep /shepherdr shared while web is on. What
+// the window's Shepherdr settings > Web shows goes into ~/.herdr/shepherdr/web.json (the link, its QR code).
+let wasOn: boolean | null = null;
 async function tailnet() {
   me = await whoami();
   g.owner = me?.login ?? null;
   g.dns = me?.dns ?? null;
-  if (!me || !webOn) return;
-  const s = await served(me.dns);
-  if (s.funnel) { console.error("Funnel is on where /shepherdr is served: refusing the tailnet until it's off"); g.owner = null; return; }
-  const err = await share(me.dns, PORT);
-  if (err) console.error(err);
+  const on = webOn();
+  const link = me ? `https://${me.dns}/shepherdr/` : null;
+  let why: string | null = me ? null : "Tailscale isn't running here";
+  if (me && on) {
+    const s = await served(me.dns);
+    if (s.funnel) { why = "Funnel is on for this machine: the web app stays off until it's off"; g.owner = null; }
+    else why = await share(me.dns, PORT);
+  } else if (me && !on && wasOn !== false) await unshare(me.dns);
+  wasOn = on;
+  let qr: string | null = null;
+  try { if (link && on && !why) qr = qrFile(existsSync(join(APP_DATA, "..")) ? APP_DATA : DATA, link); } catch {}
+  writeFileSync(join(DATA, "web.json"), JSON.stringify({ on, link, qr, why, at: Date.now() }) + "\n");
+  if (why) console.error(why);
 }
 await tailnet();
 setInterval(tailnet, 60_000);
@@ -111,6 +130,8 @@ const server = Bun.serve<{ who: string }>({
     const path = url.pathname.startsWith("/shepherdr/") ? url.pathname.slice(10) : url.pathname;
     // the window asks this (lib/service.js): while jobs is true it leaves its background work to the service
     if (path === "/api/health") return json({ ok: true, version: VERSION, core: hub.up, jobs: jobs.on && hub.up });
+    // the Web add-on switched off: nothing for the tailnet (this machine's own callers still get the API)
+    if (req.headers.has("tailscale-user-login") && !webOn()) return new Response("Shepherdr's web app is off (Shepherdr settings › Window › Add-ons).", { status: 404 });
     const socket = path === "/api/ws" || path === "/api/terminal" || path === "/api/browser";
     const viaTailnet = req.headers.has("tailscale-user-login");
     const pass = gate(req, g, socket, viaTailnet && trustedPeer(srv.requestIP(req)?.port, PORT));
@@ -162,7 +183,6 @@ const server = Bun.serve<{ who: string }>({
       try { return json(await act(hub, body, compat)); } catch (err) { return new Response((err as Error).message, { status: 400 }); }
     }
     if (path.startsWith("/api/")) return json({ error: "not found" }, 404);
-    if (!webOn) return new Response("Shepherdr's web app is off (Shepherdr settings › Web).", { status: 404 });
     return file(path);
   },
   websocket: {
@@ -178,6 +198,6 @@ const server = Bun.serve<{ who: string }>({
   },
 });
 
-console.log(`Shepherdr ${VERSION} on http://127.0.0.1:${server.port} (data ${DATA})${me && webOn ? `, https://${me.dns}/shepherdr/` : ""}`);
+console.log(`Shepherdr ${VERSION} on http://127.0.0.1:${server.port} (data ${DATA})${me && webOn() ? `, https://${me.dns}/shepherdr/` : ""}`);
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => { server.stop(true); release(); process.exit(0); });
