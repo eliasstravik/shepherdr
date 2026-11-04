@@ -2,18 +2,20 @@
 // Assistants, workers and reviewers run, how tasks are reviewed, merged and queued, Autopilot,
 // Notify, Secrets, Machines and the Window's switches; Herdr's own settings are the sidebar foot's
 // other button, Settings. Props: { space?: that space's own settings, section? }.
-// One scope (DECISIONS.md, "UI/UX review decisions"): it edits Everywhere. A space's own values
-// are set from that space ("Space settings…" in its sidebar menu): the same window with a banner,
-// where each row says "Same as everywhere" or "Changed here · Reset". On Everywhere, a row some
-// space changed says so in one dim line. Machine-only settings are rows under Machines; values a
-// machine set for everything before (the old machine scope) still apply and show there, with Reset.
+// Two levels (docs/settings.md): Everywhere, the default, and a space's own. Each page a space can
+// set its own of starts with the level switch ("Applies to: Everywhere ⌄", a picker of every space
+// by machine); "Space settings…" in a space's sidebar menu opens the window on that space. In a
+// space each row says "Inherited from Everywhere" or "Set for this space · Reset"; on Everywhere, a
+// row some spaces set their own of says so in one dim line that lists them. Pages that are one for
+// every space (Machines, Window, Web) say so. Machine-only settings are rows under Machines; values
+// a machine set for everything before (the old machine scope) still apply and show there, with Reset.
 // Writes ~/.herdr/shepherdr.json at once, no Save step (coordinator.js documents the shape;
 // herdr-task reads it too). Other machines get their share pushed (pushRemotes) for their
 // herdr-task. Agents use the chat's own model button (settings.js and agent.js from lib/).
 // The window draws its own frame (frame: "none"), most of Herdr's height, at most 900.
 
 import { View, div, svg } from "gpui-kit";
-import { v_flex, h_flex, Scrollbar, TextareaState, Textarea } from "gpui-base";
+import { v_flex, h_flex, Scrollbar, TextareaState, Textarea, InputState, Input } from "gpui-base";
 import { props, theme, machines, home, exec, readTextFile, writeTextFile, closeOverlay, openOverlay, shared } from "herdr";
 import { spaces, inRender } from "./live.js";
 import { SHEPHERDR_FILE, SHEPHERDR_DEFAULTS, LOCAL_MACHINE, shepherdrFor, shepherdrLayers, machineOfSpace } from "./coordinator.js";
@@ -27,7 +29,7 @@ import { spaceName } from "./core/spaces.js";
 import { NOTIFY, NOTIFY_DEFAULT, notifyMachine, notifyMachineOwn, notifyOf, notifyOwn, notifyEverywhere,
   setNotifyEverywhere, setNotifyMachine, setNotify } from "./notify.js";
 import { machinesSection } from "./machines-section.js";
-import { TEXT, RADIUS, H, button, link, toggleSwitch, segmented } from "./ui.js";
+import { TEXT, RADIUS, H, button, link, toggleSwitch, segmented, menuRow } from "./ui.js";
 import { webSection } from "./web-section.js";
 // Every page's, row's and button's words, and the rows' choices: core/settings.js, shared with the web app.
 // herdr-task's merge policy (MERGE): "ask" waits for the person's Accept (which merges), the others merge without it.
@@ -35,7 +37,7 @@ import { webSection } from "./web-section.js";
 // into its starting prompt; Herdr runs nothing itself.
 import { SECTIONS, ROLES, NOTES, MERGE, MUST_FIX, ROUNDS, ARCHIVE, ABOUT, BACKUP, NOTIFY_ABOUT, TITLE, SPACE_TITLE,
   EVERYWHERE, CHANGED_HERE, RESET, EDIT_INSTRUCTIONS, USE_OTHER_CLI, LOADING_AGENTS, SAVED, sameAs as sameAsWords,
-  spacesOwn, onlyFor, otherCliWords, backupProblem, notifyMachineAbout, machineLabel, TASK_ROWS } from "./core/settings.js";
+  spacesOwn, otherCliWords, backupProblem, notifyMachineAbout, machineLabel, TASK_ROWS, LEVEL, RESET_TIP } from "./core/settings.js";
 
 const I = (name) => `mods/shepherdr-settings/${name}.svg`;
 // A page's title, and a Tasks row's (by its key, section.field).
@@ -66,7 +68,11 @@ export default class ShepherdrSettings extends View {
     this.scope = p.space && spaceById(p.space) ? p.space : null;
     const want = MOVED[p.section] ?? p.section;
     this.section = this.shows(want) ? want : "agents";
-    this.listOpen = null; // the row whose "N spaces use their own" list is open
+    this.listOpen = null; // the row whose "N spaces set their own" list is open
+    // The level switch's picker: open or not, and its Find box (shown once there are many spaces).
+    this.levelOpen = false;
+    this.levelFind = InputState.new({ placeholder: LEVEL.find });
+    this.levelFind.on("change", (_e, cx) => cx.notify());
     this.kept = {}; // machine -> true: it keeps its own settings file, so pushes skip it
     this.cfg = {};
     this.raw = null;
@@ -194,8 +200,10 @@ export default class ShepherdrSettings extends View {
   }
 
   // As Shepherdr's: setting what this scope would inherit anyway unsets it, so it follows again.
+  // Autopilot's Everywhere is always written: what it inherits is this machine's from before, and
+  // another machine's may differ.
   set(key, field, value, cx) {
-    const follows = JSON.stringify(value) === JSON.stringify(this.inherited(key, field).value);
+    const follows = !(key === "autopilot" && !this.scope) && JSON.stringify(value) === JSON.stringify(this.inherited(key, field).value);
     this.change((next) => {
       if (follows) return this.drop(this.layerOf(next), key, field);
       const tg = this.target(next);
@@ -224,7 +232,9 @@ export default class ShepherdrSettings extends View {
   // its machine's (only values set before machine scope went), then Everywhere's.
   chain(key, field, scope = this.scope) {
     const out = shepherdrLayers(this.cfg, scope).map((l) => ({ level: l.level, key: l.key, value: this.valueIn(l.obj, key, field) }));
-    out.push({ level: "default", key: null, value: field ? SHEPHERDR_DEFAULTS[key]?.[field] ?? null : null });
+    // Autopilot's default: what Everywhere had before Settings kept it (autopilot-section.js)
+    const dflt = key === "autopilot" ? this.ap?.base?.[field] ?? null : field ? SHEPHERDR_DEFAULTS[key]?.[field] ?? null : null;
+    out.push({ level: "default", key: null, value: dflt });
     return out;
   }
 
@@ -263,9 +273,10 @@ export default class ShepherdrSettings extends View {
 
   // Into a space's own settings (null: Everywhere's). A page the space doesn't have goes to Agents.
   pickScope(id, cx) {
-    const saving = this.flushNotes();
+    const saving = Promise.all([this.flushNotes(), autopilotFlush(this)]);
     this.scope = id;
     this.listOpen = null;
+    this.levelOpen = false;
     if (!this.shows(this.section)) this.section = "agents";
     this.secFor();
     this.handle.focus();
@@ -400,14 +411,14 @@ export default class ShepherdrSettings extends View {
       .when(Boolean(below), (el) => el.child(below));
   }
 
-  // In a space: "Changed here · Reset" or "Same as everywhere". On Everywhere: "2 spaces use
-  // their own", which opens the list of them (each opens its settings).
+  // In a space: "Set for this space · Reset" or "Inherited from Everywhere". On Everywhere: "2
+  // spaces set their own", which opens the list of them (each opens its settings).
   scopeLine(t, sc) {
     const line = h_flex().gap(6).items_center().text_size(TEXT.label);
     if (this.scope) {
       return sc.mine
         ? line.child(div().text_color(t.muted).child(CHANGED_HERE)).child(div().text_color(t.dim).child("·"))
-          .child(link(`reset-${sc.id}`, RESET, (_e, cx) => sc.reset(cx)))
+          .child(div().tooltip(RESET_TIP(sc.from.replace(/^Inherited from /, ""))).child(link(`reset-${sc.id}`, RESET, (_e, cx) => sc.reset(cx))))
         : line.child(div().text_color(t.dim).child(sc.from));
     }
     if (!sc.others?.length) return null;
@@ -556,16 +567,71 @@ export default class ShepherdrSettings extends View {
     return this.row(t, n.title, n.about, saved ? div().text_size(TEXT.label).text_color(t.dim).child(SAVED) : null, sc, box);
   }
 
-  // The window's top: in a space's own settings, which space, and the way to Everywhere's.
-  banner(t) {
-    const s = spaceById(this.scope);
-    const where = machineLabel(machineOfSpace(this.scope));
-    const folder = tilde(this.folders[this.scope] ?? s?.folder);
-    return h_flex().w_full().mb(18).px(12).py(9).gap(12).items_center().rounded(RADIUS.card).bg(t.raised)
-      .child(v_flex().flex_1().min_w(0).gap(2)
-        .child(div().text_size(TEXT.body).text_color(t.foreground).child(onlyFor(this.scopeName(), where)))
-        .when(Boolean(folder), (el) => el.child(div().truncate().text_size(TEXT.label).text_color(t.dim).child(folder))))
-      .child(button("to-everywhere", EVERYWHERE, { kind: "plain", onClick: (_e, cx) => this.pickScope(null, cx) }));
+  // The level switch, at the top of a page a space can set its own of: "Applies to" and a picker
+  // (Everywhere, then every space by machine), and under it what that level means (a space's
+  // machine and folder). A page that is one for every space says so instead.
+  levelBar(t) {
+    if (!SECTIONS.find((s) => s.id === this.section)?.space) {
+      return div().pb(14).text_size(TEXT.label).line_height("17px").text_color(t.dim).child(LEVEL.global);
+    }
+    const sp = this.scope ? spaceById(this.scope) : null;
+    const where = machineLabel(machineOfSpace(this.scope ?? ""));
+    const folder = sp ? tilde(this.folders[this.scope] ?? sp.folder) : "";
+    const picker = h_flex().id("level-pick").h(H.lg).max_w(280).pl(10).pr(8).gap(8).items_center().rounded(RADIUS.control)
+      .border_1().border_color(this.levelOpen ? t.accent : t.input).bg(t.background).cursor_pointer().hover((st) => st.bg(t.hover))
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        this.levelOpen = !this.levelOpen;
+        if (this.levelOpen) { this.levelFind.set_value(""); if (this.levelSpaces().length > 8) this.levelFind.focus(); }
+        cx.notify();
+      })
+      .child(svg(I(this.scope ? "hash" : "globe")).size(14).flex_none().text_color(this.scope ? t.accent : t.dim))
+      .child(div().flex_1().min_w(0).truncate().text_size(TEXT.body).font_medium().text_color(t.foreground).child(this.scopeName()))
+      .child(svg("mods/workspace-chrome/chevron-down.svg").size(12).flex_none().text_color(t.dim));
+    return v_flex().relative().w_full().mb(18).px(12).py(10).gap(6).rounded(RADIUS.card).bg(t.raised)
+      .child(h_flex().gap(10).items_center()
+        .child(div().flex_none().text_size(TEXT.label).text_color(t.muted).child(LEVEL.label))
+        .child(picker))
+      .child(div().text_size(TEXT.label).line_height("17px").text_color(t.dim)
+        .child(this.scope ? LEVEL.space(where) : LEVEL.everywhere))
+      .when(Boolean(folder), (el) => el.child(div().truncate().font_family("JetBrains Mono").text_size(TEXT.id).text_color(t.dim).child(folder)))
+      .when(this.levelOpen, (el) => el.child(this.levelMenu(t)));
+  }
+
+  // Every space the picker offers, by machine (this computer's first): [{ id, name, machine }].
+  levelSpaces() {
+    return spaces().map((s) => ({ id: s.id, name: this.scopeName(s.id), machine: machineOfSpace(s.id) }))
+      .sort((a, b) => (a.machine === LOCAL_MACHINE ? -1 : b.machine === LOCAL_MACHINE ? 1 : a.machine.localeCompare(b.machine)));
+  }
+
+  // The level switch's menu: Everywhere, then the spaces under their machine's name (a Find box
+  // over them once there are many); each says how many settings it sets its own of.
+  levelMenu(t) {
+    const all = this.levelSpaces();
+    const q = this.levelFind.value().trim().toLowerCase();
+    const shown = q ? all.filter((s) => s.name.toLowerCase().includes(q)) : all;
+    const own = (id) => {
+      const l = this.cfg.spaces?.[id] ?? {};
+      return ["coordinator", "worker", "reviewer"].filter((k) => l[k] != null).length
+        + ["tasks", "automations", "backup", "autopilot"].reduce((n, k) => n + Object.keys(l[k] ?? {}).length, 0);
+    };
+    const pick = (id) => (_e, cx) => this.pickScope(id, cx);
+    const machinesHere = [...new Set(shown.map((s) => s.machine))];
+    return v_flex().id("level-menu").absolute().top(46).left(12).w(300).max_h(340).overflow_y_scroll().p(5).gap(1)
+      .rounded(RADIUS.card).bg(t.popover).border_1().border_color(t.border).shadow_md()
+      .on_click((_e, cx) => cx.stop_propagation())
+      .when(all.length > 8, (el) => el.child(div().mb(4).h(H.lg).px(9).flex().items_center().rounded(RADIUS.control)
+        .border_1().border_color(t.input).bg(t.background)
+        .child(Input.new(this.levelFind).w_full().text_size(TEXT.body).text_color(t.foreground))))
+      .child(menuRow("level-all", EVERYWHERE, { icon: I("globe"), check: !this.scope, onClick: pick(null) }))
+      .children(machinesHere.flatMap((m) => [
+        div().px(8).pt(8).pb(3).text_size(TEXT.id).font_medium().text_color(t.dim).child(machineLabel(m)),
+        ...shown.filter((s) => s.machine === m).map((s) => {
+          const n = own(s.id);
+          return menuRow(`level-${s.id}`, s.name, { icon: I("hash"), hint: n ? `${n} own` : null, check: this.scope === s.id, onClick: pick(s.id) });
+        }),
+      ]))
+      .when(!shown.length, (el) => el.child(div().px(8).py(8).text_size(TEXT.label).text_color(t.dim).child(LEVEL.none)));
   }
 
   // One copy of Herdr's live lists for the whole render (live.js): past ~50 ms Herdr stops it.
@@ -587,6 +653,7 @@ export default class ShepherdrSettings extends View {
       .children(SECTIONS.filter((s) => this.shows(s.id)).map((s) => navRow(s.id, s.title, I(s.icon), s.id === this.section, (_e, cx) => {
         this.section = s.id;
         this.listOpen = null;
+        this.levelOpen = false;
         this.handle.focus();
         cx.notify();
       })));
@@ -601,17 +668,18 @@ export default class ShepherdrSettings extends View {
     const card = h_flex().id("shepherdr-settings").track_focus(this.handle).w_full().h_full().max_h(900).min_h(0).items_start()
       .rounded(12).border_1().border_color(t.border).bg(t.popover).shadow_lg().overflow_hidden()
       // A click inside stays inside: only one beside the window closes it.
-      .on_click((_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { cx.stop_propagation(); if (this.levelOpen) { this.levelOpen = false; cx.notify(); } })
       .on_key_down((e, cx) => {
         if (e.key !== "escape") return;
-        if (this.sec?.open) { this.sec.open = false; cx.stop_propagation(); cx.notify(); }
+        if (this.levelOpen) { this.levelOpen = false; cx.stop_propagation(); cx.notify(); }
+        else if (this.sec?.open) { this.sec.open = false; cx.stop_propagation(); cx.notify(); }
         else this.close();
       })
       .child(nav)
       .child(div().relative().flex_1().min_w(0).h_full()
         .child(div().id("sh-body").size_full().overflow_y_scroll()
           .child(div().px(28).py(22)
-            .when(Boolean(this.scope), (el) => el.child(this.banner(t)))
+            .child(this.levelBar(t))
             .child(body)))
         .child(Scrollbar.vertical("sh-body").absolute().inset_0()));
     return div().id("sh-root").size_full().flex().items_center().justify_center().on_click(() => this.close()).child(card);

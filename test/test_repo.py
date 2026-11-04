@@ -101,12 +101,13 @@ class Repo(unittest.TestCase):
                     self.assertTrue(spec.startswith("./"), f"core/{f} imports {spec}")
 
     def test_autopilot_from_one_core(self):
-        """Settings › Autopilot (one setting for every space) takes its words, picks and rule from core/autopilot.js on
+        """Settings › Autopilot (Everywhere's and a space's own) takes its words, picks and rule from core/autopilot.js on
         both sides: the window's section and header, and the web app's service, never their own copies."""
         uses = {
-            J("mods", "shepherdr-settings", "autopilot-section.js"): ["AP.ROWS", "AP.PRESETS", "AP.EVENTS", "AP.ABOUT", "AP.SAVED"],
+            J("mods", "shepherdr-settings", "autopilot-section.js"): ["AP.ROWS", "AP.PRESETS", "AP.EVENTS", "AP.ABOUT", "AP.SAVED", "AP.FIELDS"],
             J("mods", "pane-chat", "autopilot.js"): ["pilotFor", "headerDetail"],
-            J("service", "compat.ts"): ["AP.ROWS", "AP.PRESETS", "AP.EVENTS", "AP.ABOUT"],
+            J("service", "settings.ts"): ["AP.ROWS", "AP.PRESETS", "AP.EVENTS", "AP.ABOUT", "AP.levelOf", "AP.FIELDS"],
+            J("service", "compat.ts"): ["AP.blankBeat"],
             J("service", "model.ts"): ["pilotFor", "everywhereOf"],
         }
         for path, names in uses.items():

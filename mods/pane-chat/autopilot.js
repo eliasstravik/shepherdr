@@ -5,10 +5,11 @@
 // them runs here.
 //
 // The switch: "Autopilot", and when on its next wake dim after it. No menu: the heartbeat, the
-// schedule and the events, one setting for every space, live in Shepherdr settings › Autopilot
-// (core/autopilot.js pilotFor: this space's switch, Everywhere's rest). It always turns on when clicked;
-// while its heartbeat is still empty a "Write a heartbeat" link after it opens that page. The
-// control is the same width in every state, so nothing in the header moves when it flips.
+// schedule and the events, Everywhere's or this space's own, live in Shepherdr settings › Autopilot
+// (core/autopilot.js pilotFor: this space's switch, its own or Everywhere's rest, from
+// ~/.herdr/shepherdr.json). It always turns on when clicked; while its heartbeat is still empty a
+// "Write a heartbeat" link after it opens that page, on this space. The control is the same width
+// in every state, so nothing in the header moves when it flips.
 
 import { div } from "gpui-kit";
 import { h_flex } from "gpui-base";
@@ -18,6 +19,7 @@ import { terminals } from "./live.js";
 import { pilotFor, headerDetail } from "./core/autopilot.js";
 
 const FILE = () => `${home()}/.herdr/tasks/.autopilot.json`;
+const SETTINGS = () => `${home()}/.herdr/shepherdr.json`;
 const CLI = () => `${appHome()}/mods/tasks/bin/herdr-task`;
 // Wide enough for "Autopilot  Next 14:30"; a narrow header shows the switch only.
 export const CHIP_W = 150, CHIP_COMPACT_W = 28, COMPACT_BELOW = 480;
@@ -43,7 +45,9 @@ export function apPoll(view, cx) {
   cx.spawn(async (cx) => {
     let a = null;
     // What applies here: the space's own, else Everywhere's (core/autopilot.js, herdr-task's rule).
-    try { a = pilotFor(JSON.parse((await readTextFile(FILE())) ?? "{}"), space); } catch { a = { on: false }; }
+    let cfg = null;
+    try { cfg = JSON.parse((await readTextFile(SETTINGS())) ?? "{}"); } catch {}
+    try { a = pilotFor(JSON.parse((await readTextFile(FILE())) ?? "{}"), space, cfg); } catch { a = { on: false }; }
     if (view.apFor !== space || view.apBusy) return;
     // On with its heartbeat maybe empty: looked at now and then (about every 30 s) until written.
     if (a.on && view.apBlank !== false && (view.apBeat = (view.apBeat ?? 0) + 1) % 8 === 1) checkBlank(view, space, cx);
@@ -58,7 +62,7 @@ export function apPoll(view, cx) {
 function checkBlank(view, space, cx) {
   cx.spawn(async (cx) => {
     let blank = null;
-    try { const shown = await ap(["show"], space); blank = !shown.heartbeat || (await blankHeartbeat(shown.heartbeat)); } catch {}
+    try { blank = Boolean((await ap(["show"], space)).blank); } catch {}
     if (view.apFor !== space || blank === null || blank === view.apBlank) return;
     view.apBlank = blank;
     cx.notify();
@@ -110,21 +114,8 @@ async function ap(args, space) {
   return out;
 }
 
-// The heartbeat as herdr-task first writes it: unchanged counts as empty.
-let starter = null;
-async function blankHeartbeat(file) {
-  const text = await readTextFile(file).catch(() => null);
-  if (!text?.trim()) return true;
-  if (starter === null) {
-    const r = await exec("python3", ["-c", "import sys; sys.path.insert(0, sys.argv[1]); from herdr_task.autopilot import STARTER; sys.stdout.write(STARTER)",
-      `${appHome()}/mods/tasks/bin`]).catch(() => null);
-    starter = r?.code === 0 ? r.stdout : "";
-  }
-  return Boolean(starter) && text.trim() === starter.trim();
-}
-
-// Settings › Autopilot: one setting for every space (Everywhere's page).
-const openAutopilot = (_space) => openSettings({ section: "autopilot" });
+// Settings › Autopilot on this space: its own, and what it inherits from Everywhere.
+const openAutopilot = (space) => openSettings({ space, section: "autopilot" });
 
 // "Write a heartbeat": after the switch while it's on and its heartbeat is still empty.
 export function apHeartbeatLink(view, space, pane) {

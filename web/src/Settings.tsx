@@ -1,7 +1,8 @@
 // Settings, as the window's (mods/shepherdr-settings): its pages in its order (Agents, Tasks, Autopilot, Notify, Secrets,
-// Machines, Window, Web), Everywhere's, or a space's own ("Space settings", with "Only for <space> on <machine>" and
-// Everywhere at the top). Each row says, as the window's, "Same as everywhere" or "Changed here · Reset", and on
-// Everywhere which spaces use their own. Every title, line and button word is core/settings.js's, the window's own.
+// Machines, Window, Web), Everywhere's, or a space's own ("Space settings"). A page a space can set its own of starts
+// with the level switch (Applies to: Everywhere or a space, picked); the others say they are one for every space. Each
+// row says, as the window's, "Inherited from Everywhere" or "Set for this space · Reset", and on Everywhere which spaces
+// set their own. Every title, line and button word is core/settings.js's, the window's own.
 // The web follows the device's light or dark (the window follows Herdr's theme): no page of its own here. A phone
 // lists the pages in one rounded group, as iOS's Settings does, and a tap pushes one over the list; a wider screen
 // keeps the list down its side.
@@ -35,6 +36,7 @@ import {
   DownIcon,
   Ghost,
   GlobeIcon,
+  HashIcon,
   SplitIcon,
   Head,
   ic,
@@ -525,10 +527,7 @@ export function withPluginErrors(sections: SettingSection[], errors: Record<stri
   )
 }
 
-/** the list of pages, in groups: the defaults of the level picked (what agents are told, only words in their prompts,
- *  apart from how Shepherdr runs, with what is one for all), this device's own, and what is only shown */
-/** the window's Settings sections, in its order; a space's own settings show only its own ones (Autopilot only for a
- *  space on this computer, which is where it has an Autopilot page) */
+/** the window's Settings sections, in its order; a space's own settings show only the ones a space can set its own of */
 const ORDER: string[] = ST.SECTIONS.map((s: { title: string }) => s.title)
 const SPACE_PAGES = new Set<string>(ST.SECTIONS.filter((s: { space?: unknown }) => s.space).map((s: { title: string }) => s.title))
 
@@ -682,13 +681,14 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
       {row.hint ? <Small className="text-pretty whitespace-pre-line">{row.hint}</Small> : null}
       {/* the exact words it adds to every new task's brief, as it is set now */}
       {row.line ? <details className="text-[0.8125rem] text-fg2"><summary className="cursor-pointer">Words this adds to each new task</summary><p className="text-pretty">“{row.line}”</p></details> : null}
-      {/* as the window's: "Same as everywhere" / "Changed here · Reset"; on Everywhere the spaces that set their own */}
-      {row.from && !row.inherits ? <Small className="text-pretty">Same as {row.from}</Small> : null}
+      {/* as the window's: "Inherited from Everywhere" / "Set for this space · Reset"; on Everywhere the spaces that set
+          their own (a machine's own rows: "Set for this machine") */}
+      {row.from && !row.inherits ? <Small className="text-pretty">{ST.inheritedFrom(row.from)}</Small> : null}
       {row.inherits ? (
         <Small className="flex flex-wrap items-center gap-1 text-pretty">
-          <span className="text-fg2">{ST.CHANGED_HERE}</span>
+          <span className="text-fg2">{row.key.startsWith('machine.') ? ST.SET_FOR_MACHINE : ST.CHANGED_HERE}</span>
           <span aria-hidden>·</span>
-          <button type="button" title={`Back to what ${row.inherits.from} has`} onClick={() => set(row.key, null)}
+          <button type="button" title={ST.RESET_TIP(row.inherits.from)} onClick={() => set(row.key, null)}
             className="press-dim relative font-medium text-accent after:absolute after:-inset-x-1 after:-inset-y-1.5 coarse:after:-inset-y-3">
             {ST.RESET}
           </button>
@@ -796,6 +796,44 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
           <blockquote className={clsx('text-pretty whitespace-pre-wrap text-fg2', phone ? clsx(card, 'px-4 py-3 text-[0.9375rem]') : 'rounded-box bg-hover px-3 py-2.5 text-[0.8125rem]')}>{page.note}</blockquote>
         </figure>
       ) : null}
+    </div>
+  )
+}
+
+/** The level switch, as the window's, at the top of a page a space can set its own of: "Applies to" and a picker
+ *  (Everywhere, then every space, by machine; a Find box once there are many), and what that level means under it (a
+ *  space's machine and folder). A page that is one for every space has only its line saying so. */
+function LevelBar({ level, sections, page, phone, onPick }: { level: string; sections: SettingSection[]; page: Page; phone: boolean; onPick: (level: string) => void }) {
+  const snap = useSnap()!
+  const wrap = clsx(phone ? 'mx-4 mt-4' : 'mx-6 mt-5 max-w-[672px]')
+  if (!SPACE_PAGES.has(page.name)) return <p className={clsx(wrap, 'text-pretty text-fg3', phone ? 'px-4 text-[0.9375rem]' : 'text-[0.8125rem]')}>{ST.LEVEL.global}</p>
+  const ids = new Set(levelsOf(sections))
+  // this computer's spaces first, then each other machine's
+  const spaces = snap.places.filter((p) => ids.has(p.id)).sort((a, b) => Number(a.id.includes('/')) - Number(b.id.includes('/')) || a.machine.localeCompare(b.machine))
+  const place = spaces.find((p) => p.id === level)
+  const machineOf = (id: string) => (id.includes('/') ? spaces.find((p) => p.id === id)?.machine ?? id.split('/')[0] : ST.THIS_COMPUTER)
+  const name = (v: string) => (v === 'all' ? ST.EVERYWHERE : spaces.find((p) => p.id === v)?.name ?? v)
+  const more = snap.machines.length > 1
+  return (
+    <div className={clsx(wrap, 'flex min-w-0 flex-col gap-1.5 rounded-box bg-hover px-3 py-2.5')}>
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="shrink-0 text-[0.8125rem] text-fg2">{ST.LEVEL.label}</span>
+        <Pick
+          label={ST.LEVEL.label}
+          value={level}
+          options={['all', ...spaces.map((p) => p.id)]}
+          ordered
+          left
+          // where there are more machines, a space says its machine
+          show={(v) => (v === 'all' || !more ? name(v) : `${name(v)} · ${machineOf(v)}`)}
+          depth={(v) => ({ depth: 0, name: v === 'all' || !more ? name(v) : `${name(v)} · ${machineOf(v)}` })}
+          icon={(v) => (v === 'all' ? <GlobeIcon className={clsx(ic, 'shrink-0 text-fg3')} /> : <HashIcon className={clsx(ic, 'shrink-0 text-accent')} />)}
+          onPick={onPick}
+          className="min-w-0"
+        />
+      </div>
+      <Small className="text-pretty">{place ? ST.LEVEL.space(machineOf(place.id)) : ST.LEVEL.everywhere}</Small>
+      {place?.where ? <Small className="truncate font-mono">{place.where}</Small> : null}
     </div>
   )
 }
@@ -1043,20 +1081,15 @@ export default function Settings() {
     requestAnimationFrame(() => scroller.current && (scroller.current.scrollTop = 0))
   }
   const clear = (key: string) => refused[at(key)] && setRefused((r) => ({ ...r, [at(key)]: '' }))
-  // a space's own settings say so, as the window's: "Only for <space> on <machine>", and Everywhere goes back
+  // a space's own settings: the title says "Space settings", the level switch which space
   const spacePlace = level !== 'all' ? snap.places.find((p) => p.id === level) : undefined
-  // its machine as the window says it ("This computer" here), and its folder under it, dim
-  const spaceWhere = spacePlace ? (spacePlace.id.includes('/') ? spacePlace.machine : ST.THIS_COMPUTER) : ''
+  // another level keeps the page shown where it has it (else its first)
+  const pickLevel = (next: string) => {
+    const at = sectionOf(page.name, snap.settings, { ...ui, settings: { ...s, level: next } })
+    setUI({ settings: { ...s, level: next, section: at < 0 ? 0 : at } })
+  }
   const body = <>
-    {spacePlace && !page.device ? (
-      <div className={clsx('flex min-w-0 items-center gap-3 rounded-box bg-hover px-3 py-2', phone ? 'mx-4 mt-4' : 'mx-6 mt-5 max-w-[672px]')}>
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate">{ST.onlyFor(spacePlace.name, spaceWhere)}</span>
-          {spacePlace.where ? <Small className="truncate">{spacePlace.where}</Small> : null}
-        </span>
-        <Ghost onClick={() => setUI({ settings: { ...s, level: 'all' } })}>{ST.EVERYWHERE}</Ghost>
-      </div>
-    ) : null}
+    {page.device ? null : <LevelBar level={level} sections={snap.settings} page={page} phone={phone} onPick={pickLevel} />}
     <PageBody key={`${page.level ?? ''}|${page.name}`} page={page} phone={phone} set={set} refused={(key) => refused[at(key)]} clear={clear} /></>
 
   if (phone) {

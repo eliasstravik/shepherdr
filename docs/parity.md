@@ -22,7 +22,7 @@ working line, `core/bg-jobs.js` for the background jobs over the box, …).
 | Accept card, toasts, status bar, confirm and prompt dialogs | `mods/accept-card`, `mods/toasts`, `mods/workspace-status-chat`, `mods/confirm-chat`, `mods/prompt-chat` | `web/src/screens/Accept.tsx`, `web/plugins/alerts`, `web/src/rowmenu.tsx` | [cards](parity/cards.md) |
 | Artifacts, Jump, Keybinds | `mods/artifacts`, `mods/jump`, `mods/keybinds` | `web/plugins/artifacts`, `web/src/screens/Recipe.tsx`, `web/plugins/keyboard` | [artifacts and jump](parity/artifacts-jump.md) |
 | Settings: Agents, Tasks, Notify, Secrets, Machines, Window, Web, and the Settings frame | `mods/shepherdr-settings` | `web/src/Settings.tsx`, `web/src/screens/Role.tsx`, `service/settings.ts`, `service/window.ts` | [settings](parity/settings.md) |
-| Settings › Autopilot (one setting for every space) | `mods/shepherdr-settings/autopilot-section.js`, `mods/tasks/bin/herdr_task/autopilot.py` | `service/autopilot.ts`, `service/compat.ts`, `web/src/Settings.tsx` | [autopilot](parity/autopilot.md) |
+| Settings › Autopilot (Everywhere's and a space's own) | `mods/shepherdr-settings/autopilot-section.js`, `mods/tasks/bin/herdr_task/autopilot.py` | `service/settings.ts`, `service/autopilot.ts`, `web/src/Settings.tsx` | [autopilot](parity/autopilot.md) |
 | New space, Add machine, worktrees, rename dialogs | `mods/newspace`, `mods/machine-add-chat`, `mods/spaces-chat/rename.js`, worktree dialog | `web/plugins/places/add.tsx`, `web/plugins/places/section.tsx`, `web/src/screens/AddMachine.tsx`, `web/src/screens/Worktree.tsx` | [dialogs](parity/dialogs.md) |
 
 A surface is done when every row on its page is ticked (✓) or a web-only form (◇) with its reason. Nothing is ✗.

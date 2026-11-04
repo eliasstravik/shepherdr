@@ -5,7 +5,8 @@ Made from the window's mod (`mods/shepherdr-settings`, with `lib/settings.js`, `
 ✓ matches, ◇ a web-only form on purpose (why), ✗ still differs.
 
 Shared, so the two can't drift: `core/settings.js` holds every page's title, every row's title and line, the button
-words, the scope lines ("Changed here · Reset", "Same as everywhere", "N spaces use their own", "Only for … on …"), the
+words, the scope lines ("Set for this space · Reset", "Inherited from Everywhere", "N spaces set their own"), the level
+switch (`LEVEL`), the
 rows' choices, the model button's words (`modelLabel`, `choicesFrom`, `roleSel`, `chooseModel`), Backup's warning
 (`backupProblem`), Home Assistant's line (`homeAbout`), an add-on's line (`addonAbout`), Web's state (`webState`) and
 the instructions editor's notes. The window's mod (`main.js`, `layout.js`, `machines-section.js`, `secrets-section.js`,
@@ -21,11 +22,11 @@ an add-on's line and Web's state; `service/settings.test.ts` checks the rows the
 |---|---|---|---|
 | Title | `main.js:580` "Settings", a space's own "Space settings" | `Settings.tsx:1140` (Head), `:1075` (phone top) | ✓ |
 | Pages, in order | `core/settings.js` SECTIONS: Agents, Tasks, Autopilot, Notify, Secrets, Machines, Window, Web | `Settings.tsx:537` groupsOf (ORDER from SECTIONS) | ✓ |
-| A space's own pages | `main.js:116` shows(): Agents, Tasks, Autopilot (this computer's spaces), Notify, Secrets | `Settings.tsx:537` (SPACE_PAGES from SECTIONS) | ✓ |
+| A space's own pages | `main.js` shows(): Agents, Tasks, Autopilot, Notify, Secrets (docs/settings.md) | `Settings.tsx:537` (SPACE_PAGES from SECTIONS) | ✓ |
 | Nav: one list, icon + title, the page picked raised | `main.js:572` navRow | `Settings.tsx` desktop nav, phone list | ✓ (2.1's icons drawn in its own set) |
 | "This device: Appearance, Keybinds" group | none: the window follows Herdr's theme; Keybinds is its own overlay (`mods/keybinds`) | removed: one list, no group heading; the web follows the device's light or dark (`theme.ts` drops a pick kept from before) | ✓ |
 | Nav title over the list | `main.js:580` (in the nav column) | Head's title (desktop), PhoneTop (phone) | ◇ the web has no window frame: its title sits in its header |
-| Space banner | `main.js:559` "Only for <space> on <machine>" (This computer here), its folder dim, Everywhere (plain button) | `Settings.tsx:1058` same words (ST.onlyFor), the space's folder, Everywhere | ✓ |
+| Level switch | `main.js` levelBar: "Applies to" and a picker (Everywhere, then every space under its machine, "N own" beside one that sets some, a Find box past 8), then "Every space, unless it sets its own." or "Only this space, on <machine>. What it doesn't set is inherited from Everywhere." and its folder; Machines, Window and Web: "The same for every space." | `Settings.tsx` LevelBar: the same words (ST.LEVEL), Pick with its Find box past 10, the space's folder | ✓ |
 | Escape closes | `main.js:600` | keyboard plugin back() | ✓ |
 | A phone pushes a page over the list | none (a window) | `Settings.tsx` Stack | ◇ phone navigation |
 
@@ -34,9 +35,9 @@ an add-on's line and Web's state; `service/settings.test.ts` checks the rows the
 | Element | Window | Web | State |
 |---|---|---|---|
 | A row: title, its line, control on the right | `main.js` row() | `Settings.tsx` PageBody | ✓ |
-| In a space, own value | `main.js:404` "Changed here · Reset" | `Settings.tsx:688` (ST.CHANGED_HERE, ST.RESET) | ✓ |
-| In a space, following | "Same as everywhere", or "Same as <machine>" for a value its machine set before | `service/settings.ts` pick()/follows() (machine layer too), `service/compat.ts` (Notify) | ✓ |
-| On Everywhere | "1 space uses its own" / "N spaces use their own", opens the list, each opens its settings | `Settings.tsx:701` (ST.spacesOwn) | ✓ |
+| In a space, own value | `main.js` scopeLine "Set for this space · Reset" (Reset's tip "Back to Everywhere's") | `Settings.tsx` PageBody (ST.CHANGED_HERE, ST.RESET, ST.RESET_TIP) | ✓ |
+| In a space, following | "Inherited from Everywhere", or "Inherited from <machine>" for a value its machine set before | `service/settings.ts` pick()/follows() (machine layer too), `service/compat.ts` (Notify) | ✓ |
+| On Everywhere | "1 space sets its own" / "N spaces set their own", opens the list, each opens its settings | `Settings.tsx` (ST.spacesOwn) | ✓ |
 | Setting what it would get anyway unsets it | `main.js` set() | `Settings.tsx` follows() | ✓ |
 
 ## Agents
@@ -99,7 +100,7 @@ an add-on's line and Web's state; `service/settings.test.ts` checks the rows the
 | Workers run at low priority | switch | Switch | ✓ |
 | Memory cap per worker | stepper Off, 1 GB … 32 GB | Stepper (was a picker) | ✓ |
 | Under each: all machines | "1 machine uses its own" | ST.machinesOwn | ✓ |
-| Under each: a machine | "Same as all machines" / "Changed here · Reset" | from/inherits "all machines" | ✓ |
+| Under each: a machine | "Inherited from all machines" / "Set for this machine · Reset" | from/inherits "all machines" (ST.SET_FOR_MACHINE) | ✓ |
 | Machine block | `:132` its name, then health and plans (machineDetails) | `MachineDetails.tsx` (core/machines.js words) under the machine's name | ✓ (health/plans were missing) |
 | Home Assistant | `:60` switch, its line from the home round (homeAbout), Make home space beside it when there is none | Switch, homeAbout, row.extra button (`service/main.ts` home.makereq, also on turning it on) | ✓ (Make home space and the round's lines were missing) |
 | Limits · Set its own | `:150` "Limits" "Same as all machines." Set its own | reveals row, ST.MACHINES.own | ✓ |
