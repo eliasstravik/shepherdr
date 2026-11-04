@@ -17,6 +17,23 @@ function readerFor(io: any, addr: string) {
   return new ChatReader(io, m ? `${m}/log` : "log").fixed(path.join("|"), kind || "claude");
 }
 
+/** Another machine's terminal as the live list has it lacks its foreground program (the log is found by its pid):
+ *  hc get has it, asked at most every 10 s per terminal. */
+const fg = new Map<string, { at: number; foreground: any }>();
+async function withForeground(addr: string, t: any) {
+  if (!t || t.foreground?.pid || !addr.includes("/") || t.state !== "live") return t;
+  let c = fg.get(addr);
+  if (!c || Date.now() - c.at > 10_000) {
+    let foreground = null;
+    try {
+      const p = Bun.spawn([process.env.SHEPHERDR_HC || "hc", "get", addr, "--json"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+      foreground = JSON.parse(await new Response(p.stdout).text())?.foreground ?? null;
+    } catch {}
+    fg.set(addr, (c = { at: Date.now(), foreground }));
+  }
+  return c.foreground ? { ...t, foreground: c.foreground } : t;
+}
+
 export class Chats {
   private followed = new Map<string, Followed>();
 
@@ -64,7 +81,7 @@ export class Chats {
     if (!f.pages.size && f.idleSince && Date.now() - f.idleSince > 60_000) { this.followed.delete(addr); return; }
     f.busy = true;
     try {
-      const t = this.hub.terminals.get(addr);
+      const t = await withForeground(addr, this.hub.terminals.get(addr));
       let changed = await f.reader.locate(t);
       if (await f.reader.pull()) changed = true;
       if (changed || !f.ready) this.publish(addr, f);

@@ -57,6 +57,25 @@ export async function newSpaceInfo(hub: Hub, machine: string | null, at: string 
   return { home, recent, start: NS.startFolder(at, recent, home) };
 }
 
+/** The template to start an Assistant from on machine. There hc runs a template's command under sh -c, and where sh is
+ *  dash (Debian, Ubuntu) the shell stays the terminal's program, so no chat would know its CLI: as the window's chat
+ *  (mods/chat startAgent), a one-off copy whose command execs it, removed by done() once it has started. Here: name.
+ *  words: the template's own words (its first message), when read. */
+export async function execTemplate(hub: Hub, name: string, machine: string | null): Promise<{ name: string; words: string; done: () => void }> {
+  const plain = { name, words: "", done: () => {} };
+  if (!machine) return plain;
+  const DIR = 'dir="$HOME/.config/herdr-core/templates"; ';
+  const src = (await exec(hub, ["sh", "-c", DIR + 'cat "$dir/$1.md"', "x", name], machine).catch(() => null))?.stdout ?? "";
+  const head = /^---\n([\s\S]*?)\n---\n?/.exec(src);
+  const cmd = /^command:[ \t]*(.+)$/m.exec(head?.[1] ?? "")?.[1]?.trim();
+  if (!head || !cmd || /^exec\s/.test(cmd)) return plain;
+  const one = `herdr-${name}-${Date.now().toString(36)}`;
+  const file = `---\nname: ${one}\ndescription: A one-off ${name} start that execs its command (Shepherdr's service), removed after use.\ncommand: exec ${cmd}\n---\n${src.slice(head[0].length)}`;
+  const w = await exec(hub, ["sh", "-c", DIR + 'printf "%s" "$2" > "$dir/$1.md"', "x", one, file], machine).catch(() => null);
+  if (w?.code !== 0) return plain;
+  return { name: one, words: src.slice(head[0].length).trim(), done: () => void exec(hub, ["sh", "-c", DIR + 'rm -f "$dir/$1.md"', "x", one], machine).catch(() => null) };
+}
+
 /** Makes a space at path on machine (null: here), as the window's New space (mods/newspace, coordinator.js
  *  createSpace): a missing folder is made, makeRepo makes a folder outside git a repo (main, an empty first commit), it
  *  is named as Herdr names it ("Home" at home, else its repo's or folder's name; unnamed: left to follow its folder, as
@@ -98,7 +117,9 @@ export async function newSpace(hub: Hub, opts: { machine: string | null; path: s
   await iconOf(machine ? `${machine}/${id}` : id);
   // Settings › Window › Assistant in new spaces off: it opens without one
   if (opts.store.value("coordinator.auto") === false) return machine ? `${machine}/${id}` : id;
+  const t = await execTemplate(hub, "assistant", machine);
   await run(["hc", "run", "--bg", "--keep", "--no-parent", ...(machine ? ["--on", machine] : []), "--cwd", abs,
-    "--label", "herdr.role=coordinator", "--label", `herdr.coordinator.space=${id}`, "--label", `herdr.space=${id}`, "assistant"]);
+    "--label", "herdr.role=coordinator", "--label", `herdr.coordinator.space=${id}`, "--label", `herdr.space=${id}`, t.name]);
+  t.done();
   return machine ? `${machine}/${id}` : id;
 }

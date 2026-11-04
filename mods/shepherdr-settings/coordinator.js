@@ -302,7 +302,7 @@ export async function makeHomeSpace(machine = null) {
   return out.space;
 }
 
-// A shell nobody used: the shell itself in the foreground, at its first prompt (a line or two).
+// A shell nobody used: the shell itself in the foreground, at its first prompt (a line or two, or under a login message).
 // A shell still starting is waited for, up to 3 s.
 async function freshShell(address) {
   for (let i = 0; i < 12; i++) {
@@ -322,7 +322,10 @@ async function shellState(address) {
     const fg = k.foreground.argv[0].split("/").pop().replace(/^-/, "");
     if (!["bash", "zsh", "fish", "sh", "dash", "nu", "elvish", "xonsh", "pwsh"].includes(fg)) return false;
     const screen = (await exec("hc", ["read", address, "--lines", "40"])).stdout.split("\n").filter((l) => l.trim());
-    return screen.length <= 2;
+    // A login message above it (another machine's motd) is no use: still fresh while its one
+    // prompt is the last line, with nothing typed or run after it.
+    const prompt = (l) => /[$#%>❯]\s*$/.test(l);
+    return screen.length <= 2 || (prompt(screen[screen.length - 1]) && screen.filter(prompt).length === 1);
   } catch { return null; }
 }
 

@@ -13,6 +13,7 @@ import * as SP from "../core/spaces.js";
 const { READ, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, DELETED, deletedSection, withRestoredSection } = SP as any;
 import type { Compat } from "./compat.ts";
 import { worktreeAct } from "./worktrees.ts";
+import { execTemplate } from "./spaces.ts";
 import * as MA from "../core/machine-add.js";
 import { exec } from "./model.ts";
 
@@ -61,6 +62,19 @@ function startWhenBack() {
     }
     if (!starts.size && startTimer) { clearInterval(startTimer); startTimer = null; }
   }, 15_000);
+}
+
+// An Assistant whose CLI showed a screen of its own (trust this folder) before hc could hand it its first message: the
+// template's words and the task go once it is idle past that screen, as the window's chat does (mods/chat follow()).
+function firstWhenIdle(hub: Hub, addr: string, text: string) {
+  const until = Date.now() + 15 * 60_000;
+  const timer = setInterval(async () => {
+    const t: any = hub.terminals.get(addr);
+    if (!t || t.state !== "live" || (t.turn ?? 0) > 0 || Date.now() > until) return clearInterval(timer);
+    if (t.status?.state !== "idle") return;
+    clearInterval(timer);
+    await hc(["send", addr, text]).catch(() => null);
+  }, 2000);
 }
 
 async function run(cmd: string[]) {
@@ -427,13 +441,16 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       ? ["--label", `herdr.chat=${rec.pane}`, "--label", `herdr.chat.slot=${slot}`, "--label", `herdr.chat.origin=slot:${slot}`, "--label", "herdr.role=coordinator",
         "--label", `herdr.coordinator.space=${bare}`, ...(rec.tab ? ["--label", `herdr.coordinator.tab=${String(rec.tab).split("/").pop()}`] : [])]
       : ["--label", "herdr.role=coordinator", "--label", `herdr.coordinator.space=${bare}`, "--label", `herdr.space=${bare}`];
-    const r = await hc(["run", "--bg", "--json", "--no-parent", "--keep", ...(sp.machine ? ["--on", sp.machine] : []), ...(sp.folder ? ["--cwd", sp.folder] : []), ...labels, "assistant", task]);
+    const tpl = await execTemplate(hub, "assistant", sp.machine ?? null);
+    const r = await hc(["run", "--bg", "--json", "--no-parent", "--keep", ...(sp.machine ? ["--on", sp.machine] : []), ...(sp.folder ? ["--cwd", sp.folder] : []), ...labels, tpl.name, task]);
+    tpl.done();
     let out: any = {};
     try { out = JSON.parse(r.stdout || "{}"); } catch {}
     if (r.code !== 0 || !out.address) throw new Error((r.stderr || r.stdout).trim().split("\n").pop() || "The Assistant didn't start.");
     // what the person asked, for its chat to show apart from the template (the window's data/chat-first)
     const first = join(process.env.HERDR_APP_HOME || join(homedir(), ".config", "herdr-app"), "data", "chat-first");
     const addr = sp.machine && !String(out.address).includes("/") ? `${sp.machine}/${out.address}` : String(out.address);
+    if (out.first_message?.sent === false && tpl.words) firstWhenIdle(hub, addr, `${tpl.words}\n\n${task}`);
     try { mkdirSync(first, { recursive: true }); writeFileSync(join(first, `${String(slot ?? addr).replace(/[^\w.-]/g, "_")}.txt`), text); } catch {}
     return { ok: true, started: true };
   }

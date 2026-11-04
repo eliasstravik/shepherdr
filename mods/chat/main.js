@@ -1131,6 +1131,14 @@ export default class Chat extends View {
         // Its own start screen, while it has no session (or a card is still open).
         const k = this.ownTerminal();
         if (k && (starting(k) || openCard(this.addr))) { await this.screens.tick(this.addr, k); cx.notify(); }
+        // The first message hc couldn't hand over (startAgent): once the agent is idle with no screen to answer.
+        if (this.firstSend && k?.turn > 0) this.firstSend = null;
+        if (this.firstSend && k?.status?.state === "idle" && !openCard(this.addr)) {
+          const text = this.firstSend;
+          this.firstSend = null;
+          const sent = await hc(["send", this.addr, text]).catch(() => null);
+          if (sent?.code !== 0) this.firstSend = text;
+        }
         this.alerts(cx);
         this.drainQueue(cx);
         // Dragged to the top with the scrollbar: no wheel said so.
@@ -1440,19 +1448,25 @@ export default class Chat extends View {
       // agent and its flags, as a one-off template (as restart.sh does), written beside the
       // template on the machine it runs on. There, an agent that isn't installed leaves the
       // template's own command (what that machine's sync put there).
-      let launch = template, oneOff = null;
+      // hc runs a template's command under sh -c, and where sh is dash (Debian, Ubuntu) the shell
+      // stays the terminal's program, so the chat wouldn't know its CLI: on another machine the
+      // command always goes through a one-off that execs it.
+      let launch = template, oneOff = null, words = "";
       const st = this.choice?.sel ?? props()?.settings;
       const on = machine ? { on: machine } : {};
       const there = !machine || !st?.agent ? true : (await knownAgents(on).catch(() => []))
         .some((a) => (a.key === st.agent || (a.run ?? [])[0] === st.agent) && a.installed !== false);
-      if (st?.agent && there) {
-        const built = agent.argvFor(st, { agent: null, argv: [] });
+      if ((st?.agent && there) || machine) {
         const q = (a) => (/^[\w@%+=:,./-]+$/.test(a) ? a : `'${String(a).replace(/'/g, "'\\''")}'`);
         const src = (await exec("sh", ["-c", TEMPLATE + 'cat "$dir/$1.md"', "x", template], on).catch(() => null))?.stdout ?? "";
-        const body = src.replace(/^---\n[\s\S]*?\n---\n?/, "");
-        if (body.trim()) {
+        const head = /^---\n([\s\S]*?)\n---\n?/.exec(src);
+        const body = head ? src.slice(head[0].length) : src;
+        const own = /^command:[ \t]*(.+)$/m.exec(head?.[1] ?? "")?.[1]?.trim();
+        const cmd = st?.agent && there ? agent.argvFor(st, { agent: null, argv: [] }).argv.map(q).join(" ") : own;
+        if (body.trim() && cmd) {
+          words = body.trim();
           oneOff = `herdr-${template}-${Date.now().toString(36)}`;
-          const file = `---\nname: ${oneOff}\ndescription: A one-off ${template} start with chosen settings (mods/chat), removed after use.\ncommand: ${built.argv.map(q).join(" ")}\n---\n${body}`;
+          const file = `---\nname: ${oneOff}\ndescription: A one-off ${template} start with chosen settings (mods/chat), removed after use.\ncommand: ${machine && !/^exec\s/.test(cmd) ? "exec " : ""}${cmd}\n---\n${body}`;
           await exec("sh", ["-c", TEMPLATE + 'printf "%s" "$2" > "$dir/$1.md"', "x", oneOff, file], on);
           launch = oneOff;
         }
@@ -1467,7 +1481,14 @@ export default class Chat extends View {
       if (oneOff) exec("sh", ["-c", TEMPLATE + 'rm -f "$dir/$1.md"', "x", oneOff], on);
       let out = {};
       try { out = JSON.parse(r.stdout || "{}"); } catch {}
-      if (r.code !== 0 || !out.address) {
+      // hc waits to hand the agent its first message and gives up while the CLI shows a screen of
+      // its own (trust this folder, in a new folder on another machine): hc took too long, but the
+      // agent runs. Then this chat sends the template's words and the task itself once the agent is
+      // idle past that screen (follow()), so the Assistant never starts without its instructions.
+      const late = (r.code !== 0 || !out.address) && this.slotAgent();
+      if (late) out = { address: late, first_message: { sent: false } };
+      if (out.address && out.first_message?.sent === false && words) this.firstSend = [words, task].filter(Boolean).join("\n\n");
+      if (r.code !== 0 && !late || !out.address) {
         p.failed = (r.stderr || r.stdout || "It didn't start.").trim();
         if (!msg) toast({ title: `The ${this.role === "coordinator" ? "Assistant" : this.role} didn't start`, body: p.failed, level: "error" });
         this.phase = "fresh";
