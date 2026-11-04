@@ -156,10 +156,11 @@ export class Model {
   pilotOf(id: string) {
     const cut = id.indexOf("/");
     if (cut > 0) {
-      // another machine's: its own record there, what applies by this machine's settings (pushed to it as its own)
+      // another machine's: its own record there, what applies by this machine's settings (pushed to it as its own);
+      // with no heartbeat in Settings it works from its machine's file, made with the starter when switched on
       const file = this.pilots.get(id.slice(0, cut)) ?? {};
       const a = pilotFor({ ...file, spaces: { [id]: file.spaces?.[id.slice(cut + 1)] ?? {} } }, id, this.settings);
-      const words = levelOf(this.settings, id).heartbeat ?? levelOf(this.settings).heartbeat ?? this.pilotEverywhere.words;
+      const words = levelOf(this.settings, id).heartbeat ?? levelOf(this.settings).heartbeat ?? STARTER;
       return { ...a, words };
     }
     const a = this.autopilot[id] ?? pilotFor({ everywhere: this.pilotEverywhere }, id);
