@@ -23,24 +23,6 @@
 @custom-variant keys (:where([data-keys="focus"]) &);
 /* the keyboard is moving the tasks' cursor, which isn't the focus */
 @custom-variant cursor (:where([data-keys="cursor"]) &);
-/* a row's own button tucked away until the pointer is over the row or the keyboard is in it (still in the Tab
-   order); where nothing hovers, a finger always sees it */
-@custom-variant tucked {
-  @media (hover: hover) {
-    :where(.group):not(:hover, :has(:focus-visible)) & {
-      @slot;
-    }
-  }
-}
-/* the other side of it: what makes room for those buttons while they show (a sidebar row's count gives way to its ⋯),
-   and while the row's menu is open */
-@custom-variant untucked {
-  @media (hover: hover) {
-    :where(.group):is(:hover, :has(:focus-visible), :has([aria-haspopup][aria-expanded="true"])) & {
-      @slot;
-    }
-  }
-}
 
 :root {
   color-scheme: light;

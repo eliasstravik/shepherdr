@@ -16,8 +16,8 @@ checks the window's askers say the same).
 |---|---|---|---|
 | Opens from | Ready row's Accept, task header, Assistant's live row (`mods/tasks/main.js:805`, `mods/chat/panel.js:156`, `mods/chat/main.js:798`), a 640×640 modal | `openAccept` from the same rows and headers; a push alert's `#accept=<task>` (`web/src/screens/Accept.tsx` fromLink) | ✓ |
 | Title | `Accept HERD-4?`, only `HERD-4` once settled (`mods/accept-card/main.js:305`, `ACCEPT.title`) | `Accept.tsx:132` `A.ACCEPT.title(ref)` / `ref` | ✓ |
-| Task name under it | muted, one line, `x.title ?? p.title` (`main.js:306`) | `Dialog sub` from the evidence, else the snapshot's task name (`Accept.tsx:132`, `rowmenu.tsx:182`) | ✓ |
-| × at top right | closes as Cancel (`main.js:270`) | `Dialog closer` (`rowmenu.tsx:184`, aria-label Close) | ✓ |
+| Task name under it | muted, one line, `x.title ?? p.title` (`main.js:306`) | `Dialog sub` from the evidence, else the snapshot's task name (`Accept.tsx:132`, `rowmenu.tsx:173`) | ✓ |
+| × at top right | closes as Cancel (`main.js:270`) | `Dialog closer` (`rowmenu.tsx:175`, aria-label Close) | ✓ |
 | Esc | closes (`main.js:296`) | Dialog's Escape; over the open proof it closes the proof first, back to the card (`Accept.tsx:129`) | ✓ |
 | Reading | `Reading the task…` (dim) (`main.js:286`) | `A.ACCEPT.reading` (`Accept.tsx:145`) | ✓ |
 | Couldn't read | the error in red in the body, footer still Cancel + Accept (disabled) | the error in red in the body (`Accept.tsx:145`) | ✓ |
@@ -74,7 +74,7 @@ checks the window's askers say the same).
 
 | Element | Window (file:line, exact words/control) | Web (file:line) | State |
 |---|---|---|---|
-| Confirm: frame | title (semibold), detail (muted), the verb, Cancel (`mods/confirm-chat/main.js:43`) | `Dialog` (`web/src/rowmenu.tsx:146`) | ✓ |
+| Confirm: frame | title (semibold), detail (muted), the verb, Cancel (`mods/confirm-chat/main.js:43`) | `Dialog` (`web/src/rowmenu.tsx:137`) | ✓ |
 | Confirm: the verb | says what it does, never "Confirm"; plain primary (`main.js:47`) | the verb, plain `Primary` | ✓ |
 | Confirm: Enter / Esc | Esc cancels; Enter runs a safe ask, does nothing on a destructive one | Esc cancels; `safe`: Cancel has the focus, so Enter cancels | ◇ a browser's Enter presses the focused button; nothing destructive runs |
 | Close space | `Close “gtm”?` (`Close this space?` for ~), `Its tabs close and every program in them ends.`, `Close space` (`lib/coordinator.js:404`, `mods/spaces-chat/popups.js:28`) | `CF.CLOSE_SPACE` (`web/plugins/places/client.tsx:663`), then the window's own close (`service/actions.ts` space-remove) | ✓ |

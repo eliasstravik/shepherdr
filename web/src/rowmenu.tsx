@@ -1,11 +1,11 @@
-// A row's menu and the questions it asks, shared by the task rows and the project rows in the sidebar: the menu opens
-// from the row's ⋯ (a mouse finds it on hover; a task row's always shows to a finger), a right click, or a finger held on the row; what can't be undone asks
-// first in a dialog. A row in the desktop's sidebar opens its menu beside it, so it covers none of the rows under it.
+// A row's menu and the questions it asks, shared by the sidebar's rows: as the window's, the menu opens from a right
+// click (at the pointer) or a finger held on the row, with no ⋯ on the row; what can't be undone asks first in a dialog.
+// A row in the desktop's sidebar held by a finger (or opened from the keyboard's menu key) opens its menu beside it.
 import clsx from 'clsx'
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { useUI } from './kernel.ts'
 import { useMotion } from './motion.ts'
-import { Ghost, ic, Menu, MoreIcon, XIcon } from './ui.tsx'
+import { Ghost, ic, Menu, XIcon } from './ui.tsx'
 
 /** how long a finger holds a row before its menu opens */
 export const HOLD_MS = 450
@@ -13,15 +13,17 @@ export const HOLD_MS = 450
 export type RowMenuState = ReturnType<typeof useRowMenu>
 
 /**
- * A row's menu: opened from its ⋯, a right click, or a finger held on the row. Held
- * open, the tap that ends the hold doesn't open the row. Spread `press` on the row's <li>. `beside`: on a desktop it
- * opens to the right of the row (a row in the left sidebar), elsewhere under it as any other.
+ * A row's menu: opened from a right click or a finger held on the row. Held open, the tap that ends the hold doesn't
+ * open the row. Spread `press` on the row's <li>. `beside`: on a desktop a right click opens it at the pointer, as the
+ * window's, and a held finger to the right of the row (a row in the left sidebar); elsewhere under it as any other.
  */
 export function useRowMenu({ beside = false }: { beside?: boolean } = {}) {
   const desktop = useUI((u) => u.device === 'desktop')
   const [open, setOpen] = useState<null | 'down' | 'up'>(null)
   /** the row a menu beside it opened from */
   const [row, setRow] = useState<HTMLElement | null>(null)
+  /** where the right click that opened it was */
+  const [point, setPoint] = useState<{ x: number; y: number } | null>(null)
   const close = useCallback(() => setOpen(null), [])
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const start = useRef<{ x: number; y: number } | null>(null)
@@ -30,10 +32,12 @@ export function useRowMenu({ beside = false }: { beside?: boolean } = {}) {
   const swallow = useRef(0)
   useEffect(() => () => clearTimeout(timer.current), [])
   // near the bottom of the screen it opens upwards, so the list's scroll doesn't hide it
-  const show = (el: HTMLElement | null) => {
+  const show = (el: HTMLElement | null, at?: { x: number; y: number }) => {
     const r = el?.getBoundingClientRect()
-    setRow(r && beside && desktop ? el : null)
-    setOpen(r && r.bottom > innerHeight * 0.6 ? 'up' : 'down')
+    const by = r && beside && desktop
+    setRow(by ? el : null)
+    setPoint(by && at ? at : null)
+    setOpen((at && by ? at.y : r?.bottom ?? 0) > innerHeight * 0.6 ? 'up' : 'down')
   }
   const cancel = () => {
     clearTimeout(timer.current)
@@ -50,6 +54,7 @@ export function useRowMenu({ beside = false }: { beside?: boolean } = {}) {
   return {
     open,
     row,
+    point,
     show,
     close,
     /** a finger held the row long enough (for a row that times its own hold, as one that can be dragged): the menu opens */
@@ -74,39 +79,16 @@ export function useRowMenu({ beside = false }: { beside?: boolean } = {}) {
       onContextMenu: (e: ReactMouseEvent) => {
         if ((e.target as HTMLElement).closest('[role=menu]')) return
         e.preventDefault()
-        if (!open) show(e.currentTarget as HTMLElement)
+        // the keyboard's menu key has no pointer: beside the row
+        if (!open) show(e.currentTarget as HTMLElement, e.button === 2 ? { x: e.clientX, y: e.clientY } : undefined)
       },
     },
   }
 }
 
-/** the ⋯ at a row's end: tucked away until the pointer is on the row; none where nothing hovers (a finger holds the row),
- *  and never seen through what sits under it on a screen that reports neither hover nor a finger.
- *  always: it shows to a finger too, its row making room for it.
- *  Its name doesn't repeat the row's: the row's own button is the one named by it */
-export function RowMenuButton({ menu, label, always, className }: { menu: RowMenuState; label: string; always?: boolean; className?: string }) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      aria-haspopup="menu"
-      aria-expanded={!!menu.open}
-      onClick={(e) => (menu.open ? menu.close() : menu.show(e.currentTarget.closest('li')))}
-      className={clsx(
-        // its ring only for the keyboard: a browser that gives the focus back to it as a question closes shows none
-        'hit grid size-6 place-items-center rounded-full text-fg3 outline-none! keys:focus-visible:shadow-[0_0_0_1.5px_var(--focus)] hover:bg-sel hover:text-fg aria-expanded:bg-sel aria-expanded:text-fg tucked:not-aria-expanded:pointer-events-none tucked:not-aria-expanded:absolute tucked:not-aria-expanded:opacity-0',
-        !always && 'pointer-coarse:hidden [@media(hover:none)]:not-aria-expanded:not-focus-visible:opacity-0',
-        className,
-      )}
-    >
-      <MoreIcon className={ic} />
-    </button>
-  )
-}
-
-/** the open menu under (or over) its row, or beside it; a click outside closes it, as any menu */
+/** the open menu at the pointer, beside its row, or under (or over) it; a click outside closes it, as any menu */
 export function RowMenu({ menu, label, className, children }: { menu: RowMenuState; label: string; className?: string; children: ReactNode }) {
-  const { row, close } = menu
+  const { row, point, close } = menu
   // beside its row it would stay put while the list under it scrolls: it goes
   useEffect(() => {
     if (!row) return
@@ -118,6 +100,15 @@ export function RowMenu({ menu, label, className, children }: { menu: RowMenuSta
       removeEventListener('resize', close)
     }
   }, [row, close])
+  if (row && point)
+    return (
+      // as the window's right-click menu: its corner at the pointer, kept on the screen
+      <div className="fixed z-21" style={{ left: Math.max(8, Math.min(point.x, innerWidth - 296)), ...(menu.open === 'up' ? { bottom: innerHeight - point.y } : { top: point.y }) }}>
+        <Menu label={label} onClose={close} className={clsx(menu.open === 'up' ? 'origin-bottom-left' : 'origin-top-left', className)}>
+          {children}
+        </Menu>
+      </div>
+    )
   const at = row?.getBoundingClientRect()
   if (at)
     return (
@@ -148,7 +139,7 @@ export function Dialog({ title, sub, closer, foot, wide, children, buttons, safe
   const shade = useRef<HTMLDivElement>(null)
   const box = useRef<HTMLDivElement>(null)
   useMotion(shade, phone ? 'sheet' : 'dialog')
-  // read while it renders, before a button in it takes the focus: the row's ⋯, or wherever it was
+  // read while it renders, before a button in it takes the focus: the row, or wherever it was
   const [opener] = useState(() => (document.activeElement instanceof HTMLElement ? document.activeElement : null))
   const cancelling = useRef(onCancel)
   cancelling.current = onCancel
