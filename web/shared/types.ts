@@ -351,6 +351,9 @@ export interface MergeEvidence {
 export interface Artifact {
   id: string
   title: string
+  /** Shepherdr 3.1: recipe (recipe.json, drawn here as HTML) or gpui (an older one, drawn only by the Herdr window);
+   *  none: 2.1's HTML page */
+  kind?: 'recipe' | 'gpui'
   /** the place it lives in */
   place: string
   /** its latest version, and when that came (ms) */

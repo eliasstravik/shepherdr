@@ -62,6 +62,12 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     for (const key of Object.keys(b.chats).slice(0, 20)) { const a = compat.addrOf(key); if (a) await act(hub, { type: "read", addr: a }, compat); }
     return { ok: true };
   }
+  if ((b?.type === "artifact-send" || b?.type === "artifact-note" || b?.type === "artifact-say") && typeof b.artifact === "string" && compat.artifacts) {
+    // a recipe's answer or a note on one of its blocks: to the agent that keeps the artifact
+    const text = str(b.text ?? b.note, 4000).trim();
+    if (!text) throw new Error("Nothing to send.");
+    return compat.artifacts.say(str(b.artifact, 100), Number(b.v) || 1, text, typeof b.target === "string" ? b.target.slice(0, 300) : undefined);
+  }
   switch (b?.type) {
     case "send": {
       const a = addr(b.addr);

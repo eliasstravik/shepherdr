@@ -3,6 +3,8 @@
 // list per place, and one per chat (its ⋯ → Artifacts). A newer version swaps in live: only its data changed, the page takes the new data without a reload.
 // Shown in the side panel, it fills a place's Artifacts list (or a task's Artifacts tab) beside the chat.
 import clsx from 'clsx'
+import { Recipe } from '@client/screens/Recipe.tsx'
+import * as R from '@core/recipe.js'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import {
   act,
@@ -67,6 +69,8 @@ import {
   XIcon,
 } from '@client/ui.tsx'
 import type { Artifact, Chat, Message, Task } from '@shared/types.ts'
+
+const { withIds, blockName } = R as any
 
 export type Pick = { text: string; selector: string; component?: string; x: number; y: number }
 
@@ -192,8 +196,44 @@ const useWindowHeight = () =>
 /** how tall each page last said it is, so a card scrolled back into the chat doesn't jump */
 const heights = new Map<string, number>()
 
+/** Shepherdr 3.1: a recipe artifact is drawn here as the web's own HTML (Recipe.tsx); an older one made for the Herdr
+ *  window says so; a 2.1 page (none here now) still has its frame. */
+export function ArtifactFrame(p: Parameters<typeof PageFrame>[0]) {
+  if (p.art.kind === 'recipe') return <RecipeFrame {...p} />
+  if (p.art.kind === 'gpui') return <WindowOnly />
+  return <PageFrame {...p} />
+}
+
+/** A recipe of the version shown, its pictures from the service; in Mark up a tap on a block points at it. */
+function RecipeFrame({ art, v, full, markup, onPick }: Parameters<typeof PageFrame>[0]) {
+  const [recipe, setRecipe] = useState<{ blocks: unknown[] } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let gone = false
+    setRecipe(null)
+    fetch(`api/artifacts/${encodeURIComponent(art.id)}/recipe?v=${v}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('gone'))))
+      .then((r) => !gone && setRecipe(withIds(r)), () => !gone && setError("This version can't be read."))
+    return () => { gone = true }
+  }, [art.id, v])
+  if (error) return <p className="p-4 text-fg3">{error}</p>
+  if (!recipe) return <p className="p-4 text-fg3">Loading…</p>
+  return (
+    <div className={clsx('overflow-y-auto p-4 phone:p-5', full ? 'h-full' : 'max-h-[70dvh]')}>
+      <Recipe recipe={recipe} asset={(src) => `api/artifacts/${encodeURIComponent(art.id)}/file/${src.split('/').map(encodeURIComponent).join('/')}?v=${v}`}
+        reply={(text) => act({ type: 'artifact-send', place: art.place, artifact: art.id, v, text })}
+        onNote={markup && onPick ? (b: any) => onPick({ text: blockName(b), selector: `[data-block="${b.id}"]`, x: 0, y: 0 }) : undefined} />
+    </div>
+  )
+}
+
+/** made before recipes, for the Herdr window only */
+function WindowOnly() {
+  return <p className="p-4 text-pretty text-fg3">Made for the Herdr window: open it there.</p>
+}
+
 /** An artifact's page in a sealed frame: scripts and forms run, never with this app's origin, and it loads nothing. */
-export function ArtifactFrame({
+function PageFrame({
   art,
   v,
   full,

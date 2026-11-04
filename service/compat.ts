@@ -3,7 +3,7 @@
 // shapes 2.1's screen reads (web/shared/types.ts: Snapshot, Chat), and its chat keys back into terminals.
 //   a space's chat (its Assistant):  p:<space id, "/" as ":">     a task's chat:  <task id>/worker
 // A task id is its ref ("SHEP-7"), "<machine>:<ref>" on another machine, as 2.1 wrote them.
-import type { Snapshot, Place, Task, Need, Section, Machine, Chat, Message, Status, TaskStatus, StepKind, ActivityAnswer, Question } from "../web/shared/types.ts";
+import type { Snapshot, Place, Task, Need, Section, Machine, Chat, Message, Status, TaskStatus, StepKind, ActivityAnswer, Question, Artifact } from "../web/shared/types.ts";
 import * as T from "../core/tasks.js";
 import type { Where } from "./worktree.ts";
 
@@ -30,6 +30,18 @@ export function activity(reader: any, id: string): ActivityAnswer {
   return { steps: x.steps.map((s: any, i: number) => ({ id: `${s.id ?? i}`, kind: STEP[s.kind] ?? "other", tool: s.kind, at: 0, end: 1, title: s.line, doing: s.line, target: "" })) };
 }
 
+/** An artifact (herdr-artifact list) as 2.1's: its versions newest first, which space it belongs to (its folder's,
+ *  here), and whether the web can draw it (a recipe) or only the window (an older GPUI one). */
+function artifactOf(a: any, spaces: Space[]): Artifact {
+  const place = spaces.find((s) => !s.machine && s.folder === a.folder)?.id ?? spaces.find((s) => !s.machine)?.id ?? "";
+  const by = a.task ? `${a.task} agent` : a.publisher ? "an agent" : "";
+  const recipe = (a.files ?? []).includes("recipe.json") && !(a.files ?? []).includes("main.js");
+  return {
+    id: a.id, title: a.title, place, v: a.version, at: a.at, when: ago(a.at, false), by, keeper: "", kind: recipe ? "recipe" : "gpui",
+    versions: [...(a.versions ?? [])].reverse().map((x: any) => ({ n: x.v, when: ago(x.at, false), by, html: x.v, ...(x.note ? { note: x.note } : {}) })),
+  };
+}
+
 export class Compat {
   /** chat key -> terminal address, from the last build */
   private chats = new Map<string, string>();
@@ -37,6 +49,9 @@ export class Compat {
   private tasks = new Map<string, { ref: string; folder: string; machine: string | null; key: string; where: Where }>();
 
   taskOf(id: string) { return this.tasks.get(id) ?? null; }
+
+  /** This machine's artifacts (service/artifacts.ts), set by main: notes and answers go through it. */
+  artifacts: { say(id: string, v: number, text: string, spot?: string): Promise<unknown> } | null = null;
 
   /** Open hook asks (service/asks.ts), set by main: they show as cards in their chat and in Needs you. */
   asks: { of(terminal: string): any[]; open: Map<string, any> } | null = null;
@@ -62,7 +77,7 @@ export class Compat {
 
   addrOf(key: string) { return this.chats.get(key) ?? null; }
 
-  snapshot(input: { host: string; user: string; machines: { name: string; here: boolean; state: string }[]; spaces: Space[]; sections: any[]; rows: Row[] }): Snapshot {
+  snapshot(input: { host: string; user: string; machines: { name: string; here: boolean; state: string }[]; spaces: Space[]; sections: any[]; rows: Row[]; artifacts?: any[] }): Snapshot {
     const { host, spaces, rows } = input;
     const chats = new Map<string, string>();
     const machines: Machine[] = input.machines.map((m) => {
@@ -129,7 +144,8 @@ export class Compat {
 
     this.chats = chats;
     this.last = {
-      terminalTransport: "core", name: "Shepherdr", host, user: input.user, places, machines, tasks, automations: {}, artifacts: [], asks: {}, needs, settings: [],
+      terminalTransport: "core", name: "Shepherdr", host, user: input.user, places, machines, tasks, automations: {}, asks: {}, needs, settings: [],
+      artifacts: (input.artifacts ?? []).map((a) => artifactOf(a, spaces)),
       sections, last, read,
     };
     return this.last;

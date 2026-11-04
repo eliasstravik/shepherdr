@@ -25,6 +25,7 @@ import { Jobs } from "./jobs.ts";
 import { terminalBridge } from "./terminal.ts";
 import { worktree } from "./worktree.ts";
 import { browserRelay } from "./browser.ts";
+import { Artifacts } from "./artifacts.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const WEB = process.env.SHEPHERDR_WEB_DIR || join(ROOT, "web", "dist");
@@ -49,6 +50,10 @@ const compat = new Compat();
 const model = new Model(hub, live);
 live.chats = new Chats(hub);
 live.compat = compat;
+const artifacts = new Artifacts();
+compat.artifacts = artifacts;
+artifacts.on(() => model.rebuild());
+artifacts.start();
 const asks = new Asks();
 compat.asks = asks;
 asks.on(() => { model.rebuild(); live.chats?.refreshAll(); });
@@ -57,7 +62,7 @@ const jobs = new Jobs(hub);
 jobs.watched = () => live.watched();
 jobs.start();
 model.onBuild = (b) => live.setSnapshot(compat.snapshot({
-  host: me?.host ?? "this machine", user: me?.name ?? "You", spaces: b.spaces, sections: b.sections, rows: b.rows,
+  host: me?.host ?? "this machine", user: me?.name ?? "You", spaces: b.spaces, sections: b.sections, rows: b.rows, artifacts: artifacts.list,
   machines: [{ name: me?.host ?? "this machine", here: true, state: "connected" }, ...b.machines.map((name) => ({ name, here: false, state: "connected" }))],
 }));
 model.start();
@@ -123,6 +128,13 @@ const server = Bun.serve<{ who: string }>({
       const body = await req.json().catch(() => null);
       if (!body || typeof body.key !== "string" || !/^[a-z][\w.-]{0,63}$/.test(body.key)) return json({ error: "bad key" }, 400);
       return json(await store.set(body.key, body.value ?? null));
+    }
+    // a recipe artifact's files (the web's recipe view asks api/artifacts/<id>/recipe?v=, /file/<path>?v=)
+    const art = /^\/api\/artifacts\/([\w.-]+)\/(recipe|file\/(.+))$/.exec(path);
+    if (art) {
+      const v = Number(url.searchParams.get("v"));
+      if (art[2] === "recipe") { const r = artifacts.recipe(art[1], v); return r ? json(r) : json({ error: "No recipe here." }, 404); }
+      return artifacts.file(art[1], v, decodeURIComponent(art[3]));
     }
     if (path === "/api/worktree") {
       const t = compat.taskOf(url.searchParams.get("task") ?? "");
