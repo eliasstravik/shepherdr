@@ -66,7 +66,19 @@ export async function share(dns: string, port: number): Promise<string | null> {
   return r.ok ? null : "tailscale serve failed";
 }
 
-export async function unshare(dns: string): Promise<void> {
+/** Stops sharing /shepherdr. port: only when it leads to this service (another one's share is left alone). */
+export async function unshare(dns: string, port?: number): Promise<void> {
   const now = await served(dns);
-  if (now.proxy) await run(["serve", `--https=${now.port ?? 443}`, "--set-path", MOUNT, "off"]);
+  if (now.proxy && (port === undefined || now.proxy === `http://127.0.0.1:${port}`)) await run(["serve", `--https=${now.port ?? 443}`, "--set-path", MOUNT, "off"]);
+}
+
+/** What a move here set aside (shepherdr web serve-from --take-link: ~/.herdr/shepherdr/replaced-share.json), shared
+ *  again once this machine no longer serves the web app. */
+export async function restoreShare(file: string): Promise<boolean> {
+  let r: { port?: string; proxy?: string } | null = null;
+  try { r = JSON.parse(await Bun.file(file).text()); } catch { return false; }
+  if (!r?.proxy || !/^\d+$/.test(String(r.port)) || !/^https?:\/\/127\.0\.0\.1:\d+\/?$/.test(r.proxy)) return false;
+  const ok = (await run(["serve", "--bg", `--https=${r.port}`, "--set-path", MOUNT, r.proxy])).ok;
+  if (ok) try { (await import("node:fs")).unlinkSync(file); } catch {}
+  return ok;
 }

@@ -12,8 +12,14 @@ const { windowLeavesIt } = await import("./jobs.ts");
 test("no window installed: the service does it", () => {
   expect(windowLeavesIt()).toBe(true);
 });
+test("Herdr with its own mods only (no Shepherdr layout, as an always-on box): the service does it", () => {
+  mkdirSync(join(home, "mods", "changes"), { recursive: true });
+  expect(windowLeavesIt()).toBe(true);
+});
 test("a 3.0 window (its tab bar never asks the service): the window keeps it", () => {
   mkdirSync(join(home, "mods", "tabs-tasks"), { recursive: true });
+  mkdirSync(join(home, "data", "shepherdr"), { recursive: true });
+  writeFileSync(join(home, "data", "shepherdr", "installed.json"), "{}");
   expect(windowLeavesIt()).toBe(false);
 });
 test("a 3.1 window (lib/service.js in its tab bar): it leaves the work to the service", () => {

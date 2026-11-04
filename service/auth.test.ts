@@ -47,3 +47,18 @@ describe("on this machine", () => {
   test("another host name is refused", () =>
     expect(gate(new Request("http://x/api", { headers: { host: "evil.example", authorization: "Bearer secret-token" } }), g)).toMatchObject({ ok: false, status: 421 }));
 });
+
+test("macOS: the caller's side of the exact connection, from netstat -anv (Tailscale's extension runs as root)", async () => {
+  const { darwinPids } = await import("./peer.ts");
+  const text = [
+    "Proto Recv-Q Send-Q  Local Address          Foreign Address        (state)          rxbytes      txbytes  rhiwat  shiwat          process:pid    state  options",
+    "tcp4       0      0  127.0.0.1.7788         127.0.0.1.56078        ESTABLISHED         4440          976  406272  146988              bun:87948  00102 00000004",
+    "tcp4       0      0  127.0.0.1.56078        127.0.0.1.7788         ESTABLISHED         2160         2116  407552  146988 io.tailscale.ipn:3083   00182 00000008",
+    "tcp4       0      0  127.0.0.1.56079        127.0.0.1.7788         TIME_WAIT           2160         2116  407552  146988 curl:4000   00182 00000008",
+  ].join("\n");
+  expect(darwinPids(56078, 7788, text)).toEqual([3083]);
+  expect(darwinPids(56079, 7788, text)).toEqual([]);
+  // a name made to look like a pid ("evil:1 x") still reads as its own pid, the last one netstat wrote
+  const forged = "tcp4       0      0  127.0.0.1.56080        127.0.0.1.7788         ESTABLISHED         2160         2116  407552  146988 evil:1 x:4242   00182 00000008 000000000eb4b4f3 00000080 04000800      2      0 000000";
+  expect(darwinPids(56080, 7788, forged)).toEqual([4242]);
+});

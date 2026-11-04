@@ -8,6 +8,7 @@
 import clsx from 'clsx'
 import { ModelButton, openRole } from './screens/Role.tsx'
 import { MachineDetails } from './MachineDetails.tsx'
+import { askServeFrom } from './screens/ServeFrom.tsx'
 // The window's words for every page: core/settings.js (mods/shepherdr-settings reads the same)
 import * as STc from '@core/settings.js'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1012,6 +1013,11 @@ export default function Settings() {
   const at = (key: string) => `${page.level ?? ''}|${key}`
   const level = levelOf(snap.settings, ui)
   const set = async (key: string, value: string | null) => {
+    // Serve from: another machine picked is confirmed first (screens/ServeFrom.tsx), as the window's
+    if (key === 'web.serve') {
+      if (value && value !== page.rows.find((r) => r.key === key)?.value) askServeFrom(value)
+      return
+    }
     const own = registry.settingActions[key]
     if (own) {
       setRefused((r) => ({ ...r, [at(key)]: '' }))

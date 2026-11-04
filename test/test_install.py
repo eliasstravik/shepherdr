@@ -121,7 +121,8 @@ class Install(unittest.TestCase):
         # every relative import the installed service runs resolves inside what was installed (bun can start it)
         share = self.p(".local/share/shepherdr")
         for d, _, files in os.walk(share):
-            if "/web/dist" in d:
+            # the built page, and the helpers' files kept beside it (herdr-artifact's, run by Herdr, never by bun)
+            if "/web/dist" in d or "/mods/" in d:
                 continue
             for f in files:
                 if not f.endswith((".ts", ".js")):
@@ -154,6 +155,33 @@ class Install(unittest.TestCase):
             self.assertFalse(os.path.lexists(os.path.join(root, ".local/bin/herdr-task")))
         finally:
             shutil.rmtree(root, ignore_errors=True)
+
+    def test_web_pack_installs_another_machine(self):
+        """Serve from: what `shepherdr web install-on` sends (pack) installs web-only from itself, the installed folder
+        is a whole source to send on again, and uninstall puts back the helper it replaced."""
+        if not os.path.isfile(os.path.join(ROOT, "web", "dist", "index.html")):
+            self.skipTest("the web app isn't built in this checkout")
+        import io
+        import tarfile
+        from importlib.machinery import SourceFileLoader
+        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        root, src = tempfile.mkdtemp(prefix="shepherdr-there-"), tempfile.mkdtemp(prefix="shepherdr-src-")
+        try:
+            tarfile.open(fileobj=io.BytesIO(sh.pack(ROOT))).extractall(src)
+            os.makedirs(os.path.join(root, ".local/bin"))
+            with open(os.path.join(root, ".local/bin/herdr-task"), "w") as f:
+                f.write("#!/bin/sh\necho the old one\n")
+            run("install", "--web", "--root", root, "--source", src, "--yes", "--force")
+            share = os.path.join(root, ".local/share/shepherdr")
+            for f in ("install.sh", "bin/shepherdr", "templates/worker.md", "web/dist/index.html", "service/serve-from.ts", "core/host.js"):
+                self.assertTrue(os.path.isfile(os.path.join(share, f)), f)
+            names = lambda b: sorted(tarfile.open(fileobj=io.BytesIO(b)).getnames())
+            self.assertEqual(names(sh.pack(share)), names(sh.pack(ROOT)))
+            run("uninstall", "--root", root)
+            self.assertEqual(open(os.path.join(root, ".local/bin/herdr-task")).read(), "#!/bin/sh\necho the old one\n")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+            shutil.rmtree(src, ignore_errors=True)
 
     def test_clash_refuses_then_adopt(self):
         own = self.p(APP, "mods/jump")

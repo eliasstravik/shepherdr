@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { HOME } from "./paths.ts";
 import * as C from "../core/settings.js";
 import * as M from "../core/machines.js";
+import * as HC from "../core/host.js";
 import type { SettingRow, SettingSection } from "../web/shared/types.ts";
 
 const { TASK_ROWS, DEFAULTS, wordFor, valueFor, ROLES: CORE_ROLES, NOTES: CORE_NOTES, ABOUT, BACKUP, BASE, MACHINES, OLD_NAMES, SECTIONS,
@@ -19,6 +20,9 @@ const TEMPLATES = join(HOME, ".config", "herdr-core", "templates");
 const CLI_CHECK = join(HOME, ".herdr", "cli-check.json");
 const HOME_ROUND = join(HOME, ".herdr", "tasks", ".home.json");
 const LOCAL = "local";
+const { SERVE } = HC as any;
+/** Settings › Web's Serve from, as the service tells it (service/main.ts serveNow) */
+export type Serve = { rows: { name: string; here: boolean; state: string; os: string | null; serves: boolean; label: string }[]; host: string | null; reachable: boolean; moving: string | null; error: string | null };
 const title = (id: string) => SECTIONS.find((s: any) => s.id === id).title as string;
 const readJson = (f: string) => { try { return JSON.parse(readFileSync(f, "utf8")) ?? {}; } catch { return {}; } };
 
@@ -116,7 +120,7 @@ export class Settings {
 
   /** Every page at every level: Agents and Tasks (Everywhere and each space), Machines (all and each machine), Web.
    *  web: what the service last said of the web app (web.json: on, link, why, its QR picture's SVG). */
-  sections(web: { on: boolean; link: string | null; why: string | null; qr?: string | null } | string | null, spaces: Scope[] = [], machines: string[] = [], host = LOCAL): SettingSection[] {
+  sections(web: { on: boolean; link: string | null; why: string | null; qr?: string | null; serve?: Serve } | string | null, spaces: Scope[] = [], machines: string[] = [], host = LOCAL): SettingSection[] {
     this.host = host;
     this.scopes = spaces;
     this.machineNames = machines;
@@ -138,8 +142,15 @@ export class Settings {
   private homes: Record<string, any> | null = null;
 
   /** Web, as the window's page: the web app's state, then its link (Copy) and its QR code to open it on a phone. */
-  private web(w: { on: boolean; link: string | null; why: string | null; qr?: string | null }): SettingSection {
+  private web(w: { on: boolean; link: string | null; why: string | null; qr?: string | null; serve?: Serve }): SettingSection {
     const rows: SettingRow[] = [{ label: WEB.title, key: "", value: "", hint: webState(!w.on, true, w), fixed: true }];
+    // Serve from (core/host.js): the machine serving it now, and every connected one to move it to
+    const sv = w.serve;
+    if (w.on && sv?.rows.length) {
+      const now = sv.rows.find((r) => r.serves) ?? sv.rows[0];
+      rows.push({ label: SERVE.title, key: "web.serve", value: now.label, hint: SERVE.about, disabled: !!sv.moving,
+        options: sv.rows.filter((r) => r.serves || r.state === "connected").map((r) => r.label), ...(sv.error ? { warn: SERVE.failed(sv.error) } : {}) });
+    }
     const shown = w.on && w.link && !w.why;
     if (shown) rows.push({ label: WEB.link, key: "web.link", value: "", hint: w.link!, copy: w.link!, fixed: true });
     return { name: title("web"), global: true, rows, ...(shown && w.qr ? { qr: w.qr, qrTitle: WEB.phone } : {}) };
