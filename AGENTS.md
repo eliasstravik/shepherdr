@@ -29,6 +29,22 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
   `--args "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4"`.
 - Claude Code may log an agent's message only as a thinking block: replay a real log through `core/chat-log.js`
   before blaming the reader.
+- A branch's web app with live data, the installed one untouched: `vite preview` of its build behind
+  `tailscale serve --set-path`, proxying `/api` (changeOrigin, origin header) to the serving machine's `/shepherdr`
+  (`shepherdr web status` says which). Put the Mac mini back on the release the same way from
+  `~/.local/share/shepherdr`.
+- A test space's Assistant without the window: `hc run` it with the chat slot labels from the newest
+  `data/backups/*/sidebar.json` (`coordinator.slots`), as `service/actions.ts` does; answer the folder-trust prompt
+  with `hc keys <t> down enter`.
+- Crash recovery for real: a throwaway core, `HC_SESSION=<name> hc ...` with `HC_TERMINAL_SOCKET` and Claude's
+  `CLAUDE_*` env unset (`CLAUDE_CODE_CHILD_SESSION` turns off transcripts).
+
+## Other machines
+
+- `herdr-task --on <machine>` copies its bundle there, and a hub (the Mac mini) copies it on: running a branch's
+  herdr-task against other machines spreads that branch fleet-wide until the next update. Prefer local tests.
+- herdr-task's scheduler re-execs itself within 15 s when its code changes. Its live code is either the zipapp
+  `mods/tasks/bin/herdr-task` or the `herdr_task/` folder beside it (`zipfile.is_zipfile` says which).
 
 ## Add-ons
 
