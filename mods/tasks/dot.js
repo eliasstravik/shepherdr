@@ -53,11 +53,5 @@ export function ownProgress(addresses) {
   return null;
 }
 
-// Minutes left show only once they're a real estimate, never a first guess (DECISIONS.md): the
-// agent says it's at least ESTIMATE_PCT done, or, giving no %, it's on its second report or later
-// (progress.n, counted by herdr-task status). Herdr never shows more than the agent said.
-export const ESTIMATE_PCT = 15;
-export function estimated(p, done = p?.done) {
-  if (typeof p?.left !== "number") return false;
-  return typeof done === "number" ? done >= ESTIMATE_PCT : (p.n ?? 1) >= 2;
-}
+// Minutes left show only once they're a real estimate (core/tasks.js, shared with the web app).
+export { ESTIMATE_PCT, estimated } from "./core/tasks.js";

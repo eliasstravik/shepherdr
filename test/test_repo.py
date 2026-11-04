@@ -95,7 +95,7 @@ class Repo(unittest.TestCase):
         if not os.path.isdir(J("core")):
             return
         for f in os.listdir(J("core")):
-            if f.endswith(".js"):
+            if f.endswith(".js") and not f.endswith(".test.js"):
                 src = open(J("core", f), encoding="utf-8").read()
                 for spec in re.findall(r'''from\s+["']([^"']+)["']''', src):
                     self.assertTrue(spec.startswith("./"), f"core/{f} imports {spec}")
