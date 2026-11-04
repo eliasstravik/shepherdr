@@ -1,5 +1,24 @@
 # Changelog
 
+## 3.1.3
+
+Autopilot everywhere, settings per space, and agents that survive a crash.
+
+- Settings per space: each Settings page has a level switch at the top (Everywhere or a space), in the window and on
+  the web. A space's own value overrides Everywhere's, shown as "Set for this space" or "Inherited from Everywhere"
+  with a reset; Autopilot's schedule, events and heartbeat can differ per space. docs/settings.md lists which
+  settings are per space.
+- Autopilot works in every space on every machine: another machine's space is woken by that machine's own
+  scheduler (never twice, on while this one sleeps), and the window and web show and flip its switch. The default
+  heartbeat is a real one that works in any project instead of a form of blanks.
+- The scheduler's round waits for the tick instead of skipping it, so wakes are closed and the Assistant's header
+  no longer sticks on "Waking".
+- After a crash, power loss or reboot, every space's Assistant and every working task's agent come back as
+  themselves, resuming their exact session with its history.
+- Web: on a phone the chat's rows over the box sit evenly with Stop on its edge, and no key hints show on touch. A
+  task's Ready news line loses its Accept once the task moves on. The sidebar's foot is a gear and Settings.
+- `shepherdr update` records the new version in one run.
+
 ## 3.1.2
 
 Fixes and small wishes on top of 3.1.1, mostly the web app.
