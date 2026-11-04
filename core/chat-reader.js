@@ -22,6 +22,7 @@ export class ChatReader {
   }
 
   reset() {
+    this.pinned = false;
     this.path = null;
     this.kind = null;
     this.pid = null;
@@ -34,8 +35,19 @@ export class ChatReader {
 
   log(args) { return this.io.sh(LOG, ["log", ...args], this.machine); }
 
+  // An ended agent's own log (a finished task's last agent, as the Tasks panel opens it): read as it is, never
+  // looked for again. -> this reader.
+  fixed(path, kind) {
+    this.reset();
+    this.path = path;
+    this.kind = kind;
+    this.pinned = true;
+    return this;
+  }
+
   // Finds the log of the agent this terminal runs now (t: its herdr-core record). -> true when it changed.
   async locate(t) {
+    if (this.pinned) return false;
     const kind = kindOf(t);
     const pid = t?.foreground?.pid;
     if (!kind || !pid) { const was = this.state; if (was !== "none") { this.reset(); this.state = "none"; } return was !== "none"; }

@@ -379,7 +379,7 @@ function TriggerValue({ row, phone, onPick }: { row: SettingRow & { trigger: Non
         {t.next.length ? <Small className="tabular-nums">Next: {t.next.join(' · ')}</Small> : null}
       </div>
       <Segments label={row.label} value={picked} options={t.presets.map((p) => p.label)} fill={phone} onPick={(l) => onPick(t.presets.find((p) => p.label === l)!.value)} />
-      <Small className="text-pretty">{row.key === 'heartbeat.on' ? 'Other news waits for the next heartbeat. ' : ''}Ask the coordinator for anything else.</Small>
+      <Small className="text-pretty">{row.key === 'heartbeat.on' ? 'Other news waits for the next heartbeat. ' : ''}Ask the Assistant for anything else.</Small>
     </div>
   )
 }
@@ -513,7 +513,7 @@ function groupsOf(sections: SettingSection[], ui: UI): { name: string; pages: Pa
   const scoped = sections.filter((x) => x.level === level && !x.global).map((x): Page => x.name === 'Notify' ? {
     ...x, name: 'Notifications',
     targets: Object.fromEntries((delivery?.rows.filter((r) => !r.key.startsWith('voice.')) ?? []).map((r) => [r.key, delivery!.level ?? 'all'])),
-    about: 'All: every new coordinator message, question and alert. Needs me: questions and alerts. Off: none, and the space stays quiet. Task alerts reach you either way. Spaces can override the delivery rule here or from their sidebar menu. Device delivery below applies Everywhere.',
+    about: 'All: every new message, question and alert from its Assistant. Needs me: questions and alerts. Off: none, and the space stays quiet. Task alerts reach you either way. Spaces can override the delivery rule here or from their sidebar menu. Device delivery below applies Everywhere.',
     rows: [...x.rows.map((r) => ({ ...r, group: 'Delivery rules' })), ...(delivery?.rows.filter((r) => !r.key.startsWith('voice.')).map((r) => ({ ...r, group: 'Devices · Everywhere' })) ?? [])],
   } : x)
   const globals = sections.filter((x) => x.global).map((x): Page => x === delivery ? {

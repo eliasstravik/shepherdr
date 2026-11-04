@@ -10,6 +10,13 @@ export type Watcher = (reader: ChatReader, terminal: any) => void;
 
 type Followed = { reader: ChatReader; pages: Set<Watcher>; busy: boolean; idleSince: number | null; ready: boolean };
 
+/** "log:<machine>|<kind>|<path>": an ended agent's own log (compat.ts names a finished task's chat so). */
+function readerFor(io: any, addr: string) {
+  if (!addr.startsWith("log:")) return new ChatReader(io, addr);
+  const [m, kind, ...path] = addr.slice(4).split("|");
+  return new ChatReader(io, m ? `${m}/log` : "log").fixed(path.join("|"), kind || "claude");
+}
+
 export class Chats {
   private followed = new Map<string, Followed>();
 
@@ -23,7 +30,7 @@ export class Chats {
 
   watch(addr: string, page: Watcher) {
     let f = this.followed.get(addr);
-    if (!f) this.followed.set(addr, (f = { reader: new ChatReader(this.io, addr), pages: new Set(), busy: false, idleSince: null, ready: false }));
+    if (!f) this.followed.set(addr, (f = { reader: readerFor(this.io, addr), pages: new Set(), busy: false, idleSince: null, ready: false }));
     f.pages.add(page);
     f.idleSince = null;
     if (f.ready) page(f.reader, this.hub.terminals.get(addr));

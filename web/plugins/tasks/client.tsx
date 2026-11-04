@@ -354,7 +354,7 @@ function whereOf(snap: Snapshot, t: Task, names: TaskGroup['names']) {
 /** what to ask for a task where none is: the one space's coordinator, else any */
 function noTasks(snap: Snapshot, list: ListView) {
   const one = list.level === 2 ? snap.places.find((p) => p.id === list.chips[0]) : undefined
-  return one ? `No tasks yet. Ask ${one.name} to add one.` : 'No tasks yet. Ask a coordinator to add one.'
+  return one ? `No tasks yet. Ask ${one.name} to add one.` : 'No tasks yet. Ask an Assistant to add one.'
 }
 
 /** The lists' tasks: what their chips hold (placeId, the place picked, is for plugins of old) */
@@ -445,7 +445,7 @@ function TaskList(_: { placeId: string }) {
               ) : (
                 // only To do shows empty; with no tasks at all it says how one comes
                 <div data-flip={`empty:${g.key}`}>
-                  <Empty className="pt-0.5 text-fg3">{order.length ? 'No tasks to do yet. Ask a coordinator to add one.' : noTasks(snap, view)}</Empty>
+                  <Empty className="pt-0.5 text-fg3">{order.length ? 'No tasks to do yet. Ask an Assistant to add one.' : noTasks(snap, view)}</Empty>
                 </div>
               )}
               {g.more || g.less ? (

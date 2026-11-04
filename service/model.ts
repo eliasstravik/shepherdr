@@ -115,7 +115,8 @@ export class Model {
       const own = live.map((a) => (this.hub.terminals.get(a.address) as any)?.report).find((r) => typeof r?.progress === "number" && r.progress >= 0);
       const w = reportOf(task, p.section, own ? { pct: own.progress, msg: own.msg || null } : null);
       const running = p.section === "queued" ? list.tasks.filter((x: any) => x.state === "running" && this.agentsOf(list, x).length).length : 0;
-      const worker = live.find((a) => a.role !== "reviewer")?.address ?? null;
+      const worker = live.find((a) => a.role !== "reviewer" && a.status === "blocked")?.address ?? live.find((a) => a.role !== "reviewer")?.address ?? live[0]?.address ?? null;
+      const last = task.agents?.[task.agents.length - 1];
       return {
         key: taskKey(list, task), ref: refOf(list, task), title: task.title, section: p.section, needs: p.needs,
         sub: secondLine(p, w, p.section === "queued" ? queueReason(list, task, running) : null), left: leftOf(p, w), pct: w?.done ?? null,
@@ -123,6 +124,7 @@ export class Model {
         worker, archived: !!task.archived, pinned: pins.has(taskKey(list, task)),
         started: task.started ?? null, ready_at: task.ready_at ?? null, done_at: task.done_at ?? null,
         summary: task.summary ?? null, pr: task.pr ?? null,
+        lastLog: !worker && last?.log ? { path: last.log, kind: last.agent ?? "claude" } : null,
       };
     }));
     this.live.put("tasks", rows);

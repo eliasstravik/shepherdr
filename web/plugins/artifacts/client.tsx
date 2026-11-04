@@ -718,7 +718,7 @@ function ArtifactList(_: { placeId: string }) {
     return (
       <>
         <ListChips alone />
-        <Empty className="pt-3">No artifacts yet. Ask {one ? one.name : 'a coordinator'} for one: a report, a dashboard, a draft screen. Every agent can make them.</Empty>
+        <Empty className="pt-3">No artifacts yet. Ask {one ? one.name : 'an Assistant'} for one: a report, a dashboard, a draft screen. Every agent can make them.</Empty>
       </>
     )
   return (

@@ -43,6 +43,7 @@ export class Compat {
     const tasks: Task[] = rows.filter((r) => r.section !== "done" || (r.done_at && Date.now() - r.done_at < 7 * 86400000)).map((r) => {
       const id = taskId(r);
       if (r.worker) chats.set(`${id}/worker`, r.worker);
+      else if (r.lastLog) chats.set(`${id}/worker`, `log:${r.machine ?? ""}|${r.lastLog.kind}|${r.lastLog.path}`);
       const t: Task = {
         id, name: r.title, status: SECTION[r.section] ?? "todo", place: placeOf(r), age: r.started ? ago(r.started, false) : "",
         state: r.section, on: r.machine ?? host, created: "",
@@ -53,6 +54,7 @@ export class Compat {
         ...(r.archived ? { archived: r.done_at ?? 1 } : {}),
         ...(r.section === "working" && r.pct != null ? { report: { msg: r.sub ?? "", progress: r.pct, ...(r.left ? { eta: parseInt(r.left) || 0 } : {}) } } : {}),
         ...(r.worker ? { agent: { chat: `${id}/worker`, role: "worker", cli: "claude", status: r.section === "needs" ? "need" : "work", running: true, age: "", note: "" } } : {}),
+        ...(!r.worker && r.lastLog ? { agent: { chat: `${id}/worker`, role: "worker", cli: r.lastLog.kind, status: "idle", running: false, age: "", note: "" } } : {}),
       };
       return t;
     });
@@ -89,6 +91,6 @@ export class Compat {
       else if (x.kind === "error" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at });
     }
     const st = t?.status?.state ?? null;
-    return { key, messages, working: st === "working", cli: reader.kind === "codex" ? "codex" : "claude", ...(t && t.state !== "live" ? { finished: true } : {}) };
+    return { key, messages, working: st === "working", cli: reader.kind === "codex" ? "codex" : "claude", ...(reader.pinned || (t && t.state !== "live") ? { finished: true } : {}) };
   }
 }

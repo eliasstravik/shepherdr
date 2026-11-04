@@ -71,9 +71,9 @@ function AutopilotConfirm() {
     }
   }
   return (
-    <Dialog safe title={`Turn on Autopilot for ${place.name}?`} onCancel={close} buttons={<Primary disabled={busy} onClick={go}>{busy ? 'Changing coordinator…' : 'Turn on'}</Primary>}>
+    <Dialog safe title={`Turn on Autopilot for ${place.name}?`} onCancel={close} buttons={<Primary disabled={busy} onClick={go}>{busy ? 'Changing Assistant…' : 'Turn on'}</Primary>}>
       <div data-autopilot-confirm className="flex flex-col gap-2.5 text-pretty">
-        <p>A new coordinator replaces this one, in this chat. It wakes on a schedule and starts tasks by itself, even while you're away.</p>
+        <p>A new Assistant replaces this one, in this chat. It wakes on a schedule and starts tasks by itself, even while you're away.</p>
         <p className="text-fg2">It spends your Claude Code or Codex allowance as it goes: {limitWords(rows)}. Settings → Autopilot sets the limits.</p>
         {error ? <p role="alert" className="text-need-fg">{error}</p> : null}
       </div>
@@ -108,7 +108,7 @@ function AutopilotSwitch({ place }: { place: Place }) {
       icon={<ModeIcon className={ic} />}
       on={on}
       disabled={!!blocked}
-      note={blocked ?? (busy ? 'Changing coordinator…' : state && state !== 'On' && state !== 'Off' ? state : on ? 'Works on its own' : 'Off: does what you ask')}
+      note={blocked ?? (busy ? 'Changing Assistant…' : state && state !== 'On' && state !== 'Off' ? state : on ? 'Works on its own' : 'Off: does what you ask')}
       onClick={() => void change()}
     />
     {on ? <MenuItem onClick={() => void change(true)}>Turn off; let workers finish</MenuItem> : null}

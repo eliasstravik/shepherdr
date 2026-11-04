@@ -116,7 +116,7 @@ function Sheet({ chat, name, current, typed }: Opening) {
   const label = (id: string) => (id ? (modelsOf(cli).find((m) => m.id === id)?.label ?? id) : DEFAULT)
   return (
     <Dialog
-      title={task ? `Restart ${name} agent?` : 'Restart coordinator?'}
+      title={task ? `Restart ${name} agent?` : 'Restart Assistant?'}
       onCancel={close}
       buttons={
         <Primary autoFocus disabled={!info || busy || unavailable} onClick={go}>
@@ -170,7 +170,7 @@ function Sheet({ chat, name, current, typed }: Opening) {
 }
 
 /** "Save as nas's setting", for its role's agents there from now on */
-const saveWords = (i: RestartInfo) => `Use for future ${i.role === 'task' ? 'task agents' : 'coordinators'} ${i.space ? `in ${i.space === '~' ? 'the home space' : i.space}` : 'on this machine'}`
+const saveWords = (i: RestartInfo) => `Use for future ${i.role === 'task' ? 'task agents' : 'Assistants'} ${i.space ? `in ${i.space === '~' ? 'the home space' : i.space}` : 'on this machine'}`
 
 function Line({ label, children }: { label: string; children: ReactNode }) {
   return (

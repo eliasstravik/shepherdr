@@ -33,7 +33,7 @@ export const KEYS: [string[], string][] = [
   [[MOD, 'K'], 'Search and jump'],
   [[MOD, 'B'], 'Show or hide Spaces'],
   [[MOD, 'Click'], 'Open a space, task or artifact in split view'],
-  [['F'], "Focus on a task: hide its coordinator's chat, or show it again"],
+  [['F'], "Focus on a task: hide its Assistant's chat, or show it again"],
   [[SHIFT, 'F'], 'Widen the Task panel, or narrow it again'],
   [['/'], 'Write a message'],
   [['F'], 'Filter the tasks or artifacts (Esc clears it)'],

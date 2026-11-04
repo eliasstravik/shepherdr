@@ -319,7 +319,7 @@ function Heading({ id, label, folds, icon: mark, shut, held, className, children
 }
 
 const NOTIFY_HINT: Record<(typeof NOTIFY)[number], string> = {
-  All: "every new message from its coordinator",
+  All: "every new message from its Assistant",
   'Needs me': "its coordinator's questions and alerts",
   Off: 'nothing from its coordinator, and its row stays quiet',
 }
