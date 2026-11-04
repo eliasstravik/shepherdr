@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.1.1
+
+Fixes and small wishes on top of 3.1.0.
+
+- Web: your messages to an agent on another machine arrive as yours, not as another agent's, and settle in order in
+  the chat (sent files too). Another machine's question cards show on the web and are answered there.
+- Workers always say about how long is left, from their first status on (worker.md); the Tasks panel shows it at
+  once. `herdr-task ready` and Accept adopt a pull request the agent already opened for its branch.
+- `./install.sh` from a fresh clone builds the web app first (Bun from bun.sh when it's missing; `--no-build` skips
+  it). `shepherdr update` on a web-only install updates the web app alone, from where it came; doctor says how.
+- The chat shows the shells and watchers an agent left running in the background, over the box, with their output
+  and Stop, in the window and on the web. The status bar renders again: every view reads Herdr's live lists once.
+
 ## 3.1.0
 
 Shepherdr is also a web app again: phone first, tablet and desktop too, on the same data as the window.
