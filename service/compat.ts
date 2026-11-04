@@ -36,8 +36,8 @@ export class Compat {
     const places: Place[] = spaces.map((s) => {
       const key = placeKey(s.id);
       if (s.assistant) chats.set(key, s.assistant);
-      const name = s.name && s.name !== "~" ? s.name : (s.folder.split("/").filter(Boolean).pop() ?? s.name) || "home";
-      return { id: s.id, name, machine: s.machine ?? host, level: 2, status: AGENT[s.assistantStatus] ?? "idle", mode: "regular", chat: key };
+      const name = s.name || (s.folder.split("/").filter(Boolean).pop() ?? "home");
+      return { id: s.id, name, machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", mode: "regular", chat: key };
     });
 
     const tasks: Task[] = rows.filter((r) => r.section !== "done" || (r.done_at && Date.now() - r.done_at < 7 * 86400000)).map((r) => {

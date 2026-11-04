@@ -1210,8 +1210,8 @@ export function listChips(ui: UI, snap: Snapshot): string[] {
     const chips = l.chips.filter((c) => known(snap, c))
     if (chips.length || !l.chips.length) return chips
   }
-  const p = placeOf(snap, ui.place)
-  return p.home && p.machine === snap.host ? [] : p.home ? [`m:${p.machine}`] : [p.id]
+  // As Shepherdr 3's Tasks panel: every task of every space and machine until a filter narrows it
+  return []
 }
 
 export function listOf(snap: Snapshot, chips: string[]): Omit<ListView, 'search'> {
