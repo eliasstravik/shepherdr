@@ -50,6 +50,16 @@ export function spacesFromDoc(doc, machine = null) {
   }));
 }
 
+// What a space is called, the same in the window's sidebar and on the web: the name the person gave it, else after
+// where it is (`at`): a home folder reads "Home", a repo its name, any other folder its own. Never "~" (as New space
+// and the tab bar once named home ones: that counts as unnamed). named: false when Herdr named it itself.
+const HOME_AT = /^\/(home\/[^/]+|Users\/[^/]+|root)(?=\/|$)/;
+export const isHomeFolder = (path, home = null) => { const p = String(path ?? "").replace(/\/+$/, ""); return (!!home && p === home) || (HOME_AT.test(p) && !p.replace(HOME_AT, "")); };
+export function spaceName(s, { at = s?.folder, repo = null, home = null, named = true } = {}) {
+  if ((named && s?.name && s.name !== "~") || !at) return s?.name && s.name !== "~" ? s.name : "Home";
+  return isHomeFolder(at, home) ? "Home" : repo ?? String(at).replace(/\/+$/, "").split("/").pop();
+}
+
 // The sidebar's own data (mods/spaces-chat: sections, icons, Pinned): { sections, icons, pinned }.
 export function sidebarOf(s) {
   return {

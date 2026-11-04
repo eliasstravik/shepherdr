@@ -5,6 +5,9 @@
 // A task id is its ref ("SHEP-7"), "<machine>:<ref>" on another machine, as 2.1 wrote them.
 import type { Snapshot, Place, Task, Need, Section, Machine, Chat, Message, Status, TaskStatus, StepKind, ActivityAnswer, Question, Artifact, SettingSection } from "../web/shared/types.ts";
 import * as T from "../core/tasks.js";
+import * as SPc from "../core/spaces.js";
+import { HOME } from "./paths.ts";
+const { spaceName } = SPc as any;
 import type { Where } from "./worktree.ts";
 import * as AGc from "../core/agents.js";
 const { current, rowFor, menuFor, modelName } = AGc as any;
@@ -178,7 +181,7 @@ export class Compat {
       // its other tabs: each tab's first terminal, opened by the key t:<address> (the Assistant's tab is its chat)
       const tabs = (s.tabs ?? []).map((t: any) => ({ name: t.name || "Tab", addr: (t.terminals ?? [])[0] })).filter((t: any) => t.addr && t.addr !== s.assistant)
         .map((t: any) => { chats.set(`t:${t.addr}`, t.addr); return { name: t.name, term: `t:${t.addr}` }; });
-      const name = s.name || (s.folder.split("/").filter(Boolean).pop() ?? "home");
+      const name = spaceName(s, { home: s.machine ? null : HOME });
       return { id: s.id, name, ...(s.icon ? { emoji: s.icon } : {}), ...(/\/\.herdr\/worktrees\//.test(s.folder) ? { worktree: true } : {}), machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", mode: s.autopilot ? "autopilot" : "regular", chat: key, ...(tabs.length ? { tabs } : {}) };
     });
 

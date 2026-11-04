@@ -25,6 +25,7 @@ import { muted } from "./notify.js";
 import { MachinePopup, openMachine, openMachineSettings } from "./machine-popup.js";
 import { startPolling, allStats, healthMeters, healthWords, planRows, bars, colorOf } from "./machines.js";
 import { countBadge, red, H, TEXT, RADIUS } from "./ui.js";
+import { spaceName } from "./core/spaces.js";
 
 const POPUPS = { add: Menu, space: Menu, section: Menu, icon: IconPicker, rename: Rename, machine: MachinePopup };
 
@@ -64,7 +65,6 @@ const where = (s, ps) => JSON.stringify([s.machine ?? null, place(s, ps)]);
 const base = (path) => path.replace(/\/+$/, "").split("/").pop();
 // A home folder, here or on another machine (whose home() isn't known here), and a path from it.
 const HOME_AT = /^\/(home\/[^/]+|Users\/[^/]+|root)(?=\/|$)/;
-const isHome = (path) => path.replace(/\/+$/, "") === home() || HOME_AT.test(path) && !path.replace(HOME_AT, "").replace(/\/+$/, "");
 const tilde = (path) => path.replace(HOME_AT, "~");
 // Two spaces with one name on one machine: each shows its folder.
 const nameKey = (r) => `${r.w.machine ?? ""}\u0000${r.name.toLowerCase()}`;
@@ -288,8 +288,8 @@ export default class Spaces extends View {
   // own (a space in /tmp/488b3d00 is "488b3d00", not its Assistant's "~"). A space named "~" (as
   // our New space and the tab bar once named home ones) counts as unnamed.
   nameOf(w, g, at) {
-    if ((w.named && w.name !== "~") || !at) return w.name;
-    return isHome(at) ? "Home" : g?.name ?? base(at);
+    if (!at) return w.name;
+    return spaceName(w, { at, repo: g?.name ?? null, home: home(), named: Boolean(w.named) });
   }
 
   // The spaces shown, in Herdr's order, each with its git, where it is and its name: { w, i, g, at, name }.
