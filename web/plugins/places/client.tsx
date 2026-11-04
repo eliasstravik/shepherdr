@@ -265,7 +265,8 @@ function usePlaceRow({ p, snap, where }: { p: Place; snap: Snapshot; where?: str
     mark: (
       <>
         <span aria-hidden data-autopilot={pilot || undefined} className={clsx('mode-pill mark', !pilot && 'invisible')} />
-        <HashIcon className={clsx(icon, off || quiet ? 'text-fg3' : sel || n || fresh ? 'text-fg' : 'text-fg2')} />
+        {/* Shepherdr 3: a space's own icon (an emoji) where it has one */}
+        {p.emoji ? <span aria-hidden className={clsx(icon, 'grid place-items-center text-[0.9375rem] leading-none')}>{p.emoji}</span> : <HashIcon className={clsx(icon, off || quiet ? 'text-fg3' : sel || n || fresh ? 'text-fg' : 'text-fg2')} />}
       </>
     ),
     name: (

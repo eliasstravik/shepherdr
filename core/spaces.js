@@ -58,3 +58,44 @@ export function sidebarOf(s) {
     pinned: Array.isArray(s?.pinned) ? s.pinned : [],
   };
 }
+
+// ---- the sidebar's own data, changed (shared "spaces-chat", mods/spaces-chat/sections.js's format) ----
+const tidyBar = (d) => ({ ...(d ?? {}), sections: (d?.sections ?? []).map((s) => ({ ...s, spaces: [...(s.spaces ?? [])] })), icons: { ...(d?.icons ?? {}) },
+  pinned: [...(d?.pinned ?? [])], machines: { ...(d?.machines ?? {}) } });
+
+// A space moved: into Pinned, a section (its id), or back to its machine's top (null); before: the space it goes in
+// front of. A pinned space keeps its section (Unpin puts it back), as in the window.
+export function withMove(d, space, to, before = null) {
+  const x = tidyBar(d);
+  const put = (list) => { const i = before ? list.indexOf(before) : -1; list.splice(i < 0 ? list.length : i, 0, space); };
+  if (to === "pinned") { x.pinned = x.pinned.filter((s) => s !== space); put(x.pinned); return x; }
+  x.pinned = x.pinned.filter((s) => s !== space);
+  for (const s of x.sections) s.spaces = s.spaces.filter((id) => id !== space);
+  const sec = to ? x.sections.find((s) => s.id === to) : null;
+  if (sec) put(sec.spaces);
+  return x;
+}
+
+export function withSection(d, { id, name, machine = null, icon = null }) {
+  const x = tidyBar(d);
+  x.sections.push({ id, machine, name, folded: false, spaces: [], ...(icon ? { icon } : {}) });
+  return x;
+}
+
+export function withoutSection(d, id) {
+  const x = tidyBar(d);
+  x.sections = x.sections.filter((s) => s.id !== id);
+  return x;
+}
+
+export function withSectionName(d, id, name, icon) {
+  const x = tidyBar(d);
+  for (const s of x.sections) if (s.id === id) { s.name = name; if (icon !== undefined) { if (icon) s.icon = icon; else delete s.icon; } }
+  return x;
+}
+
+export function withIcon(d, space, icon) {
+  const x = tidyBar(d);
+  if (icon) x.icons[space] = icon; else delete x.icons[space];
+  return x;
+}

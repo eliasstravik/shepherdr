@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { sendBody, messageBody, refusal, reactionLine } from "../core/send.js";
 import { kindOf } from "../core/chat-reader.js";
-import { READ } from "../core/spaces.js";
+import * as SP from "../core/spaces.js";
+const { READ, withMove, withSection, withoutSection, withSectionName, withIcon } = SP as any;
 import type { Compat } from "./compat.ts";
 
 const ATTACH = join(process.env.HERDR_APP_HOME || join(homedir(), ".config", "herdr-app"), "data", "chat-attach");
@@ -63,6 +64,43 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if ((hub.terminals.get(a) as any)?.status?.state === "blocked") throw new Error("It's asking you something: answer that first.");
     const res = await hc(["send", a, reactionLine(b.emoji, item.text, !mine)]);
     if (res.code !== 0) throw new Error(refusal(res).message);
+    return { ok: true };
+  }
+  // the person's shared choices (pins, the sidebar, icons): in the service's document, in the window's own format
+  const sh = compat.shared;
+  if (b?.type === "pin" && typeof b.chat === "string" && b.chat.endsWith("/worker") && sh) {
+    const t = compat.taskOf(b.chat.slice(0, -7));
+    if (!t) throw new Error("That task isn't here any more.");
+    const now = new Set<string>(Array.isArray(sh.value("tasks.pinned")) ? sh.value("tasks.pinned") : []);
+    if (b.on) now.add(t.pin); else now.delete(t.pin);
+    await sh.set("tasks.pinned", [...now]);
+    return { ok: true };
+  }
+  const bar = () => sh!.value("spaces-chat") ?? {};
+  const sec = (id: unknown) => (typeof id === "string" && id.startsWith("s:") ? id.slice(2) : null);
+  if (b?.type === "move" && typeof b.id === "string" && typeof b.to === "string" && sh) {
+    const to = b.to === "pinned" ? "pinned" : sec(b.to);
+    await sh.set("spaces-chat", withMove(bar(), b.id, to, typeof b.before === "string" ? b.before : null));
+    return { ok: true };
+  }
+  if (b?.type === "section" && sh) {
+    if (b.op === "new" && typeof b.name === "string" && b.name.trim()) {
+      const machine = typeof b.machine === "string" && b.machine !== compat.host ? b.machine : null;
+      await sh.set("spaces-chat", withSection(bar(), { id: `sec-${Date.now().toString(36)}`, name: b.name.trim().slice(0, 60), machine, icon: typeof b.emoji === "string" ? b.emoji.slice(0, 16) : null }));
+      return { ok: true };
+    }
+    if (b.op === "delete" && sec(b.id)) { await sh.set("spaces-chat", withoutSection(bar(), sec(b.id))); return { ok: true }; }
+  }
+  if (b?.type === "rename" && typeof b.id === "string" && typeof b.name === "string" && sh) {
+    const name = b.name.trim().slice(0, 80);
+    const icon = typeof b.emoji === "string" ? b.emoji.slice(0, 16) || null : undefined;
+    if (sec(b.id)) { await sh.set("spaces-chat", withSectionName(bar(), sec(b.id), name, icon)); return { ok: true }; }
+    // a space: its icon is ours; its name is Herdr's (the window renames it, when it runs)
+    if (icon !== undefined) await sh.set("spaces-chat", withIcon(bar(), b.id, icon));
+    if (name) {
+      const r = await run(["herdr-app", "do", "space.rename", "--id", b.id, "--name", name]);
+      if (r.code !== 0) throw new Error("Renaming a space needs the Herdr window open.");
+    }
     return { ok: true };
   }
   if (b?.type === "keys" && typeof b.chat === "string" && Array.isArray(b.keys) && b.keys.length <= 32 && b.keys.every((k: unknown) => typeof k === "string" && k.length <= 40)) {

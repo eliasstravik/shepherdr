@@ -13,6 +13,8 @@ import * as T from "../core/tasks.js";
 const { place, refOf, taskKey, autoPrefix, reportOf, secondLine, leftOf, queueReason, machineOf } = T as any;
 import * as S from "../core/spaces.js";
 const { spacesFromDoc, sidebarOf, assistantOf, isUnread } = S as any;
+import * as N from "../core/notify.js";
+const { spaceLevel } = N as any;
 
 const SHARED = join(HOME, ".config", "herdr-app", "shared.json");
 const SHELL = /^(ba|z|fi|da|k|tc|c)?sh$|^nu$|^pwsh$/;
@@ -38,7 +40,13 @@ export class Model {
   /** Told each build: what the screen's snapshot is made from (compat.ts). */
   onBuild: ((b: { spaces: any[]; sections: any[]; rows: any[]; machines: string[] }) => void) | null = null;
 
+  /** The service's shared document (the person's pins, sidebar and Notify, in step with the window: lib/bridge.js). */
+  doc: () => Record<string, any> = () => ({});
+
   constructor(private hub: Hub, private live: Live) {}
+
+  /** A shared value: the document's, else the window's own (a window not on 3.1 yet). */
+  value(key: string) { const d = this.doc(); return key in d ? d[key] : this.shared[key]; }
 
   start() {
     this.hub.on((e) => {
@@ -109,7 +117,8 @@ export class Model {
 
   private build() {
     const terminals = [...this.hub.terminals.values()];
-    const pins = new Set<string>(Array.isArray(this.shared["tasks.pinned"]) ? this.shared["tasks.pinned"] : []);
+    const pinList = this.value("tasks.pinned");
+    const pins = new Set<string>(Array.isArray(pinList) ? pinList : []);
     const lists = [null, ...this.machines].flatMap((m) => this.lists.get(m) ?? []);
 
     const rows = lists.flatMap((list) => list.tasks.map((task: any) => {
@@ -133,7 +142,7 @@ export class Model {
     }));
     this.live.put("tasks", rows);
 
-    const bar = sidebarOf(this.shared["spaces-chat"]);
+    const bar = sidebarOf(this.value("spaces-chat"));
     const seen = this.shared["chat.seen"] ?? {};
     const spaces = [null, ...this.machines].flatMap((m) => spacesFromDoc(this.docs.get(m), m)).map((s, at) => {
       const k = assistantOf(s, terminals as any[]);
@@ -142,7 +151,7 @@ export class Model {
         ...s, at, icon: bar.icons[s.id] ?? null, pinned: bar.pinned.includes(s.id),
         section: bar.sections.find((x: any) => (x.spaces ?? []).includes(s.id))?.id ?? null,
         assistant: k?.address ?? null, assistantStatus: (k as any)?.status?.state ?? null,
-        unread: isUnread(k, seen),
+        unread: isUnread(k, seen) && spaceLevel(this.value("notify") ?? {}, s.id) !== "Off",
         red: here.filter((r) => r.section === "needs").length + ((k as any)?.status?.state === "blocked" ? 1 : 0),
         green: here.filter((r) => r.section === "ready").length,
       };

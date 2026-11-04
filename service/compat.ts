@@ -53,9 +53,13 @@ export class Compat {
   /** chat key -> terminal address, from the last build */
   private chats = new Map<string, string>();
   /** task id -> where herdr-task finds it */
-  private tasks = new Map<string, { ref: string; folder: string; machine: string | null; key: string; where: Where }>();
+  private tasks = new Map<string, { ref: string; folder: string; machine: string | null; key: string; pin: string; where: Where }>();
 
   taskOf(id: string) { return this.tasks.get(id) ?? null; }
+
+  /** The person's shared choices (service/store.ts, its document) and their values now, set by main. */
+  shared: { value(key: string): any; set(key: string, value: unknown): Promise<unknown> } | null = null;
+  host = "";
 
   /** The reader of a chat someone follows now (service/chats.ts), set by main. */
   reader: ((addr: string) => any) | null = null;
@@ -89,6 +93,7 @@ export class Compat {
 
   snapshot(input: { host: string; user: string; machines: { name: string; here: boolean; state: string }[]; spaces: Space[]; sections: any[]; rows: Row[]; artifacts?: any[]; settings?: SettingSection[] }): Snapshot {
     const { host, spaces, rows } = input;
+    this.host = host;
     const chats = new Map<string, string>();
     const machines: Machine[] = input.machines.map((m) => {
       const key = m.here ? host : m.name;
@@ -100,10 +105,10 @@ export class Compat {
       const key = placeKey(s.id);
       if (s.assistant) chats.set(key, s.assistant);
       const name = s.name || (s.folder.split("/").filter(Boolean).pop() ?? "home");
-      return { id: s.id, name, machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", mode: "regular", chat: key };
+      return { id: s.id, name, ...(s.icon ? { emoji: s.icon } : {}), machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", mode: "regular", chat: key };
     });
 
-    this.tasks = new Map(rows.map((r) => [taskId(r), { ref: r.ref, folder: r.folder, machine: r.machine ?? null, key: `${r.slug}#${r.id}`,
+    this.tasks = new Map(rows.map((r) => [taskId(r), { ref: r.ref, folder: r.folder, machine: r.machine ?? null, key: `${r.slug}#${r.id}`, pin: r.key,
       where: { folder: r.worktree, machine: r.machine ?? null, base: r.base, start: r.start, branch: r.branch, pr: r.pr } }]));
     const tasks: Task[] = rows.filter((r) => r.section !== "done" || (r.done_at && Date.now() - r.done_at < 7 * 86400000)).map((r) => {
       const id = taskId(r);
@@ -145,7 +150,7 @@ export class Compat {
     const pinned = spaces.filter((s) => s.pinned).map((s) => s.id);
     const sections: Section[] = [
       ...(pinned.length ? [{ id: "pinned", name: "Pinned", spaces: pinned }] : []),
-      ...input.sections.map((x: any) => ({ id: `s:${x.id}`, name: x.name, ...(x.emoji ? { emoji: x.emoji } : {}), ...(x.machine ? { machine: x.machine } : {}), spaces: x.spaces ?? [] })),
+      ...input.sections.map((x: any) => ({ id: `s:${x.id}`, name: x.name, ...(x.icon ? { emoji: x.icon } : {}), machine: x.machine ?? host, spaces: x.spaces ?? [] })),
     ];
 
     // unread: a space's chat counts as new until its Assistant's turn is read (core label herdr.chat.read)

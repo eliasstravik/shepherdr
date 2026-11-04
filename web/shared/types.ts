@@ -59,6 +59,8 @@ export function nameProblem(name: string, taken: string[] = []): string | undefi
  *  machine, and the main machine's on every machine. Spaces are the only places with a chat. */
 export interface Place {
   id: string
+  /** Shepherdr 3: the space's icon, an emoji the person picked (none: #) */
+  emoji?: string
   /** its name, Slack-channel style ("my-project"), unique on its machine: the slug its links and commands use */
   name: string
   /** the machine it is on (its key: herdr's label for it) */

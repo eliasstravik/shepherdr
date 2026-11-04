@@ -67,6 +67,10 @@ asks.start();
 const jobs = new Jobs(hub);
 jobs.watched = () => live.watched();
 jobs.start();
+model.doc = () => store.doc.value;
+compat.shared = { value: (k) => model.value(k), set: (k, v) => store.set(k, v) };
+store.on(() => model.rebuild());
+void store.load().catch(() => {});
 model.onBuild = (b) => live.setSnapshot(compat.snapshot({
   host: me?.host ?? "this machine", user: me?.name ?? "You", spaces: b.spaces, sections: b.sections, rows: b.rows, artifacts: artifacts.list,
   settings: settings.sections(me ? `https://${me.dns}/shepherdr/` : null),

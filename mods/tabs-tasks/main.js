@@ -7,6 +7,7 @@ import { startTick, tickOnChange } from "./tick.js";
 import { startInbox, count as inboxCount, countsByTab, readyCount, readyByTab, showInbox, toAlert } from "./inbox.js";
 import { serveRemote } from "./secrets.js";
 import { watchService } from "./service.js";
+import { startBridge } from "./bridge.js";
 import { countBadge, H, TEXT, RADIUS } from "./ui.js";
 import { on as addonOn } from "./addons.js";
 
@@ -28,6 +29,8 @@ export default class Tabs extends View {
     this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}");
     // Shepherdr's service, which does the background work while it runs (lib/service.js).
     watchService(cx);
+    // The person's pins, sidebar sections, icons and Notify, in step with the web app (lib/bridge.js).
+    startBridge(cx);
     // Tasks' queue and merge watcher (mods/tasks owns it): left to the service while it runs.
     startTick(cx);
     // What needs the person, for Tasks' "Needs you" and the red counts (inbox.js).
