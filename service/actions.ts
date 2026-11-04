@@ -2,7 +2,7 @@
 // person's words to an agent, stop it, mark an Assistant read, accept a Ready task, read a task's evidence.
 // Anything else is refused. Inputs are checked here; commands run with argument lists, never a shell line.
 import type { Hub } from "./hub.ts";
-import { sendBody, messageBody, refusal } from "../core/send.js";
+import { sendBody, messageBody, refusal, reactionLine } from "../core/send.js";
 import { kindOf } from "../core/chat-reader.js";
 import { READ } from "../core/spaces.js";
 import type { Compat } from "./compat.ts";
@@ -50,6 +50,21 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       choices: Array.isArray(b.choices) ? b.choices.filter((n: unknown) => typeof n === "number") : undefined,
       note: typeof b.note === "string" ? b.note.slice(0, 4000) : undefined, other: typeof b.other === "string" ? b.other.slice(0, 4000) : undefined });
     return { ok: true };
+  }
+  if (b?.type === "react" && typeof b.chat === "string" && typeof b.message === "string" && typeof b.emoji === "string" && b.emoji.length <= 16) {
+    // a reaction toggles, as the window's: added unless it is yours already; the agent reads the core's reaction line
+    const a = chat(b.chat), r = compat.reader?.(a);
+    const item = r?.conv?.items?.find((x: any) => x.id === b.message);
+    if (!item?.text) throw new Error("That message isn't in the chat any more.");
+    const mine = (r.conv.reactions.get(b.message) ?? []).some((x: any) => x.by === "you" && x.emoji === b.emoji);
+    if ((hub.terminals.get(a) as any)?.status?.state === "blocked") throw new Error("It's asking you something: answer that first.");
+    const res = await hc(["send", a, reactionLine(b.emoji, item.text, !mine)]);
+    if (res.code !== 0) throw new Error(refusal(res).message);
+    return { ok: true };
+  }
+  if (b?.type === "keys" && typeof b.chat === "string" && Array.isArray(b.keys) && b.keys.length <= 32 && b.keys.every((k: unknown) => typeof k === "string" && k.length <= 40)) {
+    const res = await hc(["keys", chat(b.chat), ...b.keys]);
+    return { ok: res.code === 0 };
   }
   if (b?.type === "send" && typeof b.chat === "string") b = { ...b, addr: chat(b.chat), quote: b.replyText ?? null };
   else if (b?.type === "stop" && typeof b.chat === "string") b = { ...b, addr: chat(b.chat) };
@@ -106,5 +121,6 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       return out ?? { ok: true };
     }
   }
-  throw new Error("unknown action");
+  // 2.1 has more buttons than this service answers yet: they say so plainly
+  throw new Error("Not on the web yet: use the Herdr window for this.");
 }

@@ -51,6 +51,7 @@ const compat = new Compat();
 const model = new Model(hub, live);
 live.chats = new Chats(hub);
 live.compat = compat;
+compat.reader = (a) => live.chats?.reader(a) ?? null;
 const settings = new Settings();
 settings.on(() => model.rebuild());
 settings.start();

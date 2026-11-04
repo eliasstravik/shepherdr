@@ -20,6 +20,13 @@ export const taskId = (r: Row) => (r.machine ? `${r.machine}:${r.ref}` : r.ref);
 
 // a news event's dot: what the task was at that moment
 const NEWS: Record<string, TaskStatus> = { added: "todo", queued: "queued", started: "work", needs: "need", asks: "need", stalled: "need", failed: "need", ready: "ready", merging: "merging", merged: "done", done: "done", closed: "done" };
+// a message's reactions as 2.1 shows them: yours, the agent's, or both
+function reactionsOf(list?: { emoji: string; by: string }[]) {
+  if (!list?.length) return {};
+  const by = new Map<string, Set<string>>();
+  for (const r of list) (by.get(r.emoji) ?? by.set(r.emoji, new Set()).get(r.emoji)!).add(r.by);
+  return { reactions: [...by].map(([emoji, s]) => ({ emoji, by: s.size > 1 ? "both" : s.has("you") ? "me" : "them" })) as any[] };
+}
 const STEP: Record<string, StepKind> = { run: "run", read: "read", edit: "edit", search: "search", web: "web", agent: "agent" };
 const stepRow = (s: any, i: number) => ({ key: `${s.id ?? i}`, kind: STEP[s.kind] ?? "other", text: s.count > 1 ? `${s.line} ×${s.count}` : s.line, steps: [`${s.id ?? i}`] });
 
@@ -49,6 +56,9 @@ export class Compat {
   private tasks = new Map<string, { ref: string; folder: string; machine: string | null; key: string; where: Where }>();
 
   taskOf(id: string) { return this.tasks.get(id) ?? null; }
+
+  /** The reader of a chat someone follows now (service/chats.ts), set by main. */
+  reader: ((addr: string) => any) | null = null;
 
   /** This machine's artifacts (service/artifacts.ts), set by main: notes and answers go through it. */
   artifacts: { say(id: string, v: number, text: string, spot?: string): Promise<unknown> } | null = null;
@@ -158,8 +168,9 @@ export class Compat {
     let at = 0;
     for (const x of reader.conv?.items ?? []) {
       if (x.at) at = x.at;
-      if (x.kind === "user" && x.text) messages.push({ id: x.id, who: "you", text: x.text, at: x.at, ...(x.replyTo ? { reply: { text: x.replyTo } } : {}) } as Message);
-      else if (x.kind === "agent" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at });
+      const reactions = reactionsOf(reader.conv?.reactions?.get(x.id));
+      if (x.kind === "user" && x.text) messages.push({ id: x.id, who: "you", text: x.text, at: x.at, ...(x.replyTo ? { reply: { text: x.replyTo } } : {}), ...reactions } as Message);
+      else if (x.kind === "agent" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at, ...reactions });
       else if (x.kind === "error" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at });
       else if (x.kind === "news" && x.ref) {
         // a task's news line in its Assistant's chat (<herdr-news task=… event=…>), as it was said

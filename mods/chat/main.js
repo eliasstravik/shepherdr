@@ -30,7 +30,7 @@ import * as fs from "fs/promises";
 import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names } from "./core/chat-log.js";
 import { words, howAnswered } from "./core/asks.js";
 // Sending the person's words, as the web app does (core/send.js).
-import { refusal, taskTag, messageBody, replyInstead, steerNow } from "./core/send.js";
+import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine } from "./core/send.js";
 import { AskCards, linkCtl } from "./cards.js";
 import * as strips from "./strips.js";
 import { button, red, green, amber, H, RADIUS, TEXT, toast, toastWho, plainError } from "./ui.js";
@@ -1935,7 +1935,7 @@ export default class Chat extends View {
     mine.set(emoji, on);
     this.myReacts.set(id, mine);
     if (on) this.useEmoji(emoji);
-    const line = `<hc from="person" ${on ? "reaction" : "reaction-removed"}="${emoji}" to="${excerpt(text)}"/>`;
+    const line = reactionLine(emoji, text, on);
     const st = this.status();
     if (st === "blocked" || this.asks.length) {
       this.queue.push({ id: `r${Date.now()}`, text: line, files: [], quote: null, raw: true, label: on ? `${emoji} reaction` : `${emoji} reaction removed` });

@@ -51,6 +51,9 @@ export async function steerNow(io, addr) {
   }
 }
 
+// The person's reaction to a message, as the agent reads it (on: added, else removed).
+export const reactionLine = (emoji, text, on = true) => `<hc from="person" ${on ? "reaction" : "reaction-removed"}="${emoji}" to="${excerpt(text)}"/>`;
+
 // Sends the body. kind: "claude", "codex" or another CLI. -> hc's result (code 0: it's in the agent's terminal).
 export async function sendBody(io, addr, kind, body) {
   let r = await io.hc(["send", addr, body]);
