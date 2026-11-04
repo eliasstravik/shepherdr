@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { WORDS, clock, bandActs, senderName, briefLabel, newsWords, newsTimeline, resolveArtifacts, fitThumbs, dayLabel, imagesLine, questionsBelow, notSent, unsigned, elapsed, reportMsg, doingWords } from "./chat-view.js";
+import { WORDS, clock, bandActs, bandOrder, senderName, briefLabel, newsWords, newsTimeline, resolveArtifacts, fitThumbs, dayLabel, imagesLine, questionsBelow, notSent, unsigned, elapsed, reportMsg, doingWords } from "./chat-view.js";
 
 const ROOT = join(import.meta.dir, "..");
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
@@ -47,6 +47,12 @@ describe("rows", () => {
     expect(senderName("box/ppid:12", "From Coverage: hi")).toBe("Coverage");
     expect(senderName("person")).toBe("You");
     expect(unsigned("From HERD-76 (t12u): the words")).toBe("the words");
+  });
+  test("the band: each side the other's mirror, pills at the bubble's outer edge", () => {
+    expect(bandOrder("user", ["reply", "copy", "rewind"])).toEqual(["time", "reply", "copy", "rewind", "react", "pills"]);
+    expect(bandOrder("agent", ["reply", "copy", "fork"])).toEqual(["pills", "react", "fork", "copy", "reply", "time"]);
+    expect(bandOrder("agent", ["reply", "copy"], { time: false, react: false })).toEqual(["pills", "copy", "reply"]);
+    expect(bandOrder("user", ["reply", "copy"], { react: false })).toEqual(["time", "reply", "copy", "pills"]);
   });
   test("a brief's label", () => {
     expect(briefLabel({ from: "t1", text: "x" }, 4, { sender: () => "Reviewer" })).toBe("Message from Reviewer");

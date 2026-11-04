@@ -123,6 +123,16 @@ export function bandActs(side, text, { from = null, fork = true } = {}) {
   return ["reply", "copy", ...(fork ? ["fork"] : [])];
 }
 
+// The whole band, in order from left to right (DECISIONS, Chat > Message actions): the reaction pills flush under the
+// bubble's outer edge with the smiley beside them, each side the other's mirror. Yours: the time, its actions, the
+// smiley, then the pills furthest right; the agent's: the pills furthest left, the smiley, its actions reversed and
+// the time at the inner end. `acts`: bandActs(); `time` false leaves the time out, `react` false the smiley.
+export function bandOrder(side, acts, { time = true, react = true } = {}) {
+  const lead = [...(time ? ["time"] : []), ...acts];
+  const smiley = react ? ["react"] : [];
+  return side === "user" ? [...lead, ...smiley, "pills"] : ["pills", ...smiley, ...lead.reverse()];
+}
+
 // A message another agent sent with hc often names its sender in its first words ("From HERD-76 (t12u?): …"). The
 // quiet row already says who, so its preview starts after them; the name stands in when the sender's address is
 // unknown.

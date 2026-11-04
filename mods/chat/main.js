@@ -31,7 +31,7 @@ import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names }
 import { BgJobs } from "./core/bg-jobs.js";
 import { words, howAnswered } from "./core/asks.js";
 // The rows' words and rules the web app's chat draws by too (core/chat-view.js).
-import { WORDS, clock, senderName, briefLabel, newsWords, resolveArtifacts, unsigned, fitThumbs, bandActs, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
+import { WORDS, clock, senderName, briefLabel, newsWords, resolveArtifacts, unsigned, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
 // Sending the person's words, as the web app does (core/send.js).
 import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine, mentionedIn, sendTyped } from "./core/send.js";
 import { AskCards, linkCtl } from "./cards.js";
@@ -1842,20 +1842,14 @@ export default class Chat extends View {
     // Many pills in a narrow pane: the time goes first, so the row stays inside the column.
     const room = right - left, timeW = time ? (time.length > 5 ? 82 : 38) + ACT_GAP : 0;
     const need = bar.acts.length * (ACT + ACT_GAP) + ACT + (bar.pills?.length ?? 0) * (PILL + PILL_EDGE);
-    const withTime = time && need + timeW <= room;
-    // The time and the icons; on the agent's side mirrored: the icons reversed, then the time.
-    const acts = (mirror) => {
-      const stamp = () => { if (withTime) add("time", timeW - ACT_GAP, ACT_GAP, { hover: true, text: time }); };
-      if (!mirror) stamp();
-      for (const a of mirror ? [...bar.acts].reverse() : bar.acts) add(a, ACT, ACT_GAP, { hover: true });
-      if (mirror) stamp();
-    };
-    // The pills PILL_GAP apart, PILL_EDGE from what comes before or after them.
-    const pills = () => (bar.pills ?? []).forEach((p, i) => add(`pill:${p.emoji}`, PILL, i ? PILL_GAP : PILL_EDGE, { pill: p }));
     // Reactions off (an add-on): no smiley; the pills already there still show.
-    const react = addonOn("reactions");
-    if (bar.side === "user") { acts(false); if (react) add("react", ACT, ACT_GAP, { hover: true }); pills(); }
-    else { pills(); if (react) add("react", ACT, PILL_EDGE, { hover: true }); acts(true); }
+    const order = bandOrder(bar.side, bar.acts, { time: Boolean(time) && need + timeW <= room, react: addonOn("reactions") });
+    for (const what of order) {
+      if (what === "time") add("time", timeW - ACT_GAP, ACT_GAP, { hover: true, text: time });
+      // The pills PILL_GAP apart, PILL_EDGE from what comes before or after them.
+      else if (what === "pills") (bar.pills ?? []).forEach((p, i) => add(`pill:${p.emoji}`, PILL, i ? PILL_GAP : PILL_EDGE, { pill: p }));
+      else add(what, ACT, what === "react" && bar.side !== "user" ? PILL_EDGE : ACT_GAP, { hover: true });
+    }
     const x0 = bar.side === "user" ? right - at : left;
     for (const p of parts) p.x += x0;
     return { x: x0, w: at, parts };

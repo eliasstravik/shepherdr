@@ -15,11 +15,12 @@ import { ForkIcon, openPicker, RewindIcon } from '@plugins/reactions/client.tsx'
 import { Markdown } from './markdown.tsx'
 import { jumpTo, startReply } from './reply.ts'
 
-const { WORDS, clock, bandActs, imagesLine, fitThumbs, THUMB_GAP, questionsBelow } = CV as unknown as {
+const { WORDS, clock, bandActs, bandOrder, imagesLine, fitThumbs, THUMB_GAP, questionsBelow } = CV as unknown as {
   WORDS: Record<string, string>
   questionsBelow: (n: number) => string
   clock: (at?: number) => string
   bandActs: (side: 'user' | 'agent', text?: string, o?: { from?: string | null; fork?: boolean }) => string[]
+  bandOrder: (side: 'user' | 'agent', acts: string[], o?: { time?: boolean; react?: boolean }) => string[]
   imagesLine: (n: number) => string
   fitThumbs: (sizes: ({ w: number; h: number } | null)[], width?: number) => { boxes: { w: number; h: number }[]; h: number }
   THUMB_GAP: number
@@ -71,12 +72,13 @@ export function Band({ msg, chat, cli }: { msg: Message; chat: string; cli?: boo
     </button>
   ) : null
   // as the window's: the pills 4px apart, 6px from the smiley (the band's own 2px gap and 4px here)
-  const pillRow = pills ? <span className={clsx('flex flex-wrap items-center gap-1', you ? 'pl-1' : 'pr-1')}>{pills}</span> : null
-  const stamp = time ? <time dateTime={new Date(msg.at!).toISOString()} className={clsx('shrink-0 text-[0.71875rem] text-fg3 tabular-nums', you ? 'pr-1' : 'pl-1', hover)}>{time}</time> : null
-  const actions = you ? <>{stamp}{acts.map(icon)}</> : <>{[...acts].reverse().map(icon)}{stamp}</>
+  const pillRow = pills ? <span key="pills" className={clsx('flex flex-wrap items-center gap-1', you ? 'pl-1' : 'pr-1')}>{pills}</span> : null
+  const stamp = time ? <time key="time" dateTime={new Date(msg.at!).toISOString()} className={clsx('shrink-0 text-[0.71875rem] text-fg3 tabular-nums', you ? 'pr-1' : 'pl-1', hover)}>{time}</time> : null
+  // the order is core's, as the window's: each side the other's mirror
+  const part = (what: string) => (what === 'time' ? stamp : what === 'react' ? smiley : what === 'pills' ? pillRow : icon(what))
   return (
     <div data-band className={clsx('mt-1 flex min-h-[22px] max-w-full flex-wrap items-center gap-0.5', you ? 'justify-end self-end' : 'justify-start self-start')}>
-      {you ? <>{actions}{smiley}{pillRow}</> : <>{pillRow}{smiley}{actions}</>}
+      {bandOrder(you ? 'user' : 'agent', acts, { time: !!time, react }).map(part)}
     </div>
   )
 }
