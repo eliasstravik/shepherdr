@@ -597,7 +597,8 @@
       "addon": "chat",
       "title": "Composer",
       "core": [
-        "send"
+        "send",
+        "slash"
       ],
       "herdr": {
         "mods": [
@@ -615,7 +616,6 @@
         "tablet": "Same with a keyboard",
         "phone": "Same box; long-press Send holds; drafts kept on the device"
       },
-      "planned": "Held messages, / commands and #task mentions",
       "service": [
         "actions.ts"
       ]

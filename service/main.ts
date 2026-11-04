@@ -32,6 +32,10 @@ import { Secrets } from "./secrets.ts";
 import { Agents } from "./agents.ts";
 import { Push } from "./push.ts";
 import { dictate } from "./dictate.ts";
+import { sh } from "./model.ts";
+import { kindOf } from "../core/chat-reader.js";
+import * as SL from "../core/slash.js";
+const { SCAN, scanned, commandList, MENU } = SL as any;
 import * as NF from "../core/notify.js";
 const { withEverywhere, withSpace } = NF as any;
 
@@ -207,6 +211,14 @@ const server = Bun.serve<{ who: string }>({
     }
     if (path === "/api/dictate" && req.method === "POST") {
       try { return json({ text: await dictate(await req.blob()) }); } catch (err) { return json({ error: (err as Error).message }, 400); }
+    }
+    if (path === "/api/commands") {
+      // the "/" list above the box (core/slash.js): its CLI's commands, and for Claude Code the person's own
+      const a = compat.addrOf(url.searchParams.get("chat") ?? ""), t: any = a ? hub.terminals.get(a) : null;
+      if (!a || !t) return json({ commands: [] });
+      const kind = kindOf(t) ?? "claude", machine = a.includes("/") ? a.split("/")[0] : null;
+      const mine = kind === "claude" ? scanned((await sh(hub, SCAN, ["scan", t.foreground?.cwd ?? t.cwd ?? ""], machine).catch(() => ({ stdout: "" }))).stdout) : [];
+      return json({ commands: commandList(kind, mine), menus: [...(MENU[kind] ?? [])] });
     }
     if (path === "/api/push/key") return json({ key: await push.key() });
     if (path === "/api/push/subscribe" && req.method === "POST") {

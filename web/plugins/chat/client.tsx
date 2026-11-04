@@ -2,6 +2,8 @@
 // a CLI's own menus; what you send shows at once and goes in at once, even mid-turn; only while the CLI shows a menu
 // or is starting does it wait, and the bubble says why.
 import clsx from 'clsx'
+import * as SL from '@core/slash.js'
+const { typing: slashTyping, match: slashMatch } = SL as any
 import { openAccept } from '@client/screens/Accept.tsx'
 import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ComponentType, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, type RefObject } from 'react'
 import { act, chatName, definePlugin, getDraft, getState, goChat, has, holdReload, openArtifact, openItem, openNeeds, openTask, registry, setDraft, setOutbox, setUI, taskOf, useDraft, useSnap, useStore, useUI, type UI } from '@client/kernel.ts'
@@ -1597,6 +1599,35 @@ export function useChat(key: string) {
   return useStore((s) => s.chats[key])
 }
 
+/** Shepherdr 3's "/" list: while the message is one /command so far, its CLI's commands (and the person's own) that
+ *  match, a tap takes one into the box. Whatever is typed goes to the agent as typed; this only suggests. */
+const slashLists = new Map<string, Promise<{ name: string; about: string }[]>>()
+function SlashList({ chatKey, text, pick }: { chatKey: string; text: string; pick: (name: string) => void }) {
+  const word = slashTyping(text)
+  const [list, setList] = useState<{ name: string; about: string }[]>([])
+  useEffect(() => {
+    if (word === null) return
+    if (!slashLists.has(chatKey)) slashLists.set(chatKey, fetch(`api/commands?chat=${encodeURIComponent(chatKey)}`).then((r) => r.json()).then((r) => r.commands ?? []).catch(() => []))
+    let gone = false
+    slashLists.get(chatKey)!.then((l) => !gone && setList(l))
+    return () => { gone = true }
+  }, [chatKey, word === null])
+  if (word === null) return null
+  const shown = slashMatch(list, word)
+  if (!shown.length) return null
+  return (
+    <div role="listbox" aria-label="Commands" className="mb-1.5 overflow-hidden rounded-box bg-bg p-1 shadow-menu">
+      {shown.map((c: { name: string; about: string }) => (
+        <button key={c.name} type="button" role="option" aria-selected={false} onMouseDown={(e) => e.preventDefault()} onClick={() => pick(c.name)}
+          className="flex w-full min-w-0 items-baseline gap-2 rounded-row px-2.5 py-1.5 text-left hover:bg-hover phone:py-2.5">
+          <span className="shrink-0 font-medium">/{c.name}</span>
+          <span className="min-w-0 truncate text-fg3">{c.about}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder: string; cli: string }) {
   const [text, setText] = useDraft(chatKey)
   const files = useUI((u) => u.files[chatKey]) ?? noFiles
@@ -1699,6 +1730,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
       {registry.composerAbove.map(({ View }, i) => (
         <View key={i} chatKey={chatKey} cli={cli} />
       ))}
+      <SlashList chatKey={chatKey} text={text} pick={(name) => { setText(`/${name} `); ref.current?.focus() }} />
       {/* a pill: the corners are half its one-line height, so one line has round ends; taller, the buttons keep their
           size and spot in the bottom corners, with the same curve around them (like iMessage) */}
       <div data-composer className="round-box bg-bg p-1.5 shadow-box has-[textarea:focus]:shadow-box-focus">

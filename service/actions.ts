@@ -17,15 +17,24 @@ const MACHINE = /^[\w.-]+$/;
 
 // Messages held until their agent is free, sent in order, each once.
 const held: { addr: string; kind: string; body: string; hub: Hub }[] = [];
-let draining: ReturnType<typeof setInterval> | null = null;
+let draining: ReturnType<typeof setInterval> | null = null, busy = false;
 function drain() {
   draining ??= setInterval(async () => {
-    for (const m of [...held]) {
-      const st = (m.hub.terminals.get(m.addr) as any)?.status?.state;
-      if (m.hub.terminals.get(m.addr)?.state !== "live") { held.splice(held.indexOf(m), 1); continue; }
-      if (st === "working" || st === "blocked") continue;
-      held.splice(held.indexOf(m), 1);
-      await sendBody({ hc, sleep: (ms: number) => Bun.sleep(ms), status: () => (m.hub.terminals.get(m.addr) as any)?.status?.state ?? null }, m.addr, m.kind, m.body).catch(() => null);
+    // one pass at a time: a slow send never overlaps the next tick
+    if (busy) return;
+    busy = true;
+    try {
+      for (const m of [...held]) {
+        const st = (m.hub.terminals.get(m.addr) as any)?.status?.state;
+        const alive = m.hub.terminals.get(m.addr)?.state === "live";
+        if (alive && (st === "working" || st === "blocked")) continue;
+        const i = held.indexOf(m);
+        if (i < 0) continue;
+        held.splice(i, 1);
+        if (alive) await sendBody({ hc, sleep: (ms: number) => Bun.sleep(ms), status: () => (m.hub.terminals.get(m.addr) as any)?.status?.state ?? null }, m.addr, m.kind, m.body).catch(() => null);
+      }
+    } finally {
+      busy = false;
     }
     if (!held.length && draining) { clearInterval(draining); draining = null; }
   }, 1000);
