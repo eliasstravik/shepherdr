@@ -72,11 +72,16 @@ def pr_open(s, task, repo, summary=None):
 
 def pr_adopt(task, repo):
     """The open pull request for the task's branch, opened by hand or by its agent, recorded on the
-    task; None when there is none (SHEP-13: ready failed with "already exists")."""
-    ok, out, _ = gh("pr", "list", "--repo", repo, "--head", task["branch"], "--state", "open", "--json", "number,url")
+    task; None when there is none (SHEP-13: ready failed with "already exists"). Only one from this
+    repo (never a fork's branch of the same name), into the task's base, at the branch's tip here."""
+    ok, out, _ = gh("pr", "list", "--repo", repo, "--head", task["branch"], "--state", "open",
+                    "--json", "number,url,isCrossRepository,baseRefName,headRefOid")
+    tip_ok, tip, _ = git(task["worktree"], "rev-parse", task["branch"])
     try:
-        found = json.loads(out)[0] if ok and out else None
-    except (ValueError, IndexError, TypeError):
+        found = next((p for p in json.loads(out) if not p.get("isCrossRepository")
+                      and p.get("baseRefName") == (task.get("base") or "main")
+                      and tip_ok and tip and p.get("headRefOid") == tip), None) if ok and out else None
+    except (ValueError, TypeError, AttributeError):
         found = None
     if found:
         task["pr"] = {"number": found["number"], "url": found["url"], "repo": repo}

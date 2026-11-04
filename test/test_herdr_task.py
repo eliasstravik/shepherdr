@@ -315,19 +315,28 @@ class BackToWork(unittest.TestCase):
             if a[:2] == ("pr", "create"):
                 return False, "", "a pull request for branch \"b\" into branch \"main\" already exists"
             return True, "", ""
-        for mod, name, value in ((github, "gh", fake), (github, "git", lambda *a: (True, "", ""))):
+        for mod, name, value in ((github, "gh", fake), (github, "git", lambda *a: (True, "abc", ""))):
             p = self.mock.patch.object(mod, name, value)
             p.start()
             self.addCleanup(p.stop)
         return github, calls
 
     def test_ready_adopts_the_open_pull_request(self):
-        github, calls = self.github_has([{"number": 599, "url": "https://github.com/o/r/pull/599"}])
+        github, calls = self.github_has([{"number": 599, "url": "https://github.com/o/r/pull/599", "isCrossRepository": False, "baseRefName": "main", "headRefOid": "abc"}])
         t = self.ready(mode="worktree", worktree="/w", branch="b")
         self.assertEqual(github.pr_open(self.store, t, "o/r", "Done.")["number"], 599)
         self.assertEqual(t["pr"], {"number": 599, "url": "https://github.com/o/r/pull/599", "repo": "o/r"})
         self.assertNotIn(("pr", "create"), calls)
         self.assertIn(("pr", "comment"), calls)  # the summary still reaches it
+
+    def test_ready_never_adopts_a_forks_or_another_ones(self):
+        mine = {"number": 599, "url": "https://github.com/o/r/pull/599", "isCrossRepository": False, "baseRefName": "main", "headRefOid": "abc"}
+        for other in ({"isCrossRepository": True}, {"baseRefName": "dev"}, {"headRefOid": "f00"}):
+            github, calls = self.github_has([{**mine, **other}])
+            t = self.ready(mode="worktree", worktree="/w", branch="b")
+            with self.assertRaises(self.commands.Fail):
+                github.pr_open(self.store, t, "o/r")
+            self.assertNotIn("pr", t, other)
 
     def test_ready_opens_one_when_there_is_none(self):
         github, calls = self.github_has([])
@@ -337,7 +346,7 @@ class BackToWork(unittest.TestCase):
         self.assertIn(("pr", "create"), calls)
 
     def test_accept_adopts_the_open_pull_request(self):
-        self.github_has([{"number": 599, "url": "https://github.com/o/r/pull/599"}])
+        self.github_has([{"number": 599, "url": "https://github.com/o/r/pull/599", "isCrossRepository": False, "baseRefName": "main", "headRefOid": "abc"}])
         t = self.ready(mode="worktree", worktree="/w", branch="b",
                        attention="Couldn't open a pull request: a pull request for branch \"b\" already exists")
         self.merging([{"state": "MERGED", "mergeCommit": {"oid": "f00"}}], [])

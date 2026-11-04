@@ -910,7 +910,7 @@ def cmd_accept(args):
         if busy_again(t, [detail(k) for k in live_agents(s.key(t))]):
             back = back_to_work(s, t, "its agent is at work again")
         # One its agent opened itself, which ready couldn't open again ("already exists"): adopted.
-        elif (not t.get("pr") and (t.get("attention") or "").startswith("Couldn't open a pull request")
+        elif (not t.get("pr") and "already exists" in (t.get("attention") or "")
               and (repo := github(s)) and pr_adopt(t, repo)):
             t.pop("attention", None)
             s.dirty = True
