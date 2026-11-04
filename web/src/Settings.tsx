@@ -511,10 +511,11 @@ function groupsOf(sections: SettingSection[], ui: UI): { name: string; pages: Pa
   // Present one delivery page without changing stored keys or the server/plugin section contract.
   const delivery = sections.find((x) => x.global && x.name === 'Alerts and voice')
   const scoped = sections.filter((x) => x.level === level && !x.global).map((x): Page => x.name === 'Notify' ? {
-    ...x, name: 'Notifications',
+    ...x, name: 'Notify',
     targets: Object.fromEntries((delivery?.rows.filter((r) => !r.key.startsWith('voice.')) ?? []).map((r) => [r.key, delivery!.level ?? 'all'])),
-    about: 'All: every new message, question and alert from its Assistant. Needs me: questions and alerts. Off: none, and the space stays quiet. Task alerts reach you either way. Spaces can override the delivery rule here or from their sidebar menu. Device delivery below applies Everywhere.',
-    rows: [...x.rows.map((r) => ({ ...r, group: 'Delivery rules' })), ...(delivery?.rows.filter((r) => !r.key.startsWith('voice.')).map((r) => ({ ...r, group: 'Devices · Everywhere' })) ?? [])],
+    // Shepherdr 3's words: what reaches you from a space's Assistant
+    about: 'All: every message from its Assistant. Needs me: its questions and alerts. Off: nothing, and its row stays quiet. Tasks reach you either way.',
+    rows: [...x.rows, ...(delivery?.rows.filter((r) => !r.key.startsWith('voice.')).map((r) => ({ ...r, group: 'Devices · Everywhere' })) ?? [])],
   } : x)
   const globals = sections.filter((x) => x.global).map((x): Page => x === delivery ? {
     ...x, name: 'Voice', rows: x.rows.filter((r) => r.key.startsWith('voice.')),
@@ -533,7 +534,7 @@ function groupsOf(sections: SettingSection[], ui: UI): { name: string; pages: Pa
 export const sectionOf = (name: string, sections: SettingSection[], ui: UI) =>
   groupsOf(sections, ui)
     .flatMap((g) => g.pages)
-    .findIndex((p) => p.name === ({ Notify: 'Notifications', 'Alerts and voice': 'Voice' }[name] ?? name))
+    .findIndex((p) => p.name === ({ 'Alerts and voice': 'Voice' }[name] ?? name))
 
 /** a machine's own Machine page (to open Settings on it): its section and level */
 export function settingsPageOf(sections: SettingSection[], machine: string, ui: UI) {

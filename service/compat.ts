@@ -6,6 +6,8 @@
 import type { Snapshot, Place, Task, Need, Section, Machine, Chat, Message, Status, TaskStatus, StepKind, ActivityAnswer, Question, Artifact, SettingSection } from "../web/shared/types.ts";
 import * as T from "../core/tasks.js";
 import type { Where } from "./worktree.ts";
+import * as NF from "../core/notify.js";
+const { NOTIFY, everywhereOf, spaceLevel, machineLevel, machineOfSpace, spaceOwn } = NF as any;
 
 const { ago } = T as any;
 
@@ -157,9 +159,18 @@ export class Compat {
     const last: Record<string, number> = {}, read: Record<string, number> = { "*": 0 };
     for (const s of spaces) { const k = placeKey(s.id); last[k] = s.unread ? 2 : 1; read[k] = 1; }
 
+    // Notify (3.0's All / Needs me / Off): a row per space's level and Everywhere, as 2.1's Settings and space menu read it
+    const n = this.shared?.value("notify") ?? {};
+    const level = (s: Space) => spaceLevel(n, s.id), parent = (s: Space) => machineLevel(n, machineOfSpace(s.id));
+    const notify: SettingSection[] = [
+      { name: "Notify", level: "all", rows: [{ label: "Notify", key: "notify", value: everywhereOf(n), options: [...NOTIFY] }] },
+      ...spaces.map((s) => ({ name: "Notify", level: s.id, rows: [{ label: "Notify", key: "notify", value: level(s), options: [...NOTIFY],
+        ...(spaceOwn(n, s.id) ? { inherits: { value: parent(s), from: "Everywhere" } } : { from: "Everywhere" }) }] })),
+    ];
+
     this.chats = chats;
     this.last = {
-      terminalTransport: "core", name: "Shepherdr", host, user: input.user, places, machines, tasks, automations: {}, asks: {}, needs, settings: input.settings ?? [],
+      terminalTransport: "core", name: "Shepherdr", host, user: input.user, places, machines, tasks, automations: {}, asks: {}, needs, settings: [...(input.settings ?? []), ...notify],
       artifacts: (input.artifacts ?? []).map((a) => artifactOf(a, spaces)),
       sections, last, read,
     };

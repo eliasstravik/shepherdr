@@ -33,7 +33,9 @@
         "tablet": "Drawer from the left (menu or edge swipe)",
         "phone": "Drawer (edge swipe); long-press then drag to move"
       },
-      "planned": "Moving spaces, sections, icons and pins from the web"
+      "service": [
+        "store.ts"
+      ]
     },
     {
       "id": "space-actions",
@@ -60,7 +62,7 @@
         "tablet": "⋯ or long-press menu",
         "phone": "Long-press: action sheet; rename in a sheet"
       },
-      "planned": "Rename, close, worktrees and Notify from the web (Mark read works)"
+      "planned": "Close and worktrees from the web (Mark read, Notify, rename and icon work)"
     },
     {
       "id": "new-space",
@@ -239,7 +241,7 @@
         "tablet": "Same",
         "phone": "Grouped list, pages slide in"
       },
-      "planned": "Agents, Autopilot, Notify, Secrets, Machines and Window pages (Tasks works)",
+      "planned": "Agents, Autopilot, Secrets, Machines and Window pages (Tasks, Notify and Web work)",
       "service": [
         "settings.ts"
       ]
@@ -505,7 +507,9 @@
         "tablet": "Long-press",
         "phone": "Long-press: sheet"
       },
-      "planned": "Pin from the web (pins are the window's shared state today)"
+      "service": [
+        "store.ts"
+      ]
     },
     {
       "id": "assistant",

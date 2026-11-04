@@ -28,6 +28,8 @@ import { worktree } from "./worktree.ts";
 import { browserRelay } from "./browser.ts";
 import { Artifacts } from "./artifacts.ts";
 import { Settings } from "./settings.ts";
+import * as NF from "../core/notify.js";
+const { withEverywhere, withSpace } = NF as any;
 
 const ROOT = join(import.meta.dir, "..");
 const WEB = process.env.SHEPHERDR_WEB_DIR || join(ROOT, "web", "dist");
@@ -192,6 +194,13 @@ const server = Bun.serve<{ who: string }>({
     }
     if (path === "/api/action" && req.method === "POST") {
       const body = await req.json().catch(() => null);
+      if (body?.type === "setting" && body.key === "notify") {
+        // a space's Notify (from its menu or Settings), or Everywhere's, in 3.0's shared "notify"
+        const v = typeof body.value === "string" ? body.value : null, n = model.value("notify") ?? {};
+        const next = !body.place || body.place === "all" ? withEverywhere(n, v) : withSpace(n, String(body.place), v);
+        await store.set("notify", next);
+        return json({ ok: true });
+      }
       if (body?.type === "setting" && typeof body.key === "string") {
         try { settings.set(body.key, typeof body.value === "string" ? body.value : null); return json({ ok: true }); }
         catch (err) { return new Response((err as Error).message, { status: 400 }); }
