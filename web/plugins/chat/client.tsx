@@ -1782,25 +1782,37 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
       removeEventListener('resize', on)
     }
   }, [])
+  const sized = useRef<{ text: string; width: number; room: number; live: boolean } | null>(null)
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
-    // the words grow the box upward, between buttons that stay put, up to its max height (CSS), then scroll inside.
-    // Measuring at auto height loses where it was scrolled to: it scrolls back, then the line you type comes into full
-    // view, padding and all (the browser alone stops short, under the fade)
-    const top = el.scrollTop
-    // measured at auto height, which is one line: what holds it keeps its height meanwhile, or the chat above would
-    // grow for a moment, pull its newest message up out of view and let go of the bottom
-    const hold = el.parentElement!
-    hold.style.height = `${hold.offsetHeight}px`
-    el.style.height = 'auto'
+    const was = sized.current
+    sized.current = { text, width, room, live: !!live }
     // once it scrolls, it holds whole lines between its paddings, so at the end the line above shows only in the top
     // padding, where it fades: no line looks cut, and none under the fades is one you can read
-    const cs = getComputedStyle(el)
-    const [max, lh, pads] = [parseFloat(cs.maxHeight), parseFloat(cs.lineHeight), parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom)]
-    el.style.height = `${el.scrollHeight > max && lh ? pads + Math.floor((max - pads) / lh) * lh : el.scrollHeight}px`
-    hold.style.height = ''
-    el.scrollTop = top
+    const fit = () => {
+      const cs = getComputedStyle(el)
+      const [max, lh, pads] = [parseFloat(cs.maxHeight), parseFloat(cs.lineHeight), parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom)]
+      el.style.height = `${el.scrollHeight > max && lh ? pads + Math.floor((max - pads) / lh) * lh : el.scrollHeight}px`
+    }
+    // typing on at the end only grows it: it is measured as it is, with no pass at auto height. That pass is a layout
+    // of its own on each letter, and on a phone the letters lag behind the keyboard
+    if (was && was.width === width && was.room === room && was.live === !!live && text.startsWith(was.text)) {
+      if (el.scrollHeight > el.clientHeight) fit()
+    } else {
+      // the words grow the box upward, between buttons that stay put, up to its max height (CSS), then scroll inside.
+      // Measuring at auto height loses where it was scrolled to: it scrolls back, then the line you type comes into
+      // full view, padding and all (the browser alone stops short, under the fade)
+      const top = el.scrollTop
+      // measured at auto height, which is one line: what holds it keeps its height meanwhile, or the chat above would
+      // grow for a moment, pull its newest message up out of view and let go of the bottom
+      const hold = el.parentElement!
+      hold.style.height = `${hold.offsetHeight}px`
+      el.style.height = 'auto'
+      fit()
+      hold.style.height = ''
+      el.scrollTop = top
+    }
     if (document.activeElement === el) reveal(el)
     fades(el)
     // and again when the box comes back after talking to type or a call: it is a new textarea then
@@ -1997,6 +2009,8 @@ function fades(el: HTMLElement) {
 /** the line with the caret in full view in the message box, with the padding round it, so no fade is on it */
 function reveal(el: HTMLTextAreaElement) {
   if (el.scrollHeight <= el.clientHeight || el.selectionStart !== el.selectionEnd) return
+  // the caret at the end (typing on) is on the last line: the end of the box, its bottom padding too, with no copy
+  if (el.selectionEnd === el.value.length) return void (el.scrollTop = el.scrollHeight)
   const cs = getComputedStyle(el)
   const [pt, pb, pl, pr, lh] = [cs.paddingTop, cs.paddingBottom, cs.paddingLeft, cs.paddingRight, cs.lineHeight].map(parseFloat)
   if (!lh) return
