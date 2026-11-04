@@ -384,6 +384,7 @@ function useHold(fn: ((at: At) => void) | null, swipe: (() => void) | null = nul
       // a swipe from the screen's edge is the screen's (it goes back, or opens the places)
       if (!touch || Date.now() - scrolled < 250 || e.clientX < EDGE) return
       r.current.armed = true
+      if (scrollsSideways(e.target as Element)) r.current.slide = 'off'
       if (!fn) return
       if (again) {
         r.current.last = 0
@@ -468,6 +469,14 @@ const pressable =
 
 /** a message that slides right to reply leaves sideways moves to the page; others let the browser have them (and
     skip its wait for a second tap) */
+/** a code block or table wider than the bubble scrolls sideways under the finger: it keeps that finger, the message
+    doesn't slide */
+function scrollsSideways(el: Element | null) {
+  for (; el && !el.hasAttribute('data-msg'); el = el.parentElement)
+    if (el.scrollWidth > el.clientWidth + 1 && /auto|scroll/.test(getComputedStyle(el).overflowX)) return true
+  return false
+}
+
 const touchFor = (slides: boolean) => (slides ? 'touch-pan-y touch-pinch-zoom' : 'touch-manipulation')
 
 /** the reply arrow that comes in beside a message as a finger slides it right */
