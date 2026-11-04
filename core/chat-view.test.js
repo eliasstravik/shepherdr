@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { WORDS, clock, bandActs, senderName, briefLabel, newsWords, newsTimeline, resolveArtifacts, fitThumbs, dayLabel, imagesLine, questionsBelow, notSent, unsigned, elapsed } from "./chat-view.js";
+import { WORDS, clock, bandActs, senderName, briefLabel, newsWords, newsTimeline, resolveArtifacts, fitThumbs, dayLabel, imagesLine, questionsBelow, notSent, unsigned, elapsed, reportMsg, doingWords } from "./chat-view.js";
 
 const ROOT = join(import.meta.dir, "..");
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
@@ -93,5 +93,25 @@ describe("rows", () => {
     expect(questionsBelow(2)).toBe("2 questions below");
     expect(notSent("Busy.")).toBe("Not sent: Busy. Click to try again.");
     expect(elapsed(75)).toBe("1:15");
+  });
+});
+
+describe("the working line says what the agent does, in the window and on the web", () => {
+  test("its CLI's status report, from either side's terminal", () => {
+    // the window's terminals(): a plain status word and the report; the service's herdr-core record: the report in status
+    expect(reportMsg({ status: "working", report: { app: "claude-code", msg: "Computing build times", state: "working" } })).toBe("Computing build times");
+    expect(reportMsg({ status: { app: "claude-code", msg: " Computing build times ", state: "working" } })).toBe("Computing build times");
+    expect(reportMsg({ status: { app: "claude-code", state: "working" } })).toBe("");
+    expect(reportMsg({ status: "working", report: null })).toBe("");
+    expect(reportMsg(undefined)).toBe("");
+  });
+  test("its log's open call first, then the report, never a question", () => {
+    expect(doingWords({ doing: "Editing main.js" }, "Computing build times")).toBe("Editing main.js");
+    expect(doingWords({ doing: null }, "Computing build times")).toBe("Computing build times");
+    expect(doingWords(null, "answer: Tea or coffee?")).toBe(null);
+    expect(doingWords(null, "")).toBe(null);
+  });
+  test("both sides read it from here", () => {
+    for (const f of ["mods/chat/main.js", "service/compat.ts"]) for (const fn of ["reportMsg(", "doingWords("]) expect(read(f).includes(fn) ? "" : `${fn} not in ${f}`).toBe("");
   });
 });
