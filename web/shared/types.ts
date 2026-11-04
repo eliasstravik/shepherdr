@@ -118,6 +118,8 @@ export interface Place {
   /** its chat's header under its name, as 3.0's pane header: "Assistant · Claude Code", and the folder it works in */
   header?: string
   where?: string
+  /** the folder its Assistant works in now, as the window's pane header shows it (`where` until it has one) */
+  cwd?: string
   /** where its artifacts are kept (its repo's main folder, else its own) and that folder's name, as the window's
    *  Artifacts header ("~" at home) */
   store?: { folder: string; name: string; key?: string }

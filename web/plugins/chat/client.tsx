@@ -1843,16 +1843,93 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
       ))}
       <SlashList chatKey={chatKey} text={text} pick={(name) => { setText(`/${name} `); ref.current?.focus() }} />
       <TaskList chatKey={chatKey} text={text} pick={(next) => { setText(next); ref.current?.focus() }} />
-      {/* a pill: the corners are half its one-line height, so one line has round ends; taller, the buttons keep their
-          size and spot in the bottom corners, with the same curve around them (like iMessage) */}
-      <div data-composer className="round-box bg-bg p-1.5 shadow-box has-[textarea:focus]:shadow-box-focus">
+      {/* the window's box: the words across its full width, then a row in it of attach on the left and on the right
+          what the agent runs on (the model menu), the mic and Send (or Call); nothing under it. Its corners are half a
+          round button and the padding, so the buttons sit in the bottom ones with the same curve round them */}
+      <div data-composer className="relative round-box bg-bg p-1.5 shadow-box has-[textarea:focus]:shadow-box-focus">
         {/* what it replies to: one quiet line inside the box, over the words (like WhatsApp and Telegram) */}
         <ReplyStrip chatKey={chatKey} />
-        <div data-btns className={live ? 'flex items-center gap-1' : 'grid grid-cols-[auto_minmax(0,1fr)_auto] items-end gap-1'}>
-          {live ? (
+        {live ? (
+          <div data-btns className="flex items-center gap-1">
             <live.View chatKey={chatKey} />
-          ) : (
-            <>
+          </div>
+        ) : (
+          <>
+            <div className="relative flex min-w-0">
+              <textarea
+                ref={ref}
+                name="message"
+                data-chat={chatKey}
+                data-kept
+                data-quiet
+                aria-label={placeholder}
+                rows={1}
+                value={text}
+                placeholder=""
+                onChange={(e) => setText(e.target.value)}
+                onPaste={(e) => {
+                  // a screenshot or a copied file attaches, as + does; text pastes as text
+                  const list = pasted(e.clipboardData)
+                  if (!list.length) return
+                  e.preventDefault()
+                  attach(chatKey, list)
+                }}
+                onScroll={(e) => fades(e.currentTarget)}
+                // the caret moved (an arrow key, a tap, a letter typed, after which a phone scrolls to the caret
+                // itself, short of the padding): its line comes into full view
+                onSelect={(e) => {
+                  reveal(e.currentTarget)
+                  fades(e.currentTarget)
+                }}
+                onFocus={() => setUI({ focus: chatKey })}
+                onBlur={() => getState().ui.focus === chatKey && setUI({ focus: null })}
+                onKeyDown={(e) => {
+                  // as the window's: Up in an empty box (or one showing a recalled message) brings back your earlier
+                  // messages, newest first; Down goes back toward the empty box
+                  if ((e.key === 'ArrowUp' && (!text || recall.current >= 0)) || (e.key === 'ArrowDown' && recall.current >= 0)) {
+                    if (recall.current >= 0 && text !== recalled.current) recall.current = -1
+                    else {
+                      const mine = [...new Set((getState().chats[chatKey]?.messages ?? []).filter((m) => m.who === 'you' && m.text && !m.brief).map((m) => m.text!).reverse())]
+                      const next = recall.current + (e.key === 'ArrowUp' ? 1 : -1)
+                      if (mine.length && next >= -1 && next < mine.length) {
+                        e.preventDefault()
+                        recall.current = next
+                        recalled.current = next < 0 ? '' : mine[next]
+                        setText(recalled.current)
+                        return
+                      }
+                    }
+                  }
+                  if (e.key === 'Enter' && !e.shiftKey && device === 'desktop' && !e.nativeEvent.isComposing) {
+                    e.preventDefault()
+                    // Shepherdr 3: Ctrl+Enter holds it until the agent is free
+                    send(e.ctrlKey || e.metaKey)
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    // a reply is dropped first; an empty box stops a working agent (the window's Esc); then the box lets go
+                    if (getState().ui.reply[chatKey]) return cancelReply(chatKey)
+                    if (!text.trim() && getState().chats[chatKey]?.working) return void act({ type: 'stop', chat: chatKey }).catch(() => undefined)
+                    ref.current?.blur()
+                    setUI({ focus: null })
+                  }
+                }}
+                className={clsx(
+                  // at most 8 lines (less with a phone's keyboard up): past that it scrolls inside, an edge with more
+                  // words past it fading out over its padding, so no line looks cut and every whole line stays crisp
+                  // (the one you type too), the scrollbar only while it moves
+                  'max-h-[min(calc(8lh+0.875rem),calc(var(--app-h,100dvh)*0.32))] min-h-[34px] w-full flex-1 resize-none self-center overflow-y-auto overscroll-y-contain bg-transparent px-2.5 py-[7px] text-fg outline-none phone:max-h-[min(calc(8lh+1rem),calc(var(--app-h,100dvh)*0.32))] phone:min-h-10 phone:px-3.5 phone:py-2',
+                  '[--fade-down:0px] [--fade-up:0px] [mask-image:linear-gradient(transparent,#000_var(--fade-up),#000_calc(100%-var(--fade-down)),transparent)] data-more-down:[--fade-down:7px] data-more-up:[--fade-up:7px] phone:data-more-down:[--fade-down:10px] phone:data-more-up:[--fade-up:10px]',
+                  text ? 'whitespace-pre-wrap' : 'whitespace-nowrap',
+                )}
+              />
+              {!text ? (
+                <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-2.5 left-2.5 flex items-center text-fg3 phone:right-3.5 phone:left-3.5">
+                  <span className="truncate">{placeholder}</span>
+                </span>
+              ) : null}
+            </div>
+            <div data-btns className="flex items-center gap-1">
               {registry.composerPlus ? (
                 // the window's paperclip: the device's file picker; a phone's also offers its camera (a menu)
                 <IconButton
@@ -1864,114 +1941,35 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                   <PaperClipIcon className={ic} />
                 </IconButton>
               ) : null}
-              <div className="relative col-start-2 flex min-w-0 self-stretch">
-                <textarea
-                  ref={ref}
-                  name="message"
-                  data-chat={chatKey}
-                  data-kept
-                  data-quiet
-                  aria-label={placeholder}
-                  rows={1}
-                  value={text}
-                  placeholder=""
-                  onChange={(e) => setText(e.target.value)}
-                  onPaste={(e) => {
-                    // a screenshot or a copied file attaches, as + does; text pastes as text
-                    const list = pasted(e.clipboardData)
-                    if (!list.length) return
-                    e.preventDefault()
-                    attach(chatKey, list)
+              <div className="flex-1" />
+              <AgentLine chatKey={chatKey} cli={cli} />
+              {Mic ? <Mic chatKey={chatKey} /> : null}
+              {text.trim() || files.length || !Idle ? (
+                <button
+                  type="button"
+                  aria-label="Send"
+                  // Shepherdr 3 on a phone: a long press on Send holds it until the agent is free (the phone's Ctrl+Enter)
+                  onPointerDown={() => { held.current = false; holdTimer.current = setTimeout(() => { held.current = true; buzz(); send(true) }, 500) }}
+                  onPointerUp={() => clearTimeout(holdTimer.current)}
+                  onPointerLeave={() => clearTimeout(holdTimer.current)}
+                  onContextMenu={(e) => e.preventDefault()}
+                  onClick={() => {
+                    if (held.current) return
+                    // a light tap from the phone as it goes, like ChatGPT's
+                    if (matchMedia('(pointer: coarse)').matches) buzz()
+                    send()
                   }}
-                  onScroll={(e) => fades(e.currentTarget)}
-                  // the caret moved (an arrow key, a tap, a letter typed, after which a phone scrolls to the caret
-                  // itself, short of the padding): its line comes into full view
-                  onSelect={(e) => {
-                    reveal(e.currentTarget)
-                    fades(e.currentTarget)
-                  }}
-                  onFocus={() => setUI({ focus: chatKey })}
-                  onBlur={() => getState().ui.focus === chatKey && setUI({ focus: null })}
-                  onKeyDown={(e) => {
-                    // as the window's: Up in an empty box (or one showing a recalled message) brings back your earlier
-                    // messages, newest first; Down goes back toward the empty box
-                    if ((e.key === 'ArrowUp' && (!text || recall.current >= 0)) || (e.key === 'ArrowDown' && recall.current >= 0)) {
-                      if (recall.current >= 0 && text !== recalled.current) recall.current = -1
-                      else {
-                        const mine = [...new Set((getState().chats[chatKey]?.messages ?? []).filter((m) => m.who === 'you' && m.text && !m.brief).map((m) => m.text!).reverse())]
-                        const next = recall.current + (e.key === 'ArrowUp' ? 1 : -1)
-                        if (mine.length && next >= -1 && next < mine.length) {
-                          e.preventDefault()
-                          recall.current = next
-                          recalled.current = next < 0 ? '' : mine[next]
-                          setText(recalled.current)
-                          return
-                        }
-                      }
-                    }
-                    if (e.key === 'Enter' && !e.shiftKey && device === 'desktop' && !e.nativeEvent.isComposing) {
-                      e.preventDefault()
-                      // Shepherdr 3: Ctrl+Enter holds it until the agent is free
-                      send(e.ctrlKey || e.metaKey)
-                    }
-                    if (e.key === 'Escape') {
-                      e.preventDefault()
-                      // a reply is dropped first; an empty box stops a working agent (the window's Esc); then the box lets go
-                      if (getState().ui.reply[chatKey]) return cancelReply(chatKey)
-                      if (!text.trim() && getState().chats[chatKey]?.working) return void act({ type: 'stop', chat: chatKey }).catch(() => undefined)
-                      ref.current?.blur()
-                      setUI({ focus: null })
-                    }
-                  }}
-                  className={clsx(
-                    // at most 8 lines (less with a phone's keyboard up): past that it scrolls inside, an edge with more
-                    // words past it fading out over its padding, so no line looks cut and every whole line stays crisp
-                    // (the one you type too), the scrollbar only while it moves
-                    'max-h-[min(calc(8lh+0.875rem),calc(var(--app-h,100dvh)*0.32))] min-h-[34px] w-full flex-1 resize-none self-center overflow-y-auto overscroll-y-contain bg-transparent py-[7px] pl-1.5 text-fg outline-none phone:max-h-[min(calc(8lh+1.25rem),calc(var(--app-h,100dvh)*0.32))] phone:min-h-11 phone:py-2.5',
-                    '[--fade-down:0px] [--fade-up:0px] [mask-image:linear-gradient(transparent,#000_var(--fade-up),#000_calc(100%-var(--fade-down)),transparent)] data-more-down:[--fade-down:7px] data-more-up:[--fade-up:7px] phone:data-more-down:[--fade-down:10px] phone:data-more-up:[--fade-up:10px]',
-                    !registry.composerPlus && 'pl-3',
-                    text ? 'whitespace-pre-wrap' : 'whitespace-nowrap',
-                  )}
-                />
-                {!text ? (
-                  <span
-                    aria-hidden="true"
-                    className={clsx('pointer-events-none absolute inset-y-0 right-0 flex items-center text-fg3', registry.composerPlus ? 'left-1.5' : 'left-3')}
-                  >
-                    <span className="truncate">{placeholder}</span>
-                  </span>
-                ) : null}
-              </div>
-              <div data-btns className="col-start-3 flex items-center gap-1">
-                {Mic ? <Mic chatKey={chatKey} /> : null}
-                {text.trim() || files.length || !Idle ? (
-                  <button
-                    type="button"
-                    aria-label="Send"
-                    // Shepherdr 3 on a phone: a long press on Send holds it until the agent is free (the phone's Ctrl+Enter)
-                    onPointerDown={() => { held.current = false; holdTimer.current = setTimeout(() => { held.current = true; buzz(); send(true) }, 500) }}
-                    onPointerUp={() => clearTimeout(holdTimer.current)}
-                    onPointerLeave={() => clearTimeout(holdTimer.current)}
-                    onContextMenu={(e) => e.preventDefault()}
-                    onClick={() => {
-                      if (held.current) return
-                      // a light tap from the phone as it goes, like ChatGPT's
-                      if (matchMedia('(pointer: coarse)').matches) buzz()
-                      send()
-                    }}
-                    className="press-dim relative grid size-[34px] shrink-0 place-items-center rounded-full bg-fg text-bg after:absolute after:-inset-1.5 phone:size-11"
-                  >
-                    <UpIcon className={ic} />
-                  </button>
-                ) : (
-                  <Idle chatKey={chatKey} />
-                )}
-              </div>
-            </>
-          )}
-        </div>
+                  className="press-dim relative grid size-[34px] shrink-0 place-items-center rounded-full bg-fg text-bg after:absolute after:-inset-1.5 phone:size-11"
+                >
+                  <UpIcon className={ic} />
+                </button>
+              ) : (
+                <Idle chatKey={chatKey} />
+              )}
+            </div>
+          </>
+        )}
       </div>
-      <AgentLine chatKey={chatKey} cli={cli} />
     </div>
   )
 }
@@ -2194,7 +2192,7 @@ function PlusOpen({ chatKey, file, photo }: { chatKey: string; file: RefObject<H
   const settings = snap ? registry.composerSettings.filter((x) => x.when(snap, chatKey)) : []
   return (
     <Menu label={WORDS.attach} tabs onClose={close} className="mb-2 w-fit max-w-full origin-bottom-left">
-      {/* a phone's paperclip: Attach files, or its camera; the model is the button under the box */}
+      {/* a phone's paperclip: Attach files, or its camera; the model is the button in the box */}
       <MenuItem
         icon={<FileIcon className={ic} />}
         onClick={() => {

@@ -307,7 +307,7 @@ function PlaceColumn({ place, pane }: { place: Place; pane?: number }) {
   // named by the sidebar and the tab bar, as in the window.
   const tab = term?.startsWith('t:') ? place.tabs?.find((t) => t.term === term) : undefined
   const name = tab ? (tab.prog ?? 'Shell') : (place.header ?? 'Assistant')
-  const where = tab ? tab.where : place.where
+  const where = tab ? tab.where : place.cwd ?? place.where
   // another agent tab switched to Chat shows its own chat (its terminal otherwise: the terminal plugin's chatBody)
   const tabChat = useUI((u) => (tab && u.tabView?.[tab.term] === 'chat' ? tab.term : null))
   return (

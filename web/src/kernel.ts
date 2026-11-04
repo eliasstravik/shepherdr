@@ -1170,7 +1170,8 @@ export function orderedTasks(snap: Snapshot, list: ListView) {
 export function placeKind(snap: Snapshot, p: Place) {
   // 3.0's pane header: "Assistant · Claude Code" and the folder it works in (its machine too, where there are more)
   const on = manyMachines(snap) && p.machine !== snap.host ? ` · ${machineName(snap.machines, p.machine)}` : ''
-  return `${p.header ?? 'Assistant'}${p.where ? ` · ${p.where}` : ''}${on}`
+  const where = p.cwd ?? p.where
+  return `${p.header ?? 'Assistant'}${where ? ` · ${where}` : ''}${on}`
 }
 
 /** the open task's agent, whose chat is on screen */

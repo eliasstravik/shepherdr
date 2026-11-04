@@ -557,6 +557,8 @@ export class Conversation {
         for (const id of ids) {
           if (id === "ASYNC" || id.startsWith("TASK=")) continue;
           if (task) this.backgrounded(id, task);
+          // A background call answered without a task id never started (cancelled, denied, failed): no job.
+          else this.bg = this.bg.filter((j) => j.id !== id || j.task);
           // The agent stopped a job itself (TaskStop): gone once that call is answered.
           if (this.stops.has(id)) { this.ended(null, this.stops.get(id)); this.stops.delete(id); }
           // A helper that answered (not one launched to run on its own) is done.
