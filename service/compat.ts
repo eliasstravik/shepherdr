@@ -63,6 +63,18 @@ export class Compat {
   shared: { value(key: string): any; set(key: string, value: unknown): Promise<unknown> } | null = null;
   host = "";
 
+  /** Agents' secret asks (service/secrets.ts), set by main. */
+  secrets: { asks(): { address: string; name: string; why: string }[] } | null = null;
+
+  /** A secret ask as 2.1's masked card: kept for this space, this machine, or Everywhere. */
+  secretAsk(a: { address: string; name: string; why: string }) {
+    const t: any = (this as any).terminalsOf?.(a.address);
+    const sp = ["herdr.space", "herdr.task.space", "herdr.coordinator.space"].map((k) => t?.labels?.[k]).find(Boolean);
+    const m = a.address.includes("/") ? a.address.split("/")[0] : "";
+    return { id: `secret:${a.address}:${a.name}`, name: a.name, ...(a.why ? { why: a.why } : {}),
+      levels: [...(sp ? [{ id: `p:${m}:${sp}`, label: "This space" }] : []), { id: `m:${m}`, label: m || "This computer" }, { id: "all", label: "Everywhere" }] };
+  }
+
   /** The reader of a chat someone follows now (service/chats.ts), set by main. */
   reader: ((addr: string) => any) | null = null;
 
@@ -149,6 +161,14 @@ export class Compat {
       needs.push({ id: a.id, chat: key, place, ...(task ? { task } : {}), at: a.at, question: this.question(a, key) });
     }
 
+    for (const a of this.secrets?.asks() ?? []) {
+      const key = keyOf.get(a.address);
+      if (!key) continue;
+      const task = key.endsWith("/worker") ? key.slice(0, -7) : undefined;
+      const place = task ? tasks.find((x) => x.id === task)?.place ?? "" : places.find((p) => p.chat === key)?.id ?? "";
+      needs.push({ id: `secret:${a.address}:${a.name}`, chat: key, place, ...(task ? { task } : {}), at: Date.now(), secret: this.secretAsk(a) });
+    }
+
     const pinned = spaces.filter((s) => s.pinned).map((s) => s.id);
     const sections: Section[] = [
       ...(pinned.length ? [{ id: "pinned", name: "Pinned", spaces: pinned }] : []),
@@ -201,6 +221,7 @@ export class Compat {
     // what the agent asks now, as cards at the end of its chat
     const addr = this.chats.get(key);
     for (const a of addr ? this.asks?.of(addr) ?? [] : []) messages.push({ id: `ask:${a.id}`, who: "agent", at: a.at, question: this.question(a, key) });
+    for (const a of (this.secrets?.asks() ?? []).filter((x) => x.address === addr)) messages.push({ id: `secret:${a.address}:${a.name}`, who: "agent", at: Date.now(), secret: this.secretAsk(a) } as Message);
     const st = t?.status?.state ?? null;
     return { key, messages, working: st === "working", cli: reader.kind === "codex" ? "codex" : "claude", ...(reader.pinned || (t && t.state !== "live") ? { finished: true } : {}) };
   }

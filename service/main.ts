@@ -28,6 +28,7 @@ import { worktree } from "./worktree.ts";
 import { browserRelay } from "./browser.ts";
 import { Artifacts } from "./artifacts.ts";
 import { Settings } from "./settings.ts";
+import { Secrets } from "./secrets.ts";
 import * as NF from "../core/notify.js";
 const { withEverywhere, withSpace } = NF as any;
 
@@ -55,6 +56,13 @@ const model = new Model(hub, live);
 live.chats = new Chats(hub);
 live.compat = compat;
 compat.reader = (a) => live.chats?.reader(a) ?? null;
+const secrets = new Secrets(hub);
+compat.secrets = secrets;
+(compat as any).terminalsOf = (a: string) => hub.terminals.get(a);
+let secretNames: { name: string; at: number }[] = [];
+const refreshSecrets = async () => { secretNames = await secrets.names(); model.rebuild(); };
+void refreshSecrets();
+setInterval(() => void refreshSecrets(), 30_000);
 const settings = new Settings();
 settings.on(() => { model.rebuild(); void tailnet(); });
 settings.start();
@@ -75,7 +83,7 @@ store.on(() => model.rebuild());
 void store.load().catch(() => {});
 model.onBuild = (b) => live.setSnapshot(compat.snapshot({
   host: me?.host ?? "this machine", user: me?.name ?? "You", spaces: b.spaces, sections: b.sections, rows: b.rows, artifacts: artifacts.list,
-  settings: settings.sections(me ? `https://${me.dns}/shepherdr/` : null),
+  settings: [...settings.sections(me ? `https://${me.dns}/shepherdr/` : null), { name: "Secrets", level: "all", rows: [], secrets: secretNames }],
   machines: [{ name: me?.host ?? "this machine", here: true, state: "connected" }, ...b.machines.map((name) => ({ name, here: false, state: "connected" }))],
 }));
 model.start();
@@ -194,6 +202,16 @@ const server = Bun.serve<{ who: string }>({
     }
     if (path === "/api/action" && req.method === "POST") {
       const body = await req.json().catch(() => null);
+      if (body?.type === "secret" && typeof body.name === "string" && typeof body.level === "string") {
+        // a value goes straight to the vault (herdr-secret set, from stdin); the agent hears its name only
+        try {
+          const card = body.card && typeof body.card.chat === "string" ? { address: compat.addrOf(body.card.chat) ?? "" } : undefined;
+          if (card && !card.address) throw new Error("That agent isn't here any more.");
+          await secrets.keep(body.level, body.name, typeof body.value === "string" ? body.value : null, card);
+          await refreshSecrets();
+          return json({ ok: true });
+        } catch (err) { return new Response((err as Error).message, { status: 400 }); }
+      }
       if (body?.type === "setting" && body.key === "notify") {
         // a space's Notify (from its menu or Settings), or Everywhere's, in 3.0's shared "notify"
         const v = typeof body.value === "string" ? body.value : null, n = model.value("notify") ?? {};

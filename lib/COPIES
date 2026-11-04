@@ -20,6 +20,7 @@ core/spaces.js: chat spaces-chat
 core/chat-reader.js: chat
 core/worktree.js: task-changes task-pr
 core/recipe.js: artifacts
+core/secrets.js: chat shepherdr-settings tabs-tasks
 taskwhere.js: task-files task-changes task-pr task-browser
 emoji-data.js: chat-react spaces-chat
 notify.js: chat spaces-chat tabs-tasks tasks shepherdr-settings workspace-status-chat

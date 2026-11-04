@@ -782,7 +782,7 @@
       "addon": "secrets",
       "title": "Secret cards and vault",
       "core": [
-        "asks"
+        "secrets"
       ],
       "herdr": {
         "mods": [
@@ -801,7 +801,9 @@
         "tablet": "Same",
         "phone": "Same; masked field, nothing kept in the browser"
       },
-      "planned": "The masked secret card"
+      "service": [
+        "secrets.ts"
+      ]
     },
     {
       "id": "jump",
