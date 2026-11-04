@@ -14,7 +14,21 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - GitHub runs the whole check on every pull request to main and after each merge: the Check workflow
   (`.github/workflows/check.yml`). Merging waits for it. A failure's log is `gh run view <run> --log-failed`.
 - Still write tests with your change: the installer's in `test/test_install.py`, the repo's rules in
-  `test/test_repo.py`, herdr-task's in `test/test_herdr_task.py`.
+  `test/test_repo.py`, herdr-task's in `test/test_herdr_task.py`. herdr-task's can use a real throwaway git repo
+  (tempfile) for git logic and mock only hc and gh.
+
+## Trying a change
+
+- A fresh worktree: `bun install && bun web/build-plugins.ts` before `bunx tsc` or a build (else missing types and
+  `web/generated`).
+- A branch's web app on the machine that serves it: build it (`bun run build`), then send `bin/shepherdr`'s
+  `pack(<worktree>)` to `INSTALL_THERE` over `hc exec --on <machine> --stdin` (what `cmd_web_install_on` does from
+  the installed copy). Browser pages can't use the local service on 127.0.0.1.
+- `herdr-browser screenshot` takes an absolute path (a relative one lands in the repo). Headless agent-browser has no
+  hover: restart its session with
+  `--args "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4"`.
+- Claude Code may log an agent's message only as a thinking block: replay a real log through `core/chat-log.js`
+  before blaming the reader.
 
 ## Add-ons
 

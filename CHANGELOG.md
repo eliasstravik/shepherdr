@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.1.2
+
+Fixes and small wishes on top of 3.1.1, mostly the web app.
+
+- Web chat: what you send reaches the agent at once, pictures show at once and sent bubbles no longer stick at the
+  bottom. The composer matches the window's (model picker in the box), the working line says what the agent does,
+  and long messages Claude Code shortens into updates show in the chat, in the window too.
+- Web on a phone: one compact toast per event, named as the window names them; Tasks rows fit. The sidebar has no
+  hover ⋯: right-click or long-press opens the menu.
+- Reactions sit flush under the bubble's outer edge, each side's row mirroring the other's.
+- Artifacts: every artifact is a recipe by default, so it opens on the phone (a custom one shows its picture there);
+  the Artifacts panel opens on All.
+- A task counts as merged only when its own work landed: catching up with main is never "done: merged".
+- Workers keep working while they wait on CI or another machine, and only stop for a decision the person must make
+  (worker.md).
+
 ## 3.1.1
 
 Fixes and small wishes on top of 3.1.0.
