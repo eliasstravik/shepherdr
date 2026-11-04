@@ -85,7 +85,7 @@ Settings → Web shows the new link and its QR code everywhere. It needs Python 
 | Autopilot wakes and automations | each machine's own scheduler (one per machine: herdr-task's lock); the tick above only checks it runs |
 | News, the memory guard, retries of cut turns | inside each machine's tick, so with it |
 | Push alerts to phones | the host only (the pages subscribe there) |
-| A web page's question cards (the ask flag) | the host, on the agent's machine through the link |
+| A web page's question cards (the ask flag; the cards read and answered there) | the host, on the agent's machine through the link |
 | Serving secrets to another machine's agents | the machine holding the vault (herdr-secret refuses elsewhere) |
 | Sharing `/shepherdr` on the tailnet | the host only |
 

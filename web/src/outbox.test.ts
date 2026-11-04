@@ -26,8 +26,8 @@ test('nor what another agent sent', () => {
 })
 
 test("a file that landed on the agent's machine", () => {
-  const o = sent({ text: '', files: [{ name: 'a.png', path: '/home/x/.config/herdr-app/data/chat-attach/a.png' }] })
-  expect(settle([o], chat([{ id: 'u2:f0', who: 'you', at: 10_800, file: { name: 'a.png', path: '/Users/x/.herdr/put/p1/a.png' } }]))).toEqual([])
+  const o = sent({ text: '', files: [{ name: 'a.png', path: '~/.config/herdr-app/data/chat-attach/a.png' }] })
+  expect(settle([o], chat([{ id: 'u2:f0', who: 'you', at: 10_800, file: { name: 'a.png', path: '/var/put/p1/a.png' } }]))).toEqual([])
 })
 
 test('without the server time it waits', () => {

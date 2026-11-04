@@ -142,7 +142,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
   if (b?.type === "answer" && typeof b.question === "string") {
     // a hook ask's card (its id is the request's): answered as the window's card answers it
     if (!compat.asks) throw new Error("No questions here.");
-    (compat.asks as any).answer(str(b.question, 200), { choice: typeof b.choice === "number" ? b.choice : undefined,
+    await (compat.asks as any).answer(str(b.question, 200), { choice: typeof b.choice === "number" ? b.choice : undefined,
       choices: Array.isArray(b.choices) ? b.choices.filter((n: unknown) => typeof n === "number") : undefined,
       note: typeof b.note === "string" ? b.note.slice(0, 4000) : undefined, other: typeof b.other === "string" ? b.other.slice(0, 4000) : undefined,
       answers: Array.isArray(b.answers) ? b.answers.slice(0, 20).map((x: unknown) => String(x ?? "").slice(0, 4000)) : undefined,

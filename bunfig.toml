@@ -1,0 +1,3 @@
+[test]
+# every test's service data in a throwaway folder, never the real ~/.herdr/shepherdr
+preload = ["./test/preload.ts"]
