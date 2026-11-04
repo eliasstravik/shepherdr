@@ -281,6 +281,17 @@ function claudeUser(c) {
     replyTo: parts[0].replyTo, quoted: parts[0].quoted, rest: parts[0].rest };
 }
 
+// Claude Code may show the person a message it wrote mid-turn (before a call) as a short update in other words
+// (thinkingDisplay "updates"): what it wrote never reaches the log, nor its <hc react> lines. The update is a
+// thinking block the terminal shows as a message, its signature naming it narration ("narration" in base64, at
+// each of its three alignments): the chat shows it as the agent's message too. Real thinking stays hidden (empty
+// in the log, or "summarized").
+const NARRATION = /bmFycmF0aW9u|5hcnJhdGlvb|uYXJyYXRpb2/;
+function narration(l, b) {
+  if (b?.type !== "thinking" || typeof b.thinking !== "string" || !b.thinking.trim()) return false;
+  return l.thinkingDisplay === "updates" || NARRATION.test(String(b.signature ?? "").slice(0, 80));
+}
+
 const short = (p) => {
   const s = String(p ?? "");
   const parts = s.split("/").filter(Boolean);
@@ -673,8 +684,9 @@ export class Conversation {
         this.meta = { ...this.meta, model: m.model, effort: l.perTurnEffort ?? this.meta.effort, speed: u.speed ?? this.meta.speed, used: used || this.meta.used, at: time(l.timestamp) };
       }
       for (const b of Array.isArray(m.content) ? m.content : []) {
-        if (b?.type === "thinking" && !this.open.size) this.doing = "Thinking";
-        const said = b?.type === "text" ? this.agentText(b.text ?? "") : "";
+        const told = narration(l, b);
+        if (b?.type === "thinking" && !told && !this.open.size) this.doing = "Thinking";
+        const said = b?.type === "text" ? this.agentText(b.text ?? "") : told ? this.agentText(b.thinking) : "";
         if (said) {
           // One reply can be written over several lines with the same id.
           const prev = this.replies.get(id);
