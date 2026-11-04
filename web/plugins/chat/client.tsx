@@ -1918,13 +1918,13 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                   // at most 8 lines (less with a phone's keyboard up): past that it scrolls inside, an edge with more
                   // words past it fading out over its padding, so no line looks cut and every whole line stays crisp
                   // (the one you type too), the scrollbar only while it moves
-                  'max-h-[min(calc(8lh+0.875rem),calc(var(--app-h,100dvh)*0.32))] min-h-[34px] w-full flex-1 resize-none self-center overflow-y-auto overscroll-y-contain bg-transparent px-2.5 py-[7px] text-fg outline-none phone:max-h-[min(calc(8lh+1rem),calc(var(--app-h,100dvh)*0.32))] phone:min-h-10 phone:py-2',
+                  'max-h-[min(calc(8lh+0.875rem),calc(var(--app-h,100dvh)*0.32))] min-h-[34px] w-full flex-1 resize-none self-center overflow-y-auto overscroll-y-contain bg-transparent px-2.5 py-[7px] text-fg outline-none phone:max-h-[min(calc(8lh+1rem),calc(var(--app-h,100dvh)*0.32))] phone:min-h-10 phone:px-3.5 phone:py-2',
                   '[--fade-down:0px] [--fade-up:0px] [mask-image:linear-gradient(transparent,#000_var(--fade-up),#000_calc(100%-var(--fade-down)),transparent)] data-more-down:[--fade-down:7px] data-more-up:[--fade-up:7px] phone:data-more-down:[--fade-down:10px] phone:data-more-up:[--fade-up:10px]',
                   text ? 'whitespace-pre-wrap' : 'whitespace-nowrap',
                 )}
               />
               {!text ? (
-                <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-2.5 left-2.5 flex items-center text-fg3">
+                <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-2.5 left-2.5 flex items-center text-fg3 phone:right-3.5 phone:left-3.5">
                   <span className="truncate">{placeholder}</span>
                 </span>
               ) : null}
