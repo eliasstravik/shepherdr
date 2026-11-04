@@ -192,7 +192,7 @@ function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, di
             {/* on a phone whole or not at all, as on the second line */}
             {!two && place ? (
               <span className={clsx('flex h-full min-w-0 shrink-[1000] items-center justify-end phone:flex-wrap phone:content-start phone:overflow-hidden', !meta && 'pl-1')}>
-                <span className="grow" />
+                <span className="h-full grow" />
                 <span className="flex h-full min-w-0 items-center phone:shrink-0">{place}</span>
               </span>
             ) : null}
@@ -202,9 +202,9 @@ function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, di
               {idCol ? <span style={idCol} className="shrink-0 font-mono text-[0.75rem] phone:text-[0.8125rem]" /> : null}
               {shown ? <span className="min-w-0 shrink truncate text-[0.75rem] text-fg2 phone:text-[0.8125rem]">{shown}</span> : null}
               {/* where it is takes the room the status line leaves; on a phone whole or not at all (it drops under the
-                  line, out of sight), never a cut "shep…" */}
+                  line, out of sight: the empty first item keeps the line its height), never a cut "shep…" */}
               <span className="flex h-full min-w-0 flex-1 items-center justify-end phone:flex-wrap phone:content-start phone:overflow-hidden">
-                {place ? <span className="grow" /> : null}
+                {place ? <span className="h-full grow" /> : null}
                 {place ? <span className="flex h-full min-w-0 items-center phone:shrink-0">{place}</span> : null}
               </span>
               {action}
