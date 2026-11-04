@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import type { Hub } from "./hub.ts";
 import { HOME } from "./paths.ts";
 import * as V from "../core/voice.js";
+import { refusal } from "../core/send.js";
 
 const { API, agentSpec, opening, replyLine, statusLine, envLines, apiError } = V as any;
 const APP = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
@@ -72,11 +73,9 @@ export function voiceCall(hub: Hub, addr: string, who: string, view: ChatView, p
   }, 1000);
 
   async function sendToAgent(text: string) {
-    const env = { ...process.env };
-    // the person's own message, not tagged as from another terminal
-    delete env.HC_TERMINAL_ID; delete env.HC_TERMINAL_SOCKET; delete env.HC_SCOPE;
-    const p = Bun.spawn([process.env.SHEPHERDR_HC || "hc", "send", addr, text], { env, stdout: "pipe", stderr: "pipe" });
-    if ((await p.exited) !== 0) throw new Error((await new Response(p.stderr).text()).trim() || "It didn't go through.");
+    // the person's own message, not tagged as from another terminal (Hub.send), on any machine
+    const r = await hub.send(addr, text);
+    if (r.code !== 0) throw new Error(refusal(r).message);
     return "Sent to the coding agent.";
   }
 

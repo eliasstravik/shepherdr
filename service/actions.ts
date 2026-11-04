@@ -39,7 +39,7 @@ function drain() {
         const i = held.indexOf(m);
         if (i < 0) continue;
         held.splice(i, 1);
-        if (alive) await sendBody({ hc, sleep: (ms: number) => Bun.sleep(ms), status: () => (m.hub.terminals.get(m.addr) as any)?.status?.state ?? null }, m.addr, m.kind, m.body).catch(() => null);
+        if (alive) await sendBody({ hc: asPerson(m.hub), sleep: (ms: number) => Bun.sleep(ms), status: () => (m.hub.terminals.get(m.addr) as any)?.status?.state ?? null }, m.addr, m.kind, m.body).catch(() => null);
       }
     } finally {
       busy = false;
@@ -73,7 +73,7 @@ function firstWhenIdle(hub: Hub, addr: string, text: string) {
     if (!t || t.state !== "live" || (t.turn ?? 0) > 0 || Date.now() > until) return clearInterval(timer);
     if (t.status?.state !== "idle") return;
     clearInterval(timer);
-    await hc(["send", addr, text]).catch(() => null);
+    await hub.send(addr, text);
   }, 2000);
 }
 
@@ -84,6 +84,8 @@ async function run(cmd: string[]) {
 }
 
 export const hc = (args: string[]) => run([process.env.SHEPHERDR_HC || "hc", ...args]);
+// hc for core/send.js, its sends as the person's (Hub.send: no <hc from=…> tag on another machine)
+const asPerson = (hub: Hub) => (args: string[]) => args[0] === "send" ? hub.send(args[1], args[2]) : hc(args);
 
 /** The machines added (hc machine ls), as Add machine marks them: not the temporary ones. */
 async function addedMachines() {
@@ -140,7 +142,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
   if (b?.type === "answer" && typeof b.question === "string") {
     // a hook ask's card (its id is the request's): answered as the window's card answers it
     if (!compat.asks) throw new Error("No questions here.");
-    (compat.asks as any).answer(str(b.question, 200), { choice: typeof b.choice === "number" ? b.choice : undefined,
+    await (compat.asks as any).answer(str(b.question, 200), { choice: typeof b.choice === "number" ? b.choice : undefined,
       choices: Array.isArray(b.choices) ? b.choices.filter((n: unknown) => typeof n === "number") : undefined,
       note: typeof b.note === "string" ? b.note.slice(0, 4000) : undefined, other: typeof b.other === "string" ? b.other.slice(0, 4000) : undefined,
       answers: Array.isArray(b.answers) ? b.answers.slice(0, 20).map((x: unknown) => String(x ?? "").slice(0, 4000)) : undefined,
@@ -154,7 +156,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (!item?.text) throw new Error("That message isn't in the chat any more.");
     const mine = (r.conv.reactions.get(b.message) ?? []).some((x: any) => x.by === "you" && x.emoji === b.emoji);
     if ((hub.terminals.get(a) as any)?.status?.state === "blocked") throw new Error("It's asking you something: answer that first.");
-    const res = await hc(["send", a, reactionLine(b.emoji, item.text, !mine)]);
+    const res = await hub.send(a, reactionLine(b.emoji, item.text, !mine));
     if (res.code !== 0) throw new Error(refusal(res).message);
     return { ok: true };
   }
@@ -394,7 +396,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (t?.status?.state === "working") throw new Error("The agent is working: stop it first, then rewind.");
     const users = (r?.conv?.items ?? []).filter((x: any) => x.kind === "user" && !x.from && !/^\//.test(x.text ?? ""));
     const i = users.findIndex((u: any) => u.id === b.message), back = i < 0 ? 1 : users.length - i;
-    if ((kindOf(t) ?? "claude") === "claude") { await hc(["send", a, "/rewind"]); await Bun.sleep(700); await hc(["keys", a, ...Array(back).fill("up")]); }
+    if ((kindOf(t) ?? "claude") === "claude") { await hub.send(a, "/rewind"); await Bun.sleep(700); await hc(["keys", a, ...Array(back).fill("up")]); }
     else { await hc(["keys", a, "esc", "esc"]); await Bun.sleep(500); if (back > 1) await hc(["keys", a, ...Array(back - 1).fill("left")]); }
     return { ok: true, terminal: true };
   }
@@ -499,7 +501,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       if (!text && !(Array.isArray(b.attachments) && b.attachments.length)) throw new Error("nothing to send");
       const t = hub.terminals.get(a);
       if (!t || t.state !== "live") throw new Error("That agent isn't running.");
-      const io = { hc, sleep: (ms: number) => Bun.sleep(ms), status: () => (hub.terminals.get(a) as any)?.status?.state ?? null };
+      const io = { hc: asPerson(hub), sleep: (ms: number) => Bun.sleep(ms), status: () => (hub.terminals.get(a) as any)?.status?.state ?? null };
       // files sent with it: their paths after the words, as the window's chat sends them (copied first to another machine)
       const files: string[] = [];
       for (const p of Array.isArray(b.attachments) ? b.attachments.slice(0, 20) : []) {
@@ -515,9 +517,11 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       // held on purpose (Ctrl+Enter, a long press): it goes once the agent stops working
       const st = (hub.terminals.get(a) as any)?.status?.state;
       if (b.hold && (st === "working" || st === "blocked")) { held.push({ addr: a, kind: kindOf(t) ?? "", body, hub, cid: typeof b.cid === "string" ? b.cid.slice(0, 80) : undefined }); drain(); return { ok: true, waiting: true, waitsFor: "turn" }; }
+      // when it began to go in, by this clock: the page knows it again in the chat by it (web/src/outbox.ts sameAs)
+      const at = Date.now();
       const r = await sendBody(io, a, kindOf(t) ?? "", body);
       if (r.code !== 0) throw new Error(refusal(r).message);
-      return { ok: true };
+      return { ok: true, at };
     }
     case "stop": {
       const r = await hc(["interrupt", addr(b.addr)]);

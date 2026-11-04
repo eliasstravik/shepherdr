@@ -165,6 +165,8 @@ const asks = new Asks();
 compat.asks = asks;
 asks.on(() => { model.rebuild(); live.chats?.refreshAll(); });
 asks.start();
+// another machine's agents a page shows (the web served from a machine other than theirs): their asks too
+asks.remote(hub, () => live.watched());
 // start screens and lost sessions of the agents whose chats pages have open, and of an open Assistant chat's workers
 // (service/watch.ts, as the window's chat watches them)
 const watch = new AgentWatch(hub, hcRun, {

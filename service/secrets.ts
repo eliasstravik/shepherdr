@@ -72,7 +72,7 @@ export class Secrets {
     if (!NAME.test(name)) throw new Error("Name it like an environment variable: GITHUB_TOKEN.");
     const s = scope(level);
     if (value === null) {
-      if (card) { await hc(["label", card.address, `${ASK}${name}=`]); await hc(["send", card.address, declinedLine(name)]); return; }
+      if (card) { await hc(["label", card.address, `${ASK}${name}=`]); await this.hub.send(card.address, declinedLine(name)); return; }
       const r = await run(["rm", name, ...s.args]);
       if (r.code !== 0) throw new Error(r.err.trim() || "It wasn't removed.");
       return;
@@ -84,7 +84,7 @@ export class Secrets {
     // as the window's: every agent waiting for this name hears it's kept
     for (const a of this.asks().filter((x) => x.name === name)) {
       await hc(["label", a.address, `${ASK}${name}=`]);
-      await hc(["send", a.address, keptLine(name, s.words)]);
+      await this.hub.send(a.address, keptLine(name, s.words));
     }
   }
 }
