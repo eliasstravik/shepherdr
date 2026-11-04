@@ -47,14 +47,15 @@ test("why a queued task waits", () => {
   expect(queueReason(l, { id: 4, state: "queued" }, 0)).toBe("Starts soon");
 });
 
-test("what the agent last said, with minutes only once they're a real estimate", () => {
+test("what the agent last said, with minutes from its very first estimate", () => {
   const task = (progress) => ({ id: 1, state: "running", progress });
-  expect(reportOf(task({ text: "Writing tests", done: 10, left: 600_000, at: NOW }), "working", null, NOW)).toEqual({ text: "Writing tests", done: 10, left: null, paused: false });
+  expect(reportOf(task({ text: "Starting", done: 0, left: 600_000, at: NOW }), "working", null, NOW)).toEqual({ text: "Starting", done: 0, left: 10, paused: false });
   expect(reportOf(task({ text: "Writing tests", done: 40, left: 600_000, at: NOW }), "working", null, NOW).left).toBe(10);
+  expect(reportOf(task({ text: "Writing tests", done: 40, at: NOW }), "working", null, NOW).left).toBeNull();
   expect(reportOf(task({ text: "x" }), "ready", null, NOW)).toBeNull();
   expect(reportOf(task(null), "working", { pct: 30, msg: "own words" }, NOW)).toMatchObject({ text: "own words", done: 30 });
-  expect(estimated({ left: 1, n: 2 }, null)).toBe(true);
-  expect(estimated({ left: 1 }, 14)).toBe(false);
+  expect(estimated({ left: 1 })).toBe(true);
+  expect(estimated({ done: 50 })).toBe(false);
 });
 
 test("order, words and keys", () => {

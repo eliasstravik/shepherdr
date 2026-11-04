@@ -60,7 +60,13 @@ DETAILS_OLD = ("Technical detail goes in `--details \"…\"` (any length, folded
 DETAILS_RULE = ("Ready refuses a longer summary. Technical detail goes in your proof or in `--details \"…\"` (folded in the "
                 "Accept card): a few short bullets in plain words, one `- ` per line: what changed for the person first, then how "
                 "it was checked; file names only where they help; never one dense paragraph.")
-WORKER_MD = WORKER_MD_BEFORE_DETAILS.replace(DETAILS_OLD, DETAILS_RULE)
+WORKER_MD_BEFORE_LEFT = WORKER_MD_BEFORE_DETAILS.replace(DETAILS_OLD, DETAILS_RULE)
+# Since every status gives the time left, a rough guess beats none (SHEP-13).
+LEFT_OLD = ("Leave out `--left` at the start: add about how long is left only once you know the work well enough for a real "
+            "estimate, never a first guess.")
+LEFT_RULE = ("Always add `--left` with your best estimate of how long is left (like 20m or 2h), from your very first status "
+             "on, and update it at every step as you learn more. A rough guess beats none.")
+WORKER_MD = WORKER_MD_BEFORE_LEFT.replace(LEFT_OLD, LEFT_RULE)
 
 REVIEWER_MD = """You review one Herdr task's work before it can merge. Read only: never edit files, commit or push.
 - Read the task, then the diff of its branch against its base, and run the project's checks.
@@ -79,7 +85,7 @@ OLD_WORKER_READY = """You work on one Herdr task. Stay within the task's scope a
 - When the work is finished, run the `herdr-task ready` command given at the end of your brief, with a short summary. That puts the task in Ready for the person, who accepts it. Never mark a task done yourself.
 """
 OLD_WORKER_MD = OLD_WORKER_READY.split("- When the work is finished")[0]
-OLD_WORKERS = (WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
+OLD_WORKERS = (WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
 
 
 TEMPLATE_HEADS = {

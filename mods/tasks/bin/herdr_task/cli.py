@@ -193,7 +193,7 @@ def main():
     c = cmd("status", cmd_status, "a task's agent says what it's doing now, at the start and each natural step: status 4 \"Fixing the two failing tests\" --done 40 --left 5m")
     c.add_argument("text", help=f"what it is doing, at most {LINE_MAX} characters (longer is cut at a word)")
     c.add_argument("--done", type=int, help="how far through the whole task, 0-100 (%%)")
-    c.add_argument("--left", help="about how long is left: 5m, 90s, 1h30m; only once it is a real estimate, not at the start")
+    c.add_argument("--left", help="your best guess of how long is left: 5m, 90s, 1h30m; on every status, the first too (a rough guess beats none)")
     c = cmd("alert", cmd_alert, "tell the person something that can't wait: a toast and a sound (an Assistant's follow its space's Notify): alert \"Deploy is down\" --body \"why\"", id=False)
     c.add_argument("title", help="what can't wait, a few words")
     c.add_argument("--body", help="why, a line or two")

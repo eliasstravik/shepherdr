@@ -298,7 +298,7 @@ export interface Task {
   place: string
   /** second line in lists */
   sub?: string
-  /** Working: the minutes left under its row's dot, in the window's words ("6m", "<1m", "2h"), once a real estimate */
+  /** Working: the minutes left under its row's dot, in the window's words ("6m", "<1m", "2h"), once its agent gave them */
   left?: string
   /** Ready, its accept under way from the window's Accept card: its row and header say "Accepting…" */
   accepting?: boolean

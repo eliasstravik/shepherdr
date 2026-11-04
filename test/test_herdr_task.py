@@ -310,6 +310,45 @@ class BackToWork(unittest.TestCase):
         self.assertNotIn("attention", t)  # Ready, its Accept back
 
 
+class TimeLeft(unittest.TestCase):
+    """Every status gives the time left, a rough guess beats none (SHEP-13): the minutes show from
+    the first one, one without --left asks for it, and every brief and template says so. In memory."""
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.commands as commands
+        self.commands, self.said = commands, []
+        self.store = Store([{"id": 7, "title": "Web client", "state": "running", "agents": []}])
+        for name, value in (("open_store", lambda args, write=True: self.store), ("view", lambda s, t, live=None: {}),
+                            ("live_agents", lambda key: []), ("say", lambda args, data, text: self.said.append(text))):
+            p = mock.patch.object(commands, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def status(self, left=None, done=None):
+        import argparse
+        self.commands.cmd_status(argparse.Namespace(id="SHEP-7", json=False, folder=None, text="Starting", done=done, left=left))
+        return self.said[-1]
+
+    def test_the_first_status_shows_its_minutes(self):
+        from herdr_task.output import report_of
+        self.status("20m", 0)
+        self.assertEqual(report_of(self.store.find(7), "working")["left"], 20)
+
+    def test_a_status_without_left_asks_for_it(self):
+        self.assertIn("Add --left", self.status())
+        self.assertNotIn("Add --left", self.status("20m"))
+
+    def test_every_brief_and_template_says_always(self):
+        from herdr_task import templates
+        launch = open(os.path.join(BIN, "herdr_task", "launch.py")).read()
+        for words in (templates.WORKER_MD, open(os.path.join(ROOT, "templates", "worker.md")).read(), launch):
+            self.assertNotIn("real estimate", words)
+            self.assertIn("rough guess beats none", words)
+        self.assertIn(templates.WORKER_MD_BEFORE_LEFT, templates.OLD_WORKERS)  # an unedited old one gets today's
+
+
 class Store:
     """Enough of herdr_task.store.Store for the commands, in memory."""
     def __init__(self, tasks):
