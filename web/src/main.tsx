@@ -6,7 +6,7 @@ import plugins, { enabled, user } from '../generated/client-plugins.ts'
 import App from './App.tsx'
 import { watchKeys } from './focus.ts'
 import { pluginFailed, usePluginErrors } from './guard.tsx'
-import { connect, getState, installPlugins, registry, setUI, useStore, useUI } from './kernel.ts'
+import { connect, getState, installPlugins, registry, setUI, useStore, useUI, type ClientPlugin } from './kernel.ts'
 import { watchScrolling } from './scrolling.ts'
 import Settings, { sectionOf, withPluginErrors } from './Settings.tsx'
 import { watchViewport } from './viewport.ts'
@@ -92,7 +92,7 @@ registry.overlays.push(AcceptCard, WorktreeDialog, AddMachineDialog, RoleSheet)
 registry.sideFoot.push({ order: 90, View: AddMachineButton })
 // the human's own plugins load first, each on its own: one that throws as it loads is left out
 const loaded = await Promise.all(
-  plugins.map(async (p) => {
+  plugins.map(async (p: ClientPlugin | { name: string; load: () => Promise<{ default: ClientPlugin }> }) => {
     if (!('load' in p)) return p
     try {
       return (await p.load()).default
@@ -105,7 +105,7 @@ const loaded = await Promise.all(
 // the add-ons switched off in Settings › Window: their plugins are left out (a change later reloads the page)
 const off: string[] = await fetch('api/me').then((r) => r.json()).then((m) => m.off ?? [], () => []).catch(() => [])
 Object.assign(window, { shepherdrOff: off })
-installPlugins(loaded.filter((p): p is NonNullable<typeof p> => p !== null && !off.includes(p.name)), enabled.filter((n) => !off.includes(n)), user)
+installPlugins(loaded.filter((p: ClientPlugin | null): p is ClientPlugin => p !== null && !off.includes(p.name)), enabled.filter((n: string) => !off.includes(n)), user)
 connect()
 watchViewport((keyboard) => setUI({ keyboard }))
 watchScrolling()

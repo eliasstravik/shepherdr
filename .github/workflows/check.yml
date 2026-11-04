@@ -58,6 +58,7 @@ jobs:
       - name: service, shared core and web app (types, tests, build)
         run: |
           bun install --frozen-lockfile
+          bun web/build-plugins.ts   # web/generated/ (not in git): the plugin list the app imports
           bunx tsc --noEmit -p .
           bun test service core web
           bun run build
