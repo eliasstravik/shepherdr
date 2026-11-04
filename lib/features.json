@@ -866,8 +866,7 @@
         "desktop": "? opens the web keys",
         "tablet": "Same with a keyboard",
         "phone": "Not shown (no keyboard)"
-      },
-      "planned": "3.0's keys"
+      }
     },
     {
       "id": "artifacts",

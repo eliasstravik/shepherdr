@@ -576,6 +576,12 @@ function openPlace(id: string, e: { metaKey: boolean; ctrlKey: boolean }) {
  *  that. It drags among those beside it, a home space too, or onto another section it may go in. */
 function Space({ p, snap, sort, at }: { p: Place; snap: Snapshot; sort: Sort; at: 'top' | 'machine' | 'inner' }) {
   const rename = useRename(p, snap)
+  // Shift+F2 (3.0's rename-space): the shown space's row takes its name box
+  useEffect(() => {
+    const on = (e: Event) => (e as CustomEvent<string>).detail === p.id && rename.start()
+    addEventListener('shepherdr:rename', on)
+    return () => removeEventListener('shepherdr:rename', on)
+  }, [p.id, rename.start])
   const top = at === 'top'
   const group = sort.under
   const r = usePlaceRow({ p: { ...p, name: rename.name }, snap, where: top && manyMachines(snap) ? machineName(snap.machines, p.machine) : undefined })

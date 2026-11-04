@@ -19,6 +19,8 @@ import {
 } from '@client/kernel.ts'
 import { keysMoved } from '@client/focus.ts'
 import { toggleDictation } from '@plugins/chat/client.tsx'
+import { openFind } from '@plugins/chat/find.tsx'
+import { toggleCall } from '@plugins/voice/client.tsx'
 import { ALT, CTRL, Kbd, KeyboardIcon, MOD, SHIFT } from '@client/ui.tsx'
 import { rowLook, sectionOf } from '@client/Settings.tsx'
 import type { Snapshot } from '@shared/types.ts'
@@ -47,6 +49,15 @@ export const KEYS: [string[], string][] = [
   [['A'], 'Attach a file'],
   [['Tab'], 'Move through buttons, form choices and Send'],
   [['?'], 'These shortcuts'],
+  // 3.0's window keys, the same on the web
+  [[ALT, '1–9'], "The space's tabs: 1 its chat, then each other tab's terminal"],
+  [[ALT, '←', '→'], 'Previous or next tab'],
+  [[CTRL, 'F'], 'Search in this chat'],
+  [[CTRL, SHIFT, 'K'], 'Search and jump'],
+  [[CTRL, SHIFT, 'D'], 'Dictate into the message box'],
+  [[CTRL, SHIFT, 'Space'], 'Voice call'],
+  [[SHIFT, 'F2'], 'Rename this space'],
+  [[CTRL, SHIFT, '?'], 'These shortcuts'],
 ]
 
 const SHORTCUTS = 'Keyboard shortcuts'
@@ -98,6 +109,47 @@ export default definePlugin({
     reg.keys.push({
       order: 10,
       handle: ({ e, ui, snap }) => {
+        // 3.0's window keys that work while typing too
+        const chatNow = () => keysChat(ui, snap)
+        if (e.ctrlKey && e.shiftKey && !e.altKey && e.code === 'KeyD') {
+          e.preventDefault()
+          toggleDictation(chatNow())
+          return true
+        }
+        if (e.ctrlKey && e.shiftKey && !e.altKey && e.code === 'Space' && has('voice')) {
+          e.preventDefault()
+          toggleCall(chatNow())
+          return true
+        }
+        if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && e.code === 'KeyF') {
+          e.preventDefault()
+          openFind(chatNow())
+          return true
+        }
+        if (e.ctrlKey && e.shiftKey && (e.code === 'Slash' || e.key === '?')) {
+          const section = sectionOf(SHORTCUTS, snap.settings, { ...ui, kb: true })
+          if (section < 0) return false
+          e.preventDefault()
+          setUI({ settings: ui.settings?.section === section ? null : { section }, kb: true })
+          return true
+        }
+        if (e.shiftKey && e.key === 'F2') {
+          e.preventDefault()
+          dispatchEvent(new CustomEvent('shepherdr:rename', { detail: ui.place }))
+          return true
+        }
+        // Alt+1–9 and Alt+←/→: the space's tabs, its chat first, then each other tab's terminal (3.0's tab bar)
+        if (e.altKey && !e.ctrlKey && !e.metaKey && (/^Digit[1-9]$/.test(e.code) || (!typing(e) && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')))) {
+          const place = snap.places.find((p) => p.id === ui.place)
+          if (!place) return false
+          const tabs = [null, ...(place.tabs ?? []).map((t) => t.term)]
+          const now = Math.max(0, tabs.indexOf(ui.term?.startsWith('t:') ? ui.term : null))
+          const to = e.code.startsWith('Digit') ? Number(e.code.slice(5)) - 1 : (now + (e.code === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length
+          if (to >= tabs.length) return false
+          e.preventDefault()
+          setUI({ term: tabs[to], task: null, arts: null, menu: false, plus: null, pick: null, kb: true })
+          return true
+        }
         if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
           e.preventDefault()
           setUI({ search: !ui.search, searchScope: undefined, focus: null })
