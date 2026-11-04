@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { sendBody, messageBody, refusal, reactionLine, mentionedIn, taskTag } from "../core/send.js";
 import { kindOf } from "../core/chat-reader.js";
+import * as AGa from "../core/agents.js";
+const { sessionOf, forkArgv } = AGa as any;
 import * as SP from "../core/spaces.js";
 const { READ, withMove, withSection, withoutSection, withSectionName, withIcon } = SP as any;
 import type { Compat } from "./compat.ts";
@@ -143,6 +145,27 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const opt = (v: unknown) => (typeof v === "string" && /^[\w.\[\]-]{1,60}$/.test(v) ? v : undefined);
     const next = await compat.agents.restart(a, reader, { kind: b.kind, model: opt(b.model), effort: opt(b.effort), speed: opt(b.speed) });
     return { ok: true, terminal: next };
+  }
+  if (b?.type === "rewind" && typeof b.chat === "string" && typeof b.message === "string") {
+    // the CLI's own rewind on that message, as the window's: Claude Code's /rewind lists the prompts newest last (Up
+    // once per later prompt); Codex's Esc Esc browses back from the last (Left). Then its terminal shows it.
+    const a = chat(b.chat), t: any = hub.terminals.get(a), r = compat.reader?.(a);
+    if (t?.status?.state === "working") throw new Error("The agent is working: stop it first, then rewind.");
+    const users = (r?.conv?.items ?? []).filter((x: any) => x.kind === "user" && !x.from && !/^\//.test(x.text ?? ""));
+    const i = users.findIndex((u: any) => u.id === b.message), back = i < 0 ? 1 : users.length - i;
+    if ((kindOf(t) ?? "claude") === "claude") { await hc(["send", a, "/rewind"]); await Bun.sleep(700); await hc(["keys", a, ...Array(back).fill("up")]); }
+    else { await hc(["keys", a, "esc", "esc"]); await Bun.sleep(500); if (back > 1) await hc(["keys", a, ...Array(back - 1).fill("left")]); }
+    return { ok: true, terminal: true };
+  }
+  if (b?.type === "fork" && typeof b.chat === "string") {
+    // a copy of the conversation in a new tab of its space, through the CLI's own fork (the window makes the tab)
+    const a = chat(b.chat), t: any = hub.terminals.get(a), r = compat.reader?.(a);
+    const kind = kindOf(t) ?? "claude", session = sessionOf(kind, r?.path ?? null);
+    if (!session) throw new Error("This conversation has no saved session to fork.");
+    const space = ["herdr.space", "herdr.task.space", "herdr.coordinator.space"].map((k) => t?.labels?.[k]).find(Boolean);
+    const res = await run(["herdr-app", "do", "tab.new", ...(space ? ["--space", space] : []), "--folder", t?.foreground?.cwd ?? t?.cwd ?? "", "--argv", JSON.stringify(forkArgv(kind, t?.foreground?.argv ?? t?.argv ?? [], session))]);
+    if (res.code !== 0) throw new Error("A fork opens as a tab in the Herdr window: it needs the window open.");
+    return { ok: true };
   }
   if (b?.type === "keys" && typeof b.chat === "string" && Array.isArray(b.keys) && b.keys.length <= 32 && b.keys.every((k: unknown) => typeof k === "string" && k.length <= 40)) {
     const res = await hc(["keys", chat(b.chat), ...b.keys]);

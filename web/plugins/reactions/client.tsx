@@ -12,6 +12,14 @@ import { AWAY, buzz, moveTo, project, settleMs, SPRING, useMotion } from '@clien
 import { useDialogFocus } from '@client/focus.ts'
 import { follow as followFinger, mayPanDown } from '@client/gestures.ts'
 import { ClockIcon, CopyIcon, ic, MenuItem, PlusIcon, ReplyIcon, SearchIcon, SelectIcon } from '@client/ui.tsx'
+
+/** Fork and Rewind, drawn as the window's (lucide git-fork, rotate-ccw) */
+const ForkIcon = (p: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden {...p}><circle cx="12" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" /><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9" /><path d="M12 12v3" /></svg>
+)
+const RewindIcon = (p: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden {...p}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
+)
 import type { Message } from '@shared/types.ts'
 import { canReply, startReply } from '@plugins/chat/reply.ts'
 import { frequent, loadEmoji, quickRow, remember, search, setTone, tone, TONES, withTone, type Emoji, type Group } from './emoji.ts'
@@ -378,6 +386,16 @@ function Lifted({ msg, chat }: { msg: Message; chat: string }) {
               >
                 Copy
               </MenuItem>
+              {/* Shepherdr 3: an agent's message forks the conversation into a new tab; yours rewinds it there (the CLI's own) */}
+              {msg.card ? null : msg.who === 'agent' ? (
+                <MenuItem icon={<ForkIcon className={ic} />} onClick={() => leave(() => void act({ type: 'fork', chat } as never).catch((e) => alert(e.message)))}>
+                  Fork
+                </MenuItem>
+              ) : (
+                <MenuItem icon={<RewindIcon className={ic} />} onClick={() => leave(() => void act({ type: 'rewind', chat, message: msg.id } as never).catch((e) => alert(e.message)))}>
+                  Rewind
+                </MenuItem>
+              )}
               {/* an update card is one short line: Copy takes it all */}
               {msg.card ? null : (
                 <MenuItem icon={<SelectIcon className={ic} />} onClick={() => leave(() => setUI({ pick: null, pickAll: false, selecting: msg.id }))}>
