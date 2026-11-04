@@ -102,7 +102,10 @@ const loaded = await Promise.all(
     }
   }),
 )
-installPlugins(loaded.filter((p) => p !== null), enabled, user)
+// the add-ons switched off in Settings › Window: their plugins are left out (a change later reloads the page)
+const off: string[] = await fetch('api/me').then((r) => r.json()).then((m) => m.off ?? [], () => []).catch(() => [])
+Object.assign(window, { shepherdrOff: off })
+installPlugins(loaded.filter((p): p is NonNullable<typeof p> => p !== null && !off.includes(p.name)), enabled.filter((n) => !off.includes(n)), user)
 connect()
 watchViewport((keyboard) => setUI({ keyboard }))
 watchScrolling()

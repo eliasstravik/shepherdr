@@ -19,6 +19,7 @@ import { Store } from "./store.ts";
 import { Live } from "./live.ts";
 import { Model } from "./model.ts";
 import { setPilot, runPilot } from "./autopilot.ts";
+import { windowSection, setWindow, offList, offPlugins } from "./window.ts";
 import { Chats } from "./chats.ts";
 import { act } from "./actions.ts";
 import { Compat, activity } from "./compat.ts";
@@ -28,7 +29,7 @@ import { terminalBridge } from "./terminal.ts";
 import { worktree } from "./worktree.ts";
 import { browserRelay } from "./browser.ts";
 import { Artifacts } from "./artifacts.ts";
-import { Settings } from "./settings.ts";
+import { Settings, onWritten, PUSH, pushBody } from "./settings.ts";
 import { Secrets } from "./secrets.ts";
 import { Agents } from "./agents.ts";
 import { Machines } from "./machines.ts";
@@ -91,6 +92,9 @@ const refreshSecrets = async () => { secretNames = await secrets.names(); model.
 void refreshSecrets();
 setInterval(() => void refreshSecrets(), 30_000);
 const settings = new Settings();
+// a change made on the web goes to the other machines' herdr-task as the window's does (one push at a time)
+let pushing: Promise<unknown> = Promise.resolve();
+onWritten((file) => { pushing = pushing.then(() => Promise.all(model.machineNames().map((m) => exec(hub, ["sh", "-c", PUSH, "sh", pushBody(file, m)], m).catch(() => null)))); });
 settings.on(() => { model.rebuild(); void tailnet(); });
 settings.start();
 const artifacts = new Artifacts();
@@ -111,7 +115,7 @@ void store.load().catch(() => {});
 model.onBuild = (b) => live.setSnapshot(alertNewAnd(compat.snapshot({
   host: me?.host ?? "this machine", user: me?.name ?? "You", spaces: b.spaces, sections: b.sections, rows: b.rows, artifacts: artifacts.list,
   settings: [...settings.sections(me ? `https://${me.dns}/shepherdr/` : null, b.spaces.map((s: any) => ({ id: s.id, name: s.name, machine: s.machine ?? null })), b.machines, me?.host ?? "this machine"),
-    { name: "Secrets", level: "all", rows: [], secrets: secretNames }],
+    { name: "Secrets", level: "all", rows: [], secrets: secretNames }, windowSection((k) => model.value(k))], off: offList(), offPlugins: offPlugins(),
   machines: [{ name: me?.host ?? "this machine", here: true, state: "connected" }, ...b.machines.map((name) => ({ name, here: false, state: "connected" }))],
 })));
 model.start();
@@ -191,7 +195,7 @@ const server = Bun.serve<{ who: string }>({
       return srv.upgrade(req, { data: { who: pass.who, term } as any }) ? undefined : new Response("upgrade failed", { status: 400 });
     }
     if (socket) return srv.upgrade(req, { data: { who: pass.who } }) ? undefined : new Response("upgrade failed", { status: 400 });
-    if (path === "/api/me") return json({ login: pass.who, via: pass.via, machine: me?.host ?? null, link: me ? `https://${me.dns}/shepherdr/` : null, version: VERSION });
+    if (path === "/api/me") return json({ login: pass.who, via: pass.via, machine: me?.host ?? null, link: me ? `https://${me.dns}/shepherdr/` : null, version: VERSION, off: offPlugins() });
     if (path === "/api/state" && req.method === "GET") return json(store.doc.version ? store.doc : await store.load());
     if (path === "/api/state" && req.method === "POST") {
       const body = await req.json().catch(() => null);
@@ -282,6 +286,10 @@ const server = Bun.serve<{ who: string }>({
       }
       if (body?.type === "autopilot-run" && typeof body.place === "string") {
         try { await runPilot(body.place); await model.readAutopilot(); model.rebuild(); return json({ ok: true }); }
+        catch (err) { return json({ ok: false, error: (err as Error).message }); }
+      }
+      if (body?.type === "setting" && typeof body.key === "string" && /^(window|addon)\./.test(body.key)) {
+        try { await setWindow(body.key, typeof body.value === "string" ? body.value : null, (k, v) => store.set(k, v)); return json({ ok: true }); }
         catch (err) { return json({ ok: false, error: (err as Error).message }); }
       }
       if (body?.type === "setting" && typeof body.key === "string") {

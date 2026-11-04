@@ -40,7 +40,27 @@ const CAPS = [0, 1, 2, 4, 8, 16, 32];
 const MACHINE_DEFAULTS: Record<string, unknown> = { ...HOLD, low_priority: true, worker_memory: 0 };
 const ON = (v: unknown) => (v ? "on" : "off");
 
-const bare = (id: string) => id.split("/").pop()!;
+// the window's push to other machines (mods/shepherdr-settings): each gets Everywhere, its machine's and its spaces'
+// (by their ids there), marked so it knows which machine it is; a file there without the mark is that machine's own
+export const PUSH = `f="$HOME/.herdr/shepherdr.json"; mkdir -p "$HOME/.herdr" || exit 1
+if [ -f "$f" ] && ! grep -q '"pushed_from"' "$f"; then echo own; exit 0; fi
+if [ -f "$f" ] && [ "$(cat "$f")" = "$1" ]; then exit 0; fi
+umask 077; printf '%s\\n' "$1" > "$f.tmp" && mv "$f.tmp" "$f"`;
+/** What one other machine is sent. */
+export function pushBody(file: any, m: string) {
+  const spaces = Object.fromEntries(Object.entries(file.spaces ?? {}).filter(([id]) => id.startsWith(`${m}/`)).map(([id, v]) => [id.split("/").pop(), v]));
+  return JSON.stringify({ version: 1, pushed_from: "herdr-app", here: m, everywhere: file.everywhere ?? {}, machines: file.machines?.[m] ? { [m]: file.machines[m] } : {}, spaces }, null, 2);
+}
+
+/** Writes the whole file as the window does (version 1), then tells whoever pushes it to other machines. */
+export function writeSettings(next: any) {
+  next.version = 1;
+  writeFileSync(`${FILE}.web-tmp`, JSON.stringify(next, null, 2) + "\n");
+  renameSync(`${FILE}.web-tmp`, FILE);
+  for (const fn of written) fn(next);
+}
+const written = new Set<(file: any) => void>();
+export const onWritten = (fn: (file: any) => void) => written.add(fn);
 
 export class Settings {
   private file: any = {};
@@ -62,7 +82,7 @@ export class Settings {
     for (const fn of this.listeners) fn();
   }
 
-  private layer(scope: string | null) { return scope ? this.file.spaces?.[bare(scope)] : this.file.everywhere; }
+  private layer(scope: string | null) { return scope ? this.file.spaces?.[scope] : this.file.everywhere; }
   /** A field as a scope sees it: its own, else Everywhere's, else the default; and whether the scope sets it. */
   private pick(scope: string | null, section: string, field: string | null) {
     const at = (l: any) => (field ? l?.[section]?.[field] : l?.[section]);
@@ -169,7 +189,7 @@ export class Settings {
     // the object this level holds its values in
     const target = () => {
       if (!space) return (next.everywhere ??= {});
-      const own = ((next.spaces ??= {})[bare(space)] ??= {});
+      const own = ((next.spaces ??= {})[space] ??= {});
       if (scope?.folder) own.folder = scope.folder;
       own.name = scope?.name ?? own.name;
       if (scope?.machine) own.machine = scope.machine;
@@ -221,19 +241,18 @@ export class Settings {
         const ok = (x: unknown) => x == null || (typeof x === "string" && /^[\w.\[\]-]{1,60}$/.test(x));
         if (!["claude", "codex"].includes(v?.agent) || !ok(v.model) || !ok(v.effort)) throw new Error("Pick Claude Code or Codex.");
         // the permission mode isn't picked on the web: the one it had stays (null: the CLI's own default)
-        const was = (space ? file.spaces?.[bare(space)] : file.everywhere)?.[field];
+        const was = (space ? file.spaces?.[space] : file.everywhere)?.[field];
         v = { agent: v.agent, model: v.model ?? null, effort: v.effort ?? null, fast: !!v.fast, perm: was?.agent === v.agent ? was.perm ?? null : null };
       }
       put(field, null, v);
     } else if (key === "backup.agent") {
       // off is "off"; on follows what it would get anyway when that is on, else names the other CLI (as the window's)
       const parent = space ? file.everywhere?.backup?.agent ?? null : null;
-      const worker = (space ? file.spaces?.[bare(space)]?.worker?.agent : null) ?? file.everywhere?.worker?.agent ?? "claude";
+      const worker = (space ? file.spaces?.[space]?.worker?.agent : null) ?? file.everywhere?.worker?.agent ?? "claude";
       put("backup", "agent", word === null ? null : word === "off" ? "off" : parent === "off" ? (worker === "codex" ? "claude" : "codex") : null);
     } else throw new Error("That setting can't be changed here.");
 
-    writeFileSync(`${FILE}.web-tmp`, JSON.stringify(next, null, 1) + "\n");
-    renameSync(`${FILE}.web-tmp`, FILE);
+    writeSettings(next);
     this.read();
   }
 }

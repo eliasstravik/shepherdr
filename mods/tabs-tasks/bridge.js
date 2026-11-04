@@ -8,7 +8,9 @@
 
 import { shared, setShared, home, readTextFile } from "herdr";
 
-export const KEYS = ["tasks.pinned", "spaces-chat", "notify"];
+// the person's pins, sidebar and Notify; the Window page's switches and the add-ons switched off (Settings › Window)
+export const KEYS = ["tasks.pinned", "spaces-chat", "notify", "addons.off", "tabbar.tabs", "sidebar.worktrees", "sidebar.unread", "counts.red",
+  "counts.green", "tasks.filters", "tasks.place", "chat.helpers", "coordinator.auto"];
 const STATE = "http://127.0.0.1:7788/api/state";
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 let started = false, token = null;

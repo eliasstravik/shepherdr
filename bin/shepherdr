@@ -213,7 +213,9 @@ def source_items(src):
 
 def service_items(src):
     """The service (its TypeScript runs on Bun as it is), the shared core and the built web app."""
-    items = [("service", f"{SHARE}/package.json", os.path.join(src, "package.json"))]
+    items = [("service", f"{SHARE}/package.json", os.path.join(src, "package.json")),
+             # which add-ons the web app leaves out while off (Settings › Window)
+             ("service", f"{SHARE}/lib/addons.json", os.path.join(src, "lib", "addons.json"))]
     for top in ("service", "core"):
         for f in walk_files(os.path.join(src, top)) if os.path.isdir(os.path.join(src, top)) else []:
             if not f.endswith((".test.ts", ".test.js")):

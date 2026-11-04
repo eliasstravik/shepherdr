@@ -53,3 +53,15 @@ test("machine limits: percents on the page, the file's own units, and this compu
   expect(f.machines.local.machine).toEqual({ start_memory: null, worker_memory: 4 });
   expect(() => s.set("machine.worker_memory", "3 GB", "all")).toThrow();
 });
+
+test("another machine's space keeps its machine/id key, and its machine is sent only its own", async () => {
+  const { pushBody } = await import("./settings.ts");
+  const s = new Settings();
+  s.start();
+  s.set("tasks.merge", "Right away", "vm/sp9", { id: "vm/sp9", name: "api", machine: "vm", folder: "/srv/api" });
+  const f = JSON.parse(readFileSync(file, "utf8"));
+  expect(f.spaces["vm/sp9"]).toMatchObject({ machine: "vm", folder: "/srv/api", tasks: { merge: "auto" } });
+  const sent = JSON.parse(pushBody(f, "vm"));
+  expect(sent).toMatchObject({ pushed_from: "herdr-app", here: "vm", spaces: { sp9: { folder: "/srv/api" } } });
+  expect(Object.keys(sent.spaces)).toEqual(["sp9"]);
+});

@@ -725,6 +725,9 @@ export function connect() {
     const msg = JSON.parse(ev.data) as ServerEvent
     if (msg.type === 'pong') return
     if (msg.type === 'snapshot') {
+      // an add-on switched on or off in Settings › Window: the page starts again with its plugins in or out (main.tsx)
+      const booted = (window as { shepherdrOff?: string[] }).shepherdrOff
+      if (booted && msg.snapshot.off && [...msg.snapshot.off].sort().join() !== [...booted].sort().join()) return location.reload()
       state = { ...state, snap: msg.snapshot }
       stayOnShown()
       fromOldPin(msg.snapshot)

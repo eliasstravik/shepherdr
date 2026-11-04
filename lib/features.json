@@ -254,9 +254,10 @@
         "tablet": "Same",
         "phone": "Grouped list, pages slide in"
       },
-      "planned": "Window page (Agents, Tasks, Notify, Autopilot, Secrets, Machines and Web work)",
       "service": [
-        "settings.ts"
+        "settings.ts",
+        "window.ts",
+        "autopilot.ts"
       ]
     },
     {

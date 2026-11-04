@@ -967,6 +967,8 @@ export interface Snapshot {
   /** everything waiting on the human, oldest first, each once: what the Needs you view lists and every count counts */
   needs: Need[]
   settings: SettingSection[]
+  /** the web app's plugins left out (their add-on is off in Settings › Window): a page started with others reloads */
+  off?: string[]
   /** a source like demo marks its data as fictional */
   demo?: boolean
   /** where the human's name in chat lines comes from */

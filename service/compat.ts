@@ -157,7 +157,7 @@ export class Compat {
 
   addrOf(key: string) { return this.chats.get(key) ?? null; }
 
-  snapshot(input: { host: string; user: string; machines: { name: string; here: boolean; state: string }[]; spaces: Space[]; sections: any[]; rows: Row[]; artifacts?: any[]; settings?: SettingSection[] }): Snapshot {
+  snapshot(input: { host: string; user: string; machines: { name: string; here: boolean; state: string }[]; spaces: Space[]; sections: any[]; rows: Row[]; artifacts?: any[]; settings?: SettingSection[]; off?: string[]; offPlugins?: string[] }): Snapshot {
     const { host, spaces, rows } = input;
     this.host = host;
     this.rows = rows;
@@ -249,19 +249,21 @@ export class Compat {
 
     // Autopilot (3.0's Settings › Autopilot): Everywhere lists the spaces on this machine, each space's page has its
     // switch, schedule, events, heartbeat and Run now (herdr-task keeps it all)
-    const local = spaces.filter((s) => s.pilot);
+    // the Autopilot add-on off: no page, no switch (Settings › Window)
+    const pilotOn = !(input.off ?? []).includes("autopilot");
+    const local = pilotOn ? spaces.filter((s) => s.pilot) : [];
     const pilots: SettingSection[] = [
       { name: "Autopilot", level: "all", about: `Per space. ${PILOT_ABOUT}`, rows: local.map((s) => ({ label: s.name, key: "", fixed: true,
         value: s.pilot.on ? ["On", s.pilot.trigger, s.pilot.next_run ? `Next ${when(s.pilot.next_run)}` : null].filter(Boolean).join(" · ") : "Off" })) },
       ...local.map((s) => pilotSection(s)),
     ];
-    notify.push(...pilots);
+    if (pilotOn) notify.push(...pilots);
 
     this.chats = chats;
     this.last = {
       terminalTransport: "core", name: "Shepherdr", host, user: input.user, places, machines, tasks, automations: {}, asks: {}, needs, settings: [...(input.settings ?? []), ...notify],
       artifacts: (input.artifacts ?? []).map((a) => artifactOf(a, spaces)),
-      sections, last, read,
+      sections, last, read, off: input.offPlugins ?? [],
     };
     return this.last;
   }
