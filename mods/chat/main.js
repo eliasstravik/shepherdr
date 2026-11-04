@@ -29,6 +29,8 @@ import { agents, panes, terminals, spaces, inRender } from "./live.js";
 import * as fs from "fs/promises";
 import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names } from "./core/chat-log.js";
 import { words } from "./core/asks.js";
+// Sending the person's words, as the web app does (core/send.js).
+import { refusal, taskTag, messageBody, replyInstead, steerNow } from "./core/send.js";
 import { AskCards, linkCtl } from "./cards.js";
 import * as strips from "./strips.js";
 import { button, red, green, amber, H, RADIUS, TEXT, toast, toastWho, plainError } from "./ui.js";
@@ -64,11 +66,6 @@ const askAt = (id) => { const p = String(id).split("."); const sec = Number(p[p.
 // A space's Assistant (its coordinator), whose alerts follow the space's Notify.
 const assistant = (k) => k?.labels?.["herdr.role"] === "coordinator";
 // Why hc didn't do it: { kind, message } from its JSON error ("blocked": a dialog is open), else its words.
-function refusal(r) {
-  const text = String(r?.stderr || r?.stdout || "").trim();
-  try { const e = JSON.parse(text).error; if (e?.message) return { kind: e.kind ?? null, message: e.message }; } catch {}
-  return { kind: /"kind":"blocked"/.test(text) ? "blocked" : null, message: text || "It didn't go through." };
-}
 // The composer's round buttons (Send, Call, End call, mic, Mute), and the height of its text row
 // (one line of the box), which the call's row keeps so nothing moves when a call starts.
 const ROUND = 28, TEXT_ROW = 34;
@@ -1250,9 +1247,7 @@ export default class Chat extends View {
       return;
     }
     // Herdr tag lines before the words: the message it replies to, the tasks it mentions.
-    const reply = msg.quote ? `<hc reply-to="${excerpt(msg.quote.text, 80)}"/>\n` : "";
-    const tasks = this.taskTags(msg.text);
-    const body = reply + tasks + msg.text;
+    const body = messageBody({ text: msg.text, quote: msg.quote?.text ?? null, tags: this.taskTags(msg.text) });
     const p = { id: `pending-${msg.id}`, text: msg.text, replyTo: msg.quote ? excerpt(msg.quote.text, 80) : null, files: msg.files.filter((f) => !f.image).map((f) => f.name),
       paths: msg.files.filter((f) => f.image).map((f) => f.path), at: Date.now(), sent: body,
       match: norm(msg.text).slice(0, 60) || null, msg };
@@ -1299,15 +1294,13 @@ export default class Chat extends View {
   // The agent waits on its own dialog in the terminal (a question, a permission): Esc closes it
   // (Claude Code hears the person declined it; Codex stops), then the words go as a message,
   // once it takes typing again.
-  async replyInstead(text, cx) {
-    await hc(["keys", this.addr, "esc"]);
-    let r;
-    for (let i = 0; i < 10; i++) {
-      await cx.sleep(300);
-      r = await hc(["send", this.addr, text]);
-      if (r.code === 0 || refusal(r).kind !== "blocked") break;
-    }
-    return r;
+  replyInstead(text, cx) {
+    return replyInstead(this.sendIo(cx), this.addr, text);
+  }
+
+  // What core/send.js needs from here: hc, a sleep, the agent's status now.
+  sendIo(cx) {
+    return { hc, sleep: (ms) => cx.sleep(ms), status: () => this.status() };
   }
 
   // A message that didn't go, pressed: it goes again.
@@ -1318,13 +1311,8 @@ export default class Chat extends View {
 
   // Claude Code's "send now" for a message it queued while working: Ctrl+Enter, only when its
   // screen offers it (pressed on an empty prompt it would do something else).
-  async steerNow(cx) {
-    for (let i = 0; i < 4; i++) {
-      await cx.sleep(i ? 300 : 150);
-      const r = await hc(["read", this.addr, "--lines", "40"]).catch(() => null);
-      if (/ctrl\+enter to send now/i.test(r?.stdout ?? "")) { await hc(["keys", this.addr, "ctrl+enter"]); return; }
-      if (this.status() !== "working") return;
-    }
+  steerNow(cx) {
+    return steerNow(this.sendIo(cx), this.addr);
   }
 
   // A held message sent at once (the agent takes it mid-turn).
@@ -1671,9 +1659,7 @@ export default class Chat extends View {
 
   // One tag line per task the message mentions, for the agent: what it is and where.
   taskTags(text) {
-    const attr = (v) => String(v ?? "").replace(/\s*\n\s*/g, " ").replace(/"/g, "”");
-    return this.mentioned(text)
-      .map((x) => `<hc task="${attr(taskRef(x).replace(/^#/, ""))}" title="${attr(x.title)}" state="${attr(x.status_text ?? x.state)}"${x.why ? ` why="${attr(x.why)}"` : ""} folder="${attr(x.folder)}">${String(x.prompt ?? "").slice(0, 500)}</hc>\n`).join("");
+    return this.mentioned(text).map((x) => taskTag(x, taskRef(x))).join("");
   }
 
   // ---- task news (an Assistant's chat) --------------------------------------------------------
