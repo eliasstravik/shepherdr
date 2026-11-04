@@ -194,6 +194,8 @@ const Quiet = ({ children }: { children: ReactNode }) => <div className="px-2 py
 function PlusItems({ place, done }: { place: Place; done: () => void }) {
   const { agents, failed: off } = useAgents(place)
   const row = MN.assistantRow({ open: assistantOpen(place) })
+  // C and 1–9 pick from the keys: their hints only where there are keys ("Not installed" always)
+  const keys = useUI((u) => u.device === 'desktop' || u.kb)
   const choices: Agent[] = MN.agentChoices(agents ?? [])
   const installed = choices.filter((a) => a.installed)
   const newTab = (kind?: string) => {
@@ -214,12 +216,12 @@ function PlusItems({ place, done }: { place: Place; done: () => void }) {
   return (
     <>
       <MenuItem icon={<TermIcon className={ic} />} onClick={() => newTab()}>{N.terminal}</MenuItem>
-      <MenuItem icon={<ModelIcon className={ic} />} disabled={!row.enabled} hint={row.hint || undefined} onClick={assistant} className="disabled:text-fg3">
+      <MenuItem icon={<ModelIcon className={ic} />} disabled={!row.enabled} hint={(keys && row.hint) || undefined} onClick={assistant} className="disabled:text-fg3">
         {row.label}
       </MenuItem>
       <MenuLabel>{N.agents}</MenuLabel>
       {choices.map((a, i) => (
-        <MenuItem key={a.kind} icon={<ModelIcon className={ic} />} disabled={!a.installed} hint={MN.agentHint(a, i) || undefined} onClick={() => newTab(a.kind)} className="disabled:text-fg3">
+        <MenuItem key={a.kind} icon={<ModelIcon className={ic} />} disabled={!a.installed} hint={(a.installed && !keys ? '' : MN.agentHint(a, i)) || undefined} onClick={() => newTab(a.kind)} className="disabled:text-fg3">
           {a.name}
         </MenuItem>
       ))}
