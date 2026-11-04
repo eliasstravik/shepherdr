@@ -25,10 +25,12 @@ async function hc(args: string[]) {
 /** A level as 2.1 names it (all, m:<machine>, p:<machine>:<space>) as herdr-secret's flags, and its words. */
 function scope(level: string): { args: string[]; words: string } {
   if (level === "all") return { args: [], words: "Everywhere" };
+  // the machine and the space as the window keeps them: another machine's by its name, its space as "<machine>/<id>"
+  const ok = (x: string) => /^[\w.-]*$/.test(x);
   const m = /^m:(.*)$/.exec(level);
-  if (m) return { args: ["--machine"], words: m[1] || "This computer" };
-  const p = /^p:([^:]*):(.+)$/.exec(level);
-  if (p) return { args: ["--space", p[2]], words: "this space" };
+  if (m && ok(m[1])) return { args: m[1] ? ["--machine", m[1]] : ["--machine"], words: m[1] || "This computer" };
+  const p = /^p:([^:]*):([\w.-]+)$/.exec(level);
+  if (p && ok(p[1])) return { args: ["--space", p[1] ? `${p[1]}/${p[2]}` : p[2]], words: "this space" };
   throw new Error("Not a place a secret can be kept.");
 }
 
