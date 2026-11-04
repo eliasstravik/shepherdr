@@ -264,6 +264,8 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     for (const key of Object.keys(b.chats).slice(0, 20)) { const a = compat.addrOf(key); if (a) await act(hub, { type: "read", addr: a }, compat); }
     return { ok: true };
   }
+  // a call started or ended on the page: its audio goes over /api/voice; nothing to keep here
+  if (b?.type === "call") return { ok: true };
   if (b?.type === "artifact-delete" && typeof b.artifact === "string") {
     // an artifact deleted from its ⋯, as herdr-artifact rm (it and its versions)
     if (!/^[\w.-]{1,120}$/.test(b.artifact)) throw new Error("Not an artifact.");

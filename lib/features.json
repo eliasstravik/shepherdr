@@ -962,7 +962,8 @@
       "addon": "voice",
       "title": "Voice call",
       "core": [
-        "send"
+        "send",
+        "voice"
       ],
       "herdr": {
         "mods": [
@@ -981,7 +982,10 @@
         "tablet": "Same",
         "phone": "Full-width call bar"
       },
-      "planned": "Voice calls through the service"
+      "service": [
+        "voice.ts",
+        "actions.ts"
+      ]
     },
     {
       "id": "reactions",

@@ -4,6 +4,7 @@
 # load the same file from core/.
 coordinator.js: coordinator menu-tasks new-menu-tasks newspace shepherdr-settings tabs-tasks tasks
 inbox.js: spaces-chat tabs-tasks tasks workspace-status-chat
+core/voice.js: chat
 core/asks.js: chat jump spaces-chat tabs-tasks tasks workspace-status-chat
 core/needs.js: chat jump spaces-chat tabs-tasks tasks workspace-status-chat
 core/tasks.js: chat jump tasks

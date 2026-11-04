@@ -28,6 +28,7 @@ import { Jobs } from "./jobs.ts";
 import { terminalBridge } from "./terminal.ts";
 import { worktree } from "./worktree.ts";
 import { browserRelay } from "./browser.ts";
+import { voiceCall, type ChatView } from "./voice.ts";
 import { Artifacts } from "./artifacts.ts";
 import { Settings, onWritten, PUSH, pushBody } from "./settings.ts";
 import { Secrets } from "./secrets.ts";
@@ -168,6 +169,19 @@ function file(path: string): Response {
   } });
 }
 
+// a call's name for its agent (a space's Assistant by the space, a task's by its id), and what it reads of the chat
+const callName = (key: string) => (key.startsWith("p:") ? `the ${compat.last?.places.find((p) => p.chat === key)?.name ?? "space"} Assistant` : key.split("/")[0]);
+function chatView(addr: string): ChatView {
+  const items = () => (compat.reader?.(addr)?.conv?.items ?? []) as any[];
+  return {
+    lastReply: () => { const x = [...items()].reverse().find((i) => i.kind === "agent" && i.text); return x ? { id: x.id, text: x.text } : null; },
+    recent: () => [`Status: ${(hub.terminals.get(addr) as any)?.status?.state ?? "unknown"}`,
+      ...items().filter((i) => (i.kind === "agent" || i.kind === "user") && i.text).slice(-12).map((i) => `${i.kind === "user" ? "Person" : "Agent"}: ${i.text}`)].join("\n\n").slice(-12000),
+    status: () => (hub.terminals.get(addr) as any)?.status?.state ?? null,
+    asking: () => asks.of(addr)[0]?.words?.title ?? null,
+  };
+}
+
 const server = Bun.serve<{ who: string }>({
   hostname: "127.0.0.1",
   port: PORT,
@@ -178,7 +192,7 @@ const server = Bun.serve<{ who: string }>({
     if (path === "/api/health") return json({ ok: true, version: VERSION, core: hub.up, jobs: jobs.on && hub.up });
     // the Web add-on switched off: nothing for the tailnet (this machine's own callers still get the API)
     if (req.headers.has("tailscale-user-login") && !webOn()) return new Response("Shepherdr's web app is off (Shepherdr settings › Window › Add-ons).", { status: 404 });
-    const socket = path === "/api/ws" || path === "/api/terminal" || path === "/api/browser";
+    const socket = path === "/api/ws" || path === "/api/terminal" || path === "/api/browser" || path === "/api/voice";
     const viaTailnet = req.headers.has("tailscale-user-login");
     const pass = gate(req, g, socket, viaTailnet && trustedPeer(srv.requestIP(req)?.port, PORT));
     if (!pass.ok) return new Response(pass.why, { status: pass.status });
@@ -193,6 +207,12 @@ const server = Bun.serve<{ who: string }>({
       const term = compat.addrOf(url.searchParams.get("chat") ?? "");
       if (!term || term.startsWith("log:") || hub.terminals.get(term)?.state !== "live") return new Response("no such terminal", { status: 404 });
       return srv.upgrade(req, { data: { who: pass.who, term } as any }) ? undefined : new Response("upgrade failed", { status: 400 });
+    }
+    if (path === "/api/voice") {
+      // a voice call with a chat's running agent (the Voice add-on)
+      const key = url.searchParams.get("chat") ?? "", addr = compat.addrOf(key);
+      if (offList().includes("voice") || !addr || addr.startsWith("log:") || hub.terminals.get(addr)?.state !== "live") return new Response("no call here", { status: 404 });
+      return srv.upgrade(req, { data: { who: pass.who, voice: { key, addr } } as any }) ? undefined : new Response("upgrade failed", { status: 400 });
     }
     if (socket) return srv.upgrade(req, { data: { who: pass.who } }) ? undefined : new Response("upgrade failed", { status: 400 });
     if (path === "/api/me") return json({ login: pass.who, via: pass.via, machine: me?.host ?? null, link: me ? `https://${me.dns}/shepherdr/` : null, version: VERSION, off: offPlugins() });
@@ -320,11 +340,12 @@ const server = Bun.serve<{ who: string }>({
     open(ws) {
       const d: any = ws.data;
       const page = { send: (x: any) => { ws.send(x); }, close: () => ws.close(), buffered: () => ws.getBufferedAmount() };
-      if (d.term) d.bridge = terminalBridge(hub, d.term, page);
+      if (d.voice) d.bridge = voiceCall(hub, d.voice.addr, callName(d.voice.key), chatView(d.voice.addr), page);
+      else if (d.term) d.bridge = terminalBridge(hub, d.term, page);
       else if (d.browser) d.bridge = browserRelay(d.browser, page);
       else live.join(ws);
     },
-    message(ws, msg) { const d: any = ws.data; if (d.bridge) d.bridge.message(String(msg)); else live.message(ws, String(msg)); },
+    message(ws, msg) { const d: any = ws.data; if (d.voice) d.bridge?.message(msg); else if (d.bridge) d.bridge.message(String(msg)); else live.message(ws, String(msg)); },
     close(ws) { const d: any = ws.data; if (d.bridge) d.bridge.end(); else live.leave(ws); },
   },
 });
