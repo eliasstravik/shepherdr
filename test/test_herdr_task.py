@@ -364,6 +364,102 @@ class BackToWork(unittest.TestCase):
         self.assertNotIn("attention", t)  # Ready, its Accept back
 
 
+class MergedOnlyWithOwnWork(unittest.TestCase):
+    """SHEP-23: a task counts as merged only when work of its own landed (its pull request merged, or
+    commits made on its branch now in the base), never when its branch just caught up with main, and
+    never while its agent is mid-turn. A throwaway git repo; hc and gh are never run."""
+
+    def setUp(self):
+        from unittest import mock
+        import shutil
+        sys.path.insert(0, BIN)
+        import herdr_task.commands as commands
+        import herdr_task.tick as tick
+        self.commands, self.tick = commands, tick
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.main, wt = os.path.join(self.root, "repo"), os.path.join(self.root, "wt")
+        self.git(self.root, "init", "-q", "-b", "main", self.main)
+        for k, v in (("user.name", "T"), ("user.email", "t@example.com"), ("commit.gpgsign", "false")):
+            self.git(self.main, "config", k, v)
+        self.commit(self.main, "base")
+        self.git(self.main, "worktree", "add", "-q", "-b", "task/1", wt, "HEAD")
+        self.live = []  # the task's agents now (hc records)
+        self.store = Store([{"id": 1, "title": "Reactions", "state": "running", "mode": "worktree", "worktree": wt,
+                             "branch": "task/1", "base": "main", "start": self.git(wt, "rev-parse", "HEAD"), "agents": []}])
+        self.store.loc["folder"] = self.main
+        self.task = self.store.data["tasks"][0]
+        done = lambda s, t, even_if_busy=False: t.update(state="done")
+        for mod, name, value in ((tick, "live_agents", lambda key: self.live), (tick, "finish", done),
+                                 (tick, "watch_main", lambda *a: None), (commands, "finish", done),
+                                 (commands, "open_store", lambda args, write=True: self.store),
+                                 (commands, "view", lambda s, t, live=None: dict(t)), (commands, "say", lambda *a: None),
+                                 (commands, "live_agents", lambda key: self.live), (commands, "detail", lambda k: k)):
+            p = mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def git(self, cwd, *args):
+        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, check=True).stdout.strip()
+
+    def commit(self, cwd, words):
+        self.git(cwd, "commit", "-q", "--allow-empty", "-m", words)
+        return self.git(cwd, "rev-parse", "HEAD")
+
+    def tick_once(self):
+        self.tick.facts(self.store, self.task, {"attention": [], "done": []})
+        return self.task["state"], bool(self.task.get("merged"))
+
+    def working(self):
+        self.live = [{"address": "t1", "status": {"state": "working"}}]
+
+    def test_a_fresh_branch_is_not_merged(self):
+        self.assertEqual(self.tick_once(), ("running", False))
+
+    def test_a_branch_caught_up_with_main_is_not_merged(self):
+        self.commit(self.main, "another task merged")
+        self.git(self.task["worktree"], "merge", "-q", "--ff-only", "main")  # SHEP-17's agent
+        self.assertEqual(self.tick_once(), ("running", False))
+        self.assertNotIn("own", self.task)
+        # Accepted so: done, nothing to merge, never "merged".
+        self.task["state"] = "ready"
+        import argparse
+        self.commands.cmd_accept(argparse.Namespace(id="SHEP-1", json=True, folder=None))
+        self.assertEqual(self.task["state"], "done")
+        self.assertFalse(self.task.get("merged"))
+
+    def test_a_branch_caught_up_with_origin_main_is_not_merged(self):
+        self.git(self.main, "update-ref", "refs/remotes/origin/main", self.commit(self.main, "on GitHub"))
+        self.git(self.main, "reset", "-q", "--hard", "HEAD~1")  # local main behind its remote
+        self.git(self.task["worktree"], "merge", "-q", "--ff-only", "origin/main")
+        self.assertEqual(self.tick_once(), ("running", False))
+        self.git(self.main, "merge", "-q", "--ff-only", "origin/main")  # main pulled
+        self.assertEqual(self.tick_once(), ("running", False))
+
+    def test_its_commits_merged_by_hand_make_it_done(self):
+        own = self.commit(self.task["worktree"], "reactions on the left")
+        self.assertEqual(self.tick_once(), ("running", False))
+        self.assertEqual(self.task["own"], own)
+        self.git(self.main, "merge", "-q", "--ff-only", "task/1")
+        self.working()
+        self.assertEqual(self.tick_once(), ("running", False))  # never under a working agent
+        self.live = []
+        self.assertEqual(self.tick_once(), ("done", True))
+
+    def test_its_merged_pull_request_makes_it_done(self):
+        self.commit(self.task["worktree"], "reactions on the left")
+        self.task.update(state="ready", pr={"number": 610, "repo": "o/r", "checked": 0})
+        with self.mock_pr({"state": "MERGED", "mergeCommit": {"oid": "f00"}}):
+            self.working()
+            self.assertEqual(self.tick_once(), ("ready", False))
+            self.live, self.task["pr"]["checked"] = [], 0
+            self.assertEqual(self.tick_once(), ("done", True))
+
+    def mock_pr(self, v):
+        from unittest import mock
+        return mock.patch.object(self.tick, "pr_view", lambda t: v)
+
+
 class TimeLeft(unittest.TestCase):
     """Every status gives the time left, a rough guess beats none (SHEP-13): the minutes show from
     the first one, one without --left asks for it, and every brief and template says so. In memory."""

@@ -152,15 +152,28 @@ def watch_main(s, task, sha=None):
 
 
 def merged_here(s, task):
-    """Its branch's work is in the base branch here (merged by anyone, without a PR)."""
+    """Its own work is in the base branch here (merged by anyone, without a PR): the newest commit
+    its branch held that the base didn't (own_work()) is in the base now. A branch that only caught
+    up with its base (SHEP-23: `git merge --ff-only main` mid-work, its tip the base's) has no work
+    of its own, so it never counts as merged."""
+    own = own_work(s, task)
+    return bool(own) and git(s.loc["folder"], "merge-base", "--is-ancestor", own, task["base"])[0]
+
+
+def own_work(s, task):
+    """The newest commit of the task's own seen on its branch, or None: its tip whenever the branch
+    holds commits its base branch doesn't, here or on its remote (kept on the task as "own"; the
+    tick and ready look), else the last one kept."""
     main, br, base, start = s.loc["folder"], task.get("branch"), task.get("base"), task.get("start")
     if not (br and base and start):
-        return False
+        return None
     ok, tip, _ = git(main, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}")
     tip = tip if ok and tip else task.get("head")
-    if not tip or tip == start:
-        return False
-    return git(main, "merge-base", "--is-ancestor", tip, base)[0]
+    if tip and tip != start and tip != task.get("own") and not any(
+            git(main, "merge-base", "--is-ancestor", tip, ref)[0] for ref in (base, f"refs/remotes/{remote_of(main)}/{base}")):
+        task["own"] = tip
+        s.dirty = True
+    return task.get("own")
 
 
 def finish(s, task, even_if_busy=False):
