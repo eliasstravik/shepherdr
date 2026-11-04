@@ -8,7 +8,8 @@ place, never overwrites what you made yourself, and keeps a backup of anything i
 - macOS or Linux, the Herdr app 0.1.12 or newer (`herdr-app --version`) with herdr-core 0.1.17 or newer
   (`hc --version`). Open Herdr once first, so it writes its home (`~/.config/herdr-app`).
 - python3 3.8 or newer, git, and Claude Code or Codex, installed and signed in.
-- bun (the service and the web app), and Tailscale for the web app.
+- bun (the service and the web app; the installer installs it from bun.sh when it's missing), and Tailscale for the
+  web app.
 - Optional, per add-on: `gh` (pull requests), agent-browser 0.41.1, node and Chrome (the task browser), bun,
   `pw-record` and whisper.cpp (`whisper-cli`) for dictation, an ElevenLabs key for voice calls.
 
@@ -22,6 +23,10 @@ shepherdr doctor            # check it
 ```
 
 Then in Herdr, `Ctrl+Shift+L` picks the Shepherdr layout.
+
+A fresh clone has no web app built (`web/dist` isn't in git): the installer builds it with Bun (`bun install`,
+`bun run build`) whenever it's missing or older than its sources, so nothing to do by hand. A build that fails stops
+the install before anything is written.
 
 What goes where:
 
@@ -48,10 +53,11 @@ mod called `chat`, say). Nothing is written then; it names each one. `--adopt` b
 ## Options
 
 ```text
-./install.sh [--root DIR] [--dry-run] [--adopt] [--guard] [--keys ask|keep|ours] [--no-hooks] [--yes] [--force]
-shepherdr update      the same, from the checkout it was installed from (git pull it first)
+./install.sh [--root DIR] [--dry-run] [--adopt] [--guard] [--keys ask|keep|ours] [--no-hooks] [--no-build] [--yes] [--force]
+./install.sh --web    the web app alone, without the Herdr window
+shepherdr update      the same kind again (layout, or web only), from the checkout it was installed from (git pull it first)
 shepherdr uninstall   [--root DIR] [--dry-run]: takes out what it installed and puts back what it replaced
-shepherdr doctor      [--root DIR]: checks files, links, shared copies, herdr-task and the programs it needs
+shepherdr doctor      [--root DIR]: checks files, links, shared copies, herdr-task and the programs it needs, and says how to update
 shepherdr whisper     downloads dictation's model (148 MB, checked by its sha256)
 ```
 

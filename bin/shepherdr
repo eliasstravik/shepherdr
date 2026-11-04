@@ -2,7 +2,8 @@
 """Shepherdr's installer: puts the Shepherdr layout, its mods and helpers into a Herdr app home.
 
   shepherdr install    [--root DIR] [--adopt] [--guard] [--keys ask|keep|ours] [--no-hooks] [--dry-run] [--yes]
-  shepherdr update     the same, from the checkout it was installed from (git pull it first)
+  shepherdr update     the same, from the checkout it was installed from (git pull it first); web only too
+  (a fresh clone has no web app built: install and update build it with Bun, installing Bun first when it's missing)
   shepherdr install --web               web only: herdr-core, herdr-task, the helpers, the service and the web app
                                         under .local/share/shepherdr (no herdr-app)
   shepherdr web serve-from <machine|here> [--take-link]   serve the web app from another machine linked over
@@ -167,11 +168,79 @@ def exchange(a, b):
 
 # ---- the source ---------------------------------------------------------------------------------
 
+def is_source(d):
+    return bool(d) and os.path.isfile(os.path.join(d, "install.sh")) and os.path.isfile(os.path.join(d, "lib", "addons.json"))
+
+
 def find_source(given, record):
     for cand in [given, os.path.dirname(os.path.dirname(os.path.realpath(__file__))), (record or {}).get("source")]:
-        if cand and os.path.isfile(os.path.join(cand, "install.sh")) and os.path.isfile(os.path.join(cand, "lib", "addons.json")):
+        if is_source(cand):
             return os.path.realpath(cand)
     raise Stop("no Shepherdr checkout found: run ./install.sh from one, or pass --source <checkout>")
+
+
+# ---- the web app's build ------------------------------------------------------------------------
+# web/dist isn't in git, so a fresh clone has no page: the installer builds it with Bun (which the service runs on
+# anyway) when it's missing or older than what it's built from. A source without web/src (an installed service
+# folder, Serve from's pack) ships its built page and is used as it is.
+WEB_INPUTS = ("web", "core", "package.json", "bun.lock")
+WEB_OUTPUTS = {"dist", "generated", "node_modules"}
+
+
+def web_stale(src):
+    """Why the source's web app needs a build ("isn't built", "is older than web/src/App.tsx"), or None."""
+    if not os.path.isdir(os.path.join(src, "web", "src")):
+        return None
+    try:
+        built = os.path.getmtime(os.path.join(src, "web", "dist", "index.html"))
+    except OSError:
+        return "isn't built"
+    for top in WEB_INPUTS:
+        p = os.path.join(src, top)
+        if os.path.isfile(p) and os.path.getmtime(p) > built:
+            return f"is older than {top}"
+        for d, dirs, files in os.walk(p):
+            dirs[:] = [x for x in dirs if x not in WEB_OUTPUTS and x not in SKIP]
+            for f in files:
+                if os.path.getmtime(os.path.join(d, f)) > built:
+                    return f"is older than {os.path.relpath(os.path.join(d, f), src)}"
+    return None
+
+
+def install_bun():
+    """Bun's own installer (https://bun.sh/install, into ~/.bun), as Serve from does on another machine."""
+    say("  installing Bun (https://bun.sh/install, into ~/.bun)")
+    subprocess.run(["sh", "-c", "curl -fsSL https://bun.sh/install | bash"], capture_output=True)
+    return bun_path()
+
+
+def build_web(r, src, home, a):
+    """Builds the source's web app when it's missing or out of date (bun install, bun run build), before anything is
+    written: a build that fails stops the install (nothing changed) unless --force, which installs without it."""
+    why = web_stale(src)
+    if not why or getattr(a, "no_build", False):
+        return
+    if r.dry:
+        say(f"  the web app {why}: would build it (bun install, bun run build){'' if bun_path() else ', installing Bun first'}")
+        return
+    # Bun goes on the real machine: only for an install into the real home, never for a scratch --root
+    bun = bun_path() or (install_bun() if home else None)
+    err = None if bun else "Bun isn't installed (https://bun.sh)"
+    if bun:
+        say(f"  the web app {why}: building it in {src} (bun install, bun run build)")
+        for argv in ([bun, "install", "--frozen-lockfile"], [bun, "run", "build"]):
+            p = subprocess.run(argv, cwd=src, capture_output=True, text=True)
+            if p.returncode != 0:
+                tail = (p.stderr.strip() or p.stdout.strip()).splitlines()[-5:]
+                err = f"`{' '.join(['bun', *argv[1:]])}` failed:\n    " + "\n    ".join(tail)
+                break
+    if not err:
+        return
+    if a.force:
+        r.notes.append(f"couldn't build the web app ({err.splitlines()[0]}): installed without a new page")
+        return
+    raise Stop(f"couldn't build the web app in {src}: {err}\nNothing was changed. Fix that and run this again, "
+               "or --force to install without a new page.")
 
 
 def walk_files(top):
@@ -296,7 +365,7 @@ def install_service(r, rec, home):
         r.notes.append("the Shepherdr service needs bun (https://bun.sh): install it, then run this again")
         return
     if not os.path.isfile(r.p(f"{SHARE}/web/dist/index.html")) and not r.dry:
-        r.notes.append("the web app isn't built in this checkout (bun install && bun run build), so the service serves no page yet")
+        r.notes.append("the web app isn't built, so the service serves no page yet (./install.sh builds it)")
     rel, text = unit_text(r.root, bun)
     data = text.encode()
     if read(r.p(rel)) != data:
@@ -616,6 +685,7 @@ def cmd_install(a, update=False):
         if home:
             raise Stop(f"{r.p(APP)} isn't there: open Herdr once first, so it writes its home")
         r.notes.append(f"{r.p(APP)} didn't exist: made (a scratch root)")
+    build_web(r, src, home, a)
     manifest, mods, items = source_items(src)
     actions, clashes = plan_files(r, rec, items, a.adopt)
     if clashes:
@@ -714,19 +784,29 @@ def web_items(src):
     return items
 
 
-def cmd_install_web(a):
+def cmd_install_web(a, update=False):
     root = os.path.realpath(a.root or real_home())
     home = root == os.path.realpath(real_home())
-    src = find_source(a.source, None)
     r = Run(root, a.dry_run)
-    if not shutil.which("hc") and home and not a.force:
-        raise Stop(f"herdr-core (hc {HC_MIN} or newer) isn't on the PATH: install it first (https://herdr.dev)")
     try:
         rec = json.load(open(r.p(WEB_RECORD)))
     except (OSError, ValueError):
         rec = {}
+    if update:
+        # from where it was installed (a checkout, or Serve from's copy), never from the installed folder itself
+        if not rec:
+            raise Stop(f"Shepherdr (web only) isn't installed under {root}: run ./install.sh --web first")
+        if not a.source and not is_source(rec.get("source")):
+            raise Stop(f"the Shepherdr it was installed from ({rec.get('source')}) is gone: clone it again and run "
+                       "./install.sh --web there, or pass --source <checkout>")
+        src = find_source(a.source or rec["source"], None)
+    else:
+        src = find_source(a.source, None)
+    if not shutil.which("hc") and home and not a.force:
+        raise Stop(f"herdr-core (hc {HC_MIN} or newer) isn't on the PATH: install it first (https://herdr.dev)")
     files = dict(rec.get("files", {}))
-    say(f"Shepherdr {VERSION} web-only install from {src}\n  into {root}{' (dry run: nothing is written)' if a.dry_run else ''}")
+    say(f"Shepherdr {VERSION} web-only {'update' if update else 'install'} from {src}\n  into {root}{' (dry run: nothing is written)' if a.dry_run else ''}")
+    build_web(r, src, home, a)
     n = 0
     for _g, rel, path in web_items(src):
         data, mode = read(path), os.stat(path).st_mode & 0o777
@@ -838,6 +918,17 @@ def serve_check(root):
     return bad, notes
 
 
+def update_hint(rec):
+    """How this install updates: from the checkout it came from, or (Serve from) from the machine that sent it."""
+    src = rec.get("source") or ""
+    if os.path.basename(src) == "shepherdr-src":
+        return "to update: from the machine that installed it here, `shepherdr web install-on <this machine>`"
+    if not is_source(src):
+        return f"to update: the Shepherdr it was installed from ({src}) is gone: clone it again and run ./install.sh" + (" --web" if rec.get("web") else "") + " there"
+    pull = f"`git -C {src} pull --ff-only`, then " if os.path.exists(os.path.join(src, ".git")) else ""
+    return f"to update: {pull}`shepherdr update`" + (" (web only)" if rec.get("web") else "")
+
+
 def cmd_doctor(a):
     root = os.path.realpath(a.root or real_home())
     home = root == os.path.realpath(real_home())
@@ -853,7 +944,7 @@ def cmd_doctor(a):
         say(f"Shepherdr {rec.get('version')} (web only) under {root} (from {rec.get('source')}, {rec.get('at')})")
         for x in bad + s_bad:
             say(f"  ✗ {x}")
-        for x in s_notes:
+        for x in s_notes + [update_hint(rec)]:
             say(f"  - {x}")
         if not bad + s_bad:
             say("  ✓ whole")
@@ -904,7 +995,7 @@ def cmd_doctor(a):
     say(f"Shepherdr {rec.get('version')} under {root} (from {rec.get('source')}, {rec.get('at')})")
     for x in bad:
         say(f"  ✗ {x}")
-    for x in warn + t_notes:
+    for x in warn + t_notes + [update_hint(rec)]:
         say(f"  - {x}")
     hold = r.p(HOLD)
     if bad:
@@ -1175,6 +1266,7 @@ def main(argv):
             c.add_argument("--yes", action="store_true", help="ask nothing (keys: keep yours unless --keys ours)")
             c.add_argument("--force", action="store_true", help="install although a check failed")
             c.add_argument("--web", action="store_true", help="web only: no herdr-app (the service, the web app, herdr-task and the helpers)")
+            c.add_argument("--no-build", action="store_true", help="install the web app as it is in the checkout: no build, even when it's missing or old")
     w = sub.add_parser("web", help="where the web app is served from (Serve from)")
     w.add_argument("action", choices=["serve-from", "status", "install-on"])
     w.add_argument("machine", nargs="?", help="a machine linked over herdr-core (hc machine ls), or here")
@@ -1186,7 +1278,10 @@ def main(argv):
         if a.cmd == "install":
             return cmd_install_web(a) if a.web else cmd_install(a)
         if a.cmd == "update":
-            return cmd_install(a, update=True)
+            # the kind the install record says: the whole layout, or web only (./install.sh --web)
+            root = os.path.realpath(a.root or real_home())
+            web = a.web or (not load_record(root) and os.path.isfile(os.path.join(root, WEB_RECORD)))
+            return cmd_install_web(a, update=True) if web else cmd_install(a, update=True)
         if a.cmd == "uninstall":
             return cmd_uninstall(a)
         if a.cmd == "doctor":
