@@ -3,7 +3,7 @@
 // above the message box while background work runs (subagents, shells). A row opens to its command, output or diff;
 // nothing streams by default, nothing flashes, and no command line shows until asked for.
 import clsx from 'clsx'
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   ChevronDownIcon,
   ChevronLeftIcon,
@@ -14,6 +14,7 @@ import {
   CpuChipIcon,
   DocumentTextIcon,
   ExclamationTriangleIcon,
+  EyeIcon,
   GlobeAltIcon,
   MagnifyingGlassIcon,
   PencilSquareIcon,
@@ -130,12 +131,15 @@ const Lines = ({ added, removed }: { added?: number; removed?: number }) =>
     </span>
   ) : null
 
-function Output({ chat, id, job, live }: { chat: string; id: string; job?: boolean; live?: boolean }) {
+/** what a step or job printed; `tail`: a running job's last lines, kept scrolled to the newest (as the window's 8) */
+function Output({ chat, id, job, live, tail }: { chat: string; id: string; job?: boolean; live?: boolean; tail?: boolean }) {
   const g = useActivity(chat, job ? 'job' : 'output', id, live ? 2000 : 0)
   const d = g.data
   const text = !d ? 'Loading…' : 'error' in d ? d.error : 'output' in d ? d.output || '(no output)' : ''
+  const box = useRef<HTMLPreElement>(null)
+  useEffect(() => { if (tail && box.current) box.current.scrollTop = box.current.scrollHeight }, [tail, text])
   return (
-    <pre data-output className="max-h-72 overflow-auto rounded-row bg-well px-3 py-2 font-mono text-[0.75rem]/5 whitespace-pre-wrap text-fg2">
+    <pre ref={box} data-output className={clsx(tail ? 'max-h-40' : 'max-h-72', 'overflow-auto rounded-row bg-well px-3 py-2 font-mono text-[0.75rem]/5 whitespace-pre-wrap text-fg2')}>
       {/* a diff reads in its colours */}
       {text.split('\n').map((l, i) => (
         <span key={i} className={clsx('block', /^\+(?!\+\+)/.test(l) && 'text-[var(--ready)]', /^-(?!--)/.test(l) && 'text-[var(--need)]')}>
@@ -416,33 +420,77 @@ export function NeedsYou({ chatKey }: { chatKey: string }) {
 
 /* ---------- the background tag ---------- */
 
-/** what runs in the background, just above the message box (so it never scrolls away); a tap shows each piece */
-export function JobsTag({ chatKey }: { chatKey: string; cli: string }) {
-  const jobs = useStore((s) => s.chats[chatKey]?.jobs)
-  // Settings › Window › Show subagents above the chat box off: none
-  const shown = useStore((s) => s.snap?.look?.helpers !== false)
-  const [all, setAll] = useState(false)
-  useTick(!!jobs?.length && shown)
-  if (!jobs?.length || !shown) return null
-  // as the window's (mods/chat background()): the CLI's helpers at work, one row each (a spinner, its name, how long);
-  // past five, four rows and "+N more" opens the rest
-  const open = all || jobs.length <= 5
-  const list = open ? jobs : jobs.slice(0, 4)
-  const ago = (at: number) => {
-    const s = Math.max(0, Math.floor((Date.now() - at) / 1000))
-    return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${Math.floor(s / 3600)}h`
+/** how long ago, as the window's rows count it: seconds for a minute, then minutes, then hours */
+const ago = (at: number) => {
+  const s = Math.max(0, Math.floor((Date.now() - at) / 1000))
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${Math.floor(s / 3600)}h`
+}
+
+/** a background shell or watcher over the box (as the window's, mods/chat background()): a tap opens its command, what
+ *  it printed last (Claude Code's, asked again every few seconds) and Stop */
+function JobLine({ j, chat, open, toggle }: { j: Job; chat: string; open: boolean; toggle: () => void }) {
+  const [stopping, setStopping] = useState(false)
+  const I = j.kind === 'monitor' ? EyeIcon : CommandLineIcon
+  const stop = () => {
+    setStopping(true)
+    void act({ type: 'stop-job', chat, job: j.id }).catch(() => setStopping(false))
   }
   return (
-    <div data-jobs className="flex flex-col px-0.5 pb-1">
-      {list.map((j) => (
-        <div key={j.id} className="flex h-6 items-center gap-2 text-[0.75rem] phone:h-8 phone:text-[0.8125rem]">
-          <span aria-hidden className="live-dot size-1.5 shrink-0 rounded-full bg-[var(--work)]" />
-          <span className="min-w-0 flex-1 truncate font-medium text-fg">{j.title}</span>
-          <span className="shrink-0 font-mono text-[0.71875rem] text-fg3 tabular-nums">{ago(j.at)}</span>
+    <div data-job={j.id} className="flex flex-col">
+      <button type="button" aria-expanded={open} onClick={toggle}
+        className={clsx('-mx-1 flex h-6 cursor-pointer items-center gap-2 rounded-[6px] px-1 text-left text-[0.75rem] hover:bg-hover phone:h-8 phone:text-[0.8125rem]', open && 'bg-hover')}>
+        <I aria-hidden className="size-3 shrink-0 fill-[var(--work)]" />
+        <span className="min-w-0 flex-1 truncate font-medium text-fg">{j.title}</span>
+        <span className="shrink-0 font-mono text-[0.71875rem] text-fg3 tabular-nums">{ago(j.at)}</span>
+        <ChevronDownIcon aria-hidden className={clsx('size-3 shrink-0 fill-[var(--fg3)]', open && 'rotate-180')} />
+      </button>
+      {open ? (
+        <div className="flex flex-col items-start gap-1.5 pt-1 pb-1.5 pl-5">
+          {j.command ? <code className="block max-h-16 w-full overflow-hidden font-mono text-[0.71875rem]/[1.125rem] break-all whitespace-pre-wrap text-fg2">{j.command}</code> : null}
+          {j.more === 'output' ? <div className="w-full"><Output chat={chat} id={j.id} job live tail /></div> : null}
+          {j.stop ? (
+            <button type="button" onClick={stop} disabled={stopping}
+              className="flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] pr-2.5 pl-2 text-[0.78125rem] font-medium text-fg shadow-[inset_0_0_0_1px_var(--line2)] enabled:hover:bg-hover disabled:text-fg3 phone:h-9">
+              <StopIcon aria-hidden className="size-3 shrink-0 fill-current" />
+              {stopping ? WORDS.stopping : 'Stop'}
+            </button>
+          ) : null}
         </div>
-      ))}
+      ) : null}
+    </div>
+  )
+}
+
+/** what runs in the background, just above the message box (so it never scrolls away): the CLI's subagents, then its
+ *  shells and watchers */
+export function JobsTag({ chatKey }: { chatKey: string; cli: string }) {
+  const all = useStore((s) => s.chats[chatKey]?.jobs)
+  // Settings › Window › Show subagents above the chat box off: no subagents (its shells still show)
+  const helpers = useStore((s) => s.snap?.look?.helpers !== false)
+  const [more, setMore] = useState(false)
+  const [opened, setOpened] = useState<string | null>(null)
+  const jobs = (all ?? []).filter((j) => helpers || (j.kind !== 'agent' && j.kind !== 'headless'))
+  useTick(jobs.length > 0)
+  if (!jobs.length) return null
+  // as the window's (mods/chat background()): one row each (an icon, its name, how long); past five, four rows and
+  // "+N more" opens the rest
+  const open = more || jobs.length <= 5
+  const list = open ? jobs : jobs.slice(0, 4)
+  return (
+    <div data-jobs className="flex flex-col px-0.5 pb-1">
+      {list.map((j) =>
+        j.kind === 'shell' || j.kind === 'monitor' ? (
+          <JobLine key={j.id} j={j} chat={chatKey} open={opened === j.id} toggle={() => setOpened(opened === j.id ? null : j.id)} />
+        ) : (
+          <div key={j.id} className="flex h-6 items-center gap-2 text-[0.75rem] phone:h-8 phone:text-[0.8125rem]">
+            <span aria-hidden className="live-dot size-1.5 shrink-0 rounded-full bg-[var(--work)]" />
+            <span className="min-w-0 flex-1 truncate font-medium text-fg">{j.title}</span>
+            <span className="shrink-0 font-mono text-[0.71875rem] text-fg3 tabular-nums">{ago(j.at)}</span>
+          </div>
+        ),
+      )}
       {!open ? (
-        <button type="button" onClick={() => setAll(true)} className="flex h-[22px] items-center gap-1.5 self-start rounded-[6px] px-1.5 text-[0.75rem] text-fg2 hover:bg-hover hover:text-fg phone:h-8">
+        <button type="button" onClick={() => setMore(true)} className="flex h-[22px] items-center gap-1.5 self-start rounded-[6px] px-1.5 text-[0.75rem] text-fg2 hover:bg-hover hover:text-fg phone:h-8">
           <ChevronDownIcon aria-hidden className="size-3 fill-current" />
           {`+${jobs.length - 4} more`}
         </button>

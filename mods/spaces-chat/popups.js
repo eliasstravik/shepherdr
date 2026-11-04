@@ -7,7 +7,8 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { run, props, closeOverlay, openOverlay, theme, setShared, spaces } from "herdr";
+import { run, props, closeOverlay, openOverlay, theme, setShared } from "herdr";
+import { spaces } from "./live.js";
 import { deleteSection, isPinned, pin } from "./sections.js";
 import { assistantOf, markRead } from "./unread.js";
 import { NOTIFY, notifyOf, setNotify } from "./notify.js";

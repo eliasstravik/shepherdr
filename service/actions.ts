@@ -464,6 +464,12 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     b = { ...b, addr: a, quote: quoted, tags };
   }
   else if (b?.type === "stop" && typeof b.chat === "string") b = { ...b, addr: chat(b.chat) };
+  else if (b?.type === "stop-job" && typeof b.chat === "string" && typeof b.job === "string") {
+    // Stop on a background shell or watcher (core/bg-jobs.js): its processes end; its CLI then tells the agent
+    const r = compat.reader?.(chat(b.chat));
+    if (!r || !b.job.startsWith("b:") || !(await r.stopJob(b.job.slice(2)))) throw new Error("It isn't running any more.");
+    return { ok: true };
+  }
   else if ((b?.type === "close" || b?.type === "delete" || b?.type === "archive" || b?.type === "task-resume") && typeof b.chat === "string") {
     // a task's row menu: its chat key is "<task>/worker" (or 2.1's "/Agent")
     const t = compat.taskOf(b.chat.split("/")[0]);

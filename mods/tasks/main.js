@@ -12,7 +12,8 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { spaces, panes, agents, terminals, machines, exec, readTextFile, watchFolder, appHome, home, run, theme, nextCommand, shared, setShared, openOverlay, layout } from "herdr";
+import { machines, exec, readTextFile, watchFolder, appHome, home, run, theme, nextCommand, shared, setShared, openOverlay, layout } from "herdr";
+import { spaces, panes, agents, terminals, inRender } from "./live.js";
 // What needs the person, from every space and machine (lib/inbox.js, shared; the tab
 // bar runs its engine): agents asking or waiting, task problems, failed automations, merges.
 import { items as needs, ASKS, toAgent, reasonOf, reqReason, REASONS, fit } from "./inbox.js";
@@ -216,10 +217,10 @@ export default class Tasks extends View {
   }
 
   // Herdr cuts off a render that takes too long ("interrupted"): one render reads terminals(),
-  // agents(), panes() and each space's coordinator tab once (this.frame), not once per row.
+  // agents(), panes() and each space's coordinator tab once (this.frame, live.js), not once per row.
   render(cx) {
     this.frame = {};
-    try { return this.draw(cx); } finally { this.frame = null; }
+    try { return inRender(() => this.draw(cx)); } finally { this.frame = null; }
   }
 
   draw(cx) {

@@ -5,7 +5,8 @@
 // Shared: the source is lib/parked.js; bin/sync-shared copies it into each mod in lib/COPIES.
 // Edit lib/parked.js, never a mod's copy, then run bin/sync-shared.
 
-import { panes, terminals, spaces, focused, shared, machines, run, exec, hc, appHome } from "herdr";
+import { focused, shared, machines, run, exec, hc, appHome } from "herdr";
+import { panes, terminals, spaces } from "./live.js";
 
 export const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 const STATES = ["working", "blocked", "done", "idle"];

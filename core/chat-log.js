@@ -31,8 +31,10 @@ true`;
 
 // Reads a log on the agent's machine, sending back only what the chat shows. Each kept line
 // comes back as "<offset>\t<kind>\t<data>": J a JSON line (images emptied), R a tool result's
-// ids only (outputs stay in the file, fetched when a row is opened), T a call too big to
-// send (its tool name). Lines the chat doesn't show (bookkeeping, thinking, requests) stay.
+// ids only (outputs stay in the file, fetched when a row is opened; "TASK=<id>" when the call
+// left a job running in the background), T a call too big to send (its tool name), N a
+// background job that ended ("<call id> <task id> <status>"). Lines the chat doesn't show
+// (bookkeeping, thinking, requests) stay.
 //   log tail <file> <from>            what was added since byte <from>: "T <size> <from> <end>"
 //   log page <file> <before> <want>   about <want> messages ending at byte <before> (or the
 //                                     last whole line), going back in growing chunks:
@@ -51,12 +53,25 @@ BEGIN { pos = base; first = base; msgs = 0 }
   head = substr(line, 1, 400)
   claude = index(head, "\"isSidechain\":false") && index(line, "\"type\":\"user\",\"message\"")
   codex = index(head, "\"type\":\"response_item\"")
+  # A background job (a shell, a watcher, a helper) that ended: Claude Code notes it the moment it
+  # ends, as a message queued for the agent (which may read it much later).
+  if (index(head, "\"type\":\"queue-operation\",\"operation\":\"enqueue\"") && index(line, "<task-notification>") && index(line, "<status>")) {
+    if (count) next
+    u = "-"; k = "-"; st = "-"
+    if (match(line, /<tool-use-id>[^<]+/)) u = substr(line, RSTART + 13, RLENGTH - 13)
+    if (match(line, /<task-id>[^<]+/)) k = substr(line, RSTART + 9, RLENGTH - 9)
+    if (match(line, /<status>[^<]+/)) st = substr(line, RSTART + 8, RLENGTH - 8)
+    print off "\tN\t" u " " k " " st
+    next
+  }
   if ((claude && index(line, "\"tool_result\"")) || (codex && (index(head, "\"function_call_output\"") || index(head, "\"custom_tool_call_output\"")))) {
     if (count) next
     ids = ""; t = line
     while (match(t, /"(tool_use_id|call_id)":"[^"]*"/)) { m = substr(t, RSTART, RLENGTH); sub(/^"[a-z_]*":"/, "", m); sub(/"$/, "", m); ids = ids " " m; t = substr(t, RSTART + RLENGTH) }
     # A helper (or job) launched to run on its own: its result came at once, it is not done yet.
     if (index(line, "Async agent launched") || index(line, "running in background")) ids = ids " ASYNC"
+    # A shell or watcher left running in the background (or moved there mid-run): its task id.
+    if (match(line, /"(backgroundTaskId|taskId)":"[^"]+"/)) { m = substr(line, RSTART, RLENGTH); sub(/^"[A-Za-z]*":"/, "", m); sub(/"$/, "", m); ids = ids " TASK=" m }
     print off "\tR\t" ids
     # An answer to a question, or words that declined a request: read whole (answers()).
     if (claude && length(line) <= 262144 && ((index(line, "\"answers\":{") && index(line, "\"questions\":[")) || index(line, "wrote in the chat instead: "))) print off "\tJ\t" line
@@ -280,7 +295,7 @@ function waitWords(command, description) {
 }
 
 // A command in a few words: "bun test", "git status".
-const cmdWords = (c) => clip(String(c ?? "").replace(/^(cd [^&;]+(&&|;)\s*)+/, "").split(/\s*(?:&&|\|\||;|\|)\s*/)[0], 48);
+export const cmdWords = (c) => clip(String(c ?? "").replace(/^(cd [^&;]+(&&|;)\s*)+/, "").split(/\s*(?:&&|\|\||;|\|)\s*/)[0], 48);
 const base = (p) => String(p ?? "").split("/").filter(Boolean).pop() ?? "";
 const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return clip(u, 40); } };
 
@@ -294,14 +309,18 @@ function claudeStep(name, input = {}) {
     case "Write": return { kind: "edit", line: `Wrote ${short(input.file_path)}`, doing: `Writing ${base(input.file_path)}` };
     case "Bash": {
       const line = input.description ? `${input.description}: ${clip(input.command, 80)}` : `Ran ${clip(input.command, 80)}`;
+      // `shell`: what it is, should it move to the background mid-run (Claude Code does so when a
+      // message comes while it runs).
+      const shell = { kind: "shell", label: input.description || cmdWords(input.command), cmd: String(input.command ?? "") };
       // A job left running in the background: the turn goes on; the chat watches the job.
-      if (input.run_in_background) return { kind: "run", line, doing: `Started ${input.description || cmdWords(input.command)}`,
-        bg: { label: input.description || cmdWords(input.command), cmd: String(input.command ?? "") } };
+      if (input.run_in_background) return { kind: "run", line, doing: `Started ${shell.label}`, bg: shell, shell };
       const wait = waitWords(input.command, input.description);
-      return { kind: "run", line, doing: wait ?? (input.description || `Running ${cmdWords(input.command)}`), waiting: Boolean(wait) };
+      return { kind: "run", line, doing: wait ?? (input.description || `Running ${cmdWords(input.command)}`), waiting: Boolean(wait), shell };
     }
+    // A watcher runs its command in the background and tells the agent each line it prints.
     case "Monitor": return { kind: "tool", line: `Watched ${clip(input.description ?? input.command, 70)}`,
-      doing: `Watching ${clip(input.description ?? input.command ?? "", 50)}`.trim(), waiting: true };
+      doing: `Watching ${clip(input.description ?? input.command ?? "", 50)}`.trim(), waiting: true,
+      bg: { kind: "monitor", label: clip(input.description || cmdWords(input.command), 60), cmd: String(input.command ?? "") } };
     case "Grep": return { kind: "search", line: `Searched for “${clip(input.pattern, 50)}”`, doing: `Searching for “${clip(input.pattern, 40)}”` };
     case "Glob": return { kind: "search", line: `Looked for ${clip(input.pattern, 60)}`, doing: `Looking for ${clip(input.pattern, 40)}` };
     case "WebSearch": return { kind: "web", line: `Searched the web for “${clip(input.query, 60)}”`, doing: `Searching the web for “${clip(input.query, 40)}”` };
@@ -375,10 +394,13 @@ export class Conversation {
     // Reactions by message id: [{ emoji, by: "you" | "agent" }].
     this.reactions = new Map();
     // Calls that only wait, while open (`waiting`: the newest open call is one); and the jobs
-    // the agent left running in the background ({ id, label, cmd }; the chat checks they run).
+    // the agent left running in the background, until their end is logged: { id (its call),
+    // task (Claude Code's task id, once its result says), kind: "shell" | "monitor", label, cmd,
+    // at } (core/bg-jobs.js checks they still run). `stops`: the agent's own TaskStop calls.
     this.waits = new Set();
     this.waiting = false;
     this.bg = [];
+    this.stops = new Map();
     // Claude Code's own helpers (Agent/Task calls) by call id: { desc, done }. One launched to
     // run on its own is done when its task-notification comes.
     this.helpers = new Map();
@@ -393,13 +415,13 @@ export class Conversation {
   step(id, off, st, helper = null) {
     if (!st) return;
     const last = this.items[this.items.length - 1];
-    const s = { id, kind: st.kind, line: st.line, count: st.count ?? 1, helper };
+    const s = { id, kind: st.kind, line: st.line, count: st.count ?? 1, helper, ...(st.shell ? { shell: st.shell, at: st.at } : {}) };
     if (last?.kind === "tools") last.steps.push(s);
     else this.push({ kind: "tools", id: `t${off}`, steps: [s] });
     this.calls.set(id, s);
     this.open.set(id, st.doing);
     if (st.waiting) this.waits.add(id);
-    if (st.bg) this.bg = [...this.bg.slice(-20), { id, ...st.bg }];
+    if (st.bg) this.bg = [...this.bg.slice(-20), { id, ...st.bg, at: st.at ?? Date.now() }];
     if (this.open.size > 50) this.open.delete(this.open.keys().next().value);
     this.doing = st.doing;
     this.waiting = Boolean(st.waiting);
@@ -448,6 +470,29 @@ export class Conversation {
   running() {
     const old = Date.now() - 3 * 3600000;
     return [...this.helpers.values()].filter((h) => !h.done && (!h.at || h.at > old));
+  }
+
+  // A call that left a job running in the background (its result named the task): a shell started
+  // so, or one moved there mid-run, gets its task id.
+  backgrounded(id, task) {
+    const j = this.bg.find((x) => x.id === id);
+    if (j) { j.task = task; return; }
+    const s = this.calls.get(id);
+    if (s?.shell) this.bg = [...this.bg.slice(-20), { id, task, ...s.shell, at: s.at ?? Date.now() }];
+  }
+
+  // A background job ended (by its call id or its task id): a shell, a watcher, a helper.
+  ended(id, task) {
+    if (id) { const h = this.helpers.get(id); if (h) h.done = true; }
+    this.bg = this.bg.filter((j) => !(id && j.id === id) && !(task && j.task === task));
+  }
+
+  // Claude Code's note to the agent that a job ended (<task-notification>). A watcher's note of
+  // one line it printed (no status) isn't an end.
+  notified(text) {
+    const id = /<tool-use-id>([^<]+)<\/tool-use-id>/.exec(text)?.[1];
+    const task = /<task-id>([^<]+)<\/task-id>/.exec(text)?.[1];
+    if (id || (task && /<status>/.test(text))) this.ended(id ?? null, /<status>/.test(text) ? task ?? null : null);
   }
 
   // What the person wrote to answer the agent, as their own message right after its question:
@@ -508,13 +553,22 @@ export class Conversation {
       if (r.kind === "R") {
         const ids = r.data.split(" ").filter(Boolean);
         const async = ids.includes("ASYNC");
+        const task = ids.find((x) => x.startsWith("TASK="))?.slice(5);
         for (const id of ids) {
-          if (id === "ASYNC") continue;
+          if (id === "ASYNC" || id.startsWith("TASK=")) continue;
+          if (task) this.backgrounded(id, task);
+          // The agent stopped a job itself (TaskStop): gone once that call is answered.
+          if (this.stops.has(id)) { this.ended(null, this.stops.get(id)); this.stops.delete(id); }
           // A helper that answered (not one launched to run on its own) is done.
           const h = this.helpers.get(id);
           if (h && !async) h.done = true;
           this.done(id, r.off);
         }
+        continue;
+      }
+      if (r.kind === "N") {
+        const [id, task] = r.data.split(" ").map((x) => (x === "-" ? null : x));
+        this.ended(id ?? null, task ?? null);
         continue;
       }
       if (r.kind === "T") {
@@ -535,13 +589,7 @@ export class Conversation {
     if (l.type === "user" && l.origin?.kind === "task-notification") {
       // A helper or a background job finished (Claude Code tells the agent so): it's done.
       const c = l.message?.content;
-      const text = typeof c === "string" ? c : Array.isArray(c) ? c.map((b) => b?.text ?? "").join("\n") : "";
-      const id = /<tool-use-id>([^<]+)<\/tool-use-id>/.exec(text)?.[1];
-      if (id) {
-        const h = this.helpers.get(id);
-        if (h) h.done = true;
-        this.bg = this.bg.filter((j) => j.id !== id);
-      }
+      this.notified(typeof c === "string" ? c : Array.isArray(c) ? c.map((b) => b?.text ?? "").join("\n") : "");
       return;
     }
     if (l.type === "user") {
@@ -564,6 +612,8 @@ export class Conversation {
     } else if (l.type === "attachment" && l.attachment?.type === "queued_command") {
       // A message typed while the agent was busy, taken in mid-turn.
       const a = l.attachment;
+      // Or a job's end, read by the agent mid-turn.
+      if (a.commandMode === "task-notification") { this.notified(String(a.prompt ?? "")); return; }
       if (a.commandMode !== "prompt" || (a.origin?.kind && a.origin.kind !== "human")) return;
       const u = claudeUser(a.prompt);
       if (u) this.user(`u${off}`, { ...u, at: time(a.timestamp ?? l.timestamp) });
@@ -602,7 +652,13 @@ export class Conversation {
             this.doing = "Asking you something";
           } else {
             if (b.name === "Agent" || b.name === "Task") this.helpers.set(String(b.id), { desc: String(b.input?.description ?? "a helper"), done: false, at: time(l.timestamp) });
-            this.step(String(b.id), off, claudeStep(String(b.name ?? ""), b.input ?? {}), b.name === "Agent" || b.name === "Task" ? String(b.id) : null);
+            if (b.name === "TaskStop" || b.name === "KillShell") {
+              this.stops.set(String(b.id), String(b.input?.task_id ?? b.input?.shell_id ?? ""));
+              if (this.stops.size > 20) this.stops.delete(this.stops.keys().next().value);
+            }
+            const st = claudeStep(String(b.name ?? ""), b.input ?? {});
+            if (st) st.at = time(l.timestamp) || Date.now();
+            this.step(String(b.id), off, st, b.name === "Agent" || b.name === "Task" ? String(b.id) : null);
             if (b.name === "Bash" && ARTIFACT.test(String(b.input?.command ?? ""))) this.push({ kind: "artifact", id: `art${off}`, at: time(l.timestamp) });
           }
         }

@@ -5,7 +5,8 @@
 
 import { div } from "gpui-kit";
 import { v_flex, InputState, Input } from "gpui-base";
-import { exec, spaces } from "herdr";
+import { exec } from "herdr";
+import { spaces } from "./live.js";
 import { shepherdrFor } from "./coordinator.js";
 // The row's words and the branch-name check: core/settings.js, shared with the web app.
 import { BASE, branchShape } from "./core/settings.js";

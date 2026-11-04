@@ -7,7 +7,8 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { spaces, machines, terminals } from "herdr";
+import { machines } from "herdr";
+import { spaces, terminals } from "./live.js";
 import * as vault from "./secrets.js";
 import { TEXT, RADIUS, H } from "./ui.js";
 // Every word on the page: core/settings.js, shared with the web app.

@@ -455,7 +455,13 @@ const server = Bun.serve<{ who: string }>({
     if (path === "/api/activity") {
       const addr = compat.addrOf(url.searchParams.get("chat") ?? "");
       const r = addr ? live.chats?.reader(addr) : null;
-      return json(await activity(r, url.searchParams.get("id") ?? ""));
+      const id = url.searchParams.get("id") ?? "";
+      // a background shell's or watcher's last lines (core/bg-jobs.js), asked again every few seconds while shown
+      if (url.searchParams.get("what") === "job") {
+        const out = id.startsWith("b:") && r ? await r.jobOutput(id.slice(2)).catch(() => null) : null;
+        return json(out === null ? { error: "It isn't running any more." } : { output: out });
+      }
+      return json(await activity(r, id));
     }
     if (path === "/api/action" && req.method === "POST") {
       const body = await req.json().catch(() => null);

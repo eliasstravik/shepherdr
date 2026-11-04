@@ -28,6 +28,7 @@ import { focused, props, run, theme, home, hc, exec, shared, setShared, watchFol
 import { agents, panes, terminals, spaces, inRender } from "./live.js";
 import * as fs from "fs/promises";
 import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names } from "./core/chat-log.js";
+import { BgJobs } from "./core/bg-jobs.js";
 import { words, howAnswered } from "./core/asks.js";
 // The rows' words and rules the web app's chat draws by too (core/chat-view.js).
 import { WORDS, clock, senderName, briefLabel, newsWords, resolveArtifacts, unsigned, fitThumbs, bandActs, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
@@ -350,8 +351,15 @@ export default class Chat extends View {
     this.reactReqAt = shared("chat.reactreq")?.at ?? null;
     this.sendReqAt = shared("chat.sendreq")?.at ?? null;
     this.startReqAt = shared("chat.startreq")?.at ?? null;
-    // The working line's clock, once a second while the agent works.
-    cx.timer.every(1000, (cx) => { if (this.status() === "working" && !this.call) cx.notify(); });
+    // The working line's clock, once a second while the agent works; the rows over the box (its
+    // subagents, its background shells) count seconds for their first minute, then minutes.
+    let ticks = 0;
+    cx.timer.every(1000, (cx) => {
+      if (this.call) return;
+      ticks++;
+      const rows = [...this.helpers(), ...this.jobs()];
+      if (this.status() === "working" || rows.some((r) => Date.now() - (r.at ?? 0) < 61000) || (rows.length && ticks % 30 === 0)) cx.notify();
+    });
     // An Assistant's chat keeps its tasks current for their news lines (newsLines()): herdr-task's own
     // statuses, the same as the Tasks panel's and the news it sends.
     cx.timer.every(8000, (cx) => {
@@ -475,6 +483,12 @@ export default class Chat extends View {
     this.start = null;
     this.end = 0;
     this.conv = null;
+    // What the agent left running in the background (core/bg-jobs.js), the row opened, and the
+    // last lines each printed (job id -> text, while open), the ones being stopped.
+    this.bgJobs = new BgJobs();
+    this.jobOpen = null;
+    this.jobOut = new Map();
+    this.jobStopping = new Set();
     this.anchor = null;
     this.loadingEarlier = false;
   }
@@ -1127,6 +1141,7 @@ export default class Chat extends View {
           return;
         }
         await this.pull(cx);
+        await this.lookJobs(cx);
         await this.flag();
         // Its own start screen, while it has no session (or a card is still open).
         const k = this.ownTerminal();
@@ -3003,15 +3018,55 @@ export default class Chat extends View {
     return Boolean(this.conv?.waiting);
   }
 
-  // Above the box: the CLI's subagents at work, one row each as Claude Code and Codex list them
-  // (a spinner, its name, how long). Four rows, then "+N more" opens the rest.
-  // Shepherdr settings' "Helpers above the chat box" off (shared "chat.helpers" false): none.
+  // What the agent left running in the background (its shells and watchers, core/bg-jobs.js):
+  // live while its agent is, none once it ended or this chat only shows its log.
+  jobs() {
+    if (!this.conv || this.phase !== "ready" || this.ended || !KINDS[this.kind]) return [];
+    return this.bgJobs.list(this.kind, this.conv);
+  }
+
+  // Runs a shell script on the agent's machine (core/bg-jobs.js: its first argument is $0).
+  runThere(script, args) {
+    return exec("sh", ["-c", script, ...args], { on: this.machine });
+  }
+
+  // A look at the agent's processes when one is due, and the open row's last lines again.
+  async lookJobs(cx) {
+    const pid = this.t?.foreground?.pid;
+    if (!pid || !this.conv || this.phase !== "ready") return;
+    const jobs = this.bgJobs;
+    if (jobs.due(this.kind, this.conv) && await jobs.look((s, a) => this.runThere(s, a), this.kind, pid, this.conv)) cx.notify();
+    const open = this.jobs().find((j) => j.id === this.jobOpen);
+    if (this.jobOpen && !open) { this.jobOpen = null; cx.notify(); }
+    if (open?.path) {
+      const text = await jobs.output((s, a) => this.runThere(s, a), open);
+      if (text !== null && text !== this.jobOut.get(open.id)) { this.jobOut.set(open.id, text); cx.notify(); }
+    }
+  }
+
+  // Stop on an open row: its processes end; its CLI then tells the agent, as when it stops one.
+  stopJob(job, cx) {
+    const pid = this.t?.foreground?.pid;
+    if (!pid || this.jobStopping.has(job.id)) return;
+    this.jobStopping.add(job.id);
+    const jobs = this.bgJobs;
+    cx.spawn(async (cx) => {
+      await jobs.stop((s, a) => this.runThere(s, a), this.kind, pid, job).catch(() => {});
+      this.jobStopping.delete(job.id);
+      if (this.jobOpen === job.id) this.jobOpen = null;
+      cx.notify();
+    });
+  }
+
+  // Above the box: the CLI's subagents at work, then its background shells and watchers, one row
+  // each as Claude Code and Codex list them (an icon, its name, how long). Five rows, else four and
+  // "+N more" opens the rest. A shell's or watcher's row opens to its command, what it printed last
+  // (Claude Code's), and Stop.
+  // Shepherdr settings' "Helpers above the chat box" off (shared "chat.helpers" false): no subagents.
   background(t, st) {
-    if (shared("chat.helpers") === false) return null;
     const now = Date.now();
-    const helpers = this.helpers();
-    if (!helpers.length) return null;
-    const shown = helpers;
+    const shown = [...(shared("chat.helpers") === false ? [] : this.helpers().map((h) => ({ ...h, kind: "agent" }))), ...this.jobs()];
+    if (!shown.length) return null;
     const open = this.helpersOpen || shown.length <= 5;
     const list = open ? shown : shown.slice(0, 4);
     const ago = (at) => {
@@ -3019,10 +3074,41 @@ export default class Chat extends View {
       const s = Math.max(0, Math.floor((now - at) / 1000));
       return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${Math.floor(s / 3600)}h`;
     };
-    const row = (h, i) => h_flex().id(`helper-${i}`).w_full().h(24).px(6).gap(8).items_center().text_size(12)
-      .child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900))
-      .child(div().flex_1().min_w(0).truncate().font_medium().text_color(t.foreground).child(h.label))
-      .child(div().flex_none().font_family(settings().font_family ?? "JetBrains Mono").text_size(11.5).text_color(t.dim).child(ago(h.at)));
+    const mono = settings().font_family ?? "JetBrains Mono";
+    const age = (h) => div().flex_none().font_family(mono).text_size(11.5).text_color(t.dim).child(ago(h.at));
+    const row = (h, i) => {
+      if (h.kind === "agent") return h_flex().id(`helper-${i}`).w_full().h(24).px(6).gap(8).items_center().text_size(12)
+        .child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900))
+        .child(div().flex_1().min_w(0).truncate().font_medium().text_color(t.foreground).child(h.label))
+        .child(age(h));
+      const on = this.jobOpen === h.id;
+      const head = h_flex().id(`job-${h.id}`).w_full().h(24).px(6).gap(8).items_center().rounded(6).cursor_pointer().text_size(12)
+        .when(on, (el) => el.bg(t.hover))
+        .hover((s) => s.bg(t.hover))
+        .on_click((_e, cx) => {
+          cx.stop_propagation();
+          this.jobOpen = on ? null : h.id;
+          cx.notify();
+          if (!on) cx.spawn(async (cx) => this.lookJobs(cx));
+        })
+        .child(svg(h.kind === "monitor" ? "mods/chat/eye.svg" : "mods/workspace-chrome/terminal.svg").size(12).flex_none().text_color(t.working))
+        .child(div().flex_1().min_w(0).truncate().font_medium().text_color(t.foreground).child(h.label))
+        .child(age(h))
+        .child(svg(on ? "mods/chat/chevron-up.svg" : "mods/chat/chevron-down.svg").size(12).flex_none().text_color(t.dim));
+      if (!on) return head;
+      const out = this.jobOut.get(h.id);
+      const lines = out === undefined ? null : out.split("\n").slice(-8).map((l) => (l.length > 200 ? l.slice(0, 199) + "…" : l));
+      const stopping = this.jobStopping.has(h.id);
+      return v_flex().w_full().child(head)
+        .child(v_flex().w_full().pl(26).pr(6).pt(4).pb(6).gap(6)
+          .child(div().w_full().font_family(mono).text_size(11.5).text_color(t.muted).child(h.cmd.length > 300 ? h.cmd.slice(0, 299) + "…" : h.cmd))
+          .when(Boolean(h.path), (el) => el.child(v_flex().w_full().px(8).py(6).rounded(6).bg(t.surface).border_1().border_color(t.border)
+            .font_family(mono).text_size(11.5).text_color(t.dim)
+            .children(lines === null ? [div().child("Loading…")] : lines.length && lines.some(Boolean) ? lines.map((l) => div().w_full().truncate().child(l || " ")) : [div().child("(no output)")])))
+          .child(h_flex().child(stopping
+            ? h_flex().h(28).px(10).items_center().text_size(12.5).text_color(t.dim).child(WORDS.stopping)
+            : this.button(`job-stop-${h.id}`, "Stop", "mods/chat/stop.svg", "secondary", t, (cx) => this.stopJob(h, cx)))));
+    };
     return v_flex().flex_none().w_full().max_w(COLUMN + 28).mx_auto().px(14).pt(4)
       .children(list.map(row))
       .when(!open, (el) => el.child(h_flex().id("helpers-more").h(22).px(6).gap(6).items_center().rounded(6).cursor_pointer()

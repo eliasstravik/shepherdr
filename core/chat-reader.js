@@ -5,6 +5,7 @@
 // Shared core: the source is core/chat-reader.js.
 
 import { FIND, LOG, Conversation, records, resultText } from "./chat-log.js";
+import { BgJobs } from "./bg-jobs.js";
 
 export const PAGE = 200;
 export const KEEP = 2000;
@@ -30,6 +31,7 @@ export class ChatReader {
     this.end = 0;
     this.records = [];
     this.conv = null;
+    this.bg = new BgJobs(); // what it left running in the background
     this.state = "finding"; // finding | pending (no log yet) | ready | none (not a chat agent) | missing
   }
 
@@ -69,6 +71,31 @@ export class ChatReader {
     this.kind = kind;
     this.pid = pid;
     return true;
+  }
+
+  // ---- what it left running in the background (core/bg-jobs.js) ----
+
+  run(script, args) { return this.io.sh(script, args, this.machine); }
+
+  // A look at the agent's processes when one is due. -> true when what shows changed.
+  async lookJobs() {
+    if (this.pinned || !this.pid || !this.conv || !this.bg.due(this.kind, this.conv)) return false;
+    return this.bg.look((s, a) => this.run(s, a), this.kind, this.pid, this.conv);
+  }
+
+  // Its shells and watchers now (none for a log read as it is).
+  jobs() { return this.pinned || !this.conv ? [] : this.bg.list(this.kind, this.conv); }
+
+  // One of them stopped. -> false when it's gone already.
+  async stopJob(id) {
+    const job = this.jobs().find((j) => j.id === id);
+    return job ? this.bg.stop((s, a) => this.run(s, a), this.kind, this.pid, job) : false;
+  }
+
+  // What one of them printed last (Claude Code's), or null.
+  async jobOutput(id) {
+    const job = this.jobs().find((j) => j.id === id);
+    return job ? this.bg.output((s, a) => this.run(s, a), job) : null;
   }
 
   rebuild() {

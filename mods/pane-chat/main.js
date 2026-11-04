@@ -15,7 +15,8 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { panes, terminals, props, run, theme, home, exec, hc, notify, nextCommand, shared, setShared } from "herdr";
+import { props, run, theme, home, exec, hc, notify, nextCommand, shared, setShared } from "herdr";
+import { panes, terminals, inRender } from "./live.js";
 import { apSpace, apWatch, apPoll, apChip, apHeartbeatLink, COMPACT_BELOW } from "./autopilot.js";
 import { button as uiButton, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { on as addonOn } from "./addons.js";
@@ -197,7 +198,12 @@ export default class Pane extends View {
       (v, _e, cx) => (v === "chat" ? onChat(cx) : onTerminal(cx)));
   }
 
+  // One copy of Herdr's live lists for the whole render (live.js): past ~50 ms Herdr stops it.
   render(cx) {
+    return inRender(() => this.draw(cx));
+  }
+
+  draw(cx) {
     const t = theme();
     const self = this.me();
     if (!self) return div();
