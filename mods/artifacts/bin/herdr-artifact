@@ -506,6 +506,9 @@ def parse_spec(text):
         else:
             name, _, rest = body.partition(" ")
             node = {"name": name, "calls": spec_calls(rest), "kids": [], "text": None}
+            if name in ("image", "svg"):
+                m = re.match(r'"((?:[^"\\]|\\.)*)"', rest)
+                node["src"] = m.group(1) if m else None
         while stack[-1][0] >= ind:
             stack.pop()
         stack[-1][1]["kids"].append(node)
@@ -684,7 +687,7 @@ def cmd_publish(o):
         s.data["artifacts"].remove(art)
         s.data["artifacts"].insert(0, art)
         s.dirty = True
-        installed = write_mod(keep, files, art, f"art-{art['id']}", who["terminal"])
+        installed = None if getattr(o, "no_install", False) else write_mod(keep, files, art, f"art-{art['id']}", who["terminal"])
         prune_versions(art)
     out = dict(public(art), mod=f"art-{art['id']}", installed=bool(installed), warnings=warnings)
     if o.json:
@@ -1004,6 +1007,133 @@ def cmd_note(o):
     return 0
 
 
+# ---- convert: an older GPUI artifact into a recipe -------------------------------------------------
+# Shepherdr 3.1 draws artifacts from recipes on both sides. An artifact made before is drawn once by
+# herdr-app check (its element tree, as the window builds it), and that tree becomes recipe blocks:
+# headings, text, lists, code, pictures, and a bordered card as a callout. Interactive ones (a game)
+# keep only their words and pictures; the old version stays, viewable in the window.
+
+def _leaf_text(n):
+    """All the words inside an element, in order."""
+    if n["text"]:
+        return n["text"]
+    return " ".join(t for t in (_leaf_text(k) for k in n["kids"]) if t).strip()
+
+
+def _is_leaf(n):
+    """An element that holds words only (not other elements): one line, heading or code."""
+    return bool(n["text"]) or (bool(n["kids"]) and all(k["name"] == "text" for k in n["kids"]))
+
+
+def _blocks(n, size=13.0):
+    """The recipe blocks an element shows."""
+    size = num(n["calls"], "text_size", size)
+    if n["name"] == "image" and n.get("src"):
+        return [{"type": "image", "src": os.path.basename(n["src"])}]
+    if n["name"] == "svg" or n["name"] == "text":
+        return [{"type": "text", "md": n["text"]}] if n["name"] == "text" and n["text"] and n["text"].strip() else []
+    kids = n["kids"]
+    # a bullet row: a small empty mark, then words
+    if n["name"] == "h_flex" and len(kids) == 2 and not kids[0]["kids"] and not kids[0]["text"] and _leaf_text(kids[1]):
+        return [{"type": "_item", "md": _leaf_text(kids[1])}]
+    # a label and its words side by side ("Before  the old text")
+    if n["name"] == "h_flex" and kids and all(_is_leaf(k) for k in kids) and len(kids) <= 4:
+        parts = [_leaf_text(k) for k in kids if _leaf_text(k)]
+        if len(parts) == 2 and len(parts[0]) <= 24:
+            return [{"type": "text", "md": f"**{parts[0]}** {parts[1]}"}]
+        return [{"type": "text", "md": " · ".join(parts)}] if parts else []
+    if _is_leaf(n) and _leaf_text(n):
+        t, c = _leaf_text(n), n["calls"]
+        if "font_family" in c:
+            return [{"type": "code", "text": t}]
+        if ("font_semibold" in c or "font_bold" in c) and len(t) <= 120:
+            return [{"type": "heading", "text": t, "level": 2 if size >= 14 else 3}]
+        if "font_medium" in c and size <= 12.5 and len(t) <= 80:
+            return [{"type": "heading", "text": t, "level": 3}]
+        return [{"type": "text", "md": t}]
+    out = []
+    for k in kids:
+        out += _blocks(k, size)
+    # a bordered card of words: one callout
+    c = n["calls"]
+    page = "size_full" in c or "overflow_y_scrollbar" in c or "max_w" in c
+    if not page and ("border_1" in c or "bg" in c) and "p" in c and out and all(b["type"] in ("text", "heading", "_item") for b in out) and 1 < len(out) <= 12:
+        title = out[0]["text"] if out[0]["type"] == "heading" else None
+        rest = out[1:] if title else out
+        md = "\n".join(("- " + b["md"]) if b["type"] == "_item" else (b.get("md") or f"**{b.get('text')}**") for b in rest)
+        return [{"type": "callout", "tone": "info", **({"title": title} if title else {}), "md": md}]
+    return out
+
+
+def recipe_from_spec(spec):
+    """The recipe a drawn artifact shows: bullet rows gathered into lists."""
+    root = parse_spec(spec)
+    raw = _blocks(root) if root else []
+    blocks, items = [], []
+    for b in raw + [None]:
+        if b and b["type"] == "_item":
+            items.append(b["md"])
+            continue
+        if items:
+            blocks.append({"type": "list", "items": items})
+            items = []
+        if b:
+            blocks.append(b)
+    return {"recipe": 1, "blocks": blocks or [{"type": "text", "md": "(This artifact showed nothing to keep.)"}]}
+
+
+def cmd_convert(o):
+    """Each older artifact of this machine as a recipe: into --out (look first), or with --publish as its newest
+    version (kept, not installed: the window installs it when opened; the GPUI versions stay)."""
+    if not shutil.which("herdr-app"):
+        raise Fail("herdr-app isn't here: it draws each artifact once to read what it shows.")
+    done, skipped, failed = [], [], []
+    for name in sorted(os.listdir(STORE)) if os.path.isdir(STORE) else []:
+        if not name.endswith(".json"):
+            continue
+        loc = {"store": os.path.join(STORE, name)}
+        try:
+            with open(loc["store"]) as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        for a in data.get("artifacts", []):
+            if o.id and a["id"] != o.id:
+                continue
+            files = a.get("files") or []
+            if "recipe.json" in files and "main.js" not in files:
+                skipped.append(a["id"])
+                continue
+            src = os.path.join(FILES, a["id"], f"v{a['version']}")
+            if not os.path.isdir(src):
+                failed.append((a["id"], "its files are gone"))
+                continue
+            with tempfile.TemporaryDirectory(prefix="herdr-artifact-convert-") as d:
+                stage = os.path.join(d, f"art-{a['id']}")
+                copy_files(src, files, stage)
+                with open(os.path.join(stage, "artifact.js"), "w") as f:
+                    f.write(helper(a, f"art-{a['id']}", None))
+                r = run(["herdr-app", "check", stage, "--print-spec"])
+            if r.returncode != 0:
+                failed.append((a["id"], "it doesn't draw"))
+                continue
+            recipe = recipe_from_spec(r.stdout)
+            pics = sorted({b["src"] for b in recipe["blocks"] if b["type"] == "image"} & set(files))
+            recipe["blocks"] = [b for b in recipe["blocks"] if b["type"] != "image" or b["src"] in pics]
+            out = os.path.join(o.out, a["id"]) if o.out else tempfile.mkdtemp(prefix="herdr-artifact-recipe-")
+            os.makedirs(out, exist_ok=True)
+            with open(os.path.join(out, "recipe.json"), "w") as f:
+                json.dump(recipe, f, indent=1, ensure_ascii=False)
+            for pic in pics:
+                shutil.copy2(os.path.join(src, pic), os.path.join(out, pic))
+            if o.publish:
+                cmd_publish(argparse.Namespace(dir=out, id=a["id"], title=None, folder=None, task=None, note="as a recipe (drawn natively in the window and on the web)", json=True, no_install=True))
+            done.append({"id": a["id"], "blocks": len(recipe["blocks"]), "pictures": len(pics), **({"out": out} if o.out else {})})
+    res = {"converted": done, "already": skipped, "failed": [{"id": i, "why": w} for i, w in failed]}
+    print(json.dumps(res) if o.json else f"Converted {len(done)}, already recipes {len(skipped)}, failed {len(failed)}." + "".join(f"\n  {i}: {w}" for i, w in failed))
+    return 0 if not failed else 1
+
+
 def cmd_pull(o):
     mod = pull(o.id, o.machine, o.version) if o.machine else local_mod(o.id, o.version)
     print(json.dumps({"mod": mod}) if o.json else mod)
@@ -1165,6 +1295,10 @@ def main():
     c.add_argument("id")
     c = cmd("rm", cmd_rm, "delete an artifact and its versions")
     c.add_argument("id")
+    c = cmd("convert", cmd_convert, "turn older GPUI artifacts into recipes (--out a folder to look first; --publish as their newest version)")
+    c.add_argument("--id", help="only this artifact")
+    c.add_argument("--out", help="write each recipe into this folder, change nothing")
+    c.add_argument("--publish", action="store_true", help="publish each as its newest version (not installed; the old versions stay)")
     c = cmd("new", cmd_new, "write a starting main.js into a folder")
     c.add_argument("dir")
     cmd("guide", cmd_guide, "how to write an artifact")
