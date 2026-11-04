@@ -17,6 +17,8 @@ const AGENT: Record<string, Status> = { blocked: "need", working: "work", done: 
 export const placeKey = (spaceId: string) => `p:${spaceId.replace("/", ":")}`;
 export const taskId = (r: Row) => (r.machine ? `${r.machine}:${r.ref}` : r.ref);
 
+// a news event's dot: what the task was at that moment
+const NEWS: Record<string, TaskStatus> = { added: "todo", queued: "queued", started: "work", needs: "need", asks: "need", stalled: "need", failed: "need", ready: "ready", merging: "merging", merged: "done", done: "done", closed: "done" };
 const STEP: Record<string, StepKind> = { run: "run", read: "read", edit: "edit", search: "search", web: "web", agent: "agent" };
 const stepRow = (s: any, i: number) => ({ key: `${s.id ?? i}`, kind: STEP[s.kind] ?? "other", text: s.count > 1 ? `${s.line} ×${s.count}` : s.line });
 
@@ -135,7 +137,12 @@ export class Compat {
       if (x.kind === "user" && x.text) messages.push({ id: x.id, who: "you", text: x.text, at: x.at, ...(x.replyTo ? { reply: { text: x.replyTo } } : {}) } as Message);
       else if (x.kind === "agent" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at });
       else if (x.kind === "error" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at });
-      else if (x.kind === "tools" && x.steps?.length) {
+      else if (x.kind === "news" && x.ref) {
+        // a task's news line in its Assistant's chat (<herdr-news task=… event=…>), as it was said
+        const task = reader.machine ? `${reader.machine}:${x.ref}` : x.ref;
+        const status = NEWS[x.event] ?? "work";
+        messages.push({ id: x.id, who: "agent", at: x.at, text: `${task} ${x.text}`, card: { id: x.id, task, status, text: x.text } });
+      } else if (x.kind === "tools" && x.steps?.length) {
         const rows = x.steps.map(stepRow);
         messages.push({ id: x.id, who: "agent", at, activity: { id: x.id, at, end: at, rows: rows.slice(0, 3), steps: x.steps.length, ...(rows.length > 3 ? { more: rows.length - 3 } : {}) } });
       }

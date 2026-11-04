@@ -2,6 +2,7 @@
 // a CLI's own menus; what you send shows at once and goes in at once, even mid-turn; only while the CLI shows a menu
 // or is starting does it wait, and the bubble says why.
 import clsx from 'clsx'
+import { openAccept } from '@client/screens/Accept.tsx'
 import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ComponentType, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, type RefObject } from 'react'
 import { act, chatName, definePlugin, getDraft, getState, goChat, has, holdReload, openArtifact, openItem, openNeeds, openTask, registry, setDraft, setOutbox, setUI, taskOf, useDraft, useSnap, useStore, useUI, type UI } from '@client/kernel.ts'
 import { keyOf, partsOf, priorOf, reasonOf, SEND_TIMEOUT, type Outgoing } from '@client/outbox.ts'
@@ -1028,7 +1029,6 @@ function Row({ at, arrive, children }: { at: number; arrive: string; children: R
 }
 
 /** a task's row says what its task is doing now, when that moved on from the row's own words */
-const NOW: Record<string, string> = { need: 'Needs you', done: 'Done', work: 'Working', ready: 'Ready', merging: 'Merging', queued: 'Queued', todo: 'To do' }
 
 const cardBox = 'relative flex max-w-full items-center gap-2 self-start rounded-box px-3 py-2 text-left text-[0.9375rem] shadow-[inset_0_0_0_1px_var(--line2)]'
 /** the card's words on one line: cut short with an ellipsis where the chat is narrow, what follows them kept whole */
@@ -1091,12 +1091,15 @@ function Card({ card: c, chat, at, press, keys, className }: { card: UpdateCard;
   const status = t?.status ?? c.status ?? 'idle'
   const needs = (c.ask?.open || status === 'need') && registry.views.needs
   const pr = c.pr ?? t?.pr
+  // Shepherdr 3: a news line says what happened at its moment and is never rewritten after; a Ready one has Accept
+  // while its task still waits for it
+  const accept = c.status === 'ready' && t?.status === 'ready' && !t.archived
   const line = (
     <button type="button" data-anchor data-needs-link={needs ? '' : undefined} {...press} onClick={() => (needs ? openNeeds() : openTask(task))} className={clsx(cardBox, 'hover:bg-hover', className)}>
-      <Dot s={status} className="shrink-0" />
+      <Dot s={c.status ?? status} className="shrink-0" />
       <span className={cardLine}>
         <span className="truncate">
-          <b className="font-semibold">{c.task}</b> {t && t.status !== c.status ? NOW[t.status] ?? t.status : c.text}
+          <b className="font-semibold">{c.task}</b> {c.text}
         </span>
         {pr ? (
           // set apart like a task row's
@@ -1105,6 +1108,12 @@ function Card({ card: c, chat, at, press, keys, className }: { card: UpdateCard;
           </span>
         ) : null}
       </span>
+      {accept ? (
+        <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); openAccept(task) }} onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); openAccept(task) } }}
+          className="press-dim ml-auto h-6 shrink-0 rounded-full bg-fg px-2.5 text-xs/6 font-medium text-bg phone:h-8 phone:px-3 phone:text-sm/8">
+          Accept
+        </span>
+      ) : null}
     </button>
   )
   return line
