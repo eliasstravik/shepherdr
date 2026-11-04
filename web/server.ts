@@ -225,6 +225,8 @@ function rewrite(src: string, depth: number, copy: string) {
     return `${pre}${q}${up}rt/${f}${PER_COPY.has(f) ? `?copy=${copy}` : ''}${q}`
   })
 }
+// Pictures are only ever pictures: an SVG opened by itself runs no script on this page's origin.
+const SANDBOX = { 'content-security-policy': "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox", 'x-content-type-options': 'nosniff' }
 const file = (path: string, type?: string, extra: Record<string, string> = {}) =>
   new Response(Bun.file(path), { headers: { 'content-type': type ?? TYPES[extname(path)] ?? 'application/octet-stream', 'cache-control': 'no-cache', ...extra } })
 
@@ -266,13 +268,13 @@ Bun.serve<Sock>({
     if (path.startsWith('/app/')) {
       const p = normalize(join(APP, path.slice(5)))
       if (!p.startsWith(`${APP}/`) || !TYPES[extname(p)] || extname(p) === '.json' || !existsSync(p)) return new Response('not found', { status: 404 })
-      return file(p)
+      return file(p, undefined, SANDBOX)
     }
     // A picture a mod shows by its absolute path (an attachment, a screenshot): images only.
     if (path === '/file') {
       const p = normalize(url.searchParams.get('path') ?? '')
       if (!inHome(p) || !/\.(png|jpe?g|gif|webp|svg)$/i.test(p) || !existsSync(p)) return new Response('not found', { status: 404 })
-      return file(p)
+      return file(p, undefined, SANDBOX)
     }
     return new Response('not found', { status: 404 })
   },
