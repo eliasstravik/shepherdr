@@ -442,8 +442,8 @@ export interface MergeEvidence {
 export interface Artifact {
   id: string
   title: string
-  /** Shepherdr 3.1: recipe (recipe.json, drawn here as HTML) or gpui (an older one, drawn only by the Herdr window);
-   *  none: 2.1's HTML page */
+  /** Shepherdr 3.1: recipe (recipe.json, drawn here as HTML) or gpui (a custom panel only the Herdr window runs: the
+   *  web shows its picture); none: 2.1's HTML page. Its latest version's; each version says its own. */
   kind?: 'recipe' | 'gpui'
   /** the place it lives in */
   place: string
@@ -484,6 +484,10 @@ export interface ArtifactVersion {
   html: number
   /** what it brought, when not a new page: only data, or only a title */
   what?: 'data' | 'title'
+  /** this version's kind, when it differs over its versions (a converted one: gpui before, recipe after) */
+  kind?: 'recipe' | 'gpui'
+  /** a gpui version: when the window last took its picture (ms; the web shows it in its place) */
+  picture?: number
 }
 
 /** an artifact as posted in a chat: the version it came with. A message of its own (words posted with it come just

@@ -6,6 +6,7 @@
 // area, write what should change, and Send gives it to the agent that keeps the artifact
 // (`herdr-artifact note`) with the version, the spot in words and a picture of the panel with the
 // spot outlined. A note with no spot is about the whole artifact. Esc drops the spot, then ends.
+// A custom panel (not a recipe) also leaves its picture for the web app each time it's shown (picture()).
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
@@ -22,7 +23,7 @@ const isOn = () => { const s = shared(KEY); return Boolean(s && s.mod === MOD &&
 const stop = () => setShared(KEY, null);
 
 export function markupInit(_cx) {
-  const m = { spot: null, press: null, origin: null, size: null, shot: null, sending: false, said: "", failed: false, was: false };
+  const m = { spot: null, press: null, origin: null, size: null, shot: null, sending: false, said: "", failed: false, was: false, pictured: false };
   m.input = InputState.new({ placeholder: "What should change?" });
   m.input.on("submit", (_e, cx) => send(m, cx));
   m.input.on("change", (_e, cx) => { if (m.said && !m.sending) { m.said = ""; m.failed = false; cx.notify(); } });
@@ -37,8 +38,31 @@ export function markupWrap(m, inner, cx) {
   m.was = on;
   return v_flex().id("art-mark-root").relative().size_full()
     .on_size_change((size) => { m.size = size; })
+    .when(Boolean(A.custom), (el) => el.on_mouse_move((e, cx) => {
+      if (e.local_position) m.origin = { x: e.position.x - e.local_position.x, y: e.position.y - e.local_position.y };
+      picture(m, cx);
+    }))
     .child(inner)
     .when(on, (el) => el.child(layer(m, theme())));
+}
+
+// ---- a custom panel's picture ---------------------------------------------------------------
+
+// The web app can't run a custom panel: it shows the picture the window last took of it. Once per showing, a moment
+// after the pointer first crosses it (its place in the window is known from the pointer only), the window's last
+// frame is cut to the panel and kept beside this version (herdr-artifact picture). Not while Mark up lies over it.
+function picture(m, cx) {
+  if (m.pictured || !m.origin || !m.size || isOn()) return;
+  m.pictured = true;
+  cx.timer.after(700, () => {
+    if (isOn()) { m.pictured = false; return; }
+    const o = m.origin, s = m.size;
+    const dir = `${home()}/.herdr/artifacts/notes`, file = `${dir}/shot-${Date.now()}.png`;
+    exec("sh", ["-c", 'mkdir -p "$1" && exec herdr-app shot "$2"', "shot", dir, file])
+      .then((r) => r.code === 0 && exec(CLI(), ["picture", A.id, "--version", String(A.version), "--shot", file,
+        "--panel", [o.x, o.y, s.width, s.height].map(Math.round).join(","), "--json", ...(A.machine ? ["--from", A.machine] : [])]))
+      .catch(() => {});
+  });
 }
 
 // ---- the layer ---------------------------------------------------------------------------

@@ -32,17 +32,25 @@ def artifacts_of(folder):
 
 def find_proof(s, t, given=None):
     """The task's proof artifact, {id, title}: the one given (ready --proof <id>), else its newest
-    artifact titled as a proof ("HAT-2: ... · Proof") since it started. None: it made none."""
+    artifact titled as a proof ("HAT-2: ... · Proof") since it started. None: it made none. A proof
+    is always a recipe (the person accepts from their phone too): a custom panel is refused."""
     arts = artifacts_of(s.loc["folder"])
     if given:
         a = next((a for a in arts if a.get("id") == given.strip()), None)
         if not a:
             raise Fail(f"No artifact {given} in {s.loc['folder']} (herdr-artifact list shows them).")
-        return {"id": a["id"], "title": a.get("title") or a["id"]}
-    ref, since = s.ref(t).upper(), t.get("started") or 0
-    mine = [a for a in arts if (a.get("task") or "").upper() == ref and re.search(r"\bproof\b", a.get("title") or "", re.I)
-            and (a.get("at") or 0) >= since]
-    return {"id": mine[0]["id"], "title": mine[0].get("title") or mine[0]["id"]} if mine else None
+    else:
+        ref, since = s.ref(t).upper(), t.get("started") or 0
+        mine = [a for a in arts if (a.get("task") or "").upper() == ref and re.search(r"\bproof\b", a.get("title") or "", re.I)
+                and (a.get("at") or 0) >= since]
+        a = mine[0] if mine else None
+    if not a:
+        return None
+    files = a.get("files") or []
+    if "main.js" in files or "recipe.json" not in files:
+        raise Fail(f"Your proof {a['id']} is a custom panel, which the person can't open on their phone. Make it a recipe "
+                   f"(recipe.json; `herdr-artifact guide`, A task's proof), `herdr-artifact update {a['id']} <dir>`, then run ready again.")
+    return {"id": a["id"], "title": a.get("title") or a["id"]}
 
 
 def numstat(out, files):

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """herdr-artifact: Herdr's artifacts, the one way to make and change them.
 
-An artifact is a tiny Herdr mod (main.js, maybe more .js and .svg files) an agent writes to show
-the person something: a report, a dashboard, a form, a small tool. It belongs to one folder, like
+An artifact is what an agent shows the person: a report, a dashboard, a form, a proof. It is a
+recipe (recipe.json and its pictures, Shepherdr 3.1), drawn natively by the window and by the web
+app; only a rare custom one (a game, a live tool: --custom) is a Herdr mod the window runs
+(main.js), which the web shows as the picture the window last took of it. It belongs to one folder, like
 a task: the repo root in git (a linked worktree counts as its main repo), else the folder itself.
 Each folder's artifacts are listed in ~/.herdr/artifacts/<slug>.json on the machine where the
 folder lives; every version's files are kept in ~/.herdr/artifacts/files/<id>/v<n>/ (the last 20).
@@ -14,8 +16,10 @@ mod with `herdr-app check`, so a broken artifact never reaches the person.
 """
 
 import argparse
+import contextlib
 import fcntl
 import hashlib
+import io
 import json
 import os
 import re
@@ -40,6 +44,10 @@ RECIPE_CORE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "c
 RECIPE_TYPES = {"heading", "text", "list", "table", "chart", "stats", "image", "pair", "code", "callout", "columns", "tabs",
                 "details", "divider", "choice", "form", "button"}
 NOTES = os.path.join(STORE, "notes")
+# A custom artifact's picture, as the window last showed it (a version's folder; the web shows it in its place).
+PICTURE = ".window.png"
+# A task's proof, as herdr-task finds it ("HAT-2: ... · Proof"): always a recipe, the person accepts from their phone too.
+PROOF = re.compile(r"\bproof\b", re.I)
 NARROW = 320
 KEEP = 20
 MAX_FILES = 200
@@ -215,6 +223,19 @@ def is_recipe(files):
     return "recipe.json" in files and "main.js" not in files
 
 
+def version_kind(aid, v):
+    """A kept version's kind from its files: "recipe" or "custom" (None when they're gone)."""
+    d = os.path.join(FILES, aid, f"v{v}")
+    if not os.path.isdir(d):
+        return None
+    return "recipe" if os.path.isfile(os.path.join(d, "recipe.json")) and not os.path.isfile(os.path.join(d, "main.js")) else "custom"
+
+
+NOT_RECIPE = ("{src} is a custom panel (main.js): only the Herdr window runs it, so the web app on the person's phone shows "
+              "just a picture of it. Write it as a recipe instead (recipe.json: text, tables, charts, pictures, forms; "
+              "`herdr-artifact guide`). Only when a recipe truly can't do it (a game, a live tool), publish it with --custom.")
+
+
 def recipe_problems(src, files):
     """What's wrong with a recipe.json, in words (core/recipe.js's problems(), its main rules)."""
     try:
@@ -272,7 +293,7 @@ def copy_files(src, files, dst):
         shutil.copy2(os.path.join(src, rel), os.path.join(dst, rel))
 
 
-def helper(art, mod, agent, machine=None):
+def helper(art, mod, agent, machine=None, custom=False):
     """artifact.js, written into the installed mod: who made it and how to answer them."""
     return f"""// Written by herdr-artifact each time this artifact is installed. Don't edit: it's replaced.
 import {{ hc }} from "herdr";
@@ -290,6 +311,8 @@ export const dir = "mods/{mod}";
 export const asset = (name) => `${{dir}}/${{name}}`;
 /** The agent that made it (a terminal address), or null. */
 export const agent = {json.dumps(agent)};
+/** A custom panel (its own main.js), not a recipe: the window keeps a picture of it for the web app. */
+export const custom = {json.dumps(bool(custom))};
 
 /** Sends text to the agent that made this artifact, as a message it reads like the person's.
  *  Resolves true when it was delivered, false when that agent is gone. Call it from a click. */
@@ -350,7 +373,7 @@ def write_mod(src, files, art, mod, agent, machine=None):
     with open(os.path.join(tmp, "mod.json"), "w") as f:
         json.dump(meta, f, indent=2)
     with open(os.path.join(tmp, "artifact.js"), "w") as f:
-        f.write(helper(art, mod, agent, machine))
+        f.write(helper(art, mod, agent, machine, not is_recipe(files)))
     with open(os.path.join(tmp, ".version"), "w") as f:
         # The version, and which Mark up it carries (a newer one reinstalls it on the next open).
         f.write(f"{art['version']} {markup_hash() if os.path.isfile(os.path.join(tmp, 'artifact-markup.js')) else ''}".strip() + "\n")
@@ -647,7 +670,12 @@ def public(a):
 
 def cmd_publish(o):
     src, files = gather(o.dir)
-    who = me()
+    custom = not is_recipe(files)
+    if custom and not getattr(o, "custom", False):
+        raise Fail(NOT_RECIPE.format(src=src))
+    # convert: a new version in its maker's name (its publisher and task stay)
+    as_maker = getattr(o, "as_maker", False)
+    who = {"terminal": None, "task": None} if as_maker else me()
     loc = find_anywhere(o.id) if o.id and not o.folder else locate(o.folder)
     with Store(loc) as s:
         if o.id:
@@ -668,6 +696,11 @@ def cmd_publish(o):
         task = o.task or art.get("task") or who["task"]
         if task and not title.upper().startswith(task.upper()):
             title = f"{task}: {title}"
+        if custom and PROOF.search(title):
+            if not o.id:
+                s.data["artifacts"].remove(art)
+            raise Fail("A task's proof is always a recipe (recipe.json), so the person can open it on their phone too. "
+                       "`herdr-artifact guide` shows how (A task's proof).")
         v = (art["versions"][-1]["v"] if art["versions"] else 0) + 1
         draft = dict(art, title=title, version=v, folder=loc["folder"])
         err, warnings = check(src, files, draft)
@@ -678,16 +711,24 @@ def cmd_publish(o):
         keep = os.path.join(FILES, art["id"], f"v{v}")
         copy_files(src, files, keep)
         at = now()
-        art.update(title=title, version=v, folder=loc["folder"], publisher=who["terminal"], task=task, at=at, files=files)
-        art["versions"].append({"v": v, "at": at, "publisher": who["terminal"], **({"note": o.note} if o.note else {})})
+        publisher = art.get("publisher") if as_maker else who["terminal"]
+        # each version's kind (the web draws a recipe, and shows a custom one's picture); older ones from their files
+        for x in art["versions"]:
+            if "kind" not in x and version_kind(art["id"], x["v"]):
+                x["kind"] = version_kind(art["id"], x["v"])
+        # a conversion keeps the artifact's time and place in the list (only its version is new)
+        art.update(title=title, version=v, folder=loc["folder"], publisher=publisher, task=task, at=art.get("at", at) if as_maker else at, files=files)
+        art["versions"].append({"v": v, "at": at, "publisher": publisher, "kind": "custom" if custom else "recipe",
+                                **({"note": o.note} if o.note else {})})
         for old in art["versions"][:-KEEP]:
             shutil.rmtree(os.path.join(FILES, art["id"], f"v{old['v']}"), ignore_errors=True)
         art["versions"] = art["versions"][-KEEP:]
         # Newest first.
-        s.data["artifacts"].remove(art)
-        s.data["artifacts"].insert(0, art)
+        if not as_maker:
+            s.data["artifacts"].remove(art)
+            s.data["artifacts"].insert(0, art)
         s.dirty = True
-        installed = None if getattr(o, "no_install", False) else write_mod(keep, files, art, f"art-{art['id']}", who["terminal"])
+        installed = None if getattr(o, "no_install", False) else write_mod(keep, files, art, f"art-{art['id']}", publisher)
         prune_versions(art)
     out = dict(public(art), mod=f"art-{art['id']}", installed=bool(installed), warnings=warnings)
     if o.json:
@@ -695,6 +736,9 @@ def cmd_publish(o):
     else:
         print(f"Published {art['id']} v{v}: {title}")
         print("The person sees it in the Artifacts panel; your chat shows a card for it.")
+        if custom:
+            print("A custom panel: the web app on the person's phone shows only a picture of it, taken when the window "
+                  "shows this version. A recipe opens everywhere: make it one when you can.")
         if warnings:
             print(f"\nThe check (light, dark, {NARROW} px wide) found what to fix, then update it:")
             for w in warnings:
@@ -915,9 +959,9 @@ def attr(s):
 
 
 def crop_shot(shot, panel, area, out):
-    """The artifact's panel cut from a window shot (logical px rects), the spot outlined. The shot is
-    at the window's physical size: its scale is the shot's width over the window's (window.json),
-    snapped to a quarter."""
+    """The artifact's panel cut from a window shot (logical px rects), the spot outlined (area None:
+    just the panel). The shot is at the window's physical size: its scale is the shot's width over
+    the window's (window.json), snapped to a quarter."""
     r = run(["magick", "identify", "-format", "%w", shot])
     try:
         pw = int(r.stdout.strip())
@@ -927,6 +971,9 @@ def crop_shot(shot, panel, area, out):
     except (ValueError, OSError, KeyError, IndexError, TypeError, ZeroDivisionError):
         return False
     px, py, pw_, ph = (round(v * scale) for v in panel)
+    if area is None:
+        r = run(["magick", shot, "-crop", f"{pw_}x{ph}+{px}+{py}", "+repage", "-resize", "1600x1600>", out])
+        return r.returncode == 0 and os.path.isfile(out)
     ax, ay, aw, ah = ((v - o) * scale for v, o in zip(area, (panel[0], panel[1], 0, 0)))
     if aw < 8 * scale and ah < 8 * scale:
         cx, cy = ax + aw / 2, ay + ah / 2
@@ -1007,6 +1054,69 @@ def cmd_note(o):
     return 0
 
 
+# ---- a custom artifact's picture (the web app shows it in its place) -------------------------------
+
+def cmd_picture(o):
+    """The window's picture of a custom artifact's version, taken as it shows it (Mark up's wrapper: a window shot and
+    the panel's place in it), kept beside that version's files as .window.png for the web app; another machine's goes
+    there. The newest one replaces the last."""
+    src, tmp = o.image and os.path.expanduser(o.image), None
+    if o.shot:
+        os.makedirs(NOTES, exist_ok=True)
+        tmp = os.path.join(NOTES, f"{o.id}-v{o.version}-picture-{now()}.png")
+        try:
+            ok = bool(o.panel) and crop_shot(o.shot, rect(o.panel), None, tmp)
+        finally:
+            try:
+                os.remove(o.shot)
+            except OSError:
+                pass
+        if not ok:
+            raise Fail("Couldn't cut the panel from the window's picture.")
+        src = tmp
+    if not src or not os.path.isfile(src):
+        raise Fail("Give --shot and --panel (a window shot and the panel in it), or --image.")
+    try:
+        if o.machine:
+            rel = f".herdr/artifacts/notes/{os.path.basename(src)}"
+            with open(src, "rb") as f:
+                w = subprocess.run(["hc", "file", "write", "--on", o.machine, rel], input=f.read(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if w.returncode != 0:
+                raise Fail(f"Couldn't send the picture to {o.machine}.")
+            r = run([sys.executable, os.path.realpath(__file__), "--on", o.machine, "picture", o.id, "--version", str(o.version),
+                     "--image", f"~/{rel}", "--json"])
+            try:
+                out = json.loads(r.stdout.strip().splitlines()[-1])
+            except (ValueError, IndexError):
+                raise Fail(r.stderr.strip() or f"Couldn't reach {o.machine}.")
+            if out.get("error"):
+                raise Fail(out["error"])
+            print(json.dumps(out) if o.json else f"Kept on {o.machine}.")
+            return 0
+        loc = find_anywhere(o.id)
+        with Store(loc) as s:
+            a = s.find(o.id)
+            x = next((x for x in a["versions"] if x["v"] == o.version), None)
+            d = os.path.join(FILES, a["id"], f"v{o.version}")
+            if not x or not os.path.isdir(d):
+                raise Fail(f"v{o.version} of {o.id} isn't kept.")
+            if version_kind(a["id"], o.version) == "recipe":
+                raise Fail("A recipe needs no picture: the web app draws it.")
+            shutil.copyfile(src, os.path.join(d, PICTURE))
+            x["kind"], x["picture"] = "custom", now()
+            s.dirty = True
+        out = {"id": o.id, "version": o.version, "picture": x["picture"]}
+        print(json.dumps(out) if o.json else f"Kept the picture of {o.id} v{o.version}.")
+        return 0
+    finally:
+        # a picture sent here from another machine (notes/), or cut here
+        for f in {tmp, src if src and os.path.dirname(os.path.realpath(src)) == os.path.realpath(NOTES) else None} - {None}:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+
+
 # ---- convert: an older GPUI artifact into a recipe -------------------------------------------------
 # Shepherdr 3.1 draws artifacts from recipes on both sides. An artifact made before is drawn once by
 # herdr-app check (its element tree, as the window builds it), and that tree becomes recipe blocks:
@@ -1025,6 +1135,27 @@ def _is_leaf(n):
     return bool(n["text"]) or (bool(n["kids"]) and all(k["name"] == "text" for k in n["kids"]))
 
 
+BULLET = re.compile(r"^[•·‣–-]\s+(?=\S)")
+SCROLL_X = ("overflow_x_scroll", "overflow_x_scrollbar")
+
+
+def _lines(n):
+    """An element's words a line each (a row's side by side), as in a terminal box."""
+    if _is_leaf(n):
+        return [_leaf_text(n).rstrip()]
+    if n["name"] == "h_flex" or "flex_row" in n["calls"]:
+        return [" ".join(x for k in n["kids"] for x in _lines(k) if x).rstrip()]
+    return [x for k in n["kids"] for x in _lines(k)]
+
+
+def _has(n, name):
+    return n["name"] == name or any(_has(k, name) for k in n["kids"])
+
+
+def _strong(c):
+    return "font_semibold" in c or "font_bold" in c or "font_medium" in c or num(c, "font_weight") >= 500
+
+
 def _blocks(n, size=13.0):
     """The recipe blocks an element shows."""
     size = num(n["calls"], "text_size", size)
@@ -1032,31 +1163,38 @@ def _blocks(n, size=13.0):
         return [{"type": "image", "src": os.path.basename(n["src"])}]
     if n["name"] == "svg" or n["name"] == "text":
         return [{"type": "text", "md": n["text"]}] if n["name"] == "text" and n["text"] and n["text"].strip() else []
-    kids = n["kids"]
+    kids, c = n["kids"], n["calls"]
+    page = "size_full" in c or "overflow_y_scrollbar" in c or "overflow_y_scroll" in c or "max_w" in c
+    # a terminal box: lines that don't wrap (or a monospace font, or scrolling sideways) on a card
+    if not page and kids and not _is_leaf(n) and not _has(n, "image") and (
+            "font_family" in c or any(k in c for k in SCROLL_X)
+            or (("border_1" in c or "bg" in c) and any("whitespace_nowrap" in k["calls"] or "font_family" in k["calls"] for k in kids))):
+        return [{"type": "code", "text": "\n".join(_lines(n)).strip("\n")}]
     # a bullet row: a small empty mark, then words
     if n["name"] == "h_flex" and len(kids) == 2 and not kids[0]["kids"] and not kids[0]["text"] and _leaf_text(kids[1]):
         return [{"type": "_item", "md": _leaf_text(kids[1])}]
-    # a label and its words side by side ("Before  the old text")
-    if n["name"] == "h_flex" and kids and all(_is_leaf(k) for k in kids) and len(kids) <= 4:
+    # words side by side: a label and its words ("Before  the old text"), or a table's row (gathered after)
+    if n["name"] == "h_flex" and kids and all(_is_leaf(k) for k in kids) and len(kids) <= 6:
         parts = [_leaf_text(k) for k in kids if _leaf_text(k)]
-        if len(parts) == 2 and len(parts[0]) <= 24:
-            return [{"type": "text", "md": f"**{parts[0]}** {parts[1]}"}]
-        return [{"type": "text", "md": " · ".join(parts)}] if parts else []
+        if len(parts) >= 2:
+            return [{"type": "_row", "cells": parts, "head": _strong(c) or all(_strong(k["calls"]) for k in kids if _leaf_text(k))}]
+        return [{"type": "text", "md": parts[0]}] if parts else []
     if _is_leaf(n) and _leaf_text(n):
-        t, c = _leaf_text(n), n["calls"]
+        t = _leaf_text(n)
         if "font_family" in c:
             return [{"type": "code", "text": t}]
-        if ("font_semibold" in c or "font_bold" in c) and len(t) <= 120:
+        # a bullet written into the words ("• Not shown live")
+        if BULLET.match(t):
+            return [{"type": "_item", "md": BULLET.sub("", t)}]
+        if ("font_semibold" in c or "font_bold" in c or num(c, "font_weight") >= 600) and len(t) <= 120:
             return [{"type": "heading", "text": t, "level": 2 if size >= 14 else 3}]
-        if "font_medium" in c and size <= 12.5 and len(t) <= 80:
+        if "font_medium" in c and len(t) <= 60 and not t.rstrip().endswith((".", ":", ";", ",")):
             return [{"type": "heading", "text": t, "level": 3}]
         return [{"type": "text", "md": t}]
     out = []
     for k in kids:
         out += _blocks(k, size)
     # a bordered card of words: one callout
-    c = n["calls"]
-    page = "size_full" in c or "overflow_y_scrollbar" in c or "max_w" in c
     if not page and ("border_1" in c or "bg" in c) and "p" in c and out and all(b["type"] in ("text", "heading", "_item") for b in out) and 1 < len(out) <= 12:
         title = out[0]["text"] if out[0]["type"] == "heading" else None
         rest = out[1:] if title else out
@@ -1065,29 +1203,112 @@ def _blocks(n, size=13.0):
     return out
 
 
+def _row_text(cells):
+    """One row of words alone: "**Before** the old text", or its parts with dots between."""
+    if len(cells) == 2 and len(cells[0]) <= 24:
+        return {"type": "text", "md": f"**{cells[0]}** {cells[1]}"}
+    return {"type": "text", "md": " · ".join(cells)}
+
+
 def recipe_from_spec(spec):
-    """The recipe a drawn artifact shows: bullet rows gathered into lists."""
+    """The recipe a drawn artifact shows: bullet rows gathered into lists, rows of words under a header row into
+    tables."""
     root = parse_spec(spec)
     raw = _blocks(root) if root else []
-    blocks, items = [], []
+    for i, b in enumerate(raw):
+        if b["type"] == "text" and BULLET.match(b["md"]):
+            raw[i] = {"type": "_item", "md": BULLET.sub("", b["md"])}
+    # under a "Not proven" heading, its lines are a list
+    under = False
+    for i, b in enumerate(raw):
+        if b["type"] == "heading":
+            under = bool(re.match(r"^not proven\b", b["text"].strip(), re.I))
+        elif under and b["type"] == "text":
+            raw[i] = {"type": "_item", "md": b["md"]}
+        elif under and b["type"] != "_item":
+            under = False
+    blocks, items, rows = [], [], []
+
+    def flush_rows():
+        if len(rows) >= 2 and rows[0]["head"] and all(len(r["cells"]) == len(rows[0]["cells"]) for r in rows):
+            blocks.append({"type": "table", "columns": rows[0]["cells"], "rows": [r["cells"] for r in rows[1:]]})
+        else:
+            blocks.extend(_row_text(r["cells"]) for r in rows)
+        rows.clear()
+
     for b in raw + [None]:
         if b and b["type"] == "_item":
+            if rows:
+                flush_rows()
             items.append(b["md"])
             continue
         if items:
             blocks.append({"type": "list", "items": items})
             items = []
+        if b and b["type"] == "_row" and (not rows or (len(b["cells"]) == len(rows[0]["cells"]) and not b["head"])):
+            rows.append(b)
+            continue
+        if rows:
+            flush_rows()
+        if b and b["type"] == "_row":
+            rows.append(b)
+            continue
         if b:
             blocks.append(b)
     return {"recipe": 1, "blocks": blocks or [{"type": "text", "md": "(This artifact showed nothing to keep.)"}]}
 
 
+# What a drawn element tree can't keep: a panel that answers clicks or reads data while open (tabs, filters, a
+# form, a game, files read live). Those are converted by hand (convert --id <id> --recipe <dir>) or stay custom.
+LIVE = [(re.compile(r"\.on_click\(|\.on_mouse_(down|up|move)\(|\.on_key_down\("), "it answers clicks (tabs, filters, a form, a game)"),
+        (re.compile(r"\breadTextFile\(|\bexec\(|\bfetch\("), "it reads its data while open"),
+        (re.compile(r"cx\.timer\.every"), "it changes over time")]
+
+
+def live_parts(src, files):
+    """Why a GPUI artifact's drawing alone can't make its recipe (empty: it can)."""
+    why = []
+    for rel in files:
+        if not rel.endswith((".js", ".mjs")):
+            continue
+        try:
+            with open(os.path.join(src, rel)) as f:
+                text = f.read()
+        except OSError:
+            continue
+        why += [w for rx, w in LIVE if rx.search(text) and w not in why]
+    return why
+
+
+def convert_publish(a, out):
+    """A recipe folder published as an artifact's newest version, in its maker's name (its publisher and task stay):
+    kept, not installed (the window installs it when opened; the GPUI versions before it stay)."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        cmd_publish(argparse.Namespace(dir=out, id=a["id"], title=None, folder=None, task=None, json=True, no_install=True,
+                                       as_maker=True, note="as a recipe: opens in the window and on the web"))
+
+
 def cmd_convert(o):
     """Each older artifact of this machine as a recipe: into --out (look first), or with --publish as its newest
-    version (kept, not installed: the window installs it when opened; the GPUI versions stay)."""
+    version (kept, not installed: the window installs it when opened; the GPUI versions stay). One that answers clicks
+    or reads data while open is listed instead (--force converts what it draws); `--id <id> --recipe <dir>` publishes
+    a recipe written by hand for it."""
+    if o.recipe:
+        if not o.id:
+            raise Fail("--recipe needs --id: the artifact it's for.")
+        loc = find_anywhere(o.id)
+        with Store(loc, write=False) as s:
+            a = s.find(o.id)
+        _, files = gather(o.recipe)
+        if not is_recipe(files):
+            raise Fail(f"{o.recipe} has no recipe.json (or has a main.js).")
+        convert_publish(a, o.recipe)
+        res = {"converted": [{"id": a["id"], "by": "hand"}], "already": [], "by_hand": [], "failed": []}
+        print(json.dumps(res) if o.json else f"Converted {a['id']} (by hand).")
+        return 0
     if not shutil.which("herdr-app"):
         raise Fail("herdr-app isn't here: it draws each artifact once to read what it shows.")
-    done, skipped, failed = [], [], []
+    done, skipped, hand, failed = [], [], [], []
     for name in sorted(os.listdir(STORE)) if os.path.isdir(STORE) else []:
         if not name.endswith(".json"):
             continue
@@ -1108,6 +1329,10 @@ def cmd_convert(o):
             if not os.path.isdir(src):
                 failed.append((a["id"], "its files are gone"))
                 continue
+            why = live_parts(src, files)
+            if why and not o.force:
+                hand.append((a["id"], "; ".join(why)))
+                continue
             with tempfile.TemporaryDirectory(prefix="herdr-artifact-convert-") as d:
                 stage = os.path.join(d, f"art-{a['id']}")
                 copy_files(src, files, stage)
@@ -1127,10 +1352,18 @@ def cmd_convert(o):
             for pic in pics:
                 shutil.copy2(os.path.join(src, pic), os.path.join(out, pic))
             if o.publish:
-                cmd_publish(argparse.Namespace(dir=out, id=a["id"], title=None, folder=None, task=None, note="as a recipe (drawn natively in the window and on the web)", json=True, no_install=True))
+                convert_publish(a, out)
             done.append({"id": a["id"], "blocks": len(recipe["blocks"]), "pictures": len(pics), **({"out": out} if o.out else {})})
-    res = {"converted": done, "already": skipped, "failed": [{"id": i, "why": w} for i, w in failed]}
-    print(json.dumps(res) if o.json else f"Converted {len(done)}, already recipes {len(skipped)}, failed {len(failed)}." + "".join(f"\n  {i}: {w}" for i, w in failed))
+    res = {"converted": done, "already": skipped, "by_hand": [{"id": i, "why": w} for i, w in hand],
+           "failed": [{"id": i, "why": w} for i, w in failed]}
+    if o.json:
+        print(json.dumps(res))
+    else:
+        print(f"Converted {len(done)}, already recipes {len(skipped)}, by hand {len(hand)}, failed {len(failed)}."
+              + "".join(f"\n  {i}: {w}" for i, w in hand + failed))
+        if hand:
+            print("By hand: write its recipe.json, then `herdr-artifact convert --id <id> --recipe <dir>`; "
+                  "or --force converts what it draws now.")
     return 0 if not failed else 1
 
 
@@ -1177,17 +1410,32 @@ export default class Artifact extends View {
 '''
 
 
+# What `new` starts a recipe with: a line, a table and a choice, each to replace.
+STARTER = {"recipe": 1, "blocks": [
+    {"type": "text", "md": "One line on what this shows. Replace these blocks with yours (`herdr-artifact guide` lists them)."},
+    {"type": "table", "columns": ["What", {"label": "Value", "align": "right"}], "rows": [["Example", "42"]]},
+    {"type": "choice", "question": "Does this look right?", "options": [{"label": "Yes"}, {"label": "Not yet"}]}]}
+
+
 def cmd_new(o):
     d = os.path.realpath(os.path.expanduser(o.dir))
-    if os.path.exists(os.path.join(d, "main.js")):
-        raise Fail(f"{d}/main.js exists already.")
+    name = "main.js" if o.custom else "recipe.json"
+    if os.path.exists(os.path.join(d, name)):
+        raise Fail(f"{d}/{name} exists already.")
     os.makedirs(d, exist_ok=True)
-    with open(os.path.join(d, "main.js"), "w") as f:
+    if not o.custom:
+        with open(os.path.join(d, name), "w") as f:
+            json.dump(STARTER, f, indent=1)
+            f.write("\n")
+        print(f"Wrote {d}/recipe.json. Put your blocks (and pictures beside it) in, then: herdr-artifact publish {o.dir} --title \"...\"")
+        return 0
+    with open(os.path.join(d, name), "w") as f:
         f.write(EXAMPLE)
     # So editors know the herdr and gpui-kit modules while the agent writes it.
     with open(os.path.join(d, "jsconfig.json"), "w") as f:
         json.dump({"compilerOptions": {"checkJs": True, "paths": {"gpui-kit": [os.path.join(APP, "gpui-kit.d.ts")], "herdr": [os.path.join(APP, "herdr.d.ts")]}}}, f, indent=2)
-    print(f"Wrote {d}/main.js. Edit it, then: herdr-artifact publish {o.dir} --title \"...\"")
+    print(f"Wrote {d}/main.js, a custom panel only the window runs (the web shows a picture of it). Edit it, then: "
+          f"herdr-artifact publish {o.dir} --title \"...\" --custom")
     return 0
 
 
@@ -1265,7 +1513,7 @@ def main():
         print(VERSION)
         return 0
 
-    p = argparse.ArgumentParser(prog="herdr-artifact", description="Herdr's artifacts: tiny Herdr panels an agent makes to show the person something.",
+    p = argparse.ArgumentParser(prog="herdr-artifact", description="Herdr's artifacts: recipes an agent writes to show the person something, drawn in the window and on the web.",
                                 epilog="`herdr-artifact guide` explains how to write one. Another machine's folder: herdr-artifact --on <machine> <command> ...")
     sub = p.add_subparsers(dest="cmd")
 
@@ -1275,18 +1523,20 @@ def main():
         c.set_defaults(fn=fn)
         return c
 
-    c = cmd("publish", cmd_publish, "check a mod folder and publish it (a new artifact, or with --id a new version)")
-    c.add_argument("dir", help="the folder with main.js")
+    c = cmd("publish", cmd_publish, "check a recipe folder and publish it (a new artifact, or with --id a new version)")
+    c.add_argument("dir", help="the folder with recipe.json (a custom panel: main.js, with --custom)")
     c.add_argument("--title", help="what it is, for people (needed for a new one)")
     c.add_argument("--id", help="an artifact's id: publish a new version of it")
     c.add_argument("--folder", help="the folder it belongs to (default: here)")
     c.add_argument("--task", help="the task it's for (default: this agent's task)")
     c.add_argument("--note", help="what changed in this version")
+    c.add_argument("--custom", action="store_true", help="a custom GPUI panel (main.js), only when a recipe truly can't: the web shows only its picture")
     c = cmd("update", cmd_publish, "publish a new version of an artifact (publish --id)")
     c.add_argument("id")
     c.add_argument("dir")
     c.add_argument("--title")
     c.add_argument("--note")
+    c.add_argument("--custom", action="store_true", help="a custom GPUI panel (main.js), only when a recipe truly can't")
     c.set_defaults(folder=None, task=None)
     c = cmd("list", cmd_list, "a folder's artifacts, newest first")
     c.add_argument("--folder")
@@ -1299,8 +1549,11 @@ def main():
     c.add_argument("--id", help="only this artifact")
     c.add_argument("--out", help="write each recipe into this folder, change nothing")
     c.add_argument("--publish", action="store_true", help="publish each as its newest version (not installed; the old versions stay)")
-    c = cmd("new", cmd_new, "write a starting main.js into a folder")
+    c.add_argument("--force", action="store_true", help="also convert ones that answer clicks or read data while open (what they draw at first)")
+    c.add_argument("--recipe", help="with --id: a recipe folder written by hand, published as its newest version")
+    c = cmd("new", cmd_new, "write a starting recipe.json into a folder")
     c.add_argument("dir")
+    c.add_argument("--custom", action="store_true", help="a starting main.js instead (a custom panel, only when a recipe truly can't)")
     cmd("guide", cmd_guide, "how to write an artifact")
     c = cmd("where", cmd_where, "where a folder's artifacts are listed")
     c.add_argument("--folder")
@@ -1319,6 +1572,13 @@ def main():
     c.add_argument("--shot", help="a window shot (herdr-app shot) to cut the panel from; removed after")
     c.add_argument("--panel", help="the panel in the shot, logical px: x,y,w,h")
     c.add_argument("--area", help="the marked spot in the shot, logical px: x,y,w,h")
+    c.add_argument("--from", dest="machine", help="the machine the artifact is on (default: this one)")
+    c = cmd("picture", cmd_picture, argparse.SUPPRESS)
+    c.add_argument("id")
+    c.add_argument("--version", type=int, required=True)
+    c.add_argument("--shot", help="a window shot (herdr-app shot) to cut the panel from; removed after")
+    c.add_argument("--panel", help="the panel in the shot, logical px: x,y,w,h")
+    c.add_argument("--image", help="the picture itself")
     c.add_argument("--from", dest="machine", help="the machine the artifact is on (default: this one)")
     c = cmd("pull", cmd_pull, argparse.SUPPRESS)
     c.add_argument("id")
