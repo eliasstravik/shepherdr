@@ -7,13 +7,13 @@
 // folder where another space there has its name, its repo and branch, ↑ahead ↓behind), and its red and green counts.
 // Worktree spaces nest under their repo's own. A folded section (Pinned too) still shows the space you're in and its
 // unread ones, and adds up its counts on its heading. Menus are core/menus.js's, the window's too: a right click (or a
-// finger held, or the ⋯) opens them. Spaces drag among their own, into a section or Pinned, or back to their machine's
+// finger held) opens them, no ⋯ on the rows. Spaces drag among their own, into a section or Pinned, or back to their machine's
 // top; machines and sections keep their place. Alt+↑/↓ goes to the space above or below as they show.
 import clsx from 'clsx'
 import { openWorktree } from '@client/screens/Worktree.tsx'
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type LiHTMLAttributes, type ReactNode } from 'react'
 import { act, counts, definePlugin, getState, goPlace, manyMachines, openSplit, placeOf, removeSpace, setUI, splitClick, useSnap, useUI, type Pane, type UI } from '@client/kernel.ts'
-import { Dialog, RowMenu, RowMenuButton, useRowMenu } from '@client/rowmenu.tsx'
+import { Dialog, RowMenu, useRowMenu } from '@client/rowmenu.tsx'
 import { BackIcon, BellIcon, CogIcon, BellSlashIcon, AttentionBadge, attentionWords, DeleteIcon, DownIcon, HashIcon, ic, IconButton, List, MenuItem, MenuLabel, MenuSeparator, MenuSetting, Meta, ModelIcon, MonitorIcon, NextIcon, PinnedIcon, PinTaskIcon, PlusIcon, Primary, ReadIcon, RemoveProjectIcon, RenameIcon, rowClass, RowText, SectionIcon, ServerIcon, SplitIcon, TasksIcon, UnpinIcon } from '@client/ui.tsx'
 import { HealthDot, MachineMeter } from '@plugins/health/client.tsx'
 import { toast } from '@plugins/alerts/toasts.tsx'
@@ -367,7 +367,7 @@ const indent = {
 }
 
 /** a section's heading (Pinned, a machine): its chevron, its icon (Pinned's pin; a machine's emoji or server) and its word. A tap anywhere on it folds
- *  what is under it, as its chevron does; it goes nowhere, as Slack's sections don't. What it adds (a machine's +, ⋯
+ *  what is under it, as its chevron does; it goes nowhere, as Slack's sections don't. What it adds (a machine's +
  *  and how it is) comes after its name. */
 function Heading({ id, label, folds, icon: mark, shut, held, toggle, dim, className, children, ...rest }: { id: string; label: string; folds: string; icon: ReactNode; shut: boolean; held?: () => boolean; toggle?: () => void; dim?: boolean; className?: string; children?: ReactNode } & Omit<LiHTMLAttributes<HTMLLIElement>, 'children'>) {
   const flip = toggle ?? (() => toggleFold(id))
@@ -519,7 +519,7 @@ function RenameBox({ name, problem, onSave, onCancel }: { name: string; problem:
   )
 }
 
-/** a row's name: a button going there, stretched over the row so its ⋯ stays a button of its own */
+/** a row's name: a button going there, stretched over the row */
 function Go({ p, said, sel, sort, onClick, children }: { p: Place; said: string; sel: boolean; sort?: Sort; onClick?: (e: { metaKey: boolean; ctrlKey: boolean }) => void; children: ReactNode }) {
   return (
     <button
@@ -542,8 +542,8 @@ function openPlace(id: string, _e?: { metaKey: boolean; ctrlKey: boolean }) {
   goPlace(id)
 }
 
-/** A space: its name (going there, a button stretched over the row), its ⋯ and its count. Its menu opens from the ⋯,
- *  a right click or a finger held on the row; none while its machine can't be reached. In a section at the top it sits
+/** A space: its name (going there, a button stretched over the row) and its count. Its menu opens, as the window's,
+ *  from a right click (at the pointer) or a finger held on the row: no ⋯ comes and goes on it. In a section at the top it sits
  *  in under its heading, its machine after its name where there are more machines; in a machine's section, in under
  *  that. It drags among those beside it, a home space too, or onto another section it may go in. */
 function Space({ p, snap, sort, at }: { p: Place; snap: Snapshot; sort: Sort; at: 'top' | 'machine' | 'inner' }) {
@@ -590,8 +590,7 @@ function Space({ p, snap, sort, at }: { p: Place; snap: Snapshot; sort: Sort; at
           {r.name}
         </Go>
       )}
-      {still ? null : <RowMenuButton menu={menu} label={`More for ${p.name}`} className="relative z-1 -mr-1 phone:-mr-1.5 phone:size-8" />}
-      <span className={clsx('contents', !still && 'untucked:hidden')}>{r.end}</span>
+      {r.end}
       {menu.open ? (
         <PlaceMenu p={p} snap={snap} menu={menu} unread={r.fresh} onClose={() => setRemoving(p)} />
       ) : null}
@@ -713,7 +712,6 @@ function MachineHeading({ m, shut, className }: { m: Machine; shut: boolean; cla
       {off ? null : <AddButton machine={m.machine} name={m.name} />}
       {off ? null : <MachineMeter m={m} />}
       {off ? null : <HealthDot m={m} />}
-      <RowMenuButton menu={menu} label={`More for ${m.name}`} className="relative z-1 -mr-1 phone:-mr-1.5 phone:size-8" />
       {menu.open ? (
         <RowMenu menu={menu} label={m.name} className="min-w-56!">
           {/* a machine's own menu, as the window's (core/menus.js): its name and emoji */}
@@ -749,8 +747,7 @@ function SectionHeading({ g, snap, at, className }: { g: Group; snap: Snapshot; 
       onContextMenu={pinned ? undefined : (e) => (dragging() ? e.preventDefault() : menu.press.onContextMenu(e))}
     >
       {/* Pinned has no menu in the window */}
-      {pinned ? null : <RowMenuButton menu={menu} label={`More for ${s.name}`} className="relative z-1 -mr-1 phone:-mr-1.5 phone:size-8" />}
-      <span className={clsx('contents', !pinned && 'untucked:hidden')}>{g.shut ? <Inside snap={snap} spaces={g.spaces} /> : null}</span>
+      {g.shut ? <Inside snap={snap} spaces={g.spaces} /> : null}
       {menu.open ? (
         <RowMenu menu={menu} label={s.name} className="min-w-56!">
           {/* as the window's (core/menus.js): Rename…, and Delete at once, its toast offering Undo */}

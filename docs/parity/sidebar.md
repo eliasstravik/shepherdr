@@ -48,8 +48,8 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Chevron | main.js:393 at the right end | P:801 `Fold` before the icon | ◇ 2.1's look (Slack's chevron) |
 | Warnings in words | none (the meter's colors say it) | removed ("herdr down", "CPU 95%") | ✓ |
 | Folded: counts | none | removed (2.1's dot) | ✓ |
-| Menu | main.js:375 right-click (offline too): core/menus.js `machineMenu` Rename… | P:715 right-click, a held finger or its ⋯ (offline too) | ✓ |
-| ⋯ button | none | P:714 shows on hover / always to a finger | ◇ the reach a finger and the keyboard have for the right-click menu |
+| Menu | main.js:378 right-click (offline too), at the pointer: core/menus.js `machineMenu` Rename… | P:709 right-click at the pointer (src/rowmenu.tsx), a held finger beside the row or under it on a phone (offline too) | ✓ (◇ a held finger: touch has no right-click) |
+| ⋯ button | none | none | ✓ (the web's hover ⋯ removed) |
 | Drag | header takes a dropped space back to its machine's top; machines don't move | P:707 drop target; machines no longer drag | ✓ (2.1's machine reordering removed) |
 | Loading… row | main.js:344 "Loading…" while its layout loads and no rows show | none | ◇ the service reads each machine's spaces before its snapshot shows them; an empty machine is its header, as the window's |
 
@@ -88,7 +88,8 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Folded: still shows the space you're in and unread ones | main.js:440, 463 | P:235 `stays` | ✓ (was hiding them all) |
 | Going to a space unfolds nothing | window never unfolds | P:893 (2.1's unfold-on-go removed) | ✓ |
 | Empty open section | main.js:497 "Drag spaces here" | P:767 "Drag spaces here" | ✓ |
-| Section menu | popups.js core/menus.js `sectionMenu`: Rename…, Delete | P:753 the same | ✓ |
+| Section menu | main.js:478 right-click at the pointer; popups.js core/menus.js `sectionMenu`: Rename…, Delete | P:747 right-click at the pointer, a held finger; the same items | ✓ |
+| Section ⋯ button | none | none | ✓ (the web's hover ⋯ removed) |
 | Delete at once, toast with Undo | sections.js: "Deleted the section “X”", "Its spaces moved up to the machine. Click to undo." | P:793 `deleteSection` → `toast` with `core/spaces.js` `sectionDeletedToast`; its tap → `section restore` (service/actions.ts, `withRestoredSection`) | ✓ (the web had no Undo) |
 | Sections and machines don't drag | only spaces drag | P:707, P:741 menu-only press | ✓ (2.1's reordering removed) |
 
@@ -105,8 +106,8 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Counts | main.js:662 red (needs you), green (Ready), 9+; Red counts / Green counts switches | P:352 `AttentionBadge` | ✓ (were hidden on unreachable spaces) |
 | Worktree nesting | main.js:305-325 under its repo's space, branch icon; Worktrees in the sidebar off hides them but the open one | P:209 `nest`, `look.worktrees` | ✓ |
 | Click | main.js:529 selects | P:538 goes there | ✓ (2.1's ⌘-click split view removed) |
-| Right-click menu | main.js:282 core/menus.js `spaceMenu` | P:416 the same items | ✓ (also on spaces of an unreachable machine now) |
-| ⋯ button | none | P:603 | ◇ as on machine headers |
+| Right-click menu | main.js:649 at the pointer, core/menus.js `spaceMenu`; worktree rows too | P:585 at the pointer, a held finger; P:417 the same items; worktree rows too | ✓ (also on spaces of an unreachable machine now) |
+| ⋯ button | none | none: the count stays put on hover | ✓ (the web's hover ⋯ removed) |
 | Notify setting | popups.js: bell (crossed out when Off), "Notify", All / Needs me / Off, note "Tasks alert either way." | P:426 `MenuSetting named`, note from core/menus.js | ✓ (the word and the note were missing; per-choice hints removed) |
 | Close… | confirm-chat: "Close “web”?", "Its tabs close and every program in them ends.", Close space | P:633 core/confirm.js `CLOSE_SPACE` | ✓ (the cards page keeps those words) |
 | Rename…, Space settings…, worktrees | popups.js | P:436-441 (the dialogs: [dialogs](dialogs.md)) | ✓ |
