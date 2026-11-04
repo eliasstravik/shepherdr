@@ -18,6 +18,7 @@ import { Hub } from "./hub.ts";
 import { Store } from "./store.ts";
 import { Live } from "./live.ts";
 import { Model } from "./model.ts";
+import { setPilot, runPilot } from "./autopilot.ts";
 import { Chats } from "./chats.ts";
 import { act } from "./actions.ts";
 import { Compat, activity } from "./compat.ts";
@@ -273,6 +274,14 @@ const server = Bun.serve<{ who: string }>({
         const next = !body.place || body.place === "all" ? withEverywhere(n, v) : withSpace(n, String(body.place), v);
         await store.set("notify", next);
         return json({ ok: true });
+      }
+      if (body?.type === "setting" && typeof body.key === "string" && body.key.startsWith("autopilot.") && typeof body.place === "string") {
+        try { await setPilot(body.place, body.key, typeof body.value === "string" ? body.value : null); await model.readAutopilot(); model.rebuild(); return json({ ok: true }); }
+        catch (err) { return json({ ok: false, error: (err as Error).message }); }
+      }
+      if (body?.type === "autopilot-run" && typeof body.place === "string") {
+        try { await runPilot(body.place); await model.readAutopilot(); model.rebuild(); return json({ ok: true }); }
+        catch (err) { return json({ ok: false, error: (err as Error).message }); }
       }
       if (body?.type === "setting" && typeof body.key === "string") {
         try { settings.set(body.key, typeof body.value === "string" ? body.value : null); return json({ ok: true }); }

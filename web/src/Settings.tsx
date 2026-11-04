@@ -371,15 +371,29 @@ function NumberValue({ value, num, onSave, onEdit, label }: { value: string; num
  *  the coordinator */
 function TriggerValue({ row, phone, onPick }: { row: SettingRow & { trigger: NonNullable<SettingRow['trigger']> }; phone: boolean; onPick: (v: string) => void }) {
   const t = row.trigger
-  const picked = t.presets.find((p) => p.value === row.value)?.label ?? ''
+  // a row that takes its own words (Autopilot's schedule) has Custom… too: a box for any rule, saved as you leave it
+  const [custom, setCustom] = useState(false)
+  const preset = t.presets.find((p) => p.value === row.value)
+  const picked = custom || (row.text && !preset) ? 'Custom…' : (preset?.label ?? '')
   return (
     <div className="flex flex-col gap-2.5">
       <div className="flex flex-col gap-0.5">
         <p className="text-pretty text-fg">{t.words}</p>
         {t.next.length ? <Small className="tabular-nums">Next: {t.next.join(' · ')}</Small> : null}
       </div>
-      <Segments label={row.label} value={picked} options={t.presets.map((p) => p.label)} fill={phone} onPick={(l) => onPick(t.presets.find((p) => p.label === l)!.value)} />
-      <Small className="text-pretty">{row.key === 'heartbeat.on' ? 'Other news waits for the next heartbeat. ' : ''}Ask the Assistant for anything else.</Small>
+      {(() => {
+        const options = [...t.presets.map((p) => p.label), ...(row.text ? ['Custom…'] : [])]
+        const pick = (l: string) => { if (l === 'Custom…') return setCustom(true); setCustom(false); onPick(t.presets.find((p) => p.label === l)!.value) }
+        // more picks than a phone's line holds: a pick list
+        return phone && options.length > 4 ? <Pick label={row.label} plain value={picked} options={options} onPick={pick} /> : <Segments label={row.label} value={picked} options={options} fill={phone} onPick={pick} />
+      })()}
+      {row.text && picked === 'Custom…' ? (
+        <div className="flex flex-col gap-1 [&>span:first-child]:w-full">
+          <TextValue label={`${row.label} rule`} value={preset ? '' : row.value} onEdit={() => {}} onSave={(v) => { setCustom(false); onPick(v) }} />
+          <Small className="text-pretty">Like “every 2 hours on weekdays from 8:00 to 18:00”. Saved when you leave the box.</Small>
+        </div>
+      ) : null}
+      {row.text ? null : <Small className="text-pretty">{row.key === 'heartbeat.on' ? 'Other news waits for the next heartbeat. ' : ''}Ask the Assistant for anything else.</Small>}
     </div>
   )
 }
@@ -581,10 +595,23 @@ function AppearancePick({ phone }: { phone: boolean }) {
 function Control({ row, phone, set, edit }: { row: SettingRow; phone: boolean; set: (value: string) => void; edit: () => void }) {
   const options = row.options ?? []
   const action = row.key in registry.settingActions
-  const only = !row.num && !row.text && !action && options.length <= 1 && (options[0] ?? row.value) === row.value
+  const only = !row.num && !row.text && !row.multi && !action && options.length <= 1 && (options[0] ?? row.value) === row.value
   if (row.fixed || !row.key || only) return <span className="text-right text-pretty text-fg2 [overflow-wrap:anywhere]">{shown(row.value)}</span>
   if (row.num) return <NumberValue label={row.label} value={row.value} num={row.num} onEdit={edit} onSave={set} />
   if (row.text) return <TextValue label={row.label} value={row.value} onEdit={edit} onSave={set} />
+  if (row.multi) {
+    // chips that each turn on or off (3.0's Autopilot events)
+    const on = new Set(row.value.split(',').filter(Boolean))
+    return (
+      <div role="group" aria-label={row.label} className={clsx('flex flex-wrap gap-1.5', phone ? 'justify-start' : 'justify-end')}>
+        {row.multi.map((o) => (
+          <Tab key={o.value} on={on.has(o.value)} className="shadow-[0_0_0_1px_var(--line2)]" onClick={() => set(row.multi!.map((x) => x.value).filter((v) => (v === o.value ? !on.has(v) : on.has(v))).join(','))}>
+            {o.label}
+          </Tab>
+        ))}
+      </div>
+    )
+  }
   // an action (alerts: turn them on for this device) is a button, its row's value the words under its label
   if (action) return <Ghost onClick={() => set(options[0])}>{options[0]}</Ghost>
   if (options.length === 2 && options.includes('on') && options.includes('off')) return <Switch label={row.label} on={row.value === 'on'} onChange={(on) => set(on ? 'on' : 'off')} />
@@ -596,7 +623,7 @@ function Control({ row, phone, set, edit }: { row: SettingRow; phone: boolean; s
 const follows = (row: SettingRow, value: string) => (row.inherits && value === row.inherits.value ? null : value)
 
 /** the rows whose few short choices sit side by side */
-const SEGMENTS = new Set(['notify', 'review.mustFix'])
+const SEGMENTS = new Set(['notify', 'review.mustFix', 'autopilot.events'])
 
 /** on Everywhere's rows: the way to the space Settings was opened from, and that it already sets its own */
 function SpaceOnly({ row }: { row: SettingRow }) {
@@ -661,7 +688,7 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
         {page.about ? <p className={clsx('text-pretty text-fg2', phone ? 'text-[0.9375rem]' : 'text-[0.8125rem]')}>{page.about}</p> : null}
         {hint ? <p className={clsx('text-pretty text-fg3', phone ? 'text-[0.9375rem]' : 'text-[0.8125rem]')}>{hint}</p> : null}
       </div>
-      {page.name === 'Autopilot' && page.level?.startsWith('p:') ? <div className="flex flex-col items-start gap-2"><Ghost disabled={running} onClick={async () => { setRunning(true); try { const result = await act({ type: 'autopilot-run', place: page.level! }); setPilotError(result.error ?? '') } finally { setRunning(false) } }}>{running ? 'Queuing…' : 'Run now'}</Ghost>{pilotError ? <p role="alert" className="text-need">{pilotError}</p> : null}</div> : null}
+      {page.name === 'Autopilot' && page.level && page.level !== 'all' && !page.level.startsWith('m:') ? <div className="flex flex-col items-start gap-2"><Ghost disabled={running || page.rows.find((r) => r.key === 'autopilot.on')?.value === 'off'} onClick={async () => { setRunning(true); try { const result = await act({ type: 'autopilot-run', place: page.level! }); setPilotError(result.error ?? '') } finally { setRunning(false) } }}>{running ? 'Queuing…' : 'Run now'}</Ghost>{pilotError ? <p role="alert" className="text-need">{pilotError}</p> : null}</div> : null}
       {page === APPEARANCE ? <AppearancePick phone={phone} /> : null}
       {page.secrets && page.level ? <SecretsList level={page.level} secrets={page.secrets} phone={phone} /> : null}
       {page.View ? <page.View phone={phone} /> : null}
@@ -953,7 +980,7 @@ export default function Settings() {
       <span className="text-fg2">Editing:</span>
       {page.device ? <span>This device</span> : page.global || !page.level ? <span>Everywhere</span> : levelPick(phone ? 'phone' : 'content') ?? <span>{name(level)}</span>}
     </div>
-    <PageBody key={`${page.level ?? ''}|${page.name}`} page={page} phone={phone} set={set} refused={(key) => refused[at(key)]} clear={clear} hint={page.rows.some((r) => r.key === 'space.base') ? 'This repository’s branch for new tasks.' : page.level && !page.global && page.name !== 'Task IDs' ? levelHint(page.level, snap) : undefined} /></>
+    <PageBody key={`${page.level ?? ''}|${page.name}`} page={page} phone={phone} set={set} refused={(key) => refused[at(key)]} clear={clear} hint={page.rows.some((r) => r.key === 'space.base') ? 'This repository’s branch for new tasks.' : page.level && !page.global && page.name !== 'Task IDs' && page.name !== 'Autopilot' ? levelHint(page.level, snap) : undefined} /></>
 
   if (phone) {
     const list = (

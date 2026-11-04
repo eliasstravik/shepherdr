@@ -55,7 +55,7 @@ export class Model {
       else if ("terminal" in e && e.terminal) this.soon();
     });
     const tasks = join(HOME, ".herdr", "tasks");
-    if (existsSync(tasks)) watch(tasks, () => this.soon(() => { this.readAutopilot(); return this.readLists(null); }));
+    if (existsSync(tasks)) watch(tasks, () => this.soon(() => Promise.all([this.readAutopilot(), this.readLists(null)]).then(() => {})));
     if (existsSync(SHARED)) watch(SHARED, () => this.soon(() => this.readShared()));
     setInterval(() => void this.refresh(), 10_000);
     void this.refresh();
@@ -79,15 +79,26 @@ export class Model {
       this.machines = r.machines.filter((m) => m.state === "connected").map((m) => m.name);
     } catch {}
     this.readShared();
-    this.readAutopilot();
-    await Promise.all([this.readDocs(), this.readLists(null), ...this.machines.map((m) => this.readLists(m))]);
+    await Promise.all([this.readAutopilot(), this.readDocs(), this.readLists(null), ...this.machines.map((m) => this.readLists(m))]);
     this.build();
   }
 
   private autopilot: Record<string, any> = {};
-  /** Each space's Autopilot on this machine (herdr-task's .autopilot.json). */
-  private readAutopilot() {
-    try { this.autopilot = JSON.parse(readFileSync(join(HOME, ".herdr", "tasks", ".autopilot.json"), "utf8")).spaces ?? {}; } catch { this.autopilot = {}; }
+  private reading: Promise<void> | null = null;
+  /** Each space's Autopilot on this machine, as herdr-task tells it (when it wakes, next and last wake, progress), with
+   *  its heartbeat file's words. One read at a time. */
+  readAutopilot() {
+    return this.reading ??= (async () => {
+      try {
+        const p = Bun.spawn(["herdr-task", "autopilot", "list", "--json"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+        const list = JSON.parse(await new Response(p.stdout).text() || "[]") as any[];
+        this.autopilot = Object.fromEntries(list.map((a) => {
+          let heartbeat = "";
+          try { heartbeat = a.heartbeat && existsSync(a.heartbeat) ? readFileSync(a.heartbeat, "utf8") : ""; } catch {}
+          return [a.space, { ...a, words: heartbeat }];
+        }));
+      } catch {}
+    })().finally(() => { this.reading = null; });
   }
 
   private readShared() {
@@ -165,6 +176,7 @@ export class Model {
         section: bar.sections.find((x: any) => (x.spaces ?? []).includes(s.id))?.id ?? null,
         assistant: k?.address ?? null, assistantStatus: (k as any)?.status?.state ?? null,
         autopilot: !s.machine && this.autopilot[s.id]?.on ? { next: this.autopilot[s.id].next_run ?? null } : null,
+        pilot: s.machine ? null : this.autopilot[s.id] ?? { on: false, events: [], every: null, trigger: "Only Run now" },
         unread: isUnread(k, seen) && spaceLevel(this.value("notify") ?? {}, s.id) !== "Off",
         red: here.filter((r) => r.section === "needs").length + ((k as any)?.status?.state === "blocked" ? 1 : 0),
         green: here.filter((r) => r.section === "ready").length,

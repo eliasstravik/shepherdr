@@ -253,7 +253,7 @@
         "tablet": "Same",
         "phone": "Grouped list, pages slide in"
       },
-      "planned": "Agents, Autopilot, Secrets, Machines and Window pages (Tasks, Notify and Web work)",
+      "planned": "Agents and Window pages (Tasks, Notify, Autopilot, Secrets, Machines and Web work)",
       "service": [
         "settings.ts"
       ]
@@ -1047,7 +1047,8 @@
       },
       "web": {
         "files": [
-          "plugins/coordinators/client.tsx"
+          "plugins/coordinators/client.tsx",
+          "src/Settings.tsx"
         ]
       },
       "forms": {
@@ -1056,9 +1057,9 @@
         "tablet": "Same",
         "phone": "Switch in the chat's menu; settings page"
       },
-      "planned": "Its settings page (heartbeat, schedule, events); the switch works",
       "service": [
-        "actions.ts"
+        "actions.ts",
+        "autopilot.ts"
       ]
     },
     {

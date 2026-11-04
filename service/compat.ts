@@ -19,6 +19,36 @@ export type Space = any;
 const SECTION: Record<string, TaskStatus> = { needs: "need", working: "work", merging: "merging", ready: "ready", queued: "queued", todo: "todo", done: "done" };
 const AGENT: Record<string, Status> = { blocked: "need", working: "work", done: "idle", idle: "idle" };
 
+const PILOT_ABOUT = "Its Assistant wakes on a schedule or when something happens to its tasks, and works from the heartbeat.";
+// the schedule's picks (herdr-task's --every words), and the events that wake it, as the window's
+const PILOT_EVERY = [{ label: "Off", value: "" }, { label: "Every 30 min", value: "every 30 minutes" }, { label: "Every hour", value: "every 60 minutes" }, { label: "Weekdays 9:00", value: "weekdays 9:00" }];
+export const PILOT_EVENTS: [string, string][] = [["added", "Added"], ["ready", "Ready"], ["failed", "Failed"], ["needs-you", "Needs you"], ["merged", "Merged"], ["stalled", "Stalled"]];
+function when(ms: number) {
+  const d = new Date(ms), today = new Date();
+  const hm = `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return d.toDateString() === today.toDateString() ? `Today ${hm}` : `${d.toLocaleDateString("en", { weekday: "short", month: "short", day: "numeric" })} ${hm}`;
+}
+const reasonWords = (r: string) => (r === "schedule" ? "Schedule" : r === "run now" ? "Run now" : String(r ?? "").replace(/^event:(\S+)/, (_m, e) => `Event: ${e}`));
+
+/** A space's Autopilot page, as the window's: its switch, schedule (picks or its own words), events, heartbeat file,
+ *  and how its wakes go. */
+function pilotSection(s: Space): SettingSection {
+  const a = s.pilot, on = !!a.on, events: string[] = a.events ?? [];
+  const pending = a.pending, last = a.last_wake;
+  return { name: "Autopilot", level: s.id, about: PILOT_ABOUT, rows: [
+    { label: "Autopilot", key: "autopilot.on", value: on ? "on" : "off", options: ["on", "off"] },
+    { label: "Schedule", key: "autopilot.every", value: a.every ?? "", text: true, hint: "When it wakes by itself.",
+      trigger: { words: a.trigger ?? "Only Run now", next: on && a.next_run ? [when(a.next_run)] : [], presets: PILOT_EVERY } },
+    { label: "Events", key: "autopilot.events", value: events.join(","), multi: PILOT_EVENTS.map(([v, l]) => ({ value: v, label: l })),
+      hint: "These wake it at once when they happen to this space's tasks." },
+    { label: "Heartbeat", key: "autopilot.heartbeat", value: a.words ?? "", doc: true },
+    { label: "Next wake", key: "", fixed: true, value: !on ? "Off." : pending ? `Waiting: ${pending.note ?? "goes when its Assistant is idle"}.`
+      : a.next_run ? `${when(a.next_run)} · Schedule` : events.length ? "On events only." : "Only on Run now." },
+    { label: "Last wake", key: "", fixed: true, value: last ? `${when(last.at)} · ${reasonWords(last.reason)} · ${last.outcome}` : "Never." },
+    { label: "Progress", key: "", fixed: true, value: a.progress ? `${a.progress.text} (${when(a.progress.at)})` : "None. The Assistant saves it after each wake." },
+  ] } as SettingSection;
+}
+
 export const placeKey = (spaceId: string) => `p:${spaceId.replace("/", ":")}`;
 export const taskId = (r: Row) => (r.machine ? `${r.machine}:${r.ref}` : r.ref);
 
@@ -217,8 +247,14 @@ export class Compat {
         ...(spaceOwn(n, s.id) ? { inherits: { value: parent(s), from: "Everywhere" } } : { from: "Everywhere" }) }] })),
     ];
 
-    const pilots: SettingSection[] = spaces.filter((s) => s.autopilot).map((s) => ({ name: "Autopilot", level: s.id, rows: [{ label: "State", key: "autopilot.state", fixed: true,
-      value: s.autopilot.next ? `Next ${new Date(s.autopilot.next).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "On" }] }));
+    // Autopilot (3.0's Settings › Autopilot): Everywhere lists the spaces on this machine, each space's page has its
+    // switch, schedule, events, heartbeat and Run now (herdr-task keeps it all)
+    const local = spaces.filter((s) => s.pilot);
+    const pilots: SettingSection[] = [
+      { name: "Autopilot", level: "all", about: `Per space. ${PILOT_ABOUT}`, rows: local.map((s) => ({ label: s.name, key: "", fixed: true,
+        value: s.pilot.on ? ["On", s.pilot.trigger, s.pilot.next_run ? `Next ${when(s.pilot.next_run)}` : null].filter(Boolean).join(" · ") : "Off" })) },
+      ...local.map((s) => pilotSection(s)),
+    ];
     notify.push(...pilots);
 
     this.chats = chats;

@@ -780,6 +780,8 @@ export interface SettingRow {
   warn?: string
   /** pick list values */
   options?: string[]
+  /** several picks at once, saved comma-joined (Autopilot's events) */
+  multi?: { value: string; label: string }[]
   /** a number from min to max (step: what it goes up by, 1 when none), with its unit (plural, and one: singular);
    *  off: it may be left empty for off, zero: 0 is off */
   num?: { min: number; max: number; step?: number; unit?: string; one?: string; off?: boolean; zero?: boolean }
