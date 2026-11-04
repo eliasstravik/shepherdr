@@ -2,8 +2,9 @@
 // - the task tick (herdr-task tick: queued tasks start, merged ones are done) every 15 s and 2 s after a task's agent
 //   changes, and about once a minute the automations scheduler's check, here and on other machines with tasks: every
 //   service ticks its own machine; the machine that serves the web app (Serve from, service/host.ts tickOn) ticks the
-//   others that have no service of their own, and another service does that only while the host can't be reached
-//   (herdr-task's own lock keeps two ticks of one machine from ever running at once);
+//   others that have no service of their own (and those running an Assistant: their tick brings agents back after a
+//   crash), and another service does that only while the host can't be reached (herdr-task's own lock keeps two ticks
+//   of one machine from ever running at once);
 // - another machine's agent asking for a secret (herdr.secret.want): herdr-secret serve answers it from the vault here;
 // - a chat open on a web page: the question hook's flag (data/chat-asks/open/<terminal>), so its cards come to the page
 //   (another machine's agent: its flag there, through herdr-core).
@@ -44,6 +45,16 @@ export function windowLeavesIt() {
   return existsSync(join(APP, "mods", "tabs-tasks", "service.js"));
 }
 
+/** Other machines with a live Assistant or an agent that comes back after a crash (label herdr.resume). */
+export function agentMachines(terminals: Iterable<any>): string[] {
+  const out = new Set<string>();
+  for (const k of terminals) {
+    const at = String(k?.address ?? "").indexOf("/");
+    if (at > 0 && k.state === "live" && (k.labels?.["herdr.role"] === "coordinator" || k.labels?.["herdr.resume"])) out.add(k.address.slice(0, at));
+  }
+  return [...out];
+}
+
 export class Jobs {
   readonly on = windowLeavesIt();
   private ticking = false;
@@ -79,6 +90,12 @@ export class Jobs {
       let remote: string[] = [];
       if (this.host) remote = this.host.tickOn();
       else try { remote = readdirSync(join(HOME, ".herdr", "tasks", ".remote")).filter((x) => /^[\w.-]+$/.test(x) && !x.endsWith(".secret")); } catch {}
+      // and those running an Assistant with no tasks yet: their tick brings it back after a crash (herdr-task revive.py)
+      if (!this.host || this.host.serving() || !this.host.reachable()) {
+        const own = this.host?.participants() ?? new Set<string>();
+        remote = [...new Set([...remote, ...agentMachines(this.hub.terminals.values())])].filter((m) => !own.has(m)
+          && (!this.host || this.host.machines.get(m)?.state === "connected"));
+      }
       for (const m of remote) {
         await run([cli, "--on", m, "tick", "--json"]);
         if (ensure) await run([cli, "--on", m, "scheduler", "--ensure", "--json"]);

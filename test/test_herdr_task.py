@@ -523,3 +523,152 @@ class Store:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Revive(unittest.TestCase):
+    """SHEP-30: an Assistant or a task's agent the core gave a plain shell (a crash, a power loss, a
+    reboot) gets its agent typed back into that shell, on its own session. A fake core in memory:
+    hc and the agents' session files are never touched."""
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.revive as revive
+        self.r, self.mock = revive, mock
+        self.dir = tempfile.mkdtemp()
+        self.log = os.path.join(self.dir, "S1.jsonl")
+        open(self.log, "w").close()
+        self.terms = {}
+        self.sent, self.screens, self.sessions = [], {}, {}
+
+        def hc(args):
+            out, code = "", 0
+            if args[:2] == ["hc", "label"]:
+                k, v = args[3].split("=", 1)
+                self.terms[args[2]].setdefault("labels", {})[k] = v
+            elif args[:2] == ["hc", "send"]:
+                self.sent.append((args[2], args[3]))
+            elif args[:2] == ["hc", "read"]:
+                out = self.screens.get(args[2], "")
+            else:
+                raise AssertionError(f"ran {args}")
+            return subprocess.CompletedProcess(args, code, out, "")
+
+        def hc_json(*args):
+            if args == ("ls",):
+                return {"terminals": [{"address": a, "state": t["state"]} for a, t in self.terms.items()]}
+            if args[0] == "get":
+                return json.loads(json.dumps(self.terms[args[1]]))
+            raise AssertionError(f"hc {args}")
+        for name, value in (("run", hc), ("hc_json", hc_json), ("session_of", lambda pid: self.sessions.get(pid, (None, None)))):
+            p = mock.patch.object(revive, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def assistant(self, addr="t1", pid=100, agent_pid=101, status="done"):
+        self.terms[addr] = {"address": addr, "state": "live", "pid": pid, "cwd": "/home/me", "template": "assistant",
+                            "argv": ["claude", "--model", "opus", "You are the coordinator..."], "status": {"state": status},
+                            "foreground": {"pid": agent_pid, "name": "claude", "argv": ["/opt/claude", "--model", "opus", "You are..."], "cwd": "/home/me/app"},
+                            "labels": {"herdr.role": "coordinator", "herdr.chat": "p1"}}
+        self.sessions[agent_pid] = ("S1", self.log)
+
+    def crash(self, addr, pid=200):
+        """What the core does with a kept terminal whose program was lost: a shell, labels kept."""
+        t = self.terms[addr]
+        t.update(pid=pid, argv=["/bin/bash"], template=None, status=None, foreground={"pid": pid, "name": "bash", "argv": ["/bin/bash"], "cwd": t["cwd"]})
+
+    def tick(self):
+        report = {}
+        self.r.revive_pass(report)
+        return report
+
+    def test_the_assistant_resumes_its_own_session(self):
+        self.assistant()
+        self.tick()
+        rec = json.loads(self.terms["t1"]["labels"]["herdr.resume"])
+        self.assertEqual((rec["session"], rec["argv"], rec["pid"]), ("S1", ["claude", "--model", "opus"], 100))
+        self.assertEqual(self.sent, [])
+        self.crash("t1")
+        report = self.tick()
+        self.assertEqual(report["revived"], [{"terminal": "t1", "how": "resume", "session": "S1"}])
+        self.assertEqual(self.sent, [("t1", "cd /home/me/app && claude --model opus --resume S1")])
+        # Once: the next tick types nothing again, even while the agent starts.
+        self.tick()
+        self.assertEqual(len(self.sent), 1)
+
+    def test_a_working_agent_carries_on(self):
+        self.assistant(status="working")
+        self.tick()
+        self.crash("t1")
+        self.tick()
+        self.assertIn("--resume S1 'Herdr restarted", self.sent[0][1])
+
+    def test_an_agent_that_quit_at_its_shell_stays_there(self):
+        """The same process (no crash): a person who quit the agent keeps their shell."""
+        self.assistant()
+        self.tick()
+        t = self.terms["t1"]
+        t["foreground"] = {"pid": 100, "name": "bash", "argv": ["/bin/bash"]}
+        self.tick()
+        self.assertEqual(self.sent, [])
+
+    def test_a_gone_session_starts_a_new_assistant_that_says_so(self):
+        self.assistant()
+        self.tick()
+        os.unlink(self.log)
+        self.crash("t1")
+        with self.mock.patch.object(self.r, "template_of", lambda name="assistant": ("claude", "---\ncommand: claude\n---\nYou are the Assistant.")):
+            self.tick()
+        line = self.sent[0][1]
+        self.assertTrue(line.startswith("cd /home/me/app && claude --model opus '<restart>Your earlier session is gone"), line)
+        self.assertIn("You are the Assistant.", line)
+        self.assertNotIn("--resume", line)
+
+    def test_a_resume_the_cli_refuses_starts_anew_once(self):
+        self.assistant()
+        self.tick()
+        self.crash("t1")
+        self.tick()
+        self.screens["t1"] = "$ claude --resume S1\nNo conversation found with session ID: S1\n$ "
+        with self.mock.patch.object(self.r, "template_of", lambda name="assistant": ("claude", None)):
+            report = self.tick()
+            self.tick()
+        self.assertEqual(report["revived"][0]["how"], "fresh")
+        self.assertEqual(len(self.sent), 2)
+        self.assertIn("<restart>", self.sent[1][1])
+
+    def test_never_a_second_copy_of_a_running_session(self):
+        self.assistant()
+        self.assistant("t2", pid=300, agent_pid=301)
+        self.tick()
+        self.crash("t1")
+        report = self.tick()
+        self.assertEqual(self.sent, [])
+        self.assertEqual(report["revived"][0]["how"], "running")
+
+    def test_a_worker_resumes_with_its_task_browser(self):
+        self.terms["t5"] = {"address": "t5", "state": "live", "pid": 500, "cwd": "/wt", "name": "shep-6-web",
+                            "argv": ["sh", "-c", "low", "herdr-low", "env", "HERDR_BROWSER_TASK=dev#6", "/bin/bash", "-ic", "x", "/bin/bash",
+                                     "claude", "--settings", '{"a":1}', "Brief..."],
+                            "status": {"state": "working"}, "foreground": {"pid": 501, "name": "claude", "argv": ["claude"], "cwd": "/wt"},
+                            "labels": {"herdr.task": "dev#6", "herdr.agent": "claude"}}
+        self.sessions[501] = ("S1", self.log)
+        self.tick()
+        self.crash("t5")
+        self.tick()
+        self.assertTrue(self.sent[0][1].startswith("""cd /wt && HERDR_BROWSER_TASK='dev#6' claude --settings '{"a":1}' --resume S1 'Herdr restarted"""), self.sent[0][1])
+
+    def test_an_assistant_lost_before_any_record_starts_anew(self):
+        """Lost before this change (or before its first record): a new Assistant, never a bare shell."""
+        self.assistant()
+        self.crash("t1")
+        with self.mock.patch.object(self.r, "template_of", lambda name="assistant": ("claude", "---\ncommand: claude\n---\nRole.")):
+            self.tick()
+            self.tick()
+        self.assertEqual(len(self.sent), 1)
+        self.assertTrue(self.sent[0][1].startswith("cd /home/me && claude '<restart>"), self.sent[0][1])
+
+    def test_other_terminals_are_left_alone(self):
+        self.terms["t9"] = {"address": "t9", "state": "live", "pid": 9, "argv": ["/bin/bash"], "foreground": {"pid": 9, "name": "bash"}, "labels": {}}
+        self.tick()
+        self.assertEqual((self.sent, self.terms["t9"]["labels"]), ([], {}))

@@ -25,6 +25,7 @@ from .news import news_pass, typing
 from .takeover import cant_go_on, takeover
 from .ghnews import main_pass, pr_deliver, pr_news
 from .scheduler import SCHEDULER
+from .revive import revive_pass
 
 
 def at_work(s, t):
@@ -372,6 +373,11 @@ def cmd_tick(args):
             set_hold(args.machine, json.loads(args.hold) if args.hold else None)
         except ValueError:
             pass
+    try:
+        # First: an Assistant or worker the core gave a plain shell (a crash, a reboot) gets its agent back.
+        revive_pass(report)
+    except Exception as e:  # never stops the queue
+        report["revive_error"] = str(e)
     try:
         retry_pass(report)
     except Exception as e:  # never stops the queue

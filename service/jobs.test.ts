@@ -7,7 +7,7 @@ import { join } from "node:path";
 const home = mkdtempSync(join(tmpdir(), "shep-jobs-"));
 process.env.HERDR_APP_HOME = home;
 delete process.env.SHEPHERDR_JOBS;
-const { windowLeavesIt } = await import("./jobs.ts");
+const { windowLeavesIt, agentMachines } = await import("./jobs.ts");
 
 test("no window installed: the service does it", () => {
   expect(windowLeavesIt()).toBe(true);
@@ -28,4 +28,14 @@ test("a 3.1 window (lib/service.js in its tab bar): it leaves the work to the se
   process.env.SHEPHERDR_JOBS = "off";
   expect(windowLeavesIt()).toBe(false);
   delete process.env.SHEPHERDR_JOBS;
+});
+
+test("other machines running an Assistant or a revivable agent get ticked (it comes back after a crash)", () => {
+  expect(agentMachines([
+    { address: "t1", state: "live", labels: { "herdr.role": "coordinator" } },
+    { address: "vm/t2", state: "live", labels: { "herdr.role": "coordinator" } },
+    { address: "box/t3", state: "live", labels: { "herdr.resume": "{}" } },
+    { address: "old/t4", state: "finished", labels: { "herdr.role": "coordinator" } },
+    { address: "plain/t5", state: "live", labels: {} },
+  ]).sort()).toEqual(["box", "vm"]);
 });
