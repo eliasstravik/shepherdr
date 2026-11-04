@@ -151,7 +151,10 @@ export class Model {
 
     const bar = sidebarOf(this.value("spaces-chat"));
     const seen = this.shared["chat.seen"] ?? {};
-    const spaces = [null, ...this.machines].flatMap((m) => spacesFromDoc(this.docs.get(m), m)).map((s, at) => {
+    // the window's spaces (its herdr-app documents), and the service's own (a web-only install: no window)
+    const own = (Array.isArray(this.doc().spaces) ? this.doc().spaces : []).map((x: any) => ({ id: x.machine ? `${x.machine}/${x.id}` : x.id, machine: x.machine ?? null, name: x.name, folder: x.folder, tabs: [] }));
+    const fromDocs = [null, ...this.machines].flatMap((m) => spacesFromDoc(this.docs.get(m), m));
+    const spaces = [...fromDocs, ...own.filter((x: any) => !fromDocs.some((y: any) => y.id === x.id))].map((s: any, at: number) => {
       const k = assistantOf(s, terminals as any[]);
       const here = rows.filter((r) => (r.machine ?? null) === (s.machine ?? null) && r.folder === s.folder && !r.archived);
       return {

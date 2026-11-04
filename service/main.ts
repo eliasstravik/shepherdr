@@ -32,7 +32,8 @@ import { Secrets } from "./secrets.ts";
 import { Agents } from "./agents.ts";
 import { Push } from "./push.ts";
 import { dictate } from "./dictate.ts";
-import { sh } from "./model.ts";
+import { sh, exec } from "./model.ts";
+import { folders, newSpace } from "./spaces.ts";
 import { kindOf } from "../core/chat-reader.js";
 import * as SL from "../core/slash.js";
 const { SCAN, scanned, commandList, MENU } = SL as any;
@@ -219,6 +220,19 @@ const server = Bun.serve<{ who: string }>({
       const kind = kindOf(t) ?? "claude", machine = a.includes("/") ? a.split("/")[0] : null;
       const mine = kind === "claude" ? scanned((await sh(hub, SCAN, ["scan", t.foreground?.cwd ?? t.cwd ?? ""], machine).catch(() => ({ stdout: "" }))).stdout) : [];
       return json({ commands: commandList(kind, mine), menus: [...(MENU[kind] ?? [])] });
+    }
+    if (path === "/api/folders") {
+      const m = url.searchParams.get("machine"), machine = !m || m === me?.host ? null : m;
+      const home = (await exec(hub, ["sh", "-c", 'printf %s "$HOME"'], machine).catch(() => ({ stdout: "" }))).stdout;
+      try { return json(await folders(hub, machine, url.searchParams.get("path") ?? "~", home)); } catch (err) { return json({ error: (err as Error).message }, 400); }
+    }
+    if (path === "/api/spaces" && req.method === "POST") {
+      const b = await req.json().catch(() => null);
+      try {
+        const machine = !b?.machine || b.machine === me?.host ? null : String(b.machine);
+        const place = await newSpace(hub, { machine, path: String(b?.path ?? ""), name: typeof b?.name === "string" ? b.name : undefined, create: !!b?.create, store: compat.shared! });
+        return json({ place });
+      } catch (err) { return json({ error: (err as Error).message }, 400); }
     }
     if (path === "/api/push/key") return json({ key: await push.key() });
     if (path === "/api/push/subscribe" && req.method === "POST") {
