@@ -47,7 +47,31 @@ DEFAULT_EVERY = "every 60 minutes"
 PENDING_MAX_MS = 6 * 3600000     # a wake that found no Assistant this long: missed
 TURN_MAX_MS = 3 * 3600000        # a wake's turn not seen ending this long: closed anyway
 HEARTBEAT_MAX = 8000             # characters of the heartbeat in a wake (the rest: read the file)
-STARTER = """Direction: what Autopilot works toward in this space.
+# The heartbeat Everywhere has until someone writes one: a real one, ready as it is in any project
+# (core/autopilot.js STARTER, the same words). The person edits it, Everywhere's or a space's own, to steer.
+STARTER = """Direction: keep this space's tasks moving to done, without wasting my time or money. Don't invent work or redo old asks from past chats.
+
+Each wake: first what woke you, then in order:
+1. Needs you, failed or stalled: look why. Unblock what you can (nudge, resume, fix); what only I can answer, ask me once, in one clear question.
+2. Ready: check the work (diff, checks, proof). Tell me in a line if it looks right to Accept; a clear defect, send it back saying what's wrong.
+3. To do: start the ones with a clear brief that nothing blocks; the queue limits how many run. Leave a task that's working fine alone.
+4. New tasks: only follow-ups I asked for or a finished task named. At most 2 a wake, each with a full brief.
+5. End by saving progress and your next step.
+
+Limits:
+- Never merge, Accept, mark done, delete or stop work: that's mine.
+- Ask before anything risky, costly or outside this space (deploys, pushes to main, emails, posts, payments, sign-ups).
+- Work only through herdr-task tasks; never write the code yourself.
+- Same thing failed twice: stop retrying and tell me.
+- 3 or more tasks waiting on me: start nothing new.
+- Keep a wake short: a few minutes of your own work.
+
+Reporting: one or two short plain lines, only what's new that I must know or decide; never repeat what you told me before. Nothing new: reply only <hc no-reply/>, never with other words. Alert me only for what can't wait (something down, work at risk).
+
+Stopping goal: none. Runs until I switch it off.
+"""
+# Starters earlier versions wrote: one never edited, wherever it is kept, stands for today's.
+OLD_STARTERS = ("""Direction: what Autopilot works toward in this space.
 
 Priorities:
 -
@@ -57,7 +81,7 @@ Constraints: what it must not do (e.g. never merge; ask before anything risky).
 Reporting: what to tell me after a wake, and when to alert me.
 
 Stopping goal (optional): a finite goal; when it's proven, Autopilot turns itself off.
-"""
+""",)
 
 
 def heartbeat_path(space=None):
@@ -79,21 +103,35 @@ def heartbeat_of(space=None, cfg=None):
     every, own = autopilot_layers(read_settings() if cfg is None else cfg, space)
     for layer, where in ((own, "space"), (every, "everywhere")):
         if isinstance(layer.get("heartbeat"), str):
-            return layer["heartbeat"], where
-    return heartbeat_words(heartbeat_path()), "file"
+            return current(layer["heartbeat"]), where
+    return current(heartbeat_words(heartbeat_path())), "file"
+
+
+def old_starter(words):
+    return words.strip() in {x.strip() for x in OLD_STARTERS}
+
+
+def current(words):
+    """A heartbeat's words, an earlier version's starter (never edited) as today's."""
+    return STARTER if old_starter(words) else words
 
 
 def blank(words):
-    """A heartbeat nobody wrote: empty, or the starter as it came."""
-    return not words.strip() or words.strip() == STARTER.strip()
+    """A heartbeat nobody wrote: empty (the starter is a real one)."""
+    return not current(words).strip()
 
 
-def ensure_heartbeat():
+def ensure_heartbeat(make=True):
+    """Everywhere's file: written with STARTER when missing (make), or when it still holds an earlier
+    version's starter, never edited. The person's own words are never touched."""
     p = heartbeat_path()
-    if not os.path.exists(p):
+    old = os.path.exists(p) and old_starter(heartbeat_words(p))
+    if old or (make and not os.path.exists(p)):
         os.makedirs(HEARTBEATS, exist_ok=True)
-        with open(p, "w") as f:
+        tmp = f"{p}.{os.getpid()}.tmp"
+        with open(tmp, "w") as f:
             f.write(STARTER)
+        os.replace(tmp, p)
     return p
 
 
@@ -310,7 +348,7 @@ def queue(a, reason):
 def message(space, a, reasons):
     """The wake: one tagged message (the chat shows none of it, only the Assistant's answer)."""
     beat, where = heartbeat_of(space)
-    beat = "" if blank(beat) else beat.strip()  # the starter, never filled in
+    beat = "" if blank(beat) else beat.strip()
     path = heartbeat_path()
     src = {"space": "this space's own, Shepherdr settings > Autopilot",
            "everywhere": "Everywhere's, Shepherdr settings > Autopilot"}.get(where, path.replace(HOME, "~", 1))
@@ -325,7 +363,7 @@ def message(space, a, reasons):
             "on them), evaluate what the evidence shows, then save progress and your next step with "
             "herdr-task progress \"...\". When the heartbeat's stopping goal is met and proven: "
             "herdr-task complete \"evidence\" (this turns Autopilot off). Nothing useful to do: save progress saying so, "
-            "and stop.\n\n"
+            "and end with <hc no-reply/>.\n\n"
             f"Heartbeat ({src}):\n{beat or '(not written yet: tell the person Autopilot has no heartbeat yet, and do nothing else)'}\n\n"
             f"{prog}")
     body = body.replace("</herdr-autopilot", "</ herdr-autopilot")
@@ -462,6 +500,7 @@ def set_values(args):
 
 def cmd_autopilot(args):
     sub = args.autopilot
+    ensure_heartbeat(make=False)  # an earlier version's starter in the file: today's, before anyone reads it
     if sub == "list":
         with state(write=False) as d:
             out = {"everywhere": everywhere_view(d), "spaces": [view(d, sp, a) for sp, a in d["spaces"].items()]}

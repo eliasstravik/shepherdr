@@ -154,9 +154,11 @@ class Autopilot(unittest.TestCase):
     def test_heartbeats(self):
         """Everywhere's file from before, until Settings has one; a space's own wins there."""
         v = self.cmd("heartbeat")
-        self.assertEqual((v["heartbeat"], v["heartbeat_from"], v["blank"]), (self.ap.heartbeat_path(), "file", True))
+        self.assertEqual((v["heartbeat"], v["heartbeat_from"], v["blank"]), (self.ap.heartbeat_path(), "file", False))
         with open(v["heartbeat"]) as f:
             self.assertEqual(f.read(), self.ap.STARTER)
+        # the starter is a real heartbeat: a wake brings it as it is
+        self.assertIn("Direction: keep this space's tasks moving", self.ap.message("sp1", {}, ["run now"]))
         with open(v["heartbeat"], "w") as f:
             f.write("Ship the docs.\n")
         self.assertIn("Ship the docs.", self.ap.message("sp1", {}, ["run now"]))
@@ -169,6 +171,38 @@ class Autopilot(unittest.TestCase):
         self.assertNotIn("Ship the docs.", two)
         self.assertEqual(self.cmd("heartbeat", space="sp1")["heartbeat_from"], "space")
         self.assertEqual(self.cmd("show", space="sp1")["own"], ["heartbeat"])
+
+    def test_old_starter_gets_the_new_one(self):
+        """An earlier version's starter, never edited, stands for today's: the file is rewritten,
+        Settings' words are read as it; an edited one is kept, an empty one stays blank."""
+        path = self.ap.heartbeat_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        old = self.ap.OLD_STARTERS[0]
+        with open(path, "w") as f:
+            f.write(old)
+        self.cmd("list")
+        with open(path) as f:
+            self.assertEqual(f.read(), self.ap.STARTER)
+        with open(path, "w") as f:
+            f.write("  " + old.strip() + "\n\n")
+        self.assertIn("Direction: keep this space's tasks moving", self.ap.message("sp1", {}, ["run now"]))
+        # edited, even a little: kept as the person wrote it
+        edited = old.replace("Priorities:\n-", "Priorities:\n- the docs")
+        with open(path, "w") as f:
+            f.write(edited)
+        self.cmd("heartbeat")
+        self.cmd("list")
+        with open(path) as f:
+            self.assertEqual(f.read(), edited)
+        # in Settings, Everywhere's or a space's own: read as today's
+        self.cmd("set", space="sp1", heartbeat=old)
+        v = self.cmd("show", space="sp1")
+        self.assertEqual((v["heartbeat_text"], v["blank"]), (self.ap.STARTER, False))
+        self.assertIn("Direction: keep this space's tasks moving", self.ap.message("sp1", {}, ["run now"]))
+        # empty: no heartbeat, and a wake says so
+        self.cmd("set", space="sp1", heartbeat="")
+        self.assertTrue(self.cmd("show", space="sp1")["blank"])
+        self.assertIn("not written yet", self.ap.message("sp1", {}, ["run now"]))
 
     def test_check_and_pushed_copies(self):
         self.assertEqual(self.cmd("check", every="Weekdays 9:00")["every"], "Weekdays 9:00")

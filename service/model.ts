@@ -16,7 +16,7 @@ const { spacesFromDoc, sidebarOf, assistantOf, isUnread } = S as any;
 import * as N from "../core/notify.js";
 const { spaceLevel } = N as any;
 import * as AP from "../core/autopilot.js";
-const { everywhereOf, pilotFor, STARTER } = AP as any;
+const { everywhereOf, pilotFor, STARTER, currentBeat } = AP as any;
 
 const SHARED = join(HOME, ".config", "herdr-app", "shared.json");
 const SHELL = /^(ba|z|fi|da|k|tc|c)?sh$|^nu$|^pwsh$/;
@@ -128,7 +128,7 @@ export class Model {
         const out = JSON.parse(await new Response(p.stdout).text() || "{}");
         const e = out.everywhere ?? {};
         // a herdr-task from before Settings kept the heartbeat gives only its file
-        const file = (f: string | null) => { try { return f && existsSync(f) ? readFileSync(f, "utf8") : STARTER; } catch { return STARTER; } };
+        const file = (f: string | null) => { try { return f && existsSync(f) ? currentBeat(readFileSync(f, "utf8")) : STARTER; } catch { return STARTER; } };
         this.pilotEverywhere = { ...everywhereOf({ everywhere: e }), trigger: e.trigger ?? undefined, words: e.heartbeat_text ?? file(e.heartbeat ?? null) };
         const list = Array.isArray(out.spaces) ? out.spaces : [];
         this.autopilot = Object.fromEntries(list.map((a: any) => [a.space, a]));
