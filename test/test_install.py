@@ -109,6 +109,22 @@ class Install(unittest.TestCase):
                 self.assertEqual(after[k], v, k)
         self.assertFalse(os.path.lexists(self.p(".local/bin/herdr-task")))
 
+    def test_service_unit_and_files(self):
+        """The service and the shared core land in .local/share/shepherdr; a scratch root gets the unit file only
+        (nothing is started), and uninstall takes both away."""
+        out = run("install", "--root", self.root, "--yes").stdout
+        if "needs bun" in out:
+            self.skipTest("bun isn't installed here")
+        self.assertTrue(os.path.isfile(self.p(".local/share/shepherdr/service/main.ts")))
+        self.assertFalse(any(f.endswith(".test.ts") for f in os.listdir(self.p(".local/share/shepherdr/service"))))
+        unit = self.p("Library/LaunchAgents/dev.shepherdr.service.plist") if sys.platform == "darwin" else self.p(".config/systemd/user/shepherdr.service")
+        text = open(unit).read()
+        self.assertIn(self.p(".local/share/shepherdr/service/main.ts"), text)
+        self.assertNotIn("funnel", text)
+        run("uninstall", "--root", self.root)
+        self.assertFalse(os.path.exists(unit))
+        self.assertFalse(os.path.exists(self.p(".local/share/shepherdr/service/main.ts")))
+
     def test_clash_refuses_then_adopt(self):
         own = self.p(APP, "mods/jump")
         os.makedirs(own)

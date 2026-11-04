@@ -1,5 +1,6 @@
 // Who may use the service. Two ways in, nothing else:
-// - through tailscale serve: Tailscale's login header must be the machine owner's, on the machine's own name;
+// - through tailscale serve: Tailscale's login header must be the machine owner's, on the machine's own name, on a
+//   connection tailscaled (or the owner) opened (peer.ts: another user here can't just send the header);
 // - on this machine (the Herdr window, the CLI): the token in ~/.herdr/shepherdr/token, on 127.0.0.1.
 // Writes and sockets also need the page's own origin, and writes a header no plain form or link can send.
 // The service listens on 127.0.0.1 only, so the tailnet reaches it through tailscale serve alone.
@@ -9,7 +10,7 @@ export type Pass = { ok: true; who: string; via: "tailnet" | "local" } | { ok: f
 
 const READS = new Set(["GET", "HEAD"]);
 
-export function gate(req: Request, g: Gate, socket = false): Pass {
+export function gate(req: Request, g: Gate, socket = false, peerTrusted = false): Pass {
   const h = req.headers;
   const host = (h.get("host") ?? "").toLowerCase();
   const login = h.get("tailscale-user-login");
@@ -19,6 +20,7 @@ export function gate(req: Request, g: Gate, socket = false): Pass {
 
   if (login !== null) {
     if (!g.owner || !g.dns) return { ok: false, status: 503, why: "Tailscale isn't running here" };
+    if (!peerTrusted) return { ok: false, status: 403, why: "not from Tailscale" };
     if (login !== g.owner) return { ok: false, status: 403, why: "only this machine's owner" };
     if (host !== g.dns && host !== `${g.dns}:443`) return { ok: false, status: 421, why: "wrong host" };
     if (write) {

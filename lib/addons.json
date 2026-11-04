@@ -65,6 +65,9 @@
       "about": "An Assistant works on its own between your messages, from its heartbeat. Off: no Autopilot switch, and no wake-ups." },
     { "id": "machines", "title": "Other machines", "switch": true, "needs": ["tasks"],
       "about": "Keeps herdr-task, its helpers and the role templates the same on every connected machine. Off: nothing is sent.",
-      "mods": ["machine-add-chat"] }
+      "mods": ["machine-add-chat"] },
+    { "id": "web", "title": "Web", "switch": true,
+      "about": "Shepherdr in your browser on phone, tablet and desktop, private to your tailnet. Off: the web app stops; the service keeps working.",
+      "service": true }
   ]
 }

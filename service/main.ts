@@ -11,6 +11,7 @@ import { randomBytes } from "node:crypto";
 import { DATA, SOCK, TOKEN, PORT, ensureData } from "./paths.ts";
 import { holdLock } from "./lock.ts";
 import { gate, type Gate } from "./auth.ts";
+import { trustedPeer } from "./peer.ts";
 import { whoami, share, served, type Me } from "./tailscale.ts";
 import { Hub } from "./hub.ts";
 import { Store } from "./store.ts";
@@ -74,7 +75,8 @@ const server = Bun.serve<{ who: string }>({
     const path = url.pathname.startsWith("/shepherdr/") ? url.pathname.slice(10) : url.pathname;
     if (path === "/api/health") return json({ ok: true, version: VERSION, core: hub.up });
     const socket = path === "/api/ws";
-    const pass = gate(req, g, socket);
+    const viaTailnet = req.headers.has("tailscale-user-login");
+    const pass = gate(req, g, socket, viaTailnet && trustedPeer(srv.requestIP(req)?.port));
     if (!pass.ok) return new Response(pass.why, { status: pass.status });
     if (socket) return srv.upgrade(req, { data: { who: pass.who } }) ? undefined : new Response("upgrade failed", { status: 400 });
     if (path === "/api/me") return json({ login: pass.who, via: pass.via, machine: me?.host ?? null, link: me ? `https://${me.dns}/shepherdr/` : null, version: VERSION });

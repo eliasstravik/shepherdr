@@ -14,6 +14,9 @@ What goes where (each under --root, default your home):
   .config/herdr-core/templates/*.md     the Assistant's, worker's and reviewer's instructions
   .local/bin/{herdr-task,herdr-artifact,herdr-secret,herdr-browser,shepherdr}   links into the above
   .local/bin/herdr-app                  with --guard: a guard that refuses a window with another home
+  .local/share/shepherdr/               the Shepherdr service (service/, core/) and the built web app (web/dist)
+  .config/systemd/user/shepherdr.service    Linux: keeps the service running (systemctl --user)
+  Library/LaunchAgents/dev.shepherdr.service.plist   macOS: the same with launchd
   ~/.claude/settings.json, ~/.codex/hooks.json   the question-card hooks (not with --no-hooks)
 
 Never overwritten: a mod, layout or lib file that isn't ours (it refuses, naming each; --adopt backs
@@ -38,11 +41,15 @@ import subprocess
 import sys
 import tempfile
 
-VERSION = "3.0.0"
+VERSION = "3.0.0"  # 3.1.0 with its CHANGELOG, README and RECIPE at the end of the 3.1.0 work
 HERDR_APP_MIN = "0.1.12"
 HC_MIN = "0.1.17"
 
 APP, BIN, TPL, HERDR = ".config/herdr-app", ".local/bin", ".config/herdr-core/templates", ".herdr"
+SHARE = ".local/share/shepherdr"   # the service and the web app
+UNIT = ".config/systemd/user/shepherdr.service"
+PLIST = "Library/LaunchAgents/dev.shepherdr.service.plist"
+AGENT = "dev.shepherdr.service"
 RECORD = f"{APP}/data/shepherdr/installed.json"
 HOLD = f"{HERDR}/sync-hold"
 # Helpers on the PATH: their name, and where the link leads (under the app home).
@@ -194,7 +201,88 @@ def source_items(src):
     for f in sorted(os.listdir(os.path.join(src, "templates"))):
         if f.endswith(".md"):
             items.append(("template", f"{TPL}/{f}", os.path.join(src, "templates", f)))
+    items += service_items(src)
     return manifest, mods, items
+
+
+def service_items(src):
+    """The service (its TypeScript runs on Bun as it is), the shared core and the built web app."""
+    items = [("service", f"{SHARE}/package.json", os.path.join(src, "package.json"))]
+    for top in ("service", "core"):
+        for f in walk_files(os.path.join(src, top)) if os.path.isdir(os.path.join(src, top)) else []:
+            if not f.endswith((".test.ts", ".test.js")):
+                items.append(("service", f"{SHARE}/{top}/{f}", os.path.join(src, top, f)))
+    dist = os.path.join(src, "web", "dist")
+    for f in walk_files(dist) if os.path.isfile(os.path.join(dist, "index.html")) else []:
+        items.append(("service", f"{SHARE}/web/dist/{f}", os.path.join(dist, f)))
+    return items
+
+
+def bun_path():
+    for p in (shutil.which("bun"), os.path.expanduser("~/.bun/bin/bun")):
+        if p and os.path.isfile(p):
+            return p
+    return None
+
+
+def unit_text(root, bun):
+    """The user service that keeps Shepherdr's service running (Linux), or its launchd agent (macOS)."""
+    main = os.path.join(root, SHARE, "service", "main.ts")
+    if sys.platform == "darwin":
+        return PLIST, f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{AGENT}</string>
+  <key>ProgramArguments</key><array><string>{bun}</string><string>{main}</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>{os.path.join(root, HERDR, "shepherdr", "service.log")}</string>
+  <key>StandardErrorPath</key><string>{os.path.join(root, HERDR, "shepherdr", "service.log")}</string>
+</dict>
+</plist>
+"""
+    return UNIT, f"""[Unit]
+Description=Shepherdr: background work and the web app
+After=network-online.target
+
+[Service]
+ExecStart={bun} {main}
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+"""
+
+
+def install_service(r, rec, home):
+    """Writes the unit; on the real home, (re)starts the service with it. A scratch root only gets the file."""
+    bun = bun_path()
+    if not bun:
+        r.notes.append("the Shepherdr service needs bun (https://bun.sh): install it, then run this again")
+        return
+    if not os.path.isfile(r.p(f"{SHARE}/web/dist/index.html")) and not r.dry:
+        r.notes.append("the web app isn't built in this checkout (bun install && bun run build), so the service serves no page yet")
+    rel, text = unit_text(r.root, bun)
+    data = text.encode()
+    if read(r.p(rel)) != data:
+        if r.dry:
+            say(f"  unit    {rel}")
+            return
+        atomic_write(r.p(rel), data)
+    rec.setdefault("files", {})[rel] = fsha(rel, data)
+    if not home or r.dry:
+        return
+    if sys.platform == "darwin":
+        target = f"gui/{os.getuid()}"
+        subprocess.run(["launchctl", "bootout", f"{target}/{AGENT}"], capture_output=True)
+        ok = subprocess.run(["launchctl", "bootstrap", target, r.p(rel)], capture_output=True).returncode == 0
+    else:
+        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+        ok = subprocess.run(["systemctl", "--user", "enable", "shepherdr.service"], capture_output=True).returncode == 0
+        ok = ok and subprocess.run(["systemctl", "--user", "restart", "shepherdr.service"], capture_output=True).returncode == 0
+    r.notes.append("the Shepherdr service is running" if ok else "couldn't start the Shepherdr service: `shepherdr doctor` says why")
 
 
 # ---- the record ---------------------------------------------------------------------------------
@@ -547,6 +635,7 @@ def cmd_install(a, update=False):
     rec["mods"] = {m: True for m in mods}
     rec["keys"], keys_changed = merge_keys(r, src, rec, a.keys, a.yes)
     rec["links"] = link_helpers(r, rec)
+    install_service(r, rec, home)
     if a.guard:
         install_guard(r, src, rec)
     if not a.no_hooks:
@@ -639,6 +728,12 @@ def cmd_uninstall(a):
     r = Run(root, a.dry_run)
     kept = []
     files = rec.get("files", {})
+    # The service stops first (only the real home's runs).
+    if root == os.path.realpath(real_home()) and not a.dry_run and (UNIT in files or PLIST in files):
+        if sys.platform == "darwin":
+            subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{AGENT}"], capture_output=True)
+        else:
+            subprocess.run(["systemctl", "--user", "disable", "--now", "shepherdr.service"], capture_output=True)
     # Mods: a folder holding only our unchanged files (and Herdr's generated ones) goes in one step.
     for m in rec.get("mods", {}):
         top = r.p(f"{APP}/mods/{m}")
@@ -718,7 +813,7 @@ def cmd_uninstall(a):
             pass
         os.remove(r.p(RECORD))
         # Folders that only held ours.
-        for rel in (f"{APP}/data/shepherdr", f"{APP}/bin", f"{APP}/lib"):
+        for rel in (f"{APP}/data/shepherdr", f"{APP}/bin", f"{APP}/lib", SHARE):
             for d, _, _ in sorted(os.walk(r.p(rel)), reverse=True):
                 try:
                     os.rmdir(d)

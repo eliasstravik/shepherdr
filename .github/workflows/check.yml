@@ -3,7 +3,7 @@
 # gh workflow run check.yml --ref <branch>.
 #
 # One lean job (GitHub bills by the minute): the shared lib copies, every mod's JavaScript parsed, the TypeScript
-# helpers built, the Python compiled, the repo's own rules (test_repo), the installer against throwaway roots
+# helpers built, the service and web app typechecked, tested and built, the Python compiled, the repo's own rules (test_repo), the installer against throwaway roots
 # (test_install: install, again, update, clash, adopt, uninstall, dry run) and herdr-task's commands.
 # herdr-app check needs Herdr's window runtime, which a runner doesn't have: mods are checked on a person's machine.
 name: Check
@@ -44,7 +44,7 @@ jobs:
       - name: JavaScript parses
         run: |
           fail=0
-          for f in $(find mods lib -name '*.js'); do
+          for f in $(find mods lib core -name '*.js' 2>/dev/null); do
             node --input-type=module --check < "$f" || { echo "::error file=$f::doesn't parse"; fail=1; }
           done
           exit $fail
@@ -54,7 +54,13 @@ jobs:
             bun build --no-bundle --target bun "$f" > /dev/null || exit 1
           done
       - name: JSON parses
-        run: for f in keys.json layouts/*.json lib/addons.json $(find mods -name '*.json'); do python3 -m json.tool "$f" > /dev/null || exit 1; done
+        run: for f in keys.json layouts/*.json lib/addons.json lib/features.json $(find mods -name '*.json'); do python3 -m json.tool "$f" > /dev/null || exit 1; done
+      - name: service, shared core and web app (types, tests, build)
+        run: |
+          bun install --frozen-lockfile
+          bunx tsc --noEmit -p .
+          bun test service core web
+          bun run build
       - name: shell scripts parse
         # each with the shell its first line names (bash scripts use bash-only syntax; sh is dash here)
         run: |
