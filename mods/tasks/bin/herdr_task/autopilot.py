@@ -220,9 +220,13 @@ def forward(args, machine, space):
         w = {"name": getattr(args, "name", None), "folder": getattr(args, "space_folder", None)}
         if not w["folder"]:
             w = next((x for x in window_spaces() or [] if x["id"] == f"{machine}/{space}"), None) or {}
-        for flag, v in (("--name", w.get("name")), ("--space-folder", w.get("folder"))):
-            argv += [flag, v] if v else []
-    r = remote_run(machine, argv, timeout=REMOTE_WAIT)
+        told = [x for flag, v in (("--name", w.get("name")), ("--space-folder", w.get("folder"))) if v for x in (flag, v)]
+    else:
+        told = []
+    r = remote_run(machine, argv + told, timeout=REMOTE_WAIT)
+    if told and "unrecognized arguments" in r.stderr:
+        # a machine running its own older herdr-task (it has a window: it knows its spaces itself)
+        r = remote_run(machine, argv, timeout=REMOTE_WAIT)
     try:
         v = json.loads(r.stdout)
     except ValueError:
@@ -244,6 +248,9 @@ def remote_lists(machines):
     def one(m):
         try:
             r = remote_run(m, ["autopilot", "list", "--here", "--json"], timeout=REMOTE_WAIT)
+            if "unrecognized arguments" in r.stderr:
+                # its own older herdr-task, whose list holds only its own spaces
+                r = remote_run(m, ["autopilot", "list", "--json"], timeout=REMOTE_WAIT)
             d = json.loads(r.stdout)
             if isinstance(d, dict) and not d.get("error"):
                 return d

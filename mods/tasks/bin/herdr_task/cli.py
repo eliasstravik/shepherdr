@@ -57,7 +57,8 @@ def remote_run(machine, argv, timeout=None):
     target = ".local/bin/herdr-task"
     try:
         with open(mark) as f:
-            installed = f.read().strip() == digest
+            # "source": it holds herdr-task's source, and runs its own
+            installed = f.read().strip() in (digest, "source")
     except OSError:
         installed = False
 
@@ -67,6 +68,13 @@ def remote_run(machine, argv, timeout=None):
             raise Fail(f"herdr-task isn't current on {machine}, and copies to other machines wait: {held}. "
                        "Run `shepherdr doctor` once the install is whole.")
         guard(["hc"])
+        # A machine with Herdr's own install (its window's) holds herdr-task's source: copies come from there, it's
+        # never written to (machines.py, the same rule). Its link ~/.local/bin/herdr-task leads into that install.
+        if run(["hc", "exec", "--on", machine, "--", "test", "-d", ".config/herdr-app/mods/tasks/bin/herdr_task"]).returncode == 0:
+            os.makedirs(os.path.dirname(mark), exist_ok=True)
+            with open(mark, "w") as f:
+                f.write("source")
+            return
         r = subprocess.run(["hc", "file", "write", "--on", machine, target], input=body, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if r.returncode != 0:
             raise Fail(f"Couldn't install herdr-task on {machine}: {r.stderr.decode().strip()}")

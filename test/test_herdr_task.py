@@ -331,6 +331,47 @@ class Autopilot(unittest.TestCase):
         self.assertEqual(self.sent, [])
 
 
+class RemoteInstall(unittest.TestCase):
+    """herdr-task --on installs itself on the other machine first, never over a machine that holds its source."""
+
+    def setUp(self):
+        from unittest import mock
+        import subprocess
+        sys.path.insert(0, BIN)
+        import herdr_task.cli as cli
+        self.cli, self.store, self.ran, self.wrote = cli, tempfile.mkdtemp(), [], []
+        self.source = False
+
+        def run(argv, cwd=None, check=False):
+            self.ran.append(argv)
+            code = 0 if argv[:2] != ["hc", "exec"] or "test" not in argv else (0 if self.source else 1)
+            return subprocess.CompletedProcess(argv, code, "{}" if "test" not in argv else "", "")
+
+        def write(argv, **kw):
+            self.wrote.append(argv)
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
+        for name, value in (("run", run), ("STORE", self.store), ("sync_held", lambda: None), ("guard", lambda a: None),
+                            ("install_secret", lambda m: None)):
+            p = mock.patch.object(cli, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        p = mock.patch.object(cli.subprocess, "run", write)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_a_machine_without_the_source_gets_this_copy(self):
+        self.cli.remote_run("vm", ["autopilot", "list", "--json"])
+        self.assertEqual(self.wrote[0][:5], ["hc", "file", "write", "--on", "vm"])
+
+    def test_a_machine_holding_the_source_is_never_written_to(self):
+        self.source = True
+        self.cli.remote_run("mini", ["autopilot", "list", "--json"])
+        self.cli.remote_run("mini", ["autopilot", "list", "--json"])
+        self.assertEqual(self.wrote, [])
+        self.assertEqual(sum(1 for a in self.ran if "test" in a), 1)  # asked once, then remembered
+        self.assertEqual(self.ran[-1][-3:], ["autopilot", "list", "--json"])
+
+
 class BackToWork(unittest.TestCase):
     """A Ready task that goes back to work is Working again (busy_again(), back_to_work()), and
     Accept retries a merge that failed once. In memory: hc, git and gh are never run."""
