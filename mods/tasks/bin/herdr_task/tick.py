@@ -27,8 +27,15 @@ from .ghnews import main_pass, pr_deliver, pr_news
 from .scheduler import SCHEDULER
 
 
+def at_work(s, t):
+    """Its agent is mid-turn (working, or asking): a task is never marked merged under it (SHEP-23);
+    a later tick looks again."""
+    return any(status_word(k) in ("working", "blocked") for k in live_agents(s.key(t)))
+
+
 def facts(s, t, report):
-    """A worktree task merged anywhere is done; a pull request's problems need the person."""
+    """A worktree task whose own work merged anywhere is done (once its agent is between turns); a
+    pull request's problems need the person."""
     if t.get("pr"):
         pr = t["pr"]
         if now() - pr.get("checked", 0) < PR_EVERY:
@@ -39,6 +46,8 @@ def facts(s, t, report):
         if not v:
             return
         if v.get("state") == "MERGED":
+            if at_work(s, t):
+                return
             t["merged"] = True
             watch_main(s, t, (v.get("mergeCommit") or {}).get("oid"))
             finish(s, t)
@@ -56,7 +65,7 @@ def facts(s, t, report):
                 report["attention"].append(t["id"])
             elif t.get("attention", "").startswith(("Checks failing", "It conflicts", "The pull request was closed", MERGE_FAILED)):
                 t.pop("attention")
-    elif merged_here(s, t):
+    elif merged_here(s, t) and not at_work(s, t):
         t["merged"] = True
         finish(s, t)
         report["done"].append(t["id"])

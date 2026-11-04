@@ -19,7 +19,7 @@ from .agents import (
     agent_running, busy_again, detail, fit, LINE_MAX, live_agents, ready_turns, STATUSES, SUMMARY_MAX, WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
-from .github import finish, gh, github, merged_here, pr_adopt, pr_open, pr_pending, pr_problem, pr_view, update_main, watch_main
+from .github import finish, gh, github, merged_here, own_work, pr_adopt, pr_open, pr_pending, pr_problem, pr_view, update_main, watch_main
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
     own_path, parent_for, resume_argv, retag_tabs, tab_title, task_tabs,
@@ -285,6 +285,7 @@ def cmd_ready(args):
             if git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
                 raise Fail(f"{wt} has uncommitted changes. Commit them, then run ready again.")
             t["head"] = git(wt, "rev-parse", "HEAD")[1]
+            own_work(s, t)
         refused = review_refusal(s, t, wt)
         if refused:
             # Kept (the task's line says why it waits); refused after the store is saved.
@@ -322,10 +323,10 @@ def cmd_ready(args):
     with open_store(args) as s:
         t = s.find(args.id)
         # Its review is the agent's own, as its brief's Settings block says (herdr-task starts no
-        # reviewers). A worktree branch with nothing beyond its base: nothing to merge, so done at
-        # once with its summary (as Shepherdr); no Accept needed. Tasks in the folder itself still
-        # land in Ready.
-        if wt and t.get("start") and branch_tip(s, t) == t["start"]:
+        # reviewers). A worktree branch with nothing beyond its base (none of its own, or only its
+        # base caught up with): nothing to merge, so done at once with its summary (as Shepherdr);
+        # no Accept needed. Tasks in the folder itself still land in Ready.
+        if wt and t.get("start") and in_base(s, t) and not merged_here(s, t):
             t["nothing_to_merge"] = True
             finish(s, t, even_if_busy=True)
             v = view(s, t)
@@ -880,6 +881,13 @@ def branch_tip(s, t):
     return (tip if ok and tip else None) or t.get("head") or None
 
 
+def in_base(s, t):
+    """Its branch holds nothing its base branch doesn't: no commits of its own, or it only caught
+    up with its base (`git merge --ff-only main`, SHEP-23). Nothing to merge, and never merged."""
+    tip = branch_tip(s, t)
+    return bool(tip) and (tip == t.get("start") or git(s.loc["folder"], "merge-base", "--is-ancestor", tip, t.get("base") or "main")[0])
+
+
 def ff_merge(s, t):
     """Lands a task's branch in its base branch here when that is a fast-forward (the base is
     checked out in the main folder and the branch already holds it: exactly the tested work, no
@@ -937,8 +945,8 @@ def cmd_accept(args):
             if error == "Checks are still running.":
                 # Accepted: it merges by itself once they pass (Merging).
                 t["auto_merge"], how, error = "checks", "checks", None
-        elif merged_here(s, t) or branch_tip(s, t) == t.get("start"):
-            # Already in the base branch, or no commits of its own: nothing to merge.
+        elif merged_here(s, t) or in_base(s, t):
+            # Its own work already in the base branch, or none of its own: nothing to merge.
             t["merged"] = merged_here(s, t)
             finish(s, t, even_if_busy=True)
         elif ff_merge(s, t):
