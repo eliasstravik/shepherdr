@@ -125,6 +125,25 @@ class Install(unittest.TestCase):
         self.assertFalse(os.path.exists(unit))
         self.assertFalse(os.path.exists(self.p(".local/share/shepherdr/service/main.ts")))
 
+    def test_web_only(self):
+        """install --web: the service, the web app, herdr-task and the helpers under .local/share/shepherdr, linked from
+        .local/bin; nothing in herdr-app; herdr-task runs from there; uninstall takes it all back out."""
+        root = tempfile.mkdtemp(prefix="shepherdr-web-")
+        try:
+            run("install", "--web", "--root", root, "--yes", "--force")
+            share = os.path.join(root, ".local/share/shepherdr")
+            self.assertFalse(os.path.exists(os.path.join(root, APP)))
+            self.assertTrue(os.path.isfile(os.path.join(share, "service/main.ts")))
+            self.assertEqual(os.path.realpath(os.path.join(root, ".local/bin/herdr-task")), os.path.realpath(os.path.join(share, "mods/tasks/bin/herdr-task")))
+            self.assertTrue(os.path.isfile(os.path.join(share, "mods/artifacts/recipe-view.js")))
+            p = subprocess.run([sys.executable, os.path.join(share, "mods/tasks/bin/herdr-task"), "--help"], capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            run("uninstall", "--root", root)
+            self.assertFalse(os.path.exists(os.path.join(share, "service/main.ts")))
+            self.assertFalse(os.path.lexists(os.path.join(root, ".local/bin/herdr-task")))
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_clash_refuses_then_adopt(self):
         own = self.p(APP, "mods/jump")
         os.makedirs(own)

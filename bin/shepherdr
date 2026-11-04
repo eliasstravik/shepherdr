@@ -3,6 +3,8 @@
 
   shepherdr install    [--root DIR] [--adopt] [--guard] [--keys ask|keep|ours] [--no-hooks] [--dry-run] [--yes]
   shepherdr update     the same, from the checkout it was installed from (git pull it first)
+  shepherdr install --web               web only: herdr-core, herdr-task, the helpers, the service and the web app
+                                        under .local/share/shepherdr (no herdr-app)
   shepherdr uninstall  [--root DIR] [--dry-run]
   shepherdr doctor     [--root DIR]: checks the install; once it's whole, lets the sync to other machines go
   shepherdr version
@@ -663,6 +665,104 @@ def cmd_install(a, update=False):
     return 0
 
 
+# ---- web only ----------------------------------------------------------------------------------
+# `install --web`: Shepherdr without the Herdr window. herdr-task, herdr-artifact, the helpers and the role
+# instructions, the service and the web app, all under .local/share/shepherdr (the links in .local/bin lead there);
+# what it installed is .local/share/shepherdr/installed.json. Agents' question cards come with the window's chat hooks,
+# so a web-only install has none: an agent asks in its terminal, which the web app shows live.
+WEB_RECORD = f"{SHARE}/installed.json"
+
+
+def web_items(src):
+    items = service_items(src)
+    for top in ("mods/tasks/bin", "mods/artifacts/bin", "bin"):
+        for f in walk_files(os.path.join(src, top)):
+            items.append(("tools", f"{SHARE}/{top}/{f}", os.path.join(src, top, f)))
+    for f in ("mods/artifacts/recipe-view.js", "mods/artifacts/markup.js", "core/recipe.js"):
+        items.append(("tools", f"{SHARE}/{f}" if not f.startswith("core/") else f"{SHARE}/mods/artifacts/{f}", os.path.join(src, f)))
+    for f in sorted(os.listdir(os.path.join(src, "templates"))):
+        if f.endswith(".md"):
+            items.append(("template", f"{TPL}/{f}", os.path.join(src, "templates", f)))
+    return items
+
+
+def cmd_install_web(a):
+    root = os.path.realpath(a.root or real_home())
+    home = root == os.path.realpath(real_home())
+    src = find_source(a.source, None)
+    r = Run(root, a.dry_run)
+    if not shutil.which("hc") and home and not a.force:
+        raise Stop(f"herdr-core (hc {HC_MIN} or newer) isn't on the PATH: install it first (https://herdr.dev)")
+    try:
+        rec = json.load(open(r.p(WEB_RECORD)))
+    except (OSError, ValueError):
+        rec = {}
+    files = dict(rec.get("files", {}))
+    say(f"Shepherdr {VERSION} web-only install from {src}\n  into {root}{' (dry run: nothing is written)' if a.dry_run else ''}")
+    n = 0
+    for _g, rel, path in web_items(src):
+        data, mode = read(path), os.stat(path).st_mode & 0o777
+        if read(r.p(rel)) == data:
+            files[rel] = fsha(rel, data)
+            continue
+        n += 1
+        if r.dry:
+            say(f"  write   {rel}")
+            continue
+        if os.path.exists(r.p(rel)) and rel not in files:
+            r.backup(rel)
+        atomic_write(r.p(rel), data, mode)
+        files[rel] = fsha(rel, data)
+    say(f"  files: {n} written")
+    links = {}
+    for name, target in LINKS.items():
+        rel, dest = f"{BIN}/{name}", r.p(f"{SHARE}/{target}")
+        links[name] = dest
+        if os.path.islink(r.p(rel)) and os.path.realpath(r.p(rel)) == os.path.realpath(dest):
+            continue
+        if r.dry:
+            say(f"  link {rel} -> {dest}")
+            continue
+        if os.path.lexists(r.p(rel)):
+            r.backup(rel, move=True)
+        os.makedirs(os.path.dirname(r.p(rel)), exist_ok=True)
+        os.symlink(dest, r.p(rel))
+    rec.update({"files": files, "links": links, "version": VERSION, "source": src, "at": r.stamp, "root": root, "web": True})
+    install_service(r, rec, home)
+    if not a.dry_run:
+        atomic_write(r.p(WEB_RECORD), (json.dumps(rec, indent=2, sort_keys=True) + "\n").encode())
+    for x in r.notes:
+        say(f"  - {x}")
+    say("  done." + (" Open the link the service prints (journalctl --user -u shepherdr) or ~/.herdr/shepherdr/web.json." if not a.dry_run else ""))
+    return 0
+
+
+def cmd_uninstall_web(a, root):
+    r = Run(root, a.dry_run)
+    rec = json.load(open(r.p(WEB_RECORD)))
+    if root == os.path.realpath(real_home()) and not a.dry_run:
+        if sys.platform == "darwin":
+            subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{AGENT}"], capture_output=True)
+        else:
+            subprocess.run(["systemctl", "--user", "disable", "--now", "shepherdr.service"], capture_output=True)
+    for name, dest in rec.get("links", {}).items():
+        p = r.p(f"{BIN}/{name}")
+        if os.path.islink(p) and os.path.realpath(p) == os.path.realpath(dest) and not a.dry_run:
+            os.remove(p)
+    for rel, sha in rec.get("files", {}).items():
+        if fsha(rel, read(r.p(rel))) == sha and not a.dry_run:
+            os.remove(r.p(rel))
+    if not a.dry_run:
+        os.remove(r.p(WEB_RECORD))
+        for d, _, _ in sorted(os.walk(r.p(SHARE)), reverse=True):
+            try:
+                os.rmdir(d)
+            except OSError:
+                pass
+    say(f"Shepherdr (web only) uninstalled from {root}{' (dry run)' if a.dry_run else ''}. ~/.herdr stays.")
+    return 0
+
+
 # ---- doctor -------------------------------------------------------------------------------------
 
 def cmd_doctor(a):
@@ -731,6 +831,8 @@ def cmd_doctor(a):
 def cmd_uninstall(a):
     root = os.path.realpath(a.root or real_home())
     rec = load_record(root)
+    if not rec and os.path.isfile(os.path.join(root, WEB_RECORD)):
+        return cmd_uninstall_web(a, root)
     if not rec:
         raise Stop(f"Shepherdr isn't installed under {root}")
     r = Run(root, a.dry_run)
@@ -876,11 +978,12 @@ def main(argv):
             c.add_argument("--no-hooks", action="store_true", help="leave Claude Code's and Codex's settings alone")
             c.add_argument("--yes", action="store_true", help="ask nothing (keys: keep yours unless --keys ours)")
             c.add_argument("--force", action="store_true", help="install although a check failed")
+            c.add_argument("--web", action="store_true", help="web only: no herdr-app (the service, the web app, herdr-task and the helpers)")
     sub.add_parser("version")
     a = ap.parse_args(argv)
     try:
         if a.cmd == "install":
-            return cmd_install(a)
+            return cmd_install_web(a) if a.web else cmd_install(a)
         if a.cmd == "update":
             return cmd_install(a, update=True)
         if a.cmd == "uninstall":
