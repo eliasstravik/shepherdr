@@ -61,6 +61,8 @@ export interface Place {
   id: string
   /** Shepherdr 3: the space's icon, an emoji the person picked (none: #) */
   emoji?: string
+  /** Shepherdr 3: the space is a git worktree of another (Remove worktree) */
+  worktree?: boolean
   /** its name, Slack-channel style ("my-project"), unique on its machine: the slug its links and commands use */
   name: string
   /** the machine it is on (its key: herdr's label for it) */

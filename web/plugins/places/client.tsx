@@ -23,6 +23,7 @@
 // into another order (drag.ts; Alt+Shift+↑/↓ on a focused space), which the main machine keeps for every device.
 // Alt+↑/↓ (Option on a Mac) goes to the space above or below as they show, from anywhere.
 import clsx from 'clsx'
+import { openWorktree } from '@client/screens/Worktree.tsx'
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type LiHTMLAttributes, type ReactNode } from 'react'
 import { act, counts, definePlugin, getState, goPlace, manyMachines, openSplit, placeOf, removeSpace, setUI, splitClick, useSnap, useUI, type Pane, type UI } from '@client/kernel.ts'
 import { and, Dialog, RowMenu, RowMenuButton, useRowMenu } from '@client/rowmenu.tsx'
@@ -379,6 +380,11 @@ function PlaceMenu({ p, snap, menu, unread, onRename, children }: { p: Place; sn
       <PinItem p={p} snap={snap} menu={menu} />
       <RestartItem chat={p.chat} name={p.name} onPick={menu.close} />
       {/* Shepherdr 3: a space moves between sections by dragging it, never from a menu */}
+      <MenuItem icon={<SplitIcon className={ic} />} onClick={() => { menu.close(); openWorktree({ place: p.id, name: p.name, op: 'new' }) }}>New worktree…</MenuItem>
+      <MenuItem icon={<SplitIcon className={ic} />} onClick={() => { menu.close(); openWorktree({ place: p.id, name: p.name, op: 'open' }) }}>Open worktree…</MenuItem>
+      {p.worktree ? (
+        <MenuItem icon={<RemoveProjectIcon className={ic} />} onClick={() => { menu.close(); openWorktree({ place: p.id, name: p.name, op: 'remove' }) }}>Remove worktree…</MenuItem>
+      ) : null}
       {onRename ? (
         <MenuItem
           icon={<RenameIcon className={ic} />}

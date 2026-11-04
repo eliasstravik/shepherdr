@@ -11,6 +11,7 @@ const { sessionOf, forkArgv } = AGa as any;
 import * as SP from "../core/spaces.js";
 const { READ, withMove, withSection, withoutSection, withSectionName, withIcon } = SP as any;
 import type { Compat } from "./compat.ts";
+import { worktreeAct } from "./worktrees.ts";
 
 const ATTACH = join(process.env.HERDR_APP_HOME || join(homedir(), ".config", "herdr-app"), "data", "chat-attach");
 const ADDR = /^([\w.-]+\/)?t[0-9a-z]+$/;
@@ -145,6 +146,11 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const opt = (v: unknown) => (typeof v === "string" && /^[\w.\[\]-]{1,60}$/.test(v) ? v : undefined);
     const next = await compat.agents.restart(a, reader, { kind: b.kind, model: opt(b.model), effort: opt(b.effort), speed: opt(b.speed) });
     return { ok: true, terminal: next };
+  }
+  if (b?.type === "worktree" && typeof b.place === "string" && compat.shared) {
+    const sp = compat.spaceOf(b.place);
+    if (!sp) throw new Error("That space isn't here any more.");
+    return worktreeAct(hub, sp, b, compat.shared, () => act(hub, { type: "space-remove", place: b.place }, compat).catch(() => null));
   }
   if (b?.type === "space-remove" && typeof b.place === "string" && compat.shared) {
     // Close a space: the window closes its own (herdr-app do space.close); the service forgets one of its own and ends its Assistant

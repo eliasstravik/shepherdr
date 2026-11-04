@@ -11,6 +11,7 @@ import { watchScrolling } from './scrolling.ts'
 import Settings, { sectionOf, withPluginErrors } from './Settings.tsx'
 import { watchViewport } from './viewport.ts'
 import { AcceptCard } from './screens/Accept.tsx'
+import { WorktreeDialog } from './screens/Worktree.tsx'
 
 /** a bar across the top: the first one keeps clear of a phone's notch (the screen's own top under it then doesn't) */
 const topBar = 'shrink-0 bg-bubble px-4 py-1.5 text-center text-[0.8125rem] text-fg2 phone:text-[0.9375rem] [[data-device=phone]>&:first-child]:pt-[calc(env(safe-area-inset-top)+6px)]'
@@ -84,7 +85,7 @@ function PluginTrouble() {
 registry.views.settings = Settings
 registry.topBars.push(Offline, UpdateFailed, PluginTrouble)
 // Shepherdr 3's Accept card, over everything
-registry.overlays.push(AcceptCard)
+registry.overlays.push(AcceptCard, WorktreeDialog)
 // the human's own plugins load first, each on its own: one that throws as it loads is left out
 const loaded = await Promise.all(
   plugins.map(async (p) => {

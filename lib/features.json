@@ -53,7 +53,8 @@
       },
       "web": {
         "files": [
-          "plugins/places/client.tsx"
+          "plugins/places/client.tsx",
+          "src/screens/Worktree.tsx"
         ]
       },
       "forms": {
@@ -62,7 +63,10 @@
         "tablet": "⋯ or long-press menu",
         "phone": "Long-press: action sheet; rename in a sheet"
       },
-      "planned": "New, Open and Remove worktree from the web (close, rename, icon, Notify, Mark read, Pin work)"
+      "service": [
+        "worktrees.ts",
+        "actions.ts"
+      ]
     },
     {
       "id": "new-space",

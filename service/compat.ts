@@ -63,6 +63,9 @@ export class Compat {
 
   private rows: Row[] = [];
   private spaceList: Space[] = [];
+  /** A space by its id: its folder and machine. */
+  spaceOf(id: string) { const s = this.spaceList.find((x) => x.id === id); return s ? { id: s.id, folder: s.folder, machine: s.machine ?? null } : null; }
+
   /** The tasks a chat's messages can mention (#HAT-1): its folder's, on its machine, as the window's chat has them. */
   tasksFor(chatKey: string) {
     const t = chatKey.endsWith("/worker") ? this.rows.find((r) => taskId(r) === chatKey.slice(0, -7)) : null;
@@ -137,7 +140,7 @@ export class Compat {
       const key = placeKey(s.id);
       if (s.assistant) chats.set(key, s.assistant);
       const name = s.name || (s.folder.split("/").filter(Boolean).pop() ?? "home");
-      return { id: s.id, name, ...(s.icon ? { emoji: s.icon } : {}), machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", mode: s.autopilot ? "autopilot" : "regular", chat: key };
+      return { id: s.id, name, ...(s.icon ? { emoji: s.icon } : {}), ...(/\/\.herdr\/worktrees\//.test(s.folder) ? { worktree: true } : {}), machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", mode: s.autopilot ? "autopilot" : "regular", chat: key };
     });
 
     this.tasks = new Map(rows.map((r) => [taskId(r), { ref: r.ref, folder: r.folder, machine: r.machine ?? null, key: `${r.slug}#${r.id}`, pin: r.key,
