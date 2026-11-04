@@ -192,10 +192,11 @@ function SideFoot({ drawer }: { drawer?: boolean }) {
         drawer ? 'pb-2 phone:pb-[max(env(safe-area-inset-bottom),--spacing(2))]' : 'pb-1.5',
       )}
     >
-      {/* the window's foot: Shepherdr (its settings; this device's look is a page in them) and Add machine */}
+      {/* the foot: Settings (this device's look is a page in them) and Add machine; the window's first says Shepherdr
+          with the crook, but here it only opens settings */}
       <FootButton onClick={settings} className="flex-1">
-        <CrookIcon className="size-4 shrink-0 text-fg3 coarse:text-fg2 phone:size-5 phone:text-fg2" />
-        Shepherdr
+        <CogIcon className="size-4 shrink-0 text-fg3 coarse:text-fg2 phone:size-5 phone:text-fg2" />
+        Settings
       </FootButton>
       {registry.sideFoot.map(({ View }, i) => (
         <View key={i} />
