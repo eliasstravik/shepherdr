@@ -20,7 +20,7 @@ export const taskId = (r: Row) => (r.machine ? `${r.machine}:${r.ref}` : r.ref);
 // a news event's dot: what the task was at that moment
 const NEWS: Record<string, TaskStatus> = { added: "todo", queued: "queued", started: "work", needs: "need", asks: "need", stalled: "need", failed: "need", ready: "ready", merging: "merging", merged: "done", done: "done", closed: "done" };
 const STEP: Record<string, StepKind> = { run: "run", read: "read", edit: "edit", search: "search", web: "web", agent: "agent" };
-const stepRow = (s: any, i: number) => ({ key: `${s.id ?? i}`, kind: STEP[s.kind] ?? "other", text: s.count > 1 ? `${s.line} ×${s.count}` : s.line });
+const stepRow = (s: any, i: number) => ({ key: `${s.id ?? i}`, kind: STEP[s.kind] ?? "other", text: s.count > 1 ? `${s.line} ×${s.count}` : s.line, steps: [`${s.id ?? i}`] });
 
 /** All of a tools row's steps, for 2.1's "N more" (GET api/activity?chat&what=turn&id). */
 export function activity(reader: any, id: string): ActivityAnswer {
@@ -124,7 +124,7 @@ export class Compat {
 
     this.chats = chats;
     this.last = {
-      name: "Shepherdr", host, user: input.user, places, machines, tasks, automations: {}, artifacts: [], asks: {}, needs, settings: [],
+      terminalTransport: "core", name: "Shepherdr", host, user: input.user, places, machines, tasks, automations: {}, artifacts: [], asks: {}, needs, settings: [],
       sections, last, read,
     };
     return this.last;

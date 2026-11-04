@@ -22,6 +22,7 @@ import { act } from "./actions.ts";
 import { Compat, activity } from "./compat.ts";
 import { Asks } from "./asks.ts";
 import { Jobs } from "./jobs.ts";
+import { terminalBridge } from "./terminal.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const WEB = process.env.SHEPHERDR_WEB_DIR || join(ROOT, "web", "dist");
@@ -97,10 +98,16 @@ const server = Bun.serve<{ who: string }>({
     const path = url.pathname.startsWith("/shepherdr/") ? url.pathname.slice(10) : url.pathname;
     // the window asks this (lib/service.js): while jobs is true it leaves its background work to the service
     if (path === "/api/health") return json({ ok: true, version: VERSION, core: hub.up, jobs: jobs.on && hub.up });
-    const socket = path === "/api/ws";
+    const socket = path === "/api/ws" || path === "/api/terminal";
     const viaTailnet = req.headers.has("tailscale-user-login");
     const pass = gate(req, g, socket, viaTailnet && trustedPeer(srv.requestIP(req)?.port, PORT));
     if (!pass.ok) return new Response(pass.why, { status: pass.status });
+    if (path === "/api/terminal") {
+      // a live terminal (2.1's terminal plugin): only a running one a chat names
+      const term = compat.addrOf(url.searchParams.get("chat") ?? "");
+      if (!term || term.startsWith("log:") || hub.terminals.get(term)?.state !== "live") return new Response("no such terminal", { status: 404 });
+      return srv.upgrade(req, { data: { who: pass.who, term } as any }) ? undefined : new Response("upgrade failed", { status: 400 });
+    }
     if (socket) return srv.upgrade(req, { data: { who: pass.who } }) ? undefined : new Response("upgrade failed", { status: 400 });
     if (path === "/api/me") return json({ login: pass.who, via: pass.via, machine: me?.host ?? null, link: me ? `https://${me.dns}/shepherdr/` : null, version: VERSION });
     if (path === "/api/state" && req.method === "GET") return json(store.doc.version ? store.doc : await store.load());
@@ -123,9 +130,13 @@ const server = Bun.serve<{ who: string }>({
     return file(path);
   },
   websocket: {
-    open(ws) { live.join(ws); },
-    message(ws, msg) { live.message(ws, String(msg)); },
-    close(ws) { live.leave(ws); },
+    open(ws) {
+      const d: any = ws.data;
+      if (d.term) d.bridge = terminalBridge(hub, d.term, { send: (x) => { ws.send(x); }, close: () => ws.close(), buffered: () => ws.getBufferedAmount() });
+      else live.join(ws);
+    },
+    message(ws, msg) { const d: any = ws.data; if (d.bridge) d.bridge.message(String(msg)); else live.message(ws, String(msg)); },
+    close(ws) { const d: any = ws.data; if (d.bridge) d.bridge.end(); else live.leave(ws); },
   },
 });
 
