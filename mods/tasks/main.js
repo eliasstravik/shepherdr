@@ -20,7 +20,7 @@ import { words } from "./core/asks.js";
 import { taskDot, ownProgress } from "./dot.js";
 // The rules for a task's status, order and words: shared with the web app (core/tasks.js).
 import { RANK, STATUS, RANK_OF, ORDER, GROUP_BY, groupBy, machineOf, machineName, refOf, taskKey, autoPrefix, place,
-  queueReason, reportOf as report, order, matches, day, ago, capital, short } from "./core/tasks.js";
+  queueReason, reportOf as report, secondLine, leftOf, order, matches, day, ago, capital, short } from "./core/tasks.js";
 import { READ_LISTS, taskLists } from "./core/tasklists.js";
 import { button, TEXT, H, RADIUS, red, amber } from "./ui.js";
 
@@ -457,10 +457,7 @@ export default class Tasks extends View {
   // doing (or a provider retry's line); Queued, what it waits for; Ready, when it got there (its
   // summary is the Accept card's, never this line's).
   statusLine(p, w = reportOf(p.task, p.section, p.live)) {
-    const { section } = p;
-    return section === "needs" || section === "merging" ? p.why : section === "working" ? p.why ?? w?.text ?? null
-      : section === "queued" ? this.queueReason(p.list, p.task)
-      : section === "ready" ? (p.task.ready_at ? `Ready ${ago(p.task.ready_at)}` : "Ready to accept") : null;
+    return secondLine(p, w, p.section === "queued" ? this.queueReason(p.list, p.task) : null);
   }
 
   // Archived (herdr-task's archive_pass), unless its agent works or asks again: someone wrote to
@@ -758,7 +755,7 @@ export default class Tasks extends View {
     // why; Queued, what it waits for ("after HERD-3"); Merging, why it waits. Never on the right.
     const w = reportOf(task, section, live);
     const sub = this.statusLine(p, w);
-    const left = section === "working" && !p.why && w?.left != null ? short(w.left) : null;
+    const left = leftOf(p, w);
     // Pin / Unpin in its right-click menu (not an archived task's: archived ones drop out of Pinned).
     const key = taskKey(list, task);
     return this.line(`task-${key}`, {

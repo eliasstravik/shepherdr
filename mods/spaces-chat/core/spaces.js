@@ -1,0 +1,60 @@
+// Spaces as the person knows them: each machine's spaces (Herdr's own layout document, "herdr-app", per
+// machine), each with its tabs, its Assistant (the live coordinator terminal labelled for it) and whether that
+// Assistant has something new (unread: the core label herdr.chat.read, the same on every device). The window
+// gets spaces from Herdr (spaces()); the service and the web app build them here from the same documents.
+// Shared core: the source is core/spaces.js; bin/sync-shared copies it into the mods in lib/COPIES.
+
+export const READ = "herdr.chat.read";
+export const machineOf = (address) => (String(address).includes("/") ? String(address).split("/")[0] : null);
+
+// A space's Assistant: the live coordinator terminal labelled for it, on the space's machine (labels hold that
+// machine's own ids, without the "<machine>/" an app id has).
+export function assistantOf(space, ts) {
+  const id = String(space.id).split("/").pop();
+  return ts.find((k) => k.state === "live" && k.labels?.["herdr.role"] === "coordinator"
+    && k.labels?.["herdr.coordinator.space"] === id && machineOf(k.address) === (space.machine ?? null)) ?? null;
+}
+
+// The turn last read. Before any mark: the turn the window last saw it done at (its "chat.seen").
+export function readTurn(k, seen = {}) {
+  const mark = Number(k.labels?.[READ]);
+  return Number.isFinite(mark) ? mark : seen[k.address] ?? 0;
+}
+
+// Unread, as Slack has it: only an Assistant counts; task chats never make a row bold.
+export function isUnread(k, seen = {}, asked = 0) {
+  if (!k || k.labels?.["herdr.role"] !== "coordinator") return false;
+  return (k.turn ?? 0) > Math.max(readTurn(k, seen), asked);
+}
+
+// Every terminal a layout node shows: a terminal block's, or a chat block's agent.
+function terminalsIn(node, out = []) {
+  if (!node || typeof node !== "object") return out;
+  const c = node.content;
+  if (c?.terminal) out.push(c.terminal);
+  if (c?.props?.terminal) out.push(c.props.terminal);
+  for (const ch of node.children ?? []) terminalsIn(ch, out);
+  return out;
+}
+
+// One machine's spaces from its "herdr-app" document. machine: null here, else its name (ids then read
+// "<machine>/<id>", as the window's spaces() has them).
+export function spacesFromDoc(doc, machine = null) {
+  const at = (id) => (machine ? `${machine}/${id}` : id);
+  return (Array.isArray(doc?.spaces) ? doc.spaces : []).map((s) => ({
+    id: at(s.id),
+    machine,
+    name: s.name ?? "",
+    folder: s.folder ?? "",
+    tabs: (s.tabs ?? []).map((t) => ({ id: at(t.id), name: t.name ?? "", terminals: terminalsIn(t.root).map(at) })),
+  }));
+}
+
+// The sidebar's own data (mods/spaces-chat: sections, icons, Pinned): { sections, icons, pinned }.
+export function sidebarOf(s) {
+  return {
+    sections: Array.isArray(s?.sections) ? s.sections : [],
+    icons: s?.icons && typeof s.icons === "object" ? s.icons : {},
+    pinned: Array.isArray(s?.pinned) ? s.pinned : [],
+  };
+}

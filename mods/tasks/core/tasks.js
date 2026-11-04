@@ -164,3 +164,15 @@ export const capital = (s) => (/^[a-z](?![A-Z])/.test(String(s)) ? s[0].toUpperC
 
 // Minutes left, as Shepherdr writes them under the dot: "6m", "<1m", "2h".
 export const short = (n) => (n < 1 ? "<1m" : n < 60 ? `${n}m` : `${Math.round(n / 60)}h`);
+
+// A row's second line, as Shepherdr's: Needs you and Merging, why; Working, why or what its agent says it's
+// doing (w: reportOf); Queued, what it waits for (queued: queueReason's words); Ready, since when.
+export function secondLine(p, w, queued = null, now = Date.now()) {
+  const { section } = p;
+  return section === "needs" || section === "merging" ? p.why : section === "working" ? p.why ?? w?.text ?? null
+    : section === "queued" ? queued
+    : section === "ready" ? (p.task.ready_at ? `Ready ${ago(p.task.ready_at, true, now)}` : "Ready to accept") : null;
+}
+
+// The minutes left under a working row's dot ("6m"), only once they're a real estimate.
+export const leftOf = (p, w) => (p.section === "working" && !p.why && w?.left != null ? short(w.left) : null);

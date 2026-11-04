@@ -16,6 +16,8 @@ dot.js: chat jump tasks
 core/tasklists.js: jump tasks
 core/chat-log.js: chat
 core/send.js: chat
+core/spaces.js: chat spaces-chat
+core/chat-reader.js: chat
 taskwhere.js: task-files task-changes task-pr task-browser
 emoji-data.js: chat-react spaces-chat
 notify.js: chat spaces-chat tabs-tasks tasks shepherdr-settings workspace-status-chat
