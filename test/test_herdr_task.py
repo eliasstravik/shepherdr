@@ -560,7 +560,9 @@ class Revive(unittest.TestCase):
             if args[0] == "get":
                 return json.loads(json.dumps(self.terms[args[1]]))
             raise AssertionError(f"hc {args}")
-        for name, value in (("run", hc), ("hc_json", hc_json), ("session_of", lambda pid: self.sessions.get(pid, (None, None)))):
+        self.tasks = {"dev#6": {"id": 6, "state": "running", "agents": []}}
+        for name, value in (("run", hc), ("hc_json", hc_json), ("session_of", lambda pid: self.sessions.get(pid, (None, None))),
+                            ("task_of", lambda k: self.tasks.get((k.get("labels") or {}).get("herdr.task")))):
             p = mock.patch.object(revive, name, value)
             p.start()
             self.addCleanup(p.stop)
@@ -682,3 +684,22 @@ class Revive(unittest.TestCase):
         self.crash("t1")
         self.tick()
         self.assertEqual(self.sent, [("t1", "cd /home/me && claude --dangerously-skip-permissions --resume S1")])
+
+    def test_a_finished_tasks_worker_stays_a_shell(self):
+        self.terms["t5"] = {"address": "t5", "state": "live", "pid": 500, "cwd": "/wt", "name": "shep-6-web", "argv": ["claude", "Brief"],
+                            "foreground": {"pid": 501, "name": "claude", "argv": ["claude"], "cwd": "/wt"}, "labels": {"herdr.task": "dev#6"}}
+        self.sessions[501] = ("S1", self.log)
+        self.tick()
+        self.tasks["dev#6"]["state"] = "done"
+        self.crash("t5")
+        self.tick()
+        self.assertEqual(self.sent, [])
+
+    def test_a_worker_lost_before_any_record_resumes_its_tasks_session(self):
+        self.tasks["dev#6"]["agents"] = [{"address": "t5", "argv": ["claude"], "session": "S1", "log": self.log}]
+        self.terms["t5"] = {"address": "t5", "state": "live", "pid": 500, "cwd": "/wt", "name": "shep-6-web", "argv": ["claude"],
+                            "labels": {"herdr.task": "dev#6"}}
+        self.crash("t5")
+        with self.mock.patch("herdr_task.launch.own_argv", lambda argv: argv):
+            self.tick()
+        self.assertTrue(self.sent[0][1].startswith("cd /wt && HERDR_BROWSER_TASK='dev#6' claude --resume S1 'Herdr restarted"), self.sent)

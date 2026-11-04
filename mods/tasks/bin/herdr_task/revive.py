@@ -178,17 +178,19 @@ def record_of(k):
             "pid": k.get("pid"), "working": status_word(k) in ("working", "blocked"), "shell": shell}
 
 
-def task_record(k):
-    """A task agent with no record of its own: the session its task recorded (sessions.refresh_sessions)."""
+def task_of(k):
+    """A task agent's task (read only), or None (gone, archived)."""
     from .store import read_list
     from .base import STORE
-    from .launch import own_argv
     key = (k.get("labels") or {}).get("herdr.task") or ""
     slug, _, n = key.rpartition("#")
     d = read_list(os.path.join(STORE, slug + ".json")) if slug and n.isdigit() else None
-    t = next((t for t in (d or {}).get("tasks") or [] if t.get("id") == int(n)), None)
-    if not t:
-        return None
+    return next((t for t in (d or {}).get("tasks") or [] if t.get("id") == int(n)), None)
+
+
+def task_record(k, t):
+    """A task agent with no record of its own: the session its task recorded (sessions.refresh_sessions)."""
+    from .launch import own_argv
     a = next((a for a in (t.get("agents") or []) + (t.get("reviewers") or []) if a.get("address") == k["address"]), None)
     kind, argv = base_argv((a or {}).get("argv"))
     if not kind:
@@ -229,6 +231,11 @@ def plan(k, rec, running):
     sessions agents run here now."""
     labels = k.get("labels") or {}
     assistant = labels.get("herdr.role") == "coordinator" or k.get("template") in ASSISTANT_TEMPLATES
+    # A task's agent only while its task is at work (Working, or Ready for follow-ups): a finished
+    # task's stays a shell, as its end would leave it.
+    task = task_of(k) if labels.get("herdr.task") else None
+    if labels.get("herdr.task") and (task or {}).get("state") not in ("running", "ready"):
+        return None
     if rec and rec.get("pid") == k.get("pid"):
         # Typed here already: once more only when the resume said its session is gone.
         if rec.get("how") != "resume" or now() - (rec.get("sent") or 0) > LOOK_MS:
@@ -241,7 +248,7 @@ def plan(k, rec, running):
         # From before records (or lost before the first one): only a terminal the core plainly gave a shell.
         if not bare_shell(k):
             return None
-        rec = task_record(k) if labels.get("herdr.task") else None
+        rec = task_record(k, task) if task else None
     if rec and rec.get("session") and rec["session"] in running:
         return ("running", None, False)
     if rec and rec.get("session") and rec.get("log") and os.path.isfile(rec["log"]):
