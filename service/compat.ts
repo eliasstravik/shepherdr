@@ -383,6 +383,11 @@ export class Compat {
       needs.push({ id: `secret:${a.address}:${a.name}`, chat: key, place, ...(task ? { task } : {}), at: Date.now(), secret: this.secretAsk(a) });
     }
 
+    // 'attention' is an agent waiting with no card: one whose chat has a card (its question, a secret) needs you once,
+    // not twice (one toast, one alert, one in the counts)
+    const carded = new Set(needs.filter((x) => x.id !== "attention").map((x) => x.chat));
+    for (let i = needs.length - 1; i >= 0; i--) if (needs[i].id === "attention" && carded.has(needs[i].chat)) needs.splice(i, 1);
+
     const pinned = spaces.filter((s) => s.pinned).map((s) => s.id);
     const sections: Section[] = [
       ...(pinned.length ? [{ id: "pinned", name: "Pinned", spaces: pinned }] : []),

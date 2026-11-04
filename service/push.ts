@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DATA } from "./paths.ts";
 import * as T from "../core/toasts.js";
-import { notifies } from "../web/shared/alerts.ts";
+import { notifies, taskWho } from "../web/shared/alerts.ts";
 
 /**
  * What each push alert says, as the window's toasts (core/toasts.js): an agent that needs you, "HERD-4 · Needs you" or
@@ -15,13 +15,13 @@ import { notifies } from "../web/shared/alerts.ts";
  */
 export function alertsOf(snap: any): Map<string, { title: string; body: string; tag: string; waits?: true; url?: string }> {
   const now = new Map<string, { title: string; body: string; tag: string; waits?: true; url?: string }>();
-  const who = (n: any) => n.task ?? T.assistantWho(snap.places?.find((p: any) => p.id === n.place)?.name);
+  const who = (n: any) => n.task ? taskWho(snap, n.task) : T.assistantWho(snap.places?.find((p: any) => p.id === n.place)?.name);
   for (const n of snap.needs ?? []) {
     if (snap.settings && !notifies(snap, { go: { place: n.place }, task: n.task ? true : undefined })) continue;
     now.set(`need:${n.chat}:${n.id}`, { title: T.toastTitle(who(n), T.NEEDS_YOU), body: T.needReason(n), tag: n.task ?? n.chat, waits: true });
   }
   for (const t of snap.tasks ?? []) if (t.status === "ready" && !t.archived)
-    now.set(`ready:${t.id}`, { title: T.toastTitle(t.id, T.FINISHED), body: t.name, tag: t.id, url: `./#accept=${encodeURIComponent(t.id)}` });
+    now.set(`ready:${t.id}`, { title: T.toastTitle(taskWho(snap, t.id), T.FINISHED), body: t.name, tag: t.id, url: `./#accept=${encodeURIComponent(t.id)}` });
   // an agent's own alert (herdr-task alert), as its toast: a task's always, an Assistant's by its space's Notify
   for (const a of snap.alerts ?? []) if (a.notify) now.set(`alert:${a.id}`, { title: a.title, body: a.body, tag: `alert:${a.id}` });
   return now;
@@ -43,7 +43,7 @@ export function agentAlerts(terminals: Iterable<any>, snap: any, chatOf: (addres
     const chat = chatOf(k.address) ?? undefined;
     const task = chat?.includes("/") ? snap.tasks?.find((t: any) => t.id === chat.slice(0, chat.lastIndexOf("/"))) : null;
     const coord = !task && chat ? snap.places?.find((p: any) => p.chat === chat) : null;
-    const ref = a.task ?? task?.id ?? (k.labels?.["herdr.task"] ? (/^([a-z][a-z0-9]*-\d+)/.exec(k.name ?? "")?.[1] ?? "").toUpperCase() : "");
+    const ref = a.task ?? (task ? taskWho(snap, task.id) : null) ?? (k.labels?.["herdr.task"] ? (/^([a-z][a-z0-9]*-\d+)/.exec(k.name ?? "")?.[1] ?? "").toUpperCase() : "");
     const who = ref || (k.labels?.["herdr.role"] === "coordinator" || coord ? T.assistantWho(coord?.name) : k.program?.name ?? "Agent");
     const place = task?.place ?? coord?.id;
     const notify = Boolean(a.about || task || k.labels?.["herdr.task"] || !place || notifies(snap, { go: { place } }));

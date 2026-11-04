@@ -70,7 +70,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Title hover | T:822 the title when cut, an error | W Line `title` (the second line too when cut) | ✓ |
 | Second line words | T:841-842 capital first, at most 40 characters cut at a word, whole on hover | W Line (`capital`, `fit`) | ✓ fixed ("after SHEP-7" → "After SHEP-7") |
 | Working | core secondLine: why, else its agent's words; pie of % done | compat `sub`, TaskDot pie | ✓ |
-| Minutes left | T:854-855 under the glyph, amber, monospace: "6m", "<1m", "2h" | W Line `left` from compat `left` (core leftOf) | ✓ fixed (showed raw eta, "2h" read as 2m) |
+| Minutes left | T:854-855 under the glyph, amber, monospace, level with the second line: "6m", "<1m", "2h" | W Line `left` from compat `left` (core leftOf), as tall as the second line | ✓ fixed (showed raw eta, "2h" read as 2m; sat above the second line on a phone) |
 | Needs you | why (core place) | compat `sub` | ✓ |
 | Queued | "After HERD-3", "Waits: …", "Starts soon" | compat `sub` (core queueReason) | ✓ |
 | Ready | "Ready 5m ago" + Accept | compat `sub` + W `accept` | ✓ |
@@ -78,6 +78,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | To do, Done | one line, place at the end | W Line one-line | ✓ |
 | Where it is | T:700-706 machine (not this computer) · space, only what the grouping doesn't say; Settings "Where on task rows" off: none | W whereOf / autoWhere, `names` | ✓ |
 | Place gives way | T:823-831 one line: the place shrinks first; two lines: it takes only the room left | W Line `shrink-[1000]`, flex-1 justify-end | ✓ |
+| Place, phone | — | whole or not at all (it wraps out of sight), never a cut `m3 · shep…` | ◇ phone: a few letters of a place say nothing |
 | Accept | T:796-800 compact solid button at line 2's end, "Accepting…" while the Accept card's accept runs | W TaskRow `accept`, `useAccepting` + compat `accepting` (shared "tasks.accepting") | ✓ fixed |
 | Accept never covers the place | T:845-849 the place sits before the button | W Line: place in flex-1, then the button (shrink-0), desktop, tablet and phone | ✓ |
 | Archived rows | T:538 done glyph, no pin menu | W TaskRow, `menu` off when archived | ✓ fixed (offered Pin) |
