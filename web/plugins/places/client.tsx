@@ -362,7 +362,6 @@ function PlaceMenu({ p, snap, menu, unread, onRename, children }: { p: Place; sn
       ) : null}
       <MenuSetting
         name="Notify"
-        note="For its coordinator's chat; tasks alert as always"
         icon={now === 'Off' ? <BellSlashIcon className={ic} /> : <BellIcon className={ic} />}
         choices={NOTIFY.map((v) => ({ label: v, hint: NOTIFY_HINT[v], on: now === v, onClick: () => void pick(v).catch(() => undefined) }))}
       />
@@ -379,9 +378,7 @@ function PlaceMenu({ p, snap, menu, unread, onRename, children }: { p: Place; sn
       </MenuItem>
       <PinItem p={p} snap={snap} menu={menu} />
       <RestartItem chat={p.chat} name={p.name} onPick={menu.close} />
-      <MenuItem icon={<SectionIcon className={ic} />} hint={<NextIcon className={ic} />} aria-haspopup="menu" onClick={() => setMoving(true)}>
-        Move to section
-      </MenuItem>
+      {/* Shepherdr 3: a space moves between sections by dragging it, never from a menu */}
       {onRename ? (
         <MenuItem
           icon={<RenameIcon className={ic} />}
@@ -622,7 +619,7 @@ function Space({ p, snap, sort, at }: { p: Place; snap: Snapshot; sort: Sort; at
                 setTimeout(() => setRemoving(p))
               }}
             >
-              Remove from Shepherdr…
+              Close…
             </MenuItem>
           )}
         </PlaceMenu>
@@ -693,7 +690,7 @@ function RemoveBox({ p, snap }: { p: Place; snap: Snapshot }) {
     )
   return (
     <Dialog
-      title={`Remove ${p.name} from Shepherdr?`}
+      title={`Close ${p.name}?`}
       safe
       onCancel={cancel}
       buttons={
@@ -702,12 +699,7 @@ function RemoveBox({ p, snap }: { p: Place; snap: Snapshot }) {
         </Primary>
       }
     >
-      <p>Its files and folder stay on disk. Shepherdr only forgets it, and its coordinator closes.</p>
-      <p className="mt-1.5">
-        {open.length
-          ? `${open.length > 1 ? `Its ${open.length} open tasks` : 'Its open task'}${open.length <= 4 ? ` (${and(open)})` : ''} ${open.length > 1 ? 'hide' : 'hides'} with it; ${open.length > 1 ? 'their worktrees and branches stay' : 'its worktree and branch stay'}. Add the space again to bring them and its chat back.`
-          : 'Add it again any time to bring its chat back.'}
-      </p>
+      <p>Its folder and files stay. Its Assistant and terminals close.</p>
       {error ? <p className="mt-1.5 text-need-fg">{error}</p> : null}
     </Dialog>
   )

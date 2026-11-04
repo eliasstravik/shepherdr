@@ -146,6 +146,19 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const next = await compat.agents.restart(a, reader, { kind: b.kind, model: opt(b.model), effort: opt(b.effort), speed: opt(b.speed) });
     return { ok: true, terminal: next };
   }
+  if (b?.type === "space-remove" && typeof b.place === "string" && compat.shared) {
+    // Close a space: the window closes its own (herdr-app do space.close); the service forgets one of its own and ends its Assistant
+    const own = Array.isArray(compat.shared.value("spaces")) ? compat.shared.value("spaces") : [];
+    const mine = own.find((x: any) => (x.machine ? `${x.machine}/${x.id}` : x.id) === b.place);
+    if (mine) {
+      await compat.shared.set("spaces", own.filter((x: any) => x !== mine));
+      for (const t of hub.terminals.values()) if (t.labels?.["herdr.coordinator.space"] === mine.id && (t.address.includes("/") ? t.address.split("/")[0] : null) === (mine.machine ?? null)) await hc(["kill", t.address]);
+      return { ok: true };
+    }
+    const r = await run(["herdr-app", "do", "space.close", "--id", b.place, "--confirmed", "true"]);
+    if (r.code !== 0) throw new Error("Closing a space needs the Herdr window open.");
+    return { ok: true };
+  }
   if (b?.type === "rewind" && typeof b.chat === "string" && typeof b.message === "string") {
     // the CLI's own rewind on that message, as the window's: Claude Code's /rewind lists the prompts newest last (Up
     // once per later prompt); Codex's Esc Esc browses back from the last (Left). Then its terminal shows it.

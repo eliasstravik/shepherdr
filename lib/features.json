@@ -62,7 +62,7 @@
         "tablet": "⋯ or long-press menu",
         "phone": "Long-press: action sheet; rename in a sheet"
       },
-      "planned": "Close and worktrees from the web (Mark read, Notify, rename and icon work)"
+      "planned": "New, Open and Remove worktree from the web (close, rename, icon, Notify, Mark read, Pin work)"
     },
     {
       "id": "new-space",
@@ -88,7 +88,9 @@
         "tablet": "Dialog",
         "phone": "Full-screen sheet with folder browser"
       },
-      "planned": "New space from the web"
+      "service": [
+        "spaces.ts"
+      ]
     },
     {
       "id": "tabs",
@@ -643,7 +645,6 @@
         "tablet": "Tap a message to show its row",
         "phone": "Long-press: sheet; swipe right to reply"
       },
-      "planned": "Fork and Rewind",
       "service": [
         "actions.ts"
       ]
