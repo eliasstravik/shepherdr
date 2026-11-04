@@ -125,6 +125,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Needs you | W:2979 red dot, "Needs you", what it waits for or "The agent is asking something in the terminal.", Open terminal | A:389 NeedsYou (D `blocked`) | ✓ (was missing) |
 | Starting the Assistant | W:1419 startAgent: the first message in an empty Assistant chat starts it (assistant template, the message its task, the slot's labels), "Starting the Assistant…" | service/actions.ts `send` to a space with no Assistant: the same `hc run` and labels in the window's slot (shared "coordinator.slots"), else the service's own labels; writes data/chat-first; A WorkingLine "Starting the Assistant…" | ✓ |
 | Helpers | W:2972 rows: spinner, name, age; past five, four and "+N more" | A JobsTag: the same rows over the box | ✓ |
+| Background shells and watchers | W background(): after the subagents, a row each for the shells and watchers the agent left running (terminal or eye icon, name, age, chevron), live from its log and its processes (core/bg-jobs.js), gone when they end; a tap opens its command, the last lines it printed (Claude Code's) and Stop; Codex's own long-running shells too. Settings' subagents switch leaves them shown | A JobsTag JobLine: the same rows and the same open row (service compat `jobs`, api/activity `what=job`, action `stop-job`) | ✓ |
 
 ## Cards
 

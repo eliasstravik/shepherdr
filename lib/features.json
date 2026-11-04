@@ -748,6 +748,37 @@
       ]
     },
     {
+      "id": "background-jobs",
+      "addon": "chat",
+      "title": "Background shells above the box",
+      "core": [
+        "chat-log",
+        "bg-jobs",
+        "chat-reader"
+      ],
+      "herdr": {
+        "mods": [
+          "chat"
+        ]
+      },
+      "web": {
+        "files": [
+          "plugins/chat/activity.tsx"
+        ]
+      },
+      "forms": {
+        "herdr": "A row per shell or watcher; a tap opens its command, output and Stop",
+        "desktop": "Same",
+        "tablet": "Same",
+        "phone": "Same, taller rows"
+      },
+      "service": [
+        "compat.ts",
+        "chats.ts",
+        "actions.ts"
+      ]
+    },
+    {
       "id": "find",
       "addon": "chat",
       "title": "Find in chat",

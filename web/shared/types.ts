@@ -677,6 +677,10 @@ export interface Job {
   now?: string
   /** its own steps (a subagent, a headless agent) or its output (a shell) can be read (activityOf, what: 'job') */
   more?: 'steps' | 'output'
+  /** a shell's or watcher's command line */
+  command?: string
+  /** it can be stopped from here (action stop-job) */
+  stop?: boolean
 }
 
 /** what the screen asks of a chat's activity: a turn's steps, a step's raw output, a background job's steps or output */
@@ -1233,6 +1237,8 @@ export type Action =
   | { type: 'pause'; chat: string }
   /** its agent goes and the task is To do; its work stays */
   | { type: 'stop'; chat: string }
+  /** Stop on a background shell or watcher over the box (Job.id) */
+  | { type: 'stop-job'; chat: string; job: string }
   /** what the restart sheet shows for a coordinator (chat: its place id) or a task's agent (ID/Agent): RestartInfo */
   | { type: 'restart-info'; chat: string }
   /** start a coordinator or a task's agent again on this CLI, model and effort (none: the CLI's own; no kind: all as

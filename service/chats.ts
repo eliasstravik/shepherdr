@@ -84,6 +84,7 @@ export class Chats {
       const t = await withForeground(addr, this.hub.terminals.get(addr));
       let changed = await f.reader.locate(t);
       if (await f.reader.pull()) changed = true;
+      if (await f.reader.lookJobs()) changed = true;
       if (changed || !f.ready) this.publish(addr, f);
     } catch (err) {
       console.error(`chat ${addr}: ${(err as Error).message}`);
