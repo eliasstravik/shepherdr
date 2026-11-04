@@ -2,9 +2,10 @@
 // tailscaled (root) or by this machine's owner: another user on the machine could reach 127.0.0.1 and send the
 // header itself. Linux reads the kernel's socket table; macOS asks lsof. Only the exact connection counts (caller
 // 127.0.0.1:<port> to the service's 127.0.0.1:<service>, established); none, or more than one owner: not believed.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 const ME = process.getuid?.() ?? -1;
+const LSOF = ["/usr/sbin/lsof", "/usr/bin/lsof"].find((p) => existsSync(p)) ?? "lsof";
 const LOOP4 = "0100007F";                              // 127.0.0.1 as /proc/net/tcp writes it
 const LOOP6 = "0000000000000000FFFF00000100007F";      // ::ffff:127.0.0.1 in tcp6
 const hex = (n: number) => n.toString(16).toUpperCase().padStart(4, "0");
@@ -24,9 +25,11 @@ export function peerUid(port: number, service: number): number | null {
       }
     }
   } else if (process.platform === "darwin") {
-    const r = Bun.spawnSync(["lsof", "-nP", "-a", "-p", `^${process.pid}`, `-iTCP@127.0.0.1:${port}`, "-sTCP:ESTABLISHED", "-Fun"], { stdout: "pipe", stderr: "ignore" });
+    // lsof is in /usr/sbin, which launchd's PATH for the service may lack; none at all: not believed
+    let out = "";
+    try { out = Bun.spawnSync([LSOF, "-nP", "-a", "-p", `^${process.pid}`, `-iTCP@127.0.0.1:${port}`, "-sTCP:ESTABLISHED", "-Fun"], { stdout: "pipe", stderr: "ignore" }).stdout.toString(); } catch {}
     let uid: number | null = null;
-    for (const line of r.stdout.toString().split("\n")) {
+    for (const line of out.split("\n")) {
       if (line.startsWith("u")) uid = Number(line.slice(1));
       else if (line === `n127.0.0.1:${port}->127.0.0.1:${service}` && uid !== null) uids.add(uid);
     }

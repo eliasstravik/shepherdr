@@ -257,7 +257,7 @@ def unit_text(root, bun):
     tools = ["gh", "git", "node", "agent-browser", "claude", "codex", "python3", "tailscale", "whisper-cli", "pw-record", "pw-play", "jq"]
     found = [os.path.dirname(os.path.realpath(p)) if os.path.basename(os.path.realpath(p)) == t else os.path.dirname(p)
              for t in tools for p in [shutil.which(t)] if p]
-    dirs = [os.path.join(root, BIN), os.path.dirname(bun), *found, "/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin"]
+    dirs = [os.path.join(root, BIN), os.path.dirname(bun), *found, "/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
     path = ":".join(dict.fromkeys(dirs))
     if sys.platform == "darwin":
         return PLIST, f"""<?xml version="1.0" encoding="UTF-8"?>
