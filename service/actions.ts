@@ -103,6 +103,13 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     }
     return { ok: true };
   }
+  if (b?.type === "mode" && typeof b.place === "string" && (b.mode === "autopilot" || b.mode === "regular")) {
+    // Autopilot: herdr-task's, per space on this machine (a plain switch, as the window's header)
+    if (b.place.includes("/")) throw new Error("Autopilot is set on that space's own machine.");
+    const r = await run(["herdr-task", "autopilot", b.mode === "autopilot" ? "on" : "off", "--space", b.place, "--json"]);
+    if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim().split("\n").pop() || "Autopilot didn't change.");
+    return { ok: true };
+  }
   if (b?.type === "keys" && typeof b.chat === "string" && Array.isArray(b.keys) && b.keys.length <= 32 && b.keys.every((k: unknown) => typeof k === "string" && k.length <= 40)) {
     const res = await hc(["keys", chat(b.chat), ...b.keys]);
     return { ok: res.code === 0 };

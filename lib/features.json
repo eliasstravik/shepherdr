@@ -1040,7 +1040,10 @@
         "tablet": "Same",
         "phone": "Switch in the chat's menu; settings page"
       },
-      "planned": "The Autopilot switch and page"
+      "planned": "Its settings page (heartbeat, schedule, events); the switch works",
+      "service": [
+        "actions.ts"
+      ]
     },
     {
       "id": "machines",

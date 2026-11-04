@@ -89,14 +89,11 @@ function AutopilotSwitch({ place }: { place: Place }) {
   const rows = useSnap()?.settings.find((section) => section.name === 'Autopilot' && section.level === place.id)?.rows
   const state = rows?.find((row) => row.label === 'State')?.value
   const blocked = on ? undefined : rows?.find((row) => row.label === PILOT_BLOCKED)?.value
-  const change = async (keepWorkers = false) => {
+  // Shepherdr 3: a plain switch (the same Assistant, woken by its heartbeat), no dialog
+  const change = async () => {
     if (busy) return
-    if (!on) {
-      setUI({ menu: false })
-      return confirm(place.id)
-    }
     setBusy(true); setError('')
-    try { const result = await act({ type: 'mode', place: place.id, mode: 'regular', keepWorkers }); setError(result.error ?? '') }
+    try { const result = await act({ type: 'mode', place: place.id, mode: on ? 'regular' : 'autopilot' }); setError(result.error ?? '') }
     catch (e) { setError((e as Error).message) }
     finally { setBusy(false) }
   }
@@ -108,10 +105,9 @@ function AutopilotSwitch({ place }: { place: Place }) {
       icon={<ModeIcon className={ic} />}
       on={on}
       disabled={!!blocked}
-      note={blocked ?? (busy ? 'Changing Assistant…' : state && state !== 'On' && state !== 'Off' ? state : on ? 'Works on its own' : 'Off: does what you ask')}
+      note={blocked ?? (state && state !== 'On' && state !== 'Off' ? state : undefined)}
       onClick={() => void change()}
     />
-    {on ? <MenuItem onClick={() => void change(true)}>Turn off; let workers finish</MenuItem> : null}
     {error ? <p role="alert" className="max-w-72 px-3 py-2 text-sm text-pretty text-need [overflow-wrap:anywhere]">{error}</p> : null}
     </>
   )

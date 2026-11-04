@@ -119,7 +119,7 @@ export class Compat {
       const key = placeKey(s.id);
       if (s.assistant) chats.set(key, s.assistant);
       const name = s.name || (s.folder.split("/").filter(Boolean).pop() ?? "home");
-      return { id: s.id, name, ...(s.icon ? { emoji: s.icon } : {}), machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", mode: "regular", chat: key };
+      return { id: s.id, name, ...(s.icon ? { emoji: s.icon } : {}), machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", mode: s.autopilot ? "autopilot" : "regular", chat: key };
     });
 
     this.tasks = new Map(rows.map((r) => [taskId(r), { ref: r.ref, folder: r.folder, machine: r.machine ?? null, key: `${r.slug}#${r.id}`, pin: r.key,
@@ -187,6 +187,10 @@ export class Compat {
       ...spaces.map((s) => ({ name: "Notify", level: s.id, rows: [{ label: "Notify", key: "notify", value: level(s), options: [...NOTIFY],
         ...(spaceOwn(n, s.id) ? { inherits: { value: parent(s), from: "Everywhere" } } : { from: "Everywhere" }) }] })),
     ];
+
+    const pilots: SettingSection[] = spaces.filter((s) => s.autopilot).map((s) => ({ name: "Autopilot", level: s.id, rows: [{ label: "State", key: "autopilot.state", fixed: true,
+      value: s.autopilot.next ? `Next ${new Date(s.autopilot.next).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "On" }] }));
+    notify.push(...pilots);
 
     this.chats = chats;
     this.last = {

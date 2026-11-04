@@ -55,7 +55,7 @@ export class Model {
       else if ("terminal" in e && e.terminal) this.soon();
     });
     const tasks = join(HOME, ".herdr", "tasks");
-    if (existsSync(tasks)) watch(tasks, () => this.soon(() => this.readLists(null)));
+    if (existsSync(tasks)) watch(tasks, () => this.soon(() => { this.readAutopilot(); return this.readLists(null); }));
     if (existsSync(SHARED)) watch(SHARED, () => this.soon(() => this.readShared()));
     setInterval(() => void this.refresh(), 10_000);
     void this.refresh();
@@ -76,8 +76,15 @@ export class Model {
       this.machines = r.machines.filter((m) => m.state === "connected").map((m) => m.name);
     } catch {}
     this.readShared();
+    this.readAutopilot();
     await Promise.all([this.readDocs(), this.readLists(null), ...this.machines.map((m) => this.readLists(m))]);
     this.build();
+  }
+
+  private autopilot: Record<string, any> = {};
+  /** Each space's Autopilot on this machine (herdr-task's .autopilot.json). */
+  private readAutopilot() {
+    try { this.autopilot = JSON.parse(readFileSync(join(HOME, ".herdr", "tasks", ".autopilot.json"), "utf8")).spaces ?? {}; } catch { this.autopilot = {}; }
   }
 
   private readShared() {
@@ -151,6 +158,7 @@ export class Model {
         ...s, at, icon: bar.icons[s.id] ?? null, pinned: bar.pinned.includes(s.id),
         section: bar.sections.find((x: any) => (x.spaces ?? []).includes(s.id))?.id ?? null,
         assistant: k?.address ?? null, assistantStatus: (k as any)?.status?.state ?? null,
+        autopilot: !s.machine && this.autopilot[s.id]?.on ? { next: this.autopilot[s.id].next_run ?? null } : null,
         unread: isUnread(k, seen) && spaceLevel(this.value("notify") ?? {}, s.id) !== "Off",
         red: here.filter((r) => r.section === "needs").length + ((k as any)?.status?.state === "blocked" ? 1 : 0),
         green: here.filter((r) => r.section === "ready").length,
