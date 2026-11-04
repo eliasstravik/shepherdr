@@ -1,0 +1,100 @@
+// The Shepherdr service: one per machine, always on (user systemd / launchd). It does Shepherdr's background work
+// and serves the web app with its live updates, on 127.0.0.1 only; the tailnet reaches it through
+// tailscale serve --set-path /shepherdr (never funnel).
+//
+//   bun service/main.ts            run it (systemd and launchd run exactly this)
+//   SHEPHERDR_PORT=7788            the port on 127.0.0.1
+//   SHEPHERDR_WEB=on|off           serve the web app and share it on the tailnet (default on)
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join, normalize } from "node:path";
+import { randomBytes } from "node:crypto";
+import { DATA, SOCK, TOKEN, PORT, ensureData } from "./paths.ts";
+import { holdLock } from "./lock.ts";
+import { gate, type Gate } from "./auth.ts";
+import { whoami, share, served, type Me } from "./tailscale.ts";
+import { Hub } from "./hub.ts";
+import { Store } from "./store.ts";
+import { Live } from "./live.ts";
+
+const ROOT = join(import.meta.dir, "..");
+const WEB = process.env.SHEPHERDR_WEB_DIR || join(ROOT, "web", "dist");
+export const VERSION = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version as string;
+
+ensureData();
+const release = await holdLock(SOCK);
+if (!release) {
+  console.log("Shepherdr's service is already running.");
+  process.exit(0);
+}
+
+if (!existsSync(TOKEN)) writeFileSync(TOKEN, randomBytes(24).toString("hex") + "\n", { mode: 0o600 });
+const token = readFileSync(TOKEN, "utf8").trim();
+
+const hub = new Hub();
+const store = new Store(hub);
+let me: Me | null = await whoami();
+const g: Gate = { owner: me?.login ?? null, dns: me?.dns ?? null, port: PORT, token };
+const live = new Live(hub, store, () => me, VERSION);
+
+// Tailscale can come up after the service: look again now and then, and keep /shepherdr shared while web is on.
+const webOn = process.env.SHEPHERDR_WEB !== "off";
+async function tailnet() {
+  me = await whoami();
+  g.owner = me?.login ?? null;
+  g.dns = me?.dns ?? null;
+  if (!me || !webOn) return;
+  const s = await served(me.dns);
+  if (s.funnel) { console.error("Funnel is on where /shepherdr is served: refusing the tailnet until it's off"); g.owner = null; return; }
+  const err = await share(me.dns, PORT);
+  if (err) console.error(err);
+}
+await tailnet();
+setInterval(tailnet, 60_000);
+
+const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "no-store" } });
+
+function file(path: string): Response {
+  const rel = normalize(path).replace(/^(\.\.[/\\])+/, "").replace(/^\/+/, "");
+  let p = join(WEB, rel);
+  if (!p.startsWith(WEB) || !existsSync(p) || rel === "") p = join(WEB, "index.html");
+  if (!existsSync(p)) return new Response("The web app isn't built: run bun run build.", { status: 503 });
+  const immutable = rel.startsWith("assets/");
+  return new Response(Bun.file(p), { headers: {
+    "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+  } });
+}
+
+const server = Bun.serve<{ who: string }>({
+  hostname: "127.0.0.1",
+  port: PORT,
+  async fetch(req, srv) {
+    const url = new URL(req.url);
+    const path = url.pathname.startsWith("/shepherdr/") ? url.pathname.slice(10) : url.pathname;
+    if (path === "/api/health") return json({ ok: true, version: VERSION, core: hub.up });
+    const socket = path === "/api/ws";
+    const pass = gate(req, g, socket);
+    if (!pass.ok) return new Response(pass.why, { status: pass.status });
+    if (socket) return srv.upgrade(req, { data: { who: pass.who } }) ? undefined : new Response("upgrade failed", { status: 400 });
+    if (path === "/api/me") return json({ login: pass.who, via: pass.via, machine: me?.host ?? null, link: me ? `https://${me.dns}/shepherdr/` : null, version: VERSION });
+    if (path === "/api/state" && req.method === "GET") return json(store.doc.version ? store.doc : await store.load());
+    if (path === "/api/state" && req.method === "POST") {
+      const body = await req.json().catch(() => null);
+      if (!body || typeof body.key !== "string" || !/^[a-z][\w.-]{0,63}$/.test(body.key)) return json({ error: "bad key" }, 400);
+      return json(await store.set(body.key, body.value ?? null));
+    }
+    if (path.startsWith("/api/")) return json({ error: "not found" }, 404);
+    if (!webOn) return new Response("Shepherdr's web app is off (Shepherdr settings › Web).", { status: 404 });
+    return file(path);
+  },
+  websocket: {
+    open(ws) { live.join(ws); },
+    message(ws, msg) { live.message(ws, String(msg)); },
+    close(ws) { live.leave(ws); },
+  },
+});
+
+console.log(`Shepherdr ${VERSION} on http://127.0.0.1:${server.port} (data ${DATA})${me && webOn ? `, https://${me.dns}/shepherdr/` : ""}`);
+
+for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => { server.stop(true); release(); process.exit(0); });
