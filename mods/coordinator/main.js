@@ -6,7 +6,8 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
-import { props, theme, settings, terminals, knownAgents, closeOverlay, home, exec, readTextFile, writeTextFile, watchFolder } from "herdr";
+import { props, theme, settings, knownAgents, closeOverlay, home, exec, readTextFile, writeTextFile, watchFolder } from "herdr";
+import { terminals, inRender } from "./live.js";
 import { coordinatorIn, workersOf, entryFor, restartAgent, closeCoordinator, taskOf, switchTask } from "./coordinator.js";
 import { TEXT, H, RADIUS, button as uiButton, heading, dialogFooter } from "./ui.js";
 // Switch agent's words: core/menus.js (the web app's Switch agent reads the same).
@@ -101,7 +102,12 @@ export default class Coordinator extends View {
     if (this.pending && this.code && this.code.value() !== this.saved) await writeTextFile(FILE(), this.code.value(), this.raw === null ? null : this.saved).catch(() => {});
   }
 
+  // One copy of Herdr's live lists for the whole render (live.js): past ~50 ms Herdr stops it.
   render(cx) {
+    return inRender(() => this.draw(cx));
+  }
+
+  draw(cx) {
     const view = props()?.view;
     if (view === "close") return this.closeDialog();
     if (view === "agents") return this.agentMenu();

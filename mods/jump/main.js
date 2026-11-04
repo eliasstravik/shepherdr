@@ -20,7 +20,8 @@
 import { div, svg } from "gpui-kit";
 import { View } from "gpui-kit";
 import { h_flex, v_flex, InputState, Input, VirtualListScrollHandle, v_virtual_list, Scrollbar } from "gpui-base";
-import { spaces, machines, terminals, agents, layout, layouts, exec, home, run, theme, props, closeOverlay, shared, setShared } from "herdr";
+import { machines, layout, layouts, exec, home, run, theme, props, closeOverlay, shared, setShared } from "herdr";
+import { spaces, terminals, agents, inRender } from "./live.js";
 import { taskDot } from "./dot.js";
 import { READ_LISTS, taskLists } from "./core/tasklists.js";
 import { busyAgain } from "./core/tasks.js";
@@ -309,7 +310,12 @@ export default class Jump extends View {
           .when(Boolean(r.sub), (el) => el.child(div().min_w(0).truncate().text_size(TEXT.label).text_color(t.dim).child(r.sub)))));
   }
 
+  // One copy of Herdr's live lists for the whole render (live.js): past ~50 ms Herdr stops it.
   render(cx) {
+    return inRender(() => this.draw(cx));
+  }
+
+  draw(cx) {
     const t = theme();
     const q = this.input.value().trim();
     const rows = this.rows(q);

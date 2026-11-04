@@ -12,6 +12,7 @@ import { countBadge, H, TEXT, RADIUS } from "./ui.js";
 import { on as addonOn } from "./addons.js";
 // A tab's name (what runs in it while Herdr named it): core/menus.js, as the web app's tab bar names it.
 import { tabName } from "./core/menus.js";
+import { inRender } from "./live.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -118,7 +119,12 @@ export default class Tabs extends View {
     localStorage.setItem("panels", JSON.stringify(this.panels));
   }
 
+  // One copy of Herdr's live lists for the whole render (live.js): past ~50 ms Herdr stops it.
   render(cx) {
+    return inRender(() => this.draw(cx));
+  }
+
+  draw(cx) {
     // Another machine's agent using a secret: answered from here (secrets.js, bin/herdr-secret serve).
     serveRemote();
     tickOnChange(cx);

@@ -35,7 +35,8 @@
 import { LINE_MAX, REASONS, fit, reqReason, reportReason } from "./core/needs.js";
 import { notifies, spaceOfTerminal } from "./notify.js";
 import { toast, toastWho as whoOf } from "./ui.js";
-import { exec, appHome, home, terminals, agents, panes, spaces, focused, shared, setShared, watchFolder, readTextFile, writeTextFile, playSound, settings, run, layout } from "herdr";
+import { exec, appHome, home, focused, shared, setShared, watchFolder, readTextFile, writeTextFile, playSound, settings, run, layout } from "herdr";
+import { terminals, agents, panes, spaces } from "./live.js";
 
 const CLI = () => `${appHome()}/mods/tasks/bin/herdr-task`;
 export const ASKS = () => `${appHome()}/data/chat-asks`;
@@ -291,7 +292,9 @@ export function items() {
   const asks = shared("inbox.asks") ?? [];
   const asking = new Set(asks.map((a) => a.terminal));
   const out = asks.map((a) => ({ key: `ask:${a.id}`, kind: "ask", id: a.id, terminal: a.terminal, at: Number(a.id.split(".")[1]) * 1000 || 0 }));
-  for (const k of terminals())
+  const all = terminals();
+  forgetUnblocked(all);
+  for (const k of all)
     if (k.state === "live" && k.status === "blocked" && !asking.has(k.address))
       out.push({ key: `blocked:${k.address}`, kind: "blocked", terminal: k.address, at: blockedSince(k.address) });
   const tasks = shared("inbox.tasks") ?? [];
@@ -348,8 +351,14 @@ export function readyByTab() {
 const since = new Map();
 function blockedSince(address) {
   if (!since.has(address)) since.set(address, Date.now());
-  for (const a of since.keys()) if (terminals().find((k) => k.address === a)?.status !== "blocked") since.delete(a);
-  return since.get(address) ?? Date.now();
+  return since.get(address);
+}
+
+// Those no longer waiting start over. One pass over one list: a terminals() per waiting agent,
+// per waiting agent, took the status bar past Herdr's render time (SHEP-15).
+function forgetUnblocked(all) {
+  const blocked = new Set(all.filter((k) => k.status === "blocked").map((k) => k.address));
+  for (const a of since.keys()) if (!blocked.has(a)) since.delete(a);
 }
 
 // ---- going there --------------------------------------------------------------------------

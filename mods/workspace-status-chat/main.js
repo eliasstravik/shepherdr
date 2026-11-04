@@ -3,7 +3,8 @@
 // No agent count: the Tasks panel shows the work.
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, theme, run, window, keys, shared } from "herdr";
+import { theme, run, window, keys, shared } from "herdr";
+import { spaces, inRender } from "./live.js";
 import { count as needsYou } from "./inbox.js";
 import { countBadge, TEXT, RADIUS } from "./ui.js";
 
@@ -23,7 +24,12 @@ export default class WorkspaceStatus extends View {
     return key ? `${key}  Commands` : "Commands";
   }
 
-  render() {
+  // One copy of Herdr's live lists for the whole render (live.js): past ~50 ms Herdr stops it.
+  render(cx) {
+    return inRender(() => this.draw(cx));
+  }
+
+  draw() {
     const t = theme();
     const space = spaces().find(s => s.active);
     const needs = needsYou();

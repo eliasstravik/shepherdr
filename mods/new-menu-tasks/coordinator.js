@@ -9,7 +9,8 @@
 // Shared: the source is lib/coordinator.js; bin/sync-shared copies it into each mod in lib/COPIES.
 // Edit lib/coordinator.js, never a mod's copy, then run bin/sync-shared.
 
-import { terminals, panes, appHome, exec, hc, run, openOverlay, shared, setShared, home, machines, focused, readTextFile, spaces as allSpaces } from "herdr";
+import { appHome, exec, hc, run, openOverlay, shared, setShared, home, machines, focused, readTextFile } from "herdr";
+import { terminals, panes, spaces as allSpaces } from "./live.js";
 import { logSpace } from "./spacelog.js";
 import { toast, plainError } from "./ui.js";
 

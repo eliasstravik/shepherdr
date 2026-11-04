@@ -8,7 +8,8 @@
 // Shared: the source is lib/secrets.js; bin/sync-shared copies it into each mod in lib/COPIES.
 // Edit lib/secrets.js, never a mod's copy, then run bin/sync-shared.
 
-import { appHome, home, exec, hc, readTextFile, writeTextFile, terminals, spaces, panes } from "herdr";
+import { appHome, home, exec, hc, readTextFile, writeTextFile } from "herdr";
+import { terminals, spaces, panes } from "./live.js";
 import { serviceRuns } from "./service.js";
 
 // The ask's label and the words the agent hears: core/secrets.js, shared with the web app.

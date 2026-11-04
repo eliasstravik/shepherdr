@@ -14,7 +14,8 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, TextareaState, Textarea } from "gpui-base";
-import { props, theme, spaces, machines, home, exec, readTextFile, writeTextFile, closeOverlay, openOverlay, shared } from "herdr";
+import { props, theme, machines, home, exec, readTextFile, writeTextFile, closeOverlay, openOverlay, shared } from "herdr";
+import { spaces, inRender } from "./live.js";
 import { SHEPHERDR_FILE, SHEPHERDR_DEFAULTS, LOCAL_MACHINE, shepherdrFor, shepherdrLayers, machineOfSpace } from "./coordinator.js";
 import * as models from "./settings.js";
 import { layoutSection } from "./layout.js";
@@ -567,7 +568,12 @@ export default class ShepherdrSettings extends View {
       .child(button("to-everywhere", EVERYWHERE, { kind: "plain", onClick: (_e, cx) => this.pickScope(null, cx) }));
   }
 
+  // One copy of Herdr's live lists for the whole render (live.js): past ~50 ms Herdr stops it.
   render(cx) {
+    return inRender(() => this.draw(cx));
+  }
+
+  draw(cx) {
     const t = theme();
     const navRow = (id, title, icon, on, onClick) => h_flex().id(`sh-s-${id}`).h(30).gap(10).px(10).flex_none()
       .items_center().rounded(RADIUS.card).bg(on ? t.raised : "#00000000")

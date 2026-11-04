@@ -1,6 +1,7 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { theme, spaces, panes, knownAgents, run, openOverlay, closeOverlay, props, window, keys } from "herdr";
+import { theme, knownAgents, run, openOverlay, closeOverlay, props, window, keys } from "herdr";
+import { spaces, panes, inRender } from "./live.js";
 import { coordinatorTab, requestCoordinator } from "./coordinator.js";
 import { H, TEXT, RADIUS } from "./ui.js";
 // The rows' words, the Assistant's row and the agents offered: core/menus.js (the web app's + menu reads the same).
@@ -43,7 +44,12 @@ export default class NewMenu extends View {
       .child(div().size(16).flex_none().flex().items_center().justify_center().child(icon))
       .child(div().flex_1().min_w(0).truncate().child(name)).child(div().flex_none().text_size(TEXT.label).text_color(t.dim).child(hint));
   }
-  render() {
+  // One copy of Herdr's live lists for the whole render (live.js): past ~50 ms Herdr stops it.
+  render(cx) {
+    return inRender(() => this.draw(cx));
+  }
+
+  draw() {
     const t = theme();
     const space = spaces().find(s => s.active);
     const installed = this.agents.filter(a => a.installed);

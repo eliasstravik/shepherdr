@@ -9,7 +9,8 @@
 // Unpin puts it back where it was. A machine's name and emoji here are only what the sidebar
 // shows: its hc name stays.
 
-import { shared, setShared, spaces, machines } from "herdr";
+import { shared, setShared, machines } from "herdr";
+import { spaces } from "./live.js";
 import { toast } from "./ui.js";
 import { DELETED, deletedSection, sectionDeletedToast, withRestoredSection } from "./core/spaces.js";
 

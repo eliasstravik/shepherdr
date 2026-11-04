@@ -13,7 +13,8 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { machines, panes, run, props, exec, hc, home, theme, shared, setShared, watchFolder, window, layout, nextCommand, spaces as allSpaces } from "herdr";
+import { machines, run, props, exec, hc, home, theme, shared, setShared, watchFolder, window, layout, nextCommand } from "herdr";
+import { panes, spaces as allSpaces, inRender } from "./live.js";
 import { countsByTab, readyByTab } from "./inbox.js";
 import { spacesWithChats } from "./parked.js";
 import { sectionsOf, sectionOf, iconOf, placeSpace, foldSection, prune, data, pin, foldPinned, machineLook, restoreSection } from "./sections.js";
@@ -683,7 +684,12 @@ export default class Spaces extends View {
 
   close() { this.popup?.close?.(); }
 
+  // One copy of Herdr's live lists for the whole render (live.js): past ~50 ms Herdr stops it.
   render(cx) {
+    return inRender(() => this.draw(cx));
+  }
+
+  draw(cx) {
     if (this.popup) return this.popup.render(cx);
     const t = theme();
     const collapsed = narrow();

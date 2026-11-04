@@ -5,7 +5,8 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec, knownAgents, window } from "herdr";
+import { run, props, closeOverlay, openOverlay, theme, keys, exec, knownAgents, window } from "herdr";
+import { terminals, spaces, panes, inRender } from "./live.js";
 import { TEXT, menuRow } from "./ui.js";
 import { tabMenu, appMenu } from "./core/menus.js";
 import { rectOf, besideRow, agentIn, coordinatorIn, isCoordinator, isCoordinatorTab, entryFor, restartAgent, closeTab, taskOf, switchTask, renameTab, renameSpace, closeSpace } from "./coordinator.js";
@@ -178,7 +179,12 @@ export default class Menu extends View {
     }
   }
 
+  // One copy of Herdr's live lists for the whole render (live.js): past ~50 ms Herdr stops it.
   render(cx) {
+    return inRender(() => this.draw(cx));
+  }
+
+  draw(cx) {
     const t = theme();
     const list = items(props(), this.git, this.known);
     return v_flex()

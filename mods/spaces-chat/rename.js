@@ -11,7 +11,8 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { theme, props, closeOverlay, openOverlay, run, shared, spaces } from "herdr";
+import { theme, props, closeOverlay, openOverlay, run, shared } from "herdr";
+import { spaces } from "./live.js";
 import { data, iconOf, setIcon, setSectionIcon, renameSection, addSection, nameFree, machineLook, setMachineLook } from "./sections.js";
 import { logSpace } from "./spacelog.js";
 import { dialogFooter, TEXT, RADIUS, H } from "./ui.js";

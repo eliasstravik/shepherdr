@@ -9,7 +9,8 @@
 //   merging  the green ring with a quarter gap, turning
 //   queued   the grey ring with a clock's two hands      todo  the grey ring      off  dashed
 import { div, svg } from "gpui-kit";
-import { theme, terminals } from "herdr";
+import { theme } from "herdr";
+import { terminals } from "./live.js";
 import { red, green, amber } from "./ui.js";
 
 // Shepherdr's own red, green and amber, light and dark: one source for the app, in ui.js. The

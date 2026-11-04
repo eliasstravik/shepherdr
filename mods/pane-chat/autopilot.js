@@ -13,7 +13,8 @@
 import { div } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { link, TEXT, openSettings, toast, plainError } from "./ui.js";
-import { terminals, theme, home, appHome, exec, readTextFile, notify, shared, setShared } from "herdr";
+import { theme, home, appHome, exec, readTextFile, notify, shared, setShared } from "herdr";
+import { terminals } from "./live.js";
 import { pilotFor, headerDetail } from "./core/autopilot.js";
 
 const FILE = () => `${home()}/.herdr/tasks/.autopilot.json`;

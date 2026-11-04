@@ -27,7 +27,8 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Popup } from "gpui-base";
-import { props, theme, home, exec, pickFolder, closeOverlay, openOverlay, shared, setShared, spaces, focused } from "herdr";
+import { props, theme, home, exec, pickFolder, closeOverlay, openOverlay, shared, setShared, focused } from "herdr";
+import { spaces, inRender } from "./live.js";
 import { dialogFooter, button, TEXT, RADIUS } from "./ui.js";
 import { NEWSPACE as K, readShepherdr, shepherdrFor, LOCAL_MACHINE, autoCoordinator } from "./coordinator.js";
 import * as N from "./core/newspace.js";
@@ -290,7 +291,12 @@ export default class NewSpace extends View {
     return line;
   }
 
+  // One copy of Herdr's live lists for the whole render (live.js): past ~50 ms Herdr stops it.
   render(cx) {
+    return inRender(() => this.draw(cx));
+  }
+
+  draw(cx) {
     const t = theme();
     const rq = shared(PICK);
     if (rq?.for === props()?.overlay && rq.at > this.picked) {

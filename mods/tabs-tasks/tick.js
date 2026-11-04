@@ -5,7 +5,8 @@
 // `herdr-task --on` installed itself on). Owned by mods/tasks; the tick itself is cheap when
 // nothing waits, and only one runs at a time.
 
-import { exec, appHome, terminals, spaces, run } from "herdr";
+import { exec, appHome, run } from "herdr";
+import { terminals, spaces } from "./live.js";
 import { coordinatorTab } from "./coordinator.js";
 import { serviceRuns } from "./service.js";
 
