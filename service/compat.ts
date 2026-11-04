@@ -127,7 +127,7 @@ export function artifactStore(s: { folder: string; machine?: string | null; git?
   return { folder, key: `${s.machine ?? ""}|${folder}`, name: !repo && atHome ? "~" : folder.split("/").filter(Boolean).pop() ?? "/" };
 }
 
-function artifactOf(a: any, spaces: Space[], program: (addr: string) => string | null = () => null): Artifact {
+export function artifactOf(a: any, spaces: Space[], program: (addr: string) => string | null = () => null): Artifact {
   // its store is a folder: the space it is kept for (its own folder first, then a worktree of its repo), else none
   // (it shows with All)
   // (it shows with All). Another machine's (service/artifacts.ts reads them there) belongs to that machine's spaces.
@@ -143,7 +143,9 @@ function artifactOf(a: any, spaces: Space[], program: (addr: string) => string |
   return {
     id: a.id, title: a.title, place, v: a.version, at: a.at, when: ago(a.at, false), by, keeper: by, kind: recipe ? "recipe" : "gpui",
     folder: a.folder ?? "", folderName: name, store: `${m ?? ""}|${a.folder ?? ""}`, ...(m ? { machine: m } : {}), ...(a.task ? { task: a.task } : {}),
-    versions: [...(a.versions ?? [])].reverse().map((x: any) => ({ n: x.v, at: x.at, when: ago(x.at, false), by, html: x.v, ...(x.note ? { note: x.note } : {}) })),
+    versions: [...(a.versions ?? [])].reverse().map((x: any) => ({ n: x.v, at: x.at, when: ago(x.at, false), by, html: x.v, ...(x.note ? { note: x.note } : {}),
+      // herdr-artifact records each version's kind ("custom": a GPUI panel) and when the window took a custom one's picture
+      ...(x.kind ? { kind: (x.kind === "recipe" ? "recipe" : "gpui") as "recipe" | "gpui" } : {}), ...(x.picture ? { picture: x.picture } : {}) })),
   };
 }
 

@@ -189,7 +189,7 @@ SET_KEYS = {"review": "review", "brief.review": "review", "merge": "merge", "bri
             "reviewer": "reviewer", "reviewer.agent": "reviewer", "reviewer.model": "reviewer_model", "reviewer.effort": "reviewer_effort",
             "proof": "proof", "brief.proof": "proof"}
 # The Proof line (as Shepherdr's skill asks of its task agents), on and off.
-PROOF_WORDS = {"on": "show verifiable proof in one artifact: each proof with a one-line caption, real and from this work now, "
+PROOF_WORDS = {"on": "show verifiable proof in one recipe artifact: each proof with a one-line caption, real and from this work now, "
                      "plus a \"Not proven\" list; then say ready with --proof <its id>",
                "off": "not needed for this task: no proof artifact; say in your summary how you checked it"}
 MERGE_VALUES = {"ask": "ask", "ask me first": "ask", "ask first": "ask", "ask the person first": "ask", "wait": "ask",

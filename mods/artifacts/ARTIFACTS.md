@@ -1,80 +1,101 @@
 # Artifacts: show the person something
 
-An artifact is a tiny Herdr panel you write: a report, a chart, a board, a checklist, a form
-that asks the person to choose. It is a Herdr mod (a folder with `main.js`, maybe more `.js`
-and `.svg` files). The person finds it in the Artifacts tab of the right sidebar and in your
-chat, and opens it beside their work.
+An artifact is a recipe you write: a `recipe.json` (blocks of headings, text, tables, charts,
+pictures, forms) and its pictures beside it, in one folder. Herdr draws it natively twice from
+that one file: in the window, and in the web app on the person's phone. The person finds it in
+the Artifacts tab of the right sidebar and in your chat.
 
 ```sh
-herdr-artifact new ./my-report          # writes a starting main.js
+herdr-artifact new ./my-report          # writes a starting recipe.json
 herdr-artifact publish ./my-report --title "Coverage by package"     # prints its id
 herdr-artifact update <id> ./my-report --note "adds the API package" # a new version, same artifact
 herdr-artifact list                     # this folder's artifacts
 herdr-artifact rm <id>
 ```
 
-- Publish checks the mod with `herdr-app check` first, in light and in dark; a broken one is
-  refused with the error. It also reads the built UI at 320 px wide and in both looks, and lists
-  what to fix (too wide, text hard to read): fix those and `update`. (It reads the element tree;
-  it doesn't take a picture.)
-- Change an artifact with `update` (a new version, the same card and panel), not a second
-  `publish`. The last 20 versions are kept; the person can step back through them. An open copy
-  reloads by itself.
-- The person can mark it up: point at a spot or drag over an area and write what should change.
-  It reaches you (or, once you've ended, your task's agent) as
-  `<hc from="artifact" id=… version=… title=… on="the 180×80 px area at x 120–300, …">note</hc>`,
-  with a path to a picture of the panel, the spot outlined. Change it and `update`.
+- Change an artifact with `update` (a new version, the same card), not a second `publish`. The
+  last 20 versions are kept; the person can step back through them. An open copy reloads by
+  itself.
 - It belongs to the folder you run in (the repo root), like tasks; `--folder` picks another.
   A task's agent gets its task in front of the title ("HAT-2: Coverage by package").
+- Publish checks it first (every block, every picture there); a broken one is refused with why.
 - Don't open it on the person's screen yourself; tell them it's there.
 
-## Writing one
+## The recipe
 
-Read `~/.config/herdr-app/AGENTS.md` (Mods, UI, the `herdr` module) and the type files
-`gpui-kit.d.ts` and `herdr.d.ts` there: they are the truth. The short version:
-
-```js
-import { View, div } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
-import { theme, readTextFile } from "herdr";
-import { reply, asset } from "./artifact.js";
-
-export default class Report extends View {
-  init(_props, cx) {
-    this.rows = [];
-    cx.spawn(async (cx) => {
-      const text = await readTextFile("/abs/path/to/data.json");   // or exec("git", [...])
-      this.rows = JSON.parse(text ?? "[]");
-      cx.notify();
-    });
-  }
-  render() {
-    const t = theme();
-    return v_flex().size_full().p(16).gap(8).bg(t.background).text_color(t.foreground).text_size(13)
-      .children(this.rows.map((r, i) => h_flex().id(`r${i}`).justify_between()
-        .child(div().child(r.name)).child(div().text_color(t.muted).child(String(r.value)))))
-      .child(div().id("ok").px(12).py(6).rounded(6).bg(t.solid).text_color(t.solid_foreground)
-        .on_click((_e, cx) => cx.spawn(async () => { await reply("Approved the plan."); })).child("Approve"));
-  }
+```json
+{
+  "recipe": 1,
+  "blocks": [
+    { "type": "text", "md": "**92%** of lines are covered, up from 81%." },
+    { "type": "stats", "items": [{ "label": "Lines", "value": "92%", "note": "+11" }, { "label": "Files", "value": "148" }] },
+    { "type": "table", "columns": ["Package", { "label": "Coverage", "align": "right" }], "rows": [["api", "88%"], ["web", "95%"]] },
+    { "type": "image", "src": "after.png", "caption": "The new chart, in the window at 1440 px" },
+    { "type": "choice", "question": "Ship it?", "options": [{ "label": "Ship", "description": "merge today" }, { "label": "Wait" }] }
+  ]
 }
 ```
 
-Rules:
-- `./artifact.js` is written for you on publish (don't ship your own): `title`, `version`,
-  `id`, `asset("chart.svg")` (the path for `svg()` / `image()`), and `reply(text)`, which
-  sends text to you, the agent that made it, wrapped as
-  `<hc from="artifact" id=… version=… title=…>text</hc>`. Use it for forms and buttons, only
-  from a click. It resolves false when you're gone.
-- Don't repeat the title inside it: the viewer and the sidebar already show it right above your
-  panel. Start with the content (a one-line summary, the numbers, the chart).
-- Colors from `theme()` only (`background`, `surface`, `foreground`, `muted`, `dim`, `accent`,
-  `border`, `solid`/`solid_foreground` for a primary button, `working`/`blocked`/`done`), so it
-  follows light and dark. Text sizes in px (12-15). No emojis.
-- Fill the panel (`size_full()`), scroll long content (`.id(..).overflow_y_scrollbar()`), and
-  work from about 320 px wide.
-- Data: bake it into the files, or read it live with `readTextFile(path)` / `exec(cmd, args,
-  { cwd })` inside `cx.spawn`. Absolute paths. `fetch` works but prefer local data.
-- No `setTimeout`/`setInterval` (`cx.timer.every` for data, rarely); animate natively
-  (`.frames`, `.spin`, `.loop`, `.transition`), never with a timer.
-- Never keep a `cx`; every callback gets its own. No top-level `await`.
-- Only `.js .json .svg .png .jpg .gif .webp .md .txt .csv .ttf .otf`, at most 4 MB.
+Blocks, top to bottom (each may carry an `"id"`; the person's notes point at blocks):
+
+| type | fields |
+|---|---|
+| `heading` | `text`, `level` 1-3 |
+| `text` | `md` (Markdown: bold, links, `code`, lists) |
+| `list` | `items` (Markdown each), `ordered` |
+| `table` | `columns` (labels, or `{ label, align }`), `rows` (lists of cells) |
+| `chart` | `kind` bar, line or pie, `labels`, `series` [{ `name`, `values` (numbers) }] |
+| `stats` | `items` [{ `label`, `value`, `note` }]: a row of big numbers |
+| `image` | `src` (a picture beside recipe.json), `caption`, `w`, `h` |
+| `pair` | `before` and `after`, each { `src`, `caption` }: side by side, stacked on a phone |
+| `code` | `text`, `lang`: command output, a diff, a log |
+| `callout` | `tone` info, good, warn or bad, `title`, `md` |
+| `columns` | `columns`: lists of blocks, side by side (stacked on a phone) |
+| `tabs` | `tabs` [{ `label`, `blocks` }] |
+| `details` | `summary`, `blocks`: folded until opened |
+| `divider` | nothing |
+| `choice` | `question`, `options` [{ `label`, `description` }]: the person picks one |
+| `form` | `fields` [{ `name`, `label`, `kind` text, textarea, select or checkbox, `options` }], `submit` |
+| `button` | `label`, `reply`: a press sends `reply` |
+
+- **Pictures**: PNG, JPEG, GIF, WebP or SVG files in the folder, named in `src` (no paths up or
+  out). Screenshots go in as they are; crop them to what matters first (`magick`).
+- **Forms and answers**: a `choice`, a `form` or a `button` sends the person's words to you as
+  `<hc from="artifact" id=… version=… title=…>Ship it?: Ship</hc>`, in the window and on the web
+  alike.
+- **Update**: change recipe.json (and pictures), then `herdr-artifact update <id> <dir> --note
+  "what changed"`. Each version is kept with its note.
+- **Mark up**: the person can point at a block (or a spot) and write what should change. It
+  reaches you as `<hc from="artifact" id=… version=… title=… on="the table “Coverage”">note</hc>`,
+  sometimes with a path to a picture of it. Change it and `update`.
+- Don't repeat the title inside it: the viewer shows it right above. Start with the content (a
+  one-line summary, the numbers, the picture). No emojis. Data goes in the recipe; it isn't read
+  live.
+- Only `.json` and pictures (plus `.txt`, `.md`, `.csv`), at most 4 MB.
+
+## A task's proof
+
+A proof is a recipe, always (the person accepts tasks from their phone too): titled "<the task's
+full title> · Proof"; a `text` block saying what changed in one to three plain lines; then each
+proof as an `image`, `pair` or `code` block with a one-line `caption` (or a `text` line above it);
+then a `heading` "Not proven" and a `list`. `herdr-artifact publish` refuses a proof that isn't a
+recipe.
+
+## A custom panel, only when a recipe truly can't
+
+A recipe covers reports, boards, proofs, plans, forms and choices. Only something that must run
+code while the person looks (a game, a live terminal view, a drawing tool) is a custom panel: a
+Herdr mod (`main.js` in GPUI) that only the window can run. The web app shows just a picture of
+it, taken when the window last showed it, and "open it in the Herdr window". So:
+
+```sh
+herdr-artifact new ./my-tool --custom   # a starting main.js
+herdr-artifact publish ./my-tool --title "Tic-tac-toe" --custom      # --custom on every publish and update
+```
+
+Read `~/.config/herdr-app/AGENTS.md` (Mods, UI, the `herdr` module) and the type files
+`gpui-kit.d.ts` and `herdr.d.ts` there. `./artifact.js` is written for you (`id`, `version`,
+`asset(name)`, `reply(text)`, from a click only). Colors from `theme()` only, text 12-15 px, fill
+the panel (`size_full()`), scroll long content, work from 320 px wide, no timers
+(`cx.timer.every` rarely), never keep a `cx`. Publish checks it with `herdr-app check` in light
+and dark and at 320 px, and lists what to fix.

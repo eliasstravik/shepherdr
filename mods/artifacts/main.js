@@ -1,5 +1,5 @@
-// Artifacts: tiny Herdr panels agents make to show the person something (a report, a board, a
-// form). Each folder's list is ~/.herdr/artifacts/<slug>.json on the machine the folder is on,
+// Artifacts: recipes agents write to show the person something (a report, a board, a form; rarely
+// a custom panel). Each folder's list is ~/.herdr/artifacts/<slug>.json on the machine the folder is on,
 // changed only through the herdr-artifact CLI (bin/herdr-artifact), which agents use. This panel
 // only shows them: a click opens one inside this sidebar (drill in, ‹ Artifacts back; see
 // sidebar.js); a layout without that view opens it full window (artview.js), as chat cards and

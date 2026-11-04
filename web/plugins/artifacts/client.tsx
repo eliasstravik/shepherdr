@@ -49,7 +49,7 @@ import {
   UpIcon,
   XIcon,
 } from '@client/ui.tsx'
-import type { Artifact, Chat, Message } from '@shared/types.ts'
+import type { Artifact, ArtifactVersion, Chat, Message } from '@shared/types.ts'
 
 const { withIds } = R as any
 const { MARKUP, markupHint, markupSent, describe } = M as any
@@ -350,11 +350,13 @@ const useWindowHeight = () =>
 /** how tall each page last said it is, so a card scrolled back into the chat doesn't jump */
 const heights = new Map<string, number>()
 
-/** Shepherdr 3.1: a recipe artifact is drawn here as the web's own HTML (Recipe.tsx); an older one made for the Herdr
- *  window says so; a 2.1 page (none here now) still has its frame. */
+/** Shepherdr 3.1: a recipe artifact is drawn here as the web's own HTML (Recipe.tsx); a custom panel only the Herdr
+ *  window runs shows the window's picture of it; a 2.1 page (none here now) still has its frame. Each version by its own
+ *  kind: a converted one was a panel before it became a recipe. */
 export function ArtifactFrame(p: Parameters<typeof PageFrame>[0]) {
-  if (p.art.kind === 'recipe') return <RecipeFrame {...p} />
-  if (p.art.kind === 'gpui') return <WindowOnly />
+  const kind = p.art.versions.find((x) => x.n === p.v)?.kind ?? p.art.kind
+  if (kind === 'recipe') return <RecipeFrame {...p} />
+  if (kind === 'gpui') return <WindowPicture {...p} />
   return <PageFrame {...p} />
 }
 
@@ -383,9 +385,23 @@ function RecipeFrame({ art, v, full }: Parameters<typeof PageFrame>[0]) {
   )
 }
 
-/** made before recipes, for the Herdr window only */
-function WindowOnly() {
-  return <p className="p-4 text-pretty text-fg3">Made for the Herdr window: open it there.</p>
+/** A custom panel, for the Herdr window only: the picture the window last took of it (herdr-artifact picture, as it
+ *  showed it), this version's or else the newest before it, with where to open it small underneath. */
+function WindowPicture({ art, v, full }: Parameters<typeof PageFrame>[0]) {
+  const shot = (x: ArtifactVersion) => (x.kind ?? art.kind) === 'gpui' && !!x.picture
+  // newest first
+  const pic = art.versions.find((x) => x.n === v && shot(x)) ?? art.versions.find((x) => x.n < v && shot(x))
+  const on = art.machine ? `&on=${encodeURIComponent(art.machine)}` : ''
+  if (!pic) return <p className="p-4 text-pretty text-fg3">Made for the Herdr window: open it there.</p>
+  return (
+    <figure className={clsx('flex flex-col gap-1.5 overflow-y-auto p-4 phone:p-5', full ? 'h-full' : 'max-h-[70dvh]')}>
+      <img src={`api/artifacts/${encodeURIComponent(art.id)}/file/.window.png?v=${pic.n}&t=${pic.picture}${on}`} alt={art.title}
+        className="h-auto max-w-full self-start rounded-box shadow-box" />
+      <figcaption className="text-pretty text-xs text-fg3">
+        {pic.n === v ? '' : `As v${pic.n} looked. `}Made for the Herdr window: open it there.
+      </figcaption>
+    </figure>
+  )
 }
 
 /** An artifact's page in a sealed frame: scripts and forms run, never with this app's origin, and it loads nothing. */
