@@ -45,7 +45,7 @@ export function autopilotInit(view, cx) {
     let old = null;
     try { old = JSON.parse((await readTextFile(STATE())) ?? "{}"); } catch {}
     const e = AP.everywhereOf(old);
-    ap.base = { every: e.every ?? "", events: e.events, heartbeat: (await readTextFile(OLD_BEAT()).catch(() => null)) ?? AP.STARTER };
+    ap.base = { every: e.every ?? "", events: e.events, heartbeat: AP.currentBeat((await readTextFile(OLD_BEAT()).catch(() => null)) ?? AP.STARTER) };
     cx.notify();
   });
   // "Saved" goes again a moment after a save.

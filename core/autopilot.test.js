@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { pilotFor, everywhereOf, headerDetail, presetOf, levelOf, blankBeat, STARTER, EVENTS, PRESETS } from "./autopilot.js";
+import { pilotFor, everywhereOf, headerDetail, presetOf, levelOf, blankBeat, currentBeat, OLD_STARTERS, STARTER, EVENTS, PRESETS } from "./autopilot.js";
 import { SECTIONS } from "./settings.js";
 
 const { cases } = JSON.parse(readFileSync(new URL("./autopilot.cases.json", import.meta.url), "utf8"));
@@ -41,12 +41,15 @@ test("a level holds only what it sets", () => {
   expect(levelOf(settings)).toEqual({ every: "" });
   expect(levelOf(settings, "sp1")).toEqual({ heartbeat: "Go." });
   expect(levelOf(settings, "sp2")).toEqual({});
-  expect([blankBeat(""), blankBeat(STARTER), blankBeat("Ship.")]).toEqual([true, true, false]);
+  // the starter is a real heartbeat; an earlier version's, never edited, stands for it
+  expect([blankBeat(""), blankBeat(STARTER), blankBeat("Ship."), blankBeat(OLD_STARTERS[0])]).toEqual([true, false, false, false]);
+  expect([currentBeat(OLD_STARTERS[0]), currentBeat(` ${OLD_STARTERS[0].trim()}\n\n`), currentBeat("Ship.")]).toEqual([STARTER, STARTER, "Ship."]);
 });
 
 test("the starter heartbeat, events and default schedule are herdr-task's", () => {
   const py = readFileSync(new URL("../mods/tasks/bin/herdr_task/autopilot.py", import.meta.url), "utf8");
   expect(py).toContain(`STARTER = """${STARTER}"""`);
+  expect(py).toContain(`OLD_STARTERS = ("""${OLD_STARTERS[0]}""",)`);
   const auto = readFileSync(new URL("../mods/tasks/bin/herdr_task/automations.py", import.meta.url), "utf8");
   expect(auto).toContain(`EVENTS = [${EVENTS.map(([v]) => `"${v}"`).join(", ")}]`);
   expect(py).toContain(`DEFAULT_EVERY = "${PRESETS[2][0]}"`);
