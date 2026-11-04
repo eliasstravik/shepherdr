@@ -232,6 +232,8 @@ def bun_path():
 def unit_text(root, bun):
     """The user service that keeps Shepherdr's service running (Linux), or its launchd agent (macOS)."""
     main = os.path.join(root, SHARE, "service", "main.ts")
+    # hc, herdr-task and the helpers live in ~/.local/bin, which a user service's PATH lacks
+    path = ":".join([os.path.join(root, BIN), os.path.dirname(bun), "/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin"])
     if sys.platform == "darwin":
         return PLIST, f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -239,6 +241,7 @@ def unit_text(root, bun):
 <dict>
   <key>Label</key><string>{AGENT}</string>
   <key>ProgramArguments</key><array><string>{bun}</string><string>{main}</string></array>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>{path}</string></dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>{os.path.join(root, HERDR, "shepherdr", "service.log")}</string>
@@ -252,6 +255,7 @@ After=network-online.target
 
 [Service]
 ExecStart={bun} {main}
+Environment=PATH={path}
 Restart=always
 RestartSec=2
 

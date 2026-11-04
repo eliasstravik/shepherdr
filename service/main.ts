@@ -21,6 +21,7 @@ import { Chats } from "./chats.ts";
 import { act } from "./actions.ts";
 import { Compat, activity } from "./compat.ts";
 import { Asks } from "./asks.ts";
+import { Jobs } from "./jobs.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const WEB = process.env.SHEPHERDR_WEB_DIR || join(ROOT, "web", "dist");
@@ -49,6 +50,9 @@ const asks = new Asks();
 compat.asks = asks;
 asks.on(() => { model.rebuild(); live.chats?.refreshAll(); });
 asks.start();
+const jobs = new Jobs(hub);
+jobs.watched = () => live.watched();
+jobs.start();
 model.onBuild = (b) => live.setSnapshot(compat.snapshot({
   host: me?.host ?? "this machine", user: me?.name ?? "You", spaces: b.spaces, sections: b.sections, rows: b.rows,
   machines: [{ name: me?.host ?? "this machine", here: true, state: "connected" }, ...b.machines.map((name) => ({ name, here: false, state: "connected" }))],
@@ -91,7 +95,8 @@ const server = Bun.serve<{ who: string }>({
   async fetch(req, srv) {
     const url = new URL(req.url);
     const path = url.pathname.startsWith("/shepherdr/") ? url.pathname.slice(10) : url.pathname;
-    if (path === "/api/health") return json({ ok: true, version: VERSION, core: hub.up });
+    // the window asks this (lib/service.js): while jobs is true it leaves its background work to the service
+    if (path === "/api/health") return json({ ok: true, version: VERSION, core: hub.up, jobs: jobs.on && hub.up });
     const socket = path === "/api/ws";
     const viaTailnet = req.headers.has("tailscale-user-login");
     const pass = gate(req, g, socket, viaTailnet && trustedPeer(srv.requestIP(req)?.port, PORT));

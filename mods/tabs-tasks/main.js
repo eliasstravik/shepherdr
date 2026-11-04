@@ -6,6 +6,7 @@ import { agentIn, isCoordinatorTab, closeTab, watchNewSpaces, newSpace, openCoor
 import { startTick, tickOnChange } from "./tick.js";
 import { startInbox, count as inboxCount, countsByTab, readyCount, readyByTab, showInbox, toAlert } from "./inbox.js";
 import { serveRemote } from "./secrets.js";
+import { watchService } from "./service.js";
 import { countBadge, H, TEXT, RADIUS } from "./ui.js";
 import { on as addonOn } from "./addons.js";
 
@@ -25,7 +26,9 @@ export default class Tabs extends View {
     cx.timer.every(5000, () => sweep());
     this.pressed = null;
     this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}");
-    // Tasks' queue and merge watcher (mods/tasks owns it).
+    // Shepherdr's service, which does the background work while it runs (lib/service.js).
+    watchService(cx);
+    // Tasks' queue and merge watcher (mods/tasks owns it): left to the service while it runs.
     startTick(cx);
     // What needs the person, for Tasks' "Needs you" and the red counts (inbox.js).
     startInbox(cx);

@@ -59,7 +59,11 @@ export class Asks {
       const picked = a.other ? [a.other] : (a.choices ?? (a.choice != null ? [a.choice] : [])).map((i) => q.options[i]?.name).filter(Boolean);
       if (!picked.length) throw new Error("Pick an answer first.");
       out = answers(ask.req, { [q.text]: picked.join(", ") });
-    } else if (a.choice === 0) out = allow();
+    } else if (a.choice === 0) {
+      // never allowed unseen: a request too long for the card is answered where it shows whole, the terminal
+      if (w.cut) throw new Error("Too long to show here in full: answer it in the terminal.");
+      out = allow();
+    }
     else out = deny(a.note?.trim() || (w.kind === "plan" ? "The person didn't approve this plan yet. Ask them what to change." : undefined));
     // As the window's answerAsk(): first how it went (end/<id>, for every other copy of the card), then the answer.
     const how = howAnswered(ask, out, "on the web");

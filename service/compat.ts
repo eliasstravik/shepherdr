@@ -49,9 +49,12 @@ export class Compat {
         choices: q.options.map((o: any) => ({ label: o.name, ...(o.description ? { description: o.description } : {}) })),
         ...(w.questions.length > 1 ? { steps: w.questions.map((x: any) => x.header || x.text) } : {}) };
     }
-    const detail = w.detail ? "```\n" + w.detail + "\n```" : undefined;
+    // the request word for word in a code block whose fence no run of backticks in it can close; one too long to show
+    // whole says so (and can't be allowed from here: service/asks.ts)
+    const fence = "`".repeat(Math.max(3, ...[...String(w.detail ?? "").matchAll(/`+/g)].map((m) => m[0].length + 1)));
+    const detail = w.detail ? `${fence}text\n${w.detail}\n${fence}${w.cut ? "\n\nToo long to show here in full: answer it in the terminal." : ""}` : undefined;
     return w.kind === "plan"
-      ? { id: a.id, title: w.title, kind: "Plan", to: key, plan: w.detail, choices: [{ label: "Approve" }, { label: "Keep planning" }], noteRequiredFor: 1 }
+      ? { id: a.id, title: w.title, kind: "Plan", to: key, plan: `${w.detail ?? ""}${w.cut ? "\n\nToo long to show here in full: answer it in the terminal." : ""}`, choices: [{ label: "Approve" }, { label: "Keep planning" }], noteRequiredFor: 1 }
       : { id: a.id, title: w.title, kind: "Question", to: key, ...(detail ? { plan: detail } : {}), choices: [{ label: "Allow" }, { label: "Deny" }] };
   }
   last: Snapshot | null = null;

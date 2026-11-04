@@ -39,6 +39,9 @@ export class Live {
     if (!this.views.has("state")) void this.store.load().then((d) => this.put("state", d));
   }
 
+  /** The terminals web pages show now. */
+  watched() { return [...this.pages].flatMap((ws) => [...(ws.data.chats?.values() ?? [])].map((w) => w.addr)); }
+
   leave(ws: WS) {
     this.pages.delete(ws);
     for (const w of ws.data.chats?.values() ?? []) this.chats?.unwatch(w.addr, w.watcher);
