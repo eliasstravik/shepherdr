@@ -101,36 +101,36 @@ class Repo(unittest.TestCase):
                     self.assertTrue(spec.startswith("./"), f"core/{f} imports {spec}")
 
     def test_features_have_both_sides(self):
-        """lib/features.json: every feature has its core, a Herdr side and a web side; every mod and every web screen
-        belongs to a feature; once a feature is built (no "planned"), the files it names are there."""
+        """lib/features.json: every feature has its shared logic, a Herdr side and a web side, every file it names is
+        there, and every mod belongs to a feature."""
         feats = json.load(open(J("lib", "features.json")))["features"]
         ids = [f["id"] for f in feats]
         self.assertEqual(len(ids), len(set(ids)), "a feature id is listed twice")
         addons = {"core"} | {a["id"] for a in self.addons["addons"]}
-        screens_dir = J("web", "src", "screens")
         for f in feats:
             name = f["id"]
             self.assertIn(f["addon"], addons, f"{name}: no add-on {f['addon']}")
-            self.assertTrue(f["core"] or f.get("view_only"), f"{name}: no shared core")
+            self.assertTrue(f["core"] or f.get("service") or f.get("view_only"), f"{name}: no shared logic")
+            for c in f["core"]:
+                self.assertTrue(os.path.isfile(J("core", f"{c}.js")), f"{name}: no core/{c}.js")
+            for c in f.get("service", []):
+                self.assertTrue(os.path.isfile(J("service", c)), f"{name}: no service/{c}")
             herdr = f.get("herdr", {})
             self.assertTrue(herdr.get("mods") or herdr.get("builtin"), f"{name}: no Herdr side")
             for m in herdr.get("mods", []):
                 self.assertTrue(os.path.isdir(J("mods", m)), f"{name}: no mod {m}")
-            self.assertTrue(f.get("web", {}).get("screens"), f"{name}: no web side")
+            self.assertTrue(f.get("web", {}).get("files"), f"{name}: no web side")
+            for w in f["web"]["files"]:
+                self.assertTrue(os.path.isfile(J("web", w)), f"{name}: no web/{w}")
             for k in ("herdr", "desktop", "tablet", "phone"):
                 self.assertTrue(f.get("forms", {}).get(k), f"{name}: no {k} form")
-            if f.get("planned"):
-                continue
-            for c in f["core"]:
-                self.assertTrue(os.path.isfile(J("core", f"{c}.js")), f"{name}: no core/{c}.js")
-            for s in f["web"]["screens"]:
-                self.assertTrue(os.path.isfile(os.path.join(screens_dir, f"{s}.tsx")), f"{name}: no web/src/screens/{s}.tsx")
         used = {m for f in feats for m in f.get("herdr", {}).get("mods", [])}
         self.assertEqual(sorted(set(os.listdir(J("mods"))) - used), [], "a mod belongs to no feature")
-        named = {s for f in feats for s in f["web"]["screens"]}
-        if os.path.isdir(screens_dir):
-            shipped = {n[:-4] for n in os.listdir(screens_dir) if n.endswith(".tsx") and not n.endswith(".test.tsx")}
-            self.assertEqual(sorted(shipped - named), [], "a web screen belongs to no feature")
+        screens = J("web", "src", "screens")
+        named = {w for f in feats for w in f["web"]["files"]}
+        for n in os.listdir(screens) if os.path.isdir(screens) else []:
+            if n.endswith(".tsx"):
+                self.assertIn(f"src/screens/{n}", named, f"web/src/screens/{n} belongs to no feature")
 
     def test_version_everywhere(self):
         v = re.search(r'^VERSION = "([^"]+)"', open(J("bin", "shepherdr")).read(), re.M).group(1)
