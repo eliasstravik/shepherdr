@@ -29,11 +29,14 @@ export function peerUid(port: number, service: number): number | null {
     // lsof sees only this user's sockets, and Tailscale's network extension runs as root: netstat -anv names the
     // process of every socket (process:pid), and ps says whose it is. Both in /usr/sbin and /bin, which launchd's PATH
     // for the service may lack; neither answering: not believed.
-    for (const pid of darwinPids(port, service)) {
+    const pids = darwinPids(port, service);
+    for (const pid of pids) {
       let out = "";
       try { out = Bun.spawnSync([PS, "-o", "uid=", "-p", String(pid)], { stdout: "pipe", stderr: "ignore" }).stdout.toString().trim(); } catch {}
       if (/^\d+$/.test(out)) uids.add(Number(out));
     }
+    // the same process still holds it after ps answered (not one gone and its pid given to another)
+    if (JSON.stringify(darwinPids(port, service)) !== JSON.stringify(pids)) return null;
   }
   return uids.size === 1 ? [...uids][0] : null;
 }
@@ -47,8 +50,11 @@ export function darwinPids(port: number, service: number, text?: string): number
   for (const line of out.split("\n")) {
     const f = line.trim().split(/\s+/);
     if (f[3] !== `127.0.0.1.${port}` || f[4] !== `127.0.0.1.${service}` || f[5] !== "ESTABLISHED") continue;
-    const owner = f.slice(6).find((x) => /:\d+$/.test(x));
-    if (owner) pids.push(Number(owner.split(":").pop()));
+    // the pid netstat appends to the process name: the last "<name>:<pid>" token, with only its own fixed columns
+    // (state, options, counts: hex, no colon) after it. A name can hold spaces and colons of its own, never after that.
+    const at = f.map((x) => /:\d+$/.test(x)).lastIndexOf(true);
+    if (at < 6 || f.length - at < 3 || !f.slice(at + 1).every((x) => /^[0-9a-f]+$/i.test(x))) continue;
+    pids.push(Number(f[at].split(":").pop()));
   }
   return pids;
 }

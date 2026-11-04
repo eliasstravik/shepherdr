@@ -58,4 +58,7 @@ test("macOS: the caller's side of the exact connection, from netstat -anv (Tails
   ].join("\n");
   expect(darwinPids(56078, 7788, text)).toEqual([3083]);
   expect(darwinPids(56079, 7788, text)).toEqual([]);
+  // a name made to look like a pid ("evil:1 x") still reads as its own pid, the last one netstat wrote
+  const forged = "tcp4       0      0  127.0.0.1.56080        127.0.0.1.7788         ESTABLISHED         2160         2116  407552  146988 evil:1 x:4242   00182 00000008 000000000eb4b4f3 00000080 04000800      2      0 000000";
+  expect(darwinPids(56080, 7788, forged)).toEqual([4242]);
 });
