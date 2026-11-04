@@ -308,7 +308,9 @@ function top(mode) {
     t.append(back);
   }
   const s = model.spaces().find((x) => x.active);
-  t.append(h("div", "title", nav.tab === "spaces" ? "Spaces" : nav.tab === "tasks" ? (thread ? "Task" : "Tasks") : s?.name ?? "Chat"));
+  // As the sidebar says it: a space nobody named reads after its folder ("Home" at home).
+  const name = !s ? "Chat" : s.name !== "~" ? s.name : s.folder && s.folder !== state.home ? s.folder.split("/").pop() : "Home";
+  t.append(h("div", "title", nav.tab === "spaces" ? "Spaces" : nav.tab === "tasks" ? (thread ? "Task" : "Tasks") : name));
   return t;
 }
 

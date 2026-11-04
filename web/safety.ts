@@ -4,7 +4,7 @@
 // tap or key in the page (`gesture`), from this short list. Everything that only reads runs.
 
 const READ_CMDS = new Set(['cat', 'ls', 'head', 'tail', 'wc', 'test', '[', 'stat', 'pgrep', 'ps', 'uname', 'hostname', 'which',
-  'date', 'readlink', 'realpath', 'du', 'df', 'id', 'whoami', 'true', 'echo', 'printf', 'basename', 'dirname', 'grep', 'jq', 'command'])
+  'date', 'readlink', 'realpath', 'du', 'df', 'id', 'whoami', 'true', 'echo', 'printf', 'basename', 'dirname', 'grep', 'jq'])
 const GIT_READ = new Set(['status', 'log', 'rev-parse', 'branch', 'diff', 'show', 'rev-list', 'ls-files', 'merge-base', 'remote',
   'symbolic-ref', 'for-each-ref', 'worktree', 'cat-file', 'describe', 'shortlog', 'name-rev', 'ls-tree', 'config'])
 const HC_READ = new Set(['ls', 'get', 'read', 'templates', 'schema', 'wait'])
@@ -19,7 +19,8 @@ const TOOL_READ: Record<string, Set<string>> = {
 const WRITES = new RegExp([
   String.raw`(^|[\s;&|(\x60$])(rm|mv|cp|mkdir|touch|tee|kill|pkill|killall|ln|chmod|chown|truncate|dd|curl|wget|bun|node|python3?|nohup|setsid|wl-copy|notify-send|systemctl|ssh|scp|rsync|herdr-task|herdr-app|herdr-secret|herdr-artifact|hc)\b(?!\s+(ls|get|read|list|show|status)\b)`,
   String.raw`\bsed\s+-i`,
-  String.raw`\bfind\b[^;|&]*-(delete|exec)`,
+  String.raw`\bfind\b[^;|&]*-(delete|exec|ok|fprint|fls)`,
+  String.raw`\b(eval|exec|source|xargs|awk\s+[^|;&]*system)\b`,
   String.raw`[^2&]>{1,2}\s*(?!/dev/null|&)`,
   String.raw`\bgit\s+(?!(status|log|rev-parse|branch|diff|show|rev-list|ls-files|merge-base|remote|symbolic-ref|for-each-ref|cat-file|describe|config\s+--get|-C\s))`,
 ].join('|'))
@@ -48,7 +49,13 @@ export function classify(argv: string[], _app: string): 'read' | 'write' {
   }
   if (name === 'git') {
     const rest = [...args]
-    while (rest[0]?.startsWith('-')) rest.splice(0, ['-C', '-c', '--git-dir', '--work-tree'].includes(rest[0]) ? 2 : 1)
+    while (rest[0]?.startsWith('-')) {
+      // A config set on the command line can run programs (core.pager, core.fsmonitor=<cmd>...):
+      // only the harmless ones mods use.
+      if (rest[0] === '-c' && !/^(core\.fsmonitor=false|color\.ui=false|core\.quotepath=(false|off))$/.test(rest[1] ?? '')) return 'write'
+      rest.splice(0, ['-C', '-c', '--git-dir', '--work-tree'].includes(rest[0]) ? 2 : 1)
+    }
+    if (rest.some((a) => /^--(output|ext-diff|exec|upload-pack|receive-pack)\b/.test(a))) return 'write'
     if (rest[0] === 'branch' && rest.some((a) => /^-[dDmM]|--delete|--move/.test(a))) return 'write'
     if (rest[0] === 'worktree' && rest[1] !== 'list') return 'write'
     if (rest[0] === 'config' && !rest.includes('--get') && !rest.includes('--list')) return 'write'
@@ -60,7 +67,7 @@ export function classify(argv: string[], _app: string): 'read' | 'write' {
     if (rest[0] === 'auto' && rest[1] === 'list') return 'read'
     return TOOL_READ[name].has(rest[0]) ? 'read' : 'write'
   }
-  if (name === 'find') return args.some((a) => a === '-delete' || a.startsWith('-exec')) ? 'write' : 'read'
+  if (name === 'find') return args.some((a) => /^-(delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)$/.test(a)) ? 'write' : 'read'
   return READ_CMDS.has(name) ? 'read' : 'write'
 }
 

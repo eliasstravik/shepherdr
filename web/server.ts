@@ -5,7 +5,7 @@
 // Bound to 127.0.0.1 only; shared privately over the tailnet with `tailscale serve --set-path`.
 // The window stays the one that runs things: whatever a mod starts by itself in the browser
 // (timers, request queues, cleanups) is refused here unless it only reads (safety.ts).
-import { readFileSync, existsSync, statSync, watch, readdirSync } from 'node:fs'
+import { readFileSync, existsSync, statSync, watch, readdirSync, realpathSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join, normalize, extname, dirname } from 'node:path'
 import { homedir } from 'node:os'
@@ -135,7 +135,13 @@ function watchOnce(path: string): Promise<string[]> {
   })
 }
 
-const inHome = (p: string) => { const n = normalize(p); return n === HOME || n.startsWith(`${HOME}/`) }
+// Files the page may read on this computer: inside the home folder (links followed first).
+const inHome = (p: string) => {
+  let n = normalize(String(p))
+  try { n = realpathSync(n) } catch { /* not there yet: its own path */ }
+  return n === HOME || n.startsWith(`${HOME}/`)
+}
+const homeOnly = (p: string) => { if (!inHome(p)) throw new Error('Outside the home folder') }
 
 async function call(op: string, a: any, gesture: boolean): Promise<unknown> {
   switch (op) {
@@ -157,21 +163,46 @@ async function call(op: string, a: any, gesture: boolean): Promise<unknown> {
       if (opts.on) {
         try { return (await core.call('file.read', { path, on: opts.on }, 15000)).text } catch { return null }
       }
+      if (!inHome(path)) return null
       try { const s = statSync(path); if (s.size > 1 << 20) throw new Error('too big'); return await readFile(path, 'utf8') } catch { return null }
     }
-    case 'writeTextFile': refuse(`write ${a[0]}`, gesture)
-    case 'fs.readFile': try { return await readFile(a[0], 'utf8') } catch (e) { throw new Error(String(e)) }
+    case 'writeTextFile': refuse(`write ${a[0]}`)
+    case 'fs.readFile': homeOnly(a[0]); try { return await readFile(a[0], 'utf8') } catch (e) { throw new Error(String(e)) }
     case 'fs.readdir': {
+      homeOnly(a[0])
       const d = readdirSync(a[0], { withFileTypes: true })
       return a[1]?.withFileTypes ? d.map((x) => ({ name: x.name, dir: x.isDirectory() })) : d.map((x) => x.name)
     }
-    case 'fs.exists': return existsSync(a[0])
-    case 'fs.write': refuse(`fs ${a[1]} ${a[0]}`, gesture)
+    case 'fs.exists': return inHome(a[0]) && existsSync(a[0])
+    case 'fs.write': refuse(`fs ${a[1]} ${a[0]}`)
     case 'watch': return inHome(a[0]) ? watchOnce(a[0]) : [a[0]]
     case 'run': refuse(`run ${a[0]} ${JSON.stringify(a[1] ?? {}).slice(0, 120)}`, gesture)
     case 'blocked': return blocked
   }
   throw new Error(`unknown call ${op}`)
+}
+
+// ---- who may use it -------------------------------------------------------------------------
+// The page can run the mods' commands, so only the person gets in: by a name this server goes by
+// (no DNS rebinding), and through `tailscale serve` only as the tailnet's owner (Tailscale's
+// identity header). Unshared, on 127.0.0.1, the computer's own browser.
+const HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`])
+let OWNER: string | null = process.env.SHEPHERDR_WEB_LOGIN ?? null
+try {
+  const ts = JSON.parse(Bun.spawnSync(['tailscale', 'status', '--json']).stdout.toString())
+  const dns = String(ts.Self?.DNSName ?? '').replace(/\.$/, '')
+  if (dns) HOSTS.add(dns)
+  OWNER ??= ts.User?.[String(ts.Self?.UserID)]?.LoginName ?? null
+} catch { /* no Tailscale: this computer only */ }
+function allowed(req: Request): true | string {
+  const host = req.headers.get('host') ?? ''
+  const fwdHost = req.headers.get('x-forwarded-host')
+  const login = req.headers.get('tailscale-user-login')
+  const viaServe = Boolean(fwdHost || req.headers.get('x-forwarded-for') || login)
+  if (!viaServe) return HOSTS.has(host) && /^(127\.0\.0\.1|localhost):/.test(host) ? true : 'unknown host'
+  if (fwdHost && !HOSTS.has(fwdHost)) return 'unknown host'
+  if (!OWNER || login !== OWNER) return 'not the owner'
+  return true
 }
 
 // ---- serving --------------------------------------------------------------------------------
@@ -205,10 +236,12 @@ Bun.serve<Sock>({
     const url = new URL(req.url)
     const path = decodeURIComponent(url.pathname)
     // Only this page may talk to the socket (no other website in the person's browser).
+    const who = allowed(req)
+    if (who !== true) { log('turned away', who, req.headers.get('host'), req.headers.get('tailscale-user-login') ?? ''); return new Response('forbidden', { status: 403 }) }
     if (path === '/ws') {
+      // Only this page may open the socket: its own origin, never another website's.
       const origin = req.headers.get('origin')
-      const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host')
-      if (origin && new URL(origin).host !== host) return new Response('forbidden', { status: 403 })
+      if (!origin || !HOSTS.has(new URL(origin).host)) return new Response('forbidden', { status: 403 })
       return srv.upgrade(req, { data: { id: Math.random() } }) ? undefined : new Response('upgrade failed', { status: 400 })
     }
     if (path === '/' || path === '/index.html') return file(join(CLIENT, 'index.html'))

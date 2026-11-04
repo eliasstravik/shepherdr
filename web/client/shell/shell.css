@@ -96,3 +96,6 @@ input.e::placeholder, textarea.e::placeholder { color: var(--dim); }
 
 .link { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 99; padding: 6px 12px; border-radius: 8px; background: var(--popover); border: 1px solid var(--border); color: var(--muted); font-size: 12px; }
 .link[hidden] { display: none; }
+
+/* Phones zoom into a field whose text is under 16 px: fields are 16 px there. */
+@media (max-width: 699px) { input.e, textarea.e { font-size: 16px !important; } }
