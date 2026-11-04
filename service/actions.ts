@@ -268,8 +268,8 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
   if (b?.type === "call") return { ok: true };
   if (b?.type === "artifact-delete" && typeof b.artifact === "string") {
     // an artifact deleted from its ⋯, as herdr-artifact rm (it and its versions)
-    if (!/^[\w.-]{1,120}$/.test(b.artifact)) throw new Error("Not an artifact.");
-    const r = await run(["herdr-artifact", "rm", b.artifact, "--json"]);
+    if (!/^\w[\w.-]{0,119}$/.test(b.artifact)) throw new Error("Not an artifact.");
+    const r = await run(["herdr-artifact", "rm", "--json", "--", b.artifact]);
     if (r.code !== 0) return { ok: false, error: (r.stderr || r.stdout).trim().split("\n").pop() || "It wasn't deleted." };
     return { ok: true };
   }

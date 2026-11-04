@@ -203,6 +203,7 @@ export default definePlugin({
           const places = shownPlaces(snap)
           const i = places.findIndex((p) => p.id === ui.place)
           const n = places.length
+          if (!n) return false
           return go({ place: places[(i + (k === ']' ? 1 : n - 1)) % n].id, task: null, cur: 0 })
         }
         if (k === 'n' && has('places')) return go({ adding: true })

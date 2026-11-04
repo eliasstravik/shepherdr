@@ -65,3 +65,18 @@ test("another machine's space keeps its machine/id key, and its machine is sent 
   expect(sent).toMatchObject({ pushed_from: "herdr-app", here: "vm", spaces: { sp9: { folder: "/srv/api" } } });
   expect(Object.keys(sent.spaces)).toEqual(["sp9"]);
 });
+
+test("a machine that isn't connected, a prototype key, or an unreadable file is refused, and nothing is written", () => {
+  const s = new Settings();
+  s.start();
+  s.sections(null, [], ["vm"], "box");
+  const before = readFileSync(file, "utf8");
+  expect(() => s.set("machine.start_load", "150", "m:__proto__")).toThrow();
+  expect(() => s.set("machine.start_load", "150", "m:typo")).toThrow();
+  expect(({} as any).machine).toBeUndefined();
+  expect(readFileSync(file, "utf8")).toBe(before);
+  writeFileSync(file, "{ half");
+  expect(() => s.set("tasks.merge", "Right away")).toThrow();
+  expect(readFileSync(file, "utf8")).toBe("{ half");
+  writeFileSync(file, before);
+});

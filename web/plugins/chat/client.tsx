@@ -1351,7 +1351,12 @@ function StepsCard({ q, chat, source, steady }: { q: Question & { parts: NonNull
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const sent = q.sent !== undefined || !!q.closed
-  const answerOf = (i: number) => (others[i] !== null && others[i]!.trim() ? others[i]!.trim() : picks[i].map((k) => q.parts[i].choices[k].label).join(', '))
+  // a multi-select question's picks and its Other words together; a single one's Other replaces its pick
+  const answerOf = (i: number) => {
+    const typed = others[i]?.trim() ?? ''
+    const picked = picks[i].map((k) => q.parts[i].choices[k].label)
+    return (q.parts[i].multi ? [...picked, typed].filter(Boolean) : typed ? [typed] : picked).join(', ')
+  }
   const done = q.parts.every((_, i) => answerOf(i))
   const pick = (i: number, k: number) => {
     const multi = q.parts[i].multi

@@ -53,6 +53,16 @@ export function pushBody(file: any, m: string) {
 }
 
 /** Writes the whole file as the window does (version 1), then tells whoever pushes it to other machines. */
+/** The file as it is: {} only when there is none yet. Unreadable (half-written, hand-broken) refuses, so a change
+ *  never writes a file with everything else gone. */
+export function readSettings(): any {
+  let text: string;
+  try { text = readFileSync(FILE, "utf8"); } catch (e: any) { if (e?.code === "ENOENT") return {}; throw new Error("The settings file can't be read now. Try again."); }
+  try { const f = JSON.parse(text); if (f && typeof f === "object" && !Array.isArray(f)) return f; } catch {}
+  throw new Error("The settings file can't be read now (~/.herdr/shepherdr.json isn't valid JSON).");
+}
+const SAFE = (k: string) => !["__proto__", "constructor", "prototype"].includes(k);
+
 export function writeSettings(next: any) {
   next.version = 1;
   writeFileSync(`${FILE}.web-tmp`, JSON.stringify(next, null, 2) + "\n");
@@ -65,6 +75,7 @@ export const onWritten = (fn: (file: any) => void) => written.add(fn);
 export class Settings {
   private file: any = {};
   private host = LOCAL;
+  private machineNames: string[] = [];
   private listeners = new Set<() => void>();
 
   on(fn: () => void) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
@@ -94,6 +105,7 @@ export class Settings {
   /** Every page at every level: Agents and Tasks (Everywhere and each space), Machines (all and each machine), Web. */
   sections(link: string | null, spaces: Scope[] = [], machines: string[] = [], host = LOCAL): SettingSection[] {
     this.host = host;
+    this.machineNames = machines;
     const out: SettingSection[] = [];
     for (const s of [null, ...spaces]) out.push(this.agents(s), this.tasks(s));
     out.push(this.machines(null), ...[LOCAL, ...machines].map((m) => this.machines(m)));
@@ -180,11 +192,13 @@ export class Settings {
    *  the file keeps. null: back to what it follows. scope: the space's name, machine and repo folder (herdr-task
    *  finds a space's settings by its folder). */
   set(key: string, word: string | null, level = "all", scope?: Scope | null) {
-    let file: any = {};
-    try { file = JSON.parse(readFileSync(FILE, "utf8")); } catch {}
+    const file = readSettings();
     const next = structuredClone(file);
     const machine = level.startsWith("m:") ? (level.slice(2) === this.host ? LOCAL : level.slice(2)) : null;
     const space = level !== "all" && !machine ? level : null;
+    // only a machine there is (this computer, or one connected), and keys that are plain names
+    if (machine !== null && (!SAFE(machine) || (machine !== LOCAL && !this.machineNames.includes(machine)))) throw new Error("That machine isn't connected.");
+    if (space && (!SAFE(space) || !scope)) throw new Error("That space isn't here any more.");
     if (space && !scope) throw new Error("That space isn't here any more.");
     // the object this level holds its values in
     const target = () => {

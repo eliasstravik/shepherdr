@@ -64,6 +64,7 @@ export class Artifacts {
 
   /** The person's words to the agent that keeps it (a note on a block, or an answer). */
   async say(id: string, v: number, text: string, spot?: string) {
+    if (!/^\w[\w.-]{0,119}$/.test(id)) throw new Error("Not an artifact.");
     const args = ["note", id, "--text", text, "--version", String(v), "--json", ...(spot ? ["--spot", spot] : [])];
     const r = await run(args);
     if (r.code !== 0) throw new Error((r.err || r.out).trim().split("\n").pop() || "It didn't go through.");

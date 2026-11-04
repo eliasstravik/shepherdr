@@ -52,12 +52,12 @@ function AgentSheet({ o }: { o: Extract<Open, { kind: 'role' }> }) {
     <Dialog title={o.title} onCancel={close}
       buttons={<>
         {o.pick ? <Ghost disabled={busy} onClick={() => save(null)}>Use default</Ghost> : null}
-        <Primary autoFocus disabled={!clis || busy} onClick={() => save(JSON.stringify({ agent: kind, model: model || null, effort: effort || null, fast: speed === 'fast' }))}>{busy ? 'Saving…' : 'Save'}</Primary>
+        <Primary autoFocus disabled={!clis || busy} onClick={() => save(JSON.stringify({ agent: kind, model: model || null, effort: effort || null, fast: speed === 'fast' && (cli?.speeds?.length ?? 0) > 1 }))}>{busy ? 'Saving…' : 'Save'}</Primary>
       </>}>
       {clis ? (
         <div className="flex flex-col gap-2.5 text-fg phone:gap-1">
           <Line label="Agent">
-            <Pick label="Agent" value={cli?.name ?? kind} options={clis.map((c) => c.name)} onPick={(n) => { setKind(clis.find((c) => c.name === n)!.kind); setModel(''); setEffort('') }} />
+            <Pick label="Agent" value={cli?.name ?? kind} options={clis.map((c) => c.name)} onPick={(n) => { setKind(clis.find((c) => c.name === n)!.kind); setModel(''); setEffort(''); setSpeed('') }} />
           </Line>
           <Line label="Model">
             {cli?.models?.length ? <Pick label="Model" value={label(model)} options={[DEFAULT, ...cli.models.map((m) => m.label)]} onPick={(l) => { const id = cli.models!.find((m) => m.label === l)?.id ?? ''; setModel(id); if (!(cli.models!.find((m) => m.id === id)?.efforts ?? []).includes(effort)) setEffort('') }} /> : <span className="text-fg3">Default</span>}

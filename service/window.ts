@@ -3,7 +3,7 @@
 // Everywhere's "off" in ~/.herdr/shepherdr.json (herdr-task, other machines) and shared "addons.off" (the window's
 // mods). The web app leaves an off add-on's plugins out (lib/addons.json's "web") and its pages with them.
 import { readFileSync } from "node:fs";
-import { writeSettings } from "./settings.ts";
+import { readSettings, writeSettings } from "./settings.ts";
 import { join } from "node:path";
 import { HOME } from "./paths.ts";
 import type { SettingRow, SettingSection } from "../web/shared/types.ts";
@@ -31,7 +31,7 @@ export function addons(): Addon[] {
   return manifest!;
 }
 
-function readFile(): any { try { return JSON.parse(readFileSync(FILE, "utf8")); } catch { return {}; } }
+function readFile(): any { try { return readSettings(); } catch { return {}; } }
 /** The add-ons switched off (Everywhere's "off"). */
 export const offList = (): string[] => { const o = readFile()?.everywhere?.off; return Array.isArray(o) ? o : []; };
 /** The web app's plugins left out now. */
@@ -67,7 +67,7 @@ export async function setWindow(key: string, word: string | null, setShared: (k:
   const off = offList();
   if (blockers(a.id, on, off).length) throw new Error(on ? "Turn on what it needs first." : "Turn off what needs it first.");
   const list = on ? off.filter((x) => x !== a.id) : [...new Set([...off, a.id])];
-  const file = readFile();
+  const file = readSettings();
   const e = (file.everywhere ??= {});
   if (list.length) e.off = list; else delete e.off;
   writeSettings(file);
