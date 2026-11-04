@@ -82,10 +82,10 @@ const THUMB = 56, THUMB_GAP = 6;
 // The live row's level wave: each bar's width and the gap between bars, in px.
 const WAVE_BAR = 3, WAVE_GAP = 2;
 // ONE row under each message, its band (a list row of its own), on the message's side (left
-// for the agent, right for the person), in this order: the time (dim), reply, copy, rewind or
-// fork; then on the agent's the reaction pills and the smiley to add one, furthest right, and
-// on the person's the smiley and then the pills, furthest right (flush under the bubble's
-// edge). The pills always show; the rest only while the pointer is on the message, in room
+// for the agent, right for the person), the reaction pills flush under the bubble's outer edge
+// and the smiley to add one beside them: on the agent's the pills (furthest left), the smiley,
+// then the time (dim), reply, copy, fork; on the person's, mirrored, the time, reply, copy,
+// rewind, the smiley and then the pills (furthest right). The pills always show; the rest only while the pointer is on the message, in room
 // that is always kept, so nothing moves. barLayout() places every part; hitBar() reads the
 // same places.
 // One even rhythm on a 4 px scale (spaced()): under every message its band, always kept: BAND_IN
@@ -116,8 +116,9 @@ function findModel(menus, name) {
 // About how many lines words take at a width (px), for a row's height before it's measured.
 const wrapLines = (text, width) => String(text ?? "").split("\n").reduce((n, l) => n + Math.max(1, Math.ceil((l.length * 7) / Math.max(120, width))), 0);
 const ICONS = { copy: "copy", reply: "reply", rewind: "rewind", fork: "git-fork", react: "smile-plus" };
-// Reaction pills: this wide, this far apart; and the gap before the first and after the last.
-const PILL = 46, PILL_GAP = 4, PILL_EDGE = 6;
+// Reaction pills: this wide and tall (inside the ACT row, so they sit on the icons' center line
+// without towering over them), this far apart; and the gap between them and the smiley.
+const PILL = 46, PILL_H = 20, PILL_GAP = 4, PILL_EDGE = 6;
 // A task's id as shown and typed: herdr-task's PREFIX-n (`ref`, e.g. HAT-1), else #n.
 const taskRef = (x) => (x?.ref ? String(x.ref) : `#${x?.id}`);
 // Task chips under a message: this wide, this far apart.
@@ -1838,13 +1839,19 @@ export default class Chat extends View {
     const parts = [];
     let at = 0;
     const add = (what, w, gap, more = {}) => { at += parts.length ? gap : 0; parts.push({ what, x: at, w, ...more }); at += w; };
-    if (time) add("time", time.length > 5 ? 82 : 38, 0, { hover: true, text: time });
-    for (const a of bar.acts) add(a, ACT, ACT_GAP, { hover: true });
+    // Many pills in a narrow pane: the time goes first, so the row stays inside the column.
+    const room = right - left, timeW = time ? (time.length > 5 ? 82 : 38) + ACT_GAP : 0;
+    const need = bar.acts.length * (ACT + ACT_GAP) + ACT + (bar.pills?.length ?? 0) * (PILL + PILL_EDGE);
+    const acts = () => {
+      if (time && need + timeW <= room) add("time", timeW - ACT_GAP, ACT_GAP, { hover: true, text: time });
+      for (const a of bar.acts) add(a, ACT, ACT_GAP, { hover: true });
+    };
+    // The pills PILL_GAP apart, PILL_EDGE from what comes before or after them.
     const pills = () => (bar.pills ?? []).forEach((p, i) => add(`pill:${p.emoji}`, PILL, i ? PILL_GAP : PILL_EDGE, { pill: p }));
     // Reactions off (an add-on): no smiley; the pills already there still show.
     const react = addonOn("reactions");
-    if (bar.side === "user") { if (react) add("react", ACT, ACT_GAP, { hover: true }); pills(); }
-    else { pills(); if (react) add("react", ACT, bar.pills?.length ? PILL_EDGE : ACT_GAP, { hover: true }); }
+    if (bar.side === "user") { acts(); if (react) add("react", ACT, ACT_GAP, { hover: true }); pills(); }
+    else { pills(); if (react) add("react", ACT, PILL_EDGE, { hover: true }); acts(); }
     const x0 = bar.side === "user" ? right - at : left;
     for (const p of parts) p.x += x0;
     return { x: x0, w: at, parts };
@@ -2693,7 +2700,7 @@ export default class Chat extends View {
     const icon = (a) => div().size(ACT).flex().items_center().justify_center().rounded(5).cursor_pointer()
       .text_color(done && a === "copy" ? t.foreground : t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground))
       .child(svg(`mods/chat/${done && a === "copy" ? "check" : ICONS[a]}.svg`).size(14));
-    const pill = (p) => h_flex().w(PILL).h(22).gap(4).items_center().justify_center().rounded(11).border_1().cursor_pointer()
+    const pill = (p) => h_flex().w(PILL).h(PILL_H).gap(4).items_center().justify_center().rounded(PILL_H / 2).border_1().cursor_pointer()
       .when(p.you, (el) => el.bg(t.accent + "26").border_color(t.accent))
       .when(!p.you, (el) => el.border_color(t.border).hover((s) => s.bg(t.hover)))
       .child(div().text_size(13).child(p.emoji))
@@ -2702,7 +2709,7 @@ export default class Chat extends View {
     return div().absolute().left(0).right(0).bottom(bottom).h(bar.box?.h ?? ACT_ROW)
       .children(parts.filter((p) => Boolean(p.hover) === hover).map((p) => div().absolute().top(0).bottom(0).left(p.x).w(p.w).flex().items_center()
         .when(bar.side === "user" && p.what === "time", (el) => el.justify_end())
-        .child(p.what === "time" ? div().pr(bar.side === "user" ? 4 : 0).pl(bar.side === "user" ? 0 : 2).text_size(11.5).text_color(t.dim).child(p.text)
+        .child(p.what === "time" ? div().pr(bar.side === "user" ? 4 : 0).pl(bar.side === "user" ? 0 : 4).text_size(11.5).text_color(t.dim).child(p.text)
           : p.pill ? pill(p.pill) : icon(p.what))));
   }
 

@@ -35,9 +35,10 @@ export const onTerminal = (fn: (chat: string) => void) => void (showTerminal = f
 
 /* ---------- the band under a message ---------- */
 
-/** ONE row under a message, on its side: the time (dim), Reply, Copy, Rewind (yours, not a /command) or Fork (the
- *  agent's); then on the agent's its reactions and the smiley furthest right, on yours the smiley and then the
- *  reactions, flush under the bubble's edge. The reactions always show; the rest while the pointer is on the message,
+/** ONE row under a message, on its side, its reactions flush under the bubble's outer edge with the smiley beside
+ *  them: on the agent's the reactions (furthest left), the smiley, then the time (dim), Reply, Copy, Fork; on yours,
+ *  mirrored, the time, Reply, Copy, Rewind (not on a /command), the smiley and then the reactions (furthest right).
+ *  The reactions always show; the rest while the pointer is on the message,
  *  in room that is always kept, so nothing moves. A finger holds the message instead (its own bar). */
 export function Band({ msg, chat, cli }: { msg: Message; chat: string; cli?: boolean }) {
   const you = msg.who === 'you'
@@ -68,12 +69,17 @@ export function Band({ msg, chat, cli }: { msg: Message; chat: string; cli?: boo
       <SmileIcon className="size-3.5" />
     </button>
   ) : null
-  const pillRow = pills ? <span className="flex flex-wrap items-center gap-1 px-1.5">{pills}</span> : null
+  // as the window's: the pills 4px apart, 6px from the smiley (the band's own 2px gap and 4px here)
+  const pillRow = pills ? <span className={clsx('flex flex-wrap items-center gap-1', you ? 'pl-1' : 'pr-1')}>{pills}</span> : null
+  const actions = (
+    <>
+      {time ? <time dateTime={new Date(msg.at!).toISOString()} className={clsx('shrink-0 text-[0.71875rem] text-fg3 tabular-nums', you ? 'pr-1' : 'px-1', hover)}>{time}</time> : null}
+      {acts.map(icon)}
+    </>
+  )
   return (
     <div data-band className={clsx('mt-1 flex min-h-[22px] max-w-full flex-wrap items-center gap-0.5', you ? 'justify-end self-end' : 'justify-start self-start')}>
-      {time ? <time dateTime={new Date(msg.at!).toISOString()} className={clsx('shrink-0 text-[0.71875rem] text-fg3 tabular-nums', you ? 'pr-1' : 'pl-0.5 pr-1', hover)}>{time}</time> : null}
-      {acts.map(icon)}
-      {you ? <>{smiley}{pillRow}</> : <>{pillRow}{smiley}</>}
+      {you ? <>{actions}{smiley}{pillRow}</> : <>{pillRow}{smiley}{actions}</>}
     </div>
   )
 }
