@@ -9,7 +9,7 @@
 
 What goes where (each under --root, default your home):
   .config/herdr-app/mods/<mod>          the add-ons' mods (lib/addons.json lists them), one swap per mod
-  .config/herdr-app/layouts/shepherdr.json, lib/, bin/
+  .config/herdr-app/layouts/shepherdr.json, lib/, core/, bin/
   .config/herdr-app/keys.json           our keys merged in: free ones added, a key you use asked about first
   .config/herdr-core/templates/*.md     the Assistant's, worker's and reviewer's instructions
   .local/bin/{herdr-task,herdr-artifact,herdr-secret,herdr-browser,shepherdr}   links into the above
@@ -198,6 +198,10 @@ def source_items(src):
             items.append(("lib", f"{APP}/lib/{f}", os.path.join(src, "lib", f)))
     for f in walk_files(os.path.join(src, "bin")):
         items.append(("bin", f"{APP}/bin/{f}", os.path.join(src, "bin", f)))
+    # The shared core's source beside lib/, so the app's own bin/sync-shared finds it (mods carry copies).
+    for f in walk_files(os.path.join(src, "core")) if os.path.isdir(os.path.join(src, "core")) else []:
+        if not f.endswith(".test.js"):
+            items.append(("lib", f"{APP}/core/{f}", os.path.join(src, "core", f)))
     for f in sorted(os.listdir(os.path.join(src, "templates"))):
         if f.endswith(".md"):
             items.append(("template", f"{TPL}/{f}", os.path.join(src, "templates", f)))
@@ -813,7 +817,7 @@ def cmd_uninstall(a):
             pass
         os.remove(r.p(RECORD))
         # Folders that only held ours.
-        for rel in (f"{APP}/data/shepherdr", f"{APP}/bin", f"{APP}/lib", SHARE):
+        for rel in (f"{APP}/data/shepherdr", f"{APP}/bin", f"{APP}/lib", f"{APP}/core", SHARE):
             for d, _, _ in sorted(os.walk(r.p(rel)), reverse=True):
                 try:
                     os.rmdir(d)
