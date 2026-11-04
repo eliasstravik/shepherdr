@@ -48,9 +48,9 @@ def install_secret(machine):
             f.write(digest)
 
 
-def remote(machine, argv):
-    """Runs herdr-task on the machine that holds the folder (installing it there first), then
-    names a new tab from here, where the window is."""
+def remote_run(machine, argv, timeout=None):
+    """herdr-task on another machine (installed there first when it isn't this one): its run,
+    output kept. timeout: seconds before herdr-core gives up on it."""
     body = bundle()
     digest = hashlib.sha1(body).hexdigest()
     mark = os.path.join(STORE, ".remote", machine)
@@ -79,15 +79,23 @@ def remote(machine, argv):
     if not installed and not sync_held():
         install()
     install_secret(machine)
-    if argv[:1] == ["tick"]:
-        # Its start limits live in Settings here, where the window is (HERD-40).
-        from .settings import machine_limits
-        argv = [*argv, "--machine", machine, "--hold", json.dumps(machine_limits(machine))]
-    call = ["hc", "exec", "--on", machine, "--", "sh", "-c", 'exec "$HOME/.local/bin/herdr-task" "$@"', "herdr-task", *argv]
+    wait = ["--timeout", str(timeout)] if timeout else []
+    call = ["hc", "exec", "--on", machine, *wait, "--", "sh", "-c", 'exec "$HOME/.local/bin/herdr-task" "$@"', "herdr-task", *argv]
     r = run(call)
     if r.returncode == 127 or "not found" in r.stderr and not r.stdout:
         install()
         r = run(call)
+    return r
+
+
+def remote(machine, argv):
+    """Runs herdr-task on the machine that holds the folder (installing it there first), then
+    names a new tab from here, where the window is."""
+    if argv[:1] == ["tick"]:
+        # Its start limits live in Settings here, where the window is (HERD-40).
+        from .settings import machine_limits
+        argv = [*argv, "--machine", machine, "--hold", json.dumps(machine_limits(machine))]
+    r = remote_run(machine, argv)
     sys.stderr.write(r.stderr)
     out = r.stdout
     if r.returncode == 0 and "--json" in argv:
@@ -276,11 +284,15 @@ def main():
             c.add_argument("--space", help="the space (default: the Assistant's own)")
         if everywhere:
             c.add_argument("--everywhere", action="store_true", help="Everywhere's: what every space works from unless it sets its own")
+        # A space on another machine is done there (autopilot.forward), told its name and folder from the window here.
+        c.add_argument("--name", help=argparse.SUPPRESS)
+        c.add_argument("--space-folder", help=argparse.SUPPRESS)
         c.add_argument("--json", action="store_true")
         c.set_defaults(fn=cmd_autopilot)
         return c
     ap_cmd("show", "this space's Autopilot (or --everywhere): when it wakes and from what heartbeat, its own or Everywhere's, next and last wake, progress", everywhere=True)
-    c = ap.add_parser("list", help="Everywhere's schedule and events, and each space's Autopilot on this machine")
+    c = ap.add_parser("list", help="Everywhere's schedule and events, and each space's Autopilot, on this machine and every machine the window lists")
+    c.add_argument("--here", action="store_true", help="only this machine's spaces")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_autopilot)
     ap_cmd("on", "turn it on in this space (makes the heartbeat file)")

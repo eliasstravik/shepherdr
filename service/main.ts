@@ -503,7 +503,7 @@ const server = Bun.serve<{ who: string }>({
         return json({ ok: true });
       }
       if (body?.type === "autopilot-run" && typeof body.place === "string") {
-        try { await runPilot(body.place); await model.readAutopilot(); model.rebuild(); return json({ ok: true }); }
+        try { await runPilot(body.place); await model.readPilot(body.place); return json({ ok: true }); }
         catch (err) { return json({ ok: false, error: (err as Error).message }); }
       }
       if (body?.type === "setting" && body.key === "web.serve") {
@@ -563,7 +563,12 @@ const server = Bun.serve<{ who: string }>({
         try { if (!settings.choices) await readDefaults(); return json({ ok: true, menus: settings.choices?.menus ?? {}, permDefault: settings.choices?.permDefault ?? {}, clis: await compat.agents!.choices(null) }); }
         catch (err) { return json({ ok: false, error: (err as Error).message }); }
       }
-      try { return json(await act(hub, body, compat)); } catch (err) { return new Response((err as Error).message, { status: 400 }); }
+      try {
+        const r = await act(hub, body, compat);
+        // a switch flipped: shown at once, on another machine's space too (its file read again there)
+        if (body?.type === "mode" && typeof body.place === "string") await model.readPilot(body.place);
+        return json(r);
+      } catch (err) { return new Response((err as Error).message, { status: 400 }); }
     }
     if (path.startsWith("/api/")) return json({ error: "not found" }, 404);
     return file(path);

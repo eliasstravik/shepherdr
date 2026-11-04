@@ -41,7 +41,8 @@ function openAutopilot(place: Place) {
 /** The header's Autopilot switch (3.0's): flips at once, herdr-task's answer says the rest (a refusal goes back, with a
  *  toast). "Autopilot" and what it waits for beside it (core/autopilot.js headerDetail: "Next 10:00", "Queued",
  *  "Waking", "On events", "Run now only") where the header is 480px or wider, else the switch alone; "Write a
- *  heartbeat" after it while on with its heartbeat still empty. The Assistant's tab only, on this computer's spaces. */
+ *  heartbeat" after it while on with its heartbeat still empty. The Assistant's tab only, in every space on every
+ *  machine (another machine's is switched and woken there). */
 function AutopilotHeader({ place }: { place: Place }) {
   const a = place.pilot
   const phone = useUI((u) => u.device === 'phone')

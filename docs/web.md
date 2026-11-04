@@ -83,7 +83,7 @@ Settings → Web shows the new link and its QR code everywhere. It needs Python 
 | Work | Runs on |
 | --- | --- |
 | The task tick, the automations scheduler's check (herdr-task) | each machine with a Shepherdr service ticks its own; the host ticks the machines with none (VMs) that any service ran tasks on; another service ticks those only while the host can't be reached (herdr-task's lock keeps two ticks of one machine apart) |
-| Autopilot wakes and automations | each machine's own scheduler (one per machine: herdr-task's lock); the tick above only checks it runs |
+| Autopilot wakes and automations | each machine's own scheduler (one per machine: herdr-task's lock); the tick above only checks it runs. A space's switch flipped from another machine is handed to herdr-task on the space's own machine, which keeps it and wakes it |
 | News, the memory guard, retries of cut turns | inside each machine's tick, so with it |
 | Push alerts to phones | the host only (the pages subscribe there) |
 | A web page's question cards (the ask flag; the cards read and answered there) | the host, on the agent's machine through the link |

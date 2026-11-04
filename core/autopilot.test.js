@@ -54,3 +54,23 @@ test("the starter heartbeat, events and default schedule are herdr-task's", () =
   expect(auto).toContain(`EVENTS = [${EVENTS.map(([v]) => `"${v}"`).join(", ")}]`);
   expect(py).toContain(`DEFAULT_EVERY = "${PRESETS[2][0]}"`);
 });
+
+test("another machine's space: its file read with its lists, its own settings here by its full id", async () => {
+  const { READ_LISTS, fileIn, taskLists } = await import("./tasklists.js");
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const home = mkdtempSync(join(tmpdir(), "shep-ap-"));
+  mkdirSync(join(home, ".herdr", "tasks"), { recursive: true });
+  writeFileSync(join(home, ".herdr", "tasks", ".autopilot.json"), JSON.stringify({ version: 2, spaces: { sp9: { on: true, next_run: 5 } } }));
+  writeFileSync(join(home, ".herdr", "tasks", "repo.json"), JSON.stringify({ folder: "/x", tasks: [] }));
+  const out = Bun.spawnSync(["sh", "-c", READ_LISTS], { env: { HOME: home, PATH: process.env.PATH } }).stdout.toString();
+  const file = fileIn(out, ".autopilot.json");
+  expect(file.spaces.sp9.on).toBe(true);
+  expect(fileIn(out, ".nothing.json")).toBe(null);
+  expect(taskLists(out).map((l) => l.slug)).toEqual(["repo"]);
+  // as the service and the window's header read it: named "vm/sp9" here, so its own settings here apply
+  const settings = { spaces: { "vm/sp9": { autopilot: { every: "every 2 hours" } } } };
+  const a = pilotFor({ ...file, spaces: { "vm/sp9": file.spaces.sp9 } }, "vm/sp9", settings);
+  expect([a.on, a.next_run, a.every, a.own]).toEqual([true, 5, "every 2 hours", ["every"]]);
+});

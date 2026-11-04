@@ -26,8 +26,8 @@ export async function checkEvery(words: string) {
   }
 }
 
-/** Wakes a space's Assistant now (queued until it is idle). */
+/** Wakes a space's Assistant now (queued until it is idle); another machine's ("vm/sp1") through herdr-task there. */
 export const runPilot = (space: string) => {
-  if (!/^[\w-]+$/.test(space) || space === "all") throw new Error("Autopilot runs on that space's own machine.");
+  if (!/^([\w.-]+\/)?[\w-]+$/.test(space) || space === "all") throw new Error("bad space");
   return task(["run-now", "--space", space]);
 };
