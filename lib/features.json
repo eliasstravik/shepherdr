@@ -228,7 +228,9 @@
         "tablet": "Popovers",
         "phone": "Action sheets, bottom-sheet confirms"
       },
-      "planned": "The + menu and space menus' actions"
+      "service": [
+        "actions.ts"
+      ]
     },
     {
       "id": "settings",
@@ -547,7 +549,10 @@
         "tablet": "Main chat",
         "phone": "The Chat tab of the bottom bar"
       },
-      "planned": "Switch agent, restart, instructions, close"
+      "service": [
+        "actions.ts",
+        "agents.ts"
+      ]
     },
     {
       "id": "news",

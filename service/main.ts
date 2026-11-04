@@ -306,6 +306,7 @@ const server = Bun.serve<{ who: string }>({
         try { return json({ ok: true, text: settings.template(body.role, typeof body.text === "string" ? body.text : undefined) }); }
         catch (err) { return json({ ok: false, error: (err as Error).message }); }
       }
+      if (body?.type === "limits-check") { await machines.checkNow(); return json({ ok: true }); }
       if (body?.type === "role-info") {
         try { return json({ ok: true, clis: await compat.agents!.choices(null) }); }
         catch (err) { return json({ ok: false, error: (err as Error).message }); }

@@ -4,10 +4,12 @@
 // red pill at the header's right, beside that menu (on a phone after the subtitle, under the name), says so, and a tap
 // on it opens the menu; with it off the header says nothing of it. Turning it on replaces the coordinator and spends on
 // its own, so it asks first, and where it can't run the switch is greyed with the reason; off is always one tap.
-import { useState, useSyncExternalStore } from 'react'
+import clsx from 'clsx'
+import { useEffect, useState, useSyncExternalStore } from 'react'
+import { openRole } from '@client/screens/Role.tsx'
 import { act, definePlugin, has, setUI, useSnap, useUI } from '@client/kernel.ts'
 import { Dialog } from '@client/rowmenu.tsx'
-import { ic, MenuItem, MenuSwitch, ModeIcon, Primary } from '@client/ui.tsx'
+import { ic, MenuItem, MenuSwitch, ModeIcon, PlanIcon, Primary, XIcon } from '@client/ui.tsx'
 import { PILOT_BLOCKED, type Place } from '@shared/types.ts'
 
 /** Autopilot on, as a red pill with a dot: at the header's right, or after the subtitle on a phone; a tap opens the ⋯
@@ -113,11 +115,72 @@ function AutopilotSwitch({ place }: { place: Place }) {
   )
 }
 
+/* ---------- 3.0's Assistant items: its instructions, and closing it ---------- */
+
+let closing: Place | null = null
+const closeListeners = new Set<() => void>()
+const openClose = (p: Place | null) => { closing = p; closeListeners.forEach((f) => f()) }
+
+/** "Edit instructions…" and "Close Assistant…" in a space's ⋯ menu, as the window's Assistant tab menu */
+function AssistantItems({ place }: { place: Place }) {
+  return (
+    <>
+      <MenuItem icon={<PlanIcon className={ic} />} onClick={() => { setUI({ menu: false }); openRole({ kind: 'file', role: 'coordinator', title: 'What every Assistant is told first', file: 'assistant.md' }) }}>
+        Edit instructions…
+      </MenuItem>
+      <MenuItem icon={<XIcon className={ic} />} onClick={() => { setUI({ menu: false }); openClose(place) }}>
+        Close Assistant…
+      </MenuItem>
+    </>
+  )
+}
+
+/** Close the Assistant? With workers running: stop them, or let them finish on their own */
+function CloseAssistant() {
+  const place = useSyncExternalStore((f) => (closeListeners.add(f), () => void closeListeners.delete(f)), () => closing)
+  const [workers, setWorkers] = useState<number | null>(null)
+  const [stop, setStop] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    setWorkers(null); setStop(true); setBusy(false); setError('')
+    if (place) act({ type: 'assistant-close', place: place.id, mode: 'count' } as never).then((r: { workers?: number; error?: string }) => (r.error ? setError(r.error) : setWorkers(r.workers ?? 0)), (e: Error) => setError(e.message))
+  }, [place])
+  if (!place) return null
+  const go = async () => {
+    setBusy(true); setError('')
+    try { await act({ type: 'assistant-close', place: place.id, mode: stop ? 'stop' : 'keep' } as never); openClose(null) }
+    catch (e) { setError((e as Error).message); setBusy(false) }
+  }
+  const choice = (on: boolean, title: string, detail: string, pick: () => void) => (
+    <button type="button" role="radio" aria-checked={on} onClick={pick} className="press flex w-full items-start gap-2.5 rounded-row px-2 py-2 text-left hover:bg-hover">
+      <span aria-hidden="true" className={clsx('mt-0.5 size-4 shrink-0 rounded-full shadow-[inset_0_0_0_1.5px_var(--fg3)]', on && 'shadow-[inset_0_0_0_5px_var(--fg)]')} />
+      <span><span className="block font-medium">{title}</span><span className="block text-[0.8125rem] text-fg2">{detail}</span></span>
+    </button>
+  )
+  return (
+    <Dialog title="Close the Assistant?" onCancel={() => openClose(null)} safe
+      buttons={<Primary disabled={busy || workers === null} onClick={() => void go()}>{busy ? 'Closing…' : 'Close Assistant'}</Primary>}>
+      <div className="flex flex-col gap-2 text-pretty">
+        <p className="text-fg2">{workers === null ? (error ? '' : 'Reading…') : workers ? `It has ${workers} worker${workers > 1 ? 's' : ''} running. Their branches and worktrees stay either way.` : 'It has no workers running.'}</p>
+        {workers ? (
+          <div role="radiogroup" aria-label="Its workers" className="flex flex-col">
+            {choice(stop, 'Stop its workers', 'Ends the agents it started and closes their tabs.', () => setStop(true))}
+            {choice(!stop, 'Let them finish', 'Workers keep running in their own tabs, on their own.', () => setStop(false))}
+          </div>
+        ) : null}
+        {error ? <p role="alert" className="text-need-fg">{error}</p> : null}
+      </div>
+    </Dialog>
+  )
+}
+
 export default definePlugin({
   name: 'coordinators',
   setup(reg) {
     reg.placeMark.push({ order: 10, View: AutopilotPill })
     reg.placeMenu.push({ order: 10, View: AutopilotSwitch })
-    reg.overlays.push(AutopilotConfirm)
+    reg.overlays.push(AutopilotConfirm, CloseAssistant)
+    reg.placeMenu.push({ order: 80, View: AssistantItems })
   },
 })

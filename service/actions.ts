@@ -3,6 +3,7 @@
 // Anything else is refused. Inputs are checked here; commands run with argument lists, never a shell line.
 import type { Hub } from "./hub.ts";
 import { join } from "node:path";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { sendBody, messageBody, refusal, reactionLine, mentionedIn, taskTag } from "../core/send.js";
 import { kindOf } from "../core/chat-reader.js";
@@ -13,6 +14,7 @@ const { READ, withMove, withSection, withoutSection, withSectionName, withIcon }
 import type { Compat } from "./compat.ts";
 import { worktreeAct } from "./worktrees.ts";
 
+const APP = process.env.HERDR_APP_HOME || join(homedir(), ".config", "herdr-app");
 const ATTACH = join(process.env.HERDR_APP_HOME || join(homedir(), ".config", "herdr-app"), "data", "chat-attach");
 const ADDR = /^([\w.-]+\/)?t[0-9a-z]+$/;
 const REF = /^[A-Z][A-Z0-9]*-\d+$/;
@@ -112,6 +114,32 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     await sh.set("spaces-chat", withMove(bar(), b.id, to, typeof b.before === "string" ? b.before : null));
     return { ok: true };
   }
+  if (b?.type === "order" && sh && typeof b.under === "string" && Array.isArray(b.ids)) {
+    // a dragged sidebar list, kept where the window keeps it: Pinned's and each section's spaces, and the sections'
+    // order, in the shared sidebar data; a machine's own spaces in the window's order (space.move)
+    const ids = b.ids.filter((x: unknown) => typeof x === "string").slice(0, 500) as string[];
+    const d = structuredClone(bar());
+    d.sections ??= []; d.pinned ??= [];
+    const same = (a: string[], c: string[]) => a.length === c.length && a.every((x) => c.includes(x));
+    if (b.under === "pinned") { if (!same(ids, d.pinned)) throw new Error("Pinned changed meanwhile."); d.pinned = ids; }
+    else if (sec(b.under)) {
+      const x = d.sections.find((y: any) => y.id === sec(b.under));
+      if (!x || !same(ids, x.spaces ?? [])) throw new Error("That section changed meanwhile.");
+      x.spaces = ids;
+    } else if (b.under === "sections" || b.under.startsWith("sections:")) {
+      // the sections at the top (Pinned among them, which isn't one of the data's) or a machine's: their new order
+      const order = ids.map(sec).filter(Boolean) as string[];
+      d.sections = [...order.map((id) => d.sections.find((y: any) => y.id === id)).filter(Boolean), ...d.sections.filter((y: any) => !order.includes(y.id))];
+    } else if (b.under.startsWith("m:")) {
+      for (const [i, id] of ids.entries()) {
+        const r = await run(["herdr-app", "do", "space.move", "--id", id, "--index", String(i + 1)]);
+        if (r.code !== 0) throw new Error("Moving spaces needs the Herdr window open.");
+      }
+      return { ok: true };
+    } else throw new Error("Machines keep their order: drag spaces and sections instead.");
+    await sh.set("spaces-chat", d);
+    return { ok: true };
+  }
   if (b?.type === "section" && sh) {
     if (b.op === "new" && typeof b.name === "string" && b.name.trim()) {
       const machine = typeof b.machine === "string" && b.machine !== compat.host ? b.machine : null;
@@ -161,6 +189,20 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (!sp) throw new Error("That space isn't here any more.");
     return worktreeAct(hub, sp, b, compat.shared, () => act(hub, { type: "space-remove", place: b.place }, compat).catch(() => null));
   }
+  if (b?.type === "assistant-close" && typeof b.place === "string") {
+    // 3.0's Close Assistant: its tab closes; "stop" ends the workers it started first, "keep" lets them finish
+    const key = `p:${b.place.replace("/", ":")}`, a = compat.addrOf(key);
+    const t: any = a ? hub.terminals.get(a) : null;
+    if (!t) throw new Error("This space has no Assistant running.");
+    const workers = [...hub.terminals.values()].filter((x: any) => x.state === "live" && x.parent === a).length;
+    if (b.mode === "count") return { ok: true, workers };
+    const tab = t.labels?.["herdr.coordinator.tab"];
+    const script = join(APP, "mods", "coordinator", "close.sh");
+    if (!tab || !existsSync(script)) throw new Error("Closing an Assistant needs Shepherdr's window layout installed.");
+    const r = await run(["bash", script, tab, a!, b.mode === "stop" ? "stop" : "keep"]);
+    if (r.code !== 0) throw new Error("It didn't close: the Herdr window needs to be open.");
+    return { ok: true };
+  }
   if (b?.type === "space-remove" && typeof b.place === "string" && compat.shared) {
     // Close a space: the window closes its own (herdr-app do space.close); the service forgets one of its own and ends its Assistant
     const own = Array.isArray(compat.shared.value("spaces")) ? compat.shared.value("spaces") : [];
@@ -207,6 +249,12 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     b = { ...b, addr: a, quote: quoted, tags };
   }
   else if (b?.type === "stop" && typeof b.chat === "string") b = { ...b, addr: chat(b.chat) };
+  else if ((b?.type === "close" || b?.type === "delete" || b?.type === "archive") && typeof b.chat === "string") {
+    // a task's row menu: its chat key is "<task>/worker" (or 2.1's "/Agent")
+    const t = compat.taskOf(b.chat.split("/")[0]);
+    if (!t) throw new Error("That task isn't here any more.");
+    b = { ...b, ref: t.ref, folder: t.folder, machine: t.machine };
+  }
   else if ((b?.type === "evidence" || b?.type === "accept") && typeof b.task === "string") {
     const t = compat.taskOf(b.task);
     if (!t) throw new Error("That task isn't here any more.");
@@ -214,6 +262,13 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
   }
   else if (b?.type === "read" && b.chats && typeof b.chats === "object") {
     for (const key of Object.keys(b.chats).slice(0, 20)) { const a = compat.addrOf(key); if (a) await act(hub, { type: "read", addr: a }, compat); }
+    return { ok: true };
+  }
+  if (b?.type === "artifact-delete" && typeof b.artifact === "string") {
+    // an artifact deleted from its ⋯, as herdr-artifact rm (it and its versions)
+    if (!/^[\w.-]{1,120}$/.test(b.artifact)) throw new Error("Not an artifact.");
+    const r = await run(["herdr-artifact", "rm", b.artifact, "--json"]);
+    if (r.code !== 0) return { ok: false, error: (r.stderr || r.stdout).trim().split("\n").pop() || "It wasn't deleted." };
     return { ok: true };
   }
   if ((b?.type === "artifact-send" || b?.type === "artifact-note" || b?.type === "artifact-say") && typeof b.artifact === "string" && compat.artifacts) {
@@ -272,6 +327,16 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       try { out = JSON.parse(r.stdout); } catch {}
       if (r.code !== 0 || out?.error) throw new Error(out?.error || r.stderr.trim() || "herdr-task accept failed");
       return out ?? { ok: true };
+    }
+    // the person's own calls on a task, as herdr-task makes them: done, removed, or back from the archive
+    case "close": case "delete": case "archive": {
+      if (b.type === "archive" && b.on !== false) throw new Error("Done tasks archive themselves: Settings › Tasks › Archive Done after.");
+      const { ref, folder, machine } = taskOf(b);
+      const r = await task([b.type === "close" ? "done" : b.type === "delete" ? "rm" : "unarchive", ref], folder, machine);
+      let out: any = null;
+      try { out = JSON.parse(r.stdout); } catch {}
+      if (r.code !== 0 || out?.error) return { ok: false, error: out?.error || r.stderr.trim().split("\n").pop() || "herdr-task refused it." };
+      return { ok: true };
     }
   }
   // 2.1 has more buttons than this service answers yet: they say so plainly

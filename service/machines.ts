@@ -25,6 +25,12 @@ export class Machines {
     setInterval(() => void this.poll(), 30_000);
   }
 
+  /** Reads every machine's plan limits again now (the limits list's refresh): those older than a minute. */
+  async checkNow() {
+    for (const s of this.stats.values()) if (Date.now() - (s.limitsAt ?? 0) > 60_000) s.limitsAt = 0;
+    await this.poll();
+  }
+
   private async poll() {
     if (this.busy || !SCRIPT) return;
     this.busy = true;
