@@ -66,7 +66,8 @@ class Autopilot(unittest.TestCase):
         for name, value in (("STORE", store), ("STATE", os.path.join(store, ".autopilot.json")),
                             ("HEARTBEATS", os.path.join(self.tmp, "beats")), ("run", never), ("hc_json", never),
                             ("space_info", lambda s: ("~", self.folder) if s == "sp1" else (None, None)),
-                            ("window_spaces", lambda: None), ("ensure_scheduler", self.scheduler)):
+                            ("window_spaces", lambda: None), ("ensure_scheduler", self.scheduler),
+                            ("coordinator_in", lambda s: None)):
             p = mock.patch.object(ap, name, value)
             p.start()
             self.addCleanup(p.stop)
@@ -335,6 +336,7 @@ class Autopilot(unittest.TestCase):
         self.cmd("on", space="sp1")
         with self.ap.state() as d:
             a = d["spaces"]["sp1"]
+            a.pop("pending", None)  # the first wake switching on queued: this one stands for it
             a["inflight"] = {"at": self.ap.now() - ago, "reason": "schedule", "to": "t9", "turn": turn}
             self.ap.log_wake(a, "schedule", "Delivered", a["inflight"]["at"])
 
@@ -371,6 +373,26 @@ class Autopilot(unittest.TestCase):
         self.wake(5000)
         self.assertEqual(self.settled({"foreground": {"name": "bash"}, "turn": 3})["last_wake"]["outcome"],
                          "Assistant stopped, no progress saved")
+
+    def test_switching_on_wakes_at_once(self):
+        """SHEP-5: switched on, its first wake goes now (not one interval later); already on, no second one."""
+        from unittest import mock
+        v = self.cmd("on", space="sp1")
+        # no Assistant running yet: queued, said so, and still a scheduled wake after it
+        self.assertEqual(v["pending"]["reasons"], ["switched on"])
+        self.assertTrue(v["next_run"])
+        self.cmd("off", space="sp1")
+        self.assertEqual(self.cmd("show", space="sp1")["pending"], None)
+        k = {"state": "live", "foreground": {"name": "claude"}, "turn": 2, "status": {"state": "idle"}}
+        sent = []
+        with mock.patch.object(self.ap, "hc_json", lambda *a: k), mock.patch.object(self.ap, "coordinator_in", lambda s: "t9"), \
+                mock.patch.object(self.ap, "typing", lambda *a: False), \
+                mock.patch.object(self.ap, "news_send", lambda to, m, check=True: sent.append(m) or True):
+            v = self.cmd("on", space="sp1")
+            self.assertEqual((len(sent), v["inflight"]["reason"]), (1, "switched on"))
+            self.assertIn('reason="switched on"', sent[0])
+            self.cmd("on", space="sp1")
+        self.assertEqual(len(sent), 1)
 
     def test_run_now_goes_after_a_wake_whose_turn_ended(self):
         """A wake the scheduler hasn't closed yet never holds Run now back."""

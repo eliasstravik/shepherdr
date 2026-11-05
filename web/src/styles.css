@@ -815,6 +815,19 @@
     width: 6px;
     height: 6px;
   }
+  /* SHEP-5: a sidebar row's Autopilot mark (a small rocket before the #): it breathes while a wake runs or waits */
+  .pilot-mark {
+    margin-right: -4px;
+  }
+  .pilot-mark[data-waking] {
+    animation: pilot-wake 1.2s ease-in-out infinite;
+  }
+  @keyframes pilot-wake {
+    50% { opacity: 0.35; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pilot-mark[data-waking] { animation: none; }
+  }
   [data-device="phone"] .mode-pill.mark {
     width: 16px;
     height: 16px;

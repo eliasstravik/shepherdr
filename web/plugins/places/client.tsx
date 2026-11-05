@@ -14,7 +14,7 @@ import { openWorktree } from '@client/screens/Worktree.tsx'
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type LiHTMLAttributes, type ReactNode } from 'react'
 import { act, counts, definePlugin, getState, goPlace, manyMachines, openSplit, placeOf, removeSpace, setUI, splitClick, useSnap, useUI, type Pane, type UI } from '@client/kernel.ts'
 import { Dialog, RowMenu, useRowMenu } from '@client/rowmenu.tsx'
-import { BackIcon, BellIcon, CogIcon, BellSlashIcon, AttentionBadge, attentionWords, DeleteIcon, DownIcon, HashIcon, ic, IconButton, List, MenuItem, MenuLabel, MenuSeparator, MenuSetting, Meta, ModelIcon, MonitorIcon, NextIcon, PinnedIcon, PinTaskIcon, PlusIcon, Primary, ReadIcon, RemoveProjectIcon, RenameIcon, rowClass, RowText, SectionIcon, ServerIcon, SplitIcon, TasksIcon, UnpinIcon } from '@client/ui.tsx'
+import { AutopilotIcon, BackIcon, BellIcon, CogIcon, BellSlashIcon, AttentionBadge, attentionWords, DeleteIcon, DownIcon, HashIcon, ic, IconButton, List, MenuItem, MenuLabel, MenuSeparator, MenuSetting, Meta, ModelIcon, MonitorIcon, NextIcon, PinnedIcon, PinTaskIcon, PlusIcon, Primary, ReadIcon, RemoveProjectIcon, RenameIcon, rowClass, RowText, SectionIcon, ServerIcon, SplitIcon, TasksIcon, UnpinIcon } from '@client/ui.tsx'
 import { HealthDot, MachineMeter } from '@plugins/health/client.tsx'
 import { toast } from '@plugins/alerts/toasts.tsx'
 import { MarkRead, markPlaceRead, muted, placeUnread } from '@client/unread.ts'
@@ -314,22 +314,26 @@ function usePlaceRow({ p, snap, where }: { p: Place; snap: Snapshot; where?: str
   const fresh = placeUnread(snap, p) && snap.look?.unread !== false
   const quiet = muted(snap, p.id)
   const off = p.status === 'off' && !p.connecting
-  // 3.0's row: no Autopilot mark (the chat's header has its switch); after the name only what's unusual: its machine
-  // (in Pinned), its folder where another space on its machine has its name, its repo and branch, ↑ahead ↓behind
-  // (core/spaces.js gitTail, as the window's)
-  const pilot = false
+  // its Autopilot (SHEP-5): a small mark before the name while on, pulsing while a wake runs (its turn) or waits for
+  // its Assistant; after the name only what's unusual: its machine (in Pinned), its folder where another space on its
+  // machine has its name, its repo and branch, ↑ahead ↓behind (core/spaces.js gitTail, as the window's)
+  const pilot = !!p.pilot?.on
+  const waking = pilot && !!(p.pilot?.inflight || p.pilot?.pending)
   const label = [where, sharedNames(snap).has(p.id) && p.where ? (SPc.tilde as (x: string) => string)(p.where) : null].filter(Boolean).join(' · ') || null
   const tail = p.git ? (SPc.gitTail as (g: object, o: object) => { where: string; ahead: number; behind: number })({ name: p.gitName, branch: p.branch, ahead: p.ahead, behind: p.behind }, { name: p.name, tree: !!treeMark.get(p.id), tag: label }) : { where: label ?? '', ahead: 0, behind: 0 }
   return {
     sel,
     // what the row says aloud, its count and offline too
-    said: `${p.name}${where ? ` on ${where}` : ''}${p.home ? ', home space' : ''}${p.connecting ? ', connecting' : off ? ", can't reach" : n ? `, ${c.ownNeed} need you, ${c.ownReady} ready here` : ''}${fresh && !off ? ', unread' : ''}${pilot ? ', on Autopilot' : ''}${quiet ? ', muted' : ''}`,
+    said: `${p.name}${where ? ` on ${where}` : ''}${p.home ? ', home space' : ''}${p.connecting ? ', connecting' : off ? ", can't reach" : n ? `, ${c.ownNeed} need you, ${c.ownReady} ready here` : ''}${fresh && !off ? ', unread' : ''}${pilot ? (waking ? ', Autopilot waking' : ', on Autopilot') : ''}${quiet ? ', muted' : ''}`,
     fresh,
     // the Autopilot mark, then the space's # before the name, as Slack's channels have: grey, lit with the name where
     // it is open or something is new
     mark: (
       <>
-        <span aria-hidden data-autopilot={pilot || undefined} className={clsx('mode-pill mark', !pilot && 'invisible')} />
+        <span aria-hidden data-autopilot={pilot || undefined} data-waking={waking || undefined} title={pilot ? (waking ? 'Autopilot waking' : 'Autopilot on') : undefined}
+          className={clsx('pilot-mark grid size-3.5 shrink-0 place-items-center', !pilot && 'invisible', waking ? 'text-work' : 'text-fg3')}>
+          <AutopilotIcon className="size-3" />
+        </span>
         {/* Shepherdr 3: a space's own icon (an emoji) where it has one */}
         {treeMark.get(p.id) ? <BranchIcon className={clsx(icon, 'text-fg3')} /> : p.emoji ? <span aria-hidden className={clsx(icon, 'grid place-items-center text-[0.9375rem] leading-none', quiet && 'opacity-50')}>{p.emoji}</span> : <HashIcon className={clsx(icon, fresh ? 'text-fg' : sel && !quiet ? 'text-fg2' : 'text-fg3')} />}
       </>

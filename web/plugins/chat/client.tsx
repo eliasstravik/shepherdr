@@ -25,7 +25,7 @@ import { answeredBy, cancelReply, canReply, isArtifact, jumpTo, startReply } fro
 import { typing, working } from './typing.ts'
 import { JobsSheet, JobsTag, NeedsYou, TurnLine, WorkingLine } from './activity.tsx'
 import { ClockIcon, PaperClipIcon } from '@heroicons/react/16/solid'
-import { AskedRow, Band, BriefRow, Chips, EndedRow, ErrorRow, NoteRow, Notice, HeadRow, ImagesLine, NewsRow, onTerminal, PublishingRow, questionsBelow, ReplyLine, Thumbs, WORDS } from './rows.tsx'
+import { AskedRow, Band, BriefRow, Chips, EndedRow, ErrorRow, NoteRow, Notice, HeadRow, ImagesLine, NewsRow, onTerminal, PilotRow, PublishingRow, questionsBelow, ReplyLine, Thumbs, WORDS } from './rows.tsx'
 import { AgentLine, openModelMenu, openRestart, RestartSheet } from '@client/restart.tsx'
 
 /* ---------- messages ---------- */
@@ -1124,7 +1124,7 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
   const rows: (Item | Quiet)[] = []
   const pics = new Map<Message, Message[]>()
   const imgLines = new Map<Message, number>()
-  const isQuiet = (m: Message) => !!(m.activity || m.brief || m.news || m.publishing || m.ended)
+  const isQuiet = (m: Message) => !!(m.activity || m.brief || m.news || m.publishing || m.ended || m.pilot)
   for (const it of items) {
     const last = rows.at(-1)
     if ('msg' in it && isQuiet(it.msg)) {
@@ -1188,7 +1188,7 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
                 <div data-quiet className="flex w-full flex-col">
                   {it.quiet.map((m) => (
                     <div key={m.id} data-msg={m.id} data-chat={chat.key} className="w-full">
-                      {m.activity ? <TurnLine a={m.activity} chat={chat.key} /> : m.brief ? <BriefRow msg={m} /> : m.news ? <NewsRow msg={m} /> : m.ended ? <EndedRow msg={m} /> : <PublishingRow />}
+                      {m.activity ? <TurnLine a={m.activity} chat={chat.key} /> : m.brief ? <BriefRow msg={m} /> : m.news ? <NewsRow msg={m} /> : m.ended ? <EndedRow msg={m} /> : m.pilot ? <PilotRow msg={m} /> : <PublishingRow />}
                     </div>
                   ))}
                 </div>

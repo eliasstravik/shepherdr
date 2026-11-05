@@ -7,6 +7,7 @@
 // heartbeat" follows it while the heartbeat is empty. Every word is core/menus.js's or core/confirm.js's, as the window's.
 // On a phone the tabs, the shown tab's menu and the + menu's items are in the header's ⋯.
 import clsx from 'clsx'
+import { PlayIcon } from '@heroicons/react/16/solid'
 import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode, type WheelEvent } from 'react'
 import { attentionCounts } from '@client/attention.ts'
 import { openRole } from '@client/screens/Role.tsx'
@@ -48,10 +49,11 @@ function AutopilotHeader({ place }: { place: Place }) {
   const phone = useUI((u) => u.device === 'phone')
   const other = useUI((u) => !!u.term?.startsWith('t:'))
   const [want, setWant] = useState<boolean | null>(null)
+  const [running, setRunning] = useState(false)
   const [, setNow] = useState(0)
-  // "Next 10:00" becomes a weekday further off than a day, and back: looked at again now and then
+  // "Next in 7 min" counts down, "Next 10:00" becomes a weekday further off than a day: looked at again each 15 s
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30000)
+    const t = setInterval(() => setNow(Date.now()), 15000)
     return () => clearInterval(t)
   }, [])
   useEffect(() => {
@@ -72,6 +74,21 @@ function AutopilotHeader({ place }: { place: Place }) {
       failed(`Autopilot didn't turn ${next ? 'on' : 'off'}`)(e as Error)
     }
   }
+  // Run now (herdr-task autopilot run-now): queued until the Assistant is idle, which the words then say ("Queued",
+  // "Waking"); it waits while one is already queued or running
+  const busy = running || !!shown.pending || !!shown.inflight
+  const runNow = async () => {
+    if (busy) return
+    setRunning(true)
+    try {
+      const r = await act({ type: 'autopilot-run', place: place.id })
+      if (r.error) throw new Error(r.error)
+    } catch (e) {
+      failed("Autopilot didn't wake")(e as Error)
+    } finally {
+      setRunning(false)
+    }
+  }
   const words = clsx('@max-[30rem]/place:hidden', phone && 'hidden')
   return (
     <div data-autopilot className="flex shrink-0 items-center gap-2 text-[0.8125rem]" title={phone ? AP.TITLE : undefined}>
@@ -79,7 +96,16 @@ function AutopilotHeader({ place }: { place: Place }) {
       <button type="button" tabIndex={-1} aria-hidden="true" onClick={() => void flip()} className={clsx('shrink-0 font-medium', on ? 'text-fg' : 'text-fg2', words)}>
         {AP.TITLE}
       </button>
-      {on ? <span className={clsx('min-w-0 truncate text-fg3 tabular-nums', shown.inflight && 'animate-pulse', words)}>{AP.headerDetail(shown)}</span> : null}
+      {on ? <span className={clsx('min-w-0 truncate text-fg3 tabular-nums', shown.inflight && 'animate-pulse', words)}>{running && !shown.pending && !shown.inflight ? 'Queuing…' : AP.headerDetail(shown)}</span> : null}
+      {on && want === null ? (
+        <button type="button" data-run-now disabled={busy} onClick={() => void runNow()} title={phone ? 'Run now' : undefined}
+          aria-label="Run Autopilot now"
+          className="press-dim relative flex h-6 shrink-0 items-center gap-1 rounded-md py-1 pr-2 pl-1.5 text-[0.75rem] font-medium text-fg2 ring-1 ring-line hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent">
+          <PlayIcon aria-hidden className="size-3.5" />
+          <span className={clsx(phone && 'sr-only')}>Run now</span>
+          <span aria-hidden className="absolute top-1/2 left-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden" />
+        </button>
+      ) : null}
       {on && a.blank ? (
         <button type="button" onClick={() => openAutopilot(place)} className="press-dim shrink-0 text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent">
           Write a heartbeat
