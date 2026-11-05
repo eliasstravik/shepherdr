@@ -12,6 +12,7 @@ export const WORDS = {
   browse: "Browse…",
   loading: "Loading…",
   empty: "No folders inside",
+  noMatch: "No matching folders",
   missing: "This folder doesn't exist. It will be created.",
   makeRepo: "Make it a git repo",
   makeRepoWhy: "so each task gets its own worktree",
@@ -51,6 +52,28 @@ export const pathOf = (text, home) => {
   const f = String(text ?? "").trim();
   return /^[~/]/.test(f) ? untilde(f.length > 1 ? f.replace(/\/+$/, "") : f, home) : null;
 };
+
+// The folder a field's text is inside, as a shell completes a path: the part up to its last / (as a path) and
+// the word after it, or null when the text has no / or isn't a path ("~/dev/sh" → { dir: <home>/dev, word: "sh" }).
+export const typedDir = (text, home) => {
+  const f = String(text ?? "").trimStart();
+  const i = f.lastIndexOf("/");
+  if (i < 0 || !/^[~/]/.test(f)) return null;
+  const d = f.slice(0, i + 1);
+  return { dir: d === "/" ? "/" : untilde(d.replace(/\/+$/, "") || "/", home), word: f.slice(i + 1) };
+};
+
+// A folder as the field holds it to list what's inside: from home as ~, ending in /.
+export const asDir = (p, home) => { const t = tilde(p, home); return t.endsWith("/") ? t : t + "/"; };
+
+// A folder's subfolders (paths) whose name matches `word`, ignoring case: those starting with it first, then
+// those containing it, each in their order.
+export function matching(paths, word) {
+  const w = String(word ?? "").toLowerCase();
+  if (!w) return [...paths];
+  const name = (p) => (p.split("/").filter(Boolean).pop() ?? p).toLowerCase();
+  return [...paths.filter((p) => name(p).startsWith(w)), ...paths.filter((p) => !name(p).startsWith(w) && name(p).includes(w))];
+}
 
 // The suggestions: `all` (recent folders, Browse…'s picks first) matching what's typed (all of them for
 // an empty field or a path), at most SHOWN, the field's own folder left out.

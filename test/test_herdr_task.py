@@ -130,14 +130,14 @@ class Autopilot(unittest.TestCase):
         self.assertTrue(os.path.exists(self.ap.heartbeat_path()))
         # Everywhere's schedule changes reach it
         v0 = v["next_run"]
-        self.cmd("set", everywhere=True, every="weekdays 9:00")
+        self.cmd("set", everywhere=True, every="weekdays 9:07")
         v = self.cmd("show", space="sp1")
-        self.assertEqual(v["every"], "weekdays 9:00")
+        self.assertEqual(v["every"], "weekdays 9:07")
         self.assertNotEqual(v["next_run"], v0)
         # its own schedule wins there (and gets its own next wake); its events still follow Everywhere's
         v = self.cmd("set", space="sp1", every="every 2 hours")
         self.assertEqual((v["every"], v["events"], v["own"]), ("every 2 hours", ["ready"], ["every"]))
-        self.assertEqual(self.cmd("show", space="sp2")["every"], "weekdays 9:00")
+        self.assertEqual(self.cmd("show", space="sp2")["every"], "weekdays 9:07")
         self.cmd("set", everywhere=True, every="every 60 minutes")
         self.assertEqual(self.cmd("show", space="sp1")["every"], "every 2 hours")
         # "default": back to Everywhere's
