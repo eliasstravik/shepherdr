@@ -65,7 +65,8 @@ export function checksLine(cs) {
 export const CHECK_ORDER = { fail: 0, pending: 1, pass: 2, skip: 3 };
 
 // The side views' words, as the window's mods show them (task-files, task-changes, task-pr): the web app's Files,
-// Changes and Pull request say the same (core/worktree.test.js checks the mods still say these).
+// Changes and Pull request say the same (core/worktree.test.js checks the mods still say these, but All files: the
+// web's back button's label, where the window's chevron says nothing).
 export const VIEW_WORDS = {
   allFiles: "All files",
   loadingFiles: "Loading files…",

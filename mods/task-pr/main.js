@@ -88,8 +88,9 @@ export default class PullRequest extends View {
     const pr = res.pr;
     // A state is a soft tint with its word in the colour (red is for what needs you, so Closed is grey).
     const tone = { open: ["Open", t.ansi2], draft: ["Draft", t.muted], merged: ["Merged", t.ansi5], closed: ["Closed", t.muted] }[pr.state];
-    const icon = { pass: ["mods/workspace-chrome/circle-check.svg", t.ansi2], fail: ["mods/task-pr/circle-x.svg", t.ansi1],
-      pending: ["mods/workspace-chrome/clock.svg", t.working], skip: ["mods/task-pr/circle-minus.svg", t.dim] };
+    // Each state's word stays beside its mark: the web's checks say it (core/worktree.js CHECK_WORDS).
+    const icon = { pass: ["mods/workspace-chrome/circle-check.svg", t.ansi2, "Passed"], fail: ["mods/task-pr/circle-x.svg", t.ansi1, "Failed"],
+      pending: ["mods/workspace-chrome/clock.svg", t.working, "Running"], skip: ["mods/task-pr/circle-minus.svg", t.dim, "Skipped"] };
     return root
       // The bar the other views have: its state and number, the size of the change.
       .child(h_flex().h(34).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border).text_size(12)
