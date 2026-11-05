@@ -50,19 +50,29 @@ let sources: AudioBufferSourceNode[] = []
 /** the agent's first words, when they come before the microphone is through */
 let waiting: ArrayBuffer[] = []
 
-export async function startCall(chatKey: string, onError: (message: string) => void = () => undefined) {
+/** what the voice agent asked to show (service/voice-tools.ts Nav), done by the page */
+export type Nav = { kind: string; [k: string]: unknown }
+
+/** what the page shows now, for the voice agent's "here" and "this task" (sent as it changes) */
+export function sendWhere(where: Record<string, unknown>) {
+  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'where', ...where }))
+}
+
+export async function startCall(chatKey: string, onError: (message: string) => void = () => undefined, onNav: (nav: Nav) => void = () => undefined, onOpen: () => void = () => undefined) {
   stopCall()
   const url = new URL(`api/voice?chat=${encodeURIComponent(chatKey)}`, location.href)
   url.protocol = url.protocol.replace('http', 'ws')
   ws = new WebSocket(url)
   ws.binaryType = 'arraybuffer'
+  ws.onopen = () => onOpen()
   ws.onmessage = (e) => {
     if (e.data instanceof ArrayBuffer) {
       phase = 'listening'
       if (!play(e.data)) { stopCall(); onError('Voice audio could not keep up. Start a new call.') }
       return
     }
-    const m = JSON.parse(String(e.data)) as { type: string; message?: string; state?: typeof phase }
+    const m = JSON.parse(String(e.data)) as { type: string; message?: string; state?: typeof phase; nav?: Nav }
+    if (m.type === 'nav' && m.nav) onNav(m.nav)
     if (m.type === 'state' && m.state) {
       phase = m.state
       phaseAt = Date.now()

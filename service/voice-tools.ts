@@ -181,7 +181,8 @@ function taskLine(snap: Snapshot, t: Task, withPlace = true) {
   return `${spoken(t.id)}, "${cut(t.name, 80)}"${space ? ` in ${space}` : ""}: ${bits.join(", ")}${what ? `. ${cut(what, 140)}` : ""}`;
 }
 
-function lookHere(snap: Snapshot, where: Where) {
+/** Where the call is and what the app shows, in words (look here, and the call's opening). */
+export function lookHere(snap: Snapshot, where: Where) {
   const from = where.client === "web" ? `the web app${where.device ? ` on a ${where.device}` : ""}` : `the Herdr window${where.machine ? ` on ${where.machine}` : ""}`;
   const out = [`The call runs in ${from}. It is with ${chatName(snap, where.call)}.`];
   const shows: string[] = [];
@@ -204,7 +205,7 @@ async function lookChat(io: VoiceIO, snap: Snapshot, where: Where, id: unknown, 
   const read = await io.chat(c.key);
   if (!read) return fail(`I can't read ${c.name}'s chat right now: its agent isn't running.`);
   const st = read.status === "working" ? `working${read.doing ? `: ${cut(read.doing, 120)}` : ""}` : read.status === "blocked" ? "waiting for the person" : read.status === "done" || read.status === "idle" ? "idle, waiting for a message" : read.status ?? "not running";
-  const line = (x: ChatRead["items"][number]) => `${x.who === "you" ? "Person" : x.who === "news" ? "Shepherdr" : "Agent"}${x.at ? ` (${ago(x.at)})` : ""}: ${cut(x.text, query ? 300 : 500)}`;
+  const line = (x: ChatRead["items"][number]) => `${x.who === "you" ? "Person" : x.who === "news" ? "From elsewhere" : "Agent"}${x.at ? ` (${ago(x.at)})` : ""}: ${cut(x.text, query ? 300 : 500)}`;
   if (query) {
     const ws = words(query);
     const find = () => read.items.filter((x) => ws.every((w) => x.text.toLowerCase().includes(w)));
