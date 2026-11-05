@@ -24,7 +24,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, TextareaState, Textarea, Scrollbar, VirtualListScrollHandle, TextView, v_virtual_list, InputState, Input } from "gpui-base";
-import { focused, props, run, theme, home, hc, exec, shared, setShared, watchFolder, window, settings, playSound, notify, appHome, readTextFile, writeTextFile, nextCommand, openOverlay, knownAgents, machines } from "herdr";
+import { focused, props, run, theme, home, hc, exec, shared, setShared, watchFolder, window, settings, playSound, notify, appHome, readTextFile, writeTextFile, nextCommand, openOverlay, knownAgents, machines, layout } from "herdr";
 import { agents, panes, terminals, spaces, inRender } from "./live.js";
 import * as fs from "fs/promises";
 import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names, pilotLine } from "./core/chat-log.js";
@@ -49,7 +49,7 @@ import * as mentions from "./core/mentions.js";
 import * as agent from "./agent.js";
 import * as choices from "./settings.js";
 import { Dictation } from "./dictate.js";
-import { PanelHost, inner, openTaskThread, backToTasks, requestWorkerTerminal, THREAD } from "./panel.js";
+import { PanelHost, inner, openTaskThread, backToTasks, requestWorkerTerminal, THREAD, STACK as TASKS_STACK, BODY as THREAD_BODY, CHAT as THREAD_CHAT, TERM as THREAD_TERM, FILES as THREAD_FILES, CHANGES as THREAD_CHANGES, PR as THREAD_PR, BROWSER as THREAD_BROWSER } from "./panel.js";
 import { markRead, onScreen, unread } from "./unread.js";
 import { notifies } from "./notify.js";
 import { ScreenWatch, screenStrips, openCard, cardsOf, starting, cliOf } from "./screens.js";
@@ -2161,6 +2161,7 @@ export default class Chat extends View {
     const name = `${agent.NAMES[this.kind] ?? "the agent"}`;
     await exec("sh", ["-c", 'rm -rf "$1" "$1.level" && mkdir -p "$1/in" && touch "$1/alive"', "x", dir]);
     this.callRecent();
+    this.callWhereWas = null;
     // The helper runs beside the app (setsid: not tied to this mod's exec); it ends itself when
     // the chat stops touching `alive`.
     await exec("sh", ["-c", 'setsid bun "$2" "$1" "$3" "$4" </dev/null >"$1/log" 2>&1 &', "x", dir, `${appHome()}/mods/chat/voice.ts`, this.addr, name]);
@@ -2210,8 +2211,66 @@ export default class Chat extends View {
         const w = { dir, next: watchFolder(dir).catch(() => null).finally(() => { if (this.callWatch === w) this.callWatch = null; }) };
         this.callWatch = w;
       }
+      // What the window shows, for the call's "here"; what the voice agent asked to show.
+      this.callWhere();
+      await this.callNav();
       await Promise.race([this.callWatch.next, cx.sleep(1000)]);
     }
+  }
+
+  // What the window shows now, for the voice agent's "here", "this task" (voice.ts reads where.json): the space
+  // selected, and the task open in the Tasks panel with its tab. Written only when it changes.
+  callWhere() {
+    const find = (node, id) => { if (!node || typeof node !== "object") return null; if (node.id === id) return node; for (const c of node.children ?? []) { const hit = find(c, id); if (hit) return hit; } return null; };
+    const s = spaces().find((x) => x.active);
+    const place = s ? (s.machine && !String(s.id).includes("/") ? `${s.machine}/${s.id}` : String(s.id)) : null;
+    const tree = layout();
+    const panel = find(tree, "panel"), thread = shared("tasks.thread");
+    const open = panel && !panel.hidden && find(tree, "panel-body")?.active === TASKS_STACK && find(tree, TASKS_STACK)?.active === THREAD && thread?.task;
+    const m = open && String(thread.terminal ?? "").includes("/") ? String(thread.terminal).split("/")[0] : null;
+    const TAB = { [THREAD_CHAT]: "chat", [THREAD_TERM]: "terminal", [THREAD_FILES]: "files", [THREAD_CHANGES]: "changes", [THREAD_PR]: "pr", [THREAD_BROWSER]: "browser" };
+    const w = JSON.stringify({ place, task: open ? (m ? `${m}:${thread.task}` : String(thread.task)) : null, tab: open ? TAB[find(tree, THREAD_BODY)?.active] ?? "chat" : null });
+    if (w === this.callWhereWas) return;
+    this.callWhereWas = w;
+    fs.writeFile(`${this.callDir}/where.json`, w).catch(() => {});
+  }
+
+  // What the voice agent asked to show (service/voice-tools.ts Nav, written by voice.ts into nav/), done here.
+  async callNav() {
+    const box = `${this.callDir}/nav`;
+    const names = (await fs.readdir(box).catch(() => [])).filter((f) => f.endsWith(".json")).sort();
+    for (const f of names) {
+      let nav = null;
+      try { nav = JSON.parse(await fs.readFile(`${box}/${f}`, "utf8")); } catch {}
+      await fs.rm(`${box}/${f}`).catch(() => {});
+      if (nav) try { this.voiceNav(nav); } catch (e) { console.error(`voice nav: ${e?.message ?? e}`); }
+    }
+  }
+
+  voiceNav(nav) {
+    const spaceOf = (place) => spaces().find((x) => String(x.id) === place || (x.machine && `${x.machine}/${x.id}` === place));
+    if (nav.kind === "space") { const sp = spaceOf(nav.place); if (sp) run("space.select", { id: sp.id }); }
+    else if (nav.kind === "chat") {
+      // the call's own chat: its pane; another chat: its space, or its task's chat in the Tasks panel
+      if (nav.addr === this.addr) { const mine = this.myPane() ?? this.lastPane; if (mine) this.revealPane(mine); }
+      else if (/\/worker$/.test(nav.chat ?? "") && nav.addr) openTaskThread(nav.addr, nav.chat.slice(0, -7).split(":").pop(), null);
+      else if (String(nav.chat ?? "").startsWith("p:")) { const sp = spaceOf(nav.chat.slice(2).replace(":", "/")); if (sp) run("space.select", { id: sp.id }); }
+    } else if (nav.kind === "task") {
+      if (nav.tab === "review" && nav.ref && nav.folder) {
+        openOverlay({ mod: "accept-card", kind: "dialog", modal: true, width: 640, height: 640, props: { ref: nav.ref, folder: nav.folder, machine: nav.machine ?? null, title: nav.title } });
+        return;
+      }
+      if (!nav.addr) { setShared("tasks.searchreq", { q: `${nav.ref ?? nav.task} ${nav.title ?? ""}`.trim(), at: Date.now() }); run("layout.select", { stack: "panel-body", child: TASKS_STACK }); backToTasks(); run("layout.show", { id: "panel" }); return; }
+      openTaskThread(nav.addr, nav.ref ?? String(nav.task).split(":").pop(), nav.title ?? null);
+      const child = { terminal: THREAD_TERM, files: THREAD_FILES, changes: THREAD_CHANGES, pr: THREAD_PR, browser: THREAD_BROWSER }[nav.tab];
+      if (child) { if (nav.tab === "terminal") requestWorkerTerminal(nav.addr); run("layout.select", { stack: THREAD_BODY, child }); }
+    } else if (nav.kind === "tasks" || nav.kind === "needs") {
+      run("layout.select", { stack: "panel-body", child: TASKS_STACK });
+      backToTasks();
+      run("layout.show", { id: "panel" });
+    } else if (nav.kind === "artifact") {
+      openViewer({ id: nav.artifact, title: nav.title, version: nav.v, latest: nav.v, machine: nav.machine ?? null });
+    } else if (nav.kind === "settings") run("app.settings", nav.section ? { section: String(nav.section).toLowerCase() } : {});
   }
 
   callSay(m) {
