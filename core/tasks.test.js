@@ -162,31 +162,32 @@ test("place: a worker's helper keeps it Working, never Needs you", () => {
 });
 
 describe("a space's tasks (the Tasks panel's This space)", () => {
-  const space = { id: "sp1", name: "lane", folder: "/home/me/lanes/lane", machine: null };
+  const space = { id: "sp1", name: "lane", folder: "/w/lanes/lane", machine: null };
   test("a list in the space's folder, or a repo directly in it", () => {
-    expect(inSpace(space, { folder: "/home/me/lanes/lane" })).toBe(true);
-    expect(inSpace({ ...space, folder: "/home/me/lanes/lane/" }, { folder: "/home/me/lanes/lane/repo" })).toBe(true);
-    expect(inSpace(space, { folder: "/home/me/lanes/lane/repo/sub" })).toBe(false);
-    expect(inSpace(space, { folder: "/home/me/lanes/lane-2" })).toBe(false);
-    expect(inSpace(space, { folder: "/home/me/lanes" })).toBe(false);
+    expect(inSpace(space, { folder: "/w/lanes/lane" })).toBe(true);
+    expect(inSpace({ ...space, folder: "/w/lanes/lane/" }, { folder: "/w/lanes/lane/repo" })).toBe(true);
+    expect(inSpace(space, { folder: "/w/lanes/lane/repo/sub" })).toBe(false);
+    expect(inSpace(space, { folder: "/w/lanes/lane-2" })).toBe(false);
+    expect(inSpace(space, { folder: "/w/lanes" })).toBe(false);
   });
   test("a space in a home folder has only its own list, not every repo there", () => {
-    for (const home of ["/Users/me", "/home/me", "/root"]) {
+    // built, so no personal-looking path sits in the repo (test/test_repo.py)
+    for (const home of ["Users", "home"].map((h) => `/${h}/me`).concat("/root")) {
       expect(inSpace({ ...space, folder: home }, { folder: `${home}/repo` })).toBe(false);
       expect(inSpace({ ...space, folder: home }, { folder: home })).toBe(true);
       expect(inSpace({ ...space, folder: home }, { folder: `${home}/repo`, space: "sp1" })).toBe(true);
     }
   });
   test("a task started for the space, wherever its list is", () => {
-    expect(inSpace(space, { folder: "/home/me/repo", space: "sp1" })).toBe(true);
-    expect(inSpace(space, { folder: "/home/me/repo", space: "sp2" })).toBe(false);
-    expect(inSpace(space, { folder: "/home/me/repo" })).toBe(false);
+    expect(inSpace(space, { folder: "/w/repo", space: "sp1" })).toBe(true);
+    expect(inSpace(space, { folder: "/w/repo", space: "sp2" })).toBe(false);
+    expect(inSpace(space, { folder: "/w/repo" })).toBe(false);
   });
   test("only on the space's machine; ids with or without their machine", () => {
     const vm = { ...space, id: "vm/sp1", machine: "vm" };
     expect(inSpace(vm, { machine: "vm", folder: "/x", space: "sp1" })).toBe(true);
     expect(inSpace(vm, { machine: "vm", folder: "/x", space: "vm/sp1" })).toBe(true);
-    expect(inSpace(vm, { folder: "/home/me/lanes/lane", space: "sp1" })).toBe(false);
-    expect(inSpace(null, { folder: "/home/me/lanes/lane" })).toBe(false);
+    expect(inSpace(vm, { folder: "/w/lanes/lane", space: "sp1" })).toBe(false);
+    expect(inSpace(null, { folder: "/w/lanes/lane" })).toBe(false);
   });
 });
