@@ -99,6 +99,18 @@ export class Model {
   /** Builds again soon (something the snapshot shows changed outside: an ask). */
   rebuild() { this.soon(); }
 
+  /** A space just made (New space): its machine's spaces read again until it is among them (up to `ms`; another
+   *  machine's document can land a moment after the window answers), the snapshot built with it. Whether it showed. */
+  async waitSpace(id: string, ms = 4000) {
+    const end = Date.now() + ms;
+    for (;;) {
+      await this.readDocs();
+      this.build();
+      if (this.spaces.some((s) => s.id === id) || Date.now() >= end) return this.spaces.some((s) => s.id === id);
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+
   private async refresh() {
     try {
       const r = await this.hub.call<{ machines: any[] }>("machine.list", {});

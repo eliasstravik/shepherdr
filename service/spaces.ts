@@ -12,10 +12,12 @@ import { exec } from "./model.ts";
 import * as NS from "../core/newspace.js";
 import * as SP from "../core/spaces.js";
 
-const APP = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
-export const withWindow = () => existsSync(join(APP, "mods", "spaces-chat"));
+export const withWindow = () => existsSync(join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "mods", "spaces-chat"));
 
 async function run(cmd: string[]) {
+  // the window's herdr-app: SHEPHERDR_HERDR_APP in tests (as service/actions.ts)
+  if (cmd[0] === "herdr-app" && process.env.SHEPHERDR_HERDR_APP) cmd = [process.env.SHEPHERDR_HERDR_APP, ...cmd.slice(1)];
+  if (cmd[0] === "hc" && process.env.SHEPHERDR_HC) cmd = [process.env.SHEPHERDR_HC, ...cmd.slice(1)];
   const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
   return { code: await p.exited, out, err };
@@ -76,6 +78,11 @@ export async function execTemplate(hub: Hub, name: string, machine: string | nul
   return { name: one, words: src.slice(head[0].length).trim(), done: () => void exec(hub, ["sh", "-c", DIR + 'rm -f "$dir/$1.md"', "x", one], machine).catch(() => null) };
 }
 
+/** The web's id for the space the window made: Herdr already answers another machine's as "<machine>/<id>" (its
+ *  ids are qualified, as its tabs'); kept as it is, never "<machine>/<machine>/<id>" (SHEP-56: the page then waited
+ *  for a space that never came). */
+export const placeId = (space: string, machine: string | null) => (!machine || space.startsWith(`${machine}/`) ? space : `${machine}/${space}`);
+
 /** Makes a space at path on machine (null: here), as the window's New space (mods/newspace, coordinator.js
  *  createSpace): a missing folder is made, makeRepo makes a folder outside git a repo (main, an empty first commit), it
  *  is named as Herdr names it ("Home" at home, else its repo's or folder's name; unnamed: left to follow its folder, as
@@ -105,8 +112,9 @@ export async function newSpace(hub: Hub, opts: { machine: string | null; path: s
     const r = await run(["herdr-app", "do", "space.new", "--folder", abs, ...(opts.unnamed ? [] : ["--name", name]), ...(machine ? ["--machine", machine] : [])]);
     let out: any = {};
     try { out = JSON.parse(r.out || "{}"); } catch {}
+    if (out.error) throw new Error(`Herdr couldn't make it: ${out.error}`);
     if (r.code !== 0 || !out.space) throw new Error("A new space opens in the Herdr window: it needs the window open.");
-    const place = machine ? `${machine}/${out.space}` : out.space as string;
+    const place = placeId(String(out.space), machine);
     await iconOf(place);
     return place;
   }
