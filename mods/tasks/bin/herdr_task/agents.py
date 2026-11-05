@@ -10,12 +10,32 @@ from .base import hc_json, HOME, now, RANK, SHELLS
 
 # ---- live agents ----------------------------------------------------------------------------
 
-def live_agents(key):
-    """The task's live terminals, with labels (hc ls leaves labels out unless filtering by them).
-    Agents start inside the person's shell, which stays when the agent exits: agent_running()."""
+# A worker's own helper agents (SHEP-54): hc children of its terminal it starts itself (`hc run`), labelled
+# herdr.task (its task) and herdr.role reviewer or helper. Never one of the task's agents: no second worker, no
+# status of their own; a working one keeps its quiet worker Working (own_work).
+HELPER_ROLES = ("reviewer", "helper")
+
+
+def is_helper(k):
+    return (k.get("labels") or {}).get("herdr.role") in HELPER_ROLES and bool(k.get("parent"))
+
+
+def _live(key):
     d = hc_json("ls", "--label", f"herdr.task={key}") or {}
     return [dict(k, labels=dict(k.get("labels") or {}, **{"herdr.task": key}))
             for k in d.get("terminals", []) if k.get("state") == "live"]
+
+
+def live_agents(key):
+    """The task's live terminals, with labels (hc ls leaves labels out unless filtering by them),
+    its worker's helpers left out (live_helpers()). Agents start inside the person's shell, which
+    stays when the agent exits: agent_running()."""
+    return [k for k in _live(key) if not is_helper(k)]
+
+
+def live_helpers(key):
+    """The helper agents its worker started (a reviewer, a second opinion), still live."""
+    return [k for k in _live(key) if is_helper(k)]
 
 
 def detail(k):
@@ -574,11 +594,17 @@ def waits_on_own(task, address=None, ended=0):
 
 
 def own_work(task, live):
-    """Its quiet agent is on its own work (above), and its last message asks the person nothing."""
+    """Its quiet agent is on its own work (above), and its last message asks the person nothing.
+    A helper of its own at work (its reviewer, SHEP-54) counts too."""
     for k in live:
         if (k.get("labels") or {}).get("herdr.role") == "reviewer" or status_word(k) == "blocked":
             continue
         address = k.get("address")
+        key = (k.get("labels") or {}).get("herdr.task")
+        if key and any(h.get("parent") == address and status_word(h) in ("working", "blocked") for h in live_helpers(key)):
+            if not last_question(task, address):
+                return True
+            continue
         log = agent_log(task, address) or agent_log(task)
         jobs, ended = background_jobs(log) if log else ({}, 0)
         if (jobs or waits_on_own(task, address, ended)) and not last_question(task, address):
