@@ -68,7 +68,7 @@ export function risky(name) { return RISKY.test(String(name ?? "")); }
 export function nodeLine(n) {
   const bits = [n.ref, n.role].filter(Boolean);
   if (n.name) bits.push(JSON.stringify(clip(n.name, 80)));
-  for (const s of ["selected", "checked", "pressed", "expanded", "collapsed", "disabled", "focused", "current"]) if (n[s]) bits.push(s);
+  for (const s of STATES) if (n[s]) bits.push(s);
   if (n.level) bits.push(`level ${n.level}`);
   if (n.value != null && n.value !== "") bits.push(`value ${JSON.stringify(clip(n.value, 60))}`);
   if (n.options?.length) bits.push(`options ${clip(n.options.slice(0, 8).join(", "), 120)}`);
@@ -77,7 +77,8 @@ export function nodeLine(n) {
 }
 
 /** A node matches find's words when each is in its role, name or value. */
-const matches = (n, ws) => ws.every((w) => `${n.role} ${n.name ?? ""} ${n.value ?? ""}`.toLowerCase().includes(w));
+const STATES = ["selected", "checked", "pressed", "expanded", "collapsed", "disabled", "focused", "current"];
+const matches = (n, ws) => ws.every((w) => `${n.role} ${n.name ?? ""} ${n.value ?? ""} ${STATES.filter((x) => n[x]).join(" ")}`.toLowerCase().includes(w));
 
 /**
  * The screen as the voice agent reads it: a head line (what the app shows, a dialog over it), then a line per thing,

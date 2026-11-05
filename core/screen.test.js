@@ -50,6 +50,8 @@ test("the screen as lines: ref, role, name, states; a dialog over it; cut short 
   expect(found).toContain("e250");
   expect(found).not.toContain("e249 ");
   expect(screenText({ nodes: many.slice(0, 2), find: "zebra" })).toContain("Nothing on screen matches");
+  // a state is found too ("what has the focus")
+  expect(screenText({ nodes: [{ ref: "e1", role: "button", name: "Mute" }, { ref: "e2", role: "button", name: "End call", focused: true }], find: "focused" })).toContain('e2 button "End call" focused');
 });
 
 test("risky clicks: delete, merge, accept, stop, end call; not open, close or back", () => {

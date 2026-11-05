@@ -248,6 +248,49 @@ export function key(k: string, el: Element | null = document.activeElement) {
   return go
 }
 
+/** Enter or Space that would do something that can't be taken back: on a risky button, or in a dialog whose own
+ *  button is (a Remove dialog's box submits on Enter). The words to ask the person, else ''. */
+export function riskyEnter(k: string, at: Element | null) {
+  if (k !== 'Enter' && k !== 'Space') return ''
+  const el = at instanceof HTMLElement ? at : null
+  if (el && S.risky(nameOf(el))) return `Press ${nameOf(el).slice(0, 80)}?`
+  const dialog = el?.closest<HTMLElement>('[aria-modal="true"], [role="alertdialog"], dialog') ?? topDialog()
+  if (!dialog) return ''
+  const b = [...dialog.querySelectorAll<HTMLElement>('button, [role="button"]')].find((x) => shown(x) && S.risky(nameOf(x)))
+  return b ? `Press ${nameOf(b).slice(0, 80)} in ${text(dialog.getAttribute('aria-label')) || 'the dialog'}?` : ''
+}
+
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), [contenteditable="true"]'
+
+/**
+ * A key as the person's keyboard would press it: the page's own handlers first (keydown), then what the browser would
+ * do itself, which a made-up key event doesn't: Tab moves the focus, Enter or Space presses a focused button or link,
+ * Page Up/Down, Home and End scroll. Says what happened.
+ */
+export function pressKey(k: string): string {
+  const at = document.activeElement as HTMLElement | null
+  const handled = !key(k, at)
+  if (handled) return `Pressed ${k}`
+  if (k === 'Tab') {
+    const scope = topDialog() ?? document.body
+    const all = [...scope.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((x) => shown(x) && onScreen(x))
+    if (!all.length) return 'Pressed Tab: nothing on screen takes the focus'
+    const next = all[(all.indexOf(at as HTMLElement) + 1) % all.length]
+    next.focus()
+    const r = roleOf(next)
+    return `Pressed Tab: the focus is on the ${r || 'item'}${nameOf(next) ? ` "${nameOf(next).slice(0, 60)}"` : ''}`
+  }
+  if ((k === 'Enter' || k === 'Space') && at && at !== document.body) {
+    const r = roleOf(at)
+    if (['button', 'link', 'checkbox', 'radio', 'switch', 'tab', 'menuitem', 'option', 'treeitem'].includes(r) && !(at instanceof HTMLInputElement && at.type === 'text')) {
+      press(at)
+      return `Pressed ${k} on the ${r}${nameOf(at) ? ` "${nameOf(at).slice(0, 60)}"` : ''}`
+    }
+  }
+  if (['PageDown', 'PageUp', 'Home', 'End'].includes(k)) return scroll({ PageDown: 'down', PageUp: 'up', Home: 'top', End: 'bottom' }[k]!, null)
+  return `Pressed ${k}; nothing on the page took it`
+}
+
 /** words put in a text box as typing would (React sees the change); the box's old words are replaced */
 export function typeInto(el: HTMLElement, value: string) {
   el.focus()
@@ -313,7 +356,11 @@ export async function screenAction(p: Record<string, unknown>, head: () => Head,
     const did = app.closeTop()
     return did ? after(did) : no('nothing is open over the screen to close')
   }
-  if (q.do === 'key') { key(q.text); return after(`Pressed ${q.text}`) }
+  if (q.do === 'key') {
+    const held = riskyEnter(q.text, document.activeElement)
+    if (held && !q.confirmed) return { ok: false, ask: held, screen: '' }
+    return after(pressKey(q.text))
+  }
   const el = q.ref ? elementOf(q.ref) : null
   if (q.ref && !el) return no(`${q.ref} isn't on the screen any more: here is what is`)
   if (q.do === 'scroll') return after(scroll(q.direction, el))
@@ -329,7 +376,11 @@ export async function screenAction(p: Record<string, unknown>, head: () => Head,
   if (q.do === 'type') {
     if (el instanceof HTMLInputElement && el.type === 'password') return no('that field is for a secret: secrets go in the masked box, never by voice')
     if (!typeInto(el!, q.text)) return no(`the ${called} isn't a text field`)
-    if (q.submit) key('Enter', el)
+    if (q.submit) {
+      const held = riskyEnter('Enter', el)
+      if (held && !q.confirmed) return { ok: false, ask: `${held} (the text is typed in already)`, screen: '' }
+      key('Enter', el)
+    }
     return after(`Typed into the ${called}${q.submit ? ' and pressed Enter' : ''}`)
   }
   if (q.do === 'select') {
