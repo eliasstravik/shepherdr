@@ -159,7 +159,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Writing it down | W "Writing", spinner in Done | C "Writing", Done disabled | ✓ |
 | Call row | W:3259 Mute (mic / mic-off), wave, Connecting / Listening / Thinking / Speaking / Muted + m:ss, red round X | V:98 CallBox: the same, red round X | ✓ |
 | No key | W:2936 "Voice calls need an ElevenLabs key", "Add your key in Settings › Secrets as ELEVENLABS_API_KEY, then press the call button again.", Open Secrets | V:34 CallHelp over the box, same words, Open Secrets | ✓ (was a top error bar) |
-| Call bar elsewhere | B "Voice call with X · m:ss", Go back, red round X | V:146 CallLine: same words, Go back, red round X | ◇ 2.1's green pill look |
+| A call elsewhere (SHEP-51: no bar) | spaces-chat callMark: a green pill with the wave and m:ss on the call's space row, goes back to its chat | places CallMark: the same pill on the space row, goes back to its chat | = |
 | Call error | B "Voice call: …" with × | V:168 | ✓ |
 
 ## Image viewer (mods/chat-image)

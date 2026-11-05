@@ -34,7 +34,7 @@ connection it came on). A page from anywhere else can't change anything: writes 
 - The task browser: Kitty in the window, a live view of the same browser on the web.
 - Voice calls and dictation: the machine's microphone in the window, the phone's on the web, through the service
   (the same ElevenLabs voice agent, `core/voice.js`; ElevenLabs speech to text, Scribe, for dictation, with the
-  same key). The voice agent has four tools (`core/voice.js` TOOLS), answered by the service with the web app's
+  same key). The voice agent has four Shepherdr tools (`core/voice.js` TOOLS), answered by the service with the web app's
   reach (`service/voice-tools.ts`): `look` reads anything (the call's context, any chat or a search in it, spaces,
   machines, tasks, a task's summary and checks, Needs you, news, Autopilot, automations, settings, secret names,
   artifacts), `open` shows something in the app the call runs in: the very page or window that started it (the page gets
@@ -46,6 +46,17 @@ connection it came on). A page from anywhere else can't change anything: writes 
   (`POST /api/voice/tool`, local token); without it only its own chat works. Both sides tell the call what the app shows
   (the page's `where` message, the window's `where.json`). The agent's spec carries a fingerprint (`SPEC`): an agent
   made from an older one is PATCHed on the next call (`ensureAgent`).
+  A fifth tool, `screen` (SHEP-51, `core/screen.js`), is the fallback for what those four can't do: the app that
+  started the call reads what it shows as numbered things, as a screen reader would (`e7 tab "Artifacts" selected`),
+  and does one action on one (click, type, select, scroll, a key, back, close), then answers with its screen again.
+  The page reads its own DOM (`web/plugins/voice/screen.ts`: roles, names, states; only the top modal dialog while one
+  is open; refs stay with their element for the whole call); the window reads its frame (`mods/chat/call-screen.js`:
+  spaces, tabs, the side panel's and a task's tabs, a few commands, the call's chat scrolls) and says what it can't
+  reach (inside another mod's drawing, its dialogs, keys). A click on something that deletes, merges, stops or ends
+  the call is held until the agent says the person said yes (`risky`). The prompt has the agent use look, open, send and
+  act first. `open` also shows the shown space's Artifacts, Files and Changes panels and its Assistant's terminal (a
+  space named: that space first, then its panel), Tasks filtered by a state and words, and a Settings page by its
+  spoken name. A call going on shows as a green mark with its clock on its space's row in the sidebar (no bar).
 - Keys: 3.0's keys work in the web app too (Settings → Keyboard shortcuts on a desktop).
 
 ## Install
