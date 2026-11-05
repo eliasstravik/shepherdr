@@ -24,7 +24,7 @@ import { Markdown } from './markdown.tsx'
 import { answeredBy, cancelReply, canReply, isArtifact, jumpTo, startReply } from './reply.ts'
 import { typing, working } from './typing.ts'
 import { JobsSheet, JobsTag, NeedsYou, TurnLine, WorkingLine } from './activity.tsx'
-import { ClockIcon, PaperClipIcon } from '@heroicons/react/16/solid'
+import { ClockIcon } from '@heroicons/react/16/solid'
 import { AskedRow, Band, BriefRow, Chips, EndedRow, ErrorRow, NoteRow, Notice, HeadRow, ImagesLine, NewsRow, onTerminal, PilotRow, PublishingRow, questionsBelow, ReplyLine, Thumbs, WORDS } from './rows.tsx'
 import { AgentLine, openModelMenu, openRestart, RestartSheet } from '@client/restart.tsx'
 import { expandPicked, forMarkdown, mentionItems, MentionList, pickable, takeItem, useReach, withChips, type Item } from './mentions.tsx'
@@ -1936,14 +1936,14 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
             </div>
             <div data-btns className="flex items-center gap-1">
               {registry.composerPlus ? (
-                // the window's paperclip: the device's file picker; a phone's also offers its camera (a menu)
+                // the window's plus: the device's file picker; a phone's also offers its camera (a menu)
                 <IconButton
                   label={WORDS.attach}
                   className={roundBtn}
                   pressed={plus}
                   onClick={() => device === 'phone' ? setUI({ plus: plus ? null : chatKey }) : document.querySelector<HTMLInputElement>(`input[name=file][data-chat="${CSS.escape(chatKey)}"]`)?.click()}
                 >
-                  <PaperClipIcon className={ic} />
+                  <PlusIcon className={ic} />
                 </IconButton>
               ) : null}
               <div className="flex-1" />
@@ -2218,7 +2218,7 @@ function PlusOpen({ chatKey, file, photo }: { chatKey: string; file: RefObject<H
   const settings = snap ? registry.composerSettings.filter((x) => x.when(snap, chatKey)) : []
   return (
     <Menu label={WORDS.attach} tabs onClose={close} className="w-fit max-w-full origin-bottom-left">
-      {/* a phone's paperclip: Attach files, or its camera; the model is the button in the box */}
+      {/* a phone's plus: Attach files, or its camera; the model is the button in the box */}
       <MenuItem
         icon={<FileIcon className={ic} />}
         onClick={() => {
