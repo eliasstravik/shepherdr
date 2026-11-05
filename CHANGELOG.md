@@ -1,5 +1,20 @@
 # Changelog
 
+## 3.1.8
+
+Tasks that start at a time you pick, an Assistant that never stops quietly, and a few things back where they belong.
+
+- Scheduled tasks: tell a task to start later (at a time, or in an hour) and it starts by itself. They wait in their
+  own Scheduled group with a countdown, and a task's menu has Start later, in the window and on the web.
+- Autopilot never parks silently: when work waits on your Accept it says what waits, carries on with other work, and
+  a quiet wake says why it stayed quiet. 3.1.7's starter heartbeat, if you never edited it, is upgraded (the old one
+  kept as a `.bak`).
+- A task's time left is back under its status icon, short ("2h", "<1m").
+- The Fast switch is back in the model menu for Codex, and turning it off really runs at standard speed.
+- Settings › Agents › Reactions: the Assistant reacts with an emoji where it fits (on by default), or never.
+- Automations say which machine and space they belong to.
+- Voice calls can look around Shepherdr: read a chat, open a space, task or artifact, and send or act for you.
+
 ## 3.1.7
 
 A space's chat says which space it is, and the README shows how to install with an agent.
