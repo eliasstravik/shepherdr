@@ -2140,7 +2140,16 @@ export default class Chat extends View {
       const v = Number((await readTextFile(`${this.callDir}.level`).catch(() => null)) ?? 0);
       return Number.isFinite(v) ? v : 0;
     }, () => this.call === call));
-    cx.spawn(async (cx) => this.runCall(cx));
+    cx.spawn(async (cx) => {
+      try { await this.runCall(cx); } catch (e) {
+        // A call whose window side stopped must end where it can be seen, not hang on (voice.ts would end it 20 s later
+        // with nothing said): why, in the window and in the call's log.
+        const why = `The call stopped in the window: ${e?.message ?? e}`;
+        exec("sh", ["-c", 'printf "%s %s\\n" "$(date +%H:%M:%S)" "$2" >> "$1"', "x", `${this.callDir}/log`, why]).catch(() => {});
+        if (this.call === call) { this.callError(why); await this.hangup(); }
+        cx.notify();
+      }
+    });
   }
 
   async runCall(cx) {
@@ -2210,15 +2219,17 @@ export default class Chat extends View {
         const fresh = (this.conv?.items ?? []).filter((x) => x.kind === "agent" && !seen.has(x.id));
         if (fresh.length) { this.callSay({ type: "reply", text: fresh.slice(-2).map((x) => x.text).join("\n\n") }); fresh.forEach((x) => seen.add(x.id)); }
       }
-      // One watch at a time (a new one each second would pile up while the folder is quiet).
+      // One watch at a time (a new one each second would pile up while the folder is quiet). Kept here before anything
+      // is awaited: a change already waiting settles it at once, and it lets go of this.callWatch then.
       if (this.callWatch?.dir !== dir) {
         const w = { dir, next: watchFolder(dir).catch(() => null).finally(() => { if (this.callWatch === w) this.callWatch = null; }) };
         this.callWatch = w;
       }
+      const changed = this.callWatch.next;
       // What the window shows, for the call's "here"; what the voice agent asked to show.
       this.callWhere();
       await this.callNav();
-      await Promise.race([this.callWatch.next, cx.sleep(1000)]);
+      await Promise.race([changed, cx.sleep(1000)]);
     }
   }
 
@@ -2246,7 +2257,7 @@ export default class Chat extends View {
     for (const f of names) {
       let nav = null;
       try { nav = JSON.parse(await fs.readFile(`${box}/${f}`, "utf8")); } catch {}
-      await fs.rm(`${box}/${f}`).catch(() => {});
+      await fs.unlink(`${box}/${f}`).catch(() => {});
       if (!nav) continue;
       // said back by the nav's name (voice.ts waits for it before the voice agent may say it's on screen)
       let ack;

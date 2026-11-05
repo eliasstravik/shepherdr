@@ -9,7 +9,15 @@ let engine = AVAudioEngine()
 let node = AVAudioPlayerNode()
 engine.attach(node)
 engine.connect(node, to: engine.mainMixerNode, format: format)
-do { try engine.start() } catch { exit(1) }
+func fail(_ why: String) -> Never {
+  FileHandle.standardError.write("speaker: \(why)\n".data(using: .utf8)!)
+  exit(1)
+}
+do { try engine.start() } catch { fail("didn't start: \(error.localizedDescription)") }
+// The output device changed: the engine has stopped; the call starts a new speaker for its next words.
+NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { _ in
+  fail("the output device changed")
+}
 node.play()
 
 // Done once heard, not once handed to the output (by its value: the SDKs name this case differently).

@@ -58,8 +58,13 @@ function state() {
 }
 let lastState = "";
 
-function end(why: string | null = null) {
+// A line in the call's log (this process's output goes there; the microphone's and speaker's too).
+function log(line: string) { console.error(`${new Date().toTimeString().slice(0, 8)} ${line}`); }
+
+// The call's end: `why` is the error the person sees (none: a plain end), `how` what the log says happened.
+function end(why: string | null = null, how = why ?? "ended") {
   if (ended) return;
+  log(`call ended: ${how}`);
   if (why) error = why;
   ended = true;
   try { ws?.close(); } catch {}
@@ -67,8 +72,8 @@ function end(why: string | null = null) {
   state();
   setTimeout(() => process.exit(0), 100);
 }
-process.on("SIGTERM", () => end());
-process.on("SIGINT", () => end());
+process.on("SIGTERM", () => end(null, "stopped (SIGTERM)"));
+process.on("SIGINT", () => end(null, "stopped (SIGINT)"));
 
 // ---- secrets: key.ts ----------------------------------------------------------------------
 
@@ -129,7 +134,11 @@ const tools = dirname(dir.replace(/\/$/, ""));
 
 function startPlayer() {
   const argv = speaker(outRate, tools);
-  if (argv) player = Bun.spawn(argv, { stdin: "pipe", stdout: "ignore", stderr: "ignore" });
+  if (!argv) return;
+  const p = Bun.spawn(argv, { stdin: "pipe", stdout: "ignore", stderr: "inherit" });
+  player = p;
+  // Gone on its own (not hushed or ended): said in the log, and the next words start it again.
+  p.exited.then((code) => { if (!p.killed && !ended) log(`speaker exited ${code}`); if (player === p) player = null; });
 }
 // Loudness of 16-bit samples, scaled so speech fills most of 0..1.
 function loud(pcm: Uint8Array) {
@@ -166,7 +175,7 @@ function hush() {
 async function startMic() {
   const argv = recorder(inRate, tools);
   if (!argv) throw new Error("no recorder");
-  mic = Bun.spawn(argv, { stdout: "pipe", stderr: "ignore" });
+  mic = Bun.spawn(argv, { stdout: "pipe", stderr: "inherit" });
   const chunk = Math.round(inRate * 2 * 0.1); // 100 ms
   let buf = new Uint8Array(0);
   for await (const part of mic.stdout as ReadableStream<Uint8Array>) {
@@ -189,6 +198,9 @@ async function startMic() {
       if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ user_audio_chunk: Buffer.from(piece).toString("base64") }));
     }
   }
+  // Its sound ended while the call goes on: nobody would be heard any more.
+  const code = await mic.exited;
+  if (!ended) end(`The microphone stopped (exit ${code})`);
 }
 
 // ---- the chat -----------------------------------------------------------------------------
@@ -269,7 +281,7 @@ function inbox() {
     try { m = JSON.parse(readFileSync(join(box, f), "utf8")); } catch {}
     try { rmSync(join(box, f)); } catch {}
     if (!m) continue;
-    if (m.type === "hangup") return end();
+    if (m.type === "hangup") return end(null, "hung up in the window");
     if (m.type === "mute") { muted = Boolean(m.on); state(); }
     if (m.type === "reply" && typeof m.text === "string") send(replyLine(who, m.text));
     if (m.type === "status" && m.status !== lastStatus) {
@@ -313,6 +325,7 @@ async function main() {
       const meta = m.conversation_initiation_metadata_event ?? {};
       outRate = Number(/pcm_(\d+)/.exec(meta.agent_output_audio_format ?? "")?.[1] ?? 16000);
       inRate = Number(/pcm_(\d+)/.exec(meta.user_input_audio_format ?? "")?.[1] ?? 16000);
+      log(`connected: ElevenLabs conversation ${meta.conversation_id ?? "?"}`);
       phase = "listening";
       state();
       startMic().catch((err) => end(`The microphone didn't start: ${err?.message ?? err}`));
@@ -342,7 +355,8 @@ async function main() {
     }
   };
   ws.onerror = () => end("The voice connection failed.");
-  ws.onclose = (e) => end(ended ? null : e.code === 1000 ? null : `The call was closed (${e.code}${e.reason ? `: ${e.reason}` : ""}).`);
+  ws.onclose = (e) => end(e.code === 1000 ? null : `The call was closed (${e.code}${e.reason ? `: ${e.reason}` : ""}).`,
+    `ElevenLabs closed the connection (${e.code}${e.reason ? `: ${e.reason}` : ""})`);
 }
 
 // The level the chat's wave shows, ten times a second, beside the call folder (so writing it
@@ -363,7 +377,10 @@ setInterval(() => {
   if (ended) return;
   inbox();
   if (ws?.readyState === WebSocket.OPEN) void moved();
-  try { if (Date.now() - statSync(join(dir, "alive")).mtimeMs > 20000) end(); } catch { if (Date.now() - since > 20000) end(); }
+  try {
+    const quiet = Date.now() - statSync(join(dir, "alive")).mtimeMs;
+    if (quiet > 20000) end(null, `the window stopped checking in (alive last touched ${Math.round(quiet / 1000)} s ago)`);
+  } catch { if (Date.now() - since > 20000) end(null, "the window stopped checking in (no alive file)"); }
   state();
 }, 150);
 
