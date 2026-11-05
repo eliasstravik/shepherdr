@@ -12,7 +12,8 @@
 //      (owner-only: the backup to roll back to) and this machine marked remote.
 // Rollback: `shepherdr secrets move-to <old machine>` from anywhere moves them back with whatever was added since.
 // With the machine that keeps them gone for good: `shepherdr secrets move-to here --restore` on the old one puts its
-// backup back and names it again (what was added since then on the other one isn't in it).
+// backup back and names it again (what was added since then on the other one isn't in it). Once the other one is back,
+// `shepherdr secrets move-to here` there hands it the newer record (each service does that too).
 // shepherdr secrets where [--json]: which machine keeps them.
 import { CoreClient } from "./hc/client.ts";
 import { createHash } from "node:crypto";
@@ -37,7 +38,8 @@ const VAULT = join(HERDR, "vault.json"), MARK = join(HERDR, "secret-remote");
 // herdr-secret and hc there, wherever they were installed (PATH over herdr-core's exec may not have them)
 const PATHS = 'PATH="$HOME/.local/bin:$HOME/.local/share/shepherdr/bin:${HERDR_APP_HOME:-$HOME/.config/herdr-app}/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; export PATH; ';
 
-const c = await CoreClient.endpoint({ binary: process.env.SHEPHERDR_HC || "hc" }).catch((e) => fail(`herdr-core isn't answering here: ${(e as Error).message}`));
+// the hc session as hc and herdr-secret take it (HC_SESSION), else the default one
+const c = await CoreClient.endpoint({ binary: process.env.SHEPHERDR_HC || "hc", ...(process.env.HC_SESSION ? { session: process.env.HC_SESSION } : {}) }).catch((e) => fail(`herdr-core isn't answering here: ${(e as Error).message}`));
 const call = <T = any>(method: string, params: Record<string, unknown> = {}, timeout = 20_000) => c.call<T>(method, params, timeout);
 const at = (on: string | null) => (on ? { on } : {});
 const getDoc = (name: string, on: string | null) => call<{ value: any; version: number }>("doc.get", { name, ...at(on) });
@@ -120,8 +122,16 @@ if (!amMain) {
   process.exit(0);
 }
 if (to === null) {
-  if (json) console.log(JSON.stringify({ ok: true, to: null, already: true }));
-  else say("This computer keeps the secrets already.");
+  // already here: the record handed again to each machine linked from here that has an older one (one that was off
+  // at a rollback comes back believing it still keeps them, until this or a service hands it on)
+  const handed: string[] = [];
+  if (record) for (const m of connected) {
+    const theirs = secretsRecord((await getDoc(SECRETS_DOC, m).catch(() => null))?.value);
+    if ((theirs?.at ?? 0) < record.at && await setDoc(SECRETS_DOC, record, m).then(() => true, () => false)) handed.push(m);
+  }
+  if (json) console.log(JSON.stringify({ ok: true, to: null, already: true, handed }));
+  else say(`This computer keeps the secrets already${handed.length ? ` (told ${handed.join(", ")} again)` : ""}.`);
+  c.close();
   process.exit(0);
 }
 if (!connected.includes(to)) fail(`${to} is offline: it needs to be on to take the secrets.`);
