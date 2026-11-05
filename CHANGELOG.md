@@ -1,5 +1,25 @@
 # Changelog
 
+## 3.1.6
+
+Autopilot that decides on its own, agents talking as a group chat, and a calmer, tidier app.
+
+- Autopilot: on a wake the Assistant makes every call itself, saying in one line what it chose and why, and answers
+  its agents' questions instead of asking you. Only something critical (money, publishing, deleting data, credentials,
+  security, stuck after retries) reaches you, as an alert. 3.1.5's starter heartbeat, if you never edited it, is
+  upgraded with the old one kept beside it as a `.bak`.
+- Messages between agents show as a group chat: one quiet row ("Assistant → SHEP-4") that opens into the message,
+  and another Assistant's message names it and its machine.
+- A finished task shows its chat, not "hasn't started"; one whose chat is gone shows its summary instead.
+- Assistant header: no hidden button that ended the agent, its state in words ("Working…", "Needs you"), Autopilot
+  on the right.
+- No hover tooltips anywhere; buttons say what they do.
+- Tasks list: the id under the title, time left and Review at the row's end, the same in the window and on the web.
+- Model picker: every model a CLI offers, with search, pinned and recent ones; reasoning levels read whole.
+- Dictation writes your words down with ElevenLabs (the voice call's key), not whisper.cpp.
+- Secrets follow the machine that serves the web app with no setup, and can be added or removed from any machine.
+- Sidebar: no more git ahead/behind arrows. Attach in the composer is a plus.
+
 ## 3.1.5
 
 Autopilot now pushes the project forward on its own.
