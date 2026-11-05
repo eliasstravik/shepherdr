@@ -87,6 +87,37 @@ test("a reply's react lines land on the person's message, at its start, middle o
   expect(c.reactions.get(c.items[0].id).map((r) => r.emoji)).toEqual(["👀", "🔥", "✅"]);
 });
 
+// SHEP-47: the person's words in to= may hold double quotes; the line still reacts and never shows.
+test("a react line whose to= quotes the person's \"words\" still reacts", async () => {
+  const mac = { ...person, uuid: "p4", message: { role: "user", content: 'aha well "this machine" is my mac mini' } };
+  const reply1 = '<hc react="💡" to="aha well "this machine" is my mac mini"/>\nGot it: the Mac mini is this machine.';
+  const c = await read([mac, reply("m1", [text(reply1)])]);
+  expect(said(c)).toEqual(["Got it: the Mac mini is this machine."]);
+  expect(c.reactions.get(c.items[0].id)).toEqual([{ emoji: "💡", by: "agent" }]);
+});
+
+test("emoji with variation selectors and skin tones react", async () => {
+  for (const emoji of ["💡", "❤️", "👍🏽", "👨‍👩‍👧"]) {
+    const c = await read([person, reply("m1", [text(`<hc react="${emoji}" to="Test bubble"/>\nOk.`)])]);
+    expect(said(c)).toEqual(["Ok."]);
+    expect(c.reactions.get(c.items[0].id)).toEqual([{ emoji, by: "agent" }]);
+  }
+});
+
+test("a react tag at the start of a paragraph reacts and leaves its words", async () => {
+  const words = 'First.\n\n<hc react="👍" to="Test bubble for"/> Then the rest.';
+  const c = await read([person, reply("m1", [text(words)])]);
+  expect(said(c)).toEqual(["First.\n\nThen the rest."]);
+  expect(c.reactions.get(c.items[0].id)).toEqual([{ emoji: "👍", by: "agent" }]);
+});
+
+test("a react line that can't be read never shows as text", async () => {
+  for (const line of ['<hc react="👀" to="unclosed', '<hc react=👀 to=x/>']) {
+    const c = await read([person, reply("m1", [text(`${line}\nStill here.`)])]);
+    expect(said(c)).toEqual(["Still here."]);
+  }
+});
+
 // SHEP-42: a reply that is only a reaction (Settings › Reactions) shows just that reaction on the person's message.
 test("a react line with <hc no-reply/> shows only the reaction", async () => {
   const thanks = { ...person, uuid: "p2", message: { role: "user", content: "Thanks, that's perfect" } };

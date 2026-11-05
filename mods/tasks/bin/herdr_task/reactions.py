@@ -19,7 +19,7 @@ EVERY_MS = 60000  # looked at again this often, and at once when the settings fi
 GUIDE = ("Reactions (on in Settings): react to some of the person's messages with one emoji, as a person would in a chat: "
          "👀 on a new ask you're picking up, 👍 on a go-ahead, ✅ on their ask once it's done, 😂 at a joke, 🙏 for thanks. "
          "Most messages get none; never more than one per message; never instead of an answer they need. "
-         "Write it on a line of its own in the reply that ends your turn: <hc react=\"👀\" to=\"first words of their message\"/>. "
+         "Write it on a line of its own in the reply that ends your turn: <hc react=\"👀\" to=\"first words of their message\"/>. In to=, leave out double quotes or make them curly (“ ”). "
          "A message that needs no words back (a thanks, an ok, a joke) gets only the reaction: that line, then <hc no-reply/>, nothing else.")
 TURNED_ON = "Reactions are now on in Settings. " + GUIDE.split(": ", 1)[1]
 OFF = "Reactions are off in Settings: never react to the person's messages (no <hc react> lines)."
