@@ -146,3 +146,55 @@ export async function voiceKey(io) {
   if (!r.key) return { error: noKeyOn(w.name), why: "none" };
   return { key: r.key, agent: typeof r.agent === "string" && /^[\w-]{1,200}$/.test(r.agent) ? r.agent : "", from: w.name };
 }
+
+// ---- dictation ----------------------------------------------------------------------------
+// The composer's mic (the window's mods/chat/transcribe.ts, the web app's service/dictate.ts): the recording goes to
+// ElevenLabs speech to text (Scribe) with the same key as a call (voiceKey), the language found from the audio (the
+// person writes English and Swedish). The words go into the box to edit; nothing is kept and the key never leaves memory.
+
+export const STT_MODEL = "scribe_v2";
+export const DICTATE_NO_KEY = "Dictation needs an ElevenLabs key in Settings › Secrets.";
+export const MAX_AUDIO = 20 * 1024 * 1024;
+
+/** A failed key lookup (voiceKey's { error, why }) in dictation's words: no key → where to add it; else as it said. */
+export const dictateKeyError = (k) => k.why === "none" ? DICTATE_NO_KEY : k.error;
+
+/** The speech to text request: POST <API>/speech-to-text, multipart with the audio and the model; no language_code,
+ *  so it finds the language itself; no audio events ("(laughter)"). */
+export function sttRequest(key, audio, filename = "dictation") {
+  const form = new FormData();
+  form.append("model_id", STT_MODEL);
+  form.append("tag_audio_events", "false");
+  form.append("file", audio, filename);
+  return { url: `${API}/speech-to-text`, init: { method: "POST", body: form, redirect: "error", headers: { "xi-api-key": key } } };
+}
+
+/** ElevenLabs' short reason for a failed request (its detail.message, else the status), keys and tokens hidden. */
+export function sttError(status, body) {
+  let why = "";
+  try {
+    const d = JSON.parse(body)?.detail;
+    why = typeof d === "string" ? d : typeof d?.message === "string" ? d.message : Array.isArray(d) && typeof d[0]?.msg === "string" ? d[0].msg : "";
+  } catch {}
+  why = why.replace(/[A-Za-z0-9_-]{32,}/g, "…").replace(/\s+/g, " ").trim().slice(0, 200);
+  return why ? `ElevenLabs said: ${why}` : `ElevenLabs said ${status}.`;
+}
+
+/** Writes a recording down: its words ("" when nothing was said), or throws an Error in plain words.
+ *  key(): voiceKey's answer (the caller's io); fetchFn: fetch (a test's stand-in). */
+export async function transcribe(audio, key, fetchFn = fetch, filename) {
+  if (!audio?.size) throw new Error("Nothing was recorded.");
+  if (audio.size > MAX_AUDIO) throw new Error("That recording is too long.");
+  const k = await key();
+  if ("error" in k) throw new Error(dictateKeyError(k));
+  const { url, init } = sttRequest(k.key, audio, filename);
+  let r;
+  try { r = await fetchFn(url, { ...init, signal: AbortSignal.timeout(60000) }); }
+  catch (e) { throw new Error(e?.name === "TimeoutError" ? "ElevenLabs didn't answer in time. Try again." : "Can't reach ElevenLabs. Check this machine's internet, then try again."); }
+  const body = await r.text().catch(() => "");
+  if (!r.ok) throw new Error(sttError(r.status, body));
+  let text = "";
+  try { text = JSON.parse(body)?.text; } catch {}
+  if (typeof text !== "string") throw new Error("ElevenLabs gave no words back.");
+  return text.replace(/\s+/g, " ").trim();
+}

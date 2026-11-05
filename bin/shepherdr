@@ -327,7 +327,7 @@ def unit_text(root, bun):
     main = os.path.join(root, SHARE, "service", "main.ts")
     # hc, herdr-task and the helpers live in ~/.local/bin, which a user service's PATH lacks; and the tools herdr-task
     # and the agents run (gh, git, node, agent-browser, the CLIs…) where this install finds them (mise, nvm, brew…)
-    tools = ["gh", "git", "node", "agent-browser", "claude", "codex", "python3", "tailscale", "whisper-cli", "ffmpeg", "pw-record", "pw-play", "jq"]
+    tools = ["gh", "git", "node", "agent-browser", "claude", "codex", "python3", "tailscale", "pw-record", "pw-play", "jq"]
     found = [os.path.dirname(os.path.realpath(p)) if os.path.basename(os.path.realpath(p)) == t else os.path.dirname(p)
              for t in tools for p in [shutil.which(t)] if p]
     dirs = [os.path.join(root, BIN), os.path.dirname(bun), *found, "/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
@@ -667,7 +667,7 @@ def check_tools(root_is_home):
         if not shutil.which(name):
             bad.append(f"{name} isn't on the PATH")
     optional = {"gh": "pull requests (tasks)", "agent-browser": "the task browser (0.41.1)", "node": "the task browser",
-                "bun": "voice calls and dictation", "pw-record": "dictation", "whisper-cli": "dictation", "ffmpeg": "dictation from the web app"}
+                "bun": "voice calls and dictation", "pw-record": "dictation"}
     for name, what in optional.items():
         if not shutil.which(name):
             notes.append(f"optional: {name} isn't on the PATH ({what})")
@@ -993,9 +993,6 @@ def cmd_doctor(a):
         s_bad, s_notes = serve_check(root)
         bad += s_bad
         t_notes += s_notes
-    model = r.p(f"{APP}/data/whisper/ggml-base.bin")
-    if not os.path.isfile(model):
-        warn.append(f"dictation's model isn't there: `shepherdr whisper` downloads it ({APP}/data/whisper/ggml-base.bin, 148 MB)")
     say(f"Shepherdr {rec.get('version')} under {root} (from {rec.get('source')}, {rec.get('at')})")
     for x in bad:
         say(f"  ✗ {x}")
@@ -1123,29 +1120,6 @@ def cmd_uninstall(a):
     if r.backed:
         say(f"  everything removed is in {r.backup_dir}")
     say("  In Herdr, switch to another layout (Ctrl+Shift+L) if Shepherdr's was showing.")
-    return 0
-
-
-# ---- whisper ------------------------------------------------------------------------------------
-
-def cmd_whisper(a):
-    """Dictation's model (lib/addons.json, the voice add-on): downloaded once, checked by its sha256."""
-    root = os.path.realpath(a.root or real_home())
-    m = next(x for x in json.load(open(os.path.join(find_source(a.source, load_record(root)), "lib", "addons.json")))["addons"] if x["id"] == "voice")["model"]
-    dest = os.path.join(root, APP, m["path"])
-    if os.path.isfile(dest) and sha_bytes(read(dest)) == m["sha256"]:
-        say(f"already there: {dest}")
-        return 0
-    tmp = dest + ".part"
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    say(f"downloading {m['url']} ...")
-    if subprocess.run(["curl", "-fL", "--retry", "3", "-o", tmp, m["url"]]).returncode != 0:
-        raise Stop("download failed")
-    if sha_bytes(read(tmp)) != m["sha256"]:
-        os.remove(tmp)
-        raise Stop("the download's sha256 doesn't match: not kept")
-    os.replace(tmp, dest)
-    say(f"kept: {dest}")
     return 0
 
 
@@ -1299,7 +1273,7 @@ def hand_over(a, argv):
 def main(argv):
     ap = argparse.ArgumentParser(prog="shepherdr", description="Install, update, check or remove Shepherdr in Herdr.")
     sub = ap.add_subparsers(dest="cmd")
-    for name in ("install", "update", "uninstall", "doctor", "whisper"):
+    for name in ("install", "update", "uninstall", "doctor"):
         c = sub.add_parser(name)
         c.add_argument("--root", help="install under this folder instead of your home (a scratch try: it mirrors "
                                       ".config/herdr-app, .local/bin and .config/herdr-core/templates)")
@@ -1342,8 +1316,6 @@ def main(argv):
             return cmd_uninstall(a)
         if a.cmd == "doctor":
             return cmd_doctor(a)
-        if a.cmd == "whisper":
-            return cmd_whisper(a)
         if a.cmd == "web":
             return cmd_web(a)
         if a.cmd == "secrets":

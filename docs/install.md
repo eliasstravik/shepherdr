@@ -11,7 +11,7 @@ place, never overwrites what you made yourself, and keeps a backup of anything i
 - bun (the service and the web app; the installer installs it from bun.sh when it's missing), and Tailscale for the
   web app.
 - Optional, per add-on: `gh` (pull requests), agent-browser 0.41.1, node and Chrome (the task browser), bun,
-  `pw-record` and whisper.cpp (`whisper-cli`) for dictation, an ElevenLabs key for voice calls.
+  `pw-record` for dictation in the window, an ElevenLabs key for voice calls and dictation.
 
 ## Install
 
@@ -58,7 +58,6 @@ mod called `chat`, say). Nothing is written then; it names each one. `--adopt` b
 shepherdr update      the same kind again (layout, or web only), from the checkout it was installed from (git pull it first)
 shepherdr uninstall   [--root DIR] [--dry-run]: takes out what it installed and puts back what it replaced
 shepherdr doctor      [--root DIR]: checks files, links, shared copies, herdr-task and the programs it needs, and says how to update
-shepherdr whisper     downloads dictation's model (148 MB, checked by its sha256)
 ```
 
 `--root DIR` installs under another folder instead of your home (it mirrors `.config/herdr-app`, `.local/bin`,

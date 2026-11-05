@@ -8,7 +8,7 @@ describe('what the service answered to a recording', () => {
     expect(heard(200, JSON.stringify({ text: '' }))).toEqual({ text: '' })
   })
   test("the service's own reason when it couldn't write it down", () => {
-    expect(heard(400, JSON.stringify({ error: 'The machine serving Shepherdr needs ffmpeg for dictation.' }))).toEqual({ error: 'The machine serving Shepherdr needs ffmpeg for dictation.' })
+    expect(heard(400, JSON.stringify({ error: 'Dictation needs an ElevenLabs key in Settings › Secrets.' }))).toEqual({ error: 'Dictation needs an ElevenLabs key in Settings › Secrets.' })
   })
   test('a page that is not its answer (a proxy, a crash) or no answer at all is an error, never empty words', () => {
     expect(heard(502, '<html>Bad gateway</html>')).toEqual({ error: "Shepherdr couldn't write it down (error 502)." })

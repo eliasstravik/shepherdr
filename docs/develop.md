@@ -9,7 +9,7 @@ lib/features.json        every feature: its Herdr side, its web side and its sha
 core/                    the logic the mods and the service share (plain JS; copied into mods by bin/sync-shared)
 service/                 the always-on service (Bun): the web app's API, background work, tailnet sharing (docs/web.md)
 web/                     the web app (React, Vite, Tailwind; 2.1's design): src/, plugins/, shared/
-bin/shepherdr            the installer (install, update, uninstall, doctor, whisper); ./install.sh runs it
+bin/shepherdr            the installer (install, update, uninstall, doctor); ./install.sh runs it
 bin/                     herdr-secret, herdr-browser, herdr-browser-view, sync-shared (installed to the app's bin/)
 mods/tasks/bin/          herdr-task (entry) and its herdr_task package
 mods/artifacts/bin/      herdr-artifact

@@ -33,7 +33,8 @@ connection it came on). A page from anywhere else can't change anything: writes 
   `herdr-artifact convert` turns an older drawn artifact into a recipe.
 - The task browser: Kitty in the window, a live view of the same browser on the web.
 - Voice calls and dictation: the machine's microphone in the window, the phone's on the web, through the service
-  (the same ElevenLabs voice agent, `core/voice.js`; whisper.cpp for dictation).
+  (the same ElevenLabs voice agent, `core/voice.js`; ElevenLabs speech to text, Scribe, for dictation, with the
+  same key).
 - Keys: 3.0's keys work in the web app too (Settings → Keyboard shortcuts on a desktop).
 
 ## Install

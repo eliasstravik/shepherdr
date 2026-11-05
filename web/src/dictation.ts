@@ -1,5 +1,5 @@
 // Talk to type: the microphone records while a meter on it draws the wave; on Done the service writes it down
-// (whisper.cpp, as the window's dictation), and the words go into the box to edit; cancel drops it.
+// (ElevenLabs speech to text, as the window's dictation), and the words go into the box to edit; cancel drops it.
 import { levelOf, meter, TALKING, type Sample } from './meter.ts'
 
 export interface Dictation {
@@ -45,7 +45,7 @@ export function micError(e: unknown): string {
 }
 
 /** Starts listening. `end` gets what was heard when it finishes, or null when cancelled; `fail` why it didn't work. Shepherdr 3: the phone records,
- *  the service writes it down with whisper.cpp (the window's dictation, the same words on every phone browser). */
+ *  the service has ElevenLabs write it down (the window's dictation, the same words on every phone browser). */
 export function dictate(end: (text: string | null) => void, fail: (why: string) => void = () => undefined): Dictation {
   current?.cancel()
   let state: 'on' | 'finishing' | 'over' = 'on'

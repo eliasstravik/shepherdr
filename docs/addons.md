@@ -15,7 +15,7 @@ marked below off and on again, at once and on every machine (Everywhere's `off` 
 | Secrets | always on in 3.1.5 | `herdr-secret`, the masked card, Settings → Secrets | — |
 | Keyboard | always on in 3.1.5 | Jump (Ctrl+K), the keys list (Ctrl+Shift+?) | — |
 | Artifacts | yes | Agents' reports and draft screens beside the chat, `herdr-artifact` | No Artifacts button in the tab bar |
-| Voice and dictation | yes | Calls with an Assistant (ElevenLabs), dictation (whisper.cpp). Needs Chat | No call or mic buttons; their keys do nothing |
+| Voice and dictation | yes | Calls with an Assistant (ElevenLabs), dictation (ElevenLabs speech to text, the same key). Needs Chat | No call or mic buttons; their keys do nothing |
 | Reactions | yes | React to a message with an emoji. Needs Chat | No smiley on messages (agents' own reactions still show) |
 | Task browser | yes | A browser per task you can watch and take over (`herdr-browser`). Needs Tasks | No Browser tab; workers aren't given a browser |
 | Autopilot | yes | An Assistant works on its own from its heartbeat. Needs Assistants | No Autopilot switch in the header; no wake-ups |
