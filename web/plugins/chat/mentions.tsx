@@ -151,6 +151,16 @@ function SpaceMark({ emoji, dim }: { emoji?: string; dim?: boolean }) {
   )
 }
 
+/** a task row's title, then its space · machine: on its right, or under it on a phone */
+function TitleWhere({ title, where, quiet }: { title: string; where: string; quiet?: boolean }) {
+  return (
+    <span className="flex min-w-0 flex-1 items-baseline gap-2.5 phone:flex-col phone:items-stretch phone:gap-0">
+      <span className={clsx('min-w-0 flex-1 truncate', quiet && 'text-fg2')}>{title}</span>
+      {where ? <span className="max-w-[40%] shrink-0 truncate text-[0.75rem] text-fg3 phone:max-w-full">{where}</span> : null}
+    </span>
+  )
+}
+
 /** the "#" list over the box: a tap (or Enter / Tab on the chosen one) takes one */
 export function MentionList({ items, sel, pick, from }: { items: Item[]; sel: number; pick: (i: Item) => void; from: string | null }) {
   if (!items.length) return null
@@ -175,8 +185,7 @@ export function MentionList({ items, sel, pick, from }: { items: Item[]; sel: nu
               <div key={i.key} role="option" aria-disabled="true" aria-selected={false} title={M.LOCKED_TASK} className="flex min-w-0 items-center gap-2.5 rounded-row px-2.5 py-1 text-fg3 phone:py-1.5">
                 <span className="grid w-6 shrink-0 place-items-center phone:w-7"><LockClosedIcon className="size-3" aria-hidden="true" /></span>
                 <span className="shrink-0 font-medium tabular-nums">{refOf(i.task.id)}</span>
-                <span className="min-w-0 flex-1 truncate">{i.task.name}</span>
-                <span className="max-w-[40%] shrink-0 truncate text-[0.75rem]">{i.where}</span>
+                <TitleWhere title={i.task.name} where={i.where} />
               </div>
             )
             if (i.kind === 'locked') return (
@@ -204,8 +213,7 @@ export function MentionList({ items, sel, pick, from }: { items: Item[]; sel: nu
                   <>
                     <span className="grid w-6 shrink-0 place-items-center phone:w-7"><Dot s={i.task.status} p={i.task.report?.progress} /></span>
                     <span className="shrink-0 font-medium tabular-nums">{refOf(i.task.id)}</span>
-                    <span className="min-w-0 flex-1 truncate text-fg2">{i.task.name}</span>
-                    <span className="max-w-[40%] shrink-0 truncate text-[0.75rem] text-fg3">{i.where}</span>
+                    <TitleWhere title={i.task.name} where={i.where} quiet />
                   </>
                 ) : null}
               </button>
@@ -296,6 +304,8 @@ export function taskStateOf(m: TaskMention, snap: Snapshot | null | undefined, g
   return { task, ok: !!task && agent, why: !task ? M.UNSEEN_TASK : !agent ? M.LOCKED_TASK : '' }
 }
 
+/** a chip's title: short enough on a phone that the chip stays in the line's flow */
+export const TITLE = 'inline-block max-w-[16rem] truncate align-top phone:max-w-[7rem]'
 const TASK_CHIP = 'inline-flex max-w-full items-baseline gap-1 rounded-md py-px pr-1.5 pl-1 align-baseline whitespace-nowrap'
 
 export function TaskChip({ m, chatKey }: { m: TaskMention; chatKey: string }) {
@@ -305,7 +315,7 @@ export function TaskChip({ m, chatKey }: { m: TaskMention; chatKey: string }) {
   if (!ok) return (
     <span data-mention="locked" title={why} aria-label={`${m.ref}: ${why}`} className={clsx(TASK_CHIP, 'bg-fg/6 text-fg3')}>
       <LockClosedIcon className="size-3 shrink-0 self-center" aria-hidden="true" />
-      <span className="truncate"><span className="font-medium">@{m.ref}</span>{task ? <span> · {M.short(task.name)}</span> : null}</span>
+      <span className="truncate"><span className="font-medium">@{m.ref}</span>{task ? <span> · <span className={TITLE}>{M.short(task.name)}</span></span> : null}</span>
     </span>
   )
   return (
@@ -313,7 +323,7 @@ export function TaskChip({ m, chatKey }: { m: TaskMention; chatKey: string }) {
       onClick={(e) => { e.stopPropagation(); openTask(task!.id) }}
       className={clsx(TASK_CHIP, 'bg-accent/12 text-accent hover:bg-accent/20')}>
       <Dot s={task!.status} p={task!.report?.progress} className="size-3 self-center" />
-      <span className="truncate"><span className="font-medium">{m.ref}</span><span className="text-fg2"> · {M.short(task!.name)}</span></span>
+      <span className="truncate"><span className="font-medium">{m.ref}</span><span className="text-fg2"> · <span className={TITLE}>{M.short(task!.name)}</span></span></span>
     </button>
   )
 }

@@ -5,7 +5,7 @@ import { marked } from 'marked'
 import { useMemo, type MouseEvent } from 'react'
 import { goPlace, openTask, useSnap } from '@client/kernel.ts'
 import * as MNs from '@core/mentions.js'
-import { forMarkdown, hasMention, parseMention, parseTask, stateOf, taskStateOf, useReach } from './mentions.tsx'
+import { forMarkdown, hasMention, parseMention, parseTask, stateOf, taskStateOf, TITLE, useReach } from './mentions.tsx'
 const shortTitle = (MNs as any).short as (t: string) => string
 
 marked.setOptions({ gfm: true, breaks: false })
@@ -209,7 +209,14 @@ function taskChip(ref: string, s: ReturnType<typeof taskStateOf>) {
   b.className = 'font-medium'
   b.textContent = s.ok ? ref : `@${ref}`
   words.append(b)
-  if (s.task) { const w = document.createElement('span'); if (s.ok) w.className = 'text-fg2'; w.textContent = ` · ${shortTitle(s.task.name)}`; words.append(w) }
+  if (s.task) {
+    const w = document.createElement('span'), title = document.createElement('span')
+    if (s.ok) w.className = 'text-fg2'
+    title.className = TITLE
+    title.textContent = shortTitle(s.task.name)
+    w.append(' · ', title)
+    words.append(w)
+  }
   if (s.ok) {
     const t = s.task!
     chip.setAttribute('type', 'button')
