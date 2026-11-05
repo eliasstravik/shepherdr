@@ -1,5 +1,26 @@
 # Changelog
 
+## 3.1.4
+
+Mentions in chat, Autopilot you can see, and more done from the web without the window.
+
+- Chat: type # to mention a space and @ to mention a task, in the window and on the web. A mention shows as a chip
+  that opens the space or task, locked when the agent can't reach it.
+- Autopilot: switching it on wakes the Assistant at once; every wake shows as one quiet line in the chat; the header
+  counts down to the next run and has Run now; the sidebar marks spaces on Autopilot with a small rocket.
+- Automations can fire on another machine's task events.
+- Messages from other agents stand out as their own bubble and name who sent them. The person's words sent from
+  the window always count as the person's, never as "Another agent".
+- The web can close, rename and reorder a space with no Herdr window open.
+- New space: pick the machine to make it on, and the folder list follows the path you type, as a shell completes one.
+- Secrets can be kept on one chosen main machine, and voice calls use its ElevenLabs key everywhere
+  (`shepherdr secrets move-to`).
+- Tasks: a task whose agent is fixing its failing checks shows Working, not Needs you. Buttons that open the Accept
+  card say Review.
+- Web: tidier Assistant header with Autopilot as one group; a phone task view with a calm one-line header and tab
+  strips that only scroll sideways; dictation says why when it can't write your words down; a nicer Mark up
+  button; the chat's Latest pill stays under the drawer; spaces you've read stop being bold after each new reply.
+
 ## 3.1.3
 
 Autopilot everywhere, settings per space, and agents that survive a crash.
