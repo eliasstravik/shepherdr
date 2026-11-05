@@ -190,7 +190,7 @@ export function ago(ms, suffix = true, now = Date.now()) {
 // already in mixed case ("iOS") is left as it is.
 export const capital = (s) => (/^[a-z](?![A-Z])/.test(String(s)) ? s[0].toUpperCase() + s.slice(1) : s);
 
-// Minutes left, as Shepherdr writes them under the dot: "6m", "<1m", "2h".
+// Time left, as Shepherdr writes it at a row's end ("2h left"): "6m", "<1m", "2h".
 export const short = (n) => (n < 1 ? "<1m" : n < 60 ? `${n}m` : `${Math.round(n / 60)}h`);
 
 // A row's second line, as Shepherdr's: Needs you and Merging, why; Working, why or what its agent says it's

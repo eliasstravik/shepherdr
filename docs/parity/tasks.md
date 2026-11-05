@@ -46,7 +46,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | By space | T:339-345 one group per task list, named by the space in its folder (else the list's name), sidebar order; machine quiet after it with more machines | G projectGroups by `listName` and machine | ✓ fixed (grouped by the space that started the task) |
 | By machine | T:350-351 machine heading, brighter, hairline above all but the first | W MachineHeading | ✓ |
 | Machine › Space | T:353-354 machine heading with count over its spaces' groups; folding it hides them | W | ✓ |
-| Heading | T:571-582 chevron in the icon column, label small and dim, count at the right; the whole heading folds | W GroupHeading/FoldHeading | ✓ |
+| Heading | T group(): chevron in the icon column, label small, its count right by it ("Ready 2"), room above each group; the whole heading folds | W GroupHeading/FoldHeading | ✓ (SHEP-34) |
 | Folded headings remembered | T:551-554 | kernel `toggleShut`, groups.ts saveShut | ✓ |
 | Alt-click folds siblings | (none) | W FoldHeading | ◇ a keyboard nicety for wide screens; does nothing unless Alt is held |
 | Done cut | T:28,565 5 Done rows, "Show N more" / "Show less" | W DoneToggle, G DONE_SHOWN | ✓ |
@@ -63,24 +63,24 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 
 | Element | Window | Web | State |
 |---|---|---|---|
-| Grid | T:819-857 glyph, id column, title owns line 1; line 2 starts under the title | W Line | ✓ |
-| Id column | T:262-266 as wide as the longest id anywhere, monospace, dim | W `IdWidth` (ch of the longest ref) | ✓ fixed (each id was its own width) |
+| Grid | T line(): glyph level with the title; title owns line 1; line 2: id · words · where, read left to right; the end (Review, time left, next run) centred on the row | W Line (a phone: the end at line 2's end, the title the whole first line) | ✓ (SHEP-34) |
+| Id | T line() at line 2's start, monospace, dim (no id column since SHEP-34: it took the title's room) | W Line `ref_` | ✓ |
 | Id without the machine | T:22 refOf "SHEP-7" | W `refOf` strips "vm:" | ✓ fixed |
 | Title | T:829 foreground, Done dim | W Line `dim` | ✓ fixed |
 | Title hover | T:822 the title when cut, an error | W Line `title` (the second line too when cut) | ✓ |
 | Second line words | T:841-842 capital first, at most 40 characters cut at a word, whole on hover | W Line (`capital`, `fit`) | ✓ fixed ("after SHEP-7" → "After SHEP-7") |
 | Working | core secondLine: why, else its agent's words; pie of % done | compat `sub`, TaskDot pie | ✓ |
-| Minutes left | T:854-855 under the glyph, amber, monospace, level with the second line: "6m", "<1m", "2h" | W Line `left` from compat `left` (core leftOf), as tall as the second line | ✓ fixed (showed raw eta, "2h" read as 2m; sat above the second line on a phone) |
+| Time left | T line() at the row's end, amber: "6m left", "<1m left", "2h left" (a bare "2h" at a row's end reads as an age) | W Line `left` from compat `left` (core leftOf) | ✓ (SHEP-34) |
 | Needs you | why (core place) | compat `sub` | ✓ |
 | Queued | "After HERD-3", "Waits: …", "Starts soon" | compat `sub` (core queueReason) | ✓ |
 | Ready | "Ready 5m ago" + Review (opens the Accept card) | compat `sub` + W `accept` | ✓ |
 | Merging | "Merges once its checks pass" | compat `sub` | ✓ |
 | To do, Done | one line, place at the end | W Line one-line | ✓ |
 | Where it is | T:700-706 machine (not this computer) · space, only what the grouping doesn't say; Settings "Where on task rows" off: none | W whereOf / autoWhere, `names` | ✓ |
-| Place gives way | T:823-831 one line: the place shrinks first; two lines: it takes only the room left | W Line `shrink-[1000]`, flex-1 justify-end | ✓ |
+| Place gives way | T line(): after the words, it takes only the room left and shrinks first | W Line: whole or not at all (wraps out of sight) | ✓ |
 | Place, phone | — | whole or not at all (it wraps out of sight), never a cut `m3 · shep…` | ◇ phone: a few letters of a place say nothing |
 | Accept | T:796-800 compact solid button at line 2's end, "Accepting…" while the Accept card's accept runs | W TaskRow `accept`, `useAccepting` + compat `accepting` (shared "tasks.accepting") | ✓ fixed |
-| Review never covers the place | T:845-849 the place sits before the button | W Line: place in flex-1, then the button (shrink-0), desktop, tablet and phone | ✓ |
+| Review never covers the place | T line(): Review is the row's end, outside the text; soft (one per Ready row, never solid) | W Line `end` (shrink-0), desktop, tablet and phone | ✓ |
 | Archived rows | T:538 done glyph, no pin menu | W TaskRow, `menu` off when archived | ✓ fixed (offered Pin) |
 | Selected | T:833 the focused agent's row | W the open task's row | ◇ the web has no focused pane; the open task is what's shown |
 | Right-click menu | T:786-790, TM:26-32 Pin / Unpin (core taskMenu) | W TaskMenu (right click, or a held finger) | ✓ / ◇ touch holds |
