@@ -969,7 +969,8 @@
       "addon": "voice",
       "title": "Dictation",
       "core": [
-        "send"
+        "send",
+        "voice"
       ],
       "herdr": {
         "mods": [
@@ -982,8 +983,8 @@
         ]
       },
       "forms": {
-        "herdr": "Mic, level wave, Cancel/Done (whisper.cpp)",
-        "desktop": "Mic; audio goes to the service's whisper.cpp",
+        "herdr": "Mic, level wave, Cancel/Done (ElevenLabs Scribe)",
+        "desktop": "Mic; audio goes through the service to ElevenLabs Scribe",
         "tablet": "Same",
         "phone": "Same; big mic button"
       },

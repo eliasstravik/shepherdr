@@ -462,7 +462,7 @@ const server = Bun.serve<{ who: string }>({
       return json({ path: join(dir, name), name: f.name });
     }
     if (path === "/api/dictate" && req.method === "POST") {
-      try { return json({ text: await dictate(await req.blob()) }); } catch (err) { return json({ error: (err as Error).message }, 400); }
+      try { return json({ text: await dictate(hub, await req.blob()) }); } catch (err) { return json({ error: (err as Error).message }, 400); }
     }
     if (path === "/api/commands") {
       // the "/" list above the box (core/slash.js): its CLI's commands, and for Claude Code the person's own

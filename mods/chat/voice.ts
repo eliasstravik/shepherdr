@@ -18,15 +18,14 @@
 // made for this ("Herdr chat") is kept as ELEVENLABS_AGENT_ID in secrets/elevenlabs-agent.env,
 // with a tag of the key. The key is never printed, logged or written here.
 
-import { readFileSync, writeFileSync, readdirSync, rmSync, statSync, mkdirSync, existsSync, renameSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, rmSync, statSync, mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { API, agentSpec, opening, replyLine, statusLine, envLines, apiError, voiceKey } from "./core/voice.js";
+import { API, agentSpec, opening, replyLine, statusLine, apiError } from "./core/voice.js";
+import { SECRETS, keyFor, envFile } from "./key.ts";
 
 const [dir, addr, name] = process.argv.slice(2);
 if (!dir || !addr) { console.error("usage: bun voice.ts <call folder> <agent address> <agent name>"); process.exit(2); }
-const HOME = process.env.HERDR_APP_HOME || join(process.env.HOME ?? "", ".config/herdr-app");
-const SECRETS = join(HOME, "secrets");
 const who = name || "the coding agent";
 
 
@@ -64,29 +63,7 @@ function end(why: string | null = null) {
 process.on("SIGTERM", () => end());
 process.on("SIGINT", () => end());
 
-// ---- secrets ------------------------------------------------------------------------------
-
-// A program's output (null: it failed), its input none.
-async function output(argv: string[]) {
-  try {
-    const p = Bun.spawn(argv, { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
-    const out = await new Response(p.stdout).text();
-    return (await p.exited) === 0 ? out : null;
-  } catch { return null; }
-}
-const secretBin = () => [join(HOME, "bin", "herdr-secret"), join(process.env.HOME ?? "", ".local", "bin", "herdr-secret")].find(existsSync) ?? "herdr-secret";
-
-// The key: the old file here, the vault here, or the machine that keeps the secrets (in memory only).
-const keyFor = () => voiceKey({
-  oldFile: () => envFile(join(SECRETS, "elevenlabs.env")).ELEVENLABS_API_KEY || "",
-  where: async () => { const out = await output([secretBin(), "where", "--json"]); return out ? JSON.parse(out) : null; },
-  vault: () => { try { return readFileSync(join(process.env.HOME ?? "", ".herdr", "vault.json"), "utf8"); } catch { return null; } },
-  ask: (on: string, script: string) => output(["hc", "exec", "--on", on, "--timeout", "15", "--", "python3", "-c", script]),
-}) as Promise<{ key: string; agent?: string } | { error: string; why: string }>;
-
-function envFile(file: string): Record<string, string> {
-  try { return envLines(readFileSync(file, "utf8")); } catch { return {}; }
-}
+// ---- secrets: key.ts ----------------------------------------------------------------------
 
 async function api(path: string, key: string, init: RequestInit = {}) {
   const r = await fetch(`${API}${path}`, { ...init, redirect: "error", signal: AbortSignal.timeout(15000),
