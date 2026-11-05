@@ -52,6 +52,7 @@ for ID in $A $B; do herdr-task start "$ID" --folder "$REPO" --space "$SPACE" --p
 - Another CLI, model or effort for one task, only when the person asks: `--agent <key>` (`claude`, `codex`, `pi`, ...), `--model <id or alias>` (`opus`, `sonnet`, `gpt-5.5`), `--effort <low|medium|high|xhigh|max>`; for its review, `--reviewer <key>`, `--reviewer-model`, `--reviewer-effort`. Otherwise leave them out: Settings decide. On `edit`, the next agent started for it uses the new choice.
 - `--base <branch>` when the work should branch from and merge into another branch than the space's base (a feature branch): its worktree starts there, and its pull request or merge targets it. The branch must exist here or on the remote. Default: the space's Base branch (the person's setting, captured when the task is added), else the folder's current branch.
 - `--after` also takes another folder's task on this machine by its ID (`--after WEB-2`) and another machine's with the machine first (`--after vm-b:HAT-12`): it waits until that one is done. herdr-task checks it's there when you add it.
+- `--at "fri 8:15"` (also "2026-11-06 09:00", "tomorrow 9:00", "18:00"; this machine's time zone) or `--in 6h` ("90m", "2 days") on `add`, `start` or `edit` makes it Scheduled: it starts by itself then (still after its `--after` tasks, and as the queue allows), also while the window is closed. `edit --at ""` unschedules, `start --now` starts it at once. A one-off later is Scheduled; something that repeats is an automation (below).
 - `--start-notes "<steps>"` replaces the folder's "When a task starts" notes for this task (the person's settings; `herdr-task config --json` shows them as `settings.tasks.start_notes`); the worker reads them before its task.
 - `--finish-notes "<steps>"` does the same for "When a task finishes" (`finish_notes`), read before it says ready. To add steps rather than replace, write them in the prompt.
 - If a start result says the first message wasn't sent, `hc read <terminal>` before doing anything; never send the prompt twice blind.
@@ -111,7 +112,7 @@ herdr-task auto add "Dependency check" --prompt "<the full brief, as for a task>
 herdr-task auto add "Look at failures" --prompt "<brief>" --on failed --json
 ```
 
-- `--every`: "weekdays 9:00", "daily 9:00,17:30", "mon,thu 8:15", "every 30 minutes", "every 2 hours on weekdays from 8:00 to 18:00", "hourly", "once 2026-11-05 9:00" (this machine's time zone; unknown words are refused: fix and retry).
+- `--every`: "weekdays 9:00", "daily 9:00,17:30", "mon,thu 8:15", "every 30 minutes", "every 2 hours on weekdays from 8:00 to 18:00", "hourly", "once 2026-11-05 9:00", "once tomorrow 9:00" (this machine's time zone; unknown words are refused: fix and retry).
 - `--on`: added, ready, failed, needs-you, merged, stalled (this folder's tasks; its own runs never set it off). `--match "words"` or `--match "branch:task/*"` narrows it.
 - `--from vm-b:~/dev/app` (with `--on`): hear another folder's task events instead, on a machine linked to this one (`herdr-task machines`) or a folder here; each event fires one run, its brief naming the task, title and machine.
 - Its runs start in this space with you as their parent, so their news comes to you like any worker's; the queue and the Tasks-at-once limit apply.
