@@ -128,12 +128,13 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
       sel={sel}
       kb={kb}
       // its pie: the % done, while it works; an archived one is a done task's check
-      glyph={<TaskDot s={t.archived ? 'done' : t.status} w={t.archived || !t.report ? undefined : { ...t.report, eta: undefined }}
-        until={t.status === 'scheduled' && !t.archived && t.startsAt ? (TK.untilShort as (ms: number) => string)(t.startsAt) : undefined} />}
+      glyph={<TaskDot s={t.archived ? 'done' : t.status} w={t.archived || !t.report ? undefined : { ...t.report, eta: undefined }} />}
       ref_={refOf(t.id)}
       title={t.name}
       sub={t.sub}
-      left={t.status === 'work' && !t.archived ? t.left : undefined}
+      // Scheduled (SHEP-38): its time until it starts ("6h") in the same place, counted live, in grey
+      left={t.archived ? undefined : t.status === 'work' ? t.left : t.status === 'scheduled' && t.startsAt ? (TK.untilShort as (ms: number) => string)(t.startsAt) : undefined}
+      leftQuiet={t.status === 'scheduled'}
       dim={t.status === 'done'}
       where={where?.join(' · ')}
       action={accept}
@@ -157,8 +158,8 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
  *   Review or an automation's next run (`meta`).
  * A row with nothing under its title is one line. `tip`: more for its button's label only (an automation's error).
  */
-function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, dim, meta, where, action, tip, onOpen, menu, children }: {
-  flip?: string; sel?: boolean; kb?: boolean; glyph: ReactNode; ref_?: string; title: string; sub?: string; left?: string; dim?: boolean; meta?: string
+function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, leftQuiet, dim, meta, where, action, tip, onOpen, menu, children }: {
+  flip?: string; sel?: boolean; kb?: boolean; glyph: ReactNode; ref_?: string; title: string; sub?: string; left?: string; leftQuiet?: boolean; dim?: boolean; meta?: string
   where?: string; action?: ReactNode; tip?: string; onOpen?: (e: MouseEvent) => void; menu?: RowMenuState; children?: ReactNode
 }) {
   const said = sub ? capital(sub) : undefined
@@ -172,7 +173,7 @@ function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, di
         <button
           type="button"
           aria-current={sel || undefined}
-          aria-label={`${ref_ ? `${ref_} ` : ''}${title}${said ? `, ${said}` : ''}${left ? `, ${left} left` : ''}${meta ? `, ${meta}` : ''}${tip ? `, ${tip}` : ''}`}
+          aria-label={`${ref_ ? `${ref_} ` : ''}${title}${said ? `, ${said}` : ''}${left ? (leftQuiet ? `, in ${left}` : `, ${left} left`) : ''}${meta ? `, ${meta}` : ''}${tip ? `, ${tip}` : ''}`}
           onClick={onOpen}
           className="absolute inset-0 cursor-pointer rounded-[inherit] outline-none keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)]"
         />
@@ -184,7 +185,7 @@ function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, di
         <span aria-hidden className="col-start-1 row-start-1 grid h-5 w-3.5 place-items-center phone:h-6 phone:w-4">{glyph}</span>
         {/* the time left under the glyph, as tall as the second line so it sits level with it */}
         {two && left ? (
-          <span aria-hidden className="col-start-1 row-start-2 flex h-4 w-3.5 items-center justify-center font-mono text-[0.6875rem] font-semibold whitespace-nowrap text-work-fg tabular-nums @max-[24rem]:h-6 phone:h-6 phone:w-4 phone:text-[0.75rem]">{left}</span>
+          <span aria-hidden className={clsx('col-start-1 row-start-2 flex h-4 w-3.5 items-center justify-center font-mono text-[0.6875rem] font-semibold whitespace-nowrap tabular-nums @max-[24rem]:h-6 phone:h-6 phone:w-4 phone:text-[0.75rem]', leftQuiet ? 'text-fg3' : 'text-work-fg')}>{left}</span>
         ) : null}
         <span aria-hidden={!!onOpen} className={clsx('col-start-2 row-start-1 min-w-0 truncate text-[0.875rem]/5 phone:text-base/6', dim ? 'text-fg2' : 'text-fg', two && '@max-[24rem]:col-end-4')}>{title}</span>
         {two ? (

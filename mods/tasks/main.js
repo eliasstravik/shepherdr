@@ -753,13 +753,12 @@ export default class Tasks extends View {
     // why; Queued, what it waits for ("after HERD-3"); Merging, why it waits. The id leads it.
     const w = reportOf(task, section, live);
     const sub = this.statusLine(p, w);
-    const left = section === "scheduled" ? null : leftOf(p, w);
-    // Scheduled (SHEP-38): its time until it starts under its calendar ("6h"), as a working row's minutes left.
-    const under = section === "scheduled" ? leftOf(p, w) : null;
+    // Scheduled (SHEP-38): its time until it starts under its calendar ("6h"), where a working row's time left goes, in grey.
+    const left = leftOf(p, w);
     // Pin / Unpin in its right-click menu (not an archived task's: archived ones drop out of Pinned).
     const key = taskKey(list, task);
     return this.line(`task-${key}`, {
-      go: this.target(p), glyph: this.glyph(p, w), under, ref: refOf(list, task), title: task.title, sub, left,
+      go: this.target(p), glyph: this.glyph(p, w), ref: refOf(list, task), title: task.title, sub, left, leftColor: section === "scheduled" ? t.dim : null,
       dim: section === "done", selected: focused, where: this.whereOf(list.machine, placeName(list)),
       action: section === "ready" ? this.acceptButton(p, t) : null,
       pin: this.shelved(p) ? null : { key, on: this.pins().has(key), status: section, machine: list.machine ?? null, folder: list.folder,
@@ -835,7 +834,7 @@ export default class Tasks extends View {
   //   run (`meta`).
   // A row with nothing under its title is one line. Nothing shows on hover: no tooltips (SHEP-25).
   // `pin`: { key, on }: Pin / Unpin in the row's right-click menu.
-  line(id, { go, glyph, under, ref, title, sub, left, dim, selected, meta, metaColor, where, action, pin }, t) {
+  line(id, { go, glyph, ref, title, sub, left, leftColor, dim, selected, meta, metaColor, where, action, pin }, t) {
     // Every second line is at most 40 characters (herdr-task cuts an agent's own; this catches the
     // derived ones: a long queue, a check's message).
     const said = sub ? capital(sub) : null;
@@ -846,10 +845,7 @@ export default class Tasks extends View {
       .when(Boolean(selected), (el) => el.bg(t.selected))
       .when(Boolean(pin), (el) => el.on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.rowMenu(pin); }))
       .when(Boolean(go), (el) => el.cursor_pointer().hover((s) => s.bg(selected ? t.selected : t.hover)).on_click((_e, cx) => { go(); cx.notify(); }));
-    const mark = under
-      ? v_flex().w(14).flex_none().items_center().child(h_flex().h(20).items_center().child(glyph))
-        .child(div().text_size(TEXT.id).font_medium().whitespace_nowrap().text_color(t.dim).child(under))
-      : h_flex().w(14).h(20).flex_none().items_center().justify_center().child(glyph);
+    const mark = h_flex().w(14).h(20).flex_none().items_center().justify_center().child(glyph);
     const head = div().id(`${id}-title`).min_w(0).truncate().text_color(dim ? t.muted : t.foreground).child(title);
     if (!two) return row.h(32).child(mark).child(head.flex_1()).when(Boolean(end), (el) => el.child(end));
     // The words keep their room: where it is takes only what is left after them, and gives way first.
@@ -862,7 +858,7 @@ export default class Tasks extends View {
     return row.py(8)
       .child(v_flex().w(14).flex_none().self_start().gap(2).child(mark)
         .when(Boolean(left), (el) => el.child(h_flex().w(14).h(16).items_center().justify_center().whitespace_nowrap()
-          .font_family(ID_FONT).text_size(ID_SIZE).font_semibold().text_color(amber()).child(left))))
+          .font_family(ID_FONT).text_size(ID_SIZE).font_semibold().text_color(leftColor ?? amber()).child(left))))
       .child(v_flex().flex_1().min_w(0).gap(2).child(h_flex().h(20).min_w(0).items_center().child(head.flex_1())).child(second))
       .when(Boolean(end), (el) => el.child(end));
   }
