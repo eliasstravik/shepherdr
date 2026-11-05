@@ -24,7 +24,7 @@ ASSISTANT_TEMPLATES = ("assistant", "coordinator")  # "coordinator": Assistants 
 DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "must_fix": "major", "max_running": MAX_RUNNING, "worktrees": True,
                       "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": ""},
             "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {},
-            "assistant": {"reactions": True}}
+            "agents": {"reactions": True}}
 LEVELS = ["blocker", "major", "minor"]
 
 
@@ -86,17 +86,19 @@ def write_autopilot(space, values):
     os.replace(tmp, SETTINGS)
 
 
-def reactions_on(space=None):
-    """Settings › Agents › Reactions for a space's Assistant: the space's own, else Everywhere's,
-    else on. Only the Assistant reacts (reactions.py); workers are never told to."""
-    d = read_settings()
+def reactions_on(space=None, d=None):
+    """Settings › Agents › Reactions in a space, for every agent there (reactions.py): the space's
+    own, else Everywhere's, else on. A layer's agents.reactions, else what SHEP-42 kept as
+    assistant.reactions (when only the Assistant reacted): the window and the web app move it."""
+    d = read_settings() if d is None else d
     own = (d.get("spaces") or {}).get(bare(space)) if space else None
     for layer in (own, d.get("everywhere")):
-        a = layer.get("assistant") if isinstance(layer, dict) else None
-        v = a.get("reactions") if isinstance(a, dict) else None
-        if isinstance(v, bool):
-            return v
-    return DEFAULTS["assistant"]["reactions"]
+        for key in ("agents", "assistant"):
+            a = layer.get(key) if isinstance(layer, dict) else None
+            v = a.get("reactions") if isinstance(a, dict) else None
+            if isinstance(v, bool):
+                return v
+    return DEFAULTS["agents"]["reactions"]
 
 
 def settings_layers(s, space=None):

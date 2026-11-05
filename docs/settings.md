@@ -20,10 +20,10 @@ drops the space's own, and it inherits again. A few settings are one for every s
 | Page | Setting | Level | Why |
 |---|---|---|---|
 | Agents | Assistant (CLI, model, effort, fast, permissions) | Everywhere, space | A repo may want a stronger model or another CLI |
-| Agents | Reactions (the Assistant reacts with an emoji; on) | Everywhere, space | A space may want a plainer chat |
 | Agents | Workers | Everywhere, space | The same: what a task in this space runs on |
 | Agents | Reviewer | Everywhere, space | The same |
 | Agents | Backup agent | Everywhere, space | A space whose work shouldn't move to the other CLI |
+| Agents | Reactions (every agent reacts with an emoji; on) | Everywhere, space | A space may want a plainer chat |
 | Agents | Instructions (assistant.md, worker.md, reviewer.md) | Everywhere only | Repo rules belong in the repo's AGENTS.md or CLAUDE.md, which every agent there reads |
 | Tasks | Merge, Review, Must fix, Proof | Everywhere, space | How much care a repo needs differs |
 | Tasks | Tasks at once | Everywhere, space | It counts per folder already |
@@ -51,7 +51,7 @@ task values a machine set before (the old machine scope) still apply there until
 ## Where they're kept, and how they travel
 
 - `~/.herdr/shepherdr.json`: `everywhere` and `spaces[<space id>]` (another machine's space as `<machine>/<id>`), each
-  with `coordinator`, `worker`, `reviewer`, `backup`, `tasks`, `automations`, `assistant` (`{ reactions }`) and
+  with `coordinator`, `worker`, `reviewer`, `backup`, `tasks`, `automations`, `agents` (`{ reactions }`) and
   `autopilot` (`{ every, events, heartbeat }`). The window pushes each machine its share (Everywhere's and its spaces' by their
   ids there), and when the web app is served from another machine its service keeps the file in step with that host
   (`service/sync.ts`). So a space on any machine, and the web on the Mac mini, see the same values.
@@ -77,16 +77,30 @@ task values a machine set before (the old machine scope) still apply there until
 
 ## Reactions
 
-Agents › Reactions, under the Assistant, on by default: the space's Assistant reacts to some of your messages with one
-emoji, as a person would (👀 on a new ask it picks up, 👍 on a go-ahead, ✅ on your ask once it's done, 😂 at a joke,
-🙏 for thanks). Most messages get none, never more than one, and never instead of an answer you need. Off, it never
-reacts. Workers are never told to react.
+Agents › Reactions, on by default: every agent reacts to some of your messages with one emoji, as a person would
+(👀 on a new ask it picks up, 👍 on a go-ahead, ✅ on your ask once it's done, 😂 at a joke, 🙏 for thanks): Assistants,
+task workers, automation runs and plain agent tabs, on every machine. Most messages get none, never more than one, and
+never instead of an answer you need. Off, none reacts. The reactions show on your messages in every chat, the
+Assistant's, a task's and an agent tab's, in the window and on the web (`core/chat-log.js`).
 
-- **How it's told.** With its settings block (below): the when-and-how paragraph (`herdr_task/reactions.py` GUIDE) when
-  on, "never react" when off; the terminal is labelled `herdr.reactions=on|off`.
-- **Changed mid-session.** A `<herdr-setting name="reactions">` line, as for every setting below.
+- **Kept as** `agents.reactions` at each level. SHEP-42 kept it as the Assistant's, `assistant.reactions`: it still
+  applies where a level has no `agents.reactions` (herdr-task, the window's chain), and the window and the web app
+  move it there when they read the file (`upgradeReactions` in `core/settings.js`), so their next change writes it.
+- **How it's told.** The chat's SessionStart hook (`mods/chat/session-note.sh`) asks `herdr-task _session-note` for
+  every agent's extra words: an Assistant's settings block (below) ends with them, any other agent gets just them
+  (`herdr_task/reactions.py`): the when-and-how paragraph (GUIDE) when on, "never react" when off, by its space (its
+  terminal's space or task-space label, else the space whose folder holds its folder, else Everywhere's). It runs at
+  every start, resume and compaction, for Claude Code and Codex, and labels the terminal `herdr.reactions=on|off`. The
+  role instructions (`assistant.md`, `worker.md`, `reviewer.md`) don't carry it: they are your words to edit, and the
+  hook is the one start path that knows the setting now.
+- **Changed mid-session.** A `<herdr-setting name="reactions" value scope>` line: an Assistant's comes with its other
+  changed settings (below); every other live agent its hook taught gets it alone from herdr-task's news pass
+  (`reactions_pass`), once, ending "carry on with what you were doing; if nothing, reply only `<hc no-reply/>`", so a
+  worker mid-task keeps working. One started before this isn't told until it starts again.
+- **Reviewers** run headless (`claude -p`, `codex exec`): their output goes to their worker, not a chat. Their hook
+  may run in the worker's terminal and teach them too, but they never get your messages, so they never react.
 - **A reaction only.** A reply of a `<hc react … />` line and `<hc no-reply/>` shows just the reaction on your
-  message, in the window and on the web (`core/chat-log.js`).
+  message.
 
 ## What the Assistant is told
 
@@ -107,5 +121,5 @@ then the space's own), without guessing (`herdr_task/assistant_settings.py`):
   whole block once it has had a turn. Busy with the person: next pass.
 - **The chat hides them**, as every Herdr tag (`core/chat-log.js`), and the `<hc no-reply/>` after: a settings change
   already shows where it was made, so a news row would only repeat it.
-- **Workers are not told**: their brief's Settings block is fixed when they start (Reactions are the Assistant's only).
+- **Other agents get only Reactions** (above): a worker's brief's Settings block is fixed when it starts.
 

@@ -226,3 +226,17 @@ test("sendsOf reads only what a command really sends", () => {
   expect(sendsOf('hc send t1 "$UNKNOWN"; hc keys t1 enter; hc read t1')).toEqual([]);
   expect(sendsOf("git grep -n 'hc send' core")).toEqual([]);
 });
+
+// SHEP-48: a task worker reacts too (Reactions are for every agent): its react line lands on the person's message in
+// its task chat, after its brief and its work, and the Settings notice it got mid-work shows nothing.
+test("a task worker's reaction lands on the person's message in its task chat", async () => {
+  const brief = { ...person, uuid: "b1", message: { role: "user", content: "You work on one Herdr task.\n\nYour task, SHOP-3:\nMake the card bigger." } };
+  const ask = { ...person, uuid: "p4", message: { role: "user", content: "Can you also make it blue?" } };
+  const notice = { ...person, uuid: "p5", message: { role: "user", content: '<herdr-setting name="reactions" value="on">Reactions are now on in Settings. React to some of the person\'s messages. Nothing to answer: carry on with what you were doing; if nothing, reply only <hc no-reply/>.</herdr-setting>' } };
+  const c = await read([brief, reply("w1", [text("Starting on the card."), call]), notice, ask,
+    reply("w2", [text('<hc react="👀" to="Can you also make it blue?"/>\nOn it: blue as well.')])]);
+  expect(said(c)).toEqual(["Starting on the card.", "On it: blue as well."]);
+  const you = c.items.filter((x) => x.kind === "user");
+  expect(you.map((x) => x.text)).toEqual([brief.message.content, "Can you also make it blue?"]);
+  expect(c.reactions.get(you[1].id)).toEqual([{ emoji: "👀", by: "agent" }]);
+});

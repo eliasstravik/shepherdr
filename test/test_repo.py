@@ -294,10 +294,11 @@ if __name__ == "__main__":
 
 
 class SessionNote(unittest.TestCase):
-    """SHEP-42: the chat's SessionStart hook (mods/chat/session-note.sh) adds an Assistant's Reactions words
-    (herdr-task _session-note) to its JSON; a worker's start never asks herdr-task. hc and herdr-task are fakes."""
+    """SHEP-42, SHEP-48: the chat's SessionStart hook (mods/chat/session-note.sh) adds every agent's Reactions
+    words (herdr-task _session-note, on or off by its space) to its JSON: an Assistant's, a task worker's, an
+    agent tab's. Outside Herdr it says nothing. hc and herdr-task are fakes."""
 
-    def run_hook(self, role):
+    def run_hook(self, role, terminal="t5"):
         import shutil
         import subprocess
         import tempfile
@@ -314,8 +315,12 @@ class SessionNote(unittest.TestCase):
             f.write(f"#!/bin/sh\necho \"$@\" >> {log}\ncat {d}/words\n")
         for x in ("hc", "herdr-task"):
             os.chmod(os.path.join(d, x), 0o755)
-        env = {**os.environ, "PATH": f"{d}:{os.environ['PATH']}", "HC_TERMINAL_ID": "t5"}
+        env = {**os.environ, "PATH": f"{d}:{os.environ['PATH']}", "HC_TERMINAL_ID": terminal}
+        if not terminal:
+            env.pop("HC_TERMINAL_ID")
         out = subprocess.run(["sh", os.path.join(ROOT, "mods", "chat", "session-note.sh")], capture_output=True, text=True, env=env)
+        if not terminal:
+            return out.stdout, os.path.exists(log)
         ctx = json.loads(out.stdout)["hookSpecificOutput"]["additionalContext"]
         if not os.path.exists(log):
             return ctx, ""
@@ -328,7 +333,13 @@ class SessionNote(unittest.TestCase):
         self.assertTrue(ctx.endswith('`herdr-artifact guide` first. Reactions (on in Settings): <hc react="👀" to="x"/>'), ctx[-120:])
         self.assertEqual(asked.split(), ["_session-note", "t5"])
 
-    def test_a_worker_gets_the_chat_note_only(self):
-        ctx, asked = self.run_hook(None)
-        self.assertTrue(ctx.endswith("run `herdr-artifact guide` first."), ctx[-80:])
-        self.assertEqual(asked, "")
+    def test_a_worker_and_an_agent_tab_get_theirs_too(self):
+        for role, terminal in ((None, "t9"), ("", "t11")):
+            ctx, asked = self.run_hook(role, terminal)
+            self.assertTrue(ctx.endswith('`herdr-artifact guide` first. Reactions (on in Settings): <hc react="👀" to="x"/>'), ctx[-120:])
+            self.assertEqual(asked.split(), ["_session-note", terminal])
+
+    def test_outside_herdr_it_says_nothing(self):
+        out, asked = self.run_hook(None, "")
+        self.assertEqual(out, "")
+        self.assertFalse(asked)
