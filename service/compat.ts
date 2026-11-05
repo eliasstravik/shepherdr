@@ -464,7 +464,8 @@ export class Compat {
     const space = key.startsWith("p:") ? key.slice(2).replace(":", "/") : null;
     const spaceRows = space ? this.rows.filter((r) => r.space === space && r.ref) : [];
     const workerOf = new Map<string, string>(this.rows.filter((r) => r.worker).map((r) => [r.worker, r.ref]));
-    const sender = (from: string, text: string) => senderName(from, text, { find: term, machine, taskOf: (a: string) => workerOf.get(a) ?? null });
+    // here: this machine's name in herdr-core (another machine's agent writes ours as "<here>/t75")
+    const sender = (from: string, text: string) => senderName(from, text, { find: term, machine, taskOf: (a: string) => workerOf.get(a) ?? null, here: (this as any).coreName?.() ?? null });
     const news = space ? newsTimeline(items, new Map(spaceRows.map((r) => [r.ref, { ...r, status: r.section }])), { start: reader.start }) : [];
     const newsLine = (e: any): Message => {
       const task = machine ? `${machine}:${e.ref}` : e.ref;
@@ -499,7 +500,7 @@ export class Compat {
       const brief = x.kind === "user" && !first ? briefLabel(x, i, { start: reader.start, template, task, sender }) : null;
       if (brief) {
         const restart = /^<restart>/.test(x.text ?? "");
-        messages.push({ id: x.id, who: "you", at: x.at, text: restart ? x.text.replace(/<\/?restart>/g, "") : x.from ? unsigned(x.text) : x.text, brief: { label: brief, ...(restart ? { bare: true } : {}) } });
+        messages.push({ id: x.id, who: "you", at: x.at, text: restart ? x.text.replace(/<\/?restart>/g, "") : x.from ? unsigned(x.text) : x.text, brief: { label: brief, ...(restart ? { bare: true } : {}), ...(x.from ? { from: sender(x.from, x.text) } : {}) } });
       } else if (x.kind === "user" && (x.text || x.paths?.length || x.images)) {
         const sentCid = sends.length && !x.from ? sentAs(sends, x, takenSends) : undefined;
         const cid = sentCid ? { cid: sentCid } : {};

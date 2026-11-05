@@ -71,6 +71,12 @@ const online = (machine) => !machine || machines().find((m) => m.name === machin
 const same = (a, b) => norm(a) === norm(b);
 // The person's words into the agent's terminal: plain input from them, here and on another machine (core/person.js).
 const personHc = asPerson({ hc, exec });
+// This machine's name in herdr-core, once known: another machine's agent writes our terminals as "<it>/t75" (SHEP-12).
+let ownName = null, askedName = false;
+const coreName = () => {
+  if (!askedName) { askedName = true; hc(["server", "status"]).then((r) => { ownName = JSON.parse(r.stdout || "{}")?.core?.name || null; }).catch(() => { askedName = false; }); }
+  return ownName;
+};
 // When an ask was made: its id is <terminal>.<seconds>.<pid> (ask-hook.sh), taken at the end of
 // that second so it sits after what was said in it.
 const askAt = (id) => { const p = String(id).split("."); const sec = Number(p[p.length - 2]); return Number.isFinite(sec) && sec > 1e9 ? sec * 1000 + 999 : Date.now(); };
@@ -2469,7 +2475,8 @@ export default class Chat extends View {
         // Not typed by the person: a launch brief or another agent's message, as a quiet row.
         // A fresh start's handover says it all in its label.
         const restart = /^<restart>/.test(x.text ?? "");
-        out.push({ kind: "brief", id: x.id, label: this.brief(x, i), text: restart ? x.text.replace(/<\/?restart>/g, "") : x.from ? unsigned(x.text) : x.text, bare: restart });
+        // Another agent's message (who: its sender) is drawn as a message (SHEP-12).
+        out.push({ kind: "brief", id: x.id, label: this.brief(x, i), text: restart ? x.text.replace(/<\/?restart>/g, "") : x.from ? unsigned(x.text) : x.text, bare: restart, ...(x.from ? { who: this.sender(x.from, x.text) } : {}) });
         continue;
       }
       if (x.kind === "user") {
@@ -2618,7 +2625,7 @@ export default class Chat extends View {
   // the message with (text: "From HERD-76: …"), else "Another agent".
   sender(from, text = null) {
     // core/chat-view.js: the web app's chat names senders the same way.
-    return senderName(from, text, { find: (a) => terminals().find((x) => x.address === a), machine:this.machine, taskOf: (a) => this.workerTasks().get(a)?.ref ?? null });
+    return senderName(from, text, { find: (a) => terminals().find((x) => x.address === a), machine:this.machine, taskOf: (a) => this.workerTasks().get(a)?.ref ?? null, here: coreName() });
   }
 
   // Whose ask a card shows: the CLI's short name ("Claude asks").
@@ -2661,7 +2668,7 @@ export default class Chat extends View {
     switch (x.kind) {
       case "end": return 10;
       case "top": case "loading": case "note": return 36;
-      case "brief": return this.opened.has(x.id) ? 32 + lines(x.text, w) * 19 : 20;
+      case "brief": return this.opened.has(x.id) ? (x.who ? 46 + lines(x.text, w - 50) * 20 : 32 + lines(x.text, w) * 19) : 20;
       case "replyref": return 22;
       case "chips": return 30;
       case "imgs": return this.fitThumbs(x.paths).h + 8;
@@ -2785,6 +2792,15 @@ export default class Chat extends View {
           .child(div().min_w(0).truncate().text_color(t.muted).child(k.title)))), 18, 3);
       case "brief": {
         const open = this.opened.has(x.id);
+        // Another agent's message (SHEP-12): a speech bubble in the accent, who sent it a step stronger than a tools
+        // row, then its first words; open, the whole message in a soft bubble under it.
+        if (x.who) return col(v_flex().w_full().px(6).py(QUIET_PY).rounded(7).cursor_pointer().hover((s) => s.bg(t.hover))
+          .child(h_flex().gap(6).items_center().text_size(12).text_color(t.muted)
+            .child(svg("mods/chat/message.svg").size(14).flex_none().text_color(t.accent))
+            .child(div().flex_none().font_medium().text_color(t.foreground).child(x.who))
+            .when(!open, (el) => el.child(div().flex_1().min_w(0).truncate().child(String(x.text ?? "").split("\n").find((l) => l.trim()) ?? ""))))
+          .when(open, (el) => el.child(h_flex().w_full().pl(20).pt(6).pb(2).child(div().max_w(most).px(12).py(8).rounded(12).bg(t.raised)
+            .text_size(13).text_color(t.foreground).child(TextView.markdown(`${pre}chat-brief-${x.id}`, x.text || " ").selectable(true))))), 12, 0);
         return col(v_flex().w_full().px(6).py(QUIET_PY).rounded(7).cursor_pointer().hover((s) => s.bg(t.hover))
           .child(h_flex().gap(6).items_center().text_size(12).text_color(t.dim)
             .child(svg(`mods/workspace-chrome/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none())
