@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.1.11
+
+Web app fixes: new spaces on other machines and menus that stay in sight.
+
+- A new space made on another machine from the web app shows up and opens at once, with the icon you picked. If it
+  takes a moment, the dialog says so and keeps waiting instead of closing.
+- In the web app's sidebar, the machine load popover and every row menu open fully on screen, even in a narrow sidebar
+  or the phone drawer.
+
 ## 3.1.10
 
 Voice that can reach your whole screen, subagents you can see, and honest Working and Waking labels.
