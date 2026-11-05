@@ -61,5 +61,5 @@ in `.autopilot.json` (version 1) are dropped on the next read.
 | Element | Window | Web | State |
 |---|---|---|---|
 | On or off | the space's own switch (`mods/pane-chat/autopilot.js` apPoll, `pilotFor`); another machine's from its file there (read over herdr-core about every 12 s), flipped through herdr-task | `place.pilot` from `model.ts` pilotOf (another machine's file comes with its lists) | ✓ |
-| Detail | `Waking`, `Queued`, `Next 10:00`, `Next Wed`, `On events`, `Run now only` (`headerDetail`, from the space's own schedule and events, else Everywhere's) | `AP.headerDetail` (`web/plugins/coordinators/client.tsx`) | ✓ |
+| Detail | `Waking`, `Queued`, `Next 10:00`, `Next Wed`, `On events`, `No schedule` (`headerDetail`, from the space's own schedule and events, else Everywhere's) | `AP.headerDetail` (`web/plugins/coordinators/client.tsx`) | ✓ |
 | `Write a heartbeat` | while on and the heartbeat that applies is empty (herdr-task's `blank`; the starter is a real one); opens Settings › Autopilot on that space | the same; opens that space's Autopilot page | ✓ |
