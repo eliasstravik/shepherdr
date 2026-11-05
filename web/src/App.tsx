@@ -302,14 +302,13 @@ function PlaceColumn({ place, pane }: { place: Place; pane?: number }) {
   const snap = useSnap()!
   const Chat = registry.views.chat
   const term = useUI((u) => u.term)
-  // 3.0's pane header: what runs in the shown tab ("Assistant · Claude Code"; another tab's program) and its folder,
-  // then plugins' marks there (placeHeader order ≤ 10); past the gap, right-aligned, its status in words, the Autopilot
-  // pill and Chat | Terminal (placeHeader, by order). The space is
-  // named by the sidebar and the tab bar, as in the window.
+  // the pane header: the space's name, its folder (and machine) quieter under it; another tab shown names its program
+  // ("Shell", "Codex") and folder. Then plugins' marks (placeHeader order ≤ 10); past the gap, right-aligned, its
+  // status in words, the Autopilot pill and Chat | Terminal (placeHeader, by order). Never the Assistant's role or
+  // agent (SHEP-36): the composer's model menu says which agent.
   const tab = term?.startsWith('t:') ? place.tabs?.find((t) => t.term === term) : undefined
-  // "Assistant · Claude Code": the role is the title, what it runs leads the quieter line under it, then its folder
-  const [name, ...runs] = (tab ? (tab.prog ?? 'Shell') : (place.header ?? 'Assistant')).split(' · ')
-  const where = tab ? tab.where : place.cwd ?? place.where
+  const name = tab ? (tab.prog ?? 'Shell') : place.name
+  const where = tab ? tab.where : placeKind(snap, place)
   // another agent tab switched to Chat shows its own chat (its terminal otherwise: the terminal plugin's chatBody)
   const tabChat = useUI((u) => (tab && u.tabView?.[tab.term] === 'chat' ? tab.term : null))
   return (
@@ -318,7 +317,7 @@ function PlaceColumn({ place, pane }: { place: Place; pane?: number }) {
         <MenuButton />
         {pane ? null : <PlacesToggle when="closed" />}
         <div className="flex min-w-24 shrink-[100] items-center">
-          <Who name={name} kind={runs.length || where ? <PaneWhere runs={runs.join(' · ')} where={where} /> : undefined} />
+          <Who name={name} kind={where ? <PaneWhere where={where} /> : undefined} />
         </div>
         {registry.placeHeader.filter((h) => h.order <= 10).map(({ View }, i) => (
           <View key={i} place={place} />
@@ -337,18 +336,13 @@ function PlaceColumn({ place, pane }: { place: Place; pane?: number }) {
   )
 }
 
-/** a pane header's quiet line: what runs ("Claude Code"), then its folder, which gives way from its start so its own
- *  name stays ("…/dev/shepherdr") */
-function PaneWhere({ runs, where }: { runs: string; where?: string }) {
+/** a pane header's quiet line: the folder, which gives way from its start so its own name stays ("…/dev/shepherdr") */
+function PaneWhere({ where }: { where: string }) {
   return (
     <span className="flex min-w-0">
-      {runs ? <span className="shrink-0">{runs}</span> : null}
-      {runs && where ? <span className="shrink-0 px-1 text-fg3">·</span> : null}
-      {where ? (
-        <span className="min-w-0 truncate text-fg3 [direction:rtl]">
-          <bdi>{where}</bdi>
-        </span>
-      ) : null}
+      <span className="min-w-0 truncate text-fg3 [direction:rtl]">
+        <bdi>{where}</bdi>
+      </span>
     </span>
   )
 }

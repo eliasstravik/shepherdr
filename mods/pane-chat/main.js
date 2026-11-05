@@ -16,7 +16,8 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { props, run, theme, home, exec, hc, notify, nextCommand, shared, setShared } from "herdr";
-import { panes, terminals, inRender } from "./live.js";
+import { panes, terminals, spaces, inRender } from "./live.js";
+import { spaceName } from "./core/spaces.js";
 import { apSpace, apWatch, apPoll, apGroup, apHeartbeatLink, COMPACT_BELOW } from "./autopilot.js";
 import { button as uiButton, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { on as addonOn } from "./addons.js";
@@ -216,10 +217,11 @@ export default class Pane extends View {
     // An artifact (mods/artifacts: mod "art-<id>") shows its title and version.
     const art = self.mod?.startsWith("art-") ? shared("artifacts.titles")?.[self.mod] ?? self.title : null;
     const prog = ((p.program?.agent || p.program?.shell) && p.program.name) || p.title || p.program?.name || "Shell";
-    // An Assistant reads "Assistant · Claude Code": the role first, then what it runs.
+    // An Assistant reads as its space ("tor-gameboy"), never its role or what it runs (SHEP-36: the composer's model
+    // menu says which agent): the space's name, then its folder, quieter.
     const isAssistant = Boolean(lazy) || terminals().find((x) => x.address === (agent ?? self.terminal))?.labels?.["herdr.role"] === "coordinator";
-    const name = art ?? (lazy ? "Assistant" : chatMode && p === self ? "Chat" : isAssistant ? `Assistant · ${prog}` : prog);
-    const runs = !self.mod?.startsWith("art-") && !lazy && isAssistant && name !== "Chat" ? prog : null;
+    const space = isAssistant ? spaces().find((s) => s.tabs?.some((x) => x.id === self.tab)) : null;
+    const name = art ?? (isAssistant ? spaceName(space, { home: home() }) : chatMode && p === self ? "Chat" : prog);
     const pic = art !== null ? svg("mods/artifacts/artifacts.svg").size(14).flex_none().text_color(t.dim) : icon(p.program, 14, t.dim);
     const st = p.status;
     const pane = self.pane;
@@ -242,10 +244,7 @@ export default class Pane extends View {
       .on_size_change((size, cx) => { if (Math.round(size.width) !== this.width) { this.width = Math.round(size.width); cx.notify(); } })
       .on_click(() => run("pane.focus", { pane }))
       .when(Boolean(pic), (el) => el.child(pic))
-      // "Assistant · Claude Code": the role in full, what it runs quieter after it.
-      .child(h_flex().flex_none().max_w(260).min_w(0).gap(4).items_center()
-        .child(div().min_w(0).truncate().font_medium().text_color(t.foreground).child(runs ? "Assistant" : name))
-        .when(Boolean(runs), (el) => el.child(div().min_w(0).truncate().text_color(t.muted).child(`· ${runs}`))))
+      .child(div().flex_none().max_w(260).min_w(0).truncate().font_medium().text_color(t.foreground).child(name))
       // The folder gives way first; the switch keeps its width; the gap after pushes the rest right.
       .child(div().flex_shrink_1().min_w(0).truncate().text_color(t.dim).child(folder(p.cwd)))
       .child(div().flex_1())
