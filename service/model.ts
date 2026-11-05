@@ -201,16 +201,19 @@ export class Model {
       if (k.state !== "live" || k.labels?.["herdr.task"] !== key || machineOf(k.address) !== (list.machine ?? null)) continue;
       const st = typeof k.status === "object" ? k.status?.state ?? null : null;
       if (!st && SHELL.test(String((k as any).foreground?.name ?? ""))) continue;
-      // its worker's own helper (SHEP-54: its reviewer, an hc child): never one of its agents; while it works or asks,
-      // the task is Working (its worker waits on it), else nothing
-      if (isHelper(k)) {
-        if (st === "working" || st === "blocked") out.push({ address: k.address, status: "working", role: k.labels?.["herdr.role"] ?? "helper", turn: 0 });
-        continue;
-      }
+      // its worker's own helper (SHEP-54: its reviewer, an hc child): never one of its agents (helpersOf)
+      if (isHelper(k)) continue;
       // turn: its finished turns, for a Ready task back at work (core busyAgain())
       out.push({ address: k.address, status: st, role: k.labels?.["herdr.role"] ?? "worker", turn: Number((k as any).turn) || 0 });
     }
     return out;
+  }
+
+  /** Its worker's own helper agents now (SHEP-54): core place() counts one at work as the task at work. */
+  private helpersOf(list: List, task: any) {
+    const key = `${list.slug}#${task.id}`;
+    return [...this.hub.terminals.values()].filter((k: any) => k.state === "live" && k.labels?.["herdr.task"] === key && isHelper(k))
+      .map((k: any) => ({ address: k.address, status: typeof k.status === "object" ? k.status?.state ?? null : null }));
   }
 
   private build() {
@@ -221,7 +224,7 @@ export class Model {
 
     const rows = lists.flatMap((list) => list.tasks.map((task: any) => {
       const live = this.agentsOf(list, task);
-      const p = place(list, task, { live });
+      const p = place(list, task, { live, helpers: this.helpersOf(list, task) });
       const own = live.map((a) => (this.hub.terminals.get(a.address) as any)?.report).find((r) => typeof r?.progress === "number" && r.progress >= 0);
       const w = reportOf(task, p.section, own ? { pct: own.progress, msg: own.msg || null } : null);
       const running = p.section === "queued" ? list.tasks.filter((x: any) => x.state === "running" && this.agentsOf(list, x).length).length : 0;

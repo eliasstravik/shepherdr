@@ -91,11 +91,14 @@ export function retryLine(r, now = Date.now()) {
 // ([{ address, status, ... }], only while it runs or is ready); loaded: false while its machine's agents
 // aren't known yet; each { address, status, turn, role }. The same rules as herdr-task's task_status(): its record,
 // then its agents' own status.
-export function place(list, task, { live = [], loaded = true, now = Date.now() } = {}) {
+// helpers: its worker's own helper agents (SHEP-54: a reviewer it started as its hc child), never among live: one at
+// work or asking keeps the task Working (its worker waits on it; the worker answers what it asks), else they count not.
+export function place(list, task, { live = [], helpers = [], loaded = true, now = Date.now() } = {}) {
   const st = task.state;
   if (!(st === "running" || st === "ready")) live = [];
   const status = live.reduce((s, a) => ((RANK[a.status] ?? 0) > (RANK[s] ?? 0) ? a.status : s), null);
-  const states = live.map((a) => a.status);
+  const busy = live.length && helpers.some((a) => a.status === "working" || a.status === "blocked");
+  const states = [...live.map((a) => a.status), ...(busy ? ["working"] : [])];
   let section = ["todo", "queued", "scheduled", "done"].includes(st) ? st : null, needs = null, why = null;
   const need = (kind, text) => { section = "needs"; needs = kind; why = text; };
   if (section) return { list, task, live, status, section, needs, why };

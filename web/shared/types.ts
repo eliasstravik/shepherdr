@@ -326,6 +326,8 @@ export interface Task {
   plan?: string[]
   /** none until the task's agent starts */
   agent?: TaskAgent
+  /** its worker's own helper agents (SHEP-54: a reviewer it started), newest last */
+  subagents?: { chat: string; title: string; status: 'working' | 'needs' | 'done'; at: number; ended?: number }[]
   desc?: string
   said?: string
   /** its facts line when done: PR, commit, checks, review, what is not proven */

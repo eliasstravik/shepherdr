@@ -469,10 +469,13 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
   // them), else where it merges
   const ref = task.id.slice(task.id.lastIndexOf(':') + 1)
   const doing = task.report ? <ReportLine w={task.report} head /> : task.status === 'work' && task.sub ? <span className="truncate">{task.sub}</span> : null
+  // its helper agent at work or asking (SHEP-54: its reviewer), named after what it does; its row is over the box
+  const helper = [...(task.subagents ?? [])].reverse().find((s) => s.status !== 'done')
   const sub = (
     <span className="flex min-w-0 items-center gap-1.5">
       <span className="shrink-0 font-mono text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{ref}</span>
       {doing ? <span className="flex min-w-0 items-center gap-1.5"><span aria-hidden className="text-fg3">·</span>{doing}</span> : task.base ? <span className="min-w-0 truncate"><span aria-hidden className="text-fg3">· </span>→ {task.base}</span> : null}
+      {helper ? <span data-task-subagent className="flex shrink-0 items-center gap-1.5 whitespace-nowrap"><span aria-hidden className="text-fg3">·</span>{`${helper.title} ${helper.status === 'needs' ? 'needs it' : 'at work'}`}</span> : null}
     </span>
   )
   // in focus it sits at the window's edge: no line there

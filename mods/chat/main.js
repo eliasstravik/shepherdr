@@ -29,6 +29,7 @@ import { agents, panes, terminals, spaces, inRender } from "./live.js";
 import * as fs from "fs/promises";
 import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names, pilotLine } from "./core/chat-log.js";
 import { BgJobs } from "./core/bg-jobs.js";
+import { ChatReader } from "./core/chat-reader.js";
 import { words, howAnswered } from "./core/asks.js";
 // The rows' words and rules the web app's chat draws by too (core/chat-view.js).
 import { WORDS, clock, subagentsOf, subagentWord, senderName, briefLabel, fromName, sentTo, selfName, initialOf, newsWords, resolveArtifacts, unsigned, ownWords, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
@@ -3282,7 +3283,7 @@ export default class Chat extends View {
   // "+N more" opens the rest. A shell's or watcher's row opens to its command, what it printed last
   // (Claude Code's), and Stop.
   // Shepherdr settings' "Helpers above the chat box" off (shared "chat.helpers" false): no subagents.
-  background(t, st) {
+  background(t, st, rcx) {
     const now = Date.now();
     // its own helper agents in herdr first (SHEP-54: a reviewer it started as its hc child), then the CLI's
     const kids = shared("chat.helpers") === false || this.phase === "ended" ? [] : subagentsOf(terminals(), this.addr, now).map((k) => ({ ...k, kind: "child", id: `c:${k.address}`, label: k.title }));
@@ -3298,7 +3299,7 @@ export default class Chat extends View {
     const mono = settings().font_family ?? "JetBrains Mono";
     const age = (h) => div().flex_none().font_family(mono).text_size(11.5).text_color(t.dim).child(ago(h.at));
     const row = (h, i) => {
-      if (h.kind === "child") return this.subagentRow(h, t, age);
+      if (h.kind === "child") return this.subagentRow(h, t, age, rcx);
       if (h.kind === "agent") return h_flex().id(`helper-${i}`).w_full().h(24).px(6).gap(8).items_center().text_size(12)
         .child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900))
         .child(div().flex_1().min_w(0).truncate().font_medium().text_color(t.foreground).child(h.label))
@@ -3343,7 +3344,7 @@ export default class Chat extends View {
   // One subagent over the box (SHEP-54), as the web's: its status (a spinner at work, red asking, a check once done),
   // "Reviewer · Codex", its state in words and how long. It opens to what it does now and "Open its chat": its own
   // conversation in a dialog (a view only, as a task's thread), where the person can watch or talk to it.
-  subagentRow(h, t, age) {
+  subagentRow(h, t, age, rcx) {
     const on = this.jobOpen === h.id;
     const word = subagentWord(h.status);
     const icon = h.status === "working" ? svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)
@@ -3352,7 +3353,7 @@ export default class Chat extends View {
     const head = h_flex().id(`sub-${h.address}`).w_full().h(24).px(6).gap(8).items_center().rounded(6).cursor_pointer().text_size(12)
       .when(on, (el) => el.bg(t.hover))
       .hover((s) => s.bg(t.hover))
-      .on_click((_e, cx) => { cx.stop_propagation(); this.jobOpen = on ? null : h.id; cx.notify(); })
+      .on_click((_e, cx) => { cx.stop_propagation(); this.jobOpen = on ? null : h.id; if (!on) this.subagentWords(h.address, cx); cx.notify(); })
       .child(icon)
       .child(div().min_w(0).truncate().font_medium().text_color(t.foreground).child(h.label))
       .child(div().flex_none().text_color(h.status === "needs" ? red(t) : t.dim).child(word))
@@ -3362,11 +3363,37 @@ export default class Chat extends View {
     if (!on) return head;
     const k = terminals().find((x) => x.address === h.address);
     const now = typeof k?.status === "object" ? k.status?.msg : null;
+    // its last words, from its own log (read when opened, again every few seconds while open: subagentWords)
+    const said = this.subSaid?.get(h.address);
+    if (rcx && !this.subPulling?.has(h.address) && Date.now() - (this.subAt?.get(h.address) ?? 0) > 4000) this.subagentWords(h.address, rcx);
     return v_flex().w_full().child(head)
       .child(v_flex().w_full().pl(26).pr(6).pt(4).pb(6).gap(6)
-        .child(div().w_full().text_size(12).text_color(t.muted).child(now || (h.status === "done" ? "Its turn is over: its last message is its report." : "Starting…")))
+        .children(said === undefined ? [div().text_size(12).text_color(t.dim).child("Loading…")]
+          : said.map((w) => div().w_full().pl(8).border_l(2).border_color(t.border).text_size(12).text_color(t.muted).child(w.length > 400 ? w.slice(0, 399) + "…" : w)))
+        .when(Boolean(now) || (said !== undefined && !said.length), (el) => el.child(div().w_full().truncate().text_size(11.5).text_color(t.dim).child(now || "Nothing said yet.")))
         .child(h_flex().child(this.button(`sub-open-${h.address}`, WORDS.subOpen, "mods/chat/arrow-right.svg", "secondary", t, () =>
           openOverlay({ mod: "chat", kind: "dialog", width: 760, height: 0.85, props: { terminal: h.address, thread: true, title: h.label } })))));
+  }
+
+  // A subagent's last two messages, from its own session log (core/chat-reader.js, as the web's service reads it).
+  subagentWords(addr, cx) {
+    this.subSaid ??= new Map(); this.subPulling ??= new Set(); this.subAt ??= new Map(); this.subReaders ??= new Map();
+    this.subPulling.add(addr);
+    this.subAt.set(addr, Date.now());
+    const machine = addr.includes("/") ? addr.split("/")[0] : null;
+    let r = this.subReaders.get(addr);
+    if (!r) this.subReaders.set(addr, (r = new ChatReader({ sh: (script, args, on) => exec("sh", ["-c", script, ...args], { on: on ?? machine }) }, addr)));
+    cx.spawn(async (cx) => {
+      try {
+        const got = await hc(["get", addr, "--json"]).then((x) => JSON.parse(x.stdout || "{}")).catch(() => null);
+        if (got) await r.locate(got);
+        await r.pull();
+        const items = r.conv?.items ?? [];
+        this.subSaid.set(addr, items.filter((x) => x.kind === "agent" && x.text).slice(-2).map((x) => norm(x.text)));
+      } catch { this.subSaid.set(addr, []); }
+      this.subPulling.delete(addr);
+      cx.notify();
+    });
   }
 
   // Held messages, each with Edit and Cancel; they go once the agent is free.
@@ -4077,7 +4104,7 @@ export default class Chat extends View {
       .child(this.statusLine(t, st) ?? div())
       .child(this.callBar(t) ?? div())
       .child(this.queued(t) ?? div())
-      .child(this.background(t, st) ?? div())
+      .child(this.background(t, st, cx) ?? div())
       .child(this.composer(t, st))
       .child(div().flex_none().h(12));
   }
