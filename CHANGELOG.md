@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.1.9
+
+Voice calls that really open things where you are, reactions from every agent, and Assistants that know their settings.
+
+- Voice calls open a space, task or artifact on the screen you called from, and only say it's open once it shows. An
+  old page that never answers asks you to reload. Spaces are found by machine, artifacts by title.
+- Settings › Agents › Reactions is one switch for every agent: Assistants, task agents, automations and agent tabs.
+  Running agents are told when it changes, and pick the emoji that fits best, not just a thumbs up.
+- An agent's reaction still works when it quotes your words, and never shows up as stray text.
+- Each Assistant gets its space's settings when it starts (review, merge, proof, Autopilot and the rest), and a short
+  note when one of them changes.
+
 ## 3.1.8
 
 Tasks that start at a time you pick, an Assistant that never stops quietly, and a few things back where they belong.
