@@ -63,7 +63,7 @@ function useRunNow(place: Place) {
 /** The header's Autopilot (3.0's switch), one group: the switch, "Autopilot", what it waits for (core/autopilot.js
  *  headerDetail: "Next in 7 min", "Queued", "Waking", "On events", "Run now only") and Run now, on one quiet pill as
  *  tall as Chat | Terminal. It flips at once, herdr-task's answer says the rest (a refusal goes back, with a toast).
- *  It sits on the header's right with the other controls, Run now as a ▶ (its name in its tooltip) so the header's
+ *  It sits on the header's right with the other controls, Run now as a ▶ (its name in its label) so the header's
  *  name and folder keep their room; as the column narrows "Autopilot" goes while on (under 42rem: the green switch
  *  and its next run say it), then what it waits for (under 32rem); off, "Autopilot" stays down to 30rem. On a phone the switch alone, on a round pill as tall as the header's buttons: Run now is in its
  *  ⋯. "Write a heartbeat" after it while on with its heartbeat still empty. The Assistant's tab only, in every space
