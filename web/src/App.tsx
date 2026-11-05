@@ -305,7 +305,8 @@ function PlaceColumn({ place, pane }: { place: Place; pane?: number }) {
   const Chat = registry.views.chat
   const term = useUI((u) => u.term)
   // 3.0's pane header: what runs in the shown tab ("Assistant · Claude Code"; another tab's program) and its folder,
-  // then the Autopilot switch; past the gap its status, × and Chat | Terminal (placeHeader, by order). The space is
+  // then plugins' marks there (placeHeader order ≤ 10); past the gap, right-aligned, its status in words, the Autopilot
+  // pill and Chat | Terminal (placeHeader, by order). The space is
   // named by the sidebar and the tab bar, as in the window.
   const tab = term?.startsWith('t:') ? place.tabs?.find((t) => t.term === term) : undefined
   // "Assistant · Claude Code": the role is the title, what it runs leads the quieter line under it, then its folder
