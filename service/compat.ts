@@ -137,6 +137,19 @@ export function artifactStore(s: { folder: string; machine?: string | null; git?
   return { folder, key: `${s.machine ?? ""}|${folder}`, name: !repo && atHome ? "~" : folder.split("/").filter(Boolean).pop() ?? "/" };
 }
 
+/** unread: a space's chat counts as new until its Assistant's turn is read (core label herdr.chat.read). last is that
+ *  turn, so a page's read mark (web/src/read-marks.ts) knows a newer reply from the one it marked: a fixed "new" (2)
+ *  once made a page that had read a space never mark it again, and its row stayed bold (SHEP-19). */
+export function unreadMarks(spaces: Space[], keyOf: (id: string) => string) {
+  const last: Record<string, number> = {}, read: Record<string, number> = { "*": 0 };
+  for (const s of spaces) {
+    const k = keyOf(s.id), turn = Math.max(Number(s.turn) || 0, s.unread ? 1 : 0);
+    last[k] = turn;
+    read[k] = s.unread ? turn - 1 : turn;
+  }
+  return { last, read };
+}
+
 export function artifactOf(a: any, spaces: Space[], program: (addr: string) => string | null = () => null): Artifact {
   // its store is a folder: the space it is kept for (its own folder first, then a worktree of its repo), else none
   // (it shows with All)
@@ -383,9 +396,7 @@ export class Compat {
       ...input.sections.map((x: any) => ({ id: `s:${x.id}`, name: x.name, ...(x.icon ? { emoji: x.icon } : {}), machine: x.machine ?? host, spaces: x.spaces ?? [] })),
     ];
 
-    // unread: a space's chat counts as new until its Assistant's turn is read (core label herdr.chat.read)
-    const last: Record<string, number> = {}, read: Record<string, number> = { "*": 0 };
-    for (const s of spaces) { const k = placeKey(s.id); last[k] = s.unread ? 2 : 1; read[k] = 1; }
+    const { last, read } = unreadMarks(spaces, placeKey);
 
     // Notify (3.0's All / Needs me / Off): a row per space's level and Everywhere, as 2.1's Settings and space menu read it
     const n = this.shared?.value("notify") ?? {};

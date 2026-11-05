@@ -258,7 +258,7 @@ export class Model {
         // Jump's newest-first spaces
         changedAt: Math.max(0, ...(s.tabs ?? []).flatMap((t: any) => t.terminals ?? []).map((a: string) => Number((this.hub.terminals.get(a) as any)?.status_ms) || 0)),
         section: bar.sections.find((x: any) => (x.spaces ?? []).includes(s.id))?.id ?? null,
-        assistant: k?.address ?? null, assistantStatus: (k as any)?.status?.state ?? null,
+        assistant: k?.address ?? null, turn: (k as any)?.turn ?? 0, assistantStatus: (k as any)?.status?.state ?? null,
         autopilot: this.pilotOf(s.id).on ? { next: this.pilotOf(s.id).next_run ?? null } : null,
         git: this.gitOf(s),
         pilot: this.pilotOf(s.id),

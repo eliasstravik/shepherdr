@@ -7,13 +7,9 @@ import { useEffect, useState } from 'react'
 import { notifyOf } from '@shared/alerts.ts'
 import type { Place, Snapshot } from '@shared/types.ts'
 import { act, useSnap, useStore, visibleChats } from './kernel.ts'
+import { toMark, unread } from './read-marks.ts'
 
-/** has the chat something you haven't read */
-export function unread(snap: Snapshot, key: string | undefined): boolean {
-  const last = key ? snap.last?.[key] : undefined
-  if (!key || !last) return false
-  return last > Math.max(snap.read?.[key] ?? 0, snap.read?.['*'] ?? 0)
-}
+export { unread }
 
 /** Notify is Off: no alerts, and its row stays quiet */
 export const muted = (snap: Snapshot, place: string) => notifyOf(snap, place) === 'Off'
@@ -26,12 +22,13 @@ export function placeUnread(snap: Snapshot, p: Place) {
 /** what a mark sent already covers, until the snapshot has it */
 const asked = new Map<string, number>()
 
-/** these chats are read, up to what the snapshot has of them */
+/** these chats are read, up to what the snapshot has of them; a mark that fails is tried again */
 export function markRead(snap: Snapshot, keys: string[]) {
-  const chats = Object.fromEntries(keys.filter((k) => unread(snap, k) && (asked.get(k) ?? 0) < snap.last![k]).map((k) => [k, snap.last![k]]))
+  const chats = toMark(snap, keys, asked)
   if (!Object.keys(chats).length) return
-  for (const [k, at] of Object.entries(chats)) asked.set(k, at)
-  act({ type: 'read', chats }).catch(() => undefined)
+  act({ type: 'read', chats }).catch(() => {
+    for (const [k, at] of Object.entries(chats)) if (asked.get(k) === at) asked.delete(k)
+  })
 }
 
 /** Mark as read: these spaces' coordinators' chats */
