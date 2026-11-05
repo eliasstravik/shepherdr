@@ -1,11 +1,13 @@
-// Dictation into the message box: record.ts records the default microphone (pw-record) and
-// reports its level, transcribe.ts has ElevenLabs write it down (Scribe, with the voice call's key:
-// Settings › Secrets, read from the machine that keeps them into memory only). The text goes into
+// Dictation into the message box: record.ts records the default microphone (pw-record on Linux,
+// ffmpeg on macOS) and reports its level, transcribe.ts has ElevenLabs write it down (Scribe, with
+// the voice call's key: Settings › Secrets, read from the machine that keeps them into memory only). The text goes into
 // the box to edit; nothing is sent by itself or kept.
 
 import { exec, appHome, readTextFile } from "herdr";
 
 const DIR = () => `${appHome()}/data/chat-dictation`;
+// The window's PATH can be short: bun's own folder and Homebrew's (bun, ffmpeg) too.
+const PATH = 'PATH="$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; ';
 
 export class Dictation {
   constructor(key) {
@@ -26,8 +28,8 @@ export class Dictation {
     this.state = "recording";
     this.started = Date.now();
     // record.ts runs until told how to end (SIGINT keeps the audio, SIGTERM drops it); its pid
-    // goes beside the file.
-    this.run = exec("sh", ["-c", 'mkdir -p "$(dirname "$1")" && rm -f "$1" "$2" && { bun "$3" "$1" "$2" </dev/null >/dev/null 2>&1 & echo $! > "$1.pid"; wait; }',
+    // goes beside the file, and why it couldn't record (no recorder, a silent mic) in <file>.err.
+    this.run = exec("sh", ["-c", PATH + 'mkdir -p "$(dirname "$1")" && rm -f "$1" "$2" "$1.err" && { bun "$3" "$1" "$2" </dev/null >/dev/null 2>"$1.err" & echo $! > "$1.pid"; wait; }',
       "x", this.file, this.levelFile, `${appHome()}/mods/chat/record.ts`]).catch(() => null);
   }
 
@@ -44,7 +46,9 @@ export class Dictation {
     try {
       await exec("sh", ["-c", 'p=$(cat "$1.pid" 2>/dev/null) && kill -INT "$p" 2>/dev/null; rm -f "$1.pid"; true', "x", this.file]);
       await this.run;
-      const r = await exec("sh", ["-c", 'bun "$1" "$2" </dev/null 2>/dev/null', "x", `${appHome()}/mods/chat/transcribe.ts`, this.file]);
+      const why = (await readTextFile(`${this.file}.err`).catch(() => "")).trim();
+      if (why) throw new Error(why.split("\n").pop());
+      const r = await exec("sh", ["-c", PATH + 'bun "$1" "$2" </dev/null 2>/dev/null', "x", `${appHome()}/mods/chat/transcribe.ts`, this.file]);
       let said = null;
       try { said = JSON.parse(r.stdout.trim().split("\n").pop()); } catch {}
       if (typeof said?.text === "string") return said.text;
@@ -54,13 +58,13 @@ export class Dictation {
       return "";
     } finally {
       this.state = "idle";
-      exec("rm", ["-f", this.file, this.levelFile]);
+      exec("rm", ["-f", this.file, `${this.file}.err`, this.levelFile]);
     }
   }
 
   // Throws the recording away (Cancel, a call starting, or the chat closing).
   cancel() {
-    if (this.state === "recording") exec("sh", ["-c", 'p=$(cat "$1.pid" 2>/dev/null) && kill -TERM "$p" 2>/dev/null; rm -f "$1.pid" "$1" "$2"; true', "x", this.file, this.levelFile]);
+    if (this.state === "recording") exec("sh", ["-c", 'p=$(cat "$1.pid" 2>/dev/null) && kill -TERM "$p" 2>/dev/null; rm -f "$1.pid" "$1" "$1.err" "$2"; true', "x", this.file, this.levelFile]);
     this.state = "idle";
   }
 }

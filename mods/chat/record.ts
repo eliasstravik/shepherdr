@@ -1,17 +1,51 @@
 // Dictation's recorder (mods/chat dictate.js): records the default microphone with pw-record
-// and keeps the audio until it is told how to end, writing the mic's level as it goes.
+// (Linux) or on macOS mic.swift (built once with swiftc beside the recording), else ffmpeg, and keeps
+// the audio until it is told how to end, writing the mic's level as it goes. No recorder, or a
+// microphone that gives nothing: a plain message on stderr.
 //   bun record.ts <out.wav> <level file>
 // SIGINT: write <out.wav> (16 kHz mono 16-bit) and exit. SIGTERM: throw it away and exit.
 // The level file holds one number, 0..1, updated ten times a second.
 
-import { writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 const [out, levelFile] = process.argv.slice(2);
 if (!out || !levelFile) { console.error("usage: bun record.ts <out.wav> <level file>"); process.exit(2); }
 const RATE = 16000;
 const chunks: Uint8Array[] = [];
 let bytes = 0, peak = 0, wrote = 0;
-const mic = Bun.spawn(["pw-record", "--rate", String(RATE), "--channels", "1", "--format", "s16", "--raw", "-"], { stdout: "pipe", stderr: "ignore" });
+const mac = process.platform === "darwin";
+
+// mic.swift built for this version of it (named by its hash), or null without the command line tools
+// (swiftc then only offers to install them) or when it doesn't build.
+function swiftMic(): string | null {
+  if (!mac || Bun.spawnSync(["xcode-select", "-p"], { stdout: "ignore", stderr: "ignore" }).exitCode !== 0) return null;
+  const src = join(import.meta.dir, "mic.swift");
+  const bin = join(dirname(out), `mic-${Bun.hash(readFileSync(src)).toString(36)}`);
+  if (existsSync(bin)) return bin;
+  const tmp = `${bin}.${process.pid}`;
+  if (Bun.spawnSync(["swiftc", "-O", src, "-o", tmp], { stdout: "ignore", stderr: "ignore" }).exitCode !== 0) return null;
+  renameSync(tmp, bin);
+  return bin;
+}
+
+function recorder(): string[] | null {
+  if (Bun.which("pw-record")) return ["pw-record", "--rate", String(RATE), "--channels", "1", "--format", "s16", "--raw", "-"];
+  if (!mac) return null;
+  const swift = swiftMic();
+  if (swift) return [swift];
+  // The window's PATH can be short: Homebrew's folders too.
+  const ffmpeg = Bun.which("ffmpeg") ?? ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"].find((p) => existsSync(p));
+  return ffmpeg ? [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-i", ":default", "-ac", "1", "-ar", String(RATE), "-f", "s16le", "-"] : null;
+}
+
+const argv = recorder();
+if (!argv) {
+  console.error(mac ? "Dictation needs Xcode's command line tools (xcode-select --install) or ffmpeg (brew install ffmpeg) to record"
+    : "Dictation needs pw-record (PipeWire) to record: install pipewire");
+  process.exit(1);
+}
+const mic = Bun.spawn(argv, { stdout: "pipe", stderr: "ignore" });
 
 function wav(): Buffer {
   const head = Buffer.alloc(44);
@@ -39,4 +73,9 @@ for await (const part of mic.stdout as ReadableStream<Uint8Array>) {
     wrote = Date.now();
     peak = 0;
   }
+}
+// The recorder ended by itself (it is only killed on a signal, which exits first).
+if (!bytes) {
+  console.error(mac ? "The microphone gave nothing: allow Herdr in System Settings › Privacy & Security › Microphone" : "The microphone gave nothing: check pw-record and the default input");
+  process.exit(1);
 }

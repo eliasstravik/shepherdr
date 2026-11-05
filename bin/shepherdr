@@ -667,10 +667,17 @@ def check_tools(root_is_home):
         if not shutil.which(name):
             bad.append(f"{name} isn't on the PATH")
     optional = {"gh": "pull requests (tasks)", "agent-browser": "the task browser (0.41.1)", "node": "the task browser",
-                "bun": "voice calls and dictation", "pw-record": "dictation"}
+                "bun": "voice calls and dictation"}
     for name, what in optional.items():
-        if not shutil.which(name):
+        if not (bun_path() if name == "bun" else shutil.which(name)):
             notes.append(f"optional: {name} isn't on the PATH ({what})")
+    # Dictation's recorder (mods/chat/record.ts): pw-record, or on macOS mic.swift (Xcode's command line tools build
+    # it) else ffmpeg (also where Homebrew puts it).
+    if not shutil.which("pw-record") and not (sys.platform == "darwin" and (
+            subprocess.run(["xcode-select", "-p"], capture_output=True).returncode == 0 or shutil.which("ffmpeg")
+            or any(os.path.isfile(p) for p in ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg")))):
+        notes.append("optional: dictation can't record: it needs pw-record (Linux), or Xcode's command line tools "
+                     "or ffmpeg (macOS)")
     return bad, notes
 
 

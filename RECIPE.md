@@ -77,8 +77,8 @@ Left to right, on the theme's `canvas` background, no title bar:
 - Mod names are fixed (`chat`, `tasks`, …): their state in `data/<mod>` and pane names follow them. The installer
   refuses a folder by the same name that isn't Shepherdr's.
 - Needs python3 3.8+ and git; bun and Tailscale for the web app; gh for pull requests, agent-browser 0.41.1 and node
-  for the task browser, bun and pw-record for voice and dictation,
-  an ElevenLabs key for calls and dictation. Claude Code or Codex as the agents.
+  for the task browser, bun for voice and dictation, pw-record for voice calls, pw-record (Linux) or Xcode's command
+  line tools or ffmpeg (macOS) for dictation, an ElevenLabs key for calls and dictation. Claude Code or Codex as the agents.
 - Two blocks are rewritten while you use it (`tasks-thread-term` points at the shown task's terminal,
   `artifacts-view-body` at the opened artifact): ship them blank.
 
