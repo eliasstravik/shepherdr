@@ -266,25 +266,6 @@ export class PanelHost {
     });
   }
 
-  // Pin / Unpin the task: a view choice in shared "tasks.pinned", keyed as the Tasks list keys it
-  // ("<machine, empty here>:<folder>#<id>", mods/tasks). Pinned, it sits pressed in.
-  pinButton(t) {
-    const r = this.rec, key = `${r.machine ?? ""}:${r.folder}#${r.id}`;
-    const pins = Array.isArray(shared("tasks.pinned")) ? shared("tasks.pinned") : [];
-    const on = pins.includes(key);
-    return h_flex().id("thread-pin").size(24).flex_none().items_center().justify_center().rounded(RADIUS.control).cursor_pointer()
-      .when(on, (el) => el.bg(t.selected)).text_color(on ? t.foreground : t.dim)
-      .hover((s) => s.bg(on ? t.selected : t.hover).text_color(t.foreground))
-      .on_click((_e, cx) => {
-        cx.stop_propagation();
-        const now = shared("tasks.pinned");
-        const rest = (Array.isArray(now) ? now : []).filter((k) => k !== key);
-        setShared("tasks.pinned", on ? rest : [...rest, key]);
-        cx.notify();
-      })
-      .child(svg("mods/workspace-chrome/pin.svg").size(14).flex_none());
-  }
-
   // Chat | Terminal | Files | Changes | Pull request | Browser: the main chat's header switch
   // (ui.js segmented, as mods/pane-chat). segs: { key, label, on, dead (can't open now), fn }.
   switcher(t, segs) {
@@ -393,7 +374,7 @@ export class PanelHost {
       // What its agent made (mods/task-artifacts): always there, counted once it has some.
       ...(find(layout(), ARTIFACTS) && addonOn("artifacts") ? [{ key: "artifacts", label: this.artsLabel(want), on: shownNow === ARTIFACTS, fn: pick(ARTIFACTS) }] : []),
     ];
-    // Three rows on one left edge (EDGE): a slim bar (‹ Tasks; base, Pin, Accept), the task (its
+    // Three rows on one left edge (EDGE): a slim bar (‹ Tasks; base, Accept), the task (its
     // dot, id and title, and under them what its agent is doing), then the switcher.
     // Their height is the "tasks-thread-head" block's size in layouts/shepherdr.json (127): keep them in step.
     return v_flex().id("thread-head-rows").size_full().pt(8).pb(12).gap(12).bg(t.background).border_b(1).border_color(t.border)
@@ -412,7 +393,8 @@ export class PanelHost {
   }
 
   // The slim bar: ‹ Tasks back to the list on the left (its chevron on the shared edge, its hover
-  // reaching past it), and on the right the task's base, Pin and Accept.
+  // reaching past it), and on the right the task's base and Accept
+  // (no Pin: the task's row menu pins it, SHEP-62).
   barRow(t, st, addr) {
     return h_flex().id("thread-bar").h(24).flex_none().pl(EDGE - 6).pr(EDGE).gap(4).items_center()
       .child(h_flex().id("thread-back").h(24).pl(2).pr(8).gap(2).flex_none().items_center().rounded(RADIUS.control).cursor_pointer()
@@ -424,8 +406,6 @@ export class PanelHost {
       // A task's own base (herdr-task add --base), where it merges into; the folder's default isn't shown.
       .when(Boolean(this.rec?.base_set && this.rec?.base), (el) => el.child(div().id("thread-base").flex_none().max_w(160).truncate().pr(4)
         .text_size(TEXT.label).text_color(t.muted).child(`→ ${this.rec.base}`)))
-      // Pin / Unpin, as the task's row in the list (not an archived task's).
-      .when(Boolean(this.rec && !(this.rec.archived && this.rec.state === "done")), (el) => el.child(this.pinButton(t)))
       // Review: the header's one primary button, opens the Accept card (its Accept merges first when there's something to merge).
       .when(this.acceptable(st, addr), (el) => el.child(button("thread-accept", this.accepting ? "Accepting…" : "Review",
         { kind: "primary", disabled: this.accepting, onClick: (_e, cx) => this.accept(cx) })));
