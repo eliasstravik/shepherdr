@@ -1,21 +1,24 @@
 import { expect, test, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeSaved, renameSaved, orderSaved, withoutSpace } from "./saved-spaces.ts";
 
-// No Herdr window here (herdr-app isn't on this PATH, as on CI): every "herdr-app do" fails, as with the window shut.
-// The space log goes to a throwaway app home; act() reads it when imported.
+// Herdr installed, its window shut: a herdr-app that fails every "herdr-app do" (and records it), used in place of the real
+// one, so a real window is never reached. The space log goes to a throwaway app home; act() reads it when imported.
 const APP = mkdtempSync(join(tmpdir(), "shep-saved-"));
+const BIN = join(APP, "bin"), CALLS = join(APP, "herdr-app-calls");
+mkdirSync(BIN);
+writeFileSync(join(BIN, "herdr-app"), `#!/bin/sh\necho "$*" >> "${CALLS}"\necho "herdr-app: no window is running" >&2\nexit 1\n`, { mode: 0o755 });
 let act: typeof import("./actions.ts").act;
-const was = { app: process.env.HERDR_APP_HOME, path: process.env.PATH };
+const was = process.env.HERDR_APP_HOME;
 beforeAll(async () => {
   process.env.HERDR_APP_HOME = APP;
-  process.env.PATH = "/usr/bin:/bin";                 // never a real window's herdr-app, even on a machine with one
+  process.env.SHEPHERDR_HERDR_APP = join(BIN, "herdr-app");   // never a real window's, even on a machine with one
   ({ act } = await import("./actions.ts"));
-  if (was.app === undefined) delete process.env.HERDR_APP_HOME; else process.env.HERDR_APP_HOME = was.app;
+  if (was === undefined) delete process.env.HERDR_APP_HOME; else process.env.HERDR_APP_HOME = was;
 });
-afterAll(() => { process.env.PATH = was.path; });
+afterAll(() => { delete process.env.SHEPHERDR_HERDR_APP; });
 
 const tab = (id: string, ...blocks: any[]) => ({ id, name: id, root: { type: "row", id, children: blocks } });
 const term = (pane: string, t: string) => ({ type: "block", id: pane, content: { terminal: t } });
@@ -135,6 +138,7 @@ test("Close space from the web, no window: a window space on this computer close
   expect(c.data["spaces-chat"].icons).toEqual({});
   const log = readFileSync(join(APP, "data", "backups", "space-log.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
   expect(log.at(-1)).toMatchObject({ space: "spA", name: "Home", action: "close", machine: null });
+  expect(readFileSync(CALLS, "utf8")).toContain("do space.close --id spA");   // the window was asked first
 });
 
 test("Close space from the web, no window: another machine's space closes on that machine", async () => {

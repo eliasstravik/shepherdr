@@ -89,6 +89,8 @@ function firstWhenIdle(hub: Hub, addr: string, text: string) {
 async function run(cmd: string[]) {
   // a program that isn't there (herdr-app on a web-only install) fails as any other: its code, not a throw
   let p: ReturnType<typeof Bun.spawn<"ignore", "pipe", "pipe">>;
+  // the window's herdr-app: SHEPHERDR_HERDR_APP in tests (as SHEPHERDR_HC for hc)
+  if (cmd[0] === "herdr-app" && process.env.SHEPHERDR_HERDR_APP) cmd = [process.env.SHEPHERDR_HERDR_APP, ...cmd.slice(1)];
   try { p = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe", stdin: "ignore" }); }
   catch (e) { return { code: 127, stdout: "", stderr: String(e) }; }
   const [stdout, stderr] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
