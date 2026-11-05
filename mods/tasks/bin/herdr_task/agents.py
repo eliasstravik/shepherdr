@@ -95,6 +95,11 @@ def task_status(task, live):
     # before its first message lands. Working, until it ends or STARTING_MS pass.
     if starting(task):
         return "working", None, None
+    # Quiet without saying ready, but on its own work (SHEP-53): a background shell, Monitor or
+    # agent still running, or its fresh status line says it waits on CI or a review: Working, its
+    # status line shown, unless its last message asks the person something.
+    if live and own_work(task, live):
+        return "working", None, None
     # Quiet without saying ready: alive, it ended its turn (view() says on what: its question or
     # its last sentence); its process gone, the agent stopped.
     if live:
@@ -190,9 +195,9 @@ def fit(text, n=LINE_MAX):
     return cut.rstrip(" ,;:.-") + "…"
 
 
-def log_tail(log, size=262144):
-    """The last lines of an agent's session log (Claude Code's or Codex's JSONL), parsed; [] when
-    it can't be read. A first line cut in half is left out."""
+def log_lines(log, size=262144):
+    """The last lines of an agent's session log, as text; [] when it can't be read. A first line
+    cut in half is left out."""
     if not log:
         return []
     try:
@@ -203,8 +208,14 @@ def log_tail(log, size=262144):
             lines = f.read().decode("utf-8", "replace").split("\n")
     except OSError:
         return []
+    return lines[1:] if at else lines
+
+
+def log_tail(log, size=262144):
+    """The last lines of an agent's session log (Claude Code's or Codex's JSONL), parsed; [] when
+    it can't be read. A first line cut in half is left out."""
     out = []
-    for raw in lines[1:] if at else lines:
+    for raw in log_lines(log, size):
         try:
             d = json.loads(raw)
         except ValueError:
@@ -440,3 +451,136 @@ def starting(task):
         return False
     at = max([x for x in (task.get("started"), (last or {}).get("at"), (task.get("review") or {}).get("at")) if isinstance(x, (int, float))] or [0])
     return now() - at < STARTING_MS
+
+
+# ---- its own work in the background -------------------------------------------------------------
+# An agent that ended its turn with its own work still running (SHEP-53) is not waiting on the
+# person: Claude Code's background shells, Monitors and background agents (their start has an id,
+# a <task-notification> with a status ends it), Codex's background terminals (a process left
+# running with a session id, until an output says it exited). Or it said so: its status line, set
+# this turn and still fresh, says it waits on CI, a check, a review or a background job ("Waiting on
+# review round 1", "Codex reviewing the change"), and no background job of its ended since.
+# It asks the person something (a question tool or permission: blocked; its last message asks):
+# Needs you all the same. As core/tasks.js place() with task.own_work, which news_pass keeps.
+BG_LOG_BYTES = 1048576
+BG_MAX_MS = 3 * 3600_000  # a background job started longer ago than this no longer counts
+BG_STARTED = re.compile(r"Command running in background with ID: (\w+)|Monitor started \(task (\w+)|Async agent launched[\s\S]*?agentId: (\w+)")
+BG_ENDED = re.compile(r"<task-id>(\w+)</task-id>(?:(?!</task-notification>)[\s\S])*?<status>(\w+)</status>")
+CODEX_RUNNING = re.compile(r"Process running with session ID (\d+)")
+CODEX_OBJECT = re.compile(r"\{[^{}]*\"session_id\"\s*:\s*(\d+)[^{}]*\}")
+CODEX_EXITED = re.compile(r"\"exit_code\"\s*:|Process exited with code")
+WAITS_ON = re.compile(r"\b(wait\w*|watch\w*|polling)\b.*\b(ci|checks?|reviews?|reviewer|build|tests?|background|jobs?|deploy\w*|"
+                      r"release|github|pipeline|actions?|run|workflow)\b|\breviewing\b", re.I)
+WAITS_ON_PERSON = re.compile(r"\b(you|your|yours|person|human|answer|reply|approv\w*|decid\w*|decision|confirm\w*|ok|okay|"
+                             r"input|accept\w*|sign(?:ed)?[- ]?in|login|a go|go-ahead)\b", re.I)
+_bg_cache = {}
+
+
+def _ms(stamp):
+    try:
+        return int(datetime.datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).timestamp() * 1000)
+    except ValueError:
+        return None
+
+
+def _text(x):
+    """A tool result's or output's words, whatever its shape."""
+    if isinstance(x, str):
+        return x
+    if isinstance(x, list):
+        return "\n".join(_text(y) for y in x)
+    if isinstance(x, dict):
+        return _text(x.get("text") if "text" in x else x.get("content"))
+    return ""
+
+
+def background_jobs(log):
+    """(running, last_ended): its agent's background jobs still running by its session log ({id:
+    started ms}), and when the last one ended (ms, or 0). Cached on the log's size and time."""
+    try:
+        st = os.stat(log)
+    except (OSError, TypeError):
+        return {}, 0
+    key = (st.st_size, st.st_mtime_ns)
+    hit = _bg_cache.get(log)
+    if hit and hit[0] == key:
+        return hit[1]
+    running, ended, calls = {}, 0, {}
+    for raw in log_lines(log, BG_LOG_BYTES):
+        if "<task-notification>" in raw or "task_id" in raw or '"tool_result"' in raw or "session_id" in raw or "session ID" in raw:
+            try:
+                d = json.loads(raw)
+            except ValueError:
+                continue
+            if not isinstance(d, dict):
+                continue
+            at = _ms(d.get("timestamp")) or now()
+            # Claude Code: ended by its notice (in the queue, an attachment or a user line), or stopped.
+            if "<task-notification>" in raw and (d.get("type") in ("queue-operation", "attachment") or from_person(d) is not None):
+                for m in BG_ENDED.finditer(raw):
+                    running.pop(m.group(1), None)
+                    ended = max(ended, at)
+            r = d.get("toolUseResult")
+            if isinstance(r, dict) and r.get("task_id") and "stopped" in str(r.get("message") or "").lower():
+                running.pop(str(r["task_id"]), None)
+                ended = max(ended, at)
+            if d.get("type") == "user" and '"tool_result"' in raw and not d.get("isSidechain"):
+                ids = []
+                if isinstance(r, dict):
+                    ids = [r.get("backgroundTaskId") or (r.get("taskId") if r.get("timeoutMs") is not None else None)
+                           or (r.get("agentId") if r.get("isAsync") else None)]
+                for c in (d.get("message") or {}).get("content") or []:
+                    if isinstance(c, dict) and c.get("type") == "tool_result":
+                        m = BG_STARTED.match(_text(c.get("content")).strip())
+                        ids += [next(g for g in m.groups() if g)] if m else []
+                for i in filter(None, ids):
+                    running.setdefault(str(i), at)
+            # Codex: a process left running has a session id until an output says it exited.
+            p = d.get("payload") or {}
+            if d.get("type") == "response_item" and p.get("type") in ("function_call", "custom_tool_call"):
+                calls[p.get("call_id")] = str(p.get("arguments") or p.get("input") or "")
+            elif d.get("type") == "response_item" and p.get("type") in ("function_call_output", "custom_tool_call_output"):
+                text = _text(p.get("output"))
+                for m in CODEX_RUNNING.finditer(text):
+                    running.setdefault("codex:" + m.group(1), at)
+                for m in CODEX_OBJECT.finditer(text):
+                    if CODEX_EXITED.search(m.group(0)):
+                        if running.pop("codex:" + m.group(1), None) is not None:
+                            ended = max(ended, at)
+                    else:
+                        running.setdefault("codex:" + m.group(1), at)
+                # write_stdin to a session whose output says it exited
+                sids = set(re.findall(r"session_id\W{0,4}(\d+)", calls.get(p.get("call_id"), "")))
+                if len(sids) == 1 and CODEX_EXITED.search(text) and not CODEX_OBJECT.search(text):
+                    if running.pop("codex:" + sids.pop(), None) is not None:
+                        ended = max(ended, at)
+    out = ({i: t for i, t in running.items() if now() - t < BG_MAX_MS}, ended)
+    _bg_cache[log] = (key, out)
+    return out
+
+
+def waits_on_own(task, address=None, ended=0):
+    """Its status line, set this turn by the agent itself and still fresh, says it waits on CI, a
+    check, a review or a background job, and no background job of its ended since."""
+    p = task.get("progress") or {}
+    said = p.get("set") or p.get("at") or 0
+    if p.get("by") or not said or said < ended or not own_line(task, address):
+        return False
+    left = p.get("left") if isinstance(p.get("left"), (int, float)) else 0
+    if now() - said >= max(ON_IT_MS, left):
+        return False
+    text = str(p.get("text") or "")
+    return bool(WAITS_ON.search(text)) and not WAITS_ON_PERSON.search(text)
+
+
+def own_work(task, live):
+    """Its quiet agent is on its own work (above), and its last message asks the person nothing."""
+    for k in live:
+        if (k.get("labels") or {}).get("herdr.role") == "reviewer" or status_word(k) == "blocked":
+            continue
+        address = k.get("address")
+        log = agent_log(task, address) or agent_log(task)
+        jobs, ended = background_jobs(log) if log else ({}, 0)
+        if (jobs or waits_on_own(task, address, ended)) and not last_question(task, address):
+            return True
+    return False

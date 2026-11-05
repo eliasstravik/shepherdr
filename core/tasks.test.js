@@ -23,6 +23,12 @@ describe("a task's status (as herdr-task's task_status)", () => {
     expect(at({ id: 1, state: "running", started: NOW - 600_000 }, [{ address: "t1", status: "idle" }])).toMatchObject({ section: "needs", needs: "reply" });
     expect(at({ id: 1, state: "running", started: NOW - 600_000 })).toMatchObject({ section: "needs", needs: "stopped" });
   });
+  test("an idle agent on its own background work is working; asking still needs you (SHEP-53)", () => {
+    const idle = [{ address: "t1", status: "idle" }];
+    expect(at({ id: 1, state: "running", started: NOW - 600_000, own_work: true }, idle)).toMatchObject({ section: "working", needs: null });
+    expect(at({ id: 1, state: "running", started: NOW - 600_000, own_work: true }, [{ address: "t1", status: "blocked" }])).toMatchObject({ section: "needs", needs: "asks" });
+    expect(at({ id: 1, state: "running", started: NOW - 600_000, own_work: true })).toMatchObject({ section: "needs", needs: "stopped" });
+  });
   test("a machine still loading gives no verdict", () => {
     expect(at({ id: 1, state: "running", started: NOW - 600_000 }, [], false).section).toBe("working");
   });

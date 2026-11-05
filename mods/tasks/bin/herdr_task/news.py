@@ -129,6 +129,13 @@ def news_pass(report, folder=None):
                     else:
                         t.pop("waits", None)
                     s.dirty = True
+                # Quiet on its own background work (SHEP-53): Working in the Tasks panel too.
+                if s.write and bool(t.get("own_work")) != bool(v.get("own_work")):
+                    if v.get("own_work"):
+                        t["own_work"] = True
+                    else:
+                        t.pop("own_work", None)
+                    s.dirty = True
                 cur = {"status": v["status"], "why": v.get("why"), "stall": stall[0] if stall else None}
                 current[key] = cur
                 prev = mine.get(str(t["id"]))
