@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.1.5
+
+Autopilot now pushes the project forward on its own.
+
+- Autopilot: each wake, after unblocking and checking what's open, the Assistant looks at the project and adds and
+  starts the next most valuable tasks (at most 2 a wake). It stays quiet only when nothing is worth doing.
+- Each space can set a one-line Direction for Autopilot to follow, in Shepherdr settings → Autopilot (window and web)
+  or with `herdr-task autopilot set --direction`. With none, it works out what matters from the project itself.
+- The old starter heartbeat, if you never edited it, is upgraded to the new one on its own, with the old one kept
+  beside it as a `.bak`. Your own words are never touched.
+
 ## 3.1.4
 
 Mentions in chat, Autopilot you can see, and more done from the web without the window.
