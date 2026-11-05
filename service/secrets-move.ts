@@ -84,7 +84,8 @@ if (cmd !== "move-to" || (!target && !toIdArg)) fail("usage: shepherdr secrets m
 const toId = toIdArg || (target === "here" || target === me.name ? me.id : links[target!]);
 if (!toId) fail(`${target} isn't a machine linked from here (hc machine ls).`);
 const toMaybe = nameOf(toId);
-if (toMaybe === undefined) fail("That machine isn't linked from here.");
+// passed on from another machine that this one doesn't link (each machine links others its own way): they stay here
+if (toMaybe === undefined) fail(toIdArg ? `${me.name}, which keeps the secrets, doesn't link the machine to move them to: they stay on ${me.name} (link it there with hc machine add).` : "That machine isn't linked from here.");
 const to: string | null = toMaybe;
 
 // ---- rollback with the machine that keeps them gone ---------------------------------------------------------------

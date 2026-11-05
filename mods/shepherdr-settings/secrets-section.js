@@ -166,7 +166,7 @@ export function secretsSection(view, t) {
   const ms = machines();
   const keptWhere = !kept ? W.loading : kept.here ? W.keptHere : kept.name || W.notLinked;
   // following Serve from: kept there already, or still where they were (they move on their own)
-  const serve = kept?.serve === null ? W.keptHere : kept?.serve || "";
+  const serve = kept?.serve === null ? W.thisOne : kept?.serve || "";
   const same = !!kept?.auto && (kept.serve === null ? kept.here : !!kept.serve && kept.serve === kept.name);
   const keptName = !kept?.auto ? keptWhere : same ? W.sameAsServe(keptWhere) : W.forNow(keptWhere);
   const reach = !kept || kept.here || ms.some((m) => m.name === kept.name && m.layout !== "unavailable");

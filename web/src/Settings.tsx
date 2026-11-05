@@ -892,7 +892,7 @@ function KeptOn({ kept, phone }: { kept: NonNullable<Page['kept']>; phone: boole
   const [err, setErr] = useState('')
   const where = kept.here ? ST.THIS_COMPUTER : kept.name || W.notLinked
   // following Serve from: kept there already, or still where they were (they move on their own)
-  const serve = kept.serve === null ? ST.THIS_COMPUTER : kept.serve || ''
+  const serve = kept.serve === null ? W.thisOne : kept.serve || ''
   const same = !!kept.auto && (kept.serve === null ? kept.here : !!kept.serve && kept.serve === kept.name)
   const now = !kept.auto ? where : same ? W.sameAsServe(where) : W.forNow(where)
   const move = async (m: string) => {
