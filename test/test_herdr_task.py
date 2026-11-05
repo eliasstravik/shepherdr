@@ -1255,6 +1255,40 @@ class TimeLeft(unittest.TestCase):
         self.assertIn(templates.WORKER_MD_BEFORE_LEFT, templates.OLD_WORKERS)  # an unedited old one gets today's
 
 
+class ReviewAsAHelperAgent(unittest.TestCase):
+    """SHEP-54: workers run their review as an interactive hc child people see, never headless; an
+    unedited earlier worker or reviewer template gets today's words."""
+
+    def test_the_words(self):
+        sys.path.insert(0, BIN)
+        from herdr_task import templates
+        with open(os.path.join(ROOT, "templates", "worker.md")) as f:
+            worker = f.read()
+        for words in (templates.WORKER_MD, worker):
+            self.assertIn("--label herdr.role=reviewer", words)
+            self.assertIn("herdr.task=$HERDR_BROWSER_TASK", words)
+            self.assertIn("codex --sandbox read-only --ask-for-approval never", words)
+            self.assertIn("claude --permission-mode plan", words)
+            self.assertIn("hc wait <its name>", words)
+            self.assertNotIn("< /dev/null", words)
+        self.assertIn(templates.WORKER_MD_BEFORE_SUBAGENTS, templates.OLD_WORKERS)
+        with open(os.path.join(ROOT, "templates", "reviewer.md")) as f:
+            self.assertIn(templates.REVIEWER_MD.strip(), f.read())
+
+    def test_an_unedited_old_reviewer_gets_todays(self):
+        sys.path.insert(0, BIN)
+        from unittest import mock
+        from herdr_task import templates
+        d = tempfile.mkdtemp()
+        with open(os.path.join(d, "reviewer.md"), "w") as f:
+            f.write(templates.TEMPLATE_HEADS["reviewer"] + templates.REVIEWER_MD_BEFORE_SUBAGENT)
+        with mock.patch.object(templates, "TEMPLATES", d):
+            self.assertEqual(templates.instructions("reviewer"), templates.REVIEWER_MD.strip())
+            with open(os.path.join(d, "reviewer.md"), "w") as f:
+                f.write(templates.TEMPLATE_HEADS["reviewer"] + "My own words.")
+            self.assertEqual(templates.instructions("reviewer"), "My own words.")
+
+
 class Store:
     """Enough of herdr_task.store.Store for the commands, in memory."""
     def __init__(self, tasks):
