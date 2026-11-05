@@ -37,7 +37,8 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
   `data/backups/*/sidebar.json` (`coordinator.slots`), as `service/actions.ts` does; answer the folder-trust prompt
   with `hc keys <t> down enter`.
 - No Shepherdr service runs on the dev VM: to screenshot a web dialog, serve `web/dist` with a tiny Bun stub answering
-  only the APIs it needs (plus a minimal snapshot on `/api/ws`), never the full service.
+  only the APIs it needs, never the full service: upgrade `/api/ws` and send
+  `{type:'snapshot',snapshot:{places,machines,tasks,...}}`; 404 other `/api`.
 - A cross-machine send without ssh: two throwaway cores (`HC_SESSION=a`/`b`, clean `env -i`) and
   `hc machine add --via 'sh -c' --name vmb --session b` on a; the wrap only shows with a real agent (e.g.
   `claude --model haiku`) as the target.
