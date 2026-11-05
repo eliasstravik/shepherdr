@@ -1,5 +1,7 @@
-// New space, as the window's (mods/newspace; its words and rules core/newspace.js): on the machine it was opened for (a
-// machine's + › New space; else the shown space's), "Icon and folder": the space's icon ("#" until an emoji is picked),
+// New space, as the window's (mods/newspace; its words and rules core/newspace.js): with two or more machines on, a
+// Machine choice first (only those on and reachable), starting on the one it was opened for (a machine's + › New space;
+// else the shown space's); changing it starts the folder over from that machine's home and recent folders. Then
+// "Icon and folder": the space's icon ("#" until an emoji is picked),
 // the field holding the folder it is made in, and Browse…. The field starts where the person works (the shown space's
 // folder, as its repo's top) and its list follows what's typed, as a shell completes a path: a path with a / lists the
 // subfolders of the folder up to its last / (that machine's, asked once per folder) matching the word after it, the
@@ -12,8 +14,8 @@ import clsx from 'clsx'
 import { useEffect, useId, useRef, useState } from 'react'
 import { goPlace, placeOf, setUI, useSnap, useUI } from '@client/kernel.ts'
 import { Sheet, SheetClose } from '@client/Stack.tsx'
-import { CheckIcon, FolderIcon, Ghost, ic, Primary, Who } from '@client/ui.tsx'
-import type { Folders } from '@shared/types.ts'
+import { CheckIcon, FolderIcon, Ghost, MonitorIcon, Primary, ServerIcon, Who, ic } from '@client/ui.tsx'
+import type { Folders, Machine } from '@shared/types.ts'
 import * as NS from '@core/newspace.js'
 import { IconChoice, IconPicker } from './section.tsx'
 
@@ -70,9 +72,18 @@ function NewSpaceDialog() {
   const snap = useSnap()!
   const ui = useUI()
   const listId = useId()
-  // the machine: the one it was opened for, else the shown space's (Ctrl+Shift+N, the + menu), else this computer
-  const [machine] = useState(() => (typeof ui.adding === 'string' ? ui.adding : (placeOf(snap, ui.place)?.machine ?? snap.host)))
+  // the machines it can make a space on (on and reachable); the Machine choice shows for two or more
+  const on = (snap.machines ?? []).filter((m) => m.status !== 'off' && !m.connecting)
+  const keys: string[] = NS.reachable(on.map((m) => ({ key: m.machine, on: true })))
+  const choosing = NS.choosesMachine(keys)
+  // the machine: the one it was opened for, else the shown space's (Ctrl+Shift+N, the + menu), else the first on
+  const [machine, setMachine] = useState<string>(
+    () => NS.startMachine(keys, typeof ui.adding === 'string' ? ui.adding : undefined, placeOf(snap, ui.place)?.machine) ?? (typeof ui.adding === 'string' ? ui.adding : snap.host),
+  )
   const remote = machine !== snap.host ? machine : null
+  // the machine the answers in flight are for: one asked before a change is dropped
+  const asking = useRef(machine)
+  asking.current = machine
   const [place] = useState(ui.place)
   const [info, setInfo] = useState<Info | null>(null)
   const [text, setText] = useState('')
@@ -91,6 +102,7 @@ function NewSpaceDialog() {
   // the machine's home, recent folders and where the field starts, first (the window finds them before it opens)
   useEffect(() => {
     let live = true
+    setInfo(null)
     get<Info>(`api/newspace?machine=${encodeURIComponent(machine)}&place=${encodeURIComponent(place ?? '')}`).then(
       (i) => {
         if (!live) return
@@ -116,8 +128,8 @@ function NewSpaceDialog() {
       for (const p of want) {
         asked.current.add(p)
         get<Folders>(`api/folders?machine=${encodeURIComponent(machine)}&path=${encodeURIComponent(p)}`).then(
-          (f) => setSeen((s) => ({ ...s, [p]: f })),
-          () => setSeen((s) => ({ ...s, [p]: 'error' })),
+          (f) => asking.current === machine && setSeen((s) => ({ ...s, [p]: f })),
+          () => asking.current === machine && setSeen((s) => ({ ...s, [p]: 'error' })),
         )
       }
     }, 150)
@@ -173,6 +185,17 @@ function NewSpaceDialog() {
     setError('')
     input.current?.focus({ preventScroll: true })
   }
+  // another machine: the folder starts over from its home and recent folders
+  const switchTo = (m: string) => {
+    if (m === machine || busy) return
+    shut()
+    setMachine(m)
+    setText('')
+    setSeen({})
+    asked.current = new Set()
+    setMakeRepo(true)
+    setError('')
+  }
   const choose = () => list(field && now?.exists ? field : home)
 
   const create = async () => {
@@ -225,10 +248,11 @@ function NewSpaceDialog() {
   return (
     <Sheet label={W.title} onClose={close} panel="max-w-[460px]">
       <div className="flex min-h-[52px] shrink-0 items-center gap-2.5 border-b border-line pr-3 pl-4">
-        <Who name={W.title} kind={remote ? W.on(remote) : undefined} />
+        <Who name={W.title} kind={remote && !choosing ? W.on(remote) : undefined} />
         <SheetClose onClose={close} />
       </div>
       <div className="flex min-h-0 flex-col px-4 pt-3.5 pb-4" onPointerDown={(e) => listOpen && !(e.target as HTMLElement).closest('[data-folders]') && e.target !== input.current && shut()}>
+        {choosing ? <MachineChoice id={`${listId}-machine`} machines={on} value={machine} onChange={switchTo} label={label} /> : null}
         <label htmlFor={`${listId}-path`} className={label}>
           {W.label}
         </label>
@@ -326,6 +350,40 @@ function NewSpaceDialog() {
         </div>
       </div>
     </Sheet>
+  )
+}
+
+/** the Machine choice, over the folder: a native select (the phone's own picker), each machine's icon beside its name */
+function MachineChoice({ id, machines, value, onChange, label }: { id: string; machines: Machine[]; value: string; onChange: (m: string) => void; label: string }) {
+  const m = machines.find((x) => x.machine === value)
+  const Icon = m?.here ? MonitorIcon : ServerIcon
+  return (
+    <div className="mb-3.5 flex flex-col phone:mb-4">
+      <label htmlFor={id} className={label}>
+        {W.machine}
+      </label>
+      <div className="mt-1.5 grid grid-cols-[2.25rem_1fr_2rem] phone:grid-cols-[2.5rem_1fr_2.25rem]">
+        <select
+          id={id}
+          name="machine"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="col-span-full row-start-1 h-9 w-full appearance-none rounded-full bg-bg pr-8 pl-9 text-fg shadow-[inset_0_0_0_1px_var(--line2)] outline-none focus:shadow-box-focus phone:h-11 phone:pl-10 phone:text-[1rem]"
+        >
+          {machines.map((x) => (
+            <option key={x.machine} value={x.machine}>
+              {x.name}
+            </option>
+          ))}
+        </select>
+        <span className="pointer-events-none col-start-1 row-start-1 grid place-items-center text-fg3">
+          {m?.emoji ? <span className="text-[0.875rem] leading-none">{m.emoji}</span> : <Icon className={ic} />}
+        </span>
+        <svg viewBox="0 0 8 5" width="8" height="5" fill="none" aria-hidden className="pointer-events-none col-start-3 row-start-1 place-self-center text-fg3">
+          <path d="M.5.5 4 4 7.5.5" stroke="currentcolor" />
+        </svg>
+      </div>
+    </div>
   )
 }
 

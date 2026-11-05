@@ -1,12 +1,14 @@
 // The New space dialog's words and rules, the same in the window (mods/newspace) and on the web
 // (web/plugins/places/add.tsx, service/spaces.ts): its field holds the folder the space is made in, its
 // suggestions are that machine's recent folders (at most SHOWN), Browse… lists a folder's subfolders on
-// another machine, and a folder outside git is offered "Make it a git repo".
+// another machine, and a folder outside git is offered "Make it a git repo". With more than one machine on, it starts
+// with a Machine choice (a machine's + only preselects it); with one, the choice isn't shown.
 // Plain JS (no herdr or node imports): bin/sync-shared copies it into mods/newspace/core/.
 
 export const WORDS = {
   title: "New space",
   on: (machine) => `on ${machine}`,
+  machine: "Machine",
   label: "Icon and folder",
   placeholder: "~/path/to/folder",
   browse: "Browse…",
@@ -114,3 +116,15 @@ export const offersRepo = (folder, inRepo, home) => Boolean(folder) && folder !=
 
 // What Herdr calls an unnamed space there: "Home" at home, else its repo's top folder, else the folder.
 export const placeName = (folder, top, home) => (folder === home ? "Home" : (top || folder).split("/").filter(Boolean).pop() ?? folder);
+
+// The machines New space can make a space on: those on and reachable (`list`: { key, on }, key null for this
+// computer), in their order. The Machine choice shows only when there are two or more.
+export const reachable = (list) => list.filter((m) => m.on).map((m) => m.key);
+export const choosesMachine = (keys) => keys.length > 1;
+
+// The machine the dialog starts on: the one asked for (a machine's +), else the shown space's, when it can be reached;
+// else the first that can (this computer first when it is on). undefined: none can.
+export function startMachine(keys, asked, shown) {
+  for (const k of [asked, shown]) if (k !== undefined && keys.includes(k)) return k;
+  return keys.length ? keys[0] : undefined;
+}

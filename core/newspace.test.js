@@ -89,3 +89,17 @@ test("Add machine: the ssh config's hosts, when it needs a terminal, its words",
   expect(read("web/src/screens/AddMachine.tsx")).toContain("from '@core/machine-add.js'");
   expect(read("service/actions.ts")).toContain('from "../core/machine-add.js"');
 });
+
+test("the Machine choice: only reachable machines, shown for two or more, preselected as asked", () => {
+  const keys = N.reachable([{ key: null, on: true }, { key: "vm", on: false }, { key: "mini", on: true }]);
+  expect(keys).toEqual([null, "mini"]);
+  expect(N.choosesMachine(keys)).toBe(true);
+  expect(N.choosesMachine([null])).toBe(false);
+  expect(N.WORDS.machine).toBe("Machine");
+  // a machine's + wins, then the shown space's, then the first reachable
+  expect(N.startMachine(keys, "mini", null)).toBe("mini");
+  expect(N.startMachine(keys, undefined, "mini")).toBe("mini");
+  expect(N.startMachine(keys, "vm", "mini")).toBe("mini");
+  expect(N.startMachine(keys, "vm", "vm")).toBe(null);
+  expect(N.startMachine([], null, null)).toBe(undefined);
+});
