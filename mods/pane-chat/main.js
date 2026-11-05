@@ -224,7 +224,7 @@ export default class Pane extends View {
     const st = p.status;
     const pane = self.pane;
     const canSwitch = chatMode ? Boolean(entry) || Boolean(lazy) : chatty(self);
-    // An Assistant (chat or terminal): its Autopilot switch after the folder (none while the
+    // An Assistant (chat or terminal): its Autopilot switch on the right, before the hover buttons (none while the
     // Autopilot add-on is off).
     const apFor = addonOn("autopilot") ? apSpace(agent ?? (chatMode ? null : self.terminal), lazy || null) : null;
     apWatch(this, apFor, cx);
@@ -248,12 +248,16 @@ export default class Pane extends View {
         .when(Boolean(runs), (el) => el.child(div().min_w(0).truncate().text_color(t.muted).child(`· ${runs}`))))
       // The folder gives way first; the switch keeps its width; the gap after pushes the rest right.
       .child(div().flex_shrink_1().min_w(0).truncate().text_color(t.dim).child(folder(p.cwd)))
+      .child(div().flex_1())
+      // The status in words, right-aligned with the controls: "Working…" with its spinner, "Needs you", nothing at
+      // rest (done is the normal state, no mark).
+      .when(st === "working", el => el.child(h_flex().flex_none().gap(6).items_center().text_color(t.muted)
+        .child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900))
+        .when((this.width ?? Infinity) >= COMPACT_BELOW, el => el.child(div().whitespace_nowrap().child("Working…")))))
+      .when(st === "blocked", el => el.child(div().flex_none().px(6).h(18).flex().items_center().rounded(RADIUS.control).bg(t.blocked + "26").text_size(TEXT.id).font_semibold().text_color(t.blocked).child("Needs you")))
+      // Autopilot sits with the other controls on the right, not mid-bar after the folder.
       .when(Boolean(apFor), (el) => el.child(apGroup(this, t, apFor, pane, (this.width ?? Infinity) < COMPACT_BELOW))
         .child(apHeartbeatLink(this, apFor, pane) ?? div()))
-      .child(div().flex_1())
-      .when(st === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
-      .when(st === "blocked", el => el.child(div().flex_none().px(6).h(18).flex().items_center().rounded(RADIUS.control).bg(t.blocked + "26").text_size(TEXT.id).font_semibold().text_color(t.blocked).child("Needs you")))
-      .when(st === "done", el => el.child(div().size(7).flex_none().rounded(4).bg(t.done)))
       // Ending a chat's agent asks first, in place of the hover buttons.
       .when(Boolean(entry) && this.ending === true, el => el
         .child(div().flex_none().whitespace_nowrap().text_color(t.foreground).child(endAgent(prog).ask))

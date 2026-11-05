@@ -169,9 +169,23 @@ class Repo(unittest.TestCase):
             for n in names:
                 self.assertIn(n, text, f"{os.path.relpath(path, ROOT)} doesn't use {n}")
 
+    def test_web_header_no_hidden_end(self):
+        """The web Assistant header holds no hidden control that ends its agent (SHEP-23): ending or closing is the
+        tab's own × and menu in the tab bar; the header's status is words ("Working…", "Needs you"), never a done tick."""
+        text = open(J("web", "plugins", "coordinators", "client.tsx")).read()
+        self.assertNotIn("PaneEnd", text)
+        self.assertNotIn("endAgent", text)
+        header = text[text.index("function StatusMark("):text.index("/* ---------- the tab bar's +")]
+        self.assertIn("Working…", header)
+        self.assertIn("Needs you", header)
+        self.assertNotIn("'done'", header)
+        self.assertNotIn("XIcon", header)
+        # Autopilot sits on the right with the other controls (order > 10), after the status
+        self.assertIn("{ order: 12, View: StatusMark }, { order: 14, View: AutopilotHeader }", text)
+
     def test_tab_bar_from_one_list(self):
-        """The tab bar's + menu, a tab's menu, Switch agent, a tab's name and the header's End agent are core/menus.js's
-        on both sides (mods/new-menu-tasks, menu-tasks, coordinator, tabs-tasks, pane-chat and the web app's
+        """The tab bar's + menu, a tab's menu, Switch agent, a tab's name and the window header's End agent are
+        core/menus.js's on both sides (mods/new-menu-tasks, menu-tasks, coordinator, tabs-tasks, pane-chat and the web app's
         coordinators plugin), and the header's Autopilot words core/autopilot.js's: neither side keeps its own copy."""
         uses = {
             J("mods", "new-menu-tasks", "main.js"): ["NEW_MENU", "assistantRow", "agentChoices", "agentHint"],
@@ -179,7 +193,7 @@ class Repo(unittest.TestCase):
             J("mods", "coordinator", "main.js"): ["SWITCH_AGENT"],
             J("mods", "tabs-tasks", "main.js"): ["tabName"],
             J("mods", "pane-chat", "main.js"): ["endAgent"],
-            J("web", "plugins", "coordinators", "client.tsx"): ["NEW_MENU", "assistantRow", "agentChoices", "agentHint", "tabMenu", "SWITCH_AGENT", "endAgent", "headerDetail", "appMenu", "openKeybinds"],
+            J("web", "plugins", "coordinators", "client.tsx"): ["NEW_MENU", "assistantRow", "agentChoices", "agentHint", "tabMenu", "SWITCH_AGENT", "headerDetail", "appMenu", "openKeybinds"],
             J("service", "compat.ts"): ["tabName"],
         }
         for path, names in uses.items():

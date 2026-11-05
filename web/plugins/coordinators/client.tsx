@@ -63,9 +63,9 @@ function useRunNow(place: Place) {
 /** The header's Autopilot (3.0's switch), one group: the switch, "Autopilot", what it waits for (core/autopilot.js
  *  headerDetail: "Next in 7 min", "Queued", "Waking", "On events", "Run now only") and Run now, on one quiet pill as
  *  tall as Chat | Terminal. It flips at once, herdr-task's answer says the rest (a refusal goes back, with a toast).
- *  The header's name gets the room first; as it narrows Run now becomes its ▶ (under 48rem), "Autopilot" goes while
- *  on (under 42rem: the green switch and its next run say it), then what it waits for (under 32rem); off, "Autopilot"
- *  stays down to 30rem. On a phone the switch alone, on a round pill as tall as the header's buttons: Run now is in its
+ *  It sits on the header's right with the other controls, Run now as a ▶ (its name in its tooltip) so the header's
+ *  name and folder keep their room; as the column narrows "Autopilot" goes while on (under 42rem: the green switch
+ *  and its next run say it), then what it waits for (under 32rem); off, "Autopilot" stays down to 30rem. On a phone the switch alone, on a round pill as tall as the header's buttons: Run now is in its
  *  ⋯. "Write a heartbeat" after it while on with its heartbeat still empty. The Assistant's tab only, in every space
  *  on every machine (another machine's is switched and woken there). */
 function AutopilotHeader({ place }: { place: Place }) {
@@ -112,7 +112,7 @@ function AutopilotHeader({ place }: { place: Place }) {
     )
   return (
     <>
-      <div data-autopilot title={AP.TITLE} className={clsx('flex h-8 shrink-0 items-center gap-2 rounded-full bg-hover p-0.5 pl-1.5 text-[0.8125rem]', !(on && want === null) && 'pr-1.5 @min-[30rem]/place:pr-3')}>
+      <div data-autopilot title={AP.TITLE} className={clsx('flex h-8 shrink-0 items-center gap-2 rounded-full bg-hover p-0.5 pl-1.5 text-[0.8125rem] coarse:h-10', !(on && want === null) && 'pr-1.5 @min-[30rem]/place:pr-3')}>
         <Switch label={AP.TITLE} on={on} onChange={() => void flip()} />
         <button type="button" tabIndex={-1} aria-hidden="true" onClick={() => void flip()} className={clsx('shrink-0 font-medium', on ? 'text-fg @max-[42rem]/place:hidden' : 'text-fg2 @max-[30rem]/place:hidden')}>
           {AP.TITLE}
@@ -128,10 +128,9 @@ function AutopilotHeader({ place }: { place: Place }) {
             onClick={() => void run()}
             title="Run now"
             aria-label="Run Autopilot now"
-            className="press-dim relative flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-fg2 enabled:hover:bg-seg-on enabled:hover:text-fg enabled:hover:shadow-[0_0_0_1px_var(--line2)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-default disabled:opacity-50 @min-[48rem]/place:pr-2.5 @min-[48rem]/place:pl-1.5"
+            className="press-dim relative grid size-7 shrink-0 place-items-center rounded-full text-fg2 coarse:size-9 enabled:hover:bg-seg-on enabled:hover:text-fg enabled:hover:shadow-[0_0_0_1px_var(--line2)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-default disabled:opacity-50"
           >
             <PlayIcon aria-hidden className="size-3.5 shrink-0" />
-            <span className="whitespace-nowrap @max-[48rem]/place:sr-only">Run now</span>
             <span aria-hidden className="absolute top-1/2 left-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden" />
           </button>
         ) : null}
@@ -179,6 +178,9 @@ function shownTab(place: Place, term: string | null) {
   return term?.startsWith('t:') ? (place.tabs ?? []).find((t) => t.term === term) ?? null : null
 }
 
+/** The pane header's status, in words: "Working…" with its spinner while its agent works, "Needs you" while it waits
+ *  on you, nothing at rest (idle or done is the normal state). Never a control: ending or closing is the tab's (its ×
+ *  and its menu in the tab bar). */
 function StatusMark({ place }: { place: Place }) {
   const term = useUI((u) => u.term)
   // a phone's header is the window's narrow pane: only the switch shows there
@@ -186,48 +188,20 @@ function StatusMark({ place }: { place: Place }) {
   const tab = shownTab(place, term)
   if (phone) return null
   const state: TabState = tab ? tab.state ?? 'idle' : place.assistantTab?.state ?? (place.status === 'need' ? 'blocked' : place.status === 'work' ? 'working' : 'idle')
-  if (state === 'working') return <Spin />
-  if (state === 'blocked')
-    return <span className="inline-flex h-[18px] shrink-0 items-center rounded-md bg-need/15 px-1.5 text-[0.6875rem] font-semibold text-need-fg">Needs you</span>
-  if (state === 'done') return <Dot s="done" className="shrink-0" />
-  return null
-}
-
-/** the header's own buttons on hover (3.0's): × ends its agent, asking first in the header ("End Claude Code?" Cancel,
- *  End agent); another tab's × closes it. Splitting and zooming a pane are the window's: the web's tabs have one pane. */
-function PaneEnd({ place }: { place: Place }) {
-  const term = useUI((u) => u.term)
-  const phone = useUI((u) => u.device === 'phone')
-  const [ending, setEnding] = useState(false)
-  useEffect(() => setEnding(false), [term, place.id])
-  const tab = shownTab(place, term)
-  // the window asks first on an agent's chat (an Assistant's, Claude Code's or Codex's in Chat); a terminal just closes
-  const live = useUI((u) => (tab ? !!tab.cli && u.tabView?.[tab.term] === 'chat' : !!place.assistantTab?.live && u.term !== place.chat))
-  if (phone) return null
-  const prog = tab ? tab.prog ?? 'Shell' : (place.header ?? 'Assistant').replace(/^Assistant · /, '')
-  const words = MN.endAgent(prog)
-  const end = () => {
-    setEnding(false)
-    if (tab) return void act({ type: 'tab-end', tab: tab.id ?? '', chat: tab.term } as never).catch(failed("The tab didn't close"))
-    const id = place.assistantTab?.id
-    void (id ? act({ type: 'tab-end', tab: id, chat: place.chat } as never) : act({ type: 'assistant-close', place: place.id, mode: 'keep' } as never)).catch(failed("The tab didn't close"))
-  }
-  if (ending)
+  if (state === 'working')
     return (
-      <div className="flex shrink-0 items-center gap-2 text-[0.8125rem]">
-        <span className="whitespace-nowrap">{words.ask}</span>
-        <button type="button" onClick={() => setEnding(false)} className="press-dim h-7 rounded-full px-2.5 text-fg2 hover:bg-hover hover:text-fg">{words.cancel}</button>
-        <Primary onClick={end}>{words.verb}</Primary>
-      </div>
+      <span role="status" className="flex h-8 shrink-0 items-center gap-1.5 text-[0.8125rem] text-fg2">
+        <Spin />
+        <span className="whitespace-nowrap @max-[34rem]/place:sr-only">Working…</span>
+      </span>
     )
-  return (
-    // holds no room until shown (its gap too), so the name and Autopilot keep it on a pointer that hovers
-    <span className="-ml-2.5 flex max-w-0 shrink-0 overflow-hidden opacity-0 transition-opacity group-hover/head:ml-0 group-hover/head:max-w-none group-hover/head:opacity-100 focus-within:ml-0 focus-within:max-w-none focus-within:opacity-100 coarse:ml-0 coarse:max-w-none coarse:opacity-100">
-      <IconButton label={live ? words.tip : 'Close pane'} title={live ? words.tip : undefined} onClick={() => (live ? setEnding(true) : end())}>
-        <XIcon className={ic} />
-      </IconButton>
-    </span>
-  )
+  if (state === 'blocked')
+    return (
+      <span role="status" className="inline-flex h-6 shrink-0 items-center rounded-full bg-need/15 px-2 text-[0.75rem] font-semibold whitespace-nowrap text-need-fg">
+        Needs you
+      </span>
+    )
+  return null
 }
 
 /* ---------- the tab bar's + (3.0's new-menu) ---------- */
@@ -836,9 +810,9 @@ function CloseAssistant() {
 export default definePlugin({
   name: 'coordinators',
   setup(reg) {
-    // the pane header (3.0's): Autopilot after the name and folder; then, past the gap, the status, × on hover and (the
-    // terminal plugin's, order 15) Chat | Terminal
-    reg.placeHeader.push({ order: 10, View: AutopilotHeader }, { order: 12, View: StatusMark }, { order: 13, View: PaneEnd })
+    // the pane header: the name and folder on the left; on the right, in one row of 32px controls, the status in words,
+    // the Autopilot pill and (the terminal plugin's, order 15) Chat | Terminal
+    reg.placeHeader.push({ order: 12, View: StatusMark }, { order: 14, View: AutopilotHeader })
     reg.views.tabBar = TabBar
     reg.views.spacePanel = SpacePanel
     reg.overlays.push(CloseAssistant, TabRename, TabMenu, CloseSpace)
