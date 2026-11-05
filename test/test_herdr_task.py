@@ -31,6 +31,17 @@ class HerdrTask(unittest.TestCase):
         os.unlink(f.name)
         self.assertEqual(out.stdout.split(), ["True", "False"], out.stderr)
 
+    def test_tell_takes_a_chat_mention(self):
+        """A chat's #-mention (core/mentions.js) names its Assistant for tell-assistant: whole, its target, or #name."""
+        code = ("import sys, json; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]);"
+                "from herdr_task.machines import _find;"
+                "rows = [{'target': 'vm-demo/t3', 'route': 'vm-demo', 'space': 'sp-shop', 'space_name': 'shop'},"
+                "        {'target': 't1', 'route': None, 'space': 'sp-web', 'space_name': 'web'}];"
+                "print(json.dumps([[a['target'] for a in _find(rows, t)] for t in sys.argv[2:]]))")
+        forms = ["[#shop](space:vm-demo/sp-shop)", "space:vm-demo/sp-shop", "vm-demo/sp-shop", "sp-shop", "#shop", "[#web](space:sp-web)", "#nope"]
+        out = subprocess.run([sys.executable, "-c", code, BIN, *forms], capture_output=True, text=True)
+        self.assertEqual(json.loads(out.stdout), [["vm-demo/t3"]] * 5 + [["t1"], []], out.stderr)
+
     @unittest.skipUnless(CI, "runs only on CI: herdr-task never runs with a changed HOME on a person's machine")
     def test_commands_start(self):
         home = tempfile.mkdtemp()

@@ -45,6 +45,7 @@ import * as secrets from "./secrets.js";
 import { taskDot, ownProgress } from "./dot.js";
 import * as attach from "./attach.js";
 import * as slash from "./slash.js";
+import * as mentions from "./core/mentions.js";
 import * as agent from "./agent.js";
 import * as choices from "./settings.js";
 import { Dictation } from "./dictate.js";
@@ -299,6 +300,9 @@ export default class Chat extends View {
     this.slashSel = 0;
     this.slashOff = null;
     this.cmds = [];
+    // "#": the spaces this agent's machine reaches (core/mentions.js) and the ones picked into the box
+    this.reach = null;
+    this.picked = [];
     this.copied = null;
     this.note = null;
     this.dflt = null;
@@ -981,6 +985,7 @@ export default class Chat extends View {
       cx.spawn(async (cx) => { this.dflt = await agent.defaults(kind, this.machine); cx.notify(); });
       cx.spawn(async (cx) => { this.cmds = await slash.commands(kind, this.machine, t.foreground?.cwd ?? t.cwd); cx.notify(); });
       cx.spawn(async (cx) => { await this.loadTasks(); cx.notify(); });
+      cx.spawn(async (cx) => { await this.loadReach(); cx.notify(); });
       if (this.assistant()) cx.spawn(async (cx) => { await this.loadSpaceTasks(); cx.notify(); });
     }
     const f = await exec("sh", ["-c", FIND, "chat", kind, String(pid)], { on: this.machine });
@@ -1200,7 +1205,9 @@ export default class Chat extends View {
   // Enter: now (while the agent works, it takes it mid-turn). Ctrl+Enter while it
   // works: held, and sent by itself once it is free.
   send(cx, hold = false) {
-    const text = this.box.value().trim();
+    // A picked "#space" goes as its mention, which names its target (core/mentions.js).
+    const text = mentions.expand(this.box.value().trim(), this.picked);
+    this.picked = [];
     // Also while the agent asks in its terminal: the words answer it there (deliver()).
     if (!text && !this.files.length) return;
     const msg = { id: `m${Date.now()}`, text, files: this.files, quote: this.quote };
@@ -1230,6 +1237,7 @@ export default class Chat extends View {
     const list = this.suggestions();
     if (list.length) {
       const c = list[Math.min(this.slashSel, list.length - 1)];
+      if (c.task || c.space) { this.pick(c, cx); const v = this.box.value(); cx.timer.after(30, () => this.box.set_value(v)); return; }
       if (this.box.value().trim() !== `/${c.name}`) { this.pick(c, cx); cx.timer.after(30, () => this.box.set_value(`/${c.name} `)); return; }
     }
     this.send(cx, hold);
@@ -1378,12 +1386,15 @@ export default class Chat extends View {
     // Enter's new line may already be in the box when the submit comes.
     const v = this.box.value().replace(/\n+$/, "");
     if (this.slashOff === v) return [];
-    // "#4" at the end: this folder's tasks (herdr-task), by number or title.
-    const h = /(?:^|\s)#([\w-]*)$/.exec(v);
-    if (h && this.tasks?.length) {
-      const q = h[1].toLowerCase();
-      return this.tasks.filter((x) => !q || String(x.id).startsWith(q) || taskRef(x).toLowerCase().includes(q) || x.title.toLowerCase().includes(q)).slice(0, 8)
+    // "#" at the end: the spaces this agent reaches (a pick names one for it), then this folder's
+    // tasks (herdr-task), by number or title.
+    const h = mentions.typing(v);
+    if (h !== null) {
+      const q = h.toLowerCase();
+      const sp = mentions.match(this.reach?.spaces ?? [], q).map((x) => ({ space: x, name: `#${x.name}`, about: x.route ? x.machine : "This machine", key: `space-${x.id}` }));
+      const tk = (this.tasks ?? []).filter((x) => !q || String(x.id).startsWith(q) || taskRef(x).toLowerCase().includes(q) || x.title.toLowerCase().includes(q)).slice(0, sp.length ? 5 : 8)
         .map((x) => ({ task: true, name: taskRef(x), about: x.title, state: x.status_text ?? x.state }));
+      if (sp.length || tk.length) return [...sp, ...tk];
     }
     const w = slash.typing(v);
     if (w === null || !this.cmds.length) return [];
@@ -1391,7 +1402,12 @@ export default class Chat extends View {
   }
 
   pick(c, cx) {
-    if (c.task) {
+    if (c.space) {
+      const next = mentions.pickInto(this.box.value(), c.space);
+      this.picked = [...this.picked.filter((x) => x.name !== c.space.name), c.space];
+      this.box.set_value(next);
+      this.slashOff = next.replace(/\n+$/, "");
+    } else if (c.task) {
       const v = this.box.value().replace(/\n+$/, "");
       const next = v.replace(/#[\w-]*$/, `${c.name} `);
       this.box.set_value(next);
@@ -1671,6 +1687,28 @@ export default class Chat extends View {
       .child(icon("find-prev", "mods/chat/chevron-up.svg", (cx) => this.findStep(-1, rows, cx)))
       .child(icon("find-next", "mods/chat/chevron-down.svg", (cx) => this.findStep(1, rows, cx)))
       .child(icon("find-x", "mods/chat/x.svg", (cx) => this.closeFind(cx)));
+  }
+
+  // ---- spaces (#shop) -------------------------------------------------------------------------
+
+  // The spaces the agent's machine reaches, from its herdr-task reach map (what tell-assistant
+  // follows); none there yet: the spaces on its own machine.
+  async loadReach() {
+    const r = await exec("sh", ["-c", mentions.REACH_FILE], { on: this.machine }).catch(() => null);
+    let graph = null;
+    try { graph = JSON.parse(r?.stdout || "null")?.graph ?? null; } catch {}
+    const here = graph ? null : (spaces() ?? []).filter((x) => (x.machine ?? null) === (this.machine ?? null))
+      .map((x) => ({ id: String(x.id).split("/").pop(), name: x.name, route: "", machine: this.machine ?? "", target: String(x.id).split("/").pop(), assistant: false }));
+    this.reach = { from: graph?.core?.name ?? this.machine, spaces: graph ? mentions.reachable(graph) : here };
+  }
+
+  // A message's words with each #-mention in plain markdown: its name and machine, and "out of
+  // reach" when this agent can't reach that space.
+  mentionsIn(text) {
+    if (!mentions.hasMention(text)) return text;
+    const ids = this.reach ? new Set(this.reach.spaces.map((x) => x.id)) : null;
+    const by = new Map((this.reach?.spaces ?? []).map((x) => [x.id, x.machine]));
+    return mentions.plain(text, ids, (m) => by.get(m.id));
   }
 
   // ---- tasks (#4) -----------------------------------------------------------------------------
@@ -2748,14 +2786,14 @@ export default class Chat extends View {
       // accent's own text color on the full accent was too faint on light accents).
       div().max_w(most).px(12).py(8).rounded(12).bg(t.accent + "33").border_1().border_color(t.accent + "4d")
         .text_color(t.foreground).when(faded, (el) => el.opacity(0.55))
-        .child(TextView.markdown(`${pre}chat-md-${x.id}`, this.findMark(typed(text)) || " ").selectable(true)));
+        .child(TextView.markdown(`${pre}chat-md-${x.id}`, this.findMark(typed(this.mentionsIn(text))) || " ").selectable(true)));
     const theirs = (text) => h_flex().w_full().justify_start().child(
       div().max_w(most).px(12).py(8).rounded(12).bg(t.raised).text_color(t.foreground)
         .child(x.clip ? this.clipped(t.raised, x.clip, div().id(`${pre}fold-in-${x.id}`).flex_none()
           // Its words' drawn height: a reply shorter than it looked isn't folded (foldOf()).
           .on_size_change((size, cx) => { const was = this.natural.get(x.id); if (!was || Math.abs(was - size.height) > 1) { this.natural.set(x.id, size.height); cx.notify(); } })
-          .child(TextView.markdown(`${pre}chat-md-${x.id}`, this.findMark(text) || " ").selectable(true)))
-          : TextView.markdown(`${pre}chat-md-${x.id}`, this.findMark(text) || " ").selectable(true)));
+          .child(TextView.markdown(`${pre}chat-md-${x.id}`, this.findMark(this.mentionsIn(text)) || " ").selectable(true)))
+          : TextView.markdown(`${pre}chat-md-${x.id}`, this.findMark(this.mentionsIn(text)) || " ").selectable(true)));
     const fileLine = (label) => h_flex().gap(5).items_center().text_size(12).text_color(t.dim)
       .child(svg("mods/chat/paperclip.svg").size(12).flex_none()).child(div().truncate().child(label));
     switch (x.kind) {
@@ -3200,11 +3238,11 @@ export default class Chat extends View {
     if (!list.length) return null;
     const sel = Math.min(this.slashSel, list.length - 1);
     return v_flex().w_full().p(4).gap(1).border_b(1).border_color(t.border).children(list.map((c, i) =>
-      h_flex().id(`slash-${c.name}`).h(28).px(8).gap(10).items_center().rounded(6).cursor_pointer()
+      h_flex().id(`slash-${c.key ?? c.name}`).h(28).px(8).gap(10).items_center().rounded(6).cursor_pointer()
         .when(i === sel, (el) => el.bg(t.selected))
         .hover((s) => s.bg(t.hover))
         .on_click((_e, cx) => { cx.stop_propagation(); this.pick(c, cx); })
-        .child(div().flex_none().text_size(12.5).font_medium().text_color(t.foreground).child(c.task ? c.name : `/${c.name}`))
+        .child(div().flex_none().text_size(12.5).font_medium().text_color(t.foreground).child(c.task || c.space ? c.name : `/${c.name}`))
         .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(c.task ? t.muted : t.dim).child(c.about))
         .when(Boolean(c.state), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(c.state)))));
   }

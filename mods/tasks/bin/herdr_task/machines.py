@@ -15,6 +15,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -526,7 +527,7 @@ if hc:
             spaces = ((json.load(f).get("herdr-app") or {}).get("value") or {}).get("spaces") or []
     except Exception:
         spaces = []
-    me["spaces"] = [{"id": s.get("id"), "name": s.get("name"), "folder": s.get("folder")} for s in spaces]
+    me["spaces"] = [{"id": s.get("id"), "name": s.get("name"), "folder": s.get("folder"), "machine": s.get("machine"), "icon": s.get("icon")} for s in spaces]
     names = {s["id"]: s for s in me["spaces"]}
     me["assistants"] = []
     for a in seen:
@@ -737,6 +738,9 @@ def cmd_assistants(args):
 
 def _find(rows, target):
     t = target.strip()
+    # A chat's #-mention, whole or its target: [#shop](space:vm-demo/sp1), space:vm-demo/sp1, #shop.
+    m = re.fullmatch(r"\[#[^\]]*\]\(space:([^)\s]+)\)", t)
+    t = m.group(1) if m else re.sub(r"^space:", "", t).lstrip("#")
     hits = [a for a in rows if t in (a["target"], a.get("space"), f"{a['route']}/{a.get('space')}" if a["route"] else a.get("space"))]
     if not hits:
         hits = [a for a in rows if t == a.get("space_name") or (a["route"] and t == f"{a['route']}/{a.get('space_name')}")]

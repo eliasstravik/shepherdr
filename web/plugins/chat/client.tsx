@@ -27,12 +27,15 @@ import { JobsSheet, JobsTag, NeedsYou, TurnLine, WorkingLine } from './activity.
 import { ClockIcon, PaperClipIcon } from '@heroicons/react/16/solid'
 import { AskedRow, Band, BriefRow, Chips, EndedRow, ErrorRow, NoteRow, Notice, HeadRow, ImagesLine, NewsRow, onTerminal, PilotRow, PublishingRow, questionsBelow, ReplyLine, Thumbs, WORDS } from './rows.tsx'
 import { AgentLine, openModelMenu, openRestart, RestartSheet } from '@client/restart.tsx'
+import { expandPicked, forMarkdown, mentionItems, MentionList, pickable, takeItem, useReach, withChips, type Item } from './mentions.tsx'
+import * as MNc from '@core/mentions.js'
+const mentionTyping = (MNc as any).typing as (text: string) => string | null
 
 /* ---------- messages ---------- */
 
 /** Human messages, including full task briefs and generated settings, exactly as written. */
-function YourText({ text }: { text: string }) {
-  return <div className="whitespace-pre-wrap wrap-anywhere">{text}</div>
+function YourText({ text, chat }: { text: string; chat?: string }) {
+  return <div className="whitespace-pre-wrap wrap-anywhere">{chat ? withChips(text, chat) : text}</div>
 }
 
 export { Markdown }
@@ -192,7 +195,7 @@ function Bubble({ msg, chat, from, out, last, pics, images, writing }: { msg: Me
                     return blocker ? <LinkButton onClick={() => jumpTo(chat.key, blocker.id, { card: true })}>Go to question</LinkButton> : null
                   })()}
                 </> : waitLine(msg.waitsFor)}</div> : null}
-                {msg.text ? <div ref={text} data-text>{you ? <YourText text={msg.text} /> : <Fold id={msg.id}><Markdown text={msg.text} /></Fold>}</div> : null}
+                {msg.text ? <div ref={text} data-text>{you ? <YourText text={msg.text} chat={chat.key} /> : <Fold id={msg.id}><Markdown text={msg.text} chat={chat.key} /></Fold>}</div> : null}
               </div>,
               true,
             )
@@ -1717,31 +1720,6 @@ function SlashList({ chatKey, text, pick }: { chatKey: string; text: string; pic
   )
 }
 
-/** "#4" at the end of the box, as the window's: the chat's space's tasks, by number or title; a tap puts its id in */
-function TaskList({ chatKey, text, pick }: { chatKey: string; text: string; pick: (text: string) => void }) {
-  const snap = useSnap()
-  const h = /(?:^|\s)#([\w-]*)$/.exec(text.replace(/\n+$/, ''))
-  if (!h || !snap) return null
-  const own = taskChatId(chatKey)
-  const place = own ? taskOf(snap, own)?.place : snap.places.find((p) => p.chat === chatKey)?.id
-  const q = h[1].toLowerCase()
-  const refOf = (id: string) => id.split(':').pop() ?? id
-  const list = (snap.tasks ?? []).filter((t) => t.place === place && (!q || refOf(t.id).toLowerCase().includes(q) || t.name.toLowerCase().includes(q))).slice(0, 8)
-  if (!list.length) return null
-  return (
-    <div role="listbox" aria-label="Tasks" className="overflow-hidden rounded-box bg-bg p-1 shadow-menu">
-      {list.map((t) => (
-        <button key={t.id} type="button" role="option" aria-selected={false} onMouseDown={(e) => e.preventDefault()} onClick={() => pick(text.replace(/\n+$/, '').replace(/#[\w-]*$/, `${refOf(t.id)} `))}
-          className="flex w-full min-w-0 items-baseline gap-2.5 rounded-row px-2.5 py-1.5 text-left hover:bg-hover phone:py-2.5">
-          <span className="shrink-0 font-medium">{refOf(t.id)}</span>
-          <span className="min-w-0 flex-1 truncate text-fg2">{t.name}</span>
-          {t.state ? <span className="shrink-0 text-[0.6875rem] text-fg3">{t.state}</span> : null}
-        </button>
-      ))}
-    </div>
-  )
-}
-
 function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder: string; cli: string }) {
   const [text, setText] = useDraft(chatKey)
   const files = useUI((u) => u.files[chatKey]) ?? noFiles
@@ -1810,8 +1788,19 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
   // Up in an empty box: which earlier message shows (-1: none), and its words (editing them makes it a new one)
   const recall = useRef(-1)
   const recalled = useRef('')
+  // the "#" list: spaces this chat's agent reaches and this space's tasks (mentions.tsx); Escape closes it for what is
+  // typed, Up and Down choose, Enter or Tab takes
+  const snap = useSnap()
+  const word = mentionTyping(text)
+  const [mclosed, setMclosed] = useState<string | null>(null)
+  const reach = useReach(chatKey, word !== null)
+  const mentions = word !== null && mclosed !== text ? mentionItems(snap, chatKey, text, reach) : []
+  const choosable = pickable(mentions)
+  const [msel, setMsel] = useState(0)
+  useEffect(() => setMsel(0), [word])
+  const takeMention = (i: Item) => { setText(takeItem(chatKey, text, i)); ref.current?.focus() }
   const send = (hold = false) => {
-    const t = text.trim()
+    const t = expandPicked(chatKey, text.trim())
     if (!t && !files.length) return
     recall.current = -1
     const reply = getState().ui.reply[chatKey]
@@ -1852,7 +1841,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
         <View key={i} chatKey={chatKey} cli={cli} />
       ))}
       <SlashList chatKey={chatKey} text={text} pick={(name) => { setText(`/${name} `); ref.current?.focus() }} />
-      <TaskList chatKey={chatKey} text={text} pick={(next) => { setText(next); ref.current?.focus() }} />
+      <MentionList items={mentions} sel={msel} from={reach?.from ?? null} pick={takeMention} />
       {/* the window's box: the words across its full width, then a row in it of attach on the left and on the right
           what the agent runs on (the model menu), the mic and Send (or Call); nothing under it. Its corners are half a
           round button and the padding, so the buttons sit in the bottom ones with the same curve round them */}
@@ -1894,6 +1883,12 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                 onFocus={() => setUI({ focus: chatKey })}
                 onBlur={() => getState().ui.focus === chatKey && setUI({ focus: null })}
                 onKeyDown={(e) => {
+                  if (choosable.length && !e.nativeEvent.isComposing) {
+                    const n = choosable.length, at = Math.min(msel, n - 1)
+                    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); return setMsel((at + (e.key === 'ArrowDown' ? 1 : n - 1)) % n) }
+                    if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && device === 'desktop')) { e.preventDefault(); return takeMention(choosable[at]) }
+                    if (e.key === 'Escape') { e.preventDefault(); return setMclosed(text) }
+                  }
                   // as the window's: Up in an empty box (or one showing a recalled message) brings back your earlier
                   // messages, newest first; Down goes back toward the empty box
                   if ((e.key === 'ArrowUp' && (!text || recall.current >= 0)) || (e.key === 'ArrowDown' && recall.current >= 0)) {

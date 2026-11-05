@@ -3,6 +3,8 @@
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import { useMemo, type MouseEvent } from 'react'
+import { goPlace, useSnap } from '@client/kernel.ts'
+import { forMarkdown, hasMention, parseMention, stateOf, useReach } from './mentions.tsx'
 
 marked.setOptions({ gfm: true, breaks: false })
 
@@ -26,8 +28,9 @@ const DONE = svg(['M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.15
 /** the reply as safe HTML: a copy button on each code block, and a bit of inline code copies when tapped. The marks
     go onto the sanitized elements themselves, never into the HTML as text, so nothing in the reply can turn into them.
     A link's or picture's title goes: nothing pops up on hover */
-export function toHtml(text: string) {
+export function toHtml(text: string, mention?: (a: HTMLAnchorElement, name: string, target: string) => void) {
   const root = DOMPurify.sanitize(marked.parse(text, { async: false }) as string, { RETURN_DOM: true, FORBID_ATTR: ['title'] }) as HTMLElement
+  if (mention) for (const a of root.querySelectorAll<HTMLAnchorElement>('a[href^="#space="]')) mention(a, (a.textContent ?? '').replace(/^#/, ''), decodeURIComponent(a.getAttribute('href')!.slice(7)))
   for (const pre of root.querySelectorAll('pre')) {
     const box = document.createElement('div')
     box.className = 'code'
@@ -130,7 +133,56 @@ function onCopy(e: MouseEvent) {
   copied(el)
 }
 
-export function Markdown({ text }: { text: string }) {
+/** chat: the chat it is in, so a #-mention of a space (core/mentions.js) draws as a chip, open or locked */
+export function Markdown({ text, chat }: { text: string; chat?: string }) {
+  if (chat && hasMention(text)) return <WithMentions text={text} chat={chat} />
+  return <Plain text={text} />
+}
+
+function Plain({ text }: { text: string }) {
   const html = useMemo(() => toHtml(text), [text])
   return <div className="prose-reply" onClick={onCopy} dangerouslySetInnerHTML={{ __html: html }} />
+}
+
+const CHIP = 'inline-flex max-w-full items-baseline rounded-md px-1.5 align-baseline whitespace-nowrap no-underline'
+const LOCK = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" class="size-3 shrink-0 self-center mr-1"><path fill-rule="evenodd" d="M8 1a3.5 3.5 0 0 0-3.5 3.5V7A1.5 1.5 0 0 0 3 8.5v5A1.5 1.5 0 0 0 4.5 15h7a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 11.5 7V4.5A3.5 3.5 0 0 0 8 1Zm2 6V4.5a2 2 0 1 0-4 0V7h4Z" clip-rule="evenodd"/></svg>'
+
+function WithMentions({ text, chat }: { text: string; chat: string }) {
+  const snap = useSnap()
+  const got = useReach(chat)
+  const states = new Map<string, ReturnType<typeof stateOf>>()
+  for (const m of text.matchAll(/\[#([^\]\n]{1,80})\]\(space:([^)\s]+)\)/g)) states.set(m[2], stateOf(parseMention(m[1], m[2]), snap, got))
+  const key = [...states].map(([t, s]) => `${t}:${s.ok}:${s.machine}:${s.place?.id ?? ''}`).join('|')
+  const html = useMemo(() => toHtml(forMarkdown(text), (a, name, target) => {
+    const s = states.get(target) ?? stateOf(parseMention(name, target), snap, got)
+    const chip = document.createElement(s.ok ? 'button' : 'span')
+    const words = document.createElement('span')
+    words.className = 'truncate'
+    const b = document.createElement('span')
+    b.className = 'font-medium'
+    b.textContent = `#${name}`
+    words.append(b)
+    if (s.machine) { const w = document.createElement('span'); w.className = 'opacity-70'; w.textContent = ` · ${s.machine}`; words.append(w) }
+    if (s.ok) {
+      chip.setAttribute('type', 'button')
+      chip.setAttribute('data-mention', 'open')
+      chip.setAttribute('data-place', s.place!.id)
+      chip.setAttribute('aria-label', `Open space ${name} on ${s.machine}`)
+      chip.className = `${CHIP} bg-accent/12 text-accent hover:bg-accent/20`
+    } else {
+      chip.setAttribute('data-mention', 'locked')
+      chip.setAttribute('title', s.why)
+      chip.setAttribute('aria-label', `${name}: ${s.why}`)
+      chip.className = `${CHIP} bg-fg/6 text-fg3`
+      chip.innerHTML = LOCK
+    }
+    chip.append(words)
+    a.replaceWith(chip)
+  }), [text, key])
+  const click = (e: MouseEvent) => {
+    const el = (e.target as Element).closest('[data-place]')
+    if (el && e.currentTarget.contains(el)) { e.stopPropagation(); return goPlace(el.getAttribute('data-place')!) }
+    onCopy(e)
+  }
+  return <div className="prose-reply" onClick={click} dangerouslySetInnerHTML={{ __html: html }} />
 }
