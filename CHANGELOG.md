@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.1.7
+
+A space's chat says which space it is, and the README shows how to install with an agent.
+
+- A space's chat header, in the window and on the web, shows the space's name and its folder (and its machine when
+  it's another one), not "Assistant · Claude Code". The composer's model menu still says which agent runs.
+- README and the install guide: what to tell your coding agent so it installs Shepherdr for you, in the Herdr app or
+  without it (the web app in a browser on your tailnet is then your window).
+
 ## 3.1.6
 
 Autopilot that decides on its own, agents talking as a group chat, and a calmer, tidier app.
