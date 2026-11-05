@@ -3,7 +3,7 @@
 // Anything else is refused. Inputs are checked here; commands run with argument lists, never a shell line.
 import type { Hub } from "./hub.ts";
 import { join } from "node:path";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { sendBody, messageBody, refusal, reactionLine, mentionedIn, taskTag } from "../core/send.js";
 import { kindOf } from "../core/chat-reader.js";
@@ -16,8 +16,17 @@ import { worktreeAct } from "./worktrees.ts";
 import { execTemplate } from "./spaces.ts";
 import * as MA from "../core/machine-add.js";
 import { exec } from "./model.ts";
+import { closeSaved, renameSaved, orderSaved, withoutSpace, splitId } from "./saved-spaces.ts";
 
 const APP = process.env.HERDR_APP_HOME || join(homedir(), ".config", "herdr-app");
+// The window's own space log (lib/spacelog.js): a space the service closed or renamed with no window is traced there too
+function logSpace(action: string, id: string, name: string | null, extra: Record<string, unknown> = {}) {
+  try {
+    const dir = join(APP, "data", "backups");
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join(dir, "space-log.jsonl"), JSON.stringify({ at: new Date().toISOString(), machine: splitId(id).machine, space: id, name, action, ...extra, by: "web, no window (service/saved-spaces.ts)" }) + "\n");
+  } catch {}
+}
 const ATTACH = join(process.env.HERDR_APP_HOME || join(homedir(), ".config", "herdr-app"), "data", "chat-attach");
 const ADDR = /^([\w.-]+\/)?t[0-9a-z]+$/;
 const REF = /^[A-Z][A-Z0-9]*-\d+$/;
@@ -78,7 +87,12 @@ function firstWhenIdle(hub: Hub, addr: string, text: string) {
 }
 
 async function run(cmd: string[]) {
-  const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  // a program that isn't there (herdr-app on a web-only install) fails as any other: its code, not a throw
+  let p: ReturnType<typeof Bun.spawn<"ignore", "pipe", "pipe">>;
+  // the window's herdr-app: SHEPHERDR_HERDR_APP in tests (as SHEPHERDR_HC for hc)
+  if (cmd[0] === "herdr-app" && process.env.SHEPHERDR_HERDR_APP) cmd = [process.env.SHEPHERDR_HERDR_APP, ...cmd.slice(1)];
+  try { p = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe", stdin: "ignore" }); }
+  catch (e) { return { code: 127, stdout: "", stderr: String(e) }; }
   const [stdout, stderr] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
   return { code: await p.exited, stdout, stderr };
 }
@@ -196,7 +210,12 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     } else if (b.under.startsWith("m:")) {
       for (const [i, id] of ids.entries()) {
         const r = await run(["herdr-app", "do", "space.move", "--id", id, "--index", String(i + 1)]);
-        if (r.code !== 0) throw new Error("Moving spaces needs the Herdr window open.");
+        if (r.code !== 0) {
+          // no window: the machine's saved spaces in that order (service/saved-spaces.ts)
+          const key = b.under.slice(2);
+          await orderSaved(hub, key === compat.host ? null : key, ids);
+          break;
+        }
       }
       return { ok: true };
     } else throw new Error("Machines keep their order: drag spaces and sections instead.");
@@ -239,7 +258,13 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     // an empty name gives it Herdr's own back, as the window's Rename dialog does
     if (name || b.unname === true) {
       const r = await run(["herdr-app", "do", "space.rename", "--id", b.id, "--name", name]);
-      if (r.code !== 0) throw new Error("Renaming a space needs the Herdr window open.");
+      // no window: its saved name (Herdr's own name back is the window's to give)
+      if (r.code !== 0) {
+        if (!name) throw new Error("Giving a space Herdr's own name back needs the Herdr window open.");
+        const done = await renameSaved(hub, b.id, name);
+        if (!done) throw new Error("That space isn't here any more.");
+        logSpace("rename", b.id, done.was, { to: name });
+      }
     }
     return { ok: true };
   }
@@ -327,7 +352,12 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const tab = typeof b.tab === "string" ? b.tab : t?.labels?.["herdr.coordinator.tab"], name = b.name.trim().slice(0, 80);
     if (!tab || !/^[\w./:-]{1,200}$/.test(tab)) throw new Error("This space has no Assistant tab.");
     const r = await run(["herdr-app", "do", "tab.rename", "--id", tab, "--name", name]);
-    if (r.code !== 0) throw new Error("Renaming a tab needs the Herdr window open.");
+    if (r.code !== 0) {
+      // no window: its saved name; a tab's place reads the space's machine ("vm/…"), the Assistant's label its own id
+      if (!name) throw new Error("Giving a tab Herdr's own name back needs the Herdr window open.");
+      const there = a?.includes("/") && !tab.includes("/") ? `${a.split("/")[0]}/${tab}` : tab;
+      if (!(await renameSaved(hub, there, name))) throw new Error("That tab isn't here any more.");
+    }
     return { ok: true };
   }
   if ((b?.type === "tab-close" || b?.type === "tab-move" || b?.type === "tab-end") && typeof b.tab === "string" && /^[\w./:-]{1,200}$/.test(b.tab)) {
@@ -380,7 +410,8 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     return { ok: true };
   }
   if (b?.type === "space-remove" && typeof b.place === "string" && compat.shared) {
-    // Close a space: the window closes its own (herdr-app do space.close); the service forgets one of its own and ends its Assistant
+    // Close a space: the window closes its own (herdr-app do space.close), or with no window the service closes it in
+    // the window's saved spaces (service/saved-spaces.ts); the service forgets one of its own and ends its Assistant
     const own = Array.isArray(compat.shared.value("spaces")) ? compat.shared.value("spaces") : [];
     const mine = own.find((x: any) => (x.machine ? `${x.machine}/${x.id}` : x.id) === b.place);
     if (mine) {
@@ -389,7 +420,13 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       return { ok: true };
     }
     const r = await run(["herdr-app", "do", "space.close", "--id", b.place, "--confirmed", "true"]);
-    if (r.code !== 0) throw new Error("Closing a space needs the Herdr window open.");
+    if (r.code !== 0) {
+      const gone = await closeSaved(hub, b.place);
+      if (!gone) throw new Error("That space isn't here any more.");
+      logSpace("close", b.place, gone.name);
+      const bar = compat.shared.value("spaces-chat") ?? {}, next = withoutSpace(bar, b.place);
+      if (next !== bar) await compat.shared.set("spaces-chat", next);
+    }
     return { ok: true };
   }
   if (b?.type === "rewind" && typeof b.chat === "string" && typeof b.message === "string") {
