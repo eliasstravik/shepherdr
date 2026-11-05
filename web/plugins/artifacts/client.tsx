@@ -32,10 +32,10 @@ import { useMotion } from '@client/motion.ts'
 import { isDark, useDark } from '@client/theme.ts'
 import {
   BackIcon,
+  CheckIcon,
   NextIcon,
   dimmed,
   FilterBox,
-  Ghost,
   ic,
   IconButton,
   List,
@@ -286,6 +286,29 @@ export function showInPanel(id: string) {
   setUI(ui.device === 'phone' ? { task: null, tab: 'artifacts', pick: null, plus: null, menu: false } : { task: ui.task && !taskInMiddle(ui, snap) ? null : ui.task, side: 'artifacts' })
 }
 
+/** Mark up / Done, one look in the viewer's bar and the panel's (and the window's, mods/artifacts/main.js and
+ *  chat-image/artifact-bar.js): a pointer clicking a spot and its name, round like every header button. round: on a
+ *  phone's bar it is a grey circle with only the pointer, like Close beside it. While marking it says Done with a tick,
+ *  tinted the blue of the frame round what you mark. */
+function MarkUpButton({ on, onClick, round }: { on: boolean; onClick: () => void; round?: boolean }) {
+  return (
+    <button
+      type="button"
+      aria-label={on ? 'Done' : 'Mark up'}
+      aria-pressed={on}
+      onClick={onClick}
+      className={clsx(
+        'hit press-dim inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full pr-2.5 pl-2 text-[0.8125rem] font-medium whitespace-nowrap coarse:h-9 phone:h-11 phone:gap-2 phone:pr-4 phone:pl-3.5 phone:text-[0.9375rem]',
+        on ? 'bg-[color-mix(in_srgb,var(--focus)_14%,var(--bg))] text-fg' : 'text-fg2 hover:bg-hover hover:text-fg',
+        round && !on && 'phone:w-11 phone:justify-center phone:bg-bubble phone:px-0',
+      )}
+    >
+      {on ? <CheckIcon className={clsx(ic, 'text-focus')} /> : <MarkUpIcon className={ic} />}
+      <span className={clsx(round && !on && 'phone:hidden')}>{on ? 'Done' : 'Mark up'}</span>
+    </button>
+  )
+}
+
 /** An artifact in the side panel, under the window's sidebar bar: ‹ Artifacts back to the list, its title, which
  *  version (‹ v2 of 5 ›, · Latest ›), and Mark up / Done, which marks it up right there */
 function PanelArtifact({ art, onBack }: { art: Artifact; onBack: () => void }) {
@@ -301,9 +324,7 @@ function PanelArtifact({ art, onBack }: { art: Artifact; onBack: () => void }) {
         </button>
         <div className="min-w-0 flex-1 truncate font-semibold">{art.title}</div>
         <Stepper art={art} shown={shown} bar="sidebar" onStep={(n) => { setMarking(false); setV(n) }} />
-        <Ghost aria-pressed={marking} onClick={() => setMarking(!marking)} className="shrink-0 aria-pressed:bg-sel aria-pressed:text-fg">
-          <MarkUpIcon /> {marking ? 'Done' : 'Mark up'}
-        </Ghost>
+        <MarkUpButton on={marking} onClick={() => setMarking(!marking)} />
       </div>
       <div className="relative min-h-0 flex-1">
         <div className="absolute inset-0">
@@ -580,14 +601,7 @@ function Viewer() {
           <PageIcon className={clsx(ic, 'shrink-0 text-fg2 phone:hidden')} />
           <div className="min-w-0 flex-1 truncate font-medium">{art.title || 'Artifact'}</div>
           <Stepper art={art} shown={shown} bar="viewer" onStep={(n) => openArtifact(art.id, n)} />
-          <IconButton
-            label={markup ? 'Done' : 'Mark up'}
-            pressed={markup}
-            className={clsx(barBtn, 'w-auto! px-2 gap-1 inline-flex! aria-pressed:bg-[color-mix(in_srgb,var(--accent)_16%,var(--bg))]')}
-            onClick={() => setMarkup(!markup)}
-          >
-            <MarkUpIcon /><span className="phone:hidden">{markup ? 'Done' : 'Mark up'}</span>
-          </IconButton>
+          <MarkUpButton on={markup} onClick={() => setMarkup(!markup)} round />
           {/* beside the chat, in the Artifacts panel */}
           {phone ? null : (
             <IconButton label="Open in sidebar" onClick={() => showInPanel(art.id)} className="rounded-full!">
