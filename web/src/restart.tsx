@@ -224,11 +224,12 @@ function SpeedWords({ speed }: { speed: Worn }) {
 
 /* ---------- the window's model button and menu (mods/chat pickParts, mods/chat-models) ---------- */
 
-type MenuModel = { id: string; name: string; efforts: string[]; defaultEffort?: string | null; fast?: boolean }
-type AgentMenu = { name: string; models: MenuModel[]; perms?: { id: string; label: string }[]; fastLocked?: boolean }
+export type MenuModel = { id: string; name: string; efforts: string[]; defaultEffort?: string | null; fast?: boolean }
+export type AgentMenu = { name: string; models: MenuModel[]; perms?: { id: string; label: string }[]; fastLocked?: boolean }
 type MenuPick = { agent: string; model: string | null; effort: string | null; fast: boolean; perm: string | null }
-type MenuData = { current: MenuPick; menus: Record<string, AgentMenu>; permDefault: Record<string, string>; picks?: { pinned: string[]; recent: string[] }; remote: string | null }
+type MenuData = { current: MenuPick; menus: Record<string, AgentMenu>; permDefault: Record<string, string>; picks?: Picks; remote: string | null }
 /** a stretch of the model list (core/agents.js modelSections): Pinned, Recent, All models, or an agent's matches */
+type Picks = { pinned: string[]; recent: string[] }
 type Section = { key: string; title: string | null; agent: string; rows: (MenuModel & { agent: string; pinned: boolean; typed?: boolean })[]; more: number }
 
 /** the menu open: its chat, and the model a typed /model named */
@@ -254,6 +255,99 @@ function findModel(menus: Record<string, AgentMenu>, name?: string) {
 
 const LEVEL: Record<string, string> = { minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra', none: 'None' }
 
+/** The model list both model menus show (the chat's, below, and Settings' role menu, screens/Role.tsx), made for
+ *  any number of agents with any number of models: a tab per agent (only when more than one), a search over every
+ *  agent's models (a letter typed on a row goes to it; Enter takes the first match; one word no model has is offered
+ *  as an id to start on), the agent's pinned and recent models on top (core/agents.js modelSections), a star to pin
+ *  one (onPin), long lists capped */
+export function ModelList({ menus, agent, picks, chosen, disabled, phone, onPick, onPin, autoFocus }: {
+  menus: Record<string, AgentMenu>; agent: string; picks?: Picks; chosen: { agent: string; model: string | null }; disabled?: boolean; phone?: boolean
+  onPick: (row: MenuModel & { agent: string; typed?: boolean }) => void; onPin?: (agent: string, id: string) => void; autoFocus?: boolean
+}) {
+  const [tab, setTab] = useState(agent)
+  const [q, setQ] = useState('')
+  const search = useRef<HTMLInputElement>(null)
+  const list = useRef<HTMLDivElement>(null)
+  // on a desktop the search takes the keys at once; a phone's keyboard comes up only when the box is tapped
+  useEffect(() => {
+    if (autoFocus) search.current?.focus({ preventScroll: true })
+  }, [])
+  const agents = Object.keys(menus)
+  const sections = AGc.modelSections(menus, tab, picks, q) as Section[]
+  const pick = (row: Section['rows'][number]) => {
+    onPick(row)
+    setTab(row.agent)
+    setQ('')
+    if (!phone) search.current?.focus({ preventScroll: true })
+  }
+  const keys = (e: ReactKeyboardEvent) => {
+    if (e.target === search.current || e.metaKey || e.ctrlKey || e.altKey || e.key.length !== 1 || !search.current) return
+    search.current.focus({ preventScroll: true })
+  }
+  const row = 'flex min-h-[31px] w-full items-center gap-2.5 rounded-[7px] px-[9px] text-left enabled:hover:bg-hover focus-visible:bg-hover focus-visible:outline-none disabled:text-fg3 coarse:min-h-11 phone:min-h-11'
+  const head = (t: string) => <div className="px-[9px] pt-2 pb-1 text-[0.6875rem] text-fg3 coarse:text-[0.8125rem] phone:text-[0.8125rem]">{t}</div>
+  return (
+    <div onKeyDown={keys} className="flex flex-col">
+      {agents.length > 1 ? (
+        <div className="px-1 pt-1 pb-1.5">
+          <Tabs label="Agent" className="flex w-full">
+            {agents.map((a) => (
+              <Tab key={a} fill on={tab === a} onClick={() => { setTab(a); setQ('') }} className="text-[0.75rem]! coarse:text-[0.875rem]! phone:text-[0.875rem]!">
+                <span className="inline-flex items-center gap-1.5 align-middle">
+                  <img src={`agents/${a}.svg`} alt="" aria-hidden className="size-3.5 shrink-0" />
+                  {menus[a].name}
+                </span>
+              </Tab>
+            ))}
+          </Tabs>
+        </div>
+      ) : null}
+      <div className="px-1 pb-1">
+        <div className="flex h-8 items-center gap-2 rounded-[7px] bg-sel pl-2.5 text-fg3 focus-within:shadow-[inset_0_0_0_1.5px_var(--focus)] coarse:h-11 phone:h-11">
+          <SearchIcon aria-hidden className="size-3.5 shrink-0" />
+          <input ref={search} name="model-search" type="search" autoComplete="off" spellCheck={false} enterKeyHint="go" disabled={disabled}
+            aria-label="Search models" placeholder={agents.length > 1 ? 'Search every agent’s models' : 'Search models'} value={q}
+            onChange={(e) => { setQ(e.target.value); list.current?.scrollTo({ top: 0 }) }}
+            onKeyDown={(e) => {
+              // Enter takes the first match
+              if (e.key === 'Enter') { const first = sections[0]?.rows[0]; if (q && first) { e.preventDefault(); pick(first) } }
+            }}
+            className="h-full min-w-0 flex-1 bg-transparent pr-2 text-fg outline-none placeholder:text-fg3 max-sm:text-base [&::-webkit-search-cancel-button]:appearance-none" />
+        </div>
+      </div>
+      <div ref={list} className={clsx('overflow-y-auto overscroll-contain', phone ? 'max-h-[40dvh]' : 'max-h-[min(300px,36dvh)]')}>
+        {sections.length === 0 ? <p className="px-[9px] py-2 text-fg3">No models.</p> : null}
+        {sections.map((s) => (
+          <div key={s.key} role="group" aria-label={s.title ?? undefined}>
+            {s.title ? head(s.title) : null}
+            {s.rows.map((x) => {
+              const on = x.agent === chosen.agent && x.id === chosen.model
+              return (
+                <div key={`${x.agent}-${x.id}`} className="group relative flex items-center">
+                  <button type="button" role="menuitemradio" aria-checked={on} disabled={disabled} className={clsx(row, onPin && 'pr-9')} onClick={() => pick(x)}>
+                    {/* the agent's own mark, Herdr's icon (web/public/agents, from the window's icons) */}
+                    <img src={`agents/${x.agent}.svg`} alt="" aria-hidden className="size-3.5 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">{x.typed ? <>Use <span className="font-medium">{x.id}</span></> : x.name}</span>
+                    {x.typed ? <span className="shrink-0 text-[0.6875rem] text-fg3">{menus[x.agent]?.name} id</span> : null}
+                    <span className="grid size-3.5 shrink-0 place-items-center">{on ? <CheckIcon className="size-3.5" /> : null}</span>
+                  </button>
+                  {x.typed || disabled || !onPin ? null : (
+                    <button type="button" tabIndex={-1} aria-label={x.pinned ? `Unpin ${x.name}` : `Pin ${x.name}`} aria-pressed={x.pinned} onClick={() => onPin(x.agent, x.id)}
+                      className={clsx('absolute right-0.5 grid size-7 place-items-center rounded-[6px] text-fg3 hover:text-fg coarse:size-10 phone:size-10', !x.pinned && 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 coarse:opacity-60 phone:opacity-60')}>
+                      {x.pinned ? <StarSolid className="size-3.5 text-fg2" /> : <StarOutline className="size-3.5" />}
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+            {s.more ? <p className="px-[9px] py-1 text-[0.6875rem] text-fg3 coarse:text-[0.8125rem] phone:text-[0.8125rem]">{s.more} more. Type to narrow.</p> : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /** The model menu, for any number of agents with any number of models each: a tab per installed agent (only when more
  *  than one), a search over every agent's models (type anywhere in the menu), the agent's pinned and recent models
  *  on top (core/agents.js modelSections), a star to pin one; then Reasoning (that model's levels), Fast (where the
@@ -263,13 +357,9 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
   const [data, setData] = useState<MenuData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [sel, setSel] = useState<MenuPick | null>(null)
-  const [tab, setTab] = useState<string | null>(null)
-  const [q, setQ] = useState('')
   const [perms, setPerms] = useState(false)
   const [busy, setBusy] = useState(false)
   const phone = useUI((u) => u.device === 'phone')
-  const search = useRef<HTMLInputElement>(null)
-  const list = useRef<HTMLDivElement>(null)
   const close = () => setMenuOpen(null)
   const models = (d: MenuData) => Object.entries(d.menus).flatMap(([agent, m]) => m.models.map((x) => ({ ...x, agent })))
   const choose = (d: MenuData, was: MenuPick, m: MenuModel & { agent: string }): MenuPick => {
@@ -293,14 +383,9 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
         const m = pre && models(r.menu).find((x) => x.agent === pre.agent && x.id === pre.model)
         const s = m ? choose(r.menu, r.menu.current, m) : r.menu.current
         setSel(s)
-        setTab(s.agent)
       })
       .catch((e: Error) => setError(e.message))
   }, [chat, typed])
-  // on a desktop the search takes the keys at once; a phone's keyboard comes up only when the box is tapped
-  useEffect(() => {
-    if (data && !phone && !data.remote) search.current?.focus({ preventScroll: true })
-  }, [!!data])
   const model = (s: MenuPick) => data?.menus[s.agent]?.models.find((m) => m.id === s.model) ?? null
   const level = (s: MenuPick) => s.effort ?? model(s)?.defaultEffort ?? null
   const changes = () => {
@@ -330,18 +415,10 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
       setData({ ...data, menus })
     }
     setSel(choose(data, sel, row))
-    setTab(row.agent)
-    setQ('')
-    if (!phone) search.current?.focus({ preventScroll: true })
   }
   const pin = async (agent: string, id: string) => {
     const r = await act({ type: 'model-pin', agent, model: id } as never).catch(() => null)
     if (r?.picks && data) setData({ ...data, picks: r.picks })
-  }
-  // a letter typed on a row goes to the search, as everywhere it can be typed
-  const keys = (e: ReactKeyboardEvent) => {
-    if (e.target === search.current || e.metaKey || e.ctrlKey || e.altKey || e.key.length !== 1 || !search.current) return
-    search.current.focus({ preventScroll: true })
   }
   const remote = data?.remote ?? null
   const menu = sel ? data?.menus[sel.agent] : undefined
@@ -349,8 +426,6 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
   const on = sel ? level(sel) : null
   const perm = sel ? menu?.perms?.find((x) => x.id === sel.perm) : undefined
   const ch = changes()
-  const agents = data ? Object.keys(data.menus) : []
-  const sections = data && tab ? (AGc.modelSections(data.menus, tab, data.picks, q) as Section[]) : []
   const row = 'flex min-h-[31px] w-full items-center gap-2.5 rounded-[7px] px-[9px] text-left enabled:hover:bg-hover focus-visible:bg-hover focus-visible:outline-none disabled:text-fg3 coarse:min-h-11 phone:min-h-11'
   const head = (t: string) => <div className="px-[9px] pt-2 pb-1 text-[0.6875rem] text-fg3 coarse:text-[0.8125rem] phone:text-[0.8125rem]">{t}</div>
   const sheet = (
@@ -359,69 +434,15 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
       <Menu label="Model" onClose={close} tabs
         // a phone's sheet is outside the app's [data-device] (a portal): its own classes, not phone: ones
         className={phone ? 'fixed inset-x-0 bottom-0 z-40 rounded-b-none pb-[max(env(safe-area-inset-bottom),--spacing(2))]' : 'absolute right-0 bottom-full z-30 mb-2 w-[340px] max-w-[calc(100vw-2rem)] origin-bottom-right'}>
-        <div data-model-menu onKeyDown={keys} className="relative flex flex-col text-[0.8rem] coarse:text-[0.9375rem] phone:text-[0.9375rem]">
+        <div data-model-menu className="relative flex flex-col text-[0.8rem] coarse:text-[0.9375rem] phone:text-[0.9375rem]">
           {!data || !sel ? (
             <p className={clsx('px-[9px] py-2 text-fg3', error && 'text-need-fg')}>{error ?? 'Reading what it runs on…'}</p>
           ) : (
             <>
               {/* another machine's Assistant: what runs is shown, and said once why it can't change here */}
               {remote ? <p className="px-[9px] pt-1.5 pb-1 text-pretty text-[0.75rem] text-fg3 coarse:text-[0.875rem] phone:text-[0.875rem]">Runs on {remote}. Change its model there.</p> : null}
-              {agents.length > 1 ? (
-                <div className="px-1 pt-1 pb-1.5">
-                  <Tabs label="Agent" className="flex w-full">
-                    {agents.map((a) => (
-                      <Tab key={a} fill on={tab === a} onClick={() => { setTab(a); setQ('') }} className="text-[0.75rem]! coarse:text-[0.875rem]! phone:text-[0.875rem]!">
-                        <span className="inline-flex items-center gap-1.5 align-middle">
-                          <img src={`agents/${a}.svg`} alt="" aria-hidden className="size-3.5 shrink-0" />
-                          {data.menus[a].name}
-                        </span>
-                      </Tab>
-                    ))}
-                  </Tabs>
-                </div>
-              ) : null}
-              <div className="px-1 pb-1">
-                <div className="flex h-8 items-center gap-2 rounded-[7px] bg-sel pl-2.5 text-fg3 focus-within:shadow-[inset_0_0_0_1.5px_var(--focus)] coarse:h-11 phone:h-11">
-                  <SearchIcon aria-hidden className="size-3.5 shrink-0" />
-                  <input ref={search} name="model-search" type="search" autoComplete="off" spellCheck={false} enterKeyHint="go" disabled={!!remote}
-                    aria-label="Search models" placeholder={agents.length > 1 ? 'Search every agent’s models' : 'Search models'} value={q}
-                    onChange={(e) => { setQ(e.target.value); list.current?.scrollTo({ top: 0 }) }}
-                    onKeyDown={(e) => {
-                      // Enter takes the first match
-                      if (e.key === 'Enter') { const first = sections[0]?.rows[0]; if (q && first) { e.preventDefault(); pick(first) } }
-                    }}
-                    className="h-full min-w-0 flex-1 bg-transparent pr-2 text-fg outline-none placeholder:text-fg3 max-sm:text-base [&::-webkit-search-cancel-button]:appearance-none" />
-                </div>
-              </div>
-              <div ref={list} className={clsx('overflow-y-auto overscroll-contain', phone ? 'max-h-[40dvh]' : 'max-h-[min(300px,36dvh)]')}>
-                {sections.length === 0 ? <p className="px-[9px] py-2 text-fg3">No models.</p> : null}
-                {sections.map((s) => (
-                  <div key={s.key} role="group" aria-label={s.title ?? 'Use the id typed'}>
-                    {s.title ? head(s.title) : null}
-                    {s.rows.map((x) => {
-                      const chosen = x.agent === sel.agent && x.id === sel.model
-                      return (
-                        <div key={`${x.agent}-${x.id}`} className="group relative flex items-center">
-                          <button type="button" role="menuitemradio" aria-checked={chosen} disabled={!!remote} className={clsx(row, 'pr-9')} onClick={() => pick(x)}>
-                            {/* the agent's own mark, Herdr's icon (web/public/agents, from the window's icons) */}
-                            <img src={`agents/${x.agent}.svg`} alt="" aria-hidden className="size-3.5 shrink-0" />
-                            <span className="min-w-0 flex-1 truncate">{x.typed ? <>Use <span className="font-medium">{x.id}</span></> : x.name}</span>
-                            {x.typed ? <span className="shrink-0 text-[0.6875rem] text-fg3">{data.menus[x.agent]?.name} id</span> : null}
-                            <span className="grid size-3.5 shrink-0 place-items-center">{chosen ? <CheckIcon className="size-3.5" /> : null}</span>
-                          </button>
-                          {x.typed || remote ? null : (
-                            <button type="button" tabIndex={-1} aria-label={x.pinned ? `Unpin ${x.name}` : `Pin ${x.name}`} aria-pressed={x.pinned} onClick={() => void pin(x.agent, x.id)}
-                              className={clsx('absolute right-0.5 grid size-7 place-items-center rounded-[6px] text-fg3 hover:text-fg coarse:size-10 phone:size-10', !x.pinned && 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 coarse:opacity-60 phone:opacity-60')}>
-                              {x.pinned ? <StarSolid className="size-3.5 text-fg2" /> : <StarOutline className="size-3.5" />}
-                            </button>
-                          )}
-                        </div>
-                      )
-                    })}
-                    {s.more ? <p className="px-[9px] py-1 text-[0.6875rem] text-fg3 coarse:text-[0.8125rem] phone:text-[0.8125rem]">{s.more} more. Type to narrow.</p> : null}
-                  </div>
-                ))}
-              </div>
+              <ModelList menus={data.menus} agent={sel.agent} picks={data.picks} chosen={sel} disabled={!!remote} phone={phone} onPick={pick}
+                onPin={(agent, id) => void pin(agent, id)} autoFocus={!phone && !remote} />
               <div className="px-1 py-1"><div className="h-px bg-line" /></div>
               {m?.efforts?.length ? (
                 <>
