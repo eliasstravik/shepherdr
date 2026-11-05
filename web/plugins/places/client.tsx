@@ -4,7 +4,7 @@
 // red dot when its health couldn't be read; not: "Offline" or "Connecting…", dimmed and folded until tapped open), its
 // spaces in no section, then its sections. A space's row: its # (or emoji), its name (bold while its Assistant has
 // something new, dimmed with a crossed-out bell when muted), after it only what's unusual (its machine in Pinned, its
-// folder where another space there has its name, its repo and branch, ↑ahead ↓behind), and its red and green counts.
+// folder where another space there has its name, its repo and branch), and its red and green counts.
 // Worktree spaces nest under their repo's own. A folded section (Pinned too) still shows the space you're in and its
 // unread ones, and adds up its counts on its heading. Menus are core/menus.js's, the window's too: a right click (or a
 // finger held) opens them, no ⋯ on the rows. Spaces drag among their own, into a section or Pinned, or back to their machine's
@@ -316,11 +316,11 @@ function usePlaceRow({ p, snap, where }: { p: Place; snap: Snapshot; where?: str
   const off = p.status === 'off' && !p.connecting
   // its Autopilot (SHEP-5): a small mark before the name while on, pulsing while a wake runs (its turn) or waits for
   // its Assistant; after the name only what's unusual: its machine (in Pinned), its folder where another space on its
-  // machine has its name, its repo and branch, ↑ahead ↓behind (core/spaces.js gitTail, as the window's)
+  // machine has its name, its repo and branch (core/spaces.js gitTail, as the window's)
   const pilot = !!p.pilot?.on
   const waking = pilot && !!(p.pilot?.inflight || p.pilot?.pending)
   const label = [where, sharedNames(snap).has(p.id) && p.where ? (SPc.tilde as (x: string) => string)(p.where) : null].filter(Boolean).join(' · ') || null
-  const tail = p.git ? (SPc.gitTail as (g: object, o: object) => { where: string; ahead: number; behind: number })({ name: p.gitName, branch: p.branch, ahead: p.ahead, behind: p.behind }, { name: p.name, tree: !!treeMark.get(p.id), tag: label }) : { where: label ?? '', ahead: 0, behind: 0 }
+  const tail = p.git ? (SPc.gitTail as (g: object, o: object) => { where: string })({ name: p.gitName, branch: p.branch }, { name: p.name, tree: !!treeMark.get(p.id), tag: label }) : { where: label ?? '' }
   return {
     sel,
     // what the row says aloud, its count and offline too
@@ -345,12 +345,8 @@ function usePlaceRow({ p, snap, where }: { p: Place; snap: Snapshot; where?: str
     ),
     end: (
       <>
-        {tail.where || tail.ahead || tail.behind ? (
-          <span className="flex min-w-0 shrink items-center gap-1 text-[0.75rem] text-fg3 tabular-nums phone:text-[0.8125rem]">
-            {tail.where ? <span className="min-w-0 truncate">{tail.where}</span> : null}
-            {tail.ahead ? <span className="shrink-0 text-ready-fg">↑{tail.ahead}</span> : null}
-            {tail.behind ? <span className="shrink-0 text-need-fg">↓{tail.behind}</span> : null}
-          </span>
+        {tail.where ? (
+          <span className="min-w-0 shrink truncate text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{tail.where}</span>
         ) : null}
         {quiet ? <BellSlashIcon aria-hidden className={clsx(ic, 'text-fg3')} /> : null}
         <AttentionBadge need={c.ownNeed} ready={c.ownReady} scope="here" />
