@@ -64,7 +64,7 @@ function choose(coord, agentKey, id) {
   if (!m) return;
   const next = { ...sel, agent: agentKey, model: id };
   if (next.effort && !m.efforts.includes(next.effort)) next.effort = null;
-  if (!m.fast || data.menus[agentKey].fastLocked) next.fast = Boolean(data.menus[agentKey].fastLocked && m.fast);
+  if (!m.fast) next.fast = false;
   if (agentKey !== sel.agent) {
     const full = sel.perm === "bypassPermissions" || sel.perm === "full";
     next.perm = full ? (agentKey === "claude" ? "bypassPermissions" : "full") : data.permDefault[agentKey];
@@ -99,7 +99,7 @@ export function settingsRows(t, coord, opts = {}, cx = null) {
   const models = Object.entries(data.menus).flatMap(([a, mm]) => mm.models.map((x) => ({ id: `${a}:${x.id}`, label: x.name, icon: data.icons?.[a]?.icon, tint: data.icons?.[a]?.tint })));
   const levels = m?.efforts ?? [];
   const level = sel.effort ?? m?.defaultEffort ?? null;
-  const fastOk = Boolean(m?.fast) && !menu?.fastLocked;
+  const fastOk = Boolean(m?.fast);
   const perm = menu?.perms?.find((p) => p.id === sel.perm);
   return v_flex().w_full().text_size(12.8).text_color(t.foreground).when(off, (el) => el.opacity(0.45))
     .child(row("Agent", select("ns-model", [icon(sel.agent), div().min_w(0).truncate().child(m?.name ?? sel.model ?? "Choose")],

@@ -131,7 +131,7 @@ export function chooseModel(menus, permDefault, sel, agent, id) {
   if (agent !== sel.agent) {
     const full = sel.perm === "bypassPermissions" || sel.perm === "full";
     next.perm = full ? (agent === "claude" ? "bypassPermissions" : "full") : permDefault?.[agent] ?? null;
-    next.fast = Boolean(menus[agent]?.fastLocked);
+    next.fast = false;
   }
   return next;
 }

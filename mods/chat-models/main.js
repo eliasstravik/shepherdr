@@ -117,7 +117,7 @@ export default class ModelMenu extends View {
       // Another agent: its own permission modes; full access stays full access.
       const full = was.perm === "bypassPermissions" || was.perm === "full";
       next.perm = full ? (m.agent === "claude" ? "bypassPermissions" : "full") : this.p.permDefault?.[m.agent] ?? null;
-      next.fast = Boolean(this.p.menus?.[m.agent]?.fastLocked);
+      next.fast = false;
     }
     this.sel = next;
   }
@@ -231,7 +231,7 @@ export default class ModelMenu extends View {
     const remote = this.p.remote ?? null;
     const m = this.model();
     const menu = this.p.menus?.[this.sel.agent];
-    const fast = Boolean(m?.fast) && !menu?.fastLocked;
+    const fast = Boolean(m?.fast);
     const changes = remote || this.settingsMode ? [] : this.changes();
     const perm = menu?.perms?.find((x) => x.id === this.sel.perm);
     const agents = Object.keys(this.p.menus ?? {});

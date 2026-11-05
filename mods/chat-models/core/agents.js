@@ -93,7 +93,7 @@ export function parseDefaults(kind, stdout) {
   }
   return kind === "claude"
     ? { model: out.model || null, effort: out.effort || null, fast: Boolean(out.fast), per: parsePer(out.per), mode: out.mode || null }
-    : { model: out.model || null, effort: out.model_reasoning_effort || null, fast: ["fast", "priority"].includes(out.service_tier), fastInConfig: Boolean(out.service_tier),
+    : { model: out.model || null, effort: out.model_reasoning_effort || null, fast: ["fast", "priority"].includes(out.service_tier),
       sandbox: out.sandbox_mode || null, approval: out.approval_policy || null, models };
 }
 
@@ -145,7 +145,7 @@ export function contextWords(c) {
 }
 
 // What the model picker (mods/chat-models, the web's restart.tsx) shows for one agent, as plain data:
-// { name, models: [{ id, name, efforts, defaultEffort, fast }], perms, fastLocked }: every model the CLI
+// { name, models: [{ id, name, efforts, defaultEffort, fast }], perms }: every model the CLI
 // offers (Codex: its own models_cache.json; Claude Code: its /model menu), the picker searches them.
 // `dflt` is that agent's settings (defaults()); `current` its running model, kept in the list.
 export function menuFor(agent, dflt, current = null) {
@@ -154,12 +154,12 @@ export function menuFor(agent, dflt, current = null) {
       defaultEffort: dflt?.per?.[m.match[1].replace(/\[1m\]$/, "")] ?? dflt?.effort ?? null, fast: m.id.startsWith("opus") }));
     // a model typed by id (an older one it still takes) stays in the list while it runs
     if (current && !models.some((m) => m.id === current)) models.unshift({ id: current, name: modelName(current), efforts: CLAUDE_EFFORTS, defaultEffort: dflt?.effort ?? null, fast: false });
-    return { name: NAMES.claude, perms: PERMS.claude, fastLocked: false, models };
+    return { name: NAMES.claude, perms: PERMS.claude, models };
   }
   const all = (dflt?.models ?? []).map((m) => ({ id: m.id, name: m.label, efforts: m.efforts?.length ? m.efforts : ["low", "medium", "high", "xhigh"],
     defaultEffort: m.defaultEffort ?? dflt?.effort ?? null, fast: m.fast }));
   if (current && !all.some((m) => m.id === current)) all.unshift({ id: current, name: current, efforts: ["low", "medium", "high", "xhigh"], defaultEffort: dflt?.effort ?? null, fast: false });
-  return { name: NAMES.codex, perms: PERMS.codex, fastLocked: Boolean(dflt?.fastInConfig), models: all };
+  return { name: NAMES.codex, perms: PERMS.codex, models: all };
 }
 
 // The levels a model typed by id gets: its agent's usual ones.
@@ -338,7 +338,8 @@ export function argvFor(pick, old) {
   const a = [...flags, "--no-daemon"];
   if (pick.model) a.push("-m", pick.model);
   if (pick.effort) a.push("-c", `model_reasoning_effort="${pick.effort}"`);
-  if (pick.fast) a.push("-c", 'service_tier="fast"');
+  // always said, so Fast off wins over a service_tier in config.toml (default: the standard tier)
+  a.push("-c", `service_tier="${pick.fast ? "fast" : "default"}"`);
   if (pick.perm === "full") a.push("--dangerously-bypass-approvals-and-sandbox");
   else if (pick.perm === "read-only") a.push("-s", "read-only", "-a", "on-request");
   else if (pick.perm) a.push("-s", "workspace-write", "-a", "on-request");

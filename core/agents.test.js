@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { menuFor, modelSections, parsePicks, pickKey, withPin, withRecent } from "./agents.js";
+import { argvFor, current, line, menuFor, modelSections, parseDefaults, parsePicks, pickKey, withPin, withRecent } from "./agents.js";
 
 const codex = { models: Array.from({ length: 250 }, (_, i) => ({ id: `gpt-${i}`, label: `GPT ${i}`, efforts: ["low", "high"] })) };
 const menus = { claude: menuFor("claude", {}), codex: menuFor("codex", codex) };
@@ -47,4 +47,25 @@ test("a pinned or recent model typed by id stays on offer", () => {
   expect(modelSections(menus, "claude", picks, "")[0].rows[0]).toMatchObject({ id: "claude-opus-4-8", name: "Opus 4.8", pinned: true });
   expect(modelSections(menus, "codex", picks, "")[0]).toMatchObject({ title: "Recent", rows: [{ id: "gpt-x" }] });
   expect(modelSections(menus, "claude", picks, "gpt-x").map((x) => x.key)).toEqual(["codex", "typed"]);
+});
+
+// SHEP-41: Fast was hidden (and stuck on) for a Codex whose config.toml set service_tier.
+test("every agent with a fast mode shows the Fast switch, and turning it off sticks", () => {
+  const cache = JSON.stringify({ models: [{ slug: "gpt-x", display_name: "GPT-X", supported_reasoning_levels: [{ effort: "high" }], service_tiers: [{ id: "priority" }] },
+    { slug: "gpt-slow", display_name: "GPT-Slow", service_tiers: [] }] });
+  const dflt = parseDefaults("codex", `model\tgpt-x\nservice_tier\tfast\nmodels\t${cache}\n`);
+  const codexMenu = menuFor("codex", dflt);
+  expect(codexMenu.models.find((m) => m.id === "gpt-x").fast).toBe(true);
+  expect(codexMenu.models.find((m) => m.id === "gpt-slow").fast).toBe(false);
+  expect(codexMenu.fastLocked).toBeUndefined();
+  expect(menuFor("claude", {}).models.find((m) => m.id === "opus").fast).toBe(true);
+  // off: said on the command line, so config.toml's fast loses, and the label reads it back
+  const off = argvFor({ agent: "codex", model: "gpt-x", effort: "high", fast: false }, { agent: "codex", argv: ["codex", "-c", 'service_tier="fast"'] }).argv;
+  expect(off.filter((a) => a.startsWith("service_tier"))).toEqual(['service_tier="default"']);
+  expect(current("codex", off, {}, dflt).fast).toBe(false);
+  expect(line(current("codex", off, {}, dflt))).toBe("Codex · GPT-X · High");
+  const on = argvFor({ agent: "codex", model: "gpt-x", fast: true }, { agent: "codex", argv: off }).argv;
+  expect(current("codex", on, {}, dflt).fast).toBe(true);
+  const claudeOff = argvFor({ agent: "claude", model: "opus", fast: false }, { agent: "claude", argv: ["claude"] }).argv;
+  expect(current("claude", claudeOff, {}, { fast: true }).fast).toBe(false);
 });

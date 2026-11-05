@@ -1256,6 +1256,19 @@ class Scheduled(unittest.TestCase):
             self.add("Typo", at="fry 9:00")
 
 
+class FastOffIsSaid(unittest.TestCase):
+    """SHEP-41: a worker with Fast off runs standard even when config.toml sets service_tier."""
+
+    def test_codex_fast_on_and_off(self):
+        sys.path.insert(0, BIN)
+        from herdr_task.settings import argv_for
+        off = argv_for({"agent": "codex", "model": "gpt-x", "fast": False})
+        self.assertIn('service_tier="default"', off)
+        self.assertNotIn('service_tier="fast"', off)
+        self.assertIn('service_tier="fast"', argv_for({"agent": "codex", "fast": True}))
+        self.assertIn('{"fastMode": false}', argv_for({"agent": "claude", "fast": False}))
+
+
 if __name__ == "__main__":
     unittest.main()
 

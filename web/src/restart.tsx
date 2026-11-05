@@ -225,7 +225,7 @@ function SpeedWords({ speed }: { speed: Worn }) {
 /* ---------- the window's model button and menu (mods/chat pickParts, mods/chat-models) ---------- */
 
 export type MenuModel = { id: string; name: string; efforts: string[]; defaultEffort?: string | null; fast?: boolean }
-export type AgentMenu = { name: string; models: MenuModel[]; perms?: { id: string; label: string }[]; fastLocked?: boolean }
+export type AgentMenu = { name: string; models: MenuModel[]; perms?: { id: string; label: string }[] }
 type MenuPick = { agent: string; model: string | null; effort: string | null; fast: boolean; perm: string | null }
 type MenuData = { current: MenuPick; menus: Record<string, AgentMenu>; permDefault: Record<string, string>; picks?: Picks; remote: string | null }
 /** a stretch of the model list (core/agents.js modelSections): Pinned, Recent, All models, or an agent's matches */
@@ -370,7 +370,7 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
       // another agent: its own permission modes; full access stays full access
       const full = was.perm === 'bypassPermissions' || was.perm === 'full'
       next.perm = full ? (m.agent === 'claude' ? 'bypassPermissions' : 'full') : d.permDefault[m.agent] ?? null
-      next.fast = !!d.menus[m.agent]?.fastLocked
+      next.fast = false
     }
     return next
   }
@@ -460,12 +460,13 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
                   </div>
                 </>
               ) : null}
-              {m?.fast && !menu?.fastLocked ? (
+              {m?.fast ? (
                 <button type="button" role="menuitemcheckbox" aria-checked={sel.fast} disabled={!!remote} className={row} onClick={() => setSel({ ...sel, fast: !sel.fast })}>
                   <SpeedIcon className="size-3.5 shrink-0 text-fg3" />
                   <span className="flex-1">Fast</span>
-                  <span aria-hidden className={clsx('relative h-4 w-7 shrink-0 rounded-full transition-colors', sel.fast ? 'bg-accent' : 'bg-line2')}>
-                    <span className={clsx('absolute top-0.5 size-3 rounded-full bg-bg transition-[left]', sel.fast ? 'left-3.5' : 'left-0.5')} />
+                  {/* a switch as wide as two thumbs, a touch bigger for a finger */}
+                  <span aria-hidden className={clsx('inline-flex h-4 w-7 shrink-0 rounded-full p-0.5 transition-colors coarse:h-5 coarse:w-9 phone:h-5 phone:w-9', sel.fast ? 'bg-accent' : 'bg-line2')}>
+                    <span className={clsx('aspect-square h-full rounded-full bg-bg shadow-soft transition-transform', sel.fast && 'translate-x-full')} />
                   </span>
                 </button>
               ) : null}

@@ -88,7 +88,7 @@ function ModelMenu({ start, up, onClose, save }: { start: AgentPick; up: boolean
   const menu = data?.menus[sel.agent]
   const model = menu?.models.find((m) => m.id === sel.model)
   const level = sel.effort ?? model?.defaultEffort ?? null
-  const fast = !!model?.fast && !menu?.fastLocked
+  const fast = !!model?.fast
   const perm = menu?.perms.find((p) => p.id === sel.perm)
   return (
     <Menu label={modelLabel(data?.menus, sel)} tabs onClose={onClose}
