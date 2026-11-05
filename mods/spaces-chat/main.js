@@ -162,13 +162,15 @@ export default class Spaces extends View {
     });
   }
 
-  // A space's Autopilot mark after its name (SHEP-5): a small accent dot in its round tint while on, breathing while a
-  // wake runs or waits. This computer's spaces only (another machine's file is read where its header shows).
+  // A space's Autopilot mark after its name (SHEP-5): a small rocket, as its chat's wake lines have, dim while on, in
+  // the working colour and breathing while a wake runs or waits. This computer's spaces only (another machine's file
+  // is read where its header shows).
   pilotMark(w, t) {
     const p = w.machine ? null : this.pilots?.get(w.id);
     if (!p) return null;
-    return div().id(`pilot-${w.id}`).size(14).flex_none().flex().items_center().justify_center().rounded(7).bg(t.accent + "29")
-      .child(div().size(6).rounded(3).bg(t.accent).when(p === "waking", (el) => el.loop("opacity", { from: 0.3, to: 1, period: 1200 })));
+    return div().id(`pilot-${w.id}`).flex_none().text_color(p === "waking" ? t.working : t.dim)
+      .when(p === "waking", (el) => el.loop("opacity", { from: 0.35, to: 1, period: 1200 }))
+      .child(svg("mods/spaces-chat/rocket.svg").size(12).flex_none());
   }
 
   checkNew(cx) {

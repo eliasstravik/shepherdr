@@ -815,19 +815,18 @@
     width: 6px;
     height: 6px;
   }
-  /* SHEP-5: a sidebar row's Autopilot mark in the accent (red there read as "needs you"); while a wake runs or waits
-     its dot breathes */
-  .mode-pill.mark[data-autopilot] {
-    --m: var(--accent);
+  /* SHEP-5: a sidebar row's Autopilot mark (a small rocket before the #): it breathes while a wake runs or waits */
+  .pilot-mark {
+    margin-right: -4px;
   }
-  .mode-pill.mark[data-waking]::before {
+  .pilot-mark[data-waking] {
     animation: pilot-wake 1.2s ease-in-out infinite;
   }
   @keyframes pilot-wake {
-    50% { transform: scale(1.6); opacity: 0.45; }
+    50% { opacity: 0.35; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .mode-pill.mark[data-waking]::before { animation: none; width: 8px; height: 8px; }
+    .pilot-mark[data-waking] { animation: none; }
   }
   [data-device="phone"] .mode-pill.mark {
     width: 16px;
