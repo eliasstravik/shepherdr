@@ -1766,21 +1766,22 @@ class LostLogs(unittest.TestCase):
         self.assertFalse(self.tick.lost_log(t, t["agents"][0]))
 
 
-class Reactions(unittest.TestCase):
-    """SHEP-42: Settings › Agents › Reactions (on by default) for a space's Assistant: what its session
-    is told at the start, and the one message a running one gets when it changes. A throwaway settings
-    file and state; hc is faked (its terminals are dicts), nothing is sent."""
+class AssistantSettings(unittest.TestCase):
+    """SHEP-42/SHEP-49: a space's Assistant is told its settings (Reactions among them): the block its
+    session gets at the start, and the one message a running one gets when some change. A throwaway
+    settings file and state; hc is faked (its terminals are dicts), nothing is sent."""
 
     def setUp(self):
         from unittest import mock
         sys.path.insert(0, BIN)
         import herdr_task.settings as settings
-        import herdr_task.reactions as reactions
+        import herdr_task.assistant_settings as aset
         import herdr_task.news as news
-        self.settings, self.reactions, self.news = settings, reactions, news
+        self.settings, self.aset, self.news = settings, aset, news
         self.dir = tempfile.mkdtemp()
         self.file = os.path.join(self.dir, "shepherdr.json")
         self.terminals, self.labelled, self.sent = {}, [], []
+        self.auto = {}  # space -> (on, schedule, direction)
 
         def hc_json(*args):
             return self.terminals.get(args[1]) if args[0] == "get" else None
@@ -1793,10 +1794,11 @@ class Reactions(unittest.TestCase):
             return subprocess.CompletedProcess(args, 0, "", "")
 
         for target, name, value in [
-            (settings, "SETTINGS", self.file), (reactions, "SETTINGS", self.file),
-            (reactions, "STATE", os.path.join(self.dir, ".reactions.json")), (reactions, "hc_json", hc_json),
-            (reactions, "run", run), (reactions, "addon_off", lambda name: False),
-            (reactions, "coordinators", lambda: list(self.terminals)),
+            (settings, "SETTINGS", self.file), (aset, "SETTINGS", self.file),
+            (aset, "STATE", os.path.join(self.dir, ".assistant-settings.json")), (aset, "hc_json", hc_json),
+            (aset, "run", run), (aset, "addon_off", lambda name: False),
+            (aset, "coordinators", lambda: list(self.terminals)),
+            (aset, "autopilot_of", lambda space, cfg: self.auto.get(space, (False, "every 60 minutes", ""))),
             (news, "news_send", lambda addr, text: self.sent.append((addr, text)) or True),
         ]:
             p = mock.patch.object(target, name, value)
@@ -1813,7 +1815,10 @@ class Reactions(unittest.TestCase):
     def assistant(self, addr="t5", space="sp1", turn=3, **labels):
         self.terminals[addr] = {"state": "live", "turn": turn, "labels": {"herdr.role": "coordinator", "herdr.space": space, **labels}}
 
-    def test_on_by_default_everywhere_and_a_space_sets_its_own(self):
+    def line(self, note, label):
+        return next(x for x in note.split("\n") if x.startswith(f"- {label}: "))
+
+    def test_reactions_on_by_default_everywhere_and_a_space_sets_its_own(self):
         self.assertTrue(self.settings.DEFAULTS["assistant"]["reactions"])
         self.assertTrue(self.settings.reactions_on("sp1"))
         self.write({"everywhere": {"assistant": {"reactions": False}}, "spaces": {"sp2": {"assistant": {"reactions": True}}}})
@@ -1821,21 +1826,56 @@ class Reactions(unittest.TestCase):
         self.assertTrue(self.settings.reactions_on("vm/sp2"))
         self.assertFalse(self.settings.reactions_on(None))
 
-    def test_an_assistant_session_is_told_when_and_how_only_with_reactions_on(self):
+    def test_the_block_by_default(self):
         self.assistant()
-        note = self.reactions.session_note("t5")
-        for words in ("👀", "👍", "✅", "😂", "🙏", "<hc react=", "never more than one", "never instead of an answer", "<hc no-reply/>"):
-            self.assertIn(words, note)
-        self.assertEqual(self.terminals["t5"]["labels"]["herdr.reactions"], "on")
-        self.write({"spaces": {"sp1": {"assistant": {"reactions": False}}}})
-        note = self.reactions.session_note("t5")
+        note = self.aset.session_note("t5")
+        self.assertTrue(note.startswith("Your settings: "))
+        for label, words in [("Review", "off"), ("Merge", "ask the person first"), ("Proof", "on"), ("Task agent", "claude"),
+                             ("Base branch", "the folder's checked-out branch"), ("Worktrees", "on"), ("Tasks at once", "10 per folder"),
+                             ("Task notes", "none"), ("Autopilot", "off"), ("Reactions", "on")]:
+            self.assertTrue(self.line(note, label).startswith(f"- {label}: {words}"), self.line(note, label))
+        # nothing differs from Herdr's default: no line says who set it
+        self.assertNotIn("; set for", note)
+        self.assertNotIn("; your setting", note)
+        self.assertEqual(len(note.split("\n")), 12)  # head, 10 lines, the Reactions guide
+
+    def test_the_block_for_a_space_with_its_own(self):
+        self.write({"everywhere": {"tasks": {"review_rounds": 2, "merge": "checks"}, "assistant": {"reactions": True}},
+                    "spaces": {"sp1": {"tasks": {"base": "dev", "start_notes": "bun install", "max_running": 3, "worktrees": False},
+                                       "worker": {"agent": "codex", "model": "gpt-5", "effort": "high"},
+                                       "reviewer": {"agent": "claude", "model": "opus"},
+                                       "assistant": {"reactions": False}},
+                               "sp2": {"tasks": {"merge": "auto"}}}})
+        self.auto["sp1"] = (True, "every 30 minutes", "Ship the beta")
+        self.assistant()
+        note = self.aset.session_note("t5")
+        self.assertEqual(self.line(note, "Review"), "- Review: on, at most 2 rounds, must fix major and up (blocker, major), reviewer claude, model opus; set for this space")
+        self.assertEqual(self.line(note, "Merge"), "- Merge: after checks (Herdr merges a ready task once its checks pass); your setting everywhere")
+        self.assertEqual(self.line(note, "Proof"), "- Proof: on")
+        self.assertEqual(self.line(note, "Task agent"), "- Task agent: codex, model gpt-5, effort high; set for this space")
+        self.assertIn("- Base branch: dev ", note)
+        self.assertIn("- Worktrees: off (tasks work in the folder itself); set for this space", note)
+        self.assertIn("- Tasks at once: 3 per folder", note)
+        self.assertIn("- Task notes: start notes set", note)
+        self.assertEqual(self.line(note, "Autopilot"), "- Autopilot: on, every 30 minutes, direction: Ship the beta; set for this space")
+        self.assertIn("- Reactions: off", note)
+        self.assertIn("never react", note.split("\n")[-1])
         self.assertNotIn("👀", note)
-        self.assertIn("never react", note)
-        self.assertEqual(self.terminals["t5"]["labels"]["herdr.reactions"], "off")
-        # a worker: nothing, and no label
+        labels = self.terminals["t5"]["labels"]
+        self.assertEqual(labels["herdr.reactions"], "off")
+        self.assertEqual(sorted(self.aset.parse(labels["herdr.settings"])),
+                         sorted(["review", "merge", "proof", "agent", "base", "worktrees", "max_running", "notes", "autopilot", "reactions"]))
+        # another space inherits Everywhere's, with its own merge
+        self.assistant("t6", "sp2")
+        other = self.aset.session_note("t6")
+        self.assertIn("- Merge: on its own (Herdr merges a ready task); set for this space", other)
+        self.assertIn("- Reactions: on", other)
+        self.assertIn("👀", other)
+
+    def test_only_assistants_are_told(self):
         self.terminals["t9"] = {"state": "live", "labels": {"herdr.task": "SHEP-1"}}
-        self.assertEqual(self.reactions.session_note("t9"), "")
-        self.assertNotIn("herdr.reactions", self.terminals["t9"]["labels"])
+        self.assertEqual(self.aset.session_note("t9"), "")
+        self.assertEqual(self.terminals["t9"]["labels"], {"herdr.task": "SHEP-1"})
 
     def test_the_hook_text_is_json_ready(self):
         import contextlib
@@ -1843,46 +1883,87 @@ class Reactions(unittest.TestCase):
         self.assistant()
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            self.reactions.cmd_session_note(type("A", (), {"terminal": "t5"})())
+            self.aset.cmd_session_note(type("A", (), {"terminal": "t5"})())
         ctx = json.loads('{"c":"base.' + out.getvalue() + '"}')["c"]
-        self.assertTrue(ctx.startswith("base. Reactions (on in Settings)"))
+        self.assertTrue(ctx.startswith("base. Your settings: "))
+        self.assertIn("\n- Review: off\n", ctx)
         self.assertIn('<hc react="👀"', ctx)
 
-    def test_a_running_assistant_is_told_once_when_it_changes(self):
-        self.assistant(**{"herdr.reactions": "on"})
-        self.write({})
+    def test_a_running_assistant_is_told_once_what_changed_in_one_message(self):
+        self.assistant()
+        self.aset.session_note("t5")
         quiet = {}
-        self.reactions.reactions_pass({}, quiet)
-        self.assertEqual(self.sent, [])  # taught on already
-        self.write({"everywhere": {"assistant": {"reactions": False}}})
+        self.aset.settings_pass({}, quiet)
+        self.assertEqual(self.sent, [])  # told at its start already
+        self.write({"everywhere": {"tasks": {"review_rounds": 3}}, "spaces": {"sp1": {"assistant": {"reactions": False}}}})
         report = {}
-        self.reactions.reactions_pass(report, quiet)
+        self.aset.settings_pass(report, quiet)
         self.assertEqual(len(self.sent), 1)
-        self.assertIn("now off", self.sent[0][1])
-        self.assertRegex(self.sent[0][1], r'^<herdr-setting name="reactions" value="off">[\s\S]*<hc no-reply/>\.</herdr-setting>$')
-        self.assertEqual(report["reactions"], [{"to": "t5", "now": "off"}])
-        # once: the next pass (the file changed again, the value didn't) says nothing
-        self.write({"everywhere": {"assistant": {"reactions": False}, "tasks": {"merge": "auto"}}})
-        self.reactions.reactions_pass({}, quiet)
-        self.assertEqual(len(self.sent), 1)
-        # back on: told again, with the how
-        self.write({})
-        self.reactions.reactions_pass({}, quiet)
-        self.assertEqual(len(self.sent), 2)
-        self.assertIn("now on", self.sent[1][1])
-        self.assertIn("👀", self.sent[1][1])
+        lines = self.sent[0][1].split("\n")
+        self.assertEqual(len(lines), 2)
+        self.assertRegex(lines[0], r'^<herdr-setting name="review" value="on" scope="everywhere">Review is now on, at most 3 rounds[^<]*'
+                                   r'; your setting everywhere\. Tasks you add from now on get it; running ones keep their brief\.</herdr-setting>$')
+        self.assertRegex(lines[1], r'^<herdr-setting name="reactions" value="off" scope="space">Reactions are now off[\s\S]*<hc no-reply/>\.</herdr-setting>$')
+        self.assertEqual(report["settings"], [{"to": "t5", "changed": ["review", "reactions"]}])
+        self.assertEqual(self.terminals["t5"]["labels"]["herdr.reactions"], "off")
 
-    def test_one_started_before_is_taught_when_on_and_only_labelled_when_off(self):
-        self.assistant("t5", "sp1")
+    def test_a_save_that_changes_nothing_for_it_says_nothing(self):
+        self.write({"everywhere": {"tasks": {"merge": "checks"}}})
+        self.assistant()
+        self.aset.session_note("t5")
+        # the same values saved again
+        self.write({"everywhere": {"tasks": {"merge": "checks"}}})
+        self.aset.settings_pass({}, {})
+        # another space's change, and Everywhere's where this space sets its own
+        self.write({"everywhere": {"tasks": {"merge": "checks"}}, "spaces": {"sp2": {"tasks": {"merge": "auto"}}}})
+        self.aset.settings_pass({}, {})
+        self.write({"everywhere": {"tasks": {"merge": "checks"}, "worker": {"agent": "codex"}},
+                    "spaces": {"sp1": {"worker": {"agent": "claude", "model": "opus"}}}})
+        self.aset.settings_pass({}, {})
+        self.assertEqual(len(self.sent), 1)  # only the last: sp1's own agent
+        self.assertIn('name="agent" value="claude/opus" scope="space"', self.sent[0][1])
+        self.write({"everywhere": {"tasks": {"merge": "checks"}, "worker": {"agent": "codex"}},
+                    "spaces": {"sp1": {"worker": {"agent": "claude", "model": "opus"}}}})
+        self.aset.settings_pass({}, {})
+        self.assertEqual(len(self.sent), 1)
+
+    def test_back_to_the_default_says_so(self):
+        self.write({"everywhere": {"tasks": {"proof": False}}})
+        self.assistant()
+        self.aset.session_note("t5")
+        self.write({})
+        self.aset.settings_pass({}, {})
+        self.assertIn('<herdr-setting name="proof" value="on" scope="everywhere">Proof is now on; Herdr\'s default.', self.sent[0][1])
+
+    def test_one_started_before_gets_the_whole_block_once_it_has_had_a_turn(self):
+        self.assistant("t5", "sp1", **{"herdr.reactions": "on"})
         self.assistant("t6", "sp2")
-        self.assistant("t7", "sp1", turn=0)  # just started: its hook teaches it
-        self.write({"spaces": {"sp2": {"assistant": {"reactions": False}}}})
-        self.reactions.reactions_pass({}, {})
-        self.assertEqual([a for a, _ in self.sent], ["t5"])
-        self.assertEqual(self.terminals["t6"]["labels"]["herdr.reactions"], "off")
-        self.assertNotIn("herdr.reactions", self.terminals["t7"]["labels"])
+        self.assistant("t7", "sp1", turn=0)  # just started: its hook tells it
+        self.write({"spaces": {"sp2": {"assistant": {"reactions": True}}}})
+        self.aset.settings_pass({}, {})
+        self.assertEqual([a for a, _ in self.sent], ["t5", "t6"])
+        self.assertTrue(self.sent[0][1].startswith('<herdr-setting name="all">Your settings: '))
+        self.assertNotIn("👀", self.sent[0][1])  # taught reactions already
+        self.assertIn("👀", self.sent[1][1])
+        self.assertNotIn("herdr.settings", self.terminals["t7"]["labels"])
+        self.write({"spaces": {"sp2": {"assistant": {"reactions": True}}}})
+        self.aset.settings_pass({}, {})
+        self.assertEqual(len(self.sent), 2)
+
+    def test_busy_with_the_person_tries_again_next_time(self):
+        from unittest import mock
+        self.assistant()
+        self.aset.session_note("t5")
+        self.write({"everywhere": {"tasks": {"merge": "auto"}}})
+        with mock.patch.object(self.news, "news_send", lambda addr, text: False):
+            self.aset.settings_pass({}, {})
+        self.write({"everywhere": {"tasks": {"merge": "auto"}}})
+        self.aset.settings_pass({}, {})
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn('name="merge" value="auto"', self.sent[0][1])
 
     def test_chat_tags_hide_the_message(self):
-        """The message is one <herdr-…> tag: the chat shows nothing of it (core/chat-log.js strips Herdr's tags)."""
-        self.assertTrue(self.reactions.told(False).startswith("<herdr-setting "))
-        self.assertTrue(self.reactions.told(True).endswith("</herdr-setting>"))
+        """Every line is one <herdr-…> tag: the chat shows nothing of it (core/chat-log.js strips Herdr's tags)."""
+        rs = self.aset.rows("sp1", {}, (False, "", ""))
+        for line in self.aset.notice(rs).split("\n"):
+            self.assertRegex(line, r'^<herdr-setting name="\w+" value="[^"]*" scope="\w+">[^\n]*</herdr-setting>$')

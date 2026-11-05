@@ -82,11 +82,30 @@ emoji, as a person would (👀 on a new ask it picks up, 👍 on a go-ahead, ✅
 🙏 for thanks). Most messages get none, never more than one, and never instead of an answer you need. Off, it never
 reacts. Workers are never told to react.
 
-- **How it's told.** The chat's SessionStart hook (`mods/chat/session-note.sh`) asks `herdr-task _session-note` for an
-  Assistant's extra words: the when-and-how paragraph (`herdr_task/reactions.py` GUIDE) when on, "never react" when off.
-  It runs at every start, resume and compaction, and labels the terminal `herdr.reactions=on|off`.
-- **Changed mid-session.** herdr-task's news pass (`reactions_pass`, on a settings change and every minute) tells each
-  live Assistant whose label differs once, as a hidden `<herdr-setting name="reactions">` message it answers with
-  `<hc no-reply/>`; a read chat stays read. One with no label yet (started before) is taught once it has had a turn.
+- **How it's told.** With its settings block (below): the when-and-how paragraph (`herdr_task/reactions.py` GUIDE) when
+  on, "never react" when off; the terminal is labelled `herdr.reactions=on|off`.
+- **Changed mid-session.** A `<herdr-setting name="reactions">` line, as for every setting below.
 - **A reaction only.** A reply of a `<hc react … />` line and `<hc no-reply/>` shows just the reaction on your
   message, in the window and on the web (`core/chat-log.js`).
+
+## What the Assistant is told
+
+A space's Assistant knows the settings that shape how it makes and runs tasks, resolved for its space (Everywhere's,
+then the space's own), without guessing (`herdr_task/assistant_settings.py`):
+
+- **At every start, resume, compaction and handoff** the chat's SessionStart hook (`mods/chat/session-note.sh`) asks
+  `herdr-task _session-note` for a "Your settings" block, like the Settings block a worker's brief ends with: Review
+  (rounds, must fix, reviewer), Merge, Proof, Task agent, Base branch, Worktrees, Tasks at once, Task notes (start and
+  finish notes set or not), Autopilot (on or off, schedule, direction) and Reactions, one line each. A line that differs
+  from Herdr's default says who set it (*set for this space*, *your setting everywhere*). The terminal is labelled
+  `herdr.settings` with a short hash of each line.
+- **Changed while it runs** (in the window or on the web, Everywhere or the space): herdr-task's news pass (on a
+  settings change, and every minute for Autopilot's switch) sends each live Assistant whose lines differ one message,
+  a line per changed setting: `<herdr-setting name="review" value="on" scope="everywhere|space">Review is now on, …
+  Tasks you add from now on get it; running ones keep their brief.</herdr-setting>`, the last ending "reply only
+  `<hc no-reply/>`". A save that changes nothing for its space says nothing. One started before this (no label) gets the
+  whole block once it has had a turn. Busy with the person: next pass.
+- **The chat hides them**, as every Herdr tag (`core/chat-log.js`), and the `<hc no-reply/>` after: a settings change
+  already shows where it was made, so a news row would only repeat it.
+- **Workers are not told**: their brief's Settings block is fixed when they start (Reactions are the Assistant's only).
+

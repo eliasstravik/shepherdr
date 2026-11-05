@@ -22,7 +22,7 @@ from .automations import auto_list, cmd_auto, cmd_scheduler, cmd_track, EVENTS, 
 from .machines import cmd_assistants, cmd_machines, cmd_sync_auto, cmd_tell
 from .autopilot import cmd_autopilot, cmd_complete, cmd_progress
 from .home import cmd_home
-from .reactions import cmd_session_note
+from .assistant_settings import cmd_session_note
 
 
 # ---- another machine ------------------------------------------------------------------------
