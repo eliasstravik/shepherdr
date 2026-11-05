@@ -55,6 +55,11 @@ test("a level holds only what it sets", () => {
   expect(OLD_STARTERS.map(currentBeat)).toEqual(OLD_STARTERS.map(() => STARTER));
   expect(STARTER).toContain("Push the project forward");
   expect(STARTER).not.toContain("Don't invent work");
+  // 3.1.5's asked; today's decides, and only a take-over alerts the person
+  expect(OLD_STARTERS[0]).toContain("ask me once");
+  expect(STARTER).not.toMatch(/ask me once|Ask before/);
+  expect(STARTER).toContain("Never ask me a question on a wake");
+  expect(STARTER).toContain("herdr-task alert");
 });
 
 test("the starter heartbeat, events and default schedule are herdr-task's", () => {
