@@ -1,6 +1,6 @@
 // Machine health, as 3.0's sidebar has it (mods/spaces-chat main.js meter, machine-popup.js): on each connected machine's
 // header, its CPU, memory and disk as thin bars (grey while all is well, amber while new tasks wait there, red past its
-// alert limit), its tooltip the numbers and each plan's least left; a red dot when its health couldn't be read. A tap on
+// alert limit), its label the numbers and each plan's least left; a red dot when its health couldn't be read. A tap on
 // the bars opens the machine's details: how fresh they are, each meter with its numbers, each agent CLI's plan, and
 // Machine settings. The reads and every word are the shared core's (core/machines.js), as the window's.
 import clsx from 'clsx'
@@ -54,7 +54,7 @@ function Bars({ meters }: { meters: Meter[] }) {
   )
 }
 
-/** a connected machine header's meter (3.0's): its bars, its tooltip the numbers and the plans' least left; a tap opens
+/** a connected machine header's meter (3.0's): its bars, its label the numbers and the plans' least left; a tap opens
  *  its details under it. None until its health has been read. */
 export function MachineMeter({ m }: { m: Machine }) {
   const s = m.stats
@@ -64,7 +64,7 @@ export function MachineMeter({ m }: { m: Machine }) {
   const words = core.meterWords(s)
   return (
     <span className="relative z-1 flex">
-      <button type="button" aria-label={`${m.name}: ${words}`} title={words} aria-haspopup="dialog" aria-expanded={open}
+      <button type="button" aria-label={`${m.name}: ${words}`} aria-haspopup="dialog" aria-expanded={open}
         onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
         className="hit grid h-6 place-items-center rounded-full px-1 hover:bg-sel aria-expanded:bg-sel phone:h-8">
         <Bars meters={meters} />
@@ -74,12 +74,12 @@ export function MachineMeter({ m }: { m: Machine }) {
   )
 }
 
-/** a connected machine header's red dot: its health couldn't be read (the window's words in its tooltip) */
+/** a connected machine header's red dot: its health couldn't be read (the window's words in its label) */
 export function HealthDot({ m }: { m: Machine }) {
   const error = m.stats?.error
   if (!error) return null
   const said = core.healthErrorWords(error)
-  return <span role="img" aria-label={said} title={said} className="relative z-1 size-1.5 shrink-0 rounded-full bg-need" />
+  return <span role="img" aria-label={said} className="relative z-1 size-1.5 shrink-0 rounded-full bg-need" />
 }
 
 function useNow() {

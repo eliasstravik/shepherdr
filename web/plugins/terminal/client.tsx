@@ -364,7 +364,7 @@ function ChatOrTerminal({ place }: { place: Place }) {
   return (
     <Tabs label="Chat or terminal" className="shrink-0">
       <Tab on={!term} onClick={() => go(false)}>Chat</Tab>
-      <Tab on={term} title={shortcut(CTRL, '`')} onClick={() => go(true)}>Terminal</Tab>
+      <Tab on={term} onClick={() => go(true)}>Terminal</Tab>
     </Tabs>
   )
 }

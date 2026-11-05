@@ -83,9 +83,9 @@ export function toggleSwitch(id, on, onToggle, { disabled = false } = {}) {
 }
 
 // Segmented control ----------------------------------------------------------
-// options: [[value, label, { disabled, tip }?], ...]. Every segment is as wide as its words and
+// options: [[value, label, { disabled }?], ...]. Every segment is as wide as its words and
 // never cut; `fill` stretches the segments over the row (still never narrower than their words).
-// A disabled segment is dim and takes no click; `tip` is its tooltip.
+// A disabled segment is dim and takes no click.
 // opts: { size: "sm" 24 | "lg" 32, disabled, fill }.
 export function segmented(id, options, value, onPick, { size = "sm", disabled = false, fill = false } = {}) {
   const t = theme();
@@ -98,7 +98,6 @@ export function segmented(id, options, value, onPick, { size = "sm", disabled = 
         .whitespace_nowrap().text_size(TEXT.label)
         .when(fill, (el) => el.flex_1())
         .when(!fill, (el) => el.flex_none())
-        .when(Boolean(o?.tip), (el) => el.tooltip(o.tip))
         .when(on, (el) => el.bg(t.background).text_color(t.foreground).font_medium())
         .when(!on && Boolean(o?.disabled), (el) => el.text_color(t.dim).opacity(0.6))
         .when(!on && !o?.disabled, (el) => el.text_color(t.muted))

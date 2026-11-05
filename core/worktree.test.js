@@ -9,7 +9,9 @@ const window = ["task-files", "task-changes", "task-pr"].map(mod).join("\n");
 
 describe("the task views' words are the window's", () => {
   test("every word of Files, Changes and Pull request is in the window's mods", () => {
-    for (const [k, w] of Object.entries({ ...VIEW_WORDS, ...CHANGE_WORDS, ...CHECK_WORDS, ...PR_STATES })) expect([k, window.includes(w)]).toEqual([k, true]);
+    // All files: the web's back button's label; the window's back chevron says nothing (no tooltips, SHEP-25)
+    const said = Object.entries({ ...VIEW_WORDS, ...CHANGE_WORDS, ...CHECK_WORDS, ...PR_STATES }).filter(([k]) => k !== "allFiles");
+    for (const [k, w] of said) expect([k, window.includes(w)]).toEqual([k, true]);
   });
   test("the templated lines read as the window's", () => {
     expect(noChanges("main")).toBe("No changes against main");

@@ -264,7 +264,7 @@ export function DiffView({ task }: { task: Task }) {
           const [word, tone] = KIND[x.status]
           return (
             <button key={x.path} type="button" role="listitem" aria-current={x.path === open || undefined} onClick={() => pick(x.path === open ? '-' : x.path)} className={clsx(row, 'pl-2 aria-current:bg-sel')}>
-              <span title={word} className="grid w-3.5 shrink-0 place-items-center">
+              <span className="grid w-3.5 shrink-0 place-items-center">
                 <span className={clsx('size-2 rounded-full', tone)} />
                 <span className="sr-only">{word}</span>
               </span>
@@ -456,15 +456,14 @@ function PrView({ task }: { task: Task }) {
                       {c.url ? <OpenIcon className={clsx('size-3 shrink-0 text-fg3')} /> : null}
                     </>
                   )
-                  const tip = c.workflow ? `${word} · ${c.workflow}` : word
                   return (
                     <li key={`${c.name}${i}`}>
                       {c.url ? (
-                        <a href={c.url} target="_blank" rel="noreferrer" title={tip} className="press flex min-h-[30px] items-center gap-2 rounded-row px-2 text-[0.8125rem] hover:bg-hover coarse:min-h-11 phone:min-h-11 phone:text-[0.9375rem]">
+                        <a href={c.url} target="_blank" rel="noreferrer" className="press flex min-h-[30px] items-center gap-2 rounded-row px-2 text-[0.8125rem] hover:bg-hover coarse:min-h-11 phone:min-h-11 phone:text-[0.9375rem]">
                           {body}
                         </a>
                       ) : (
-                        <div title={tip} className="flex min-h-[30px] items-center gap-2 px-2 text-[0.8125rem] coarse:min-h-11 phone:min-h-11 phone:text-[0.9375rem]">{body}</div>
+                        <div className="flex min-h-[30px] items-center gap-2 px-2 text-[0.8125rem] coarse:min-h-11 phone:min-h-11 phone:text-[0.9375rem]">{body}</div>
                       )}
                     </li>
                   )

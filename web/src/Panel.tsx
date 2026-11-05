@@ -159,9 +159,9 @@ export function TaskTabs({ task }: { task: Task }) {
   if (!items.length) return null
   // as 3.0's: a tab switches the view in place, under the same header (never another panel)
   const on = ui.sheet && items.some((i) => i.id === ui.sheet) && !(ui.sheet === 'terminal' && !termRunning(task)) ? ui.sheet : 'chat'
-  // dead: it can't open now (the window's disabled segment, its reason on hover): only Terminal, once its agent ended
+  // dead: it can't open now (the window's disabled segment, its reason in its label): only Terminal, once its agent ended
   const tab = (id: string, label: string, dead: string | null, go: () => void) => (
-    <button key={id} type="button" role="tab" aria-selected={on === id} aria-disabled={dead ? true : undefined} data-off={dead ? '' : undefined} title={dead ?? undefined} onClick={dead ? undefined : go}
+    <button key={id} type="button" role="tab" aria-selected={on === id} aria-disabled={dead ? true : undefined} data-off={dead ? '' : undefined} aria-label={dead ? `${label}: ${dead}` : undefined} onClick={dead ? undefined : go}
       className="relative inline-flex h-7 shrink-0 items-center rounded-full px-2.5 text-[0.8125rem] whitespace-nowrap text-fg2 after:absolute after:-inset-y-1.5 after:inset-x-0 hover:bg-hover aria-selected:bg-sel aria-selected:text-fg data-off:cursor-default data-off:text-fg3 data-off:hover:bg-transparent coarse:h-9 phone:h-9 phone:px-3 phone:text-[0.875rem]">
       {label}
     </button>

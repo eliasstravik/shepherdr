@@ -68,7 +68,7 @@ export function planRows(s, now = Date.now()) {
   return rows;
 }
 export const planLevel = (s) => worst(planRows(s).filter((r) => typeof r.pct === "number").map((r) => r.level));
-// The meter's tooltip: its health, then each plan's least left.
+// The meter's words (the web's label for it): its health, then each plan's least left.
 export const meterWords = (s) => [healthWords(s), ...planRows(s).filter((r) => typeof r.pct === "number").map((r) => `${r.name} ${r.pct}% left`)].join(" · ");
 
 // 2m, 3h 10m, 5d 4h

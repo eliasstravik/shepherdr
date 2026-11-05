@@ -43,7 +43,7 @@ export default class CallBar extends View {
   // Hang up: the chat's red round X (mods/chat round("call-x", ..., "danger")), 24 here.
   hangUp(id, fn) {
     return div().id(id).size(24).flex_none().flex().items_center().justify_center().rounded(12).cursor_pointer()
-      .bg(red()).text_color("#ffffff").hover((s) => s.opacity(0.85)).tooltip("End call")
+      .bg(red()).text_color("#ffffff").hover((s) => s.opacity(0.85))
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click((_e, cx) => { cx.stop_propagation(); fn(); cx.notify(); })
       .child(svg("mods/chat/x.svg").size(14));

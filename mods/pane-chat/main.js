@@ -269,7 +269,7 @@ export default class Pane extends View {
         .child(this.button(t, `ph-d-${pane}`, "split-down", "pane.split", { direction: "down", pane }))
         .child(this.button(t, `ph-z-${pane}`, self.zoomed ? "unzoom" : "zoom", "pane.zoom", { pane }))
         .when(!entry, el => el.child(this.button(t, `ph-x-${pane}`, "close", "pane.close", { pane })))
-        .when(Boolean(entry), el => el.child(this.button(t, `ph-x-${pane}`, "close", null, null, () => { this.ending = true; }).tooltip(endAgent(prog).tip))))
+        .when(Boolean(entry), el => el.child(this.button(t, `ph-x-${pane}`, "close", null, null, () => { this.ending = true; }))))
       .when(canSwitch, (el) => el.child(this.switcher(t, `ph-mode-${pane}`, chatMode,
         (cx) => this.toChat(self, cx),
         // No agent yet: the chat starts it (no first message) and then shows its terminal.

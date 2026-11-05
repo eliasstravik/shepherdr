@@ -25,8 +25,6 @@ import { unreadSpaces, readShown } from "./unread.js";
 import { muted } from "./notify.js";
 import { MachinePopup, openMachine, openMachineSettings } from "./machine-popup.js";
 import { startPolling, allStats, healthMeters, bars } from "./machines.js";
-// The meter's tooltip and the red dot's words: the shared core's (the web's machine header says the same).
-import { meterWords, healthErrorWords } from "./core/machines.js";
 import { countBadge, red, H, TEXT, RADIUS } from "./ui.js";
 import { spaceName, gitTail, tilde, sharedNames } from "./core/spaces.js";
 import { coordinatorTab } from "./coordinator.js";
@@ -413,13 +411,12 @@ export default class Spaces extends View {
           // + (New space or New section, there) hugging its one meter. HERD-70.
           .when(connected, el => el.child(h_flex().flex_none().gap(2).items_center()
             .child(div().id(`machine-add-${m ?? "local"}`).size(20).flex_none().flex().items_center().justify_center().rounded(RADIUS.control)
-              .text_color(t.muted).cursor_pointer().hover(s => s.bg(t.raised).text_color(t.foreground)).tooltip("New space or section")
+              .text_color(t.muted).cursor_pointer().hover(s => s.bg(t.raised).text_color(t.foreground))
               .on_mouse_down("left", (e) => { this.addAt = rectOf(e); })
               .on_click((_e, cx) => { cx.stop_propagation(); this.addMenu(m); })
               .child(svg("mods/workspace-chrome/plus.svg").size(14)))
             .child(this.meter(m, t))))
-          .when(connected && Boolean(health?.error), el => el.child(div().id(`machine-dot-${m ?? "local"}`).size(6).rounded(3).flex_none().bg(red())
-            .tooltip(healthErrorWords(health.error))))
+          .when(connected && Boolean(health?.error), el => el.child(div().id(`machine-dot-${m ?? "local"}`).size(6).rounded(3).flex_none().bg(red())))
           .child(svg(`mods/workspace-chrome/chevron-${folded ? "right" : "down"}.svg`).size(12).flex_none().text_color(t.dim)));
       const own = !collapsed && sectionsOf(m).length;
       // An empty machine is just its header: its + makes a space.
@@ -428,18 +425,16 @@ export default class Spaces extends View {
   }
 
   // A machine's health (CPU, memory, disk) as one set of thin bars, amber while new tasks wait
-  // there, red past its alert limit. No % beside it (HERD-70): numbers and plan left stay in
-  // the tooltip and the details a click opens (machine-popup.js). HERD-40, HERD-62.
+  // there, red past its alert limit. No % beside it (HERD-70): numbers and plan left are in
+  // the details a click opens (machine-popup.js). HERD-40, HERD-62.
   // `this.stats`: read once per render (render()), as each read copies every machine's numbers.
   meter(m, t) {
     const s = this.stats?.[m ?? ""];
     const id = `machine-meter-${m ?? "local"}`;
     if (!s?.health) return div().id(id);
     const meters = healthMeters(s);
-    const words = meterWords(s);
     return h_flex().id(id).flex_none().h(20).px(4).gap(4).items_center().rounded(RADIUS.control).cursor_pointer()
       .hover((st) => st.bg(t.hover))
-      .tooltip(words)
       .on_mouse_down("left", (e) => { this.meterAt = rectOf(e); })
       .on_click((_e, cx) => { cx.stop_propagation(); openMachine(m, this.meterAt); })
       .child(bars(t, meters, 11, `${id}-health`));
@@ -744,7 +739,7 @@ export default class Spaces extends View {
         .when(!collapsed, el => el.child("Spaces"))
         // As a machine's +: New space, New section, on the shown space's machine.
         .child(div().id("space-new").size(H.sm).flex_none().flex().items_center().justify_center().rounded(RADIUS.control).cursor_pointer()
-          .hover(s => s.bg(t.hover).text_color(t.foreground)).tooltip("New space or section")
+          .hover(s => s.bg(t.hover).text_color(t.foreground))
           .on_mouse_down("left", (e) => { this.addAt = rectOf(e); })
           .on_click(() => this.addMenu(sp.find(s => s.active)?.machine ?? null))
           .child(svg("mods/workspace-chrome/plus.svg").size(14))))

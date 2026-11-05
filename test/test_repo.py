@@ -66,6 +66,49 @@ class Repo(unittest.TestCase):
                 for n, line in enumerate(f, 1):
                     self.assertIsNone(bad.search(line), f"{os.path.relpath(p, ROOT)}:{n}: {line.strip()[:120]}")
 
+    # Elements and components whose `title` is no hover popup: a dialog's or card's heading, a row's words, an
+    # iframe's name for screen readers.
+    TITLE_OK = {"Dialog", "CardShell", "TitleWhere", "Line", "iframe"}
+
+    def test_no_hover_tooltips(self):
+        """Nothing pops up on hover (SHEP-25): no `title=` tooltip in the web app, no `.tooltip(` in the window's
+        mods. An icon-only control says its words with `aria-label` instead."""
+        found = []
+        for top in ("web/src", "web/plugins"):
+            for d, _, files in os.walk(J(top)):
+                for f in files:
+                    if not f.endswith((".tsx", ".ts", ".html")):
+                        continue
+                    p = os.path.join(d, f)
+                    with open(p, encoding="utf-8") as fh:
+                        src = fh.read()
+                    rel = os.path.relpath(p, ROOT)
+                    for m in re.finditer(r"(?<![\w.-])title=", src):
+                        # the tag it sits on: the last one still open (a <TaskDot /> in an earlier prop is closed)
+                        tags = []
+                        for t in re.finditer(r"<([A-Za-z][\w.]*)|/>|</[\w.]*>", src[:m.start()]):
+                            if t.group(1):
+                                tags.append(t.group(1))
+                            elif tags:
+                                tags.pop()
+                        tag = tags[-1] if tags else "?"
+                        if tag not in self.TITLE_OK:
+                            found.append(f"{rel}:{src.count(chr(10), 0, m.start()) + 1}: title= on <{tag}>")
+                    for m in re.finditer(r"setAttribute\(\s*['\"]title['\"]|\.title\s*=(?!=)", src):
+                        if not src[max(0, m.start() - 8):m.start()].endswith("document"):
+                            found.append(f"{rel}:{src.count(chr(10), 0, m.start()) + 1}: sets a title")
+        for top in ("mods", "lib", "core"):
+            for d, dirs, files in os.walk(J(top)):
+                dirs[:] = [x for x in dirs if x not in ("node_modules", ".last")]
+                for f in files:
+                    if f.endswith(".js"):
+                        p = os.path.join(d, f)
+                        with open(p, encoding="utf-8") as fh:
+                            for n, line in enumerate(fh, 1):
+                                if ".tooltip(" in line:
+                                    found.append(f"{os.path.relpath(p, ROOT)}:{n}: .tooltip(")
+        self.assertFalse(found, "hover tooltips (use aria-label, or show the words):\n" + "\n".join(found))
+
     def test_no_leftovers(self):
         for p in text_files():
             name = os.path.basename(p)

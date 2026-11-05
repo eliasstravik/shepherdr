@@ -157,7 +157,7 @@ function CallLine({ call }: { call: string }) {
         Go back
       </button>
       {/* the window's hang-up: a red round X ("End call") */}
-      <button type="button" aria-label="End call" title="End call" className="press-dim relative grid size-8 shrink-0 place-items-center rounded-full bg-need text-white after:absolute after:-inset-1.5 phone:size-11" onClick={endCall}>
+      <button type="button" aria-label="End call" className="press-dim relative grid size-8 shrink-0 place-items-center rounded-full bg-need text-white after:absolute after:-inset-1.5 phone:size-11" onClick={endCall}>
         <XIcon className={ic} />
       </button>
     </div>

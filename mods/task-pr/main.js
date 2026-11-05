@@ -88,6 +88,7 @@ export default class PullRequest extends View {
     const pr = res.pr;
     // A state is a soft tint with its word in the colour (red is for what needs you, so Closed is grey).
     const tone = { open: ["Open", t.ansi2], draft: ["Draft", t.muted], merged: ["Merged", t.ansi5], closed: ["Closed", t.muted] }[pr.state];
+    // Each state's word stays beside its mark: the web's checks say it (core/worktree.js CHECK_WORDS).
     const icon = { pass: ["mods/workspace-chrome/circle-check.svg", t.ansi2, "Passed"], fail: ["mods/task-pr/circle-x.svg", t.ansi1, "Failed"],
       pending: ["mods/workspace-chrome/clock.svg", t.working, "Running"], skip: ["mods/task-pr/circle-minus.svg", t.dim, "Skipped"] };
     return root
@@ -119,10 +120,9 @@ export default class PullRequest extends View {
             .when(pr.checks.length > 0, (e) => e.child(div().min_w(0).truncate().text_color(t.dim).child(checksLine(pr.checks)))))
           .when(!pr.checks.length, (e) => e.child(div().text_size(12).text_color(t.dim).child("No checks on it.")))
           .children(pr.checks.map((c, i) => {
-            const [ic, color, word] = icon[c.state];
+            const [ic, color] = icon[c.state];
             return h_flex().id(`task-pr-check-${i}`).h(30).mx(-8).px(8).gap(8).items_center().rounded(7)
               .when(Boolean(c.url), (e) => e.cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => cx.open_url(c.url)))
-              .tooltip(c.workflow ? `${word} · ${c.workflow}` : word)
               .child(svg(ic).size(14).flex_none().text_color(color))
               .child(div().flex_1().min_w(0).truncate().child(c.name))
               .when(Boolean(c.url), (e) => e.child(svg("mods/chat-image/external-link.svg").size(12).flex_none().text_color(t.dim)));

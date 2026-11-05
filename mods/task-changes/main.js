@@ -10,7 +10,7 @@ import { green, amber, red, RADIUS, TEXT } from "./ui.js";
 // The fork point and the changed files, as the web app's Diff reads them (core/worktree.js).
 import { READ, against, changedFiles } from "./core/worktree.js";
 
-// A file's change as a colored dot, its word on hover: added green, changed amber, deleted red
+// A file's change as a colored dot: added green, changed amber, deleted red
 // (a merge conflict red too).
 const KIND = { A: ["Added", green], M: ["Changed", amber], D: ["Deleted", red], U: ["Conflict", red] };
 
@@ -166,9 +166,9 @@ export default class Changes extends View {
           .child(div().min_w(0).truncate().child(this.vs.label ? `Against ${this.vs.label}` : "Uncommitted")))))
       .child(v_flex().id("changes-list").flex_none().h(Math.min(200, Math.max(44, n * 28 + 12))).overflow_y_scrollbar().p(6).border_b(1).border_color(t.border).children(this.files.map((f) => {
         const parts = f.path.split("/"), name = parts.pop();
-        const [word, color] = KIND[f.status] ?? KIND.M;
+        const [, color] = KIND[f.status] ?? KIND.M;
         return h_flex().id(`change-${f.path}`).h(28).flex_none().px(8).gap(8).items_center().rounded(RADIUS.card).cursor_pointer().when(this.open === f.path, (e) => e.bg(t.selected)).hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.pick(f.path, cx))
-          .child(h_flex().id(`change-kind-${f.path}`).w(14).h(28).flex_none().items_center().justify_center().tooltip(word)
+          .child(h_flex().id(`change-kind-${f.path}`).w(14).h(28).flex_none().items_center().justify_center()
             .child(div().size(8).rounded(4).bg(color())))
           .child(h_flex().flex_1().min_w(0).child(div().text_color(t.dim).truncate().child(parts.length ? parts.join("/") + "/" : "")).child(div().max_w(260).min_w(0).truncate().child(name)))
           .when(f.add > 0, (e) => e.child(div().text_size(11).text_color(t.ansi2).child(`+${f.add}`))).when(f.del > 0, (e) => e.child(div().text_size(11).text_color(t.ansi1).child(`−${f.del}`)));

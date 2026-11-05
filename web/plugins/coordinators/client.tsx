@@ -63,7 +63,7 @@ function useRunNow(place: Place) {
 /** The header's Autopilot (3.0's switch), one group: the switch, "Autopilot", what it waits for (core/autopilot.js
  *  headerDetail: "Next in 7 min", "Queued", "Waking", "On events", "Run now only") and Run now, on one quiet pill as
  *  tall as Chat | Terminal. It flips at once, herdr-task's answer says the rest (a refusal goes back, with a toast).
- *  It sits on the header's right with the other controls, Run now as a ▶ (its name in its tooltip) so the header's
+ *  It sits on the header's right with the other controls, Run now as a ▶ (its name in its label) so the header's
  *  name and folder keep their room; as the column narrows "Autopilot" goes while on (under 42rem: the green switch
  *  and its next run say it), then what it waits for (under 32rem); off, "Autopilot" stays down to 30rem. On a phone the switch alone, on a round pill as tall as the header's buttons: Run now is in its
  *  ⋯. "Write a heartbeat" after it while on with its heartbeat still empty. The Assistant's tab only, in every space
@@ -106,13 +106,13 @@ function AutopilotHeader({ place }: { place: Place }) {
     ) : null
   if (phone)
     return (
-      <div data-autopilot className="flex h-11 shrink-0 items-center rounded-full bg-bubble px-2" title={AP.TITLE}>
+      <div data-autopilot className="flex h-11 shrink-0 items-center rounded-full bg-bubble px-2">
         <Switch label={AP.TITLE} on={on} onChange={() => void flip()} />
       </div>
     )
   return (
     <>
-      <div data-autopilot title={AP.TITLE} className={clsx('flex h-8 shrink-0 items-center gap-2 rounded-full bg-hover p-0.5 pl-1.5 text-[0.8125rem] coarse:h-10', !(on && want === null) && 'pr-1.5 @min-[30rem]/place:pr-3')}>
+      <div data-autopilot className={clsx('flex h-8 shrink-0 items-center gap-2 rounded-full bg-hover p-0.5 pl-1.5 text-[0.8125rem] coarse:h-10', !(on && want === null) && 'pr-1.5 @min-[30rem]/place:pr-3')}>
         <Switch label={AP.TITLE} on={on} onChange={() => void flip()} />
         <button type="button" tabIndex={-1} aria-hidden="true" onClick={() => void flip()} className={clsx('shrink-0 font-medium', on ? 'text-fg @max-[42rem]/place:hidden' : 'text-fg2 @max-[30rem]/place:hidden')}>
           {AP.TITLE}
@@ -126,7 +126,6 @@ function AutopilotHeader({ place }: { place: Place }) {
             data-run-now
             disabled={busy}
             onClick={() => void run()}
-            title="Run now"
             aria-label="Run Autopilot now"
             className="press-dim relative grid size-7 shrink-0 place-items-center rounded-full text-fg2 coarse:size-9 enabled:hover:bg-seg-on enabled:hover:text-fg enabled:hover:shadow-[0_0_0_1px_var(--line2)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-default disabled:opacity-50"
           >

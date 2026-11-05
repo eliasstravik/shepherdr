@@ -165,7 +165,7 @@ export default class Files extends View {
     return v_flex().id("files").size_full().min_h(0).overflow_hidden().bg(t.background).text_color(t.foreground).text_size(13)
       .child(h_flex().h(34).flex_none().pl(this.file ? 6 : 14).pr(14).gap(4).items_center().border_b(1).border_color(t.border).text_size(12)
         .when(Boolean(this.file), el => el.child(h_flex().id("files-back").size(24).flex_none().items_center().justify_center().rounded(6).cursor_pointer()
-          .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).tooltip("All files")
+          .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
           .on_click((_e, cx) => { this.show(null); cx.notify(); })
           .child(svg("mods/workspace-chrome/chevron-left.svg").size(14).flex_none())))
         .child(div().flex_1().min_w(0).truncate().text_color(this.file ? t.foreground : t.muted).child(this.file ?? (this.on ? `${this.on}:${this.root}` : this.root?.replace(home(), "~")) ?? "")))

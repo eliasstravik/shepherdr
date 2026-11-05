@@ -240,11 +240,10 @@ export default class ImageViewer extends View {
 
   // ---- drawing ---------------------------------------------------------------------------
 
-  // A toolbar button: an icon, a tooltip, its own press (so the backdrop never sees it).
-  btn(id, icon, tip, act, t) {
+  // A toolbar button: an icon, its own press (so the backdrop never sees it).
+  btn(id, icon, act, t) {
     return div().id(id).size(32).flex_none().flex().items_center().justify_center().rounded(RADIUS.control).cursor_pointer()
       .text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
-      .tooltip(tip)
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click((_e, cx) => { cx.stop_propagation(); act(cx); cx.notify(); })
       .child(svg(`mods/chat-image/${icon}.svg`).size(16));
@@ -260,21 +259,20 @@ export default class ImageViewer extends View {
         .child(div().min_w(0).truncate().font_medium().text_color(t.foreground).child(img?.name ?? "Image"))
         .when(Boolean(img), (el) => el.child(div().flex_none().text_size(TEXT.label).text_color(t.muted).child(`${img.w} × ${img.h}`))))
       .when(Boolean(img), (el) => el
-        .child(this.btn("zoom-out", "zoom-out", "Zoom out  −", () => this.zoomBy(1 / STEP), t))
+        .child(this.btn("zoom-out", "zoom-out", () => this.zoomBy(1 / STEP), t))
         // The zoom, and the one fit / actual size switch.
         .child(div().id("pct").w(52).h(32).flex_none().flex().items_center().justify_center().rounded(RADIUS.control).cursor_pointer()
           .text_size(TEXT.label).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
-          .tooltip(this.fit ? "Actual size  1" : "Fit to window  0")
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
           .on_click((_e, cx) => { cx.stop_propagation(); this.toggleActual(); cx.notify(); })
           .child(pct))
-        .child(this.btn("zoom-in", "zoom-in", "Zoom in  +", () => this.zoomBy(STEP), t))
+        .child(this.btn("zoom-in", "zoom-in", () => this.zoomBy(STEP), t))
         .child(this.rule(t))
-        .child(this.btn("copy", this.copied ? "check" : "copy", this.copied ? "Copied" : "Copy image", (cx) => this.copy(cx), t))
-        .child(this.btn("open", "external-link", "Open in default app", () => this.openFile(), t))
-        .child(this.btn("reveal", "folder-open", "Show in folder", () => this.reveal(), t))
+        .child(this.btn("copy", this.copied ? "check" : "copy", (cx) => this.copy(cx), t))
+        .child(this.btn("open", "external-link", () => this.openFile(), t))
+        .child(this.btn("reveal", "folder-open", () => this.reveal(), t))
         .child(this.rule(t)))
-      .child(this.btn("close", "x", "Close  Esc", () => closeOverlay(props()?.overlay), t));
+      .child(this.btn("close", "x", () => closeOverlay(props()?.overlay), t));
   }
 
   arrow(id, icon, d, side, t) {
@@ -282,7 +280,6 @@ export default class ImageViewer extends View {
     return div().id(id).absolute().top(s.h / 2 - 20).when(side === "left", (el) => el.left(14)).when(side === "right", (el) => el.right(14))
       .size(40).flex().items_center().justify_center().rounded(20).cursor_pointer()
       .bg(t.raised).border_1().border_color(t.border).text_color(t.foreground).hover((st) => st.bg(t.hover))
-      .tooltip(d < 0 ? "Previous  ←" : "Next  →")
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_mouse_up("left", (_e, cx) => cx.stop_propagation())
       .on_click((_e, cx) => { cx.stop_propagation(); this.step(d); cx.notify(); })

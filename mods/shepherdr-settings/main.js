@@ -37,7 +37,7 @@ import { webSection } from "./web-section.js";
 // into its starting prompt; Herdr runs nothing itself.
 import { SECTIONS, ROLES, NOTES, MERGE, MUST_FIX, ROUNDS, ARCHIVE, ABOUT, BACKUP, NOTIFY_ABOUT, TITLE, SPACE_TITLE,
   EVERYWHERE, CHANGED_HERE, RESET, EDIT_INSTRUCTIONS, USE_OTHER_CLI, LOADING_AGENTS, SAVED, sameAs as sameAsWords,
-  spacesOwn, otherCliWords, backupProblem, notifyMachineAbout, machineLabel, TASK_ROWS, LEVEL, RESET_TIP } from "./core/settings.js";
+  spacesOwn, otherCliWords, backupProblem, notifyMachineAbout, machineLabel, TASK_ROWS, LEVEL } from "./core/settings.js";
 
 const I = (name) => `mods/shepherdr-settings/${name}.svg`;
 // A page's title, and a Tasks row's (by its key, section.field).
@@ -418,7 +418,7 @@ export default class ShepherdrSettings extends View {
     if (this.scope) {
       return sc.mine
         ? line.child(div().text_color(t.muted).child(CHANGED_HERE)).child(div().text_color(t.dim).child("·"))
-          .child(div().tooltip(RESET_TIP(sc.from.replace(/^Inherited from /, ""))).child(link(`reset-${sc.id}`, RESET, (_e, cx) => sc.reset(cx))))
+          .child(div().child(link(`reset-${sc.id}`, RESET, (_e, cx) => sc.reset(cx))))
         : line.child(div().text_color(t.dim).child(sc.from));
     }
     if (!sc.others?.length) return null;
