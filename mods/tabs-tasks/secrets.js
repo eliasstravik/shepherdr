@@ -14,6 +14,7 @@ import { serviceRuns } from "./service.js";
 
 // The ask's label and the words the agent hears: core/secrets.js, shared with the web app.
 import { NAME, ASK, asksIn, keptLine, declinedLine } from "./core/secrets.js";
+import { sendAsPerson } from "./core/person.js";
 export { NAME };
 const WANT = "herdr.secret.want";
 const SPACE_LABELS = ["herdr.space", "herdr.task.space", "herdr.coordinator.space"];
@@ -80,7 +81,8 @@ export function allAsks() {
 
 async function answer(address, name, text) {
   await hc(["label", address, `${ASK}${name}=`]).catch(() => {});
-  await hc(["send", address, text]).catch(() => {});
+  // the person's answer: plain input from them, never "Another agent" on another machine (core/person.js)
+  await sendAsPerson({ hc, exec }, address, text).catch(() => {});
 }
 
 export async function decline(address, name) {

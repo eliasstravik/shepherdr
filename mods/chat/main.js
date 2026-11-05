@@ -31,9 +31,11 @@ import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names }
 import { BgJobs } from "./core/bg-jobs.js";
 import { words, howAnswered } from "./core/asks.js";
 // The rows' words and rules the web app's chat draws by too (core/chat-view.js).
-import { WORDS, clock, senderName, briefLabel, newsWords, resolveArtifacts, unsigned, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
+import { WORDS, clock, senderName, briefLabel, newsWords, resolveArtifacts, unsigned, ownWords, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
 // Sending the person's words, as the web app does (core/send.js).
 import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine, mentionedIn, sendTyped } from "./core/send.js";
+// hc whose send goes as the person, with no caller: never "Another agent" on another machine (SHEP-3, core/person.js).
+import { asPerson } from "./core/person.js";
 import { AskCards, linkCtl } from "./cards.js";
 import * as strips from "./strips.js";
 import { button, red, green, amber, H, RADIUS, TEXT, toast, toastWho, plainError } from "./ui.js";
@@ -67,6 +69,8 @@ const TEMPLATE = 'dir="$HOME/.config/herdr-core/templates"; ';
 // Whether a machine's layout is here now (it's connected); this computer always is.
 const online = (machine) => !machine || machines().find((m) => m.name === machine)?.layout === "ready";
 const same = (a, b) => norm(a) === norm(b);
+// The person's words into the agent's terminal: plain input from them, here and on another machine (core/person.js).
+const personHc = asPerson({ hc, exec });
 // When an ask was made: its id is <terminal>.<seconds>.<pid> (ask-hook.sh), taken at the end of
 // that second so it sits after what was said in it.
 const askAt = (id) => { const p = String(id).split("."); const sec = Number(p[p.length - 2]); return Number.isFinite(sec) && sec > 1e9 ? sec * 1000 + 999 : Date.now(); };
@@ -1026,9 +1030,17 @@ export default class Chat extends View {
     const users = this.conv.items.filter((x) => x.kind === "user");
     // An answer written in the box is in once the log has it as an answer.
     if (this.replied?.length) this.replied = this.replied.filter((r) => !users.some((u) => u.answer && (u.at ?? 0) >= r.at - 5000 && norm(u.text).includes(norm(r.text))));
+    // The person's words that came wrapped as another machine's process's message (a send that named its caller):
+    // theirs, as sent from here (core/chat-view.js ownWords).
+    for (const u of users) if (this.own?.has(u.id)) delete u.from;
     if (!this.pending?.length) return;
-    this.pending = this.pending.filter((p) => !users.some((u) => (u.at ?? 0) >= p.at - 5000 &&
-      (same(u.text, p.sent) || (p.match && norm(u.text).includes(p.match)) || (!p.match && u.images))));
+    const matches = (u, p) => (u.at ?? 0) >= p.at - 5000 &&
+      (same(u.text, p.sent) || (p.match && norm(u.text).includes(p.match)) || (!p.match && u.images));
+    for (const id of ownWords(users, this.pending, matches)) {
+      (this.own ??= new Set()).add(id);
+      delete users.find((u) => u.id === id).from;
+    }
+    this.pending = this.pending.filter((p) => !users.some((u) => matches(u, p)));
   }
 
   // The newest page first; after that, what the log gained since.
@@ -1152,7 +1164,7 @@ export default class Chat extends View {
         if (this.firstSend && k?.status?.state === "idle" && !openCard(this.addr)) {
           const text = this.firstSend;
           this.firstSend = null;
-          const sent = await hc(["send", this.addr, text]).catch(() => null);
+          const sent = await personHc(["send", this.addr, text]).catch(() => null);
           if (sent?.code !== 0) this.firstSend = text;
         }
         this.alerts(cx);
@@ -1223,7 +1235,7 @@ export default class Chat extends View {
     const st = this.status();
     if (st === "working" || st === "blocked" || this.asks.length || openCard(this.addr) || this.pending.some((p) => !p.failed && !p.late)) return;
     const msg = this.queue.shift();
-    if (msg.raw) hc(["send", this.addr, msg.text]);
+    if (msg.raw) personHc(["send", this.addr, msg.text]);
     else this.deliver(msg, cx);
     this.saveSoon(cx);
     cx.notify();
@@ -1299,7 +1311,7 @@ export default class Chat extends View {
 
   // What core/send.js needs from here: hc, a sleep, the agent's status now.
   sendIo(cx) {
-    return { hc, sleep: (ms) => cx.sleep(ms), status: () => this.status() };
+    return { hc: personHc, sleep: (ms) => cx.sleep(ms), status: () => this.status() };
   }
 
   // A message that didn't go, pressed: it goes again.
@@ -1317,7 +1329,7 @@ export default class Chat extends View {
   // A held message sent at once (the agent takes it mid-turn).
   sendQueued(msg, cx) {
     this.queue = this.queue.filter((m) => m !== msg);
-    if (msg.raw) hc(["send", this.addr, msg.text]);
+    if (msg.raw) personHc(["send", this.addr, msg.text]);
     else this.deliver(msg, cx);
     this.saveSoon(cx);
   }
@@ -1524,7 +1536,7 @@ export default class Chat extends View {
       this.wasFocused = false;
       if (machine && msg?.files.length) {
         // On another machine: the files once the agent runs there.
-        cx.spawn(async () => { const paths = await attach.deliver(msg.files, this.addr, this.machine).catch(() => []); if (paths.length) await hc(["send", this.addr, paths.join("\n")]); });
+        cx.spawn(async () => { const paths = await attach.deliver(msg.files, this.addr, this.machine).catch(() => []); if (paths.length) await personHc(["send", this.addr, paths.join("\n")]); });
       }
       cx.spawn(async (cx) => this.follow(cx));
       if (!this.machine) cx.spawn(async (cx) => this.watchAsks(cx));
@@ -1955,7 +1967,7 @@ export default class Chat extends View {
     if (st === "blocked" || this.asks.length) {
       this.queue.push({ id: `r${Date.now()}`, text: line, files: [], quote: null, raw: true, label: on ? `${emoji} reaction` : `${emoji} reaction removed` });
       this.saveSoon(cx);
-    } else hc(["send", this.addr, line]);
+    } else personHc(["send", this.addr, line]);
     cx.notify();
   }
 
@@ -1975,7 +1987,7 @@ export default class Chat extends View {
     const back = i < 0 ? 1 : users.length - i;
     cx.spawn(async (cx) => {
       if (this.kind === "claude") {
-        await hc(["send", this.addr, "/rewind"]);
+        await personHc(["send", this.addr, "/rewind"]);
         await cx.sleep(700);
         await hc(["keys", this.addr, ...Array(back).fill("up")]);
       } else {
