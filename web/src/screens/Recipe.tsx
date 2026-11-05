@@ -108,7 +108,7 @@ function Tabs({ b, render }: { b: Block; render: (bs: Block[]) => ReactNode }) {
   const [on, setOn] = useState(0)
   return (
     <div className="flex flex-col gap-3">
-      <div role="tablist" className="inline-flex max-w-full gap-0.5 self-start overflow-x-auto rounded-full bg-hover p-0.5">
+      <div role="tablist" className="scroll-x inline-flex max-w-full gap-0.5 self-start rounded-full bg-hover p-0.5">
         {b.tabs.map((t: any, i: number) => (
           <button key={i} role="tab" aria-selected={on === i} type="button" onClick={() => setOn(i)} className={clsx('h-7 shrink-0 rounded-full px-3 phone:h-9', on === i ? 'bg-seg-on shadow-seg' : 'text-fg2')}>{t.label}</button>
         ))}

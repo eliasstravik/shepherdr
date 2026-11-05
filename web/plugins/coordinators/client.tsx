@@ -437,7 +437,7 @@ function TabBar({ place }: { place: Place }) {
   }
   return (
     <div ref={bar} data-chrome data-tabbar onWheel={wheel} onContextMenu={appMenu} onPointerUp={() => setTimeout(() => (drag.current = null))} className="flex h-11 shrink-0 items-center gap-1 border-b border-line bg-well px-2.5 coarse:h-13">
-      <div role="tablist" aria-label="Tabs" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto py-1 [scrollbar-width:none]">
+      <div role="tablist" aria-label="Tabs" className="scroll-x flex min-w-0 flex-1 items-center gap-1 py-1">
         {shownTabs ? tabs.map((t, i) => <Tab key={t.key} place={place} t={t} i={i} on={t === shown} drag={drag} />) : null}
       </div>
       <PlusButton place={place} />

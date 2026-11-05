@@ -2079,7 +2079,7 @@ function Attachments({ chatKey }: { chatKey: string }) {
       ref={row}
       role="list"
       aria-label="Attached files"
-      className="-mx-4 flex shrink-0 gap-2 overflow-x-auto overscroll-x-contain px-4 motion-safe:scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="scroll-x -mx-4 flex shrink-0 gap-2 px-4 motion-safe:scroll-smooth"
     >
       {files.map((f, i) => (
         <Pending key={`${f.path ?? f.name}-${i}`} f={f} chatKey={chatKey} onRemove={() => remove(f)} />
