@@ -130,15 +130,15 @@ export function withSectionName(d, id, name, icon) {
   return x;
 }
 
-// Only what's unusual after a space's name in the sidebar: "herdr · spike", with ↑ahead ↓behind beside it. The repo or
-// branch goes when the name already says it (a worktree is named after its branch), and master/main go: nearly every
-// space is on one. g: { name (repo), branch, ahead, behind }; tree: nested under its repo; tag: its machine, in Pinned.
+// Only what's unusual after a space's name in the sidebar: "herdr · spike". The repo or branch goes when the name
+// already says it (a worktree is named after its branch), and master/main go: nearly every space is on one.
+// g: { name (repo), branch }; tree: nested under its repo; tag: its machine, in Pinned.
 export function gitTail(g, { name = "", tree = false, tag = null } = {}) {
   const raw = g?.branch ?? "detached";
   const same = (a) => String(a ?? "").toLowerCase() === String(name).toLowerCase();
   const branch = same(raw) || raw === "master" || raw === "main" ? "" : raw;
   const repo = tree || same(g?.name) ? "" : g?.name ?? "";
-  return { where: [tag, repo, branch].filter(Boolean).join(" \u00b7 "), ahead: g?.ahead ?? 0, behind: g?.behind ?? 0 };
+  return { where: [tag, repo, branch].filter(Boolean).join(" \u00b7 ") };
 }
 
 // A machine's own name and emoji in the sidebar (machines[""] is this computer's): empty name goes back to its own.

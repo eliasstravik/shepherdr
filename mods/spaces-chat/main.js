@@ -1,6 +1,6 @@
 // Workspace spaces: stable colored avatars, worktrees under their checkout,
 // grouped by machine when more than one is known. After a space's name, the repo
-// its first terminal is in now, only where unusual: branch, ahead/behind. Agent state lives in the agents list, not here. Click to
+// its first terminal is in now, only where unusual: its branch. Agent state lives in the agents list, not here. Click to
 // switch, right-click for its menu, drag to reorder. Under each machine, its sections
 // (sections.js): the + on its header makes one, spaces drag in and out of them (only by
 // dragging; a folded one opens while a space is dragged over it). Above the machines, Pinned
@@ -102,7 +102,7 @@ export default class Spaces extends View {
       this.popup.init(cx);
       return;
     }
-    this.git = {}; // where() -> { name, branch, ahead, behind, repo, linked }, null: not a repo
+    this.git = {}; // where() -> { name, branch, repo, linked }, null: not a repo
     this.checked = {}; // where() -> when it was last looked at
     this.unsure = new Set(); // where()s git couldn't answer for (a machine away)
     this.pending = new Set(); // where()s to look at next
@@ -197,7 +197,7 @@ export default class Spaces extends View {
     for (const p of ps) {
       if (!p.terminal || !spaceOf[p.tab]) continue;
       busy[p.pane] = p.status === "working" || !(p.program?.shell || p.program?.agent);
-      if (this.busy[p.pane] && !busy[p.pane]) this.sameRepo(at[spaceOf[p.tab].id], keys).forEach((k) => due.add(k));
+      if (this.busy[p.pane] && !busy[p.pane] && keys.has(at[spaceOf[p.tab].id])) due.add(at[spaceOf[p.tab].id]);
     }
     this.busy = busy;
     for (const m of machines()) {
@@ -212,12 +212,6 @@ export default class Spaces extends View {
       }
     }
     return due;
-  }
-
-  // `key` and the other places in its repo (a commit there moves their ahead/behind).
-  sameRepo(key, keys) {
-    const repo = this.git[key]?.repo;
-    return [key, ...(repo ? [...keys].filter((k) => this.git[k]?.repo === repo) : [])];
   }
 
   refreshMachines(cx) {
@@ -248,7 +242,7 @@ export default class Spaces extends View {
     });
   }
 
-  // One place's git: branch, ahead/behind, its repo.
+  // One place's git: its branch and repo.
   async check(key, cx) {
     const [on, cwd] = JSON.parse(key);
     this.checked[key] = Date.now();
@@ -256,28 +250,19 @@ export default class Spaces extends View {
     try {
       // No optional locks: a status that touched the index would wake the watch again.
       // Writes nothing under .git (index lock, fsmonitor cookie): watch() would wake on it.
-      const r = await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v2", "--branch"], { cwd, on });
+      // The repo's own .git folder names it; a worktree's top differs from it.
+      const r = await exec("git", ["rev-parse", "--show-toplevel", "--path-format=absolute", "--git-common-dir"], { cwd, on });
       if (r.code !== 0) {
         // Only git's own "no" is remembered as no repo; anything else is asked again.
         if (!/not a git repository/i.test(r.stderr)) this.unsure.add(key);
         this.git[key] = null;
         return;
       }
-      // The repo's own .git folder names it; a worktree's top differs from it.
-      const top = await exec("git", ["rev-parse", "--show-toplevel"], { cwd, on });
-      const common = await exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd, on });
-      const repo = common.stdout.trim();
+      const [top, repo] = r.stdout.split("\n").map((l) => l.trim());
+      // its branch; none: detached
+      const head = await exec("git", ["symbolic-ref", "--short", "-q", "HEAD"], { cwd, on });
       const name = repo.endsWith("/.git") ? base(repo.slice(0, -5)) : base(repo).replace(/\.git$/, "");
-      const info = { name, branch: null, ahead: 0, behind: 0, repo: JSON.stringify([on, repo]), linked: repo !== `${top.stdout.trim()}/.git` };
-      for (const line of r.stdout.split("\n")) {
-        if (line.startsWith("# branch.head ")) info.branch = line.slice(14);
-        else if (line.startsWith("# branch.ab ")) {
-          const [a, b] = line.slice(12).split(" ");
-          info.ahead = Math.abs(parseInt(a, 10)) || 0;
-          info.behind = Math.abs(parseInt(b, 10)) || 0;
-        }
-      }
-      this.git[key] = info;
+      this.git[key] = { name, branch: head.code === 0 ? head.stdout.trim() || null : null, repo: JSON.stringify([on, repo]), linked: repo !== `${top}/.git` };
       if (!on) this.watch(repo, cx);
     } catch {
       // Couldn't ask (the machine is away): keep what it showed, look again later.
@@ -617,7 +602,7 @@ export default class Spaces extends View {
     return w.tabs.reduce((n, tab) => n + (m.get(tab.id) ?? 0), 0);
   }
 
-  // Only what's unusual, after the name: "herdr \u00b7 spike \u21912 \u21931". The repo or
+  // Only what's unusual, after the name: "herdr \u00b7 spike". The repo or
   // branch goes when the name already says it (a worktree is named after its branch),
   // and master/main go: nearly every space is on one.
   gitTail(g, tree, name, t, tag) {
@@ -631,9 +616,7 @@ export default class Spaces extends View {
       .items_center()
       .text_size(TEXT.label)
       .text_color(t.dim)
-      .when(Boolean(where), (el) => el.child(div().min_w(0).truncate().child(where)))
-      .when(g.ahead > 0, (el) => el.child(div().flex_none().text_color(t.ansi2).child(`\u2191${g.ahead}`)))
-      .when(g.behind > 0, (el) => el.child(div().flex_none().text_color(t.ansi1).child(`\u2193${g.behind}`)));
+      .when(Boolean(where), (el) => el.child(div().min_w(0).truncate().child(where)));
   }
 
   // `pinned`: in Pinned, `tag` its machine there; `end`: the drag key (a section's, Pinned) a

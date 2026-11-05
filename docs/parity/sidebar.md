@@ -101,7 +101,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Name | main.js:91 `nameText`: bold and bright while unread; dim when muted; bright when open; else muted | P:338 | ✓ (counts no longer make it bold) |
 | Unread | unread.js: Assistant's turn unread; never when muted; Settings › Window › Bold unread spaces | src/unread.ts `placeUnread`, `look.unread` | ✓ |
 | Notify Off look | main.js:654-659 dimmed, emoji at half, crossed-out bell, counts still show | P:334-352 | ✓ |
-| After the name | main.js:598-616 `gitTail`: machine in Pinned, repo/branch, ↑ahead ↓behind | P:322 core/spaces.js `gitTail` | ✓ |
+| After the name | main.js:598-616 `gitTail`: machine in Pinned, repo/branch (no ↑ahead ↓behind since SHEP-32) | P:322 core/spaces.js `gitTail` | ✓ |
 | Two spaces with one name | main.js:619 its folder, from ~ | P:302 `sharedNames`, `tilde` (core/spaces.js) | ✓ (was missing) |
 | Counts | main.js:662 red (needs you), green (Ready), 9+; Red counts / Green counts switches | P:352 `AttentionBadge` | ✓ (were hidden on unreachable spaces) |
 | Worktree nesting | main.js:305-325 under its repo's space, branch icon; Worktrees in the sidebar off hides them but the open one | P:209 `nest`, `look.worktrees` | ✓ |

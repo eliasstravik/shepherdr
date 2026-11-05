@@ -74,22 +74,17 @@ export class Model {
   private spaces: any[] = [];
   /** Each space folder's git, as the window's sidebar reads it: { name (the repo), linked (a worktree), repo }, null:
    *  not a repo. Read once, then again each minute. */
-  private git = new Map<string, { info: { name: string; linked: boolean; repo: string; branch?: string | null; ahead?: number; behind?: number } | null; at: number }>();
+  private git = new Map<string, { info: { name: string; linked: boolean; repo: string; branch?: string | null } | null; at: number }>();
   private async readGit(spaces: any[]) {
     const due = spaces.filter((s) => s.folder && Date.now() - (this.git.get(`${s.machine ?? ""}|${s.folder}`)?.at ?? 0) > 60_000);
     await Promise.all(due.slice(0, 12).map(async (s) => {
       const key = `${s.machine ?? ""}|${s.folder}`;
       this.git.set(key, { info: this.git.get(key)?.info ?? null, at: Date.now() });
-      // as the window's sidebar reads it: its repo, and its branch and ahead/behind (no optional locks: reads only)
-      const r = await exec(this.hub, ["sh", "-c", 'cd "$1" 2>/dev/null && git rev-parse --show-toplevel --path-format=absolute --git-common-dir 2>/dev/null && git --no-optional-locks -c core.fsmonitor=false status --porcelain=v2 --branch -uno 2>/dev/null | grep "^# branch\\."', "git", s.folder], s.machine ?? null, 20).catch(() => null);
-      const [top, repo, ...rest] = (r?.stdout ?? "").trim().split("\n");
+      // as the window's sidebar reads it: its repo and its branch (reads only: nothing under .git is written)
+      const r = await exec(this.hub, ["sh", "-c", 'cd "$1" 2>/dev/null && git rev-parse --show-toplevel --path-format=absolute --git-common-dir 2>/dev/null && { git symbolic-ref --short -q HEAD 2>/dev/null || echo; }', "git", s.folder], s.machine ?? null, 20).catch(() => null);
+      const [top, repo, head] = (r?.stdout ?? "").split("\n").map((l) => l.trim());
       const name = repo ? (repo.endsWith("/.git") ? repo.slice(0, -5) : repo.replace(/\.git$/, "")).split("/").pop()! : "";
-      let branch: string | null = null, ahead = 0, behind = 0;
-      for (const l of rest) {
-        if (l.startsWith("# branch.head ")) branch = l.slice(14) === "(detached)" ? null : l.slice(14);
-        else if (l.startsWith("# branch.ab ")) { const [a, b] = l.slice(12).split(" "); ahead = Math.abs(parseInt(a, 10)) || 0; behind = Math.abs(parseInt(b, 10)) || 0; }
-      }
-      this.git.set(key, { info: top && repo ? { name, linked: repo !== `${top}/.git`, repo, branch, ahead, behind } : null, at: Date.now() });
+      this.git.set(key, { info: top && repo ? { name, linked: repo !== `${top}/.git`, repo, branch: head || null } : null, at: Date.now() });
     }));
     if (due.length) this.soon();
   }

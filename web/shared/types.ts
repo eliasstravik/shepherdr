@@ -125,11 +125,9 @@ export interface Place {
   store?: { folder: string; name: string; key?: string }
   /** when something in its tabs last changed state (ms; Herdr's tab changed_at): Jump lists spaces newest first */
   changedAt?: number
-  /** its repo's name, branch (null: detached) and commits ahead of and behind its upstream, as the window's row */
+  /** its repo's name and branch (null: detached), as the window's row */
   gitName?: string
   branch?: string | null
-  ahead?: number
-  behind?: number
 }
 
 /** A machine, as a heading over its spaces in the sidebar: no chat, nothing to open. How it is doing shows on it and in
