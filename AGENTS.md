@@ -40,7 +40,9 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
   only the APIs it needs, never the full service: upgrade `/api/ws` and send
   `{type:'snapshot',snapshot:{places,machines,tasks,...}}`; 404 other `/api`. A later pushed `chat` event (setTimeout) makes
   replies arrive while scrolled up (the Latest pill's count). Run the stub in the background, or it dies with the shell call. Each
-  place in the snapshot needs a `chat` field (else a blank crash); open a viewer with `?artifact=<id>`.
+  place in the snapshot needs a `chat` field (else a blank crash); open a viewer with `?artifact=<id>`, a task with
+  `?task=<id>`. Answer the client's `watch` message with `{type:'chat',chat}` per key; `sections: []` lists places
+  under their machine in the sidebar.
 - A cross-machine send without ssh: two throwaway cores (`HC_SESSION=a`/`b`, clean `env -i`) and
   `hc machine add --via 'sh -c' --name vmb --session b` on a; the wrap only shows with a real agent (e.g.
   `claude --model haiku`) as the target.
