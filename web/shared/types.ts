@@ -1021,6 +1021,8 @@ export interface SettingSection {
   /** Settings › Secrets, as the window's: every kept secret with where it is kept, and the agents waiting on one */
   vault?: { name: string; at: number; scope: 'everywhere' | 'machine' | 'space'; machine: string | null; space: string | null; where: string }[]
   asks?: { address: string; name: string; why: string; who: string; scope: string }[]
+  /** Secrets: the machine that keeps them (name null: this one; "" not linked), and the machines they can move to */
+  kept?: { here: boolean; set: boolean; name: string | null; reachable: boolean; choices: { name: string; here: boolean; state: string }[]; moving: string | null; error: string | null }
   /** Web: its QR code (an SVG picture's data URL) and the words over it */
   qr?: string
   qrTitle?: string
