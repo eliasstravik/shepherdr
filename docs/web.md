@@ -37,8 +37,11 @@ connection it came on). A page from anywhere else can't change anything: writes 
   same key). The voice agent has four tools (`core/voice.js` TOOLS), answered by the service with the web app's
   reach (`service/voice-tools.ts`): `look` reads anything (the call's context, any chat or a search in it, spaces,
   machines, tasks, a task's summary and checks, Needs you, news, Autopilot, automations, settings, secret names,
-  artifacts), `open` shows something in the app the call runs in (the page gets a `nav` message; the window's chat mod
-  gets `nav/*.json` in the call folder), `send` writes as the person to any chat, and `act` runs one of the web app's
+  artifacts), `open` shows something in the app the call runs in: the very page or window that started it (the page gets
+  a `nav` message on its call socket and answers `navved` with what it shows; the window's chat mod gets `nav/*.json`
+  in the call folder and answers `navved/*.json`). The agent hears it's on screen only after that answer, else why
+  not (`navWords`). Spaces are found with their machine's names, the serving one's key too ("Mac mini Home" while it
+  calls itself This computer); several that fit make it ask which. `send` writes as the person to any chat, and `act` runs one of the web app's
   actions only after the person said yes out loud (`confirmed`). The window's call asks its own machine's service
   (`POST /api/voice/tool`, local token); without it only its own chat works. Both sides tell the call what the app shows
   (the page's `where` message, the window's `where.json`). The agent's spec carries a fingerprint (`SPEC`): an agent
