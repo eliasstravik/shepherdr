@@ -39,17 +39,41 @@ function openAutopilot(place: Place) {
   setUI({ settings: { section: Math.max(0, i), level }, drawer: false, menu: false })
 }
 
-/** The header's Autopilot switch (3.0's): flips at once, herdr-task's answer says the rest (a refusal goes back, with a
- *  toast). "Autopilot" and what it waits for beside it (core/autopilot.js headerDetail: "Next 10:00", "Queued",
- *  "Waking", "On events", "Run now only") where the header is 480px or wider, else the switch alone; "Write a
- *  heartbeat" after it while on with its heartbeat still empty. The Assistant's tab only, in every space on every
- *  machine (another machine's is switched and woken there). */
+/** Run now (herdr-task autopilot run-now): queued until the Assistant is idle, which the words then say ("Queued",
+ *  "Waking"); it waits while one is already queued or running. The header's button and the phone's ⋯ item share it. */
+function useRunNow(place: Place) {
+  const [running, setRunning] = useState(false)
+  const a = place.pilot
+  const busy = running || !!a?.pending || !!a?.inflight
+  const run = async () => {
+    if (busy) return
+    setRunning(true)
+    try {
+      const r = await act({ type: 'autopilot-run', place: place.id })
+      if (r.error) throw new Error(r.error)
+    } catch (e) {
+      failed("Autopilot didn't wake")(e as Error)
+    } finally {
+      setRunning(false)
+    }
+  }
+  return { running, busy, run }
+}
+
+/** The header's Autopilot (3.0's switch), one group: the switch, "Autopilot", what it waits for (core/autopilot.js
+ *  headerDetail: "Next in 7 min", "Queued", "Waking", "On events", "Run now only") and Run now, on one quiet pill as
+ *  tall as Chat | Terminal. It flips at once, herdr-task's answer says the rest (a refusal goes back, with a toast).
+ *  The header's name gets the room first; as it narrows Run now becomes its ▶ (under 48rem), "Autopilot" goes while
+ *  on (under 42rem: the green switch and its next run say it), then what it waits for (under 32rem); off, "Autopilot"
+ *  stays down to 30rem. On a phone the switch alone, on a round pill as tall as the header's buttons: Run now is in its
+ *  ⋯. "Write a heartbeat" after it while on with its heartbeat still empty. The Assistant's tab only, in every space
+ *  on every machine (another machine's is switched and woken there). */
 function AutopilotHeader({ place }: { place: Place }) {
   const a = place.pilot
   const phone = useUI((u) => u.device === 'phone')
   const other = useUI((u) => !!u.term?.startsWith('t:'))
   const [want, setWant] = useState<boolean | null>(null)
-  const [running, setRunning] = useState(false)
+  const { running, busy, run } = useRunNow(place)
   const [, setNow] = useState(0)
   // "Next in 7 min" counts down, "Next 10:00" becomes a weekday further off than a day: looked at again each 15 s
   useEffect(() => {
@@ -74,44 +98,69 @@ function AutopilotHeader({ place }: { place: Place }) {
       failed(`Autopilot didn't turn ${next ? 'on' : 'off'}`)(e as Error)
     }
   }
-  // Run now (herdr-task autopilot run-now): queued until the Assistant is idle, which the words then say ("Queued",
-  // "Waking"); it waits while one is already queued or running
-  const busy = running || !!shown.pending || !!shown.inflight
-  const runNow = async () => {
-    if (busy) return
-    setRunning(true)
-    try {
-      const r = await act({ type: 'autopilot-run', place: place.id })
-      if (r.error) throw new Error(r.error)
-    } catch (e) {
-      failed("Autopilot didn't wake")(e as Error)
-    } finally {
-      setRunning(false)
-    }
-  }
-  const words = clsx('@max-[30rem]/place:hidden', phone && 'hidden')
-  return (
-    <div data-autopilot className="flex shrink-0 items-center gap-2 text-[0.8125rem]" title={phone ? AP.TITLE : undefined}>
-      <Switch label={AP.TITLE} on={on} onChange={() => void flip()} />
-      <button type="button" tabIndex={-1} aria-hidden="true" onClick={() => void flip()} className={clsx('shrink-0 font-medium', on ? 'text-fg' : 'text-fg2', words)}>
-        {AP.TITLE}
+  const heartbeat =
+    on && a.blank ? (
+      <button type="button" onClick={() => openAutopilot(place)} className="press-dim shrink-0 text-[0.8125rem] whitespace-nowrap text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent">
+        Write a heartbeat
       </button>
-      {on ? <span className={clsx('min-w-0 truncate text-fg3 tabular-nums', shown.inflight && 'animate-pulse', words)}>{running && !shown.pending && !shown.inflight ? 'Queuing…' : AP.headerDetail(shown)}</span> : null}
-      {on && want === null ? (
-        <button type="button" data-run-now disabled={busy} onClick={() => void runNow()} title={phone ? 'Run now' : undefined}
-          aria-label="Run Autopilot now"
-          className="press-dim relative flex h-6 shrink-0 items-center gap-1 rounded-md py-1 pr-2 pl-1.5 text-[0.75rem] font-medium text-fg2 ring-1 ring-line hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent">
-          <PlayIcon aria-hidden className="size-3.5" />
-          <span className={clsx(phone && 'sr-only')}>Run now</span>
-          <span aria-hidden className="absolute top-1/2 left-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden" />
+    ) : null
+  if (phone)
+    return (
+      <div data-autopilot className="flex h-11 shrink-0 items-center rounded-full bg-bubble px-2" title={AP.TITLE}>
+        <Switch label={AP.TITLE} on={on} onChange={() => void flip()} />
+      </div>
+    )
+  return (
+    <>
+      <div data-autopilot title={AP.TITLE} className={clsx('flex h-8 shrink-0 items-center gap-2 rounded-full bg-hover p-0.5 pl-1.5 text-[0.8125rem]', !(on && want === null) && 'pr-1.5 @min-[30rem]/place:pr-3')}>
+        <Switch label={AP.TITLE} on={on} onChange={() => void flip()} />
+        <button type="button" tabIndex={-1} aria-hidden="true" onClick={() => void flip()} className={clsx('shrink-0 font-medium', on ? 'text-fg @max-[42rem]/place:hidden' : 'text-fg2 @max-[30rem]/place:hidden')}>
+          {AP.TITLE}
         </button>
-      ) : null}
-      {on && a.blank ? (
-        <button type="button" onClick={() => openAutopilot(place)} className="press-dim shrink-0 text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent">
-          Write a heartbeat
-        </button>
-      ) : null}
-    </div>
+        {on ? (
+          <span className={clsx('min-w-0 truncate text-fg3 tabular-nums @max-[32rem]/place:hidden', shown.inflight && 'animate-pulse')}>{running && !shown.pending && !shown.inflight ? 'Queuing…' : AP.headerDetail(shown)}</span>
+        ) : null}
+        {on && want === null ? (
+          <button
+            type="button"
+            data-run-now
+            disabled={busy}
+            onClick={() => void run()}
+            title="Run now"
+            aria-label="Run Autopilot now"
+            className="press-dim relative flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-fg2 enabled:hover:bg-seg-on enabled:hover:text-fg enabled:hover:shadow-[0_0_0_1px_var(--line2)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-default disabled:opacity-50 @min-[48rem]/place:pr-2.5 @min-[48rem]/place:pl-1.5"
+          >
+            <PlayIcon aria-hidden className="size-3.5 shrink-0" />
+            <span className="whitespace-nowrap @max-[48rem]/place:sr-only">Run now</span>
+            <span aria-hidden className="absolute top-1/2 left-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden" />
+          </button>
+        ) : null}
+      </div>
+      {heartbeat}
+    </>
+  )
+}
+
+/** On a phone, Run now is the shown tab's first item in ⋯ while Autopilot is on (the header has the switch alone) */
+function PhoneRunNow({ place }: { place: Place }) {
+  const phone = useUI((u) => u.device === 'phone')
+  const other = useUI((u) => !!u.term?.startsWith('t:'))
+  const { running, busy, run } = useRunNow(place)
+  const a = place.pilot
+  if (!phone || other || !a?.on || !has('autopilot')) return null
+  return (
+    <MenuItem
+      icon={<PlayIcon aria-hidden className="size-4" />}
+      disabled={busy}
+      hint={running && !a.pending && !a.inflight ? 'Queuing…' : AP.headerDetail(a)}
+      className="disabled:opacity-50"
+      onClick={() => {
+        void run()
+        setUI({ menu: false })
+      }}
+    >
+      Run Autopilot now
+    </MenuItem>
   )
 }
 
@@ -172,7 +221,8 @@ function PaneEnd({ place }: { place: Place }) {
       </div>
     )
   return (
-    <span className="flex shrink-0 opacity-0 transition-opacity group-hover/head:opacity-100 focus-within:opacity-100 coarse:opacity-100">
+    // holds no room until shown (its gap too), so the name and Autopilot keep it on a pointer that hovers
+    <span className="-ml-2.5 flex max-w-0 shrink-0 overflow-hidden opacity-0 transition-opacity group-hover/head:ml-0 group-hover/head:max-w-none group-hover/head:opacity-100 focus-within:ml-0 focus-within:max-w-none focus-within:opacity-100 coarse:ml-0 coarse:max-w-none coarse:opacity-100">
       <IconButton label={live ? words.tip : 'Close pane'} title={live ? words.tip : undefined} onClick={() => (live ? setEnding(true) : end())}>
         <XIcon className={ic} />
       </IconButton>
@@ -646,6 +696,7 @@ function PhoneTabItems({ place }: { place: Place }) {
   const close = () => setUI({ menu: false })
   return (
     <>
+      <PhoneRunNow place={place} />
       <TabMenuItems place={place} tab={tab} close={close} />
       <MenuSeparator />
       <PlusItems place={place} done={close} />
