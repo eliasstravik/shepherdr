@@ -16,10 +16,16 @@ from .base import hc_json, HOME, now, RANK, SHELLS
 HELPER_ROLES = ("reviewer", "helper")
 
 
+def parent_of(k):
+    """Its parent's address as hc ls writes this terminal's: another machine's names its parent there ("t5" for "vm/t5")."""
+    p, a = str(k.get("parent") or ""), str(k.get("address") or "")
+    return f"{a.split('/')[0]}/{p}" if p and "/" in a and "/" not in p else p or None
+
+
 def is_helper(k, mine=()):
     """hc ls gives no labels: a helper is also told by its parent, another terminal of the same task
     (a worker's parent is its Assistant, never the task's)."""
-    return bool(k.get("parent")) and ((k.get("labels") or {}).get("herdr.role") in HELPER_ROLES or k["parent"] in mine)
+    return bool(k.get("parent")) and ((k.get("labels") or {}).get("herdr.role") in HELPER_ROLES or parent_of(k) in mine)
 
 
 def _live(key):
@@ -605,7 +611,7 @@ def own_work(task, live):
             continue
         address = k.get("address")
         key = (k.get("labels") or {}).get("herdr.task")
-        if key and any(h.get("parent") == address and status_word(h) in ("working", "blocked") for h in live_helpers(key)):
+        if key and any(parent_of(h) == address and status_word(h) in ("working", "blocked") for h in live_helpers(key)):
             if not last_question(task, address):
                 return True
             continue

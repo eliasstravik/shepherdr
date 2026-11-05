@@ -79,7 +79,7 @@ SUBAGENTS_RULE = ("read-only, as your own helper agent that people can watch and
                   "or `claude --permission-mode plan` (never `codex exec` or `claude -p`: nobody sees those). Its prompt gives "
                   "it the brief, the diff against the base branch and ~/.config/herdr-core/templates/reviewer.md, and asks for "
                   "its findings as its last message. It shows in your chat as a subagent and ends with you. Wait for it with "
-                  "`hc wait <its name> --timeout 600` (again on a timeout), read its report with `hc read <its name> --lines "
+                  "`hc wait <its name> --timeout 600` (again on a timeout, or while it says turn 0: it hadn't started), read its report with `hc read <its name> --lines "
                   "400`, then end it with `hc kill <its name>`. Any other helper agent you want (research, a second opinion) "
                   "goes the same way, labelled herdr.role=helper. The reviewer reports")
 WORKER_MD = WORKER_MD_BEFORE_SUBAGENTS.replace(SUBAGENTS_OLD, SUBAGENTS_RULE)

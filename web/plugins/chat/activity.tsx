@@ -468,9 +468,12 @@ function JobLine({ j, chat, open, toggle }: { j: Job; chat: string; open: boolea
 
 /** a subagent's chat followed while it shows (its row open, or its own chat in the sheet): kernel visibleChats */
 function follow(chat: string, on: boolean) {
+  // counted: each one that shows it holds one, and lets go of its own only (the row stays followed once its sheet closes)
   setUI((u) => {
-    const subs = (u.subs ?? []).filter((k) => k !== chat)
-    return { subs: on ? [...subs, chat] : subs }
+    const subs = [...(u.subs ?? [])]
+    if (on) subs.push(chat)
+    else if (subs.includes(chat)) subs.splice(subs.indexOf(chat), 1)
+    return { subs }
   })
 }
 
@@ -478,7 +481,7 @@ function follow(chat: string, on: boolean) {
 let sub: Job | null = null
 const subOpeners = new Set<() => void>()
 export function openSubagent(j: Job | null) {
-  if (sub?.chat && sub.chat !== j?.chat) follow(sub.chat, false)
+  if (sub?.chat) follow(sub.chat, false)
   sub = j
   if (j?.chat) follow(j.chat, true)
   subOpeners.forEach((l) => l())

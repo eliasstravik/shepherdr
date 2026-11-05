@@ -1087,6 +1087,9 @@ class WorkersOwnHelpers(OwnBackgroundWork):
         self.hc["ls"] = [self.worker, dict(self.reviewer, labels={})]
         self.assertEqual([k["address"] for k in self.agents.live_agents("x#7")], ["t1"])
         self.assertEqual([k["address"] for k in self.agents.live_helpers("x#7")], ["t2"])
+        # another machine's: its parent named there
+        self.hc["ls"] = [dict(self.worker, address="vm/t1"), dict(self.reviewer, address="vm/t2", labels={})]
+        self.assertEqual([k["address"] for k in self.agents.live_helpers("x#7")], ["vm/t2"])
         # one with no parent (an old herdr-task reviewer) stays the task's
         self.hc["ls"] = [self.worker, dict(self.reviewer, parent=None)]
         self.assertEqual([k["address"] for k in self.agents.live_agents("x#7")], ["t1", "t2"])

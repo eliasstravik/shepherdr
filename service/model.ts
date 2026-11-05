@@ -210,9 +210,11 @@ export class Model {
   }
 
   /** Its worker's own helper agents now (SHEP-54): core place() counts one at work as the task at work. */
-  private helpersOf(list: List, task: any) {
-    const key = `${list.slug}#${task.id}`;
-    return [...this.hub.terminals.values()].filter((k: any) => k.state === "live" && k.labels?.["herdr.task"] === key && isHelper(k))
+  private helpersOf(list: List, task: any, live: { address: string }[]) {
+    const key = `${list.slug}#${task.id}`, mine = new Set(live.map((a) => a.address.split("/").pop()));
+    // on the folder's machine, a child of one of its agents
+    return [...this.hub.terminals.values()].filter((k: any) => k.state === "live" && k.labels?.["herdr.task"] === key && isHelper(k)
+      && machineOf(k.address) === (list.machine ?? null) && mine.has(String(k.parent).split("/").pop()))
       .map((k: any) => ({ address: k.address, status: typeof k.status === "object" ? k.status?.state ?? null : null }));
   }
 
@@ -224,7 +226,7 @@ export class Model {
 
     const rows = lists.flatMap((list) => list.tasks.map((task: any) => {
       const live = this.agentsOf(list, task);
-      const p = place(list, task, { live, helpers: this.helpersOf(list, task) });
+      const p = place(list, task, { live, helpers: this.helpersOf(list, task, live) });
       const own = live.map((a) => (this.hub.terminals.get(a.address) as any)?.report).find((r) => typeof r?.progress === "number" && r.progress >= 0);
       const w = reportOf(task, p.section, own ? { pct: own.progress, msg: own.msg || null } : null);
       const running = p.section === "queued" ? list.tasks.filter((x: any) => x.state === "running" && this.agentsOf(list, x).length).length : 0;
