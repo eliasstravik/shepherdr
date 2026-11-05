@@ -17,7 +17,7 @@ from .settings import bare, settings_for, worker_argv, worktrees_on
 from .agents import agent_running, live_agents, starting, status_of, task_status
 from .sessions import session_of
 from .launch import default_space
-from .store import locate, open_store, read_list, Store, store_files
+from .store import locate, open_store, read_list, refuse_folder_space, Store, store_files
 from .queues import queue_reason
 from .archive import archive_pass
 from .output import say
@@ -272,6 +272,8 @@ def cmd_auto(args):
         # Another machine's automation asks (fetch_feed): this folder's tasks now. Reads only.
         print(json.dumps(feed(args.folder)))
         return
+    if sub == "add":
+        refuse_folder_space(args.folder, getattr(args, "here", False))
     with open_store(args) as s:
         autos = s.data.setdefault("automations", [])
         msg = ""

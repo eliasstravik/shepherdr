@@ -1,6 +1,7 @@
 """Where a folder's tasks live (~/.herdr/tasks/<slug>.json) and the locked Store that edits them."""
 
 import fcntl
+import functools
 import hashlib
 import json
 import os
@@ -28,6 +29,41 @@ def locate(path):
         return {"folder": main, "kind": "repo", "name": os.path.basename(main) or "/", "common": common}
     name = "~" if path == HOME else (os.path.basename(path) or "/")
     return {"folder": path, "kind": "folder", "name": name, "common": None}
+
+
+def repos_in(folder):
+    """A folder space's repos: the git repos directly inside a plain folder (not home or /), sorted. Each of
+    its tasks works in one of them (--folder <repo> --space <space>); [] for any other folder."""
+    if folder in (HOME, "/"):
+        return []
+    try:
+        names = sorted(n for n in os.listdir(folder) if not n.startswith("."))
+    except OSError:
+        return []
+    return [os.path.join(folder, n) for n in names if os.path.exists(os.path.join(folder, n, ".git"))]
+
+
+
+@functools.lru_cache(maxsize=64)
+def space_repos(folder):
+    """A folder space's repos (its folder isn't in a git repo but holds some), else []."""
+    try:
+        loc = locate(folder) if folder else None
+    except Fail:
+        return []
+    return repos_in(loc["folder"]) if loc and loc["kind"] == "folder" else []
+
+
+def refuse_folder_space(folder, here=False):
+    """add and auto add on a folder space's own folder: refused, naming its repos (--here: the folder itself)."""
+    if here:
+        return
+    loc = locate(folder)
+    inside = repos_in(loc["folder"]) if loc["kind"] == "folder" else []
+    if inside:
+        names = ", ".join(os.path.basename(r) for r in inside[:12]) + (", ..." if len(inside) > 12 else "")
+        raise Fail(f"{loc['folder']} is a folder space: pass --folder <the repo this works in> ({names}), "
+                   "or --here to work in the folder itself.")
 
 
 def slug_of(folder):

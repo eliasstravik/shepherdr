@@ -34,6 +34,10 @@ test("the field, its suggestions and where it starts", () => {
   expect(N.offersRepo("/h/me/new", false, home)).toBe(true);
   expect(N.offersRepo(home, false, home)).toBe(false);
   expect(N.offersRepo("/h/me/r", true, home)).toBe(false);
+  expect(N.offersRepo("/h/me/lane", false, home, true)).toBe(false);
+  expect(N.holdsRepos([{ repo: false }, { repo: true }])).toBe(true);
+  expect(N.holdsRepos([{ repo: false }])).toBe(false);
+  expect(N.holdsRepos(undefined)).toBe(false);
   expect(N.placeName(home, "", home)).toBe("Home");
   expect(N.placeName("/h/me/r/sub", "/h/me/r", home)).toBe("r");
   expect(N.recentFrom("/a\n/a\n/h/.herdr/worktrees/r/b\n/b\n")).toEqual(["/a", "/b"]);

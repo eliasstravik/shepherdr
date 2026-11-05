@@ -211,7 +211,8 @@ export class Compat {
     const t = chatKey.endsWith("/worker") ? this.rows.find((r) => taskId(r) === chatKey.slice(0, -7)) : null;
     const s = !t ? this.spaceList.find((x) => placeKey(x.id) === chatKey) : null;
     const machine = t ? t.machine ?? null : s?.machine ?? null, folder = t ? t.folder : s?.folder;
-    return this.rows.filter((r) => (r.machine ?? null) === machine && r.folder === folder)
+    // a space's chat also has the tasks it started in other folders (a folder space's tasks live in its repos' lists)
+    return this.rows.filter((r) => ((r.machine ?? null) === machine && r.folder === folder) || (!!s && !!r.space && r.space === s.id))
       .map((r) => ({ ref: r.ref, id: r.id, title: r.title, status_text: r.sub ?? r.section, why: r.why, folder: r.folder, prompt: r.prompt, state: r.section }));
   }
 

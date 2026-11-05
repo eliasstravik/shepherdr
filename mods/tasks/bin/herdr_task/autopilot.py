@@ -14,7 +14,7 @@ from .base import addon_off, Fail, hc_json, HOME, now, run, STORE
 from .settings import autopilot_layers, bare, read_settings, write_autopilot
 from .agents import agent_running, status_word
 from .launch import caller_labels, coordinator_in
-from .store import locate, read_list, Store, store_files
+from .store import locate, read_list, space_repos, Store, store_files
 from .output import say
 from .news import news_send, typing
 from .scheduler import ensure_scheduler
@@ -601,6 +601,11 @@ def message(space, a, reasons):
     aim = (f"Direction (set by the person, Shepherdr settings > Autopilot): {aim}" if aim else
            "Direction: none set. Work out what matters most from the project itself: its README, docs and goals, "
            "recent commits and merged tasks, open issues and PRs, and what the person asked for lately.")
+    repos = space_repos(a.get("folder"))
+    if repos:
+        aim += ("\nThis is a folder space, not tied to one repo: its projects are each git repo inside its folder ("
+                + ", ".join(r.replace(HOME, "~", 1) for r in repos) + "). Look at each one, and give every task "
+                "--folder <its repo> --space <this space>.")
     body = (f"Autopilot wake: {why}, {when(now())}.\n"
             "You are on Autopilot in this space: you drive it forward and decide on your own; the person steers "
             "later. Never ask the person a question on a wake: make every call yourself (product and taste choices "

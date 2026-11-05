@@ -1625,6 +1625,51 @@ class Scheduled(unittest.TestCase):
             self.add("Typo", at="fry 9:00")
 
 
+class FolderSpace(unittest.TestCase):
+    """A folder space: a plain folder holding git repos (Scheduled's throwaway folder holds the repo "app").
+    Its tasks each work in one repo: add on the folder itself is refused with the repos to pass, and list
+    there lists each repo's tasks."""
+    setUp, run_cmd, add, task = Scheduled.setUp, Scheduled.run_cmd, Scheduled.add, Scheduled.task
+
+    def test_add_on_the_folder_names_its_repos(self):
+        with self.assertRaises(self.Fail) as e:
+            self.add("Fix it", folder=self.tmp)
+        self.assertIn("app", str(e.exception))
+        self.assertIn("--folder", str(e.exception))
+
+    def test_here_still_works_in_the_folder(self):
+        self.assertEqual(self.add("Tidy", folder=self.tmp, here=True)["mode"], "here")
+
+    def test_list_lists_each_repos_tasks(self):
+        self.add("Fix it", space="sp1")
+        out = self.run_cmd(self.commands.cmd_list, folder=self.tmp, all=False, archived=False)
+        self.assertEqual([(g["name"], [t["title"] for t in g["tasks"]]) for g in out], [("app", ["Fix it"])])
+
+    def test_add_keeps_its_space(self):
+        self.add("Fix it", space="sp1")
+        self.assertEqual(self.task(1).get("space"), "sp1")
+
+    def test_auto_add_is_refused_on_the_folder_too(self):
+        with self.assertRaises(self.Fail):
+            self.store_mod.refuse_folder_space(self.tmp)
+        self.store_mod.refuse_folder_space(self.tmp, here=True)
+        self.store_mod.refuse_folder_space(self.folder)
+
+    def test_the_spaces_settings_reach_its_repos(self):
+        import herdr_task.settings as settings
+        with open(settings.SETTINGS, "w") as f:
+            json.dump({"spaces": {"sp1": {"folder": self.tmp, "tasks": {"merge": "ask me first"}}}}, f)
+        self.store_mod.space_repos.cache_clear()
+        with self.store_mod.Store(self.store_mod.locate(self.folder), write=False) as s:
+            self.assertEqual(settings.settings_layers(s, "sp1")[2], {"folder": self.tmp, "tasks": {"merge": "ask me first"}})
+            self.assertEqual(settings.settings_layers(s)[2].get("folder"), self.tmp)
+
+    def test_only_a_plain_folder_with_repos_is_one(self):
+        self.assertEqual(self.store_mod.repos_in(self.tmp), [os.path.join(self.tmp, "app")])
+        self.assertEqual(self.store_mod.repos_in(self.folder), [])
+        self.assertEqual(self.store_mod.repos_in(self.store_mod.HOME), [])
+
+
 class FastOffIsSaid(unittest.TestCase):
     """SHEP-41: a worker with Fast off runs standard even when config.toml sets service_tier."""
 

@@ -67,7 +67,7 @@ export default class NewSpace extends View {
     this.browse = null; // another machine's Browse…: { dir, rows } (rows null while listing)
     this.extra = []; // folders from Choose folder…, listed first
     this.exists = new Map(this.recent.map((p) => [p, true]));
-    this.repo = new Map(); // folder -> in a git repo (null: couldn't ask)
+    this.repo = new Map(); // folder -> in a git repo (null: couldn't ask; "repos": holds git repos)
     this.makeRepo = true; // "Make it a git repo", where it's offered
     this.listOpen = false; // the suggestions under the field
     this.hi = -1; // the suggestion Up/Down is on
@@ -120,8 +120,14 @@ export default class NewSpace extends View {
       if (!this.exists.get(p)) { this.repo.set(p, false); return cx.notify(); }
       const r = await exec("git", ["rev-parse", "--is-inside-work-tree"], { ...this.on(), cwd: p }).catch(() => null);
       if (repo !== this.repo) return;
-      // No git to ask there: nothing offered.
-      this.repo.set(p, r ? r.code === 0 && r.stdout.trim() === "true" : null);
+      // No git to ask there: nothing offered. A folder outside git with repos directly inside: "repos" (a folder space).
+      let v = r ? r.code === 0 && r.stdout.trim() === "true" : null;
+      if (v === false) {
+        const k = await exec("sh", ["-c", 'for d in "$1"/*/; do [ -e "$d.git" ] && exit 0; done; exit 1', "x", p], this.on()).catch(() => null);
+        if (k?.code === 0) v = "repos";
+      }
+      if (repo !== this.repo) return;
+      this.repo.set(p, v);
       cx.notify();
     });
   }
@@ -129,7 +135,8 @@ export default class NewSpace extends View {
   // Whether "Make it a git repo" shows for the field's folder: known not to be in one, not home.
   offersRepo() {
     const p = this.folder();
-    return N.offersRepo(p, this.repo.get(p), HOME);
+    const v = this.repo.get(p);
+    return N.offersRepo(p, v === "repos" ? false : v, HOME, v === "repos");
   }
 
   // Another machine picked: its home and recent folders first, then the folder starts over there.
@@ -350,9 +357,10 @@ export default class NewSpace extends View {
         .child(div().flex_none().text_color(t.foreground).child(W.makeRepo))
         .child(div().min_w(0).truncate().text_color(t.dim).child(W.makeRepoWhy));
     }
-    if (folder && this.repo.get(folder) === true)
+    const v = folder ? this.repo.get(folder) : undefined;
+    if (v === true || v === "repos")
       return line.text_color(t.dim).child(svg("mods/workspace-chrome/git-branch.svg").size(13).flex_none())
-        .child(div().min_w(0).truncate().child(W.isRepo));
+        .child(div().min_w(0).truncate().child(v === true ? W.isRepo : W.isFolderSpace));
     return line;
   }
 

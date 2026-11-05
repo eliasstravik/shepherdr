@@ -40,7 +40,7 @@ async function get<T>(url: string): Promise<T> {
 
 type Info = { home: string; recent: string[]; start: string }
 /** what the field's folder is: there (a folder) or not yet, and in a git repo (null: couldn't ask) */
-type Known = { exists: boolean; repo: boolean | null }
+type Known = { exists: boolean; repo: boolean | null; repos?: boolean }
 type Row = { path: string; up?: boolean }
 /** a folder as asked: its answer, or 'error' (couldn't ask) */
 type Seen = Folders | 'error'
@@ -137,7 +137,7 @@ function NewSpaceDialog() {
   }, [field, typed?.dir, machine])
   const knownOf = (p: string | null): Known | undefined => {
     const f = p ? seen[p] : undefined
-    return !f ? undefined : f === 'error' ? { exists: false, repo: null } : { exists: f.dir, repo: f.dir ? !!f.repo : false }
+    return !f ? undefined : f === 'error' ? { exists: false, repo: null } : { exists: f.dir, repo: f.dir ? !!f.repo : false, repos: !f.repo && NS.holdsRepos(f.entries) }
   }
 
   // once it is made, wait for the new space to show, then open it
@@ -156,7 +156,7 @@ function NewSpaceDialog() {
   const now = knownOf(field)
   // the folder Create space makes the space in: the field's, once it's known whether it exists
   const folder = now ? field : null
-  const offers = NS.offersRepo(folder, now?.repo, home)
+  const offers = NS.offersRepo(folder, now?.repo, home, now?.repos)
   // the list: the typed folder's subfolders matching the word after its last / (the folder above first while no word
   // is typed); without a /, the recent folders matching what's typed
   const listing = typed ? seen[typed.dir] : undefined
@@ -333,10 +333,10 @@ function NewSpaceDialog() {
               <span className="shrink-0 text-fg">{W.makeRepo}</span>
               <span className="min-w-0 truncate text-fg3">{W.makeRepoWhy}</span>
             </button>
-          ) : folder && now?.repo ? (
+          ) : folder && (now?.repo || now?.repos) ? (
             <span className="flex min-w-0 items-center gap-2 text-fg3">
               <BranchIcon className="size-3.5 shrink-0" />
-              <span className="truncate">{W.isRepo}</span>
+              <span className="truncate">{now?.repo ? W.isRepo : W.isFolderSpace}</span>
             </span>
           ) : null}
         </div>
