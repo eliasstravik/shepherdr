@@ -72,6 +72,7 @@ import {
   KeepFiltersIcon,
   PlaceIcon,
   RoundButton,
+  HeadButton,
   SearchIcon,
   shortcut,
   Tab,
@@ -423,30 +424,29 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
   const keyboard = useUI((u) => u.keyboard)
   const coordinator = placeOf(snap, task.place).name
   const accepting = useAccepting(task.id) || !!task.accepting
-  // as 3.0's task header (mods/chat/panel.js barRow): where it merges, Pin / Unpin (not an archived task's), and Review
-  // (opens the Accept card) once it is Ready ("Accepting…" while its accept runs); then its tabs (TaskTabs)
-  const target = task.base ? <span className="max-w-40 shrink-0 truncate text-[0.8125rem] text-fg2 phone:text-[0.875rem]" title={`Merges into ${task.base}`}>→ {task.base}</span> : null
+  // as 3.0's task header (mods/chat/panel.js barRow): Pin / Unpin (not an archived task's), and Review (opens the Accept
+  // card) once it is Ready ("Accepting…" while its accept runs), sized as the header's other buttons; then its tabs (TaskTabs)
   const tools = (
     <>
-      {target}
       {task.archived && task.status === 'done' ? null : (
         <IconButton label={task.pinned ? 'Unpin' : 'Pin'} pressed={!!task.pinned} onClick={() => void pinTask(task, !task.pinned).catch(() => undefined)}>
           {task.pinned ? <UnpinIcon className={ic} /> : <PinTaskIcon className={ic} />}
         </IconButton>
       )}
-      {task.status === 'ready' && !task.archived ? <Primary soft disabled={accepting} onClick={() => openAccept(task.id)}>{accepting ? 'Accepting…' : 'Review'}</Primary> : null}
+      {task.status === 'ready' && !task.archived ? <HeadButton disabled={accepting} onClick={() => openAccept(task.id)}>{accepting ? 'Accepting…' : 'Review'}</HeadButton> : null}
     </>
   )
-  // its id, in the list's monospace, before its title (as the window's), and under them what its agent is doing
+  // its title alone on the first line, so it keeps the room; under it, quieter, its id in the list's monospace, then what
+  // its agent is doing (working with no % yet, or a provider retry's line: its row's words, as the window's header says
+  // them), else where it merges
   const ref = task.id.slice(task.id.lastIndexOf(':') + 1)
-  const named = (
-    <span className="flex min-w-0 items-baseline gap-2">
-      <span className="shrink-0 font-mono text-[0.8125rem] font-normal text-fg3">{ref}</span>
-      <span className="min-w-0 truncate">{task.name}</span>
+  const doing = task.report ? <ReportLine w={task.report} head /> : task.status === 'work' && task.sub ? <span className="truncate">{task.sub}</span> : null
+  const sub = (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <span className="shrink-0 font-mono text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{ref}</span>
+      {doing ? <span className="flex min-w-0 items-center gap-1.5"><span aria-hidden className="text-fg3">·</span>{doing}</span> : task.base ? <span className="min-w-0 truncate" title={`Merges into ${task.base}`}><span aria-hidden className="text-fg3">· </span>→ {task.base}</span> : null}
     </span>
   )
-  // (working with no % yet, or a provider retry's line: its row's words, as the window's header says them)
-  const said = task.report ? <ReportLine w={task.report} head /> : task.status === 'work' && task.sub ? <span className="truncate">{task.sub}</span> : undefined
   // in focus it sits at the window's edge: no line there
   const focus = useStore((s) => focusHere(s.ui, s.snap))
   // split, a click on the open task on the right gives it the focus (the keys work on its chat)
@@ -460,20 +460,7 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
   if (phone)
     return (
       <section className="flex min-h-0 flex-1 flex-col">
-        <PhoneTop
-          left={
-            <RoundButton label="Tasks" onClick={back}>
-              <BackIcon className={ic} />
-            </RoundButton>
-          }
-          dot={task.status}
-          p={task.report?.progress}
-          name={task.name}
-          expandName
-          kind={<span className="font-mono">{ref}</span>}
-          right={tools}
-          report={task.report}
-        />
+        <TaskTop back={back} task={task} sub={sub} tools={tools} />
         <TaskTabs task={task} />
         {/* no bar under a task's chat: the message box keeps clear of the home indicator itself */}
         <div className={clsx('flex min-h-0 flex-1 flex-col', !keyboard && 'pb-[env(safe-area-inset-bottom)]')}>
@@ -501,7 +488,7 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
       data-drawer-from={middle || undefined}
       onPointerDownCapture={split && !middle ? () => focusPane(-1) : undefined}
       onFocusCapture={split && !middle ? () => focusPane(-1) : undefined}
-      className={clsx('flex min-h-0 min-w-0 flex-1 flex-col border-line', !focus && !middle && 'border-l')}
+      className={clsx('@container/task flex min-h-0 min-w-0 flex-1 flex-col border-line', !focus && !middle && 'border-l')}
     >
       <Head conversation>
         {middle ? (
@@ -510,13 +497,13 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
             <PlacesToggle when="closed" />
           </>
         ) : null}
-        <button type="button" onClick={back} className="press-dim inline-flex h-7 shrink-0 items-center gap-0.5 rounded-full pr-2.5 pl-1.5 text-[0.8125rem] text-fg2 hover:bg-hover hover:text-fg">
+        {/* in a narrow column (the side's) Back is its arrow alone, so the title keeps the room */}
+        <button type="button" onClick={back} aria-label="Tasks" title="Tasks" className="press-dim relative inline-flex h-7 shrink-0 items-center gap-0.5 rounded-full px-1.5 text-[0.8125rem] text-fg2 after:absolute after:-inset-y-2 after:inset-x-0 hover:bg-hover hover:text-fg @lg/task:pr-2.5">
           <BackIcon className={ic} />
-          Tasks
+          <span aria-hidden className="hidden @lg/task:inline">Tasks</span>
         </button>
         <Dot s={task.status} p={task.report?.progress} halo />
-        {/* its id and title, the words a narrow column has room for; what its agent is doing under them (the window's) */}
-        <Who name={named} kind={said} />
+        <Who name={task.name} kind={sub} />
         {/* its buttons close together, as a toolbar's, so the name keeps the room */}
         <div className="flex shrink-0 items-center gap-1">
           {tools}
@@ -525,6 +512,26 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
       <TaskTabs task={task} />
       <Scroll chat><TabBody task={task} chatKey={g?.chat ?? ''}>{body}</TabBody></Scroll>
     </section>
+  )
+}
+
+/** A task's top on a phone, as the desktop's header: Back, its status, its title on one line (a tap shows it whole) over
+ *  its id and what it is doing, then its buttons, each as tall as Back */
+function TaskTop({ back, task, sub, tools }: { back: () => void; task: Task; sub: ReactNode; tools: ReactNode }) {
+  const [whole, setWhole] = useState(false)
+  return (
+    // under a bar at the top (offline, a call) the notch is already kept clear
+    <div data-kb data-chrome className="relative flex shrink-0 items-center gap-2 border-b border-line px-3 pt-[calc(env(safe-area-inset-top)+6px)] pb-1.5 [[data-topbar]~*_&]:pt-1.5">
+      <RoundButton label="Tasks" onClick={back}>
+        <BackIcon className={ic} />
+      </RoundButton>
+      <Dot s={task.status} p={task.report?.progress} halo />
+      <button type="button" aria-expanded={whole} title={whole ? undefined : task.name} onClick={() => setWhole(!whole)} className="min-w-0 flex-1 py-0.5 text-left">
+        <span className={clsx('block text-base/5 font-semibold', whole ? 'break-words' : 'truncate')}>{task.name}</span>
+        <span className="mt-0.5 block text-[0.8125rem]/[18px] text-fg2">{sub}</span>
+      </button>
+      <div className="flex shrink-0 items-center gap-1">{tools}</div>
+    </div>
   )
 }
 

@@ -392,6 +392,20 @@
   }
 }
 
+/* A strip that scrolls sideways only (a task's tabs, the list chips, attached files): overflow-x alone turns overflow-y
+   to auto too, so anything a hair taller (a tab's hit area) made it scroll and bounce up and down on a phone, and a
+   vertical swipe on it moved it. No scrollbar: the cut edge says there is more */
+@utility scroll-x {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 /* A chat's column of messages and its box: a comfortable line, a little wider on a very wide window */
 @utility max-w-read {
   max-width: 720px;
