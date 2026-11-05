@@ -748,7 +748,7 @@ export default class Tasks extends View {
     const shown = this.frame ? (this.frame.agents ??= new Map(agents().map((a) => [a.address, a]))) : new Map(agents().map((a) => [a.address, a]));
     const focused = live.some((a) => shown.get(a.address)?.focused);
     // The second line, as Shepherdr's: Working, what its agent says it's doing (herdr-task status),
-    // its time left at the row's end, or a provider retry's line while Herdr waits; Needs you,
+    // its time left short under the glyph, or a provider retry's line while Herdr waits; Needs you,
     // why; Queued, what it waits for ("after HERD-3"); Merging, why it waits. The id leads it.
     const w = reportOf(task, section, live);
     const sub = this.statusLine(p, w);
@@ -809,13 +809,15 @@ export default class Tasks extends View {
   }
 
   // One row (as Shepherdr's web Tasks list), three parts with one job each:
-  // - the glyph, level with the title;
+  // - the glyph, level with the title, and under it, level with the second line, the time left
+  //   ("2h", "<1m": short, in the working color, centred on the glyph; wider than it, it overflows
+  //   evenly, so the column and the titles never move);
   // - the text: the title owns the first line, cut only at its own end; under it one quiet line read
   //   left to right, never pushed apart: the task's id (dim, monospace), what it says now (why it
   //   needs you or what its agent does: at most 40 characters, cut at a word), then where it is after
   //   a dot (it gives way first);
-  // - the end, centred on the row: the one thing to act on or watch: Review, the time left ("2h
-  //   left", in the working color) or an automation's next run (`meta`).
+  // - the end, centred on the row: the one thing to act on or watch: Review or an automation's next
+  //   run (`meta`).
   // A row with nothing under its title is one line. Nothing shows on hover: no tooltips (SHEP-25).
   // `pin`: { key, on }: Pin / Unpin in the row's right-click menu.
   line(id, { go, glyph, ref, title, sub, left, dim, selected, meta, metaColor, where, action, pin }, t) {
@@ -824,8 +826,7 @@ export default class Tasks extends View {
     const said = sub ? capital(sub) : null;
     const shown = said ? fit(said) : null;
     const two = Boolean(ref) || Boolean(shown) || Boolean(where);
-    const end = action ?? (left ? div().flex_none().whitespace_nowrap().text_size(TEXT.label).font_medium().text_color(amber()).child(`${left} left`)
-      : meta ? div().flex_none().whitespace_nowrap().text_size(TEXT.label).text_color(metaColor ?? t.dim).child(meta) : null);
+    const end = action ?? (meta ? div().flex_none().whitespace_nowrap().text_size(TEXT.label).text_color(metaColor ?? t.dim).child(meta) : null);
     const row = h_flex().id(id).relative().flex_none().px(8).gap(12).items_center().rounded(RADIUS.card)
       .when(Boolean(selected), (el) => el.bg(t.selected))
       .when(Boolean(pin), (el) => el.on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.rowMenu(pin); }))
@@ -839,8 +840,11 @@ export default class Tasks extends View {
       .when(Boolean(shown), (el) => el.child(div().id(`${id}-sub`).flex_shrink_1().min_w(0).truncate().text_color(t.muted).child(shown)))
       .when(Boolean(where), (el) => el.child(div().flex_shrink(1000).min_w(0).truncate().text_color(t.dim)
         .child(ref || shown ? `· ${where}` : where)));
+    // The time left as tall as the second line (16), 2 under the glyph as the line is under the title.
     return row.py(8)
-      .child(mark.self_start())
+      .child(v_flex().w(14).flex_none().self_start().gap(2).child(mark)
+        .when(Boolean(left), (el) => el.child(h_flex().w(14).h(16).items_center().justify_center().whitespace_nowrap()
+          .font_family(ID_FONT).text_size(ID_SIZE).font_semibold().text_color(amber()).child(left))))
       .child(v_flex().flex_1().min_w(0).gap(2).child(h_flex().h(20).min_w(0).items_center().child(head.flex_1())).child(second))
       .when(Boolean(end), (el) => el.child(end));
   }
