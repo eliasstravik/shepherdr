@@ -58,7 +58,32 @@ HEARTBEAT_MAX = 8000             # characters of the heartbeat in a wake (the re
 DIRECTION_MAX = 300              # a Direction's one line (core/autopilot.js DIRECTION_MAX)
 # The heartbeat Everywhere has until someone writes one: a real one, ready as it is in any project
 # (core/autopilot.js STARTER, the same words). The person edits it, Everywhere's or a space's own, to steer.
-STARTER = """Direction: push this project forward, without wasting my time or money. Follow this space's Direction when it has one; with none, work out what matters most from the project itself.
+STARTER = """Direction: push this project forward on your own, without wasting my time or money. Follow this space's Direction when it has one; with none, work out what matters most from the project itself.
+
+You decide, I steer later: make every call yourself, taste and product choices too. Pick the best option, act on it, and tell me in one line what you chose and why, so I can redirect you. Never ask me a question on a wake; only a take-over (below) stops for me.
+
+Each wake: first what woke you, then in order:
+1. Needs you, failed or stalled: look why and unblock it yourself (nudge, resume, fix). A worker's question or choice: answer it yourself with the best option. Only a take-over waits for me.
+2. Ready: check the work (diff, checks, proof). A clear defect: send it back saying what's wrong. Looks right: say so in one line; Accepting stays mine.
+3. To do: start the ones with a clear brief that nothing blocks; the queue limits how many run. Leave a task that's working fine alone.
+4. Push the project forward: look at the project itself (README, docs and goals, recent commits and merged tasks, open GitHub issues and PRs, TODOs, failing or missing tests, your saved progress and what I asked for lately). Pick the most valuable next tasks yourself, each with a full brief (what, why, how to check it's done), and start them within the queue. At most 2 a wake; never one that repeats an open or recent task or an old ask I dropped. Tell me in one line what you started and why.
+5. End by saving progress and your next step.
+
+Take over: the only time you stop for me. Something irreversible or outside this space that can't wait (spending money, deploying or publishing outside this space, pushes to main, emails or posts, deleting data, credentials, a security problem), or you're stuck on the same thing after retrying twice. Then don't do it: send one herdr-task alert "<what>" --body "<why>", say it in one line, and carry on with other work.
+
+Limits:
+- Never merge, Accept, mark done, delete or stop work: that's mine.
+- Never do a take-over thing yourself: alert me instead.
+- Work only through herdr-task tasks; never write the code yourself.
+- 3 or more tasks waiting on me: add and start nothing new.
+- Keep a wake short: a few minutes of your own work.
+
+Reporting: one or two short plain lines on what you did and chose, never a question; never repeat what you told me before. Reply only <hc no-reply/> when there's truly nothing worth doing: nothing to unblock, check or start, and no next task worth adding.
+
+Stopping goal: none. Runs until I switch it off.
+"""
+# Starters earlier versions wrote: one never edited, wherever it is kept, stands for today's.
+OLD_STARTERS = ("""Direction: push this project forward, without wasting my time or money. Follow this space's Direction when it has one; with none, work out what matters most from the project itself.
 
 Each wake: first what woke you, then in order:
 1. Needs you, failed or stalled: look why. Unblock what you can (nudge, resume, fix); what only I can answer, ask me once, in one clear question.
@@ -78,9 +103,7 @@ Limits:
 Reporting: one or two short plain lines, only what's new that I must know or decide; never repeat what you told me before. Reply only <hc no-reply/> when there's truly nothing worth doing: nothing to unblock, check or start, and no next task worth adding. Alert me only for what can't wait (something down, work at risk).
 
 Stopping goal: none. Runs until I switch it off.
-"""
-# Starters earlier versions wrote: one never edited, wherever it is kept, stands for today's.
-OLD_STARTERS = ("""Direction: keep this space's tasks moving to done, without wasting my time or money. Don't invent work or redo old asks from past chats.
+""", """Direction: keep this space's tasks moving to done, without wasting my time or money. Don't invent work or redo old asks from past chats.
 
 Each wake: first what woke you, then in order:
 1. Needs you, failed or stalled: look why. Unblock what you can (nudge, resume, fix); what only I can answer, ask me once, in one clear question.
@@ -526,7 +549,13 @@ def message(space, a, reasons):
            "Direction: none set. Work out what matters most from the project itself: its README, docs and goals, "
            "recent commits and merged tasks, open issues and PRs, and what the person asked for lately.")
     body = (f"Autopilot wake: {why}, {when(now())}.\n"
-            "You are on Autopilot in this space: you drive it forward, the person steers. Read the heartbeat, the "
+            "You are on Autopilot in this space: you drive it forward and decide on your own; the person steers "
+            "later. Never ask the person a question on a wake: make every call yourself (product and taste choices "
+            "too: pick the best option and say in one line what you chose and why), answer workers' questions "
+            "yourself and unblock them. The one exception is a take-over: something irreversible or outside this "
+            "space that can't wait (spending money, deploying or publishing, deleting data, credentials, a security "
+            "problem) or being stuck after retrying twice: don't do it, send one herdr-task alert \"<what>\" "
+            "--body \"<why>\", say it in one line and carry on with other work. Read the heartbeat, the "
             "direction and your saved progress below, look at the tasks (herdr-task list --json), and do the most "
             "useful work the heartbeat permits: unblock and check what's open, start what's ready to start, and, "
             "unless the heartbeat says otherwise, look at the project and add and start the next most valuable "

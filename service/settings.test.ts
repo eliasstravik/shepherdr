@@ -77,6 +77,7 @@ test("Autopilot: Everywhere's unless a space sets its own, kept with the rest an
   expect(row("sp4", "autopilot.heartbeat").value).toBe(APc.STARTER);
   s.set("autopilot.heartbeat", null, "sp4", web);
   expect(page("all").about).toContain("push the project forward");
+  expect(page("all").about).toContain("never asking you");
   // Reset: back to Everywhere's
   s.set("autopilot.every", null, "pi/sp5", api);
   s.set("autopilot.heartbeat", null, "pi/sp5", api);

@@ -227,7 +227,7 @@ class Autopilot(unittest.TestCase):
         as everywhere.md.bak; a file the person edited is left as it is, with no backup."""
         path = self.ap.heartbeat_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        last = self.ap.OLD_STARTERS[0]
+        last = self.ap.OLD_STARTERS[1]
         self.assertIn("Don't invent work", last)
         with open(path, "w") as f:
             f.write(last)
@@ -249,6 +249,40 @@ class Autopilot(unittest.TestCase):
             self.assertEqual(f.read(), edited)
         self.assertFalse(os.path.exists(path + ".bak"))
         self.assertIn("4. New tasks: only what I ask for", self.ap.message("sp1", {}, ["run now"]))
+
+    def test_the_asking_starter_upgrades_with_a_backup(self):
+        """3.1.5's starter (which told it to ask) becomes today's deciding one, kept as everywhere.md.bak;
+        an edited one stays as it is, with no backup."""
+        path = self.ap.heartbeat_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        last = self.ap.OLD_STARTERS[0]
+        self.assertIn("ask me once, in one clear question", last)
+        with open(path, "w") as f:
+            f.write(last)
+        self.cmd("list")
+        with open(path) as f:
+            self.assertEqual(f.read(), self.ap.STARTER)
+        with open(path + ".bak") as f:
+            self.assertEqual(f.read(), last)
+        os.remove(path + ".bak")
+        edited = last.replace("At most 2 a wake", "At most 1 a wake")
+        with open(path, "w") as f:
+            f.write(edited)
+        self.cmd("list")
+        with open(path) as f:
+            self.assertEqual(f.read(), edited)
+        self.assertFalse(os.path.exists(path + ".bak"))
+
+    def test_a_wake_decides_instead_of_asking(self):
+        """The wake and the starter tell it to make the calls itself and never ask; only a take-over,
+        for what's critical, goes to the person as an alert."""
+        m = self.ap.message("sp1", {}, ["schedule"])
+        for words in ("Never ask the person a question on a wake", "pick the best option", "Never ask me a question",
+                      "Take over: the only time you stop for me", "herdr-task alert", "carry on with other work",
+                      "answer it yourself"):
+            self.assertIn(words, m)
+        for words in ("ask me once", "Ask before anything", "Tell me in a line if it looks right"):
+            self.assertNotIn(words, m)
 
     def test_a_wake_drives_the_project(self):
         """By default a wake asks for new tasks that push the project forward, toward the space's
