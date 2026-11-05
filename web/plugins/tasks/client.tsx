@@ -145,8 +145,8 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
  * - the text: the title owns the first line; under it one quiet line read left to right, never pushed apart: the
  *   task's id (dim, monospace), what it says now (why it needs you, what its agent does: at most 40 characters, the
  *   whole of it in the row's label), then where it is after a dot, whole or not at all (it gives way first);
- * - the end, centred on the row: the one thing to act on or watch: Review, the time left ("2h left") or an
- *   automation's next run (`meta`).
+ * - the end, centred on the row (in a narrow list, at the second line's end): the one thing to act on or watch:
+ *   Review, the time left ("2h left") or an automation's next run (`meta`).
  * A row with nothing under its title is one line. `tip`: more for its button's label only (an automation's error).
  */
 function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, dim, meta, where, action, tip, onOpen, menu, children }: {
@@ -159,7 +159,7 @@ function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, di
   const end = action ?? (left ? <span className="shrink-0 text-[0.75rem] font-medium whitespace-nowrap text-work-fg tabular-nums phone:text-[0.8125rem]">{left} left</span>
     : meta ? <span className="shrink-0 text-[0.75rem] whitespace-nowrap text-fg3 tabular-nums phone:text-[0.8125rem]">{meta}</span> : null)
   return (
-    <li data-flip={flip} className={clsx(rowClass(sel, kb), 'group relative p-0! select-none [-webkit-touch-callout:none]', menu?.open && !sel && 'bg-hover')} {...(menu?.press ?? {})}>
+    <li data-flip={flip} className={clsx(rowClass(sel, kb), 'group @container relative p-0! select-none [-webkit-touch-callout:none]', menu?.open && !sel && 'bg-hover')} {...(menu?.press ?? {})}>
       {/* the whole row opens it: one button stretched under it; Review sits over it, a button of its own */}
       {onOpen ? (
         <button
@@ -171,13 +171,13 @@ function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, di
         />
       ) : null}
       {/* what the row shows is said by its button's label: only Review is read on its own. A grid: the glyph, the title
-          and the end on a desktop's first line (the end centred on the row); on a phone the end sits at the second
-          line's end, so the title has the whole first line */}
+          and the end on the first line (the end centred on the row); in a narrow list (a phone, a tablet's panel) the
+          end sits at the second line's end, so the title has the whole first line */}
       <div className={clsx('pointer-events-none relative grid min-h-[inherit] w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 px-2 phone:px-3', two && 'gap-y-0.5 py-2')}>
         <span aria-hidden className="col-start-1 row-start-1 grid h-5 w-3.5 place-items-center phone:h-6 phone:w-4">{glyph}</span>
-        <span aria-hidden={!!onOpen} className={clsx('col-start-2 row-start-1 min-w-0 truncate text-[0.875rem]/5 phone:text-base/6', dim ? 'text-fg2' : 'text-fg', two && 'phone:col-end-4')}>{title}</span>
+        <span aria-hidden={!!onOpen} className={clsx('col-start-2 row-start-1 min-w-0 truncate text-[0.875rem]/5 phone:text-base/6', dim ? 'text-fg2' : 'text-fg', two && '@max-[24rem]:col-end-4')}>{title}</span>
         {two ? (
-          <span aria-hidden={!!onOpen} className="col-start-2 row-start-2 flex h-4 min-w-0 items-center gap-1.5 text-[0.75rem]/4 phone:h-6 phone:text-[0.8125rem]/5">
+          <span aria-hidden={!!onOpen} className="col-start-2 row-start-2 flex h-4 min-w-0 @max-[24rem]:h-6 items-center gap-1.5 text-[0.75rem]/4 phone:h-6 phone:text-[0.8125rem]/5">
             {ref_ ? <span className="shrink-0 font-mono text-[0.6875rem] text-fg3 phone:text-[0.75rem]">{ref_}</span> : null}
             {shown ? <span className="min-w-0 shrink truncate text-fg2">{shown}</span> : null}
             {/* where it is takes the room left after the words, whole or not at all: it drops under the line, out of
@@ -190,7 +190,7 @@ function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, di
             ) : null}
           </span>
         ) : null}
-        {end ? <span className={clsx('col-start-3 row-start-1 flex items-center', two && 'row-span-2 phone:row-span-1 phone:row-start-2')}>{end}</span> : null}
+        {end ? <span className={clsx('col-start-3 row-start-1 flex items-center', two && 'row-span-2 @max-[24rem]:row-span-1 @max-[24rem]:row-start-2')}>{end}</span> : null}
       </div>
       {children}
     </li>
