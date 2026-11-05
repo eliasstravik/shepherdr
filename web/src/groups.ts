@@ -15,6 +15,7 @@ export const GROUPS: [Task['status'], string][] = [
   ['merging', 'Merging'],
   ['work', 'Working'],
   ['queued', 'Queued'],
+  ['scheduled', 'Scheduled'],
   ['todo', 'To do'],
   ['done', 'Done'],
 ]

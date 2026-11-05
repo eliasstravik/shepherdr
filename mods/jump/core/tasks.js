@@ -7,10 +7,11 @@ import { REASONS } from "./needs.js";
 
 // An agent's own status, most urgent first.
 export const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
-export const STATUS = { needs: "Needs you", working: "Working", merging: "Merging", ready: "Ready", queued: "Queued", todo: "To do", done: "Done" };
-export const RANK_OF = Object.fromEntries(["needs", "ready", "merging", "working", "queued", "todo", "done"].map((id, i) => [id, i]));
+export const STATUS = { needs: "Needs you", working: "Working", merging: "Merging", ready: "Ready", queued: "Queued", scheduled: "Scheduled", todo: "To do", done: "Done" };
+export const RANK_OF = Object.fromEntries(["needs", "ready", "merging", "working", "queued", "scheduled", "todo", "done"].map((id, i) => [id, i]));
 // The list's order: its groups, and the filter row's chips.
-export const ORDER = ["needs", "ready", "merging", "working", "queued", "todo", "done", "automations"];
+// Scheduled (SHEP-38, herdr-task --at/--in): a task that starts by itself at a time, after Queued (it waits longer).
+export const ORDER = ["needs", "ready", "merging", "working", "queued", "scheduled", "todo", "done", "automations"];
 // How the list can be grouped (the ⋯ menu's Group by; Shepherdr's GROUP_WORDS). "folder" was Space's old key.
 export const GROUP_BY = ["status", "space", "machine", "machine-space"];
 export const groupBy = (v) => (v === "folder" ? "space" : GROUP_BY.includes(v) ? v : "status");
@@ -83,7 +84,7 @@ export function place(list, task, { live = [], loaded = true, now = Date.now() }
   if (!(st === "running" || st === "ready")) live = [];
   const status = live.reduce((s, a) => ((RANK[a.status] ?? 0) > (RANK[s] ?? 0) ? a.status : s), null);
   const states = live.map((a) => a.status);
-  let section = ["todo", "queued", "done"].includes(st) ? st : null, needs = null, why = null;
+  let section = ["todo", "queued", "scheduled", "done"].includes(st) ? st : null, needs = null, why = null;
   const need = (kind, text) => { section = "needs"; needs = kind; why = text; };
   if (section) return { list, task, live, status, section, needs, why };
   // Cut off by its model's provider (herdr-task tick): Working while Herdr waits to tell it to
@@ -158,6 +159,8 @@ export function reportOf(task, section, own = null, now = Date.now()) {
 
 // Sort within a section: the newest activity first; to do in the order they were added.
 export function order(section) {
+  // Scheduled: the next to start first.
+  if (section === "scheduled") return (a, b) => (a.task.scheduled_for ?? 0) - (b.task.scheduled_for ?? 0);
   if (section === "todo") return (a, b) => a.task.id - b.task.id;
   if (section === "done") return (a, b) => (b.task.done_at ?? 0) - (a.task.done_at ?? 0);
   return (a, b) => (b.task.ready_at ?? b.task.started ?? 0) - (a.task.ready_at ?? a.task.started ?? 0);
@@ -199,8 +202,31 @@ export function secondLine(p, w, queued = null, now = Date.now()) {
   const { section } = p;
   return section === "needs" || section === "merging" ? p.why : section === "working" ? p.why ?? w?.text ?? null
     : section === "queued" ? queued
+    : section === "scheduled" ? startsLine(p.task.scheduled_for, now)
     : section === "ready" ? (p.task.ready_at ? `Ready ${ago(p.task.ready_at, true, now)}` : "Ready to accept") : null;
 }
 
-// The minutes left under a working row's dot ("6m"), once its agent gave them.
-export const leftOf = (p, w) => (p.section === "working" && !p.why && w?.left != null ? short(w.left) : null);
+// The minutes left under a working row's dot ("6m"), once its agent gave them; a scheduled one's time until it starts
+// ("6h", "2d"), under its clock.
+export const leftOf = (p, w, now = Date.now()) => (p.section === "scheduled" ? untilShort(p.task.scheduled_for, now)
+  : p.section === "working" && !p.why && w?.left != null ? short(w.left) : null);
+
+// ---- Scheduled (SHEP-38) ----------------------------------------------------------------------------------------
+// herdr-task's when.py words: "Today 18:00", "Tomorrow 9:00", "Fri 9:00" this week, else "Nov 20 9:00".
+export function startsAt(ms, now = Date.now()) {
+  const d = new Date(ms), n = new Date(now);
+  const hm = `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const days = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - new Date(n.getFullYear(), n.getMonth(), n.getDate())) / 86400000);
+  if (days === 0) return `Today ${hm}`;
+  if (days === 1) return `Tomorrow ${hm}`;
+  if (days > 1 && days < 7) return `${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()]} ${hm}`;
+  return `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()]} ${d.getDate()} ${hm}`;
+}
+// Until it starts, as few letters as fit under a dot: "45m", "6h", "2d"; "now" once due (the next tick starts it).
+export function untilShort(ms, now = Date.now()) {
+  if (typeof ms !== "number") return null;
+  const m = Math.ceil((ms - now) / 60000);
+  return m <= 0 ? "now" : m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`;
+}
+// A scheduled row's second line: "Starts Today 18:00"; "Starts now" once due.
+export const startsLine = (ms, now = Date.now()) => (typeof ms !== "number" ? "Scheduled" : ms <= now ? "Starts now" : `Starts ${startsAt(ms, now)}`);

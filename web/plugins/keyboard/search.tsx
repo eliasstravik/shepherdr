@@ -13,7 +13,7 @@ type Kind = 'space' | 'task' | 'artifact' | 'machine'
 const KINDS: Kind[] = ['space', 'task', 'artifact', 'machine']
 const GROUP: Record<Kind, string> = { space: 'Spaces', task: 'Tasks', artifact: 'Artifacts', machine: 'Machines' }
 const SHOWN = 8
-const STATUS: Record<TaskStatus, string> = { need: 'Needs you', work: 'Working', merging: 'Merging', ready: 'Ready', queued: 'Queued', todo: 'To do', done: 'Done' } as Record<TaskStatus, string>
+const STATUS: Record<TaskStatus, string> = { need: 'Needs you', work: 'Working', merging: 'Merging', ready: 'Ready', queued: 'Queued', scheduled: 'Scheduled', todo: 'To do', done: 'Done' } as Record<TaskStatus, string>
 
 type Item = { kind: Kind; key: string; label: string; sub: string; at: number; icon?: string; ref?: string; status?: TaskStatus; pct?: number; active?: boolean; go: () => void }
 

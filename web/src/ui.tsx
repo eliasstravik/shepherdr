@@ -64,6 +64,7 @@ export {
   MinusCircleIcon,
   MinusIcon,
   PauseIcon,
+  PlayIcon,
   PencilIcon as RenameIcon,
   PhoneXMarkIcon as EndCallIcon,
   PlusIcon,
@@ -422,8 +423,17 @@ export function etaShort(eta: number) {
  * the row's whole width. Anything else is the dot alone; frozen while it waits on you, the % it stopped at stays in its
  * pie (still working) or, on the needs-you mark, for screen readers: its line says what it asks.
  */
-export function TaskDot({ s, w }: { s: Status; w?: Report }) {
+export function TaskDot({ s, w, until }: { s: Status; w?: Report; until?: string }) {
   const dot = <Dot s={s} p={w?.progress} frozen={w?.paused ? w : undefined} />
+  // Scheduled (SHEP-38): its time until it starts under its calendar, as a working row's minutes left, in grey
+  if (s === 'scheduled' && until)
+    return (
+      <span className="mt-[3px] flex w-3.5 shrink-0 flex-col items-center self-stretch phone:mt-1 phone:w-4">
+        {dot}
+        <span aria-hidden className="mt-auto text-[0.625rem]/4 font-semibold whitespace-nowrap text-fg3 tabular-nums phone:text-[0.6875rem]/5">{until}</span>
+        <span className="sr-only">{until === 'now' ? ', starts now' : `, starts in ${until}`}</span>
+      </span>
+    )
   if (s !== 'work' || !w || w.paused || w.eta === undefined) return dot
   return (
     <span className="mt-[3px] flex w-3.5 shrink-0 flex-col items-center self-stretch phone:mt-1 phone:w-4">
@@ -518,6 +528,7 @@ const STATUS_WORD: Record<Status, string> = {
   work: 'Working',
   idle: 'Stopped',
   queued: 'Queued',
+  scheduled: 'Scheduled',
   todo: 'To do',
   done: 'Done',
   off: "Can't reach",

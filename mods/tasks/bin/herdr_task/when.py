@@ -123,7 +123,14 @@ def when_from(at=None, within=None, now_ms=None):
         raise Fail("Give --at or --in, not both.")
     if within is not None:
         return now_ms + parse_in(within)
-    ms = parse_at(at, now_ms)
+    try:
+        ms = parse_at(at, now_ms)
+    except Fail as e:
+        # A span typed where a time goes ("6h", "in 6 hours": the web's Other time… field) is from now.
+        try:
+            return now_ms + parse_in(at)
+        except Fail:
+            raise Fail(f"{e} Or a span from now, like \"6h\" or \"in 2 days\".")
     if ms <= now_ms:
         raise Fail(f"{at.strip()} has passed. " + AT_HOW)
     return ms

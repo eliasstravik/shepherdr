@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { place, queueReason, reportOf, estimated, order, ago, autoPrefix, refOf, taskKey, matches, busyAgain, secondLine, WORKING_AGAIN } from "./tasks.js";
+import { place, queueReason, reportOf, estimated, order, ago, autoPrefix, refOf, taskKey, matches, busyAgain, secondLine, leftOf, ORDER, STATUS, WORKING_AGAIN } from "./tasks.js";
 import { REASONS, fit } from "./needs.js";
 
 const NOW = 1_800_000_000_000;
@@ -105,4 +105,24 @@ describe("a problem someone is on (as herdr-task's on_it)", () => {
     const why = c.expect.why === "QUESTION" ? REASONS.question : c.expect.why;
     expect({ section: p.section, needs: p.needs, why: p.why }).toEqual({ section: c.expect.status, needs: c.expect.needs, why });
   });
+});
+
+// SHEP-38: a task that starts by itself at a time (herdr-task --at / --in) is Scheduled: its row says when ("Starts
+// Today 18:00"), its time until then under its mark ("6h"), the next to start first.
+test("a scheduled task says when it starts", () => {
+  const now = new Date(2026, 10, 5, 12, 0).getTime(); // a Thursday, noon
+  const at = (d, h, m = 0) => new Date(2026, 10, d, h, m).getTime();
+  const list = { prefix: "HAT", folder: "/f", tasks: [] };
+  const p = (ms) => place(list, { id: 1, state: "scheduled", scheduled_for: ms, agents: [] }, { now });
+  expect(p(at(5, 18)).section).toBe("scheduled");
+  expect(secondLine(p(at(5, 18)), null, null, now)).toBe("Starts Today 18:00");
+  expect(secondLine(p(at(6, 9)), null, null, now)).toBe("Starts Tomorrow 9:00");
+  expect(secondLine(p(at(9, 8, 15)), null, null, now)).toBe("Starts Mon 8:15");
+  expect(secondLine(p(at(25, 9)), null, null, now)).toBe("Starts Nov 25 9:00");
+  expect(secondLine(p(at(5, 11)), null, null, now)).toBe("Starts now");
+  expect([at(5, 12, 45), at(5, 18), at(7, 12)].map((ms) => leftOf(p(ms), null, now))).toEqual(["45m", "6h", "2d"]);
+  const rows = [p(at(7, 9)), p(at(5, 18))];
+  expect(rows.sort(order("scheduled")).map((r) => r.task.scheduled_for)).toEqual([at(5, 18), at(7, 9)]);
+  expect(ORDER.indexOf("scheduled")).toBe(ORDER.indexOf("queued") + 1);
+  expect(STATUS.scheduled).toBe("Scheduled");
 });

@@ -1093,6 +1093,10 @@ class Scheduled(unittest.TestCase):
             self.assertTrue("6h" in str(e.exception) or "how long" in str(e.exception), str(e.exception))
         with self.assertRaises(self.Fail):
             when_from("2020-01-01 09:00", None)  # passed
+        self.assertEqual(when_from("in 6 hours", None, thu), thu + 6 * 3600000)  # a span where a time goes: from now
+        with self.assertRaises(self.Fail) as e:
+            when_from("whenever", None, thu)
+        self.assertIn('"tomorrow 9:00"', str(e.exception))
         with self.assertRaises(self.Fail):
             self.add("Both", at="18:00", in_="6h")  # one or the other (argparse refuses it too)
 
