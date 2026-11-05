@@ -96,6 +96,9 @@ export interface Place {
   machine: string
   /** the machine's home space */
   home?: boolean
+  /** its folder on its machine, as herdr has it (no ~): the Tasks list's This space matches tasks by it (core/tasks.js
+   *  inSpace) */
+  folder?: string
   /** what its Tasks and Artifacts list: 2 its own; 1 its machine's (a home space); 0 every machine's (the main
    *  machine's home space, where there are more machines) */
   level: 0 | 1 | 2
@@ -385,6 +388,8 @@ export interface Automation {
   /** where it is, as its row says it: the space in its folder, else its list's name; and its machine (none: this computer) */
   listName?: string
   machine?: string | null
+  /** its list's folder on its machine: the Tasks list's This space matches it (core/tasks.js inSpace) */
+  folder?: string
   /** set off by another folder's task events (--from): that folder's machine (none: this computer), its space's name
    *  there (else the folder's last part), and the events ("merged", "ready"…) */
   from?: { machine: string | null; place: string; events: string[] }

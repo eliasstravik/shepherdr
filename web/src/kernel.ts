@@ -5,7 +5,7 @@ import { buildId } from '@shared/build.ts'
 import { expire, loadOutbox, prune, saveOutbox, settle, type Outgoing } from './outbox.ts'
 import { keptOf, mayReload, type Kept } from './reload.ts'
 import { OPEN_WITHIN, PONG_WITHIN, retryIn, SAY_LOST_AFTER } from './link.ts'
-import { groupFor, groupTasks, loadAllDone, loadGroups, loadShut, namesFor, saveAllDone, saveGroups, saveShut, shownGroup, type GroupBy, type Groups, type TaskGroup } from './groups.ts'
+import { groupFor, groupTasks, loadAllDone, loadGroups, loadScope, loadShut, namesFor, saveAllDone, saveGroups, saveScope, saveShut, scopeSpace, shownGroup, taskInSpace, type GroupBy, type Groups, type TaskGroup, type TaskScope } from './groups.ts'
 import { canDock, CHAT_READ, fit as fitSidebars, focused, loadSidebars, PANEL, RIGHT, saveSidebars, showPanel, toggleFocus as focusTo, type Sidebars } from './sidebars.ts'
 import { hush } from './motion.ts'
 import { closed, loadPanes, MAX_PANES, normal, only, opened, PANE_MIN, replaced, samePane, savePanes, type Pane, type Panes } from './panes.ts'
@@ -258,6 +258,8 @@ export interface UI {
   /** the Tasks panel's status filter, as 3.0's chips: all, needs, working, merging, ready, queued, todo, done or
    *  automations; kept on this device */
   taskFilter: string
+  /** the Tasks list's Show (the ⋯ menu): the space picked's tasks, or every space's; kept on this device */
+  taskScope: TaskScope
   /** what each list is filtered by, while typed: "place|tasks", "place|artifacts" (*pinned for the pinned chips) */
   filter: Record<string, string>
   /** message id with the reaction bar open */
@@ -321,6 +323,11 @@ function loadTaskFilter(): string {
     return 'all'
   }
 }
+/** the Tasks list's Show: the space picked's tasks or every space's, remembered on this device */
+export function setTaskScope(s: TaskScope) {
+  setUI({ taskScope: s, cur: 0 })
+}
+
 /** pick the Tasks panel's status filter (3.0's chips and More), remembered on this device */
 export function setTaskFilter(f: string) {
   try { localStorage.setItem(TASK_FILTER, f) } catch { /* private window: All statuses next time */ }
@@ -428,6 +435,7 @@ let state: State = {
     shut: loadShut(),
     archived: null,
     taskFilter: loadTaskFilter(),
+    taskScope: loadScope(),
     filter: {},
     pick: null,
     pickChat: null,
@@ -506,6 +514,7 @@ export function setUI(patch: Partial<UI> | ((ui: UI) => Partial<UI>)) {
   if (p.sidebars) saveSidebars(p.sidebars)
   if (p.split) savePanes(p.split)
   if (p.groups) saveGroups(p.groups)
+  if (p.taskScope) saveScope(p.taskScope)
   if (p.allDone) saveAllDone(p.allDone)
   if (p.shut) saveShut(p.shut)
   if (p.lists) saveLists(p.lists)
@@ -1035,13 +1044,13 @@ export function ladder(snap: Snapshot, id: string) {
 }
 
 /** a list's tasks: archived ones are left out of every list and count */
-export function tasksIn(snap: Snapshot, list: Pick<ListView, 'chips'>) {
-  return snap.tasks.filter((t) => inList(snap, list.chips, t.place) && !t.archived)
+export function tasksIn(snap: Snapshot, list: Pick<ListView, 'chips' | 'space'>) {
+  return snap.tasks.filter((t) => inList(snap, list.chips, t.place) && !t.archived && (!list.space || taskInSpace(list.space, t)))
 }
 
 /** a list's archived tasks, for its Archived view: the latest archived first */
-export function archivedIn(snap: Snapshot, list: Pick<ListView, 'chips'>) {
-  return snap.tasks.filter((t) => inList(snap, list.chips, t.place) && t.archived).sort((a, b) => b.archived! - a.archived!)
+export function archivedIn(snap: Snapshot, list: Pick<ListView, 'chips' | 'space'>) {
+  return snap.tasks.filter((t) => inList(snap, list.chips, t.place) && t.archived && (!list.space || taskInSpace(list.space, t))).sort((a, b) => b.archived! - a.archived!)
 }
 
 /** archive a task (its agent stops first) or bring it back; only Done tasks' own archiving, and plugins, still put one away */
@@ -1106,7 +1115,7 @@ export function counts(snap: Snapshot, placeId: string) {
 
 /* ---------- a place's tasks, grouped (groups.ts) ---------- */
 
-export { GROUPS, groupChoices, groupFor, namesFor, type GroupBy, type Groups, type TaskGroup } from './groups.ts'
+export { GROUPS, autoInSpace, groupChoices, groupFor, namesFor, needInSpace, scopeSpace, type GroupBy, type Groups, type TaskGroup, type TaskScope } from './groups.ts'
 
 /** a list's tasks in their groups, in the order they show: more machines' under each machine's name */
 export function taskGroups(snap: Snapshot, list: ListView, by: GroupBy): TaskGroup[] {
@@ -1237,6 +1246,8 @@ export interface ListView {
   level: 0 | 1 | 2
   /** Global Home’s default, before an explicit scope or search. */
   attention?: boolean
+  /** This space (the Tasks ⋯ menu's Show): the space whose tasks alone it lists; none: every space's */
+  space?: Place
 }
 
 const machineChip = (c: string) => c.startsWith('m:')
@@ -1271,13 +1282,16 @@ export function listOf(snap: Snapshot, chips: string[]): Omit<ListView, 'search'
   return { key: chips.length ? [...chips].sort().join('+') : '*', chips, level }
 }
 
-let lastList: { snap: Snapshot; lists: Lists; place: string; view: ListView } | null = null
+let lastList: { snap: Snapshot; lists: Lists; place: string; scope: TaskScope; view: ListView } | null = null
 
 /** the lists as they show now: the same object while nothing they hang on changes, so a part can pick it */
 export function listView(ui: UI, snap: Snapshot): ListView {
-  if (lastList && lastList.snap === snap && lastList.lists === ui.lists && lastList.place === ui.place) return lastList.view
-  const view = { ...listOf(snap, listChips(ui, snap)), search: listsPinned(ui, snap) ? '*pinned' : ui.place, attention: false }
-  lastList = { snap, lists: ui.lists, place: ui.place, view }
+  if (lastList && lastList.snap === snap && lastList.lists === ui.lists && lastList.place === ui.place && lastList.scope === ui.taskScope) return lastList.view
+  const chips = listChips(ui, snap)
+  // This space: the place picked, while the lists follow it with no chips of their own
+  const space = chips.length || listsPinned(ui, snap) ? undefined : scopeSpace(ui.taskScope, snap.places.find((p) => p.id === ui.place))
+  const view = { ...listOf(snap, chips), search: listsPinned(ui, snap) ? '*pinned' : ui.place, attention: false, ...(space ? { space } : {}) }
+  lastList = { snap, lists: ui.lists, place: ui.place, scope: ui.taskScope, view }
   return view
 }
 

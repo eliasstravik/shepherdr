@@ -12,8 +12,8 @@ test("each automation carries its machine (none: this computer)", () => {
     { id: 1, title: "Here", folder: "/w/home", machine: null },
     { id: 2, title: "There", folder: "/w/shop", machine: "vm-b" },
   ], spaces);
-  expect(out.home[0]).toMatchObject({ name: "Here", listName: "Home", machine: null });
-  expect(out["vm-b/s1"][0]).toMatchObject({ name: "There", listName: "shop", machine: "vm-b" });
+  expect(out.home[0]).toMatchObject({ name: "Here", listName: "Home", machine: null, folder: "/w/home" });
+  expect(out["vm-b/s1"][0]).toMatchObject({ name: "There", listName: "shop", machine: "vm-b", folder: "/w/shop" });
 });
 
 test("--from: the other folder's machine, its space's name there (else its last part) and the events", () => {

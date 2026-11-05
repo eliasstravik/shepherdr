@@ -4,7 +4,8 @@
 // space; one of more machines' (everything, or chips on more), also one list per machine, or each machine's name over
 // its spaces' lists. One space's list is by status alone. More machines' and one machine's each keep their choice,
 // remembered on this device; by status until chosen.
-import { doneNewestFirst, type Machine, type Place, type Task } from '@shared/types.ts'
+import { doneNewestFirst, type Automation, type Machine, type Need, type Place, type Task } from '@shared/types.ts'
+import * as TK from '@core/tasks.js'
 
 export type GroupBy = 'status' | 'machine' | 'project' | 'machine-project'
 export type Groups = { all: GroupBy; machine: GroupBy }
@@ -44,6 +45,44 @@ export function saveGroups(g: Groups) {
     /* private window: by status again next time */
   }
 }
+
+/** The Tasks list's Show, as the window's ⋯ (shared "tasks.scope" there): the space picked's tasks (the default), or
+ *  every space's. Kept on this device, as Group by. */
+export type TaskScope = 'space' | 'all'
+const SCOPE = 'shepherdr.taskScope'
+
+export function loadScope(): TaskScope {
+  try {
+    return localStorage.getItem(SCOPE) === 'all' ? 'all' : 'space'
+  } catch {
+    return 'space'
+  }
+}
+
+export function saveScope(s: TaskScope) {
+  try {
+    localStorage.setItem(SCOPE, s)
+  } catch {
+    /* private window: this space again next time */
+  }
+}
+
+/** the space This space keeps to: the place picked, unless it is a machine's home (no space picked: every space's) */
+export const scopeSpace = (scope: TaskScope, p: Place | undefined) => (scope === 'space' && p && !p.home ? p : undefined)
+
+// The window's rule for what is a space's (core/tasks.js inSpace): on its machine, and started for it, or in a list
+// whose folder is the space's or a repo directly in it.
+const inSpace = TK.inSpace as (space: { id: string; folder?: string; machine?: string | null }, x: { machine?: string | null; folder?: string | null; space?: string | null }) => boolean
+
+/** a task is the space's: its machine, the space it was started for (its place) and its list's folder */
+export const taskInSpace = (space: Place, t: Task) => inSpace(space, { machine: t.on, folder: t.taskFolder, space: t.place })
+
+/** an automation is the space's by its list's folder (host: this computer, an automation's machine when it has none) */
+export const autoInSpace = (space: Place, a: Automation, host: string) => inSpace(space, { machine: a.machine || host, folder: a.folder })
+
+/** an agent asking is the space's when its chat is in the space's tabs, as the window counts Needs you by tab: its
+ *  Assistant's (the need's place) or another tab's terminal */
+export const needInSpace = (space: Place, n: Pick<Need, 'place' | 'chat'>) => n.place === space.id || !!space.tabs?.some((t) => t.term === n.chat)
 
 const ALL_DONE = 'shepherdr.allDone'
 

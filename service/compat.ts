@@ -120,7 +120,7 @@ export function automationsBySpace(list: any[], spaces: Space[], spaceName: (s: 
       ...(a.last_error ? { error: String(a.last_error.message ?? ""), failed: a.last_error.kind === "fire" ? "fire" : "start" } : {}),
       ...(!a.last_error && !a.paused && a.next_run ? { nextAt: a.next_run } : {}),
       ...(ref ? { task: a.machine ? `${a.machine}:${ref}` : ref } : {}),
-      listName: s ? spaceName(s) : a.list ?? a.folder, machine: a.machine ?? null,
+      listName: s ? spaceName(s) : a.list ?? a.folder, machine: a.machine ?? null, ...(a.folder ? { folder: String(a.folder) } : {}),
       // --from (SHEP-14): the folder whose task events set it off, by its space's name there (else its last part),
       // and its machine (none: the automation's own)
       ...(a.from?.folder ? { from: fromOf(a, spaces, spaceName) } : {}) });
@@ -341,7 +341,7 @@ export class Compat {
       // machine's too, as its own window shows it); the space's folder until it has one
       const live = ak?.foreground?.cwd ?? ak?.cwd;
       const cwd = live ? (s.machine ? SPc.tilde(live) : shortHome(live)) : null;
-      return { id: s.id, name, ...(!s.name || s.name === "~" ? { unnamed: true } : {}), ...(s.icon ? { emoji: s.icon } : {}),...(s.git ? { git: s.git.linked ? "linked" : "main", repo: s.git.repo, gitName: s.git.name, branch: s.git.branch ?? null } : {}), ...(s.git?.linked ? { worktree: true } : {}), machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", mode: s.autopilot ? "autopilot" : "regular", chat: key, header, where, ...(cwd ? { cwd } : {}), assistantTab, ...(s.pilot ? { pilot: headerPilot(s.pilot) } : {}),store: artifactStore(s as any), ...((s as any).changedAt ? { changedAt: (s as any).changedAt } : {}),...(tabs.length ? { tabs } : {}) };
+      return { id: s.id, name, folder: s.folder, ...(!s.name || s.name === "~" ? { unnamed: true } : {}), ...(s.icon ? { emoji: s.icon } : {}),...(s.git ? { git: s.git.linked ? "linked" : "main", repo: s.git.repo, gitName: s.git.name, branch: s.git.branch ?? null } : {}), ...(s.git?.linked ? { worktree: true } : {}), machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", mode: s.autopilot ? "autopilot" : "regular", chat: key, header, where, ...(cwd ? { cwd } : {}), assistantTab, ...(s.pilot ? { pilot: headerPilot(s.pilot) } : {}),store: artifactStore(s as any), ...((s as any).changedAt ? { changedAt: (s as any).changedAt } : {}),...(tabs.length ? { tabs } : {}) };
     });
 
     // every agent's own helper agents (SHEP-54): their chats open by t:<address>, as a tab's

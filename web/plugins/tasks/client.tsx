@@ -1,7 +1,8 @@
-// Tasks, as Shepherdr 3's Tasks panel (mods/tasks): every task on every machine, Pinned first, then Needs you
-// (tasks and what any agent asks), then by the header's Group by (Status, Space, Machine, Machine › Space; kept on this
-// device). A filter row picks one status (All statuses, Needs you, Working, Ready, the rest under More). Each heading
-// folds what is under it away. A row says where its task is, as far as the grouping doesn't; a Ready row has Review. A
+// Tasks, as Shepherdr 3's Tasks panel (mods/tasks): the space picked's tasks, or every task on every machine (the
+// header's ⋯, Show: This space or All spaces; kept on this device), Pinned first, then Needs you (tasks and what any
+// agent asks), then by the header's Group by (Status, Space, Machine, Machine › Space; kept on this device). A filter
+// row picks one status (All statuses, Needs you, Working, Ready, the rest under More). Each heading folds what is under
+// it away. A row says where its task is, as far as the grouping doesn't; a Ready row has Review. A
 // row's menu only pins it (core/menus.js taskMenu, the window's too); the Assistant does the rest. Done tasks archive
 // themselves: the Archived row at the bottom opens them.
 import clsx from 'clsx'
@@ -9,11 +10,14 @@ import { openAccept, useAccepting } from '@client/screens/Accept.tsx'
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import {
   archivedIn,
+  autoInSpace,
   definePlugin,
   matches,
+  needInSpace,
   filteredGroups,
   goChat,
   setTaskFilter,
+  setTaskScope,
   tasksIn,
   namesFor,
   filterOf,
@@ -43,6 +47,7 @@ import {
   type Groups,
   type ListView,
   type TaskGroup,
+  type TaskScope,
 } from '@client/kernel.ts'
 import { keysMoved } from '@client/focus.ts'
 import {
@@ -294,12 +299,13 @@ const PRIMARY = ['needs', 'working', 'ready']
 /** what needs you that is no task's: an agent asking (an Assistant's question, a secret, its turn waiting), or an
  *  automation that didn't run or didn't start its task (the window's inbox items) */
 type AgentNeed = { id: string; chat?: string; who: string; why: string; where?: string; auto?: Automation }
-function agentNeeds(snap: Snapshot): AgentNeed[] {
+function agentNeeds(snap: Snapshot, space?: Place): AgentNeed[] {
   const where = (machine: string | null | undefined, name?: string) => {
     const m = machine && machine !== snap.host ? snap.machines?.find((x) => x.machine === machine)?.name ?? machine : undefined
     return [m, name].filter(Boolean).join(' · ') || undefined
   }
-  const asks = snap.needs.filter((n) => !n.task && n.chat).map((n) => {
+  // This space: only its own (core/tasks.js inSpace, its tabs' asks)
+  const asks = snap.needs.filter((n) => !n.task && n.chat && (!space || needInSpace(space, n))).map((n) => {
     const p = snap.places.find((x) => x.id === n.place)
     // why, in the window's words (core/needs.js REASONS, reqReason): a plan, a permission's own words, a question
     const q = n.question
@@ -309,7 +315,7 @@ function agentNeeds(snap: Snapshot): AgentNeed[] {
     return { id: n.id, chat: n.chat, who: 'Assistant', why, where: where(p?.machine, p?.name) }
   })
   // an automation goes by its name, with no id: "Didn't run" or "Didn't start its task"
-  const autos = Object.values(snap.automations ?? {}).flat().filter((a) => a.error)
+  const autos = Object.values(snap.automations ?? {}).flat().filter((a) => a.error && (!space || autoInSpace(space, a, snap.host)))
     .map((a) => ({ id: `auto:${a.machine ?? ''}:${a.listName}:${a.name}`, who: a.name, why: a.failed === 'fire' ? "Didn't run" : "Didn't start its task", where: where(a.machine, a.listName), auto: a }))
   return [...asks, ...autos]
 }
@@ -445,6 +451,7 @@ function TaskList(_: { placeId: string }) {
   const archived = useUI((u) => u.archived === key)
   const wanted = useUI((u) => u.taskFilter)
   const q = useUI((u) => filterOf(u, view.search, 'tasks'))
+  const scope = useUI((u) => u.taskScope)
   const place = placeOf(snap, getState().ui.place)
   const by = groupFor(chosen, view.level)
   // a task moving to another group glides there; a new one fades in; what a filter, Show more or a fold leaves just shows
@@ -453,9 +460,9 @@ function TaskList(_: { placeId: string }) {
   if (archived) return <ArchivedList list={view} />
   const loaded = !!snap.places.length || !!snap.tasks.length
   // what the search field holds: only what matches it shows, in its group (the window's matches())
-  const asks = agentNeeds(snap).filter((n) => !q || matches(q, n.who, n.why, n.where))
+  const asks = agentNeeds(snap, view.space).filter((n) => !q || matches(q, n.who, n.why, n.where))
   const live = tasksIn(snap, view).filter((t) => !q || found(snap, t, q))
-  const autos = Object.values(snap.automations ?? {}).flat().filter((a) => !q || matches(q, a.name, a.listName, a.machine ? machineName(snap.machines, a.machine) : undefined))
+  const autos = Object.values(snap.automations ?? {}).flat().filter((a) => (!view.space || autoInSpace(view.space, a, snap.host)) && (!q || matches(q, a.name, a.listName, a.machine ? machineName(snap.machines, a.machine) : undefined)))
   // the chips' counts: what each status holds now, as far as the search lets it (Needs you: its tasks and what else
   // needs you)
   const counts: Record<string, number> = { needs: live.filter((t) => t.status === 'need').length + asks.length, automations: autos.length }
@@ -567,7 +574,7 @@ function TaskList(_: { placeId: string }) {
         {/* Automations: their own group, last */}
         {autoGroup}
         {/* nothing at all: said once, never "yet" (3.0's) */}
-        {loaded && nothing && !q ? <Empty className="pt-3 text-fg3">{snap.tasks.length ? 'Nothing to do.' : 'No tasks on any machine. Ask an Assistant to plan some.'}</Empty> : null}
+        {loaded && nothing && !q ? <Empty className="pt-3 text-fg3">{emptyLine(snap, view, scope)}</Empty> : null}
         {archivedGroup ? (
           <div key="archived">
             <GroupHeading label="Archived" count={archivedGroup.tasks.length} flip="group:archived" />
@@ -581,6 +588,14 @@ function TaskList(_: { placeId: string }) {
       </div>
     </>
   )
+}
+
+/** The list's line when it shows nothing at all, as the window's: This space names the space and the way to every
+ *  space's; with no space picked (a machine's home) it lists every space's and says so */
+function emptyLine(snap: Snapshot, view: ListView, scope: TaskScope) {
+  if (view.space) return `Nothing in ${view.space.name || 'this space'}. All spaces, in the ⋯ menu, shows every space's tasks.`
+  if (!snap.tasks.length) return 'No tasks on any machine. Ask an Assistant to plan some.'
+  return scope === 'space' && !view.chips.length && view.search !== '*pinned' ? 'Nothing to do in any space. Pick a space to see only its tasks.' : 'Nothing to do.'
 }
 
 /** a heading's fold: shut or open, and what a tap does (all: Alt/Option held, its siblings go the same way) */
@@ -765,14 +780,18 @@ function grouping(g: Groups, snap: Snapshot): Groups {
 
 const GROUP_WORDS: Record<GroupBy, string> = { status: 'Status', machine: 'Machine', project: 'Space', 'machine-project': 'Machine › Space' }
 
-/** The Tasks header's ⋯: group a machine's tasks by status or space; more machines' also by machine, or by machine
- *  and then space (place, the place picked, is for plugins of old) */
+const SCOPE_WORDS: [TaskScope, string][] = [['space', 'This space'], ['all', 'All spaces']]
+
+/** The Tasks header's ⋯, as the window's: Show this space's tasks or every space's, then group a machine's tasks by
+ *  status or space; more machines' also by machine, or by machine and then space (place, the place picked, is for
+ *  plugins of old) */
 function TasksMenu(_: { place: Place }) {
   const snap = useSnap()!
   const view = useStore((s) => listView(s.ui, snap))
   const level = view.level
   const chosen = grouping(useUI((u) => u.groups), snap)
   const by = groupFor(chosen, level)
+  const scope = useUI((u) => u.taskScope)
   const phone = useUI((u) => u.device === 'phone')
   const [open, setOpen] = useState(false)
   // the machine ones only while more than one machine has tasks (the window's)
@@ -791,6 +810,23 @@ function TasksMenu(_: { place: Place }) {
       </B>
       {open ? (
         <Menu label="Group by" onClose={() => setOpen(false)} className="absolute top-full right-0 z-21 mt-1.5 max-w-[calc(100vw-24px)] origin-top-right">
+          <div role="group" aria-label="Show">
+            <MenuLabel>Show</MenuLabel>
+            {SCOPE_WORDS.map(([c, words]) => (
+              <MenuItem
+                key={c}
+                role="menuitemradio"
+                aria-checked={scope === c}
+                icon={scope === c ? <CheckIcon className={ic} /> : null}
+                onClick={() => {
+                  setOpen(false)
+                  setTaskScope(c)
+                }}
+              >
+                {words}
+              </MenuItem>
+            ))}
+          </div>
           <div role="group" aria-label="Group by">
             <MenuLabel>Group by</MenuLabel>
             {choices.map((c) => (
