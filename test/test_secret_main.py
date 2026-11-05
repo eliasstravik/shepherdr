@@ -57,11 +57,14 @@ class Machine(unittest.TestCase):
             p.stop()
         shutil.rmtree(self.dir, ignore_errors=True)
 
-    def be(self, me, record=None, mark=False, vault=None):
+    def be(self, me, record=None, mark=False, vault=None, host=None):
         with open(os.path.join(self.core, "core.json"), "w") as f:
             json.dump({"id": me, "name": me[3:]}, f)
+        docs = {"shepherdr.secrets": {"value": record, "version": 1}} if record else {}
+        if host:
+            docs["shepherdr.host"] = {"value": {"id": host, "at": 1}, "version": 1}
         with open(os.path.join(self.core, "docs.json"), "w") as f:
-            json.dump({"shepherdr.secrets": {"value": record, "version": 1}} if record else {}, f)
+            json.dump(docs, f)
         mk = os.path.join(self.herdr, "secret-remote")
         if mark:
             open(mk, "a").close()
@@ -89,9 +92,19 @@ class Record(Machine):
     def test_where(self):
         self.be(M3, {"id": MINI, "at": 2})
         with mock.patch.object(secret, "hc_json", lambda *a: {"machines": [{"name": "mac-mini", "id": MINI}, {"name": "vm", "id": VM}]}):
-            self.assertEqual(secret.main_machine(), {"here": False, "set": True, "id": MINI, "name": "mac-mini"})
+            self.assertEqual(secret.main_machine(), {"here": False, "set": True, "auto": False, "serve": "", "id": MINI, "name": "mac-mini"})
         self.be(MINI, {"id": MINI, "at": 2}, mark=True)
-        self.assertEqual(secret.main_machine(), {"here": True, "set": True, "id": MINI, "name": None})
+        self.assertEqual(secret.main_machine(), {"here": True, "set": True, "auto": False, "serve": "", "id": MINI, "name": None})
+
+    def test_where_following_serve_from(self):
+        # SHEP-33: nobody picked one: kept where they were (m3) and following the machine serving the web app
+        self.be(VM, {"id": M3, "at": 2, "auto": True}, mark=True, host=MINI)
+        with mock.patch.object(secret, "hc_json", lambda *a: {"machines": [{"name": "mac-mini", "id": MINI}, {"name": "m3", "id": M3}]}):
+            self.assertEqual(secret.main_machine(), {"here": False, "set": True, "auto": True, "serve": "mac-mini", "id": M3, "name": "m3"})
+            self.assertTrue(secret.remote())
+        # moved there: same as Serve from, seen from that machine
+        self.be(MINI, {"id": MINI, "at": 3, "auto": True}, host=MINI)
+        self.assertEqual(secret.main_machine(), {"here": True, "set": True, "auto": True, "serve": None, "id": MINI, "name": None})
 
 
 class Mark(Machine):
@@ -188,6 +201,39 @@ class Forward(Machine):
         self.assertEqual(json.loads(argv[-1]), {"id": M3, "links": self.links})
         with open(secret.VAULT) as f:
             self.assertEqual([e["name"] for e in json.load(f)["secrets"]], ["OLD"], "nothing kept here")
+
+    def test_none_named_set_goes_to_the_linked_machine_that_keeps_them(self):
+        # SHEP-33: the web app's machine is marked remote and no keeper is named yet: Settings › Secrets › Add there
+        # finds the linked machine that keeps them (herdr-secret where there) and hands it the value on stdin
+        self.be(MINI, None, mark=True)
+        links = [{"name": "vm", "id": VM, "state": "connected"}, {"name": "m3", "id": M3, "state": "connected"}]
+
+        def run(argv, **k):
+            self.calls.append((list(argv), k.get("input")))
+            if "where" in argv:
+                here = argv[argv.index("--on") + 1] == "m3"
+                return types.SimpleNamespace(returncode=0, stdout=json.dumps({"here": here}).encode(), stderr=b"")
+            return types.SimpleNamespace(returncode=0, stdout=b"Kept GITHUB_TOKEN.\n", stderr=b"")
+        with mock.patch.object(secret, "hc_json", lambda *a: {"machines": links}), mock.patch.object(secret.subprocess, "run", run), \
+                mock.patch.object(secret.sys, "stdin", types.SimpleNamespace(isatty=lambda: False, read=lambda: "ghp_value123\n")), mock.patch("sys.stdout"):
+            secret.cmd_set("GITHUB_TOKEN", self.args())
+        asked = [a[a.index("--on") + 1] for a, _ in self.calls if "where" in a]
+        self.assertEqual(asked, ["vm", "m3"])
+        argv, stdin = self.calls[-1]
+        self.assertEqual(argv[:5], ["hc", "exec", "--stdin", "--on", "m3"])
+        self.assertEqual(stdin, b"ghp_value123")
+        self.assertTrue(all("ghp_value123" not in " ".join(a) for a, _ in self.calls), "never in a command line")
+        self.assertEqual(argv[-4:-2], ["set", "GITHUB_TOKEN"])
+        with open(secret.VAULT) as f:
+            self.assertEqual([e["name"] for e in json.load(f)["secrets"]], ["OLD"], "nothing kept here")
+
+    def test_none_named_and_no_linked_machine_keeps_them(self):
+        self.be(MINI, None, mark=True)
+        with mock.patch.object(secret, "hc_json", lambda *a: {"machines": [{"name": "vm", "id": VM, "state": "connected"}]}), \
+                mock.patch.object(secret.subprocess, "run", lambda argv, **k: types.SimpleNamespace(returncode=0, stdout=b'{"here": false}', stderr=b"")), \
+                mock.patch.object(secret.sys, "stdin", types.SimpleNamespace(isatty=lambda: False, read=lambda: "v4lue")):
+            with self.assertRaisesRegex(secret.Fail, "No machine linked from here keeps the secrets"):
+                secret.cmd_set("GITHUB_TOKEN", self.args())
 
     def test_value_file_read_and_gone(self):
         os.makedirs(secret.DROP)

@@ -35,7 +35,7 @@ drops the space's own, and it inherits again. A few settings are one for every s
 | Autopilot | On or off | Space only | The header's switch: Everywhere never turns a space on |
 | Notify | All / Needs me / Off | Everywhere, space | A busy space can be quiet |
 | Secrets | A secret | Everywhere, machine, space | A key for one repo, or one machine's own |
-| Secrets | Kept on | All machines | One vault every machine's agents and voice calls use; best on an always-on machine |
+| Secrets | Kept on | All machines | One vault every machine's agents and voice calls use; follows Serve from unless picked |
 | Machines | When new tasks wait (memory, CPU, disk), low priority, memory cap per worker | All machines, machine | About a machine's hardware, not a space's work |
 | Machines | Home Assistant | Machine only | One per machine |
 | Window | Tabs, sidebar, counts, filters, subagents, Assistant in new spaces | Everywhere only | How the screen looks; the last is about spaces not made yet |
@@ -60,7 +60,13 @@ task values a machine set before (the old machine scope) still apply there until
   over herdr-core (the value on stdin, scopes renamed into that machine's words); that machine's service answers every
   agent's request even with no window open, and voice calls read the ElevenLabs key from there into memory only.
   `shepherdr secrets move-to <machine>` moves the vault (a backup on both sides; `move-to here --restore` on the old
-  one rolls back when the other is gone). No record yet: the machine without `~/.herdr/secret-remote` keeps them.
+  one rolls back when the other is gone). By default the secrets follow Serve from (Kept on says "Same as Serve from:
+  <machine>"): with no machine picked, each service names where the secrets are now (the machine whose vault has
+  some, else the one serving the web app: `autoKeeper`, a record with `auto: true`) and hands it on, so voice calls
+  and agents work with no setup; then the machine serving the web app moves them to itself with `move-to` (backup,
+  verified copy, rollback), and does so again when Serve from moves. Picking another machine in Kept on stops the
+  following; picking the Serve from machine starts it again. Voice calls with no record yet ask each linked machine
+  for the key. No record and nothing to decide yet: the machine without `~/.herdr/secret-remote` keeps them.
 - Notify is in the shared document (`notify`), kept in step the same way.
 - herdr-task reads the effective value: `settings_for()` for agents and tasks (the Settings block every brief ends
   with names who set each line), `autopilot.resolve()` for Autopilot (`herdr-task autopilot show` lists which parts are

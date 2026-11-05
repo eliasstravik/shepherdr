@@ -189,6 +189,11 @@ export const SECRETS = {
   // Kept on: the machine whose vault every machine's agents and voice calls use (shepherdr secrets move-to)
   keptOn: "Kept on", keptHere: "This computer", thisOne: "this computer",
   keptAbout: "Every machine's agents and voice calls get them from there. Pick an always-on machine.",
+  // nobody picked one: they follow Serve from (core/secrets.js followTo)
+  sameAsServe: (name) => `Same as Serve from: ${name}`,
+  sameAbout: "They stay with the machine serving the web app, and move with it. Every machine's agents and voice calls get them from there. Pick another machine to keep them there instead.",
+  forNow: (name) => `${name}, for now`,
+  following: (to) => `They follow Serve from: they move to ${to} on their own, with a backup, once both machines are on.`,
   unreachable: (name) => `Can't reach ${name}, which keeps them: agents on other machines can't get secrets until it's back.`,
   notLinked: "A machine not linked from here keeps them.",
   moveConfirm: (name) => `Keep secrets on ${name}?`,
