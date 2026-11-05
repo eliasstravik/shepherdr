@@ -4,6 +4,7 @@
 // web app reaches, no more. Every answer is a few short sentences to be spoken, never raw data; long ones are cut
 // here. An act changes nothing until the voice agent says the person confirmed it out loud (confirmed: true).
 import type { Snapshot, Task, Place } from "../web/shared/types.ts";
+import { navWords } from "../core/voice.js";
 
 /** Where a call comes from: its app, the chat it started in, and what that app shows now (sent by the page or the window). */
 export type Where = {
@@ -48,7 +49,10 @@ export interface VoiceIO {
   taskWhere?(id: string): { ref: string; folder: string; machine: string | null } | null;
 }
 
-export type Answer = { result: string; nav?: Nav; error?: boolean };
+/** a tool's answer: words for the voice agent; an open's nav, and what it shows in words, for the app to show and confirm */
+export type Answer = { result: string; nav?: Nav; shows?: string; error?: boolean };
+/** what the app said once it tried a nav: it shows it now (ok), or why not; with what it shows now */
+export type Ack = { ok: boolean; why?: string | null; where?: Record<string, unknown> };
 
 const MAX = 3500;
 const cut = (s: string, n: number) => { const t = String(s ?? "").replace(/\s+/g, " ").trim(); return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t; };
@@ -106,7 +110,6 @@ const spoken = (id: string) => id.split(":").pop()!.replace(/-/g, " ");
 // ---- finding what the person means --------------------------------------------------------
 
 const placeName = (snap: Snapshot, id: string | null | undefined) => snap.places.find((p) => p.id === id)?.name ?? "";
-const machineName = (snap: Snapshot, m: string | undefined) => snap.machines.find((x) => x.machine === m)?.name ?? m ?? "";
 const taskOfChat = (snap: Snapshot, key: string) => (key.endsWith("/worker") ? snap.tasks.find((t) => t.id === key.slice(0, -7)) ?? null : null);
 const placeOfChat = (snap: Snapshot, key: string) => snap.places.find((p) => p.chat === key) ?? null;
 
@@ -130,20 +133,101 @@ export function findTask(snap: Snapshot, id: unknown, where: Where): Task | null
   return live.find(match) ?? snap.tasks.find(match) ?? null;
 }
 
-/** the space meant: "here" (on screen, else the call's), its name, or words of it */
-export function findSpace(snap: Snapshot, id: unknown, where: Where): Place | null {
+/** every name a machine goes by: its name, its own name, its key ("eliass-mac-mini"), and "this computer" for the one
+ *  Shepherdr serves from (the Mac mini that serves calls itself "This computer", but the person says "the Mac mini") */
+export function machineAliases(m: Snapshot["machines"][number]) {
+  const out = [m.name, m.ownName ?? "", m.machine, ...(m.here ? ["this computer", "this machine"] : [])].filter(Boolean);
+  return [...new Set(out)];
+}
+const FILLER = new Set(["the", "a", "an", "space", "spaces", "project", "on", "in", "at", "of", "my", "assistant", "s", "to", "switch", "go", "open", "show", "one", "please", "machine", "computer", "s"]);
+const said = (s: unknown) => words(s).filter((w) => !FILLER.has(w));
+/** the machines named in the person's words, and the words left for the space: "Mac Mini Home" → the Mac mini, ["home"] */
+function machinesSaid(snap: Snapshot, id: unknown) {
+  const all = norm(id), ws = said(id);
+  let best = 0, hits: Snapshot["machines"] = [], used = new Set<string>();
+  for (const m of snap.machines) {
+    let score = 0;
+    const mine = new Set<string>();
+    for (const a of machineAliases(m)) {
+      const aw = said(a).filter((w) => w.length > 1);
+      // the whole name said ("mac mini", "macmini"), else the most of its words ("mini" for "eliass-mac-mini")
+      const whole = norm(a).length > 2 && all.includes(norm(a)) ? aw.length + 1 : 0;
+      const some = aw.filter((w) => ws.includes(w));
+      const sc = Math.max(whole, some.length);
+      if (sc > score) { score = sc; mine.clear(); (whole >= some.length ? aw : some).forEach((w) => mine.add(w)); if (whole) mine.add(norm(a)); }
+    }
+    if (!score) continue;
+    if (score > best) { best = score; hits = [m]; used = mine; }
+    else if (score === best) { hits.push(m); mine.forEach((w) => used.add(w)); }
+  }
+  return { machines: hits, rest: ws.filter((w) => !used.has(w)) };
+}
+
+/** every space the person may mean: "here", its name, its id, "Home on the Mac mini", "Mac Mini Home", words of it */
+export function spacesSaid(snap: Snapshot, id: unknown, where: Where): Place[] {
   if (isHere(id)) {
     const p = where.place ?? placeOfChat(snap, where.call)?.id ?? taskOfChat(snap, where.call)?.place;
-    return snap.places.find((x) => x.id === p) ?? null;
+    const hit = snap.places.find((x) => x.id === p);
+    return hit ? [hit] : [];
   }
   const want = norm(id);
-  const exact = snap.places.find((p) => norm(p.name) === want || norm(p.id) === want || norm(p.id.split("/").pop()) === want);
+  const exact = snap.places.filter((p) => norm(p.id) === want || norm(p.id.split("/").pop()) === want);
+  if (exact.length === 1) return exact;
+  const { machines, rest } = machinesSaid(snap, id);
+  const on = (p: Place) => !machines.length || machines.some((m) => m.machine === p.machine);
+  const named = (p: Place, ws: string[]) => {
+    const name = norm(p.name), nameWords = words(p.name);
+    if (!ws.length) return !!p.home;
+    return norm(ws.join("")) === name || ws.every((w) => nameWords.some((n) => n === w || (w.length > 2 && n.startsWith(w))) || (w.length > 2 && name.includes(w)) || (w === "home" && !!p.home));
+  };
+  // a machine said and its space's name: that machine's
+  let hits = snap.places.filter((p) => on(p) && named(p, rest));
+  // the space's name said whole (one with a machine's word in it, "mini app")
+  if (!hits.length) hits = snap.places.filter((p) => norm(p.name) === want);
+  if (!hits.length && machines.length) hits = snap.places.filter((p) => named(p, said(id)));
+  // words that name no space (a machine called otherwise than said): the space by the words that do, so it asks which
+  if (!hits.length) {
+    const known = said(id).filter((w) => snap.places.some((p) => named(p, [w])));
+    if (known.length) hits = snap.places.filter((p) => on(p) && named(p, known));
+    if (!hits.length && known.length) hits = snap.places.filter((p) => named(p, known));
+  }
+  if (hits.length > 1) {
+    // the same name exactly beats words of it
+    const whole = hits.filter((p) => norm(p.name) === norm(rest.join("")));
+    if (whole.length) hits = whole;
+  }
+  return hits;
+}
+
+/** the space meant, when only one fits (else null: none, or it could be several; open says which) */
+export function findSpace(snap: Snapshot, id: unknown, where: Where): Place | null {
+  const hits = spacesSaid(snap, id, where);
+  return hits.length === 1 ? hits[0] : null;
+}
+
+/** "Home on the Mac mini": a space as the person would say it, its machine named when the name is on more than one */
+const spaceSaid = (snap: Snapshot, p: Place) => `${p.name} on ${machineSaid(snap, p.machine)}`;
+/** a machine as the person knows it: "This computer" with its own name beside it */
+function machineSaid(snap: Snapshot, key: string | undefined) {
+  const m = snap.machines.find((x) => x.machine === key);
+  if (!m) return key ?? "";
+  return m.here && m.machine && norm(m.name) !== norm(m.machine) ? `${m.name} (${m.machine})` : m.name;
+}
+
+/** the artifact meant: "this" (open now), its id, or words of its title (most words first, newest first) */
+export function findArtifact(snap: Snapshot, id: unknown, where: Where) {
+  const arts = [...(snap.artifacts ?? [])].sort((a, b) => b.at - a.at);
+  if (isHere(id)) return (where.artifact ? arts.find((x) => x.id === where.artifact) : null) ?? arts[0] ?? null;
+  const exact = arts.find((x) => x.id === id);
   if (exact) return exact;
-  // "the shepherdr space", "shepherdr on the mac mini"
-  const ws = words(id).filter((w) => !["the", "space", "project", "on", "in", "assistant", "s"].includes(w));
-  if (!ws.length) return null;
-  const said = (p: Place) => `${p.name} ${machineName(snap, p.machine)}`.toLowerCase();
-  return snap.places.find((p) => ws.every((w) => said(p).includes(w))) ?? snap.places.find((p) => ws.some((w) => norm(p.name).includes(w) && w.length > 2)) ?? null;
+  const ws = said(id).filter((w) => !["artifact", "page", "proof", "report", "the", "that", "it"].includes(w));
+  if (!ws.length) return arts.find((x) => words(x.title).some((w) => words(id).includes(w))) ?? null;
+  const text = (x: any) => `${x.title} ${x.task ?? ""} ${x.by ?? ""}`.toLowerCase();
+  const score = (x: any) => ws.filter((w) => text(x).includes(w)).length;
+  let best = 0, hit: (typeof arts)[number] | null = null;
+  for (const a of arts) { const s = score(a); if (s > best) { best = s; hit = a; } }
+  // most of the words said: at least half (newest first among the best)
+  return hit && best * 2 >= ws.length ? hit : null;
 }
 
 /** a chat by what the person called it: "here" (the call's), a task (its agent's chat) or a space (its Assistant's) */
@@ -190,7 +274,7 @@ export function lookHere(snap: Snapshot, where: Where) {
   const t = where.task ? snap.tasks.find((x) => x.id === where.task) : null;
   if (t) shows.push(`task ${spoken(t.id)}, "${cut(t.name, 80)}" (${STATUS[t.status] ?? t.status})${where.tab && where.tab !== "chat" ? `, its ${where.tab} tab` : ""}`);
   const p = where.place ? snap.places.find((x) => x.id === where.place) : null;
-  if (p) shows.push(`${t ? "in " : ""}the ${p.name} space on ${machineName(snap, p.machine)}`);
+  if (p) shows.push(`${t ? "in " : ""}the ${p.name} space on ${machineSaid(snap, p.machine)}`);
   const a = where.artifact ? snap.artifacts.find((x) => x.id === where.artifact) : null;
   if (a) shows.push(`the artifact "${cut(a.title, 80)}"`);
   if (shows.length) out.push(`The app shows ${shows.join(", ")}.`);
@@ -230,7 +314,7 @@ function lookSpaces(snap: Snapshot) {
       const bits = [p.mode === "autopilot" || p.pilot?.on ? "Autopilot on" : "", n("need") ? `${n("need")} need you` : "", n("ready") ? `${n("ready")} ready` : "", n("work") ? `${n("work")} working` : ""].filter(Boolean);
       return `${p.name}${p.home ? " (home)" : ""}${bits.length ? `: ${bits.join(", ")}` : ""}`;
     });
-    out.push(`On ${m.name}${m.status === "off" ? " (offline)" : ""}: ${rows.join("; ")}.`);
+    out.push(`On ${machineSaid(snap, m.machine)}${m.status === "off" ? " (offline)" : ""}: ${rows.join("; ")}.`);
   }
   return done(out.join("\n") || "No spaces yet.");
 }
@@ -239,7 +323,7 @@ function lookMachines(snap: Snapshot) {
   return done(snap.machines.map((m) => {
     const sp = snap.places.filter((p) => p.machine === m.machine).length;
     const work = snap.tasks.filter((t) => !t.archived && t.status === "work" && snap.places.find((p) => p.id === t.place)?.machine === m.machine).length;
-    return `${m.name}${m.here ? " (where Shepherdr serves from)" : ""}: ${m.status === "off" ? `offline${m.unreachableSince ? ` since ${m.unreachableSince}` : ""}` : m.connecting ? "connecting" : "online"}, ${sp} space${sp === 1 ? "" : "s"}, ${work} task${work === 1 ? "" : "s"} working.`;
+    return `${machineSaid(snap, m.machine)}${m.here ? " (where Shepherdr serves from)" : ""}: ${m.status === "off" ? `offline${m.unreachableSince ? ` since ${m.unreachableSince}` : ""}` : m.connecting ? "connecting" : "online"}, ${sp} space${sp === 1 ? "" : "s"}, ${work} task${work === 1 ? "" : "s"} working.`;
   }).join("\n") || "No machines.");
 }
 
@@ -443,12 +527,17 @@ export async function voiceTool(name: string, params: any, where: Where, io: Voi
   }
 }
 
+/** An open: what to show and, until the app confirms, words that claim nothing (shown() says the rest). */
+const showing = (shows: string, nav: Nav): Answer => ({ result: `Asked the app to show ${shows}, but it hasn't confirmed: don't say it's on screen.`, nav, shows });
+
 function open(snap: Snapshot, where: Where, io: VoiceIO, what: string, id: string, tab: string, query: string): Answer {
   switch (what) {
     case "space": {
-      const p = findSpace(snap, id, where);
-      if (!p) return fail(`I can't find a space called "${cut(id, 60)}".`);
-      return done(`Showing the ${p.name} space.`, { kind: "space", place: p.id });
+      const hits = spacesSaid(snap, id, where);
+      if (!hits.length) return fail(`I can't find a space called "${cut(id, 60)}". Spaces: ${snap.places.slice(0, 12).map((p) => spaceSaid(snap, p)).join("; ")}.`);
+      if (hits.length > 1) return fail(`Which one: ${hits.slice(0, 6).map((p) => spaceSaid(snap, p)).join("; ")}? Ask the person.`);
+      const p = hits[0];
+      return showing(`the ${spaceSaid(snap, p)} space`, { kind: "space", place: p.id });
     }
     case "task": {
       const t = findTask(snap, id, where);
@@ -458,27 +547,32 @@ function open(snap: Snapshot, where: Where, io: VoiceIO, what: string, id: strin
       if (want === "pr" && !t.pr) return fail(`${spoken(t.id)} has no pull request yet.`);
       const at = io.taskWhere?.(t.id);
       const chat = t.agent?.chat;
-      return done(`Showing ${spoken(t.id)}${want === "chat" ? "" : want === "review" ? "'s review" : `'s ${want === "pr" ? "pull request" : want}`}.`,
+      return showing(`${spoken(t.id)}${want === "chat" ? "" : want === "review" ? "'s review" : `'s ${want === "pr" ? "pull request" : want}`}`,
         { kind: "task", task: t.id, tab: want, ...(chat ? { chat, addr: io.addrOf?.(chat) ?? null } : {}), ...(at ? { ref: at.ref, folder: at.folder, machine: at.machine } : {}), title: t.name });
     }
-    case "tasks": return done(`Showing the Tasks panel${query ? `, ${query}` : ""}.`, { kind: "tasks", ...(query ? { filter: stateOf(query) ?? undefined } : {}) });
-    case "needs": return done("Showing what needs you.", { kind: "needs" });
+    case "tasks": return showing(`the Tasks panel${query ? `, ${query}` : ""}`, { kind: "tasks", ...(query ? { filter: stateOf(query) ?? undefined } : {}) });
+    case "needs": return showing("what needs the person", { kind: "needs" });
     case "artifact": {
-      const ws = words(id);
-      const arts = [...(snap.artifacts ?? [])].sort((a, b) => b.at - a.at);
-      const a = isHere(id) && where.artifact ? arts.find((x) => x.id === where.artifact)
-        : arts.find((x) => x.id === id) ?? (ws.length ? arts.find((x) => ws.every((w) => `${x.title} ${(x as any).task ?? ""}`.toLowerCase().includes(w))) : arts[0]);
-      if (!a) return fail(`I can't find an artifact like "${cut(id, 60)}".`);
-      return done(`Opening "${cut(a.title, 80)}".`, { kind: "artifact", artifact: a.id, title: a.title, v: a.v, machine: (a as any).machine ?? null });
+      const a = findArtifact(snap, id, where);
+      if (!a) return fail(`I can't find an artifact like "${cut(id, 60)}". Look at artifacts for their titles.`);
+      return showing(`the artifact "${cut(a.title, 80)}"`, { kind: "artifact", artifact: a.id, title: a.title, v: a.v, machine: (a as any).machine ?? null });
     }
-    case "settings": return done(`Opening Settings${id ? `, ${id}` : ""}.`, { kind: "settings", ...(id ? { section: id } : {}) });
+    case "settings": return showing(`Settings${id ? `, ${id}` : ""}`, { kind: "settings", ...(id ? { section: id } : {}) });
     case "chat": {
       const c = id ? findChat(snap, id, where) : { key: where.call, name: chatName(snap, where.call) };
       if ("error" in c) return fail(c.error);
-      return done(`Showing ${c.name}'s chat.`, { kind: "chat", chat: c.key, addr: io.addrOf?.(c.key) ?? null });
+      return showing(`${c.name}'s chat`, { kind: "chat", chat: c.key, addr: io.addrOf?.(c.key) ?? null });
     }
   }
   return fail("open can show: space, task, tasks, needs, artifact, settings, chat.");
+}
+
+/** An open's answer once the app that started the call tried it: on screen only when it said so. show() asks that very
+ *  app (the page's call socket, or the window's chat) and resolves with its ack, or null when it didn't answer. */
+export async function shown(a: Answer, show: (nav: Nav) => Promise<Ack | null>): Promise<Answer> {
+  if (!a.nav) return a;
+  const ack = await show(a.nav).catch((e) => ({ ok: false, why: String(e?.message ?? e) }) as Ack);
+  return { ...a, ...(navWords(a.shows ?? "it", ack) as { result: string; error?: boolean }) };
 }
 
 /** What an act will do, in words to ask the person ("Accept SHEP 45, “Voice calls”? That merges it."). */

@@ -14,6 +14,7 @@
 //   recent.txt  the chat's last messages and the agent's status (looking at it without the service)
 //   where.json  from the chat: what the window shows ({ place, task, tab }), for the agent's "here"
 //   nav/*.json  written here: what the voice agent asked to show (open), done by the chat
+//   navved/*.json  from the chat, by the nav's name: { ok, why } once it tried it (open counts only then)
 // and beside it <call folder>.level: how loud the call is now, 0..1 (the agent while it speaks,
 // else the person), for the chat's wave.
 // Secrets: ELEVENLABS_API_KEY (the person's) from <app home>/secrets/elevenlabs.env, else as kept
@@ -25,7 +26,7 @@
 import { readFileSync, writeFileSync, readdirSync, rmSync, statSync, mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { API, opening, replyLine, statusLine, whereLine, apiError, ensureAgent, agentFile } from "./core/voice.js";
+import { API, opening, replyLine, statusLine, whereLine, apiError, ensureAgent, agentFile, navWords } from "./core/voice.js";
 import { SECRETS, keyFor, envFile } from "./key.ts";
 
 const [dir, addr, name] = process.argv.slice(2);
@@ -101,7 +102,7 @@ const TOKEN = join(process.env.SHEPHERDR_DATA || join(process.env.HOME ?? "", ".
 function where() { try { return JSON.parse(readFileSync(join(dir, "where.json"), "utf8")); } catch { return {}; } }
 
 /** A tool's answer from the service: { result, nav?, error? }, or null when the service can't be asked. */
-async function serviceTool(tool: string, params: unknown): Promise<{ result: string; nav?: unknown; error?: boolean } | null> {
+async function serviceTool(tool: string, params: unknown): Promise<{ result: string; nav?: unknown; shows?: string; error?: boolean } | null> {
   let token = "";
   try { token = readFileSync(TOKEN, "utf8").trim(); } catch { return null; }
   try {
@@ -224,6 +225,27 @@ async function moved() {
   if (a && !a.error) send(whereLine(a.result));
 }
 
+/** What the voice agent asked to show, done by the chat that started this call: its { ok, why }, or null when it
+ *  didn't answer in time (the chat reads nav/ about once a second). */
+async function showHere(nav: unknown): Promise<{ ok: boolean; why?: string } | null> {
+  const name = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}.json`;
+  try {
+    mkdirSync(join(dir, "nav"), { recursive: true });
+    writeFileSync(join(dir, "nav", `${name}.tmp`), JSON.stringify(nav));
+    renameSync(join(dir, "nav", `${name}.tmp`), join(dir, "nav", name));
+  } catch { return { ok: false, why: "the window couldn't be told" }; }
+  const ack = join(dir, "navved", name);
+  for (let i = 0; i < 40 && !ended; i++) {
+    await Bun.sleep(150);
+    let a: any = null;
+    try { a = JSON.parse(readFileSync(ack, "utf8")); } catch { continue; }
+    try { rmSync(ack); } catch {}
+    return { ok: a?.ok === true, why: typeof a?.why === "string" ? a.why : undefined };
+  }
+  try { rmSync(join(dir, "nav", name)); } catch {}
+  return null;
+}
+
 function send(line: object) {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(line));
 }
@@ -294,9 +316,8 @@ async function main() {
       const name = String(c.tool_name ?? ""), params = c.parameters ?? {};
       let a = await serviceTool(name, params);
       if (!a) a = await localTool(name, params);
-      if (a.nav) {
-        try { mkdirSync(join(dir, "nav"), { recursive: true }); writeFileSync(join(dir, "nav", `${Date.now()}-${Math.random().toString(36).slice(2, 7)}.json`), JSON.stringify(a.nav)); } catch {}
-      }
+      // an open: this window's chat shows it, and says so (navved/), before the agent may say it's on screen
+      if (a.nav) a = { ...a, ...navWords(a.shows ?? "it", await showHere(a.nav)) };
       if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "client_tool_result", tool_call_id: c.tool_call_id, result: a.result, is_error: !!a.error }));
     }
   };

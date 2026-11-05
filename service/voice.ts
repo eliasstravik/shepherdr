@@ -11,7 +11,7 @@ import type { Hub } from "./hub.ts";
 import { HOME } from "./paths.ts";
 import * as V from "../core/voice.js";
 import { secretBin } from "./secrets.ts";
-import { voiceTool, lookHere, type VoiceIO, type Where } from "./voice-tools.ts";
+import { voiceTool, lookHere, shown, type Ack, type Nav, type VoiceIO, type Where } from "./voice-tools.ts";
 
 const { API, opening, replyLine, statusLine, whereLine, envLines, apiError, voiceKey, ensureAgent, agentFile } = V as any;
 const APP = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
@@ -68,7 +68,22 @@ export type CallDeps = {
   follow(): () => void;
   /** the call's start: where it is (the page tells what it shows as it moves) */
   where: Where;
+  /** the voice agent's socket address (default: a signed ElevenLabs one for the person's key; a test's fake) */
+  dial?: () => Promise<string>;
+  /** how long an open waits for the page to say it shows it (ms) */
+  navWait?: number;
 };
+
+/** The voice agent's socket: a signed address for the "Herdr chat" agent of the person's key. */
+async function dialElevenLabs(hub: Hub) {
+  const k = await keyFor(hub);
+  if ("error" in k) throw new Error(k.error);
+  const id = await agentId(k.key, k.agent);
+  const { signed_url } = await api(`/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(id)}`, k.key) as { signed_url: string };
+  const url = new URL(signed_url);
+  if (url.protocol !== "wss:" || !url.hostname.endsWith("elevenlabs.io")) throw new Error("ElevenLabs gave an unexpected address.");
+  return signed_url;
+}
 
 /** The page's "where" message, checked: what it shows now. */
 export function pageWhere(m: any): Partial<Where> {
@@ -79,6 +94,17 @@ export function pageWhere(m: any): Partial<Where> {
 /** One call: the page's audio to the voice agent and back. message(): a frame from the page; end(): the page went. */
 export function voiceCall(hub: Hub, who: string, deps: CallDeps, page: Page) {
   const { view, io } = deps;
+  // an open goes to this very page (the socket that started the call: that phone, that browser tab) and counts only
+  // once the page says it shows it ({ type: "navved", id, ok, why, where })
+  let navs = 0;
+  const waiting = new Map<number, (a: Ack | null) => void>();
+  const show = (nav: Nav) => new Promise<Ack | null>((res) => {
+    if (ended) return res({ ok: false, why: "the call ended" });
+    const id = ++navs;
+    const t = setTimeout(() => { waiting.delete(id); res(null); }, deps.navWait ?? 5000);
+    waiting.set(id, (a) => { clearTimeout(t); waiting.delete(id); res(a); });
+    tell({ type: "nav", id, nav });
+  });
   let where = deps.where;
   let ws: WebSocket | null = null, ended = false;
   let lastStatus = view.status(), lastReply = view.lastReply()?.id ?? null;
@@ -93,6 +119,7 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, page: Page) {
     clearInterval(watch);
     if (saying) clearTimeout(saying);
     unfollow();
+    for (const done of [...waiting.values()]) done({ ok: false, why: "the call ended" });
     if (why) tell({ type: "error", message: why });
     try { ws?.close(); } catch {}
     try { page.close(); } catch {}
@@ -107,13 +134,7 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, page: Page) {
   }, 1000);
 
   (async () => {
-    const k = await keyFor(hub);
-    if ("error" in k) return end(k.error);
-    const key = k.key;
-    const id = await agentId(key, k.agent);
-    const { signed_url } = await api(`/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(id)}`, key) as { signed_url: string };
-    const url = new URL(signed_url);
-    if (url.protocol !== "wss:" || !url.hostname.endsWith("elevenlabs.io")) throw new Error("ElevenLabs gave an unexpected address.");
+    const signed_url = await (deps.dial ?? (() => dialElevenLabs(hub)))();
     if (ended) return;
     ws = new WebSocket(signed_url);
     ws.onopen = () => { said = here(); toVoice(opening(who, said)); };
@@ -138,8 +159,7 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, page: Page) {
       else if (m.type === "client_tool_call") {
         const c = m.client_tool_call ?? {};
         tell({ type: "state", state: "thinking" });
-        const a = await voiceTool(String(c.tool_name ?? ""), c.parameters ?? {}, where, io);
-        if (a.nav) tell({ type: "nav", nav: a.nav });
+        const a = await shown(await voiceTool(String(c.tool_name ?? ""), c.parameters ?? {}, where, io), show);
         toVoice({ type: "client_tool_result", tool_call_id: c.tool_call_id, result: a.result, is_error: !!a.error });
       }
     };
@@ -149,12 +169,18 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, page: Page) {
 
   return {
     /** the page's microphone: 16 kHz PCM (the page cancels its own speaker's echo, so the person can talk over it);
-     *  or, as text, where the page is now ({ type: "where", place, task, tab, artifact, settings, device }) */
+     *  or, as text, where the page is now ({ type: "where", place, task, tab, artifact, settings, device }), or what
+     *  it did with an open ({ type: "navved", id, ok, why?, where? }) */
     message(data: string | Buffer | ArrayBuffer) {
       if (ended) return;
       if (typeof data === "string") {
         let m: any = null;
         try { m = JSON.parse(data); } catch {}
+        if (m?.type === "navved" && typeof m.id === "number") {
+          if (m.where && typeof m.where === "object") where = { ...where, ...pageWhere(m.where) };
+          waiting.get(m.id)?.({ ok: m.ok === true, why: typeof m.why === "string" ? m.why.slice(0, 300) : null });
+          return;
+        }
         if (m?.type !== "where") return;
         where = { ...where, ...pageWhere(m) };
         // told once it settles (a tap through a few screens is one note)

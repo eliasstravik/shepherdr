@@ -58,7 +58,10 @@ export function sendWhere(where: Record<string, unknown>) {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'where', ...where }))
 }
 
-export async function startCall(chatKey: string, onError: (message: string) => void = () => undefined, onNav: (nav: Nav) => void = () => undefined, onOpen: () => void = () => undefined) {
+/** what this page did with an open: it shows it now (ok), or why not; and what it shows now */
+export type NavAck = { ok: boolean; why?: string; where?: Record<string, unknown> }
+
+export async function startCall(chatKey: string, onError: (message: string) => void = () => undefined, onNav: (nav: Nav) => NavAck = () => ({ ok: false, why: 'this page can\'t open things' }), onOpen: () => void = () => undefined) {
   stopCall()
   const url = new URL(`api/voice?chat=${encodeURIComponent(chatKey)}`, location.href)
   url.protocol = url.protocol.replace('http', 'ws')
@@ -71,8 +74,14 @@ export async function startCall(chatKey: string, onError: (message: string) => v
       if (!play(e.data)) { stopCall(); onError('Voice audio could not keep up. Start a new call.') }
       return
     }
-    const m = JSON.parse(String(e.data)) as { type: string; message?: string; state?: typeof phase; nav?: Nav }
-    if (m.type === 'nav' && m.nav) onNav(m.nav)
+    const m = JSON.parse(String(e.data)) as { type: string; id?: number; message?: string; state?: typeof phase; nav?: Nav }
+    // the voice agent asked to show something: shown here, on this very page, and said back (the agent says it's on
+    // screen only then)
+    if (m.type === 'nav' && m.nav) {
+      let ack: NavAck
+      try { ack = onNav(m.nav) } catch (err) { ack = { ok: false, why: (err as Error)?.message || 'it failed on the page' } }
+      if (typeof m.id === 'number' && ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'navved', id: m.id, ...ack }))
+    }
     if (m.type === 'state' && m.state) {
       phase = m.state
       phaseAt = Date.now()
