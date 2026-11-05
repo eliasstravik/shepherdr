@@ -65,3 +65,84 @@ export function envLines(text) {
 
 // An error from ElevenLabs, said without anything that looks like a key.
 export const apiError = (status, body) => `ElevenLabs said ${status}${body ? `: ${String(body).slice(0, 300).replace(/[A-Za-z0-9_-]{32,}/g, "…")}` : ""}`;
+
+// ---- the key ------------------------------------------------------------------------------
+// ELEVENLABS_API_KEY lives in Settings › Secrets (Everywhere), in the vault on the machine that keeps the secrets
+// (`herdr-secret where`; Settings › Secrets › Kept on). A call on another machine reads it from there over herdr-core's
+// link into memory only: it's never written, logged or copied here. The voice agent's id made with it is kept beside it
+// there (secrets/elevenlabs-agent.env, with a tag of the key), so every machine uses the same "Herdr chat" agent.
+
+export const KEY_NAME = "ELEVENLABS_API_KEY";
+export const NO_KEY = "Voice calls need an ElevenLabs key: add ELEVENLABS_API_KEY in Settings › Secrets, for Everywhere.";
+export const noKeyOn = (name) => `Voice calls need an ElevenLabs key: ${name}, which keeps your secrets, has none. Add ELEVENLABS_API_KEY in Settings › Secrets, for Everywhere.`;
+export const unreachable = (name) => `Can't reach ${name}, which keeps your secrets, for the ElevenLabs key: is it on and linked? Try again in a moment.`;
+export const NO_MAIN = "This machine asks another for its secrets, but none is named to keep them yet: pick one in Settings › Secrets.";
+
+// Run with python3 on the machine that keeps the secrets: prints {"key", "agent"} (the agent only if made with this
+// key). Reads the vault's Everywhere entry, else the old secrets/elevenlabs.env there.
+export const KEY_SCRIPT = `
+import hashlib, json, os
+H = os.path.expanduser("~")
+app = os.environ.get("HERDR_APP_HOME") or os.path.join(H, ".config", "herdr-app")
+def env(p):
+    out = {}
+    try:
+        with open(p) as f:
+            for l in f:
+                l = l.strip()
+                if l.startswith("export "):
+                    l = l[7:].strip()
+                if l and not l.startswith("#") and "=" in l:
+                    k, v = l.split("=", 1)
+                    out[k.strip()] = v.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return out
+key = ""
+try:
+    with open(os.path.join(H, ".herdr", "vault.json")) as f:
+        v = json.load(f)
+    key = next((e["value"] for e in v.get("secrets", []) if e.get("name") == "${KEY_NAME}" and e.get("scope") == "everywhere" and isinstance(e.get("value"), str)), "")
+except Exception:
+    pass
+key = key or env(os.path.join(app, "secrets", "elevenlabs.env")).get("${KEY_NAME}", "")
+a = env(os.path.join(app, "secrets", "elevenlabs-agent.env"))
+tag = hashlib.sha256(key.encode()).hexdigest()[:16] if key else ""
+print(json.dumps({"key": key, "agent": a.get("ELEVENLABS_AGENT_ID", "") if key and a.get("ELEVENLABS_KEY_TAG") == tag else ""}))
+`;
+
+/** The vault's Everywhere value of a name (the vault file's text), else "". */
+export function vaultValue(text, name = KEY_NAME) {
+  try {
+    const v = JSON.parse(text);
+    const e = (Array.isArray(v?.secrets) ? v.secrets : []).find((x) => x?.name === name && x?.scope === "everywhere");
+    return typeof e?.value === "string" ? e.value : "";
+  } catch { return ""; }
+}
+
+/**
+ * The key for a call: { key, agent?, from } (from: "file" | "here" | the main machine's name) or { error, why }
+ * (why: "none" when the machine that keeps the secrets truly has none, "unreachable" when it can't be asked now,
+ * "unnamed" when no machine is named to keep them). io:
+ *   oldFile()          the old <app home>/secrets/elevenlabs.env here: its key or ""
+ *   where()            `herdr-secret where --json` here: { here, set, name } (null: no herdr-secret: this machine)
+ *   vault()            the vault file's text here, or null
+ *   ask(name, script)  python3 -c script on that machine: its stdout, or null when it couldn't run there
+ */
+export async function voiceKey(io) {
+  const file = io.oldFile();
+  if (file) return { key: file, from: "file" };
+  const w = await io.where().catch(() => null);
+  if (!w || w.here) {
+    const key = vaultValue(io.vault() ?? "");
+    return key ? { key, from: "here" } : { error: NO_KEY, why: "none" };
+  }
+  if (!w.set) return { error: NO_MAIN, why: "unnamed" };
+  if (!w.name) return { error: unreachable("the machine that keeps your secrets (not linked from here)"), why: "unreachable" };
+  const out = await io.ask(w.name, KEY_SCRIPT).catch(() => null);
+  let r = null;
+  try { r = JSON.parse(String(out ?? "").trim().split("\n").pop()); } catch {}
+  if (!r || typeof r.key !== "string") return { error: unreachable(w.name), why: "unreachable" };
+  if (!r.key) return { error: noKeyOn(w.name), why: "none" };
+  return { key: r.key, agent: typeof r.agent === "string" && /^[\w-]{1,200}$/.test(r.agent) ? r.agent : "", from: w.name };
+}

@@ -13,14 +13,15 @@
 // and beside it <call folder>.level: how loud the call is now, 0..1 (the agent while it speaks,
 // else the person), for the chat's wave.
 // Secrets: ELEVENLABS_API_KEY (the person's) from <app home>/secrets/elevenlabs.env, else as kept
-// in Settings › Secrets for Everywhere (the vault). The voice
-// agent made for this ("Herdr chat") is kept as ELEVENLABS_AGENT_ID in
-// secrets/elevenlabs-agent.env. Neither is ever printed or logged.
+// in Settings › Secrets for Everywhere (the vault), on the machine that keeps the secrets: read
+// from there over herdr-core's link into memory only (core/voice.js voiceKey). The voice agent
+// made for this ("Herdr chat") is kept as ELEVENLABS_AGENT_ID in secrets/elevenlabs-agent.env,
+// with a tag of the key. The key is never printed, logged or written here.
 
 import { readFileSync, writeFileSync, readdirSync, rmSync, statSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { API, agentSpec, opening, replyLine, statusLine, envLines, apiError } from "./core/voice.js";
+import { API, agentSpec, opening, replyLine, statusLine, envLines, apiError, voiceKey } from "./core/voice.js";
 
 const [dir, addr, name] = process.argv.slice(2);
 if (!dir || !addr) { console.error("usage: bun voice.ts <call folder> <agent address> <agent name>"); process.exit(2); }
@@ -65,14 +66,23 @@ process.on("SIGINT", () => end());
 
 // ---- secrets ------------------------------------------------------------------------------
 
-// A key kept in Settings › Secrets for Everywhere (~/.herdr/vault.json, owner-only), else "".
-function vaultKey(name: string): string {
+// A program's output (null: it failed), its input none.
+async function output(argv: string[]) {
   try {
-    const v = JSON.parse(readFileSync(join(process.env.HOME ?? "", ".herdr", "vault.json"), "utf8"));
-    const e = (Array.isArray(v?.secrets) ? v.secrets : []).find((x: any) => x?.name === name && x?.scope === "everywhere");
-    return typeof e?.value === "string" ? e.value : "";
-  } catch { return ""; }
+    const p = Bun.spawn(argv, { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    const out = await new Response(p.stdout).text();
+    return (await p.exited) === 0 ? out : null;
+  } catch { return null; }
 }
+const secretBin = () => [join(HOME, "bin", "herdr-secret"), join(process.env.HOME ?? "", ".local", "bin", "herdr-secret")].find(existsSync) ?? "herdr-secret";
+
+// The key: the old file here, the vault here, or the machine that keeps the secrets (in memory only).
+const keyFor = () => voiceKey({
+  oldFile: () => envFile(join(SECRETS, "elevenlabs.env")).ELEVENLABS_API_KEY || "",
+  where: async () => { const out = await output([secretBin(), "where", "--json"]); return out ? JSON.parse(out) : null; },
+  vault: () => { try { return readFileSync(join(process.env.HOME ?? "", ".herdr", "vault.json"), "utf8"); } catch { return null; } },
+  ask: (on: string, script: string) => output(["hc", "exec", "--on", on, "--timeout", "15", "--", "python3", "-c", script]),
+}) as Promise<{ key: string; agent?: string } | { error: string; why: string }>;
 
 function envFile(file: string): Record<string, string> {
   try { return envLines(readFileSync(file, "utf8")); } catch { return {}; }
@@ -88,16 +98,20 @@ async function api(path: string, key: string, init: RequestInit = {}) {
 }
 
 // The dedicated "Herdr chat" voice agent: made once with the person's key, its id kept in secrets.
-async function agentId(key: string) {
+// (made: the one the machine that keeps the key made with it.) Only the id and a tag of the key are kept here.
+async function agentId(key: string, made = "") {
   const file = join(SECRETS, "elevenlabs-agent.env");
   const saved = envFile(file);
   const tag = createHash("sha256").update(key).digest("hex").slice(0, 16);
-  if (saved.ELEVENLABS_AGENT_ID && (!saved.ELEVENLABS_KEY_TAG || saved.ELEVENLABS_KEY_TAG === tag)) return saved.ELEVENLABS_AGENT_ID;
-  const r = await api("/convai/agents/create", key, { method: "POST", body: JSON.stringify(agentSpec(who)) }) as { agent_id?: string };
-  if (typeof r.agent_id !== "string" || !/^[\w-]{1,200}$/.test(r.agent_id)) throw new Error("ElevenLabs didn't make the voice agent.");
+  if (saved.ELEVENLABS_AGENT_ID && saved.ELEVENLABS_KEY_TAG === tag) return saved.ELEVENLABS_AGENT_ID;
+  const id = made || (saved.ELEVENLABS_AGENT_ID && !saved.ELEVENLABS_KEY_TAG ? saved.ELEVENLABS_AGENT_ID : "") || await (async () => {
+    const r = await api("/convai/agents/create", key, { method: "POST", body: JSON.stringify(agentSpec(who)) }) as { agent_id?: string };
+    if (typeof r.agent_id !== "string" || !/^[\w-]{1,200}$/.test(r.agent_id)) throw new Error("ElevenLabs didn't make the voice agent.");
+    return r.agent_id;
+  })();
   mkdirSync(SECRETS, { recursive: true, mode: 0o700 });
-  writeFileSync(file, `# The "Herdr chat" voice agent, made by the chat mod with ELEVENLABS_API_KEY.\nELEVENLABS_AGENT_ID=${r.agent_id}\nELEVENLABS_KEY_TAG=${tag}\n`, { mode: 0o600 });
-  return r.agent_id;
+  writeFileSync(file, `# The "Herdr chat" voice agent, made by the chat mod with ELEVENLABS_API_KEY.\nELEVENLABS_AGENT_ID=${id}\nELEVENLABS_KEY_TAG=${tag}\n`, { mode: 0o600 });
+  return id;
 }
 
 // ---- audio --------------------------------------------------------------------------------
@@ -214,9 +228,10 @@ function inbox() {
 async function main() {
   mkdirSync(join(dir, "in"), { recursive: true });
   state();
-  const key = envFile(join(SECRETS, "elevenlabs.env")).ELEVENLABS_API_KEY || vaultKey("ELEVENLABS_API_KEY");
-  if (!key) return end("No ElevenLabs key. Add ELEVENLABS_API_KEY in Settings › Secrets.");
-  const id = await agentId(key);
+  const k = await keyFor();
+  if ("error" in k) return end(k.error);
+  const key = k.key;
+  const id = await agentId(key, k.agent);
   const { signed_url } = await api(`/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(id)}`, key) as { signed_url: string };
   const url = new URL(signed_url);
   if (url.protocol !== "wss:" || !url.hostname.endsWith("elevenlabs.io")) throw new Error("ElevenLabs gave an unexpected address.");

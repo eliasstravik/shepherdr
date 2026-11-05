@@ -2085,8 +2085,11 @@ export default class Chat extends View {
     const dir = this.callDir;
     const keyFile = `${appHome()}/secrets/elevenlabs.env`;
     const ok = await exec("sh", ["-c", 'grep -q "^[[:space:]]*\\(export[[:space:]]*\\)\\{0,1\\}ELEVENLABS_API_KEY=." "$1" 2>/dev/null && echo yes', "x", keyFile]);
-    // Or kept in Settings › Secrets (Everywhere): voice.ts reads it from the vault itself.
-    const kept = ok.stdout.trim() === "yes" || (await secrets.entries().catch(() => [])).some((e) => e.name === "ELEVENLABS_API_KEY" && e.scope === "everywhere");
+    // Or kept in Settings › Secrets (Everywhere), here or on the machine that keeps the secrets: voice.ts reads it
+    // itself. The help only when that machine truly has none: one that can't be asked now (entries() fails) lets the
+    // call try, and voice.ts says it can't reach it.
+    const list = ok.stdout.trim() === "yes" ? null : await secrets.entries().catch(() => null);
+    const kept = !list || list.some((e) => e.name === "ELEVENLABS_API_KEY" && e.scope === "everywhere");
     if (!kept) {
       this.call = null;
       this.callHelp = true;

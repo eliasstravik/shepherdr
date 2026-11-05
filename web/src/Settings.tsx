@@ -883,6 +883,61 @@ function NoteBox({ row, under, save, mono = false }: { row: SettingRow; under: R
   )
 }
 
+/** Secrets › Kept on: the machine that keeps them, a list of the others to move them to, and a confirm before the move
+ *  (shepherdr secrets move-to, run by the service; the page sees it go in the next snapshots). */
+function KeptOn({ kept, phone }: { kept: NonNullable<Page['kept']>; phone: boolean }) {
+  const W = ST.SECRETS
+  const [open, setOpen] = useState(false)
+  const [sure, setSure] = useState<string | null>(null)
+  const [err, setErr] = useState('')
+  const now = kept.here ? ST.THIS_COMPUTER : kept.name || W.notLinked
+  const move = async (m: string) => {
+    setSure(null)
+    const r = (await act({ type: 'secrets-move', machine: m } as never).catch((e: Error) => ({ ok: false, error: e.message }))) as { ok?: boolean; error?: string }
+    setErr(r?.ok === false ? r.error ?? "That didn't go through." : '')
+  }
+  const status = kept.moving ? W.moving(kept.moving) : kept.error || err || (!kept.reachable && kept.name ? W.unreachable(kept.name) : W.keptAbout)
+  return (
+    <>
+      <h3 className={clsx(heading(phone), 'pt-4')}>{W.keptOn}</h3>
+      <div className={clsx('flex flex-col gap-2 py-3', phone ? clsx(card, 'px-4') : 'border-b border-line')}>
+        <div className="relative flex items-center gap-2">
+          <MachineIcon className={clsx(ic, 'text-fg3')} />
+          <span className="min-w-0 flex-1 truncate">{now}</span>
+          <Ghost aria-haspopup="menu" aria-expanded={open} disabled={!!kept.moving} onClick={() => setOpen(!open)} className="pr-1.5">
+            <span>{W.moveVerb}</span><DownIcon className={ic} />
+          </Ghost>
+          {open ? (
+            <Menu label={W.keptOn} select onClose={() => setOpen(false)} className="absolute top-full right-0 z-10 mt-1 max-h-[300px] w-[240px] max-w-[calc(100vw-2rem)] origin-top-right overflow-y-auto">
+              {kept.choices.map((c) => {
+                const on = c.here ? kept.here : c.name === kept.name
+                return (
+                  <MenuItem key={c.name || 'here'} role="menuitemradio" aria-checked={on} icon={on ? <CheckIcon className={ic} /> : null}
+                    hint={c.state !== 'connected' ? W.offline : undefined} disabled={on || c.state !== 'connected'}
+                    onClick={() => { setOpen(false); setSure(c.here ? '' : c.name) }}>
+                    {c.here ? ST.THIS_COMPUTER : c.name}
+                  </MenuItem>
+                )
+              })}
+            </Menu>
+          ) : null}
+        </div>
+        {sure !== null ? (
+          <div className="flex flex-col gap-2 rounded-row border border-line p-3">
+            <span className="font-medium">{W.moveConfirm(sure || W.thisOne)}</span>
+            <Small className="text-pretty">{W.moveDetail(sure || W.thisOne, kept.here ? W.thisOne : now)}</Small>
+            <span className="flex justify-end gap-1">
+              <Ghost className="shadow-none!" onClick={() => setSure(null)}>{W.keep}</Ghost>
+              <Ghost onClick={() => void move(sure || 'here')} className="bg-fg text-bg! shadow-none! enabled:hover:bg-fg">{W.moveVerb}</Ghost>
+            </span>
+          </div>
+        ) : null}
+        <Small role="status" className={clsx('text-pretty', (kept.error || err || (!kept.reachable && kept.name)) && 'text-need-fg!')}>{status}</Small>
+      </div>
+    </>
+  )
+}
+
 /** Secrets, as the window's page (secrets-section.js): what it is, the agents waiting on one (Give it fills the form
  *  in), Add (Name, Value, For: Everywhere, a machine or a space; a space's own page starts on that space), and every
  *  kept secret with where it is, each to Replace or Remove. Values never come here: they only go, once, to the vault on
@@ -937,6 +992,7 @@ function SecretsPage({ level, page, phone }: { level: string; page: Page; phone:
   return (
     <div className="flex w-full flex-col">
       <p className={clsx('text-pretty text-fg3', phone ? 'px-4 text-[0.9375rem]' : 'text-[0.8125rem]')}>{W.about}</p>
+      {page.kept && level === 'all' ? <KeptOn kept={page.kept} phone={phone} /> : null}
       {asks.length ? (
         <>
           <h3 className={sub}>{W.asked}</h3>

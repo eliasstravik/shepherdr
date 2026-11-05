@@ -186,6 +186,16 @@ export const SECRETS = {
   keptNote: (name, where) => `Kept ${name} for ${where}.`,
   removedNote: (name, where) => `Removed ${name} from ${where}.`,
   pasteNew: (name) => `Paste the new value for ${name}.`,
+  // Kept on: the machine whose vault every machine's agents and voice calls use (shepherdr secrets move-to)
+  keptOn: "Kept on", keptHere: "This computer", thisOne: "this computer",
+  keptAbout: "Every machine's agents and voice calls get them from there. Pick an always-on machine.",
+  unreachable: (name) => `Can't reach ${name}, which keeps them: agents on other machines can't get secrets until it's back.`,
+  notLinked: "A machine not linked from here keeps them.",
+  moveConfirm: (name) => `Keep secrets on ${name}?`,
+  moveDetail: (name, from) => `Every secret is copied to ${name}, checked, and then used from there by every machine. ${from} keeps a backup copy; moving them back brings back what was added since.`,
+  moveVerb: "Move them",
+  moving: (name) => `Moving them to ${name}…`,
+  offline: "offline",
 };
 // A scope in words, for the list and the For picker: "Everywhere", a machine's name, "Space web".
 export const secretWhere = (scope, machine, spaceName) =>

@@ -35,6 +35,7 @@ drops the space's own, and it inherits again. A few settings are one for every s
 | Autopilot | On or off | Space only | The header's switch: Everywhere never turns a space on |
 | Notify | All / Needs me / Off | Everywhere, space | A busy space can be quiet |
 | Secrets | A secret | Everywhere, machine, space | A key for one repo, or one machine's own |
+| Secrets | Kept on | All machines | One vault every machine's agents and voice calls use; best on an always-on machine |
 | Machines | When new tasks wait (memory, CPU, disk), low priority, memory cap per worker | All machines, machine | About a machine's hardware, not a space's work |
 | Machines | Home Assistant | Machine only | One per machine |
 | Window | Tabs, sidebar, counts, filters, subagents, Assistant in new spaces | Everywhere only | How the screen looks; the last is about spaces not made yet |
@@ -53,6 +54,13 @@ task values a machine set before (the old machine scope) still apply there until
   (`{ every, events, heartbeat }`). The window pushes each machine its share (Everywhere's and its spaces' by their
   ids there), and when the web app is served from another machine its service keeps the file in step with that host
   (`service/sync.ts`). So a space on any machine, and the web on the Mac mini, see the same values.
+- Secrets live in one vault, `~/.herdr/vault.json` on the machine that keeps them (Secrets › Kept on). Which one:
+  herdr-core document `shepherdr.secrets` = `{ id, at, by }` on every machine, handed on by each service as
+  `shepherdr.host` is (`core/secrets.js`). `herdr-secret` on any other machine passes `set`, `rm` and `names` there
+  over herdr-core (the value on stdin, scopes renamed into that machine's words); that machine's service answers every
+  agent's request even with no window open, and voice calls read the ElevenLabs key from there into memory only.
+  `shepherdr secrets move-to <machine>` moves the vault (a backup on both sides; `move-to here --restore` on the old
+  one rolls back when the other is gone). No record yet: the machine without `~/.herdr/secret-remote` keeps them.
 - Notify is in the shared document (`notify`), kept in step the same way.
 - herdr-task reads the effective value: `settings_for()` for agents and tasks (the Settings block every brief ends
   with names who set each line), `autopilot.resolve()` for Autopilot (`herdr-task autopilot show` lists which parts are
