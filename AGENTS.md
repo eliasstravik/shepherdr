@@ -38,10 +38,17 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
   with `hc keys <t> down enter`.
 - No Shepherdr service runs on the dev VM: to screenshot a web dialog, serve `web/dist` with a tiny Bun stub answering
   only the APIs it needs, never the full service: upgrade `/api/ws` and send
-  `{type:'snapshot',snapshot:{places,machines,tasks,...}}`; 404 other `/api`.
+  `{type:'snapshot',snapshot:{places,machines,tasks,...}}`; 404 other `/api`. A later pushed `chat` event (setTimeout) makes
+  replies arrive while scrolled up (the Latest pill's count). Run the stub in the background, or it dies with the shell call. Each
+  place in the snapshot needs a `chat` field (else a blank crash); open a viewer with `?artifact=<id>`, a task with
+  `?task=<id>`. Answer the client's `watch` message with `{type:'chat',chat}` per key; `sections: []` lists places
+  under their machine in the sidebar. A stub chat message can carry any Message field (brief, activity, news) to
+  screenshot quiet rows without a real log.
 - A cross-machine send without ssh: two throwaway cores (`HC_SESSION=a`/`b`, clean `env -i`) and
   `hc machine add --via 'sh -c' --name vmb --session b` on a; the wrap only shows with a real agent (e.g.
   `claude --model haiku`) as the target.
+- Web dictation on the dev VM: agent-browser's fake-mic flags don't apply; override
+  `navigator.mediaDevices.getUserMedia` with an oscillator `MediaStreamDestination` via eval.
 - Crash recovery for real: a throwaway core, `HC_SESSION=<name> hc ...` with `HC_TERMINAL_SOCKET` and Claude's
   `CLAUDE_*` env unset (`CLAUDE_CODE_CHILD_SESSION` turns off transcripts).
 

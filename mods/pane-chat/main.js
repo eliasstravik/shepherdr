@@ -17,7 +17,7 @@ import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { props, run, theme, home, exec, hc, notify, nextCommand, shared, setShared } from "herdr";
 import { panes, terminals, inRender } from "./live.js";
-import { apSpace, apWatch, apPoll, apChip, apHeartbeatLink, apRunNow, COMPACT_BELOW } from "./autopilot.js";
+import { apSpace, apWatch, apPoll, apGroup, apHeartbeatLink, COMPACT_BELOW } from "./autopilot.js";
 import { button as uiButton, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { on as addonOn } from "./addons.js";
 // "End Claude Code?" and its buttons: core/menus.js (the web app's header asks in the same words).
@@ -219,6 +219,7 @@ export default class Pane extends View {
     // An Assistant reads "Assistant · Claude Code": the role first, then what it runs.
     const isAssistant = Boolean(lazy) || terminals().find((x) => x.address === (agent ?? self.terminal))?.labels?.["herdr.role"] === "coordinator";
     const name = art ?? (lazy ? "Assistant" : chatMode && p === self ? "Chat" : isAssistant ? `Assistant · ${prog}` : prog);
+    const runs = !self.mod?.startsWith("art-") && !lazy && isAssistant && name !== "Chat" ? prog : null;
     const pic = art !== null ? svg("mods/artifacts/artifacts.svg").size(14).flex_none().text_color(t.dim) : icon(p.program, 14, t.dim);
     const st = p.status;
     const pane = self.pane;
@@ -241,11 +242,13 @@ export default class Pane extends View {
       .on_size_change((size, cx) => { if (Math.round(size.width) !== this.width) { this.width = Math.round(size.width); cx.notify(); } })
       .on_click(() => run("pane.focus", { pane }))
       .when(Boolean(pic), (el) => el.child(pic))
-      .child(div().flex_none().truncate().max_w(260).font_medium().text_color(t.foreground).child(name))
+      // "Assistant · Claude Code": the role in full, what it runs quieter after it.
+      .child(h_flex().flex_none().max_w(260).min_w(0).gap(4).items_center()
+        .child(div().min_w(0).truncate().font_medium().text_color(t.foreground).child(runs ? "Assistant" : name))
+        .when(Boolean(runs), (el) => el.child(div().min_w(0).truncate().text_color(t.muted).child(`· ${runs}`))))
       // The folder gives way first; the switch keeps its width; the gap after pushes the rest right.
       .child(div().flex_shrink_1().min_w(0).truncate().text_color(t.dim).child(folder(p.cwd)))
-      .when(Boolean(apFor), (el) => el.child(apChip(this, t, apFor, pane, (this.width ?? Infinity) < COMPACT_BELOW))
-        .child(apRunNow(this, t, apFor, pane) ?? div())
+      .when(Boolean(apFor), (el) => el.child(apGroup(this, t, apFor, pane, (this.width ?? Infinity) < COMPACT_BELOW))
         .child(apHeartbeatLink(this, apFor, pane) ?? div()))
       .child(div().flex_1())
       .when(st === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))

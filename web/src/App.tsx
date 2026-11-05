@@ -308,7 +308,8 @@ function PlaceColumn({ place, pane }: { place: Place; pane?: number }) {
   // then the Autopilot switch; past the gap its status, × and Chat | Terminal (placeHeader, by order). The space is
   // named by the sidebar and the tab bar, as in the window.
   const tab = term?.startsWith('t:') ? place.tabs?.find((t) => t.term === term) : undefined
-  const name = tab ? (tab.prog ?? 'Shell') : (place.header ?? 'Assistant')
+  // "Assistant · Claude Code": the role is the title, what it runs leads the quieter line under it, then its folder
+  const [name, ...runs] = (tab ? (tab.prog ?? 'Shell') : (place.header ?? 'Assistant')).split(' · ')
   const where = tab ? tab.where : place.cwd ?? place.where
   // another agent tab switched to Chat shows its own chat (its terminal otherwise: the terminal plugin's chatBody)
   const tabChat = useUI((u) => (tab && u.tabView?.[tab.term] === 'chat' ? tab.term : null))
@@ -317,8 +318,8 @@ function PlaceColumn({ place, pane }: { place: Place; pane?: number }) {
       <Head conversation className="group/head">
         <MenuButton />
         {pane ? null : <PlacesToggle when="closed" />}
-        <div className="flex min-w-0 shrink items-center gap-2.5">
-          <Who name={name} kind={where || undefined} />
+        <div className="flex min-w-24 shrink-[100] items-center">
+          <Who name={name} kind={runs.length || where ? <PaneWhere runs={runs.join(' · ')} where={where} /> : undefined} />
         </div>
         {registry.placeHeader.filter((h) => h.order <= 10).map(({ View }, i) => (
           <View key={i} place={place} />
@@ -334,6 +335,22 @@ function PlaceColumn({ place, pane }: { place: Place; pane?: number }) {
         tabChat ? <Chat key={tabChat} chatKey={tabChat} placeholder={`Message ${tab?.prog ?? 'the agent'}`} /> : <Chat chatKey={place.chat} placeholder="Message the Assistant" unreachable={unreachable(place, snap)} />
       ) : null}
     </section>
+  )
+}
+
+/** a pane header's quiet line: what runs ("Claude Code"), then its folder, which gives way from its start so its own
+ *  name stays ("…/dev/shepherdr") */
+function PaneWhere({ runs, where }: { runs: string; where?: string }) {
+  return (
+    <span className="flex min-w-0">
+      {runs ? <span className="shrink-0">{runs}</span> : null}
+      {runs && where ? <span className="shrink-0 px-1 text-fg3">·</span> : null}
+      {where ? (
+        <span className="min-w-0 truncate text-fg3 [direction:rtl]" title={where}>
+          <bdi>{where}</bdi>
+        </span>
+      ) : null}
+    </span>
   )
 }
 
