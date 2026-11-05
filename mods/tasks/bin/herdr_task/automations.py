@@ -342,12 +342,11 @@ def auto_list(args):
 
 def event_brief(ev, f, src=None):
     """What set a run off, for its brief: the task's ref, title and machine."""
-    where = f"{src['machine']}'s folder {src['folder']}" if src and src.get("machine") else \
-        (f"the folder {src['folder']} on this machine" if src else "this folder")
+    where = f"folder {src['folder']} on machine {src['machine']}" if src and src.get("machine") else \
+        (f"folder {src['folder']} on this machine" if src else "this folder")
     words = {"added": "was added", "ready": "is ready", "failed": "failed", "needs-you": "needs the person",
              "merged": "was merged", "stalled": "stalled"}[ev]
-    return (f"Set off by: task {f['ref']} ({' '.join(str(f['title']).split())}) {words}, in {where}"
-            + (f", on machine {src['machine']}" if src and src.get("machine") else "") + ".")
+    return f"Set off by: task {f['ref']} ({' '.join(str(f['title']).split())}) {words}, in {where}."
 
 
 def fire(s, a, why, brief=None):
