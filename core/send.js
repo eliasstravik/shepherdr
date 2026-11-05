@@ -22,14 +22,15 @@ export function taskTag(x, ref) {
   return `<hc task="${attr(ref.replace(/^#/, ""))}" title="${attr(x.title)}" state="${attr(x.status_text ?? x.state)}"${x.why ? ` why="${attr(x.why)}"` : ""} folder="${attr(x.folder)}">${String(x.prompt ?? "").slice(0, 500)}</hc>\n`;
 }
 
-// The tasks a message mentions: HAT-1 as written (or #HAT-1); a task without a prefix only as #4, never a bare number.
+// The tasks a message mentions: HAT-1 as written (or #HAT-1, @HAT-1 and a picked [@HAT-1](task:…), core/mentions.js); a
+// task without a prefix only as #4, never a bare number.
 // tasks: [{ ref, id, ... }] (the chat's folder's).
 export function mentionedIn(text, tasks) {
   const t = String(text ?? ""), low = t.toLowerCase();
   return (tasks ?? []).filter((x) => {
     if (!low.includes(String(x.ref ? x.ref : `#${x.id}`).toLowerCase())) return false;
-    const ref = x.ref ? `#?${String(x.ref).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` : `#${x.id}`;
-    return new RegExp(`(^|[\\s(])${ref}\\b`, "i").test(t);
+    const ref = x.ref ? `[#@]?${String(x.ref).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` : `#${x.id}`;
+    return new RegExp(`(^|[\\s([])${ref}\\b`, "i").test(t);
   });
 }
 

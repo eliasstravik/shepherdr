@@ -12,6 +12,7 @@ import * as CV from "../core/chat-view.js";
 const { summary, names, pilotLine } = CL as any;
 const { senderName, briefLabel, newsTimeline, resolveArtifacts, unsigned } = CV as any;
 import { mentionedIn } from "../core/send.js";
+import * as MEc from "../core/mentions.js";
 import * as SCc from "../core/screens.js";
 const { SCREEN } = SCc as any;
 import { readFileSync } from "node:fs";
@@ -336,7 +337,7 @@ export class Compat {
       else if (r.lastLog) chats.set(`${id}/worker`, `log:${r.machine ?? ""}|${r.lastLog.kind}|${r.lastLog.path}`);
       const t: Task = {
         id, name: r.title, status: SECTION[r.section] ?? "todo", place: placeOf(r), listName: placeName(r), age: r.started ? ago(r.started, false) : "",
-        state: r.section, on: r.machine ?? host, created: "",
+        state: r.section, on: r.machine ?? host, created: "", ...(r.folder ? { taskFolder: r.folder } : {}),
         // its latest news (ms), as Jump orders tasks newest first
         at: Math.max(0, ...[r.done_at, r.ready_at, r.started].filter((x: unknown): x is number => typeof x === "number")),
         ...(r.sub ? { sub: r.sub } : {}),
@@ -516,7 +517,9 @@ export class Compat {
         const sentCid = sends.length && !x.from ? sentAs(sends, x, takenSends) : undefined;
         const cid = sentCid ? { cid: sentCid } : {};
         // the tasks it mentions, as chips under it (core/send.js: the same matching as the window's)
-        const chips = x.text ? mentionedIn(x.text, mentionable) : [];
+        // one picked with @ already draws as a chip in its words (core/mentions.js): not again under them
+        const inline = new Set((MEc as any).split(x.text ?? "").filter((p: any) => p.task).map((p: any) => p.task.ref.toLowerCase()));
+        const chips = x.text ? mentionedIn(x.text, mentionable).filter((r: any) => !inline.has(String(r.ref ?? "").toLowerCase())) : [];
         const mentions = chips.length ? { mentions: chips.map((r: any) => ({ task: machine ? `${machine}:${r.ref}` : r.ref, ref: r.ref ?? `#${r.id}`, title: r.title })) } : {};
         // what it replies to: the message it names, which a press on its line brings into view (the window's goTo)
         const to = x.replyTo ? items.slice(0, i).reverse().find((y: any) => (y.kind === "user" || y.kind === "agent") && y.text && names(y.text, String(x.replyTo).slice(0, 60))) : null;

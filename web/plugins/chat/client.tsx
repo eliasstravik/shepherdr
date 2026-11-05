@@ -29,7 +29,7 @@ import { AskedRow, Band, BriefRow, Chips, EndedRow, ErrorRow, NoteRow, Notice, H
 import { AgentLine, openModelMenu, openRestart, RestartSheet } from '@client/restart.tsx'
 import { expandPicked, forMarkdown, mentionItems, MentionList, pickable, takeItem, useReach, withChips, type Item } from './mentions.tsx'
 import * as MNc from '@core/mentions.js'
-const mentionTyping = (MNc as any).typing as (text: string) => string | null
+const mentionTyping = (text: string): string | null => (MNc as any).typingTask(text) ?? (MNc as any).typing(text)
 
 /* ---------- messages ---------- */
 
@@ -1788,8 +1788,8 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
   // Up in an empty box: which earlier message shows (-1: none), and its words (editing them makes it a new one)
   const recall = useRef(-1)
   const recalled = useRef('')
-  // the "#" list: spaces this chat's agent reaches and this space's tasks (mentions.tsx); Escape closes it for what is
-  // typed, Up and Down choose, Enter or Tab takes
+  // the "#" list: spaces this chat's agent reaches; the "@" list: tasks in them (mentions.tsx). Escape closes it for
+  // what is typed, Up and Down choose, Enter or Tab takes
   const snap = useSnap()
   const word = mentionTyping(text)
   const [mclosed, setMclosed] = useState<string | null>(null)
@@ -1797,7 +1797,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
   const mentions = word !== null && mclosed !== text ? mentionItems(snap, chatKey, text, reach) : []
   const choosable = pickable(mentions)
   const [msel, setMsel] = useState(0)
-  useEffect(() => setMsel(0), [word])
+  useEffect(() => setMsel(0), [word, (MNc as any).typingTask(text) === null])
   const takeMention = (i: Item) => { setText(takeItem(chatKey, text, i)); ref.current?.focus() }
   const send = (hold = false) => {
     const t = expandPicked(chatKey, text.trim())
