@@ -42,7 +42,8 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 |---|---|---|---|
 | Pinned first | T:324 "Pinned", status order, every one | G groupTasks | ✓ |
 | Needs you next | T:325-326 inbox items and tasks Herdr saw go wrong | W + G | ✓ |
-| By status | T:328-334 Ready, Merging, Working, Queued, To do, Done; only groups holding something | G | ✓ |
+| By status | T:328-334 Ready, Merging, Working, Queued, Scheduled, To do, Done; only groups holding something | G | ✓ |
+| Scheduled group | core ORDER after Queued, the next to start first (core `order`) | G `GROUPS` | ✓ (SHEP-38) |
 | By space | T:339-345 one group per task list, named by the space in its folder (else the list's name), sidebar order; machine quiet after it with more machines | G projectGroups by `listName` and machine | ✓ fixed (grouped by the space that started the task) |
 | By machine | T:350-351 machine heading, brighter, hairline above all but the first | W MachineHeading | ✓ |
 | Machine › Space | T:353-354 machine heading with count over its spaces' groups; folding it hides them | W | ✓ |
@@ -59,7 +60,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Reading | T:390 "Reading tasks…" | W | ✓ |
 | Lists unreadable | T:387-389 "Couldn't read the task lists: …" card | (the service reads them) | ◇ the service keeps the last lists; a read failure there shows as the service's own banner |
 
-## Rows (every kind: Working, Needs you, Queued, Ready, Merging, To do, Done, archived, automation, agent need)
+## Rows (every kind: Working, Needs you, Queued, Scheduled, Ready, Merging, To do, Done, archived, automation, agent need)
 
 | Element | Window | Web | State |
 |---|---|---|---|
@@ -73,6 +74,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Time left | T line() short under the glyph, level with line 2, amber mono: "6m", "<1m", "2h" (as before SHEP-34) | W Line `left` from compat `left` (core leftOf) | ✓ (SHEP-39) |
 | Needs you | why (core place) | compat `sub` | ✓ |
 | Queued | "After HERD-3", "Waits: …", "Starts soon" | compat `sub` (core queueReason) | ✓ |
+| Scheduled | a grey calendar (mods/tasks/scheduled.svg), its time until it starts under it ("6h", core `leftOf`), "Starts Today 18:00" (core `startsLine`) | ui.tsx `.dot.scheduled` (the same drawing), TaskDot `until` (core `untilShort`, live), compat `sub` | ✓ (SHEP-38) |
 | Ready | "Ready 5m ago" + Review (opens the Accept card) | compat `sub` + W `accept` | ✓ |
 | Merging | "Merges once its checks pass" | compat `sub` | ✓ |
 | To do, Done | one line, place at the end | W Line one-line | ✓ |
@@ -84,6 +86,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Archived rows | T:538 done glyph, no pin menu | W TaskRow, `menu` off when archived | ✓ fixed (offered Pin) |
 | Selected | T:833 the focused agent's row | W the open task's row | ◇ the web has no focused pane; the open task is what's shown |
 | Right-click menu | T:786-790, TM:26-32 Pin / Unpin (core taskMenu) | W TaskMenu (right click, or a held finger) | ✓ / ◇ touch holds |
+| Start later (SHEP-38) | TM rowSections: a task not started yet: "Start later" ("Reschedule · Starts …" when scheduled) over In 1 hour, In 3 hours, Tomorrow 9:00, Monday 9:00; scheduled: Start now, Unschedule; a refusal is a toast | W TaskActions, the same core `taskMenu`; a refusal shows under it | ◇ the web also has Other time… (a typed time, herdr-task's words); in the window the Assistant takes any other time |
 | Agent need | T:617-628 its name, why (REASONS / request words), machine · space | W AgentNeedRow: "Assistant", REASONS.plan / the question / REASONS.permission | ✓ fixed (was "<space> Assistant", 2.1 words) |
 | Secret ask | (the window's inbox has no secret item) | W "Wants the secret NAME" | ◇ the web's secret card has to be reachable from the list; the window answers it in the chat |
 | Failed automation in Needs you | T:635-636 red repeat mark, its name, "Didn't run" / "Didn't start its task", tap opens Automations | W agentNeeds `autos`, AgentNeedRow | ✓ fixed (missing) |

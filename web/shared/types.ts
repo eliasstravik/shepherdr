@@ -4,7 +4,7 @@ import type { BrowserNote } from './browser.ts'
 
 /** Status marks: red needs you, green ready, green turning ring merging, amber working, grey ring idle or to do, grey
  * clock queued, grey check done, dashed ring unreachable. */
-export type Status = 'need' | 'ready' | 'merging' | 'work' | 'idle' | 'queued' | 'todo' | 'done' | 'off'
+export type Status = 'need' | 'ready' | 'merging' | 'work' | 'idle' | 'queued' | 'scheduled' | 'todo' | 'done' | 'off'
 /** A chat's final segment is its role; the task ID may itself contain a machine qualifier. */
 export function taskChatId(chat: string) { const at = chat.lastIndexOf('/'); return at < 0 ? undefined : chat.slice(0, at) }
 
@@ -273,7 +273,7 @@ export interface Report {
  * into main, nothing for you to do (GitHub's checks run, it is rebased or merged); work: its agent is at it; queued:
  * it waits for other tasks to be done, then Shepherdr tells its agent to go; todo: its agent waits for a go, or is
  * starting and not yet at work on its brief; done: merged */
-export type TaskStatus = 'need' | 'ready' | 'merging' | 'work' | 'queued' | 'todo' | 'done'
+export type TaskStatus = 'need' | 'ready' | 'merging' | 'work' | 'queued' | 'scheduled' | 'todo' | 'done'
 
 /** A task's one agent: tapping the task opens its chat. */
 export interface TaskAgent {
@@ -300,8 +300,11 @@ export interface Task {
   place: string
   /** second line in lists */
   sub?: string
-  /** Working: the minutes left under its row's dot, in the window's words ("6m", "<1m", "2h"), once its agent gave them */
+  /** Working: the minutes left under its row's dot, in the window's words ("6m", "<1m", "2h"), once its agent gave them;
+   *  Scheduled: the time until it starts ("6h", "2d") */
   left?: string
+  /** Scheduled (SHEP-38, herdr-task --at/--in): when it starts by itself (ms) */
+  startsAt?: number
   /** Ready, its accept under way from the window's Accept card: its row and header say "Accepting…" */
   accepting?: boolean
   /** still Working, its turn over: what Shepherdr itself knows it waits for */
@@ -1264,6 +1267,9 @@ export type Action =
   | { type: 'restart'; chat: string; kind?: string; model?: string; effort?: string; speed?: string; save?: boolean }
   /** mark a task done with nothing merged (shepherdr task close); refused (held) while it holds unmerged work, unless force */
   | { type: 'close'; chat: string; force?: boolean }
+  /** SHEP-38: start a task that hasn't started by itself later (herdr-task edit --at / --in, the words as typed), take that
+   *  back (off: back to To do) or start a scheduled one now */
+  | { type: 'schedule'; chat: string; at?: string; in?: string; off?: boolean; now?: boolean }
   /** delete a task: its agent, herdr space, worktree, branch, chat and record; refused while it holds work, unless force */
   | { type: 'delete'; chat: string; force?: boolean }
   /** forget a space (shepherdr space remove): its folder and code stay on disk, its coordinator closes, and its open

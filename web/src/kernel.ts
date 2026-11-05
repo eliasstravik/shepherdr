@@ -308,7 +308,7 @@ function tabOf(t: string | null): UI['tab'] {
 }
 
 const TASK_FILTER = 'shepherdr.taskFilter'
-const FILTERS = ['all', 'needs', 'working', 'merging', 'ready', 'queued', 'todo', 'done', 'automations']
+const FILTERS = ['all', 'needs', 'working', 'merging', 'ready', 'queued', 'scheduled', 'todo', 'done', 'automations']
 function loadTaskFilter(): string {
   try {
     const v = localStorage.getItem(TASK_FILTER) ?? 'all'
@@ -1049,6 +1049,12 @@ export function archiveTask(t: Task, on: boolean) {
 /** pin a task to the top of its lists, or unpin it */
 export function pinTask(t: Task, on: boolean) {
   return act({ type: 'pin', chat: t.agent?.chat ?? `${t.id}/Agent`, on })
+}
+
+/** SHEP-38: start a task by itself later ({ at: "fri 8:15" } or { in: "6h" }), take that back ({ off: true }) or start a
+ *  scheduled one now ({ now: true }); error: herdr-task's words for a time it doesn't know */
+export function scheduleTask(t: Task, when: { at?: string; in?: string; off?: boolean; now?: boolean }): Promise<{ ok?: boolean; error?: string; why?: string }> {
+  return act({ type: 'schedule', chat: t.agent?.chat ?? `${t.id}/Agent`, ...when })
 }
 
 /** pause a working task: its agent is interrupted and the task is To do until written to */

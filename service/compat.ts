@@ -38,7 +38,7 @@ const { ago } = T as any;
 export type Row = any;
 export type Space = any;
 
-const SECTION: Record<string, TaskStatus> = { needs: "need", working: "work", merging: "merging", ready: "ready", queued: "queued", todo: "todo", done: "done" };
+const SECTION: Record<string, TaskStatus> = { needs: "need", working: "work", merging: "merging", ready: "ready", queued: "queued", scheduled: "scheduled", todo: "todo", done: "done" };
 const AGENT: Record<string, Status> = { blocked: "need", working: "work", done: "idle", idle: "idle" };
 
 // Autopilot's words and picks: core/autopilot.js, the window's Settings › Autopilot's too
@@ -349,6 +349,7 @@ export class Compat {
         ...(accepting(r) ? { accepting: true } : {}),
         // the minutes left under a Working row's dot, as the window writes them (core/tasks.js leftOf: "6m", "<1m", "2h")
         ...(r.left ? { left: r.left } : {}),
+        ...(r.scheduled_for ? { startsAt: r.scheduled_for } : {}),
         ...(r.done_at ? { doneAt: r.done_at } : {}),
         // it ran (an agent once started): never "hasn't started", its summary when its chat is gone (SHEP-26)
         ...(r.started ? { started: r.started } : {}), ...(r.summary ? { summary: r.summary } : {}), ...(r.details ? { details: r.details } : {}),

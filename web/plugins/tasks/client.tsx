@@ -27,6 +27,7 @@ import {
   splitClick,
   pinTask,
   placeOf,
+  scheduleTask,
   registry,
   setFilter,
   setGroup,
@@ -48,6 +49,7 @@ import {
   ArchivedIcon,
   BackIcon,
   CheckIcon,
+  ClockIcon,
   DownIcon,
   Empty,
   FilterBox,
@@ -57,14 +59,18 @@ import {
   Menu,
   MenuItem,
   MenuLabel,
+  MenuSeparator,
   Meta,
   MoreIcon,
   NextIcon,
   PinTaskIcon,
+  PlayIcon,
   RoundButton,
   rowClass,
   TaskDot,
   UnpinIcon,
+  XIcon,
+  field,
 } from '@client/ui.tsx'
 import { doneNewestFirst, machineName, type Automation, type Place, type Snapshot, type Task } from '@shared/types.ts'
 import { useFlip } from '@client/motion.ts'
@@ -126,7 +132,9 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
       ref_={refOf(t.id)}
       title={t.name}
       sub={t.sub}
-      left={t.status === 'work' && !t.archived ? t.left : undefined}
+      // Scheduled (SHEP-38): its time until it starts ("6h") in the same place, counted live, in grey
+      left={t.archived ? undefined : t.status === 'work' ? t.left : t.status === 'scheduled' && t.startsAt ? (TK.untilShort as (ms: number) => string)(t.startsAt) : undefined}
+      leftQuiet={t.status === 'scheduled'}
       dim={t.status === 'done'}
       where={where?.join(' · ')}
       action={accept}
@@ -150,8 +158,8 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
  *   Review or an automation's next run (`meta`).
  * A row with nothing under its title is one line. `tip`: more for its button's label only (an automation's error).
  */
-function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, dim, meta, where, action, tip, onOpen, menu, children }: {
-  flip?: string; sel?: boolean; kb?: boolean; glyph: ReactNode; ref_?: string; title: string; sub?: string; left?: string; dim?: boolean; meta?: string
+function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, leftQuiet, dim, meta, where, action, tip, onOpen, menu, children }: {
+  flip?: string; sel?: boolean; kb?: boolean; glyph: ReactNode; ref_?: string; title: string; sub?: string; left?: string; leftQuiet?: boolean; dim?: boolean; meta?: string
   where?: string; action?: ReactNode; tip?: string; onOpen?: (e: MouseEvent) => void; menu?: RowMenuState; children?: ReactNode
 }) {
   const said = sub ? capital(sub) : undefined
@@ -165,7 +173,7 @@ function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, di
         <button
           type="button"
           aria-current={sel || undefined}
-          aria-label={`${ref_ ? `${ref_} ` : ''}${title}${said ? `, ${said}` : ''}${left ? `, ${left} left` : ''}${meta ? `, ${meta}` : ''}${tip ? `, ${tip}` : ''}`}
+          aria-label={`${ref_ ? `${ref_} ` : ''}${title}${said ? `, ${said}` : ''}${left ? (leftQuiet ? `, in ${left}` : `, ${left} left`) : ''}${meta ? `, ${meta}` : ''}${tip ? `, ${tip}` : ''}`}
           onClick={onOpen}
           className="absolute inset-0 cursor-pointer rounded-[inherit] outline-none keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)]"
         />
@@ -177,7 +185,7 @@ function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, di
         <span aria-hidden className="col-start-1 row-start-1 grid h-5 w-3.5 place-items-center phone:h-6 phone:w-4">{glyph}</span>
         {/* the time left under the glyph, as tall as the second line so it sits level with it */}
         {two && left ? (
-          <span aria-hidden className="col-start-1 row-start-2 flex h-4 w-3.5 items-center justify-center font-mono text-[0.6875rem] font-semibold whitespace-nowrap text-work-fg tabular-nums @max-[24rem]:h-6 phone:h-6 phone:w-4 phone:text-[0.75rem]">{left}</span>
+          <span aria-hidden className={clsx('col-start-1 row-start-2 flex h-4 w-3.5 items-center justify-center font-mono text-[0.6875rem] font-semibold whitespace-nowrap tabular-nums @max-[24rem]:h-6 phone:h-6 phone:w-4 phone:text-[0.75rem]', leftQuiet ? 'text-fg3' : 'text-work-fg')}>{left}</span>
         ) : null}
         <span aria-hidden={!!onOpen} className={clsx('col-start-2 row-start-1 min-w-0 truncate text-[0.875rem]/5 phone:text-base/6', dim ? 'text-fg2' : 'text-fg', two && '@max-[24rem]:col-end-4')}>{title}</span>
         {two ? (
@@ -201,15 +209,57 @@ function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, di
   )
 }
 
-/** A task's one menu, in its row's ⋯ and its chat's, as 3.0's (core/menus.js taskMenu): Pin or Unpin */
+type MenuEntry = { id?: string; label?: string; icon?: string; heading?: string; sep?: boolean; at?: string; in?: string; typed?: boolean }
+const OTHER = MN.SCHEDULE_OTHER as { placeholder: string; label: string; button: string }
+
+/** A task's one menu, in its row's ⋯ and its chat's, as 3.0's (core/menus.js taskMenu): Pin or Unpin; a task not started
+ *  yet also Start later (SHEP-38): a few times, or one typed in herdr-task's words (Other time…), and a scheduled one
+ *  Start now and Unschedule. What herdr-task refuses (a time it doesn't know) shows under it, the menu kept open. */
 function TaskActions({ task: t, close }: { task: Task; close: () => void }) {
+  const [typing, setTyping] = useState(false)
+  const [text, setText] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const go = async (when: Parameters<typeof scheduleTask>[1]) => {
+    setBusy(true)
+    setError(null)
+    const r = await scheduleTask(t, when).catch((e: Error) => ({ ok: false, error: e.message }))
+    setBusy(false)
+    if (r?.ok === false) setError(r.error ?? "Couldn't schedule it.")
+    else close()
+  }
+  const items = (MN.taskMenu as (o: object) => MenuEntry[])({ pinned: !!t.pinned, status: t.archived ? null : t.status })
   return (
     <>
-      {(MN.taskMenu as (o: object) => { label: string; icon: string }[])({ pinned: !!t.pinned }).map((it) => (
-        <MenuItem key={it.label} icon={t.pinned ? <UnpinIcon className={ic} /> : <PinTaskIcon className={ic} />} onClick={() => { close(); void pinTask(t, !t.pinned).catch(() => undefined) }}>
-          {it.label}
-        </MenuItem>
-      ))}
+      {items.map((it, i) => {
+        if (it.sep) return <MenuSeparator key={`sep${i}`} />
+        if (it.heading) return <MenuLabel key={it.heading}>{t.status === 'scheduled' && t.sub ? `${it.heading} · ${capital(t.sub)}` : it.heading}</MenuLabel>
+        if (it.id === 'schedule')
+          return <MenuItem key={it.label} disabled={busy} icon={<ClockIcon className={ic} />} onClick={() => void go(it.in ? { in: it.in } : { at: it.at })}>{it.label}</MenuItem>
+        if (it.id === 'schedule-other')
+          return typing ? (
+            <div key="other">
+            <form className="flex items-center gap-2 px-2 py-1 phone:px-3" onSubmit={(e) => { e.preventDefault(); if (text.trim()) void go({ at: text }) }}>
+              <input name="when" aria-label={OTHER.label} autoFocus placeholder={OTHER.placeholder} value={text} disabled={busy}
+                onChange={(e) => { setText(e.target.value); setError(null) }}
+                className={clsx(field, 'h-7 min-w-0 flex-1 rounded-md bg-bg px-2 text-[0.8125rem] max-sm:text-base/6 phone:h-9')} />
+              <button type="submit" disabled={busy || !text.trim()} className="press-dim h-7 shrink-0 rounded-md bg-bubble px-2.5 text-[0.75rem] font-medium text-fg enabled:hover:bg-sel disabled:opacity-40 phone:h-9 phone:px-3 phone:text-[0.8125rem]">{OTHER.button}</button>
+            </form>
+            {/* what herdr-task refused, under the field, never widening the menu */}
+            {error ? <p role="alert" className="w-0 min-w-full px-2 pb-1.5 text-[0.75rem]/4 text-need-fg phone:px-3 phone:text-[0.8125rem]/5">{error}</p> : null}
+            </div>
+          ) : (
+            <MenuItem key="other" disabled={busy} icon={<ClockIcon className={ic} />} onClick={() => setTyping(true)}>{it.label}</MenuItem>
+          )
+        if (it.id === 'start-now') return <MenuItem key="now" disabled={busy} icon={<PlayIcon className={ic} />} onClick={() => void go({ now: true })}>{it.label}</MenuItem>
+        if (it.id === 'unschedule') return <MenuItem key="off" disabled={busy} icon={<XIcon className={ic} />} onClick={() => void go({ off: true })}>{it.label}</MenuItem>
+        return (
+          <MenuItem key={it.label} icon={t.pinned ? <UnpinIcon className={ic} /> : <PinTaskIcon className={ic} />} onClick={() => { close(); void pinTask(t, !t.pinned).catch(() => undefined) }}>
+            {it.label}
+          </MenuItem>
+        )
+      })}
+      {error && !typing ? <p role="alert" className="w-0 min-w-full px-2 pt-1 pb-1.5 text-[0.75rem]/4 text-need-fg phone:px-3 phone:text-[0.8125rem]/5">{error}</p> : null}
     </>
   )
 }
@@ -235,9 +285,9 @@ function whereOf(snap: Snapshot, t: Task, names: TaskGroup['names']) {
 }
 
 /** 3.0's statuses (core/tasks.js ORDER) as the web's task statuses, and their words */
-const FILTER_STATUS: Record<string, Task['status']> = { working: 'work', merging: 'merging', ready: 'ready', queued: 'queued', todo: 'todo', done: 'done' }
-const FILTER_WORDS: Record<string, string> = { needs: 'Needs you', working: 'Working', merging: 'Merging', ready: 'Ready', queued: 'Queued', todo: 'To do', done: 'Done', automations: 'Automations' }
-const FILTER_ORDER = ['needs', 'ready', 'merging', 'working', 'queued', 'todo', 'done', 'automations']
+const FILTER_STATUS: Record<string, Task['status']> = { working: 'work', merging: 'merging', ready: 'ready', queued: 'queued', scheduled: 'scheduled', todo: 'todo', done: 'done' }
+const FILTER_WORDS: Record<string, string> = { needs: 'Needs you', working: 'Working', merging: 'Merging', ready: 'Ready', queued: 'Queued', scheduled: 'Scheduled', todo: 'To do', done: 'Done', automations: 'Automations' }
+const FILTER_ORDER = ['needs', 'ready', 'merging', 'working', 'queued', 'scheduled', 'todo', 'done', 'automations']
 /** the chips that show beside All statuses before More, as far as there is room (3.0's filterRow) */
 const PRIMARY = ['needs', 'working', 'ready']
 

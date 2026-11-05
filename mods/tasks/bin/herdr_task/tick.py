@@ -84,6 +84,18 @@ def back_pass(s, t, report):
         report.setdefault("working_again", []).append(s.ref(t))
 
 
+def due_pass(s, report):
+    """Scheduled tasks whose time has come (SHEP-38), a time passed while the machine was off too, join
+    the queue in the order they were due: the queue below starts them (after their --after tasks,
+    when there's room), each once."""
+    for t in s.data["tasks"]:
+        if t["state"] == "scheduled" and (t.get("scheduled_for") or 0) <= now():
+            t["state"], t["queued_at"] = "queued", t.get("scheduled_for") or now()
+            t.pop("scheduled_for", None)
+            s.dirty = True
+            report.setdefault("due", []).append(s.ref(t))
+
+
 def tick_store(s, report):
     """One folder's turn: Ready tasks back at work are Working again, merged tasks become done,
     auto-merges go when they can, and queued tasks start while there's room."""
@@ -101,6 +113,7 @@ def tick_store(s, report):
                 if not merge_now(s, t):
                     report["done"].append(t["id"])
             t.pop("_pr_fresh", None)
+    due_pass(s, report)
     queued = sorted((t for t in s.data["tasks"] if t["state"] == "queued"), key=lambda t: t.get("queued_at") or 0)
     n = running_count(s) if queued else 0
     budget = [3]  # other machines asked this pass, at most
@@ -413,7 +426,7 @@ def cmd_tick(args):
         d = read_list(p)
         tasks = (d or {}).get("tasks") or []
         if not d or not os.path.isdir(d.get("folder") or "") or not (d.get("main_watch") or any(
-                t.get("state") in ("queued", "ready") or (t.get("worktree") and t.get("state") == "running") for t in tasks)):
+                t.get("state") in ("queued", "scheduled", "ready") or (t.get("worktree") and t.get("state") == "running") for t in tasks)):
             continue
         with Store(locate(d["folder"])) as s:
             tick_store(s, report)

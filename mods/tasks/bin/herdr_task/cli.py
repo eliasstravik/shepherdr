@@ -167,6 +167,13 @@ def main():
         c.add_argument("--agent", help="agent key (claude, codex, ...)")
         c.add_argument("--argv", help="how to start it, as a JSON list (default from --agent)")
 
+    def when_opts(c, edit=False):
+        # SHEP-38: Scheduled, a one-off start at a time (a repeating one is an automation: auto add --every).
+        g = c.add_mutually_exclusive_group()
+        g.add_argument("--at", help="start it by itself at this time, this machine's time zone: \"2026-11-06 09:00\", "
+                                    "\"tomorrow 9:00\", \"fri 8:15\", \"18:00\"" + (" (\"\" unschedules: back to To do)" if edit else ""))
+        g.add_argument("--in", dest="in_", metavar="SPAN", help="start it by itself this long from now: \"6h\", \"90m\", \"2 days\"")
+
     cmd("where", cmd_where, "the task folder and store for a folder", id=False)
     c = cmd("list", cmd_list, "list tasks", id=False)
     c.add_argument("--all", action="store_true", help="every folder's tasks on this machine")
@@ -183,16 +190,18 @@ def main():
     c.add_argument("--after", help="start only once these tasks are done: 3,5; another folder's by its id (WEB-2), another "
                                    "machine's with the machine first (vm-b:HAT-12)")
     c.add_argument("--space", help="the space it's for, whose settings it takes (default: yours)")
+    when_opts(c)
     c = cmd("show", cmd_show, "one task")
     c.add_argument("--evidence", action="store_true", help="with what its Accept card shows: commits, changed files, checks and its proof")
     c = cmd("start", cmd_start, "start a task's agent (no tab: an hc child of the space's coordinator)")
     agent_opts(c)
     c.add_argument("--space")
     c.add_argument("--parent", help="a coordinator's terminal: the agent's hc parent (default: the space's coordinator)")
-    c.add_argument("--now", action="store_true", help="skip the queue")
+    c.add_argument("--now", action="store_true", help="skip the queue (a scheduled task: start it now)")
     g = c.add_mutually_exclusive_group()
     g.add_argument("--here", action="store_true")
     g.add_argument("--worktree", action="store_true")
+    when_opts(c)
     c = cmd("ready", cmd_ready, "a worker's task is finished (worktree tasks: committed): it waits in Ready for the person's Accept (opens a pull request on GitHub)")
     c.add_argument("--summary", help=f"what the person now sees or can do, in plain words, at most {SUMMARY_MAX} characters "
                                      "(no file names, flags or jargon); longer is refused")
@@ -218,7 +227,7 @@ def main():
     c = cmd("accept", cmd_accept, "the person's Accept on a Ready task: merges first when there is something to merge, then done")
     agent_opts(c)
     c.add_argument("--space")
-    cmd("reopen", lambda a: cmd_state(a, "reopen"), "undo done or ready; a queued task goes back to to do")
+    cmd("reopen", lambda a: cmd_state(a, "reopen"), "undo done or ready; a queued or scheduled task goes back to to do")
     cmd("unarchive", cmd_unarchive, "bring an archived task back into its list (only when the person asks; writing to it does too)")
     c = cmd("edit", cmd_edit, "change a task")
     c.add_argument("--title")
@@ -230,6 +239,7 @@ def main():
     g = c.add_mutually_exclusive_group()
     g.add_argument("--here", action="store_true")
     g.add_argument("--worktree", action="store_true")
+    when_opts(c, edit=True)
     cmd("rm", cmd_rm, "remove a task")
     c = cmd("config", cmd_config, "this folder's settings", id=False)
     c.add_argument("--prefix", help="task ids' prefix, 2 to 5 letters (HAT -> HAT-4); unique on this machine")

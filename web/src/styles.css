@@ -757,6 +757,13 @@
     border: solid var(--muted);
     border-width: 0 0 1.5px 1.5px;
   }
+  /* scheduled (SHEP-38): starts by itself at a time: a small grey calendar, its top bar and two rings */
+  .dot.scheduled {
+    border-radius: 0;
+    box-shadow: none;
+    background: var(--muted);
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14' fill='none' stroke='%23000' stroke-width='1.5'%3E%3Crect x='1.75' y='2.75' width='10.5' height='9.5' rx='2'/%3E%3Cpath d='M1.75 6.25h10.5M4.75 1v3M9.25 1v3'/%3E%3C/svg%3E") center / contain no-repeat;
+  }
   .dot.off {
     box-shadow: none;
     border: 1.5px dashed var(--muted);

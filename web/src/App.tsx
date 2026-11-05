@@ -486,7 +486,7 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
     <ChatGone task={task} />
   ) : (
     // never started: why it waits, as the window's (a queued one's reason, else that it hasn't started)
-    <Empty>{task.status === 'queued' && task.sub ? capital(task.sub) : "This task hasn't started."}</Empty>
+    <Empty>{(task.status === 'queued' || task.status === 'scheduled') && task.sub ? capital(task.sub) : "This task hasn't started."}</Empty>
   )
   if (phone)
     return (

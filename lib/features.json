@@ -353,7 +353,7 @@
         ]
       },
       "forms": {
-        "herdr": "Groups, filters, group by, search (F), dots and %, Review on Ready rows, automations, archived",
+        "herdr": "Groups, filters, group by, search (F), dots and %, Review on Ready rows, Scheduled and Start later, automations, archived",
         "desktop": "Right column",
         "tablet": "Column beside the chat",
         "phone": "Tasks tab in the bottom bar"

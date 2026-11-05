@@ -2,7 +2,7 @@
 // click (at the pointer) or a finger held on the row, with no ⋯ on the row; what can't be undone asks first in a dialog.
 // A row in the desktop's sidebar held by a finger (or opened from the keyboard's menu key) opens its menu beside it.
 import clsx from 'clsx'
-import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { useUI } from './kernel.ts'
 import { useMotion } from './motion.ts'
 import { Ghost, ic, Menu, XIcon } from './ui.tsx'
@@ -89,6 +89,23 @@ export function useRowMenu({ beside = false }: { beside?: boolean } = {}) {
 /** the open menu at the pointer, beside its row, or under (or over) it; a click outside closes it, as any menu */
 export function RowMenu({ menu, label, className, children }: { menu: RowMenuState; label: string; className?: string; children: ReactNode }) {
   const { row, point, close } = menu
+  // a long menu (a task's Start later) that would run past the screen's bottom or top moves up or down onto it
+  const box = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    // the menu itself where it sits in its row (a box with no box of its own around it)
+    const el = (box.current?.classList.contains('contents') ? box.current.firstElementChild : box.current) as HTMLElement | null
+    if (!el) return
+    el.style.translate = ''
+    // its own height, not its box mid-way through springing out
+    const r = el.getBoundingClientRect(), h = el.offsetHeight
+    const top = menu.open === 'up' ? r.bottom - h : r.top
+    // inside its row it is clipped by the list that scrolls around it, not only by the screen
+    let clip = el.parentElement, lo = 8, hi = innerHeight - 8
+    while (clip && clip !== document.body && getComputedStyle(clip).overflowY === 'visible') clip = clip.parentElement
+    if (clip && clip !== document.body) { const c = clip.getBoundingClientRect(); lo = Math.max(lo, c.top + 4); hi = Math.min(hi, c.bottom - 4) }
+    const dy = top + h > hi ? hi - (top + h) : top < lo ? lo - top : 0
+    if (dy) el.style.translate = `0 ${Math.max(dy, lo - top)}px`
+  })
   // beside its row it would stay put while the list under it scrolls: it goes
   useEffect(() => {
     if (!row) return
@@ -103,7 +120,7 @@ export function RowMenu({ menu, label, className, children }: { menu: RowMenuSta
   if (row && point)
     return (
       // as the window's right-click menu: its corner at the pointer, kept on the screen
-      <div className="fixed z-21" style={{ left: Math.max(8, Math.min(point.x, innerWidth - 296)), ...(menu.open === 'up' ? { bottom: innerHeight - point.y } : { top: point.y }) }}>
+      <div ref={box} className="fixed z-21" style={{ left: Math.max(8, Math.min(point.x, innerWidth - 296)), ...(menu.open === 'up' ? { bottom: innerHeight - point.y } : { top: point.y }) }}>
         <Menu label={label} onClose={close} className={clsx(menu.open === 'up' ? 'origin-bottom-left' : 'origin-top-left', className)}>
           {children}
         </Menu>
@@ -113,7 +130,7 @@ export function RowMenu({ menu, label, className, children }: { menu: RowMenuSta
   if (at)
     return (
       // its first row level with the row, just past the sidebar's edge; near the bottom its last row is
-      <div className="fixed z-21" style={{ left: at.right + 8, ...(menu.open === 'up' ? { bottom: innerHeight - at.bottom - 6 } : { top: at.top - 6 }) }}>
+      <div ref={box} className="fixed z-21" style={{ left: at.right + 8, ...(menu.open === 'up' ? { bottom: innerHeight - at.bottom - 6 } : { top: at.top - 6 }) }}>
         <Menu label={label} onClose={close} className={clsx(menu.open === 'up' ? 'origin-bottom-left' : 'origin-top-left', className)}>
           {children}
         </Menu>
@@ -121,9 +138,11 @@ export function RowMenu({ menu, label, className, children }: { menu: RowMenuSta
     )
   return (
     // never wider than its row: a phone's drawer is narrower than a wide menu, which would run off the screen's left
-    <Menu label={label} onClose={close} className={clsx('absolute right-1 z-21 max-w-[calc(100%-0.5rem)] origin-top-right', menu.open === 'up' ? 'bottom-full mb-1' : 'top-full mt-1', className)}>
-      {children}
-    </Menu>
+    <div ref={box} className="contents">
+      <Menu label={label} onClose={close} className={clsx('absolute right-1 z-21 max-w-[calc(100%-0.5rem)] origin-top-right', menu.open === 'up' ? 'bottom-full mb-1' : 'top-full mt-1', className)}>
+        {children}
+      </Menu>
+    </div>
   )
 }
 

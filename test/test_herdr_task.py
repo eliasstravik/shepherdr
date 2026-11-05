@@ -989,6 +989,205 @@ class Store:
         return f"f#{t['id']}"
 
 
+class Scheduled(unittest.TestCase):
+    """APP-38: a task that starts by itself at a time (--at "fri 8:15", --in 6h). A real task list on
+    disk in a throwaway store and a throwaway git repo; only starting an agent, hc and the clock are faked."""
+
+    def setUp(self):
+        import argparse
+        import contextlib
+        import io
+        import shutil
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.commands as commands
+        import herdr_task.queues as queues
+        import herdr_task.settings as settings
+        import herdr_task.store as store
+        import herdr_task.tick as tick
+        from herdr_task.base import Fail
+        self.commands, self.tick, self.store_mod, self.Fail = commands, tick, store, Fail
+        self.argparse, self.io, self.redirect = argparse, io, contextlib.redirect_stdout
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.folder = os.path.join(self.tmp, "app")
+        os.makedirs(self.folder)
+        subprocess.run(["git", "init", "-q", "-b", "main", self.folder], check=True)
+        subprocess.run(["git", "-C", self.folder, "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-q",
+                        "--allow-empty", "-m", "base"], check=True)
+        self.started, self.clock = [], None
+
+        def begin(s, t, argv, space, parent=None):
+            t["state"], t["started"] = "running", 1
+            for k in ("queue", "queued_at", "held", "scheduled_for"):
+                t.pop(k, None)
+            s.dirty = True
+            self.started.append((s.ref(t), argv, space, parent))
+            return {"address": "t9", "agent": "claude"}
+
+        later = lambda: self.clock if self.clock is not None else int(__import__("time").time() * 1000)
+        patches = [mock.patch.object(store, "STORE", os.path.join(self.tmp, "tasks")),
+                   mock.patch.object(settings, "SETTINGS", os.path.join(self.tmp, "settings.json")),
+                   mock.patch.dict(os.environ, {"HC_TERMINAL_ID": ""}),
+                   mock.patch.object(commands, "begin", begin), mock.patch.object(tick, "begin", begin),
+                   mock.patch.object(commands, "ensure_scheduler", lambda quiet=False: {}),
+                   mock.patch.object(commands, "default_space", lambda: "sp1"),
+                   mock.patch.object(commands, "caller_space", lambda: None),
+                   mock.patch.object(commands, "worker_argv", lambda s, t, space, key=None: ["claude"]),
+                   mock.patch.object(tick, "worker_argv", lambda s, t, space, key=None: ["claude"]),
+                   mock.patch.object(commands, "live_agents", lambda key: []),
+                   mock.patch.object(queues, "live_agents", lambda key: []),
+                   mock.patch.object(queues, "machine_hold", lambda: None),
+                   mock.patch.object(tick, "machine_hold", lambda: None),
+                   mock.patch.object(tick, "now", later)]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def run_cmd(self, fn, **kw):
+        base = dict(folder=self.folder, json=True, id=None, title=None, prompt=None, prompt_file=None, here=False,
+                    worktree=False, after=None, space=None, at=None, in_=None, agent=None, model=None, effort=None,
+                    argv=None, parent=None, now=False, base=None, start_notes=None, finish_notes=None, set=None)
+        args = self.argparse.Namespace(**{**base, **kw})
+        out = self.io.StringIO()
+        with self.redirect(out):
+            fn(args)
+        return json.loads(out.getvalue())
+
+    def add(self, title, **kw):
+        return self.run_cmd(self.commands.cmd_add, title=title, **kw)
+
+    def tick_at(self, ms):
+        """One tick at that moment, the list read fresh from disk (as after a restart)."""
+        self.clock = ms
+        report = {"started": [], "done": [], "attention": [], "fired": []}
+        with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            self.tick.tick_store(s, report)
+        return [x["ref"] for x in report["started"]]
+
+    def task(self, n):
+        with self.store_mod.Store(self.store_mod.locate(self.folder), write=False) as s:
+            return dict(s.find(n))
+
+    def test_parsing_absolute_relative_and_refused(self):
+        import datetime
+        from herdr_task.when import parse_at, parse_in, when_from
+        thu = int(datetime.datetime(2026, 11, 5, 10, 0).timestamp() * 1000)  # a Thursday, 10:00
+        at = lambda words: datetime.datetime.fromtimestamp(parse_at(words, thu) / 1000).strftime("%a %Y-%m-%d %H:%M")
+        self.assertEqual(at("2026-11-06 09:00"), "Fri 2026-11-06 09:00")
+        self.assertEqual(at("tomorrow 9:00"), "Fri 2026-11-06 09:00")
+        self.assertEqual(at("fri 8:15"), "Fri 2026-11-06 08:15")
+        self.assertEqual(at("thu 9:00"), "Thu 2026-11-12 09:00")  # passed today: next week's
+        self.assertEqual(at("today 18:00"), "Thu 2026-11-05 18:00")
+        self.assertEqual(at("9:00"), "Fri 2026-11-06 09:00")  # a bare time: the next one
+        self.assertEqual(at("next friday at 5:30 pm"), "Fri 2026-11-06 17:30")
+        self.assertEqual([parse_in(x) // 60000 for x in ("6h", "90m", "2 days", "6 hours", "1h 30m", "in 6 hours")],
+                         [360, 90, 2880, 360, 90, 360])
+        for words in ("soon", "tomorrow", "blah 9:00", "25:00", "2026-02-30 9:00", "2026-11-06"):
+            with self.assertRaises(self.Fail, msg=words) as e:
+                parse_at(words, thu)
+            self.assertRegex(str(e.exception), r"tomorrow 9:00|No such date|2026-11-06 09:00")
+        for words in ("6", "soon", "6 parsecs", ""):
+            with self.assertRaises(self.Fail, msg=words) as e:
+                parse_in(words)
+            self.assertTrue("6h" in str(e.exception) or "how long" in str(e.exception), str(e.exception))
+        with self.assertRaises(self.Fail):
+            when_from("2020-01-01 09:00", None)  # passed
+        self.assertEqual(when_from("in 6 hours", None, thu), thu + 6 * 3600000)  # a span where a time goes: from now
+        with self.assertRaises(self.Fail) as e:
+            when_from("whenever", None, thu)
+        self.assertIn('"tomorrow 9:00"', str(e.exception))
+        with self.assertRaises(self.Fail):
+            self.add("Both", at="18:00", in_="6h")  # one or the other (argparse refuses it too)
+
+    def test_automations_once_takes_the_same_words(self):
+        import datetime
+        from herdr_task.automations import parse_every
+        r = parse_every("once tomorrow 9:00")
+        tomorrow = datetime.date.today() + datetime.timedelta(days=1)
+        self.assertEqual(r, {"text": "once tomorrow 9:00", "kind": "once", "at": f"{tomorrow:%Y-%m-%d} 09:00"})
+        self.assertEqual(parse_every("once 2026-11-05 9:00")["at"], "2026-11-05 09:00")
+        with self.assertRaises(self.Fail):
+            parse_every("once whenever")
+
+    def test_it_starts_on_time_not_before(self):
+        import time
+        v = self.add("Nightly cleanup", in_="6h")
+        self.assertEqual(v["status"], "scheduled")
+        self.assertEqual(v["status_text"], "Scheduled")
+        self.assertRegex(v["why"], r"^Starts (Today|Tomorrow) \d+:\d\d \(in (5h \d+m|6h)\)$")
+        due = v["scheduled_for"]
+        self.assertAlmostEqual(due, time.time() * 1000 + 6 * 3600000, delta=5000)
+        self.assertEqual(self.tick_at(due - 60000), [])
+        self.assertEqual(self.task(1)["state"], "scheduled")
+        self.assertEqual(self.tick_at(due + 1000), ["APP-1"])
+        self.assertEqual(self.started, [("APP-1", ["claude"], "sp1", None)])  # the space it was added in
+        t = self.task(1)
+        self.assertEqual(t["state"], "running")
+        self.assertNotIn("scheduled_for", t)
+        self.assertEqual(self.tick_at(due + 20000), [])  # once
+
+    def test_a_time_passed_while_the_machine_was_off_starts_once(self):
+        v = self.add("Report", at="2099-01-01 09:00")
+        self.assertEqual(v["status"], "scheduled")
+        # The machine was off on the day: the first tick after (a fresh read of the list) starts it.
+        a_day_late = v["scheduled_for"] + 86400000
+        self.assertEqual(self.tick_at(a_day_late), ["APP-1"])
+        self.assertEqual(self.tick_at(a_day_late + 15000), [])
+        self.assertEqual(len(self.started), 1)
+
+    def test_no_room_then_it_queues(self):
+        from unittest import mock
+        import herdr_task.queues as queues
+        self.add("Busy one")
+        self.run_cmd(self.commands.cmd_start, id="1", now=True)
+        v = self.add("Later", in_="1h")
+        with mock.patch.object(self.store_mod.Store, "max_running", lambda s: 1), \
+                mock.patch.object(queues, "working", lambda s, t: t["state"] == "running"):
+            self.assertEqual(self.tick_at(v["scheduled_for"] + 1000), [])
+            self.assertEqual(self.task(2)["state"], "queued")
+
+    def test_after_and_a_time_start_when_both_hold(self):
+        self.add("First")
+        v = self.add("Second", in_="1h", after="1")
+        due = v["scheduled_for"]
+        self.assertEqual(v["status"], "scheduled")
+        self.assertEqual(self.tick_at(due + 1000), [])  # its time came, SHEP-1 isn't done
+        self.assertEqual(self.task(2)["state"], "queued")
+        with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            s.find(1)["state"] = "done"
+            s.dirty = True
+        self.assertEqual(self.tick_at(due + 20000), ["APP-2"])
+        # the other way round: done first, then its time
+        self.add("Third")
+        v = self.add("Fourth", in_="2h", after="3")
+        with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            s.find(3)["state"] = "done"
+            s.dirty = True
+        self.assertEqual(self.tick_at(v["scheduled_for"] - 60000), [])
+        self.assertEqual(self.tick_at(v["scheduled_for"] + 1000), ["APP-4"])
+
+    def test_start_at_now_reschedule_and_unschedule(self):
+        self.add("Deploy")
+        v = self.run_cmd(self.commands.cmd_start, id="1", at="2099-01-01 09:00", agent=None)
+        self.assertEqual((v["status"], v["queue"]["space"]), ("scheduled", "sp1"))
+        v = self.run_cmd(self.commands.cmd_edit, id="1", in_="3h")
+        self.assertEqual(v["status"], "scheduled")
+        self.assertEqual(v["queue"]["argv"], ["claude"])  # what start would use, kept
+        v = self.run_cmd(self.commands.cmd_edit, id="1", at="")
+        self.assertEqual(v["status"], "todo")
+        self.assertNotIn("scheduled_for", v)
+        self.run_cmd(self.commands.cmd_edit, id="1", at="tomorrow 9:00")
+        self.assertEqual(self.task(1)["state"], "scheduled")
+        v = self.run_cmd(self.commands.cmd_start, id="1", now=True)
+        self.assertEqual(v["state"], "running")
+        self.assertEqual([x[0] for x in self.started], ["APP-1"])
+        with self.assertRaises(self.Fail):
+            self.run_cmd(self.commands.cmd_edit, id="1", in_="1h")  # started: too late
+        with self.assertRaises(self.Fail):
+            self.add("Typo", at="fry 9:00")
+
+
 if __name__ == "__main__":
     unittest.main()
 

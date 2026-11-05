@@ -36,7 +36,7 @@ Keep your attention on decisions. Shepherdr starts, follows and puts away the ta
 
 ### 📈 See every task at a glance
 
-Each space's Assistant chat is in the middle and its tasks on the right, by what they need: `Needs you`, `Ready`, `Merging`, `Working`, `Queued`, `To do` and `Done`. A working task's dot fills like a pie with its % done and its minutes left, and its second line says what it is doing (`Fixing the two failing tests`). The sidebar groups your spaces by machine, with Pinned and sections of your own, and marks the ones that wait on you. A task opens in the panel with its chat, terminal, files, diff, pull request and browser; Herdr's own panes and splits work as always.
+Each space's Assistant chat is in the middle and its tasks on the right, by what they need: `Needs you`, `Ready`, `Merging`, `Working`, `Queued`, `Scheduled`, `To do` and `Done`. A working task's dot fills like a pie with its % done and its minutes left, and its second line says what it is doing (`Fixing the two failing tests`). The sidebar groups your spaces by machine, with Pinned and sections of your own, and marks the ones that wait on you. A task opens in the panel with its chat, terminal, files, diff, pull request and browser; Herdr's own panes and splits work as always.
 
 ### 🧩 Make it yours: everything is an add-on
 
