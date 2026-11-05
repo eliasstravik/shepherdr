@@ -326,6 +326,10 @@ export interface Task {
   plan?: string[]
   /** none until the task's agent starts */
   agent?: TaskAgent
+  /** the ids of the artifacts its agent and its helpers made or updated (SHEP-60): its proof first, then newest first */
+  artifacts?: string[]
+  /** its proof artifact's id (herdr-task ready --proof) */
+  proof?: string
   /** its worker's own helper agents (SHEP-54: a reviewer it started), newest last */
   subagents?: { chat: string; title: string; status: 'working' | 'needs' | 'done'; at: number; ended?: number }[]
   desc?: string

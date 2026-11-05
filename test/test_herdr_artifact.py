@@ -178,5 +178,44 @@ class Artifacts(unittest.TestCase):
         ])
 
 
+class WhoPublishes(unittest.TestCase):
+    """SHEP-60: a task's agent (and its helpers) publish in its task's name, read from the terminal's herdr.task
+    label with `hc get` (`hc ls --json` lists no labels), else from HERDR_BROWSER_TASK."""
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp(prefix="shepherdr-artifact-home-")
+        os.makedirs(os.path.join(self.home, ".herdr", "tasks"))
+        with open(os.path.join(self.home, ".herdr", "tasks", "dev-shop.json"), "w") as f:
+            json.dump({"prefix": "SHOP", "tasks": []}, f)
+        self.p = mock.patch.object(A, "HOME", self.home)
+        self.p.start()
+
+    def tearDown(self):
+        self.p.stop()
+        shutil.rmtree(self.home, ignore_errors=True)
+
+    def hc(self, labels, code=0):
+        out = json.dumps({"address": "t5", "labels": labels})
+        return mock.patch.object(A, "run", return_value=types.SimpleNamespace(returncode=code, stdout=out, stderr=""))
+
+    def test_its_label_names_its_task(self):
+        with mock.patch.dict(os.environ, {"HC_TERMINAL_ID": "t5"}, clear=False), self.hc({"herdr.task": "dev-shop#4"}) as run:
+            os.environ.pop("HERDR_BROWSER_TASK", None)
+            self.assertEqual(A.me(), {"terminal": "t5", "task": "SHOP-4"})
+            self.assertEqual(run.call_args[0][0], ["hc", "get", "t5", "--json"])
+
+    def test_no_label_then_its_task_env(self):
+        with mock.patch.dict(os.environ, {"HC_TERMINAL_ID": "t5", "HERDR_BROWSER_TASK": "dev-shop#7"}), self.hc({}):
+            self.assertEqual(A.me()["task"], "SHOP-7")
+
+    def test_a_list_without_a_prefix_and_no_task(self):
+        self.assertEqual(A.task_ref("other#3"), "#3")
+        self.assertIsNone(A.task_ref(None))
+        self.assertIsNone(A.task_ref("nonsense"))
+        with mock.patch.dict(os.environ, {"HC_TERMINAL_ID": "t5"}), self.hc({}, code=1):
+            os.environ.pop("HERDR_BROWSER_TASK", None)
+            self.assertEqual(A.me(), {"terminal": "t5", "task": None})
+
+
 if __name__ == "__main__":
     unittest.main()

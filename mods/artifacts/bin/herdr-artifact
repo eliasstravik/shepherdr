@@ -171,27 +171,35 @@ def find_anywhere(ref):
 # ---- who is publishing --------------------------------------------------------------------
 
 def me():
-    """This terminal's address and its task, from herdr-core: {terminal, task}."""
+    """This terminal's address and its task, from herdr-core: {terminal, task}. Its task is its herdr.task label
+    ("<list slug>#<n>", a task's worker and its helpers carry it), read with `hc get` (`hc ls` lists no labels),
+    else the task's own HERDR_BROWSER_TASK, which its worker's shell is started with."""
     t = os.environ.get("HC_TERMINAL_ID") or None
-    task = None
+    key = None
     if t:
-        r = run(["hc", "ls", "--json"])
         try:
-            rows = json.loads(r.stdout)
-            rows = rows if isinstance(rows, list) else rows.get("terminals", [])
-        except ValueError:
-            rows = []
-        row = next((x for x in rows if x.get("address") == t), None)
-        key = (row or {}).get("labels", {}).get("herdr.task")
-        if key and "#" in key:
-            slug, n = key.rsplit("#", 1)
-            try:
-                with open(os.path.join(HOME, ".herdr", "tasks", slug + ".json")) as f:
-                    prefix = json.load(f).get("prefix")
-                task = f"{prefix}-{n}" if prefix else f"#{n}"
-            except (OSError, ValueError):
-                task = f"#{n}"
-    return {"terminal": t, "task": task}
+            r = run(["hc", "get", t, "--json"])
+            row = json.loads(r.stdout) if r.returncode == 0 else {}
+        except (OSError, ValueError):
+            row = {}
+        key = ((row if isinstance(row, dict) else {}).get("labels") or {}).get("herdr.task")
+    key = key or os.environ.get("HERDR_BROWSER_TASK") or None
+    return {"terminal": t, "task": task_ref(key)}
+
+
+def task_ref(key):
+    """A task's key ("dev-shop#4") as its people know it ("SHOP-4"): its list's prefix, else "#4"."""
+    if not key or "#" not in key:
+        return None
+    slug, n = key.rsplit("#", 1)
+    if not n.isdigit():
+        return None
+    try:
+        with open(os.path.join(HOME, ".herdr", "tasks", slug + ".json")) as f:
+            prefix = json.load(f).get("prefix")
+    except (OSError, ValueError):
+        prefix = None
+    return f"{prefix}-{n}" if prefix else f"#{n}"
 
 
 # ---- files -------------------------------------------------------------------------------

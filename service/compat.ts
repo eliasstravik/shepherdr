@@ -9,6 +9,7 @@ import * as SPc from "../core/spaces.js";
 import { kindOf as kindOfTerm } from "../core/chat-reader.js";
 import * as CL from "../core/chat-log.js";
 import * as CV from "../core/chat-view.js";
+import { taskArtifacts } from "../core/task-artifacts.js";
 const { summary, names, pilotLine } = CL as any;
 const { senderName, briefLabel, newsTimeline, resolveArtifacts, unsigned, fromName, sentTo, selfName, subagentsOf, isHelper } = CV as any;
 import { mentionedIn } from "../core/send.js";
@@ -197,6 +198,8 @@ export class Compat {
   private rows: Row[] = [];
   /** the artifacts' registries as herdr-artifact lists them (versions with who published them), for a chat's publishes */
   private rawArts: any[] = [];
+  /** the artifact ids each chat log says were published (service/task-logs.ts), set by main */
+  taskLogs: { ids(path: string): string[] } | null = null;
   private spaceList: Space[] = [];
   /** A space by its id: its folder and machine. */
   spaceOf(id: string) { const s = this.spaceList.find((x) => x.id === id); return s ? { id: s.id, folder: s.folder, machine: s.machine ?? null } : null; }
@@ -370,6 +373,10 @@ export class Compat {
         ...(r.started ? { started: r.started } : {}), ...(r.summary ? { summary: r.summary } : {}), ...(r.details ? { details: r.details } : {}),
         ...(r.pr ? { pr: { number: r.pr.number, url: r.pr.url } } : {}),
         ...(r.branch ? { branch: r.branch } : {}), ...(r.base ? { base: r.base } : {}),
+        // its Artifacts tab (SHEP-60): its proof first, then newest first; its chat logs as the fallback (this machine's)
+        ...((arts) => (arts.length ? { artifacts: arts } : {}))(taskArtifacts(this.rawArts, { ref: r.ref, folder: r.folder, machine: r.machine ?? null, agents: r.agents, proof: r.proof },
+          r.machine ? [] : (r.logs ?? []).flatMap((p: string) => this.taskLogs?.ids(p) ?? []))),
+        ...(r.proof ? { proof: r.proof } : {}),
         // the task's browser (agent-browser), relayed for this machine's tasks
         ...(r.machine ? { browser: { ready: false, hint: `This task runs on ${r.machine}. Its browser can be watched only from that machine's Herdr for now.` } } : { browser: { ready: true } }),
         ...(r.pinned ? { pinned: 1 } : {}),

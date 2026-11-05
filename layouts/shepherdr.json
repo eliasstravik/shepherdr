@@ -213,6 +213,13 @@
                                       }
                                     }
                                   ]
+                                },
+                                {
+                                  "id": "tasks-thread-artifacts",
+                                  "type": "block",
+                                  "content": {
+                                    "mod": "task-artifacts"
+                                  }
                                 }
                               ],
                               "active": "tasks-thread-chat"

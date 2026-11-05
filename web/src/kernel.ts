@@ -62,6 +62,8 @@ export interface PanelItem {
   Icon: FC<{ className?: string }>
   /** a hook: why it has nothing to show for this task (greyed out with that hint), or null */
   useOff?: (task: Task) => string | null
+  /** how many it holds for this task, shown quietly after its label (Artifacts 3); none or 0: no number */
+  count?: (task: Task) => number
   View: FC<{ task: Task; chatKey: string }>
 }
 

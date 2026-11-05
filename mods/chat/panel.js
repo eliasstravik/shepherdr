@@ -28,6 +28,8 @@ import { taskDot, ownProgress, estimated } from "./dot.js";
 import { busyAgain, onIt } from "./core/tasks.js";
 import { button, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { on as addonOn } from "./addons.js";
+import { artifactCli } from "./artview.js";
+import { GREP, publishedIds, taskArtifacts } from "./core/task-artifacts.js";
 
 // The task header's shared left edge, and task ids in the Tasks list's monospace (mods/tasks).
 const EDGE = 12, ID_FONT = "JetBrains Mono";
@@ -36,6 +38,10 @@ export const STACK = "tasks", LIST = "tasks-list", THREAD = "tasks-thread";
 export const BODY = "tasks-thread-body", CHAT = "tasks-thread-chat", TERM = "tasks-thread-term";
 export const FILES = "tasks-thread-files", CHANGES = "tasks-thread-changes", PR = "tasks-thread-pr";
 export const BROWSER = "tasks-thread-browser";
+// The task's Artifacts (mods/task-artifacts, SHEP-60): what its agent and its helpers made.
+export const ARTIFACTS = "tasks-thread-artifacts";
+// How often its artifacts are looked for again while it shows (a python start and a grep of its logs).
+const ARTS_EVERY = 15000;
 
 function find(node, id) {
   if (!node || typeof node !== "object") return null;
@@ -142,6 +148,33 @@ export class PanelHost {
       if (JSON.stringify(w) !== JSON.stringify(shared("tasks.thread.where") ?? null)) setShared("tasks.thread.where", w);
     }
     if (JSON.stringify(rec) !== JSON.stringify(this.rec)) { this.rec = rec; cx.notify(); }
+    if (this.head && rec && find(layout(), ARTIFACTS) && addonOn("artifacts")) this.loadArts(rec, addr, cx);
+  }
+
+  // Its artifacts (core/task-artifacts.js, as the web's Artifacts tab finds them): its folder's list (herdr-artifact,
+  // on its machine), and what its agents' chat logs say they published (grep there), for shared
+  // "tasks.thread.artifacts" = { terminal, ref, machine, list: [{ id, title, v, at, proof }] }: the header counts
+  // them, mods/task-artifacts lists them. Again every ARTS_EVERY while the task shows; at once for another task.
+  async loadArts(rec, addr, cx) {
+    const key = `${rec.machine ?? ""}|${rec.folder}|${rec.ref}`;
+    if (this.artsBusy || (this.artsKey === key && Date.now() - this.artsAt < ARTS_EVERY)) return;
+    this.artsBusy = true;
+    try {
+      const on = rec.machine ?? null;
+      const out = await artifactCli(on, ["list", "--folder", rec.folder]).catch(() => null);
+      const arts = Array.isArray(out?.artifacts) ? out.artifacts : [];
+      const logs = (Array.isArray(rec.agents) ? rec.agents : []).map((a) => a.log).filter((x) => typeof x === "string");
+      const said = logs.length ? await exec("grep", ["-ohE", GREP, ...logs], on ? { on } : {}).catch(() => null) : null;
+      const ids = taskArtifacts(arts, { ref: rec.ref, folder: rec.folder, machine: null, agents: rec.agents, proof: rec.proof?.id ?? null }, publishedIds(said?.stdout));
+      const list = ids.map((id) => arts.find((a) => a.id === id)).map((a) => ({ id: a.id, title: a.title, v: a.version, at: a.at, proof: a.id === rec.proof?.id }));
+      const v = { terminal: addr ?? null, ref: rec.ref, machine: on, list };
+      if (this.cur?.terminal === v.terminal && JSON.stringify(v) !== JSON.stringify(shared("tasks.thread.artifacts") ?? null)) setShared("tasks.thread.artifacts", v);
+      this.artsKey = key;
+      this.artsAt = Date.now();
+    } finally {
+      this.artsBusy = false;
+    }
+    cx.notify();
   }
 
   // Ready and nothing in the way (as the list's Ready group): not asking, no problem, not already merging, not
@@ -357,6 +390,8 @@ export class PanelHost {
       ...(hasPr ? [{ key: "pr", label: "Pull request", on: shownNow === PR, fn: pick(PR) }] : []),
       // The task's own browser, watched live (mods/task-browser), when the layout has it.
       ...(find(layout(), BROWSER) && addonOn("browser") ? [{ key: "browser", label: "Browser", on: shownNow === BROWSER, fn: pick(BROWSER) }] : []),
+      // What its agent made (mods/task-artifacts): always there, counted once it has some.
+      ...(find(layout(), ARTIFACTS) && addonOn("artifacts") ? [{ key: "artifacts", label: this.artsLabel(want), on: shownNow === ARTIFACTS, fn: pick(ARTIFACTS) }] : []),
     ];
     // Three rows on one left edge (EDGE): a slim bar (‹ Tasks; base, Pin, Accept), the task (its
     // dot, id and title, and under them what its agent is doing), then the switcher.
@@ -367,6 +402,13 @@ export class PanelHost {
         .child(this.taskBlock(t, { want, st, addr })))
       .child(h_flex().id("thread-views").flex_none().px(EDGE).overflow_x_scroll()
         .child(this.switcher(t, segs)));
+  }
+
+  // "Artifacts", with how many once the shown task has some ("Artifacts 3").
+  artsLabel(want) {
+    const a = shared("tasks.thread.artifacts");
+    const n = a && a.terminal === (want?.terminal ?? null) && (want?.terminal || a.ref === want?.task) ? a.list.length : 0;
+    return n ? `Artifacts ${n}` : "Artifacts";
   }
 
   // The slim bar: ‹ Tasks back to the list on the left (its chevron on the shared edge, its hover

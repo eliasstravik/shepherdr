@@ -501,6 +501,35 @@
       ]
     },
     {
+      "id": "task-artifacts",
+      "addon": "artifacts",
+      "title": "A task's Artifacts",
+      "core": [
+        "task-artifacts"
+      ],
+      "herdr": {
+        "mods": [
+          "task-artifacts"
+        ]
+      },
+      "web": {
+        "files": [
+          "plugins/artifacts/client.tsx",
+          "src/Panel.tsx"
+        ]
+      },
+      "forms": {
+        "herdr": "Its proof first, then newest first; a click opens the viewer",
+        "desktop": "Panel",
+        "tablet": "Panel",
+        "phone": "Screen"
+      },
+      "service": [
+        "compat.ts",
+        "task-logs.ts"
+      ]
+    },
+    {
       "id": "task-menu",
       "addon": "tasks",
       "title": "Pin from a row",

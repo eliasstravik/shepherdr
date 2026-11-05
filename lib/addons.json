@@ -48,7 +48,7 @@
       "keys": ["global ctrl-k", "global ctrl-shift-k", "global ctrl-shift-/", "global ctrl-shift-?"] },
     { "id": "artifacts", "title": "Artifacts", "switch": true,
       "about": "Reports and draft screens from agents, beside the chat, with markup. Off: no Artifacts panel button.",
-      "mods": ["artifacts"], "blocks": ["artifacts", "artifacts-list", "artifacts-view"], "helpers": ["herdr-artifact"], "web": ["artifacts"] },
+      "mods": ["artifacts", "task-artifacts"], "blocks": ["artifacts", "artifacts-list", "artifacts-view", "tasks-thread-artifacts"], "helpers": ["herdr-artifact"], "web": ["artifacts"] },
     { "id": "voice", "title": "Voice and dictation", "switch": true, "needs": ["chat"],
       "about": "Call an Assistant and talk (an ElevenLabs key), and dictate into the box (the same key). Off: no call or mic buttons.",
       "mods": ["chat-call"], "blocks": ["chat-call"], "keys": ["mod:chat ctrl-shift-d", "mod:chat ctrl-shift-space"], "web": ["voice"] },
