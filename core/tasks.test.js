@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { place, queueReason, reportOf, estimated, order, ago, autoPrefix, refOf, taskKey, matches, busyAgain, secondLine, leftOf, ORDER, STATUS, WORKING_AGAIN } from "./tasks.js";
+import { place, queueReason, reportOf, estimated, order, ago, autoPrefix, refOf, taskKey, matches, busyAgain, secondLine, leftOf, ORDER, STATUS, WORKING_AGAIN, fromLine, autoWhere } from "./tasks.js";
 import { REASONS, fit } from "./needs.js";
 
 const NOW = 1_800_000_000_000;
@@ -125,4 +125,19 @@ test("a scheduled task says when it starts", () => {
   expect(rows.sort(order("scheduled")).map((r) => r.task.scheduled_for)).toEqual([at(5, 18), at(7, 9)]);
   expect(ORDER.indexOf("scheduled")).toBe(ORDER.indexOf("queued") + 1);
   expect(STATUS.scheduled).toBe("Scheduled");
+});
+
+describe("an automation's row (SHEP-43)", () => {
+  test("says its machine and space whatever the grouping, its machine only with more than one", () => {
+    expect(autoWhere("vm-b", "shepherdr", true)).toBe("vm-b · shepherdr");
+    expect(autoWhere("This computer", "Home", true)).toBe("This computer · Home");
+    expect(autoWhere("This computer", "Home", false)).toBe("Home");
+    expect(autoWhere(null, null, true)).toBe(null);
+  });
+  test("one set off from another folder says by what and where", () => {
+    expect(fromLine(["merged"], "vm-b · shepherdr")).toBe("On merges in vm-b · shepherdr");
+    expect(fromLine(["ready", "merged"], "x")).toBe("On ready tasks or merges in x");
+    expect(fromLine(["added", "ready", "merged"], "x")).toBe("On task events in x");
+    expect(fromLine([], "x")).toBe("On task events in x");
+  });
 });

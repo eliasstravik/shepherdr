@@ -22,7 +22,7 @@ import { taskDot, ownProgress } from "./dot.js";
 import { taskMenu } from "./core/menus.js";
 // The rules for a task's status, order and words: shared with the web app (core/tasks.js).
 import { RANK, STATUS, RANK_OF, ORDER, GROUP_BY, groupBy, machineOf, machineName, refOf, taskKey, autoPrefix, place,
-  queueReason, reportOf as report, secondLine, leftOf, order, matches, day, ago, capital, short } from "./core/tasks.js";
+  queueReason, reportOf as report, secondLine, leftOf, order, matches, day, ago, capital, short, autoWhere, fromLine } from "./core/tasks.js";
 import { READ_LISTS, taskLists } from "./core/tasklists.js";
 import { TEXT, H, RADIUS, red, amber } from "./ui.js";
 
@@ -267,6 +267,7 @@ export default class Tasks extends View {
     // Group by (the ⋯ menu): by machine only while more than one machine has tasks; Machine › Space
     // is then by space.
     const multi = new Set(this.lists.filter((l) => l.tasks.length || l.automations?.length).map((l) => l.machine ?? "")).size > 1;
+    this.multi = multi;
     const chosen = groupBy(shared("tasks.groupby"));
     const by = multi || !chosen.startsWith("machine") ? chosen : chosen === "machine" ? "status" : "space";
     this.names = { machine: true, space: true };
@@ -602,11 +603,17 @@ export default class Tasks extends View {
     const go = p ? this.target(p) : null;
     const err = a.last_error?.message;
     // Why it won't run as planned goes on the second line, as every reason does; when it runs next stays on the right.
-    const sub = err ? "Didn't start" : a.paused ? "Paused" : null;
+    // One set off by another folder's task events (--from) says by what and where, unless something is wrong.
+    const src = a.from?.folder ? { machine: a.from.machine ?? list.machine ?? null, folder: a.from.folder } : null;
+    const from = src ? fromLine(a.on, `${machineName(src.machine)} · ${spaceOf(src).name ?? String(src.folder).split("/").filter(Boolean).pop()}`) : null;
+    const sub = err ? "Didn't start" : a.paused ? "Paused" : from;
     const when = !err && !a.paused && a.next_run ? day(a.next_run) : null;
+    // Where it is: its machine (with more than one) and space whatever the grouping, as the Automations group sits
+    // under no machine or space heading; none with "Where on task rows" off.
+    const where = shared("tasks.place") === false ? null : autoWhere(machineName(list.machine), placeName(list), this.multi);
     return this.line(`auto-${list.machine ?? ""}:${list.folder}#${a.id}`, {
       go, glyph: svg("mods/tasks/repeat.svg").size(14).flex_none().text_color(err ? red() : t.dim),
-      ref: null, title: a.title, dim: a.paused, sub, meta: when, where: this.whereOf(list.machine, placeName(list)),
+      ref: null, title: a.title, dim: a.paused, sub, meta: when, where,
     }, t);
   }
 

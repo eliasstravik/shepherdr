@@ -608,6 +608,46 @@ class RemoteInstall(unittest.TestCase):
         self.assertEqual(self.ran[-1][-3:], ["autopilot", "list", "--json"])
 
 
+class AutomationMachine(unittest.TestCase):
+    """auto list/show --json say whose an automation is: none here, the machine through --on (SHEP-43)."""
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.cli as cli
+        self.cli, self.answer = cli, ""
+        p = mock.patch.object(cli, "remote_run", lambda m, argv: subprocess.CompletedProcess(argv, 0, self.answer, ""))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def remote(self, argv, answer):
+        from unittest import mock
+        import io
+        self.answer = json.dumps(answer)
+        with mock.patch.object(sys, "stdout", io.StringIO()) as out:
+            self.cli.remote("vm-b", argv)
+        return json.loads(out.getvalue())
+
+    def test_a_list_from_another_machine_names_it(self):
+        got = self.remote(["auto", "list", "--json", "--all"], [{"ref": "X-A1", "folder": "/w", "machine": None}])
+        self.assertEqual(got[0]["machine"], "vm-b")
+
+    def test_one_from_another_machine_names_it(self):
+        got = self.remote(["auto", "show", "--json", "X-A1"], {"ref": "X-A1", "folder": "/w", "machine": None})
+        self.assertEqual(got["machine"], "vm-b")
+
+    def test_a_feed_is_left_as_it_is(self):
+        got = self.remote(["auto", "feed", "--json"], {"folder": "/w", "prefix": "X", "tasks": []})
+        self.assertNotIn("machine", got)
+
+    def test_here_it_names_none(self):
+        import herdr_task.automations as au
+        s = type("S", (), {"loc": {"folder": "/w"}, "prefix": "X", "data": {}})()
+        with __import__("unittest").mock.patch.object(au, "settings_for", lambda s, sp: {"automations": {}}):
+            v = au.auto_view(s, {"id": 1, "title": "t"})
+        self.assertIsNone(v["machine"])
+
+
 class SchedulerRound(unittest.TestCase):
     """The scheduler's round (automations.one_pass) and the window's or service's tick share one lock,
     both every 15 s. SHEP-34: a round that found the tick holding it skipped, and in step with the

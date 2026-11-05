@@ -379,6 +379,9 @@ export interface Automation {
   /** where it is, as its row says it: the space in its folder, else its list's name; and its machine (none: this computer) */
   listName?: string
   machine?: string | null
+  /** set off by another folder's task events (--from): that folder's machine (none: this computer), its space's name
+   *  there (else the folder's last part), and the events ("merged", "ready"…) */
+  from?: { machine: string | null; place: string; events: string[] }
 }
 
 /** A question card: built-in choice cards, a CLI's own menus, plans. */

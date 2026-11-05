@@ -19,6 +19,18 @@ export const groupBy = (v) => (v === "folder" ? "space" : GROUP_BY.includes(v) ?
 export const machineOf = (address) => (address?.includes("/") ? address.split("/")[0] : null);
 // A machine as people read it (the Spaces sidebar's words): its name, or This computer.
 export const machineName = (m) => m ?? "This computer";
+
+// An automation set off by another folder's task events (herdr-task auto --from), as its row's second line says it:
+// the events, then where they happen ("On merges in vm-b · shepherdr").
+const FROM_EVENTS = { added: "new tasks", ready: "ready tasks", failed: "failures", "needs-you": "tasks that need you", merged: "merges", stalled: "stalls" };
+export function fromLine(events, where) {
+  const words = (events ?? []).map((e) => FROM_EVENTS[e] ?? e);
+  return `On ${words.length && words.length < 3 ? words.join(" or ") : "task events"} in ${where}`;
+}
+
+// What an automation's row says of where it is: its machine and space, both whatever the grouping (the Automations
+// group sits under no machine or space heading); its machine only when more than one machine has tasks.
+export const autoWhere = (machine, space, multi) => [multi ? machine : null, space].filter(Boolean).join(" · ") || null;
 // A list's task id: HAT-4.
 export const refOf = (list, task) => `${list.prefix}-${task.id}`;
 // A task's pin key (shared "tasks.pinned"): "<machine, empty here>:<folder>#<id>".

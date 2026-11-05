@@ -120,6 +120,14 @@ def remote(machine, argv):
                 if isinstance(d.get(k), str) and "/" not in d[k]:
                     d[k] = f"{machine}/{d[k]}"
             out = json.dumps(d) + "\n"
+        # An automation's view (auto list, show, add...) is that machine's: it says so (SHEP-43).
+        if argv[:1] == ["auto"] and argv[1:2] != ["feed"]:
+            views = d if isinstance(d, list) else [d] if isinstance(d, dict) else []
+            for v in views:
+                if isinstance(v, dict) and "ref" in v and v.get("machine") is None:
+                    v["machine"] = machine
+            if views:
+                out = json.dumps(d) + "\n"
     sys.stdout.write(out)
     return r.returncode
 
