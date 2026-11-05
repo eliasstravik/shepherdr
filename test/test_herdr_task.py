@@ -63,6 +63,7 @@ class Autopilot(unittest.TestCase):
         import herdr_task.autopilot as ap
         self.ap, self.io, self.redirect = ap, io, contextlib.redirect_stdout
         self.tmp = tempfile.mkdtemp()
+        self.lists = []  # the task lists a wake looks at (waiting())
         self.folder = os.path.join(self.tmp, "tt-repo")
         os.makedirs(self.folder)
         store = os.path.join(self.tmp, "tasks")
@@ -78,7 +79,7 @@ class Autopilot(unittest.TestCase):
                             ("HEARTBEATS", os.path.join(self.tmp, "beats")), ("run", never), ("hc_json", never),
                             ("space_info", lambda s: ("~", self.folder) if s == "sp1" else (None, None)),
                             ("window_spaces", lambda: None), ("ensure_scheduler", self.scheduler),
-                            ("coordinator_in", lambda s: None)):
+                            ("coordinator_in", lambda s: None), ("store_files", lambda: self.lists)):
             p = mock.patch.object(ap, name, value)
             p.start()
             self.addCleanup(p.stop)
@@ -227,8 +228,7 @@ class Autopilot(unittest.TestCase):
         as everywhere.md.bak; a file the person edited is left as it is, with no backup."""
         path = self.ap.heartbeat_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        last = self.ap.OLD_STARTERS[1]
-        self.assertIn("Don't invent work", last)
+        last = next(x for x in self.ap.OLD_STARTERS if "Don't invent work" in x)
         with open(path, "w") as f:
             f.write(last)
         self.cmd("list")
@@ -255,8 +255,7 @@ class Autopilot(unittest.TestCase):
         an edited one stays as it is, with no backup."""
         path = self.ap.heartbeat_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        last = self.ap.OLD_STARTERS[0]
-        self.assertIn("ask me once, in one clear question", last)
+        last = next(x for x in self.ap.OLD_STARTERS if "ask me once, in one clear question" in x)
         with open(path, "w") as f:
             f.write(last)
         self.cmd("list")
@@ -421,6 +420,66 @@ class Autopilot(unittest.TestCase):
         self.assertEqual([v["space"] for v in self.cmd("list", here=True)["spaces"]], ["sp1", "sp2"])
         self.assertEqual(self.sent, [])
 
+    def test_the_parking_starter_upgrades_with_a_backup(self):
+        """SHEP-40: 3.1.7's starter (whose quiet wakes parked behind an Accept with a bare no-reply)
+        becomes today's, kept as everywhere.md.bak; an edited one stays as it is."""
+        path = self.ap.heartbeat_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        last = self.ap.OLD_STARTERS[0]
+        self.assertIn("Reply only <hc no-reply/> when there's truly nothing worth doing", last)
+        self.assertIn("Never ask me a question on a wake", last)
+        with open(path, "w") as f:
+            f.write(last)
+        self.cmd("list")
+        with open(path) as f:
+            self.assertEqual(f.read(), self.ap.STARTER)
+        with open(path + ".bak") as f:
+            self.assertEqual(f.read(), last)
+        for words in ("Never park on a task waiting for my Accept", "never a limit of your own",
+                      'end with <hc no-reply why="', "never a bare <hc no-reply/>"):
+            self.assertIn(words, self.ap.STARTER)
+        self.assertNotIn("Reply only <hc no-reply/>", self.ap.STARTER)
+        # in Settings, as it was: read as today's
+        self.cmd("set", space="sp1", heartbeat=last)
+        self.assertEqual(self.cmd("show", space="sp1")["heartbeat_text"], self.ap.STARTER)
+        # edited: kept, no backup
+        os.remove(path + ".bak")
+        edited = last.replace("At most 2 a wake", "At most 1 a wake")
+        with open(path, "w") as f:
+            f.write(edited)
+        self.cmd("list")
+        with open(path) as f:
+            self.assertEqual(f.read(), edited)
+        self.assertFalse(os.path.exists(path + ".bak"))
+
+    def test_a_wake_never_parks_on_an_accept(self):
+        """SHEP-40, tor-gameboy: TG-2 Ready, TG-3 queued after it and TG-4 after TG-3. The wake names
+        what waits on the person, asks for work around it, a why on a quiet reply, and no self-made limits."""
+        p = os.path.join(self.tmp, "tasks", "dev-tor-gameboy.json")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w") as f:
+            json.dump({"folder": self.folder, "prefix": "TG", "tasks": [
+                {"id": 1, "state": "done", "space": "sp1"},
+                {"id": 2, "state": "ready", "space": "sp1"},
+                {"id": 3, "state": "queued", "after": [2]},
+                {"id": 4, "state": "queued", "after": [3]},
+                {"id": 5, "state": "ready", "space": "sp1"},
+                {"id": 6, "state": "ready", "space": "sp9"},
+                {"id": 7, "state": "queued", "after": [6], "space": "sp9"}]}, f)
+        self.lists = [p]
+        a = {"folder": self.folder, "progress": {"text": "TG-3 queued behind it (Elias pace: one at a time).", "at": self.ap.now()}}
+        self.assertEqual(self.ap.waiting("sp1", a), ["TG-2 is Ready, waiting on the person's Accept; TG-3 and TG-4 wait behind it"])
+        self.assertEqual(self.ap.waiting("sp9", {}), ["TG-6 is Ready, waiting on the person's Accept; TG-7 waits behind it"])
+        m = self.ap.message("sp1", a, ["schedule"])
+        for words in ("Waiting on the person:\n- TG-2 is Ready, waiting on the person's Accept; TG-3 and TG-4 wait behind it",
+                      "never parks you", "work that doesn't need it", "say in one line what waits on the person's Accept",
+                      "never a limit or pace of your own", "doesn't apply", '<hc no-reply why="..."/>',
+                      "never a bare <hc no-reply/>"):
+            self.assertIn(words, m)
+        # nothing waiting: no such section
+        self.lists = []
+        self.assertNotIn("Waiting on the person", self.ap.message("sp1", a, ["schedule"]))
+
     def wake(self, ago, turn=3):
         """sp1 on, with a wake delivered to t9 `ago` ms back (its turn then: `turn`)."""
         self.cmd("on", space="sp1")
@@ -450,7 +509,16 @@ class Autopilot(unittest.TestCase):
         self.assertEqual(self.cmd("show", space="sp1")["inflight"], None)
         # its turn not counted: idle a while after the wake ends it, not at once
         self.wake(5000)
-        self.assertIn("inflight", self.settled({"turn": 3, "status": {"state": "idle"}}))
+        self.assertIn("inflight", self.settled({"turn": 3, "status": {"state": "idle"}, "status_ms": self.ap.now() - 60000}))
+        # SHEP-40: a one-second quiet turn the count missed: its status settled after the wake ends it at once
+        self.wake(5000)
+        a = self.settled({"turn": 3, "status": {"state": "done"}, "status_ms": self.ap.now() - 4000})
+        self.assertNotIn("inflight", a)
+        self.assertEqual(a["last_wake"]["outcome"], "Turn ended, no progress saved")
+        self.assertEqual(self.cmd("show", space="sp1")["inflight"], None)
+        # still working since the wake: not ended
+        self.wake(5000)
+        self.assertIn("inflight", self.settled({"turn": 3, "status": {"state": "working"}, "status_ms": self.ap.now() - 4000}))
         self.wake(self.ap.IDLE_AFTER_MS + 1000)
         self.assertNotIn("inflight", self.settled({"turn": 3, "status": {"state": "idle"}}))
         # asking the person something: still its wake, until the timeout

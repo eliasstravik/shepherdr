@@ -110,6 +110,13 @@ test("an Autopilot wake shows as one quiet line, never silence, and its words ne
   expect(lines(c)).toEqual(["Autopilot woke · switched on"]);
   c = await read([wake("schedule"), reply("m1", [text("Started HAT-5.")]), person, reply("m2", [text("<hc no-reply/>")])]);
   expect(lines(c)).toEqual(["Autopilot woke · on schedule"]);
+  // SHEP-40: a quiet wake says why on its line, never a bare "nothing to do"
+  c = await read([wake("schedule"), reply("m1", [call]), reply("m2", [text('<hc no-reply why="Checked TG-2: waiting on your Accept; TG-3 and TG-4 wait behind it"/>')])]);
+  expect(lines(c)).toEqual(["Autopilot woke · on schedule · Checked TG-2: waiting on your Accept; TG-3 and TG-4 wait behind it"]);
+  expect(said(c)).toEqual([]);
+  c = await read([wake("run now"), reply("m1", [text(`<hc no-reply why="${"x".repeat(300)}"/>`)])]);
+  expect(lines(c)[0].length).toBeLessThan(200);
+  expect(said(c)).toEqual([]);
 });
 
 // Agent to agent as a group chat (SHEP-27): another Assistant's message, and the messages this agent sends.

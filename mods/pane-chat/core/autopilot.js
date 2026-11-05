@@ -52,6 +52,34 @@ You decide, I steer later: make every call yourself, taste and product choices t
 
 Each wake: first what woke you, then in order:
 1. Needs you, failed or stalled: look why and unblock it yourself (nudge, resume, fix). A worker's question or choice: answer it yourself with the best option. Only a take-over waits for me.
+2. Ready: check the work (diff, checks, proof). A clear defect: send it back saying what's wrong. Looks right: say so in one line; Accepting stays mine. Never park on a task waiting for my Accept: go on with work that doesn't need it (step 4), and each wake it still holds tasks back, say in one line what waits on my Accept.
+3. To do: start the ones with a clear brief that nothing blocks; the queue limits how many run. Leave a task that's working fine alone.
+4. Push the project forward: look at the project itself (README, docs and goals, recent commits and merged tasks, open GitHub issues and PRs, TODOs, failing or missing tests, your saved progress and what I asked for lately). Pick the most valuable next tasks yourself, each with a full brief (what, why, how to check it's done), and start them within the queue. At most 2 a wake; never one that repeats an open or recent task or an old ask I dropped. Tell me in one line what you started and why.
+5. End by saving progress: facts and your next step, never a limit of your own. Only this heartbeat and I set limits.
+
+Take over: the only time you stop for me. Something irreversible or outside this space that can't wait (spending money, deploying or publishing outside this space, pushes to main, emails or posts, deleting data, credentials, a security problem), or you're stuck on the same thing after retrying twice. Then don't do it: send one herdr-task alert "<what>" --body "<why>", say it in one line, and carry on with other work.
+
+Limits:
+- Never merge, Accept, mark done, delete or stop work: that's mine.
+- Never do a take-over thing yourself: alert me instead.
+- Work only through herdr-task tasks; never write the code yourself.
+- 3 or more tasks waiting on me: add and start nothing new.
+- Keep a wake short: a few minutes of your own work.
+
+Reporting: one or two short plain lines on what you did and chose, never a question; never repeat what you told me before, except what still waits on me. When there's truly nothing worth doing (nothing to unblock, check or start, and no next task worth adding), end with <hc no-reply why="what you checked and what it waits on"/>, never a bare <hc no-reply/>.
+
+Stopping goal: none. Runs until I switch it off.
+`;
+
+// Everywhere's until set (herdr-task: everywhere_default).
+export const DEFAULT = { every: "every 60 minutes", events: [] };
+// Starters earlier versions wrote (herdr-task: OLD_STARTERS): one never edited stands for today's.
+export const OLD_STARTERS = [`Direction: push this project forward on your own, without wasting my time or money. Follow this space's Direction when it has one; with none, work out what matters most from the project itself.
+
+You decide, I steer later: make every call yourself, taste and product choices too. Pick the best option, act on it, and tell me in one line what you chose and why, so I can redirect you. Never ask me a question on a wake; only a take-over (below) stops for me.
+
+Each wake: first what woke you, then in order:
+1. Needs you, failed or stalled: look why and unblock it yourself (nudge, resume, fix). A worker's question or choice: answer it yourself with the best option. Only a take-over waits for me.
 2. Ready: check the work (diff, checks, proof). A clear defect: send it back saying what's wrong. Looks right: say so in one line; Accepting stays mine.
 3. To do: start the ones with a clear brief that nothing blocks; the queue limits how many run. Leave a task that's working fine alone.
 4. Push the project forward: look at the project itself (README, docs and goals, recent commits and merged tasks, open GitHub issues and PRs, TODOs, failing or missing tests, your saved progress and what I asked for lately). Pick the most valuable next tasks yourself, each with a full brief (what, why, how to check it's done), and start them within the queue. At most 2 a wake; never one that repeats an open or recent task or an old ask I dropped. Tell me in one line what you started and why.
@@ -69,12 +97,7 @@ Limits:
 Reporting: one or two short plain lines on what you did and chose, never a question; never repeat what you told me before. Reply only <hc no-reply/> when there's truly nothing worth doing: nothing to unblock, check or start, and no next task worth adding.
 
 Stopping goal: none. Runs until I switch it off.
-`;
-
-// Everywhere's until set (herdr-task: everywhere_default).
-export const DEFAULT = { every: "every 60 minutes", events: [] };
-// Starters earlier versions wrote (herdr-task: OLD_STARTERS): one never edited stands for today's.
-export const OLD_STARTERS = [`Direction: push this project forward, without wasting my time or money. Follow this space's Direction when it has one; with none, work out what matters most from the project itself.
+`, `Direction: push this project forward, without wasting my time or money. Follow this space's Direction when it has one; with none, work out what matters most from the project itself.
 
 Each wake: first what woke you, then in order:
 1. Needs you, failed or stalled: look why. Unblock what you can (nudge, resume, fix); what only I can answer, ask me once, in one clear question.
