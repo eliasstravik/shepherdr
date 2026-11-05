@@ -117,8 +117,17 @@ function scrollWords(el: HTMLElement) {
   return `scrolled ${pct}%${more ? ` (${more})` : ''}`
 }
 
+/** a scrolling part's name: its label, a chat's "messages", else the heading over it (the panel's "Artifacts") */
 function scrollName(el: HTMLElement) {
-  return text(el.getAttribute('aria-label')) || text(el.querySelector('h1, h2, h3, [role="heading"]')?.textContent).slice(0, 60) || 'list'
+  const own = text(el.getAttribute('aria-label'))
+  if (own) return own
+  if (el.querySelector('[data-msg]')) return 'messages'
+  const heads = 'h1, h2, h3, [role="heading"]'
+  for (let p: HTMLElement | null = el, i = 0; p && i < 5; p = p.parentElement, i++) {
+    const h = [...p.querySelectorAll(heads)].find((x) => (p === el || !el.contains(x)) && shown(x) && text(x.textContent))
+    if (h) return `${text(h.textContent).slice(0, 50)} list`
+  }
+  return 'list'
 }
 
 /** what is on screen now, in screen order: the things to act on, and how many more are off screen */
@@ -151,7 +160,30 @@ export function readScreen(): { nodes: Node[]; hidden: number; dialog: string } 
     for (const c of el.children) walk(c, d)
   }
   for (const c of root.children) walk(c, 0)
+  // the same name more than once (each row's Remove, Replace, Review): each says its row ("Remove, GH_TOKEN")
+  const seen = new Map<string, number>()
+  for (const n of nodes) if (n.role !== 'heading' && n.role !== 'scroll') seen.set(n.name, (seen.get(n.name) ?? 0) + 1)
+  for (const n of nodes) {
+    if (n.role === 'heading' || n.role === 'scroll' || (seen.get(n.name) ?? 0) < 2) continue
+    const ctx = rowOf(elementOf(n.ref), n.name)
+    if (ctx) n.name = `${n.name}, ${ctx}`
+  }
   return { nodes: nodes.slice(0, 400), hidden, dialog: dialog ? text(dialog.getAttribute('aria-label')) || nameOf(dialog).slice(0, 60) || 'a dialog' : '' }
+}
+
+/** the words of the row a repeated button is in, without the buttons' own: what tells one Remove from another (a row
+ *  is small: a part with more than a few buttons is a bar or a list, and says nothing about one of them) */
+function rowOf(el: HTMLElement | null, name: string) {
+  const CONTROLS = 'button, [role="button"], a, input, select, textarea, [role="tab"]'
+  for (let p = el?.parentElement, i = 0; p && p !== document.body && i < 4; p = p.parentElement, i++) {
+    if (p.querySelectorAll(CONTROLS).length > 4) return ''
+    const bits: string[] = []
+    const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT)
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) if (!n.parentElement?.closest(CONTROLS) && text(n.textContent)) bits.push(text(n.textContent))
+    const t = bits.join(' · ')
+    if (t && t !== name) return t.slice(0, 50)
+  }
+  return ''
 }
 
 function describe(el: Element, role: string, name: string, depth: number): Node {

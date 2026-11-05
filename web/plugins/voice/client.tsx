@@ -69,6 +69,10 @@ function closeTop(): string | null {
     return `Pressed Escape on ${name}`
   }
   for (const [k, off, did] of layer) if (ui[k]) { setUI({ [k]: off } as Partial<UI>); return did }
+  // a page shown inside a panel (an artifact in the Artifacts list, a task's file): the screen's own ‹ Back
+  const own = [...document.querySelectorAll<SVGElement>('[data-back]')].map((i) => i.closest<HTMLElement>('button, [role="button"], a')).filter((b): b is HTMLElement => !!b && b.getClientRects().length > 0)
+  const side = own.filter((b) => b.closest('[data-side], aside, [role="complementary"]')).at(-1) ?? own.at(-1)
+  if (side) { press(side); return `Pressed ‹ ${(side.getAttribute('aria-label') || side.textContent || 'Back').trim().slice(0, 40)}` }
   if (ui.task && (ui.device === 'phone' || (snap && taskInMiddle(ui, snap)))) { setUI({ task: null, sheet: null }); return 'Closed the task' }
   return null
 }

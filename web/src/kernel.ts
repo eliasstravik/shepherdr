@@ -1440,7 +1440,8 @@ export function chatPlace(snap: Snapshot, key: string): string | null {
 
 export function goChat(key: string) {
   if (key.includes('/')) openTask(taskChatId(key)!)
-  else setUI({ place: key, task: null, tab: 'chat', drawer: false })
+  // a space's chat key (p:<id>) goes to its space (SHEP-51: it went to the home space)
+  else setUI({ place: state.snap?.places.find((p) => p.chat === key)?.id ?? key, task: null, tab: 'chat', drawer: false })
 }
 
 export type Children = { children?: ReactNode }
