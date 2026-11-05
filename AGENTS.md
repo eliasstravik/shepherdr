@@ -46,6 +46,8 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - A cross-machine send without ssh: two throwaway cores (`HC_SESSION=a`/`b`, clean `env -i`) and
   `hc machine add --via 'sh -c' --name vmb --session b` on a; the wrap only shows with a real agent (e.g.
   `claude --model haiku`) as the target.
+- Web dictation on the dev VM: agent-browser's fake-mic flags don't apply; override
+  `navigator.mediaDevices.getUserMedia` with an oscillator `MediaStreamDestination` via eval.
 - Crash recovery for real: a throwaway core, `HC_SESSION=<name> hc ...` with `HC_TERMINAL_SOCKET` and Claude's
   `CLAUDE_*` env unset (`CLAUDE_CODE_CHILD_SESSION` turns off transcripts).
 
