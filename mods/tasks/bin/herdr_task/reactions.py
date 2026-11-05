@@ -5,9 +5,8 @@ mods/chat/session-note.sh, asks `herdr-task _session-note`): an Assistant with i
 (assistant_settings.py), any other agent just these words (agent_note), and its terminal is
 labelled with what it was taught. A running one is told once when the setting changes for its
 space, as SHEP-49's <herdr-setting> line: an Assistant by assistant_settings' pass, every other
-agent its hook taught by reactions_pass here. A headless reviewer (claude -p, codex exec) has no
-chat: its hook may run in its worker's terminal, but it never gets the person's messages, so it has
-nothing to react to."""
+agent its hook taught by reactions_pass here. A reviewer runs as its worker's helper agent (SHEP-54):
+taught like any other, it seldom gets the person's messages to react to."""
 
 import json
 import os

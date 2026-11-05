@@ -10,7 +10,7 @@ import { kindOf as kindOfTerm } from "../core/chat-reader.js";
 import * as CL from "../core/chat-log.js";
 import * as CV from "../core/chat-view.js";
 const { summary, names, pilotLine } = CL as any;
-const { senderName, briefLabel, newsTimeline, resolveArtifacts, unsigned, fromName, sentTo, selfName } = CV as any;
+const { senderName, briefLabel, newsTimeline, resolveArtifacts, unsigned, fromName, sentTo, selfName, subagentsOf, isHelper } = CV as any;
 import { mentionedIn } from "../core/send.js";
 import * as MEc from "../core/mentions.js";
 import * as SCc from "../core/screens.js";
@@ -341,6 +341,8 @@ export class Compat {
       return { id: s.id, name, ...(!s.name || s.name === "~" ? { unnamed: true } : {}), ...(s.icon ? { emoji: s.icon } : {}),...(s.git ? { git: s.git.linked ? "linked" : "main", repo: s.git.repo, gitName: s.git.name, branch: s.git.branch ?? null } : {}), ...(s.git?.linked ? { worktree: true } : {}), machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", mode: s.autopilot ? "autopilot" : "regular", chat: key, header, where, ...(cwd ? { cwd } : {}), assistantTab, ...(s.pilot ? { pilot: headerPilot(s.pilot) } : {}),store: artifactStore(s as any), ...((s as any).changedAt ? { changedAt: (s as any).changedAt } : {}),...(tabs.length ? { tabs } : {}) };
     });
 
+    // every agent's own helper agents (SHEP-54): their chats open by t:<address>, as a tab's
+    for (const k of (this as any).terminalsAll?.() ?? []) if (isHelper(k)) chats.set(`t:${k.address}`, k.address);
     this.tasks = new Map(rows.map((r) => [taskId(r), { ref: r.ref, folder: r.folder, machine: r.machine ?? null, key: `${r.slug}#${r.id}`, pin: r.key,
       where: { folder: r.worktree, machine: r.machine ?? null, base: r.base, start: r.start, branch: r.branch, pr: r.pr } }]));
     // one older than 10 minutes was left by a quit (as the window reads it)
@@ -356,6 +358,8 @@ export class Compat {
         // its latest news (ms), as Jump orders tasks newest first
         at: Math.max(0, ...[r.done_at, r.ready_at, r.started].filter((x: unknown): x is number => typeof x === "number")),
         ...(r.sub ? { sub: r.sub } : {}),
+        // its worker's own helper agents (SHEP-54), named in its detail's header; each one's row is over its chat's box
+        ...(r.subagents?.length ? { subagents: r.subagents.map((x: any) => ({ chat: `t:${x.address}`, title: x.title, status: x.status, at: x.at, ...(x.ended ? { ended: x.ended } : {}) })) } : {}),
         // the window's Accept card accepting it now (shared "tasks.accepting", mods/accept-card): "Accepting…"
         ...(accepting(r) ? { accepting: true } : {}),
         // the minutes left under a Working row's dot, as the window writes them (core/tasks.js leftOf: "6m", "<1m", "2h")
@@ -629,7 +633,11 @@ export class Compat {
     const st = t?.status?.state ?? null;
     // the CLI's own subagents still at work, then its background shells and watchers, above the box (3.0: the helpers
     // list; core/bg-jobs.js)
+    // first its own helper agents in herdr (SHEP-54: a reviewer it started as its hc child), each opening to its own chat
+    const kids = addr ? subagentsOf((this as any).terminalsAll?.() ?? [], addr) : [];
     const jobs: Job[] = [
+      // (one that ended keeps its row a while, done, but no longer opens: its log is found by its running process)
+      ...kids.map((s: any) => ({ id: `c:${s.address}`, kind: "child" as const, title: s.title, at: s.at, ...(s.ended ? {} : { chat: `t:${s.address}` }), status: s.status, role: s.role, ...(s.cli ? { cli: s.cli } : {}), ...(s.ended ? { ended: s.ended } : {}) })),
       ...(reader.conv?.running?.() ?? []).map((h: any, i: number) => ({ id: `h${i}`, kind: "agent" as const, title: h.desc, at: h.at ?? Date.now() })),
       ...(reader.jobs?.() ?? []).map((j: any) => ({ id: `b:${j.id}`, kind: j.kind === "monitor" ? "monitor" as const : "shell" as const, title: j.label, at: j.at ?? Date.now(), command: j.cmd, stop: true, ...(j.path ? { more: "output" as const } : {}) })),
     ];

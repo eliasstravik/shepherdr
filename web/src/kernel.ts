@@ -203,6 +203,8 @@ export interface UI {
   sideShut?: boolean
   /** a space's other agent tabs (t:<address>) shown as their chat rather than their terminal (3.0's Chat | Terminal) */
   tabView?: Record<string, 'chat' | 'terminal'>
+  /** subagents' chats on screen (SHEP-54): a subagent row opened over the box, or its own chat in a sheet; followed too */
+  subs?: string[]
   /** what the Tasks and Artifacts lists show (their chips) and whether it stays whatever place is picked, remembered
    *  on this device */
   lists: Lists
@@ -1208,14 +1210,15 @@ export function visibleChats(ui: UI, snap: Snapshot): string[] {
   const tabChat = ui.term?.startsWith('t:') && ui.tabView?.[ui.term] === 'chat' ? ui.term : null
   const place = tabChat ?? placeOf(snap, ui.place).chat
   const ag = agentChat(ui, snap)?.chat
+  const subs = ui.subs ?? []
   // a phone shows one chat (with a task open, its place's chat waits under it as it last was, unseen)
-  if (ui.device === 'phone') return [ui.task ? ag : ui.tab === 'chat' && !ui.settings ? place : null].filter(Boolean) as string[]
+  if (ui.device === 'phone') return [ui.task ? ag : ui.tab === 'chat' && !ui.settings ? place : null, ...subs].filter(Boolean) as string[]
   // split, each pane's chat
   const panes = panesHere(ui)
   // (focus on the open task hides them)
-  if (panes.length) return [...new Set([...(focusHere(ui, snap) ? [] : panes.map((p) => paneChat(snap, p))), ag])].filter(Boolean) as string[]
+  if (panes.length) return [...new Set([...(focusHere(ui, snap) ? [] : panes.map((p) => paneChat(snap, p))), ag, ...subs])].filter(Boolean) as string[]
   // a task in the middle covers its place's chat
-  return [taskInMiddle(ui, snap) ? null : place, ag].filter(Boolean) as string[]
+  return [...new Set([taskInMiddle(ui, snap) ? null : place, ag, ...subs])].filter(Boolean) as string[]
 }
 
 /* ---------- what the Tasks and Artifacts lists show: their chips ---------- */

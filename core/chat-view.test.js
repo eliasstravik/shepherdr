@@ -186,3 +186,29 @@ describe("agent to agent as a group chat (SHEP-27)", () => {
     expect(initialOf("Assistant on Mac mini · Home")).toBe("A");
   });
 });
+
+// SHEP-54: an agent's own helper agents in herdr, over its chat
+import { subagentsOf, subagentTitle, isHelper } from "./chat-view.js";
+test("subagentsOf: its own hc children labelled reviewer or helper, never workers", () => {
+  const now = 10_000_000;
+  const terms = [
+    { address: "t1", state: "live", labels: { "herdr.task": "x#1" } },
+    { address: "t2", parent: "t1", state: "live", status: { state: "working" }, created_ms: 100, name: "x-1-review", labels: { "herdr.task": "x#1", "herdr.role": "reviewer", "herdr.agent": "codex" } },
+    // a worker: an Assistant's child with a task, no helper role
+    { address: "t3", parent: "t0", state: "live", labels: { "herdr.task": "x#2" } },
+    { address: "t4", parent: "t1", state: "live", status: { state: "blocked" }, created_ms: 50, agent: "claude-code", labels: { "herdr.role": "helper" } },
+    // ended an hour and more ago: gone
+    { address: "t5", parent: "t1", state: "finished", finished_ms: now - 2 * 3600000, labels: { "herdr.role": "reviewer" } },
+    { address: "t6", parent: "t1", state: "finished", created_ms: 10, finished_ms: now - 60000, labels: { "herdr.role": "reviewer", "herdr.agent": "claude" } },
+    // another machine's: its parent named there
+    { address: "vm/t8", parent: "t7", state: "live", status: "idle", created_ms: 1, labels: { "herdr.role": "reviewer" } },
+  ];
+  const got = subagentsOf(terms, "t1", now);
+  expect(got.map((s) => [s.address, s.title, s.status])).toEqual([
+    ["t6", "Reviewer · Claude Code", "done"], ["t4", "Helper · Claude Code", "needs"], ["t2", "Reviewer · Codex", "working"]]);
+  expect(got[0].ended).toBe(now - 60000);
+  expect(subagentsOf(terms, "vm/t7", now).map((s) => [s.address, s.status])).toEqual([["vm/t8", "done"]]);
+  expect(subagentsOf(terms, "t0", now)).toEqual([]);
+  expect(isHelper({ labels: { "herdr.role": "reviewer" } })).toBe(false); // no parent: an old herdr-task reviewer
+  expect(subagentTitle({ role: "reviewer", cli: null })).toBe("Reviewer");
+});

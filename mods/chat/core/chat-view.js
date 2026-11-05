@@ -11,6 +11,9 @@ export const WORDS = {
   noMatches: "No matches",
   searchEarlier: "Search earlier",
   needsYou: "Needs you",
+  // a subagent row's state (SHEP-54), and how it opens
+  subDone: "Done",
+  subOpen: "Open its chat",
   askingInTerminal: "The agent is asking something in the terminal.",
   openTerminal: "Open terminal",
   replyInstead: "Reply instead…",
@@ -320,4 +323,63 @@ export function fitThumbs(sizes, width = Infinity) {
   const k = Math.min(1, width / Math.max(1, total));
   if (k < 1) boxes = boxes.map((b) => ({ w: Math.floor(b.w * k), h: Math.floor(b.h * k) }));
   return { boxes, h: Math.max(24, ...boxes.map((b) => b.h)) };
+}
+
+// ---- subagents: an agent's own helper agents in herdr (SHEP-54) ----
+// What a worker (or an Assistant) starts with `hc run` for itself: a reviewer, a second opinion. Each is an hc child of
+// its terminal, labelled herdr.role reviewer or helper (herdr.task: its worker's task). Never a task's worker (an
+// Assistant's children are mostly workers: herdr.task without a helper role) nor an Assistant. Shown over its parent's
+// chat as a subagent row: its role and CLI, working / needs / done, how long, opening to its last messages and its own
+// chat. One that ended stays a while (it reported, its parent ended it).
+export const HELPER_ROLES = ["reviewer", "helper"];
+export const subagentWord = (status) => (status === "working" ? WORDS.working : status === "needs" ? WORDS.needsYou : WORDS.subDone);
+export const SUBAGENT_KEEP_MS = 60 * 60000;
+const roleOf = (k) => k?.labels?.["herdr.role"] ?? null;
+export const isHelper = (k) => HELPER_ROLES.includes(roleOf(k)) && !!k?.parent;
+
+// k's parent, as an address comparable with `addr`: another machine's terminal names its parent on that machine ("t5"
+// for "vm/t5").
+function parentAddr(k) {
+  const p = String(k?.parent ?? "");
+  if (!p) return null;
+  const m = String(k.address ?? "").includes("/") ? String(k.address).split("/")[0] : null;
+  return m && !p.includes("/") ? `${m}/${p}` : p;
+}
+
+const AGENTS = { codex: "Codex", claude: "Claude Code", "claude-code": "Claude Code", pi: "Pi" };
+// its CLI: its herdr.agent label, else what hc says runs in it, else its command's name
+export function subagentCli(k) {
+  const a = k?.labels?.["herdr.agent"] ?? k?.agent ?? null;
+  if (a) return String(a).replace(/^claude-code$/, "claude");
+  const argv = k?.foreground?.argv ?? k?.argv ?? [];
+  const prog = argv.map((x) => String(x).split("/").pop()).find((x) => /^(claude|codex|pi)$/.test(x));
+  return prog ?? null;
+}
+
+// "Reviewer · Codex"
+export function subagentTitle(s) {
+  const role = s.role === "reviewer" ? "Reviewer" : s.role && s.role !== "helper" ? s.role[0].toUpperCase() + s.role.slice(1) : "Helper";
+  return [role, AGENTS[s.cli] ?? (s.cli ? s.cli[0].toUpperCase() + s.cli.slice(1) : null)].filter(Boolean).join(" · ");
+}
+
+// how it is: "working", "needs" (it asks in its terminal) or "done" (its turn over, or it ended)
+export function subagentStatus(k) {
+  if (k?.state && k.state !== "live") return "done";
+  const st = typeof k?.status === "object" ? k.status?.state : k?.status;
+  return st === "working" ? "working" : st === "blocked" ? "needs" : "done";
+}
+
+// The subagents of the terminal at `addr`, oldest first: [{ address, role, cli, title, status, at, ended?, name }].
+// terms: every terminal hc knows (live and finished).
+export function subagentsOf(terms, addr, now = Date.now()) {
+  if (!addr) return [];
+  const out = [];
+  for (const k of terms) {
+    if (!k || !isHelper(k) || parentAddr(k) !== addr) continue;
+    const ended = k.state && k.state !== "live";
+    if (ended && now - (k.finished_ms ?? 0) > SUBAGENT_KEEP_MS) continue;
+    const s = { address: k.address, role: roleOf(k), cli: subagentCli(k), status: subagentStatus(k), at: k.created_ms ?? now, name: k.name ?? null, ...(ended ? { ended: k.finished_ms ?? now } : {}) };
+    out.push({ ...s, title: subagentTitle(s) });
+  }
+  return out.sort((a, b) => a.at - b.at);
 }

@@ -98,8 +98,8 @@ Assistant's, a task's and an agent tab's, in the window and on the web (`core/ch
   changed settings (below); every other live agent its hook taught gets it alone from herdr-task's news pass
   (`reactions_pass`), once, ending "carry on with what you were doing; if nothing, reply only `<hc no-reply/>`", so a
   worker mid-task keeps working. One started before this isn't told until it starts again.
-- **Reviewers** run headless (`claude -p`, `codex exec`): their output goes to their worker, not a chat. Their hook
-  may run in the worker's terminal and teach them too, but they never get your messages, so they never react.
+- **Reviewers** run as their worker's own helper agents (an hc child, shown as a subagent in its chat): their hook
+  teaches them too, but your messages rarely reach them, so they seldom react.
 - **A reaction only.** A reply of a `<hc react … />` line and `<hc no-reply/>` shows just the reaction on your
   message.
 

@@ -436,8 +436,8 @@ def review_refusal(s, t, wt):
 
 
 def cmd_reviewed(args):
-    """A task's agent records one review round of its current commit (its own review: a subagent
-    or a headless CLI, as its brief says). Uses one of its Review rounds; `ready` then accepts that
+    """A task's agent records one review round of its current commit (its own review: a helper agent
+    it started as its hc child, as its brief says). Uses one of its Review rounds; `ready` then accepts that
     commit. Out of rounds it is refused: only the Assistant adds one (review-more)."""
     with open_store(args) as s:
         t = s.find(args.id)

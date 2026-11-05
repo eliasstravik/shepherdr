@@ -23,10 +23,11 @@ import { Fold } from './fold.tsx'
 import { Markdown } from './markdown.tsx'
 import { answeredBy, cancelReply, canReply, isArtifact, jumpTo, startReply } from './reply.ts'
 import { typing, working } from './typing.ts'
-import { JobsSheet, JobsTag, NeedsYou, TurnLine, WorkingLine } from './activity.tsx'
+import { JobsSheet, JobsTag, NeedsYou, openSubagent, TurnLine, useSubagent, WorkingLine } from './activity.tsx'
 import { ClockIcon } from '@heroicons/react/16/solid'
 import { AskedRow, Band, BriefRow, Chips, EndedRow, ErrorRow, NoteRow, Notice, HeadRow, ImagesLine, NewsRow, onTerminal, PilotRow, PublishingRow, questionsBelow, ReplyLine, Thumbs, WORDS } from './rows.tsx'
 import { AgentLine, openModelMenu, openRestart, RestartSheet } from '@client/restart.tsx'
+import { Sheet, SheetClose } from '@client/Stack.tsx'
 import { expandPicked, forMarkdown, mentionItems, MentionList, pickable, takeItem, useReach, withChips, type Item } from './mentions.tsx'
 import * as MNc from '@core/mentions.js'
 const mentionTyping = (text: string): string | null => (MNc as any).typingTask(text) ?? (MNc as any).typing(text)
@@ -2691,6 +2692,25 @@ function DropFiles({ chatKey, children }: { chatKey: string; children: ReactNode
   )
 }
 
+/** a subagent's own chat (SHEP-54: a reviewer its worker started), opened from its row over the parent's box: the whole
+ *  conversation, and a box to talk to it */
+function SubagentSheet() {
+  const j = useSubagent()
+  if (!j?.chat) return null
+  const close = () => openSubagent(null)
+  return (
+    <Sheet label={j.title} onClose={close} panel="max-w-[720px] h-[min(85dvh,860px)]">
+      <div className="flex shrink-0 items-center gap-2 px-4 pt-3 pb-2">
+        <h2 className="min-w-0 flex-1 truncate text-[0.9375rem] font-medium phone:text-base">{j.title}</h2>
+        <SheetClose onClose={close} />
+      </div>
+      <div data-subagent-chat className="flex min-h-0 flex-1 flex-col">
+        <ChatView key={j.chat} chatKey={j.chat} placeholder={`Message the ${j.role === 'reviewer' ? 'reviewer' : 'helper'}`} />
+      </div>
+    </Sheet>
+  )
+}
+
 export default definePlugin({
   name: 'chat',
   setup(reg) {
@@ -2699,7 +2719,7 @@ export default definePlugin({
     reg.composerAbove.push({ order: 5, View: WorkingLine }, { order: 6, View: NeedsYou }, { order: 8, View: Held })
     reg.composerAbove.push({ order: 10, View: JobsTag })
     onTerminal(openTerminal)
-    reg.overlays.push(JobsSheet)
+    reg.overlays.push(JobsSheet, SubagentSheet)
     reg.messageParts.push({ order: 60, View: ({ msg, chat, from }) => (msg.question ? <QuestionCard q={msg.question} chat={chat} msg={msg.id} from={from} /> : null) })
     reg.messageParts.push({ order: 61, View: ({ msg, chat }) => (msg.secret ? <SecretCard ask={msg.secret} chat={chat} source={msg.secret.by ? { id: msg.secret.by.ref, title: msg.secret.by.title } : undefined} /> : null) })
     reg.composerPlus = PlusMenu

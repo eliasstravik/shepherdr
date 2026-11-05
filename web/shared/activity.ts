@@ -152,14 +152,15 @@ export type JobCounts = Partial<Record<Job['kind'], number>>
 
 export const countJobs = (jobs: Job[]): JobCounts => {
   const c: JobCounts = {}
-  for (const j of jobs) c[j.kind] = (c[j.kind] ?? 0) + 1
+  // a helper agent of its own that finished (SHEP-54) still shows a while, but runs no more
+  for (const j of jobs) if (j.kind !== 'child' || j.status !== 'done') c[j.kind] = (c[j.kind] ?? 0) + 1
   return c
 }
 
 /** "2 subagents working", "1 shell running", "1 subagent · 2 shells": headless agents it runs count as subagents too */
 export function jobsWords(c: JobCounts) {
   const parts = [
-    [(c.agent ?? 0) + (c.headless ?? 0), 'subagent'],
+    [(c.agent ?? 0) + (c.headless ?? 0) + (c.child ?? 0), 'subagent'],
     [c.shell ?? 0, 'shell'],
     [c.monitor ?? 0, 'watcher'],
   ] as const

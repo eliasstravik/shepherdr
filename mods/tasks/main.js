@@ -61,6 +61,9 @@ async function cli(machine, [command, ...args], folder) {
 
 export { GROUP_BY };
 
+// a worker's own helper agent (SHEP-54): an hc child labelled reviewer or helper
+const helper = (k) => ["reviewer", "helper"].includes(k.labels?.["herdr.role"]) && !!k.parent;
+
 export default class Tasks extends View {
   init(_props, cx) {
     this.lists = [];       // [{ folder, name, kind, slug, prefix, machine, tasks }]: every machine's
@@ -188,7 +191,7 @@ export default class Tasks extends View {
     const f = this.frame ?? {};
     const shown = f.agents ??= new Map(agents().map((a) => [a.address, a]));
     return (f.terminals ??= terminals()).filter((k) => k.state === "live" && k.labels?.["herdr.task"] === key && machineOf(k.address) === m)
-      .filter((k) => k.program?.key !== "shell" && !k.program?.shell)
+      .filter((k) => k.program?.key !== "shell" && !k.program?.shell && !helper(k))
       .map((k) => {
         // agents() knows when someone looked at a finished agent (done -> idle), as Herdr shows it.
         const a = shown.get(k.address);
@@ -209,7 +212,20 @@ export default class Tasks extends View {
     const st = task.state;
     const live = st === "running" || st === "ready" ? this.live(list, task) : [];
     const loaded = machines().find((m) => (m.name ?? null) === (list.machine ?? null))?.layout !== "loading";
-    return place(list, task, { live, loaded });
+    return place(list, task, { live, loaded, helpers: live.length ? this.helpers(list, task, live) : [] });
+  }
+
+  // Its worker's own helper agents (SHEP-54: a reviewer it started as its hc child): never among its agents; one at
+  // work or asking keeps the task Working (core/tasks.js place()).
+  helpers(list, task, live) {
+    const key = `${list.slug}#${task.id}`, m = list.machine ?? null;
+    const mine = new Set(live.map((a) => a.address.split("/").pop()));
+    const f = this.frame ?? {};
+    const shown = f.agents ??= new Map(agents().map((a) => [a.address, a]));
+    // on the folder's machine, a child of one of its agents
+    return (f.terminals ??= terminals()).filter((k) => k.state === "live" && k.labels?.["herdr.task"] === key && helper(k)
+      && machineOf(k.address) === m && mine.has(String(k.parent).split("/").pop()))
+      .map((k) => ({ address: k.address, status: shown.get(k.address)?.status ?? (RANK[k.status] ? k.status : null) }));
   }
 
   // Why a queued task waits (core/tasks.js): the tasks it comes after, else the folder is full.

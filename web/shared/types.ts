@@ -326,6 +326,8 @@ export interface Task {
   plan?: string[]
   /** none until the task's agent starts */
   agent?: TaskAgent
+  /** its worker's own helper agents (SHEP-54: a reviewer it started), newest last */
+  subagents?: { chat: string; title: string; status: 'working' | 'needs' | 'done'; at: number; ended?: number }[]
   desc?: string
   said?: string
   /** its facts line when done: PR, commit, checks, review, what is not proven */
@@ -690,7 +692,8 @@ export interface TurnActivity {
 /** Work an agent started in the background that still runs */
 export interface Job {
   id: string
-  kind: 'agent' | 'shell' | 'monitor' | 'headless'
+  /** child: its own helper agent in herdr (SHEP-54: a reviewer it started), a chat of its own */
+  kind: 'agent' | 'shell' | 'monitor' | 'headless' | 'child'
   /** what it is: a subagent's description, a shell's command, a headless CLI's words */
   title: string
   at: number
@@ -702,6 +705,12 @@ export interface Job {
   command?: string
   /** it can be stopped from here (action stop-job) */
   stop?: boolean
+  /** a child: its chat's key (t:<address>), working / needs / done, its role and CLI, when it ended */
+  chat?: string
+  status?: 'working' | 'needs' | 'done'
+  role?: string
+  cli?: string
+  ended?: number
 }
 
 /** what the screen asks of a chat's activity: a turn's steps, a step's raw output, a background job's steps or output */

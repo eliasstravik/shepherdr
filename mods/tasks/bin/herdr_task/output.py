@@ -4,7 +4,7 @@ import json
 
 from .base import now
 from .agents import (
-    agent_running, ask_reason, held_ask, last_words, own_line, own_work, status_word, STATUSES, task_status,
+    agent_running, detail, live_helpers, ask_reason, held_ask, last_words, own_line, own_work, status_word, STATUSES, task_status,
 )
 from .queues import waiting_ext, waiting_for
 
@@ -35,10 +35,27 @@ def view(s, task, live=None):
     v["status_text"] = STATUSES[v["status"]]
     v["live"] = [{"address": k["address"], "status": (k.get("status") or {}).get("state") if isinstance(k.get("status"), dict) else k.get("status"),
                   "tab": (k.get("labels") or {}).get("herdr.tab"), "role": (k.get("labels") or {}).get("herdr.role") or "worker"} for k in running]
+    # Its worker's own helper agents (SHEP-54: a reviewer it started as an hc child), for the Tasks panel.
+    v["subagents"] = subagents(s.key(task)) if known and running and task["state"] in ("running", "ready") else []
     v["ref"], v["prefix"] = s.ref(task), s.prefix
     v["waiting_for"] = waiting_for(s, task)
     v["waiting_ext"] = waiting_ext(task)
     return v
+
+
+def subagent(k):
+    """One helper as people see it: its role, its CLI, its status (working, needs, done) and since when."""
+    lb = k.get("labels") or {}
+    st = k.get("status")
+    st = st.get("state") if isinstance(st, dict) else st
+    cli = lb.get("herdr.agent") or ("codex" if "codex" in str(k.get("agent") or "") else "claude" if k.get("agent") else None)
+    return {"address": k["address"], "parent": k.get("parent"), "role": lb.get("herdr.role") or "helper", "agent": cli,
+            "name": k.get("name"), "status": "working" if st == "working" else "needs" if st == "blocked" else "done",
+            "at": k.get("created_ms")}
+
+
+def subagents(key):
+    return [subagent(detail(k)) for k in live_helpers(key)]
 
 
 def progress_clock(s, task, status):

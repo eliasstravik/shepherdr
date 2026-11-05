@@ -147,3 +147,16 @@ describe("an automation's row (SHEP-43)", () => {
     expect(fromLine([], "x")).toBe("On task events in x");
   });
 });
+
+// SHEP-54: a worker's own helper agent (its reviewer, an hc child) is never one of its agents: at work or asking, its
+// quiet worker is Working; once over, it counts not
+test("place: a worker's helper keeps it Working, never Needs you", () => {
+  const list = { slug: "x", folder: "/x", prefix: "X", tasks: [] };
+  const task = { id: 1, state: "running", started: 1, agents: [{ address: "t1", at: 1 }] };
+  const live = [{ address: "t1", status: "idle", role: "worker" }];
+  expect(place(list, task, { live, helpers: [{ address: "t2", status: "working" }] }).section).toBe("working");
+  expect(place(list, task, { live, helpers: [{ address: "t2", status: "blocked" }] }).section).toBe("working");
+  expect(place(list, task, { live, helpers: [{ address: "t2", status: "idle" }] }).section).toBe("needs");
+  // no worker left: its helper alone keeps nothing going
+  expect(place(list, task, { live: [], helpers: [{ address: "t2", status: "working" }] }).section).toBe("needs");
+});

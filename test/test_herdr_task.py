@@ -955,6 +955,11 @@ class OwnBackgroundWork(unittest.TestCase):
         p = mock.patch.object(agents, "now", lambda: self.clock)
         p.start()
         self.addCleanup(p.stop)
+        self.hc = {}  # what hc ls --label herdr.task=<key> and hc get answer: {"ls": [...], "get": {address: record}}
+        h = mock.patch.object(agents, "hc_json", lambda *a: ({"terminals": self.hc.get("ls", [])} if a[0] == "ls"
+                                                               else self.hc.get("get", {}).get(a[1])))
+        h.start()
+        self.addCleanup(h.stop)
         self.dir = tempfile.mkdtemp()
         self.log = os.path.join(self.dir, "s.jsonl")
         self.lines = []
@@ -1058,6 +1063,68 @@ class OwnBackgroundWork(unittest.TestCase):
         with self.mock.patch.object(output, "waiting_for", lambda s, t: []), self.mock.patch.object(output, "waiting_ext", lambda t: []):
             v = output.view(S(), self.task, [dict(k, foreground={"name": "claude"}) for k in self.idle])
         self.assertEqual((v["status"], v["own_work"]), ("working", True))
+
+
+class WorkersOwnHelpers(OwnBackgroundWork):
+    """SHEP-54: a worker runs its review as an hc child (herdr.task, herdr.role=reviewer, its
+    terminal the parent). Never one of the task's agents (no second worker, nothing it says counts as
+    the task's status); while it works, its quiet worker is Working; the Tasks panel lists it."""
+
+    def setUp(self):
+        super().setUp()
+        self.idle = [dict(self.idle[0], labels={"herdr.task": "x#7"})]
+        # idle here (SHEP-53's cases, inherited, hold with it), working in each case below
+        self.reviewer = {"address": "t2", "parent": "t1", "state": "live", "status": "idle", "agent": "codex",
+                         "labels": {"herdr.task": "x#7", "herdr.role": "reviewer", "herdr.agent": "codex"}, "created_ms": 5}
+        self.worker = {"address": "t1", "state": "live", "status": "idle", "labels": {"herdr.task": "x#7"}}
+        self.hc = {"ls": [self.worker, self.reviewer], "get": {"t2": self.reviewer}}
+
+    def test_never_one_of_the_tasks_agents(self):
+        self.reviewer["status"] = "working"
+        self.assertEqual([k["address"] for k in self.agents.live_agents("x#7")], ["t1"])
+        self.assertEqual([k["address"] for k in self.agents.live_helpers("x#7")], ["t2"])
+        # hc ls gives no labels: its parent, the task's own terminal, says so
+        self.hc["ls"] = [self.worker, dict(self.reviewer, labels={})]
+        self.assertEqual([k["address"] for k in self.agents.live_agents("x#7")], ["t1"])
+        self.assertEqual([k["address"] for k in self.agents.live_helpers("x#7")], ["t2"])
+        # another machine's: its parent named there
+        self.hc["ls"] = [dict(self.worker, address="vm/t1"), dict(self.reviewer, address="vm/t2", labels={})]
+        self.assertEqual([k["address"] for k in self.agents.live_helpers("x#7")], ["vm/t2"])
+        # one with no parent (an old herdr-task reviewer) stays the task's
+        self.hc["ls"] = [self.worker, dict(self.reviewer, parent=None)]
+        self.assertEqual([k["address"] for k in self.agents.live_agents("x#7")], ["t1", "t2"])
+
+    def test_its_quiet_worker_is_working_while_it_reviews(self):
+        self.reviewer["status"] = "working"
+        self.say(-200_000, "Codex reviews it now.")
+        self.assertEqual(self.status(), ("working", None, None))
+        # asking the person still needs them
+        self.say(-100_000, "Should I also update the docs?")
+        self.assertEqual(self.status()[:2], ("needs", "reply"))
+        # the review over: quiet again
+        self.lines[:] = self.lines[:1]
+        self.say(-100_000, "Done.")
+        self.reviewer["status"] = "idle"
+        self.assertEqual(self.status()[:2], ("needs", "reply"))
+        # another worker's child doesn't count
+        self.reviewer.update(status="working", parent="t9")
+        self.assertEqual(self.status()[:2], ("needs", "reply"))
+
+    def test_the_tasks_panel_lists_it(self):
+        import herdr_task.output as output
+        self.reviewer["status"] = "working"
+
+        class S:
+            write, loc, prefix = False, {"folder": "/f"}, "X"
+            key = lambda self, t: "x#7"
+            ref = lambda self, t: "X-7"
+        with self.mock.patch.object(output, "waiting_for", lambda s, t: []), self.mock.patch.object(output, "waiting_ext", lambda t: []), \
+                self.mock.patch.object(output, "detail", lambda k: self.hc["get"].get(k["address"], k)):
+            v = output.view(S(), self.task, [dict(k, foreground={"name": "claude"}) for k in self.idle])
+        self.assertEqual(v["status"], "working")
+        self.assertEqual(v["subagents"], [{"address": "t2", "parent": "t1", "role": "reviewer", "agent": "codex", "name": None,
+                                           "status": "working", "at": 5}])
+        self.assertEqual([x["role"] for x in v["live"]], ["worker"])
 
 
 class MergedOnlyWithOwnWork(unittest.TestCase):
@@ -1193,6 +1260,40 @@ class TimeLeft(unittest.TestCase):
             self.assertNotIn("real estimate", words)
             self.assertIn("rough guess beats none", words)
         self.assertIn(templates.WORKER_MD_BEFORE_LEFT, templates.OLD_WORKERS)  # an unedited old one gets today's
+
+
+class ReviewAsAHelperAgent(unittest.TestCase):
+    """SHEP-54: workers run their review as an interactive hc child people see, never headless; an
+    unedited earlier worker or reviewer template gets today's words."""
+
+    def test_the_words(self):
+        sys.path.insert(0, BIN)
+        from herdr_task import templates
+        with open(os.path.join(ROOT, "templates", "worker.md")) as f:
+            worker = f.read()
+        for words in (templates.WORKER_MD, worker):
+            self.assertIn("--label herdr.role=reviewer", words)
+            self.assertIn("herdr.task=$HERDR_BROWSER_TASK", words)
+            self.assertIn("codex --sandbox read-only --ask-for-approval never", words)
+            self.assertIn("claude --permission-mode plan", words)
+            self.assertIn("hc wait <its name>", words)
+            self.assertNotIn("< /dev/null", words)
+        self.assertIn(templates.WORKER_MD_BEFORE_SUBAGENTS, templates.OLD_WORKERS)
+        with open(os.path.join(ROOT, "templates", "reviewer.md")) as f:
+            self.assertIn(templates.REVIEWER_MD.strip(), f.read())
+
+    def test_an_unedited_old_reviewer_gets_todays(self):
+        sys.path.insert(0, BIN)
+        from unittest import mock
+        from herdr_task import templates
+        d = tempfile.mkdtemp()
+        with open(os.path.join(d, "reviewer.md"), "w") as f:
+            f.write(templates.TEMPLATE_HEADS["reviewer"] + templates.REVIEWER_MD_BEFORE_SUBAGENT)
+        with mock.patch.object(templates, "TEMPLATES", d):
+            self.assertEqual(templates.instructions("reviewer"), templates.REVIEWER_MD.strip())
+            with open(os.path.join(d, "reviewer.md"), "w") as f:
+                f.write(templates.TEMPLATE_HEADS["reviewer"] + "My own words.")
+            self.assertEqual(templates.instructions("reviewer"), "My own words.")
 
 
 class Store:
