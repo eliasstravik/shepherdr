@@ -385,7 +385,10 @@ export async function screenAction(p: Record<string, unknown>, head: () => Head,
   }
   if (q.do === 'select') {
     if (!(el instanceof HTMLSelectElement)) {
-      // a custom list: open it; the voice agent then clicks the choice
+      // a custom list: open it; the voice agent then clicks the choice. Anything else isn't a list (select never
+      // presses a button: a risky one would go round the yes)
+      if (!['combobox', 'listbox', 'button'].includes(role) || (role === 'button' && el!.getAttribute('aria-haspopup') === null && el!.getAttribute('aria-expanded') === null)) return no(`the ${called} isn't a list to pick from: click it instead`)
+      if (S.risky(name) && !q.confirmed) return { ok: false, ask: `Press ${name.slice(0, 80)}?`, screen: '' }
       press(el!)
       return after(`Opened the ${called}: click the choice next`)
     }

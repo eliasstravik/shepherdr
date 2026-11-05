@@ -107,6 +107,7 @@ export async function voiceNav(nav: Nav): Promise<NavAck> {
   if (nav.kind === 'chat' && str(nav.chat)) {
     setUI(LAYERS_OFF)
     goChat(str(nav.chat))
+    setUI({ term: null, arts: null })
     return check(visibleChats(getState().ui, snap).includes(str(nav.chat)), 'that chat didn\'t open')
   }
   if (nav.kind === 'artifact' && str(nav.artifact)) {

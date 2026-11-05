@@ -368,7 +368,8 @@ function CallMark({ call, snap }: { call: string; snap: Snapshot }) {
       data-call-mark
       aria-label={`Back to the voice call with ${chatName(snap, call)}, ${t}`}
       onPointerDown={(e) => e.stopPropagation()}
-      onClick={(e) => { e.stopPropagation(); goChat(call) }}
+      // its chat, not the terminal or artifacts it was flipped to
+      onClick={(e) => { e.stopPropagation(); goChat(call); setUI({ term: null, arts: null }) }}
       className="press-dim relative z-1 flex h-5 shrink-0 items-center gap-1 rounded-full bg-ready/15 py-0.5 pr-2 pl-1.5 text-[0.75rem] font-medium text-ready-fg tabular-nums after:absolute after:-inset-1.5 phone:h-6 phone:text-[0.8125rem]"
     >
       <Waves className="h-3 scale-75" />
