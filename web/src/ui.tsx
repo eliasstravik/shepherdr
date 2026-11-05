@@ -631,7 +631,7 @@ export function Primary({ className, children, soft, ...p }: Btn & { soft?: bool
   )
 }
 
-/** A header's one button with words (a task's Accept): soft, and as tall as the header's other buttons (28px, 44px on
+/** A header's one button with words (a Ready task's Review): soft, and as tall as the header's other buttons (28px, 44px on
  *  a phone as its round ones) */
 export function HeadButton({ className, children, ...p }: Btn) {
   return (
