@@ -671,13 +671,16 @@ def check_tools(root_is_home):
     for name, what in optional.items():
         if not (bun_path() if name == "bun" else shutil.which(name)):
             notes.append(f"optional: {name} isn't on the PATH ({what})")
-    # Dictation's recorder (mods/chat/record.ts): pw-record, or on macOS mic.swift (Xcode's command line tools build
-    # it) else ffmpeg (also where Homebrew puts it).
-    if not shutil.which("pw-record") and not (sys.platform == "darwin" and (
-            subprocess.run(["xcode-select", "-p"], capture_output=True).returncode == 0 or shutil.which("ffmpeg")
+    # The microphone and speaker (mods/chat/audio.ts): pw-record and pw-play, or on macOS mic.swift and speaker.swift
+    # (Xcode's command line tools build them); dictation's recorder else ffmpeg (also where Homebrew puts it).
+    xcode = sys.platform == "darwin" and subprocess.run(["xcode-select", "-p"], capture_output=True).returncode == 0
+    if not shutil.which("pw-record") and not (xcode or sys.platform == "darwin" and (shutil.which("ffmpeg")
             or any(os.path.isfile(p) for p in ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg")))):
         notes.append("optional: dictation can't record: it needs pw-record (Linux), or Xcode's command line tools "
                      "or ffmpeg (macOS)")
+    if not xcode and not (shutil.which("pw-record") and shutil.which("pw-play")):
+        notes.append("optional: voice calls can't use the microphone and speaker: they need pw-record and pw-play "
+                     "(Linux), or Xcode's command line tools (macOS)")
     return bad, notes
 
 

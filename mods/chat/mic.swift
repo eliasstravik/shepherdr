@@ -1,16 +1,17 @@
-// Dictation's microphone on macOS (record.ts builds it with swiftc and runs it): the default input
-// as 16 kHz mono 16-bit raw on stdout until it is killed. ffmpeg's avfoundation input drops most of
-// the sound on recent macOS, Apple's own audio engine doesn't.
+// The microphone on macOS for dictation and voice calls (audio.ts builds it with swiftc): the default
+// input as mono 16-bit raw at the rate given (16000 when none) on stdout until it is killed. ffmpeg's
+// avfoundation input drops most of the sound on recent macOS, Apple's own audio engine doesn't.
 import AVFoundation
 
+let rate = CommandLine.arguments.count > 1 ? Double(CommandLine.arguments[1]) ?? 16000 : 16000
 let engine = AVAudioEngine()
 let input = engine.inputNode
 let from = input.outputFormat(forBus: 0)
-let to = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true)!
+let to = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: rate, channels: 1, interleaved: true)!
 guard let converter = AVAudioConverter(from: from, to: to) else { exit(1) }
 let out = FileHandle.standardOutput
 input.installTap(onBus: 0, bufferSize: 1600, format: from) { buf, _ in
-  let room = AVAudioFrameCount(Double(buf.frameLength) * 16000 / from.sampleRate) + 16
+  let room = AVAudioFrameCount(Double(buf.frameLength) * rate / from.sampleRate) + 16
   guard let pcm = AVAudioPCMBuffer(pcmFormat: to, frameCapacity: room) else { return }
   var given = false
   converter.convert(to: pcm, error: nil) { _, status in

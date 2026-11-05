@@ -11,8 +11,9 @@ place, never overwrites what you made yourself, and keeps a backup of anything i
 - bun (the service and the web app; the installer installs it from bun.sh when it's missing), and Tailscale for the
   web app.
 - Optional, per add-on: `gh` (pull requests), agent-browser 0.41.1, node and Chrome (the task browser), bun,
-  `pw-record` (Linux) or Xcode's command line tools or `ffmpeg` (macOS) for dictation in the window, an ElevenLabs
-  key for voice calls and dictation.
+  `pw-record` (Linux) or Xcode's command line tools or `ffmpeg` (macOS) for dictation in the window, `pw-record` and
+  `pw-play` (Linux) or Xcode's command line tools (macOS) for voice calls in the window, an ElevenLabs key for voice
+  calls and dictation.
 
 ## Install
 

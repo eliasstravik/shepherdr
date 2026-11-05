@@ -1,13 +1,13 @@
 // Dictation into the message box: record.ts records the default microphone (pw-record on Linux,
-// ffmpeg on macOS) and reports its level, transcribe.ts has ElevenLabs write it down (Scribe, with
+// mic.swift or ffmpeg on macOS) and reports its level, transcribe.ts has ElevenLabs write it down (Scribe, with
 // the voice call's key: Settings › Secrets, read from the machine that keeps them into memory only). The text goes into
 // the box to edit; nothing is sent by itself or kept.
 
 import { exec, appHome, readTextFile } from "herdr";
 
 const DIR = () => `${appHome()}/data/chat-dictation`;
-// The window's PATH can be short: bun's own folder and Homebrew's (bun, ffmpeg) too.
-const PATH = 'PATH="$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; ';
+// The window's PATH can be short: bun's own folder and Homebrew's (bun, ffmpeg) too, for dictation and calls.
+export const PATH = 'PATH="$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; ';
 
 export class Dictation {
   constructor(key) {

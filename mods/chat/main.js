@@ -49,7 +49,7 @@ import * as slash from "./slash.js";
 import * as mentions from "./core/mentions.js";
 import * as agent from "./agent.js";
 import * as choices from "./settings.js";
-import { Dictation } from "./dictate.js";
+import { Dictation, PATH } from "./dictate.js";
 import { PanelHost, inner, openTaskThread, backToTasks, requestWorkerTerminal, THREAD, STACK as TASKS_STACK, BODY as THREAD_BODY, CHAT as THREAD_CHAT, TERM as THREAD_TERM, FILES as THREAD_FILES, CHANGES as THREAD_CHANGES, PR as THREAD_PR, BROWSER as THREAD_BROWSER } from "./panel.js";
 import { markRead, onScreen, unread } from "./unread.js";
 import { notifies } from "./notify.js";
@@ -2166,9 +2166,9 @@ export default class Chat extends View {
     await exec("sh", ["-c", 'rm -rf "$1" "$1.level" && mkdir -p "$1/in" && touch "$1/alive"', "x", dir]);
     this.callRecent();
     this.callWhereWas = null;
-    // The helper runs beside the app (setsid: not tied to this mod's exec); it ends itself when
-    // the chat stops touching `alive`.
-    await exec("sh", ["-c", 'setsid bun "$2" "$1" "$3" "$4" </dev/null >"$1/log" 2>&1 &', "x", dir, `${appHome()}/mods/chat/voice.ts`, this.addr, name]);
+    // The helper runs beside the app (setsid: not tied to this mod's exec; macOS has none, nohup there); it ends
+    // itself when the chat stops touching `alive`.
+    await exec("sh", ["-c", PATH + 's=$(command -v setsid || echo nohup); $s bun "$2" "$1" "$3" "$4" </dev/null >"$1/log" 2>&1 &', "x", dir, `${appHome()}/mods/chat/voice.ts`, this.addr, name]);
     const call = this.call;
     let touched = 0, lastStatus = null, seen = new Set((this.conv?.items ?? []).map((x) => x.id));
     while (this.call === call) {

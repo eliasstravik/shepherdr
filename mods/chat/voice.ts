@@ -24,11 +24,12 @@
 // with a tag of the key. The key is never printed, logged or written here.
 
 import { readFileSync, writeFileSync, readdirSync, rmSync, statSync, mkdirSync, renameSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { API, opening, replyLine, statusLine, whereLine, apiError, ensureAgent, agentFile, navWords } from "./core/voice.js";
 import { screenWords } from "./core/screen.js";
 import { SECRETS, keyFor, envFile } from "./key.ts";
+import { mac, recorder, player as speaker } from "./audio.ts";
 
 const [dir, addr, name] = process.argv.slice(2);
 if (!dir || !addr) { console.error("usage: bun voice.ts <call folder> <agent address> <agent name>"); process.exit(2); }
@@ -123,9 +124,12 @@ let player: ReturnType<typeof Bun.spawn> | null = null;
 let outRate = 16000;
 let inRate = 16000;
 let playEnd = 0;
+// The microphone and speaker (audio.ts), built on macOS beside the calls' folders.
+const tools = dirname(dir.replace(/\/$/, ""));
 
 function startPlayer() {
-  player = Bun.spawn(["pw-play", "--rate", String(outRate), "--channels", "1", "--format", "s16", "--raw", "-"], { stdin: "pipe", stdout: "ignore", stderr: "ignore" });
+  const argv = speaker(outRate, tools);
+  if (argv) player = Bun.spawn(argv, { stdin: "pipe", stdout: "ignore", stderr: "ignore" });
 }
 // Loudness of 16-bit samples, scaled so speech fills most of 0..1.
 function loud(pcm: Uint8Array) {
@@ -140,6 +144,7 @@ let micLevel = 0;
 
 function play(pcm: Uint8Array) {
   if (!player) startPlayer();
+  if (!player) return;
   const now = Date.now();
   const from = Math.max(playEnd, now + 120);
   const piece = Math.round(outRate * 2 * 0.1);
@@ -159,7 +164,9 @@ function hush() {
 }
 
 async function startMic() {
-  mic = Bun.spawn(["pw-record", "--rate", String(inRate), "--channels", "1", "--format", "s16", "--raw", "-"], { stdout: "pipe", stderr: "ignore" });
+  const argv = recorder(inRate, tools);
+  if (!argv) throw new Error("no recorder");
+  mic = Bun.spawn(argv, { stdout: "pipe", stderr: "ignore" });
   const chunk = Math.round(inRate * 2 * 0.1); // 100 ms
   let buf = new Uint8Array(0);
   for await (const part of mic.stdout as ReadableStream<Uint8Array>) {
@@ -278,6 +285,11 @@ function inbox() {
 async function main() {
   mkdirSync(join(dir, "in"), { recursive: true });
   state();
+  // The microphone and speaker first (on macOS this builds them once, before the call connects).
+  if (!recorder(16000, tools) || !speaker(16000, tools)) {
+    return end(mac ? "Calls need Xcode's command line tools (xcode-select --install) for the microphone and speaker"
+      : "Calls need pw-record and pw-play (PipeWire): install pipewire");
+  }
   const k = await keyFor();
   if ("error" in k) return end(k.error);
   const key = k.key;
