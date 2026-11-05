@@ -162,6 +162,17 @@ async function moveSecrets(machine: string | null) {
   await home.poll();
   await refreshSecrets();
 }
+// Secrets follow Serve from unless the person picked a machine (core/secrets.js followTo): kept elsewhere (where they
+// were before, or Serve from moved), the machine serving the web app moves them to itself the same safe way as Kept on
+// (shepherdr secrets move-to: a backup, a verified copy, rollback), once the machine that keeps them is on; a failed
+// try waits ten minutes and says why in Settings › Secrets.
+let followTried = 0;
+setInterval(() => {
+  if (!home.shouldFollow() || (secretsMoving && !secretsMoving.error) || Date.now() - followTried < 10 * 60_000) return;
+  followTried = Date.now();
+  console.error("secrets: following Serve from: moving them here");
+  void moveSecrets(null).catch(() => {});
+}, 30_000);
 const settings = new Settings();
 // Settings › Agents' model menu and buttons (core/settings.js choicesFrom), from each CLI's own settings here, read
 // again every ten minutes; a CLI herdr-task's check finds missing here isn't offered

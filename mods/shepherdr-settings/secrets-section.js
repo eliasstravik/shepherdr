@@ -164,7 +164,11 @@ export function secretsSection(view, t) {
   // Kept on: the machine whose vault every machine uses, and the others to move it to
   const kept = vault.keptOn();
   const ms = machines();
-  const keptName = !kept ? W.loading : kept.here ? W.keptHere : kept.name || W.notLinked;
+  const keptWhere = !kept ? W.loading : kept.here ? W.keptHere : kept.name || W.notLinked;
+  // following Serve from: kept there already, or still where they were (they move on their own)
+  const serve = kept?.serve === null ? W.keptHere : kept?.serve || "";
+  const same = !!kept?.auto && (kept.serve === null ? kept.here : !!kept.serve && kept.serve === kept.name);
+  const keptName = !kept?.auto ? keptWhere : same ? W.sameAsServe(keptWhere) : W.forNow(keptWhere);
   const reach = !kept || kept.here || ms.some((m) => m.name === kept.name && m.layout !== "unavailable");
   const choices = [{ name: "", label: W.keptHere, on: !!kept?.here, off: false },
     ...ms.filter((m) => m.name).map((m) => ({ name: m.name, label: m.name, on: !kept?.here && kept?.name === m.name, off: m.layout === "unavailable" }))];
@@ -175,14 +179,14 @@ export function secretsSection(view, t) {
       .child(div().flex_1().min_w(0).truncate().text_size(13).text_color(c.off ? t.dim : t.foreground).child(c.label))
       .child(div().text_size(11).text_color(t.dim).child(c.off ? W.offline : ""))
       .child(div().size(14).flex_none().when(c.on, (el) => el.child(svg("mods/workspace-chrome/check.svg").size(14).text_color(t.foreground))))));
-  const keptStatus = s.moving ? W.moving(s.moving) : s.moveErr || (!reach ? W.unreachable(kept.name) : W.keptAbout);
+  const keptStatus = s.moving ? W.moving(s.moving) : s.moveErr || (!reach ? W.unreachable(kept.name) : !kept?.auto ? W.keptAbout : same || !serve ? W.sameAbout : W.following(serve));
   const keptRow = v_flex().relative().gap(8).py(12).border_b(1).border_color(t.border)
     .child(h_flex().gap(10).items_center()
       .child(div().flex_1().min_w(0).truncate().text_size(TEXT.body).text_color(t.foreground).child(keptName))
       .child(s.moving ? div() : small("sec-kept-move", W.moveVerb, () => { s.keptOpen = !s.keptOpen; })))
     .when(s.keptSure !== null, (el) => el.child(v_flex().gap(6).p(10).rounded(RADIUS.control).border_1().border_color(t.border)
       .child(div().text_size(TEXT.body).font_medium().text_color(t.foreground).child(W.moveConfirm(s.keptSure || W.thisOne)))
-      .child(div().text_size(TEXT.label).line_height("17px").text_color(t.dim).child(W.moveDetail(s.keptSure || W.thisOne, kept?.here ? W.thisOne : keptName)))
+      .child(div().text_size(TEXT.label).line_height("17px").text_color(t.dim).child(W.moveDetail(s.keptSure || W.thisOne, kept?.here ? W.thisOne : keptWhere)))
       .child(h_flex().gap(4).justify_end()
         .child(small("sec-kept-no", W.keep, () => { s.keptSure = null; }, "ghost"))
         .child(small("sec-kept-yes", W.moveVerb, (cx) => moveTo(s, s.keptSure, cx))))))

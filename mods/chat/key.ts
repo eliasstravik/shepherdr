@@ -29,4 +29,9 @@ export const keyFor = () => voiceKey({
   where: async () => { const out = await output([secretBin(), "where", "--json"]); return out ? JSON.parse(out) : null; },
   vault: () => { try { return readFileSync(join(process.env.HOME ?? "", ".herdr", "vault.json"), "utf8"); } catch { return null; } },
   ask: (on: string, script: string) => output(["hc", "exec", "--on", on, "--timeout", "15", "--", "python3", "-c", script]),
+  // none named to keep them yet: each machine linked from here that is on (SHEP-33)
+  machines: async () => {
+    const out = await output(["hc", "machine", "ls", "--json"]);
+    try { return (JSON.parse(out ?? "").machines ?? []).filter((m: any) => !m.temporary && m.state === "connected" && m.name).map((m: any) => String(m.name)); } catch { return []; }
+  },
 }) as Promise<{ key: string; agent?: string } | { error: string; why: string }>;

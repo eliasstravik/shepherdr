@@ -4,14 +4,17 @@
 // Secrets from the web: an agent's ask (herdr.secret.ask.<NAME> on its terminal) as 2.1's masked card, a value kept
 // in the vault on this machine with herdr-secret set (from stdin: a value is never in a command line, a chat or a log),
 // and the agent told by name only (core/secrets.js), as the window's card does. Settings > Secrets lists names only.
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import type { MachineRow } from "./host.ts";
 import { join } from "node:path";
 import type { Hub } from "./hub.ts";
 import { HOME } from "./paths.ts";
 import * as SC from "../core/secrets.js";
+import * as HC from "../core/host.js";
 
-const { NAME, ASK, asksIn, keptLine, declinedLine, SECRETS_DOC, secretsRecord, believeRecord } = SC as any;
+const { NAME, ASK, asksIn, keptLine, declinedLine, SECRETS_DOC, secretsRecord, believeRecord, autoKeeper, followTo, COUNT_SCRIPT } = SC as any;
+const { HOST_DOC, newestHost } = HC as any;
+const VAULT = join(HOME, ".herdr", "vault.json");
 const MARK = join(HOME, ".herdr", "secret-remote");
 const APP = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
 const BIN = [join(APP, "bin", "herdr-secret"), join(HOME, ".local", "share", "shepherdr", "bin", "herdr-secret"), join(HOME, ".local", "bin", "herdr-secret")].find(existsSync) ?? "herdr-secret";
@@ -46,7 +49,8 @@ function scope(level: string): { args: string[]; words: string } {
 }
 
 export class Secrets {
-  constructor(private hub: Hub) {}
+  /** local: this machine's vault, as a count (tests give their own) */
+  constructor(private hub: Hub, private local = localVault) {}
 
   /** Every agent's waiting asks: [{ address, name, why }]. */
   asks() {
@@ -97,19 +101,33 @@ export class Secrets {
   }
 }
 
+/** How many secrets this machine's vault has (never a value), and whether it's marked remote. */
+function localVault() {
+  let count = 0;
+  try { count = (JSON.parse(readFileSync(VAULT, "utf8")).secrets ?? []).length; } catch {}
+  return { count, remote: existsSync(MARK) };
+}
+
 /** Which machine keeps the secrets, as this service sees it: every 15 s (and when the record changes here) it reads
  *  the record here and on each machine it links, keeps the one to believe (core/secrets.js believeRecord), and hands it
- *  on to the machines that have an older one or none. On that machine, it answers other machines' requests. */
+ *  on to the machines that have an older one or none. None anywhere: it picks one (core/secrets.js autoKeeper) from how
+ *  many secrets each machine's vault has, and names it as automatic. On that machine, it answers other machines'
+ *  requests. */
 export class SecretsHome {
   me: { id: string; name: string } | null = null;
-  record: { id: string; at: number; by?: string } | null = null;
+  record: { id: string; at: number; by?: string; auto?: boolean } | null = null;
+  /** the id of the machine serving the web app (shepherdr.host), which the secrets follow unless the person picked one */
+  host: string | null = null;
   machines = new Map<string, { id: string | null; state: string }>();
   private busy = false;
   private served = new Set<string>();
   private listeners = new Set<() => void>();
   private said = "";
+  // what each machine's vault had when last asked (id -> { count, remote }): a machine off now is still known
+  private vaults = new Map<string, { count: number; remote: boolean }>();
 
-  constructor(private hub: Hub) {}
+  /** local: this machine's vault, as a count (tests give their own) */
+  constructor(private hub: Hub, private local = localVault) {}
 
   on(fn: () => void) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
 
@@ -135,10 +153,26 @@ export class SecretsHome {
     return "";
   }
 
-  /** For Settings › Secrets: where they're kept, whether it answers, and the machines they can move to. */
+  /** The machine serving the web app by its name here (null: this one; "" when not linked or none). */
+  hostName(): string | null {
+    if (!this.host) return "";
+    if (this.host === this.me?.id) return null;
+    for (const [n, m] of this.machines) if (m.id === this.host) return n;
+    return "";
+  }
+
+  /** Secrets following Serve from but kept on another machine, seen from the machine serving the web app: true when
+   *  it should move them to itself now (the machine that keeps them is on). */
+  shouldFollow() {
+    const name = this.name();
+    return !!followTo(this.record, this.host, this.me?.id) && !!name && this.machines.get(name)?.state === "connected";
+  }
+
+  /** For Settings › Secrets: where they're kept, whether it answers, and the machines they can move to. auto: they
+   *  follow Serve from (serve: the machine serving the web app, by its name here, null this one). */
   view(choices: MachineRow[] = []) {
     const name = this.name();
-    return { here: this.here(), set: !!this.record, name, reachable: name === null || (!!name && this.machines.get(name)?.state === "connected"),
+    return { here: this.here(), set: !!this.record, auto: !!this.record?.auto, serve: this.record?.auto ? this.hostName() : "", name, reachable: name === null || (!!name && this.machines.get(name)?.state === "connected"),
       choices: [{ name: this.me?.name ?? "", here: true, state: "connected" }, ...[...this.machines].map(([n, m]) => ({ name: n, here: false, state: m.state }))]
         .filter((c) => c.here || !choices.length || choices.some((x) => x.name === c.name)) };
   }
@@ -155,6 +189,21 @@ export class SecretsHome {
     if (this.served.size > 200) this.served.clear();
   }
 
+  /** The machine to keep them when nobody named one (core/secrets.js autoKeeper), from each machine's vault: this
+   *  one's read here, a linked one's counted there (a count, never a value), one off now as last seen. */
+  private async pick(connected: [string, string][]) {
+    this.vaults.set(this.me!.id, this.local());
+    await Promise.all(connected.map(async ([n, id]) => {
+      const r = await this.hub.call<{ code: number; stdout: string }>("machine.exec", { on: n, argv: ["python3", "-c", COUNT_SCRIPT], timeout: 10 }, 15_000).catch(() => null);
+      try {
+        const v = r?.code === 0 ? JSON.parse(Buffer.from(r.stdout ?? "", "base64").toString("utf8").trim().split("\n").pop() ?? "") : null;
+        if (v && Number.isFinite(v.count)) this.vaults.set(id, { count: v.count, remote: !!v.remote });
+      } catch {}
+    }));
+    const ids = [this.me!.id, ...[...this.machines.values()].map((m) => m.id).filter((x): x is string => !!x)];
+    return autoKeeper([...new Set(ids)].map((id) => ({ id, count: this.vaults.get(id)?.count ?? null, remote: this.vaults.get(id)?.remote ?? false })), this.host);
+  }
+
   async poll() {
     if (this.busy) return;
     this.busy = true;
@@ -164,10 +213,16 @@ export class SecretsHome {
       const ml = await this.hub.call<{ machines: any[] }>("machine.list", {});
       this.machines = new Map((ml.machines ?? []).filter((m) => !m.temporary).map((m) => [String(m.name), { id: m.id ? String(m.id) : null, state: String(m.state ?? "") }]));
       const get = (on: string | null) => this.hub.call<{ value: any; version: number }>("doc.get", { name: SECRETS_DOC, ...(on ? { on } : {}) }, 8000).catch(() => null);
+      this.host = newestHost([(await this.hub.call<{ value: any }>("doc.get", { name: HOST_DOC }, 8000).catch(() => null))?.value])?.id ?? null;
       const mine = await get(null);
       const connected = [...this.machines].filter(([, m]) => m.state === "connected" && m.id);
       const there = await Promise.all(connected.map(async ([n, m]) => ({ n, id: m.id!, doc: await get(n) })));
-      const best = believeRecord(mine?.value, Object.fromEntries(there.map((t) => [t.id, t.doc?.value])));
+      let best = believeRecord(mine?.value, Object.fromEntries(there.map((t) => [t.id, t.doc?.value])));
+      // nobody named one anywhere seen: pick one, the same way every machine would
+      if (!best && this.me.id) {
+        const pick = await this.pick(connected.map(([n, m]) => [n, m.id!]));
+        if (pick) best = { id: pick.id, at: Date.now(), by: this.me.id, auto: true };
+      }
       if (best && JSON.stringify(best) !== JSON.stringify(secretsRecord(mine?.value)))
         await this.hub.call("doc.set", { name: SECRETS_DOC, value: best, version: mine?.version ?? 0 }).catch(() => {});
       // handed on to each machine it links that has an older record, or none

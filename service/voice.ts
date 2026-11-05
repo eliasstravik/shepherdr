@@ -29,6 +29,8 @@ export function keyFor(hub: Pick<Hub, "call">) {
       return (await p.exited) === 0 ? JSON.parse(out) : null;
     },
     vault: () => { try { return readFileSync(join(HOME, ".herdr", "vault.json"), "utf8"); } catch { return null; } },
+    machines: async () => ((await hub.call<{ machines: any[] }>("machine.list", {})).machines ?? [])
+      .filter((m) => !m.temporary && m.state === "connected" && m.name).map((m) => String(m.name)),
     ask: async (on: string, script: string) => {
       const r = await hub.call<{ code: number; stdout: string }>("machine.exec", { on, argv: ["python3", "-c", script], timeout: 15 }, 20_000);
       return r.code === 0 ? Buffer.from(r.stdout ?? "", "base64").toString("utf8") : null;

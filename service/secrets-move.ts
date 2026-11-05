@@ -24,7 +24,7 @@ import * as SC from "../core/secrets.js";
 import * as HC from "../core/host.js";
 
 const { SECRETS_DOC, secretsRecord } = SC as any;
-const { renamer, moveId } = HC as any;
+const { renamer, moveId, HOST_DOC, newestHost } = HC as any;
 
 const args = process.argv.slice(2);
 const json = args.includes("--json"), restore = args.includes("--restore");
@@ -67,12 +67,16 @@ const connected = list.filter((m) => m.state === "connected").map((m) => m.name 
 const nameOf = (id: string): string | null | undefined => (id === me.id ? null : list.find((m) => m.id === id)?.name);
 const record = secretsRecord((await getDoc(SECRETS_DOC, null).catch(() => null))?.value);
 const amMain = record ? record.id === me.id : !existsSync(MARK);
+// the machine serving the web app: secrets kept there follow it (auto: Settings says "Same as Serve from"), elsewhere
+// they stay where the person put them
+const hostId: string | null = newestHost([(await getDoc(HOST_DOC, null).catch(() => null))?.value])?.id ?? null;
+const follows = (id: string) => (id === hostId ? { auto: true } : {});
 const mainName = record ? nameOf(record.id) : amMain ? null : undefined;
 const words = (n: string | null | undefined) => (n === null ? "this computer" : n ?? "a machine not linked from here");
 
 if (cmd === "where") {
-  if (json) console.log(JSON.stringify({ ok: true, here: amMain, named: !!record, machine: amMain ? null : mainName ?? null }));
-  else say(amMain ? "This computer keeps the secrets." : record ? `${words(mainName)} keeps the secrets.` : "Another machine keeps the secrets (none is named yet: this one is marked remote).");
+  if (json) console.log(JSON.stringify({ ok: true, here: amMain, named: !!record, auto: !!record?.auto, machine: amMain ? null : mainName ?? null }));
+  else say(amMain ? `This computer keeps the secrets${record?.auto ? " (following Serve from)" : ""}.` : record ? `${words(mainName)} keeps the secrets${record.auto ? " (following Serve from)" : ""}.` : "Another machine keeps the secrets (none is named yet: this one is marked remote).");
   process.exit(0);
 }
 if (cmd !== "move-to" || (!target && !toIdArg)) fail("usage: shepherdr secrets move-to <machine|here> [--restore] [--json] | shepherdr secrets where");
@@ -125,7 +129,12 @@ if (to === null) {
   // already here: the record handed again to each machine linked from here that has an older one (one that was off
   // at a rollback comes back believing it still keeps them, until this or a service hands it on)
   const handed: string[] = [];
-  if (record) for (const m of connected) {
+  // picked here on purpose: follows Serve from if this machine serves the web app, else the person's choice from now on
+  if (!record || !!record.auto !== (me.id === hostId)) {
+    const chosen = { id: me.id, at: Date.now(), by: me.id, ...follows(me.id) };
+    await setDoc(SECRETS_DOC, chosen, null);
+    for (const m of connected) if (await setDoc(SECRETS_DOC, chosen, m).then(() => true, () => false)) handed.push(m);
+  } else if (record) for (const m of connected) {
     const theirs = secretsRecord((await getDoc(SECRETS_DOC, m).catch(() => null))?.value);
     if ((theirs?.at ?? 0) < record.at && await setDoc(SECRETS_DOC, record, m).then(() => true, () => false)) handed.push(m);
   }
@@ -199,7 +208,7 @@ if (sw.code !== 0) fail(`couldn't put the vault in place on ${to}: ${sw.stderr.t
 say(`Copied ${moved.length} secret${moved.length === 1 ? "" : "s"} to ${to}${keptThere.length ? ` (kept ${keptThere.length} it had)` : ""}${backup ? `; its old vault is ${backup} there` : ""}.`);
 
 // ---- 4. the record everywhere ---------------------------------------------------------------------------------------
-const next = { id: toId, at: Date.now(), by: me.id };
+const next = { id: toId, at: Date.now(), by: me.id, ...follows(toId) };
 await setDoc(SECRETS_DOC, next, null);
 await setDoc(SECRETS_DOC, next, to);
 for (const m of connected) if (m !== to) await setDoc(SECRETS_DOC, next, m).catch(() => {});

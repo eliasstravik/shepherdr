@@ -57,11 +57,14 @@ class Machine(unittest.TestCase):
             p.stop()
         shutil.rmtree(self.dir, ignore_errors=True)
 
-    def be(self, me, record=None, mark=False, vault=None):
+    def be(self, me, record=None, mark=False, vault=None, host=None):
         with open(os.path.join(self.core, "core.json"), "w") as f:
             json.dump({"id": me, "name": me[3:]}, f)
+        docs = {"shepherdr.secrets": {"value": record, "version": 1}} if record else {}
+        if host:
+            docs["shepherdr.host"] = {"value": {"id": host, "at": 1}, "version": 1}
         with open(os.path.join(self.core, "docs.json"), "w") as f:
-            json.dump({"shepherdr.secrets": {"value": record, "version": 1}} if record else {}, f)
+            json.dump(docs, f)
         mk = os.path.join(self.herdr, "secret-remote")
         if mark:
             open(mk, "a").close()
@@ -89,9 +92,19 @@ class Record(Machine):
     def test_where(self):
         self.be(M3, {"id": MINI, "at": 2})
         with mock.patch.object(secret, "hc_json", lambda *a: {"machines": [{"name": "mac-mini", "id": MINI}, {"name": "vm", "id": VM}]}):
-            self.assertEqual(secret.main_machine(), {"here": False, "set": True, "id": MINI, "name": "mac-mini"})
+            self.assertEqual(secret.main_machine(), {"here": False, "set": True, "auto": False, "serve": "", "id": MINI, "name": "mac-mini"})
         self.be(MINI, {"id": MINI, "at": 2}, mark=True)
-        self.assertEqual(secret.main_machine(), {"here": True, "set": True, "id": MINI, "name": None})
+        self.assertEqual(secret.main_machine(), {"here": True, "set": True, "auto": False, "serve": "", "id": MINI, "name": None})
+
+    def test_where_following_serve_from(self):
+        # SHEP-33: nobody picked one: kept where they were (m3) and following the machine serving the web app
+        self.be(VM, {"id": M3, "at": 2, "auto": True}, mark=True, host=MINI)
+        with mock.patch.object(secret, "hc_json", lambda *a: {"machines": [{"name": "mac-mini", "id": MINI}, {"name": "m3", "id": M3}]}):
+            self.assertEqual(secret.main_machine(), {"here": False, "set": True, "auto": True, "serve": "mac-mini", "id": M3, "name": "m3"})
+            self.assertTrue(secret.remote())
+        # moved there: same as Serve from, seen from that machine
+        self.be(MINI, {"id": MINI, "at": 3, "auto": True}, host=MINI)
+        self.assertEqual(secret.main_machine(), {"here": True, "set": True, "auto": True, "serve": None, "id": MINI, "name": None})
 
 
 class Mark(Machine):

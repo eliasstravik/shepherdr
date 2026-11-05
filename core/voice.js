@@ -73,10 +73,9 @@ export const apiError = (status, body) => `ElevenLabs said ${status}${body ? `: 
 // there (secrets/elevenlabs-agent.env, with a tag of the key), so every machine uses the same "Herdr chat" agent.
 
 export const KEY_NAME = "ELEVENLABS_API_KEY";
-export const NO_KEY = "Voice calls need an ElevenLabs key: add ELEVENLABS_API_KEY in Settings › Secrets, for Everywhere.";
+export const NO_KEY = "Voice calls need an ElevenLabs key: add it in Settings › Secrets (as ELEVENLABS_API_KEY, for Everywhere).";
 export const noKeyOn = (name) => `Voice calls need an ElevenLabs key: ${name}, which keeps your secrets, has none. Add ELEVENLABS_API_KEY in Settings › Secrets, for Everywhere.`;
 export const unreachable = (name) => `Can't reach ${name}, which keeps your secrets, for the ElevenLabs key: is it on and linked? Try again in a moment.`;
-export const NO_MAIN = "This machine asks another for its secrets, but none is named to keep them yet: pick one in Settings › Secrets.";
 
 // Run with python3 on the machine that keeps the secrets: prints {"key", "agent"} (the agent only if made with this
 // key). Reads the vault's Everywhere entry, else the old secrets/elevenlabs.env there.
@@ -123,11 +122,13 @@ export function vaultValue(text, name = KEY_NAME) {
 /**
  * The key for a call: { key, agent?, from } (from: "file" | "here" | the main machine's name) or { error, why }
  * (why: "none" when the machine that keeps the secrets truly has none, "unreachable" when it can't be asked now,
- * "unnamed" when no machine is named to keep them). io:
+ * No machine named to keep them yet (the services name one on their own, core/secrets.js autoKeeper; this is until that
+ * reaches here): this machine's vault, then each machine linked from here, the first with a key. io:
  *   oldFile()          the old <app home>/secrets/elevenlabs.env here: its key or ""
  *   where()            `herdr-secret where --json` here: { here, set, name } (null: no herdr-secret: this machine)
  *   vault()            the vault file's text here, or null
  *   ask(name, script)  python3 -c script on that machine: its stdout, or null when it couldn't run there
+ *   machines()         the names of the machines linked from here that are on now (only asked when none is named)
  */
 export async function voiceKey(io) {
   const file = io.oldFile();
@@ -137,14 +138,29 @@ export async function voiceKey(io) {
     const key = vaultValue(io.vault() ?? "");
     return key ? { key, from: "here" } : { error: NO_KEY, why: "none" };
   }
-  if (!w.set) return { error: NO_MAIN, why: "unnamed" };
+  if (!w.set) {
+    const here = vaultValue(io.vault() ?? "");
+    if (here) return { key: here, from: "here" };
+    for (const name of (await io.machines?.().catch(() => null)) ?? []) {
+      const r = await askKey(io, name);
+      if (r?.key) return r;
+    }
+    return { error: NO_KEY, why: "none" };
+  }
   if (!w.name) return { error: unreachable("the machine that keeps your secrets (not linked from here)"), why: "unreachable" };
-  const out = await io.ask(w.name, KEY_SCRIPT).catch(() => null);
+  const r = await askKey(io, w.name);
+  if (!r) return { error: unreachable(w.name), why: "unreachable" };
+  if (!r.key) return { error: noKeyOn(w.name), why: "none" };
+  return r;
+}
+
+// The key on that machine (KEY_SCRIPT): { key, agent, from } (key "" when it has none), or null when it can't be asked.
+async function askKey(io, name) {
+  const out = await io.ask(name, KEY_SCRIPT).catch(() => null);
   let r = null;
   try { r = JSON.parse(String(out ?? "").trim().split("\n").pop()); } catch {}
-  if (!r || typeof r.key !== "string") return { error: unreachable(w.name), why: "unreachable" };
-  if (!r.key) return { error: noKeyOn(w.name), why: "none" };
-  return { key: r.key, agent: typeof r.agent === "string" && /^[\w-]{1,200}$/.test(r.agent) ? r.agent : "", from: w.name };
+  if (!r || typeof r.key !== "string") return null;
+  return { key: r.key, agent: r.key && typeof r.agent === "string" && /^[\w-]{1,200}$/.test(r.agent) ? r.agent : "", from: name };
 }
 
 // ---- dictation ----------------------------------------------------------------------------
