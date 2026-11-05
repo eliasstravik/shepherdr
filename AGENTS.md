@@ -38,6 +38,9 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
   with `hc keys <t> down enter`.
 - No Shepherdr service runs on the dev VM: to screenshot a web dialog, serve `web/dist` with a tiny Bun stub answering
   only the APIs it needs (plus a minimal snapshot on `/api/ws`), never the full service.
+- A cross-machine send without ssh: two throwaway cores (`HC_SESSION=a`/`b`, clean `env -i`) and
+  `hc machine add --via 'sh -c' --name vmb --session b` on a; the wrap only shows with a real agent (e.g.
+  `claude --model haiku`) as the target.
 - Crash recovery for real: a throwaway core, `HC_SESSION=<name> hc ...` with `HC_TERMINAL_SOCKET` and Claude's
   `CLAUDE_*` env unset (`CLAUDE_CODE_CHILD_SESSION` turns off transcripts).
 
