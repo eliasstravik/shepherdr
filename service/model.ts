@@ -9,6 +9,7 @@ import type { Live } from "./live.ts";
 import { HOME } from "./paths.ts";
 import { READ_LISTS, taskLists, fileIn } from "../core/tasklists.js";
 import * as T from "../core/tasks.js";
+import { isHelper, subagentsOf } from "../core/chat-view.js";
 // The core is plain JavaScript; its defaults read as narrow types to TypeScript.
 const { place, refOf, taskKey, autoPrefix, reportOf, secondLine, leftOf, queueReason, machineOf } = T as any;
 import * as S from "../core/spaces.js";
@@ -200,6 +201,12 @@ export class Model {
       if (k.state !== "live" || k.labels?.["herdr.task"] !== key || machineOf(k.address) !== (list.machine ?? null)) continue;
       const st = typeof k.status === "object" ? k.status?.state ?? null : null;
       if (!st && SHELL.test(String((k as any).foreground?.name ?? ""))) continue;
+      // its worker's own helper (SHEP-54: its reviewer, an hc child): never one of its agents; while it works or asks,
+      // the task is Working (its worker waits on it), else nothing
+      if (isHelper(k)) {
+        if (st === "working" || st === "blocked") out.push({ address: k.address, status: "working", role: k.labels?.["herdr.role"] ?? "helper", turn: 0 });
+        continue;
+      }
       // turn: its finished turns, for a Ready task back at work (core busyAgain())
       out.push({ address: k.address, status: st, role: k.labels?.["herdr.role"] ?? "worker", turn: Number((k as any).turn) || 0 });
     }
@@ -218,7 +225,8 @@ export class Model {
       const own = live.map((a) => (this.hub.terminals.get(a.address) as any)?.report).find((r) => typeof r?.progress === "number" && r.progress >= 0);
       const w = reportOf(task, p.section, own ? { pct: own.progress, msg: own.msg || null } : null);
       const running = p.section === "queued" ? list.tasks.filter((x: any) => x.state === "running" && this.agentsOf(list, x).length).length : 0;
-      const worker = live.find((a) => a.role !== "reviewer" && a.status === "blocked")?.address ?? live.find((a) => a.role !== "reviewer")?.address ?? live[0]?.address ?? null;
+      const mine = live.filter((a) => a.role !== "reviewer" && a.role !== "helper");
+      const worker = mine.find((a) => a.status === "blocked")?.address ?? mine[0]?.address ?? null;
       const last = task.agents?.[task.agents.length - 1];
       return {
         key: taskKey(list, task), ref: refOf(list, task), title: task.title, section: p.section, needs: p.needs,
@@ -235,6 +243,8 @@ export class Model {
         summary: task.summary ?? null, details: task.details ?? null, pr: task.pr ?? null, prompt: String(task.prompt ?? "").slice(0, 500), why: p.why ?? null,
         worktree: task.worktree ?? list.folder, base: task.base ?? null, start: task.start ?? null, branch: task.branch ?? null,
         lastLog: !worker && last?.log ? { path: last.log, kind: last.agent ?? "claude" } : null,
+        // its worker's own helper agents (SHEP-54), for the task's detail
+        subagents: worker ? subagentsOf(terminals as any[], worker) : [],
       };
     }));
     this.live.put("tasks", rows);

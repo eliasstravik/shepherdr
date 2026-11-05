@@ -31,7 +31,7 @@ import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names, 
 import { BgJobs } from "./core/bg-jobs.js";
 import { words, howAnswered } from "./core/asks.js";
 // The rows' words and rules the web app's chat draws by too (core/chat-view.js).
-import { WORDS, clock, senderName, briefLabel, fromName, sentTo, selfName, initialOf, newsWords, resolveArtifacts, unsigned, ownWords, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
+import { WORDS, clock, subagentsOf, subagentWord, senderName, briefLabel, fromName, sentTo, selfName, initialOf, newsWords, resolveArtifacts, unsigned, ownWords, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
 // Sending the person's words, as the web app does (core/send.js).
 import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine, mentionedIn, sendTyped } from "./core/send.js";
 // hc whose send goes as the person, with no caller: never "Another agent" on another machine (SHEP-3, core/person.js).
@@ -3284,7 +3284,9 @@ export default class Chat extends View {
   // Shepherdr settings' "Helpers above the chat box" off (shared "chat.helpers" false): no subagents.
   background(t, st) {
     const now = Date.now();
-    const shown = [...(shared("chat.helpers") === false ? [] : this.helpers().map((h) => ({ ...h, kind: "agent" }))), ...this.jobs()];
+    // its own helper agents in herdr first (SHEP-54: a reviewer it started as its hc child), then the CLI's
+    const kids = shared("chat.helpers") === false || this.phase === "ended" ? [] : subagentsOf(terminals(), this.addr, now).map((k) => ({ ...k, kind: "child", id: `c:${k.address}`, label: k.title }));
+    const shown = [...kids, ...(shared("chat.helpers") === false ? [] : this.helpers().map((h) => ({ ...h, kind: "agent" }))), ...this.jobs()];
     if (!shown.length) return null;
     const open = this.helpersOpen || shown.length <= 5;
     const list = open ? shown : shown.slice(0, 4);
@@ -3296,6 +3298,7 @@ export default class Chat extends View {
     const mono = settings().font_family ?? "JetBrains Mono";
     const age = (h) => div().flex_none().font_family(mono).text_size(11.5).text_color(t.dim).child(ago(h.at));
     const row = (h, i) => {
+      if (h.kind === "child") return this.subagentRow(h, t, age);
       if (h.kind === "agent") return h_flex().id(`helper-${i}`).w_full().h(24).px(6).gap(8).items_center().text_size(12)
         .child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900))
         .child(div().flex_1().min_w(0).truncate().font_medium().text_color(t.foreground).child(h.label))
@@ -3335,6 +3338,35 @@ export default class Chat extends View {
         .on_click((_e, cx) => { cx.stop_propagation(); this.helpersOpen = true; cx.notify(); })
         .child(svg("mods/workspace-chrome/chevron-down.svg").size(12).flex_none())
         .child(`+${shown.length - 4} more`)));
+  }
+
+  // One subagent over the box (SHEP-54), as the web's: its status (a spinner at work, red asking, a check once done),
+  // "Reviewer · Codex", its state in words and how long. It opens to what it does now and "Open its chat": its own
+  // conversation in a dialog (a view only, as a task's thread), where the person can watch or talk to it.
+  subagentRow(h, t, age) {
+    const on = this.jobOpen === h.id;
+    const word = subagentWord(h.status);
+    const icon = h.status === "working" ? svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)
+      : h.status === "needs" ? div().size(6).mx(3).flex_none().rounded(3).bg(red(t))
+      : svg("mods/chat/check.svg").size(12).flex_none().text_color(t.dim);
+    const head = h_flex().id(`sub-${h.address}`).w_full().h(24).px(6).gap(8).items_center().rounded(6).cursor_pointer().text_size(12)
+      .when(on, (el) => el.bg(t.hover))
+      .hover((s) => s.bg(t.hover))
+      .on_click((_e, cx) => { cx.stop_propagation(); this.jobOpen = on ? null : h.id; cx.notify(); })
+      .child(icon)
+      .child(div().min_w(0).truncate().font_medium().text_color(t.foreground).child(h.label))
+      .child(div().flex_none().text_color(h.status === "needs" ? red(t) : t.dim).child(word))
+      .child(div().flex_1())
+      .child(age(h.ended ? { at: Date.now() - (h.ended - h.at) } : h))
+      .child(svg(on ? "mods/chat/chevron-up.svg" : "mods/chat/chevron-down.svg").size(12).flex_none().text_color(t.dim));
+    if (!on) return head;
+    const k = terminals().find((x) => x.address === h.address);
+    const now = typeof k?.status === "object" ? k.status?.msg : null;
+    return v_flex().w_full().child(head)
+      .child(v_flex().w_full().pl(26).pr(6).pt(4).pb(6).gap(6)
+        .child(div().w_full().text_size(12).text_color(t.muted).child(now || (h.status === "done" ? "Its turn is over: its last message is its report." : "Starting…")))
+        .child(h_flex().child(this.button(`sub-open-${h.address}`, WORDS.subOpen, "mods/chat/arrow-right.svg", "secondary", t, () =>
+          openOverlay({ mod: "chat", kind: "dialog", width: 760, height: 0.85, props: { terminal: h.address, thread: true, title: h.label } })))));
   }
 
   // Held messages, each with Edit and Cancel; they go once the agent is free.

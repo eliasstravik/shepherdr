@@ -132,6 +132,7 @@ machines.start();
 const secrets = new Secrets(hub);
 compat.secrets = secrets;
 (compat as any).terminalsOf = (a: string) => hub.terminals.get(a);
+(compat as any).terminalsAll = () => [...hub.terminals.values()];
 (compat as any).coreName = () => host.me?.name || null;
 let secretNames: { name: string; at: number; space: string | null }[] = [];
 let vaultList: Awaited<ReturnType<Secrets["entries"]>> = [];
