@@ -47,6 +47,7 @@ export {
   Cog6ToothIcon as CogIcon,
   CommandLineIcon as TermIcon,
   CpuChipIcon as ModelIcon,
+  CursorArrowRaysIcon as MarkUpIcon,
   DocumentDuplicateIcon as CopyIcon,
   DocumentIcon as FileIcon,
   EllipsisHorizontalIcon as MoreIcon,
@@ -1200,13 +1201,3 @@ export function MarkBadge({ x, y }: { x: number; y: number }) {
   )
 }
 
-/** Mark up: a pointer and a speech bubble, a note left on a spot (like a design tool's comment). No Heroicon exists for
- *  it; drawn solid at 16px like the Micro set beside it */
-export function MarkUpIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true" className={clsx(ic, 'fill-current')}>
-      <path d="M1.5 6.1a.6.6 0 0 1 .95-.49l6.6 4.75a.6.6 0 0 1-.28 1.08l-2.6.32 1.45 2.8a.75.75 0 1 1-1.33.7L4.85 12.5l-2.37 1.7a.6.6 0 0 1-.95-.5Z" />
-      <path d="M9.75 1h3.5A1.75 1.75 0 0 1 15 2.75v2.5A1.75 1.75 0 0 1 13.25 7H12.5l-1.85 1.85A.4.4 0 0 1 10 8.57V7h-.25A1.75 1.75 0 0 1 8 5.25v-2.5A1.75 1.75 0 0 1 9.75 1Z" />
-    </svg>
-  )
-}
