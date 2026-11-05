@@ -520,6 +520,56 @@ class BackToWork(unittest.TestCase):
                          ("working", None, "Working again"))
         self.assertEqual(self.agents.task_status(t, [self.agent({"address": "t1", "status": "working", "turn": 4, "role": "worker"})])[0], "ready")
 
+    def test_a_problem_its_agent_is_on_reads_working(self):
+        """SHEP-8: the cases core/tasks.test.js checks place() on (core/on-it.cases.json)."""
+        with open(os.path.join(ROOT, "core", "on-it.cases.json")) as f:
+            on = json.load(f)
+        with self.mock.patch.object(self.agents, "now", lambda: on["now"]):
+            for c in on["cases"]:
+                why = self.agents.REASONS["question"] if c["expect"]["why"] == "QUESTION" else c["expect"]["why"]
+                got = self.agents.task_status(dict(c["task"], id=7), [self.agent(a) for a in c["live"]])
+                self.assertEqual(got, (c["expect"]["status"], c["expect"]["needs"], why), c["name"])
+
+    def test_failing_checks_need_you_only_once_its_agent_stops_on_them(self):
+        """SHEP-8 end to end: the tick finds the check failing on a Ready task; its agent at work on it
+        (back at work, then waiting on CI with its own status) reads Working; idle with the check still
+        failing once its line is stale, Needs you; the fix pushed and the check gone, the problem too."""
+        t = self.ready(space="sp1", mode="worktree", worktree="/w", branch="b", pr={"number": 3, "repo": "o/r", "checked": 0})
+        red = {"state": "OPEN", "mergeable": "MERGEABLE", "headRefOid": "a",
+               "statusCheckRollup": [{"name": "check", "conclusion": "FAILURE"}]}
+        views = [red]
+        clock = [10_000_000]
+        for mod, name, value in ((self.tick, "pr_view", lambda t: views[0]), (self.tick, "pr_news", lambda *a: None),
+                                 (self.tick, "now", lambda: clock[0]), (self.agents, "now", lambda: clock[0]),
+                                 (self.commands, "now", lambda: clock[0])):
+            p = self.mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        status = lambda: self.agents.task_status(t, self.live)
+        worker = lambda st, turn: [self.agent({"address": "t1", "status": st, "turn": turn, "role": "worker"})]
+        # its agent is already at work when the failure is found: Working, not Needs you
+        self.live = worker("working", 5)
+        self.tick.facts(self.store, t, {"attention": []})
+        self.assertEqual(t["attention"], "Checks failing: check.")
+        self.assertEqual(status(), ("working", None, "Working again"))
+        # the tick takes it back to work; it says what it does and waits on CI in the background
+        self.tick.back_pass(self.store, t, {})
+        self.assertEqual(t["state"], "running")
+        clock[0] += 60_000
+        self.commands.cmd_status(self.args(text="Re-running CI", done=95, left=None))
+        self.live = worker("idle", 6)
+        self.assertEqual(status(), ("working", None, None))
+        # 40 minutes on, idle, the check still failing: nobody is on it
+        clock[0] += 40 * 60_000
+        t["pr"]["checked"] = 0
+        self.tick.facts(self.store, t, {"attention": []})
+        self.assertEqual(status(), ("needs", "attention", "Checks failing: check."))
+        # its fix pushed, the failure gone: so is the problem
+        views[0] = dict(red, statusCheckRollup=[{"name": "check", "status": "IN_PROGRESS"}])
+        t["pr"]["checked"] = 0
+        self.tick.facts(self.store, t, {"attention": []})
+        self.assertNotIn("attention", t)
+
     def test_ready_keeps_each_agents_next_turn(self):
         turns = self.agents.ready_turns([{"address": "t1", "status": {"state": "working"}, "turn": 4},
                                          {"address": "t2", "status": "idle", "turn": 2}])
