@@ -6,9 +6,10 @@
 // v<n>", publish's words). Its proof (herdr-task ready --proof) always counts, and comes first; the rest newest first.
 
 const ID = "[a-z0-9][a-z0-9-]*-[0-9a-f]{4}";
-// publish's words ("Published <id> v2: ..."), and its --json answer ("mod": "art-<id>", "installed": ...), as a
-// chat log keeps them (inside JSON strings: quotes escaped)
-const SAID = new RegExp(`Published (${ID}) v\\d+|\\\\?"mod\\\\?": ?\\\\?"art-(${ID})\\\\?", ?\\\\?"installed`, "g");
+// publish's words ("Published <id> v2: ..."), and its --json answer ("mod": "art-<id>"), as a chat log keeps them
+// (inside JSON strings: quotes escaped). GREP is the same as grep -E reads it (the window greps a log where it is).
+export const GREP = `Published ${ID} v[0-9]+|mod[\\\\"]*: ?[\\\\"]*art-${ID}`;
+const SAID = new RegExp(`Published (${ID}) v\\d+|mod[\\\\"]*: ?[\\\\"]*art-(${ID})`, "g");
 
 /** The artifact ids a chat log's text says were published, in order, once each. */
 export function publishedIds(text) {

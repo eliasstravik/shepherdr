@@ -49,7 +49,8 @@ import {
   UpIcon,
   XIcon,
 } from '@client/ui.tsx'
-import type { Artifact, ArtifactVersion, Chat, Message } from '@shared/types.ts'
+import type { Artifact, ArtifactVersion, Chat, Message, Task } from '@shared/types.ts'
+import { titleInTask } from '@core/task-artifacts.js'
 
 const { withIds } = R as any
 const { MARKUP, markupHint, markupSent, describe } = M as any
@@ -729,9 +730,53 @@ function ArtifactList(_: { placeId: string }) {
   )
 }
 
+/** A task's Artifacts tab (SHEP-60): what its agent and its helpers made or updated (the service finds them:
+ *  core/task-artifacts.js), its proof first and marked so, then newest first; each with its title (without the task's
+ *  id in front), how many versions and when. A tap opens it in the viewer (its versions, Mark up). None: a quiet line. */
+function TaskArtifacts({ task }: { task: Task; chatKey: string }) {
+  const snap = useSnap()!
+  // "2h ago" moves on by the minute
+  const [, tick] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 60000)
+    return () => clearInterval(t)
+  }, [])
+  const ref = task.id.slice(task.id.lastIndexOf(':') + 1)
+  const all = snap.artifacts ?? []
+  const list = (task.artifacts ?? []).map((id) => all.find((a) => a.id === id)).filter((a): a is Artifact => !!a)
+  if (!list.length)
+    return (
+      <div className="flex flex-col items-center gap-1.5 px-5 pt-10 pb-4 text-center">
+        <PageIcon className={clsx(ic, 'text-fg3')} />
+        <p className="pt-1 font-medium">No artifacts yet</p>
+        <p className="max-w-64 text-[0.8125rem] text-pretty text-fg2 phone:text-[0.9375rem]">Reports and proofs this task's agent makes show here.</p>
+      </div>
+    )
+  return (
+    <List className="py-1.5">
+      {list.map((a) => {
+        const proof = a.id === task.proof
+        return (
+          <Row key={a.id} two onActivate={() => openArtifact(a.id)} data-task-artifact={a.id} className="gap-3! py-2!">
+            <PageIcon className={clsx(ic, 'mt-0.5 shrink-0 self-start', proof ? 'text-focus' : 'text-fg3')} />
+            <RowText sub={[`${a.v} ${a.v === 1 ? 'version' : 'versions'}`, a.at ? ago(a.at) : null].filter(Boolean).join(' · ')}>
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="min-w-0 truncate">{titleInTask(a.title, ref)}</span>
+                {proof ? <span className="shrink-0 rounded-full bg-sel px-2 py-px text-[0.6875rem]/4 font-medium text-fg2 phone:text-[0.75rem]/4">Proof</span> : null}
+              </span>
+            </RowText>
+          </Row>
+        )
+      })}
+    </List>
+  )
+}
+
 export default definePlugin({
   name: 'artifacts',
   setup(reg) {
+    // a task's own: the last of its tabs, always there (its place never moves), counted once it has some
+    reg.taskPanel.push({ id: 'artifacts', order: 60, label: 'Artifacts', Icon: PageIcon, count: (t) => t.artifacts?.length ?? 0, View: TaskArtifacts })
     reg.views.artifacts = ArtifactList
     reg.views.artifact = SplitArtifact
     reg.messageParts.push({ order: 50, View: ArtifactCard })

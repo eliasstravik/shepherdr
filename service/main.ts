@@ -37,6 +37,7 @@ import { browserRelay } from "./browser.ts";
 import { voiceCall, pageWhere, type ChatView } from "./voice.ts";
 import { voiceTool, type VoiceIO, type Where } from "./voice-tools.ts";
 import { Artifacts } from "./artifacts.ts";
+import { TaskLogs } from "./task-logs.ts";
 import { Settings, onWritten, PUSH, pushBody } from "./settings.ts";
 import { Secrets, SecretsHome } from "./secrets.ts";
 import { Agents } from "./agents.ts";
@@ -223,6 +224,10 @@ compat.artifacts = artifacts;
 artifacts.hub = hub;
 artifacts.machines = () => model.machineNames();
 artifacts.on(() => model.rebuild());
+// a task's chat logs, for its older artifacts that name no task (its Artifacts tab)
+const taskLogs = new TaskLogs();
+taskLogs.onChange = () => model.rebuild();
+compat.taskLogs = taskLogs;
 artifacts.start();
 const asks = new Asks();
 compat.asks = asks;

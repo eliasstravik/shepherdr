@@ -118,8 +118,14 @@ function PanelTab({ item, task, on }: { item: PanelItem; task: Task; on: boolean
     >
       <item.Icon className={ic} />
       {item.label}
+      <Count n={item.count?.(task)} />
     </button>
   )
+}
+
+/** a tab's quiet count after its label (Artifacts 3), read with it ("Artifacts, 3"); nothing for none */
+function Count({ n }: { n?: number }) {
+  return n ? <span className="text-fg3 tabular-nums"><span className="sr-only">, </span>{n}</span> : null
 }
 
 /** An item's view, or why it has nothing to show (greyed out) */
@@ -160,16 +166,17 @@ export function TaskTabs({ task }: { task: Task }) {
   // as 3.0's: a tab switches the view in place, under the same header (never another panel)
   const on = ui.sheet && items.some((i) => i.id === ui.sheet) && !(ui.sheet === 'terminal' && !termRunning(task)) ? ui.sheet : 'chat'
   // dead: it can't open now (the window's disabled segment, its reason in its label): only Terminal, once its agent ended
-  const tab = (id: string, label: string, dead: string | null, go: () => void) => (
+  const tab = (id: string, label: string, dead: string | null, go: () => void, n?: number) => (
     <button key={id} type="button" role="tab" aria-selected={on === id} aria-disabled={dead ? true : undefined} data-off={dead ? '' : undefined} aria-label={dead ? `${label}: ${dead}` : undefined} onClick={dead ? undefined : go}
-      className="relative inline-flex h-7 shrink-0 items-center rounded-full px-2.5 text-[0.8125rem] whitespace-nowrap text-fg2 after:absolute after:-inset-y-1.5 after:inset-x-0 hover:bg-hover aria-selected:bg-sel aria-selected:text-fg data-off:cursor-default data-off:text-fg3 data-off:hover:bg-transparent coarse:h-9 phone:h-9 phone:px-3 phone:text-[0.875rem]">
+      className="relative inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[0.8125rem] whitespace-nowrap text-fg2 after:absolute after:-inset-y-1.5 after:inset-x-0 hover:bg-hover aria-selected:bg-sel aria-selected:text-fg data-off:cursor-default data-off:text-fg3 data-off:hover:bg-transparent coarse:h-9 phone:h-9 phone:px-3 phone:text-[0.875rem]">
       {label}
+      <Count n={n} />
     </button>
   )
   return (
     <div role="tablist" aria-label={`${task.id} views`} className="scroll-x flex shrink-0 items-center gap-0.5 border-b border-line px-3 py-1.5 phone:px-4">
       {tab('chat', 'Chat', null, closeSheet)}
-      {items.map((i) => tab(i.id, i.label, i.id === 'terminal' && !termRunning(task) ? 'Not running' : null, () => setUI({ sheet: i.id, taskMenu: false, plus: null, pick: null })))}
+      {items.map((i) => tab(i.id, i.label, i.id === 'terminal' && !termRunning(task) ? 'Not running' : null, () => setUI({ sheet: i.id, taskMenu: false, plus: null, pick: null }), i.count?.(task)))}
     </div>
   )
 }

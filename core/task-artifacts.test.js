@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
-import { publishedIds, taskArtifacts, titleInTask } from "./task-artifacts.js";
+import { spawnSync } from "node:child_process";
+import { GREP, publishedIds, taskArtifacts, titleInTask } from "./task-artifacts.js";
 
-const F = "/home/me/dev/shop";
+const F = "/srv/dev/shop";
 const art = (id, more = {}) => ({ id, folder: F, at: 100, versions: [{ v: 1, at: 100, publisher: "t9" }], ...more });
 const task = { ref: "SHOP-4", folder: F, machine: null, agents: [{ address: "t5", at: 1000, ended: 5000 }], proof: null };
 
@@ -43,6 +44,9 @@ test("publish's words in a chat log, plain and inside JSON", () => {
   ].join("\n");
   expect(publishedIds(log)).toEqual(["coverage-by-pack-1a2b", "proof-9f9f"]);
   expect(publishedIds("")).toEqual([]);
+  // the window greps the log where it is, then reads what grep found the same way
+  const found = spawnSync("grep", ["-ohE", GREP], { input: log, encoding: "utf8" }).stdout;
+  expect(publishedIds(found)).toEqual(["coverage-by-pack-1a2b", "proof-9f9f"]);
 });
 
 test("its title without the task's id in front", () => {
