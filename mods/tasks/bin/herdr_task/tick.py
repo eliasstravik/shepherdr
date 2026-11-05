@@ -13,7 +13,7 @@ from .settings import machine_name, worker_argv
 from .agents import agent_log, agent_running, busy_again, detail, held_ask, live_agents, status_word, task_status
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
-from .github import finish, merged_here, pr_pending, pr_problem, pr_view, watch_main
+from .github import already_merged, finish, github, merged_here, pr_merged, pr_pending, pr_problem, pr_view, watch_main
 from .launch import default_space
 from .store import locate, read_list, Store, store_files
 from .queues import machine_hold, refresh_ext, running_count, set_hold, waiting_ext, waiting_for
@@ -72,6 +72,29 @@ def facts(s, t, report):
         t["merged"] = True
         finish(s, t)
         report["done"].append(t["id"])
+    elif t.get("own") and not at_work(s, t) and now() - t.get("gh_checked", 0) >= PR_EVERY:
+        # SHEP-59: its pull request squash-merged without the task knowing (opened by its agent), or a
+        # Ready one whose work is already in its base: done, as ready would.
+        t["gh_checked"] = now()
+        s.dirty = True
+        gone = already_merged(s, t) if t["state"] == "ready" else squash_merged(s, t)
+        if gone is not None:
+            t["merged"] = True
+            if gone:
+                watch_main(s, t, (gone.get("mergeCommit") or {}).get("oid"))
+            finish(s, t)
+            report["done"].append(t["id"])
+
+
+def squash_merged(s, t):
+    """A Working task's branch whose pull request (opened by its agent) merged at its tip: that
+    pull request, recorded on the task, or None."""
+    repo = github(s)
+    found = pr_merged(t, repo) if repo else None
+    if not found or found.get("headRefOid") != (t.get("own") or t.get("head")):
+        return None
+    t["pr"] = {"number": found["number"], "url": found["url"], "repo": repo}
+    return {**t["pr"], "mergeCommit": found.get("mergeCommit")}
 
 
 def back_pass(s, t, report):
