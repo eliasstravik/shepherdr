@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.1.10
+
+Voice that can reach your whole screen, subagents you can see, and honest Working and Waking labels.
+
+- Voice calls can look at and use everything on your screen: open files, changes, tasks by state, settings pages and
+  more. Risky clicks wait for your yes. The bar on top is gone: a green mark with the clock on the call's space takes
+  you back to it.
+- An agent's own helpers, like its reviewer, show in its chat as Subagent rows you can open, and never count as the
+  task's agents. Reviews run as one of these helpers, never hidden.
+- An agent that's quiet because its own background job is still running (CI, a review, a shell) reads Working, not
+  Needs you.
+- Autopilot's header says Waking the moment you switch it on, and No schedule when nothing is set.
+
 ## 3.1.9
 
 Voice calls that really open things where you are, reactions from every agent, and Assistants that know their settings.
