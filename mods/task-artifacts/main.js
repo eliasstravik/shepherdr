@@ -60,7 +60,7 @@ export default class TaskArtifacts extends View {
       .child(div().pt(1).flex_none().child(svg(ICON).size(14).text_color(a.proof ? t.accent : t.dim)))
       .child(v_flex().flex_1().min_w(0).gap(2)
         .child(h_flex().min_w(0).gap(8).items_center()
-          .child(div().min_w(0).truncate().text_size(13).text_color(t.foreground).child(titleInTask(a.title, ref)))
+          .child(div().min_w(0).truncate().text_size(13).text_color(t.foreground).child(titleInTask(a.title, ref, a.proof)))
           .when(Boolean(a.proof), (el) => el.child(div().flex_none().h(18).px(7).flex().items_center().rounded(9).bg(t.selected)
             .text_size(11).font_medium().text_color(t.muted).child("Proof"))))
         .child(div().min_w(0).truncate().text_size(TEXT.label).text_color(t.dim)

@@ -761,7 +761,7 @@ function TaskArtifacts({ task }: { task: Task; chatKey: string }) {
             <PageIcon className={clsx(ic, 'mt-0.5 shrink-0 self-start', proof ? 'text-focus' : 'text-fg3')} />
             <RowText sub={[`${a.v} ${a.v === 1 ? 'version' : 'versions'}`, a.at ? ago(a.at) : null].filter(Boolean).join(' · ')}>
               <span className="flex min-w-0 items-center gap-2">
-                <span className="min-w-0 truncate">{titleInTask(a.title, ref)}</span>
+                <span className="min-w-0 truncate">{titleInTask(a.title, ref, proof)}</span>
                 {proof ? <span className="shrink-0 rounded-full bg-sel px-2 py-px text-[0.6875rem]/4 font-medium text-fg2 phone:text-[0.75rem]/4">Proof</span> : null}
               </span>
             </RowText>

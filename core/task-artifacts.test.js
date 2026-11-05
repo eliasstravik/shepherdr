@@ -55,4 +55,6 @@ test("its title without the task's id in front", () => {
   expect(titleInTask("Coverage", "SHOP-4")).toBe("Coverage");
   expect(titleInTask("SHOP-4", "SHOP-4")).toBe("SHOP-4");
   expect(titleInTask("SHOP-40: Other", "SHOP-4")).toBe("SHOP-40: Other");
+  expect(titleInTask("SHOP-4: Checkout · Proof", "SHOP-4", true)).toBe("Checkout");
+  expect(titleInTask("SHOP-4: Checkout · Proof", "SHOP-4")).toBe("Checkout · Proof");
 });

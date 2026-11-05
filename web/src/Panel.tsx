@@ -162,9 +162,14 @@ export const itemsFor = (task: Task) => registry.taskPanel.filter((i) => i.id !=
 export function TaskTabs({ task }: { task: Task }) {
   const ui = useUI()
   const items = itemsFor(task)
-  if (!items.length) return null
+  const bar = useRef<HTMLDivElement>(null)
   // as 3.0's: a tab switches the view in place, under the same header (never another panel)
   const on = ui.sheet && items.some((i) => i.id === ui.sheet) && !(ui.sheet === 'terminal' && !termRunning(task)) ? ui.sheet : 'chat'
+  // the picked tab always in sight: a narrow column or a phone scrolls the strip to it (the last, Artifacts, was cut off)
+  useLayoutEffect(() => {
+    bar.current?.querySelector<HTMLElement>('[aria-selected=true]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [on, task.id])
+  if (!items.length) return null
   // dead: it can't open now (the window's disabled segment, its reason in its label): only Terminal, once its agent ended
   const tab = (id: string, label: string, dead: string | null, go: () => void, n?: number) => (
     <button key={id} type="button" role="tab" aria-selected={on === id} aria-disabled={dead ? true : undefined} data-off={dead ? '' : undefined} aria-label={dead ? `${label}: ${dead}` : undefined} onClick={dead ? undefined : go}
@@ -174,7 +179,7 @@ export function TaskTabs({ task }: { task: Task }) {
     </button>
   )
   return (
-    <div role="tablist" aria-label={`${task.id} views`} className="scroll-x flex shrink-0 items-center gap-0.5 border-b border-line px-3 py-1.5 phone:px-4">
+    <div ref={bar} role="tablist" aria-label={`${task.id} views`} className="scroll-x flex shrink-0 items-center gap-0.5 border-b border-line px-3 py-1.5 phone:px-4">
       {tab('chat', 'Chat', null, closeSheet)}
       {items.map((i) => tab(i.id, i.label, i.id === 'terminal' && !termRunning(task) ? 'Not running' : null, () => setUI({ sheet: i.id, taskMenu: false, plus: null, pick: null }), i.count?.(task)))}
     </div>

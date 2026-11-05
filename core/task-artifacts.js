@@ -44,11 +44,13 @@ export function taskArtifacts(arts, task, logIds = []) {
   return mine.sort((x, y) => Number(y.id === proof) - Number(x.id === proof) || (y.at ?? 0) - (x.at ?? 0)).map((a) => a.id);
 }
 
-/** Its title as the task's tab lists it: without the task's id in front ("SHEP-60: Coverage" -> "Coverage"). */
-export function titleInTask(title, ref) {
-  const t = String(title ?? ""), r = String(ref ?? "");
+/** Its title as the task's tab lists it: without the task's id in front ("SHEP-60: Coverage" -> "Coverage"), and a
+ *  proof's without " · Proof" at its end (its Proof mark says it). */
+export function titleInTask(title, ref, proof = false) {
+  let t = String(title ?? "");
+  const r = String(ref ?? "");
   // SHOP-4 never cuts SHOP-40's
-  if (!r || t.slice(0, r.length).toUpperCase() !== r.toUpperCase() || /\d/.test(t[r.length] ?? "")) return t;
-  const rest = t.slice(r.length).replace(/^[:\s·-]+/, "");
-  return rest || t;
+  if (r && t.slice(0, r.length).toUpperCase() === r.toUpperCase() && !/\d/.test(t[r.length] ?? "")) t = t.slice(r.length).replace(/^[:\s·-]+/, "") || t;
+  if (proof) t = t.replace(/\s*·\s*proof\s*$/i, "") || t;
+  return t;
 }
