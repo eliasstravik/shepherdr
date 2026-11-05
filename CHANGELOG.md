@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.1.12
+
+Artifacts in a task's view, and tasks that finish cleanly after a squash merge.
+
+- A task's view has an Artifacts tab, on the web and in the window: every report and proof the task's agents made, the
+  proof first, then the newest.
+- Artifacts name the task they were made for again.
+- When a task's pull request was squash-merged, or its work is already in main, ready marks the task done instead of
+  trying to open a second pull request.
+
 ## 3.1.11
 
 Web app fixes: new spaces on other machines and menus that stay in sight.
