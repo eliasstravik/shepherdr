@@ -12,7 +12,7 @@ import * as HC from "../core/host.js";
 import * as APc from "../core/autopilot.js";
 import type { SettingRow, SettingSection } from "../web/shared/types.ts";
 
-const { TASK_ROWS, DEFAULTS, wordFor, valueFor, ROLES: CORE_ROLES, NOTES: CORE_NOTES, ABOUT, BACKUP, BASE, MACHINES, OLD_NAMES, SECTIONS,
+const { TASK_ROWS, DEFAULTS, wordFor, valueFor, ROLES: CORE_ROLES, NOTES: CORE_NOTES, ABOUT, BACKUP, REACTIONS, BASE, MACHINES, OLD_NAMES, SECTIONS,
   WEB, modelLabel, roleSel, otherCli, otherCliWords, backupProblem, homeAbout, webState, fromWord, LOADING_AGENTS, RESET, machineLabel } = C as any;
 const AP = APc as any;
 /** Autopilot as Everywhere has it now (herdr-task's view: what Settings keeps, else what it kept before, else the
@@ -195,6 +195,10 @@ export class Settings {
         agent: { role: r.id, pick: p.value ?? null, sel, unset, other: !s && r.id === "reviewer" && !unset },
         ...(s ? {} : { file: r.file }), ...this.follows(s, p, button, r.id, null) } as SettingRow;
     });
+    // Reactions, under the Assistant: it reacts to some of your messages with an emoji (herdr-task's reactions.py)
+    const re = this.pick(scope, "assistant", "reactions");
+    rows.splice(rows.findIndex((r) => r.key === "role.coordinator") + 1, 0, { label: REACTIONS.title, key: "assistant.reactions",
+      value: ON(re.value !== false), options: ["on", "off"], hint: REACTIONS.about, ...this.follows(s, re, (v) => ON(v !== false), "assistant", "reactions") });
     // Backup: the other CLI takes over a task once when its agent can't go on (on: unset or a CLI; off: "off"); a
     // machine where the other CLI can't is one more line under it
     const b = this.pick(scope, "backup", "agent");
@@ -423,6 +427,11 @@ export class Settings {
       } else if (word !== null && field === "direction") v = AP.directionOf(word) || null;
       else if (word !== null) v = word.slice(0, 8000);
       put("autopilot", field, v);
+    } else if (key === "assistant.reactions") {
+      // on or off; the same as what this level would inherit unsets it, so it follows again (as the window's)
+      if (word !== null && word !== "on" && word !== "off") throw new Error("Not one of its choices.");
+      const parent = space ? file.everywhere?.assistant?.reactions ?? DEFAULTS.assistant.reactions : DEFAULTS.assistant.reactions;
+      put("assistant", "reactions", word === null || (word === "on") === parent ? null : word === "on");
     } else if (key === "backup.agent") {
       // off is "off"; on follows what it would get anyway when that is on, else names the other CLI (as the window's)
       const parent = space ? file.everywhere?.backup?.agent ?? null : null;

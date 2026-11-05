@@ -478,14 +478,19 @@ def coordinator_tab(addr):
     return labels.get("herdr.tab") or labels.get("herdr.coordinator.tab")
 
 
+def coordinators():
+    """The live coordinators' addresses on this machine (without labels: hc get each)."""
+    # Only coordinators get an hc get (labels): there can be thousands of terminals.
+    found = [k for k in (hc_json("ls") or {}).get("terminals", []) if k.get("template") in ASSISTANT_TEMPLATES]
+    found += (hc_json("ls", "--label", "herdr.role=coordinator") or {}).get("terminals", [])
+    return list(dict.fromkeys(k["address"] for k in found if k.get("state") == "live" and "/" not in k["address"]))
+
+
 def coordinator_in(space):
     """The space's live coordinator on this machine, or None."""
     if not space:
         return None
-    # Only coordinators get an hc get (labels): there can be thousands of terminals.
-    found = [k for k in (hc_json("ls") or {}).get("terminals", []) if k.get("template") in ASSISTANT_TEMPLATES]
-    found += (hc_json("ls", "--label", "herdr.role=coordinator") or {}).get("terminals", [])
-    for addr in dict.fromkeys(k["address"] for k in found if k.get("state") == "live" and "/" not in k["address"]):
+    for addr in coordinators():
         k = hc_json("get", addr) or {}
         labels = k.get("labels") or {}
         if k.get("state") == "live" and bare(space) in (labels.get("herdr.space"), labels.get("herdr.coordinator.space")):

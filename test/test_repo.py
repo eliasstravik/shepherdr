@@ -291,3 +291,44 @@ class Repo(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SessionNote(unittest.TestCase):
+    """SHEP-42: the chat's SessionStart hook (mods/chat/session-note.sh) adds an Assistant's Reactions words
+    (herdr-task _session-note) to its JSON; a worker's start never asks herdr-task. hc and herdr-task are fakes."""
+
+    def run_hook(self, role):
+        import shutil
+        import subprocess
+        import tempfile
+        if not shutil.which("jq"):
+            self.skipTest("needs jq")
+        d = tempfile.mkdtemp()
+        log = os.path.join(d, "asked")
+        with open(os.path.join(d, "hc"), "w") as f:
+            f.write(f"#!/bin/sh\necho '{json.dumps({'labels': {'herdr.role': role} if role else {}})}'\n")
+        # what _session-note prints: JSON string content, escaped
+        with open(os.path.join(d, "words"), "w") as f:
+            f.write(json.dumps(' Reactions (on in Settings): <hc react="👀" to="x"/>', ensure_ascii=False)[1:-1])
+        with open(os.path.join(d, "herdr-task"), "w") as f:
+            f.write(f"#!/bin/sh\necho \"$@\" >> {log}\ncat {d}/words\n")
+        for x in ("hc", "herdr-task"):
+            os.chmod(os.path.join(d, x), 0o755)
+        env = {**os.environ, "PATH": f"{d}:{os.environ['PATH']}", "HC_TERMINAL_ID": "t5"}
+        out = subprocess.run(["sh", os.path.join(ROOT, "mods", "chat", "session-note.sh")], capture_output=True, text=True, env=env)
+        ctx = json.loads(out.stdout)["hookSpecificOutput"]["additionalContext"]
+        if not os.path.exists(log):
+            return ctx, ""
+        with open(log) as f:
+            return ctx, f.read()
+
+    def test_an_assistant_gets_its_reactions_words(self):
+        ctx, asked = self.run_hook("coordinator")
+        self.assertTrue(ctx.startswith("Herdr chat:"))
+        self.assertTrue(ctx.endswith('`herdr-artifact guide` first. Reactions (on in Settings): <hc react="👀" to="x"/>'), ctx[-120:])
+        self.assertEqual(asked.split(), ["_session-note", "t5"])
+
+    def test_a_worker_gets_the_chat_note_only(self):
+        ctx, asked = self.run_hook(None)
+        self.assertTrue(ctx.endswith("run `herdr-artifact guide` first."), ctx[-80:])
+        self.assertEqual(asked, "")

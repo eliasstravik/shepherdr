@@ -22,6 +22,7 @@ from .automations import auto_list, cmd_auto, cmd_scheduler, cmd_track, EVENTS, 
 from .machines import cmd_assistants, cmd_machines, cmd_sync_auto, cmd_tell
 from .autopilot import cmd_autopilot, cmd_complete, cmd_progress
 from .home import cmd_home
+from .reactions import cmd_session_note
 
 
 # ---- another machine ------------------------------------------------------------------------
@@ -400,6 +401,9 @@ def main():
     c = sub.add_parser("_allow")  # Codex's PermissionRequest hook (own_argv)
     c.add_argument("--command", required=True)
     c.set_defaults(fn=cmd_allow, json=False)
+    c = sub.add_parser("_session-note")  # the chat's SessionStart hook (mods/chat/session-note.sh): an Assistant's extra words
+    c.add_argument("terminal")
+    c.set_defaults(fn=cmd_session_note, json=False)
     c = sub.add_parser("_track")
     c.add_argument("id")
     c.add_argument("address")

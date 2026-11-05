@@ -20,6 +20,7 @@ drops the space's own, and it inherits again. A few settings are one for every s
 | Page | Setting | Level | Why |
 |---|---|---|---|
 | Agents | Assistant (CLI, model, effort, fast, permissions) | Everywhere, space | A repo may want a stronger model or another CLI |
+| Agents | Reactions (the Assistant reacts with an emoji; on) | Everywhere, space | A space may want a plainer chat |
 | Agents | Workers | Everywhere, space | The same: what a task in this space runs on |
 | Agents | Reviewer | Everywhere, space | The same |
 | Agents | Backup agent | Everywhere, space | A space whose work shouldn't move to the other CLI |
@@ -50,8 +51,8 @@ task values a machine set before (the old machine scope) still apply there until
 ## Where they're kept, and how they travel
 
 - `~/.herdr/shepherdr.json`: `everywhere` and `spaces[<space id>]` (another machine's space as `<machine>/<id>`), each
-  with `coordinator`, `worker`, `reviewer`, `backup`, `tasks`, `automations` and `autopilot`
-  (`{ every, events, heartbeat }`). The window pushes each machine its share (Everywhere's and its spaces' by their
+  with `coordinator`, `worker`, `reviewer`, `backup`, `tasks`, `automations`, `assistant` (`{ reactions }`) and
+  `autopilot` (`{ every, events, heartbeat }`). The window pushes each machine its share (Everywhere's and its spaces' by their
   ids there), and when the web app is served from another machine its service keeps the file in step with that host
   (`service/sync.ts`). So a space on any machine, and the web on the Mac mini, see the same values.
 - Secrets live in one vault, `~/.herdr/vault.json` on the machine that keeps them (Secrets › Kept on). Which one:
@@ -73,3 +74,19 @@ task values a machine set before (the old machine scope) still apply there until
   the space's own). Autopilot's schedule and events from before Settings kept them (`~/.herdr/tasks/.autopilot.json`
   `everywhere`) and its heartbeat file (`~/.config/herdr-core/autopilot/everywhere.md`) are what Everywhere inherits
   until it's set.
+
+## Reactions
+
+Agents › Reactions, under the Assistant, on by default: the space's Assistant reacts to some of your messages with one
+emoji, as a person would (👀 on a new ask it picks up, 👍 on a go-ahead, ✅ on your ask once it's done, 😂 at a joke,
+🙏 for thanks). Most messages get none, never more than one, and never instead of an answer you need. Off, it never
+reacts. Workers are never told to react.
+
+- **How it's told.** The chat's SessionStart hook (`mods/chat/session-note.sh`) asks `herdr-task _session-note` for an
+  Assistant's extra words: the when-and-how paragraph (`herdr_task/reactions.py` GUIDE) when on, "never react" when off.
+  It runs at every start, resume and compaction, and labels the terminal `herdr.reactions=on|off`.
+- **Changed mid-session.** herdr-task's news pass (`reactions_pass`, on a settings change and every minute) tells each
+  live Assistant whose label differs once, as a hidden `<herdr-setting name="reactions">` message it answers with
+  `<hc no-reply/>`; a read chat stays read. One with no label yet (started before) is taught once it has had a turn.
+- **A reaction only.** A reply of a `<hc react … />` line and `<hc no-reply/>` shows just the reaction on your
+  message, in the window and on the web (`core/chat-log.js`).

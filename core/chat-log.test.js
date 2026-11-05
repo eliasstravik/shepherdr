@@ -87,6 +87,27 @@ test("a reply's react lines land on the person's message, at its start, middle o
   expect(c.reactions.get(c.items[0].id).map((r) => r.emoji)).toEqual(["👀", "🔥", "✅"]);
 });
 
+// SHEP-42: a reply that is only a reaction (Settings › Reactions) shows just that reaction on the person's message.
+test("a react line with <hc no-reply/> shows only the reaction", async () => {
+  const thanks = { ...person, uuid: "p2", message: { role: "user", content: "Thanks, that's perfect" } };
+  for (const words of ['<hc react="🙏" to="Thanks, that\'s perfect"/>\n<hc no-reply/>', '<hc no-reply/>\n<hc react="🙏" to="Thanks"/>']) {
+    const c = await read([person, reply("m1", [text("Done: the card is bigger now.")]), thanks, reply("m2", [text(words)])]);
+    expect(said(c)).toEqual(["Done: the card is bigger now."]);
+    const you = c.items.filter((x) => x.kind === "user");
+    expect(c.reactions.get(you[1].id)).toEqual([{ emoji: "🙏", by: "agent" }]);
+    expect(c.reactions.get(you[0].id)).toBeUndefined();
+    expect(c.items.at(-1).kind).toBe("user");
+  }
+});
+
+// A running Assistant told Reactions changed (herdr-task's <herdr-setting>): nothing of it shows, nor its no-reply.
+test("a Reactions change told to the Assistant shows nothing", async () => {
+  const note = { ...person, uuid: "p3", message: { role: "user", content: '<herdr-setting name="reactions" value="off">Reactions are now off in Settings: don\'t react (no <hc react> lines). Nothing to answer: reply only <hc no-reply/>.</herdr-setting>' } };
+  const c = await read([person, note, reply("m3", [text("<hc no-reply/>")])]);
+  expect(c.items.map((x) => x.kind)).toEqual(["user"]);
+  expect(c.items[0].text).toBe("Test bubble for reactions");
+});
+
 // SHEP-5: an Autopilot wake as herdr-task sends it (as tor-gameboy's Assistant got it: the CLI wraps it as pasted).
 const wake = (reason, uuid = "w1") => ({ parentUuid: null, isSidechain: false, type: "user", message: { role: "user",
   content: `\n\n<pasted_content id="4f83">\n<herdr-autopilot reason="${reason}" space="sp5">\nAutopilot wake: ${reason}, Thu 06:30.\nYou are on Autopilot…\n</herdr-autopilot>\n</pasted_content>` }, uuid, timestamp: at });

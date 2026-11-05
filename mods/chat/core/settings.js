@@ -84,6 +84,8 @@ export const LOADING_AGENTS = "Loading agents…";
 // An unset Reviewer's button: what runs, the other CLI.
 export const otherCliWords = (cli) => `Other CLI (${NAMES[cli] ?? cli})`;
 export const otherCli = (worker) => (worker === "codex" ? "claude" : "codex");
+// Reactions (herdr-task's reactions.py): a space's Assistant reacts to some of your messages with an emoji; off, never.
+export const REACTIONS = { title: "Reactions", about: "The Assistant reacts to some of your messages with an emoji, as a person would." };
 export const BACKUP = { title: "Backup agent", about: "The other CLI takes over a task once when its agent can't go on." };
 // The machines where the other CLI can't take over (herdr-task's check, ~/.herdr/cli-check.json's machines: this
 // computer is ""), in one line. m: the scope's machine ("local" or its name), null for Everywhere (every machine).
@@ -280,7 +282,8 @@ export const ROUNDS = [[0, "Off"], [1, "1 round"], [2, "2 rounds"], [3, "3 round
 export const ARCHIVE = [[0, "Off"], [1, "1 day"], [3, "3 days"], [7, "1 week"], [30, "1 month"]];
 export const ONOFF = [[true, "On"], [false, "Off"]];
 
-export const DEFAULTS = { tasks: { merge: "ask", review_rounds: 0, must_fix: "major", max_running: 10, worktrees: true, archive_after: 7, proof: true }, automations: { enabled: true } };
+export const DEFAULTS = { tasks: { merge: "ask", review_rounds: 0, must_fix: "major", max_running: 10, worktrees: true, archive_after: 7, proof: true }, automations: { enabled: true },
+  assistant: { reactions: true } };
 
 // [section, field, label, choices | { min, max }]
 export const TASK_ROWS = [

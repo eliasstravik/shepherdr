@@ -1724,3 +1724,125 @@ class LostLogs(unittest.TestCase):
     def test_a_running_agent_is_left_to_the_session_pass(self):
         t = {"id": 5, "state": "running", "agents": [{"address": "t1", "agent": "claude", "at": self.at}]}
         self.assertFalse(self.tick.lost_log(t, t["agents"][0]))
+
+
+class Reactions(unittest.TestCase):
+    """SHEP-42: Settings › Agents › Reactions (on by default) for a space's Assistant: what its session
+    is told at the start, and the one message a running one gets when it changes. A throwaway settings
+    file and state; hc is faked (its terminals are dicts), nothing is sent."""
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.settings as settings
+        import herdr_task.reactions as reactions
+        import herdr_task.news as news
+        self.settings, self.reactions, self.news = settings, reactions, news
+        self.dir = tempfile.mkdtemp()
+        self.file = os.path.join(self.dir, "shepherdr.json")
+        self.terminals, self.labelled, self.sent = {}, [], []
+
+        def hc_json(*args):
+            return self.terminals.get(args[1]) if args[0] == "get" else None
+
+        def run(args, **_):
+            if args[:2] == ["hc", "label"]:
+                k, v = args[3].split("=", 1)
+                self.terminals[args[2]].setdefault("labels", {})[k] = v
+                self.labelled.append((args[2], args[3]))
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        for target, name, value in [
+            (settings, "SETTINGS", self.file), (reactions, "SETTINGS", self.file),
+            (reactions, "STATE", os.path.join(self.dir, ".reactions.json")), (reactions, "hc_json", hc_json),
+            (reactions, "run", run), (reactions, "addon_off", lambda name: False),
+            (reactions, "coordinators", lambda: list(self.terminals)),
+            (news, "news_send", lambda addr, text: self.sent.append((addr, text)) or True),
+        ]:
+            p = mock.patch.object(target, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def write(self, d):
+        with open(self.file, "w") as f:
+            json.dump(d, f)
+        # a change the pass looks at at once (the file's time), as the window's or the web's save
+        self.saves = getattr(self, "saves", 0) + 1
+        os.utime(self.file, (1700000000 + self.saves, 1700000000 + self.saves))
+
+    def assistant(self, addr="t5", space="sp1", turn=3, **labels):
+        self.terminals[addr] = {"state": "live", "turn": turn, "labels": {"herdr.role": "coordinator", "herdr.space": space, **labels}}
+
+    def test_on_by_default_everywhere_and_a_space_sets_its_own(self):
+        self.assertTrue(self.settings.DEFAULTS["assistant"]["reactions"])
+        self.assertTrue(self.settings.reactions_on("sp1"))
+        self.write({"everywhere": {"assistant": {"reactions": False}}, "spaces": {"sp2": {"assistant": {"reactions": True}}}})
+        self.assertFalse(self.settings.reactions_on("sp1"))
+        self.assertTrue(self.settings.reactions_on("vm/sp2"))
+        self.assertFalse(self.settings.reactions_on(None))
+
+    def test_an_assistant_session_is_told_when_and_how_only_with_reactions_on(self):
+        self.assistant()
+        note = self.reactions.session_note("t5")
+        for words in ("👀", "👍", "✅", "😂", "🙏", "<hc react=", "never more than one", "never instead of an answer", "<hc no-reply/>"):
+            self.assertIn(words, note)
+        self.assertEqual(self.terminals["t5"]["labels"]["herdr.reactions"], "on")
+        self.write({"spaces": {"sp1": {"assistant": {"reactions": False}}}})
+        note = self.reactions.session_note("t5")
+        self.assertNotIn("👀", note)
+        self.assertIn("never react", note)
+        self.assertEqual(self.terminals["t5"]["labels"]["herdr.reactions"], "off")
+        # a worker: nothing, and no label
+        self.terminals["t9"] = {"state": "live", "labels": {"herdr.task": "SHEP-1"}}
+        self.assertEqual(self.reactions.session_note("t9"), "")
+        self.assertNotIn("herdr.reactions", self.terminals["t9"]["labels"])
+
+    def test_the_hook_text_is_json_ready(self):
+        import contextlib
+        import io
+        self.assistant()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.reactions.cmd_session_note(type("A", (), {"terminal": "t5"})())
+        ctx = json.loads('{"c":"base.' + out.getvalue() + '"}')["c"]
+        self.assertTrue(ctx.startswith("base. Reactions (on in Settings)"))
+        self.assertIn('<hc react="👀"', ctx)
+
+    def test_a_running_assistant_is_told_once_when_it_changes(self):
+        self.assistant(**{"herdr.reactions": "on"})
+        self.write({})
+        quiet = {}
+        self.reactions.reactions_pass({}, quiet)
+        self.assertEqual(self.sent, [])  # taught on already
+        self.write({"everywhere": {"assistant": {"reactions": False}}})
+        report = {}
+        self.reactions.reactions_pass(report, quiet)
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("now off", self.sent[0][1])
+        self.assertRegex(self.sent[0][1], r'^<herdr-setting name="reactions" value="off">[\s\S]*<hc no-reply/>\.</herdr-setting>$')
+        self.assertEqual(report["reactions"], [{"to": "t5", "now": "off"}])
+        # once: the next pass (the file changed again, the value didn't) says nothing
+        self.write({"everywhere": {"assistant": {"reactions": False}, "tasks": {"merge": "auto"}}})
+        self.reactions.reactions_pass({}, quiet)
+        self.assertEqual(len(self.sent), 1)
+        # back on: told again, with the how
+        self.write({})
+        self.reactions.reactions_pass({}, quiet)
+        self.assertEqual(len(self.sent), 2)
+        self.assertIn("now on", self.sent[1][1])
+        self.assertIn("👀", self.sent[1][1])
+
+    def test_one_started_before_is_taught_when_on_and_only_labelled_when_off(self):
+        self.assistant("t5", "sp1")
+        self.assistant("t6", "sp2")
+        self.assistant("t7", "sp1", turn=0)  # just started: its hook teaches it
+        self.write({"spaces": {"sp2": {"assistant": {"reactions": False}}}})
+        self.reactions.reactions_pass({}, {})
+        self.assertEqual([a for a, _ in self.sent], ["t5"])
+        self.assertEqual(self.terminals["t6"]["labels"]["herdr.reactions"], "off")
+        self.assertNotIn("herdr.reactions", self.terminals["t7"]["labels"])
+
+    def test_chat_tags_hide_the_message(self):
+        """The message is one <herdr-…> tag: the chat shows nothing of it (core/chat-log.js strips Herdr's tags)."""
+        self.assertTrue(self.reactions.told(False).startswith("<herdr-setting "))
+        self.assertTrue(self.reactions.told(True).endswith("</herdr-setting>"))
