@@ -97,7 +97,7 @@ function RepeatIcon({ className }: { className?: string }) {
 
 /**
  * A task, with one line under its title (taskLine). Working, its pie fills with the % done its agent reported and the time
- * left sits at the row's end ("2h left"); Ready, Review sits there instead.
+ * left sits short under it ("2h"); Ready, Review sits at the row's end.
  */
 function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
   // the open task, or the focused pane's in split view
@@ -141,12 +141,13 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
 
 /**
  * One row, as the window's (mods/tasks line()). Three parts, each with one job:
- * - the glyph, level with the title;
+ * - the glyph, level with the title, and under it, level with the second line, the time left ("2h", "<1m": short, in the
+ *   working colour, centred on the glyph; wider than it, it overflows evenly, so the column and the titles never move);
  * - the text: the title owns the first line; under it one quiet line read left to right, never pushed apart: the
  *   task's id (dim, monospace), what it says now (why it needs you, what its agent does: at most 40 characters, the
  *   whole of it in the row's label), then where it is after a dot, whole or not at all (it gives way first);
  * - the end, centred on the row (in a narrow list, at the second line's end): the one thing to act on or watch:
- *   Review, the time left ("2h left") or an automation's next run (`meta`).
+ *   Review or an automation's next run (`meta`).
  * A row with nothing under its title is one line. `tip`: more for its button's label only (an automation's error).
  */
 function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, dim, meta, where, action, tip, onOpen, menu, children }: {
@@ -156,8 +157,7 @@ function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, di
   const said = sub ? capital(sub) : undefined
   const shown = said ? fit(said) : undefined
   const two = !!(ref_ || shown || where)
-  const end = action ?? (left ? <span className="shrink-0 text-[0.75rem] font-medium whitespace-nowrap text-work-fg tabular-nums phone:text-[0.8125rem]">{left} left</span>
-    : meta ? <span className="shrink-0 text-[0.75rem] whitespace-nowrap text-fg3 tabular-nums phone:text-[0.8125rem]">{meta}</span> : null)
+  const end = action ?? (meta ? <span className="shrink-0 text-[0.75rem] whitespace-nowrap text-fg3 tabular-nums phone:text-[0.8125rem]">{meta}</span> : null)
   return (
     <li data-flip={flip} className={clsx(rowClass(sel, kb), 'group @container relative p-0! select-none [-webkit-touch-callout:none]', menu?.open && !sel && 'bg-hover')} {...(menu?.press ?? {})}>
       {/* the whole row opens it: one button stretched under it; Review sits over it, a button of its own */}
@@ -175,6 +175,10 @@ function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, di
           end sits at the second line's end, so the title has the whole first line */}
       <div className={clsx('pointer-events-none relative grid min-h-[inherit] w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 px-2 phone:px-3', two && 'gap-y-0.5 py-2')}>
         <span aria-hidden className="col-start-1 row-start-1 grid h-5 w-3.5 place-items-center phone:h-6 phone:w-4">{glyph}</span>
+        {/* the time left under the glyph, as tall as the second line so it sits level with it */}
+        {two && left ? (
+          <span aria-hidden className="col-start-1 row-start-2 flex h-4 w-3.5 items-center justify-center font-mono text-[0.6875rem] font-semibold whitespace-nowrap text-work-fg tabular-nums @max-[24rem]:h-6 phone:h-6 phone:w-4 phone:text-[0.75rem]">{left}</span>
+        ) : null}
         <span aria-hidden={!!onOpen} className={clsx('col-start-2 row-start-1 min-w-0 truncate text-[0.875rem]/5 phone:text-base/6', dim ? 'text-fg2' : 'text-fg', two && '@max-[24rem]:col-end-4')}>{title}</span>
         {two ? (
           <span aria-hidden={!!onOpen} className="col-start-2 row-start-2 flex h-4 min-w-0 @max-[24rem]:h-6 items-center gap-1.5 text-[0.75rem]/4 phone:h-6 phone:text-[0.8125rem]/5">

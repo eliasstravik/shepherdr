@@ -63,14 +63,14 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 
 | Element | Window | Web | State |
 |---|---|---|---|
-| Grid | T line(): glyph level with the title; title owns line 1; line 2: id · words · where, read left to right; the end (Review, time left, next run) centred on the row | W Line (a phone: the end at line 2's end, the title the whole first line) | ✓ (SHEP-34) |
+| Grid | T line(): glyph level with the title; title owns line 1; line 2: id · words · where, read left to right; the end (Review, next run) centred on the row; time left under the glyph | W Line (a phone: the end at line 2's end, the title the whole first line) | ✓ (SHEP-34) |
 | Id | T line() at line 2's start, monospace, dim (no id column since SHEP-34: it took the title's room) | W Line `ref_` | ✓ |
 | Id without the machine | T:22 refOf "SHEP-7" | W `refOf` strips "vm:" | ✓ fixed |
 | Title | T:829 foreground, Done dim | W Line `dim` | ✓ fixed |
 | Title hover | T:822 the title when cut, an error | W Line `title` (the second line too when cut) | ✓ |
 | Second line words | T:841-842 capital first, at most 40 characters cut at a word, whole on hover | W Line (`capital`, `fit`) | ✓ fixed ("after SHEP-7" → "After SHEP-7") |
 | Working | core secondLine: why, else its agent's words; pie of % done | compat `sub`, TaskDot pie | ✓ |
-| Time left | T line() at the row's end, amber: "6m left", "<1m left", "2h left" (a bare "2h" at a row's end reads as an age) | W Line `left` from compat `left` (core leftOf) | ✓ (SHEP-34) |
+| Time left | T line() short under the glyph, level with line 2, amber mono: "6m", "<1m", "2h" (as before SHEP-34) | W Line `left` from compat `left` (core leftOf) | ✓ (SHEP-39) |
 | Needs you | why (core place) | compat `sub` | ✓ |
 | Queued | "After HERD-3", "Waits: …", "Starts soon" | compat `sub` (core queueReason) | ✓ |
 | Ready | "Ready 5m ago" + Review (opens the Accept card) | compat `sub` + W `accept` | ✓ |
