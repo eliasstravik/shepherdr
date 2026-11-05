@@ -317,7 +317,10 @@ class SessionNote(unittest.TestCase):
         env = {**os.environ, "PATH": f"{d}:{os.environ['PATH']}", "HC_TERMINAL_ID": "t5"}
         out = subprocess.run(["sh", os.path.join(ROOT, "mods", "chat", "session-note.sh")], capture_output=True, text=True, env=env)
         ctx = json.loads(out.stdout)["hookSpecificOutput"]["additionalContext"]
-        return ctx, open(log).read() if os.path.exists(log) else ""
+        if not os.path.exists(log):
+            return ctx, ""
+        with open(log) as f:
+            return ctx, f.read()
 
     def test_an_assistant_gets_its_reactions_words(self):
         ctx, asked = self.run_hook("coordinator")
