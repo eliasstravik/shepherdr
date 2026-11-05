@@ -313,6 +313,7 @@ def main():
     c.add_argument("--every", help=HOW + ' "" or off: no schedule; default: follow Everywhere\'s.')
     c.add_argument("--on", help="task events that wake it, comma-separated (\"\": none; default: Everywhere's): " + ", ".join(EVENTS))
     c.add_argument("--heartbeat", help="its heartbeat's words (default: Everywhere's)")
+    c.add_argument("--direction", help="one line it steers toward (\"\" or default: none, it works out what matters from the project)")
     c = ap.add_parser("check", help="check a schedule's words without saving them")
     c.add_argument("--every", required=True)
     c.add_argument("--json", action="store_true")

@@ -176,7 +176,7 @@ class Autopilot(unittest.TestCase):
         with open(v["heartbeat"]) as f:
             self.assertEqual(f.read(), self.ap.STARTER)
         # the starter is a real heartbeat: a wake brings it as it is
-        self.assertIn("Direction: keep this space's tasks moving", self.ap.message("sp1", {}, ["run now"]))
+        self.assertIn("Push the project forward", self.ap.message("sp1", {}, ["run now"]))
         with open(v["heartbeat"], "w") as f:
             f.write("Ship the docs.\n")
         self.assertIn("Ship the docs.", self.ap.message("sp1", {}, ["run now"]))
@@ -195,7 +195,7 @@ class Autopilot(unittest.TestCase):
         Settings' words are read as it; an edited one is kept, an empty one stays blank."""
         path = self.ap.heartbeat_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        old = self.ap.OLD_STARTERS[0]
+        old = self.ap.OLD_STARTERS[-1]  # the first starter, a form to fill in
         with open(path, "w") as f:
             f.write(old)
         self.cmd("list")
@@ -203,7 +203,7 @@ class Autopilot(unittest.TestCase):
             self.assertEqual(f.read(), self.ap.STARTER)
         with open(path, "w") as f:
             f.write("  " + old.strip() + "\n\n")
-        self.assertIn("Direction: keep this space's tasks moving", self.ap.message("sp1", {}, ["run now"]))
+        self.assertIn("Push the project forward", self.ap.message("sp1", {}, ["run now"]))
         # edited, even a little: kept as the person wrote it
         edited = old.replace("Priorities:\n-", "Priorities:\n- the docs")
         with open(path, "w") as f:
@@ -216,11 +216,56 @@ class Autopilot(unittest.TestCase):
         self.cmd("set", space="sp1", heartbeat=old)
         v = self.cmd("show", space="sp1")
         self.assertEqual((v["heartbeat_text"], v["blank"]), (self.ap.STARTER, False))
-        self.assertIn("Direction: keep this space's tasks moving", self.ap.message("sp1", {}, ["run now"]))
+        self.assertIn("Push the project forward", self.ap.message("sp1", {}, ["run now"]))
         # empty: no heartbeat, and a wake says so
         self.cmd("set", space="sp1", heartbeat="")
         self.assertTrue(self.cmd("show", space="sp1")["blank"])
         self.assertIn("not written yet", self.ap.message("sp1", {}, ["run now"]))
+
+    def test_the_last_starter_upgrades_with_a_backup(self):
+        """A machine still on the starter that said "Don't invent work" gets today's, the old one kept
+        as everywhere.md.bak; a file the person edited is left as it is, with no backup."""
+        path = self.ap.heartbeat_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        last = self.ap.OLD_STARTERS[0]
+        self.assertIn("Don't invent work", last)
+        with open(path, "w") as f:
+            f.write(last)
+        self.cmd("list")
+        with open(path) as f:
+            self.assertEqual(f.read(), self.ap.STARTER)
+        with open(path + ".bak") as f:
+            self.assertEqual(f.read(), last)
+        os.remove(path + ".bak")
+        # today's starter: nothing to do, no backup
+        self.cmd("list")
+        self.assertFalse(os.path.exists(path + ".bak"))
+        # edited: kept, no backup
+        edited = last.replace("4. New tasks: only follow-ups I asked for", "4. New tasks: only what I ask for")
+        with open(path, "w") as f:
+            f.write(edited)
+        self.cmd("list")
+        with open(path) as f:
+            self.assertEqual(f.read(), edited)
+        self.assertFalse(os.path.exists(path + ".bak"))
+        self.assertIn("4. New tasks: only what I ask for", self.ap.message("sp1", {}, ["run now"]))
+
+    def test_a_wake_drives_the_project(self):
+        """By default a wake asks for new tasks that push the project forward, toward the space's
+        Direction when it has one (else the project's own), and a quiet reply only when there's
+        truly nothing worth doing."""
+        m = self.ap.message("sp1", {}, ["schedule"])
+        for words in ("Push the project forward", "add and start the next most valuable", "Direction: none set",
+                      "truly nothing worth doing", "Never merge, Accept"):
+            self.assertIn(words, m)
+        self.assertNotIn("Don't invent work", m)
+        self.cmd("set", space="sp1", direction="  Launch the\n shop  ")
+        v = self.cmd("show", space="sp1")
+        self.assertEqual((v["direction"], v["own"]), ("Launch the shop", ["direction"]))
+        self.assertIn("Direction (set by the person, Shepherdr settings > Autopilot): Launch the shop", self.ap.message("sp1", {}, ["schedule"]))
+        self.assertIn("Direction: none set", self.ap.message("sp2", {}, ["schedule"]))
+        self.cmd("set", space="sp1", direction="")
+        self.assertEqual(self.cmd("show", space="sp1")["direction"], "")
 
     def test_check_and_pushed_copies(self):
         self.assertEqual(self.cmd("check", every="Weekdays 9:00")["every"], "Weekdays 9:00")

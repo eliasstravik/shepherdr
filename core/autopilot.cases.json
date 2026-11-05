@@ -262,6 +262,75 @@
           "events"
         ]
       }
+    },
+    {
+      "name": "a space's own Direction: its own; an empty one is none",
+      "file": {
+        "version": 2,
+        "spaces": {
+          "sp1": {
+            "on": true
+          },
+          "sp2": {
+            "on": true
+          }
+        }
+      },
+      "settings": {
+        "everywhere": {
+          "autopilot": {
+            "direction": "Ship the docs"
+          }
+        },
+        "spaces": {
+          "sp1": {
+            "autopilot": {
+              "direction": "Launch the shop"
+            }
+          },
+          "sp2": {
+            "autopilot": {
+              "direction": "  "
+            }
+          }
+        }
+      },
+      "space": "sp1",
+      "expect": {
+        "on": true,
+        "every": "every 60 minutes",
+        "events": [],
+        "own": [
+          "direction"
+        ]
+      }
+    },
+    {
+      "name": "an empty Direction is not the space's own",
+      "file": {
+        "version": 2,
+        "spaces": {
+          "sp2": {
+            "on": true
+          }
+        }
+      },
+      "settings": {
+        "spaces": {
+          "sp2": {
+            "autopilot": {
+              "direction": "  "
+            }
+          }
+        }
+      },
+      "space": "sp2",
+      "expect": {
+        "on": true,
+        "every": "every 60 minutes",
+        "events": [],
+        "own": []
+      }
     }
   ]
 }
