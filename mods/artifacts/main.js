@@ -210,7 +210,7 @@ export default class Artifacts extends View {
         .child(svg("mods/workspace-chrome/search.svg").size(14).flex_none().text_color(t.dim))
         .child(Input.new(this.query).flex_1().min_w(0).text_size(13).text_color(t.foreground))
         .when(Boolean(q), (el) => el.child(h_flex().id("art-search-x").size(22).flex_none().items_center().justify_center().rounded(6)
-          .cursor_pointer().text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground)).tooltip("Clear")
+          .cursor_pointer().text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground))
           .on_click((_e, cx) => { cx.stop_propagation(); this.query.set_value(""); cx.notify(); })
           .child(svg("mods/workspace-chrome/x.svg").size(13).flex_none())))
         .when(!q && !this.searching, (el) => el.child(h_flex().h(18).px(5).mr(3).flex_none().items_center().rounded(4).border_1()
@@ -308,8 +308,8 @@ export default class Artifacts extends View {
       });
       cx.notify();
     };
-    const arrow = (id, icon, n, tip) => div().id(id).size(24).flex_none().flex().items_center().justify_center().rounded(6)
-      .text_color(n && !hv.busy ? t.muted : t.border).when(Boolean(n), (el) => el.tooltip(tip))
+    const arrow = (id, icon, n) => div().id(id).size(24).flex_none().flex().items_center().justify_center().rounded(6)
+      .text_color(n && !hv.busy ? t.muted : t.border)
       .when(Boolean(n) && !hv.busy, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
         .on_click((_e, cx) => { cx.stop_propagation(); step(n === latest ? null : n, cx); }))
       .child(svg(icon).size(14));
@@ -322,15 +322,14 @@ export default class Artifacts extends View {
         .child("Artifacts"))
       .child(div().flex_1().min_w(0).truncate().font_semibold().child(title))
       .when(Boolean(v), (el) => el.child(h_flex().flex_none().items_center()
-        .when(kept.length > 1 || older, (row) => row.child(arrow("art-v-prev", "mods/workspace-chrome/chevron-left.svg", prev, `v${prev}`)))
+        .when(kept.length > 1 || older, (row) => row.child(arrow("art-v-prev", "mods/workspace-chrome/chevron-left.svg", prev)))
         .child(div().id("art-v").px(2).flex_none().text_size(TEXT.label).text_color(older ? t.foreground : t.dim)
-          .when(Boolean(me?.at), (el) => el.tooltip(ago(me.at)))
           .child(hv.busy ? "Opening…" : kept.length > 1 || older ? `v${shown} of ${latest}` : `v${shown}`))
-        .when(kept.length > 1 || older, (row) => row.child(arrow("art-v-next", "mods/workspace-chrome/chevron-right.svg", next, `v${next}`)))
+        .when(kept.length > 1 || older, (row) => row.child(arrow("art-v-next", "mods/workspace-chrome/chevron-right.svg", next)))
         // An older one: "v2 of 5 · Latest ›".
         .when(older && !hv.busy, (row) => row.child(div().px(4).text_size(TEXT.label).text_color(t.dim).child("·"))
           .child(h_flex().id("art-latest").h(24).px(6).flex_none().items_center().rounded(RADIUS.control).cursor_pointer()
-            .text_size(TEXT.label).font_medium().text_color(t.accent).hover((s) => s.bg(t.hover)).tooltip(`v${latest}`)
+            .text_size(TEXT.label).font_medium().text_color(t.accent).hover((s) => s.bg(t.hover))
             .on_click((_e, cx) => { cx.stop_propagation(); step(null, cx); })
             .child("Latest ›")))))
       // Mark up / Done, as the viewer's bar (chat-image/artifact-bar.js) and the web's: a pointer clicking a spot; while

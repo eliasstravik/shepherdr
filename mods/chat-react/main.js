@@ -97,7 +97,6 @@ export default class EmojiPicker extends View {
       .child(h_flex().h(38).flex_none().px(PAD).gap(1).items_center().border_b(1).border_color(t.border)
         // Line icons (Lucide, cat/), never emoji in chrome; the shown category bright, the rest dim.
         .children(cats.map((c) => div().id(`cat-${c.name}`).flex_1().h(28).flex().items_center().justify_center().rounded(6).cursor_pointer()
-          .tooltip(c.name)
           .when(!searching && c.name === current, (el) => el.bg(t.selected).text_color(t.foreground))
           .when(searching || c.name !== current, (el) => el.text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground)))
           .on_click((_e, cx) => {

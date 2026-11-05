@@ -456,7 +456,6 @@ function PrView({ task }: { task: Task }) {
                       {c.url ? <OpenIcon className={clsx('size-3 shrink-0 text-fg3')} /> : null}
                     </>
                   )
-                  const tip = c.workflow ? `${word} · ${c.workflow}` : word
                   return (
                     <li key={`${c.name}${i}`}>
                       {c.url ? (

@@ -127,8 +127,6 @@ function apChip(view, t, space, pane, compact) {
   const on = Boolean(a?.on);
   return h_flex().id(`ap-${pane}`).flex_none().gap(7).items_center().cursor_pointer()
     .on_click((_e, cx) => { cx.stop_propagation(); apToggle(view, space, cx); })
-    // Tooltips are a name at most (DECISIONS.md): only the compact switch, which hides its word.
-    .when(compact, (el) => el.tooltip("Autopilot"))
     .child(knob(t, on, pane))
     .when(!compact, (el) => el
       .child(div().flex_none().font_medium().text_color(on ? t.foreground : t.muted).child("Autopilot"))
@@ -162,7 +160,6 @@ function apRunNow(view, t, space, pane, compact) {
     .when(busy, (el) => el.opacity(0.6))
     .when(!busy, (el) => el.cursor_pointer().hover((s) => s.bg(t.background).text_color(t.foreground))
       .on_click((_e, cx) => { cx.stop_propagation(); apRun(view, space, cx); }))
-    .when(compact, (el) => el.tooltip(words))
     .child(svg("mods/pane-chat/play.svg").size(11).flex_none())
     .when(!compact, (el) => el.child(words));
 }

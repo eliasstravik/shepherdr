@@ -242,7 +242,6 @@ export class PanelHost {
     return h_flex().id("thread-pin").size(24).flex_none().items_center().justify_center().rounded(RADIUS.control).cursor_pointer()
       .when(on, (el) => el.bg(t.selected)).text_color(on ? t.foreground : t.dim)
       .hover((s) => s.bg(on ? t.selected : t.hover).text_color(t.foreground))
-      .tooltip(on ? "Unpin" : "Pin")
       .on_click((_e, cx) => {
         cx.stop_propagation();
         const now = shared("tasks.pinned");
@@ -254,9 +253,9 @@ export class PanelHost {
   }
 
   // Chat | Terminal | Files | Changes | Pull request | Browser: the main chat's header switch
-  // (ui.js segmented, as mods/pane-chat). segs: { key, label, on, dead (can't open now), tip, fn }.
+  // (ui.js segmented, as mods/pane-chat). segs: { key, label, on, dead (can't open now), fn }.
   switcher(t, segs) {
-    return segmented("thread-mode", segs.map((x) => [x.key, x.label, { disabled: x.dead, tip: x.tip }]),
+    return segmented("thread-mode", segs.map((x) => [x.key, x.label, { disabled: x.dead }]),
       segs.find((x) => x.on)?.key ?? null, (v, _e, cx) => segs.find((x) => x.key === v)?.fn(cx));
   }
 
@@ -352,7 +351,7 @@ export class PanelHost {
     if (shownNow === PR && !hasPr && this.rec) cx.timer.after(0, () => showWorkerChat());
     const segs = [
       { key: "chat", label: "Chat", on: shownNow === CHAT, fn: () => showWorkerChat() },
-      { key: "term", label: "Terminal", on: shownNow === TERM, dead: !live, tip: live ? null : "Not running", fn: (cx) => this.toTerminal(addr, cx) },
+      { key: "term", label: "Terminal", on: shownNow === TERM, dead: !live, fn: (cx) => this.toTerminal(addr, cx) },
       { key: "files", label: "Files", on: shownNow === FILES, fn: pick(FILES) },
       { key: "changes", label: "Changes", on: shownNow === CHANGES, fn: pick(CHANGES) },
       ...(hasPr ? [{ key: "pr", label: "Pull request", on: shownNow === PR, fn: pick(PR) }] : []),
@@ -382,7 +381,7 @@ export class PanelHost {
       .child(div().flex_1())
       // A task's own base (herdr-task add --base), where it merges into; the folder's default isn't shown.
       .when(Boolean(this.rec?.base_set && this.rec?.base), (el) => el.child(div().id("thread-base").flex_none().max_w(160).truncate().pr(4)
-        .text_size(TEXT.label).text_color(t.muted).tooltip(`Merges into ${this.rec.base}`).child(`→ ${this.rec.base}`)))
+        .text_size(TEXT.label).text_color(t.muted).child(`→ ${this.rec.base}`)))
       // Pin / Unpin, as the task's row in the list (not an archived task's).
       .when(Boolean(this.rec && !(this.rec.archived && this.rec.state === "done")), (el) => el.child(this.pinButton(t)))
       // Review: the header's one primary button, opens the Accept card (its Accept merges first when there's something to merge).
@@ -403,8 +402,7 @@ export class PanelHost {
       .child(v_flex().flex_1().min_w(0).gap(2)
         .child(h_flex().h(22).min_w(0).gap(8).items_center()
           .when(Boolean(want?.task), (el) => el.child(div().flex_none().font_family(ID_FONT).text_size(TEXT.label).text_color(t.dim).child(want.task)))
-          .child(div().id("thread-title").flex_1().min_w(0).truncate().text_size(TEXT.title).font_medium()
-            .when(Boolean(title), (el) => el.tooltip(title)).child(title)))
+          .child(div().id("thread-title").flex_1().min_w(0).truncate().text_size(TEXT.title).font_medium().child(title)))
         .child(h_flex().h(16).min_w(0).items_center()
           .child(div().flex_1().min_w(0).when(Boolean(report), (el) => el.child(report)))));
   }

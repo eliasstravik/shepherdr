@@ -107,7 +107,7 @@ export function parse(name, target) {
 
 export const hasMention = (text) => /\[#[^\]\n]+\]\(space:[^)\s]+\)|\[@[^\]\n]+\]\(task:[^)\s]+\)/.test(String(text ?? ""));
 
-// The words a locked chip says, and why (its tooltip).
+// The words a locked chip says, and why (in its label).
 export const LOCKED = { label: "Out of reach", why: "This chat's agent can't reach that space, so it can't act on it." };
 export const UNSEEN = "That space isn't in your sidebar here.";
 export const LOCKED_TASK = "This chat's agent can't reach that task's space, so it can't act on it.";
