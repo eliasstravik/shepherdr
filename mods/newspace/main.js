@@ -1,6 +1,9 @@
 // New space, on this computer or another machine: a dialog opened by coordinator.js newSpace (the
 // + menu, the Spaces sidebar's +, a machine's + and New space there, Ctrl+Shift+N, through the tab
 // bar), which finds that machine's recent folders and home first (props { recent, machine, home }).
+// With two or more machines on and reachable, a Machine choice comes first (core/newspace.js
+// reachable, startMachine): it starts on the machine it was opened for, and another one starts the
+// folder over from that machine's home and recent folders. With one, it isn't shown.
 // It draws its own panel (frame "none"), centered and as tall as what it shows; the sizes are
 // coordinator.js NEWSPACE.
 // On another machine, folders are looked up there, and Browse… lists the field's folder's
@@ -27,14 +30,22 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Popup } from "gpui-base";
-import { props, theme, home, exec, pickFolder, closeOverlay, openOverlay, shared, setShared, focused } from "herdr";
+import { props, theme, home, exec, pickFolder, closeOverlay, openOverlay, shared, setShared, focused, machines } from "herdr";
 import { spaces, inRender } from "./live.js";
 import { dialogFooter, button, TEXT, RADIUS } from "./ui.js";
-import { NEWSPACE as K, readShepherdr, shepherdrFor, LOCAL_MACHINE, autoCoordinator } from "./coordinator.js";
+import { NEWSPACE as K, readShepherdr, shepherdrFor, LOCAL_MACHINE, autoCoordinator, recentFolders, homeOf } from "./coordinator.js";
 import * as N from "./core/newspace.js";
 
 // The suggestions' width (the field's: the dialog's 460 less its padding, the icon, Browse… and the gaps).
 const LIST_W = 290;
+// The Machine choice's width (the panel's 460 less its padding).
+const MACHINE_W = 424;
+// A machine (null: this computer) as the sidebar shows it (mods/spaces-chat sections.js machineLook):
+// its name unless renamed, its emoji or none (its server or monitor icon).
+const lookOf = (m) => { const l = shared("spaces-chat")?.machines?.[m ?? ""] ?? {}; return { name: l.name || (m ?? "This computer"), icon: l.icon ?? null }; };
+// The machines a space can be made on: this computer and each connected one (coordinator.js newSpace's choosing).
+const reachableMachines = () =>
+  N.reachable([{ key: null, on: true }, ...machines().filter((m) => m.name).map((m) => ({ key: m.name, on: m.layout === "ready" }))]);
 // The icon picker's answer (mods/spaces-chat rename.js PICK): { for (this overlay), emoji, at }.
 const PICK = "spaces-chat.iconpick";
 // The home folder paths are shown from: the dialog's machine's (props.home).
@@ -49,6 +60,8 @@ const { scratch, parent, NEW_REPO, SUBFOLDERS, WORDS: W } = N;
 export default class NewSpace extends View {
   init(_props, cx) {
     this.machine = props()?.machine ?? null; // null: this computer
+    this.machineOpen = false; // the Machine choice's list
+    this.switching = false; // another machine's folders, being found
     HOME = props()?.home ?? home();
     this.recent = (props()?.recent ?? []).filter((p) => !scratch(p));
     this.browse = null; // another machine's Browse…: { dir, rows } (rows null while listing)
@@ -94,14 +107,19 @@ export default class NewSpace extends View {
     const p = pathOf(this.text);
     if (!p || this.repo.has(p)) return;
     this.repo.set(p, undefined);
+    // Answers for a machine switched away from are dropped (switchTo makes new maps).
+    const exists = this.exists, repo = this.repo;
     cx.spawn(async (cx) => {
+      if (exists !== this.exists) return;
       if (!this.exists.has(p) || this.exists.get(p) === undefined) {
         this.exists.set(p, undefined);
         this.exists.set(p, (await exec("test", ["-d", p], this.on()).catch(() => ({ code: 1 }))).code === 0);
         cx.notify();
       }
+      if (exists !== this.exists) return;
       if (!this.exists.get(p)) { this.repo.set(p, false); return cx.notify(); }
       const r = await exec("git", ["rev-parse", "--is-inside-work-tree"], { ...this.on(), cwd: p }).catch(() => null);
+      if (repo !== this.repo) return;
       // No git to ask there: nothing offered.
       this.repo.set(p, r ? r.code === 0 && r.stdout.trim() === "true" : null);
       cx.notify();
@@ -112,6 +130,52 @@ export default class NewSpace extends View {
   offersRepo() {
     const p = this.folder();
     return N.offersRepo(p, this.repo.get(p), HOME);
+  }
+
+  // Another machine picked: its home and recent folders first, then the folder starts over there.
+  switchTo(m, cx) {
+    this.machineOpen = false;
+    if (m === this.machine || this.busy || this.switching) return cx.notify();
+    this.switching = true; this.switchingTo = m; this.listOpen = false; this.browse = null; this.hi = -1; this.error = "";
+    cx.notify();
+    cx.spawn(async (cx) => {
+      const [recent, at] = await Promise.all([recentFolders(m).catch(() => []), homeOf(m).catch(() => null)]);
+      this.switching = false;
+      if (!at) { this.error = `Couldn't reach ${lookOf(m).name}.`; return cx.notify(); }
+      this.machine = m; HOME = at;
+      this.recent = recent.filter((p) => !scratch(p));
+      this.extra = []; this.exists = new Map(this.recent.map((p) => [p, true])); this.repo = new Map(); this.makeRepo = true;
+      this.text = tilde(this.defaultFolder());
+      this.input.set_value(this.text);
+      this.check(cx);
+      this.input.focus();
+      cx.notify();
+    });
+  }
+
+  // The Machine choice: a field-like button with the machine's icon and name, its list under it.
+  machineChoice(t, keys) {
+    const look = lookOf(this.machine);
+    const iconOf = (m, l) => (l.icon ? div().w(14).flex_none().flex().justify_center().text_size(12).child(l.icon)
+      : svg(`mods/workspace-chrome/${m ? "server" : "monitor"}.svg`).size(14).flex_none().text_color(t.muted));
+    const field = h_flex().id("machine").w_full().h(K.field).px(10).gap(8).items_center().rounded(RADIUS.control).border(1)
+      .border_color(this.machineOpen ? t.accent : t.input).bg(t.background).text_color(t.foreground).cursor_pointer()
+      .hover((s) => s.bg(t.hover))
+      .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); this.listOpen = false; this.browse = null; this.machineOpen = !this.machineOpen; cx.notify(); })
+      .child(iconOf(this.machine, look))
+      .child(div().flex_1().min_w(0).truncate().child(this.switching ? `${lookOf(this.switchingTo).name}…` : look.name))
+      .child(svg("mods/workspace-chrome/chevron-down.svg").size(12).flex_none().text_color(t.muted));
+    return Popup.new("machine-list", field).w_full().anchor("top_left")
+      .when(this.machineOpen, (el) => el.content(v_flex().id("machine-rows").w(MACHINE_W).mt(4).p(4).rounded(8).border(1).border_color(t.border).bg(t.popover).shadow_lg().text_size(13)
+        .children(keys.map((m, i) => {
+          const l = lookOf(m);
+          return h_flex().id(`machine-${i}`).h(K.row).flex_none().px(9).gap(10).rounded(6).items_center().cursor_pointer()
+            .hover((s) => s.bg(t.hover))
+            .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); this.switchTo(m, cx); })
+            .child(iconOf(m, l))
+            .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(l.name))
+            .child(div().size(14).flex_none().when(m === this.machine, (el) => el.child(svg("mods/workspace-chrome/check.svg").size(14).text_color(t.foreground))));
+        }))));
   }
 
   // Where exec runs: the dialog's machine.
@@ -249,6 +313,7 @@ export default class NewSpace extends View {
   // Esc closes the suggestions first, then the dialog. Up and Down open them and walk them.
   key(e, cx) {
     if (e.key === "escape") {
+      if (this.machineOpen) { this.machineOpen = false; cx.stop_propagation(); return cx.notify(); }
       if (!this.listOpen) return this.close();
       this.listOpen = false; this.browse = null; this.hi = -1; cx.stop_propagation(); cx.notify(); return;
     }
@@ -312,6 +377,9 @@ export default class NewSpace extends View {
     // Under the field, one quiet line: a folder that isn't there yet is made on Create. Its room is
     // kept, so the dialog keeps its height either way; an error goes beside the buttons, in red.
     const note = field && this.exists.get(field) === false ? W.missing : "";
+    // The machines a space can be made on; the Machine choice shows for two or more.
+    const keys = reachableMachines();
+    const choosing = N.choosesMachine(keys);
     const input = Input.new(this.input).w_full().h(K.field).px(10).items_center().rounded(RADIUS.control).border(1)
       .border_color(this.focused ? t.accent : t.input).bg(t.background).text_color(t.foreground);
     // The suggestions hang under the field in the window's top layer, only while they're open.
@@ -321,10 +389,14 @@ export default class NewSpace extends View {
         .when(Boolean(empty), (el) => el.child(div().h(K.row).flex_none().px(9).flex().items_center().text_color(t.dim).child(empty)))));
     const panel = v_flex().id("newspace").w_full().flex_none().p(K.pad).rounded(10).border(1).border_color(t.border).bg(t.popover).shadow_lg().text_size(13)
       .on_key_down((e, cx) => this.key(e, cx))
-      .on_mouse_down("left", (_e, cx) => { if (this.listOpen) { this.listOpen = false; this.browse = null; this.hi = -1; cx.notify(); } })
+      .on_mouse_down("left", (_e, cx) => { if (this.listOpen || this.machineOpen) { this.listOpen = false; this.machineOpen = false; this.browse = null; this.hi = -1; cx.notify(); } })
       .child(h_flex().h(K.title).flex_none().gap(6).items_baseline().text_size(TEXT.title).font_semibold().text_color(t.foreground).child(W.title)
-        .when(Boolean(this.machine), (el) => el.child(div().min_w(0).truncate().font_normal().text_color(t.dim).child(W.on(this.machine)))))
+        .when(Boolean(this.machine) && !choosing, (el) => el.child(div().min_w(0).truncate().font_normal().text_color(t.dim).child(W.on(lookOf(this.machine).name)))))
       .child(div().h(K.section).flex_none())
+      .when(choosing, (el) => el.child(div().h(K.label).flex_none().text_size(TEXT.label).text_color(t.dim).child(W.machine))
+        .child(div().h(K.gap).flex_none())
+        .child(this.machineChoice(t, keys))
+        .child(div().h(K.section).flex_none()))
       .child(div().h(K.label).flex_none().text_size(TEXT.label).text_color(t.dim).child(W.label))
       .child(div().h(K.gap).flex_none())
       // The icon (as the Rename dialog's), the field and Browse…: the desktop's own folder picker
@@ -342,7 +414,7 @@ export default class NewSpace extends View {
       .child(this.repoLine(t, folder))
       .child(div().h(K.section).flex_none())
       .child(dialogFooter({ onCancel: () => this.close(), note: this.error, error: true,
-        primary: { id: "create", label: this.busy ? W.creating : W.create, disabled: !folder || this.busy, onClick: (_e, cx) => this.create(cx) } }));
+        primary: { id: "create", label: this.busy ? W.creating : W.create, disabled: !folder || this.busy || this.switching, onClick: (_e, cx) => this.create(cx) } }));
     // The overlay is the panel at its tallest; the panel sits in its middle.
     return v_flex().size_full().justify_center().child(panel);
   }

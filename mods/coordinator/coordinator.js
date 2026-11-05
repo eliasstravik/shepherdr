@@ -202,12 +202,16 @@ export async function openCoordinator(space, show = true, settings = null) {
 // It finds that machine's recent folders and home first, so the dialog opens at the height its
 // content needs, its paths shown from that home.
 export async function newSpace(space) {
-  const machine = space?.machine ?? null;
+  // The machine asked for, else (it can't be reached) this computer, as core/newspace.js startMachine: the dialog's
+  // Machine choice offers the rest, shown while another machine is connected.
+  const asked = space?.machine ?? null;
+  const machine = asked && !machineReady(asked) ? null : asked;
+  const choosing = machines().some((m) => m.name && m.layout === "ready");
   const [recent, at] = await Promise.all([recentFolders(machine).catch(() => []), homeOf(machine).catch(() => null)]);
   if (!at) return toast({ title: `Couldn't reach ${machine}`, body: "Try New space again once it's connected.", level: "error" });
   // The dialog draws its own panel (frame "none"), centered and as tall as what it shows now:
   // the overlay is the panel at its tallest.
-  openOverlay({ mod: "newspace", kind: "dialog", frame: "none", width: 460, height: newSpaceHeight(recent.length), props: { recent, machine, home: at } });
+  openOverlay({ mod: "newspace", kind: "dialog", frame: "none", width: 460, height: newSpaceHeight(recent.length, choosing), props: { recent, machine, home: at } });
 }
 
 // A machine's home folder (null: this computer's).
@@ -224,9 +228,11 @@ export async function homeOf(machine = null) {
 // with the coordinator on; off, the dialog draws itself shorter in its middle.
 export const NEWSPACE = { pad: 18, title: 20, label: 16, gap: 4, field: 32, row: 31, line: 32, buttons: 32, section: 16 };
 export const NEWSPACE_SHOWN = 5;
-export function newSpaceHeight(n) {
-  const k = NEWSPACE, rows = 1 + Math.min(n, NEWSPACE_SHOWN) + 1;
-  return 2 * k.pad + k.title + k.section + k.label + k.gap + k.field + k.gap + rows * k.row + k.section + 3 * k.line + k.section + k.buttons;
+// choosing: the Machine choice shows (its label, field and the space under it), and another machine's folders may be
+// more, so the rows are at their most.
+export function newSpaceHeight(n, choosing = false) {
+  const k = NEWSPACE, rows = 1 + Math.min(choosing ? NEWSPACE_SHOWN : n, NEWSPACE_SHOWN) + 1;
+  return (choosing ? k.label + k.gap + k.field + k.section : 0) + 2 * k.pad + k.title + k.section + k.label + k.gap + k.field + k.gap + rows * k.row + k.section + 3 * k.line + k.section + k.buttons;
 }
 
 // A machine's folders people worked in (null: this computer's), newest first, at most 8: its spaces'
