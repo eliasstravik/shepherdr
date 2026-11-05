@@ -5,7 +5,7 @@
 // earlier…). Their words and rules come from core/chat-view.js, as the window's do.
 import clsx from 'clsx'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { ChatBubbleLeftEllipsisIcon, CheckIcon as TickIcon, ChevronDownIcon, ChevronRightIcon, PaperClipIcon } from '@heroicons/react/16/solid'
+import { ArrowRightIcon, ChatBubbleLeftEllipsisIcon, CheckIcon as TickIcon, ChevronDownIcon, ChevronRightIcon, PaperClipIcon } from '@heroicons/react/16/solid'
 import { act, has, openTask, registry } from '@client/kernel.ts'
 import { AutopilotIcon, CheckIcon, CopyIcon, PageIcon, ReplyIcon, SmileIcon, TermIcon } from '@client/ui.tsx'
 import * as CV from '@core/chat-view.js'
@@ -15,10 +15,11 @@ import { ForkIcon, openPicker, RewindIcon } from '@plugins/reactions/client.tsx'
 import { Markdown } from './markdown.tsx'
 import { jumpTo, startReply } from './reply.ts'
 
-const { WORDS, clock, bandActs, bandOrder, imagesLine, fitThumbs, THUMB_GAP, questionsBelow } = CV as unknown as {
+const { WORDS, clock, initialOf, bandActs, bandOrder, imagesLine, fitThumbs, THUMB_GAP, questionsBelow } = CV as unknown as {
   WORDS: Record<string, string>
   questionsBelow: (n: number) => string
   clock: (at?: number) => string
+  initialOf: (name: string) => string
   bandActs: (side: 'user' | 'agent', text?: string, o?: { from?: string | null; fork?: boolean }) => string[]
   bandOrder: (side: 'user' | 'agent', acts: string[], o?: { time?: boolean; react?: boolean }) => string[]
   imagesLine: (n: number) => string
@@ -133,27 +134,49 @@ function Opens({ label, text, bare, children }: { label: ReactNode; text?: strin
   )
 }
 
-/** a launch brief ("Task brief"): its label, then its words when opened; a message another agent sent: FromRow */
+/** a launch brief ("Task brief"): its label, then its words when opened; a message between agents: AgentRow */
 export function BriefRow({ msg }: { msg: Message }) {
-  if (msg.brief!.from) return <FromRow from={msg.brief!.from} text={msg.text} />
+  if (msg.brief!.from) return <AgentRow from={msg.brief!.from} to={msg.brief!.to} text={msg.text} at={msg.at} />
   return <Opens label={msg.brief!.label} text={msg.text} bare={msg.brief!.bare} />
 }
 
-/** a message another agent sent (SHEP-12): still one compact row, but a message's: a speech bubble in the accent, who
- *  sent it a step stronger than a tools row, then its first words; it opens to the whole message in a soft bubble */
-function FromRow({ from, text }: { from: string; text?: string }) {
+/** a name's round initial, as a group chat shows who speaks: another agent's in the accent, the chat's own agent's
+ *  (a message it sent) neutral */
+function Avatar({ name, own }: { name: string; own?: boolean }) {
+  return (
+    <span aria-hidden className={clsx('grid size-5 shrink-0 place-items-center rounded-full text-[0.625rem] font-semibold',
+      own ? 'bg-[color-mix(in_srgb,var(--fg)_10%,transparent)] text-fg2' : 'bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] text-accent')}>
+      {initialOf(name)}
+    </span>
+  )
+}
+
+/** agent to agent, as a group chat (SHEP-12, SHEP-27): a message another agent sent this one ("Assistant on Mac mini ·
+ *  Home") or one this chat's agent sent another ("Assistant → SHEP-4"). One quiet row like a news line: a speech
+ *  bubble in the accent, who (→ whom) a step stronger, its first words, its time; it opens in place to the whole
+ *  message as a speech bubble from that agent, its initial beside the name, and closes again from the same line */
+function AgentRow({ from, to, text, at }: { from: string; to?: string; text?: string; at?: number }) {
   const [open, setOpen] = useState(false)
   const first = String(text ?? '').split('\n').find((l) => l.trim()) ?? ''
+  const time = at ? clock(at) : ''
   return (
-    <div data-from className="flex w-full flex-col">
+    <div data-from={to ? undefined : from} data-to={to} className="flex w-full flex-col">
       <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}
         className="flex w-full min-w-0 items-center gap-1.5 rounded-[7px] px-1.5 py-0.5 text-left text-[0.75rem]/5 text-fg2 hover:bg-hover phone:py-1.5 phone:text-[0.8125rem]/5">
-        <ChatBubbleLeftEllipsisIcon aria-hidden className="size-4 shrink-0 fill-accent" />
+        {open ? <Avatar name={from} own={!!to} /> : <ChatBubbleLeftEllipsisIcon aria-hidden className="size-4 shrink-0 fill-accent" />}
         <span className="shrink-0 font-medium text-fg"><span className="sr-only">Message from </span>{from}</span>
-        {!open && first ? <span className="min-w-0 flex-1 truncate">{first}</span> : null}
+        {to ? (
+          <>
+            <ArrowRightIcon aria-hidden className="size-3 shrink-0 fill-fg3" />
+            <span className="sr-only"> to </span>
+            <span className="shrink-0 font-medium text-fg">{to}</span>
+          </>
+        ) : null}
+        {!open && first ? <span className="min-w-0 flex-1 truncate">{first}</span> : <span className="flex-1" />}
+        {time ? <span className="shrink-0 text-fg3 tabular-nums">{time}</span> : null}
       </button>
       {open ? (
-        <div className="mt-1 mb-1 ml-[26px] max-w-[min(100%,640px)] self-start rounded-[14px] rounded-tl-[4px] bg-bubble px-3 py-2 text-[0.8125rem] text-fg phone:ml-[24px] phone:text-[0.9375rem]">
+        <div className="mt-1 mb-1 ml-8 max-w-[min(100%_-_2rem,640px)] self-start rounded-[14px] rounded-tl-[4px] bg-bubble px-3 py-2 text-[0.8125rem] text-fg phone:text-[0.9375rem]">
           <Markdown text={text ?? ''} />
         </div>
       ) : null}

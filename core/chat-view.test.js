@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { WORDS, clock, bandActs, bandOrder, senderName, briefLabel, newsWords, newsTimeline, resolveArtifacts, fitThumbs, dayLabel, imagesLine, questionsBelow, notSent, unsigned, elapsed, reportMsg, doingWords, ownWords, outsideTerminal } from "./chat-view.js";
+import { WORDS, clock, bandActs, bandOrder, senderName, briefLabel, newsWords, newsTimeline, resolveArtifacts, fitThumbs, dayLabel, imagesLine, questionsBelow, notSent, unsigned, elapsed, reportMsg, doingWords, ownWords, outsideTerminal, fromName, sentTo, selfName, initialOf } from "./chat-view.js";
 
 const ROOT = join(import.meta.dir, "..");
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
@@ -161,5 +161,28 @@ describe("ownWords", () => {
   test("one send claims one message", () => {
     const users = [{ id: 1, text: "yes", from: "mac/ppid:1", at: 10_000 }, { id: 2, text: "yes", from: "mac/ppid:9", at: 11_000 }];
     expect(ownWords(users, [{ text: "yes", at: 9_000 }], matches)).toEqual([1]);
+  });
+});
+
+describe("agent to agent as a group chat (SHEP-27)", () => {
+  test("another Assistant is named by its machine and space; this machine's unsaid", () => {
+    const x = { from: "mac/t13", assistant: { machine: "mac", space: "Home" }, text: "hi" };
+    expect(fromName(x, () => "nope", { machineName: (m) => (m === "mac" ? "Mac mini" : null) })).toBe("Assistant on Mac mini · Home");
+    expect(fromName(x, () => "nope", { here: "mac" })).toBe("Assistant · Home");
+    expect(fromName({ from: "t3", text: "x" }, (f) => `name of ${f}`)).toBe("name of t3");
+    expect(briefLabel(x, 5, { machineName: () => "Mac mini" })).toBe("Message from Assistant on Mac mini · Home");
+  });
+  test("whom a sent message went to", () => {
+    const sender = (a) => ({ t10s: "SHEP-4", "mac/t13": "Another agent on mac" }[a] ?? "Another agent");
+    expect(sentTo({ to: "t10s", how: "hc" }, sender)).toBe("SHEP-4");
+    expect(sentTo({ to: "mac/t13", how: "assistant" }, sender)).toBe("Assistant on mac");
+    expect(sentTo({ to: "Home", how: "assistant" }, sender)).toBe("Assistant · Home");
+  });
+  test("who the chat's own agent is, and initials", () => {
+    expect(selfName({ assistant: true })).toBe("Assistant");
+    expect(selfName({ task: "SHEP-4" })).toBe("SHEP-4");
+    expect(selfName({ kind: "codex" })).toBe("Codex");
+    expect(initialOf("SHEP-4")).toBe("S");
+    expect(initialOf("Assistant on Mac mini · Home")).toBe("A");
   });
 });

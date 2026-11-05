@@ -31,7 +31,7 @@ import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names, 
 import { BgJobs } from "./core/bg-jobs.js";
 import { words, howAnswered } from "./core/asks.js";
 // The rows' words and rules the web app's chat draws by too (core/chat-view.js).
-import { WORDS, clock, senderName, briefLabel, newsWords, resolveArtifacts, unsigned, ownWords, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
+import { WORDS, clock, senderName, briefLabel, fromName, sentTo, selfName, initialOf, newsWords, resolveArtifacts, unsigned, ownWords, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
 // Sending the person's words, as the web app does (core/send.js).
 import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine, mentionedIn, sendTyped } from "./core/send.js";
 // hc whose send goes as the person, with no caller: never "Another agent" on another machine (SHEP-3, core/person.js).
@@ -2518,6 +2518,12 @@ export default class Chat extends View {
       // An Autopilot wake: one quiet line, never its words (core/chat-log.js pilotLine).
       if (x.kind === "pilot") { dated(x.at); out.push({ kind: "pilot", id: x.id, text: pilotLine(x) }); continue; }
       if (x.kind !== "mark") dated(x.at);
+      // A message this agent sent another (SHEP-27): "Assistant → SHEP-4", drawn as another agent's message is.
+      if (x.kind === "sent") {
+        if (x.text) out.push({ kind: "brief", id: x.id, label: `Message to ${sentTo(x, (a) => this.sender(a))}`, text: unsigned(x.text), at: x.at,
+          who: selfName({ assistant: this.role === "coordinator" || assistant(this.t), task: this.taskRef, kind: this.kind }), to: sentTo(x, (a) => this.sender(a)) });
+        continue;
+      }
       if (x.kind === "artifact") {
         // A published artifact: its card (the latest publish of it; earlier ones a line), or a
         // quiet line while the registry doesn't list it yet.
@@ -2539,7 +2545,7 @@ export default class Chat extends View {
         // A fresh start's handover says it all in its label.
         const restart = /^<restart>/.test(x.text ?? "");
         // Another agent's message (who: its sender) is drawn as a message (SHEP-12).
-        out.push({ kind: "brief", id: x.id, label: this.brief(x, i), text: restart ? x.text.replace(/<\/?restart>/g, "") : x.from ? unsigned(x.text) : x.text, bare: restart, ...(x.from ? { who: this.sender(x.from, x.text) } : {}) });
+        out.push({ kind: "brief", id: x.id, label: this.brief(x, i), text: restart ? x.text.replace(/<\/?restart>/g, "") : x.from ? unsigned(x.text) : x.text, bare: restart, ...(x.from ? { who: fromName(x, (f, t) => this.sender(f, t), this.names()), at: x.at } : {}) });
         continue;
       }
       if (x.kind === "user") {
@@ -2688,7 +2694,12 @@ export default class Chat extends View {
   // the message with (text: "From HERD-76: …"), else "Another agent".
   sender(from, text = null) {
     // core/chat-view.js: the web app's chat names senders the same way.
-    return senderName(from, text, { find: (a) => terminals().find((x) => x.address === a), machine:this.machine, taskOf: (a) => this.workerTasks().get(a)?.ref ?? null, here: coreName() });
+    return senderName(from, text, { find: (a) => terminals().find((x) => x.address === a), machine:this.machine, taskOf: (a) => this.workerTasks().get(a)?.ref ?? null, here: coreName(), machineName: this.names().machineName });
+  }
+
+  // How another Assistant's machine is named (core/chat-view.js fromName): the person's name for it, as the sidebar's.
+  names() {
+    return { machineName: (m) => shared("spaces-chat")?.machines?.[m]?.name || null, here: this.machine ?? coreName() };
   }
 
   // Whose ask a card shows: the CLI's short name ("Claude asks").
@@ -2708,7 +2719,7 @@ export default class Chat extends View {
   // for a task (herdr-task); and any message another agent sent with hc.
   brief(x, i) {
     // core/chat-view.js: the web app's chat labels them the same way.
-    return briefLabel(x, i, { start: this.start, template: this.t?.template ?? null, task: Boolean(this.t?.labels?.["herdr.task"]), sender: (f, t) => this.sender(f, t) });
+    return briefLabel(x, i, { start: this.start, template: this.t?.template ?? null, task: Boolean(this.t?.labels?.["herdr.task"]), sender: (f, t) => this.sender(f, t), ...this.names() });
   }
 
   // What a row's height depends on: measured once per key and width.
@@ -2855,15 +2866,24 @@ export default class Chat extends View {
           .child(div().min_w(0).truncate().text_color(t.muted).child(k.title)))), 18, 3);
       case "brief": {
         const open = this.opened.has(x.id);
-        // Another agent's message (SHEP-12): a speech bubble in the accent, who sent it a step stronger than a tools
-        // row, then its first words; open, the whole message in a soft bubble under it.
-        if (x.who) return col(v_flex().w_full().px(6).py(QUIET_PY).rounded(7).cursor_pointer().hover((s) => s.bg(t.hover))
-          .child(h_flex().gap(6).items_center().text_size(12).text_color(t.muted)
-            .child(svg("mods/chat/message.svg").size(14).flex_none().text_color(t.accent))
-            .child(div().flex_none().font_medium().text_color(t.foreground).child(x.who))
-            .when(!open, (el) => el.child(div().flex_1().min_w(0).truncate().child(String(x.text ?? "").split("\n").find((l) => l.trim()) ?? ""))))
-          .when(open, (el) => el.child(h_flex().w_full().pl(20).pt(6).pb(2).child(div().max_w(most).px(12).py(8).rounded(12).bg(t.raised)
-            .text_size(13).text_color(t.foreground).child(TextView.markdown(`${pre}chat-brief-${x.id}`, x.text || " ").selectable(true))))), 12, 0);
+        // Agent to agent, as a group chat (SHEP-12, SHEP-27): a message another agent sent ("Assistant on Mac mini ·
+        // Home") or this one sent another ("Assistant → SHEP-4"). One quiet row like a news line: a speech bubble in the
+        // accent, who (→ whom) a step stronger, its first words, its time; open, the sender's initial in place of the
+        // icon and the whole message as a speech bubble from it, closed again from the same line.
+        if (x.who) {
+          const avatar = div().size(20).flex_none().rounded(10).flex().items_center().justify_center().text_size(10).font_semibold()
+            .bg(x.to ? t.foreground + "1a" : t.accent + "2e").text_color(x.to ? t.muted : t.accent).child(initialOf(x.who));
+          return col(v_flex().w_full().px(6).py(QUIET_PY).rounded(7).cursor_pointer().hover((s) => s.bg(t.hover))
+            .child(h_flex().h(20).gap(6).items_center().text_size(12).text_color(t.muted)
+              .child(open ? avatar : svg("mods/chat/message.svg").size(14).flex_none().text_color(t.accent))
+              .child(div().flex_none().font_medium().text_color(t.foreground).child(x.who))
+              .when(Boolean(x.to), (el) => el.child(svg("mods/chat/arrow-right.svg").size(12).flex_none().text_color(t.dim))
+                .child(div().flex_none().font_medium().text_color(t.foreground).child(x.to)))
+              .child(div().flex_1().min_w(0).truncate().child(open ? "" : String(x.text ?? "").split("\n").find((l) => l.trim()) ?? ""))
+              .when(x.at > 1e12, (el) => el.child(div().flex_none().text_color(t.dim).child(clock(x.at)))))
+            .when(open, (el) => el.child(h_flex().w_full().pl(26).pt(6).pb(2).child(div().max_w(most).px(12).py(8).rounded(12).bg(t.raised)
+              .text_size(13).text_color(t.foreground).child(TextView.markdown(`${pre}chat-brief-${x.id}`, x.text || " ").selectable(true))))), 12, 0);
+        }
         return col(v_flex().w_full().px(6).py(QUIET_PY).rounded(7).cursor_pointer().hover((s) => s.bg(t.hover))
           .child(h_flex().gap(6).items_center().text_size(12).text_color(t.dim)
             .child(svg(`mods/workspace-chrome/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none())
