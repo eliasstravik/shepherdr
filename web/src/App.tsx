@@ -174,7 +174,7 @@ export function Brand() {
 /** the brand row's search: Jump (core keys' Ctrl+K), as the window's magnifier */
 function SearchButton() {
   return (
-    <IconButton label="Search" title={`Search · ${shortcut(MOD, 'K')}`} onClick={() => setUI({ search: true, searchScope: undefined, drawer: false })}>
+    <IconButton label="Search" onClick={() => setUI({ search: true, searchScope: undefined, drawer: false })}>
       <SearchIcon className={ic} />
     </IconButton>
   )
@@ -347,7 +347,7 @@ function PaneWhere({ runs, where }: { runs: string; where?: string }) {
       {runs ? <span className="shrink-0">{runs}</span> : null}
       {runs && where ? <span className="shrink-0 px-1 text-fg3">·</span> : null}
       {where ? (
-        <span className="min-w-0 truncate text-fg3 [direction:rtl]" title={where}>
+        <span className="min-w-0 truncate text-fg3 [direction:rtl]">
           <bdi>{where}</bdi>
         </span>
       ) : null}
@@ -462,7 +462,7 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
   const sub = (
     <span className="flex min-w-0 items-center gap-1.5">
       <span className="shrink-0 font-mono text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{ref}</span>
-      {doing ? <span className="flex min-w-0 items-center gap-1.5"><span aria-hidden className="text-fg3">·</span>{doing}</span> : task.base ? <span className="min-w-0 truncate" title={`Merges into ${task.base}`}><span aria-hidden className="text-fg3">· </span>→ {task.base}</span> : null}
+      {doing ? <span className="flex min-w-0 items-center gap-1.5"><span aria-hidden className="text-fg3">·</span>{doing}</span> : task.base ? <span className="min-w-0 truncate"><span aria-hidden className="text-fg3">· </span>→ {task.base}</span> : null}
     </span>
   )
   // in focus it sits at the window's edge: no line there
@@ -516,7 +516,7 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
           </>
         ) : null}
         {/* in a narrow column (the side's) Back is its arrow alone, so the title keeps the room */}
-        <button type="button" onClick={back} aria-label="Tasks" title="Tasks" className="press-dim relative inline-flex h-7 shrink-0 items-center gap-0.5 rounded-full px-1.5 text-[0.8125rem] text-fg2 after:absolute after:-inset-y-2 after:inset-x-0 hover:bg-hover hover:text-fg @lg/task:pr-2.5">
+        <button type="button" onClick={back} aria-label="Tasks" className="press-dim relative inline-flex h-7 shrink-0 items-center gap-0.5 rounded-full px-1.5 text-[0.8125rem] text-fg2 after:absolute after:-inset-y-2 after:inset-x-0 hover:bg-hover hover:text-fg @lg/task:pr-2.5">
           <BackIcon className={ic} />
           <span aria-hidden className="hidden @lg/task:inline">Tasks</span>
         </button>
@@ -544,7 +544,7 @@ function TaskTop({ back, task, sub, tools }: { back: () => void; task: Task; sub
         <BackIcon className={ic} />
       </RoundButton>
       <Dot s={task.status} p={task.report?.progress} halo />
-      <button type="button" aria-expanded={whole} title={whole ? undefined : task.name} onClick={() => setWhole(!whole)} className="min-w-0 flex-1 py-0.5 text-left">
+      <button type="button" aria-expanded={whole} onClick={() => setWhole(!whole)} className="min-w-0 flex-1 py-0.5 text-left">
         <span className={clsx('block text-base/5 font-semibold', whole ? 'break-words' : 'truncate')}>{task.name}</span>
         <span className="mt-0.5 block text-[0.8125rem]/[18px] text-fg2">{sub}</span>
       </button>

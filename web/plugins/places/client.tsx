@@ -330,7 +330,7 @@ function usePlaceRow({ p, snap, where }: { p: Place; snap: Snapshot; where?: str
     // it is open or something is new
     mark: (
       <>
-        <span aria-hidden data-autopilot={pilot || undefined} data-waking={waking || undefined} title={pilot ? (waking ? 'Autopilot waking' : 'Autopilot on') : undefined}
+        <span aria-hidden data-autopilot={pilot || undefined} data-waking={waking || undefined}
           className={clsx('pilot-mark grid size-3.5 shrink-0 place-items-center', !pilot && 'invisible', waking ? 'text-work' : 'text-fg3')}>
           <AutopilotIcon className="size-3" />
         </span>
@@ -500,7 +500,6 @@ function RenameBox({ name, problem, onSave, onCancel }: { name: string; problem:
         name="place-name"
         aria-label={`New name for ${name}`}
         aria-invalid={!!bad || undefined}
-        title={bad}
         enterKeyHint="done"
         autoComplete="off"
         autoCapitalize="none"
@@ -828,7 +827,6 @@ function AddButton({ machine, name, label }: { machine: string; name: string; la
       <button
         type="button"
         aria-label={label ?? `New space or section on ${name}`}
-        title="New space or section"
         aria-haspopup="menu"
         aria-expanded={!!menu.open}
         onClick={(e) => {

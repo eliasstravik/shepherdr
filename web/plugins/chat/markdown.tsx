@@ -180,7 +180,6 @@ function WithMentions({ text, chat }: { text: string; chat: string }) {
       chip.className = `${CHIP} bg-accent/12 text-accent hover:bg-accent/20`
     } else {
       chip.setAttribute('data-mention', 'locked')
-      chip.setAttribute('title', s.why)
       chip.setAttribute('aria-label', `${name}: ${s.why}`)
       chip.className = `${CHIP} bg-fg/6 text-fg3`
       chip.innerHTML = LOCK
@@ -233,7 +232,6 @@ function taskChip(ref: string, s: ReturnType<typeof taskStateOf>) {
     chip.append(dot)
   } else {
     chip.setAttribute('data-mention', 'locked')
-    chip.setAttribute('title', s.why)
     chip.setAttribute('aria-label', `${ref}: ${s.why}`)
     chip.className = `${TASK_CHIP} bg-fg/6 text-fg3`
     chip.innerHTML = LOCK.replace(' mr-1', '')

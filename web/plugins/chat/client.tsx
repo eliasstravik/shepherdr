@@ -2104,7 +2104,7 @@ function Pending({ f, chatKey, onRemove }: { f: { name: string; path?: string };
           <img src={fileUrl(chatKey, path)} alt={f.name} draggable={false} onError={() => setBroken(true)} className="size-full object-cover" />
         </button>
       ) : (
-        <div title={f.name} className="flex h-full w-[184px] items-center gap-2.5 rounded-box bg-bubble pr-8 pl-2.5 phone:w-[200px]">
+        <div className="flex h-full w-[184px] items-center gap-2.5 rounded-box bg-bubble pr-8 pl-2.5 phone:w-[200px]">
           <span className="grid size-10 shrink-0 place-items-center rounded-[calc(var(--box-radius)-var(--spacing)*2.5)] bg-bg text-fg2">
             <FileIcon className={ic} />
           </span>

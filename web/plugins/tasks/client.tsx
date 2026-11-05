@@ -74,7 +74,7 @@ import * as TK from '@core/tasks.js'
 import * as ND from '@core/needs.js'
 
 // the window's words for a row (core/tasks.js, core/needs.js): every second line starts with a capital and is at most
-// 40 characters, cut at a word (the whole of it on hover); an automation's next run as "9:00", "Tue 9:00", "Nov 12 9:00"
+// 40 characters, cut at a word (the whole of it in the row's label); an automation's next run as "9:00", "Tue 9:00", "Nov 12 9:00"
 const capital = TK.capital as (s: string) => string
 const fit = ND.fit as (s: string) => string
 const day = TK.day as (ms: number) => string
@@ -147,10 +147,10 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
 /**
  * One row, as the window's (mods/tasks line()): the glyph, the dim id in its fixed column, then the title, which owns
  * the first line. Anything else goes on a second line that starts where the title does: why it needs you or what its
- * agent does (at most 40 characters, the whole of it on hover), then at its end where it is and the button (Review),
+ * agent does (at most 40 characters; the whole of it in its button's label), then at its end where it is and the button (Review),
  * so where it is never sits under the button. A row with nothing to say under its title is one line, where it is dim
  * at its end. `meta`: a short note at the first line's end (an automation's next run). `left`: the minutes left, small
- * under the glyph. `tip`: the title's hover (an automation's error).
+ * under the glyph. `tip`: more for its button's label only (an automation's error).
  */
 function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, dim, meta, where, action, tip, onOpen, menu, children }: {
   flip?: string; sel?: boolean; kb?: boolean; glyph: ReactNode; ref_?: string; title: string; sub?: string; left?: string; dim?: boolean; meta?: string
@@ -170,8 +170,7 @@ function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, di
         <button
           type="button"
           aria-current={sel || undefined}
-          aria-label={`${ref_ ? `${ref_} ` : ''}${title}${said ? `, ${said}` : ''}${meta ? `, ${meta}` : ''}`}
-          title={[tip, shown !== said ? said : undefined].filter(Boolean).join(' · ') || title}
+          aria-label={`${ref_ ? `${ref_} ` : ''}${title}${said ? `, ${said}` : ''}${meta ? `, ${meta}` : ''}${tip ? `, ${tip}` : ''}`}
           onClick={onOpen}
           className="absolute inset-0 cursor-pointer rounded-[inherit] outline-none keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)]"
         />
@@ -377,8 +376,8 @@ function autoWhere(snap: Snapshot, a: Automation, names: { machine: boolean; pro
 }
 
 /** An automation (herdr-task auto), as the window's row (mods/tasks autoRow): its mark, its name (no id), when it runs
- *  next at the first line's end; on the second line why it won't run as planned (Didn't start, the error on the
- *  title's hover; Paused). A tap opens the task it added last. Only agents add or change automations. */
+ *  next at the first line's end; on the second line why it won't run as planned (Didn't start, the error in its
+ *  label; Paused). A tap opens the task it added last. Only agents add or change automations. */
 function AutoRow({ a, where }: { a: Automation; where?: string }) {
   return (
     <Line

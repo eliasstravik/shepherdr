@@ -182,7 +182,7 @@ export function MentionList({ items, sel, pick, from }: { items: Item[]; sel: nu
           {head(title)}
           {g.map((i) => {
             if (i.kind === 'lockedTask') return (
-              <div key={i.key} role="option" aria-disabled="true" aria-selected={false} title={M.LOCKED_TASK} className="flex min-w-0 items-center gap-2.5 rounded-row px-2.5 py-1 text-fg3 phone:py-1.5">
+              <div key={i.key} role="option" aria-disabled="true" aria-selected={false} aria-label={`${refOf(i.task.id)} ${i.task.name}: ${M.LOCKED_TASK}`} className="flex min-w-0 items-center gap-2.5 rounded-row px-2.5 py-1 text-fg3 phone:py-1.5">
                 <span className="grid w-6 shrink-0 place-items-center phone:w-7"><LockClosedIcon className="size-3" aria-hidden="true" /></span>
                 <span className="shrink-0 font-medium tabular-nums">{refOf(i.task.id)}</span>
                 <TitleWhere title={i.task.name} where={i.where} />
@@ -262,7 +262,7 @@ export function Chip({ m, chatKey }: { m: Mention; chatKey: string }) {
     </>
   )
   if (!ok) return (
-    <span data-mention="locked" title={why} aria-label={`${m.name}: ${why}`}
+    <span data-mention="locked" aria-label={`${m.name}: ${why}`}
       className="inline-flex max-w-full items-baseline gap-1 rounded-md bg-fg/6 px-1.5 align-baseline whitespace-nowrap text-fg3">
       <LockClosedIcon className="size-3 shrink-0 translate-y-[0.1em] self-center" aria-hidden="true" />
       <span className="truncate">{label}</span>
@@ -313,7 +313,7 @@ export function TaskChip({ m, chatKey }: { m: TaskMention; chatKey: string }) {
   const got = useReach(chatKey)
   const { task, ok, why } = taskStateOf(m, snap, got, chatKey)
   if (!ok) return (
-    <span data-mention="locked" title={why} aria-label={`${m.ref}: ${why}`} className={clsx(TASK_CHIP, 'bg-fg/6 text-fg3')}>
+    <span data-mention="locked" aria-label={`${m.ref}: ${why}`} className={clsx(TASK_CHIP, 'bg-fg/6 text-fg3')}>
       <LockClosedIcon className="size-3 shrink-0 self-center" aria-hidden="true" />
       <span className="truncate"><span className="font-medium">@{m.ref}</span>{task ? <span> · <span className={TITLE}>{M.short(task.name)}</span></span> : null}</span>
     </span>

@@ -69,9 +69,8 @@ export function ago(ms: number) {
 /** which version, who made it and when: "v3 · Claude Code · 2h ago" (the window's) */
 const detailOf = (a: Artifact) => [`v${a.v}`, a.by, a.at ? ago(a.at) : null].filter(Boolean).join(' · ')
 
-/** the version stepper the window's artifact bars have: ‹ v2 of 5 ›, then "· Latest ›" while an older one shows (its
- *  tooltip the latest's number); one version only: "v3" in the sidebar's head (when it came on hover), "v3 · 2h ago" in
- *  the viewer's bar */
+/** the version stepper the window's artifact bars have: ‹ v2 of 5 ›, then "· Latest ›" while an older one shows; one
+ *  version only: "v3" in the sidebar's head, "v3 · 2h ago" in the viewer's bar */
 function Stepper({ art, shown, onStep, bar }: { art: Artifact; shown: number; onStep: (n: number | undefined) => void; bar: 'sidebar' | 'viewer' }) {
   const kept = [...art.versions.map((x) => x.n)].sort((a, b) => a - b)
   const latest = art.v
@@ -81,20 +80,20 @@ function Stepper({ art, shown, onStep, bar }: { art: Artifact; shown: number; on
   const me = art.versions.find((x) => x.n === shown)
   const when = me?.at ? ago(me.at) : undefined
   if (kept.length <= 1 && !older)
-    return <div title={bar === 'sidebar' ? when : undefined} className="shrink-0 text-xs text-fg2 tabular-nums phone:text-[0.8125rem]">v{shown}{bar === 'viewer' && when ? ` · ${when}` : ''}</div>
+    return <div className="shrink-0 text-xs text-fg2 tabular-nums phone:text-[0.8125rem]">v{shown}{bar === 'viewer' && when ? ` · ${when}` : ''}</div>
   return (
     <div className="flex shrink-0 items-center text-xs tabular-nums phone:text-[0.8125rem]">
       <IconButton label={prev ? `v${prev}` : `v${shown}`} disabled={!prev} className="rounded-full! disabled:opacity-40" onClick={() => prev && onStep(prev)}>
         <BackIcon className={ic} />
       </IconButton>
-      <span title={when} className={clsx('px-0.5', older ? 'text-fg' : 'text-fg2')}>v{shown} of {latest}</span>
+      <span className={clsx('px-0.5', older ? 'text-fg' : 'text-fg2')}>v{shown} of {latest}</span>
       <IconButton label={next ? `v${next}` : `v${shown}`} disabled={!next} className="rounded-full! disabled:opacity-40" onClick={() => next && onStep(next === latest ? undefined : next)}>
         <NextIcon className={ic} />
       </IconButton>
       {older ? (
         <>
           <span className="px-1 text-fg3">·</span>
-          <button type="button" title={`v${latest}`} className="press-dim rounded-full px-1.5 py-1 font-medium text-focus hover:bg-hover" onClick={() => onStep(undefined)}>Latest ›</button>
+          <button type="button" className="press-dim rounded-full px-1.5 py-1 font-medium text-focus hover:bg-hover" onClick={() => onStep(undefined)}>Latest ›</button>
         </>
       ) : null}
     </div>
@@ -217,7 +216,6 @@ function MarkupLayer({ art, v, onEnd }: { art: Artifact; v: number; onEnd: () =>
             <button
               type="button"
               aria-label="Send"
-              title="Send  Enter"
               disabled={!text.trim() || sending}
               onClick={() => void send()}
               className={clsx('press-dim relative grid size-8 shrink-0 place-items-center rounded-row bg-fg text-bg after:absolute after:-inset-1.5 phone:size-11', dimmed)}
@@ -608,7 +606,7 @@ function Viewer() {
               <PanelIcon className={ic} />
             </IconButton>
           )}
-          <IconButton label="Close" title="Close  Esc" onClick={closeArtifact} className={barBtn}>
+          <IconButton label="Close" onClick={closeArtifact} className={barBtn}>
             <XIcon className={ic} />
           </IconButton>
         </div>

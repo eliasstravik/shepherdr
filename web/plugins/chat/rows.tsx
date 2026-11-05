@@ -54,20 +54,20 @@ export function Band({ msg, chat, cli }: { msg: Message; chat: string; cli?: boo
   const btn = 'grid size-[22px] shrink-0 place-items-center rounded-[5px] text-fg3 hover:bg-hover hover:text-fg'
   const hover = 'pointer-coarse:hidden opacity-0 transition-opacity group-hover/msg:opacity-100 focus-visible:opacity-100 group-focus-within/msg:opacity-100'
   const icon = (a: string) => {
-    if (a === 'reply') return <button key={a} type="button" aria-label="Reply" title="Reply" className={clsx(btn, hover)} onClick={() => startReply(chat, msg)}><ReplyIcon className="size-3.5" /></button>
+    if (a === 'reply') return <button key={a} type="button" aria-label="Reply" className={clsx(btn, hover)} onClick={() => startReply(chat, msg)}><ReplyIcon className="size-3.5" /></button>
     if (a === 'copy')
       return (
-        <button key={a} type="button" aria-label={copied ? 'Copied' : 'Copy'} title={copied ? 'Copied' : 'Copy'} className={clsx(btn, hover, copied && 'text-fg opacity-100')}
+        <button key={a} type="button" aria-label={copied ? 'Copied' : 'Copy'} className={clsx(btn, hover, copied && 'text-fg opacity-100')}
           onClick={() => { void navigator.clipboard?.writeText(msg.text ?? '').catch(() => undefined); setCopied(true); clearTimeout(timer.current); timer.current = setTimeout(() => setCopied(false), 1500) }}>
           {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
         </button>
       )
     if (a === 'rewind')
-      return <button key={a} type="button" aria-label="Rewind" title="Rewind" className={clsx(btn, hover)} onClick={() => void act({ type: 'rewind', chat, message: msg.id } as never).then(() => showTerminal(chat), (e: Error) => alert(e.message))}><RewindIcon className="size-3.5" /></button>
-    return <button key={a} type="button" aria-label="Fork" title="Fork" className={clsx(btn, hover)} onClick={() => void act({ type: 'fork', chat } as never).catch((e: Error) => alert(e.message))}><ForkIcon className="size-3.5" /></button>
+      return <button key={a} type="button" aria-label="Rewind" className={clsx(btn, hover)} onClick={() => void act({ type: 'rewind', chat, message: msg.id } as never).then(() => showTerminal(chat), (e: Error) => alert(e.message))}><RewindIcon className="size-3.5" /></button>
+    return <button key={a} type="button" aria-label="Fork" className={clsx(btn, hover)} onClick={() => void act({ type: 'fork', chat } as never).catch((e: Error) => alert(e.message))}><ForkIcon className="size-3.5" /></button>
   }
   const smiley = react ? (
-    <button key="react" type="button" aria-label="React" title="React" className={clsx(btn, hover)} onClick={() => openPicker(chat, msg.id)}>
+    <button key="react" type="button" aria-label="React" className={clsx(btn, hover)} onClick={() => openPicker(chat, msg.id)}>
       <SmileIcon className="size-3.5" />
     </button>
   ) : null
@@ -146,7 +146,7 @@ function FromRow({ from, text }: { from: string; text?: string }) {
   const first = String(text ?? '').split('\n').find((l) => l.trim()) ?? ''
   return (
     <div data-from className="flex w-full flex-col">
-      <button type="button" aria-expanded={open} title={`Message from ${from}`} onClick={() => setOpen(!open)}
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}
         className="flex w-full min-w-0 items-center gap-1.5 rounded-[7px] px-1.5 py-0.5 text-left text-[0.75rem]/5 text-fg2 hover:bg-hover phone:py-1.5 phone:text-[0.8125rem]/5">
         <ChatBubbleLeftEllipsisIcon aria-hidden className="size-4 shrink-0 fill-accent" />
         <span className="shrink-0 font-medium text-fg"><span className="sr-only">Message from </span>{from}</span>

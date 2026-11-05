@@ -688,7 +688,7 @@ function PageBody({ page, phone, set, refused, clear, hint }: { page: Page; phon
         <Small className="flex flex-wrap items-center gap-1 text-pretty">
           <span className="text-fg2">{row.key.startsWith('machine.') ? ST.SET_FOR_MACHINE : ST.CHANGED_HERE}</span>
           <span aria-hidden>·</span>
-          <button type="button" title={ST.RESET_TIP(row.inherits.from)} onClick={() => set(row.key, null)}
+          <button type="button" aria-label={`${ST.RESET}: ${ST.RESET_TIP(row.inherits.from)}`} onClick={() => set(row.key, null)}
             className="press-dim relative font-medium text-accent after:absolute after:-inset-x-1 after:-inset-y-1.5 coarse:after:-inset-y-3">
             {ST.RESET}
           </button>

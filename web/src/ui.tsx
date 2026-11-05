@@ -554,7 +554,7 @@ export function AttentionBadge({ need: allNeed, ready: allReady, scope }: { need
   const label = `${need} needs you, ${ready} ready · ${scope}`
   const cap = (n: number) => n > 9 ? '9+' : String(n)
   return (
-    <span role="img" aria-label={label} title={label} data-attention-badge={split ? 'both' : need ? 'need' : 'ready'}
+    <span role="img" aria-label={label} data-attention-badge={split ? 'both' : need ? 'need' : 'ready'}
       className={clsx('attention-badge', split && 'attention-badge-split')}>
       {need > 0 ? <span aria-hidden="true" className="attention-badge-need">{cap(need)}</span> : null}
       {ready > 0 ? <span aria-hidden="true" className="attention-badge-ready">{cap(ready)}</span> : null}
