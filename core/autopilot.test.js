@@ -56,10 +56,17 @@ test("a level holds only what it sets", () => {
   expect(STARTER).toContain("Push the project forward");
   expect(STARTER).not.toContain("Don't invent work");
   // 3.1.5's asked; today's decides, and only a take-over alerts the person
-  expect(OLD_STARTERS[0]).toContain("ask me once");
+  expect(OLD_STARTERS.some((x) => x.includes("ask me once"))).toBe(true);
   expect(STARTER).not.toMatch(/ask me once|Ask before/);
   expect(STARTER).toContain("Never ask me a question on a wake");
   expect(STARTER).toContain("herdr-task alert");
+  // SHEP-40: 3.1.7's parked behind an Accept with a bare no-reply; today's works around it, says what waits, and gives a why
+  expect(OLD_STARTERS[0]).toContain("Reply only <hc no-reply/>");
+  expect(currentBeat(OLD_STARTERS[0])).toBe(STARTER);
+  expect(STARTER).toContain("Never park on a task waiting for my Accept");
+  expect(STARTER).toContain("never a limit of your own");
+  expect(STARTER).toContain('<hc no-reply why="');
+  expect(STARTER).not.toContain("Reply only <hc no-reply/>");
 });
 
 test("the starter heartbeat, events and default schedule are herdr-task's", () => {

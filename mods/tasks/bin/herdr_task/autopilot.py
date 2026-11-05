@@ -64,6 +64,31 @@ You decide, I steer later: make every call yourself, taste and product choices t
 
 Each wake: first what woke you, then in order:
 1. Needs you, failed or stalled: look why and unblock it yourself (nudge, resume, fix). A worker's question or choice: answer it yourself with the best option. Only a take-over waits for me.
+2. Ready: check the work (diff, checks, proof). A clear defect: send it back saying what's wrong. Looks right: say so in one line; Accepting stays mine. Never park on a task waiting for my Accept: go on with work that doesn't need it (step 4), and each wake it still holds tasks back, say in one line what waits on my Accept.
+3. To do: start the ones with a clear brief that nothing blocks; the queue limits how many run. Leave a task that's working fine alone.
+4. Push the project forward: look at the project itself (README, docs and goals, recent commits and merged tasks, open GitHub issues and PRs, TODOs, failing or missing tests, your saved progress and what I asked for lately). Pick the most valuable next tasks yourself, each with a full brief (what, why, how to check it's done), and start them within the queue. At most 2 a wake; never one that repeats an open or recent task or an old ask I dropped. Tell me in one line what you started and why.
+5. End by saving progress: facts and your next step, never a limit of your own. Only this heartbeat and I set limits.
+
+Take over: the only time you stop for me. Something irreversible or outside this space that can't wait (spending money, deploying or publishing outside this space, pushes to main, emails or posts, deleting data, credentials, a security problem), or you're stuck on the same thing after retrying twice. Then don't do it: send one herdr-task alert "<what>" --body "<why>", say it in one line, and carry on with other work.
+
+Limits:
+- Never merge, Accept, mark done, delete or stop work: that's mine.
+- Never do a take-over thing yourself: alert me instead.
+- Work only through herdr-task tasks; never write the code yourself.
+- 3 or more tasks waiting on me: add and start nothing new.
+- Keep a wake short: a few minutes of your own work.
+
+Reporting: one or two short plain lines on what you did and chose, never a question; never repeat what you told me before, except what still waits on me. When there's truly nothing worth doing (nothing to unblock, check or start, and no next task worth adding), end with <hc no-reply why="what you checked and what it waits on"/>, never a bare <hc no-reply/>.
+
+Stopping goal: none. Runs until I switch it off.
+"""
+# Starters earlier versions wrote: one never edited, wherever it is kept, stands for today's.
+OLD_STARTERS = ("""Direction: push this project forward on your own, without wasting my time or money. Follow this space's Direction when it has one; with none, work out what matters most from the project itself.
+
+You decide, I steer later: make every call yourself, taste and product choices too. Pick the best option, act on it, and tell me in one line what you chose and why, so I can redirect you. Never ask me a question on a wake; only a take-over (below) stops for me.
+
+Each wake: first what woke you, then in order:
+1. Needs you, failed or stalled: look why and unblock it yourself (nudge, resume, fix). A worker's question or choice: answer it yourself with the best option. Only a take-over waits for me.
 2. Ready: check the work (diff, checks, proof). A clear defect: send it back saying what's wrong. Looks right: say so in one line; Accepting stays mine.
 3. To do: start the ones with a clear brief that nothing blocks; the queue limits how many run. Leave a task that's working fine alone.
 4. Push the project forward: look at the project itself (README, docs and goals, recent commits and merged tasks, open GitHub issues and PRs, TODOs, failing or missing tests, your saved progress and what I asked for lately). Pick the most valuable next tasks yourself, each with a full brief (what, why, how to check it's done), and start them within the queue. At most 2 a wake; never one that repeats an open or recent task or an old ask I dropped. Tell me in one line what you started and why.
@@ -81,9 +106,7 @@ Limits:
 Reporting: one or two short plain lines on what you did and chose, never a question; never repeat what you told me before. Reply only <hc no-reply/> when there's truly nothing worth doing: nothing to unblock, check or start, and no next task worth adding.
 
 Stopping goal: none. Runs until I switch it off.
-"""
-# Starters earlier versions wrote: one never edited, wherever it is kept, stands for today's.
-OLD_STARTERS = ("""Direction: push this project forward, without wasting my time or money. Follow this space's Direction when it has one; with none, work out what matters most from the project itself.
+""", """Direction: push this project forward, without wasting my time or money. Follow this space's Direction when it has one; with none, work out what matters most from the project itself.
 
 Each wake: first what woke you, then in order:
 1. Needs you, failed or stalled: look why. Unblock what you can (nudge, resume, fix); what only I can answer, ask me once, in one clear question.
@@ -531,6 +554,35 @@ def queue(a, reason):
         a["pending"] = {"reasons": [reason], "at": now()}
 
 
+def waiting(space, a):
+    """Ready tasks of this space that others wait behind (queued --after them, down the chain), in
+    words: ["TG-2 is Ready, waiting on the person's Accept; TG-3 and TG-4 wait behind it"]. A fact
+    for the wake, so a blocked chain is said, never parked on in silence."""
+    out = []
+    for p in store_files():
+        d = read_list(p) or {}
+        tasks = d.get("tasks") or []
+        mine = lambda t: bare(t.get("space") or "") == space or (not t.get("space") and d.get("folder") == a.get("folder"))
+        if not any(mine(t) for t in tasks):
+            continue
+        ref = lambda t: f"{d.get('prefix') or ''}-{t['id']}"
+        for t in tasks:
+            if t.get("state") != "ready" or not mine(t):
+                continue
+            behind, look = [], [t["id"]]
+            while look:
+                i = look.pop(0)
+                for x in tasks:
+                    if i in (x.get("after") or []) and x.get("state") in ("queued", "todo") and x not in behind:
+                        behind.append(x)
+                        look.append(x["id"])
+            if behind:
+                names = [ref(x) for x in behind]
+                names = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+                out.append(f"{ref(t)} is Ready, waiting on the person's Accept; {names} wait{'s' if len(behind) == 1 else ''} behind it")
+    return out
+
+
 def message(space, a, reasons):
     """The wake: one tagged message. The chat shows it as one quiet line ("Autopilot woke · on schedule",
     core/chat-log.js pilotLine), never its words, then the Assistant's answer or "nothing new"."""
@@ -544,6 +596,7 @@ def message(space, a, reasons):
     p = a.get("progress")
     prog = f"Saved progress ({when(p['at'])}):\n{p['text']}" if p else "Saved progress: none yet (this is the first wake)."
     why = reasons[0] + (f" (also: {', '.join(reasons[1:])})" if len(reasons) > 1 else "")
+    waits = "\n".join(f"- {x}" for x in waiting(space, a))
     aim = direction_of(space)
     aim = (f"Direction (set by the person, Shepherdr settings > Autopilot): {aim}" if aim else
            "Direction: none set. Work out what matters most from the project itself: its README, docs and goals, "
@@ -561,12 +614,19 @@ def message(space, a, reasons):
             "unless the heartbeat says otherwise, look at the project and add and start the next most valuable "
             "tasks to push it toward the direction. Evaluate what the evidence shows, then save progress and your "
             "next step with herdr-task progress \"...\". When the heartbeat's stopping goal is met and proven: "
-            "herdr-task complete \"evidence\" (this turns Autopilot off). Only when there's truly nothing worth "
-            "doing (nothing to unblock, check or start, and no next task worth adding): save progress saying so, "
-            "and end with <hc no-reply/>.\n\n"
+            "herdr-task complete \"evidence\" (this turns Autopilot off). A Ready task that others wait behind "
+            "never parks you: go on with work that doesn't need it (tasks outside its chain, within the heartbeat's "
+            "limits), and each wake it still holds them back, say in one line what waits on the person's Accept. "
+            "Saved progress records facts and your next step, never a limit or pace of your own: only the heartbeat "
+            "and the person set limits, and one in your saved progress that neither set doesn't apply (leave it out "
+            "when you save). Only when there's truly nothing worth doing (nothing to unblock, check or start, and no "
+            "next task worth adding): save progress saying so, and end with <hc no-reply why=\"...\"/>, its why one "
+            "short line of what you checked and what it waits on (the chat shows it on the wake's line), never a "
+            "bare <hc no-reply/>.\n\n"
             f"Heartbeat ({src}):\n{beat or '(not written yet: tell the person Autopilot has no heartbeat yet, and do nothing else)'}\n\n"
             f"{aim}\n\n"
-            f"{prog}")
+            + (f"Waiting on the person:\n{waits}\n\n" if waits else "")
+            + f"{prog}")
     body = body.replace("</herdr-autopilot", "</ herdr-autopilot")
     reason = reasons[0].replace('"', "'")
     return f'<herdr-autopilot reason="{reason}" space="{space}">\n{body}\n</herdr-autopilot>'
@@ -611,8 +671,11 @@ def settle(a):
     gone = k.get("state") != "live" or not agent_running(k)
     # Its turn counted, or (should the count miss it) the Assistant idle a while after the wake:
     # closed either way, so the header leaves "Waking" and the next wake can go.
+    # A turn of a second (a quiet wake) can slip past the count: its status settling after the wake
+    # (status_ms) says it ended too (SHEP-40: "Waking" held two minutes after a one-second turn).
     st = status_word(k)
-    ended = st != "working" and ((k.get("turn") or 0) > f["turn"] or (st in ("idle", "done") and now() - f["at"] > IDLE_AFTER_MS))
+    settled_since = st in ("idle", "done") and (k.get("status_ms") or 0) > f["at"]
+    ended = st != "working" and ((k.get("turn") or 0) > f["turn"] or settled_since or (st in ("idle", "done") and now() - f["at"] > IDLE_AFTER_MS))
     if not (gone or ended or now() - f["at"] > TURN_MAX_MS):
         return
     a.pop("inflight")

@@ -198,7 +198,7 @@ def news_pass(report, folder=None):
 
 
 READ = "herdr.chat.read"  # the Assistant's turn last read (mods/chat/unread.js)
-NO_REPLY = re.compile(r"^\s*(?:<hc\s+no-reply\s*/>|</?no-reply\b[^\n]*)\s*$")
+NO_REPLY = re.compile(r"^\s*(?:<hc\s+no-reply\b[^>]*/>|</?no-reply\b[^\n]*)\s*$")
 
 
 def news_read(quiet):

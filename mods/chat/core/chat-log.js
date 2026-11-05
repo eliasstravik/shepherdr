@@ -168,17 +168,18 @@ const CODEX_INJECTED = /^\s*(# AGENTS\.md instructions|<(environment_context|use
 // Reactions travel as Herdr tag lines (taught to agents by session-note.sh):
 //   the person  <hc from="person" reaction="👍" to="first words of the message"/>   (or reaction-removed=)
 //   the agent   <hc react="👀" to="first words of the person's message"/>   on a line of its own
-//               <hc no-reply/>   a reply that is only this shows nothing (<no-reply> too)
+//               <hc no-reply/>   a reply that is only this shows nothing (<no-reply> too); on an Autopilot
+//               wake <hc no-reply why="Waiting on your Accept of TG-2"/> puts its why on the wake's line
 // Task news Herdr sends an Assistant (herdr-task's news_pass) is one <herdr-news> tag per line:
 // each is a news item of its own ({ kind: "news", ref, event, text }), shown as a slim line in
 // an Assistant's chat (mods/chat newsLines()); the tags themselves never show.
 // None of these lines show in the chat; the reactions show on the messages they name.
-const TAG = /^<hc((?:\s+[\w-]+="[^"]*")*)\s*\/>$/;
+const TAG = /^<hc((?:\s+[\w-]+(?:="[^"]*")?)*)\s*\/>$/;
 function tagOf(line) {
   const m = TAG.exec(line.trim());
   if (!m) return null;
   const a = {};
-  for (const [, k, v] of m[1].matchAll(/([\w-]+)="([^"]*)"/g)) a[k] = v;
+  for (const [, k, v] of m[1].matchAll(/([\w-]+)(?:="([^"]*)")?/g)) a[k] = v ?? "";
   return a;
 }
 // A message's start, as a reaction names it: its first words, on one line, quotes made curly.
@@ -250,12 +251,16 @@ export function pilotWhy(reason) {
 }
 
 // A wake's quiet line in the chat: "Autopilot woke · on schedule", then how it went once that shows in the log:
-// " · nothing to do" (it answered <hc no-reply/> without looking at anything), " · checked, nothing new" (it looked,
-// then answered that), nothing more while it works or once it said something (its words follow as its message).
-// item: { kind: "pilot", reason, steps, said, quiet }.
+// its why when it answered <hc no-reply why="…"/> (" · Waiting on your Accept of TG-2", SHEP-40), else " · nothing to
+// do" (a bare <hc no-reply/> without looking at anything), " · checked, nothing new" (it looked, then answered that),
+// nothing more while it works or once it said something (its words follow as its message).
+// item: { kind: "pilot", reason, steps, said, quiet, why }.
+export const PILOT_WHY_MAX = 160;
 export function pilotLine(item) {
   const head = `Autopilot woke · ${pilotWhy(item?.reason)}`;
   if (item?.said || !item?.quiet) return head;
+  const why = String(item.why ?? "").replace(/\s+/g, " ").trim();
+  if (why) return `${head} · ${why.length > PILOT_WHY_MAX ? why.slice(0, PILOT_WHY_MAX - 1).trimEnd() + "…" : why}`;
   return `${head} · ${item.steps ? "checked, nothing new" : "nothing to do"}`;
 }
 
@@ -754,7 +759,7 @@ export class Conversation {
       if (a?.react) this.react("agent", { emoji: a.react, to: a.to ?? "", on: true });
       // <no-reply> too (an Assistant's answer to task news it has nothing to add to).
       else if (!(a && "no-reply" in a) && !/^<hc\s+no-reply\s*\/>/.test(line.trim()) && !/^<\/?no-reply\b/.test(line.trim())) out.push(line);
-      else if (this.pilot) this.pilot.quiet = true;
+      else if (this.pilot) { this.pilot.quiet = true; if (a?.why) this.pilot.why = unattr(a.why); }
     }
     const said = out.join("\n").trim();
     if (said && this.pilot) this.pilot.said = true;
