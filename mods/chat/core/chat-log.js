@@ -271,7 +271,17 @@ function cleanWords(t) {
     return { text: `${cmd[1].trim()} ${args.trim()}`.trim() };
   }
   if (INJECTED.test(t)) return null;
-  t = t.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").replace(/<\/?pasted_content\b[^>]*>\n?/g, "")
+  t = t.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").replace(/<\/?pasted_content\b[^>]*>\n?/g, "");
+  // Another Assistant's message (herdr-task tell-assistant): <herdr-assistant from="mac/t13" machine="mac"
+  // space="Home" can-reply="no">text</herdr-assistant>, the whole message (the CLI may wrap it as pasted).
+  const peer = /^\s*<herdr-assistant\b([^>]*)>([\s\S]*?)<\/herdr-assistant\s*>\s*$/.exec(t);
+  if (peer) {
+    const at = (k) => unattr(new RegExp(`\\b${k}="([^"]*)"`).exec(peer[1])?.[1] ?? "");
+    const from = at("from");
+    if (from) return { text: peer[2].replace(/&lt;\/herdr-assistant/g, "</herdr-assistant").trim(), from,
+      assistant: { machine: at("machine"), space: at("space"), reply: at("can-reply") === "yes" } };
+  }
+  t = t
     // Task mentions (#4) come with a tag line each for the agent; the chat shows the "#4".
     .replace(/<hc task="[^"]*"[^>]*>[\s\S]*?<\/hc>\n?/g, "")
     // Herdr's own tags for the agent (<herdr-news>, <herdr-github>, ...), wherever they are in a
@@ -308,7 +318,7 @@ function claudeUser(c) {
   if (!parts.length) return images ? { text: "", images } : null;
   const reactions = parts.flatMap((p) => p.reactions ?? []), news = parts.flatMap((p) => p.news ?? []);
   const pilot = parts.find((p) => p.pilot)?.pilot;
-  return { text: parts.map((p) => p.text).filter(Boolean).join("\n\n"), from: parts[0].from, images, reactions, news, ...(pilot ? { pilot } : {}),
+  return { text: parts.map((p) => p.text).filter(Boolean).join("\n\n"), from: parts[0].from, ...(parts[0].assistant ? { assistant: parts[0].assistant } : {}), images, reactions, news, ...(pilot ? { pilot } : {}),
     replyTo: parts[0].replyTo, quoted: parts[0].quoted, rest: parts[0].rest };
 }
 
@@ -333,6 +343,91 @@ const clip = (s, n = 90) => { s = String(s ?? "").replace(/\s+/g, " ").trim(); r
 // A command that publishes an artifact (mods/artifacts): the chat shows a card for it, found in
 // the artifacts' registry by who published it and when.
 const ARTIFACT = /\bherdr-artifact\b[^\n|;&]*\b(publish|update)\b/;
+
+// The messages a shell command sends other agents: [{ to, text, how }], how "hc" (`hc send [flags] <terminal>
+// <text>`, to a terminal) or "assistant" (`herdr-task tell-assistant <address or space> <text>`). Read with a small
+// shell lexer: quotes, escapes, `;` `&&` `||` `|` and new lines between commands, heredoc bodies skipped, and a text
+// given as "$VAR" taken from a VAR=… set earlier in the same command. A text it can't know is left out.
+const VALUED = new Set(["--if", "--timeout", "--on"]);
+export function sendsOf(command) {
+  const s = String(command ?? "");
+  if (!/\b(hc|herdr-task)\b/.test(s) || !/\b(send|tell-assistant)\b/.test(s)) return [];
+  const cmds = [], vars = new Map();
+  let words = [], w = null, i = 0, heredocs = [];
+  // w: { text, var? (the word was only $NAME) }
+  const end = () => { if (w) words.push(w); w = null; };
+  const done = () => { end(); if (words.length) cmds.push(words); words = []; };
+  const add = (c) => { w ??= { text: "", raw: "" }; w.text += c; };
+  while (i < s.length) {
+    const c = s[i];
+    if (c === "\n") {
+      done(); i++;
+      // heredoc bodies follow the line that opened them
+      for (const tag of heredocs) {
+        const close = new RegExp(`^\\t*${tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "m");
+        const m = close.exec(s.slice(i));
+        i = m ? i + m.index + m[0].length + 1 : s.length;
+      }
+      heredocs = [];
+      continue;
+    }
+    if (c === " " || c === "\t") { end(); i++; continue; }
+    if (c === ";" || c === "|" || (c === "&" && s[i - 1] !== ">" && s[i + 1] !== ">")) { done(); i += s[i + 1] === c ? 2 : 1; continue; }
+    if (c === "#" && !w) { while (i < s.length && s[i] !== "\n") i++; continue; }
+    if (c === "<" && s[i + 1] === "<" && s[i + 2] !== "<") {
+      end();
+      const m = /^<<-?\s*(['"]?)([\w.-]+)\1/.exec(s.slice(i));
+      if (m) { heredocs.push(m[2]); i += m[0].length; continue; }
+    }
+    if (c === "'") {
+      const j = s.indexOf("'", i + 1);
+      add(s.slice(i + 1, j < 0 ? s.length : j)); w.raw += "'"; i = j < 0 ? s.length : j + 1; continue;
+    }
+    if (c === '"') {
+      let j = i + 1, out = "";
+      while (j < s.length && s[j] !== '"') {
+        if (s[j] === "\\" && '"\\$`\n'.includes(s[j + 1] ?? "")) { out += s[j + 1] === "\n" ? "" : s[j + 1]; j += 2; }
+        else out += s[j++];
+      }
+      const raw = s.slice(i + 1, j);
+      add(out); w.raw += /^\$\{?\w+\}?$/.test(raw) ? raw : "\"";
+      i = j + 1; continue;
+    }
+    if (c === "\\") { add(s[i + 1] ?? ""); w.raw += "\\"; i += 2; continue; }
+    add(c); w.raw += c; i++;
+  }
+  done();
+  const out = [];
+  for (const cmd of cmds) {
+    // NAME=value words before a command (or alone) set a variable for what follows
+    let k = 0;
+    while (k < cmd.length && /^[A-Za-z_]\w*=/.test(cmd[k].text)) {
+      const eq = cmd[k].text.indexOf("=");
+      vars.set(cmd[k].text.slice(0, eq), cmd[k].text.slice(eq + 1));
+      k++;
+    }
+    const a = cmd.slice(k).map((x) => {
+      const v = /^\$\{?(\w+)\}?$/.exec(x.raw);
+      return v ? (vars.has(v[1]) ? vars.get(v[1]) : null) : x.text;
+    });
+    const prog = String(a[0] ?? "").split("/").pop();
+    let rest = null, how = null;
+    if (prog === "hc" && a[1] === "send") { rest = a.slice(2); how = "hc"; }
+    else if (prog === "herdr-task" && a.includes("tell-assistant")) { rest = a.slice(a.indexOf("tell-assistant") + 1); how = "assistant"; }
+    if (!rest) continue;
+    const args = [];
+    for (let j = 0; j < rest.length; j++) {
+      const x = rest[j];
+      if (x === null) { args.push(null); continue; }
+      if (/^\d*>/.test(x) || x === ">" ) { if (!/^\d*>&?\S/.test(x)) j++; continue; }
+      if (x.startsWith("--")) { if (VALUED.has(x)) j++; continue; }
+      args.push(x);
+    }
+    const [to, text] = args;
+    if (to && typeof text === "string" && text.trim()) out.push({ to, text: text.trim(), how });
+  }
+  return out;
+}
 
 // One tool call in words: its kind (for the summary) and a line for the open row.
 // A command that only waits (hc wait, sleep): what it waits for, in words; else null. While
@@ -392,6 +487,15 @@ function claudeStep(name, input = {}) {
   return { kind: "tool", line: `Used ${name}`, doing: input.description ? clip(input.description, 60) : `Using ${name}` };
 }
 
+// A Codex call's shell command(s), as one text (sendsOf reads it), else "".
+function codexCommand(args) {
+  let a = args;
+  if (typeof a === "string") { try { a = JSON.parse(a); } catch { return a; } }
+  if (!a || typeof a !== "object") return "";
+  const c = a.cmd ?? a.command ?? a.input ?? "";
+  return Array.isArray(c) ? (/^(ba|z)?sh$/.test(c[0]) && c[1]?.startsWith("-") ? c.slice(2).join(" ") : c.map((x) => /\s/.test(x) ? `'${String(x).replace(/'/g, "'\\''")}'` : x).join(" ")) : String(c);
+}
+
 function codexStep(name, args) {
   let a = args;
   if (typeof a === "string") a = parse(a) ?? { input: a };
@@ -426,6 +530,9 @@ function codexStep(name, args) {
 //   replyTo: the start of the message it answers)
 //   { kind: "mark", id }  (a message of only reactions: ends the turn, shows nothing)
 //   { kind: "news", id, at, ref, event, text }  (one line of task news Herdr told an Assistant)
+//   { kind: "sent", id, at, to, text, how }  (a message the agent sent another agent: sendsOf())
+//   a user item's from: who sent it (another agent's address); assistant: { machine, space, reply } when it is
+//   another Assistant's (<herdr-assistant>)
 //   { kind: "pilot", id, at, reason, steps, said, quiet }  (an Autopilot wake, its quiet line: pilotLine())
 //   { kind: "tools", id, steps: [{ id, kind, line, out? }] }  (calls in a row, between texts;
 //                                             out: where the call's result line is)
@@ -467,6 +574,17 @@ export class Conversation {
 
   push(item) {
     this.items.push(item);
+    return item;
+  }
+
+  // The messages a command sent other agents (sendsOf), each its own item after the call's row:
+  // { kind: "sent", id, at, to, text, how }.
+  sent(command, off, at) {
+    // A send tried again (`|| hc send …`, or `--force` after a refusal) shows once: one already sent this turn.
+    const turn = this.items.slice(this.items.findLastIndex((x) => x.kind === "user" || x.kind === "mark") + 1);
+    sendsOf(command).forEach((m, i) => {
+      if (!turn.some((x) => x.kind === "sent" && x.to === m.to && x.text === m.text)) turn.push(this.push({ kind: "sent", id: `s${off}:${i}`, at, ...m }) ?? m);
+    });
   }
 
   // Tool calls in a row join the last item when it is a tools row.
@@ -530,7 +648,7 @@ export class Conversation {
       replyTo = u.quoted;
       text = u.rest;
     }
-    this.push({ kind: "user", id, text, replyTo, from: u.from, at: u.at, images: u.images || 0 });
+    this.push({ kind: "user", id, text, replyTo, from: u.from, ...(u.assistant ? { assistant: u.assistant } : {}), at: u.at, images: u.images || 0 });
     this.doing = null;
   }
 
@@ -759,6 +877,7 @@ export class Conversation {
             if (st) st.at = time(l.timestamp) || Date.now();
             this.step(String(b.id), off, st, b.name === "Agent" || b.name === "Task" ? String(b.id) : null);
             if (b.name === "Bash" && ARTIFACT.test(String(b.input?.command ?? ""))) this.push({ kind: "artifact", id: `art${off}`, at: time(l.timestamp) });
+            if (b.name === "Bash") this.sent(String(b.input?.command ?? ""), off, time(l.timestamp));
           }
         }
       }
@@ -799,6 +918,7 @@ export class Conversation {
         if (st?.spawn) this.helpers.set(cid, { desc: st.spawn, done: false, untilTurn: true });
         this.step(cid, off, st, st?.spawn ? cid : null);
         if (ARTIFACT.test(JSON.stringify(p.arguments ?? p.input ?? p.action ?? ""))) this.push({ kind: "artifact", id: `art${off}`, at: time(l.timestamp) });
+        this.sent(codexCommand(p.arguments ?? p.input ?? p.action), off, time(l.timestamp));
       }
     } else if (l.type === "turn_context") {
       this.meta = { ...this.meta, model: p.model ?? this.meta.model, effort: p.effort ?? p.reasoning_effort ?? this.meta.effort, at: time(l.timestamp) };

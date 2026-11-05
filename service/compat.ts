@@ -10,7 +10,7 @@ import { kindOf as kindOfTerm } from "../core/chat-reader.js";
 import * as CL from "../core/chat-log.js";
 import * as CV from "../core/chat-view.js";
 const { summary, names, pilotLine } = CL as any;
-const { senderName, briefLabel, newsTimeline, resolveArtifacts, unsigned } = CV as any;
+const { senderName, briefLabel, newsTimeline, resolveArtifacts, unsigned, fromName, sentTo, selfName } = CV as any;
 import { mentionedIn } from "../core/send.js";
 import * as MEc from "../core/mentions.js";
 import * as SCc from "../core/screens.js";
@@ -174,6 +174,8 @@ export function artifactOf(a: any, spaces: Space[], program: (addr: string) => s
 }
 
 export class Compat {
+  /** another machine's key -> the name people read for it (who sent a message: core/chat-view.js fromName) */
+  machineNames = new Map<string, string>();
   /** chat key -> terminal address, from the last build */
   private chats = new Map<string, string>();
   /** task id -> where herdr-task finds it */
@@ -272,9 +274,11 @@ export class Compat {
     this.rawArts = input.artifacts ?? [];
     this.spaceList = spaces;
     const chats = new Map<string, string>();
+    this.machineNames = new Map();
     const machines: Machine[] = input.machines.map((m) => {
       // named as the window's sidebar names it: the person's name for it, else its own; this computer "This computer"
       const key = m.here ? host : m.name, look = (this.shared?.value("spaces-chat") ?? {}).machines?.[m.here ? "" : m.name] ?? {};
+      if (!m.here) this.machineNames.set(m.name, machineLabel(m.name, look.name));
       return { id: `m:${key}`, machine: key, name: machineLabel(m.here ? null : m.name, look.name), ownName: m.here ? "This computer" : m.name, ...(look.icon ? { emoji: look.icon } : {}), status: m.state === "connected" ? "idle" : "off", ...(m.here ? { here: true } : {}), ...(m.state === "connecting" ? { connecting: true } : {}), ...(this.machineStats?.(m.here ? null : m.name) ?? {}) } as Machine;
     });
     // a task's space: the one that started it (herdr-task keeps it), else the one in its folder, as the window places it
@@ -477,7 +481,13 @@ export class Compat {
     const spaceRows = space ? this.rows.filter((r) => r.space === space && r.ref) : [];
     const workerOf = new Map<string, string>(this.rows.filter((r) => r.worker).map((r) => [r.worker, r.ref]));
     // here: this machine's name in herdr-core (another machine's agent writes ours as "<here>/t75")
-    const sender = (from: string, text: string) => senderName(from, text, { find: term, machine, taskOf: (a: string) => workerOf.get(a) ?? null, here: (this as any).coreName?.() ?? null });
+    const here = (this as any).coreName?.() ?? null;
+    const sender = (from: string, text: string) => senderName(from, text, { find: term, machine, taskOf: (a: string) => workerOf.get(a) ?? null, here });
+    // agent to agent as a group chat (SHEP-27): who sent a message (another Assistant by its machine and space), and
+    // who this chat's own agent is when it sends one ("Assistant → SHEP-4")
+    const taskLabel = String(t?.labels?.["herdr.task"] ?? "");
+    const peers = { machineName: (m: string) => this.machineNames.get(m) ?? null, here: machine ?? here };
+    const self = selfName({ assistant: key.startsWith("p:"), task: taskLabel ? workerOf.get(this.chats.get(key) ?? "") ?? (/^[a-z]+-\d+$/i.test(taskLabel) ? taskLabel.toUpperCase() : null) : null, kind: reader.kind });
     const news = space ? newsTimeline(items, new Map(spaceRows.map((r) => [r.ref, { ...r, status: r.section }])), { start: reader.start }) : [];
     const newsLine = (e: any): Message => {
       const task = machine ? `${machine}:${e.ref}` : e.ref;
@@ -509,10 +519,10 @@ export class Compat {
         x = { ...x, text: ft };
       }
       // not typed by the person: a launch brief or another agent's message, as one quiet row
-      const brief = x.kind === "user" && !first ? briefLabel(x, i, { start: reader.start, template, task, sender }) : null;
+      const brief = x.kind === "user" && !first ? briefLabel(x, i, { start: reader.start, template, task, sender, ...peers }) : null;
       if (brief) {
         const restart = /^<restart>/.test(x.text ?? "");
-        messages.push({ id: x.id, who: "you", at: x.at, text: restart ? x.text.replace(/<\/?restart>/g, "") : x.from ? unsigned(x.text) : x.text, brief: { label: brief, ...(restart ? { bare: true } : {}), ...(x.from ? { from: sender(x.from, x.text) } : {}) } });
+        messages.push({ id: x.id, who: "you", at: x.at, text: restart ? x.text.replace(/<\/?restart>/g, "") : x.from ? unsigned(x.text) : x.text, brief: { label: brief, ...(restart ? { bare: true } : {}), ...(x.from ? { from: fromName(x, sender, peers) } : {}) } });
       } else if (x.kind === "user" && (x.text || x.paths?.length || x.images)) {
         const sentCid = sends.length && !x.from ? sentAs(sends, x, takenSends) : undefined;
         const cid = sentCid ? { cid: sentCid } : {};
@@ -533,6 +543,11 @@ export class Compat {
         // images Claude Code didn't say the source of: how many, as the window's paperclip line
         const unseen = (x.images ?? 0) - (x.paths?.length ?? 0);
         if (unseen > 0) messages.push({ id: `${x.id}:n`, who: "you", at: x.at, ...cid, images: unseen } as Message);
+      }
+      else if (x.kind === "sent" && x.text) {
+        // a message it sent another agent: "Assistant → SHEP-4", a quiet row that opens to its words
+        const to = sentTo(x, (a: string) => sender(a, ""));
+        messages.push({ id: x.id, who: "agent", at: x.at, text: unsigned(x.text), brief: { label: `Message to ${to}`, from: self, to } });
       }
       else if (x.kind === "agent" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at, ...reactions });
       else if (x.kind === "error" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at, error: true });

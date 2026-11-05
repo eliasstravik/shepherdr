@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LOG, Conversation, records, pilotLine } from "./chat-log.js";
+import { LOG, Conversation, records, pilotLine, sendsOf } from "./chat-log.js";
 
 // A Claude Code log as LOG reads it, fed to a Conversation.
 async function read(lines) {
@@ -110,4 +110,37 @@ test("an Autopilot wake shows as one quiet line, never silence, and its words ne
   expect(lines(c)).toEqual(["Autopilot woke · switched on"]);
   c = await read([wake("schedule"), reply("m1", [text("Started HAT-5.")]), person, reply("m2", [text("<hc no-reply/>")])]);
   expect(lines(c)).toEqual(["Autopilot woke · on schedule"]);
+});
+
+// Agent to agent as a group chat (SHEP-27): another Assistant's message, and the messages this agent sends.
+const told = (content, uuid = "h1") => ({ parentUuid: null, isSidechain: false, type: "user", message: { role: "user", content }, uuid, timestamp: at });
+const bash = (id, command) => ({ type: "tool_use", id, name: "Bash", input: { command }, caller: { type: "direct" } });
+
+test("another Assistant's message (tell-assistant) is a message from it, its machine and space kept", async () => {
+  const c = await read([told('\n\n<pasted_content id="6418">\n<herdr-assistant from="mac/t13" machine="mac" space="Home" can-reply="no">From the Mac mini: a bug &amp; more</herdr-assistant>\n</pasted_content>')]);
+  const u = c.items.find((x) => x.kind === "user");
+  expect(u.from).toBe("mac/t13");
+  expect(u.assistant).toEqual({ machine: "mac", space: "Home", reply: false });
+  expect(u.text).toBe("From the Mac mini: a bug &amp; more");
+  // a brief that only quotes the tag among other words stays the person's
+  const q = await read([told('Show <herdr-assistant from="a/t1" machine="a" space="S">x</herdr-assistant> like this')]);
+  expect(q.items.find((x) => x.kind === "user")?.from).toBeUndefined();
+});
+
+test("what the agent sends other agents (hc send, tell-assistant) is a message of its own after its call", async () => {
+  const c = await read([person, reply("m1", [bash("toolu_s1", 'export PATH=~/.local/bin:$PATH; M="Rebase on main"; hc send t10v "$M" >/dev/null; hc send --force t10s "$M" >/dev/null 2>&1 || hc send t10s "$M"; echo ok'),
+    bash("toolu_s2", "herdr-task tell-assistant mac/t13 'Thanks, on it' --json")])]);
+  const sent = c.items.filter((x) => x.kind === "sent").map((x) => [x.to, x.text, x.how]);
+  // the retry after || shows once
+  expect(sent).toEqual([["t10v", "Rebase on main", "hc"], ["t10s", "Rebase on main", "hc"], ["mac/t13", "Thanks, on it", "assistant"]]);
+  expect(c.items.findIndex((x) => x.kind === "tools")).toBeLessThan(c.items.findIndex((x) => x.kind === "sent"));
+});
+
+test("sendsOf reads only what a command really sends", () => {
+  // a heredoc's body is a file's words, never a command
+  expect(sendsOf("cat > b.md <<'EOF'\nhc send t1 \"no\"\nEOF\nhc send t2 \"yes\"")).toEqual([{ to: "t2", text: "yes", how: "hc" }]);
+  expect(sendsOf('hc send --if idle --timeout 30 vm/t3 "a \\"quoted\\" word"')).toEqual([{ to: "vm/t3", text: 'a "quoted" word', how: "hc" }]);
+  // a text it can't know, and other hc commands, are left out
+  expect(sendsOf('hc send t1 "$UNKNOWN"; hc keys t1 enter; hc read t1')).toEqual([]);
+  expect(sendsOf("git grep -n 'hc send' core")).toEqual([]);
 });

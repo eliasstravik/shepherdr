@@ -186,11 +186,45 @@ export function senderName(from, text = null, { find = () => null, machine = nul
   return `${name || signed || "Another agent"}${away}`;
 }
 
+// Agent to agent, as a group chat (SHEP-27). Who sent a user item another agent sent: another Assistant's
+// (<herdr-assistant>, x.assistant: { machine, space }) by its machine and space ("Assistant on Mac mini · Home"; its
+// machine unsaid when it is this one), else senderName's ("SHEP-4", "Reviewer", "Assistant on m3").
+//   sender(from, text): senderName with the chat's lookups; machineName(key): the name people read for a machine
+//   key (null: unknown); here: this machine's key in herdr-core.
+export function fromName(x, sender = (f) => f, { machineName = (m) => m, here = null } = {}) {
+  const a = x?.assistant;
+  if (!a) return sender(x?.from, x?.text);
+  const m = a.machine && a.machine !== here ? machineName(a.machine) || a.machine : null;
+  return `Assistant${m ? ` on ${m}` : ""}${a.space ? ` · ${a.space}` : ""}`;
+}
+
+// Whom a message the chat's agent sent went to (a "sent" item: { to, how }): a terminal by senderName ("SHEP-4",
+// "Assistant on m3"); tell-assistant's target is an Assistant, by its address or its space's name ("Assistant ·
+// Home").
+export function sentTo(x, sender = (f) => f) {
+  const to = String(x?.to ?? "");
+  const address = /^([\w.>-]+\/)?t\d[0-9a-z]*$/.test(to);
+  if (x?.how !== "assistant") return address ? sender(to.split(">").pop()) : to;
+  if (!address) return `Assistant · ${to}`;
+  return String(sender(to.split(">").pop())).replace(/^(Another agent|t\d[0-9a-z]*)\b/, "Assistant");
+}
+
+// Who the chat's own agent is in its group chat: "Assistant" for a space's, its task's ref for a task's worker, else
+// its CLI's name ("Claude").
+export function selfName({ assistant = false, task = null, kind = null } = {}) {
+  if (assistant) return "Assistant";
+  if (task) return task;
+  return { claude: "Claude", codex: "Codex" }[kind] ?? "Agent";
+}
+
+// A name's initial for its avatar: a task ref's letters ("SHEP-4" → "S"), else its first letter.
+export const initialOf = (name) => (String(name ?? "").trim().match(/[A-Za-z0-9]/)?.[0] ?? "?").toUpperCase();
+
 // A user message the person didn't type, in words for its quiet row, else null: the session's first message when the
 // agent was started from a template (a coordinator), as a handoff, or for a task (herdr-task); and any message
 // another agent sent with hc. i: its place in the conversation; start: the first byte read (0: the log's start).
-export function briefLabel(x, i, { start = null, template = null, task = false, sender = (f) => f } = {}) {
-  if (x.from) return `Message from ${sender(x.from, x.text)}`;
+export function briefLabel(x, i, { start = null, template = null, task = false, sender = (f) => f, machineName = (m) => m, here = null } = {}) {
+  if (x.from) return `Message from ${fromName(x, sender, { machineName, here })}`;
   if (i !== 0 || start !== 0) return null;
   if (/^<restart>/.test(x.text ?? "")) return "New session";
   if (/^You are taking over this tab/.test(x.text ?? "") || /^herdr-handoff/.test(template ?? "")) return "Handoff from the previous agent";

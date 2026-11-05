@@ -559,8 +559,9 @@ export interface Message {
   secret?: SecretAsk
   /** 3.0's quiet row for a message the person didn't type: a launch brief ("New session", "Task brief") or one
    *  another agent sent ("Message from Reviewer"); its words (text) open under it. bare: no preview (a fresh start);
-   *  from: who sent it ("Reviewer", "Assistant on m3"), only on a message from another agent, drawn as a message */
-  brief?: { label: string; bare?: boolean; from?: string }
+   *  from: who sent it ("Reviewer", "Assistant on m3"), only on a message from another agent, drawn as a message;
+   *  to: whom, on a message this chat's own agent sent another (from is then itself: "Assistant" → "SHEP-4") */
+  brief?: { label: string; bare?: boolean; from?: string; to?: string }
   /** 3.0's task news line in an Assistant's chat (core/chat-view.js newsWords): its mark, what happened, the rest;
    *  live: still needs you (red); accept: the newest ready line of a task still Ready */
   news?: { task: string; ref: string; mark: 'started' | 'needs' | 'ready' | 'done' | 'other'; what: string; text: string; live?: boolean; accept?: boolean }
