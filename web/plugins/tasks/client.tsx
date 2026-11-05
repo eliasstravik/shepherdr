@@ -403,23 +403,30 @@ function found(snap: Snapshot, t: Task, q: string) {
   return matches(q, refOf(t.id), t.name, t.sub, t.report?.msg, t.pr && `#${t.pr.number}`, t.listName, p.name, machineName(snap.machines, t.on))
 }
 
-/** what an automation's row says of where it is, as far as the grouping doesn't say it (the window's names) */
-function autoWhere(snap: Snapshot, a: Automation, names: { machine: boolean; project: boolean }) {
+/** what an automation's row says of where it is: its machine (with more than one) and space, whatever the grouping,
+ *  as the Automations group sits under no machine or space heading (core/tasks.js autoWhere) */
+function autoWhere(snap: Snapshot, a: Automation) {
   if (snap.look?.place === false) return undefined
-  const m = names.machine && a.machine && a.machine !== snap.host ? machineName(snap.machines, a.machine) || a.machine : undefined
-  return [m, names.project ? a.listName : undefined].filter(Boolean).join(' · ') || undefined
+  return (TK.autoWhere as (m: string, s?: string, multi?: boolean) => string | null)(machineName(snap.machines, a.machine || snap.host), a.listName, multiMachine(snap)) ?? undefined
+}
+
+/** an automation set off by another folder's task events (--from): by what and where ("On merges in vm-b · shepherdr") */
+function autoFrom(snap: Snapshot, a: Automation) {
+  const f = a.from
+  return f ? (TK.fromLine as (e: string[], w: string) => string)(f.events, `${machineName(snap.machines, f.machine || snap.host)} · ${f.place}`) : undefined
 }
 
 /** An automation (herdr-task auto), as the window's row (mods/tasks autoRow): its mark, its name (no id), when it runs
  *  next at the first line's end; on the second line why it won't run as planned (Didn't start, the error in its
- *  label; Paused). A tap opens the task it added last. Only agents add or change automations. */
-function AutoRow({ a, where }: { a: Automation; where?: string }) {
+ *  label; Paused), else what sets it off from another folder (--from). A tap opens the task it added last. Only agents
+ *  add or change automations. */
+function AutoRow({ a, where, from }: { a: Automation; where?: string; from?: string }) {
   return (
     <Line
       glyph={<RepeatIcon className={clsx('size-3.5', a.error ? 'text-need' : 'text-fg3')} />}
       title={a.name}
       dim={!a.on}
-      sub={a.error ? "Didn't start" : !a.on ? 'Paused' : undefined}
+      sub={a.error ? "Didn't start" : !a.on ? 'Paused' : from}
       meta={a.nextAt ? day(a.nextAt) : undefined}
       where={where}
       tip={a.error}
@@ -474,7 +481,7 @@ function TaskList(_: { placeId: string }) {
             <List>
               {shown.map((t, i) => <TaskRow key={t.id} t={t} ix={i} where={whereOf(snap, t, names)} />)}
               {filter === 'needs' ? asks.map((n) => <AgentNeedRow key={n.id} n={n} listKey={key} />) : null}
-              {filter === 'automations' ? autos.map((a) => <AutoRow key={`${a.machine ?? ''}:${a.listName}:${a.name}`} a={a} where={autoWhere(snap, a, names)} />) : null}
+              {filter === 'automations' ? autos.map((a) => <AutoRow key={`${a.machine ?? ''}:${a.listName}:${a.name}`} a={a} where={autoWhere(snap, a)} from={autoFrom(snap, a)} />) : null}
             </List>
           ) : <Empty className="pt-3 text-fg3">No {what} match “{q}”.</Empty>}
         </div>
@@ -504,7 +511,7 @@ function TaskList(_: { placeId: string }) {
       <GroupHeading label="Automations" count={autos.length} flip="group:automations" fold={q ? undefined : { shut: autoShut, toggle: () => toggleShut(key, 'automations') }} />
       {autoShut ? null : (
         <List>
-          {autos.map((a) => <AutoRow key={`${a.machine ?? ''}:${a.listName}:${a.name}`} a={a} where={autoWhere(snap, a, names)} />)}
+          {autos.map((a) => <AutoRow key={`${a.machine ?? ''}:${a.listName}:${a.name}`} a={a} where={autoWhere(snap, a)} from={autoFrom(snap, a)} />)}
         </List>
       )}
     </div>

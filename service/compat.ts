@@ -106,7 +106,7 @@ export async function activity(reader: any, id: string): Promise<ActivityAnswer>
  *  here), and whether the web can draw it (a recipe) or only the window (an older GPUI one). */
 /** herdr-task's automations as each space's (by its folder): the window's row words, its name, Paused or Didn't
  *  start, and when it runs next */
-function automationsBySpace(list: any[], spaces: Space[], spaceName: (s: Space) => string = (s) => s.name) {
+export function automationsBySpace(list: any[], spaces: Space[], spaceName: (s: Space) => string = (s) => s.name) {
   const out: Record<string, any[]> = {};
   for (const a of list) {
     // a list no space works in: under its folder's own key, named by its list (as the window's row)
@@ -119,9 +119,20 @@ function automationsBySpace(list: any[], spaces: Space[], spaceName: (s: Space) 
       ...(a.last_error ? { error: String(a.last_error.message ?? ""), failed: a.last_error.kind === "fire" ? "fire" : "start" } : {}),
       ...(!a.last_error && !a.paused && a.next_run ? { nextAt: a.next_run } : {}),
       ...(ref ? { task: a.machine ? `${a.machine}:${ref}` : ref } : {}),
-      listName: s ? spaceName(s) : a.list ?? a.folder, machine: a.machine ?? null });
+      listName: s ? spaceName(s) : a.list ?? a.folder, machine: a.machine ?? null,
+      // --from (SHEP-14): the folder whose task events set it off, by its space's name there (else its last part),
+      // and its machine (none: the automation's own)
+      ...(a.from?.folder ? { from: fromOf(a, spaces, spaceName) } : {}) });
   }
   return out;
+}
+
+/** an automation's --from as its row says it: the other folder's machine (its own when none), that folder's space's
+ *  name there (else the folder's last part) and the events it listens for */
+export function fromOf(a: any, spaces: Space[], spaceName: (s: Space) => string = (s) => s.name) {
+  const machine = a.from.machine ?? a.machine ?? null, folder = String(a.from.folder);
+  const s = spaces.find((x) => (x.machine ?? null) === machine && x.folder === folder);
+  return { machine, place: s ? spaceName(s) : folder.split("/").filter(Boolean).pop() ?? folder, events: Array.isArray(a.on) ? a.on.map(String) : [] };
 }
 
 /** Settings › Window's look switches, each on unless set to false (as the window reads them). */
