@@ -6,10 +6,12 @@ import fnmatch
 import json
 import os
 import re
+import subprocess
 import sys
+import threading
 import time
 
-from .base import ENTRY, Fail, hc_json, now, STORE
+from .base import ENTRY, Fail, guard, hc_json, now, STORE
 from .settings import bare, settings_for, worker_argv, worktrees_on
 from .agents import agent_running, live_agents, starting, status_of, task_status
 from .sessions import session_of
@@ -156,6 +158,8 @@ def trigger_words(a):
         parts.append(every)
     if a.get("on"):
         words = " or ".join(EVENT_WORDS[e] for e in a["on"])
+        if a.get("from"):
+            words += f" in {from_text(a['from'])}"
         if a.get("match"):
             words += f" ({a['match']})"
         parts.append(("when " if parts else "When ") + words)
@@ -168,6 +172,22 @@ def parse_on(text):
     if bad:
         raise Fail(f"Unknown event {bad[0]!r}; events are {', '.join(EVENTS)}.")
     return sorted(set(evs), key=EVENTS.index)
+
+
+def parse_from(text):
+    """--from: another folder whose task events set it off, "vm-b:/path" (another machine's) or a
+    folder here: {machine (None: this one), folder}; None for "" (its own folder again)."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    m = re.fullmatch(r"([A-Za-z0-9][\w.-]*):(.+)", t)
+    if m and not re.fullmatch(r"[A-Za-z]", m.group(1)):
+        return {"machine": m.group(1), "folder": m.group(2).strip()}
+    return {"machine": None, "folder": locate(t)["folder"]}
+
+
+def from_text(src):
+    return f"{src['machine']}:{src['folder']}" if src.get("machine") else src["folder"]
 
 
 def auto_ref(s, a):
@@ -190,7 +210,7 @@ def find_auto(s, ref):
 def auto_view(s, a):
     v = {k: a.get(k) for k in ("id", "title", "prompt", "mode", "agent", "on", "match", "space", "paused",
                                 "next_run", "last_run", "last_task", "last_error", "runs", "created")}
-    v.update(ref=auto_ref(s, a), folder=s.loc["folder"], prefix=s.prefix, every=(a.get("every") or {}).get("text"),
+    v.update(ref=auto_ref(s, a), **{"from": from_text(a["from"]) if a.get("from") else None}, folder=s.loc["folder"], prefix=s.prefix, every=(a.get("every") or {}).get("text"),
              trigger=trigger_words(a), enabled=settings_for(s, a.get("space"))["automations"].get("enabled", True))
     return v
 
@@ -217,6 +237,17 @@ def set_auto_fields(s, a, args, adding=False):
         a["on"] = parse_on(args.on) or None
     if args.match is not None:
         a["match"] = args.match.strip() or None
+    if getattr(args, "from_", None) is not None:
+        src = parse_from(args.from_)
+        if src and not src["machine"] and src["folder"] == s.loc["folder"]:
+            src = None  # its own folder: what it hears anyway
+        if src != a.get("from"):
+            a["from"] = src
+            a.pop("from_seen", None)
+            if not src:
+                a.pop("from", None)
+            else:
+                a["warning"] = watch_from(s, a)
     if args.agent:
         a["agent"] = args.agent
     if args.here or args.worktree:
@@ -229,6 +260,8 @@ def set_auto_fields(s, a, args, adding=False):
         a["parent"] = args.parent
     if not a.get("every") and not a.get("on"):
         raise Fail("Say when it runs: --every \"weekdays 9:00\" and/or --on ready,merged. " + HOW)
+    if a.get("from") and not a.get("on"):
+        raise Fail("--from says whose task events set it off: give --on too (merged, ready, ...).")
     if a.get("every") and a["every"]["kind"] == "once" and not a.get("next_run") and adding:
         raise Fail("That time has passed.")
 
@@ -237,6 +270,10 @@ def cmd_auto(args):
     sub = args.auto
     if sub == "list":
         return auto_list(args)
+    if sub == "feed":
+        # Another machine's automation asks (fetch_feed): this folder's tasks now. Reads only.
+        print(json.dumps(feed(args.folder)))
+        return
     with open_store(args) as s:
         autos = s.data.setdefault("automations", [])
         msg = ""
@@ -251,11 +288,15 @@ def cmd_auto(args):
             s.data["auto_next"] = a["id"] + 1
             autos.append(a)
             msg = f"{auto_ref(s, a)} added: {trigger_words(a)}."
+            if a.get("warning"):
+                msg += f"\nWarning: {a['warning']}"
         else:
             a = find_auto(s, args.id)
             if sub == "edit":
                 set_auto_fields(s, a, args)
                 msg = f"{auto_ref(s, a)} saved: {trigger_words(a)}."
+                if a.get("warning"):
+                    msg += f"\nWarning: {a['warning']}"
             elif sub == "pause":
                 a["paused"] = True
                 msg = f"{auto_ref(s, a)} paused."
@@ -271,11 +312,15 @@ def cmd_auto(args):
                 msg = f"{auto_ref(s, a)} added {s.ref(t)}" + (f", but: {a['last_error']['message']}" if a.get("last_error") else ".")
             elif sub == "show":
                 msg = auto_line(auto_view(s, a))
+
         s.dirty = s.dirty or sub != "show"
         # The panel shows these as stored: what sets it off, in words.
         for x in autos:
             x["trigger"] = trigger_words(x)
+        warning = a.pop("warning", None)
         v = auto_view(s, a)
+        if warning:
+            v["warning"] = warning
     if sub != "rm":
         ensure_scheduler(quiet=True)
     say(args, {**v, **({"removed": True} if sub == "rm" else {})}, msg)
@@ -295,15 +340,31 @@ def auto_list(args):
     print("\n".join(auto_line(v) for v in out) if out else "No automations.")
 
 
-def fire(s, a, why):
+def event_brief(ev, f, src=None):
+    """What set a run off, for its brief: the task's ref, title and machine."""
+    where = f"{src['machine']}'s folder {src['folder']}" if src and src.get("machine") else \
+        (f"the folder {src['folder']} on this machine" if src else "this folder")
+    words = {"added": "was added", "ready": "is ready", "failed": "failed", "needs-you": "needs the person",
+             "merged": "was merged", "stalled": "stalled"}[ev]
+    return (f"Set off by: task {f['ref']} ({' '.join(str(f['title']).split())}) {words}, in {where}"
+            + (f", on machine {src['machine']}" if src and src.get("machine") else "") + ".")
+
+
+def fire(s, a, why, brief=None):
     """Adds the automation's task again and starts it (or queues it, as start would). Returns the
-    task. A start that fails is the automation's last error, and the task needs the person."""
-    t = s.new(a["title"], a.get("prompt") or "", a.get("mode") or ("worktree" if worktrees_on(s) else "here"))
+    task. A start that fails is the automation's last error, and the task needs the person.
+    brief: what set it off (event_brief), added under its prompt."""
+    prompt = a.get("prompt") or ""
+    if brief:
+        prompt = f"{prompt.rstrip()}\n\n{brief}" if prompt.strip() else brief
+    t = s.new(a["title"], prompt, a.get("mode") or ("worktree" if worktrees_on(s) else "here"))
     t["automation"] = a["id"]
     if a.get("agent"):
         t["agent"] = a["agent"]
     space = a.get("space")
     run_rec = {"at": now(), "why": why, "task": s.ref(t)}
+    if a.get("from") and why.split(":")[0] in EVENTS:
+        run_rec["from"] = from_text(a["from"])
     try:
         if not space:
             raise Fail("It has no space to start in.")
@@ -337,65 +398,205 @@ def matches(a, t):
     return all(w in title for w in m.lower().split())
 
 
-def events_in(s, seen):
-    """What happened to this folder's tasks since the last look: [(event, task)]. `seen` is this
-    folder's record of how each task was, updated in place. The first look only records."""
+def task_facts(s, t):
+    """How a task is now, as events read it. Another machine's come this way too (`auto feed`)."""
+    live = [k for k in live_agents(s.key(t))] if t["state"] in ("running", "ready") else []
+    working_ones = [k for k in live if agent_running(k)]
+    return {"id": t["id"], "ref": s.ref(t), "title": t["title"], "branch": t.get("branch"), "state": t["state"],
+            "status": status_of(t, working_ones) if t["state"] == "running" else t["state"],
+            "needs": task_status(t, working_ones)[1], "attention": t.get("attention"), "merged": bool(t.get("merged")),
+            "automation": t.get("automation"), "starting": bool(t["state"] == "running" and starting(t))}
+
+
+def diff_events(facts, seen):
+    """What happened to these tasks since the last look: [(event, facts)]. `seen` is the record of
+    how each task was, updated in place. The first look only records."""
     first = "_init" not in seen
     seen["_init"] = True
     out = []
-    for t in s.data["tasks"]:
-        key = str(t["id"])
+    for f in facts:
+        key = str(f["id"])
         prev = seen.get(key)
-        live = [k for k in live_agents(s.key(t))] if t["state"] in ("running", "ready") else []
-        working_ones = [k for k in live if agent_running(k)]
-        status = status_of(t, working_ones) if t["state"] == "running" else t["state"]
-        needs = task_status(t, working_ones)[1]
-        cur = {"state": t["state"], "status": status, "needs": needs, "attention": t.get("attention"),
+        status, needs = f["status"], f["needs"]
+        cur = {"state": f["state"], "status": status, "needs": needs, "attention": f.get("attention"),
                "quiet": (prev or {}).get("quiet"), "stalled": (prev or {}).get("stalled")}
         # Quiet since: a running task whose agents aren't working.
-        cur["quiet"] = None if status in ("working",) or t["state"] != "running" else (cur["quiet"] or now())
+        cur["quiet"] = None if status in ("working",) or f["state"] != "running" else (cur["quiet"] or now())
         if prev is None:
-            if not first and not t.get("automation") and t["state"] != "done":
-                out.append(("added", t))
+            if not first and not f.get("automation") and f["state"] != "done":
+                out.append(("added", f))
+            # New since the last look and already on: what it went through meanwhile (an answer
+            # missed while this side or the other was down).
+            if not first and f["state"] == "ready":
+                out.append(("ready", f))
+            if not first and f["state"] == "done" and f.get("merged"):
+                out.append(("merged", f))
         else:
-            if t["state"] == "ready" and prev["state"] != "ready":
-                out.append(("ready", t))
-            if t["state"] == "done" and prev["state"] != "done" and t.get("merged"):
-                out.append(("merged", t))
-            if t.get("attention") and t.get("attention") != prev.get("attention"):
-                out.append(("failed", t))
+            if f["state"] == "ready" and prev["state"] != "ready":
+                out.append(("ready", f))
+            if f["state"] == "done" and prev["state"] != "done" and f.get("merged"):
+                out.append(("merged", f))
+            if f.get("attention") and f.get("attention") != prev.get("attention"):
+                out.append(("failed", f))
             # Needs you: its agent asks something, or waits for a reply (the status people see).
             if needs in ("asks", "reply") and prev.get("needs") not in ("asks", "reply"):
-                out.append(("needs-you", t))
-            stalled = t["state"] == "running" and ((status == "stopped" and not starting(t)) or (cur["quiet"] and now() - cur["quiet"] >= STALL_MS))
+                out.append(("needs-you", f))
+            stalled = f["state"] == "running" and ((status == "stopped" and not f.get("starting")) or (cur["quiet"] and now() - cur["quiet"] >= STALL_MS))
             if stalled and not prev.get("stalled"):
-                out.append(("stalled", t))
+                out.append(("stalled", f))
             cur["stalled"] = bool(stalled)
         seen[key] = cur
     return out
 
 
-def automations_pass(s, seen, report):
-    """Fires this folder's automations that are due: their time came, or an event they hear."""
+def events_in(s, seen):
+    """What happened to this folder's tasks since the last look: [(event, task)] (diff_events)."""
+    by_id = {t["id"]: t for t in s.data["tasks"]}
+    return [(ev, by_id[f["id"]]) for ev, f in diff_events([task_facts(s, t) for t in s.data["tasks"]], seen)]
+
+
+# ---- another folder's events (--from) -------------------------------------------------------
+# An automation can hear another folder's task events, on this machine or another one this one
+# reaches over herdr-core (one-way reach is enough: this machine asks, the other one only
+# answers). Each round the scheduler asks that folder's tasks as they are now (`herdr-task auto
+# feed` there, as --after asks about another machine's task) and compares them with the last
+# answer it kept on the automation itself ("from_seen"), saved with the runs it fires: a restart
+# of either side neither fires twice nor drops what happened meanwhile (caught up on the next
+# answer). Kept on this side only: the other machine stores and runs nothing for it.
+
+FEED_TIMEOUT_S = 40
+
+
+def feed(folder):
+    """This machine's folder's tasks as events read them: {folder, prefix, tasks: [task_facts]}."""
+    loc = locate(folder)
+    with Store(loc, write=False) as s:
+        return {"folder": loc["folder"], "prefix": s.prefix, "tasks": [task_facts(s, t) for t in s.data["tasks"]]}
+
+
+def fetch_feed(src):
+    """src's folder's tasks now (feed()), asked on its machine. Raises Fail when it can't be asked."""
+    if not src.get("machine"):
+        return feed(src["folder"])
+    guard(["hc"])
+    argv = [sys.executable, ENTRY, "--on", src["machine"], "auto", "feed", "--folder", src["folder"], "--json"]
+    try:
+        r = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=FEED_TIMEOUT_S + 20)
+    except subprocess.TimeoutExpired:
+        raise Fail(f"{src['machine']} didn't answer.")
+    line = next((x for x in reversed(r.stdout.splitlines()) if x.startswith("{")), None)
+    try:
+        d = json.loads(line) if line else None
+    except ValueError:
+        d = None
+    if isinstance(d, dict) and isinstance(d.get("tasks"), list):
+        return d
+    err = (d or {}).get("error") if isinstance(d, dict) else None
+    last = ((r.stderr or "").strip().splitlines() or [f"Couldn't ask {src['machine']}."])[-1]
+    raise Fail(err or re.sub(r"^[\w.]*Fail: ", "", last))
+
+
+def watch_from(s, a):
+    """At add or edit: checks --from's machine and folder, and takes the first look (from then
+    on, every event is news). Unknown machine: refused. One that can't be asked now: a warning
+    (the scheduler's first answer is then its first look)."""
+    src = a["from"]
+    if src.get("machine"):
+        from .machines import connected_machines
+        names = [m.get("name") for m in connected_machines()]
+        if src["machine"] not in names:
+            raise Fail(f"No machine {src['machine']} is linked to this one" + (f" (linked: {', '.join(names)})." if names else "."))
+    try:
+        d = fetch_feed(src)
+    except Fail as e:
+        if not src.get("machine"):
+            raise
+        return f"couldn't ask {src['machine']} now ({e}); its events count from the first answer."
+    seen = {}
+    diff_events(d["tasks"], seen)
+    a["from_seen"] = seen
+    return None
+
+
+def feeds_for(lists):
+    """Every --from source the automations in these lists hear, asked at once (in parallel):
+    {from_text: feed or Fail}. Asked outside the folders' locks (another machine can be slow)."""
+    srcs = {}
+    for d in lists:
+        for a in d.get("automations") or []:
+            if a.get("from") and a.get("on") and not a.get("paused"):
+                srcs[from_text(a["from"])] = a["from"]
+    out = {}
+
+    def ask(key, src):
+        try:
+            out[key] = fetch_feed(src)
+        except Exception as e:  # one machine never stops the rest
+            out[key] = e if isinstance(e, Fail) else Fail(str(e)[:200])
+    threads = [threading.Thread(target=ask, args=kv) for kv in srcs.items()]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    return out
+
+
+def from_events(s, a, feeds):
+    """The --from folder's events since this automation last looked: [(event, facts)]. Its record
+    changes in the store, with the runs they fire (one save)."""
+    d = (feeds or {}).get(from_text(a["from"]))
+    if d is None:
+        return []
+    if isinstance(d, Exception):
+        err = {"at": now(), "message": f"Couldn't ask {from_text(a['from'])}: {d}", "kind": "from"}
+        if (a.get("last_error") or {}).get("message") != err["message"]:
+            a["last_error"] = err
+            s.dirty = True
+        return []
+    if (a.get("last_error") or {}).get("kind") == "from":
+        a.pop("last_error")
+    seen = a.setdefault("from_seen", {})
+    before = json.dumps(seen, sort_keys=True)
+    out = diff_events(d["tasks"], seen)
+    ids = {str(f["id"]) for f in d["tasks"]}
+    for k in [k for k in seen if k not in ids and k != "_init"]:
+        seen.pop(k)
+    if json.dumps(seen, sort_keys=True) != before:
+        s.dirty = True
+    return out
+
+
+def automations_pass(s, seen, report, feeds=None):
+    """Fires this folder's automations that are due: their time came (once), or an event they hear
+    (once per event). feeds: the --from folders' tasks now (feeds_for)."""
     autos = [a for a in s.data.get("automations") or [] if not a.get("paused")]
     if not autos:
         return
     enabled = settings_for(s)["automations"].get("enabled", True)
-    happened = events_in(s, seen) if any(a.get("on") for a in autos) else []
+    happened = events_in(s, seen) if any(a.get("on") and not a.get("from") for a in autos) else []
     for a in autos:
         on = settings_for(s, a.get("space"))["automations"].get("enabled", True) if a.get("space") else enabled
         whys = []
         if a.get("every") and a.get("next_run") and now() >= a["next_run"]:
             a["next_run"] = next_run(a["every"], now())
             s.dirty = True
-            whys.append("time")
-        for ev, t in happened:
-            # Its own tasks never set it off again (no endless chains).
-            if ev in (a.get("on") or []) and t.get("automation") != a["id"] and matches(a, t):
-                whys.append(f"{ev}: {s.ref(t)}")
-        if whys and on:
-            t = fire(s, a, whys[0])
-            report["fired"].append({"folder": s.loc["folder"], "automation": auto_ref(s, a), "task": s.ref(t), "why": whys[0]})
+            whys.append(("time", None))
+        if a.get("from"):
+            # Another folder's: its record moves on also while it's off (Settings), as its own folder's does.
+            for ev, f in from_events(s, a, feeds) if a.get("on") else []:
+                if ev in a["on"] and matches(a, f):
+                    where = f"{a['from']['machine']}:" if a["from"].get("machine") else ""
+                    whys.append((f"{ev}: {where}{f['ref']}", event_brief(ev, f, a["from"])))
+        else:
+            for ev, t in happened:
+                # Its own tasks never set it off again (no endless chains).
+                if ev in (a.get("on") or []) and t.get("automation") != a["id"] and matches(a, t):
+                    whys.append((f"{ev}: {s.ref(t)}", event_brief(ev, {"ref": s.ref(t), "title": t["title"]})))
+        if not on:
+            continue
+        for why, brief in whys:
+            t = fire(s, a, why, brief)
+            report["fired"].append({"folder": s.loc["folder"], "automation": auto_ref(s, a), "task": s.ref(t), "why": why})
 
 
 SEEN = os.path.join(STORE, ".seen.json")
@@ -428,17 +629,16 @@ def one_pass(report):
         return
     try:
         seen_all = read_list(SEEN) or {}
-        for p in store_files():
-            d = read_list(p)
-            tasks = (d or {}).get("tasks") or []
-            if not d or not os.path.isdir(d.get("folder") or ""):
-                continue
+        lists = [d for d in map(read_list, store_files()) if d and os.path.isdir(d.get("folder") or "")]
+        feeds = feeds_for(lists)
+        for d in lists:
+            tasks = d.get("tasks") or []
             busy = any(t.get("state") == "queued" or (t.get("worktree") and t.get("state") in ("running", "ready")) for t in tasks)
             if not busy and not d.get("automations"):
                 continue
             with Store(locate(d["folder"])) as s:
                 seen = seen_all.setdefault(s.slug, {})
-                automations_pass(s, seen, report)
+                automations_pass(s, seen, report, feeds)
                 tick_store(s, report)
         try:
             retry_pass(report)

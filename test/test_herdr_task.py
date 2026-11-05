@@ -1081,3 +1081,189 @@ class Revive(unittest.TestCase):
         with self.mock.patch("herdr_task.launch.own_argv", lambda argv: argv):
             self.tick()
         self.assertTrue(self.sent[0][1].startswith("cd /wt && HERDR_BROWSER_TASK='dev#6' claude --resume S1 'Herdr restarted"), self.sent)
+
+
+class AutomationFromAnotherMachine(unittest.TestCase):
+    """SHEP-14: an automation on machine A hears task events in a folder on machine B (--from). Two
+    linked machines, simulated: B is a real herdr-task process on its own task store (asked as
+    `herdr-task --on vmb auto feed` would ask it, its hc a fake that knows no terminals); A runs the
+    scheduler's real round on another store. Only starting agents and the other passes are mocked."""
+
+    def setUp(self):
+        import argparse
+        import contextlib
+        import io
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.automations as au
+        import herdr_task.store as store
+        import herdr_task.settings as settings
+        import herdr_task.machines as machines
+        import herdr_task.home as home
+        import herdr_task.autopilot as ap
+        self.au, self.argparse, self.io, self.redirect = au, argparse, io, contextlib.redirect_stdout
+        self.tmp = tempfile.mkdtemp()
+        self.a_store, self.b_store = os.path.join(self.tmp, "a-tasks"), os.path.join(self.tmp, "b-tasks")
+        self.a_folder, self.b_folder = os.path.join(self.tmp, "a-app"), os.path.join(self.tmp, "shepherdr")
+        for f in (self.a_folder, self.b_folder):
+            os.makedirs(f)
+            subprocess.run(["git", "init", "-q", f], check=True)
+        os.makedirs(self.b_store)
+        fakebin = os.path.join(self.tmp, "bin")
+        os.makedirs(fakebin)
+        with open(os.path.join(fakebin, "hc"), "w") as f:
+            f.write("#!/bin/sh\nexit 1\n")
+        os.chmod(os.path.join(fakebin, "hc"), 0o755)
+        self.b_env = {**os.environ, "HERDR_TASK_STORE": self.b_store, "PATH": fakebin + os.pathsep + os.environ.get("PATH", ""),
+                      "HERDR_TASK_SETTINGS": os.path.join(self.tmp, "b-settings.json")}
+        self.b_tasks, self.b_up, self.started = [], True, []
+        self.write_b()
+        real_run = subprocess.run
+
+        def run(argv, **kw):
+            # A's `herdr-task --on vmb ...`: answered by B's own herdr-task, or not at all while B is down.
+            if "--on" in argv and argv[argv.index("--on") + 1] == "vmb":
+                if not self.b_up:
+                    return subprocess.CompletedProcess(argv, 1, "", "hc: vmb: connection refused\n")
+                rest = argv[argv.index("--on") + 2:]
+                return real_run([sys.executable, os.path.join(BIN, "herdr-task"), *rest], env=self.b_env, **kw)
+            return real_run(argv, **kw)
+
+        def begin(s, t, argv, space, parent=None):
+            t["state"], t["started"] = "running", 1
+            self.started.append({"ref": s.ref(t), "prompt": t["prompt"]})
+
+        patches = [mock.patch.object(store, "STORE", self.a_store), mock.patch.object(au, "STORE", self.a_store),
+                   mock.patch.object(au, "SEEN", os.path.join(self.a_store, ".seen.json")),
+                   mock.patch.object(settings, "SETTINGS", os.path.join(self.tmp, "a-settings.json")),
+                   mock.patch.object(au.subprocess, "run", run), mock.patch.object(au, "guard", lambda a: None),
+                   mock.patch.object(au, "begin", begin), mock.patch.object(au, "queue_reason", lambda s, t: None),
+                   mock.patch.object(au, "worker_argv", lambda s, t, space: ["claude"]),
+                   mock.patch.object(au, "ensure_scheduler", lambda quiet=False: {}),
+                   mock.patch.object(au, "default_space", lambda: "sp1"),
+                   mock.patch.object(au, "live_agents", lambda key: []),
+                   mock.patch.object(machines, "connected_machines", lambda: [{"name": "vmb", "state": "connected"}]),
+                   mock.patch.object(ap, "autopilot_pass", lambda r: None), mock.patch.object(home, "home_pass", lambda r: None),
+                   mock.patch.dict(os.environ, {"HC_TERMINAL_ID": ""})]
+        patches += [mock.patch.object(au, n, lambda *a, **k: None) for n in (
+            "tick_store", "retry_pass", "archive_pass", "news_pass", "end_done_pass", "memory_guard", "backup_pass",
+            "cli_check_pass", "machines_pass")]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def write_b(self):
+        """B's task list as its own herdr-task keeps it."""
+        from_b = {"version": 1, "folder": self.b_folder, "kind": "repo", "name": "shepherdr", "prefix": "SHEP",
+                  "next": len(self.b_tasks) + 1, "tasks": self.b_tasks}
+        slug = self.b_folder.strip("/").replace("/", "-")
+        with open(os.path.join(self.b_store, slug + ".json"), "w") as f:
+            json.dump(from_b, f)
+
+    def b_task(self, title, state="todo", **kw):
+        self.b_tasks.append({"id": len(self.b_tasks) + 1, "title": title, "prompt": "", "mode": "worktree", "state": state,
+                             "created": 1, "agents": [], **kw})
+        self.write_b()
+
+    def b_merge(self, n):
+        t = self.b_tasks[n - 1]
+        t.update(state="done", merged=True, done_at=2)
+        self.write_b()
+
+    def auto(self, sub, **kw):
+        args = self.argparse.Namespace(auto=sub, folder=self.a_folder, json=True, id=None, title=None, prompt=None,
+                                       prompt_file=None, every=None, on=None, match=None, agent=None, space=None,
+                                       parent=None, here=False, worktree=False, from_=None)
+        for k, v in kw.items():
+            setattr(args, k, v)
+        out = self.io.StringIO()
+        with self.redirect(out):
+            self.au.cmd_auto(args)
+        return json.loads(out.getvalue())
+
+    def round(self):
+        """One scheduler round on A; each round reads all it knows from disk (a restart loses nothing)."""
+        report = {"started": [], "done": [], "attention": [], "fired": []}
+        self.au.one_pass(report)
+        return report["fired"]
+
+    def test_a_merge_on_b_starts_one_run_on_a(self):
+        self.b_task("Fix the scheduler")
+        self.b_task("Write docs")
+        a = self.auto("add", title="Update Shepherdr everywhere", prompt="Update every machine.", on="merged",
+                      from_=f"vmb:{self.b_folder}")
+        self.assertEqual(a["from"], f"vmb:{self.b_folder}")
+        self.assertIn(f"When a task is merged in vmb:{self.b_folder}", a["trigger"])
+        self.assertNotIn("warning", a)
+        self.assertEqual(self.round(), [])  # nothing happened on B yet
+        self.b_merge(1)
+        fired = self.round()
+        self.assertEqual([f["why"] for f in fired], ["merged: vmb:SHEP-1"])
+        self.assertEqual(len(self.started), 1)
+        brief = self.started[0]["prompt"]
+        self.assertTrue(brief.startswith("Update every machine."))
+        for words in ("SHEP-1", "Fix the scheduler", "vmb"):
+            self.assertIn(words, brief)
+        # Rounds again, and A's scheduler restarted (a round keeps nothing in memory): no second run.
+        self.assertEqual(self.round() + self.round(), [])
+        self.assertEqual(len(self.started), 1)
+        # auto show and list say where it listens
+        shown = self.auto("show", id="1")
+        self.assertEqual(shown["from"], f"vmb:{self.b_folder}")
+        self.assertEqual(shown["runs"][-1]["from"], f"vmb:{self.b_folder}")
+
+    def test_missed_while_down_is_caught_up_once(self):
+        self.b_task("Fix one")
+        self.auto("add", title="Update", prompt="Go.", on="merged", from_=f"vmb:{self.b_folder}")
+        self.round()
+        # B can't be reached: its merges meanwhile wait, and nothing fires
+        self.b_up = False
+        self.b_merge(1)
+        self.b_task("Fix two", state="done", merged=True)  # added and merged while unseen
+        self.assertEqual(self.round(), [])
+        self.assertIn("Couldn't ask vmb", self.auto("show", id="1")["last_error"]["message"])
+        # B is back: each merge fires once, the error goes
+        self.b_up = True
+        self.assertEqual(sorted(f["why"] for f in self.round()), ["merged: vmb:SHEP-1", "merged: vmb:SHEP-2"])
+        self.assertEqual(self.round(), [])
+        self.assertIsNone(self.auto("show", id="1")["last_error"])
+        # A was down (no rounds) while B merged another: once, on A's next round
+        self.b_task("Fix three")
+        self.round()
+        self.b_merge(3)
+        self.assertEqual([f["why"] for f in self.round()], ["merged: vmb:SHEP-3"])
+        self.assertEqual(self.round(), [])
+        self.assertEqual(len(self.started), 3)
+
+    def test_match_still_narrows(self):
+        self.b_task("Fix the scheduler")
+        self.b_task("Write docs")
+        self.auto("add", title="Update", prompt="Go.", on="merged", match="fix", from_=f"vmb:{self.b_folder}")
+        self.b_merge(2)
+        self.assertEqual(self.round(), [])
+        self.b_merge(1)
+        self.assertEqual([f["why"] for f in self.round()], ["merged: vmb:SHEP-1"])
+
+    def test_other_events_too(self):
+        self.auto("add", title="Look", prompt="Look.", on="added,ready", from_=f"vmb:{self.b_folder}")
+        self.b_task("New thing")
+        self.assertEqual([f["why"] for f in self.round()], ["added: vmb:SHEP-1"])
+        self.b_tasks[0]["state"] = "ready"
+        self.write_b()
+        self.assertEqual([f["why"] for f in self.round()], ["ready: vmb:SHEP-1"])
+
+    def test_unknown_or_unreachable_machine(self):
+        with self.assertRaises(self.au.Fail) as e:
+            self.auto("add", title="Update", prompt="Go.", on="merged", from_="vm-nope:/home/x/app")
+        self.assertIn("No machine vm-nope", str(e.exception))
+        with self.assertRaises(self.au.Fail):
+            self.auto("add", title="Update", prompt="Go.", from_=f"vmb:{self.b_folder}")  # no --on
+        self.b_up = False
+        a = self.auto("add", title="Update", prompt="Go.", on="merged", from_=f"vmb:{self.b_folder}")
+        self.assertIn("couldn't ask vmb", a["warning"])
+        # its first answer is its first look: from then on every merge is news
+        self.b_task("Fix")
+        self.b_up = True
+        self.assertEqual(self.round(), [])
+        self.b_merge(1)
+        self.assertEqual(len(self.round()), 1)

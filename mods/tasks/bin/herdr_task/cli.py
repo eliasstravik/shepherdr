@@ -266,6 +266,8 @@ def main():
             c.add_argument("--every", help=HOW)
             c.add_argument("--on", help="events, comma-separated: " + ", ".join(EVENTS))
             c.add_argument("--match", help="only tasks whose title has these words, or branch:<glob>")
+            c.add_argument("--from", dest="from_", help="hear another folder's task events instead of this one's: "
+                           "vm-b:~/dev/app (another machine linked to this one) or a folder here (\"\" clears)")
             c.add_argument("--agent")
             c.add_argument("--space", help="the space its tasks start in (default: yours)")
             c.add_argument("--parent", help="its tasks' agents' parent (default: you)")
@@ -281,6 +283,7 @@ def main():
     c.add_argument("--all", action="store_true", help="every folder's on this machine")
     c.set_defaults(fn=auto_list)
     auto_cmd("show", "one automation")
+    auto_cmd("feed", "this folder's tasks as events read them, as JSON (asked by another machine's --from)", id=False)
     auto_cmd("pause", "stop it firing")
     auto_cmd("resume", "let it fire again")
     ap = sub.add_parser("autopilot", help="a space's Assistant woken on a schedule or by events, with the heartbeat "
