@@ -2636,7 +2636,9 @@ function DropFiles({ chatKey, children }: { chatKey: string; children: ReactNode
   return (
     <div
       data-drop
-      className="relative flex min-h-0 flex-1 flex-col"
+      // its own stacking context: the Latest pill, the drop note and a message's menu layer over the chat only, so a
+      // drawer, sheet or menu over the chat covers them all, whatever their z
+      className="isolate relative flex min-h-0 flex-1 flex-col"
       onDragEnter={(e) => {
         if (!draggingFiles(e.dataTransfer)) return
         e.preventDefault()
