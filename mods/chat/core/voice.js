@@ -1,9 +1,12 @@
 // A voice call, as the same on both sides: the window's call (mods/chat/voice.ts, the machine's microphone and
 // speaker) and the web app's (service/voice.ts, the phone's). An ElevenLabs voice agent talks with the person and
 // reads, opens and changes Shepherdr for them through four client tools (look, open, send, act), which the service
-// answers (service/voice-tools.ts; the window's call asks its machine's service). It is told the called agent's
+// answers, and, for whatever those can't do, a fifth: screen, which reads and acts on the very screen the call runs on
+// (core/screen.js; the page or the window does it) (service/voice-tools.ts; the window's call asks its machine's service). It is told the called agent's
 // replies and status as [Update] lines. Plain data and words: each side does its own audio, files and sockets.
 // Shared core: the source is core/voice.js.
+
+import { DOS } from "./screen.js";
 
 export const API = "https://api.elevenlabs.io/v1";
 
@@ -19,18 +22,21 @@ How Shepherdr works:
 
 Your tools:
 - look: read anything: where the call is and what is on screen, a chat (latest messages or a search), spaces, machines, tasks, one task, Needs you, news, Autopilot, automations, settings, secret names, artifacts.
-- open: show something in the person's app (the one the call runs in): a space, a task and its tab, the Tasks panel, Needs you, an artifact, Settings, or back to the call's chat.
+- open: show something in the person's app (the one the call runs in): a space, a task and its tab, the Tasks panel (filtered by state or words), Needs you, the Artifacts, Files or Changes panel, the space's terminal, an artifact, a Settings page, or back to the call's chat.
 - send: write in a chat as the person: the call's chat, any space's Assistant or a task's agent.
 - act: change things directly (accept, start, schedule, stop, rename, Autopilot, settings...).
+- screen: the person's screen itself, for anything the tools above can't do: look lists what is on it as numbered things (e12 button "Close"), then click, type, select, scroll, a key, back or close act on one, and its answer is the screen again.
 
 Rules:
+- Use look, open, send and act first: they are quicker and surer, and work whatever is on screen. Use screen only when none of them fits (scroll, close or go back, press a button or fill a field they don't cover, expand something, read exactly what the screen shows).
+- With screen: look before you act and use only refs from its latest answer; after each action read the new screen in its answer instead of guessing. Before clicking anything that deletes, merges, accepts, stops, ends the call or can't be undone, say what it will do and ask; click it with confirmed true only after a clear yes. Never type a secret or a password.
 - Always use look before you answer about the person's work: never guess or invent what an agent said, a task's state or anything else. If look can't tell, say so.
 - "Here", "this task", "this space", "that one" mean what the call's context says (look with what "here" when unsure), or what you just talked about.
 - Making or planning things (a new task with a brief, a new space, an automation, Autopilot's direction, editing a brief, anything that takes judgment) goes to that space's Assistant with send, in the person's words with every detail. Say you passed it on.
 - Before any act, say in a few words exactly what it will do and ask; call act with confirmed true only after the person clearly said yes on this call. Without a yes, call it with confirmed false (it changes nothing and tells you what to ask).
 - Sending is fine without asking when the person clearly asked you to send it. Never send greetings, chit-chat, or what the person says to you about the call. If unsure whether something is meant for an agent, ask.
 - Messages that start with [Update] come from Shepherdr, not the person: never send them on. Tell the person what they say, briefly, and plainly when an agent needs them.
-- open shows it on the very screen the call runs on, and its answer says whether that screen confirmed it. Say something is on screen only when open's answer says it is; otherwise say it didn't open and why. If several spaces or machines fit, ask which.
+- open and screen act on the very screen the call runs on, and their answers say whether that screen confirmed it. Say something is on screen only when open's answer says it is; otherwise say it didn't open and why. If several spaces or machines fit, ask which.
 - Speak briefly and naturally, like a person: one or two sentences, then stop. Summarize; never read out code, paths, links or ids letter by letter (say "SHEP 45"). Offer more only if asked.${where ? `\n\nWhere the call is now: ${where}` : ""}`;
 
 const PLACE = { type: "string", description: "Which one: a space's name, a task's id (SHEP-45), a machine's or artifact's name, or \"here\" (the call's or what is on screen). Leave out for all." };
@@ -39,7 +45,7 @@ const tool = (name, description, props, required = []) =>
 
 /** What a look can read, an open can show and an act can do (service/voice-tools.ts answers each). */
 export const LOOKS = ["here", "chat", "spaces", "machines", "tasks", "task", "needs", "news", "autopilot", "automations", "settings", "secrets", "artifacts"];
-export const OPENS = ["space", "task", "tasks", "needs", "artifact", "settings", "chat"];
+export const OPENS = ["space", "task", "tasks", "needs", "artifacts", "files", "changes", "terminal", "artifact", "settings", "chat"];
 export const TABS = ["chat", "terminal", "files", "changes", "pr", "browser", "review"];
 export const ACTS = ["accept", "start", "schedule", "unschedule", "stop", "resume", "done", "reopen", "delete", "pin", "unpin",
   "autopilot_on", "autopilot_off", "autopilot_run", "rename_space", "remove_space", "setting", "forget_secret", "delete_artifact"];
@@ -51,15 +57,25 @@ export const TOOLS = [
     query: { type: "string", description: "Words to search for (a chat, tasks, settings, artifacts), or a task state to filter tasks (working, ready, needs, queued, scheduled, todo, done)." },
     count: { type: "integer", description: "How many chat messages or items (default 6, at most 30)." },
   }, ["what"]),
-  tool("open", "Show something in the person's app, the one the call runs in: a space, a task (on a tab), the Tasks panel, Needs you, an artifact, Settings, or the call's chat.", {
-    what: { type: "string", enum: OPENS, description: "What to show." },
+  tool("open", "Show something in the person's app, the one the call runs in: a space, a task (on a tab), the Tasks panel, Needs you, the shown space's Artifacts, Files or Changes panel or its Assistant's terminal, an artifact, a Settings page, or the call's chat.", {
+    what: { type: "string", enum: OPENS, description: "What to show. artifacts, files, changes, terminal: the shown space's panel (id a space's name to switch first). settings: id is the page (Secrets, Window, Voice...)." },
     id: PLACE,
     tab: { type: "string", enum: TABS, description: "A task's tab: chat, terminal, files, changes, pr (pull request), browser, or review (a Ready task's Accept card)." },
+    query: { type: "string", description: "tasks: a state to filter by (working, ready, needs, queued, scheduled, todo, done) and/or words to type in its filter box." },
   }, ["what"]),
   tool("send", "Write a message as the person: to the call's chat (default), a space's Assistant (by the space's name) or a task's agent (by its id). Also how to ask an Assistant to make, plan or change things.", {
     to: { type: "string", description: "A space's name (its Assistant), a task's id (its agent), or \"here\" (the call's chat, the default)." },
     text: { type: "string", description: "The message, in the person's words, tidied, with every detail." },
   }, ["text"]),
+  tool("screen", "The person's screen itself, as numbered things (refs): read it, then act on one. Only for what look, open, send and act can't do: scroll, close, go back, press a button, fill or pick in a field, expand or collapse. Its answer is always the screen as it is now.", {
+    do: { type: "string", enum: DOS, description: "look: list what is on screen (find narrows it). click: press ref. type: put text in ref (submit true presses Enter). select: pick text in ref's list. scroll: direction, in ref or the main part. key: press text (Enter, Escape, Tab, ArrowDown...). back: the app's Back. close: close what is on top (a menu, dialog, artifact, Settings)." },
+    ref: { type: "string", description: "A ref from screen's latest answer, like e12." },
+    text: { type: "string", description: "type: the words. select: the choice. key: the key." },
+    direction: { type: "string", enum: ["down", "up", "top", "bottom"], description: "scroll's direction." },
+    submit: { type: "boolean", description: "type: press Enter after." },
+    find: { type: "string", description: "Words to list only matching things (a long screen)." },
+    confirmed: { type: "boolean", description: "click: true only after the person said yes to a click that deletes, merges, stops or can't be undone." },
+  }, ["do"]),
   tool("act", "Change something directly. Ask the person first and set confirmed true only after a clear yes; with confirmed false nothing changes and it says what to ask.", {
     action: { type: "string", enum: ACTS, description: "accept: a Ready task (merges it). start: a task now. schedule: a task later (value: when, \"in 2h\", \"tomorrow 9:00\"). unschedule. stop: a working task's agent. resume: an ended task's agent. done: mark a task done without merging. reopen: a done or ready task. delete: a task. pin, unpin: a task. autopilot_on, autopilot_off, autopilot_run (wake now): a space's. rename_space (value: the new name). remove_space: forget a space (its folder stays). setting: change a setting (key: its name, value, id: a space or leave out for everywhere). forget_secret: delete a secret by name (key). delete_artifact." },
     id: PLACE,

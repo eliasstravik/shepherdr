@@ -2,7 +2,10 @@
 // microphone are the drawn icons.
 import clsx from 'clsx'
 import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type HTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type Ref, type RefObject, type TextareaHTMLAttributes } from 'react'
-import { ChevronUpDownIcon, MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/16/solid'
+import { ChevronLeftIcon, ChevronUpDownIcon, MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/16/solid'
+
+/** ‹, every Back's icon: marked, so a voice call's close and back find the screen's own Back (SHEP-51, voice/screen.ts) */
+export const BackIcon = (p: { className?: string }) => <ChevronLeftIcon data-back="" {...p} />
 import type { Status, Task, Report } from '@shared/types.ts'
 import { TALKING, type Sample } from './meter.ts'
 import { useMotion } from './motion.ts'
@@ -40,7 +43,6 @@ export {
   ChevronDoubleLeftIcon as WidenIcon,
   ChevronDoubleRightIcon as NarrowIcon,
   ChevronDownIcon as DownIcon,
-  ChevronLeftIcon as BackIcon,
   ChevronRightIcon as NextIcon,
   ChevronUpDownIcon as UpDownIcon,
   ClipboardDocumentListIcon as PlanIcon,

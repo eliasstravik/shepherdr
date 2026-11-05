@@ -550,6 +550,21 @@ export const sectionOf = (name: string, sections: SettingSection[], ui: UI) =>
     .flatMap((g) => g.pages)
     .findIndex((p) => p.name === ({ 'Alerts and voice': 'Voice' }[name] ?? name))
 
+/** the pages' names in order (a section's index is its place here) */
+export const pageNames = (sections: SettingSection[], ui: UI) => groupsOf(sections, ui).flatMap((g) => g.pages).map((p) => p.name)
+
+/** a page as said ("secrets", "the window page"): its index, its name exactly, else case and words aside, else -1 */
+export function sectionLike(said: string, sections: SettingSection[], ui: UI) {
+  const exact = sectionOf(said, sections, ui)
+  if (exact >= 0) return exact
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '')
+  const want = norm(said.replace(/\b(the|page|settings|section|tab)\b/gi, ''))
+  if (!want) return -1
+  const names = pageNames(sections, ui).map(norm)
+  const i = names.indexOf(want)
+  return i >= 0 ? i : names.findIndex((n) => n.startsWith(want) || (want.length > 3 && n.includes(want)))
+}
+
 /** a machine's own Machine page (to open Settings on it): its section and level */
 export function settingsPageOf(sections: SettingSection[], machine: string, ui: UI) {
   const level = `m:${machine}`

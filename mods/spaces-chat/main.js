@@ -25,7 +25,7 @@ import { unreadSpaces, readShown } from "./unread.js";
 import { muted } from "./notify.js";
 import { MachinePopup, openMachine, openMachineSettings } from "./machine-popup.js";
 import { startPolling, allStats, healthMeters, bars } from "./machines.js";
-import { countBadge, red, H, TEXT, RADIUS } from "./ui.js";
+import { countBadge, red, green, H, TEXT, RADIUS } from "./ui.js";
 import { spaceName, gitTail, tilde, sharedNames } from "./core/spaces.js";
 import { coordinatorTab } from "./coordinator.js";
 
@@ -129,6 +129,8 @@ export default class Spaces extends View {
     this.pilots = new Map();
     this.readPilots(cx);
     cx.timer.every(5000, (cx) => this.readPilots(cx));
+    // A voice call's clock on its space's row (callMark): once a second, only while a call is on.
+    cx.timer.every(1000, (cx) => { if (this.calling) cx.notify(); });
     // Each machine's health and plan limits (machines.js): read every 45 s / 10 min, not per render.
     startPolling(cx);
     // spaces-chat.machine (a key, or `herdr-app do`): the details of the shown space's machine.
@@ -169,6 +171,38 @@ export default class Spaces extends View {
     return div().id(`pilot-${w.id}`).flex_none().text_color(p === "waking" ? t.working : t.dim)
       .when(p === "waking", (el) => el.loop("opacity", { from: 0.35, to: 1, period: 1200 }))
       .child(svg("mods/spaces-chat/rocket.svg").size(12).flex_none());
+  }
+
+  // SHEP-51: a voice call going on in this space (mods/chat's shared "chat.calls": its chat's pane is in one of this
+  // space's tabs), in its row: a soft green pill with the call's wave and clock, which goes back to the call's chat
+  // (its box is the call: Mute, End). No bar over the window.
+  callOf(w) {
+    const calls = shared("chat.calls") ?? {};
+    for (const [pane, c] of Object.entries(calls)) {
+      if (Date.now() - (c.beat ?? 0) > 45000) continue;
+      const tab = c.tab ?? panes().find((p) => p.pane === pane)?.tab;
+      if (tab && (w.tabs ?? []).some((t) => t.id === tab)) return { pane, ...c, tab };
+    }
+    return null;
+  }
+
+  callMark(w, t) {
+    const call = this.callOf(w);
+    if (!call) return null;
+    this.calling = true;
+    const secs = Math.max(0, Math.floor((Date.now() - (call.started ?? Date.now())) / 1000));
+    const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+    const back = () => {
+      run("space.select", { id: w.id });
+      run("tab.select", { id: call.tab });
+      run("pane.focus", { pane: call.pane });
+    };
+    return h_flex().id(`call-${w.id}`).h(18).pl(5).pr(7).gap(4).flex_none().items_center().rounded(9).cursor_pointer()
+      .bg(`${green()}26`).text_color(green()).text_size(TEXT.label).hover((s) => s.opacity(0.8))
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { cx.stop_propagation(); back(); })
+      .child(svg("mods/chat/audio-lines.svg").size(12).flex_none().loop("opacity", { from: 0.45, to: 1, period: 1400 }))
+      .child(div().child(clock));
   }
 
   checkNew(cx) {
@@ -663,6 +697,7 @@ export default class Spaces extends View {
             .when(quiet && Boolean(iconOf(w.id)), (el) => el.opacity(0.5)).child(iconOf(w.id) ?? "#")))
           .child(nameText(name, fresh, quiet ? t.dim : w.active ? t.foreground : t.muted, t))
           .when(Boolean(this.pilotMark(w, t)), (el) => el.child(this.pilotMark(w, t)))
+          .when(Boolean(this.callOf(w)), (el) => el.child(this.callMark(w, t)))
           .child(g ? this.gitTail(g, tree, name, t, label) : h_flex().flex_1().min_w(0).justify_end().text_size(TEXT.label).text_color(t.dim)
             .when(Boolean(label), (el) => el.child(div().min_w(0).truncate().child(label))))
           .when(quiet, (el) => el.child(svg("mods/spaces-chat/bell-off.svg").size(13).flex_none().text_color(t.dim)))
@@ -692,6 +727,8 @@ export default class Spaces extends View {
 
   // One copy of Herdr's live lists for the whole render (live.js): past ~50 ms Herdr stops it.
   render(cx) {
+    // a voice call's row sets it again (callMark): its clock ticks only while one shows
+    this.calling = false;
     return inRender(() => this.draw(cx));
   }
 

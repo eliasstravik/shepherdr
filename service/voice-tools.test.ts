@@ -287,3 +287,40 @@ test("open is on screen only once the app that started the call says so", async 
   const look = await voiceTool("look", { what: "here" }, fromMbp, { ...io(), snap: () => fleet });
   expect(await shown(look, async () => { throw new Error("asked"); })).toEqual(look);
 });
+
+test("open: the shown space's panels, a space's panel by its name (space first, then the panel), Tasks by state and words", async () => {
+  for (const what of ["artifacts", "files", "changes", "terminal"]) {
+    const a = await voiceTool("open", { what }, web, io());
+    expect(a.nav).toEqual({ kind: "panel", panel: what } as any);
+  }
+  const there = await voiceTool("open", { what: "artifacts", id: "gtm" }, web, io());
+  expect(there.nav).toEqual({ kind: "space", place: "mini/sp2" });
+  expect(there.then).toEqual({ kind: "panel", panel: "artifacts" });
+  const asked: any[] = [];
+  const r = await shown(there, async (nav) => { asked.push(nav); return { ok: true }; });
+  expect(asked).toEqual([{ kind: "space", place: "mini/sp2" }, { kind: "panel", panel: "artifacts" }]);
+  expect(r.result).toContain("on the person's screen now");
+  expect("then" in r).toBe(false);
+  // the space didn't open: the panel isn't asked for
+  const one: any[] = [];
+  await shown(there, async (nav) => { one.push(nav); return { ok: false, why: "no" }; });
+  expect(one.length).toBe(1);
+  expect((await voiceTool("open", { what: "tasks", query: "ready" }, web, io())).nav).toEqual({ kind: "tasks", filter: "ready" });
+  expect((await voiceTool("open", { what: "tasks", query: "ready ones about voice" }, web, io())).nav).toEqual({ kind: "tasks", filter: "ready", search: "about voice" });
+  expect((await voiceTool("open", { what: "tasks", query: "model menu" }, web, io())).nav).toEqual({ kind: "tasks", search: "model menu" });
+});
+
+test("screen: checked here, done by the app that started the call, its answer the screen itself", async () => {
+  expect((await voiceTool("screen", { do: "click" }, web, io())).error).toBe(true);
+  const a = await voiceTool("screen", { do: "click", ref: "e4" }, web, io());
+  expect(a.nav).toMatchObject({ kind: "screen", do: "click", ref: "e4", confirmed: false });
+  const r = await shown(a, async () => ({ ok: true, did: 'Pressed the tab "Artifacts"', screen: "Screen: the web app on a phone." }));
+  expect(r.result).toBe('Pressed the tab "Artifacts". What the screen shows now:\nScreen: the web app on a phone.');
+  const held = await shown(a, async () => ({ ok: false, ask: "Press Delete task?", screen: "" }));
+  expect(held.result).toContain("Ask the person first");
+  expect((await shown(a, async () => null)).error).toBe(true);
+  // nothing changes in Shepherdr itself: no action was sent
+  const x = io();
+  await voiceTool("screen", { do: "look" }, web, x);
+  expect(x.calls).toEqual([]);
+});

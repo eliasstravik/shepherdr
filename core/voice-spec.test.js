@@ -61,8 +61,8 @@ test("one kept for another key isn't used: a new one", async () => {
   expect(await ensureAgent(f.io)).toBe("agent_new");
 });
 
-test("the spec: four client tools, a version that follows its words, and a file without the key", () => {
-  expect(TOOLS.map((t) => t.name)).toEqual(["look", "open", "send", "act"]);
+test("the spec: five client tools (screen the fallback), a version that follows its words, and a file without the key", () => {
+  expect(TOOLS.map((t) => t.name)).toEqual(["look", "open", "send", "screen", "act"]);
   for (const t of TOOLS) { expect(t.type).toBe("client"); expect(t.expects_response).toBe(true); expect(t.response_timeout_secs).toBeLessThanOrEqual(120); }
   expect(TOOLS.find((t) => t.name === "act").parameters.required).toContain("confirmed");
   expect(SPEC).toBe(specTag(agentSpec()));

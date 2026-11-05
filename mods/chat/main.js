@@ -55,6 +55,7 @@ import { markRead, onScreen, unread } from "./unread.js";
 import { notifies } from "./notify.js";
 import { ScreenWatch, screenStrips, openCard, cardsOf, starting, cliOf } from "./screens.js";
 import { dayLabel, dayOf } from "./days.js";
+import { CallScreen } from "./call-screen.js";
 import { on as addonOn } from "./addons.js";
 
 // Messages a page of history holds: the newest page first, earlier ones as the person scrolls up.
@@ -2159,6 +2160,8 @@ export default class Chat extends View {
       return;
     }
     this.callHelp = false;
+    // the voice agent's screen tool reads and acts on this window (call-screen.js): refs start again each call
+    this.callScreen = new CallScreen(this);
     const name = `${agent.NAMES[this.kind] ?? "the agent"}`;
     await exec("sh", ["-c", 'rm -rf "$1" "$1.level" && mkdir -p "$1/in" && touch "$1/alive"', "x", dir]);
     this.callRecent();
@@ -2253,10 +2256,36 @@ export default class Chat extends View {
     }
   }
 
+  // The voice call's screen tool scrolls this chat (call-screen.js): a few rows at a time, or to an end.
+  scrollBy(direction) {
+    const n = this.rows().length;
+    if (!n || !this.range) return null;
+    if (direction === "bottom") { this.pinned = true; this.scroll.scroll_to_bottom(); return "Scrolled the call's chat to the newest"; }
+    if (direction === "top") { this.pinned = false; this.scroll.scroll_to_item(0, "top"); return "Scrolled the call's chat to the oldest loaded (older ones load from there)"; }
+    const span = Math.max(1, this.range.end - this.range.start);
+    const to = direction === "up" ? Math.max(0, this.range.start - span) : Math.min(n - 1, this.range.end + span - 1);
+    this.pinned = direction === "down" && to >= n - 1;
+    this.scroll.scroll_to_item(to, direction === "up" ? "top" : "bottom");
+    return `Scrolled the call's chat ${direction}`;
+  }
+
+  scrollWords() {
+    const n = this.rows().length;
+    if (!n || !this.range) return "";
+    return `messages ${this.range.start + 1} to ${Math.min(n, this.range.end)} of ${n} loaded${this.range.end < n ? " (more below)" : ""}${this.range.start > 0 ? " (more above)" : ""}`;
+  }
+
   // What the voice agent asked to show, done in this window: { ok } once done, else { ok: false, why }.
   voiceNav(nav) {
     const spaceOf = (place) => spaces().find((x) => String(x.id) === place || (x.machine && `${x.machine}/${x.id}` === place));
     const no = (why) => ({ ok: false, why });
+    if (nav.kind === "screen") return (this.callScreen ??= new CallScreen(this)).act(nav);
+    if (nav.kind === "panel") {
+      if (nav.panel === "terminal" || nav.panel === "chat") return no("the window switches an Assistant between Chat and Terminal on its own tab, which a call can't reach yet");
+      run("layout.select", { stack: "panel-body", child: nav.panel === "artifacts" ? "artifacts" : nav.panel });
+      run("layout.show", { id: "panel" });
+      return { ok: true };
+    }
     if (nav.kind === "space") {
       const sp = spaceOf(nav.place);
       if (!sp) return no("this window doesn't have that space");
@@ -2290,6 +2319,11 @@ export default class Chat extends View {
       run("layout.select", { stack: "panel-body", child: TASKS_STACK });
       backToTasks();
       run("layout.show", { id: "panel" });
+      // the filter row's chip and the search field, as the Tasks list's own keys set them (mods/tasks)
+      const FILTER = { need: "needs", work: "working", ready: "ready", merging: "merging", queued: "queued", scheduled: "scheduled", todo: "todo", done: "done", automations: "automations" };
+      const at = Date.now();
+      setShared("tasks.filterreq", { key: nav.kind === "needs" ? "needs" : FILTER[nav.filter] ?? "all", at });
+      if (nav.kind === "tasks" && nav.search) setShared("tasks.searchreq", { q: String(nav.search), at });
       return { ok: true };
     }
     if (nav.kind === "artifact") { openViewer({ id: nav.artifact, title: nav.title, version: nav.v, latest: nav.v, machine: nav.machine ?? null }); return { ok: true }; }
