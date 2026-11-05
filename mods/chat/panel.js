@@ -381,8 +381,8 @@ export class PanelHost {
         .text_size(TEXT.label).text_color(t.muted).tooltip(`Merges into ${this.rec.base}`).child(`→ ${this.rec.base}`)))
       // Pin / Unpin, as the task's row in the list (not an archived task's).
       .when(Boolean(this.rec && !(this.rec.archived && this.rec.state === "done")), (el) => el.child(this.pinButton(t)))
-      // Accept: the header's one primary button (merges first when there's something to merge).
-      .when(this.acceptable(st, addr), (el) => el.child(button("thread-accept", this.accepting ? "Accepting…" : "Accept",
+      // Review: the header's one primary button, opens the Accept card (its Accept merges first when there's something to merge).
+      .when(this.acceptable(st, addr), (el) => el.child(button("thread-accept", this.accepting ? "Accepting…" : "Review",
         { kind: "primary", disabled: this.accepting, onClick: (_e, cx) => this.accept(cx) })));
   }
 

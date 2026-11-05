@@ -39,7 +39,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Started from a slot with your words | W:2428 the template part a "New session" row, your words a bubble | D `firstTask()` reads the same data/chat-first/<slot>.txt: "New session" row, then your words | ✓ |
 | Tools row | W:2793 "› Read a file, ran a command" (core summary), opens to each step's line and the first lines it printed | A:316 TurnLine + A:332 ToolSteps (D `activity.summary`, `api/activity` → `results()`) | ✓ (showed raw "Description: command" rows) |
 | Quiet lines sit tight | W spaced(): tools, briefs, news, artifact lines one block, 16px between blocks | C:1084 quiet runs grouped, `gap-4` between blocks | ✓ |
-| Task news line | W:2764 mark (green tick ready, grey tick done, amber started, red needs while live), REF, what, "·", words; Accept at the right while Ready | R:138 NewsRow (D `news`, core `newsWords`/`newsTimeline` incl. start/ready/done from the task's record) | ✓ (was a bordered 2.1 card with raw text) |
+| Task news line | W:2764 mark (green tick ready, grey tick done, amber started, red needs while live), REF, what, "·", words; Review (opens the Accept card) at the right while Ready | R:138 NewsRow (D `news`, core `newsWords`/`newsTimeline` incl. start/ready/done from the task's record) | ✓ (was a bordered 2.1 card with raw text) |
 | Accept on a Ready line | W:2838 opens the Accept card | R:138 → `openAccept` | ✓ |
 | Artifact card / line | W:2748 latest: card "Artifact · v3" + Open; earlier: "Published X v2" | plugins/artifacts ArtifactCard (D emits `artifact` via core `resolveArtifacts`) | ✓ (publishes were missing) |
 | Artifact publishing | W:2807 "Publishing an artifact…" | R:164 PublishingRow (D `publishing`) | ✓ |

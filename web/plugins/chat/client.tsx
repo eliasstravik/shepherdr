@@ -1008,7 +1008,7 @@ function Card({ card: c, chat, at, press, keys, className }: { card: UpdateCard;
   const status = t?.status ?? c.status ?? 'idle'
   const needs = (c.ask?.open || status === 'need') && registry.views.needs
   const pr = c.pr ?? t?.pr
-  // Shepherdr 3: a news line says what happened at its moment and is never rewritten after; a Ready one has Accept
+  // Shepherdr 3: a news line says what happened at its moment and is never rewritten after; a Ready one has Review (opens the Accept card)
   // while its task still waits for it
   const accept = c.status === 'ready' && t?.status === 'ready' && !t.archived
   const line = (
@@ -1028,7 +1028,7 @@ function Card({ card: c, chat, at, press, keys, className }: { card: UpdateCard;
       {accept ? (
         <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); openAccept(task) }} onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); openAccept(task) } }}
           className="press-dim ml-auto h-6 shrink-0 rounded-full bg-fg px-2.5 text-xs/6 font-medium text-bg phone:h-8 phone:px-3 phone:text-sm/8">
-          Accept
+          Review
         </span>
       ) : null}
     </button>

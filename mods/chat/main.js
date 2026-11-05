@@ -123,7 +123,7 @@ const PILL = 46, PILL_H = 20, PILL_GAP = 4, PILL_EDGE = 6;
 const taskRef = (x) => (x?.ref ? String(x.ref) : `#${x?.id}`);
 // Task chips under a message: this wide, this far apart.
 const TASK = 170, TASK_GAP = 6;
-// A Ready task's news line: its Accept, this wide, at the line's right end.
+// A Ready task's news line: its Review (opens the Accept card), this wide, at the line's right end.
 const ACCEPT = 64;
 // The picker's Frequently used before there is any history.
 const FREQUENT = ["👍", "👎", "❓", "✅", "👀", "🎉", "❤️", "🔥", "🙏"];
@@ -2953,7 +2953,7 @@ export default class Chat extends View {
 
   // The Tasks panel's Accept (ui.js), drawn here without a handler: a news line is a list row.
   acceptButton(busy) {
-    return button("accept-news", busy ? "Accepting…" : "Accept", { kind: "primary", size: "xs", disabled: Boolean(busy) });
+    return button("accept-news", busy ? "Accepting…" : "Review", { kind: "primary", size: "xs", disabled: Boolean(busy) });
   }
 
   statusLine(t, st) {

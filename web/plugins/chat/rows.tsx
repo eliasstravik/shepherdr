@@ -139,7 +139,7 @@ export function BriefRow({ msg }: { msg: Message }) {
 }
 
 /** a task's news line: its mark, the id, what happened, then its words, dim; a needs-you line still waiting in red.
- *  The line opens the task; a Ready one's Accept sits at its right end ("Accepting…" while it runs, as the window's),
+ *  The line opens the task; a Ready one's Review (opens the Accept card) sits at its right end ("Accepting…" while it runs, as the window's),
  *  gone once the task moved on (the service tells the chat again then) */
 export function NewsRow({ msg }: { msg: Message }) {
   const n = msg.news!
@@ -160,7 +160,7 @@ export function NewsRow({ msg }: { msg: Message }) {
       {n.accept ? (
         <button type="button" disabled={busy} onClick={(e) => { e.stopPropagation(); openAccept(n.task) }}
           className="press-dim ml-1 h-5 shrink-0 rounded-[6px] bg-fg px-2 text-[0.6875rem]/5 font-medium text-bg disabled:opacity-60 phone:h-7 phone:px-2.5 phone:text-xs/7">
-          {busy ? 'Accepting…' : 'Accept'}
+          {busy ? 'Accepting…' : 'Review'}
         </button>
       ) : null}
     </div>

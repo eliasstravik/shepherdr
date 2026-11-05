@@ -14,7 +14,7 @@ checks the window's askers say the same).
 
 | Element | Window (file:line, exact words/control) | Web (file:line) | State |
 |---|---|---|---|
-| Opens from | Ready row's Accept, task header, Assistant's live row (`mods/tasks/main.js:805`, `mods/chat/panel.js:156`, `mods/chat/main.js:798`), a 640×640 modal | `openAccept` from the same rows and headers; a push alert's `#accept=<task>` (`web/src/screens/Accept.tsx` fromLink) | ✓ |
+| Opens from | Review on a Ready row, the task header, Assistant's live row (`mods/tasks/main.js:805`, `mods/chat/panel.js:156`, `mods/chat/main.js:798`), a 640×640 modal | `openAccept` from the same rows and headers; a push alert's `#accept=<task>` (`web/src/screens/Accept.tsx` fromLink) | ✓ |
 | Title | `Accept HERD-4?`, only `HERD-4` once settled (`mods/accept-card/main.js:305`, `ACCEPT.title`) | `Accept.tsx:132` `A.ACCEPT.title(ref)` / `ref` | ✓ |
 | Task name under it | muted, one line, `x.title ?? p.title` (`main.js:306`) | `Dialog sub` from the evidence, else the snapshot's task name (`Accept.tsx:132`, `rowmenu.tsx:173`) | ✓ |
 | × at top right | closes as Cancel (`main.js:270`) | `Dialog closer` (`rowmenu.tsx:175`, aria-label Close) | ✓ |

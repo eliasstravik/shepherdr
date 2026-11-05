@@ -423,8 +423,8 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
   const keyboard = useUI((u) => u.keyboard)
   const coordinator = placeOf(snap, task.place).name
   const accepting = useAccepting(task.id) || !!task.accepting
-  // as 3.0's task header (mods/chat/panel.js barRow): where it merges, Pin / Unpin (not an archived task's), and Accept
-  // once it is Ready ("Accepting…" while its accept runs); then its tabs (TaskTabs)
+  // as 3.0's task header (mods/chat/panel.js barRow): where it merges, Pin / Unpin (not an archived task's), and Review
+  // (opens the Accept card) once it is Ready ("Accepting…" while its accept runs); then its tabs (TaskTabs)
   const target = task.base ? <span className="max-w-40 shrink-0 truncate text-[0.8125rem] text-fg2 phone:text-[0.875rem]" title={`Merges into ${task.base}`}>→ {task.base}</span> : null
   const tools = (
     <>
@@ -434,7 +434,7 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
           {task.pinned ? <UnpinIcon className={ic} /> : <PinTaskIcon className={ic} />}
         </IconButton>
       )}
-      {task.status === 'ready' && !task.archived ? <Primary soft disabled={accepting} onClick={() => openAccept(task.id)}>{accepting ? 'Accepting…' : 'Accept'}</Primary> : null}
+      {task.status === 'ready' && !task.archived ? <Primary soft disabled={accepting} onClick={() => openAccept(task.id)}>{accepting ? 'Accepting…' : 'Review'}</Primary> : null}
     </>
   )
   // its id, in the list's monospace, before its title (as the window's), and under them what its agent is doing
