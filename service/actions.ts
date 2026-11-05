@@ -514,7 +514,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (!r || !b.job.startsWith("b:") || !(await r.stopJob(b.job.slice(2)))) throw new Error("It isn't running any more.");
     return { ok: true };
   }
-  else if ((b?.type === "close" || b?.type === "delete" || b?.type === "archive" || b?.type === "task-resume" || b?.type === "schedule") && typeof b.chat === "string") {
+  else if ((b?.type === "close" || b?.type === "delete" || b?.type === "archive" || b?.type === "reopen" || b?.type === "task-resume" || b?.type === "schedule") && typeof b.chat === "string") {
     // a task's row menu: its chat key is "<task>/worker" (or 2.1's "/Agent")
     const t = compat.taskOf(b.chat.split("/")[0]);
     if (!t) throw new Error("That task isn't here any more.");
@@ -621,10 +621,10 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       return { ok: true, why: out?.why ?? null };
     }
     // the person's own calls on a task, as herdr-task makes them: done, removed, or back from the archive
-    case "close": case "delete": case "archive": {
+    case "close": case "delete": case "archive": case "reopen": {
       if (b.type === "archive" && b.on !== false) throw new Error("Done tasks archive themselves: Settings › Tasks › Archive Done after.");
       const { ref, folder, machine } = taskOf(b);
-      const r = await task([b.type === "close" ? "done" : b.type === "delete" ? "rm" : "unarchive", ref], folder, machine);
+      const r = await task([b.type === "close" ? "done" : b.type === "delete" ? "rm" : b.type === "reopen" ? "reopen" : "unarchive", ref], folder, machine);
       let out: any = null;
       try { out = JSON.parse(r.stdout); } catch {}
       if (r.code !== 0 || out?.error) return { ok: false, error: out?.error || r.stderr.trim().split("\n").pop() || "herdr-task refused it." };
