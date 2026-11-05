@@ -241,7 +241,9 @@ export class Settings {
    *  of it, unless the file says newer). A space switches it on in its Assistant's header. */
   private pilot(s: Scope | null, e: PilotEverywhere, trigger?: (space: string) => string | undefined): SettingSection {
     const every = AP.levelOf(this.file), own = s ? AP.levelOf(this.file, s.id) : {};
-    const parent: Record<string, any> = { heartbeat: every.heartbeat ?? e.words ?? "", every: every.every ?? e.every ?? "", events: every.events ?? e.events ?? [] };
+    const parent: Record<string, any> = { heartbeat: AP.currentBeat(every.heartbeat ?? e.words ?? ""), every: every.every ?? e.every ?? "", events: every.events ?? e.events ?? [],
+      direction: every.direction ?? "" };
+    if (typeof own.heartbeat === "string") own.heartbeat = AP.currentBeat(own.heartbeat);
     const pick = (f: string) => ({ value: f in own ? own[f] : parent[f], own: f in own, parent: parent[f], level: "everywhere", machine: null });
     const others = (f: string) => (s ? {} : (() => {
       const list = this.scopes.filter((sc) => f in AP.levelOf(this.file, sc.id)).map((sc) => ({ id: sc.id, name: sc.name }));
@@ -257,6 +259,9 @@ export class Settings {
     const words = (s ? trigger?.(s.id) : e.trigger) ?? ([ew.trim() ? everyWord(ew) : "", named ? `On ${named}` : ""].filter(Boolean).join(" · ") || "Only Run now");
     const R = AP.ROWS;
     const rows: SettingRow[] = [
+      // a space's Direction: the one line it steers toward (Everywhere has none to give: it works out its own)
+      ...(s ? [{ label: R.direction.label, key: "autopilot.direction", value: String(pick("direction").value ?? ""), text: true, hint: R.direction.about,
+        placeholder: AP.DIRECTION_PLACEHOLDER } as SettingRow] : []),
       { label: R.heartbeat.label, key: "autopilot.heartbeat", value: String(pick("heartbeat").value ?? ""), doc: true, hint: R.heartbeat.about,
         ...under("heartbeat", (v) => String(v ?? "")) } as SettingRow,
       { label: R.every.label, key: "autopilot.every", value: ew, text: true, hint: R.every.about,
@@ -415,7 +420,8 @@ export class Settings {
         const on = word.split(",").map((x) => x.trim()).filter(Boolean);
         if (on.some((x) => !AP.EVENTS.some(([e]: string[]) => e === x))) throw new Error("Not an event Autopilot knows.");
         v = AP.eventsIn(on);
-      } else if (word !== null) v = word.slice(0, 8000);
+      } else if (word !== null && field === "direction") v = AP.directionOf(word) || null;
+      else if (word !== null) v = word.slice(0, 8000);
       put("autopilot", field, v);
     } else if (key === "backup.agent") {
       // off is "off"; on follows what it would get anyway when that is on, else names the other CLI (as the window's)

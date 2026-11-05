@@ -44,12 +44,12 @@ def read_settings():
 
 
 def autopilot_layers(d, space=None):
-    """(Everywhere's, the space's own) Autopilot in a settings file d: {every, events, heartbeat},
+    """(Everywhere's, the space's own) Autopilot in a settings file d: {every, events, heartbeat, direction},
     each only when set. A space is found by its id on this machine (a pushed copy holds this
     machine's spaces by their bare ids, as herdr-task names them)."""
     def part(layer):
         a = (layer or {}).get("autopilot") if isinstance(layer, dict) else None
-        return {k: v for k, v in a.items() if k in ("every", "events", "heartbeat") and v is not None} if isinstance(a, dict) else {}
+        return {k: v for k, v in a.items() if k in ("every", "events", "heartbeat", "direction") and v is not None} if isinstance(a, dict) else {}
     return part(d.get("everywhere")), part((d.get("spaces") or {}).get(space) if space else None)
 
 

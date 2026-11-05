@@ -11,13 +11,16 @@
 // Shared core: the source is core/autopilot.js; bin/sync-shared copies it into the mods in lib/COPIES.
 
 export const TITLE = "Autopilot";
-export const ABOUT = "How Autopilot works. Turn it on in a space with the switch in its Assistant's header: "
-  + "its Assistant then wakes on a schedule or when something happens to its tasks, and works from the heartbeat.";
-// The fields a space can set its own of (Shepherdr settings' "autopilot").
-export const FIELDS = ["heartbeat", "every", "events"];
+export const ABOUT = "Turn it on in a space with the switch in its Assistant's header: its Assistant then wakes on a schedule "
+  + "or when something happens to its tasks. By default it unblocks and checks what's open, then adds and starts the next "
+  + "most useful tasks to push the project forward, toward the space's Direction (none: what the project itself shows). "
+  + "It never merges or accepts: that stays yours.";
+// The fields a space can set its own of (Shepherdr settings' "autopilot"). direction: one line that steers it (a space's).
+export const FIELDS = ["heartbeat", "every", "events", "direction"];
 
 // Each row's label and its line under it.
 export const ROWS = {
+  direction: { label: "Direction", about: "One line it steers toward in this space. Empty: it works out what matters most from the project itself." },
   heartbeat: { label: "Heartbeat", about: "What it works from: direction, priorities, limits and when to stop." },
   every: { label: "Schedule", about: "When it wakes by itself." },
   events: { label: "Events", about: "These wake a space's Assistant at once when they happen to its tasks." },
@@ -33,12 +36,41 @@ export const EVENTS = [["added", "Added"], ["ready", "Ready"], ["failed", "Faile
 
 // The heartbeat box: saved a moment after typing stops, and on leaving it; "Saved" shows dim for a moment after.
 export const SAVED = "Saved";
+// The Direction box: one line, kept when you leave it (herdr-task: DIRECTION_MAX).
+export const DIRECTION_PLACEHOLDER = "Like \"get the checkout flow ready to launch\"";
+export const DIRECTION_MAX = 300;
+export const directionOf = (words) => String(words ?? "").replace(/\s+/g, " ").trim().slice(0, DIRECTION_MAX);
 export const SAVE_AFTER_MS = 600;
 export const NO_HEARTBEAT = "Couldn't make the heartbeat file.";
 
 // The heartbeat Everywhere has until someone writes one (autopilot.py STARTER, the same words): a real one, ready to use
 // as it is in any project; the person edits it, Everywhere's or a space's own, to steer.
-export const STARTER = `Direction: keep this space's tasks moving to done, without wasting my time or money. Don't invent work or redo old asks from past chats.
+export const STARTER = `Direction: push this project forward, without wasting my time or money. Follow this space's Direction when it has one; with none, work out what matters most from the project itself.
+
+Each wake: first what woke you, then in order:
+1. Needs you, failed or stalled: look why. Unblock what you can (nudge, resume, fix); what only I can answer, ask me once, in one clear question.
+2. Ready: check the work (diff, checks, proof). Tell me in a line if it looks right to Accept; a clear defect, send it back saying what's wrong.
+3. To do: start the ones with a clear brief that nothing blocks; the queue limits how many run. Leave a task that's working fine alone.
+4. Push the project forward: look at the project itself (README, docs and goals, recent commits and merged tasks, open GitHub issues and PRs, TODOs, failing or missing tests, your saved progress and what I asked for lately). Add the most valuable next tasks, each with a full brief (what, why, how to check it's done), and start them within the queue. At most 2 a wake; never one that repeats an open or recent task or an old ask I dropped. Tell me in one line what you started and why.
+5. End by saving progress and your next step.
+
+Limits:
+- Never merge, Accept, mark done, delete or stop work: that's mine.
+- Ask before anything risky, costly or outside this space (deploys, pushes to main, emails, posts, payments, sign-ups).
+- Work only through herdr-task tasks; never write the code yourself.
+- Same thing failed twice: stop retrying and tell me.
+- 3 or more tasks waiting on me: add and start nothing new.
+- Keep a wake short: a few minutes of your own work.
+
+Reporting: one or two short plain lines, only what's new that I must know or decide; never repeat what you told me before. Reply only <hc no-reply/> when there's truly nothing worth doing: nothing to unblock, check or start, and no next task worth adding. Alert me only for what can't wait (something down, work at risk).
+
+Stopping goal: none. Runs until I switch it off.
+`;
+
+// Everywhere's until set (herdr-task: everywhere_default).
+export const DEFAULT = { every: "every 60 minutes", events: [] };
+// Starters earlier versions wrote (herdr-task: OLD_STARTERS): one never edited stands for today's.
+export const OLD_STARTERS = [`Direction: keep this space's tasks moving to done, without wasting my time or money. Don't invent work or redo old asks from past chats.
 
 Each wake: first what woke you, then in order:
 1. Needs you, failed or stalled: look why. Unblock what you can (nudge, resume, fix); what only I can answer, ask me once, in one clear question.
@@ -58,12 +90,7 @@ Limits:
 Reporting: one or two short plain lines, only what's new that I must know or decide; never repeat what you told me before. Nothing new: reply only <hc no-reply/>, never with other words. Alert me only for what can't wait (something down, work at risk).
 
 Stopping goal: none. Runs until I switch it off.
-`;
-
-// Everywhere's until set (herdr-task: everywhere_default).
-export const DEFAULT = { every: "every 60 minutes", events: [] };
-// Starters earlier versions wrote (herdr-task: OLD_STARTERS): one never edited stands for today's.
-export const OLD_STARTERS = [`Direction: what Autopilot works toward in this space.
+`, `Direction: what Autopilot works toward in this space.
 
 Priorities:
 -
@@ -116,6 +143,7 @@ export function pilotFor(file, space, settings = null) {
     if (typeof layer.every === "string") { e.every = ruleText(layer.every); if (mine) own.push("every"); }
     if (Array.isArray(layer.events)) { e.events = eventsIn(layer.events); if (mine) own.push("events"); }
     if (mine && typeof layer.heartbeat === "string") own.push("heartbeat");
+    if (mine && typeof layer.direction === "string" && layer.direction.trim()) own.push("direction");
   }
   return { ...a, space, on: Boolean(a.on), every: e.every, events: e.events, own, ...(e.trigger && !a.trigger ? { trigger: e.trigger } : {}) };
 }

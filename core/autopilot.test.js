@@ -51,12 +51,16 @@ test("a level holds only what it sets", () => {
   // the starter is a real heartbeat; an earlier version's, never edited, stands for it
   expect([blankBeat(""), blankBeat(STARTER), blankBeat("Ship."), blankBeat(OLD_STARTERS[0])]).toEqual([true, false, false, false]);
   expect([currentBeat(OLD_STARTERS[0]), currentBeat(` ${OLD_STARTERS[0].trim()}\n\n`), currentBeat("Ship.")]).toEqual([STARTER, STARTER, "Ship."]);
+  // every earlier starter (the one that said "Don't invent work" too) stands for today's, which drives the project
+  expect(OLD_STARTERS.map(currentBeat)).toEqual(OLD_STARTERS.map(() => STARTER));
+  expect(STARTER).toContain("Push the project forward");
+  expect(STARTER).not.toContain("Don't invent work");
 });
 
 test("the starter heartbeat, events and default schedule are herdr-task's", () => {
   const py = readFileSync(new URL("../mods/tasks/bin/herdr_task/autopilot.py", import.meta.url), "utf8");
   expect(py).toContain(`STARTER = """${STARTER}"""`);
-  expect(py).toContain(`OLD_STARTERS = ("""${OLD_STARTERS[0]}""",)`);
+  expect(py).toContain(`OLD_STARTERS = (${OLD_STARTERS.map((x) => `"""${x}"""`).join(", ")},)`);
   const auto = readFileSync(new URL("../mods/tasks/bin/herdr_task/automations.py", import.meta.url), "utf8");
   expect(auto).toContain(`EVENTS = [${EVENTS.map(([v]) => `"${v}"`).join(", ")}]`);
   expect(py).toContain(`DEFAULT_EVERY = "${PRESETS[2][0]}"`);

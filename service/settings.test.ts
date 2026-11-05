@@ -1,3 +1,4 @@
+import * as APc from "../core/autopilot.js";
 import { expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -64,6 +65,18 @@ test("Autopilot: Everywhere's unless a space sets its own, kept with the rest an
   expect(row("sp4", "autopilot.heartbeat")).toMatchObject({ value: "Keep it green." });
   expect(row("all", "autopilot.every").others).toEqual([{ id: "pi/sp5", name: "api" }]);
   expect(() => s.set("autopilot.events", "lunch", "all")).toThrow();
+  // a space's Direction: one line; empty, none (Everywhere's page has no Direction row)
+  s.set("autopilot.direction", "  Launch the\n  shop ", "sp4", web);
+  expect(JSON.parse(readFileSync(file, "utf8")).spaces.sp4.autopilot).toEqual({ direction: "Launch the shop" });
+  expect(row("sp4", "autopilot.direction")).toMatchObject({ value: "Launch the shop", text: true });
+  expect(row("all", "autopilot.direction")).toBeUndefined();
+  s.set("autopilot.direction", "", "sp4", web);
+  expect(JSON.parse(readFileSync(file, "utf8")).spaces.sp4.autopilot).toBeUndefined();
+  // an earlier version's starter in Settings shows as today's
+  s.set("autopilot.heartbeat", APc.OLD_STARTERS[0], "sp4", web);
+  expect(row("sp4", "autopilot.heartbeat").value).toBe(APc.STARTER);
+  s.set("autopilot.heartbeat", null, "sp4", web);
+  expect(page("all").about).toContain("push the project forward");
   // Reset: back to Everywhere's
   s.set("autopilot.every", null, "pi/sp5", api);
   s.set("autopilot.heartbeat", null, "pi/sp5", api);

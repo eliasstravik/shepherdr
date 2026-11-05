@@ -27,10 +27,13 @@ const MONO = "JetBrains Mono";
 // The section's state, made in the window's init (the boxes need a live host call).
 export function autopilotInit(view, cx) {
   const ap = { base: null, every: InputState.new({ placeholder: AP.CUSTOM_PLACEHOLDER }), err: "", custom: false,
+    dir: InputState.new({ placeholder: AP.DIRECTION_PLACEHOLDER }),
     beat: { box: TextareaState.new({ placeholder: "" }), saved: null, gen: 0, savedAt: 0, focus: false } };
   ap.every.on("submit", (_e, cx) => saveEvery(view, cx));
   ap.every.on("blur", (_e, cx) => saveEvery(view, cx));
   ap.every.on("change", (_e, cx) => { ap.err = ""; cx.notify(); });
+  ap.dir.on("submit", (_e, cx) => saveDirection(view, cx));
+  ap.dir.on("blur", (_e, cx) => saveDirection(view, cx));
   const b = ap.beat;
   b.box.set_auto_grow(4, 12);
   b.box.on("change", (_e, cx) => {
@@ -53,8 +56,20 @@ export function autopilotInit(view, cx) {
   return ap;
 }
 
-// What applies at the window's level now: { every, events, heartbeat }.
-const now = (view) => Object.fromEntries(AP.FIELDS.map((f) => [f, view.chain("autopilot", f).find((x) => x.value !== undefined)?.value]));
+// What applies at the window's level now: { every, events, heartbeat, direction } (an earlier version's starter as today's).
+const now = (view) => {
+  const a = Object.fromEntries(AP.FIELDS.map((f) => [f, view.chain("autopilot", f).find((x) => x.value !== undefined)?.value]));
+  return { ...a, heartbeat: a.heartbeat == null ? a.heartbeat : AP.currentBeat(a.heartbeat) };
+};
+
+// A space's Direction: one line, kept when you leave the box; empty, it has none again.
+function saveDirection(view, cx) {
+  if (!view.scope || view.scope !== view.ap.dirScope) return; // the box still shows another space's
+  const v = AP.directionOf(view.ap.dir.value());
+  if (v === AP.directionOf(now(view).direction)) return;
+  if (v) view.set("autopilot", "direction", v, cx);
+  else view.reset("autopilot", "direction", cx);
+}
 
 // A Custom schedule: herdr-task knows its words first (its refusal shows under the box), then it's kept.
 function saveEvery(view, cx) {
@@ -102,6 +117,12 @@ export function autopilotSection(view, t, cx) {
     ap.err = "";
     cx.timer.after(0, (cx) => { ap.every.set_value(a.every ?? ""); cx.notify(); });
   }
+  const dirKey = `${view.scope ?? ""}|${a.direction ?? ""}`;
+  if (ap.dirKey !== dirKey) {
+    ap.dirKey = dirKey;
+    ap.dirScope = view.scope;
+    cx.timer.after(0, (cx) => { ap.dir.set_value(AP.directionOf(a.direction)); cx.notify(); });
+  }
   const b = ap.beat;
   const beatKey = `${view.scope ?? ""}|${a.heartbeat ?? ""}`;
   if (b.key !== beatKey && !b.focus) {
@@ -142,6 +163,10 @@ export function autopilotSection(view, t, cx) {
   return v_flex()
     .child(view.title(t, AP.TITLE))
     .child(div().pb(8).text_size(TEXT.label).line_height("17px").text_color(t.dim).child(AP.ABOUT))
+    // a space's Direction: the one line it steers toward (Everywhere has none: each space works out its own)
+    .when(Boolean(view.scope), (el) => el.child(view.row(t, AP.ROWS.direction.label, AP.ROWS.direction.about, null, null,
+      div().w_full().h(H.lg).px(9).flex().items_center().rounded(RADIUS.control).border_1().border_color(t.input).bg(t.background)
+        .child(Input.new(ap.dir).w_full().text_size(TEXT.body).text_color(t.foreground)))))
     .child(view.row(t, AP.ROWS.heartbeat.label, AP.ROWS.heartbeat.about, savedWord, view.scoped("autopilot", "heartbeat"), beatBox))
     .child(view.row(t, AP.ROWS.every.label, AP.ROWS.every.about,
       segmented("ap-every", [...AP.PRESETS, [CUSTOM, AP.CUSTOM]], preset, pick), view.scoped("autopilot", "every"), customBox))

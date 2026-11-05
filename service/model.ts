@@ -160,7 +160,7 @@ export class Model {
       // with no heartbeat in Settings it works from its machine's file, made with the starter when switched on
       const file = this.pilots.get(id.slice(0, cut)) ?? {};
       const a = pilotFor({ ...file, spaces: { [id]: file.spaces?.[id.slice(cut + 1)] ?? {} } }, id, this.settings);
-      const words = levelOf(this.settings, id).heartbeat ?? levelOf(this.settings).heartbeat ?? STARTER;
+      const words = currentBeat(levelOf(this.settings, id).heartbeat ?? levelOf(this.settings).heartbeat ?? STARTER);
       return { ...a, words };
     }
     const a = this.autopilot[id] ?? pilotFor({ everywhere: this.pilotEverywhere }, id);
