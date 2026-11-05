@@ -6,7 +6,7 @@
 // themselves: the Archived row at the bottom opens them.
 import clsx from 'clsx'
 import { openAccept, useAccepting } from '@client/screens/Accept.tsx'
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import {
   archivedIn,
   definePlugin,
@@ -83,10 +83,6 @@ const STATUS = TK.STATUS as Record<string, string>
 /** a task's id as its row shows it: its list's ref, without the machine ("SHEP-7"; the machine is in where it is) */
 const refOf = (id: string) => id.slice(id.lastIndexOf(':') + 1)
 
-/** the id column's width (characters): as wide as the longest id anywhere in the list, so every title lines up (the
- *  window's idWidth) */
-const IdWidth = createContext(0)
-
 /** the window's automation mark (mods/tasks/repeat.svg, lucide's repeat) */
 function RepeatIcon({ className }: { className?: string }) {
   return (
@@ -100,9 +96,8 @@ function RepeatIcon({ className }: { className?: string }) {
 }
 
 /**
- * A task, with one line under its title (taskLine). Working, its pie fills with the % done its agent reported and the minutes
- * left sit small under it. Every row shows its age (how long it has been as it is) at its end, like the rows around it;
- * waiting on you, its frozen status line stays in its chat's header.
+ * A task, with one line under its title (taskLine). Working, its pie fills with the % done its agent reported and the time
+ * left sits at the row's end ("2h left"); Ready, Review sits there instead.
  */
 function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
   // the open task, or the focused pane's in split view
@@ -112,12 +107,12 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
   // task's: archived ones drop out of Pinned)
   const menu = useRowMenu()
   const busy = useAccepting(t.id) || !!t.accepting
-  // as 3.0's row (mods/tasks row()): Review (opens the Accept card), the compact one, on a Ready row's second line; "Accepting…" while its
-  // accept runs
+  // Review (opens the Accept card) at a Ready row's end, soft as the chat header's Review: one per Ready row, so never the
+  // filled look; "Accepting…" while its accept runs
   const accept =
     t.status === 'ready' && !t.archived ? (
       <button type="button" disabled={busy} onClick={() => openAccept(t.id)}
-        className="press-dim pointer-events-auto relative z-1 h-5 shrink-0 rounded-full bg-fg px-2 text-[0.75rem] font-medium whitespace-nowrap text-bg after:absolute after:-inset-1.5 disabled:opacity-60 phone:h-7 phone:px-3 phone:text-[0.8125rem]">
+        className="press-dim pointer-events-auto relative z-1 h-6 shrink-0 rounded-full bg-bubble px-2.5 text-[0.75rem] font-medium whitespace-nowrap text-fg after:absolute after:-inset-x-1 after:-inset-y-2.5 enabled:hover:bg-sel disabled:opacity-60 phone:px-3 phone:text-[0.8125rem]">
         {busy ? 'Accepting…' : 'Review'}
       </button>
     ) : null
@@ -145,24 +140,24 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
 }
 
 /**
- * One row, as the window's (mods/tasks line()): the glyph, the dim id in its fixed column, then the title, which owns
- * the first line. Anything else goes on a second line that starts where the title does: why it needs you or what its
- * agent does (at most 40 characters; the whole of it in its button's label), then at its end where it is and the button (Review),
- * so where it is never sits under the button. A row with nothing to say under its title is one line, where it is dim
- * at its end. `meta`: a short note at the first line's end (an automation's next run). `left`: the minutes left, small
- * under the glyph. `tip`: more for its button's label only (an automation's error).
+ * One row, as the window's (mods/tasks line()). Three parts, each with one job:
+ * - the glyph, level with the title;
+ * - the text: the title owns the first line; under it one quiet line read left to right, never pushed apart: the
+ *   task's id (dim, monospace), what it says now (why it needs you, what its agent does: at most 40 characters, the
+ *   whole of it in the row's label), then where it is after a dot, whole or not at all (it gives way first);
+ * - the end, centred on the row: the one thing to act on or watch: Review, the time left ("2h left") or an
+ *   automation's next run (`meta`).
+ * A row with nothing under its title is one line. `tip`: more for its button's label only (an automation's error).
  */
 function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, dim, meta, where, action, tip, onOpen, menu, children }: {
   flip?: string; sel?: boolean; kb?: boolean; glyph: ReactNode; ref_?: string; title: string; sub?: string; left?: string; dim?: boolean; meta?: string
   where?: string; action?: ReactNode; tip?: string; onOpen?: (e: MouseEvent) => void; menu?: RowMenuState; children?: ReactNode
 }) {
-  const idCh = useContext(IdWidth)
   const said = sub ? capital(sub) : undefined
   const shown = said ? fit(said) : undefined
-  const two = !!shown || !!action
-  const place = where ? <span className="min-w-0 shrink truncate text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{where}</span> : null
-  // the id column: as wide as the longest id in the list (the second line starts under the title too)
-  const idCol = ref_ && idCh ? { width: `${idCh}ch` } : undefined
+  const two = !!(ref_ || shown || where)
+  const end = action ?? (left ? <span className="shrink-0 text-[0.75rem] font-medium whitespace-nowrap text-work-fg tabular-nums phone:text-[0.8125rem]">{left} left</span>
+    : meta ? <span className="shrink-0 text-[0.75rem] whitespace-nowrap text-fg3 tabular-nums phone:text-[0.8125rem]">{meta}</span> : null)
   return (
     <li data-flip={flip} className={clsx(rowClass(sel, kb), 'group relative p-0! select-none [-webkit-touch-callout:none]', menu?.open && !sel && 'bg-hover')} {...(menu?.press ?? {})}>
       {/* the whole row opens it: one button stretched under it; Review sits over it, a button of its own */}
@@ -170,46 +165,32 @@ function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, di
         <button
           type="button"
           aria-current={sel || undefined}
-          aria-label={`${ref_ ? `${ref_} ` : ''}${title}${said ? `, ${said}` : ''}${meta ? `, ${meta}` : ''}${tip ? `, ${tip}` : ''}`}
+          aria-label={`${ref_ ? `${ref_} ` : ''}${title}${said ? `, ${said}` : ''}${left ? `, ${left} left` : ''}${meta ? `, ${meta}` : ''}${tip ? `, ${tip}` : ''}`}
           onClick={onOpen}
           className="absolute inset-0 cursor-pointer rounded-[inherit] outline-none keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)]"
         />
       ) : null}
-      {/* what the row shows is said by its button's label: only Review is read on its own */}
-      <div className={clsx('pointer-events-none relative flex min-h-[inherit] w-full min-w-0 gap-2.5 px-2 phone:px-3', two ? 'items-start py-1.5' : 'items-center')}>
-        <span aria-hidden className="flex w-3.5 shrink-0 flex-col items-center">
-          <span className="grid h-[18px] place-items-center phone:h-5">{glyph}</span>
-          {/* level with the second line, as the window's: as tall as it, under the glyph */}
-          {two && left ? <span className="mt-0.5 flex h-5 items-center font-mono text-[0.6875rem] font-semibold whitespace-nowrap text-work-fg tabular-nums phone:h-7">{left}</span> : null}
-        </span>
-        <span aria-hidden={!!onOpen} className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="flex h-[18px] min-w-0 items-center gap-2 phone:h-5">
-            {ref_ ? <span style={idCol} className="shrink-0 font-mono text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{ref_}</span> : null}
-            <span className={clsx('min-w-16 flex-auto truncate', dim ? 'text-fg2' : 'text-fg')}>{title}</span>
-            {meta ? <span className="shrink-0 pl-1 text-[0.75rem] text-fg3 tabular-nums phone:text-[0.8125rem]">{meta}</span> : null}
-            {/* one line: where it is at the end; it gives way before the title is cut */}
-            {/* on a phone whole or not at all, as on the second line */}
-            {!two && place ? (
-              <span className={clsx('flex h-full min-w-0 shrink-[1000] items-center justify-end phone:flex-wrap phone:content-start phone:overflow-hidden', !meta && 'pl-1')}>
-                <span className="h-full grow" />
-                <span className="flex h-full min-w-0 items-center phone:shrink-0">{place}</span>
+      {/* what the row shows is said by its button's label: only Review is read on its own. A grid: the glyph, the title
+          and the end on a desktop's first line (the end centred on the row); on a phone the end sits at the second
+          line's end, so the title has the whole first line */}
+      <div className={clsx('pointer-events-none relative grid min-h-[inherit] w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 px-2 phone:px-3', two && 'gap-y-0.5 py-2')}>
+        <span aria-hidden className="col-start-1 row-start-1 grid h-5 w-3.5 place-items-center phone:h-6 phone:w-4">{glyph}</span>
+        <span aria-hidden={!!onOpen} className={clsx('col-start-2 row-start-1 min-w-0 truncate text-[0.875rem]/5 phone:text-base/6', dim ? 'text-fg2' : 'text-fg', two && 'phone:col-end-4')}>{title}</span>
+        {two ? (
+          <span aria-hidden={!!onOpen} className="col-start-2 row-start-2 flex h-4 min-w-0 items-center gap-1.5 text-[0.75rem]/4 phone:h-6 phone:text-[0.8125rem]/5">
+            {ref_ ? <span className="shrink-0 font-mono text-[0.6875rem] text-fg3 phone:text-[0.75rem]">{ref_}</span> : null}
+            {shown ? <span className="min-w-0 shrink truncate text-fg2">{shown}</span> : null}
+            {/* where it is takes the room left after the words, whole or not at all: it drops under the line, out of
+                sight (the empty first item keeps the line its height), never a cut "shep…" */}
+            {where ? (
+              <span className="flex h-full min-w-0 flex-1 basis-0 flex-wrap content-start overflow-hidden">
+                <span className="h-full" />
+                <span className="flex h-full shrink-0 items-center gap-1.5 whitespace-nowrap text-fg3">{ref_ || shown ? <span aria-hidden>·</span> : null}{where}</span>
               </span>
             ) : null}
           </span>
-          {two ? (
-            <span className="flex h-5 min-w-0 items-center gap-2 phone:h-7">
-              {idCol ? <span style={idCol} className="shrink-0 font-mono text-[0.75rem] phone:text-[0.8125rem]" /> : null}
-              {shown ? <span className="min-w-0 shrink truncate text-[0.75rem] text-fg2 phone:text-[0.8125rem]">{shown}</span> : null}
-              {/* where it is takes the room the status line leaves; on a phone whole or not at all (it drops under the
-                  line, out of sight: the empty first item keeps the line its height), never a cut "shep…" */}
-              <span className="flex h-full min-w-0 flex-1 items-center justify-end phone:flex-wrap phone:content-start phone:overflow-hidden">
-                {place ? <span className="h-full grow" /> : null}
-                {place ? <span className="flex h-full min-w-0 items-center phone:shrink-0">{place}</span> : null}
-              </span>
-              {action}
-            </span>
-          ) : null}
-        </span>
+        ) : null}
+        {end ? <span className={clsx('col-start-3 row-start-1 flex items-center', two && 'row-span-2 phone:row-span-1 phone:row-start-2')}>{end}</span> : null}
       </div>
       {children}
     </li>
@@ -393,18 +374,7 @@ function AutoRow({ a, where }: { a: Automation; where?: string }) {
   )
 }
 
-function TaskList(props: { placeId: string }) {
-  const snap = useSnap()!
-  // ids sit in a column as wide as the longest one anywhere here, so every title lines up (the window's idWidth)
-  const idCh = Math.max(0, ...snap.tasks.map((t) => refOf(t.id).length))
-  return (
-    <IdWidth.Provider value={idCh}>
-      <TaskListBody {...props} />
-    </IdWidth.Provider>
-  )
-}
-
-function TaskListBody(_: { placeId: string }) {
+function TaskList(_: { placeId: string }) {
   const snap = useSnap()!
   const view = useStore((s) => listView(s.ui, snap))
   const key = view.key
@@ -566,10 +536,11 @@ function FoldHeading({ name, fold, flip, className, children, count }: { name: s
     <>
       {fold ? <Icon aria-hidden className={clsx(ic, '-mx-px text-fg3 group-hover/h:text-fg phone:mx-0')} /> : <span aria-hidden className={clsx(ic, '-mx-px phone:mx-0')} />}
       {children}
-      {count ? <span className="ml-auto shrink-0 text-[0.75rem] font-medium text-fg3 tabular-nums phone:text-[0.875rem]">{count}</span> : null}
+      {/* its count right by its name ("Ready 2"), not across the panel */}
+      {count ? <span className="shrink-0 text-[0.75rem] text-fg3 tabular-nums phone:text-[0.875rem]">{count}</span> : null}
     </>
   )
-  const look = 'flex min-h-9 w-full items-center gap-2 rounded-row px-2 text-left phone:min-h-11 phone:px-3'
+  const look = 'flex min-h-8 w-full items-center gap-3 rounded-row px-2 text-left phone:min-h-11 phone:px-3'
   return (
     <div data-flip={flip} data-heading={name} className={clsx('px-1.5 phone:px-2', className)}>
       {fold ? (
@@ -591,8 +562,8 @@ function FoldHeading({ name, fold, flip, className, children, count }: { name: s
 /** A group's label (Working, Done, a space): folds its tasks away, and its Show all with them */
 function GroupHeading({ label, note, count, flip, fold }: { label: string; note?: string; count: number; flip?: string; fold?: Fold }) {
   return (
-    <FoldHeading name={label} fold={fold} flip={flip} count={count} className="pt-1">
-      <span className="min-w-0 truncate text-[0.75rem] font-medium text-fg3 phone:text-[0.875rem]">
+    <FoldHeading name={label} fold={fold} flip={flip} count={count} className="pt-3">
+      <span className="min-w-0 truncate text-[0.75rem] font-medium text-fg2 phone:text-[0.875rem]">
         {label}
         {/* by space on All machines, the machine it is on */}
         {note ? <span className="font-normal opacity-75"> · {note}</span> : null}
