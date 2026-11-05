@@ -189,12 +189,12 @@ def news_pass(report, folder=None):
             read = (k.get("labels") or {}).get(READ) if k else None
             if k and str(read) == str(k.get("turn")) and to not in quiet:
                 quiet[to] = {"turn": k.get("turn"), "at": now()}
-    # Reactions changed in Settings: each running Assistant told once (reactions.py).
+    # Settings changed for a space: its running Assistant told once, in one message (assistant_settings.py).
     try:
-        from .reactions import reactions_pass
-        reactions_pass(report, quiet)
+        from .assistant_settings import settings_pass
+        settings_pass(report, quiet)
     except Exception as e:  # never stops the news
-        report["reactions_error"] = str(e)
+        report["settings_error"] = str(e)
     news_read(quiet)
     held_pass(report)
     tmp = f"{NEWS}.{os.getpid()}.tmp"
