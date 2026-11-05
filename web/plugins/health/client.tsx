@@ -7,7 +7,7 @@ import clsx from 'clsx'
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { act, definePlugin, getState, setUI, useSnap } from '@client/kernel.ts'
 import { sectionOf } from '@client/Settings.tsx'
-import { CogIcon, ic, MonitorIcon, NextIcon, ServerIcon, useDismiss } from '@client/ui.tsx'
+import { CogIcon, Floating, ic, MonitorIcon, NextIcon, ServerIcon, useDismiss } from '@client/ui.tsx'
 import type { Machine, MachineStats } from '@shared/types.ts'
 import * as MC from '@core/machines.js'
 
@@ -59,17 +59,23 @@ function Bars({ meters }: { meters: Meter[] }) {
 export function MachineMeter({ m }: { m: Machine }) {
   const s = m.stats
   const [open, setOpen] = useState(false)
+  const button = useRef<HTMLButtonElement>(null)
   if (!s?.health) return null
   const meters = core.healthMeters(s)
   const words = core.meterWords(s)
   return (
     <span className="relative z-1 flex">
-      <button type="button" aria-label={`${m.name}: ${words}`} aria-haspopup="dialog" aria-expanded={open}
+      <button ref={button} type="button" aria-label={`${m.name}: ${words}`} aria-haspopup="dialog" aria-expanded={open}
         onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
         className="hit grid h-6 place-items-center rounded-full px-1 hover:bg-sel aria-expanded:bg-sel phone:h-8">
         <Bars meters={meters} />
       </button>
-      {open ? <MachinePopup m={m} onClose={() => setOpen(false)} /> : null}
+      {open ? (
+        // over everything, under the bars (or over them, near the bottom), never past the screen's edges at any sidebar width
+        <Floating anchor={button.current} place="below-end" gap={4} onClose={() => setOpen(false)}>
+          <MachinePopup m={m} onClose={() => setOpen(false)} />
+        </Floating>
+      ) : null}
     </span>
   )
 }
@@ -155,7 +161,7 @@ function Cli({ r, now }: { r: PlanRow; now: number }) {
   )
 }
 
-/** A machine's details (the window's machine-popup.js), under its meter: its name and how fresh, its health, each agent
+/** A machine's details (the window's machine-popup.js), under its meter (or over it, in sight: Floating): its name and how fresh, its health, each agent
  *  CLI's plan, and Machine settings (Settings › Machines). Read again on opening when its plans are over a minute old. */
 function MachinePopup({ m, onClose }: { m: Machine; onClose: () => void }) {
   const snap = useSnap()!
@@ -193,7 +199,7 @@ function MachinePopup({ m, onClose }: { m: Machine; onClose: () => void }) {
       aria-label={m.name}
       tabIndex={-1}
       onClick={(e) => e.stopPropagation()}
-      className="popover absolute top-full right-0 z-21 mt-1 flex max-h-[min(480px,calc(100dvh-6rem))] w-[min(20rem,calc(100vw-24px))] origin-top-right flex-col p-0! text-left font-normal text-fg outline-none"
+      className="popover flex max-h-[480px] w-[min(20rem,calc(100vw-16px))] flex-col overflow-hidden p-0! text-left font-normal text-fg outline-none"
     >
       <div className="flex h-[46px] shrink-0 items-center gap-2 border-b border-line px-3.5">
         <Mark className="size-4 shrink-0 text-fg2" />
