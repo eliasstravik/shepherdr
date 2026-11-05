@@ -93,6 +93,7 @@ def cmd_add(args):
     if args.prompt_file:
         with open(args.prompt_file) as f:
             prompt = f.read()
+    at = scheduled_at(args)  # refused before anything is added
     with open_store(args) as s:
         repo = s.loc["kind"] == "repo"
         if args.worktree and not repo:
@@ -106,14 +107,13 @@ def cmd_add(args):
         set_notes(t, args)
         if args.after:
             set_after(s, t, *parse_after(s, args.after))
-        at = scheduled_at(args)
         if at:
             # Started later by the scheduler, with no caller to ask: its space is kept now.
             schedule(s, t, at, {"space": space or default_space()})
         v = view(s, t)
     if at:
         ensure_scheduler_quietly()
-    say(args, v, s.ref(t) + (f" ({v['why']})" if at else ""))
+    say(args, v, s.ref(t) + (f": {v['why']}" if at else ""))
 
 
 # ---- scheduled (SHEP-38) -----------------------------------------------------------------------

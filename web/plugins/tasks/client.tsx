@@ -237,12 +237,16 @@ function TaskActions({ task: t, close }: { task: Task; close: () => void }) {
           return <MenuItem key={it.label} disabled={busy} icon={<ClockIcon className={ic} />} onClick={() => void go(it.in ? { in: it.in } : { at: it.at })}>{it.label}</MenuItem>
         if (it.id === 'schedule-other')
           return typing ? (
-            <form key="other" className="flex items-center gap-2 px-2 py-1 phone:px-3" onSubmit={(e) => { e.preventDefault(); if (text.trim()) void go({ at: text }) }}>
+            <div key="other">
+            <form className="flex items-center gap-2 px-2 py-1 phone:px-3" onSubmit={(e) => { e.preventDefault(); if (text.trim()) void go({ at: text }) }}>
               <input name="when" aria-label={OTHER.label} autoFocus placeholder={OTHER.placeholder} value={text} disabled={busy}
                 onChange={(e) => { setText(e.target.value); setError(null) }}
                 className={clsx(field, 'h-7 min-w-0 flex-1 rounded-md bg-bg px-2 text-[0.8125rem] max-sm:text-base/6 phone:h-9')} />
               <button type="submit" disabled={busy || !text.trim()} className="press-dim h-7 shrink-0 rounded-md bg-bubble px-2.5 text-[0.75rem] font-medium text-fg enabled:hover:bg-sel disabled:opacity-40 phone:h-9 phone:px-3 phone:text-[0.8125rem]">{OTHER.button}</button>
             </form>
+            {/* what herdr-task refused, under the field, never widening the menu */}
+            {error ? <p role="alert" className="w-0 min-w-full px-2 pb-1.5 text-[0.75rem]/4 text-need-fg phone:px-3 phone:text-[0.8125rem]/5">{error}</p> : null}
+            </div>
           ) : (
             <MenuItem key="other" disabled={busy} icon={<ClockIcon className={ic} />} onClick={() => setTyping(true)}>{it.label}</MenuItem>
           )
@@ -254,7 +258,7 @@ function TaskActions({ task: t, close }: { task: Task; close: () => void }) {
           </MenuItem>
         )
       })}
-      {error ? <p role="alert" className="max-w-64 px-2 pt-1 pb-1.5 text-[0.75rem]/4 whitespace-normal text-need-fg phone:px-3 phone:text-[0.8125rem]/5">{error}</p> : null}
+      {error && !typing ? <p role="alert" className="w-0 min-w-full px-2 pt-1 pb-1.5 text-[0.75rem]/4 text-need-fg phone:px-3 phone:text-[0.8125rem]/5">{error}</p> : null}
     </>
   )
 }
