@@ -27,7 +27,7 @@ import { v_flex, h_flex, TextareaState, Textarea, Scrollbar, VirtualListScrollHa
 import { focused, props, run, theme, home, hc, exec, shared, setShared, watchFolder, window, settings, playSound, notify, appHome, readTextFile, writeTextFile, nextCommand, openOverlay, knownAgents, machines } from "herdr";
 import { agents, panes, terminals, spaces, inRender } from "./live.js";
 import * as fs from "fs/promises";
-import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names } from "./core/chat-log.js";
+import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names, pilotLine } from "./core/chat-log.js";
 import { BgJobs } from "./core/bg-jobs.js";
 import { words, howAnswered } from "./core/asks.js";
 // The rows' words and rules the web app's chat draws by too (core/chat-view.js).
@@ -2446,6 +2446,8 @@ export default class Chat extends View {
       while (ti < tasks.length && x.at && tasks[ti].at < x.at) { dated(tasks[ti].at); put(tasks[ti++]); }
       if (i === qAt) { putCard(ownQ); continue; }
       if (x.kind === "news") { const r = news.inline.get(x.id); if (r) { dated(x.at); out.push(r); } continue; }
+      // An Autopilot wake: one quiet line, never its words (core/chat-log.js pilotLine).
+      if (x.kind === "pilot") { dated(x.at); out.push({ kind: "pilot", id: x.id, text: pilotLine(x) }); continue; }
       if (x.kind !== "mark") dated(x.at);
       if (x.kind === "artifact") {
         // A published artifact: its card (the latest publish of it; earlier ones a line), or a
@@ -2584,7 +2586,7 @@ export default class Chat extends View {
   // (tools, "Message from …", artifact lines) sitting tight together, a card. A band is always
   // ACT_ROW: BAND_IN of air, then the actions' row at its foot, shown or not.
   spaced(rows) {
-    const quiet = (r) => r.kind === "tools" || r.kind === "brief" || r.kind === "askend" || r.kind === "tasknews" || (r.kind === "artifact" && (r.line || r.pending));
+    const quiet = (r) => r.kind === "tools" || r.kind === "brief" || r.kind === "askend" || r.kind === "pilot" || r.kind === "tasknews" || (r.kind === "artifact" && (r.line || r.pending));
     const of = (r) => r.blk ?? (quiet(r) ? "quiet" : r.id);
     // How far a row's words sit inside its edge once its outer room is gone (a reply line's
     // small text sits in an 18 px line; it only ever starts a block).
@@ -2822,6 +2824,11 @@ export default class Chat extends View {
         // One strip of a card waiting on the person (strips.js): its presses come through
         // clickRow(), by where they were.
         return col(strips.strip(t, x.s, x.first, x.last, pre), 18, 0);
+      case "pilot":
+        // An Autopilot wake: why it woke and, once it shows, how it went; quiet, as a closed ask.
+        return col(h_flex().w_full().py(QUIET_PY).gap(6).items_center().text_size(12).text_color(t.dim)
+          .child(svg("mods/chat/rocket.svg").size(12).flex_none())
+          .child(div().min_w(0).truncate().child(x.text)), 18, 0);
       case "askend":
         // A closed ask: what it asked and how it went, quiet (the card itself is gone).
         return col(h_flex().w_full().py(QUIET_PY).gap(6).items_center().text_size(12).text_color(t.dim)

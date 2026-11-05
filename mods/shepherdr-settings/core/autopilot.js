@@ -135,14 +135,17 @@ export function when(ms, today = new Date()) {
 }
 
 // What follows "Autopilot" in an Assistant's header while on: waking (a wake's turn runs), queued (waits for an idle
-// Assistant), the next scheduled wake, else what wakes it. Nothing while off.
+// Assistant), the next scheduled wake ("Next in 7 min" within the hour, "Next 14:30" within a day, else "Next Fri"),
+// else what wakes it. Nothing while off. A screen showing it looks again each half minute or so.
 export function headerDetail(a, now = Date.now()) {
   if (!a?.on) return "";
   if (a.inflight) return "Waking";
   if (a.pending) return "Queued";
   if (a.next_run) {
-    const d = new Date(a.next_run);
-    return a.next_run - now < 86400000 ? `Next ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}` : `Next ${d.toLocaleDateString("en", { weekday: "short" })}`;
+    const d = new Date(a.next_run), left = a.next_run - now;
+    if (left < 60000) return "Next in 1 min";
+    if (left < 3600000) return `Next in ${Math.ceil(left / 60000)} min`;
+    return left < 86400000 ? `Next ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}` : `Next ${d.toLocaleDateString("en", { weekday: "short" })}`;
   }
   return a.events?.length ? "On events" : "Run now only";
 }

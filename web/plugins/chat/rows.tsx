@@ -7,7 +7,7 @@ import clsx from 'clsx'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { CheckIcon as TickIcon, ChevronDownIcon, ChevronRightIcon, PaperClipIcon } from '@heroicons/react/16/solid'
 import { act, has, openTask, registry } from '@client/kernel.ts'
-import { CheckIcon, CopyIcon, PageIcon, ReplyIcon, SmileIcon, TermIcon } from '@client/ui.tsx'
+import { AutopilotIcon, CheckIcon, CopyIcon, PageIcon, ReplyIcon, SmileIcon, TermIcon } from '@client/ui.tsx'
 import * as CV from '@core/chat-view.js'
 import type { Chat, Message, ReplyQuote } from '@shared/types.ts'
 import { openAccept, useAccepting } from '@client/screens/Accept.tsx'
@@ -173,6 +173,16 @@ export function EndedRow({ msg }: { msg: Message }) {
     <div className={clsx('flex w-full min-w-0 items-center gap-1.5 px-1.5 py-px', quiet)}>
       <CheckIcon className="size-3 shrink-0" />
       <span className="min-w-0 truncate">{msg.ended}</span>
+    </div>
+  )
+}
+
+/** an Autopilot wake: why it woke and, once it shows, how it went ("· checked, nothing new"); its words never show */
+export function PilotRow({ msg }: { msg: Message }) {
+  return (
+    <div data-pilot className={clsx('flex w-full min-w-0 items-center gap-1.5 px-1.5 py-px', quiet)}>
+      <AutopilotIcon aria-hidden className="size-3 shrink-0" />
+      <span className="min-w-0 truncate">{msg.pilot}</span>
     </div>
   )
 }

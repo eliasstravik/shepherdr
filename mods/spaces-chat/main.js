@@ -13,7 +13,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { machines, run, props, exec, hc, home, theme, shared, setShared, watchFolder, window, layout, nextCommand } from "herdr";
+import { machines, run, props, exec, hc, home, theme, shared, setShared, watchFolder, window, layout, nextCommand, readTextFile } from "herdr";
 import { panes, spaces as allSpaces, inRender } from "./live.js";
 import { countsByTab, readyByTab } from "./inbox.js";
 import { spacesWithChats } from "./parked.js";
@@ -126,6 +126,11 @@ export default class Spaces extends View {
     this.machinesRead = false; // hc machine ls answered once: a machine missing from it is offline
     this.refreshMachines(cx);
     cx.timer.every(15000, cx => this.refreshMachines(cx));
+    // Each of this computer's spaces on Autopilot (herdr-task's ~/.herdr/tasks/.autopilot.json): "on", or "waking"
+    // while a wake runs or waits for its Assistant; its row shows a mark (row()). Read every 5 s.
+    this.pilots = new Map();
+    this.readPilots(cx);
+    cx.timer.every(5000, (cx) => this.readPilots(cx));
     // Each machine's health and plan limits (machines.js): read every 45 s / 10 min, not per render.
     startPolling(cx);
     // spaces-chat.machine (a key, or `herdr-app do`): the details of the shown space's machine.
@@ -144,6 +149,26 @@ export default class Spaces extends View {
     // `git status` walks the whole tree, on another machine a process there:
     // only when its answer could have changed (see `due`).
     cx.timer.every(250, (cx) => this.checkNew(cx));
+  }
+
+  readPilots(cx) {
+    cx.spawn(async (cx) => {
+      let d = null;
+      try { d = JSON.parse((await readTextFile(`${home()}/.herdr/tasks/.autopilot.json`)) ?? "{}"); } catch { return; }
+      const next = new Map(Object.entries(d?.spaces ?? {}).filter(([, a]) => a?.on).map(([id, a]) => [id, a.inflight || a.pending ? "waking" : "on"]));
+      if (JSON.stringify([...next]) === JSON.stringify([...this.pilots])) return;
+      this.pilots = next;
+      cx.notify();
+    });
+  }
+
+  // A space's Autopilot mark after its name (SHEP-5): a small accent dot in its round tint while on, breathing while a
+  // wake runs or waits. This computer's spaces only (another machine's file is read where its header shows).
+  pilotMark(w, t) {
+    const p = w.machine ? null : this.pilots?.get(w.id);
+    if (!p) return null;
+    return div().id(`pilot-${w.id}`).size(14).flex_none().flex().items_center().justify_center().rounded(7).bg(t.accent + "29")
+      .child(div().size(6).rounded(3).bg(t.accent).when(p === "waking", (el) => el.loop("opacity", { from: 0.3, to: 1, period: 1200 })));
   }
 
   checkNew(cx) {
@@ -657,6 +682,7 @@ export default class Spaces extends View {
           .when(!tree, el => el.child(div().w(18).flex_none().text_center().text_size(iconOf(w.id) ? 14 : 15).text_color(fresh ? t.foreground : w.active && !quiet ? t.muted : t.dim)
             .when(quiet && Boolean(iconOf(w.id)), (el) => el.opacity(0.5)).child(iconOf(w.id) ?? "#")))
           .child(nameText(name, fresh, quiet ? t.dim : w.active ? t.foreground : t.muted, t))
+          .when(Boolean(this.pilotMark(w, t)), (el) => el.child(this.pilotMark(w, t)))
           .child(g ? this.gitTail(g, tree, name, t, label) : h_flex().flex_1().min_w(0).justify_end().text_size(TEXT.label).text_color(t.dim)
             .when(Boolean(label), (el) => el.child(div().min_w(0).truncate().child(label))))
           .when(quiet, (el) => el.child(svg("mods/spaces-chat/bell-off.svg").size(13).flex_none().text_color(t.dim)))

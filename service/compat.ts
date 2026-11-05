@@ -9,7 +9,7 @@ import * as SPc from "../core/spaces.js";
 import { kindOf as kindOfTerm } from "../core/chat-reader.js";
 import * as CL from "../core/chat-log.js";
 import * as CV from "../core/chat-view.js";
-const { summary, names } = CL as any;
+const { summary, names, pilotLine } = CL as any;
 const { senderName, briefLabel, newsTimeline, resolveArtifacts, unsigned } = CV as any;
 import { mentionedIn } from "../core/send.js";
 import * as SCc from "../core/screens.js";
@@ -528,6 +528,9 @@ export class Compat {
         // a task's news line in its Assistant's chat (<herdr-news task=… event=…>), as it was said
         const e = inline.get(x.id);
         if (e) messages.push(newsLine(e));
+      } else if (x.kind === "pilot") {
+        // an Autopilot wake: one quiet line, never its words (core/chat-log.js pilotLine)
+        messages.push({ id: x.id, who: "agent", at: x.at, pilot: pilotLine(x) });
       } else if (x.kind === "artifact") {
         // a publish: its card (the latest of it) or line, as the artifacts plugin draws it; a quiet line while the
         // registry doesn't list it yet

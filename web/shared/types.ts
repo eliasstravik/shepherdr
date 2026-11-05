@@ -572,6 +572,8 @@ export interface Message {
   /** 3.0's quiet line for an ask or start screen that closed: what it asked and how it went ("Run: npm test · Allowed
    *  in the chat") */
   ended?: string
+  /** an Autopilot wake's quiet line ("Autopilot woke · on schedule · checked, nothing new": core/chat-log.js pilotLine) */
+  pilot?: string
   /** the tasks your message mentions (#HAT-1), as 3.0's chips under it: a press opens the task */
   mentions?: { task: string; ref: string; title: string }[]
   at?: number
