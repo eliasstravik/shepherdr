@@ -1,7 +1,7 @@
 // The voice call's tools (voice-tools.ts) on a fixture snapshot: what each says, what it opens, and that an act
 // changes nothing without the person's yes.
 import { expect, test } from "bun:test";
-import { voiceTool, findTask, findSpace, evidenceWords, type VoiceIO, type Where } from "./voice-tools.ts";
+import { voiceTool, findTask, findSpace, findArtifact, spacesSaid, shown, evidenceWords, type VoiceIO, type Where } from "./voice-tools.ts";
 
 const now = Date.now();
 const snap: any = {
@@ -122,7 +122,7 @@ test("look needs, news, spaces, machines, autopilot, automations", async () => {
   expect(news.split("\n")[1]).toContain("SHEP 50");
   expect(news).toContain("Alert, Memory at 91%");
   const spaces = (await voiceTool("look", { what: "spaces" }, web, io())).result;
-  expect(spaces).toContain("On This computer: shepherdr: Autopilot on, 1 ready, 1 working.");
+  expect(spaces).toContain("On This computer (vm): shepherdr: Autopilot on, 1 ready, 1 working.");
   expect(spaces).toContain("On Mac mini (offline): gtm: 1 need you.");
   expect((await voiceTool("look", { what: "machines" }, web, io())).result).toContain("Mac mini: offline since 14:02, 1 space, 0 tasks working.");
   const pilot = (await voiceTool("look", { what: "autopilot" }, web, io())).result;
@@ -146,7 +146,9 @@ test("open: what it shows in the app the call runs in", async () => {
   expect((await voiceTool("open", { what: "space", id: "the gtm space" }, web, io())).nav).toEqual({ kind: "space", place: "mini/sp2" });
   const t = await voiceTool("open", { what: "task", id: "this", tab: "terminal" }, web, io());
   expect(t.nav).toMatchObject({ kind: "task", task: "SHEP-45", tab: "terminal", chat: "SHEP-45/worker", addr: "t1", ref: "SHEP-45", folder: "/repo" });
-  expect(t.result).toBe("Showing SHEP 45's terminal.");
+  // never "it's open" before the app says so
+  expect(t.result).toContain("hasn't confirmed");
+  expect(t.shows).toBe("SHEP 45's terminal");
   const review = await voiceTool("open", { what: "task", id: "45", tab: "review" }, web, io());
   expect(review.error).toBe(true);
   expect((await voiceTool("open", { what: "task", id: "41", tab: "review" }, web, io())).nav).toMatchObject({ kind: "task", task: "SHEP-41", tab: "review" });
@@ -207,4 +209,81 @@ test("results stay short, and evidence words read plainly", async () => {
   expect(a.result.length).toBeLessThanOrEqual(3500);
   expect(evidenceWords({ checks: [{ name: "build", conclusion: "failure" }, { name: "lint", conclusion: "success" }] })).toBe("Checks: 1 failed (build).");
   expect(evidenceWords(null)).toBe("");
+});
+
+// The person's fleet as the Mac mini serves it: the mini is "This computer" (its key its host name), the MacBook and a
+// VM linked, each with a Home space.
+const fleet: any = {
+  ...snap,
+  host: "eliass-mac-mini",
+  machines: [
+    { id: "m:eliass-mac-mini", machine: "eliass-mac-mini", name: "This computer", ownName: "This computer", status: "idle", here: true },
+    { id: "m:mbp", machine: "eliass-macbook-pro", name: "MacBook Pro", ownName: "eliass-macbook-pro", emoji: "💻", status: "idle" },
+    { id: "m:vm", machine: "vm-dev", name: "Dev VM", ownName: "vm-dev", status: "idle" },
+  ],
+  places: [
+    { id: "h1", name: "Home", home: true, machine: "eliass-mac-mini", chat: "p:h1", mode: "regular", level: 0, status: "idle" },
+    { id: "s1", name: "shepherdr", machine: "eliass-mac-mini", chat: "p:s1", mode: "regular", level: 2, status: "idle" },
+    { id: "eliass-macbook-pro/h2", name: "Home", home: true, machine: "eliass-macbook-pro", chat: "p:eliass-macbook-pro:h2", mode: "regular", level: 0, status: "idle" },
+    { id: "vm-dev/h3", name: "Home", home: true, machine: "vm-dev", chat: "p:vm-dev:h3", mode: "regular", level: 0, status: "idle" },
+    { id: "vm-dev/s4", name: "mini app", machine: "vm-dev", chat: "p:vm-dev:s4", mode: "regular", level: 2, status: "idle" },
+  ],
+  artifacts: [
+    { id: "old", title: "SHEP-40 Voice call · Proof", place: "s1", v: 1, at: now - 86400_000, when: "1d", by: "SHEP-40 agent" },
+    { id: "new", title: "SHEP-45 Voice calls read and navigate · Proof", place: "s1", v: 3, at: now - 3600_000, when: "1h", by: "SHEP-45 agent" },
+    { id: "hulk", title: "Hulk mini game · Proof", place: "s1", v: 1, at: now - 7200_000, when: "2h", by: "SHEP-39 agent" },
+  ],
+};
+const fromMbp: Where = { client: "web", device: "desktop", machine: "eliass-mac-mini", call: "p:s1", place: "s1" };
+
+test("a space by its machine: the Mac mini that serves (\"This computer\") by its own name, others by theirs", () => {
+  const id = (q: string) => spacesSaid(fleet, q, fromMbp).map((p) => p.id);
+  expect(id("Mac Mini Home")).toEqual(["h1"]);
+  expect(id("Home on the Mac mini")).toEqual(["h1"]);
+  expect(id("the mac mini's home space")).toEqual(["h1"]);
+  expect(id("home on this computer")).toEqual(["h1"]);
+  expect(id("MacBook Pro home")).toEqual(["eliass-macbook-pro/h2"]);
+  expect(id("home on the macbook")).toEqual(["eliass-macbook-pro/h2"]);
+  expect(id("dev vm home")).toEqual(["vm-dev/h3"]);
+  // a space whose name has a machine's word in it
+  expect(id("mini app")).toEqual(["vm-dev/s4"]);
+  // truly ambiguous: every machine has a Home
+  expect(id("home")).toHaveLength(3);
+  expect(findSpace(fleet, "home", fromMbp)).toBeNull();
+});
+
+test("open space: the one meant, or which one when several fit", async () => {
+  const x = { ...io(), snap: () => fleet };
+  const a = await voiceTool("open", { what: "space", id: "Mac Mini Home" }, fromMbp, x);
+  expect(a.nav).toEqual({ kind: "space", place: "h1" });
+  expect(a.shows).toBe("the Home on This computer (eliass-mac-mini) space");
+  const which = await voiceTool("open", { what: "space", id: "Home" }, fromMbp, x);
+  expect(which.error).toBe(true);
+  expect(which.nav).toBeUndefined();
+  expect(which.result).toContain("Which one: Home on This computer (eliass-mac-mini); Home on MacBook Pro; Home on Dev VM?");
+});
+
+test("an artifact by words of its title, newest first", () => {
+  expect(findArtifact(fleet, "the voice call one", fromMbp)?.id).toBe("new");
+  expect(findArtifact(fleet, "voice call proof", fromMbp)?.id).toBe("new");
+  expect(findArtifact(fleet, "SHEP-40", fromMbp)?.id).toBe("old");
+  expect(findArtifact(fleet, "the Hulk mini game", fromMbp)?.id).toBe("hulk");
+  expect(findArtifact(fleet, "hulk", fromMbp)?.id).toBe("hulk");
+  expect(findArtifact(fleet, "quarterly sales deck", fromMbp)).toBeNull();
+});
+
+test("open is on screen only once the app that started the call says so", async () => {
+  const a = await voiceTool("open", { what: "artifact", id: "hulk mini game" }, fromMbp, { ...io(), snap: () => fleet });
+  expect((await shown(a, async () => ({ ok: true }))).result).toBe("It's on the person's screen now: the artifact \"Hulk mini game · Proof\".");
+  const no = await shown(a, async () => ({ ok: false, why: "this app doesn't list that artifact" }));
+  expect(no.error).toBe(true);
+  expect(no.result).toContain("couldn't open");
+  expect(no.result).toContain("doesn't list that artifact");
+  // an old page that never answers: not on screen
+  const silent = await shown(a, async () => null);
+  expect(silent.error).toBe(true);
+  expect(silent.result).not.toContain("on the person's screen now");
+  // look and send aren't asked about
+  const look = await voiceTool("look", { what: "here" }, fromMbp, { ...io(), snap: () => fleet });
+  expect(await shown(look, async () => { throw new Error("asked"); })).toEqual(look);
 });

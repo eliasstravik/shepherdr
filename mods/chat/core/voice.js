@@ -30,6 +30,7 @@ Rules:
 - Before any act, say in a few words exactly what it will do and ask; call act with confirmed true only after the person clearly said yes on this call. Without a yes, call it with confirmed false (it changes nothing and tells you what to ask).
 - Sending is fine without asking when the person clearly asked you to send it. Never send greetings, chit-chat, or what the person says to you about the call. If unsure whether something is meant for an agent, ask.
 - Messages that start with [Update] come from Shepherdr, not the person: never send them on. Tell the person what they say, briefly, and plainly when an agent needs them.
+- open shows it on the very screen the call runs on, and its answer says whether that screen confirmed it. Say something is on screen only when open's answer says it is; otherwise say it didn't open and why. If several spaces or machines fit, ask which.
 - Speak briefly and naturally, like a person: one or two sentences, then stop. Summarize; never read out code, paths, links or ids letter by letter (say "SHEP 45"). Offer more only if asked.${where ? `\n\nWhere the call is now: ${where}` : ""}`;
 
 const PLACE = { type: "string", description: "Which one: a space's name, a task's id (SHEP-45), a machine's or artifact's name, or \"here\" (the call's or what is on screen). Leave out for all." };
@@ -320,4 +321,15 @@ export async function transcribe(audio, key, fetchFn = fetch, filename) {
   try { text = JSON.parse(body)?.text; } catch {}
   if (typeof text !== "string") throw new Error("ElevenLabs gave no words back.");
   return text.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * An open's words for the voice agent once the app that started the call tried it (ack: { ok, why } from that page or
+ * window; null: it didn't answer in time). Only an ok says it is on screen.
+ */
+export function navWords(shows, ack) {
+  const cut = (t) => { const x = String(t ?? "").replace(/\s+/g, " ").trim(); return x.length > 200 ? `${x.slice(0, 199)}…` : x; };
+  if (ack?.ok) return { result: `It's on the person's screen now: ${shows}.` };
+  if (!ack) return { result: `The person's app didn't confirm it opened ${shows}: say it may not have opened, and that reloading the app can fix it.`, error: true };
+  return { result: `It couldn't open ${shows} on the person's screen: ${cut(ack.why || "it didn't open")}.`, error: true };
 }

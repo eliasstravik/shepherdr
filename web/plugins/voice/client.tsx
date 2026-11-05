@@ -8,37 +8,75 @@ import { ic, IconButton, LiveWave, MicIcon, MicOffIcon, roundBtn, useElapsed, Wa
 import { cancelDictation } from '@plugins/chat/client.tsx'
 import { sectionOf } from '@client/Settings.tsx'
 import { openAccept } from '@client/screens/Accept.tsx'
-import { callPhase, callSample, muteCall, sendWhere, startCall, stopCall, type Nav } from './call.ts'
+import { callPhase, callSample, muteCall, sendWhere, startCall, stopCall, type Nav, type NavAck } from './call.ts'
 
 /** the Tasks panel's filter for a task state the voice agent named */
 const FILTER: Record<string, string> = { need: 'needs', work: 'working', ready: 'ready', merging: 'merging', queued: 'queued', todo: 'todo', done: 'done' }
 /** a task's tab as the side panel names it */
 const ITEM: Record<string, string> = { terminal: 'terminal', files: 'files', changes: 'diff', pr: 'pr', browser: 'browser' }
 
-/** What the voice agent asked to show (its open tool), here on this page. */
-export function voiceNav(nav: Nav) {
+/** what this page shows now, as the call is told it */
+function whereNow() {
   const { ui, snap } = getState()
-  if (!snap) return
+  if (!snap) return {}
+  return { device: ui.device, place: ui.place, task: ui.task, tab: ui.task ? shownItem(ui, snap) ?? 'chat' : null, artifact: ui.viewer?.artifact ?? null, settings: !!ui.settings }
+}
+
+/** What the voice agent asked to show (its open tool), here on this page: done, then checked on the page's own state,
+ *  so the call says it's on screen only when it is. */
+export function voiceNav(nav: Nav): NavAck {
+  const { ui, snap } = getState()
+  if (!snap) return { ok: false, why: 'the app is still loading' }
   const str = (v: unknown) => (typeof v === 'string' ? v : '')
-  setUI({ viewer: null, settings: null, search: false, menu: false, plus: null })
-  if (nav.kind === 'space' && snap.places.some((p) => p.id === nav.place)) goPlace(str(nav.place))
-  else if (nav.kind === 'chat' && str(nav.chat)) goChat(str(nav.chat))
-  else if (nav.kind === 'artifact' && str(nav.artifact)) openArtifact(str(nav.artifact))
-  else if (nav.kind === 'settings') {
+  const no = (why: string): NavAck => ({ ok: false, why, where: whereNow() })
+  const check = (ok: boolean, why: string): NavAck => (ok ? { ok: true, where: whereNow() } : no(why))
+  if (nav.kind === 'space') {
+    const id = str(nav.place)
+    if (!snap.places.some((p) => p.id === id)) return no('this app doesn\'t list that space')
+    setUI({ viewer: null, settings: null, search: false, menu: false, plus: null })
+    goPlace(id)
+    const now = getState().ui
+    return check(now.place === placeOf(snap, id).id && !now.task, 'the space didn\'t open')
+  }
+  if (nav.kind === 'chat' && str(nav.chat)) {
+    setUI({ viewer: null, settings: null, search: false, menu: false, plus: null })
+    goChat(str(nav.chat))
+    return check(visibleChats(getState().ui, snap).includes(str(nav.chat)), 'that chat didn\'t open')
+  }
+  if (nav.kind === 'artifact' && str(nav.artifact)) {
+    const id = str(nav.artifact)
+    if (!(snap.artifacts ?? []).some((a) => a.id === id)) return no('this app doesn\'t list that artifact')
+    setUI({ settings: null, search: false, menu: false, plus: null })
+    openArtifact(id)
+    return check(getState().ui.viewer?.artifact === id, 'the artifact didn\'t open')
+  }
+  if (nav.kind === 'settings') {
+    setUI({ viewer: null, search: false, menu: false, plus: null })
     const at = nav.section ? sectionOf(str(nav.section), snap.settings ?? [], ui) : -1
     setUI({ settings: { section: ui.device === 'phone' && at < 0 ? null : Math.max(0, at) }, drawer: false })
-  } else if (nav.kind === 'tasks' || nav.kind === 'needs') {
+    return check(!!getState().ui.settings, 'Settings didn\'t open')
+  }
+  if (nav.kind === 'tasks' || nav.kind === 'needs') {
+    setUI({ viewer: null, settings: null, search: false, menu: false, plus: null })
     const taskFilter = nav.kind === 'needs' ? 'needs' : FILTER[str(nav.filter)] ?? 'all'
     setUI(ui.device === 'phone' ? { task: null, tab: 'tasks', taskFilter, pick: null } : { side: 'tasks', sideShut: false, taskFilter })
-  } else if (nav.kind === 'task' && snap.tasks.some((t) => t.id === nav.task)) {
+    const now = getState().ui
+    return check(now.taskFilter === taskFilter && (ui.device === 'phone' ? now.tab === 'tasks' : now.side === 'tasks'), 'the Tasks panel didn\'t open')
+  }
+  if (nav.kind === 'task') {
     const id = str(nav.task), tab = str(nav.tab)
-    if (tab === 'review') return openAccept(id)
+    if (!snap.tasks.some((t) => t.id === id)) return no('this app doesn\'t list that task')
+    setUI({ viewer: null, settings: null, search: false, menu: false, plus: null })
+    if (tab === 'review') { openAccept(id); return { ok: true, where: whereNow() } }
     openTask(id)
     const item = ITEM[tab]
-    if (!item) return
-    if (getState().ui.device === 'desktop') setUI((u) => ({ sidebars: { ...u.sidebars, panelOpen: true, item } }))
-    else openItem(item)
+    if (item) {
+      if (getState().ui.device === 'desktop') setUI((u) => ({ sidebars: { ...u.sidebars, panelOpen: true, item } }))
+      else openItem(item)
+    }
+    return check(getState().ui.task === id, 'the task didn\'t open')
   }
+  return no('this app can\'t show that')
 }
 
 /** While a call is on: what this page shows, told to the call as it changes (its "here" and "this task"). */
@@ -68,8 +106,7 @@ export function toggleCall(chatKey: string) {
     setUI({ callError: message })
   }, voiceNav, () => {
     // the call's socket is open: where this page is, from the start
-    const { ui, snap } = getState()
-    if (snap) sendWhere({ device: ui.device, place: ui.place, task: ui.task, tab: ui.task ? shownItem(ui, snap) ?? 'chat' : null, artifact: ui.viewer?.artifact ?? null, settings: !!ui.settings })
+    if (getState().snap) sendWhere(whereNow())
   }).catch(() => { endCall(); setUI({ callError: 'Audio could not start on this device.' }) })
 }
 

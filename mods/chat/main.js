@@ -2243,34 +2243,57 @@ export default class Chat extends View {
       let nav = null;
       try { nav = JSON.parse(await fs.readFile(`${box}/${f}`, "utf8")); } catch {}
       await fs.rm(`${box}/${f}`).catch(() => {});
-      if (nav) try { this.voiceNav(nav); } catch (e) { console.error(`voice nav: ${e?.message ?? e}`); }
+      if (!nav) continue;
+      // said back by the nav's name (voice.ts waits for it before the voice agent may say it's on screen)
+      let ack;
+      try { ack = this.voiceNav(nav) ?? { ok: true }; } catch (e) { console.error(`voice nav: ${e?.message ?? e}`); ack = { ok: false, why: "it failed in the window" }; }
+      await fs.mkdir(`${this.callDir}/navved`, { recursive: true }).catch(() => {});
+      await fs.writeFile(`${this.callDir}/navved/${f}`, JSON.stringify(ack)).catch(() => {});
     }
   }
 
+  // What the voice agent asked to show, done in this window: { ok } once done, else { ok: false, why }.
   voiceNav(nav) {
     const spaceOf = (place) => spaces().find((x) => String(x.id) === place || (x.machine && `${x.machine}/${x.id}` === place));
-    if (nav.kind === "space") { const sp = spaceOf(nav.place); if (sp) run("space.select", { id: sp.id }); }
-    else if (nav.kind === "chat") {
+    const no = (why) => ({ ok: false, why });
+    if (nav.kind === "space") {
+      const sp = spaceOf(nav.place);
+      if (!sp) return no("this window doesn't have that space");
+      run("space.select", { id: sp.id });
+      return { ok: true };
+    }
+    if (nav.kind === "chat") {
       // the call's own chat: its pane; another chat: its space, or its task's chat in the Tasks panel
-      if (nav.addr === this.addr) { const mine = this.myPane() ?? this.lastPane; if (mine) this.revealPane(mine); }
-      else if (/\/worker$/.test(nav.chat ?? "") && nav.addr) openTaskThread(nav.addr, nav.chat.slice(0, -7).split(":").pop(), null);
-      else if (String(nav.chat ?? "").startsWith("p:")) { const sp = spaceOf(nav.chat.slice(2).replace(":", "/")); if (sp) run("space.select", { id: sp.id }); }
-    } else if (nav.kind === "task") {
+      if (nav.addr === this.addr) { const mine = this.myPane() ?? this.lastPane; if (!mine) return no("its pane isn't open"); this.revealPane(mine); return { ok: true }; }
+      if (/\/worker$/.test(nav.chat ?? "") && nav.addr) { openTaskThread(nav.addr, nav.chat.slice(0, -7).split(":").pop(), null); return { ok: true }; }
+      if (String(nav.chat ?? "").startsWith("p:")) { const sp = spaceOf(nav.chat.slice(2).replace(":", "/")); if (!sp) return no("this window doesn't have that space"); run("space.select", { id: sp.id }); return { ok: true }; }
+      return no("that chat isn't running");
+    }
+    if (nav.kind === "task") {
       if (nav.tab === "review" && nav.ref && nav.folder) {
         openOverlay({ mod: "accept-card", kind: "dialog", modal: true, width: 640, height: 640, props: { ref: nav.ref, folder: nav.folder, machine: nav.machine ?? null, title: nav.title } });
-        return;
+        return { ok: true };
       }
-      if (!nav.addr) { setShared("tasks.searchreq", { q: `${nav.ref ?? nav.task} ${nav.title ?? ""}`.trim(), at: Date.now() }); run("layout.select", { stack: "panel-body", child: TASKS_STACK }); backToTasks(); run("layout.show", { id: "panel" }); return; }
+      if (!nav.addr) {
+        // no agent running: the Tasks panel, searched for it
+        setShared("tasks.searchreq", { q: `${nav.ref ?? nav.task} ${nav.title ?? ""}`.trim(), at: Date.now() });
+        run("layout.select", { stack: "panel-body", child: TASKS_STACK }); backToTasks(); run("layout.show", { id: "panel" });
+        return { ok: true };
+      }
       openTaskThread(nav.addr, nav.ref ?? String(nav.task).split(":").pop(), nav.title ?? null);
       const child = { terminal: THREAD_TERM, files: THREAD_FILES, changes: THREAD_CHANGES, pr: THREAD_PR, browser: THREAD_BROWSER }[nav.tab];
       if (child) { if (nav.tab === "terminal") requestWorkerTerminal(nav.addr); run("layout.select", { stack: THREAD_BODY, child }); }
-    } else if (nav.kind === "tasks" || nav.kind === "needs") {
+      return { ok: true };
+    }
+    if (nav.kind === "tasks" || nav.kind === "needs") {
       run("layout.select", { stack: "panel-body", child: TASKS_STACK });
       backToTasks();
       run("layout.show", { id: "panel" });
-    } else if (nav.kind === "artifact") {
-      openViewer({ id: nav.artifact, title: nav.title, version: nav.v, latest: nav.v, machine: nav.machine ?? null });
-    } else if (nav.kind === "settings") run("app.settings", nav.section ? { section: String(nav.section).toLowerCase() } : {});
+      return { ok: true };
+    }
+    if (nav.kind === "artifact") { openViewer({ id: nav.artifact, title: nav.title, version: nav.v, latest: nav.v, machine: nav.machine ?? null }); return { ok: true }; }
+    if (nav.kind === "settings") { run("app.settings", nav.section ? { section: String(nav.section).toLowerCase() } : {}); return { ok: true }; }
+    return no("the window can't show that");
   }
 
   callSay(m) {
