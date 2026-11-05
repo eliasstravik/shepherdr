@@ -3,7 +3,7 @@
 Mission control for your coding agents inside Herdr: your spaces in a sidebar, each with its own Assistant you talk to
 as a chat, and a Tasks panel on the right that shows which task needs you, which is ready and which is still working.
 You tell the Assistant what needs doing; it turns it into tasks, each run by its own agent in its own git worktree,
-and asks you on a card when it needs a decision. Shepherdr 3.1.6, for herdr-app 0.1.12 and herdr-core 0.1.17 or newer.
+and asks you on a card when it needs a decision. Shepherdr 3.1.7, for herdr-app 0.1.12 and herdr-core 0.1.17 or newer.
 
 ![Shepherdr](preview.png)
 
@@ -18,8 +18,8 @@ Left to right, on the theme's `canvas` background, no title bar:
   own), Shepherdr (its settings) and Add machine.
 - **Tab bar** (42px): the space's tabs, then on the right `+`, the side panels' buttons (Files, Changes, Tasks with its
   red/green counts, Artifacts) and the layout switcher.
-- **Main** (the active tab): each pane has a 30px header (`pane-chat`): the agent's name and folder ("Assistant ·
-  Claude Code ~"), an Autopilot switch on an Assistant, and Chat | Terminal. Chat shows the agent's conversation as
+- **Main** (the active tab): each pane has a 30px header (`pane-chat`): an Assistant's space name and folder
+  ("shop ~"), an Autopilot switch on an Assistant, and Chat | Terminal. Chat shows the agent's conversation as
   bubbles with question, permission and secret cards in the timeline, a box with attach, model choice, dictation and
   Send (or Call when the box is empty). Panes are 10px rounded with a 1px border, accent when focused, 8px apart.
 - **Side panel** (510px, 280–900): one of Files, Changes, Tasks or Artifacts. Tasks is one list grouped by status
@@ -43,7 +43,7 @@ Left to right, on the theme's `canvas` background, no title bar:
   calls the Assistant, Ctrl+F finds in the chat. Alt+1…9 pick a tab, Alt+Up/Down a space, Alt+Enter splits.
 - Shepherdr settings (the sidebar foot): Agents, Tasks, Autopilot, Notify, Secrets, Machines, Window and Web. Window
   holds the look switches and the add-on switches: Artifacts, Voice and dictation, Reactions, Task browser, Autopilot,
-  Other machines and Web can be turned off; the rest is always on in 3.1.6. Web shows the web app's link and Serve
+  Other machines and Web can be turned off; the rest is always on in 3.1.7. Web shows the web app's link and Serve
   from, the machine that serves it.
 - The web app (`https://<this machine>/shepherdr/`, your tailnet only): the same spaces, Assistants, tasks, cards,
   artifacts and settings on a phone, a tablet or another browser, on the same data.
