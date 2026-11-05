@@ -37,7 +37,7 @@ import { browserRelay } from "./browser.ts";
 import { voiceCall, type ChatView } from "./voice.ts";
 import { Artifacts } from "./artifacts.ts";
 import { Settings, onWritten, PUSH, pushBody } from "./settings.ts";
-import { Secrets } from "./secrets.ts";
+import { Secrets, SecretsHome } from "./secrets.ts";
 import { Agents } from "./agents.ts";
 import { Machines } from "./machines.ts";
 import { Push, alertsOf, agentAlerts } from "./push.ts";
@@ -114,6 +114,31 @@ let vaultList: Awaited<ReturnType<Secrets["entries"]>> = [];
 const refreshSecrets = async () => { [secretNames, vaultList] = await Promise.all([secrets.names(), secrets.entries()]); model.rebuild(); };
 void refreshSecrets();
 setInterval(() => void refreshSecrets(), 30_000);
+// which machine keeps the secrets; there, other machines' requests answered with or without a window
+const home = new SecretsHome(hub);
+home.on(() => { void refreshSecrets(); });
+void home.start();
+// Settings › Secrets › Kept on: a move this service started (shepherdr secrets move-to), until it ends
+let secretsMoving: { to: string; at: number; error?: string } | null = null;
+async function moveSecrets(machine: string | null) {
+  const target = machine ?? home.me?.name ?? "here";
+  secretsMoving = { to: target, at: Date.now() };
+  model.rebuild();
+  const cli = [join(HOME, ".local", "bin", "shepherdr"), join(ROOT, "bin", "shepherdr")].find(existsSync) ?? "shepherdr";
+  try {
+    const p = Bun.spawn([cli, "secrets", "move-to", machine ?? "here", "--json"], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+    const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
+    let r: any = null;
+    try { r = JSON.parse(out.trim().split("\n").pop() ?? ""); } catch {}
+    if ((await p.exited) !== 0 || r?.ok === false) throw new Error(r?.error || err.trim().split("\n").pop()?.replace(/^shepherdr: /, "") || "The move didn't finish.");
+    secretsMoving = null;
+  } catch (err) {
+    secretsMoving = { to: target, at: Date.now(), error: (err as Error).message };
+    setTimeout(() => { if (secretsMoving?.error) { secretsMoving = null; model.rebuild(); } }, 120_000);
+  }
+  await home.poll();
+  await refreshSecrets();
+}
 const settings = new Settings();
 // Settings › Agents' model menu and buttons (core/settings.js choicesFrom), from each CLI's own settings here, read
 // again every ten minutes; a CLI herdr-task's check finds missing here isn't offered
@@ -140,7 +165,8 @@ function secretsPage(spaces: any[]) {
     const space = sp ? (machine && !String(sp).includes("/") ? `${machine}/${sp}` : sp) : null;
     return { address: a.address, name: a.name, why: a.why ?? "", who: t?.name || a.address, scope: space ?? `m:${machine ?? ""}` };
   });
-  return { vault, asks };
+  const kept = { ...home.view(), moving: secretsMoving && !secretsMoving.error ? secretsMoving.to : null, error: secretsMoving?.error ?? null };
+  return { vault, asks, kept };
 }
 // Base branch's empty box: the branch a space's folder has checked out, on its machine
 settings.fetchBranch = async (s) => {
@@ -550,6 +576,14 @@ const server = Bun.serve<{ who: string }>({
         catch (err) { return json({ ok: false, error: (err as Error).message }); }
       }
       if (body?.type === "limits-check") { await machines.checkNow(); return json({ ok: true }); }
+      if (body?.type === "secrets-move") {
+        // Settings › Secrets › Kept on: the vault moves (shepherdr secrets move-to); the page sees it as it goes
+        const m = typeof body.machine === "string" && body.machine && body.machine !== home.me?.name ? body.machine : null;
+        if (m !== null && !home.machines.has(m)) return json({ ok: false, error: "That machine isn't linked." });
+        if (secretsMoving && !secretsMoving.error) return json({ ok: false, error: `Already moving them to ${secretsMoving.to}.` });
+        void moveSecrets(m).catch(() => {});
+        return json({ ok: true });
+      }
       if (body?.type === "serve-from") {
         // Settings › Web's Serve from: the move runs on (the page sees it in Settings › Web as it goes)
         const m = typeof body.machine === "string" && body.machine && body.machine !== host.me?.name ? body.machine : null;

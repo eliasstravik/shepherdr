@@ -5,7 +5,6 @@
 //   others that have no service of their own (and those running an Assistant: their tick brings agents back after a
 //   crash), and another service does that only while the host can't be reached (herdr-task's own lock keeps two ticks
 //   of one machine from ever running at once);
-// - another machine's agent asking for a secret (herdr.secret.want): herdr-secret serve answers it from the vault here;
 // - a chat open on a web page: the question hook's flag (data/chat-asks/open/<terminal>), so its cards come to the page
 //   (another machine's agent: its flag there, through herdr-core).
 // The window sees this service running (GET /api/health: jobs) and leaves the same work to it (lib/service.js), and
@@ -61,7 +60,6 @@ export class Jobs {
   private rounds = 0;
   private soon: ReturnType<typeof setTimeout> | null = null;
   private seen = "";
-  private served = new Set<string>();
   /** terminals a web page shows now (service/live.ts tells) */
   watched: () => string[] = () => [];
   private flagged = new Map<string, number>();
@@ -74,7 +72,7 @@ export class Jobs {
     setInterval(() => void this.tick(), 15_000);
     void this.tick();
     this.hub.on((e) => {
-      if (e.type === "reset" || ("terminal" in e && e.terminal)) { this.onChange(); this.serveSecrets(); }
+      if (e.type === "reset" || ("terminal" in e && e.terminal)) this.onChange();
     });
     setInterval(() => this.flags(), 4000);
   }
@@ -114,17 +112,6 @@ export class Jobs {
     this.seen = now;
     if (first || this.soon) return;
     this.soon = setTimeout(() => { this.soon = null; void this.tick(); }, 2000);
-  }
-
-  /** Each remote request for a secret, once (herdr-secret serve also refuses a second answer). */
-  private serveSecrets() {
-    for (const t of this.hub.terminals.values()) {
-      const w = t.labels?.["herdr.secret.want"];
-      if (!w || !t.address.includes("/") || this.served.has(w)) continue;
-      this.served.add(w);
-      void run([tool("herdr-secret", "bin/herdr-secret"), "serve", t.address]);
-    }
-    if (this.served.size > 200) this.served.clear();
   }
 
   /** The hook asks a chat only while its flag is fresh (ask-hook.sh: 15 s): a page showing a local Claude agent's chat

@@ -9,6 +9,10 @@
   shepherdr web serve-from <machine|here> [--take-link]   serve the web app from another machine linked over
                                         herdr-core (an always-on Mac mini or cloud VM), installing it there; here: back
   shepherdr web status                  which machine serves it, and its link
+  shepherdr secrets move-to <machine|here> [--restore]   the machine that keeps the secrets (the vault agents use by
+                                        name): moves them there, with a backup on both; --restore: the old one takes its
+                                        backup back when the other is gone for good
+  shepherdr secrets where               which machine keeps them
   shepherdr uninstall  [--root DIR] [--dry-run]
   shepherdr doctor     [--root DIR]: checks the install; once it's whole, lets the sync to other machines go
   shepherdr version
@@ -1248,6 +1252,20 @@ def cmd_web(a):
     raise Stop("shepherdr web serve-from <machine|here> [--take-link] | shepherdr web status")
 
 
+def cmd_secrets(a):
+    if a.action == "move-to" and not (a.machine or a.to_id):
+        raise Stop("which machine? shepherdr secrets move-to <machine|here> (hc machine ls lists them)")
+    bun = bun_path()
+    script = next((p for p in (os.path.join(real_home(), SHARE, "service", "secrets-move.ts"),
+                               os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "service", "secrets-move.ts"))
+                   if os.path.isfile(p)), None)
+    if not bun or not script:
+        raise Stop("Shepherdr's service isn't installed here (it needs Bun): ./install.sh first")
+    argv = [bun, script, a.action] + ([a.machine] if a.machine else []) + (["--to-id", a.to_id] if a.to_id else []) \
+        + (["--restore"] if a.restore else []) + (["--json"] if a.json else [])
+    return subprocess.run(argv).returncode
+
+
 def hand_over(a, argv):
     """`shepherdr update` runs the installed copy, which a pull doesn't change: installing with it wrote the old version
     (and its old steps), so it took a second run to say the new one. When the source's own installer is another, it
@@ -1302,6 +1320,12 @@ def main(argv):
     w.add_argument("machine", nargs="?", help="a machine linked over herdr-core (hc machine ls), or here")
     w.add_argument("--take-link", action="store_true", help="that machine's /shepherdr is shared to something else: set it aside (moving away puts it back)")
     w.add_argument("--json", action="store_true")
+    s = sub.add_parser("secrets", help="which machine keeps the secrets (Settings › Secrets › Kept on)")
+    s.add_argument("action", choices=["move-to", "where"])
+    s.add_argument("machine", nargs="?", help="a machine linked over herdr-core (hc machine ls), or here")
+    s.add_argument("--restore", action="store_true", help="here: take this machine's backup back (the other one is gone for good)")
+    s.add_argument("--to-id", help=argparse.SUPPRESS)
+    s.add_argument("--json", action="store_true")
     sub.add_parser("version")
     a = ap.parse_args(argv)
     try:
@@ -1322,6 +1346,8 @@ def main(argv):
             return cmd_whisper(a)
         if a.cmd == "web":
             return cmd_web(a)
+        if a.cmd == "secrets":
+            return cmd_secrets(a)
         if a.cmd == "version":
             say(f"shepherdr {VERSION}")
             return 0
