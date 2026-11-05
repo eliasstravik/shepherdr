@@ -2694,7 +2694,7 @@ export default class Chat extends View {
   // the message with (text: "From HERD-76: …"), else "Another agent".
   sender(from, text = null) {
     // core/chat-view.js: the web app's chat names senders the same way.
-    return senderName(from, text, { find: (a) => terminals().find((x) => x.address === a), machine:this.machine, taskOf: (a) => this.workerTasks().get(a)?.ref ?? null, here: coreName() });
+    return senderName(from, text, { find: (a) => terminals().find((x) => x.address === a), machine:this.machine, taskOf: (a) => this.workerTasks().get(a)?.ref ?? null, here: coreName(), machineName: this.names().machineName });
   }
 
   // How another Assistant's machine is named (core/chat-view.js fromName): the person's name for it, as the sidebar's.

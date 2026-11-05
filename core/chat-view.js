@@ -163,8 +163,9 @@ export function ownWords(users, pending, matches) {
 // name it signed the message with, else "Another agent".
 //   find(address): that terminal ({ name, labels, template }), else null; machine: the chat's agent's machine (null:
 //   here); taskOf(address): the task ref whose worker that is, else null; here: this machine's own name in
-//   herdr-core: another machine's agent writes our terminals as "<here>/t75", our list has them as "t75".
-export function senderName(from, text = null, { find = () => null, machine = null, taskOf = () => null, here = null } = {}) {
+//   herdr-core: another machine's agent writes our terminals as "<here>/t75", our list has them as "t75"; machineName(key):
+//   the name people read for a machine ("Mac mini"), else null (its key then).
+export function senderName(from, text = null, { find = () => null, machine = null, taskOf = () => null, here = null, machineName = () => null } = {}) {
   const [addr, ...rest] = String(from ?? "").trim().split(/\s+/);
   const signed = signedBy(text);
   if (addr === "person") return "You";
@@ -177,7 +178,7 @@ export function senderName(from, text = null, { find = () => null, machine = nul
   const l = k?.labels ?? {}, name = rest.join(" ") || k?.name || "";
   // Where it runs (null: here), said when that isn't where the chat's agent is.
   const at = local ? null : full.includes("/") ? full.split("/")[0] : null;
-  const away = at !== machine && (at ?? here) ? ` on ${at ?? here}` : "";
+  const away = at !== machine && (at ?? here) ? ` on ${machineName(at ?? here) || (at ?? here)}` : "";
   if (l["herdr.role"] === "reviewer" || /\breview/i.test(name)) return "Reviewer";
   if (l["herdr.role"] === "coordinator" || /^(herdr-)?(assistant|coordinator)\b/.test(k?.template ?? "") || /^coord/i.test(name)) return `Assistant${away}`;
   const task = taskOf(full) ?? (local ? taskOf(local) : null) ?? /^([a-z][a-z0-9]*)-(\d+)(?:-|$)/i.exec(name)?.slice(1, 3).join("-").toUpperCase();

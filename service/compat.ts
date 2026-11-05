@@ -482,7 +482,7 @@ export class Compat {
     const workerOf = new Map<string, string>(this.rows.filter((r) => r.worker).map((r) => [r.worker, r.ref]));
     // here: this machine's name in herdr-core (another machine's agent writes ours as "<here>/t75")
     const here = (this as any).coreName?.() ?? null;
-    const sender = (from: string, text: string) => senderName(from, text, { find: term, machine, taskOf: (a: string) => workerOf.get(a) ?? null, here });
+    const sender = (from: string, text: string) => senderName(from, text, { find: term, machine, taskOf: (a: string) => workerOf.get(a) ?? null, here, machineName: (m: string) => this.machineNames.get(m) ?? null });
     // agent to agent as a group chat (SHEP-27): who sent a message (another Assistant by its machine and space), and
     // who this chat's own agent is when it sends one ("Assistant → SHEP-4")
     const taskLabel = String(t?.labels?.["herdr.task"] ?? "");
