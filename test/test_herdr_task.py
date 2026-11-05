@@ -914,6 +914,25 @@ class BackToWork(unittest.TestCase):
                 github.pr_open(self.store, t, "o/r")
             self.assertNotIn("pr", t, other)
 
+    def test_ready_never_opens_a_second_one_after_a_merged_one(self):
+        # SHEP-59: the branch's pull request merged (squash), then more commits: no second one.
+        import herdr_task.github as github
+        calls = []
+
+        def fake(*a, **k):
+            calls.append(a[:2])
+            if a[:2] == ("pr", "list"):
+                state = a[a.index("--state") + 1]
+                return True, json.dumps([] if state == "open" else [{"number": 704, "url": "u", "isCrossRepository": False,
+                                                                     "baseRefName": "main", "headRefOid": "old"}]), ""
+            return True, "", ""
+        with self.mock.patch.object(github, "gh", fake), self.mock.patch.object(github, "git", lambda *a: (True, "abc", "")):
+            t = self.ready(mode="worktree", worktree="/w", branch="b")
+            with self.assertRaises(self.commands.Fail) as e:
+                github.pr_open(self.store, t, "o/r")
+        self.assertIn("#704", str(e.exception))
+        self.assertNotIn(("pr", "create"), calls)
+
     def test_ready_opens_one_when_there_is_none(self):
         github, calls = self.github_has([])
         t = self.ready(mode="worktree", worktree="/w", branch="b")
@@ -1221,6 +1240,95 @@ class MergedOnlyWithOwnWork(unittest.TestCase):
     def mock_pr(self, v):
         from unittest import mock
         return mock.patch.object(self.tick, "pr_view", lambda t: v)
+
+    # SHEP-59: a pull request squash-merged (its commits never in main), then ready: done, never a
+    # second pull request; nor when its work is in main some other way (nothing left to merge).
+    def change(self, cwd, words):
+        with open(os.path.join(cwd, "reactions.txt"), "w") as f:
+            f.write(words)
+        self.git(cwd, "add", "reactions.txt")
+        return self.commit(cwd, words)
+
+    def squash_into_main(self):
+        self.git(self.main, "merge", "-q", "--squash", "task/1")
+        return self.commit(self.main, "SHEP-1 Reactions (#704)")
+
+    def github(self, merged):
+        """GitHub for o/r with these merged pull requests for the branch (none open); the gh calls."""
+        from unittest import mock
+        import herdr_task.github as github
+        calls = []
+
+        def fake(*a, **k):
+            calls.append(a[:2])
+            if a[:2] == ("pr", "list"):
+                return True, json.dumps(merged if a[a.index("--state") + 1] == "merged" else []), ""
+            if a[:2] == ("pr", "create"):
+                return True, "https://github.com/o/r/pull/705", ""
+            return True, "", ""
+        for mod, name, value in ((github, "gh", fake), (github, "github", lambda s: "o/r"), (self.commands, "github", lambda s: "o/r"),
+                                 (github, "watch_main", lambda *a: None), (self.commands, "watch_main", lambda *a: None),
+                                 (self.tick, "github", lambda s: "o/r")):
+            p = mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        return calls
+
+    def ready_now(self):
+        import argparse
+        from unittest import mock
+        with mock.patch.object(self.commands, "review_refusal", lambda *a: None), \
+                mock.patch.object(self.commands, "find_proof", lambda *a: None), \
+                mock.patch.object(self.commands, "task_settings", lambda *a: []), \
+                mock.patch.object(self.commands, "ready_turns", lambda *a: {}), \
+                mock.patch.object(self.commands, "pr_open", lambda *a: (_ for _ in ()).throw(AssertionError("a pull request opened"))):
+            self.commands.cmd_ready(argparse.Namespace(id="SHEP-1", json=True, folder=None, summary="Done.", details=None,
+                                                       proof=None, agents_md=None))
+        return self.task["state"], bool(self.task.get("merged"))
+
+    def test_ready_after_its_pull_request_squash_merged_is_done(self):
+        tip = self.change(self.task["worktree"], "reactions on the left")
+        self.squash_into_main()
+        self.commit(self.main, "another task merged after it")
+        calls = self.github([{"number": 704, "url": "https://github.com/o/r/pull/704", "isCrossRepository": False,
+                              "baseRefName": "main", "headRefOid": tip, "mergeCommit": {"oid": "f00"}}])
+        self.assertEqual(self.ready_now(), ("done", True))
+        self.assertEqual(self.task["pr"]["number"], 704)
+        self.assertNotIn(("pr", "create"), calls)
+
+    def test_ready_with_nothing_left_to_merge_is_done(self):
+        self.change(self.task["worktree"], "reactions on the left")
+        self.squash_into_main()  # by hand, no pull request
+        calls = self.github([])
+        self.assertEqual(self.ready_now(), ("done", True))
+        self.assertNotIn("pr", self.task)
+        self.assertNotIn(("pr", "create"), calls)
+
+    def test_ready_with_work_left_opens_its_pull_request(self):
+        self.change(self.task["worktree"], "reactions on the left")
+        self.github([])
+        with self.assertRaises(AssertionError):
+            self.ready_now()  # on to pr_open
+
+    def test_the_tick_finds_a_squash_merged_pull_request(self):
+        tip = self.change(self.task["worktree"], "reactions on the left")
+        self.assertEqual(self.tick_once(), ("running", False))
+        self.squash_into_main()
+        self.github([{"number": 704, "url": "u", "isCrossRepository": False, "baseRefName": "main", "headRefOid": tip}])
+        self.working()
+        self.assertEqual(self.tick_once(), ("running", False))  # never under a working agent
+        self.live, self.task["gh_checked"] = [], 0  # GitHub asked at most once a minute
+        self.assertEqual(self.tick_once(), ("done", True))
+        self.assertEqual(self.task["pr"]["number"], 704)
+
+    def test_the_tick_finds_a_ready_task_already_in_main(self):
+        self.change(self.task["worktree"], "reactions on the left")
+        self.tick_once()
+        self.task["state"] = "ready"
+        self.github([])
+        self.squash_into_main()
+        self.task["gh_checked"] = 0
+        self.assertEqual(self.tick_once(), ("done", True))
 
 
 class TimeLeft(unittest.TestCase):

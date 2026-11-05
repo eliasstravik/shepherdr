@@ -19,7 +19,7 @@ from .agents import (
     agent_running, busy_again, detail, fit, LINE_MAX, live_agents, ready_turns, STATUSES, SUMMARY_MAX, WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
-from .github import finish, gh, github, merged_here, own_work, pr_adopt, pr_open, pr_pending, pr_problem, pr_view, update_main, watch_main
+from .github import already_merged, finish, gh, github, merged_here, own_work, pr_adopt, pr_open, pr_pending, pr_problem, pr_view, update_main, watch_main
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
     own_path, parent_for, resume_argv, retag_tabs, tab_title, task_tabs,
@@ -391,6 +391,19 @@ def cmd_ready(args):
             finish(s, t, even_if_busy=True)
             v = view(s, t)
             say(args, v, f"{s.ref(t)}: nothing to merge (no commits beyond its base); done.")
+            return
+        # Its work already in its base (SHEP-59: its pull request squash-merged, or nothing left to
+        # merge): done at once, never a second pull request.
+        gone = already_merged(s, t) if wt and t.get("start") else None
+        if gone is not None:
+            t["merged"] = True
+            if gone:
+                watch_main(s, t, (gone.get("mergeCommit") or {}).get("oid"))
+                update_main(s, t)
+            finish(s, t, even_if_busy=True)
+            v = view(s, t)
+            how = f"pull request #{gone['number']} is merged" if gone else f"its work is already in {t.get('base') or 'main'}"
+            say(args, v, f"{s.ref(t)}: {how}; done.")
             return
         msg = finalize(s, t)
         if proof:

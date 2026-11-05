@@ -56,6 +56,12 @@ def pr_open(s, task, repo, summary=None):
         if summary:
             gh("pr", "comment", str(task["pr"]["number"]), "--repo", repo, "--body", summary)
         return task["pr"]
+    # SHEP-59: never a second pull request for a branch that already had one merged (one at its tip
+    # is done before this: already_merged()); commits made since go on a new branch.
+    done = pr_merged(task, repo)
+    if done:
+        raise Fail(f"Pull request #{done['number']} for {br} is already merged, and {br} has commits since. "
+                   f"Put them on a new branch (a new task) rather than a second pull request.")
     body = (task.get("prompt") or "").strip() or task["title"]
     if summary:
         body += "\n\n## Summary\n\n" + summary.strip()
@@ -86,6 +92,58 @@ def pr_adopt(task, repo):
     if found:
         task["pr"] = {"number": found["number"], "url": found["url"], "repo": repo}
     return task.get("pr") if found else None
+
+
+def pr_merged(task, repo):
+    """The merged pull request for the task's branch (from this repo, into its base), or None
+    (SHEP-59: a squash merge leaves the branch's commits out of the base)."""
+    ok, out, _ = gh("pr", "list", "--repo", repo, "--head", task["branch"], "--state", "merged",
+                    "--json", "number,url,isCrossRepository,baseRefName,headRefOid,mergeCommit")
+    try:
+        return next((p for p in json.loads(out) if not p.get("isCrossRepository")
+                     and p.get("baseRefName") == (task.get("base") or "main")), None) if ok and out else None
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def landed(s, task):
+    """Its own work is in its base branch, though not as its commits (squash-merged, SHEP-59):
+    merging its tip into the base, here or on its remote, would change nothing. Only a branch with
+    work of its own (own_work()): one that just caught up with its base is never merged."""
+    if not own_work(s, task):
+        return False
+    main, base = s.loc["folder"], task.get("base") or "main"
+    ok, tip, _ = git(main, "rev-parse", "--verify", "--quiet", f"refs/heads/{task.get('branch')}")
+    tip = tip if ok and tip else task.get("head")
+    for ref in (base, f"refs/remotes/{remote_of(main)}/{base}"):
+        ok, tree, _ = git(main, "merge-tree", "--write-tree", ref, tip)
+        has, have, _ = git(main, "rev-parse", "--verify", "--quiet", f"{ref}^{{tree}}")
+        if ok and has and tree and tree.split()[0] == have:
+            return True
+    return False
+
+
+def already_merged(s, task):
+    """SHEP-59: its work is already in its base (its pull request merged, squash too, or nothing left
+    to merge): ready and the tick mark it done instead of opening a pull request. Returns the merged
+    pull request ({} when merged without one), or None. Its pull request is recorded on the task."""
+    if merged_here(s, task):
+        return {}
+    repo = github(s)
+    tip = task.get("head")
+    if repo:
+        main = s.loc["folder"]
+        git(main, "fetch", "--quiet", remote_of(main), task.get("base") or "main")
+        tip = git(main, "rev-parse", "--verify", "--quiet", f"refs/heads/{task.get('branch')}")[1] or tip
+        if task.get("pr"):
+            v = pr_view(task)
+            if v and v.get("state") == "MERGED" and v.get("headRefOid") == tip:
+                return {**task["pr"], "mergeCommit": v.get("mergeCommit")}
+        found = pr_merged(task, repo)
+        if found and found.get("headRefOid") == tip:
+            task["pr"] = {"number": found["number"], "url": found["url"], "repo": repo}
+            return {**task["pr"], "mergeCommit": found.get("mergeCommit")}
+    return {} if landed(s, task) else None
 
 
 BAD = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
