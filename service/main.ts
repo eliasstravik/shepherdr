@@ -34,7 +34,8 @@ import { terminalBridge } from "./terminal.ts";
 import { worktree } from "./worktree.ts";
 import * as W from "../core/worktree.js";
 import { browserRelay } from "./browser.ts";
-import { voiceCall, type ChatView } from "./voice.ts";
+import { voiceCall, pageWhere, type ChatView } from "./voice.ts";
+import { voiceTool, type VoiceIO, type Where } from "./voice-tools.ts";
 import { Artifacts } from "./artifacts.ts";
 import { Settings, onWritten, PUSH, pushBody } from "./settings.ts";
 import { Secrets, SecretsHome } from "./secrets.ts";
@@ -377,11 +378,152 @@ function chatView(addr: string): ChatView {
   const items = () => (compat.reader?.(addr)?.conv?.items ?? []) as any[];
   return {
     lastReply: () => { const x = [...items()].reverse().find((i) => i.kind === "agent" && i.text); return x ? { id: x.id, text: x.text } : null; },
-    recent: () => [`Status: ${(hub.terminals.get(addr) as any)?.status?.state ?? "unknown"}`,
-      ...items().filter((i) => (i.kind === "agent" || i.kind === "user") && i.text).slice(-12).map((i) => `${i.kind === "user" ? "Person" : "Agent"}: ${i.text}`)].join("\n\n").slice(-12000),
     status: () => (hub.terminals.get(addr) as any)?.status?.state ?? null,
     asking: () => asks.of(addr)[0]?.words?.title ?? null,
   };
+}
+
+/** Keeps a chat read (service/chats.ts) while something needs it: a voice call, or a tool reading another chat. The
+ *  first read has come once ready resolves; stop() lets it go (dropped a minute after, as a page's). */
+function follow(addr: string) {
+  let first: () => void = () => {};
+  const ready = new Promise<void>((r) => { first = r; });
+  const page = () => first();
+  live.chats?.watch(addr, page);
+  return { ready, stop: () => live.chats?.unwatch(addr, page) };
+}
+
+/** What a voice call's tools reach (service/voice-tools.ts): what the web app shows and does. */
+const voiceIO: VoiceIO = {
+  snap: () => compat.last,
+  async chat(key) {
+    const addr = compat.addrOf(key);
+    if (!addr) return null;
+    const f = follow(addr);
+    try {
+      await Promise.race([f.ready, Bun.sleep(8000)]);
+      const r = compat.reader?.(addr);
+      if (!r) return null;
+      const t: any = hub.terminals.get(addr);
+      const items = () => ((r.conv?.items ?? []) as any[])
+        .filter((i) => (i.kind === "user" || i.kind === "agent" || i.kind === "ask") && typeof i.text === "string" && i.text.trim())
+        .map((i) => ({ who: (i.kind === "user" ? (i.from ? "news" : "you") : "agent") as "you" | "agent" | "news", text: String(i.text), at: typeof i.at === "number" ? i.at : undefined }));
+      const out = { status: t?.status?.state ?? null, doing: r.conv?.doing ?? t?.status?.message ?? null, items: items(),
+        earlier: async () => { const more = await r.earlier().catch(() => false); if (more) out.items = items(); return !!more; } };
+      return out;
+    } finally { f.stop(); }
+  },
+  async send(key, text) { await act(hub, { type: "send", chat: key, text, human: true }, compat); },
+  async action(body) {
+    const r = await doAction(body);
+    const text = await r.text();
+    if (!r.ok) throw new Error(text.trim() || "That didn't go through.");
+    try { return JSON.parse(text); } catch { return { ok: true }; }
+  },
+  addrOf: (key) => compat.addrOf(key),
+  taskWhere: (id) => { const t = compat.taskOf(id); return t ? { ref: t.ref, folder: t.folder, machine: t.machine } : null; },
+};
+
+
+/** One of the web app's actions (an Action, POST /api/action), as the page sends it: a voice call's acts go here too. */
+async function doAction(body: any): Promise<Response> {
+  if (body?.type === "secret" && typeof body.name === "string" && typeof body.level === "string") {
+    // a value goes straight to the vault (herdr-secret set, from stdin); the agent hears its name only
+    try {
+      const card = body.card && typeof body.card.chat === "string" ? { address: compat.addrOf(body.card.chat) ?? "" } : undefined;
+      if (card && !card.address) throw new Error("That agent isn't here any more.");
+      await secrets.keep(body.level, body.name, typeof body.value === "string" ? body.value : null, card);
+      await refreshSecrets();
+      return json({ ok: true });
+    } catch (err) { return new Response((err as Error).message, { status: 400 }); }
+  }
+  if (body?.type === "setting" && body.key === "notify") {
+    // a space's Notify (from its menu or Settings), or Everywhere's, in 3.0's shared "notify"
+    const v = typeof body.value === "string" ? body.value : null, n = model.value("notify") ?? {};
+    const next = !body.place || body.place === "all" ? withEverywhere(n, v) : withSpace(n, String(body.place), v);
+    await store.set("notify", next);
+    return json({ ok: true });
+  }
+  if (body?.type === "setting" && typeof body.key === "string" && body.key.startsWith("notify.machine@")) {
+    // Reset of what a machine set before machine scope went (the window's Notify rows under Everywhere's)
+    await store.set("notify", (NF as any).withMachine(model.value("notify") ?? {}, body.key.slice("notify.machine@".length), null));
+    return json({ ok: true });
+  }
+  if (body?.type === "autopilot-run" && typeof body.place === "string") {
+    try { await runPilot(body.place); await model.readPilot(body.place); return json({ ok: true }); }
+    catch (err) { return json({ ok: false, error: (err as Error).message }); }
+  }
+  if (body?.type === "setting" && body.key === "web.serve") {
+    // Settings › Web's Serve from, confirmed: the machine by its line in the picker
+    const row = serveNow().rows.find((r) => r.label === body.value);
+    if (!row) return json({ ok: false, error: "That machine isn't linked." });
+    if (row.serves) return json({ ok: true });
+    if (moving && !moving.error) return json({ ok: false, error: `Already moving it to ${moving.to}.` });
+    void serveFrom(row.here ? null : row.name).catch(() => {});
+    return json({ ok: true });
+  }
+  if (body?.type === "setting" && typeof body.key === "string" && /^(window|addon)\./.test(body.key)) {
+    try { await setWindow(body.key, typeof body.value === "string" ? body.value : null, (k, v) => store.set(k, v)); return json({ ok: true }); }
+    catch (err) { return json({ ok: false, error: (err as Error).message }); }
+  }
+  if (body?.type === "setting" && typeof body.key === "string") {
+    try {
+      // a space's own: its name, machine and repo folder go with it (herdr-task finds a space's settings by folder)
+      const level = typeof body.place === "string" ? body.place : "all";
+      const sp = level !== "all" && !level.startsWith("m:") ? model.spaceById(level) : null;
+      const folder = sp ? (await exec(hub, ["git", "-C", sp.folder || "~", "rev-parse", "--show-toplevel"], sp.machine ?? null).catch(() => null))?.stdout.trim() || sp.folder : null;
+      let value = typeof body.value === "string" ? body.value : null;
+      // Autopilot's schedule: herdr-task knows its words first (Custom…), as the window's
+      if (body.key === "autopilot.every" && value !== null) value = await checkEvery(value);
+      // Home Assistant's Make home space (and turning it on), as the window's: herdr-task's home round makes one
+      const home = /^machine\.(makehome|home)@([\w.-]+)$/.exec(body.key);
+      if (home && (home[1] === "makehome" || value === "on")) await store.set("home.makereq", { machine: home[2] === "local" ? null : home[2], at: Date.now() });
+      if (home?.[1] === "makehome") return json({ ok: true });
+      // Base branch: checked before it's saved, here or on origin as git last fetched it (the window's words)
+      if (body.key === "tasks.base" && value?.trim()) {
+        const want = value.trim();
+        const there = SC.branchShape(want) && sp && (await Promise.all([`refs/heads/${want}`, `refs/remotes/origin/${want}`].map((ref) =>
+          exec(hub, ["git", "-C", folder || sp.folder || "~", "show-ref", "--verify", "--quiet", ref], sp.machine ?? null).catch(() => null)))).some((r) => r?.code === 0);
+        if (!there) return json({ ok: false, error: SC.BASE.missing(want) });
+      }
+      settings.set(body.key, value, level, sp ? { id: sp.id, name: sp.name, machine: sp.machine ?? null, folder } : null);
+      if (body.key.startsWith("autopilot.")) { await model.readAutopilot(); model.rebuild(); }
+      return json({ ok: true });
+    } catch (err) { return json({ ok: false, error: (err as Error).message }); }
+  }
+  if (body?.type === "template" && typeof body.role === "string") {
+    try { return json({ ok: true, text: settings.template(body.role, typeof body.text === "string" ? body.text : undefined) }); }
+    catch (err) { return json({ ok: false, error: (err as Error).message }); }
+  }
+  if (body?.type === "limits-check") { await machines.checkNow(); return json({ ok: true }); }
+  if (body?.type === "secrets-move") {
+    // Settings › Secrets › Kept on: the vault moves (shepherdr secrets move-to); the page sees it as it goes
+    const m = typeof body.machine === "string" && body.machine && body.machine !== home.me?.name ? body.machine : null;
+    if (m !== null && !home.machines.has(m)) return json({ ok: false, error: "That machine isn't linked." });
+    if (secretsMoving && !secretsMoving.error) return json({ ok: false, error: `Already moving them to ${secretsMoving.to}.` });
+    void moveSecrets(m).catch(() => {});
+    return json({ ok: true });
+  }
+  if (body?.type === "serve-from") {
+    // Settings › Web's Serve from: the move runs on (the page sees it in Settings › Web as it goes)
+    const m = typeof body.machine === "string" && body.machine && body.machine !== host.me?.name ? body.machine : null;
+    if (m !== null && !host.machines.has(m)) return json({ ok: false, error: "That machine isn't linked." });
+    if (moving && !moving.error) return json({ ok: false, error: `Already moving it to ${moving.to}.` });
+    void serveFrom(m).catch(() => {});
+    return json({ ok: true });
+  }
+  if (body?.type === "role-info") {
+    // Settings › Agents' model menu (the window's, settings mode): every installed CLI's models, levels, Fast and
+    // permission modes, and the person's pinned and recent models
+    try { if (!settings.choices) await readDefaults(); return json({ ok: true, menus: settings.choices?.menus ?? {}, permDefault: settings.choices?.permDefault ?? {}, picks: (compat.agents as any).picks(), clis: await compat.agents!.choices(null) }); }
+    catch (err) { return json({ ok: false, error: (err as Error).message }); }
+  }
+  try {
+    const r = await act(hub, body, compat);
+    // a switch flipped: shown at once, on another machine's space too (its file read again there)
+    if (body?.type === "mode" && typeof body.place === "string") await model.readPilot(body.place);
+    return json(r);
+  } catch (err) { return new Response((err as Error).message, { status: 400 }); }
 }
 
 const server = Bun.serve<{ who: string }>({
@@ -547,105 +689,16 @@ const server = Bun.serve<{ who: string }>({
       }
       return json(await activity(r, id));
     }
-    if (path === "/api/action" && req.method === "POST") {
-      const body = await req.json().catch(() => null);
-      if (body?.type === "secret" && typeof body.name === "string" && typeof body.level === "string") {
-        // a value goes straight to the vault (herdr-secret set, from stdin); the agent hears its name only
-        try {
-          const card = body.card && typeof body.card.chat === "string" ? { address: compat.addrOf(body.card.chat) ?? "" } : undefined;
-          if (card && !card.address) throw new Error("That agent isn't here any more.");
-          await secrets.keep(body.level, body.name, typeof body.value === "string" ? body.value : null, card);
-          await refreshSecrets();
-          return json({ ok: true });
-        } catch (err) { return new Response((err as Error).message, { status: 400 }); }
-      }
-      if (body?.type === "setting" && body.key === "notify") {
-        // a space's Notify (from its menu or Settings), or Everywhere's, in 3.0's shared "notify"
-        const v = typeof body.value === "string" ? body.value : null, n = model.value("notify") ?? {};
-        const next = !body.place || body.place === "all" ? withEverywhere(n, v) : withSpace(n, String(body.place), v);
-        await store.set("notify", next);
-        return json({ ok: true });
-      }
-      if (body?.type === "setting" && typeof body.key === "string" && body.key.startsWith("notify.machine@")) {
-        // Reset of what a machine set before machine scope went (the window's Notify rows under Everywhere's)
-        await store.set("notify", (NF as any).withMachine(model.value("notify") ?? {}, body.key.slice("notify.machine@".length), null));
-        return json({ ok: true });
-      }
-      if (body?.type === "autopilot-run" && typeof body.place === "string") {
-        try { await runPilot(body.place); await model.readPilot(body.place); return json({ ok: true }); }
-        catch (err) { return json({ ok: false, error: (err as Error).message }); }
-      }
-      if (body?.type === "setting" && body.key === "web.serve") {
-        // Settings › Web's Serve from, confirmed: the machine by its line in the picker
-        const row = serveNow().rows.find((r) => r.label === body.value);
-        if (!row) return json({ ok: false, error: "That machine isn't linked." });
-        if (row.serves) return json({ ok: true });
-        if (moving && !moving.error) return json({ ok: false, error: `Already moving it to ${moving.to}.` });
-        void serveFrom(row.here ? null : row.name).catch(() => {});
-        return json({ ok: true });
-      }
-      if (body?.type === "setting" && typeof body.key === "string" && /^(window|addon)\./.test(body.key)) {
-        try { await setWindow(body.key, typeof body.value === "string" ? body.value : null, (k, v) => store.set(k, v)); return json({ ok: true }); }
-        catch (err) { return json({ ok: false, error: (err as Error).message }); }
-      }
-      if (body?.type === "setting" && typeof body.key === "string") {
-        try {
-          // a space's own: its name, machine and repo folder go with it (herdr-task finds a space's settings by folder)
-          const level = typeof body.place === "string" ? body.place : "all";
-          const sp = level !== "all" && !level.startsWith("m:") ? model.spaceById(level) : null;
-          const folder = sp ? (await exec(hub, ["git", "-C", sp.folder || "~", "rev-parse", "--show-toplevel"], sp.machine ?? null).catch(() => null))?.stdout.trim() || sp.folder : null;
-          let value = typeof body.value === "string" ? body.value : null;
-          // Autopilot's schedule: herdr-task knows its words first (Custom…), as the window's
-          if (body.key === "autopilot.every" && value !== null) value = await checkEvery(value);
-          // Home Assistant's Make home space (and turning it on), as the window's: herdr-task's home round makes one
-          const home = /^machine\.(makehome|home)@([\w.-]+)$/.exec(body.key);
-          if (home && (home[1] === "makehome" || value === "on")) await store.set("home.makereq", { machine: home[2] === "local" ? null : home[2], at: Date.now() });
-          if (home?.[1] === "makehome") return json({ ok: true });
-          // Base branch: checked before it's saved, here or on origin as git last fetched it (the window's words)
-          if (body.key === "tasks.base" && value?.trim()) {
-            const want = value.trim();
-            const there = SC.branchShape(want) && sp && (await Promise.all([`refs/heads/${want}`, `refs/remotes/origin/${want}`].map((ref) =>
-              exec(hub, ["git", "-C", folder || sp.folder || "~", "show-ref", "--verify", "--quiet", ref], sp.machine ?? null).catch(() => null)))).some((r) => r?.code === 0);
-            if (!there) return json({ ok: false, error: SC.BASE.missing(want) });
-          }
-          settings.set(body.key, value, level, sp ? { id: sp.id, name: sp.name, machine: sp.machine ?? null, folder } : null);
-          if (body.key.startsWith("autopilot.")) { await model.readAutopilot(); model.rebuild(); }
-          return json({ ok: true });
-        } catch (err) { return json({ ok: false, error: (err as Error).message }); }
-      }
-      if (body?.type === "template" && typeof body.role === "string") {
-        try { return json({ ok: true, text: settings.template(body.role, typeof body.text === "string" ? body.text : undefined) }); }
-        catch (err) { return json({ ok: false, error: (err as Error).message }); }
-      }
-      if (body?.type === "limits-check") { await machines.checkNow(); return json({ ok: true }); }
-      if (body?.type === "secrets-move") {
-        // Settings › Secrets › Kept on: the vault moves (shepherdr secrets move-to); the page sees it as it goes
-        const m = typeof body.machine === "string" && body.machine && body.machine !== home.me?.name ? body.machine : null;
-        if (m !== null && !home.machines.has(m)) return json({ ok: false, error: "That machine isn't linked." });
-        if (secretsMoving && !secretsMoving.error) return json({ ok: false, error: `Already moving them to ${secretsMoving.to}.` });
-        void moveSecrets(m).catch(() => {});
-        return json({ ok: true });
-      }
-      if (body?.type === "serve-from") {
-        // Settings › Web's Serve from: the move runs on (the page sees it in Settings › Web as it goes)
-        const m = typeof body.machine === "string" && body.machine && body.machine !== host.me?.name ? body.machine : null;
-        if (m !== null && !host.machines.has(m)) return json({ ok: false, error: "That machine isn't linked." });
-        if (moving && !moving.error) return json({ ok: false, error: `Already moving it to ${moving.to}.` });
-        void serveFrom(m).catch(() => {});
-        return json({ ok: true });
-      }
-      if (body?.type === "role-info") {
-        // Settings › Agents' model menu (the window's, settings mode): every installed CLI's models, levels, Fast and
-        // permission modes, and the person's pinned and recent models
-        try { if (!settings.choices) await readDefaults(); return json({ ok: true, menus: settings.choices?.menus ?? {}, permDefault: settings.choices?.permDefault ?? {}, picks: (compat.agents as any).picks(), clis: await compat.agents!.choices(null) }); }
-        catch (err) { return json({ ok: false, error: (err as Error).message }); }
-      }
-      try {
-        const r = await act(hub, body, compat);
-        // a switch flipped: shown at once, on another machine's space too (its file read again there)
-        if (body?.type === "mode" && typeof body.place === "string") await model.readPilot(body.place);
-        return json(r);
-      } catch (err) { return new Response((err as Error).message, { status: 400 }); }
+    if (path === "/api/action" && req.method === "POST") return doAction(await req.json().catch(() => null));
+    if (path === "/api/voice/tool" && req.method === "POST") {
+      // the window's voice call (mods/chat/voice.ts) asks its tools here, from this machine only
+      if (pass.via !== "local") return json({ error: "not here" }, 403);
+      const b = await req.json().catch(() => null);
+      const key = typeof b?.addr === "string" ? chatOfAddress(b.addr) : null;
+      if (!key || typeof b.tool !== "string") return json({ error: "no such call" }, 400);
+      const where: Where = { client: "window", call: key, machine: me?.host ?? null, ...pageWhere(b.where ?? {}) };
+      const a = await voiceTool(b.tool, b.params ?? {}, where, voiceIO);
+      return json(a);
     }
     if (path.startsWith("/api/")) return json({ error: "not found" }, 404);
     return file(path);
@@ -654,7 +707,8 @@ const server = Bun.serve<{ who: string }>({
     open(ws) {
       const d: any = ws.data;
       const page = { send: (x: any) => { ws.send(x); }, close: () => ws.close(), buffered: () => ws.getBufferedAmount() };
-      if (d.voice) d.bridge = voiceCall(hub, d.voice.addr, callName(d.voice.key), chatView(d.voice.addr), page);
+      if (d.voice) d.bridge = voiceCall(hub, callName(d.voice.key), { view: chatView(d.voice.addr), io: voiceIO, where: { client: "web", call: d.voice.key, machine: me?.host ?? null },
+        follow: () => follow(d.voice.addr).stop }, page);
       else if (d.term) d.bridge = terminalBridge(hub, d.term, page);
       else if (d.browser) d.bridge = browserRelay(d.browser, page);
       else live.join(ws);

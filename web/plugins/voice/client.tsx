@@ -3,11 +3,54 @@
 // green bar shows who, Go back returns.
 import clsx from 'clsx'
 import { useEffect, useState } from 'react'
-import { act, agentChat, chatName, definePlugin, getState, goChat, placeOf, setUI, useSnap, useStore, useUI, visibleChats } from '@client/kernel.ts'
+import { act, agentChat, chatName, definePlugin, getState, goChat, goPlace, openArtifact, openItem, openTask, placeOf, setUI, shownItem, useSnap, useStore, useUI, visibleChats } from '@client/kernel.ts'
 import { ic, IconButton, LiveWave, MicIcon, MicOffIcon, roundBtn, useElapsed, WaveIcon, Waves, XIcon } from '@client/ui.tsx'
 import { cancelDictation } from '@plugins/chat/client.tsx'
 import { sectionOf } from '@client/Settings.tsx'
-import { callPhase, callSample, muteCall, startCall, stopCall } from './call.ts'
+import { openAccept } from '@client/screens/Accept.tsx'
+import { callPhase, callSample, muteCall, sendWhere, startCall, stopCall, type Nav } from './call.ts'
+
+/** the Tasks panel's filter for a task state the voice agent named */
+const FILTER: Record<string, string> = { need: 'needs', work: 'working', ready: 'ready', merging: 'merging', queued: 'queued', todo: 'todo', done: 'done' }
+/** a task's tab as the side panel names it */
+const ITEM: Record<string, string> = { terminal: 'terminal', files: 'files', changes: 'diff', pr: 'pr', browser: 'browser' }
+
+/** What the voice agent asked to show (its open tool), here on this page. */
+export function voiceNav(nav: Nav) {
+  const { ui, snap } = getState()
+  if (!snap) return
+  const str = (v: unknown) => (typeof v === 'string' ? v : '')
+  setUI({ viewer: null, settings: null, search: false, menu: false, plus: null })
+  if (nav.kind === 'space' && snap.places.some((p) => p.id === nav.place)) goPlace(str(nav.place))
+  else if (nav.kind === 'chat' && str(nav.chat)) goChat(str(nav.chat))
+  else if (nav.kind === 'artifact' && str(nav.artifact)) openArtifact(str(nav.artifact))
+  else if (nav.kind === 'settings') {
+    const at = nav.section ? sectionOf(str(nav.section), snap.settings ?? [], ui) : -1
+    setUI({ settings: { section: ui.device === 'phone' && at < 0 ? null : Math.max(0, at) }, drawer: false })
+  } else if (nav.kind === 'tasks' || nav.kind === 'needs') {
+    const taskFilter = nav.kind === 'needs' ? 'needs' : FILTER[str(nav.filter)] ?? 'all'
+    setUI(ui.device === 'phone' ? { task: null, tab: 'tasks', taskFilter, pick: null } : { side: 'tasks', sideShut: false, taskFilter })
+  } else if (nav.kind === 'task' && snap.tasks.some((t) => t.id === nav.task)) {
+    const id = str(nav.task), tab = str(nav.tab)
+    if (tab === 'review') return openAccept(id)
+    openTask(id)
+    const item = ITEM[tab]
+    if (!item) return
+    if (getState().ui.device === 'desktop') setUI((u) => ({ sidebars: { ...u.sidebars, panelOpen: true, item } }))
+    else openItem(item)
+  }
+}
+
+/** While a call is on: what this page shows, told to the call as it changes (its "here" and "this task"). */
+function CallWhere() {
+  const where = useStore((s) => {
+    if (!s.ui.call || !s.snap) return ''
+    return JSON.stringify({ device: s.ui.device, place: s.ui.place, task: s.ui.task, tab: s.ui.task ? shownItem(s.ui, s.snap) ?? 'chat' : null,
+      artifact: s.ui.viewer?.artifact ?? null, settings: !!s.ui.settings })
+  })
+  useEffect(() => { if (where) sendWhere(JSON.parse(where)) }, [where])
+  return null
+}
 
 export function toggleCall(chatKey: string) {
   const ui = getState().ui
@@ -23,6 +66,10 @@ export function toggleCall(chatKey: string) {
     // no key yet: the window's card over the box says where it goes (callBar), not an error
     if (/ElevenLabs key/i.test(message)) return void (help = chatKey, helpers.forEach((f) => f()))
     setUI({ callError: message })
+  }, voiceNav, () => {
+    // the call's socket is open: where this page is, from the start
+    const { ui, snap } = getState()
+    if (snap) sendWhere({ device: ui.device, place: ui.place, task: ui.task, tab: ui.task ? shownItem(ui, snap) ?? 'chat' : null, artifact: ui.viewer?.artifact ?? null, settings: !!ui.settings })
   }).catch(() => { endCall(); setUI({ callError: 'Audio could not start on this device.' }) })
 }
 
@@ -183,7 +230,7 @@ export default definePlugin({
   setup(reg) {
     reg.composerIdle = CallButton
     reg.composerLive.push({ when: (ui, chatKey) => ui.call === chatKey, View: CallBox })
-    reg.topBars.push(CallBar, CallError)
+    reg.topBars.push(CallBar, CallError, CallWhere)
     reg.composerAbove.push({ order: 7, View: CallHelp })
     // 3.0 calls with Ctrl+Shift+Space (the keyboard plugin): no V or M keys of its own
   },

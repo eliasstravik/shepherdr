@@ -34,7 +34,15 @@ connection it came on). A page from anywhere else can't change anything: writes 
 - The task browser: Kitty in the window, a live view of the same browser on the web.
 - Voice calls and dictation: the machine's microphone in the window, the phone's on the web, through the service
   (the same ElevenLabs voice agent, `core/voice.js`; ElevenLabs speech to text, Scribe, for dictation, with the
-  same key).
+  same key). The voice agent has four tools (`core/voice.js` TOOLS), answered by the service with the web app's
+  reach (`service/voice-tools.ts`): `look` reads anything (the call's context, any chat or a search in it, spaces,
+  machines, tasks, a task's summary and checks, Needs you, news, Autopilot, automations, settings, secret names,
+  artifacts), `open` shows something in the app the call runs in (the page gets a `nav` message; the window's chat mod
+  gets `nav/*.json` in the call folder), `send` writes as the person to any chat, and `act` runs one of the web app's
+  actions only after the person said yes out loud (`confirmed`). The window's call asks its own machine's service
+  (`POST /api/voice/tool`, local token); without it only its own chat works. Both sides tell the call what the app shows
+  (the page's `where` message, the window's `where.json`). The agent's spec carries a fingerprint (`SPEC`): an agent
+  made from an older one is PATCHed on the next call (`ensureAgent`).
 - Keys: 3.0's keys work in the web app too (Settings → Keyboard shortcuts on a desktop).
 
 ## Install

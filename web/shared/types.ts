@@ -1270,6 +1270,8 @@ export type Action =
   | { type: 'restart'; chat: string; kind?: string; model?: string; effort?: string; speed?: string; save?: boolean }
   /** mark a task done with nothing merged (shepherdr task close); refused (held) while it holds unmerged work, unless force */
   | { type: 'close'; chat: string; force?: boolean }
+  /** undo done or ready (herdr-task reopen): a voice call's act reopen */
+  | { type: 'reopen'; chat: string }
   /** SHEP-38: start a task that hasn't started by itself later (herdr-task edit --at / --in, the words as typed), take that
    *  back (off: back to To do) or start a scheduled one now */
   | { type: 'schedule'; chat: string; at?: string; in?: string; off?: boolean; now?: boolean }

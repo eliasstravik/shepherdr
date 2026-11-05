@@ -1,7 +1,9 @@
-// A voice call with an agent's chat: an ElevenLabs voice agent talks with the person and passes
-// on only what is meant for the coding agent (send_to_agent → hc send); the chat feeds it the
-// coding agent's replies and status, which it tells the person. Started by the chat mod (a mod
-// has no audio or sockets); one process per call, nothing recorded or kept.
+// A voice call with an agent's chat: an ElevenLabs voice agent talks with the person and reads,
+// opens and changes Shepherdr for them through its tools (core/voice.js: look, open, send, act),
+// which this machine's Shepherdr service answers (POST /api/voice/tool, service/voice-tools.ts:
+// the reach of the person's web app); without the service, only this chat (send, look at it).
+// The chat feeds it the called agent's replies and status, which it tells the person. Started by
+// the chat mod (a mod has no audio or sockets); one process per call, nothing recorded or kept.
 //   bun voice.ts <call folder> <agent address> <agent name>
 // The call folder links it to the chat:
 //   state.json  written here: { phase, muted, error, since } (phase: connecting, listening,
@@ -9,7 +11,9 @@
 //   alive       touched by the chat every few seconds; stale for 20 s ends the call
 //   in/*.json   from the chat: { type: "mute", on } | { type: "hangup" } |
 //               { type: "reply", text } | { type: "status", status, asking? }
-//   recent.txt  the chat's last messages and the agent's status, for read_chat
+//   recent.txt  the chat's last messages and the agent's status (looking at it without the service)
+//   where.json  from the chat: what the window shows ({ place, task, tab }), for the agent's "here"
+//   nav/*.json  written here: what the voice agent asked to show (open), done by the chat
 // and beside it <call folder>.level: how loud the call is now, 0..1 (the agent while it speaks,
 // else the person), for the chat's wave.
 // Secrets: ELEVENLABS_API_KEY (the person's) from <app home>/secrets/elevenlabs.env, else as kept
@@ -21,7 +25,7 @@
 import { readFileSync, writeFileSync, readdirSync, rmSync, statSync, mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { API, agentSpec, opening, replyLine, statusLine, apiError } from "./core/voice.js";
+import { API, opening, replyLine, statusLine, whereLine, apiError, ensureAgent, agentFile } from "./core/voice.js";
 import { SECRETS, keyFor, envFile } from "./key.ts";
 
 const [dir, addr, name] = process.argv.slice(2);
@@ -71,26 +75,45 @@ async function api(path: string, key: string, init: RequestInit = {}) {
   if (!r.ok) {
     throw new Error(apiError(r.status, await r.text().catch(() => "")));
   }
-  return r.json();
+  return r.status === 204 ? null : r.json();
 }
 
-// The dedicated "Herdr chat" voice agent: made once with the person's key, its id kept in secrets.
-// (made: the one the machine that keeps the key made with it.) Only the id and a tag of the key are kept here.
+// The "Herdr chat" voice agent, up to this spec (core/voice.js ensureAgent: made, or PATCHed when its tools or prompt
+// changed). (made: the one the machine that keeps the key made with it.) Only the id, a tag of the key and the spec are
+// kept here.
 async function agentId(key: string, made = "") {
   const file = join(SECRETS, "elevenlabs-agent.env");
-  const saved = envFile(file);
   const tag = createHash("sha256").update(key).digest("hex").slice(0, 16);
-  if (saved.ELEVENLABS_AGENT_ID && saved.ELEVENLABS_KEY_TAG === tag) return saved.ELEVENLABS_AGENT_ID;
-  const id = made || (saved.ELEVENLABS_AGENT_ID && !saved.ELEVENLABS_KEY_TAG ? saved.ELEVENLABS_AGENT_ID : "") || await (async () => {
-    const r = await api("/convai/agents/create", key, { method: "POST", body: JSON.stringify(agentSpec(who)) }) as { agent_id?: string };
-    if (typeof r.agent_id !== "string" || !/^[\w-]{1,200}$/.test(r.agent_id)) throw new Error("ElevenLabs didn't make the voice agent.");
-    return r.agent_id;
-  })();
-  mkdirSync(SECRETS, { recursive: true, mode: 0o700 });
-  writeFileSync(file, `# The "Herdr chat" voice agent, made by the chat mod with ELEVENLABS_API_KEY.\nELEVENLABS_AGENT_ID=${id}\nELEVENLABS_KEY_TAG=${tag}\n`, { mode: 0o600 });
-  return id;
+  return ensureAgent({
+    saved: envFile(file), tag, made,
+    api: (path: string, init?: RequestInit) => api(path, key, init),
+    save: (id: string, spec: string) => { mkdirSync(SECRETS, { recursive: true, mode: 0o700 }); writeFileSync(file, agentFile(id, tag, spec), { mode: 0o600 }); },
+  }) as Promise<string>;
 }
 
+// ---- the service: the tools ---------------------------------------------------------------
+// This machine's Shepherdr service answers the tools as for the web app, told this call's agent and what the window
+// shows; what it asks to show goes to the chat (nav/). Its token is the local callers' (~/.herdr/shepherdr/token).
+
+const SERVICE = `http://127.0.0.1:${process.env.SHEPHERDR_PORT || 7788}`;
+const TOKEN = join(process.env.SHEPHERDR_DATA || join(process.env.HOME ?? "", ".herdr", "shepherdr"), "token");
+
+function where() { try { return JSON.parse(readFileSync(join(dir, "where.json"), "utf8")); } catch { return {}; } }
+
+/** A tool's answer from the service: { result, nav?, error? }, or null when the service can't be asked. */
+async function serviceTool(tool: string, params: unknown): Promise<{ result: string; nav?: unknown; error?: boolean } | null> {
+  let token = "";
+  try { token = readFileSync(TOKEN, "utf8").trim(); } catch { return null; }
+  try {
+    const r = await fetch(`${SERVICE}/api/voice/tool`, { method: "POST", signal: AbortSignal.timeout(25000),
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ addr, tool, params, where: where() }) });
+    if (!r.ok) return null;
+    const a = await r.json();
+    return typeof a?.result === "string" ? a : null;
+  } catch { return null; }
+}
+
+// ElevenLabs' answer (none for a 204), or throws its error in words without anything like a key.
 // ---- audio --------------------------------------------------------------------------------
 
 let mic: ReturnType<typeof Bun.spawn> | null = null;
@@ -168,11 +191,37 @@ async function sendToAgent(text: string) {
   const p = Bun.spawn(["hc", "send", addr, text], { env, stdout: "pipe", stderr: "pipe" });
   const code = await p.exited;
   if (code !== 0) throw new Error((await new Response(p.stderr).text()).trim() || "It didn't go through.");
-  return "Sent to the coding agent.";
+  return `Sent to ${who}.`;
 }
 
 function readChat() {
   try { return readFileSync(join(dir, "recent.txt"), "utf8").slice(-12000) || "Nothing yet."; } catch { return "Nothing yet."; }
+}
+
+const NO_SERVICE = "Shepherdr's service isn't running on this machine, so on this call I can only read and write this chat.";
+/** Without the service: this chat only (send here, look at it). */
+async function localTool(name: string, p: any): Promise<{ result: string; nav?: unknown; error?: boolean }> {
+  const here = !p?.to || /^(here|this|this chat)$/i.test(String(p.to).trim());
+  try {
+    if ((name === "send" && here) || name === "send_to_agent") {
+      const text = String(p?.text ?? "").trim();
+      if (!text || text.length > 16000) throw new Error("Nothing to send.");
+      return { result: await sendToAgent(text) };
+    }
+    if ((name === "look" && p?.what === "chat" && (!p.id || /^(here|this)$/i.test(String(p.id).trim()))) || name === "read_chat") return { result: readChat() };
+  } catch (err: any) { return { result: String(err?.message ?? err).slice(0, 500), error: true }; }
+  return { result: NO_SERVICE, error: true };
+}
+
+// The window moved during the call: told (in words, from the service) once it settles.
+let saidWhere = "", whereAt = 0;
+async function moved() {
+  const now = JSON.stringify(where());
+  if (now === saidWhere || Date.now() - whereAt < 1500) return;
+  whereAt = Date.now();
+  saidWhere = now;
+  const a = await serviceTool("look", { what: "here" });
+  if (a && !a.error) send(whereLine(a.result));
 }
 
 function send(line: object) {
@@ -214,8 +263,10 @@ async function main() {
   if (url.protocol !== "wss:" || !url.hostname.endsWith("elevenlabs.io")) throw new Error("ElevenLabs gave an unexpected address.");
   if (ended) return;
   ws = new WebSocket(signed_url);
+  const here = (await serviceTool("look", { what: "here" }))?.result ?? "";
+  saidWhere = JSON.stringify(where());
   ws.onopen = () => {
-    ws!.send(JSON.stringify(opening(who)));
+    ws!.send(JSON.stringify(opening(who, here)));
   };
   ws.onmessage = async (e) => {
     if (ended) return;
@@ -240,16 +291,13 @@ async function main() {
     else if (m.type === "client_tool_call") {
       const c = m.client_tool_call ?? {};
       phase = "thinking"; thinkingAt = Date.now(); state();
-      let result = "", isError = false;
-      try {
-        if (c.tool_name === "send_to_agent") {
-          const text = String(c.parameters?.text ?? "").trim();
-          if (!text || text.length > 16000) throw new Error("Nothing to send.");
-          result = await sendToAgent(text);
-        } else if (c.tool_name === "read_chat") result = readChat();
-        else throw new Error("No such tool.");
-      } catch (err: any) { result = String(err?.message ?? err).slice(0, 500); isError = true; }
-      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "client_tool_result", tool_call_id: c.tool_call_id, result, is_error: isError }));
+      const name = String(c.tool_name ?? ""), params = c.parameters ?? {};
+      let a = await serviceTool(name, params);
+      if (!a) a = await localTool(name, params);
+      if (a.nav) {
+        try { mkdirSync(join(dir, "nav"), { recursive: true }); writeFileSync(join(dir, "nav", `${Date.now()}-${Math.random().toString(36).slice(2, 7)}.json`), JSON.stringify(a.nav)); } catch {}
+      }
+      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "client_tool_result", tool_call_id: c.tool_call_id, result: a.result, is_error: !!a.error }));
     }
   };
   ws.onerror = () => end("The voice connection failed.");
@@ -273,6 +321,7 @@ setInterval(() => {
 setInterval(() => {
   if (ended) return;
   inbox();
+  if (ws?.readyState === WebSocket.OPEN) void moved();
   try { if (Date.now() - statSync(join(dir, "alive")).mtimeMs > 20000) end(); } catch { if (Date.now() - since > 20000) end(); }
   state();
 }, 150);
