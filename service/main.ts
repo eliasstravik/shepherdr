@@ -27,7 +27,7 @@ import { windowSection, setWindow, offList, offPlugins } from "./window.ts";
 import { Chats } from "./chats.ts";
 import { act, hc as hcRun } from "./actions.ts";
 import { AgentWatch } from "./watch.ts";
-import { Compat, activity, newsKey } from "./compat.ts";
+import { Compat, activity, newsKey, placeKey } from "./compat.ts";
 import { Asks } from "./asks.ts";
 import { Jobs } from "./jobs.ts";
 import { terminalBridge } from "./terminal.ts";
@@ -53,6 +53,29 @@ import * as HCORE from "../core/host.js";
 const { serveChoice } = HCORE as any;
 import * as NF from "../core/notify.js";
 const { withEverywhere, withSpace } = NF as any;
+
+import * as MN from "../core/mentions.js";
+const { REACH_FILE, reachable } = MN as any;
+
+// A machine's reach map, as its spaces: kept a minute (its scheduler redraws it every 5)
+const reaches = new Map<string, { at: number; got: Promise<{ from: string | null; spaces: any[]; checked: number | null }> }>();
+function reachOf(machine: string | null) {
+  const k = machine ?? "", was = reaches.get(k);
+  if (was && Date.now() - was.at < 60_000) return was.got;
+  const got = exec(hub, ["sh", "-c", REACH_FILE], machine, 20).then((r) => {
+    const d = JSON.parse(r.stdout || "null");
+    return { from: d?.graph?.core?.name ?? machine, spaces: reachable(d?.graph), checked: d?.at ?? null };
+  }).catch(() => null).then((r) => r?.checked ? r : {
+    // no map there yet (its scheduler hasn't run): its own spaces, which it always reaches
+    from: machine, checked: null,
+    spaces: compat.allSpaces().filter((s) => (s.machine ?? null) === machine).map((s) => {
+      const id = s.id.split("/").pop()!, p = compat.last?.places.find((x) => x.id === s.id);
+      return { id, name: p?.name ?? id, route: "", machine: machine ?? me?.host ?? "", target: id, ...(p?.emoji ? { emoji: p.emoji } : {}), assistant: !!p?.assistantTab?.live };
+    }),
+  });
+  reaches.set(k, { at: Date.now(), got });
+  return got;
+}
 
 const ROOT = join(import.meta.dir, "..");
 const WEB = process.env.SHEPHERDR_WEB_DIR || join(ROOT, "web", "dist");
@@ -448,6 +471,14 @@ const server = Bun.serve<{ who: string }>({
       const kind = kindOf(t) ?? "claude", machine = a.includes("/") ? a.split("/")[0] : null;
       const mine = kind === "claude" ? scanned((await sh(hub, SCAN, ["scan", t.foreground?.cwd ?? t.cwd ?? ""], machine).catch(() => ({ stdout: "" }))).stdout) : [];
       return json({ commands: commandList(kind, mine), menus: [...(MENU[kind] ?? [])] });
+    }
+    if (path === "/api/reach") {
+      // the "#" list above the box (core/mentions.js): the spaces the machine running this chat's agent can reach, from
+      // its herdr-task reach map (what tell-assistant follows); a chat with no agent yet: its space's machine
+      const key = url.searchParams.get("chat") ?? "", a = compat.addrOf(key);
+      const sp = !a ? compat.allSpaces().find((s) => placeKey(s.id) === key) : null;
+      const machine = a ? (a.includes("/") ? a.split("/")[0] : null) : sp?.machine ?? null;
+      return json(await reachOf(machine));
     }
     if (path === "/api/folders") {
       const m = url.searchParams.get("machine"), machine = !m || m === me?.host ? null : m;
