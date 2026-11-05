@@ -59,16 +59,16 @@ export function sendWhere(where: Record<string, unknown>) {
 }
 
 /** what this page did with an open: it shows it now (ok), or why not; and what it shows now */
-export type NavAck = { ok: boolean; why?: string; where?: Record<string, unknown> }
+export type NavAck = { ok: boolean; why?: string; where?: Record<string, unknown>; did?: string; ask?: string; screen?: string }
 
-export async function startCall(chatKey: string, onError: (message: string) => void = () => undefined, onNav: (nav: Nav) => NavAck = () => ({ ok: false, why: 'this page can\'t open things' }), onOpen: () => void = () => undefined) {
+export async function startCall(chatKey: string, onError: (message: string) => void = () => undefined, onNav: (nav: Nav) => NavAck | Promise<NavAck> = () => ({ ok: false, why: 'this page can\'t open things' }), onOpen: () => void = () => undefined) {
   stopCall()
   const url = new URL(`api/voice?chat=${encodeURIComponent(chatKey)}`, location.href)
   url.protocol = url.protocol.replace('http', 'ws')
   ws = new WebSocket(url)
   ws.binaryType = 'arraybuffer'
   ws.onopen = () => onOpen()
-  ws.onmessage = (e) => {
+  ws.onmessage = async (e) => {
     if (e.data instanceof ArrayBuffer) {
       phase = 'listening'
       if (!play(e.data)) { stopCall(); onError('Voice audio could not keep up. Start a new call.') }
@@ -79,7 +79,7 @@ export async function startCall(chatKey: string, onError: (message: string) => v
     // screen only then)
     if (m.type === 'nav' && m.nav) {
       let ack: NavAck
-      try { ack = onNav(m.nav) } catch (err) { ack = { ok: false, why: (err as Error)?.message || 'it failed on the page' } }
+      try { ack = await onNav(m.nav) } catch (err) { ack = { ok: false, why: (err as Error)?.message || 'it failed on the page' } }
       if (typeof m.id === 'number' && ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'navved', id: m.id, ...ack }))
     }
     if (m.type === 'state' && m.state) {

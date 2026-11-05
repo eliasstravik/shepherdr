@@ -5,6 +5,7 @@
 // here. An act changes nothing until the voice agent says the person confirmed it out loud (confirmed: true).
 import type { Snapshot, Task, Place } from "../web/shared/types.ts";
 import { navWords } from "../core/voice.js";
+import { screenParams, screenWords } from "../core/screen.js";
 
 /** Where a call comes from: its app, the chat it started in, and what that app shows now (sent by the page or the window). */
 export type Where = {
@@ -27,7 +28,9 @@ export type Where = {
 export type Nav =
   | { kind: "space"; place: string }
   | { kind: "task"; task: string; tab?: string; chat?: string; addr?: string | null; ref?: string; title?: string; folder?: string; machine?: string | null }
-  | { kind: "tasks"; filter?: string }
+  | { kind: "tasks"; filter?: string; search?: string }
+  | { kind: "panel"; panel: "artifacts" | "files" | "changes" | "terminal" | "chat" }
+  | { kind: "screen"; do: string; ref?: string; text?: string; direction?: string; submit?: boolean; find?: string; confirmed?: boolean }
   | { kind: "needs" }
   | { kind: "artifact"; artifact: string; title: string; v: number; machine?: string | null }
   | { kind: "settings"; section?: string }
@@ -50,9 +53,9 @@ export interface VoiceIO {
 }
 
 /** a tool's answer: words for the voice agent; an open's nav, and what it shows in words, for the app to show and confirm */
-export type Answer = { result: string; nav?: Nav; shows?: string; error?: boolean };
+export type Answer = { result: string; nav?: Nav; shows?: string; error?: boolean; then?: Nav };
 /** what the app said once it tried a nav: it shows it now (ok), or why not; with what it shows now */
-export type Ack = { ok: boolean; why?: string | null; where?: Record<string, unknown> };
+export type Ack = { ok: boolean; why?: string | null; where?: Record<string, unknown>; did?: string; ask?: string; screen?: string };
 
 const MAX = 3500;
 const cut = (s: string, n: number) => { const t = String(s ?? "").replace(/\s+/g, " ").trim(); return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t; };
@@ -521,6 +524,11 @@ export async function voiceTool(name: string, params: any, where: Where, io: Voi
       return done(`Sent to ${c.name}.`);
     }
     if (name === "act") return await act(snap, where, io, p, id);
+    if (name === "screen") {
+      const q = screenParams(p) as any;
+      if (q.error) return fail(q.error);
+      return { result: "Asked the screen, but it hasn't answered.", nav: { kind: "screen", ...q }, shows: "the screen" };
+    }
     return fail("No such tool.");
   } catch (e: any) {
     return fail(cut(String(e?.message ?? e), 400) || "That didn't work.");
@@ -550,7 +558,21 @@ function open(snap: Snapshot, where: Where, io: VoiceIO, what: string, id: strin
       return showing(`${spoken(t.id)}${want === "chat" ? "" : want === "review" ? "'s review" : `'s ${want === "pr" ? "pull request" : want}`}`,
         { kind: "task", task: t.id, tab: want, ...(chat ? { chat, addr: io.addrOf?.(chat) ?? null } : {}), ...(at ? { ref: at.ref, folder: at.folder, machine: at.machine } : {}), title: t.name });
     }
-    case "tasks": return showing(`the Tasks panel${query ? `, ${query}` : ""}`, { kind: "tasks", ...(query ? { filter: stateOf(query) ?? undefined } : {}) });
+    case "tasks": {
+      // a state said ("ready ones") filters by it; other words go in the filter box ("voice" → tasks about voice)
+      const st = query ? stateOf(query) : null;
+      const rest = st ? words(query).filter((w) => !stateOf(w) && !["tasks", "task", "the", "ones", "only", "all", "for", "me", "you"].includes(w)).join(" ") : query;
+      return showing(`the Tasks panel${st ? `, ${STATUS[st]}` : ""}${rest ? `, filtered by "${cut(rest, 60)}"` : ""}`, { kind: "tasks", ...(st ? { filter: st } : {}), ...(rest ? { search: rest } : {}) });
+    }
+    case "artifacts": case "files": case "changes": case "terminal": {
+      // the shown space's panel; a space named: there first (the page goes to it, then opens the panel)
+      if (id && !isHere(id)) {
+        const hits = spacesSaid(snap, id, where);
+        if (hits.length !== 1) return fail(hits.length ? `Which one: ${hits.slice(0, 6).map((p) => spaceSaid(snap, p)).join("; ")}? Ask the person.` : `I can't find a space called "${cut(id, 60)}".`);
+        return { ...showing(`the ${hits[0].name} space's ${what === "terminal" ? "Assistant terminal" : `${what} panel`}`, { kind: "space", place: hits[0].id }), then: { kind: "panel", panel: what } } as Answer;
+      }
+      return showing(what === "terminal" ? "the space's Assistant terminal" : `the ${what[0].toUpperCase()}${what.slice(1)} panel`, { kind: "panel", panel: what as "artifacts" });
+    }
     case "needs": return showing("what needs the person", { kind: "needs" });
     case "artifact": {
       const a = findArtifact(snap, id, where);
@@ -564,15 +586,21 @@ function open(snap: Snapshot, where: Where, io: VoiceIO, what: string, id: strin
       return showing(`${c.name}'s chat`, { kind: "chat", chat: c.key, addr: io.addrOf?.(c.key) ?? null });
     }
   }
-  return fail("open can show: space, task, tasks, needs, artifact, settings, chat.");
+  return fail("open can show: space, task, tasks, needs, artifacts, files, changes, terminal, artifact, settings, chat.");
 }
 
 /** An open's answer once the app that started the call tried it: on screen only when it said so. show() asks that very
  *  app (the page's call socket, or the window's chat) and resolves with its ack, or null when it didn't answer. */
 export async function shown(a: Answer, show: (nav: Nav) => Promise<Ack | null>): Promise<Answer> {
   if (!a.nav) return a;
-  const ack = await show(a.nav).catch((e) => ({ ok: false, why: String(e?.message ?? e) }) as Ack);
-  return { ...a, ...(navWords(a.shows ?? "it", ack) as { result: string; error?: boolean }) };
+  const ask = (nav: Nav) => show(nav).catch((e) => ({ ok: false, why: String(e?.message ?? e) }) as Ack);
+  let ack = await ask(a.nav);
+  // the screen's answer is the screen itself (core/screen.js)
+  if (a.nav.kind === "screen") { const { then: _t, ...rest } = a; return { ...rest, ...(screenWords(ack) as { result: string; error?: boolean }) }; }
+  // two steps (a space, then its panel): the second only once the first is on screen
+  if (ack?.ok && a.then) ack = await ask(a.then);
+  const { then: _t, ...rest } = a;
+  return { ...rest, ...(navWords(a.shows ?? "it", ack) as { result: string; error?: boolean }) };
 }
 
 /** What an act will do, in words to ask the person ("Accept SHEP 45, “Voice calls”? That merges it."). */

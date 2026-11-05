@@ -95,3 +95,18 @@ test("a page that can't show it, or never answers: the agent hears it didn't ope
   expect(o.result).toContain("didn't confirm");
   c.end();
 });
+
+test("the screen tool: done on the page that started the call, the agent hears the page's new screen", async () => {
+  const phone = page((nav) => nav.kind === "screen" ? { ok: true, did: "Scrolled the messages down", screen: "Screen: the web app on a phone.\ne3 button \"Close\"" } : { ok: true });
+  const c = phone.start({ client: "web", device: "phone", machine: "eliass-mac-mini", call: "p:h1" });
+  await until(() => !!agent);
+  await Bun.sleep(50);
+  const n = results.length;
+  agent.send(JSON.stringify({ type: "client_tool_call", client_tool_call: { tool_name: "screen", tool_call_id: "s1", parameters: { do: "scroll", direction: "down" } } }));
+  await until(() => results.length > n);
+  expect(phone.got.filter((m) => m.type === "nav").pop().nav).toMatchObject({ kind: "screen", do: "scroll", direction: "down" });
+  expect(results[n].result).toBe('Scrolled the messages down. What the screen shows now:\nScreen: the web app on a phone.\ne3 button "Close"');
+  expect(results[n].is_error).toBe(false);
+  c.end();
+  agent = null;
+});

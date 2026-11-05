@@ -170,7 +170,7 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, page: Page) {
   return {
     /** the page's microphone: 16 kHz PCM (the page cancels its own speaker's echo, so the person can talk over it);
      *  or, as text, where the page is now ({ type: "where", place, task, tab, artifact, settings, device }), or what
-     *  it did with an open ({ type: "navved", id, ok, why?, where? }) */
+     *  it did with an open or a screen action ({ type: "navved", id, ok, why?, where?, did?, ask?, screen? }) */
     message(data: string | Buffer | ArrayBuffer) {
       if (ended) return;
       if (typeof data === "string") {
@@ -178,7 +178,9 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, page: Page) {
         try { m = JSON.parse(data); } catch {}
         if (m?.type === "navved" && typeof m.id === "number") {
           if (m.where && typeof m.where === "object") where = { ...where, ...pageWhere(m.where) };
-          waiting.get(m.id)?.({ ok: m.ok === true, why: typeof m.why === "string" ? m.why.slice(0, 300) : null });
+          // a screen action's answer says what it did, what to ask first, and the screen now (core/screen.js)
+          const str = (v: unknown, n: number) => (typeof v === "string" ? v.slice(0, n) : undefined);
+          waiting.get(m.id)?.({ ok: m.ok === true, why: typeof m.why === "string" ? m.why.slice(0, 300) : null, did: str(m.did, 300), ask: str(m.ask, 300), screen: str(m.screen, 4000) });
           return;
         }
         if (m?.type !== "where") return;

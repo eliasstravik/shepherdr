@@ -27,6 +27,7 @@ import { readFileSync, writeFileSync, readdirSync, rmSync, statSync, mkdirSync, 
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { API, opening, replyLine, statusLine, whereLine, apiError, ensureAgent, agentFile, navWords } from "./core/voice.js";
+import { screenWords } from "./core/screen.js";
 import { SECRETS, keyFor, envFile } from "./key.ts";
 
 const [dir, addr, name] = process.argv.slice(2);
@@ -102,7 +103,7 @@ const TOKEN = join(process.env.SHEPHERDR_DATA || join(process.env.HOME ?? "", ".
 function where() { try { return JSON.parse(readFileSync(join(dir, "where.json"), "utf8")); } catch { return {}; } }
 
 /** A tool's answer from the service: { result, nav?, error? }, or null when the service can't be asked. */
-async function serviceTool(tool: string, params: unknown): Promise<{ result: string; nav?: unknown; shows?: string; error?: boolean } | null> {
+async function serviceTool(tool: string, params: unknown): Promise<{ result: string; nav?: any; then?: unknown; shows?: string; error?: boolean } | null> {
   let token = "";
   try { token = readFileSync(TOKEN, "utf8").trim(); } catch { return null; }
   try {
@@ -201,7 +202,7 @@ function readChat() {
 
 const NO_SERVICE = "Shepherdr's service isn't running on this machine, so on this call I can only read and write this chat.";
 /** Without the service: this chat only (send here, look at it). */
-async function localTool(name: string, p: any): Promise<{ result: string; nav?: unknown; error?: boolean }> {
+async function localTool(name: string, p: any): Promise<{ result: string; nav?: any; then?: unknown; shows?: string; error?: boolean }> {
   const here = !p?.to || /^(here|this|this chat)$/i.test(String(p.to).trim());
   try {
     if ((name === "send" && here) || name === "send_to_agent") {
@@ -225,9 +226,9 @@ async function moved() {
   if (a && !a.error) send(whereLine(a.result));
 }
 
-/** What the voice agent asked to show, done by the chat that started this call: its { ok, why }, or null when it
- *  didn't answer in time (the chat reads nav/ about once a second). */
-async function showHere(nav: unknown): Promise<{ ok: boolean; why?: string } | null> {
+/** What the voice agent asked to show, done by the chat that started this call: its { ok, why } (a screen action's
+ *  { did, ask, screen } too), or null when it didn't answer in time (the chat reads nav/ about once a second). */
+async function showHere(nav: unknown): Promise<{ ok: boolean; why?: string; did?: string; ask?: string; screen?: string } | null> {
   const name = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}.json`;
   try {
     mkdirSync(join(dir, "nav"), { recursive: true });
@@ -240,7 +241,8 @@ async function showHere(nav: unknown): Promise<{ ok: boolean; why?: string } | n
     let a: any = null;
     try { a = JSON.parse(readFileSync(ack, "utf8")); } catch { continue; }
     try { rmSync(ack); } catch {}
-    return { ok: a?.ok === true, why: typeof a?.why === "string" ? a.why : undefined };
+    const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+    return { ok: a?.ok === true, why: str(a?.why), did: str(a?.did), ask: str(a?.ask), screen: str(a?.screen) };
   }
   try { rmSync(join(dir, "nav", name)); } catch {}
   return null;
@@ -317,7 +319,13 @@ async function main() {
       let a = await serviceTool(name, params);
       if (!a) a = await localTool(name, params);
       // an open: this window's chat shows it, and says so (navved/), before the agent may say it's on screen
-      if (a.nav) a = { ...a, ...navWords(a.shows ?? "it", await showHere(a.nav)) };
+      // (the screen tool's answer is the screen itself; a space then its panel: the second once the first shows)
+      if (a.nav?.kind === "screen") a = { ...a, ...screenWords(await showHere(a.nav)) };
+      else if (a.nav) {
+        let ack = await showHere(a.nav);
+        if (ack?.ok && a.then) ack = await showHere(a.then);
+        a = { ...a, ...navWords(a.shows ?? "it", ack) };
+      }
       if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "client_tool_result", tool_call_id: c.tool_call_id, result: a.result, is_error: !!a.error }));
     }
   };

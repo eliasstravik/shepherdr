@@ -1430,6 +1430,14 @@ export function openTask(id: string) {
   }))
 }
 
+/** the space a chat is in: its Assistant's own, or its task's (a voice call's mark goes on it, SHEP-51) */
+export function chatPlace(snap: Snapshot, key: string): string | null {
+  const own = snap.places.find((p) => p.chat === key)
+  if (own) return own.id
+  if (key.includes('/')) return taskOf(snap, taskChatId(key)!)?.place ?? null
+  return snap.places.some((p) => p.id === key) ? key : null
+}
+
 export function goChat(key: string) {
   if (key.includes('/')) openTask(taskChatId(key)!)
   else setUI({ place: key, task: null, tab: 'chat', drawer: false })

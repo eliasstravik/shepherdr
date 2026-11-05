@@ -5,6 +5,7 @@
 coordinator.js: coordinator menu-tasks new-menu-tasks newspace shepherdr-settings spaces-chat tabs-tasks tasks
 inbox.js: spaces-chat tabs-tasks tasks workspace-status-chat
 core/voice.js: chat
+core/screen.js: chat
 core/accept.js: accept-card
 core/toasts.js: toasts
 core/menus.js: spaces-chat tasks tasks-menu menu-tasks new-menu-tasks pane-chat tabs-tasks coordinator
