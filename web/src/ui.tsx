@@ -10,6 +10,8 @@ import type { Status, Task, Report } from '@shared/types.ts'
 import { TALKING, type Sample } from './meter.ts'
 import { useMotion } from './motion.ts'
 import { useStore } from './kernel.ts'
+import { createPortal } from 'react-dom'
+import { placeFloat, type Placement } from './float.ts'
 
 export {
   AdjustmentsHorizontalIcon as ModeIcon,
@@ -724,6 +726,71 @@ export function useDismiss(ref: RefObject<HTMLElement | null>, onClose: () => vo
       removeEventListener('blur', blur)
     }
   }, [ref])
+}
+
+/**
+ * A popup laid over everything on the screen's own layer (a portal), so no sidebar, scrolling list or drawer clips or
+ * covers it: placed from what opened it (float.ts) on the side with room, all of it in sight at any width, and placed
+ * again as the screen resizes or it grows. Too tall for the room, it scrolls. A list scrolling what opened it away
+ * closes it (onClose). `point`: a right click's spot, the anchor then only the row it was on.
+ */
+export function Floating({ anchor, point, place, gap, onClose, children }: { anchor: HTMLElement | null; point?: { x: number; y: number } | null; place: Placement; gap?: number; onClose?: () => void; children: ReactNode }) {
+  const device = useStore((s) => s.ui.device)
+  const ref = useRef<HTMLDivElement>(null)
+  const close = useRef(onClose)
+  close.current = onClose
+  useLayoutEffect(() => {
+    const box = ref.current!
+    const el = box.firstElementChild as HTMLElement | null
+    if (!el) return
+    const scrolls = getComputedStyle(el).overflowY !== 'visible'
+    const put = () => {
+      if (!point && !anchor?.isConnected) return
+      // measured where it has the whole screen's width, at its own height
+      box.style.left = box.style.top = '0px'
+      el.style.maxHeight = ''
+      if (!scrolls) el.style.overflowY = ''
+      const a = point ? { left: point.x, top: point.y, right: point.x, bottom: point.y } : anchor!.getBoundingClientRect()
+      const h = el.offsetHeight
+      const s = placeFloat(a, el.offsetWidth, h, place, innerWidth, innerHeight, gap)
+      box.style.left = `${s.x}px`
+      box.style.top = `${s.y}px`
+      if (h > s.maxH) {
+        el.style.maxHeight = `${s.maxH}px`
+        if (!scrolls) el.style.overflowY = 'auto'
+      }
+      // it springs out of the corner nearest what opened it
+      el.style.transformOrigin = `${s.left ? 'right' : 'left'} ${s.up ? 'bottom' : 'top'}`
+    }
+    put()
+    let frame = 0
+    const later = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(put)
+    }
+    const ro = new ResizeObserver(later)
+    ro.observe(el)
+    // the list under what opened it scrolled: it would float away from it, so it goes (or follows, with no onClose)
+    const scrolled = (e: Event) => {
+      if (!(e.target instanceof Node) || box.contains(e.target) || !anchor || !e.target.contains(anchor)) return
+      if (close.current) close.current()
+      else later()
+    }
+    addEventListener('resize', later)
+    addEventListener('scroll', scrolled, { capture: true, passive: true })
+    return () => {
+      cancelAnimationFrame(frame)
+      ro.disconnect()
+      removeEventListener('resize', later)
+      removeEventListener('scroll', scrolled, { capture: true })
+    }
+  }, [anchor, point, place, gap])
+  return createPortal(
+    <div ref={ref} data-device={device} data-float="" className={clsx('fixed top-0 left-0 z-50 max-w-[calc(100vw-16px)] font-sans text-fg antialiased', device === 'phone' ? 'text-base/6' : 'text-sm/5')}>
+      {children}
+    </div>,
+    document.body,
+  )
 }
 
 /**

@@ -445,7 +445,7 @@ function PlaceMenu({ p, snap, menu, unread, onClose }: { p: Place; snap: Snapsho
   const then = (f: () => void) => () => { menu.close(); setTimeout(f) }
   const items = (MN.spaceMenu as (o: object) => CoreItem[])({ unread, pinned, git: p.git ?? null, assistant: !!(p.assistantTab?.id || p.assistantTab?.live) })
   return (
-    <RowMenu menu={menu} label={p.name} className="min-w-[min(17rem,calc(100%-0.5rem))]!">
+    <RowMenu menu={menu} label={p.name} className="min-w-[min(17rem,calc(100vw-1rem))]!">
       <CoreMenuItems items={items}
         setting={<MenuSetting name="Notify" named icon={now === 'Off' ? <BellSlashIcon className={ic} /> : <BellIcon className={ic} />}
           note={items.find((x) => x.setting)?.note}
