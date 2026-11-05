@@ -167,8 +167,8 @@ def argv_for(pick):
             a += ["-m", pick["model"]]
         if pick.get("effort"):
             a += ["-c", f'model_reasoning_effort="{pick["effort"]}"']
-        if pick.get("fast"):
-            a += ["-c", 'service_tier="fast"']
+        # always said, so Fast off wins over a service_tier in config.toml (default: the standard tier)
+        a += ["-c", 'service_tier="%s"' % ("fast" if pick.get("fast") else "default")]
         perm = pick.get("perm")
         if perm == "full":
             a.append("--dangerously-bypass-approvals-and-sandbox")

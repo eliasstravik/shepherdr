@@ -225,7 +225,7 @@ function SpeedWords({ speed }: { speed: Worn }) {
 /* ---------- the window's model button and menu (mods/chat pickParts, mods/chat-models) ---------- */
 
 export type MenuModel = { id: string; name: string; efforts: string[]; defaultEffort?: string | null; fast?: boolean }
-export type AgentMenu = { name: string; models: MenuModel[]; perms?: { id: string; label: string }[]; fastLocked?: boolean }
+export type AgentMenu = { name: string; models: MenuModel[]; perms?: { id: string; label: string }[] }
 type MenuPick = { agent: string; model: string | null; effort: string | null; fast: boolean; perm: string | null }
 type MenuData = { current: MenuPick; menus: Record<string, AgentMenu>; permDefault: Record<string, string>; picks?: Picks; remote: string | null }
 /** a stretch of the model list (core/agents.js modelSections): Pinned, Recent, All models, or an agent's matches */
@@ -370,7 +370,7 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
       // another agent: its own permission modes; full access stays full access
       const full = was.perm === 'bypassPermissions' || was.perm === 'full'
       next.perm = full ? (m.agent === 'claude' ? 'bypassPermissions' : 'full') : d.permDefault[m.agent] ?? null
-      next.fast = !!d.menus[m.agent]?.fastLocked
+      next.fast = false
     }
     return next
   }
@@ -460,7 +460,7 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
                   </div>
                 </>
               ) : null}
-              {m?.fast && !menu?.fastLocked ? (
+              {m?.fast ? (
                 <button type="button" role="menuitemcheckbox" aria-checked={sel.fast} disabled={!!remote} className={row} onClick={() => setSel({ ...sel, fast: !sel.fast })}>
                   <SpeedIcon className="size-3.5 shrink-0 text-fg3" />
                   <span className="flex-1">Fast</span>
