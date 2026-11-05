@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { pilotFor, everywhereOf, headerDetail, presetOf, levelOf, blankBeat, currentBeat, OLD_STARTERS, STARTER, EVENTS, PRESETS } from "./autopilot.js";
+import { pilotFor, everywhereOf, headerDetail, flipped, presetOf, levelOf, blankBeat, currentBeat, OLD_STARTERS, STARTER, EVENTS, PRESETS } from "./autopilot.js";
 import { SECTIONS } from "./settings.js";
 
 const { cases } = JSON.parse(readFileSync(new URL("./autopilot.cases.json", import.meta.url), "utf8"));
@@ -27,7 +27,7 @@ test("the header's words", () => {
   expect(headerDetail({ on: true, pending: {} })).toBe("Queued");
   expect(headerDetail({ on: true, inflight: {}, pending: {} })).toBe("Waking");
   expect(headerDetail({ on: true, events: ["ready"] })).toBe("On events");
-  expect(headerDetail({ on: true, events: [] })).toBe("Run now only");
+  expect(headerDetail({ on: true, events: [] })).toBe("No schedule");
   // SHEP-5: the next heartbeat, near as minutes, further as its time
   const now = new Date(2026, 10, 5, 9, 0, 0).getTime();
   expect(headerDetail({ on: true, next_run: now + 7 * 60000 - 5000 }, now)).toBe("Next in 7 min");
@@ -37,6 +37,23 @@ test("the header's words", () => {
   expect(headerDetail({ on: true, next_run: now + 3 * 86400000 }, now)).toBe("Next Sun");
   expect(presetOf(" Every 60 Minutes ")).toBe("every 60 minutes");
   expect(presetOf("every 2 hours")).toBe(null);
+});
+
+test("SHEP-52: switched on, the header says Waking at once, never the off record's empty schedule", () => {
+  const off = { on: false, next_run: null, pending: null, inflight: null, every: "every 60 minutes", events: [] };
+  expect(headerDetail({ ...off, on: true })).toBe("No schedule"); // what it showed before: the off record, on
+  expect(headerDetail(flipped(off, true))).toBe("Waking");
+  expect(flipped(off, true).on).toBe(true);
+  // herdr-task's answer then says the rest: queued, waking, then the next wake
+  expect(headerDetail({ ...off, on: true, pending: { reasons: ["switched on"] } })).toBe("Queued");
+  const now = Date.now();
+  expect(headerDetail({ ...off, on: true, next_run: now + 60 * 60000 - 1000 }, now)).toBe("Next in 60 min");
+  // switched off: nothing waits
+  const on = { on: true, next_run: now + 5000, pending: { reasons: ["run now"] }, inflight: { reason: "run now" } };
+  expect(flipped(on, false)).toEqual({ on: false, next_run: null, pending: null, inflight: null });
+  expect(headerDetail(flipped(on, false))).toBe("");
+  // a wake already running keeps its own
+  expect(flipped({ ...on, on: false }, true).inflight).toEqual({ reason: "run now" });
 });
 
 test("a space's own settings have Autopilot", () => {

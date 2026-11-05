@@ -17,7 +17,7 @@ import { h_flex } from "gpui-base";
 import { link, TEXT, H, RADIUS, openSettings, toast, plainError } from "./ui.js";
 import { theme, home, appHome, exec, readTextFile, notify, shared, setShared } from "herdr";
 import { terminals } from "./live.js";
-import { pilotFor, headerDetail } from "./core/autopilot.js";
+import { pilotFor, headerDetail, flipped } from "./core/autopilot.js";
 
 const FILE = () => `${home()}/.herdr/tasks/.autopilot.json`;
 const SETTINGS = () => `${home()}/.herdr/shepherdr.json`;
@@ -188,8 +188,8 @@ function apToggle(view, space, cx) {
   if (!was || view.apBusy) return;
   const on = !was.on;
   view.apBusy = true;
-  // It flips at once; herdr-task's answer then says the rest.
-  view.ap = on ? { ...was, on } : { ...was, on, next_run: null, pending: null, inflight: null };
+  // It flips at once ("Waking" when on: it wakes at once); herdr-task's answer then says the rest.
+  view.ap = flipped(was, on);
   cx.notify();
   cx.spawn(async (cx) => {
     try {

@@ -100,7 +100,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Name | PC:215 "Assistant · Claude Code" (just "Assistant" before it starts); another tab its program | A:301 `place.header`; another tab `prog` | ✓ |
 | Folder, ~ for home | PC:240 | A:301 `place.where` / the tab's `where` | ✓ |
 | The space's name | (not in the header: the sidebar and the tab) | desktop: same; phone: its top names the space | ◇ phone: no sidebar or tab bar |
-| Autopilot switch | AP:86 knob + "Autopilot" + `headerDetail` ("Next 09:30", "Queued", "Waking" pulsing, "On events", "Run now only") | C:42 Switch + word + `headerDetail` (`place.pilot`), "Waking" pulses | ✓ |
+| Autopilot switch | AP:86 knob + "Autopilot" + `headerDetail` ("Next 09:30", "Queued", "Waking" pulsing, "On events", "No schedule") | C:42 Switch + word + `headerDetail` (`place.pilot`), "Waking" pulses | ✓ |
 | Narrow header: switch only, tooltip | AP:21 below 480 px, tooltip "Autopilot" | C:42 container below 30rem / phone: switch only, title "Autopilot" | ✓ |
 | Flips at once; refusal toasts | AP:132 "Autopilot didn't turn on/off" | C:42 the same toast | ✓ |
 | "Write a heartbeat" | AP:128 on with an empty heartbeat → Settings › Autopilot | C:42 `pilot.blank` → Settings › Autopilot for the space | ✓ |

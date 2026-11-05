@@ -61,7 +61,7 @@ function useRunNow(place: Place) {
 }
 
 /** The header's Autopilot (3.0's switch), one group: the switch, "Autopilot", what it waits for (core/autopilot.js
- *  headerDetail: "Next in 7 min", "Queued", "Waking", "On events", "Run now only") and Run now, on one quiet pill as
+ *  headerDetail: "Next in 7 min", "Queued", "Waking", "On events", "No schedule") and Run now, on one quiet pill as
  *  tall as Chat | Terminal. It flips at once, herdr-task's answer says the rest (a refusal goes back, with a toast).
  *  It sits on the header's right with the other controls, Run now as a ▶ (its name in its label) so the header's
  *  name and folder keep their room; as the column narrows "Autopilot" goes while on (under 42rem: the green switch
@@ -85,7 +85,8 @@ function AutopilotHeader({ place }: { place: Place }) {
   }, [a?.on, want])
   if (!a || other || !has('autopilot')) return null
   const on = want ?? a.on
-  const shown = want === null ? a : { ...a, on, ...(on ? {} : { next_run: null, pending: false, inflight: false }) }
+  // flipped this moment: on says "Waking" (it wakes at once), off nothing, until the snapshot catches up
+  const shown = want === null ? a : AP.flipped(a, on)
   const flip = async () => {
     if (want !== null) return
     const next = !on
