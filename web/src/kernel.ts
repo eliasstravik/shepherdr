@@ -1169,12 +1169,11 @@ export function orderedTasks(snap: Snapshot, list: ListView) {
   return shownGroups(snap, list).flatMap((g) => g.tasks)
 }
 
-/** what a space is, under its name in its header: a home space keeps its machine (the main machine's every machine) */
+/** what a space is, quietly under its name in its header: the folder its Assistant works in, and its machine when not
+ *  this one. Never its role or agent ("Assistant · Claude Code", SHEP-36): the composer's model menu says which agent. */
 export function placeKind(snap: Snapshot, p: Place) {
-  // 3.0's pane header: "Assistant · Claude Code" and the folder it works in (its machine too, where there are more)
-  const on = manyMachines(snap) && p.machine !== snap.host ? ` · ${machineName(snap.machines, p.machine)}` : ''
-  const where = p.cwd ?? p.where
-  return `${p.header ?? 'Assistant'}${where ? ` · ${where}` : ''}${on}`
+  const on = manyMachines(snap) && p.machine !== snap.host ? machineName(snap.machines, p.machine) : ''
+  return [p.cwd ?? p.where, on].filter(Boolean).join(' · ')
 }
 
 /** the open task's agent, whose chat is on screen */
