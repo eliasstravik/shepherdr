@@ -158,12 +158,13 @@ export function modelButton(t, coord, opts = {}, cx = null) {
 // select: { agent, model } that comes chosen (a typed /model sonnet), told back at once.
 export function openMenu(coord, select = null) {
   const { sel, data } = coord;
-  const rows = Object.values(data.menus).reduce((n, m) => n + m.models.length, 0);
-  const W = 300, H = 2 + 10 + 26 + 31 * rows + 9 + 26 + 34 + 31 + 31;
+  // border and padding, agent tabs, search, the list (it scrolls past 8 rows), separator,
+  // Reasoning header and levels, Fast, Permissions (chat-models' sizes)
+  const W = 340, H = 2 + 10 + 34 + 36 + 8 * 31 + 9 + 26 + 34 + 31 + 31;
   const b = coord.at;
   const at = b ? { x: Math.max(8, b.x + b.width - W), y: b.y - H - 6 >= 8 ? b.y - H - 6 : b.y + b.height + 6 } : "pointer";
   openOverlay({ mod: "chat-models", kind: "popup", frame: "none", width: W, height: H, at,
-    props: { mode: "settings", key: coord.key, height: H, remote: null, select,
+    props: { mode: "settings", key: coord.key, width: W, height: H, remote: null, select,
       current: { agent: sel.agent, model: sel.model, effort: sel.effort ?? null, fast: Boolean(sel.fast), perm: sel.perm ?? null },
       menus: data.menus, icons: data.icons, permDefault: data.permDefault } });
 }
