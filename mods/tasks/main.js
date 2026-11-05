@@ -19,6 +19,7 @@ import { spaces, panes, agents, terminals, inRender } from "./live.js";
 import { items as needs, ASKS, toAgent, reasonOf, reqReason, REASONS, fit } from "./inbox.js";
 import { words } from "./core/asks.js";
 import { taskDot, ownProgress } from "./dot.js";
+import { taskMenu } from "./core/menus.js";
 // The rules for a task's status, order and words: shared with the web app (core/tasks.js).
 import { RANK, STATUS, RANK_OF, ORDER, GROUP_BY, groupBy, machineOf, machineName, refOf, taskKey, autoPrefix, place,
   queueReason, reportOf as report, secondLine, leftOf, order, matches, day, ago, capital, short } from "./core/tasks.js";
@@ -752,14 +753,17 @@ export default class Tasks extends View {
     // why; Queued, what it waits for ("after HERD-3"); Merging, why it waits. The id leads it.
     const w = reportOf(task, section, live);
     const sub = this.statusLine(p, w);
-    const left = leftOf(p, w);
+    const left = section === "scheduled" ? null : leftOf(p, w);
+    // Scheduled (SHEP-38): its time until it starts under its calendar ("6h"), as a working row's minutes left.
+    const under = section === "scheduled" ? leftOf(p, w) : null;
     // Pin / Unpin in its right-click menu (not an archived task's: archived ones drop out of Pinned).
     const key = taskKey(list, task);
     return this.line(`task-${key}`, {
-      go: this.target(p), glyph: this.glyph(p, w), ref: refOf(list, task), title: task.title, sub, left,
+      go: this.target(p), glyph: this.glyph(p, w), under, ref: refOf(list, task), title: task.title, sub, left,
       dim: section === "done", selected: focused, where: this.whereOf(list.machine, placeName(list)),
       action: section === "ready" ? this.acceptButton(p, t) : null,
-      pin: this.shelved(p) ? null : { key, on: this.pins().has(key) },
+      pin: this.shelved(p) ? null : { key, on: this.pins().has(key), status: section, machine: list.machine ?? null, folder: list.folder,
+        ref: refOf(list, task), sub: section === "scheduled" ? sub : null },
     }, t);
   }
 
@@ -782,8 +786,19 @@ export default class Tasks extends View {
 
   // The row's right-click menu (mods/tasks-menu): Pin / Unpin, at the pointer. Rows show no pin of
   // their own: a pinned task sits in the Pinned group.
+  // A task not started yet also starts later (SHEP-38): a few times, and a scheduled one Start now and Unschedule
+  // (core/menus.js taskMenu; the web's Other time… types any time, here the Assistant does).
   rowMenu(pin) {
-    openOverlay({ mod: "tasks-menu", kind: "popup", at: "pointer", width: 160, height: 8 + 32, props: { menu: "row", key: pin.key, on: pin.on } });
+    const items = taskMenu({ pinned: pin.on, status: pin.status }).filter((x) => !x.typed);
+    // As tasks-menu draws it: a section per line or heading, 4 apart; a heading 28, a row 32.
+    let height = 8, first = true;
+    for (const x of items) {
+      if ((x.sep || x.heading) && !first) height += 4;
+      height += x.sep ? 0 : x.heading ? 28 : 32;
+      first = false;
+    }
+    openOverlay({ mod: "tasks-menu", kind: "popup", at: "pointer", width: 220, height, props: { menu: "row", key: pin.key, on: pin.on,
+      status: pin.status, machine: pin.machine, folder: pin.folder, ref: pin.ref, sub: pin.sub } });
   }
 
   // Ready = "looks done, your call": Review (opens the Accept card) is the person's one action here, at the row's end. It merges first when there is something to merge (herdr-task accept follows the merge
@@ -820,7 +835,7 @@ export default class Tasks extends View {
   //   run (`meta`).
   // A row with nothing under its title is one line. Nothing shows on hover: no tooltips (SHEP-25).
   // `pin`: { key, on }: Pin / Unpin in the row's right-click menu.
-  line(id, { go, glyph, ref, title, sub, left, dim, selected, meta, metaColor, where, action, pin }, t) {
+  line(id, { go, glyph, under, ref, title, sub, left, dim, selected, meta, metaColor, where, action, pin }, t) {
     // Every second line is at most 40 characters (herdr-task cuts an agent's own; this catches the
     // derived ones: a long queue, a check's message).
     const said = sub ? capital(sub) : null;
@@ -831,7 +846,10 @@ export default class Tasks extends View {
       .when(Boolean(selected), (el) => el.bg(t.selected))
       .when(Boolean(pin), (el) => el.on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.rowMenu(pin); }))
       .when(Boolean(go), (el) => el.cursor_pointer().hover((s) => s.bg(selected ? t.selected : t.hover)).on_click((_e, cx) => { go(); cx.notify(); }));
-    const mark = h_flex().w(14).h(20).flex_none().items_center().justify_center().child(glyph);
+    const mark = under
+      ? v_flex().w(14).flex_none().items_center().child(h_flex().h(20).items_center().child(glyph))
+        .child(div().text_size(TEXT.id).font_medium().whitespace_nowrap().text_color(t.dim).child(under))
+      : h_flex().w(14).h(20).flex_none().items_center().justify_center().child(glyph);
     const head = div().id(`${id}-title`).min_w(0).truncate().text_color(dim ? t.muted : t.foreground).child(title);
     if (!two) return row.h(32).child(mark).child(head.flex_1()).when(Boolean(end), (el) => el.child(end));
     // The words keep their room: where it is takes only what is left after them, and gives way first.

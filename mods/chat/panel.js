@@ -199,7 +199,7 @@ export class PanelHost {
     // A problem (failing checks) its worker is on (core/tasks.js onIt()): Working; nobody on it: Needs you.
     const k = addr ? terminals().find((x) => x.address === addr) : null;
     const fixing = r.attention && onIt(r, live ? [{ address: addr, status: st, turn: k?.turn, role: k?.labels?.["herdr.role"] ?? "worker" }] : []);
-    const s = ["todo", "queued", "done"].includes(r.state) ? r.state
+    const s = ["todo", "queued", "scheduled", "done"].includes(r.state) ? r.state
       : (r.attention && !fixing) || st === "blocked" || r.retry?.over ? "needs"
       : fixing ? "working"
       : r.state === "ready" && !this.again(st, addr) ? ((r.merge_requested && live) || (r.auto_merge && r.pr && !r.merged) ? "merging" : "ready")

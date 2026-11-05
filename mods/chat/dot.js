@@ -8,6 +8,7 @@
 //   ready    green, a white tick        done     the same in grey
 //   merging  the green ring with a quarter gap, turning
 //   queued   the grey ring with a clock's two hands      todo  the grey ring      off  dashed
+//   scheduled  a small grey calendar (SHEP-38: starts by itself at a time)
 import { div, svg } from "gpui-kit";
 import { theme } from "herdr";
 import { terminals } from "./live.js";
@@ -26,7 +27,7 @@ const pie = (pct) => `mods/tasks/pie/${Math.min(100, Math.max(5, Math.round(pct 
 const box = () => div().relative().size(14).flex_none();
 const ring = (color, file = "circle") => svg(`mods/tasks/${file}.svg`).size(14).flex_none().text_color(color);
 
-// s: needs, working, merging, ready, queued, todo, done, off. pct: the % done (working).
+// s: needs, working, merging, ready, queued, scheduled, todo, done, off. pct: the % done (working).
 export function taskDot(s, { pct = null, halo = false } = {}) {
   const t = theme();
   switch (s) {
@@ -39,6 +40,7 @@ export function taskDot(s, { pct = null, halo = false } = {}) {
       .child(svg("mods/tasks/tick.svg").size(14).flex_none().text_color("#ffffff"));
     case "merging": return ring(readyColor(), "merging").spin(1400);
     case "queued": return ring(t.dim, "queued");
+    case "scheduled": return ring(t.dim, "scheduled");
     case "off": return ring(t.dim, "off");
   }
   return ring(t.dim);

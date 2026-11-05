@@ -7,13 +7,16 @@
 //             props().items = [{ key, label, count }], props().current. A pick goes to the
 //             panel as shared "tasks.filterreq" = { key, at }.
 //   "row"     a task row's right-click: Pin or Unpin (props().on) the task props().key, in shared
-//             "tasks.pinned" (mods/tasks keeps the same list).
+//             "tasks.pinned" (mods/tasks keeps the same list). A task not started yet (props().status
+//             todo, queued or scheduled) also starts later (SHEP-38): herdr-task edit --in / --at on
+//             props().machine, folder and ref; a scheduled one Start now and Unschedule. What herdr-task
+//             refuses shows as a toast.
 // ↑/↓ move, Enter picks, Esc closes.
 
 import { View, div } from "gpui-kit";
 import { v_flex } from "gpui-base";
-import { props, closeOverlay, theme, shared, setShared } from "herdr";
-import { menuRow, heading, TEXT } from "./ui.js";
+import { props, closeOverlay, theme, shared, setShared, exec, appHome } from "herdr";
+import { menuRow, heading, toast, TEXT } from "./ui.js";
 import { taskMenu } from "./core/menus.js";
 
 // Shepherdr's GROUP_WORDS. "folder" was Space's old key.
@@ -23,13 +26,7 @@ const GROUPS = [{ key: "status", label: "Status" }, { key: "space", label: "Spac
 // The menu's sections, each a title (or none), its items, which is checked and what a pick does.
 function sections() {
   const p = props() ?? {};
-  if (p.menu === "row") return [{ title: null, checks: false, current: null,
-    items: taskMenu({ pinned: p.on }).map((it) => ({ key: "pin", label: it.label, icon: `mods/workspace-chrome/${it.icon}.svg` })),
-    pick: () => {
-      const v = shared("tasks.pinned");
-      const rest = (Array.isArray(v) ? v : []).filter((k) => k !== p.key);
-      setShared("tasks.pinned", p.on ? rest : [...rest, p.key]);
-    } }];
+  if (p.menu === "row") return rowSections(p);
   if (p.menu === "filter") return [{ title: null, items: p.items ?? [], current: p.current,
     pick: (key) => setShared("tasks.filterreq", { key, at: Date.now() }) }];
   const items = GROUPS.filter((g) => p.machines || !g.key.startsWith("machine"));
@@ -37,6 +34,43 @@ function sections() {
   const by = shared("tasks.groupby") === "folder" ? "space" : shared("tasks.groupby");
   const current = items.some((g) => g.key === by) ? by : by === "machine-space" ? "space" : "status";
   return [{ title: "Group by", items, current, pick: (key) => setShared("tasks.groupby", key) }];
+}
+
+// A row's menu (core/menus.js taskMenu, the web's too): its sections between the lines, a heading
+// over Start later's times. Other time… is the web's (a typed time): here the Assistant does that.
+function rowSections(p) {
+  const out = [];
+  let cur = null;
+  for (const it of taskMenu({ pinned: p.on, status: p.status ?? null })) {
+    if (it.typed) continue;
+    if (it.sep || it.heading || !cur) out.push(cur = { title: it.heading ? (p.status === "scheduled" && p.sub ? `${it.heading} · ${p.sub}` : it.heading) : null,
+      checks: false, current: null, items: [], pick: (key) => rowPick(p, key) });
+    if (it.sep || it.heading) continue;
+    cur.items.push({ key: `${it.id}:${cur.items.length}`, label: it.label, at: it.at, in: it.in, id: it.id,
+      icon: it.icon === "play" ? "mods/tasks/play.svg" : `mods/workspace-chrome/${it.icon}.svg` });
+  }
+  return out.filter((s) => s.items.length);
+}
+
+function rowPick(p, key) {
+  const it = rowSections(p).flatMap((s) => s.items).find((x) => x.key === key);
+  if (!it) return;
+  if (it.id === "pin" || it.id === "unpin") {
+    const v = shared("tasks.pinned");
+    const rest = (Array.isArray(v) ? v : []).filter((k) => k !== p.key);
+    setShared("tasks.pinned", p.on ? rest : [...rest, p.key]);
+    return;
+  }
+  const args = it.id === "start-now" ? ["start", p.ref, "--now"] : it.id === "unschedule" ? ["edit", p.ref, "--at", ""]
+    : ["edit", p.ref, ...(it.in ? ["--in", it.in] : ["--at", it.at])];
+  // herdr-task, here or (--on) on the folder's machine; the list shows the change on its next read.
+  exec(`${appHome()}/mods/tasks/bin/herdr-task`, [...(p.machine ? ["--on", p.machine] : []), ...args, "--json", "--folder", p.folder])
+    .then((r) => {
+      let out = null;
+      try { out = JSON.parse(r.stdout || "null"); } catch {}
+      if (r.code !== 0 || !out || out.error) toast({ level: "error", title: `Couldn't schedule ${p.ref}`, body: out?.error || r.stderr?.trim() || "herdr-task refused it." });
+    })
+    .catch((e) => toast({ level: "error", title: `Couldn't schedule ${p.ref}`, body: String(e?.message ?? e) }));
 }
 
 // Every item in order, with its section: ↑/↓ run through all of them.
