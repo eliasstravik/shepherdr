@@ -140,6 +140,22 @@ const SIGNED = /^\s*(?:\*\*)?(?:[Mm]essage\s+)?[Ff]rom\s+([A-Z][\w.-]*(?:\s+[\w.
 export const signedBy = (text) => SIGNED.exec(String(text ?? ""))?.[1]?.trim() || null;
 export const unsigned = (text) => String(text ?? "").replace(SIGNED, "");
 
+// A sender outside any terminal: from="<machine>/ppid:123" (a script, a service, or a window that named its process).
+export const outsideTerminal = (from) => /(^|\/)ppid:\d+$/.test(String(from ?? "").trim().split(/\s+/)[0]);
+
+// The person's own words that came wrapped as a message from outside any terminal (a window or service on another
+// machine whose send named its process, before SHEP-3): each one the person sent from this chat moments before with the
+// same words (matches(u, p): the chat's own test that the log's message u is its pending send p). A message from a
+// terminal (an agent) never counts, nor one nobody here just sent. users: the log's user messages; -> their ids.
+export function ownWords(users, pending, matches) {
+  const ids = [];
+  for (const p of pending ?? []) {
+    const u = (users ?? []).find((u) => !ids.includes(u.id) && matches(u, p));
+    if (u?.from && outsideTerminal(u.from)) ids.push(u.id);
+  }
+  return ids;
+}
+
 // Who sent a message with hc (<hc from="t7 herd-12-fix-login">): its role or task as people know it ("Reviewer",
 // "HERD-12", "Assistant on vm-ssa"), never its terminal address. An artifact's form says its title; the person's own
 // lines (a kept secret) are "You". A sender outside any terminal (from="<machine>/ppid:123") or one gone goes by the
@@ -150,7 +166,7 @@ export function senderName(from, text = null, { find = () => null, machine = nul
   const [addr, ...rest] = String(from ?? "").trim().split(/\s+/);
   const signed = signedBy(text);
   if (addr === "person") return "You";
-  if (/(^|\/)ppid:\d+$/.test(addr ?? "")) return signed || "Another agent";
+  if (outsideTerminal(addr)) return signed || "Another agent";
   if (!/^([\w.-]+\/)?t\d[0-9a-z]*$/.test(addr ?? "")) return String(from);
   // A bare address is on the machine of the agent it was sent to.
   const full = !addr.includes("/") && machine ? `${machine}/${addr}` : addr;

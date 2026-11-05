@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { WORDS, clock, bandActs, bandOrder, senderName, briefLabel, newsWords, newsTimeline, resolveArtifacts, fitThumbs, dayLabel, imagesLine, questionsBelow, notSent, unsigned, elapsed, reportMsg, doingWords } from "./chat-view.js";
+import { WORDS, clock, bandActs, bandOrder, senderName, briefLabel, newsWords, newsTimeline, resolveArtifacts, fitThumbs, dayLabel, imagesLine, questionsBelow, notSent, unsigned, elapsed, reportMsg, doingWords, ownWords, outsideTerminal } from "./chat-view.js";
 
 const ROOT = join(import.meta.dir, "..");
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
@@ -119,5 +119,31 @@ describe("the working line says what the agent does, in the window and on the we
   });
   test("both sides read it from here", () => {
     for (const f of ["mods/chat/main.js", "service/compat.ts"]) for (const fn of ["reportMsg(", "doingWords("]) expect(read(f).includes(fn) ? "" : `${fn} not in ${f}`).toBe("");
+  });
+});
+
+// SHEP-3: the person's words that came wrapped as another machine's process's message are theirs once this chat knows
+// it just sent them; an agent's message, or words nobody here sent, stay another's.
+describe("ownWords", () => {
+  const matches = (u, p) => u.text === p.text && u.at >= p.at - 5000;
+  test("a window's send on another machine, wrapped, is the person's", () => {
+    expect(outsideTerminal("laptop/ppid:25569")).toBe(true);
+    const users = [{ id: 1, text: "kill shep-1 and start a new task for it instead", from: "laptop/ppid:25569", at: 10_000 }];
+    expect(ownWords(users, [{ text: "kill shep-1 and start a new task for it instead", at: 9_000 }], matches)).toEqual([1]);
+  });
+  test("an agent's message with the same words stays the agent's", () => {
+    expect(outsideTerminal("t7 review")).toBe(false);
+    expect(ownWords([{ id: 1, text: "ok", from: "t7 review", at: 10_000 }], [{ text: "ok", at: 9_000 }], matches)).toEqual([]);
+    expect(ownWords([{ id: 1, text: "ok", from: "vm/t7", at: 10_000 }], [{ text: "ok", at: 9_000 }], matches)).toEqual([]);
+  });
+  test("nothing sent from here, or other words: still another's", () => {
+    const users = [{ id: 1, text: "hello", from: "mac/ppid:1", at: 10_000 }];
+    expect(ownWords(users, [], matches)).toEqual([]);
+    expect(ownWords(users, [{ text: "bye", at: 9_000 }], matches)).toEqual([]);
+    expect(ownWords(users, [{ text: "hello", at: 60_000 }], matches)).toEqual([]);
+  });
+  test("one send claims one message", () => {
+    const users = [{ id: 1, text: "yes", from: "mac/ppid:1", at: 10_000 }, { id: 2, text: "yes", from: "mac/ppid:9", at: 11_000 }];
+    expect(ownWords(users, [{ text: "yes", at: 9_000 }], matches)).toEqual([1]);
   });
 });

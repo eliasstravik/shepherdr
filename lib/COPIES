@@ -22,6 +22,7 @@ core/chat-log.js: chat
 core/chat-view.js: chat
 core/screens.js: chat
 core/send.js: chat
+core/person.js: chat shepherdr-settings tabs-tasks
 core/spaces.js: chat spaces-chat shepherdr-settings jump
 core/autopilot.js: pane-chat shepherdr-settings
 core/chat-reader.js: chat
