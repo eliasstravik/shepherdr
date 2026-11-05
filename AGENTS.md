@@ -55,6 +55,10 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - No herdr-app window runs on the dev VM: window-mod UI can only be syntax-checked here, not screenshot. No ImageMagick
   either: crop proof screenshots with python3 PIL. Stop a background stub with `kill $(lsof -t -i:<port>)`, never
   `pkill -f` on its path (it matches the calling shell).
+- Autopilot wake replay: print `herdr_task.autopilot.message()` (patch `heartbeat_of`/`direction_of`), then
+  `claude -p --append-system-prompt templates/assistant.md` in a scratch repo with fake herdr-task/hc on PATH.
+- Web stub: a place's `chat` is its chat key string (the chat object goes only in the watch reply). Headless screenshots
+  never show native `title=` tooltips: check with `document.querySelectorAll('[title]')`.
 - Crash recovery for real: a throwaway core, `HC_SESSION=<name> hc ...` with `HC_TERMINAL_SOCKET` and Claude's
   `CLAUDE_*` env unset (`CLAUDE_CODE_CHILD_SESSION` turns off transcripts).
 

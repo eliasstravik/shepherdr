@@ -12,7 +12,7 @@ from .base import Fail, guard, hc_json, now, PR_EVERY, run, SHELLS, STORE
 from .settings import machine_name, worker_argv
 from .agents import agent_log, agent_running, busy_again, detail, held_ask, live_agents, status_word, task_status
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
-from .sessions import refresh_sessions, session_of
+from .sessions import find_lost_logs, refresh_sessions, session_of
 from .github import finish, merged_here, pr_pending, pr_problem, pr_view, watch_main
 from .launch import default_space
 from .store import locate, read_list, Store, store_files
@@ -137,6 +137,27 @@ def tick_store(s, report):
             main_pass(s, report)
         except Exception as e:  # never stops the tick
             report["main_error"] = str(e)
+
+
+def lost_log(t, a):
+    """An agent of task t that ended with no log recorded, not looked for yet (find_lost_logs())."""
+    gone = a.get("ended") or (t.get("state") == "done" and (t.get("ended_at") or 0) > (t.get("done_at") or 0))
+    return bool(gone and not a.get("log") and not a.get("log_looked"))
+
+
+def lost_logs_pass(report, folder=None):
+    """Finds the log of every ended task agent here whose session no pass saw (a short run), so its
+    chat reads back after its terminal is gone (SHEP-26). Cheap once each was looked for."""
+    for p in store_files(folder):
+        d = read_list(p)
+        tasks = (d or {}).get("tasks") or []
+        if not d or not os.path.isdir(d.get("folder") or "") or not any(lost_log(t, a) for t in tasks for a in t.get("agents") or []):
+            continue
+        with Store(locate(d["folder"])) as s:
+            for t in s.data["tasks"]:
+                if any(lost_log(t, a) for a in t.get("agents") or []):
+                    find_lost_logs(s, t)
+                    report.setdefault("logs_found", []).append(s.ref(t))
 
 
 # ---- Done tasks end their agents (as Shepherdr) -----------------------------------------------
@@ -405,6 +426,10 @@ def cmd_tick(args):
         memory_guard(report)
     except Exception as e:  # never stops the queue
         report["ended_error"] = str(e)
+    try:
+        lost_logs_pass(report, args.folder)
+    except Exception as e:  # never stops the queue
+        report["logs_error"] = str(e)
     try:
         browser_pass(report)
     except Exception as e:  # never stops the queue

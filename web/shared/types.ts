@@ -309,6 +309,11 @@ export interface Task {
   /** still Working, its turn over: what Shepherdr itself knows it waits for */
   waitsFor?: 'review'
   age: string
+  /** when its first agent started (ms): a task that ran never says it hasn't started */
+  started?: number
+  /** what its agent said when it was ready (herdr-task ready --summary, --details) */
+  summary?: string
+  details?: string
   /** when a Done task finished (ms): the Done group shows newest first */
   doneAt?: number
   /** its latest news (ms): started, ready or done, as Jump orders tasks */
@@ -829,7 +834,7 @@ export interface Chat {
   /** a note at the conversation's end (a lost session being started again) */
   note?: string
   /** 3.0's notice instead of the conversation: opening it, not a chat agent, its log not found, its agent ended */
-  notice?: 'opening' | 'unsupported' | 'none' | 'ended'
+  notice?: 'opening' | 'unsupported' | 'none' | 'ended' | 'gone'
   /** the turn that runs now: how far it got and its step on now, drawn as one quiet line at the end of the chat */
   live?: TurnActivity
   /** what it started in the background that still runs: subagents, shells, headless agents */

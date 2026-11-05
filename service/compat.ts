@@ -346,6 +346,8 @@ export class Compat {
         // the minutes left under a Working row's dot, as the window writes them (core/tasks.js leftOf: "6m", "<1m", "2h")
         ...(r.left ? { left: r.left } : {}),
         ...(r.done_at ? { doneAt: r.done_at } : {}),
+        // it ran (an agent once started): never "hasn't started", its summary when its chat is gone (SHEP-26)
+        ...(r.started ? { started: r.started } : {}), ...(r.summary ? { summary: r.summary } : {}), ...(r.details ? { details: r.details } : {}),
         ...(r.pr ? { pr: { number: r.pr.number, url: r.pr.url } } : {}),
         ...(r.branch ? { branch: r.branch } : {}), ...(r.base ? { base: r.base } : {}),
         // the task's browser (agent-browser), relayed for this machine's tasks
@@ -631,6 +633,7 @@ export class Compat {
     // instead of the conversation, the window's notice: still opening, not a chat agent, its log not found, ended
     const kind = kindOfTerm(t);
     const notice = !reader.conv && (reader.state === "finding" || reader.state === "pending") ? "opening"
+      : reader.state === "missing" && reader.pinned ? "gone"
       : reader.state === "none" || reader.state === "missing" ? ((t && t.state !== "live") || !t ? "ended" : kind ? "none" : "unsupported")
       : !reader.pinned && (!t || t.state !== "live") && !items.length ? "ended" : null;
     return { key, messages, ...head, ...under, ...(note ? { note } : {}), ...(notice ? { notice } : {}), ...(agent ? { agent } : {}), ...(jobs.length ? { jobs } : {}), working: st === "working", cli: reader.kind === "codex" ? "codex" : "claude", ...(reader.pinned || (t && t.state !== "live") ? { finished: true } : {}) };

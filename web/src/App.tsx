@@ -427,6 +427,22 @@ function SideList({ snap }: { snap: Snapshot }) {
   )
 }
 
+/** A task that ran but whose chat is no longer kept (its agent's log is gone): what it said when it was ready, its
+ *  details as their lines, and a quiet line saying why there's no chat (SHEP-26) */
+function ChatGone({ task }: { task: Task }) {
+  return (
+    <div data-chat-gone className="flex flex-col gap-2 px-4 py-3 text-[0.8125rem] text-pretty phone:px-5 phone:text-[0.9375rem]">
+      {task.summary ? <p className="text-fg">{task.summary}</p> : null}
+      {task.details ? (
+        <ul className="flex flex-col gap-1 text-fg2">
+          {task.details.split('\n').map((l) => l.trim().replace(/^[-*•]\s*/, '')).filter(Boolean).map((l, i) => <li key={i} className="flex gap-1.5"><span aria-hidden className="text-fg3">·</span><span className="min-w-0">{l}</span></li>)}
+        </ul>
+      ) : null}
+      <p className="text-fg3">Its chat is no longer kept.</p>
+    </div>
+  )
+}
+
 /** An open task is its one agent's chat; until its agent starts there is no chat yet. In the middle (the lists pinned),
  *  it has what the place's chat there has to bring places back. */
 function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?: number }) {
@@ -434,6 +450,8 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
   const g = task.agent ?? null
   const Chat = registry.views.chat
   const finished = useStore((s) => s.chats[g?.chat ?? '']?.finished)
+  // its agent's saved log is gone (deleted since): what it said when it was ready instead
+  const gone = useStore((s) => s.chats[g?.chat ?? '']?.notice === 'gone')
   const back = () => setUI({ task: null })
   const phone = useUI((u) => u.device === 'phone')
   const desktop = useUI((u) => u.device === 'desktop')
@@ -467,8 +485,11 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
   const focus = useStore((s) => focusHere(s.ui, s.snap))
   // split, a click on the open task on the right gives it the focus (the keys work on its chat)
   const split = useUI((u) => panesHere(u).length > 0)
-  const body = g ? (
+  const body = g && !gone ? (
     Chat ? <Chat chatKey={g.chat} placeholder={agentPlaceholder(task, g.status === 'done' || finished)} /> : null
+  ) : g || task.started || task.summary ? (
+    // it ran, but no log of its chat is left (its terminal and log are gone): its summary, and why there's no chat
+    <ChatGone task={task} />
   ) : (
     // never started: why it waits, as the window's (a queued one's reason, else that it hasn't started)
     <Empty>{task.status === 'queued' && task.sub ? capital(task.sub) : "This task hasn't started."}</Empty>
@@ -496,7 +517,7 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
             <PaneButtons i={pane} />
           </div>
         </Head>
-        <Scroll chat={!!g}>{body}</Scroll>
+        <Scroll chat={!!g && !gone}>{body}</Scroll>
       </section>
     )
   return (

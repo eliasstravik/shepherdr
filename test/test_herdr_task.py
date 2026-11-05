@@ -1357,3 +1357,90 @@ class AutomationFromAnotherMachine(unittest.TestCase):
         self.assertEqual(self.round(), [])
         self.b_merge(1)
         self.assertEqual(len(self.round()), 1)
+
+
+class LostLogs(unittest.TestCase):
+    """SHEP-26: a task agent that ended before any pass saw its session (a short automation run) gets
+    its log found afterwards, so its chat reads back once its terminal is gone. A throwaway HOME
+    with Claude Code and Codex logs; nothing is run."""
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.sessions as sessions
+        import herdr_task.tick as tick
+        self.sessions, self.tick = sessions, tick
+        self.home = tempfile.mkdtemp()
+        p = mock.patch.object(sessions, "HOME", self.home)
+        p.start()
+        self.addCleanup(p.stop)
+        self.folder = "/Users/me"
+        self.at = 1793873842495  # the agent's launch (ms)
+
+    def stamp(self, ms):
+        import datetime
+        return datetime.datetime.fromtimestamp(ms / 1000, datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+
+    def claude_log(self, sid, at, first, folder=None):
+        d = self.sessions.project_dir(folder or self.folder)
+        os.makedirs(d, exist_ok=True)
+        f = os.path.join(d, sid + ".jsonl")
+        with open(f, "w") as fh:
+            fh.write(json.dumps({"type": "mode", "mode": "normal", "sessionId": sid}) + "\n")
+            fh.write(json.dumps({"type": "user", "timestamp": self.stamp(at), "sessionId": sid, "message": {"role": "user", "content": first}}) + "\n")
+            fh.write(json.dumps({"type": "assistant", "timestamp": self.stamp(at + 2000), "message": {"role": "assistant", "content": [{"type": "text", "text": "Done."}]}}) + "\n")
+        return f
+
+    def store(self, task):
+        class S:
+            dirty = False
+            loc = {"folder": self.folder}
+            def ref(self, t): return "ELIA-5"
+        return S()
+
+    def test_an_ended_agent_without_a_session_gets_the_log_that_names_its_task(self):
+        # the Home Assistant's own session in the same folder (started earlier), another task's run after, and its own
+        self.claude_log("assistant", self.at - 3600000, "You are the coordinator of one space in Herdr")
+        self.claude_log("other", self.at + 5000, "Your task, ELIA-50:\nSomething else")
+        mine = self.claude_log("mine", self.at + 1500, [{"type": "text", "text": "You work on one Herdr task.\n\nYour task, ELIA-5:\nSay hi"}])
+        t = {"id": 5, "state": "done", "done_at": self.at + 14268, "ended_at": self.at + 81555,
+             "agents": [{"address": "t1h", "agent": "claude", "argv": ["claude"], "at": self.at, "parent": "t13", "ended": self.at + 81555}]}
+        self.assertTrue(self.tick.lost_log(t, t["agents"][0]))
+        s = self.store(t)
+        self.sessions.find_lost_logs(s, t)
+        self.assertEqual(t["agents"][0]["log"], mine)
+        self.assertTrue(s.dirty)
+        # looked for once: never again
+        self.assertFalse(self.tick.lost_log(t, t["agents"][0]))
+
+    def test_by_its_session_when_it_has_one(self):
+        mine = self.claude_log("S9", self.at, "anything", folder="/elsewhere")
+        t = {"id": 5, "state": "done", "agents": [{"address": "t1", "agent": "claude", "session": "S9", "at": self.at, "ended": self.at + 1}]}
+        self.sessions.find_lost_logs(self.store(t), t)
+        self.assertEqual(t["agents"][0]["log"], mine)
+
+    def test_a_codex_rollout(self):
+        import datetime
+        day = datetime.date.fromtimestamp(self.at / 1000)
+        d = os.path.join(self.home, ".codex", "sessions", f"{day:%Y}", f"{day:%m}", f"{day:%d}")
+        os.makedirs(d)
+        f = os.path.join(d, "rollout-2026-11-05T10-00-00-0199aaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl")
+        with open(f, "w") as fh:
+            fh.write(json.dumps({"timestamp": self.stamp(self.at + 800), "type": "session_meta", "payload": {"id": "x", "timestamp": self.stamp(self.at + 800), "cwd": self.folder}}) + "\n")
+            fh.write(json.dumps({"timestamp": self.stamp(self.at + 900), "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<environment_context>…</environment_context>"}]}}) + "\n")
+            fh.write(json.dumps({"timestamp": self.stamp(self.at + 900), "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Your task, ELIA-5:\nSay hi"}]}}) + "\n")
+        t = {"id": 5, "state": "done", "agents": [{"address": "t1", "agent": "codex", "at": self.at, "ended": self.at + 60000}]}
+        self.sessions.find_lost_logs(self.store(t), t)
+        self.assertEqual(t["agents"][0]["log"], f)
+
+    def test_no_log_left_is_looked_for_once_and_stays_none(self):
+        self.claude_log("before", self.at - 7200000, "Your task, ELIA-5:\nan older run")  # started long before this agent
+        t = {"id": 5, "state": "done", "agents": [{"address": "t1", "agent": "claude", "at": self.at, "ended": self.at + 60000}]}
+        self.sessions.find_lost_logs(self.store(t), t)
+        self.assertNotIn("log", t["agents"][0])
+        self.assertTrue(t["agents"][0]["log_looked"])
+        self.assertFalse(self.tick.lost_log(t, t["agents"][0]))
+
+    def test_a_running_agent_is_left_to_the_session_pass(self):
+        t = {"id": 5, "state": "running", "agents": [{"address": "t1", "agent": "claude", "at": self.at}]}
+        self.assertFalse(self.tick.lost_log(t, t["agents"][0]))
