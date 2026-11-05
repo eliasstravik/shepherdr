@@ -136,7 +136,7 @@ export default class NewSpace extends View {
   switchTo(m, cx) {
     this.machineOpen = false;
     if (m === this.machine || this.busy || this.switching) return cx.notify();
-    this.switching = true; this.listOpen = false; this.browse = null; this.hi = -1; this.error = "";
+    this.switching = true; this.switchingTo = m; this.listOpen = false; this.browse = null; this.hi = -1; this.error = "";
     cx.notify();
     cx.spawn(async (cx) => {
       const [recent, at] = await Promise.all([recentFolders(m).catch(() => []), homeOf(m).catch(() => null)]);
@@ -163,7 +163,7 @@ export default class NewSpace extends View {
       .hover((s) => s.bg(t.hover))
       .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); this.listOpen = false; this.browse = null; this.machineOpen = !this.machineOpen; cx.notify(); })
       .child(iconOf(this.machine, look))
-      .child(div().flex_1().min_w(0).truncate().child(this.switching ? `${look.name} …` : look.name))
+      .child(div().flex_1().min_w(0).truncate().child(this.switching ? `${lookOf(this.switchingTo).name}…` : look.name))
       .child(svg("mods/workspace-chrome/chevron-down.svg").size(12).flex_none().text_color(t.muted));
     return Popup.new("machine-list", field).w_full().anchor("top_left")
       .when(this.machineOpen, (el) => el.content(v_flex().id("machine-rows").w(MACHINE_W).mt(4).p(4).rounded(8).border(1).border_color(t.border).bg(t.popover).shadow_lg().text_size(13)
