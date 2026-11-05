@@ -47,10 +47,10 @@ def status_of(task, live):
     return best or "stopped"
 
 
-# What people see a task as: one of seven, derived, never stored. From the task's record (todo,
-# queued, ready, done, attention, a merge asked for or waiting on checks) and its agents' own
+# What people see a task as: one of eight, derived, never stored. From the task's record (todo,
+# scheduled (SHEP-38: starts by itself at a time), queued, ready, done, attention, a merge asked for or waiting on checks) and its agents' own
 # Herdr status (working, blocked, idle/done), which agents report as always.
-STATUSES = {"todo": "To do", "queued": "Queued", "working": "Working", "needs": "Needs you",
+STATUSES = {"todo": "To do", "scheduled": "Scheduled", "queued": "Queued", "working": "Working", "needs": "Needs you",
             "ready": "Ready", "merging": "Merging", "done": "Done"}
 
 
@@ -58,6 +58,9 @@ def task_status(task, live):
     """(status, needs, why): a STATUSES key; for Needs you what kind ("attention", "asks",
     "reply", "stopped") and a one-line reason. live = its running agents (hc records)."""
     st = task["state"]
+    if st == "scheduled":
+        from .when import starts_words
+        return "scheduled", None, starts_words(task.get("scheduled_for") or now(), now())
     if st not in ("running", "ready"):
         return (st if st in STATUSES else "todo"), None, None
     states = []

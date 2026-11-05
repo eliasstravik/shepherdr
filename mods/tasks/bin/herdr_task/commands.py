@@ -30,6 +30,7 @@ from .archive import unarchive
 from .output import line, minutes, say, view
 from .scheduler import ensure_scheduler
 from .proof import evidence, find_proof
+from .when import when_from
 
 
 # ---- commands -------------------------------------------------------------------------------
@@ -105,7 +106,55 @@ def cmd_add(args):
         set_notes(t, args)
         if args.after:
             set_after(s, t, *parse_after(s, args.after))
-        say(args, view(s, t), s.ref(t))
+        at = scheduled_at(args)
+        if at:
+            # Started later by the scheduler, with no caller to ask: its space is kept now.
+            schedule(s, t, at, {"space": space or default_space()})
+        v = view(s, t)
+    if at:
+        ensure_scheduler_quietly()
+    say(args, v, s.ref(t) + (f" ({v['why']})" if at else ""))
+
+
+# ---- scheduled (SHEP-38) -----------------------------------------------------------------------
+# A task that starts by itself at a time (--at "fri 9:00", --in 6h): state "scheduled" with
+# scheduled_for (ms) and what start would use (queue: argv, space, parent). The scheduler's tick
+# (tick.py's due_pass) queues it once that time comes, also a time passed while the machine was
+# off, and the queue starts it as any queued task (after its --after tasks, when there's room).
+
+def scheduled_at(args):
+    """--at / --in as a moment (ms), or None when neither was given."""
+    at, within = getattr(args, "at", None), getattr(args, "in_", None)
+    if at is None and within is None:
+        return None
+    return when_from(at, within)
+
+
+def schedule(s, t, at, plan=None):
+    if t["state"] not in ("todo", "scheduled", "queued"):
+        raise Fail(f"{s.ref(t)} has already started ({STATUSES.get(t['state'], t['state'])}); only a task not started yet can be scheduled.")
+    t["state"], t["scheduled_for"] = "scheduled", at
+    if plan is not None:
+        t["queue"] = plan
+    for k in ("queued_at", "held"):
+        t.pop(k, None)
+    s.dirty = True
+
+
+def unschedule(t):
+    """Back to To do, as if never scheduled (a task that isn't scheduled is left as it is)."""
+    if t["state"] != "scheduled":
+        return
+    t["state"] = "todo"
+    for k in ("scheduled_for", "queue", "queued_at", "held"):
+        t.pop(k, None)
+
+
+def ensure_scheduler_quietly():
+    try:
+        ensure_scheduler(quiet=True)
+    except Exception:
+        pass
 
 
 def set_base(s, t, base, space=None, new=False):
@@ -208,7 +257,7 @@ def begin(s, t, argv, space, parent=None):
     t["state"], t["started"] = "running", now()
     # Its brief teaches `reviewed`: ready waits for a review of its final commit (review_refusal).
     t["review_gate"] = True
-    for k in ("queue", "queued_at", "attention", "held"):
+    for k in ("queue", "queued_at", "attention", "held", "scheduled_for"):
         t.pop(k, None)
     if t.get("mode") == "worktree" and not t.get("worktree") and not worktrees_on(s, space):
         t["mode"] = "here"
@@ -234,11 +283,19 @@ def cmd_start(args):
         argv = agent_argv(None, args.argv) if args.argv else worker_argv(s, t, space, args.agent) if args.agent else \
             (q.get("argv") or worker_argv(s, t, space))
         parent = args.parent or q.get("parent")
-        # A queued task started again goes now; otherwise it waits its turn.
-        reason = None if (t["state"] == "queued" or args.now) else queue_reason(s, t)
-        if reason:
+        plan = {"argv": argv, "space": space, "parent": parent, **({"custom": True} if args.argv else {})}
+        at = scheduled_at(args)
+        if at:
+            # start --at / --in: it starts by itself then, as this start would now.
+            schedule(s, t, at, plan)
+            v = view(s, t)
+            reason = "scheduled"
+        # A queued task started again goes now; otherwise it waits its turn. A scheduled one
+        # started now waits only for the queue (start --now: not even that).
+        elif (reason := None if (t["state"] == "queued" or args.now) else queue_reason(s, t)):
             t["state"], t["queued_at"] = "queued", now()
-            t["queue"] = {"argv": argv, "space": space, "parent": parent, **({"custom": True} if args.argv else {})}
+            t.pop("scheduled_for", None)
+            t["queue"] = plan
             s.dirty = True
             v = view(s, t)
         else:
@@ -249,6 +306,9 @@ def cmd_start(args):
         ensure_scheduler(quiet=True)
     except Exception:
         pass
+    if reason == "scheduled":
+        say(args, v, f"{s.ref(t)} is scheduled: {v['why']}. It starts by itself then.")
+        return
     if reason:
         say(args, {**v, "queued": True, "reason": reason}, f"{s.ref(t)} is queued ({reason}). It starts by itself when it can.")
         return
@@ -621,7 +681,7 @@ def cmd_state(args, state):
     with open_store(args) as s:
         t = s.find(args.id)
         if state == "reopen":
-            state = "running" if t.get("started") and t["state"] != "queued" else "todo"
+            state = "running" if t.get("started") and t["state"] not in ("queued", "scheduled") else "todo"
             for k in ("reviews", "review", "auto_merge", "merged", "nothing_to_merge", "accepted_at"):
                 t.pop(k, None)
         if state == "done" and t.get("worktree") and merged_here(s, t):
@@ -630,7 +690,7 @@ def cmd_state(args, state):
         t[{"done": "done_at", "running": "reopened_at", "todo": "reopened_at"}[state]] = now()
         if state != "done":
             unarchive(s, t)
-        for k in ("merge_requested", "attention", "queue", "queued_at", "progress", "retry") if state != "running" else ("attention",):
+        for k in ("merge_requested", "attention", "queue", "queued_at", "progress", "retry", "scheduled_for", "held") if state != "running" else ("attention", "scheduled_for"):
             t.pop(k, None)
         s.dirty = True
         v = view(s, t)
@@ -669,8 +729,13 @@ def cmd_edit(args):
         set_notes(t, args)
         if args.after is not None:
             set_after(s, t, *parse_after(s, args.after))
+        at = scheduled_at(args) if (args.at or "").strip() or args.in_ is not None else None
+        if at:
+            schedule(s, t, at)
+        elif args.at is not None:
+            unschedule(t)  # --at "": back to To do
         if args.here or args.worktree:
-            if t["state"] not in ("todo", "queued"):
+            if t["state"] not in ("todo", "scheduled", "queued"):
                 raise Fail("Where a task works can only change before it starts.")
             if args.worktree and s.loc["kind"] != "repo":
                 raise Fail("Worktrees need a git repo.")
@@ -679,7 +744,9 @@ def cmd_edit(args):
         tabs = task_tabs(s, t) if t["title"] != old else []
         v = view(s, t)
     left = name_tabs([(tab, tab_title(s, t)) for tab in tabs])
-    say(args, {**v, "rename": left}, f"{s.ref(t)} saved.")
+    if at:
+        ensure_scheduler_quietly()
+    say(args, {**v, "rename": left}, f"{s.ref(t)} saved" + (f": {v['why']}." if v["status"] == "scheduled" else "."))
 
 
 def cmd_config(args):
@@ -745,7 +812,7 @@ def cmd_resume(args):
         live = [k for k in map(detail, live_agents(s.key(t))) if agent_running(k)]
         if live:
             raise Fail(f"{s.ref(t)} still has an agent ({live[0]['address']}). Use switch to replace it.")
-        if t["state"] in ("todo", "queued"):
+        if t["state"] in ("todo", "scheduled", "queued"):
             raise Fail(f"{s.ref(t)} hasn't started. Use start.")
         space = bare(args.space) if args.space else (t.get("space") or default_space())
         if t["state"] == "done":
@@ -766,10 +833,11 @@ def cmd_switch(args):
         labels = (old or {}).get("labels") or {}
         space = (labels.get("herdr.task.space") or labels.get("herdr.space") or (bare(args.space) if args.space else None)
                  or t.get("space") or default_space())
-        if t["state"] in ("todo", "queued", "done"):
+        if t["state"] in ("todo", "scheduled", "queued", "done"):
             t["state"] = "running"
             t.setdefault("started", now())
             t.pop("queue", None)
+            t.pop("scheduled_for", None)
         a, resumed = start_again(s, t, space, args.agent, args.argv, parent=args.parent)
         v = view(s, t)
     ended = []

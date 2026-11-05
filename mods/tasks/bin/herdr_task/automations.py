@@ -12,6 +12,7 @@ import threading
 import time
 
 from .base import ENTRY, Fail, guard, hc_json, now, STORE
+from .when import parse_at
 from .settings import bare, settings_for, worker_argv, worktrees_on
 from .agents import agent_running, live_agents, starting, status_of, task_status
 from .sessions import session_of
@@ -41,7 +42,7 @@ EVENT_WORDS = {"added": "a task is added", "ready": "a task is ready", "failed":
                "needs-you": "a task needs the person", "merged": "a task is merged", "stalled": "a task stalls"}
 STALL_MS = 30 * 60000
 HOW = ('Write times like "weekdays 9:00", "daily 9:00,17:30", "mon,thu 8:15", "every 30 minutes", '
-       '"every 2 hours on weekdays from 8:00 to 18:00", "hourly" or "once 2026-11-05 9:00" (this machine\'s time zone).')
+       '"every 2 hours on weekdays from 8:00 to 18:00", "hourly", "once 2026-11-05 9:00" or "once tomorrow 9:00" (this machine\'s time zone).')
 
 
 def parse_days(text):
@@ -75,15 +76,11 @@ def parse_every(text):
     t = re.sub(r"\s+", " ", text.strip().lower())
     if t in ("hourly", "every hour"):
         t = "every 1 hours"
-    m = re.fullmatch(r"once (\d{4})-(\d{1,2})-(\d{1,2})[ t](\d{1,2}[:.]\d{2})", t)
+    m = re.fullmatch(r"once (.+)", t)
     if m:
-        y, mo, d = map(int, m.groups()[:3])
-        hhmm = parse_hhmm(m.group(4))
-        try:
-            datetime.date(y, mo, d)
-        except ValueError:
-            raise Fail(f"No such date: {text}")
-        return {"text": text.strip(), "kind": "once", "at": f"{y:04d}-{mo:02d}-{d:02d} {hhmm}"}
+        # The same words as a task's --at (when.py): "once 2026-11-05 9:00", "once tomorrow 9:00", "once fri 8:15".
+        at = datetime.datetime.fromtimestamp(parse_at(m.group(1), how=HOW) / 1000)
+        return {"text": text.strip(), "kind": "once", "at": at.strftime("%Y-%m-%d %H:%M")}
     m = re.fullmatch(r"every (\d+) ?(minutes?|mins?|m|hours?|hrs?|h)(?: on ([a-z ,]+?))?(?: (?:from|between) (\d{1,2}[:.]\d{2}) (?:to|and|-) (\d{1,2}[:.]\d{2}))?(?: on ([a-z ,]+))?", t)
     if m:
         n = int(m.group(1)) * (60 if m.group(2).startswith("h") else 1)
@@ -632,7 +629,7 @@ def one_pass(report):
         feeds = feeds_for(lists)
         for d in lists:
             tasks = d.get("tasks") or []
-            busy = any(t.get("state") == "queued" or (t.get("worktree") and t.get("state") in ("running", "ready")) for t in tasks)
+            busy = any(t.get("state") in ("queued", "scheduled") or (t.get("worktree") and t.get("state") in ("running", "ready")) for t in tasks)
             if not busy and not d.get("automations"):
                 continue
             with Store(locate(d["folder"])) as s:
