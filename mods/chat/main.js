@@ -3345,7 +3345,8 @@ export default class Chat extends View {
   // "Reviewer · Codex", its state in words and how long. It opens to what it does now and "Open its chat": its own
   // conversation in a dialog (a view only, as a task's thread), where the person can watch or talk to it.
   subagentRow(h, t, age, rcx) {
-    const on = this.jobOpen === h.id;
+    // one that ended keeps its row a while, done, but no longer opens: its log is found by its running process
+    const on = this.jobOpen === h.id && !h.ended;
     const word = subagentWord(h.status);
     const icon = h.status === "working" ? svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)
       : h.status === "needs" ? div().size(6).mx(3).flex_none().rounded(3).bg(red(t))
@@ -3353,13 +3354,13 @@ export default class Chat extends View {
     const head = h_flex().id(`sub-${h.address}`).w_full().h(24).px(6).gap(8).items_center().rounded(6).cursor_pointer().text_size(12)
       .when(on, (el) => el.bg(t.hover))
       .hover((s) => s.bg(t.hover))
-      .on_click((_e, cx) => { cx.stop_propagation(); this.jobOpen = on ? null : h.id; if (!on) this.subagentWords(h.address, cx); cx.notify(); })
+      .on_click((_e, cx) => { cx.stop_propagation(); if (h.ended) return; this.jobOpen = on ? null : h.id; if (!on) this.subagentWords(h.address, cx); cx.notify(); })
       .child(icon)
       .child(div().min_w(0).truncate().font_medium().text_color(t.foreground).child(h.label))
       .child(div().flex_none().text_color(h.status === "needs" ? red(t) : t.dim).child(word))
       .child(div().flex_1())
       .child(age(h.ended ? { at: Date.now() - (h.ended - h.at) } : h))
-      .child(svg(on ? "mods/chat/chevron-up.svg" : "mods/chat/chevron-down.svg").size(12).flex_none().text_color(t.dim));
+      .child(h.ended ? div().size(12).flex_none() : svg(on ? "mods/chat/chevron-up.svg" : "mods/chat/chevron-down.svg").size(12).flex_none().text_color(t.dim));
     if (!on) return head;
     const k = terminals().find((x) => x.address === h.address);
     const now = typeof k?.status === "object" ? k.status?.msg : null;

@@ -6,7 +6,7 @@
 import type { Hub } from "./hub.ts";
 import { sh } from "./model.ts";
 import { ChatReader } from "../core/chat-reader.js";
-import { reportMsg } from "../core/chat-view.js";
+import { reportMsg, subagentsOf } from "../core/chat-view.js";
 
 /** A page following a chat: told the reader (and the terminal now) each time the conversation changes. */
 export type Watcher = (reader: ChatReader, terminal: any) => void;
@@ -17,7 +17,9 @@ type Followed = { reader: ChatReader; pages: Set<Watcher>; busy: boolean; idleSi
   /** its terminal's watch-only stream, and a read it asked for soon */
   stream?: { close(): void } | null; soon?: ReturnType<typeof setTimeout> | null; last?: number;
   /** what its CLI said it does when last told (the working line's words while no call is open in its log) */
-  said?: string };
+  said?: string;
+  /** its subagents as last told (SHEP-54): one starting, changing state or ending is news for its chat */
+  kids?: string };
 
 /** a screen that keeps drawing (a spinner) asks for a read at most this often */
 const NUDGE = 200;
@@ -134,6 +136,8 @@ export class Chats {
       // its CLI says it does something else now (a status change, no new line in its log): told too
       const said = reportMsg(t);
       if (said !== f.said) { f.said = said; changed = true; }
+      const kids = subagentsOf([...this.hub.terminals.values()], addr).map((k: any) => `${k.address}:${k.status}:${k.ended ?? ""}`).join(" ");
+      if (kids !== (f.kids ?? "")) { f.kids = kids; changed = true; }
       if (changed || !f.ready) this.publish(addr, f);
     } catch (err) {
       console.error(`chat ${addr}: ${(err as Error).message}`);

@@ -530,18 +530,18 @@ function SubagentLine({ j, open, toggle }: { j: Job; open: boolean; toggle: () =
   const word = CV.subagentWord(j.status ?? 'working')
   return (
     <div data-subagent={j.id} data-status={j.status} className="flex flex-col">
-      <button type="button" aria-expanded={open} onClick={toggle}
-        className={clsx('-mx-1 flex h-6 cursor-pointer items-center gap-2 rounded-[6px] px-1 text-left text-[0.75rem] hover:bg-hover phone:h-8 phone:text-[0.8125rem]', open && 'bg-hover')}>
+      <button type="button" aria-expanded={chat ? open : undefined} disabled={!chat} onClick={toggle}
+        className={clsx('-mx-1 flex h-6 items-center gap-2 rounded-[6px] px-1 text-left text-[0.75rem] phone:h-8 phone:text-[0.8125rem]', chat && 'cursor-pointer hover:bg-hover', open && 'bg-hover')}>
         <span className="flex size-3 shrink-0 items-center justify-center"><SubDot status={j.status} /></span>
         <span className="min-w-0 truncate font-medium text-fg">{j.title}</span>
         <span className={clsx('shrink-0', j.status === 'needs' ? 'text-[var(--need-fg)]' : 'text-fg3')}>{word}</span>
         <span className="flex-1" />
         <span className="shrink-0 font-mono text-[0.71875rem] text-fg3 tabular-nums">{ago(j.at, j.ended)}</span>
-        <ChevronDownIcon aria-hidden className={clsx('size-3 shrink-0 fill-[var(--fg3)]', open && 'rotate-180')} />
+        {chat ? <ChevronDownIcon aria-hidden className={clsx('size-3 shrink-0 fill-[var(--fg3)]', open && 'rotate-180')} /> : <span aria-hidden className="size-3 shrink-0" />}
       </button>
-      {open ? (
+      {open && chat ? (
         <div className="flex flex-col items-start gap-2 pt-1 pb-1.5 pl-5">
-          {chat ? <SubWords chat={chat} /> : null}
+          <SubWords chat={chat} />
           <button type="button" onClick={() => openSubagent(j)}
             className="flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-[7px] pr-2.5 pl-2 text-[0.78125rem] font-medium text-fg shadow-[inset_0_0_0_1px_var(--line2)] hover:bg-hover phone:h-9">
             <ArrowUpRightIcon aria-hidden className="size-3 shrink-0 fill-current" />
