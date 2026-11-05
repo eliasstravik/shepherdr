@@ -107,14 +107,15 @@ export default class ModelMenu extends View {
     return div().size(14).flex_none().when(on, (el) => el.child(svg("mods/workspace-chrome/check.svg").size(14).text_color(t.foreground)));
   }
 
-  // That model's levels as one segmented control; the default shows chosen when none is set.
+  // That model's levels as one segmented control; the default shows chosen when none is set. Each level is as
+  // wide as its word and the room left is shared out, so Extra high reads whole (equal slices cut it).
   levels(t) {
     const m = this.model();
     const on = this.level(this.sel);
     const off = Boolean(this.p.remote);
     return h_flex().h(SEG).flex_none().px(4).items_center().child(h_flex().w_full().h(28).p(2).gap(2).rounded(7).bg(t.raised)
       .when(off, (el) => el.opacity(0.5))
-      .children((m?.efforts ?? []).map((e) => h_flex().id(`level-${e}`).flex_1().min_w(0).h_full().justify_center().items_center().rounded(5)
+      .children((m?.efforts ?? []).map((e) => h_flex().id(`level-${e}`).flex_auto().min_w(0).px(4).h_full().justify_center().items_center().rounded(5)
         .text_size(11.5)
         .when(on === e, (el) => el.bg(t.background).text_color(t.foreground).font_medium())
         .when(on !== e, (el) => el.text_color(t.muted).when(!off, (el) => el.cursor_pointer().hover((s) => s.text_color(t.foreground))

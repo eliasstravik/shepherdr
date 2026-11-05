@@ -330,10 +330,11 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
             <div className="px-1 py-1"><div className="h-px bg-line" /></div>
             {head('Reasoning')}
             <div className="px-1 py-[3px]">
+              {/* each level as wide as its word, the room left shared out: Extra high reads whole even at a phone's 288px */}
               <div role="radiogroup" aria-label="Reasoning" className={clsx('flex h-7 gap-0.5 rounded-[7px] bg-sel p-0.5 coarse:h-10', remote && 'opacity-50')}>
                 {(m?.efforts ?? []).map((e) => (
                   <button key={e} type="button" role="radio" aria-checked={on === e} disabled={!!remote} onClick={() => setSel({ ...sel, effort: e })}
-                    className={clsx('min-w-0 flex-1 truncate rounded-[5px] text-[0.71875rem]', on === e ? 'bg-bg font-medium text-fg shadow-soft' : 'text-fg2 enabled:hover:text-fg')}>
+                    className={clsx('min-w-0 flex-auto truncate rounded-[5px] px-1 text-[0.71875rem]', on === e ? 'bg-bg font-medium text-fg shadow-soft' : 'text-fg2 enabled:hover:text-fg')}>
                     {LEVEL[e] ?? e}
                   </button>
                 ))}
