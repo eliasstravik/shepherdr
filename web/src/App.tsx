@@ -475,7 +475,7 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
     <span className="flex min-w-0 items-center gap-1.5">
       <span className="shrink-0 font-mono text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{ref}</span>
       {doing ? <span className="flex min-w-0 items-center gap-1.5"><span aria-hidden className="text-fg3">·</span>{doing}</span> : task.base ? <span className="min-w-0 truncate"><span aria-hidden className="text-fg3">· </span>→ {task.base}</span> : null}
-      {helper ? <span data-task-subagent className="flex shrink-0 items-center gap-1.5 whitespace-nowrap"><span aria-hidden className="text-fg3">·</span>{`${helper.title} ${helper.status === 'needs' ? 'needs it' : 'at work'}`}</span> : null}
+      {helper ? <span data-task-subagent className="flex min-w-0 shrink-[4] items-center gap-1.5 whitespace-nowrap"><span aria-hidden className="text-fg3">·</span><span className="truncate">{`${helper.title} ${helper.status === 'needs' ? 'needs it' : 'at work'}`}</span></span> : null}
     </span>
   )
   // in focus it sits at the window's edge: no line there
