@@ -25,6 +25,8 @@ export const WORDS = {
   cantList: (dir, machine) => `Couldn't list ${dir}${machine ? ` on ${machine}` : ""}.`,
   cantMake: (dir) => `Couldn't make ${dir}.`,
   cantRepo: (why) => `Couldn't make it a git repo: ${why || "git failed"}`,
+  // made, but not in the list yet (another machine's spaces still on their way): said, never closed silently
+  notShown: (machine) => `Made it${machine ? ` on ${machine}` : ""}, but it hasn't shown up yet. It opens here once it does.`,
 };
 
 // The suggestions shown at most.

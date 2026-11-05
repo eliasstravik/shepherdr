@@ -651,6 +651,8 @@ const server = Bun.serve<{ who: string }>({
         const machine = !b?.machine || b.machine === me?.host ? null : String(b.machine);
         const icon = typeof b?.icon === "string" && b.icon ? b.icon.slice(0, 16) : null;
         const place = await newSpace(hub, { machine, path: String(b?.path ?? ""), makeRepo: !!b?.makeRepo, icon, store: compat.shared! });
+        // the page opens it once the sidebar has it: in the snapshot before the answer, not at the next 10 s read
+        await model.waitSpace(place);
         return json({ place });
       } catch (err) { return json({ error: (err as Error).message }, 400); }
     }
