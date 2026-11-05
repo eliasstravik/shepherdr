@@ -1083,6 +1083,10 @@ class WorkersOwnHelpers(OwnBackgroundWork):
         self.reviewer["status"] = "working"
         self.assertEqual([k["address"] for k in self.agents.live_agents("x#7")], ["t1"])
         self.assertEqual([k["address"] for k in self.agents.live_helpers("x#7")], ["t2"])
+        # hc ls gives no labels: its parent, the task's own terminal, says so
+        self.hc["ls"] = [self.worker, dict(self.reviewer, labels={})]
+        self.assertEqual([k["address"] for k in self.agents.live_agents("x#7")], ["t1"])
+        self.assertEqual([k["address"] for k in self.agents.live_helpers("x#7")], ["t2"])
         # one with no parent (an old herdr-task reviewer) stays the task's
         self.hc["ls"] = [self.worker, dict(self.reviewer, parent=None)]
         self.assertEqual([k["address"] for k in self.agents.live_agents("x#7")], ["t1", "t2"])

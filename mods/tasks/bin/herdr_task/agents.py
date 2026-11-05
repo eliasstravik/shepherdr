@@ -16,26 +16,30 @@ from .base import hc_json, HOME, now, RANK, SHELLS
 HELPER_ROLES = ("reviewer", "helper")
 
 
-def is_helper(k):
-    return (k.get("labels") or {}).get("herdr.role") in HELPER_ROLES and bool(k.get("parent"))
+def is_helper(k, mine=()):
+    """hc ls gives no labels: a helper is also told by its parent, another terminal of the same task
+    (a worker's parent is its Assistant, never the task's)."""
+    return bool(k.get("parent")) and ((k.get("labels") or {}).get("herdr.role") in HELPER_ROLES or k["parent"] in mine)
 
 
 def _live(key):
     d = hc_json("ls", "--label", f"herdr.task={key}") or {}
-    return [dict(k, labels=dict(k.get("labels") or {}, **{"herdr.task": key}))
+    live = [dict(k, labels=dict(k.get("labels") or {}, **{"herdr.task": key}))
             for k in d.get("terminals", []) if k.get("state") == "live"]
+    mine = {k.get("address") for k in live}
+    return [(k, is_helper(k, mine)) for k in live]
 
 
 def live_agents(key):
     """The task's live terminals, with labels (hc ls leaves labels out unless filtering by them),
     its worker's helpers left out (live_helpers()). Agents start inside the person's shell, which
     stays when the agent exits: agent_running()."""
-    return [k for k in _live(key) if not is_helper(k)]
+    return [k for k, helper in _live(key) if not helper]
 
 
 def live_helpers(key):
     """The helper agents its worker started (a reviewer, a second opinion), still live."""
-    return [k for k in _live(key) if is_helper(k)]
+    return [k for k, helper in _live(key) if helper]
 
 
 def detail(k):
