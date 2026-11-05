@@ -96,6 +96,21 @@ test("a react line whose to= quotes the person's \"words\" still reacts", async 
   expect(c.reactions.get(c.items[0].id)).toEqual([{ emoji: "💡", by: "agent" }]);
 });
 
+test("a to= with its quotes dropped or made curly still names the message", async () => {
+  const mac = { ...person, uuid: "p4", message: { role: "user", content: 'aha well "this machine" is my mac mini' } };
+  for (const to of ["aha well this machine is my mac mini", "aha well “this machine” is my mac mini"]) {
+    const c = await read([mac, reply("m1", [text(`<hc react="💡" to="${to}"/>\nGot it.`)])]);
+    expect(said(c)).toEqual(["Got it."]);
+    expect(c.reactions.get(c.items[0].id)).toEqual([{ emoji: "💡", by: "agent" }]);
+  }
+});
+
+test("a react tag with to= first, at a paragraph's start, still reacts", async () => {
+  const c = await read([person, reply("m1", [text('<hc to="Test bubble" react="👍"/> Rest.')])]);
+  expect(said(c)).toEqual(["Rest."]);
+  expect(c.reactions.get(c.items[0].id)).toEqual([{ emoji: "👍", by: "agent" }]);
+});
+
 test("emoji with variation selectors and skin tones react", async () => {
   for (const emoji of ["💡", "❤️", "👍🏽", "👨‍👩‍👧"]) {
     const c = await read([person, reply("m1", [text(`<hc react="${emoji}" to="Test bubble"/>\nOk.`)])]);

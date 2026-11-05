@@ -205,8 +205,10 @@ export function excerpt(text, n = 60) {
   return one.length > n ? one.slice(0, n - 1).trimEnd() + "…" : one;
 }
 // Does `text` start with what a reaction's `to` quotes (loose: an agent may shorten it)?
+// Quotes don't count: an agent may drop them or make them curly in to= (SHEP-47).
 export function names(text, to) {
-  const a = excerpt(text, 400).toLowerCase(), b = String(to ?? "").replace(/…$/, "").replace(/"/g, "”").replace(/\s+/g, " ").trim().toLowerCase();
+  const bare = (x) => x.replace(/["“”„]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+  const a = bare(excerpt(text, 400)), b = bare(String(to ?? "").replace(/…$/, ""));
   if (!b) return false;
   return a.startsWith(b) || (b.length >= 12 && a.includes(b.slice(0, 24)));
 }
@@ -774,17 +776,17 @@ export class Conversation {
     for (const line of String(text).split("\n")) {
       // A react tag also counts at the start of a paragraph, its words after it on the same line;
       // one that still doesn't read (a broken tag) never shows as text either, only what follows it.
-      if (/^\s*<hc\s+react=/.test(line)) {
-        const t = tagAt(line), end = line.indexOf("/>");
+      const t = /^\s*<hc\s/.test(line) ? tagAt(line) : null;
+      if (t?.a.react || /^\s*<hc\s+react=/.test(line)) {
+        const end = line.indexOf("/>");
         if (t?.a.react) this.react("agent", { emoji: t.a.react, to: t.a.to ?? "", on: true });
         const rest = t ? t.rest : end < 0 ? "" : line.slice(end + 2).trim();
         if (rest) out.push(rest);
         continue;
       }
       const a = tagOf(line);
-      if (a?.react) this.react("agent", { emoji: a.react, to: a.to ?? "", on: true });
       // <no-reply> too (an Assistant's answer to task news it has nothing to add to).
-      else if (!(a && "no-reply" in a) && !/^<hc\s+no-reply\s*\/>/.test(line.trim()) && !/^<\/?no-reply\b/.test(line.trim())) out.push(line);
+      if (!(a && "no-reply" in a) && !/^<hc\s+no-reply\s*\/>/.test(line.trim()) && !/^<\/?no-reply\b/.test(line.trim())) out.push(line);
       else if (this.pilot) { this.pilot.quiet = true; if (a?.why) this.pilot.why = unattr(a.why); }
     }
     const said = out.join("\n").trim();
