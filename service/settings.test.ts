@@ -150,13 +150,40 @@ test("Agents and Tasks say the window's words: the model button, Other CLI, Must
   s.start();
   s.choices = C.choicesFrom({ claude: { model: "opus[1m]", effort: "high", per: {} }, codex: { models: [{ id: "gpt-5", label: "GPT-5", efforts: ["low", "high"] }] } });
   const agents = s.sections(null).find((x) => x.name === "Agents" && x.level === "all")!;
-  expect(agents.rows.map((r) => r.label)).toEqual(["Assistant", "Workers", "Reviewer", "Backup agent"]);
+  expect(agents.rows.map((r) => r.label)).toEqual(["Assistant", "Reactions", "Workers", "Reviewer", "Backup agent"]);
   expect(agents.rows[0].value).toBe("Opus 5.5 · 1M · High");
-  expect(agents.rows[2]).toMatchObject({ value: "Other CLI (Codex)", agent: { unset: true, other: false } });
+  expect(agents.rows[3]).toMatchObject({ value: "Other CLI (Codex)", agent: { unset: true, other: false } });
   const tasks = s.sections(null).find((x) => x.name === "Tasks" && x.level === "all")!;
   expect(tasks.rows.some((r) => r.key === "tasks.must_fix")).toBe(false);
   expect(tasks.rows.find((r) => r.key === "tasks.max_running")).toMatchObject({ hint: C.ABOUT["tasks.max_running"], steps: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"] });
   const web = s.sections({ on: true, link: "https://box/shepherdr/", why: null }).find((x) => x.name === "Web")!;
   expect(web.rows.map((r) => r.label)).toEqual(["Shepherdr on the web", "Link"]);
   expect(web.rows[0].hint).toBe("On, private to your tailnet.");
+});
+
+// SHEP-42: Reactions, the row under the Assistant: on by default, off Everywhere, a space's own on, Reset back
+test("Reactions: on by default under the Assistant, Everywhere's or a space's own", () => {
+  const s = new Settings();
+  s.start();
+  const sp = { id: "sp7", name: "shop", machine: null, folder: "/shop" };
+  const row = (level: string) => s.sections(null, [sp]).find((x) => x.name === "Agents" && x.level === level)!.rows;
+  const keys = row("all").map((r) => r.key);
+  expect(keys.indexOf("assistant.reactions")).toBe(keys.indexOf("role.coordinator") + 1);
+  expect(row("all").find((r) => r.key === "assistant.reactions")).toMatchObject({ label: "Reactions", value: "on", options: ["on", "off"] });
+  s.set("assistant.reactions", "off", "all");
+  let f = JSON.parse(readFileSync(file, "utf8"));
+  expect(f.everywhere.assistant).toEqual({ reactions: false });
+  expect(row("sp7").find((r) => r.key === "assistant.reactions")).toMatchObject({ value: "off", from: "Everywhere" });
+  s.set("assistant.reactions", "on", "sp7", sp);
+  f = JSON.parse(readFileSync(file, "utf8"));
+  expect(f.spaces.sp7.assistant).toEqual({ reactions: true });
+  expect(row("sp7").find((r) => r.key === "assistant.reactions")).toMatchObject({ value: "on", inherits: { value: "off", from: "Everywhere" } });
+  expect(row("all").find((r) => r.key === "assistant.reactions")?.others).toEqual([{ id: "sp7", name: "shop" }]);
+  // the same as what it would inherit unsets it; Reset too; back on Everywhere is the default again
+  s.set("assistant.reactions", null, "sp7", sp);
+  s.set("assistant.reactions", "on", "all");
+  f = JSON.parse(readFileSync(file, "utf8"));
+  expect(f.spaces.sp7.assistant).toBeUndefined();
+  expect(f.everywhere.assistant).toBeUndefined();
+  expect(() => s.set("assistant.reactions", "maybe", "all")).toThrow();
 });

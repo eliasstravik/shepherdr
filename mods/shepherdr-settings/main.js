@@ -35,7 +35,7 @@ import { webSection } from "./web-section.js";
 // herdr-task's merge policy (MERGE): "ask" waits for the person's Accept (which merges), the others merge without it.
 // NOTES: what a task's agent is told to do first and last (tasks.start_notes / finish_notes): herdr-task puts them
 // into its starting prompt; Herdr runs nothing itself.
-import { SECTIONS, ROLES, NOTES, MERGE, MUST_FIX, ROUNDS, ARCHIVE, ABOUT, BACKUP, NOTIFY_ABOUT, TITLE, SPACE_TITLE,
+import { SECTIONS, ROLES, NOTES, MERGE, MUST_FIX, ROUNDS, ARCHIVE, ABOUT, BACKUP, REACTIONS, NOTIFY_ABOUT, TITLE, SPACE_TITLE,
   EVERYWHERE, CHANGED_HERE, RESET, EDIT_INSTRUCTIONS, USE_OTHER_CLI, LOADING_AGENTS, SAVED, sameAs as sameAsWords,
   spacesOwn, otherCliWords, backupProblem, notifyMachineAbout, machineLabel, TASK_ROWS, LEVEL } from "./core/settings.js";
 
@@ -470,7 +470,7 @@ export default class ShepherdrSettings extends View {
     this.saveRoles(cx);
     return v_flex()
       .child(this.title(t, page("agents")))
-      .children(ROLES.map((r) => this.roleRow(t, r, cx)))
+      .children(ROLES.flatMap((r) => (r.id === "coordinator" ? [this.roleRow(t, r, cx), this.reactionsRow(t)] : [this.roleRow(t, r, cx)])))
       .child(this.backupRow(t));
   }
 
@@ -486,6 +486,14 @@ export default class ShepherdrSettings extends View {
       .when(!this.scope, (el) => el.child(button(`edit-${r.id}`, EDIT_INSTRUCTIONS,
         { onClick: () => this.edit({ id: r.id, title: r.told, file: `${TEMPLATES()}/${r.file}` }) })));
     return this.row(t, r.title, r.about, control, this.scoped(r.id, null));
+  }
+
+  // Reactions, under the Assistant (herdr-task's reactions.py): it reacts to some of your
+  // messages with an emoji; off, never. Workers are never told to.
+  reactionsRow(t) {
+    const on = shepherdrFor(this.cfg, this.scope).assistant.reactions !== false;
+    return this.row(t, REACTIONS.title, REACTIONS.about,
+      toggleSwitch("reactions", on, (next, _e, cx) => this.set("assistant", "reactions", next, cx)), this.scoped("assistant", "reactions"));
   }
 
   // Backup (herdr-task's takeover.py): the other CLI takes over a task, once, when its agent
@@ -613,7 +621,7 @@ export default class ShepherdrSettings extends View {
     const own = (id) => {
       const l = this.cfg.spaces?.[id] ?? {};
       return ["coordinator", "worker", "reviewer"].filter((k) => l[k] != null).length
-        + ["tasks", "automations", "backup", "autopilot"].reduce((n, k) => n + Object.keys(l[k] ?? {}).length, 0);
+        + ["tasks", "automations", "backup", "autopilot", "assistant"].reduce((n, k) => n + Object.keys(l[k] ?? {}).length, 0);
     };
     const pick = (id) => (_e, cx) => this.pickScope(id, cx);
     const machinesHere = [...new Set(shown.map((s) => s.machine))];

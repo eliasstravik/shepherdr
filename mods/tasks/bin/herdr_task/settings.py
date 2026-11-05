@@ -23,7 +23,8 @@ OLD_INSTRUCTIONS = os.path.join(HOME, ".herdr", "instructions")
 ASSISTANT_TEMPLATES = ("assistant", "coordinator")  # "coordinator": Assistants started before the rename
 DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "must_fix": "major", "max_running": MAX_RUNNING, "worktrees": True,
                       "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": ""},
-            "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {}}
+            "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {},
+            "assistant": {"reactions": True}}
 LEVELS = ["blocker", "major", "minor"]
 
 
@@ -83,6 +84,19 @@ def write_autopilot(space, values):
         json.dump(d, f, indent=2)
         f.write("\n")
     os.replace(tmp, SETTINGS)
+
+
+def reactions_on(space=None):
+    """Settings › Agents › Reactions for a space's Assistant: the space's own, else Everywhere's,
+    else on. Only the Assistant reacts (reactions.py); workers are never told to."""
+    d = read_settings()
+    own = (d.get("spaces") or {}).get(bare(space)) if space else None
+    for layer in (own, d.get("everywhere")):
+        a = layer.get("assistant") if isinstance(layer, dict) else None
+        v = a.get("reactions") if isinstance(a, dict) else None
+        if isinstance(v, bool):
+            return v
+    return DEFAULTS["assistant"]["reactions"]
 
 
 def settings_layers(s, space=None):

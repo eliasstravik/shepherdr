@@ -61,3 +61,14 @@ test("Backup's warning, an add-on's line and Web's state, in the window's words"
   expect(S.sameAs("everywhere", null)).toBe("Inherited from Everywhere");
   expect(S.sameAs("machine", "vm")).toBe("Inherited from vm");
 });
+
+// SHEP-42: Reactions, under the Assistant: on unless a level turns it off, the same default everywhere it's read.
+test("Reactions are on by default, in the core, the window's chain and herdr-task", () => {
+  expect(S.DEFAULTS.assistant.reactions).toBe(true);
+  // lib/coordinator.js needs the window's runtime: its defaults and its chain, as written
+  const lib = read("lib/coordinator.js");
+  expect(lib).toMatch(/SHEPHERDR_DEFAULTS = \{[^;]*assistant: \{ reactions: true \}/);
+  expect(lib).toContain('for (const k of ["tasks", "automations", "assistant"])');
+  expect(read("mods/tasks/bin/herdr_task/settings.py")).toContain('"assistant": {"reactions": True}');
+  expect(S.REACTIONS.title).toBe("Reactions");
+});
