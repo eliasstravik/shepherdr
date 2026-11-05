@@ -1,12 +1,16 @@
 // Restart picks for either chat role, used once or saved for its space. Opened from the + or ⋯ menu.
 import clsx from 'clsx'
 import { ChevronUpDownIcon } from '@heroicons/react/20/solid'
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { StarIcon as StarSolid } from '@heroicons/react/16/solid'
+import { StarIcon as StarOutline } from '@heroicons/react/24/outline'
+import { createPortal } from 'react-dom'
+import * as AGc from '@core/agents.js'
 import { taskChatId, type Chat, type Place, type RestartCli, type RestartInfo } from '@shared/types.ts'
 import { act, setUI, taskOf, useSnap, useStore, useUI } from './kernel.ts'
 import { Dialog } from './rowmenu.tsx'
 import { Pick, shown, Switch, TextValue } from './Settings.tsx'
-import { CheckIcon, DownIcon, EffortIcon, ic, Menu, MenuItem, ModelIcon, ModeIcon, NextIcon, Primary, RestartIcon, SpeedIcon } from './ui.tsx'
+import { CheckIcon, DownIcon, EffortIcon, ic, Menu, MenuItem, ModelIcon, ModeIcon, NextIcon, Primary, RestartIcon, SearchIcon, SpeedIcon, Tab, Tabs } from './ui.tsx'
 
 /* ---------- the sheet ---------- */
 
@@ -220,10 +224,13 @@ function SpeedWords({ speed }: { speed: Worn }) {
 
 /* ---------- the window's model button and menu (mods/chat pickParts, mods/chat-models) ---------- */
 
-type MenuModel = { id: string; name: string; efforts: string[]; defaultEffort?: string | null; fast?: boolean }
-type AgentMenu = { name: string; models: MenuModel[]; perms?: { id: string; label: string }[]; fastLocked?: boolean }
+export type MenuModel = { id: string; name: string; efforts: string[]; defaultEffort?: string | null; fast?: boolean }
+export type AgentMenu = { name: string; models: MenuModel[]; perms?: { id: string; label: string }[]; fastLocked?: boolean }
 type MenuPick = { agent: string; model: string | null; effort: string | null; fast: boolean; perm: string | null }
-type MenuData = { current: MenuPick; menus: Record<string, AgentMenu>; permDefault: Record<string, string>; remote: string | null }
+type MenuData = { current: MenuPick; menus: Record<string, AgentMenu>; permDefault: Record<string, string>; picks?: Picks; remote: string | null }
+/** a stretch of the model list (core/agents.js modelSections): Pinned, Recent, All models, or an agent's matches */
+type Picks = { pinned: string[]; recent: string[] }
+type Section = { key: string; title: string | null; agent: string; rows: (MenuModel & { agent: string; pinned: boolean; typed?: boolean })[]; more: number }
 
 /** the menu open: its chat, and the model a typed /model named */
 let menuOpen: { chat: string; typed?: string } | null = null
@@ -248,15 +255,111 @@ function findModel(menus: Record<string, AgentMenu>, name?: string) {
 
 const LEVEL: Record<string, string> = { minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra', none: 'None' }
 
-/** Model (every installed agent's; picking another agent's switches agent), Reasoning (that model's levels), Fast
- *  (where the model has it), Permissions (a small sub-menu), and, only when a choice differs from what runs now, one
- *  Restart button */
+/** The model list both model menus show (the chat's, below, and Settings' role menu, screens/Role.tsx), made for
+ *  any number of agents with any number of models: a tab per agent (only when more than one), a search over every
+ *  agent's models (a letter typed on a row goes to it; Enter takes the first match; one word no model has is offered
+ *  as an id to start on), the agent's pinned and recent models on top (core/agents.js modelSections), a star to pin
+ *  one (onPin), long lists capped */
+export function ModelList({ menus, agent, picks, chosen, disabled, phone, onPick, onPin, autoFocus }: {
+  menus: Record<string, AgentMenu>; agent: string; picks?: Picks; chosen: { agent: string; model: string | null }; disabled?: boolean; phone?: boolean
+  onPick: (row: MenuModel & { agent: string; typed?: boolean }) => void; onPin?: (agent: string, id: string) => void; autoFocus?: boolean
+}) {
+  const [tab, setTab] = useState(agent)
+  const [q, setQ] = useState('')
+  const search = useRef<HTMLInputElement>(null)
+  const list = useRef<HTMLDivElement>(null)
+  // on a desktop the search takes the keys at once; a phone's keyboard comes up only when the box is tapped
+  useEffect(() => {
+    if (autoFocus) search.current?.focus({ preventScroll: true })
+  }, [])
+  const agents = Object.keys(menus)
+  const sections = AGc.modelSections(menus, tab, picks, q) as Section[]
+  const pick = (row: Section['rows'][number]) => {
+    onPick(row)
+    setTab(row.agent)
+    setQ('')
+    if (!phone) search.current?.focus({ preventScroll: true })
+  }
+  const keys = (e: ReactKeyboardEvent) => {
+    if (e.target === search.current || e.metaKey || e.ctrlKey || e.altKey || e.key.length !== 1 || !search.current) return
+    search.current.focus({ preventScroll: true })
+  }
+  const row = 'flex min-h-[31px] w-full items-center gap-2.5 rounded-[7px] px-[9px] text-left enabled:hover:bg-hover focus-visible:bg-hover focus-visible:outline-none disabled:text-fg3 coarse:min-h-11 phone:min-h-11'
+  const head = (t: string) => <div className="px-[9px] pt-2 pb-1 text-[0.6875rem] text-fg3 coarse:text-[0.8125rem] phone:text-[0.8125rem]">{t}</div>
+  return (
+    <div onKeyDown={keys} className="flex flex-col">
+      {agents.length > 1 ? (
+        <div className="px-1 pt-1 pb-1.5">
+          <Tabs label="Agent" className="flex w-full">
+            {agents.map((a) => (
+              <Tab key={a} fill on={tab === a} onClick={() => { setTab(a); setQ('') }} className="text-[0.75rem]! coarse:text-[0.875rem]! phone:text-[0.875rem]!">
+                <span className="inline-flex items-center gap-1.5 align-middle">
+                  <img src={`agents/${a}.svg`} alt="" aria-hidden className="size-3.5 shrink-0" />
+                  {menus[a].name}
+                </span>
+              </Tab>
+            ))}
+          </Tabs>
+        </div>
+      ) : null}
+      <div className="px-1 pb-1">
+        <div className="flex h-8 items-center gap-2 rounded-[7px] bg-sel pl-2.5 text-fg3 focus-within:shadow-[inset_0_0_0_1.5px_var(--focus)] coarse:h-11 phone:h-11">
+          <SearchIcon aria-hidden className="size-3.5 shrink-0" />
+          <input ref={search} name="model-search" type="search" autoComplete="off" spellCheck={false} enterKeyHint="go" disabled={disabled}
+            aria-label="Search models" placeholder={agents.length > 1 ? 'Search every agent’s models' : 'Search models'} value={q}
+            onChange={(e) => { setQ(e.target.value); list.current?.scrollTo({ top: 0 }) }}
+            onKeyDown={(e) => {
+              // Enter takes the first match
+              if (e.key === 'Enter') { const first = sections[0]?.rows[0]; if (q && first) { e.preventDefault(); pick(first) } }
+            }}
+            className="h-full min-w-0 flex-1 bg-transparent pr-2 text-fg outline-none placeholder:text-fg3 max-sm:text-base [&::-webkit-search-cancel-button]:appearance-none" />
+        </div>
+      </div>
+      <div ref={list} className={clsx('overflow-y-auto overscroll-contain', phone ? 'max-h-[40dvh]' : 'max-h-[min(300px,36dvh)]')}>
+        {sections.length === 0 ? <p className="px-[9px] py-2 text-fg3">No models.</p> : null}
+        {sections.map((s) => (
+          <div key={s.key} role="group" aria-label={s.title ?? undefined}>
+            {s.title ? head(s.title) : null}
+            {s.rows.map((x) => {
+              const on = x.agent === chosen.agent && x.id === chosen.model
+              return (
+                <div key={`${x.agent}-${x.id}`} className="group relative flex items-center">
+                  <button type="button" role="menuitemradio" aria-checked={on} disabled={disabled} className={clsx(row, onPin && 'pr-9')} onClick={() => pick(x)}>
+                    {/* the agent's own mark, Herdr's icon (web/public/agents, from the window's icons) */}
+                    <img src={`agents/${x.agent}.svg`} alt="" aria-hidden className="size-3.5 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">{x.typed ? <>Use <span className="font-medium">{x.id}</span></> : x.name}</span>
+                    {x.typed ? <span className="shrink-0 text-[0.6875rem] text-fg3">{menus[x.agent]?.name} id</span> : null}
+                    <span className="grid size-3.5 shrink-0 place-items-center">{on ? <CheckIcon className="size-3.5" /> : null}</span>
+                  </button>
+                  {x.typed || disabled || !onPin ? null : (
+                    <button type="button" tabIndex={-1} aria-label={x.pinned ? `Unpin ${x.name}` : `Pin ${x.name}`} aria-pressed={x.pinned} onClick={() => onPin(x.agent, x.id)}
+                      className={clsx('absolute right-0.5 grid size-7 place-items-center rounded-[6px] text-fg3 hover:text-fg coarse:size-10 phone:size-10', !x.pinned && 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 coarse:opacity-60 phone:opacity-60')}>
+                      {x.pinned ? <StarSolid className="size-3.5 text-fg2" /> : <StarOutline className="size-3.5" />}
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+            {s.more ? <p className="px-[9px] py-1 text-[0.6875rem] text-fg3 coarse:text-[0.8125rem] phone:text-[0.8125rem]">{s.more} more. Type to narrow.</p> : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** The model menu, for any number of agents with any number of models each: a tab per installed agent (only when more
+ *  than one), a search over every agent's models (type anywhere in the menu), the agent's pinned and recent models
+ *  on top (core/agents.js modelSections), a star to pin one; then Reasoning (that model's levels), Fast (where the
+ *  model has it), Permissions (a small sub-menu), and, only when a choice differs from what runs now, one Restart
+ *  button that says when it starts a new conversation (another agent). Popover on a desktop, a sheet on a phone. */
 function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
   const [data, setData] = useState<MenuData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [sel, setSel] = useState<MenuPick | null>(null)
   const [perms, setPerms] = useState(false)
   const [busy, setBusy] = useState(false)
+  const phone = useUI((u) => u.device === 'phone')
   const close = () => setMenuOpen(null)
   const models = (d: MenuData) => Object.entries(d.menus).flatMap(([agent, m]) => m.models.map((x) => ({ ...x, agent })))
   const choose = (d: MenuData, was: MenuPick, m: MenuModel & { agent: string }): MenuPick => {
@@ -278,7 +381,8 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
         setData(r.menu)
         const pre = findModel(r.menu.menus, typed)
         const m = pre && models(r.menu).find((x) => x.agent === pre.agent && x.id === pre.model)
-        setSel(m ? choose(r.menu, r.menu.current, m) : r.menu.current)
+        const s = m ? choose(r.menu, r.menu.current, m) : r.menu.current
+        setSel(s)
       })
       .catch((e: Error) => setError(e.message))
   }, [chat, typed])
@@ -287,6 +391,7 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
   const changes = () => {
     if (!data || !sel || data.remote) return []
     const w = data.current, out: string[] = []
+    if (sel.agent !== w.agent) out.push(data.menus[sel.agent]?.name ?? sel.agent)
     if (sel.agent !== w.agent || sel.model !== w.model) out.push(model(sel)?.name ?? sel.model ?? '')
     if (level(sel) && level(sel) !== level(w)) out.push(LEVEL[level(sel)!] ?? level(sel)!)
     if (sel.fast !== w.fast) out.push(sel.fast ? 'Fast' : 'Standard')
@@ -302,83 +407,108 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
     if ((r as { ok?: boolean }).ok === false) return setError((r as { error?: string }).error || "The agent didn't restart.")
     close()
   }
+  const pick = (row: MenuModel & { agent: string; typed?: boolean }) => {
+    if (!data || !sel) return
+    // a model typed by id joins its agent's list, so its levels and the Restart button know it
+    if (row.typed && !data.menus[row.agent]?.models.some((m) => m.id === row.id)) {
+      const menus = { ...data.menus, [row.agent]: { ...data.menus[row.agent], models: [row, ...data.menus[row.agent].models] } }
+      setData({ ...data, menus })
+    }
+    setSel(choose(data, sel, row))
+  }
+  const pin = async (agent: string, id: string) => {
+    const r = await act({ type: 'model-pin', agent, model: id } as never).catch(() => null)
+    if (r?.picks && data) setData({ ...data, picks: r.picks })
+  }
   const remote = data?.remote ?? null
   const menu = sel ? data?.menus[sel.agent] : undefined
   const m = sel ? model(sel) : null
   const on = sel ? level(sel) : null
   const perm = sel ? menu?.perms?.find((x) => x.id === sel.perm) : undefined
   const ch = changes()
-  const row = 'flex min-h-[31px] w-full items-center gap-2.5 rounded-[7px] px-[9px] text-left enabled:hover:bg-hover disabled:text-fg3 coarse:min-h-11'
-  const head = (t: string) => <div className="px-[9px] pt-2 pb-1 text-[0.6875rem] text-fg3">{t}</div>
-  return (
-    <Menu label="Model" onClose={close} className="absolute right-0 bottom-full z-30 mb-2 w-[300px] max-w-[calc(100vw-2rem)] origin-bottom-right">
-      <div data-model-menu className="relative flex flex-col text-[0.8rem]">
-        {!data || !sel ? (
-          <p className={clsx('px-[9px] py-2 text-fg3', error && 'text-need-fg')}>{error ?? 'Reading what it runs on…'}</p>
-        ) : (
-          <>
-            {head('Model')}
-            {models(data).map((x) => (
-              <button key={`${x.agent}-${x.id}`} type="button" role="menuitemradio" aria-checked={x.agent === sel.agent && x.id === sel.model} disabled={!!remote} className={row} onClick={() => setSel(choose(data, sel, x))}>
-                {/* the agent's own mark, Herdr's icon (web/public/agents, from the window's icons) */}
-                <img src={`agents/${x.agent}.svg`} alt="" aria-hidden className="size-3.5 shrink-0" />
-                <span className="min-w-0 flex-1 truncate">{x.name}</span>
-                {remote ? <span className="shrink-0 text-[0.6875rem] text-fg3">{remote}</span> : null}
-                <span className="grid size-3.5 shrink-0 place-items-center">{x.agent === sel.agent && x.id === sel.model ? <CheckIcon className="size-3.5" /> : null}</span>
-              </button>
-            ))}
-            <div className="px-1 py-1"><div className="h-px bg-line" /></div>
-            {head('Reasoning')}
-            <div className="px-1 py-[3px]">
-              <div role="radiogroup" aria-label="Reasoning" className={clsx('flex h-7 gap-0.5 rounded-[7px] bg-sel p-0.5 coarse:h-10', remote && 'opacity-50')}>
-                {(m?.efforts ?? []).map((e) => (
-                  <button key={e} type="button" role="radio" aria-checked={on === e} disabled={!!remote} onClick={() => setSel({ ...sel, effort: e })}
-                    className={clsx('min-w-0 flex-1 truncate rounded-[5px] text-[0.71875rem]', on === e ? 'bg-bg font-medium text-fg shadow-soft' : 'text-fg2 enabled:hover:text-fg')}>
-                    {LEVEL[e] ?? e}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {m?.fast && !menu?.fastLocked ? (
-              <button type="button" role="menuitemcheckbox" aria-checked={sel.fast} disabled={!!remote} className={row} onClick={() => setSel({ ...sel, fast: !sel.fast })}>
-                <SpeedIcon className="size-3.5 shrink-0 text-fg3" />
-                <span className="flex-1">Fast</span>
-                <span aria-hidden className={clsx('relative h-4 w-7 shrink-0 rounded-full transition-colors', sel.fast ? 'bg-accent' : 'bg-line2')}>
-                  <span className={clsx('absolute top-0.5 size-3 rounded-full bg-bg transition-[left]', sel.fast ? 'left-3.5' : 'left-0.5')} />
-                </span>
-              </button>
-            ) : null}
-            {menu?.perms?.length ? (
-              <button type="button" aria-haspopup="menu" aria-expanded={perms} disabled={!!remote} className={clsx(row, perms && 'bg-hover')} onClick={() => setPerms(!perms)}>
-                <ModeIcon className="size-3.5 shrink-0 text-fg3" />
-                <span className="flex-1">Permissions</span>
-                <span className="shrink-0 text-[0.75rem] text-fg3">{perm?.label ?? ''}</span>
-                <NextIcon className="size-3 shrink-0 text-fg3" />
-              </button>
-            ) : null}
-            {perms && menu?.perms ? (
-              <div role="menu" aria-label="Permissions" className="absolute right-1 bottom-9 z-10 w-[180px] rounded-[8px] bg-bg p-[5px] shadow-menu">
-                {menu.perms.map((x) => (
-                  <button key={x.id} type="button" role="menuitemradio" aria-checked={sel.perm === x.id} className={row} onClick={() => { setSel({ ...sel, perm: x.id }); setPerms(false) }}>
-                    <span className="flex-1">{x.label}</span>
-                    <span className="grid size-3.5 shrink-0 place-items-center">{sel.perm === x.id ? <CheckIcon className="size-3.5" /> : null}</span>
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            {error ? <p className="px-[9px] pt-1 text-[0.75rem] text-need-fg">{error}</p> : null}
-            {ch.length ? (
-              <div className="pt-[5px]">
-                <button type="button" disabled={busy} onClick={() => void restart()} className="press-dim h-7 w-full truncate rounded-[7px] bg-fg px-2.5 text-[0.78125rem] font-medium text-bg disabled:opacity-60 coarse:h-11">
-                  {busy ? 'Restarting…' : `Restart with ${ch.join(' · ')}`}
+  const row = 'flex min-h-[31px] w-full items-center gap-2.5 rounded-[7px] px-[9px] text-left enabled:hover:bg-hover focus-visible:bg-hover focus-visible:outline-none disabled:text-fg3 coarse:min-h-11 phone:min-h-11'
+  const head = (t: string) => <div className="px-[9px] pt-2 pb-1 text-[0.6875rem] text-fg3 coarse:text-[0.8125rem] phone:text-[0.8125rem]">{t}</div>
+  const sheet = (
+    <>
+      {phone ? <div aria-hidden className="fixed inset-0 z-40 bg-black/30" /> : null}
+      <Menu label="Model" onClose={close} tabs
+        // a phone's sheet is outside the app's [data-device] (a portal): its own classes, not phone: ones
+        className={phone ? 'fixed inset-x-0 bottom-0 z-40 rounded-b-none pb-[max(env(safe-area-inset-bottom),--spacing(2))]' : 'absolute right-0 bottom-full z-30 mb-2 w-[340px] max-w-[calc(100vw-2rem)] origin-bottom-right'}>
+        <div data-model-menu className="relative flex flex-col text-[0.8rem] coarse:text-[0.9375rem] phone:text-[0.9375rem]">
+          {!data || !sel ? (
+            <p className={clsx('px-[9px] py-2 text-fg3', error && 'text-need-fg')}>{error ?? 'Reading what it runs on…'}</p>
+          ) : (
+            <>
+              {/* another machine's Assistant: what runs is shown, and said once why it can't change here */}
+              {remote ? <p className="px-[9px] pt-1.5 pb-1 text-pretty text-[0.75rem] text-fg3 coarse:text-[0.875rem] phone:text-[0.875rem]">Runs on {remote}. Change its model there.</p> : null}
+              <ModelList menus={data.menus} agent={sel.agent} picks={data.picks} chosen={sel} disabled={!!remote} phone={phone} onPick={pick}
+                onPin={(agent, id) => void pin(agent, id)} autoFocus={!phone && !remote} />
+              <div className="px-1 py-1"><div className="h-px bg-line" /></div>
+              {m?.efforts?.length ? (
+                <>
+                  {head('Reasoning')}
+                  <div className="px-1 py-[3px]">
+                    {/* each level as wide as its word, the room left shared out: Extra high reads whole even at a phone's 288px */}
+                    <div role="radiogroup" aria-label="Reasoning" className={clsx('flex h-7 gap-0.5 rounded-[7px] bg-sel p-0.5 coarse:h-10 phone:h-10', remote && 'opacity-50')}>
+                      {m.efforts.map((e) => (
+                        <button key={e} type="button" role="radio" aria-checked={on === e} disabled={!!remote} onClick={() => setSel({ ...sel, effort: e })}
+                          className={clsx('min-w-0 flex-auto truncate rounded-[5px] px-1 text-[0.71875rem]', on === e ? 'bg-bg font-medium text-fg shadow-soft' : 'text-fg2 enabled:hover:text-fg')}>
+                          {LEVEL[e] ?? e}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              ) : null}
+              {m?.fast && !menu?.fastLocked ? (
+                <button type="button" role="menuitemcheckbox" aria-checked={sel.fast} disabled={!!remote} className={row} onClick={() => setSel({ ...sel, fast: !sel.fast })}>
+                  <SpeedIcon className="size-3.5 shrink-0 text-fg3" />
+                  <span className="flex-1">Fast</span>
+                  <span aria-hidden className={clsx('relative h-4 w-7 shrink-0 rounded-full transition-colors', sel.fast ? 'bg-accent' : 'bg-line2')}>
+                    <span className={clsx('absolute top-0.5 size-3 rounded-full bg-bg transition-[left]', sel.fast ? 'left-3.5' : 'left-0.5')} />
+                  </span>
                 </button>
-              </div>
-            ) : null}
-          </>
-        )}
-      </div>
-    </Menu>
+              ) : null}
+              {menu?.perms?.length ? (
+                <button type="button" aria-haspopup="menu" aria-expanded={perms} disabled={!!remote} className={clsx(row, perms && 'bg-hover')} onClick={() => setPerms(!perms)}>
+                  <ModeIcon className="size-3.5 shrink-0 text-fg3" />
+                  <span className="flex-1">Permissions</span>
+                  <span className="shrink-0 text-[0.75rem] text-fg3">{perm?.label ?? ''}</span>
+                  <NextIcon className="size-3 shrink-0 text-fg3" />
+                </button>
+              ) : null}
+              {perms && menu?.perms ? (
+                <div role="menu" aria-label="Permissions" className="absolute right-1 bottom-9 z-10 w-[180px] rounded-[8px] bg-bg p-[5px] shadow-menu">
+                  {menu.perms.map((x) => (
+                    <button key={x.id} type="button" role="menuitemradio" aria-checked={sel.perm === x.id} className={row} onClick={() => { setSel({ ...sel, perm: x.id }); setPerms(false) }}>
+                      <span className="flex-1">{x.label}</span>
+                      <span className="grid size-3.5 shrink-0 place-items-center">{sel.perm === x.id ? <CheckIcon className="size-3.5" /> : null}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {error ? <p className="px-[9px] pt-1 text-[0.75rem] text-need-fg">{error}</p> : null}
+              {ch.length ? (
+                <div className="flex flex-col gap-1 pt-[5px]">
+                  {/* another agent can't carry this conversation on: said before the press, not after */}
+                  {sel.agent !== data.current.agent ? (
+                    <p className="px-[9px] text-pretty text-[0.71875rem] text-fg3 coarse:text-[0.8125rem] phone:text-[0.8125rem]">
+                      {data.menus[sel.agent]?.name} starts a new conversation. This one stays in {data.menus[data.current.agent]?.name ?? 'its old agent'}’s history.
+                    </p>
+                  ) : null}
+                  <button type="button" disabled={busy} onClick={() => void restart()} className="press-dim min-h-7 w-full rounded-[7px] bg-fg px-2.5 py-1 text-balance text-[0.78125rem] font-medium text-bg disabled:opacity-60 coarse:min-h-11 phone:min-h-11 coarse:text-[0.9375rem] phone:text-[0.9375rem]">
+                    {busy ? 'Restarting…' : `Restart with ${ch.join(' · ')}`}
+                  </button>
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
+      </Menu>
+    </>
   )
+  // a phone's sheet covers the whole screen's bottom (the tab bar too), above the chat's own layer
+  return phone ? createPortal(<div data-device="phone" className="isolate z-40 font-sans antialiased">{sheet}</div>, document.body) : sheet
 }
 
 /** In the message box, as the window's model button: what its agent runs on ("Opus 5.5 · High"), a chevron; it opens

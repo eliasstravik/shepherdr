@@ -94,7 +94,8 @@ export function backupProblem(checks, m, cli) {
 }
 
 // The model menu's words (mods/chat-models, settings mode) and its button's: "Opus 5.5 · 1M · High".
-export const MODEL_MENU = { model: "Model", reasoning: "Reasoning", fast: "Fast", permissions: "Permissions" };
+// the model list's headings come from core/agents.js modelSections (Pinned, Recent, Models)
+export const MODEL_MENU = { reasoning: "Reasoning", fast: "Fast", permissions: "Permissions" };
 const modelOf = (menus, sel) => menus?.[sel?.agent]?.models?.find((m) => m.id === sel.model) ?? null;
 export function modelLabel(menus, sel) {
   const m = modelOf(menus, sel);

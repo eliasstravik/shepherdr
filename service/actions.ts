@@ -278,6 +278,10 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim().split("\n").pop() || "Autopilot didn't change.");
     return { ok: true };
   }
+  if (b?.type === "model-pin" && compat.agents && ["claude", "codex"].includes(b.agent) && typeof b.model === "string" && /^[\w.\[\]-]{1,60}$/.test(b.model)) {
+    // the model menu's star: pinned to the top of its agent's list (core/agents.js PICKS_FILE, as the window's)
+    return { ok: true, picks: (compat.agents as any).pin(b.agent, b.model) };
+  }
   if ((b?.type === "restart-info" || b?.type === "model-menu" || b?.type === "restart") && typeof b.chat === "string" && compat.agents) {
     // the model menu: what it runs on and its choices (model-menu: the window's, mods/chat-models); a restart on
     // another model, effort, speed, permission mode or CLI

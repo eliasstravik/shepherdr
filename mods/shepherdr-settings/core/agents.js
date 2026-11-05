@@ -144,21 +144,105 @@ export function contextWords(c) {
   return `${Math.min(100, Math.round((c.used / c.window) * 100))}% context`;
 }
 
-// What the model picker (mods/chat-models) shows for one agent, as plain data:
-// { name, models: [{ id, name, efforts, defaultEffort, fast }], perms, fastLocked }.
+// What the model picker (mods/chat-models, the web's restart.tsx) shows for one agent, as plain data:
+// { name, models: [{ id, name, efforts, defaultEffort, fast }], perms, fastLocked }: every model the CLI
+// offers (Codex: its own models_cache.json; Claude Code: its /model menu), the picker searches them.
 // `dflt` is that agent's settings (defaults()); `current` its running model, kept in the list.
 export function menuFor(agent, dflt, current = null) {
   if (agent === "claude") {
-    return { name: NAMES.claude, perms: PERMS.claude, fastLocked: false,
-      models: CLAUDE_MODELS.map((m) => ({ id: m.id, name: m.name, efforts: CLAUDE_EFFORTS,
-        defaultEffort: dflt?.per?.[m.match[1].replace(/\[1m\]$/, "")] ?? dflt?.effort ?? null, fast: m.id.startsWith("opus") })) };
+    const models = CLAUDE_MODELS.map((m) => ({ id: m.id, name: m.name, efforts: CLAUDE_EFFORTS,
+      defaultEffort: dflt?.per?.[m.match[1].replace(/\[1m\]$/, "")] ?? dflt?.effort ?? null, fast: m.id.startsWith("opus") }));
+    // a model typed by id (an older one it still takes) stays in the list while it runs
+    if (current && !models.some((m) => m.id === current)) models.unshift({ id: current, name: modelName(current), efforts: CLAUDE_EFFORTS, defaultEffort: dflt?.effort ?? null, fast: false });
+    return { name: NAMES.claude, perms: PERMS.claude, fastLocked: false, models };
   }
-  // Codex lists many: its first few (the cache's order), and the one running now.
-  const all = dflt?.models ?? [];
-  const shown = all.filter((m, i) => i < 5 || m.id === current);
-  return { name: NAMES.codex, perms: PERMS.codex, fastLocked: Boolean(dflt?.fastInConfig),
-    models: shown.map((m) => ({ id: m.id, name: m.label, efforts: m.efforts?.length ? m.efforts : ["low", "medium", "high", "xhigh"],
-      defaultEffort: m.defaultEffort ?? dflt?.effort ?? null, fast: m.fast })) };
+  const all = (dflt?.models ?? []).map((m) => ({ id: m.id, name: m.label, efforts: m.efforts?.length ? m.efforts : ["low", "medium", "high", "xhigh"],
+    defaultEffort: m.defaultEffort ?? dflt?.effort ?? null, fast: m.fast }));
+  if (current && !all.some((m) => m.id === current)) all.unshift({ id: current, name: current, efforts: ["low", "medium", "high", "xhigh"], defaultEffort: dflt?.effort ?? null, fast: false });
+  return { name: NAMES.codex, perms: PERMS.codex, fastLocked: Boolean(dflt?.fastInConfig), models: all };
+}
+
+// The levels a model typed by id gets: its agent's usual ones.
+export function typedModel(agent, id) {
+  return { id, name: agent === "claude" ? modelName(id) : id, efforts: agent === "claude" ? CLAUDE_EFFORTS : ["low", "medium", "high", "xhigh"], defaultEffort: null, fast: false, typed: true };
+}
+
+// The person's picks in the model menus (the window's and the web's alike), in PICKS_FILE under the
+// home of the machine the menu runs on: { pinned: ["codex:gpt-6-sol"], recent: [...] }, recent newest first.
+export const PICKS_FILE = ".herdr/model-picks.json";
+const RECENT = 5;
+export const pickKey = (agent, id) => `${agent}:${id}`;
+export function parsePicks(text) {
+  let d = {};
+  try { d = JSON.parse(text || "{}") ?? {}; } catch {}
+  const list = (x) => (Array.isArray(x) ? x.filter((k) => typeof k === "string" && k.includes(":")) : []);
+  return { pinned: list(d.pinned), recent: list(d.recent).slice(0, RECENT) };
+}
+// Restarted on it: first among the recent ones.
+export function withRecent(picks, key) {
+  return { ...picks, recent: [key, ...picks.recent.filter((k) => k !== key)].slice(0, RECENT) };
+}
+// The star: pinned to the top of its agent's list, or not any more.
+export function withPin(picks, key) {
+  return { ...picks, pinned: picks.pinned.includes(key) ? picks.pinned.filter((k) => k !== key) : [...picks.pinned, key] };
+}
+
+// Every word typed is in the model's name or id somewhere, any case ("op 1m" finds Opus 5.5 · 1M).
+export function modelMatches(m, q) {
+  const hay = `${m.name ?? ""} ${m.id}`.toLowerCase().replace(/[^a-z0-9.\[\] ]+/g, " ");
+  return String(q ?? "").toLowerCase().split(/[^a-z0-9.\[\]]+/).filter(Boolean).every((w) => hay.includes(w));
+}
+
+// The model list as the picker shows it: sections of rows, at most CAP rows each (`more` counts the rest).
+// Nothing typed: the agent shown (`agent`), its pinned models, then its recent ones, then all the rest in the
+// CLI's order. Typed: every agent's matches, an agent to a section (its pinned and recent first), and, for one
+// word no model of an agent has as its id, a row per such agent to start it on that id (`typed`).
+// Each row: { agent, ...model, pinned }; a section: { key, title, agent, rows, more }.
+export const CAP = 200;
+export function modelSections(menus, agent, picks, q) {
+  picks = picks ?? { pinned: [], recent: [] };
+  const query = String(q ?? "").trim();
+  const order = (k, models) => {
+    const rank = (m) => {
+      const key = pickKey(k, m.id), p = picks.pinned.indexOf(key), r = picks.recent.indexOf(key);
+      return p >= 0 ? p : r >= 0 ? 1000 + r : 2000;
+    };
+    return models.map((m, i) => ({ m, i, r: rank(m) })).sort((a, b) => a.r - b.r || a.i - b.i)
+      .map(({ m }) => ({ agent: k, ...m, pinned: picks.pinned.includes(pickKey(k, m.id)) }));
+  };
+  // a pinned or recent model typed by id (no CLI lists it) stays on offer
+  const saved = (k) => {
+    const models = menus?.[k]?.models ?? [], known = new Set(models.map((m) => m.id));
+    const ids = [...new Set([...picks.pinned, ...picks.recent].filter((x) => x.startsWith(`${k}:`)).map((x) => x.slice(k.length + 1)))];
+    return [...models, ...ids.filter((id) => !known.has(id)).map((id) => ({ ...typedModel(k, id), typed: false }))];
+  };
+  const capped = (key, title, k, rows) => ({ key, title, agent: k, rows: rows.slice(0, CAP), more: Math.max(0, rows.length - CAP) });
+  if (!query) {
+    const rows = order(agent, saved(agent));
+    const pinned = rows.filter((r) => r.pinned);
+    const recent = rows.filter((r) => !r.pinned && picks.recent.includes(pickKey(agent, r.id)));
+    const rest = rows.filter((r) => !r.pinned && !picks.recent.includes(pickKey(agent, r.id)));
+    return [
+      ...(pinned.length ? [capped("pinned", "Pinned", agent, pinned)] : []),
+      ...(recent.length ? [capped("recent", "Recent", agent, recent)] : []),
+      ...(rest.length ? [capped("all", pinned.length || recent.length ? "All models" : "Models", agent, rest)] : []),
+    ];
+  }
+  const out = [];
+  // the agent shown first, then the others in their usual order
+  for (const k of [agent, ...Object.keys(menus ?? {}).filter((x) => x !== agent)]) {
+    const m = menus?.[k];
+    if (!m) continue;
+    const rows = order(k, saved(k).filter((x) => modelMatches(x, query)));
+    if (rows.length) out.push(capped(k, m.name, k, rows));
+  }
+  // one word that could be an id, and no model has it: start any agent on it as typed
+  if (/^[\w.\[\]-]{2,60}$/.test(query)) {
+    const rows = [agent, ...Object.keys(menus ?? {}).filter((x) => x !== agent)]
+      .filter((k) => menus?.[k] && !saved(k).some((m) => m.id === query)).map((k) => ({ agent: k, ...typedModel(k, query), pinned: false }));
+    if (rows.length) out.push({ key: "typed", title: "Use the id typed", agent, rows, more: 0 });
+  }
+  return out;
 }
 
 // The picker row that is what runs now (`c` from current()), or the model as it is.
