@@ -77,10 +77,11 @@ task values a machine set before (the old machine scope) still apply there until
 
 ## Reactions
 
-Agents › Reactions, on by default: every agent reacts to some of your messages with one emoji, as a person would
-(👀 on a new ask it picks up, 👍 on a go-ahead, ✅ on your ask once it's done, 😂 at a joke, 🙏 for thanks): Assistants,
-task workers, automation runs and plain agent tabs, on every machine. Most messages get none, never more than one, and
-never instead of an answer you need. Off, none reacts. The reactions show on your messages in every chat, the
+Agents › Reactions, on by default: every agent reacts to some of your messages with one emoji, as a person would:
+Assistants, task workers, automation runs and plain agent tabs, on every machine. It picks the most specific,
+delightful or funny one that fits, not a generic 👍 or 👀 by default (🚀 for a launch, 🔥 for a great result, 🐛 for a
+bug report, 🧹 for a cleanup ask, 🫡 for a direct order, 🤌 for a nice detail, 🍿 for drama). Tasteful: most messages
+get none, never more than one, and never instead of an answer you need. Off, none reacts. The reactions show on your messages in every chat, the
 Assistant's, a task's and an agent tab's, in the window and on the web (`core/chat-log.js`).
 
 - **Kept as** `agents.reactions` at each level. SHEP-42 kept it as the Assistant's, `assistant.reactions`: it still

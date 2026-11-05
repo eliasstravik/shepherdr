@@ -1833,8 +1833,12 @@ class AgentReactions(unittest.TestCase):
         self.write({"everywhere": {"agents": {"reactions": False}}})
         for a in ("t9", "t10", "t11", "t12"):
             self.assertIn("never react", self.aset.session_note(a))
-        for words in ("👀", "👍", "✅", "😂", "🙏", "<hc react=", "never more than one", "never instead of an answer", "<hc no-reply/>", "In to=, leave out double quotes"):
+        for words in ("👀", "👍", "✅", "😂", "🙏", "<hc react=", "never more than one", "never instead of an answer", "<hc no-reply/>", "In to=, leave out double quotes",
+                      "most specific, delightful or funny emoji", "not a generic 👍 or 👀 by default", "🚀", "🔥", "🐛", "🧹", "🫡", "🤌", "🍿",
+                      "Keep it tasteful", "most messages get none"):
             self.assertIn(words, self.reactions.GUIDE)
+        # the turned-on notice carries the same guidance
+        self.assertIn("most specific, delightful or funny emoji", self.reactions.TURNED_ON)
 
     def test_running_agents_of_every_type_are_told_once(self):
         """Workers, automation runs and agent tabs their hook taught are told once when it changes for their

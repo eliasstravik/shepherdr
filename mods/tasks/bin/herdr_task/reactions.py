@@ -22,8 +22,10 @@ STATE = os.path.join(STORE, ".reactions.json")
 EVERY_MS = 60000  # looked at again this often, and at once when the settings file changes
 
 GUIDE = ("Reactions (on in Settings): react to some of the person's messages with one emoji, as a person would in a chat: "
-         "👀 on a new ask you're picking up, 👍 on a go-ahead, ✅ on their ask once it's done, 😂 at a joke, 🙏 for thanks. "
-         "Most messages get none; never more than one per message; never instead of an answer they need. "
+         "pick the most specific, delightful or funny emoji that fits that message, not a generic 👍 or 👀 by default: "
+         "🚀 for a launch, 🔥 for a great result, 🐛 for a bug report, 🧹 for a cleanup ask, 🫡 for a direct order, 🤌 for a nice detail, "
+         "🍿 for drama, 😂 at a joke, 🙏 for thanks, ✅ on their ask once it's done; 👀 or 👍 only when nothing more fitting does. "
+         "Keep it tasteful: most messages get none; never more than one per message; never instead of an answer they need. "
          "Write it on a line of its own in the reply that ends your turn: <hc react=\"👀\" to=\"first words of their message\"/>. In to=, leave out double quotes or make them curly (“ ”). "
          "A message that needs no words back (a thanks, an ok, a joke) gets only the reaction: that line, then <hc no-reply/>, nothing else.")
 TURNED_ON = "Reactions are now on in Settings. " + GUIDE.split(": ", 1)[1]
