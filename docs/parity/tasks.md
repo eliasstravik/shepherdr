@@ -73,14 +73,14 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Minutes left | T:854-855 under the glyph, amber, monospace, level with the second line: "6m", "<1m", "2h" | W Line `left` from compat `left` (core leftOf), as tall as the second line | ✓ fixed (showed raw eta, "2h" read as 2m; sat above the second line on a phone) |
 | Needs you | why (core place) | compat `sub` | ✓ |
 | Queued | "After HERD-3", "Waits: …", "Starts soon" | compat `sub` (core queueReason) | ✓ |
-| Ready | "Ready 5m ago" + Accept | compat `sub` + W `accept` | ✓ |
+| Ready | "Ready 5m ago" + Review (opens the Accept card) | compat `sub` + W `accept` | ✓ |
 | Merging | "Merges once its checks pass" | compat `sub` | ✓ |
 | To do, Done | one line, place at the end | W Line one-line | ✓ |
 | Where it is | T:700-706 machine (not this computer) · space, only what the grouping doesn't say; Settings "Where on task rows" off: none | W whereOf / autoWhere, `names` | ✓ |
 | Place gives way | T:823-831 one line: the place shrinks first; two lines: it takes only the room left | W Line `shrink-[1000]`, flex-1 justify-end | ✓ |
 | Place, phone | — | whole or not at all (it wraps out of sight), never a cut `m3 · shep…` | ◇ phone: a few letters of a place say nothing |
 | Accept | T:796-800 compact solid button at line 2's end, "Accepting…" while the Accept card's accept runs | W TaskRow `accept`, `useAccepting` + compat `accepting` (shared "tasks.accepting") | ✓ fixed |
-| Accept never covers the place | T:845-849 the place sits before the button | W Line: place in flex-1, then the button (shrink-0), desktop, tablet and phone | ✓ |
+| Review never covers the place | T:845-849 the place sits before the button | W Line: place in flex-1, then the button (shrink-0), desktop, tablet and phone | ✓ |
 | Archived rows | T:538 done glyph, no pin menu | W TaskRow, `menu` off when archived | ✓ fixed (offered Pin) |
 | Selected | T:833 the focused agent's row | W the open task's row | ◇ the web has no focused pane; the open task is what's shown |
 | Right-click menu | T:786-790, TM:26-32 Pin / Unpin (core taskMenu) | W TaskMenu (right click, or a held finger) | ✓ / ◇ touch holds |
@@ -108,7 +108,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | ‹ Tasks | P:364-368 chevron + "Tasks" | A desktop button "Tasks"; phone round Back "Tasks" | ✓ / ◇ phone top bar |
 | → base | P:371-372 "→ main", tooltip "Merges into main", only a base of its own | A `target` (compat sends base) | ✓ |
 | Pin / Unpin | P:225-241,374 pin icon, pressed when pinned, tooltip "Pin"/"Unpin"; not an archived Done task's | A IconButton | ✓ fixed (showed on archived) |
-| Accept | P:376-377 primary "Accept", "Accepting…" | A Primary, `useAccepting` + `task.accepting` | ✓ fixed |
+| Review | P:385 primary "Review" (opens the Accept card), "Accepting…" | A Primary, `useAccepting` + `task.accepting` | ✓ fixed |
 | Status dot | P:184-195 with halo, pie | A Dot halo | ✓ |
 | Id and title | P:391-394 id in monospace, then the title, one line | A `named` | ✓ fixed (title over "id · CLI · space") |
 | Report line | P:279-300 agent's words · "~6 min" / "<1 min" / "~2 h"; paused: dim, "· 40%" | A `said` (ReportLine head; minutesLeft as the window's) | ✓ fixed ("~1 h 20 min left") |

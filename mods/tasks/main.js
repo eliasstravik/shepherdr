@@ -790,14 +790,14 @@ export default class Tasks extends View {
     openOverlay({ mod: "tasks-menu", kind: "popup", at: "pointer", width: 160, height: 8 + 32, props: { menu: "row", key: pin.key, on: pin.on } });
   }
 
-  // Ready = "looks done, your call": Accept is the person's one action here, one solid 20 button
+  // Ready = "looks done, your call": Review (opens the Accept card) is the person's one action here, one solid 20 button
   // (ui.js). It merges first when there is something to merge (herdr-task accept follows the merge
   // settings), else it's done. "Accepting…" while the Accept card's accept runs (shared
   // "tasks.accepting", accepting()).
   acceptButton(p, _t) {
     const key = `${p.list.machine ?? ""}:${p.list.folder}:${refOf(p.list, p.task)}`;
     const busy = accepting(key);
-    return button(`accept-${key}`, busy ? "Accepting…" : "Accept", { kind: "primary", size: "xs", disabled: busy, onClick: () => this.accept(p) });
+    return button(`accept-${key}`, busy ? "Accepting…" : "Review", { kind: "primary", size: "xs", disabled: busy, onClick: () => this.accept(p) });
   }
 
   // Accept shows what you approve first: the Accept card (mods/accept-card) runs herdr-task
