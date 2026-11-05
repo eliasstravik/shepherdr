@@ -23,6 +23,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | ⋯ Group by | T:372-375 icon button, tooltip "Group by" | W TasksMenu, label "Group by" | ✓ |
 | Group by menu | TM:20-39 heading "Group by"; Status, Space, Machine, Machine › Space (the machine ones only while more than one machine has tasks); check on the current | W TasksMenu + `multiMachine`, `grouping` | ✓ |
 | One machine with tasks | T:274 Machine shows as Status, Machine › Space as Space | W `grouping` | ✓ |
+| Show (⋯ menu) | TM heading "Show": This space (default), All spaces (shared `tasks.scope`); This space keeps the selected space's tasks, automations and Needs you (core `inSpace`: its folder or a repo directly in it (never every repo in a home folder), or started for it; Needs you also by the item's tab); empty: "Nothing in <space>. All spaces, in the ⋯ menu, shows every space's tasks."; a Ctrl+K jump searches every space | — | ✗ window only for now (the web's list has no selected space) |
 | Search field | T:86,489-503 "Filter tasks", magnifier, F key hint while empty and unfocused, X "Clear" | W TaskFilter (FilterBox) | ✓ |
 | F to the field, Esc clears | T:384, T:505-510 | keyboard plugin, FilterBox | ✓ |
 | What search finds | T:472-475 id, title, status line, summary, #PR, space, list, machine | W `found` | ✓ (summary isn't in the snapshot; the status line and report are) |

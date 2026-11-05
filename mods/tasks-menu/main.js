@@ -1,8 +1,9 @@
 // The Tasks panel's small menus (mods/tasks), as popups at the pointer in the look of Herdr's
 // own menu. props().menu:
-//   "group"   the header's ⋯: group the list by status, space, machine, or machine then space
-//             (shared "tasks.groupby", kept); the machine ones only when props().machines (more
-//             than one machine has tasks)
+//   "group"   the header's ⋯: Show this space's tasks or every space's (shared "tasks.scope" =
+//             "space", the default, or "all"; kept), then group the list by status, space, machine,
+//             or machine then space (shared "tasks.groupby", kept); the machine ones only when
+//             props().machines (more than one machine has tasks)
 //   "filter"  the filter row's More: the statuses that don't get a chip of their own;
 //             props().items = [{ key, label, count }], props().current. A pick goes to the
 //             panel as shared "tasks.filterreq" = { key, at }.
@@ -22,6 +23,8 @@ import { taskMenu } from "./core/menus.js";
 // Shepherdr's GROUP_WORDS. "folder" was Space's old key.
 const GROUPS = [{ key: "status", label: "Status" }, { key: "space", label: "Space" },
   { key: "machine", label: "Machine" }, { key: "machine-space", label: "Machine › Space" }];
+// Show: keys apart from Group by's (a row's id is its key), "scope:" then shared "tasks.scope"'s value.
+const SCOPES = [{ key: "scope:space", label: "This space" }, { key: "scope:all", label: "All spaces" }];
 
 // The menu's sections, each a title (or none), its items, which is checked and what a pick does.
 function sections() {
@@ -33,7 +36,9 @@ function sections() {
   // What the list shows now: by machine with one machine is by status, Machine › Space by space.
   const by = shared("tasks.groupby") === "folder" ? "space" : shared("tasks.groupby");
   const current = items.some((g) => g.key === by) ? by : by === "machine-space" ? "space" : "status";
-  return [{ title: "Group by", items, current, pick: (key) => setShared("tasks.groupby", key) }];
+  return [{ title: "Show", items: SCOPES, current: shared("tasks.scope") === "all" ? "scope:all" : "scope:space",
+    pick: (key) => setShared("tasks.scope", key.slice(6)) },
+  { title: "Group by", items, current, pick: (key) => setShared("tasks.groupby", key) }];
 }
 
 // A row's menu (core/menus.js taskMenu, the web's too): its sections between the lines, a heading

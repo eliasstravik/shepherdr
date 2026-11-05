@@ -9,6 +9,8 @@
 // space, machine, or machine then space (shared "tasks.groupby", from the header's ⋯:
 // mods/tasks-menu; the machine ones only while more than one machine has tasks).
 // "Needs you" lists everything that needs the person (inbox.js), here or not.
+// Shown: this space's tasks (the space selected in the window: core/tasks.js inSpace), or every
+// space's (shared "tasks.scope" = "space", the default, or "all": the header's ⋯ too).
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
@@ -16,13 +18,13 @@ import { machines, exec, readTextFile, watchFolder, appHome, home, run, theme, n
 import { spaces, panes, agents, terminals, inRender } from "./live.js";
 // What needs the person, from every space and machine (lib/inbox.js, shared; the tab
 // bar runs its engine): agents asking or waiting, task problems, failed automations, merges.
-import { items as needs, ASKS, toAgent, reasonOf, reqReason, REASONS, fit } from "./inbox.js";
+import { items as needs, tabOf, ASKS, toAgent, reasonOf, reqReason, REASONS, fit } from "./inbox.js";
 import { words } from "./core/asks.js";
 import { taskDot, ownProgress } from "./dot.js";
 import { taskMenu } from "./core/menus.js";
 // The rules for a task's status, order and words: shared with the web app (core/tasks.js).
 import { RANK, STATUS, RANK_OF, ORDER, GROUP_BY, groupBy, machineOf, machineName, refOf, taskKey, autoPrefix, place,
-  queueReason, reportOf as report, secondLine, leftOf, order, matches, day, ago, capital, short, autoWhere, fromLine } from "./core/tasks.js";
+  queueReason, reportOf as report, secondLine, leftOf, order, matches, day, ago, capital, short, autoWhere, fromLine, inSpace } from "./core/tasks.js";
 import { READ_LISTS, taskLists } from "./core/tasklists.js";
 import { TEXT, H, RADIUS, red, amber } from "./ui.js";
 
@@ -124,6 +126,12 @@ export default class Tasks extends View {
     cx.timer.every(10000, (cx) => this.loadRemote(cx));
     // Times like "4m" and "2h ago" move on by the minute.
     cx.timer.every(60000, (cx) => cx.notify());
+    // This space's tasks follow the space selected in the window.
+    cx.timer.every(1000, (cx) => {
+      if (shared("tasks.scope") === "all") return;
+      const id = spaces().find((s) => s.active)?.id ?? null;
+      if (id !== this.spaceId) { this.spaceId = id; cx.notify(); }
+    });
   }
 
   // ~/.herdr/tasks here changes: read again. One watch for the panel's life.
@@ -251,15 +259,23 @@ export default class Tasks extends View {
     if (fq?.at && fq.at !== this.filterAt) { this.filterAt = fq.at; this.pickFilter(fq.key); }
     // Ctrl+K's jump (mods/jump) to a task with no chat to open: the list, searched for it, all statuses.
     const sq = shared("tasks.searchreq");
-    if (sq?.at && sq.at !== this.searchAt) { this.searchAt = sq.at; this.pickFilter("all"); this.archivedOpen = false; this.query.set_value(String(sq.q ?? "")); }
-    let placed = this.lists.flatMap((l) => l.tasks.map((task) => this.place(l, task)));
+    if (sq?.at && sq.at !== this.searchAt) { this.searchAt = sq.at; this.pickFilter("all"); this.archivedOpen = false; this.query.set_value(String(sq.q ?? "")); this.jumped = true; }
+    // This space (shared "tasks.scope", the ⋯ menu): only what is the selected space's, Needs you
+    // too (the tab bar's count still has everything). A jump's search looks in every space.
+    if (!this.query.value().trim()) this.jumped = false;
+    const here = shared("tasks.scope") === "all" || this.jumped ? null : spaces().find((s) => s.active) ?? null;
+    this.here = here;
+    const tabs = new Set(here?.tabs.map((x) => x.id) ?? []);
+    const mine = (l, x) => !here || inSpace(here, { machine: l.machine, folder: l.folder, space: x.space });
+    const ownNeed = (x) => !here || tabs.has(tabOf(x)) || Boolean(x.folder && inSpace(here, x));
+    let placed = this.lists.flatMap((l) => l.tasks.filter((task) => mine(l, task)).map((task) => this.place(l, task)));
     // Archived tasks (herdr-task: Done ones archive themselves after a while) leave every list and
     // count: only the Archived view and a search show them, the latest archived first.
     const archived = placed.filter((p) => this.shelved(p)).sort((a, b) => (b.task.archived ?? 0) - (a.task.archived ?? 0));
     placed = placed.filter((p) => !archived.includes(p));
     this.prunePins(placed, cx);
     // Needs you: asks, stuck agents, problems, failed automations (a task ready to merge is in Ready).
-    let inbox = needs();
+    let inbox = needs().filter(ownNeed);
     this.readAsks(inbox, cx);
     this.readPrefixes(inbox, cx);
     // What the search field holds: only what matches it shows, in its group, every Done one too.
@@ -304,7 +320,7 @@ export default class Tasks extends View {
     // Each status's tasks, in its order (Done newest first), and the automations.
     const tasksOf = {};
     for (const s of ORDER.slice(1, -1)) tasksOf[s] = sorted(placed.filter((p) => p.section === s));
-    const autos = lists.flatMap((l) => (l.automations ?? []).filter((a) => !q || matches(q, a.title, placeName(l), l.name, l.machine))
+    const autos = lists.flatMap((l) => (l.automations ?? []).filter((a) => mine(l, a) && (!q || matches(q, a.title, placeName(l), l.name, l.machine)))
       .map((a) => [l, a]));
     // The filter row: All, then a chip for each status that holds something now.
     const count = (k) => (k === "needs" ? needRows.length : k === "automations" ? autos.length : tasksOf[k].length);
@@ -384,8 +400,8 @@ export default class Tasks extends View {
         .child(div().flex_1())
         .child(h_flex().id("task-more").size(H.sm).flex_none().items_center().justify_center().rounded(RADIUS.control).cursor_pointer().text_color(t.muted)
           .hover((s) => s.bg(t.hover).text_color(t.foreground))
-          // Its menu (mods/tasks-menu): a 28 heading, then 32 rows (ui.js menuRow).
-          .on_click(() => openOverlay({ mod: "tasks-menu", kind: "popup", at: "pointer", width: 200, height: 8 + 28 + (multi ? 4 : 2) * 32, props: { menu: "group", machines: multi } }))
+          // Its menu (mods/tasks-menu): Show and Group by, each a 28 heading over 32 rows (ui.js menuRow).
+          .on_click(() => openOverlay({ mod: "tasks-menu", kind: "popup", at: "pointer", width: 200, height: 8 + 2 * 28 + 4 + (multi ? 6 : 4) * 32, props: { menu: "group", machines: multi } }))
           .child(svg("mods/tasks/more.svg").size(14).flex_none())))
       .child(this.searchField(t))
       .when(!this.archivedOpen && filters, (el) => el.child(this.filterRow(chips, count, filter, t)))
@@ -556,6 +572,7 @@ export default class Tasks extends View {
   // The list's line when it shows nothing at all: how tasks come, unless there are some (all
   // archived, say).
   emptyLine() {
+    if (this.here) return `Nothing in ${this.here.name || "this space"}. All spaces, in the ⋯ menu, shows every space's tasks.`;
     return this.lists.some((l) => l.tasks.length) ? "Nothing to do." : "No tasks on any machine. Ask an Assistant to plan some.";
   }
 
