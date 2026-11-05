@@ -22,8 +22,8 @@ import { pilotFor, headerDetail } from "./core/autopilot.js";
 const FILE = () => `${home()}/.herdr/tasks/.autopilot.json`;
 const SETTINGS = () => `${home()}/.herdr/shepherdr.json`;
 const CLI = () => `${appHome()}/mods/tasks/bin/herdr-task`;
-// Wide enough for "Autopilot  Next 14:30"; a narrow header shows the switch only.
-export const CHIP_W = 150, CHIP_COMPACT_W = 28, COMPACT_BELOW = 480;
+// Wide enough for "Autopilot  Next in 10 min"; a narrow header shows the switch only.
+export const CHIP_W = 178, CHIP_COMPACT_W = 28, COMPACT_BELOW = 480;
 const CHIP_H = 22;
 
 // The space whose Assistant runs in this terminal (or waits in this lazy slot), else null; another
@@ -55,7 +55,8 @@ async function fileOf(view, space) {
   return file;
 }
 
-const sig = (a) => JSON.stringify([a?.on, a?.next_run, Boolean(a?.pending), Boolean(a?.inflight), a?.every, a?.events]);
+// What the header shows, its words too: "Next in 7 min" counts down between reads (each poll looks again).
+const sig = (a) => JSON.stringify([a?.on, a?.next_run, Boolean(a?.pending), Boolean(a?.inflight), a?.every, a?.events, headerDetail(a)]);
 
 // Reads this header's space from the file; redraws only when what the switch shows changed.
 export function apPoll(view, cx) {
@@ -136,6 +137,32 @@ async function ap(args, space) {
 
 // Settings › Autopilot on this space: its own, and what it inherits from Everywhere.
 const openAutopilot = (space) => openSettings({ space, section: "autopilot" });
+
+// Run now (herdr-task autopilot run-now): after the switch while it's on; queued until the Assistant is idle, which
+// the switch's words then say ("Queued", "Waking"). Dim and still while one is already queued or running.
+export function apRunNow(view, t, space, pane) {
+  const a = view.ap;
+  if (!a?.on || view.apBusy) return null;
+  const busy = Boolean(view.apRunning || a.pending || a.inflight);
+  return h_flex().id(`ap-run-${pane}`).flex_none().h(20).px(7).gap(4).items_center().rounded(5)
+    .border_1().border_color(t.border).text_size(TEXT.label).text_color(busy ? t.dim : t.muted)
+    .when(!busy, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
+      .on_click((_e, cx) => { cx.stop_propagation(); apRun(view, space, cx); }))
+    .child(view.apRunning && !a.pending && !a.inflight ? "Queuing…" : "Run now");
+}
+
+function apRun(view, space, cx) {
+  if (view.apRunning) return;
+  view.apRunning = true;
+  cx.notify();
+  cx.spawn(async (cx) => {
+    try { view.ap = await ap(["run-now"], space); }
+    catch (e) { toast({ title: "Autopilot didn't wake", body: plainError(e), level: "error" }); }
+    view.apRunning = false;
+    setShared("autopilot.at", Date.now());
+    cx.notify();
+  });
+}
 
 // "Write a heartbeat": after the switch while it's on and its heartbeat is still empty.
 export function apHeartbeatLink(view, space, pane) {

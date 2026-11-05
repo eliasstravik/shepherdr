@@ -353,7 +353,7 @@
         ]
       },
       "forms": {
-        "herdr": "Groups, filters, group by, search (F), dots and %, Accept on Ready rows, automations, archived",
+        "herdr": "Groups, filters, group by, search (F), dots and %, Review on Ready rows, automations, archived",
         "desktop": "Right column",
         "tablet": "Column beside the chat",
         "phone": "Tasks tab in the bottom bar"
@@ -383,7 +383,7 @@
         ]
       },
       "forms": {
-        "herdr": "Header (Pin, Accept, status); Chat, Terminal, Files, Changes, Pull request, Browser",
+        "herdr": "Header (Pin, Review, status); Chat, Terminal, Files, Changes, Pull request, Browser",
         "desktop": "Side panel with those tabs",
         "tablet": "Slides over the list, with Back",
         "phone": "Own screen; tabs in a scrolling switcher"
@@ -573,10 +573,10 @@
         ]
       },
       "forms": {
-        "herdr": "News lines in the Assistant chat; Accept on Ready",
-        "desktop": "Same lines, inline Accept",
+        "herdr": "News lines in the Assistant chat; Review on Ready",
+        "desktop": "Same lines, inline Review",
         "tablet": "Same",
-        "phone": "Same; Accept opens the sheet"
+        "phone": "Same; Review opens the sheet"
       },
       "service": [
         "compat.ts"

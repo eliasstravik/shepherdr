@@ -222,11 +222,41 @@ function newsOf(t) {
     ref: unattr(/\btask="([^"]*)"/.exec(a)?.[1]), event: unattr(/\bevent="([^"]*)"/.exec(a)?.[1]), text: text.trim() })).filter((n) => n.ref && n.event);
 }
 
-// A message's words, with the task news it carries (news: shown as their own lines).
+// An Autopilot wake (herdr-task's <herdr-autopilot reason=…>): { reason }, else null. Its words never show; the chat
+// shows one quiet line for it (pilotLine()).
+// Only a message that is the wake itself (the CLI may wrap it as pasted): an Assistant's brief shows the tag as an example.
+function pilotOf(t) {
+  const m = /^<herdr-autopilot\b([^>]*)>/.exec(String(t).replace(/<\/?pasted_content\b[^>]*>/g, "").trim());
+  return m ? { reason: unattr(/\breason="([^"]*)"/.exec(m[1])?.[1] ?? "") } : null;
+}
+
+// A message's words, with the task news it carries (news: shown as their own lines) and the Autopilot wake it is.
 function cleanUser(t) {
-  const news = newsOf(t);
+  const news = newsOf(t), pilot = pilotOf(t);
   const u = cleanWords(t);
-  return news.length ? { ...(u ?? { text: "" }), news } : u;
+  const out = news.length ? { ...(u ?? { text: "" }), news } : u;
+  return pilot ? { ...(out ?? { text: "" }), pilot } : out;
+}
+
+// Why Autopilot woke, in words: "on schedule", "Run now", "switched on", "HAT-4 is ready" (herdr-task's reasons).
+const EVENT_WORDS = { added: "was added", ready: "is ready", failed: "failed", "needs-you": "needs you", merged: "was merged", stalled: "stalled" };
+export function pilotWhy(reason) {
+  const r = String(reason ?? "").trim();
+  if (r === "schedule") return "on schedule";
+  if (r === "run now") return "Run now";
+  const ev = /^event:([\w-]+)\s+(.+)$/.exec(r);
+  if (ev) return `${ev[2]} ${EVENT_WORDS[ev[1]] ?? ev[1]}`;
+  return r || "on schedule";
+}
+
+// A wake's quiet line in the chat: "Autopilot woke · on schedule", then how it went once that shows in the log:
+// " · nothing to do" (it answered <hc no-reply/> without looking at anything), " · checked, nothing new" (it looked,
+// then answered that), nothing more while it works or once it said something (its words follow as its message).
+// item: { kind: "pilot", reason, steps, said, quiet }.
+export function pilotLine(item) {
+  const head = `Autopilot woke · ${pilotWhy(item?.reason)}`;
+  if (item?.said || !item?.quiet) return head;
+  return `${head} · ${item.steps ? "checked, nothing new" : "nothing to do"}`;
 }
 
 function cleanWords(t) {
@@ -277,7 +307,8 @@ function claudeUser(c) {
     .map((b) => cleanUser(images ? b.text.replace(/\[Image #\d+\]\s*/g, "") : b.text)).filter(Boolean);
   if (!parts.length) return images ? { text: "", images } : null;
   const reactions = parts.flatMap((p) => p.reactions ?? []), news = parts.flatMap((p) => p.news ?? []);
-  return { text: parts.map((p) => p.text).filter(Boolean).join("\n\n"), from: parts[0].from, images, reactions, news,
+  const pilot = parts.find((p) => p.pilot)?.pilot;
+  return { text: parts.map((p) => p.text).filter(Boolean).join("\n\n"), from: parts[0].from, images, reactions, news, ...(pilot ? { pilot } : {}),
     replyTo: parts[0].replyTo, quoted: parts[0].quoted, rest: parts[0].rest };
 }
 
@@ -395,6 +426,7 @@ function codexStep(name, args) {
 //   replyTo: the start of the message it answers)
 //   { kind: "mark", id }  (a message of only reactions: ends the turn, shows nothing)
 //   { kind: "news", id, at, ref, event, text }  (one line of task news Herdr told an Assistant)
+//   { kind: "pilot", id, at, reason, steps, said, quiet }  (an Autopilot wake, its quiet line: pilotLine())
 //   { kind: "tools", id, steps: [{ id, kind, line, out? }] }  (calls in a row, between texts;
 //                                             out: where the call's result line is)
 //   { kind: "ask", id, text, closed? }  (the agent's own question tool; closed once its dialog
@@ -407,6 +439,8 @@ export class Conversation {
   constructor(kind) {
     this.kind = kind;
     this.items = [];
+    // The Autopilot wake whose turn runs now (its line fills in as it goes: pilotLine()).
+    this.pilot = null;
     this.replies = new Map();
     this.calls = new Map();
     this.open = new Map();
@@ -442,6 +476,7 @@ export class Conversation {
     const s = { id, kind: st.kind, line: st.line, count: st.count ?? 1, helper, ...(st.shell ? { shell: st.shell, at: st.at } : {}) };
     if (last?.kind === "tools") last.steps.push(s);
     else this.push({ kind: "tools", id: `t${off}`, steps: [s] });
+    if (this.pilot) this.pilot.steps++;
     this.calls.set(id, s);
     this.open.set(id, st.doing);
     if (st.waiting) this.waits.add(id);
@@ -478,6 +513,13 @@ export class Conversation {
     for (const r of u?.reactions ?? []) this.react("you", r);
     // Task news: an item per line, at the moment Herdr told it.
     (u?.news ?? []).forEach((n, i) => this.push({ kind: "news", id: `${id}:n${i}`, at: u.at, ...n }));
+    // An Autopilot wake: its line, which what the Assistant then does fills in (pilotLine()); anything else said to it
+    // ends that wake's watch.
+    this.pilot = null;
+    if (u?.pilot) {
+      this.pilot = { kind: "pilot", id: `${id}:p`, at: u.at, reason: u.pilot.reason, steps: 0, said: false, quiet: false };
+      this.push(this.pilot);
+    }
     // Only reactions: nothing to show, but the agent's turn before it is over (its actions and
     // pills stay while it answers, and its answer is a turn of its own).
     if (!u?.text && !u?.images) { if (u?.reactions?.length) this.push({ kind: "mark", id }); return; }
@@ -594,8 +636,11 @@ export class Conversation {
       if (a?.react) this.react("agent", { emoji: a.react, to: a.to ?? "", on: true });
       // <no-reply> too (an Assistant's answer to task news it has nothing to add to).
       else if (!(a && "no-reply" in a) && !/^<hc\s+no-reply\s*\/>/.test(line.trim()) && !/^<\/?no-reply\b/.test(line.trim())) out.push(line);
+      else if (this.pilot) this.pilot.quiet = true;
     }
-    return out.join("\n").trim();
+    const said = out.join("\n").trim();
+    if (said && this.pilot) this.pilot.said = true;
+    return said;
   }
 
   feed(records) {

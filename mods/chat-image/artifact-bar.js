@@ -120,8 +120,15 @@ export function artifactBar(view, a, handle) {
       .when(older && !busy, (el) => el.child(div().px(2).text_size(TEXT.label).text_color(t.dim).child("·"))
         .child(textBtn("latest", null, "Latest ›", `v${latest}`, (cx) => step(view, a, null, cx), false, t)))
       .child(rule(t)))
-    .child(textBtn("markup", "mods/chat-image/markup.svg", marking ? "Done" : "Mark up", null,
-      () => setShared(MARKUP, marking ? null : { mod: a.mod, where: "viewer", at: Date.now() }), marking, t))
+    // Mark up / Done, as the sidebar's (artifacts/main.js) and the web's: a pointer clicking a spot; while marking, Done
+    // with a tick, tinted the accent of the frame round what you mark
+    .child(h_flex().id("markup").h(32).flex_none().pl(8).pr(10).gap(6).items_center().rounded(RADIUS.control).cursor_pointer()
+      .text_size(TEXT.body).font_medium().text_color(marking ? t.foreground : t.muted).when(marking, (el) => el.bg(`${t.accent}24`))
+      .hover((s) => s.bg(marking ? `${t.accent}33` : t.hover).text_color(t.foreground))
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { cx.stop_propagation(); setShared(MARKUP, marking ? null : { mod: a.mod, where: "viewer", at: Date.now() }); cx.notify(); })
+      .child(marking ? svg("mods/chat-image/check.svg").size(16).flex_none().text_color(t.accent) : svg("mods/chat-image/markup.svg").size(16).flex_none())
+      .child(marking ? "Done" : "Mark up"))
     .child(rule(t))
     .when(!a.modal && hasSidebarView(), (el) => el
       .child(iconBtn("sidebar", "mods/chat-image/panel-right.svg", "Open in sidebar", () => {

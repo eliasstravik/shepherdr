@@ -60,9 +60,11 @@ def facts(s, t, report):
             pr_news(s, t, v, report)
         except Exception as e:  # never stops the tick
             report.setdefault("github_error", []).append(f"{s.ref(t)}: {e}")
-        if t["state"] == "ready" and problem != t.get("attention"):
+        # Kept up to date while it is back at work too (a fix pushed: the problem goes away), so its
+        # agent going quiet with the problem still there reads Needs you (on_it()).
+        if t["state"] in ("ready", "running") and problem != t.get("attention"):
             if problem:
-                t["attention"] = problem
+                t["attention"], t["attention_at"] = problem, now()
                 report["attention"].append(t["id"])
             elif t.get("attention", "").startswith(("Checks failing", "It conflicts", "The pull request was closed", MERGE_FAILED)):
                 t.pop("attention")

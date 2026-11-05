@@ -40,6 +40,28 @@ test("the field, its suggestions and where it starts", () => {
   expect(N.recentCandidates([{ cwd: "/a", at: 1 }, { cwd: "/b", at: 3 }, { cwd: "/a", at: 5 }, { cwd: "/w/.herdr/worktrees/x", at: 9 }])).toEqual(["/a", "/b"]);
 });
 
+test("the field's list follows the typed path, as a shell completes one", () => {
+  const home = "/h/me";
+  expect(N.typedDir("~/dev/", home)).toEqual({ dir: "/h/me/dev", word: "" });
+  expect(N.typedDir("~/dev/sh", home)).toEqual({ dir: "/h/me/dev", word: "sh" });
+  expect(N.typedDir("~/dev/shepherdr/", home)).toEqual({ dir: "/h/me/dev/shepherdr", word: "" });
+  expect(N.typedDir("~/", home)).toEqual({ dir: home, word: "" });
+  expect(N.typedDir("~/de", home)).toEqual({ dir: home, word: "de" });
+  expect(N.typedDir("/", home)).toEqual({ dir: "/", word: "" });
+  expect(N.typedDir("/us", home)).toEqual({ dir: "/", word: "us" });
+  expect(N.typedDir("/srv//x", home)).toEqual({ dir: "/srv", word: "x" });
+  for (const t of ["", "~", "shep", "dev/sh"]) expect(N.typedDir(t, home)).toBe(null);
+  expect(N.asDir(home, home)).toBe("~/");
+  expect(N.asDir("/h/me/dev", home)).toBe("~/dev/");
+  expect(N.asDir("/", home)).toBe("/");
+  expect(N.asDir("/srv", home)).toBe("/srv/");
+  const kids = ["/h/me/dev/Ashes", "/h/me/dev/notes", "/h/me/dev/Shepherdr", "/h/me/dev/shell", "/h/me/dev/x"];
+  expect(N.matching(kids, "")).toEqual(kids);
+  expect(N.matching(kids, "sh")).toEqual(["/h/me/dev/Shepherdr", "/h/me/dev/shell", "/h/me/dev/Ashes"]);
+  expect(N.matching(kids, "SHE")).toEqual(["/h/me/dev/Shepherdr", "/h/me/dev/shell", "/h/me/dev/Ashes"]);
+  expect(N.matching(kids, "zz")).toEqual([]);
+});
+
 test("the window's New space and the web's read the same core", () => {
   expect(read("mods/newspace/main.js")).toContain('from "./core/newspace.js"');
   expect(read("web/plugins/places/add.tsx")).toContain("from '@core/newspace.js'");

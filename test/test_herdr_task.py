@@ -66,7 +66,8 @@ class Autopilot(unittest.TestCase):
         for name, value in (("STORE", store), ("STATE", os.path.join(store, ".autopilot.json")),
                             ("HEARTBEATS", os.path.join(self.tmp, "beats")), ("run", never), ("hc_json", never),
                             ("space_info", lambda s: ("~", self.folder) if s == "sp1" else (None, None)),
-                            ("window_spaces", lambda: None), ("ensure_scheduler", self.scheduler)):
+                            ("window_spaces", lambda: None), ("ensure_scheduler", self.scheduler),
+                            ("coordinator_in", lambda s: None)):
             p = mock.patch.object(ap, name, value)
             p.start()
             self.addCleanup(p.stop)
@@ -130,14 +131,14 @@ class Autopilot(unittest.TestCase):
         self.assertTrue(os.path.exists(self.ap.heartbeat_path()))
         # Everywhere's schedule changes reach it
         v0 = v["next_run"]
-        self.cmd("set", everywhere=True, every="weekdays 9:00")
+        self.cmd("set", everywhere=True, every="weekdays 9:07")
         v = self.cmd("show", space="sp1")
-        self.assertEqual(v["every"], "weekdays 9:00")
+        self.assertEqual(v["every"], "weekdays 9:07")
         self.assertNotEqual(v["next_run"], v0)
         # its own schedule wins there (and gets its own next wake); its events still follow Everywhere's
         v = self.cmd("set", space="sp1", every="every 2 hours")
         self.assertEqual((v["every"], v["events"], v["own"]), ("every 2 hours", ["ready"], ["every"]))
-        self.assertEqual(self.cmd("show", space="sp2")["every"], "weekdays 9:00")
+        self.assertEqual(self.cmd("show", space="sp2")["every"], "weekdays 9:07")
         self.cmd("set", everywhere=True, every="every 60 minutes")
         self.assertEqual(self.cmd("show", space="sp1")["every"], "every 2 hours")
         # "default": back to Everywhere's
@@ -335,6 +336,7 @@ class Autopilot(unittest.TestCase):
         self.cmd("on", space="sp1")
         with self.ap.state() as d:
             a = d["spaces"]["sp1"]
+            a.pop("pending", None)  # the first wake switching on queued: this one stands for it
             a["inflight"] = {"at": self.ap.now() - ago, "reason": "schedule", "to": "t9", "turn": turn}
             self.ap.log_wake(a, "schedule", "Delivered", a["inflight"]["at"])
 
@@ -371,6 +373,26 @@ class Autopilot(unittest.TestCase):
         self.wake(5000)
         self.assertEqual(self.settled({"foreground": {"name": "bash"}, "turn": 3})["last_wake"]["outcome"],
                          "Assistant stopped, no progress saved")
+
+    def test_switching_on_wakes_at_once(self):
+        """SHEP-5: switched on, its first wake goes now (not one interval later); already on, no second one."""
+        from unittest import mock
+        v = self.cmd("on", space="sp1")
+        # no Assistant running yet: queued, said so, and still a scheduled wake after it
+        self.assertEqual(v["pending"]["reasons"], ["switched on"])
+        self.assertTrue(v["next_run"])
+        self.cmd("off", space="sp1")
+        self.assertEqual(self.cmd("show", space="sp1")["pending"], None)
+        k = {"state": "live", "foreground": {"name": "claude"}, "turn": 2, "status": {"state": "idle"}}
+        sent = []
+        with mock.patch.object(self.ap, "hc_json", lambda *a: k), mock.patch.object(self.ap, "coordinator_in", lambda s: "t9"), \
+                mock.patch.object(self.ap, "typing", lambda *a: False), \
+                mock.patch.object(self.ap, "news_send", lambda to, m, check=True: sent.append(m) or True):
+            v = self.cmd("on", space="sp1")
+            self.assertEqual((len(sent), v["inflight"]["reason"]), (1, "switched on"))
+            self.assertIn('reason="switched on"', sent[0])
+            self.cmd("on", space="sp1")
+        self.assertEqual(len(sent), 1)
 
     def test_run_now_goes_after_a_wake_whose_turn_ended(self):
         """A wake the scheduler hasn't closed yet never holds Run now back."""
@@ -519,6 +541,56 @@ class BackToWork(unittest.TestCase):
         self.assertEqual(self.agents.task_status(t, [self.agent({"address": "t1", "status": "working", "turn": 5, "role": "worker"})]),
                          ("working", None, "Working again"))
         self.assertEqual(self.agents.task_status(t, [self.agent({"address": "t1", "status": "working", "turn": 4, "role": "worker"})])[0], "ready")
+
+    def test_a_problem_its_agent_is_on_reads_working(self):
+        """SHEP-8: the cases core/tasks.test.js checks place() on (core/on-it.cases.json)."""
+        with open(os.path.join(ROOT, "core", "on-it.cases.json")) as f:
+            on = json.load(f)
+        with self.mock.patch.object(self.agents, "now", lambda: on["now"]):
+            for c in on["cases"]:
+                why = self.agents.REASONS["question"] if c["expect"]["why"] == "QUESTION" else c["expect"]["why"]
+                got = self.agents.task_status(dict(c["task"], id=7), [self.agent(a) for a in c["live"]])
+                self.assertEqual(got, (c["expect"]["status"], c["expect"]["needs"], why), c["name"])
+
+    def test_failing_checks_need_you_only_once_its_agent_stops_on_them(self):
+        """SHEP-8 end to end: the tick finds the check failing on a Ready task; its agent at work on it
+        (back at work, then waiting on CI with its own status) reads Working; idle with the check still
+        failing once its line is stale, Needs you; the fix pushed and the check gone, the problem too."""
+        t = self.ready(space="sp1", mode="worktree", worktree="/w", branch="b", pr={"number": 3, "repo": "o/r", "checked": 0})
+        red = {"state": "OPEN", "mergeable": "MERGEABLE", "headRefOid": "a",
+               "statusCheckRollup": [{"name": "check", "conclusion": "FAILURE"}]}
+        views = [red]
+        clock = [10_000_000]
+        for mod, name, value in ((self.tick, "pr_view", lambda t: views[0]), (self.tick, "pr_news", lambda *a: None),
+                                 (self.tick, "now", lambda: clock[0]), (self.agents, "now", lambda: clock[0]),
+                                 (self.commands, "now", lambda: clock[0])):
+            p = self.mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        status = lambda: self.agents.task_status(t, self.live)
+        worker = lambda st, turn: [self.agent({"address": "t1", "status": st, "turn": turn, "role": "worker"})]
+        # its agent is already at work when the failure is found: Working, not Needs you
+        self.live = worker("working", 5)
+        self.tick.facts(self.store, t, {"attention": []})
+        self.assertEqual(t["attention"], "Checks failing: check.")
+        self.assertEqual(status(), ("working", None, "Working again"))
+        # the tick takes it back to work; it says what it does and waits on CI in the background
+        self.tick.back_pass(self.store, t, {})
+        self.assertEqual(t["state"], "running")
+        clock[0] += 60_000
+        self.commands.cmd_status(self.args(text="Re-running CI", done=95, left=None))
+        self.live = worker("idle", 6)
+        self.assertEqual(status(), ("working", None, None))
+        # 40 minutes on, idle, the check still failing: nobody is on it
+        clock[0] += 40 * 60_000
+        t["pr"]["checked"] = 0
+        self.tick.facts(self.store, t, {"attention": []})
+        self.assertEqual(status(), ("needs", "attention", "Checks failing: check."))
+        # its fix pushed, the failure gone: so is the problem
+        views[0] = dict(red, statusCheckRollup=[{"name": "check", "status": "IN_PROGRESS"}])
+        t["pr"]["checked"] = 0
+        self.tick.facts(self.store, t, {"attention": []})
+        self.assertNotIn("attention", t)
 
     def test_ready_keeps_each_agents_next_turn(self):
         turns = self.agents.ready_turns([{"address": "t1", "status": {"state": "working"}, "turn": 4},

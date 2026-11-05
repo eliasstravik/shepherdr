@@ -75,7 +75,7 @@ export function TaskPanel({ task }: { task: Task }) {
           aria-label="Task panel"
           onKeyDown={key}
           onScroll={(e) => edges(e.currentTarget)}
-          className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [--fade-l:0px] [--fade-r:0px] [mask-image:linear-gradient(to_right,transparent,#000_var(--fade-l),#000_calc(100%-var(--fade-r)),transparent)] data-more-l:[--fade-l:1.5rem] data-more-r:[--fade-r:1.5rem]"
+          className="scroll-x flex min-w-0 flex-1 items-center gap-0.5 [--fade-l:0px] [--fade-r:0px] [mask-image:linear-gradient(to_right,transparent,#000_var(--fade-l),#000_calc(100%-var(--fade-r)),transparent)] data-more-l:[--fade-l:1.5rem] data-more-r:[--fade-r:1.5rem]"
         >
           {itemsFor(task).map((i) => (
             <PanelTab key={i.id} item={i} task={task} on={i.id === item.id} />
@@ -113,7 +113,7 @@ function PanelTab({ item, task, on }: { item: PanelItem; task: Task; on: boolean
       data-off={off ? '' : undefined}
       onClick={() => openItem(item.id)}
       className={clsx(
-        'relative inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[0.8125rem] whitespace-nowrap text-fg2 after:absolute after:-inset-y-2 after:inset-x-0 hover:bg-hover aria-selected:bg-sel aria-selected:text-fg data-off:text-fg3 coarse:h-9',
+        'relative inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[0.8125rem] whitespace-nowrap text-fg2 after:absolute after:-inset-y-1.5 after:inset-x-0 hover:bg-hover aria-selected:bg-sel aria-selected:text-fg data-off:text-fg3 coarse:h-9',
       )}
     >
       <item.Icon className={ic} />
@@ -162,12 +162,12 @@ export function TaskTabs({ task }: { task: Task }) {
   // dead: it can't open now (the window's disabled segment, its reason on hover): only Terminal, once its agent ended
   const tab = (id: string, label: string, dead: string | null, go: () => void) => (
     <button key={id} type="button" role="tab" aria-selected={on === id} aria-disabled={dead ? true : undefined} data-off={dead ? '' : undefined} title={dead ?? undefined} onClick={dead ? undefined : go}
-      className="relative inline-flex h-7 shrink-0 items-center rounded-full px-2.5 text-[0.8125rem] whitespace-nowrap text-fg2 after:absolute after:-inset-y-2 after:inset-x-0 hover:bg-hover aria-selected:bg-sel aria-selected:text-fg data-off:cursor-default data-off:text-fg3 data-off:hover:bg-transparent coarse:h-9 phone:h-9 phone:px-3 phone:text-[0.875rem]">
+      className="relative inline-flex h-7 shrink-0 items-center rounded-full px-2.5 text-[0.8125rem] whitespace-nowrap text-fg2 after:absolute after:-inset-y-1.5 after:inset-x-0 hover:bg-hover aria-selected:bg-sel aria-selected:text-fg data-off:cursor-default data-off:text-fg3 data-off:hover:bg-transparent coarse:h-9 phone:h-9 phone:px-3 phone:text-[0.875rem]">
       {label}
     </button>
   )
   return (
-    <div role="tablist" aria-label={`${task.id} views`} className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line px-3 py-1.5 [scrollbar-width:none] phone:px-4">
+    <div role="tablist" aria-label={`${task.id} views`} className="scroll-x flex shrink-0 items-center gap-0.5 border-b border-line px-3 py-1.5 phone:px-4">
       {tab('chat', 'Chat', null, closeSheet)}
       {items.map((i) => tab(i.id, i.label, i.id === 'terminal' && !termRunning(task) ? 'Not running' : null, () => setUI({ sheet: i.id, taskMenu: false, plus: null, pick: null })))}
     </div>

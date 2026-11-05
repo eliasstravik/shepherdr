@@ -25,7 +25,7 @@ import { h_flex, v_flex } from "gpui-base";
 import { shared, setShared, run, theme, exec, appHome, home, readTextFile, writeTextFile, notify, layout, openOverlay } from "herdr";
 import { terminals, agents } from "./live.js";
 import { taskDot, ownProgress, estimated } from "./dot.js";
-import { busyAgain } from "./core/tasks.js";
+import { busyAgain, onIt } from "./core/tasks.js";
 import { button, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { on as addonOn } from "./addons.js";
 
@@ -196,8 +196,12 @@ export class PanelHost {
     const live = terminals().find((x) => x.address === addr)?.state === "live";
     const last = r.agents?.[r.agents.length - 1];
     const starting = !last?.ended && Date.now() - Math.max(0, ...[r.started, last?.at].filter((x) => typeof x === "number")) < 90000;
+    // A problem (failing checks) its worker is on (core/tasks.js onIt()): Working; nobody on it: Needs you.
+    const k = addr ? terminals().find((x) => x.address === addr) : null;
+    const fixing = r.attention && onIt(r, live ? [{ address: addr, status: st, turn: k?.turn, role: k?.labels?.["herdr.role"] ?? "worker" }] : []);
     const s = ["todo", "queued", "done"].includes(r.state) ? r.state
-      : r.attention || st === "blocked" || r.retry?.over ? "needs"
+      : (r.attention && !fixing) || st === "blocked" || r.retry?.over ? "needs"
+      : fixing ? "working"
       : r.state === "ready" && !this.again(st, addr) ? ((r.merge_requested && live) || (r.auto_merge && r.pr && !r.merged) ? "merging" : "ready")
       : st === "working" || r.retry || starting ? "working" : "needs";
     return taskDot(s, { pct: ownProgress([addr])?.pct ?? r.progress?.done, halo: true });
@@ -381,8 +385,8 @@ export class PanelHost {
         .text_size(TEXT.label).text_color(t.muted).tooltip(`Merges into ${this.rec.base}`).child(`→ ${this.rec.base}`)))
       // Pin / Unpin, as the task's row in the list (not an archived task's).
       .when(Boolean(this.rec && !(this.rec.archived && this.rec.state === "done")), (el) => el.child(this.pinButton(t)))
-      // Accept: the header's one primary button (merges first when there's something to merge).
-      .when(this.acceptable(st, addr), (el) => el.child(button("thread-accept", this.accepting ? "Accepting…" : "Accept",
+      // Review: the header's one primary button, opens the Accept card (its Accept merges first when there's something to merge).
+      .when(this.acceptable(st, addr), (el) => el.child(button("thread-accept", this.accepting ? "Accepting…" : "Review",
         { kind: "primary", disabled: this.accepting, onClick: (_e, cx) => this.accept(cx) })));
   }
 

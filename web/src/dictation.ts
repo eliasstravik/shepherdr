@@ -2,18 +2,6 @@
 // (whisper.cpp, as the window's dictation), and the words go into the box to edit; cancel drops it.
 import { levelOf, meter, TALKING, type Sample } from './meter.ts'
 
-type Rec = {
-  lang: string
-  continuous: boolean
-  interimResults: boolean
-  onresult: (e: { resultIndex: number; results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }) => void
-  onend: () => void
-  onerror: (e: { error: string }) => void
-  start(): void
-  stop(): void
-  abort(): void
-}
-
 export interface Dictation {
   /** stop listening; the words still on their way come in, then the end callback gets them all */
   finish(): void
@@ -34,9 +22,31 @@ export function dictSample(): Sample {
   return { level: l, who: l > TALKING ? 'you' : null }
 }
 
-/** Starts listening. `end` gets what was heard when it finishes, or null when cancelled. Shepherdr 3: the phone records,
+/** What the service answered to a recording: its words, or why it couldn't write them down in plain words. A failure
+ *  used to land as no words at all, so Done just emptied the box's recording row and nothing came. */
+export function heard(status: number, body: string): { text: string } | { error: string } {
+  let r: { text?: unknown; error?: unknown } | null = null
+  try {
+    r = JSON.parse(body)
+  } catch {
+    r = null
+  }
+  if (r && typeof r.error === 'string' && r.error) return { error: r.error }
+  if (status >= 200 && status < 300 && r && typeof r.text === 'string') return { text: r.text }
+  return { error: status ? `Shepherdr couldn't write it down (error ${status}).` : "Shepherdr couldn't be reached." }
+}
+
+/** why the microphone didn't start, in plain words */
+export function micError(e: unknown): string {
+  const name = (e as { name?: string } | null)?.name
+  if (name === 'NotAllowedError' || name === 'SecurityError') return 'The microphone is blocked: allow it for this site in your browser’s settings.'
+  if (name === 'NotFoundError') return 'No microphone was found.'
+  return 'The microphone couldn’t start.'
+}
+
+/** Starts listening. `end` gets what was heard when it finishes, or null when cancelled; `fail` why it didn't work. Shepherdr 3: the phone records,
  *  the service writes it down with whisper.cpp (the window's dictation, the same words on every phone browser). */
-export function dictate(end: (text: string | null) => void): Dictation {
+export function dictate(end: (text: string | null) => void, fail: (why: string) => void = () => undefined): Dictation {
   current?.cancel()
   let state: 'on' | 'finishing' | 'over' = 'on'
   let mic: MediaStream | null = null
@@ -59,12 +69,21 @@ export function dictate(end: (text: string | null) => void): Dictation {
       if (!rec || rec.state === 'inactive') return close('')
       rec.onstop = async () => {
         const audio = new Blob(chunks, { type: rec?.mimeType || 'audio/webm' })
-        try {
-          const r = await fetch('api/dictate', { method: 'POST', body: audio, headers: { 'x-shepherdr': '1', 'content-type': audio.type } }).then((x) => x.json())
-          close(r.text ?? '')
-        } catch {
-          close('')
+        let r: { text: string } | { error: string }
+        if (!audio.size) r = { error: 'Nothing was recorded.' }
+        else {
+          try {
+            const x = await fetch('api/dictate', { method: 'POST', body: audio, headers: { 'x-shepherdr': '1', 'content-type': audio.type } })
+            r = heard(x.status, await x.text())
+          } catch {
+            r = heard(0, '')
+          }
         }
+        if ('error' in r) {
+          if (state === 'over') return
+          fail(r.error)
+          close(null)
+        } else close(r.text)
       }
       rec.stop()
     },
@@ -87,6 +106,10 @@ export function dictate(end: (text: string | null) => void): Dictation {
       rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data) }
       rec.start(1000)
     })
-    .catch(() => close(null))
+    .catch((e) => {
+      if (state === 'over') return
+      fail(micError(e))
+      close(null)
+    })
   return self
 }

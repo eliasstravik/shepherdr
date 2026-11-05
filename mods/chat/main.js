@@ -27,13 +27,15 @@ import { v_flex, h_flex, TextareaState, Textarea, Scrollbar, VirtualListScrollHa
 import { focused, props, run, theme, home, hc, exec, shared, setShared, watchFolder, window, settings, playSound, notify, appHome, readTextFile, writeTextFile, nextCommand, openOverlay, knownAgents, machines } from "herdr";
 import { agents, panes, terminals, spaces, inRender } from "./live.js";
 import * as fs from "fs/promises";
-import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names } from "./core/chat-log.js";
+import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names, pilotLine } from "./core/chat-log.js";
 import { BgJobs } from "./core/bg-jobs.js";
 import { words, howAnswered } from "./core/asks.js";
 // The rows' words and rules the web app's chat draws by too (core/chat-view.js).
-import { WORDS, clock, senderName, briefLabel, newsWords, resolveArtifacts, unsigned, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
+import { WORDS, clock, senderName, briefLabel, newsWords, resolveArtifacts, unsigned, ownWords, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
 // Sending the person's words, as the web app does (core/send.js).
 import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine, mentionedIn, sendTyped } from "./core/send.js";
+// hc whose send goes as the person, with no caller: never "Another agent" on another machine (SHEP-3, core/person.js).
+import { asPerson } from "./core/person.js";
 import { AskCards, linkCtl } from "./cards.js";
 import * as strips from "./strips.js";
 import { button, red, green, amber, H, RADIUS, TEXT, toast, toastWho, plainError } from "./ui.js";
@@ -67,6 +69,14 @@ const TEMPLATE = 'dir="$HOME/.config/herdr-core/templates"; ';
 // Whether a machine's layout is here now (it's connected); this computer always is.
 const online = (machine) => !machine || machines().find((m) => m.name === machine)?.layout === "ready";
 const same = (a, b) => norm(a) === norm(b);
+// The person's words into the agent's terminal: plain input from them, here and on another machine (core/person.js).
+const personHc = asPerson({ hc, exec });
+// This machine's name in herdr-core, once known: another machine's agent writes our terminals as "<it>/t75" (SHEP-12).
+let ownName = null, askedName = false;
+const coreName = () => {
+  if (!askedName) { askedName = true; hc(["server", "status"]).then((r) => { ownName = JSON.parse(r.stdout || "{}")?.core?.name || null; }).catch(() => { askedName = false; }); }
+  return ownName;
+};
 // When an ask was made: its id is <terminal>.<seconds>.<pid> (ask-hook.sh), taken at the end of
 // that second so it sits after what was said in it.
 const askAt = (id) => { const p = String(id).split("."); const sec = Number(p[p.length - 2]); return Number.isFinite(sec) && sec > 1e9 ? sec * 1000 + 999 : Date.now(); };
@@ -123,7 +133,7 @@ const PILL = 46, PILL_H = 20, PILL_GAP = 4, PILL_EDGE = 6;
 const taskRef = (x) => (x?.ref ? String(x.ref) : `#${x?.id}`);
 // Task chips under a message: this wide, this far apart.
 const TASK = 170, TASK_GAP = 6;
-// A Ready task's news line: its Accept, this wide, at the line's right end.
+// A Ready task's news line: its Review (opens the Accept card), this wide, at the line's right end.
 const ACCEPT = 64;
 // The picker's Frequently used before there is any history.
 const FREQUENT = ["👍", "👎", "❓", "✅", "👀", "🎉", "❤️", "🔥", "🙏"];
@@ -1026,9 +1036,17 @@ export default class Chat extends View {
     const users = this.conv.items.filter((x) => x.kind === "user");
     // An answer written in the box is in once the log has it as an answer.
     if (this.replied?.length) this.replied = this.replied.filter((r) => !users.some((u) => u.answer && (u.at ?? 0) >= r.at - 5000 && norm(u.text).includes(norm(r.text))));
+    // The person's words that came wrapped as another machine's process's message (a send that named its caller):
+    // theirs, as sent from here (core/chat-view.js ownWords).
+    for (const u of users) if (this.own?.has(u.id)) delete u.from;
     if (!this.pending?.length) return;
-    this.pending = this.pending.filter((p) => !users.some((u) => (u.at ?? 0) >= p.at - 5000 &&
-      (same(u.text, p.sent) || (p.match && norm(u.text).includes(p.match)) || (!p.match && u.images))));
+    const matches = (u, p) => (u.at ?? 0) >= p.at - 5000 &&
+      (same(u.text, p.sent) || (p.match && norm(u.text).includes(p.match)) || (!p.match && u.images));
+    for (const id of ownWords(users, this.pending, matches)) {
+      (this.own ??= new Set()).add(id);
+      delete users.find((u) => u.id === id).from;
+    }
+    this.pending = this.pending.filter((p) => !users.some((u) => matches(u, p)));
   }
 
   // The newest page first; after that, what the log gained since.
@@ -1152,7 +1170,7 @@ export default class Chat extends View {
         if (this.firstSend && k?.status?.state === "idle" && !openCard(this.addr)) {
           const text = this.firstSend;
           this.firstSend = null;
-          const sent = await hc(["send", this.addr, text]).catch(() => null);
+          const sent = await personHc(["send", this.addr, text]).catch(() => null);
           if (sent?.code !== 0) this.firstSend = text;
         }
         this.alerts(cx);
@@ -1223,7 +1241,7 @@ export default class Chat extends View {
     const st = this.status();
     if (st === "working" || st === "blocked" || this.asks.length || openCard(this.addr) || this.pending.some((p) => !p.failed && !p.late)) return;
     const msg = this.queue.shift();
-    if (msg.raw) hc(["send", this.addr, msg.text]);
+    if (msg.raw) personHc(["send", this.addr, msg.text]);
     else this.deliver(msg, cx);
     this.saveSoon(cx);
     cx.notify();
@@ -1299,7 +1317,7 @@ export default class Chat extends View {
 
   // What core/send.js needs from here: hc, a sleep, the agent's status now.
   sendIo(cx) {
-    return { hc, sleep: (ms) => cx.sleep(ms), status: () => this.status() };
+    return { hc: personHc, sleep: (ms) => cx.sleep(ms), status: () => this.status() };
   }
 
   // A message that didn't go, pressed: it goes again.
@@ -1317,7 +1335,7 @@ export default class Chat extends View {
   // A held message sent at once (the agent takes it mid-turn).
   sendQueued(msg, cx) {
     this.queue = this.queue.filter((m) => m !== msg);
-    if (msg.raw) hc(["send", this.addr, msg.text]);
+    if (msg.raw) personHc(["send", this.addr, msg.text]);
     else this.deliver(msg, cx);
     this.saveSoon(cx);
   }
@@ -1524,7 +1542,7 @@ export default class Chat extends View {
       this.wasFocused = false;
       if (machine && msg?.files.length) {
         // On another machine: the files once the agent runs there.
-        cx.spawn(async () => { const paths = await attach.deliver(msg.files, this.addr, this.machine).catch(() => []); if (paths.length) await hc(["send", this.addr, paths.join("\n")]); });
+        cx.spawn(async () => { const paths = await attach.deliver(msg.files, this.addr, this.machine).catch(() => []); if (paths.length) await personHc(["send", this.addr, paths.join("\n")]); });
       }
       cx.spawn(async (cx) => this.follow(cx));
       if (!this.machine) cx.spawn(async (cx) => this.watchAsks(cx));
@@ -1955,7 +1973,7 @@ export default class Chat extends View {
     if (st === "blocked" || this.asks.length) {
       this.queue.push({ id: `r${Date.now()}`, text: line, files: [], quote: null, raw: true, label: on ? `${emoji} reaction` : `${emoji} reaction removed` });
       this.saveSoon(cx);
-    } else hc(["send", this.addr, line]);
+    } else personHc(["send", this.addr, line]);
     cx.notify();
   }
 
@@ -1975,7 +1993,7 @@ export default class Chat extends View {
     const back = i < 0 ? 1 : users.length - i;
     cx.spawn(async (cx) => {
       if (this.kind === "claude") {
-        await hc(["send", this.addr, "/rewind"]);
+        await personHc(["send", this.addr, "/rewind"]);
         await cx.sleep(700);
         await hc(["keys", this.addr, ...Array(back).fill("up")]);
       } else {
@@ -2434,6 +2452,8 @@ export default class Chat extends View {
       while (ti < tasks.length && x.at && tasks[ti].at < x.at) { dated(tasks[ti].at); put(tasks[ti++]); }
       if (i === qAt) { putCard(ownQ); continue; }
       if (x.kind === "news") { const r = news.inline.get(x.id); if (r) { dated(x.at); out.push(r); } continue; }
+      // An Autopilot wake: one quiet line, never its words (core/chat-log.js pilotLine).
+      if (x.kind === "pilot") { dated(x.at); out.push({ kind: "pilot", id: x.id, text: pilotLine(x) }); continue; }
       if (x.kind !== "mark") dated(x.at);
       if (x.kind === "artifact") {
         // A published artifact: its card (the latest publish of it; earlier ones a line), or a
@@ -2455,7 +2475,8 @@ export default class Chat extends View {
         // Not typed by the person: a launch brief or another agent's message, as a quiet row.
         // A fresh start's handover says it all in its label.
         const restart = /^<restart>/.test(x.text ?? "");
-        out.push({ kind: "brief", id: x.id, label: this.brief(x, i), text: restart ? x.text.replace(/<\/?restart>/g, "") : x.from ? unsigned(x.text) : x.text, bare: restart });
+        // Another agent's message (who: its sender) is drawn as a message (SHEP-12).
+        out.push({ kind: "brief", id: x.id, label: this.brief(x, i), text: restart ? x.text.replace(/<\/?restart>/g, "") : x.from ? unsigned(x.text) : x.text, bare: restart, ...(x.from ? { who: this.sender(x.from, x.text) } : {}) });
         continue;
       }
       if (x.kind === "user") {
@@ -2572,7 +2593,7 @@ export default class Chat extends View {
   // (tools, "Message from …", artifact lines) sitting tight together, a card. A band is always
   // ACT_ROW: BAND_IN of air, then the actions' row at its foot, shown or not.
   spaced(rows) {
-    const quiet = (r) => r.kind === "tools" || r.kind === "brief" || r.kind === "askend" || r.kind === "tasknews" || (r.kind === "artifact" && (r.line || r.pending));
+    const quiet = (r) => r.kind === "tools" || r.kind === "brief" || r.kind === "askend" || r.kind === "pilot" || r.kind === "tasknews" || (r.kind === "artifact" && (r.line || r.pending));
     const of = (r) => r.blk ?? (quiet(r) ? "quiet" : r.id);
     // How far a row's words sit inside its edge once its outer room is gone (a reply line's
     // small text sits in an 18 px line; it only ever starts a block).
@@ -2604,7 +2625,7 @@ export default class Chat extends View {
   // the message with (text: "From HERD-76: …"), else "Another agent".
   sender(from, text = null) {
     // core/chat-view.js: the web app's chat names senders the same way.
-    return senderName(from, text, { find: (a) => terminals().find((x) => x.address === a), machine:this.machine, taskOf: (a) => this.workerTasks().get(a)?.ref ?? null });
+    return senderName(from, text, { find: (a) => terminals().find((x) => x.address === a), machine:this.machine, taskOf: (a) => this.workerTasks().get(a)?.ref ?? null, here: coreName() });
   }
 
   // Whose ask a card shows: the CLI's short name ("Claude asks").
@@ -2647,7 +2668,7 @@ export default class Chat extends View {
     switch (x.kind) {
       case "end": return 10;
       case "top": case "loading": case "note": return 36;
-      case "brief": return this.opened.has(x.id) ? 32 + lines(x.text, w) * 19 : 20;
+      case "brief": return this.opened.has(x.id) ? (x.who ? 46 + lines(x.text, w - 50) * 20 : 32 + lines(x.text, w) * 19) : 20;
       case "replyref": return 22;
       case "chips": return 30;
       case "imgs": return this.fitThumbs(x.paths).h + 8;
@@ -2771,6 +2792,15 @@ export default class Chat extends View {
           .child(div().min_w(0).truncate().text_color(t.muted).child(k.title)))), 18, 3);
       case "brief": {
         const open = this.opened.has(x.id);
+        // Another agent's message (SHEP-12): a speech bubble in the accent, who sent it a step stronger than a tools
+        // row, then its first words; open, the whole message in a soft bubble under it.
+        if (x.who) return col(v_flex().w_full().px(6).py(QUIET_PY).rounded(7).cursor_pointer().hover((s) => s.bg(t.hover))
+          .child(h_flex().gap(6).items_center().text_size(12).text_color(t.muted)
+            .child(svg("mods/chat/message.svg").size(14).flex_none().text_color(t.accent))
+            .child(div().flex_none().font_medium().text_color(t.foreground).child(x.who))
+            .when(!open, (el) => el.child(div().flex_1().min_w(0).truncate().child(String(x.text ?? "").split("\n").find((l) => l.trim()) ?? ""))))
+          .when(open, (el) => el.child(h_flex().w_full().pl(20).pt(6).pb(2).child(div().max_w(most).px(12).py(8).rounded(12).bg(t.raised)
+            .text_size(13).text_color(t.foreground).child(TextView.markdown(`${pre}chat-brief-${x.id}`, x.text || " ").selectable(true))))), 12, 0);
         return col(v_flex().w_full().px(6).py(QUIET_PY).rounded(7).cursor_pointer().hover((s) => s.bg(t.hover))
           .child(h_flex().gap(6).items_center().text_size(12).text_color(t.dim)
             .child(svg(`mods/workspace-chrome/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none())
@@ -2810,6 +2840,11 @@ export default class Chat extends View {
         // One strip of a card waiting on the person (strips.js): its presses come through
         // clickRow(), by where they were.
         return col(strips.strip(t, x.s, x.first, x.last, pre), 18, 0);
+      case "pilot":
+        // An Autopilot wake: why it woke and, once it shows, how it went; quiet, as a closed ask.
+        return col(h_flex().w_full().py(QUIET_PY).gap(6).items_center().text_size(12).text_color(t.dim)
+          .child(svg("mods/chat/rocket.svg").size(12).flex_none())
+          .child(div().min_w(0).truncate().child(x.text)), 18, 0);
       case "askend":
         // A closed ask: what it asked and how it went, quiet (the card itself is gone).
         return col(h_flex().w_full().py(QUIET_PY).gap(6).items_center().text_size(12).text_color(t.dim)
@@ -2953,7 +2988,7 @@ export default class Chat extends View {
 
   // The Tasks panel's Accept (ui.js), drawn here without a handler: a news line is a list row.
   acceptButton(busy) {
-    return button("accept-news", busy ? "Accepting…" : "Accept", { kind: "primary", size: "xs", disabled: Boolean(busy) });
+    return button("accept-news", busy ? "Accepting…" : "Review", { kind: "primary", size: "xs", disabled: Boolean(busy) });
   }
 
   statusLine(t, st) {

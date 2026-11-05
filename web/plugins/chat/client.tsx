@@ -25,7 +25,7 @@ import { answeredBy, cancelReply, canReply, isArtifact, jumpTo, startReply } fro
 import { typing, working } from './typing.ts'
 import { JobsSheet, JobsTag, NeedsYou, TurnLine, WorkingLine } from './activity.tsx'
 import { ClockIcon, PaperClipIcon } from '@heroicons/react/16/solid'
-import { AskedRow, Band, BriefRow, Chips, EndedRow, ErrorRow, NoteRow, Notice, HeadRow, ImagesLine, NewsRow, onTerminal, PublishingRow, questionsBelow, ReplyLine, Thumbs, WORDS } from './rows.tsx'
+import { AskedRow, Band, BriefRow, Chips, EndedRow, ErrorRow, NoteRow, Notice, HeadRow, ImagesLine, NewsRow, onTerminal, PilotRow, PublishingRow, questionsBelow, ReplyLine, Thumbs, WORDS } from './rows.tsx'
 import { AgentLine, openModelMenu, openRestart, RestartSheet } from '@client/restart.tsx'
 
 /* ---------- messages ---------- */
@@ -1008,7 +1008,7 @@ function Card({ card: c, chat, at, press, keys, className }: { card: UpdateCard;
   const status = t?.status ?? c.status ?? 'idle'
   const needs = (c.ask?.open || status === 'need') && registry.views.needs
   const pr = c.pr ?? t?.pr
-  // Shepherdr 3: a news line says what happened at its moment and is never rewritten after; a Ready one has Accept
+  // Shepherdr 3: a news line says what happened at its moment and is never rewritten after; a Ready one has Review (opens the Accept card)
   // while its task still waits for it
   const accept = c.status === 'ready' && t?.status === 'ready' && !t.archived
   const line = (
@@ -1028,7 +1028,7 @@ function Card({ card: c, chat, at, press, keys, className }: { card: UpdateCard;
       {accept ? (
         <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); openAccept(task) }} onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); openAccept(task) } }}
           className="press-dim ml-auto h-6 shrink-0 rounded-full bg-fg px-2.5 text-xs/6 font-medium text-bg phone:h-8 phone:px-3 phone:text-sm/8">
-          Accept
+          Review
         </span>
       ) : null}
     </button>
@@ -1124,7 +1124,7 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
   const rows: (Item | Quiet)[] = []
   const pics = new Map<Message, Message[]>()
   const imgLines = new Map<Message, number>()
-  const isQuiet = (m: Message) => !!(m.activity || m.brief || m.news || m.publishing || m.ended)
+  const isQuiet = (m: Message) => !!(m.activity || m.brief || m.news || m.publishing || m.ended || m.pilot)
   for (const it of items) {
     const last = rows.at(-1)
     if ('msg' in it && isQuiet(it.msg)) {
@@ -1188,7 +1188,7 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
                 <div data-quiet className="flex w-full flex-col">
                   {it.quiet.map((m) => (
                     <div key={m.id} data-msg={m.id} data-chat={chat.key} className="w-full">
-                      {m.activity ? <TurnLine a={m.activity} chat={chat.key} /> : m.brief ? <BriefRow msg={m} /> : m.news ? <NewsRow msg={m} /> : m.ended ? <EndedRow msg={m} /> : <PublishingRow />}
+                      {m.activity ? <TurnLine a={m.activity} chat={chat.key} /> : m.brief ? <BriefRow msg={m} /> : m.news ? <NewsRow msg={m} /> : m.ended ? <EndedRow msg={m} /> : m.pilot ? <PilotRow msg={m} /> : <PublishingRow />}
                     </div>
                   ))}
                 </div>
@@ -2079,7 +2079,7 @@ function Attachments({ chatKey }: { chatKey: string }) {
       ref={row}
       role="list"
       aria-label="Attached files"
-      className="-mx-4 flex shrink-0 gap-2 overflow-x-auto overscroll-x-contain px-4 motion-safe:scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="scroll-x -mx-4 flex shrink-0 gap-2 px-4 motion-safe:scroll-smooth"
     >
       {files.map((f, i) => (
         <Pending key={`${f.path ?? f.name}-${i}`} f={f} chatKey={chatKey} onRemove={() => remove(f)} />
@@ -2259,7 +2259,7 @@ export function toggleDictation(chatKey: string) {
   const at = box && document.activeElement === box ? [box.selectionStart, box.selectionEnd] : null
   // the box records instead of taking typing, so the keyboard goes down
   ;(document.activeElement as HTMLElement | null)?.blur?.()
-  setUI({ dict: chatKey, dictStarted: Date.now(), dictDone: false, focus: null, plus: null })
+  setUI({ dict: chatKey, dictStarted: Date.now(), dictDone: false, dictError: null, focus: null, plus: null })
   dictation = dictate((said) => {
     dictation = null
     if (getState().ui.dict !== chatKey) return
@@ -2283,7 +2283,22 @@ export function toggleDictation(chatKey: string) {
       el.setSelectionRange(caret, caret)
     }
     requestAnimationFrame(back)
-  })
+  }, (why) => setUI({ dictError: { chat: chatKey, text: why } }))
+}
+
+/** talk to type that didn't work: why, over the box (what was typed stays as it was), until dismissed or tried again */
+function DictError({ chatKey }: { chatKey: string }) {
+  const why = useUI((u) => (u.dictError?.chat === chatKey ? u.dictError.text : null))
+  if (!why) return null
+  return (
+    <div role="alert" className="flex items-start gap-2 rounded-box bg-bubble py-2 pr-1.5 pl-3 text-[0.8125rem] text-pretty text-fg2 phone:text-[0.9375rem]">
+      <span aria-hidden="true" className="mt-[0.45em] size-1.5 shrink-0 rounded-full bg-need" />
+      <p className="min-w-0 flex-1">Dictation didn’t work. {why}</p>
+      <IconButton label="Dismiss" className="-my-1 size-7 shrink-0" onClick={() => setUI({ dictError: null })}>
+        <XIcon className={ic} />
+      </IconButton>
+    </div>
+  )
 }
 
 function boxOf(chatKey: string) {
@@ -2636,7 +2651,9 @@ function DropFiles({ chatKey, children }: { chatKey: string; children: ReactNode
   return (
     <div
       data-drop
-      className="relative flex min-h-0 flex-1 flex-col"
+      // its own stacking context: the Latest pill, the drop note and a message's menu layer over the chat only, so a
+      // drawer, sheet or menu over the chat covers them all, whatever their z
+      className="isolate relative flex min-h-0 flex-1 flex-col"
       onDragEnter={(e) => {
         if (!draggingFiles(e.dataTransfer)) return
         e.preventDefault()
@@ -2693,6 +2710,7 @@ export default definePlugin({
     reg.composerPlus = PlusMenu
     reg.composerMic = Mic
     reg.composerLive.push({ when: (ui, chatKey) => ui.dict === chatKey, View: DictationBox })
+    reg.composerAbove.push({ order: 40, View: DictError })
     // while it records, Enter puts it in the box and Esc drops it
     reg.keys.push({
       order: 5,

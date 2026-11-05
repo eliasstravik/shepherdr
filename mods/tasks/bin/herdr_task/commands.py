@@ -313,7 +313,7 @@ def cmd_ready(args):
                 # "For AGENTS.md": what the next agent would need about setting up or testing this
                 # repo; the Assistant decides whether it goes into the repo's AGENTS.md.
                 t["agents_md"] = note[:300]
-            for k in ("attention", "fix_requested", "progress", "retry", "review_out", "back"):
+            for k in ("attention", "attention_at", "handed_at", "fix_requested", "progress", "retry", "review_out", "back"):
                 t.pop(k, None)
             # Its agents' turns now: a later turn of theirs takes it back to work (busy_again()).
             t["ready_turns"] = ready_turns(live_agents(s.key(t)))
@@ -531,7 +531,8 @@ def back_to_work(s, t, why, said=WORKING_AGAIN):
     for k in ("ready_turns", "merge_requested"):
         t.pop(k, None)
     t["back"] = {"at": now(), "why": why}
-    t["progress"] = {"text": fit(said), "at": now(), "set": now()}
+    # by: Herdr's words, not its agent's (on_it() counts only an agent's own line).
+    t["progress"] = {"text": fit(said), "at": now(), "set": now(), "by": "herdr"}
     s.dirty = True
     return True
 
@@ -827,7 +828,7 @@ def merge_now(s, t):
     if v.get("state") != "MERGED":
         problem = pr_problem(v)
         if problem:
-            t["attention"] = problem
+            t["attention"], t["attention_at"] = problem, now()
             return problem
         if pr_pending(v):
             return "Checks are still running."
@@ -838,7 +839,7 @@ def merge_now(s, t):
         if not ok and (again or {}).get("state") == "MERGED":
             v = again
         elif not ok:
-            t["attention"] = f"{MERGE_FAILED}: {err}"
+            t["attention"], t["attention_at"] = f"{MERGE_FAILED}: {err}", now()
             # The next tick reads the pull request at once (merged by hand meanwhile: done).
             t["pr"]["checked"] = 0
             return t["attention"]
@@ -979,7 +980,8 @@ def cmd_fix(args):
         msg = (f"Task {s.ref(t)} \"{t['title']}\" can't merge yet: {problem}\n"
                f"Fix it in {wt}: for conflicts, rebase {br} onto {base}; for failing checks, find out why and fix them. "
                f"Run the checks, commit, then run `herdr-task ready {t['id']} --folder {shlex.quote(main)}` to push the fix.")
-        t["fix_requested"] = now()
+        # Handed the problem: someone is on it while its agent starts (on_it()).
+        t["fix_requested"] = t["handed_at"] = now()
         s.dirty = True
         sent, started = tell(s, t, msg, args)
         back_to_work(s, t, f"asked to fix: {problem}", f"Fixing: {problem}")

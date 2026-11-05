@@ -556,8 +556,9 @@ export interface Message {
   /** a secret the agent asked for (shepherdr secret ask): a masked box to give it in */
   secret?: SecretAsk
   /** 3.0's quiet row for a message the person didn't type: a launch brief ("New session", "Task brief") or one
-   *  another agent sent ("Message from Reviewer"); its words (text) open under it. bare: no preview (a fresh start) */
-  brief?: { label: string; bare?: boolean }
+   *  another agent sent ("Message from Reviewer"); its words (text) open under it. bare: no preview (a fresh start);
+   *  from: who sent it ("Reviewer", "Assistant on m3"), only on a message from another agent, drawn as a message */
+  brief?: { label: string; bare?: boolean; from?: string }
   /** 3.0's task news line in an Assistant's chat (core/chat-view.js newsWords): its mark, what happened, the rest;
    *  live: still needs you (red); accept: the newest ready line of a task still Ready */
   news?: { task: string; ref: string; mark: 'started' | 'needs' | 'ready' | 'done' | 'other'; what: string; text: string; live?: boolean; accept?: boolean }
@@ -572,6 +573,8 @@ export interface Message {
   /** 3.0's quiet line for an ask or start screen that closed: what it asked and how it went ("Run: npm test · Allowed
    *  in the chat") */
   ended?: string
+  /** an Autopilot wake's quiet line ("Autopilot woke · on schedule · checked, nothing new": core/chat-log.js pilotLine) */
+  pilot?: string
   /** the tasks your message mentions (#HAT-1), as 3.0's chips under it: a press opens the task */
   mentions?: { task: string; ref: string; title: string }[]
   at?: number

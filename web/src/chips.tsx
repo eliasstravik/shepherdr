@@ -32,7 +32,7 @@ export function ListChips({ alone }: { alone?: boolean }) {
       <div
         role="group"
         aria-label="Showing"
-        className={clsx('flex min-w-0 flex-1 gap-1.5 phone:gap-2', phone ? '-my-1 overflow-x-auto overscroll-x-contain py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden' : 'flex-wrap')}
+        className={clsx('flex min-w-0 flex-1 gap-1.5 phone:gap-2', phone ? 'scroll-x -my-1 py-1' : 'flex-wrap')}
       >
         {chips.length ? (
           chips.map((c) => {

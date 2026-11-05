@@ -28,6 +28,13 @@ test("the header's words", () => {
   expect(headerDetail({ on: true, inflight: {}, pending: {} })).toBe("Waking");
   expect(headerDetail({ on: true, events: ["ready"] })).toBe("On events");
   expect(headerDetail({ on: true, events: [] })).toBe("Run now only");
+  // SHEP-5: the next heartbeat, near as minutes, further as its time
+  const now = new Date(2026, 10, 5, 9, 0, 0).getTime();
+  expect(headerDetail({ on: true, next_run: now + 7 * 60000 - 5000 }, now)).toBe("Next in 7 min");
+  expect(headerDetail({ on: true, next_run: now + 20000 }, now)).toBe("Next in 1 min");
+  expect(headerDetail({ on: true, next_run: now - 5000 }, now)).toBe("Next in 1 min");
+  expect(headerDetail({ on: true, next_run: now + 90 * 60000 }, now)).toBe("Next 10:30");
+  expect(headerDetail({ on: true, next_run: now + 3 * 86400000 }, now)).toBe("Next Sun");
   expect(presetOf(" Every 60 Minutes ")).toBe("every 60 minutes");
   expect(presetOf("every 2 hours")).toBe(null);
 });

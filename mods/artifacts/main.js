@@ -333,11 +333,13 @@ export default class Artifacts extends View {
             .text_size(TEXT.label).font_medium().text_color(t.accent).hover((s) => s.bg(t.hover)).tooltip(`v${latest}`)
             .on_click((_e, cx) => { cx.stop_propagation(); step(null, cx); })
             .child("Latest ›")))))
+      // Mark up / Done, as the viewer's bar (chat-image/artifact-bar.js) and the web's: a pointer clicking a spot; while
+      // marking, Done with a tick, tinted the accent of the frame round what you mark (square-cornered, as the window's other bar buttons)
       .when(Boolean(v), (el) => el.child(h_flex().id("art-markup").h(24).pl(5).pr(8).gap(5).flex_none().items_center().rounded(RADIUS.control).cursor_pointer()
-        .text_size(TEXT.label).font_medium().text_color(marking ? t.foreground : t.muted).when(marking, (b) => b.bg(t.selected))
-        .hover((s) => s.bg(marking ? t.selected : t.hover).text_color(t.foreground))
+        .text_size(TEXT.label).font_medium().text_color(marking ? t.foreground : t.muted).when(marking, (b) => b.bg(`${t.accent}24`))
+        .hover((s) => s.bg(marking ? `${t.accent}33` : t.hover).text_color(t.foreground))
         .on_click((_e, cx) => { cx.stop_propagation(); setShared("artifacts.markup", marking ? null : { mod: v.mod, where: "panel", at: Date.now() }); cx.notify(); })
-        .child(svg("mods/artifacts/markup.svg").size(14).flex_none())
+        .child(marking ? svg("mods/artifacts/check.svg").size(14).flex_none().text_color(t.accent) : svg("mods/artifacts/markup.svg").size(14).flex_none())
         .child(marking ? "Done" : "Mark up")));
   }
 

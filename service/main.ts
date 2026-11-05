@@ -108,6 +108,7 @@ machines.start();
 const secrets = new Secrets(hub);
 compat.secrets = secrets;
 (compat as any).terminalsOf = (a: string) => hub.terminals.get(a);
+(compat as any).coreName = () => host.me?.name || null;
 let secretNames: { name: string; at: number; space: string | null }[] = [];
 let vaultList: Awaited<ReturnType<Secrets["entries"]>> = [];
 const refreshSecrets = async () => { [secretNames, vaultList] = await Promise.all([secrets.names(), secrets.entries()]); model.rebuild(); };

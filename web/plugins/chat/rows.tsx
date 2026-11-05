@@ -5,9 +5,9 @@
 // earlier…). Their words and rules come from core/chat-view.js, as the window's do.
 import clsx from 'clsx'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { CheckIcon as TickIcon, ChevronDownIcon, ChevronRightIcon, PaperClipIcon } from '@heroicons/react/16/solid'
+import { ChatBubbleLeftEllipsisIcon, CheckIcon as TickIcon, ChevronDownIcon, ChevronRightIcon, PaperClipIcon } from '@heroicons/react/16/solid'
 import { act, has, openTask, registry } from '@client/kernel.ts'
-import { CheckIcon, CopyIcon, PageIcon, ReplyIcon, SmileIcon, TermIcon } from '@client/ui.tsx'
+import { AutopilotIcon, CheckIcon, CopyIcon, PageIcon, ReplyIcon, SmileIcon, TermIcon } from '@client/ui.tsx'
 import * as CV from '@core/chat-view.js'
 import type { Chat, Message, ReplyQuote } from '@shared/types.ts'
 import { openAccept, useAccepting } from '@client/screens/Accept.tsx'
@@ -133,13 +133,36 @@ function Opens({ label, text, bare, children }: { label: ReactNode; text?: strin
   )
 }
 
-/** a launch brief or a message another agent sent ("Message from Reviewer"): its label, then its words when opened */
+/** a launch brief ("Task brief"): its label, then its words when opened; a message another agent sent: FromRow */
 export function BriefRow({ msg }: { msg: Message }) {
+  if (msg.brief!.from) return <FromRow from={msg.brief!.from} text={msg.text} />
   return <Opens label={msg.brief!.label} text={msg.text} bare={msg.brief!.bare} />
 }
 
+/** a message another agent sent (SHEP-12): still one compact row, but a message's: a speech bubble in the accent, who
+ *  sent it a step stronger than a tools row, then its first words; it opens to the whole message in a soft bubble */
+function FromRow({ from, text }: { from: string; text?: string }) {
+  const [open, setOpen] = useState(false)
+  const first = String(text ?? '').split('\n').find((l) => l.trim()) ?? ''
+  return (
+    <div data-from className="flex w-full flex-col">
+      <button type="button" aria-expanded={open} title={`Message from ${from}`} onClick={() => setOpen(!open)}
+        className="flex w-full min-w-0 items-center gap-1.5 rounded-[7px] px-1.5 py-0.5 text-left text-[0.75rem]/5 text-fg2 hover:bg-hover phone:py-1.5 phone:text-[0.8125rem]/5">
+        <ChatBubbleLeftEllipsisIcon aria-hidden className="size-4 shrink-0 fill-accent" />
+        <span className="shrink-0 font-medium text-fg"><span className="sr-only">Message from </span>{from}</span>
+        {!open && first ? <span className="min-w-0 flex-1 truncate">{first}</span> : null}
+      </button>
+      {open ? (
+        <div className="mt-1 mb-1 ml-[26px] max-w-[min(100%,640px)] self-start rounded-[14px] rounded-tl-[4px] bg-bubble px-3 py-2 text-[0.8125rem] text-fg phone:ml-[24px] phone:text-[0.9375rem]">
+          <Markdown text={text ?? ''} />
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 /** a task's news line: its mark, the id, what happened, then its words, dim; a needs-you line still waiting in red.
- *  The line opens the task; a Ready one's Accept sits at its right end ("Accepting…" while it runs, as the window's),
+ *  The line opens the task; a Ready one's Review (opens the Accept card) sits at its right end ("Accepting…" while it runs, as the window's),
  *  gone once the task moved on (the service tells the chat again then) */
 export function NewsRow({ msg }: { msg: Message }) {
   const n = msg.news!
@@ -160,7 +183,7 @@ export function NewsRow({ msg }: { msg: Message }) {
       {n.accept ? (
         <button type="button" disabled={busy} onClick={(e) => { e.stopPropagation(); openAccept(n.task) }}
           className="press-dim ml-1 h-5 shrink-0 rounded-[6px] bg-fg px-2 text-[0.6875rem]/5 font-medium text-bg disabled:opacity-60 phone:h-7 phone:px-2.5 phone:text-xs/7">
-          {busy ? 'Accepting…' : 'Accept'}
+          {busy ? 'Accepting…' : 'Review'}
         </button>
       ) : null}
     </div>
@@ -173,6 +196,16 @@ export function EndedRow({ msg }: { msg: Message }) {
     <div className={clsx('flex w-full min-w-0 items-center gap-1.5 px-1.5 py-px', quiet)}>
       <CheckIcon className="size-3 shrink-0" />
       <span className="min-w-0 truncate">{msg.ended}</span>
+    </div>
+  )
+}
+
+/** an Autopilot wake: why it woke and, once it shows, how it went ("· checked, nothing new"); its words never show */
+export function PilotRow({ msg }: { msg: Message }) {
+  return (
+    <div data-pilot className={clsx('flex w-full min-w-0 items-center gap-1.5 px-1.5 py-px', quiet)}>
+      <AutopilotIcon aria-hidden className="size-3 shrink-0" />
+      <span className="min-w-0 truncate">{msg.pilot}</span>
     </div>
   )
 }

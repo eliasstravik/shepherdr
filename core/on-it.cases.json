@@ -1,0 +1,418 @@
+{
+ "about": "A task Herdr found a problem with (attention: failing checks, a conflict) while its agent is or isn't on it (SHEP-8): core/tasks.js place() and herdr-task's task_status() both pass these (core/tasks.test.js, test/test_herdr_task.py). now is fixed; each agent is { address, status, turn, role }; why QUESTION is the standard asking reason.",
+ "now": 1800000000000,
+ "cases": [
+  {
+   "name": "Ready, checks failing, its agent idle: Needs you",
+   "task": {
+    "state": "ready",
+    "ready_at": 1799996400000,
+    "ready_turns": {
+     "t1": 5
+    },
+    "started": 1799992800000,
+    "agents": [],
+    "attention": "Checks failing: check.",
+    "attention_at": 1799999400000
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 5,
+     "role": "worker"
+    }
+   ],
+   "expect": {
+    "status": "needs",
+    "needs": "attention",
+    "why": "Checks failing: check."
+   }
+  },
+  {
+   "name": "Ready, checks failing, its agent at work on it: Working",
+   "task": {
+    "state": "ready",
+    "ready_at": 1799996400000,
+    "ready_turns": {
+     "t1": 5
+    },
+    "started": 1799992800000,
+    "agents": [],
+    "attention": "Checks failing: check.",
+    "attention_at": 1799999400000
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "working",
+     "turn": 5,
+     "role": "worker"
+    }
+   ],
+   "expect": {
+    "status": "working",
+    "needs": null,
+    "why": "Working again"
+   }
+  },
+  {
+   "name": "Ready, its agent still ending the turn it said ready in: on it",
+   "task": {
+    "state": "ready",
+    "ready_at": 1799996400000,
+    "ready_turns": {
+     "t1": 5
+    },
+    "started": 1799992800000,
+    "agents": [],
+    "attention": "Checks failing: check.",
+    "attention_at": 1799999400000
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "working",
+     "turn": 4,
+     "role": "worker"
+    }
+   ],
+   "expect": {
+    "status": "working",
+    "needs": null,
+    "why": "Working again"
+   }
+  },
+  {
+   "name": "back at work (rebasing, re-running CI): Working with its own line",
+   "task": {
+    "state": "running",
+    "ready_at": 1799996400000,
+    "ready_turns": {
+     "t1": 5
+    },
+    "started": 1799992800000,
+    "agents": [],
+    "attention": "Checks failing: check.",
+    "attention_at": 1799999400000
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "working",
+     "turn": 5,
+     "role": "worker"
+    }
+   ],
+   "expect": {
+    "status": "working",
+    "needs": null,
+    "why": null
+   }
+  },
+  {
+   "name": "its agent waits on CI in the background, its own status set since the failure: Working",
+   "task": {
+    "state": "running",
+    "ready_at": 1799996400000,
+    "ready_turns": {
+     "t1": 5
+    },
+    "started": 1799992800000,
+    "agents": [],
+    "attention": "Checks failing: check.",
+    "attention_at": 1799999400000,
+    "progress": {
+     "text": "Re-running CI",
+     "set": 1799999700000,
+     "at": 1799999700000,
+     "done": 95
+    }
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 5,
+     "role": "worker"
+    }
+   ],
+   "expect": {
+    "status": "working",
+    "needs": null,
+    "why": null
+   }
+  },
+  {
+   "name": "its own status from before the failure: Needs you",
+   "task": {
+    "state": "running",
+    "ready_at": 1799996400000,
+    "ready_turns": {
+     "t1": 5
+    },
+    "started": 1799992800000,
+    "agents": [],
+    "attention": "Checks failing: check.",
+    "attention_at": 1799999400000,
+    "progress": {
+     "text": "Writing tests",
+     "set": 1799998800000,
+     "at": 1799998800000
+    }
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 5,
+     "role": "worker"
+    }
+   ],
+   "expect": {
+    "status": "needs",
+    "needs": "attention",
+    "why": "Checks failing: check."
+   }
+  },
+  {
+   "name": "Herdr's own line (fix, working again) isn't its agent on it",
+   "task": {
+    "state": "running",
+    "ready_at": 1799996400000,
+    "ready_turns": {
+     "t1": 5
+    },
+    "started": 1799992800000,
+    "agents": [],
+    "attention": "Checks failing: check.",
+    "attention_at": 1799999400000,
+    "progress": {
+     "text": "Fixing: Checks failing: check.",
+     "set": 1799999700000,
+     "at": 1799999700000,
+     "by": "herdr"
+    }
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 5,
+     "role": "worker"
+    }
+   ],
+   "expect": {
+    "status": "needs",
+    "needs": "attention",
+    "why": "Checks failing: check."
+   }
+  },
+  {
+   "name": "its own status gone stale (40 min, no time left given): Needs you",
+   "task": {
+    "state": "running",
+    "ready_at": 1799996400000,
+    "ready_turns": {
+     "t1": 5
+    },
+    "started": 1799992800000,
+    "agents": [],
+    "attention": "Checks failing: check.",
+    "attention_at": 1799996400000,
+    "progress": {
+     "text": "Re-running CI",
+     "set": 1799997600000,
+     "at": 1799997600000
+    }
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 5,
+     "role": "worker"
+    }
+   ],
+   "expect": {
+    "status": "needs",
+    "needs": "attention",
+    "why": "Checks failing: check."
+   }
+  },
+  {
+   "name": "its own status 40 min old but it said an hour left: Working",
+   "task": {
+    "state": "running",
+    "ready_at": 1799996400000,
+    "ready_turns": {
+     "t1": 5
+    },
+    "started": 1799992800000,
+    "agents": [],
+    "attention": "Checks failing: check.",
+    "attention_at": 1799996400000,
+    "progress": {
+     "text": "Re-running CI",
+     "set": 1799997600000,
+     "at": 1799997600000,
+     "left": 3600000
+    }
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 5,
+     "role": "worker"
+    }
+   ],
+   "expect": {
+    "status": "working",
+    "needs": null,
+    "why": null
+   }
+  },
+  {
+   "name": "its agent stopped with checks still failing: Needs you",
+   "task": {
+    "state": "running",
+    "ready_at": 1799996400000,
+    "ready_turns": {
+     "t1": 5
+    },
+    "started": 1799992800000,
+    "agents": [],
+    "attention": "Checks failing: check.",
+    "attention_at": 1799999400000,
+    "progress": {
+     "text": "Re-running CI",
+     "set": 1799999700000,
+     "at": 1799999700000
+    }
+   },
+   "live": [],
+   "expect": {
+    "status": "needs",
+    "needs": "attention",
+    "why": "Checks failing: check."
+   }
+  },
+  {
+   "name": "just handed the failure (herdr-task fix, GitHub news), starting: Working",
+   "task": {
+    "state": "ready",
+    "ready_at": 1799996400000,
+    "ready_turns": {
+     "t1": 5
+    },
+    "started": 1799992800000,
+    "agents": [],
+    "attention": "Checks failing: check.",
+    "attention_at": 1799999400000,
+    "handed_at": 1799999980000
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 5,
+     "role": "worker"
+    }
+   ],
+   "expect": {
+    "status": "working",
+    "needs": null,
+    "why": "Working again"
+   }
+  },
+  {
+   "name": "handed it minutes ago and still idle: Needs you",
+   "task": {
+    "state": "ready",
+    "ready_at": 1799996400000,
+    "ready_turns": {
+     "t1": 5
+    },
+    "started": 1799992800000,
+    "agents": [],
+    "attention": "Checks failing: check.",
+    "attention_at": 1799999400000,
+    "handed_at": 1799999700000
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 5,
+     "role": "worker"
+    }
+   ],
+   "expect": {
+    "status": "needs",
+    "needs": "attention",
+    "why": "Checks failing: check."
+   }
+  },
+  {
+   "name": "its agent asks the person while on it: its question",
+   "task": {
+    "state": "running",
+    "ready_at": 1799996400000,
+    "ready_turns": {
+     "t1": 5
+    },
+    "started": 1799992800000,
+    "agents": [],
+    "attention": "Checks failing: check.",
+    "attention_at": 1799999400000
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "blocked",
+     "turn": 5,
+     "role": "worker"
+    }
+   ],
+   "expect": {
+    "status": "needs",
+    "needs": "asks",
+    "why": "QUESTION"
+   }
+  },
+  {
+   "name": "only a reviewer at work: Needs you",
+   "task": {
+    "state": "ready",
+    "ready_at": 1799996400000,
+    "ready_turns": {
+     "t1": 5
+    },
+    "started": 1799992800000,
+    "agents": [],
+    "attention": "Checks failing: check.",
+    "attention_at": 1799999400000
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 5,
+     "role": "worker"
+    },
+    {
+     "address": "t3",
+     "status": "working",
+     "turn": 0,
+     "role": "reviewer"
+    }
+   ],
+   "expect": {
+    "status": "needs",
+    "needs": "attention",
+    "why": "Checks failing: check."
+   }
+  }
+ ]
+}

@@ -17,7 +17,7 @@ import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { props, run, theme, home, exec, hc, notify, nextCommand, shared, setShared } from "herdr";
 import { panes, terminals, inRender } from "./live.js";
-import { apSpace, apWatch, apPoll, apChip, apHeartbeatLink, COMPACT_BELOW } from "./autopilot.js";
+import { apSpace, apWatch, apPoll, apChip, apHeartbeatLink, apRunNow, COMPACT_BELOW } from "./autopilot.js";
 import { button as uiButton, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { on as addonOn } from "./addons.js";
 // "End Claude Code?" and its buttons: core/menus.js (the web app's header asks in the same words).
@@ -245,6 +245,7 @@ export default class Pane extends View {
       // The folder gives way first; the switch keeps its width; the gap after pushes the rest right.
       .child(div().flex_shrink_1().min_w(0).truncate().text_color(t.dim).child(folder(p.cwd)))
       .when(Boolean(apFor), (el) => el.child(apChip(this, t, apFor, pane, (this.width ?? Infinity) < COMPACT_BELOW))
+        .child(apRunNow(this, t, apFor, pane) ?? div())
         .child(apHeartbeatLink(this, apFor, pane) ?? div()))
       .child(div().flex_1())
       .when(st === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))

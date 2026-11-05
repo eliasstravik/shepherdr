@@ -12,7 +12,7 @@ picker, peek, help, ...) are read-only: clone them first.
 | What | Value |
 |---|---|
 | `H.sm` / `H.lg` | buttons 24 in panels, rows and headers; 32 in dialogs and cards |
-| `H.xs` | 20: a button inside a row's 16 tall second line (a Ready row's Accept), so the row keeps its height |
+| `H.xs` | 20: a button inside a row's 16 tall second line (a Ready row's Review), so the row keeps its height |
 | `TEXT.id` 11 | IDs, times, badges |
 | `TEXT.label` 12 | second lines, labels, small headings, button words (24) |
 | `TEXT.body` 13 | body, row titles, menu rows, button words (32) |

@@ -392,6 +392,20 @@
   }
 }
 
+/* A strip that scrolls sideways only (a task's tabs, the list chips, attached files): overflow-x alone turns overflow-y
+   to auto too, so anything a hair taller (a tab's hit area) made it scroll and bounce up and down on a phone, and a
+   vertical swipe on it moved it. No scrollbar: the cut edge says there is more */
+@utility scroll-x {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 /* A chat's column of messages and its box: a comfortable line, a little wider on a very wide window */
 @utility max-w-read {
   max-width: 720px;
@@ -814,6 +828,19 @@
   .mode-pill.mark::before {
     width: 6px;
     height: 6px;
+  }
+  /* SHEP-5: a sidebar row's Autopilot mark (a small rocket before the #): it breathes while a wake runs or waits */
+  .pilot-mark {
+    margin-right: -4px;
+  }
+  .pilot-mark[data-waking] {
+    animation: pilot-wake 1.2s ease-in-out infinite;
+  }
+  @keyframes pilot-wake {
+    50% { opacity: 0.35; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pilot-mark[data-waking] { animation: none; }
   }
   [data-device="phone"] .mode-pill.mark {
     width: 16px;

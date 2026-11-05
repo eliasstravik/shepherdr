@@ -463,7 +463,8 @@ def queue(a, reason):
 
 
 def message(space, a, reasons):
-    """The wake: one tagged message (the chat shows none of it, only the Assistant's answer)."""
+    """The wake: one tagged message. The chat shows it as one quiet line ("Autopilot woke · on schedule",
+    core/chat-log.js pilotLine), never its words, then the Assistant's answer or "nothing new"."""
     beat, where = heartbeat_of(space)
     beat = "" if blank(beat) else beat.strip()
     path = heartbeat_path()
@@ -666,10 +667,17 @@ def cmd_autopilot(args):
                 told = (getattr(args, "name", None), getattr(args, "space_folder", None))
                 a["name"], a["folder"] = (told[0], folder_of(told[1])) if told[1] else space_info(space)
         if sub == "on":
+            was = bool(a.get("on"))
             a["on"] = True
             ensure_heartbeat()
             sync(d)
             msg = f"Autopilot is on: {trigger_of(resolve(d, a, space))}."
+            if not was:
+                # Switched on: its first wake goes now (queued until its Assistant is idle), not one
+                # interval later, so the person sees it work at once.
+                queue(a, "switched on")
+                got = deliver(space, a)
+                msg += " Woke its Assistant." if got == "delivered" else f" First wake queued: {(a.get('pending') or {}).get('note') or 'it goes when its Assistant is idle'}."
         elif sub == "off":
             a["on"] = False
             sync(d)

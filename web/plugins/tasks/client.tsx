@@ -1,7 +1,7 @@
 // Tasks, as Shepherdr 3's Tasks panel (mods/tasks): every task on every machine, Pinned first, then Needs you
 // (tasks and what any agent asks), then by the header's Group by (Status, Space, Machine, Machine › Space; kept on this
 // device). A filter row picks one status (All statuses, Needs you, Working, Ready, the rest under More). Each heading
-// folds what is under it away. A row says where its task is, as far as the grouping doesn't; a Ready row has Accept. A
+// folds what is under it away. A row says where its task is, as far as the grouping doesn't; a Ready row has Review. A
 // row's menu only pins it (core/menus.js taskMenu, the window's too); the Assistant does the rest. Done tasks archive
 // themselves: the Archived row at the bottom opens them.
 import clsx from 'clsx'
@@ -112,13 +112,13 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
   // task's: archived ones drop out of Pinned)
   const menu = useRowMenu()
   const busy = useAccepting(t.id) || !!t.accepting
-  // as 3.0's row (mods/tasks row()): Accept, the compact one, on a Ready row's second line; "Accepting…" while its
+  // as 3.0's row (mods/tasks row()): Review (opens the Accept card), the compact one, on a Ready row's second line; "Accepting…" while its
   // accept runs
   const accept =
     t.status === 'ready' && !t.archived ? (
       <button type="button" disabled={busy} onClick={() => openAccept(t.id)}
         className="press-dim pointer-events-auto relative z-1 h-5 shrink-0 rounded-full bg-fg px-2 text-[0.75rem] font-medium whitespace-nowrap text-bg after:absolute after:-inset-1.5 disabled:opacity-60 phone:h-7 phone:px-3 phone:text-[0.8125rem]">
-        {busy ? 'Accepting…' : 'Accept'}
+        {busy ? 'Accepting…' : 'Review'}
       </button>
     ) : null
   return (
@@ -147,7 +147,7 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
 /**
  * One row, as the window's (mods/tasks line()): the glyph, the dim id in its fixed column, then the title, which owns
  * the first line. Anything else goes on a second line that starts where the title does: why it needs you or what its
- * agent does (at most 40 characters, the whole of it on hover), then at its end where it is and the button (Accept),
+ * agent does (at most 40 characters, the whole of it on hover), then at its end where it is and the button (Review),
  * so where it is never sits under the button. A row with nothing to say under its title is one line, where it is dim
  * at its end. `meta`: a short note at the first line's end (an automation's next run). `left`: the minutes left, small
  * under the glyph. `tip`: the title's hover (an automation's error).
@@ -165,7 +165,7 @@ function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, di
   const idCol = ref_ && idCh ? { width: `${idCh}ch` } : undefined
   return (
     <li data-flip={flip} className={clsx(rowClass(sel, kb), 'group relative p-0! select-none [-webkit-touch-callout:none]', menu?.open && !sel && 'bg-hover')} {...(menu?.press ?? {})}>
-      {/* the whole row opens it: one button stretched under it; Accept sits over it, a button of its own */}
+      {/* the whole row opens it: one button stretched under it; Review sits over it, a button of its own */}
       {onOpen ? (
         <button
           type="button"
@@ -176,7 +176,7 @@ function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, di
           className="absolute inset-0 cursor-pointer rounded-[inherit] outline-none keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)]"
         />
       ) : null}
-      {/* what the row shows is said by its button's label: only Accept is read on its own */}
+      {/* what the row shows is said by its button's label: only Review is read on its own */}
       <div className={clsx('pointer-events-none relative flex min-h-[inherit] w-full min-w-0 gap-2.5 px-2 phone:px-3', two ? 'items-start py-1.5' : 'items-center')}>
         <span aria-hidden className="flex w-3.5 shrink-0 flex-col items-center">
           <span className="grid h-[18px] place-items-center phone:h-5">{glyph}</span>
