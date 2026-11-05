@@ -279,6 +279,8 @@ export interface UI {
   dictStarted: number
   /** Done was pressed: the last words are still coming in */
   dictDone: boolean
+  /** talk to type didn't work in this chat's box: why, over the box until dismissed or tried again */
+  dictError: { chat: string; text: string } | null
   files: Record<string, { name: string; path?: string }[]>
   /** search in a chat: its words, and the match shown (by message id; none: the newest) */
   find: { chat: string; q: string; id: string | null } | null
@@ -435,6 +437,7 @@ let state: State = {
     dict: null,
     dictStarted: 0,
     dictDone: false,
+    dictError: null,
     files: {},
     reply: {},
     find: null,

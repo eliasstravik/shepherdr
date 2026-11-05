@@ -2259,7 +2259,7 @@ export function toggleDictation(chatKey: string) {
   const at = box && document.activeElement === box ? [box.selectionStart, box.selectionEnd] : null
   // the box records instead of taking typing, so the keyboard goes down
   ;(document.activeElement as HTMLElement | null)?.blur?.()
-  setUI({ dict: chatKey, dictStarted: Date.now(), dictDone: false, focus: null, plus: null })
+  setUI({ dict: chatKey, dictStarted: Date.now(), dictDone: false, dictError: null, focus: null, plus: null })
   dictation = dictate((said) => {
     dictation = null
     if (getState().ui.dict !== chatKey) return
@@ -2283,7 +2283,22 @@ export function toggleDictation(chatKey: string) {
       el.setSelectionRange(caret, caret)
     }
     requestAnimationFrame(back)
-  })
+  }, (why) => setUI({ dictError: { chat: chatKey, text: why } }))
+}
+
+/** talk to type that didn't work: why, over the box (what was typed stays as it was), until dismissed or tried again */
+function DictError({ chatKey }: { chatKey: string }) {
+  const why = useUI((u) => (u.dictError?.chat === chatKey ? u.dictError.text : null))
+  if (!why) return null
+  return (
+    <div role="alert" className="flex items-start gap-2 rounded-box bg-bubble py-2 pr-1.5 pl-3 text-[0.8125rem] text-pretty text-fg2 phone:text-[0.9375rem]">
+      <span aria-hidden="true" className="mt-[0.45em] size-1.5 shrink-0 rounded-full bg-need" />
+      <p className="min-w-0 flex-1">Dictation didn’t work. {why}</p>
+      <IconButton label="Dismiss" className="-my-1 size-7 shrink-0" onClick={() => setUI({ dictError: null })}>
+        <XIcon className={ic} />
+      </IconButton>
+    </div>
+  )
 }
 
 function boxOf(chatKey: string) {
@@ -2695,6 +2710,7 @@ export default definePlugin({
     reg.composerPlus = PlusMenu
     reg.composerMic = Mic
     reg.composerLive.push({ when: (ui, chatKey) => ui.dict === chatKey, View: DictationBox })
+    reg.composerAbove.push({ order: 40, View: DictError })
     // while it records, Enter puts it in the box and Esc drops it
     reg.keys.push({
       order: 5,

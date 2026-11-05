@@ -8,6 +8,7 @@ import { HOME } from "./paths.ts";
 
 const APP = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
 const MODEL = join(APP, "data", "whisper", "ggml-base.bin");
+const FFMPEG = Bun.which("ffmpeg") ?? ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"].find(existsSync) ?? null;
 const WHISPER = [join(HOME, ".local", "bin", "whisper-cli"), join(HOME, ".local", "bin", "whisper-cpp-cpu"), "/usr/bin/whisper-cli", "/usr/local/bin/whisper-cli", "/opt/homebrew/bin/whisper-cli"].find(existsSync) ?? null;
 
 // as the window's: no [BLANK_AUDIO], (music) and the like, one line
@@ -19,15 +20,25 @@ async function run(cmd: string[]) {
   return { code: await p.exited, out, err };
 }
 
+/** what this machine lacks for dictation, in plain words with what to do; null: it has it all */
+export function missing(tools: { ffmpeg: string | null; whisper: string | null; model: boolean }): string | null {
+  const lack = [!tools.whisper && "whisper.cpp", !tools.model && "its model (shepherdr whisper)", !tools.ffmpeg && "ffmpeg"].filter(Boolean) as string[];
+  if (!lack.length) return null;
+  const words = lack.length > 1 ? `${lack.slice(0, -1).join(", ")} and ${lack.at(-1)}` : lack[0];
+  return `The machine serving Shepherdr needs ${words} for dictation.`;
+}
+
 export async function dictate(audio: Blob): Promise<string> {
-  if (!WHISPER || !existsSync(MODEL)) throw new Error("Dictation needs whisper.cpp and its model on the Shepherdr machine (shepherdr whisper).");
+  const lack = missing({ ffmpeg: FFMPEG, whisper: WHISPER, model: existsSync(MODEL) });
+  if (lack) throw new Error(lack);
+  if (!audio.size) throw new Error("Nothing was recorded.");
   if (audio.size > 20 * 1024 * 1024) throw new Error("That recording is too long.");
   const dir = mkdtempSync(join(tmpdir(), "shepherdr-dictate-"));
   try {
     await Bun.write(join(dir, "in"), audio);
-    const f = await run(["ffmpeg", "-loglevel", "error", "-i", join(dir, "in"), "-ar", "16000", "-ac", "1", join(dir, "in.wav")]);
+    const f = await run([FFMPEG!, "-loglevel", "error", "-i", join(dir, "in"), "-ar", "16000", "-ac", "1", join(dir, "in.wav")]);
     if (f.code !== 0) throw new Error("That recording couldn't be read.");
-    const r = await run([WHISPER, "-m", MODEL, "-f", join(dir, "in.wav"), "-l", "auto", "-nt", "-np", "-t", "8"]);
+    const r = await run([WHISPER!, "-m", MODEL, "-f", join(dir, "in.wav"), "-l", "auto", "-nt", "-np", "-t", "8"]);
     if (r.code !== 0) throw new Error("whisper.cpp couldn't write it down.");
     return clean(r.out);
   } finally {
