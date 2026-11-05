@@ -295,6 +295,8 @@ export interface Task {
   /** short name, as people say it: GTM-15 */
   id: string
   name: string
+  /** the folder whose tasks it is (herdr-task's --folder), on its machine: an @-mention names it (core/mentions.js) */
+  taskFolder?: string
   status: TaskStatus
   /** project place id */
   place: string

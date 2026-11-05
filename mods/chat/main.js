@@ -132,6 +132,8 @@ const ICONS = { copy: "copy", reply: "reply", rewind: "rewind", fork: "git-fork"
 const PILL = 46, PILL_H = 20, PILL_GAP = 4, PILL_EDGE = 6;
 // A task's id as shown and typed: herdr-task's PREFIX-n (`ref`, e.g. HAT-1), else #n.
 const taskRef = (x) => (x?.ref ? String(x.ref) : `#${x?.id}`);
+// herdr-task's status, as core/mentions.js TASK_RANK orders tasks
+const SECTION_DOT = { needs: "need", need: "need", working: "work", work: "work", merging: "merging", ready: "ready", queued: "queued", todo: "todo", done: "done" };
 // Task chips under a message: this wide, this far apart.
 const TASK = 170, TASK_GAP = 6;
 // A Ready task's news line: its Review (opens the Accept card), this wide, at the line's right end.
@@ -303,6 +305,8 @@ export default class Chat extends View {
     // "#": the spaces this agent's machine reaches (core/mentions.js) and the ones picked into the box
     this.reach = null;
     this.picked = [];
+    // "@": the tasks picked into the box (core/mentions.js taskToken at send)
+    this.pickedTasks = [];
     this.copied = null;
     this.note = null;
     this.dflt = null;
@@ -1206,8 +1210,9 @@ export default class Chat extends View {
   // works: held, and sent by itself once it is free.
   send(cx, hold = false) {
     // A picked "#space" goes as its mention, which names its target (core/mentions.js).
-    const text = mentions.expand(this.box.value().trim(), this.picked);
+    const text = mentions.expandTasks(mentions.expand(this.box.value().trim(), this.picked), this.pickedTasks);
     this.picked = [];
+    this.pickedTasks = [];
     // Also while the agent asks in its terminal: the words answer it there (deliver()).
     if (!text && !this.files.length) return;
     const msg = { id: `m${Date.now()}`, text, files: this.files, quote: this.quote };
@@ -1386,15 +1391,19 @@ export default class Chat extends View {
     // Enter's new line may already be in the box when the submit comes.
     const v = this.box.value().replace(/\n+$/, "");
     if (this.slashOff === v) return [];
-    // "#" at the end: the spaces this agent reaches (a pick names one for it), then this folder's
-    // tasks (herdr-task), by number or title.
+    // "#" at the end: the spaces this agent reaches (a pick names one for it).
     const h = mentions.typing(v);
     if (h !== null) {
-      const q = h.toLowerCase();
-      const sp = mentions.match(this.reach?.spaces ?? [], q).map((x) => ({ space: x, name: `#${x.name}`, about: x.route ? x.machine : "This machine", key: `space-${x.id}` }));
-      const tk = (this.tasks ?? []).filter((x) => !q || String(x.id).startsWith(q) || taskRef(x).toLowerCase().includes(q) || x.title.toLowerCase().includes(q)).slice(0, sp.length ? 5 : 8)
-        .map((x) => ({ task: true, name: taskRef(x), about: x.title, state: x.status_text ?? x.state }));
-      if (sp.length || tk.length) return [...sp, ...tk];
+      const sp = mentions.match(this.reach?.spaces ?? [], h.toLowerCase()).map((x) => ({ space: x, name: `#${x.name}`, about: x.route ? x.machine : "This machine", key: `space-${x.id}` }));
+      if (sp.length) return sp;
+    }
+    // "@" at the end: the tasks on this agent's machine (herdr-task), by ID or title; a pick names
+    // the exact one (its folder when not this one's).
+    const at = mentions.typingTask(v);
+    if (at !== null) {
+      const tk = mentions.matchTasks(this.mentionableTasks().map((x) => ({ ref: taskRef(x), title: x.title, status: SECTION_DOT[x.status ?? x.state] ?? x.state, at: x.ready_at ?? x.started ?? 0, x })), at, 8)
+        .map(({ x }) => ({ task: x, name: `@${taskRef(x)}`, about: x.title, state: x.status_text ?? x.state, key: `task-${x.folder}-${taskRef(x)}` }));
+      if (tk.length) return tk;
     }
     const w = slash.typing(v);
     if (w === null || !this.cmds.length) return [];
@@ -1408,10 +1417,12 @@ export default class Chat extends View {
       this.box.set_value(next);
       this.slashOff = next.replace(/\n+$/, "");
     } else if (c.task) {
-      const v = this.box.value().replace(/\n+$/, "");
-      const next = v.replace(/#[\w-]*$/, `${c.name} `);
+      const own = (this.t?.foreground?.cwd ?? this.t?.cwd) === c.task.folder;
+      const t = { ref: taskRef(c.task), route: "", folder: own ? "" : c.task.folder ?? "" };
+      const next = mentions.pickTaskInto(this.box.value(), t);
+      this.pickedTasks = [...this.pickedTasks.filter((x) => x.ref !== t.ref), t];
       this.box.set_value(next);
-      this.slashOff = next;
+      this.slashOff = next.replace(/\n+$/, "");
     } else {
       this.box.set_value(`/${c.name} `);
       this.slashOff = `/${c.name} `;
@@ -1708,7 +1719,18 @@ export default class Chat extends View {
     if (!mentions.hasMention(text)) return text;
     const ids = this.reach ? new Set(this.reach.spaces.map((x) => x.id)) : null;
     const by = new Map((this.reach?.spaces ?? []).map((x) => [x.id, x.machine]));
-    return mentions.plain(text, ids, (m) => by.get(m.id));
+    const title = (m) => this.mentionableTasks().find((x) => taskRef(x) === m.ref && (!m.folder || x.folder === m.folder))?.title;
+    return mentions.plain(text, ids, (m) => by.get(m.id), title);
+  }
+
+  // The tasks "@" lists: this folder's, then (an Assistant's) every folder's on its machine.
+  mentionableTasks() {
+    const seen = new Set(), out = [];
+    for (const x of [...(this.tasks ?? []), ...(this.spaceTasks ?? [])]) {
+      const k = `${x.folder}|${taskRef(x)}`;
+      if (x.ref && !seen.has(k) && !x.archived) { seen.add(k); out.push(x); }
+    }
+    return out;
   }
 
   // ---- tasks (#4) -----------------------------------------------------------------------------

@@ -630,7 +630,7 @@
         ]
       },
       "forms": {
-        "herdr": "Send mid-turn, Ctrl+Enter holds, Up recalls, drafts, / commands, #space and #task mentions, Stop chip",
+        "herdr": "Send mid-turn, Ctrl+Enter holds, Up recalls, drafts, / commands, #space and @task mentions, Stop chip",
         "desktop": "Same keys",
         "tablet": "Same with a keyboard",
         "phone": "Same box; long-press Send holds; drafts kept on the device"
