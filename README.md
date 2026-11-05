@@ -89,6 +89,22 @@ Shepherdr doesn't update itself: it never follows main, so a merge can't change 
 
 You need to be comfortable in a terminal for the install. After that everything happens in the Herdr window or the web app: you write to Assistants and answer cards, and Shepherdr settings holds the few defaults. You'll need macOS or Linux, the Herdr app 0.1.12 or newer with herdr-core 0.1.17 or newer, Python 3.8+, Git, and Claude Code or Codex, installed and signed in. `gh` (pull requests), agent-browser and Chrome for the task browser, and an ElevenLabs key for voice and dictation are optional; the web app needs Bun and Tailscale. [Install](docs/install.md) covers the prerequisites.
 
+### Can my coding agent install it for me?
+
+Yes. Give it this, in the Herdr app's terminal or any agent session on that machine:
+
+```text
+Read ~/.config/herdr-app/AGENTS.md, then add this layout: https://github.com/eliasstravik/shepherdr/tree/main
+```
+
+### Can I use it without the Herdr app?
+
+Yes: herdr-core runs the agents and the web app is your window, in a browser on your tailnet. Give your agent this:
+
+```text
+Install herdr-core (https://herdr.dev), Tailscale (signed in), python3, git and Claude Code or Codex. Then clone https://github.com/eliasstravik/shepherdr, read its docs/install.md and docs/web.md, and install only the web app with ./install.sh --web. Check it with shepherdr doctor, then give me the link from shepherdr web status. Keep it private to my tailnet: never Tailscale Funnel.
+```
+
 ### How do I check that Shepherdr is installed right?
 
 Run this: it checks every file it installed, the helper links, the shared copies and the programs it needs, and says what's missing.

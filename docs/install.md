@@ -50,6 +50,20 @@ path under your home.
 What it refuses: a mod, layout, lib or bin file by the same name that it didn't install and that differs (your own
 mod called `chat`, say). Nothing is written then; it names each one. `--adopt` backs them up and takes them over.
 
+## Without the Herdr window
+
+herdr-core and the web app alone: no Herdr app, its spaces are the service's own ([Web](web.md)). Install herdr-core
+(https://herdr.dev) and Tailscale, signed in, then:
+
+```bash
+git clone https://github.com/eliasstravik/shepherdr && cd shepherdr
+./install.sh --web          # the service, the web app, herdr-task and the helpers
+shepherdr doctor            # check it
+shepherdr web status        # where it's served: https://<this machine's tailnet name>/shepherdr/
+```
+
+It shares itself on your tailnet only (`tailscale serve`, never Funnel). `shepherdr update` keeps it web only.
+
 ## Options
 
 ```text
