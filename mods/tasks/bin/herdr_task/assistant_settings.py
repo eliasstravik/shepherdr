@@ -4,8 +4,8 @@ the space's own), as a short "Your settings" block, like the Settings block a wo
 with. Its session gets the block at every start, resume, compaction and handoff (the chat's
 SessionStart hook, mods/chat/session-note.sh, asks `herdr-task _session-note`); a running one gets
 one hidden notice line per setting that changed for its space, several at once in one message,
-never for a save that changed nothing there. Workers are never told: their brief is fixed, and
-Reactions are the Assistant's only (reactions.py)."""
+never for a save that changed nothing there. Other agents (task workers, automation runs, agent
+tabs) aren't told the block: their brief is fixed; they get only Reactions (reactions.py)."""
 
 import hashlib
 import json
@@ -40,7 +40,12 @@ def layers(d, space):
     """(name, layer) of the settings file d, least specific first: Everywhere's, this machine's
     (agent and task values set before machine scope went), the space's own."""
     def obj(x):
-        return x if isinstance(x, dict) else {}
+        x = x if isinstance(x, dict) else {}
+        # Reactions as SHEP-42 kept them (the Assistant's) where the layer has no agents' (SHEP-48)
+        old = x.get("assistant") if isinstance(x.get("assistant"), dict) else {}
+        if isinstance(old.get("reactions"), bool):
+            x = {**x, "agents": {"reactions": old["reactions"], **(x.get("agents") if isinstance(x.get("agents"), dict) else {})}}
+        return x
     machine = obj(obj(d.get("machines")).get(d.get("here") or LOCAL_MACHINE))
     own = obj(obj(d.get("spaces")).get(bare(space))) if space else {}
     return [("everywhere", obj(d.get("everywhere"))), ("machine", machine), ("space", own)]
@@ -95,7 +100,7 @@ def rows(space, d=None, auto=None):
         merge = t.get("merge") if t.get("merge") in MERGE_SHORT else "ask"
         notes = [w for w, k in (("start", "start_notes"), ("finish", "finish_notes")) if str(t.get(k) or "").strip()]
         a_on, a_every, a_dir = autopilot
-        reacting = (cfg.get("assistant") or {}).get("reactions") is not False
+        reacting = (cfg.get("agents") or {}).get("reactions") is not False
         return [
             ("review", "Review", review, "on" if rounds > 0 else "off",
              [("tasks", "review_rounds"), ("tasks", "must_fix"), ("reviewer", None)]),
@@ -116,7 +121,7 @@ def rows(space, d=None, auto=None):
              else "off" + (f" (direction when on: {a_dir})" if a_dir else ""), "on" if a_on else "off",
              [("autopilot", "every"), ("autopilot", "events"), ("autopilot", "direction"), ("autopilot", None)]),
             ("reactions", "Reactions", "on (react to some of the person's messages with one emoji)" if reacting
-             else "off (never react to the person's messages)", "on" if reacting else "off", [("assistant", "reactions")]),
+             else "off (never react to the person's messages)", "on" if reacting else "off", [("agents", "reactions")]),
         ]
     have = lines(resolve(ls), (on, every, direction))
     default = {x[0]: x[2] for x in lines(resolve([]), (False, every, ""))}
@@ -166,11 +171,13 @@ def notice(changed):
 
 def session_note(terminal):
     """What an Assistant's new session is told: its settings block, then the Reactions guide (when
-    and how with them on, never with them off); "" for any other agent. Notes on its terminal what
-    it was told."""
+    and how with them on, never with them off); any other agent only the Reactions words
+    (reactions.agent_note); "" outside Herdr. Notes on its terminal what it was told."""
     k = hc_json("get", terminal) if terminal else None
-    if not k or not is_coordinator(k):
+    if not k:
         return ""
+    if not is_coordinator(k):
+        return reactions.agent_note(terminal, k)
     rs = rows(space_of(k))
     on = next(r for r in rs if r["key"] == "reactions")["value"] == "on"
     run(["hc", "label", terminal, f"{LABEL}={digest(rs)}"])

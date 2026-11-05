@@ -195,6 +195,12 @@ def news_pass(report, folder=None):
         settings_pass(report, quiet)
     except Exception as e:  # never stops the news
         report["settings_error"] = str(e)
+    # Reactions changed for a space: every other running agent its hook taught told once (reactions.py).
+    try:
+        from .reactions import reactions_pass
+        reactions_pass(report, quiet)
+    except Exception as e:  # never stops the news
+        report["reactions_error"] = str(e)
     news_read(quiet)
     held_pass(report)
     tmp = f"{NEWS}.{os.getpid()}.tmp"

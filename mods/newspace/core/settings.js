@@ -84,8 +84,23 @@ export const LOADING_AGENTS = "Loading agents…";
 // An unset Reviewer's button: what runs, the other CLI.
 export const otherCliWords = (cli) => `Other CLI (${NAMES[cli] ?? cli})`;
 export const otherCli = (worker) => (worker === "codex" ? "claude" : "codex");
-// Reactions (herdr-task's reactions.py): a space's Assistant reacts to some of your messages with an emoji; off, never.
-export const REACTIONS = { title: "Reactions", about: "The Assistant reacts to some of your messages with an emoji, as a person would." };
+// Reactions (herdr-task's reactions.py): every agent (Assistants, task workers, automation runs, agent tabs) reacts to
+// some of your messages with an emoji; off, none does. Kept as agents.reactions; SHEP-42 kept it as assistant.reactions
+// (upgradeReactions moves it).
+export const REACTIONS = { title: "Reactions", about: "Agents react to some of your messages with an emoji, as a person would." };
+// A settings file's layers (everywhere, machines, spaces) with SHEP-42's assistant.reactions moved to agents.reactions
+// (a layer that has both keeps agents'). Changes cfg in place and returns it; true when anything moved.
+export function upgradeReactions(cfg) {
+  const layers = [cfg?.everywhere, ...Object.values(cfg?.machines ?? {}), ...Object.values(cfg?.spaces ?? {})];
+  for (const l of layers) {
+    const old = l && typeof l === "object" ? l.assistant : null;
+    if (!old || typeof old !== "object" || !("reactions" in old)) continue;
+    if (typeof old.reactions === "boolean" && typeof l.agents?.reactions !== "boolean") l.agents = { ...(l.agents ?? {}), reactions: old.reactions };
+    delete old.reactions;
+    if (!Object.keys(old).length) delete l.assistant;
+  }
+  return cfg;
+}
 export const BACKUP = { title: "Backup agent", about: "The other CLI takes over a task once when its agent can't go on." };
 // The machines where the other CLI can't take over (herdr-task's check, ~/.herdr/cli-check.json's machines: this
 // computer is ""), in one line. m: the scope's machine ("local" or its name), null for Everywhere (every machine).
@@ -227,7 +242,7 @@ export const MACHINES = {
 export const OLD_NAMES = { coordinator: "Assistant", worker: "Workers", reviewer: "Reviewer", backup: "Backup agent",
   automations: "Run automations", merge: "Merge", review_rounds: "Review", must_fix: "Must fix", proof: "Proof",
   max_running: "Tasks at once", archive_after: "Archive Done after", worktrees: "Worktrees",
-  start_notes: "When a task starts", finish_notes: "When a task finishes", base: "Base branch" };
+  start_notes: "When a task starts", finish_notes: "When a task finishes", base: "Base branch", agents: "Reactions" };
 // Home Assistant's line: on or off, and what herdr-task's home round last found there (~/.herdr/tasks/.home.json).
 export function homeAbout(on, st) {
   return !on ? "Off: nobody watches its disk, load and processes."
@@ -283,7 +298,7 @@ export const ARCHIVE = [[0, "Off"], [1, "1 day"], [3, "3 days"], [7, "1 week"], 
 export const ONOFF = [[true, "On"], [false, "Off"]];
 
 export const DEFAULTS = { tasks: { merge: "ask", review_rounds: 0, must_fix: "major", max_running: 10, worktrees: true, archive_after: 7, proof: true }, automations: { enabled: true },
-  assistant: { reactions: true } };
+  agents: { reactions: true } };
 
 // [section, field, label, choices | { min, max }]
 export const TASK_ROWS = [
