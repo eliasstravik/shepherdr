@@ -187,7 +187,7 @@ export const SECRETS = {
   removedNote: (name, where) => `Removed ${name} from ${where}.`,
   pasteNew: (name) => `Paste the new value for ${name}.`,
   // Kept on: the machine whose vault every machine's agents and voice calls use (shepherdr secrets move-to)
-  keptOn: "Kept on", keptHere: "This computer",
+  keptOn: "Kept on", keptHere: "This computer", thisOne: "this computer",
   keptAbout: "Every machine's agents and voice calls get them from there. Pick an always-on machine.",
   unreachable: (name) => `Can't reach ${name}, which keeps them: agents on other machines can't get secrets until it's back.`,
   notLinked: "A machine not linked from here keeps them.",

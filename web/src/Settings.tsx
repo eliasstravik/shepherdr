@@ -890,7 +890,6 @@ function KeptOn({ kept, phone }: { kept: NonNullable<Page['kept']>; phone: boole
   const [open, setOpen] = useState(false)
   const [sure, setSure] = useState<string | null>(null)
   const [err, setErr] = useState('')
-  const here = kept.choices.find((c) => c.here)?.name || ST.THIS_COMPUTER
   const now = kept.here ? ST.THIS_COMPUTER : kept.name || W.notLinked
   const move = async (m: string) => {
     setSure(null)
@@ -925,8 +924,8 @@ function KeptOn({ kept, phone }: { kept: NonNullable<Page['kept']>; phone: boole
         </div>
         {sure !== null ? (
           <div className="flex flex-col gap-2 rounded-row border border-line p-3">
-            <span className="font-medium">{W.moveConfirm(sure || ST.THIS_COMPUTER)}</span>
-            <Small className="text-pretty">{W.moveDetail(sure || ST.THIS_COMPUTER, kept.here ? here : now)}</Small>
+            <span className="font-medium">{W.moveConfirm(sure || W.thisOne)}</span>
+            <Small className="text-pretty">{W.moveDetail(sure || W.thisOne, kept.here ? W.thisOne : now)}</Small>
             <span className="flex justify-end gap-1">
               <Ghost className="shadow-none!" onClick={() => setSure(null)}>{W.keep}</Ghost>
               <Ghost onClick={() => void move(sure || 'here')} className="bg-fg text-bg! shadow-none! enabled:hover:bg-fg">{W.moveVerb}</Ghost>
