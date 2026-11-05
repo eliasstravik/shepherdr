@@ -132,7 +132,8 @@ def news_pass(report, folder=None):
                 cur = {"status": v["status"], "why": v.get("why"), "stall": stall[0] if stall else None}
                 current[key] = cur
                 prev = mine.get(str(t["id"]))
-                mine[str(t["id"])] = {"status": cur["status"], "stall": cur["stall"] or (prev or {}).get("stall")}
+                mine[str(t["id"])] = {"status": cur["status"], "stall": cur["stall"] or (prev or {}).get("stall"),
+                                      **({"needs": v["needs"]} if v.get("needs") else {})}
                 # Its backup took over (takeover()): told once; on a first look, old news.
                 b = t.get("backup") or {}
                 backup = s.write and b.get("state") == "started" and not b.get("told")
@@ -143,7 +144,9 @@ def news_pass(report, folder=None):
                     continue
                 lines = [("backup", news_line(s, t, v, "backup", backup_news(t)))] if backup else []
                 # Taken back to work after it said ready (back_to_work(), busy_again()): told as it happens.
-                if v["status"] == "working" and (prev or {}).get("status") in ("ready", "merging"):
+                # Its agent took up what needed the person (failing checks: on_it()) too.
+                if v["status"] == "working" and ((prev or {}).get("status") in ("ready", "merging")
+                                                 or (prev or {}).get("needs") == "attention" and t.get("attention")):
                     event = "working-again"
                 if event and (prev or {}).get("status") != v["status"]:
                     lines.append((event, news_line(s, t, v, event)))

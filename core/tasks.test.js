@@ -93,3 +93,16 @@ describe("a Ready task back at work (as herdr-task's busy_again)", () => {
     expect(place(list([task]), task, { live: [{ address: "t1", status: "blocked", turn: 5 }], now: back.now }).section).toBe("needs");
   });
 });
+
+// A task with a problem (failing checks) its agent is on: Working; nobody on it: Needs you (SHEP-8). The same
+// cases herdr-task's task_status() passes (test/test_herdr_task.py).
+const onIt = JSON.parse(readFileSync(new URL("./on-it.cases.json", import.meta.url), "utf8"));
+
+describe("a problem someone is on (as herdr-task's on_it)", () => {
+  for (const c of onIt.cases) test(c.name, () => {
+    const task = { id: 7, ...c.task };
+    const p = place(list([task]), task, { live: c.live, now: onIt.now });
+    const why = c.expect.why === "QUESTION" ? REASONS.question : c.expect.why;
+    expect({ section: p.section, needs: p.needs, why: p.why }).toEqual({ section: c.expect.status, needs: c.expect.needs, why });
+  });
+});

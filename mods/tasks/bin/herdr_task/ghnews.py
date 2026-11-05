@@ -174,6 +174,8 @@ def pr_deliver(s, t, report):
     k = resting(s, t)
     if k and news_send(k["address"], n["text"]):
         pr.pop("news")
+        # Handed to its agent: someone is on a failing check while it starts (on_it()).
+        t["handed_at"] = now()
         s.dirty = True
         report.setdefault("github", []).append({"task": s.ref(t), "to": k["address"]})
 

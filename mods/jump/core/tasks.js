@@ -55,6 +55,20 @@ export function busyAgain(task, live, now = Date.now()) {
   return live.some((a) => a.status === "working" && a.role !== "reviewer" && (a.turn ?? 0) >= (seen?.[a.address] ?? 0));
 }
 
+// A task's attention (failing checks, a conflict, a failed merge) needs the person only while nobody is on it
+// (SHEP-8), as herdr-task's on_it(): one of its agents is at work (working, or asking: its question shows), it was
+// just handed the problem (herdr-task fix, GitHub news: handed_at) and is starting, or its agent said what it's doing
+// (herdr-task status) since the problem came up and that is still fresh (ON_IT_MS, or its own time left if longer):
+// an agent waiting on CI in the background is idle to Herdr. Herdr's own words (progress.by) don't count.
+export const ON_IT_MS = 30 * 60000;
+export function onIt(task, live, now = Date.now()) {
+  if (live.some((a) => (a.status === "working" || a.status === "blocked") && a.role !== "reviewer")) return true;
+  if (now - (task.handed_at ?? 0) < STARTING_MS) return true;
+  const p = task.progress ?? {}, said = p.set ?? 0;
+  if (p.by || !live.length || !said || said < (task.attention_at ?? 0)) return false;
+  return now - said < Math.max(ON_IT_MS, typeof p.left === "number" ? p.left : 0);
+}
+
 // A provider retry's line (herdr-task's retry_line): "Provider overloaded · Retry in 2m".
 export function retryLine(r, now = Date.now()) {
   return r.due ? `${r.reason} · Retry in ${Math.max(1, Math.ceil((r.due - now) / 60000))}m` : `${r.reason} · Retrying`;
@@ -75,8 +89,10 @@ export function place(list, task, { live = [], loaded = true, now = Date.now() }
   // Cut off by its model's provider (herdr-task tick): Working while Herdr waits to tell it to
   // carry on ("Provider overloaded · Retry in 2m"); Needs you once the tries are used up.
   const retry = st === "running" && task.retry && live.some((a) => a.address === task.retry.address) && !states.includes("blocked") ? task.retry : null;
-  // Something Herdr found that only the person can sort out: failing checks, a conflict.
-  if (task.attention) need("attention", task.attention);
+  // Something Herdr found that only the person can sort out: failing checks, a conflict; while its agent is on it
+  // (onIt()), Working with its agent's own line.
+  const fixing = task.attention && onIt(task, live, now);
+  if (task.attention && !fixing) need("attention", task.attention);
   else if (retry?.over) need("provider", retry.reason);
   else if (retry) { section = "working"; why = retryLine(retry, now); }
   // Why it waits: herdr-task's words (its agent's own status line, its question or last words),
@@ -84,6 +100,7 @@ export function place(list, task, { live = [], loaded = true, now = Date.now() }
   else if (states.includes("blocked")) need("asks", task.waits ?? REASONS.question);
   // Back at work after it said ready: no Accept until it says ready again.
   else if (busyAgain(task, live, now)) { section = "working"; why = WORKING_AGAIN; }
+  else if (fixing) { section = "working"; why = st === "ready" ? WORKING_AGAIN : null; }
   else if (st === "ready") {
     section = (task.merge_requested && live.length) || (task.auto_merge && task.pr && !task.merged) ? "merging" : "ready";
     // As herdr-task's: a pull request that merges by itself once GitHub's checks pass.
