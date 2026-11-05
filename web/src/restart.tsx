@@ -464,8 +464,9 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
                 <button type="button" role="menuitemcheckbox" aria-checked={sel.fast} disabled={!!remote} className={row} onClick={() => setSel({ ...sel, fast: !sel.fast })}>
                   <SpeedIcon className="size-3.5 shrink-0 text-fg3" />
                   <span className="flex-1">Fast</span>
-                  <span aria-hidden className={clsx('relative h-4 w-7 shrink-0 rounded-full transition-colors', sel.fast ? 'bg-accent' : 'bg-line2')}>
-                    <span className={clsx('absolute top-0.5 size-3 rounded-full bg-bg transition-[left]', sel.fast ? 'left-3.5' : 'left-0.5')} />
+                  {/* a switch as wide as two thumbs, a touch bigger for a finger */}
+                  <span aria-hidden className={clsx('inline-flex h-4 w-7 shrink-0 rounded-full p-0.5 transition-colors coarse:h-5 coarse:w-9 phone:h-5 phone:w-9', sel.fast ? 'bg-accent' : 'bg-line2')}>
+                    <span className={clsx('aspect-square h-full rounded-full bg-bg shadow-soft transition-transform', sel.fast && 'translate-x-full')} />
                   </span>
                 </button>
               ) : null}
