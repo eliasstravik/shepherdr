@@ -940,6 +940,126 @@ class BackToWork(unittest.TestCase):
         self.assertNotIn("attention", t)  # Ready, its Accept back
 
 
+class OwnBackgroundWork(unittest.TestCase):
+    """SHEP-53: an agent quiet with its own work still running (a background shell, a Monitor,
+    Codex's background terminal), or whose fresh status line says it waits on CI or a review, is
+    Working, not Needs you; asking the person, or quiet with nothing running, Needs you. Real logs
+    in a temp folder; hc is never run."""
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.agents as agents
+        self.agents, self.mock = agents, mock
+        self.clock = 1_800_000_000_000
+        p = mock.patch.object(agents, "now", lambda: self.clock)
+        p.start()
+        self.addCleanup(p.stop)
+        self.dir = tempfile.mkdtemp()
+        self.log = os.path.join(self.dir, "s.jsonl")
+        self.lines = []
+        self.task = {"id": 7, "title": "Fix", "state": "running", "started": self.clock - 3600_000,
+                     "agents": [{"address": "t1", "at": self.clock - 3600_000, "log": self.log}]}
+        self.idle = [{"address": "t1", "status": {"state": "idle"}, "labels": {"herdr.role": "worker"}}]
+        self.stamp(-600_000, {"type": "user", "message": {"role": "user", "content": "Fix the bug"}})
+
+    def stamp(self, ago, d):
+        import datetime
+        at = datetime.datetime.fromtimestamp((self.clock + ago) / 1000, datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+        self.lines.append(json.dumps(dict(d, timestamp=at)))
+        with open(self.log, "w") as f:
+            f.write("\n".join(self.lines) + "\n")
+        self.agents._bg_cache.clear()
+
+    def say(self, ago, text):
+        self.stamp(ago, {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}})
+
+    def background(self, ago, job="b1"):
+        self.stamp(ago, {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "gh run watch", "run_in_background": True}}]}})
+        self.stamp(ago, {"type": "user", "toolUseResult": {"stdout": "", "backgroundTaskId": job}, "message": {"role": "user", "content": [
+            {"tool_use_id": "toolu_1", "type": "tool_result", "content": f"Command running in background with ID: {job}. Output is being written to: /tmp/x"}]}})
+
+    def finished(self, ago, job="b1"):
+        self.stamp(ago, {"type": "queue-operation", "operation": "enqueue", "content":
+                         f"<task-notification>\n<task-id>{job}</task-id>\n<status>completed</status>\n</task-notification>"})
+
+    def status(self, live=None):
+        return self.agents.task_status(self.task, self.idle if live is None else live)
+
+    def test_idle_with_a_background_shell_is_working(self):
+        self.background(-300_000)
+        self.say(-200_000, "Review is running in the background; I'll pick it up when it ends.")
+        self.assertEqual(self.status(), ("working", None, None))
+        # a Monitor counts the same
+        self.lines[:] = self.lines[:1]
+        self.stamp(-300_000, {"type": "user", "toolUseResult": {"taskId": "m1", "timeoutMs": 900000, "persistent": False},
+                              "message": {"role": "user", "content": [{"tool_use_id": "toolu_2", "type": "tool_result",
+                                                                       "content": "Monitor started (task m1, expires in 15m)"}]}})
+        self.assertEqual(self.status(), ("working", None, None))
+
+    def test_idle_with_a_question_needs_you_even_with_a_background_shell(self):
+        self.background(-300_000)
+        self.say(-200_000, "Tests run in the background. Should I also update the docs?")
+        self.assertEqual(self.status()[:2], ("needs", "reply"))
+        # asking with its question tool or a permission: blocked, Needs you
+        self.assertEqual(self.status([dict(self.idle[0], status={"state": "blocked"})])[:2], ("needs", "asks"))
+
+    def test_idle_with_nothing_running_needs_you(self):
+        self.say(-200_000, "Done with the first part.")
+        self.assertEqual(self.status()[:2], ("needs", "reply"))
+        # its background job ended and it went quiet again: Needs you as before
+        self.background(-300_000)
+        self.finished(-100_000)
+        self.assertEqual(self.status()[:2], ("needs", "reply"))
+        # a job started hours ago and never told ended no longer counts
+        self.lines[:] = self.lines[:1]
+        self.background(-4 * 3600_000)
+        self.assertEqual(self.status()[:2], ("needs", "reply"))
+
+    def test_its_status_line_says_it_waits_on_ci_or_review(self):
+        self.say(-200_000, "Pushed.")
+        for text, want in (("Waiting on review round 1", "working"), ("Rebased, waiting on GitHub check", "working"),
+                           ("Codex reviewing the change", "working"), ("Waiting for your go on the merge", "needs"),
+                           ("Fixed the menu", "needs")):
+            self.task["progress"] = {"text": text, "set": self.clock - 120_000, "at": self.clock - 120_000}
+            self.assertEqual(self.status()[0], want, text)
+        # stale (over 30 minutes), set before its turn began, or said by Herdr: no longer counts
+        self.task["progress"] = {"text": "Waiting on the GitHub check", "set": self.clock - 40 * 60_000}
+        self.assertEqual(self.status()[0], "needs")
+        self.task["progress"] = {"text": "Waiting on the GitHub check", "set": self.clock - 700_000}
+        self.assertEqual(self.status()[0], "needs")
+        self.task["progress"] = {"text": "Waiting on the GitHub check", "set": self.clock - 120_000, "by": "herdr"}
+        self.assertEqual(self.status()[0], "needs")
+        # a background job of its ended after it said so: it's back, then quiet
+        self.task["progress"] = {"text": "Waiting on the GitHub check", "set": self.clock - 120_000}
+        self.background(-110_000)
+        self.finished(-60_000)
+        self.assertEqual(self.status()[0], "needs")
+
+    def test_codex_background_terminal(self):
+        self.stamp(-300_000, {"type": "response_item", "payload": {"type": "function_call", "call_id": "c1", "name": "exec_command",
+                                                                   "arguments": json.dumps({"cmd": "gh run watch", "yield_time_ms": 1000})}})
+        self.stamp(-300_000, {"type": "response_item", "payload": {"type": "function_call_output", "call_id": "c1",
+                                                                   "output": "Process running with session ID 42"}})
+        self.assertEqual(self.status(), ("working", None, None))
+        self.stamp(-100_000, {"type": "response_item", "payload": {"type": "custom_tool_call_output", "call_id": "c2", "output": [
+            {"type": "input_text", "text": json.dumps({"chunk_id": "a", "session_id": 42, "exit_code": 0, "output": ""})}]}})
+        self.assertEqual(self.status()[:2], ("needs", "reply"))
+
+    def test_the_tasks_panel_gets_it(self):
+        """view() marks it (own_work), which news_pass keeps on the task for core/tasks.js place()."""
+        import herdr_task.output as output
+        self.background(-300_000)
+
+        class S:
+            write, loc, prefix = False, {"folder": "/f"}, "X"
+            key = ref = lambda self, t: "X-7"
+        with self.mock.patch.object(output, "waiting_for", lambda s, t: []), self.mock.patch.object(output, "waiting_ext", lambda t: []):
+            v = output.view(S(), self.task, [dict(k, foreground={"name": "claude"}) for k in self.idle])
+        self.assertEqual((v["status"], v["own_work"]), ("working", True))
+
+
 class MergedOnlyWithOwnWork(unittest.TestCase):
     """SHEP-23: a task counts as merged only when work of its own landed (its pull request merged, or
     commits made on its branch now in the base), never when its branch just caught up with main, and

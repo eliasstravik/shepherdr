@@ -124,6 +124,10 @@ export function place(list, task, { live = [], loaded = true, now = Date.now() }
   // Just started (herdr-task's starting()): its terminal still runs the shell that starts the
   // agent, or the agent is idle before its first message lands.
   else if (starting(task, now)) section = "working";
+  // Quiet, but on its own background work (SHEP-53, herdr-task's own_work()): a background shell or
+  // Monitor still running, or its fresh status line says it waits on CI or a review. Kept on the task
+  // by its scheduler (task.own_work); Working, with its own status line.
+  else if (live.length && task.own_work && st === "running") section = "working";
   // Quiet without saying ready (herdr-task ready): alive, it ended its turn (on what: task.waits);
   // its process gone, the agent stopped.
   else if (live.length) need("reply", task.waits ?? REASONS.reply);

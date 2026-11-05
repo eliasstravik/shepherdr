@@ -4,7 +4,7 @@ import json
 
 from .base import now
 from .agents import (
-    agent_running, ask_reason, held_ask, last_words, own_line, status_word, STATUSES, task_status,
+    agent_running, ask_reason, held_ask, last_words, own_line, own_work, status_word, STATUSES, task_status,
 )
 from .queues import waiting_ext, waiting_for
 
@@ -26,6 +26,9 @@ def view(s, task, live=None):
     if v["needs"] == "reply":
         # Refused ready with its rounds used up (review_refusal): the Assistant can add one.
         v["why"] = own_line(task) or ("Out of review rounds" if task.get("review_out") else None) or last_words(task)
+    # Quiet but on its own background work (SHEP-53): Working; kept on the task for the Tasks panel.
+    v["own_work"] = (v["status"] == "working" and task["state"] == "running" and bool(running)
+                     and all(status_word(k) in ("idle", "done") for k in running) and own_work(task, running))
     if known:
         progress_clock(s, task, v["status"])
     v["report"] = report_of(task, v["status"])
