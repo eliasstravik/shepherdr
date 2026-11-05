@@ -210,10 +210,15 @@ export function modelSections(menus, agent, picks, q) {
     return models.map((m, i) => ({ m, i, r: rank(m) })).sort((a, b) => a.r - b.r || a.i - b.i)
       .map(({ m }) => ({ agent: k, ...m, pinned: picks.pinned.includes(pickKey(k, m.id)) }));
   };
+  // a pinned or recent model typed by id (no CLI lists it) stays on offer
+  const saved = (k) => {
+    const models = menus?.[k]?.models ?? [], known = new Set(models.map((m) => m.id));
+    const ids = [...new Set([...picks.pinned, ...picks.recent].filter((x) => x.startsWith(`${k}:`)).map((x) => x.slice(k.length + 1)))];
+    return [...models, ...ids.filter((id) => !known.has(id)).map((id) => ({ ...typedModel(k, id), typed: false }))];
+  };
   const capped = (key, title, k, rows) => ({ key, title, agent: k, rows: rows.slice(0, CAP), more: Math.max(0, rows.length - CAP) });
   if (!query) {
-    const models = menus?.[agent]?.models ?? [];
-    const rows = order(agent, models);
+    const rows = order(agent, saved(agent));
     const pinned = rows.filter((r) => r.pinned);
     const recent = rows.filter((r) => !r.pinned && picks.recent.includes(pickKey(agent, r.id)));
     const rest = rows.filter((r) => !r.pinned && !picks.recent.includes(pickKey(agent, r.id)));
@@ -228,13 +233,13 @@ export function modelSections(menus, agent, picks, q) {
   for (const k of [agent, ...Object.keys(menus ?? {}).filter((x) => x !== agent)]) {
     const m = menus?.[k];
     if (!m) continue;
-    const rows = order(k, m.models.filter((x) => modelMatches(x, query)));
+    const rows = order(k, saved(k).filter((x) => modelMatches(x, query)));
     if (rows.length) out.push(capped(k, m.name, k, rows));
   }
   // one word that could be an id, and no model has it: start any agent on it as typed
   if (/^[\w.\[\]-]{2,60}$/.test(query)) {
     const rows = [agent, ...Object.keys(menus ?? {}).filter((x) => x !== agent)]
-      .filter((k) => menus?.[k] && !menus[k].models.some((m) => m.id === query)).map((k) => ({ agent: k, ...typedModel(k, query), pinned: false }));
+      .filter((k) => menus?.[k] && !saved(k).some((m) => m.id === query)).map((k) => ({ agent: k, ...typedModel(k, query), pinned: false }));
     if (rows.length) out.push({ key: "typed", title: "Use the id typed", agent, rows, more: 0 });
   }
   return out;
