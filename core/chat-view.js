@@ -133,10 +133,11 @@ export function bandOrder(side, acts, { time = true, react = true } = {}) {
   return side === "user" ? [...lead, ...smiley, "pills"] : ["pills", ...smiley, ...lead.reverse()];
 }
 
-// A message another agent sent with hc often names its sender in its first words ("From HERD-76 (t12u?): …"). The
+// A message another agent sent with hc often names its sender in its first words ("From HERD-76 (t12u?): …", "From
+// the person's Assistant on m3 (t10v): …"). The
 // quiet row already says who, so its preview starts after them; the name stands in when the sender's address is
 // unknown.
-const SIGNED = /^\s*(?:\*\*)?(?:[Mm]essage\s+)?[Ff]rom\s+([A-Z][\w.-]*(?:\s+[\w.-]+){0,2}?)\s*(?:\([^)\n]{0,40}\))?\s*:(?:\*\*)?\s*/;
+const SIGNED = /^\s*(?:\*\*)?(?:[Mm]essage\s+)?[Ff]rom\s+(?:the person's\s+|your\s+)?([A-Z][\w.-]*(?:\s+[\w.-]+){0,2}?)\s*(?:\([^)\n]{0,40}\))?\s*:(?:\*\*)?\s*/;
 export const signedBy = (text) => SIGNED.exec(String(text ?? ""))?.[1]?.trim() || null;
 export const unsigned = (text) => String(text ?? "").replace(SIGNED, "");
 
@@ -160,9 +161,10 @@ export function ownWords(users, pending, matches) {
 // "HERD-12", "Assistant on vm-ssa"), never its terminal address. An artifact's form says its title; the person's own
 // lines (a kept secret) are "You". A sender outside any terminal (from="<machine>/ppid:123") or one gone goes by the
 // name it signed the message with, else "Another agent".
-//   find(address): that terminal ({ name, labels }), else null; machine: the chat's agent's machine (null: here);
-//   taskOf(address): the task ref whose worker that is, else null.
-export function senderName(from, text = null, { find = () => null, machine = null, taskOf = () => null } = {}) {
+//   find(address): that terminal ({ name, labels, template }), else null; machine: the chat's agent's machine (null:
+//   here); taskOf(address): the task ref whose worker that is, else null; here: this machine's own name in
+//   herdr-core: another machine's agent writes our terminals as "<here>/t75", our list has them as "t75".
+export function senderName(from, text = null, { find = () => null, machine = null, taskOf = () => null, here = null } = {}) {
   const [addr, ...rest] = String(from ?? "").trim().split(/\s+/);
   const signed = signedBy(text);
   if (addr === "person") return "You";
@@ -170,14 +172,17 @@ export function senderName(from, text = null, { find = () => null, machine = nul
   if (!/^([\w.-]+\/)?t\d[0-9a-z]*$/.test(addr ?? "")) return String(from);
   // A bare address is on the machine of the agent it was sent to.
   const full = !addr.includes("/") && machine ? `${machine}/${addr}` : addr;
-  const k = find(full);
+  const local = here && full.startsWith(`${here}/`) ? full.slice(here.length + 1) : null;
+  const k = find(full) ?? (local ? find(local) : null);
   const l = k?.labels ?? {}, name = rest.join(" ") || k?.name || "";
-  const on = full.includes("/") ? full.split("/")[0] : null;
-  const away = on && on !== machine ? ` on ${on}` : "";
+  // Where it runs (null: here), said when that isn't where the chat's agent is.
+  const at = local ? null : full.includes("/") ? full.split("/")[0] : null;
+  const away = at !== machine && (at ?? here) ? ` on ${at ?? here}` : "";
   if (l["herdr.role"] === "reviewer" || /\breview/i.test(name)) return "Reviewer";
-  if (l["herdr.role"] === "coordinator" || /^coord/i.test(name)) return `Assistant${away}`;
-  const task = taskOf(full) ?? /^([a-z][a-z0-9]*)-(\d+)(?:-|$)/i.exec(name)?.slice(1, 3).join("-").toUpperCase();
+  if (l["herdr.role"] === "coordinator" || /^(herdr-)?(assistant|coordinator)\b/.test(k?.template ?? "") || /^coord/i.test(name)) return `Assistant${away}`;
+  const task = taskOf(full) ?? (local ? taskOf(local) : null) ?? /^([a-z][a-z0-9]*)-(\d+)(?:-|$)/i.exec(name)?.slice(1, 3).join("-").toUpperCase();
   if (task) return `${task}${away}`;
+  if (!name && signed && / on /.test(signed)) return signed;
   return `${name || signed || "Another agent"}${away}`;
 }
 

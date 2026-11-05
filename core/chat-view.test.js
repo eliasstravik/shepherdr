@@ -48,6 +48,22 @@ describe("rows", () => {
     expect(senderName("person")).toBe("You");
     expect(unsigned("From HERD-76 (t12u): the words")).toBe("the words");
   });
+  test("a sender on the machine reading the chat, written with its name (SHEP-12)", () => {
+    // the web service on m3 shows a chat on vm whose agent got a message from m3's Assistant
+    const terms = { t75: { template: "herdr-assistant-mw3acvzz", labels: { "herdr.role": "coordinator" } }, t80: { name: "shep-4-fix" }, t81: {} };
+    const find = (a) => terms[a] ?? null;
+    expect(senderName("m3/t75", "", { find, machine: "vm", here: "m3" })).toBe("Assistant on m3");
+    expect(senderName("m3/t80", "", { find, machine: "vm", here: "m3" })).toBe("SHEP-4 on m3");
+    expect(senderName("m3/t81", "", { find, machine: "vm", here: "m3", taskOf: (a) => (a === "t81" ? "SHEP-9" : null) })).toBe("SHEP-9 on m3");
+    // its own chat: no "on"
+    expect(senderName("m3/t75", "", { find, machine: null, here: "m3" })).toBe("Assistant");
+    // an Assistant known only by its template
+    expect(senderName("t75", "", { find: () => ({ template: "herdr-assistant-x" }) })).toBe("Assistant");
+    // unknown here: "Another agent", unless it signed
+    expect(senderName("box/t99", "", { find, machine: "vm", here: "m3" })).toBe("Another agent on box");
+    expect(senderName("box/t99", "From the person's Assistant on m3 (t10v): the key", { find, machine: "vm", here: "m3" })).toBe("Assistant on m3");
+    expect(unsigned("From the person's Assistant on m3 (t10v): the key")).toBe("the key");
+  });
   test("the band: each side the other's mirror, pills at the bubble's outer edge", () => {
     expect(bandOrder("user", ["reply", "copy", "rewind"])).toEqual(["time", "reply", "copy", "rewind", "react", "pills"]);
     expect(bandOrder("agent", ["reply", "copy", "fork"])).toEqual(["pills", "react", "fork", "copy", "reply", "time"]);
