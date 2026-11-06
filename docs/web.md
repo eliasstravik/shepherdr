@@ -53,7 +53,7 @@ connection it came on). A page from anywhere else can't change anything: writes 
   made from an older one is PATCHed on the next call (`ensureAgent`).
   It speaks briefly (one or two short sentences), stays quiet through silence (`turn_timeout` -1; only 15 minutes
   of silence or an hour-long call ends it) and ends the call itself with ElevenLabs' `end_call` after the person's
-  yes to "End the call?": the socket closes cleanly, so the page (an `ended` message) and the window let its "Bye."
+  yes to "Are you sure you want to end the call?": the socket closes cleanly, so the page (an `ended` message) and the window let its "Bye."
   play out and close without an error.
   A fifth tool, `screen` (SHEP-51, `core/screen.js`), is the fallback for what those four can't do: the app that
   started the call reads what it shows as numbered things, as a screen reader would (`e7 tab "Artifacts" selected`),

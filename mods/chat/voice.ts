@@ -362,7 +362,7 @@ async function main() {
       if (!a) a = await localTool(name, params);
       // an open: this window's chat shows it, and says so (navved/), before the agent may say it's on screen
       // (the screen tool's answer is the screen itself; a space then its panel: the second once the first shows)
-      if (a.nav?.kind === "screen") a = { ...a, ...screenWords(await showHere(a.nav)) };
+      if (a.nav?.kind === "screen") a = { ...a, ...screenWords(await showHere(a.nav), a.nav.do) };
       else if (a.nav) {
         let ack = await showHere(a.nav);
         if (ack?.ok && a.then) ack = await showHere(a.then);

@@ -274,7 +274,8 @@ test("an artifact by words of its title, newest first", () => {
 
 test("open is on screen only once the app that started the call says so", async () => {
   const a = await voiceTool("open", { what: "artifact", id: "hulk mini game" }, fromMbp, { ...io(), snap: () => fleet });
-  expect((await shown(a, async () => ({ ok: true }))).result).toBe("It's on the person's screen now: the artifact \"Hulk mini game · Proof\".");
+  // shown: as few words as can be, so the agent just says "Opened." (SHEP-83)
+  expect((await shown(a, async () => ({ ok: true }))).result).toBe('{"ok":true,"shown":"the artifact \\"Hulk mini game · Proof\\""}');
   const no = await shown(a, async () => ({ ok: false, why: "this app doesn't list that artifact" }));
   expect(no.error).toBe(true);
   expect(no.result).toContain("couldn't open");
@@ -282,7 +283,7 @@ test("open is on screen only once the app that started the call says so", async 
   // an old page that never answers: not on screen
   const silent = await shown(a, async () => null);
   expect(silent.error).toBe(true);
-  expect(silent.result).not.toContain("on the person's screen now");
+  expect(silent.result).not.toContain('"ok":true');
   // look and send aren't asked about
   const look = await voiceTool("look", { what: "here" }, fromMbp, { ...io(), snap: () => fleet });
   expect(await shown(look, async () => { throw new Error("asked"); })).toEqual(look);
@@ -299,7 +300,7 @@ test("open: the shown space's panels, a space's panel by its name (space first, 
   const asked: any[] = [];
   const r = await shown(there, async (nav) => { asked.push(nav); return { ok: true }; });
   expect(asked).toEqual([{ kind: "space", place: "mini/sp2" }, { kind: "panel", panel: "artifacts" }]);
-  expect(r.result).toContain("on the person's screen now");
+  expect(r.result).toContain('"ok":true');
   expect("then" in r).toBe(false);
   // the space didn't open: the panel isn't asked for
   const one: any[] = [];
@@ -315,7 +316,7 @@ test("screen: checked here, done by the app that started the call, its answer th
   const a = await voiceTool("screen", { do: "click", ref: "e4" }, web, io());
   expect(a.nav).toMatchObject({ kind: "screen", do: "click", ref: "e4", confirmed: false });
   const r = await shown(a, async () => ({ ok: true, did: 'Pressed the tab "Artifacts"', screen: "Screen: the web app on a phone." }));
-  expect(r.result).toBe('Pressed the tab "Artifacts". What the screen shows now:\nScreen: the web app on a phone.');
+  expect(r.result).toBe('Pressed the tab "Artifacts". The screen now, for your next step only (don\'t read it out):\nScreen: the web app on a phone.');
   const held = await shown(a, async () => ({ ok: false, ask: "Press Delete task?", screen: "" }));
   expect(held.result).toContain("Ask the person first");
   expect((await shown(a, async () => null)).error).toBe(true);

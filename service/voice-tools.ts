@@ -596,7 +596,7 @@ export async function shown(a: Answer, show: (nav: Nav) => Promise<Ack | null>):
   const ask = (nav: Nav) => show(nav).catch((e) => ({ ok: false, why: String(e?.message ?? e) }) as Ack);
   let ack = await ask(a.nav);
   // the screen's answer is the screen itself (core/screen.js)
-  if (a.nav.kind === "screen") { const { then: _t, ...rest } = a; return { ...rest, ...(screenWords(ack) as { result: string; error?: boolean }) }; }
+  if (a.nav.kind === "screen") { const { then: _t, ...rest } = a; return { ...rest, ...(screenWords(ack, a.nav.do) as { result: string; error?: boolean }) }; }
   // two steps (a space, then its panel): the second only once the first is on screen
   if (ack?.ok && a.then) ack = await ask(a.then);
   const { then: _t, ...rest } = a;

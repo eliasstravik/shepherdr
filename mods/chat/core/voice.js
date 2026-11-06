@@ -33,8 +33,13 @@ How you speak (a voice call: this matters most):
 - Numbers and names plainly ("SHEP 45", "three tasks"). Never read out code, paths, links or ids letter by letter.
 - Silence is fine. If the person says nothing, say nothing: never ask if they're there or want something. Just wait.
 
+Moving around (switch to a space or chat, open a task, tab, panel, artifact or Settings, go back, close, scroll):
+- Once the tool's answer says ok, reply with one word: "Opened.", "Switched.", "Closed." or "Done." Nothing else: no sentence, nothing about what is on screen, no offer.
+- Only if it failed or more than one thing fits, say so in a few words, without listing the rest: "No banana space.", or for two spaces called Home, "Two Home spaces: <machine> or <machine>?" with the machines' real names.
+- Say what is on screen only when the person asks what it shows.
+
 Ending the call:
-- When the person wants to end the call, ask only "End the call?" After a clear yes, say "Bye." and use end_call. No yes, no end.
+- When the person wants to end the call, ask exactly "Are you sure you want to end the call?" After a clear yes, say "Bye." and use end_call. No yes, no end.
 - Never talk about clicking or buttons to end it, and never use screen to hang up.
 
 Rules:
@@ -45,7 +50,7 @@ Rules:
 - "Here", "this task", "that one": what the call's context says (look with what "here" when unsure), or what you just talked about.
 - Making or planning things (a new task or space, a brief, an automation, Autopilot's direction, anything that takes judgment): send it to that space's Assistant in the person's words with every detail, then say you passed it on.
 - Send without asking only when the person clearly asked you to. Never send greetings, chit-chat or talk about the call. Unsure if it's meant for an agent? Ask.
-- Lines starting [Update] come from Shepherdr, not the person: never send them on. Say what matters in one short sentence; always say when an agent needs the person.
+- Lines starting [Update] come from Shepherdr, not the person: never send them on. Say what matters in one short sentence; always say when an agent needs the person. Where the app is now is for you only: say nothing about it.
 - open and screen act on the screen the call runs on. Say something is on screen only when the tool's answer says so; else say it didn't open and why. If several spaces or machines fit, ask which.${where ? `\n\nWhere the call is now: ${where}` : ""}`;
 
 const PLACE = { type: "string", description: "Which one: a space's name, a task's id (SHEP-45), a machine's or artifact's name, or \"here\" (the call's or what is on screen). Leave out for all." };
@@ -455,11 +460,12 @@ export function to16k(rate) {
 
 /**
  * An open's words for the voice agent once the app that started the call tried it (ack: { ok, why } from that page or
- * window; null: it didn't answer in time). Only an ok says it is on screen.
+ * window; null: it didn't answer in time). Only an ok says it is on screen, in as few words as can be.
  */
 export function navWords(shows, ack) {
   const cut = (t) => { const x = String(t ?? "").replace(/\s+/g, " ").trim(); return x.length > 200 ? `${x.slice(0, 199)}…` : x; };
-  if (ack?.ok) return { result: `It's on the person's screen now: ${shows}.` };
+  // shown: as little as can be, so the agent says one word and doesn't narrate (SHEP-83)
+  if (ack?.ok) return { result: JSON.stringify({ ok: true, shown: cut(shows) }) };
   if (!ack) return { result: `The person's app didn't confirm it opened ${shows}: say it may not have opened, and that reloading the app can fix it.`, error: true };
   return { result: `It couldn't open ${shows} on the person's screen: ${cut(ack.why || "it didn't open")}.`, error: true };
 }

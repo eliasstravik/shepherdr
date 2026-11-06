@@ -112,11 +112,16 @@ export function screenText({ head = {}, nodes = [], hidden = 0, find = "", max =
 /**
  * What the app said once it tried a screen action, in words for the voice agent. ack (from the page or window):
  * { ok, did?, why?, ask?, screen? }; null: it didn't answer in time. ask: a risky click it held back, to say out loud.
+ * did: what was asked (screen's do). Moving around (back, close, scroll) answers only that it worked, so the agent says
+ * "Done." and doesn't read the screen out (SHEP-83); other actions add the new screen, for its next step only.
  */
-export function screenWords(ack) {
+export const MOVES = ["back", "close", "scroll"];
+export function screenWords(ack, did = "") {
   if (!ack) return { result: "The person's app didn't answer: it may be closed or asleep. Say so; reloading the app can fix it.", error: true };
   const screen = typeof ack.screen === "string" ? ack.screen.slice(0, MAX + 400) : "";
   if (ack.ask) return { result: `Nothing done yet. Ask the person first: "${clip(ack.ask, 200)}" Only after a clear yes, do it again with confirmed true.${screen ? `\n${screen}` : ""}` };
   if (!ack.ok) return { result: `It didn't work: ${clip(ack.why || "the app couldn't do it", 200)}.${screen ? `\n${screen}` : ""}`, error: true };
-  return { result: `${ack.did ? `${clip(ack.did, 200)}. ` : ""}${screen ? `What the screen shows now:\n${screen}` : ""}`.trim() };
+  if (MOVES.includes(did)) return { result: JSON.stringify({ ok: true, did: clip(ack.did || did, 120) }) };
+  if (did === "look") return { result: screen || "Nothing to act on is on screen." };
+  return { result: `${ack.did ? `${clip(ack.did, 200)}. ` : "Done. "}${screen ? `The screen now, for your next step only (don't read it out):\n${screen}` : ""}`.trim() };
 }
