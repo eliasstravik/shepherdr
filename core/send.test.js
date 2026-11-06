@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { inputLine, sendBody } from "./send.js";
+import { inputLine, sendBody, steerNow } from "./send.js";
 import { LOG, Conversation, records } from "./chat-log.js";
 
 // A Claude Code terminal as hc sees it: what its screen shows after each call.
@@ -77,4 +77,31 @@ test("words typed while Claude Code works show queued until it takes them", asyn
   const note = "<task-notification>\n<task-id>b1</task-id>\n<tool-use-id>t1</tool-use-id>\n<status>completed</status>\n</task-notification>";
   const c = await conv([q("enqueue", note), typed, q("dequeue")]);
   expect(c.queued().map((x) => x.text)).toEqual(["what is this"]);
+});
+
+// A message in Claude Code's own queue: Send now presses Ctrl+Enter only while its screen offers it (#662)
+test("Send now on a queued message presses Ctrl+Enter only while Claude Code offers it", async () => {
+  const fake = (offers, status = "working") => {
+    const calls = [];
+    const io = {
+      sleep: async () => {},
+      status: () => status,
+      hc: async (args) => {
+        calls.push(args.join(" "));
+        return { code: 0, stdout: args[0] === "read" ? `● working\n❯ \n${offers ? "  ctrl+enter to send now" : "  esc to interrupt"}` : "" };
+      },
+    };
+    return { io, calls };
+  };
+  const on = fake(true);
+  expect(await steerNow(on.io, "t1")).toBe(true);
+  expect(on.calls).toContain("keys t1 ctrl+enter");
+  // not offered: nothing pressed (on an empty prompt Ctrl+Enter would do something else), and it says so
+  const off = fake(false);
+  expect(await steerNow(off.io, "t1")).toBe(false);
+  expect(off.calls.some((c) => c.startsWith("keys"))).toBe(false);
+  // the agent no longer works: its queue goes in on its own
+  const idle = fake(false, "idle");
+  expect(await steerNow(idle.io, "t1")).toBe(false);
+  expect(idle.calls.length).toBe(1);
 });

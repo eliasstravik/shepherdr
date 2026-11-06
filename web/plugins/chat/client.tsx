@@ -195,7 +195,7 @@ function Bubble({ msg, chat, from, out, last, pics, images, writing }: { msg: Me
                     const blocker = chat.messages.findLast((m) => m.question?.sent === undefined && !!m.question && !m.waiting)
                     return blocker ? <LinkButton onClick={() => jumpTo(chat.key, blocker.id, { card: true })}>Go to question</LinkButton> : null
                   })()}
-                </> : waitLine(msg.waitsFor)}</div> : null}
+                </> : msg.waitsFor === 'queue' ? <InQueue chatKey={chat.key} /> : waitLine(msg.waitsFor)}</div> : null}
                 {msg.text ? <div ref={text} data-text>{you ? <YourText text={msg.text} chat={chat.key} /> : <Fold id={msg.id}><Markdown text={msg.text} chat={chat.key} /></Fold>}</div> : null}
               </div>,
               true,
@@ -259,6 +259,23 @@ function Held({ chatKey }: { chatKey: string }) {
         </div>
       ))}
     </div>
+  )
+}
+
+/** one in its CLI's own queue (#662): Queued, and Send now when the agent is Claude Code (its Ctrl+Enter takes it at
+ *  once, mid-turn; the service presses it only while its screen offers it). Why it couldn't, in place of Send now */
+function InQueue({ chatKey }: { chatKey: string }) {
+  const claude = useStore((s) => s.chats[chatKey]?.agent?.kind === 'claude')
+  const [state, setState] = useState<'idle' | 'sending' | string>('idle')
+  const now = () => {
+    setState('sending')
+    act({ type: 'steer', chat: chatKey }).then(() => setState('idle'), (e) => setState(String(e?.message ?? e) || 'It didn\'t go.'))
+  }
+  return (
+    <>
+      {WORDS.inQueue}
+      {claude ? state === 'idle' ? <>{' · '}<LinkButton onClick={now}>{WORDS.sendNow}</LinkButton></> : state === 'sending' ? ' · Sending…' : <>{' · '}{state}</> : null}
+    </>
   )
 }
 

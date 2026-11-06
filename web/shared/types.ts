@@ -1273,6 +1273,8 @@ export type Action =
   | { type: 'pause'; chat: string }
   /** its agent goes and the task is To do; its work stays */
   | { type: 'stop'; chat: string }
+  /** Send now on a message in its CLI's own queue (waitsFor 'queue'): Claude Code takes it at once, mid-turn */
+  | { type: 'steer'; chat: string }
   /** Stop on a background shell or watcher over the box (Job.id) */
   | { type: 'stop-job'; chat: string; job: string }
   /** what the restart sheet shows for a coordinator (chat: its place id) or a task's agent (ID/Agent): RestartInfo */

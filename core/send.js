@@ -53,14 +53,16 @@ export async function replyInstead(io, addr, text) {
 }
 
 // Claude Code's "send now" for a message it queued while working: Ctrl+Enter, only when its screen offers it
-// (pressed on an empty prompt it would do something else).
+// (pressed on an empty prompt it would do something else). Also a queued message's own Send now (#662), for one left
+// in its queue when the screen didn't offer it in time. -> whether it was pressed.
 export async function steerNow(io, addr) {
   for (let i = 0; i < 4; i++) {
     await io.sleep(i ? 300 : 150);
     const r = await io.hc(["read", addr, "--lines", "40"]).catch(() => null);
-    if (/ctrl\+enter to send now/i.test(r?.stdout ?? "")) { await io.hc(["keys", addr, "ctrl+enter"]); return; }
-    if (io.status() !== "working") return;
+    if (/ctrl\+enter to send now/i.test(r?.stdout ?? "")) { await io.hc(["keys", addr, "ctrl+enter"]); return true; }
+    if (io.status() !== "working") return false;
   }
+  return false;
 }
 
 // A picture's path on a line of its own, as a sent file goes after the words.

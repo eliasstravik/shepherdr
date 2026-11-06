@@ -23,6 +23,8 @@ export const WORDS = {
   // typed while it works: in its CLI's queue, taken at its next step (Claude Code's own queue)
   inQueue: "Queued · it reads it at its next step",
   sendNow: "Send now",
+  // Send now on one in its queue that its CLI didn't offer to take at once (its screen had no "ctrl+enter to send now")
+  notNow: "It couldn't take it now",
   ended: "This task's agent has ended.",
   resuming: "Resuming…",
   emptyTitle: "What should the Assistant do?",
