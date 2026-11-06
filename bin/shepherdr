@@ -667,7 +667,12 @@ def check_tools(root_is_home):
         if not shutil.which(name):
             bad.append(f"{name} isn't on the PATH")
     optional = {"gh": "pull requests (tasks)", "agent-browser": "the task browser (0.41.1)", "node": "the task browser",
-                "bun": "voice calls and dictation", "pw-record": "dictation"}
+                "bun": "voice calls and dictation"}
+    # the window's mic and speaker: PipeWire on Linux; on a Mac its own audio, through a helper built with swiftc
+    if sys.platform == "darwin":
+        optional["swiftc"] = "the mic and speaker in the window: xcode-select --install"
+    else:
+        optional.update({"pw-record": "dictation and voice calls in the window", "pw-play": "voice calls in the window"})
     for name, what in optional.items():
         if not shutil.which(name):
             notes.append(f"optional: {name} isn't on the PATH ({what})")

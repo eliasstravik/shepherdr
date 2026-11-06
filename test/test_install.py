@@ -375,5 +375,19 @@ class Install(unittest.TestCase):
         self.assertEqual(tree(self.root), self.before)
 
 
+class AudioTools(unittest.TestCase):
+    def test_doctor_names_the_mic_and_speaker_tools_per_platform(self):
+        """Linux names pw-record and pw-play; a Mac names Apple's command line tools (swiftc) instead."""
+        from importlib.machinery import SourceFileLoader
+        from unittest import mock
+        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        for platform, want, not_want in (("linux", ["pw-record", "pw-play"], "swiftc"), ("darwin", ["swiftc"], "pw-record")):
+            with mock.patch.object(sh.sys, "platform", platform), mock.patch.object(sh.shutil, "which", lambda n: None):
+                notes = "\n".join(sh.check_tools(False)[1])
+            for name in want:
+                self.assertIn(f"optional: {name} isn't on the PATH", notes)
+            self.assertNotIn(not_want, notes)
+
+
 if __name__ == "__main__":
     unittest.main()
