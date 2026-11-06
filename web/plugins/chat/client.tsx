@@ -341,6 +341,14 @@ const SWIPE = 64
 /** how far the chat slides left to show every message's time (like iMessage) */
 const PEEK = 80
 
+/** a box from el up to (not past) top that scrolls sideways: wider than its view, and allowed to scroll */
+function scrollsAcross(el: Element | null, top: Element) {
+  for (; el && el !== top && top.contains(el); el = el.parentElement) {
+    if (el.scrollWidth > el.clientWidth + 1 && /auto|scroll/.test(getComputedStyle(el).overflowX)) return true
+  }
+  return false
+}
+
 /** on a touch screen, holding a message (or tapping it twice) does fn, with a light tap from the phone; sliding it
     right replies (swipe), sliding it left shows every message's time while the finger stays; scrolling, a tap on a link or a picture, a swipe from the screen's edge and a mouse are left
     alone */
@@ -388,7 +396,10 @@ function useHold(fn: ((at: At) => void) | null, swipe: (() => void) | null = nul
       r.current = { ...r.current, x: e.clientX, y: e.clientY, touch, fired: false, el: e.currentTarget, slide: undefined, dx: 0, armed: false }
       // a swipe from the screen's edge is the screen's (it goes back, or opens the places)
       if (!touch || Date.now() - scrolled < 250 || e.clientX < EDGE) return
+      // a finger on a box wider than its view (a code block, a table) scrolls that box sideways: the message stays put
+      // (#629); a hold still works
       r.current.armed = true
+      if (scrollsAcross(e.target as Element, e.currentTarget)) r.current.slide = 'off'
       if (!fn) return
       if (again) {
         r.current.last = 0
@@ -1761,9 +1772,23 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
       removeEventListener('resize', on)
     }
   }, [])
+  // the last full fit: its words, what it was fitted for, and the box's sizes then (its height's cap, a line, paddings)
+  const fit = useRef<{ text: string; width: number; room: number; live: boolean; max: number; lh: number; pads: number } | null>(null)
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
+    // a letter typed on at the end (the box, its width and the screen as they were): the box can only grow, so it is
+    // measured as it stands, once, and grows only when the words no longer fit. A layout or two for each letter, not
+    // five: typing on a phone keeps up (#631)
+    const f = fit.current
+    if (f && f.width === width && f.room === room && f.live === !!live && text.length > f.text.length && text.startsWith(f.text)) {
+      f.text = text
+      const h = el.scrollHeight
+      if (h > el.clientHeight) el.style.height = `${h > f.max && f.lh ? f.pads + Math.floor((f.max - f.pads) / f.lh) * f.lh : h}px`
+      if (document.activeElement === el) reveal(el)
+      fades(el)
+      return
+    }
     // the words grow the box upward, between buttons that stay put, up to its max height (CSS), then scroll inside.
     // Measuring at auto height loses where it was scrolled to: it scrolls back, then the line you type comes into full
     // view, padding and all (the browser alone stops short, under the fade)
@@ -1778,6 +1803,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
     const cs = getComputedStyle(el)
     const [max, lh, pads] = [parseFloat(cs.maxHeight), parseFloat(cs.lineHeight), parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom)]
     el.style.height = `${el.scrollHeight > max && lh ? pads + Math.floor((max - pads) / lh) * lh : el.scrollHeight}px`
+    fit.current = { text, width, room, live: !!live, max, lh, pads }
     hold.style.height = ''
     el.scrollTop = top
     if (document.activeElement === el) reveal(el)
@@ -1838,9 +1864,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
     // what goes with the box (send, +, a file's x, its menu) leaves the box the focus: a phone's keyboard stays up. What
     // shows over the box (working, queued, jobs, lists) is a stack with one gap, none of its own: as the window's
     <div data-kb data-keep-box className={clsx('mx-auto flex w-full max-w-read shrink-0 flex-col gap-2 px-4 pt-2', keyboard && device === 'phone' ? 'pb-1' : 'pb-2.5')}>
-      {registry.composerAbove.map(({ View }, i) => (
-        <View key={i} chatKey={chatKey} cli={cli} />
-      ))}
+      <ComposerAbove chatKey={chatKey} cli={cli} />
       <SlashList chatKey={chatKey} text={text} pick={(name) => { setText(`/${name} `); ref.current?.focus() }} />
       <MentionList items={mentions} sel={msel} from={reach?.from ?? null} pick={takeMention} />
       {/* the window's box: the words across its full width, then a row in it of attach on the left and on the right
@@ -1948,8 +1972,8 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                 </IconButton>
               ) : null}
               <div className="flex-1" />
-              <AgentLine chatKey={chatKey} cli={cli} />
-              {Mic ? <Mic chatKey={chatKey} /> : null}
+              <AgentLineKept chatKey={chatKey} cli={cli} />
+              {Mic ? <MicKept chatKey={chatKey} /> : null}
               {text.trim() || files.length || !Idle ? (
                 <button
                   type="button"
@@ -1982,6 +2006,17 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
 
 const noFiles: { name: string; path?: string }[] = []
 
+// What sits round the message box but not its words (what shows over it, the model menu, the mic) is drawn again only
+// when its own bits change, not on each letter typed (#631)
+const ComposerAbove = memo(function ComposerAbove({ chatKey, cli }: { chatKey: string; cli: string }) {
+  return registry.composerAbove.map(({ View }, i) => <View key={i} chatKey={chatKey} cli={cli} />)
+})
+const AgentLineKept = memo(AgentLine)
+const MicKept = memo(function MicKept({ chatKey }: { chatKey: string }) {
+  const Mic = registry.composerMic
+  return Mic ? <Mic chatKey={chatKey} /> : null
+})
+
 /** mark which ends of the message box have more words past them, for its fades */
 function fades(el: HTMLElement) {
   // only words past the padding count: a box a few px short of its end (a phone showing the caret) has none below
@@ -1993,6 +2028,11 @@ function fades(el: HTMLElement) {
 /** the line with the caret in full view in the message box, with the padding round it, so no fade is on it */
 function reveal(el: HTMLTextAreaElement) {
   if (el.scrollHeight <= el.clientHeight || el.selectionStart !== el.selectionEnd) return
+  // at the end (typing on), its line is the last: the end of the box, its padding and all, no copy to measure
+  if (el.selectionEnd === el.value.length) {
+    el.scrollTop = el.scrollHeight - el.clientHeight
+    return
+  }
   const cs = getComputedStyle(el)
   const [pt, pb, pl, pr, lh] = [cs.paddingTop, cs.paddingBottom, cs.paddingLeft, cs.paddingRight, cs.lineHeight].map(parseFloat)
   if (!lh) return
