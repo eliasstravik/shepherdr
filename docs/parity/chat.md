@@ -159,7 +159,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Writing it down | W "Writing", spinner in Done | C "Writing", Done disabled | ✓ |
 | Call row | W:3259 Mute (mic / mic-off), wave, Connecting / Listening / Thinking / Speaking / Muted + m:ss, red round X | V:98 CallBox: the same, red round X | ✓ |
 | No key | W:2936 "Voice calls need an ElevenLabs key", "Add your key in Settings › Secrets as ELEVENLABS_API_KEY, then press the call button again.", Open Secrets | V:34 CallHelp over the box, same words, Open Secrets | ✓ (was a top error bar) |
-| A call elsewhere (SHEP-51: no bar) | spaces-chat callMark: a green pill with the wave and m:ss on the call's space row, goes back to its chat | places CallMark: the same pill on the space row, goes back to its chat | = |
+| A call elsewhere (SHEP-51, SHEP-66) | spaces-chat callMark: a green pill with the wave and m:ss on the call's space row, goes back to its chat; the narrow rail shows the green wave on its space instead | places CallMark: the same pill on the space row; where no sidebar shows it (phone, tablet, shut sidebar) a slim soft-green band at the top with the space and clock, which goes back to its chat | ◇ the window always shows its sidebar or its rail; a phone or a shut web sidebar has neither |
 | Call error | B "Voice call: …" with × | V:168 | ✓ |
 
 ## Image viewer (mods/chat-image)

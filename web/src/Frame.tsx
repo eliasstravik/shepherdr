@@ -12,7 +12,7 @@ const onResize = (l: () => void) => {
   addEventListener('resize', l)
   return () => removeEventListener('resize', l)
 }
-const useWindowWidth = () => useSyncExternalStore(onResize, () => innerWidth)
+export const useWindowWidth = () => useSyncExternalStore(onResize, () => innerWidth)
 
 /** The frame's widths as CSS variables, for its sidebars as stored and as drawn (`sb`, places shut when not drawn) */
 function widths(sidebars: Sidebars, sb: Sidebars, width: number, places: boolean, panel: boolean, focus: boolean) {

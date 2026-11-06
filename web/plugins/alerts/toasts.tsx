@@ -118,7 +118,7 @@ export function Toasts() {
       onPointerLeave={() => setHovered(false)}
       className={clsx(
         'absolute z-25 flex flex-col overflow-hidden rounded-box bg-bg shadow-toast',
-        phone ? 'inset-x-3 top-[max(env(safe-area-inset-top),--spacing(3))]' : 'right-4 bottom-4',
+        phone ? 'inset-x-3 top-[max(env(safe-area-inset-top),--spacing(3))] [[data-topbar]~*_&]:top-3' : 'right-4 bottom-4',
       )}
       style={phone ? undefined : { width: T.WIDTH }}
     >
@@ -166,7 +166,7 @@ function PhoneToast({ items }: { items: Toast[] }) {
     <div
       role="status"
       aria-live="polite"
-      className="absolute inset-x-3 top-[max(env(safe-area-inset-top),--spacing(2))] z-25"
+      className="absolute inset-x-3 top-[max(env(safe-area-inset-top),--spacing(2))] z-25 [[data-topbar]~*_&]:top-2"
     >
       <div
         role={go ? 'button' : undefined}

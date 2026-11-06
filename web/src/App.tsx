@@ -225,7 +225,7 @@ function Drawer() {
       onOpen={(drawer) => setUI({ drawer })}
       can={can}
       label="Spaces"
-      panel={phone ? 'w-[84%] pt-[env(safe-area-inset-top)]' : 'w-[320px]'}
+      panel={phone ? 'w-[84%] pt-[env(safe-area-inset-top)] [[data-topbar]~*_&]:pt-0' : 'w-[320px]'}
     >
       <Brand />
       {P ? <P /> : null}

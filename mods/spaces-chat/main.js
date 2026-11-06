@@ -707,20 +707,30 @@ export default class Spaces extends View {
       );
   }
 
+  // The rail's row: its number and status; a voice call's space shows the call's green wave instead, and goes back to
+  // the call (SHEP-66: the rail has no room for callMark's clock, and the wave was nowhere on it).
   compact({ w, i }, t) {
+    const call = this.callOf(w);
     return h_flex()
       .id(`space-${w.id}`)
       .h(26)
       .flex_none()
       .justify_center()
+      .items_center()
       .gap(4)
       .rounded(RADIUS.card)
       .cursor_pointer()
       .when(w.active, (el) => el.bg(t.raised))
+      .when(Boolean(call), (el) => el.bg(`${green()}26`))
       .hover((s) => s.bg(t.hover))
-      .on_click(() => run("space.select", { id: w.id }))
+      .on_click(() => {
+        run("space.select", { id: w.id });
+        if (call) { run("tab.select", { id: call.tab }); run("pane.focus", { pane: call.pane }); }
+      })
       .child(nameText(String(i + 1), this.unread.has(w.id), muted(w.id) ? t.dim : w.active ? t.foreground : t.muted, t))
-      .child(div().text_color(tone(t, w.status)).child(glyph(w.status)));
+      .child(call
+        ? svg("mods/chat/audio-lines.svg").size(12).flex_none().text_color(green()).loop("opacity", { from: 0.45, to: 1, period: 1400 })
+        : div().text_color(tone(t, w.status)).child(glyph(w.status)));
   }
 
   close() { this.popup?.close?.(); }

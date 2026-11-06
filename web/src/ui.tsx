@@ -297,10 +297,13 @@ export function Waves({ className }: { className?: string }) {
 /** minutes and seconds since a moment, ticking: "0:42" */
 export function useElapsed(since: number) {
   const [, tick] = useState(0)
+  // each tick on the second since it began, so two clocks of one call (the band, the sidebar's mark) never differ
   useEffect(() => {
-    const t = setInterval(() => tick((x) => x + 1), 1000)
-    return () => clearInterval(t)
-  }, [])
+    let t: ReturnType<typeof setTimeout>
+    const next = () => { t = setTimeout(() => { tick((x) => x + 1); next() }, 1000 - ((Date.now() - since) % 1000) + 10) }
+    next()
+    return () => clearTimeout(t)
+  }, [since])
   const s = Math.max(0, Math.floor((Date.now() - since) / 1000))
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }

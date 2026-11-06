@@ -1041,10 +1041,10 @@
         ]
       },
       "forms": {
-        "herdr": "Call an Assistant (ElevenLabs), mute, call mark on its space in the sidebar; the voice agent reads and acts on the window's frame",
+        "herdr": "Call an Assistant (ElevenLabs), mute, call mark on its space in the sidebar (a green wave on the narrow rail); the voice agent reads and acts on the window's frame",
         "desktop": "Same, through the service",
         "tablet": "Same",
-        "phone": "Call mark on its space in the sidebar; the voice agent reads and acts on the page"
+        "phone": "Call mark on its space in the sidebar, and a slim band at the top while away from the call; the voice agent reads and acts on the page"
       },
       "service": [
         "voice.ts",
