@@ -142,4 +142,4 @@ def cmd_star(args):
         if s.get("asked") and not s.get("artifact"):
             set_state(d, {**s, "artifact": art})
     return say(args, {"asked": True, "artifact": art},
-               f"The card is in your chat ({art}). Say nothing more about it; its buttons answer by themselves.")
+               f"The card is in your chat ({art}). Say nothing more about it; its answer comes back to you as a message.")
