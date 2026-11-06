@@ -1,5 +1,30 @@
 # Changelog
 
+## 3.1.13
+
+Dictation that writes while you speak, Tasks grouped by space, calmer voice calls, and many phone and chat fixes.
+
+- Dictation writes your words while you speak. Done stops the mic at once and shows a calm Writing… with Cancel.
+- Tasks by status are split by machine and space when they sit in more than one, and a This space chip shows only the
+  space you're in (web and window).
+- Voice calls: short answers, quiet through silence, and the call ends itself after you say yes to End the call?. On a
+  phone, a slim green band at the top takes you back to a call you can't see.
+- The Herdr window on a Mac uses the Mac's own mic and speaker for dictation and calls.
+- Dismiss (or Esc) closes a question or permission card without an answer; the agent hears it was declined.
+- Send now on a message waiting in Claude Code's queue (web and window).
+- A task's header has no Pin button any more: the task row's menu pins it.
+- Phone chat: wide code and tables scroll on their own, typing is smoother, and folded replies never blank the list.
+- Chat shows typed <words>, keeps your first message after a reopen, and ignores a template's example news.
+- New tasks start from a freshly fetched base branch, and Settings › Tasks › Branch names picks how branches are named.
+- The service's port can be set at install and is checked before anything is sent to it; the web app installs on a
+  home screen behind login proxies.
+- Alerts on this device show whether they really work, can be turned off, send a test, and let each device choose
+  what it hears.
+- Agents can offer feedback about Shepherdr itself; an issue is filed only after you say yes (switch in Settings ›
+  Agents).
+- A one-time "Enjoying Shepherdr?" card with a plain link to star it on GitHub (switch in Settings › Agents).
+- The Autopilot switch stays put: its status and Run now open to its left.
+
 ## 3.1.12
 
 Artifacts in a task's view, and tasks that finish cleanly after a squash merge.
