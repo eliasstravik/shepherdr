@@ -31,6 +31,15 @@ export function fromLine(events, where) {
 // What an automation's row says of where it is: its machine and space, both whatever the grouping (the Automations
 // group sits under no machine or space heading); its machine only when more than one machine has tasks.
 export const autoWhere = (machine, space, multi) => [multi ? machine : null, space].filter(Boolean).join(" · ") || null;
+// This space (SHEP-72, the filter row's toggle): a task, automation or Needs-you item is a space's when it is on the
+// space's machine and either its list's folder is the space's folder, or it was started for that space (the space id
+// herdr-task keeps on it: "sp3", or "vm/sp3" once read from another machine). space: { id, machine, folder };
+// thing: { machine, folder, space }.
+const bareId = (id) => (id == null ? null : String(id).slice(String(id).lastIndexOf("/") + 1));
+export function inSpace(space, thing) {
+  if (!space || !thing || (thing.machine ?? null) !== (space.machine ?? null)) return false;
+  return (Boolean(thing.folder) && thing.folder === space.folder) || (thing.space != null && bareId(thing.space) === bareId(space.id));
+}
 // A list's task id: HAT-4.
 export const refOf = (list, task) => `${list.prefix}-${task.id}`;
 // A task's pin key (shared "tasks.pinned"): "<machine, empty here>:<folder>#<id>".
