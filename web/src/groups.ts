@@ -3,11 +3,13 @@
 // tasks go) across everything it lists, or one list per space. A list of one machine's tasks (its chip) can be by
 // space; one of more machines' (everything, or chips on more), also one list per machine, or each machine's name over
 // its spaces' lists. One space's list is by status alone. More machines' and one machine's each keep their choice,
-// remembered on this device; by status until chosen.
+// remembered on this device; by status until chosen. By status on more spaces, each status's tasks (but Pinned's and
+// Needs you's) go under a light heading per machine · space when they are in more than one (Split by space, on until
+// switched off).
 import { doneNewestFirst, type Machine, type Place, type Task } from '@shared/types.ts'
 
 export type GroupBy = 'status' | 'machine' | 'project' | 'machine-project'
-export type Groups = { all: GroupBy; machine: GroupBy }
+export type Groups = { all: GroupBy; machine: GroupBy; split: boolean }
 
 export const GROUPS: [Task['status'], string][] = [
   ['need', 'Needs you'],
@@ -29,11 +31,11 @@ export function loadGroups(): Groups {
   const ok = (v: unknown) => (GROUP_BY.includes(v as GroupBy) ? (v as GroupBy) : 'status')
   try {
     const v = JSON.parse(localStorage.getItem(KEY) ?? 'null') as Partial<Groups> | null
-    if (v) return { all: ok(v.all), machine: ok(v.machine) }
+    if (v) return { all: ok(v.all), machine: ok(v.machine), split: v.split !== false }
     const old = JSON.parse(localStorage.getItem(OLD) ?? 'null') as Partial<Groups> | null
-    return { all: old?.all === 'project' ? 'machine-project' : 'status', machine: ok(old?.machine) }
+    return { all: old?.all === 'project' ? 'machine-project' : 'status', machine: ok(old?.machine), split: true }
   } catch {
-    return { all: 'status', machine: 'status' }
+    return { all: 'status', machine: 'status', split: true }
   }
 }
 
@@ -108,6 +110,67 @@ export interface TaskGroup {
   note?: string
   /** Machine › Project: the machine it sits under, its name a heading over that machine's groups */
   machine?: { id: string; name: string }
+  /** by status, Split by space on: its tasks per machine · space (more than one; its tasks are theirs, in this order) */
+  subs?: SubGroup[]
+}
+
+/** a status group's tasks in one space (one task list): a light heading over them, folded on its own ("group/sub") */
+export interface SubGroup {
+  key: string
+  /** the space's name (its list's) */
+  label: string
+  /** on All machines, its machine, quiet after the name */
+  note?: string
+  /** the space's emoji (none: #) */
+  emoji?: string
+  tasks: Task[]
+  /** as it shows (shownGroups): all of them, Done cut short until Show all, folded shut */
+  count?: number
+  more?: number
+  less?: boolean
+  shut?: boolean
+}
+
+/** where a row's thing is, for Split by space: its machine and its list's (space's) name, and its latest news */
+type Spot = { on: string; name: string; at?: number }
+
+/**
+ * Things (tasks, automations) per machine · space, as Split by space shows them: the space the person is in first
+ * (here), then the one with the latest news, then the sidebar's order. Each with its space's emoji and, on All
+ * machines (level 0), its machine's name. Only one space: none (no heading needed).
+ */
+export function bySpace<T>(items: T[], spot: (x: T) => Spot, places: Place[], machines: Machine[], level: number, here?: string): (Omit<SubGroup, 'tasks'> & { items: T[] })[] {
+  const keyOf = (x: T) => { const s = spot(x); return `${s.on}|${s.name}` }
+  const keys = [...new Set(items.map(keyOf))]
+  if (keys.length < 2) return []
+  const placeAt = (k: string) => places.findIndex((p) => `${p.machine}|${p.name}` === k)
+  const latest = new Map(keys.map((k) => [k, Math.max(0, ...items.filter((x) => keyOf(x) === k).map((x) => spot(x).at ?? 0))]))
+  const rank = (k: string) => (here && places[placeAt(k)]?.id === here ? 0 : 1)
+  const at = (k: string) => { const i = placeAt(k); return i < 0 ? places.length : i }
+  return keys
+    .sort((a, b) => rank(a) - rank(b) || latest.get(b)! - latest.get(a)! || at(a) - at(b))
+    .map((k) => {
+      const [on, name] = [k.slice(0, k.indexOf('|')), k.slice(k.indexOf('|') + 1)]
+      const p = places[placeAt(k)]
+      const machine = level === 0 ? machines.find((m) => m.machine === on)?.name ?? on : undefined
+      return { key: p?.id ?? `list:${k}`, label: name, ...(machine ? { note: machine } : {}), ...(p?.emoji ? { emoji: p.emoji } : {}), items: items.filter((x) => keyOf(x) === k) }
+    })
+}
+
+/** a task's spot: its machine, its list (a list goes by the space working in its folder, else its own name) */
+const taskSpot = (places: Place[]) => (t: Task): Spot => ({ on: t.on, name: t.listName ?? places.find((p) => p.id === t.place)?.name ?? '', at: t.at })
+
+/** a status group split by space (more than one), its tasks in its subgroups' order */
+function split(g: TaskGroup, places: Place[], machines: Machine[], level: number, here?: string): TaskGroup {
+  const subs = bySpace(g.tasks, taskSpot(places), places, machines, level, here).map(({ items, ...s }) => ({ ...s, tasks: items }))
+  return subs.length ? { ...g, tasks: subs.flatMap((s) => s.tasks), subs } : g
+}
+
+/** a group with only the tasks kept, its subgroups too: empty ones go, and with one left, none (its rows say where) */
+export function keepTasks<G extends TaskGroup>(g: G, keep: (t: Task) => boolean): G {
+  const tasks = g.tasks.filter(keep)
+  const subs = g.subs?.map((s) => ({ ...s, tasks: s.tasks.filter(keep) })).filter((s) => s.tasks.length)
+  return { ...g, tasks, subs: subs && subs.length > 1 ? subs : undefined }
 }
 
 /**
@@ -118,7 +181,7 @@ export interface TaskGroup {
  * it. Done tasks are newest finished first. level: the view's (0 All machines, 1 a machine, 2 a space), which says
  * what its rows needn't.
  */
-export function groupTasks(places: Place[], machineList: Machine[], ts: Task[], by: GroupBy, level = 1): TaskGroup[] {
+export function groupTasks(places: Place[], machineList: Machine[], ts: Task[], by: GroupBy, level = 1, opts: { split?: boolean; here?: string } = {}): TaskGroup[] {
   // archived tasks are in no group: only their place's Archived view shows them
   const all = doneNewestFirst(GROUPS.flatMap(([s]) => ts.filter((t) => t.status === s && !t.archived)))
   const pinned = all.filter((t) => t.pinned)
@@ -128,7 +191,9 @@ export function groupTasks(places: Place[], machineList: Machine[], ts: Task[], 
   const machines = machineList
   const onMachine = (m: Machine) => rest.filter((t) => machineOf.get(t.place) === m.machine)
   // as 3.0's: a group shows only when it holds something (To do too)
-  if (by === 'status') return [...top, ...GROUPS.map(([s, label]) => ({ key: s, label, tasks: rest.filter((t) => t.status === s), names: namesFor(level) })).filter((g) => g.tasks.length)]
+  // Split by space: each status's tasks per space, Needs you's (it holds what agents ask too) and Pinned's not
+  const spaced = (g: TaskGroup) => (opts.split && level < 2 && g.key !== 'need' ? split(g, places, machines, level, opts.here) : g)
+  if (by === 'status') return [...top, ...GROUPS.map(([s, label]) => ({ key: s, label, tasks: rest.filter((t) => t.status === s), names: namesFor(level) })).filter((g) => g.tasks.length).map(spaced)]
   // 3.0: whatever the grouping, Needs you comes first (after Pinned), and its tasks aren't shown again below
   const needs = rest.filter((t) => t.status === 'need')
   if (needs.length) top.push({ key: 'need', label: 'Needs you', tasks: needs, names: namesFor(level) })
@@ -171,6 +236,18 @@ function projectGroups(places: Place[], machines: Machine[], ts: Task[], level: 
     out.push({ key: p?.id ?? `list:${k}`, label: name, note: machine, tasks, names: { machine: false, project: false } })
   }
   return out
+}
+
+/** A group split by space as it shows: each subgroup folded on its own ("group/sub" in shut) and cut to its latest
+ *  Done tasks on its own ("group/sub" in allDone); the group's tasks are what its open subgroups show */
+export function shownSplit(g: TaskGroup, all: (key: string) => boolean, shut: (key: string) => boolean): TaskGroup & { count: number; more: number; less: boolean; shut: boolean } {
+  if (!g.subs || shut(g.key)) return shownGroup(g, all(g.key), shut(g.key))
+  const subs = g.subs.map((s) => {
+    const k = `${g.key}/${s.key}`
+    const { tasks, count, more, less, shut: folded } = shownGroup({ ...g, key: k, tasks: s.tasks, subs: undefined }, all(k), shut(k))
+    return { ...s, tasks, count, more, less, shut: folded }
+  })
+  return { ...g, subs, tasks: subs.flatMap((s) => s.tasks), count: g.tasks.length, more: 0, less: false, shut: false }
 }
 
 /** a group's Done tasks shown before Show all */
