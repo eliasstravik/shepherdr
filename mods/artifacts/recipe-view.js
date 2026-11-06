@@ -9,7 +9,7 @@ import { image } from "gpui-kit";
 import { theme } from "herdr";
 import { asset, reply } from "./artifact.js";
 import data from "./recipe-data.js";
-import { chartShapes, choiceReply, formReply, withIds } from "./recipe.js";
+import { chartShapes, choiceReply, formReply, isLink, withIds } from "./recipe.js";
 
 const TONE = { info: "surface", good: "done", warn: "working", bad: "blocked" };
 
@@ -145,13 +145,26 @@ export default class RecipeView extends View {
               this.send(b.id, formReply(b, values), cx);
             }).child(sent ? "Sent" : b.submit ?? "Send"));
       }
-      case "button": {
-        const sent = this.sent.has(b.id);
-        return div().id(`bt-${b.id}`).self_start().px(12).py(6).rounded(6).bg(t.solid).text_color(t.solid_foreground).text_size(13)
-          .when(!sent, (e) => e.cursor_pointer()).on_click((_e, cx) => this.send(b.id, b.reply, cx)).child(sent ? `${b.label} · Sent` : b.label);
-      }
+      case "button": return this.button(b, b.id, t).self_start();
+      case "buttons": return h_flex().flex_wrap().gap(8).items_center().children(b.items.map((x, i) => this.button(x, `${b.id}-${i}`, t)));
     }
     return div();
+  }
+
+  // A button: a press sends its reply, once; with an href (https only) it opens that page in the browser each press, a
+  // plain link the person acts on themselves. quiet: the softer look, beside the one to press.
+  button(b, key, t) {
+    const link = isLink(b.href) ? b.href : null;
+    const sent = this.sent.has(key);
+    const answers = typeof b.reply === "string";
+    const live = link || !sent;
+    return div().id(`bt-${key}`).px(12).py(6).rounded(6).text_size(13)
+      .when(!b.quiet, (e) => e.bg(t.solid).text_color(t.solid_foreground))
+      .when(!!b.quiet, (e) => e.border_1().border_color(t.border).text_color(t.foreground))
+      .when(live, (e) => e.cursor_pointer()).on_click((_e, cx) => {
+        if (link) cx.open_url(link);
+        if (answers) this.send(key, b.reply, cx);
+      }).child(sent && !link ? `${b.label} · Sent` : link ? `${b.label} ↗` : b.label);
   }
 
   render(cx) {

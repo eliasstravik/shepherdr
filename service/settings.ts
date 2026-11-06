@@ -12,7 +12,7 @@ import * as HC from "../core/host.js";
 import * as APc from "../core/autopilot.js";
 import type { SettingRow, SettingSection } from "../web/shared/types.ts";
 
-const { TASK_ROWS, DEFAULTS, wordFor, valueFor, ROLES: CORE_ROLES, NOTES: CORE_NOTES, ABOUT, BACKUP, REACTIONS, upgradeReactions, BASE, BRANCH, branchPattern, MACHINES, OLD_NAMES, SECTIONS,
+const { TASK_ROWS, DEFAULTS, wordFor, valueFor, ROLES: CORE_ROLES, NOTES: CORE_NOTES, ABOUT, BACKUP, REACTIONS, STAR, starState, upgradeReactions, BASE, BRANCH, branchPattern, MACHINES, OLD_NAMES, SECTIONS,
   WEB, modelLabel, roleSel, otherCli, otherCliWords, backupProblem, homeAbout, webState, fromWord, LOADING_AGENTS, RESET, machineLabel } = C as any;
 const AP = APc as any;
 /** Autopilot as Everywhere has it now (herdr-task's view: what Settings keeps, else what it kept before, else the
@@ -207,6 +207,12 @@ export class Settings {
     const re = this.pick(scope, "agents", "reactions");
     rows.push({ label: REACTIONS.title, key: "agents.reactions", value: ON(re.value !== false), options: ["on", "off"], hint: REACTIONS.about,
       ...this.follows(s, re, (v) => ON(v !== false), "agents", "reactions") });
+    // Ask for a star (herdr-task's star.py), Everywhere only: a switch until it has asked, then just when it did
+    if (!s) {
+      const st = starState(this.file);
+      rows.push(st.asked ? { label: STAR.title, key: "star_prompt", value: "Asked", fixed: true, hint: st.about }
+        : { label: STAR.title, key: "star_prompt", value: ON(st.on), options: ["on", "off"], hint: st.about });
+    }
     return { name: title("agents"), level: scope ?? "all", rows };
   }
 
@@ -447,6 +453,15 @@ export class Settings {
       if (word !== null && word !== "on" && word !== "off") throw new Error("Not one of its choices.");
       const parent = space ? file.everywhere?.agents?.reactions ?? DEFAULTS.agents.reactions : DEFAULTS.agents.reactions;
       put("agents", "reactions", word === null || (word === "on") === parent ? null : word === "on");
+    } else if (key === "star_prompt") {
+      // Everywhere only; once asked it stays asked, whatever the switch (never a second ask)
+      if (space) throw new Error("This one is the same for every space.");
+      if (word !== null && word !== "on" && word !== "off") throw new Error("Not one of its choices.");
+      const was = file.everywhere?.star_prompt;
+      if (was?.asked) throw new Error("It already asked once, and won't ask again.");
+      next.everywhere ??= {};
+      if (word === "off") next.everywhere.star_prompt = { off: true };
+      else delete next.everywhere.star_prompt;
     } else if (key === "backup.agent") {
       // off is "off"; on follows what it would get anyway when that is on, else names the other CLI (as the window's)
       const parent = space ? file.everywhere?.backup?.agent ?? null : null;

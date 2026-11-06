@@ -36,7 +36,7 @@ import { webSection } from "./web-section.js";
 // herdr-task's merge policy (MERGE): "ask" waits for the person's Accept (which merges), the others merge without it.
 // NOTES: what a task's agent is told to do first and last (tasks.start_notes / finish_notes): herdr-task puts them
 // into its starting prompt; Herdr runs nothing itself.
-import { SECTIONS, ROLES, NOTES, MERGE, MUST_FIX, ROUNDS, ARCHIVE, ABOUT, BACKUP, REACTIONS, upgradeReactions, NOTIFY_ABOUT, TITLE, SPACE_TITLE,
+import { SECTIONS, ROLES, NOTES, MERGE, MUST_FIX, ROUNDS, ARCHIVE, ABOUT, BACKUP, REACTIONS, STAR, starState, upgradeReactions, NOTIFY_ABOUT, TITLE, SPACE_TITLE,
   EVERYWHERE, CHANGED_HERE, RESET, EDIT_INSTRUCTIONS, USE_OTHER_CLI, LOADING_AGENTS, SAVED, sameAs as sameAsWords,
   spacesOwn, otherCliWords, backupProblem, notifyMachineAbout, machineLabel, TASK_ROWS, LEVEL } from "./core/settings.js";
 
@@ -477,7 +477,20 @@ export default class ShepherdrSettings extends View {
       .child(this.title(t, page("agents")))
       .children(ROLES.map((r) => this.roleRow(t, r, cx)))
       .child(this.backupRow(t))
-      .child(this.reactionsRow(t));
+      .child(this.reactionsRow(t))
+      .when(!this.scope, (el) => el.child(this.starRow(t, cx)));
+  }
+
+  // Ask for a GitHub star (herdr-task's star.py), Everywhere only: a switch that turns it off before it ever shows;
+  // once an Assistant asked, no switch, just when (it never asks again). Kept as everywhere.star_prompt.
+  starRow(t, _cx) {
+    const st = starState(this.cfg);
+    return this.row(t, STAR.title, st.about.replace("\n", " "), st.asked ? null : toggleSwitch("star-prompt", st.on,
+      (next, _e, cx) => this.change((cfg) => {
+        const e = (cfg.everywhere ??= {});
+        if (e.star_prompt?.asked) return;
+        if (next) delete e.star_prompt; else e.star_prompt = { off: true };
+      }, cx)));
   }
 
   // A role: its model button and, on Everywhere, "Edit instructions" (the same for every space).

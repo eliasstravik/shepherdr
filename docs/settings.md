@@ -24,6 +24,7 @@ drops the space's own, and it inherits again. A few settings are one for every s
 | Agents | Reviewer | Everywhere, space | The same |
 | Agents | Backup agent | Everywhere, space | A space whose work shouldn't move to the other CLI |
 | Agents | Reactions (every agent reacts with an emoji; on) | Everywhere, space | A space may want a plainer chat |
+| Agents | Ask for a GitHub star (on; once asked, just when) | Everywhere only | One ask per person, ever, on every machine (`star_prompt`, herdr-task's `star.py`) |
 | Agents | Instructions (assistant.md, worker.md, reviewer.md) | Everywhere only | Repo rules belong in the repo's AGENTS.md or CLAUDE.md, which every agent there reads |
 | Tasks | Merge, Review, Must fix, Proof | Everywhere, space | How much care a repo needs differs |
 | Tasks | Tasks at once | Everywhere, space | It counts per folder already |

@@ -42,7 +42,7 @@ MARKUP = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "markup
 RECIPE_VIEW = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "recipe-view.js")
 RECIPE_CORE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "core", "recipe.js")
 RECIPE_TYPES = {"heading", "text", "list", "table", "chart", "stats", "image", "pair", "code", "callout", "columns", "tabs",
-                "details", "divider", "choice", "form", "button"}
+                "details", "divider", "choice", "form", "button", "buttons"}
 NOTES = os.path.join(STORE, "notes")
 # A custom artifact's picture, as the window last showed it (a version's folder; the web shows it in its place).
 PICTURE = ".window.png"
@@ -267,6 +267,14 @@ def recipe_problems(src, files):
             for x in ([b.get("src")] if b["type"] == "image" else [(b.get("before") or {}).get("src"), (b.get("after") or {}).get("src")] if b["type"] == "pair" else []):
                 if not isinstance(x, str) or x not in files:
                     out.append(f"block {where} ({b['type']}): {x!r} isn't a file beside recipe.json.")
+            for x in ([b] if b["type"] == "button" else (b.get("items") or [None]) if b["type"] == "buttons" else []):
+                # a button: words, and a reply, a plain https link or both (core/recipe.js buttonProblem)
+                x = x if isinstance(x, dict) else {}
+                href = x.get("href")
+                if not isinstance(x.get("label"), str) or not (isinstance(x.get("reply"), str) or isinstance(href, str)):
+                    out.append(f"block {where} ({b['type']}): a button needs a label and a reply or an href.")
+                if href is not None and not (isinstance(href, str) and re.fullmatch(r'https://[^\s"<>]+', href)):
+                    out.append(f"block {where} ({b['type']}): href must be an https:// link.")
             if b["type"] == "columns":
                 for j, c in enumerate(b.get("columns") or []):
                     walk(c, f"{where}.{j + 1}.")

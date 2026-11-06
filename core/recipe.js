@@ -15,11 +15,13 @@
 //   details  { summary, blocks }                        divider  {}
 //   choice   { question, options: [{ label, description }] }   one pick, sent to the agent as a reply
 //   form     { fields: [{ name, label, kind: text | textarea | select | checkbox, options }], submit }
-//   button   { label, reply }                           a press sends `reply` to the agent
+//   button   { label, reply, href, quiet }              a press sends `reply` to the agent; with href (https only) it
+//                                                       opens that page in the person's browser too; quiet: the softer look
+//   buttons  { items: [button] }                        buttons side by side (the first not quiet is the one to press)
 // Shared core: the source is core/recipe.js; bin/sync-shared copies it into the mods in lib/COPIES.
 
 export const RECIPE = 1;
-export const TYPES = ["heading", "text", "list", "table", "chart", "stats", "image", "pair", "code", "callout", "columns", "tabs", "details", "divider", "choice", "form", "button"];
+export const TYPES = ["heading", "text", "list", "table", "chart", "stats", "image", "pair", "code", "callout", "columns", "tabs", "details", "divider", "choice", "form", "button", "buttons"];
 export const TONES = ["info", "good", "warn", "bad"];
 export const CHARTS = ["bar", "line", "pie"];
 export const FIELDS = ["text", "textarea", "select", "checkbox"];
@@ -59,13 +61,21 @@ export function problems(recipe, files = null) {
       case "details": need(str(b.summary) && arr(b.blocks), "needs a summary and blocks"); if (arr(b.blocks)) walk(b.blocks, `${where}.`); break;
       case "choice": need(str(b.question) && arr(b.options) && b.options.every((o) => str(o?.label)), "needs a question and options with labels"); break;
       case "form": need(arr(b.fields) && b.fields.every((f) => str(f?.name) && FIELDS.includes(f.kind ?? "text")), `fields need a name and a kind (${FIELDS.join(", ")})`); break;
-      case "button": need(str(b.label) && str(b.reply), "needs a label and a reply"); break;
+      case "button": buttonProblem(b, need); break;
+      case "buttons": need(arr(b.items) && b.items.length > 0 && b.items.length <= 4, "items must be 1 to 4 buttons"); if (arr(b.items)) b.items.forEach((x) => buttonProblem(x ?? {}, need)); break;
     }
   });
   walk(recipe.blocks, "");
   if (n > MAX_BLOCKS) out.push(`at most ${MAX_BLOCKS} blocks.`);
   return out;
 }
+
+// A button's own fields: words, and a reply, a link or both (a link is a plain https page, opened by the person's press).
+function buttonProblem(b, need) {
+  need(str(b.label) && (str(b.reply) || str(b.href)), "a button needs a label and a reply or an href");
+  if (b.href != null) need(isLink(b.href), "href must be an https:// link");
+}
+export const isLink = (v) => typeof v === "string" && /^https:\/\/[^\s"<>]+$/.test(v);
 
 // The recipe with an id on every block (b1, b2... in order where it had none): what markup and answers point at.
 export function withIds(recipe) {
@@ -84,8 +94,8 @@ export function withIds(recipe) {
 export function blockName(b) {
   const what = { heading: "heading", text: "text", list: "list", table: "table", chart: "chart", stats: "numbers", image: "picture",
     pair: "before and after", code: "code", callout: "callout", columns: "columns", tabs: "tabs", details: "folded section",
-    divider: "line", choice: "choice", form: "form", button: "button" }[b?.type] ?? "block";
-  const name = b?.text ?? b?.title ?? b?.question ?? b?.summary ?? b?.caption ?? b?.label ?? null;
+    divider: "line", choice: "choice", form: "form", button: "button", buttons: "buttons" }[b?.type] ?? "block";
+  const name = b?.text ?? b?.title ?? b?.question ?? b?.summary ?? b?.caption ?? b?.label ?? b?.items?.[0]?.label ?? null;
   return name ? `the ${what} “${String(name).slice(0, 60)}”` : `the ${what} ${b?.id ?? ""}`.trim();
 }
 
