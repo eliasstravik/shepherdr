@@ -437,9 +437,8 @@ export class Compat {
         ...(spaces.some((s) => spaceOwn(n, s.id)) ? { others: spaces.filter((s) => spaceOwn(n, s.id)).map((s) => ({ id: s.id, name: places.find((p) => p.id === s.id)?.name ?? s.name })) } : {}) },
         // machines that set their own before machine scope went: still applied, shown with Reset (the window's)
         ...Object.entries((n as any).machines ?? {}).filter(([, v]) => NOTIFY.includes(v as string)).map(([m, v]) =>
-          ({ label: STc.machineLabel(m), key: `notify.machine@${m}`, value: "", button: STc.RESET, hint: STc.notifyMachineAbout(v) })),
-        // push alerts on this phone or browser: 2.1's alerts action (it asks the device, then tells the service)
-        { label: "Alerts on this device", key: "alerts", value: "", options: ["Turn on"] }] },
+          ({ label: STc.machineLabel(m), key: `notify.machine@${m}`, value: "", button: STc.RESET, hint: STc.notifyMachineAbout(v) }))] },
+      // (push alerts on this phone or browser: the alerts plugin's part on top of this page, web/plugins/alerts/device.tsx)
       ...spaces.map((s) => {
         // "Inherited from Everywhere", or its machine's own set before
         const m = machineOfSpace(s.id), from = STc.fromWord(machineOwn(n, m) ? "machine" : "everywhere", m);
