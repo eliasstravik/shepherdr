@@ -596,7 +596,7 @@ function Viewer() {
     <ViewerShell label={art.title} phone={phone}>
       {/* the whole screen is the page's, but for a slim bar on top (the window's artifact viewer bar) */}
       <div className="flex w-full min-w-0 flex-col overflow-hidden pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]">
-        <div className="flex shrink-0 items-center gap-1.5 border-b border-line pt-[calc(env(safe-area-inset-top)+--spacing(1))] pr-2 pb-1 pl-4 phone:gap-2 phone:px-3">
+        <div className="flex shrink-0 items-center gap-1.5 border-b border-line pt-[calc(env(safe-area-inset-top)+--spacing(1))] pr-2 [[data-topbar]~*_&]:pt-1 pb-1 pl-4 phone:gap-2 phone:px-3">
           <PageIcon className={clsx(ic, 'shrink-0 text-fg2 phone:hidden')} />
           <div className="min-w-0 flex-1 truncate font-medium">{art.title || 'Artifact'}</div>
           <Stepper art={art} shown={shown} bar="viewer" onStep={(n) => openArtifact(art.id, n)} />

@@ -1,12 +1,13 @@
 // Voice: a call is with a voice agent that passes what you say to this chat's agent as ordinary messages and reads
 // the replies out. While it is on, that chat's box is the call (Mute, End). The call stays with the agent you called:
-// elsewhere its space's row in the sidebar has a green mark with the call's clock, which goes back to it (SHEP-51; no
-// bar over the app). The voice agent's open tool shows things here (voiceNav) and its screen tool reads and acts on
+// elsewhere its space's row in the sidebar has a green mark with the call's clock, which goes back to it (SHEP-51), and
+// where no sidebar shows it (a phone, a tablet, a shut sidebar) a slim band at the top does the same (SHEP-66). The voice agent's open tool shows things here (voiceNav) and its screen tool reads and acts on
 // this very page (screen.ts), whichever device started the call.
 import clsx from 'clsx'
 import { useEffect, useState } from 'react'
-import { act, chatName, definePlugin, getState, goChat, goPlace, listView, openArtifact, openItem, openTask, placeOf, registry, setFilter, setUI, shownItem, taskInMiddle, useSnap, useStore, useUI, visibleChats, type UI } from '@client/kernel.ts'
-import { ic, IconButton, LiveWave, MicIcon, MicOffIcon, roundBtn, useElapsed, WaveIcon, XIcon } from '@client/ui.tsx'
+import { act, chatName, definePlugin, getState, goChat, goPlace, listView, openArtifact, openItem, openTask, placeOf, placesDrawn, registry, setFilter, setUI, shownItem, taskInMiddle, useSnap, useStore, useUI, visibleChats, type UI } from '@client/kernel.ts'
+import { ic, IconButton, LiveWave, MicIcon, MicOffIcon, NextIcon, roundBtn, useElapsed, WaveIcon, Waves, XIcon } from '@client/ui.tsx'
+import { useWindowWidth } from '@client/Frame.tsx'
 import { cancelDictation } from '@plugins/chat/client.tsx'
 import { pageNames, sectionLike, sectionOf } from '@client/Settings.tsx'
 import { openAccept } from '@client/screens/Accept.tsx'
@@ -309,6 +310,51 @@ function CallBox({ chatKey }: { chatKey: string }) {
   )
 }
 
+/** SHEP-66: a call whose chat isn't on screen, where the sidebar's call mark can't be seen (a phone, a tablet, a shut
+ *  sidebar): a slim band across the very top in the mark's soft green, with the call's name and clock. A tap goes back
+ *  to its chat. It pushes the app down rather than covering it, and on a phone it holds the notch's room itself. Not
+ *  the loud green bar SHEP-51 took away: no buttons, the mark's colours, a line of small words. Mute and End stay in
+ *  the call's box. */
+function CallBanner() {
+  const width = useWindowWidth()
+  const call = useStore((s) => {
+    const { ui, snap } = s
+    if (!ui.call || !snap) return null
+    // its chat on screen: not under Settings, an artifact, or flipped to its terminal or artifacts
+    const shown = !ui.settings && !ui.viewer && ui.term !== ui.call && ui.arts !== ui.call && visibleChats(ui, snap).includes(ui.call)
+    // a desktop's open sidebar has its mark already
+    return shown || placesDrawn(ui, snap, width) ? null : ui.call
+  })
+  return call ? <CallBand call={call} /> : null
+}
+
+function CallBand({ call }: { call: string }) {
+  const snap = useSnap()!
+  const t = useElapsed(useUI((u) => u.callStarted))
+  const name = chatName(snap, call)
+  return (
+    <button
+      type="button"
+      data-topbar
+      data-call-banner
+      aria-label={`Back to the voice call with ${name}, ${t}`}
+      // its chat, not the terminal or artifacts it was flipped to, and nothing over it
+      onClick={() => { setUI({ settings: null, viewer: null, search: false, menu: false, plus: null }); goChat(call); setUI({ term: null, arts: null }) }}
+      className={clsx(
+        'press-dim flex h-7 shrink-0 cursor-pointer items-center justify-center gap-1.5 bg-[color-mix(in_srgb,var(--ready)_11%,var(--bg))] px-4 text-[0.75rem] font-medium text-ready-fg tabular-nums shadow-[inset_0_-1px_0_color-mix(in_srgb,var(--ready)_22%,transparent)]',
+        // a phone: a finger's height, the words a step up, and the notch's room above them
+        'phone:h-auto phone:min-h-8 phone:py-1.5 phone:text-[0.8125rem] [[data-device=phone]>&:first-child]:pt-[calc(env(safe-area-inset-top)+6px)]',
+      )}
+    >
+      <Waves className="h-3 shrink-0 scale-75" />
+      <span className="min-w-0 truncate">{name}</span>
+      <span aria-hidden className="opacity-50">·</span>
+      <span className="shrink-0">{t}</span>
+      <NextIcon aria-hidden className="-mr-1 size-3.5 shrink-0 opacity-60 phone:size-4" />
+    </button>
+  )
+}
+
 /** a note at the top about the call (why it stopped), in the call's pill shape and its words' size */
 const callPill = 'mx-3 mt-2 flex shrink-0 [[data-device=phone]>&:first-child]:mt-[calc(env(safe-area-inset-top)+8px)] items-center gap-2.5 rounded-full py-1.5 pr-1.5 pl-4 text-[0.8125rem] font-medium phone:text-[0.9375rem]'
 
@@ -331,7 +377,7 @@ export default definePlugin({
   setup(reg) {
     reg.composerIdle = CallButton
     reg.composerLive.push({ when: (ui, chatKey) => ui.call === chatKey, View: CallBox })
-    reg.topBars.push(CallError, CallWhere)
+    reg.topBars.push(CallBanner, CallError, CallWhere)
     reg.composerAbove.push({ order: 7, View: CallHelp })
     // 3.0 calls with Ctrl+Shift+Space (the keyboard plugin): no V or M keys of its own
   },

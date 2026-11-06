@@ -58,7 +58,9 @@ connection it came on). A page from anywhere else can't change anything: writes 
   the call is held until the agent says the person said yes (`risky`). The prompt has the agent use look, open, send and
   act first. `open` also shows the shown space's Artifacts, Files and Changes panels and its Assistant's terminal (a
   space named: that space first, then its panel), Tasks filtered by a state and words, and a Settings page by its
-  spoken name. A call going on shows as a green mark with its clock on its space's row in the sidebar (no bar).
+  spoken name. A call going on shows as a green mark with its clock on its space's row in the sidebar; where the sidebar can't be
+  seen (a phone, a tablet, a shut sidebar) a slim soft-green band at the very top shows the call's space and clock, and a
+  tap goes back to it.
 - Keys: 3.0's keys work in the web app too (Settings → Keyboard shortcuts on a desktop).
 
 ## Install

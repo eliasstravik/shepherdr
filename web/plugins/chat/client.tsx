@@ -850,7 +850,7 @@ function PhotoView({ shots, at: index, go, chatKey }: { shots: Shot[]; at: numbe
           {neighbour(next, 'right')}
         </div>
       </div>
-      <div {...own} className="absolute inset-x-0 top-0 flex items-center gap-2 bg-linear-to-b from-black/60 to-transparent px-3 pt-[calc(env(safe-area-inset-top)+10px)] pb-6">
+      <div {...own} className="absolute inset-x-0 top-0 flex items-center gap-2 bg-linear-to-b from-black/60 to-transparent px-3 pt-[calc(env(safe-area-inset-top)+10px)] pb-6 [[data-topbar]~*_&]:pt-2.5">
         <div className="min-w-0 flex-1 pl-1">
           <div className="truncate text-[0.8125rem] text-white/80 phone:text-[0.9375rem]">{f.name}</div>
           {shots.length > 1 ? <div className="text-[0.75rem] text-white/55 tabular-nums phone:text-[0.8125rem]">{`${index + 1} of ${shots.length}`}</div> : null}

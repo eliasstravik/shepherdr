@@ -312,7 +312,7 @@ export function Sheet({ label, onClose, children, panel, z = 'z-8', full }: { la
   return (
     <div
       ref={ref}
-      className={clsx('absolute inset-0 flex bg-black/35', z, phone ? clsx('flex-col', !full && 'pt-[calc(env(safe-area-inset-top)+10px)]') : clsx('justify-center', full ? 'items-stretch tablet:p-4 desktop:p-6' : 'items-start px-6 py-12'))}
+      className={clsx('absolute inset-0 flex bg-black/35', z, phone ? clsx('flex-col', !full && 'pt-[calc(env(safe-area-inset-top)+10px)] [[data-topbar]~*_&]:pt-2.5') : clsx('justify-center', full ? 'items-stretch tablet:p-4 desktop:p-6' : 'items-start px-6 py-12'))}
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
