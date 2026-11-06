@@ -21,6 +21,7 @@ from .backups import cmd_backup, cmd_restore_spaces
 from .automations import auto_list, cmd_auto, cmd_scheduler, cmd_track, EVENTS, HOW
 from .machines import cmd_assistants, cmd_machines, cmd_sync_auto, cmd_tell
 from .autopilot import cmd_autopilot, cmd_complete, cmd_progress
+from .star import cmd_star
 from .home import cmd_home
 from .assistant_settings import cmd_session_note
 
@@ -347,6 +348,18 @@ def main():
     c.add_argument("--space")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_progress)
+    st = sub.add_parser("star", help="the one-time \"Enjoying Shepherdr?\" card: an Assistant asks the person once, ever, at a good moment").add_subparsers(dest="star")
+    c = st.add_parser("check", help="whether it may ask (never asked, not switched off, enough done)")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_star)
+    c = st.add_parser("ask", help="record the ask, then show the card in your chat (a plain link to the repo, and No thanks)")
+    c.add_argument("--folder")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_star)
+    c = st.add_parser("answer", help="keep the person's answer from the card")
+    c.add_argument("answer", choices=["github", "no"])
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_star)
     c = sub.add_parser("complete", help="an Assistant on Autopilot proved its heartbeat's stopping goal: turns Autopilot off")
     c.add_argument("evidence")
     c.add_argument("--space")

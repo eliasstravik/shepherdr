@@ -4,6 +4,7 @@
 // window's (mods/artifacts/recipe-view.js). Mark up lays its own layer over the whole recipe (plugins/artifacts).
 import clsx from 'clsx'
 import { useState, type ReactNode } from 'react'
+import { ArrowUpRightIcon } from '@heroicons/react/16/solid'
 import { Markdown } from '@plugins/chat/markdown.tsx'
 import { Primary } from '../ui.tsx'
 import * as R from '@core/recipe.js'
@@ -14,7 +15,7 @@ type Props = { recipe: { blocks: Block[] }; asset: (src: string) => string; repl
 /** the window's words when a recipe can't be read */
 export const UNREADABLE = "This artifact's recipe can't be read."
 
-const { chartShapes, choiceReply, formReply } = R as any
+const { chartShapes, choiceReply, formReply, isLink } = R as any
 const PALETTE = ['var(--accent)', 'var(--focus)', 'var(--ready)', 'var(--work)', 'var(--merged)', 'var(--need)']
 const TONE: Record<string, string> = { info: 'bg-well shadow-soft', good: 'bg-ready/10', warn: 'bg-work/12', bad: 'bg-need/10' }
 
@@ -94,12 +95,20 @@ function Form({ b, reply }: { b: Block; reply?: Props['reply'] }) {
   )
 }
 
-/** a press sends its reply, once: "<label> · Sent" */
-function Button({ b, reply }: { b: Block; reply?: Props['reply'] }) {
+/** a press sends its reply, once: "<label> · Sent". With an href (https only) it opens that page in a new tab each
+ *  press, as a plain link: the person acts there themselves. quiet: the softer look, beside the one to press. */
+function Button({ b, reply, className }: { b: Block; reply?: Props['reply']; className?: string }) {
   const [sent, setSent] = useState(false)
+  const link = isLink(b.href) ? (b.href as string) : null
+  const answers = typeof b.reply === 'string'
   return (
-    <Primary disabled={sent || !reply} onClick={async () => { await reply?.(b.reply); setSent(true) }} className="self-start">
-      {sent ? `${b.label} · Sent` : b.label}
+    <Primary soft={!!b.quiet} disabled={!link && (sent || !reply)} className={clsx(link && 'pr-3', className)}
+      onClick={async () => {
+        if (link) window.open(link, '_blank', 'noopener,noreferrer')
+        if (answers && !sent && reply) { await reply(b.reply); setSent(true) }
+      }}>
+      {sent && !link ? `${b.label} · Sent` : b.label}
+      {link ? <ArrowUpRightIcon aria-hidden className="size-4 shrink-0 opacity-70" /> : null}
     </Primary>
   )
 }
@@ -144,7 +153,8 @@ export function Recipe({ recipe, asset, reply }: Props) {
       case 'divider': return <hr className="border-line" />
       case 'choice': return <Choice b={b} reply={reply} />
       case 'form': return <Form b={b} reply={reply} />
-      case 'button': return <Button b={b} reply={reply} />
+      case 'button': return <Button b={b} reply={reply} className="self-start" />
+      case 'buttons': return <div className="flex flex-wrap items-center gap-2">{b.items.map((x: Block, i: number) => <Button key={i} b={x} reply={reply} />)}</div>
     }
     return null
   }

@@ -2548,3 +2548,141 @@ class AssistantSettings(unittest.TestCase):
         rs = self.aset.rows("sp1", {}, (False, "", ""))
         for line in self.aset.notice(rs).split("\n"):
             self.assertRegex(line, r'^<herdr-setting name="\w+" value="[^"]*" scope="\w+">[^\n]*</herdr-setting>$')
+
+
+class StarPrompt(unittest.TestCase):
+    """SHEP-79: the one-time "Enjoying Shepherdr?" card (herdr_task/star.py), in throwaway settings files and task
+    lists: herdr-artifact is faked, and nothing else may run."""
+
+    def setUp(self):
+        import contextlib
+        import io
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.settings as settings
+        import herdr_task.star as star
+        self.star, self.io, self.redirect, self.mock = star, io, contextlib.redirect_stdout, mock
+        self.tmp = tempfile.mkdtemp()
+        self.use(os.path.join(self.tmp, "a.json"))
+        self.done = 3
+        self.runs = []
+        for obj, name, value in ((star, "done_count", lambda: self.done), (star.subprocess, "run", self.fake_run)):
+            p = mock.patch.object(obj, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        self.settings = settings
+
+    def use(self, path):
+        """One machine's settings file (each machine reads its own copy)."""
+        import herdr_task.settings as settings
+        if hasattr(self, "_p"):
+            self._p.stop()
+        self._p = self.mock.patch.object(settings, "SETTINGS", path)
+        self._p.start()
+        self.addCleanup(self._p.stop)
+        self.path = path
+
+    def fake_run(self, argv, **kw):
+        # only herdr-artifact publish, with the card's recipe
+        self.assertEqual(argv[:2], ["herdr-artifact", "publish"], argv)
+        with open(os.path.join(argv[2], "recipe.json")) as f:
+            self.runs.append(json.load(f))
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"id": f"a{len(self.runs)}"}), "")
+
+    def cmd(self, sub, **kw):
+        import argparse
+        args = argparse.Namespace(star=sub, json=True, folder=None, **kw)
+        out = self.io.StringIO()
+        with self.redirect(out):
+            self.star.cmd_star(args)
+        return json.loads(out.getvalue())
+
+    def saved(self):
+        with open(self.path) as f:
+            return json.load(f)["everywhere"]["star_prompt"]
+
+    def test_asks_once_ever_and_records_before_showing(self):
+        self.assertTrue(self.cmd("check")["can"])
+        seen = {}
+        real_publish = self.star.publish
+
+        def publish(folder):
+            seen["asked_first"] = bool(self.saved().get("asked"))
+            return real_publish(folder)
+        with self.mock.patch.object(self.star, "publish", publish):
+            r = self.cmd("ask")
+        self.assertEqual(r, {"asked": True, "artifact": "a1"})
+        self.assertTrue(seen["asked_first"], "the ask is kept before the card shows")
+        self.assertEqual(len(self.runs), 1)
+        # a restart, or another Assistant: never again, whatever the answer
+        with self.assertRaises(self.star.Fail):
+            self.cmd("ask")
+        self.cmd("answer", answer="no")
+        with self.assertRaises(self.star.Fail):
+            self.cmd("ask")
+        self.assertFalse(self.cmd("check")["can"])
+        self.assertEqual(len(self.runs), 1)
+        self.assertEqual(self.saved()["answer"], "no")
+
+    def test_another_machine_never_asks_again(self):
+        self.cmd("ask")
+        # the settings file reaches the other machine (the web host's sync, the window's push): the same Everywhere
+        with open(self.path) as f:
+            synced = json.load(f)
+        other = os.path.join(self.tmp, "b.json")
+        with open(other, "w") as f:
+            json.dump(synced, f)
+        self.use(other)
+        self.assertFalse(self.cmd("check")["can"])
+        with self.assertRaises(self.star.Fail):
+            self.cmd("ask")
+        self.assertEqual(len(self.runs), 1)
+
+    def test_a_pushed_copy_never_asks(self):
+        with open(self.path, "w") as f:
+            json.dump({"pushed_from": "herdr-app", "here": "vm-b", "everywhere": {}}, f)
+        with self.assertRaises(self.star.Fail):
+            self.cmd("ask")
+        self.assertEqual(self.runs, [])
+
+    def test_off_switch_and_too_early(self):
+        with open(self.path, "w") as f:
+            json.dump({"everywhere": {"star_prompt": {"off": True}}}, f)
+        with self.assertRaises(self.star.Fail):
+            self.cmd("ask")
+        with open(self.path, "w") as f:
+            json.dump({}, f)
+        self.done = 2
+        with self.assertRaises(self.star.Fail):
+            self.cmd("ask")
+        self.assertEqual(self.runs, [])
+
+    def test_never_stars_for_the_person(self):
+        """The card is a plain link to the repo; nothing calls GitHub (no gh, no API, no starring)."""
+        self.cmd("ask")
+        blocks = self.runs[0]["blocks"]
+        items = next(b for b in blocks if b["type"] == "buttons")["items"]
+        self.assertEqual(items[0]["href"], "https://github.com/eliasstravik/shepherdr")
+        self.assertEqual([x["label"] for x in items], ["Open Shepherdr on GitHub", "No thanks"])
+        with open(os.path.join(BIN, "herdr_task", "star.py")) as f:
+            src = f.read()
+        for word in ("api.github.com", "user/starred", '"gh"', "urllib", "PUT"):
+            self.assertNotIn(word, src)
+
+    def test_the_card_is_a_valid_recipe(self):
+        """herdr-artifact's own check takes the card (buttons with an https href)."""
+        import importlib.machinery
+        import importlib.util
+        path = os.path.join(ROOT, "mods", "artifacts", "bin", "herdr-artifact")
+        loader = importlib.machinery.SourceFileLoader("herdr_artifact_mod", path)
+        spec = importlib.util.spec_from_loader("herdr_artifact_mod", loader)
+        art = importlib.util.module_from_spec(spec)
+        loader.exec_module(art)
+        d = tempfile.mkdtemp()
+        with open(os.path.join(d, "recipe.json"), "w") as f:
+            json.dump(self.star.card(), f)
+        self.assertEqual(art.recipe_problems(d, ["recipe.json"]), [])
+        bad = {"recipe": 1, "blocks": [{"type": "buttons", "items": [{"label": "x", "href": "javascript:alert(1)"}]}]}
+        with open(os.path.join(d, "recipe.json"), "w") as f:
+            json.dump(bad, f)
+        self.assertTrue(art.recipe_problems(d, ["recipe.json"]))

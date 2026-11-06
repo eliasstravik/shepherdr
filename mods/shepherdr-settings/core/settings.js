@@ -101,6 +101,21 @@ export function upgradeReactions(cfg) {
   }
   return cfg;
 }
+// Ask for a star (SHEP-79, herdr-task's star.py): once, ever, after things went well, an Assistant may show a small
+// card with a plain link to Shepherdr on GitHub. Everywhere only; kept as star_prompt ({ off } before it shows, then
+// { asked, answer }). Once asked it never shows again, whatever the switch says.
+export const STAR = {
+  title: "Ask for a GitHub star",
+  about: "Once, ever, after things go well, your Assistant may show a small card with a link to Shepherdr on GitHub.",
+  asked: (at, answer) => `Asked on ${new Date(at).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}${answer === "github" ? " (you opened GitHub)" : answer === "no" ? " (no thanks)" : ""}. It won't ask again.`,
+};
+// What Everywhere's star_prompt says: whether the switch is on (off: never asks) and the line under it once asked.
+export function starState(cfg) {
+  const s = cfg?.everywhere?.star_prompt;
+  const v = s && typeof s === "object" ? s : {};
+  return { on: !v.off && !v.asked, asked: Number.isFinite(v.asked) ? v.asked : null, answer: v.answer ?? null,
+    about: Number.isFinite(v.asked) ? `${STAR.about}\n${STAR.asked(v.asked, v.answer)}` : STAR.about };
+}
 export const BACKUP = { title: "Backup agent", about: "The other CLI takes over a task once when its agent can't go on." };
 // The machines where the other CLI can't take over (herdr-task's check, ~/.herdr/cli-check.json's machines: this
 // computer is ""), in one line. m: the scope's machine ("local" or its name), null for Everywhere (every machine).
