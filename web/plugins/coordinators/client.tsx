@@ -8,7 +8,7 @@
 // On a phone the tabs, the shown tab's menu and the + menu's items are in the header's ⋯.
 import clsx from 'clsx'
 import { PlayIcon } from '@heroicons/react/16/solid'
-import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode, type WheelEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode, type WheelEvent } from 'react'
 import { attentionCounts } from '@client/attention.ts'
 import { openRole } from '@client/screens/Role.tsx'
 import { openWorktree } from '@client/screens/Worktree.tsx'
@@ -60,19 +60,31 @@ function useRunNow(place: Place) {
   return { running, busy, run }
 }
 
-/** The header's Autopilot (3.0's switch), one group: the switch, "Autopilot", what it waits for (core/autopilot.js
- *  headerDetail: "Next in 7 min", "Queued", "Waking", "On events", "No schedule") and Run now, on one quiet pill as
- *  tall as Chat | Terminal. It flips at once, herdr-task's answer says the rest (a refusal goes back, with a toast).
- *  It sits on the header's right with the other controls, Run now as a ▶ (its name in its label) so the header's
- *  name and folder keep their room; as the column narrows "Autopilot" goes while on (under 42rem: the green switch
- *  and its next run say it), then what it waits for (under 32rem); off, "Autopilot" stays down to 30rem. On a phone the switch alone, on a round pill as tall as the header's buttons: Run now is in its
- *  ⋯. "Write a heartbeat" after it while on with its heartbeat still empty. The Assistant's tab only, in every space
- *  on every machine (another machine's is switched and woken there). */
+/** The header's Autopilot (3.0's switch), one group: what it waits for (core/autopilot.js
+ *  headerDetail: "Next in 7 min", "Queued", "Waking", "On events", "No schedule") and Run now (a ▶, its name in its
+ *  label), then the switch and "Autopilot", on one quiet pill as tall as Chat | Terminal. It flips at once, herdr-task's
+ *  answer says the rest (a refusal goes back, with a toast). It sits on the header's right with the other controls;
+ *  switched on, its words and Run now slide open to the switch's LEFT (SHEP-81), so the switch and "Autopilot" never move. As the column
+ *  narrows "Autopilot" goes (under 36rem, on or off alike, so the switch stays put), then what it waits for (under
+ *  32rem). On a phone the switch alone, on a round pill as tall as the header's buttons: Run now is in its ⋯. "Write a
+ *  heartbeat" before it while on with its heartbeat still empty. The Assistant's tab only, in every space on every
+ *  machine (another machine's is switched and woken there). */
 function AutopilotHeader({ place }: { place: Place }) {
   const a = place.pilot
   const phone = useUI((u) => u.device === 'phone')
   const other = useUI((u) => !!u.term?.startsWith('t:'))
   const [want, setWant] = useState<boolean | null>(null)
+  const lastWords = useRef('')
+  // the status's own width, so it slides open and shut (and from "Waking" to "Next in 7 min") rather than jumping
+  const [statusW, setStatusW] = useState<number | null>(null)
+  const statusObs = useRef<ResizeObserver | null>(null)
+  const measureStatus = useCallback((el: HTMLDivElement | null) => {
+    statusObs.current?.disconnect()
+    statusObs.current = null
+    if (!el) return
+    statusObs.current = new ResizeObserver(() => setStatusW(el.offsetWidth))
+    statusObs.current.observe(el)
+  }, [])
   const { running, busy, run } = useRunNow(place)
   const [, setNow] = useState(0)
   // "Next in 7 min" counts down, "Next 10:00" becomes a weekday further off than a day: looked at again each 15 s
@@ -111,31 +123,37 @@ function AutopilotHeader({ place }: { place: Place }) {
         <Switch label={AP.TITLE} on={on} onChange={() => void flip()} />
       </div>
     )
+  // what it waits for, kept while it slides shut so switching off folds it away rather than blanking it first
+  const words = on ? (running && !shown.pending && !shown.inflight ? 'Queuing…' : AP.headerDetail(shown)) : lastWords.current
+  if (on) lastWords.current = words
   return (
     <>
-      <div data-autopilot className={clsx('flex h-8 shrink-0 items-center gap-2 rounded-full bg-hover p-0.5 pl-1.5 text-[0.8125rem] coarse:h-10', !(on && want === null) && 'pr-1.5 @min-[30rem]/place:pr-3')}>
-        <Switch label={AP.TITLE} on={on} onChange={() => void flip()} />
-        <button type="button" tabIndex={-1} aria-hidden="true" onClick={() => void flip()} className={clsx('shrink-0 font-medium', on ? 'text-fg @max-[42rem]/place:hidden' : 'text-fg2 @max-[30rem]/place:hidden')}>
-          {AP.TITLE}
-        </button>
-        {on ? (
-          <span className={clsx('min-w-0 truncate text-fg3 tabular-nums @max-[32rem]/place:hidden', shown.inflight && 'animate-pulse')}>{running && !shown.pending && !shown.inflight ? 'Queuing…' : AP.headerDetail(shown)}</span>
-        ) : null}
-        {on && want === null ? (
-          <button
-            type="button"
-            data-run-now
-            disabled={busy}
-            onClick={() => void run()}
-            aria-label="Run Autopilot now"
-            className="press-dim relative grid size-7 shrink-0 place-items-center rounded-full text-fg2 coarse:size-9 enabled:hover:bg-seg-on enabled:hover:text-fg enabled:hover:shadow-[0_0_0_1px_var(--line2)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-default disabled:opacity-50"
-          >
-            <PlayIcon aria-hidden className="size-3.5 shrink-0" />
-            <span aria-hidden className="absolute top-1/2 left-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden" />
-          </button>
-        ) : null}
-      </div>
       {heartbeat}
+      <div data-autopilot className="flex h-8 shrink-0 items-center rounded-full bg-hover p-0.5 pr-1.5 text-[0.8125rem] coarse:h-10 @min-[36rem]/place:pr-3">
+        {/* What it waits for and Run now, left of the switch: they open leftwards, the switch and "Autopilot" never move */}
+        <div data-autopilot-status inert={!on} style={{ width: on ? (statusW ?? 'auto') : 0 }} className="shrink-0 overflow-clip transition-[width] duration-200 ease-out [overflow-clip-margin:0.375rem] motion-reduce:transition-none">
+          <div ref={measureStatus} className="flex w-max items-center gap-1 pr-1 pl-1.5">
+            <span className={clsx('whitespace-nowrap text-fg3 tabular-nums @max-[32rem]/place:hidden', shown.inflight && 'animate-pulse')}>{words}</span>
+            <button
+              type="button"
+              data-run-now
+              disabled={busy || want !== null}
+              onClick={() => void run()}
+              aria-label="Run Autopilot now"
+              className="press-dim relative grid size-7 shrink-0 place-items-center rounded-full text-fg2 coarse:size-9 enabled:hover:bg-seg-on enabled:hover:text-fg enabled:hover:shadow-[0_0_0_1px_var(--line2)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-default disabled:opacity-50"
+            >
+              <PlayIcon aria-hidden className="size-3.5 shrink-0" />
+              <span aria-hidden className="absolute top-1/2 left-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden" />
+            </button>
+          </div>
+        </div>
+        <div className="ml-1 flex shrink-0 items-center gap-2">
+          <Switch label={AP.TITLE} on={on} onChange={() => void flip()} />
+          <button type="button" tabIndex={-1} aria-hidden="true" onClick={() => void flip()} className={clsx('shrink-0 font-medium @max-[36rem]/place:hidden', on ? 'text-fg' : 'text-fg2')}>
+            {AP.TITLE}
+          </button>
+        </div>
+      </div>
     </>
   )
 }
