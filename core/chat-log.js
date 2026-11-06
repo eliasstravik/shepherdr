@@ -235,10 +235,24 @@ function replyOf(t) {
   return null;
 }
 
+// Where a message has code, fenced (```) or inline (`…`): [[start, end]]. Herdr's own tags never start inside code: a
+// role template's or brief's examples there (assistant.md's <herdr-news> lines) are words, not tags (#589). A real
+// tag may hold code (a failed check's log): only where it starts counts.
+function codeRanges(t) {
+  return [...String(t).matchAll(/```[\s\S]*?(?:```|$)|`[^`\n]*`/g)].map((m) => [m.index, m.index + m[0].length]);
+}
+const inCode = (ranges, at) => ranges.some(([a, b]) => at >= a && at < b);
+// t.replace(re, by) for the matches that start outside code.
+const replaceOutsideCode = (t, re, by) => {
+  const code = codeRanges(t);
+  return t.replace(re, (m, ...rest) => (inCode(code, rest.find((x) => typeof x === "number")) ? m : by));
+};
+
 // Task news in a message: [{ ref, event, text }], one per <herdr-news task=… event=…> tag.
 const unattr = (v) => String(v ?? "").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 function newsOf(t) {
-  return [...String(t).matchAll(/<herdr-news\b([^>]*)>([\s\S]*?)<\/herdr-news\s*>/g)].map(([, a, text]) => ({
+  const s = String(t), code = codeRanges(s);
+  return [...s.matchAll(/<herdr-news\b([^>]*)>([\s\S]*?)<\/herdr-news\s*>/g)].filter((m) => !inCode(code, m.index)).map(([, a, text]) => ({
     ref: unattr(/\btask="([^"]*)"/.exec(a)?.[1]), event: unattr(/\bevent="([^"]*)"/.exec(a)?.[1]), text: text.trim() })).filter((n) => n.ref && n.event);
 }
 
@@ -305,12 +319,12 @@ function cleanWords(t) {
     if (from) return { text: peer[2].replace(/&lt;\/herdr-assistant/g, "</herdr-assistant").trim(), from,
       assistant: { machine: at("machine"), space: at("space"), reply: at("can-reply") === "yes" } };
   }
-  t = t
-    // Task mentions (#4) come with a tag line each for the agent; the chat shows the "#4".
-    .replace(/<hc task="[^"]*"[^>]*>[\s\S]*?<\/hc>\n?/g, "")
-    // Herdr's own tags for the agent (<herdr-news>, <herdr-github>, ...), wherever they are in a
-    // message: never shown, the words typed around them are.
-    .replace(/<(herdr-[\w-]+)\b[^>]*>[\s\S]*?<\/\1\s*>\n?/g, "").replace(/<herdr-[\w-]+\b[^>]*\/>\n?/g, "").trim();
+  // Task mentions (#4) come with a tag line each for the agent; the chat shows the "#4".
+  t = replaceOutsideCode(t, /<hc task="[^"]*"[^>]*>[\s\S]*?<\/hc>\n?/g, "");
+  // Herdr's own tags for the agent (<herdr-news>, <herdr-github>, ...), wherever they are in a
+  // message: never shown, the words typed around them are. Not in code: a template's examples stay.
+  t = replaceOutsideCode(t, /<(herdr-[\w-]+)\b[^>]*>[\s\S]*?<\/\1\s*>\n?/g, "");
+  t = replaceOutsideCode(t, /<herdr-[\w-]+\b[^>]*\/>\n?/g, "").trim();
   if (!t) return null;
   // Herdr's own wrapper (other attributes may follow from=, e.g. reach="…").
   const hc = /^<hc\b([^>]*)>([\s\S]*?)<\/hc>$/.exec(t);

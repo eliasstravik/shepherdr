@@ -224,12 +224,31 @@ export function selfName({ assistant = false, task = null, kind = null } = {}) {
 // A name's initial for its avatar: a task ref's letters ("SHEP-4" → "S"), else its first letter.
 export const initialOf = (name) => (String(name ?? "").trim().match(/[A-Za-z0-9]/)?.[0] ?? "?").toUpperCase();
 
+// The session's first message: the first user item, not items[0] (#589: lines read out of it, like task news, come
+// before it). -1: none.
+export const firstUser = (items) => (items ?? []).findIndex((x) => x?.kind === "user");
+
+// The names an Assistant's first words (what the person asked when its chat started it) are kept under in
+// data/chat-first/<name>.txt: the window's chat writes its slot's (else its origin's), the web app's its slot's (else
+// the agent's address). A chat opened again by the agent's address (after a reload) finds them by its labels (#592).
+export function firstKeys({ slot = null, labels = {}, origin = null, addr = null } = {}) {
+  return [...new Set([slot, labels?.["herdr.chat.slot"], labels?.["herdr.chat.origin"], origin, addr].filter(Boolean).map(String))];
+}
+
+// What the person typed, as markdown that shows it as typed (#591): a "<" or an "&" they wrote is a character, not
+// HTML or an entity ("B1 = <yours>" kept its "<yours>"). Code, fenced or inline, is left as it is.
+export function literal(text) {
+  return String(text ?? "").split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/)
+    .map((part, i) => (i % 2 ? part : part.replace(/</g, "\\<").replace(/&(?=#?\w+;)/g, "\\&"))).join("");
+}
+
 // A user message the person didn't type, in words for its quiet row, else null: the session's first message when the
 // agent was started from a template (a coordinator), as a handoff, or for a task (herdr-task); and any message
 // another agent sent with hc. i: its place in the conversation; start: the first byte read (0: the log's start).
-export function briefLabel(x, i, { start = null, template = null, task = false, sender = (f) => f, machineName = (m) => m, here = null } = {}) {
+// first: where the session's first message is in the conversation (firstUser()).
+export function briefLabel(x, i, { start = null, template = null, task = false, sender = (f) => f, machineName = (m) => m, here = null, first = 0 } = {}) {
   if (x.from) return `Message from ${fromName(x, sender, { machineName, here })}`;
-  if (i !== 0 || start !== 0) return null;
+  if (i !== first || start !== 0) return null;
   if (/^<restart>/.test(x.text ?? "")) return "New session";
   if (/^You are taking over this tab/.test(x.text ?? "") || /^herdr-handoff/.test(template ?? "")) return "Handoff from the previous agent";
   if (template) return "New session";

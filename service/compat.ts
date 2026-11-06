@@ -11,7 +11,7 @@ import * as CL from "../core/chat-log.js";
 import * as CV from "../core/chat-view.js";
 import { taskArtifacts } from "../core/task-artifacts.js";
 const { summary, names, pilotLine } = CL as any;
-const { senderName, briefLabel, newsTimeline, resolveArtifacts, unsigned, fromName, sentTo, selfName, subagentsOf, isHelper } = CV as any;
+const { senderName, briefLabel, firstUser, firstKeys, newsTimeline, resolveArtifacts, unsigned, fromName, sentTo, selfName, subagentsOf, isHelper } = CV as any;
 import { mentionedIn } from "../core/send.js";
 import * as MEc from "../core/mentions.js";
 import * as SCc from "../core/screens.js";
@@ -474,7 +474,7 @@ export class Compat {
   private firsts = new Map<string, { at: number; text: string | null }>();
   firstTask(t: any, addr?: string | null) {
     const safe = (s: string) => String(s).replace(/[^\w.-]/g, "_");
-    const names = [t?.labels?.["herdr.chat.slot"], t?.labels?.["herdr.chat.origin"], addr].filter(Boolean).map((n) => join(APP_HOME, "data", "chat-first", `${safe(n)}.txt`));
+    const names = firstKeys({ labels: t?.labels, addr }).map((n: string) => join(APP_HOME, "data", "chat-first", `${safe(n)}.txt`));
     for (const f of names) {
       const was = this.firsts.get(f);
       if (was && Date.now() - was.at < 10_000) { if (was.text) return was.text; continue; }
@@ -530,21 +530,23 @@ export class Compat {
     const sends = (own && this.sends.get(own)) || [], takenSends = new Set<string>();
     const asking = !!own && (this.asks?.of(own) ?? []).some((a: any) => a.words?.kind === "questions");
     // an Assistant started from its chat with the person's words: what they asked (data/chat-first, as the window's)
-    const ft = reader.start === 0 && items[0]?.kind === "user" ? this.firstTask(t, own)?.trim() : null;
+    // the session's first message: the first user item (core/chat-view.js firstUser)
+    const fi = firstUser(items);
+    const ft = reader.start === 0 && fi >= 0 ? this.firstTask(t, own)?.trim() : null;
     for (const [i, raw] of items.entries()) {
       let x = raw;
       if (x.at) at = x.at;
       while (mi < made.length && x.at && made[mi].at < x.at) messages.push(newsLine(made[mi++]));
       const reactions = reactionsOf(reader.conv?.reactions?.get(x.id));
       // the template's part a quiet "New session" row, the person's words their own message
-      const first = i === 0 && !!ft && x.kind === "user" && String(x.text ?? "").trim().endsWith(ft);
+      const first = i === fi && !!ft && x.kind === "user" && String(x.text ?? "").trim().endsWith(ft);
       if (first) {
         const body = String(x.text).trim().slice(0, -ft!.length).trim();
         if (body) messages.push({ id: `${x.id}:b`, who: "you", at: x.at, text: body, brief: { label: "New session" } });
         x = { ...x, text: ft };
       }
       // not typed by the person: a launch brief or another agent's message, as one quiet row
-      const brief = x.kind === "user" && !first ? briefLabel(x, i, { start: reader.start, template, task, sender, ...peers }) : null;
+      const brief = x.kind === "user" && !first ? briefLabel(x, i, { start: reader.start, template, task, sender, ...peers, first: fi }) : null;
       if (brief) {
         const restart = /^<restart>/.test(x.text ?? "");
         messages.push({ id: x.id, who: "you", at: x.at, text: restart ? x.text.replace(/<\/?restart>/g, "") : x.from ? unsigned(x.text) : x.text, brief: { label: brief, ...(restart ? { bare: true } : {}), ...(x.from ? { from: fromName(x, sender, peers) } : {}) } });

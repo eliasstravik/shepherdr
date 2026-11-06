@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { WORDS, clock, bandActs, bandOrder, senderName, briefLabel, newsWords, newsTimeline, resolveArtifacts, fitThumbs, dayLabel, imagesLine, questionsBelow, notSent, unsigned, elapsed, reportMsg, doingWords, ownWords, outsideTerminal, fromName, sentTo, selfName, initialOf } from "./chat-view.js";
+import { WORDS, clock, bandActs, bandOrder, senderName, briefLabel, newsWords, newsTimeline, resolveArtifacts, fitThumbs, dayLabel, imagesLine, questionsBelow, notSent, unsigned, elapsed, reportMsg, doingWords, ownWords, outsideTerminal, fromName, sentTo, selfName, initialOf, literal, firstUser, firstKeys } from "./chat-view.js";
 
 const ROOT = join(import.meta.dir, "..");
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
@@ -211,4 +211,29 @@ test("subagentsOf: its own hc children labelled reviewer or helper, never worker
   expect(subagentsOf(terms, "t0", now)).toEqual([]);
   expect(isHelper({ labels: { "herdr.role": "reviewer" } })).toBe(false); // no parent: an old herdr-task reviewer
   expect(subagentTitle({ role: "reviewer", cli: null })).toBe("Reviewer");
+});
+
+// SHEP-69 (#591, #592, #589): the person's words as typed, and the session's first message found again.
+describe("the person's words and the session's first message", () => {
+  test("a <word> the person typed stays in their bubble; code is left alone (#591)", () => {
+    expect(literal("Decisions: B1 = <yours>, B3 = <yours>.")).toBe("Decisions: B1 = \\<yours>, B3 = \\<yours>.");
+    expect(literal("a `<code>` and\n```\n<div>\n```\nafter <x>")).toBe("a `<code>` and\n```\n<div>\n```\nafter \\<x>");
+    // an entity typed is its characters; a lone & needs nothing
+    expect(literal("&lt; & ampersand")).toBe("\\&lt; & ampersand");
+    expect(literal(null)).toBe("");
+  });
+  test("the first message is the first user item, wherever news read out of it went (#589)", () => {
+    expect(firstUser([{ kind: "news" }, { kind: "news" }, { kind: "user" }, { kind: "user" }])).toBe(2);
+    expect(firstUser([{ kind: "agent" }])).toBe(-1);
+    // its quiet row's label follows it there
+    expect(briefLabel({ text: "role" }, 2, { start: 0, template: "herdr-assistant", first: 2 })).toBe("New session");
+    expect(briefLabel({ text: "later" }, 3, { start: 0, template: "herdr-assistant", first: 2 })).toBe(null);
+    expect(briefLabel({ text: "role" }, 0, { start: 0, template: "herdr-assistant" })).toBe("New session");
+  });
+  test("a chat opened again by the agent's address finds the first words by its labels (#592)", () => {
+    const labels = { "herdr.chat.slot": "coord-abc", "herdr.chat.origin": "slot:coord-abc" };
+    expect(firstKeys({ labels, origin: "slot:coord-abc", addr: "t12" })).toEqual(["coord-abc", "slot:coord-abc", "t12"]);
+    expect(firstKeys({ slot: "coord-abc", labels: {}, origin: "slot:coord-abc" })).toEqual(["coord-abc", "slot:coord-abc"]);
+    expect(firstKeys({})).toEqual([]);
+  });
 });

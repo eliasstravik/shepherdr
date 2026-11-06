@@ -32,7 +32,7 @@ import { BgJobs } from "./core/bg-jobs.js";
 import { ChatReader } from "./core/chat-reader.js";
 import { words, howAnswered } from "./core/asks.js";
 // The rows' words and rules the web app's chat draws by too (core/chat-view.js).
-import { WORDS, clock, subagentsOf, subagentWord, senderName, briefLabel, fromName, sentTo, selfName, initialOf, newsWords, resolveArtifacts, unsigned, ownWords, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
+import { WORDS, clock, subagentsOf, subagentWord, senderName, briefLabel, firstUser, firstKeys, literal, fromName, sentTo, selfName, initialOf, newsWords, resolveArtifacts, unsigned, ownWords, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
 // Sending the person's words, as the web app does (core/send.js).
 import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine, mentionedIn, sendTyped } from "./core/send.js";
 // hc whose send goes as the person, with no caller: never "Another agent" on another machine (SHEP-3, core/person.js).
@@ -161,8 +161,9 @@ async function answerAsk(dir, id, text, how) {
   await writeTextFile(`${dir}/ans/${id}.json`, text, null).catch(() => {});
 }
 // The person's words keep the line breaks they typed: markdown joins single lines, so each one
-// becomes a hard break (outside code fences, which keep theirs).
-const typed = (text) => String(text).split(/(```[\s\S]*?(?:```|$))/).map((part, i) => (i % 2 ? part : part.replace(/([^\n])\n(?!\n)/g, "$1  \n"))).join("");
+// becomes a hard break (outside code fences, which keep theirs). A "<word>" they typed shows as
+// typed, not read as HTML and dropped (core/chat-view.js literal(), #591).
+const typed = (text) => literal(String(text).split(/(```[\s\S]*?(?:```|$))/).map((part, i) => (i % 2 ? part : part.replace(/([^\n])\n(?!\n)/g, "$1  \n"))).join(""));
 
 // An agent message in parts: markdown, and fenced code blocks (drawn with a Copy bar).
 function parts(text) {
@@ -424,7 +425,7 @@ export default class Chat extends View {
     this.draftFile = `${appHome()}/data/chat-drafts/${safe(this.originKey)}.json`;
     if (!this.addr && this.role) this.phase = "fresh";
     if (this.phase === "fresh") this.loadChoice(cx);
-    if (this.slot) cx.spawn(async (cx) => { this.firstTask = await fs.readFile(this.firstFile, "utf8").catch(() => null); cx.notify(); });
+    this.loadFirst(cx, labels);
     if (this.addr || this.role) cx.spawn(async (cx) => { await this.loadDraft(cx); attach.prune(); });
     if (this.addr) cx.spawn(async (cx) => this.follow(cx));
     // A Coordinator tab's chat that missed its agent (started, or Herdr restarted, before this
@@ -985,6 +986,7 @@ export default class Chat extends View {
     // Back at its shell because the session it resumed is gone: a new agent starts there.
     if (!kind) { if (!(await this.checkLost(this.addr, cx, t))) this.set("unsupported", cx); return; }
     this.t = t;
+    this.loadFirst(cx, t.labels);
     this.argv = t.foreground?.argv ?? t.argv ?? null;
     const pid = t.foreground?.pid;
     if (!pid) { if (this.phase !== "ready") this.set("none", cx); return; }
@@ -1609,6 +1611,22 @@ export default class Chat extends View {
   }
 
   get firstFile() { return `${appHome()}/data/chat-first/${safe(this.slot ?? this.originKey)}.txt`; }
+
+  // What the person asked when this chat started its agent (firstFile), also when the chat was
+  // opened again by the agent's address after a reload (no slot here: the agent's labels name it,
+  // #592). Read again only when the names it could be under change.
+  loadFirst(cx, labels) {
+    const keys = firstKeys({ slot: this.slot, labels, origin: this.originKey, addr: this.addr });
+    const sig = keys.join("|");
+    if (!keys.length || this.firstFor === sig) return;
+    this.firstFor = sig;
+    cx.spawn(async (cx) => {
+      for (const k of keys) {
+        const text = await fs.readFile(`${appHome()}/data/chat-first/${safe(k)}.txt`, "utf8").catch(() => null);
+        if (text) { this.firstTask = text; cx.notify(); return; }
+      }
+    });
+  }
 
   // The empty state: what to do, and what the assistant does.
   fresh(t) {
@@ -2641,6 +2659,8 @@ export default class Chat extends View {
       const d = dayOf(at);
       if (!days.has(d) && d > Math.max(-1, ...days)) { days.add(d); out.push({ kind: "day", id: `day:${d}`, text: dayLabel(at) }); }
     };
+    // The session's first message: the first user item (news read out of it comes before it, #589).
+    const first = firstUser(items);
     for (let i = 0; i < items.length; i++) {
       let x = items[i];
       while (ti < tasks.length && x.at && tasks[ti].at < x.at) { dated(tasks[ti].at); put(tasks[ti++]); }
@@ -2666,17 +2686,17 @@ export default class Chat extends View {
       // This chat started the agent from a template with the person's words as its task: the
       // template's part is a quiet row, the person's words their own message.
       const ft = this.firstTask?.trim();
-      if (i === 0 && this.start === 0 && x.kind === "user" && ft && this.t?.template && String(x.text ?? "").trim().endsWith(ft)) {
+      if (i === first && this.start === 0 && x.kind === "user" && ft && this.t?.template && String(x.text ?? "").trim().endsWith(ft)) {
         const body = String(x.text).trim().slice(0, -ft.length).trim();
         if (body) out.push({ kind: "brief", id: `${x.id}:b`, label: "New session", text: body });
         x = { ...x, text: ft };
       }
-      if (x.kind === "user" && !(i === 0 && ft && x.text === ft) && this.brief(x, i)) {
+      if (x.kind === "user" && !(i === first && ft && x.text === ft) && this.brief(x, i, first)) {
         // Not typed by the person: a launch brief or another agent's message, as a quiet row.
         // A fresh start's handover says it all in its label.
         const restart = /^<restart>/.test(x.text ?? "");
         // Another agent's message (who: its sender) is drawn as a message (SHEP-12).
-        out.push({ kind: "brief", id: x.id, label: this.brief(x, i), text: restart ? x.text.replace(/<\/?restart>/g, "") : x.from ? unsigned(x.text) : x.text, bare: restart, ...(x.from ? { who: fromName(x, (f, t) => this.sender(f, t), this.names()), at: x.at } : {}) });
+        out.push({ kind: "brief", id: x.id, label: this.brief(x, i, first), text: restart ? x.text.replace(/<\/?restart>/g, "") : x.from ? unsigned(x.text) : x.text, bare: restart, ...(x.from ? { who: fromName(x, (f, t) => this.sender(f, t), this.names()), at: x.at } : {}) });
         continue;
       }
       if (x.kind === "user") {
@@ -2848,9 +2868,10 @@ export default class Chat extends View {
   // A user message the person didn't type, in words for its quiet row, else null: the session's
   // first message when the agent was started from a template (a coordinator), as a handoff, or
   // for a task (herdr-task); and any message another agent sent with hc.
-  brief(x, i) {
-    // core/chat-view.js: the web app's chat labels them the same way.
-    return briefLabel(x, i, { start: this.start, template: this.t?.template ?? null, task: Boolean(this.t?.labels?.["herdr.task"]), sender: (f, t) => this.sender(f, t), ...this.names() });
+  brief(x, i, first = 0) {
+    // core/chat-view.js: the web app's chat labels them the same way. first: where the session's
+    // first message is (firstUser()).
+    return briefLabel(x, i, { first, start: this.start, template: this.t?.template ?? null, task: Boolean(this.t?.labels?.["herdr.task"]), sender: (f, t) => this.sender(f, t), ...this.names() });
   }
 
   // What a row's height depends on: measured once per key and width.
@@ -3021,7 +3042,7 @@ export default class Chat extends View {
             .child(div().flex_none().text_color(t.muted).child(x.label))
             .when(!open && !x.bare, (el) => el.child(div().flex_1().min_w(0).truncate().child(String(x.text ?? "").split("\n").find((l) => l.trim()) ?? ""))))
           .when(open, (el) => el.child(div().pl(18).pt(6).text_size(12.5).text_color(t.muted)
-            .child(TextView.markdown(`${pre}chat-brief-${x.id}`, x.text || " ").selectable(true)))), 12, 0);
+            .child(TextView.markdown(`${pre}chat-brief-${x.id}`, literal(x.text) || " ").selectable(true)))), 12, 0);
       }
       case "imgs":
         return col(h_flex().w_full().gap(THUMB_GAP).items_start().justify_end().when(Boolean(x.faded), (el) => el.opacity(0.55))
