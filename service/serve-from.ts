@@ -100,11 +100,13 @@ if (!there || there.version !== VERSION || (there.build && there.build !== BUILD
 const TAKE = `set -e; f="$HOME/.herdr/shepherdr/replaced-share.json"
 s=$(tailscale serve status --json 2>/dev/null || echo '{}')
 printf '%s' "$s" | python3 -c '
-import json, sys
+import json, os, sys
 s = json.load(sys.stdin)
+try: port = int(json.load(open(os.path.expanduser("~/.herdr/shepherdr/service.json")))["port"])
+except Exception: port = 7788
 for hp, web in (s.get("Web") or {}).items():
     h = (web.get("Handlers") or {}).get("/shepherdr")
-    if h and h.get("Proxy") and not h["Proxy"].endswith(":7788"):
+    if h and h.get("Proxy") and not h["Proxy"].endswith(f":{port}"):
         print(hp.rsplit(":", 1)[1], h["Proxy"])
 ' > "$f.tmp" || true
 if [ -s "$f.tmp" ]; then read port proxy < "$f.tmp"; printf '{"port":"%s","proxy":"%s","at":%s}\\n' "$port" "$proxy" "$(date +%s)" > "$f"

@@ -16,7 +16,10 @@ connection it came on). A page from anywhere else can't change anything: writes 
 ## How it runs
 
 - One always-on service, `~/.local/share/shepherdr/service/main.ts` on Bun, kept running by `systemctl --user`
-  (`shepherdr.service`) or launchd (`dev.shepherdr.service`). It listens on `127.0.0.1:7788` only.
+  (`shepherdr.service`) or launchd (`dev.shepherdr.service`). It listens on `127.0.0.1:7788` only
+  (another port: `./install.sh --port <n>`, kept for updates). Once the port is its own, it writes the port and a fresh
+  id into `~/.herdr/shepherdr/service.json`; the window (`lib/local.js`), the CLI and a voice call read the port there
+  and send the token or the shared state only when `/api/health` answers that id, never to another app on the port.
 - It reads what the window reads, through herdr-core (`hc`): the spaces, Assistants, chats and task lists of every
   connected machine, and herdr-task's files. Shared choices (pins, sidebar sections, Notify, the Window switches)
   live in its shared document, which the window keeps in step (`lib/bridge.js`).

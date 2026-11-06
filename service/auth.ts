@@ -39,6 +39,13 @@ export function gate(req: Request, g: Gate, socket = false, peerTrusted = false)
   return { ok: true, who: "local", via: "local" };
 }
 
+/** A caller on this machine (the window, the CLI, a call), as health tells only them the service's id (main.ts):
+ *  127.0.0.1 by the service's own port, no tailnet login, no browser page. */
+export function localCaller(req: Request, port: number) {
+  const h = req.headers, host = (h.get("host") ?? "").toLowerCase();
+  return !h.has("tailscale-user-login") && !h.get("origin") && (host === `127.0.0.1:${port}` || host === `localhost:${port}`);
+}
+
 function same(a: string, b: string) {
   if (a.length !== b.length) return false;
   let d = 0;

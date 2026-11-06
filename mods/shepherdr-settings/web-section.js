@@ -9,6 +9,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { home, appHome, readTextFile } from "herdr";
 import { button, menuRow, red, TEXT, RADIUS, H } from "./ui.js";
 import { on } from "./addons.js";
+import { localService, localToken } from "./local.js";
 // The page's words and its state line: core/settings.js and core/host.js, shared with the web app.
 import { WEB, SECTIONS, webState } from "./core/settings.js";
 import { SERVE } from "./core/host.js";
@@ -31,10 +32,13 @@ function current(view) {
 
 // Asks this machine's service to move it (the same as the web app's Settings › Web).
 async function move(label) {
-  const token = (await readTextFile(`${home()}/.herdr/shepherdr/token`).catch(() => null))?.trim();
+  const token = await localToken();
   if (!token) return "Shepherdr's service isn't running here.";
+  // its port, and that Shepherdr's own service answers there (not another app), before the token goes out
+  const svc = await localService().catch(() => null);
+  if (!svc) return "Shepherdr's service isn't answering here.";
   try {
-    const r = await fetch("http://127.0.0.1:7788/api/action", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    const r = await fetch(`${svc.base}/api/action`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ type: "setting", key: "web.serve", value: label }) });
     const j = await r.json().catch(() => null);
     return j?.ok === false ? j.error ?? "It could not be moved." : "";

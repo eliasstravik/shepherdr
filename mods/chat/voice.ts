@@ -97,8 +97,19 @@ async function agentId(key: string, made = "") {
 // This machine's Shepherdr service answers the tools as for the web app, told this call's agent and what the window
 // shows; what it asks to show goes to the chat (nav/). Its token is the local callers' (~/.herdr/shepherdr/token).
 
-const SERVICE = `http://127.0.0.1:${process.env.SHEPHERDR_PORT || 7788}`;
-const TOKEN = join(process.env.SHEPHERDR_DATA || join(process.env.HOME ?? "", ".herdr", "shepherdr"), "token");
+const DATA = process.env.SHEPHERDR_DATA || join(process.env.HOME ?? "", ".herdr", "shepherdr");
+const TOKEN = join(DATA, "token");
+
+/** The service's address, only when Shepherdr's own service answers there (service.json's port and id, as the window's
+ *  lib/local.js): never the token to another app on its port. */
+async function service(): Promise<string | null> {
+  try {
+    const f = JSON.parse(readFileSync(join(DATA, "service.json"), "utf8"));
+    const base = `http://127.0.0.1:${f.port}`;
+    const h = await (await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(3000) })).json();
+    return typeof f.id === "string" && f.id && h?.id === f.id ? base : null;
+  } catch { return null; }
+}
 
 function where() { try { return JSON.parse(readFileSync(join(dir, "where.json"), "utf8")); } catch { return {}; } }
 
@@ -106,8 +117,10 @@ function where() { try { return JSON.parse(readFileSync(join(dir, "where.json"),
 async function serviceTool(tool: string, params: unknown): Promise<{ result: string; nav?: any; then?: unknown; shows?: string; error?: boolean } | null> {
   let token = "";
   try { token = readFileSync(TOKEN, "utf8").trim(); } catch { return null; }
+  const base = await service();
+  if (!base) return null;
   try {
-    const r = await fetch(`${SERVICE}/api/voice/tool`, { method: "POST", signal: AbortSignal.timeout(25000),
+    const r = await fetch(`${base}/api/voice/tool`, { method: "POST", signal: AbortSignal.timeout(25000),
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ addr, tool, params, where: where() }) });
     if (!r.ok) return null;
     const a = await r.json();

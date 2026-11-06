@@ -141,6 +141,62 @@ class Install(unittest.TestCase):
         self.assertFalse(os.path.exists(unit))
         self.assertFalse(os.path.exists(self.p(".local/share/shepherdr/service/main.ts")))
 
+    def test_port(self):
+        """install --port (GitHub #635): the unit starts the service on it, the record keeps it for updates, 7788 puts the
+        default back; a port out of range is refused."""
+        unit = self.p("Library/LaunchAgents/dev.shepherdr.service.plist") if sys.platform == "darwin" else self.p(".config/systemd/user/shepherdr.service")
+        out = run("install", "--root", self.root, "--yes", "--port", "7795").stdout
+        if "needs bun" in out:
+            self.skipTest("bun isn't installed here")
+        self.assertIn("7795", open(unit).read())
+        self.assertIn("SHEPHERDR_PORT", open(unit).read())
+        run("update", "--root", self.root, "--yes", "--source", ROOT)
+        self.assertIn("7795", open(unit).read(), "an update keeps the port")
+        run("install", "--root", self.root, "--yes", "--port", "7788")
+        self.assertNotIn("SHEPHERDR_PORT", open(unit).read())
+        p = run("install", "--root", self.root, "--yes", "--port", "80", ok=False)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("1024", p.stdout + p.stderr)
+
+    def test_service_answers(self):
+        """doctor and install trust only Shepherdr's own service on its port: the id it wrote in service.json, not
+        another app answering health there (GitHub #635)."""
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from importlib.machinery import SourceFileLoader
+        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+
+        def server(body):
+            class H(BaseHTTPRequestHandler):
+                def do_GET(self):
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(json.dumps(body).encode())
+
+                def log_message(self, *a):
+                    pass
+            s = ThreadingHTTPServer(("127.0.0.1", 0), H)
+            threading.Thread(target=s.serve_forever, daemon=True).start()
+            return s
+        ours, other = server({"ok": True, "id": "id-1"}), server({"ok": True})
+        try:
+            data = self.p(".herdr", "shepherdr")
+            os.makedirs(data)
+            ok, why = sh.service_answers(self.root)
+            self.assertFalse(ok)
+            self.assertIn("hasn't started", why)
+            for port, want in ((ours.server_port, True), (other.server_port, False)):
+                with open(os.path.join(data, "service.json"), "w") as f:
+                    json.dump({"port": port, "id": "id-1"}, f)
+                ok, why = sh.service_answers(self.root)
+                self.assertEqual(ok, want, why)
+                self.assertEqual(sh.our_port(self.root), port)
+            self.assertIn("another app", why)
+        finally:
+            for s in (ours, other):
+                s.shutdown()
+                s.server_close()
+
     def test_web_only(self):
         """install --web: the service, the web app, herdr-task and the helpers under .local/share/shepherdr, linked from
         .local/bin; nothing in herdr-app; herdr-task runs from there; uninstall takes it all back out."""

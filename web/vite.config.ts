@@ -15,5 +15,5 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@shared': at('./shared'), '@client': at('./src'), '@plugins': at('./plugins'), '@core': at('../core') } },
   build: { outDir: at('./dist'), emptyOutDir: true, chunkSizeWarningLimit: 900 },
-  server: { host: '127.0.0.1', allowedHosts: ['.ts.net'], proxy: { '/api': { target: process.env.SHEPHERDR_API_URL || 'http://127.0.0.1:7788', ws: true } } },
+  server: { host: '127.0.0.1', allowedHosts: ['.ts.net'], proxy: { '/api': { target: process.env.SHEPHERDR_API_URL || `http://127.0.0.1:${process.env.SHEPHERDR_PORT || 7788}`, ws: true } } },
 })
