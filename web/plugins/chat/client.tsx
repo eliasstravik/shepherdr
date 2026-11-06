@@ -1226,17 +1226,30 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
  *  question mark, or a list for a plan. The title wraps onto as many lines as it needs, the mark on its first line */
 type CardSource = { id: string; title?: string }
 
-export function CardShell({ title, plan, icon, action, source, head, children }: { title: string; plan?: boolean; icon?: ComponentType<{ className?: string }>; action?: ReactNode; source?: CardSource; head?: { who: string; links: { label: string; fn: () => void }[] }; children: ReactNode }) {
+export function CardShell({ title, plan, icon, action, source, head, children }: { title: string; plan?: boolean; icon?: ComponentType<{ className?: string }>; action?: ReactNode; source?: CardSource; head?: { who: string; links: { label: string; fn: () => void }[]; dismiss?: () => void }; children: ReactNode }) {
   const Icon = icon ?? (plan ? PlanIcon : QuestionIcon)
+  // Esc while the card has the focus (a press on it) dismisses it, as Esc in the CLI's own prompt; not while typing in it
+  const esc = head?.dismiss
+    ? (e: KeyboardEvent) => {
+        if (e.key !== 'Escape' || (e.target as HTMLElement).closest('input, textarea')) return
+        e.preventDefault()
+        e.stopPropagation()
+        head.dismiss!()
+      }
+    : undefined
   return (
-    <div data-card className="mt-2 w-[440px] max-w-full cursor-default overflow-hidden rounded-box bg-bg shadow-[inset_0_0_0_1px_var(--line2)]">
+    <div data-card tabIndex={esc ? -1 : undefined} onKeyDown={esc} className="mt-2 w-[440px] max-w-full cursor-default overflow-hidden rounded-box bg-bg shadow-[inset_0_0_0_1px_var(--line2)] outline-none">
       {/* the window's card header: a red dot, "Claude asks", quiet links at the right */}
       {head ? (
         <div data-card-head className="flex items-center gap-2 px-3 pt-2 text-[0.75rem] phone:text-[0.8125rem]">
           <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-need" />
           <span className="min-w-0 flex-1 truncate font-medium text-fg2">{`${head.who} asks`}</span>
           {head.links.map((l) => (
-            <button key={l.label} type="button" onClick={l.fn} className="shrink-0 text-fg3 hover:text-fg hover:underline">{l.label}</button>
+            <button key={l.label} type="button" onClick={l.fn} className="relative shrink-0 text-fg3 hover:text-fg hover:underline">
+              {l.label}
+              {/* a finger's reach on a touch screen */}
+              <span aria-hidden="true" className="absolute top-1/2 left-1/2 hidden size-[max(100%,2.75rem)] -translate-1/2 coarse:block" />
+            </button>
           ))}
         </div>
       ) : null}
@@ -1255,13 +1268,16 @@ export function CardShell({ title, plan, icon, action, source, head, children }:
   )
 }
 
-/** a hook ask's card header, as the window's: whose ask ("Claude asks"), and "Answer in terminal" (no decision here:
- *  the CLI asks in its terminal, which then shows) */
+/** a hook ask's card header, as the window's: whose ask ("Claude asks"), "Answer in terminal" (no decision here:
+ *  the CLI asks in its terminal, which then shows) and "Dismiss" (or Esc on the card: closed without an answer, as Esc
+ *  in the CLI's prompt; the agent hears it was declined and carries on). A CLI's start screen has no Dismiss. */
 function askHead(q: Question, chat: Chat) {
+  const dismiss = q.press ? undefined : () => void act({ type: 'answer', chat: chat.key, question: q.id, dismiss: true } as never).catch(() => undefined)
+  const last = dismiss ? [{ label: 'Dismiss', fn: dismiss }] : []
   // a task worker's, in its Assistant's chat: headed by its task, its own chat a link (no terminal link)
-  if (q.by) return { who: q.by.ref, links: [{ label: 'Open chat', fn: () => goChat(q.by!.chat) }] }
+  if (q.by) return { who: q.by.ref, links: [{ label: 'Open chat', fn: () => goChat(q.by!.chat) }, ...last], dismiss }
   const terminal = () => void act({ type: 'answer', chat: chat.key, question: q.id, terminal: true } as never).then(() => openTerminal(chat.key), () => undefined)
-  return { who: chat.cli === 'codex' ? 'Codex' : 'Claude', links: [{ label: 'Answer in terminal', fn: terminal }] }
+  return { who: chat.cli === 'codex' ? 'Codex' : 'Claude', links: [{ label: 'Answer in terminal', fn: terminal }, ...last], dismiss }
 }
 
 /** a questions card's "Chat about this": no answer; the agent hears the person wants to talk it over, and the box

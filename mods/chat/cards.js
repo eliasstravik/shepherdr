@@ -6,10 +6,12 @@
 // host.chatAbout(ask, cx) goes where the person can write to it.
 // Every card the chat shows (these, a secret's, a CLI's start screen) starts with one header
 // strip (headStrip()): a red dot, "Claude asks" or "HERD-12 asks", quiet links at the right.
+// Every ask's header ends with "Dismiss" (Esc too, once the card is pressed): closed without an
+// answer, as Esc in Claude's prompt; the agent hears it was declined and carries on.
 
 import { div } from "gpui-kit";
 import { InputState } from "gpui-base";
-import { allow, deny, answer, answers, chatAbout, release } from "./core/asks.js";
+import { allow, deny, answer, answers, chatAbout, dismiss, release } from "./core/asks.js";
 
 // A card's first strip. opts: { who ("Claude", "HERD-12"), asks (false: what follows `who`
 // instead, e.g. "Kept"), dot (its color; default red), links ([ctl] at the right) }.
@@ -46,7 +48,7 @@ export class AskCards {
     const open = this.open.has(id);
     const links = [...(opts.links ?? []),
       ...(long ? [linkCtl(`ask-all-${id}`, open ? "Show less" : "Show all", () => { if (open) this.open.delete(id); else this.open.add(id); })] : []),
-      ...(opts.terminal !== false ? [this.terminalLink(ask)] : [])];
+      ...(opts.terminal !== false ? [this.terminalLink(ask)] : []), this.dismissLink(ask)];
     const out = [headStrip({ who: opts.who, links }), { key: "title", kind: "title", text: w.title }];
     if (w.detail) out.push({ key: "detail", kind: "detail", lines: w.detail.split("\n"), clip: long && !open ? SHORT : null });
     if (w.cut) out.push({ key: "cut", kind: "text", tone: "dim", text: "Some of it is too long for the chat; the terminal shows it all." });
@@ -68,6 +70,16 @@ export class AskCards {
   // "Answer in terminal": a quiet link, always at the header's right.
   terminalLink(ask) {
     return linkCtl(`ask-terminal-${ask.id}`, "Answer in terminal", (cx) => { this.drop(ask); this.host.reply(ask, release(), cx); this.host.toTerminal(ask, cx); });
+  }
+
+  // "Dismiss": a quiet link, the header's last.
+  dismissLink(ask) {
+    return linkCtl(`ask-dismiss-${ask.id}`, "Dismiss", (cx) => this.dismiss(ask, cx));
+  }
+
+  dismiss(ask, cx) {
+    this.drop(ask);
+    this.host.reply(ask, dismiss(ask.words.kind), cx);
   }
 
   // ---- questions (AskUserQuestion) ----------------------------------------------------------
@@ -133,9 +145,9 @@ export class AskCards {
     this.host.reply(ask, answers(ask.req, map), cx);
   }
 
-  // A press on one of this ask's strips: its card takes the keys (arrows, Tab, digits).
+  // A press on one of this ask's strips: its card takes the keys (Esc; a questions card's arrows,
+  // Tab, digits too).
   pressed(ask) {
-    if (ask.words.kind !== "questions") return;
     this.keyed = ask;
     this.focus.focus();
   }
@@ -147,6 +159,8 @@ export class AskCards {
   }
 
   key(ask, e, cx) {
+    if (e.key === "escape") { cx.stop_propagation(); this.dismiss(ask, cx); cx.notify(); return; }
+    if (ask.words.kind !== "questions" || !ask.words.questions.length) return;
     const w = ask.words, q = this.state(ask), n = w.questions.length;
     const last = n > 1 ? n : n - 1, step = Math.min(q.step, last);
     const k = e.key;
@@ -186,7 +200,7 @@ export class AskCards {
     const n = w.questions.length, many = n > 1;
     const last = many ? n : n - 1;
     const step = Math.min(q.step, last);
-    const links = [...(opts.links ?? []), ...(opts.terminal !== false ? [this.terminalLink(ask)] : [])];
+    const links = [...(opts.links ?? []), ...(opts.terminal !== false ? [this.terminalLink(ask)] : []), this.dismissLink(ask)];
     const out = [headStrip({ who: opts.who, links })];
     if (many) {
       out.push({ key: "title", kind: "title", text: `${n} questions` });

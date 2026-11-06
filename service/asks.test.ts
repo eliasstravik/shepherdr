@@ -57,6 +57,30 @@ test("several questions: one card with a part for each, answered all at once in 
   expect(out.updatedInput.answers).toEqual({ "Which color?": "Red", "Which sizes?": "S, M" });
 });
 
+// GitHub #573: a card closed without an answer, as Esc in Claude's prompt; Claude hears it was declined and goes on.
+test("Dismiss closes a question, a permission or a plan without an answer, and says so", () => {
+  put("t40.100.1", { tool_name: "AskUserQuestion", tool_input: { questions: [{ question: "Rerun CI?", header: "CI", options: [{ label: "Yes" }, { label: "No" }] }] } });
+  put("t41.100.1", { tool_name: "Bash", tool_input: { command: "rm -rf build" } });
+  put("t42.100.1", { tool_name: "ExitPlanMode", tool_input: { plan: "1. Do it" } });
+  const asks = new Asks();
+  asks.start();
+  const said: Record<string, string> = {};
+  for (const id of ["t40.100.1", "t41.100.1", "t42.100.1"]) {
+    asks.answer(id, { dismiss: true });
+    const d = JSON.parse(readFileSync(join(dir, "ans", `${id}.json`), "utf8")).hookSpecificOutput.decision;
+    expect(d.behavior).toBe("deny");
+    expect(d.updatedInput).toBeUndefined();
+    expect(d.interrupt).toBeUndefined();
+    said[id] = d.message;
+    expect(readFileSync(join(dir, "end", id), "utf8")).toBe("Dismissed on the web\n");
+  }
+  expect(said["t40.100.1"]).toMatch(/dismissed.*carry on/i);
+  expect(said["t41.100.1"]).toMatch(/dismissed.*don't do it/i);
+  expect(said["t42.100.1"]).toMatch(/dismissed.*plan isn't approved/i);
+  for (const t of ["t40", "t41", "t42"]) expect(asks.of(t).length).toBe(0);
+  expect(asks.endsOf("t41").at(-1)?.how).toBe("Dismissed on the web");
+});
+
 // The web served from another machine than the agent's: its asks wait in its own machine's data/chat-asks, read and
 // answered through herdr-core's link (machine.exec there; here a sh on a second throwaway home).
 test("another machine's ask: a card here, answered there", async () => {
