@@ -2,7 +2,7 @@
 // (tasks and what any agent asks), then by the header's Group by (Status, Space, Machine, Machine › Space; kept on this
 // device). By status, each status's tasks sit under a light heading per machine · space while they are in more than one
 // (Split by space in the ⋯, on until switched off; the automations too), each folding on its own. A filter row picks one status (All statuses, Needs you, Working, Ready, the rest under More). Each heading
-// folds what is under it away. A row says where its task is, as far as the grouping doesn't; a Ready row has Review. A
+// folds what is under it away. This space, first in the filter row (kept on this device), narrows it all to the place picked. A row says where its task is, as far as the grouping doesn't; a Ready row has Review. A
 // row's menu only pins it (core/menus.js taskMenu, the window's too); the Assistant does the rest. Done tasks archive
 // themselves: the Archived row at the bottom opens them.
 import clsx from 'clsx'
@@ -17,6 +17,8 @@ import {
   filteredGroups,
   goChat,
   setTaskFilter,
+  setThisSpace,
+  inList,
   tasksIn,
   namesFor,
   filterOf,
@@ -300,12 +302,13 @@ const PRIMARY = ['needs', 'working', 'ready']
 /** what needs you that is no task's: an agent asking (an Assistant's question, a secret, its turn waiting), or an
  *  automation that didn't run or didn't start its task (the window's inbox items) */
 type AgentNeed = { id: string; chat?: string; who: string; why: string; where?: string; auto?: Automation }
-function agentNeeds(snap: Snapshot): AgentNeed[] {
+/** what needs you that is no task's, in a list: an agent's by its place, an automation's by the place it is kept under */
+function agentNeeds(snap: Snapshot, chips: string[]): AgentNeed[] {
   const where = (machine: string | null | undefined, name?: string) => {
     const m = machine && machine !== snap.host ? snap.machines?.find((x) => x.machine === machine)?.name ?? machine : undefined
     return [m, name].filter(Boolean).join(' · ') || undefined
   }
-  const asks = snap.needs.filter((n) => !n.task && n.chat).map((n) => {
+  const asks = snap.needs.filter((n) => !n.task && n.chat && inList(snap, chips, n.place)).map((n) => {
     const p = snap.places.find((x) => x.id === n.place)
     // why, in the window's words (core/needs.js REASONS, reqReason): a plan, a permission's own words, a question
     const q = n.question
@@ -315,9 +318,15 @@ function agentNeeds(snap: Snapshot): AgentNeed[] {
     return { id: n.id, chat: n.chat, who: 'Assistant', why, where: where(p?.machine, p?.name) }
   })
   // an automation goes by its name, with no id: "Didn't run" or "Didn't start its task"
-  const autos = Object.values(snap.automations ?? {}).flat().filter((a) => a.error)
+  const autos = autosIn(snap, chips).filter((a) => a.error)
     .map((a) => ({ id: `auto:${a.machine ?? ''}:${a.listName}:${a.name}`, who: a.name, why: a.failed === 'fire' ? "Didn't run" : "Didn't start its task", where: where(a.machine, a.listName), auto: a }))
   return [...asks, ...autos]
+}
+
+/** a list's automations: snap.automations holds them by place id (a list no space works in: by its own key, in
+ *  every list but one narrowed to places) */
+function autosIn(snap: Snapshot, chips: string[]) {
+  return Object.entries(snap.automations ?? {}).filter(([k]) => inList(snap, chips, k)).flatMap(([, v]) => v)
 }
 
 /** a Needs you row of no task: an agent's opens its chat; a failed automation's opens the Automations group */
@@ -344,6 +353,7 @@ function StatusFilters(p: { counts: Record<string, number>; filter: string }) {
 
 function StatusFilterRow({ counts, filter }: { counts: Record<string, number>; filter: string }) {
   const [open, setOpen] = useState(false)
+  const here = useUI((u) => u.thisSpace)
   // as 3.0's: never wraps, never scrolls; a chip that doesn't fit goes in More (widths estimated, about 7.5px a letter)
   const row = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(360)
@@ -358,7 +368,7 @@ function StatusFilterRow({ counts, filter }: { counts: Record<string, number>; f
   const chips = FILTER_ORDER.filter((k) => counts[k] || k === filter)
   const primary = PRIMARY.filter((k) => chips.includes(k))
   const shown: string[] = []
-  let room = width - 8 - est('All statuses', 0)
+  let room = width - 8 - est('This space', 0) - 2 - est('All statuses', 0)
   for (const [i, k] of primary.entries()) {
     const w = est(FILTER_WORDS[k], counts[k] ?? 0)
     if (w + (chips.length > primary.length || i < primary.length - 1 ? 70 : 0) > room) break
@@ -376,6 +386,11 @@ function StatusFilterRow({ counts, filter }: { counts: Record<string, number>; f
   )
   return (
     <div ref={row} role="group" aria-label="Status" className="flex items-center gap-0.5 px-1.5 pt-1.5 phone:px-2">
+      {/* This space: a toggle before the status chips (they pick one status; this narrows to the place picked) */}
+      <button type="button" aria-pressed={here} onClick={() => setThisSpace(!here)}
+        className="press inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[0.8125rem] text-fg2 hover:bg-hover hover:text-fg aria-pressed:bg-sel aria-pressed:text-fg coarse:h-9 phone:h-9 phone:px-3 phone:text-[0.875rem]">
+        This space
+      </button>
       {chip('all', 'All statuses', 0)}
       {shown.map((k) => chip(k, FILTER_WORDS[k], counts[k] ?? 0))}
       {more.length ? (
@@ -450,6 +465,7 @@ function TaskList(_: { placeId: string }) {
   const shut = useUI((u) => u.shut)
   const archived = useUI((u) => u.archived === key)
   const wanted = useUI((u) => u.taskFilter)
+  const here = useUI((u) => u.thisSpace && view.chips.length === 1 && view.chips[0] === u.place)
   const q = useUI((u) => filterOf(u, view.search, 'tasks'))
   const place = placeOf(snap, getState().ui.place)
   const by = groupFor(chosen, view.level)
@@ -459,9 +475,9 @@ function TaskList(_: { placeId: string }) {
   if (archived) return <ArchivedList list={view} />
   const loaded = !!snap.places.length || !!snap.tasks.length
   // what the search field holds: only what matches it shows, in its group (the window's matches())
-  const asks = agentNeeds(snap).filter((n) => !q || matches(q, n.who, n.why, n.where))
+  const asks = agentNeeds(snap, view.chips).filter((n) => !q || matches(q, n.who, n.why, n.where))
   const live = tasksIn(snap, view).filter((t) => !q || found(snap, t, q))
-  const autos = Object.values(snap.automations ?? {}).flat().filter((a) => !q || matches(q, a.name, a.listName, a.machine ? machineName(snap.machines, a.machine) : undefined))
+  const autos = autosIn(snap, view.chips).filter((a) => !q || matches(q, a.name, a.listName, a.machine ? machineName(snap.machines, a.machine) : undefined))
   // the chips' counts: what each status holds now, as far as the search lets it (Needs you: its tasks and what else
   // needs you)
   const counts: Record<string, number> = { needs: live.filter((t) => t.status === 'need').length + asks.length, automations: autos.length }
@@ -610,7 +626,7 @@ function TaskList(_: { placeId: string }) {
         {/* Automations: their own group, last */}
         {autoGroup}
         {/* nothing at all: said once, never "yet" (3.0's) */}
-        {loaded && nothing && !q ? <Empty className="pt-3 text-fg3">{snap.tasks.length ? 'Nothing to do.' : 'No tasks on any machine. Ask an Assistant to plan some.'}</Empty> : null}
+        {loaded && nothing && !q ? <Empty className="pt-3 text-fg3">{here ? `Nothing in ${place.name}.` : snap.tasks.length ? 'Nothing to do.' : 'No tasks on any machine. Ask an Assistant to plan some.'}</Empty> : null}
         {archivedGroup ? (
           <div key="archived">
             <GroupHeading label="Archived" count={archivedGroup.tasks.length} flip="group:archived" />
