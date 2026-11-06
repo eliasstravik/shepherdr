@@ -43,7 +43,7 @@ import { Secrets, SecretsHome } from "./secrets.ts";
 import { Agents } from "./agents.ts";
 import { Machines } from "./machines.ts";
 import { Push, alertsOf, agentAlerts } from "./push.ts";
-import { dictate } from "./dictate.ts";
+import { dictate, liveToken } from "./dictate.ts";
 import { sh, exec } from "./model.ts";
 import { folders, newSpace, newSpaceInfo } from "./spaces.ts";
 import { kindOf } from "../core/chat-reader.js";
@@ -622,6 +622,10 @@ const server = Bun.serve<{ who: string }>({
     }
     if (path === "/api/dictate" && req.method === "POST") {
       try { return json({ text: await dictate(hub, await req.blob()) }); } catch (err) { return json({ error: (err as Error).message }, 400); }
+    }
+    // live dictation: a single-use token as the page starts recording (the words are written while it records)
+    if (path === "/api/dictate/live" && req.method === "POST") {
+      try { return json({ token: await liveToken(hub) }); } catch (err) { return json({ error: (err as Error).message }, 400); }
     }
     if (path === "/api/commands") {
       // the "/" list above the box (core/slash.js): its CLI's commands, and for Claude Code the person's own

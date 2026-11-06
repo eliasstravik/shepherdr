@@ -283,6 +283,8 @@ export interface UI {
   dictStarted: number
   /** Done was pressed: the last words are still coming in */
   dictDone: boolean
+  /** when Done was pressed (a slow writing says so) */
+  dictDoneAt: number
   /** talk to type didn't work in this chat's box: why, over the box until dismissed or tried again */
   dictError: { chat: string; text: string } | null
   files: Record<string, { name: string; path?: string }[]>
@@ -441,6 +443,7 @@ let state: State = {
     dict: null,
     dictStarted: 0,
     dictDone: false,
+    dictDoneAt: 0,
     dictError: null,
     files: {},
     reply: {},

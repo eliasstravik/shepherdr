@@ -3,8 +3,13 @@
 //   bun record.ts <out.wav> <level file>
 // SIGINT: write <out.wav> (16 kHz mono 16-bit) and exit. SIGTERM: throw it away and exit.
 // The level file holds one number, 0..1, updated ten times a second.
+// SHEP-63: the words are also written while you speak: the audio streams to ElevenLabs' realtime speech to text (the
+// key from key.ts, in memory only), and on SIGINT the last words are asked for and written to <out.wav>.txt as
+// { text } (a moment later, however long it was). No .txt: the live words didn't come, so transcribe.ts uploads the wav.
 
 import { writeFileSync } from "node:fs";
+import { liveUrl, liveChunk, liveWords, LIVE_TAIL, LIVE_WAIT } from "./core/voice.js";
+import { keyFor } from "./key.ts";
 
 const [out, levelFile] = process.argv.slice(2);
 if (!out || !levelFile) { console.error("usage: bun record.ts <out.wav> <level file>"); process.exit(2); }
@@ -22,12 +27,64 @@ function wav(): Buffer {
   return Buffer.concat([head, ...chunks.map((c) => Buffer.from(c))]);
 }
 
-process.on("SIGINT", () => { mic.kill(); writeFileSync(out, wav()); process.exit(0); });
+// The live words: a socket opened as soon as the key is found; audio kept until then, sent about every 100 ms.
+const words = liveWords();
+let ws: WebSocket | null = null, broken = false, landed: ((t: string | null) => void) | null = null;
+let queue: string[] = [], held: Uint8Array[] = [], heldBytes = 0;
+const fail = () => { broken = true; queue = []; landed?.(null); landed = null; try { ws?.close(); } catch {} };
+const send = (m: string) => { if (broken) return; if (ws?.readyState === WebSocket.OPEN) ws.send(m); else queue.push(m); };
+// (whole samples only: an odd byte waits for the next piece)
+const flush = () => {
+  if (heldBytes < 2) return;
+  const buf = Buffer.concat(held.map((c) => Buffer.from(c)));
+  const n = buf.length & ~1;
+  send(liveChunk(buf.subarray(0, n).toString("base64")));
+  held = n < buf.length ? [buf.subarray(n)] : [];
+  heldBytes = buf.length - n;
+};
+(async () => {
+  const k = await keyFor().catch(() => null);
+  if (!k || "error" in k || broken) return fail();
+  ws = new WebSocket(liveUrl(), { headers: { "xi-api-key": k.key } } as any);
+  ws.onopen = () => { for (const m of queue) ws!.send(m); queue = []; };
+  ws.onmessage = (e) => {
+    const r = words.hear(String(e.data));
+    if (r === "failed") fail();
+    else if (r === "words") { landed?.(words.text()); landed = null; }
+  };
+  ws.onerror = () => fail();
+  ws.onclose = () => fail();
+})();
+/** Done's last words: all the text, or null (they can't come: the wav is uploaded instead). */
+const finish = () => new Promise<string | null>((res) => {
+  if (broken) return res(null);
+  const t = setTimeout(() => { landed = null; fail(); res(null); }, LIVE_WAIT);
+  landed = (text) => { clearTimeout(t); res(text); };
+  flush();
+  words.done();
+  send(liveChunk(Buffer.from(LIVE_TAIL).toString("base64"), true));
+});
+
+let ending = false;
+process.on("SIGINT", async () => {
+  if (ending) return;
+  ending = true;
+  mic.kill();
+  writeFileSync(out, wav());
+  try { writeFileSync(levelFile, "0"); } catch {}
+  const text = await finish();
+  if (text !== null) writeFileSync(`${out}.txt`, JSON.stringify({ text }));
+  process.exit(0);
+});
 process.on("SIGTERM", () => { mic.kill(); process.exit(0); });
 
 for await (const part of mic.stdout as ReadableStream<Uint8Array>) {
+  if (ending) break;
   chunks.push(part);
   bytes += part.length;
+  held.push(part);
+  heldBytes += part.length;
+  if (heldBytes >= 3200) flush();
   // Loudness of what just came in (RMS, scaled so speech fills most of 0..1).
   const pcm = new Int16Array(part.slice(0, part.length & ~1).buffer);
   let sum = 0;

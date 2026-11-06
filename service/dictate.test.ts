@@ -1,7 +1,7 @@
 // Dictation writes a recording down with ElevenLabs speech to text (Scribe), with the key a voice call uses (voiceKey:
 // from the machine that keeps the secrets). The ElevenLabs call is a stand-in here: what it is sent, and each failure's words.
 import { describe, expect, test } from "bun:test";
-import { dictate, fileName } from "./dictate.ts";
+import { dictate, fileName, keyCache, liveToken } from "./dictate.ts";
 import * as V from "../core/voice.js";
 
 const { voiceKey, KEY_SCRIPT, STT_MODEL } = V as any;
@@ -94,5 +94,45 @@ describe("dictation with ElevenLabs", () => {
     expect(fileName("audio/mp4")).toBe("dictation.m4a");
     expect(fileName("audio/ogg")).toBe("dictation.ogg");
     expect(fileName("audio/wav")).toBe("dictation.wav");
+  });
+});
+
+// SHEP-63: the words are written live (a single-use token for the page), and the key is found once per service process
+describe("live dictation and the kept key", () => {
+  test("the key is looked up once, kept in memory, and found again after a while", async () => {
+    let looked = 0, now = 0;
+    const c = keyCache(async () => { looked++; return { key: KEY }; }, 1000, () => now);
+    expect(await c.get()).toEqual({ key: KEY });
+    expect(await c.get()).toEqual({ key: KEY });
+    expect(looked).toBe(1);
+    now = 1500;
+    await c.get();
+    expect(looked).toBe(2);
+    c.forget();
+    await c.get();
+    expect(looked).toBe(3);
+  });
+
+  test("a failed lookup isn't kept: the next one asks again", async () => {
+    let looked = 0;
+    const c = keyCache(async () => (++looked === 1 ? { error: "unreachable", why: "unreachable" } : { key: KEY }));
+    expect("error" in await c.get()).toBe(true);
+    await Bun.sleep(0);
+    expect(await c.get()).toEqual({ key: KEY });
+    expect(looked).toBe(2);
+  });
+
+  test("a token for the page: asked with the key, which never comes back", async () => {
+    const el = elevenlabs(200, { token: "sutkn_abc123def456" });
+    const token = await liveToken(hub, el.f, async () => ({ key: KEY }));
+    expect(token).toBe("sutkn_abc123def456");
+    expect(el.sent[0].url).toBe("https://api.elevenlabs.io/v1/single-use-token/realtime_scribe");
+    expect((el.sent[0].init.headers as Record<string, string>)["xi-api-key"]).toBe(KEY);
+  });
+
+  test("no key or ElevenLabs refuses: dictation's own words (the page then uploads the recording)", async () => {
+    await expect(liveToken(hub, elevenlabs(200, {}).f, async () => ({ error: "x", why: "none" }))).rejects.toThrow("Dictation needs an ElevenLabs key");
+    await expect(liveToken(hub, elevenlabs(401, { detail: { message: `bad ${KEY}` } }).f, async () => ({ key: KEY }))).rejects.toThrow("ElevenLabs said: bad …");
+    await expect(liveToken(hub, elevenlabs(200, { token: "" }).f, async () => ({ key: KEY }))).rejects.toThrow("ElevenLabs gave no token.");
   });
 });

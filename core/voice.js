@@ -339,6 +339,93 @@ export async function transcribe(audio, key, fetchFn = fetch, filename) {
   return text.replace(/\s+/g, " ").trim();
 }
 
+// ---- live dictation (SHEP-63) -------------------------------------------------------------
+// Writing a recording down after Done took about a second per 40 s of speech, plus the upload and the key lookup. Now
+// the words are written while the person speaks: the audio streams to ElevenLabs' realtime speech to text (Scribe v2
+// realtime) as it is recorded, and Done only asks for the last bit: the words land about 0.2 s later, however long it
+// was. The recording is still kept until the words come, so a live session that fails falls back to the upload above.
+// The browser connects with a single-use token from the service (liveTokenRequest; the key never reaches the page);
+// the window's recorder (mods/chat/record.ts) with the key itself, in memory.
+
+export const LIVE_MODEL = "scribe_v2_realtime";
+export const LIVE_RATE = 16000;
+/** Done's tail: 0.4 s of silence before the commit (ElevenLabs closes a session asked to commit under 0.3 s). */
+export const LIVE_TAIL = new Uint8Array(LIVE_RATE * 2 * 0.4);
+/** how long Done waits for the live words before it uploads the recording instead */
+export const LIVE_WAIT = 4000;
+
+/** The realtime socket's address: 16 kHz 16-bit PCM, commits only when asked (Done), the language found from the audio. */
+export const liveUrl = (token = "") => `wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=${LIVE_MODEL}&audio_format=pcm_${LIVE_RATE}&commit_strategy=manual${token ? `&token=${encodeURIComponent(token)}` : ""}`;
+
+/** A single-use token for one live session from a browser (the key stays on the service). */
+export const liveTokenRequest = (key) => ({ url: `${API}/single-use-token/realtime_scribe`, init: { method: "POST", redirect: "error", headers: { "xi-api-key": key } } });
+
+/** One piece of audio for the socket (base64 PCM); commit: write down what's pending (Done). */
+export const liveChunk = (b64, commit = false) => JSON.stringify({ message_type: "input_audio_chunk", audio_base_64: b64, sample_rate: LIVE_RATE, commit });
+
+/**
+ * The words of a live session as they come: hear() each message from the socket, done() when Done's commit was sent.
+ * hear answers "words" when Done's last words came (text() is all of it), "failed" when the session can't give them
+ * (then upload the recording), else null. Each committed piece is kept in order; the partial ones only show progress.
+ */
+export function liveWords() {
+  const said = [];
+  let asked = false, over = null;
+  return {
+    done() { asked = true; },
+    hear(raw) {
+      if (over) return null;
+      let m = null;
+      try { m = typeof raw === "string" ? JSON.parse(raw) : raw; } catch { return null; }
+      const t = String(m?.message_type ?? "");
+      if (t === "committed_transcript") {
+        if (typeof m.text === "string" && m.text.trim()) said.push(m.text.trim());
+        if (asked) return (over = "words");
+        return null;
+      }
+      if (t === "session_started" || t.startsWith("partial_transcript") || t.startsWith("committed_transcript")) return null;
+      // anything else is an error (auth_error, quota_exceeded, commit_throttled, input_error...)
+      if (m?.error || /error|exceeded|throttled|limit/.test(t)) return (over = "failed");
+      return null;
+    },
+    text: () => said.join(" ").replace(/\s+/g, " ").trim(),
+  };
+}
+
+/** 16-bit little-endian PCM bytes as base64 (no Buffer in a browser). */
+export function base64(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+/**
+ * A browser's microphone (any rate, float samples) down to 16 kHz 16-bit PCM, piece by piece: each sample out is the
+ * mean of the ones it covers (a plain low-pass, enough for speech), its place carried across pieces.
+ */
+export function to16k(rate) {
+  const step = rate / LIVE_RATE;
+  let pos = 0; // where the next sample out starts, in this piece's samples (may be negative: a part of the last one)
+  let carry = new Float32Array(0);
+  return (input) => {
+    const x = carry.length ? Float32Array.from([...carry, ...input]) : input;
+    const out = [];
+    while (pos + step <= x.length) {
+      const a = Math.max(0, Math.floor(pos)), b = Math.min(x.length, Math.floor(pos + step));
+      let sum = 0;
+      for (let i = a; i < b; i++) sum += x[i];
+      const v = b > a ? sum / (b - a) : x[a] ?? 0;
+      out.push(Math.max(-32768, Math.min(32767, Math.round(v * 32767))));
+      pos += step;
+    }
+    const keep = Math.floor(pos);
+    carry = x.slice(keep);
+    pos -= keep;
+    const pcm = new Int16Array(out);
+    return new Uint8Array(pcm.buffer);
+  };
+}
+
 /**
  * An open's words for the voice agent once the app that started the call tried it (ack: { ok, why } from that page or
  * window; null: it didn't answer in time). Only an ok says it is on screen.
