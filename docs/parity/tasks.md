@@ -30,6 +30,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Filter row | T:397-419 "All statuses", then Needs you, Working, Ready as room allows, the rest under More with counts | W StatusFilterRow | ✓ |
 | Filter row always there | T:378 shown whenever Status filters is on (not in Archived) | W TaskListBody (was hidden while empty) | ✓ fixed |
 | Status filters off | T:298 Settings "Status filters" false: no row, all shown | W `filters` (snap.look.filters) | ✓ |
+| This space (SHEP-72) | T hereChip: first in the filter row, a toggle kept by the panel; only the shown space's tasks, automations and Needs you (core/tasks.js inSpace; Needs you also by its tab); follows the space shown; off for a Ctrl+K jump's words; "Nothing in <space>." | W StatusFilterRow, kernel `thisSpace` (listChips: the place picked; kept on the device); asks and automations by the list's places | ✓ |
 | Counts follow the search | T:296 counts of the rows shown | W `counts` from the searched lists | ✓ fixed |
 | A chip kept while searching | T:300 | W `filter` | ✓ |
 | More menu | TM:33-34 the statuses, count as hint, check on current | W StatusFilterRow Menu | ✓ |

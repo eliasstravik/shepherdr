@@ -188,7 +188,22 @@ export default class Chat extends View {
     // The Tasks panel's drill-in view (props { panel: true }): its header (props { head: true })
     // and its body, a nested Chat for the task's worker, made with its own props ({ inner: true,
     // thread: true, terminal, ... }).
-    if (props()?.panel === true && !_props?.inner) { this.host = new PanelHost(Chat, props()?.head === true); return; }
+    if (props()?.panel === true && !_props?.inner) {
+      this.host = new PanelHost(Chat, props()?.head === true);
+      // pane.go (mod.json "focusable") can land on the header too: it hands the keyboard on to the chat below it (the
+      // body's nested Chat takes "focus" in its own loop). At most 5 s per wait, as the loop below.
+      if (this.host.head) cx.spawn(async (cx) => {
+        let cmd = null;
+        for (;;) {
+          cmd ??= nextCommand();
+          const c = await Promise.race([cmd, cx.sleep(5000)]);
+          if (c === undefined) continue;
+          cmd = null;
+          if (c === "focus") run("pane.go", { direction: "down" });
+        }
+      });
+      return;
+    }
     this.inner = _props?.inner === true;
     if (this.inner) inner.chat = this;
     const P = this.inner ? _props : props();
@@ -491,6 +506,9 @@ export default class Chat extends View {
           }
           continue;
         }
+        // pane.go landed on this copy (mod.json "focusable"): the Tasks panel's chat takes the keyboard into its box;
+        // a pane copy already does on focus (draw()), so again is harmless.
+        if (c === "focus") { this.box.focus(); cx.notify(); continue; }
         if (focused()?.pane !== this.myPane()) continue;
         // Voice off (Shepherdr settings > Window > Add-ons): its keys do nothing.
         if (c === "dictate" && addonOn("voice")) this.toggleDictation(cx);

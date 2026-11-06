@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { place, queueReason, reportOf, estimated, order, ago, autoPrefix, refOf, taskKey, matches, busyAgain, secondLine, leftOf, ORDER, STATUS, WORKING_AGAIN, fromLine, autoWhere } from "./tasks.js";
+import { place, queueReason, reportOf, estimated, order, ago, autoPrefix, refOf, taskKey, matches, busyAgain, secondLine, leftOf, ORDER, STATUS, WORKING_AGAIN, fromLine, autoWhere, inSpace } from "./tasks.js";
 import { REASONS, fit } from "./needs.js";
 
 const NOW = 1_800_000_000_000;
@@ -159,4 +159,22 @@ test("place: a worker's helper keeps it Working, never Needs you", () => {
   expect(place(list, task, { live, helpers: [{ address: "t2", status: "idle" }] }).section).toBe("needs");
   // no worker left: its helper alone keeps nothing going
   expect(place(list, task, { live: [], helpers: [{ address: "t2", status: "working" }] }).section).toBe("needs");
+});
+
+describe("This space (inSpace)", () => {
+  const sp = { id: "sp3", machine: null, folder: "/work/shop" };
+  test("its list's folder, on its machine", () => {
+    expect(inSpace(sp, { machine: null, folder: "/work/shop" })).toBe(true);
+    expect(inSpace(sp, { machine: "vm", folder: "/work/shop" })).toBe(false);
+    expect(inSpace(sp, { machine: null, folder: "/work/other" })).toBe(false);
+  });
+  test("started for the space, wherever its list is (a bare id or one read from a machine)", () => {
+    expect(inSpace(sp, { machine: null, folder: "/work/other", space: "sp3" })).toBe(true);
+    expect(inSpace({ ...sp, machine: "vm", id: "vm/sp3" }, { machine: "vm", folder: "/x", space: "sp3" })).toBe(true);
+    expect(inSpace({ ...sp, machine: "vm" }, { machine: "vm", folder: "/x", space: "vm/sp3" })).toBe(true);
+    expect(inSpace(sp, { machine: null, folder: "/x", space: "sp4" })).toBe(false);
+  });
+  test("no space: nothing is in it", () => {
+    expect(inSpace(null, { machine: null, folder: "/work/shop" })).toBe(false);
+  });
 });

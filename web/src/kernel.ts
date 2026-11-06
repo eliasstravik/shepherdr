@@ -258,6 +258,9 @@ export interface UI {
   /** the Tasks panel's status filter, as 3.0's chips: all, needs, working, merging, ready, queued, todo, done or
    *  automations; kept on this device */
   taskFilter: string
+  /** This space (the filter row's first chip, SHEP-72): the Tasks list shows only the place picked's tasks, automations
+   *  and what its agents ask, whatever status is picked; kept on this device */
+  thisSpace: boolean
   /** what each list is filtered by, while typed: "place|tasks", "place|artifacts" (*pinned for the pinned chips) */
   filter: Record<string, string>
   /** message id with the reaction bar open */
@@ -327,6 +330,16 @@ function loadTaskFilter(): string {
 export function setTaskFilter(f: string) {
   try { localStorage.setItem(TASK_FILTER, f) } catch { /* private window: All statuses next time */ }
   setUI({ taskFilter: f, cur: 0 })
+}
+
+const THIS_SPACE = 'shepherdr.thisSpace'
+function loadThisSpace(): boolean {
+  try { return localStorage.getItem(THIS_SPACE) === '1' } catch { return false }
+}
+/** This space on or off (the filter row's first chip), remembered on this device */
+export function setThisSpace(on: boolean) {
+  try { localStorage.setItem(THIS_SPACE, on ? '1' : '0') } catch { /* private window: off next time */ }
+  setUI({ thisSpace: on, cur: 0 })
 }
 
 function deviceFor(w: number): Device {
@@ -430,6 +443,7 @@ let state: State = {
     shut: loadShut(),
     archived: null,
     taskFilter: loadTaskFilter(),
+    thisSpace: loadThisSpace(),
     filter: {},
     pick: null,
     pickChat: null,
@@ -1151,7 +1165,7 @@ export function toggleAllDone(listKey: string, key: string) {
 
 /** how lists of this level group their tasks (a place's level: 0 more machines', 1 one machine's) */
 export function setGroup(level: number, by: GroupBy) {
-  setUI((ui) => ({ groups: { ...ui.groups, [level === 0 ? 'all' : 'machine']: by }, lists: { ...ui.lists, chips: state.snap ? listChips(ui, state.snap) : [], at: ui.place }, cur: 0 }))
+  setUI((ui) => ({ groups: { ...ui.groups, [level === 0 ? 'all' : 'machine']: by }, lists: { ...ui.lists, chips: state.snap ? ownChips(ui, state.snap) : [], at: ui.place }, cur: 0 }))
 }
 
 /** Split by space (the Tasks ⋯): by status, each status's tasks under their machine · space, or not */
@@ -1269,6 +1283,13 @@ function known(snap: Snapshot, c: string) {
 /** The chips the lists show: pinned, theirs; following, the place picked's own, or what was made of them there. Pinned
  *  chips all gone, they follow again. */
 export function listChips(ui: UI, snap: Snapshot): string[] {
+  // This space: the place picked alone, as long as it is one (never kept in the lists' own chips)
+  if (ui.thisSpace && snap.places.some((p) => p.id === ui.place)) return [ui.place]
+  return ownChips(ui, snap)
+}
+
+/** the lists' own chips, This space aside */
+function ownChips(ui: UI, snap: Snapshot): string[] {
   const l = ui.lists
   if (l.pinned || l.at === ui.place) {
     const chips = l.chips.filter((c) => known(snap, c))
@@ -1284,13 +1305,13 @@ export function listOf(snap: Snapshot, chips: string[]): Omit<ListView, 'search'
   return { key: chips.length ? [...chips].sort().join('+') : '*', chips, level }
 }
 
-let lastList: { snap: Snapshot; lists: Lists; place: string; view: ListView } | null = null
+let lastList: { snap: Snapshot; lists: Lists; place: string; here: boolean; view: ListView } | null = null
 
 /** the lists as they show now: the same object while nothing they hang on changes, so a part can pick it */
 export function listView(ui: UI, snap: Snapshot): ListView {
-  if (lastList && lastList.snap === snap && lastList.lists === ui.lists && lastList.place === ui.place) return lastList.view
+  if (lastList && lastList.snap === snap && lastList.lists === ui.lists && lastList.place === ui.place && lastList.here === ui.thisSpace) return lastList.view
   const view = { ...listOf(snap, listChips(ui, snap)), search: listsPinned(ui, snap) ? '*pinned' : ui.place, attention: false }
-  lastList = { snap, lists: ui.lists, place: ui.place, view }
+  lastList = { snap, lists: ui.lists, place: ui.place, here: ui.thisSpace, view }
   return view
 }
 
@@ -1319,7 +1340,7 @@ export function togglePin() {
     const filter = { ...ui.filter }
     for (const l of ['tasks', 'artifacts']) filter[`${to}|${l}`] = ui.filter[`${from}|${l}`] ?? ''
     return {
-      lists: pinned ? { pinned: false, chips: [], at: null } : { pinned: true, chips: state.snap ? listChips(ui, state.snap) : [], at: ui.place },
+      lists: pinned ? { pinned: false, chips: [], at: null } : { pinned: true, chips: state.snap ? ownChips(ui, state.snap) : [], at: ui.place },
       filter,
       cur: 0,
     }

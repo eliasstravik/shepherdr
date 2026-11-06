@@ -12,6 +12,8 @@
 // in more than one (Split by space in the ⋯: shared "tasks.split", on until switched off; Shepherdr's
 // SubHeading), each folding on its own.
 // "Needs you" lists everything that needs the person (inbox.js), here or not.
+// This space (the filter row's first chip, remembered by this panel): only the shown space's tasks, automations and
+// Needs you (core/tasks.js inSpace); it follows the space picked. The tab bar's counts still cover every space.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
@@ -19,13 +21,13 @@ import { machines, exec, readTextFile, watchFolder, appHome, home, run, theme, n
 import { spaces, panes, agents, terminals, inRender } from "./live.js";
 // What needs the person, from every space and machine (lib/inbox.js, shared; the tab
 // bar runs its engine): agents asking or waiting, task problems, failed automations, merges.
-import { items as needs, ASKS, toAgent, reasonOf, reqReason, REASONS, fit } from "./inbox.js";
+import { items as needs, ASKS, toAgent, reasonOf, reqReason, REASONS, fit, tabOf } from "./inbox.js";
 import { words } from "./core/asks.js";
 import { taskDot, ownProgress } from "./dot.js";
 import { taskMenu } from "./core/menus.js";
 // The rules for a task's status, order and words: shared with the web app (core/tasks.js).
 import { RANK, STATUS, RANK_OF, ORDER, GROUP_BY, groupBy, machineOf, machineName, refOf, taskKey, autoPrefix, place,
-  queueReason, reportOf as report, secondLine, leftOf, order, matches, day, ago, capital, short, autoWhere, fromLine } from "./core/tasks.js";
+  queueReason, reportOf as report, secondLine, leftOf, order, matches, day, ago, capital, short, autoWhere, fromLine, inSpace } from "./core/tasks.js";
 import { READ_LISTS, taskLists } from "./core/tasklists.js";
 import { TEXT, H, RADIUS, red, amber } from "./ui.js";
 
@@ -96,6 +98,8 @@ export default class Tasks extends View {
     this.shutKeys = saved("shut");
     // The filter row's choice: "all" (grouped) or one status, flat.
     try { this.filter = localStorage.getItem("filter") ?? "all"; } catch { this.filter = "all"; }
+    // This space: on or off, remembered (off at first: every space's, as before).
+    try { this.here = localStorage.getItem("here") === "1"; } catch { this.here = false; }
     this.filterAt = shared("tasks.filterreq")?.at ?? 0;
     this.searchAt = shared("tasks.searchreq")?.at ?? 0;
     if (shared("tasks.menuopen")) setShared("tasks.menuopen", null); // left over if the app quit with More open
@@ -127,6 +131,8 @@ export default class Tasks extends View {
         if (c === undefined) continue;
         cmd = null;
         if (c === "search") this.query.focus();
+        // pane.go landed on this panel (mod.json "focusable"): the list takes the keyboard (F: the search field).
+        else if (c === "focus") this.listFocus.focus();
         else if (GROUP_BY.includes(c) || c === "folder") setShared("tasks.groupby", groupBy(c));
         // tasks.filter-all, tasks.filter-needs, ...: the filter row's chip.
         else if (c.startsWith("filter-") && (c === "filter-all" || ORDER.includes(c.slice(7)))) {
@@ -270,8 +276,13 @@ export default class Tasks extends View {
     if (fq?.at && fq.at !== this.filterAt) { this.filterAt = fq.at; this.pickFilter(fq.key); }
     // Ctrl+K's jump (mods/jump) to a task with no chat to open: the list, searched for it, all statuses.
     const sq = shared("tasks.searchreq");
-    if (sq?.at && sq.at !== this.searchAt) { this.searchAt = sq.at; this.pickFilter("all"); this.archivedOpen = false; this.query.set_value(String(sq.q ?? "")); }
+    if (sq?.at && sq.at !== this.searchAt) { this.searchAt = sq.at; this.pickFilter("all"); this.archivedOpen = false; this.query.set_value(String(sq.q ?? "")); this.jumpQ = String(sq.q ?? ""); }
+    // Shepherdr settings' "Status filters" off (shared "tasks.filters" false): no row, all shown (This space too).
+    const filters = shared("tasks.filters") !== false;
+    // This space: the shown space's only; not for Ctrl+K's jump while its words are still in the search field.
+    const here = this.here && filters && !(this.jumpQ && this.query.value() === this.jumpQ) ? spaces().find((s) => s.active) ?? null : null;
     let placed = this.lists.flatMap((l) => l.tasks.map((task) => this.place(l, task)));
+    if (here) placed = placed.filter((p) => inSpace(here, { machine: p.list.machine ?? null, folder: p.list.folder, space: p.task.space }));
     // Archived tasks (herdr-task: Done ones archive themselves after a while) leave every list and
     // count: only the Archived view and a search show them, the latest archived first.
     const archived = placed.filter((p) => this.shelved(p)).sort((a, b) => (b.task.archived ?? 0) - (a.task.archived ?? 0));
@@ -279,6 +290,7 @@ export default class Tasks extends View {
     this.prunePins(placed, cx);
     // Needs you: asks, stuck agents, problems, failed automations (a task ready to merge is in Ready).
     let inbox = needs();
+    if (here) inbox = inbox.filter((x) => this.needHere(here, x));
     this.readAsks(inbox, cx);
     this.readPrefixes(inbox, cx);
     // What the search field holds: only what matches it shows, in its group, every Done one too.
@@ -326,11 +338,10 @@ export default class Tasks extends View {
     const tasksOf = {};
     for (const s of ORDER.slice(1, -1)) tasksOf[s] = sorted(placed.filter((p) => p.section === s));
     const autos = lists.flatMap((l) => (l.automations ?? []).filter((a) => !q || matches(q, a.title, placeName(l), l.name, l.machine))
+      .filter((a) => !here || inSpace(here, { machine: l.machine ?? null, folder: l.folder, space: a.space }))
       .map((a) => [l, a]));
     // The filter row: All, then a chip for each status that holds something now.
     const count = (k) => (k === "needs" ? needRows.length : k === "automations" ? autos.length : tasksOf[k].length);
-    // Shepherdr settings' "Status filters" off (shared "tasks.filters" false): no row, all shown.
-    const filters = shared("tasks.filters") !== false;
     // A chip picked stays picked while searching, even with nothing matching (its list says so).
     const keep = filters && Boolean(q) && ORDER.includes(this.filter);
     const chips = ORDER.filter((k) => count(k) || (keep && k === this.filter));
@@ -399,7 +410,7 @@ export default class Tasks extends View {
         las.map(([, a]) => this.autoRow(l, a, placed, t, true)), t, { open, sub: l, first: !j, note: multi ? machineName(l.machine) : null })), t, { open, count: autos.length }));
       else if (rowsOf.automations.length) body.push(this.group("automations", "Automations", rowsOf.automations, t, { open }));
       // Nothing at all to show: say so once (never "yet").
-      if (!body.length && this.ready && !q) body.push(note(this.emptyLine()));
+      if (!body.length && this.ready && !q) body.push(note(here ? `Nothing in ${here.name}.` : this.emptyLine()));
       // Searching, the archived tasks that match come last, as a group; else a row opens them.
       if (q && found.length) { this.names = { machine: true, space: true }; body.push(this.group("archived", "Archived", found.map((p) => this.row(p, t)), t, { open })); }
       else if (!q && archived.length) body.push(this.archivedLink(archived.length, t));
@@ -417,7 +428,7 @@ export default class Tasks extends View {
           .on_click(() => openOverlay({ mod: "tasks-menu", kind: "popup", at: "pointer", width: 200, height: 8 + 28 + (multi ? 4 : 2) * 32 + (by === "status" ? 36 : 0), props: { menu: "group", machines: multi } }))
           .child(svg("mods/tasks/more.svg").size(14).flex_none())))
       .child(this.searchField(t))
-      .when(!this.archivedOpen && filters, (el) => el.child(this.filterRow(chips, count, filter, t)))
+      .when(!this.archivedOpen && filters, (el) => el.child(this.filterRow(chips, count, filter, t, here)))
       // A press in the list gives it the keyboard: F then goes to the search field.
       .child(v_flex().id("task-list").flex_1().min_h(0).overflow_y_scrollbar().p(6).gap(6)
         .track_focus(this.listFocus)
@@ -436,11 +447,11 @@ export default class Tasks extends View {
   // The filter row: All statuses (not the header's All, which is folders), a chip for each status that wants a look (Needs you, Working, Ready) as
   // far as the panel's width allows, and the rest (and any that don't fit) behind More, a menu.
   // It never wraps and never scrolls. Widths are estimated: about 7px a character at 12px.
-  filterRow(chips, count, filter, t) {
+  filterRow(chips, count, filter, t, here) {
     const label = (k) => (k === "automations" ? "Automations" : STATUS[k]);
     const est = (text, n) => 16 + text.length * 7 + (n > 0 ? 5 + String(n).length * 7 : 0) + 2;
     const MORE = 62;
-    let room = (this.width ?? 360) - 12 - est("All statuses", 0);
+    let room = (this.width ?? 360) - 12 - est("This space", 0) - 2 - est("All statuses", 0);
     const shown = [];
     const primary = ["needs", "working", "ready"].filter((k) => chips.includes(k));
     const others = chips.length > primary.length;
@@ -455,6 +466,7 @@ export default class Tasks extends View {
     const picked = inMore.includes(filter) ? filter : null;
     const items = inMore.map((k) => ({ key: k, label: label(k), count: count(k) }));
     return h_flex().id("task-filter").flex_none().px(6).pt(6).gap(2).overflow_hidden()
+      .child(this.hereChip(here, t))
       .child(this.chip("all", "All statuses", 0, filter, t))
       .children(shown.map((k) => this.chip(k, label(k), count(k), filter, t)))
       .when(inMore.length > 0, (el) => el.child(this.moreChip(picked, picked ? label(picked) : "More", picked ? count(picked) : 0, items, filter, t)));
@@ -488,6 +500,30 @@ export default class Tasks extends View {
       .on_click((_e, cx) => { this.pickFilter(key); cx.notify(); })
       .child(label)
       .when(n > 0, (el) => el.child(div().text_color(t.dim).child(String(n))));
+  }
+
+  // This space: a toggle before the status chips (they pick one status; this narrows to the shown space whatever the
+  // status). On, it sits on the soft background, as a picked chip.
+  hereChip(here, t) {
+    const on = this.here;
+    return h_flex().id("chip-here").h(H.sm).px(8).gap(5).flex_none().items_center().rounded(RADIUS.control).cursor_pointer().text_size(TEXT.label)
+      .bg(on ? t.selected : t.background).text_color(on ? t.foreground : t.muted)
+      .hover((s) => s.bg(on ? t.selected : t.hover).text_color(t.foreground))
+      .on_click((_e, cx) => {
+        this.here = !this.here;
+        this.jumpQ = null;
+        try { localStorage.setItem("here", this.here ? "1" : "0"); } catch {}
+        cx.notify();
+      })
+      .child("This space");
+  }
+
+  // A Needs-you item of the shown space: its task's list or space (core/tasks.js inSpace), else the tab its agent is in
+  // (inbox.js tabOf, as the tab bar counts it) is one of the space's.
+  needHere(space, x) {
+    if (x.folder && inSpace(space, { machine: x.machine ?? null, folder: x.folder, space: x.space })) return true;
+    const tab = tabOf(x);
+    return Boolean(tab) && (space.tabs ?? []).some((tb) => tb.id === tab);
   }
 
   pickFilter(key) {
