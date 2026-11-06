@@ -63,7 +63,7 @@ function end(why: string | null = null) {
   if (why) error = why;
   ended = true;
   try { ws?.close(); } catch {}
-  mic?.kill(); player?.kill();
+  mic?.kill(); player?.kill(); asking?.kill();
   state();
   setTimeout(() => process.exit(0), 100);
 }
@@ -126,6 +126,8 @@ let inRate = 16000;
 let playEnd = 0;
 // pw-record and pw-play, or the Mac's own (audio.ts), found before the call connects
 let tools: Audio | null = null;
+// macOS's microphone prompt, while it shows (a hang-up meanwhile ends it)
+let asking: ReturnType<typeof Bun.spawn> | null = null;
 
 function startPlayer() {
   const mac = tools!.kind === "mac";
@@ -299,8 +301,9 @@ async function main() {
   // starts talking; not allowed, or nothing to record or play with, ends the call with why.
   try { tools = await audio(); } catch (err: any) { return end(String(err?.message ?? err)); }
   if (tools.access) {
-    const p = Bun.spawn(tools.access, { stdout: "ignore", stderr: "pipe" });
+    const p = asking = Bun.spawn(tools.access, { stdout: "ignore", stderr: "pipe" });
     const why = audioEnded("mic", await p.exited, await new Response(p.stderr).text().catch(() => ""));
+    asking = null;
     if (why) return end(why);
   }
   if (ended) return;

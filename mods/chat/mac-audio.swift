@@ -42,6 +42,13 @@ func ownResponsibility() {
   if rc != 0 { unsetenv("HERDR_AUDIO_OWN"); return } // runs here instead
   child = pid
   for s in [SIGTERM, SIGINT, SIGHUP] { signal(s) { sig in _ = kill(child, sig) } }
+  // the program that started it gone (killed outright): the child goes too, even mid-prompt
+  let parent = getppid()
+  let watch = DispatchSource.makeTimerSource(queue: .global())
+  watch.schedule(deadline: .now() + 0.5, repeating: 0.5)
+  watch.setEventHandler { if getppid() != parent { kill(child, SIGTERM); exit(0) } }
+  watch.resume()
+  keep.append(watch)
   var status: Int32 = 0
   while waitpid(pid, &status, 0) < 0 && errno == EINTR {}
   let sig = status & 0x7f

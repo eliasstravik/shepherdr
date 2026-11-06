@@ -40,7 +40,8 @@ async function built(): Promise<string> {
     try {
       mkdirSync(DATA, { recursive: true });
       mkdirSync(lock); // ours to build
-    } catch {
+    } catch (e: any) {
+      if (e?.code !== "EEXIST") throw new Error(audioWords("mic", "build", String(e?.message ?? e)));
       // another build is on: wait for it (a stale one, over two minutes old, is taken over)
       let age = 0;
       try { age = Date.now() - statSync(lock).mtimeMs; } catch { continue; }
