@@ -200,7 +200,7 @@ export function toggleCall(chatKey: string) {
   }, voiceNav, () => {
     // the call's socket is open: where this page is, from the start
     if (getState().snap) sendWhere(whereNow())
-  }).catch(() => { endCall(); setUI({ callError: 'Audio could not start on this device.' }) })
+  }, () => { if (getState().ui.call === chatKey) endCall() }).catch(() => { endCall(); setUI({ callError: 'Audio could not start on this device.' }) })
 }
 
 /** the chat whose call couldn't start for want of a key: the card over its box */

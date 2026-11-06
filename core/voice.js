@@ -27,17 +27,26 @@ Your tools:
 - act: change things directly (accept, start, schedule, stop, rename, Autopilot, settings...).
 - screen: the person's screen itself, for anything the tools above can't do: look lists what is on it as numbered things (e12 button "Close"), then click, type, select, scroll, a key, back or close act on one, and its answer is the screen again.
 
+How you speak (a voice call: this matters most):
+- One or two short sentences a turn, never more, then stop. Answer only what was asked: the gist, not every detail a tool gave (leave out numbers like percentages and pull requests unless asked).
+- No preambles, no recaps, no lists read out, no "I can also..." offers. More detail only when asked.
+- Numbers and names plainly ("SHEP 45", "three tasks"). Never read out code, paths, links or ids letter by letter.
+- Silence is fine. If the person says nothing, say nothing: never ask if they're there or want something. Just wait.
+
+Ending the call:
+- When the person wants to end the call, ask only "End the call?" After a clear yes, say "Bye." and use end_call. No yes, no end.
+- Never talk about clicking or buttons to end it, and never use screen to hang up.
+
 Rules:
-- Use look, open, send and act first: they are quicker and surer, and work whatever is on screen. Use screen only when none of them fits (scroll, close or go back, press a button or fill a field they don't cover, expand something, read exactly what the screen shows).
-- With screen: look before you act and use only refs from its latest answer; after each action read the new screen in its answer instead of guessing. Before clicking anything that deletes, merges, accepts, stops, ends the call or can't be undone, say what it will do and ask; click it with confirmed true only after a clear yes. Never type a secret or a password.
-- Always use look before you answer about the person's work: never guess or invent what an agent said, a task's state or anything else. If look can't tell, say so.
-- "Here", "this task", "this space", "that one" mean what the call's context says (look with what "here" when unsure), or what you just talked about.
-- Making or planning things (a new task with a brief, a new space, an automation, Autopilot's direction, editing a brief, anything that takes judgment) goes to that space's Assistant with send, in the person's words with every detail. Say you passed it on.
-- Before any act, say in a few words exactly what it will do and ask; call act with confirmed true only after the person clearly said yes on this call. Without a yes, call it with confirmed false (it changes nothing and tells you what to ask).
-- Sending is fine without asking when the person clearly asked you to send it. Never send greetings, chit-chat, or what the person says to you about the call. If unsure whether something is meant for an agent, ask.
-- Messages that start with [Update] come from Shepherdr, not the person: never send them on. Tell the person what they say, briefly, and plainly when an agent needs them.
-- open and screen act on the very screen the call runs on, and their answers say whether that screen confirmed it. Say something is on screen only when open's answer says it is; otherwise say it didn't open and why. If several spaces or machines fit, ask which.
-- Speak briefly and naturally, like a person: one or two sentences, then stop. Summarize; never read out code, paths, links or ids letter by letter (say "SHEP 45"). Offer more only if asked.${where ? `\n\nWhere the call is now: ${where}` : ""}`;
+- Check first: use look before you answer about the person's work. Never guess what an agent said or a task's state. If look can't tell, say so.
+- Prefer look, open, send and act: quicker and surer. Use screen only when none of them fits (scroll, close, go back, a button or field they don't cover, exactly what the screen shows).
+- With screen: look before you act, use only refs from its latest answer, and read the new screen in each answer.
+- Before any act, or a screen click that deletes, merges, accepts, stops or can't be undone: say in a few words what it will do and ask. Set confirmed true only after a clear yes on this call; without one, use confirmed false (it changes nothing and says what to ask). Never type a secret or a password.
+- "Here", "this task", "that one": what the call's context says (look with what "here" when unsure), or what you just talked about.
+- Making or planning things (a new task or space, a brief, an automation, Autopilot's direction, anything that takes judgment): send it to that space's Assistant in the person's words with every detail, then say you passed it on.
+- Send without asking only when the person clearly asked you to. Never send greetings, chit-chat or talk about the call. Unsure if it's meant for an agent? Ask.
+- Lines starting [Update] come from Shepherdr, not the person: never send them on. Say what matters in one short sentence; always say when an agent needs the person.
+- open and screen act on the screen the call runs on. Say something is on screen only when the tool's answer says so; else say it didn't open and why. If several spaces or machines fit, ask which.${where ? `\n\nWhere the call is now: ${where}` : ""}`;
 
 const PLACE = { type: "string", description: "Which one: a space's name, a task's id (SHEP-45), a machine's or artifact's name, or \"here\" (the call's or what is on screen). Leave out for all." };
 const tool = (name, description, props, required = []) =>
@@ -85,17 +94,35 @@ export const TOOLS = [
   }, ["action", "confirmed"]),
 ];
 
+/** What the agent says first: short, then it listens. */
+export const FIRST = "Hi, go ahead.";
+
+// ElevenLabs' own system tools, listed with ours (a built_in_tools field beside inline tools is dropped): end_call hangs
+// up (only after the person's yes, the prompt says), skip_turn stays quiet.
+const system = (name, description, params = {}) => ({ type: "system", name, description, params: { system_tool_type: name, ...params } });
+export const SYSTEM_TOOLS = [
+  system("end_call", "End the call. Only after the person said yes to ending it on this call."),
+  system("skip_turn", "Say nothing this turn: when the person says to wait or hold on, or is clearly talking to someone else.", { wait_timeout_secs: -1 }),
+];
+
+// Silence: the agent never prompts a quiet person (turn_timeout -1: no "are you there?"), and only a call silent for
+// 15 minutes ends (a forgotten call stops costing); any call ends after an hour (ElevenLabs' default is 10 minutes).
+export const SILENT_END_SECS = 900;
+export const MAX_CALL_SECS = 3600;
+
 // The dedicated "Herdr chat" voice agent, made with the person's key (its id kept in <app home>/secrets) and brought
 // up to this spec whenever it changes (SPEC, ensureAgent).
 export const agentSpec = () => ({
   name: "Herdr chat",
   conversation_config: {
     agent: {
-      first_message: "Hi, I'm listening.",
+      first_message: FIRST,
       language: "en",
       // a model that is good with tools (ElevenLabs' advice), quick enough to talk
-      prompt: { prompt: prompt("an agent"), llm: "claude-sonnet-5-5", tools: TOOLS },
+      prompt: { prompt: prompt("an agent"), llm: "claude-sonnet-5-5", tools: [...TOOLS, ...SYSTEM_TOOLS] },
     },
+    turn: { turn_timeout: -1, silence_end_call_timeout: SILENT_END_SECS },
+    conversation: { max_duration_seconds: MAX_CALL_SECS },
     asr: { user_input_audio_format: "pcm_16000" },
     tts: { agent_output_audio_format: "pcm_16000" },
   },
@@ -161,7 +188,7 @@ export const agentFile = (id, tag, spec) =>
 
 // What starts the conversation, once its socket is open: the prompt with where the call is.
 export const opening = (who, where = "") => ({ type: "conversation_initiation_client_data",
-  conversation_config_override: { agent: { prompt: { prompt: prompt(who, where) }, first_message: `You're on a call about ${who}. Go ahead.` } } });
+  conversation_config_override: { agent: { prompt: { prompt: prompt(who, where) }, first_message: FIRST } } });
 
 /** The person moved in the app during the call: a quiet note of where they are now. */
 export const whereLine = (where) => ({ type: "contextual_update", text: `[Update] The person's app now shows: ${String(where).slice(0, 600)}` });

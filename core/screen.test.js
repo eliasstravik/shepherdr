@@ -78,9 +78,9 @@ test("the voice agent: a screen tool beside look, open, send and act; told to us
   expect(screen.parameters.properties.do.enum).toEqual(DOS);
   expect(OPENS).toEqual(expect.arrayContaining(["artifacts", "files", "changes", "terminal"]));
   const p = prompt("SHEP 45's agent");
-  expect(p).toContain("Use look, open, send and act first");
+  expect(p).toContain("Prefer look, open, send and act");
   expect(p).toContain("Use screen only when none of them fits");
-  expect(p).toMatch(/say what it will do and ask; click it with confirmed true only after a clear yes/);
+  expect(p).toMatch(/a screen click that deletes, merges, accepts, stops or can't be undone: say in a few words what it will do and ask\. Set confirmed true only after a clear yes/);
   // the tool list stays small enough for ElevenLabs
   expect(JSON.stringify(TOOLS).length).toBeLessThan(9000);
 });

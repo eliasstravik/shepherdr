@@ -110,3 +110,20 @@ test("the screen tool: done on the page that started the call, the agent hears t
   c.end();
   agent = null;
 });
+
+test("SHEP-67: the voice agent hangs up (end_call after a yes): the page hears it ended, with no error; a broken call still says why", async () => {
+  agent = null;
+  const phone = page(null);
+  phone.start({ client: "web", device: "phone", machine: "eliass-mac-mini", call: "p:h1" });
+  await until(() => !!agent);
+  agent.close(1000);
+  await until(() => phone.got.some((m) => m.type === "ended"));
+  expect(phone.got.filter((m) => m.type === "ended" || m.type === "error")).toEqual([{ type: "ended" }]);
+  agent = null;
+  const other = page(null);
+  other.start({ client: "web", device: "phone", machine: "eliass-mac-mini", call: "p:h1" });
+  await until(() => !!agent);
+  agent.close(4000, "quota");
+  await until(() => other.got.some((m) => m.type === "error"));
+  expect(other.got.filter((m) => m.type === "ended" || m.type === "error")).toEqual([{ type: "error", message: "The call was closed (4000: quota)." }]);
+});

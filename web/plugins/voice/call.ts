@@ -61,8 +61,10 @@ export function sendWhere(where: Record<string, unknown>) {
 /** what this page did with an open: it shows it now (ok), or why not; and what it shows now */
 export type NavAck = { ok: boolean; why?: string; where?: Record<string, unknown>; did?: string; ask?: string; screen?: string }
 
-export async function startCall(chatKey: string, onError: (message: string) => void = () => undefined, onNav: (nav: Nav) => NavAck | Promise<NavAck> = () => ({ ok: false, why: 'this page can\'t open things' }), onOpen: () => void = () => undefined) {
+export async function startCall(chatKey: string, onError: (message: string) => void = () => undefined, onNav: (nav: Nav) => NavAck | Promise<NavAck> = () => ({ ok: false, why: 'this page can\'t open things' }), onOpen: () => void = () => undefined, onEnded: () => void = () => undefined) {
   stopCall()
+  /** the voice agent ended the call (the person said yes, or a long silence): no error, its last words play out */
+  let over = false
   const url = new URL(`api/voice?chat=${encodeURIComponent(chatKey)}`, location.href)
   url.protocol = url.protocol.replace('http', 'ws')
   ws = new WebSocket(url)
@@ -95,11 +97,18 @@ export async function startCall(chatKey: string, onError: (message: string) => v
       phase = 'listening'
     }
     if (m.type === 'error') onError(m.message ?? 'The voice call could not start.')
+    if (m.type === 'ended') over = true
   }
   // The microphone first, then the audio: an iPhone sets its sound up for playing only when the audio comes first,
   // and the microphone then sends silence. Its voice waits until the audio is there.
   const call = ws
-  call.onclose = () => { if (ws === call) { stopCall(); onError('The voice call disconnected. Start a new call.') } }
+  call.onclose = () => {
+    if (ws !== call) return
+    if (!over) { stopCall(); onError('The voice call disconnected. Start a new call.'); return }
+    muted = true
+    const left = ctx ? Math.max(0, playAt - ctx.currentTime) : 0
+    setTimeout(() => { if (ws === call) { stopCall(); onEnded() } }, Math.min(10000, left * 1000 + 300))
+  }
   call.onerror = () => { if (ws === call) { stopCall(); onError('The voice connection failed. Start a new call.') } }
   let stream: MediaStream | null = null
   try {

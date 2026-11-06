@@ -164,7 +164,13 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, page: Page) {
       }
     };
     ws.onerror = () => end("The voice connection failed.");
-    ws.onclose = (e) => end(ended ? null : e.code === 1000 ? null : `The call was closed (${e.code}${e.reason ? `: ${e.reason}` : ""}).`);
+    ws.onclose = (e) => {
+      if (ended) return;
+      // the voice agent ended the call (end_call after the person's yes, or a long silence): the page plays its last
+      // words, then closes the call without an error
+      if (e.code === 1000) tell({ type: "ended" });
+      end(e.code === 1000 ? null : `The call was closed (${e.code}${e.reason ? `: ${e.reason}` : ""}).`);
+    };
   })().catch((err) => end(String(err?.message ?? err)));
 
   return {
