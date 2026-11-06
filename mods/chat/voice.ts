@@ -330,7 +330,12 @@ async function main() {
     }
   };
   ws.onerror = () => end("The voice connection failed.");
-  ws.onclose = (e) => end(ended ? null : e.code === 1000 ? null : `The call was closed (${e.code}${e.reason ? `: ${e.reason}` : ""}).`);
+  ws.onclose = (e) => {
+    if (ended) return;
+    if (e.code !== 1000) return end(`The call was closed (${e.code}${e.reason ? `: ${e.reason}` : ""}).`);
+    // the voice agent ended the call (end_call after the person's yes, or a long silence): its last words ("Bye.") play out first
+    setTimeout(() => end(), Math.max(0, Math.min(10000, playEnd - Date.now() + 300)));
+  };
 }
 
 // The level the chat's wave shows, ten times a second, beside the call folder (so writing it

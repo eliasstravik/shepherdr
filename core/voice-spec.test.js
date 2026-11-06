@@ -1,7 +1,7 @@
 // The voice agent's spec reaches agents made before (ensureAgent): kept and up to date, nothing asked; from another
 // spec, PATCHed (and the tools it replaced removed); gone from ElevenLabs, made again; made with another key, a new one.
 import { expect, test } from "bun:test";
-import { ensureAgent, agentSpec, SPEC, specTag, TOOLS, agentFile, envLines, opening, prompt } from "./voice.js";
+import { ensureAgent, agentSpec, SPEC, specTag, TOOLS, SYSTEM_TOOLS, agentFile, envLines, opening, prompt, FIRST } from "./voice.js";
 
 function fake(o = {}) {
   const calls = [], saved = [];
@@ -71,5 +71,26 @@ test("the spec: five client tools (screen the fallback), a version that follows 
   expect(envLines(agentFile("agent_1", "tag1", SPEC))).toEqual({ ELEVENLABS_AGENT_ID: "agent_1", ELEVENLABS_KEY_TAG: "tag1", ELEVENLABS_SPEC: SPEC });
   const o = opening("the shepherdr Assistant", "The app shows task SHEP 45.");
   expect(o.conversation_config_override.agent.prompt.prompt).toContain("Where the call is now: The app shows task SHEP 45.");
-  expect(prompt("x")).toContain("confirmed true only after the person clearly said yes");
+  expect(prompt("x")).toContain("Set confirmed true only after a clear yes on this call");
+});
+
+test("SHEP-67: ends the call itself after a yes, waits quietly through silence, speaks briefly", () => {
+  const c = agentSpec().conversation_config;
+  // ElevenLabs' end_call and skip_turn, listed with ours (a separate built_in_tools field beside inline tools is dropped)
+  expect(c.agent.prompt.tools.map((t) => t.name)).toEqual(["look", "open", "send", "screen", "act", "end_call", "skip_turn"]);
+  expect(SYSTEM_TOOLS.map((t) => [t.type, t.params.system_tool_type])).toEqual([["system", "end_call"], ["system", "skip_turn"]]);
+  expect(c.agent.prompt.built_in_tools).toBeUndefined();
+  // no "are you there?" after a silence; only a 15-minute silence or an hour-long call ends it
+  expect(c.turn).toEqual({ turn_timeout: -1, silence_end_call_timeout: 900 });
+  expect(c.conversation.max_duration_seconds).toBe(3600);
+  // a short hello, on the spec and on each call
+  expect(c.agent.first_message).toBe(FIRST);
+  expect(opening("SHEP 45's agent").conversation_config_override.agent.first_message).toBe(FIRST);
+  expect(FIRST.split(" ").length).toBeLessThanOrEqual(4);
+  const p = prompt("x");
+  expect(p).toContain('ask only "End the call?" After a clear yes, say "Bye." and use end_call');
+  expect(p).toContain("never use screen to hang up");
+  expect(p).toContain("If the person says nothing, say nothing");
+  expect(p).toContain("One or two short sentences a turn");
+  expect(p).toContain('no "I can also..." offers');
 });
