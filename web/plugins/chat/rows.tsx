@@ -15,7 +15,8 @@ import { ForkIcon, openPicker, RewindIcon } from '@plugins/reactions/client.tsx'
 import { Markdown } from './markdown.tsx'
 import { jumpTo, startReply } from './reply.ts'
 
-const { WORDS, clock, initialOf, bandActs, bandOrder, imagesLine, fitThumbs, THUMB_GAP, questionsBelow } = CV as unknown as {
+const { WORDS, clock, initialOf, bandActs, bandOrder, imagesLine, fitThumbs, THUMB_GAP, questionsBelow, literal } = CV as unknown as {
+  literal: (text: string) => string
   WORDS: Record<string, string>
   questionsBelow: (n: number) => string
   clock: (at?: number) => string
@@ -134,10 +135,15 @@ function Opens({ label, text, bare, children }: { label: ReactNode; text?: strin
   )
 }
 
-/** a launch brief ("Task brief"): its label, then its words when opened; a message between agents: AgentRow */
+/** a launch brief ("Task brief", "New session"): its label, then its words when opened, as written (a "<word>" in them
+ *  shows, as in the person's own bubble); a message between agents: AgentRow */
 export function BriefRow({ msg }: { msg: Message }) {
   if (msg.brief!.from) return <AgentRow from={msg.brief!.from} to={msg.brief!.to} text={msg.text} at={msg.at} />
-  return <Opens label={msg.brief!.label} text={msg.text} bare={msg.brief!.bare} />
+  return (
+    <Opens label={msg.brief!.label} text={msg.text} bare={msg.brief!.bare}>
+      <Markdown text={literal(msg.text ?? '')} />
+    </Opens>
+  )
 }
 
 /** a name's round initial, as a group chat shows who speaks: another agent's in the accent, the chat's own agent's
