@@ -28,7 +28,7 @@ from .browsers import browser_line, browser_path
 # without touching the person's CLI settings: Claude Code in the --settings it gets at launch,
 # Codex through a PermissionRequest hook given with -c (`herdr-task _allow` answers it).
 
-OWN = ["ready", "reviewed", "status", "alert", "show", "list", "where"]
+OWN = ["ready", "reviewed", "status", "alert", "feedback", "show", "list", "where"]
 # herdr-secret's agent commands (~/.config/herdr-app/bin/herdr-secret): asking for a secret and
 # using one by name never ask either, as Shepherdr's secret commands. Written by its full path or
 # its bare name. Reviewers get none (launch() skips own_argv for them; herdr-secret refuses them).
@@ -321,6 +321,11 @@ def closing_line(s, task, parent=None, argv=None):
              f"always give `--left`, from your very first status on, and update it at every step; a rough guess beats none.")
     text += (f" Only for what truly can't wait, `{ht} alert \"<what, a few words>\" --body \"<why>\"` reaches the person at once "
              f"(a toast and a sound); a question waits in your chat instead.")
+    from .feedback import feedback_on
+    if feedback_on(task.get("space")):
+        text += (f" A problem in Shepherdr itself, not this task's code: `{ht} feedback \"<one line>\" --details \"<goal, what was "
+                 f"tried, what went wrong, expected, suggested fix>\"` returns at once and your Assistant offers the person to file "
+                 f"it; carry on.")
     text += (f" Your herdr-task command is {ht}: write that full path each time (never the bare name), as one plain command; "
              f"then its {', '.join(OWN)} commands run without asking.")
     text += browser_line()

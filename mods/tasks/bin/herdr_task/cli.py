@@ -24,6 +24,7 @@ from .autopilot import cmd_autopilot, cmd_complete, cmd_progress
 from .star import cmd_star
 from .home import cmd_home
 from .assistant_settings import cmd_session_note
+from .feedback import cmd_feedback
 
 
 # ---- another machine ------------------------------------------------------------------------
@@ -236,6 +237,27 @@ def main():
     c.add_argument("title", help="what can't wait, a few words")
     c.add_argument("--body", help="why, a line or two")
     c.add_argument("--task", help="the task it's about (an Assistant's alert about one of its tasks always reaches the person)")
+    c = cmd("feedback", cmd_feedback, "a problem in Shepherdr itself (not the project's): feedback \"<one line>\" --details \"goal, what "
+            "was tried, what went wrong, expected, suggested fix\" returns at once and your Assistant offers the person to file it "
+            "on GitHub; an Assistant gets whether to offer, and files it only on the person's yes (--file)", id=False)
+    c.add_argument("line", nargs="?", default="", help="the problem in one line")
+    c.add_argument("--details", help="goal, what was tried, what went wrong, expected, suggested fix (no secrets, no logs whole)")
+    c.add_argument("--key", help="the problem's key, as its news line or an earlier answer gave it")
+    g = c.add_mutually_exclusive_group()
+    g.add_argument("--file", action="store_true", help="Assistant, after the person's yes: search open issues for a duplicate, then file it")
+    g.add_argument("--no", action="store_true", help="Assistant: the person said no; never offered again")
+    g.add_argument("--later", action="store_true", help="Assistant on an Autopilot wake: offer it once the person is back")
+    g.add_argument("--list", action="store_true", help="what waits to be offered in this space")
+    for f, words in (("goal", "what they were trying to do"), ("happened", "what went wrong"), ("tried", "what was tried"),
+                     ("expected", "what should have happened"), ("fix", "a suggested fix"), ("repro", "minimal steps to reproduce")):
+        c.add_argument(f"--{f}", help=f"--file: {words}")
+    c.add_argument("--title", help="--file: the issue's title (default: the one line)")
+    c.add_argument("--surface", choices=["web", "window", "both"], help="--file: where the person used Shepherdr")
+    c.add_argument("--repo", help=argparse.SUPPRESS)  # a test's throwaway repo; Settings' otherwise
+    h = c.add_mutually_exclusive_group()
+    h.add_argument("--new", action="store_true", help="--file: file it even though duplicates are open")
+    h.add_argument("--comment", type=int, metavar="N", help="--file: add it as a comment on open issue N instead")
+    c.add_argument("--dry-run", action="store_true", help="--file: show the redacted draft and duplicates, file nothing")
     cmd("done", lambda a: cmd_state(a, "done"), "mark done (the person's call: only when they ask; agents finish with ready)")
     c = cmd("accept", cmd_accept, "the person's Accept on a Ready task: merges first when there is something to merge, then done")
     agent_opts(c)
@@ -428,6 +450,10 @@ def main():
     c = sub.add_parser("_session-note")  # the chat's SessionStart hook (mods/chat/session-note.sh): an Assistant's extra words
     c.add_argument("terminal")
     c.set_defaults(fn=cmd_session_note, json=False)
+    c = sub.add_parser("_hold-news")  # feedback's report, queued for its Assistant in the background (feedback.queue_news)
+    c.add_argument("to")
+    c.add_argument("text")
+    c.set_defaults(fn=lambda a: __import__("herdr_task.news", fromlist=["hold"]).hold(a.to, a.text, "news"), json=False)
     c = sub.add_parser("_track")
     c.add_argument("id")
     c.add_argument("address")

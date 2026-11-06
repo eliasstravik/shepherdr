@@ -25,6 +25,7 @@ import { manifest } from "./addons.js";
 import { secretsInit, secretsSection } from "./secrets-section.js";
 import { baseInit, baseRow } from "./base-branch.js";
 import { branchInit, branchRow } from "./branch-names.js";
+import { feedbackInit, feedbackRow, feedbackRepoRow } from "./feedback-repo.js";
 import { autopilotInit, autopilotSection, autopilotFlush } from "./autopilot-section.js";
 import { spaceName } from "./core/spaces.js";
 import { NOTIFY, NOTIFY_DEFAULT, notifyMachine, notifyMachineOwn, notifyOf, notifyOwn, notifyEverywhere,
@@ -89,6 +90,7 @@ export default class ShepherdrSettings extends View {
     this.bb = baseInit(this);
     // Tasks > Branch names, Everywhere's or a space's (branch-names.js).
     this.bn = branchInit(this);
+    this.fr = feedbackInit(this);
     // Autopilot: one setting for every space, kept by herdr-task (autopilot-section.js).
     this.ap = autopilotInit(this, cx);
     // The add-ons Window's switches offer (lib/addons.json, layout.js).
@@ -478,6 +480,8 @@ export default class ShepherdrSettings extends View {
       .children(ROLES.map((r) => this.roleRow(t, r, cx)))
       .child(this.backupRow(t))
       .child(this.reactionsRow(t))
+      .child(feedbackRow(this, t))
+      .children([feedbackRepoRow(this, t)].filter(Boolean))
       .when(!this.scope, (el) => el.child(this.starRow(t, cx)));
   }
 

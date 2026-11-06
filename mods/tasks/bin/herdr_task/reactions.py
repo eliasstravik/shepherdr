@@ -62,9 +62,11 @@ def scope_of(space, d):
 def agent_note(terminal, k):
     """What a new session of an agent that isn't an Assistant (a task worker, an automation's run,
     an agent tab) is told: when and how with Reactions on in its space, never with them off."""
-    on = reactions_on(space_of(k))
+    space = space_of(k)
+    on = reactions_on(space)
     run(["hc", "label", terminal, f"{LABEL}={'on' if on else 'off'}"])
-    return GUIDE if on else OFF
+    from .feedback import AGENT_NOTE, feedback_on
+    return (GUIDE if on else OFF) + (f"\n{AGENT_NOTE}" if feedback_on(space) else "")
 
 
 def told(on, scope="everywhere"):

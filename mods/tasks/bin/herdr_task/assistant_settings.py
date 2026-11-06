@@ -101,6 +101,9 @@ def rows(space, d=None, auto=None):
         notes = [w for w, k in (("start", "start_notes"), ("finish", "finish_notes")) if str(t.get(k) or "").strip()]
         a_on, a_every, a_dir = autopilot
         reacting = (cfg.get("agents") or {}).get("reactions") is not False
+        offering = (cfg.get("agents") or {}).get("feedback") is not False
+        from .feedback import feedback_repo
+        repo = feedback_repo(d)
         return [
             ("review", "Review", review, "on" if rounds > 0 else "off",
              [("tasks", "review_rounds"), ("tasks", "must_fix"), ("reviewer", None)]),
@@ -122,6 +125,9 @@ def rows(space, d=None, auto=None):
              [("autopilot", "every"), ("autopilot", "events"), ("autopilot", "direction"), ("autopilot", None)]),
             ("reactions", "Reactions", "on (react to some of the person's messages with one emoji)" if reacting
              else "off (never react to the person's messages)", "on" if reacting else "off", [("agents", "reactions")]),
+            ("feedback", "Feedback offers", f"on (offer once to file a Shepherdr problem as an issue on {repo}, only on the person's yes)"
+             if offering else "off (never offer feedback for Shepherdr; file nothing)", "on" if offering else "off",
+             [("agents", "feedback"), ("agents", "feedback_repo")]),
         ]
     have = lines(resolve(ls), (on, every, direction))
     default = {x[0]: x[2] for x in lines(resolve([]), (False, every, ""))}
@@ -163,7 +169,7 @@ def notice(changed):
     for i, r in enumerate(changed):
         words = (reactions.TURNED_ON if r["value"] == "on" else reactions.TURNED_OFF) if r["key"] == "reactions" else \
             f"{r['label']} is now {r['text']}" + (f"; {BY[r['by']]}" if r["by"] else "; Herdr's default") + \
-            ("." if r["key"] == "autopilot" else ". Tasks you add from now on get it; running ones keep their brief.")
+            ("." if r["key"] in ("autopilot", "feedback") else ". Tasks you add from now on get it; running ones keep their brief.")
         end = f" {NOTICE_END}" if i == len(changed) - 1 else ""
         out.append(f'<herdr-setting name="{r["key"]}" value="{attr(r["value"])}" scope="{r["scope"]}">{words}{end}</herdr-setting>')
     return "\n".join(out)

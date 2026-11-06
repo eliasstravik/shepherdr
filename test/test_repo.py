@@ -60,7 +60,8 @@ class Repo(unittest.TestCase):
                 self.assertIn(key, keys.get(ctx, {}), k)
 
     def test_nothing_personal(self):
-        bad = re.compile(r"/home/\w|/Users/\w|eliasstravik|\.ts\.net|prospecterra|thekiln|vm-stravik|skills-me")
+        # The upstream repo's public name is fine (feedback's default repo, SHEP-78); the account elsewhere isn't.
+        bad = re.compile(r"/home/\w|/Users/\w|eliasstravik(?!/shepherdr\b)|\.ts\.net|prospecterra|thekiln|vm-stravik|skills-me")
         for p in text_files():
             with open(p, encoding="utf-8", errors="replace") as f:
                 for n, line in enumerate(f, 1):

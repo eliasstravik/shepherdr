@@ -12,7 +12,7 @@ import * as HC from "../core/host.js";
 import * as APc from "../core/autopilot.js";
 import type { SettingRow, SettingSection } from "../web/shared/types.ts";
 
-const { TASK_ROWS, DEFAULTS, wordFor, valueFor, ROLES: CORE_ROLES, NOTES: CORE_NOTES, ABOUT, BACKUP, REACTIONS, STAR, starState, upgradeReactions, BASE, BRANCH, branchPattern, MACHINES, OLD_NAMES, SECTIONS,
+const { TASK_ROWS, DEFAULTS, wordFor, valueFor, ROLES: CORE_ROLES, NOTES: CORE_NOTES, ABOUT, BACKUP, REACTIONS, STAR, starState, FEEDBACK, feedbackRepo, upgradeReactions, BASE, BRANCH, branchPattern, MACHINES, OLD_NAMES, SECTIONS,
   WEB, modelLabel, roleSel, otherCli, otherCliWords, backupProblem, homeAbout, webState, fromWord, LOADING_AGENTS, RESET, machineLabel } = C as any;
 const AP = APc as any;
 /** Autopilot as Everywhere has it now (herdr-task's view: what Settings keeps, else what it kept before, else the
@@ -207,6 +207,16 @@ export class Settings {
     const re = this.pick(scope, "agents", "reactions");
     rows.push({ label: REACTIONS.title, key: "agents.reactions", value: ON(re.value !== false), options: ["on", "off"], hint: REACTIONS.about,
       ...this.follows(s, re, (v) => ON(v !== false), "agents", "reactions") });
+    // Feedback offers: agents offer once to file a problem in Shepherdr itself, only on your yes (herdr-task's feedback.py);
+    // the repo it files to is Everywhere's only
+    const fb = this.pick(scope, "agents", "feedback");
+    rows.push({ label: FEEDBACK.title, key: "agents.feedback", value: ON(fb.value !== false), options: ["on", "off"], hint: FEEDBACK.about,
+      ...this.follows(s, fb, (v) => ON(v !== false), "agents", "feedback") });
+    if (!s) {
+      const repo = this.pick(null, "agents", "feedback_repo");
+      rows.push({ label: FEEDBACK.repoTitle, key: "agents.feedback_repo", value: String(repo.value ?? ""), text: true, hint: FEEDBACK.repoAbout,
+        placeholder: FEEDBACK.repo } as SettingRow);
+    }
     // Ask for a star (herdr-task's star.py), Everywhere only: a switch until it has asked, then just when it did
     if (!s) {
       const st = starState(this.file);
@@ -462,6 +472,17 @@ export class Settings {
       next.everywhere ??= {};
       if (word === "off") next.everywhere.star_prompt = { off: true };
       else delete next.everywhere.star_prompt;
+    } else if (key === "agents.feedback") {
+      // on or off; the same as what this level would inherit unsets it, so it follows again (as Reactions)
+      if (word !== null && word !== "on" && word !== "off") throw new Error("Not one of its choices.");
+      const parent = space ? file.everywhere?.agents?.feedback ?? DEFAULTS.agents.feedback : DEFAULTS.agents.feedback;
+      put("agents", "feedback", word === null || (word === "on") === parent ? null : word === "on");
+    } else if (key === "agents.feedback_repo") {
+      // Everywhere's only: owner/name (a github.com link is made one); empty goes back to Shepherdr's own repo
+      if (space) throw new Error("The feedback repo is set for every space at once.");
+      const repo = feedbackRepo(word ?? "");
+      if (repo === null) throw new Error(FEEDBACK.bad);
+      put("agents", "feedback_repo", repo || null);
     } else if (key === "backup.agent") {
       // off is "off"; on follows what it would get anyway when that is on, else names the other CLI (as the window's)
       const parent = space ? file.everywhere?.backup?.agent ?? null : null;

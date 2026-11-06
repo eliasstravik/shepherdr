@@ -116,6 +116,23 @@ export function starState(cfg) {
   return { on: !v.off && !v.asked, asked: Number.isFinite(v.asked) ? v.asked : null, answer: v.answer ?? null,
     about: Number.isFinite(v.asked) ? `${STAR.about}\n${STAR.asked(v.asked, v.answer)}` : STAR.about };
 }
+// Feedback offers (herdr-task's feedback.py, SHEP-78): an agent that hits a problem in Shepherdr itself offers once to
+// file it as a GitHub issue, filed only on your yes. Kept as agents.feedback (on unless turned off) and, Everywhere's
+// only, agents.feedback_repo (the repo it files to; empty: upstream Shepherdr's).
+export const FEEDBACK = {
+  title: "Feedback offers",
+  about: "When Shepherdr itself misbehaves, agents offer once to file it as a GitHub issue, only with your yes.",
+  repoTitle: "Feedback repo",
+  repoAbout: "Where feedback issues go, as owner/name. Empty: Shepherdr's own repo.",
+  repo: "eliasstravik/shepherdr",
+  bad: "Write it as owner/name, like eliasstravik/shepherdr.",
+};
+// owner/name from what was typed (owner/name or a github.com link), "" for empty, null when it isn't one.
+export function feedbackRepo(v) {
+  const s = String(v ?? "").trim().replace(/^(?:https?:\/\/)?(?:www\.)?github\.com\//, "").replace(/\/+$/, "").replace(/\.git$/, "");
+  if (!s) return "";
+  return /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(s) ? s : null;
+}
 export const BACKUP = { title: "Backup agent", about: "The other CLI takes over a task once when its agent can't go on." };
 // The machines where the other CLI can't take over (herdr-task's check, ~/.herdr/cli-check.json's machines: this
 // computer is ""), in one line. m: the scope's machine ("local" or its name), null for Everywhere (every machine).
@@ -330,7 +347,7 @@ export const ARCHIVE = [[0, "Off"], [1, "1 day"], [3, "3 days"], [7, "1 week"], 
 export const ONOFF = [[true, "On"], [false, "Off"]];
 
 export const DEFAULTS = { tasks: { merge: "ask", review_rounds: 0, must_fix: "major", max_running: 10, worktrees: true, archive_after: 7, proof: true }, automations: { enabled: true },
-  agents: { reactions: true } };
+  agents: { reactions: true, feedback: true, feedback_repo: "" } };
 
 // [section, field, label, choices | { min, max }]
 export const TASK_ROWS = [

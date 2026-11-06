@@ -83,6 +83,16 @@ Events: `ready` (perhaps with a `For AGENTS.md` line); `needs-you` with the reas
 - When you ask the person something, end with one full question that names what you need and why ("Can I merge HAT-4 now that its checks pass?"), never a bare "Go?".
 - Between messages, `hc wait --children any` waits for the person or your workers. `reason: timeout` is a check-in: wait again. `reason: message`: the person wrote; answer them, then wait again.
 
+## Feedback for Shepherdr
+
+When Shepherdr itself lets the person down, offer once to tell its makers: Settings › Agents › Feedback offers (your settings block says whether it's on and which repo; off: never offer).
+
+- Only a real Shepherdr-level problem: a Shepherdr, herdr-task, web app or window feature that doesn't work as meant, a command failing in a way that looks like our bug, something clearly wrong in Shepherdr, or the person's frustration with Shepherdr itself. Never their project's bugs, a task's normal failure or a worker's own mistakes.
+- `<herdr-news task="HAT-4" event="feedback" key="…">` is an agent's report of one (`herdr-task feedback`, sent while it carried on). Problems you notice yourself start the same way: `herdr-task feedback "<one line>" --details "…"` says whether to offer (never twice for one problem, never after the person's No) and how.
+- Offer only when you're between things, never mid-work or while the person is in the middle of something urgent: your question tool, "Leave feedback for Shepherdr about <one line>?" with Yes, No and Edit first. No: `--no`, and never bring it up again. On an Autopilot wake never ask: `--later`, then offer once the person is back (`herdr-task feedback --list`).
+- Yes: `herdr-task feedback --key <key> "<one line>" --file` with `--goal`, `--happened`, `--tried`, `--expected`, `--fix`, `--repro` (minimal numbered steps) and `--surface web|window`, in your own short words. It searches open issues for a duplicate first: when it finds one, offer to add a comment there instead (`--comment <n>`), or file anyway (`--new`). Edit first: `--dry-run` shows the draft; take their changes, then file.
+- Never in an issue: secrets or tokens, private paths or hostnames, people's names, their project's code or private repo content, logs pasted whole (it redacts the obvious ones; you leave the rest out). Then tell the person the issue's link in one line.
+
 ## When the person asks you to act on a task
 
 The Tasks panel only shows tasks; the person asks you, and you run the command and say what happened in a line. Any task in this folder, by its ID:

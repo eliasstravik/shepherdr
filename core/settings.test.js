@@ -68,11 +68,11 @@ test("Reactions are on by default, in the core, the window's chain and herdr-tas
   expect(S.DEFAULTS.assistant).toBeUndefined();
   // lib/coordinator.js needs the window's runtime: its defaults and its chain, as written
   const lib = read("lib/coordinator.js");
-  expect(lib).toMatch(/SHEPHERDR_DEFAULTS = \{[^;]*agents: \{ reactions: true \}/);
+  expect(lib).toMatch(/SHEPHERDR_DEFAULTS = \{[^;]*agents: \{ reactions: true, feedback: true, feedback_repo: "" \}/);
   expect(lib).toContain('for (const k of ["tasks", "automations", "agents"])');
   // SHEP-42's key still counts in the window's chain where a layer has no agents'
   expect(lib).toContain('typeof l.obj.assistant?.reactions === "boolean" ? { reactions: l.obj.assistant.reactions, ...l.obj.agents }');
-  expect(read("mods/tasks/bin/herdr_task/settings.py")).toContain('"agents": {"reactions": True}');
+  expect(read("mods/tasks/bin/herdr_task/settings.py")).toContain('"agents": {"reactions": True, "feedback": True, "feedback_repo": "eliasstravik/shepherdr"}');
   expect(S.REACTIONS.title).toBe("Reactions");
 });
 
@@ -86,4 +86,15 @@ test("upgradeReactions moves the Assistant's Reactions to every agent's", () => 
     machines: { vm: { assistant: { other: 1 }, agents: { reactions: true } } },
     spaces: { sp1: { folder: "/a", agents: { reactions: false } }, sp2: { folder: "/b" } } });
   expect(S.upgradeReactions({})).toEqual({});
+});
+
+// SHEP-78: Feedback offers on by default; the repo as owner/name, a github.com link made one, anything else refused.
+test("Feedback offers and the repo they file to", () => {
+  expect(S.DEFAULTS.agents.feedback).toBe(true);
+  expect(S.FEEDBACK.repo).toBe("eliasstravik/shepherdr");
+  expect(S.feedbackRepo(" acme/shep ")).toBe("acme/shep");
+  expect(S.feedbackRepo("https://github.com/acme/shep.git")).toBe("acme/shep");
+  expect(S.feedbackRepo("")).toBe("");
+  expect(S.feedbackRepo("not a repo")).toBeNull();
+  expect(read("mods/shepherdr-settings/main.js")).toContain("feedbackRow(this, t)");
 });
