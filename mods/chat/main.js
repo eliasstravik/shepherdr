@@ -114,9 +114,8 @@ const ACT = 22, ACT_GAP = 2, BAND_IN = 4, ACT_ROW = BAND_IN + ACT, GAP = 16;
 // inside the row's top and bottom edges (QUIET_PY, then the small text's own leading; the
 // baseline sits a little higher than the caps sit low), measured from the window.
 const QUIET_PY = 1, QUIET_IN = { top: 5, bottom: 6 };
-// A long reply folds (Show more) when it would run past FOLD_TALL lines, to its first FOLD
-// lines; LINE_H is a reply's line in px. Its words are measured as they draw, so one that
-// turns out shorter than it looked isn't folded after all.
+// A long reply folds (Show more) when it would run past FOLD_TALL lines (estimated from its
+// words), to its first FOLD lines; LINE_H is a reply's line in px.
 const FOLD = 20, FOLD_TALL = 28, LINE_H = 21;
 // A session that is gone (LOST), what the new agent hears (lostMessage) and the chat's note: core/chat-view.js, as
 // the service restarts one for the web app.
@@ -131,6 +130,22 @@ function findModel(menus, name) {
 }
 // About how many lines words take at a width (px), for a row's height before it's measured.
 const wrapLines = (text, width) => String(text ?? "").split("\n").reduce((n, l) => n + Math.max(1, Math.ceil((l.length * 7) / Math.max(120, width))), 0);
+// A folded reply's words that show: the lines (as wrapLines counts them at `width`) filling `h`
+// px, and a few more under the fade (the estimate can run short); a long paragraph is cut where
+// its last one ends. Only those are laid out: a folded reply drawn whole under its clip was far
+// taller than its row, and scrolling up into one blanked the list (#590).
+const shownLines = (text, h, width) => {
+  const per = Math.floor(Math.max(120, width) / 7);
+  const out = [];
+  let room = Math.ceil(h / LINE_H) + 3;
+  for (const l of String(text ?? "").split("\n")) {
+    if (room <= 0) break;
+    const n = wrapLines(l, width);
+    out.push(n > room ? l.slice(0, room * per) : l);
+    room -= n;
+  }
+  return out.join("\n");
+};
 const ICONS = { copy: "copy", reply: "reply", rewind: "rewind", fork: "git-fork", react: "smile-plus" };
 // Reaction pills: this wide and tall (inside the ACT row, so they sit on the icons' center line
 // without towering over them), this far apart; and the gap between them and the smiley.
@@ -370,9 +385,8 @@ export default class Chat extends View {
     this.screenErr = new Map();
     // Agents whose lost session this chat already started again (lostSession()).
     this.lostTried = new Set();
-    // Long replies opened with Show more (by message id), and their words' drawn height.
+    // Long replies opened with Show more (by message id).
     this.unfolded = new Set();
-    this.natural = new Map();
     // Find in the chat (Ctrl+F): open, the current match.
     this.finding = false;
     this.findIdx = 0;
@@ -2794,14 +2808,13 @@ export default class Chat extends View {
 
   // How a long reply folds, or null when it's short (or holds what Find looks for): { open,
   // clips: part → px its words show, last: the last part shown }. Its parts' heights are
-  // estimated from their words; one drawn (natural) shorter than that isn't folded after all.
+  // estimated from their words.
   foldOf(x, ps) {
     const q = this.findQuery().toLowerCase();
     if (q && String(x.text).toLowerCase().includes(q)) return null;
     const w = Math.max(240, Math.floor(Math.min(this.width, COLUMN) * 0.8)) - 24;
     const est = ps.map((p) => (p.type === "md" ? wrapLines(p.text, w) * LINE_H : 34 + 16 + p.code.split("\n").length * 19));
-    const drawn = ps.length === 1 ? this.natural.get(x.id) : null;
-    if ((drawn ?? est.reduce((a, b) => a + b, 0)) <= FOLD_TALL * LINE_H) return null;
+    if (est.reduce((a, b) => a + b, 0) <= FOLD_TALL * LINE_H) return null;
     if (this.unfolded.has(x.id)) return { open: true, clips: new Map(), last: ps.length - 1 };
     const clips = new Map();
     let left = FOLD * LINE_H, last = ps.length - 1;
@@ -2992,10 +3005,8 @@ export default class Chat extends View {
         .child(TextView.markdown(`${pre}chat-md-${x.id}`, this.findMark(typed(this.mentionsIn(text))) || " ").selectable(true)));
     const theirs = (text) => h_flex().w_full().justify_start().child(
       div().max_w(most).px(12).py(8).rounded(12).bg(t.raised).text_color(t.foreground)
-        .child(x.clip ? this.clipped(t.raised, x.clip, div().id(`${pre}fold-in-${x.id}`).flex_none()
-          // Its words' drawn height: a reply shorter than it looked isn't folded (foldOf()).
-          .on_size_change((size, cx) => { const was = this.natural.get(x.id); if (!was || Math.abs(was - size.height) > 1) { this.natural.set(x.id, size.height); cx.notify(); } })
-          .child(TextView.markdown(`${pre}chat-md-${x.id}`, this.findMark(this.mentionsIn(text)) || " ").selectable(true)))
+        // Folded: only the lines that show (shownLines()), as their own view
+        .child(x.clip ? this.clipped(t.raised, x.clip, TextView.markdown(`${pre}chat-md-fold-${x.id}`, this.findMark(this.mentionsIn(shownLines(text, x.clip, most - 24))) || " ").selectable(true))
           : TextView.markdown(`${pre}chat-md-${x.id}`, this.findMark(this.mentionsIn(text)) || " ").selectable(true)));
     const fileLine = (label) => h_flex().gap(5).items_center().text_size(12).text_color(t.dim)
       .child(svg("mods/chat/paperclip.svg").size(12).flex_none()).child(div().truncate().child(label));
@@ -3076,7 +3087,9 @@ export default class Chat extends View {
             .child(svg(`mods/chat/${done ? "check" : "copy"}.svg`).size(12).flex_none()).child(done ? "Copied" : "Copy")), 18, 0).pt(x.top0 ? 0 : 6);
       }
       case "code": {
-        const lines = v_flex().w_full().flex_none().children(x.code.split("\n").map((l) => div().min_h(19).child(l || " ")));
+        // folded, only the lines that show and one under the fade (as shownLines())
+        const all = x.code.split("\n");
+        const lines = v_flex().w_full().flex_none().children((x.clip ? all.slice(0, Math.ceil(x.clip / 19) + 1) : all).map((l) => div().min_h(19).child(l || " ")));
         return col(div().w_full().px(12).py(8).rounded_b(8).bg(t.surface).border_1().border_color(t.border).overflow_hidden()
           .font_family(settings().font_family ?? "JetBrains Mono").text_size(12.5).text_color(t.foreground)
           .child(x.clip ? this.clipped(t.surface, x.clip, lines) : lines), 18, 0).pb(x.bot0 ? 0 : 6);
