@@ -36,18 +36,17 @@ async function built(): Promise<string> {
   const src = readFileSync(SRC);
   const hash = createHash("sha256").update(src).update(PLIST).update(process.arch).digest("hex").slice(0, 16);
   const dir = join(DATA, hash), exe = join(dir, HELPER), lock = `${dir}.building`;
-  for (let waited = 0; !existsSync(exe); waited++) {
+  try { mkdirSync(DATA, { recursive: true }); } catch (e: any) { throw new Error(audioWords("mic", "build", String(e?.message ?? e))); }
+  // every retry waits a moment, and it gives up after about three minutes
+  for (let tries = 0; !existsSync(exe); tries++) {
+    if (tries > 0) await Bun.sleep(100);
+    if (tries > 1800) throw new Error(audioWords("mic", "build", "it took too long"));
     try {
-      mkdirSync(DATA, { recursive: true });
       mkdirSync(lock); // ours to build
     } catch (e: any) {
       if (e?.code !== "EEXIST") throw new Error(audioWords("mic", "build", String(e?.message ?? e)));
       // another build is on: wait for it (a stale one, over two minutes old, is taken over)
-      let age = 0;
-      try { age = Date.now() - statSync(lock).mtimeMs; } catch { continue; }
-      if (age > 120_000) { try { rmSync(lock, { recursive: true, force: true }); } catch {} continue; }
-      if (waited > 1500) throw new Error(audioWords("mic", "build", "it took too long"));
-      await Bun.sleep(100);
+      try { if (Date.now() - statSync(lock).mtimeMs > 120_000) rmSync(lock, { recursive: true, force: true }); } catch {}
       continue;
     }
     try {
