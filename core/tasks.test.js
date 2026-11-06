@@ -162,19 +162,19 @@ test("place: a worker's helper keeps it Working, never Needs you", () => {
 });
 
 describe("This space (inSpace)", () => {
-  const sp = { id: "sp3", machine: null, folder: "/home/me/shop" };
+  const sp = { id: "sp3", machine: null, folder: "/work/shop" };
   test("its list's folder, on its machine", () => {
-    expect(inSpace(sp, { machine: null, folder: "/home/me/shop" })).toBe(true);
-    expect(inSpace(sp, { machine: "vm", folder: "/home/me/shop" })).toBe(false);
-    expect(inSpace(sp, { machine: null, folder: "/home/me/other" })).toBe(false);
+    expect(inSpace(sp, { machine: null, folder: "/work/shop" })).toBe(true);
+    expect(inSpace(sp, { machine: "vm", folder: "/work/shop" })).toBe(false);
+    expect(inSpace(sp, { machine: null, folder: "/work/other" })).toBe(false);
   });
   test("started for the space, wherever its list is (a bare id or one read from a machine)", () => {
-    expect(inSpace(sp, { machine: null, folder: "/home/me/other", space: "sp3" })).toBe(true);
+    expect(inSpace(sp, { machine: null, folder: "/work/other", space: "sp3" })).toBe(true);
     expect(inSpace({ ...sp, machine: "vm", id: "vm/sp3" }, { machine: "vm", folder: "/x", space: "sp3" })).toBe(true);
     expect(inSpace({ ...sp, machine: "vm" }, { machine: "vm", folder: "/x", space: "vm/sp3" })).toBe(true);
     expect(inSpace(sp, { machine: null, folder: "/x", space: "sp4" })).toBe(false);
   });
   test("no space: nothing is in it", () => {
-    expect(inSpace(null, { machine: null, folder: "/home/me/shop" })).toBe(false);
+    expect(inSpace(null, { machine: null, folder: "/work/shop" })).toBe(false);
   });
 });
