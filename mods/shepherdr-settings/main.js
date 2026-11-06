@@ -24,6 +24,7 @@ import { layoutSection } from "./layout.js";
 import { manifest } from "./addons.js";
 import { secretsInit, secretsSection } from "./secrets-section.js";
 import { baseInit, baseRow } from "./base-branch.js";
+import { branchInit, branchRow } from "./branch-names.js";
 import { autopilotInit, autopilotSection, autopilotFlush } from "./autopilot-section.js";
 import { spaceName } from "./core/spaces.js";
 import { NOTIFY, NOTIFY_DEFAULT, notifyMachine, notifyMachineOwn, notifyOf, notifyOwn, notifyEverywhere,
@@ -86,6 +87,8 @@ export default class ShepherdrSettings extends View {
     this.secFor();
     // Tasks > Base branch, a space's (base-branch.js).
     this.bb = baseInit(this);
+    // Tasks > Branch names, Everywhere's or a space's (branch-names.js).
+    this.bn = branchInit(this);
     // Autopilot: one setting for every space, kept by herdr-task (autopilot-section.js).
     this.ap = autopilotInit(this, cx);
     // The add-ons Window's switches offer (lib/addons.json, layout.js).
@@ -531,6 +534,7 @@ export default class ShepherdrSettings extends View {
     const days = Math.max(0, parseInt(k.archive_after, 10) || 0);
     const autoOn = shepherdrFor(this.cfg, this.scope).automations.enabled !== false;
     const base = baseRow(this, t);
+    const branch = branchRow(this, t);
     return v_flex()
       .child(this.title(t, page("tasks")))
       .child(this.row(t, rowTitle("tasks.merge"), ABOUT["tasks.merge"],
@@ -558,6 +562,7 @@ export default class ShepherdrSettings extends View {
         toggleSwitch("worktrees", k.worktrees !== false, (next, _e, cx) => this.set("tasks", "worktrees", next, cx)),
         this.scoped("tasks", "worktrees")))
       .when(Boolean(base), (el) => el.child(base))
+      .when(Boolean(branch), (el) => el.child(branch))
       .child(this.row(t, rowTitle("automations.enabled"), ABOUT["automations.enabled"],
         toggleSwitch("auto", autoOn, (next, _e, cx) => this.set("automations", "enabled", next, cx)),
         this.scoped("automations", "enabled")))

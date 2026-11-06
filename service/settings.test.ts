@@ -45,6 +45,24 @@ test("a space's own values go in its layer with its folder, and Reset drops them
   expect(() => s.set("tasks.merge", "Right away", "sp3", null)).toThrow();
 });
 
+test("Branch names (#570): Everywhere's or a space's own pattern, checked before it's kept", () => {
+  const s = new Settings();
+  s.start();
+  const scope = { id: "sp6", name: "api", machine: null, folder: "/api" };
+  const row = (level: string) => s.sections(null, [scope]).find((x) => x.name === "Tasks" && x.level === level)!.rows.find((r) => r.key === "tasks.branch")!;
+  expect(row("all")).toMatchObject({ label: "Branch names", text: true, value: "", placeholder: "task/{n}-{slug}" });
+  s.set("tasks.branch", "feat/{key}-{slug}", "all");
+  s.set("tasks.branch", " {key} ", "sp6", scope);
+  const f = JSON.parse(readFileSync(file, "utf8"));
+  expect(f.everywhere.tasks.branch).toBe("feat/{key}-{slug}");
+  expect(f.spaces.sp6.tasks.branch).toBe("{key}");
+  expect(row("sp6")).toMatchObject({ value: "{key}", inherits: { value: "feat/{key}-{slug}", from: "Everywhere" } });
+  expect(() => s.set("tasks.branch", "feat/{slug}", "all")).toThrow("Put {n} or {key} in it");
+  expect(() => s.set("tasks.branch", "a b/{n}", "all")).toThrow("isn't a name git allows");
+  s.set("tasks.branch", "", "sp6", scope);
+  expect(JSON.parse(readFileSync(file, "utf8")).spaces.sp6.tasks).toBeUndefined();
+});
+
 test("Autopilot: Everywhere's unless a space sets its own, kept with the rest and sent to its machine", async () => {
   const { pushBody } = await import("./settings.ts");
   const s = new Settings();

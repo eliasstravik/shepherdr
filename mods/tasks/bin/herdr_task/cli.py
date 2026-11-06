@@ -171,6 +171,8 @@ def main():
                             "review.mustFix=blocker|major|minor, proof=on|off, merge=\"on its own\"|\"after checks\"|\"ask me first\" (\"\": Settings' again)")
         c.add_argument("--base", help="the branch its worktree branches from and merges into (default: its space's Base branch "
                                       "setting, else the folder's current branch)")
+        c.add_argument("--branch", help="its branch's exact name, e.g. a ticket's ABC-2137 (default: the folder's Branch names "
+                                        "setting, else task/<n>-<title words>); refused when that branch exists already (\"\": the pattern's)")
 
     def agent_opts(c):
         c.add_argument("--agent", help="agent key (claude, codex, ...)")
@@ -207,6 +209,7 @@ def main():
     c.add_argument("--space")
     c.add_argument("--parent", help="a coordinator's terminal: the agent's hc parent (default: the space's coordinator)")
     c.add_argument("--now", action="store_true", help="skip the queue (a scheduled task: start it now)")
+    c.add_argument("--branch", help="its branch's exact name (as add --branch), before its worktree is made")
     g = c.add_mutually_exclusive_group()
     g.add_argument("--here", action="store_true")
     g.add_argument("--worktree", action="store_true")

@@ -22,7 +22,7 @@ from .sessions import refresh_sessions
 from .github import already_merged, finish, gh, github, merged_here, own_work, pr_adopt, pr_open, pr_pending, pr_problem, pr_view, update_main, watch_main
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
-    own_path, parent_for, resume_argv, retag_tabs, tab_title, task_tabs,
+    own_path, parent_for, resume_argv, retag_tabs, set_branch, tab_title, task_tabs,
 )
 from .store import is_task_list, locate, open_store, prefixes_in_use, read_list, Store, store_files
 from .queues import after_refs, parse_after, queue_reason, set_after
@@ -104,6 +104,7 @@ def cmd_add(args):
         set_opts(t, args)
         space = bare(args.space) if args.space else caller_space()
         set_base(s, t, args.base, space, new=True)
+        set_branch(s, t, getattr(args, "branch", None))
         set_notes(t, args)
         if args.after:
             set_after(s, t, *parse_after(s, args.after))
@@ -226,6 +227,8 @@ def cmd_show(args):
     text = [line(v), f"folder: {v['folder']}"]
     if v.get("worktree"):
         text.append(f"worktree: {v['worktree']} (branch {v['branch']}, base {v.get('base')})")
+    elif v.get("branch") and v.get("mode") == "worktree":
+        text.append(f"branch: {v['branch']} (set for this task)")
     if v.get("base_set"):
         text.append(f"merges into: {v['base']} (" + ("its space's base branch" if v.get("base_by") == "space" else "set for this task") + ")")
     if v.get("after_refs"):
@@ -278,6 +281,7 @@ def cmd_start(args):
             t["mode"] = "here"
         elif args.worktree and worktrees_on(s):
             t["mode"] = "worktree"
+        set_branch(s, t, getattr(args, "branch", None))
         q = t.get("queue") or {}
         space = bare(args.space) if args.space else (q.get("space") or default_space())
         argv = agent_argv(None, args.argv) if args.argv else worker_argv(s, t, space, args.agent) if args.agent else \
@@ -753,6 +757,9 @@ def cmd_edit(args):
             if args.worktree and s.loc["kind"] != "repo":
                 raise Fail("Worktrees need a git repo.")
             t["mode"] = "here" if args.here else "worktree"
+        if t["mode"] != "worktree" and not t.get("worktree"):
+            t.pop("branch", None)
+        set_branch(s, t, getattr(args, "branch", None))
         s.dirty = True
         tabs = task_tabs(s, t) if t["title"] != old else []
         v = view(s, t)

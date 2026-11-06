@@ -183,6 +183,23 @@ export const BASE = {
 };
 // A branch name git could have (before asking git whether it is there).
 export const branchShape = (b) => !/^-|[\s~^:?*[\\]|\.\.|@\{/.test(b);
+// Branch names (tasks.branch, #570): a folder's new task branches, Everywhere's or a space's own; herdr-task fills
+// it in (settings.py BRANCH_PATTERN, branch_pattern_problem). A task's own --branch wins.
+export const BRANCH = {
+  title: "Branch names",
+  about: "New tasks' branches. {n} is its number, {key} its id (SHEP-4), {slug} its title.",
+  pattern: "task/{n}-{slug}",
+};
+// Why a Branch names pattern can't be used, or "" (herdr-task's branch_pattern_problem says the same).
+export function branchPattern(pattern) {
+  const p = String(pattern ?? "").trim();
+  if (!p) return "";
+  if (!p.includes("{n}") && !p.includes("{key}")) return "Put {n} or {key} in it, so each task's branch is its own.";
+  if (/\{(?!(?:n|key|slug)\})[^}]*\}/.test(p)) return "Only {n}, {key} and {slug} can be filled in.";
+  const sample = p.replaceAll("{n}", "4").replaceAll("{key}", "ABC-4").replaceAll("{slug}", "fix-login");
+  if (/^[-/]|[/.]$|\.lock$|[\s~^:?*[\\]|\.\.|@\{|\/\/|\/\./.test(sample)) return "That isn't a name git allows for a branch.";
+  return "";
+}
 
 // ---- Notify ----------------------------------------------------------------------------------------------------
 export const NOTIFY_ABOUT = "What reaches you from a space's Assistant. Tasks always alert.";
@@ -242,7 +259,7 @@ export const MACHINES = {
 export const OLD_NAMES = { coordinator: "Assistant", worker: "Workers", reviewer: "Reviewer", backup: "Backup agent",
   automations: "Run automations", merge: "Merge", review_rounds: "Review", must_fix: "Must fix", proof: "Proof",
   max_running: "Tasks at once", archive_after: "Archive Done after", worktrees: "Worktrees",
-  start_notes: "When a task starts", finish_notes: "When a task finishes", base: "Base branch", agents: "Reactions" };
+  start_notes: "When a task starts", finish_notes: "When a task finishes", base: "Base branch", branch: "Branch names", agents: "Reactions" };
 // Home Assistant's line: on or off, and what herdr-task's home round last found there (~/.herdr/tasks/.home.json).
 export function homeAbout(on, st) {
   return !on ? "Off: nobody watches its disk, load and processes."

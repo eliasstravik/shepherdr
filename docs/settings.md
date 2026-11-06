@@ -30,6 +30,7 @@ drops the space's own, and it inherits again. A few settings are one for every s
 | Tasks | Archive Done after | Everywhere, space | Some repos keep done work in view longer |
 | Tasks | Worktrees | Everywhere, space | A folder that isn't a repo, or one that can't take worktrees |
 | Tasks | Base branch | Space only | A branch only means something in one repo |
+| Tasks | Branch names (a pattern: `{n}`, `{key}`, `{slug}`; empty: `task/{n}-{slug}`; a task's own `--branch` wins) | Everywhere, space | A team may name branches after its tickets |
 | Tasks | Run automations | Everywhere, space | Pause one repo's automations |
 | Tasks | When a task starts / finishes | Everywhere, space | Setup and cleanup steps are a repo's |
 | Autopilot | Heartbeat, Schedule, Events | Everywhere, space | Each space works toward its own goal, at its own pace |

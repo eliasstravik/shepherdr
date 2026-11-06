@@ -12,7 +12,7 @@ import * as HC from "../core/host.js";
 import * as APc from "../core/autopilot.js";
 import type { SettingRow, SettingSection } from "../web/shared/types.ts";
 
-const { TASK_ROWS, DEFAULTS, wordFor, valueFor, ROLES: CORE_ROLES, NOTES: CORE_NOTES, ABOUT, BACKUP, REACTIONS, upgradeReactions, BASE, MACHINES, OLD_NAMES, SECTIONS,
+const { TASK_ROWS, DEFAULTS, wordFor, valueFor, ROLES: CORE_ROLES, NOTES: CORE_NOTES, ABOUT, BACKUP, REACTIONS, upgradeReactions, BASE, BRANCH, branchPattern, MACHINES, OLD_NAMES, SECTIONS,
   WEB, modelLabel, roleSel, otherCli, otherCliWords, backupProblem, homeAbout, webState, fromWord, LOADING_AGENTS, RESET, machineLabel } = C as any;
 const AP = APc as any;
 /** Autopilot as Everywhere has it now (herdr-task's view: what Settings keeps, else what it kept before, else the
@@ -234,6 +234,13 @@ export class Settings {
       rows.splice(at, 0, { label: BASE.title, key: "tasks.base", value: String(p.value ?? "").trim(), text: true, hint: BASE.about,
         placeholder: BASE.empty(this.branches[s.id] ?? ""), ...this.follows(s, p, (v) => v || BASE.follows, "tasks", "base") });
     }
+    // Branch names (#570): Everywhere's or a space's own pattern for new task branches; empty: task/{n}-{slug}
+    {
+      const p = this.pick(scope, "tasks", "branch");
+      const at = rows.findIndex((r) => r.key === "automations.enabled");
+      rows.splice(at, 0, { label: BRANCH.title, key: "tasks.branch", value: String(p.value ?? "").trim(), text: true, hint: BRANCH.about,
+        placeholder: BRANCH.pattern, ...this.follows(s, p, (v) => v || BRANCH.pattern, "tasks", "branch") });
+    }
     for (const n of NOTES) {
       const p = this.pick(scope, "tasks", `${n.id}_notes`);
       rows.push({ label: n.title, key: `tasks.${n.id}_notes`, value: p.value ?? "", multiline: true, hint: n.about, placeholder: n.example, ...this.follows(s, p, (v) => v ?? "", "tasks", `${n.id}_notes`) });
@@ -401,6 +408,12 @@ export class Settings {
       // a space's own (the service checked the branch is there first); empty: back to the folder's branch
       if (!space) throw new Error("A base branch is set per space.");
       put("tasks", "base", word?.trim() ? word.trim() : null);
+    } else if (key === "tasks.branch") {
+      // a pattern herdr-task can fill in (core/settings.js branchPattern); empty: back to the level above
+      const v = word?.trim() ?? "";
+      const why = branchPattern(v);
+      if (why) throw new Error(why);
+      put("tasks", "branch", v || null);
     } else if (section === "tasks" && /^(start|finish)_notes$/.test(field)) {
       put("tasks", field, word === null ? null : word.slice(0, 8000));
     } else if (section === "role" && ROLES.some((r) => r.id === field)) {
