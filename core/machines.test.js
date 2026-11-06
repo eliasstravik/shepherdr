@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { planRows, meterWords, windowWords, whyWords, freshWords, healthReadWords, noHealthWords, noPlanWords, cliTitle, readOld,
-  meterSub, healthErrorWords, span } from "./machines.js";
+  meterSub, healthErrorWords, span, nextRead } from "./machines.js";
 
 const NOW = Date.UTC(2026, 10, 4, 12, 0);
 const health = { cpu: 12, load: 0.5, cores: 8, memory: 40, mem_used: 8 * 2 ** 30, mem_total: 32 * 2 ** 30, disk: 22, disks: [{ path: "/", pct: 22, free_gb: 300 }] };
@@ -38,4 +38,19 @@ test("a plan window: its numbers and refill, or that it refilled since", () => {
   expect(w).toEqual({ name: "Weekly", pct: 19, level: "busy", words: "19% left · 81% used", refill: "Refills Nov 9" });
   expect(windowWords({ name: "5-hour", used: 10 }, NOW).refill).toBe("No refill time reported");
   expect(windowWords({ name: "5-hour", used: 10, resets_at: NOW - 1 }, NOW).dead).toMatch(/^5-hour: refilled .+, not read since\.$/);
+});
+
+
+test("Cursor usage appears once in machine details and a failed refresh preserves its last reading", () => {
+  const read = { state: "ok", at: NOW, plan: "Pro", windows: [
+    { name: "Auto + Composer", used: 23, resets_at: NOW + 3600e3 }, { name: "API models", used: 0 },
+  ] };
+  const fresh = nextRead(read, { state: "unknown", why: "Could not read usage" });
+  const rows = planRows({ limits: { cursor: fresh }, agents: [{ key: "cursor", name: "Cursor" }] }, NOW);
+  expect(rows).toHaveLength(1);
+  expect(cliTitle(rows[0])).toBe("Cursor · Pro");
+  expect(rows[0].pct).toBe(77);
+  expect(readOld(rows[0].read, NOW)).toBe(true);
+  expect(rows[0].read.failed).toBe("Could not read usage");
+  expect(planRows({ limits: { cursor: { state: "unknown", at: NOW } } }, NOW)[0].pct).toBeNull();
 });

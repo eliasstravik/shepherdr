@@ -205,6 +205,7 @@ export type CliLimitsRead = CliLimits & { at: number; failed?: string }
 export interface MachineLimits {
   claude?: CliLimitsRead
   codex?: CliLimitsRead
+  cursor?: CliLimitsRead
 }
 
 /** what Shepherdr measures on a machine, as one level each: a share of what it has (CPU: its 1-minute load over its

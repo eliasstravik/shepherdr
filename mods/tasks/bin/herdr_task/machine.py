@@ -4,12 +4,14 @@ nothing installed: Herdr's sidebar sends it as `python3 -c <this file> [--limits
 `hc exec --on <machine>` and reads the JSON it prints, {"health": {...}, "limits": {...}}; and
 herdr-task's tick imports it to hold new tasks while its machine is too busy (hold_reason).
 
-Plan limits come only from each CLI's own usage source, each in its own short process that can
-write nothing real (bwrap on Linux, sandbox-exec on a Mac): Claude Code's `/usage` and Codex's
-`account/rateLimits/read`. Never through a running agent, never a guess: a CLI it can't read says
-why. Only percentages, reset times, the plan's name and the signed-in account come back."""
+Plan limits come only from each CLI's own usage source: Claude Code's `/usage` and Codex's
+`account/rateLimits/read` in short processes that can write nothing real (bwrap on Linux,
+sandbox-exec on a Mac), and Cursor's read-only Dashboard usage RPCs without renewing its sign-in.
+Never through a running agent, never a guess: a CLI it can't read says why. Only percentages,
+reset times, the plan's name and the signed-in account come back."""
 
 import json
+import math
 import os
 import re
 import shutil
@@ -481,8 +483,126 @@ def codex():
         close()
 
 
+def parse_cursor(result, plan=None):
+    """Cursor's GetCurrentPeriodUsage; omitted fields never mean zero usage."""
+    if not isinstance(result, dict):
+        return {"state": "unknown", "why": "Cursor reported no plan limits"}
+
+    def number(value):
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
+
+    windows = []
+    try:
+        reset = int(result.get("billingCycleEnd", 0))
+    except (ValueError, TypeError, OverflowError):
+        reset = 0
+
+    def add(name, data, percent, used, limit):
+        pct = data.get(percent)
+        if not number(pct):
+            spent, cap = data.get(used), data.get(limit)
+            pct = spent / cap * 100 if number(spent) and number(cap) and cap > 0 else None
+        if number(pct):
+            windows.append(dict({"name": name, "used": pct}, **({"resets_at": reset} if reset > 0 else {})))
+
+    usage = result.get("planUsage")
+    if isinstance(usage, dict):
+        add("Auto + Composer", usage, "autoPercentUsed", "autoSpend", "autoLimit")
+        add("API models", usage, "apiPercentUsed", "apiSpend", "apiLimit")
+        if not windows:
+            add("Included usage", usage, "totalPercentUsed", "includedSpend", "limit")
+    spend = result.get("spendLimitUsage")
+    if isinstance(spend, dict):
+        add("On-demand", spend, "", "individualUsed", "individualLimit")
+    if not windows:
+        return {"state": "unknown", "why": "Cursor reported no plan limits for this account; check its usage dashboard"}
+    got = {"state": "ok", "windows": windows}
+    info = plan.get("planInfo") if isinstance(plan, dict) else None
+    if isinstance(info, dict) and isinstance(info.get("planName"), str):
+        got["plan"] = info["planName"][:40]
+    return got
+
+
+def _cursor_token():
+    token = os.environ.get("CURSOR_AUTH_TOKEN")
+    if token:
+        return token
+    if os.environ.get("CURSOR_API_KEY") or os.environ.get("AGENT_CLI_CREDENTIAL_STORE") == "memory":
+        raise ValueError("Cursor usage needs its saved sign-in; API-key and memory-only sessions are not supported")
+    if MAC and os.environ.get("AGENT_CLI_CREDENTIAL_STORE") != "file":
+        r = subprocess.run(["/usr/bin/security", "find-generic-password", "-a", "cursor-user", "-s", "cursor-access-token", "-w"],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                           universal_newlines=True, timeout=5)
+        if r.returncode == 44:
+            return None
+        if r.returncode:
+            raise ValueError("Couldn't read Cursor's sign-in from the Keychain")
+        return r.stdout.strip() or None
+    folder = os.path.join(HOME, ".cursor") if MAC else os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "cursor")
+    auth = _json_file(os.path.join(folder, "auth.json"))
+    token = auth.get("accessToken") if isinstance(auth, dict) else None
+    return token if isinstance(token, str) and token else None
+
+
+def _cursor_rpc(method, token, team):
+    import urllib.request
+    import ssl
+    # A redirect must not carry the saved sign-in to another host.
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+    headers = {"Authorization": "Bearer " + token, "Content-Type": "application/json", "Connect-Protocol-Version": "1"}
+    if isinstance(team, int) and not isinstance(team, bool) and team > 0:
+        headers["x-cursor-team-id"] = str(team)
+    req = urllib.request.Request("https://api2.cursor.sh/aiserver.v1.DashboardService/" + method, data=b"{}", headers=headers)
+    cafile = "/etc/ssl/cert.pem" if MAC and not os.environ.get("SSL_CERT_FILE") and os.path.exists("/etc/ssl/cert.pem") else None
+    context = ssl.create_default_context(cafile=cafile)
+    with urllib.request.build_opener(NoRedirect, urllib.request.HTTPSHandler(context=context)).open(req, timeout=10) as response:
+        body = response.read(1024 * 1024 + 1)
+    if len(body) > 1024 * 1024:
+        raise ValueError("Cursor's usage response was too large")
+    result = json.loads(body)
+    if not isinstance(result, dict):
+        raise ValueError("Cursor's usage response was not an object")
+    return result
+
+
+def cursor():
+    if not which("cursor-agent"):
+        return None
+    if os.environ.get("CURSOR_API_ENDPOINT", "https://api2.cursor.sh").rstrip("/") != "https://api2.cursor.sh":
+        return {"state": "unknown", "why": "Cursor usage is unavailable for a custom endpoint"}
+    import urllib.error
+    try:
+        token = _cursor_token()
+        if not token:
+            return {"state": "signed-out"}
+        default_config = os.path.join(os.environ["XDG_CONFIG_HOME"], "cursor") if os.environ.get("XDG_CONFIG_HOME") else os.path.join(HOME, ".cursor")
+        config = os.environ.get("CURSOR_CONFIG_DIR") or default_config
+        cfg = _json_file(os.path.join(config, "cli-config.json"))
+        auth = cfg.get("authInfo") if isinstance(cfg, dict) else None
+        team = auth.get("activeTeamId") if isinstance(auth, dict) else None
+        usage = _cursor_rpc("GetCurrentPeriodUsage", token, team)
+        try:
+            plan = _cursor_rpc("GetPlanInfo", token, team)
+        except urllib.error.HTTPError as e:
+            e.close()
+            plan = None
+        except (OSError, ValueError):
+            plan = None
+        return parse_cursor(usage, plan)
+    except urllib.error.HTTPError as e:
+        e.close()
+        why = "its sign-in is due for renewal; the next agent here will do it" if e.code == 401 else "Cursor's usage service refused the read (HTTP %d)" % e.code
+    except ValueError:
+        why = "Couldn't read Cursor's saved sign-in or usage response"
+    except (OSError, subprocess.SubprocessError):
+        why = "Couldn't reach Cursor's usage service or saved sign-in"
+    return {"state": "unknown", "why": why}
+
+
 def limits():
-    """{claude?, codex?}: each CLI here, read side by side."""
+    """{claude?, codex?, cursor?}: each CLI here, read side by side."""
     out = {}
 
     def safely(key, read):
@@ -492,7 +612,7 @@ def limits():
             got = {"state": "unknown", "why": "Couldn't run it"}
         if got is not None:
             out[key] = dict(got, at=now_ms())
-    jobs = [threading.Thread(target=safely, args=a) for a in (("claude", claude), ("codex", codex))]
+    jobs = [threading.Thread(target=safely, args=a) for a in (("claude", claude), ("codex", codex), ("cursor", cursor))]
     for j in jobs:
         j.start()
     for j in jobs:
