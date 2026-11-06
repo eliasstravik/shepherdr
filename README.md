@@ -44,7 +44,7 @@ Tasks, Assistants, chat, artifacts, voice, reactions, the task browser, Autopilo
 
 ### ⚡ Stop briefing every agent yourself
 
-Write what needs doing to a space's Assistant: it makes it a task or several with `herdr-task`, each with a brief and a Settings block that says how it is reviewed and merged. Each agent starts on Claude Code or Codex, in a worktree of its own, at once or as soon as the machine has room. Want more control? Ask for it "for later", "after SHE-12", or "ask me before merging". Turn on Autopilot in the Assistant's header and it works on its own between your messages, from a heartbeat you write, or add automations that start tasks on a schedule.
+Write what needs doing to a space's Assistant: it makes it a task or several with `herdr-task`, each with a brief and a Settings block that says how it is reviewed and merged. Each agent starts on Claude Code, Codex or Cursor, in a worktree of its own, at once or as soon as the machine has room. Want more control? Ask for it "for later", "after SHE-12", or "ask me before merging". Turn on Autopilot in the Assistant's header and it works on its own between your messages, from a heartbeat you write, or add automations that start tasks on a schedule.
 
 ### 💬 Know when a task needs an answer
 
@@ -87,7 +87,7 @@ Shepherdr doesn't update itself: it never follows main, so a merge can't change 
 
 ### Do I need to know how to code?
 
-You need to be comfortable in a terminal for the install. After that everything happens in the Herdr window or the web app: you write to Assistants and answer cards, and Shepherdr settings holds the few defaults. You'll need macOS or Linux, the Herdr app 0.1.12 or newer with herdr-core 0.1.17 or newer, Python 3.8+, Git, and Claude Code or Codex, installed and signed in. `gh` (pull requests), agent-browser and Chrome for the task browser, and an ElevenLabs key for voice and dictation are optional; the web app needs Bun and Tailscale. [Install](docs/install.md) covers the prerequisites.
+You need to be comfortable in a terminal for the install. After that everything happens in the Herdr window or the web app: you write to Assistants and answer cards, and Shepherdr settings holds the few defaults. You'll need macOS or Linux, the Herdr app 0.1.12 or newer with herdr-core 0.1.17 or newer, Python 3.8+, Git, and Claude Code, Codex or Cursor, installed and signed in. `gh` (pull requests), agent-browser and Chrome for the task browser, and an ElevenLabs key for voice and dictation are optional; the web app needs Bun and Tailscale. [Install](docs/install.md) covers the prerequisites.
 
 ### Can my coding agent install it for me?
 
@@ -102,7 +102,7 @@ Read ~/.config/herdr-app/AGENTS.md, then add this layout: https://github.com/eli
 Yes: herdr-core runs the agents and the web app is your window, in a browser on your tailnet. Give your agent this:
 
 ```text
-Install herdr-core (https://herdr.dev), Tailscale (signed in), python3, git and Claude Code or Codex. Then clone https://github.com/eliasstravik/shepherdr, read its docs/install.md and docs/web.md, and install only the web app with ./install.sh --web. Check it with shepherdr doctor, then give me the link from shepherdr web status. Keep it private to my tailnet: never Tailscale Funnel.
+Install herdr-core (https://herdr.dev), Tailscale (signed in), python3, git and Claude Code, Codex or Cursor. Then clone https://github.com/eliasstravik/shepherdr, read its docs/install.md and docs/web.md, and install only the web app with ./install.sh --web. Check it with shepherdr doctor, then give me the link from shepherdr web status. Keep it private to my tailnet: never Tailscale Funnel.
 ```
 
 ### How do I check that Shepherdr is installed right?

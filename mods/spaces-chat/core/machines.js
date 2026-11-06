@@ -45,7 +45,7 @@ export const healthWords = (s) => healthMeters(s).map((m) => `${m.name} ${m.pct}
 export const meterSub = (m) => m.detail + (m.level === "over" ? " · Over its alert limit" : m.level === "busy" ? " · New tasks wait" : "");
 
 // The CLIs with a usage source; any other installed agent says "No usage info".
-export const READS = { claude: "Claude Code", codex: "Codex" };
+export const READS = { claude: "Claude Code", codex: "Codex", cursor: "Cursor" };
 // A number older than this says how old it is.
 export const OLD = 15 * 60000;
 export const leftOf = (w) => Math.max(0, Math.round(100 - w.used));
