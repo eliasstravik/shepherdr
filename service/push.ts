@@ -6,24 +6,40 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DATA } from "./paths.ts";
 import * as T from "../core/toasts.js";
-import { notifies, taskWho } from "../web/shared/alerts.ts";
+import { alertUrl, DEFAULT_TOPICS, notifies, notifyOf, pushTopics, taskWho, type PushTopic } from "../web/shared/alerts.ts";
+
+type Out = { title: string; body: string; tag: string; topic: PushTopic; place?: string; waits?: true; url?: string };
 
 /**
  * What each push alert says, as the window's toasts (core/toasts.js): an agent that needs you, "HERD-4 · Needs you" or
  * "tt-repo Assistant · Needs you", why under it (an Assistant only by its space's Notify); a task whose agent finished,
- * ready to accept, "HERD-4 · Finished" under its name, a tap opening its Accept card. Keyed so each goes once.
+ * ready to accept, "HERD-4 · Finished" under its name, a tap opening its Accept card; a task done; an Assistant's new
+ * message (an Autopilot update when its Autopilot woke it: woke, the spaces whose wake was under way a moment ago).
+ * Keyed so each goes once; each with its topic and space, which every device chooses by (Settings › Notifications).
  */
-export function alertsOf(snap: any): Map<string, { title: string; body: string; tag: string; waits?: true; url?: string }> {
-  const now = new Map<string, { title: string; body: string; tag: string; waits?: true; url?: string }>();
+export function alertsOf(snap: any, woke: Set<string> = new Set()): Map<string, Out> {
+  const now = new Map<string, Out>();
   const who = (n: any) => n.task ? taskWho(snap, n.task) : T.assistantWho(snap.places?.find((p: any) => p.id === n.place)?.name);
   for (const n of snap.needs ?? []) {
     if (snap.settings && !notifies(snap, { go: { place: n.place }, task: n.task ? true : undefined })) continue;
-    now.set(`need:${n.chat}:${n.id}`, { title: T.toastTitle(who(n), T.NEEDS_YOU), body: T.needReason(n), tag: n.task ?? n.chat, waits: true });
+    now.set(`need:${n.chat}:${n.id}`, { title: T.toastTitle(who(n), T.NEEDS_YOU), body: T.needReason(n), tag: n.task ?? n.chat, topic: "needs", place: n.place, waits: true });
   }
   for (const t of snap.tasks ?? []) if (t.status === "ready" && !t.archived)
-    now.set(`ready:${t.id}`, { title: T.toastTitle(taskWho(snap, t.id), T.FINISHED), body: t.name, tag: t.id, url: `./#accept=${encodeURIComponent(t.id)}` });
+    now.set(`ready:${t.id}`, { title: T.toastTitle(taskWho(snap, t.id), T.FINISHED), body: t.name, tag: t.id, topic: "ready", place: t.place, url: `./#accept=${encodeURIComponent(t.id)}` });
+  for (const t of snap.tasks ?? []) if (t.status === "done" && !t.archived)
+    now.set(`done:${t.id}`, { title: T.toastTitle(taskWho(snap, t.id), "Done"), body: t.name, tag: t.id, topic: "done", place: t.place, url: alertUrl({ place: t.place, task: t.id }) });
+  // an Assistant's new message (its chat's last moved on, not yet read), unless its space's Notify is Off
+  for (const p of snap.places ?? []) {
+    const last = Number(snap.last?.[p.chat]) || 0;
+    if (!last || last <= (Number(snap.read?.[p.chat]) || 0)) continue;
+    // its question already says so (Needs you)
+    if ((snap.needs ?? []).some((n: any) => n.chat === p.chat)) continue;
+    if (snap.settings && notifyOf(snap, p.id) === "Off") continue;
+    const pilot = woke.has(p.id) || (p.pilot?.on && (p.pilot.inflight || p.pilot.pending));
+    now.set(`msg:${p.chat}:${last}`, { title: T.toastTitle(T.assistantWho(p.name), pilot ? "Autopilot update" : "New message"), body: "Tap to read it.", tag: `msg:${p.chat}`, topic: pilot ? "autopilot" : "assistant", place: p.id, url: alertUrl({ place: p.id }) });
+  }
   // an agent's own alert (herdr-task alert), as its toast: a task's always, an Assistant's by its space's Notify
-  for (const a of snap.alerts ?? []) if (a.notify) now.set(`alert:${a.id}`, { title: a.title, body: a.body, tag: `alert:${a.id}` });
+  for (const a of snap.alerts ?? []) if (a.notify) now.set(`alert:${a.id}`, { title: a.title, body: a.body, tag: `alert:${a.id}`, topic: "needs", ...(a.place ? { place: a.place } : {}) });
   return now;
 }
 
@@ -64,7 +80,16 @@ export function agentAlerts(terminals: Iterable<any>, snap: any, chatOf: (addres
 }
 export const PROVIDER_BODY = "Write to it to carry on, or restart it.";
 
-type Sub = { endpoint: string; keys: { p256dh: string; auth: string }; device?: string; at: number };
+/** a device's subscription: what it is told about (none kept: what it got before it could choose) and the spaces it hears
+ *  nothing from */
+type Sub = { endpoint: string; keys: { p256dh: string; auth: string }; device?: string; at: number; topics?: PushTopic[]; muted?: string[] };
+
+/** does a device want this alert: its topic chosen, its space not muted; an alert with no topic (a test) always */
+export function wants(s: Pick<Sub, "topics" | "muted">, a: { topic?: string; place?: string }) {
+  if (!a.topic) return true;
+  if (!pushTopics(s.topics).includes(a.topic as PushTopic)) return false;
+  return !(a.place && s.muted?.includes(a.place));
+}
 
 const b64u = (b: ArrayBuffer | Uint8Array) => Buffer.from(b instanceof Uint8Array ? b : new Uint8Array(b)).toString("base64url");
 const unb64u = (s: string) => new Uint8Array(Buffer.from(s, "base64url"));
@@ -106,9 +131,11 @@ export class Push {
   /** endpoints of devices whose app is on screen now (their pages say so) */
   visible = new Set<string>();
 
-  constructor(private subject: () => string) {
-    try { this.subs = JSON.parse(readFileSync(join(DATA, "push.json"), "utf8")); } catch {}
+  constructor(private subject: () => string, private file = join(DATA, "push.json")) {
+    try { this.subs = JSON.parse(readFileSync(this.file, "utf8")); } catch {}
   }
+
+  private save() { writeFileSync(this.file, JSON.stringify(this.subs), { mode: 0o600 }); }
 
   async key() {
     if (this.vapid) return this.vapid.publicKey;
@@ -120,10 +147,37 @@ export class Push {
     return this.vapid.publicKey;
   }
 
-  subscribe(sub: any, device?: string) {
+  /** a device turned on (or again, with a new subscription: from: the one it had); it keeps what it chose */
+  subscribe(sub: any, device?: string, from?: string) {
     if (typeof sub?.endpoint !== "string" || !/^https:\/\//.test(sub.endpoint) || typeof sub?.keys?.p256dh !== "string" || typeof sub?.keys?.auth !== "string") throw new Error("Not a push subscription.");
-    this.subs = [...this.subs.filter((s) => s.endpoint !== sub.endpoint), { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth }, device: String(device ?? "").slice(0, 200), at: Date.now() }].slice(-20);
-    writeFileSync(join(DATA, "push.json"), JSON.stringify(this.subs), { mode: 0o600 });
+    const had = this.subs.find((s) => s.endpoint === sub.endpoint) ?? (from ? this.subs.find((s) => s.endpoint === from) : undefined);
+    const chose = had ? { topics: pushTopics(had.topics), ...(had.muted?.length ? { muted: had.muted } : {}) } : { topics: [...DEFAULT_TOPICS] };
+    this.subs = [...this.subs.filter((s) => s.endpoint !== sub.endpoint && s !== had), { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth }, device: String(device ?? "").slice(0, 200), at: Date.now(), ...chose }].slice(-20);
+    this.save();
+  }
+
+  /** a device turned off: it gets nothing more */
+  unsubscribe(endpoint: string) {
+    const n = this.subs.length;
+    this.subs = this.subs.filter((s) => s.endpoint !== endpoint);
+    if (this.subs.length !== n) this.save();
+  }
+
+  /** what the server keeps for a device: whether it is on, what it hears about, and how many devices are on */
+  state(endpoint: string) {
+    const s = this.subs.find((x) => x.endpoint === endpoint);
+    return { on: !!s, topics: pushTopics(s?.topics ?? DEFAULT_TOPICS), muted: s?.muted ?? [], devices: this.subs.length };
+  }
+
+  /** a device's choice (all: every device's), what it hears about and the spaces it mutes */
+  choose(endpoint: string, c: { topics?: unknown; muted?: unknown }, all = false) {
+    const s = this.subs.find((x) => x.endpoint === endpoint);
+    if (!s) throw new Error("Alerts are off for this device.");
+    const topics = c.topics === undefined ? pushTopics(s.topics) : pushTopics(c.topics);
+    const muted = Array.isArray(c.muted) ? c.muted.filter((m): m is string => typeof m === "string").slice(0, 200) : s.muted ?? [];
+    for (const x of all ? this.subs : [s]) { x.topics = [...topics]; x.muted = [...muted]; }
+    this.save();
+    return this.state(endpoint);
   }
 
   private async jwt(aud: string) {
@@ -135,22 +189,35 @@ export class Push {
     return `${head}.${body}.${b64u(sig)}`;
   }
 
-  /** Sends an alert to every subscribed device whose app isn't on screen. A gone subscription is dropped. */
-  async send(alert: Record<string, unknown>) {
+  /** one alert to one device: the push service's answer (0: it couldn't be reached); a gone subscription is dropped */
+  private async deliver(s: Sub, payload: Uint8Array) {
+    try {
+      const body = await encrypt(payload, s.keys.p256dh, s.keys.auth);
+      const r = await fetch(s.endpoint, { method: "POST", body, headers: {
+        "content-encoding": "aes128gcm", "content-type": "application/octet-stream", ttl: "86400", urgency: "high",
+        authorization: `vapid t=${await this.jwt(new URL(s.endpoint).origin)}, k=${await this.key()}`,
+      } });
+      if (r.status === 404 || r.status === 410) this.unsubscribe(s.endpoint);
+      return r.status;
+    } catch { return 0; }
+  }
+
+  /** Sends an alert to every subscribed device whose app isn't on screen and that wants it (its topic, its space). */
+  async send(alert: Record<string, unknown> & { topic?: string; place?: string }) {
     const payload = enc(JSON.stringify(alert));
     for (const s of [...this.subs]) {
-      if (this.visible.has(s.endpoint)) continue;
-      try {
-        const body = await encrypt(payload, s.keys.p256dh, s.keys.auth);
-        const r = await fetch(s.endpoint, { method: "POST", body, headers: {
-          "content-encoding": "aes128gcm", "content-type": "application/octet-stream", ttl: "86400", urgency: "high",
-          authorization: `vapid t=${await this.jwt(new URL(s.endpoint).origin)}, k=${await this.key()}`,
-        } });
-        if (r.status === 404 || r.status === 410) {
-          this.subs = this.subs.filter((x) => x.endpoint !== s.endpoint);
-          writeFileSync(join(DATA, "push.json"), JSON.stringify(this.subs), { mode: 0o600 });
-        }
-      } catch {}
+      if (this.visible.has(s.endpoint) || !wants(s, alert)) continue;
+      await this.deliver(s, payload);
     }
+  }
+
+  /** a test alert to one device, on screen or not: what to say of it */
+  async test(endpoint: string) {
+    const s = this.subs.find((x) => x.endpoint === endpoint);
+    if (!s) return { ok: false, said: "Alerts are off for this device." };
+    const status = await this.deliver(s, enc(JSON.stringify({ title: "Shepherdr · Test", body: "Alerts reach this device.", tag: "test", test: true })));
+    if (status >= 200 && status < 300) return { ok: true, said: "Sent. It should show in a few seconds." };
+    if (status === 404 || status === 410) return { ok: false, said: "This device's subscription is gone. Turn alerts on again." };
+    return { ok: false, said: status ? `The push service refused it (${status}).` : "The push service couldn't be reached." };
   }
 }

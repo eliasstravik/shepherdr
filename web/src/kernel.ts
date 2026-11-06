@@ -115,8 +115,9 @@ export interface Registry {
   keys: { order: number; handle: (k: KeyContext) => boolean }[]
   /** a settings row a plugin acts on itself (alerts: turn them on for this device); returns what to say */
   settingActions: Record<string, () => Promise<string>>
-  /** pages a plugin adds to Settings' This device group, after Appearance (the keyboard shortcuts); `when` says if one shows */
-  settingsPages: { name: string; about?: string; Icon: FC<{ className?: string }>; when: (ui: UI) => boolean; View: FC<{ phone: boolean }> }[]
+  /** pages a plugin adds to Settings' This device group, after Appearance (the keyboard shortcuts); `when` says if one shows;
+   *  into: drawn on top of that server page instead (Notify's alerts on this device) */
+  settingsPages: { name: string; about?: string; Icon: FC<{ className?: string }>; when: (ui: UI) => boolean; View: FC<{ phone: boolean }>; into?: string }[]
 }
 
 export const registry: Registry = {

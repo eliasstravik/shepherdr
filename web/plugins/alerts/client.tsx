@@ -1,20 +1,10 @@
 import { useEffect, useState } from 'react'
 import { definePlugin, openLink, setPushEndpoint, useSnap, useStore, visibleChats } from '@client/kernel.ts'
 import { keptTags, waiting } from '@shared/alerts.ts'
+import { BellIcon } from '@heroicons/react/24/outline'
 import { Toasts } from './toasts.tsx'
-
-/** Ask this device for push alerts (the app must be installed to the home screen on an iPhone). */
-export async function subscribePush(): Promise<string> {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return 'This browser has no push alerts. On an iPhone, add Shepherdr to the home screen first.'
-  const reg = await registerWorker()
-  const perm = await Notification.requestPermission()
-  if (perm !== 'granted') return 'Alerts are off for this device.'
-  const { key } = await fetch('api/push/key').then((r) => r.json())
-  const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })
-  await fetch('api/push/subscribe', { method: 'POST', headers: { 'content-type': 'application/json', 'x-shepherdr': '1' }, body: JSON.stringify({ sub, device: navigator.userAgent }) })
-  setPushEndpoint(sub.endpoint)
-  return 'Alerts are on for this device.'
-}
+import { DeviceAlerts } from './device.tsx'
+import { registerWorker } from './worker.ts'
 
 const TITLE = 'Shepherdr'
 
@@ -55,17 +45,11 @@ function Keeper() {
   return null
 }
 
-/** The service worker, beside the page under whatever path the app is served on (/shepherdr/), its scope that folder.
- *  Same-origin, so its fetch carries the login cookie of a gate in front (GitHub #494). */
-function registerWorker() {
-  const base = new URL('./', document.baseURI)
-  return navigator.serviceWorker.register(new URL('sw.js', base), { scope: base.pathname })
-}
-
 export default definePlugin({
   name: 'alerts',
   setup(reg) {
-    reg.settingActions.alerts = subscribePush
+    // Settings › Notify: this device's alerts, on top of the page (its real state, Turn on/off, a test, what it hears)
+    reg.settingsPages.push({ name: 'Alerts on this device', into: 'Notify', Icon: BellIcon, when: () => true, View: DeviceAlerts })
     // the window's toasts while the app is on screen (push alerts while it isn't)
     reg.overlays.push(Keeper, Toasts)
     if (!('serviceWorker' in navigator)) return

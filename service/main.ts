@@ -123,9 +123,12 @@ let alerted: Set<string> | null = null;
 // the agents' own alerts ride on the snapshot (the web app's toasts: web/plugins/alerts/toasts.tsx), then push
 const chatOfAddress = (a: string) => { for (const [k, v] of ((compat as any).chats ?? new Map()) as Map<string, string>) if (v === a) return k; return null; };
 const alertNewAnd = (snap: any) => { try { snap.alerts = agentAlerts(hub.terminals.values(), snap, chatOfAddress, HOME); alertNew(snap); } catch {} return snap; };
+// the spaces whose Autopilot wake was under way at the last snapshot: a message just after it is its update
+let woke = new Set<string>();
 function alertNew(snap: any) {
   // their words, as the window's toasts: service/push.ts alertsOf
-  const now = alertsOf(snap);
+  const now = alertsOf(snap, woke);
+  woke = new Set((snap.places ?? []).filter((p: any) => p.pilot?.on && (p.pilot.inflight || p.pilot.pending)).map((p: any) => p.id));
   if (alerted) for (const [k, a] of now) if (!alerted.has(k)) void push.send({ ...a, badge: (snap.needs?.length ?? 0) + (snap.tasks ?? []).filter((t: any) => t.status === "ready" && !t.archived).length, open: [...now.values()].filter((x) => x.waits).map((x) => x.tag) });
   alerted = new Set(now.keys());
 }
@@ -673,7 +676,18 @@ const server = Bun.serve<{ who: string }>({
     if (path === "/api/push/key") return json({ key: await push.key() });
     if (path === "/api/push/subscribe" && req.method === "POST") {
       const body = await req.json().catch(() => null);
-      try { push.subscribe(body?.sub, body?.device); return json({ ok: true }); } catch (err) { return json({ error: (err as Error).message }, 400); }
+      try { push.subscribe(body?.sub, body?.device, typeof body?.from === "string" ? body.from : undefined); return json({ ok: true, ...push.state(body.sub.endpoint) }); } catch (err) { return json({ error: (err as Error).message }, 400); }
+    }
+    // Settings › Notifications: this device's alerts as the server keeps them, turned off, chosen, tested
+    if (path.startsWith("/api/push/") && req.method === "POST") {
+      const body = await req.json().catch(() => null);
+      const endpoint = typeof body?.endpoint === "string" ? body.endpoint : "";
+      if (path === "/api/push/state") return json(push.state(endpoint));
+      if (path === "/api/push/unsubscribe") { push.unsubscribe(endpoint); return json({ ok: true, ...push.state(endpoint) }); }
+      if (path === "/api/push/choose") {
+        try { return json({ ok: true, ...push.choose(endpoint, { topics: body?.topics, muted: body?.muted }, !!body?.all) }); } catch (err) { return json({ error: (err as Error).message }, 400); }
+      }
+      if (path === "/api/push/test") return json(await push.test(endpoint));
     }
     if (path === "/api/worktree" && url.searchParams.has("space")) {
       // the tab bar's Files and Changes (Herdr's own panels): the space's folder, its uncommitted changes against HEAD

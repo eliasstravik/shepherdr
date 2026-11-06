@@ -540,8 +540,11 @@ function groupsOf(sections: SettingSection[], ui: UI): { name: string; pages: Pa
   const pages = [...sections.filter((x) => x.level === level && !x.global), ...(space ? [] : sections.filter((x) => x.global))]
     .filter((x) => ORDER.includes(x.name) && (!space || SPACE_PAGES.has(x.name)))
     .sort((a, b) => ORDER.indexOf(a.name) - ORDER.indexOf(b.name))
-  const own = registry.settingsPages.filter((x) => x.when(ui)).map(({ name, about, Icon, View }): Page => ({ name, about, Icon, View, device: true, rows: [] }))
-  return [{ name: space ? ST.SPACE_TITLE : ST.TITLE, pages: [...pages, ...own] }].filter((g) => g.pages.length)
+  const plugged = registry.settingsPages.filter((x) => x.when(ui))
+  const own = plugged.filter((x) => !x.into).map(({ name, about, Icon, View }): Page => ({ name, about, Icon, View, device: true, rows: [] }))
+  // a plugin's part of one of the server's pages (Notify's: alerts on this device), drawn on top of it, Everywhere only
+  const withParts = pages.map((p) => ({ ...p, View: space ? undefined : plugged.find((x) => x.into === p.name)?.View }))
+  return [{ name: space ? ST.SPACE_TITLE : ST.TITLE, pages: [...withParts, ...own] }].filter((g) => g.pages.length)
 }
 
 /** where a page sits in the list of them (for ui.settings.section), or -1 where it doesn't show */
@@ -577,13 +580,13 @@ export function settingsPageOf(sections: SettingSection[], machine: string, ui: 
 const iconOf = (p: Page) => p.Icon ?? ICONS[p.name] ?? CogIcon
 
 /** a phone's rounded group of rows, a shade lighter than the page under it in dark mode, as iOS's */
-const card = 'rounded-box bg-bg dark:bg-bubble'
+export const card = 'rounded-box bg-bg dark:bg-bubble'
 /** a row's look: in a phone's group its line starts where its words do, as iOS's; on a wider screen a line between rows */
 export const rowLook = (phone: boolean) =>
   phone
     ? 'relative flex min-h-12 items-center justify-between gap-3 px-4 py-2.5 not-first:before:absolute not-first:before:inset-x-0 not-first:before:top-0 not-first:before:left-4 not-first:before:h-px not-first:before:bg-line'
     : 'flex min-h-12 items-center justify-between gap-3 py-2 not-first:border-t not-first:border-line'
-const heading = (phone: boolean) => (phone ? 'px-4 pb-1.5 text-[0.8125rem] text-fg2' : 'pb-1 text-[0.75rem] font-medium text-fg3')
+export const heading = (phone: boolean) => (phone ? 'px-4 pb-1.5 text-[0.8125rem] text-fg2' : 'pb-1 text-[0.75rem] font-medium text-fg3')
 
 /** the window's stepper: − its value + (a count, a percent, a size), stepping through the row's choices; a value off
  *  the list (Off) steps from where the row says */
