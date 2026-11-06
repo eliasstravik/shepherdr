@@ -160,7 +160,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       choices: Array.isArray(b.choices) ? b.choices.filter((n: unknown) => typeof n === "number") : undefined,
       note: typeof b.note === "string" ? b.note.slice(0, 4000) : undefined, other: typeof b.other === "string" ? b.other.slice(0, 4000) : undefined,
       answers: Array.isArray(b.answers) ? b.answers.slice(0, 20).map((x: unknown) => String(x ?? "").slice(0, 4000)) : undefined,
-      terminal: b.terminal === true, talk: b.talk === true });
+      terminal: b.terminal === true, talk: b.talk === true, dismiss: b.dismiss === true });
     return { ok: true };
   }
   if (b?.type === "react" && typeof b.chat === "string" && typeof b.message === "string" && typeof b.emoji === "string" && b.emoji.length <= 16) {

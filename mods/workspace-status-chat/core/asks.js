@@ -81,6 +81,14 @@ export const answer = (req, label) => out({ behavior: "allow", updatedInput: { .
 export const answers = (req, map) => out({ behavior: "allow", updatedInput: { ...(req.tool_input ?? {}), answers: map } });
 // "Chat about this": no answers; Claude hears the person wants to talk it over first.
 export const chatAbout = () => deny("The person wants to talk about these questions before answering. Don't ask them again now: wait for their message in the chat and answer it.");
+// "Dismiss" (or Esc on the card): closed without an answer, as Esc in Claude's own prompt, except Claude goes on
+// rather than stopping: it hears the person declined and carries on without it. kind: the card's (words().kind).
+export const DISMISSED = "The person dismissed this without answering";
+export const dismiss = (kind) => deny(kind === "questions"
+  ? `${DISMISSED}. Don't ask these questions again now: carry on with your best judgment, and say what you assumed.`
+  : kind === "plan"
+    ? `${DISMISSED}: the plan isn't approved. Stay in plan mode and wait for the person's message.`
+    : `${DISMISSED}: don't do it. Carry on without it, or another way.`);
 // No decision: Claude shows its own prompt in the terminal.
 export const release = () => "";
 
@@ -91,6 +99,7 @@ export function howAnswered(ask, text, where) {
   try { d = JSON.parse(text).hookSpecificOutput?.decision; } catch {}
   if (!d) return null;
   const plan = ask.words.kind === "plan";
+  if (d.behavior === "deny" && String(d.message ?? "").startsWith(DISMISSED)) return `Dismissed ${where}`;
   if (d.behavior === "allow") return `${plan ? "Approved" : d.updatedInput ? "Answered" : "Allowed"} ${where}`;
   if (ask.words.kind === "questions") return `Left to talk over ${where}`;
   return plan ? `Sent back to planning ${where}` : `Denied ${where}`;

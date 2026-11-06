@@ -10,7 +10,7 @@ import { DATA, HOME } from "./paths.ts";
 import * as A from "../core/asks.js";
 import type { Hub } from "./hub.ts";
 
-const { words, allow, deny, answers, howAnswered, release, chatAbout } = A as any;
+const { words, allow, deny, answers, howAnswered, release, chatAbout, dismiss } = A as any;
 const DIR = join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "data", "chat-asks");
 const ID = /^[\w.-]+$/;
 const MACHINE = /^[\w.-]+$/;
@@ -150,7 +150,7 @@ export class Asks {
   of(terminal: string) { return [...this.open.values()].filter((a) => a.terminal === terminal); }
 
   /** Answers it as the window's card would: a permission or plan allowed or declined, a question's pick. */
-  async answer(id: string, a: { choice?: number; choices?: number[]; note?: string; other?: string; answers?: string[]; terminal?: boolean; talk?: boolean }) {
+  async answer(id: string, a: { choice?: number; choices?: number[]; note?: string; other?: string; answers?: string[]; terminal?: boolean; talk?: boolean; dismiss?: boolean }) {
     const ask = this.open.get(id);
     if (!ask) throw new Error("That question was answered already.");
     const w = ask.words;
@@ -158,6 +158,8 @@ export class Asks {
     // the window's card links: "Answer in terminal" (no decision: the CLI asks in its terminal) and a questions card's
     // "Chat about this" (Claude hears the person wants to talk it over first)
     if (a.terminal) out = release();
+    // "Dismiss" (or Esc): closed without an answer; the agent hears it was declined and carries on
+    else if (a.dismiss) out = dismiss(w.kind);
     else if (a.talk && w.kind === "questions") out = chatAbout();
     else if (w.kind === "questions" && w.questions.length > 1) {
       // the multi-step card: each question's answer in order, all of them
