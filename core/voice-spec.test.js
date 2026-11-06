@@ -88,7 +88,11 @@ test("SHEP-67: ends the call itself after a yes, waits quietly through silence, 
   expect(opening("SHEP 45's agent").conversation_config_override.agent.first_message).toBe(FIRST);
   expect(FIRST.split(" ").length).toBeLessThanOrEqual(4);
   const p = prompt("x");
-  expect(p).toContain('ask only "End the call?" After a clear yes, say "Bye." and use end_call');
+  expect(p).toContain('ask exactly "Are you sure you want to end the call?" After a clear yes, say "Bye." and use end_call');
+  expect(p).not.toContain('"End the call?"');
+  // moving around: one word once it's shown, a few words only when it failed or is unclear (SHEP-83)
+  expect(p).toContain('reply with one word: "Opened.", "Switched.", "Closed." or "Done." Nothing else');
+  expect(p).toContain("Only if it failed or more than one thing fits");
   expect(p).toContain("never use screen to hang up");
   expect(p).toContain("If the person says nothing, say nothing");
   expect(p).toContain("One or two short sentences a turn");

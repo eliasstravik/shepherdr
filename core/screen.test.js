@@ -54,13 +54,25 @@ test("the screen as lines: ref, role, name, states; a dialog over it; cut short 
   expect(screenText({ nodes: [{ ref: "e1", role: "button", name: "Mute" }, { ref: "e2", role: "button", name: "End call", focused: true }], find: "focused" })).toContain('e2 button "End call" focused');
 });
 
+test("moving around (back, close, scroll) answers only that it worked, never the screen (SHEP-83)", () => {
+  for (const d of ["back", "close", "scroll"]) {
+    const r = screenWords({ ok: true, did: "Went back", screen: "Screen: x\ne1 button \"Close\"" }, d);
+    expect(JSON.parse(r.result)).toEqual({ ok: true, did: "Went back" });
+    expect(r.result).not.toContain("Screen");
+  }
+  expect(JSON.parse(screenWords({ ok: true }, "close").result)).toEqual({ ok: true, did: "close" });
+  // a failure still says why, with the screen
+  expect(screenWords({ ok: false, why: "nothing to go back to", screen: "Screen: y" }, "back").result).toContain("Screen: y");
+});
+
 test("risky clicks: delete, merge, accept, stop, end call; not open, close or back", () => {
   for (const n of ["Delete task", "Accept", "Merge", "Stop agent", "End call", "Remove space", "Forget secret"]) expect(risky(n)).toBe(true);
   for (const n of ["Artifacts", "Close", "Back", "Settings", "Filter tasks", "Secrets"]) expect(risky(n)).toBe(false);
 });
 
 test("answers: the new screen after an action, a held click to ask about, a failure, no answer", () => {
-  expect(screenWords({ ok: true, did: "Pressed the tab \"Artifacts\"", screen: "Screen: x" }).result).toBe('Pressed the tab "Artifacts". What the screen shows now:\nScreen: x');
+  expect(screenWords({ ok: true, did: "Pressed the tab \"Artifacts\"", screen: "Screen: x" }, "click").result).toBe('Pressed the tab "Artifacts". The screen now, for your next step only (don\'t read it out):\nScreen: x');
+  expect(screenWords({ ok: true, screen: "Screen: x" }, "look").result).toBe("Screen: x");
   const ask = screenWords({ ok: false, ask: "Press Delete task?" });
   expect(ask.result).toContain('Ask the person first: "Press Delete task?"');
   expect(ask.error).toBeUndefined();

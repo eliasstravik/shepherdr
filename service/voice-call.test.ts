@@ -68,12 +68,12 @@ test("a call from a phone: the open lands on that phone, and is said on screen o
   const r = await tool({ what: "artifact", id: "the hulk mini game" });
   expect(phone.got.filter((m) => m.type === "nav").map((m) => m.nav)).toEqual([{ kind: "artifact", artifact: "hulk", title: "Hulk mini game · Proof", v: 1, machine: null }]);
   expect(laptop.got).toEqual([]);
-  expect(r.result).toBe("It's on the person's screen now: the artifact \"Hulk mini game · Proof\".");
+  expect(JSON.parse(r.result)).toEqual({ ok: true, shown: "the artifact \"Hulk mini game · Proof\"" });
   expect(r.is_error).toBe(false);
   // another machine's space, by its machine's name
   const s = await tool({ what: "space", id: "home on the macbook pro" });
   expect(phone.got.filter((m) => m.type === "nav").pop().nav).toEqual({ kind: "space", place: "eliass-macbook-pro/h2" });
-  expect(s.result).toContain("on the person's screen now");
+  expect(JSON.parse(s.result).ok).toBe(true);
   c.end();
   agent = null;
 });
@@ -105,7 +105,8 @@ test("the screen tool: done on the page that started the call, the agent hears t
   agent.send(JSON.stringify({ type: "client_tool_call", client_tool_call: { tool_name: "screen", tool_call_id: "s1", parameters: { do: "scroll", direction: "down" } } }));
   await until(() => results.length > n);
   expect(phone.got.filter((m) => m.type === "nav").pop().nav).toMatchObject({ kind: "screen", do: "scroll", direction: "down" });
-  expect(results[n].result).toBe('Scrolled the messages down. What the screen shows now:\nScreen: the web app on a phone.\ne3 button "Close"');
+  // moving around: only that it worked, never the screen to read out (SHEP-83)
+  expect(JSON.parse(results[n].result)).toEqual({ ok: true, did: "Scrolled the messages down" });
   expect(results[n].is_error).toBe(false);
   c.end();
   agent = null;
