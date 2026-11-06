@@ -25,7 +25,7 @@ import { h_flex, v_flex, InputState, Input, VirtualListScrollHandle, v_virtual_l
 import { theme, props, setShared, closeOverlay, home, readTextFile, writeTextFile } from "herdr";
 import { modelSections, parsePicks, pickKey, withPin, withRecent, PICKS_FILE } from "./core/agents.js";
 
-const AGENTS = ["claude", "codex"];
+const AGENTS = ["claude", "codex", "cursor"];
 const LEVEL = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra", none: "None" };
 // Sizes, as the chat counts them for the overlay's height (mods/chat openPicker): the model list
 // scrolls past LIST; NOTE is a quiet line (another machine's; a new conversation's, two lines).

@@ -191,7 +191,8 @@ const readDefaults = async () => {
   try {
     let check: any = {};
     try { check = JSON.parse(readFileSync(join(HOME, ".herdr", "cli-check.json"), "utf8"))?.machines?.[""] ?? {}; } catch {}
-    settings.choices = SC.choicesFrom(await compat.agents!.ownDefaults(), { claude: check.claude !== "missing", codex: check.codex !== "missing" });
+    const defaults = await compat.agents!.ownDefaults();
+    settings.choices = SC.choicesFrom(defaults, { claude: check.claude !== "missing", codex: check.codex !== "missing", cursor: defaults.cursor.installed });
     model.rebuild();
   } catch {}
 };

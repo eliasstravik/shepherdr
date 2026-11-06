@@ -18,6 +18,18 @@ for p in "$pid" $(kids "$pid"); do
     [ -n "$id" ] || continue
     for f in "$HOME"/.claude/projects/*/"$id".jsonl; do [ -f "$f" ] && { echo "$f"; exit 0; }; done
     echo "pending"; exit 0
+  elif [ "$kind" = cursor ]; then
+    if [ -d "/proc/$p/fd" ]; then
+      files=$(for d in /proc/$p/fd/*; do readlink "$d"; done 2>/dev/null)
+    else
+      files=$(lsof -p "$p" -Fn 2>/dev/null | sed -n 's/^n//p')
+    fi
+    id=$(printf '%s\\n' "$files" | sed -n 's|.*/\\.cursor/chats/[^/]*/\\([0-9a-fA-F-]*\\)/store\\.db.*|\\1|p' | head -1)
+    [ -n "$id" ] || continue
+    for f in "$HOME"/.cursor/projects/*/agent-transcripts/"$id"/"$id".jsonl "$HOME"/.cursor/projects/*/agent-transcripts/"$id".jsonl; do
+      [ -f "$f" ] && { echo "$f"; exit 0; }
+    done
+    echo "pending"; exit 0
   else
     if [ -d "/proc/$p/fd" ]; then
       f=$(for d in /proc/$p/fd/*; do readlink "$d"; done 2>/dev/null | grep '/rollout-.*\\.jsonl$' | head -1)
@@ -87,7 +99,8 @@ BEGIN { pos = base; first = base; msgs = 0 }
     print off "\tJ\t" line
     next
   }
-  keep = 0
+  cursor = head ~ /^\{[[:space:]]*"role":[[:space:]]*"(user|assistant)"/
+  keep = cursor ? 1 : 0
   if (index(head, "\"isSidechain\":false")) {
     if (index(line, "\"type\":\"user\",\"message\"") || index(line, "\"type\":\"assistant\",\"uuid\"") || (index(line, "\"type\":\"attachment\",\"uuid\"") && index(line, "\"queued_command\""))) keep = 1
   } else if (index(head, "\"type\":\"response_item\"")) {
@@ -98,7 +111,7 @@ BEGIN { pos = base; first = base; msgs = 0 }
     keep = 1
   }
   if (!keep) next
-  if (index(line, "\"type\":\"text\"") || index(line, "\"role\":\"user\",\"content\":\"") || index(head, "\"type\":\"message\"")) msgs++
+  if (cursor || index(line, "\"type\":\"text\"") || index(line, "\"role\":\"user\",\"content\":\"") || index(head, "\"type\":\"message\"")) msgs++
   if (count) next
   gsub(/"data":"[^"]*"/, "\"data\":\"\"", line)
   gsub(/"image_url":"data:[^"]*"/, "\"image_url\":\"\"", line)
@@ -842,7 +855,15 @@ export class Conversation {
       }
       const l = parse(r.data);
       if (!l || typeof l !== "object") continue;
-      if (this.kind === "codex") this.codex(l, r.off); else this.claude(l, r.off);
+      if (this.kind === "cursor") {
+        if (!["user", "assistant"].includes(l.role)) continue;
+        // Cursor omits results: a new message retires old activity without inventing a result.
+        this.open.clear(); this.calls.clear(); this.waits.clear();
+        this.doing = null; this.waiting = false;
+        const content = (Array.isArray(l.message?.content) ? l.message.content : []).map((b, i) => b.type === "tool_use"
+          ? { ...b, id: b.id ?? `cursor-${r.off}-${i}`, name: b.name === "Shell" ? "Bash" : b.name, input: { ...b.input, ...(b.input?.path ? { file_path: b.input.path } : {}) } } : b);
+        this.claude({ ...l, type: l.role, uuid: `cursor-${r.off}`, message: { ...l.message, content } }, r.off);
+      } else if (this.kind === "codex") this.codex(l, r.off); else this.claude(l, r.off);
     }
   }
 

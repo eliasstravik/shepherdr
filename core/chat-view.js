@@ -220,7 +220,7 @@ export function sentTo(x, sender = (f) => f) {
 export function selfName({ assistant = false, task = null, kind = null } = {}) {
   if (assistant) return "Assistant";
   if (task) return task;
-  return { claude: "Claude", codex: "Codex" }[kind] ?? "Agent";
+  return { claude: "Claude", codex: "Codex", cursor: "Cursor" }[kind] ?? "Agent";
 }
 
 // A name's initial for its avatar: a task ref's letters ("SHEP-4" → "S"), else its first letter.
@@ -367,13 +367,13 @@ function parentAddr(k) {
   return m && !p.includes("/") ? `${m}/${p}` : p;
 }
 
-const AGENTS = { codex: "Codex", claude: "Claude Code", "claude-code": "Claude Code", pi: "Pi" };
+const AGENTS = { codex: "Codex", claude: "Claude Code", "claude-code": "Claude Code", pi: "Pi", cursor: "Cursor", "cursor-agent": "Cursor", agent: "Cursor" };
 // its CLI: its herdr.agent label, else what hc says runs in it, else its command's name
 export function subagentCli(k) {
   const a = k?.labels?.["herdr.agent"] ?? k?.agent ?? null;
   if (a) return String(a).replace(/^claude-code$/, "claude");
   const argv = k?.foreground?.argv ?? k?.argv ?? [];
-  const prog = argv.map((x) => String(x).split("/").pop()).find((x) => /^(claude|codex|pi)$/.test(x));
+  const prog = argv.map((x) => String(x).split("/").pop()).find((x) => /^(claude|codex|pi|cursor-agent|agent)$/.test(x));
   return prog ?? null;
 }
 

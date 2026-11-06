@@ -151,7 +151,7 @@ def cmd_allow(args):
 
 def resume_argv(argv, session):
     k = agent_key(argv)
-    if k == "claude":
+    if k in ("claude", "cursor"):
         return argv + ["--resume", session]
     if k == "codex":
         return [argv[0], "resume"] + argv[1:] + [session]
@@ -328,6 +328,9 @@ def closing_line(s, task, parent=None, argv=None):
                  f"it; carry on.")
     text += (f" Your herdr-task command is {ht}: write that full path each time (never the bare name), as one plain command; "
              f"then its {', '.join(OWN)} commands run without asking.")
+    if argv and agent_key(argv) == "cursor":
+        text = text.replace("then its " + ", ".join(OWN) + " commands run without asking.",
+                            "Cursor applies the selected permission mode to these commands too.")
     text += browser_line()
     if secret_path():
         text += (" Secrets (keys, tokens, passwords) are used by name, never seen: `herdr-secret ask NAME --why \"…\"` "

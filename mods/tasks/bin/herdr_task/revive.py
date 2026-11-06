@@ -41,13 +41,14 @@ CLAUDE_VALUE = {"--add-dir", "--mcp-config", "--append-system-prompt", "--system
                 "--disallowedTools", "--disallowed-tools", "--agent", "--agents", "--plugin-dir", "--fallback-model",
                 "--output-format", "--input-format", "--name", "--setting-sources", "--betas", "--debug-file",
                 "--model", "--effort", "--settings", "--permission-mode"}
+CURSOR_VALUE = {"--model", "--mode", "--sandbox", "--workspace", "--add-dir", "--plugin-dir", "--output-format", "--api-key", "--endpoint", "--header", "-H", "-e"}
 CODEX_VALUE = {"-c", "--config", "-m", "--model", "-p", "--profile", "-s", "--sandbox", "-a", "--ask-for-approval",
                "-C", "--cd", "--add-dir", "-i", "--image", "--enable", "--disable", "--local-provider", "--oss"}
 
 
 def kind_of(word):
     b = os.path.basename(str(word))
-    return b if b in ("claude", "codex") else None
+    return "cursor" if b in ("cursor-agent", "agent") else b if b in ("claude", "codex") else None
 
 
 def base_argv(argv):
@@ -61,7 +62,18 @@ def base_argv(argv):
     i = 0
     while i < len(rest):
         a = rest[i]
-        if kind == "claude":
+        if kind == "cursor":
+            if a == "--resume":
+                i += 2 if i + 1 < len(rest) and not rest[i + 1].startswith("-") else 1
+                continue
+            if a.startswith("--resume=") or a == "--continue":
+                i += 1
+                continue
+            if a in CURSOR_VALUE and i + 1 < len(rest):
+                out += [a, rest[i + 1]]
+                i += 2
+                continue
+        elif kind == "claude":
             if a in ("--resume", "-r", "--session-id"):
                 i += 2 if i + 1 < len(rest) and not rest[i + 1].startswith("-") else 1
                 continue
@@ -93,7 +105,7 @@ def base_argv(argv):
 def resume_argv(kind, argv, session, message=None):
     """argv (base_argv's) resuming `session`, with a first message when given."""
     tail = [message] if message else []
-    if kind == "claude":
+    if kind in ("claude", "cursor"):
         return [*argv, "--resume", session, *tail]
     return [argv[0], "resume", *argv[1:], session, *tail]
 

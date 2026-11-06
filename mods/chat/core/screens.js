@@ -119,12 +119,12 @@ export const pressKeys = (at, choice) => [...Array(Math.abs(choice - at)).fill(c
 const FIRST_LOOK = 6000;  // an agent this young may just be slow
 const RETRY = 10000;      // a pressed choice has this long to leave the screen before it's asked again
 export const KEEP = 6;    // closed cards kept per agent (their quiet lines)
-export const CLI = { claude: "Claude Code", codex: "Codex" };
+export const CLI = { claude: "Claude Code", codex: "Codex", cursor: "Cursor" };
 
 // Which CLI a terminal runs: { claude | codex } from its report or its program, else null.
 export function cliOf(k) {
   const a = String(k?.status?.app ?? k?.agent ?? k?.foreground?.name ?? "");
-  return /^claude/.test(a) ? "claude" : /^codex/.test(a) ? "codex" : null;
+  return /^claude/.test(a) ? "claude" : /^codex/.test(a) ? "codex" : /^(cursor|cursor-agent|agent)$/.test(a) ? "cursor" : null;
 }
 
 // Still before its session: live, no status reported, no turn taken. (hc ls's `status` is the report's state word,

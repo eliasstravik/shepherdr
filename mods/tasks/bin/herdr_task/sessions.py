@@ -1,5 +1,6 @@
 """Agent sessions: the Claude Code or Codex session a task's agent runs, so it can resume."""
 
+import glob
 import json
 import os
 import re
@@ -51,6 +52,12 @@ def session_of(pid):
         elif shutil.which("lsof"):
             files = [l[1:] for l in run(["lsof", "-p", p, "-Fn"]).stdout.split("\n") if l.startswith("n")]
         for f in files:
+            cursor = re.search(r"/\.cursor/chats/[^/]+/([0-9a-fA-F-]{36})/store\.db(?:-wal|-shm)?$", f)
+            if cursor:
+                sid = cursor.group(1)
+                base = os.path.join(HOME, ".cursor", "projects", "*", "agent-transcripts")
+                logs = glob.glob(os.path.join(base, sid, sid + ".jsonl")) + glob.glob(os.path.join(base, sid + ".jsonl"))
+                return sid, next(iter(logs), None)
             m = re.search(r"/rollout-.*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$", f)
             if m:
                 return m.group(1), f
@@ -134,7 +141,10 @@ def project_dir(folder):
 
 def log_by_session(kind, sid):
     import glob
-    if kind == "codex":
+    if kind == "cursor":
+        base = os.path.join(HOME, ".cursor", "projects", "*", "agent-transcripts")
+        found = glob.glob(os.path.join(base, sid, sid + ".jsonl")) + glob.glob(os.path.join(base, sid + ".jsonl"))
+    elif kind == "codex":
         found = glob.glob(os.path.join(HOME, ".codex", "sessions", "*", "*", "*", f"rollout-*{sid}.jsonl"))
     else:
         found = glob.glob(os.path.join(HOME, ".claude", "projects", "*", sid + ".jsonl"))
@@ -146,9 +156,11 @@ def find_log(a, ref, folders, taken=()):
     or None: by its session when it has one, else the earliest log of its kind that started from
     its launch on (until it ended) and whose first message names its task."""
     import glob
-    kind = "codex" if a.get("agent") == "codex" else "claude"
+    kind = "cursor" if a.get("agent") in ("cursor", "cursor-agent", "agent") else "codex" if a.get("agent") == "codex" else "claude"
     if a.get("session"):
         return log_by_session(kind, a["session"])
+    if kind == "cursor":
+        return None  # Cursor transcripts have no timestamps: never guess another session by folder.
     at = a.get("at")
     if not at:
         return None

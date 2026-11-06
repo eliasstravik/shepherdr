@@ -63,29 +63,29 @@ export class Agents {
     if (!t) throw new Error("That agent isn't here any more.");
     const machine = addr.includes("/") ? addr.split("/")[0] : null;
     const kind = kindOf(t) ?? reader?.kind ?? "claude";
-    const [claude, codex, have] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine),
-      sh(this.hub, 'for c in "$@"; do command -v "$c" >/dev/null 2>&1 && echo "$c"; done', ["agents", "claude", "codex"], machine).then((r: any) => new Set(String(r?.stdout ?? "").split("\n").filter(Boolean)), () => null)]);
-    const dflts: any = { claude, codex };
+    const [claude, codex, cursor, have] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine), this.defaults("cursor", machine),
+      sh(this.hub, 'for c in "$@"; do command -v "$c" >/dev/null 2>&1 && echo "$c"; done', ["agents", "claude", "codex", "cursor-agent"], machine).then((r: any) => new Set(String(r?.stdout ?? "").split("\n").filter(Boolean)), () => null)]);
+    const dflts: any = { claude, codex, cursor };
     let meta = reader?.conv?.meta ?? {};
     // a resumed conversation's log names the model it ran on before: until this process writes, its arguments say
     if (t.created_ms && meta.at && meta.at < t.created_ms) meta = { used: meta.used, window: meta.window };
     const c = current(kind, t.foreground?.argv ?? t.argv ?? [], meta, dflts[kind]);
     const row = rowFor(kind, c);
-    const menus = Object.fromEntries(["claude", "codex"].filter((k) => k === kind || !have || have.has(k)).map((k) => [k, menuFor(k, dflts[k], k === kind ? row : null)]));
+    const menus = Object.fromEntries(["claude", "codex", "cursor"].filter((k) => k === kind || !have || have.has(k === "cursor" ? "cursor-agent" : k)).map((k) => [k, menuFor(k, dflts[k], k === kind ? row : null)]));
     return { current: { agent: kind, model: row, effort: c.effort ?? null, fast: !!c.fast, perm: c.perm ?? null }, menus,
-      permDefault: { claude: claude?.mode ?? "manual", codex: "auto" }, picks: this.picks(), remote: machine && !t.labels?.["herdr.task"] ? machine : null };
+      permDefault: { claude: claude?.mode ?? "manual", codex: "auto", cursor: "auto" }, picks: this.picks(), remote: machine && !t.labels?.["herdr.task"] ? machine : null };
   }
 
   /** Each CLI's own settings here (Settings › Agents' model menu: core/settings.js choicesFrom). */
   async ownDefaults() {
-    const [claude, codex] = await Promise.all([this.defaults("claude", null), this.defaults("codex", null)]);
-    return { claude, codex };
+    const [claude, codex, cursor] = await Promise.all([this.defaults("claude", null), this.defaults("codex", null), this.defaults("cursor", null)]);
+    return { claude, codex, cursor };
   }
 
   /** What an unset role runs, in the window's words ("Opus 5.5 · 1M · High"): each CLI's own defaults here. */
   async defaultLines(): Promise<Record<string, string>> {
     const out: Record<string, string> = {};
-    for (const k of ["claude", "codex"]) {
+    for (const k of ["claude", "codex", "cursor"]) {
       const d: any = await this.defaults(k, null).catch(() => null);
       if (d) out[k] = line({ agent: k, model: d.model, effort: d.effort ?? d.per?.[String(d.model ?? "").replace(/\[1m\]$/, "")] ?? null, fast: d.fast }).split(" · ").slice(1).join(" · ");
     }
@@ -94,9 +94,9 @@ export class Agents {
 
   /** What each CLI offers on a machine (null: here), as the restart sheet lists them. */
   async choices(machine: string | null) {
-    const [claude, codex] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine)]);
-    const dflt: any = { claude, codex };
-    return ["claude", "codex"].map((k) => {
+    const [claude, codex, cursor] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine), this.defaults("cursor", machine)]);
+    const dflt: any = { claude, codex, cursor };
+    return ["claude", "codex", "cursor"].filter((k) => k !== "cursor" || cursor.installed).map((k) => {
       const m = menuFor(k, dflt[k], null);
       // its permission modes, and the one a new agent gets unless picked (the CLI's own: Claude Code's settings mode)
       return { kind: k, name: NAMES[k], models: m.models.map((x: any) => ({ id: x.id, label: x.name, efforts: x.efforts, ...(x.defaultEffort ? { defaultEffort: x.defaultEffort } : {}) })),
@@ -110,10 +110,10 @@ export class Agents {
     if (!t) throw new Error("That agent isn't here any more.");
     const machine = addr.includes("/") ? addr.split("/")[0] : null;
     const kind = kindOf(t) ?? "claude";
-    const [claude, codex] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine)]);
-    const dflt: any = { claude, codex };
+    const [claude, codex, cursor] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine), this.defaults("cursor", machine)]);
+    const dflt: any = { claude, codex, cursor };
     const c = current(kind, t.foreground?.argv ?? t.argv ?? [], reader?.conv?.meta ?? {}, dflt[kind]);
-    const clis = ["claude", "codex"].map((k) => {
+    const clis = ["claude", "codex", "cursor"].filter((k) => k === kind || k !== "cursor" || cursor.installed).map((k) => {
       const m = menuFor(k, dflt[k], k === kind ? c.model : null);
       return { kind: k, name: NAMES[k], models: m.models.map((x: any) => ({ id: x.id, label: x.name, efforts: x.efforts, ...(x.defaultEffort ? { defaultEffort: x.defaultEffort } : {}) })),
         speeds: m.models.some((x: any) => x.fast) ? ["normal", "fast"] : ["normal"] };
@@ -128,7 +128,7 @@ export class Agents {
     if (!t || t.state !== "live") throw new Error("That agent isn't running.");
     const kind = kindOf(t) ?? "claude";
     const old = { agent: kind, argv: t.foreground?.argv ?? t.argv ?? [], session: sessionOf(kind, reader?.path ?? null) };
-    const built = argvFor({ agent: pick.kind, model: pick.model, effort: pick.effort, fast: pick.speed === "fast", perm: pick.perm ?? current(kind, old.argv, {}, {}).perm }, old);
+    const built = argvFor({ agent: pick.kind, model: pick.model, effort: pick.effort, fast: pick.speed === "fast", perm: pick.perm ?? (pick.kind === kind ? current(kind, old.argv, {}, {}).perm : pick.kind === "claude" ? "manual" : "auto") }, old);
     const pane = t.labels?.["herdr.chat"] ?? "";
     const task = t.labels?.["herdr.task"];
     if (task) {

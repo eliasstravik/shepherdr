@@ -10,7 +10,7 @@ from .base import Fail, HOME, MAX_RUNNING
 
 
 # What each agent key starts by default. Unknown keys run as themselves; --argv overrides.
-AGENTS = {"claude": ["claude"], "codex": ["codex", "--no-daemon"]}
+AGENTS = {"claude": ["claude"], "codex": ["codex", "--no-daemon"], "cursor": ["cursor-agent"]}
 
 
 # ---- the person's settings ------------------------------------------------------------------
@@ -176,6 +176,13 @@ def argv_for(pick):
             a.append("--dangerously-skip-permissions")
         elif perm:
             a += ["--permission-mode", "default" if perm == "manual" else perm]
+        return a
+    if agent == "cursor":
+        if pick.get("effort") or pick.get("fast"):
+            raise Fail("Choose Cursor reasoning and speed through its model ID.")
+        a = ["cursor-agent", "--model", pick.get("model") or "auto"]
+        perm = pick.get("perm")
+        a += ["--force"] if perm == "full" else ["--mode", "ask"] if perm == "read-only" else ["--auto-review"]
         return a
     if agent == "codex":
         a = ["codex", "--no-daemon"]
@@ -467,7 +474,8 @@ def agent_argv(key, argv_json=None):
 
 
 def agent_key(argv):
-    return os.path.basename(argv[0])
+    name = os.path.basename(argv[0])
+    return "cursor" if name in ("cursor-agent", "agent") else name
 
 
 def bare(i):

@@ -69,7 +69,7 @@ const PAGE = 200;
 const KEEP = 2000;
 // The conversation's width at most, in px: lines stay readable in a wide pane.
 const COLUMN = 760;
-const KINDS = { "claude-code": "claude", claude: "claude", codex: "codex" };
+const KINDS = { "claude-code": "claude", claude: "claude", codex: "codex", cursor: "cursor", "cursor-agent": "cursor", agent: "cursor" };
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 // The role templates' folder on the machine a command runs on (sh -c prefix: $dir).
 const TEMPLATE = 'dir="$HOME/.config/herdr-core/templates"; ';
@@ -922,7 +922,7 @@ export default class Chat extends View {
     if (this.lostTried.has(addr)) return false;
     this.lostTried.add(addr);
     if (!t) { try { t = JSON.parse((await hc(["get", addr, "--json"])).stdout || "null"); } catch {} }
-    const kind = cliOf({ agent: (t?.argv ?? []).map((a) => String(a).split("/").pop()).find((a) => /^(claude|codex)$/.test(a)) });
+    const kind = cliOf({ agent: (t?.argv ?? []).map((a) => String(a).split("/").pop()).find((a) => /^(claude|codex|cursor-agent|agent)$/.test(a)) });
     const fresh = kind ? agent.freshArgv(kind, t?.argv) : null;
     if (!fresh) return false;
     if (t.state !== "live" && (t.exit_code ?? 1) === 0) return false;
@@ -2142,6 +2142,7 @@ export default class Chat extends View {
 
   // A copy of this conversation, continued in a new tab of this space (the CLI's own fork).
   fork(cx) {
+    if (this.kind === "cursor") { toast({ title: "Can’t fork", body: "Cursor CLI does not support copying a conversation.", level: "info" }); return; }
     const session = agent.sessionOf(this.kind, this.path);
     if (!session) { toast({ title: "Can't fork", body: "This conversation has no saved session.", level: "info" }); return; }
     const tab = panes().find((p) => p.pane === this.myPane())?.tab;
@@ -2493,12 +2494,12 @@ export default class Chat extends View {
       try {
         const stale = !this.pickCache || Date.now() - this.pickCache.at > 60000 || this.pickCache.machine !== this.machine;
         if (stale) {
-          const [claude, codex, known] = await Promise.all([agent.defaults("claude", this.machine), agent.defaults("codex", this.machine),
+          const [claude, codex, cursor, known] = await Promise.all([agent.defaults("claude", this.machine), agent.defaults("codex", this.machine), agent.defaults("cursor", this.machine),
             knownAgents({ on: this.machine }).catch(() => [])]);
-          const prog = (key) => known.find((a) => a.key === key || (a.run ?? [])[0] === key);
-          this.pickCache = { at: Date.now(), machine: this.machine, dflts: { claude, codex },
-            icons: Object.fromEntries(["claude", "codex"].map((k) => [k, { icon: prog(k)?.icon ?? null, tint: Boolean(prog(k)?.tint) }])),
-            installed: Object.fromEntries(["claude", "codex"].map((k) => [k, prog(k) ? prog(k).installed !== false : true])) };
+          const prog = (key) => known.find((a) => a.key === key || (a.run ?? [])[0] === (key === "cursor" ? "cursor-agent" : key));
+          this.pickCache = { at: Date.now(), machine: this.machine, dflts: { claude, codex, cursor },
+            icons: Object.fromEntries(["claude", "codex", "cursor"].map((k) => [k, { icon: prog(k)?.icon ?? null, tint: Boolean(prog(k)?.tint) }])),
+            installed: Object.fromEntries(["claude", "codex", "cursor"].map((k) => [k, prog(k) ? prog(k).installed !== false : k === "cursor" ? cursor.installed : true])) };
         }
         const { dflts, icons, installed } = this.pickCache;
         if (this.kind) dflts[this.kind] = this.dflt ?? dflts[this.kind];
@@ -2506,7 +2507,7 @@ export default class Chat extends View {
         const remote = this.machine && !this.t?.labels?.["herdr.task"] ? this.machine : null;
         const currentRow = agent.rowFor(c.agent, c);
         // Installed agents only (and always the one running).
-        const menus = Object.fromEntries(["claude", "codex"].filter((k) => k === c.agent || installed[k])
+        const menus = Object.fromEntries(["claude", "codex", "cursor"].filter((k) => k === c.agent || installed[k])
           .map((k) => [k, agent.menuFor(k, dflts[k], k === c.agent ? currentRow : null)]));
         // As tall as the menu can get (chat-models' sizes): border and padding, another machine's
         // line, agent tabs, search, the list (it scrolls past 8 rows), separator, Reasoning header
@@ -2516,7 +2517,7 @@ export default class Chat extends View {
           at: at ? { x: Math.max(8, at.x - W + 90), y: Math.max(8, at.y - H - 10) } : "pointer",
           props: { pane: this.pickKey(), remote, width: W, height: H, select: name ? findModel(menus, name) : null,
             current: { agent: c.agent, model: currentRow, effort: c.effort ?? null, fast: c.fast, perm: c.perm ?? null },
-            menus, icons, permDefault: { claude: dflts.claude?.mode ?? "manual", codex: "auto" } } });
+            menus, icons, permDefault: { claude: dflts.claude?.mode ?? "manual", codex: "auto", cursor: "auto" } } });
       } finally {
         this.picking = false;
         cx.notify();

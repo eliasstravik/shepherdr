@@ -322,6 +322,7 @@ class SessionNote(unittest.TestCase):
         if not terminal:
             env.pop("HC_TERMINAL_ID")
         out = subprocess.run(["sh", os.path.join(ROOT, "mods", "chat", "session-note.sh")], capture_output=True, text=True, env=env)
+        self.assertEqual(out.returncode, 0, out.stderr)
         if not terminal:
             return out.stdout, os.path.exists(log)
         ctx = json.loads(out.stdout)["hookSpecificOutput"]["additionalContext"]
@@ -329,6 +330,11 @@ class SessionNote(unittest.TestCase):
             return ctx, ""
         with open(log) as f:
             return ctx, f.read()
+
+    def test_hook_parses_with_system_shell(self):
+        import subprocess
+        out = subprocess.run(["/bin/sh", "-n", J("mods", "chat", "session-note.sh")], capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
 
     def test_an_assistant_gets_its_reactions_words(self):
         ctx, asked = self.run_hook("coordinator")

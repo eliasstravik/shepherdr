@@ -2,7 +2,7 @@
 // rules both the window's model menu (lib/agent.js, mods/chat-models) and the web app's use. Reading an agent's own
 // settings and restarting it run where each side runs commands (lib/agent.js, service/agents.ts).
 // Shared core: the source is core/agents.js; bin/sync-shared copies it into the mods in lib/COPIES.
-export const NAMES = { claude: "Claude Code", codex: "Codex" };
+export const NAMES = { claude: "Claude Code", codex: "Codex", cursor: "Cursor" };
 
 // Claude Code's current models, as its /model menu offers them. `id` is what --model gets;
 // `match` the names a running agent may report for it.
@@ -17,6 +17,7 @@ const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 // Permission modes as each CLI has them (Claude: --permission-mode, or
 // --dangerously-skip-permissions for full access; Codex: its sandbox and approvals).
 const PERMS = {
+  cursor: [{ id: "auto", label: "Auto review" }, { id: "read-only", label: "Read only" }, { id: "full", label: "Full access" }],
   claude: [{ id: "manual", label: "Ask" }, { id: "auto", label: "Auto" }, { id: "acceptEdits", label: "Accept edits" },
     { id: "plan", label: "Plan" }, { id: "bypassPermissions", label: "Full access" }],
   codex: [{ id: "read-only", label: "Read only" }, { id: "auto", label: "Auto" }, { id: "full", label: "Full access" }],
@@ -59,6 +60,17 @@ export const DEFAULTS = `
 if [ "$1" = claude ]; then
   f="$HOME/.claude/settings.json"
   command -v jq >/dev/null && [ -f "$f" ] && jq -r '"model\\t\\(.model // "")", "effort\\t\\(.effortLevel // "")", "fast\\t\\(if .fastMode == true then "on" else "" end)", "per\\t\\(.modelSettings // {} | with_entries(.value |= (.effortLevel // null)) | tojson)", "mode\\t\\(.permissions.defaultMode // "")"' "$f" 2>/dev/null
+elif [ "$1" = cursor ]; then
+  command -v cursor-agent >/dev/null 2>&1 || exit 0
+  echo 'installed	true'
+  f="$HOME/.cursor/cli-config.json"
+  command -v jq >/dev/null && [ -f "$f" ] && jq -r '"model\\t\\(.model | if type == "object" then (.displayModelId // .modelId) else . end)", "mode\\t\\(.approvalMode // "")"' "$f" 2>/dev/null
+  python3 -c 'import subprocess
+try:
+ r=subprocess.run(["cursor-agent", "--list-models"], capture_output=True, text=True, timeout=8)
+ for line in r.stdout.splitlines():
+  if " - " in line: print("cursor-model\\t" + line)
+except (OSError, subprocess.TimeoutExpired): pass'
 else
   f="$HOME/.codex/config.toml"
   for k in model model_reasoning_effort service_tier sandbox_mode approval_policy; do
@@ -79,6 +91,14 @@ export function parseDefaults(kind, stdout) {
   for (const line of (stdout ?? "").split("\n")) {
     const t = line.indexOf("\t");
     if (t > 0) out[line.slice(0, t)] = line.slice(t + 1);
+  }
+  if (kind === "cursor") {
+    const models = [{ id: "auto", label: "Auto" }];
+    for (const line of (stdout ?? "").split("\n")) {
+      const m = /^cursor-model\t([\w.\[\]=,/-]+) - (.+)$/.exec(line.replace(/\x1b\[[0-9;]*m/g, ""));
+      if (m && !models.some((x) => x.id === m[1])) models.push({ id: m[1], label: m[2].replace(/ \((?:current|default|current, default)\)$/, "") });
+    }
+    return { installed: out.installed === "true", model: out.model && !["null", "default"].includes(out.model) ? out.model : "auto", mode: out.mode, models };
   }
   let models = null;
   if (out.models) {
@@ -115,6 +135,15 @@ export function current(kind, argv, meta, dflt) {
     return { agent: "claude", model: meta.model ?? alias, alias, effort: meta.effort ?? flag(argv, "--effort") ?? per ?? dflt.effort,
       fast: Boolean(fast), perm: perm === "default" ? "manual" : perm, used: meta.used ?? null, window: meta.window ?? (big ? 1000000 : 200000) };
   }
+  if (kind === "cursor") {
+    const model = flag(argv, "--model") ?? dflt.model ?? "auto";
+    const mode = flag(argv, "--mode");
+    const perm = argv.includes("--plan") || ["ask", "plan"].includes(mode) ? "read-only"
+      : argv.some((a) => ["--force", "-f", "--yolo"].includes(a)) ? "full"
+      : argv.includes("--auto-review") ? "auto" : dflt.mode === "unrestricted" ? "full" : "auto";
+    return { agent: "cursor", model, label: dflt.models?.find((m) => m.id === model)?.label ?? model,
+      effort: null, fast: false, perm, used: null, window: null };
+  }
   const o = overrides(argv);
   const tier = o.service_tier;
   const model = meta.model ?? flag(argv, "-m", "--model") ?? o.model ?? dflt.model;
@@ -149,6 +178,12 @@ export function contextWords(c) {
 // offers (Codex: its own models_cache.json; Claude Code: its /model menu), the picker searches them.
 // `dflt` is that agent's settings (defaults()); `current` its running model, kept in the list.
 export function menuFor(agent, dflt, current = null) {
+  if (agent === "cursor") {
+    const all = dflt?.models?.length ? dflt.models : [{ id: "auto", label: "Auto" }];
+    const models = all.map((m) => ({ id: m.id, name: m.label, efforts: [], defaultEffort: null, fast: false }));
+    if (current && !models.some((m) => m.id === current)) models.unshift(typedModel(agent, current));
+    return { name: NAMES.cursor, perms: PERMS.cursor, models };
+  }
   if (agent === "claude") {
     const models = CLAUDE_MODELS.map((m) => ({ id: m.id, name: m.name, efforts: CLAUDE_EFFORTS,
       defaultEffort: dflt?.per?.[m.match[1].replace(/\[1m\]$/, "")] ?? dflt?.effort ?? null, fast: m.id.startsWith("opus") }));
@@ -164,7 +199,7 @@ export function menuFor(agent, dflt, current = null) {
 
 // The levels a model typed by id gets: its agent's usual ones.
 export function typedModel(agent, id) {
-  return { id, name: agent === "claude" ? modelName(id) : id, efforts: agent === "claude" ? CLAUDE_EFFORTS : ["low", "medium", "high", "xhigh"], defaultEffort: null, fast: false, typed: true };
+  return { id, name: agent === "claude" ? modelName(id) : id, efforts: agent === "cursor" ? [] : agent === "claude" ? CLAUDE_EFFORTS : ["low", "medium", "high", "xhigh"], defaultEffort: null, fast: false, typed: true };
 }
 
 // The person's picks in the model menus (the window's and the web's alike), in PICKS_FILE under the
@@ -258,6 +293,9 @@ export function rowFor(agent, c) {
 }
 
 // Flags that are about what to resume, which model, effort or speed: set again by a restart.
+const CURSOR_VALUE = new Set(["--model", "--mode", "--sandbox", "--workspace", "--add-dir", "--plugin-dir", "--output-format", "--api-key", "--endpoint", "--header", "-H", "-e"]);
+const CURSOR_DROP = new Set(["--model", "--mode", "--resume"]);
+const CURSOR_BARE = new Set(["--continue", "--plan", "--force", "-f", "--yolo", "--auto-review"]);
 const CLAUDE_DROP = new Set(["--model", "--effort", "--settings", "--session-id", "--resume", "-r", "--permission-mode"]);
 const CLAUDE_BARE = new Set(["--continue", "-c", "--fork-session", "--dangerously-skip-permissions"]);
 // Flags whose next word is their value (so it isn't taken for a first message).
@@ -274,7 +312,13 @@ function kept(kind, argv) {
   const rest = argv.slice(1);
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
-    if (kind === "claude") {
+    if (kind === "cursor") {
+      if (CURSOR_BARE.has(a)) continue;
+      if (CURSOR_DROP.has(a)) { if (rest[i + 1] && !rest[i + 1].startsWith("-")) i++; continue; }
+      if ([...CURSOR_DROP].some((f) => a.startsWith(f + "="))) continue;
+      if (CURSOR_VALUE.has(a)) { out.push(a, rest[++i]); continue; }
+      if (a.startsWith("-")) out.push(a);
+    } else if (kind === "claude") {
       if (CLAUDE_BARE.has(a)) continue;
       if (CLAUDE_DROP.has(a)) { if (rest[i + 1] && !rest[i + 1].startsWith("-")) i++; continue; }
       if ([...CLAUDE_DROP].some((f) => a.startsWith(f + "="))) continue;
@@ -296,13 +340,17 @@ function kept(kind, argv) {
 // first message), or null when argv resumed none: for a fresh start once that session is gone.
 export function freshArgv(kind, argv) {
   argv = argv ?? [];
-  const at = argv.findIndex((a, i) => (i === 0 || !a.startsWith("-")) && /^(claude|codex)$/.test(String(a).split("/").pop()));
+  const at = argv.findIndex((a, i) => (i === 0 || !a.startsWith("-")) && /^(claude|codex|cursor-agent|agent)$/.test(String(a).split("/").pop()));
   if (at < 0) return null;
   const rest = argv.slice(at + 1), out = [argv[at]];
   let resumed = false;
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
-    if (kind === "claude") {
+    if (kind === "cursor") {
+      if (a === "--resume") { resumed = true; if (rest[i + 1] && !rest[i + 1].startsWith("-")) i++; continue; }
+      if (a.startsWith("--resume=") || a === "--continue") { resumed = true; continue; }
+      if (CURSOR_VALUE.has(a)) { out.push(a, rest[++i]); continue; }
+    } else if (kind === "claude") {
       if (a === "--resume" || a === "-r" || a === "--session-id") { resumed ||= a !== "--session-id"; if (rest[i + 1] && !rest[i + 1].startsWith("-")) i++; continue; }
       if (/^--(resume|session-id)=/.test(a)) { resumed ||= a.startsWith("--resume"); continue; }
       if (a === "--continue" || a === "-c") { resumed = true; continue; }
@@ -334,6 +382,15 @@ export function argvFor(pick, old) {
     if (same && old.session) return { argv: [...a, "--resume", old.session], resume: true, base: a };
     return { argv: a, resume: false, base: a };
   }
+  if (pick.agent === "cursor") {
+    if (pick.effort || pick.fast) throw new Error("Choose Cursor reasoning and speed through its model ID.");
+    const a = ["cursor-agent", ...flags, "--model", pick.model || "auto"];
+    if (pick.perm === "full") a.push("--force");
+    else if (pick.perm === "read-only") a.push("--mode", "ask");
+    else a.push("--auto-review");
+    return { argv: same && old.session ? [...a, "--resume", old.session] : a, resume: Boolean(same && old.session), base: a };
+  }
+  if (pick.agent !== "codex") throw new Error("Unknown agent: " + pick.agent);
   // Codex runs its commands outside hc without --no-daemon (as herdr-task and restart.sh add).
   const a = [...flags, "--no-daemon"];
   if (pick.model) a.push("-m", pick.model);
@@ -355,6 +412,7 @@ export function sessionOf(kind, path) {
 
 // A copy of the conversation in a new tab beside this one, through the CLI's own fork.
 export function forkArgv(kind, argv, session) {
+  if (kind === "cursor") return null;
   argv = argv ?? [];
   // The same model, effort and speed as the original.
   const same = kind === "claude"

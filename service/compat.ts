@@ -19,7 +19,7 @@ const { SCREEN } = SCc as any;
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 const APP_HOME = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
-const CLI_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex" };
+const CLI_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex", cursor: "Cursor" };
 import * as MNc from "../core/menus.js";
 import * as APc from "../core/autopilot.js";
 const { machineLabel } = MNc as any;
@@ -223,7 +223,7 @@ export class Compat {
   machineStats: ((m: string | null) => any) | null = null;
 
   /** The model menu and restarts (service/agents.ts), set by main. */
-  agents: { info(addr: string, reader: any): Promise<unknown>; restart(addr: string, reader: any, pick: any): Promise<string>; choices(machine: string | null): Promise<unknown>; ownDefaults(): Promise<{ claude: unknown; codex: unknown }> } | null = null;
+  agents: { info(addr: string, reader: any): Promise<unknown>; restart(addr: string, reader: any, pick: any): Promise<string>; choices(machine: string | null): Promise<unknown>; ownDefaults(): Promise<{ claude: unknown; codex: unknown; cursor: { installed: boolean } }> } | null = null;
 
   /** Agents' secret asks (service/secrets.ts), set by main. */
   secrets: { asks(): { address: string; name: string; why: string }[] } | null = null;
@@ -679,6 +679,6 @@ export class Compat {
       : reader.state === "missing" && reader.pinned ? "gone"
       : reader.state === "none" || reader.state === "missing" ? ((t && t.state !== "live") || !t ? "ended" : kind ? "none" : "unsupported")
       : !reader.pinned && (!t || t.state !== "live") && !items.length ? "ended" : null;
-    return { key, messages, ...head, ...under, ...(note ? { note } : {}), ...(notice ? { notice } : {}), ...(agent ? { agent } : {}), ...(jobs.length ? { jobs } : {}), working: st === "working", cli: reader.kind === "codex" ? "codex" : "claude", ...(reader.pinned || (t && t.state !== "live") ? { finished: true } : {}) };
+    return { key, messages, ...head, ...under, ...(note ? { note } : {}), ...(notice ? { notice } : {}), ...(agent ? { agent } : {}), ...(jobs.length ? { jobs } : {}), working: st === "working", cli: reader.kind ?? "claude", ...(reader.pinned || (t && t.state !== "live") ? { finished: true } : {}) };
   }
 }

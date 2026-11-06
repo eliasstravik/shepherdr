@@ -268,3 +268,14 @@ test("Feedback offers and its repo", () => {
   s.set("agents.feedback_repo", "", "all");
   expect(JSON.parse(readFileSync(file, "utf8")).everywhere?.agents).toBeUndefined();
 });
+
+
+test("Cursor roles preserve their own model and permissions without pretending to accept effort flags", () => {
+  const s = new Settings(); s.start();
+  const scope = { id: "cursor-test", name: "Cursor", machine: null, folder: "/cursor-test" };
+  const pick = { agent: "cursor", model: "auto", perm: "read-only" };
+  s.set("role.worker", JSON.stringify(pick), scope.id, scope);
+  expect(JSON.parse(readFileSync(file, "utf8")).spaces[scope.id].worker).toEqual({ ...pick, effort: null, fast: false });
+  expect(() => s.set("role.worker", JSON.stringify({ ...pick, effort: "high" }), scope.id, scope)).toThrow("model ID");
+  expect(() => s.set("role.worker", JSON.stringify({ ...pick, perm: "bypassPermissions" }), scope.id, scope)).toThrow("permission");
+});

@@ -83,7 +83,7 @@ export class AgentWatch {
     this.tried.add(addr);
     let t: any = null;
     try { t = JSON.parse((await this.hc(["get", addr, "--json"])).stdout || "null"); } catch {}
-    const kind = cliOf({ agent: (t?.argv ?? []).map((a: string) => String(a).split("/").pop()).find((a: string) => /^(claude|codex)$/.test(a)) });
+    const kind = cliOf({ agent: (t?.argv ?? []).map((a: string) => String(a).split("/").pop()).find((a: string) => /^(claude|codex|cursor-agent|agent)$/.test(a)) });
     const fresh = kind ? freshArgv(kind, t?.argv) : null;
     if (!fresh || !t) return;
     if (t.state !== "live" && (t.exit_code ?? 1) === 0) return;

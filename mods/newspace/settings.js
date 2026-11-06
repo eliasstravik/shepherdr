@@ -28,12 +28,12 @@ const LAST = () => `${appHome()}/data/coordinator-last.json`;
 // What the agents on this machine (or `machine`) offer: { menus, icons, installed, permDefault,
 // defaults } (defaults: the CLI's own, for a first time).
 export async function loadChoices(machine = null) {
-  const [claude, codex, known] = await Promise.all([agent.defaults("claude", machine), agent.defaults("codex", machine),
+  const [claude, codex, cursor, known] = await Promise.all([agent.defaults("claude", machine), agent.defaults("codex", machine), agent.defaults("cursor", machine),
     knownAgents({ on: machine }).catch(() => [])]);
-  const prog = (k) => known.find((a) => a.key === k || (a.run ?? [])[0] === k);
-  const installed = Object.fromEntries(["claude", "codex"].map((k) => [k, prog(k) ? prog(k).installed !== false : k === "claude"]));
-  const icons = Object.fromEntries(["claude", "codex"].map((k) => [k, { icon: prog(k)?.icon ?? null, tint: Boolean(prog(k)?.tint) }]));
-  const { menus, permDefault, defaults } = choicesFrom({ claude, codex }, installed);
+  const prog = (k) => known.find((a) => a.key === k || (a.run ?? [])[0] === (k === "cursor" ? "cursor-agent" : k));
+  const installed = Object.fromEntries(["claude", "codex", "cursor"].map((k) => [k, prog(k) ? prog(k).installed !== false : k === "cursor" ? cursor.installed : k === "claude"]));
+  const icons = Object.fromEntries(["claude", "codex", "cursor"].map((k) => [k, { icon: prog(k)?.icon ?? null, tint: Boolean(prog(k)?.tint) }]));
+  const { menus, permDefault, defaults } = choicesFrom({ claude, codex, cursor }, installed);
   return { menus, icons, installed, permDefault, defaults };
 }
 

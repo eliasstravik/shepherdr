@@ -134,10 +134,10 @@ async function knownAgents(hub: Hub, compat: Compat, machine: string | null): Pr
   if (Array.isArray(s?.agents) && s.agents.some((a: any) => Array.isArray(a.run)))
     return [...s.agents.map((a: any) => ({ kind: a.key, name: a.name, installed: true, run: a.run })),
       ...(Array.isArray(s.others) ? s.others.map((a: any) => ({ kind: a.key, name: a.name, installed: false })) : [])];
-  const AGENTS: Record<string, { name: string; run: string[] }> = { claude: { name: "Claude Code", run: ["claude"] }, codex: { name: "Codex", run: ["codex"] } };
-  const r = await exec(hub, ["sh", "-c", 'for c in "$@"; do command -v "$c" >/dev/null 2>&1 && echo "$c"; done', "agents", ...Object.keys(AGENTS)], machine).catch(() => null);
+  const AGENTS: Record<string, { name: string; run: string[] }> = { claude: { name: "Claude Code", run: ["claude"] }, codex: { name: "Codex", run: ["codex"] }, cursor: { name: "Cursor", run: ["cursor-agent"] } };
+  const r = await exec(hub, ["sh", "-c", 'for c in "$@"; do command -v "$c" >/dev/null 2>&1 && echo "$c"; done', "agents", ...Object.values(AGENTS).map((a) => a.run[0])], machine).catch(() => null);
   const have = new Set((r?.stdout ?? "").split("\n").filter(Boolean));
-  return Object.entries(AGENTS).map(([kind, a]) => ({ kind, name: a.name, installed: have.has(kind), run: a.run }));
+  return Object.entries(AGENTS).map(([kind, a]) => ({ kind, name: a.name, installed: have.has(a.run[0]), run: a.run }));
 }
 
 export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
@@ -279,7 +279,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim().split("\n").pop() || "Autopilot didn't change.");
     return { ok: true };
   }
-  if (b?.type === "model-pin" && compat.agents && ["claude", "codex"].includes(b.agent) && typeof b.model === "string" && /^[\w.\[\]-]{1,60}$/.test(b.model)) {
+  if (b?.type === "model-pin" && compat.agents && ["claude", "codex", "cursor"].includes(b.agent) && typeof b.model === "string" && /^[\w.\[\]=,/-]{1,160}$/.test(b.model)) {
     // the model menu's star: pinned to the top of its agent's list (core/agents.js PICKS_FILE, as the window's)
     return { ok: true, picks: (compat.agents as any).pin(b.agent, b.model) };
   }
@@ -289,8 +289,8 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const a = chat(b.chat), reader = compat.reader?.(a);
     if (b.type === "restart-info") return compat.agents.info(a, reader);
     if (b.type === "model-menu") return { ok: true, menu: await (compat.agents as any).menu(a, reader) };
-    if (!["claude", "codex"].includes(b.kind)) throw new Error("Pick Claude Code or Codex.");
-    const opt = (v: unknown) => (typeof v === "string" && /^[\w.\[\]-]{1,60}$/.test(v) ? v : undefined);
+    if (!["claude", "codex", "cursor"].includes(b.kind)) throw new Error("Pick Claude Code, Codex or Cursor.");
+    const opt = (v: unknown) => (typeof v === "string" && /^[\w.\[\]=,/-]{1,160}$/.test(v) ? v : undefined);
     const next = await compat.agents.restart(a, reader, { kind: b.kind, model: opt(b.model), effort: opt(b.effort), speed: opt(b.speed), perm: opt(b.perm) });
     return { ok: true, terminal: next };
   }
@@ -454,6 +454,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     // a copy of the conversation in a new tab of its space, through the CLI's own fork (the window makes the tab)
     const a = chat(b.chat), t: any = hub.terminals.get(a), r = compat.reader?.(a);
     const kind = kindOf(t) ?? "claude", session = sessionOf(kind, r?.path ?? null);
+    if (kind === "cursor") throw new Error("Cursor CLI does not support copying a conversation.");
     if (!session) throw new Error("This conversation has no saved session to fork.");
     const space = ["herdr.space", "herdr.task.space", "herdr.coordinator.space"].map((k) => t?.labels?.[k]).find(Boolean);
     const res = await run(["herdr-app", "do", "tab.new", ...(space ? ["--space", space] : []), "--folder", t?.foreground?.cwd ?? t?.cwd ?? "", "--argv", JSON.stringify(forkArgv(kind, t?.foreground?.argv ?? t?.argv ?? [], session))]);

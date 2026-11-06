@@ -33,7 +33,8 @@ if [ "$app" = claude-code ] && [ -n "$pid" ]; then
   sid=$(jq -r '.sessionId // empty' "$HOME/.claude/sessions/$pid.json" 2>/dev/null)
   [ -n "$sid" ] && log=$(find "$HOME/.claude/projects" -name "$sid.jsonl" 2>/dev/null | head -1)
 fi
-if [ -z "$log" ] && [ -n "$created" ]; then
+# Cursor transcripts have no folder/timestamp metadata; its screen is the safe handoff.
+if [ -z "$log" ] && [ -n "$created" ] && [[ "$app" != cursor && "$app" != cursor-agent && "$app" != agent ]]; then
   log=$(find "$HOME/.claude/projects" "$HOME/.codex/sessions" "$HOME/.pi/agent/sessions" "$HOME/.local/share/opencode" \
       -type f \( -name '*.jsonl' -o -name '*.json' \) -newermt "@$((created / 1000))" 2>/dev/null \
     | xargs -r grep -l -F "\"$cwd\"" 2>/dev/null | xargs -r ls -t 2>/dev/null | head -1)

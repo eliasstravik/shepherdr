@@ -9,7 +9,7 @@ import { BgJobs } from "./bg-jobs.js";
 
 export const PAGE = 200;
 export const KEEP = 2000;
-export const KINDS = { "claude-code": "claude", claude: "claude", codex: "codex" };
+export const KINDS = { "claude-code": "claude", claude: "claude", codex: "codex", cursor: "cursor", "cursor-agent": "cursor", agent: "cursor" };
 
 // The CLI a terminal runs, as the chat knows them ("claude", "codex"), else null.
 export const kindOf = (t) => KINDS[t?.status?.app] ?? KINDS[t?.foreground?.name] ?? null;
