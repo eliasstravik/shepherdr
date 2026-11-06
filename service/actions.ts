@@ -5,8 +5,9 @@ import type { Hub } from "./hub.ts";
 import { join } from "node:path";
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { sendBody, messageBody, refusal, reactionLine, mentionedIn, taskTag } from "../core/send.js";
+import { sendBody, steerNow, messageBody, refusal, reactionLine, mentionedIn, taskTag } from "../core/send.js";
 import { kindOf } from "../core/chat-reader.js";
+import { WORDS } from "../core/chat-view.js";
 import * as AGa from "../core/agents.js";
 const { sessionOf, forkArgv } = AGa as any;
 import * as SP from "../core/spaces.js";
@@ -507,7 +508,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const tags = mentionedIn(String(b.text ?? ""), compat.tasksFor(b.chat)).map((x: any) => taskTag(x, x.ref ?? `#${x.id}`)).join("");
     b = { ...b, addr: a, quote: quoted, tags };
   }
-  else if (b?.type === "stop" && typeof b.chat === "string") b = { ...b, addr: chat(b.chat) };
+  else if ((b?.type === "stop" || b?.type === "steer") && typeof b.chat === "string") b = { ...b, addr: chat(b.chat) };
   else if (b?.type === "stop-job" && typeof b.chat === "string" && typeof b.job === "string") {
     // Stop on a background shell or watcher (core/bg-jobs.js): its processes end; its CLI then tells the agent
     const r = compat.reader?.(chat(b.chat));
@@ -575,6 +576,14 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       const r = await sendBody(io, a, kindOf(t) ?? "", body);
       if (r.code !== 0) throw new Error(refusal(r).message);
       return { ok: true, at };
+    }
+    case "steer": {
+      // Send now on a message in Claude Code's own queue (#662): its Ctrl+Enter, only while its screen offers it
+      const a = addr(b.addr), t = hub.terminals.get(a);
+      if (!t || t.state !== "live") throw new Error("That agent isn't running.");
+      const io = { hc: asPerson(hub), sleep: (ms: number) => Bun.sleep(ms), status: () => (hub.terminals.get(a) as any)?.status?.state ?? null };
+      if (!(await steerNow(io, a))) throw new Error(WORDS.notNow);
+      return { ok: true };
     }
     case "stop": {
       const r = await hc(["interrupt", addr(b.addr)]);

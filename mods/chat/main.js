@@ -41,6 +41,7 @@ import { AskCards, linkCtl } from "./cards.js";
 import * as strips from "./strips.js";
 import { button, red, green, amber, H, RADIUS, TEXT, toast, toastWho, plainError } from "./ui.js";
 import { openViewer, noteChatArea } from "./artview.js";
+import { KEY_HOLDER, holdKeys, keysElsewhere } from "./keyholder.js";
 import { SecretCards } from "./secret-card.js";
 import * as secrets from "./secrets.js";
 import { taskDot, ownProgress } from "./dot.js";
@@ -266,7 +267,7 @@ export default class Chat extends View {
     this.box.set_rows(1);
     // Ctrl+Enter (the textarea's secondary submit): held until the agent is free.
     this.box.on("submit", (e, cx) => { if (!e?.shift) this.enter(cx, Boolean(e?.secondary)); });
-    this.box.on("focus", (_e, cx) => { this.focused = true; noteChatArea(this.areaKey(), { focus: true, at: Date.now() }); cx.notify(); });
+    this.box.on("focus", (_e, cx) => { this.focused = true; noteChatArea(this.areaKey(), { focus: true, at: Date.now() }); holdKeys(this.areaKey()); cx.notify(); });
     this.box.on("blur", (_e, cx) => { this.focused = false; noteChatArea(this.areaKey(), { focus: false, at: Date.now() }); cx.notify(); });
     this.box.on("change", (_e, cx) => {
       // A big paste (over 8 KB or 200 lines) becomes a text file to send, not text in the box.
@@ -1383,6 +1384,24 @@ export default class Chat extends View {
   // screen offers it (pressed on an empty prompt it would do something else).
   steerNow(cx) {
     return steerNow(this.sendIo(cx), this.addr);
+  }
+
+  // A queued line's row (pendingRows()): its own key, so a press on it is Send now.
+  queuedLine(of) {
+    return { kind: "queued", id: `qn:${of}` };
+  }
+
+  // Send now on a message in Claude Code's own queue (#662): one its screen didn't offer Ctrl+Enter for in time
+  // (steerNow() after a send gives up after about a second) waits there until its turn ends. Pressed again here.
+  sendQueuedNow(cx) {
+    this.steering = true;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      const ok = await this.steerNow(cx).catch(() => false);
+      this.steering = ok ? null : WORDS.notNow;
+      cx.notify();
+      if (!ok) { await cx.sleep(4000); this.steering = null; cx.notify(); }
+    });
   }
 
   // A held message sent at once (the agent takes it mid-turn).
@@ -2793,15 +2812,17 @@ export default class Chat extends View {
     for (const p of this.pending) {
       const from = out.length;
       if (p.replyTo) out.push({ kind: "replyref", id: `rr:${p.id}`, to: p.replyTo, of: p.id, side: "user" });
-      const queued = p.delivered && inQueue.has(norm(p.text)) ? WORDS.inQueue : undefined;
-      out.push({ kind: "pending", id: p.id, text: p.text, files: p.files, failed: p.failed, late: p.late, waiting: p.waiting ?? queued, delivered: p.delivered });
+      const queued = !p.waiting && p.delivered && inQueue.has(norm(p.text));
+      out.push({ kind: "pending", id: p.id, text: p.text, files: p.files, failed: p.failed, late: p.late, waiting: p.waiting, delivered: p.delivered });
       if (p.paths?.length) out.push({ kind: "imgs", id: `i:${p.id}`, paths: p.paths, faded: !p.delivered });
+      if (queued) out.push(this.queuedLine(p.id));
       block(from, p.id);
     }
     for (const q of queue) {
       if (this.pending.some((p) => norm(p.text) === norm(q.text))) continue;
       const from = out.length;
-      out.push({ kind: "pending", id: `q:${q.id}`, text: q.text, files: q.images ? [imagesLine(q.images)] : [], delivered: true, waiting: WORDS.inQueue });
+      out.push({ kind: "pending", id: `q:${q.id}`, text: q.text, files: q.images ? [imagesLine(q.images)] : [], delivered: true });
+      out.push(this.queuedLine(`q:${q.id}`));
       block(from, `q:${q.id}`);
     }
     if (this.note) out.push({ kind: "note", id: this.note.id, text: this.note.text });
@@ -2934,7 +2955,7 @@ export default class Chat extends View {
       case "imgs": return this.fitThumbs(x.paths).h + 8;
       case "codehead": return 34;
       case "code": return 16 + (x.clip ?? String(x.code).split("\n").length * 19);
-      case "fold": return 26;
+      case "fold": case "queued": return 26;
       case "day": return 18;
       case "user": case "pending": return 30 + lines(x.text, w * 0.8 - 24) * 20 + (x.from ? 17 : 0) + ((x.images || x.files?.length) ? 20 : 0);
       case "agent": return 30 + (x.clip ?? lines(x.text, w * 0.8 - 24) * 21);
@@ -3097,6 +3118,14 @@ export default class Chat extends View {
           .font_family(settings().font_family ?? "JetBrains Mono").text_size(12.5).text_color(t.foreground)
           .child(x.clip ? this.clipped(t.surface, x.clip, lines) : lines), 18, 0).pb(x.bot0 ? 0 : 6);
       }
+      case "queued":
+        // In Claude Code's own queue (#662): "Queued · it reads it at its next step", and Send now (clickRow()):
+        // its Ctrl+Enter takes it at once, mid-turn. Sending… while it presses; why not, if it couldn't.
+        return col(h_flex().w_full().h(22).justify_end().gap(4).items_center().text_size(12).text_color(t.dim)
+          .child(div().min_w(0).truncate().child(WORDS.inQueue))
+          .when(this.kind === "claude", (el) => el.child("·").child(this.steering
+            ? div().flex_none().child(this.steering === true ? "Sending…" : this.steering)
+            : div().flex_none().cursor_pointer().font_medium().text_color(t.muted).hover((st) => st.text_color(t.foreground)).child(WORDS.sendNow))), 18, 2);
       case "fold":
         // Show more / Show less, under the reply's bubble, in line with its words (clickRow()).
         return col(h_flex().w_full().h(22).pl(12).child(h_flex().h(22).gap(4).items_center().cursor_pointer()
@@ -3200,6 +3229,7 @@ export default class Chat extends View {
       if (this.opened.has(key)) this.opened.delete(key);
       else { this.opened.add(key); this.loadResults(row, cx); }
     } else if (row.kind === "codehead") this.copy(row.code, row.id, cx);
+    else if (row.kind === "queued" && this.kind === "claude" && !this.steering) this.sendQueuedNow(cx);
     else if (row.kind === "pending" && row.failed) { const p = this.pending.find((x) => x.id === row.id); if (p?.msg) this.retry(p, cx); }
     else if (row.kind === "artifact" && row.art) this.openArtifact(row);
     else if (row.kind === "tasknews") {
@@ -3974,7 +4004,10 @@ export default class Chat extends View {
     if (paneFocused && showsBox && (!this.wasFocused || !this.hadBox)) { cx.timer.after(0, () => this.box.focus()); cx.timer.after(600, () => this.box.focus()); }
     // The pane focused again (a command, a click on its header) can leave the box without the
     // keyboard: give it back, unless the person just pressed something inside the chat.
+    // Not while the keyboard is somewhere else in the window that isn't a pane (#633): a task's chat, the list or its
+    // search in the Tasks panel (shared "keyboard.holder", keyHolder()); Herdr still counts this pane as focused then.
     else if (paneFocused && showsBox && !this.call && this.focused === false && Date.now() - (this.press?.at ?? 0) > 1500
+      && !keysElsewhere(shared(KEY_HOLDER), this.areaKey())
       && Date.now() - (this.refocusAt ?? 0) > 1000) {
       this.refocusAt = Date.now();
       cx.timer.after(0, () => this.box.focus());
@@ -4061,7 +4094,7 @@ export default class Chat extends View {
       })
       .on_mouse_move((e) => { if (e.bounds) this.noteArea(e.bounds); })
       // Where a press was, for the action buttons under messages (rows can't take handlers).
-      .on_mouse_down("left", (e) => { this.press = { x: e.local_position?.x, y: e.local_position?.y, at: Date.now() }; this.pressWin = e.position; this.keepIcons = null; if (e.bounds) this.noteArea(e.bounds); })
+      .on_mouse_down("left", (e) => { this.press = { x: e.local_position?.x, y: e.local_position?.y, at: Date.now() }; holdKeys(this.areaKey()); this.pressWin = e.position; this.keepIcons = null; if (e.bounds) this.noteArea(e.bounds); })
       // Files dropped anywhere on the chat go with the next message.
       .on_drop((e, cx) => { this.addFiles(attach.paths(e.paths ?? [])); this.saveSoon(cx); this.box.focus(); cx.notify(); });
 

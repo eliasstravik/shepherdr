@@ -102,6 +102,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | "#" task list | W:1351 "#4": the folder's tasks, ref + title + state | C:1691 TaskList (the space's tasks from the snapshot) | ✓ |
 | Reply strip | W quote line with × in the box | C:1993 "Replying to …" × | ◇ 2.1's wording kept for whom it quotes |
 | Queued (held) message | W:2999 a row over the box: clock, its words, "Queued · Sends when the agent is free", Send now, Edit, × | C Held: the same row over the box (held ones are kept out of the conversation) | ✓ |
+| In its CLI's queue | W `queued` row under the bubble: "Queued · it reads it at its next step · Send now" (Claude Code: Ctrl+Enter while its screen offers it, `steerNow`) | C `InQueue`: the same line, Send now acts `steer` | ✓ (SHEP-70) |
 | Draft kept | W data/chat-drafts | C drafts (useDraft) | ✓ |
 
 ## Model menu (mods/chat-models)

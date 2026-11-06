@@ -18,6 +18,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { machines, exec, readTextFile, watchFolder, appHome, home, run, theme, nextCommand, shared, setShared, openOverlay, layout } from "herdr";
+import { holdKeys } from "./keyholder.js";
 import { spaces, panes, agents, terminals, inRender } from "./live.js";
 // What needs the person, from every space and machine (lib/inbox.js, shared; the tab
 // bar runs its engine): agents asking or waiting, task problems, failed automations, merges.
@@ -113,7 +114,8 @@ export default class Tasks extends View {
     // too. Esc clears it; F gets to it while the list holds the keyboard.
     this.query = InputState.new({ placeholder: "Filter tasks" });
     this.query.on("change", (_e, cx) => cx.notify());
-    this.query.on("focus", (_e, cx) => { this.searching = true; cx.notify(); });
+    // Its search or list taking the keyboard: the Assistant chat beside it leaves it here (keyholder.js, #633).
+    this.query.on("focus", (_e, cx) => { this.searching = true; holdKeys("tasks"); cx.notify(); });
     this.query.on("blur", (_e, cx) => { this.searching = false; cx.notify(); });
     this.listFocus = cx.focus_handle();
     bindSearchKeys(cx, "tasks_search");
@@ -132,7 +134,7 @@ export default class Tasks extends View {
         cmd = null;
         if (c === "search") this.query.focus();
         // pane.go landed on this panel (mod.json "focusable"): the list takes the keyboard (F: the search field).
-        else if (c === "focus") this.listFocus.focus();
+        else if (c === "focus") { holdKeys("tasks"); this.listFocus.focus(); }
         else if (GROUP_BY.includes(c) || c === "folder") setShared("tasks.groupby", groupBy(c));
         // tasks.filter-all, tasks.filter-needs, ...: the filter row's chip.
         else if (c.startsWith("filter-") && (c === "filter-all" || ORDER.includes(c.slice(7)))) {
@@ -432,7 +434,7 @@ export default class Tasks extends View {
       // A press in the list gives it the keyboard: F then goes to the search field.
       .child(v_flex().id("task-list").flex_1().min_h(0).overflow_y_scrollbar().p(6).gap(6)
         .track_focus(this.listFocus)
-        .on_mouse_down("left", () => this.listFocus.focus())
+        .on_mouse_down("left", () => { holdKeys("tasks"); this.listFocus.focus(); })
         .on_key_down((e, cx) => {
           if (e.keystroke === "f" && !this.searching) { cx.stop_propagation(); this.query.focus(); cx.notify(); }
           else if (e.keystroke === "escape" && this.archivedOpen) { cx.stop_propagation(); this.archivedOpen = false; cx.notify(); }
