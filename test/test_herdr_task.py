@@ -1146,6 +1146,135 @@ class WorkersOwnHelpers(OwnBackgroundWork):
         self.assertEqual([x["role"] for x in v["live"]], ["worker"])
 
 
+class NewWorktrees(unittest.TestCase):
+    """SHEP-74: a new task's worktree starts from its base fetched first (#574), on its own branch
+    name or its folder's Branch names pattern (#570). Throwaway repos (a bare origin and a clone)
+    and a throwaway settings file; hc and gh are never run."""
+
+    def setUp(self):
+        from unittest import mock
+        import shutil
+        sys.path.insert(0, BIN)
+        import herdr_task.launch as launch
+        import herdr_task.settings as settings
+        from herdr_task.base import Fail
+        self.launch, self.settings, self.Fail = launch, settings, Fail
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.origin, self.main, self.other = (os.path.join(self.root, x) for x in ("origin.git", "repo", "other"))
+        self.git(self.root, "init", "-q", "--bare", "-b", "main", self.origin)
+        self.git(self.root, "clone", "-q", self.origin, self.main)
+        self.commit(self.main, "first")
+        self.git(self.main, "push", "-q", "origin", "main")
+        self.git(self.root, "clone", "-q", self.origin, self.other)
+        self.settings_file = os.path.join(self.root, "shepherdr.json")
+        for mod, name, value in ((launch, "WORKTREES", os.path.join(self.root, "wt")), (settings, "SETTINGS", self.settings_file)):
+            p = mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        self.store = Store([])
+        self.store.loc["folder"] = self.main
+
+    def git(self, cwd, *args):
+        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, check=True).stdout.strip()
+
+    def commit(self, cwd, words):
+        self.git(cwd, "-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false",
+                 "commit", "-q", "--allow-empty", "-m", words)
+        return self.git(cwd, "rev-parse", "HEAD")
+
+    def task(self, title="Check base", **kw):
+        t = {"id": len(self.store.data["tasks"]) + 1, "title": title, "mode": "worktree", "state": "todo", **kw}
+        self.store.data["tasks"].append(t)
+        return t
+
+    def new_worktree(self, t=None):
+        t = t or self.task()
+        return t, self.launch.folder_for(self.store, t)
+
+    def test_starts_from_the_remote_base_when_the_folder_is_behind(self):
+        theirs = self.commit(self.other, "merged on GitHub")
+        self.git(self.other, "push", "-q", "origin", "main")
+        before = self.git(self.main, "rev-parse", "main")
+        t, path = self.new_worktree()
+        self.assertEqual(self.git(path, "rev-parse", "HEAD"), theirs)
+        self.assertEqual(t["start"], theirs)
+        self.assertEqual(t["base"], "main")
+        self.assertEqual(self.git(self.main, "rev-parse", "main"), before)  # the folder's own checkout stays as it was
+        # no upstream: the task's branch never tracks origin/main
+        self.assertEqual(subprocess.run(["git", "-C", path, "rev-parse", "--abbrev-ref", "@{u}"], capture_output=True).returncode, 128)
+
+    def test_keeps_the_local_base_when_it_has_work_of_its_own(self):
+        mine = self.commit(self.main, "merged here, not pushed")
+        _, path = self.new_worktree()
+        self.assertEqual(self.git(path, "rev-parse", "HEAD"), mine)
+
+    def test_offline_starts_from_the_local_base(self):
+        self.git(self.main, "remote", "set-url", "origin", os.path.join(self.root, "gone.git"))
+        here = self.git(self.main, "rev-parse", "main")
+        _, path = self.new_worktree()
+        self.assertEqual(self.git(path, "rev-parse", "HEAD"), here)
+
+    def test_default_branch_name_stays(self):
+        t, _ = self.new_worktree(self.task("Fix the login page"))
+        self.assertEqual(t["branch"], "task/1-fix-the-login-page")
+
+    def write_settings(self, d):
+        with open(self.settings_file, "w") as f:
+            json.dump(d, f)
+
+    def test_the_folders_pattern(self):
+        self.write_settings({"everywhere": {"tasks": {"branch": "feat/{key}-{slug}"}},
+                             "spaces": {"sp1": {"folder": self.main, "tasks": {"branch": "{key}"}}}})
+        t, path = self.new_worktree(self.task("Fix login"))
+        self.assertEqual(t["branch"], "SHEP-1")
+        self.assertEqual(self.git(path, "rev-parse", "--abbrev-ref", "HEAD"), "SHEP-1")
+        self.write_settings({"everywhere": {"tasks": {"branch": "feat/{key}-{slug}"}}})
+        self.assertEqual(self.new_worktree(self.task("Fix login"))[0]["branch"], "feat/SHEP-2-fix-login")
+        # one that can't be used (no {n} or {key}: every task would share it) falls back to the default
+        self.write_settings({"everywhere": {"tasks": {"branch": "feat/{slug}"}}})
+        self.assertEqual(self.new_worktree(self.task("Fix login"))[0]["branch"], "task/3-fix-login")
+
+    def test_pattern_problems(self):
+        problem = self.settings.branch_pattern_problem
+        for ok in ("", "task/{n}-{slug}", "{key}", "users/me/{key}-{slug}"):
+            self.assertIsNone(problem(ok), ok)
+        for bad in ("feat/{slug}", "x/{n}/{bad}", "{n} x", "-{n}", "a..{n}", "{key}.lock"):
+            self.assertIsNotNone(problem(bad), bad)
+
+    def test_an_exact_branch(self):
+        t = self.task("Fix login")
+        self.launch.set_branch(self.store, t, "ABC-2137")
+        _, path = self.new_worktree(t)
+        self.assertEqual(t["branch"], "ABC-2137")
+        self.assertEqual(self.git(path, "rev-parse", "--abbrev-ref", "HEAD"), "ABC-2137")
+        self.assertTrue(path.endswith("/ABC-2137"))
+        self.launch.set_branch(self.store, t, "ABC-2137")  # the same again: nothing to do
+        with self.assertRaisesRegex(self.Fail, "can't change now"):
+            self.launch.set_branch(self.store, t, "ABC-1")
+
+    def test_an_exact_branch_is_refused_when_taken_or_invalid(self):
+        set_branch, t = self.launch.set_branch, self.task()
+        for bad in ("two words", "a..b", "-x", "x.lock"):
+            with self.assertRaisesRegex(self.Fail, "isn't a valid branch name"):
+                set_branch(self.store, t, bad)
+        self.git(self.main, "branch", "here-already")
+        with self.assertRaisesRegex(self.Fail, "already here"):
+            set_branch(self.store, t, "here-already")
+        self.git(self.other, "push", "-q", "origin", "HEAD:refs/heads/ABC-1")  # pushed by someone else, never fetched here
+        with self.assertRaisesRegex(self.Fail, "origin already has"):
+            set_branch(self.store, t, "ABC-1")
+        set_branch(self.store, self.task(), "ABC-2")
+        with self.assertRaisesRegex(self.Fail, "SHEP-2 already uses it"):
+            set_branch(self.store, t, "ABC-2")
+        self.assertNotIn("branch", t)
+        set_branch(self.store, t, "ABC-3")
+        set_branch(self.store, t, "")  # back to the pattern
+        self.assertNotIn("branch", t)
+        with self.assertRaisesRegex(self.Fail, "in a worktree"):
+            set_branch(self.store, self.task(mode="here"), "ABC-4")
+
+
 class MergedOnlyWithOwnWork(unittest.TestCase):
     """SHEP-23: a task counts as merged only when work of its own landed (its pull request merged, or
     commits made on its branch now in the base), never when its branch just caught up with main, and

@@ -22,7 +22,7 @@ TEMPLATES = os.environ.get("HERDR_TASK_TEMPLATES") or os.path.join(HOME, ".confi
 OLD_INSTRUCTIONS = os.path.join(HOME, ".herdr", "instructions")
 ASSISTANT_TEMPLATES = ("assistant", "coordinator")  # "coordinator": Assistants started before the rename
 DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "must_fix": "major", "max_running": MAX_RUNNING, "worktrees": True,
-                      "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": ""},
+                      "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": "", "branch": ""},
             "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {},
             "agents": {"reactions": True}}
 LEVELS = ["blocker", "major", "minor"]
@@ -424,6 +424,27 @@ def space_base(s, space=None):
     """The branch a space's new tasks branch from and merge into (Shepherdr settings > Tasks >
     Base branch, per space); "" when unset: the folder's current branch."""
     return str(settings_for(s, space)["tasks"].get("base") or "").strip()
+
+
+# Shepherdr settings > Tasks > Branch names (tasks.branch, #570): a folder's new task branches.
+# {n}: the task's number, {key}: its id (SHEP-4), {slug}: its title's words. Unset: this.
+BRANCH_PATTERN = "task/{n}-{slug}"
+
+
+def branch_pattern_problem(pattern):
+    """Why a Branch names pattern can't be used, or None (core/settings.js branchPattern says the same)."""
+    p = str(pattern or "").strip()
+    if not p:
+        return None
+    if "{n}" not in p and "{key}" not in p:
+        return "Put {n} or {key} in it, so each task's branch is its own."
+    if re.search(r"\{(?!(?:n|key|slug)\})[^}]*\}", p):
+        return "Only {n}, {key} and {slug} can be filled in."
+    sample = p.replace("{n}", "4").replace("{key}", "ABC-4").replace("{slug}", "fix-login")
+    if (sample.startswith("-") or sample.startswith("/") or sample.endswith("/") or sample.endswith(".") or sample.endswith(".lock")
+            or re.search(r"[\s~^:?*\[\\]|\.\.|@\{|//|/\.", sample)):
+        return "That isn't a name git allows for a branch."
+    return None
 
 
 def merge_policy(s, t):

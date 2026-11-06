@@ -16,7 +16,7 @@ import sys
 import time
 
 from .base import ENTRY, Fail, git, hc_json, now, run, WORKTREES
-from .settings import agent_key, ASSISTANT_TEMPLATES, bare, notes, notes_part, review_limits, settings_block
+from .settings import agent_key, ASSISTANT_TEMPLATES, bare, BRANCH_PATTERN, branch_pattern_problem, notes, notes_part, review_limits, settings_block, settings_for
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
 from .github import finish, remote_of
@@ -392,6 +392,100 @@ def base_ref(main, base):
     raise Fail(f"There is no branch {base} here.")
 
 
+def git_quick(cwd, *args, timeout=15):
+    """git that may reach the network (fetch, ls-remote): never asks for a password and gives up
+    after `timeout` seconds, so an offline or slow remote costs a moment, not a hang."""
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": os.environ.get("GIT_SSH_COMMAND") or "ssh -o BatchMode=yes"}
+    try:
+        r = subprocess.run(["git", "-C", cwd, *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           universal_newlines=True, env=env, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return False, "", "timed out"
+    return r.returncode == 0, r.stdout.strip(), r.stderr.strip()
+
+
+def fresh_start(main, base):
+    """Where a new worktree on `base` starts (#574): the base fetched from the remote first, so a
+    task branches from the latest even when others merge on GitHub. The remote's when it holds
+    everything the local branch has (the local one is only behind); else the local branch (it has
+    work of its own, or the fetch failed: offline, no remote, no such branch there). The folder's
+    own checkout is never moved."""
+    remote = remote_of(main)
+    if remote not in git(main, "remote")[1].split() or not git(main, "show-ref", "--verify", "--quiet", f"refs/heads/{base}")[0]:
+        return base
+    git_quick(main, "fetch", "--quiet", "--no-tags", remote, f"+refs/heads/{base}:refs/remotes/{remote}/{base}")
+    theirs = f"refs/remotes/{remote}/{base}"
+    if git(main, "show-ref", "--verify", "--quiet", theirs)[0] and git(main, "merge-base", "--is-ancestor", f"refs/heads/{base}", theirs)[0]:
+        return f"{remote}/{base}"
+    return base
+
+
+def branch_problem(main, name):
+    """Why `name` can't be a branch (git check-ref-format's rules), or None."""
+    if not name or name.startswith("-") or not git(main, "check-ref-format", "--branch", name)[0]:
+        return f"{name!r} isn't a valid branch name."
+    return None
+
+
+def branch_taken(s, t, name):
+    """Who has branch `name` already: another task here, this repo, or its remote (asked now when
+    it answers within seconds, else as git last fetched it). None: it's free."""
+    for o in s.data.get("tasks") or []:
+        if o is not t and o.get("branch") == name:
+            return f"{s.ref(o)} already uses it"
+    main = s.loc["folder"]
+    if git(main, "show-ref", "--verify", "--quiet", f"refs/heads/{name}")[0]:
+        return "a branch by that name is already here"
+    remote = remote_of(main)
+    if remote in git(main, "remote")[1].split():
+        ok, out, _ = git_quick(main, "ls-remote", "--heads", remote, f"refs/heads/{name}", timeout=10)
+        if (ok and out) or (not ok and git(main, "show-ref", "--verify", "--quiet", f"refs/remotes/{remote}/{name}")[0]):
+            return f"{remote} already has a branch by that name"
+    return None
+
+
+def set_branch(s, t, name):
+    """--branch: the task's exact branch name (#570), e.g. a ticket's ABC-2137, instead of its
+    folder's pattern. Checked as git does, and refused when that branch exists already (here, on
+    the remote, or another task's): never a silent suffix. "" goes back to the pattern."""
+    if name is None:
+        return
+    name = name.strip()
+    if t.get("worktree"):
+        if name == t.get("branch"):
+            return
+        raise Fail(f"{s.ref(t)} already has its worktree on {t.get('branch')}; its branch can't change now.")
+    if not name:
+        t.pop("branch", None)
+        return
+    if t.get("mode") != "worktree":
+        raise Fail("--branch is for tasks in a worktree; this one works in the folder itself.")
+    if name == t.get("branch"):
+        return
+    problem = branch_problem(s.loc["folder"], name)
+    if problem:
+        raise Fail(problem)
+    taken = branch_taken(s, t, name)
+    if taken:
+        raise Fail(f"Branch {name}: {taken}. Pick another name.")
+    t["branch"] = name
+
+
+def branch_for(s, task):
+    """A task's branch: its own (--branch), else its folder's pattern (Shepherdr settings > Tasks >
+    Branch names: {n} its number, {key} its id, {slug} its title's words), else task/{n}-{slug}."""
+    if task.get("branch"):
+        return task["branch"]
+    words = re.sub(r"[^a-z0-9]+", "-", task["title"].lower()).strip("-")[:40].strip("-") or "task"
+    pattern = str(settings_for(s, task.get("space"))["tasks"].get("branch") or "").strip()
+    if not pattern or branch_pattern_problem(pattern):
+        pattern = BRANCH_PATTERN
+    name = pattern.replace("{n}", str(task["id"])).replace("{key}", s.ref(task)).replace("{slug}", words)
+    if branch_problem(s.loc["folder"], name):
+        name = BRANCH_PATTERN.replace("{n}", str(task["id"])).replace("{slug}", words)
+    return name
+
+
 def folder_for(s, task):
     if task.get("mode") != "worktree":
         return s.loc["folder"]
@@ -400,15 +494,19 @@ def folder_for(s, task):
     if s.loc["kind"] != "repo":
         raise Fail("Worktrees need a git repo. Use --here.")
     main = s.loc["folder"]
-    words = re.sub(r"[^a-z0-9]+", "-", task["title"].lower()).strip("-")[:40].strip("-") or "task"
-    branch = task.get("branch") or f"task/{task['id']}-{words}"
+    branch = branch_for(s, task)
     path = os.path.join(WORKTREES, os.path.basename(main), re.sub(r"[^A-Za-z0-9._-]+", "-", branch).strip("-"))
     # Its own base (--base) branches from that branch; else from what the folder has checked out.
     own = task.get("base") if task.get("base_set") else None
     base = base_ref(main, own) if own else current_base(main)
     exists = git(main, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}")[0]
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    add = ["worktree", "add", path, branch] if exists else ["worktree", "add", "-b", branch, path, own or "HEAD"]
+    if exists:
+        add = ["worktree", "add", path, branch]
+    else:
+        # From the base's latest (fetched first); a detached folder (base is a commit) from HEAD.
+        branchy = git(main, "show-ref", "--verify", "--quiet", f"refs/heads/{base}")[0]
+        add = ["worktree", "add", "--no-track", "-b", branch, path, fresh_start(main, base) if branchy else (own or "HEAD")]
     ok, _, err = git(main, *add)
     if not ok:
         raise Fail(err or "git worktree add failed")
