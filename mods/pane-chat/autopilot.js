@@ -109,30 +109,29 @@ function knob(t, on, pane) {
       .bg(on ? t.accent_foreground : t.muted).transition("left", 120));
 }
 
-// The group: on a pill as tall as Chat | Terminal (ui.js segmented: H.sm, raised), the switch, then
-// "Autopilot" and while on what it waits for dim after it, then Run now (apRunNow) at its end.
-// Compact: the switch and Run now's ▶ only.
+// The group: on a pill as tall as Chat | Terminal (ui.js segmented: H.sm, raised). While on, what it waits for and Run now
+// (apRunNow) come first, on the switch's LEFT, then the switch and "Autopilot" (SHEP-81): the pill grows
+// leftwards and the switch never moves, on or off. Compact: Run now's ▶ and the switch only.
 export function apGroup(view, t, space, pane, compact) {
   const run = apRunNow(view, t, space, pane, compact);
-  return h_flex().id(`ap-group-${pane}`).flex_none().h(H.sm).p(2).pl(6).gap(7).items_center()
-    .when(!run && !compact, (el) => el.pr(10))
-    .when(!run && compact, (el) => el.pr(6))
+  const a = view.ap;
+  const words = !compact && a?.on ? detail(a) : "";
+  return h_flex().id(`ap-group-${pane}`).flex_none().h(H.sm).p(2).gap(7).items_center()
+    .pr(compact ? 6 : 10).pl(words ? 10 : run ? 2 : 6)
     .rounded(RADIUS.control).bg(t.raised).text_size(TEXT.label)
-    .child(apChip(view, t, space, pane, compact))
-    .when(Boolean(run), (el) => el.child(run));
+    .when(Boolean(words), (el) => el.child(div().flex_none().whitespace_nowrap().text_color(t.dim)
+      .when(Boolean(a?.inflight), (el) => el.loop("opacity", { from: 0.35, to: 1, period: 1200 }))
+      .child(words)))
+    .when(Boolean(run), (el) => el.child(run))
+    .child(apChip(view, t, space, pane, compact));
 }
 
 function apChip(view, t, space, pane, compact) {
-  const a = view.ap;
-  const on = Boolean(a?.on);
+  const on = Boolean(view.ap?.on);
   return h_flex().id(`ap-${pane}`).flex_none().gap(7).items_center().cursor_pointer()
     .on_click((_e, cx) => { cx.stop_propagation(); apToggle(view, space, cx); })
     .child(knob(t, on, pane))
-    .when(!compact, (el) => el
-      .child(div().flex_none().font_medium().text_color(on ? t.foreground : t.muted).child("Autopilot"))
-      .when(on, (el) => el.child(div().flex_none().whitespace_nowrap().text_color(t.dim)
-        .when(Boolean(a?.inflight), (el) => el.loop("opacity", { from: 0.35, to: 1, period: 1200 }))
-        .child(detail(a)))));
+    .when(!compact, (el) => el.child(div().flex_none().font_medium().text_color(on ? t.foreground : t.muted).child("Autopilot")));
 }
 
 // herdr-task autopilot <args> --space <space>: its JSON, or throws with its words.
@@ -147,7 +146,7 @@ async function ap(args, space) {
 // Settings › Autopilot on this space: its own, and what it inherits from Everywhere.
 const openAutopilot = (space) => openSettings({ space, section: "autopilot" });
 
-// Run now (herdr-task autopilot run-now): the group's end while it's on; queued until the Assistant is idle, which
+// Run now (herdr-task autopilot run-now): the group's start while it's on; queued until the Assistant is idle, which
 // the switch's words then say ("Queued", "Waking"). Dim and still while one is already queued or running. Like a
 // segment: hovered, it lifts as a picked one does. Compact: its ▶ alone.
 function apRunNow(view, t, space, pane, compact) {
@@ -177,7 +176,7 @@ function apRun(view, space, cx) {
   });
 }
 
-// "Write a heartbeat": after the switch while it's on and its heartbeat is still empty.
+// "Write a heartbeat": before the group while it's on and its heartbeat is still empty.
 export function apHeartbeatLink(view, space, pane) {
   return view.ap?.on && view.apBlank === true ? link(`ap-beat-${pane}`, "Write a heartbeat", () => openAutopilot(space)) : null;
 }

@@ -255,8 +255,9 @@ export default class Pane extends View {
         .when((this.width ?? Infinity) >= COMPACT_BELOW, el => el.child(div().whitespace_nowrap().child("Working…")))))
       .when(st === "blocked", el => el.child(div().flex_none().px(6).h(18).flex().items_center().rounded(RADIUS.control).bg(t.blocked + "26").text_size(TEXT.id).font_semibold().text_color(t.blocked).child("Needs you")))
       // Autopilot sits with the other controls on the right, not mid-bar after the folder.
-      .when(Boolean(apFor), (el) => el.child(apGroup(this, t, apFor, pane, (this.width ?? Infinity) < COMPACT_BELOW))
-        .child(apHeartbeatLink(this, apFor, pane) ?? div()))
+      // "Write a heartbeat" before it, so nothing after the switch comes and goes with it.
+      .when(Boolean(apFor), (el) => el.child(apHeartbeatLink(this, apFor, pane) ?? div())
+        .child(apGroup(this, t, apFor, pane, (this.width ?? Infinity) < COMPACT_BELOW)))
       // Ending a chat's agent asks first, in place of the hover buttons.
       .when(Boolean(entry) && this.ending === true, el => el
         .child(div().flex_none().whitespace_nowrap().text_color(t.foreground).child(endAgent(prog).ask))
