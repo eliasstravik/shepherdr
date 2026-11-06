@@ -2286,7 +2286,9 @@ class AgentReactions(unittest.TestCase):
         self.terminals["t12"] = {"state": "live", "cwd": "/elsewhere"}
         self.write({"spaces": {"sp2": {"agents": {"reactions": False}}, "sp4": {"folder": "/repos/shop", "agents": {"reactions": False}}}})
         notes = {a: self.aset.session_note(a) for a in ("t9", "t10", "t11", "t12")}
-        self.assertEqual(notes, {"t9": self.reactions.OFF, "t10": self.reactions.GUIDE, "t11": self.reactions.OFF, "t12": self.reactions.GUIDE})
+        from herdr_task.feedback import AGENT_NOTE
+        fb = "\n" + AGENT_NOTE  # Feedback offers (SHEP-78), on by default
+        self.assertEqual(notes, {"t9": self.reactions.OFF + fb, "t10": self.reactions.GUIDE + fb, "t11": self.reactions.OFF + fb, "t12": self.reactions.GUIDE + fb})
         self.assertEqual([self.terminals[a]["labels"]["herdr.reactions"] for a in ("t9", "t10", "t11", "t12")], ["off", "on", "off", "on"])
         self.write({"everywhere": {"agents": {"reactions": False}}})
         for a in ("t9", "t10", "t11", "t12"):
@@ -2410,12 +2412,13 @@ class AssistantSettings(unittest.TestCase):
         self.assertTrue(note.startswith("Your settings: "))
         for label, words in [("Review", "off"), ("Merge", "ask the person first"), ("Proof", "on"), ("Task agent", "claude"),
                              ("Base branch", "the folder's checked-out branch"), ("Worktrees", "on"), ("Tasks at once", "10 per folder"),
-                             ("Task notes", "none"), ("Autopilot", "off"), ("Reactions", "on")]:
+                             ("Task notes", "none"), ("Autopilot", "off"), ("Reactions", "on"),
+                             ("Feedback offers", "on (offer once to file a Shepherdr problem as an issue on eliasstravik/shepherdr")]:
             self.assertTrue(self.line(note, label).startswith(f"- {label}: {words}"), self.line(note, label))
         # nothing differs from Herdr's default: no line says who set it
         self.assertNotIn("; set for", note)
         self.assertNotIn("; your setting", note)
-        self.assertEqual(len(note.split("\n")), 12)  # head, 10 lines, the Reactions guide
+        self.assertEqual(len(note.split("\n")), 13)  # head, 11 lines, the Reactions guide
 
     def test_the_block_for_a_space_with_its_own(self):
         self.write({"everywhere": {"tasks": {"review_rounds": 2, "merge": "checks"}, "assistant": {"reactions": True}},
@@ -2442,7 +2445,7 @@ class AssistantSettings(unittest.TestCase):
         labels = self.terminals["t5"]["labels"]
         self.assertEqual(labels["herdr.reactions"], "off")
         self.assertEqual(sorted(self.aset.parse(labels["herdr.settings"])),
-                         sorted(["review", "merge", "proof", "agent", "base", "worktrees", "max_running", "notes", "autopilot", "reactions"]))
+                         sorted(["review", "merge", "proof", "agent", "base", "worktrees", "max_running", "notes", "autopilot", "reactions", "feedback"]))
         # another space inherits Everywhere's, with its own merge
         self.assistant("t6", "sp2")
         other = self.aset.session_note("t6")
@@ -2454,7 +2457,8 @@ class AssistantSettings(unittest.TestCase):
         self.terminals["t9"] = {"state": "live", "labels": {"herdr.task": "SHEP-1"}}
         note = self.aset.session_note("t9")
         self.assertNotIn("Your settings", note)
-        self.assertEqual(note, self.aset.reactions.GUIDE)
+        from herdr_task.feedback import AGENT_NOTE
+        self.assertEqual(note, self.aset.reactions.GUIDE + "\n" + AGENT_NOTE)  # and Feedback (SHEP-78), on by default
         self.assertEqual(self.terminals["t9"]["labels"], {"herdr.task": "SHEP-1", "herdr.reactions": "on"})
         self.assertEqual(self.aset.session_note("nope"), "")  # not a terminal here
 
@@ -2686,3 +2690,258 @@ class StarPrompt(unittest.TestCase):
         with open(os.path.join(d, "recipe.json"), "w") as f:
             json.dump(bad, f)
         self.assertTrue(art.recipe_problems(d, ["recipe.json"]))
+
+
+class Feedback(unittest.TestCase):
+    """SHEP-78: an agent's report of a problem in Shepherdr itself returns at once and reaches its
+    Assistant as a feedback news line; the Assistant offers once per problem, remembers the
+    person's No, searches for a duplicate before filing and files a redacted issue. A throwaway
+    store and settings file; hc and gh are faked, nothing is sent or filed. Made-up names only."""
+
+    def setUp(self):
+        import io
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.cli as cli
+        import herdr_task.feedback as fb
+        import herdr_task.launch as launch
+        import herdr_task.settings as settings
+        self.cli, self.fb, self.io, self.mock = cli, fb, io, mock
+        self.queue = fb.queue_news  # the real one (faked below)
+        self.dir = tempfile.mkdtemp()
+        self.file = os.path.join(self.dir, "shepherdr.json")
+        self.held, self.gh, self.issues = [], [], []
+        self.caller = {"labels": {"herdr.task": "dev#7", "herdr.task.space": "sp1", "herdr.agent": "codex"}, "name": "shep-7-fix"}
+        with open(os.path.join(self.dir, "dev.json"), "w") as f:
+            json.dump({"prefix": "SHEP", "tasks": [{"id": 7, "title": "Fix login"}]}, f)
+
+        def run(args, **_):
+            self.gh.append(args)
+            if args[1:3] == ["issue", "list"]:
+                return subprocess.CompletedProcess(args, 0, json.dumps(self.issues), "")
+            if "--body-file" in args:
+                with open(args[args.index("--body-file") + 1]) as f:
+                    self.body = f.read()
+                return subprocess.CompletedProcess(args, 0, "https://github.com/acme/shep/issues/42\n", "")
+            return subprocess.CompletedProcess(args, 1, "", "unexpected")
+
+        for target, name, value in [
+            (settings, "SETTINGS", self.file), (fb, "STATE", os.path.join(self.dir, ".feedback.json")), (fb, "STORE", self.dir),
+            (fb, "me", lambda: ("t9", self.caller)), (fb, "run", run), (fb, "cli_version", lambda agent: "0.9.1"),
+            (fb, "private_words", lambda: ["Jane Doe", "Jane", "janes-box"]), (fb, "shepherdr_version", lambda: "3.1.12"),
+            (launch, "caller_space", lambda: (self.caller.get("labels") or {}).get("herdr.task.space") or (self.caller.get("labels") or {}).get("herdr.space")),
+            (launch, "coordinator_in", lambda space: "t5" if space == "sp1" else None),
+            (fb, "queue_news", lambda to, text: self.held.append((to, text, "news"))),
+        ]:
+            p = mock.patch.object(target, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def settings(self, d):
+        with open(self.file, "w") as f:
+            json.dump(d, f)
+
+    def assistant(self):
+        self.caller = {"labels": {"herdr.role": "coordinator", "herdr.space": "sp1", "herdr.agent": "claude"}, "name": "assistant"}
+
+    def say(self, *argv):
+        import contextlib
+        out, err = self.io.StringIO(), self.io.StringIO()
+        with self.mock.patch.object(sys, "argv", ["herdr-task", "feedback", *argv]), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = self.cli.main()
+        return code, out.getvalue() + err.getvalue()
+
+    def test_a_report_returns_at_once_and_reaches_the_assistant(self):
+        import time
+        t = time.time()
+        code, out = self.say("The Accept card shows an empty diff", "--details", "Goal: accept SHEP-7. Expected: its 3 files.")
+        self.assertLess(time.time() - t, 2)
+        self.assertEqual(code, 0)
+        self.assertIn("Carry on", out)
+        self.assertEqual(len(self.held), 1)
+        to, text, how = self.held[0]
+        self.assertEqual((to, how), ("t5", "news"))
+        self.assertRegex(text, r'^<herdr-news task="SHEP-7" event="feedback" key="[0-9a-f]{10}">SHEP-7 feedback: The Accept card shows an empty diff · '
+                               r'Goal: accept SHEP-7\. Expected: its 3 files\. \(Fix login\)</herdr-news>$')
+        # the same problem again (other small words): nothing more is sent
+        code, out = self.say("the accept card shows the empty diff")
+        self.assertIn("already has this one", out)
+        self.assertEqual(len(self.held), 1)
+
+    def test_the_chat_reads_it_as_a_news_row(self):
+        self.say("Status lines vanish after a restart")
+        js = ("const m = await import(process.argv[1]); const t = process.argv[2];"
+            "const r = [...t.matchAll(/<herdr-news\\b([^>]*)>([\\s\\S]*?)<\\/herdr-news\\s*>/g)].length;"
+            "const w = (await import(process.argv[3])).newsWords({ ref: 'SHEP-7', event: 'feedback', text: t.replace(/<[^>]*>/g, '') }, { title: 'Fix login' });"
+            "console.log(JSON.stringify([r, w]));")
+        out = subprocess.run(["node", "--input-type=module", "-e", js, os.path.join(ROOT, "core", "chat-log.js"), self.held[0][1],
+                              os.path.join(ROOT, "core", "chat-view.js")], capture_output=True, text=True)
+        if out.returncode:
+            self.skipTest(out.stderr[-300:])
+        n, words = json.loads(out.stdout)
+        self.assertEqual(n, 1)
+        self.assertEqual(words, {"mark": "other", "what": "feedback", "text": "Status lines vanish after a restart"})
+
+    def test_off_in_settings_sends_nothing(self):
+        self.settings({"spaces": {"sp1": {"agents": {"feedback": False}}}})
+        code, out = self.say("Status lines vanish after a restart")
+        self.assertEqual((code, self.held), (0, []))
+        self.assertIn("off in Settings", out)
+        self.assistant()
+        self.assertIn("off in Settings", self.say("Status lines vanish after a restart")[1])
+        self.assertIn("off in Settings", self.say("Status lines vanish after a restart", "--file", "--new")[1])
+        self.assertEqual(self.gh, [])
+        # Everywhere off, the space on: on there
+        self.settings({"everywhere": {"agents": {"feedback": False}}, "spaces": {"sp1": {"agents": {"feedback": True}}}})
+        self.assertTrue(self.fb.feedback_on("sp1"))
+        self.assertFalse(self.fb.feedback_on("sp2"))
+
+    def test_offered_once_and_no_is_remembered(self):
+        self.assistant()
+        code, out = self.say("Ready refuses a reviewed commit")
+        self.assertIn('"Leave feedback for Shepherdr about Ready refuses a reviewed commit?"', out)
+        self.assertIn("Already offered", self.say("ready refuses the reviewed commit")[1])
+        self.assertIn("Remembered", self.say("Ready refuses a reviewed commit", "--no")[1])
+        self.assertIn("said no", self.say("Ready refuses a reviewed commit")[1])
+        self.caller = {"labels": {"herdr.task": "dev#7", "herdr.task.space": "sp1"}}
+        self.assertIn("said no", self.say("Ready refuses a reviewed commit")[1])
+        self.assertEqual(self.held, [])
+
+    def test_only_an_assistant_files(self):
+        code, out = self.say("Ready refuses a reviewed commit", "--file")
+        self.assertEqual(code, 1)
+        self.assertIn("Only an Assistant", out)
+        self.assertEqual(self.gh, [])
+
+    def test_a_duplicate_is_offered_before_filing(self):
+        self.assistant()
+        self.issues = [{"number": 12, "title": "Ready refuses reviewed commits", "url": "https://github.com/acme/shep/issues/12"}]
+        code, out = self.say("Ready refuses a reviewed commit", "--file", "--happened", "It said no round was recorded.")
+        self.assertIn("#12 Ready refuses reviewed commits", out)
+        self.assertIn("--comment", out)
+        self.assertEqual([a[1:3] for a in self.gh], [["issue", "list"]])
+        self.assertIn("eliasstravik/shepherdr", self.gh[0])  # the default repo
+        self.assertEqual(self.gh[0][self.gh[0].index("--search") + 1], "ready refuses reviewed commit")
+        code, out = self.say("Ready refuses a reviewed commit", "--file", "--comment", "12", "--happened", "Again on 3.1.12.")
+        self.assertEqual(self.gh[-1][:4], ["gh", "issue", "comment", "12"])
+        self.assertIn("Commented: https://github.com/acme/shep/issues/42", out)
+        self.assertIn("Already filed", self.say("Ready refuses a reviewed commit")[1])
+
+    def test_the_issue_is_redacted_and_complete(self):
+        self.assistant()
+        self.settings({"everywhere": {"agents": {"feedback_repo": "https://github.com/acme/shep.git"}}})
+        code, out = self.say(
+            "Tasks panel loses a task's status line", "--file", "--surface", "web",
+            "--goal", "Watch SHEP-7 from my phone.",
+            "--happened", "Jane Doe saw it blank on janes-box.example.ts.net (100.101.1.2); log at /home/jane/.herdr/tasks/dev.json, "
+                          "token ghp_abcdefghijklmnopqrstuvwxyz012345, GH_TOKEN=s3cr3t, mail jane@example.com\n" + "\n".join(f"log line {i}" for i in range(60)),
+            "--tried", "Reloaded the page.", "--expected", "Its last status line.", "--fix", "Keep it in the store.",
+            "--repro", "1. Start a task\n2. Restart the service")
+        self.assertEqual(code, 0, out)
+        self.assertIn("Filed: https://github.com/acme/shep/issues/42", out)
+        create = self.gh[-1]
+        self.assertEqual(create[:5], ["gh", "issue", "create", "--repo", "acme/shep"])
+        self.assertEqual(create[create.index("--title") + 1], "Tasks panel loses a task's status line")
+        b = self.body
+        for head in ("## Goal", "## What happened", "## What was tried", "## Expected", "## Suggested fix", "## Steps to reproduce", "## Environment"):
+            self.assertIn(head, b)
+        for words in ("- Shepherdr: 3.1.12", "- Agent CLI: Claude Code 0.9.1", "- Used from: the web app", "1. Start a task", "… (cut)"):
+            self.assertIn(words, b)
+        for secret in ("Jane", "janes-box", "100.101.1.2", "/home/jane", "ghp_", "s3cr3t", "jane@example.com", "log line 40"):
+            self.assertNotIn(secret, b)
+        self.assertIn("~/.herdr/tasks/dev.json", b)
+        self.assertIn("GH_TOKEN=<redacted>", b)
+
+    def test_the_search_never_carries_a_secret(self):
+        """The duplicate search leaves the machine too: its words are redacted first."""
+        self.assistant()
+        self.say("Login fails with GH_TOKEN=supersecret123 for Jane", "--file")
+        q = self.gh[0][self.gh[0].index("--search") + 1]
+        self.assertEqual(q, "login fails token")
+        for w in ("supersecret123", "jane", "redacted", "name"):
+            self.assertNotIn(w, q.lower())
+
+    def test_filing_holds_no_lock_while_gh_runs(self):
+        """A worker's report while the Assistant's gh call is slow: it still returns at once."""
+        import fcntl
+        self.assistant()
+        locked = []
+
+        def gh(args, **_):
+            with open(self.fb.STATE + ".lock", "a") as lock:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    locked.append(False)
+                    fcntl.flock(lock, fcntl.LOCK_UN)
+                except OSError:
+                    locked.append(True)
+            return subprocess.CompletedProcess(args, 0, "[]" if args[1:3] == ["issue", "list"] else "https://github.com/acme/shep/issues/9\n", "")
+        with self.mock.patch.object(self.fb, "run", gh):
+            code, out = self.say("Status lines vanish after a restart", "--file")
+        self.assertIn("Filed: https://github.com/acme/shep/issues/9", out)
+        self.assertTrue(locked and not any(locked), locked)  # every search and the create ran with the lock free
+        self.assertIn("Already filed: https://github.com/acme/shep/issues/9", self.say("Status lines vanish after a restart")[1])
+
+    def test_never_filed_twice(self):
+        """Filed (or a comment added): another --file of the same problem files nothing; one under way
+        holds a second off; one that found duplicates or failed leaves it as it was."""
+        self.assistant()
+        self.issues = [{"number": 12, "title": "Status lines vanish", "url": "https://github.com/acme/shep/issues/12"}]
+        self.say("Status lines vanish after a restart", "--file")  # duplicates: nothing filed, nothing held
+        self.assertNotIn("filing", open(self.fb.STATE).read())
+        self.say("Status lines vanish after a restart", "--file", "--comment", "12")
+        n = len(self.gh)
+        for again in (["--new"], ["--comment", "12"]):
+            code, out = self.say("Status lines vanish after a restart", "--file", *again)
+            self.assertIn("Already filed", out)
+        self.assertEqual(len(self.gh), n)
+        with self.fb.problems() as ps:
+            ps[self.fb.key_of("Ready hangs")] = {"line": "Ready hangs", "state": "filing", "at": self.fb.now()}
+        self.assertIn("being filed right now", self.say("Ready hangs", "--file", "--new")[1])
+        # a report or an offer while it's filed leaves it marked: a second --file still files nothing
+        self.assertIn("filing this one right now", self.say("Ready hangs")[1])
+        self.caller = {"labels": {"herdr.task": "dev#7", "herdr.task.space": "sp1"}}
+        self.assertIn("filing this one right now", self.say("Ready hangs")[1])
+        self.assistant()
+        self.assertIn("being filed right now", self.say("Ready hangs", "--file", "--comment", "12")[1])
+        self.assertEqual((len(self.gh), self.held), (n, []))
+
+    def test_a_report_queues_in_the_background(self):
+        """The news line goes to a detached herdr-task (_hold-news): a report never waits on the held messages' lock."""
+        calls = []
+        with self.mock.patch.object(self.fb.subprocess, "Popen", lambda args, **kw: calls.append((args, kw))):
+            self.queue("t5", "<herdr-news …>")
+        (args, kw), = calls
+        self.assertEqual(args[-3:], ["_hold-news", "t5", "<herdr-news …>"])
+        self.assertTrue(kw["start_new_session"])
+
+    def test_a_workers_details_and_cli_go_in_the_issue(self):
+        self.say("Status lines vanish after a restart", "--details", "Restarted the service; every status line went blank.")
+        self.assistant()
+        self.say("Status lines vanish after a restart", "--file", "--new", "--dry-run")
+        self.assertEqual(self.gh, [])
+        code, out = self.say("Status lines vanish after a restart", "--file", "--new")
+        self.assertIn("every status line went blank", self.body)
+        self.assertIn("- Agent CLI: Codex 0.9.1", self.body)
+
+    def test_autopilot_notes_it_for_later(self):
+        self.assistant()
+        self.assertIn("Noted", self.say("Status lines vanish after a restart", "--later")[1])
+        self.assertIn("later  Status lines vanish after a restart", self.say("--list")[1])
+
+    def test_every_role_is_told(self):
+        from herdr_task import templates, reactions, autopilot
+        with open(os.path.join(ROOT, "templates", "assistant.md")) as f:
+            a = f.read()
+        for words in ("## Feedback for Shepherdr", "Leave feedback for Shepherdr about", "--no", "--later", "duplicate", "--comment", "in the middle of something urgent"):
+            self.assertIn(words, a)
+        with open(os.path.join(ROOT, "templates", "worker.md")) as f:
+            self.assertIn(templates.FEEDBACK_RULE.strip(), f.read())
+        self.assertIn(templates.FEEDBACK_RULE, templates.WORKER_MD)
+        self.assertIn(templates.WORKER_MD_BEFORE_FEEDBACK, templates.OLD_WORKERS)
+        with open(os.path.join(ROOT, "templates", "reviewer.md")) as f:
+            self.assertIn(templates.REVIEWER_FEEDBACK.strip(), f.read())
+        self.assertIn("herdr-task feedback", self.fb.AGENT_NOTE)
+        with open(os.path.join(BIN, "herdr_task", "autopilot.py")) as f:
+            self.assertIn("herdr-task feedback", f.read())
+        self.assertIn("feedback", __import__("herdr_task.launch", fromlist=["OWN"]).OWN)

@@ -169,7 +169,7 @@ test("Agents and Tasks say the window's words: the model button, Other CLI, Must
   s.start();
   s.choices = C.choicesFrom({ claude: { model: "opus[1m]", effort: "high", per: {} }, codex: { models: [{ id: "gpt-5", label: "GPT-5", efforts: ["low", "high"] }] } });
   const agents = s.sections(null).find((x) => x.name === "Agents" && x.level === "all")!;
-  expect(agents.rows.map((r) => r.label)).toEqual(["Assistant", "Workers", "Reviewer", "Backup agent", "Reactions", "Ask for a GitHub star"]);
+  expect(agents.rows.map((r) => r.label)).toEqual(["Assistant", "Workers", "Reviewer", "Backup agent", "Reactions", "Feedback offers", "Feedback repo", "Ask for a GitHub star"]);
   expect(agents.rows[0].value).toBe("Opus 5.5 · 1M · High");
   expect(agents.rows[2]).toMatchObject({ value: "Other CLI (Codex)", agent: { unset: true, other: false } });
   const tasks = s.sections(null).find((x) => x.name === "Tasks" && x.level === "all")!;
@@ -246,4 +246,25 @@ test("Ask for a star: an Everywhere switch that turns it off before it ever show
   expect(row("all")!.hint).toMatch(/won't ask again/);
   expect(() => s.set("star_prompt", "on", "all")).toThrow();
   expect(CORE.starState({ everywhere: { star_prompt: { asked: 1 } } }).on).toBe(false);
+});
+
+// SHEP-78: Feedback offers, on by default, per space as Reactions; the repo Everywhere's only, checked
+test("Feedback offers and its repo", () => {
+  writeFileSync(file, "{}");
+  const s = new Settings();
+  s.start();
+  const sp = { id: "sp7", name: "shop", machine: null, folder: "/shop" };
+  const row = (level: string) => s.sections(null, [sp]).find((x) => x.name === "Agents" && x.level === level)!.rows;
+  expect(row("all").find((r) => r.key === "agents.feedback")).toMatchObject({ label: "Feedback offers", value: "on", options: ["on", "off"] });
+  expect(row("all").find((r) => r.key === "agents.feedback_repo")).toMatchObject({ label: "Feedback repo", value: "", text: true, placeholder: "eliasstravik/shepherdr" });
+  expect(row("sp7").find((r) => r.key === "agents.feedback_repo")).toBeUndefined();
+  s.set("agents.feedback", "off", "sp7", sp);
+  s.set("agents.feedback_repo", "https://github.com/acme/shep", "all");
+  const f = JSON.parse(readFileSync(file, "utf8"));
+  expect(f.spaces.sp7.agents).toEqual({ feedback: false });
+  expect(f.everywhere.agents).toEqual({ feedback_repo: "acme/shep" });
+  expect(() => s.set("agents.feedback_repo", "nope nope", "all")).toThrow();
+  expect(() => s.set("agents.feedback_repo", "acme/x", "sp7", sp)).toThrow();
+  s.set("agents.feedback_repo", "", "all");
+  expect(JSON.parse(readFileSync(file, "utf8")).everywhere?.agents).toBeUndefined();
 });
