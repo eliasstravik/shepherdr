@@ -69,6 +69,7 @@ an add-on's line and Web's state; `service/settings.test.ts` checks the rows the
 | Tasks at once | stepper − N + (1–10), no unit | `Settings.tsx:575` Stepper over the row's steps | ✓ (was a typed box with "tasks") |
 | Archive Done after | segmented Off / 1 day / 3 days / 1 week / 1 month | Segments | ✓ (was a picker) |
 | Base branch (a space's) | `base-branch.js:47` box, "Its branch now: main" / "Its current branch", checked here or on origin, "There's no branch “x” here or on origin." | text box with that placeholder (`service/main.ts` fetchBranch), checked in `service/main.ts` before saving, the error under the row | ✓ (was missing) |
+| Branch names (Everywhere's or a space's) | `branch-names.js` box, "task/{n}-{slug}" when empty, checked by `branchPattern`, its words under the box | text box with that placeholder, checked by `branchPattern` in `service/settings.ts` before saving, the error under the row | ✓ |
 | When a task starts / finishes | `main.js:545` title, line, a box as wide as the page with its example dim, saved after typing stops and on leaving, "Saved" | `Settings.tsx:817` NoteBox (was a Save/Undo editor with "Every task here") | ✓ |
 | Lines under each row | ABOUT | `service/settings.ts` hint: ABOUT | ✓ (were missing) |
 
