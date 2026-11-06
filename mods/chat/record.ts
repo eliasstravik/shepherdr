@@ -1,8 +1,9 @@
-// Dictation's recorder (mods/chat dictate.js): records the default microphone with pw-record
-// and keeps the audio until it is told how to end, writing the mic's level as it goes.
+// Dictation's recorder (mods/chat dictate.js): records the default microphone (audio.ts: pw-record on Linux, the
+// Mac's own herdr-audio on macOS) and keeps the audio until it is told how to end, writing the mic's level as it goes.
 //   bun record.ts <out.wav> <level file>
 // SIGINT: write <out.wav> (16 kHz mono 16-bit) and exit. SIGTERM: throw it away and exit.
-// The level file holds one number, 0..1, updated ten times a second.
+// The level file holds one number, 0..1, updated ten times a second; or "!" and the words when the mic can't work
+// (not allowed on a Mac, none there, no recorder), and this ends.
 // SHEP-63: the words are also written while you speak: the audio streams to ElevenLabs' realtime speech to text (the
 // key from key.ts, in memory only), and on SIGINT the last words are asked for and written to <out.wav>.txt as
 // { text } (a moment later, however long it was). No .txt: the live words didn't come, so transcribe.ts uploads the wav.
@@ -10,13 +11,16 @@
 import { writeFileSync } from "node:fs";
 import { liveUrl, liveChunk, liveWords, LIVE_TAIL, LIVE_WAIT } from "./core/voice.js";
 import { keyFor } from "./key.ts";
+import { audio, ended } from "./audio.ts";
 
 const [out, levelFile] = process.argv.slice(2);
 if (!out || !levelFile) { console.error("usage: bun record.ts <out.wav> <level file>"); process.exit(2); }
 const RATE = 16000;
 const chunks: Uint8Array[] = [];
 let bytes = 0, peak = 0, wrote = 0;
-const mic = Bun.spawn(["pw-record", "--rate", String(RATE), "--channels", "1", "--format", "s16", "--raw", "-"], { stdout: "pipe", stderr: "ignore" });
+const cant = (words: string) => { try { writeFileSync(levelFile, `!${words}`); } catch {} process.exit(1); };
+const tools = await audio().catch((e) => cant(String(e?.message ?? e)));
+const mic = Bun.spawn(tools!.mic(RATE), { stdout: "pipe", stderr: tools!.kind === "mac" ? "pipe" : "ignore" });
 
 function wav(): Buffer {
   const head = Buffer.alloc(44);
@@ -96,4 +100,10 @@ for await (const part of mic.stdout as ReadableStream<Uint8Array>) {
     wrote = Date.now();
     peak = 0;
   }
+}
+// The mic ended by itself (on a Mac: not allowed, or no microphone): say why, unless Done or Cancel ended it.
+if (!ending) {
+  const code = await mic.exited;
+  const why = tools!.kind === "mac" ? ended("mic", code, await new Response(mic.stderr as ReadableStream).text().catch(() => "")) : null;
+  if (why && !ending) cant(why);
 }

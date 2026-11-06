@@ -29,6 +29,7 @@ import { createHash } from "node:crypto";
 import { API, opening, replyLine, statusLine, whereLine, apiError, ensureAgent, agentFile, navWords } from "./core/voice.js";
 import { screenWords } from "./core/screen.js";
 import { SECRETS, keyFor, envFile } from "./key.ts";
+import { audio, ended as audioEnded, type Audio } from "./audio.ts";
 
 const [dir, addr, name] = process.argv.slice(2);
 if (!dir || !addr) { console.error("usage: bun voice.ts <call folder> <agent address> <agent name>"); process.exit(2); }
@@ -62,7 +63,7 @@ function end(why: string | null = null) {
   if (why) error = why;
   ended = true;
   try { ws?.close(); } catch {}
-  mic?.kill(); player?.kill();
+  mic?.kill(); player?.kill(); asking?.kill();
   state();
   setTimeout(() => process.exit(0), 100);
 }
@@ -136,9 +137,20 @@ let player: ReturnType<typeof Bun.spawn> | null = null;
 let outRate = 16000;
 let inRate = 16000;
 let playEnd = 0;
+// pw-record and pw-play, or the Mac's own (audio.ts), found before the call connects
+let tools: Audio | null = null;
+// macOS's microphone prompt, while it shows (a hang-up meanwhile ends it)
+let asking: ReturnType<typeof Bun.spawn> | null = null;
 
 function startPlayer() {
-  player = Bun.spawn(["pw-play", "--rate", String(outRate), "--channels", "1", "--format", "s16", "--raw", "-"], { stdin: "pipe", stdout: "ignore", stderr: "ignore" });
+  const mac = tools!.kind === "mac";
+  const p = Bun.spawn(tools!.speaker(outRate), { stdin: "pipe", stdout: "ignore", stderr: mac ? "pipe" : "ignore" });
+  player = p;
+  // On a Mac, a speaker that can't play ends the call with why (one killed for talking over isn't that).
+  if (mac) p.exited.then(async (code) => {
+    const why = audioEnded("speaker", code, await new Response(p.stderr as ReadableStream).text().catch(() => ""));
+    if (why && player === p) end(why);
+  });
 }
 // Loudness of 16-bit samples, scaled so speech fills most of 0..1.
 function loud(pcm: Uint8Array) {
@@ -172,7 +184,9 @@ function hush() {
 }
 
 async function startMic() {
-  mic = Bun.spawn(["pw-record", "--rate", String(inRate), "--channels", "1", "--format", "s16", "--raw", "-"], { stdout: "pipe", stderr: "ignore" });
+  const mac = tools!.kind === "mac";
+  const m = Bun.spawn(tools!.mic(inRate), { stdout: "pipe", stderr: mac ? "pipe" : "ignore" });
+  mic = m;
   const chunk = Math.round(inRate * 2 * 0.1); // 100 ms
   let buf = new Uint8Array(0);
   for await (const part of mic.stdout as ReadableStream<Uint8Array>) {
@@ -194,6 +208,11 @@ async function startMic() {
       if (muted || Date.now() < playEnd + 350) piece = new Uint8Array(chunk);
       if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ user_audio_chunk: Buffer.from(piece).toString("base64") }));
     }
+  }
+  // On a Mac, a mic that stopped by itself (not allowed, unplugged) ends the call with why.
+  if (mac && !ended) {
+    const why = audioEnded("mic", await m.exited, await new Response(m.stderr as ReadableStream).text().catch(() => ""));
+    if (why) end(why);
   }
 }
 
@@ -291,6 +310,16 @@ function inbox() {
 async function main() {
   mkdirSync(join(dir, "in"), { recursive: true });
   state();
+  // The mic and speaker first: on a Mac, macOS asks for the microphone now (the first time), before the voice agent
+  // starts talking; not allowed, or nothing to record or play with, ends the call with why.
+  try { tools = await audio(); } catch (err: any) { return end(String(err?.message ?? err)); }
+  if (tools.access) {
+    const p = asking = Bun.spawn(tools.access, { stdout: "ignore", stderr: "pipe" });
+    const why = audioEnded("mic", await p.exited, await new Response(p.stderr).text().catch(() => ""));
+    asking = null;
+    if (why) return end(why);
+  }
+  if (ended) return;
   const k = await keyFor();
   if ("error" in k) return end(k.error);
   const key = k.key;

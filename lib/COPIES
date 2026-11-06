@@ -55,3 +55,4 @@ artifact-sidebar.js: chat-image jump
 addons.js: chat pane-chat shepherdr-settings tabs-tasks
 live.js: chat coordinator jump menu-tasks new-menu-tasks newspace pane-chat shepherdr-settings spaces-chat tabs-tasks tasks workspace-status-chat
 core/bg-jobs.js: chat
+core/audio.js: chat

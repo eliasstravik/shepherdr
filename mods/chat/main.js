@@ -49,7 +49,7 @@ import * as slash from "./slash.js";
 import * as mentions from "./core/mentions.js";
 import * as agent from "./agent.js";
 import * as choices from "./settings.js";
-import { Dictation } from "./dictate.js";
+import { Dictation, BUN_PATH, warmAudio } from "./dictate.js";
 
 // Writing down after Done this long says it's taking longer than usual (SHEP-63).
 const DICT_SLOW = 5000;
@@ -451,6 +451,7 @@ export default class Chat extends View {
     this.originKey = labels["herdr.chat.origin"] || (this.slot ? `slot:${this.slot}` : null) || this.addr || "none";
     this.typing = labels["herdr.typing"] ? { addr: this.addr, at: Number(labels["herdr.typing"]) || 0 } : null;
     this.dict = new Dictation(this.originKey);
+    if (addonOn("voice")) warmAudio();
     this.draftFile = `${appHome()}/data/chat-drafts/${safe(this.originKey)}.json`;
     if (!this.addr && this.role) this.phase = "fresh";
     if (this.phase === "fresh") this.loadChoice(cx);
@@ -2229,9 +2230,9 @@ export default class Chat extends View {
     await exec("sh", ["-c", 'rm -rf "$1" "$1.level" && mkdir -p "$1/in" && touch "$1/alive"', "x", dir]);
     this.callRecent();
     this.callWhereWas = null;
-    // The helper runs beside the app (setsid: not tied to this mod's exec); it ends itself when
-    // the chat stops touching `alive`.
-    await exec("sh", ["-c", 'setsid bun "$2" "$1" "$3" "$4" </dev/null >"$1/log" 2>&1 &', "x", dir, `${appHome()}/mods/chat/voice.ts`, this.addr, name]);
+    // The helper runs beside the app (setsid: not tied to this mod's exec; macOS has no setsid: its own process group
+    // and no hangup instead); it ends itself when the chat stops touching `alive`.
+    await exec("sh", ["-c", BUN_PATH + 'if command -v setsid >/dev/null 2>&1; then setsid bun "$2" "$1" "$3" "$4" </dev/null >"$1/log" 2>&1 & else set -m; nohup bun "$2" "$1" "$3" "$4" </dev/null >"$1/log" 2>&1 & fi', "x", dir, `${appHome()}/mods/chat/voice.ts`, this.addr, name]);
     const call = this.call;
     let touched = 0, lastStatus = null, seen = new Set((this.conv?.items ?? []).map((x) => x.id));
     while (this.call === call) {
@@ -2279,9 +2280,11 @@ export default class Chat extends View {
         this.callWatch = w;
       }
       // What the window shows, for the call's "here"; what the voice agent asked to show.
+      // (the watch kept before awaiting: one that fires meanwhile clears this.callWatch)
+      const woke = this.callWatch.next;
       this.callWhere();
       await this.callNav();
-      await Promise.race([this.callWatch.next, cx.sleep(1000)]);
+      await Promise.race([woke, cx.sleep(1000)]);
     }
   }
 
@@ -2309,7 +2312,7 @@ export default class Chat extends View {
     for (const f of names) {
       let nav = null;
       try { nav = JSON.parse(await fs.readFile(`${box}/${f}`, "utf8")); } catch {}
-      await fs.rm(`${box}/${f}`).catch(() => {});
+      await fs.unlink(`${box}/${f}`).catch(() => {});
       if (!nav) continue;
       // said back by the nav's name (voice.ts waits for it before the voice agent may say it's on screen)
       let ack;

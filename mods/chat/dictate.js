@@ -1,4 +1,4 @@
-// Dictation into the message box: record.ts records the default microphone (pw-record) and
+// Dictation into the message box: record.ts records the default microphone (audio.ts: pw-record, or the Mac's own) and
 // reports its level, transcribe.ts has ElevenLabs write it down (Scribe, with the voice call's key:
 // Settings › Secrets, read from the machine that keeps them into memory only). The text goes into
 // the box to edit; nothing is sent by itself or kept.
@@ -9,6 +9,19 @@
 import { exec, appHome, readTextFile } from "herdr";
 
 const DIR = () => `${appHome()}/data/chat-dictation`;
+
+// bun where the window's PATH may lack it (a Mac app opened from the Dock gets only the system's folders); after the
+// PATH it has, so a machine that finds bun already finds the same one.
+export const BUN_PATH = 'PATH="$PATH:$HOME/.bun/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin"; export PATH; ';
+
+// On a Mac the mic is herdr-audio, built once (audio.ts): built now in the background, so the first dictation or call
+// doesn't wait for it. Nothing on Linux.
+let warmed = false;
+export function warmAudio() {
+  if (warmed) return;
+  warmed = true;
+  exec("sh", ["-c", `${BUN_PATH}[ "$(uname)" = Darwin ] && { bun "$1" warm </dev/null >/dev/null 2>&1 & }; true`, "x", `${appHome()}/mods/chat/audio.ts`]).catch(() => {});
+}
 
 export class Dictation {
   constructor(key) {
@@ -34,13 +47,20 @@ export class Dictation {
     this.doneAt = 0;
     // record.ts runs until told how to end (SIGINT keeps the audio, SIGTERM drops it); its pid
     // goes beside the file.
-    this.run = exec("sh", ["-c", 'mkdir -p "$(dirname "$1")" && rm -f "$1" "$2" "$1.txt" && { bun "$3" "$1" "$2" </dev/null >/dev/null 2>&1 & echo $! > "$1.pid"; wait; }',
+    this.run = exec("sh", ["-c", BUN_PATH + 'mkdir -p "$(dirname "$1")" && rm -f "$1" "$2" "$1.txt" && { bun "$3" "$1" "$2" </dev/null >/dev/null 2>&1 & echo $! > "$1.pid"; wait; }',
       "x", this.file, this.levelFile, `${appHome()}/mods/chat/record.ts`]).catch(() => null);
   }
 
-  // How loud the microphone is now, 0..1 (record.ts writes it ten times a second).
+  // How loud the microphone is now, 0..1 (record.ts writes it ten times a second). When the mic can't work (record.ts
+  // wrote "!" and why: not allowed on a Mac, no microphone), the recording stops and the box says why.
   async level() {
-    const v = Number((await readTextFile(this.levelFile).catch(() => null)) ?? 0);
+    const s = (await readTextFile(this.levelFile).catch(() => null)) ?? "0";
+    if (s.startsWith("!") && this.state === "recording") {
+      this.cancel();
+      this.error = s.slice(1).trim() || "The microphone didn't start.";
+      return 0;
+    }
+    const v = Number(s);
     return Number.isFinite(v) ? v : 0;
   }
 
@@ -61,7 +81,7 @@ export class Dictation {
       let how = "live";
       if (typeof said?.text !== "string") {
         how = "upload";
-        const r = await exec("sh", ["-c", 'bun "$1" "$2" </dev/null 2>/dev/null', "x", `${appHome()}/mods/chat/transcribe.ts`, file]);
+        const r = await exec("sh", ["-c", BUN_PATH + 'bun "$1" "$2" </dev/null 2>/dev/null', "x", `${appHome()}/mods/chat/transcribe.ts`, file]);
         try { said = JSON.parse(r.stdout.trim().split("\n").pop()); } catch { said = null; }
       }
       if (!mine()) return "";
