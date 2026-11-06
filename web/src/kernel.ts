@@ -5,7 +5,7 @@ import { buildId } from '@shared/build.ts'
 import { expire, loadOutbox, prune, saveOutbox, settle, type Outgoing } from './outbox.ts'
 import { keptOf, mayReload, type Kept } from './reload.ts'
 import { OPEN_WITHIN, PONG_WITHIN, retryIn, SAY_LOST_AFTER } from './link.ts'
-import { groupFor, groupTasks, loadAllDone, loadGroups, loadShut, namesFor, saveAllDone, saveGroups, saveShut, shownGroup, type GroupBy, type Groups, type TaskGroup } from './groups.ts'
+import { groupFor, groupTasks, loadAllDone, loadGroups, loadShut, keepTasks, namesFor, saveAllDone, saveGroups, saveShut, shownSplit, type GroupBy, type Groups, type TaskGroup } from './groups.ts'
 import { canDock, CHAT_READ, fit as fitSidebars, focused, loadSidebars, PANEL, RIGHT, saveSidebars, showPanel, toggleFocus as focusTo, type Sidebars } from './sidebars.ts'
 import { hush } from './motion.ts'
 import { closed, loadPanes, MAX_PANES, normal, only, opened, PANE_MIN, replaced, samePane, savePanes, type Pane, type Panes } from './panes.ts'
@@ -1109,23 +1109,28 @@ export function counts(snap: Snapshot, placeId: string) {
 
 /* ---------- a place's tasks, grouped (groups.ts) ---------- */
 
-export { GROUPS, groupChoices, groupFor, namesFor, type GroupBy, type Groups, type TaskGroup } from './groups.ts'
+export { GROUPS, bySpace, groupChoices, groupFor, keepTasks, namesFor, type GroupBy, type Groups, type SubGroup, type TaskGroup } from './groups.ts'
 
-/** a list's tasks in their groups, in the order they show: more machines' under each machine's name */
-export function taskGroups(snap: Snapshot, list: ListView, by: GroupBy): TaskGroup[] {
+/** a list's tasks in their groups, in the order they show: more machines' under each machine's name; by status, each
+ *  status's per space with split (Split by space), the space the person is in (here) first */
+export function taskGroups(snap: Snapshot, list: ListView, by: GroupBy, opts: { split?: boolean; here?: string } = {}): TaskGroup[] {
   const tasks = tasksIn(snap, list)
   if (list.attention) return snap.places.flatMap((p) => (['need', 'ready'] as const).flatMap((status) => {
     const rows = tasks.filter((t) => t.place === p.id && t.status === status)
     return rows.length ? [{ key: `${p.id}|${status}`, label: `${p.name} · ${status === 'need' ? 'Needs you' : 'Ready'}`, note: machineName(snap.machines, p.machine), tasks: rows, names: { machine: false, project: false } }] : []
   }))
-  return groupTasks(snap.places, snap.machines ?? [], tasks, by, list.level)
+  return groupTasks(snap.places, snap.machines ?? [], tasks, by, list.level, opts)
 }
+
+/** how a list's groups split: by space as this device chose (on until switched off), the space open first */
+const splitOf = (ui: Pick<UI, 'groups'> & Partial<Pick<UI, 'place'>>) => ({ split: ui.groups.split !== false, here: ui.place ?? state.ui.place })
 
 /** a list's task groups as this screen shows them: grouped as this device chose, Done cut short until Show all, a
  *  group folded shut (or under a machine folded shut) showing none of its tasks */
 export function shownGroups(snap: Snapshot, list: ListView, ui: Pick<UI, 'groups' | 'allDone' | 'shut'> = state.ui) {
   const shut = (key: string) => ui.shut.includes(`${list.key}|${key}`)
-  return taskGroups(snap, list, groupFor(ui.groups, list.level)).map((g) => shownGroup(g, ui.allDone.includes(`${list.key}|${g.key}`), shut(g.key) || (!!g.machine && shut(`m:${g.machine.id}`))))
+  const all = (key: string) => ui.allDone.includes(`${list.key}|${key}`)
+  return taskGroups(snap, list, groupFor(ui.groups, list.level), splitOf(ui)).map((g) => shownSplit(g, all, (k) => shut(k) || (k === g.key && !!g.machine && shut(`m:${g.machine.id}`))))
 }
 
 /** fold a heading of a list's tasks shut or open ("group", "m:machine"); with siblings, them too, the same way */
@@ -1149,6 +1154,11 @@ export function setGroup(level: number, by: GroupBy) {
   setUI((ui) => ({ groups: { ...ui.groups, [level === 0 ? 'all' : 'machine']: by }, lists: { ...ui.lists, chips: state.snap ? listChips(ui, state.snap) : [], at: ui.place }, cur: 0 }))
 }
 
+/** Split by space (the Tasks ⋯): by status, each status's tasks under their machine · space, or not */
+export function setSplit(on: boolean) {
+  setUI((ui) => ({ groups: { ...ui.groups, split: on }, cur: 0 }))
+}
+
 /** whether every word typed is in one of these, any case: ⌘K's search and the lists' filters */
 export function matches(q: string, ...fields: (string | number | undefined)[]) {
   const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean)
@@ -1168,10 +1178,10 @@ export function setFilter(listKey: string, list: 'tasks' | 'artifacts', q: strin
 
 /** A list's tasks filtered: in their groups, every Done one, and then its archived ones; groups with none left out */
 export function filteredGroups(snap: Snapshot, list: ListView, q: string, ui: Pick<UI, 'groups'> = state.ui) {
-  const groups: TaskGroup[] = taskGroups(snap, { ...list, attention: false }, groupFor(ui.groups, list.level))
+  const groups: TaskGroup[] = taskGroups(snap, { ...list, attention: false }, groupFor(ui.groups, list.level), splitOf(ui))
   const archived = archivedIn(snap, list)
   if (archived.length) groups.push({ key: 'archived', label: 'Archived', tasks: archived, names: namesFor(list.level) })
-  return groups.map((g) => ({ ...g, tasks: g.tasks.filter((t) => taskMatches(t, q)) })).filter((g) => g.tasks.length)
+  return groups.map((g) => keepTasks(g, (t) => taskMatches(t, q))).filter((g) => g.tasks.length)
 }
 
 /** a list's tasks in the order they show, as the keyboard walks them: only the ones on screen */

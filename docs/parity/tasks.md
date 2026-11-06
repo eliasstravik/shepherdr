@@ -47,6 +47,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | By space | T:339-345 one group per task list, named by the space in its folder (else the list's name), sidebar order; machine quiet after it with more machines | G projectGroups by `listName` and machine | ✓ fixed (grouped by the space that started the task) |
 | By machine | T:350-351 machine heading, brighter, hairline above all but the first | W MachineHeading | ✓ |
 | Machine › Space | T:353-354 machine heading with count over its spaces' groups; folding it hides them | W | ✓ |
+| Split by space | T `bySpace`, `subGroup`: by status, each status's tasks (not Pinned's or Needs you's) and the automations under a light heading per machine · space while in more than one (emoji or #, name, machine quieter, count; the open space first, then latest news, then sidebar order); rows under it drop where; each folds and cuts its Done on its own; shared "tasks.split", a check in the ⋯ | W SubHeading, G `bySpace`/`shownSplit`, kernel `setSplit` (kept on this device) | ✓ (SHEP-65) |
 | Heading | T group(): chevron in the icon column, label small, its count right by it ("Ready 2"), room above each group; the whole heading folds | W GroupHeading/FoldHeading | ✓ (SHEP-34) |
 | Folded headings remembered | T:551-554 | kernel `toggleShut`, groups.ts saveShut | ✓ |
 | Alt-click folds siblings | (none) | W FoldHeading | ◇ a keyboard nicety for wide screens; does nothing unless Alt is held |
