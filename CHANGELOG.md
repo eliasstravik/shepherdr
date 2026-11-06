@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.1.14
+
+Shorter voice replies when you ask a call to open something.
+
+- Voice calls: opening a space, task or screen gets a one-word reply, a failed or unclear open is said in a few words,
+  and ending the call asks "Are you sure you want to end the call?".
+
 ## 3.1.13
 
 Dictation that writes while you speak, Tasks grouped by space, calmer voice calls, and many phone and chat fixes.
