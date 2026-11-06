@@ -50,6 +50,9 @@ import * as mentions from "./core/mentions.js";
 import * as agent from "./agent.js";
 import * as choices from "./settings.js";
 import { Dictation } from "./dictate.js";
+
+// Writing down after Done this long says it's taking longer than usual (SHEP-63).
+const DICT_SLOW = 5000;
 import { PanelHost, inner, openTaskThread, backToTasks, requestWorkerTerminal, THREAD, STACK as TASKS_STACK, BODY as THREAD_BODY, CHAT as THREAD_CHAT, TERM as THREAD_TERM, FILES as THREAD_FILES, CHANGES as THREAD_CHANGES, PR as THREAD_PR, BROWSER as THREAD_BROWSER } from "./panel.js";
 import { markRead, onScreen, unread } from "./unread.js";
 import { notifies } from "./notify.js";
@@ -2084,6 +2087,9 @@ export default class Chat extends View {
     if (this.dict.state === "writing") return;
     if (this.dict.state === "recording") {
       cx.notify();
+      const writing = this.dict.n;
+      // a slow writing says so
+      cx.spawn(async (cx) => { await cx.sleep(DICT_SLOW); if (this.dict.state === "writing" && this.dict.n === writing) cx.notify(); });
       cx.spawn(async (cx) => {
         cx.notify();
         const text = await this.dict.stop();
@@ -2114,14 +2120,21 @@ export default class Chat extends View {
   }
 
   // While recording, the box's bottom row is the recording (the shared live row): the red X
-  // throws it away, the mic's level, "Recording" and the time, Done in Send's spot (a spinner
-  // while it is written down). The typed text stays above.
+  // throws it away, the mic's level, "Recording" and the time, Done in Send's spot. After Done
+  // the mic and the wave stop at once: a calm spinner and "Writing…" until the words land (saying
+  // so after DICT_SLOW), the red X still drops it. The typed text stays above.
   recordingRow(t) {
-    const writing = this.dict.state === "writing";
-    return this.liveRow(t, "chat-rec",
-      this.round("rec-x", "mods/chat/x.svg", t, "danger", writing ? null : (cx) => this.cancelDictation(cx)),
-      writing ? "Writing" : "Recording", !writing, this.dict.started ?? Date.now(),
-      this.round("rec-done", writing ? "spinner" : "mods/chat/check.svg", t, "call", writing ? null : (cx) => this.toggleDictation(cx)));
+    if (this.dict.state !== "writing") return this.liveRow(t, "chat-rec",
+      this.round("rec-x", "mods/chat/x.svg", t, "danger", (cx) => this.cancelDictation(cx)),
+      "Recording", true, this.dict.started ?? Date.now(),
+      this.round("rec-done", "mods/chat/check.svg", t, "call", (cx) => this.toggleDictation(cx)));
+    const slow = Date.now() - (this.dict.doneAt || Date.now()) >= DICT_SLOW;
+    return h_flex().id("chat-rec").w_full().h(44).flex_none().px(8).gap(12).items_center()
+      .child(this.round("rec-x", "mods/chat/x.svg", t, "danger", (cx) => this.cancelDictation(cx)))
+      .child(h_flex().id("chat-rec-writing").flex_1().min_w(0).gap(8).items_center()
+        .child(svg("mods/workspace-chrome/spinner.svg").size(14).flex_none().text_color(t.dim).spin(900))
+        .child(div().truncate().text_size(12.5).font_medium().text_color(t.muted).child(slow ? "Taking longer than usual…" : "Writing…")))
+      .child(this.round("rec-done", "mods/chat/check.svg", t, "off", null));
   }
 
   // ---- voice call ---------------------------------------------------------------------------

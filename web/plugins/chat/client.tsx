@@ -2255,7 +2255,7 @@ export function toggleDictation(chatKey: string) {
   const at = box && document.activeElement === box ? [box.selectionStart, box.selectionEnd] : null
   // the box records instead of taking typing, so the keyboard goes down
   ;(document.activeElement as HTMLElement | null)?.blur?.()
-  setUI({ dict: chatKey, dictStarted: Date.now(), dictDone: false, dictError: null, focus: null, plus: null })
+  setUI({ dict: chatKey, dictStarted: Date.now(), dictDone: false, dictDoneAt: 0, dictError: null, focus: null, plus: null })
   dictation = dictate((said) => {
     dictation = null
     if (getState().ui.dict !== chatKey) return
@@ -2302,7 +2302,8 @@ function boxOf(chatKey: string) {
 }
 
 export function finishDictation() {
-  setUI({ dictDone: true })
+  if (!dictation || getState().ui.dictDone) return
+  setUI({ dictDone: true, dictDoneAt: Date.now() })
   dictation?.finish()
 }
 
@@ -2323,28 +2324,65 @@ function Mic({ chatKey }: { chatKey: string }) {
   )
 }
 
-/** While you talk to type the box records: Cancel, a red dot and the time, the live wave of your voice, Done */
+/** writing down after Done this long says it's taking longer than usual */
+export const DICT_SLOW = 5000
+
+/** the calm writing spinner: a faint ring with a turning arc */
+function WritingSpin() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" className="size-3.5 shrink-0 animate-spin text-fg3 motion-reduce:animate-none">
+      <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeOpacity="0.3" strokeWidth="2" />
+      <path d="M14 8a6 6 0 0 0-6-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+/** true once writing has taken DICT_SLOW */
+function useSlow(at: number) {
+  const [slow, setSlow] = useState(false)
+  useEffect(() => {
+    setSlow(false)
+    if (!at) return
+    const t = setTimeout(() => setSlow(true), Math.max(0, at + DICT_SLOW - Date.now()))
+    return () => clearTimeout(t)
+  }, [at])
+  return slow
+}
+
+/** While you talk to type the box records: Cancel, the live wave of your voice, a red dot and the time, Done. After
+ *  Done the microphone and the wave stop at once: a calm "Writing…" with a small spinner until the words land (saying
+ *  so if it takes a while), and Cancel still drops it. */
 export function DictationBox() {
   const ui = useUI()
+  const writing = ui.dictDone
   const t = useElapsed(ui.dictStarted)
+  const slow = useSlow(writing ? ui.dictDoneAt : 0)
   return (
     <>
-      {/* as the window's recording row: the red X throws it away, the wave, "Recording" (or "Writing") and the time,
-          Done in Send's spot */}
-      <button type="button" aria-label="Cancel" disabled={ui.dictDone} onClick={cancelDictation}
+      {/* as the window's recording row: the red X throws it away, the wave, "Recording" and the time, Done in Send's spot */}
+      <button type="button" aria-label={writing ? 'Cancel: drop what was said' : 'Cancel'} onClick={cancelDictation}
         className={clsx('press-dim relative grid size-[34px] shrink-0 place-items-center rounded-full bg-need text-white after:absolute after:-inset-1.5 phone:size-11', dimmed)}>
         <XIcon className={ic} />
       </button>
-      <LiveWave sample={dictSample} label="Your voice" className="mx-1.5 flex-1" />
-      <p className="flex shrink-0 items-center gap-1.5 pr-1 text-[0.8125rem] phone:text-[0.9375rem]">
-        {ui.dictDone ? null : <span aria-hidden="true" className="size-2 rounded-full bg-need" />}
-        <span role="status" className="font-medium text-fg">{ui.dictDone ? 'Writing' : 'Recording'}</span>
-        <span className="font-mono text-[0.75rem] text-fg3 tabular-nums">{t}</span>
-      </p>
+      {writing ? (
+        <p role="status" data-dict="writing" className="mx-1.5 flex min-w-0 flex-1 items-center gap-2 text-[0.8125rem] phone:text-[0.9375rem]">
+          <WritingSpin />
+          <span className="shimmer truncate font-medium">{slow ? 'Taking longer than usual…' : 'Writing…'}</span>
+        </p>
+      ) : (
+        <>
+          <LiveWave sample={dictSample} label="Your voice" className="mx-1.5 flex-1" />
+          <p className="flex shrink-0 items-center gap-1.5 pr-1 text-[0.8125rem] phone:text-[0.9375rem]">
+            <span aria-hidden="true" className="size-2 rounded-full bg-need" />
+            <span role="status" data-dict="recording" className="font-medium text-fg">Recording</span>
+            <span className="font-mono text-[0.75rem] text-fg3 tabular-nums">{t}</span>
+          </p>
+        </>
+      )}
       <button
         type="button"
         aria-label="Done: put it in the box"
-        disabled={ui.dictDone}
+        disabled={writing}
         onClick={() => finishDictation()}
         className={clsx('press-dim relative grid size-[34px] shrink-0 place-items-center rounded-full bg-fg text-bg after:absolute after:-inset-1.5 phone:size-11', dimmed)}
       >
