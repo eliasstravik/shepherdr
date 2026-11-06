@@ -7,12 +7,12 @@
 //   SHEPHERDR_WEB=on|off           serve the web app and share it on the tailnet (default on)
 // Serve from (service/host.ts): one machine serves the web app and holds the shared data; on the others the service
 // reads and writes it there, keeps their settings in step (service/sync.ts) and doesn't share /shepherdr.
-import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, rmSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { randomBytes } from "node:crypto";
 import { DATA, SOCK, TOKEN, PORT, HOME, ensureData } from "./paths.ts";
 import { holdLock } from "./lock.ts";
-import { gate, type Gate } from "./auth.ts";
+import { gate, localCaller, type Gate } from "./auth.ts";
 import { trustedPeer } from "./peer.ts";
 import { whoami, share, served, unshare, restoreShare, type Me } from "./tailscale.ts";
 import { qrFile } from "./qr.ts";
@@ -92,6 +92,11 @@ if (!release) {
 
 if (!existsSync(TOKEN)) writeFileSync(TOKEN, randomBytes(24).toString("hex") + "\n", { mode: 0o600 });
 const token = readFileSync(TOKEN, "utf8").trim();
+// This start's id (GitHub #635): written with the port into service.json once the port is ours, and answered by health
+// to this machine's callers only, so the window (lib/local.js), the CLI and a call know it is Shepherdr's own service
+// on that port, never another app holding it, before they send the token or the shared state.
+const SERVICE_ID = randomBytes(16).toString("hex");
+const SERVICE_FILE = join(DATA, "service.json");
 
 const hub = new Hub();
 const host = new Host(hub, VERSION);
@@ -539,7 +544,7 @@ const server = Bun.serve<{ who: string }>({
     const url = new URL(req.url);
     const path = url.pathname.startsWith("/shepherdr/") ? url.pathname.slice(10) : url.pathname;
     // the window asks this (lib/service.js): while jobs is true it leaves its background work to the service
-    if (path === "/api/health") return json({ ok: true, version: VERSION, core: hub.up, jobs: jobs.on && hub.up, serving: host.serving(), host: host.hubName() ?? null, reachable: host.reachable(),
+    if (path === "/api/health") return json({ ok: true, app: "shepherdr", ...(localCaller(req, PORT) ? { id: SERVICE_ID } : {}), version: VERSION, core: hub.up, jobs: jobs.on && hub.up, serving: host.serving(), host: host.hubName() ?? null, reachable: host.reachable(),
       // the other machines this service ticks (Serve from: the host the ones with no service of their own)
       ticks: jobs.on ? host.tickOn() : [] });
     // the Web add-on switched off: nothing for the tailnet (this machine's own callers still get the API)
@@ -732,4 +737,7 @@ const server = Bun.serve<{ who: string }>({
 
 console.log(`Shepherdr ${VERSION} on http://127.0.0.1:${server.port} (data ${DATA})${me && webOn() ? `, https://${me.dns}/shepherdr/` : ""}`);
 
-for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => { server.stop(true); release(); process.exit(0); });
+// the port is ours now: say where and this start's id (only this user can read it)
+writeFileSync(SERVICE_FILE, JSON.stringify({ port: server.port, id: SERVICE_ID, pid: process.pid, version: VERSION }) + "\n", { mode: 0o600 });
+
+for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => { server.stop(true); try { rmSync(SERVICE_FILE); } catch {} release(); process.exit(0); });

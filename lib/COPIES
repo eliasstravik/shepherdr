@@ -47,6 +47,7 @@ spacelog.js: coordinator menu-tasks new-menu-tasks newspace shepherdr-settings t
 secrets.js: chat shepherdr-settings tabs-tasks
 service.js: chat shepherdr-settings tabs-tasks
 bridge.js: tabs-tasks
+local.js: chat shepherdr-settings tabs-tasks
 machines.js: spaces-chat shepherdr-settings
 ui.js: accept-card artifacts chat chat-call chat-image chat-models chat-react coordinator jump toasts menu-tasks new-menu-tasks newspace pane-chat shepherdr-settings spaces-chat tabs-tasks task-browser task-changes task-files task-pr tasks tasks-menu workspace-chrome-shepherdr workspace-status-chat confirm-chat prompt-chat machine-add-chat keybinds task-artifacts
 artview.js: accept-card artifacts chat chat-image jump task-artifacts

@@ -6,7 +6,7 @@ import { Toasts } from './toasts.tsx'
 /** Ask this device for push alerts (the app must be installed to the home screen on an iPhone). */
 export async function subscribePush(): Promise<string> {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return 'This browser has no push alerts. On an iPhone, add Shepherdr to the home screen first.'
-  const reg = await navigator.serviceWorker.register('sw.js')
+  const reg = await registerWorker()
   const perm = await Notification.requestPermission()
   if (perm !== 'granted') return 'Alerts are off for this device.'
   const { key } = await fetch('api/push/key').then((r) => r.json())
@@ -55,6 +55,13 @@ function Keeper() {
   return null
 }
 
+/** The service worker, beside the page under whatever path the app is served on (/shepherdr/), its scope that folder.
+ *  Same-origin, so its fetch carries the login cookie of a gate in front (GitHub #494). */
+function registerWorker() {
+  const base = new URL('./', document.baseURI)
+  return navigator.serviceWorker.register(new URL('sw.js', base), { scope: base.pathname })
+}
+
 export default definePlugin({
   name: 'alerts',
   setup(reg) {
@@ -62,8 +69,7 @@ export default definePlugin({
     // the window's toasts while the app is on screen (push alerts while it isn't)
     reg.overlays.push(Keeper, Toasts)
     if (!('serviceWorker' in navigator)) return
-    navigator.serviceWorker
-      .register('sw.js')
+    registerWorker()
       // tell the server which push subscription is this screen, so it sends none while the app is on screen
       .then((r) => r.pushManager?.getSubscription())
       .then((s) => s && setPushEndpoint(s.endpoint))

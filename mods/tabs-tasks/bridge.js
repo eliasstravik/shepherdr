@@ -6,12 +6,12 @@
 // Shared: the source is lib/bridge.js; bin/sync-shared copies it into each mod in lib/COPIES.
 // Edit lib/bridge.js, never a mod's copy, then run bin/sync-shared.
 
-import { shared, setShared, home, readTextFile } from "herdr";
+import { shared, setShared } from "herdr";
+import { localService, localToken } from "./local.js";
 
 // the person's pins, sidebar and Notify; the Window page's switches and the add-ons switched off (Settings › Window)
 export const KEYS = ["tasks.pinned", "spaces-chat", "notify", "addons.off", "tabbar.tabs", "sidebar.worktrees", "sidebar.unread", "counts.red",
   "counts.green", "tasks.filters", "tasks.place", "chat.helpers", "coordinator.auto"];
-const STATE = "http://127.0.0.1:7788/api/state";
 // the same value whatever order its keys are in (herdr-core keeps a document's keys sorted, a mod writes its own order;
 // another machine's words come back in another): never a change by itself
 const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === "object"
@@ -22,8 +22,12 @@ let started = false, token = null;
 const last = new Map();
 
 async function sync(cx) {
-  token ??= (await readTextFile(`${home()}/.herdr/shepherdr/token`).catch(() => null))?.trim() || null;
+  token ??= await localToken();
   if (!token) return;
+  // the service's port, and that it is really Shepherdr's service there, before the token or the state go out
+  const svc = await localService(cx);
+  if (!svc) return;
+  const STATE = `${svc.base}/api/state`;
   const auth = { authorization: `Bearer ${token}` };
   const got = await Promise.race([fetch(STATE, { headers: auth }).then((r) => (r.ok ? r.json() : null)), cx.sleep(1500).then(() => null)]).catch(() => null);
   if (!got) return;

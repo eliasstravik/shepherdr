@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { gate, type Gate } from "./auth.ts";
+import { gate, localCaller, type Gate } from "./auth.ts";
 
 const g: Gate = { owner: "me@example.com", dns: "box.tailnet.example", port: 7788, token: "secret-token" };
 const tailnet = (init: { method?: string; headers?: Record<string, string> } = {}) =>
@@ -61,4 +61,13 @@ test("macOS: the caller's side of the exact connection, from netstat -anv (Tails
   // a name made to look like a pid ("evil:1 x") still reads as its own pid, the last one netstat wrote
   const forged = "tcp4       0      0  127.0.0.1.56080        127.0.0.1.7788         ESTABLISHED         2160         2116  407552  146988 evil:1 x:4242   00182 00000008 000000000eb4b4f3 00000080 04000800      2      0 000000";
   expect(darwinPids(56080, 7788, forged)).toEqual([4242]);
+});
+
+describe("health's id only to this machine's callers (GitHub #635)", () => {
+  test("the window on 127.0.0.1 by the service's port", () => expect(localCaller(local(), 7788)).toBe(true));
+  test("not through tailscale serve", () => expect(localCaller(tailnet(), 7788)).toBe(false));
+  test("not a tagged device's request through tailscale serve (the machine's name, no login)", () =>
+    expect(localCaller(tailnet({ headers: { "tailscale-user-login": "" } }), 7788)).toBe(false));
+  test("not a browser page", () => expect(localCaller(local({ origin: "http://127.0.0.1:7788" }), 7788)).toBe(false));
+  test("not by another port", () => expect(localCaller(local(), 7790)).toBe(false));
 });

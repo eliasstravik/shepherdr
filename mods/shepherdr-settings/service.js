@@ -6,16 +6,16 @@
 // Edit lib/service.js, never a mod's copy, then run bin/sync-shared.
 
 import { exec } from "herdr";
+import { localService } from "./local.js";
 
-const HEALTH = "http://127.0.0.1:7788/api/health";
 let runs = false, started = false, startedAt = 0;
 
 // The service does the background work now.
 export const serviceRuns = () => runs;
 
 async function check(cx) {
-  let r = null;
-  try { r = await Promise.race([fetch(HEALTH).then((x) => x.json()), cx.sleep(1500).then(() => null)]); } catch {}
+  // only Shepherdr's own service counts (local.js): another app on its port is "not answering"
+  const r = (await localService(cx).catch(() => null))?.health ?? null;
   runs = r?.jobs === true;
   // Not answering: start it (its systemd user unit or launchd agent), at most once a minute.
   if (!r && Date.now() - startedAt > 60000) {
