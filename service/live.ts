@@ -9,7 +9,7 @@ import type { Chats, Watcher } from "./chats.ts";
 import type { Compat } from "./compat.ts";
 
 // A page's socket: the chats it follows (by 2.1's chat key), each with the terminal and the watcher it holds.
-type WS = ServerWebSocket<{ who: string; chats?: Map<string, { addr: string; watcher: Watcher }>; push?: string | null; visible?: boolean }>;
+type WS = ServerWebSocket<{ who: string; keys?: string[]; chats?: Map<string, { addr: string; watcher: Watcher }>; push?: string | null; visible?: boolean }>;
 
 export class Live {
   private pages = new Set<WS>();
@@ -56,6 +56,8 @@ export class Live {
 
   /** 2.1's snapshot: everything the screen lists, whole, each time it changes. */
   setSnapshot(snapshot: unknown) {
+    // a chat key may map to another terminal now (a task's worker restarted in a new one, SHEP-90): follow it there
+    for (const ws of this.pages) if (ws.data.keys) this.watch(ws, ws.data.keys);
     const text = JSON.stringify({ type: "snapshot", snapshot });
     if (text === this.snap) return;
     this.snap = text;
@@ -66,6 +68,7 @@ export class Live {
   private watch(ws: WS, keys: string[]) {
     const chats = this.chats, compat = this.compat;
     if (!chats || !compat) return;
+    ws.data.keys = keys;
     const want = new Map<string, string>();
     for (const k of keys.slice(0, 40)) { const a = compat.addrOf(k); if (a) want.set(k, a); }
     ws.data.chats ??= new Map();
