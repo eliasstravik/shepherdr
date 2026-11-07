@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.1.16
+
+Every agent question can be answered from the chat, and web messages never get lost.
+
+- Every question or permission an agent asks shows as a card in the chat, on the web and phone too, for Claude Code
+  and Codex.
+- Messages sent from the web go again by themselves after a dropped connection, show how they are going, and are
+  never sent twice.
+- Background processes and subagents each show as one row over the chat box, which opens to the list.
+- A task's chat follows its agent when it restarts in a new terminal, instead of "Can't find this conversation".
+
 ## 3.1.15
 
 Agents keep their chat history, a stuck web chat recovers on its own, and the session note works on Macs.
