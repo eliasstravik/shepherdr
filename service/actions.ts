@@ -9,7 +9,7 @@ import { sendBody, steerNow, messageBody, refusal, reactionLine, mentionedIn, ta
 import { kindOf } from "../core/chat-reader.js";
 import { WORDS } from "../core/chat-view.js";
 import * as AGa from "../core/agents.js";
-import * as AS from "../core/asks.js";
+import { answerCodex } from "./codex-ask.ts";
 const { sessionOf, forkArgv } = AGa as any;
 import * as SP from "../core/spaces.js";
 const { READ, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, DELETED, deletedSection, withRestoredSection } = SP as any;
@@ -101,29 +101,6 @@ async function run(cmd: string[]) {
 
 export const hc = (args: string[]) => run([process.env.SHEPHERDR_HC || "hc", ...args]);
 
-/** A Codex question card's answer (core/asks.js codexSteps) pressed on its screen, only while that shows the questions
- *  the card was drawn from. "Answer in terminal" presses nothing; "Dismiss" and "Chat about this" are Esc, as in its
- *  own picker. Resolves with what went wrong, or null. */
-export async function answerCodex(addr: string, questions: any[], b: any): Promise<string | null> {
-  if (b.terminal === true) return null;
-  const screen = await hc(["read", addr]);
-  if (screen.code !== 0) return "Its terminal can't be read: answer it there.";
-  if (!AS.codexOnScreen(screen.stdout, questions)) return "Its screen shows something else now: answer it in the terminal.";
-  if (b.dismiss === true || b.talk === true) return (await hc(["keys", addr, "esc"])).code === 0 ? null : "It didn't go through.";
-  const said = (i: number) => {
-    const q = questions[i];
-    return typeof b.other === "string" && b.other.trim() ? b.other : typeof b.choice === "number" ? q.choices[b.choice]?.label : undefined;
-  };
-  const answers = questions.length > 1 ? (Array.isArray(b.answers) ? b.answers.map((x: unknown) => String(x ?? "")) : []) : [said(0) ?? ""];
-  const steps = AS.codexSteps(questions, answers);
-  if (!steps) throw new Error(questions.length > 1 ? "Answer every question first." : "Pick an answer first.");
-  for (const step of steps) {
-    const r = step.paste !== undefined ? await hc(["send", "--force", addr, step.paste]) : await hc(["keys", addr, ...step.keys]);
-    if (r.code !== 0) return "It didn't go through: answer it in the terminal.";
-    await Bun.sleep(150);
-  }
-  return null;
-}
 // hc for core/send.js, its sends as the person's (Hub.send: no <hc from=…> tag on another machine)
 const asPerson = (hub: Hub) => (args: string[]) => args[0] === "send" ? hub.send(args[1], args[2]) : hc(args);
 
@@ -184,7 +161,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const a = chat(b.chat);
     const item = (compat.reader?.(a)?.conv?.items ?? []).find((x: any) => x.kind === "ask" && x.id === b.question.slice(3));
     if (!item?.questions?.length || item.closed) throw new Error("That question was answered already.");
-    const why = await answerCodex(a, item.questions, b);
+    const why = await answerCodex(hc, a, item.questions, b);
     if (why) throw new Error(why);
     return { ok: true };
   }

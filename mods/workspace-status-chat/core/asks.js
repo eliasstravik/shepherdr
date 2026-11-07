@@ -121,6 +121,12 @@ export function codexQuestions(args) {
   })).filter((q) => q.text);
 }
 
+/** A choice as the card shows it: "(Recommended)" as its tag, as Claude's. */
+export const codexChoice = (c) => {
+  const rec = /\s*\(recommended\)\s*$/i.test(c.label);
+  return { label: c.label.replace(/\s*\(recommended\)\s*$/i, ""), ...(c.description ? { description: c.description } : {}), ...(rec ? { recommended: true } : {}) };
+};
+
 /** Whether Codex's screen shows these questions' picker at its first question, none answered yet. */
 export function codexOnScreen(screen, questions) {
   const s = String(screen ?? "").replace(/\s+/g, " ");
@@ -139,7 +145,7 @@ export function codexSteps(questions, answers) {
   for (const [i, q] of questions.entries()) {
     const said = String(answers[i] ?? "").trim();
     if (!said) return null;
-    const k = q.choices.findIndex((c) => c.label === said);
+    const k = q.choices.findIndex((c) => c.label === said || codexChoice(c).label === said);
     if (k >= 0 && k < 9) steps.push({ keys: [String(k + 1)] });
     else if (k >= 0) steps.push({ keys: [...Array(k).fill("down"), "enter"] });
     // "None of the above", its notes: the words pasted, then Enter (Codex hears "None of the above" and the note)

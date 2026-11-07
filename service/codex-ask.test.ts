@@ -1,15 +1,11 @@
 // Codex's own questions (request_user_input) on a chat card (SHEP-91): Codex gives no hook for them, so the card's
 // answer is pressed on its screen, only while that shows the questions the card was drawn from. A fake hc logs what
 // it was asked to press and shows a made-up picker.
-import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync, readFileSync, chmodSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { expect, test } from "bun:test";
 import { codexQuestions } from "../core/asks.js";
 import { codexQuestion } from "./compat.ts";
+import { answerCodex } from "./codex-ask.ts";
 
-const dir = mkdtempSync(join(tmpdir(), "codex-ask-"));
-const LOG = join(dir, "log"), SCREEN = join(dir, "screen");
 const PICKER = [
   "  Question 1/2 (2 unanswered)",
   "  Which color?",
@@ -22,20 +18,16 @@ const QS = codexQuestions({ questions: [
   { question: "Which color?", header: "Color", options: [{ label: "Red", description: "Choose red." }, { label: "Blue", description: "Choose blue." }] },
   { question: "Which size?", header: "Size", options: [{ label: "Small" }, { label: "Large" }] },
 ] });
-let A: typeof import("./actions.ts");
-const was = process.env.SHEPHERDR_HC;
-
-beforeAll(async () => {
-  const hc = join(dir, "hc");
-  writeFileSync(hc, `#!/bin/sh\nif [ "$1" = read ]; then cat "${SCREEN}"; exit 0; fi\necho "$*" >> "${LOG}"\n`);
-  chmodSync(hc, 0o755);
-  process.env.SHEPHERDR_HC = hc;
-  A = await import("./actions.ts");
-});
-afterAll(() => { if (was === undefined) delete process.env.SHEPHERDR_HC; else process.env.SHEPHERDR_HC = was; });
-
-const pressed = () => (existsSync(LOG) ? readFileSync(LOG, "utf8").trim().split("\n").filter(Boolean) : []);
-const fresh = (screen: string) => { writeFileSync(SCREEN, screen); writeFileSync(LOG, ""); };
+// a fake hc: `read` shows the screen, anything else is logged as pressed
+let screen = "", log: string[] = [];
+const hc = async (args: string[]) => {
+  if (args[0] === "read") return { code: 0, stdout: screen };
+  log.push(args.join(" "));
+  return { code: 0, stdout: "" };
+};
+const A = { answerCodex: (addr: string, qs: any[], b: any) => answerCodex(hc, addr, qs, b) };
+const pressed = () => log;
+const fresh = (s: string) => { screen = s; log = []; };
 
 test("the card: a step for each question, its choices and Other", () => {
   const q = codexQuestion({ id: "q12", questions: QS }, "p:sp1");

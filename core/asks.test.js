@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { codexQuestions, codexOnScreen, codexSteps, words, howAnswered, allow, dismiss } from "./asks.js";
+import { codexChoice, codexQuestions, codexOnScreen, codexSteps, words, howAnswered, allow, dismiss } from "./asks.js";
 
 // request_user_input's arguments as Codex 0.163 logs them (a made-up question)
 const ARGS = JSON.stringify({ questions: [
@@ -42,6 +42,10 @@ test("a pick is its number key; words of one's own go in None of the above's not
   expect(codexSteps(qs, ["Blue", "Small"])).toEqual([{ keys: ["2"] }, { keys: ["1"] }]);
   expect(codexSteps(qs, ["Red", "Medium, please"])).toEqual([{ keys: ["1"] }, { keys: ["down", "down", "tab"] }, { paste: "Medium, please" }]);
   expect(codexSteps(qs, ["Red"])).toBeNull();
+  // the card shows "SQLite (Recommended)" as "SQLite" with its tag: either is that choice
+  const rec = [{ text: "Which?", header: "", choices: [{ label: "SQLite (Recommended)" }, { label: "Postgres" }] }];
+  expect(codexSteps(rec, ["SQLite"])).toEqual([{ keys: ["1"] }]);
+  expect(codexChoice(rec[0].choices[0])).toEqual({ label: "SQLite", recommended: true });
   expect(codexSteps(qs, ["Red", " "])).toBeNull();
   // a tenth choice has no number key: down to it and Enter
   const many = [{ text: "Which?", header: "", choices: Array.from({ length: 11 }, (_, i) => ({ label: `C${i}` })) }];

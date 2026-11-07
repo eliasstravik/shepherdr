@@ -15,6 +15,7 @@ const { senderName, briefLabel, firstUser, firstKeys, newsTimeline, resolveArtif
 import { mentionedIn } from "../core/send.js";
 import * as MEc from "../core/mentions.js";
 import * as SCc from "../core/screens.js";
+import { codexChoice } from "../core/asks.js";
 const { SCREEN } = SCc as any;
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -189,10 +190,12 @@ export function artifactOf(a: any, spaces: Space[], program: (addr: string) => s
  *  Codex's screen (service/actions.ts, core/asks.js codexSteps). */
 export function codexQuestion(x: any, key: string): Question {
   const qs: any[] = x.questions ?? [];
+  const choices = (q: any) => q.choices.map(codexChoice);
+  // no note: its picker has nowhere for one beside a pick
   if (qs.length > 1)
-    return { id: `cq:${x.id}`, title: `${qs.length} questions`, kind: "Question", to: key, choices: [], other: true,
-      parts: qs.map((q) => ({ title: q.text, header: q.header || undefined, choices: q.choices })) };
-  return { id: `cq:${x.id}`, title: qs[0].text, kind: "Question", to: key, other: true, choices: qs[0].choices };
+    return { id: `cq:${x.id}`, title: `${qs.length} questions`, kind: "Question", to: key, choices: [], other: true, noNote: true,
+      parts: qs.map((q) => ({ title: q.text, header: q.header || undefined, choices: choices(q) })) };
+  return { id: `cq:${x.id}`, title: qs[0].text, kind: "Question", to: key, other: true, noNote: true, choices: choices(qs[0]) };
 }
 
 export class Compat {
