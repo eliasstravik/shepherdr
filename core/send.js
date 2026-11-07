@@ -82,8 +82,11 @@ export function inputLine(screen) {
 // The words a message shows in Claude Code's box by: its first line that isn't a sent file's path or a tag line (a
 // picture becomes "[Image #1]", a long paste "[Pasted text #1 +12 lines]").
 function wordsLine(body) {
-  return String(body ?? "").split("\n").map((l) => l.trim()).find((l) => l && !/^[/~]\S+$/.test(l) && !/^<hc\b/.test(l)) ?? "";
+  const lines = String(body ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+  // files alone (no words): its first file's path, as typed (a picture shows as its marker instead)
+  return lines.find((l) => !/^[/~]\S+$/.test(l) && !/^<hc\b/.test(l)) ?? lines.find((l) => !/^<hc\b/.test(l) && !PICTURE_LINE.test(l)) ?? "";
 }
+const PICTURE_LINE = /^[/~]\S*\.(png|jpe?g|gif|webp|bmp|heic)$/i;
 const MARKS = /\[(Image|Pasted text) #\d+[^\]]*\]/g;
 
 // Claude Code's box still holds this message, not taken in: its first words in it, or a picture or paste marker (just

@@ -62,7 +62,14 @@ async function sendNow(hub: Hub, b: any, compat: Compat, again = false) {
   const body = [messageBody({ text, quote: typeof b.quote === "string" ? b.quote.slice(0, 2000) : null, tags: typeof b.tags === "string" ? b.tags : "" }), ...files].filter(Boolean).join("\n\n");
   // held on purpose (Ctrl+Enter, a long press): it goes once the agent stops working
   const st = (hub.terminals.get(a) as any)?.status?.state;
-  if (b.hold && (st === "working" || st === "blocked")) { held.push({ addr: a, kind: kindOf(t) ?? "", body, hub, cid: typeof b.cid === "string" ? b.cid.slice(0, 80) : undefined }); drain(); return { ok: true, waiting: true, waitsFor: "turn" }; }
+  if (b.hold && (st === "working" || st === "blocked")) {
+    const cid = typeof b.cid === "string" ? b.cid.slice(0, 80) : undefined;
+    // once it goes: the chat knows it again by its words (its id and files), so the page sees it went in
+    const note = () => { if (cid) compat.noteSend?.(a, { cid, text, files: sent, at: Date.now() }); };
+    held.push({ addr: a, kind: kindOf(t) ?? "", body, hub, cid, note });
+    drain();
+    return { ok: true, waiting: true, waitsFor: "turn" };
+  }
   // when it began to go in, by this clock: the page knows it again in the chat by it (web/src/outbox.ts sameAs)
   const at = Date.now();
   // what it was, so the chat knows it again while it waits in the CLI's queue
@@ -74,7 +81,7 @@ async function sendNow(hub: Hub, b: any, compat: Compat, again = false) {
 }
 
 // Messages held until their agent is free, sent in order, each once.
-const held: { addr: string; kind: string; body: string; hub: Hub; cid?: string; now?: boolean }[] = [];
+const held: { addr: string; kind: string; body: string; hub: Hub; cid?: string; now?: boolean; note?: () => void }[] = [];
 let draining: ReturnType<typeof setInterval> | null = null, busy = false;
 function drain() {
   draining ??= setInterval(async () => {
@@ -90,10 +97,11 @@ function drain() {
         if (i < 0) continue;
         held.splice(i, 1);
         // one that can't go now is told to its page (Chat.failed: Not sent, with Retry), never dropped quietly
+        if (alive) m.note?.();
         const r: any = alive
           ? await sendBody({ hc: asPerson(m.hub), sleep: (ms: number) => Bun.sleep(ms), status: () => (m.hub.terminals.get(m.addr) as any)?.status?.state ?? null }, m.addr, m.kind, m.body).catch((e: Error) => ({ code: 1, stderr: e.message }))
           : { code: 1, stderr: "That agent isn't running." };
-        if (r.code !== 0 && m.cid) noteFailed(m.addr, m.cid, refusal(r).message);
+        if (r.code !== 0 && m.cid) noteFailed(m.addr, m.cid, refusal(r).message, !!r.stuck);
       }
     } finally {
       busy = false;

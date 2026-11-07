@@ -63,7 +63,9 @@ export function once(cid: string, go: (again: boolean) => Promise<unknown>): Pro
 
 /** held messages that couldn't go once the agent was free, by agent address: the page shows them failed with Retry */
 const heldFailed = new Map<string, { cid: string; error: string; at: number }[]>();
-export function noteFailed(addr: string, cid: string, error: string) {
+export function noteFailed(addr: string, cid: string, error: string, stayed = false) {
+  // it stayed in Claude Code's box: its Retry presses Enter only
+  if (stayed) stuck.add(cid);
   // its Retry goes again (its answer was "held", not "in")
   if (load().delete(cid)) save();
   const list = (heldFailed.get(addr) ?? []).filter((f) => f.cid !== cid && Date.now() - f.at < KEEP);

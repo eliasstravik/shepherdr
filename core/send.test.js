@@ -203,3 +203,10 @@ test("a stuck one taken in late is not typed again by its Retry", async () => {
   expect(r.code).toBe(0);
   expect(calls).not.toContain("send");
 });
+
+test("a file alone (no words, not a picture) still in the box is not taken as sent", async () => {
+  const { holds } = await import("./send.js");
+  expect(holds("❯ /var/files/t1/report.txt", "/var/files/t1/report.txt")).toBe(true);
+  expect(holds("❯ /var/files/t1/report.txt", "/var/files/t1/report.txt", true)).toBe(true);
+  expect(holds("❯ ", "/var/files/t1/report.txt")).toBe(false);
+});
