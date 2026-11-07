@@ -34,7 +34,7 @@ import { words, howAnswered } from "./core/asks.js";
 // The rows' words and rules the web app's chat draws by too (core/chat-view.js).
 import { WORDS, clock, subagentsOf, subagentWord, senderName, briefLabel, firstUser, firstKeys, literal, fromName, sentTo, selfName, initialOf, newsWords, resolveArtifacts, unsigned, ownWords, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
 // Sending the person's words, as the web app does (core/send.js).
-import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine, mentionedIn, sendTyped } from "./core/send.js";
+import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine, mentionedIn, sendTyped, SETTLE } from "./core/send.js";
 // hc whose send goes as the person, with no caller: never "Another agent" on another machine (SHEP-3, core/person.js).
 import { asPerson } from "./core/person.js";
 import { AskCards, linkCtl } from "./cards.js";
@@ -1330,8 +1330,10 @@ export default class Chat extends View {
       try {
         const paths = await attach.deliver(msg.files, this.addr, this.machine);
         p.sent = [body, ...paths].filter(Boolean).join("\n\n");
-        // (a message with pictures: its Enter again if Claude Code lost it, sendTyped())
-        r = await sendTyped(this.sendIo(cx), this.addr, this.kind, p.sent);
+        // (a message with pictures: its Enter again if Claude Code lost it, sendTyped(); one that stayed in its box
+        // last time gets only its Enter now, never typed twice)
+        r = await sendTyped(this.sendIo(cx), this.addr, this.kind, p.sent, SETTLE, !!msg.stuck);
+        msg.stuck = !!r.stuck;
         // Its own dialog is open in its terminal (a question or a permission with no card
         // here): the words answer it the "Reply instead…" way.
         if (r.code !== 0 && refusal(r).kind === "blocked" && (this.kind === "claude" || this.kind === "codex")) r = await this.replyInstead(p.sent, cx);

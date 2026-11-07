@@ -14,7 +14,7 @@ import * as SP from "../core/spaces.js";
 const { READ, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, DELETED, deletedSection, withRestoredSection } = SP as any;
 import type { Compat } from "./compat.ts";
 import { worktreeAct } from "./worktrees.ts";
-import { once } from "./send-once.ts";
+import { noteFailed, once } from "./send-once.ts";
 import { execTemplate } from "./spaces.ts";
 import * as MA from "../core/machine-add.js";
 import { exec } from "./model.ts";
@@ -38,7 +38,7 @@ const MACHINE = /^[\w.-]+$/;
 
 /** One page's message to its agent, its files' paths after its words. -> { ok, at } once it is in the agent's terminal
  *  (Claude Code's box clear: core/send.js settleBox), or { waiting } held for the agent's turn; else it throws. */
-async function sendNow(hub: Hub, b: any, compat: Compat) {
+async function sendNow(hub: Hub, b: any, compat: Compat, again = false) {
   const a = addr(b.addr);
   const text = str(b.text ?? "").trim();
   if (!text && !(Array.isArray(b.attachments) && b.attachments.length)) throw new Error("nothing to send");
@@ -67,8 +67,9 @@ async function sendNow(hub: Hub, b: any, compat: Compat) {
   const at = Date.now();
   // what it was, so the chat knows it again while it waits in the CLI's queue
   if (typeof b.cid === "string") compat.noteSend?.(a, { cid: b.cid.slice(0, 80), text, files: sent, at });
-  const r = await sendBody(io, a, kindOf(t) ?? "", body);
-  if (r.code !== 0) throw new Error(refusal(r).message);
+  const r: any = await sendBody(io, a, kindOf(t) ?? "", body, again);
+  // (stuck: it stayed in Claude Code's box; sent again with this id it gets only its Enter: send-once.ts)
+  if (r.code !== 0) throw Object.assign(new Error(refusal(r).message), { stuck: !!r.stuck });
   return { ok: true, at };
 }
 
@@ -88,7 +89,11 @@ function drain() {
         const i = held.indexOf(m);
         if (i < 0) continue;
         held.splice(i, 1);
-        if (alive) await sendBody({ hc: asPerson(m.hub), sleep: (ms: number) => Bun.sleep(ms), status: () => (m.hub.terminals.get(m.addr) as any)?.status?.state ?? null }, m.addr, m.kind, m.body).catch(() => null);
+        // one that can't go now is told to its page (Chat.failed: Not sent, with Retry), never dropped quietly
+        const r: any = alive
+          ? await sendBody({ hc: asPerson(m.hub), sleep: (ms: number) => Bun.sleep(ms), status: () => (m.hub.terminals.get(m.addr) as any)?.status?.state ?? null }, m.addr, m.kind, m.body).catch((e: Error) => ({ code: 1, stderr: e.message }))
+          : { code: 1, stderr: "That agent isn't running." };
+        if (r.code !== 0 && m.cid) noteFailed(m.addr, m.cid, refusal(r).message);
       }
     } finally {
       busy = false;
@@ -589,7 +594,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       // one page's send asked again (its answer lost on the way, a reload, Retry): the same one, never twice
       const cid = typeof b.cid === "string" && b.cid ? b.cid.slice(0, 80) : null;
       if (!cid) return sendNow(hub, b, compat);
-      return once(cid, () => sendNow(hub, b, compat));
+      return once(cid, (again) => sendNow(hub, b, compat, again));
     }
     case "steer": {
       // Send now on a message in Claude Code's own queue (#662): its Ctrl+Enter, only while its screen offers it

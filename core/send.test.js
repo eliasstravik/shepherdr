@@ -160,7 +160,7 @@ test("one that stays in the box is not sent: it fails as stuck, and sending it a
   again.io.hc(["send", "t1", BODY]);
   for (let i = 0; i < 12; i++) await again.io.hc(["read", "t1"]);
   again.calls.length = 0;
-  const r2 = await sendTyped(again.io, "t1", "claude", BODY, QUICK);
+  const r2 = await sendTyped(again.io, "t1", "claude", BODY, QUICK, true);
   expect(r2.code).toBe(0);
   expect(again.calls).not.toContain("send");
   expect(again.box()).toBe("❯ ");
@@ -174,6 +174,22 @@ test("a dialog on screen (no box under its rule) is never pressed", async () => 
   expect(calls.some((c) => c.startsWith("keys"))).toBe(false);
   expect(holds("❯ ", BODY)).toBe(false);
   expect(holds("❯ [Pasted text #1 +12 lines]", "a\nb")).toBe(true);
-  // someone else's stuck pictures are not this one's when it has words of its own
-  expect(holds("❯ [Image #1] other words", BODY, false)).toBe(false);
+  // sent again: only this very message counts, never another one starting the same
+  expect(holds("❯ [Image #1] [Image #2] more images - save to repo", BODY, true)).toBe(true);
+  expect(holds("❯ [Image #1] more images - save to repo and the old ones", BODY, true)).toBe(false);
+  expect(holds("❯ [Image #1] other words", BODY, true)).toBe(false);
+});
+
+test("a screen that can't be read proves nothing: it keeps looking, and a box that then holds it is stuck", async () => {
+  const { settleBox } = await import("./send.js");
+  let n = 0;
+  const io = { sleep: async () => {}, hc: async (args) => {
+    if (args[0] !== "read") return { code: 0, stdout: "" };
+    n++;
+    return n <= 3 ? { code: 1, stdout: "", stderr: "unreachable" } : { code: 0, stdout: `● ok\n────\n❯ [Image #1] more images - save to repo\n────` };
+  } };
+  expect(await settleBox(io, "t1", BODY, { looks: 10, every: 1, enters: 0 })).toBe(false);
+  // never read at all: hc send's word stands
+  const blind = { sleep: async () => {}, hc: async () => ({ code: 1, stdout: "" }) };
+  expect(await settleBox(blind, "t1", BODY, { looks: 3, every: 1, enters: 1 })).toBe(true);
 });

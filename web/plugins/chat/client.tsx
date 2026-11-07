@@ -1737,6 +1737,8 @@ export function SecretCard({ ask, chat, source }: { ask: SecretAsk; chat: Chat; 
 
 /** being sent from this page now, by cid: each once */
 const delivering = new Set<string>()
+/** by cid: done once its send is over (in or failed), for the ones sent after it in its chat */
+const gates = new Map<string, Promise<void>>()
 
 /** send one on its way: its files up first (each once, again by itself when the network cut it off), then the message,
  *  asked again with the same id while the network is the trouble (the server never sends it twice). It is "sent" only
@@ -1746,6 +1748,12 @@ async function deliver(cid: string) {
   const first = getState().outbox.find((x) => x.cid === cid)
   if (!first || first.state !== 'sending') return
   delivering.add(cid)
+  // the agent gets them in the order they were sent: this one's message waits for the ones sent before it in this
+  // chat (words sent while earlier pictures still go up never overtake them); their files go up meanwhile
+  let opened!: () => void
+  const mine = new Promise<void>((r) => (opened = r))
+  const before = getState().outbox.filter((x) => x.chat === first.chat && x.cid !== cid && x.state === 'sending' && x.at <= first.at).map((x) => gates.get(x.cid)).filter(Boolean)
+  gates.set(cid, mine)
   const patch = (p: (x: Outgoing) => Partial<Outgoing>) => setOutbox((all) => all.map((x) => (x.cid === cid && x.state === 'sending' ? { ...x, ...p(x) } : x)))
   const since = first.at
   const onWait = (offline: boolean) => patch((x) => (!!x.offline === offline ? {} : { offline: offline || undefined }))
@@ -1760,6 +1768,7 @@ async function deliver(cid: string) {
       patch(() => ({ up }))
       return { ...f, path }
     }))
+    await Promise.all(before)
     const o = getState().outbox.find((x) => x.cid === cid)
     if (!o || o.state !== 'sending') return
     if (standIns.length) patch(() => ({ files, up: undefined }))
@@ -1783,6 +1792,8 @@ async function deliver(cid: string) {
     patch(() => ({ state: 'failed', error: reasonOf(e), offline: undefined, up: undefined }))
   } finally {
     delivering.delete(cid)
+    gates.delete(cid)
+    opened()
   }
 }
 
