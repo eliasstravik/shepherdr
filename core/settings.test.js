@@ -72,7 +72,7 @@ test("Reactions are on by default, in the core, the window's chain and herdr-tas
   expect(lib).toContain('for (const k of ["tasks", "automations", "agents"])');
   // SHEP-42's key still counts in the window's chain where a layer has no agents'
   expect(lib).toContain('typeof l.obj.assistant?.reactions === "boolean" ? { reactions: l.obj.assistant.reactions, ...l.obj.agents }');
-  expect(read("mods/tasks/bin/herdr_task/settings.py")).toContain('"agents": {"reactions": True, "feedback": True, "feedback_repo": "eliasstravik/shepherdr"}');
+  expect(read("mods/tasks/bin/herdr_task/settings.py")).toContain('"agents": {"reactions": True, "feedback": True, "feedback_repo": "NeuralHerd/BossGoat"}');
   expect(S.REACTIONS.title).toBe("Reactions");
 });
 
@@ -91,7 +91,7 @@ test("upgradeReactions moves the Assistant's Reactions to every agent's", () => 
 // SHEP-78: Feedback offers on by default; the repo as owner/name, a github.com link made one, anything else refused.
 test("Feedback offers and the repo they file to", () => {
   expect(S.DEFAULTS.agents.feedback).toBe(true);
-  expect(S.FEEDBACK.repo).toBe("eliasstravik/shepherdr");
+  expect(S.FEEDBACK.repo).toBe("NeuralHerd/BossGoat");
   expect(S.feedbackRepo(" acme/shep ")).toBe("acme/shep");
   expect(S.feedbackRepo("https://github.com/acme/shep.git")).toBe("acme/shep");
   expect(S.feedbackRepo("")).toBe("");

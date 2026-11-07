@@ -15,7 +15,7 @@ const { grouped, flatKeys, keyFound, KEYBINDS, WEB_KEYS } = K as any
 const apple = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent)
 
 /** the Keybinds list, as the window's dialog groups and names it: [{ group, rows: [{ name, keys }] }] */
-export const KEYS: { group: string; rows: { name: string; keys: string[] }[] }[] = grouped(flatKeys(WEB_KEYS), { layout: 'shepherdr', mac: apple })
+export const KEYS: { group: string; rows: { name: string; keys: string[] }[] }[] = grouped(flatKeys(WEB_KEYS), { layout: 'BossGoat', mac: apple })
 
 /* the Keybinds dialog (the window's mods/keybinds): open or not, on this page */
 let keybindsOpen = false

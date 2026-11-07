@@ -17,9 +17,9 @@ export const CORE_ENVIRONMENT = ['XDG_RUNTIME_DIR', 'XDG_STATE_HOME', 'XDG_CONFI
 export type CoreEnvironment = Partial<Record<typeof CORE_ENVIRONMENT[number], string | null>>
 export type CoreEndpoint = string | { binary: string; session?: string; socket?: string; environment?: CoreEnvironment }
 const REQUIRED = ['terminal.run', 'terminal.list', 'terminal.get', 'terminal.label', 'terminal.attach', 'terminal.send', 'terminal.wait', 'terminal.read', 'terminal.keys', 'terminal.interrupt', 'terminal.kill', 'events.subscribe', 'doc.get', 'doc.set', 'file.read', 'file.write', 'machine.exec', 'machine.list', 'server.status']
-const otherGeneration = (what: string) => new CoreError('incompatible', `Shepherdr speaks herdr-core generation ${CORE_GENERATION}, and ${what}. Update Shepherdr, or run it on a generation ${CORE_GENERATION} core in its own session with --core-bin and --core-session.`)
-const tooOld = (version: unknown) => new CoreError('incompatible', `Shepherdr needs herdr-core ${CORE_MINIMUM} or newer; this core is ${version}. Run hc update, then start Shepherdr again.`)
-const lacking = (version: unknown, missing: string[]) => new CoreError('incompatible', `herdr-core ${version} lacks what Shepherdr needs: ${missing.join(', ')}. Update hc and Shepherdr, then start Shepherdr again.`)
+const otherGeneration = (what: string) => new CoreError('incompatible', `BossGoat speaks herdr-core generation ${CORE_GENERATION}, and ${what}. Update BossGoat, or run it on a generation ${CORE_GENERATION} core in its own session with --core-bin and --core-session.`)
+const tooOld = (version: unknown) => new CoreError('incompatible', `BossGoat needs herdr-core ${CORE_MINIMUM} or newer; this core is ${version}. Run hc update, then start BossGoat again.`)
+const lacking = (version: unknown, missing: string[]) => new CoreError('incompatible', `herdr-core ${version} lacks what BossGoat needs: ${missing.join(', ')}. Update hc and BossGoat, then start BossGoat again.`)
 
 /** One local Unix socket. No shell, SSH bridge, screen parsing, or retry of uncertain writes. */
 export class CoreClient {

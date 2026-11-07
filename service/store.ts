@@ -36,7 +36,7 @@ export class Store {
   private at(): string | null {
     if (!this.remote()) return null;
     const name = this.host!.hubName();
-    if (typeof name !== "string" || !this.host!.reachable()) throw Object.assign(new Error("The machine that serves Shepherdr can't be reached now."), { kind: "unreachable" });
+    if (typeof name !== "string" || !this.host!.reachable()) throw Object.assign(new Error("The machine that serves BossGoat can't be reached now."), { kind: "unreachable" });
     return name;
   }
 

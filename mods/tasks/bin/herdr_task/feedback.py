@@ -1,6 +1,6 @@
-"""Feedback for Shepherdr (SHEP-78): an agent that hits a problem in Shepherdr itself (a Shepherdr,
+"""Feedback for BossGoat (SHEP-78): an agent that hits a problem in BossGoat itself (a BossGoat,
 herdr-task, web or window feature that doesn't work as meant, a command failing like our bug, the
-person's frustration with Shepherdr) offers, once, to file it as a GitHub issue, and files it only
+person's frustration with BossGoat) offers, once, to file it as a GitHub issue, and files it only
 with the person's yes.
 
 - Any agent that isn't an Assistant (a task worker, its reviewer, an automation's run, an agent
@@ -48,9 +48,9 @@ STOP = set("a an and are as at be but by can could did do does doesnt dont for f
 
 
 # What every agent that isn't an Assistant is told at its session's start (reactions.agent_note), with offers on.
-AGENT_NOTE = ("Feedback for Shepherdr (on in Settings): when Shepherdr itself misbehaves, not the project's own code (a Shepherdr, "
+AGENT_NOTE = ("Feedback for BossGoat (on in Settings): when BossGoat itself misbehaves, not the project's own code (a BossGoat, "
               "herdr-task, web app or window feature that doesn't work as meant, a Herdr command failing like a bug, the person "
-              "frustrated with Shepherdr), run herdr-task feedback \"<one line>\" --details \"<goal, what was tried, what went wrong, "
+              "frustrated with BossGoat), run herdr-task feedback \"<one line>\" --details \"<goal, what was tried, what went wrong, "
               "expected, suggested fix>\" once per problem and carry on: it returns at once and the space's Assistant asks the "
               "person whether to file it. Never file an issue yourself; no secrets, private paths or whole logs.")
 
@@ -77,7 +77,7 @@ def repo_of(value):
 
 
 def feedback_repo(d=None):
-    """The repo feedback is filed to: Everywhere's agents.feedback_repo, else upstream Shepherdr's."""
+    """The repo feedback is filed to: Everywhere's agents.feedback_repo, else upstream BossGoat's."""
     d = read_settings() if d is None else d
     a = (d.get("everywhere") or {}).get("agents") if isinstance(d.get("everywhere"), dict) else None
     return repo_of((a or {}).get("feedback_repo") if isinstance(a, dict) else None) or REPO
@@ -247,12 +247,12 @@ def issue_body(line, fields, env, private=None):
         words = trim(fields.get(key))
         parts.append(f"## {head}\n\n{words or '_Not known._'}")
     parts.append("## Environment\n\n" + "\n".join([
-        f"- Shepherdr: {env.get('shepherdr') or 'unknown'}",
+        f"- BossGoat: {env.get('shepherdr') or 'unknown'}",
         f"- Machine: {env.get('os') or 'unknown'}",
         f"- Agent CLI: {env.get('agent') or 'not known'}",
         f"- Used from: {env.get('surface') or 'not stated'}",
     ]))
-    parts.append("_Filed by a Shepherdr agent with the person's yes (Settings › Agents › Feedback offers)._")
+    parts.append("_Filed by a BossGoat agent with the person's yes (Settings › Agents › Feedback offers)._")
     return redact("\n\n".join(parts), private)
 
 
@@ -339,13 +339,13 @@ def queue_news(to, text):
 def news_line(ref, title, line, details, key):
     attr = lambda x: str(x).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
     more = one_line(details, 900)
-    text = f"{ref} feedback: {line}" + (f" · {more}" if more else "") + f" ({one_line(title or 'Shepherdr', 80)})"
+    text = f"{ref} feedback: {line}" + (f" · {more}" if more else "") + f" ({one_line(title or 'BossGoat', 80)})"
     return f'<herdr-news task="{attr(ref)}" event="feedback" key="{key}">{text.replace("<", "‹").replace(">", "›")}</herdr-news>'
 
 
 def offer_words(line, key):
     return (f"Offer it once, when you're between things (never mid-work, never while the person is in the middle of "
-            f"something urgent): ask with your question tool \"Leave feedback for Shepherdr about {line}?\" with Yes, No and "
+            f"something urgent): ask with your question tool \"Leave feedback for BossGoat about {line}?\" with Yes, No and "
             f"Edit first. Yes: herdr-task feedback --key {key} \"{line}\" --file --goal … --happened … --tried … "
             f"--expected … --fix … --repro … --surface web|window. Edit first: show the draft (add --dry-run), take their "
             f"changes, then file. No: herdr-task feedback --key {key} \"{line}\" --no.")

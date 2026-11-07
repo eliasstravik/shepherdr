@@ -215,7 +215,7 @@ export class Push {
   async test(endpoint: string) {
     const s = this.subs.find((x) => x.endpoint === endpoint);
     if (!s) return { ok: false, said: "Alerts are off for this device." };
-    const status = await this.deliver(s, enc(JSON.stringify({ title: "Shepherdr · Test", body: "Alerts reach this device.", tag: "test", test: true })));
+    const status = await this.deliver(s, enc(JSON.stringify({ title: "BossGoat · Test", body: "Alerts reach this device.", tag: "test", test: true })));
     if (status >= 200 && status < 300) return { ok: true, said: "Sent. It should show in a few seconds." };
     if (status === 404 || status === 410) return { ok: false, said: "This device's subscription is gone. Turn alerts on again." };
     return { ok: false, said: status ? `The push service refused it (${status}).` : "The push service couldn't be reached." };

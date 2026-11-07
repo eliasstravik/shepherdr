@@ -1,7 +1,7 @@
 # Develop
 
 ```text
-layouts/shepherdr.json   the layout (two live blocks shipped blank: tasks-thread-term, artifacts-view-body)
+layouts/BossGoat.json   the layout (two live blocks shipped blank: tasks-thread-term, artifacts-view-body)
 mods/<name>/             the 29 mods, installed as they are (names fixed: data/<mod> state follows them)
 lib/                     shared modules, one source each; bin/sync-shared copies them into the mods in lib/COPIES
 lib/addons.json          the add-ons: mods, blocks, keys, helpers, needs, web plugins (docs/addons.md)
@@ -60,7 +60,7 @@ Never point `--root` at the real home for a try, and never start Herdr or herdr-
 
 ## The herdr.dev listing (at release, with the person's yes)
 
-- The repo root is the listed layout folder: `layouts/shepherdr.json`, `mods/`, `RECIPE.md`, `preview.png`,
+- The repo root is the listed layout folder: `layouts/BossGoat.json`, `mods/`, `RECIPE.md`, `preview.png`,
   `keys.json`. herdr.dev reads the recipe's title and first paragraph.
 - Repo topics: add `herdr-layout` (the listing), keep `herdr` and `shepherdr`, and drop `herdr-plugin` (the
   terminal-plugin card; `herdr-plugin.toml` is gone from main, 2.1 stays installable from `v2.1`).

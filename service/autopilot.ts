@@ -22,7 +22,7 @@ export async function checkEvery(words: string) {
   catch (err) {
     if (!/invalid choice/.test((err as Error).message)) throw err;
     if ((APc as any).presetOf(v) !== null) return v;
-    throw new Error("herdr-task here is older than this page: update Shepherdr to save your own schedule's words.");
+    throw new Error("herdr-task here is older than this page: update BossGoat to save your own schedule's words.");
   }
 }
 

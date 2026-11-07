@@ -232,7 +232,7 @@ function readChat() {
   try { return readFileSync(join(dir, "recent.txt"), "utf8").slice(-12000) || "Nothing yet."; } catch { return "Nothing yet."; }
 }
 
-const NO_SERVICE = "Shepherdr's service isn't running on this machine, so on this call I can only read and write this chat.";
+const NO_SERVICE = "BossGoat's service isn't running on this machine, so on this call I can only read and write this chat.";
 /** Without the service: this chat only (send here, look at it). */
 async function localTool(name: string, p: any): Promise<{ result: string; nav?: any; then?: unknown; shows?: string; error?: boolean }> {
   const here = !p?.to || /^(here|this|this chat)$/i.test(String(p.to).trim());

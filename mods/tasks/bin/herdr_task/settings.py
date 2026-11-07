@@ -24,7 +24,7 @@ ASSISTANT_TEMPLATES = ("assistant", "coordinator")  # "coordinator": Assistants 
 DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "must_fix": "major", "max_running": MAX_RUNNING, "worktrees": True,
                       "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": "", "branch": ""},
             "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {},
-            "agents": {"reactions": True, "feedback": True, "feedback_repo": "eliasstravik/shepherdr"}}
+            "agents": {"reactions": True, "feedback": True, "feedback_repo": "NeuralHerd/BossGoat"}}
 LEVELS = ["blocker", "major", "minor"]
 
 
@@ -60,7 +60,7 @@ def write_autopilot(space, values):
     pushed here: the window's machine holds the truth and would put its own back."""
     d = read_settings()
     if d.get("pushed_from"):
-        raise Fail("This machine's Shepherdr settings are a copy from the machine whose window sets them: change Autopilot in Settings there.")
+        raise Fail("This machine's BossGoat settings are a copy from the machine whose window sets them: change Autopilot in Settings there.")
     if space:
         layer = (d.setdefault("spaces", {})).setdefault(space, {})
     else:
@@ -117,7 +117,7 @@ def settings_layers(s, space=None):
 
 
 def settings_for(s, space=None):
-    """The settings for this folder's tasks: Shepherdr settings' Everywhere, then this machine's,
+    """The settings for this folder's tasks: BossGoat settings' Everywhere, then this machine's,
     then the override of the space working in this folder (--space's when several do): the most
     specific wins. The window no longer writes agent or task values for a machine (only its
     machine-only rows, read by machine_limits/machine_option); ones set before still apply here. Written by the settings window (~/.herdr/shepherdr.json); herdr-task only
@@ -139,7 +139,7 @@ def settings_for(s, space=None):
 
 def notes(s, task, which, space=None):
     """A task's "When a task starts" / "finishes" notes (which: "start" or "finish"): its own
-    (--start-notes / --finish-notes), else its folder's from Shepherdr settings. Herdr runs
+    (--start-notes / --finish-notes), else its folder's from BossGoat settings. Herdr runs
     nothing itself: the notes go into the agents' starting prompts."""
     own = (task.get(f"{which}_notes") or "").strip()
     return own or (settings_for(s, space or task.get("space"))["tasks"].get(f"{which}_notes") or "").strip()
@@ -151,7 +151,7 @@ def notes_part(head, text):
 
 
 def worktrees_on(s, space=None):
-    """Tasks here get a git worktree each: in a git repo, unless the person's Shepherdr settings
+    """Tasks here get a git worktree each: in a git repo, unless the person's BossGoat settings
     turn worktrees off for it (then it works in the folder itself, as a folder without git)."""
     return s.loc["kind"] == "repo" and settings_for(s, space)["tasks"].get("worktrees") is not False
 
@@ -428,7 +428,7 @@ def review_limits(s, t):
 
 
 def space_base(s, space=None):
-    """The branch a space's new tasks branch from and merge into (Shepherdr settings > Tasks >
+    """The branch a space's new tasks branch from and merge into (BossGoat settings > Tasks >
     Base branch, per space); "" when unset: the folder's current branch."""
     return str(settings_for(s, space)["tasks"].get("base") or "").strip()
 
@@ -487,7 +487,7 @@ def machine_limits(machine=None):
     """A machine's start limits (Settings > Machines; HERD-40): Everywhere's ("everywhere" ->
     "machine"), then that machine's own ("machines" -> its key -> "machine"; "local" is this
     computer, and a file Herdr pushed to another machine names it in "here"). Each is a number,
-    or null for off; one not set is Shepherdr's default (machine.HOLD)."""
+    or null for off; one not set is BossGoat's default (machine.HOLD)."""
     from .machine import hold_limits
     try:
         with open(SETTINGS) as f:

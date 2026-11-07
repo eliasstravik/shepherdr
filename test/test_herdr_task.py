@@ -2413,7 +2413,7 @@ class AssistantSettings(unittest.TestCase):
         for label, words in [("Review", "off"), ("Merge", "ask the person first"), ("Proof", "on"), ("Task agent", "claude"),
                              ("Base branch", "the folder's checked-out branch"), ("Worktrees", "on"), ("Tasks at once", "10 per folder"),
                              ("Task notes", "none"), ("Autopilot", "off"), ("Reactions", "on"),
-                             ("Feedback offers", "on (offer once to file a Shepherdr problem as an issue on eliasstravik/shepherdr")]:
+                             ("Feedback offers", "on (offer once to file a BossGoat problem as an issue on NeuralHerd/BossGoat")]:
             self.assertTrue(self.line(note, label).startswith(f"- {label}: {words}"), self.line(note, label))
         # nothing differs from Herdr's default: no line says who set it
         self.assertNotIn("; set for", note)
@@ -2666,8 +2666,8 @@ class StarPrompt(unittest.TestCase):
         self.cmd("ask")
         blocks = self.runs[0]["blocks"]
         items = next(b for b in blocks if b["type"] == "buttons")["items"]
-        self.assertEqual(items[0]["href"], "https://github.com/eliasstravik/shepherdr")
-        self.assertEqual([x["label"] for x in items], ["Open Shepherdr on GitHub", "No thanks"])
+        self.assertEqual(items[0]["href"], "https://github.com/NeuralHerd/BossGoat")
+        self.assertEqual([x["label"] for x in items], ["Open BossGoat on GitHub", "No thanks"])
         with open(os.path.join(BIN, "herdr_task", "star.py")) as f:
             src = f.read()
         for word in ("api.github.com", "user/starred", '"gh"', "urllib", "PUT"):
@@ -2799,7 +2799,7 @@ class Feedback(unittest.TestCase):
     def test_offered_once_and_no_is_remembered(self):
         self.assistant()
         code, out = self.say("Ready refuses a reviewed commit")
-        self.assertIn('"Leave feedback for Shepherdr about Ready refuses a reviewed commit?"', out)
+        self.assertIn('"Leave feedback for BossGoat about Ready refuses a reviewed commit?"', out)
         self.assertIn("Already offered", self.say("ready refuses the reviewed commit")[1])
         self.assertIn("Remembered", self.say("Ready refuses a reviewed commit", "--no")[1])
         self.assertIn("said no", self.say("Ready refuses a reviewed commit")[1])
@@ -2820,7 +2820,7 @@ class Feedback(unittest.TestCase):
         self.assertIn("#12 Ready refuses reviewed commits", out)
         self.assertIn("--comment", out)
         self.assertEqual([a[1:3] for a in self.gh], [["issue", "list"]])
-        self.assertIn("eliasstravik/shepherdr", self.gh[0])  # the default repo
+        self.assertIn("NeuralHerd/BossGoat", self.gh[0])  # the default repo
         self.assertEqual(self.gh[0][self.gh[0].index("--search") + 1], "ready refuses reviewed commit")
         code, out = self.say("Ready refuses a reviewed commit", "--file", "--comment", "12", "--happened", "Again on 3.1.12.")
         self.assertEqual(self.gh[-1][:4], ["gh", "issue", "comment", "12"])
@@ -2845,7 +2845,7 @@ class Feedback(unittest.TestCase):
         b = self.body
         for head in ("## Goal", "## What happened", "## What was tried", "## Expected", "## Suggested fix", "## Steps to reproduce", "## Environment"):
             self.assertIn(head, b)
-        for words in ("- Shepherdr: 3.1.12", "- Agent CLI: Claude Code 0.9.1", "- Used from: the web app", "1. Start a task", "… (cut)"):
+        for words in ("- BossGoat: 3.1.12", "- Agent CLI: Claude Code 0.9.1", "- Used from: the web app", "1. Start a task", "… (cut)"):
             self.assertIn(words, b)
         for secret in ("Jane", "janes-box", "100.101.1.2", "/home/jane", "ghp_", "s3cr3t", "jane@example.com", "log line 40"):
             self.assertNotIn(secret, b)

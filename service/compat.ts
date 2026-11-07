@@ -450,7 +450,7 @@ export class Compat {
 
     this.chats = chats;
     this.last = {
-      terminalTransport: "core", name: "Shepherdr", host, user: input.user, places, machines, tasks, automations: automationsBySpace(input.automations ?? [], spaces, (s) => places.find((p) => p.id === s.id)?.name ?? s.name), asks: {}, needs, settings: [...(input.settings ?? []), ...notify],
+      terminalTransport: "core", name: "BossGoat", host, user: input.user, places, machines, tasks, automations: automationsBySpace(input.automations ?? [], spaces, (s) => places.find((p) => p.id === s.id)?.name ?? s.name), asks: {}, needs, settings: [...(input.settings ?? []), ...notify],
       artifacts: (input.artifacts ?? []).map((a) => artifactOf(a, spaces, (addr) => { const k = kindOfTerm((this as any).terminalsOf?.(addr)); return k ? CLI_NAMES[k] ?? k : null; })),
       sections, last, read, off: input.offPlugins ?? [],
       // the Window page's look switches (shared keys the window reads too): the web follows the same ones

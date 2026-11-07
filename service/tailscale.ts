@@ -59,7 +59,7 @@ export async function funnelAnywhere(): Promise<boolean> {
 export async function share(dns: string, port: number): Promise<string | null> {
   const now = await served(dns);
   const ours = `http://127.0.0.1:${port}`;
-  if (now.funnel) return "Funnel is on for this machine's HTTPS port: Shepherdr won't serve there";
+  if (now.funnel) return "Funnel is on for this machine's HTTPS port: BossGoat won't serve there";
   if (now.proxy === ours) return null;
   if (now.proxy) return `${MOUNT} is already shared to ${now.proxy}`;
   const r = await run(["serve", "--bg", "--set-path", MOUNT, String(port)]);

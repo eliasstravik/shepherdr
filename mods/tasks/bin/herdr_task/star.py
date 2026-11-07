@@ -1,5 +1,5 @@
-"""The one-time "Enjoying Shepherdr?" card (SHEP-79): an Assistant may ask the person, once ever, to
-star Shepherdr on GitHub, at a good moment it judges by its instructions (assistant.md).
+"""The one-time "Enjoying BossGoat?" card (SHEP-79): an Assistant may ask the person, once ever, to
+star BossGoat on GitHub, at a good moment it judges by its instructions (assistant.md).
 
 What's kept is Everywhere's `star_prompt` in the settings file (~/.herdr/shepherdr.json), so it
 travels to every machine as the other settings do (the window's push, the web host's sync):
@@ -22,20 +22,20 @@ from .output import say
 from . import settings as conf
 from .store import read_list, store_files
 
-REPO_URL = "https://github.com/eliasstravik/shepherdr"
+REPO_URL = "https://github.com/NeuralHerd/BossGoat"
 # Done tasks on this machine before an ask is possible: never in someone's first session.
 MIN_DONE = 3
-TITLE = "Enjoying Shepherdr?"
-ANSWERS = {"github": "Opened Shepherdr on GitHub", "no": "No thanks"}
+TITLE = "Enjoying BossGoat?"
+ANSWERS = {"github": "Opened BossGoat on GitHub", "no": "No thanks"}
 
 
 def card():
     """The card's recipe: two lines, then the link (the one to press) and No thanks."""
     return {"recipe": 1, "blocks": [
-        {"type": "text", "md": "If Shepherdr has been useful, a star on GitHub helps other people find it "
+        {"type": "text", "md": "If BossGoat has been useful, a star on GitHub helps other people find it "
                                "and lets you follow what's new. This is the only time it will ask."},
         {"type": "buttons", "items": [
-            {"label": "Open Shepherdr on GitHub", "href": REPO_URL, "reply": f"{TITLE} {ANSWERS['github']}"},
+            {"label": "Open BossGoat on GitHub", "href": REPO_URL, "reply": f"{TITLE} {ANSWERS['github']}"},
             {"label": "No thanks", "reply": f"{TITLE} {ANSWERS['no']}", "quiet": True},
         ]},
     ]}

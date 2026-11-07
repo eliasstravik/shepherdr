@@ -1649,7 +1649,7 @@ export function SecretCard({ ask, chat, source }: { ask: SecretAsk; chat: Chat; 
       if (r?.ok === false) setErr(r.error ?? "That didn't go through.")
       else setValue('')
     } catch {
-      setErr("That didn't go through: Shepherdr can't be reached.")
+      setErr("That didn't go through: BossGoat can't be reached.")
     } finally {
       setBusy(false)
     }

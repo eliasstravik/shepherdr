@@ -86,7 +86,7 @@ export const VERSION = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8
 ensureData();
 const release = await holdLock(SOCK);
 if (!release) {
-  console.log("Shepherdr's service is already running.");
+  console.log("BossGoat's service is already running.");
   process.exit(0);
 }
 
@@ -552,11 +552,11 @@ const server = Bun.serve<{ who: string }>({
       // the other machines this service ticks (Serve from: the host the ones with no service of their own)
       ticks: jobs.on ? host.tickOn() : [] });
     // the Web add-on switched off: nothing for the tailnet (this machine's own callers still get the API)
-    if (req.headers.has("tailscale-user-login") && !webOn()) return new Response("Shepherdr's web app is off (Shepherdr settings › Window › Add-ons).", { status: 404 });
+    if (req.headers.has("tailscale-user-login") && !webOn()) return new Response("BossGoat's web app is off (BossGoat settings › Window › Add-ons).", { status: 404 });
     // another machine serves it now (Serve from): a page that still comes here goes there
     if (req.headers.has("tailscale-user-login") && !host.serving()) {
       const there = host.hostLink();
-      return there ? Response.redirect(there, 302) : new Response("Shepherdr's web app is served from another machine now.", { status: 404 });
+      return there ? Response.redirect(there, 302) : new Response("BossGoat's web app is served from another machine now.", { status: 404 });
     }
     const socket = path === "/api/ws" || path === "/api/terminal" || path === "/api/browser" || path === "/api/voice";
     const viaTailnet = req.headers.has("tailscale-user-login");
@@ -750,7 +750,7 @@ const server = Bun.serve<{ who: string }>({
   },
 });
 
-console.log(`Shepherdr ${VERSION} on http://127.0.0.1:${server.port} (data ${DATA})${me && webOn() ? `, https://${me.dns}/shepherdr/` : ""}`);
+console.log(`BossGoat ${VERSION} on http://127.0.0.1:${server.port} (data ${DATA})${me && webOn() ? `, https://${me.dns}/shepherdr/` : ""}`);
 
 // the port is ours now: say where and this start's id (only this user can read it)
 writeFileSync(SERVICE_FILE, JSON.stringify({ port: server.port, id: SERVICE_ID, pid: process.pid, version: VERSION }) + "\n", { mode: 0o600 });

@@ -376,7 +376,7 @@ export class PanelHost {
     ];
     // Three rows on one left edge (EDGE): a slim bar (‹ Tasks; base, Accept), the task (its
     // dot, id and title, and under them what its agent is doing), then the switcher.
-    // Their height is the "tasks-thread-head" block's size in layouts/shepherdr.json (127): keep them in step.
+    // Their height is the "tasks-thread-head" block's size in layouts/BossGoat.json (127): keep them in step.
     return v_flex().id("thread-head-rows").size_full().pt(8).pb(12).gap(12).bg(t.background).border_b(1).border_color(t.border)
       .child(v_flex().flex_none().gap(8)
         .child(this.barRow(t, st, addr))

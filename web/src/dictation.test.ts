@@ -11,9 +11,9 @@ describe('what the service answered to a recording', () => {
     expect(heard(400, JSON.stringify({ error: 'Dictation needs an ElevenLabs key in Settings › Secrets.' }))).toEqual({ error: 'Dictation needs an ElevenLabs key in Settings › Secrets.' })
   })
   test('a page that is not its answer (a proxy, a crash) or no answer at all is an error, never empty words', () => {
-    expect(heard(502, '<html>Bad gateway</html>')).toEqual({ error: "Shepherdr couldn't write it down (error 502)." })
-    expect(heard(200, '{}')).toEqual({ error: "Shepherdr couldn't write it down (error 200)." })
-    expect(heard(0, '')).toEqual({ error: "Shepherdr couldn't be reached." })
+    expect(heard(502, '<html>Bad gateway</html>')).toEqual({ error: "BossGoat couldn't write it down (error 502)." })
+    expect(heard(200, '{}')).toEqual({ error: "BossGoat couldn't write it down (error 200)." })
+    expect(heard(0, '')).toEqual({ error: "BossGoat couldn't be reached." })
   })
   test('a blocked microphone says how to allow it', () => {
     expect(micError({ name: 'NotAllowedError' })).toContain('allow it')

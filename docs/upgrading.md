@@ -1,5 +1,7 @@
 # Upgrading
 
+For an existing `shepherdr` layout, first follow the [BossGoat layout migration](install.md#upgrading-an-existing-shepherdr-layout) to preserve saved layout preferences.
+
 ## From 3.0.x
 
 ```bash

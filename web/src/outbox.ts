@@ -175,7 +175,7 @@ export function expire(out: Outgoing[], now: number, working: (chat: string) => 
       changed = true
       return { ...o, state: 'failed' as const, error, lost }
     }
-    if (o.state === 'sending' && now - o.at > SEND_TIMEOUT + 5000) return fail('No answer from Shepherdr.')
+    if (o.state === 'sending' && now - o.at > SEND_TIMEOUT + 5000) return fail('No answer from BossGoat.')
     if (o.state === 'sent' && !o.waiting && now - (o.wentAt ?? o.at) > KEEP_BUSY) return fail("It didn't show up in the chat.", true)
     if (o.state === 'sent' && !o.waiting && working(o.chat)) {
       // noted now and then, not on every tick: it is saved with the rest
@@ -217,8 +217,8 @@ export function keyOf(m: Message) {
 /** why it didn't go through, in a few words */
 export function reasonOf(e: unknown): string {
   const err = e as Error
-  if (err?.name === 'TimeoutError' || err?.name === 'AbortError') return 'No answer from Shepherdr.'
-  if (err instanceof TypeError) return "Can't reach Shepherdr."
+  if (err?.name === 'TimeoutError' || err?.name === 'AbortError') return 'No answer from BossGoat.'
+  if (err instanceof TypeError) return "Can't reach BossGoat."
   let msg = err?.message ?? ''
   try {
     msg = (JSON.parse(msg) as { error?: string }).error ?? msg

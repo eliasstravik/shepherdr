@@ -39,11 +39,10 @@ export default class WorkspaceChrome extends View {
         .on_click(action).child(svg(`mods/workspace-chrome-shepherdr/${icon}.svg`).size(14))
         .when(!collapsed, el => el.child(label));
       return v_flex().size_full().bg(t.chrome).border_t(1).border_color(t.border).px(8).pt(4).pb(8).text_size(13)
-        // Herdr's own settings, as shipped (with its update dot), then Shepherdr's
-        // (mods/shepherdr-settings) under Shepherdr's mark, the crook.
+        // Herdr's settings (with its update dot), then BossGoat's settings.
         .child(row("settings", "settings", "Settings", () => run("app.settings"))
           .when(Boolean(updates().app.ready), el => el.child(div().size(6).rounded_full().bg(t.accent))))
-        .child(row("shepherdr", "crook", "Shepherdr", () => openSettings()))
+        .child(row("shepherdr", "goat", "BossGoat", () => openSettings()))
         .child(row("machine", "plus", "Add machine", () => run("mod.open", { name: "machine-add-chat" })));
     }
     return h_flex().size_full().bg(t.chrome).pl(collapsed ? 6 : 14).pr(10).gap(4).items_center().text_size(13.5)

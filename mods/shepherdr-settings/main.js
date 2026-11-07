@@ -21,6 +21,9 @@ import { spaces, inRender } from "./live.js";
 import { SHEPHERDR_FILE, SHEPHERDR_DEFAULTS, LOCAL_MACHINE, shepherdrFor, shepherdrLayers, machineOfSpace } from "./coordinator.js";
 import * as models from "./settings.js";
 import { layoutSection } from "./layout.js";
+import { appearanceInit, appearanceSection } from "./appearance.js";
+import { APPEARANCE, WALLPAPER } from "./core/wallpaper.js";
+import { wallpaperTheme } from "./wallpaper.js";
 import { manifest } from "./addons.js";
 import { secretsInit, secretsSection } from "./secrets-section.js";
 import { baseInit, baseRow } from "./base-branch.js";
@@ -37,9 +40,11 @@ import { webSection } from "./web-section.js";
 // herdr-task's merge policy (MERGE): "ask" waits for the person's Accept (which merges), the others merge without it.
 // NOTES: what a task's agent is told to do first and last (tasks.start_notes / finish_notes): herdr-task puts them
 // into its starting prompt; Herdr runs nothing itself.
-import { SECTIONS, ROLES, NOTES, MERGE, MUST_FIX, ROUNDS, ARCHIVE, ABOUT, BACKUP, REACTIONS, STAR, starState, upgradeReactions, NOTIFY_ABOUT, TITLE, SPACE_TITLE,
+import { SECTIONS as SHARED_SECTIONS, ROLES, NOTES, MERGE, MUST_FIX, ROUNDS, ARCHIVE, ABOUT, BACKUP, REACTIONS, STAR, starState, upgradeReactions, NOTIFY_ABOUT, TITLE, SPACE_TITLE,
   EVERYWHERE, CHANGED_HERE, RESET, EDIT_INSTRUCTIONS, USE_OTHER_CLI, LOADING_AGENTS, SAVED, sameAs as sameAsWords,
   spacesOwn, otherCliWords, backupProblem, notifyMachineAbout, machineLabel, TASK_ROWS, LEVEL } from "./core/settings.js";
+
+const SECTIONS = [...SHARED_SECTIONS.slice(0, 6), APPEARANCE, ...SHARED_SECTIONS.slice(6)];
 
 const I = (name) => `mods/shepherdr-settings/${name}.svg`;
 // A page's title, and a Tasks row's (by its key, section.field).
@@ -93,6 +98,7 @@ export default class ShepherdrSettings extends View {
     this.fr = feedbackInit(this);
     // Autopilot: one setting for every space, kept by herdr-task (autopilot-section.js).
     this.ap = autopilotInit(this, cx);
+    this.appearance = appearanceInit();
     // The add-ons Window's switches offer (lib/addons.json, layout.js).
     this.addons = null;
     cx.spawn(async (cx) => { this.addons = await manifest(); cx.notify(); });
@@ -604,6 +610,7 @@ export default class ShepherdrSettings extends View {
   // (Everywhere, then every space by machine), and under it what that level means (a space's
   // machine and folder). A page that is one for every space says so instead.
   levelBar(t) {
+    if (this.section === "appearance") return div().pb(14).text_size(TEXT.label).text_color(t.dim).child(WALLPAPER.scope);
     if (!SECTIONS.find((s) => s.id === this.section)?.space) {
       return div().pb(14).text_size(TEXT.label).line_height("17px").text_color(t.dim).child(LEVEL.global);
     }
@@ -673,7 +680,7 @@ export default class ShepherdrSettings extends View {
   }
 
   draw(cx) {
-    const t = theme();
+    const t = wallpaperTheme(theme(), this.section === "appearance");
     const navRow = (id, title, icon, on, onClick) => h_flex().id(`sh-s-${id}`).h(30).gap(10).px(10).flex_none()
       .items_center().rounded(RADIUS.card).bg(on ? t.raised : "#00000000")
       .when(!on, (el) => el.cursor_pointer().hover((st) => st.bg(t.hover)))
@@ -693,6 +700,7 @@ export default class ShepherdrSettings extends View {
     const body = this.section === "agents" ? this.agents(t, cx)
       : this.section === "tasks" ? this.tasks(t)
       : this.section === "secrets" ? secretsSection(this, t)
+      : this.section === "appearance" ? appearanceSection(this, t)
       : this.section === "window" ? layoutSection(this, t)
       : this.section === "web" ? webSection(this, t)
       : this.section === "notify" ? this.notify(t)

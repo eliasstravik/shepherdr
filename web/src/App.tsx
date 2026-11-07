@@ -48,7 +48,7 @@ import {
   BackIcon,
   BellIcon,
   ChatIcon,
-  CrookIcon,
+  GoatIcon,
   CogIcon,
   OpenIcon,
   AttentionBadge,
@@ -129,10 +129,10 @@ function Loading() {
   return (
     <div data-device={device} className="grid h-full place-items-center bg-bg px-6 font-sans text-sm/5 text-fg3 antialiased phone:text-base/6">
       <div role="status" className="flex flex-col items-center gap-3 text-center">
-        <span className="grid size-10 place-items-center overflow-hidden rounded-[11px] bg-fg pt-1 text-bg">
-          <CrookIcon className="size-8 overflow-visible" />
+        <span className="grid size-10 place-items-center overflow-hidden rounded-[11px] bg-fg text-bg">
+          <GoatIcon className="size-8" />
         </span>
-        {offline ? "Can't reach Shepherdr. Trying again…" : 'Loading…'}
+        {offline ? "Can't reach BossGoat. Trying again…" : 'Loading…'}
       </div>
     </div>
   )
@@ -158,7 +158,7 @@ export function Brand() {
   const snap = useSnap()!
   return (
     <div className="flex items-center gap-1 px-3.5 pt-3 pb-0.5 text-[0.9375rem] font-semibold desktop:pr-2.5 phone:px-5 phone:pt-3 phone:pb-1 phone:text-[1.125rem]">
-      <CrookIcon className="mr-1 size-6" />
+      <GoatIcon className="mr-1 size-6" />
       <span className="min-w-0 flex-1 truncate">{snap.name}</span>
       <SearchButton />
       <PlacesToggle when="open" />
@@ -188,8 +188,8 @@ function SideFoot({ drawer }: { drawer?: boolean }) {
         drawer ? 'pb-2 phone:pb-[max(env(safe-area-inset-bottom),--spacing(2))]' : 'pb-1.5',
       )}
     >
-      {/* the foot: Settings (this device's look is a page in them) and Add machine; the window's first says Shepherdr
-          with the crook, but here it only opens settings */}
+      {/* the foot: Settings (this device's look is a page in them) and Add machine; the window's first says BossGoat
+          with the goat icon, but here it only opens settings */}
       <FootButton onClick={settings} className="flex-1">
         <CogIcon className="size-4 shrink-0 text-fg3 coarse:text-fg2 phone:size-5 phone:text-fg2" />
         Settings

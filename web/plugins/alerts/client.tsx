@@ -6,7 +6,7 @@ import { Toasts } from './toasts.tsx'
 import { DeviceAlerts } from './device.tsx'
 import { registerWorker } from './worker.ts'
 
-const TITLE = 'Shepherdr'
+const TITLE = 'BossGoat'
 
 /** the app icon's count (Badging API: iPhone, Mac, Windows, ChromeOS) and, where there is no icon to mark (Linux), the
  *  window's title: "(3) Shepherdr" */

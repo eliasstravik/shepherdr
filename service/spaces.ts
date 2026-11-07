@@ -72,7 +72,7 @@ export async function execTemplate(hub: Hub, name: string, machine: string | nul
   const cmd = /^command:[ \t]*(.+)$/m.exec(head?.[1] ?? "")?.[1]?.trim();
   if (!head || !cmd || /^exec\s/.test(cmd)) return plain;
   const one = `herdr-${name}-${Date.now().toString(36)}`;
-  const file = `---\nname: ${one}\ndescription: A one-off ${name} start that execs its command (Shepherdr's service), removed after use.\ncommand: exec ${cmd}\n---\n${src.slice(head[0].length)}`;
+  const file = `---\nname: ${one}\ndescription: A one-off ${name} start that execs its command (BossGoat's service), removed after use.\ncommand: exec ${cmd}\n---\n${src.slice(head[0].length)}`;
   const w = await exec(hub, ["sh", "-c", DIR + 'printf "%s" "$2" > "$dir/$1.md"', "x", one, file], machine).catch(() => null);
   if (w?.code !== 0) return plain;
   return { name: one, words: src.slice(head[0].length).trim(), done: () => void exec(hub, ["sh", "-c", DIR + 'rm -f "$dir/$1.md"', "x", one], machine).catch(() => null) };

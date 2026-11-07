@@ -13,7 +13,7 @@ test("keys as people read them, as the window's Keybinds shows them", () => {
 });
 
 test("Shepherdr's keys.json grouped: the layout's own key replaces the global one, Alt+1–9 folds, Chat is its own group", () => {
-  const g = grouped(flatKeys(repoKeys), { layout: "shepherdr" });
+  const g = grouped(flatKeys(repoKeys), { layout: "BossGoat" });
   expect(g.map((x) => x.group)).toEqual(["Tabs", "Spaces", "Panes", "Terminal", "Chat", "App"]);
   const row = (group, name) => g.find((x) => x.group === group)?.rows.find((r) => r.name === name);
   expect(row("Tabs", "Show tab 1–9").keys).toEqual(["Alt+1–9"]);
@@ -30,7 +30,7 @@ test("the web's keys are the window's: each one bound the same in Shepherdr's ke
       expect(repoKeys[section]?.[k] ?? (section === "global" ? herdr[k] : undefined)).toBe(action);
       if (!action.startsWith("tab.select:")) expect(NAMES[action.split(":")[0]]).toBeDefined();
     }
-  const g = grouped(flatKeys(WEB_KEYS), { layout: "shepherdr" });
+  const g = grouped(flatKeys(WEB_KEYS), { layout: "BossGoat" });
   expect(g.map((x) => x.group)).toEqual(["Tabs", "Spaces", "Chat", "App"]);
   expect(g[0].rows.map((r) => r.name)).toEqual(["Show tab 1–9", "Previous tab", "Next tab"]);
   expect(g[0].rows[1].keys).toEqual(["Alt+Left", "Alt+["]);

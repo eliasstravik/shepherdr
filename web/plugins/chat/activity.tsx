@@ -72,7 +72,7 @@ async function ask(chat: string, what: 'turn' | 'output' | 'job', id: string) {
     const b = (await r.json().catch(() => ({}))) as ActivityAnswer
     got.set(k, { data: r.ok ? b : { error: ('error' in b && b.error) || `It said ${r.status}.` }, loading: false })
   } catch {
-    got.set(k, { ...(got.get(k) ?? {}), data: { error: "Can't reach Shepherdr right now." }, loading: false })
+    got.set(k, { ...(got.get(k) ?? {}), data: { error: "Can't reach BossGoat right now." }, loading: false })
   }
   listeners.forEach((l) => l())
 }

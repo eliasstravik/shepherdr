@@ -10,9 +10,9 @@ import { DOS } from "./screen.js";
 
 export const API = "https://api.elevenlabs.io/v1";
 
-export const prompt = (who, where = "") => `You are Shepherdr's voice: the person's hands-free assistant for Shepherdr, an app where AI coding agents work on tasks across their machines. You are on a call that started in ${who}'s chat.
+export const prompt = (who, where = "") => `You are BossGoat's voice: the person's hands-free assistant for BossGoat, an app where AI coding agents work on tasks across their machines. You are on a call that started in ${who}'s chat.
 
-How Shepherdr works:
+How BossGoat works:
 - A machine (this computer, a Mac mini, a VM) has spaces. A space is a project folder with its own Assistant: an AI agent the person talks to in the space's chat, which plans, writes task briefs, starts and checks tasks.
 - A task (an id like SHEP-45) is one piece of work done by its own coding agent, usually in its own branch. Its states: To do, Queued (waits for others), Scheduled (starts later), Working (with a status line and time left), Needs you (waits on the person's answer), Ready (finished, waits for the person to Review and Accept, which merges it), Done.
 - Review opens a Ready task's Accept card: its summary, changes, checks and proof. Accept merges it.
@@ -50,7 +50,7 @@ Rules:
 - "Here", "this task", "that one": what the call's context says (look with what "here" when unsure), or what you just talked about.
 - Making or planning things (a new task or space, a brief, an automation, Autopilot's direction, anything that takes judgment): send it to that space's Assistant in the person's words with every detail, then say you passed it on.
 - Send without asking only when the person clearly asked you to. Never send greetings, chit-chat or talk about the call. Unsure if it's meant for an agent? Ask.
-- Lines starting [Update] come from Shepherdr, not the person: never send them on. Say what matters in one short sentence; always say when an agent needs the person. Where the app is now is for you only: say nothing about it.
+- Lines starting [Update] come from BossGoat, not the person: never send them on. Say what matters in one short sentence; always say when an agent needs the person. Where the app is now is for you only: say nothing about it.
 - open and screen act on the screen the call runs on. Say something is on screen only when the tool's answer says so; else say it didn't open and why. If several spaces or machines fit, ask which.${where ? `\n\nWhere the call is now: ${where}` : ""}`;
 
 const PLACE = { type: "string", description: "Which one: a space's name, a task's id (SHEP-45), a machine's or artifact's name, or \"here\" (the call's or what is on screen). Leave out for all." };
@@ -65,7 +65,7 @@ export const ACTS = ["accept", "start", "schedule", "unschedule", "stop", "resum
   "autopilot_on", "autopilot_off", "autopilot_run", "rename_space", "remove_space", "setting", "forget_secret", "delete_artifact"];
 
 export const TOOLS = [
-  tool("look", "Read Shepherdr: where the call is, a chat, spaces, machines, tasks, a task's details, what needs the person, news, Autopilot, automations, settings, secret names, artifacts. Answers in short sentences.", {
+  tool("look", "Read BossGoat: where the call is, a chat, spaces, machines, tasks, a task's details, what needs the person, news, Autopilot, automations, settings, secret names, artifacts. Answers in short sentences.", {
     what: { type: "string", enum: LOOKS, description: "What to read. here: the call's context and what is on screen. chat: a chat's latest messages (or a search with query). tasks: a list (filter with id and query). task: one task's details, summary, proof and pull request." },
     id: PLACE,
     query: { type: "string", description: "Words to search for (a chat, tasks, settings, artifacts), or a task state to filter tasks (working, ready, needs, queued, scheduled, todo, done)." },
@@ -189,7 +189,7 @@ export async function ensureAgent(io) {
 
 /** The kept file's words: only the id, a tag of the key and the spec it was brought up to, never the key. */
 export const agentFile = (id, tag, spec) =>
-  `# The "Herdr chat" voice agent, made by Shepherdr with ELEVENLABS_API_KEY.\nELEVENLABS_AGENT_ID=${id}\nELEVENLABS_KEY_TAG=${tag}\nELEVENLABS_SPEC=${spec}\n`;
+  `# The "Herdr chat" voice agent, made by BossGoat with ELEVENLABS_API_KEY.\nELEVENLABS_AGENT_ID=${id}\nELEVENLABS_KEY_TAG=${tag}\nELEVENLABS_SPEC=${spec}\n`;
 
 // What starts the conversation, once its socket is open: the prompt with where the call is.
 export const opening = (who, where = "") => ({ type: "conversation_initiation_client_data",

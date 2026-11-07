@@ -33,7 +33,7 @@
     "ctrl-shift-space": "chat.call",
     "ctrl-f": "chat.find"
   },
-  "layout:shepherdr": {
+  "layout:BossGoat": {
     "ctrl-shift-w": "tabs-tasks.close",
     "ctrl-shift-n": "tabs-tasks.newspace",
     "f2": "tabs-tasks.rename-tab",

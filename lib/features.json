@@ -1,6 +1,6 @@
 {
   "//": [
-    "Shepherdr's features list (3.1.14): every feature the layout ships, on both sides. Each has its shared logic (core/<name>.js,",
+    "BossGoat's features list (3.1.14): every feature the layout ships, on both sides. Each has its shared logic (core/<name>.js,",
     "or the service's service/<file> where herdr-core itself is the logic), its Herdr side (the mods it lives in, or a Herdr",
     "built-in) and its web side (files under web/: 2.1's screens and plugins, and web/src/screens). test/test_repo.py checks it:",
     "a feature missing a side, a mod that belongs to no feature, or a listed file that isn't there fails CI. \"planned\" says what",
@@ -195,7 +195,7 @@
       },
       "forms": {
         "herdr": "Toasts with sound, click to go there",
-        "desktop": "Toast in the page; push when no screen shows Shepherdr",
+        "desktop": "Toast in the page; push when no screen shows BossGoat",
         "tablet": "Same",
         "phone": "Top toast, push, app badge"
       },
@@ -236,7 +236,7 @@
     {
       "id": "settings",
       "addon": "core",
-      "title": "Shepherdr settings",
+      "title": "BossGoat settings",
       "core": [
         "settings"
       ],
@@ -281,7 +281,7 @@
         ]
       },
       "forms": {
-        "herdr": "Search, sidebar toggle, Settings and Shepherdr buttons, Add machine",
+        "herdr": "Search, sidebar toggle, Settings and BossGoat buttons, Add machine",
         "desktop": "Header and sidebar footer",
         "tablet": "Header",
         "phone": "Top bar and the More sheet"

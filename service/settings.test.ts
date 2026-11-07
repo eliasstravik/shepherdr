@@ -176,7 +176,7 @@ test("Agents and Tasks say the window's words: the model button, Other CLI, Must
   expect(tasks.rows.some((r) => r.key === "tasks.must_fix")).toBe(false);
   expect(tasks.rows.find((r) => r.key === "tasks.max_running")).toMatchObject({ hint: C.ABOUT["tasks.max_running"], steps: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"] });
   const web = s.sections({ on: true, link: "https://box/shepherdr/", why: null }).find((x) => x.name === "Web")!;
-  expect(web.rows.map((r) => r.label)).toEqual(["Shepherdr on the web", "Link"]);
+  expect(web.rows.map((r) => r.label)).toEqual(["BossGoat on the web", "Link"]);
   expect(web.rows[0].hint).toBe("On, private to your tailnet.");
 });
 
@@ -256,7 +256,7 @@ test("Feedback offers and its repo", () => {
   const sp = { id: "sp7", name: "shop", machine: null, folder: "/shop" };
   const row = (level: string) => s.sections(null, [sp]).find((x) => x.name === "Agents" && x.level === level)!.rows;
   expect(row("all").find((r) => r.key === "agents.feedback")).toMatchObject({ label: "Feedback offers", value: "on", options: ["on", "off"] });
-  expect(row("all").find((r) => r.key === "agents.feedback_repo")).toMatchObject({ label: "Feedback repo", value: "", text: true, placeholder: "eliasstravik/shepherdr" });
+  expect(row("all").find((r) => r.key === "agents.feedback_repo")).toMatchObject({ label: "Feedback repo", value: "", text: true, placeholder: "NeuralHerd/BossGoat" });
   expect(row("sp7").find((r) => r.key === "agents.feedback_repo")).toBeUndefined();
   s.set("agents.feedback", "off", "sp7", sp);
   s.set("agents.feedback_repo", "https://github.com/acme/shep", "all");

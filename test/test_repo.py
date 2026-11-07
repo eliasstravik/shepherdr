@@ -40,7 +40,7 @@ class Repo(unittest.TestCase):
                 self.assertIn(n, ids, f"{a['id']} needs {n}")
 
     def test_layout_has_no_live_values(self):
-        text = open(J("layouts", "shepherdr.json")).read()
+        text = open(J("layouts", "BossGoat.json")).read()
         d = json.loads(text)
         self.assertNotRegex(text, r'"terminal":\s*"t\w+"')
         self.assertNotIn("art-", text)
@@ -53,7 +53,7 @@ class Repo(unittest.TestCase):
     def test_keys_name_our_layout_and_parse(self):
         keys = json.load(open(J("keys.json")))
         layouts = [c for c in keys if c.startswith("layout:")]
-        self.assertEqual(layouts, ["layout:shepherdr"])
+        self.assertEqual(layouts, ["layout:BossGoat"])
         for a in [self.addons["core"]] + self.addons["addons"]:
             for k in a.get("keys", []):
                 ctx, key = k.split(" ", 1)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shepherdr's installer: puts the Shepherdr layout, its mods and helpers into a Herdr app home.
+"""Shepherdr's installer: puts the BossGoat layout, its mods and helpers into a Herdr app home.
 
   shepherdr install    [--root DIR] [--adopt] [--guard] [--keys ask|keep|ours] [--no-hooks] [--dry-run] [--yes]
                        [--port N]: the service's port on 127.0.0.1 when another app holds 7788 (updates keep it)
@@ -20,7 +20,7 @@
 
 What goes where (each under --root, default your home):
   .config/herdr-app/mods/<mod>          the add-ons' mods (lib/addons.json lists them), one swap per mod
-  .config/herdr-app/layouts/shepherdr.json, lib/, core/, bin/
+  .config/herdr-app/layouts/BossGoat.json, lib/, core/, bin/
   .config/herdr-app/keys.json           our keys merged in: free ones added, a key you use asked about first
   .config/herdr-core/templates/*.md     the Assistant's, worker's and reviewer's instructions
   .local/bin/{herdr-task,herdr-artifact,herdr-secret,herdr-browser,shepherdr}   links into the above
@@ -275,6 +275,9 @@ def source_items(src):
         items += [(m, f"{APP}/mods/{m}/{f}", os.path.join(top, f)) for f in walk_files(top)]
     for name in manifest["core"]["layouts"]:
         items.append(("layout", f"{APP}/layouts/{name}.json", os.path.join(src, "layouts", f"{name}.json")))
+        preview = os.path.join(src, "layouts", f"{name}.svg")
+        if os.path.isfile(preview):
+            items.append(("layout", f"{APP}/layouts/{name}.svg", preview))
     for f in walk_files(os.path.join(src, "lib")):
         if not f.startswith(".last"):
             items.append(("lib", f"{APP}/lib/{f}", os.path.join(src, "lib", f)))
@@ -608,6 +611,20 @@ def merge_keys(r, src, rec, mode, yes):
     old = (rec or {}).get("keys", {})
     out = dict(old)
     changed = False
+    if not (rec or {}).get("bossgoat_keys_migrated") and "layout:shepherdr" in have:
+        target = have.setdefault("layout:BossGoat", {})
+        old = dict(old)
+        for key, value in have["layout:shepherdr"].items():
+            if key in target:
+                continue
+            target[key] = value
+            name = f"layout:BossGoat {key}"
+            out[name] = {"value": value, "was": None, "added": True}
+            if old.get(f"layout:shepherdr {key}", {}).get("value") == value:
+                old[name] = out[name]
+            changed = True
+        if rec is not None:
+            rec["bossgoat_keys_migrated"] = True
     asked = sys.stdin.isatty() and not yes and mode == "ask"
     for ctx, keys in ours.items():
         for key, value in keys.items():
@@ -768,6 +785,10 @@ def cmd_install(a, update=False):
         if home:
             raise Stop(f"{r.p(APP)} isn't there: open Herdr once first, so it writes its home")
         r.notes.append(f"{r.p(APP)} didn't exist: made (a scratch root)")
+    if os.path.isfile(r.p(f"{APP}/layouts/shepherdr.json")) and not os.path.isfile(r.p(f"{APP}/layouts/BossGoat.json")):
+        raise Stop('Before upgrading, preserve your layout preferences in the running Herdr window:\n'
+                   '  herdr-app do layout.clone \'{"name":"shepherdr","as":"BossGoat"}\'\n'
+                   'Then rerun with --adopt to back up the clone and install BossGoat. Layout click state is left intact.')
     build_web(r, src, home, a)
     manifest, mods, items = source_items(src)
     actions, clashes = plan_files(r, rec, items, a.adopt)
@@ -821,6 +842,7 @@ def cmd_install(a, update=False):
             atomic_write(r.p(rel), data, mode)
     for rel in gone:
         if not rel.startswith(f"{APP}/mods/") and not r.dry:
+            r.backup(rel)
             os.remove(r.p(rel))
     for g, rel, how, data, mode in actions:
         if how != "keep":
@@ -848,7 +870,7 @@ def cmd_install(a, update=False):
     if not a.dry_run:
         if r.backed:
             say(f"  backup of what it replaced: {r.backup_dir}")
-        say("  done. Next: `shepherdr doctor`" + ("" if home else f" --root {root}") + ", then pick the Shepherdr layout in Herdr (Ctrl+Shift+L).")
+        say("  done. Next: `shepherdr doctor`" + ("" if home else f" --root {root}") + ", then pick the BossGoat layout in Herdr (Ctrl+Shift+L).")
     return 0
 
 
@@ -1063,7 +1085,7 @@ def cmd_doctor(a):
                 compile(read(os.path.join(pkg, f)), os.path.join(pkg, f), "exec")
             except SyntaxError as e:
                 bad.append(f"herdr-task doesn't compile: {e}")
-    for rel in ("layouts/shepherdr.json", "keys.json"):
+    for rel in ("layouts/BossGoat.json", "keys.json"):
         try:
             json.load(open(r.p(f"{APP}/{rel}")))
         except (OSError, ValueError) as e:

@@ -126,3 +126,31 @@ then the space's own), without guessing (`herdr_task/assistant_settings.py`):
   already shows where it was made, so a news row would only repeat it.
 - **Other agents get only Reactions** (above): a worker's brief's Settings block is fixed when it starts.
 
+## BossGoat desktop background
+
+BossGoat includes `bossgoat-background.png` as its default background, so a new installation needs no file
+selection or download. Existing custom images remain selected. The default transparency is 0% (fully visible).
+
+In the desktop sidebar, open **BossGoat → Appearance → Background** and select **Solid colour** or **Image**.
+Solid colours use HolyCow’s [Eden palette](https://github.com/NeuralHerd/HolyCow/blob/main/website/src/styles/eden.css):
+Paper, Pearl, Sage and Peach for light backgrounds; Ink, Midnight and Charcoal for dark backgrounds.
+Dark solids use matching dark chat surfaces and light text. These are plain colours, with no image to load.
+Switching modes remembers your last solid colour and image, including its transparency, on this computer.
+
+For an image, choose a PNG, JPEG or WebP file,
+or drop one onto the preview. Images up to 30 MB and 60 megapixels are accepted and copied
+locally, with a maximum edge of 4096 pixels. The original image stays untouched.
+
+The picture fills the conversation area without stretching. **Transparency** ranges from 0% (fully visible)
+to 100% (hidden), while messages keep light surfaces. Transparency applies only to images. Changes save automatically.
+The message box follows Herdr’s native light or dark theme so its typing cursor stays visible, regardless of the background.
+**Reset to default** restores `bossgoat-background.png` and its default transparency. Other Herdr layouts, terminal panes and the web app
+keep their existing appearance.
+
+This preference belongs to this computer, not a space or an agent. It is stored in Herdr’s local
+shared state; image copies live in `~/.config/herdr-app/data/bossgoat-wallpaper/`. They are not sent
+to agents or other machines, and updates preserve them. Reset restores the bundled image without deleting
+your original image or the local image cache. Older Fade settings retain their appearance.
+
+The macOS picker uses Apple’s Command Line Tools. Linux uses the desktop portal and PyGObject /
+GdkPixbuf, as the chat attachment picker does.

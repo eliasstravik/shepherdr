@@ -326,7 +326,7 @@ function lookMachines(snap: Snapshot) {
   return done(snap.machines.map((m) => {
     const sp = snap.places.filter((p) => p.machine === m.machine).length;
     const work = snap.tasks.filter((t) => !t.archived && t.status === "work" && snap.places.find((p) => p.id === t.place)?.machine === m.machine).length;
-    return `${machineSaid(snap, m.machine)}${m.here ? " (where Shepherdr serves from)" : ""}: ${m.status === "off" ? `offline${m.unreachableSince ? ` since ${m.unreachableSince}` : ""}` : m.connecting ? "connecting" : "online"}, ${sp} space${sp === 1 ? "" : "s"}, ${work} task${work === 1 ? "" : "s"} working.`;
+    return `${machineSaid(snap, m.machine)}${m.here ? " (where BossGoat serves from)" : ""}: ${m.status === "off" ? `offline${m.unreachableSince ? ` since ${m.unreachableSince}` : ""}` : m.connecting ? "connecting" : "online"}, ${sp} space${sp === 1 ? "" : "s"}, ${work} task${work === 1 ? "" : "s"} working.`;
   }).join("\n") || "No machines.");
 }
 
@@ -494,7 +494,7 @@ export async function voiceTool(name: string, params: any, where: Where, io: Voi
   // the oldest calls' tools, from an agent made before (send_to_agent, read_chat): as send and look at the chat
   if (name === "send_to_agent") return voiceTool("send", { text: p.text }, where, io);
   if (name === "read_chat") return voiceTool("look", { what: "chat" }, where, io);
-  if (!snap) return fail("Shepherdr is still starting: try again in a moment.");
+  if (!snap) return fail("BossGoat is still starting: try again in a moment.");
   try {
     if (name === "look") {
       switch (String(p.what ?? "")) {
@@ -644,7 +644,7 @@ async function act(snap: Snapshot, where: Where, io: VoiceIO, p: any, id: string
       case "rename_space":
         if (!value) return fail("What should it be called?");
         ask = `Rename ${sp.name} to ${value}?`; body = { type: "rename", id: sp.id, name: value }; said = `Renamed it ${value}.`; break;
-      case "remove_space": ask = `Remove ${sp.name} from Shepherdr? Its folder and code stay on disk.`; body = { type: "space-remove", place: sp.id }; said = `Removed ${sp.name}.`; break;
+      case "remove_space": ask = `Remove ${sp.name} from BossGoat? Its folder and code stay on disk.`; body = { type: "space-remove", place: sp.id }; said = `Removed ${sp.name}.`; break;
     }
   } else if (action === "setting") {
     const sp = id ? findSpace(snap, id, where) : null;

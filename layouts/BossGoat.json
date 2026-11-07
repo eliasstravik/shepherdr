@@ -1,5 +1,6 @@
 {
   "id": "root",
+  "preview": "layouts/BossGoat.svg",
   "cloned_from": {
     "name": "main",
     "version": "0.1.11"

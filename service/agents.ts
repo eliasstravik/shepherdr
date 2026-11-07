@@ -142,7 +142,7 @@ export class Agents {
       return out.terminal as string;
     }
     const script = join(APP, "mods", "coordinator", "restart.sh");
-    if (!existsSync(script)) throw new Error("Restarting an Assistant needs Shepherdr's window layout installed.");
+    if (!existsSync(script)) throw new Error("Restarting an Assistant needs BossGoat's window layout installed.");
     const p = Bun.spawn(["bash", script, addr, JSON.stringify(built.argv)], { stdout: "pipe", stderr: "pipe", stdin: "ignore",
       env: { ...process.env, HERDR_RESTART_CHAT: pane, ...(built.resume ? { HERDR_RESTART_RESUME: "1" } : {}) } });
     const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);

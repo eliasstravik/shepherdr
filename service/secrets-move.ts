@@ -150,7 +150,7 @@ if (!connected.includes(to)) fail(`${to} is offline: it needs to be on to take t
 const w = await exec(["sh", "-c", `${PATHS}herdr-secret where --json`], to);
 let whereThere: any = null;
 try { whereThere = JSON.parse(w.stdout.trim().split("\n").pop() ?? ""); } catch {}
-if (w.code !== 0 || !whereThere || typeof whereThere.here !== "boolean") fail(`herdr-secret on ${to} doesn't know where secrets are kept yet: update Shepherdr there first (shepherdr update, or the release).`);
+if (w.code !== 0 || !whereThere || typeof whereThere.here !== "boolean") fail(`herdr-secret on ${to} doesn't know where secrets are kept yet: update BossGoat there first (shepherdr update, or the release).`);
 const ml = await exec(["sh", "-c", `${PATHS}hc machine ls --json`], to);
 let theirs: Record<string, string> = {};
 try { theirs = Object.fromEntries((JSON.parse(ml.stdout).machines ?? []).filter((m: any) => m.id && !m.temporary).map((m: any) => [m.name, m.id])); }

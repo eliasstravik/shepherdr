@@ -61,6 +61,7 @@ import { ScreenWatch, screenStrips, openCard, cardsOf, starting, cliOf } from ".
 import { dayLabel, dayOf } from "./days.js";
 import { CallScreen } from "./call-screen.js";
 import { on as addonOn } from "./addons.js";
+import { currentWallpaper, wallpaperLayer, wallpaperTheme } from "./wallpaper.js";
 
 // Messages a page of history holds: the newest page first, earlier ones as the person scrolls up.
 const PAGE = 200;
@@ -1684,9 +1685,9 @@ export default class Chat extends View {
   fresh(t) {
     const starting = this.phase === "starting";
     return v_flex().flex_1().min_h(0).items_center().justify_center().px(24).gap(6)
-      .child(div().text_size(TEXT.title).font_medium().text_color(t.foreground).child(starting ? WORDS.startingAssistant : WORDS.emptyTitle))
+      .child(div().text_size(TEXT.title).font_medium().text_color(t.foreground).when(t.wallpaper, (el) => el.bg(t.surface).px(10).py(5).rounded(8)).child(starting ? WORDS.startingAssistant : WORDS.emptyTitle))
       .child(div().max_w(380).text_center().text_size(TEXT.label).text_color(t.dim)
-        .child(WORDS.emptyBody));
+        .when(t.wallpaper, (el) => el.bg(t.surface).px(10).py(5).rounded(8)).child(WORDS.emptyBody));
   }
 
   // ---- find (Ctrl+F) ----------------------------------------------------------------------------
@@ -3018,7 +3019,7 @@ export default class Chat extends View {
     // A readable column, centered when the pane is wide.
     // At a block's edge a row drops its outer room there: spaced() puts the gap between blocks.
     const col = (el, px = 18, py = 6) => h_flex().w_full().justify_center()
-      .child(div().w_full().max_w(COLUMN + 2 * px).px(px).pt(x.top0 ? 0 : py).pb(x.bot0 ? 0 : py).child(el));
+      .child(div().w_full().max_w(COLUMN + 2 * px).when(t.wallpaper, (el) => el.bg(t.surface).rounded(8)).px(px).pt(x.top0 ? 0 : py).pb(x.bot0 ? 0 : py).child(el));
     const pad = (el) => col(el, 18, 7);
     // The person's words on the right in an accent tint; the agent's on the left, quieter.
     const most = Math.max(240, Math.floor(Math.min(this.width, COLUMN) * 0.8));
@@ -3825,6 +3826,8 @@ export default class Chat extends View {
       .child(h_flex().w_full().h(36).px(12).gap(8).items_center().rounded(10).border_1().border_color(t.border)
         .text_size(12.5).text_color(t.dim).child(div().size(6).flex_none().rounded(3).bg(t.dim)).child(div().flex_1().child(WORDS.ended))
         .when(Boolean(this.taskKey), (el) => el.child(this.button("chat-resume", this.resuming ? WORDS.resuming : "Resume",null, "primary", t, (cx) => this.resumeTask(cx)))));
+    // Herdr draws the native caret from its own theme, independently of the chat wallpaper.
+    t = theme();
     // An open card, or the agent's own dialog in its terminal, doesn't lock the box: words
     // written there answer it ("Reply instead…"). Only a call waits until it's free.
     const blocked = st === "blocked" && !this.asks.length;
@@ -3836,7 +3839,7 @@ export default class Chat extends View {
     const recallable = !list.length && (!this.box.value() || this.recall >= 0);
     const take = (fn) => (_e, cx) => { fn(cx); cx.stop_propagation(); cx.notify(); };
     const sel = Math.min(this.slashSel, Math.max(0, list.length - 1));
-    return div().flex_none().w_full().max_w(COLUMN + 28).mx_auto().px(14).pt(8).child(v_flex().id("chat-composer").w_full().rounded(10).border_1()
+    return div().flex_none().w_full().max_w(COLUMN + 28).mx_auto().px(14).pt(8).child(v_flex().id("chat-composer").w_full().rounded(10).border_1().text_color(t.foreground)
       // Esc stops a working agent while the box is empty and nothing is open over it.
       .key_context([list.length ? "chat_slash" : recallable ? "chat_recall" : "chat_composer",
         st === "working" && !list.length && !this.box.value().trim() && !this.quote ? "chat_stop" : null].filter(Boolean).join(" "))
@@ -4080,12 +4083,14 @@ export default class Chat extends View {
     if (this.call && paneFocused && !this.callHadFocus) cx.timer.after(0, () => { if (this.call) this.callFocus.focus(); });
     this.callHadFocus = Boolean(this.call && paneFocused);
     this.alerts(cx);
-    const t = theme();
+    const picture = currentWallpaper();
+    const t = wallpaperTheme(theme(), picture);
     const st = this.status() ?? null;
     if (st === "working" && this.lastWorking !== "working") this.workingSince = Date.now();
     if (st !== "working") this.stopping = false;
     this.lastWorking = st;
-    const root = v_flex().id("chat").size_full().bg(t.background).text_color(t.foreground).text_size(13)
+    const root = v_flex().id("chat").relative().size_full().bg(t.background).text_color(t.foreground).text_size(13)
+      .when(Boolean(picture), (el) => el.child(wallpaperLayer(picture, this.width, this.height)))
       .on_size_change((size, cx) => {
         if (Math.abs(size.width - this.width) > 1) this.width = size.width;
         this.height = size.height;

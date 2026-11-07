@@ -33,17 +33,17 @@ function current(view) {
 // Asks this machine's service to move it (the same as the web app's Settings › Web).
 async function move(label) {
   const token = await localToken();
-  if (!token) return "Shepherdr's service isn't running here.";
+  if (!token) return "BossGoat's service isn't running here.";
   // its port, and that Shepherdr's own service answers there (not another app), before the token goes out
   const svc = await localService().catch(() => null);
-  if (!svc) return "Shepherdr's service isn't answering here.";
+  if (!svc) return "BossGoat's service isn't answering here.";
   try {
     const r = await fetch(`${svc.base}/api/action`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ type: "setting", key: "web.serve", value: label }) });
     const j = await r.json().catch(() => null);
     return j?.ok === false ? j.error ?? "It could not be moved." : "";
   } catch {
-    return "Shepherdr's service isn't answering here.";
+    return "BossGoat's service isn't answering here.";
   }
 }
 

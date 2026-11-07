@@ -28,13 +28,13 @@ function Offline() {
   if (restarting)
     return (
       <div role="status" data-topbar className={topBar}>
-        Shepherdr is updating. Back in a moment.
+        BossGoat is updating. Back in a moment.
       </div>
     )
   const at = new Date(offline).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   return (
     <div role="status" data-topbar className={topBar}>
-      Can't reach Shepherdr since {at}. Showing what it showed last; trying again.
+      Can't reach BossGoat since {at}. Showing what it showed last; trying again.
     </div>
   )
 }

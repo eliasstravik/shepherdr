@@ -125,7 +125,7 @@ def rows(space, d=None, auto=None):
              [("autopilot", "every"), ("autopilot", "events"), ("autopilot", "direction"), ("autopilot", None)]),
             ("reactions", "Reactions", "on (react to some of the person's messages with one emoji)" if reacting
              else "off (never react to the person's messages)", "on" if reacting else "off", [("agents", "reactions")]),
-            ("feedback", "Feedback offers", f"on (offer once to file a Shepherdr problem as an issue on {repo}, only on the person's yes)"
+            ("feedback", "Feedback offers", f"on (offer once to file a BossGoat problem as an issue on {repo}, only on the person's yes)"
              if offering else "off (never offer feedback for Shepherdr; file nothing)", "on" if offering else "off",
              [("agents", "feedback"), ("agents", "feedback_repo")]),
         ]

@@ -121,7 +121,7 @@ export function keyFound(filter, group, row) {
 export const KEYBINDS = { title: "Keybinds", filter: "Filter keys", none: "No keys match." };
 
 // The window's keys that work in the web app too (web/plugins/keyboard handles each), as keys.json and Herdr's
-// defaults bind them, under the shepherdr layout. The others are the window's: panes, the command palette, zoom,
+// defaults bind them, under the BossGoat layout. The others are the window's: panes, the command palette, zoom,
 // the terminal's own keys, and those a browser keeps for itself (Ctrl+Tab, Ctrl+1–9, Ctrl+Shift+N, T, W).
 export const WEB_KEYS = {
   global: {
@@ -135,7 +135,7 @@ export const WEB_KEYS = {
     "ctrl-,": "app.settings",
   },
   "mod:chat": { "ctrl-shift-d": "chat.dictate", "ctrl-shift-space": "chat.call", "ctrl-f": "chat.find" },
-  "layout:shepherdr": { "shift-f2": "tabs-tasks.rename-space" },
+  "layout:BossGoat": { "shift-f2": "tabs-tasks.rename-space" },
 };
 
 // keys.json's sections as the list grouped() takes: { section: { keys: action } } -> [{ section, keys, action }].

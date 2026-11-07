@@ -337,7 +337,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (b.mode === "count") return { ok: true, workers };
     const tab = t.labels?.["herdr.coordinator.tab"];
     const script = join(APP, "mods", "coordinator", "close.sh");
-    if (!tab || !existsSync(script)) throw new Error("Closing an Assistant needs Shepherdr's window layout installed.");
+    if (!tab || !existsSync(script)) throw new Error("Closing an Assistant needs BossGoat's window layout installed.");
     const r = await run(["bash", script, tab, a!, b.mode === "stop" ? "stop" : "keep"]);
     if (r.code !== 0) throw new Error("It didn't close: the Herdr window needs to be open.");
     return { ok: true };
@@ -382,7 +382,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const known = await knownAgents(hub, compat, sp.machine ?? null);
     if (b.type === "tab-agents") return { ok: true, agents: known.map(({ kind, name, installed }) => ({ kind, name, installed })) };
     const a = typeof b.kind === "string" ? known.find((x) => x.kind === b.kind && x.installed && x.run?.length) : null;
-    if (b.kind != null && !a) throw new Error("Not an agent Shepherdr knows.");
+    if (b.kind != null && !a) throw new Error("Not an agent BossGoat knows.");
     const r = await run(["herdr-app", "do", "tab.new", "--space", sp.id, "--folder", sp.folder || "~", ...(a ? ["--name", a.name, "--argv", JSON.stringify(a.run)] : [])]);
     if (r.code !== 0) throw new Error("A new tab opens in the Herdr window: it needs the window open.");
     return { ok: true };
@@ -409,7 +409,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const assistant = t.labels?.["herdr.role"] === "coordinator" && !t.labels?.["herdr.agent"];
     const argv = to?.run ?? (assistant ? null : now?.run ?? null);
     const script = join(APP, "mods", "coordinator", "restart.sh");
-    if (!existsSync(script)) throw new Error("Switching agents needs Shepherdr's window layout installed.");
+    if (!existsSync(script)) throw new Error("Switching agents needs BossGoat's window layout installed.");
     const r = await run(["bash", script, a, ...(argv ? [JSON.stringify(argv)] : [])]);
     if (r.code !== 0) throw new Error("It didn't restart: the Herdr window needs to be open.");
     return { ok: true };

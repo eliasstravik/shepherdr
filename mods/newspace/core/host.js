@@ -183,7 +183,7 @@ export const SERVE = {
   confirm: (m, here) => (here ? "Serve the web app from this computer?" : `Serve the web app from ${m}?`),
   detail: (m, here) => (here
     ? "Its link moves here and the other machine stops sharing it. Pins and settings come along."
-    : `Shepherdr's web service is installed or updated on ${m}, its link moves there and this computer stops sharing it. Pins and settings come along.`),
+    : `BossGoat's web service is installed or updated on ${m}, its link moves there and this computer stops sharing it. Pins and settings come along.`),
   verb: "Move it",
 };
 

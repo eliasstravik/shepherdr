@@ -45,10 +45,10 @@ async function readNow(): Promise<{ state: DeviceState; endpoint: string | null;
 }
 
 const WORDS: Record<DeviceState, { title: string; about: string }> = {
-  on: { title: 'On', about: 'This device gets alerts while Shepherdr is not on its screen.' },
+  on: { title: 'On', about: 'This device gets alerts while BossGoat is not on its screen.' },
   off: { title: 'Off', about: 'This device gets no alerts.' },
-  blocked: { title: 'Blocked', about: "This device's settings block Shepherdr's alerts. On an iPhone: Settings › Notifications › Shepherdr › Allow Notifications. In a browser: the site's settings beside its address." },
-  install: { title: 'Add to Home Screen first', about: 'An iPhone sends alerts only to the app on its Home Screen: tap Share, then Add to Home Screen, and open Shepherdr from there.' },
+  blocked: { title: 'Blocked', about: "This device's settings block BossGoat's alerts. On an iPhone: Settings › Notifications › BossGoat › Allow Notifications. In a browser: the site's settings beside its address." },
+  install: { title: 'Add to Home Screen first', about: 'An iPhone sends alerts only to the app on its Home Screen: tap Share, then Add to Home Screen, and open BossGoat from there.' },
   unsupported: { title: 'Not here', about: 'This browser has no push alerts.' },
 }
 

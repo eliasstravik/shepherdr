@@ -69,7 +69,7 @@ if (cmd === "status") {
   const where = from === undefined ? "a machine not linked from here" : from === null ? "this computer" : from;
   const link = from === undefined ? null : await linkOf(from as string | null);
   if (json) console.log(JSON.stringify({ ok: true, host: from ?? null, here: from === null, link }));
-  else say(`Shepherdr's web app is served from ${where}${link ? `: ${link}` : ""}.`);
+  else say(`BossGoat's web app is served from ${where}${link ? `: ${link}` : ""}.`);
   process.exit(0);
 }
 if (cmd !== "serve-from" || !target) fail("usage: shepherdr web serve-from <machine|here> [--take-link] [--json] | shepherdr web status");
@@ -87,13 +87,13 @@ if (from && !connected.includes(from)) say(`${from} (serving now) is offline: it
 const BUILD = buildId();
 let there = await node(to);
 if (!there || there.version !== VERSION || (there.build && there.build !== BUILD) || (!there.build && to !== null)) {
-  say(`Installing Shepherdr's web service on ${to ?? "this computer"}…`);
+  say(`Installing BossGoat's web service on ${to ?? "this computer"}…`);
   const cli = process.env.SHEPHERDR_CLI || "shepherdr";
   const p = Bun.spawn([cli, "web", "install-on", to ?? "here"], { stdout: json ? "pipe" : "inherit", stderr: "pipe", stdin: "ignore" });
   const err = await new Response(p.stderr).text();
   if ((await p.exited) !== 0) fail(err.trim().split("\n").pop()?.replace(/^shepherdr: /, "") || `couldn't install it on ${to}`);
   for (let i = 0; i < 60 && !(there?.build === BUILD); i++) { await Bun.sleep(2000); there = await node(to); }
-  if (there?.build !== BUILD) fail(`Shepherdr's web service on ${to ?? "this computer"} hasn't started again: \`shepherdr doctor\` there says why.`);
+  if (there?.build !== BUILD) fail(`BossGoat's web service on ${to ?? "this computer"} hasn't started again: \`shepherdr doctor\` there says why.`);
 }
 
 // ---- 2. the link there --------------------------------------------------------------------------------------------
@@ -121,7 +121,7 @@ if (take) {
 // ---- 3. the shared data, in the new host's words ------------------------------------------------------------------
 if ((record?.id ?? me.id) !== toId && (was === null || connected.includes(was))) {
   const src = await namesOf(was), dst = to === null ? { id: me.id, links } : there;
-  if (!src || !dst) fail("couldn't read both machines' names (is Shepherdr's service running on both?)");
+  if (!src || !dst) fail("couldn't read both machines' names (is BossGoat's service running on both?)");
   const move = renamer(src, dst);
   const doc = (await getDoc("shepherdr", was)).value;
   if (doc && typeof doc === "object") await setDoc("shepherdr", relocateDoc(doc, move), to);
@@ -152,6 +152,6 @@ for (let i = 0; i < 45 && !link; i++) {
   else await Bun.sleep(2000);
 }
 if (json) console.log(JSON.stringify({ ok: true, host: to, link }));
-else say(link ? `Shepherdr's web app is served from ${to ?? "this computer"}: ${link}` : `Moved to ${to ?? "this computer"}; its link comes once Tailscale shares it there (\`shepherdr web status\`).`);
+else say(link ? `BossGoat's web app is served from ${to ?? "this computer"}: ${link}` : `Moved to ${to ?? "this computer"}; its link comes once Tailscale shares it there (\`shepherdr web status\`).`);
 c.close();
 process.exit(0);

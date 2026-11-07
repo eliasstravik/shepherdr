@@ -106,7 +106,7 @@ export function upgradeReactions(cfg) {
 // { asked, answer }). Once asked it never shows again, whatever the switch says.
 export const STAR = {
   title: "Ask for a GitHub star",
-  about: "Once, ever, after things go well, your Assistant may show a small card with a link to Shepherdr on GitHub.",
+  about: "Once, ever, after things go well, your Assistant may show a small card with a link to BossGoat on GitHub.",
   asked: (at, answer) => `Asked on ${new Date(at).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}${answer === "github" ? " (you opened GitHub)" : answer === "no" ? " (no thanks)" : ""}. It won't ask again.`,
 };
 // What Everywhere's star_prompt says: whether the switch is on (off: never asks) and the line under it once asked.
@@ -121,11 +121,11 @@ export function starState(cfg) {
 // only, agents.feedback_repo (the repo it files to; empty: upstream Shepherdr's).
 export const FEEDBACK = {
   title: "Feedback offers",
-  about: "When Shepherdr itself misbehaves, agents offer once to file it as a GitHub issue, only with your yes.",
+  about: "When BossGoat itself misbehaves, agents offer once to file it as a GitHub issue, only with your yes.",
   repoTitle: "Feedback repo",
-  repoAbout: "Where feedback issues go, as owner/name. Empty: Shepherdr's own repo.",
-  repo: "eliasstravik/shepherdr",
-  bad: "Write it as owner/name, like eliasstravik/shepherdr.",
+  repoAbout: "Where feedback issues go, as owner/name. Empty: BossGoat's own repo.",
+  repo: "NeuralHerd/BossGoat",
+  bad: "Write it as owner/name, like NeuralHerd/BossGoat.",
 };
 // owner/name from what was typed (owner/name or a github.com link), "" for empty, null when it isn't one.
 export function feedbackRepo(v) {
@@ -331,11 +331,11 @@ export function addonAbout(about, now, stop) {
 }
 
 // ---- Web -------------------------------------------------------------------------------------------------------
-export const WEB = { title: "Shepherdr on the web", link: "Link", copy: "Copy", phone: "Open it on your phone" };
+export const WEB = { title: "BossGoat on the web", link: "Link", copy: "Copy", phone: "Open it on your phone" };
 // The Web page's state line: off (the Web add-on), not read yet, no service, or what the service last said (web.json).
 // Served from another machine (Serve from, core/host.js): says which; a move under way says that first.
 export const webState = (off, loaded, w) => (off ? "Off. Turn it on under Window › Add-ons." : !loaded ? "Reading…"
-  : !w ? "Shepherdr's service isn't running here." : w.serve?.moving ? SERVE.moving(w.serve.moving)
+  : !w ? "BossGoat's service isn't running here." : w.serve?.moving ? SERVE.moving(w.serve.moving)
   : w.serve?.host && !w.serve.reachable ? SERVE.unreachable(w.serve.host) : w.why ? w.why
   : w.serve?.host ? SERVE.elsewhere(w.serve.host) : "On, private to your tailnet.");
 

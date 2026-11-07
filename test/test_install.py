@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHEPHERDR = os.path.join(ROOT, "bin", "shepherdr")
@@ -55,19 +56,80 @@ class Install(unittest.TestCase):
     def p(self, *rel):
         return os.path.join(self.root, *rel)
 
+    def test_layout_upgrade_keeps_preferences_and_custom_shortcuts(self):
+        run("install", "--root", self.root, "--yes")
+        legacy = self.p(APP, "layouts/shepherdr.json")
+        target = self.p(APP, "layouts/BossGoat.json")
+        os.rename(target, legacy)
+        record = self.p(APP, "data/shepherdr/installed.json")
+        rec = json.loads(Path(record).read_text())
+        rec["files"][f"{APP}/layouts/shepherdr.json"] = rec["files"].pop(f"{APP}/layouts/BossGoat.json")
+        rec["keys"] = {k.replace("layout:BossGoat", "layout:shepherdr"): v for k, v in rec["keys"].items()}
+        with open(record, "w") as f:
+            json.dump(rec, f)
+        keys_path = self.p(APP, "keys.json")
+        keys = json.loads(Path(keys_path).read_text())
+        keys["layout:shepherdr"] = keys.pop("layout:BossGoat")
+        keys["layout:shepherdr"].update({"f2": "mine.rename", "alt-g": "mine.go"})
+        keys["layout:BossGoat"] = {"shift-f2": "mine.space"}
+        with open(keys_path, "w") as f:
+            json.dump(keys, f)
+        before = tree(self.root)
+        blocked = run("install", "--root", self.root, "--yes", ok=False)
+        self.assertNotEqual(blocked.returncode, 0)
+        self.assertIn("layout.clone", blocked.stdout + blocked.stderr)
+        self.assertEqual(tree(self.root), before, "upgrade must wait until Herdr copies the click state")
+
+        # Model the files created by Herdr's supported clone command.
+        clone = json.loads(Path(legacy).read_text())
+        clone["cloned_from"] = {"name": "shepherdr", "version": "0.1.12"}
+        with open(target, "w") as f:
+            json.dump(clone, f)
+        state = self.p(APP, "layouts/.state/BossGoat.json")
+        os.makedirs(os.path.dirname(state), exist_ok=True)
+        with open(state, "w") as f:
+            f.write('{"theme":"paper","sidebar":{"px":260}}')
+        before = tree(self.root)
+        run("install", "--root", self.root, "--yes", "--adopt", "--keys", "keep", "--dry-run")
+        self.assertEqual(tree(self.root), before)
+        run("install", "--root", self.root, "--yes", "--adopt", "--keys", "keep")
+        self.assertEqual(Path(state).read_bytes(), before[f"{APP}/layouts/.state/BossGoat.json"])
+        self.assertFalse(os.path.exists(legacy), "the old shipped layout must leave the picker")
+        self.assertTrue(list(Path(self.p(APP, ".shepherdr-backup")).rglob("shepherdr.json")))
+        keys = json.loads(Path(keys_path).read_text())
+        self.assertEqual(keys["layout:BossGoat"]["f2"], "mine.rename")
+        self.assertEqual(keys["layout:BossGoat"]["shift-f2"], "mine.space")
+        self.assertEqual(keys["layout:BossGoat"]["alt-g"], "mine.go")
+        del keys["layout:BossGoat"]["alt-g"]
+        with open(keys_path, "w") as f:
+            json.dump(keys, f)
+        run("install", "--root", self.root, "--yes", "--keys", "keep")
+        self.assertNotIn("alt-g", json.loads(Path(keys_path).read_text())["layout:BossGoat"], "migration only runs once")
+        run("doctor", "--root", self.root)
+        run("uninstall", "--root", self.root)
+        keys = json.loads(Path(keys_path).read_text())
+        self.assertEqual(keys["layout:BossGoat"], {"shift-f2": "mine.space"})
+        self.assertEqual(keys["layout:shepherdr"]["f2"], "mine.rename")
+        self.assertTrue(os.path.exists(state))
+
     def test_install_again_update_uninstall(self):
         out = run("install", "--root", self.root, "--yes").stdout
         self.assertRegex(out, r"files: \d+ new\n")
         rec = json.load(open(self.p(APP, "data/shepherdr/installed.json")))
         self.assertEqual(rec["version"], "3.1.14")
         self.assertTrue(os.path.isfile(self.p(APP, "mods/tasks/bin/herdr-task")))
-        self.assertTrue(os.path.isfile(self.p(APP, "layouts/shepherdr.json")))
+        self.assertTrue(os.path.isfile(self.p(APP, "layouts/BossGoat.json")))
+        layout = json.load(open(self.p(APP, "layouts/BossGoat.json")))
+        self.assertTrue(os.path.isfile(self.p(APP, layout["preview"])))
+        self.assertEqual(Path(self.p(APP, "mods/chat/bossgoat-background.png")).read_bytes(),
+                         (Path(ROOT) / "mods/chat/bossgoat-background.png").read_bytes(),
+                         "new installations must include the default wallpaper without downloading it")
         self.assertEqual(os.path.realpath(self.p(".local/bin/herdr-task")), os.path.realpath(self.p(APP, "mods/tasks/bin/herdr-task")))
         # A key the person uses is kept (no terminal to ask in); free ones are added.
         keys = json.load(open(self.p(APP, "keys.json")))
         self.assertEqual(keys["global"]["ctrl-k"], "mine.open")
         self.assertEqual(keys["global"]["alt-1"], "space.select:1")
-        self.assertEqual(keys["layout:shepherdr"]["f2"], "tabs-tasks.rename-tab")
+        self.assertEqual(keys["layout:BossGoat"]["f2"], "tabs-tasks.rename-tab")
         hooks = json.load(open(self.p(".claude/settings.json")))
         self.assertEqual(hooks["model"], "x")
         self.assertIn("ask-hook.sh", json.dumps(hooks["hooks"]["PermissionRequest"]))
