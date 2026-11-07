@@ -15,6 +15,8 @@ type Evidence = {
   summary?: string
   details?: string
   proof?: { id: string; title: string } | null
+  /** its other artifacts (a research task's report), linked beside its proof */
+  artifacts?: { id: string; title: string }[]
   git?: boolean
   commits?: { count: number; list: { sha: string; subject: string }[] }
   diff?: { files: number; added: number; removed: number; list: { path: string; added: number; removed: number }[] } | null
@@ -80,6 +82,17 @@ function Changes({ e }: { e: Evidence }) {
         </ul>
       ) : null}
     </div>
+  )
+}
+
+// An artifact (its proof, or another it published) over the card, in the viewer; closing it comes back here
+function ArtifactRow({ a }: { a: { id: string; title: string } }) {
+  return (
+    <button type="button" onClick={() => openArtifact(a.id)} className="press-dim flex h-9 w-full items-center gap-2 rounded-[var(--row-radius)] bg-well px-2.5 text-left shadow-soft hover:bg-hover phone:h-11">
+      <span className="min-w-0 flex-1 truncate">{A.proofTitle(a.title)}</span>
+      <span className="shrink-0 text-xs text-fg3">{A.ACCEPT.open}</span>
+      <OpenIcon className="size-3.5 shrink-0 text-fg3" />
+    </button>
   )
 }
 
@@ -153,15 +166,13 @@ export function AcceptCard() {
               </p>
             </Section>
             <Section label={A.ACCEPT.proof}>
-              {e.proof ? (
-                // the proof artifact over the card, in the viewer; closing it comes back here
-                <button type="button" onClick={() => openArtifact(e.proof!.id)} className="press-dim flex h-9 w-full items-center gap-2 rounded-[var(--row-radius)] bg-well px-2.5 text-left shadow-soft hover:bg-hover phone:h-11">
-                  <span className="min-w-0 flex-1 truncate">{A.proofTitle(e.proof.title)}</span>
-                  <span className="shrink-0 text-xs text-fg3">{A.ACCEPT.open}</span>
-                  <OpenIcon className="size-3.5 shrink-0 text-fg3" />
-                </button>
-              ) : <p className="text-fg3">{A.ACCEPT.noProof}</p>}
+              {e.proof ? <ArtifactRow a={e.proof} /> : <p className="text-fg3">{A.ACCEPT.noProof}</p>}
             </Section>
+            {e.artifacts?.length ? (
+              <Section label={A.ACCEPT.artifacts}>
+                <div className="flex flex-col gap-1.5">{e.artifacts.map((a) => <ArtifactRow key={a.id} a={a} />)}</div>
+              </Section>
+            ) : null}
             {w.details ? (
               <section className="flex flex-col gap-2 border-t border-line pt-3">
                 <button type="button" aria-expanded={details} onClick={() => setDetails(!details)} className="flex items-center gap-1.5 self-start text-[0.8125rem] font-medium text-fg3 hover:text-fg phone:text-sm">
