@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { once } from "./actions.ts";
+import { once } from "./send-once.ts";
 
 // SHEP-93: a phone that lost the answer asks again with the same id: it never goes twice
 test("a send asked again while on its way waits for it, and one that went in answers again without going", async () => {

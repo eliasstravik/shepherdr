@@ -14,6 +14,7 @@ import * as SP from "../core/spaces.js";
 const { READ, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, DELETED, deletedSection, withRestoredSection } = SP as any;
 import type { Compat } from "./compat.ts";
 import { worktreeAct } from "./worktrees.ts";
+import { once } from "./send-once.ts";
 import { execTemplate } from "./spaces.ts";
 import * as MA from "../core/machine-add.js";
 import { exec } from "./model.ts";
@@ -69,19 +70,6 @@ async function sendNow(hub: Hub, b: any, compat: Compat) {
   const r = await sendBody(io, a, kindOf(t) ?? "", body);
   if (r.code !== 0) throw new Error(refusal(r).message);
   return { ok: true, at };
-}
-
-/** What pages sent lately, by the page's id (cid): a send asked again while on its way waits for it and gets its
- *  answer, one that went in answers again without going twice; one that failed may go again. Kept an hour. */
-const sends = new Map<string, { at: number; going: Promise<unknown>; done?: boolean }>();
-export function once(cid: string, go: () => Promise<unknown>): Promise<unknown> {
-  for (const [k, v] of sends) if (Date.now() - v.at > 60 * 60_000) sends.delete(k);
-  const was = sends.get(cid);
-  if (was) return was.going;
-  const e = { at: Date.now(), going: go() };
-  sends.set(cid, e);
-  e.going.then(() => { e.done = true; }, () => { if (sends.get(cid) === e) sends.delete(cid); });
-  return e.going;
 }
 
 // Messages held until their agent is free, sent in order, each once.

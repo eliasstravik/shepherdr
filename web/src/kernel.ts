@@ -3,6 +3,7 @@ import { actionable, attentionCounts } from './attention.ts'
 import { useSyncExternalStore, type FC, type ReactNode } from 'react'
 import { buildId } from '@shared/build.ts'
 import { expire, loadOutbox, prune, saveOutbox, settle, type Outgoing } from './outbox.ts'
+import { HttpError, wakeAll } from './uploads.ts'
 import { keptOf, mayReload, type Kept } from './reload.ts'
 import { OPEN_WITHIN, PONG_WITHIN, retryIn, SAY_LOST_AFTER } from './link.ts'
 import { groupFor, groupTasks, loadAllDone, loadGroups, loadShut, keepTasks, namesFor, saveAllDone, saveGroups, saveShut, shownSplit, type GroupBy, type Groups, type TaskGroup } from './groups.ts'
@@ -739,7 +740,8 @@ let watched = ''
 
 export async function act(a: Action, signal?: AbortSignal) {
   const r = await fetch('api/action', { method: 'POST', headers: { 'content-type': 'application/json', 'x-shepherdr': '1' }, body: JSON.stringify(a), signal })
-  if (!r.ok) throw new Error((await r.text()) || `${r.status}`)
+  // with its status: a proxy's 502 is the network (uploads.ts transient), the server's own no is not
+  if (!r.ok) throw new HttpError(r.status, (await r.text()) || `${r.status}`)
   return r.json().catch(() => ({}))
 }
 
@@ -771,6 +773,8 @@ export function connect() {
     if (saying) clearTimeout(saying)
     saying = null
     watched = ''
+    // the link is back: what waits to send goes now
+    wakeAll()
     if (state.ui.offline) setUI({ offline: null })
     watchVisible()
   }
