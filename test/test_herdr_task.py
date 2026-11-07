@@ -1433,6 +1433,69 @@ class MergedOnlyWithOwnWork(unittest.TestCase):
         self.assertNotIn("pr", self.task)
         self.assertNotIn(("pr", "create"), calls)
 
+    # SHEP-96: a task with no commits beyond its base (research, an artifact only) still waits in
+    # Ready for the person's Accept, its words kept; Accept just marks it done and cleans up.
+    def ready_said(self, summary="Found three options.", details="- Read five sources"):
+        import argparse
+        from unittest import mock
+        with mock.patch.object(self.commands, "review_refusal", lambda *a: None), \
+                mock.patch.object(self.commands, "find_proof", lambda *a: None), \
+                mock.patch.object(self.commands, "task_settings", lambda *a: []), \
+                mock.patch.object(self.commands, "ready_turns", lambda *a: {}), \
+                mock.patch.object(self.commands, "merge_policy", lambda *a: "auto"), \
+                mock.patch.object(self.commands, "tell", lambda *a: (_ for _ in ()).throw(AssertionError("asked to merge"))), \
+                mock.patch.object(self.commands, "pr_open", lambda *a: (_ for _ in ()).throw(AssertionError("a pull request opened"))):
+            self.commands.cmd_ready(argparse.Namespace(id="SHEP-1", json=True, folder=None, summary=summary, details=details,
+                                                       proof=None, agents_md=None))
+        return self.task["state"]
+
+    def accept_now(self):
+        import argparse
+        from unittest import mock
+        import herdr_task.github as github
+        with mock.patch.object(self.commands, "finish", github.finish):  # the real one: worktree and branch go
+            self.commands.cmd_accept(argparse.Namespace(id="SHEP-1", json=True, folder=None))
+
+    def test_ready_with_no_commits_waits_for_accept(self):
+        calls = self.github([])
+        self.assertEqual(self.ready_said(), "ready")
+        self.assertEqual((self.task["summary"], self.task["details"]), ("Found three options.", "- Read five sources"))
+        self.assertTrue(self.task["nothing_to_merge"])
+        self.assertNotIn("auto_merge", self.task)
+        self.assertNotIn("pr", self.task)
+        self.assertNotIn(("pr", "create"), calls)
+        self.assertTrue(os.path.isdir(self.task["worktree"]))
+        # the tick leaves it for the person too
+        self.assertEqual(self.tick_once(), ("ready", False))
+        self.task["gh_checked"] = 0
+        self.assertEqual(self.tick_once(), ("ready", False))
+        # Accept: done, never merged, its worktree and branch cleaned up
+        self.accept_now()
+        self.assertEqual(self.task["state"], "done")
+        self.assertFalse(self.task.get("merged"))
+        self.assertTrue(self.task["nothing_to_merge"])
+        self.assertFalse(os.path.isdir(self.task["worktree"]))
+        self.assertEqual(self.git(self.main, "branch", "--list", "task/1"), "")
+
+    def test_ready_only_caught_up_with_main_waits_for_accept(self):
+        self.github([])
+        self.commit(self.main, "another task merged")
+        self.git(self.task["worktree"], "merge", "-q", "--ff-only", "main")
+        self.assertEqual(self.ready_said(), "ready")
+        self.assertTrue(self.task["nothing_to_merge"])
+        self.accept_now()
+        self.assertEqual(self.task["state"], "done")
+        self.assertFalse(self.task.get("merged"))
+
+    def test_commits_after_a_no_commit_ready_go_the_usual_way(self):
+        self.github([])
+        self.assertEqual(self.ready_said(), "ready")
+        self.task["state"] = "running"  # back at work
+        self.change(self.task["worktree"], "reactions on the left")
+        with self.assertRaises(AssertionError):
+            self.ready_said()  # on to pr_open
+        self.assertNotIn("nothing_to_merge", self.task)
+
     def test_ready_with_work_left_opens_its_pull_request(self):
         self.change(self.task["worktree"], "reactions on the left")
         self.github([])
@@ -1765,6 +1828,24 @@ class FastOffIsSaid(unittest.TestCase):
         self.assertNotIn('service_tier="fast"', off)
         self.assertIn('service_tier="fast"', argv_for({"agent": "codex", "fast": True}))
         self.assertIn('{"fastMode": false}', argv_for({"agent": "claude", "fast": False}))
+
+
+class AcceptCardArtifacts(unittest.TestCase):
+    """SHEP-96: the Accept card links the task's other artifacts (a research report) beside its proof."""
+
+    def test_its_other_artifacts_since_it_started(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.proof as proof
+        arts = [{"id": "report-0003", "title": "SHEP-1: Three options", "task": "SHEP-1", "at": 300},
+                {"id": "proof-0002", "title": "SHEP-1: Reactions · Proof", "task": "SHEP-1", "at": 200, "files": ["recipe.json"]},
+                {"id": "other-0004", "title": "SHEP-2: Elsewhere", "task": "SHEP-2", "at": 400},
+                {"id": "old-0001", "title": "SHEP-1: Before it started", "task": "SHEP-1", "at": 50}]
+        s = Store([{"id": 1, "title": "Reactions", "state": "ready", "started": 100, "agents": []}])
+        t = s.data["tasks"][0]
+        with mock.patch.object(proof, "artifacts_of", lambda folder: arts):
+            self.assertEqual(proof.task_artifacts(s, t, {"id": "proof-0002"}), [{"id": "report-0003", "title": "SHEP-1: Three options"}])
+            self.assertEqual([a["id"] for a in proof.task_artifacts(s, t)], ["report-0003", "proof-0002"])
 
 
 if __name__ == "__main__":

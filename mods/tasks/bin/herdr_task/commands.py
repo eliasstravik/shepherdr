@@ -388,17 +388,16 @@ def cmd_ready(args):
         t = s.find(args.id)
         # Its review is the agent's own, as its brief's Settings block says (herdr-task starts no
         # reviewers). A worktree branch with nothing beyond its base (none of its own, or only its
-        # base caught up with): nothing to merge, so done at once with its summary (as Shepherdr);
-        # no Accept needed. Tasks in the folder itself still land in Ready.
+        # base caught up with: a research or artifact-only task) still waits in Ready for the
+        # person's Accept, its summary, details and artifacts on the card (SHEP-96); no pull request,
+        # and Accept just marks it done and cleans up its worktree.
         if wt and t.get("start") and in_base(s, t) and not merged_here(s, t):
             t["nothing_to_merge"] = True
-            finish(s, t, even_if_busy=True)
-            v = view(s, t)
-            say(args, v, f"{s.ref(t)}: nothing to merge (no commits beyond its base); done.")
-            return
+        else:
+            t.pop("nothing_to_merge", None)
         # Its work already in its base (SHEP-59: its pull request squash-merged, or nothing left to
         # merge): done at once, never a second pull request.
-        gone = already_merged(s, t) if wt and t.get("start") else None
+        gone = already_merged(s, t) if wt and t.get("start") and not t.get("nothing_to_merge") else None
         if gone is not None:
             t["merged"] = True
             if gone:
@@ -623,10 +622,12 @@ def finalize(s, t):
     s.dirty = True
     wt = t.get("worktree")
     msg = f"{s.ref(t)} is ready."
-    if t.get("mode") != "worktree" or not wt:
-        # Nothing to merge: it waits in Ready for the person's Accept, whatever the merge setting.
+    if t.get("mode") != "worktree" or not wt or t.get("nothing_to_merge"):
+        # Nothing to merge (in the folder itself, or no commits beyond its base): it waits in Ready
+        # for the person's Accept, whatever the merge setting; no pull request.
         t.pop("auto_merge", None)
-        return msg + " The person accepts it in the Tasks panel."
+        return msg + (" Nothing to merge (no commits beyond its base)." if t.get("nothing_to_merge") else "") + \
+            " The person accepts it in the Tasks panel."
     repo = github(s) if wt and os.path.isdir(wt) else None
     if repo:
         try:
@@ -1037,6 +1038,8 @@ def cmd_accept(args):
         elif merged_here(s, t) or in_base(s, t):
             # Its own work already in the base branch, or none of its own: nothing to merge.
             t["merged"] = merged_here(s, t)
+            if not t["merged"]:
+                t["nothing_to_merge"] = True
             finish(s, t, even_if_busy=True)
         elif ff_merge(s, t):
             how = "merged"

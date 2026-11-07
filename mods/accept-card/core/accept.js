@@ -12,6 +12,7 @@ export const ACCEPT = {
   changes: "Changes",
   checks: "Checks",
   proof: "Proof",
+  artifacts: "Artifacts",
   details: "Details",
   notGit: "Not a git folder.",
   noCommits: "No commits.",
