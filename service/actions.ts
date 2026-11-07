@@ -15,6 +15,7 @@ import * as SP from "../core/spaces.js";
 const { READ, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, DELETED, deletedSection, withRestoredSection } = SP as any;
 import type { Compat } from "./compat.ts";
 import { worktreeAct } from "./worktrees.ts";
+import { noteFailed, once } from "./send-once.ts";
 import { execTemplate } from "./spaces.ts";
 import * as MA from "../core/machine-add.js";
 import { exec } from "./model.ts";
@@ -30,12 +31,58 @@ function logSpace(action: string, id: string, name: string | null, extra: Record
   } catch {}
 }
 const ATTACH = join(process.env.HERDR_APP_HOME || join(homedir(), ".config", "herdr-app"), "data", "chat-attach");
+/** files in one message at most (the page says so before it sends: web/plugins/chat/client.tsx) */
+export const MAX_FILES = 50;
 const ADDR = /^([\w.-]+\/)?t[0-9a-z]+$/;
 const REF = /^[A-Z][A-Z0-9]*-\d+$/;
 const MACHINE = /^[\w.-]+$/;
 
+/** One page's message to its agent, its files' paths after its words. -> { ok, at } once it is in the agent's terminal
+ *  (Claude Code's box clear: core/send.js settleBox), or { waiting } held for the agent's turn; else it throws. */
+async function sendNow(hub: Hub, b: any, compat: Compat, again = false) {
+  const a = addr(b.addr);
+  const text = str(b.text ?? "").trim();
+  if (!text && !(Array.isArray(b.attachments) && b.attachments.length)) throw new Error("nothing to send");
+  const t = hub.terminals.get(a);
+  if (!t || t.state !== "live") throw new Error("That agent isn't running.");
+  const io = { hc: asPerson(hub), sleep: (ms: number) => Bun.sleep(ms), status: () => (hub.terminals.get(a) as any)?.status?.state ?? null };
+  // files sent with it: their paths after the words, as the window's chat sends them (copied first to another machine)
+  const sent: string[] = Array.isArray(b.attachments) ? b.attachments : [];
+  // never some of them quietly
+  if (sent.length > MAX_FILES) throw new Error(`At most ${MAX_FILES} files in one message.`);
+  for (const p of sent) if (typeof p !== "string" || !p.startsWith(ATTACH + "/") || p.includes("/../")) throw new Error("That file isn't one sent from here.");
+  // all at once
+  const files = await Promise.all(sent.map(async (p) => {
+    if (!a.includes("/")) return p;
+    const put = await hc(["put", a, p, "--json"]);
+    let landed: string | null = null;
+    try { landed = JSON.parse(put.stdout || "{}").path ?? null; } catch {}
+    if (put.code !== 0 || !landed) throw new Error("A file didn't reach that machine.");
+    return landed;
+  }));
+  const body = [messageBody({ text, quote: typeof b.quote === "string" ? b.quote.slice(0, 2000) : null, tags: typeof b.tags === "string" ? b.tags : "" }), ...files].filter(Boolean).join("\n\n");
+  // held on purpose (Ctrl+Enter, a long press): it goes once the agent stops working
+  const st = (hub.terminals.get(a) as any)?.status?.state;
+  if (b.hold && (st === "working" || st === "blocked")) {
+    const cid = typeof b.cid === "string" ? b.cid.slice(0, 80) : undefined;
+    // once it goes: the chat knows it again by its words (its id and files), so the page sees it went in
+    const note = () => { if (cid) compat.noteSend?.(a, { cid, text, files: sent, at: Date.now() }); };
+    held.push({ addr: a, kind: kindOf(t) ?? "", body, hub, cid, note });
+    drain();
+    return { ok: true, waiting: true, waitsFor: "turn" };
+  }
+  // when it began to go in, by this clock: the page knows it again in the chat by it (web/src/outbox.ts sameAs)
+  const at = Date.now();
+  // what it was, so the chat knows it again while it waits in the CLI's queue
+  if (typeof b.cid === "string") compat.noteSend?.(a, { cid: b.cid.slice(0, 80), text, files: sent, at });
+  const r: any = await sendBody(io, a, kindOf(t) ?? "", body, again);
+  // (stuck: it stayed in Claude Code's box; sent again with this id it gets only its Enter: send-once.ts)
+  if (r.code !== 0) throw Object.assign(new Error(refusal(r).message), { stuck: !!r.stuck });
+  return { ok: true, at };
+}
+
 // Messages held until their agent is free, sent in order, each once.
-const held: { addr: string; kind: string; body: string; hub: Hub; cid?: string; now?: boolean }[] = [];
+const held: { addr: string; kind: string; body: string; hub: Hub; cid?: string; now?: boolean; note?: () => void }[] = [];
 let draining: ReturnType<typeof setInterval> | null = null, busy = false;
 function drain() {
   draining ??= setInterval(async () => {
@@ -50,7 +97,12 @@ function drain() {
         const i = held.indexOf(m);
         if (i < 0) continue;
         held.splice(i, 1);
-        if (alive) await sendBody({ hc: asPerson(m.hub), sleep: (ms: number) => Bun.sleep(ms), status: () => (m.hub.terminals.get(m.addr) as any)?.status?.state ?? null }, m.addr, m.kind, m.body).catch(() => null);
+        // one that can't go now is told to its page (Chat.failed: Not sent, with Retry), never dropped quietly
+        if (alive) m.note?.();
+        const r: any = alive
+          ? await sendBody({ hc: asPerson(m.hub), sleep: (ms: number) => Bun.sleep(ms), status: () => (m.hub.terminals.get(m.addr) as any)?.status?.state ?? null }, m.addr, m.kind, m.body).catch((e: Error) => ({ code: 1, stderr: e.message }))
+          : { code: 1, stderr: "That agent isn't running." };
+        if (r.code !== 0 && m.cid) noteFailed(m.addr, m.cid, refusal(r).message, !!r.stuck);
       }
     } finally {
       busy = false;
@@ -558,35 +610,10 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
   }
   switch (b?.type) {
     case "send": {
-      const a = addr(b.addr);
-      const text = str(b.text ?? "").trim();
-      if (!text && !(Array.isArray(b.attachments) && b.attachments.length)) throw new Error("nothing to send");
-      const t = hub.terminals.get(a);
-      if (!t || t.state !== "live") throw new Error("That agent isn't running.");
-      const io = { hc: asPerson(hub), sleep: (ms: number) => Bun.sleep(ms), status: () => (hub.terminals.get(a) as any)?.status?.state ?? null };
-      // files sent with it: their paths after the words, as the window's chat sends them (copied first to another machine)
-      const sent: string[] = Array.isArray(b.attachments) ? b.attachments.slice(0, 20) : [];
-      for (const p of sent) if (typeof p !== "string" || !p.startsWith(ATTACH + "/") || p.includes("/../")) throw new Error("That file isn't one sent from here.");
-      // all at once
-      const files = await Promise.all(sent.map(async (p) => {
-        if (!a.includes("/")) return p;
-        const put = await hc(["put", a, p, "--json"]);
-        let landed: string | null = null;
-        try { landed = JSON.parse(put.stdout || "{}").path ?? null; } catch {}
-        if (put.code !== 0 || !landed) throw new Error("A file didn't reach that machine.");
-        return landed;
-      }));
-      const body = [messageBody({ text, quote: typeof b.quote === "string" ? b.quote.slice(0, 2000) : null, tags: typeof b.tags === "string" ? b.tags : "" }), ...files].filter(Boolean).join("\n\n");
-      // held on purpose (Ctrl+Enter, a long press): it goes once the agent stops working
-      const st = (hub.terminals.get(a) as any)?.status?.state;
-      if (b.hold && (st === "working" || st === "blocked")) { held.push({ addr: a, kind: kindOf(t) ?? "", body, hub, cid: typeof b.cid === "string" ? b.cid.slice(0, 80) : undefined }); drain(); return { ok: true, waiting: true, waitsFor: "turn" }; }
-      // when it began to go in, by this clock: the page knows it again in the chat by it (web/src/outbox.ts sameAs)
-      const at = Date.now();
-      // what it was, so the chat knows it again while it waits in the CLI's queue
-      if (typeof b.cid === "string") compat.noteSend?.(a, { cid: b.cid.slice(0, 80), text, files: sent, at });
-      const r = await sendBody(io, a, kindOf(t) ?? "", body);
-      if (r.code !== 0) throw new Error(refusal(r).message);
-      return { ok: true, at };
+      // one page's send asked again (its answer lost on the way, a reload, Retry): the same one, never twice
+      const cid = typeof b.cid === "string" && b.cid ? b.cid.slice(0, 80) : null;
+      if (!cid) return sendNow(hub, b, compat);
+      return once(cid, (again) => sendNow(hub, b, compat, again));
     }
     case "steer": {
       // Send now on a message in Claude Code's own queue (#662): its Ctrl+Enter, only while its screen offers it

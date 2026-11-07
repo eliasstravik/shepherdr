@@ -2,6 +2,7 @@
 // from the agent's log: the server gives it back the screen's id (cid), and it takes the pending one's place. It goes in
 // at once even while the agent works; a busy CLI may keep it until its next step, so it can take a while to come back.
 import type { Chat, Message, ReplyQuote } from '@shared/types.ts'
+import { GIVE_UP } from './uploads.ts'
 
 export interface Outgoing {
   /** the screen's own id for it: the message comes back with it */
@@ -38,10 +39,23 @@ export interface Outgoing {
   lost?: boolean
   /** when the chat first showed a newer message of yours than it, by this screen's clock: the log moved past it */
   pastAt?: number
+  /** the chat's last message when it was sent: it shows right after it (and after the ones sent before it), never
+   *  under what came later (SHEP-93) */
+  after?: string
+  /** the ones sent before it in its chat, still on their way when it was sent: it shows after them */
+  before?: string[]
+  /** still sending: its files up so far (they go up before the message goes) */
+  up?: number
+  /** still sending: the network is gone or cut it off, and it goes again by itself */
+  offline?: boolean
 }
 
-/** how long Send waits for the server to answer */
-export const SEND_TIMEOUT = 20_000
+/** how long one try of Send waits for the server to answer: one with many pictures for another machine takes a while
+ *  (asked again with the same id, it never goes twice) */
+export const SEND_TIMEOUT = 90_000
+/** one still sending (on this screen or another, or a reload ago) fails after this: it keeps trying by itself until
+ *  then (uploads.ts GIVE_UP) */
+const KEEP_SENDING = GIVE_UP + 60_000
 /** one that went in but never came back from the log is not delivered after this, from when its agent last worked */
 export const KEEP_SENT = 2 * 60_000
 /** and after this however long its agent seems to work (one that stays working for good would keep it forever) */
@@ -175,7 +189,7 @@ export function expire(out: Outgoing[], now: number, working: (chat: string) => 
       changed = true
       return { ...o, state: 'failed' as const, error, lost }
     }
-    if (o.state === 'sending' && now - o.at > SEND_TIMEOUT + 5000) return fail('No answer from Shepherdr.')
+    if (o.state === 'sending' && now - o.at > KEEP_SENDING) return fail("Couldn't reach Shepherdr.")
     if (o.state === 'sent' && !o.waiting && now - (o.wentAt ?? o.at) > KEEP_BUSY) return fail("It didn't show up in the chat.", true)
     if (o.state === 'sent' && !o.waiting && working(o.chat)) {
       // noted now and then, not on every tick: it is saved with the rest
@@ -207,6 +221,37 @@ export function partsOf(o: Outgoing, chat?: Chat): Message[] {
     ...(o.text ? [{ ...base, id: `out:${o.cid}`, text: o.text, reply: o.reply }] : []),
     ...o.files.map((file, i) => ({ ...base, id: `out:${o.cid}:${i}`, file, reply: !i && !o.text ? o.reply : undefined })),
   ]
+}
+
+/** the chat's last message to send after: one in the conversation, not one waiting or a card that moves */
+export function anchorOf(chat: Chat | undefined): string | undefined {
+  const ms = chat?.messages ?? []
+  for (let i = ms.length - 1; i >= 0; i--) {
+    const m = ms[i]
+    if (!m.waiting && !/^(ask|secret|card|ae|se):/.test(m.id)) return m.id
+  }
+  return undefined
+}
+
+/** where each one on its way shows among the chat's rows (in order, each with its cid when it was sent from a
+ *  screen): right after the message that was last when it was sent, and after the ones sent before it (still on their
+ *  way then: before), even once they are in the chat, so the chat keeps the order things were sent in. One whose
+ *  message is gone from the chat (or an old one without) goes at the end. -> the index to insert at, per cid */
+export function placesOf(rows: { id: string; cid?: string }[], out: Pick<Outgoing, 'cid' | 'after' | 'before'>[]): Map<string, number> {
+  const at = new Map<string, number>()
+  const index = new Map<string, number>(rows.map((r, i) => [r.id, i]))
+  for (const o of out) {
+    const i = o.after !== undefined ? index.get(o.after) : undefined
+    if (i === undefined) {
+      at.set(o.cid, rows.length)
+      continue
+    }
+    let n = i + 1
+    const before = new Set(o.before ?? [])
+    if (before.size) rows.forEach((r, k) => { if (r.cid && before.has(r.cid) && k + 1 > n) n = k + 1 })
+    at.set(o.cid, n)
+  }
+  return at
 }
 
 /** a message's place in the list: what you sent keeps one from the moment you tap Send, so the swap redraws nothing */

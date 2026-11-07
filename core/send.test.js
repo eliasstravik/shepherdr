@@ -105,3 +105,108 @@ test("Send now on a queued message presses Ctrl+Enter only while Claude Code off
   expect(await steerNow(idle.io, "t1")).toBe(false);
   expect(idle.calls.length).toBe(1);
 });
+
+// SHEP-93: eleven pictures take Claude Code long to read: the box fills marker by marker, its Enter is lost
+function slowClaude({ pics = 11, takes = Infinity, startsOnEnter = 1 } = {}) {
+  const calls = [];
+  let box = "❯ ", shown = 0, enters = 0, status = "idle", loading = false;
+  const io = {
+    sleep: (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 2))),
+    status: () => status,
+    hc: async (args) => {
+      calls.push(args[0] === "send" ? "send" : args.join(" "));
+      if (args[0] === "send") {
+        loading = true;
+        // hc send answers before the pictures are read, its Enter lost
+        return { code: 0, stdout: '{"started":false}' };
+      }
+      if (args[0] === "read") {
+        // a marker more on each look while it reads them
+        if (loading && shown < pics) shown++;
+        if (loading) box = `❯ ${Array.from({ length: shown }, (_, i) => `[Image #${i + 1}]`).join(" ")} more images - save to repo`;
+        if (shown >= pics) loading = false;
+        return { code: 0, stdout: `● ok\n────\n${box}\n────\n  ⏵⏵ auto mode on` };
+      }
+      if (args[0] === "keys" && args[2] === "enter") {
+        enters++;
+        // an Enter while it still reads is lost too
+        if (!loading && enters >= startsOnEnter && enters <= takes) { box = "❯ "; status = "working"; }
+      }
+      return { code: 0, stdout: "" };
+    },
+  };
+  return { io, calls, box: () => box, enters: () => enters };
+}
+const BODY = "more images - save to repo\n\n" + Array.from({ length: 11 }, (_, i) => `/var/files/t1/web-${i}.jpeg`).join("\n\n");
+const QUICK = { looks: 60, every: 1, enters: 4 };
+
+test("eleven pictures: Enter lost while they load goes again once the box is still, and it goes in", async () => {
+  const c = slowClaude();
+  const r = await sendBody(c.io, "t1", "claude", BODY);
+  expect(r.code).toBe(0);
+  expect(c.box()).toBe("❯ ");
+});
+
+test("one that stays in the box is not sent: it fails as stuck, and sending it again presses Enter, never types it twice", async () => {
+  const { sendTyped, STUCK } = await import("./send.js");
+  const c = slowClaude({ takes: 0 });
+  const r = await sendTyped(c.io, "t1", "claude", BODY, QUICK);
+  expect(r.code).toBe(1);
+  expect(r.stuck).toBe(true);
+  expect(r.stderr).toBe(STUCK);
+  expect(c.enters()).toBe(4);
+  // Retry: the box holds it already
+  const again = slowClaude({ takes: Infinity });
+  again.io.hc(["send", "t1", BODY]);
+  for (let i = 0; i < 12; i++) await again.io.hc(["read", "t1"]);
+  again.calls.length = 0;
+  const r2 = await sendTyped(again.io, "t1", "claude", BODY, QUICK, true);
+  expect(r2.code).toBe(0);
+  expect(again.calls).not.toContain("send");
+  expect(again.box()).toBe("❯ ");
+});
+
+test("a dialog on screen (no box under its rule) is never pressed", async () => {
+  const { holds, settleBox } = await import("./send.js");
+  const calls = [];
+  const io = { sleep: async () => {}, hc: async (args) => { calls.push(args.join(" ")); return { code: 0, stdout: "❯ more images - save to repo\n● reply\n Do you want to proceed?\n❯ 1. Yes\n  2. No" }; } };
+  expect(await settleBox(io, "t1", BODY, QUICK)).toBe(true);
+  expect(calls.some((c) => c.startsWith("keys"))).toBe(false);
+  expect(holds("❯ ", BODY)).toBe(false);
+  expect(holds("❯ [Pasted text #1 +12 lines]", "a\nb")).toBe(true);
+  // sent again: only this very message counts, never another one starting the same
+  expect(holds("❯ [Image #1] [Image #2] more images - save to repo", BODY, true)).toBe(true);
+  expect(holds("❯ [Image #1] more images - save to repo and the old ones", BODY, true)).toBe(false);
+  expect(holds("❯ [Image #1] other words", BODY, true)).toBe(false);
+});
+
+test("a screen that can't be read proves nothing: it keeps looking, and a box that then holds it is stuck", async () => {
+  const { settleBox } = await import("./send.js");
+  let n = 0;
+  const io = { sleep: async () => {}, hc: async (args) => {
+    if (args[0] !== "read") return { code: 0, stdout: "" };
+    n++;
+    return n <= 3 ? { code: 1, stdout: "", stderr: "unreachable" } : { code: 0, stdout: `● ok\n────\n❯ [Image #1] more images - save to repo\n────` };
+  } };
+  expect(await settleBox(io, "t1", BODY, { looks: 10, every: 1, enters: 0 })).toBe(false);
+  // never read at all: hc send's word stands
+  const blind = { sleep: async () => {}, hc: async () => ({ code: 1, stdout: "" }) };
+  expect(await settleBox(blind, "t1", BODY, { looks: 3, every: 1, enters: 1 })).toBe(true);
+});
+
+test("a stuck one taken in late is not typed again by its Retry", async () => {
+  const { sendTyped } = await import("./send.js");
+  const c = slowClaude();
+  const calls = [];
+  const io = { ...c.io, hc: async (args) => { calls.push(args[0]); return args[0] === "read" ? { code: 0, stdout: "● ok\n────\n❯ \n────" } : { code: 0, stdout: "" }; } };
+  const r = await sendTyped(io, "t1", "claude", BODY, QUICK, true);
+  expect(r.code).toBe(0);
+  expect(calls).not.toContain("send");
+});
+
+test("a file alone (no words, not a picture) still in the box is not taken as sent", async () => {
+  const { holds } = await import("./send.js");
+  expect(holds("❯ /var/files/t1/report.txt", "/var/files/t1/report.txt")).toBe(true);
+  expect(holds("❯ /var/files/t1/report.txt", "/var/files/t1/report.txt", true)).toBe(true);
+  expect(holds("❯ ", "/var/files/t1/report.txt")).toBe(false);
+});

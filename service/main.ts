@@ -543,6 +543,9 @@ async function doAction(body: any): Promise<Response> {
 const server = Bun.serve<{ who: string }>({
   hostname: "127.0.0.1",
   port: PORT,
+  // a send with many pictures (copied to another machine, Claude Code reading each) can take longer than Bun's 10 s
+  // default: cut off, the page took it as failed while it still went in (SHEP-93)
+  idleTimeout: 180,
   async fetch(req, srv) {
     const url = new URL(req.url);
     const path = url.pathname.startsWith("/shepherdr/") ? url.pathname.slice(10) : url.pathname;

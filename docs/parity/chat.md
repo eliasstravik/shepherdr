@@ -72,6 +72,8 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Smiley | W:1852 opens the emoji picker | R:42 → `openPicker` (the full picker) | ✓ |
 | Newest reply while working | W:2477 no band yet | C:1084 `writing` | ✓ |
 | What you just sent | W pending rows have no band | C:102 no band while in the outbox | ✓ |
+| A send whose Enter Claude Code lost (pictures, a long paste) | W sendTyped: Enter again until the box is clear; sent again, only Enter | the same (core/send.js settleBox), once per id (service/send-once.ts) | ✓ |
+| How a send goes | W failed row with resend | Sending… / Uploading n of m / Waiting for a connection, then Not sent with Retry; goes again by itself; in send order (SHEP-93) | ◇ the web's network |
 | Touch | (no touch) | hold a message: X's bar; slide right to reply | ◇ touch instead of hover |
 
 ## Emoji picker (mods/chat-react)

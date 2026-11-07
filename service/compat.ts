@@ -3,6 +3,7 @@
 // shapes 2.1's screen reads (web/shared/types.ts: Snapshot, Chat), and its chat keys back into terminals.
 //   a space's chat (its Assistant):  p:<space id, "/" as ":">     a task's chat:  <task id>/worker
 // A task id is its ref ("SHEP-7"), "<machine>:<ref>" on another machine, as 2.1 wrote them.
+import { failedOf } from "./send-once.ts";
 import type { Snapshot, Place, Task, Need, Section, Machine, Chat, Message, Status, TaskStatus, StepKind, ActivityAnswer, Question, Artifact, SettingSection, Job } from "../web/shared/types.ts";
 import * as T from "../core/tasks.js";
 import * as SPc from "../core/spaces.js";
@@ -289,7 +290,7 @@ export class Compat {
    *  again by its words, and shows with the page's id and files */
   sends = new Map<string, Sent[]>();
   noteSend(addr: string, s: Sent) {
-    this.sends.set(addr, [...(this.sends.get(addr) ?? []).filter((x) => Date.now() - x.at < 30 * 60_000), s].slice(-20));
+    this.sends.set(addr, [...(this.sends.get(addr) ?? []).filter((x) => x.cid !== s.cid && Date.now() - x.at < 30 * 60_000), s].slice(-20));
   }
 
   addrOf(key: string) { return this.chats.get(key) ?? null; }
@@ -698,6 +699,7 @@ export class Compat {
       : reader.state === "missing" && reader.pinned ? "gone"
       : reader.state === "none" || reader.state === "missing" ? ((t && t.state !== "live") || !t ? "ended" : kind ? "none" : "unsupported")
       : !reader.pinned && (!t || t.state !== "live") && !items.length ? "ended" : null;
-    return { key, messages, ...head, ...under, ...(note ? { note } : {}), ...(notice ? { notice } : {}), ...(agent ? { agent } : {}), ...(jobs.length ? { jobs } : {}), working: st === "working", cli: reader.kind === "codex" ? "codex" : "claude", ...(reader.pinned || (t && t.state !== "live") ? { finished: true } : {}) };
+    const failed = failedOf(addr);
+    return { key, messages, ...(failed.length ? { failed } : {}), ...head, ...under, ...(note ? { note } : {}), ...(notice ? { notice } : {}), ...(agent ? { agent } : {}), ...(jobs.length ? { jobs } : {}), working: st === "working", cli: reader.kind === "codex" ? "codex" : "claude", ...(reader.pinned || (t && t.state !== "live") ? { finished: true } : {}) };
   }
 }
