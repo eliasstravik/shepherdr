@@ -54,3 +54,29 @@ test("a followed chat finds the log of an agent that starts in its terminal late
   expect(r.path).toBe(log);
   expect(seen.at(-1)).toBe("ready");
 });
+
+// SHEP-90: a task's worker restarted in a new terminal (t1y's sh ended, t1z runs the agent): its followed chat stayed
+// on the old terminal ("Can't find this conversation") until the service restarted, as the page sends the same key.
+test("a followed task chat moves to its worker's new terminal by itself", async () => {
+  const { Live } = await import("./live.ts");
+  const h = hub();
+  feed(h, "restarted", "t1y", { address: "t1y", state: "live", argv: ["sh"], cwd: "/work/demo", labels: {}, foreground: { name: "sh", pid: 4001, argv: ["sh"], cwd: "/work/demo" } });
+  const map = new Map([["DEMO-1/worker", "t1y"]]);
+  const live = new Live(h, { on() {}, load: async () => ({}) } as any, () => null, "test");
+  live.chats = new Chats(h);
+  live.compat = { addrOf: (k: string) => map.get(k) ?? null, chat: (k: string, r: any) => ({ key: k, state: r.state, path: r.path ?? null }) } as any;
+  const got: any[] = [];
+  const ws: any = { data: { who: "demo" }, readyState: 1, getBufferedAmount: () => 0, send: (t: string) => { const m = JSON.parse(t); if (m.type === "chat") got.push(m.chat); } };
+  live.join(ws);
+  live.message(ws, JSON.stringify({ type: "watch", chats: ["DEMO-1/worker"], visible: true }));
+  for (let i = 0; i < 30 && !got.length; i++) await Bun.sleep(100);
+  expect(got.at(-1)?.state).toBe("none");
+  // herdr-task restarts the worker as a new terminal running the agent; the next snapshot maps the key there
+  feed(h, "lost", "t1y", { state: "ended" });
+  feed(h, "restarted", "t1z", { address: "t1z", state: "live", argv: ["claude"], cwd: "/work/demo", labels: {}, foreground: { name: "claude", pid: 4242, argv: ["claude"], cwd: "/work/demo" } });
+  map.set("DEMO-1/worker", "t1z");
+  live.setSnapshot({ tasks: [{ id: "DEMO-1" }] });
+  for (let i = 0; i < 30 && got.at(-1)?.state !== "ready"; i++) await Bun.sleep(100);
+  expect(got.at(-1)).toEqual({ key: "DEMO-1/worker", state: "ready", path: log });
+  expect(live.watched()).toEqual(["t1z"]);
+});
