@@ -41,4 +41,8 @@ test("a held one that couldn't go is told to its page, and its Retry goes again"
   expect(failedOf("t9")).toEqual([{ cid: "c-3", error: "That agent isn't running." }]);
   await once("c-3", hold);
   expect(went).toBe(2);
+  // held, then the service restarted (the held queue is in memory only): its Retry goes again
+  forgetAll();
+  await once("c-3", hold);
+  expect(went).toBe(3);
 });

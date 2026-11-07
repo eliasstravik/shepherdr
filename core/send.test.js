@@ -193,3 +193,13 @@ test("a screen that can't be read proves nothing: it keeps looking, and a box th
   const blind = { sleep: async () => {}, hc: async () => ({ code: 1, stdout: "" }) };
   expect(await settleBox(blind, "t1", BODY, { looks: 3, every: 1, enters: 1 })).toBe(true);
 });
+
+test("a stuck one taken in late is not typed again by its Retry", async () => {
+  const { sendTyped } = await import("./send.js");
+  const c = slowClaude();
+  const calls = [];
+  const io = { ...c.io, hc: async (args) => { calls.push(args[0]); return args[0] === "read" ? { code: 0, stdout: "● ok\n────\n❯ \n────" } : { code: 0, stdout: "" }; } };
+  const r = await sendTyped(io, "t1", "claude", BODY, QUICK, true);
+  expect(r.code).toBe(0);
+  expect(calls).not.toContain("send");
+});

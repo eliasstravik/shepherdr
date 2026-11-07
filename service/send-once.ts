@@ -24,7 +24,7 @@ function load(): Map<string, Done> {
 function save() {
   try {
     const tmp = `${FILE()}.tmp`;
-    writeFileSync(tmp, JSON.stringify(Object.fromEntries(load())), { mode: 0o600 });
+    writeFileSync(tmp, JSON.stringify(Object.fromEntries([...load()].filter(([, v]) => !(v.result as { waiting?: boolean })?.waiting))), { mode: 0o600 });
     renameSync(tmp, FILE());
   } catch {}
 }
@@ -50,7 +50,8 @@ export function once(cid: string, go: (again: boolean) => Promise<unknown>): Pro
       going.delete(cid);
       stuck.delete(cid);
       d.set(cid, { at: Date.now(), result });
-      save();
+      // one held for the agent's turn is held in memory only: after a restart it is gone, so its Retry must go again
+      if (!(result as { waiting?: boolean })?.waiting) save();
     },
     (e) => {
       going.delete(cid);

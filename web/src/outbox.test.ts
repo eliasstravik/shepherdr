@@ -122,7 +122,7 @@ test('one on its way shows right after what was last when it was sent, in the or
   ])
   expect(anchorOf(c)).toBe('a1')
   // later: the agent answered something else, and you sent another one that came back
-  const ids = ['a1', 'u2', 'a3']
+  const ids = [{ id: 'a1' }, { id: 'u2' }, { id: 'a3' }]
   const places = placesOf(ids, [{ cid: 'stuck', after: 'a1' }, { cid: 'next', after: 'a3' }, { cid: 'old' }, { cid: 'gone', after: 'x' }])
   expect(places.get('stuck')).toBe(1)
   expect(places.get('next')).toBe(3)
@@ -137,4 +137,13 @@ test('one still sending keeps trying by itself for minutes (a reload resumes it)
   const failed = expire([o], 12 * 60_000)[0]
   expect(failed.state).toBe('failed')
   expect(failed.text).toBe('cool')
+})
+
+test('two sent at once: once the first is in the chat, the second stays under it', async () => {
+  const { placesOf } = await import('./outbox.ts')
+  // A and B were sent after a1; A came back from the log (with its id), B is still on its way
+  const rows = [{ id: 'a1' }, { id: 'uA', cid: 'A' }, { id: 'uA:f0', cid: 'A' }]
+  expect(placesOf(rows, [{ cid: 'B', after: 'a1', before: ['A'] }]).get('B')).toBe(3)
+  // without A before it, it would sit right after a1
+  expect(placesOf(rows, [{ cid: 'B', after: 'a1' }]).get('B')).toBe(1)
 })

@@ -1175,7 +1175,7 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
   // under it and the chat keeps the order things were sent in (SHEP-93: one stuck at the bottom under everything
   // newer). When it comes back it keeps its place in the list, so nothing is drawn again (a picture doesn't load twice)
   const mine = outbox.filter((o) => o.chat === chat.key && !heldOut(o))
-  const places = placesOf(shown.map((it) => ('msg' in it ? it.msg.id : '')), mine)
+  const places = placesOf(shown.map((it) => ('msg' in it ? { id: it.msg.id, cid: it.msg.cid } : { id: '' })), mine)
   const extra = new Map<number, Item[]>()
   for (const out of mine) {
     const parts = partsOf(out, chat)
@@ -1806,7 +1806,7 @@ function retry(cid: string) {
   const s = getState()
   const o = s.outbox.find((x) => x.cid === cid)
   if (!o) return
-  const again: Outgoing = { ...o, cid: o.lost ? newCid() : o.cid, state: 'sending', error: undefined, lost: undefined, waiting: undefined, waitsFor: undefined, queued: undefined, serverAt: undefined, wentAt: undefined, busyAt: undefined, pastAt: undefined, offline: undefined, up: undefined, at: Date.now(), prior: priorOf(s.chats[o.chat]), after: anchorOf(s.chats[o.chat]) }
+  const again: Outgoing = { ...o, cid: o.lost ? newCid() : o.cid, state: 'sending', error: undefined, lost: undefined, waiting: undefined, waitsFor: undefined, queued: undefined, serverAt: undefined, wentAt: undefined, busyAt: undefined, pastAt: undefined, offline: undefined, up: undefined, at: Date.now(), prior: priorOf(s.chats[o.chat]), after: anchorOf(s.chats[o.chat]), before: s.outbox.filter((x) => x.chat === o.chat && x.cid !== cid).map((x) => x.cid) }
   setOutbox((all) => all.map((x) => (x.cid === cid ? again : x)))
   void deliver(again.cid)
 }
@@ -1970,6 +1970,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
       state: 'sending',
       prior: priorOf(getState().chats[chatKey]),
       after: anchorOf(getState().chats[chatKey]),
+      before: getState().outbox.filter((o) => o.chat === chatKey).map((o) => o.cid),
       ...(hold ? { hold: true } : {}),
     }
     setOutbox((all) => [...all, out])

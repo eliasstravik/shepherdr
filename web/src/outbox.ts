@@ -42,6 +42,8 @@ export interface Outgoing {
   /** the chat's last message when it was sent: it shows right after it (and after the ones sent before it), never
    *  under what came later (SHEP-93) */
   after?: string
+  /** the ones sent before it in its chat, still on their way when it was sent: it shows after them */
+  before?: string[]
   /** still sending: its files up so far (they go up before the message goes) */
   up?: number
   /** still sending: the network is gone or cut it off, and it goes again by itself */
@@ -231,15 +233,23 @@ export function anchorOf(chat: Chat | undefined): string | undefined {
   return undefined
 }
 
-/** where each one on its way shows among the chat's rows (ids in order): right after the message that was last when
- *  it was sent, and after the ones sent before it there, so the chat keeps the order things were sent in. One whose
+/** where each one on its way shows among the chat's rows (in order, each with its cid when it was sent from a
+ *  screen): right after the message that was last when it was sent, and after the ones sent before it (still on their
+ *  way then: before), even once they are in the chat, so the chat keeps the order things were sent in. One whose
  *  message is gone from the chat (or an old one without) goes at the end. -> the index to insert at, per cid */
-export function placesOf(ids: string[], out: Pick<Outgoing, 'cid' | 'after'>[]): Map<string, number> {
+export function placesOf(rows: { id: string; cid?: string }[], out: Pick<Outgoing, 'cid' | 'after' | 'before'>[]): Map<string, number> {
   const at = new Map<string, number>()
-  const index = new Map<string, number>(ids.map((id, i) => [id, i]))
+  const index = new Map<string, number>(rows.map((r, i) => [r.id, i]))
   for (const o of out) {
     const i = o.after !== undefined ? index.get(o.after) : undefined
-    at.set(o.cid, i === undefined ? ids.length : i + 1)
+    if (i === undefined) {
+      at.set(o.cid, rows.length)
+      continue
+    }
+    let n = i + 1
+    const before = new Set(o.before ?? [])
+    if (before.size) rows.forEach((r, k) => { if (r.cid && before.has(r.cid) && k + 1 > n) n = k + 1 })
+    at.set(o.cid, n)
   }
   return at
 }

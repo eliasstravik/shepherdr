@@ -140,10 +140,15 @@ export async function settleBox(io, addr, body, opts = SETTLE) {
 // holds exactly it still, it gets Enter, never typed twice. -> hc's result; stuck: still in the box.
 export async function sendTyped(io, addr, kind, body, opts = SETTLE, again = false) {
   if (kind !== "claude") return io.hc(["send", addr, body]);
-  if (again && holds(await boxOf(io, addr), body, true)) {
-    await io.hc(["keys", addr, "enter"]).catch(() => null);
-    const ok = await settleBox(io, addr, body, opts);
-    return ok ? { code: 0, stdout: "{}", stderr: "" } : { code: 1, stdout: "", stderr: STUCK, stuck: true };
+  if (again) {
+    const box = await boxOf(io, addr);
+    if (holds(box, body, true)) {
+      await io.hc(["keys", addr, "enter"]).catch(() => null);
+      const ok = await settleBox(io, addr, body, opts);
+      return ok ? { code: 0, stdout: "{}", stderr: "" } : { code: 1, stdout: "", stderr: STUCK, stuck: true };
+    }
+    // the box let it go since (Claude Code took it in late): typed again it would go twice
+    if (box !== undefined && !holds(box, body)) return { code: 0, stdout: "{}", stderr: "" };
   }
   const going = io.hc(["send", addr, body]);
   let back = false, last = null;
