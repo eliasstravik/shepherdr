@@ -30,7 +30,7 @@ import * as fs from "fs/promises";
 import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names, pilotLine } from "./core/chat-log.js";
 import { BgJobs } from "./core/bg-jobs.js";
 import { ChatReader } from "./core/chat-reader.js";
-import { words, howAnswered } from "./core/asks.js";
+import { words, howAnswered, codexOnScreen, codexSteps } from "./core/asks.js";
 // The rows' words and rules the web app's chat draws by too (core/chat-view.js).
 import { WORDS, clock, bgGroups, subagentsOf, subagentWord, senderName, briefLabel, firstUser, firstKeys, literal, fromName, sentTo, selfName, initialOf, newsWords, resolveArtifacts, unsigned, ownWords, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
 // Sending the person's words, as the web app does (core/send.js).
@@ -369,6 +369,14 @@ export default class Chat extends View {
       toTerminal: (ask) => { openTaskThread(ask.terminal, ask.ref, ask.title); requestWorkerTerminal(ask.terminal); },
       chatAbout: (ask) => openTaskThread(ask.terminal, ask.ref, ask.title),
     }, cx.focus_handle());
+    // Codex's own questions (request_user_input, no hook): the same question card, its answer
+    // pressed on Codex's screen (codexCard(), answerCodex()).
+    this.codexCards = new AskCards({
+      reply: (ask, text, cx) => this.answerCodex(ask, text, cx),
+      toTerminal: () => this.toTerminal(),
+      chatAbout: () => this.box.focus(),
+    }, cx.focus_handle());
+    this.codexAsk = null;
     this.shownAsks = new Map();
     // Secrets agents ask for (herdr-secret ask): their masked cards, here and for the workers.
     this.secretCards = new SecretCards();
@@ -553,8 +561,9 @@ export default class Chat extends View {
     this.loadingEarlier = false;
   }
 
-  // Closing (back to the terminal, or the pane goes): the hook stops waiting on this chat, so
-  // Claude asks in its terminal instead. A call or a recording ends with it.
+  // Closing (back to the terminal, or the pane goes): its flag goes, and a Codex agent's waiting
+  // asks are released (Codex waits on the hook), so it asks in its terminal instead. Claude's stay
+  // on the web's cards: its terminal shows its own prompt meanwhile. A call or a recording ends with it.
   async close(cx) {
     if (this.host) return this.host.close(cx);
     this.box.release();
@@ -563,7 +572,7 @@ export default class Chat extends View {
     this.dict.cancel();
     if (this.call) await this.hangup();
     if (!this.addr || this.machine) return;
-    await exec("sh", ["-c", 'rm -f "$1/open/$2"; for f in "$1/req/$2".*.json; do [ -f "$f" ] && : > "$1/ans/${f##*/}"; done; true', "x", this.askDir, this.addr]);
+    await exec("sh", ["-c", 'rm -f "$1/open/$2"; for f in "$1/req/$2".*.json; do [ -f "$f" ] && grep -q \'"turn_id"\' "$f" && : > "$1/ans/${f##*/}"; done; true', "x", this.askDir, this.addr]);
   }
 
   // ---- drafts -----------------------------------------------------------------------------
@@ -826,6 +835,8 @@ export default class Chat extends View {
   timelineCards() {
     const out = [];
     for (const a of this.asks) out.push({ id: `card:${a.id}`, at: askAt(a.id), strips: this.cards.strips(a, { who: this.cli() }), owner: this.cards, ask: a, question: a.words.kind === "questions" });
+    const cq = this.codexCard();
+    if (cq) out.push({ id: `card:${cq.id}`, at: cq.at, strips: this.codexCards.strips(cq, { who: "Codex" }), owner: this.codexCards, ask: cq, question: true });
     for (const a of this.sasks ?? []) {
       if (!a.kept) out.push({ id: `card:s:${a.name}`, at: this.seenAt(`s:${a.address}|${a.name}`), strips: this.secretCards.strips(a, { who: this.cli() }) });
     }
@@ -898,6 +909,40 @@ export default class Chat extends View {
   }
 
   // A press on a start screen's choice (its card here or in the Assistant's chat).
+  // Codex's open question (its log's ask with its questions) while it waits on its screen, as
+  // an AskUserQuestion request for the question card; the same object while it stays open, so
+  // the card keeps its picks.
+  codexCard() {
+    if (this.kind !== "codex" || this.status() !== "blocked") return null;
+    const x = [...(this.conv?.items ?? [])].reverse().find((i) => i.kind === "ask");
+    if (!x || x.closed || !x.questions?.length) return null;
+    if (this.codexAsk?.item === x) return this.codexAsk;
+    const req = { tool_name: "AskUserQuestion", tool_input: { questions: x.questions.map((q) => ({ question: q.text, header: q.header, multiSelect: false, options: q.choices })) } };
+    this.codexAsk = { id: `cq-${x.id}`, at: x.at ?? Date.now(), item: x, req, words: words(req) };
+    return this.codexAsk;
+  }
+
+  // The card's answer (as a hook's would be: core/asks.js answers() or a refusal) pressed on
+  // Codex's screen, only while it shows these questions: picks and Other words (codexSteps),
+  // Dismiss and "Chat about this" are Esc, "Answer in terminal" presses nothing.
+  answerCodex(ask, text, cx) {
+    let d = null;
+    try { d = JSON.parse(text).hookSpecificOutput?.decision; } catch {}
+    if (!d) return;
+    const qs = ask.item.questions, map = d.updatedInput?.answers;
+    cx.spawn(async (cx) => {
+      const screen = (await hc(["read", this.addr]).catch(() => null))?.stdout ?? "";
+      if (!codexOnScreen(screen, qs)) { toast({ title: "Codex", body: "Its screen shows something else now: answer it in the terminal.", level: "alert" }); return; }
+      const steps = map ? codexSteps(qs, qs.map((q) => map[q.text] ?? "")) : [{ keys: ["esc"] }];
+      for (const st of steps ?? []) {
+        if (st.paste !== undefined) await hc(["send", "--force", this.addr, st.paste]).catch(() => null);
+        else await hc(["keys", this.addr, ...st.keys]).catch(() => null);
+        await cx.sleep(150);
+      }
+      cx.notify();
+    });
+  }
+
   pressScreen(card, i, cx) {
     if (this.screenBusy.has(card.id)) return;
     this.screenBusy.add(card.id);

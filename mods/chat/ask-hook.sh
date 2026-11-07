@@ -1,20 +1,25 @@
 #!/bin/sh
-# Claude Code's PermissionRequest hook (in ~/.claude/settings.json): lets the person answer a
-# permission, a question (AskUserQuestion) or a plan (ExitPlanMode) on the agent's chat card.
+# The PermissionRequest hook of Claude Code (~/.claude/settings.json) and Codex (~/.codex/hooks.json,
+# and a task worker's own `herdr-task _allow`, which hands it what it doesn't allow itself): lets
+# the person answer a permission, a question (AskUserQuestion) or a plan (ExitPlanMode) on the
+# agent's chat card, wherever they read it: the window, the web app, a phone.
 #
-# Does nothing (no decision, so Claude shows its own prompt in the terminal) unless it runs in
-# a Herdr terminal ($HC_TERMINAL_ID) whose chat is showing right now: the chat mod touches
-# data/chat-asks/open/<terminal> every few seconds while it is open. Then it leaves the request
-# in data/chat-asks/req/ and waits for the chat's answer in data/chat-asks/ans/, which it
-# prints as it is: the hook's decision, or nothing (answer in the terminal). Any error, the
-# chat closing, or no answer in time also means no decision. It never decides by itself.
+# In a Herdr terminal ($HC_TERMINAL_ID), it leaves the request in data/chat-asks/req/ and waits for
+# the chat's answer in data/chat-asks/ans/, which it prints as it is: the hook's decision, or
+# nothing (answer in the terminal). Any error, or no answer in time, also means no decision. It
+# never decides by itself. It waits whether or not a chat shows the agent right now (SHEP-91: a
+# person away from the window still gets the card on the web); only without hc and jq, when it
+# can't tell the terminal answered, does it wait just while a chat's flag is fresh (the window's
+# chat touches data/chat-asks/open/<terminal> every few seconds while it shows the agent).
 #
-# Claude keeps this hook running when its prompt is answered elsewhere (typed in the terminal,
-# by another agent's `hc send`), so the hook watches for that itself: once Claude's own status
-# (OSC 7501, `hc get`) has been blocked and isn't any more, or the terminal ended, Claude no
-# longer waits on it. It leaves what happened in data/chat-asks/end/<id> ("Answered in the
-# terminal", from Claude's log when it can tell) for the chat's card, then goes, so every copy
-# (the card, Needs you, the counts) closes at once.
+# The terminal stays a way to answer. Claude shows its own prompt while this waits, and keeps
+# the hook running when the prompt is answered there (typed in the terminal, by another agent's
+# `hc send`), so the hook watches for that itself: once Claude's own status (OSC 7501, `hc get`)
+# has been blocked and isn't any more, or the terminal ended, Claude no longer waits on it. It
+# leaves what happened in data/chat-asks/end/<id> ("Answered in the terminal", from Claude's log
+# when it can tell) for the chat's card, then goes, so every copy (the card, Needs you, the
+# counts) closes at once. Codex shows its prompt only once the hook is done: the card's "Answer
+# in terminal" (or the window showing the terminal) hands it back.
 
 t="${HC_TERMINAL_ID:-}"
 [ -n "$t" ] || exit 0
@@ -27,7 +32,16 @@ fresh() {
   m=$(stat -c %Y "$flag" 2>/dev/null || stat -f %m "$flag" 2>/dev/null) || return 1
   [ $(( $(date +%s) - m )) -le 15 ]
 }
-fresh || exit 0
+watch=0
+command -v hc >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 && watch=1
+# Without hc and jq it can't see the terminal answered: only while a chat shows the agent.
+[ "$watch" = 1 ] || fresh || exit 0
+# A task worker's Codex runs its own hook too (herdr-task _allow, in its argv), which hands this
+# what it doesn't allow itself ($HERDR_ASK_CHAINED): Codex waits for both, so this copy steps aside.
+if [ -z "${HERDR_ASK_CHAINED:-}" ] && [ "$watch" = 1 ] \
+  && hc get "$t" --json 2>/dev/null | jq -e '(.argv // []) | index("_allow")' >/dev/null 2>&1; then
+  exit 0
+fi
 
 id="$t.$(date +%s).$$"
 req="$d/req/$id.json"
@@ -57,8 +71,6 @@ how() {
     *) echo "Answered in the terminal" ;;
   esac
 }
-watch=0
-command -v hc >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 && watch=1
 armed=0
 
 # Up to 30 minutes (the hook's timeout in settings.json is the same).
@@ -68,13 +80,14 @@ while [ "$i" -lt 6000 ]; do
     cat "$ans" 2>/dev/null
     done_
   fi
-  fresh || done_
   if [ "$watch" = 1 ]; then
     case "$(status)" in
       blocked) armed=1 ;;
       gone) ended "Agent stopped" ;;
       working|idle|done) [ "$armed" = 1 ] && ended "$(how answered)" ;;
     esac
+  else
+    fresh || done_
   fi
   sleep 0.3
   i=$((i + 1))

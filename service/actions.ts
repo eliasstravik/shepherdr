@@ -9,6 +9,7 @@ import { sendBody, steerNow, messageBody, refusal, reactionLine, mentionedIn, ta
 import { kindOf } from "../core/chat-reader.js";
 import { WORDS } from "../core/chat-view.js";
 import * as AGa from "../core/agents.js";
+import { answerCodex } from "./codex-ask.ts";
 const { sessionOf, forkArgv } = AGa as any;
 import * as SP from "../core/spaces.js";
 const { READ, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, DELETED, deletedSection, withRestoredSection } = SP as any;
@@ -99,6 +100,7 @@ async function run(cmd: string[]) {
 }
 
 export const hc = (args: string[]) => run([process.env.SHEPHERDR_HC || "hc", ...args]);
+
 // hc for core/send.js, its sends as the person's (Hub.send: no <hc from=…> tag on another machine)
 const asPerson = (hub: Hub) => (args: string[]) => args[0] === "send" ? hub.send(args[1], args[2]) : hc(args);
 
@@ -153,6 +155,15 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (b.terminal === true) return { ok: true };
     const why = await (compat as any).watch?.press(str(b.question, 300), typeof b.choice === "number" ? b.choice : -1);
     return why ? { ok: false, error: why } : { ok: true };
+  }
+  if (b?.type === "answer" && typeof b.question === "string" && b.question.startsWith("cq:")) {
+    // Codex's own questions (compat.ts codexQuestion): answered on its screen, as a person would
+    const a = chat(b.chat);
+    const item = (compat.reader?.(a)?.conv?.items ?? []).find((x: any) => x.kind === "ask" && x.id === b.question.slice(3));
+    if (!item?.questions?.length || item.closed) throw new Error("That question was answered already.");
+    const why = await answerCodex(hc, a, item.questions, b);
+    if (why) throw new Error(why);
+    return { ok: true };
   }
   if (b?.type === "answer" && typeof b.question === "string") {
     // a hook ask's card (its id is the request's): answered as the window's card answers it

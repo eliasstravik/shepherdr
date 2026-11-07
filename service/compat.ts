@@ -15,6 +15,7 @@ const { senderName, briefLabel, firstUser, firstKeys, newsTimeline, resolveArtif
 import { mentionedIn } from "../core/send.js";
 import * as MEc from "../core/mentions.js";
 import * as SCc from "../core/screens.js";
+import { codexChoice } from "../core/asks.js";
 const { SCREEN } = SCc as any;
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -183,6 +184,18 @@ export function artifactOf(a: any, spaces: Space[], program: (addr: string) => s
       // herdr-artifact records each version's kind ("custom": a GPUI panel) and when the window took a custom one's picture
       ...(x.kind ? { kind: (x.kind === "recipe" ? "recipe" : "gpui") as "recipe" | "gpui" } : {}), ...(x.picture ? { picture: x.picture } : {}) })),
   };
+}
+
+/** Codex's own questions (a log's ask item with its questions) as a question card: its id cq:<item id>, answered on
+ *  Codex's screen (service/actions.ts, core/asks.js codexSteps). */
+export function codexQuestion(x: any, key: string): Question {
+  const qs: any[] = x.questions ?? [];
+  const choices = (q: any) => q.choices.map(codexChoice);
+  // no note: its picker has nowhere for one beside a pick
+  if (qs.length > 1)
+    return { id: `cq:${x.id}`, title: `${qs.length} questions`, kind: "Question", to: key, choices: [], other: true, noNote: true,
+      parts: qs.map((q) => ({ title: q.text, header: q.header || undefined, choices: choices(q) })) };
+  return { id: `cq:${x.id}`, title: qs[0].text, kind: "Question", to: key, other: true, noNote: true, choices: choices(qs[0]) };
 }
 
 export class Compat {
@@ -528,6 +541,11 @@ export class Compat {
     // what pages sent it, known again in the log: the page's id comes back on it
     const sends = (own && this.sends.get(own)) || [], takenSends = new Set<string>();
     const asking = !!own && (this.asks?.of(own) ?? []).some((a: any) => a.words?.kind === "questions");
+    // Codex's own questions (request_user_input) waiting on its screen: a card that answers them there (SHEP-91), at
+    // the end, in place of its "Asked you" box
+    const codexAsk = reader.kind === "codex" && t?.status?.state === "blocked"
+      ? [...items].reverse().find((x: any) => x.kind === "ask") : null;
+    const codexCard = codexAsk && !codexAsk.closed && codexAsk.questions?.length ? codexAsk : null;
     // an Assistant started from its chat with the person's words: what they asked (data/chat-first, as the window's)
     // the session's first message: the first user item (core/chat-view.js firstUser)
     const fi = firstUser(items);
@@ -578,7 +596,7 @@ export class Compat {
       else if (x.kind === "agent" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at, ...reactions });
       else if (x.kind === "error" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at, error: true });
       // its own question asked now shows as its card (at the end), in place of its "Asked you" box, as the window's
-      else if (x.kind === "ask" && !x.closed && asking) continue;
+      else if (x.kind === "ask" && !x.closed && (asking || x === codexCard)) continue;
       else if (x.kind === "ask" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at, asked: x.closed === "answered" ? "answered" : x.closed ? "dismissed" : "open" });
       else if (x.kind === "news" && x.ref) {
         // a task's news line in its Assistant's chat (<herdr-news task=… event=…>), as it was said
@@ -614,6 +632,7 @@ export class Compat {
     }
     // what the agent asks now, as cards at the end of its chat
     for (const a of addr ? this.asks?.of(addr) ?? [] : []) messages.push({ id: `ask:${a.id}`, who: "agent", at: a.at, question: this.question(a, key) });
+    if (codexCard) messages.push({ id: `ask:cq:${codexCard.id}`, who: "agent", at: codexCard.at ?? Date.now(), question: codexQuestion(codexCard, key) });
     for (const a of (this.secrets?.asks() ?? []).filter((x) => x.address === addr)) messages.push({ id: `secret:${a.address}:${a.name}`, who: "agent", at: Date.now(), secret: this.secretAsk(a) } as Message);
     // asks that closed, as the window's quiet lines ("✓ Run: npm test · Allowed in the chat"); a question's own line is
     // its "Asked you" box, from the log
