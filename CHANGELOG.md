@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.1.15
+
+Agents keep their chat history, a stuck web chat recovers on its own, and the session note works on Macs.
+
+- Agents started from inside Claude Code keep their chat history and folder-trust prompt again.
+- The web chat follows an Assistant that was restarted, instead of showing "not a chat agent" until the service
+  restarts.
+- Macs: the note Shepherdr adds when a Claude Code session starts no longer breaks it (#731).
+
 ## 3.1.14
 
 Shorter voice replies when you ask a call to open something.
