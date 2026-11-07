@@ -553,8 +553,9 @@ export default class Chat extends View {
     this.loadingEarlier = false;
   }
 
-  // Closing (back to the terminal, or the pane goes): the hook stops waiting on this chat, so
-  // Claude asks in its terminal instead. A call or a recording ends with it.
+  // Closing (back to the terminal, or the pane goes): its flag goes, and a Codex agent's waiting
+  // asks are released (Codex waits on the hook), so it asks in its terminal instead. Claude's stay
+  // on the web's cards: its terminal shows its own prompt meanwhile. A call or a recording ends with it.
   async close(cx) {
     if (this.host) return this.host.close(cx);
     this.box.release();
@@ -563,7 +564,7 @@ export default class Chat extends View {
     this.dict.cancel();
     if (this.call) await this.hangup();
     if (!this.addr || this.machine) return;
-    await exec("sh", ["-c", 'rm -f "$1/open/$2"; for f in "$1/req/$2".*.json; do [ -f "$f" ] && : > "$1/ans/${f##*/}"; done; true', "x", this.askDir, this.addr]);
+    await exec("sh", ["-c", 'rm -f "$1/open/$2"; for f in "$1/req/$2".*.json; do [ -f "$f" ] && grep -q \'"turn_id"\' "$f" && : > "$1/ans/${f##*/}"; done; true', "x", this.askDir, this.addr]);
   }
 
   // ---- drafts -----------------------------------------------------------------------------

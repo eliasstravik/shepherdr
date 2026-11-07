@@ -24,10 +24,10 @@
 // program to find out: shared "inbox.asks" (waiting requests), "inbox.tasks", "inbox.autos".
 // Live agents are read where the items are made (items()).
 //
-// Claude's hook only asks the chat while someone touches data/chat-asks/open/<terminal>: the
-// chat does while it shows the agent; the engine does for every Claude agent here that isn't
-// on screen as a terminal, so their asks wait for its chat. When one comes on screen as a
-// terminal, its waiting asks are released and Claude asks in the terminal as usual.
+// The hook (mods/chat/ask-hook.sh) asks the chat every time, whoever reads it (the web app, a
+// phone); the flag the engine touches (data/chat-asks/open/<terminal>) matters only where hc or jq
+// is missing. Claude shows its own prompt in its terminal meanwhile; Codex waits on the hook, so
+// a Codex agent's ask is released once its terminal comes on screen, and Codex asks there.
 //
 // Shared: the source is lib/inbox.js; bin/sync-shared copies it into each mod in lib/COPIES.
 // Edit lib/inbox.js, never a mod's copy, then run bin/sync-shared.
@@ -114,8 +114,13 @@ async function readAsks() {
   const r = await exec("sh", ["-c", 'cd "$1/req" 2>/dev/null || exit 0; for f in *.json; do [ -f "$f" ] || continue; p=${f%.json}; p=${p##*.}; if kill -0 "$p" 2>/dev/null; then echo "$f"; else rm -f "$f"; fi; done; true', "x", ASKS()]);
   const ids = r.stdout.split("\n").filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -5)).sort();
   const asks = ids.map((id) => ({ id, terminal: id.split(".")[0] }));
-  // One that came on screen as a terminal goes back to it.
-  for (const a of asks) if (onScreen(a.terminal)) await release(a.id);
+  // Codex's (it waits on the hook) that came on screen as a terminal goes back to it; Claude's
+  // terminal shows its prompt anyway, and releasing it would close its card on the web too.
+  const shown = asks.filter((a) => onScreen(a.terminal));
+  if (shown.length) {
+    const r = await exec("sh", ["-c", 'cd "$1/req" && shift && for i; do grep -q \'"turn_id"\' "$i.json" 2>/dev/null && echo "$i"; done; true', "x", ASKS(), ...shown.map((a) => a.id)]).catch(() => null);
+    for (const id of (r?.stdout ?? "").split("\n").filter(Boolean)) await release(id);
+  }
   const left = asks.filter((a) => !onScreen(a.terminal));
   // A few seconds in, an ask Herdr shows no agent waiting for gets its own alert.
   const now = Date.now();

@@ -80,6 +80,9 @@ HOOKS = [  # (file under home, event, entry): the question and permission cards 
      {"hooks": [{"type": "command", "command": "sh '{app}/mods/chat/ask-hook.sh'", "timeout": 1800}]}),
     (".codex/hooks.json", "SessionStart",
      {"hooks": [{"type": "command", "command": "sh '{app}/mods/chat/session-note.sh'", "timeout": 10}]}),
+    # Codex's approvals on the chat's card too (SHEP-91); a task worker's own hook hands them on instead
+    (".codex/hooks.json", "PermissionRequest",
+     {"hooks": [{"type": "command", "command": "sh '{app}/mods/chat/ask-hook.sh'", "timeout": 1800}]}),
 ]
 
 

@@ -3001,3 +3001,41 @@ class Feedback(unittest.TestCase):
         with open(os.path.join(BIN, "herdr_task", "autopilot.py")) as f:
             self.assertIn("herdr-task feedback", f.read())
         self.assertIn("feedback", __import__("herdr_task.launch", fromlist=["OWN"]).OWN)
+
+
+class CodexAsksOnTheCard(unittest.TestCase):
+    """SHEP-91: a Codex worker's PermissionRequest hook (`herdr-task _allow`) allows its own commands, and hands anything
+    else to the chat's card (ask-hook.sh, marked HERDR_ASK_CHAINED), waiting as long as the card does."""
+
+    def run_allow(self, command, hook):
+        app = tempfile.mkdtemp()
+        if hook is not None:
+            os.makedirs(os.path.join(app, "mods", "chat"))
+            with open(os.path.join(app, "mods", "chat", "ask-hook.sh"), "w") as f:
+                f.write(hook)
+        code = ("import sys, types, argparse; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]);"
+                "from herdr_task.launch import cmd_allow; cmd_allow(argparse.Namespace(command='/x/herdr-task'))")
+        req = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "turn_id": "t1"})
+        env = {**os.environ, "HERDR_APP_HOME": app}
+        env.pop("HERDR_ASK_CHAINED", None)
+        return subprocess.run([sys.executable, "-c", code, BIN], input=req, capture_output=True, text=True, env=env)
+
+    def test_its_own_command_never_asks(self):
+        out = self.run_allow("/x/herdr-task status SHEP-1 hi", 'echo "should not run"')
+        self.assertEqual(json.loads(out.stdout)["hookSpecificOutput"]["decision"], {"behavior": "allow"}, out.stderr)
+
+    def test_anything_else_goes_to_the_card(self):
+        card = ('[ "$HERDR_ASK_CHAINED" = 1 ] || exit 0; grep -q "rm -rf build" || exit 0; '
+                'echo \'{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"no"}}}\'')
+        out = self.run_allow("rm -rf build", card)
+        self.assertEqual(json.loads(out.stdout)["hookSpecificOutput"]["decision"], {"behavior": "deny", "message": "no"}, out.stderr)
+        # no card answer (answered in the terminal, or no chat hook installed): no decision, Codex asks itself
+        self.assertEqual(self.run_allow("rm -rf build", "exit 0").stdout, "")
+        self.assertEqual(self.run_allow("rm -rf build", None).stdout, "")
+
+    def test_codex_waits_as_long_as_the_card(self):
+        sys.path.insert(0, BIN)
+        from herdr_task import launch
+        argv = launch.own_argv(["codex", "--sandbox", "workspace-write"])
+        self.assertIn(f"timeout={launch.ASK_TIMEOUT}", argv[2])
+        self.assertEqual(launch.ASK_TIMEOUT, 1800)
