@@ -1,6 +1,6 @@
 // The tailnet side: who owns this machine, its name, and sharing /shepherdr privately with tailscale serve.
 // Never funnel: serving stops when Funnel is on for the port /shepherdr is served on.
-import { MOUNT } from "./paths.ts";
+import { MOUNT, HTTPS_PORT } from "./paths.ts";
 
 export type Me = { login: string; name: string; dns: string; host: string };
 
@@ -55,14 +55,16 @@ export async function funnelAnywhere(): Promise<boolean> {
   try { return Object.values(JSON.parse(r.out || "{}").AllowFunnel ?? {}).some(Boolean); } catch { return false; }
 }
 
-/** Shares 127.0.0.1:<port> at https://<machine>/shepherdr. Refuses to replace /shepherdr when it points elsewhere. */
-export async function share(dns: string, port: number): Promise<string | null> {
+/** Shares 127.0.0.1:<port> at https://<machine>[:<httpsPort>]/shepherdr. Refuses to replace /shepherdr when it
+ *  points elsewhere; ours on another HTTPS port (the setting changed) moves to this one. */
+export async function share(dns: string, port: number, httpsPort = HTTPS_PORT): Promise<string | null> {
   const now = await served(dns);
   const ours = `http://127.0.0.1:${port}`;
   if (now.funnel) return "Funnel is on for this machine's HTTPS port: Shepherdr won't serve there";
-  if (now.proxy === ours) return null;
-  if (now.proxy) return `${MOUNT} is already shared to ${now.proxy}`;
-  const r = await run(["serve", "--bg", "--set-path", MOUNT, String(port)]);
+  if (now.proxy === ours && now.port === String(httpsPort)) return null;
+  if (now.proxy && now.proxy !== ours) return `${MOUNT} is already shared to ${now.proxy}`;
+  if (now.proxy === ours) await run(["serve", `--https=${now.port ?? 443}`, "--set-path", MOUNT, "off"]);
+  const r = await run(["serve", "--bg", `--https=${httpsPort}`, "--set-path", MOUNT, String(port)]);
   return r.ok ? null : "tailscale serve failed";
 }
 

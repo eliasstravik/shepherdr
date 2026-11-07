@@ -162,6 +162,23 @@ class Install(unittest.TestCase):
         self.assertNotEqual(p.returncode, 0)
         self.assertIn("1024", p.stdout + p.stderr)
 
+    def test_https_port(self):
+        """install --https-port: the unit tells the service the tailnet HTTPS port, an update keeps it, 443 puts the
+        default back; a port out of range is refused."""
+        unit = self.p("Library/LaunchAgents/dev.shepherdr.service.plist") if sys.platform == "darwin" else self.p(".config/systemd/user/shepherdr.service")
+        out = run("install", "--root", self.root, "--yes", "--https-port", "8443").stdout
+        if "needs bun" in out:
+            self.skipTest("bun isn't installed here")
+        self.assertIn("SHEPHERDR_HTTPS_PORT", open(unit).read())
+        self.assertIn("8443", open(unit).read())
+        run("update", "--root", self.root, "--yes", "--source", ROOT)
+        self.assertIn("8443", open(unit).read(), "an update keeps the HTTPS port")
+        run("install", "--root", self.root, "--yes", "--https-port", "443")
+        self.assertNotIn("SHEPHERDR_HTTPS_PORT", open(unit).read())
+        p = run("install", "--root", self.root, "--yes", "--https-port", "70000", ok=False)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("65535", p.stdout + p.stderr)
+
     def test_service_answers(self):
         """doctor and install trust only Shepherdr's own service on its port: the id it wrote in service.json, not
         another app answering health there (GitHub #635)."""

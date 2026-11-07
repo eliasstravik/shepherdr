@@ -32,6 +32,14 @@ describe("through tailscale serve", () => {
     expect(gate(tailnet({ headers: { origin: "https://evil.example" } }), g, true, true)).toMatchObject({ ok: false });
     expect(gate(tailnet({ headers: { origin: "https://box.tailnet.example" } }), g, true, true)).toMatchObject({ ok: true });
   });
+  test("on another HTTPS port, only that host and origin get in", () => {
+    const g2: Gate = { ...g, httpsPort: 8443 };
+    const at = (headers: Record<string, string>, method = "GET") => tailnet({ method, headers: { host: "box.tailnet.example:8443", ...headers } });
+    expect(gate(at({}), g2, false, true)).toMatchObject({ ok: true });
+    expect(gate(tailnet(), g2, false, true)).toMatchObject({ ok: false, status: 421 });
+    expect(gate(at({ origin: "https://box.tailnet.example:8443", "x-shepherdr": "1" }, "POST"), g2, false, true)).toMatchObject({ ok: true });
+    expect(gate(at({ origin: "https://box.tailnet.example", "x-shepherdr": "1" }, "POST"), g2, false, true)).toMatchObject({ ok: false, status: 403 });
+  });
   test("cross-site and preflight requests are refused", () => {
     expect(gate(tailnet({ headers: { "sec-fetch-site": "cross-site" } }), g, false, true)).toMatchObject({ ok: false });
     expect(gate(tailnet({ method: "OPTIONS" }), g, false, true)).toMatchObject({ ok: false });

@@ -69,6 +69,7 @@ It shares itself on your tailnet only (`tailscale serve`, never Funnel). `shephe
 
 ```text
 ./install.sh [--root DIR] [--dry-run] [--adopt] [--guard] [--keys ask|keep|ours] [--no-hooks] [--no-build] [--yes] [--force]
+             [--port N] [--https-port N]
 ./install.sh --web    the web app alone, without the Herdr window
 shepherdr update      the same kind again (layout, or web only), from the checkout it was installed from (git pull it first)
 shepherdr uninstall   [--root DIR] [--dry-run]: takes out what it installed and puts back what it replaced

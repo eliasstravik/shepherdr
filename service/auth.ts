@@ -5,8 +5,10 @@
 // Writes and sockets also need the page's own origin, and writes a header no plain form or link can send.
 // The service listens on 127.0.0.1 only, so the tailnet reaches it through tailscale serve alone.
 
-export type Gate = { owner: string | null; dns: string | null; port: number; token: string };
+export type Gate = { owner: string | null; dns: string | null; port: number; token: string; httpsPort?: number };
 export type Pass = { ok: true; who: string; via: "tailnet" | "local" } | { ok: false; status: number; why: string };
+
+import { tailnetOrigin } from "./paths.ts";
 
 const READS = new Set(["GET", "HEAD"]);
 
@@ -22,10 +24,12 @@ export function gate(req: Request, g: Gate, socket = false, peerTrusted = false)
     if (!g.owner || !g.dns) return { ok: false, status: 503, why: "Tailscale isn't running here" };
     if (!peerTrusted) return { ok: false, status: 403, why: "not from Tailscale" };
     if (login !== g.owner) return { ok: false, status: 403, why: "only this machine's owner" };
-    if (host !== g.dns && host !== `${g.dns}:443`) return { ok: false, status: 421, why: "wrong host" };
+    const hp = g.httpsPort ?? 443;
+    const hostOk = hp === 443 ? host === g.dns || host === `${g.dns}:443` : host === `${g.dns}:${hp}`;
+    if (!hostOk) return { ok: false, status: 421, why: "wrong host" };
     if (write) {
       const origin = h.get("origin");
-      if (origin !== `https://${g.dns}`) return { ok: false, status: 403, why: "wrong origin" };
+      if (origin !== tailnetOrigin(g.dns, hp)) return { ok: false, status: 403, why: "wrong origin" };
       if (!socket && h.get("x-shepherdr") !== "1") return { ok: false, status: 403, why: "missing x-shepherdr" };
     }
     return { ok: true, who: login, via: "tailnet" };

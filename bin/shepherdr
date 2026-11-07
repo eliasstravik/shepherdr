@@ -3,6 +3,7 @@
 
   shepherdr install    [--root DIR] [--adopt] [--guard] [--keys ask|keep|ours] [--no-hooks] [--dry-run] [--yes]
                        [--port N]: the service's port on 127.0.0.1 when another app holds 7788 (updates keep it)
+                       [--https-port N]: the tailnet HTTPS port for the web app when something else uses 443 (updates keep it)
   shepherdr update     the same, from the checkout it was installed from (git pull it first); web only too
   (a fresh clone has no web app built: install and update build it with Bun, installing Bun first when it's missing)
   shepherdr install --web               web only: herdr-core, herdr-task, the helpers, the service and the web app
@@ -326,10 +327,11 @@ def bun_path():
     return None
 
 
-def unit_text(root, bun, port=None):
+def unit_text(root, bun, port=None, https_port=None):
     """The user service that keeps Shepherdr's service running (Linux), or its launchd agent (macOS). port: install's
     --port (SHEPHERDR_PORT; none: the service's own 7788). The window and the CLI read the port the service really took
-    from ~/.herdr/shepherdr/service.json, so this is the only place it is set."""
+    from ~/.herdr/shepherdr/service.json, so this is the only place it is set. https_port: install's --https-port
+    (SHEPHERDR_HTTPS_PORT; none: 443), the tailnet HTTPS port tailscale serve shares the web app on."""
     main = os.path.join(root, SHARE, "service", "main.ts")
     # hc, herdr-task and the helpers live in ~/.local/bin, which a user service's PATH lacks; and the tools herdr-task
     # and the agents run (gh, git, node, agent-browser, the CLIs…) where this install finds them (mise, nvm, brew…)
@@ -345,7 +347,7 @@ def unit_text(root, bun, port=None):
 <dict>
   <key>Label</key><string>{AGENT}</string>
   <key>ProgramArguments</key><array><string>{bun}</string><string>{main}</string></array>
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>{path}</string>{f"<key>SHEPHERDR_PORT</key><string>{port}</string>" if port else ""}</dict>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>{path}</string>{f"<key>SHEPHERDR_PORT</key><string>{port}</string>" if port else ""}{f"<key>SHEPHERDR_HTTPS_PORT</key><string>{https_port}</string>" if https_port else ""}</dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>{os.path.join(root, HERDR, "shepherdr", "service.log")}</string>
@@ -360,7 +362,7 @@ After=network-online.target
 [Service]
 ExecStart={bun} {main}
 Environment=PATH={path}
-{f"Environment=SHEPHERDR_PORT={port}{chr(10)}" if port else ""}Restart=always
+{f"Environment=SHEPHERDR_PORT={port}{chr(10)}" if port else ""}{f"Environment=SHEPHERDR_HTTPS_PORT={https_port}{chr(10)}" if https_port else ""}Restart=always
 RestartSec=2
 
 [Install]
@@ -425,6 +427,19 @@ def set_port(a, rec):
         rec["port"] = p
 
 
+def set_https_port(a, rec):
+    """install --https-port: kept in the record, so an update keeps it; 443 goes back to the default."""
+    p = getattr(a, "https_port", None)
+    if p is None:
+        return
+    if not 1 <= p <= 65535:
+        raise Stop(f"--https-port {p}: pick one from 1 to 65535")
+    if p == 443:
+        rec.pop("https_port", None)
+    else:
+        rec["https_port"] = p
+
+
 def install_service(r, rec, home):
     """Writes the unit; on the real home, (re)starts the service with it. A scratch root only gets the file."""
     bun = bun_path()
@@ -433,7 +448,7 @@ def install_service(r, rec, home):
         return
     if not os.path.isfile(r.p(f"{SHARE}/web/dist/index.html")) and not r.dry:
         r.notes.append("the web app isn't built, so the service serves no page yet (./install.sh builds it)")
-    rel, text = unit_text(r.root, bun, rec.get("port"))
+    rel, text = unit_text(r.root, bun, rec.get("port"), rec.get("https_port"))
     data = text.encode()
     if read(r.p(rel)) != data:
         if r.dry:
@@ -831,6 +846,7 @@ def cmd_install(a, update=False):
     rec["keys"], keys_changed = merge_keys(r, src, rec, a.keys, a.yes)
     rec["links"] = link_helpers(r, rec)
     set_port(a, rec)
+    set_https_port(a, rec)
     install_service(r, rec, home)
     if a.guard:
         install_guard(r, src, rec)
@@ -923,6 +939,7 @@ def cmd_install_web(a, update=False):
     if r.backed:
         rec["backups"] = [*rec.get("backups", []), r.backup_dir]
     set_port(a, rec)
+    set_https_port(a, rec)
     install_service(r, rec, home)
     if not a.dry_run:
         atomic_write(r.p(WEB_RECORD), (json.dumps(rec, indent=2, sort_keys=True) + "\n").encode())
@@ -1377,6 +1394,8 @@ def main(argv):
             c.add_argument("--web", action="store_true", help="web only: no herdr-app (the service, the web app, herdr-task and the helpers)")
             c.add_argument("--port", type=int, help=f"the port Shepherdr's service listens on, on 127.0.0.1 (default {DEFAULT_PORT}; "
                                                     "kept for updates): when another app already uses it")
+            c.add_argument("--https-port", type=int, help="the tailnet HTTPS port tailscale serve shares the web app on "
+                                                          "(default 443; kept for updates): when something else on this machine uses 443")
             c.add_argument("--no-build", action="store_true", help="install the web app as it is in the checkout: no build, even when it's missing or old")
     w = sub.add_parser("web", help="where the web app is served from (Serve from)")
     w.add_argument("action", choices=["serve-from", "status", "install-on"])
