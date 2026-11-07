@@ -276,7 +276,7 @@ export class Compat {
    *  again by its words, and shows with the page's id and files */
   sends = new Map<string, Sent[]>();
   noteSend(addr: string, s: Sent) {
-    this.sends.set(addr, [...(this.sends.get(addr) ?? []).filter((x) => Date.now() - x.at < 30 * 60_000), s].slice(-20));
+    this.sends.set(addr, [...(this.sends.get(addr) ?? []).filter((x) => x.cid !== s.cid && Date.now() - x.at < 30 * 60_000), s].slice(-20));
   }
 
   addrOf(key: string) { return this.chats.get(key) ?? null; }
