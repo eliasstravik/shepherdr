@@ -158,6 +158,24 @@ def resume_argv(argv, session):
     return None
 
 
+# ---- agents never inherit a parent Claude Code session (SHEP-86) ------------------------------
+# herdr-core's holder keeps the environment of whatever started it, and every terminal gets it: a
+# holder started from inside Claude Code hands each agent CLAUDECODE, CLAUDE_PID and
+# CLAUDE_CODE_CHILD_SESSION, SESSION_ID, MESSAGING_*... Claude Code then saves no transcript (the
+# web Chat can't find the conversation) and skips the folder-trust prompt. hc can only add
+# variables, so the launch unsets them first: CLAUDECODE, CLAUDE_PID and CLAUDE_CODE_*, keeping the
+# person's own Claude Code config (_USE_*, _SKIP_*, _DISABLE_*, _OAUTH_*..., CLAUDE_CONFIG_DIR).
+# The same line is core/clean-env.js CLEAN_ENV and mods/coordinator/restart.sh's (test_repo keeps
+# them equal).
+CLEAN_ENV = ("for v in $(env | sed -nE 's/^(CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_[A-Za-z0-9_]+)=.*/\\1/p' | "
+             "grep -vE '^CLAUDE_CODE_(USE|SKIP|DISABLE|ENABLE|MAX|OAUTH|CLIENT|API)_'); do unset \"$v\"; done;")
+
+
+def clean_env(argv):
+    """argv run without a parent Claude Code session's markers (CLEAN_ENV)."""
+    return ["sh", "-c", CLEAN_ENV + ' exec "$@"', "herdr-clean", *argv]
+
+
 def in_shell(argv):
     """Runs the agent in the person's interactive shell, as Herdr does: their functions and
     aliases apply (claude() adding flags), and the shell stays when the agent exits."""
@@ -545,7 +563,7 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
     name = agent_name(s, task, "review" if role else None)
     # HERDR_BROWSER_TASK: which task's browser herdr-browser drives (HERD-57), for it and its children.
     r = run(["hc", "run", "--bg", "--json", "--keep", "--cwd", folder_for(s, task), "--name", name,
-             *labels, *rel, "--", *low_priority(["env", f"HERDR_BROWSER_TASK={key}", *in_shell(cmd)], name)])
+             *labels, *rel, "--", *low_priority(clean_env(["env", f"HERDR_BROWSER_TASK={key}", *in_shell(cmd)]), name)])
     try:
         out = json.loads(r.stdout)
     except ValueError:

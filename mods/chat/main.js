@@ -49,6 +49,7 @@ import * as attach from "./attach.js";
 import * as slash from "./slash.js";
 import * as mentions from "./core/mentions.js";
 import * as agent from "./agent.js";
+import { cleanCommand } from "./core/clean-env.js";
 import * as choices from "./settings.js";
 import { Dictation, BUN_PATH, warmAudio } from "./dictate.js";
 
@@ -1569,15 +1570,16 @@ export default class Chat extends View {
       // agent and its flags, as a one-off template (as restart.sh does), written beside the
       // template on the machine it runs on. There, an agent that isn't installed leaves the
       // template's own command (what that machine's sync put there).
-      // hc runs a template's command under sh -c, and where sh is dash (Debian, Ubuntu) the shell
-      // stays the terminal's program, so the chat wouldn't know its CLI: on another machine the
-      // command always goes through a one-off that execs it.
+      // Every start goes through a one-off (SHEP-86): its command first clears a parent Claude Code
+      // session's markers the holder may carry (core/clean-env.js), then execs the agent: hc runs a
+      // template's command under sh -c, and where sh is dash (Debian, Ubuntu) the shell would stay
+      // the terminal's program, so the chat wouldn't know its CLI.
       let launch = template, oneOff = null, words = "";
       const st = this.choice?.sel ?? props()?.settings;
       const on = machine ? { on: machine } : {};
       const there = !machine || !st?.agent ? true : (await knownAgents(on).catch(() => []))
         .some((a) => (a.key === st.agent || (a.run ?? [])[0] === st.agent) && a.installed !== false);
-      if ((st?.agent && there) || machine) {
+      {
         const q = (a) => (/^[\w@%+=:,./-]+$/.test(a) ? a : `'${String(a).replace(/'/g, "'\\''")}'`);
         const src = (await exec("sh", ["-c", TEMPLATE + 'cat "$dir/$1.md"', "x", template], on).catch(() => null))?.stdout ?? "";
         const head = /^---\n([\s\S]*?)\n---\n?/.exec(src);
@@ -1587,7 +1589,7 @@ export default class Chat extends View {
         if (body.trim() && cmd) {
           words = body.trim();
           oneOff = `herdr-${template}-${Date.now().toString(36)}`;
-          const file = `---\nname: ${oneOff}\ndescription: A one-off ${template} start with chosen settings (mods/chat), removed after use.\ncommand: ${machine && !/^exec\s/.test(cmd) ? "exec " : ""}${cmd}\n---\n${body}`;
+          const file = `---\nname: ${oneOff}\ndescription: A one-off ${template} start with chosen settings (mods/chat), removed after use.\ncommand: ${cleanCommand(cmd)}\n---\n${body}`;
           await exec("sh", ["-c", TEMPLATE + 'printf "%s" "$2" > "$dir/$1.md"', "x", oneOff, file], on);
           launch = oneOff;
         }

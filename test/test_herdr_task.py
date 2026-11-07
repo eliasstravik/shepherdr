@@ -1771,8 +1771,62 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class CleanEnv(unittest.TestCase):
+    """SHEP-86: herdr-core's holder hands every terminal the environment it was started with, so a holder started from
+    inside Claude Code would hand each agent that session's markers (transcripts off, no folder-trust prompt). A task's
+    agent launched through launch() runs without them; the person's own Claude Code config stays. Fake values only:
+    hc is never run, the launch's own argv runs for real with `env` as its agent."""
+    MARKERS = {"CLAUDECODE": "1", "CLAUDE_PID": "4242", "CLAUDE_CODE_CHILD_SESSION": "1", "CLAUDE_CODE_SESSION_ID": "fake-session",
+               "CLAUDE_CODE_ENTRYPOINT": "cli", "CLAUDE_CODE_MESSAGING_SOCKET": "/tmp/fake.sock", "CLAUDE_CODE_MESSAGING_TOKEN": "fake-token"}
+    KEPT = {"CLAUDE_CONFIG_DIR": "/tmp/fake-claude", "CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_DISABLE_AUTOUPDATER": "1", "FAKE_OTHER": "x"}
+
+    def agent_env(self, argv):
+        """What the agent at the end of a launch argv sees, started from a parent environment with the markers."""
+        out = subprocess.run(argv, env={"PATH": os.environ["PATH"], **self.MARKERS, **self.KEPT}, capture_output=True, text=True, timeout=20)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return dict(l.split("=", 1) for l in out.stdout.splitlines() if "=" in l)
+
+    def test_a_task_agent_starts_without_a_parent_claude_session(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.launch as L
+        ran = []
+
+        def run(argv, *a, **k):
+            ran.append(argv)
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"address": "t9"}), "")
+        s = SimpleNamespace(key=lambda t: "dev#6", dirty=False)
+        task = {"id": 6, "title": "fake", "agents": []}
+        with mock.patch.object(L, "run", run), mock.patch.object(L, "folder_for", lambda s, t: "/tmp"), \
+                mock.patch.object(L, "agent_name", lambda *a: "dev-6-fake"), mock.patch.object(L, "track", lambda *a: None), \
+                mock.patch.object(L, "coordinator_tab", lambda a: None), mock.patch.object(L, "own_argv", lambda a: a), \
+                mock.patch.object(L, "in_shell", lambda a: a), mock.patch.object(L, "low_priority", lambda a, n: a):
+            L.launch(s, task, ["env"], "sp1")
+        hc = ran[0]
+        self.assertEqual(hc[:2], ["hc", "run"])
+        env = self.agent_env(hc[hc.index("--") + 1:])
+        for k in self.MARKERS:
+            self.assertNotIn(k, env)
+        for k, v in self.KEPT.items():
+            self.assertEqual(env.get(k), v)
+        self.assertEqual(env.get("HERDR_BROWSER_TASK"), "dev#6")  # what the launch sets on purpose stays
+
+    def test_the_same_line_everywhere(self):
+        """herdr-task, the window and the service (core/clean-env.js) and restart.sh clear the same names."""
+        sys.path.insert(0, BIN)
+        import herdr_task.launch as L
+        js = subprocess.run(["sh", "-c", 'grep -o "export const CLEAN_ENV = .*" "$1"', "x", os.path.join(ROOT, "core", "clean-env.js")],
+                            capture_output=True, text=True).stdout.strip()
+        self.assertEqual(js.split("`")[1].replace("\\\\", "\\"), L.CLEAN_ENV)
+        restart = os.path.join(ROOT, "mods", "coordinator", "restart.sh")
+        line = subprocess.run(["bash", "-c", 'eval "$(grep "^clean=" "$1")"; printf %s "$clean"', "x", restart], capture_output=True, text=True).stdout
+        self.assertEqual(line, L.CLEAN_ENV)
+        self.assertEqual(self.agent_env(["sh", "-c", line + ' exec env']).keys() & self.MARKERS.keys(), set())
+
+
 class Revive(unittest.TestCase):
-    """SHEP-30: an Assistant or a task's agent the core gave a plain shell (a crash, a power loss, a
+    """SHEP-30:an Assistant or a task's agent the core gave a plain shell (a crash, a power loss, a
     reboot) gets its agent typed back into that shell, on its own session. A fake core in memory:
     hc and the agents' session files are never touched."""
 
@@ -1793,7 +1847,9 @@ class Revive(unittest.TestCase):
                 k, v = args[3].split("=", 1)
                 self.terms[args[2]].setdefault("labels", {})[k] = v
             elif args[:2] == ["hc", "send"]:
-                self.sent.append((args[2], args[3]))
+                # each line first clears a parent Claude Code session's markers (SHEP-86)
+                self.assertTrue(args[3].startswith(revive.CLEAN_ENV + " "), args[3])
+                self.sent.append((args[2], args[3][len(revive.CLEAN_ENV) + 1:]))
             elif args[:2] == ["hc", "read"]:
                 out = self.screens.get(args[2], "")
             else:
