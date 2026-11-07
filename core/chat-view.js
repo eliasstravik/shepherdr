@@ -355,6 +355,26 @@ export function fitThumbs(sizes, width = Infinity) {
 export const HELPER_ROLES = ["reviewer", "helper"];
 export const subagentWord = (status) => (status === "working" ? WORDS.working : status === "needs" ? WORDS.needsYou : WORDS.subDone);
 export const SUBAGENT_KEEP_MS = 60 * 60000;
+
+// ---- the rows over the box, grouped (SHEP-92) ----
+// Several subagents or background shells stacked over the box ate a phone's screen: each kind takes at most one row.
+// One of a kind shows as its own row; two or more as one group row ("3 background processes"), its newest's title, how
+// long that one has run and their shared state, opening in place to the list of them, each opening as before.
+const SUB_KINDS = ["agent", "headless", "child"];
+// shared by a group of subagents: one asking makes it ask, else one at work makes it work, else all are done
+const sharedStatus = (items) =>
+  items.some((j) => j.status === "needs") ? "needs" : items.some((j) => !j.status || j.status === "working") ? "working" : "done";
+export function bgGroups(items) {
+  const sub = items.filter((j) => SUB_KINDS.includes(j.kind));
+  const proc = items.filter((j) => !SUB_KINDS.includes(j.kind));
+  const group = (kind, list) => {
+    const newest = list.reduce((a, b) => ((b.at ?? 0) > (a.at ?? 0) ? b : a));
+    const n = list.length;
+    const words = n < 2 ? null : kind === "sub" ? `${n} subagents` : `${n} background processes`;
+    return { kind, items: list, newest, status: kind === "sub" ? sharedStatus(list) : "working", words };
+  };
+  return [...(sub.length ? [group("sub", sub)] : []), ...(proc.length ? [group("proc", proc)] : [])];
+}
 const roleOf = (k) => k?.labels?.["herdr.role"] ?? null;
 export const isHelper = (k) => HELPER_ROLES.includes(roleOf(k)) && !!k?.parent;
 

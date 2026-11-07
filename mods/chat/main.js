@@ -32,7 +32,7 @@ import { BgJobs } from "./core/bg-jobs.js";
 import { ChatReader } from "./core/chat-reader.js";
 import { words, howAnswered } from "./core/asks.js";
 // The rows' words and rules the web app's chat draws by too (core/chat-view.js).
-import { WORDS, clock, subagentsOf, subagentWord, senderName, briefLabel, firstUser, firstKeys, literal, fromName, sentTo, selfName, initialOf, newsWords, resolveArtifacts, unsigned, ownWords, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
+import { WORDS, clock, bgGroups, subagentsOf, subagentWord, senderName, briefLabel, firstUser, firstKeys, literal, fromName, sentTo, selfName, initialOf, newsWords, resolveArtifacts, unsigned, ownWords, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
 // Sending the person's words, as the web app does (core/send.js).
 import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine, mentionedIn, sendTyped } from "./core/send.js";
 // hc whose send goes as the person, with no caller: never "Another agent" on another machine (SHEP-3, core/person.js).
@@ -3412,10 +3412,11 @@ export default class Chat extends View {
     });
   }
 
-  // Above the box: the CLI's subagents at work, then its background shells and watchers, one row
-  // each as Claude Code and Codex list them (an icon, its name, how long). Five rows, else four and
-  // "+N more" opens the rest. A shell's or watcher's row opens to its command, what it printed last
-  // (Claude Code's), and Stop.
+  // Above the box: the CLI's subagents at work, then its background shells and watchers, at most one
+  // row of each kind (SHEP-92, as the web's): one shows as its own row (an icon, its name, how long),
+  // two or more as one row ("3 background processes", their shared state, the newest's name) that
+  // opens in place to the list of them. A shell's or watcher's row opens to its command, what it
+  // printed last (Claude Code's), and Stop.
   // Shepherdr settings' "Helpers above the chat box" off (shared "chat.helpers" false): no subagents.
   background(t, st, rcx) {
     const now = Date.now();
@@ -3423,8 +3424,6 @@ export default class Chat extends View {
     const kids = shared("chat.helpers") === false || this.phase === "ended" ? [] : subagentsOf(terminals(), this.addr, now).map((k) => ({ ...k, kind: "child", id: `c:${k.address}`, label: k.title }));
     const shown = [...kids, ...(shared("chat.helpers") === false ? [] : this.helpers().map((h) => ({ ...h, kind: "agent" }))), ...this.jobs()];
     if (!shown.length) return null;
-    const open = this.helpersOpen || shown.length <= 5;
-    const list = open ? shown : shown.slice(0, 4);
     const ago = (at) => {
       if (!at) return "";
       const s = Math.max(0, Math.floor((now - at) / 1000));
@@ -3466,13 +3465,29 @@ export default class Chat extends View {
             ? h_flex().h(28).px(10).items_center().text_size(12.5).text_color(t.dim).child(WORDS.stopping)
             : this.button(`job-stop-${h.id}`, "Stop", "mods/chat/stop.svg", "secondary", t, (cx) => this.stopJob(h, cx)))));
     };
+    // two or more of a kind: one row, opening in place to each of them
+    this.groupOpen ??= {};
+    const group = (g) => {
+      const on = Boolean(this.groupOpen[g.kind]);
+      const icon = g.kind === "proc" ? svg("mods/workspace-chrome/terminal.svg").size(12).flex_none().text_color(t.working)
+        : g.status === "working" ? svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)
+        : g.status === "needs" ? div().size(6).mx(3).flex_none().rounded(3).bg(red(t))
+        : svg("mods/chat/check.svg").size(12).flex_none().text_color(t.dim);
+      const head = h_flex().id(`bg-group-${g.kind}`).w_full().h(24).px(6).gap(8).items_center().rounded(6).cursor_pointer().text_size(12)
+        .when(on, (el) => el.bg(t.hover))
+        .hover((s) => s.bg(t.hover))
+        .on_click((_e, cx) => { cx.stop_propagation(); this.groupOpen[g.kind] = !on; cx.notify(); })
+        .child(icon)
+        .child(div().flex_none().font_medium().text_color(t.foreground).child(g.words))
+        .when(g.kind === "sub", (el) => el.child(div().flex_none().text_color(g.status === "needs" ? red(t) : t.dim).child(subagentWord(g.status))))
+        .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(g.newest.label ?? ""))
+        .child(age(g.newest.ended ? { at: Date.now() - (g.newest.ended - g.newest.at) } : g.newest))
+        .child(svg(on ? "mods/chat/chevron-up.svg" : "mods/chat/chevron-down.svg").size(12).flex_none().text_color(t.dim));
+      if (!on) return head;
+      return v_flex().w_full().child(head).child(v_flex().w_full().pl(20).pt(2).children(g.items.map((h) => row(h, shown.indexOf(h)))));
+    };
     return v_flex().flex_none().w_full().max_w(COLUMN + 28).mx_auto().px(14).pt(4)
-      .children(list.map(row))
-      .when(!open, (el) => el.child(h_flex().id("helpers-more").h(22).px(6).gap(6).items_center().rounded(6).cursor_pointer()
-        .text_size(12).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
-        .on_click((_e, cx) => { cx.stop_propagation(); this.helpersOpen = true; cx.notify(); })
-        .child(svg("mods/workspace-chrome/chevron-down.svg").size(12).flex_none())
-        .child(`+${shown.length - 4} more`)));
+      .children(bgGroups(shown).map((g) => (g.words ? group(g) : row(g.items[0], shown.indexOf(g.items[0])))));
   }
 
   // One subagent over the box (SHEP-54), as the web's: its status (a spinner at work, red asking, a check once done),

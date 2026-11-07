@@ -237,3 +237,19 @@ describe("the person's words and the session's first message", () => {
     expect(firstKeys({})).toEqual([]);
   });
 });
+
+// SHEP-92: at most one row over the box for each kind of background work
+import { bgGroups } from "./chat-view.js";
+test("bgGroups: one row per kind, subagents first, the newest and their shared state", () => {
+  expect(bgGroups([])).toEqual([]);
+  const one = bgGroups([{ id: "s1", kind: "shell", at: 5, title: "Build" }]);
+  expect(one.map((g) => [g.kind, g.words, g.newest.id])).toEqual([["proc", null, "s1"]]);
+  const many = bgGroups([
+    { id: "s1", kind: "shell", at: 5 }, { id: "m1", kind: "monitor", at: 9 }, { id: "s2", kind: "shell", at: 7 },
+    { id: "c1", kind: "child", at: 3, status: "done" }, { id: "a1", kind: "agent", at: 4 },
+  ]);
+  expect(many.map((g) => [g.kind, g.words, g.newest.id, g.status, g.items.length])).toEqual([
+    ["sub", "2 subagents", "a1", "working", 2], ["proc", "3 background processes", "m1", "working", 3]]);
+  expect(bgGroups([{ kind: "child", at: 1, status: "done" }, { kind: "child", at: 2, status: "needs" }, { kind: "child", at: 3, status: "working" }])[0].status).toBe("needs");
+  expect(bgGroups([{ kind: "child", at: 1, status: "done" }, { kind: "child", at: 2, status: "done" }])[0].status).toBe("done");
+});
