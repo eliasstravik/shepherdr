@@ -17,7 +17,7 @@ import { machines, run, props, exec, hc, home, theme, shared, setShared, watchFo
 import { panes, spaces as allSpaces, inRender } from "./live.js";
 import { countsByTab, readyByTab } from "./inbox.js";
 import { spacesWithChats } from "./parked.js";
-import { sectionsOf, sectionOf, iconOf, placeSpace, foldSection, prune, data, pin, foldPinned, machineLook, restoreSection } from "./sections.js";
+import { sectionsOf, sectionOf, iconOf, placeSpace, foldSection, prune, data, pin, foldPinned, machineLook, restoreSection, moveSection } from "./sections.js";
 import { Menu, openMenu, rectOf } from "./popups.js";
 import { IconPicker } from "./icon.js";
 import { Rename } from "./rename.js";
@@ -117,6 +117,11 @@ export default class Spaces extends View {
     this.pressed = null; // the space being dragged (its id)
     this.over = null; // where it would land: "space:<id>", "section:<id>" (its end) or "top:<machine>"
     this.peek = null; // a folded section opened while a space is dragged over it
+    // a section dragged by its header: its id, the one of its machine's it would take the place of, and
+    // whether it left its own place (then its click folds nothing)
+    this.lifted = null;
+    this.target = null;
+    this.liftMoved = false;
     this.unread = new Set(); // spaces whose Assistant has something new (unread.js)
     this.machines = [];
     this.folded = new Set(JSON.parse(localStorage.getItem("machines.folded") ?? "[]"));
@@ -418,7 +423,8 @@ export default class Spaces extends View {
           }
           cx.notify();
         })
-        .on_mouse_move((_e, cx) => this.drag(`top:${m}`, m, cx))
+        // a section dragged over its machine's header goes first
+        .on_mouse_move((_e, cx) => { this.drag(`top:${m}`, m, cx); this.liftOver(null, m, cx); })
         .on_mouse_down("right", (e) => openMenu("machine", { machine: m, row: rectOf(e) }))
         .when(out, el => el.child(this.line(t, "bottom")))
         // Its emoji, or the server / monitor; and the name it was given (Rename), else its own.
@@ -495,29 +501,46 @@ export default class Spaces extends View {
     const byId = new Map(list.map((r) => [r.w.id, r]));
     const filed = new Set(sections.flatMap((s) => s.spaces));
     const out = this.ordered(list.filter((r) => !filed.has(r.w.id))).map((r) => this.row(r, t));
+    // a section dragged here: the line shows where it lands, over the one it takes the place of going up,
+    // under that one's last row going down
+    const ids = sections.map((s) => s.id);
+    const lifting = this.lifted !== null && this.target !== this.lifted && ids.includes(this.lifted) && ids.includes(this.target);
+    const down = lifting && ids.indexOf(this.lifted) < ids.indexOf(this.target);
     for (const s of sections) {
       const members = s.spaces.map((id) => byId.get(id)).filter(Boolean);
       const open = !s.folded || (this.pressed !== null && this.peek === s.id);
-      out.push(this.sectionHead(s, members, t, open));
       // Folded, it still shows the space you're in and its unread ones, as Slack does.
       const shown = this.ordered(open ? members : members.filter((r) => r.w.active || this.unread.has(r.w.id)));
+      const empty = open && !members.length;
+      const under = lifting && down && this.target === s.id;
+      out.push(this.sectionHead(s, members, t, open, { above: lifting && !down && this.target === s.id, below: under && !shown.length && !empty }));
       // Dropped on the header, a space goes to the section's end: the line shows under its last row.
-      shown.forEach((r, n) => out.push(this.row({ ...r, end: open && n === shown.length - 1 ? `section:${s.id}` : null }, t)));
-      if (open && !members.length) out.push(this.emptySection(s, t));
+      shown.forEach((r, n) => out.push(this.row({ ...r, sec: s.id, below: under && n === shown.length - 1 && !empty, end: open && n === shown.length - 1 ? `section:${s.id}` : null }, t)));
+      if (empty) out.push(this.emptySection(s, t, under));
     }
     return out;
   }
 
-  sectionHead(s, members, t, open) {
+  // `above`/`below`, a dragged section's line
+  sectionHead(s, members, t, open, { above = false, below = false } = {}) {
     const needs = open ? 0 : members.reduce((n, r) => n + this.needs(r.w), 0);
     const ready = open ? 0 : members.reduce((n, r) => n + this.readyIn(r.w), 0);
     // Over it, the line shows where the space lands: under the section's last row ("Drag spaces
     // here" when empty), or under the header while it's folded.
     const line = this.pressed !== null && this.over === `section:${s.id}` && !open;
     return this.groupHead(`section-${s.id}`, t)
-      .on_click(() => foldSection(s.id))
+      // pressed, it can be dragged among its machine's sections; a click without a drag still folds it
+      .on_click(() => { if (!this.liftMoved) foldSection(s.id); })
+      .on_mouse_down("left", () => {
+        this.lifted = s.id;
+        this.target = s.id;
+        this.liftMoved = false;
+      })
       .on_mouse_down("right", (e) => openMenu("section", { section: s.id, row: rectOf(e) }))
-      .on_mouse_move((_e, cx) => this.drag(`section:${s.id}`, s.machine, cx))
+      .on_mouse_move((_e, cx) => { this.drag(`section:${s.id}`, s.machine, cx); this.liftOver(s.id, s.machine, cx); })
+      .when(this.lifted === s.id && this.target !== s.id, (el) => el.opacity(0.5))
+      .when(above, (el) => el.child(this.line(t, "top")))
+      .when(below, (el) => el.child(this.line(t, "bottom")))
       // Its icon in the spaces' "#" column: the folder, or the emoji picked for it.
       .child(div().w(18).flex_none().flex().justify_center()
         .child(s.icon ? div().text_size(13).child(s.icon) : svg("mods/workspace-chrome/folder.svg").size(14)))
@@ -534,9 +557,12 @@ export default class Spaces extends View {
       .text_size(TEXT.label).font_medium().text_color(t.dim).cursor_pointer().hover((st) => st.bg(t.hover));
   }
 
-  emptySection(s, t) {
+  // `below`, a dragged section's line under it
+  emptySection(s, t, below = false) {
     return h_flex().relative().id(`section-empty-${s.id}`).h(28).flex_none().px(8).gap(9).items_center().text_size(TEXT.label).text_color(t.dim)
-      .on_mouse_move((_e, cx) => this.drag(`section:${s.id}`, s.machine, cx))
+      .on_mouse_move((_e, cx) => { this.drag(`section:${s.id}`, s.machine, cx); this.liftOver(s.id, s.machine, cx); })
+      .when(this.lifted === s.id && this.target !== s.id, (el) => el.opacity(0.5))
+      .when(below, (el) => el.child(this.line(t, "bottom")))
       .child(div().w(18).flex_none())
       .child("Drag spaces here")
       .when(this.pressed && this.over === `section:${s.id}`, (el) => el.child(this.line(t, "top")));
@@ -564,9 +590,26 @@ export default class Spaces extends View {
     }
   }
 
+  // a section dragged, over a place of its own machine's: `id` the section the pointer is in, none for
+  // the machine's header or its spaces in no section (its first section's place). Another machine's: nowhere.
+  liftOver(id, machine, cx) {
+    if (this.lifted === null) return;
+    const mine = sectionsOf(machine ?? null);
+    const next = mine.some((s) => s.id === this.lifted) ? (id ?? mine[0]?.id ?? null) : null;
+    if (this.target === next) return;
+    this.target = next;
+    if (next !== this.lifted) this.liftMoved = true;
+    cx.notify();
+  }
+
   // Released: a press without a move selects the space; else it goes where the line shows.
   release(cx) {
     const from = this.pressed, over = this.over;
+    // a dragged section takes the place the line shows
+    const lifted = this.lifted, target = this.target;
+    this.lifted = null;
+    this.target = null;
+    if (lifted !== null && target !== null && target !== lifted) moveSection(lifted, target);
     this.pressed = null;
     this.over = null;
     this.peek = null;
@@ -655,7 +698,8 @@ export default class Spaces extends View {
 
   // `pinned`: in Pinned, `tag` its machine there; `end`: the drag key (a section's, Pinned) a
   // drop under this last row goes to.
-  row({ w, i, g, tree, end, pinned, tag, at, name }, t) {
+  // `sec`, the section it shows in, and `below`, a dragged section's line under it
+  row({ w, i, g, tree, end, pinned, tag, at, name, sec = null, below = false }, t) {
     const on = w.active;
     // Another space here has its name: its folder, dim, says which.
     const label = [tag, this.dup?.has(w.id) && at ? tilde(at) : null].filter(Boolean).join(" \u00b7 ") || null;
@@ -684,7 +728,10 @@ export default class Spaces extends View {
         this.pressed = w.id;
         this.over = `space:${w.id}`;
       })
-      .on_mouse_move((_e, cx) => this.drag(`space:${w.id}`, pinned ? ANY : w.machine, cx))
+      // a dragged section over a space's row: that row's section, or its machine's first
+      .on_mouse_move((_e, cx) => { this.drag(`space:${w.id}`, pinned ? ANY : w.machine, cx); if (!pinned) this.liftOver(sec, w.machine ?? null, cx); })
+      .when(this.lifted !== null && sec === this.lifted && this.target !== sec, (el) => el.opacity(0.5))
+      .when(below, (el) => el.child(this.line(t, "bottom")))
       .on_mouse_down("right", (e) => this.menu(w, g, name, e))
       .child(
         h_flex()

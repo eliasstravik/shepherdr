@@ -162,3 +162,19 @@ test("rename and reorder from the web, no window", async () => {
   await act(w.hub as any, { type: "order", under: "m:mini", ids: ["spC", "spB", "spA"] }, c);
   expect(ids(w.docs.here)).toEqual(["spC", "spB", "spA"]);
 });
+
+// the web's section drag, through the same act()
+test("a machine's sections reordered from the web: in the window's shared data, other machines' left where they were", async () => {
+  const w = world(), c = compat(w);
+  c.data["spaces-chat"].sections = [
+    { id: "a", machine: null, name: "A", folded: false, spaces: ["spA"] }, { id: "v1", machine: "vm", name: "V1", folded: false, spaces: [] },
+    { id: "b", machine: null, name: "B", folded: true, spaces: [] },
+  ];
+  expect(await act(w.hub as any, { type: "order", under: "sections:m:mini", ids: ["s:b", "s:a"] }, c)).toEqual({ ok: true });
+  const bar = c.data["spaces-chat"];
+  expect(bar.sections.map((s: any) => s.id)).toEqual(["b", "v1", "a"]);
+  expect(bar.sections[0]).toMatchObject({ name: "B", folded: true });
+  expect(bar.sections[2].spaces).toEqual(["spA"]);
+  expect(bar.pinned).toEqual(["vm/sp1"]);
+  await expect(act(w.hub as any, { type: "order", under: "all", ids: ["m:vm", "m:mini"] }, c)).rejects.toThrow("Machines keep their order");
+});
