@@ -2292,7 +2292,9 @@ function startUpload(chatKey: string, id: string, since = Date.now()): Promise<s
     picked.set(id, f)
     const release = holdReload()
     try {
-      return await retrying(() => postFile(chatKey, f), since)
+      // the message it goes with says it waits for the network
+      const onWait = (w: boolean) => setOutbox((all) => (all.some((o) => o.state === 'sending' && !!o.offline !== w && o.files.some((x) => x.path === id)) ? all.map((o) => (o.state === 'sending' && o.files.some((x) => x.path === id) ? { ...o, offline: w || undefined } : o)) : all))
+      return await retrying(() => postFile(chatKey, f), since, { onWait })
     } finally {
       release()
     }
