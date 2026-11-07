@@ -11,7 +11,7 @@ import { WORDS } from "../core/chat-view.js";
 import * as AGa from "../core/agents.js";
 const { sessionOf, forkArgv } = AGa as any;
 import * as SP from "../core/spaces.js";
-const { READ, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, DELETED, deletedSection, withRestoredSection } = SP as any;
+const { READ, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, DELETED, deletedSection, withRestoredSection, withSectionOrder } = SP as any;
 import type { Compat } from "./compat.ts";
 import { worktreeAct } from "./worktrees.ts";
 import { execTemplate } from "./spaces.ts";
@@ -207,7 +207,8 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     } else if (b.under === "sections" || b.under.startsWith("sections:")) {
       // the sections at the top (Pinned among them, which isn't one of the data's) or a machine's: their new order
       const order = ids.map(sec).filter(Boolean) as string[];
-      d.sections = [...order.map((id) => d.sections.find((y: any) => y.id === id)).filter(Boolean), ...d.sections.filter((y: any) => !order.includes(y.id))];
+      // the shared core's, as the window's drag: they take the places they held, the rest stay put
+      d.sections = withSectionOrder(d, order).sections;
     } else if (b.under.startsWith("m:")) {
       for (const [i, id] of ids.entries()) {
         const r = await run(["herdr-app", "do", "space.move", "--id", id, "--index", String(i + 1)]);

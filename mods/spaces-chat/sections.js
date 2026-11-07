@@ -12,7 +12,7 @@
 import { shared, setShared, machines } from "herdr";
 import { spaces } from "./live.js";
 import { toast } from "./ui.js";
-import { DELETED, deletedSection, sectionDeletedToast, withRestoredSection } from "./core/spaces.js";
+import { DELETED, deletedSection, sectionDeletedToast, withRestoredSection, sectionMoved, withSectionOrder } from "./core/spaces.js";
 
 const KEY = "spaces-chat";
 
@@ -56,6 +56,15 @@ const change = (id, f) => {
 };
 export const renameSection = (id, name) => change(id, (s) => ({ ...s, name: name.trim() }));
 export const setSectionIcon = (id, emoji) => change(id, (s) => { const { icon: _, ...rest } = s; return emoji ? { ...rest, icon: emoji } : rest; });
+// a section dragged onto another of its machine's (`over`) takes its place; other machines' keep theirs.
+export function moveSection(id, over) {
+  const d = data();
+  const s = d.sections.find((x) => x.id === id);
+  if (!s || !sectionsOf(s.machine).some((x) => x.id === over)) return;
+  const ids = sectionsOf(s.machine).map((x) => x.id);
+  const next = sectionMoved(ids, id, over);
+  if (next !== ids) save(withSectionOrder(d, next));
+}
 export const foldSection = (id) => change(id, (s) => ({ ...s, folded: !s.folded }));
 export const unfoldSection = (id) => change(id, (s) => ({ ...s, folded: false }));
 

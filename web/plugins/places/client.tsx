@@ -8,7 +8,8 @@
 // Worktree spaces nest under their repo's own. A folded section (Pinned too) still shows the space you're in and its
 // unread ones, and adds up its counts on its heading. Menus are core/menus.js's, the window's too: a right click (or a
 // finger held) opens them, no ⋯ on the rows. Spaces drag among their own, into a section or Pinned, or back to their machine's
-// top; machines and sections keep their place. Alt+↑/↓ goes to the space above or below as they show.
+// top; a machine's sections drag among its own, Pinned and the machines keep their place. Alt+↑/↓ goes to
+// the space above or below as they show.
 import clsx from 'clsx'
 import { openWorktree } from '@client/screens/Worktree.tsx'
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type LiHTMLAttributes, type ReactNode } from 'react'
@@ -392,7 +393,8 @@ const indent = {
 /** a section's heading (Pinned, a machine): its chevron, its icon (Pinned's pin; a machine's emoji or server) and its word. A tap anywhere on it folds
  *  what is under it, as its chevron does; it goes nowhere, as Slack's sections don't. What it adds (a machine's +
  *  and how it is) comes after its name. */
-function Heading({ id, label, folds, icon: mark, shut, held, toggle, dim, className, children, ...rest }: { id: string; label: string; folds: string; icon: ReactNode; shut: boolean; held?: () => boolean; toggle?: () => void; dim?: boolean; className?: string; children?: ReactNode } & Omit<LiHTMLAttributes<HTMLLIElement>, 'children'>) {
+// `sort`, where a section's heading moves with Alt+Shift+↑/↓
+function Heading({ id, label, folds, icon: mark, shut, held, toggle, dim, sort, className, children, ...rest }: { id: string; label: string; folds: string; icon: ReactNode; shut: boolean; held?: () => boolean; toggle?: () => void; dim?: boolean; sort?: Sort; className?: string; children?: ReactNode } & Omit<LiHTMLAttributes<HTMLLIElement>, 'children'>) {
   const flip = toggle ?? (() => toggleFold(id))
   return (
     <li data-heading={id} className={clsx(rowClass(false, false, true), 'group gap-1.5 select-none [-webkit-touch-callout:none]', className)} {...rest}>
@@ -402,6 +404,8 @@ function Heading({ id, label, folds, icon: mark, shut, held, toggle, dim, classN
         <button
           type="button"
           aria-expanded={!shut}
+          aria-keyshortcuts={sort && sort.ids.length > 1 ? 'Alt+Shift+ArrowUp Alt+Shift+ArrowDown' : undefined}
+          onKeyDown={sort ? (e) => moveKey(e, id, sort) : undefined}
           // a finger held to open its menu folds nothing
           onClick={() => !held?.() && flip()}
           className="flex min-w-0 flex-1 cursor-pointer text-left outline-none after:absolute after:inset-0 after:rounded-[inherit] keys:focus-visible:after:shadow-[inset_0_0_0_1.5px_var(--focus)]"
@@ -746,9 +750,10 @@ function MachineHeading({ m, shut, className }: { m: Machine; shut: boolean; cla
 
 /** A section's heading, at the top (Pinned) or in a machine, as the window's: its mark and name, a tap folding its
  *  spaces away (the one you're in and its unread ones stay); folded, what needs you in them (red) and their tasks in
- *  Ready (green). Sections keep their place (they don't drag); a space dropped on one goes in, last. Its menu renames or
- *  deletes it; Pinned has none, and shows while it holds any. */
-function SectionHeading({ g, snap, at, className }: { g: Group; snap: Snapshot; at: 'top' | 'inner'; className?: string }) {
+ *  Ready (green). A machine's sections drag among its own, their spaces along (`sort`), Pinned keeps its
+ *  place; a space dropped on one goes in, last. Its menu renames or deletes it; Pinned has none, and shows while it
+ *  holds any. */
+function SectionHeading({ g, snap, at, sort, className }: { g: Group; snap: Snapshot; at: 'top' | 'inner'; sort?: Sort; className?: string }) {
   const menu = useRowMenu({ beside: true })
   const { s } = g
   const pinned = s.id === PINNED
@@ -760,12 +765,14 @@ function SectionHeading({ g, snap, at, className }: { g: Group; snap: Snapshot; 
       icon={<SectionMark s={s} />}
       held={menu.held}
       shut={g.shut}
+      sort={pinned ? undefined : sort}
       data-section={s.id}
       data-machine={at === 'inner' ? `m:${s.machine}` : undefined}
       data-drop={s.id}
-      className={clsx(dropHeading, at === 'inner' && 'pl-5 phone:pl-6', className, menu.open && 'bg-hover')}
-      // only its menu: a finger held on it opens it (sections keep their place)
-      onPointerDown={pinned ? undefined : (e) => press(e, { id: s.id, siblings: [s.id], level: 'section', drop: () => {}, hold: menu.hold, lift: menu.close, release: menu.release })}
+      // dragged, it lifts above the rest with its spaces
+      className={clsx(dropHeading, dragged, at === 'inner' && 'pl-5 phone:pl-6', className, menu.open && 'bg-hover')}
+      // dragged among its machine's sections, its spaces along; a finger held on it opens its menu first
+      onPointerDown={pinned ? undefined : (e) => press(e, { id: s.id, siblings: sort?.ids ?? [s.id], level: 'section', drop: (ids) => sort && reorder(sort.under, ids), hold: menu.hold, lift: menu.close, release: menu.release })}
       onContextMenu={pinned ? undefined : (e) => (dragging() ? e.preventDefault() : menu.press.onContextMenu(e))}
     >
       {/* Pinned has no menu in the window */}
@@ -783,9 +790,9 @@ function SectionHeading({ g, snap, at, className }: { g: Group; snap: Snapshot; 
   )
 }
 
-/** an open section with no spaces in it: where they go, as the window's */
-function EmptySection({ inner }: { inner: boolean }) {
-  return <li className={clsx('flex min-h-7 items-center text-[0.75rem] text-fg3 phone:min-h-9 phone:text-[0.8125rem]', inner ? indent.inner : indent.top)}>Drag spaces here</li>
+/** an open section with no spaces in it: where they go, as the window's (`section`, so it moves with its heading) */
+function EmptySection({ inner, section }: { inner: boolean; section?: string }) {
+  return <li data-section={section} className={clsx('flex min-h-7 items-center text-[0.75rem] text-fg3 phone:min-h-9 phone:text-[0.8125rem]', inner ? indent.inner : indent.top)}>Drag spaces here</li>
 }
 
 /** the "Spaces" heading over the list, as the window's: its word, and its + (New space or section, on the shown space's
@@ -940,8 +947,9 @@ function Places() {
               ? null
               : sections.map((g) => (
                   <Fragment key={g.s.id}>
-                    <SectionHeading g={g} snap={snap} at="inner" />
-                    {!g.shut && !g.spaces.length ? <EmptySection inner /> : null}
+                    {/* its machine's sections, as they show, for its drag */}
+                    <SectionHeading g={g} snap={snap} at="inner" sort={{ under: sectionsIn(m.id), ids: sections.map((x) => x.s.id) }} />
+                    {!g.shut && !g.spaces.length ? <EmptySection inner section={g.s.id} /> : null}
                     {g.shown.map((p) => (
                       <Space key={p.id} p={p} snap={snap} at="inner" sort={{ under: g.s.id, ids: g.shown.map((x) => x.id) }} />
                     ))}

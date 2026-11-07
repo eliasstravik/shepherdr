@@ -124,6 +124,27 @@ export function withRestoredSection(d, gone) {
   return x;
 }
 
+// a section dragged among its machine's. Its new place, from the window's drag: it takes the place of
+// the one it was dropped on (`over`), the rest shift toward where it was. The same list back when nothing moves.
+export function sectionMoved(ids, id, over) {
+  const from = ids.indexOf(id), to = ids.indexOf(over);
+  if (from < 0 || to < 0 || from === to) return ids;
+  const out = ids.filter((x) => x !== id);
+  out.splice(to, 0, id);
+  return out;
+}
+// The sections' new order (the window's drag, the web's `order` action): those `ids` names take, in that order, the
+// places they held among all of them; every other section (another machine's) stays where it was. Unknown ids go.
+export function withSectionOrder(d, ids) {
+  const x = tidyBar(d);
+  const byId = new Map(x.sections.map((s) => [s.id, s]));
+  const want = [...new Set(ids)].filter((id) => byId.has(id));
+  const moving = new Set(want);
+  let k = 0;
+  x.sections = x.sections.map((s) => (moving.has(s.id) ? byId.get(want[k++]) : s));
+  return x;
+}
+
 export function withSectionName(d, id, name, icon) {
   const x = tidyBar(d);
   for (const s of x.sections) if (s.id === id) { s.name = name; if (icon !== undefined) { if (icon) s.icon = icon; else delete s.icon; } }
