@@ -58,6 +58,11 @@ connection it came on). A page from anywhere else can't change anything: writes 
   A fifth tool, `screen` (SHEP-51, `core/screen.js`), is the fallback for what those four can't do: the app that
   started the call reads what it shows as numbered things, as a screen reader would (`e7 tab "Artifacts" selected`),
   and does one action on one (click, type, select, scroll, a key, back, close), then answers with its screen again.
+- ElevenLabs usage (SHEP-128): the serving machine's Plan usage (Settings › Machines) shows the plan's credits left
+  beside Claude Code's and Codex's, read by its service with the voice key (`GET /v1/user/subscription`, core/voice.js
+  `readUsage`) as often as the plan limits (10 minutes; Refresh at most once a minute), as `limits.elevenlabs`, so a
+  call's `look` sees it too. Hidden with no key or the Voice add-on off. A key without "User → Read" shows a hint to
+  give it that. The API gives no voice-agent minutes: credits only.
   The page reads its own DOM (`web/plugins/voice/screen.ts`: roles, names, states; only the top modal dialog while one
   is open; refs stay with their element for the whole call); the window reads its frame (`mods/chat/call-screen.js`:
   spaces, tabs, the side panel's and a task's tabs, a few commands, the call's chat scrolls) and says what it can't

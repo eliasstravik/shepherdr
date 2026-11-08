@@ -34,9 +34,9 @@ export function keyCache(find: () => Promise<Key>, keep = KEY_KEEP, now = () => 
 }
 
 let cache: ReturnType<typeof keyCache> | null = null;
-const cachedKey = (hub: Pick<Hub, "call">) => (cache ??= keyCache(() => keyFor(hub)));
+export const cachedKey = (hub: Pick<Hub, "call">) => (cache ??= keyCache(() => keyFor(hub)));
 /** a refused key: found again next time */
-const refused = (e: unknown) => { if (/\b401\b|invalid.*key|unauthori/i.test(String((e as Error)?.message ?? e))) cache?.forget(); };
+export const refused = (e: unknown) => { if (/\b401\b|invalid.*key|unauthori/i.test(String((e as Error)?.message ?? e))) cache?.forget(); };
 
 export async function dictate(hub: Pick<Hub, "call">, audio: Blob, fetchFn: typeof fetch = fetch, key = () => cachedKey(hub).get()): Promise<string> {
   try { return await transcribe(audio, key, fetchFn, fileName(audio.type)); } catch (e) { refused(e); throw e; }

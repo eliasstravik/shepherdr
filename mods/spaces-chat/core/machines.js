@@ -45,7 +45,7 @@ export const healthWords = (s) => healthMeters(s).map((m) => `${m.name} ${m.pct}
 export const meterSub = (m) => m.detail + (m.level === "over" ? " · Over its alert limit" : m.level === "busy" ? " · New tasks wait" : "");
 
 // The CLIs with a usage source; any other installed agent says "No usage info".
-export const READS = { claude: "Claude Code", codex: "Codex" };
+export const READS = { claude: "Claude Code", codex: "Codex", elevenlabs: "ElevenLabs" };
 // A number older than this says how old it is.
 export const OLD = 15 * 60000;
 export const leftOf = (w) => Math.max(0, Math.round(100 - w.used));
@@ -111,7 +111,7 @@ export function windowWords(w, now = Date.now()) {
 export const failedWords = (read) => `Last read failed: ${read.failed}`;
 // A CLI with no numbers: why.
 export const whyWords = (read) =>
-  read.state === "signed-out" ? "Not signed in on this machine." : read.state === "no-plan" ? "No plan limits: not signed in to a subscription." : `Unknown. ${read.why ?? ""}`;
+  read.state === "signed-out" ? "Not signed in on this machine." : read.state === "no-access" ? read.why ?? "" : read.state === "no-plan" ? "No plan limits: not signed in to a subscription." : `Unknown. ${read.why ?? ""}`;
 export const NO_USAGE = "No usage info.";
 export const READING_MACHINE = "Reading this machine…";
 // A machine header's red dot: its health couldn't be read.
