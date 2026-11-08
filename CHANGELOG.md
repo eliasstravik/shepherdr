@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.1.26
+
+The order you drag your spaces into now stays put.
+
+- In the web app, a space you drag to a new spot in the sidebar stays there, even one that used to snap back to the bottom. The Herdr window shows the same order.
+
 ## 3.1.25
 
 Calls are easier on a phone held sideways, and you can see how much voice you have left.
