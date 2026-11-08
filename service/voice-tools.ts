@@ -361,7 +361,7 @@ export function planWords(stats: any, now = Date.now()) {
     if (r.none) continue;
     const name = `${r.name}${r.read?.plan ? ` (${r.read.plan})` : ""}`;
     if (r.read?.state !== "ok") { out.push(`${name}: ${whyWords(r.read)}`); continue; }
-    const ws = (r.read.windows ?? []).map((w: any) => windowWords(w, now)).map((w: any) => (w.dead ? w.dead : `${w.name} ${w.words}, ${w.refill.toLowerCase()}`));
+    const ws = (r.read.windows ?? []).map((w: any) => windowWords(w, now)).map((w: any) => (w.dead ? w.dead : `${w.name} ${w.words}, ${w.refill[0].toLowerCase()}${w.refill.slice(1)}`));
     out.push(`${name} plan: ${ws.length ? ws.join("; ") : "no limits reported"}.${r.read.failed ? " Its last read failed, so these may be old." : ""}`);
   }
   return out.join(" ");
