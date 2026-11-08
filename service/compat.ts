@@ -218,7 +218,7 @@ export class Compat {
   /** A space by its id: its folder and machine. */
   spaceOf(id: string) { const s = this.spaceList.find((x) => x.id === id); return s ? { id: s.id, folder: s.folder, machine: s.machine ?? null } : null; }
   /** Every space: its folder and machine (the worktree dialog's "open" marks). */
-  allSpaces() { return this.spaceList.map((s) => ({ id: s.id as string, folder: s.folder as string, machine: (s.machine ?? null) as string | null })); }
+  allSpaces() { return this.spaceList.map((s) => ({ id: s.id as string, folder: s.folder as string, machine: (s.machine ?? null) as string | null, ...((s as any).own ? { own: true } : {}) })); }
 
   /** The tasks a chat's messages can mention (#HAT-1): its folder's, on its machine, as the window's chat has them. */
   tasksFor(chatKey: string) {

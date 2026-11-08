@@ -12,7 +12,7 @@ import * as AGa from "../core/agents.js";
 import { answerCodex } from "./codex-ask.ts";
 const { sessionOf, forkArgv } = AGa as any;
 import * as SP from "../core/spaces.js";
-const { READ, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, DELETED, deletedSection, withRestoredSection } = SP as any;
+const { READ, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, withOrder, DELETED, deletedSection, withRestoredSection } = SP as any;
 import type { Compat } from "./compat.ts";
 import { worktreeAct } from "./worktrees.ts";
 import { noteFailed, once } from "./send-once.ts";
@@ -272,15 +272,25 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       const order = ids.map(sec).filter(Boolean) as string[];
       d.sections = [...order.map((id) => d.sections.find((y: any) => y.id === id)).filter(Boolean), ...d.sections.filter((y: any) => !order.includes(y.id))];
     } else if (b.under.startsWith("m:")) {
-      for (const [i, id] of ids.entries()) {
-        const r = await run(["herdr-app", "do", "space.move", "--id", id, "--index", String(i + 1)]);
-        if (r.code !== 0) {
-          // no window: the machine's saved spaces in that order (service/saved-spaces.ts)
-          const key = b.under.slice(2);
-          await orderSaved(hub, key === compat.host ? null : key, ids);
-          break;
+      // the order is the sidebar's own (core/spaces.js withOrder), so it holds on every device and for spaces Herdr
+      // doesn't keep (the service's own, always last before SHEP-130); the rest of the machine's stay where they were
+      const key = b.under.slice(2), machine = key === compat.host ? null : key;
+      const all: any[] = compat.allSpaces?.() ?? [];
+      const now = all.filter((s) => (s.machine ?? null) === machine).map((s) => s.id);
+      await sh.set("spaces-chat", withOrder(bar(), machine, ids, now));
+      // and Herdr's own order too, best effort, for the window and a release before this one: its spaces only
+      const own = new Set(all.filter((s) => s.own).map((s) => s.id));
+      const mine = ids.filter((id) => !own.has(id));
+      try {
+        for (const [i, id] of mine.entries()) {
+          const r = await run(["herdr-app", "do", "space.move", "--id", id, "--index", String(i + 1)]);
+          if (r.code !== 0) {
+            // no window: the machine's saved spaces in that order (service/saved-spaces.ts)
+            await orderSaved(hub, machine, mine);
+            break;
+          }
         }
-      }
+      } catch {}
       return { ok: true };
     } else throw new Error("Machines keep their order: drag spaces and sections instead.");
     await sh.set("spaces-chat", d);

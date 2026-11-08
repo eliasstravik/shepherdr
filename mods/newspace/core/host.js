@@ -85,7 +85,9 @@ export function relocate(key, value, rename) {
       return m === undefined ? [] : [{ ...s, machine: m, spaces: keep(s.spaces ?? [], (id) => moveId(id, rename)) }];
     }) : value.sections;
     return { ...value, sections, icons: mapKeys(value.icons, (id) => moveId(id, rename)), pinned: keep(value.pinned, (id) => moveId(id, rename)),
-      ...(isObj(value.machines) ? { machines: mapKeys(value.machines, machineKey("")(rename)) } : {}) };
+      ...(isObj(value.machines) ? { machines: mapKeys(value.machines, machineKey("")(rename)) } : {}),
+      // each machine's dragged order of its spaces (core/spaces.js withOrder): its key and its ids
+      ...(isObj(value.order) ? { order: Object.fromEntries(Object.entries(mapKeys(value.order, machineKey("")(rename))).map(([k, ids]) => [k, keep(ids, (id) => moveId(id, rename))])) } : {}) };
   }
   if (key === "notify" && isObj(value)) {
     return { ...value, ...(isObj(value.machines) ? { machines: mapKeys(value.machines, machineKey("local")(rename)) } : {}),
@@ -111,6 +113,7 @@ export function keepForeign(key, next, old, back) {
     if (isObj(old.icons)) out.icons = { ...Object.fromEntries(Object.entries(old.icons).filter(([id]) => foreignId(id))), ...(next.icons ?? {}) };
     if (Array.isArray(old.pinned)) out.pinned = [...(next.pinned ?? []), ...old.pinned.filter((id) => foreignId(id) && !(next.pinned ?? []).includes(id))];
     if (isObj(old.machines)) out.machines = { ...Object.fromEntries(Object.entries(old.machines).filter(([k]) => back(k === "" ? null : k) === undefined)), ...(next.machines ?? {}) };
+    if (isObj(old.order)) out.order = { ...Object.fromEntries(Object.entries(old.order).filter(([k]) => back(k === "" ? null : k) === undefined)), ...(next.order ?? {}) };
     return out;
   }
   if (key === "notify" && isObj(next) && isObj(old)) {

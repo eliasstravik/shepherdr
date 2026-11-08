@@ -27,7 +27,7 @@ import { MachinePopup, openMachine, openMachineSettings } from "./machine-popup.
 import { startPolling, allStats, healthMeters, bars } from "./machines.js";
 import { countBadge, red, green, H, TEXT, RADIUS, toast } from "./ui.js";
 import { on as addonOn } from "./addons.js";
-import { spaceName, gitTail, tilde, sharedNames } from "./core/spaces.js";
+import { spaceName, gitTail, tilde, sharedNames, inOrder, withOrder } from "./core/spaces.js";
 import { coordinatorTab } from "./coordinator.js";
 
 const POPUPS = { add: Menu, space: Menu, section: Menu, icon: IconPicker, rename: Rename, machine: MachinePopup };
@@ -364,14 +364,21 @@ export default class Spaces extends View {
     return spaceName(w, { at, repo: g?.name ?? null, home: home(), named: Boolean(w.named) });
   }
 
-  // The spaces shown, in Herdr's order, each with its git, where it is and its name: { w, i, g, at, name }.
+  // Every space, each machine's in the order the person dragged them into (shared "spaces-chat".order, the web's
+  // too: core/spaces.js inOrder), Herdr's for the rest.
+  sorted() {
+    return inOrder(spaces(), data().order);
+  }
+
+  // The spaces shown, in the sidebar's order, each with its git, where it is and its name: { w, i (Herdr's index), g,
+  // at, name }.
   visible() {
-    const sp = spaces(), ps = panes();
+    const sp = this.sorted(), ps = panes(), herdr = spaces();
     const ready = (w) => this.shown.has(w.id) || where(w, ps) in this.git || Date.now() - (this.born[w.id] ??= Date.now()) > 1500;
     for (const w of sp) if (!this.shown.has(w.id) && ready(w)) this.shown.add(w.id);
     return sp.filter((w) => this.shown.has(w.id)).map((w) => {
       const g = this.git[where(w, ps)] ?? null, at = place(w, ps);
-      return { w, i: sp.indexOf(w), g, at, name: this.nameOf(w, g, at) };
+      return { w, i: herdr.indexOf(w), g, at, name: this.nameOf(w, g, at) };
     });
   }
 
@@ -614,8 +621,8 @@ export default class Spaces extends View {
       const a = sec.spaces.indexOf(from);
       return a >= 0 && a < sec.spaces.indexOf(to) ? "bottom" : "top";
     }
-    // At the top, Herdr's order decides (space.move).
-    const sp = spaces();
+    // At the top, the sidebar's order (sorted()).
+    const sp = this.sorted();
     return sp.findIndex((s) => s.id === from) < sp.findIndex((s) => s.id === to) ? "bottom" : "top";
   }
 
@@ -639,8 +646,18 @@ export default class Spaces extends View {
         const at = sec.spaces.filter((x) => x !== from).indexOf(id);
         placeSpace(from, sec.id, this.edge(from, id) === "bottom" ? at + 1 : at);
       } else {
+        const edge = this.edge(from, id);
         if (sectionOf(from)) placeSpace(from, null);
-        // space.move takes the target's place, counted from 1: the rest shift toward where it was.
+        // The new order, kept in the sidebar's data so the web and every device show it (SHEP-130): the machine's
+        // spaces as they show, this one beside the one it was dropped on.
+        const w = spaces().find((s) => s.id === from);
+        const shown = this.sorted().filter((s) => (s.machine ?? null) === (w?.machine ?? null)).map((s) => s.id);
+        const rest = shown.filter((x) => x !== from), at = rest.indexOf(id);
+        if (w && at >= 0) {
+          rest.splice(edge === "bottom" ? at + 1 : at, 0, from);
+          setShared("spaces-chat", withOrder(data(), w.machine ?? null, rest, shown));
+        }
+        // And Herdr's own order: space.move takes the target's place, counted from 1: the rest shift toward where it was.
         const i = spaces().findIndex((s) => s.id === id);
         if (i >= 0) run("space.move", { id: from, index: i + 1 });
       }
