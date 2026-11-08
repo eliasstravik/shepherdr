@@ -38,7 +38,7 @@ const WAIT_TOLD_MS = 15_000;
 
 export function hearing(io: HearIO) {
   /** the chats followed now: { stop, last reply seen, last status; primed once its first read came } */
-  const chats = new Map<string, { stop: () => void; view: ChatView; reply: string | null; status: string | null; primed: boolean }>();
+  const chats = new Map<string, { stop: () => void; view: ChatView; reply: string | null; status: string | null; primed: boolean; base?: string | null }>();
   /** sent to during the call: followed to its end */
   const sent = new Set<string>();
   let shown: string | null = null;
@@ -58,7 +58,7 @@ export function hearing(io: HearIO) {
     const view = io.view(key);
     if (!view) return;
     const f = io.follow(key);
-    const c = { stop: f.stop, view, reply: null as string | null, status: null as string | null, primed: false };
+    const c = { stop: f.stop, view, reply: null as string | null, status: null as string | null, primed: false, base: null as string | null };
     chats.set(key, c);
     // what the chat said before its first read came in is not news: the baseline is taken then (or after 8 s)
     const prime = () => {
@@ -66,7 +66,7 @@ export function hearing(io: HearIO) {
       c.primed = true;
       const r = view.lastReply();
       // a quick answer to this call's send, already there by the first read, is still told
-      c.reply = r && !(sentAt.has(key) && (r.at ?? 0) >= sentAt.get(key)!) ? r.id : null;
+      c.reply = c.base = r && !(sentAt.has(key) && (r.at ?? 0) >= sentAt.get(key)!) ? r.id : null;
       c.status = view.status();
     };
     if (f.ready) Promise.race([f.ready, new Promise((r) => setTimeout(r, 8000))]).then(prime, prime);
@@ -76,7 +76,14 @@ export function hearing(io: HearIO) {
 
   return {
     /** the call sent there: its replies are told until the call ends */
-    sentTo(key: string, at = Date.now()) { if (!sentAt.has(key)) sentAt.set(key, at); sent.add(key); watch(key); },
+    sentTo(key: string, at = Date.now()) {
+      if (!sentAt.has(key)) sentAt.set(key, at);
+      sent.add(key);
+      watch(key);
+      // its first read came while the send was on its way and took a quick answer for history: it is news after all
+      const c = chats.get(key), r = c?.view.lastReply();
+      if (c?.primed && r && r.id === c.base && r.id === c.reply && (r.at ?? 0) >= at) c.reply = null;
+    },
     /** what the screen shows now (the page's or the window's where) */
     onScreen(where: Where) {
       const s = io.snap();
@@ -106,6 +113,9 @@ export function hearing(io: HearIO) {
       }
       const s = io.snap();
       if (!s) return;
+      // a need answered is forgotten: the same one again later (a task's "attention" id comes back) is new
+      const now = new Set((s.needs ?? []).map(needKey));
+      for (const k of needs) if (!now.has(k)) needs.delete(k);
       for (const n of s.needs ?? []) {
         const k = needKey(n);
         if (needs.has(k)) continue;
@@ -114,12 +124,12 @@ export function hearing(io: HearIO) {
         if (!n.secret && Date.now() - (toldWait.get(n.chat) ?? 0) < WAIT_TOLD_MS) { toldWait.delete(n.chat); continue; }
         queue.push(needLine(needWords(s, n)));
       }
-      const now = readyIds(s);
-      for (const id of now) if (!ready.has(id)) {
+      const nowReady = readyIds(s);
+      for (const id of nowReady) if (!ready.has(id)) {
         const t = s.tasks.find((x) => x.id === id)!;
         queue.push(needLine(`${spoken(t.id)}, "${String(t.name).slice(0, 80)}", is ready for review`));
       }
-      ready = now;
+      ready = nowReady;
     },
     /** the queued updates, as few lines as can be (several said as one), and the queue empty */
     take(): Line[] { return queue.length ? batchLines(queue.splice(0)) : []; },

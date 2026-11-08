@@ -142,3 +142,30 @@ test("a quick answer to the call's send, there by the chat's first read, is stil
   expect(texts(h.take())).toContain('the lab Assistant replied: """Port 5173."""');
   h.stop();
 });
+
+test("the chat on screen read just before a send answered quickly: still said; a need that comes back is said again", async () => {
+  const w = world();
+  let loaded!: () => void;
+  const ready = new Promise<void>((r) => { loaded = r; });
+  const h = hearing({ ...w.io, follow: (key) => ({ stop: () => {}, ready: key === "p:lab" ? ready : undefined }) });
+  h.onScreen({ client: "web", place: "lab" });
+  const asked = Date.now();
+  // its first read comes with the answer while the send is still on its way
+  w.chats["p:lab"].reply = { id: "r5", text: "Done.", at: asked + 20 } as any;
+  loaded();
+  await Bun.sleep(0);
+  h.sentTo("p:lab", asked);
+  h.tick();
+  expect(texts(h.take())).toContain('replied: """Done."""');
+  // a task waits ("attention"), is answered, then waits again: said both times
+  const need = { id: "attention", chat: "TEST-7/worker", place: "shop", task: "TEST-7", at: 1, text: "Stuck on a prompt" };
+  w.snap.needs = [need];
+  h.tick();
+  expect(texts(h.take())).toContain("TEST 7's agent needs the person");
+  w.snap.needs = [];
+  h.tick();
+  w.snap.needs = [{ ...need, at: 2 }];
+  h.tick();
+  expect(texts(h.take())).toContain("TEST 7's agent needs the person");
+  h.stop();
+});
