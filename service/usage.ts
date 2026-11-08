@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { DATA } from "./paths.ts";
 import * as U from "../core/usage.js";
 
-const { lines, FILE, OLD, DELETED, CAP, DELETE } = U as any;
+const { lines, sinceDelete, FILE, OLD, DELETED, CAP, DELETE } = U as any;
 const file = () => join(DATA, FILE);
 
 // The add-on is on (Shepherdr settings > Window > Add-ons): main.ts gives the off list's check (not imported here, so
@@ -25,9 +25,7 @@ export function record(events: unknown[], on = insightsOn()): boolean {
   if (!on) return false;
   const cut = deletedAt();
   // an event before it goes; a view that began before it counts only its time after it
-  const kept = events.filter((e: any) => !(typeof e?.at === "number" && e.at < cut))
-    .map((e: any) => (typeof e?.at === "number" && typeof e.ms === "number" && e.at - e.ms < cut ? { ...e, ms: Math.max(0, Math.round(e.at - cut)) } : e));
-  const text: string = lines(kept);
+  const text: string = lines(events.map((e) => sinceDelete(e, cut)).filter(Boolean));
   if (!text) return true;
   try {
     mkdirSync(DATA, { recursive: true, mode: 0o700 });

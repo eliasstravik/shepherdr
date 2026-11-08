@@ -8,13 +8,23 @@
 
 import { exec, home, focused, shared, window as win } from "herdr";
 import { on } from "./addons.js";
-import { lines, APPEND, CAP } from "./core/usage.js";
+import { lines, sinceDelete, APPEND, DELETED_AT, CAP } from "./core/usage.js";
 
 const dir = () => `${home()}/.herdr/shepherdr`;
 
 export function note(kind, fields = {}) {
   if (!on("insights")) return;
-  const text = lines([{ ...fields, kind, from: "window" }]);
+  const e = { ...fields, kind, from: "window", at: Date.now() };
+  if (typeof e.ms !== "number") return append(e);
+  // a timed view: a Delete since it began (from anywhere: Settings, an agent, another machine's) leaves only the time
+  // after it (usage.deleted's time)
+  exec("sh", ["-c", DELETED_AT, "usage", dir()])
+    .then((r) => append(sinceDelete(e, (Number(String(r?.stdout ?? "").trim()) || 0) * 1000)))
+    .catch(() => append(e));
+}
+
+function append(e) {
+  const text = e ? lines([e]) : "";
   if (text) exec("sh", ["-c", APPEND, "usage", dir(), text, String(CAP)]).catch(() => {});
 }
 

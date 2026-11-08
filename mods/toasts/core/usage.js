@@ -57,6 +57,18 @@ export function clean(e, at = Date.now()) {
   return out;
 }
 
+/** An event as it stands after a Delete at `cut` (ms; 0: none): one from before it is gone (null), a view that began
+ *  before it keeps only its time after it. */
+export function sinceDelete(e, cut) {
+  if (!cut || !e || typeof e.at !== "number") return e;
+  if (e.at < cut) return null;
+  return typeof e.ms === "number" && e.at - e.ms < cut ? { ...e, ms: Math.max(0, Math.round(e.at - cut)) } : e;
+}
+
+// The shell line that prints the last Delete's time in seconds ($1 the folder; nothing when there was none), on
+// Linux and macOS.
+export const DELETED_AT = 'f="$1/usage.deleted"; [ -f "$f" ] && { stat -c %Y "$f" 2>/dev/null || stat -f %m "$f"; }; true';
+
 /** The events as lines to append (each ends with a new line); "" when none is kept. */
 export function lines(events, at = Date.now()) {
   return (Array.isArray(events) ? events : []).slice(0, 500).map((e) => clean(e, at)).filter(Boolean)

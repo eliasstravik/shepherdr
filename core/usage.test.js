@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clean, lines, APPEND, CAP, DELETE } from "./usage.js";
+import { clean, lines, sinceDelete, APPEND, CAP, DELETE, DELETED_AT } from "./usage.js";
 
 test("keeps kinds, ids, counts and times; drops words and unknown fields", () => {
   const e = clean({ kind: "send", from: "phone", n: 2, text: "my secret plan", task: "SHEP-7", at: 5 }, 10);
@@ -50,4 +50,15 @@ test("Delete on a machine: both files go, and its moment is marked for late batc
   Bun.spawnSync(["sh", "-c", DELETE], { env: { HOME: home, PATH: process.env.PATH } });
   expect(existsSync(join(d, "usage.jsonl")) || existsSync(join(d, "usage.1.jsonl"))).toBe(false);
   expect(existsSync(join(d, "usage.deleted"))).toBe(true);
+  // its time, as the window reads it before it notes a timed view
+  const secs = Number(Bun.spawnSync(["sh", "-c", DELETED_AT, "usage", d]).stdout.toString().trim());
+  expect(Math.abs(secs * 1000 - statSync(join(d, "usage.deleted")).mtimeMs)).toBeLessThan(1000);
+  expect(Bun.spawnSync(["sh", "-c", DELETED_AT, "usage", join(home, "none")]).stdout.toString()).toBe("");
+});
+
+test("after a Delete: older events go, a view across it keeps only its time after it", () => {
+  expect(sinceDelete({ kind: "act", at: 900 }, 1000)).toBeNull();
+  expect(sinceDelete({ kind: "view", at: 1500, ms: 4000 }, 1000)).toEqual({ kind: "view", at: 1500, ms: 500 });
+  expect(sinceDelete({ kind: "view", at: 1500, ms: 200 }, 1000)).toEqual({ kind: "view", at: 1500, ms: 200 });
+  expect(sinceDelete({ kind: "view", at: 1500, ms: 4000 }, 0)).toEqual({ kind: "view", at: 1500, ms: 4000 });
 });

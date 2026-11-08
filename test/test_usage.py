@@ -30,7 +30,8 @@ class UsageIsLocal(unittest.TestCase):
 
     def test_the_window_writes_with_a_local_shell_only(self):
         text = open(J("lib/usage.js")).read()
-        self.assertEqual(re.findall(r"\bexec\(\s*\"(\w+)\"", text), ["sh"])
+        progs = re.findall(r"\bexec\(\s*\"(\w+)\"", text)
+        self.assertTrue(progs and set(progs) == {"sh"}, progs)
         self.assertNotIn("on:", text, "the window writes on its own machine only")
 
     def test_no_telemetry_packages(self):
