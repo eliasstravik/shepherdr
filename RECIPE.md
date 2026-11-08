@@ -3,7 +3,7 @@
 Mission control for your coding agents inside Herdr: your spaces in a sidebar, each with its own Assistant you talk to
 as a chat, and a Tasks panel on the right that shows which task needs you, which is ready and which is still working.
 You tell the Assistant what needs doing; it turns it into tasks, each run by its own agent in its own git worktree,
-and asks you on a card when it needs a decision. Shepherdr 3.1.17, for herdr-app 0.1.12 and herdr-core 0.1.17 or newer.
+and asks you on a card when it needs a decision. Shepherdr 3.1.18, for herdr-app 0.1.12 and herdr-core 0.1.17 or newer.
 
 ![Shepherdr](preview.png)
 
@@ -29,7 +29,8 @@ Left to right, on the theme's `canvas` background, no title bar:
   over its Chat, Terminal, Files, Changes, Pull request and Browser. Artifacts lists agents' reports and draft
   screens; one opens in place under a 42px head.
 - **Status bar** (28px): the machine, and Ctrl+Shift+P Commands.
-- Floating: a call bar at the top center while a voice call runs elsewhere, toasts at the bottom right.
+- Floating: a call's error note at the top center, toasts at the bottom right. A call going on shows as the Talk to
+  Shepherdr card at the top of the sidebar.
 
 ## How it behaves
 
@@ -43,7 +44,7 @@ Left to right, on the theme's `canvas` background, no title bar:
   calls the Assistant, Ctrl+F finds in the chat. Alt+1…9 pick a tab, Alt+Up/Down a space, Alt+Enter splits.
 - Shepherdr settings (the sidebar foot): Agents, Tasks, Autopilot, Notify, Secrets, Machines, Window and Web. Window
   holds the look switches and the add-on switches: Artifacts, Voice and dictation, Reactions, Task browser, Autopilot,
-  Other machines, Web and Usage insights can be turned off; the rest is always on in 3.1.17. Web shows the web app's link and Serve
+  Other machines, Web and Usage insights can be turned off; the rest is always on in 3.1.18. Web shows the web app's link and Serve
   from, the machine that serves it.
 - The web app (`https://<this machine>/shepherdr/`, your tailnet only): the same spaces, Assistants, tasks, cards,
   artifacts and settings on a phone, a tablet or another browser, on the same data.
