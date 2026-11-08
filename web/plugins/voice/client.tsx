@@ -10,7 +10,6 @@ import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'rea
 import { act, definePlugin, getState, goChat, goPlace, listView, openArtifact, openItem, openTask, placeOf, placesDrawn, registry, setFilter, setUI, shownItem, taskInMiddle, useStore, useUI, visibleChats, type UI } from '@client/kernel.ts'
 import { EndCallIcon, FitIcon, ic, IconButton, MicIcon, MicOffIcon, RoundButton, UnfitIcon, useElapsed, WaveIcon, Waves, XIcon } from '@client/ui.tsx'
 import { useWindowWidth } from '@client/Frame.tsx'
-import { Dialog } from '@client/rowmenu.tsx'
 import { cancelDictation } from '@plugins/chat/client.tsx'
 import { pageNames, sectionLike, sectionOf } from '@client/Settings.tsx'
 import { openAccept } from '@client/screens/Accept.tsx'
@@ -316,8 +315,8 @@ function CallMark({ phase, className }: { phase: Phase; className?: string }) {
 
 /** SHEP-108, SHEP-118: the minimized call's two buttons, one look wherever they show (a phone's bottom bar, the
  *  sidebar's card, the strip at the top): Full screen a quiet grey round that opens the call over everything again
- *  (Mute lives there only), End a red round with the hang-up phone. End asks first, as the voice does ("Are you sure
- *  you want to end the call?"). size: the bottom bar's, or the card's */
+ *  (Mute lives there only), End a red round with the hang-up phone that hangs up at once (SHEP-127: no question first).
+ *  size: the bottom bar's, or the card's */
 function CallControls({ size }: { size: 'bar' | 'card' }) {
   const btn = size === 'bar' ? 'size-14 max-[359px]:size-12' : 'size-8 phone:size-11'
   const glyph = size === 'bar' ? 'size-5' : ic
@@ -327,39 +326,11 @@ function CallControls({ size }: { size: 'bar' | 'card' }) {
         className={clsx('press-dim relative grid shrink-0 place-items-center rounded-full bg-bubble text-fg2 after:absolute after:-inset-1', btn)}>
         <FitIcon className={glyph} />
       </button>
-      <button type="button" aria-label="End call" onClick={askEnd}
+      <button type="button" aria-label="End call" onClick={endCall}
         className={clsx('press-dim relative grid shrink-0 place-items-center rounded-full bg-need text-white after:absolute after:-inset-1', btn)}>
         <EndCallIcon className={glyph} />
       </button>
     </>
-  )
-}
-
-/** End's question: open while asked, answered by End call or Cancel */
-let asking = false
-const askers = new Set<() => void>()
-function setAsking(on: boolean) { asking = on; askers.forEach((f) => f()) }
-function askEnd() { setAsking(true) }
-
-/** "Are you sure you want to end the call?", the voice's own words, over everything: over the app while the call is
- *  minimized, inside the full-screen call while that shows (full) */
-function EndCallDialog({ full = false }: { full?: boolean }) {
-  const [, tick] = useState(0)
-  useEffect(() => { const f = () => tick((x) => x + 1); askers.add(f); return () => void askers.delete(f) }, [])
-  const on = useUI((u) => u.call)
-  const shownFull = useUI((u) => u.callFull)
-  useEffect(() => { if (!on && asking) setAsking(false) }, [on])
-  if (!asking || !on || shownFull !== full) return null
-  return (
-    <Dialog title="Are you sure you want to end the call?" safe onCancel={() => setAsking(false)}
-      buttons={
-        <button type="button" onClick={() => { setAsking(false); endCall() }}
-          className="press-dim relative inline-flex h-[34px] shrink-0 items-center gap-1.5 rounded-full bg-need px-3.5 font-medium text-white after:absolute after:-inset-1 coarse:h-11 phone:h-11">
-          <EndCallIcon className={ic} /> End call
-        </button>
-      }>
-      <p>Shepherdr stops listening and hangs up.</p>
-    </Dialog>
   )
 }
 
@@ -510,8 +481,6 @@ function FullCall() {
     // the keyboard stays on the call: focus starts on it, Tab goes round its own buttons, Escape minimizes
     if (!screen.current?.contains(document.activeElement)) screen.current?.focus()
     const k = (e: KeyboardEvent) => {
-      // the end question's own keys go first
-      if (asking) return
       if (e.key === 'Escape') { e.preventDefault(); minimize() }
       else if (e.key === 'Tab' && screen.current) {
         const bs = [...screen.current.querySelectorAll<HTMLElement>('button')]
@@ -548,11 +517,10 @@ function FullCall() {
           className="bg-white/10 text-fg aria-pressed:bg-fg aria-pressed:text-[#08090a]">
           {muted ? <MicOffIcon className="size-6" /> : <MicIcon className="size-6" />}
         </BigCallButton>
-        <BigCallButton label="End call" word="End" onClick={askEnd} className="bg-need text-white">
+        <BigCallButton label="End call" word="End" onClick={endCall} className="bg-need text-white">
           <EndCallIcon className="size-6" />
         </BigCallButton>
       </div>
-      <EndCallDialog full />
     </div>
   )
 }
@@ -610,7 +578,7 @@ export default definePlugin({
     // SHEP-122: no Listening pill above a phone's bar: the minimized call is its bar's buttons alone
     reg.phoneAbove.push(PhoneHelp)
     reg.topBars.push(CallBanner, TopHelp, CallError, CallWhere)
-    reg.overlays.push(OpenedTag, EndCallDialog, CallScreen)
+    reg.overlays.push(OpenedTag, CallScreen)
     // 3.0 calls with Ctrl+Shift+Space (the keyboard plugin): no V or M keys of its own
   },
 })
