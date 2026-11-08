@@ -32,6 +32,7 @@ How you speak (a voice call: this matters most):
 - No preambles, no recaps, no lists read out, no "I can also..." offers. More detail only when asked.
 - Numbers and names plainly ("SHEP 45", "three tasks"). Never read out code, paths, links or ids letter by letter.
 - Silence is fine. If the person says nothing, say nothing: never ask if they're there or want something. Just wait.
+- Speak the language the person speaks: English at first, theirs as soon as they speak another (switch with language_detection), back when they go back, any number of times. The exact words below are English: say them in the call's language.
 
 Moving around (switch to a space or chat, open a task, tab, panel, artifact or Settings, go back, close, scroll):
 - Once the tool's answer says ok, reply with one word: "Opened.", "Switched.", "Closed." or "Done." Nothing else: no sentence, nothing about what is on screen, no offer.
@@ -108,7 +109,17 @@ const system = (name, description, params = {}) => ({ type: "system", name, desc
 export const SYSTEM_TOOLS = [
   system("end_call", "End the call. Only after the person said yes to ending it on this call."),
   system("skip_turn", "Say nothing this turn: when the person says to wait or hold on, or is clearly talking to someone else.", { wait_timeout_secs: -1 }),
+  // switches the call's language (voice and words) all call long, not only at its start (SHEP-104)
+  system("language_detection", "Switch the call's language: as soon as the person speaks another language than the call's, or asks for one. Again each time they change, back to English too.", { only_at_conversation_start: false }),
 ];
+
+// Every language a call can switch to: all ElevenLabs takes as a language preset (its create API lists them when given
+// another), English being the call's own. The speech model speaks them all (eleven_v4_turbo, GET /v1/models). None has
+// a first message of its own: a call always starts in English (language_presets).
+export const TTS_MODEL = "eleven_v4_turbo";
+export const LANGUAGES = ("zh es hi pt pt-br fr de ja ar ko id it nl tr pl ru sv tl fil ms ro uk el cs da fi bg hr sk ta vi no hu af hy " +
+  "as ast az be bn bs ca yue et gl ka gu ha he is ga jv kn kk ky lv lt lb mk ml mt mi mr my mn ne oc or ps fa pa " +
+  "sr sd sl so sw tg te th ur uz yo cy am lo lg sn ckb wo zu").trim().split(" ");
 
 // Silence: the agent never prompts a quiet person (turn_timeout -1: no "are you there?"), and only a call silent for
 // 15 minutes ends (a forgotten call stops costing); any call ends after an hour (ElevenLabs' default is 10 minutes).
@@ -128,8 +139,10 @@ export const agentSpec = () => ({
     },
     turn: { turn_timeout: -1, silence_end_call_timeout: SILENT_END_SECS },
     conversation: { max_duration_seconds: MAX_CALL_SECS },
+    // Scribe hears any language; the speech model speaks them all, in the same voice
     asr: { user_input_audio_format: "pcm_16000" },
-    tts: { agent_output_audio_format: "pcm_16000" },
+    tts: { model_id: TTS_MODEL, agent_output_audio_format: "pcm_16000" },
+    language_presets: Object.fromEntries(LANGUAGES.map((l) => [l, { overrides: {} }])),
   },
   platform_settings: {
     auth: { enable_auth: true },
