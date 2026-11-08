@@ -439,25 +439,6 @@ function PhoneHelp() {
   return useTop() ? null : <CallHelp className="mx-4 mb-2" />
 }
 
-/** SHEP-113: on a phone's home the call's card is in the shut sidebar: a slim pill above the bar says what the call
- *  is doing (Listening, Thinking, Checking tasks…, Speaking) and its clock; Mute and End stay in the bar */
-function PhoneCallStatus() {
-  const on = useUI((u) => u.call)
-  const top = useTop()
-  return on && !top ? <PhoneStatusPill /> : null
-}
-function PhoneStatusPill() {
-  const t = useElapsed(useUI((u) => u.callStarted))
-  const { word, phase } = usePhase()
-  return (
-    <div data-call-status data-phase={phase} className="mb-2 flex justify-center px-4">
-      <p className={clsx('flex max-w-full min-w-0 items-center gap-2 rounded-full py-1 pr-3.5 pl-3 text-[0.8125rem]/5 font-medium text-ready-fg tabular-nums', callTint)}>
-        <span className="grid w-4 shrink-0 place-items-center"><CallMark phase={phase} className="h-3" /></span>
-        <span className="flex min-w-0 gap-1"><span role="status" className="min-w-0 truncate">{word}</span><span aria-hidden className="shrink-0">· {t}</span></span>
-      </p>
-    </div>
-  )
-}
 function TopHelp() {
   return useTop() ? <CallHelp className="mx-3 mt-2" /> : null
 }
@@ -610,7 +591,8 @@ export default definePlugin({
   setup(reg) {
     reg.sideTop.push(ShepherdrRow)
     reg.phoneBar.push(PhoneCallButton)
-    reg.phoneAbove.push(PhoneHelp, PhoneCallStatus)
+    // SHEP-122: no Listening pill above a phone's bar: the minimized call is its bar's buttons alone
+    reg.phoneAbove.push(PhoneHelp)
     reg.topBars.push(CallBanner, TopHelp, CallError, CallWhere)
     reg.overlays.push(OpenedTag, EndCallDialog, CallScreen)
     // 3.0 calls with Ctrl+Shift+Space (the keyboard plugin): no V or M keys of its own
