@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.1.20
+
+A voice call can see everything you can, and lets you know when it's busy.
+
+- A call can read every panel the app shows: tasks, changes, pull requests, files, artifacts, usage insights and each
+  machine's health and plan limits. Secrets stay hidden from it.
+- While it looks something up, a call says a word or two ("On it.") and plays a soft typing sound.
+- The call shows Listening, Thinking, Working (and on what, like "Checking tasks…") or Speaking: on the sidebar card,
+  the top strip and a slim pill above a phone's bottom bar.
+- A call answers what you asked first, before any news from your tasks.
+
 ## 3.1.19
 
 On a phone, the voice call lives in the bottom bar, and a chat's round button only sends.
