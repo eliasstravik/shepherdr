@@ -494,7 +494,7 @@ function minimize() { setUI({ callFull: false }) }
 
 /** The call over everything, phone first (SHEP-118): calm and dark whatever the app's look, Shepherdr and the clock at
  *  the top, the orb in the middle with what the call does under it, and only the call's own buttons: Minimize, Mute,
- *  End. Minimize (or Escape) puts it back in the bar, card or strip, whose Full screen button brings it back. */
+ *  End. Held sideways (short and wide), the orb and its word sit left and the rest right (SHEP-126). Minimize (or Escape) puts it back in the bar, card or strip, whose Full screen button brings it back. */
 function CallScreen() {
   const on = useUI((u) => u.call && u.callFull)
   return on ? <FullCall /> : null
@@ -526,13 +526,13 @@ function FullCall() {
   const look = muted && (phase === 'listening' || phase === 'connecting') ? 'muted' : phase
   return (
     <div ref={screen} tabIndex={-1} data-call-screen data-theme="dark" data-phase={look} role="dialog" aria-label="Voice call with Shepherdr"
-      className="call-screen-in outline-none fixed inset-0 z-70 flex flex-col bg-[#08090a] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[max(env(safe-area-inset-bottom),--spacing(8))] pl-[env(safe-area-inset-left)] text-fg antialiased scheme-only-dark">
-      <header className="flex flex-col items-center gap-0.5 pt-8">
+      className="call-screen-in outline-none fixed inset-0 z-70 flex flex-col bg-[#08090a] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[max(env(safe-area-inset-bottom),--spacing(8))] pl-[env(safe-area-inset-left)] text-fg antialiased scheme-only-dark short:grid short:grid-cols-2 short:grid-rows-[1fr_auto_auto_1fr] short:pt-[max(env(safe-area-inset-top),--spacing(6))] short:pb-[max(env(safe-area-inset-bottom),--spacing(6))]">
+      <header className="flex flex-col items-center gap-0.5 pt-8 short:col-start-2 short:row-start-2 short:pt-0">
         <h2 className="text-base/6 font-semibold">Shepherdr</h2>
         <p className="text-sm/5 text-fg2 tabular-nums">{t}</p>
       </header>
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-12 px-6">
-        <div ref={orb} data-phase={look} aria-hidden className="call-orb w-[min(64vw,38dvh,300px)]">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-12 px-6 short:col-start-1 short:row-span-full short:gap-(--orb-short-gap)">
+        <div ref={orb} data-phase={look} aria-hidden className="call-orb w-[min(64vw,38dvh,300px)] short:w-(--orb-short)">
           <span className="call-orb-body"><span className="call-orb-swirl" /><span className="call-orb-sheen" /></span>
         </div>
         <p className="flex h-7 max-w-full min-w-0 items-center gap-2 text-lg/7 font-medium text-fg2">
@@ -540,7 +540,7 @@ function FullCall() {
           {phase === 'thinking' || phase === 'working' ? <span aria-hidden className="typing inline-flex shrink-0 items-center gap-[3px] [&>i]:size-[5px]!"><i /><i /><i /></span> : null}
         </p>
       </div>
-      <div role="group" aria-label="Call controls" className="flex items-start justify-center gap-6 px-6">
+      <div role="group" aria-label="Call controls" className="flex items-start justify-center gap-6 px-6 short:col-start-2 short:row-start-3 short:mt-10">
         <BigCallButton label="Minimize the call" word="Minimize" onClick={minimize} className="bg-white/10 text-fg">
           <UnfitIcon className="size-6" />
         </BigCallButton>
