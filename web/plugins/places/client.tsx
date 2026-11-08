@@ -12,9 +12,9 @@
 import clsx from 'clsx'
 import { openWorktree } from '@client/screens/Worktree.tsx'
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type LiHTMLAttributes, type ReactNode } from 'react'
-import { act, chatPlace, chatName, counts, definePlugin, goChat, getState, goPlace, manyMachines, openSplit, placeOf, removeSpace, setUI, splitClick, useSnap, useUI, type Pane, type UI } from '@client/kernel.ts'
+import { act, counts, definePlugin, getState, goPlace, manyMachines, openSplit, placeOf, removeSpace, setUI, splitClick, useSnap, useUI, type Pane, type UI } from '@client/kernel.ts'
 import { Dialog, RowMenu, useRowMenu } from '@client/rowmenu.tsx'
-import { AutopilotIcon, BackIcon, BellIcon, CogIcon, BellSlashIcon, AttentionBadge, attentionWords, DeleteIcon, DownIcon, HashIcon, ic, IconButton, List, MenuItem, MenuLabel, MenuSeparator, MenuSetting, Meta, ModelIcon, MonitorIcon, NextIcon, PinnedIcon, PinTaskIcon, PlusIcon, Primary, ReadIcon, RemoveProjectIcon, RenameIcon, rowClass, RowText, SectionIcon, ServerIcon, SplitIcon, TasksIcon, UnpinIcon, useElapsed, Waves } from '@client/ui.tsx'
+import { AutopilotIcon, BackIcon, BellIcon, CogIcon, BellSlashIcon, AttentionBadge, attentionWords, DeleteIcon, DownIcon, HashIcon, ic, IconButton, List, MenuItem, MenuLabel, MenuSeparator, MenuSetting, Meta, ModelIcon, MonitorIcon, NextIcon, PinnedIcon, PinTaskIcon, PlusIcon, Primary, ReadIcon, RemoveProjectIcon, RenameIcon, rowClass, RowText, SectionIcon, ServerIcon, SplitIcon, TasksIcon, UnpinIcon } from '@client/ui.tsx'
 import { HealthDot, MachineMeter } from '@plugins/health/client.tsx'
 import { toast } from '@plugins/alerts/toasts.tsx'
 import { MarkRead, markPlaceRead, muted, placeUnread } from '@client/unread.ts'
@@ -318,15 +318,13 @@ function usePlaceRow({ p, snap, where }: { p: Place; snap: Snapshot; where?: str
   // its Assistant; after the name only what's unusual: its machine (in Pinned), its folder where another space on its
   // machine has its name, its repo and branch (core/spaces.js gitTail, as the window's)
   const pilot = !!p.pilot?.on
-  // a voice call in this space (its Assistant's or one of its tasks'): a green mark after the name that goes back to it
-  const call = useUI((u) => (u.call && chatPlace(snap, u.call) === p.id ? u.call : null))
   const waking = pilot && !!(p.pilot?.inflight || p.pilot?.pending)
   const label = [where, sharedNames(snap).has(p.id) && p.where ? (SPc.tilde as (x: string) => string)(p.where) : null].filter(Boolean).join(' · ') || null
   const tail = p.git ? (SPc.gitTail as (g: object, o: object) => { where: string })({ name: p.gitName, branch: p.branch }, { name: p.name, tree: !!treeMark.get(p.id), tag: label }) : { where: label ?? '' }
   return {
     sel,
     // what the row says aloud, its count and offline too
-    said: `${p.name}${where ? ` on ${where}` : ''}${p.home ? ', home space' : ''}${p.connecting ? ', connecting' : off ? ", can't reach" : n ? `, ${c.ownNeed} need you, ${c.ownReady} ready here` : ''}${fresh && !off ? ', unread' : ''}${pilot ? (waking ? ', Autopilot waking' : ', on Autopilot') : ''}${quiet ? ', muted' : ''}${call ? ', on a voice call' : ''}`,
+    said: `${p.name}${where ? ` on ${where}` : ''}${p.home ? ', home space' : ''}${p.connecting ? ', connecting' : off ? ", can't reach" : n ? `, ${c.ownNeed} need you, ${c.ownReady} ready here` : ''}${fresh && !off ? ', unread' : ''}${pilot ? (waking ? ', Autopilot waking' : ', on Autopilot') : ''}${quiet ? ', muted' : ''}`,
     fresh,
     // the Autopilot mark, then the space's # before the name, as Slack's channels have: grey, lit with the name where
     // it is open or something is new
@@ -351,31 +349,10 @@ function usePlaceRow({ p, snap, where }: { p: Place; snap: Snapshot; where?: str
           <span className="min-w-0 shrink truncate text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{tail.where}</span>
         ) : null}
         {quiet ? <BellSlashIcon aria-hidden className={clsx(ic, 'text-fg3')} /> : null}
-        {call ? <CallMark call={call} snap={snap} /> : null}
         <AttentionBadge need={c.ownNeed} ready={c.ownReady} scope="here" />
       </>
     ),
   }
-}
-
-/** SHEP-51: the voice call going on in a space, in its row: a soft green pill with the call's wave and clock. It takes
- *  you back to the call's chat (its box is the call: Mute and End are there), from anywhere the sidebar shows. */
-function CallMark({ call, snap }: { call: string; snap: Snapshot }) {
-  const t = useElapsed(useUI((u) => u.callStarted))
-  return (
-    <button
-      type="button"
-      data-call-mark
-      aria-label={`Back to the voice call with ${chatName(snap, call)}, ${t}`}
-      onPointerDown={(e) => e.stopPropagation()}
-      // its chat, not the terminal or artifacts it was flipped to
-      onClick={(e) => { e.stopPropagation(); goChat(call); setUI({ term: null, arts: null }) }}
-      className="press-dim relative z-1 flex h-5 shrink-0 items-center gap-1 rounded-full bg-ready/15 py-0.5 pr-2 pl-1.5 text-[0.75rem] font-medium text-ready-fg tabular-nums after:absolute after:-inset-1.5 phone:h-6 phone:text-[0.8125rem]"
-    >
-      <Waves className="h-3 scale-75" />
-      {t}
-    </button>
-  )
 }
 
 /** a row's icon: a hair under the name's 15px, tucked 2px nearer the name */

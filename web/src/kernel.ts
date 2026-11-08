@@ -109,6 +109,12 @@ export interface Registry {
   overlays: FC[]
   /** a line under the top of the screen (voice call elsewhere, offline) */
   topBars: FC[]
+  /** rows at the top of the spaces list, under its brand row, above Spaces (the Shepherdr voice call, SHEP-105) */
+  sideTop: FC[]
+  /** round buttons after Search in the phone's bottom bar (the voice call) */
+  phoneBar: FC[]
+  /** just above the phone's bottom bar (a voice call's Mute and End) */
+  phoneAbove: FC[]
   /** beside Settings at the foot of the spaces list, on a phone in the drawer's: there whatever is open (plan limits) */
   sideFoot: { order: number; View: FC }[]
   /** under the task list: place is its one space, else the place picked; list, what it shows (listView) */
@@ -143,6 +149,9 @@ export const registry: Registry = {
   composerMic: null,
   overlays: [],
   topBars: [],
+  sideTop: [],
+  phoneBar: [],
+  phoneAbove: [],
   tasksFooter: [],
   keys: [],
   settingActions: {},
@@ -241,8 +250,10 @@ export interface UI {
   taskMenu: boolean
   /** what each side panel item has picked, by "task|item" (the file shown) */
   picked: Record<string, string>
-  /** chat key on a voice call */
-  call: string | null
+  /** a voice call with Shepherdr is on (SHEP-105: with all of it, not one chat) */
+  call: boolean
+  /** the chat whose call button started it, if any: the call's "here" while the screen shows no chat */
+  callFrom: string | null
   callStarted: number
   callMuted: boolean
   /** why the last voice call stopped, until dismissed */
@@ -435,7 +446,8 @@ let state: State = {
     sheet: params.get('task') && deviceFor(innerWidth) !== 'desktop' ? params.get('item') : null,
     taskMenu: false,
     picked: {},
-    call: null,
+    call: false,
+    callFrom: null,
     callStarted: 0,
     callMuted: false,
     callError: null,

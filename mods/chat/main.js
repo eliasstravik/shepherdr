@@ -201,6 +201,16 @@ function parts(text) {
 
 let bound = false;
 
+// What the voice opened, in a few words for its "Opened by voice" toast.
+function voiceOpened(nav) {
+  if (nav.kind === "task") return `${nav.ref ?? String(nav.task ?? "").split(":").pop()}${nav.title ? ` \u00b7 ${nav.title}` : ""}`;
+  if (nav.kind === "artifact") return nav.title ?? "An artifact";
+  if (nav.kind === "tasks" || nav.kind === "needs") return nav.kind === "needs" ? "What needs you" : "The Tasks list";
+  if (nav.kind === "settings") return `Settings${nav.section ? ` \u203a ${nav.section}` : ""}`;
+  if (nav.kind === "panel") return `${nav.panel[0].toUpperCase()}${nav.panel.slice(1)}`;
+  return nav.kind === "space" || nav.kind === "chat" ? "A space" : "";
+}
+
 export default class Chat extends View {
   init(_props, cx) {
     // The Tasks panel's drill-in view (props { panel: true }): its header (props { head: true })
@@ -2313,8 +2323,8 @@ export default class Chat extends View {
       let st = null;
       try { st = JSON.parse(s ?? "null"); } catch {}
       if (st) {
-        const changed = st.phase !== call.phase || st.error !== call.error || (st.who ?? null) !== call.who;
-        call.phase = st.phase; call.error = st.error; call.pid = st.pid; call.who = st.who ?? null;
+        const changed = st.phase !== call.phase || st.error !== call.error || (st.who ?? null) !== call.who || (st.said ?? "") !== (call.said ?? "");
+        call.phase = st.phase; call.error = st.error; call.pid = st.pid; call.who = st.who ?? null; call.said = st.said ?? "";
         if (changed) { this.callShared(); cx.notify(); }
         if (st.phase === "ended") {
           if (st.error) this.callError(st.error);
@@ -2390,6 +2400,8 @@ export default class Chat extends View {
       // said back by the nav's name (voice.ts waits for it before the voice agent may say it's on screen)
       let ack;
       try { ack = this.voiceNav(nav) ?? { ok: true }; } catch (e) { console.error(`voice nav: ${e?.message ?? e}`); ack = { ok: false, why: "it failed in the window" }; }
+      // what the voice opened says why the window changed by itself (SHEP-105): a short quiet toast
+      if (ack.ok && nav.kind !== "screen") toast({ title: "Opened by voice", body: voiceOpened(nav), level: "info", timeout: 3500 });
       await fs.mkdir(`${this.callDir}/navved`, { recursive: true }).catch(() => {});
       await fs.writeFile(`${this.callDir}/navved/${f}`, JSON.stringify(ack)).catch(() => {});
     }
@@ -2503,8 +2515,8 @@ export default class Chat extends View {
     if (pid) exec("sh", ["-c", 'sleep 1; kill "$1" 2>/dev/null; true', "x", String(pid)]);
   }
 
-  // The call for the bar shown while its chat isn't (mods/chat-call): shared "chat.calls" =
-  // { <chat pane>: { phase, who, muted, started, beat, name, tab } }.
+  // The call for the sidebar's call card (mods/spaces-chat voiceRow): shared "chat.calls" =
+  // { <chat pane>: { phase, who, muted, started, beat, name, tab, said } }.
   callShared() {
     const mine = this.myPane() ?? this.lastPane;
     if (!mine) return;
@@ -2513,7 +2525,7 @@ export default class Chat extends View {
     if (c) {
       const tab = panes().find((p) => p.pane === mine)?.tab ?? null;
       all[mine] = { phase: c.phase, who: c.who, muted: c.muted, started: c.started, beat: c.beat ?? Date.now(),
-        name: agent.NAMES[this.kind] ?? "the agent", tab };
+        name: agent.NAMES[this.kind] ?? "the agent", tab, said: c.said ?? "" };
     } else if (all[mine]) delete all[mine];
     else return;
     setShared("chat.calls", all);
@@ -4084,12 +4096,13 @@ export default class Chat extends View {
     this.wasFocused = paneFocused;
     this.hadBox = showsBox;
     this.paneFocused = paneFocused;
-    // The call bar elsewhere (mods/chat-call) ends a call through shared "chat.callreq" =
-    // { pane, at, action: "end" }.
+    // The sidebar's Shepherdr row (mods/spaces-chat voiceRow, SHEP-105) starts, mutes and ends the call it runs here
+    // through shared "chat.callreq" = { pane, at, action: "start" | "mute" | "end" } (none: start or end).
     const req = shared("chat.callreq");
     if (req && req.pane === mine && req.at !== this.callReqAt && Date.now() - req.at < 5000) {
       this.callReqAt = req.at;
-      if (req.action === "end" ? this.call : true) cx.timer.after(0, (cx) => { this.toggleCall(cx); cx.notify(); });
+      if (req.action === "mute") { if (this.call) cx.timer.after(0, (cx) => { this.callMute(cx); }); }
+      else if (req.action === "end" ? this.call : req.action === "start" ? !this.call : true) cx.timer.after(0, (cx) => { this.toggleCall(cx); cx.notify(); });
     }
     // The model picker's Restart (mods/chat-models): shared "chat.restartreq" = { pane, at, pick }.
     const rr = shared("chat.restartreq"), pk = this.pickKey();

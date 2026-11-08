@@ -65,9 +65,15 @@ connection it came on). A page from anywhere else can't change anything: writes 
   the call is held until the agent says the person said yes (`risky`). The prompt has the agent use look, open, send and
   act first. `open` also shows the shown space's Artifacts, Files and Changes panels and its Assistant's terminal (a
   space named: that space first, then its panel), Tasks filtered by a state and words, and a Settings page by its
-  spoken name. A call going on shows as a green mark with its clock on its space's row in the sidebar; where the sidebar can't be
-  seen (a phone, a tablet, a shut sidebar) a slim soft-green band at the very top shows the call's space and clock, and a
-  tap goes back to it.
+  spoken name.
+  SHEP-105: a call is with Shepherdr itself, not one chat. It starts from "Talk to Shepherdr" at the top of the
+  sidebar (the call card while on: what it is doing, its clock, the last thing it said, Mute, End), a phone's voice
+  button beside Search (a green Mute and End strip above the bar), or a chat's call button (the same call, that chat its
+  "here" while the screen shows none); where neither card nor bar shows, the strip sits at the top. `/api/voice` takes
+  no chat. What it hears (`service/voice-hear.ts`): the replies and status of every chat it sent to and of the one on
+  screen, and anything new anywhere that needs the person (a question, a secret, a task Ready), queued until the
+  person and the voice are both quiet, several said as one. The window's call asks `POST /api/voice/hear` for the same.
+  What the voice opens gets an "Opened by voice" tag for a few seconds.
 - Keys: 3.0's keys work in the web app too (Settings → Keyboard shortcuts on a desktop).
 
 ## Install

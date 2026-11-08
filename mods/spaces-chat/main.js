@@ -25,7 +25,8 @@ import { unreadSpaces, readShown } from "./unread.js";
 import { muted } from "./notify.js";
 import { MachinePopup, openMachine, openMachineSettings } from "./machine-popup.js";
 import { startPolling, allStats, healthMeters, bars } from "./machines.js";
-import { countBadge, red, green, H, TEXT, RADIUS } from "./ui.js";
+import { countBadge, red, green, H, TEXT, RADIUS, toast } from "./ui.js";
+import { on as addonOn } from "./addons.js";
 import { spaceName, gitTail, tilde, sharedNames } from "./core/spaces.js";
 import { coordinatorTab } from "./coordinator.js";
 
@@ -129,7 +130,7 @@ export default class Spaces extends View {
     this.pilots = new Map();
     this.readPilots(cx);
     cx.timer.every(5000, (cx) => this.readPilots(cx));
-    // A voice call's clock on its space's row (callMark): once a second, only while a call is on.
+    // The voice call card's clock (voiceRow): once a second, only while a call is on.
     cx.timer.every(1000, (cx) => { if (this.calling) cx.notify(); });
     // Each machine's health and plan limits (machines.js): read every 45 s / 10 min, not per render.
     startPolling(cx);
@@ -173,36 +174,59 @@ export default class Spaces extends View {
       .child(svg("mods/spaces-chat/rocket.svg").size(12).flex_none());
   }
 
-  // SHEP-51: a voice call going on in this space (mods/chat's shared "chat.calls": its chat's pane is in one of this
-  // space's tabs), in its row: a soft green pill with the call's wave and clock, which goes back to the call's chat
-  // (its box is the call: Mute, End). No bar over the window.
-  callOf(w) {
-    const calls = shared("chat.calls") ?? {};
-    for (const [pane, c] of Object.entries(calls)) {
-      if (Date.now() - (c.beat ?? 0) > 45000) continue;
-      const tab = c.tab ?? panes().find((p) => p.pane === pane)?.tab;
-      if (tab && (w.tabs ?? []).some((t) => t.id === tab)) return { pane, ...c, tab };
-    }
+  // SHEP-105: "Talk to Shepherdr" at the top of the sidebar, above the spaces: a voice call with Shepherdr itself, not
+  // one chat. The window runs it in the shown space's Assistant chat (mods/chat voice.ts: shared "chat.callreq"
+  // { pane, at, action: "start" | "mute" | "end" }), but the call hears and reaches every space. On a call the row is the
+  // call card: Shepherdr, what it is doing and its clock, Mute and End; on the narrow rail, a green wave that ends it.
+  liveCall() {
+    for (const [pane, c] of Object.entries(shared("chat.calls") ?? {})) if (Date.now() - (c.beat ?? 0) < 45000) return { pane, ...c };
     return null;
   }
 
-  callMark(w, t) {
-    const call = this.callOf(w);
-    if (!call) return null;
+  // the chat a new call runs in: the shown space's Assistant's, its tab shown so the chat can take the request
+  startCall() {
+    const ps = panes();
+    const sp = spaces().find((s) => s.active);
+    const tab = sp ? coordinatorTab(sp, undefined, ps) : null;
+    const chatIn = (id) => ps.find((p) => p.mod === "chat" && p.tab === id)?.pane ?? null;
+    const at = tab && chatIn(tab.id) ? tab.id : (sp?.tabs ?? []).map((t) => t.id).find((id) => chatIn(id)) ?? null;
+    if (!at) return toast({ title: "Talk to Shepherdr", body: "This space has no chat to run the call from: open its Assistant first.", level: "info" });
+    if (!sp.tabs.some((t) => t.id === at && t.active)) run("tab.select", { id: at });
+    setShared("chat.callreq", { pane: chatIn(at), at: Date.now(), action: "start" });
+  }
+
+  voiceRow(t, collapsed) {
+    if (!addonOn("voice")) return null;
+    const call = this.liveCall();
+    const req = (action) => setShared("chat.callreq", { pane: call.pane, at: Date.now(), action });
+    const round = (id, size, bg, fg, icon, f) => div().id(id).size(size).flex_none().flex().items_center().justify_center().rounded(size / 2).cursor_pointer()
+      .bg(bg).text_color(fg).hover((s) => s.opacity(0.85))
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { cx.stop_propagation(); f(); })
+      .child(svg(icon).size(13));
+    if (collapsed) return h_flex().h(36).flex_none().justify_center().items_center()
+      .child(call ? round("voice-end", 26, `${green()}26`, green(), "mods/chat/audio-lines.svg", () => req("end"))
+        : round("voice-start", 26, t.foreground, t.background, "mods/chat/audio-lines.svg", () => this.startCall()));
+    if (!call) return h_flex().id("voice-row").mx(8).mt(4).h(32).pl(8).pr(4).gap(9).flex_none().items_center().rounded(RADIUS.card).cursor_pointer()
+      .hover((s) => s.bg(t.hover))
+      .on_click(() => this.startCall())
+      .child(svg("mods/chat/audio-lines.svg").size(14).flex_none().text_color(t.muted))
+      .child(div().flex_1().min_w(0).truncate().font_medium().text_color(t.foreground).child("Talk to Shepherdr"))
+      .child(round("voice-start", 24, t.foreground, t.background, "mods/chat/audio-lines.svg", () => this.startCall()));
     this.calling = true;
     const secs = Math.max(0, Math.floor((Date.now() - (call.started ?? Date.now())) / 1000));
     const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
-    const back = () => {
-      run("space.select", { id: w.id });
-      run("tab.select", { id: call.tab });
-      run("pane.focus", { pane: call.pane });
-    };
-    return h_flex().id(`call-${w.id}`).h(18).pl(5).pr(7).gap(4).flex_none().items_center().rounded(9).cursor_pointer()
-      .bg(`${green()}26`).text_color(green()).text_size(TEXT.label).hover((s) => s.opacity(0.8))
-      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-      .on_click((_e, cx) => { cx.stop_propagation(); back(); })
-      .child(svg("mods/chat/audio-lines.svg").size(12).flex_none().loop("opacity", { from: 0.45, to: 1, period: 1400 }))
-      .child(div().child(clock));
+    const word = call.muted && call.phase !== "speaking" ? "Muted" : ({ connecting: "Connecting", listening: "Listening", thinking: "Thinking", speaking: "Speaking" })[call.phase] ?? "On a call";
+    return v_flex().id("voice-card").mx(8).mt(4).p(8).gap(8).flex_none().rounded(RADIUS.card).bg(`${green()}1c`).border_1().border_color(`${green()}38`)
+      .child(h_flex().gap(7).items_center()
+        .child(svg("mods/chat/audio-lines.svg").size(13).flex_none().text_color(green()).loop("opacity", { from: 0.45, to: 1, period: 1400 }))
+        .child(div().flex_1().min_w(0).truncate().font_semibold().text_color(t.foreground).child("Shepherdr"))
+        .child(div().flex_none().text_size(TEXT.label).font_medium().text_color(green()).child(`${word} \u00b7 ${clock}`)))
+      // the last thing it said
+      .when(Boolean(call.said), (el) => el.child(div().text_size(TEXT.label).text_color(t.muted).line_clamp(2).child(`\u201c${call.said}\u201d`)))
+      .child(h_flex().gap(6).justify_end()
+        .child(round("voice-mute", 26, call.muted ? t.foreground : t.background, call.muted ? t.background : t.foreground, call.muted ? "mods/chat/mic-off.svg" : "mods/chat/mic.svg", () => req("mute")))
+        .child(round("voice-end", 26, red(), "#ffffff", "mods/chat/x.svg", () => req("end"))));
   }
 
   checkNew(cx) {
@@ -697,7 +721,6 @@ export default class Spaces extends View {
             .when(quiet && Boolean(iconOf(w.id)), (el) => el.opacity(0.5)).child(iconOf(w.id) ?? "#")))
           .child(nameText(name, fresh, quiet ? t.dim : w.active ? t.foreground : t.muted, t))
           .when(Boolean(this.pilotMark(w, t)), (el) => el.child(this.pilotMark(w, t)))
-          .when(Boolean(this.callOf(w)), (el) => el.child(this.callMark(w, t)))
           .child(g ? this.gitTail(g, tree, name, t, label) : h_flex().flex_1().min_w(0).justify_end().text_size(TEXT.label).text_color(t.dim)
             .when(Boolean(label), (el) => el.child(div().min_w(0).truncate().child(label))))
           .when(quiet, (el) => el.child(svg("mods/spaces-chat/bell-off.svg").size(13).flex_none().text_color(t.dim)))
@@ -707,10 +730,8 @@ export default class Spaces extends View {
       );
   }
 
-  // The rail's row: its number and status; a voice call's space shows the call's green wave instead, and goes back to
-  // the call (SHEP-66: the rail has no room for callMark's clock, and the wave was nowhere on it).
+  // The rail's row: its number and status (a voice call shows at the rail's top, voiceRow).
   compact({ w, i }, t) {
-    const call = this.callOf(w);
     return h_flex()
       .id(`space-${w.id}`)
       .h(26)
@@ -721,23 +742,17 @@ export default class Spaces extends View {
       .rounded(RADIUS.card)
       .cursor_pointer()
       .when(w.active, (el) => el.bg(t.raised))
-      .when(Boolean(call), (el) => el.bg(`${green()}26`))
       .hover((s) => s.bg(t.hover))
-      .on_click(() => {
-        run("space.select", { id: w.id });
-        if (call) { run("tab.select", { id: call.tab }); run("pane.focus", { pane: call.pane }); }
-      })
+      .on_click(() => run("space.select", { id: w.id }))
       .child(nameText(String(i + 1), this.unread.has(w.id), muted(w.id) ? t.dim : w.active ? t.foreground : t.muted, t))
-      .child(call
-        ? svg("mods/chat/audio-lines.svg").size(12).flex_none().text_color(green()).loop("opacity", { from: 0.45, to: 1, period: 1400 })
-        : div().text_color(tone(t, w.status)).child(glyph(w.status)));
+      .child(div().text_color(tone(t, w.status)).child(glyph(w.status)));
   }
 
   close() { this.popup?.close?.(); }
 
   // One copy of Herdr's live lists for the whole render (live.js): past ~50 ms Herdr stops it.
   render(cx) {
-    // a voice call's row sets it again (callMark): its clock ticks only while one shows
+    // the voice call's card sets it again (voiceRow): its clock ticks only while one shows
     this.calling = false;
     return inRender(() => this.draw(cx));
   }
@@ -765,6 +780,7 @@ export default class Spaces extends View {
     }
     if (changed) setShared("space.colors", kept);
     return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
+      .child(this.voiceRow(t, collapsed))
       .child(h_flex().h(31).pl(16).pr(10).items_center().justify_between().text_size(TEXT.label).font_medium().text_color(t.dim)
         .when(!collapsed, el => el.child("Spaces"))
         // As a machine's +: New space, New section, on the shown space's machine.

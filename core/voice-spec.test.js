@@ -1,7 +1,7 @@
 // The voice agent's spec reaches agents made before (ensureAgent): kept and up to date, nothing asked; from another
 // spec, PATCHed (and the tools it replaced removed); gone from ElevenLabs, made again; made with another key, a new one.
 import { expect, test } from "bun:test";
-import { ensureAgent, agentSpec, SPEC, specTag, TOOLS, SYSTEM_TOOLS, agentFile, envLines, opening, prompt, FIRST, LANGUAGES, TTS_MODEL } from "./voice.js";
+import { ensureAgent, agentSpec, SPEC, specTag, TOOLS, SYSTEM_TOOLS, agentFile, envLines, opening, prompt, FIRST, LANGUAGES, TTS_MODEL, batchLines, needLine, replyLine } from "./voice.js";
 
 function fake(o = {}) {
   const calls = [], saved = [];
@@ -69,9 +69,9 @@ test("the spec: five client tools (screen the fallback), a version that follows 
   const changed = agentSpec(); changed.conversation_config.agent.prompt.tools[0].description += "!";
   expect(specTag(changed)).not.toBe(SPEC);
   expect(envLines(agentFile("agent_1", "tag1", SPEC))).toEqual({ ELEVENLABS_AGENT_ID: "agent_1", ELEVENLABS_KEY_TAG: "tag1", ELEVENLABS_SPEC: SPEC });
-  const o = opening("the shepherdr Assistant", "The app shows task SHEP 45.");
+  const o = opening("The app shows task SHEP 45.");
   expect(o.conversation_config_override.agent.prompt.prompt).toContain("Where the call is now: The app shows task SHEP 45.");
-  expect(prompt("x")).toContain("Set confirmed true only after a clear yes on this call");
+  expect(prompt()).toContain("Set confirmed true only after a clear yes on this call");
 });
 
 test("SHEP-67: ends the call itself after a yes, waits quietly through silence, speaks briefly", () => {
@@ -85,9 +85,9 @@ test("SHEP-67: ends the call itself after a yes, waits quietly through silence, 
   expect(c.conversation.max_duration_seconds).toBe(3600);
   // a short hello, on the spec and on each call
   expect(c.agent.first_message).toBe(FIRST);
-  expect(opening("SHEP 45's agent").conversation_config_override.agent.first_message).toBe(FIRST);
+  expect(opening().conversation_config_override.agent.first_message).toBe(FIRST);
   expect(FIRST.split(" ").length).toBeLessThanOrEqual(4);
-  const p = prompt("x");
+  const p = prompt();
   expect(p).toContain('ask exactly "Are you sure you want to end the call?" After a clear yes, say "Bye." and use end_call');
   expect(p).not.toContain('"End the call?"');
   // moving around: one word once it's shown, a few words only when it failed or is unclear (SHEP-83)
@@ -116,9 +116,32 @@ test("SHEP-104: English first, then whatever language the person speaks, back an
   expect(c.tts.model_id).toBe(TTS_MODEL);
   expect(TTS_MODEL).not.toMatch(/_v2$/);
   // the prompt says to answer in the person's language, the hello stays English
-  expect(prompt("x")).toContain("Speak the language the person speaks");
-  expect(opening("x").conversation_config_override.agent.first_message).toBe(FIRST);
+  expect(prompt()).toContain("Speak the language the person speaks");
+  expect(opening().conversation_config_override.agent.first_message).toBe(FIRST);
   // a changed spec: agents made before are PATCHed to it (ensureAgent)
   const before = agentSpec(); delete before.conversation_config.language_presets;
   expect(specTag(before)).not.toBe(SPEC);
+});
+
+test("SHEP-105: one Shepherdr voice for everything, never tied to the chat it started in", () => {
+  const p = prompt();
+  expect(p).toContain("The person called Shepherdr itself, not one agent");
+  expect(p).toContain("You never hand the call over to another voice");
+  expect(p).not.toMatch(/started in .*'s chat/);
+  expect(p).not.toContain("the call's chat");
+  // sends and moves on: the reply comes later as an [Update]
+  expect(p).toContain('say only "Passed it to <name>."');
+  expect(p).toContain("Several at once: one or two short sentences");
+  // what stays (SHEP-67, SHEP-83, SHEP-104)
+  expect(p).toContain('ask exactly "Are you sure you want to end the call?"');
+  expect(p).toContain('reply with one word: "Opened.", "Switched.", "Closed." or "Done."');
+  expect(p).toContain("Speak the language the person speaks");
+  // updates that come together are said as one; quiet notes stay quiet
+  expect(batchLines([])).toEqual([]);
+  const one = batchLines([replyLine("the shop Assistant", "Fixed it.")]);
+  expect(one).toEqual([{ type: "user_message", text: expect.stringContaining("the shop Assistant replied") }]);
+  const two = batchLines([{ type: "contextual_update", text: "[Update] x is working now." }, replyLine("the shop Assistant", "Fixed it."), needLine("TEST-7 is ready for review")]);
+  expect(two.map((l) => l.type)).toEqual(["contextual_update", "user_message"]);
+  expect(two[1].text).toContain("2 things came in together");
+  expect(two[1].text).toContain("TEST-7 is ready for review");
 });

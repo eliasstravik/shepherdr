@@ -7,15 +7,18 @@ import type { Snapshot, Task, Place } from "../web/shared/types.ts";
 import { navWords } from "../core/voice.js";
 import { screenParams, screenWords } from "../core/screen.js";
 
-/** Where a call comes from: its app, the chat it started in, and what that app shows now (sent by the page or the window). */
+/** Where a call comes from: its app, the chat it started from (if any), and what that app shows now (sent by the page or
+ *  the window). SHEP-105: a call is with Shepherdr itself, not that chat: "here" is what the screen shows. */
 export type Where = {
   client: "web" | "window";
   /** phone, tablet or desktop (web) */
   device?: string | null;
   /** the machine whose window it is (window), or the one serving the web app */
   machine?: string | null;
-  /** the chat the call is with (its key: p:<space> for an Assistant, <task>/worker for a task's agent) */
-  call: string;
+  /** the chat the call was started from, by its call button (its key: p:<space> for an Assistant, <task>/worker for a
+   *  task's agent); none from the sidebar's Shepherdr row or the phone's voice button. Only "here" while the screen
+   *  shows no chat. */
+  call?: string | null;
   /** what the app shows now: a space (place id), a task, the task's tab, an artifact open, Settings */
   place?: string | null;
   task?: string | null;
@@ -53,7 +56,7 @@ export interface VoiceIO {
 }
 
 /** a tool's answer: words for the voice agent; an open's nav, and what it shows in words, for the app to show and confirm */
-export type Answer = { result: string; nav?: Nav; shows?: string; error?: boolean; then?: Nav };
+export type Answer = { result: string; nav?: Nav; shows?: string; error?: boolean; then?: Nav; sent?: string };
 /** what the app said once it tried a nav: it shows it now (ok), or why not; with what it shows now */
 export type Ack = { ok: boolean; why?: string | null; where?: Record<string, unknown>; did?: string; ask?: string; screen?: string };
 
@@ -116,9 +119,18 @@ const placeName = (snap: Snapshot, id: string | null | undefined) => snap.places
 const taskOfChat = (snap: Snapshot, key: string) => (key.endsWith("/worker") ? snap.tasks.find((t) => t.id === key.slice(0, -7)) ?? null : null);
 const placeOfChat = (snap: Snapshot, key: string) => snap.places.find((p) => p.chat === key) ?? null;
 
+/** the chat the screen shows: an open task's agent, else the shown space's Assistant, else the one the call started from */
+export function screenChat(snap: Snapshot, where: Where): string | null {
+  const t = where.task ? snap.tasks.find((x) => x.id === where.task) : null;
+  if (t) return t.agent?.chat ?? `${t.id}/worker`;
+  const p = where.place ? snap.places.find((x) => x.id === where.place) : null;
+  return p?.chat ?? where.call ?? null;
+}
+const callKey = (where: Where) => where.call ?? "";
+
 /** the task meant: "this" (on screen, else the call's), its id ("SHEP-45", "shep 45", "45"), or words of its title */
 export function findTask(snap: Snapshot, id: unknown, where: Where): Task | null {
-  if (isHere(id)) return (where.task ? snap.tasks.find((t) => t.id === where.task) : null) ?? taskOfChat(snap, where.call);
+  if (isHere(id)) return (where.task ? snap.tasks.find((t) => t.id === where.task) : null) ?? taskOfChat(snap, callKey(where));
   const want = norm(id);
   const live = snap.tasks.filter((t) => !t.archived);
   const byId = (ts: Task[]) => ts.find((t) => norm(t.id) === want || norm(t.id.split(":").pop()) === want);
@@ -127,7 +139,7 @@ export function findTask(snap: Snapshot, id: unknown, where: Where): Task | null
   // just its number: the one in the space on screen first
   if (/^\d+$/.test(want)) {
     const num = live.filter((t) => t.id.split("-").pop() === want);
-    const here = where.place ?? placeOfChat(snap, where.call)?.id ?? taskOfChat(snap, where.call)?.place;
+    const here = where.place ?? placeOfChat(snap, callKey(where))?.id ?? taskOfChat(snap, callKey(where))?.place;
     return num.find((t) => t.place === here) ?? (num.length === 1 ? num[0] : null);
   }
   const ws = words(id);
@@ -169,7 +181,7 @@ function machinesSaid(snap: Snapshot, id: unknown) {
 /** every space the person may mean: "here", its name, its id, "Home on the Mac mini", "Mac Mini Home", words of it */
 export function spacesSaid(snap: Snapshot, id: unknown, where: Where): Place[] {
   if (isHere(id)) {
-    const p = where.place ?? placeOfChat(snap, where.call)?.id ?? taskOfChat(snap, where.call)?.place;
+    const p = where.place ?? placeOfChat(snap, callKey(where))?.id ?? taskOfChat(snap, callKey(where))?.place;
     const hit = snap.places.find((x) => x.id === p);
     return hit ? [hit] : [];
   }
@@ -233,9 +245,12 @@ export function findArtifact(snap: Snapshot, id: unknown, where: Where) {
   return hit && best * 2 >= ws.length ? hit : null;
 }
 
-/** a chat by what the person called it: "here" (the call's), a task (its agent's chat) or a space (its Assistant's) */
+/** a chat by what the person called it: "here" (the one on screen), a task (its agent's chat) or a space (its Assistant's) */
 function findChat(snap: Snapshot, id: unknown, where: Where): { key: string; name: string } | { error: string } {
-  if (isHere(id)) return { key: where.call, name: chatName(snap, where.call) };
+  if (isHere(id)) {
+    const key = screenChat(snap, where);
+    return key ? { key, name: chatName(snap, key) } : { error: "No chat is on screen: which space or task?" };
+  }
   const t = findTask(snap, id, where);
   if (t && (norm(id) === norm(t.id) || norm(id) === norm(t.id.split(":").pop()) || !findSpace(snap, id, where))) {
     const key = t.agent?.chat;
@@ -271,7 +286,7 @@ function taskLine(snap: Snapshot, t: Task, withPlace = true) {
 /** Where the call is and what the app shows, in words (look here, and the call's opening). */
 export function lookHere(snap: Snapshot, where: Where) {
   const from = where.client === "web" ? `the web app${where.device ? ` on a ${where.device}` : ""}` : `the Herdr window${where.machine ? ` on ${where.machine}` : ""}`;
-  const out = [`The call runs in ${from}. It is with ${chatName(snap, where.call)}.`];
+  const out = [`The call runs in ${from}. It is with Shepherdr, not one agent.`];
   const shows: string[] = [];
   if (where.settings) shows.push("Settings");
   const t = where.task ? snap.tasks.find((x) => x.id === where.task) : null;
@@ -521,7 +536,8 @@ export async function voiceTool(name: string, params: any, where: Where, io: Voi
       const c = findChat(snap, typeof p.to === "string" ? p.to.slice(0, 200) : "", where);
       if ("error" in c) return fail(c.error);
       await io.send(c.key, text);
-      return done(`Sent to ${c.name}.`);
+      // the call follows that chat from now on: its replies come as [Update]s (voice-hear.ts)
+      return { ...done(`Sent to ${c.name}. Say "Passed it to ${c.name}." and nothing else: its reply comes later as an [Update].`), sent: c.key };
     }
     if (name === "act") return await act(snap, where, io, p, id);
     if (name === "screen") {
@@ -581,7 +597,7 @@ function open(snap: Snapshot, where: Where, io: VoiceIO, what: string, id: strin
     }
     case "settings": return showing(`Settings${id ? `, ${id}` : ""}`, { kind: "settings", ...(id ? { section: id } : {}) });
     case "chat": {
-      const c = id ? findChat(snap, id, where) : { key: where.call, name: chatName(snap, where.call) };
+      const c = findChat(snap, id || "here", where);
       if ("error" in c) return fail(c.error);
       return showing(`${c.name}'s chat`, { kind: "chat", chat: c.key, addr: io.addrOf?.(c.key) ?? null });
     }
