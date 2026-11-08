@@ -2556,19 +2556,19 @@ export default class Chat extends View {
         }
         const { dflts, icons, installed } = this.pickCache;
         if (this.kind) dflts[this.kind] = this.dflt ?? dflts[this.kind];
-        // another machine's Assistant: its machine, said once in the menu (only that machine restarts it)
-        const remote = this.machine && !this.t?.labels?.["herdr.task"] ? this.machine : null;
+        // its machine out of reach now: the menu says so once a change is chosen (the restart waits for it)
+        const offline = this.machine && !online(this.machine) ? this.machine : null;
         const currentRow = agent.rowFor(c.agent, c);
         // Installed agents only (and always the one running).
         const menus = Object.fromEntries(["claude", "codex"].filter((k) => k === c.agent || installed[k])
           .map((k) => [k, agent.menuFor(k, dflts[k], k === c.agent ? currentRow : null)]));
         // As tall as the menu can get (chat-models' sizes): border and padding, another machine's
-        // line, agent tabs, search, the list (it scrolls past 8 rows), separator, Reasoning header
+        // offline line, agent tabs, search, the list (it scrolls past 8 rows), separator, Reasoning header
         // and levels, Fast, Permissions, the new conversation's two lines, Restart (two lines).
         const W = 340, H = 2 + 10 + 20 + 34 + 36 + 8 * 31 + 9 + 26 + 34 + 31 + 31 + 40 + 50;
         openOverlay({ mod: "chat-models", kind: "popup", frame: "none", width: W, height: H,
           at: at ? { x: Math.max(8, at.x - W + 90), y: Math.max(8, at.y - H - 10) } : "pointer",
-          props: { pane: this.pickKey(), remote, width: W, height: H, select: name ? findModel(menus, name) : null,
+          props: { pane: this.pickKey(), offline, width: W, height: H, select: name ? findModel(menus, name) : null,
             current: { agent: c.agent, model: currentRow, effort: c.effort ?? null, fast: c.fast, perm: c.perm ?? null },
             menus, icons, permDefault: { claude: dflts.claude?.mode ?? "manual", codex: "auto" } } });
       } finally {
