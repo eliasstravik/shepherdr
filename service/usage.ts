@@ -3,7 +3,7 @@
 // ~/.herdr/shepherdr/usage.jsonl. Kinds, ids, counts and times only (core/usage.js drops the rest). Nothing here
 // makes a network call: the file stays on this machine; Delete removes it here and on the person's own other
 // machines over herdr-core's link (hc exec --on), the same way every other cross-machine read goes.
-import { appendFileSync, chmodSync, existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DATA } from "./paths.ts";
 import * as U from "../core/usage.js";
@@ -35,6 +35,16 @@ export function record(events: unknown[], on = insightsOn()): boolean {
     chmodSync(f, 0o600);
   } catch { /* a full disk: insights are never worth an error */ }
   return true;
+}
+
+/** Whether the add-on is on now. */
+export const isOn = () => insightsOn();
+
+/** This machine's log, oldest first (a voice call's look at insights, SHEP-110): what is kept, never more. */
+export function logLines(): string[] {
+  const out: string[] = [];
+  for (const n of [OLD, FILE]) { try { out.push(...readFileSync(join(DATA, n), "utf8").split("\n").filter(Boolean)); } catch {} }
+  return out;
 }
 
 /** One event from the service itself. */

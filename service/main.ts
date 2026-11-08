@@ -24,7 +24,8 @@ import { Live } from "./live.ts";
 import { Model } from "./model.ts";
 import { checkEvery, runPilot } from "./autopilot.ts";
 import { windowSection, setWindow, offList, offPlugins } from "./window.ts";
-import { record, deleteAll, note as noteUsage, followSwitch } from "./usage.ts";
+import { record, deleteAll, note as noteUsage, followSwitch, isOn as insightsOn, logLines } from "./usage.ts";
+import { insightsSummary } from "./voice-data.ts";
 import { Chats } from "./chats.ts";
 import { act, hc as hcRun } from "./actions.ts";
 import { AgentWatch } from "./watch.ts";
@@ -466,6 +467,60 @@ const voiceIO: VoiceIO = {
   },
   addrOf: (key) => compat.addrOf(key),
   taskWhere: (id) => { const t = compat.taskOf(id); return t ? { ref: t.ref, folder: t.folder, machine: t.machine } : null; },
+  // SHEP-110: the web app's other reads (voice-data.ts SOURCES), each as the panel that shows it reads it
+  async read(source, a) {
+    const action = async (body: Record<string, unknown>) => {
+      const r = await doAction(body), text = await r.text();
+      if (!r.ok) throw new Error(text.trim() || "It couldn't be read.");
+      const out = JSON.parse(text);
+      if (out?.ok === false && out.error) throw new Error(String(out.error));
+      return out;
+    };
+    // a task's folder (its worktree), else a space's: what its Files, Changes and Pull request tabs read
+    const tree = () => {
+      const t = a.task ? compat.taskOf(a.task) : null;
+      if (t) return t.where;
+      const sp = a.place ? compat.spaceOf(a.place) : null;
+      if (sp) return { folder: sp.folder, machine: sp.machine };
+      throw new Error("Which task or space?");
+    };
+    const path = String(a.path ?? "").replace(/^\/+/, "");
+    if (/(^|\/)(\.env[^/]*|\.netrc|\.npmrc|\.pypirc|id_[a-z0-9]+|[^/]*\.(pem|key|p12|pfx)|credentials[^/]*|secrets?[^/]*)$/i.test(path)) throw new Error("That file may hold secrets: I don't read it out.");
+    switch (source) {
+      case "insights": return insightsSummary(logLines(), insightsOn());
+      case "evidence": return action({ type: "evidence", task: a.task });
+      case "changes": return worktree(hub, tree(), "diff");
+      case "patch": return worktree(hub, tree(), "patch", path);
+      case "pr": return worktree(hub, tree(), "pr");
+      case "files": return worktree(hub, tree(), "dir", path || undefined);
+      case "file": if (!path) throw new Error("Which file? Put its path after file/."); return worktree(hub, tree(), "file", path);
+      case "artifact": return artifacts.recipe(String(a.artifact), Number(a.v) || 1, a.machine ?? null);
+      case "activity": {
+        const addr = a.chat ? compat.addrOf(a.chat) : null;
+        if (!addr) throw new Error("That chat isn't running.");
+        const f = follow(addr);
+        try {
+          await Promise.race([f.ready, Bun.sleep(8000)]);
+          const r: any = compat.reader?.(addr);
+          const turns = ((r?.conv?.items ?? []) as any[]).filter((i) => i.kind === "tools").slice(-3);
+          return Promise.all(turns.map((x) => activity(r, x.id)));
+        } finally { f.stop(); }
+      }
+      case "model": return action({ type: "restart-info", chat: a.chat });
+      case "models": return action({ type: "role-info" });
+      case "template": return action({ type: "template", role: a.role });
+      case "agents": return action({ type: "tab-agents", place: a.place });
+      case "worktree": return action({ type: "worktree", place: a.place, op: "info" });
+      case "hosts": return action({ type: "machine-hosts" });
+      case "folders": {
+        const machine = a.machine ?? null;
+        const home = (await exec(hub, ["sh", "-c", 'printf %s "$HOME"'], machine).catch(() => ({ stdout: "" }))).stdout;
+        return folders(hub, machine, path || "~", home);
+      }
+      case "me": return { machine: me?.host ?? null, link: me ? `https://${me.dns}/shepherdr/` : null, version: VERSION, off: offPlugins() };
+    }
+    throw new Error(`No such data: ${source}.`);
+  },
 };
 
 
