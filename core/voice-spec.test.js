@@ -1,7 +1,7 @@
 // The voice agent's spec reaches agents made before (ensureAgent): kept and up to date, nothing asked; from another
 // spec, PATCHed (and the tools it replaced removed); gone from ElevenLabs, made again; made with another key, a new one.
 import { expect, test } from "bun:test";
-import { ensureAgent, agentSpec, SPEC, specTag, TOOLS, SYSTEM_TOOLS, agentFile, envLines, opening, prompt, FIRST } from "./voice.js";
+import { ensureAgent, agentSpec, SPEC, specTag, TOOLS, SYSTEM_TOOLS, agentFile, envLines, opening, prompt, FIRST, LANGUAGES, TTS_MODEL } from "./voice.js";
 
 function fake(o = {}) {
   const calls = [], saved = [];
@@ -77,8 +77,8 @@ test("the spec: five client tools (screen the fallback), a version that follows 
 test("SHEP-67: ends the call itself after a yes, waits quietly through silence, speaks briefly", () => {
   const c = agentSpec().conversation_config;
   // ElevenLabs' end_call and skip_turn, listed with ours (a separate built_in_tools field beside inline tools is dropped)
-  expect(c.agent.prompt.tools.map((t) => t.name)).toEqual(["look", "open", "send", "screen", "act", "end_call", "skip_turn"]);
-  expect(SYSTEM_TOOLS.map((t) => [t.type, t.params.system_tool_type])).toEqual([["system", "end_call"], ["system", "skip_turn"]]);
+  expect(c.agent.prompt.tools.map((t) => t.name)).toEqual(["look", "open", "send", "screen", "act", "end_call", "skip_turn", "language_detection"]);
+  expect(SYSTEM_TOOLS.map((t) => [t.type, t.params.system_tool_type])).toEqual([["system", "end_call"], ["system", "skip_turn"], ["system", "language_detection"]]);
   expect(c.agent.prompt.built_in_tools).toBeUndefined();
   // no "are you there?" after a silence; only a 15-minute silence or an hour-long call ends it
   expect(c.turn).toEqual({ turn_timeout: -1, silence_end_call_timeout: 900 });
@@ -97,4 +97,28 @@ test("SHEP-67: ends the call itself after a yes, waits quietly through silence, 
   expect(p).toContain("If the person says nothing, say nothing");
   expect(p).toContain("One or two short sentences a turn");
   expect(p).toContain('no "I can also..." offers');
+});
+
+test("SHEP-104: English first, then whatever language the person speaks, back and forth all call long", () => {
+  const c = agentSpec().conversation_config;
+  expect(c.agent.language).toBe("en");
+  // ElevenLabs' language detection, allowed after the first two turns too
+  const ld = c.agent.prompt.tools.find((t) => t.name === "language_detection");
+  expect(ld.params).toEqual({ system_tool_type: "language_detection", only_at_conversation_start: false });
+  // every preset language ElevenLabs takes, English not among them (it is the call's own), none twice
+  expect(LANGUAGES).toContain("sv");
+  expect(LANGUAGES).not.toContain("en");
+  expect(new Set(LANGUAGES).size).toBe(LANGUAGES.length);
+  expect(LANGUAGES.length).toBeGreaterThanOrEqual(90);
+  expect(Object.keys(c.language_presets)).toEqual(LANGUAGES);
+  expect(c.language_presets.sv).toEqual({ overrides: {} });
+  // a speech model that speaks them (not an English-only v2), set rather than left to ElevenLabs' default
+  expect(c.tts.model_id).toBe(TTS_MODEL);
+  expect(TTS_MODEL).not.toMatch(/_v2$/);
+  // the prompt says to answer in the person's language, the hello stays English
+  expect(prompt("x")).toContain("Speak the language the person speaks");
+  expect(opening("x").conversation_config_override.agent.first_message).toBe(FIRST);
+  // a changed spec: agents made before are PATCHed to it (ensureAgent)
+  const before = agentSpec(); delete before.conversation_config.language_presets;
+  expect(specTag(before)).not.toBe(SPEC);
 });
