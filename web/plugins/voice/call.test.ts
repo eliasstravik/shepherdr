@@ -217,7 +217,7 @@ test('End tells the server to end it now (not hold it for the page)', async () =
   expect(ws.readyState).toBe(3)
 })
 
-test("a socket that never got a call (the server refused it) is an error, as before", async () => {
+test("a socket that never got a call (the server refused it) is an error at once, no retrying", async () => {
   errors.length = 0
   const p = call.startCall('p:h1', (m) => errors.push(m))
   FakeSocket.all.at(-1)!.close()
