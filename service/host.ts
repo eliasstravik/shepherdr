@@ -13,7 +13,7 @@ import { buildId } from "./build.ts";
 const BUILD = buildId();
 import * as HC from "../core/host.js";
 
-const { HOST_DOC, NODE_DOC, newestHost, nodeAlive, renamer } = HC as any;
+const { HOST_DOC, NODE_DOC, WEB_DOC, newestHost, nodeAlive, renamer } = HC as any;
 
 export type Node = { id: string; name: string; os: string; version: string; build?: string; link: string | null; serving: boolean; links: Record<string, string>; remotes: string[]; at: number };
 export type MachineRow = { name: string; id: string | null; state: string; here?: boolean };
@@ -123,6 +123,16 @@ export class Host {
     return this.hub.call<{ value: any; version: number }>("doc.get", { name, ...(on ? { on } : {}) }, 8000);
   }
 
+  /** Writes the web link record (core/host.js WEB_DOC) on these machines (null: here) where it differs. */
+  private async sayLink(on: (string | null)[]) {
+    const value = { link: this.link, id: this.me!.id };
+    await Promise.all(on.map(async (m) => {
+      const d = await this.get(WEB_DOC, m).catch(() => null);
+      if (d && d.value?.link === value.link && d.value?.id === value.id) return;
+      await this.hub.call("doc.set", { name: WEB_DOC, value, version: d?.version ?? 0, ...(m ? { on: m } : {}) }).catch(() => {});
+    }));
+  }
+
   /** Reads and hands on the host record; writes this machine's node record. */
   async poll() {
     if (this.busy) return;
@@ -148,6 +158,8 @@ export class Host {
       // hand it on to each machine this one links whose record is older (one that answered)
       if (best) for (const t of there) if (t.host && (Number(t.host.value?.at) || 0) < best.at)
         await this.hub.call("doc.set", { name: HOST_DOC, value: best, version: t.host.version, on: t.m }).catch(() => {});
+      // the host says its web link here and on each machine it links, for agents there (herdr-artifact link)
+      if (this.link && (!best || best.id === this.me.id)) await this.sayLink([null, ...connected]);
       // the picker says each machine's system: ask the ones with no service of their own, once
       await Promise.all(there.filter((t) => { const id = this.machines.get(t.m)?.id; return id && !this.nodes.has(id) && !this.systems.has(id); }).map(async (t) => {
         const r = await this.hub.call<{ code: number; stdout: string }>("machine.exec", { on: t.m, argv: ["uname", "-s"], timeout: 10 }, 15_000).catch(() => null);

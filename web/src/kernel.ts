@@ -783,6 +783,7 @@ export function connect() {
     pinging = null
     const msg = JSON.parse(ev.data) as ServerEvent
     if (msg.type === 'pong') return
+    if (msg.type === 'show') return openArtifact(msg.artifact)
     if (msg.type === 'snapshot') {
       // an add-on switched on or off in Settings › Window: the page starts again with its plugins in or out (main.tsx)
       const booted = (window as { shepherdrOff?: string[] }).shepherdrOff
