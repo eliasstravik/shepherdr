@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.1.21
+
+A voice call opens full screen, and research tasks leave your code alone.
+
+- In the web app a call opens full screen: a calm orb that moves with who's talking, plus Minimize, Mute and End.
+  Minimized, the call's card and bar show Full screen where Mute was.
+- A task that only looks things up (reading, research, comparing) works in the folder itself, with no branch or pull
+  request, and hands you its answer as an artifact.
+
 ## 3.1.20
 
 A voice call can see everything you can, and lets you know when it's busy.
