@@ -1041,10 +1041,10 @@
         ]
       },
       "forms": {
-        "herdr": "Call an Assistant (ElevenLabs), mute, call mark on its space in the sidebar (a green wave on the narrow rail); the voice agent reads and acts on the window's frame",
+        "herdr": "Call Shepherdr itself (ElevenLabs) from the sidebar's Talk to Shepherdr row or a chat's call button: one voice that sends to any Assistant or agent and says their replies and what needs you; the row becomes the call card (Mute, End; a green wave on the narrow rail); the voice agent reads and acts on the window's frame",
         "desktop": "Same, through the service",
         "tablet": "Same",
-        "phone": "Call mark on its space in the sidebar, and a slim band at the top while away from the call; the voice agent reads and acts on the page"
+        "phone": "A voice button beside Search and a green Mute and End strip above the bar (at the top over a task or Settings); the sidebar's row in the drawer; Opened by voice tags; the voice agent reads and acts on the page"
       },
       "service": [
         "voice.ts",

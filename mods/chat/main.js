@@ -4084,12 +4084,13 @@ export default class Chat extends View {
     this.wasFocused = paneFocused;
     this.hadBox = showsBox;
     this.paneFocused = paneFocused;
-    // The call bar elsewhere (mods/chat-call) ends a call through shared "chat.callreq" =
-    // { pane, at, action: "end" }.
+    // The sidebar's Shepherdr row (mods/spaces-chat voiceRow, SHEP-105) starts, mutes and ends the call it runs here
+    // through shared "chat.callreq" = { pane, at, action: "start" | "mute" | "end" } (none: start or end).
     const req = shared("chat.callreq");
     if (req && req.pane === mine && req.at !== this.callReqAt && Date.now() - req.at < 5000) {
       this.callReqAt = req.at;
-      if (req.action === "end" ? this.call : true) cx.timer.after(0, (cx) => { this.toggleCall(cx); cx.notify(); });
+      if (req.action === "mute") { if (this.call) cx.timer.after(0, (cx) => { this.callMute(cx); }); }
+      else if (req.action === "end" ? this.call : req.action === "start" ? !this.call : true) cx.timer.after(0, (cx) => { this.toggleCall(cx); cx.notify(); });
     }
     // The model picker's Restart (mods/chat-models): shared "chat.restartreq" = { pane, at, pick }.
     const rr = shared("chat.restartreq"), pk = this.pickKey();
