@@ -6,6 +6,8 @@
 
 /* Device shapes: the root carries data-device (phone, tablet, desktop) */
 @custom-variant phone (&:where([data-device=phone], [data-device=phone] *));
+/* SHEP-126: a phone held sideways (or any window this short and wide): too short for a stacked layout */
+@custom-variant short (@media (orientation: landscape) and (max-height: 32rem));
 @custom-variant tablet (&:where([data-device=tablet], [data-device=tablet] *));
 @custom-variant desktop (&:where([data-device=desktop], [data-device=desktop] *));
 /* light or dark: the root carries data-theme, the appearance picked on this device or its own mode (theme.ts) */
@@ -945,6 +947,17 @@
     border-radius: 50%;
     transform: scale(calc(1 + var(--lvl) * 0.14));
     transition: transform 0.12s ease-out;
+  }
+  /* SHEP-126: held sideways, the orb sits left of the controls and takes its size from the height: what is left
+     beside the state label. Its largest swell (×1.14, breathing ×1.035) reaches 0.09 of it past each side, so the
+     gap to the label grows with it and 0.1 of it is kept free above and below */
+  [data-call-screen] {
+    --orb-short: min(
+      calc((100dvh - max(env(safe-area-inset-top), 1.5rem) - max(env(safe-area-inset-bottom), 1.5rem) - 2.5rem) / 1.3),
+      40vw,
+      300px
+    );
+    --orb-short-gap: calc(var(--orb-short) * 0.1 + 0.75rem);
   }
   .call-orb::before {
     content: '';
