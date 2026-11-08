@@ -523,6 +523,13 @@ def starting(task):
 # It asks the person something (a question tool or permission: blocked; its last message asks):
 # Needs you all the same. As core/tasks.js place() with task.own_work, which news_pass keeps.
 BG_LOG_BYTES = 64 * 1048576  # a first look at a log reads at most this much of its end
+# A tool call (Claude Code's log line, compact JSON) and its result; one open longer than FG_MAX_MS
+# (a foreground command times out at 10 minutes) no longer counts as running.
+TOOL_USE = re.compile(r'"type":\s*"tool_use",\s*"id":\s*"([^"]+)",\s*"name":\s*"([^"]+)"')
+TOOL_DONE = re.compile(r'"tool_use_id":\s*"([^"]+)"')
+TIMESTAMP = re.compile(r'"timestamp":\s*"([^"]+)"')
+SIDECHAIN = re.compile(r'"isSidechain":\s*true')
+FG_MAX_MS = 15 * 60000
 # Only lines with one of these are parsed: a log's screenshots are megabytes of lines that aren't.
 BG_HINTS = ("<task-notification>", "task_id", "backgroundTaskId", "timeoutMs", "isAsync", "in background with ID",
             "Monitor started", "Async agent launched", "session_id", "session ID")
@@ -587,10 +594,35 @@ def background_jobs(log):
     return {i: t for i, t in c["running"].items() if now() - t < BG_MAX_MS}, c["ended"]
 
 
+def open_tool(log):
+    """The tool call its agent (Claude Code) has open in its log's main thread, started under
+    FG_MAX_MS ago: (name, started ms), or None. A question tool or a plan is no work of its own."""
+    background_jobs(log)
+    c = _bg_cache.get(log) or {}
+    calls = c.get("open") or {}
+    for i in [i for i, (_, at) in calls.items() if now() - at >= FG_MAX_MS]:
+        calls.pop(i)
+    mine = [x for x in calls.values() if x[0] not in ("AskUserQuestion", "ExitPlanMode")]
+    return max(mine, key=lambda x: x[1]) if mine else None
+
+
 def _bg_scan(lines, seen):
-    """background_jobs()'s reading of new lines, into seen: {running, calls, ended}."""
+    """background_jobs()'s reading of new lines, into seen: {running, calls, ended, open}. Tool
+    calls open and done are read off the raw line (an image's result is megabytes of JSON)."""
     running, calls, ended = seen["running"], seen["calls"], seen["ended"]
+    opened = seen.setdefault("open", {})
     for raw in lines:
+        # Claude Code keeps a copy of each request it sends (api-request-blob): every call and
+        # result so far again, never news of one.
+        if '"api-request' in raw[:200]:
+            continue
+        if '"tool_use"' in raw and not SIDECHAIN.search(raw):
+            stamp = TIMESTAMP.search(raw)
+            for m in TOOL_USE.finditer(raw):
+                opened[m.group(1)] = (m.group(2), (_ms(stamp.group(1)) if stamp else None) or now())
+        if '"tool_use_id"' in raw:
+            for m in TOOL_DONE.finditer(raw):
+                opened.pop(m.group(1), None)
         if any(h in raw for h in BG_HINTS):
             try:
                 d = json.loads(raw)
@@ -670,5 +702,10 @@ def own_work(task, live):
         log = agent_log(task, address) or agent_log(task)
         jobs, ended = background_jobs(log) if log else ({}, 0)
         if (jobs or waits_on_own(task, address, ended)) and not last_question(task, address):
+            return True
+        # Mid-turn, a long command of its own still running in the foreground: Herdr can read
+        # Claude Code idle then (SHEP-133: HOME-1 read Needs you during a 50 s Bash). Unless a
+        # permission for it waits on the person (the chat's hook holds it).
+        if log and open_tool(log) and not held_ask(address):
             return True
     return False

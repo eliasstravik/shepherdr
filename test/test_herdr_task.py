@@ -1188,6 +1188,48 @@ class NoFalseNeedsYou(unittest.TestCase):
         self.finished(-50_000)
         self.assertEqual(self.status()[:2], ("needs", "reply"))
 
+    def test_a_long_command_in_the_foreground_is_work(self):
+        """HOME-1 read Needs you twice mid-turn: a 50 s and a 110 s Bash running in the foreground,
+        Claude Code read idle meanwhile. Its log has the call open: Working. A permission for it
+        held, Needs you; done, or open past FG_MAX_MS, quiet as before."""
+        held = {}
+        p = self.mock.patch.object(self.agents, "held_ask", lambda address: held.get(address))
+        p.start()
+        self.addCleanup(p.stop)
+        self.say(-60_000, "Passes. Finishing all 10, then the gallery.")
+        # Claude Code's own compact lines, as its log writes them
+        self.lines.append('{"parentUuid":"a","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use",'
+                          '"id":"toolu_9","name":"Bash","input":{"command":"./finish.sh"}}]},"type":"assistant","timestamp":"%s"}'
+                          % self.iso(-50_000))
+        self.write()
+        self.assertEqual(self.status(), ("working", None, None))
+        self.assertEqual(self.agents.open_tool(self.log)[0], "Bash")
+        held["t1"] = {"tool_name": "Bash", "tool_input": {"command": "./finish.sh"}}
+        self.assertEqual(self.status()[:2], ("needs", "reply"))
+        held.clear()
+        # its result in: quiet, Needs you
+        self.lines.append('{"parentUuid":"b","isSidechain":false,"type":"user","message":{"role":"user","content":[{"tool_use_id":'
+                          '"toolu_9","type":"tool_result","content":"done"}]},"timestamp":"%s"}' % self.iso(-10_000))
+        self.write()
+        self.assertEqual(self.status()[:2], ("needs", "reply"))
+        # a subagent's call (its side chain) or a question tool is no work of its own; one open 15 minutes, none
+        for line in ('{"isSidechain":true,"message":{"content":[{"type":"tool_use","id":"toolu_a","name":"Bash"}]},"type":"assistant","timestamp":"%s"}' % self.iso(-5_000),
+                     '{"isSidechain":false,"message":{"content":[{"type":"tool_use","id":"toolu_b","name":"AskUserQuestion"}]},"type":"assistant","timestamp":"%s"}' % self.iso(-5_000),
+                     '{"isSidechain":false,"message":{"content":[{"type":"tool_use","id":"toolu_c","name":"Bash"}]},"type":"assistant","timestamp":"%s"}' % self.iso(-16 * 60_000)):
+            self.lines.append(line)
+            self.write()
+            self.assertEqual(self.status()[:2], ("needs", "reply"), line)
+            self.lines.pop()
+
+    def iso(self, ago):
+        import datetime
+        return datetime.datetime.fromtimestamp((self.clock + ago) / 1000, datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+
+    def write(self):
+        with open(self.log, "w") as f:
+            f.write("\n".join(self.lines) + "\n")
+        self.agents._bg_cache.clear()
+
     def test_the_log_is_read_as_it_grows(self):
         self.background(-300_000)
         self.assertEqual(list(self.agents.background_jobs(self.log)[0]), ["b1"])
