@@ -2,7 +2,7 @@
 // SHEPHERDR_DATA moves only these (tests); it never changes HOME, so herdr-core and herdr-task stay the real ones.
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { mkdirSync, chmodSync, realpathSync } from "node:fs";
+import { mkdirSync, chmodSync, lstatSync, readlinkSync, realpathSync } from "node:fs";
 
 export const HOME = homedir();
 export const DATA = process.env.SHEPHERDR_DATA || join(HOME, ".herdr", "shepherdr");
@@ -33,11 +33,14 @@ const REAL_HERDR = join(HOME, ".herdr");
 export const appHome = () => process.env.HERDR_APP_HOME || REAL_APP;
 
 /** A path with its symlinks followed as far as it exists (the rest kept as written), so a link can't hide where it
- *  lands. */
-function landing(path: string): string {
+ *  lands, even one to a folder not made yet (a write through it would make it). */
+function landing(path: string, hops = 0): string {
   let p = resolve(path), rest = "";
   for (;;) {
     try { return join(realpathSync(p), rest); } catch {}
+    try {
+      if (hops < 40 && lstatSync(p).isSymbolicLink()) return landing(join(resolve(dirname(p), readlinkSync(p)), rest), hops + 1);
+    } catch {}
     const up = dirname(p);
     if (up === p) return resolve(path);
     rest = join(p.slice(up.length).replace(/^\//, ""), rest);

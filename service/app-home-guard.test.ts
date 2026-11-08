@@ -26,6 +26,10 @@ test("a write anywhere in the real app home or ~/.herdr is refused; a throwaway 
   const link = join(tmp, "app");
   symlinkSync(realApp, link);
   expect(() => writable(join(link, "data", "backups", "space-log.jsonl"))).toThrow("A test may not write");
+  // a link to where the real home would be, before it exists (GitHub's runner has none)
+  const ahead = join(tmp, "ahead");
+  symlinkSync(join(realApp, "data", "not-made-yet"), ahead);
+  expect(() => writable(join(ahead, "space-log.jsonl"))).toThrow("A test may not write");
 });
 
 test("the space log goes where HERDR_APP_HOME says at each call, and never to the real one", () => {
