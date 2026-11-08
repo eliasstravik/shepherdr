@@ -2,7 +2,9 @@
 // opens and changes Shepherdr for them through its tools (core/voice.js: look, open, send, act),
 // which this machine's Shepherdr service answers (POST /api/voice/tool, service/voice-tools.ts:
 // the reach of the person's web app); without the service, only this chat (send, look at it).
-// The chat feeds it the called agent's replies and status, which it tells the person. Started by
+// SHEP-105: the call is with Shepherdr itself, not this chat: the service says what it hears (POST
+// /api/voice/hear: the chats it sent to, the one on screen, needs anywhere), once the person and the
+// voice are quiet. Without the service, the chat feeds it its own agent's replies and status. Started by
 // the chat mod (a mod has no audio or sockets); one process per call, nothing recorded or kept.
 //   bun voice.ts <call folder> <agent address> <agent name>
 // The call folder links it to the chat:
@@ -44,6 +46,10 @@ let since = Date.now();
 let error: string | null = null;
 let thinkingAt = 0;
 let heardAt = 0;
+// the call's id for the service (its folder's name), tools running now, and whether the service hears for it
+const callId = dir.replace(/\/$/, "").split("/").pop() ?? "";
+let busy = 0;
+let hears = false;
 
 function state() {
   const speaking = player && Date.now() < playEnd + 250;
@@ -64,6 +70,7 @@ function end(why: string | null = null) {
   ended = true;
   try { ws?.close(); } catch {}
   mic?.kill(); player?.kill(); asking?.kill();
+  if (hears) void serviceCall("DELETE", `/api/voice/hear?call=${encodeURIComponent(callId)}`);
   state();
   setTimeout(() => process.exit(0), 100);
 }
@@ -114,19 +121,38 @@ async function service(): Promise<string | null> {
 
 function where() { try { return JSON.parse(readFileSync(join(dir, "where.json"), "utf8")); } catch { return {}; } }
 
-/** A tool's answer from the service: { result, nav?, error? }, or null when the service can't be asked. */
-async function serviceTool(tool: string, params: unknown): Promise<{ result: string; nav?: any; then?: unknown; shows?: string; error?: boolean } | null> {
+/** The service's JSON answer to a call of this machine's, or null when it can't be asked. */
+async function serviceCall(method: string, path: string, body?: unknown, ms = 25000): Promise<any> {
   let token = "";
   try { token = readFileSync(TOKEN, "utf8").trim(); } catch { return null; }
   const base = await service();
   if (!base) return null;
   try {
-    const r = await fetch(`${base}/api/voice/tool`, { method: "POST", signal: AbortSignal.timeout(25000),
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ addr, tool, params, where: where() }) });
-    if (!r.ok) return null;
-    const a = await r.json();
-    return typeof a?.result === "string" ? a : null;
+    const r = await fetch(`${base}${path}`, { method, signal: AbortSignal.timeout(ms),
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    return r.ok ? await r.json() : null;
   } catch { return null; }
+}
+
+/** A tool's answer from the service: { result, nav?, error? }, or null when the service can't be asked. */
+async function serviceTool(tool: string, params: unknown): Promise<{ result: string; nav?: any; then?: unknown; shows?: string; error?: boolean } | null> {
+  const a = await serviceCall("POST", "/api/voice/tool", { addr, call: callId, tool, params, where: where() });
+  return typeof a?.result === "string" ? a : null;
+}
+
+/** SHEP-105: what the call hears, from the service, said once the person and the voice are both quiet. */
+let hearing = false;
+async function hear() {
+  if (hearing || ended || ws?.readyState !== WebSocket.OPEN) return;
+  hearing = true;
+  try {
+    const now = Date.now();
+    const quiet = !busy && now - heardAt > 1200 && now > playEnd + 1200;
+    const a = await serviceCall("POST", "/api/voice/hear", { call: callId, addr, where: where(), quiet }, 5000);
+    if (!a || !Array.isArray(a.lines)) return;
+    hears = true;
+    for (const line of a.lines) if (line && typeof line.text === "string") send(line);
+  } finally { hearing = false; }
 }
 
 // ElevenLabs' answer (none for a 204), or throws its error in words without anything like a key.
@@ -296,8 +322,9 @@ function inbox() {
     if (!m) continue;
     if (m.type === "hangup") return end();
     if (m.type === "mute") { muted = Boolean(m.on); state(); }
-    if (m.type === "reply" && typeof m.text === "string") send(replyLine(who, m.text));
-    if (m.type === "status" && m.status !== lastStatus) {
+    // the service hears this chat with the rest (hear()); without it, the chat's own agent only
+    if (m.type === "reply" && typeof m.text === "string" && !hears) send(replyLine(who, m.text));
+    if (m.type === "status" && m.status !== lastStatus && !hears) {
       lastStatus = m.status;
       const line = statusLine(who, m.status, m.asking);
       if (line) send(line);
@@ -332,7 +359,7 @@ async function main() {
   const here = (await serviceTool("look", { what: "here" }))?.result ?? "";
   saidWhere = JSON.stringify(where());
   ws.onopen = () => {
-    ws!.send(JSON.stringify(opening(who, here)));
+    ws!.send(JSON.stringify(opening(here)));
   };
   ws.onmessage = async (e) => {
     if (ended) return;
@@ -357,20 +384,24 @@ async function main() {
     else if (m.type === "client_tool_call") {
       const c = m.client_tool_call ?? {};
       phase = "thinking"; thinkingAt = Date.now(); state();
-      const name = String(c.tool_name ?? ""), params = c.parameters ?? {};
-      let a = await serviceTool(name, params);
-      if (!a) a = await localTool(name, params);
-      // an open: this window's chat shows it, and says so (navved/), before the agent may say it's on screen
-      // (the screen tool's answer is the screen itself; a space then its panel: the second once the first shows)
-      if (a.nav?.kind === "screen") a = { ...a, ...screenWords(await showHere(a.nav), a.nav.do) };
-      else if (a.nav) {
-        let ack = await showHere(a.nav);
-        if (ack?.ok && a.then) ack = await showHere(a.then);
-        a = { ...a, ...navWords(a.shows ?? "it", ack) };
-      }
-      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "client_tool_result", tool_call_id: c.tool_call_id, result: a.result, is_error: !!a.error }));
+      busy++;
+      try { await tool(c); } finally { busy--; }
     }
   };
+  async function tool(c: any) {
+    const name = String(c.tool_name ?? ""), params = c.parameters ?? {};
+    let a = await serviceTool(name, params);
+    if (!a) a = await localTool(name, params);
+    // an open: this window's chat shows it, and says so (navved/), before the agent may say it's on screen
+    // (the screen tool's answer is the screen itself; a space then its panel: the second once the first shows)
+    if (a.nav?.kind === "screen") a = { ...a, ...screenWords(await showHere(a.nav), a.nav.do) };
+    else if (a.nav) {
+      let ack = await showHere(a.nav);
+      if (ack?.ok && a.then) ack = await showHere(a.then);
+      a = { ...a, ...navWords(a.shows ?? "it", ack) };
+    }
+    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "client_tool_result", tool_call_id: c.tool_call_id, result: a.result, is_error: !!a.error }));
+  }
   ws.onerror = () => end("The voice connection failed.");
   ws.onclose = (e) => {
     if (ended) return;
@@ -393,11 +424,13 @@ setInterval(() => {
   try { writeFileSync(`${dir.replace(/\/$/, "")}.level`, level.toFixed(3)); } catch {}
 }, 100);
 
+let hearAt = 0;
 // The chat's commands, and the call's end once the chat stops showing.
 setInterval(() => {
   if (ended) return;
   inbox();
   if (ws?.readyState === WebSocket.OPEN) void moved();
+  if (Date.now() - hearAt > 1000) { hearAt = Date.now(); void hear(); }
   try { if (Date.now() - statSync(join(dir, "alive")).mtimeMs > 20000) end(); } catch { if (Date.now() - since > 20000) end(); }
   state();
 }, 150);

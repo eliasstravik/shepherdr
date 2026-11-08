@@ -41,7 +41,7 @@ const RATE = 16000
 /** how long a dropped call keeps trying to get back (the server holds it 60 s) */
 export const RETRY_MS = 55_000
 
-type Handlers = { chatKey: string; onError: (message: string) => void; onNav: (nav: Nav) => NavAck | Promise<NavAck>; onOpen: () => void; onEnded: () => void }
+type Handlers = { chatKey: string | null; onError: (message: string) => void; onNav: (nav: Nav) => NavAck | Promise<NavAck>; onOpen: () => void; onEnded: () => void }
 /** the lock screen's call controls: hang up, and mute (on: true mutes) */
 export type Controls = { title: string; hangUp: () => void; mute: (on: boolean) => void }
 
@@ -185,7 +185,11 @@ async function voiceOut(c: AudioContext, into: AudioNode) {
 function connect(resume: boolean) {
   const h = on
   if (!h) return
-  const url = new URL(`api/voice?chat=${encodeURIComponent(h.chatKey)}${resume && callId ? `&resume=${encodeURIComponent(callId)}` : ''}`, location.href)
+  // SHEP-105: a call with Shepherdr; chat, the chat whose call button started it (its "here" until the screen shows one)
+  const q = new URLSearchParams()
+  if (h.chatKey) q.set('chat', h.chatKey)
+  if (resume && callId) q.set('resume', callId)
+  const url = new URL(`api/voice${q.size ? `?${q}` : ''}`, location.href)
   url.protocol = url.protocol.replace('http', 'ws')
   const sock = (ws = new WebSocket(url))
   sock.binaryType = 'arraybuffer'
@@ -197,7 +201,9 @@ function connect(resume: boolean) {
       if (!play(e.data)) { stopCall(); h.onError('Voice audio could not keep up. Start a new call.') }
       return
     }
-    const m = JSON.parse(String(e.data)) as { type: string; id?: number | string; message?: string; state?: typeof phase; nav?: Nav }
+    const m = JSON.parse(String(e.data)) as { type: string; id?: number | string; message?: string; state?: typeof phase; nav?: Nav; text?: string }
+    // what the voice said, for the call card
+    if (m.type === 'said' && typeof m.text === 'string') { said = m.text; saidAt = Date.now() }
     if (m.type === 'call' && typeof m.id === 'string') callId = m.id
     // back on the call: as it was, the agent says so
     if (m.type === 'resumed') { retryUntil = 0; retries = 0; phase = 'listening'; phaseAt = Date.now(); wakeAudio() }
@@ -271,7 +277,12 @@ if (typeof document !== 'undefined') {
   addEventListener('pageshow', comeBack)
 }
 
-export async function startCall(chatKey: string, onError: (message: string) => void = () => undefined, onNav: (nav: Nav) => NavAck | Promise<NavAck> = () => ({ ok: false, why: 'this page can\'t open things' }), onOpen: () => void = () => undefined, onEnded: () => void = () => undefined, lock: Controls | null = null) {
+/** the last thing the voice said, and when (the call card shows it) */
+let said = ''
+let saidAt = 0
+export const lastSaid = () => ({ text: said, at: saidAt })
+
+export async function startCall(chatKey: string | null, onError: (message: string) => void = () => undefined, onNav: (nav: Nav) => NavAck | Promise<NavAck> = () => ({ ok: false, why: 'this page can\'t open things' }), onOpen: () => void = () => undefined, onEnded: () => void = () => undefined, lock: Controls | null = null) {
   stopCall()
   const h: Handlers = { chatKey, onError, onNav, onOpen, onEnded }
   on = h
@@ -355,4 +366,6 @@ export function stopCall() {
   retries = 0
   controls = null
   over = false
+  said = ''
+  saidAt = 0
 }

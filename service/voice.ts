@@ -191,7 +191,12 @@ export function voiceCall(hub: Hub, deps: CallDeps, first: Page) {
         tell({ type: "state", state: "listening" });
       }
       else if (m.type === "user_transcript") tell({ type: "state", state: "thinking" });
-      else if (m.type === "agent_response") tell({ type: "state", state: "listening" });
+      else if (m.type === "agent_response") {
+        tell({ type: "state", state: "listening" });
+        // what it said, for the call card (SHEP-105: the last thing the voice said)
+        const text = m.agent_response_event?.agent_response;
+        if (typeof text === "string" && text.trim()) tell({ type: "said", text: text.trim().slice(0, 300) });
+      }
       else if (m.type === "audio" && typeof m.audio_event?.audio_base_64 === "string") {
         const pcm = Buffer.from(m.audio_event.audio_base_64, "base64");
         speakUntil = Math.max(speakUntil, Date.now()) + (pcm.length / 2 / 16000) * 1000;
