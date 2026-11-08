@@ -11,6 +11,7 @@ import { canDock, CHAT_READ, fit as fitSidebars, focused, loadSidebars, PANEL, R
 import { hush } from './motion.ts'
 import { closed, loadPanes, MAX_PANES, normal, only, opened, PANE_MIN, replaced, samePane, savePanes, type Pane, type Panes } from './panes.ts'
 import { setupGuarded } from './guard.tsx'
+import { note as noteUsage, noteAct, noteView, startUsage } from './usage.ts'
 import { decide, screenOf, screenOfUrl, stepKey, stepsTo, systemSwipe, urlOf, type Entry } from './nav.ts'
 import { machineName, taskChatId, type Action, type Chat, type Message, type Place, type ReplyQuote, type ServerEvent, type Snapshot, type Task, type TermScreen, type UpdateStatus } from '@shared/types.ts'
 
@@ -522,6 +523,8 @@ export function setUI(patch: Partial<UI> | ((ui: UI) => Partial<UI>)) {
   if ((Object.keys(p) as (keyof UI)[]).every((k) => Object.is(p[k], state.ui[k]))) return
   state = { ...state, ui: { ...state.ui, ...p } }
   if ((Object.keys(p) as (keyof UI)[]).some((k) => STEP_FIELDS.has(k))) syncUrl()
+  // usage insights (usage.ts): the screen shown, and the time on the one before
+  noteView(state.ui)
   if (p.sidebars) saveSidebars(p.sidebars)
   if (p.split) savePanes(p.split)
   if (p.groups) saveGroups(p.groups)
@@ -660,6 +663,8 @@ function startHistory() {
   })
 }
 startHistory()
+noteView(state.ui)
+startUsage(() => state.ui)
 
 /** go where an alert's link points (its place, task and card), as a tap on the alert does with the app open */
 export function openLink(href: string) {
@@ -739,9 +744,13 @@ let ws: WebSocket | null = null
 let watched = ''
 
 export async function act(a: Action, signal?: AbortSignal) {
+  noteAct(a as { type: string; cid?: string; key?: unknown })
   const r = await fetch('api/action', { method: 'POST', headers: { 'content-type': 'application/json', 'x-shepherdr': '1' }, body: JSON.stringify(a), signal })
   // with its status: a proxy's 502 is the network (uploads.ts transient), the server's own no is not
-  if (!r.ok) throw new HttpError(r.status, (await r.text()) || `${r.status}`)
+  if (!r.ok) {
+    noteUsage('error', { type: a.type, status: r.status })
+    throw new HttpError(r.status, (await r.text()) || `${r.status}`)
+  }
   return r.json().catch(() => ({}))
 }
 

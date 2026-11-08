@@ -21,6 +21,7 @@ import { div, svg } from "gpui-kit";
 import { View } from "gpui-kit";
 import { h_flex, v_flex, InputState, Input, VirtualListScrollHandle, v_virtual_list, Scrollbar } from "gpui-base";
 import { machines, layout, layouts, exec, home, run, theme, props, closeOverlay, shared, setShared } from "herdr";
+import { note } from "./usage.js";
 import { spaces, terminals, agents, inRender } from "./live.js";
 import { taskDot } from "./dot.js";
 import { READ_LISTS, taskLists } from "./core/tasklists.js";
@@ -109,6 +110,7 @@ function showInTaskList(q) {
 
 export default class Jump extends View {
   init(_props, cx) {
+    note("feature", { type: "jump" });
     this.openedAt = Date.now(); // a chat's box letting go of the keyboard about now had it (chatArea())
     this.lists = new Map(); // "" (this computer) or a machine -> its task lists
     this.arts = new Map();  // the same -> its artifacts, each with { machine, folder }

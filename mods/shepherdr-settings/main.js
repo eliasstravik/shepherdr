@@ -22,6 +22,7 @@ import { SHEPHERDR_FILE, SHEPHERDR_DEFAULTS, LOCAL_MACHINE, shepherdrFor, shephe
 import * as models from "./settings.js";
 import { layoutSection } from "./layout.js";
 import { manifest } from "./addons.js";
+import { note } from "./usage.js";
 import { secretsInit, secretsSection } from "./secrets-section.js";
 import { baseInit, baseRow } from "./base-branch.js";
 import { branchInit, branchRow } from "./branch-names.js";
@@ -70,6 +71,8 @@ export default class ShepherdrSettings extends View {
     this.scope = p.space && spaceById(p.space) ? p.space : null;
     const want = MOVED[p.section] ?? p.section;
     this.section = this.shows(want) ? want : "agents";
+    // Usage insights (lib/usage.js): Settings opened, and each page shown.
+    note("view", { view: "settings", section: this.section, ...(this.scope ? { space: this.scope } : {}) });
     this.listOpen = null; // the row whose "N spaces set their own" list is open
     // The level switch's picker: open or not, and its Find box (shown once there are many spaces).
     this.levelOpen = false;
@@ -685,6 +688,7 @@ export default class ShepherdrSettings extends View {
         .child(this.scope ? SPACE_TITLE : TITLE))
       .children(SECTIONS.filter((s) => this.shows(s.id)).map((s) => navRow(s.id, s.title, I(s.icon), s.id === this.section, (_e, cx) => {
         this.section = s.id;
+        note("view", { view: "settings", section: s.id });
         this.listOpen = null;
         this.levelOpen = false;
         this.handle.focus();

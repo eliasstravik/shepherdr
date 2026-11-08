@@ -10,6 +10,7 @@ import { watchService } from "./service.js";
 import { startBridge } from "./bridge.js";
 import { countBadge, H, TEXT, RADIUS } from "./ui.js";
 import { on as addonOn } from "./addons.js";
+import { watchViews } from "./usage.js";
 // A tab's name (what runs in it while Herdr named it): core/menus.js, as the web app's tab bar names it.
 import { tabName } from "./core/menus.js";
 import { inRender } from "./live.js";
@@ -38,6 +39,8 @@ export default class Tabs extends View {
     startTick(cx);
     // What needs the person, for Tasks' "Needs you" and the red counts (inbox.js).
     startInbox(cx);
+    // Usage insights (lib/usage.js, the insights add-on): the space and tab shown, and the time on each.
+    watchViews(cx);
     // The add-ons switched off (lib/addons.js): Everywhere's "off" in ~/.herdr/shepherdr.json, as
     // the settings window last saved it (or pushed it here), into shared state the mods read.
     readTextFile(`${home()}/.herdr/shepherdr.json`).then((s) => {
