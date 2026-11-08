@@ -12,6 +12,26 @@
 #   HERDR_RESTART_RESUME=1          argv resumes the same conversation: no handoff is sent.
 set -u
 old=$1 argv=${2:-}
+# Another machine's agent (<machine>/<address>): this script runs there (its logs, templates and hc are
+# that machine's), carried over hc like any cross-machine command; the new address comes back as
+# <machine>/<address>, as this side names it.
+if [[ "$old" == */* ]]; then
+  on=${old%/*} here=${old##*/}
+  envs=()
+  [ -n "${HERDR_RESTART_CHAT:-}" ] && envs+=(--env "HERDR_RESTART_CHAT=$HERDR_RESTART_CHAT")
+  [ -n "${HERDR_RESTART_RESUME:-}" ] && envs+=(--env "HERDR_RESTART_RESUME=1")
+  out=$(hc exec --on "$on" --stdin --timeout 300 ${envs[@]+"${envs[@]}"} -- bash -s "$here" "$argv" <"$0" 2>/dev/null)
+  code=$?
+  new=$(tail -n 1 <<<"$out")
+  if [ "$code" -ne 0 ] || [ -z "$new" ]; then
+    state=$(hc machine ls --json 2>/dev/null | jq -r --arg m "${on%%/*}" '.machines[]? | select(.name == $m) | .state' 2>/dev/null)
+    if [ -n "$state" ] && [ "$state" != connected ]; then echo "$on is offline. Try again once it's back." >&2
+    else echo "It didn't restart on $on." >&2; fi
+    exit 1
+  fi
+  echo "$on/$new"
+  exit 0
+fi
 info=$(hc get "$old" --json) || exit 1
 get() { jq -r "$1 // empty" <<<"$info"; }
 space=$(get '.labels["herdr.space"]') tab=$(get '.labels["herdr.tab"]') role=$(get '.labels["herdr.role"]')
