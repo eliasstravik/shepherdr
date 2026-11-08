@@ -5,10 +5,10 @@
 // changed one). The file is moved between the two machines' names (core/host.js relocateSettings); what they were
 // last is kept in ~/.herdr/shepherdr/host-base.json. The host itself, or no host set: nothing to do.
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import type { Hub } from "./hub.ts";
 import type { Host } from "./host.ts";
-import { DATA, HOME, settingsFile, writableSettings } from "./paths.ts";
+import { DATA, HOME, settingsFile, underTest, writableSettings } from "./paths.ts";
 import * as HC from "../core/host.js";
 
 const { relocateSettings, merge3 } = HC as any;
@@ -22,6 +22,8 @@ function readJson(path: string): any {
   try { return JSON.parse(readFileSync(path, "utf8")); } catch (e: any) { return e?.code === "ENOENT" ? null : undefined; }
 }
 function writeAtomic(path: string, text: string) {
+  // a test writes only throwaway files, never the person's home (their templates, their settings)
+  if (underTest() && resolve(path).startsWith(`${resolve(HOME)}/`)) throw new Error("A test may not write the real home folder.");
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(`${path}.host-tmp`, text, { mode: 0o600 });
   renameSync(`${path}.host-tmp`, path);
@@ -46,6 +48,8 @@ export class Sync {
 
   /** Writes a file on the host whole (a temporary file, then renamed: never half-written). */
   private async write(on: string, rel: string, text: string) {
+    // a test never writes another machine's settings or templates
+    if (underTest()) throw new Error("A test may not write another machine's files.");
     const r = await this.hub.call<{ code: number }>("machine.exec", { on, argv: ["sh", "-c", 'mkdir -p "$(dirname "$1")" && umask 077 && cat > "$1.host-tmp" && mv "$1.host-tmp" "$1"', "sh", rel],
       input: Buffer.from(text).toString("base64"), timeout: 20 }, 25_000);
     if (r.code !== 0) throw new Error(`couldn't write ${rel} there`);

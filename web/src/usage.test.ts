@@ -1,5 +1,5 @@
 import { beforeEach, expect, test } from 'bun:test'
-import { flush, note, noteAct, noteView, pending, resetUsage, viewOf, type Shown } from './usage.ts'
+import { flush, followOff, note, noteAct, noteView, pending, resetUsage, viewOf, type Shown } from './usage.ts'
 
 // fake ids only
 const ui = (o: Partial<Shown> = {}): Shown => ({ device: 'desktop', place: 'p:vm:shop', task: null, tab: 'chat', side: 'tasks', sheet: null, viewer: null, settings: null, search: false, adding: false, ...o })
@@ -48,4 +48,19 @@ test('sent only to its own service; off there, nothing more is kept', async () =
   } finally {
     globalThis.fetch = real
   }
+})
+
+test('the switch is followed live: off keeps nothing, on again starts afresh', () => {
+  followOff(['insights'])
+  note('feature', { type: 'jump' })
+  expect(pending()).toEqual([])
+  followOff(['voice'])
+  note('feature', { type: 'jump' })
+  expect(pending()).toHaveLength(1)
+})
+
+test('Delete drops what the page still holds', () => {
+  note('feature', { type: 'jump' })
+  noteAct({ type: 'setting', key: 'insights.delete' })
+  expect(pending()).toEqual([])
 })

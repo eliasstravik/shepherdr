@@ -11,7 +11,7 @@ import { canDock, CHAT_READ, fit as fitSidebars, focused, loadSidebars, PANEL, R
 import { hush } from './motion.ts'
 import { closed, loadPanes, MAX_PANES, normal, only, opened, PANE_MIN, replaced, samePane, savePanes, type Pane, type Panes } from './panes.ts'
 import { setupGuarded } from './guard.tsx'
-import { note as noteUsage, noteAct, noteView, startUsage } from './usage.ts'
+import { followOff, note as noteUsage, noteAct, noteView, startUsage } from './usage.ts'
 import { decide, screenOf, screenOfUrl, stepKey, stepsTo, systemSwipe, urlOf, type Entry } from './nav.ts'
 import { machineName, taskChatId, type Action, type Chat, type Message, type Place, type ReplyQuote, type ServerEvent, type Snapshot, type Task, type TermScreen, type UpdateStatus } from '@shared/types.ts'
 
@@ -797,6 +797,7 @@ export function connect() {
       const booted = (window as { shepherdrOff?: string[] }).shepherdrOff
       if (booted && msg.snapshot.off && [...msg.snapshot.off].sort().join() !== [...booted].sort().join()) return location.reload()
       state = { ...state, snap: msg.snapshot }
+      followOff(msg.snapshot.off)
       stayOnShown()
       fromOldPin(msg.snapshot)
       // once loaded, the first snapshot with every machine in reach says which chats are gone (one connecting or out

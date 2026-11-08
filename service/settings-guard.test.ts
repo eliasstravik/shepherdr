@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { settingsFile, underTest, writableSettings } from "./paths.ts";
 import { writeSettings } from "./settings.ts";
+import { Sync } from "./sync.ts";
 
 // The person's real settings file: a test may read whether it is there, never write it.
 const real = join(homedir(), ".herdr", "shepherdr.json");
@@ -27,4 +28,12 @@ test("a write to the real ~/.herdr/shepherdr.json is refused, and the file stays
     process.env.HERDR_TASK_SETTINGS = was;
   }
   expect(stamp()).toBe(before);
+});
+
+test("the settings sync never writes another machine's files under test", async () => {
+  let called = false;
+  const hub = { call: async () => { called = true; return { code: 0 }; } };
+  const sync: any = new Sync(hub as any, {} as any);
+  await expect(sync.write("vm-fake", ".herdr/shepherdr.json", "{}")).rejects.toThrow("A test may not write");
+  expect(called).toBe(false);
 });

@@ -62,6 +62,12 @@ export function noteView(ui: Shown) {
  *  often the outbox retries it. */
 export function noteAct(a: { type: string; cid?: string; key?: unknown }) {
   if (a.type === 'usage') return
+  // Delete: what this page still holds goes too, and the screen on now counts from now
+  if (a.type === 'setting' && a.key === 'insights.delete') {
+    buf = []
+    if (shown) shown = { ...shown, since: Date.now() }
+    return
+  }
   if (a.type === 'send') {
     if (a.cid && sent.has(a.cid)) return
     if (a.cid) sent.add(a.cid)
@@ -70,13 +76,23 @@ export function noteAct(a: { type: string; cid?: string; key?: unknown }) {
   note('act', { type: a.type, ...(a.type === 'setting' && typeof a.key === 'string' ? { key: a.key } : {}) })
 }
 
+/** The add-ons switched off, from each snapshot: off, nothing is kept or sent; on again, it starts afresh. */
+export function followOff(list: string[] | undefined) {
+  const now = !!list?.includes('insights')
+  if (now && !off) {
+    buf = []
+    shown = null
+  }
+  off = now
+}
+
 export async function flush(keepalive = false) {
   if (off || !buf.length) return
   const events = buf
   buf = []
   try {
     const r = await fetch('api/action', { method: 'POST', keepalive, headers: { 'content-type': 'application/json', 'x-shepherdr': '1' }, body: JSON.stringify({ type: 'usage', events }) })
-    if ((await r.json().catch(() => ({})))?.on === false) off = true
+    if ((await r.json().catch(() => ({})))?.on === false) followOff(['insights'])
   } catch {
     /* offline: these are dropped, never worth a retry */
   }

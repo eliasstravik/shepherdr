@@ -16,10 +16,13 @@ const file = () => join(DATA, FILE);
 let insightsOn = () => false;
 export function followSwitch(on: () => boolean) { insightsOn = on; }
 
+// Delete's moment: a page's batch still on its way with older events doesn't bring them back.
+let deletedAt = 0;
+
 /** Appends the events that may be kept; false when the add-on is off (nothing written). */
 export function record(events: unknown[], on = insightsOn()): boolean {
   if (!on) return false;
-  const text: string = lines(events);
+  const text: string = lines(events.filter((e: any) => !(typeof e?.at === "number" && e.at < deletedAt)));
   if (!text) return true;
   try {
     mkdirSync(DATA, { recursive: true, mode: 0o700 });
@@ -37,6 +40,7 @@ export const note = (kind: string, fields: Record<string, unknown> = {}) => reco
 /** Deletes this machine's usage log, and each other machine's given (its own Delete there). The machines it couldn't
  *  reach. */
 export async function deleteAll(machines: string[], hc: (args: string[]) => Promise<boolean>): Promise<string[]> {
+  deletedAt = Date.now();
   for (const n of [FILE, OLD]) rmSync(join(DATA, n), { force: true });
   const missed: string[] = [];
   await Promise.all(machines.map(async (m) => { if (!(await hc(["exec", "--on", m, "--timeout", "20", "--", "sh", "-c", DELETE]))) missed.push(m); }));
