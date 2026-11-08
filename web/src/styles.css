@@ -960,6 +960,12 @@
     inset: 0;
     overflow: hidden;
     border-radius: 50%;
+    /* SHEP-120: iOS Safari clips the spinning, blurred, blended swirl (its own GPU layer) only to this box's square,
+       not its rounded corners, so a grey square showed around the orb. A circular clip-path and mask clip it there */
+    clip-path: circle(50%);
+    -webkit-mask-image: radial-gradient(circle closest-side, #000 calc(100% - 0.5px), transparent);
+    mask-image: radial-gradient(circle closest-side, #000 calc(100% - 0.5px), transparent);
+    isolation: isolate;
     background: radial-gradient(circle at 50% 115%, #d9fbe8 0%, #5fe0a0 26%, #1f9a62 52%, #0e4a31 76%, #08241a 100%);
     box-shadow: inset 0 -10px 40px rgb(255 255 255 / 0.08), inset 0 18px 48px rgb(0 0 0 / 0.45);
     animation: orb-breathe 5s ease-in-out infinite;
