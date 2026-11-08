@@ -1487,6 +1487,23 @@ class MergedOnlyWithOwnWork(unittest.TestCase):
         self.assertEqual(self.task["state"], "done")
         self.assertFalse(self.task.get("merged"))
 
+    # SHEP-117: a research task runs in the folder itself (--here), commits nothing and ends with an
+    # artifact: ready waits for Accept with no branch or pull request, whatever the merge setting.
+    def test_research_in_the_folder_itself_goes_ready_then_done(self):
+        calls = self.github([])
+        for k in ("worktree", "branch", "start"):
+            self.task.pop(k)
+        self.task["mode"] = "here"
+        self.assertEqual(self.ready_said(), "ready")
+        self.assertEqual(self.task["summary"], "Found three options.")
+        self.assertNotIn("auto_merge", self.task)
+        self.assertNotIn("pr", self.task)
+        self.assertNotIn(("pr", "create"), calls)
+        self.accept_now()
+        self.assertEqual(self.task["state"], "done")
+        self.assertFalse(self.task.get("merged"))
+        self.assertEqual(self.git(self.main, "rev-list", "--count", "HEAD"), "1")
+
     def test_commits_after_a_no_commit_ready_go_the_usual_way(self):
         self.github([])
         self.assertEqual(self.ready_said(), "ready")
