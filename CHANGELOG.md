@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.1.19
+
+On a phone, the voice call lives in the bottom bar, and a chat's round button only sends.
+
+- A phone's voice button sits at the end of its bottom bar; search is in the ☰ menu's magnifier.
+- A chat's round button is always Send: grey until there is something to send. Calls start from Talk to Shepherdr.
+- During a call, a phone's bottom bar has Mute and a red hang-up that asks before it ends the call.
+- The call card is one tidy row: who, what it is doing and how long, with Mute and hang-up.
+
 ## 3.1.18
 
 One voice call now talks to all of Shepherdr, and model choice works on every machine.
