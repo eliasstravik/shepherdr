@@ -21,8 +21,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 |---|---|---|---|
 | Title | T:370 "Tasks", semibold | A SideList `Tasks` (beside Artifacts as tabs) | ◇ the window's Artifacts is its own panel; the web's narrow screens put the two side panels under one head (artifacts and header pages) |
 | ⋯ Group by | T:372-375 icon button, tooltip "Group by" | W TasksMenu, label "Group by" | ✓ |
-| Group by menu | TM:20-39 heading "Group by"; Status, Space, Machine, Machine › Space (the machine ones only while more than one machine has tasks); check on the current | W TasksMenu + `multiMachine`, `grouping` | ✓ |
-| One machine with tasks | T:274 Machine shows as Status, Machine › Space as Space | W `grouping` | ✓ |
+| Group by menu | TM heading "Group by"; For you, Space, Status (shared "tasks.group"; props().current from the panel); check on the current | W TasksMenu, G `groupChoices` | ✓ (SHEP-98) |
 | Search field | T:86,489-503 "Filter tasks", magnifier, F key hint while empty and unfocused, X "Clear" | W TaskFilter (FilterBox) | ✓ |
 | F to the field, Esc clears | T:384, T:505-510 | keyboard plugin, FilterBox | ✓ |
 | What search finds | T:472-475 id, title, status line, summary, #PR, space, list, machine | W `found` | ✓ (summary isn't in the snapshot; the status line and report are) |
@@ -41,14 +40,12 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 
 | Element | Window | Web | State |
 |---|---|---|---|
-| Pinned first | T:324 "Pinned", status order, every one | G groupTasks | ✓ |
+| For you (default) | T `groupNow`, `spaceGroup`, `doneLine`: For you (everything that needs you, then Ready, each row saying its space), Pinned, each space's other work in status order under its name (emoji or #, count; machine quiet only when two machines have a space of that name; a click opens the space), Done as "N done today" until opened; old "tasks.groupby" Status with Split by space on becomes For you | G groupTasks `you`, W YouHeading/SpaceHeading/DoneLine (sticky headings), kernel `DONE_OPEN`, groups.ts loadGroups (same migration) | ✓ (SHEP-98) |
+| Pinned | T: first by space or status; For you: after For you, without its Needs you and Ready ones | G groupTasks | ✓ (SHEP-98) |
 | Needs you next | T:325-326 inbox items and tasks Herdr saw go wrong | W + G | ✓ |
 | By status | T:328-334 Ready, Merging, Working, Queued, Scheduled, To do, Done; only groups holding something | G | ✓ |
 | Scheduled group | core ORDER after Queued, the next to start first (core `order`) | G `GROUPS` | ✓ (SHEP-38) |
-| By space | T:339-345 one group per task list, named by the space in its folder (else the list's name), sidebar order; machine quiet after it with more machines | G projectGroups by `listName` and machine | ✓ fixed (grouped by the space that started the task) |
-| By machine | T:350-351 machine heading, brighter, hairline above all but the first | W MachineHeading | ✓ |
-| Machine › Space | T:353-354 machine heading with count over its spaces' groups; folding it hides them | W | ✓ |
-| Split by space | T `bySpace`, `subGroup`: by status, each status's tasks (not Pinned's or Needs you's) and the automations under a light heading per machine · space while in more than one (emoji or #, name, machine quieter, count; the open space first, then latest news, then sidebar order); rows under it drop where; each folds and cuts its Done on its own; shared "tasks.split", a check in the ⋯ | W SubHeading, G `bySpace`/`shownSplit`, kernel `setSplit` (kept on this device) | ✓ (SHEP-65) |
+| By space | T:339-345 one group per task list, named by the space in its folder (else the list's name), sidebar order; machine quiet after it only when two machines have a space of that name | G projectGroups by `listName` and machine | ✓ fixed (grouped by the space that started the task) |
 | Heading | T group(): chevron in the icon column, label small, its count right by it ("Ready 2"), room above each group; the whole heading folds | W GroupHeading/FoldHeading | ✓ (SHEP-34) |
 | Folded headings remembered | T:551-554 | kernel `toggleShut`, groups.ts saveShut | ✓ |
 | Alt-click folds siblings | (none) | W FoldHeading | ◇ a keyboard nicety for wide screens; does nothing unless Alt is held |
@@ -80,7 +77,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Ready | "Ready 5m ago" + Review (opens the Accept card) | compat `sub` + W `accept` | ✓ |
 | Merging | "Merges once its checks pass" | compat `sub` | ✓ |
 | To do, Done | one line, place at the end | W Line one-line | ✓ |
-| Where it is | T:700-706 machine (not this computer) · space, only what the grouping doesn't say; Settings "Where on task rows" off: none | W whereOf / autoWhere, `names` | ✓ |
+| Where it is | T whereOf: the space, only where the grouping doesn't say it; never the machine (SHEP-98); Settings "Where on task rows" off: none | W whereOf / autoWhere, `names` | ✓ |
 | Place gives way | T line(): after the words, it takes only the room left and shrinks first | W Line: whole or not at all (wraps out of sight) | ✓ |
 | Place, phone | — | whole or not at all (it wraps out of sight), never a cut `m3 · shep…` | ◇ phone: a few letters of a place say nothing |
 | Accept | T:796-800 compact solid button at line 2's end, "Accepting…" while the Accept card's accept runs | W TaskRow `accept`, `useAccepting` + compat `accepting` (shared "tasks.accepting") | ✓ fixed |
