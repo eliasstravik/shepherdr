@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { DATA, HOME } from "./paths.ts";
 import * as A from "../core/asks.js";
 import type { Hub } from "./hub.ts";
+import { note as noteUsage } from "./usage.ts";
 
 const { words, allow, deny, answers, howAnswered, release, chatAbout, dismiss } = A as any;
 const DIR = join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "data", "chat-asks");
@@ -53,6 +54,8 @@ export class Asks {
     let how = known ?? "";
     if (!a.machine) try { how = readFileSync(join(DIR, "end", a.id), "utf8").trim(); } catch {}
     this.ends = [...this.ends, { id: a.id, terminal: a.terminal, title: a.words?.title ?? "", how: how || "No longer waiting", at: askAt(a.id), kind: a.words?.kind ?? "" }].slice(-200);
+    // Usage insights (service/usage.ts): how long it waited, and whether it was answered in the agent's terminal
+    noteUsage("ask", { type: a.words?.kind || undefined, ms: Math.max(0, Date.now() - askAt(a.id) + 999), ...(/terminal/i.test(how) ? { from: "terminal" } : {}) });
     try { writeFileSync(`${ENDS}.tmp`, JSON.stringify(this.ends)); renameSync(`${ENDS}.tmp`, ENDS); } catch {}
   }
 

@@ -9,6 +9,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { placement, run, shared, setShared, theme } from "herdr";
+import { note } from "./usage.js";
 import { TOASTS, TEXT, RADIUS, red, amber, green } from "./ui.js";
 // How many, how wide, how long and in which color: core/toasts.js, shared with the web app's toasts.
 import { SHOWN, WIDTH, LINES, BODY_MAX, tone, clip, unexpired } from "./core/toasts.js";
@@ -20,10 +21,14 @@ const color = (level, t) => ({ red: red(), amber: amber(), green: green() }[tone
 export default class Toasts extends View {
   init(_props, cx) {
     this.hovered = null;
+    // Usage insights (lib/usage.js): each error toast shown, once (its kind only, never its words).
+    this.seen = new Set();
     // Expiry: once a second, and only writes when one goes.
     cx.timer.every(1000, () => {
-      if (placement()?.hovered) return;
       const list = shared(TOASTS) ?? [];
+      for (const n of list) if (n.level === "error" && !this.seen.has(n.id)) { this.seen.add(n.id); note("error", { type: "toast" }); }
+      for (const id of this.seen) if (!list.some((n) => n.id === id)) this.seen.delete(id);
+      if (placement()?.hovered) return;
       const left = unexpired(list);
       if (left.length !== list.length) setShared(TOASTS, left);
     });

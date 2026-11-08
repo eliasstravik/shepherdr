@@ -20,6 +20,7 @@ marked below off and on again, at once and on every machine (Everywhere's `off` 
 | Task browser | yes | A browser per task you can watch and take over (`herdr-browser`). Needs Tasks | No Browser tab; workers aren't given a browser |
 | Autopilot | yes | An Assistant works on its own from its heartbeat. Needs Assistants | No Autopilot switch in the header; no wake-ups |
 | Other machines | yes | Keeps herdr-task, its helpers and the role instructions the same on every connected machine. Needs Tasks | Nothing is sent to other machines |
+| Usage insights | yes | A private log of how you use Shepherdr, only on your own machines, for your Assistant's tips when you ask ([insights.md](insights.md)) | Nothing is recorded; what was kept stays until you delete it |
 | Web | yes | The web app on your tailnet (docs/web.md) | The web app stops and isn't shared; the service keeps its background work |
 
 An add-on can't be turned on while one it needs is off, nor off while an add-on that needs it is on: its line in

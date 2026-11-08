@@ -14,6 +14,7 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { openViewer } from "./artview.js";
 import { appHome, closeOverlay, exec, notify, openOverlay, props, shared, setShared, theme } from "herdr";
+import { note } from "./usage.js";
 import { dialogFooter, green, red, amber, H, RADIUS, TEXT } from "./ui.js";
 // The card's words, the summary cut and the details as bullets: core/accept.js, shared with the web app's card.
 import { ACCEPT, words, readable, commitsLine, filesLine, moreLine, proofTitle, whereNow } from "./core/accept.js";
@@ -149,6 +150,7 @@ export default class AcceptCard extends View {
   accept(cx) {
     if (this.busy || !this.t || this.t.state !== "ready") return;
     const p = props() ?? {};
+    note("act", { type: "accept", task: p.ref });
     this.busy = true;
     this.error = null;
     // The task's row in the Tasks list says "Accepting…" meanwhile (shared "tasks.accepting").

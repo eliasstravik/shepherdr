@@ -4,14 +4,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Hub } from "./hub.ts";
-import { HOME } from "./paths.ts";
+import { HOME, settingsFile } from "./paths.ts";
 import { exec } from "./model.ts";
 import * as MC from "../core/machines.js";
 
 const { holdOf, nextRead, healthMeters } = MC as any;
 const SCRIPT = [join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "mods", "tasks", "bin", "herdr_task", "machine.py"),
   join(HOME, ".local", "share", "shepherdr", "mods", "tasks", "bin", "herdr_task", "machine.py")].find(existsSync);
-const SETTINGS = process.env.HERDR_TASK_SETTINGS || join(HOME, ".herdr", "shepherdr.json");
 
 export class Machines {
   stats = new Map<string | null, any>();
@@ -36,7 +35,7 @@ export class Machines {
     this.busy = true;
     try {
       let cfg: any = null;
-      try { cfg = JSON.parse(readFileSync(SETTINGS, "utf8")); } catch {}
+      try { cfg = JSON.parse(readFileSync(settingsFile(), "utf8")); } catch {}
       const script = readFileSync(SCRIPT, "utf8"), now = Date.now();
       await Promise.all([null, ...this.list()].map(async (m) => {
         const was = this.stats.get(m) ?? {};

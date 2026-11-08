@@ -1223,6 +1223,43 @@
         "sync.ts",
         "serve-from.ts"
       ]
+    },
+    {
+      "id": "insights",
+      "addon": "insights",
+      "title": "Usage insights: a private local log of how the person uses Shepherdr, for their own agents' tips",
+      "core": [
+        "usage",
+        "settings"
+      ],
+      "herdr": {
+        "mods": [
+          "tabs-tasks",
+          "chat",
+          "shepherdr-settings",
+          "artifacts",
+          "jump",
+          "accept-card",
+          "toasts"
+        ]
+      },
+      "web": {
+        "files": [
+          "src/usage.ts",
+          "src/kernel.ts",
+          "src/Settings.tsx"
+        ]
+      },
+      "forms": {
+        "herdr": "Recorded in the background (views, switches, main buttons, features, errors); Settings \u203a Window: its switch and Delete",
+        "desktop": "Recorded in the background, sent to this app's own service; Settings \u203a Window: its switch and Delete",
+        "tablet": "Same",
+        "phone": "Same, recorded as the phone"
+      },
+      "service": [
+        "usage.ts",
+        "asks.ts"
+      ]
     }
   ]
 }

@@ -62,6 +62,7 @@ import { ScreenWatch, screenStrips, openCard, cardsOf, starting, cliOf } from ".
 import { dayLabel, dayOf } from "./days.js";
 import { CallScreen } from "./call-screen.js";
 import { on as addonOn } from "./addons.js";
+import { note } from "./usage.js";
 
 // Messages a page of history holds: the newest page first, earlier ones as the person scrolls up.
 const PAGE = 200;
@@ -1313,6 +1314,7 @@ export default class Chat extends View {
     // for every later agent: it opens the model picker instead, that model chosen.
     const mm = !msg.files.length && /^\/model(?:\s+(\S+))?\s*$/i.exec(text);
     if (mm) { this.quote = msg.quote; this.modelCommand(mm[1] ?? null, cx); this.saveSoon(cx); cx.notify(); return; }
+    note("send", { n: msg.files.length });
     if (hold && this.status() === "working") this.queue.push(msg);
     else this.deliver(msg, cx);
     this.saveSoon(cx);
@@ -1741,6 +1743,7 @@ export default class Chat extends View {
   // ---- find (Ctrl+F) ----------------------------------------------------------------------------
 
   openFind(cx) {
+    note("feature", { type: "chat-find" });
     this.finding = true;
     this.findJump = true;
     cx.timer.after(0, () => this.findBox.focus());
@@ -2223,6 +2226,7 @@ export default class Chat extends View {
       });
       return;
     }
+    note("feature", { type: "dictation" });
     cx.spawn(async (cx) => {
       await this.dict.start();
       cx.notify();
@@ -2264,6 +2268,7 @@ export default class Chat extends View {
     if (this.call) { cx.spawn(async (cx) => { await this.hangup(); cx.notify(); }); return; }
     if (this.dict.state === "recording") this.dict.cancel();
     this.call = { phase: "connecting", who: null, muted: false, error: null, started: Date.now() };
+    note("feature", { type: "voice-call" });
     if (shared("chat.callError")) setShared("chat.callError", null);
     this.callShared();
     cx.timer.after(0, () => { if (this.call) this.callFocus.focus(); });

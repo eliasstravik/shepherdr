@@ -10,7 +10,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, rmSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { randomBytes } from "node:crypto";
-import { DATA, SOCK, TOKEN, PORT, HOME, ensureData } from "./paths.ts";
+import { DATA, SOCK, TOKEN, PORT, HOME, ensureData, settingsFile } from "./paths.ts";
 import { holdLock } from "./lock.ts";
 import { gate, localCaller, type Gate } from "./auth.ts";
 import { trustedPeer } from "./peer.ts";
@@ -24,6 +24,7 @@ import { Live } from "./live.ts";
 import { Model } from "./model.ts";
 import { checkEvery, runPilot } from "./autopilot.ts";
 import { windowSection, setWindow, offList, offPlugins } from "./window.ts";
+import { record, deleteAll, note as noteUsage, followSwitch } from "./usage.ts";
 import { Chats } from "./chats.ts";
 import { act, hc as hcRun } from "./actions.ts";
 import { AgentWatch } from "./watch.ts";
@@ -141,6 +142,8 @@ function alertNew(snap: any) {
   alerted = new Set(now.keys());
 }
 compat.agents = new Agents(hub);
+// usage insights (service/usage.ts) record while the add-on is on
+followSwitch(() => !offList().includes("insights"));
 const machines = new Machines(hub, () => model.machineNames());
 machines.onChange = () => model.rebuild();
 compat.machineStats = (m) => machines.of(m);
@@ -301,13 +304,12 @@ model.start();
 
 // The Web add-on (Shepherdr settings > Window > Add-ons, Everywhere's "off" in ~/.herdr/shepherdr.json): off, the web
 // app stops and /shepherdr is no longer shared; the service keeps its background work.
-const SETTINGS = process.env.HERDR_TASK_SETTINGS || join(HOME, ".herdr", "shepherdr.json");
 const APP_DATA = join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "data", "shepherdr");
 /** where files from a page's message box are kept (the window keeps pasted ones there too) */
 const ATTACH = join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "data", "chat-attach");
 function webOn() {
   if (process.env.SHEPHERDR_WEB === "off") return false;
-  try { return !(JSON.parse(readFileSync(SETTINGS, "utf8"))?.everywhere?.off ?? []).includes("web"); } catch { return true; }
+  try { return !(JSON.parse(readFileSync(settingsFile(), "utf8"))?.everywhere?.off ?? []).includes("web"); } catch { return true; }
 }
 
 // Tailscale can come up after the service: look again now and then, and keep /shepherdr shared while web is on. What
@@ -435,8 +437,9 @@ const voiceIO: VoiceIO = {
       return out;
     } finally { f.stop(); }
   },
-  async send(key, text) { await act(hub, { type: "send", chat: key, text, human: true }, compat); },
+  async send(key, text) { noteUsage("send", { from: "voice" }); await act(hub, { type: "send", chat: key, text, human: true }, compat); },
   async action(body) {
+    noteUsage("act", { from: "voice", type: body?.type });
     const r = await doAction(body);
     const text = await r.text();
     if (!r.ok) throw new Error(text.trim() || "That didn't go through.");
@@ -483,6 +486,14 @@ async function doAction(body: any): Promise<Response> {
     if (moving && !moving.error) return json({ ok: false, error: `Already moving it to ${moving.to}.` });
     void serveFrom(row.here ? null : row.name).catch(() => {});
     return json({ ok: true });
+  }
+  // Usage insights (service/usage.ts): the web app's events, and Settings > Window's Delete (every machine's log)
+  if (body?.type === "usage") return json({ ok: true, on: record(Array.isArray(body.events) ? body.events : []) });
+  if (body?.type === "setting" && body.key === "insights.delete") {
+    const missed = await deleteAll(model.machineNames(), async (args) => (await hcRun(args)).code === 0);
+    // the window's open view counts from now (lib/usage.js; the bridge brings it there)
+    await store.set("usage.deletedAt", Date.now());
+    return json(missed.length ? { ok: false, error: SC.INSIGHTS.missed(missed.join(", ")) } : { ok: true });
   }
   if (body?.type === "setting" && typeof body.key === "string" && /^(window|addon)\./.test(body.key)) {
     try { await setWindow(body.key, typeof body.value === "string" ? body.value : null, (k, v) => store.set(k, v)); return json({ ok: true }); }
@@ -749,6 +760,7 @@ const server = Bun.serve<{ who: string }>({
     open(ws) {
       const d: any = ws.data;
       const page = { send: (x: any) => { ws.send(x); }, close: () => ws.close(), buffered: () => ws.getBufferedAmount() };
+      if (d.voice) noteUsage("feature", { from: "web", type: "voice-call" });
       if (d.voice) d.bridge = voiceCall(hub, callName(d.voice.key), { view: chatView(d.voice.addr), io: voiceIO, where: { client: "web", call: d.voice.key, machine: me?.host ?? null },
         follow: () => follow(d.voice.addr).stop }, page);
       else if (d.term) d.bridge = terminalBridge(hub, d.term, page);

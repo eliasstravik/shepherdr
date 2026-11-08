@@ -322,6 +322,14 @@ export const SWITCHES = [
     key: "coordinator.auto" },
 ];
 export const ADDONS = "Add-ons";
+// Usage insights' Delete, under its switch (the window's and the web's Settings > Window): every machine's log.
+export const INSIGHTS = {
+  title: "Delete usage data",
+  about: "Deletes the usage log on this computer and on your other machines. It starts again from now while the add-on is on.",
+  button: "Delete",
+  done: "Deleted.",
+  missed: (names) => `Deleted here. Not reached: ${names}. Try again when they're online.`,
+};
 // An add-on's line: its about, and what stops a flip (stop: the titles in the way).
 export function addonAbout(about, now, stop) {
   if (!stop.length) return about;

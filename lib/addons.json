@@ -64,6 +64,8 @@
     { "id": "machines", "title": "Other machines", "switch": true, "needs": ["tasks"],
       "about": "Keeps herdr-task, its helpers and the role templates the same on every connected machine. Off: nothing is sent.",
       "mods": ["machine-add-chat"] },
+    { "id": "insights", "title": "Usage insights", "switch": true,
+      "about": "A private log of how you use Shepherdr (screens, switches, buttons and times, never your words), kept only on your own machines so your Assistant can suggest better ways to work when you ask. It is never sent to Shepherdr's makers or anyone else. Off: nothing is recorded." },
     { "id": "web", "title": "Web", "switch": true,
       "about": "Shepherdr in your browser on phone, tablet and desktop, private to your tailnet. Off: the web app stops; the service keeps working.",
       "service": true }
