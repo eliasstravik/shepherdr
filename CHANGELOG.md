@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.1.24
+
+You can ask the voice call to go full screen or step aside.
+
+- On a call, say "go full screen" or "minimize" and the voice does it itself. When it opens the full screen for you, it
+  no longer shrinks it again right after.
+
 ## 3.1.23
 
 A minimized call on a phone keeps out of the way.
