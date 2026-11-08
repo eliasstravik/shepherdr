@@ -40,6 +40,7 @@ export class Model {
   private known: { name: string; state: string }[] = []; // every other machine, with its state (the sidebar's headers)
   private shared: any = {};
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private settleTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Told each build: what the screen's snapshot is made from (compat.ts). */
   onBuild: ((b: { spaces: any[]; sections: any[]; rows: any[]; machines: string[]; known: { name: string; state: string }[]; automations: any[] }) => void) | null = null;
@@ -207,15 +208,16 @@ export class Model {
   /** A task's agents now: live terminals labelled with its key, on the folder's machine, not shells. */
   private agentsOf(list: List, task: any) {
     const key = `${list.slug}#${task.id}`;
-    const out: { address: string; status: string | null; role: string; turn: number }[] = [];
+    const out: { address: string; status: string | null; role: string; turn: number; since: number }[] = [];
     for (const k of this.hub.terminals.values()) {
       if (k.state !== "live" || k.labels?.["herdr.task"] !== key || machineOf(k.address) !== (list.machine ?? null)) continue;
       const st = typeof k.status === "object" ? k.status?.state ?? null : null;
       if (!st && SHELL.test(String((k as any).foreground?.name ?? ""))) continue;
       // its worker's own helper (SHEP-54: its reviewer, an hc child): never one of its agents (helpersOf)
       if (isHelper(k)) continue;
-      // turn: its finished turns, for a Ready task back at work (core busyAgain())
-      out.push({ address: k.address, status: st, role: k.labels?.["herdr.role"] ?? "worker", turn: Number((k as any).turn) || 0 });
+      // turn: its finished turns, for a Ready task back at work (core busyAgain()); since: when its status last
+      // changed (hc's status_ms), for the grace before a quiet agent needs the person (core GRACE_MS, SHEP-133)
+      out.push({ address: k.address, status: st, role: k.labels?.["herdr.role"] ?? "worker", turn: Number((k as any).turn) || 0, since: Number((k as any).status_ms) || 0 });
     }
     return out;
   }
@@ -235,9 +237,11 @@ export class Model {
     const pins = new Set<string>(Array.isArray(pinList) ? pinList : []);
     const lists = [null, ...this.machines].flatMap((m) => this.lists.get(m) ?? []);
 
+    let settles = Infinity;
     const rows = lists.flatMap((list) => list.tasks.map((task: any) => {
       const live = this.agentsOf(list, task);
       const p = place(list, task, { live, helpers: this.helpersOf(list, task, live) });
+      if (p.settles) settles = Math.min(settles, p.settles);
       const own = live.map((a) => (this.hub.terminals.get(a.address) as any)?.report).find((r) => typeof r?.progress === "number" && r.progress >= 0);
       const w = reportOf(task, p.section, own ? { pct: own.progress, msg: own.msg || null } : null);
       const running = p.section === "queued" ? list.tasks.filter((x: any) => x.state === "running" && this.agentsOf(list, x).length).length : 0;
@@ -268,6 +272,9 @@ export class Model {
       };
     }));
     this.live.put("tasks", rows);
+    // a task in its grace before Needs you (core GRACE_MS): built again the moment it ends, not up to 10 s later
+    if (this.settleTimer) clearTimeout(this.settleTimer);
+    this.settleTimer = settles < Infinity ? setTimeout(() => { this.settleTimer = null; this.soon(); }, Math.max(0, settles - Date.now()) + 50) : null;
 
     const bar = sidebarOf(this.value("spaces-chat"));
     const seen = this.shared["chat.seen"] ?? {};

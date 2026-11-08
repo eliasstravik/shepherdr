@@ -597,16 +597,18 @@ def cmd_alert(args):
     say(args, alert, "Alert sent.")
 
 
-def back_to_work(s, t, why, said=WORKING_AGAIN):
+def back_to_work(s, t, why, said=WORKING_AGAIN, auto=False):
     """A Ready task taken back to work (herdr-task fix or resume, or its agent at work again):
     Working, its status line saying so until its agent reports, and no Accept until its next
-    ready. why: what took it back, for its Assistant's news ("SHEP-7 is working again: why")."""
+    ready. why: what took it back, for its Assistant's news ("SHEP-7 is working again: why").
+    auto: only its agent's own turn took it back (a message, a background job's notice), not a
+    fix asked for: Ready again when that turn changed nothing (tick's settle_back())."""
     if t["state"] != "ready":
         return False
     t["state"] = "running"
     for k in ("ready_turns", "merge_requested"):
         t.pop(k, None)
-    t["back"] = {"at": now(), "why": why}
+    t["back"] = {"at": now(), "why": why, **({"auto": True, "progress": t.get("progress")} if auto else {})}
     # by: Herdr's words, not its agent's (on_it() counts only an agent's own line).
     t["progress"] = {"text": fit(said), "at": now(), "set": now(), "by": "herdr"}
     s.dirty = True
@@ -1006,7 +1008,7 @@ def cmd_accept(args):
         # Its agent at work again since it said ready: never accepted half done. Working again
         # (saved), and refused after the store is.
         if busy_again(t, [detail(k) for k in live_agents(s.key(t))]):
-            back = back_to_work(s, t, "its agent is at work again")
+            back = back_to_work(s, t, "its agent is at work again", auto=True)
         # One its agent opened itself, which ready couldn't open again ("already exists"): adopted.
         elif (not t.get("pr") and "already exists" in (t.get("attention") or "")
               and (repo := github(s)) and pr_adopt(t, repo)):

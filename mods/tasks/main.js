@@ -214,7 +214,9 @@ export default class Tasks extends View {
         const chat = k.labels?.["herdr.chat"];
         const pane = (f.panes ??= panes()).find((p) => p.terminal === k.address)?.pane ?? (chat ? (m ? `${m}/${chat}` : chat) : null);
         return { address: k.address, status: st, program: a?.program ?? k.program, tab: tab && m ? `${m}/${tab}` : tab, pane,
-          role: k.labels?.["herdr.role"] ?? "worker", turn: k.turn };
+          role: k.labels?.["herdr.role"] ?? "worker", turn: k.turn,
+          // when its status last changed: a quiet agent needs the person only after core/tasks.js GRACE_MS
+          ...(typeof k.status_ms === "number" ? { since: k.status_ms } : {}) };
       });
   }
 

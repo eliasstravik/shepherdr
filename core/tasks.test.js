@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { place, queueReason, reportOf, estimated, order, ago, autoPrefix, refOf, taskKey, matches, busyAgain, secondLine, leftOf, ORDER, STATUS, WORKING_AGAIN, fromLine, autoWhere, inSpace } from "./tasks.js";
+import { place, queueReason, reportOf, estimated, order, ago, autoPrefix, refOf, taskKey, matches, busyAgain, secondLine, leftOf, ORDER, STATUS, WORKING_AGAIN, GRACE_MS, fromLine, autoWhere, inSpace } from "./tasks.js";
 import { REASONS, fit } from "./needs.js";
 
 const NOW = 1_800_000_000_000;
@@ -103,6 +103,7 @@ describe("a Ready task back at work (as herdr-task's busy_again)", () => {
 // A task with a problem (failing checks) its agent is on: Working; nobody on it: Needs you (SHEP-8). The same
 // cases herdr-task's task_status() passes (test/test_herdr_task.py).
 const onIt = JSON.parse(readFileSync(new URL("./on-it.cases.json", import.meta.url), "utf8"));
+const grace = JSON.parse(readFileSync(new URL("./grace.cases.json", import.meta.url), "utf8"));
 
 describe("a problem someone is on (as herdr-task's on_it)", () => {
   for (const c of onIt.cases) test(c.name, () => {
@@ -110,6 +111,21 @@ describe("a problem someone is on (as herdr-task's on_it)", () => {
     const p = place(list([task]), task, { live: c.live, now: onIt.now });
     const why = c.expect.why === "QUESTION" ? REASONS.question : c.expect.why;
     expect({ section: p.section, needs: p.needs, why: p.why }).toEqual({ section: c.expect.status, needs: c.expect.needs, why });
+  });
+});
+
+// SHEP-133: a short grace before Needs you (core/grace.cases.json, which herdr-task's tests read too).
+describe("a short grace before Needs you (as herdr-task's GRACE_MS)", () => {
+  for (const c of grace.cases) test(c.name, () => {
+    const task = { id: 7, ...c.task };
+    const p = place(list([task]), task, { live: c.live, now: grace.now });
+    expect({ section: p.section, needs: p.needs }).toEqual({ section: c.expect.status, needs: c.expect.needs });
+    if (c.expect.settles) expect(p.settles).toBe(c.expect.settles);
+    else expect(p.settles).toBeUndefined();
+  });
+  test("the grace is the same on both sides", () => {
+    expect(GRACE_MS).toBe(20000);
+    expect(readFileSync(new URL("../mods/tasks/bin/herdr_task/agents.py", import.meta.url), "utf8")).toContain("GRACE_MS = 20_000");
   });
 });
 
