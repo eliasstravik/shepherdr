@@ -798,6 +798,7 @@ export function connect() {
       if (booted && msg.snapshot.off && [...msg.snapshot.off].sort().join() !== [...booted].sort().join()) return location.reload()
       state = { ...state, snap: msg.snapshot }
       followOff(msg.snapshot.off)
+      noteView(state.ui)
       stayOnShown()
       fromOldPin(msg.snapshot)
       // once loaded, the first snapshot with every machine in reach says which chats are gone (one connecting or out

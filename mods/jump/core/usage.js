@@ -13,6 +13,9 @@
 export const FILE = "usage.jsonl";
 // One older file is kept when the log passes CAP bytes: at most about 2 × CAP on disk.
 export const OLD = "usage.1.jsonl";
+// Touched by every Delete (here, the window's, another machine's): the service drops a late batch's events older
+// than it, so nothing deleted comes back.
+export const DELETED = "usage.deleted";
 export const CAP = 2_000_000;
 
 // What happened.
@@ -64,5 +67,5 @@ export function lines(events, at = Date.now()) {
 export const APPEND = 'd="$1"; mkdir -p "$d" && chmod 700 "$d"; f="$d/usage.jsonl"; '
   + '[ -f "$f" ] && [ "$(wc -c < "$f")" -gt "$3" ] && mv -f "$f" "$d/usage.1.jsonl"; printf %s "$2" >> "$f"; chmod 600 "$f"';
 
-// The shell line that deletes it all on a machine (Settings' Delete, and an agent asked to).
-export const DELETE = 'rm -f "$HOME/.herdr/shepherdr/usage.jsonl" "$HOME/.herdr/shepherdr/usage.1.jsonl"';
+// The shell line that deletes it all on a machine (Settings' Delete, and an agent asked to), and marks when.
+export const DELETE = 'd="$HOME/.herdr/shepherdr"; rm -f "$d/usage.jsonl" "$d/usage.1.jsonl"; mkdir -p "$d" && touch "$d/usage.deleted"';

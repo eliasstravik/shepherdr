@@ -21,7 +21,8 @@ export function note(kind, fields = {}) {
 // What is shown while the window is the active one ("" when it isn't), and since when.
 let shown = null;
 function look() {
-  const f = win()?.active ? focused() : null;
+  // off: no view is timed, so turning it on again starts from then
+  const f = on("insights") && win()?.active ? focused() : null;
   const key = f ? `${f.space}\t${f.tab}` : "";
   if (shown?.key === key) return;
   const now = Date.now();

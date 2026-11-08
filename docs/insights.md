@@ -40,7 +40,7 @@ Assistant's instructions (`templates/assistant.md`, Usage insights) say where ea
 ## Size
 
 At 2 MB the log becomes `usage.1.jsonl` and a new one starts; the one before that goes. At most about 4 MB per
-machine.
+machine. Delete leaves an empty `usage.deleted`, whose time keeps a late batch from bringing older events back.
 
 ## Each machine its own
 

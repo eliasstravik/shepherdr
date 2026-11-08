@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clean, lines, APPEND, CAP } from "./usage.js";
+import { clean, lines, APPEND, CAP, DELETE } from "./usage.js";
 
 test("keeps kinds, ids, counts and times; drops words and unknown fields", () => {
   const e = clean({ kind: "send", from: "phone", n: 2, text: "my secret plan", task: "SHEP-7", at: 5 }, 10);
@@ -39,4 +39,15 @@ test("the window's append: creates the folder, appends, and turns a full log int
   // words with quotes and $ go in as they are, never run
   run('{"x":"$(touch pwned)"}\n');
   expect(existsSync(join(d, "pwned"))).toBe(false);
+});
+
+test("Delete on a machine: both files go, and its moment is marked for late batches", () => {
+  const home = mkdtempSync(join(tmpdir(), "usage-home-"));
+  const d = join(home, ".herdr", "shepherdr");
+  Bun.spawnSync(["sh", "-c", APPEND, "usage", d, '{"a":1}\n', String(CAP)]);
+  writeFileSync(join(d, "usage.1.jsonl"), "old\n");
+  // a throwaway HOME for this shell line only
+  Bun.spawnSync(["sh", "-c", DELETE], { env: { HOME: home, PATH: process.env.PATH } });
+  expect(existsSync(join(d, "usage.jsonl")) || existsSync(join(d, "usage.1.jsonl"))).toBe(false);
+  expect(existsSync(join(d, "usage.deleted"))).toBe(true);
 });

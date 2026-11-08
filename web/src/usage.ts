@@ -50,6 +50,11 @@ export function note(kind: string, fields: Record<string, unknown> = {}) {
 /** The screen now (each change of it): the one before ends, with its time. A page out of sight shows nothing. */
 export function noteView(ui: Shown) {
   surface = ui.device === 'phone' ? 'phone' : 'web'
+  // off: no view is timed, so turning it on again starts from then
+  if (off) {
+    shown = null
+    return
+  }
   const fields = typeof document !== 'undefined' && document.visibilityState === 'hidden' ? null : viewOf(ui)
   const key = fields ? JSON.stringify(fields) : ''
   if (shown?.key === key) return

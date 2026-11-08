@@ -64,3 +64,15 @@ test('Delete drops what the page still holds', () => {
   noteAct({ type: 'setting', key: 'insights.delete' })
   expect(pending()).toEqual([])
 })
+
+test('time while off is never counted', () => {
+  noteView(ui())
+  followOff(['insights'])
+  noteView(ui({ task: 'SHOP-2' }))
+  followOff([])
+  noteView(ui({ task: 'SHOP-2' }))
+  noteView(ui())
+  expect(pending()).toHaveLength(1)
+  expect(pending()[0]).toMatchObject({ view: 'task', task: 'SHOP-2' })
+  expect(pending()[0].ms as number).toBeLessThan(1000)
+})
