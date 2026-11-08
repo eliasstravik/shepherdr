@@ -127,3 +127,18 @@ test("a reply already in a chat before its first read came is not news; a later 
   expect(texts(h.take())).toContain("Which branch?");
   h.stop();
 });
+
+test("a quick answer to the call's send, there by the chat's first read, is still said", async () => {
+  const w = world();
+  let loaded!: () => void;
+  const ready = new Promise<void>((r) => { loaded = r; });
+  const h = hearing({ ...w.io, follow: (key) => ({ stop: () => {}, ready: key === "p:lab" ? ready : undefined }) });
+  const asked = Date.now();
+  h.sentTo("p:lab", asked);
+  w.chats["p:lab"].reply = { id: "r9", text: "Port 5173.", at: asked + 50 } as any;
+  loaded();
+  await Bun.sleep(0);
+  h.tick();
+  expect(texts(h.take())).toContain('the lab Assistant replied: """Port 5173."""');
+  h.stop();
+});

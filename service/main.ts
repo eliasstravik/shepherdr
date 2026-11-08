@@ -401,7 +401,7 @@ function file(path: string): Response {
 function chatView(addr: string): ChatView {
   const items = () => (compat.reader?.(addr)?.conv?.items ?? []) as any[];
   return {
-    lastReply: () => { const x = [...items()].reverse().find((i) => i.kind === "agent" && i.text); return x ? { id: x.id, text: x.text } : null; },
+    lastReply: () => { const x = [...items()].reverse().find((i) => i.kind === "agent" && i.text); return x ? { id: x.id, text: x.text, at: typeof x.at === "number" ? x.at : undefined } : null; },
     status: () => (hub.terminals.get(addr) as any)?.status?.state ?? null,
     asking: () => asks.of(addr)[0]?.words?.title ?? null,
   };
@@ -773,9 +773,10 @@ const server = Bun.serve<{ who: string }>({
       const key = typeof b?.addr === "string" ? chatOfAddress(b.addr) : null;
       if (typeof b?.tool !== "string") return json({ error: "no such call" }, 400);
       const where: Where = { client: "window", call: key, machine: me?.host ?? null, ...pageWhere(b.where ?? {}) };
+      const asked = Date.now();
       const a = await voiceTool(b.tool, b.params ?? {}, where, voiceIO);
       // a send: that window call follows the chat from now on (SHEP-105)
-      if (a.sent) windowCall(b.call)?.sentTo(a.sent);
+      if (a.sent) windowCall(b.call)?.sentTo(a.sent, asked);
       return json(a);
     }
     if (path === "/api/voice/hear" && req.method === "POST") {

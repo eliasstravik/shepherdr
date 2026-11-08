@@ -207,9 +207,10 @@ export function voiceCall(hub: Hub, deps: CallDeps, first: Page) {
         const c = m.client_tool_call ?? {};
         tell({ type: "state", state: "thinking" });
         busy++;
+        const asked = Date.now();
         try {
           const a = await shown(await voiceTool(String(c.tool_name ?? ""), c.parameters ?? {}, where, io), show);
-          if (a.sent) hear.sentTo(a.sent);
+          if (a.sent) hear.sentTo(a.sent, asked);
           toVoice({ type: "client_tool_result", tool_call_id: c.tool_call_id, result: a.result, is_error: !!a.error });
         } finally { busy--; }
       }

@@ -201,6 +201,16 @@ function parts(text) {
 
 let bound = false;
 
+// What the voice opened, in a few words for its "Opened by voice" toast.
+function voiceOpened(nav) {
+  if (nav.kind === "task") return `${nav.ref ?? String(nav.task ?? "").split(":").pop()}${nav.title ? ` \u00b7 ${nav.title}` : ""}`;
+  if (nav.kind === "artifact") return nav.title ?? "An artifact";
+  if (nav.kind === "tasks" || nav.kind === "needs") return nav.kind === "needs" ? "Needs you" : "Tasks";
+  if (nav.kind === "settings") return `Settings${nav.section ? ` \u203a ${nav.section}` : ""}`;
+  if (nav.kind === "panel") return `${nav.panel[0].toUpperCase()}${nav.panel.slice(1)}`;
+  return nav.kind === "space" || nav.kind === "chat" ? "A space" : "";
+}
+
 export default class Chat extends View {
   init(_props, cx) {
     // The Tasks panel's drill-in view (props { panel: true }): its header (props { head: true })
@@ -2390,6 +2400,8 @@ export default class Chat extends View {
       // said back by the nav's name (voice.ts waits for it before the voice agent may say it's on screen)
       let ack;
       try { ack = this.voiceNav(nav) ?? { ok: true }; } catch (e) { console.error(`voice nav: ${e?.message ?? e}`); ack = { ok: false, why: "it failed in the window" }; }
+      // what the voice opened says why the window changed by itself (SHEP-105): a short quiet toast
+      if (ack.ok && nav.kind !== "screen") toast({ title: "Opened by voice", body: voiceOpened(nav), level: "info", timeout: 3500 });
       await fs.mkdir(`${this.callDir}/navved`, { recursive: true }).catch(() => {});
       await fs.writeFile(`${this.callDir}/navved/${f}`, JSON.stringify(ack)).catch(() => {});
     }

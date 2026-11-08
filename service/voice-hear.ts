@@ -10,7 +10,7 @@ import { chatName, screenChat, type Where } from "./voice-tools.ts";
 const { replyLine, statusLine, needLine, batchLines } = V as any;
 
 /** What the call reads of one chat: the agent's last reply and its status. */
-export type ChatView = { lastReply(): { id: string; text: string } | null; status(): string | null; asking(): string | null };
+export type ChatView = { lastReply(): { id: string; text: string; at?: number } | null; status(): string | null; asking(): string | null };
 
 export type HearIO = {
   snap(): Snapshot | null;
@@ -51,6 +51,8 @@ export function hearing(io: HearIO) {
 
   const wanted = () => new Set([...sent, ...(shown ? [shown] : [])]);
   const name = (key: string) => { const s = io.snap(); return s ? chatName(s, key) : "an agent"; };
+  /** when the call first sent to each chat: a reply after that is news, even one in the chat's first read */
+  const sentAt = new Map<string, number>();
   function watch(key: string) {
     if (chats.has(key)) return;
     const view = io.view(key);
@@ -59,7 +61,14 @@ export function hearing(io: HearIO) {
     const c = { stop: f.stop, view, reply: null as string | null, status: null as string | null, primed: false };
     chats.set(key, c);
     // what the chat said before its first read came in is not news: the baseline is taken then (or after 8 s)
-    const prime = () => { if (c.primed) return; c.primed = true; c.reply = view.lastReply()?.id ?? null; c.status = view.status(); };
+    const prime = () => {
+      if (c.primed) return;
+      c.primed = true;
+      const r = view.lastReply();
+      // a quick answer to this call's send, already there by the first read, is still told
+      c.reply = r && !(sentAt.has(key) && (r.at ?? 0) >= sentAt.get(key)!) ? r.id : null;
+      c.status = view.status();
+    };
     if (f.ready) Promise.race([f.ready, new Promise((r) => setTimeout(r, 8000))]).then(prime, prime);
     else prime();
   }
@@ -67,7 +76,7 @@ export function hearing(io: HearIO) {
 
   return {
     /** the call sent there: its replies are told until the call ends */
-    sentTo(key: string) { sent.add(key); watch(key); },
+    sentTo(key: string, at = Date.now()) { if (!sentAt.has(key)) sentAt.set(key, at); sent.add(key); watch(key); },
     /** what the screen shows now (the page's or the window's where) */
     onScreen(where: Where) {
       const s = io.snap();
