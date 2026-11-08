@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.1.25
+
+Calls are easier on a phone held sideways, and you can see how much voice you have left.
+
+- In the web app, a full-screen call on a phone held sideways puts the orb on the left and the buttons on the right.
+- End hangs up at once, with no "Are you sure" step.
+- Settings → Plan usage shows your ElevenLabs credits. If your key can't read them, it says which permission to add.
+
 ## 3.1.24
 
 You can ask the voice call to go full screen or step aside.
