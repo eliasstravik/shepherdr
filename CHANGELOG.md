@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.1.22
+
+The voice call's orb is a clean circle on iPhone.
+
+- In the web app on an iPhone or iPad, the full-screen call's orb shows only its circle, with no grey square around
+  it.
+
 ## 3.1.21
 
 A voice call opens full screen, and research tasks leave your code alone.
