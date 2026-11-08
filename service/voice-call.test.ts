@@ -2,7 +2,7 @@
 // things; the open goes to the page that started the call (a phone, a laptop's browser tab), never another, and the
 // agent hears it's on screen only once that page said so.
 import { afterAll, expect, test } from "bun:test";
-import { voiceCall } from "./voice.ts";
+import { callToResume, voiceCall } from "./voice.ts";
 import type { VoiceIO, Where } from "./voice-tools.ts";
 
 const now = Date.now();
@@ -20,12 +20,15 @@ const io: VoiceIO = { snap: () => snap, chat: async () => null, send: async () =
 // the fake voice agent: sends each test's tool calls, keeps what the call answered
 const results: any[] = [];
 let agent: any = null;
+const heard: any[] = [];
+let agentClosed = 0;
 const server = Bun.serve({
   port: 0,
   fetch(req, srv) { return srv.upgrade(req) ? undefined : new Response("no", { status: 400 }); },
   websocket: {
+    close() { agentClosed++; },
     open(ws) { agent = ws; ws.send(JSON.stringify({ type: "conversation_initiation_metadata", conversation_initiation_metadata_event: { agent_output_audio_format: "pcm_16000" } })); },
-    message(_ws, m) { const x = JSON.parse(String(m)); if (x.type === "client_tool_result") results.push(x); },
+    message(_ws, m) { const x = JSON.parse(String(m)); heard.push(x); if (x.type === "client_tool_result") results.push(x); },
   },
 });
 afterAll(() => server.stop(true));
@@ -127,4 +130,76 @@ test("SHEP-67: the voice agent hangs up (end_call after a yes): the page hears i
   agent.close(4000, "quota");
   await until(() => other.got.some((m) => m.type === "error"));
   expect(other.got.filter((m) => m.type === "ended" || m.type === "error")).toEqual([{ type: "error", message: "The call was closed (4000: quota)." }]);
+});
+
+// SHEP-102: a phone that locks (or loses the network) may drop the page's socket. The call holds on the server, with
+// the voice agent's conversation still open, and the page goes back to it; the agent hears the phone is back.
+function bare(who = "person@example.com") {
+  const got: any[] = [];
+  let closed = false;
+  const p = { got, get closed() { return closed; }, send(x: string | Uint8Array) { got.push(typeof x === "string" ? JSON.parse(x) : x); }, close() { closed = true; } };
+  const start = (holdMs = 5000) => voiceCall({} as any, "the Home Assistant", { view: { lastReply: () => null, status: () => null, asking: () => null }, io,
+    where: { client: "web", device: "phone", machine: "eliass-mac-mini", call: "p:h1" }, follow: () => () => {}, dial: async () => `ws://127.0.0.1:${server.port}/`, holdMs, who }, p);
+  return { ...p, p, start };
+}
+
+test("SHEP-102: the page's socket drops; the call holds and the page comes back to it, the agent says it's back", async () => {
+  agent = null;
+  const first = bare();
+  const c = first.start();
+  const id = first.got.find((m) => m.type === "call")?.id;
+  expect(typeof id).toBe("string");
+  await until(() => !!agent);
+  const closedBefore = agentClosed;
+  c.detach(first.p);
+  await Bun.sleep(200);
+  // still on with the voice agent
+  expect(agentClosed).toBe(closedBefore);
+  // only the same person, on the same chat, gets it back
+  expect(callToResume(id, "someone@example.com", "p:h1")).toBeNull();
+  expect(callToResume(id, "person@example.com", "p:h2")).toBeNull();
+  const again = bare();
+  const n = heard.length;
+  expect(callToResume(id, "person@example.com", "p:h1")!.attach(again.p)).toBe(true);
+  expect(again.got).toEqual([{ type: "resumed", id }]);
+  await until(() => heard.length > n);
+  const back = heard.slice(n).find((m) => m.type === "user_message");
+  expect(back.text).toContain("lost the call's connection");
+  expect(back.text).toContain("Say you're back");
+  // the agent's voice now goes to the page that came back
+  agent.send(JSON.stringify({ type: "audio", audio_event: { audio_base_64: Buffer.from([1, 0, 2, 0]).toString("base64") } }));
+  await until(() => again.got.some((m) => m instanceof Uint8Array));
+  expect(again.got.some((m) => m instanceof Uint8Array)).toBe(true);
+  expect(first.got.some((m) => m instanceof Uint8Array)).toBe(false);
+  // the old socket's late close changes nothing
+  c.detach(first.p);
+  await Bun.sleep(100);
+  expect(again.p.closed).toBe(false);
+  c.end();
+  expect(callToResume(id, "person@example.com", "p:h1")).toBeNull();
+});
+
+test("SHEP-102: a page that never comes back: the call ends once the hold is up; End ends it at once", async () => {
+  agent = null;
+  const gone = bare();
+  const c = gone.start(150);
+  const id = gone.got.find((m) => m.type === "call").id;
+  await until(() => !!agent);
+  const closedBefore = agentClosed;
+  c.detach(gone.p);
+  await until(() => agentClosed > closedBefore);
+  expect(agentClosed).toBe(closedBefore + 1);
+  expect(callToResume(id, "person@example.com", "p:h1")).toBeNull();
+  // the person's End (or the lock screen's hang up): no holding
+  agent = null;
+  const ends = bare();
+  const d = ends.start();
+  const id2 = ends.got.find((m) => m.type === "call").id;
+  await until(() => !!agent);
+  const before = agentClosed;
+  d.message(JSON.stringify({ type: "end" }));
+  await until(() => agentClosed > before);
+  expect(ends.p.closed).toBe(true);
+  expect(callToResume(id2, "person@example.com", "p:h1")).toBeNull();
+  expect(d.attach(bare().p)).toBe(false);
 });

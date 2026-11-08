@@ -200,7 +200,12 @@ export function toggleCall(chatKey: string) {
   }, voiceNav, () => {
     // the call's socket is open: where this page is, from the start
     if (getState().snap) sendWhere(whereNow())
-  }, () => { if (getState().ui.call === chatKey) endCall() }).catch(() => { endCall(); setUI({ callError: 'Audio could not start on this device.' }) })
+  }, () => { if (getState().ui.call === chatKey) endCall() }, {
+    // the lock screen and Control Center show the call: hang up and mute from there (SHEP-102)
+    title: getState().snap ? chatName(getState().snap!, chatKey) : 'Shepherdr',
+    hangUp: () => { if (getState().ui.call === chatKey) endCall() },
+    mute: (on) => { if (getState().ui.call !== chatKey) return; muteCall(on); setUI({ callMuted: on }) },
+  }).catch(() => { endCall(); setUI({ callError: 'Audio could not start on this device.' }) })
 }
 
 /** the chat whose call couldn't start for want of a key: the card over its box */
@@ -260,7 +265,7 @@ export function toggleMute() {
   setUI({ callMuted: on })
 }
 
-const WORD = { connecting: 'Connecting', listening: 'Listening', thinking: 'Thinking', speaking: 'Speaking' }
+const WORD = { connecting: 'Connecting', listening: 'Listening', thinking: 'Thinking', speaking: 'Speaking', reconnecting: 'Reconnecting' }
 
 function usePhase() {
   const [phase, set] = useState(callPhase)
