@@ -84,3 +84,12 @@ test("a machine's line in the picker", () => {
   expect(serveChoice({ name: "mac-mini", os: "darwin", state: "connected" })).toBe("mac-mini · macOS");
   expect(serveChoice({ name: "vm", os: null, state: "unreachable" })).toBe("vm · Offline");
 });
+
+test("the dragged order of each machine's spaces reads the same on both machines; the mini's own stays (SHEP-130)", () => {
+  const order = { "": ["sp2", "sp1"], "mac-mini": ["mac-mini/sp9", "mac-mini/sp4"], vm: ["vm/sp3"], gone: ["gone/sp1"] };
+  const there = relocate("spaces-chat", { order }, toMini);
+  expect(there.order).toEqual({ m3: ["m3/sp2", "m3/sp1"], "": ["sp9", "sp4"], vm: ["vm/sp3"] });
+  expect(relocate("spaces-chat", there, toLaptop).order).toEqual({ "": ["sp2", "sp1"], "mac-mini": ["mac-mini/sp9", "mac-mini/sp4"], vm: ["vm/sp3"] });
+  const merged = keepForeign("spaces-chat", relocate("spaces-chat", { order: { "": ["sp1"] } }, toMini), { order: { lonely: ["lonely/a"], m3: ["m3/old"] } }, toLaptop);
+  expect(merged.order).toEqual({ lonely: ["lonely/a"], m3: ["m3/sp1"] });
+});

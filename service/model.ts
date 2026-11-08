@@ -13,7 +13,7 @@ import { isHelper, subagentsOf } from "../core/chat-view.js";
 // The core is plain JavaScript; its defaults read as narrow types to TypeScript.
 const { place, refOf, taskKey, autoPrefix, reportOf, secondLine, leftOf, queueReason, machineOf } = T as any;
 import * as S from "../core/spaces.js";
-const { spacesFromDoc, sidebarOf, assistantOf, isUnread } = S as any;
+const { spacesFromDoc, sidebarOf, assistantOf, isUnread, inOrder } = S as any;
 import * as N from "../core/notify.js";
 const { spaceLevel } = N as any;
 import * as AP from "../core/autopilot.js";
@@ -272,9 +272,10 @@ export class Model {
     const bar = sidebarOf(this.value("spaces-chat"));
     const seen = this.shared["chat.seen"] ?? {};
     // the window's spaces (its herdr-app documents), and the service's own (a web-only install: no window)
-    const own = (Array.isArray(this.doc().spaces) ? this.doc().spaces : []).map((x: any) => ({ id: x.machine ? `${x.machine}/${x.id}` : x.id, machine: x.machine ?? null, name: x.name, folder: x.folder, tabs: [] }));
+    const own = (Array.isArray(this.doc().spaces) ? this.doc().spaces : []).map((x: any) => ({ id: x.machine ? `${x.machine}/${x.id}` : x.id, machine: x.machine ?? null, name: x.name, folder: x.folder, tabs: [], own: true }));
     const fromDocs = [null, ...this.machines].flatMap((m) => spacesFromDoc(this.docs.get(m), m));
-    const spaces = [...fromDocs, ...own.filter((x: any) => !fromDocs.some((y: any) => y.id === x.id))].map((s: any, at: number) => {
+    // each machine's spaces in the order the person dragged them into (core/spaces.js inOrder), Herdr's for the rest
+    const spaces = inOrder([...fromDocs, ...own.filter((x: any) => !fromDocs.some((y: any) => y.id === x.id))], this.value("spaces-chat")?.order).map((s: any, at: number) => {
       const k = assistantOf(s, terminals as any[]);
       // a task belongs to the space that started it, else to the space in its folder (as the window's counts)
       const here = rows.filter((r) => !r.archived && (r.space ? r.space === s.id : (r.machine ?? null) === (s.machine ?? null) && r.folder === s.folder));
