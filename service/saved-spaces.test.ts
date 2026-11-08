@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { closeSaved, renameSaved, orderSaved, withoutSpace } from "./saved-spaces.ts";
 
 // Herdr installed, its window shut: a herdr-app that fails every "herdr-app do" (and records it), used in place of the real
-// one, so a real window is never reached. The space log goes to a throwaway app home; act() reads it when imported.
+// one, so a real window is never reached. The space log goes to a throwaway app home, for the whole file: act() reads
+// it at each call (SHEP-131: it once kept the real one from an earlier import and logged these fake spaces there).
 const APP = mkdtempSync(join(tmpdir(), "shep-saved-"));
 const BIN = join(APP, "bin"), CALLS = join(APP, "herdr-app-calls");
 mkdirSync(BIN);
@@ -16,9 +17,11 @@ beforeAll(async () => {
   process.env.HERDR_APP_HOME = APP;
   process.env.SHEPHERDR_HERDR_APP = join(BIN, "herdr-app");   // never a real window's, even on a machine with one
   ({ act } = await import("./actions.ts"));
+});
+afterAll(() => {
+  delete process.env.SHEPHERDR_HERDR_APP;
   if (was === undefined) delete process.env.HERDR_APP_HOME; else process.env.HERDR_APP_HOME = was;
 });
-afterAll(() => { delete process.env.SHEPHERDR_HERDR_APP; });
 
 const tab = (id: string, ...blocks: any[]) => ({ id, name: id, root: { type: "row", id, children: blocks } });
 const term = (pane: string, t: string) => ({ type: "block", id: pane, content: { terminal: t } });

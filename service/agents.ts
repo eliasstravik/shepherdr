@@ -5,13 +5,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { join } from "node:path";
 import type { Hub } from "./hub.ts";
-import { HOME } from "./paths.ts";
+import { HOME, appHome, writable } from "./paths.ts";
 import { sh } from "./model.ts";
 import * as AG from "../core/agents.js";
 import { kindOf } from "../core/chat-reader.js";
 
 const { DEFAULTS, parseDefaults, current, menuFor, rowFor, argvFor, sessionOf, NAMES, line, PICKS_FILE, parsePicks, pickKey, withPin, withRecent } = AG as any;
-const APP = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
 
 async function run(cmd: string[]) {
   const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
@@ -28,7 +27,7 @@ export class Agents {
     try { return parsePicks(readFileSync(this.picksPath, "utf8")); } catch { return parsePicks(""); }
   }
   private savePicks(p: unknown) {
-    mkdirSync(dirname(this.picksPath), { recursive: true });
+    mkdirSync(dirname(writable(this.picksPath)), { recursive: true });
     writeFileSync(this.picksPath, JSON.stringify(p, null, 2));
   }
   /** the star on a model's row: pinned to the top of its agent's list, or not any more */
@@ -147,7 +146,7 @@ export class Agents {
       this.used(pick);
       return out.terminal as string;
     }
-    const script = join(APP, "mods", "coordinator", "restart.sh");
+    const script = join(appHome(), "mods", "coordinator", "restart.sh");
     if (!existsSync(script)) throw new Error("Restarting an Assistant needs Shepherdr's window layout installed.");
     const p = Bun.spawn(["bash", script, addr, JSON.stringify(built.argv)], { stdout: "pipe", stderr: "pipe", stdin: "ignore",
       env: { ...process.env, HERDR_RESTART_CHAT: pane, ...(built.resume ? { HERDR_RESTART_RESUME: "1" } : {}) } });

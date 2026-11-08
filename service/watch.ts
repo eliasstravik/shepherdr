@@ -9,7 +9,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Hub } from "./hub.ts";
-import { HOME } from "./paths.ts";
+import { HOME, appHome } from "./paths.ts";
 import * as SC from "../core/screens.js";
 import * as CV from "../core/chat-view.js";
 import * as AG from "../core/agents.js";
@@ -17,7 +17,6 @@ import * as AG from "../core/agents.js";
 const { ScreenWatch, starting, cliOf, readScreen, screenText, pressKeys, SCREEN } = SC as any;
 const { LOST, lostMessage, shellWord, WORDS, sessionStarted, sessionFailed } = CV as any;
 const { freshArgv } = AG as any;
-const APP = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
 type Run = (args: string[]) => Promise<{ code: number; stdout: string; stderr?: string }>;
 /** an agent to watch: its address, and its task's id when it is a task's worker */
 export type Watched = { addr: string; ref?: string | null };
@@ -110,7 +109,7 @@ export class AgentWatch {
         // herdr-task would resume the same gone session again: its task starts it anew
         if (t.labels?.["herdr.task"]) throw new Error("ask the Assistant to resume its task.");
         const pane = t.labels?.["herdr.chat"];
-        const script = join(APP, "mods", "coordinator", "restart.sh");
+        const script = join(appHome(), "mods", "coordinator", "restart.sh");
         if (!pane || !existsSync(script)) throw new Error("its chat isn't open in the Herdr window.");
         const p = Bun.spawn(["bash", script, addr, JSON.stringify([...fresh, msg])], { stdout: "pipe", stderr: "pipe", stdin: "ignore",
           env: { ...process.env, HERDR_RESTART_CHAT: pane, HERDR_RESTART_RESUME: "1" } });
