@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.1.18
+
+One voice call now talks to all of Shepherdr, and model choice works on every machine.
+
+- A voice call is with Shepherdr itself, not one chat: start it from Talk to Shepherdr at the top of the sidebar or a
+  phone's voice button. It hears every chat it sent to, the one on screen and anything new that needs you, and says it
+  when you're both quiet.
+- What a call opens for you shows an Opened by voice tag for a few seconds.
+- Changing an Assistant's model, reasoning or permissions works for a space on another machine too, and says so if
+  that machine is offline.
+
 ## 3.1.17
 
 Voice calls go on with the phone locked, and agents can show you an artifact wherever you are.
