@@ -177,7 +177,7 @@ export default class Spaces extends View {
   // SHEP-105: "Talk to Shepherdr" at the top of the sidebar, above the spaces: a voice call with Shepherdr itself, not
   // one chat. The window runs it in the shown space's Assistant chat (mods/chat voice.ts: shared "chat.callreq"
   // { pane, at, action: "start" | "mute" | "end" }), but the call hears and reaches every space. On a call the row is the
-  // call card: Shepherdr, what it is doing and its clock, Mute and End; on the narrow rail, a green wave that ends it.
+  // call card: Shepherdr, what it is doing and its clock, Mute and the red hang-up; on the narrow rail, a green wave that ends it.
   liveCall() {
     for (const [pane, c] of Object.entries(shared("chat.calls") ?? {})) if (Date.now() - (c.beat ?? 0) < 45000) return { pane, ...c };
     return null;
@@ -217,16 +217,15 @@ export default class Spaces extends View {
     const secs = Math.max(0, Math.floor((Date.now() - (call.started ?? Date.now())) / 1000));
     const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
     const word = call.muted && call.phase !== "speaking" ? "Muted" : ({ connecting: "Connecting", listening: "Listening", thinking: "Thinking", speaking: "Speaking" })[call.phase] ?? "On a call";
-    return v_flex().id("voice-card").mx(8).mt(4).p(8).gap(8).flex_none().rounded(RADIUS.card).bg(`${green()}1c`).border_1().border_color(`${green()}38`)
-      .child(h_flex().gap(7).items_center()
-        .child(svg("mods/chat/audio-lines.svg").size(13).flex_none().text_color(green()).loop("opacity", { from: 0.45, to: 1, period: 1400 }))
-        .child(div().flex_1().min_w(0).truncate().font_semibold().text_color(t.foreground).child("Shepherdr"))
-        .child(div().flex_none().text_size(TEXT.label).font_medium().text_color(green()).child(`${word} \u00b7 ${clock}`)))
-      // the last thing it said
-      .when(Boolean(call.said), (el) => el.child(div().text_size(TEXT.label).text_color(t.muted).line_clamp(2).child(`\u201c${call.said}\u201d`)))
-      .child(h_flex().gap(6).justify_end()
-        .child(round("voice-mute", 26, call.muted ? t.foreground : t.background, call.muted ? t.background : t.foreground, call.muted ? "mods/chat/mic-off.svg" : "mods/chat/mic.svg", () => req("mute")))
-        .child(round("voice-end", 26, red(), "#ffffff", "mods/chat/x.svg", () => req("end"))));
+    // SHEP-108: one row, its details only (who, what it does, how long; never what was said), then Mute (quiet, solid
+    // while muted) and the red hang-up, as the web's card and phone bar
+    return h_flex().id("voice-card").mx(8).mt(4).py(6).pl(10).pr(6).gap(9).flex_none().items_center().rounded(RADIUS.card).bg(`${green()}1c`).border_1().border_color(`${green()}38`)
+      .child(svg("mods/chat/audio-lines.svg").size(14).flex_none().text_color(green()).loop("opacity", { from: 0.45, to: 1, period: 1400 }))
+      .child(v_flex().flex_1().min_w(0)
+        .child(div().truncate().font_semibold().text_color(t.foreground).child("Shepherdr"))
+        .child(div().truncate().text_size(TEXT.label).font_medium().text_color(green()).child(`${word} \u00b7 ${clock}`)))
+      .child(round("voice-mute", 26, call.muted ? t.foreground : t.raised, call.muted ? t.background : t.muted, call.muted ? "mods/chat/mic-off.svg" : "mods/chat/mic.svg", () => req("mute")))
+      .child(round("voice-end", 26, red(), "#ffffff", "mods/chat/phone-x.svg", () => req("end")));
   }
 
   checkNew(cx) {

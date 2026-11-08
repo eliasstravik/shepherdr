@@ -8,12 +8,13 @@
 import clsx from 'clsx'
 import { useEffect, useState } from 'react'
 import { act, definePlugin, getState, goChat, goPlace, listView, openArtifact, openItem, openTask, placeOf, placesDrawn, registry, setFilter, setUI, shownItem, taskInMiddle, useStore, useUI, visibleChats, type UI } from '@client/kernel.ts'
-import { ic, IconButton, MicIcon, MicOffIcon, RoundButton, useElapsed, WaveIcon, Waves, XIcon } from '@client/ui.tsx'
+import { EndCallIcon, ic, IconButton, MicIcon, MicOffIcon, RoundButton, useElapsed, WaveIcon, Waves, XIcon } from '@client/ui.tsx'
 import { useWindowWidth } from '@client/Frame.tsx'
+import { Dialog } from '@client/rowmenu.tsx'
 import { cancelDictation } from '@plugins/chat/client.tsx'
 import { pageNames, sectionLike, sectionOf } from '@client/Settings.tsx'
 import { openAccept } from '@client/screens/Accept.tsx'
-import { callPhase, lastSaid, muteCall, sendWhere, startCall, stopCall, type Nav, type NavAck } from './call.ts'
+import { callPhase, muteCall, sendWhere, startCall, stopCall, type Nav, type NavAck } from './call.ts'
 import { key, press, resetScreen, screenAction, type Head } from './screen.ts'
 
 /** the Tasks panel's filter for a task state the voice agent named */
@@ -270,30 +271,58 @@ const WORD = { connecting: 'Connecting', listening: 'Listening', thinking: 'Thin
 /** what the call is doing, in a word (Muted whenever the voice isn't speaking and the mic is off) */
 function usePhase() {
   const [phase, set] = useState(callPhase)
-  const [said, setSaid] = useState(lastSaid)
   useEffect(() => {
-    const t = setInterval(() => { set(callPhase()); setSaid((x) => (x.at === lastSaid().at ? x : lastSaid())) }, 150)
+    const t = setInterval(() => set(callPhase()), 150)
     return () => clearInterval(t)
   }, [])
   const muted = useUI((u) => u.callMuted)
-  return { word: muted && phase !== 'speaking' ? 'Muted' : WORD[phase], said: said.text }
+  return { word: muted && phase !== 'speaking' ? 'Muted' : WORD[phase] }
 }
 
-/** Mute and End, round, as the call's own controls everywhere (the card, the strip) */
-function CallControls({ size }: { size: 'card' | 'strip' }) {
+/** SHEP-108: the call's two buttons, one look wherever they show (a phone's bottom bar, the sidebar's card, the strip
+ *  at the top): Mute a quiet grey round that turns solid while muted, End a red round with the hang-up phone. End asks
+ *  first, as the voice does ("Are you sure you want to end the call?"). size: the bottom bar's, or the card's */
+function CallControls({ size }: { size: 'bar' | 'card' }) {
   const muted = useUI((u) => u.callMuted)
-  const btn = size === 'card' ? 'size-8 phone:size-11' : 'size-9'
+  const btn = size === 'bar' ? 'size-14 max-[359px]:size-12' : 'size-8 phone:size-11'
+  const glyph = size === 'bar' ? 'size-5' : ic
   return (
     <>
-      <button type="button" aria-label={muted ? 'Unmute' : 'Mute'} aria-pressed={muted} onClick={toggleMute}
-        className={clsx('press-dim relative grid shrink-0 place-items-center rounded-full bg-bg text-fg shadow-[inset_0_0_0_1px_var(--line2)] after:absolute after:-inset-1 aria-pressed:bg-fg aria-pressed:text-bg aria-pressed:shadow-none', btn)}>
-        {muted ? <MicOffIcon className={ic} /> : <MicIcon className={ic} />}
+      <button type="button" aria-label={muted ? 'Unmute yourself' : 'Mute yourself'} aria-pressed={muted} onClick={toggleMute}
+        className={clsx('press-dim relative grid shrink-0 place-items-center rounded-full bg-bubble text-fg2 after:absolute after:-inset-1 aria-pressed:bg-fg aria-pressed:text-bg', btn)}>
+        {muted ? <MicOffIcon className={glyph} /> : <MicIcon className={glyph} />}
       </button>
-      <button type="button" aria-label="End call" onClick={endCall}
+      <button type="button" aria-label="End call" onClick={askEnd}
         className={clsx('press-dim relative grid shrink-0 place-items-center rounded-full bg-need text-white after:absolute after:-inset-1', btn)}>
-        <XIcon className={ic} />
+        <EndCallIcon className={glyph} />
       </button>
     </>
+  )
+}
+
+/** End's question: open while asked, answered by End call or Cancel */
+let asking = false
+const askers = new Set<() => void>()
+function setAsking(on: boolean) { asking = on; askers.forEach((f) => f()) }
+function askEnd() { setAsking(true) }
+
+/** "Are you sure you want to end the call?", the voice's own words, over everything */
+function EndCallDialog() {
+  const [, tick] = useState(0)
+  useEffect(() => { const f = () => tick((x) => x + 1); askers.add(f); return () => void askers.delete(f) }, [])
+  const on = useUI((u) => u.call)
+  useEffect(() => { if (!on && asking) setAsking(false) }, [on])
+  if (!asking || !on) return null
+  return (
+    <Dialog title="Are you sure you want to end the call?" safe onCancel={() => setAsking(false)}
+      buttons={
+        <button type="button" onClick={() => { setAsking(false); endCall() }}
+          className="press-dim relative inline-flex h-[34px] shrink-0 items-center gap-1.5 rounded-full bg-need px-3.5 font-medium text-white after:absolute after:-inset-1 coarse:h-11 phone:h-11">
+          <EndCallIcon className={ic} /> End call
+        </button>
+      }>
+      <p>Shepherdr stops listening and hangs up.</p>
+    </Dialog>
   )
 }
 
@@ -319,68 +348,58 @@ function ShepherdrRow() {
   )
 }
 
+/** SHEP-108: the call's one place for its details: who, what it is doing and how long, then Mute and End. Never what
+ *  was said: that is the chat's */
 function CallCard() {
   const t = useElapsed(useUI((u) => u.callStarted))
-  const { word, said } = usePhase()
+  const { word } = usePhase()
   return (
-    <section aria-label="Voice call with Shepherdr" data-call-card className={clsx('flex flex-col gap-2 rounded-[10px] p-2.5 pt-2 phone:gap-2.5 phone:p-3', callTint)}>
-      <div className="flex items-center gap-2 text-[0.9375rem]/5 phone:text-base/6">
-        <Waves className="h-3 shrink-0 text-ready-fg" />
-        <h2 className="min-w-0 flex-1 truncate font-semibold text-fg">Shepherdr</h2>
-        <p className="shrink-0 text-[0.75rem] font-medium text-ready-fg tabular-nums phone:text-[0.8125rem]">
+    <section aria-label="Voice call with Shepherdr" data-call-card className={clsx('flex items-center gap-2.5 rounded-[12px] py-1.5 pr-1.5 pl-3 phone:gap-3 phone:py-2 phone:pr-2 phone:pl-3.5', callTint)}>
+      <Waves className="h-3.5 shrink-0 text-ready-fg phone:h-4" />
+      <div className="min-w-0 flex-1">
+        <h2 className="truncate text-[0.9375rem]/5 font-semibold text-fg phone:text-base/6">Shepherdr</h2>
+        <p className="truncate text-[0.75rem]/4 font-medium text-ready-fg tabular-nums phone:text-[0.8125rem]/5">
           <span role="status">{word}</span> · {t}
         </p>
       </div>
-      {said ? <p className="line-clamp-2 text-[0.8125rem]/[1.125rem] text-fg2 phone:text-[0.9375rem]/5">“{said}”</p> : null}
-      <div className="flex items-center justify-end gap-2">
-        <CallControls size="card" />
-      </div>
+      <CallControls size="card" />
     </section>
   )
 }
 
-/** SHEP-105: the phone's voice button, at the end of the bottom bar: Talk to Shepherdr. Quiet grey as the bar's other
- *  round buttons (SHEP-108); on a call the strip's green tint and a green wave, and a tap ends it */
+/** SHEP-105, SHEP-108: the end of a phone's bottom bar. Off a call: Talk to Shepherdr, a quiet grey round. On one:
+ *  Mute and the red hang-up, nothing above the bar (the call's details are the sidebar's card) */
 function PhoneCallButton() {
   const on = useUI((u) => u.call)
-  return (
-    <RoundButton label={on ? 'End the call with Shepherdr' : 'Talk to Shepherdr'} aria-pressed={on}
-      onClick={() => toggleCall(null)}
-      className={clsx('size-14 max-[359px]:size-12', on && clsx(callTint, 'text-ready-fg'))}>
+  return on ? <CallControls size="bar" /> : (
+    <RoundButton label="Talk to Shepherdr" onClick={() => toggleCall(null)} className="size-14 max-[359px]:size-12">
       <WaveIcon className="size-5" />
     </RoundButton>
   )
 }
 
-/** the strip a call shows where no card does: Shepherdr, what it is doing and its clock, Mute and End. Above a phone's
- *  bottom bar, else at the top. */
-function CallStrip({ top }: { top?: boolean }) {
+/** the strip at the top where neither the sidebar's card nor a phone's bottom bar shows: Shepherdr, what it is doing
+ *  and its clock, Mute and End */
+function CallStrip() {
   const t = useElapsed(useUI((u) => u.callStarted))
   const { word } = usePhase()
   return (
-    <div data-call-strip data-topbar={top || undefined} role="group" aria-label="Voice call with Shepherdr"
-      className={clsx('flex shrink-0 items-center gap-2 py-1 pr-1 pl-3.5 text-[0.8125rem] font-medium text-ready-fg tabular-nums', callTint,
-        top ? 'mx-3 mt-2 rounded-full [[data-device=phone]>&:first-child]:mt-[calc(env(safe-area-inset-top)+8px)]' : 'mx-4 mb-1 rounded-full phone:text-[0.9375rem]')}>
+    <div data-call-strip data-topbar role="group" aria-label="Voice call with Shepherdr"
+      className={clsx('mx-3 mt-2 flex shrink-0 items-center gap-2 rounded-full py-1 pr-1 pl-3.5 text-[0.8125rem] font-medium text-ready-fg tabular-nums [[data-device=phone]>&:first-child]:mt-[calc(env(safe-area-inset-top)+8px)] phone:text-[0.9375rem]', callTint)}>
       <Waves className="h-3 shrink-0" />
       <p className="min-w-0 flex-1 truncate">
         <span className="text-fg">Shepherdr</span> · <span role="status">{word}</span> · {t}
       </p>
-      <CallControls size="strip" />
+      <CallControls size="card" />
     </div>
   )
-}
-
-/** a phone's home (chat, tasks, needs, artifacts) with its bottom bar: the strip goes just above the bar */
-function PhoneStrip() {
-  const on = useUI((u) => u.call)
-  return on ? <CallStrip /> : null
 }
 
 /** the strip at the top where no card or bottom bar shows the call: a shut sidebar, a tablet, a phone with a task or
  *  Settings over its home (SHEP-66's band, now with Mute and End) */
 function CallBanner() {
   const on = useUI((u) => u.call)
-  return useTop() && on ? <CallStrip top /> : null
+  return useTop() && on ? <CallStrip /> : null
 }
 
 /** where the call shows at the top: neither the sidebar's card nor a phone's bottom bar is on screen */
@@ -452,9 +471,9 @@ export default definePlugin({
   setup(reg) {
     reg.sideTop.push(ShepherdrRow)
     reg.phoneBar.push(PhoneCallButton)
-    reg.phoneAbove.push(PhoneHelp, PhoneStrip)
+    reg.phoneAbove.push(PhoneHelp)
     reg.topBars.push(CallBanner, TopHelp, CallError, CallWhere)
-    reg.overlays.push(OpenedTag)
+    reg.overlays.push(OpenedTag, EndCallDialog)
     // 3.0 calls with Ctrl+Shift+Space (the keyboard plugin): no V or M keys of its own
   },
 })

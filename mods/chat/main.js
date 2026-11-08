@@ -3885,7 +3885,7 @@ export default class Chat extends View {
       .child(this.liveRow(t, "chat-call",
         this.round("call-mute", `mods/chat/${c.muted ? "mic-off" : "mic"}.svg`, t, c.muted ? "on" : "quiet", (cx) => this.callMute(cx)),
         word, false, c.started,
-        this.round("call-x", "mods/chat/x.svg", t, "danger", (cx) => cx.spawn(async (cx) => { await this.hangup(); cx.notify(); })))));
+        this.round("call-x", "mods/chat/phone-x.svg", t, "danger", (cx) => cx.spawn(async (cx) => { await this.hangup(); cx.notify(); })))));
   }
 
   // The model button before the first message (loadChoice): the same menu, choosing what it starts on.
