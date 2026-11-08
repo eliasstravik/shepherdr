@@ -422,6 +422,50 @@ async function askKey(io, name) {
   return { key: r.key, agent: r.key && typeof r.agent === "string" && /^[\w-]{1,200}$/.test(r.agent) ? r.agent : "", from: name };
 }
 
+// ---- usage -------------------------------------------------------------------------------
+// SHEP-128: what is left of the person's ElevenLabs plan, under Plan usage beside Claude Code's and Codex's (the web's
+// Settings › Machines, the serving machine's block), read with the voice key: GET <API>/user/subscription. Its
+// character_count / character_limit are the plan's credits, refilled at next_character_count_reset_unix (seconds).
+// A key restricted without "User → Read" gets 401 missing_permissions: a plain hint, never an error wall.
+
+export const USAGE_PATH = "/user/subscription";
+export const USAGE_NO_ACCESS = "Give your ElevenLabs key 'User → Read' access to see usage here: elevenlabs.io › Developers › API Keys, edit the key, set User to Read.";
+
+/** ElevenLabs' answer as a plan read (core/machines.js planRows' shape): { state: "ok", plan, account, windows: [Credits] },
+ *  { state: "no-access", why: the hint }, or { state: "unknown", why }. at: when it was read (ms). */
+export function usageRead(status, body, at = Date.now()) {
+  let d = null;
+  try { d = JSON.parse(body); } catch {}
+  if (status === 401 || status === 403) {
+    const det = d?.detail;
+    if (det?.status === "missing_permissions" || /missing.{0,20}permission|user_read/i.test(String(det?.message ?? det ?? ""))) {
+      return { state: "no-access", why: USAGE_NO_ACCESS, at };
+    }
+  }
+  if (status < 200 || status >= 300) return { state: "unknown", why: sttError(status, body), at };
+  const used = Number(d?.character_count), limit = Number(d?.character_limit);
+  if (!Number.isFinite(used) || !Number.isFinite(limit)) return { state: "unknown", why: "ElevenLabs gave no usage numbers.", at };
+  const reset = Number(d?.next_character_count_reset_unix);
+  const n = (x) => Math.round(x).toLocaleString("en-US");
+  const tier = typeof d?.tier === "string" ? d.tier.replace(/_/g, " ").trim().slice(0, 40) : "";
+  return {
+    state: "ok", at,
+    ...(tier ? { plan: tier } : {}),
+    account: limit > 0 ? `${n(used)} of ${n(limit)} credits used` : `${n(used)} credits used`,
+    windows: limit > 0 ? [{ name: "Credits", used: Math.max(0, Math.min(100, (used / limit) * 100)), ...(reset > 0 ? { resets_at: reset * 1000 } : {}) }] : [],
+  };
+}
+
+/** Reads it: the plan read, or null when there is no key (voice isn't set up: nothing shows). key(): voiceKey's answer. */
+export async function readUsage(key, fetchFn = fetch, now = () => Date.now()) {
+  const k = await key();
+  if ("error" in k) return k.why === "none" ? null : { state: "unknown", why: k.error, at: now() };
+  let r;
+  try { r = await fetchFn(`${API}${USAGE_PATH}`, { redirect: "error", headers: { "xi-api-key": k.key }, signal: AbortSignal.timeout(15000) }); }
+  catch { return { state: "unknown", why: "Can't reach ElevenLabs from this machine.", at: now() }; }
+  return usageRead(r.status, await r.text().catch(() => ""), now());
+}
+
 // ---- dictation ----------------------------------------------------------------------------
 // The composer's mic (the window's mods/chat/transcribe.ts, the web app's service/dictate.ts): the recording goes to
 // ElevenLabs speech to text (Scribe) with the same key as a call (voiceKey), the language found from the audio (the
