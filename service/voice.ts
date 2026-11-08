@@ -1,8 +1,10 @@
 // A voice call from the web (2.1's call: the page streams its microphone here as 16 kHz PCM and plays what comes
 // back), as the window's call (mods/chat/voice.ts) with the phone's microphone and speaker: the same ElevenLabs voice
 // agent (core/voice.js), the same key and agent id (<app home>/secrets), its tools answered here (voice-tools.ts:
-// look, open, send, act, with the reach of the person's web app), and the called agent's replies and status said as
-// [Update]s. The page tells where it is (what it shows) as it moves; an open comes back to it as a nav message.
+// look, open, send, act, with the reach of the person's web app). SHEP-105: the call is with Shepherdr itself, not a
+// chat: it hears the chats it sent to and the one on screen, and what needs the person anywhere (voice-hear.ts), as
+// [Update]s held until the person and the voice are quiet. The page tells where it is (what it shows) as it moves; an
+// open comes back to it as a nav message.
 // Nothing is recorded or kept; a key is never sent to the page or logged.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -12,8 +14,10 @@ import { HOME } from "./paths.ts";
 import * as V from "../core/voice.js";
 import { secretBin } from "./secrets.ts";
 import { voiceTool, lookHere, shown, type Ack, type Nav, type VoiceIO, type Where } from "./voice-tools.ts";
+import { hearing, type HearIO } from "./voice-hear.ts";
+export type { ChatView } from "./voice-hear.ts";
 
-const { API, opening, replyLine, statusLine, whereLine, envLines, apiError, voiceKey, ensureAgent, agentFile } = V as any;
+const { API, opening, whereLine, envLines, apiError, voiceKey, ensureAgent, agentFile } = V as any;
 const APP = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
 const SECRETS = join(APP, "secrets");
 
@@ -63,23 +67,32 @@ type Page = { send(x: string | Uint8Array): void; close(): void };
 /** SHEP-102: how long a call holds when its page's socket drops (a phone that locks, a lift, a tunnel): the voice
  *  agent's conversation stays open, and the page comes back to it (resume) with all it was told. */
 export const HOLD_MS = 60_000;
-/** the calls on now, by their id (the page's to come back with; only for the same person and chat) */
-const calls = new Map<string, { who: string; chat: string; call: ReturnType<typeof voiceCall> }>();
-/** a call a page comes back to, if it is still holding, for that person and that chat */
-export function callToResume(id: string, who: string, chat: string) {
+/** the calls on now, by their id (the page's to come back with; only for the same person) */
+const calls = new Map<string, { who: string; call: ReturnType<typeof voiceCall> }>();
+/** a call a page comes back to, if it is still holding, for that person */
+export function callToResume(id: string, who: string) {
   const c = calls.get(id);
-  return c && c.who === who && c.chat === chat ? c.call : null;
+  return c && c.who === who ? c.call : null;
 }
 /** the words the voice agent gets when the page is back: say so, and say again what was cut */
 export const backLine = (secs: number) => ({ type: "user_message",
   text: `[Update] The person's phone lost the call's connection for about ${Math.max(1, Math.round(secs))} s and is back now: they heard nothing of what you said meanwhile. Say you're back in a few words, then repeat briefly anything they missed.` });
-/** What the call reads of its own chat: the agent's last reply and its status (for the [Update]s). */
-export type ChatView = { lastReply(): { id: string; text: string } | null; status(): string | null; asking(): string | null };
+/** how long the person and the voice must both be quiet before the call says its updates (ms) */
+export const QUIET_MS = 1200;
+/** loud enough to be speech: RMS of 16-bit samples above ~2% of full scale */
+const SPEECH = 650;
+/** whether a piece of 16-bit PCM is someone talking */
+export function talking(pcm: Uint8Array) {
+  const b = pcm.byteOffset % 2 ? pcm.slice() : pcm;
+  const s = new Int16Array(b.buffer, b.byteOffset, b.length >> 1);
+  let sum = 0;
+  for (let i = 0; i < s.length; i += 4) sum += s[i] * s[i];
+  return Math.sqrt(sum / Math.max(1, s.length >> 2)) > SPEECH;
+}
 export type CallDeps = {
-  view: ChatView;
   io: VoiceIO;
-  /** keeps the call's chat read while the call is on (its replies are told even with no page on it); the stop */
-  follow(): () => void;
+  /** what the call hears: chats it sent to or the one on screen, and needs anywhere (voice-hear.ts) */
+  hear: HearIO;
   /** the call's start: where it is (the page tells what it shows as it moves) */
   where: Where;
   /** the voice agent's socket address (default: a signed ElevenLabs one for the person's key; a test's fake) */
@@ -110,8 +123,8 @@ export function pageWhere(m: any): Partial<Where> {
 }
 
 /** One call: the page's audio to the voice agent and back. message(): a frame from the page; end(): the page went. */
-export function voiceCall(hub: Hub, who: string, deps: CallDeps, first: Page) {
-  const { view, io } = deps;
+export function voiceCall(hub: Hub, deps: CallDeps, first: Page) {
+  const { io } = deps;
   // the page on the call now; none while its socket is down and the call holds for it (SHEP-102)
   let page: Page | null = first, gone = 0, hold: ReturnType<typeof setTimeout> | null = null;
   const id = crypto.randomUUID();
@@ -128,8 +141,9 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, first: Page) {
   });
   let where = deps.where;
   let ws: WebSocket | null = null, ended = false;
-  let lastStatus = view.status(), lastReply = view.lastReply()?.id ?? null;
-  const unfollow = deps.follow();
+  const hear = hearing(deps.hear);
+  // when the person last talked, until when the voice is talking, and tools running: updates wait for a quiet moment
+  let heardAt = 0, speakUntil = 0, busy = 0;
   const tell = (m: object) => { try { page?.send(JSON.stringify(m)); } catch {} };
   const toVoice = (m: object) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m)); };
   const here = () => { const s = io.snap(); return s ? lookHere(s, where) : ""; };
@@ -141,29 +155,30 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, first: Page) {
     if (hold) clearTimeout(hold);
     clearInterval(watch);
     if (saying) clearTimeout(saying);
-    unfollow();
+    hear.stop();
     for (const done of [...waiting.values()]) done({ ok: false, why: "the call ended" });
     if (why) tell({ type: "error", message: why });
     try { ws?.close(); } catch {}
     try { page?.close(); } catch {}
     page = null;
   };
-  calls.set(id, { who: deps.who ?? "", chat: deps.where.call ?? "", call: null as any });
+  calls.set(id, { who: deps.who ?? "", call: null as any });
   tell({ type: "call", id });
-  // the called agent's replies and status, as the window's chat feeds its call
+  // what the call hears (the chats it follows, needs anywhere), said once nobody is talking
+  hear.onScreen(where);
   const watch = setInterval(() => {
     if (ended) return;
-    const st = view.status();
-    if (st !== lastStatus) { lastStatus = st; const line = statusLine(who, st, view.asking()); if (line) toVoice(line); }
-    const r = view.lastReply();
-    if (r && r.id !== lastReply) { lastReply = r.id; toVoice(replyLine(who, r.text)); }
+    hear.onScreen(where);
+    hear.tick();
+    const t = Date.now();
+    if (ws?.readyState === WebSocket.OPEN && !busy && t - heardAt > QUIET_MS && t > speakUntil + QUIET_MS) for (const line of hear.take()) toVoice(line);
   }, 1000);
 
   (async () => {
     const signed_url = await (deps.dial ?? (() => dialElevenLabs(hub)))();
     if (ended) return;
     ws = new WebSocket(signed_url);
-    ws.onopen = () => { said = here(); toVoice(opening(who, said)); };
+    ws.onopen = () => { said = here(); toVoice(opening(said)); };
     ws.onmessage = async (e) => {
       if (ended) return;
       let m: any;
@@ -179,14 +194,19 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, first: Page) {
       else if (m.type === "agent_response") tell({ type: "state", state: "listening" });
       else if (m.type === "audio" && typeof m.audio_event?.audio_base_64 === "string") {
         const pcm = Buffer.from(m.audio_event.audio_base_64, "base64");
+        speakUntil = Math.max(speakUntil, Date.now()) + (pcm.length / 2 / 16000) * 1000;
         if (pcm.length % 2 === 0) try { page?.send(new Uint8Array(pcm)); } catch {}
       }
-      else if (m.type === "interruption") tell({ type: "interrupt" });
+      else if (m.type === "interruption") { speakUntil = 0; tell({ type: "interrupt" }); }
       else if (m.type === "client_tool_call") {
         const c = m.client_tool_call ?? {};
         tell({ type: "state", state: "thinking" });
-        const a = await shown(await voiceTool(String(c.tool_name ?? ""), c.parameters ?? {}, where, io), show);
-        toVoice({ type: "client_tool_result", tool_call_id: c.tool_call_id, result: a.result, is_error: !!a.error });
+        busy++;
+        try {
+          const a = await shown(await voiceTool(String(c.tool_name ?? ""), c.parameters ?? {}, where, io), show);
+          if (a.sent) hear.sentTo(a.sent);
+          toVoice({ type: "client_tool_result", tool_call_id: c.tool_call_id, result: a.result, is_error: !!a.error });
+        } finally { busy--; }
       }
     };
     ws.onerror = () => end("The voice connection failed.");
@@ -246,6 +266,7 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, first: Page) {
       if (ws?.readyState !== WebSocket.OPEN) return;
       const pcm = Buffer.from(data as ArrayBuffer);
       if (pcm.length > 256 * 1024 || pcm.length % 2) return;
+      if (talking(pcm)) heardAt = Date.now();
       ws.send(JSON.stringify({ user_audio_chunk: pcm.toString("base64") }));
     },
     end: () => end(),
