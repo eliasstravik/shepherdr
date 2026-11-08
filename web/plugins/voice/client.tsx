@@ -2,8 +2,8 @@
 // or task's agent, tells you when they reply or need you, and opens things here (voiceNav; its screen tool reads and
 // acts on this very page, screen.ts, whichever device started the call). It starts from the "Talk to Shepherdr" row at
 // the top of the sidebar, which becomes the call card while it is on (what it last said, Mute, End); on a phone from
-// the voice button beside Search, with a green strip of Mute and End above the bar; and from a chat's call button,
-// which starts the same call with that chat as its "here". Where neither shows (a shut sidebar, a task open on a phone)
+// the voice button at the end of the bottom bar, with a green strip of Mute and End above the bar (a chat's box has no
+// call button since SHEP-108: it is always Send). Where neither shows (a shut sidebar, a task open on a phone)
 // the strip sits at the top. Whatever the voice opens gets an "Opened by voice" tag for a moment.
 import clsx from 'clsx'
 import { useEffect, useState } from 'react'
@@ -259,22 +259,6 @@ export function endCall() {
   act({ type: 'call', chat: ui.callFrom ?? '', on: false })
 }
 
-/** a chat's call button: starts the call with Shepherdr from this chat (its "here"); pressed while a call is on */
-function CallButton({ chatKey }: { chatKey: string }) {
-  const on = useUI((u) => u.call)
-  return (
-    <button
-      type="button"
-      aria-label={on ? 'End the call with Shepherdr' : 'Talk to Shepherdr'}
-      aria-pressed={on}
-      onClick={() => toggleCall(chatKey)}
-      className="press-dim relative grid size-[34px] shrink-0 place-items-center rounded-full bg-fg text-bg after:absolute after:-inset-1.5 aria-pressed:bg-ready phone:size-11"
-    >
-      <WaveIcon />
-    </button>
-  )
-}
-
 export function toggleMute() {
   const on = !getState().ui.callMuted
   muteCall(on)
@@ -355,14 +339,14 @@ function CallCard() {
   )
 }
 
-/** SHEP-105: the phone's voice button, beside Search: Talk to Shepherdr; green while a call is on (a tap ends it, as a
- *  chat's call button) */
+/** SHEP-105: the phone's voice button, at the end of the bottom bar: Talk to Shepherdr. Quiet grey as the bar's other
+ *  round buttons (SHEP-108); on a call the strip's green tint and a green wave, and a tap ends it */
 function PhoneCallButton() {
   const on = useUI((u) => u.call)
   return (
-    <RoundButton label={on ? 'End the call with Shepherdr' : 'Talk to Shepherdr'} pressed={on}
+    <RoundButton label={on ? 'End the call with Shepherdr' : 'Talk to Shepherdr'} aria-pressed={on}
       onClick={() => toggleCall(null)}
-      className={clsx('size-14 bg-fg! text-bg! max-[359px]:size-12', on && 'bg-ready! text-white!')}>
+      className={clsx('size-14 max-[359px]:size-12', on && clsx(callTint, 'text-ready-fg'))}>
       <WaveIcon className="size-5" />
     </RoundButton>
   )
@@ -466,7 +450,6 @@ function CallError() {
 export default definePlugin({
   name: 'voice',
   setup(reg) {
-    reg.composerIdle = CallButton
     reg.sideTop.push(ShepherdrRow)
     reg.phoneBar.push(PhoneCallButton)
     reg.phoneAbove.push(PhoneHelp, PhoneStrip)

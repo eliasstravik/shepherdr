@@ -887,7 +887,8 @@ function PhoneHome({ snap }: { snap: Snapshot }) {
   )
 }
 
-/** Chat | Tasks | Artifacts and Search at the bottom of the phone (3.0 has no Needs you view: it is Tasks' first section) */
+/** Chat | Tasks | Artifacts at the bottom of the phone, then what plugins add (the voice call's button). Search is the
+ *  magnifier at the top of the ☰ drawer (SHEP-108). 3.0 has no Needs you view: it is Tasks' first section */
 function PhoneBar() {
   const tab = useUI((u) => u.tab)
   return (
@@ -910,16 +911,13 @@ function PhoneBar() {
             onClick={() => setUI({ tab: k, pick: null, plus: null, menu: false })}
             className="relative flex h-12 min-w-0 flex-auto items-center justify-center gap-1.5 rounded-full text-[0.875rem] whitespace-nowrap text-fg2 aria-pressed:bg-seg-on aria-pressed:text-fg aria-pressed:shadow-seg max-[359px]:gap-1 max-[359px]:px-1.5 max-[359px]:text-[0.8125rem]"
           >
-            {/* the tabs, Search and the voice button: most phones have room for the words only, a phone in Display Zoom (320px) for fewer */}
+            {/* the tabs and the voice button: most phones have room for the words only, a phone in Display Zoom (320px) for fewer */}
             <Icon className={clsx(ic, 'max-[479px]:hidden')} />
             {k === 'needs' ? <>Needs<span className="max-[359px]:hidden"> you</span></> : l}
             {k === 'tasks' ? <TaskAttention /> : k === 'needs' ? <NeedsAttention /> : null}
           </button>
         ))}
       </div>
-      <RoundButton label="Search" className="size-14 max-[359px]:size-12" onClick={() => setUI({ search: true, searchScope: undefined })}>
-        <SearchIcon className={ic} />
-      </RoundButton>
       {registry.phoneBar.map((View, i) => (
         <View key={i} />
       ))}

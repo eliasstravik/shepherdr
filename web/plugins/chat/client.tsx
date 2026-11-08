@@ -1855,7 +1855,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
   const plus = useUI((u) => u.plus === chatKey)
   const ref = useRef<HTMLTextAreaElement>(null)
   const live = useUI((u) => registry.composerLive.find((l) => l.when(u, chatKey)))
-  const Idle = registry.composerIdle
+  const sendable = !!(text.trim() || files.length)
   const Mic = registry.composerMic
   useEffect(() => {
     if (focused && device === 'desktop') ref.current?.focus()
@@ -1984,7 +1984,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
       <SlashList chatKey={chatKey} text={text} pick={(name) => { setText(`/${name} `); ref.current?.focus() }} />
       <MentionList items={mentions} sel={msel} from={reach?.from ?? null} pick={takeMention} />
       {/* the window's box: the words across its full width, then a row in it of attach on the left and on the right
-          what the agent runs on (the model menu), the mic and Send (or Call); nothing under it. Its corners are half a
+          what the agent runs on (the model menu), the mic and Send; nothing under it. Its corners are half a
           round button and the padding, so the buttons sit in the bottom ones with the same curve round them */}
       <div data-composer className="relative round-box bg-bg p-1.5 shadow-box has-[textarea:focus]:shadow-box-focus">
         {/* what it replies to: one quiet line inside the box, over the words (like WhatsApp and Telegram) */}
@@ -2090,28 +2090,27 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
               <div className="flex-1" />
               <AgentLineKept chatKey={chatKey} cli={cli} />
               {Mic ? <MicKept chatKey={chatKey} /> : null}
-              {text.trim() || files.length || !Idle ? (
-                <button
+              {/* always Send (SHEP-108): quiet while there is nothing to send, filled once there is. A call is with
+                  Shepherdr itself (the sidebar's top, a phone's bottom bar), never from a chat's box */}
+              <button
                   type="button"
-                  aria-label="Send"
-                  // Shepherdr 3 on a phone: a long press on Send holds it until the agent is free (the phone's Ctrl+Enter)
-                  onPointerDown={() => { held.current = false; holdTimer.current = setTimeout(() => { held.current = true; buzz(); send(true) }, 500) }}
-                  onPointerUp={() => clearTimeout(holdTimer.current)}
-                  onPointerLeave={() => clearTimeout(holdTimer.current)}
-                  onContextMenu={(e) => e.preventDefault()}
-                  onClick={() => {
-                    if (held.current) return
-                    // a light tap from the phone as it goes, like ChatGPT's
-                    if (matchMedia('(pointer: coarse)').matches) buzz()
-                    send()
-                  }}
-                  className="press-dim relative grid size-[34px] shrink-0 place-items-center rounded-full bg-fg text-bg after:absolute after:-inset-1.5 phone:size-11"
-                >
-                  <UpIcon className={ic} />
-                </button>
-              ) : (
-                <Idle chatKey={chatKey} />
-              )}
+                aria-label="Send"
+                disabled={!sendable}
+                // Shepherdr 3 on a phone: a long press on Send holds it until the agent is free (the phone's Ctrl+Enter)
+                onPointerDown={() => { held.current = false; holdTimer.current = setTimeout(() => { held.current = true; buzz(); send(true) }, 500) }}
+                onPointerUp={() => clearTimeout(holdTimer.current)}
+                onPointerLeave={() => clearTimeout(holdTimer.current)}
+                onContextMenu={(e) => e.preventDefault()}
+                onClick={() => {
+                  if (held.current) return
+                  // a light tap from the phone as it goes, like ChatGPT's
+                  if (matchMedia('(pointer: coarse)').matches) buzz()
+                  send()
+                }}
+                className="press-dim relative grid size-[34px] shrink-0 place-items-center rounded-full bg-fg text-bg after:absolute after:-inset-1.5 disabled:bg-bubble disabled:text-fg3 phone:size-11"
+              >
+                <UpIcon className={ic} />
+              </button>
             </div>
           </>
         )}
