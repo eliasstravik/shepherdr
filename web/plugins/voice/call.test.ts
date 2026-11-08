@@ -245,3 +245,17 @@ test('SHEP-113: the call shows Listening, Thinking, Working (what, in plain word
   ws.say({ type: 'state', state: 'listening' })
   expect(call.callPhase()).toBe('listening')
 })
+
+test('SHEP-124: a voice action minimizes the full-screen call, but not call_view, a look, or a click that opened it', async () => {
+  const { stepsAside } = await import('./call.ts')
+  // opening things while full screen: minimized, so the person sees it
+  expect(stepsAside({ kind: 'artifact', artifact: 'a1' }, true, true, true)).toBe(true)
+  expect(stepsAside({ kind: 'screen', do: 'click', ref: 'e3' }, true, true, true)).toBe(true)
+  // failed: nothing changed
+  expect(stepsAside({ kind: 'space', place: 'sp1' }, false, true, true)).toBe(false)
+  // reading the screen changes nothing; call_view sets the view itself
+  expect(stepsAside({ kind: 'screen', do: 'look' }, true, true, true)).toBe(false)
+  expect(stepsAside({ kind: 'call', full: true }, true, false, true)).toBe(false)
+  // the bug: a screen click on "Open the call full screen" went full screen, then was minimized at once
+  expect(stepsAside({ kind: 'screen', do: 'click', ref: 'e9' }, true, false, true)).toBe(false)
+})

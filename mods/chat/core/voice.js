@@ -1,6 +1,6 @@
 // A voice call, as the same on both sides: the window's call (mods/chat/voice.ts, the machine's microphone and
 // speaker) and the web app's (service/voice.ts, the phone's). An ElevenLabs voice agent talks with the person and
-// reads, opens and changes Shepherdr for them through four client tools (look, open, send, act), which the service
+// reads, opens and changes Shepherdr for them through four client tools (look, open, send, act) and call_view (the web call's full screen or minimized), which the service
 // answers, and, for whatever those can't do, a fifth: screen, which reads and acts on the very screen the call runs on
 // (core/screen.js; the page or the window does it) (service/voice-tools.ts; the window's call asks its machine's service).
 // SHEP-105: a call is with Shepherdr itself, not one chat: it is told, as [Update] lines, the replies and status of the
@@ -29,6 +29,7 @@ Your tools:
 - send: write in a chat as the person: any space's Assistant or a task's agent (by its name or id), or "here": the chat on screen.
 - act: change things directly (accept, start, schedule, stop, rename, Autopilot, settings...).
 - screen: the person's screen itself, for anything the tools above can't do: look lists what is on it as numbered things (e12 button "Close"), then click, type, select, scroll, a key, back or close act on one, and its answer is the screen again.
+- call_view: the call's own view in the web app: full (the call fills the screen) or minimized (the app shows, the call in its bar). "Back to the call", "maximize the call", "full screen": call_view full. "Minimize the call", "hide the call": call_view minimized. Never screen for this.
 
 How you speak (a voice call: this matters most):
 - One or two short sentences a turn, never more, then stop. Answer only what was asked: the gist, not every detail a tool gave (leave out numbers like percentages and pull requests unless asked).
@@ -38,7 +39,8 @@ How you speak (a voice call: this matters most):
 - Silence is fine. If the person says nothing, say nothing: never ask if they're there or want something. Just wait.
 - Speak the language the person speaks: English at first, theirs as soon as they speak another (switch with language_detection), back when they go back, any number of times. The exact words below are English: say them in the call's language.
 
-Moving around (switch to a space or chat, open a task, tab, panel, artifact or Settings, go back, close, scroll):
+Moving around (switch to a space or chat, open a task, tab, panel, artifact or Settings, go back, close, scroll, the call's view):
+- Opening or moving around minimizes a full-screen call by itself, so the person sees it: no call_view first.
 - Once the tool's answer says ok, reply with one word: "Opened.", "Switched.", "Closed." or "Done." Nothing else: no sentence, nothing about what is on screen, no offer.
 - Only if it failed or more than one thing fits, say so in a few words, without listing the rest: "No banana space.", or for two spaces called Home, "Two Home spaces: <machine> or <machine>?" with the machines' real names.
 - Say what is on screen only when the person asks what it shows.
@@ -76,6 +78,8 @@ const tool = (name, description, props, required = [], speech = "force") =>
 export const LOOKS = ["here", "chat", "spaces", "machines", "tasks", "task", "needs", "news", "autopilot", "automations", "settings", "secrets", "artifacts", "data"];
 export const OPENS = ["space", "task", "tasks", "needs", "artifacts", "files", "changes", "terminal", "artifact", "settings", "chat"];
 export const TABS = ["chat", "terminal", "files", "changes", "pr", "browser", "review"];
+/** the call's own view (call_view): full screen or minimized */
+export const VIEWS = ["full", "minimized"];
 export const ACTS = ["accept", "start", "schedule", "unschedule", "stop", "resume", "done", "reopen", "delete", "pin", "unpin",
   "autopilot_on", "autopilot_off", "autopilot_run", "rename_space", "remove_space", "setting", "forget_secret", "delete_artifact"];
 
@@ -113,6 +117,10 @@ export const TOOLS = [
     value: { type: "string", description: "The new value: a time for schedule, a name for rename_space, a setting's value." },
     confirmed: { type: "boolean", description: "True only after the person said yes to exactly this on the call." },
   }, ["action", "confirmed"]),
+  // SHEP-124: the call's own view, never by screen clicks (the web app's full-screen call, SHEP-118)
+  tool("call_view", "Show the call full screen (full: the call fills the person's screen) or minimize it (minimized: the app shows, the call in its bar). The web app's call only. Opening things minimizes it by itself.", {
+    view: { type: "string", enum: VIEWS, description: "full: the full-screen call. minimized: the app, with the call in its bar." },
+  }, ["view"], "auto"),
 ];
 
 /** What the agent says first: short, then it listens. */
@@ -268,6 +276,7 @@ export function toolWords(name, params = {}) {
   if (name === "send") { const to = s(p.to); return !to || to === "here" ? "sending to this chat" : `sending to ${to}`; }
   if (name === "act") return p.confirmed === true ? ACT_WORDS[p.action] ?? "making the change" : "checking";
   if (name === "screen") return p.do === "look" ? "reading the screen" : "using the screen";
+  if (name === "call_view") return p.view === "full" ? "showing the call" : "minimizing the call";
   return "working";
 }
 

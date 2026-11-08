@@ -119,7 +119,7 @@ async function dialElevenLabs(hub: Hub) {
 /** The page's "where" message, checked: what it shows now. */
 export function pageWhere(m: any): Partial<Where> {
   const s = (v: unknown, n = 200) => (typeof v === "string" && v.length <= n ? v : null);
-  return { device: s(m.device, 20), place: s(m.place), task: s(m.task), tab: s(m.tab, 40), artifact: s(m.artifact), settings: m.settings === true };
+  return { device: s(m.device, 20), place: s(m.place), task: s(m.task), tab: s(m.tab, 40), artifact: s(m.artifact), settings: m.settings === true, ...(typeof m.full === "boolean" ? { full: m.full } : {}) };
 }
 
 /** One call: the page's audio to the voice agent and back. message(): a frame from the page; end(): the page went. */

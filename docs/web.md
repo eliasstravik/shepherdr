@@ -73,7 +73,9 @@ connection it came on). A page from anywhere else can't change anything: writes 
   SHEP-118: a web call opens full screen (always dark: Shepherdr, its clock, an orb that breathes while it listens,
   swells with whoever speaks, swirls while it thinks or works and greys while muted; only Minimize, Mute and End).
   Minimized, the card, bar and strip show Full screen where Mute was: Mute is the full-screen view's only. Whatever
-  the voice opens or does on the page minimizes it, and its screen tool never reads it (`[data-call-screen]`). `/api/voice` takes
+  the voice opens or does on the page minimizes it, and its screen tool never reads it (`[data-call-screen]`). SHEP-124:
+  the agent's own `call_view` tool (full or minimized, a `{ kind: "call" }` nav) sets the view, never screen clicks; an
+  action that itself made the call full screen isn't minimized again (`stepsAside`). `/api/voice` takes
   no chat. What it hears (`service/voice-hear.ts`): the replies and status of every chat it sent to and of the one on
   screen, and anything new anywhere that needs the person (a question, a secret, a task Ready), queued until the
   person and the voice are both quiet, several said as one. The window's call asks `POST /api/voice/hear` for the same.

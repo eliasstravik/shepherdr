@@ -27,6 +27,8 @@ export type Where = {
   tab?: string | null;
   artifact?: string | null;
   settings?: boolean;
+  /** the web call fills the screen (SHEP-118), else it is minimized */
+  full?: boolean;
 };
 
 /** Something to show in the app the call runs in (the page's kernel, or the window's chat mod). */
@@ -39,7 +41,9 @@ export type Nav =
   | { kind: "needs" }
   | { kind: "artifact"; artifact: string; title: string; v: number; machine?: string | null }
   | { kind: "settings"; section?: string }
-  | { kind: "chat"; chat: string; addr?: string | null };
+  | { kind: "chat"; chat: string; addr?: string | null }
+  /** SHEP-124: the web call's own view: full screen (full) or minimized */
+  | { kind: "call"; full: boolean };
 
 export type ChatRead = { status: string | null; doing?: string | null; items: { who: "you" | "agent" | "news"; text: string; at?: number }[]; earlier?: () => Promise<boolean> };
 
@@ -301,6 +305,7 @@ export function lookHere(snap: Snapshot, where: Where) {
   const a = where.artifact ? snap.artifacts.find((x) => x.id === where.artifact) : null;
   if (a) shows.push(`the artifact "${cut(a.title, 80)}"`);
   if (shows.length) out.push(`The app shows ${shows.join(", ")}.`);
+  if (where.client === "web" && typeof where.full === "boolean") out.push(where.full ? "The call fills the screen (full screen) over the app." : "The call is minimized: the app shows.");
   const need = snap.needs.length, ready = snap.tasks.filter((x) => x.status === "ready" && !x.archived).length, work = snap.tasks.filter((x) => x.status === "work" && !x.archived).length;
   out.push(`Overall: ${need} waiting on the person, ${ready} ready for review, ${work} working.`);
   return out.join(" ");
@@ -623,6 +628,13 @@ export async function voiceTool(name: string, params: any, where: Where, io: Voi
       return { ...done(`Sent to ${c.name}. Say "Passed it to ${c.name}." and nothing else: its reply comes later as an [Update].`), sent: c.key };
     }
     if (name === "act") return await act(snap, where, io, p, id);
+    if (name === "call_view") {
+      // SHEP-124: the call's view, set by the page itself (never clicks on the screen)
+      const view = String(p.view ?? "");
+      if (view !== "full" && view !== "minimized") return fail("call_view's view is full or minimized.");
+      if (where.client !== "web") return fail("This call runs in the Herdr window, which has no full-screen call.");
+      return view === "full" ? showing("the full-screen call", { kind: "call", full: true }) : showing("the app, with the call minimized", { kind: "call", full: false });
+    }
     if (name === "screen") {
       const q = screenParams(p) as any;
       if (q.error) return fail(q.error);

@@ -83,6 +83,15 @@ let waiting: ArrayBuffer[] = []
 /** what the voice agent asked to show (service/voice-tools.ts Nav), done by the page */
 export type Nav = { kind: string; [k: string]: unknown }
 
+/** SHEP-118, SHEP-124: whether a voice action that worked minimizes the full-screen call afterwards, so the person sees
+ *  what it did: not the call's own view (call_view), not a screen look, and not an action that itself made the call
+ *  full screen (a screen click on its Full screen button: it used to be minimized again at once) */
+export function stepsAside(nav: Nav, ok: boolean, fullBefore: boolean, fullAfter: boolean) {
+  if (!ok || nav.kind === 'call') return false
+  if (nav.kind === 'screen' && nav.do === 'look') return false
+  return !(fullAfter && !fullBefore)
+}
+
 /** what the page shows now, for the voice agent's "here" and "this task" (sent as it changes) */
 export function sendWhere(where: Record<string, unknown>) {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'where', ...where }))

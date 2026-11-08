@@ -61,8 +61,8 @@ test("one kept for another key isn't used: a new one", async () => {
   expect(await ensureAgent(f.io)).toBe("agent_new");
 });
 
-test("the spec: five client tools (screen the fallback), a version that follows its words, and a file without the key", () => {
-  expect(TOOLS.map((t) => t.name)).toEqual(["look", "open", "send", "screen", "act"]);
+test("the spec: six client tools (screen the fallback, call_view the call's own view), a version that follows its words, and a file without the key", () => {
+  expect(TOOLS.map((t) => t.name)).toEqual(["look", "open", "send", "screen", "act", "call_view"]);
   for (const t of TOOLS) { expect(t.type).toBe("client"); expect(t.expects_response).toBe(true); expect(t.response_timeout_secs).toBeLessThanOrEqual(120); }
   expect(TOOLS.find((t) => t.name === "act").parameters.required).toContain("confirmed");
   expect(SPEC).toBe(specTag(agentSpec()));
@@ -77,7 +77,7 @@ test("the spec: five client tools (screen the fallback), a version that follows 
 test("SHEP-67: ends the call itself after a yes, waits quietly through silence, speaks briefly", () => {
   const c = agentSpec().conversation_config;
   // ElevenLabs' end_call and skip_turn, listed with ours (a separate built_in_tools field beside inline tools is dropped)
-  expect(c.agent.prompt.tools.map((t) => t.name)).toEqual(["look", "open", "send", "screen", "act", "end_call", "skip_turn", "language_detection"]);
+  expect(c.agent.prompt.tools.map((t) => t.name)).toEqual(["look", "open", "send", "screen", "act", "call_view", "end_call", "skip_turn", "language_detection"]);
   expect(SYSTEM_TOOLS.map((t) => [t.type, t.params.system_tool_type])).toEqual([["system", "end_call"], ["system", "skip_turn"], ["system", "language_detection"]]);
   expect(c.agent.prompt.built_in_tools).toBeUndefined();
   // no "are you there?" after a silence; only a 15-minute silence or an hour-long call ends it
@@ -149,7 +149,7 @@ test("SHEP-105: one Shepherdr voice for everything, never tied to the chat it st
 test("SHEP-113: a word before a slow tool, a filler for a slow reply, a sound while a tool runs, the ask first", () => {
   const c = agentSpec().conversation_config;
   // ElevenLabs' pre-tool speech: always before look, send and act; ElevenLabs decides for the quick open and screen
-  expect(Object.fromEntries(TOOLS.map((t) => [t.name, t.pre_tool_speech]))).toEqual({ look: "force", open: "auto", send: "force", screen: "auto", act: "force" });
+  expect(Object.fromEntries(TOOLS.map((t) => [t.name, t.pre_tool_speech]))).toEqual({ look: "force", open: "auto", send: "force", screen: "auto", act: "force", call_view: "auto" });
   for (const t of TOOLS) { expect(t.force_pre_tool_speech).toBeUndefined(); expect(t.tool_call_sound).toBe("typing"); expect(t.tool_call_sound_behavior).toBe("auto"); }
   // a slow model: a short filler of its own after 3 s (within ElevenLabs' 0.5..8)
   const soft = c.turn.soft_timeout_config;
@@ -173,6 +173,8 @@ test("SHEP-113: what a tool is doing, in plain words", () => {
   expect(toolWords("act", { action: "accept", confirmed: true })).toBe("accepting the task");
   expect(toolWords("act", { action: "accept", confirmed: false })).toBe("checking");
   expect(toolWords("screen", { do: "click" })).toBe("using the screen");
+  expect(toolWords("call_view", { view: "full" })).toBe("showing the call");
+  expect(toolWords("call_view", { view: "minimized" })).toBe("minimizing the call");
   expect(toolWords("open", { what: "task" })).toBe("opening it");
   expect(toolWords("whatever")).toBe("working");
 });
@@ -194,4 +196,14 @@ test("SHEP-113: the person's ask holds the updates until it is answered, tools a
   g.seen("user_transcript", 10000);
   expect(g.holding(39000)).toBe(true);
   expect(g.holding(41000)).toBe(false);
+});
+
+test("SHEP-124: call_view sets the call's own view (full or minimized), never screen clicks; opening minimizes by itself", () => {
+  const t = TOOLS.find((x) => x.name === "call_view");
+  expect(t.parameters.required).toEqual(["view"]);
+  expect(t.parameters.properties.view.enum).toEqual(["full", "minimized"]);
+  const p = prompt();
+  expect(p).toContain('"Back to the call", "maximize the call", "full screen": call_view full');
+  expect(p).toContain("Never screen for this.");
+  expect(p).toContain("Opening or moving around minimizes a full-screen call by itself");
 });
