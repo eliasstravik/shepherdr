@@ -483,6 +483,8 @@ async function doAction(body: any): Promise<Response> {
   if (body?.type === "usage") return json({ ok: true, on: record(Array.isArray(body.events) ? body.events : []) });
   if (body?.type === "setting" && body.key === "insights.delete") {
     const missed = await deleteAll(model.machineNames(), async (args) => (await hcRun(args)).code === 0);
+    // the window's open view counts from now (lib/usage.js; the bridge brings it there)
+    await store.set("usage.deletedAt", Date.now());
     return json(missed.length ? { ok: false, error: SC.INSIGHTS.missed(missed.join(", ")) } : { ok: true });
   }
   if (body?.type === "setting" && typeof body.key === "string" && /^(window|addon)\./.test(body.key)) {

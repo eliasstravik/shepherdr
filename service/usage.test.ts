@@ -39,3 +39,12 @@ test("a batch still on its way after Delete doesn't bring older events back", as
   record([{ kind: "view", from: "web", view: "place", at: after - 60_000 }, { kind: "view", from: "web", view: "task", at: after }], true);
   expect(read()).toEqual([{ at: after, kind: "view", from: "web", view: "task" }]);
 });
+
+test("a view that began before Delete keeps only its time after it", async () => {
+  await deleteAll([], async () => true);
+  const now = Date.now() + 5000;
+  record([{ kind: "view", from: "web", view: "place", at: now, ms: 3_600_000 }], true);
+  const [e] = read();
+  expect(e.ms).toBeLessThanOrEqual(5100);
+  expect(e.ms).toBeGreaterThan(4000);
+});

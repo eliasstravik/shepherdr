@@ -155,7 +155,7 @@ When the person asks how they use Shepherdr, or for tips to work better in it, r
 - Autopilot wakes: `~/.herdr/tasks/.autopilot.json` (each space's last wakes: `at`, `reason`, `outcome`).
 - Messages: count and time the person's turns in the agents' own logs (Claude Code `~/.claude/projects/*/*.jsonl`, Codex `~/.codex/sessions`), never their words. The usage log has the sends from the web, a phone, the window and calls; the rest were typed in a terminal.
 - Other machines: the same files there (`hc exec --on <machine> -- cat ~/.herdr/shepherdr/usage.jsonl`), when the person asks about them too.
-- An empty log: Usage insights may be off (Settings > Window > Add-ons); say so. Deleting it is the Delete under that switch, or, when the person asks you, `rm -f ~/.herdr/shepherdr/usage.jsonl ~/.herdr/shepherdr/usage.1.jsonl` on each machine.
+- An empty log: Usage insights may be off (Settings > Window > Add-ons); say so. Deleting it is the Delete under that switch, or, when the person asks you, on each machine: `rm -f ~/.herdr/shepherdr/usage.jsonl ~/.herdr/shepherdr/usage.1.jsonl && touch ~/.herdr/shepherdr/usage.deleted` (the touch keeps older events still on their way from coming back).
 
 ## Secrets
 

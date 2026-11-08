@@ -24,7 +24,10 @@ const deletedAt = () => { try { return statSync(join(DATA, DELETED)).mtimeMs; } 
 export function record(events: unknown[], on = insightsOn()): boolean {
   if (!on) return false;
   const cut = deletedAt();
-  const text: string = lines(events.filter((e: any) => !(typeof e?.at === "number" && e.at < cut)));
+  // an event before it goes; a view that began before it counts only its time after it
+  const kept = events.filter((e: any) => !(typeof e?.at === "number" && e.at < cut))
+    .map((e: any) => (typeof e?.at === "number" && typeof e.ms === "number" && e.at - e.ms < cut ? { ...e, ms: Math.max(0, Math.round(e.at - cut)) } : e));
+  const text: string = lines(kept);
   if (!text) return true;
   try {
     mkdirSync(DATA, { recursive: true, mode: 0o700 });

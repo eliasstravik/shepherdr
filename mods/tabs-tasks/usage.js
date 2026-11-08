@@ -6,7 +6,7 @@
 //   note(kind, fields)           one event from the window
 //   watchViews(cx)               the shown space and tab, and the time on each (the tab bar's init, once)
 
-import { exec, home, focused, window as win } from "herdr";
+import { exec, home, focused, shared, window as win } from "herdr";
 import { on } from "./addons.js";
 import { lines, APPEND, CAP } from "./core/usage.js";
 
@@ -26,7 +26,9 @@ function look() {
   const key = f ? `${f.space}\t${f.tab}` : "";
   if (shown?.key === key) return;
   const now = Date.now();
-  if (shown?.key) note("view", { view: "tab", space: shown.space, tab: shown.tab, ms: now - shown.since });
+  // a Delete since it began (Settings, here or on the web: shared "usage.deletedAt"): only the time after it counts
+  const since = Math.max(shown?.since ?? 0, Number(shared("usage.deletedAt")) || 0);
+  if (shown?.key) note("view", { view: "tab", space: shown.space, tab: shown.tab, ms: Math.max(0, now - since) });
   shown = { key, space: f?.space, tab: f?.tab, since: now };
 }
 

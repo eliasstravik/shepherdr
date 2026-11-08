@@ -35,6 +35,8 @@ function deleteUsage(cx) {
   cx.spawn(async (cx) => {
     const run = (on) => exec("sh", ["-c", DELETE], on ? { on } : {}).then((r) => r?.code === 0).catch(() => false);
     await run(null);
+    // the window's open view counts from now (lib/usage.js)
+    setShared("usage.deletedAt", Date.now());
     const others = machines().map((m) => m.name).filter(Boolean);
     const missed = (await Promise.all(others.map(async (m) => ((await run(m)) ? null : m)))).filter(Boolean);
     deleted = missed.length ? INSIGHTS.missed(missed.join(", ")) : INSIGHTS.done;
