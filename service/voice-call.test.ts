@@ -204,3 +204,35 @@ test("SHEP-102: a page that never comes back: the call ends once the hold is up;
   expect(callToResume(id2, "person@example.com")).toBeNull();
   expect(d.attach(bare().p)).toBe(false);
 });
+
+// SHEP-105: what the call hears waits for a quiet moment: nothing is said over the person, then it comes as one line.
+test("SHEP-105: updates wait while the person talks, then come together; a send follows that chat", async () => {
+  agent = null;
+  const box = { reply: null as null | { id: string; text: string } };
+  const hearIO: HearIO = { snap: () => snap, view: (key) => (key === "p:h1" ? { lastReply: () => box.reply, status: () => "idle", asking: () => null } : null), follow: () => () => {} };
+  const p = page(null);
+  const sent: string[] = [];
+  const c = voiceCall({} as any, { io: { ...io, send: async (k) => { sent.push(k); } }, hear: hearIO, where: { client: "web", device: "phone", machine: "box" }, dial: async () => `ws://127.0.0.1:${server.port}/` }, p as any);
+  await until(() => !!agent);
+  await Bun.sleep(100);
+  // a sidebar call with no chat: the opening says it is with Shepherdr
+  const open = heard.findLast((m) => m.type === "conversation_initiation_client_data");
+  expect(open.conversation_config_override.agent.prompt.prompt).toContain("It is with Shepherdr, not one agent");
+  // send to Home: followed from now on
+  const n = results.length;
+  agent.send(JSON.stringify({ type: "client_tool_call", client_tool_call: { tool_name: "send", tool_call_id: "s1", parameters: { to: "home on this computer", text: "Check the build" } } }));
+  await until(() => results.length > n);
+  expect(sent).toEqual(["p:h1"]);
+  // the person keeps talking while a reply comes in
+  const loud = new Uint8Array(new Int16Array(1600).map((_, i) => (i % 2 ? 5000 : -5000)).buffer);
+  const before = heard.length;
+  box.reply = { id: "r1", text: "The build is green." };
+  for (let i = 0; i < 6; i++) { c.message(Buffer.from(loud)); await Bun.sleep(300); }
+  expect(heard.slice(before).some((m) => m.type === "user_message")).toBe(false);
+  // quiet: said once
+  await until(() => heard.slice(before).some((m) => m.type === "user_message"));
+  const said = heard.slice(before).filter((m) => m.type === "user_message");
+  expect(said).toHaveLength(1);
+  expect(said[0].text).toContain('the Home Assistant replied: """The build is green."""');
+  c.end();
+}, 10000);
