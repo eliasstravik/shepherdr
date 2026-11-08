@@ -216,7 +216,10 @@ export default class Spaces extends View {
     this.calling = true;
     const secs = Math.max(0, Math.floor((Date.now() - (call.started ?? Date.now())) / 1000));
     const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
-    const word = call.muted && call.phase !== "speaking" ? "Muted" : ({ connecting: "Connecting", listening: "Listening", thinking: "Thinking", speaking: "Speaking" })[call.phase] ?? "On a call";
+    // SHEP-113: Listening, Thinking, Working with what it does, Speaking (Muted never hides that it heard)
+    const word = call.muted && (call.phase === "listening" || call.phase === "connecting") ? "Muted"
+      : call.phase === "working" && call.doing ? `Working: ${call.doing}`
+      : ({ connecting: "Connecting", listening: "Listening", thinking: "Thinking", working: "Working", speaking: "Speaking" })[call.phase] ?? "On a call";
     // SHEP-108: one row, its details only (who, what it does, how long; never what was said), then Mute (quiet, solid
     // while muted) and the red hang-up, as the web's card and phone bar
     return h_flex().id("voice-card").mx(8).mt(4).py(6).pl(10).pr(6).gap(9).flex_none().items_center().rounded(RADIUS.card).bg(`${green()}1c`).border_1().border_color(`${green()}38`)

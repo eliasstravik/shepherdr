@@ -224,3 +224,24 @@ test("a socket that never got a call (the server refused it) is an error at once
   await p
   expect(errors).toEqual(['The voice connection failed. Start a new call.'])
 })
+
+test('SHEP-113: the call shows Listening, Thinking, Working (what, in plain words) and Speaking from its real events', async () => {
+  const ws = await start()
+  ws.say({ type: 'state', state: 'listening' })
+  expect([call.callPhase(), call.callDoing()]).toEqual(['listening', ''])
+  ws.say({ type: 'state', state: 'thinking' })
+  expect(call.callPhase()).toBe('thinking')
+  ws.say({ type: 'state', state: 'working', doing: 'checking tasks' })
+  expect([call.callPhase(), call.callDoing()]).toEqual(['working', 'checking tasks'])
+  // its "On it." plays: Speaking while it plays, and still Working after (the tool runs on)
+  const ctx = FakeContext.last
+  ws.onmessage?.({ data: new Int16Array(1600).buffer })
+  expect(call.callPhase()).toBe('speaking')
+  ctx.currentTime = 1
+  expect([call.callPhase(), call.callDoing()]).toEqual(['working', 'checking tasks'])
+  // the tool's result: thinking about the answer, then listening once it's said
+  ws.say({ type: 'state', state: 'thinking' })
+  expect([call.callPhase(), call.callDoing()]).toEqual(['thinking', ''])
+  ws.say({ type: 'state', state: 'listening' })
+  expect(call.callPhase()).toBe('listening')
+})

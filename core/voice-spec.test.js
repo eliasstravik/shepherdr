@@ -1,7 +1,7 @@
 // The voice agent's spec reaches agents made before (ensureAgent): kept and up to date, nothing asked; from another
 // spec, PATCHed (and the tools it replaced removed); gone from ElevenLabs, made again; made with another key, a new one.
 import { expect, test } from "bun:test";
-import { ensureAgent, agentSpec, SPEC, specTag, TOOLS, SYSTEM_TOOLS, agentFile, envLines, opening, prompt, FIRST, LANGUAGES, TTS_MODEL, batchLines, needLine, replyLine } from "./voice.js";
+import { ensureAgent, agentSpec, SPEC, specTag, TOOLS, SYSTEM_TOOLS, agentFile, envLines, opening, prompt, FIRST, LANGUAGES, TTS_MODEL, batchLines, needLine, replyLine, toolWords, turnGate } from "./voice.js";
 
 function fake(o = {}) {
   const calls = [], saved = [];
@@ -81,7 +81,7 @@ test("SHEP-67: ends the call itself after a yes, waits quietly through silence, 
   expect(SYSTEM_TOOLS.map((t) => [t.type, t.params.system_tool_type])).toEqual([["system", "end_call"], ["system", "skip_turn"], ["system", "language_detection"]]);
   expect(c.agent.prompt.built_in_tools).toBeUndefined();
   // no "are you there?" after a silence; only a 15-minute silence or an hour-long call ends it
-  expect(c.turn).toEqual({ turn_timeout: -1, silence_end_call_timeout: 900 });
+  expect(c.turn).toMatchObject({ turn_timeout: -1, silence_end_call_timeout: 900 });
   expect(c.conversation.max_duration_seconds).toBe(3600);
   // a short hello, on the spec and on each call
   expect(c.agent.first_message).toBe(FIRST);
@@ -144,4 +144,54 @@ test("SHEP-105: one Shepherdr voice for everything, never tied to the chat it st
   expect(two.map((l) => l.type)).toEqual(["contextual_update", "user_message"]);
   expect(two[1].text).toContain("2 things came in together");
   expect(two[1].text).toContain("TEST-7 is ready for review");
+});
+
+test("SHEP-113: a word before a slow tool, a filler for a slow reply, a sound while a tool runs, the ask first", () => {
+  const c = agentSpec().conversation_config;
+  // ElevenLabs' pre-tool speech: always before look, send and act; ElevenLabs decides for the quick open and screen
+  expect(Object.fromEntries(TOOLS.map((t) => [t.name, t.pre_tool_speech]))).toEqual({ look: "force", open: "auto", send: "force", screen: "auto", act: "force" });
+  for (const t of TOOLS) { expect(t.force_pre_tool_speech).toBeUndefined(); expect(t.tool_call_sound).toBe("typing"); expect(t.tool_call_sound_behavior).toBe("auto"); }
+  // a slow model: a short filler of its own after 3 s (within ElevenLabs' 0.5..8)
+  const soft = c.turn.soft_timeout_config;
+  expect(soft.timeout_seconds).toBeGreaterThanOrEqual(0.5);
+  expect(soft.timeout_seconds).toBeLessThanOrEqual(8);
+  expect(soft.use_llm_generated_message).toBe(true);
+  expect(soft.message.length).toBeLessThanOrEqual(200);
+  const p = prompt();
+  expect(p).toContain('first say one or two words in the call\'s language ("On it.", "Checking."), never a sentence');
+  expect(p).toContain("The person's ask comes first");
+  expect(p).toContain("Never start a reply with an [Update].");
+  // still one word after a move (SHEP-83)
+  expect(p).toContain('reply with one word: "Opened."');
+});
+
+test("SHEP-113: what a tool is doing, in plain words", () => {
+  expect(toolWords("look", { what: "tasks" })).toBe("checking tasks");
+  expect(toolWords("look", { what: "nope" })).toBe("looking");
+  expect(toolWords("send", { to: "shop" })).toBe("sending to shop");
+  expect(toolWords("send", { to: "here" })).toBe("sending to this chat");
+  expect(toolWords("act", { action: "accept", confirmed: true })).toBe("accepting the task");
+  expect(toolWords("act", { action: "accept", confirmed: false })).toBe("checking");
+  expect(toolWords("screen", { do: "click" })).toBe("using the screen");
+  expect(toolWords("open", { what: "task" })).toBe("opening it");
+  expect(toolWords("whatever")).toBe("working");
+});
+
+test("SHEP-113: the person's ask holds the updates until it is answered, tools and all", () => {
+  const g = turnGate(30000);
+  expect(g.holding(0)).toBe(false);
+  g.seen("user_transcript", 1000);
+  expect(g.holding(1500)).toBe(true);
+  // "On it." then the tool: still held while it runs, and after its result until the answer
+  g.seen("agent_response", 2000);
+  g.seen("client_tool_call", 2100);
+  expect(g.holding(2200)).toBe(true);
+  g.seen("client_tool_result", 5000);
+  expect(g.holding(5100)).toBe(true);
+  g.seen("agent_response", 6000);
+  expect(g.holding(6100)).toBe(false);
+  // a model that never answers holds no longer than the cap
+  g.seen("user_transcript", 10000);
+  expect(g.holding(39000)).toBe(true);
+  expect(g.holding(41000)).toBe(false);
 });

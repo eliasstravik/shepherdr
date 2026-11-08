@@ -14,7 +14,7 @@ import { Dialog } from '@client/rowmenu.tsx'
 import { cancelDictation } from '@plugins/chat/client.tsx'
 import { pageNames, sectionLike, sectionOf } from '@client/Settings.tsx'
 import { openAccept } from '@client/screens/Accept.tsx'
-import { callPhase, muteCall, sendWhere, startCall, stopCall, type Nav, type NavAck } from './call.ts'
+import { callDoing, callPhase, muteCall, sendWhere, startCall, stopCall, type Nav, type NavAck } from './call.ts'
 import { key, press, resetScreen, screenAction, type Head } from './screen.ts'
 
 /** the Tasks panel's filter for a task state the voice agent named */
@@ -266,17 +266,34 @@ export function toggleMute() {
   setUI({ callMuted: on })
 }
 
-const WORD = { connecting: 'Connecting', listening: 'Listening', thinking: 'Thinking', speaking: 'Speaking', reconnecting: 'Reconnecting' }
+const WORD = { connecting: 'Connecting', listening: 'Listening', thinking: 'Thinking', working: 'Working', speaking: 'Speaking', reconnecting: 'Reconnecting' }
+type Phase = keyof typeof WORD
 
-/** what the call is doing, in a word (Muted whenever the voice isn't speaking and the mic is off) */
+/** What the call is doing, in a word, from the conversation's own events (SHEP-113): Listening, Thinking, Working with
+ *  what it does ("Working: checking tasks"), Speaking. Muted whenever the voice isn't speaking and the mic is off, but
+ *  never over Thinking or Working: the person still sees it heard them. */
 function usePhase() {
-  const [phase, set] = useState(callPhase)
+  const [now, set] = useState(() => ({ phase: callPhase() as Phase, doing: callDoing() }))
   useEffect(() => {
-    const t = setInterval(() => set(callPhase()), 150)
+    const t = setInterval(() => {
+      const phase = callPhase() as Phase, doing = callDoing()
+      set((was) => (was.phase === phase && was.doing === doing ? was : { phase, doing }))
+    }, 150)
     return () => clearInterval(t)
   }, [])
   const muted = useUI((u) => u.callMuted)
-  return { word: muted && phase !== 'speaking' ? 'Muted' : WORD[phase] }
+  const { phase, doing } = now
+  // working: what it does says it ("Checking tasks…"), the dots beside say it's at work
+  const word = muted && (phase === 'listening' || phase === 'connecting') ? 'Muted' : phase === 'working' && doing ? `${doing[0].toUpperCase()}${doing.slice(1)}…` : WORD[phase]
+  return { word, phase }
+}
+
+/** SHEP-113: the call's mark beside its words, one per state: the wave moves while the voice speaks, stands still
+ *  while it listens, and gives way to the typing dots while it thinks or works */
+function CallMark({ phase, className }: { phase: Phase; className?: string }) {
+  if (phase === 'thinking' || phase === 'working')
+    return <span aria-hidden data-call-mark={phase} className={clsx('typing inline-flex shrink-0 items-center gap-[3px] [&>i]:size-[4px]!', className)}><i /><i /><i /></span>
+  return <span data-call-mark={phase} className="contents"><Waves className={clsx('shrink-0', phase !== 'speaking' && 'wv-still', className)} /></span>
 }
 
 /** SHEP-108: the call's two buttons, one look wherever they show (a phone's bottom bar, the sidebar's card, the strip
@@ -352,14 +369,14 @@ function ShepherdrRow() {
  *  was said: that is the chat's */
 function CallCard() {
   const t = useElapsed(useUI((u) => u.callStarted))
-  const { word } = usePhase()
+  const { word, phase } = usePhase()
   return (
-    <section aria-label="Voice call with Shepherdr" data-call-card className={clsx('flex items-center gap-2.5 rounded-[12px] py-1.5 pr-1.5 pl-3 phone:gap-3 phone:py-2 phone:pr-2 phone:pl-3.5', callTint)}>
-      <Waves className="h-3.5 shrink-0 text-ready-fg phone:h-4" />
+    <section aria-label="Voice call with Shepherdr" data-call-card data-phase={phase} className={clsx('flex items-center gap-2.5 rounded-[12px] py-1.5 pr-1.5 pl-3 phone:gap-3 phone:py-2 phone:pr-2 phone:pl-3.5', callTint)}>
+      <span className="grid w-4 shrink-0 place-items-center text-ready-fg phone:w-5"><CallMark phase={phase} className="h-3.5 phone:h-4" /></span>
       <div className="min-w-0 flex-1">
         <h2 className="truncate text-[0.9375rem]/5 font-semibold text-fg phone:text-base/6">Shepherdr</h2>
-        <p className="truncate text-[0.75rem]/4 font-medium text-ready-fg tabular-nums phone:text-[0.8125rem]/5">
-          <span role="status">{word}</span> · {t}
+        <p className="flex min-w-0 gap-1 text-[0.75rem]/4 font-medium text-ready-fg tabular-nums phone:text-[0.8125rem]/5">
+          <span role="status" className="min-w-0 truncate">{word}</span><span className="shrink-0">· {t}</span>
         </p>
       </div>
       <CallControls size="card" />
@@ -382,11 +399,11 @@ function PhoneCallButton() {
  *  and its clock, Mute and End */
 function CallStrip() {
   const t = useElapsed(useUI((u) => u.callStarted))
-  const { word } = usePhase()
+  const { word, phase } = usePhase()
   return (
-    <div data-call-strip data-topbar role="group" aria-label="Voice call with Shepherdr"
+    <div data-call-strip data-topbar data-phase={phase} role="group" aria-label="Voice call with Shepherdr"
       className={clsx('mx-3 mt-2 flex shrink-0 items-center gap-2 rounded-full py-1 pr-1 pl-3.5 text-[0.8125rem] font-medium text-ready-fg tabular-nums [[data-device=phone]>&:first-child]:mt-[calc(env(safe-area-inset-top)+8px)] phone:text-[0.9375rem]', callTint)}>
-      <Waves className="h-3 shrink-0" />
+      <span className="grid w-4 shrink-0 place-items-center"><CallMark phase={phase} className="h-3" /></span>
       <p className="min-w-0 flex-1 truncate">
         <span className="text-fg">Shepherdr</span> · <span role="status">{word}</span> · {t}
       </p>
@@ -416,6 +433,26 @@ function useTop() {
 /** the key's card where the sidebar's row doesn't show: above a phone's bar, else at the top */
 function PhoneHelp() {
   return useTop() ? null : <CallHelp className="mx-4 mb-2" />
+}
+
+/** SHEP-113: on a phone's home the call's card is in the shut sidebar: a slim pill above the bar says what the call
+ *  is doing (Listening, Thinking, Checking tasks…, Speaking) and its clock; Mute and End stay in the bar */
+function PhoneCallStatus() {
+  const on = useUI((u) => u.call)
+  const top = useTop()
+  return on && !top ? <PhoneStatusPill /> : null
+}
+function PhoneStatusPill() {
+  const t = useElapsed(useUI((u) => u.callStarted))
+  const { word, phase } = usePhase()
+  return (
+    <div data-call-status data-phase={phase} className="mb-2 flex justify-center px-4">
+      <p className={clsx('flex max-w-full min-w-0 items-center gap-2 rounded-full py-1 pr-3.5 pl-3 text-[0.8125rem]/5 font-medium text-ready-fg tabular-nums', callTint)}>
+        <span className="grid w-4 shrink-0 place-items-center"><CallMark phase={phase} className="h-3" /></span>
+        <span className="flex min-w-0 gap-1"><span role="status" className="min-w-0 truncate">{word}</span><span aria-hidden className="shrink-0">· {t}</span></span>
+      </p>
+    </div>
+  )
 }
 function TopHelp() {
   return useTop() ? <CallHelp className="mx-3 mt-2" /> : null
@@ -471,7 +508,7 @@ export default definePlugin({
   setup(reg) {
     reg.sideTop.push(ShepherdrRow)
     reg.phoneBar.push(PhoneCallButton)
-    reg.phoneAbove.push(PhoneHelp)
+    reg.phoneAbove.push(PhoneHelp, PhoneCallStatus)
     reg.topBars.push(CallBanner, TopHelp, CallError, CallWhere)
     reg.overlays.push(OpenedTag, EndCallDialog)
     // 3.0 calls with Ctrl+Shift+Space (the keyboard plugin): no V or M keys of its own

@@ -875,6 +875,15 @@
   .wv i:nth-child(4) {
     animation-delay: 0.45s;
   }
+  /* SHEP-113: a call's wave stands still while it listens (it moves only while the voice speaks) */
+  .wv.wv-still i {
+    animation: none;
+    height: 6px;
+  }
+  .wv.wv-still i:nth-child(2),
+  .wv.wv-still i:nth-child(3) {
+    height: 10px;
+  }
   @media (prefers-reduced-motion: reduce) {
     .wv i {
       animation: none;
