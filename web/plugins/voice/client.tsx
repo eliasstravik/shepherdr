@@ -6,15 +6,15 @@
 // call button since SHEP-108: it is always Send). Where neither shows (a shut sidebar, a task open on a phone)
 // the strip sits at the top. Whatever the voice opens gets an "Opened by voice" tag for a moment.
 import clsx from 'clsx'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { act, definePlugin, getState, goChat, goPlace, listView, openArtifact, openItem, openTask, placeOf, placesDrawn, registry, setFilter, setUI, shownItem, taskInMiddle, useStore, useUI, visibleChats, type UI } from '@client/kernel.ts'
-import { EndCallIcon, ic, IconButton, MicIcon, MicOffIcon, RoundButton, useElapsed, WaveIcon, Waves, XIcon } from '@client/ui.tsx'
+import { EndCallIcon, FitIcon, ic, IconButton, MicIcon, MicOffIcon, RoundButton, UnfitIcon, useElapsed, WaveIcon, Waves, XIcon } from '@client/ui.tsx'
 import { useWindowWidth } from '@client/Frame.tsx'
 import { Dialog } from '@client/rowmenu.tsx'
 import { cancelDictation } from '@plugins/chat/client.tsx'
 import { pageNames, sectionLike, sectionOf } from '@client/Settings.tsx'
 import { openAccept } from '@client/screens/Accept.tsx'
-import { callDoing, callPhase, muteCall, sendWhere, startCall, stopCall, type Nav, type NavAck } from './call.ts'
+import { callDoing, callPhase, callSample, muteCall, sendWhere, startCall, stopCall, type Nav, type NavAck } from './call.ts'
 import { key, press, resetScreen, screenAction, type Head } from './screen.ts'
 
 /** the Tasks panel's filter for a task state the voice agent named */
@@ -94,6 +94,8 @@ export async function voiceNav(nav: Nav): Promise<NavAck> {
   const ack = await doNav(nav)
   // what the voice opened is tagged for a moment, so a screen that changed by itself says why
   if (ack.ok && nav.kind !== 'screen') openedByVoice()
+  // SHEP-118: whatever the voice opens or does on the page is meant to be seen: the full-screen call steps aside
+  if (ack.ok && !(nav.kind === 'screen' && nav.do === 'look')) setUI({ callFull: false })
   return ack
 }
 
@@ -200,7 +202,7 @@ export function toggleCall(from: string | null = null) {
   if (ui.dict) cancelDictation()
   // the keyboard goes down: the call is listening
   ;(document.activeElement as HTMLElement | null)?.blur?.()
-  setUI({ call: true, callFrom: from, callStarted: Date.now(), callMuted: false, callError: null, focus: null, plus: null })
+  setUI({ call: true, callFull: true, callFrom: from, callStarted: Date.now(), callMuted: false, callError: null, focus: null, plus: null })
   act({ type: 'call', chat: from ?? '', on: true })
   resetScreen()
   const started = getState().ui.callStarted
@@ -256,7 +258,7 @@ export function endCall() {
   const ui = getState().ui
   if (!ui.call) return
   stopCall()
-  setUI({ call: false, callFrom: null, callMuted: false })
+  setUI({ call: false, callFull: false, callFrom: null, callMuted: false })
   act({ type: 'call', chat: ui.callFrom ?? '', on: false })
 }
 
@@ -296,18 +298,18 @@ function CallMark({ phase, className }: { phase: Phase; className?: string }) {
   return <span data-call-mark={phase} className="contents"><Waves className={clsx('shrink-0', phase !== 'speaking' && 'wv-still', className)} /></span>
 }
 
-/** SHEP-108: the call's two buttons, one look wherever they show (a phone's bottom bar, the sidebar's card, the strip
- *  at the top): Mute a quiet grey round that turns solid while muted, End a red round with the hang-up phone. End asks
- *  first, as the voice does ("Are you sure you want to end the call?"). size: the bottom bar's, or the card's */
+/** SHEP-108, SHEP-118: the minimized call's two buttons, one look wherever they show (a phone's bottom bar, the
+ *  sidebar's card, the strip at the top): Full screen a quiet grey round that opens the call over everything again
+ *  (Mute lives there only), End a red round with the hang-up phone. End asks first, as the voice does ("Are you sure
+ *  you want to end the call?"). size: the bottom bar's, or the card's */
 function CallControls({ size }: { size: 'bar' | 'card' }) {
-  const muted = useUI((u) => u.callMuted)
   const btn = size === 'bar' ? 'size-14 max-[359px]:size-12' : 'size-8 phone:size-11'
   const glyph = size === 'bar' ? 'size-5' : ic
   return (
     <>
-      <button type="button" aria-label={muted ? 'Unmute yourself' : 'Mute yourself'} aria-pressed={muted} onClick={toggleMute}
-        className={clsx('press-dim relative grid shrink-0 place-items-center rounded-full bg-bubble text-fg2 after:absolute after:-inset-1 aria-pressed:bg-fg aria-pressed:text-bg', btn)}>
-        {muted ? <MicOffIcon className={glyph} /> : <MicIcon className={glyph} />}
+      <button type="button" aria-label="Open the call full screen" data-call-maximize onClick={() => setUI({ callFull: true })}
+        className={clsx('press-dim relative grid shrink-0 place-items-center rounded-full bg-bubble text-fg2 after:absolute after:-inset-1', btn)}>
+        <FitIcon className={glyph} />
       </button>
       <button type="button" aria-label="End call" onClick={askEnd}
         className={clsx('press-dim relative grid shrink-0 place-items-center rounded-full bg-need text-white after:absolute after:-inset-1', btn)}>
@@ -323,13 +325,15 @@ const askers = new Set<() => void>()
 function setAsking(on: boolean) { asking = on; askers.forEach((f) => f()) }
 function askEnd() { setAsking(true) }
 
-/** "Are you sure you want to end the call?", the voice's own words, over everything */
-function EndCallDialog() {
+/** "Are you sure you want to end the call?", the voice's own words, over everything: over the app while the call is
+ *  minimized, inside the full-screen call while that shows (full) */
+function EndCallDialog({ full = false }: { full?: boolean }) {
   const [, tick] = useState(0)
   useEffect(() => { const f = () => tick((x) => x + 1); askers.add(f); return () => void askers.delete(f) }, [])
   const on = useUI((u) => u.call)
+  const shownFull = useUI((u) => u.callFull)
   useEffect(() => { if (!on && asking) setAsking(false) }, [on])
-  if (!asking || !on) return null
+  if (!asking || !on || shownFull !== full) return null
   return (
     <Dialog title="Are you sure you want to end the call?" safe onCancel={() => setAsking(false)}
       buttons={
@@ -458,6 +462,104 @@ function TopHelp() {
   return useTop() ? <CallHelp className="mx-3 mt-2" /> : null
 }
 
+/* ---------- SHEP-118: the full-screen call ---------- */
+
+/** the orb's swell, each frame from the call's sound: whoever speaks (nothing of yours while muted), smoothed */
+function useOrbLevel(ref: RefObject<HTMLDivElement | null>) {
+  useEffect(() => {
+    let raf = 0, v = 0
+    const step = () => {
+      const s = callSample()
+      const target = getState().ui.callMuted && s.who !== 'agent' ? 0 : s.level
+      v += (target - v) * (target > v ? 0.35 : 0.12)
+      ref.current?.style.setProperty('--lvl', v.toFixed(3))
+      raf = requestAnimationFrame(step)
+    }
+    raf = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(raf)
+  }, [ref])
+}
+
+/** one of the full-screen call's three round buttons, its word under it */
+function BigCallButton({ label, word, onClick, pressed, className, children }: { label: string; word: string; onClick: () => void; pressed?: boolean; className?: string; children: ReactNode }) {
+  return (
+    <div className="flex w-20 flex-col items-center gap-2">
+      <button type="button" aria-label={label} aria-pressed={pressed} onClick={onClick}
+        className={clsx('press-dim relative grid size-16 shrink-0 place-items-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-fg', className)}>
+        {children}
+      </button>
+      <p aria-hidden className="text-[0.8125rem]/5 text-fg2">{word}</p>
+    </div>
+  )
+}
+
+function minimize() { setUI({ callFull: false }) }
+
+/** The call over everything, phone first (SHEP-118): calm and dark whatever the app's look, Shepherdr and the clock at
+ *  the top, the orb in the middle with what the call does under it, and only the call's own buttons: Minimize, Mute,
+ *  End. Minimize (or Escape) puts it back in the bar, card or strip, whose Full screen button brings it back. */
+function CallScreen() {
+  const on = useUI((u) => u.call && u.callFull)
+  return on ? <FullCall /> : null
+}
+function FullCall() {
+  const t = useElapsed(useUI((u) => u.callStarted))
+  const muted = useUI((u) => u.callMuted)
+  const { word, phase } = usePhase()
+  const orb = useRef<HTMLDivElement>(null)
+  useOrbLevel(orb)
+  const screen = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    // the keyboard stays on the call: focus starts on it, Tab goes round its own buttons, Escape minimizes
+    if (!screen.current?.contains(document.activeElement)) screen.current?.focus()
+    const k = (e: KeyboardEvent) => {
+      // the end question's own keys go first
+      if (asking) return
+      if (e.key === 'Escape') { e.preventDefault(); minimize() }
+      else if (e.key === 'Tab' && screen.current) {
+        const bs = [...screen.current.querySelectorAll<HTMLElement>('button')]
+        const at = bs.indexOf(document.activeElement as HTMLElement)
+        e.preventDefault()
+        bs[at < 0 ? (e.shiftKey ? bs.length - 1 : 0) : (at + (e.shiftKey ? bs.length - 1 : 1)) % bs.length]?.focus()
+      }
+    }
+    addEventListener('keydown', k)
+    return () => removeEventListener('keydown', k)
+  }, [])
+  const look = muted && (phase === 'listening' || phase === 'connecting') ? 'muted' : phase
+  return (
+    <div ref={screen} tabIndex={-1} data-call-screen data-theme="dark" data-phase={look} role="dialog" aria-label="Voice call with Shepherdr"
+      className="call-screen-in outline-none fixed inset-0 z-70 flex flex-col bg-[#08090a] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[max(env(safe-area-inset-bottom),--spacing(8))] pl-[env(safe-area-inset-left)] text-fg antialiased scheme-only-dark">
+      <header className="flex flex-col items-center gap-0.5 pt-8">
+        <h2 className="text-base/6 font-semibold">Shepherdr</h2>
+        <p className="text-sm/5 text-fg2 tabular-nums">{t}</p>
+      </header>
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-12 px-6">
+        <div ref={orb} data-phase={look} aria-hidden className="call-orb w-[min(64vw,38dvh,300px)]">
+          <span className="call-orb-body"><span className="call-orb-swirl" /><span className="call-orb-sheen" /></span>
+        </div>
+        <p className="flex h-7 max-w-full min-w-0 items-center gap-2 text-lg/7 font-medium text-fg2">
+          <span role="status" className="min-w-0 truncate">{word}</span>
+          {phase === 'thinking' || phase === 'working' ? <span aria-hidden className="typing inline-flex shrink-0 items-center gap-[3px] [&>i]:size-[5px]!"><i /><i /><i /></span> : null}
+        </p>
+      </div>
+      <div role="group" aria-label="Call controls" className="flex items-start justify-center gap-6 px-6">
+        <BigCallButton label="Minimize the call" word="Minimize" onClick={minimize} className="bg-white/10 text-fg">
+          <UnfitIcon className="size-6" />
+        </BigCallButton>
+        <BigCallButton label={muted ? 'Unmute yourself' : 'Mute yourself'} word={muted ? 'Unmute' : 'Mute'} pressed={muted} onClick={toggleMute}
+          className="bg-white/10 text-fg aria-pressed:bg-fg aria-pressed:text-[#08090a]">
+          {muted ? <MicOffIcon className="size-6" /> : <MicIcon className="size-6" />}
+        </BigCallButton>
+        <BigCallButton label="End call" word="End" onClick={askEnd} className="bg-need text-white">
+          <EndCallIcon className="size-6" />
+        </BigCallButton>
+      </div>
+      <EndCallDialog full />
+    </div>
+  )
+}
+
 /* ---------- "Opened by voice" ---------- */
 
 let opened = 0
@@ -510,7 +612,7 @@ export default definePlugin({
     reg.phoneBar.push(PhoneCallButton)
     reg.phoneAbove.push(PhoneHelp, PhoneCallStatus)
     reg.topBars.push(CallBanner, TopHelp, CallError, CallWhere)
-    reg.overlays.push(OpenedTag, EndCallDialog)
+    reg.overlays.push(OpenedTag, EndCallDialog, CallScreen)
     // 3.0 calls with Ctrl+Shift+Space (the keyboard plugin): no V or M keys of its own
   },
 })

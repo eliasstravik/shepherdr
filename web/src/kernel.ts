@@ -253,6 +253,8 @@ export interface UI {
   callFrom: string | null
   callStarted: number
   callMuted: boolean
+  /** SHEP-118: the call fills the screen (orb, Mute, End, Minimize); off: minimized into the bar, card or strip */
+  callFull: boolean
   /** why the last voice call stopped, until dismissed */
   callError: string | null
   plus: string | null
@@ -447,6 +449,7 @@ let state: State = {
     callFrom: null,
     callStarted: 0,
     callMuted: false,
+    callFull: false,
     callError: null,
     plus: null,
     menu: false,

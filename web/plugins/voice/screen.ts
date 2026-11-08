@@ -81,7 +81,8 @@ function nameOf(el: Element): string {
 
 function shown(el: Element) {
   const h = el as HTMLElement
-  if (h.closest('[aria-hidden="true"], [inert]')) return false
+  // SHEP-118: the full-screen call is the call's own, never the page the voice reads and acts on
+  if (h.closest('[aria-hidden="true"], [inert], [data-call-screen]')) return false
   if (typeof h.checkVisibility === 'function') return h.checkVisibility({ visibilityProperty: true, opacityProperty: true } as CheckVisibilityOptions)
   return h.getClientRects().length > 0
 }
