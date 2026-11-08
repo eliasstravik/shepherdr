@@ -8,11 +8,10 @@ import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from "
 import { join, dirname } from "node:path";
 import type { Hub } from "./hub.ts";
 import type { Host } from "./host.ts";
-import { DATA, HOME } from "./paths.ts";
+import { DATA, HOME, settingsFile, writableSettings } from "./paths.ts";
 import * as HC from "../core/host.js";
 
 const { relocateSettings, merge3 } = HC as any;
-const FILE = process.env.HERDR_TASK_SETTINGS || join(HOME, ".herdr", "shepherdr.json");
 const REL = ".herdr/shepherdr.json";
 const TEMPLATES = ["assistant.md", "worker.md", "reviewer.md"];
 const TPL_REL = ".config/herdr-core/templates";
@@ -61,7 +60,7 @@ export class Sync {
       const base = readJson(BASE) ?? {};
       const was = JSON.stringify(base);
       // the settings file
-      const mine = readJson(FILE);
+      const mine = readJson(settingsFile());
       const text = await this.read(on, REL);
       let theirsRaw: any = null;
       try { theirsRaw = text === null ? {} : JSON.parse(text); } catch { theirsRaw = undefined; }
@@ -72,7 +71,7 @@ export class Sync {
         // the first round after a move: the host's own copy wins where both say something; a pushed copy there (no move
         // yet) is no truth, so this machine's goes in
         const merged = merge3(base.settings ?? ("pushed_from" in theirsRaw ? {} : theirs), here, theirs);
-        if (!same(merged, here)) writeAtomic(FILE, JSON.stringify({ ...merged, version: 1 }, null, 2) + "\n");
+        if (!same(merged, here)) writeAtomic(writableSettings(), JSON.stringify({ ...merged, version: 1 }, null, 2) + "\n");
         const out = relocateSettings(merged, this.host.toHost());
         if (!same(out, own(theirsRaw)) || "pushed_from" in theirsRaw) await this.write(on, REL, JSON.stringify({ ...out, version: 1 }, null, 2) + "\n");
         base.settings = merged;

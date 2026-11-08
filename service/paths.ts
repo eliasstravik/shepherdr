@@ -1,7 +1,7 @@
 // Where the service keeps its own files: ~/.herdr/shepherdr (next to herdr-task's ~/.herdr/tasks).
 // SHEPHERDR_DATA moves only these (tests); it never changes HOME, so herdr-core and herdr-task stay the real ones.
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { mkdirSync, chmodSync } from "node:fs";
 
 export const HOME = homedir();
@@ -11,6 +11,19 @@ export const TOKEN = join(DATA, "token");         // local callers (the Herdr wi
 export const LOG = join(DATA, "service.log");
 export const PORT = Number(process.env.SHEPHERDR_PORT || 7788);
 export const MOUNT = "/shepherdr";                // tailscale serve --set-path; never funnel
+
+// herdr-task's settings file, ~/.herdr/shepherdr.json (HERDR_TASK_SETTINGS: a test's own). Read at each use, so a
+// test's own file holds whichever module loaded first.
+const REAL_SETTINGS = join(HOME, ".herdr", "shepherdr.json");
+export const settingsFile = () => process.env.HERDR_TASK_SETTINGS || REAL_SETTINGS;
+/** Running under bun test (test/preload.ts sets SHEPHERDR_TEST; bun sets NODE_ENV=test). */
+export const underTest = () => !!process.env.SHEPHERDR_TEST || process.env.NODE_ENV === "test";
+/** The settings file to write: a test is refused the real one, so it can never change the person's settings (nor have
+ *  the window and herdr-task send them on to their Assistants and other machines). */
+export function writableSettings(path = settingsFile()): string {
+  if (underTest() && resolve(path) === resolve(REAL_SETTINGS)) throw new Error("A test may not write the real ~/.herdr/shepherdr.json.");
+  return path;
+}
 
 export function ensureData() {
   mkdirSync(DATA, { recursive: true, mode: 0o700 });

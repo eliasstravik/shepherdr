@@ -6,7 +6,7 @@ import { watch, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Hub } from "./hub.ts";
 import type { Live } from "./live.ts";
-import { HOME } from "./paths.ts";
+import { HOME, settingsFile } from "./paths.ts";
 import { READ_LISTS, taskLists, fileIn } from "../core/tasklists.js";
 import * as T from "../core/tasks.js";
 import { isHelper, subagentsOf } from "../core/chat-view.js";
@@ -20,7 +20,6 @@ import * as AP from "../core/autopilot.js";
 const { everywhereOf, pilotFor, levelOf, STARTER, currentBeat } = AP as any;
 
 const SHARED = join(HOME, ".config", "herdr-app", "shared.json");
-const SETTINGS = process.env.HERDR_TASK_SETTINGS || join(HOME, ".herdr", "shepherdr.json");
 const SHELL = /^(ba|z|fi|da|k|tc|c)?sh$|^nu$|^pwsh$/;
 
 /** Runs a command on a machine through herdr-core (null: here). Output comes back base64. */
@@ -137,7 +136,7 @@ export class Model {
    *  Everywhere's, its switch, next and last wake, progress, the heartbeat's words). One read at a time. */
   readAutopilot() {
     return this.reading ??= (async () => {
-      try { this.settings = JSON.parse(readFileSync(SETTINGS, "utf8")) ?? {}; } catch {}
+      try { this.settings = JSON.parse(readFileSync(settingsFile(), "utf8")) ?? {}; } catch {}
       try {
         // this machine's own (--here: other machines' are read with their lists); a herdr-task from before --here lists only its own
         const listed = async (args: string[]) => {

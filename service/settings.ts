@@ -5,7 +5,7 @@
 // how herdr-task finds it), and for the Machines page each machine ("machines"[its name, "local" here]).
 import { existsSync, readFileSync, renameSync, watch, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { HOME } from "./paths.ts";
+import { HOME, settingsFile, writableSettings } from "./paths.ts";
 import * as C from "../core/settings.js";
 import * as M from "../core/machines.js";
 import * as HC from "../core/host.js";
@@ -19,7 +19,6 @@ const AP = APc as any;
  *  defaults): its schedule's words, events, heartbeat words and what wakes it in plain words */
 export type PilotEverywhere = { every: string | null; events: string[]; words: string; trigger?: string };
 const { HOLD } = M as any;
-const FILE = process.env.HERDR_TASK_SETTINGS || join(HOME, ".herdr", "shepherdr.json");
 const TEMPLATES = join(HOME, ".config", "herdr-core", "templates");
 // herdr-task's check of each machine's CLIs (installed, signed in), and its home round (each machine's home space)
 const CLI_CHECK = join(HOME, ".herdr", "cli-check.json");
@@ -67,7 +66,7 @@ export function pushBody(file: any, m: string) {
  *  never writes a file with everything else gone. */
 export function readSettings(): any {
   let text: string;
-  try { text = readFileSync(FILE, "utf8"); } catch (e: any) { if (e?.code === "ENOENT") return {}; throw new Error("The settings file can't be read now. Try again."); }
+  try { text = readFileSync(settingsFile(), "utf8"); } catch (e: any) { if (e?.code === "ENOENT") return {}; throw new Error("The settings file can't be read now. Try again."); }
   // SHEP-42's assistant.reactions comes back as agents.reactions, so a change writes it there
   try { const f = JSON.parse(text); if (f && typeof f === "object" && !Array.isArray(f)) return upgradeReactions(f); } catch {}
   throw new Error("The settings file can't be read now (~/.herdr/shepherdr.json isn't valid JSON).");
@@ -76,8 +75,9 @@ const SAFE = (k: string) => !["__proto__", "constructor", "prototype"].includes(
 
 export function writeSettings(next: any) {
   next.version = 1;
-  writeFileSync(`${FILE}.web-tmp`, JSON.stringify(next, null, 2) + "\n");
-  renameSync(`${FILE}.web-tmp`, FILE);
+  const file = writableSettings();
+  writeFileSync(`${file}.web-tmp`, JSON.stringify(next, null, 2) + "\n");
+  renameSync(`${file}.web-tmp`, file);
   for (const fn of written) fn(next);
 }
 const written = new Set<(file: any) => void>();
@@ -93,12 +93,12 @@ export class Settings {
 
   start() {
     this.read();
-    if (existsSync(dirname(FILE))) watch(dirname(FILE), (_e, name) => { if (name === "shepherdr.json") this.read(); });
+    if (existsSync(dirname(settingsFile()))) watch(dirname(settingsFile()), (_e, name) => { if (name === "shepherdr.json") this.read(); });
   }
 
   private read() {
     let next: any = {};
-    try { next = upgradeReactions(JSON.parse(readFileSync(FILE, "utf8")) ?? {}); } catch {}
+    try { next = upgradeReactions(JSON.parse(readFileSync(settingsFile(), "utf8")) ?? {}); } catch {}
     if (JSON.stringify(next) === JSON.stringify(this.file)) return;
     this.file = next;
     for (const fn of this.listeners) fn();
