@@ -14,7 +14,7 @@ import { Dialog } from '@client/rowmenu.tsx'
 import { cancelDictation } from '@plugins/chat/client.tsx'
 import { pageNames, sectionLike, sectionOf } from '@client/Settings.tsx'
 import { openAccept } from '@client/screens/Accept.tsx'
-import { callDoing, callPhase, callSample, muteCall, sendWhere, startCall, stopCall, type Nav, type NavAck } from './call.ts'
+import { callDoing, callPhase, callSample, muteCall, sendWhere, startCall, stepsAside, stopCall, type Nav, type NavAck } from './call.ts'
 import { key, press, resetScreen, screenAction, type Head } from './screen.ts'
 
 /** the Tasks panel's filter for a task state the voice agent named */
@@ -27,7 +27,7 @@ const PANEL_WORDS: Record<string, string> = { tasks: 'Tasks', artifacts: 'Artifa
 function whereNow() {
   const { ui, snap } = getState()
   if (!snap) return {}
-  return { device: ui.device, place: ui.place, task: ui.task, tab: ui.task ? shownItem(ui, snap) ?? 'chat' : null, artifact: ui.viewer?.artifact ?? null, settings: !!ui.settings }
+  return { device: ui.device, place: ui.place, task: ui.task, tab: ui.task ? shownItem(ui, snap) ?? 'chat' : null, artifact: ui.viewer?.artifact ?? null, settings: !!ui.settings, full: ui.callFull }
 }
 
 /** what this page shows, in a few words, for the head of the screen's list */
@@ -91,12 +91,24 @@ function goBack(): string | null {
 /** What the voice agent asked to show (its open tool), here on this page: done, then checked on the page's own state,
  *  so the call says it's on screen only when it is. Its screen tool's actions are done here too (screen.ts). */
 export async function voiceNav(nav: Nav): Promise<NavAck> {
+  // SHEP-124: the call's own view (call_view): full screen or minimized, set here, never by clicks
+  if (nav.kind === 'call') return callView(nav.full === true)
+  const was = getState().ui.callFull
   const ack = await doNav(nav)
   // what the voice opened is tagged for a moment, so a screen that changed by itself says why
   if (ack.ok && nav.kind !== 'screen') openedByVoice()
-  // SHEP-118: whatever the voice opens or does on the page is meant to be seen: the full-screen call steps aside
-  if (ack.ok && !(nav.kind === 'screen' && nav.do === 'look')) setUI({ callFull: false })
+  // SHEP-118: whatever the voice opens or does on the page is meant to be seen: the full-screen call steps aside.
+  // SHEP-124: but not when that very action opened it (a screen click on the call's Full screen button)
+  if (stepsAside(nav, ack.ok, was, getState().ui.callFull)) setUI({ callFull: false })
   return ack
+}
+
+/** SHEP-124: the voice agent's call_view: the call full screen (full) or minimized, checked on the page's state */
+function callView(full: boolean): NavAck {
+  if (!getState().ui.call) return { ok: false, why: 'no call is on in this app', where: whereNow() }
+  setUI(full ? { callFull: true, menu: false, plus: null } : { callFull: false })
+  const ok = getState().ui.callFull === full
+  return ok ? { ok: true, where: whereNow() } : { ok: false, why: full ? 'the call didn\'t go full screen' : 'the call didn\'t minimize', where: whereNow() }
 }
 
 async function doNav(nav: Nav): Promise<NavAck> {
@@ -188,7 +200,7 @@ function CallWhere() {
   const where = useStore((s) => {
     if (!s.ui.call || !s.snap) return ''
     return JSON.stringify({ device: s.ui.device, place: s.ui.place, task: s.ui.task, tab: s.ui.task ? shownItem(s.ui, s.snap) ?? 'chat' : null,
-      artifact: s.ui.viewer?.artifact ?? null, settings: !!s.ui.settings })
+      artifact: s.ui.viewer?.artifact ?? null, settings: !!s.ui.settings, full: s.ui.callFull })
   })
   useEffect(() => { if (where) sendWhere(JSON.parse(where)) }, [where])
   return null
