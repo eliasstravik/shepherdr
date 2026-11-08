@@ -35,7 +35,7 @@ import { terminalBridge } from "./terminal.ts";
 import { worktree } from "./worktree.ts";
 import * as W from "../core/worktree.js";
 import { browserRelay } from "./browser.ts";
-import { voiceCall, pageWhere, type ChatView } from "./voice.ts";
+import { voiceCall, callToResume, pageWhere, type ChatView } from "./voice.ts";
 import { voiceTool, type VoiceIO, type Where } from "./voice-tools.ts";
 import { Artifacts } from "./artifacts.ts";
 import { TaskLogs } from "./task-logs.ts";
@@ -599,7 +599,9 @@ const server = Bun.serve<{ who: string }>({
       // a voice call with a chat's running agent (the Voice add-on)
       const key = url.searchParams.get("chat") ?? "", addr = compat.addrOf(key);
       if (offList().includes("voice") || !addr || addr.startsWith("log:") || hub.terminals.get(addr)?.state !== "live") return new Response("no call here", { status: 404 });
-      return srv.upgrade(req, { data: { who: pass.who, voice: { key, addr } } as any }) ? undefined : new Response("upgrade failed", { status: 400 });
+      // SHEP-102: a page whose socket dropped (a locked phone) comes back to its call with the call's id
+      const resume = (url.searchParams.get("resume") ?? "").slice(0, 64);
+      return srv.upgrade(req, { data: { who: pass.who, voice: { key, addr, resume } } as any }) ? undefined : new Response("upgrade failed", { status: 400 });
     }
     if (socket) return srv.upgrade(req, { data: { who: pass.who } }) ? undefined : new Response("upgrade failed", { status: 400 });
     if (path === "/api/me") return json({ login: pass.who, via: pass.via, machine: me?.host ?? null, link: me ? `https://${me.dns}/shepherdr/` : null, version: VERSION, off: offPlugins() });
@@ -760,15 +762,23 @@ const server = Bun.serve<{ who: string }>({
     open(ws) {
       const d: any = ws.data;
       const page = { send: (x: any) => { ws.send(x); }, close: () => ws.close(), buffered: () => ws.getBufferedAmount() };
+      d.page = page;
+      if (d.voice?.resume) {
+        // back to a call that held for this page; gone (ended, or held too long): the page says so and stops
+        d.bridge = callToResume(d.voice.resume, String(d.who ?? ""), d.voice.key);
+        if (!d.bridge?.attach(page)) { d.bridge = null; ws.send(JSON.stringify({ type: "error", message: "The call ended while the phone was away. Start a new call." })); ws.close(); }
+        return;
+      }
       if (d.voice) noteUsage("feature", { from: "web", type: "voice-call" });
       if (d.voice) d.bridge = voiceCall(hub, callName(d.voice.key), { view: chatView(d.voice.addr), io: voiceIO, where: { client: "web", call: d.voice.key, machine: me?.host ?? null },
-        follow: () => follow(d.voice.addr).stop }, page);
+        follow: () => follow(d.voice.addr).stop, who: String(d.who ?? "") }, page);
       else if (d.term) d.bridge = terminalBridge(hub, d.term, page);
       else if (d.browser) d.bridge = browserRelay(d.browser, page);
       else live.join(ws);
     },
     message(ws, msg) { const d: any = ws.data; if (d.voice) d.bridge?.message(msg); else if (d.bridge) d.bridge.message(String(msg)); else live.message(ws, String(msg)); },
-    close(ws) { const d: any = ws.data; if (d.bridge) d.bridge.end(); else live.leave(ws); },
+    // a call's page that went without ending it holds the call for it to come back (SHEP-102)
+    close(ws) { const d: any = ws.data; if (d.voice) d.bridge?.detach(d.page); else if (d.bridge) d.bridge.end(); else live.leave(ws); },
   },
 });
 

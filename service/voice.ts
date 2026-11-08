@@ -59,6 +59,20 @@ export function agentId(key: string, made = "", dir = SECRETS, call = api) {
 }
 
 type Page = { send(x: string | Uint8Array): void; close(): void };
+
+/** SHEP-102: how long a call holds when its page's socket drops (a phone that locks, a lift, a tunnel): the voice
+ *  agent's conversation stays open, and the page comes back to it (resume) with all it was told. */
+export const HOLD_MS = 60_000;
+/** the calls on now, by their id (the page's to come back with; only for the same person and chat) */
+const calls = new Map<string, { who: string; chat: string; call: ReturnType<typeof voiceCall> }>();
+/** a call a page comes back to, if it is still holding, for that person and that chat */
+export function callToResume(id: string, who: string, chat: string) {
+  const c = calls.get(id);
+  return c && c.who === who && c.chat === chat ? c.call : null;
+}
+/** the words the voice agent gets when the page is back: say so, and say again what was cut */
+export const backLine = (secs: number) => ({ type: "user_message",
+  text: `[Update] The person's phone lost the call's connection for about ${Math.max(1, Math.round(secs))} s and is back now: they heard nothing of what you said meanwhile. Say you're back in a few words, then repeat briefly anything they missed.` });
 /** What the call reads of its own chat: the agent's last reply and its status (for the [Update]s). */
 export type ChatView = { lastReply(): { id: string; text: string } | null; status(): string | null; asking(): string | null };
 export type CallDeps = {
@@ -72,6 +86,10 @@ export type CallDeps = {
   dial?: () => Promise<string>;
   /** how long an open waits for the page to say it shows it (ms) */
   navWait?: number;
+  /** how long the call holds for its page to come back (ms) */
+  holdMs?: number;
+  /** who called (a page comes back only as them) */
+  who?: string;
 };
 
 /** The voice agent's socket: a signed address for the "Herdr chat" agent of the person's key. */
@@ -92,8 +110,11 @@ export function pageWhere(m: any): Partial<Where> {
 }
 
 /** One call: the page's audio to the voice agent and back. message(): a frame from the page; end(): the page went. */
-export function voiceCall(hub: Hub, who: string, deps: CallDeps, page: Page) {
+export function voiceCall(hub: Hub, who: string, deps: CallDeps, first: Page) {
   const { view, io } = deps;
+  // the page on the call now; none while its socket is down and the call holds for it (SHEP-102)
+  let page: Page | null = first, gone = 0, hold: ReturnType<typeof setTimeout> | null = null;
+  const id = crypto.randomUUID();
   // an open goes to this very page (the socket that started the call: that phone, that browser tab) and counts only
   // once the page says it shows it ({ type: "navved", id, ok, why, where })
   let navs = 0;
@@ -109,21 +130,26 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, page: Page) {
   let ws: WebSocket | null = null, ended = false;
   let lastStatus = view.status(), lastReply = view.lastReply()?.id ?? null;
   const unfollow = deps.follow();
-  const tell = (m: object) => { try { page.send(JSON.stringify(m)); } catch {} };
+  const tell = (m: object) => { try { page?.send(JSON.stringify(m)); } catch {} };
   const toVoice = (m: object) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m)); };
   const here = () => { const s = io.snap(); return s ? lookHere(s, where) : ""; };
   let said = "", saying: ReturnType<typeof setTimeout> | null = null;
   const end = (why: string | null = null) => {
     if (ended) return;
     ended = true;
+    calls.delete(id);
+    if (hold) clearTimeout(hold);
     clearInterval(watch);
     if (saying) clearTimeout(saying);
     unfollow();
     for (const done of [...waiting.values()]) done({ ok: false, why: "the call ended" });
     if (why) tell({ type: "error", message: why });
     try { ws?.close(); } catch {}
-    try { page.close(); } catch {}
+    try { page?.close(); } catch {}
+    page = null;
   };
+  calls.set(id, { who: deps.who ?? "", chat: deps.where.call ?? "", call: null as any });
+  tell({ type: "call", id });
   // the called agent's replies and status, as the window's chat feeds its call
   const watch = setInterval(() => {
     if (ended) return;
@@ -153,7 +179,7 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, page: Page) {
       else if (m.type === "agent_response") tell({ type: "state", state: "listening" });
       else if (m.type === "audio" && typeof m.audio_event?.audio_base_64 === "string") {
         const pcm = Buffer.from(m.audio_event.audio_base_64, "base64");
-        if (pcm.length % 2 === 0) page.send(new Uint8Array(pcm));
+        if (pcm.length % 2 === 0) try { page?.send(new Uint8Array(pcm)); } catch {}
       }
       else if (m.type === "interruption") tell({ type: "interrupt" });
       else if (m.type === "client_tool_call") {
@@ -173,7 +199,26 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, page: Page) {
     };
   })().catch((err) => end(String(err?.message ?? err)));
 
-  return {
+  const call = {
+    id,
+    /** the page's socket closed without an end: the call holds for it (a locked phone's dropped socket comes back) */
+    detach(from: Page) {
+      if (ended || page !== from) return;
+      page = null;
+      gone = Date.now();
+      hold = setTimeout(() => end(), deps.holdMs ?? HOLD_MS);
+    },
+    /** the page came back (its socket again, with the call's id): it gets the call where it is, the agent says so */
+    attach(to: Page) {
+      if (ended) return false;
+      if (hold) { clearTimeout(hold); hold = null; }
+      const old = page;
+      page = to;
+      if (old && old !== to) try { old.close(); } catch {}
+      tell({ type: "resumed", id });
+      if (gone) { toVoice(backLine((Date.now() - gone) / 1000)); gone = 0; }
+      return true;
+    },
     /** the page's microphone: 16 kHz PCM (the page cancels its own speaker's echo, so the person can talk over it);
      *  or, as text, where the page is now ({ type: "where", place, task, tab, artifact, settings, device }), or what
      *  it did with an open or a screen action ({ type: "navved", id, ok, why?, where?, did?, ask?, screen? }) */
@@ -189,6 +234,8 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, page: Page) {
           waiting.get(m.id)?.({ ok: m.ok === true, why: typeof m.why === "string" ? m.why.slice(0, 300) : null, did: str(m.did, 300), ask: str(m.ask, 300), screen: str(m.screen, 4000) });
           return;
         }
+        // the person ended the call (End, or the lock screen's hang up): no holding for the page
+        if (m?.type === "end") return end();
         if (m?.type !== "where") return;
         where = { ...where, ...pageWhere(m) };
         // told once it settles (a tap through a few screens is one note)
@@ -203,4 +250,6 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, page: Page) {
     },
     end: () => end(),
   };
+  calls.get(id)!.call = call;
+  return call;
 }
