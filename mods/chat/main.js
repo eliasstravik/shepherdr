@@ -2323,8 +2323,8 @@ export default class Chat extends View {
       let st = null;
       try { st = JSON.parse(s ?? "null"); } catch {}
       if (st) {
-        const changed = st.phase !== call.phase || st.error !== call.error || (st.who ?? null) !== call.who || (st.said ?? "") !== (call.said ?? "");
-        call.phase = st.phase; call.error = st.error; call.pid = st.pid; call.who = st.who ?? null; call.said = st.said ?? "";
+        const changed = st.phase !== call.phase || (st.doing ?? "") !== (call.doing ?? "") || st.error !== call.error || (st.who ?? null) !== call.who || (st.said ?? "") !== (call.said ?? "");
+        call.phase = st.phase; call.doing = typeof st.doing === "string" ? st.doing.slice(0, 60) : ""; call.error = st.error; call.pid = st.pid; call.who = st.who ?? null; call.said = st.said ?? "";
         if (changed) { this.callShared(); cx.notify(); }
         if (st.phase === "ended") {
           if (st.error) this.callError(st.error);
@@ -2524,7 +2524,7 @@ export default class Chat extends View {
     const c = this.call;
     if (c) {
       const tab = panes().find((p) => p.pane === mine)?.tab ?? null;
-      all[mine] = { phase: c.phase, who: c.who, muted: c.muted, started: c.started, beat: c.beat ?? Date.now(),
+      all[mine] = { phase: c.phase, doing: c.doing ?? "", who: c.who, muted: c.muted, started: c.started, beat: c.beat ?? Date.now(),
         name: agent.NAMES[this.kind] ?? "the agent", tab, said: c.said ?? "" };
     } else if (all[mine]) delete all[mine];
     else return;

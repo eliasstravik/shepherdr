@@ -17,7 +17,7 @@ import { voiceTool, lookHere, shown, type Ack, type Nav, type VoiceIO, type Wher
 import { hearing, type HearIO } from "./voice-hear.ts";
 export type { ChatView } from "./voice-hear.ts";
 
-const { API, opening, whereLine, envLines, apiError, voiceKey, ensureAgent, agentFile } = V as any;
+const { API, opening, whereLine, envLines, apiError, voiceKey, ensureAgent, agentFile, toolWords, turnGate } = V as any;
 const APP = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
 const SECRETS = join(APP, "secrets");
 
@@ -142,11 +142,14 @@ export function voiceCall(hub: Hub, deps: CallDeps, first: Page) {
   let where = deps.where;
   let ws: WebSocket | null = null, ended = false;
   const hear = hearing(deps.hear);
-  // when the person last talked, until when the voice is talking, and tools running: updates wait for a quiet moment
+  // when the person last talked, until when the voice is talking, and whether it still owes the person an answer
+  // (SHEP-113: their ask comes first): updates wait for a quiet moment after it
   let heardAt = 0, speakUntil = 0, busy = 0;
+  const turn = turnGate();
   const tell = (m: object) => { try { page?.send(JSON.stringify(m)); } catch {} };
   const toVoice = (m: object) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m)); };
   const here = () => { const s = io.snap(); return s ? lookHere(s, where) : ""; };
+  let doing = "";
   let said = "", saying: ReturnType<typeof setTimeout> | null = null;
   const end = (why: string | null = null) => {
     if (ended) return;
@@ -171,7 +174,7 @@ export function voiceCall(hub: Hub, deps: CallDeps, first: Page) {
     hear.onScreen(where);
     hear.tick();
     const t = Date.now();
-    if (ws?.readyState === WebSocket.OPEN && !busy && t - heardAt > QUIET_MS && t > speakUntil + QUIET_MS) for (const line of hear.take()) toVoice(line);
+    if (ws?.readyState === WebSocket.OPEN && !turn.holding(t) && t - heardAt > QUIET_MS && t > speakUntil + QUIET_MS) for (const line of hear.take()) toVoice(line);
   }, 1000);
 
   (async () => {
@@ -190,9 +193,11 @@ export function voiceCall(hub: Hub, deps: CallDeps, first: Page) {
         if (!/pcm_16000/.test(meta.agent_output_audio_format ?? "pcm_16000")) return end("The voice agent speaks in a format the page can't play.");
         tell({ type: "state", state: "listening" });
       }
-      else if (m.type === "user_transcript") tell({ type: "state", state: "thinking" });
+      else if (m.type === "user_transcript") { turn.seen("user_transcript"); tell({ type: "state", state: "thinking" }); }
       else if (m.type === "agent_response") {
-        tell({ type: "state", state: "listening" });
+        turn.seen("agent_response");
+        // a word before a tool ("On it."): the call is still working on it
+        tell(busy ? { type: "state", state: "working", doing } : { type: "state", state: "listening" });
         // what it said, for the call card (SHEP-105: the last thing the voice said)
         const text = m.agent_response_event?.agent_response;
         if (typeof text === "string" && text.trim()) tell({ type: "said", text: text.trim().slice(0, 300) });
@@ -205,14 +210,22 @@ export function voiceCall(hub: Hub, deps: CallDeps, first: Page) {
       else if (m.type === "interruption") { speakUntil = 0; tell({ type: "interrupt" }); }
       else if (m.type === "client_tool_call") {
         const c = m.client_tool_call ?? {};
-        tell({ type: "state", state: "thinking" });
+        // SHEP-113: the call shows what it is doing, in plain words ("Working: checking tasks")
+        doing = toolWords(String(c.tool_name ?? ""), c.parameters ?? {});
+        turn.seen("client_tool_call");
+        tell({ type: "state", state: "working", doing });
         busy++;
         const asked = Date.now();
         try {
           const a = await shown(await voiceTool(String(c.tool_name ?? ""), c.parameters ?? {}, where, io), show);
           if (a.sent) hear.sentTo(a.sent, asked);
           toVoice({ type: "client_tool_result", tool_call_id: c.tool_call_id, result: a.result, is_error: !!a.error });
-        } finally { busy--; }
+        } finally {
+          busy--;
+          turn.seen("client_tool_result");
+          // its answer next
+          if (!busy && !ended) tell({ type: "state", state: "thinking" });
+        }
       }
     };
     ws.onerror = () => end("The voice connection failed.");

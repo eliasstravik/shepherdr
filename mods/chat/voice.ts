@@ -8,8 +8,8 @@
 // the chat mod (a mod has no audio or sockets); one process per call, nothing recorded or kept.
 //   bun voice.ts <call folder> <agent address> <agent name>
 // The call folder links it to the chat:
-//   state.json  written here: { phase, muted, error, since } (phase: connecting, listening,
-//               thinking, speaking, ended)
+//   state.json  written here: { phase, doing, muted, error, since } (phase: connecting, listening,
+//               thinking, working (doing: what, in plain words), speaking, ended)
 //   alive       touched by the chat every few seconds; stale for 20 s ends the call
 //   in/*.json   from the chat: { type: "mute", on } | { type: "hangup" } |
 //               { type: "reply", text } | { type: "status", status, asking? }
@@ -28,7 +28,7 @@
 import { readFileSync, writeFileSync, readdirSync, rmSync, statSync, mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { API, opening, replyLine, statusLine, whereLine, apiError, ensureAgent, agentFile, navWords } from "./core/voice.js";
+import { API, opening, replyLine, statusLine, whereLine, apiError, ensureAgent, agentFile, navWords, toolWords, turnGate } from "./core/voice.js";
 import { screenWords } from "./core/screen.js";
 import { SECRETS, keyFor, envFile } from "./key.ts";
 import { audio, ended as audioEnded, type Audio } from "./audio.ts";
@@ -49,17 +49,21 @@ let heardAt = 0;
 // the call's id for the service (its folder's name), tools running now, and whether the service hears for it
 const callId = dir.replace(/\/$/, "").split("/").pop() ?? "";
 let busy = 0;
+// SHEP-113: what a tool is doing (plain words), and whether the person's ask is still unanswered (updates wait)
+let doing = "";
+const turn = turnGate();
 let hears = false;
 // the last thing the voice said (the sidebar's call card shows it)
 let said = "";
 
 function state() {
   const speaking = player && Date.now() < playEnd + 250;
-  const shown = ended ? "ended" : phase === "connecting" ? "connecting" : speaking ? "speaking" : phase === "thinking" && Date.now() - thinkingAt < 20000 ? "thinking" : "listening";
+  const shown = ended ? "ended" : phase === "connecting" ? "connecting" : speaking ? "speaking"
+    : phase === "thinking" && Date.now() - thinkingAt < 20000 ? "thinking" : phase === "working" && Date.now() - thinkingAt < 35000 ? "working" : "listening";
   // Who is talking, for the chat's wave: the agent while its voice plays, else the person
   // while the microphone hears them (a moment's hold, so it doesn't flicker).
   const talking = ended ? null : speaking ? "agent" : !muted && Date.now() - heardAt < 400 ? "you" : null;
-  const s = JSON.stringify({ phase: shown, who: talking, muted, error, since, pid: process.pid, said });
+  const s = JSON.stringify({ phase: shown, doing: shown === "working" ? doing : "", who: talking, muted, error, since, pid: process.pid, said });
   if (s === lastState) return;
   lastState = s;
   try { writeFileSync(join(dir, "state.json.tmp"), s); renameSync(join(dir, "state.json.tmp"), join(dir, "state.json")); } catch {}
@@ -149,7 +153,7 @@ async function hear() {
   hearing = true;
   try {
     const now = Date.now();
-    const quiet = !busy && now - heardAt > 1200 && now > playEnd + 1200;
+    const quiet = !turn.holding(now) && now - heardAt > 1200 && now > playEnd + 1200;
     const a = await serviceCall("POST", "/api/voice/hear", { call: callId, addr, where: where(), quiet }, 5000);
     if (!a || !Array.isArray(a.lines)) return;
     hears = true;
@@ -376,9 +380,11 @@ async function main() {
       state();
       startMic().catch((err) => end(`The microphone didn't start: ${err?.message ?? err}`));
     }
-    else if (m.type === "user_transcript") { phase = "thinking"; thinkingAt = Date.now(); state(); }
+    else if (m.type === "user_transcript") { turn.seen("user_transcript"); phase = "thinking"; thinkingAt = Date.now(); state(); }
     else if (m.type === "agent_response") {
-      phase = "listening";
+      turn.seen("agent_response");
+      // a word before a tool ("On it."): still working on it
+      if (!busy) phase = "listening";
       const text = m.agent_response_event?.agent_response;
       if (typeof text === "string" && text.trim()) said = text.trim().slice(0, 300);
       state();
@@ -390,9 +396,16 @@ async function main() {
     else if (m.type === "interruption") hush();
     else if (m.type === "client_tool_call") {
       const c = m.client_tool_call ?? {};
-      phase = "thinking"; thinkingAt = Date.now(); state();
+      doing = toolWords(String(c.tool_name ?? ""), c.parameters ?? {});
+      turn.seen("client_tool_call");
+      phase = "working"; thinkingAt = Date.now(); state();
       busy++;
-      try { await tool(c); } finally { busy--; }
+      try { await tool(c); } finally {
+        busy--;
+        turn.seen("client_tool_result");
+        // its answer next
+        if (!busy) { phase = "thinking"; thinkingAt = Date.now(); state(); }
+      }
     }
   };
   async function tool(c: any) {

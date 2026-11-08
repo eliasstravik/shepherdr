@@ -223,6 +223,8 @@ test("SHEP-105: updates wait while the person talks, then come together; a send 
   agent.send(JSON.stringify({ type: "client_tool_call", client_tool_call: { tool_name: "send", tool_call_id: "s1", parameters: { to: "home on this computer", text: "Check the build" } } }));
   await until(() => results.length > n);
   expect(sent).toEqual(["p:h1"]);
+  // its answer to the tool's result (SHEP-113: updates wait until the person's ask is answered)
+  agent.send(JSON.stringify({ type: "agent_response", agent_response_event: { agent_response: "Passed it to Home." } }));
   // the person keeps talking while a reply comes in
   const loud = new Uint8Array(new Int16Array(1600).map((_, i) => (i % 2 ? 5000 : -5000)).buffer);
   const before = heard.length;
@@ -234,5 +236,41 @@ test("SHEP-105: updates wait while the person talks, then come together; a send 
   const said = heard.slice(before).filter((m) => m.type === "user_message");
   expect(said).toHaveLength(1);
   expect(said[0].text).toContain('the Home Assistant replied: """The build is green."""');
+  c.end();
+}, 10000);
+
+test("SHEP-113: the person's ask is answered first; updates that came meanwhile wait, then follow; the page sees each state", async () => {
+  agent = null;
+  const box = { reply: null as null | { id: string; text: string } };
+  const hearIO: HearIO = { snap: () => snap, view: (key) => (key === "p:h1" ? { lastReply: () => box.reply, status: () => "idle", asking: () => null } : null), follow: () => ({ stop: () => {} }) };
+  const p = page(null);
+  // the Home space on screen: the call follows its chat's replies
+  const c = voiceCall({} as any, { io, hear: hearIO, where: { client: "web", device: "phone", machine: "box", place: "h1" }, dial: async () => `ws://127.0.0.1:${server.port}/` }, p as any);
+  await until(() => !!agent);
+  await Bun.sleep(100);
+  const states = () => p.got.filter((m) => m.type === "state").map((m) => (m.doing ? `${m.state}: ${m.doing}` : m.state));
+  // the person asks; while the voice works on it, a reply comes in elsewhere
+  const before = heard.length;
+  agent.send(JSON.stringify({ type: "user_transcript", user_transcription_event: { user_transcript: "What's working right now?" } }));
+  await until(() => states().includes("thinking"));
+  box.reply = { id: "r1", text: "The build is green." };
+  agent.send(JSON.stringify({ type: "agent_response", agent_response_event: { agent_response: "On it." } }));
+  const n = results.length;
+  agent.send(JSON.stringify({ type: "client_tool_call", client_tool_call: { tool_name: "look", tool_call_id: "l1", parameters: { what: "tasks", query: "working" } } }));
+  await until(() => results.length > n);
+  // quiet for well past the quiet moment: the update still waits, the answer is owed
+  await Bun.sleep(2600);
+  expect(heard.slice(before).some((m) => m.type === "user_message")).toBe(false);
+  // the answer, then the update after it
+  agent.send(JSON.stringify({ type: "agent_response", agent_response_event: { agent_response: "Nothing is working now." } }));
+  const answeredAt = heard.length;
+  await until(() => heard.slice(before).some((m) => m.type === "user_message"));
+  const said = heard.slice(before).filter((m) => m.type === "user_message");
+  expect(said).toHaveLength(1);
+  expect(said[0].text).toContain("The build is green.");
+  expect(heard.indexOf(said[0])).toBeGreaterThanOrEqual(answeredAt);
+  // the page saw each state, with what the tool did in plain words
+  // ("On it." is said while it shows Speaking: the page shows the voice playing over this state)
+  expect(states()).toEqual(["listening", "thinking", "listening", "working: checking tasks", "thinking", "listening"]);
   c.end();
 }, 10000);

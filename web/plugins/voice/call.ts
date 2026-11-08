@@ -24,8 +24,10 @@ let playAt = 0
 let yours: AnalyserNode | null = null
 let theirs: AnalyserNode | null = null
 /** what the call is doing, besides the agent speaking (which the playing audio tells) */
-let phase: 'connecting' | 'listening' | 'thinking' | 'reconnecting' = 'connecting'
+let phase: 'connecting' | 'listening' | 'thinking' | 'working' | 'reconnecting' = 'connecting'
 let phaseAt = 0
+/** SHEP-113: while working, what it does, in plain words ("checking tasks") */
+let doing = ''
 /** the server's id for this call: a dropped socket goes back to it */
 let callId: string | null = null
 /** until when a dropped socket keeps trying (a little under the server's hold) */
@@ -197,11 +199,12 @@ function connect(resume: boolean) {
   sock.onmessage = async (e) => {
     if (ws !== sock) return
     if (e.data instanceof ArrayBuffer) {
-      if (phase !== 'reconnecting') phase = 'listening'
+      // its voice: done thinking (a word before a tool, "On it.", leaves it working)
+      if (phase === 'thinking' || phase === 'connecting') phase = 'listening'
       if (!play(e.data)) { stopCall(); h.onError('Voice audio could not keep up. Start a new call.') }
       return
     }
-    const m = JSON.parse(String(e.data)) as { type: string; id?: number | string; message?: string; state?: typeof phase; nav?: Nav; text?: string }
+    const m = JSON.parse(String(e.data)) as { type: string; id?: number | string; message?: string; state?: typeof phase; doing?: string; nav?: Nav; text?: string }
     if (m.type === 'call' && typeof m.id === 'string') callId = m.id
     // back on the call: as it was, the agent says so
     if (m.type === 'resumed') { retryUntil = 0; retries = 0; phase = 'listening'; phaseAt = Date.now(); wakeAudio() }
@@ -213,8 +216,9 @@ function connect(resume: boolean) {
       if (typeof m.id === 'number' && ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'navved', id: m.id, ...ack }))
     }
     if (m.type === 'state' && m.state) {
+      if (m.state !== phase || m.state !== 'working' || m.doing !== doing) phaseAt = Date.now()
       phase = m.state
-      phaseAt = Date.now()
+      doing = m.state === 'working' && typeof m.doing === 'string' ? m.doing.slice(0, 60) : ''
     }
     // you talked over it: what it was about to say is dropped
     if (m.type === 'interrupt') {
@@ -309,14 +313,20 @@ export function muteCall(isMuted: boolean) {
   ms?.setMicrophoneActive?.(!isMuted)?.catch?.(() => undefined)
 }
 
+export type CallPhase = 'connecting' | 'listening' | 'thinking' | 'working' | 'speaking' | 'reconnecting'
+
 /** what the call is doing now: the agent speaking whenever its voice is still playing */
-export function callPhase(): 'connecting' | 'listening' | 'thinking' | 'speaking' | 'reconnecting' {
+export function callPhase(): CallPhase {
   if (phase === 'reconnecting') return phase
   if (ctx && playAt > ctx.currentTime + 0.05) return 'speaking'
-  // thinking that never led to words goes back to listening
+  // thinking that never led to words goes back to listening; a tool gives up after 30 s (its timeout)
   if (phase === 'thinking' && Date.now() - phaseAt > 20000) return 'listening'
+  if (phase === 'working' && Date.now() - phaseAt > 35000) return 'listening'
   return phase
 }
+
+/** SHEP-113: while working, what it does in plain words ("checking tasks"), else "" */
+export const callDoing = () => (callPhase() === 'working' ? doing : '')
 
 /** for the wave: whoever is louder right now, the agent first (your mic hears it a little too) */
 export function callSample(): Sample {
@@ -355,6 +365,7 @@ export function stopCall() {
   playAt = 0
   muted = false
   phase = 'connecting'
+  doing = ''
   callId = null
   retryUntil = 0
   retries = 0

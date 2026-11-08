@@ -34,6 +34,7 @@ How you speak (a voice call: this matters most):
 - One or two short sentences a turn, never more, then stop. Answer only what was asked: the gist, not every detail a tool gave (leave out numbers like percentages and pull requests unless asked).
 - No preambles, no recaps, no lists read out, no "I can also..." offers. More detail only when asked.
 - Numbers and names plainly ("SHEP 45", "three tasks"). Never read out code, paths, links or ids letter by letter.
+- Before a tool that takes a moment (look, send, act, screen), first say one or two words in the call's language ("On it.", "Checking."), never a sentence about what you will do. Then the tool, then the answer.
 - Silence is fine. If the person says nothing, say nothing: never ask if they're there or want something. Just wait.
 - Speak the language the person speaks: English at first, theirs as soon as they speak another (switch with language_detection), back when they go back, any number of times. The exact words below are English: say them in the call's language.
 
@@ -56,12 +57,20 @@ Rules:
 - Making or planning things (a new task or space, a brief, an automation, Autopilot's direction, anything that takes judgment): send it to that space's Assistant in the person's words with every detail.
 - Never wait on an agent: they take minutes. After a send, say only "Passed it to <name>." (the space's or task's name) and stop. Their reply comes later as an [Update].
 - Send without asking only when the person clearly asked you to. Never send greetings, chit-chat or talk about the call. Unsure if it's meant for an agent? Ask.
+- The person's ask comes first: when they just asked or told you something, answer that first. [Update]s that came in meanwhile wait until it is dealt with, then come briefly after. Never start a reply with an [Update].
 - Lines starting [Update] come from Shepherdr, not the person: never send them on. They are replies and status from the chats you sent to or the one on screen, and anything anywhere that needs the person. Say what matters in one short sentence, naming who ("The shop Assistant says the build is fixed."). Always say when someone needs the person. Several at once: one or two short sentences for all ("Two things: ..."). Where the app is now is for you only: say nothing about it.
 - open and screen act on the screen the call runs on. Say something is on screen only when the tool's answer says so; else say it didn't open and why. If several spaces or machines fit, ask which.${where ? `\n\nWhere the call is now: ${where}` : ""}`;
 
 const PLACE = { type: "string", description: "Which one: a space's name, a task's id (SHEP-45), a machine's or artifact's name, or \"here\" (what is on screen). Leave out for all." };
-const tool = (name, description, props, required = []) =>
-  ({ type: "client", name, description, expects_response: true, response_timeout_secs: 30, parameters: { type: "object", properties: props, required } });
+// SHEP-113: the person always knows the call heard them. pre_tool_speech "force": the agent says a word or two
+// ("On it.") before the tool runs, "auto" where ElevenLabs decides from how long the tool takes (open and screen are
+// quick, and say one word after: SHEP-83); tool_call_sound "typing" plays while a tool it spoke before runs long (the
+// call's "still working"). https://elevenlabs.io/docs/agents-platform/api-reference/agents/create (pre_tool_speech,
+// tool_call_sound, tool_call_sound_behavior on a client tool) and
+// https://elevenlabs.io/docs/eleven-agents/customization/tools/tool-configuration/tool-call-sounds
+const tool = (name, description, props, required = [], speech = "force") =>
+  ({ type: "client", name, description, expects_response: true, response_timeout_secs: 30, pre_tool_speech: speech,
+    tool_call_sound: "typing", tool_call_sound_behavior: "auto", parameters: { type: "object", properties: props, required } });
 
 /** What a look can read, an open can show and an act can do (service/voice-tools.ts answers each). */
 export const LOOKS = ["here", "chat", "spaces", "machines", "tasks", "task", "needs", "news", "autopilot", "automations", "settings", "secrets", "artifacts", "data"];
@@ -83,7 +92,7 @@ export const TOOLS = [
     id: PLACE,
     tab: { type: "string", enum: TABS, description: "A task's tab: chat, terminal, files, changes, pr (pull request), browser, or review (a Ready task's Accept card)." },
     query: { type: "string", description: "tasks: a state to filter by (working, ready, needs, queued, scheduled, todo, done) and/or words to type in its filter box." },
-  }, ["what"]),
+  }, ["what"], "auto"),
   tool("send", "Write a message as the person: to a space's Assistant (by the space's name) or a task's agent (by its id), or the chat on screen (\"here\"). Also how to ask an Assistant to make, plan or change things.", {
     to: { type: "string", description: "A space's name (its Assistant), a task's id (its agent), or \"here\" (the chat on screen)." },
     text: { type: "string", description: "The message, in the person's words, tidied, with every detail." },
@@ -96,7 +105,7 @@ export const TOOLS = [
     submit: { type: "boolean", description: "type: press Enter after." },
     find: { type: "string", description: "Words to list only matching things (a long screen)." },
     confirmed: { type: "boolean", description: "click: true only after the person said yes to a click that deletes, merges, stops or can't be undone." },
-  }, ["do"]),
+  }, ["do"], "auto"),
   tool("act", "Change something directly. Ask the person first and set confirmed true only after a clear yes; with confirmed false nothing changes and it says what to ask.", {
     action: { type: "string", enum: ACTS, description: "accept: a Ready task (merges it). start: a task now. schedule: a task later (value: when, \"in 2h\", \"tomorrow 9:00\"). unschedule. stop: a working task's agent. resume: an ended task's agent. done: mark a task done without merging. reopen: a done or ready task. delete: a task. pin, unpin: a task. autopilot_on, autopilot_off, autopilot_run (wake now): a space's. rename_space (value: the new name). remove_space: forget a space (its folder stays). setting: change a setting (key: its name, value, id: a space or leave out for everywhere). forget_secret: delete a secret by name (key). delete_artifact." },
     id: PLACE,
@@ -132,6 +141,11 @@ export const LANGUAGES = ("zh es hi pt pt-br fr de ja ar ko id it nl tr pl ru sv
 export const SILENT_END_SECS = 900;
 export const MAX_CALL_SECS = 3600;
 
+// SHEP-113: the model slow to start a reply: after 3 s a short filler of its own words (in the call's language), the
+// fixed one only if it can't. turn.soft_timeout_config, timeout_seconds 0.5..8 (-1 off):
+// https://elevenlabs.io/docs/eleven-agents/customization/conversation-flow
+export const SOFT_TIMEOUT = { timeout_seconds: 3, message: "One moment.", use_llm_generated_message: true };
+
 // The dedicated "Herdr chat" voice agent, made with the person's key (its id kept in <app home>/secrets) and brought
 // up to this spec whenever it changes (SPEC, ensureAgent).
 export const agentSpec = () => ({
@@ -143,7 +157,7 @@ export const agentSpec = () => ({
       // a model that is good with tools (ElevenLabs' advice), quick enough to talk
       prompt: { prompt: prompt(), llm: "claude-sonnet-5-5", tools: [...TOOLS, ...SYSTEM_TOOLS] },
     },
-    turn: { turn_timeout: -1, silence_end_call_timeout: SILENT_END_SECS },
+    turn: { turn_timeout: -1, silence_end_call_timeout: SILENT_END_SECS, soft_timeout_config: SOFT_TIMEOUT },
     conversation: { max_duration_seconds: MAX_CALL_SECS },
     // Scribe hears any language; the speech model speaks them all, in the same voice
     asr: { user_input_audio_format: "pcm_16000" },
@@ -232,6 +246,50 @@ export function batchLines(lines) {
   if (loud.length === 1) out.push({ type: "user_message", text: `[Update] ${loud[0]}` });
   else if (loud.length > 1) out.push({ type: "user_message", text: `[Update] ${loud.length} things came in together:\n${loud.map((t, i) => `${i + 1}. ${t}`).join("\n")}\nTell the person all of them in one or two short sentences.` });
   return out;
+}
+
+// ---- what the call is doing (SHEP-113) -------------------------------------------------------
+
+const LOOK_WORDS = { here: "looking at the screen", chat: "reading the chat", spaces: "checking spaces", machines: "checking machines",
+  tasks: "checking tasks", task: "reading the task", needs: "checking what needs you", news: "reading the news", autopilot: "checking Autopilot",
+  automations: "checking automations", settings: "reading settings", secrets: "checking secret names", artifacts: "checking artifacts", data: "looking it up" };
+const ACT_WORDS = { accept: "accepting the task", start: "starting the task", schedule: "scheduling the task", unschedule: "unscheduling the task",
+  stop: "stopping the agent", resume: "resuming the agent", done: "marking it done", reopen: "reopening the task", delete: "deleting the task",
+  pin: "pinning the task", unpin: "unpinning the task", autopilot_on: "turning Autopilot on", autopilot_off: "turning Autopilot off",
+  autopilot_run: "waking Autopilot", rename_space: "renaming the space", remove_space: "removing the space", setting: "changing a setting",
+  forget_secret: "forgetting a secret", delete_artifact: "deleting the artifact" };
+
+/** What a tool call is doing, in a few plain words for the call's status ("checking tasks", "sending to shop"). */
+export function toolWords(name, params = {}) {
+  const p = params && typeof params === "object" ? params : {};
+  const s = (v) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, 40) : "");
+  if (name === "look") return LOOK_WORDS[p.what] ?? "looking";
+  if (name === "open") return "opening it";
+  if (name === "send") { const to = s(p.to); return !to || to === "here" ? "sending to this chat" : `sending to ${to}`; }
+  if (name === "act") return p.confirmed === true ? ACT_WORDS[p.action] ?? "making the change" : "checking";
+  if (name === "screen") return p.do === "look" ? "reading the screen" : "using the screen";
+  return "working";
+}
+
+/**
+ * SHEP-113: the person's ask comes first. Fed the voice agent's events as they come (seen), holding() says whether
+ * the call still owes the person an answer: from their words (user_transcript) until the agent replied
+ * (agent_response) with no tool running, and again after each tool's result (its answer follows). [Update]s wait
+ * while it holds (the caller's job), so a reply never starts with them. A model that never answers holds no longer
+ * than maxMs.
+ */
+export function turnGate(maxMs = 30000) {
+  let owed = false, at = 0, tools = 0;
+  return {
+    seen(type, now = Date.now()) {
+      if (type === "user_transcript") { owed = true; at = now; }
+      else if (type === "client_tool_call") { tools++; at = now; }
+      else if (type === "client_tool_result") { tools = Math.max(0, tools - 1); owed = true; at = now; }
+      else if (type === "agent_response") { owed = false; at = now; }
+    },
+    // a tool that never came back holds four times as long at most
+    holding: (now = Date.now()) => (tools > 0 && now - at < maxMs * 4) || (owed && now - at < maxMs),
+  };
 }
 
 /** Something anywhere needs the person (a question, a secret, a task Ready): one short line, said out loud. */
