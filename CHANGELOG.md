@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.1.17
+
+Voice calls go on with the phone locked, and agents can show you an artifact wherever you are.
+
+- A voice call keeps going with the phone locked, shows on the lock screen, and picks up again after a dropped
+  connection.
+- Voice calls switch to the language you speak, by themselves.
+- An agent can open an artifact for you on the screen you used last, and gives you its link.
+- The Tasks list shows what needs you first, then each space's tasks.
+- A task that changed no code (research, a report) waits for your Accept instead of finishing on its own, and its
+  Accept card links its artifacts.
+- Usage insights, a new add-on you can switch off: a private log on your own machine of how you use Shepherdr, that
+  your agents can read.
+
 ## 3.1.16
 
 Every agent question can be answered from the chat, and web messages never get lost.
