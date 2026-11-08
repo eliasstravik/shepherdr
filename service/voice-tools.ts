@@ -6,6 +6,8 @@
 import type { Snapshot, Task, Place } from "../web/shared/types.ts";
 import { navWords } from "../core/voice.js";
 import { screenParams, screenWords } from "../core/screen.js";
+import { planRows, windowWords, whyWords, healthWords } from "../core/machines.js";
+import { SOURCES, scrub, render, at, search, segments, type SourceArgs } from "./voice-data.ts";
 
 /** Where a call comes from: its app, the chat it started from (if any), and what that app shows now (sent by the page or
  *  the window). SHEP-105: a call is with Shepherdr itself, not that chat: "here" is what the screen shows. */
@@ -53,6 +55,9 @@ export interface VoiceIO {
   addrOf?(key: string): string | null;
   /** a task's folder and machine (the window's Accept card needs them) */
   taskWhere?(id: string): { ref: string; folder: string; machine: string | null } | null;
+  /** one of the web app's other reads (voice-data.ts SOURCES), as the panel that shows it fetches it: its data, or
+   *  throws an Error in plain words */
+  read?(source: string, args: SourceArgs): Promise<unknown>;
 }
 
 /** a tool's answer: words for the voice agent; an open's nav, and what it shows in words, for the app to show and confirm */
@@ -341,8 +346,25 @@ function lookMachines(snap: Snapshot) {
   return done(snap.machines.map((m) => {
     const sp = snap.places.filter((p) => p.machine === m.machine).length;
     const work = snap.tasks.filter((t) => !t.archived && t.status === "work" && snap.places.find((p) => p.id === t.place)?.machine === m.machine).length;
-    return `${machineSaid(snap, m.machine)}${m.here ? " (where Shepherdr serves from)" : ""}: ${m.status === "off" ? `offline${m.unreachableSince ? ` since ${m.unreachableSince}` : ""}` : m.connecting ? "connecting" : "online"}, ${sp} space${sp === 1 ? "" : "s"}, ${work} task${work === 1 ? "" : "s"} working.`;
+    const plans = planWords((m as any).stats);
+    return `${machineSaid(snap, m.machine)}${m.here ? " (where Shepherdr serves from)" : ""}: ${m.status === "off" ? `offline${m.unreachableSince ? ` since ${m.unreachableSince}` : ""}` : m.connecting ? "connecting" : "online"}, ${sp} space${sp === 1 ? "" : "s"}, ${work} task${work === 1 ? "" : "s"} working.${plans ? ` ${plans}` : ""}`;
   }).join("\n") || "No machines.");
+}
+
+/** a machine's health and its agent plans' limits, as its machine popup words them (core/machines.js) */
+export function planWords(stats: any, now = Date.now()) {
+  if (!stats) return "";
+  const out: string[] = [];
+  const h = stats.health ? healthWords(stats) : "";
+  if (h) out.push(`Health: ${h}.`);
+  for (const r of planRows(stats, now) as any[]) {
+    if (r.none) continue;
+    const name = `${r.name}${r.read?.plan ? ` (${r.read.plan})` : ""}`;
+    if (r.read?.state !== "ok") { out.push(`${name}: ${whyWords(r.read)}`); continue; }
+    const ws = (r.read.windows ?? []).map((w: any) => windowWords(w, now)).map((w: any) => (w.dead ? w.dead : `${w.name} ${w.words}, ${w.refill[0].toLowerCase()}${w.refill.slice(1)}`));
+    out.push(`${name} plan: ${ws.length ? ws.join("; ") : "no limits reported"}.${r.read.failed ? " Its last read failed, so these may be old." : ""}`);
+  }
+  return out.join(" ");
 }
 
 function lookTasks(snap: Snapshot, where: Where, id: unknown, query: string, count: number) {
@@ -497,6 +519,66 @@ function lookArtifacts(snap: Snapshot, where: Where, query: string, count: numbe
   return done(list(arts.map((a) => `"${cut(a.title, 90)}"${placeName(snap, a.place) ? ` in ${placeName(snap, a.place)}` : ""}, ${ago(a.at)}${(a as any).by ? ` by ${(a as any).by}` : ""}`), count, "artifacts"));
 }
 
+// ---- data: everything the UI shows (voice-data.ts) ----------------------------------------
+
+/** What look data's top shows: the snapshot's every part, then the other sources. */
+function dataTop(snap: Snapshot) {
+  const parts = Object.entries(snap as any).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}: ${Array.isArray(v) ? `${v.length} items` : v && typeof v === "object" ? `{${Object.keys(v).slice(0, 8).join(", ")}${Object.keys(v).length > 8 ? ", …" : ""}}` : JSON.stringify(v)}`);
+  const src = Object.entries(SOURCES).map(([k, s]) => `${k}${s.arg ? ` (id: ${s.arg.replace(/-/g, " ")})` : ""}: ${s.about}`);
+  return `Everything the app shows. path a part, then any key, item id or name ("machines/mini/stats/limits"), or query words to search it all.\nThe app's live data:\n${parts.join("\n")}\nRead when a panel opens (path its name):\n${src.join("\n")}`;
+}
+
+/** what a source is about, from the look's id: a task, a space, a chat... ("here": what is on screen) */
+function sourceArgs(snap: Snapshot, where: Where, kind: string | undefined, id: string): SourceArgs | { error: string } {
+  if (!kind) return {};
+  if (kind === "task" || kind === "task-or-space") {
+    const t = findTask(snap, id, where);
+    const exact = t && (isHere(id) || norm(id) === norm(t.id) || norm(id) === norm(t.id.split(":").pop()));
+    if (t && (kind === "task" || exact)) return { task: t.id };
+    if (kind === "task-or-space") { const p = findSpace(snap, id, where); if (p) return { place: p.id }; if (t) return { task: t.id }; }
+    return { error: isHere(id) ? "Which task? Say its id." : `I can't find ${kind === "task" ? "task" : "a task or space"} "${cut(id, 60)}".` };
+  }
+  if (kind === "space") { const p = findSpace(snap, id, where); return p ? { place: p.id } : { error: `Which space? I can't find "${cut(id, 60)}".` }; }
+  if (kind === "chat") { const c = findChat(snap, id || "here", where); return "error" in c ? c : { chat: c.key }; }
+  if (kind === "artifact") { const a = findArtifact(snap, id, where); return a ? { artifact: a.id, v: a.v, machine: (a as any).machine ?? null } : { error: `I can't find an artifact like "${cut(id, 60)}".` }; }
+  if (kind === "machine") {
+    if (!id || isHere(id)) return { machine: null };
+    const m = snap.machines.find((x) => machineAliases(x).some((a) => norm(a) === norm(id)));
+    return m ? { machine: m.here ? null : m.machine } : { error: `I can't find a machine called "${cut(id, 60)}".` };
+  }
+  if (kind === "role") return id ? { role: id.toLowerCase().trim() } : { error: "Which role? assistant, worker or reviewer." };
+  return {};
+}
+
+async function lookData(io: VoiceIO, snap: Snapshot, where: Where, id: string, path: string, query: string) {
+  const segs = segments(path);
+  const src = segs.length ? Object.keys(SOURCES).find((k) => norm(k) === norm(segs[0])) : undefined;
+  if (!src) {
+    const root = scrub(snap);
+    if (!segs.length && !query) return done(dataTop(snap));
+    const node = at(root, segs);
+    if ("error" in node) return fail(`${node.error} Look at data with no path for every part.`);
+    if (query) {
+      const hits = search(node.v, query);
+      return done(hits.length ? `${hits.length} value${hits.length === 1 ? "" : "s"} about "${cut(query, 60)}"${segs.length ? ` in ${node.trail}` : ""}:\n${hits.join("\n")}` : `Nothing about "${cut(query, 60)}"${segs.length ? ` in ${node.trail}` : ""} in the live data. A panel's own data may have it: look at data with no path for those.`);
+    }
+    return done(`${node.trail}:\n${render(node.v, node.key)}`);
+  }
+  const s = SOURCES[src];
+  if (!io.read) return fail("I can't read that from here.");
+  const a = sourceArgs(snap, where, s.arg, id);
+  if ("error" in a) return fail(a.error);
+  const rest = segs.slice(1);
+  const data = scrub(await io.read(src, s.rest ? { ...a, path: rest.join("/") } : a));
+  const node = s.rest ? { v: data, key: src, trail: segs.join("/") } : at(data, rest);
+  if ("error" in node) return fail(node.error);
+  if (query) {
+    const hits = search(node.v, query);
+    return done(hits.length ? `${src}, about "${cut(query, 60)}":\n${hits.join("\n")}` : `Nothing about "${cut(query, 60)}" in ${src}.`);
+  }
+  return done(`${[src, ...rest].join("/")}:\n${render(node.v, node.key)}`);
+}
+
 // ---- the tools ----------------------------------------------------------------------------
 
 /** One tool call from the voice agent: its answer in words, and what to show in the app (open). */
@@ -526,8 +608,9 @@ export async function voiceTool(name: string, params: any, where: Where, io: Voi
         case "settings": return lookSettings(snap, where, id, query);
         case "secrets": return lookSecrets(snap);
         case "artifacts": return lookArtifacts(snap, where, query, p.count ? count : 8);
+        case "data": return await lookData(io, snap, where, id, typeof p.path === "string" ? p.path.slice(0, 300) : "", query);
       }
-      return fail(`look can read: here, chat, spaces, machines, tasks, task, needs, news, autopilot, automations, settings, secrets, artifacts.`);
+      return fail(`look can read: here, chat, spaces, machines, tasks, task, needs, news, autopilot, automations, settings, secrets, artifacts, data.`);
     }
     if (name === "open") return open(snap, where, io, String(p.what ?? ""), id, typeof p.tab === "string" ? p.tab : "", query);
     if (name === "send") {
