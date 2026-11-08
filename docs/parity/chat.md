@@ -96,7 +96,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Model button | W:3199 "Opus 5.5 · High ⌄" in the box's bottom row, a narrow chat drops "· 1M" | S:384 AgentLine: the same words (D `agent.words`) with a chevron, under the box | ◇ 2.1's one-row box: the button sits under it |
 | /model | W:2225 opens the picker, the named model chosen | C /model → `openModelMenu(chat, name)` | ✓ |
 | Mic | W round mic (Voice add-on) | C:2255 Mic | ✓ |
-| Send / Call | W one round button: Send with words, Call when empty | C Send, else V:65 CallButton | ✓ |
+| Send | W one round button, always Send: grey with nothing to send, filled with words or files (SHEP-108) | C the same Send, disabled and grey while empty | ✓ |
 | Enter / Ctrl+Enter / Shift+Enter | W send, hold until free, new line | C same | ✓ |
 | Up / Down recall | W:1337 earlier messages in an empty box | C:1780 | ✓ (was missing) |
 | Esc | W stops a working agent (empty box), drops a quote | C same | ✓ |
@@ -162,7 +162,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Writing it down | W "Writing", spinner in Done | C "Writing", Done disabled | ✓ |
 | Call row | W:3259 Mute (mic / mic-off), wave, Connecting / Listening / Thinking / Speaking / Muted + m:ss, red round X | V:98 CallBox: the same, red round X | ✓ |
 | No key | W:2936 "Voice calls need an ElevenLabs key", "Add your key in Settings › Secrets as ELEVENLABS_API_KEY, then press the call button again.", Open Secrets | V:34 CallHelp over the box, same words, Open Secrets | ✓ (was a top error bar) |
-| A call with Shepherdr (SHEP-105) | spaces-chat voiceRow: Talk to Shepherdr at the top of the sidebar, the call card while on (what it does, m:ss, Mute, End; on the narrow rail a wave that ends it); the call runs in the shown space's Assistant chat | voice ShepherdrRow: the same row and card at the top of the sidebar (with the last thing it said); a phone's voice button beside Search and a green Mute and End strip above the bar; where neither shows (a shut sidebar, a tablet, a phone's task) the strip at the top; Opened by voice tags | ◇ the window always shows its sidebar or its rail; a phone or a shut web sidebar has neither |
+| A call with Shepherdr (SHEP-105) | spaces-chat voiceRow: Talk to Shepherdr at the top of the sidebar, the call card while on (what it does, m:ss, Mute, End; on the narrow rail a wave that ends it); the call runs in the shown space's Assistant chat | voice ShepherdrRow: the same row and card at the top of the sidebar (with the last thing it said); a phone's voice button at the end of its bottom bar (search: the ☰ drawer's magnifier) and a green Mute and End strip above the bar; where neither shows (a shut sidebar, a tablet, a phone's task) the strip at the top; Opened by voice tags | ◇ the window always shows its sidebar or its rail; a phone or a shut web sidebar has neither |
 | Call error | B "Voice call: …" with × | V:168 | ✓ |
 
 ## Image viewer (mods/chat-image)

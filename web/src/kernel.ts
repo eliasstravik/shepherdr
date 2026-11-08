@@ -97,8 +97,6 @@ export interface Registry {
   composerLive: { when: (ui: UI, chatKey: string) => boolean; View: FC<{ chatKey: string }> }[]
   /** above the composer box (+ menu, attachments) */
   composerAbove: { order: number; View: FC<{ chatKey: string; cli: string }> }[]
-  /** the right-hand composer button while the box is empty (voice call) */
-  composerIdle: FC<{ chatKey: string }> | null
   /** settings at the top of the + menu's agent section, before the CLI's own (a coordinator's mode); `when` says if one shows */
   composerSettings: { order: number; when: (snap: Snapshot, chatKey: string) => boolean; View: FC<{ chatKey: string }> }[]
   /** the + menu */
@@ -144,7 +142,6 @@ export const registry: Registry = {
   composerLive: [],
   composerAbove: [],
   composerSettings: [],
-  composerIdle: null,
   composerPlus: null,
   composerMic: null,
   overlays: [],

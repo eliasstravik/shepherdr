@@ -3885,7 +3885,7 @@ export default class Chat extends View {
       .child(this.liveRow(t, "chat-call",
         this.round("call-mute", `mods/chat/${c.muted ? "mic-off" : "mic"}.svg`, t, c.muted ? "on" : "quiet", (cx) => this.callMute(cx)),
         word, false, c.started,
-        this.round("call-x", "mods/chat/x.svg", t, "danger", (cx) => cx.spawn(async (cx) => { await this.hangup(); cx.notify(); })))));
+        this.round("call-x", "mods/chat/phone-x.svg", t, "danger", (cx) => cx.spawn(async (cx) => { await this.hangup(); cx.notify(); })))));
   }
 
   // The model button before the first message (loadChoice): the same menu, choosing what it starts on.
@@ -3906,8 +3906,7 @@ export default class Chat extends View {
         .text_size(12.5).text_color(t.dim).child(div().size(6).flex_none().rounded(3).bg(t.dim)).child(div().flex_1().child(WORDS.ended))
         .when(Boolean(this.taskKey), (el) => el.child(this.button("chat-resume", this.resuming ? WORDS.resuming : "Resume",null, "primary", t, (cx) => this.resumeTask(cx)))));
     // An open card, or the agent's own dialog in its terminal, doesn't lock the box: words
-    // written there answer it ("Reply instead…"). Only a call waits until it's free.
-    const blocked = st === "blocked" && !this.asks.length;
+    // written there answer it ("Reply instead…").
     const ready = this.phase === "ready" || this.phase === "fresh";
     const empty = !this.box.value().trim() && !this.files.length;
     const can = ready && !empty;
@@ -3979,11 +3978,9 @@ export default class Chat extends View {
         .when(Boolean(this.addr), (el) => el.children(this.pickParts(t, true)))
         .when(!this.addr && this.phase === "fresh" && Boolean(this.choice?.sel) && Boolean(cx), (el) => el.child(this.freshPick(t, cx)))
         .when(addonOn("voice"), (el) => el.child(this.round("chat-mic", "mods/chat/mic.svg", t, "ghost", (cx) => this.toggleDictation(cx))))
-        // Nothing to send: the same button starts a call, also while the agent works (unless the
-        // Voice add-on is off).
-        .child(empty && ready && !blocked && this.addr && addonOn("voice")
-          ? this.round("chat-send", "mods/chat/audio-lines.svg", t, "call", (cx) => this.toggleCall(cx))
-          : this.round("chat-send", "mods/chat/send.svg", t, can ? "solid" : "off", can ? (cx) => this.send(cx) : null)))));
+        // Always Send (SHEP-108): quiet with nothing to send, filled once there is. A call is with
+        // Shepherdr itself, from the top of the sidebar (SHEP-105), never from a chat's box.
+        .child(this.round("chat-send", "mods/chat/send.svg", t, can ? "solid" : "off", can ? (cx) => this.send(cx) : null)))));
   }
 
   // ---- alerts ---------------------------------------------------------------------------------

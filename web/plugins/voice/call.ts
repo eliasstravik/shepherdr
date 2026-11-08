@@ -202,8 +202,6 @@ function connect(resume: boolean) {
       return
     }
     const m = JSON.parse(String(e.data)) as { type: string; id?: number | string; message?: string; state?: typeof phase; nav?: Nav; text?: string }
-    // what the voice said, for the call card
-    if (m.type === 'said' && typeof m.text === 'string') { said = m.text; saidAt = Date.now() }
     if (m.type === 'call' && typeof m.id === 'string') callId = m.id
     // back on the call: as it was, the agent says so
     if (m.type === 'resumed') { retryUntil = 0; retries = 0; phase = 'listening'; phaseAt = Date.now(); wakeAudio() }
@@ -277,10 +275,6 @@ if (typeof document !== 'undefined') {
   addEventListener('pageshow', comeBack)
 }
 
-/** the last thing the voice said, and when (the call card shows it) */
-let said = ''
-let saidAt = 0
-export const lastSaid = () => ({ text: said, at: saidAt })
 
 export async function startCall(chatKey: string | null, onError: (message: string) => void = () => undefined, onNav: (nav: Nav) => NavAck | Promise<NavAck> = () => ({ ok: false, why: 'this page can\'t open things' }), onOpen: () => void = () => undefined, onEnded: () => void = () => undefined, lock: Controls | null = null) {
   stopCall()
@@ -366,6 +360,4 @@ export function stopCall() {
   retries = 0
   controls = null
   over = false
-  said = ''
-  saidAt = 0
 }
