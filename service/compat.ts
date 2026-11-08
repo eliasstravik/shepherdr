@@ -20,12 +20,11 @@ import { codexChoice } from "../core/asks.js";
 const { SCREEN } = SCc as any;
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-const APP_HOME = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
 const CLI_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex" };
 import * as MNc from "../core/menus.js";
 import * as APc from "../core/autopilot.js";
 const { machineLabel } = MNc as any;
-import { HOME } from "./paths.ts";
+import { HOME, appHome } from "./paths.ts";
 const { spaceName } = SPc as any;
 import type { Where } from "./worktree.ts";
 import * as AGc from "../core/agents.js";
@@ -487,7 +486,7 @@ export class Compat {
   private firsts = new Map<string, { at: number; text: string | null }>();
   firstTask(t: any, addr?: string | null) {
     const safe = (s: string) => String(s).replace(/[^\w.-]/g, "_");
-    const names = firstKeys({ labels: t?.labels, addr }).map((n: string) => join(APP_HOME, "data", "chat-first", `${safe(n)}.txt`));
+    const names = firstKeys({ labels: t?.labels, addr }).map((n: string) => join(appHome(), "data", "chat-first", `${safe(n)}.txt`));
     for (const f of names) {
       const was = this.firsts.get(f);
       if (was && Date.now() - was.at < 10_000) { if (was.text) return was.text; continue; }

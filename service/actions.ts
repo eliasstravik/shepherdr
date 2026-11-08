@@ -2,7 +2,8 @@
 // person's words to an agent, stop it, mark an Assistant read, accept a Ready task, read a task's evidence.
 // Anything else is refused. Inputs are checked here; commands run with argument lists, never a shell line.
 import type { Hub } from "./hub.ts";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { appHome, writable } from "./paths.ts";
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { sendBody, steerNow, messageBody, refusal, reactionLine, mentionedIn, taskTag } from "../core/send.js";
@@ -21,16 +22,16 @@ import * as MA from "../core/machine-add.js";
 import { exec } from "./model.ts";
 import { closeSaved, renameSaved, orderSaved, withoutSpace, splitId } from "./saved-spaces.ts";
 
-const APP = process.env.HERDR_APP_HOME || join(homedir(), ".config", "herdr-app");
 // The window's own space log (lib/spacelog.js): a space the service closed or renamed with no window is traced there too
-function logSpace(action: string, id: string, name: string | null, extra: Record<string, unknown> = {}) {
+export function logSpace(action: string, id: string, name: string | null, extra: Record<string, unknown> = {}) {
   try {
-    const dir = join(APP, "data", "backups");
-    mkdirSync(dir, { recursive: true });
-    appendFileSync(join(dir, "space-log.jsonl"), JSON.stringify({ at: new Date().toISOString(), machine: splitId(id).machine, space: id, name, action, ...extra, by: "web, no window (service/saved-spaces.ts)" }) + "\n");
+    // where at each call, and never the real one under test (SHEP-131: a test once logged its fake spaces there)
+    const file = writable(join(appHome(), "data", "backups", "space-log.jsonl"));
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(file, JSON.stringify({ at: new Date().toISOString(), machine: splitId(id).machine, space: id, name, action, ...extra, by: "web, no window (service/saved-spaces.ts)" }) + "\n");
   } catch {}
 }
-const ATTACH = join(process.env.HERDR_APP_HOME || join(homedir(), ".config", "herdr-app"), "data", "chat-attach");
+const attachDir = () => join(appHome(), "data", "chat-attach");
 /** files in one message at most (the page says so before it sends: web/plugins/chat/client.tsx) */
 export const MAX_FILES = 50;
 const ADDR = /^([\w.-]+\/)?t[0-9a-z]+$/;
@@ -50,7 +51,7 @@ async function sendNow(hub: Hub, b: any, compat: Compat, again = false) {
   const sent: string[] = Array.isArray(b.attachments) ? b.attachments : [];
   // never some of them quietly
   if (sent.length > MAX_FILES) throw new Error(`At most ${MAX_FILES} files in one message.`);
-  for (const p of sent) if (typeof p !== "string" || !p.startsWith(ATTACH + "/") || p.includes("/../")) throw new Error("That file isn't one sent from here.");
+  for (const p of sent) if (typeof p !== "string" || !p.startsWith(attachDir() + "/") || p.includes("/../")) throw new Error("That file isn't one sent from here.");
   // all at once
   const files = await Promise.all(sent.map(async (p) => {
     if (!a.includes("/")) return p;
@@ -409,7 +410,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const workers = [...hub.terminals.values()].filter((x: any) => x.state === "live" && x.parent === a).length;
     if (b.mode === "count") return { ok: true, workers };
     const tab = t.labels?.["herdr.coordinator.tab"];
-    const script = join(APP, "mods", "coordinator", "close.sh");
+    const script = join(appHome(), "mods", "coordinator", "close.sh");
     if (!tab || !existsSync(script)) throw new Error("Closing an Assistant needs Shepherdr's window layout installed.");
     const r = await run(["bash", script, tab, a!, b.mode === "stop" ? "stop" : "keep"]);
     if (r.code !== 0) throw new Error("It didn't close: the Herdr window needs to be open.");
@@ -481,7 +482,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (b.kind != null && !to?.run?.length) throw new Error("Not an agent installed there.");
     const assistant = t.labels?.["herdr.role"] === "coordinator" && !t.labels?.["herdr.agent"];
     const argv = to?.run ?? (assistant ? null : now?.run ?? null);
-    const script = join(APP, "mods", "coordinator", "restart.sh");
+    const script = join(appHome(), "mods", "coordinator", "restart.sh");
     if (!existsSync(script)) throw new Error("Switching agents needs Shepherdr's window layout installed.");
     const r = await run(["bash", script, a, ...(argv ? [JSON.stringify(argv)] : [])]);
     if (r.code !== 0) throw new Error("It didn't restart: the Herdr window needs to be open.");
@@ -548,7 +549,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const [slot, rec] = Object.entries(slots).find(([, r]) => r && (r.space === sp.id || r.space === bare)) ?? [];
     const text = str(b.text ?? "").trim();
     if (!text) throw new Error("nothing to send");
-    const files = Array.isArray(b.attachments) && !sp.machine ? b.attachments.filter((p: unknown) => typeof p === "string" && p.startsWith(ATTACH + "/") && !p.includes("/../")) : [];
+    const files = Array.isArray(b.attachments) && !sp.machine ? b.attachments.filter((p: unknown) => typeof p === "string" && p.startsWith(attachDir() + "/") && !p.includes("/../")) : [];
     const task = [text, ...files].join("\n\n");
     // its machine offline: it waits (the web shows it waiting to be reached) and starts once the machine is back
     if (sp.machine && !(await addedMachines()).some((m: any) => m.name === sp.machine && m.state === "connected")) {
@@ -568,10 +569,10 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     try { out = JSON.parse(r.stdout || "{}"); } catch {}
     if (r.code !== 0 || !out.address) throw new Error((r.stderr || r.stdout).trim().split("\n").pop() || "The Assistant didn't start.");
     // what the person asked, for its chat to show apart from the template (the window's data/chat-first)
-    const first = join(process.env.HERDR_APP_HOME || join(homedir(), ".config", "herdr-app"), "data", "chat-first");
+    const first = join(appHome(), "data", "chat-first");
     const addr = sp.machine && !String(out.address).includes("/") ? `${sp.machine}/${out.address}` : String(out.address);
     if (out.first_message?.sent === false && tpl.words) firstWhenIdle(hub, addr, `${tpl.words}\n\n${task}`);
-    try { mkdirSync(first, { recursive: true }); writeFileSync(join(first, `${String(slot ?? addr).replace(/[^\w.-]/g, "_")}.txt`), text); } catch {}
+    try { mkdirSync(first, { recursive: true }); writeFileSync(writable(join(first, `${String(slot ?? addr).replace(/[^\w.-]/g, "_")}.txt`)), text); } catch {}
     return { ok: true, started: true };
   }
   if (b?.type === "send" && typeof b.chat === "string") {
