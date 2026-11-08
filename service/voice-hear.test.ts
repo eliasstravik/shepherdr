@@ -20,7 +20,7 @@ function world() {
   const io = {
     snap: () => snap,
     view: (key: string): ChatView | null => chats[key] ? { lastReply: () => chats[key].reply, status: () => chats[key].status, asking: () => chats[key].asking } : null,
-    follow: (key: string) => { followed.push(key); return () => { followed.splice(followed.indexOf(key), 1); }; },
+    follow: (key: string) => { followed.push(key); return { stop: () => { followed.splice(followed.indexOf(key), 1); } }; },
   };
   return { snap, chats, followed, io };
 }
@@ -95,4 +95,35 @@ test("someone talking: loud 16-bit samples are, silence isn't", () => {
   const loud = new Int16Array(1600).map((_, i) => (i % 2 ? 4000 : -4000));
   expect(talking(new Uint8Array(loud.buffer))).toBe(true);
   expect(talking(new Uint8Array(3200))).toBe(false);
+});
+
+test("a reply already in a chat before its first read came is not news; a later question of a chat still waiting is", async () => {
+  const w = world();
+  // the chat's history isn't read yet when the call starts following it
+  let loaded!: () => void;
+  const ready = new Promise<void>((r) => { loaded = r; });
+  const real = w.chats["p:shop"].reply;
+  w.chats["p:shop"].reply = null;
+  const h = hearing({ ...w.io, follow: (key) => ({ stop: () => {}, ready: key === "p:shop" ? ready : undefined }) });
+  h.onScreen({ client: "web", place: "shop" });
+  h.tick();
+  // its history comes in: the old reply shows up, and isn't said
+  w.chats["p:shop"].reply = real;
+  loaded();
+  await Bun.sleep(0);
+  h.tick();
+  expect(h.take()).toEqual([]);
+  // it waits on the person: said once (its status), its need not again
+  w.chats["p:shop"].status = "blocked";
+  w.chats["p:shop"].asking = "Deploy now?";
+  h.tick();
+  w.snap.needs = [{ id: "q1", chat: "p:shop", place: "shop", at: 1, text: "Deploy now?" }];
+  h.tick();
+  expect(texts(h.take()).match(/needs the person/g)).toHaveLength(1);
+  // still waiting, a second question comes: said
+  w.snap.needs.push({ id: "q2", chat: "p:shop", place: "shop", at: 2, question: { id: "q2", title: "Which branch?", kind: "Question" } });
+  h.tick();
+  // (within the window of the status line, the first need took its one skip)
+  expect(texts(h.take())).toContain("Which branch?");
+  h.stop();
 });

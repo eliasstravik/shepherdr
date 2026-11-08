@@ -17,7 +17,7 @@ const snap: any = {
   artifacts: [{ id: "hulk", title: "Hulk mini game · Proof", place: "h1", v: 1, at: now, when: "1m", by: "x" }],
 };
 const io: VoiceIO = { snap: () => snap, chat: async () => null, send: async () => {}, action: async () => ({ ok: true }) };
-const hear: HearIO = { snap: () => snap, view: () => null, follow: () => () => {} };
+const hear: HearIO = { snap: () => snap, view: () => null, follow: () => ({ stop: () => {} }) };
 
 // the fake voice agent: sends each test's tool calls, keeps what the call answered
 const results: any[] = [];
@@ -209,7 +209,7 @@ test("SHEP-102: a page that never comes back: the call ends once the hold is up;
 test("SHEP-105: updates wait while the person talks, then come together; a send follows that chat", async () => {
   agent = null;
   const box = { reply: null as null | { id: string; text: string } };
-  const hearIO: HearIO = { snap: () => snap, view: (key) => (key === "p:h1" ? { lastReply: () => box.reply, status: () => "idle", asking: () => null } : null), follow: () => () => {} };
+  const hearIO: HearIO = { snap: () => snap, view: (key) => (key === "p:h1" ? { lastReply: () => box.reply, status: () => "idle", asking: () => null } : null), follow: () => ({ stop: () => {} }) };
   const p = page(null);
   const sent: string[] = [];
   const c = voiceCall({} as any, { io: { ...io, send: async (k) => { sent.push(k); } }, hear: hearIO, where: { client: "web", device: "phone", machine: "box" }, dial: async () => `ws://127.0.0.1:${server.port}/` }, p as any);

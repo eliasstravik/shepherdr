@@ -16,8 +16,9 @@ export type HearIO = {
   snap(): Snapshot | null;
   /** a chat's view, by its key (null: no agent running there now) */
   view(key: string): ChatView | null;
-  /** keeps that chat read while the call follows it; the stop */
-  follow(key: string): () => void;
+  /** keeps that chat read while the call follows it: the stop, and ready once its first read came (what it had before
+   *  then is not news) */
+  follow(key: string): { stop: () => void; ready?: Promise<unknown> };
 };
 
 type Line = { type: string; text: string };
@@ -32,9 +33,12 @@ function needWords(snap: Snapshot, n: Snapshot["needs"][number]) {
 const needKey = (n: Snapshot["needs"][number]) => `${n.chat}#${n.id}`;
 const readyIds = (snap: Snapshot | null) => new Set((snap?.tasks ?? []).filter((t) => t.status === "ready" && !t.archived).map((t) => t.id));
 
+/** how long after a chat's status said it waits its need (the snapshot a little behind) counts as that same wait */
+const WAIT_TOLD_MS = 15_000;
+
 export function hearing(io: HearIO) {
-  /** the chats followed now: { stop, last reply seen, last status } */
-  const chats = new Map<string, { stop: () => void; view: ChatView; reply: string | null; status: string | null }>();
+  /** the chats followed now: { stop, last reply seen, last status; primed once its first read came } */
+  const chats = new Map<string, { stop: () => void; view: ChatView; reply: string | null; status: string | null; primed: boolean }>();
   /** sent to during the call: followed to its end */
   const sent = new Set<string>();
   let shown: string | null = null;
@@ -42,6 +46,8 @@ export function hearing(io: HearIO) {
   const first = io.snap();
   const needs = new Set((first?.needs ?? []).map(needKey));
   let ready = readyIds(first);
+  /** when a followed chat's status said it waits for the person: its need that shows soon after isn't said again */
+  const toldWait = new Map<string, number>();
 
   const wanted = () => new Set([...sent, ...(shown ? [shown] : [])]);
   const name = (key: string) => { const s = io.snap(); return s ? chatName(s, key) : "an agent"; };
@@ -49,7 +55,13 @@ export function hearing(io: HearIO) {
     if (chats.has(key)) return;
     const view = io.view(key);
     if (!view) return;
-    chats.set(key, { stop: io.follow(key), view, reply: view.lastReply()?.id ?? null, status: view.status() });
+    const f = io.follow(key);
+    const c = { stop: f.stop, view, reply: null as string | null, status: null as string | null, primed: false };
+    chats.set(key, c);
+    // what the chat said before its first read came in is not news: the baseline is taken then (or after 8 s)
+    const prime = () => { if (c.primed) return; c.primed = true; c.reply = view.lastReply()?.id ?? null; c.status = view.status(); };
+    if (f.ready) Promise.race([f.ready, new Promise((r) => setTimeout(r, 8000))]).then(prime, prime);
+    else prime();
   }
   function drop(key: string) { chats.get(key)?.stop(); chats.delete(key); }
 
@@ -72,11 +84,13 @@ export function hearing(io: HearIO) {
     tick() {
       for (const key of wanted()) watch(key);
       for (const [key, c] of chats) {
+        if (!c.primed) continue;
         const st = c.view.status();
         if (st !== c.status) {
           c.status = st;
           const line = statusLine(name(key), st, c.view.asking());
           if (line) queue.push(line);
+          if (st === "blocked") toldWait.set(key, Date.now());
         }
         const r = c.view.lastReply();
         if (r && r.id !== c.reply) { c.reply = r.id; queue.push(replyLine(name(key), r.text)); }
@@ -87,8 +101,8 @@ export function hearing(io: HearIO) {
         const k = needKey(n);
         if (needs.has(k)) continue;
         needs.add(k);
-        // a followed chat's own wait is said by its status (statusLine) already
-        if (chats.has(n.chat) && !n.secret) continue;
+        // a followed chat's wait that its status just said (statusLine); a later question of one still waiting is new
+        if (!n.secret && Date.now() - (toldWait.get(n.chat) ?? 0) < WAIT_TOLD_MS) { toldWait.delete(n.chat); continue; }
         queue.push(needLine(needWords(s, n)));
       }
       const now = readyIds(s);

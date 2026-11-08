@@ -421,7 +421,7 @@ function follow(addr: string) {
 const hearIO: HearIO = {
   snap: () => compat.last,
   view: (key) => { const addr = compat.addrOf(key); return addr && !addr.startsWith("log:") ? chatView(addr) : null; },
-  follow: (key) => { const addr = compat.addrOf(key); return addr ? follow(addr).stop : () => {}; },
+  follow: (key) => { const addr = compat.addrOf(key); return addr ? follow(addr) : { stop: () => {} }; },
 };
 
 /** The window's calls' hearing (POST /api/voice/hear, mods/chat/voice.ts), by the call's id: let go once a call stops

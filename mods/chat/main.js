@@ -2313,8 +2313,8 @@ export default class Chat extends View {
       let st = null;
       try { st = JSON.parse(s ?? "null"); } catch {}
       if (st) {
-        const changed = st.phase !== call.phase || st.error !== call.error || (st.who ?? null) !== call.who;
-        call.phase = st.phase; call.error = st.error; call.pid = st.pid; call.who = st.who ?? null;
+        const changed = st.phase !== call.phase || st.error !== call.error || (st.who ?? null) !== call.who || (st.said ?? "") !== (call.said ?? "");
+        call.phase = st.phase; call.error = st.error; call.pid = st.pid; call.who = st.who ?? null; call.said = st.said ?? "";
         if (changed) { this.callShared(); cx.notify(); }
         if (st.phase === "ended") {
           if (st.error) this.callError(st.error);
@@ -2503,8 +2503,8 @@ export default class Chat extends View {
     if (pid) exec("sh", ["-c", 'sleep 1; kill "$1" 2>/dev/null; true', "x", String(pid)]);
   }
 
-  // The call for the bar shown while its chat isn't (mods/chat-call): shared "chat.calls" =
-  // { <chat pane>: { phase, who, muted, started, beat, name, tab } }.
+  // The call for the sidebar's call card (mods/spaces-chat voiceRow): shared "chat.calls" =
+  // { <chat pane>: { phase, who, muted, started, beat, name, tab, said } }.
   callShared() {
     const mine = this.myPane() ?? this.lastPane;
     if (!mine) return;
@@ -2513,7 +2513,7 @@ export default class Chat extends View {
     if (c) {
       const tab = panes().find((p) => p.pane === mine)?.tab ?? null;
       all[mine] = { phase: c.phase, who: c.who, muted: c.muted, started: c.started, beat: c.beat ?? Date.now(),
-        name: agent.NAMES[this.kind] ?? "the agent", tab };
+        name: agent.NAMES[this.kind] ?? "the agent", tab, said: c.said ?? "" };
     } else if (all[mine]) delete all[mine];
     else return;
     setShared("chat.calls", all);

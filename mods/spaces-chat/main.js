@@ -222,6 +222,8 @@ export default class Spaces extends View {
         .child(svg("mods/chat/audio-lines.svg").size(13).flex_none().text_color(green()).loop("opacity", { from: 0.45, to: 1, period: 1400 }))
         .child(div().flex_1().min_w(0).truncate().font_semibold().text_color(t.foreground).child("Shepherdr"))
         .child(div().flex_none().text_size(TEXT.label).font_medium().text_color(green()).child(`${word} \u00b7 ${clock}`)))
+      // the last thing it said
+      .when(Boolean(call.said), (el) => el.child(div().text_size(TEXT.label).text_color(t.muted).line_clamp(2).child(`\u201c${call.said}\u201d`)))
       .child(h_flex().gap(6).justify_end()
         .child(round("voice-mute", 26, call.muted ? t.foreground : t.background, call.muted ? t.background : t.foreground, call.muted ? "mods/chat/mic-off.svg" : "mods/chat/mic.svg", () => req("mute")))
         .child(round("voice-end", 26, red(), "#ffffff", "mods/chat/x.svg", () => req("end"))));

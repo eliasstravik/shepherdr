@@ -50,6 +50,8 @@ let heardAt = 0;
 const callId = dir.replace(/\/$/, "").split("/").pop() ?? "";
 let busy = 0;
 let hears = false;
+// the last thing the voice said (the sidebar's call card shows it)
+let said = "";
 
 function state() {
   const speaking = player && Date.now() < playEnd + 250;
@@ -57,7 +59,7 @@ function state() {
   // Who is talking, for the chat's wave: the agent while its voice plays, else the person
   // while the microphone hears them (a moment's hold, so it doesn't flicker).
   const talking = ended ? null : speaking ? "agent" : !muted && Date.now() - heardAt < 400 ? "you" : null;
-  const s = JSON.stringify({ phase: shown, who: talking, muted, error, since, pid: process.pid });
+  const s = JSON.stringify({ phase: shown, who: talking, muted, error, since, pid: process.pid, said });
   if (s === lastState) return;
   lastState = s;
   try { writeFileSync(join(dir, "state.json.tmp"), s); renameSync(join(dir, "state.json.tmp"), join(dir, "state.json")); } catch {}
@@ -375,7 +377,12 @@ async function main() {
       startMic().catch((err) => end(`The microphone didn't start: ${err?.message ?? err}`));
     }
     else if (m.type === "user_transcript") { phase = "thinking"; thinkingAt = Date.now(); state(); }
-    else if (m.type === "agent_response") { phase = "listening"; state(); }
+    else if (m.type === "agent_response") {
+      phase = "listening";
+      const text = m.agent_response_event?.agent_response;
+      if (typeof text === "string" && text.trim()) said = text.trim().slice(0, 300);
+      state();
+    }
     else if (m.type === "audio" && typeof m.audio_event?.audio_base_64 === "string") {
       const pcm = Buffer.from(m.audio_event.audio_base_64, "base64");
       if (pcm.length % 2 === 0) play(new Uint8Array(pcm));
