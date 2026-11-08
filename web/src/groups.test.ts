@@ -59,3 +59,16 @@ describe('For you, then space (SHEP-98)', () => {
     expect(loadGroups()).toEqual({ all: 'status', machine: 'you' })
   })
 })
+
+describe("the window's grouping (core/tasks.js groupNow)", () => {
+  test('For you until chosen; old Status split by space and the machine ones become For you', async () => {
+    const { groupNow } = (await import('@core/tasks.js')) as { groupNow: (s: (k: string) => unknown) => string }
+    const from = (v: Record<string, unknown>) => groupNow((k) => v[k])
+    expect(from({})).toBe('you')
+    expect(from({ 'tasks.groupby': 'status' })).toBe('you')
+    expect(from({ 'tasks.groupby': 'status', 'tasks.split': false })).toBe('status')
+    expect(from({ 'tasks.groupby': 'machine-space' })).toBe('you')
+    expect(from({ 'tasks.groupby': 'folder' })).toBe('space')
+    expect(from({ 'tasks.group': 'status', 'tasks.groupby': 'space' })).toBe('status')
+  })
+})

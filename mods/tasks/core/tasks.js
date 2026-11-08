@@ -13,8 +13,18 @@ export const RANK_OF = Object.fromEntries(["needs", "ready", "merging", "working
 // Scheduled (SHEP-38, herdr-task --at/--in): a task that starts by itself at a time, after Queued (it waits longer).
 export const ORDER = ["needs", "ready", "merging", "working", "queued", "scheduled", "todo", "done", "automations"];
 // How the list can be grouped (the ⋯ menu's Group by; Shepherdr's GROUP_WORDS). "folder" was Space's old key.
-export const GROUP_BY = ["status", "space", "machine", "machine-space"];
-export const groupBy = (v) => (v === "folder" ? "space" : GROUP_BY.includes(v) ? v : "status");
+export const GROUP_BY = ["you", "space", "status"];
+// A grouping's key: "folder" was Space's; Machine and Machine › Space are gone (SHEP-98): For you.
+export const groupBy = (v) => (v === "folder" ? "space" : GROUP_BY.includes(v) ? v : "you");
+// The window's grouping now (shared "tasks.group", from its ⋯), For you until chosen. Before SHEP-98
+// it was "tasks.groupby", Status split by space by default: Status with Split by space off stays
+// Status, Space stays Space, the rest is For you. shared: the window's shared(key).
+export const groupNow = (shared) => {
+  const v = shared("tasks.group");
+  if (v) return groupBy(v);
+  const old = shared("tasks.groupby");
+  return old === "space" || old === "folder" ? "space" : old === "status" && shared("tasks.split") === false ? "status" : "you";
+};
 
 export const machineOf = (address) => (address?.includes("/") ? address.split("/")[0] : null);
 // A machine as people read it (the Spaces sidebar's words): its name, or This computer.
