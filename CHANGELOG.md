@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.1.23
+
+A minimized call on a phone keeps out of the way.
+
+- In the web app on a phone, a minimized voice call no longer shows a green Listening pill above the bottom bar.
+  Mute and End stay in the bar.
+
 ## 3.1.22
 
 The voice call's orb is a clean circle on iPhone.
