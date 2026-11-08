@@ -8,9 +8,12 @@ import secrets
 import subprocess
 import time
 
-from .base import Fail, guard, hc_json, now, PR_EVERY, run, SHELLS, STORE
+from .base import Fail, git, guard, hc_json, now, PR_EVERY, run, SHELLS, STORE
 from .settings import machine_name, worker_argv
-from .agents import agent_log, agent_running, busy_again, detail, held_ask, live_agents, status_word, task_status
+from .agents import (
+    agent_log, agent_running, busy_again, detail, held_ask, last_question, live_agents, own_work, ready_turns, status_word,
+    task_status,
+)
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
 from .github import already_merged, finish, github, merged_here, pr_merged, pr_pending, pr_problem, pr_view, watch_main
@@ -103,8 +106,38 @@ def back_pass(s, t, report):
     live = live_agents(s.key(t))
     # Cheap while nothing works: hc ls alone; its records in full (roles) only then.
     if any(status_word(k) == "working" for k in live) and busy_again(t, [detail(k) for k in live]):
-        back_to_work(s, t, "its agent is at work again")
+        back_to_work(s, t, "its agent is at work again", auto=True)
         report.setdefault("working_again", []).append(s.ref(t))
+
+
+def settle_back(s, t, report):
+    """A Ready task its agent's own turn took back to work (back_pass(): a message in its chat,
+    a background job's notice waking it) is Ready again once that turn ended with nothing new: its
+    branch where it said ready, nothing uncommitted, no question asked, no work of its own left
+    running (SHEP-133). Else it stays Working, and Needs you once its agent stays quiet."""
+    b = t.get("back") or {}
+    if t["state"] != "running" or not b.get("auto") or t.get("attention") or t.get("retry"):
+        return False
+    wt = t.get("worktree") if t.get("mode") == "worktree" else None
+    if not wt or not t.get("head") or not os.path.isdir(wt):
+        return False
+    live = [k for k in map(detail, live_agents(s.key(t))) if agent_running(k)]
+    if not live or any(status_word(k) not in ("idle", "done") for k in live):
+        return False
+    ok, head, _ = git(wt, "rev-parse", "HEAD")
+    if not ok or head != t["head"] or git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
+        return False
+    if any(last_question(t, k.get("address")) for k in live) or own_work(t, live):
+        return False
+    t["state"], t["ready_turns"] = "ready", ready_turns(live)
+    if b.get("progress"):
+        t["progress"] = b["progress"]
+    else:
+        t.pop("progress", None)
+    t.pop("back", None)
+    s.dirty = True
+    report.setdefault("ready_again", []).append(s.ref(t))
+    return True
 
 
 def due_pass(s, report):
@@ -125,6 +158,8 @@ def tick_store(s, report):
     for t in s.data["tasks"]:
         if t["state"] == "ready":
             back_pass(s, t, report)
+        elif t["state"] == "running" and (t.get("back") or {}).get("auto"):
+            settle_back(s, t, report)
         if t.get("worktree") and t["state"] in ("running", "ready"):
             facts(s, t, report)
             if t["state"] == "ready" and (t.get("pr") or {}).get("news"):

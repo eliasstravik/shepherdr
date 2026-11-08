@@ -790,6 +790,53 @@ class BackToWork(unittest.TestCase):
         self.tick.facts(self.store, t, {"attention": []})
         self.assertNotIn("attention", t)
 
+    def test_ready_again_when_its_own_turn_changed_nothing(self):
+        """SHEP-133: a background job's notice (or a question in its chat) wakes a Ready task's agent;
+        it answers and goes quiet with nothing new. Ready again, not Needs you."""
+        wt = tempfile.mkdtemp()
+        said = {"text": "Proof published", "at": 1, "set": 1}
+        t = self.ready(mode="worktree", worktree=wt, branch="b", head="abc", progress=dict(said))
+        repo = {"head": "abc", "dirty": ""}
+        p = self.mock.patch.object(self.tick, "git", lambda cwd, *a: (True, repo["head"] if a[0] == "rev-parse" else repo["dirty"], ""))
+        p.start()
+        self.addCleanup(p.stop)
+        worker = lambda st, turn: [dict(self.agent({"address": "t1", "status": st, "turn": turn, "role": "worker"}), agent="claude")]
+        # woken: Working again (its Assistant hears it), Herdr's line
+        self.live = worker("working", 5)
+        self.tick.tick_store(self.store, {"started": []})
+        self.assertEqual((t["state"], t["back"]["auto"], t["progress"]["by"]), ("running", True, "herdr"))
+        # still at work: stays so
+        self.tick.tick_store(self.store, {"started": []})
+        self.assertEqual(t["state"], "running")
+        # its turn over, nothing new: Ready again, its own line back, the next turn new work again
+        self.live = worker("idle", 6)
+        report = {"started": []}
+        self.tick.tick_store(self.store, report)
+        self.assertEqual((t["state"], t["ready_turns"], t["progress"], report["ready_again"]), ("ready", {"t1": 6}, said, ["SHEP-7"]))
+        self.assertNotIn("back", t)
+        self.assertEqual(self.agents.task_status(t, self.live)[0], "ready")
+        # woken again, and this time it commits, or leaves changes, or asks: stays Working (Needs you after the grace)
+        for change in ({"head": "def"}, {"dirty": " M a.py"}):
+            t.update(state="ready", ready_turns={"t1": 6})
+            repo.update({"head": "abc", "dirty": "", **change})
+            self.live = worker("working", 6)
+            self.tick.tick_store(self.store, {"started": []})
+            self.live = worker("idle", 7)
+            self.tick.tick_store(self.store, {"started": []})
+            self.assertEqual(t["state"], "running", change)
+
+    def test_a_fix_asked_for_is_never_undone(self):
+        """herdr-task fix or resume took it back: Working until its agent says ready, idle or not."""
+        t = self.ready(mode="worktree", worktree=tempfile.mkdtemp(), branch="b", head="abc")
+        p = self.mock.patch.object(self.tick, "git", lambda cwd, *a: (True, "abc" if a[0] == "rev-parse" else "", ""))
+        p.start()
+        self.addCleanup(p.stop)
+        self.commands.back_to_work(self.store, t, "the person asked for a fix")
+        self.assertNotIn("auto", t["back"])
+        self.live = [dict(self.agent({"address": "t1", "status": "idle", "turn": 6, "role": "worker"}), agent="claude")]
+        self.tick.tick_store(self.store, {"started": []})
+        self.assertEqual(t["state"], "running")
+
     def test_ready_keeps_each_agents_next_turn(self):
         turns = self.agents.ready_turns([{"address": "t1", "status": {"state": "working"}, "turn": 4},
                                          {"address": "t2", "status": "idle", "turn": 2}])
@@ -1082,6 +1129,83 @@ class OwnBackgroundWork(unittest.TestCase):
         with self.mock.patch.object(output, "waiting_for", lambda s, t: []), self.mock.patch.object(output, "waiting_ext", lambda t: []):
             v = output.view(S(), self.task, [dict(k, foreground={"name": "claude"}) for k in self.idle])
         self.assertEqual((v["status"], v["own_work"]), ("working", True))
+
+
+class NoFalseNeedsYou(unittest.TestCase):
+    """SHEP-133: no Needs you for a few seconds that moves on by itself. A quiet agent or a problem
+    Herdr found needs the person only after a grace (GRACE_MS); asking needs them at once; Herdr's
+    own "Working again" is never the reason; a background job started before megabytes of
+    screenshots still counts. Real logs in a temp folder; hc is never run."""
+
+    setUp = OwnBackgroundWork.setUp
+    stamp, say, background, finished, status = (OwnBackgroundWork.stamp, OwnBackgroundWork.say, OwnBackgroundWork.background,
+                                                OwnBackgroundWork.finished, OwnBackgroundWork.status)
+
+    def test_the_rule_is_cores(self):
+        """The cases core/tasks.test.js checks place() on (core/grace.cases.json)."""
+        with open(os.path.join(ROOT, "core", "grace.cases.json")) as f:
+            g = json.load(f)
+        self.assertEqual(self.agents.GRACE_MS, 20_000)
+        agent = lambda a: {"address": a["address"], "status": {"state": a["status"]}, "turn": a["turn"],
+                           "labels": {"herdr.role": a["role"]}, **({"status_ms": a["since"]} if "since" in a else {})}
+        with self.mock.patch.object(self.agents, "now", lambda: g["now"]):
+            for c in g["cases"]:
+                got = self.agents.task_status(dict(c["task"], id=7), [agent(a) for a in c["live"]])
+                self.assertEqual(got[:2], (c["expect"]["status"], c["expect"]["needs"]), c["name"])
+
+    def test_a_quiet_agent_needs_you_once_the_grace_is_over(self):
+        self.say(-3_000, "Done with the first part.")
+        quiet = lambda ago, st="idle": [dict(self.idle[0], status={"state": st}, status_ms=self.clock - ago)]
+        self.assertEqual(self.status(quiet(3_000)), ("working", None, None))
+        self.assertEqual(self.status(quiet(19_000)), ("working", None, None))
+        self.assertEqual(self.status(quiet(21_000))[:2], ("needs", "reply"))
+        # a question or a permission: at once
+        self.assertEqual(self.status(quiet(1_000, "blocked"))[:2], ("needs", "asks"))
+
+    def test_herdrs_own_words_are_never_its_reason(self):
+        """SHEP-126 read "Needs you · Working again": a background job's notice woke it while Ready
+        (back_to_work() set Herdr's line), it said it was still ready and went quiet."""
+        self.say(-60_000, "That was an old file search finishing. Nothing changes: the task is still ready.")
+        self.task["progress"] = {"text": "Working again", "at": self.clock - 70_000, "set": self.clock - 70_000, "by": "herdr"}
+        self.assertIsNone(self.agents.own_line(self.task))
+        self.assertEqual(self.agents.last_words(self.task), "Nothing changes: the task is still…")
+        # its own line said this turn still is the reason
+        self.task["progress"] = {"text": "Waiting for your go on the menu", "at": self.clock - 50_000, "set": self.clock - 50_000}
+        self.assertEqual(self.agents.own_line(self.task), "Waiting for your go on the menu")
+
+    def test_a_job_before_megabytes_of_screenshots_still_counts(self):
+        """HOME-1 read Needs you while its Monitor ran: 4.5 MB of image results after the Monitor's
+        start pushed it out of the 1 MB the log's end was read for."""
+        self.background(-300_000)
+        image = {"type": "image", "source": {"type": "base64", "data": "A" * 700_000}}
+        for i in range(4):
+            self.stamp(-200_000 + i, {"type": "user", "message": {"role": "user", "content": [
+                {"tool_use_id": f"toolu_r{i}", "type": "tool_result", "content": [image]}]}})
+        self.say(-100_000, "Four look clean. Waiting for the rest.")
+        self.assertGreater(os.path.getsize(self.log), 2_500_000)
+        self.assertEqual(self.status(), ("working", None, None))
+        # it ends: quiet with nothing left, Needs you
+        self.finished(-50_000)
+        self.assertEqual(self.status()[:2], ("needs", "reply"))
+
+    def test_the_log_is_read_as_it_grows(self):
+        self.background(-300_000)
+        self.assertEqual(list(self.agents.background_jobs(self.log)[0]), ["b1"])
+        line = json.dumps({"type": "queue-operation", "operation": "enqueue", "timestamp": "2027-01-15T08:00:00Z",
+                           "content": "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>"})
+        # half a line still being written: not read yet
+        with open(self.log, "a") as f:
+            f.write(line[:40])
+        self.assertEqual(list(self.agents.background_jobs(self.log)[0]), ["b1"])
+        with open(self.log, "a") as f:
+            f.write(line[40:] + "\n")
+        jobs, ended = self.agents.background_jobs(self.log)
+        self.assertEqual((jobs, bool(ended)), ({}, True))
+        # a new log in its place (same name): read afresh
+        os.remove(self.log)
+        with open(self.log, "w") as f:
+            f.write("\n".join(self.lines) + "\n")
+        self.assertEqual(list(self.agents.background_jobs(self.log)[0]), ["b1"])
 
 
 class WorkersOwnHelpers(OwnBackgroundWork):
