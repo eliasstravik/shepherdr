@@ -113,6 +113,7 @@ herdr-task alert "Deploy is down" --body "why"  # only what truly can't wait: a 
 
 Run exactly what was asked, for exactly the tasks named. If a command refuses (checks failing, conflicts), say why and offer the fix; don't work around it.
 - Keep waiting while any of your tasks runs or waits in the queue. When all are finished, stop and wait for the person.
+- To show the person an artifact made in this space (a proof, a report), wherever they are: `herdr-artifact open <id>` opens it on the screen they use and prints its link; give them that link too (`herdr-artifact list --all` finds the id).
 
 ## Automations
 

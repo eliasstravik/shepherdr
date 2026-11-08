@@ -43,6 +43,7 @@ import { Secrets, SecretsHome } from "./secrets.ts";
 import { Agents } from "./agents.ts";
 import { Machines } from "./machines.ts";
 import { Push, alertsOf, agentAlerts } from "./push.ts";
+import { Shows, showInWindow } from "./show.ts";
 import { dictate, liveToken } from "./dictate.ts";
 import { sh, exec } from "./model.ts";
 import { folders, newSpace, newSpaceInfo } from "./spaces.ts";
@@ -118,6 +119,13 @@ const push = new Push(() => (me ? `https://${me.dns}` : "https://herdr.dev"));
 const pushSend = push.send.bind(push);
 push.send = ((a: any) => (host.serving() ? pushSend(a) : Promise.resolve())) as typeof push.send;
 live.onVisible = (v) => { push.visible = v; };
+// an agent's herdr-artifact open (service/show.ts): the serving machine's screen the person is on opens the artifact,
+// else its window (an agent on another machine; one here opened it in this window itself)
+const shows = new Shows();
+hub.on((e) => {
+  if (e.type !== "reset" && e.type !== "labels" && e.type !== "created") return;
+  for (const a of shows.take(hub.terminals.values())) if (host.serving() && !live.show(a.artifact) && a.machine) void showInWindow(a).catch(() => {});
+});
 // what was already waiting or ready when the service started: no alert for it
 let alerted: Set<string> | null = null;
 // the agents' own alerts ride on the snapshot (the web app's toasts: web/plugins/alerts/toasts.tsx), then push

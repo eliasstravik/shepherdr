@@ -16,6 +16,9 @@
 
 export const HOST_DOC = "shepherdr.host";
 export const NODE_DOC = "shepherdr.node";
+// the web app's link, { link, id } (id: the host's), written by the host here and on every machine it links: an agent on
+// a machine with no service of its own (a VM) can still give the person a link (herdr-artifact link, SHEP-99)
+export const WEB_DOC = "shepherdr.web";
 // a node record older than this: that machine's service is gone (they write theirs every minute)
 export const NODE_STALE = 3 * 60_000;
 

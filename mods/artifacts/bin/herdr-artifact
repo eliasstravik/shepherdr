@@ -29,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 
 VERSION = "1"
 HOME = os.path.expanduser("~")
@@ -1389,8 +1390,89 @@ def cmd_pull(o):
     return 0
 
 
-def cmd_open(o):
-    """Shows an artifact in this window: beside a pane, or in a new tab."""
+# ---- showing the person (SHEP-99) ------------------------------------------------------------
+# Wherever the person is: the web app's page they use (a phone, a browser) opens it, else the window here; and a
+# link always works. The machine that serves the web app writes its link in herdr-core's document shepherdr.web on
+# every machine it links (core/host.js WEB_DOC), so an agent on a machine with no web app of its own has it too.
+WEB_DOC = "shepherdr.web"
+WEB_JSON = os.path.join(HOME, ".herdr", "shepherdr", "web.json")
+# The core label an agent's terminal asks with: the serving machine's service hears it (service/show.ts).
+SHOW = "herdr.show"
+
+
+def core_doc(name):
+    """A herdr-core document's value on this machine (hc connect, plain JSON lines), or None."""
+    if not shutil.which("hc"):
+        return None
+    ask = "".join(json.dumps({"jsonrpc": "2.0", "id": i, "method": m, "params": p}) + "\n"
+                  for i, m, p in ((1, "hello", {"generation": 1}), (2, "doc.get", {"name": name})))
+    try:
+        r = subprocess.run(["hc", "connect"], input=ask, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                           universal_newlines=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    for line in r.stdout.splitlines():
+        try:
+            m = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(m, dict) and m.get("id") == 2:
+            return (m.get("result") or {}).get("value")
+    return None
+
+
+def web_base():
+    """The web app's link (its tailnet address, ".../shepherdr/"), or None: the host's word here, else what
+    this machine's own service says (its web.json)."""
+    for get in (lambda: core_doc(WEB_DOC), lambda: json.load(open(WEB_JSON))):
+        try:
+            link = (get() or {}).get("link")
+        except (OSError, ValueError, AttributeError):
+            link = None
+        if isinstance(link, str) and link.startswith("https://"):
+            return link if link.endswith("/") else link + "/"
+    return None
+
+
+def web_link(aid):
+    base = web_base()
+    return f"{base}?artifact={urllib.parse.quote(aid, safe='')}" if base else None
+
+
+NO_LINK = ("No web link is known here yet: Shepherdr's web app isn't served, or the machine serving it hasn't "
+           "linked this one (`shepherdr web status` there says).")
+
+
+def known(aid, machine):
+    """Fails unless the artifact is here (or, with --from, leaves that to the machine it's on)."""
+    if not machine:
+        find_anywhere(aid)
+
+
+def cmd_link(o):
+    known(o.id, o.machine)
+    link = web_link(o.id)
+    if not link:
+        raise Fail(NO_LINK)
+    print(json.dumps({"id": o.id, "link": link}) if o.json else link)
+    return 0
+
+
+def ask_screen(aid):
+    """Asks the web app's page the person uses to open it: the label herdr.show on this agent's own terminal.
+    True once asked (whether a page is on screen to show it, only the serving machine knows)."""
+    me_ = os.environ.get("HC_TERMINAL_ID")
+    if not me_ or not shutil.which("hc"):
+        return False
+    ask = {"id": secrets.token_hex(4), "at": now(), "artifact": aid}
+    return run(["hc", "label", me_, f"{SHOW}={json.dumps(ask, separators=(',', ':'))}"]).returncode == 0
+
+
+def open_window(o):
+    """Opens it in the Herdr window here, beside a pane or in a new tab: the mod's name, or None (no window here).
+    Fails when the window refuses it."""
+    if not shutil.which("herdr-app"):
+        return None
     mod = pull(o.id, o.machine) if o.machine else local_mod(o.id)
     if o.tab:
         args = ["herdr-app", "do", "tab.new", "--mod", mod]
@@ -1399,8 +1481,30 @@ def cmd_open(o):
     r = run(args)
     if r.returncode != 0:
         raise Fail(r.stdout.strip() or r.stderr.strip() or "herdr-app couldn't open it")
-    print(r.stdout.strip() if o.json else f"Opened {mod}.")
-    return 0
+    return mod
+
+
+def cmd_open(o):
+    """Shows an artifact to the person wherever they are: the web app's page they use opens it, the Herdr window here
+    too (when there is one), and its link is printed, which always works."""
+    known(o.id, o.machine)
+    link = web_link(o.id)
+    screen = ask_screen(o.id)
+    try:
+        window, why = open_window(o), None
+    except Fail as e:
+        window, why = None, str(e)
+    if o.json:
+        print(json.dumps({"id": o.id, "link": link, "screen": screen, "window": window, **({"error": why} if why else {})}))
+    else:
+        if screen:
+            print("Asked the person's screen to show it: the web app opens it on the page they use, if one is open.")
+        if window:
+            print(f"Opened {window} in the window here.")
+        elif why:
+            print(f"The window here couldn't open it: {why}")
+        print(f"Link: {link}" if link else NO_LINK)
+    return 0 if (screen or window or link) else 1
 
 
 EXAMPLE = '''import { View, div } from "gpui-kit";
@@ -1573,12 +1677,15 @@ def main():
     cmd("guide", cmd_guide, "how to write an artifact")
     c = cmd("where", cmd_where, "where a folder's artifacts are listed")
     c.add_argument("--folder")
-    c = cmd("open", cmd_open, "show an artifact in this window")
+    c = cmd("open", cmd_open, "show an artifact to the person, wherever they are (their web app page, the window here), and print its link")
     c.add_argument("id")
     c.add_argument("--from", dest="machine", help="the machine it's on (default: this one)")
-    c.add_argument("--beside", help="a pane to open it beside (default: the focused one)")
+    c.add_argument("--beside", help="in the window: a pane to open it beside (default: the focused one)")
     c.add_argument("--direction", default="right", choices=["right", "down"])
-    c.add_argument("--tab", action="store_true", help="in a new tab instead")
+    c.add_argument("--tab", action="store_true", help="in the window: in a new tab instead")
+    c = cmd("link", cmd_link, "an artifact's link in the web app, for the person")
+    c.add_argument("id")
+    c.add_argument("--from", dest="machine", help="the machine it's on (default: this one)")
     c = cmd("note", cmd_note, "send the person's note on an artifact to the agent that keeps it (the viewer's Mark up)")
     c.add_argument("id")
     c.add_argument("--text", required=True, help="what the person wrote")
