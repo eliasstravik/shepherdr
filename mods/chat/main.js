@@ -205,7 +205,7 @@ let bound = false;
 function voiceOpened(nav) {
   if (nav.kind === "task") return `${nav.ref ?? String(nav.task ?? "").split(":").pop()}${nav.title ? ` \u00b7 ${nav.title}` : ""}`;
   if (nav.kind === "artifact") return nav.title ?? "An artifact";
-  if (nav.kind === "tasks" || nav.kind === "needs") return nav.kind === "needs" ? "Needs you" : "Tasks";
+  if (nav.kind === "tasks" || nav.kind === "needs") return nav.kind === "needs" ? "What needs you" : "The Tasks list";
   if (nav.kind === "settings") return `Settings${nav.section ? ` \u203a ${nav.section}` : ""}`;
   if (nav.kind === "panel") return `${nav.panel[0].toUpperCase()}${nav.panel.slice(1)}`;
   return nav.kind === "space" || nav.kind === "chat" ? "A space" : "";
