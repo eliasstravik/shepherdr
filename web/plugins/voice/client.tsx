@@ -99,7 +99,11 @@ export async function voiceNav(nav: Nav): Promise<NavAck> {
   if (ack.ok && nav.kind !== 'screen') openedByVoice()
   // SHEP-118: whatever the voice opens or does on the page is meant to be seen: the full-screen call steps aside.
   // SHEP-124: but not when that very action opened it (a screen click on the call's Full screen button)
-  if (stepsAside(nav, ack.ok, was, getState().ui.callFull)) setUI({ callFull: false })
+  if (stepsAside(nav, ack.ok, was, getState().ui.callFull)) {
+    setUI({ callFull: false })
+    // what the call is told it shows: minimized now
+    if (ack.where) return { ...ack, where: { ...ack.where, full: false } }
+  }
   return ack
 }
 

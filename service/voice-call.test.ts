@@ -274,3 +274,20 @@ test("SHEP-113: the person's ask is answered first; updates that came meanwhile 
   expect(states()).toEqual(["listening", "thinking", "listening", "working: checking tasks", "thinking", "listening"]);
   c.end();
 }, 10000);
+
+test("SHEP-124: call_view: the voice agent sets the web call full screen or minimized on the page that started it", async () => {
+  const phone = page((nav) => ({ ok: true, where: { device: "phone", full: nav.full } }));
+  const c = phone.start({ client: "web", device: "phone", machine: "eliass-mac-mini", call: null });
+  await until(() => !!agent);
+  await Bun.sleep(50);
+  for (const view of ["minimized", "full"]) {
+    const n = results.length;
+    agent.send(JSON.stringify({ type: "client_tool_call", client_tool_call: { tool_name: "call_view", tool_call_id: `v-${view}`, parameters: { view } } }));
+    await until(() => results.length > n);
+    expect(phone.got.filter((m) => m.type === "nav").pop().nav).toEqual({ kind: "call", full: view === "full" });
+    expect(JSON.parse(results[n].result).ok).toBe(true);
+    expect(results[n].is_error).toBe(false);
+  }
+  c.end();
+  agent = null;
+});
