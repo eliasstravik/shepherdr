@@ -232,6 +232,12 @@ function voiceOpened(nav) {
   return nav.kind === "space" || nav.kind === "chat" ? "A space" : "";
 }
 
+// Herdr's zoom (View › Zoom): what the window reports (a size, a press's place) is in pixels at the zoom, while
+// what the chat lays out (.w(), .h(), the list's row sizes) is at zoom 1. Every reported number comes back to zoom 1
+// here, so the rows' heights and the presses' places match what's drawn at any zoom (#759).
+export function zoomOf() { return Number(settings()?.zoom) || 1; }
+export function unzoom(px) { return px === undefined || px === null ? px : px / zoomOf(); }
+
 export default class Chat extends View {
   init(_props, cx) {
     // The Tasks panel's drill-in view (props { panel: true }): its header (props { head: true })
@@ -2193,12 +2199,14 @@ export default class Chat extends View {
     const W = 360, H = 420;
     const p = this.pressWin, local = this.press;
     let at = "pointer";
-    if (p && local?.x !== undefined) {
-      const paneX = p.x - local.x, paneY = p.y - (local.y ?? 0);
-      const left = anchor ?? local.x;
-      const x = Math.max(8, Math.min(paneX + left, paneX + this.width - W - 8));
+    if (p && local?.rx !== undefined) {
+      // In the window's pixels (pressWin's): the chat's own numbers are at zoom 1.
+      const z = zoomOf();
+      const paneX = p.x - local.rx, paneY = p.y - (local.ry ?? 0);
+      const left = anchor !== undefined && anchor !== null ? anchor * z : local.rx;
+      const x = Math.max(8, Math.min(paneX + left, paneX + this.width * z - W - 8));
       const rowTop = p.y - 14, rowBottom = p.y + 14;
-      const y = rowTop - H - 4 >= 8 ? rowTop - H - 4 : Math.min(rowBottom + 4, paneY + (this.height ?? 800) - H - 8);
+      const y = rowTop - H - 4 >= 8 ? rowTop - H - 4 : Math.min(rowBottom + 4, paneY + (this.height ?? 800) * z - H - 8);
       at = { x, y: Math.max(8, y) };
     }
     const fr = this.frequent(18);
@@ -3853,12 +3861,27 @@ export default class Chat extends View {
     }));
   }
 
+  // The pane's size as the window reports it, kept at zoom 1 (the column's width, the rows' wrap).
+  paneSize(size) {
+    const w = unzoom(size.width);
+    if (Math.abs(w - this.width) > 1) this.width = w;
+    this.height = unzoom(size.height);
+  }
+
+  // A press on the chat: where in the pane at zoom 1 (x, y: what the hit tests compare with the layout), and as the
+  // window said it (rx, ry: with pressWin, where the pane sits in the window, for what opens over it).
+  notePress(e) {
+    const x = e.local_position?.x, y = e.local_position?.y;
+    this.press = { x: unzoom(x), y: unzoom(y), rx: x, ry: y, at: Date.now() };
+  }
+
   // This chat pane in the window ({ x, y, width, height }), from the press that opens something
   // over it (the viewers: images, text, artifacts); null before any press.
   paneArea() {
     const p = this.pressWin, local = this.press;
-    if (!p || local?.x === undefined) return null;
-    return { x: p.x - local.x, y: p.y - (local.y ?? 0), width: Math.round(this.width), height: Math.round(this.height ?? 700) };
+    if (!p || local?.rx === undefined) return null;
+    const z = zoomOf();
+    return { x: p.x - local.rx, y: p.y - (local.ry ?? 0), width: Math.round(this.width * z), height: Math.round((this.height ?? 700) * z) };
   }
 
   // Where this chat is and whether its box has the keyboard, for Ctrl+K's artifacts (artview.js
@@ -3877,7 +3900,7 @@ export default class Chat extends View {
   openText(f) {
     const a = this.paneArea();
     const at = a ? { x: a.x, y: a.y } : "pointer";
-    const width = Math.round(this.width), height = Math.round(this.height ?? 700);
+    const width = Math.round(this.width * zoomOf()), height = Math.round((this.height ?? 700) * zoomOf());
     openOverlay({ mod: "chat-image", kind: "popup", frame: "none", width, height, at, props: { textPath: f.path, title: f.name, width, height } });
   }
 
@@ -3925,7 +3948,7 @@ export default class Chat extends View {
     // Over this chat pane, at its size (a popup's root needs its size spelled out).
     const a = this.paneArea();
     const at = a ? { x: a.x, y: a.y } : "pointer";
-    const width = Math.round(this.width), height = Math.round(this.height ?? 700);
+    const width = Math.round(this.width * zoomOf()), height = Math.round((this.height ?? 700) * zoomOf());
     openOverlay({ mod: "chat-image", kind: "popup", frame: "none", width, height, at,
       props: { images, index: Math.max(0, Math.min(images.length - 1, i)), width, height } });
   }
@@ -4022,7 +4045,7 @@ export default class Chat extends View {
     const bars = [...Array(n - lv.length).fill(0), ...lv];
     // Quiet is one thin faint line across, behind the bars.
     return h_flex().id(`${id}-wave`).relative().flex_1().min_w(0).h(28).gap(WAVE_GAP).items_center().overflow_hidden()
-      .on_size_change((size, cx) => { if (Math.abs((this.waveW ?? 0) - size.width) > 2) { this.waveW = size.width; cx.notify(); } })
+      .on_size_change((size, cx) => { const w = unzoom(size.width); if (Math.abs((this.waveW ?? 0) - w) > 2) { this.waveW = w; cx.notify(); } })
       .child(div().absolute().left(0).right(0).top(13.5).h(1).bg(t.dim).opacity(0.3))
       .children(bars.map((v) => v < 0.04
         ? div().w(WAVE_BAR).h(1).flex_none()
@@ -4336,15 +4359,14 @@ export default class Chat extends View {
     this.lastWorking = st;
     const root = v_flex().id("chat").size_full().bg(t.background).text_color(t.foreground).text_size(13)
       .on_size_change((size, cx) => {
-        if (Math.abs(size.width - this.width) > 1) this.width = size.width;
-        this.height = size.height;
+        this.paneSize(size);
         if (this.pinned) this.stick = true;
         this.noteArea(null);
         cx.notify();
       })
       .on_mouse_move((e) => { if (e.bounds) this.noteArea(e.bounds); })
       // Where a press was, for the action buttons under messages (rows can't take handlers).
-      .on_mouse_down("left", (e) => { this.press = { x: e.local_position?.x, y: e.local_position?.y, at: Date.now() }; holdKeys(this.areaKey()); this.pressWin = e.position; this.keepIcons = null; if (e.bounds) this.noteArea(e.bounds); })
+      .on_mouse_down("left", (e) => { this.notePress(e); holdKeys(this.areaKey()); this.pressWin = e.position; this.keepIcons = null; if (e.bounds) this.noteArea(e.bounds); })
       // Files dropped anywhere on the chat go with the next message.
       .on_drop((e, cx) => { this.addFiles(attach.paths(e.paths ?? [])); this.saveSoon(cx); this.box.focus(); cx.notify(); });
 
@@ -4404,7 +4426,9 @@ export default class Chat extends View {
     // What sits under the list (an ask card, the working line) changes its height: stay on the newest.
     const below = `${this.asks.length}|${this.sasks.map((a) => a.name + (a.kept ? "+" : "")).join(",")}|${this.wasks.map((a) => a.id).join(",")}|${[this.addr, ...this.workerTasks().keys()].map((a) => openCard(a)?.id ?? "").join("")}|${st}|${this.focused}|${this.queue.length}|${Boolean(this.call)}|${this.files.length}|${Boolean(this.quote)}`;
     if (below !== this.below) { this.below = below; if (this.pinned) this.stick = true; }
-    if (Math.abs(this.heightsFor - this.width) > 1) { this.heights.clear(); this.measuredAt.clear(); this.heightsFor = this.width; this.measureGen++; }
+    if (Math.abs(this.heightsFor - this.width) > 1 || (this.heightsZoom ?? 1) !== zoomOf()) {
+      this.heights.clear(); this.measuredAt.clear(); this.heightsFor = this.width; this.heightsZoom = zoomOf(); this.measureGen++;
+    }
     const keys = rows.map((x) => this.key(x));
     // Every size a real number of pixels: one NaN, zero or runaway height leaves the list blank.
     const sizes = rows.map((x, i) => {
@@ -4419,15 +4443,15 @@ export default class Chat extends View {
       : v_flex().relative().flex_1().min_h(0).pt(8)
         .id("chat-body")
         .on_size_change((size, cx) => {
-          const was = this.listH;
-          this.listH = size.height;
-          if (was && Math.abs(was - size.height) > 0.5 && this.pinned) { this.stick = true; cx.notify(); }
+          const was = this.listH, h = unzoom(size.height);
+          this.listH = h;
+          if (was && Math.abs(was - h) > 0.5 && this.pinned) { this.stick = true; cx.notify(); }
         })
         // How far down the list a press was, for the action bands (rows take no handlers).
-        .on_mouse_down("left", (e) => { this.bodyPress = e.local_position?.y; })
+        .on_mouse_down("left", (e) => { this.bodyPress = unzoom(e.local_position?.y); })
         // Rows' hover styles show on a redraw: one per 6 px the pointer moves down or up.
         .on_mouse_move((e, cx) => {
-          const b = Math.floor((e.local_position?.y ?? 0) / 6);
+          const b = Math.floor(unzoom(e.local_position?.y ?? 0) / 6);
           if (b !== this.hoverBand) { this.hoverBand = b; cx.notify(); }
         })
         .on_hover((hovered, cx) => { if (!hovered) { this.hoverBand = null; cx.notify(); } })
@@ -4464,8 +4488,8 @@ export default class Chat extends View {
         .child(Scrollbar.vertical("chat-rows").absolute().inset_0())
         .child(this.measurer(rows, keys, t))
         // Cards' controls measured (strips.js hit()), and where question cards' keys come in.
-        .child(strips.measure(t, rows.filter((r) => r.kind === "cardstrip").map((r) => r.s), this.cardW, (cx) => cx.notify())
-          .child(div().id("mw-accept").flex_none().on_size_change((size, cx) => { if (this.cardW.get("accept") !== size.width) { this.cardW.set("accept", size.width); cx.notify(); } })
+        .child(strips.measure(t, rows.filter((r) => r.kind === "cardstrip").map((r) => r.s), this.cardW, (cx) => cx.notify(), unzoom)
+          .child(div().id("mw-accept").flex_none().on_size_change((size, cx) => { const w = unzoom(size.width); if (this.cardW.get("accept") !== w) { this.cardW.set("accept", w); cx.notify(); } })
             .child(this.acceptButton(false))))
         .child(this.cards.sink("own")).child(this.workerCards.sink("worker"))
         .when(!this.pinned, (el) => {
@@ -4515,8 +4539,9 @@ export default class Chat extends View {
       .child(v_flex().w_full().children(order.map((i) => div().id(`m${this.measureGen}-${keys[i]}`).flex_none().w_full()
         .on_size_change((size, cx) => {
           if (!this.measuredAt.has(keys[i])) this.measuredAt.set(keys[i], Date.now());
-          if (this.heights.get(keys[i]) === size.height) return;
-          this.heights.set(keys[i], size.height);
+          const h = unzoom(size.height);
+          if (this.heights.get(keys[i]) === h) return;
+          this.heights.set(keys[i], h);
           if (this.pinned) this.stick = true;
           if (this.anchor && Date.now() < this.anchor.until) this.reanchor = true;
           cx.notify();
