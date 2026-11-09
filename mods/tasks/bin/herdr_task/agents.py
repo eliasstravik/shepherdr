@@ -54,20 +54,37 @@ def detail(k):
 
 
 def agent_running(k):
-    foreground = k.get("foreground") or {}
-    fg = os.path.basename(foreground.get("name") or "")
-    if fg and fg not in SHELLS:
+    fg = k.get("foreground") or {}
+    fg_name = os.path.basename(fg.get("name") or "")
+    if fg_name and fg_name not in SHELLS:
         return True
-    # Interactive-shell launches can keep the shell in the foreground while a live
-    # agent reports its identity and status separately.
-    status = k.get("status")
-    status = status.get("state") if isinstance(status, dict) else status
-    agent = os.path.basename(str(k.get("agent") or ""))
-    if fg in SHELLS and agent not in SHELLS and status in RANK and status != "idle":
-        return True
-    if fg:
+    if fg_name:
+        # fish keeps the agent its child, in its own process group (#780): the terminal's foreground
+        # stays the shell running its launch command (fish -ic "claude …; exec fish -i") the whole
+        # time. Only once it exec'ed its plain interactive shell has the agent exited.
+        if runs_command(fg.get("argv")):
+            return True
+        # Some terminal implementations retain a plain shell foreground record while the agent is
+        # active. A recognized live agent status is then evidence the worker has not exited.
+        status = k.get("status")
+        status = status.get("state") if isinstance(status, dict) else status
+        agent = os.path.basename(str(k.get("agent") or ""))
+        if agent not in SHELLS and status in RANK and status != "idle":
+            return True
         return False
-    return bool(k.get("agent")) and k.get("agent") not in SHELLS
+    return bool(k.get("agent")) and os.path.basename(str(k.get("agent"))) not in SHELLS
+
+
+def runs_command(argv):
+    """A shell's argv that runs a command (-c, -ic, -lic, --command), not a plain shell."""
+    for a in (argv or [])[1:]:
+        if a == "--command" or a.startswith("--command="):
+            return True
+        if not a.startswith("-") or a.startswith("--"):
+            break
+        if "c" in a[1:]:
+            return True
+    return False
 
 
 def status_of(task, live):
