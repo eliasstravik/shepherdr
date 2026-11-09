@@ -1961,6 +1961,22 @@ class MergedOnlyWithOwnWork(unittest.TestCase):
         self.assertEqual(self.task["state"], "done")
         self.assertFalse(self.task.get("merged"))
 
+    def test_ready_rebased_onto_origin_main_waits_for_accept(self):
+        """#737: no commits of its own, its branch rebased onto origin/main while the local main is
+        behind: nothing to merge and nothing to review, never an empty pull request."""
+        from unittest import mock
+        calls = self.github([])
+        self.git(self.main, "update-ref", "refs/remotes/origin/main", self.commit(self.main, "on GitHub"))
+        self.git(self.main, "reset", "-q", "--hard", "HEAD~1")  # local main behind its remote
+        self.git(self.task["worktree"], "rebase", "-q", "origin/main")
+        self.task["head"] = self.git(self.task["worktree"], "rev-parse", "HEAD")
+        self.task["review_gate"] = True
+        with mock.patch.object(self.commands, "review_limits", lambda *a: (True, 2)):
+            self.assertIsNone(self.commands.review_refusal(self.store, self.task, self.task["worktree"]))
+        self.assertEqual(self.ready_said(), "ready")
+        self.assertTrue(self.task["nothing_to_merge"])
+        self.assertNotIn(("pr", "create"), calls)
+
     # SHEP-117: a research task runs in the folder itself (--here), commits nothing and ends with an
     # artifact: ready waits for Accept with no branch or pull request, whatever the merge setting.
     def test_research_in_the_folder_itself_goes_ready_then_done(self):
