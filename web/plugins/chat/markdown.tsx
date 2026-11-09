@@ -112,7 +112,8 @@ function onCopy(e: MouseEvent) {
   // dragging across code selects it; that is not a tap
   if (el.tagName === 'CODE' && getSelection()?.toString()) return
   e.stopPropagation()
-  const code = el.tagName === 'CODE' ? el : el.parentElement?.querySelector('pre')
+  // a block's button sits in the bar over its code (SHEP-152: it looked beside itself, found nothing, copied nothing)
+  const code = el.tagName === 'CODE' ? el : el.closest('.code')?.querySelector('pre')
   if (!code?.textContent) return
   void copyText(code.textContent.replace(/\n$/, ''), el).then((ok) => ok && copied(el))
 }
