@@ -42,9 +42,23 @@ def pr_open(s, task, repo, summary=None):
     """Pushes the task's branch and opens its pull request (or keeps the open one, also one opened
     by hand or by its agent for the branch: SHEP-13's "already exists")."""
     wt, br = task["worktree"], task["branch"]
-    ok, _, err = git(wt, "push", "--force-with-lease", "-u", remote_of(s.loc["folder"]), br)
-    if not ok:
-        raise Fail(f"Couldn't push {br}: {err}")
+    # Continuing a pull request already open on another branch, its work pushed there (#828): that
+    # one is the task's, never a second with the same commits.
+    if not (task.get("pr") or {}).get("number") and pr_at_tip(task, repo):
+        if summary:
+            gh("pr", "comment", str(task["pr"]["number"]), "--repo", repo, "--body", summary)
+        return task["pr"]
+    remote = remote_of(s.loc["folder"])
+    # The pull request it continues (#828) gets its new commits on its own branch, never forced.
+    to = (task.get("pr") or {}).get("branch") or br
+    # Already there at its exact tip (pushed by hand): no second push through its hooks (#795).
+    has, tip, _ = git(wt, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}")
+    seen, there, _ = git(wt, "ls-remote", remote, f"refs/heads/{to}")
+    if not (has and tip and seen and there.split()[:1] == [tip]):
+        ok, _, err = git(wt, "push", "--force-with-lease", "-u", remote, br) if to == br else \
+            git(wt, "push", remote, f"{br}:refs/heads/{to}")
+        if not ok:
+            raise Fail(f"Couldn't push {br}" + (f" to {to}" if to != br else "") + f": {err}")
     pr = task.get("pr") or {}
     if pr.get("number"):
         ok, out, _ = gh("pr", "view", str(pr["number"]), "--repo", repo, "--json", "state", "-q", ".state")
@@ -52,6 +66,10 @@ def pr_open(s, task, repo, summary=None):
             if summary:
                 gh("pr", "comment", str(pr["number"]), "--repo", repo, "--body", summary)
             return pr
+        if pr.get("branch"):
+            # The other branch's pull request it continued was closed or merged: its own branch from here.
+            task.pop("pr")
+            return pr_open(s, task, repo, summary)
     if pr_adopt(task, repo):
         if summary:
             gh("pr", "comment", str(task["pr"]["number"]), "--repo", repo, "--body", summary)
@@ -91,6 +109,25 @@ def pr_adopt(task, repo):
         found = None
     if found:
         task["pr"] = {"number": found["number"], "url": found["url"], "repo": repo}
+    return task.get("pr") if found else None
+
+
+def pr_at_tip(task, repo):
+    """An open pull request from this repo, into the task's base, on another branch whose head is
+    exactly the task branch's tip: recorded on the task, else None (#828)."""
+    ok, tip, _ = git(task["worktree"], "rev-parse", "--verify", "--quiet", f"refs/heads/{task['branch']}")
+    if not (ok and tip):
+        return None
+    ok, out, _ = gh("pr", "list", "--repo", repo, "--state", "open", "--search", tip,
+                    "--json", "number,url,isCrossRepository,baseRefName,headRefName,headRefOid")
+    try:
+        found = next((p for p in json.loads(out) if not p.get("isCrossRepository") and p.get("headRefOid") == tip
+                      and p.get("headRefName") and p.get("headRefName") != task["branch"]
+                      and p.get("baseRefName") == (task.get("base") or "main")), None) if ok and out else None
+    except (ValueError, TypeError, AttributeError):
+        found = None
+    if found:
+        task["pr"] = {"number": found["number"], "url": found["url"], "repo": repo, "branch": found["headRefName"]}
     return task.get("pr") if found else None
 
 

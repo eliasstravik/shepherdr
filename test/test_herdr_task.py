@@ -4121,3 +4121,292 @@ class CodexAsksOnTheCard(unittest.TestCase):
         mine = ["codex", "-c", "projects={}"]
         self.assertEqual(sum(str(a).startswith("projects") for a in launch.own_argv(mine, d)), 1)
         self.assertFalse(any(str(a).startswith("projects") for a in launch.own_argv(["codex"])))
+
+class TaskFlow(unittest.TestCase):
+    """SHEP-170's task flow fixes, in a throwaway git repo and store; hc and gh are never run."""
+
+    def setUp(self):
+        from unittest import mock
+        import shutil
+        sys.path.insert(0, BIN)
+        import herdr_task.commands as commands
+        self.commands, self.mock = commands, mock
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.main, wt = os.path.join(self.root, "repo"), os.path.join(self.root, "wt")
+        self.git(self.root, "init", "-q", "-b", "main", self.main)
+        for k, v in (("user.name", "T"), ("user.email", "t@example.com"), ("commit.gpgsign", "false")):
+            self.git(self.main, "config", k, v)
+        self.commit(self.main, "base")
+        self.git(self.main, "worktree", "add", "-q", "-b", "task/1", wt, "HEAD")
+        self.live = []
+        self.said = []
+        self.store = Store([{"id": 1, "title": "Flow", "state": "running", "mode": "worktree", "worktree": wt,
+                             "branch": "task/1", "base": "main", "start": self.git(wt, "rev-parse", "HEAD"), "agents": [],
+                             "started": 1}])
+        self.store.loc["folder"] = self.main
+        self.task = self.store.data["tasks"][0]
+        self.patch(commands, "open_store", lambda args, write=True: self.store)
+        self.patch(commands, "view", lambda s, t, live=None: dict(t))
+        self.patch(commands, "say", lambda args, v, text: self.said.append(text))
+        self.patch(commands, "live_agents", lambda key: self.live)
+        self.patch(commands, "detail", lambda k: k)
+
+    def patch(self, mod, name, value):
+        p = self.mock.patch.object(mod, name, value)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def git(self, cwd, *args):
+        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, check=True).stdout.strip()
+
+    def commit(self, cwd, words, file=None):
+        if file:
+            with open(os.path.join(cwd, file), "a") as f:
+                f.write(words + "\n")
+            self.git(cwd, "add", file)
+        self.git(cwd, "commit", "-q", "--allow-empty", "-m", words)
+        return self.git(cwd, "rev-parse", "HEAD")
+
+    def args(self, **kw):
+        import argparse
+        return argparse.Namespace(**{"id": "SHEP-1", "json": True, "folder": None, **kw})
+
+    def test_switch_moves_the_task_to_the_given_space(self):
+        """#837: an explicit --space wins over the old agent's herdr.task.space label."""
+        self.task["space"] = "sp-a"
+        self.live = [{"address": "t1", "status": {"state": "working"}, "labels": {"herdr.task.space": "sp-a"}}]
+        got = []
+        self.patch(self.commands, "agent_running", lambda k: True)
+        self.patch(self.commands, "refresh_sessions", lambda *a: None)
+        self.patch(self.commands, "run", lambda *a, **k: None)
+        self.patch(self.commands, "start_again", lambda s, t, space, *a, **k: (got.append(space), ({"address": "t2", "agent": "claude"}, False))[1])
+        self.commands.cmd_switch(self.args(space="sp-b", agent="claude", argv=None, parent="t9", keep=False))
+        self.assertEqual(got, ["sp-b"])
+        got.clear()
+        self.commands.cmd_switch(self.args(space=None, agent="claude", argv=None, parent=None, keep=False))
+        self.assertEqual(got, ["sp-a"])  # none given: the old agent's own space
+
+    def settings(self, d):
+        import herdr_task.settings as settings
+        f = os.path.join(self.root, "shepherdr.json")
+        with open(f, "w") as fh:
+            json.dump(d, fh)
+        self.patch(settings, "SETTINGS", f)
+        return settings
+
+    def test_a_running_task_keeps_its_briefs_review(self):
+        """#750: Review turned on everywhere while a task runs: its brief said off, so show and ready say off too."""
+        settings = self.settings({})
+        self.task["agents"] = [{"argv": ["claude"], "agent": "claude"}]
+        settings.keep_review(self.store, self.task)  # its brief: Review off
+        self.task["review_gate"] = True
+        self.commit(self.task["worktree"], "work", "a.txt")
+        self.task["head"] = self.git(self.task["worktree"], "rev-parse", "HEAD")
+        self.settings({"everywhere": {"tasks": {"review_rounds": 3}}})
+        self.assertEqual(settings.review_limits(self.store, self.task)[0], False)
+        self.assertIn("- Review: off", settings.settings_block(self.store, self.task))
+        self.assertIsNone(self.commands.review_refusal(self.store, self.task, self.task["worktree"]))
+        # A fresh brief (a task started now) gets today's: on, three rounds, and ready waits for one.
+        settings.keep_review(self.store, self.task)
+        self.assertEqual(settings.review_limits(self.store, self.task), (True, 3))
+        self.assertIn("isn't reviewed", self.commands.review_refusal(self.store, self.task, self.task["worktree"]))
+        # Turned off again meanwhile: still on for this one, as its brief said.
+        self.settings({})
+        self.assertEqual(settings.review_limits(self.store, self.task), (True, 3))
+
+    def reviewed_task(self):
+        self.settings({"everywhere": {"tasks": {"review_rounds": 3}}})
+        self.task["review_gate"] = True
+        wt = self.task["worktree"]
+        head = self.commit(wt, "work", "a.txt")
+        self.task["reviews"] = [{"round": 1, "result": "report", "at": 2, "head": head}]
+        return wt
+
+    def refusal(self):
+        wt = self.task["worktree"]
+        self.task["head"] = self.git(wt, "rev-parse", "HEAD")
+        return self.commands.review_refusal(self.store, self.task, wt)
+
+    def test_a_clean_merge_from_the_base_needs_no_new_round(self):
+        """#741: merging the base into a reviewed branch, cleanly, keeps it reviewed."""
+        wt = self.reviewed_task()
+        self.assertIsNone(self.refusal())
+        self.commit(self.main, "another task", "b.txt")
+        self.git(wt, "merge", "-q", "--no-edit", "main")
+        self.assertIsNone(self.refusal())
+        self.commit(self.main, "and another", "c.txt")
+        self.git(wt, "merge", "-q", "--no-edit", "main")
+        self.assertIsNone(self.refusal())  # twice over
+        self.commit(wt, "a fix of its own", "a.txt")
+        self.assertIn("isn't reviewed", self.refusal())
+
+    def test_a_merge_with_more_in_it_needs_a_round(self):
+        wt = self.reviewed_task()
+        self.commit(self.main, "another task", "b.txt")
+        self.git(wt, "merge", "-q", "--no-edit", "main")
+        with open(os.path.join(wt, "b.txt"), "a") as f:
+            f.write("slipped in\n")
+        self.git(wt, "commit", "-q", "-a", "--amend", "--no-edit")
+        self.assertIn("isn't reviewed", self.refusal())
+
+    def test_a_merge_with_conflicts_needs_a_round(self):
+        wt = self.reviewed_task()
+        self.commit(self.main, "the same file", "a.txt")
+        subprocess.run(["git", "-C", wt, "merge", "-q", "--no-edit", "main"], capture_output=True)
+        with open(os.path.join(wt, "a.txt"), "w") as f:
+            f.write("resolved\n")
+        self.git(wt, "commit", "-q", "-a", "--no-edit")
+        self.assertIn("isn't reviewed", self.refusal())
+
+    def test_out_of_rounds_needs_you_whatever_its_line_says(self):
+        """#784: ready refused for rounds, the worker's status line "waiting for a review round" is no work of its own."""
+        from herdr_task import agents, base
+        t = base.now()
+        self.task.update(started=t - 3600000, agents=[{"address": "t1", "at": t - 3600000}],
+                         progress={"text": "Out of review rounds: waiting for a review round", "set": t - 60000, "at": t - 60000})
+        live = [{"address": "t1", "status": {"state": "idle"}, "status_ms": t - 120000}]
+        self.patch(agents, "agent_log", lambda *a, **k: None)
+        self.assertEqual(agents.task_status(self.task, live)[0], "working")  # its own line: on its own review
+        self.task["review_out"] = t - 90000
+        self.assertEqual(agents.task_status(self.task, live)[:2], ("needs", "reply"))
+
+    def test_ready_pushes_only_what_the_remote_lacks(self):
+        """#795: the branch already on its remote at its tip: no push through a pre-push hook that fails."""
+        import herdr_task.github as github
+        wt, remote = self.task["worktree"], os.path.join(self.root, "remote.git")
+        self.git(self.root, "init", "-q", "--bare", remote)
+        self.git(self.main, "remote", "add", "origin", remote)
+        self.commit(wt, "work", "a.txt")
+        self.git(wt, "push", "-q", "--no-verify", "origin", "task/1")  # by hand
+        hooks = os.path.join(self.main, ".git", "hooks")
+        os.makedirs(hooks, exist_ok=True)
+        with open(os.path.join(hooks, "pre-push"), "w") as f:
+            f.write("#!/bin/sh\necho 'over the time budget' >&2\nexit 1\n")
+        os.chmod(os.path.join(hooks, "pre-push"), 0o755)
+        asked = []
+
+        def gh(*a, **k):
+            asked.append(a[:2])
+            return (True, "https://github.com/o/r/pull/7", "") if a[:2] == ("pr", "create") else (True, "[]", "")
+        self.patch(github, "gh", gh)
+        self.assertEqual(github.pr_open(self.store, self.task, "o/r")["number"], 7)
+        self.assertIn(("pr", "create"), asked)
+        # A commit the remote lacks: pushed, and the hook's failure said.
+        self.task.pop("pr")
+        self.commit(wt, "more", "a.txt")
+        with self.assertRaises(Exception) as e:
+            github.pr_open(self.store, self.task, "o/r")
+        self.assertIn("Couldn't push task/1", str(e.exception))
+
+    def test_ready_keeps_the_pull_request_the_task_continues(self):
+        """#828: the work pushed to an open pull request's own branch: ready takes that one, never a second."""
+        import herdr_task.github as github
+        wt, remote = self.task["worktree"], os.path.join(self.root, "remote.git")
+        self.git(self.root, "init", "-q", "--bare", remote)
+        self.git(self.main, "remote", "add", "origin", remote)
+        tip = self.commit(wt, "finish it", "a.txt")
+        self.git(wt, "push", "-q", "origin", "task/1:refs/heads/feature")  # by the agent
+        asked = []
+
+        def gh(*a, **k):
+            asked.append(a)
+            if a[:2] == ("pr", "list") and "--search" in a:
+                return True, json.dumps([{"number": 2918, "url": "https://github.com/o/r/pull/2918", "isCrossRepository": False,
+                                          "baseRefName": "main", "headRefName": "feature", "headRefOid": tip}]), ""
+            if a[:2] == ("pr", "view"):
+                return True, "OPEN", ""
+            return (False, "", "no") if a[:2] == ("pr", "create") else (True, "[]", "")
+        self.patch(github, "gh", gh)
+        self.assertEqual(github.pr_open(self.store, self.task, "o/r", "Done")["number"], 2918)
+        self.assertNotIn("create", [a[1] for a in asked])
+        self.assertEqual(self.git(self.root, "--git-dir", remote, "branch", "--list", "task/1"), "")  # no branch of its own
+        # A later commit goes to that pull request's branch.
+        tip = self.commit(wt, "a fix", "a.txt")
+        self.assertEqual(github.pr_open(self.store, self.task, "o/r")["number"], 2918)
+        self.assertEqual(self.git(self.root, "--git-dir", remote, "rev-parse", "feature"), tip)
+
+    def test_the_same_red_checks_are_told_once(self):
+        """#796: after ready again, the same failing checks of the same commit aren't news again."""
+        from herdr_task import ghnews, base
+        self.patch(ghnews, "resting", lambda s, t: {"address": "t1"})
+        self.patch(ghnews, "pr_comments", lambda repo, n: [])
+        self.patch(ghnews, "log_tail", lambda repo, rid: None)
+        self.task.update(state="ready", ready_at=base.now() - 1000, pr={"number": 7, "repo": "o/r", "url": "u"})
+        v = {"state": "OPEN", "headRefOid": "abc", "statusCheckRollup": [{"name": "test", "conclusion": "FAILURE", "detailsUrl": "x"}]}
+        ghnews.pr_news(self.store, self.task, v, {})
+        self.assertIn('Check "test" failed', self.task["pr"].pop("news")["text"])  # told, then ready again
+        self.task["ready_at"] = base.now()
+        ghnews.pr_news(self.store, self.task, v, {})
+        self.assertNotIn("news", self.task["pr"])
+        # A new commit's runs failing: news.
+        self.task["ready_at"] = base.now() + 1
+        ghnews.pr_news(self.store, self.task, {**v, "headRefOid": "def"}, {})
+        self.assertIn("news", self.task["pr"])
+
+    def test_an_automation_sets_its_tasks_review(self):
+        """#744: auto add/edit --set, kept on the automation and given to each task it adds."""
+        import argparse
+        from herdr_task import automations
+        none = dict(title=None, prompt=None, prompt_file=None, every=None, on="ready", match=None, from_=None, agent=None,
+                    here=False, worktree=False, space=None, parent=None)
+        a = {"id": 1, "title": "Sweep", "prompt": "Read the open pull requests", "space": "sp1"}
+        automations.set_auto_fields(self.store, a, argparse.Namespace(**none, set=["review=off", "reviewer.model=opus"]))
+        self.assertEqual(a["set"], {"review": "off", "reviewer.model": "opus"})
+        with self.assertRaises(Exception):
+            automations.set_auto_fields(self.store, a, argparse.Namespace(**none, set=["colour=red"]))
+        automations.set_auto_fields(self.store, a, argparse.Namespace(**none, set=["reviewer.model="]))
+        self.assertEqual(a["set"], {"review": "off"})
+        self.store.new = lambda title, prompt, mode: self.store.data["tasks"].append(
+            {"id": 2, "title": title, "prompt": prompt, "mode": mode, "state": "todo", "agents": []}) or self.store.data["tasks"][-1]
+        for name, value in (("worker_argv", lambda s, t, space: ["claude"]), ("queue_reason", lambda s, t: None),
+                            ("begin", lambda *a, **k: None)):
+            self.patch(automations, name, value)
+        t = automations.fire(self.store, a, "every")
+        self.assertEqual(t["set"], {"review": "off"})
+
+    def test_a_folder_task_that_changed_nothing_needs_no_review(self):
+        """#744: a task in the folder itself, still on the commit it started at with nothing changed: nothing to review."""
+        self.settings({"everywhere": {"tasks": {"review_rounds": 3}}})
+        self.task.update(mode="here", worktree=None, review_gate=True, folder_start=self.git(self.main, "rev-parse", "HEAD"))
+        self.assertIsNone(self.commands.review_refusal(self.store, self.task, None))
+        with open(os.path.join(self.main, "a.txt"), "w") as f:
+            f.write("x\n")
+        self.git(self.main, "add", "a.txt")
+        self.assertIn("isn't reviewed", self.commands.review_refusal(self.store, self.task, None))  # changed
+        self.git(self.main, "commit", "-q", "-m", "a")
+        self.assertIn("isn't reviewed", self.commands.review_refusal(self.store, self.task, None))  # committed
+
+    def test_the_folder_trust_dialog_needs_you(self):
+        """#755: Claude Code's folder-trust dialog (no status reported yet) is Needs you, not Working."""
+        from herdr_task import agents, base
+        screen = "Accessing workspace:\\n\\n Quick safety check: Is this a project you created or one you trust?\\n ❯ No, exit\\n   Yes, I trust this folder\\n"
+        shown = [screen]
+        self.patch(agents, "_trust_seen", {})
+        self.patch(base, "run", lambda argv, **k: subprocess.CompletedProcess(argv, 0, shown[0], ""))
+        self.task.update(started=base.now() - 10000, agents=[{"address": "t1", "at": base.now() - 10000}])
+        live = [{"address": "t1", "status": None, "turn": 0}]
+        self.assertEqual(agents.task_status(self.task, live), ("needs", "asks", agents.REASONS["trust"]))
+        agents._trust_seen.clear()
+        shown[0] = "❯ "
+        self.assertEqual(agents.task_status(self.task, live)[0], "working")  # just started, no dialog
+        live[0]["status"] = "working"
+        shown[0] = screen  # never read once it reports
+        self.assertEqual(agents.task_status(self.task, live)[0], "working")
+
+    def test_low_priority_says_nothing_without_proc(self):
+        """#755: no "oom_score_adj: No such file" line where /proc isn't (a Mac)."""
+        from herdr_task import launch
+        low = launch.LOW.replace("/proc/self/oom_score_adj", os.path.join(self.root, "none", "oom_score_adj"))
+        p = subprocess.run(["sh", "-c", low, "herdr-low", "true"], capture_output=True, text=True)
+        self.assertEqual((p.returncode, p.stderr), (0, ""))
+
+    def test_an_agent_under_fish_is_running(self):
+        """#780: under fish the foreground stays `fish -ic "<agent>; exec fish -i"` while its agent works."""
+        from herdr_task import agents
+        fg = lambda *argv: {"address": "t1", "foreground": {"name": "fish", "argv": list(argv), "pid": 9}}
+        self.assertTrue(agents.agent_running(fg("/usr/bin/fish", "-ic", "claude --model x; exec fish -i")))
+        self.assertTrue(agents.agent_running(fg("fish", "-l", "--command", "claude; exec fish -i")))
+        self.assertFalse(agents.agent_running(fg("fish", "-i")))  # exec'ed its own shell: the agent exited
+        self.assertFalse(agents.agent_running(fg("bash")))
+        self.assertTrue(agents.agent_running({"foreground": {"name": "claude", "argv": ["claude"]}}))

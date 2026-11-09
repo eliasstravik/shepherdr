@@ -268,6 +268,10 @@ def begin(s, t, argv, space, parent=None):
     if t.get("mode") == "worktree" and not t.get("worktree") and not worktrees_on(s, space):
         t["mode"] = "here"
     folder_for(s, t)
+    if t.get("mode") != "worktree" and s.loc["kind"] == "repo":
+        # The folder's commit as it starts: still there, and nothing tracked changed, at ready means
+        # it changed nothing, so there is nothing to review (review_refusal, #744).
+        t["folder_start"] = git(s.loc["folder"], "rev-parse", "HEAD")[1] or None
     parent = parent_for(parent, space)
     return launch(s, t, argv, space, brief(s, t, parent, space, argv), parent=parent)
 
@@ -425,6 +429,8 @@ def cmd_ready(args):
                     "then run ready again with --proof <its id>.")
         v = view(s, t)
     say(args, v, msg)
+    if msg.startswith(f"{s.ref(t)} {READY_BUT}"):
+        sys.exit(1)  # its push or pull request failed: not ready the way it meant (#795)
 
 
 REVIEWED = ("report", "pass", "changes")  # a recorded review round (report: the agent's own reviewed)
@@ -445,9 +451,13 @@ def review_refusal(s, t, wt):
         return None
     if wt and t.get("start") and in_base(s, t):
         return None  # no commits of its own: nothing to review (nothing to merge)
+    if not wt and t.get("folder_start") and unchanged_folder(s, t):
+        return None  # in the folder itself, and it changed nothing (#744: a run that only reads)
     revs = [r for r in t.get("reviews") or [] if r.get("result") in REVIEWED and (r.get("at") or 0) >= (t.get("started") or 0)]
     head = t.get("head") if wt else None
     if (any(r.get("head") == head for r in revs) if wt else bool(revs)):
+        return None
+    if wt and head and base_merges_only(s, t, wt, {r.get("head") for r in revs if r.get("head")}, head):
         return None
     ref, ht, folder = s.ref(t), own_path(), shlex.quote(s.loc["folder"])
     what = f"your final commit {head[:7]}" if head else "this task's work"
@@ -461,6 +471,39 @@ def review_refusal(s, t, wt):
     return (f"Review is on and {what} isn't reviewed. Have it reviewed as your brief says, fix what must be fixed, record the "
             f"round with `{ht} reviewed {ref} --folder {folder} --report \"<findings, a line>\"` (on the commit you'd say "
             f"ready at), then run ready again. {rounds - rounds_used(t)} of {rounds} rounds left.")
+
+
+def unchanged_folder(s, t):
+    """A task in the folder itself left it as it started: on the same commit, nothing tracked changed."""
+    folder = s.loc["folder"]
+    ok, head, _ = git(folder, "rev-parse", "HEAD")
+    clean, changed, _ = git(folder, "status", "--porcelain", "--untracked-files=no")
+    return ok and head == t["folder_start"] and clean and not changed
+
+
+def base_merges_only(s, t, wt, reviewed, head):
+    """#741: everything after a reviewed commit (along the branch's first parents) is clean merges
+    from its base branch (here or on its remote): each merge's other parent is in the base, and its
+    tree is exactly what git's own merge of its two parents gives. Nothing of its own to review; a
+    merge with conflicts, or with anything changed beyond the plain merge, still needs a round."""
+    main, base = s.loc["folder"], t.get("base") or "main"
+    bases = [base, f"refs/remotes/{remote_of(main)}/{base}"]
+    c = head
+    for _ in range(100):
+        if c in reviewed:
+            return c != head
+        ok, line, _ = git(wt, "rev-list", "--parents", "-n", "1", c)
+        parts = line.split() if ok else []
+        if len(parts) != 3:
+            return False  # a commit of its own (or an octopus): reviewed as usual
+        _, first, other = parts
+        if not any(git(wt, "merge-base", "--is-ancestor", other, b)[0] for b in bases):
+            return False
+        ok, tree, _ = git(wt, "merge-tree", "--write-tree", first, other)
+        if not ok or not tree or tree.split()[0] != git(wt, "rev-parse", f"{c}^{{tree}}")[1]:
+            return False
+        c = first
+    return False
 
 
 def cmd_reviewed(args):
@@ -637,6 +680,9 @@ def back_to_work(s, t, why, said=WORKING_AGAIN, auto=False):
     return True
 
 
+READY_BUT = "is ready, but:"  # finalize() couldn't push or open its pull request
+
+
 def finalize(s, t):
     """Ready: on GitHub its pull request opens; then the merge policy in Settings decides who
     merges: auto (now), checks (once its checks pass) or ask (the person). Returns what to say."""
@@ -664,7 +710,7 @@ def finalize(s, t):
                    "pass and GitHub says it can merge; a failing check or a conflict comes back to you to fix.")
         except Fail as e:
             t["attention"] = str(e)
-            return f"{s.ref(t)} is ready, but: {e} Tell the person."
+            return f"{s.ref(t)} {READY_BUT} {e} Tell the person."
     policy = merge_policy(s, t)
     if policy in ("auto", "checks"):
         t["auto_merge"] = policy
@@ -884,7 +930,8 @@ def cmd_switch(args):
         refresh_sessions(s, t, live)
         old = live[-1] if live else None
         labels = (old or {}).get("labels") or {}
-        space = (labels.get("herdr.task.space") or labels.get("herdr.space") or (bare(args.space) if args.space else None)
+        # A given --space wins: the task moves there (#837); else the old agent's own space.
+        space = ((bare(args.space) if args.space else None) or labels.get("herdr.task.space") or labels.get("herdr.space")
                  or t.get("space") or default_space())
         if t["state"] in ("todo", "scheduled", "queued", "done"):
             t["state"] = "running"

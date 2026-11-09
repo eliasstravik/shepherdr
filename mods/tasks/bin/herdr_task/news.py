@@ -13,7 +13,7 @@ from .base import guard, hc_json, now, run, STORE
 from .settings import bare
 from .agents import (
     agent_log, agent_running, detail, from_person, live_agents, log_tail, said, starting, status_word,
-    STATUSES,
+    STATUSES, trust_asked,
 )
 from .sessions import session_of
 from .launch import coordinator_in
@@ -128,6 +128,15 @@ def news_pass(report, folder=None):
                         t["waits"] = waits
                     else:
                         t.pop("waits", None)
+                    s.dirty = True
+                # Claude Code's folder-trust dialog (#755): Needs you in the Tasks panel too (its agent
+                # reports no status while it shows).
+                trust = trust_asked(live) if v.get("needs") == "asks" else None
+                if s.write and t.get("trust_ask") != trust:
+                    if trust:
+                        t["trust_ask"] = trust
+                    else:
+                        t.pop("trust_ask", None)
                     s.dirty = True
                 # Quiet on its own background work (SHEP-53): Working in the Tasks panel too.
                 if s.write and bool(t.get("own_work")) != bool(v.get("own_work")):

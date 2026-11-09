@@ -130,6 +130,7 @@ herdr-task auto add "Look at failures" --prompt "<brief>" --on failed --json
 - `--every`: "weekdays 9:00", "daily 9:00,17:30", "mon,thu 8:15", "every 30 minutes", "every 2 hours on weekdays from 8:00 to 18:00", "hourly", "once 2026-11-05 9:00", "once tomorrow 9:00" (this machine's time zone; unknown words are refused: fix and retry).
 - `--on`: added, ready, failed, needs-you, merged, stalled (this folder's tasks; its own runs never set it off). `--match "words"` or `--match "branch:task/*"` narrows it.
 - `--from vm-b:~/dev/app` (with `--on`): hear another folder's task events instead, on a machine linked to this one (`herdr-task machines`) or a folder here; each event fires one run, its brief naming the task, title and machine.
+- `--set review=off` (any `add --set` key, repeatable): each run's task gets it. Turn Review off for a run that only reads (a sweep, a report).
 - Its runs start in this space with you as their parent, so their news comes to you like any worker's; the queue and the Tasks-at-once limit apply.
 - `auto list --json`, `auto show|pause|resume|run-now|rm HAT-A1`, `auto edit HAT-A1 [same flags] [--title]`. Pause, change or remove one only when the person asks.
 - Automations run with Herdr closed. If the person turned automations off in Shepherdr settings, say so instead of adding one.

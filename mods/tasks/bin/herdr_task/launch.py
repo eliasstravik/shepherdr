@@ -16,7 +16,7 @@ import sys
 import time
 
 from .base import ASK_HOME, ENTRY, Fail, git, hc_json, now, run, WORKTREES
-from .settings import agent_key, ASSISTANT_TEMPLATES, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, notes, notes_part, review_limits, settings_block, settings_for
+from .settings import agent_key, ASSISTANT_TEMPLATES, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, keep_review, notes, notes_part, review_limits, settings_block, settings_for
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
 from .github import finish, remote_of
@@ -330,7 +330,7 @@ def in_shell(argv):
 # ends whole cgroups, ends that worker rather than the holder that keeps every terminal. On a Mac:
 # nice 10 and the utility QoS clamp (taskpolicy). Anything missing is skipped, never fatal.
 
-LOW = ('echo 500 > /proc/self/oom_score_adj 2>/dev/null; '
+LOW = ('{ echo 500 > /proc/self/oom_score_adj; } 2>/dev/null; '
        'command -v ionice >/dev/null 2>&1 && ionice -c2 -n7 -p $$ >/dev/null 2>&1; '
        'command -v taskpolicy >/dev/null 2>&1 && exec nice -n 10 taskpolicy -c utility "$@"; '
        'exec nice -n 10 "$@"')
@@ -500,6 +500,7 @@ def where_line(task):
 
 def brief(s, task, parent=None, space=None, argv=None):
     instructions("reviewer")  # the file its review's reviewer gets (WORKER_MD)
+    keep_review(s, task, space)
     start = notes_part("Before you start", notes(s, task, "start", space))
     if start and task.get("worktree"):
         start += f"\n(The main folder is {s.loc['folder']}.)"
