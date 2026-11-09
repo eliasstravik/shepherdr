@@ -254,8 +254,14 @@ export const opening = (where = "") => ({ type: "conversation_initiation_client_
 /** The person moved in the app during the call: a quiet note of where they are now. */
 export const whereLine = (where) => ({ type: "contextual_update", text: `[Update] The person's app now shows: ${String(where).slice(0, 600)}` });
 
-// An agent the call follows replied in its chat: the voice agent says it.
-export const replyLine = (who, text) => ({ type: "user_message", text: `[Update] ${who} replied: """${String(text).slice(0, 3000)}""" Tell the person what it says, briefly.` });
+// An agent the call follows replied in its chat: the voice agent says it. A long reply goes whole; one past REPLY_MAX
+// is cut and says so, so the voice agent knows the rest is in the chat (#785).
+export const REPLY_MAX = 40000;
+export function replyLine(who, text) {
+  const t = String(text);
+  const body = t.length > REPLY_MAX ? `${t.slice(0, REPLY_MAX)}""" (cut short here; the rest is in the chat: look at the chat to read it.)` : `${t}"""`;
+  return { type: "user_message", text: `[Update] ${who} replied: """${body} Tell the person what it says, briefly.` };
+}
 
 /**
  * Several [Update]s that came together, as one (SHEP-105): quiet notes stay quiet notes; what is said out loud goes as
