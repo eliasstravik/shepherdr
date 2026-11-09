@@ -46,7 +46,7 @@ export function canDock(sb: Sidebars, width: number, panel = false) {
 export const FOCUS_BELOW = 1600
 
 const KEY = 'shepherdr.sidebars'
-export const BASE: Sidebars = { left: LEFT.base, right: RIGHT.base, open: true, panel: PANEL.base, panelOpen: false, item: 'diff', focus: false, focusAuto: false, wide: false }
+export const BASE: Sidebars = { left: LEFT.base, right: RIGHT.base, open: true, panel: PANEL.base, panelOpen: false, item: 'terminal', focus: false, focusAuto: false, wide: false }
 
 /** a width within its span and the room the window leaves; the span's min wins over a window too narrow */
 export function clamp(w: number, s: Span, room = Infinity) {
@@ -126,7 +126,8 @@ export function loadSidebars(): Sidebars {
       open: v.open !== false,
       panel: typeof v.panel === 'number' ? clamp(v.panel, PANEL) : PANEL.base,
       panelOpen: v.panelOpen === true,
-      item: typeof v.item === 'string' && v.item ? v.item : BASE.item,
+      // Files and Changes ("files", "diff") are no longer a task's tabs (SHEP-143)
+      item: typeof v.item === 'string' && v.item && v.item !== 'files' && v.item !== 'diff' ? v.item : BASE.item,
       focus: v.focus === true,
       focusAuto: v.focusAuto === true,
       wide: v.wide === true,

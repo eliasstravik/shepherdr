@@ -35,7 +35,7 @@ What goes where:
 | What | Where |
 |---|---|
 | The layout | `~/.config/herdr-app/layouts/shepherdr.json` |
-| 29 mods (the add-ons, [Add-ons](addons.md)) | `~/.config/herdr-app/mods/<name>/`, one swap per mod so Herdr reloads each once |
+| 28 mods (the add-ons, [Add-ons](addons.md)) | `~/.config/herdr-app/mods/<name>/`, one swap per mod so Herdr reloads each once |
 | Shared modules, helpers | `~/.config/herdr-app/lib/`, `~/.config/herdr-app/bin/` |
 | Keys | merged into `~/.config/herdr-app/keys.json`: free keys added; a key you already use is asked about (kept without a terminal; `--keys ours` takes Shepherdr's) |
 | Role instructions | `~/.config/herdr-core/templates/{assistant,worker,reviewer}.md`; one you edited is kept, the new one goes beside it as `.new` |

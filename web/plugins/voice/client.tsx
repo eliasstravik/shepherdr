@@ -18,7 +18,7 @@ import { key, press, resetScreen, screenAction, type Head } from './screen.ts'
 /** the Tasks panel's filter for a task state the voice agent named */
 const FILTER: Record<string, string> = { need: 'needs', work: 'working', ready: 'ready', merging: 'merging', queued: 'queued', scheduled: 'scheduled', todo: 'todo', done: 'done', automations: 'automations' }
 /** a task's tab as the side panel names it */
-const ITEM: Record<string, string> = { terminal: 'terminal', files: 'files', changes: 'diff', pr: 'pr', browser: 'browser' }
+const ITEM: Record<string, string> = { terminal: 'terminal', pr: 'pr', browser: 'browser' }
 const PANEL_WORDS: Record<string, string> = { tasks: 'Tasks', artifacts: 'Artifacts', files: 'Files', changes: 'Changes', needs: 'Needs you' }
 
 /** what this page shows now, as the call is told it */
@@ -173,7 +173,7 @@ async function doNav(nav: Nav): Promise<NavAck> {
     if (panel === 'artifacts' && !registry.views.artifacts) return no('Artifacts is turned off in this app')
     if ((panel === 'files' || panel === 'changes') && !(snap.panels ?? ['files', 'changes']).includes(panel)) return no(`this space has no ${panel} panel`)
     if (ui.device === 'phone') {
-      if (panel === 'files' || panel === 'changes') return no(`a phone shows ${panel} only on a task: open the task's ${panel} tab`)
+      if (panel === 'files' || panel === 'changes') return no(`a phone has no ${panel} panel: it shows on a tablet or computer`)
       setUI({ task: null, tab: panel as UI['tab'], pick: null })
       return check(getState().ui.tab === panel, `the ${panel} tab didn't open`)
     }

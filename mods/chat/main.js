@@ -55,7 +55,7 @@ import { Dictation, BUN_PATH, warmAudio } from "./dictate.js";
 
 // Writing down after Done this long says it's taking longer than usual (SHEP-63).
 const DICT_SLOW = 5000;
-import { PanelHost, inner, openTaskThread, backToTasks, requestWorkerTerminal, THREAD, STACK as TASKS_STACK, BODY as THREAD_BODY, CHAT as THREAD_CHAT, TERM as THREAD_TERM, FILES as THREAD_FILES, CHANGES as THREAD_CHANGES, PR as THREAD_PR, BROWSER as THREAD_BROWSER } from "./panel.js";
+import { PanelHost, inner, openTaskThread, backToTasks, requestWorkerTerminal, THREAD, STACK as TASKS_STACK, BODY as THREAD_BODY, CHAT as THREAD_CHAT, TERM as THREAD_TERM, PR as THREAD_PR, BROWSER as THREAD_BROWSER } from "./panel.js";
 import { markRead, onScreen, unread } from "./unread.js";
 import { notifies } from "./notify.js";
 import { ScreenWatch, screenStrips, openCard, cardsOf, starting, cliOf } from "./screens.js";
@@ -2440,7 +2440,7 @@ export default class Chat extends View {
     const panel = find(tree, "panel"), thread = shared("tasks.thread");
     const open = panel && !panel.hidden && find(tree, "panel-body")?.active === TASKS_STACK && find(tree, TASKS_STACK)?.active === THREAD && thread?.task;
     const m = open && String(thread.terminal ?? "").includes("/") ? String(thread.terminal).split("/")[0] : null;
-    const TAB = { [THREAD_CHAT]: "chat", [THREAD_TERM]: "terminal", [THREAD_FILES]: "files", [THREAD_CHANGES]: "changes", [THREAD_PR]: "pr", [THREAD_BROWSER]: "browser" };
+    const TAB = { [THREAD_CHAT]: "chat", [THREAD_TERM]: "terminal", [THREAD_PR]: "pr", [THREAD_BROWSER]: "browser" };
     const w = JSON.stringify({ place, task: open ? (m ? `${m}:${thread.task}` : String(thread.task)) : null, tab: open ? TAB[find(tree, THREAD_BODY)?.active] ?? "chat" : null });
     if (w === this.callWhereWas) return;
     this.callWhereWas = w;
@@ -2521,7 +2521,8 @@ export default class Chat extends View {
         return { ok: true };
       }
       openTaskThread(nav.addr, nav.ref ?? String(nav.task).split(":").pop(), nav.title ?? null);
-      const child = { terminal: THREAD_TERM, files: THREAD_FILES, changes: THREAD_CHANGES, pr: THREAD_PR, browser: THREAD_BROWSER }[nav.tab];
+      // no Files or Changes tab (SHEP-143): the service sends those as pr or chat
+      const child = { terminal: THREAD_TERM, pr: THREAD_PR, browser: THREAD_BROWSER }[nav.tab];
       if (child) { if (nav.tab === "terminal") requestWorkerTerminal(nav.addr); run("layout.select", { stack: THREAD_BODY, child }); }
       return { ok: true };
     }

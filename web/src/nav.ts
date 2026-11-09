@@ -78,6 +78,10 @@ export function urlOf(s: Screen, phone: boolean, path = location.pathname, slug:
   return `${path}?${q}`
 }
 
+/** a task tab an address names: Files and Changes were a task's tabs until SHEP-143 (now the space's side panels
+ *  only), so an old link to them opens its Pull request (its changes on GitHub), else its chat */
+export const itemOfUrl = (id: string | null) => (id === 'files' || id === 'diff' ? 'pr' : id)
+
 /** a screen from an address the app didn't write (an old bookmark, a link): what it names, nothing else open */
 export function screenOfUrl(search: string, desktop: boolean, tabOf: (t: string | null) => UI['tab']): Partial<UI> {
   const q = new URLSearchParams(search)
@@ -86,7 +90,7 @@ export function screenOfUrl(search: string, desktop: boolean, tabOf: (t: string 
     task: q.get('task'),
     tab: tabOf(q.get('tab')),
     viewer: q.get('artifact') ? { artifact: q.get('artifact')! } : null,
-    sheet: q.get('task') && !desktop ? q.get('item') : null,
+    sheet: q.get('task') && !desktop ? itemOfUrl(q.get('item')) : null,
     settings: null,
     search: false,
     drawer: false,

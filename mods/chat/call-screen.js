@@ -1,7 +1,8 @@
 // A voice call's screen in the Herdr window (SHEP-51, core/screen.js): the voice agent's fallback for what its
 // Shepherdr tools can't do, as the web page's (web/plugins/voice/screen.ts) but with what a mod can reach. A mod can't
 // read another mod's drawing, so the window's screen is its frame, read from Herdr: the spaces, the shown space's tabs,
-// the side panel's tabs (Files, Changes, Tasks, Artifacts) and an open task's tabs, the call's own chat (scrolled
+// the side panel's tabs (Files, Changes, Tasks, Artifacts) and an open task's tabs (Chat, Terminal, Pull request,
+// Artifacts, Browser), the call's own chat (scrolled
 // here), and a few of the window's commands (Settings, Keybinds, Jump, next and previous tab or space). Each is a
 // numbered thing the voice agent can click. Not reachable from here (said in the answer): what is drawn inside a
 // mod (a list's rows, a dialog's buttons, Settings' pages), closing another mod's overlay, typing into another mod's
@@ -11,10 +12,10 @@
 import { run, layout, shared } from "herdr";
 import { spaces, panes } from "./live.js";
 import { screenText, screenParams, risky } from "./core/screen.js";
-import { backToTasks, requestWorkerTerminal, STACK as TASKS, LIST as TASK_LIST, THREAD, BODY, CHAT, TERM, FILES, CHANGES, PR, BROWSER } from "./panel.js";
+import { backToTasks, requestWorkerTerminal, STACK as TASKS, LIST as TASK_LIST, THREAD, BODY, CHAT, TERM, PR, ARTIFACTS, BROWSER } from "./panel.js";
 
 const PANELS = [["files", "Files"], ["changes", "Changes"], [TASKS, "Tasks"], ["artifacts", "Artifacts"]];
-const THREAD_TABS = [[CHAT, "Chat"], [TERM, "Terminal"], [FILES, "Files"], [CHANGES, "Changes"], [PR, "Pull request"], [BROWSER, "Browser"]];
+const THREAD_TABS = [[CHAT, "Chat"], [TERM, "Terminal"], [PR, "Pull request"], [ARTIFACTS, "Artifacts"], [BROWSER, "Browser"]];
 const COMMANDS = [
   ["app.settings", "Settings", null], ["mod.open", "Keybinds", { name: "keybinds" }], ["mod.open", "Jump to a space, task or artifact", { name: "jump" }],
   ["tab.next", "Next tab", null], ["tab.prev", "Previous tab", null], ["space.next", "Next space", null], ["space.prev", "Previous space", null],
@@ -68,7 +69,7 @@ export class CallScreen {
     if (open && body?.active === TASKS && find(tree, TASKS)?.active === THREAD) {
       add("thread:back", { role: "button", name: "Back to the task list", depth: 1 }, () => backToTasks());
       const shownTab = find(tree, BODY)?.active;
-      for (const [id, name] of THREAD_TABS) add(`thread:${id}`, { role: "tab", name: `Task's ${name}`, selected: shownTab === id, depth: 1 }, () => {
+      for (const [id, name] of THREAD_TABS) if (find(tree, id)) add(`thread:${id}`, { role: "tab", name: `Task's ${name}`, selected: shownTab === id, depth: 1 }, () => {
         const term = shared("tasks.thread")?.terminal;
         if (id === TERM && term) requestWorkerTerminal(term);
         run("layout.select", { stack: BODY, child: id });

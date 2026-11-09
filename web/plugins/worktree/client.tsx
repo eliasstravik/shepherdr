@@ -1,9 +1,9 @@
-// Worktree: three of a task view's tabs, all read only, as the window's (mods task-files, task-changes, task-pr).
-// Files browses the task's folder one folder at a time, with each changed file's letter, and shows a file,
-// highlighted; Changes lists what the task changed against where it left its base (committed or not, new files
-// too), each file's diff under the list; Pull request shows the task's PR on GitHub (state, size, branch, checks, a
-// link). Their words are the window's own (core/worktree.js VIEW_WORDS). The server reads only that task's folder
-// (service/worktree.ts).
+// Worktree: a task view's Pull request tab, as the window's (mods/task-pr), and the views of the space's Files and
+// Changes side panels (web/plugins/coordinators SpacePanel), all read only. Files browses a folder one folder at a
+// time, with each changed file's letter, and shows a file, highlighted; Changes lists what changed (committed or not,
+// new files too), each file's diff under the list; Pull request shows the task's PR on GitHub (state, size, branch,
+// checks, a link). Their words are the window's own (core/worktree.js VIEW_WORDS). The server reads only that task's
+// or space's folder (service/worktree.ts).
 import clsx from 'clsx'
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { definePlugin, setUI, useStore } from '@client/kernel.ts'
@@ -482,13 +482,9 @@ function PrView({ task }: { task: Task }) {
 export default definePlugin({
   name: 'worktree',
   setup(reg) {
-    // as the window's task view: Files and Changes always, Pull request once the task has one (itemsFor); none dims:
-    // each says in its own view why it has nothing to show
-    reg.taskPanel.push(
-      { id: 'files', order: 20, label: 'Files', Icon: FolderIcon, View: FilesView },
-      { id: 'diff', order: 30, label: 'Changes', Icon: DiffIcon, View: DiffView },
-      { id: 'pr', order: 40, label: 'Pull request', Icon: PrIcon, View: PrView },
-    )
+    // as the window's task view: Pull request once the task has one (itemsFor). Files and Changes are the space's side
+    // panels only (web/plugins/coordinators SpacePanel), no longer a task's tabs (SHEP-143)
+    reg.taskPanel.push({ id: 'pr', order: 20, label: 'Pull request', Icon: PrIcon, View: PrView })
   },
 })
 

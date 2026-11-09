@@ -55,9 +55,9 @@ Left to right, on the theme's `canvas` background, no title bar:
   `sidebar-footer` workspace-chrome-shepherdr `{footer: true}`) and `work` column (`tabs` tabs-tasks, `work-body` row
   of `main` `{tab: "active"}` with the pane-chat header and `panel` column → `panel-body` stack of files, changes,
   `tasks` stack (`tasks-list` tasks; `tasks-thread`: chat `{panel, head}`, then a stack of chat `{panel}`, a terminal
-  block, task-files, task-changes, task-pr, task-browser) and `artifacts` stack; `status` workspace-status-chat).
+  block, task-pr, task-browser) and `artifacts` stack; `status` workspace-status-chat).
   Floating `chat-call` (top, center) and `toasts` (bottom, end).
-- 29 mods in `mods/` (lib/addons.json lists them by add-on), plus Herdr's shipped `files`, `changes` and
+- 28 mods in `mods/` (lib/addons.json lists them by add-on), plus Herdr's shipped `files`, `changes` and
   `workspace-chrome`. Shared modules have one source in `lib/` and are copied into each mod (`bin/sync-shared`).
 - Programs: `herdr-task` (mods/tasks/bin, Python: the tasks and their scheduler), `herdr-artifact`
   (mods/artifacts/bin), `herdr-secret` and `herdr-browser` (bin/), linked into `~/.local/bin`; the role instructions

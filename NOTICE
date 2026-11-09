@@ -2,7 +2,7 @@ Shepherdr
 Copyright (c) 2026 Elias Stravik. MIT licensed: see LICENSE.
 
 Some of Shepherdr's mods began as copies of mods the Herdr app ships, and were then changed for Shepherdr:
-mods/task-files (from Herdr's files), mods/task-changes (from changes), mods/machine-add-chat (from machine-add)
+mods/machine-add-chat (from machine-add)
 and mods/toasts (from Herdr's toast). The Herdr app is licensed under the Apache License, Version 2.0; its license
 is in LICENSE-herdr. Those parts stay under that license.
 

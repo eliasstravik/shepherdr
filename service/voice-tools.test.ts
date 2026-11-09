@@ -153,6 +153,9 @@ test("open: what it shows in the app the call runs in", async () => {
   const review = await voiceTool("open", { what: "task", id: "45", tab: "review" }, web, io());
   expect(review.error).toBe(true);
   expect((await voiceTool("open", { what: "task", id: "41", tab: "review" }, web, io())).nav).toMatchObject({ kind: "task", task: "SHEP-41", tab: "review" });
+  // a task has no Files or Changes tab (SHEP-143): its pull request, else its chat
+  expect((await voiceTool("open", { what: "task", id: "41", tab: "changes" }, web, io())).nav).toMatchObject({ kind: "task", task: "SHEP-41", tab: "pr" });
+  expect((await voiceTool("open", { what: "task", id: "45", tab: "files" }, web, io())).nav).toMatchObject({ kind: "task", task: "SHEP-45", tab: "chat" });
   expect((await voiceTool("open", { what: "tasks", query: "ready" }, web, io())).nav).toEqual({ kind: "tasks", filter: "ready" });
   expect((await voiceTool("open", { what: "artifact", id: "model menu proof" }, web, io())).nav).toMatchObject({ kind: "artifact", artifact: "a1" });
   expect((await voiceTool("open", { what: "chat" }, web, io())).nav).toEqual({ kind: "chat", chat: "SHEP-45/worker", addr: "t1" });

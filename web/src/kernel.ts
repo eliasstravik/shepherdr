@@ -12,7 +12,7 @@ import { hush } from './motion.ts'
 import { closed, loadPanes, MAX_PANES, normal, only, opened, PANE_MIN, replaced, samePane, savePanes, type Pane, type Panes } from './panes.ts'
 import { setupGuarded } from './guard.tsx'
 import { followOff, note as noteUsage, noteAct, noteView, startUsage } from './usage.ts'
-import { decide, screenOf, screenOfUrl, stepKey, stepsTo, systemSwipe, urlOf, type Entry } from './nav.ts'
+import { decide, itemOfUrl, screenOf, screenOfUrl, stepKey, stepsTo, systemSwipe, urlOf, type Entry } from './nav.ts'
 import { machineName, taskChatId, type Action, type Chat, type Message, type Place, type ReplyQuote, type ServerEvent, type Snapshot, type Task, type TermScreen, type UpdateStatus } from '@shared/types.ts'
 
 /* ---------- slots ---------- */
@@ -54,7 +54,7 @@ export interface Views {
 }
 
 /**
- * An item of an open task's side panel (Terminal, Files, Diff, Pull request; Browser): a tab in the panel on a
+ * An item of an open task's side panel (Terminal, Pull request, Artifacts, Browser): a tab in the panel on a
  * desktop, a row of the task header's ⋯ menu opening it as a full-screen sheet on a phone or tablet.
  */
 export interface PanelItem {
@@ -445,7 +445,7 @@ let state: State = {
     adding: false,
     term: null,
     arts: null,
-    sheet: params.get('task') && deviceFor(innerWidth) !== 'desktop' ? params.get('item') : null,
+    sheet: params.get('task') && deviceFor(innerWidth) !== 'desktop' ? itemOfUrl(params.get('item')) : null,
     taskMenu: false,
     picked: {},
     call: false,
@@ -1614,7 +1614,7 @@ function closing(ui: UI, i: number): Partial<UI> {
   return { ...splitTo(v), ...(last?.kind === 'place' ? { place: last.id } : {}) }
 }
 
-/** a task's pane gives way to the task opened on the right, with its side panel at `item` (its Terminal, Files, …) */
+/** a task's pane gives way to the task opened on the right, with its side panel at `item` (its Terminal, Artifacts, …) */
 export function paneToPanel(i: number, item: string) {
   setUI((ui) => {
     const p = ui.split.panes[i]
