@@ -43,7 +43,7 @@ import { AskCards, linkCtl } from "./cards.js";
 import * as strips from "./strips.js";
 import { button, red, green, amber, H, RADIUS, TEXT, toast, toastWho, plainError } from "./ui.js";
 import { openViewer, noteChatArea } from "./artview.js";
-import { KEY_HOLDER, holdKeys, keysElsewhere } from "./keyholder.js";
+import { KEY_HOLDER, holdKeys, keysElsewhere, dialogHolds, liveHolder } from "./keyholder.js";
 import { SecretCards } from "./secret-card.js";
 import * as secrets from "./secrets.js";
 import { taskDot, ownProgress } from "./dot.js";
@@ -4260,6 +4260,28 @@ export default class Chat extends View {
 
   // One copy of Herdr's live lists for the whole render (live.js): a render past Herdr's 50 ms
   // is stopped, and the chat then shows "This view could not be re-rendered".
+  // The message box gets the keyboard back when its pane does (opened, clicked, gone to), or after a notice; from
+  // render, the focus itself from a timer right after.
+  refocus(paneFocused, showsBox, cx) {
+    // Focus moves only outside render: from a timer callback right after it.
+    // Never while a dialog over it holds the keyboard (New space's field, #752): Herdr counts this pane focused under it.
+    const dialog = dialogHolds(shared(KEY_HOLDER));
+    if (paneFocused && showsBox && !dialog && (!this.wasFocused || !this.hadBox)) {
+      cx.timer.after(0, () => { if (!dialogHolds(shared(KEY_HOLDER))) this.box.focus(); });
+      cx.timer.after(600, () => { if (!dialogHolds(shared(KEY_HOLDER))) this.box.focus(); });
+    }
+    // The pane focused again (a command, a click on its header) can leave the box without the
+    // keyboard: give it back, unless the person just pressed something inside the chat.
+    // Not while the keyboard is somewhere else in the window that isn't a pane (#633): a task's chat, the list or its
+    // search in the Tasks panel (shared "keyboard.holder", keyHolder()); Herdr still counts this pane as focused then.
+    else if (paneFocused && showsBox && !this.call && this.focused === false && Date.now() - (this.press?.at ?? 0) > 1500
+      && !keysElsewhere(liveHolder(shared(KEY_HOLDER)), this.areaKey())
+      && Date.now() - (this.refocusAt ?? 0) > 1000) {
+      this.refocusAt = Date.now();
+      cx.timer.after(0, () => this.box.focus());
+    }
+  }
+
   render(cx) {
     return inRender(() => this.draw(cx));
   }
@@ -4272,18 +4294,7 @@ export default class Chat extends View {
     // Herdr settles pane focus a moment later, so ask again after it (as the help mod does).
     // The box also comes back after a notice (opening, restarting): it gets the keyboard then too.
     const showsBox = Boolean(this.addr) && this.phase === "ready";
-    // Focus moves only outside render: from a timer callback right after it.
-    if (paneFocused && showsBox && (!this.wasFocused || !this.hadBox)) { cx.timer.after(0, () => this.box.focus()); cx.timer.after(600, () => this.box.focus()); }
-    // The pane focused again (a command, a click on its header) can leave the box without the
-    // keyboard: give it back, unless the person just pressed something inside the chat.
-    // Not while the keyboard is somewhere else in the window that isn't a pane (#633): a task's chat, the list or its
-    // search in the Tasks panel (shared "keyboard.holder", keyHolder()); Herdr still counts this pane as focused then.
-    else if (paneFocused && showsBox && !this.call && this.focused === false && Date.now() - (this.press?.at ?? 0) > 1500
-      && !keysElsewhere(shared(KEY_HOLDER), this.areaKey())
-      && Date.now() - (this.refocusAt ?? 0) > 1000) {
-      this.refocusAt = Date.now();
-      cx.timer.after(0, () => this.box.focus());
-    }
+    this.refocus(paneFocused, showsBox, cx);
     this.wasFocused = paneFocused;
     this.hadBox = showsBox;
     this.paneFocused = paneFocused;

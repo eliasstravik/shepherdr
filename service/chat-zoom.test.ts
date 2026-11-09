@@ -4,6 +4,7 @@
 // card's Submit, Accept: missed). No window runs here, so gpui and herdr are stand-ins that keep the handlers given.
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { fakeHerdr } from "./fake-herdr";
+import { fakeGpuiBase, fakeGpuiKit } from "./fake-gpui";
 
 let zoom = 1;
 const handlers: Record<string, ((...a: any[]) => void)[]> = {};
@@ -27,11 +28,8 @@ mock.module("herdr", () => fakeHerdr({
   exec: async () => ({ code: 1, stdout: "", stderr: "" }), hc: async () => ({ code: 1, stdout: "", stderr: "" }),
   readTextFile: async () => null, writeTextFile: async () => {}, watchFolder: () => {},
 }));
-mock.module("gpui-kit", () => ({ View: class {}, div: el, svg: el, image: el }));
-mock.module("gpui-base", () => ({
-  v_flex: el, h_flex: el, Input: el, InputState: class {}, TextareaState: class {}, Textarea: el, VirtualListScrollHandle: class {},
-  v_virtual_list: el, Scrollbar: el, TextView: { markdown: el },
-}));
+mock.module("gpui-kit", () => fakeGpuiKit({ View: class {}, div: el, svg: el, image: el }));
+mock.module("gpui-base", () => fakeGpuiBase({ v_flex: el, h_flex: el, v_virtual_list: el, Scrollbar: el, TextView: { markdown: el } }));
 (globalThis as any).localStorage ??= { getItem: () => null, setItem: () => {}, removeItem: () => {} };
 
 const { default: Chat } = await import("../mods/chat/main.js");
