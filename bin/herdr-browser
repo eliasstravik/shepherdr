@@ -157,7 +157,8 @@ ensure() {
 problem() {
   if [ -z "$bin" ]; then _what="agent-browser isn't installed here"
   else _what="Shepherdr runs agent-browser $PIN (or a newer ${PIN%.*}.x); this machine has ${ver:-an unknown version} ($bin)"; fi
-  echo "herdr-browser: $_what${why:+, and Shepherdr couldn't install it: $why}. Fix it: $fix"
+  if [ -n "$why" ]; then _what="$_what, and Shepherdr couldn't install it: $why"; fi
+  echo "herdr-browser: $_what. Fix it: $fix"
 }
 
 json_str() { printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()), end="")'; }

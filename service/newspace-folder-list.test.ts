@@ -6,8 +6,9 @@ import { fakeHerdr } from "./fake-herdr";
 import { built, byId, fakeGpuiBase, fakeGpuiKit, type Call } from "./fake-gpui";
 
 const none = async () => ({ code: 1, stdout: "", stderr: "" });
+let overlayProps: { overlay: string } | null = { overlay: "o1" };
 mock.module("herdr", () => fakeHerdr({
-  props: () => ({ overlay: "o1" }), theme: () => new Proxy({}, { get: () => "#000000" }), home: () => "/nonexistent-home", exec: none, hc: none,
+  props: () => overlayProps, theme: () => new Proxy({}, { get: () => "#000000" }), home: () => "/nonexistent-home", exec: none, hc: none,
   shared: () => undefined, setShared: () => {}, machines: () => [], focused: () => null, spaces: () => [], agents: () => [], panes: () => [], terminals: () => [],
 }));
 mock.module("gpui-kit", () => fakeGpuiKit());
@@ -17,7 +18,7 @@ const { default: NewSpace } = await import("../mods/newspace/main.js");
 const { NEWSPACE: K } = await import("../mods/newspace/coordinator.js");
 const cx: any = new Proxy({ timer: { after: () => {}, every: () => {} } }, { get: (t, k) => (t as any)[k] ?? (() => {}) });
 
-beforeEach(() => { built.length = 0; });
+beforeEach(() => { built.length = 0; overlayProps = { overlay: "o1" }; });
 
 // The dialog browsing a folder of `n` subfolders on another machine.
 const browsing = (n: number) => {
@@ -40,4 +41,9 @@ test("12 folders: all 12 in a list 8 rows tall that scrolls", () => {
 
 test("3 folders: as tall as its rows", () => {
   expect(sizes(browsing(3))).toEqual({ h: K.row * 3 + 8, overflow_y_scrollbar: true });
+});
+
+test("renders without overlay props or an icon-picker reply, as herdr-app check does", () => {
+  overlayProps = null;
+  expect(() => browsing(3)).not.toThrow();
 });

@@ -378,7 +378,7 @@ export default class NewSpace extends View {
   draw(cx) {
     const t = theme();
     const rq = shared(PICK);
-    if (rq?.for === props()?.overlay && rq.at > this.picked) {
+    if (rq && rq.for === props()?.overlay && rq.at > this.picked) {
       this.picked = rq.at;
       this.icon = rq.emoji ?? null;
       cx.timer.after(0, () => this.input.focus());
