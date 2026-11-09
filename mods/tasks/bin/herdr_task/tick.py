@@ -17,7 +17,7 @@ from .agents import (
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
 from .github import (already_merged, BEHIND, drop_branch, finish, github, merged_here, needs_approval, pr_merged, pr_pending, pr_problem,
-                     pr_view, queue_entry, tidy_done, tidy_due, update_main, watch_main)
+                     pr_view, pr_wait, queue_entry, tidy_done, tidy_due, update_main, watch_main)
 from .launch import default_space
 from .store import locate, read_list, Store, store_files
 from .queues import machine_hold, refresh_ext, running_count, set_hold, waiting_ext, waiting_for
@@ -30,6 +30,9 @@ from .takeover import cant_go_on, takeover
 from .ghnews import main_pass, pr_deliver, pr_news
 from .scheduler import SCHEDULER
 from .revive import revive_pass
+
+
+PR_WAIT_EVERY = 20000  # how often a pull request whose checks still run is read again (ms)
 
 
 def at_work(s, t):
@@ -99,6 +102,16 @@ def facts(s, t, report):
         else:
             pr.pop("needs_approval", None)
         t["_pr_fresh"] = not problem and not pr_pending(v) and not needs_approval(v)
+        # Ready only once its checks are done and GitHub knows it can merge (SHEP-175): Working till then.
+        if t["state"] == "ready":
+            wait = pr_wait(v, t.get("ready_at"))
+            if wait != pr.get("wait"):
+                if wait:
+                    pr["wait"] = wait
+                else:
+                    pr.pop("wait", None)
+            if wait:
+                pr["checked"] = now() - PR_EVERY + PR_WAIT_EVERY
         try:
             pr_news(s, t, v, report)
         except Exception as e:  # never stops the tick

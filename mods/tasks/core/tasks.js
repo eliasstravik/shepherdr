@@ -115,6 +115,18 @@ export function retryLine(r, now = Date.now()) {
   return r.due ? `${r.reason} · Retry in ${Math.max(1, Math.ceil((r.due - now) / 60000))}m` : `${r.reason} · Retrying`;
 }
 
+// Ready only when the person must act (SHEP-175), as herdr-task's ready_wait(): a task said ready is Ready (and its
+// news and alerts) only once the person's Accept is what's left. Not while its pull request's checks still run or
+// GitHub works out whether it can merge (task.pr.wait, kept by herdr-task's tick), nor while it merges by itself:
+// then it is Working, with what it waits for in a few words. Null when it's the person's.
+export function readyWait(task, live = []) {
+  if (task.merge_requested && live.length) return "Merging";
+  if (task.merge_queued && task.pr) return "In GitHub's merge queue";
+  // #743: waits calmly for a review GitHub requires.
+  if (task.auto_merge && task.pr && !task.merged) return task.pr.needs_approval ? "Merges once it's approved" : "Merges once its checks pass";
+  return task.pr?.wait || null;
+}
+
 // A task's status (its section), why it needs the person, and its live agents. live: its agents now
 // ([{ address, status, ... }], only while it runs or is ready); loaded: false while its machine's agents
 // aren't known yet; each { address, status, turn, role, since (hc's status_ms: GRACE_MS) }. The same rules as herdr-task's task_status(): its record,
@@ -151,16 +163,14 @@ export function place(list, task, { live = [], helpers = [], loaded = true, now 
   else if (busyAgain(task, live, now)) { section = "working"; why = WORKING_AGAIN; }
   else if (fixing) { section = "working"; why = st === "ready" ? WORKING_AGAIN : null; }
   else if (st === "ready") {
-    const queued = Boolean(task.merge_queued && task.pr);
-    section = (task.merge_requested && live.length) || queued || (task.auto_merge && task.pr && !task.merged) ? "merging" : "ready";
-    // As herdr-task's: a pull request in GitHub's merge queue (merging until GitHub merged it), or one that merges by
-    // itself once GitHub's checks pass, or once it's approved.
-    if (section === "merging" && queued) why = "In GitHub's merge queue";
-    else if (section === "merging" && !(task.merge_requested && live.length)) why = task.pr.needs_approval ? "Merges once it's approved" : "Merges once its checks pass";
+    // Nothing for the person yet (SHEP-175, readyWait()): Working, with what it waits for.
+    const wait = readyWait(task, live);
+    section = wait ? "working" : "ready";
+    if (wait) why = wait;
     // Said ready but not at rest yet (SHEP-148, herdr-task's not_at_rest()): still at work in the turn it said ready
     // in, or its own work still running (a background job, a Monitor, a helper: task.own_work, kept by its scheduler).
     // Working until it is, and only then Ready.
-    else if (section === "ready" && live.length && (busy || task.own_work || live.some((a) => a.status === "working" && a.role !== "reviewer"))) section = "working";
+    if (section === "ready" && live.length && (busy || task.own_work || live.some((a) => a.status === "working" && a.role !== "reviewer"))) section = "working";
   }
   // Its agents' terminals aren't known yet (the machine is loading): no verdict yet.
   else if (states.some((x) => x !== "idle" && x !== "done") || (!live.length && !loaded)) section = "working";
