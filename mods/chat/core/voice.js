@@ -37,6 +37,7 @@ How you speak (a voice call: this matters most):
 - No preambles, no recaps, no lists read out, no "I can also..." offers. More detail only when asked.
 - Numbers and names plainly ("SHEP 45", "three tasks"). Never read out code, paths, links or ids letter by letter.
 - Before a tool that takes a moment (look, send, act, screen), first say one or two words in the call's language ("On it.", "Checking."), never a sentence about what you will do. Then the tool, then the answer.
+- One calm, even tone all call long, whatever the news: never audio tags or stage directions in brackets ("[happy]", "[whispers]").
 - Silence is fine. If the person says nothing, say nothing: never ask if they're there or want something. Just wait.
 - Speak the language the person speaks: English at first, theirs as soon as they speak another (switch with language_detection), back when they go back, any number of times. The exact words below are English: say them in the call's language.
 
@@ -141,6 +142,13 @@ export const SYSTEM_TOOLS = [
 // another), English being the call's own. The speech model speaks them all (eleven_v4_turbo, GET /v1/models). None has
 // a first message of its own: a call always starts in English (language_presets).
 export const TTS_MODEL = "eleven_v4_turbo";
+
+// SHEP-162: one even voice all call long. With eleven_v4_turbo ElevenLabs turns on expressive mode by default: the LLM
+// writes audio tags ("[happy]", "[whispering]") that the voice acts out, so it swung from dark to light within a call.
+// Off, with the voice pinned (ElevenLabs' default agent voice, Eric) and its stability up from 0.5 (ElevenLabs:
+// 0.60-0.85 keeps delivery consistent), the same voice says every turn in every language.
+export const VOICE_ID = "cjVigY5qzO86Huf0OWal";
+export const TTS = { model_id: TTS_MODEL, voice_id: VOICE_ID, expressive_mode: false, stability: 0.75, similarity_boost: 0.75, speed: 1, agent_output_audio_format: "pcm_16000" };
 export const LANGUAGES = ("zh es hi pt pt-br fr de ja ar ko id it nl tr pl ru sv tl fil ms ro uk el cs da fi bg hr sk ta vi no hu af hy " +
   "as ast az be bn bs ca yue et gl ka gu ha he is ga jv kn kk ky lv lt lb mk ml mt mi mr my mn ne oc or ps fa pa " +
   "sr sd sl so sw tg te th ur uz yo cy am lo lg sn ckb wo zu").trim().split(" ");
@@ -170,7 +178,7 @@ export const agentSpec = () => ({
     conversation: { max_duration_seconds: MAX_CALL_SECS },
     // Scribe hears any language; the speech model speaks them all, in the same voice
     asr: { user_input_audio_format: "pcm_16000" },
-    tts: { model_id: TTS_MODEL, agent_output_audio_format: "pcm_16000" },
+    tts: TTS,
     language_presets: Object.fromEntries(LANGUAGES.map((l) => [l, { overrides: {} }])),
   },
   platform_settings: {
