@@ -1,7 +1,7 @@
 // Voice (SHEP-105): a call with Shepherdr itself, not one chat. One voice takes what you say to any space's Assistant
 // or task's agent, tells you when they reply or need you, and opens things here (voiceNav; its screen tool reads and
-// acts on this very page, screen.ts, whichever device started the call). It starts from the "Talk to Shepherdr" row at
-// the top of the sidebar, which becomes the call card while it is on (what it last said, Mute, End); on a phone from
+// acts on this very page, screen.ts, whichever device started the call). It starts from the voice button beside Search in
+// the sidebar's brand row (SHEP-135), and the call card shows at the top of the sidebar while it is on; on a phone from
 // the voice button at the end of the bottom bar, with a green strip of Mute and End above the bar (a chat's box has no
 // call button since SHEP-108: it is always Send). Where neither shows (a shut sidebar, a task open on a phone)
 // the strip sits at the top. Whatever the voice opens gets an "Opened by voice" tag for a moment.
@@ -337,22 +337,31 @@ function CallControls({ size }: { size: 'bar' | 'card' }) {
 /** the soft green of a call (the old call mark's), its words in the ready colour */
 const callTint = 'bg-[color-mix(in_srgb,var(--ready)_11%,var(--bg))] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--ready)_22%,transparent)]'
 
-/** SHEP-105: the top of the spaces list: "Talk to Shepherdr", above everything it can reach. On a call it is the call
- *  card: Shepherdr, what it is doing and its clock, the last thing it said, Mute and End. */
+/** SHEP-105, SHEP-135: the top of the spaces list, on a call only: the call card (Shepherdr, what it is doing and its
+ *  clock, Full screen and End). Off a call nothing, but the key's card when a call couldn't start for want of one; the
+ *  call starts from the voice button beside Search (VoiceButton). */
 function ShepherdrRow() {
   const on = useUI((u) => u.call)
+  const [helped] = useHelp()
+  if (!on && !helped) return null
   return (
     <div className="flex flex-col gap-2 px-2 pt-1.5 pb-1 phone:px-3 phone:pt-2">
-      {on ? <CallCard /> : (
-        <button type="button" onClick={() => toggleCall(null)} aria-label="Talk to Shepherdr: a voice call"
-          className="press group flex min-h-9 items-center gap-2.5 rounded-row py-1 pr-1 pl-2 text-left text-[0.9375rem]/5 text-fg hover:bg-hover keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] focus-visible:outline-none coarse:min-h-11 phone:min-h-12 phone:pl-3 phone:text-base/6">
-          <WaveIcon className="size-4 text-fg2 phone:size-[18px]" />
-          <span className="min-w-0 flex-1 truncate font-medium">Talk to Shepherdr</span>
-          <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-full bg-fg text-bg phone:size-9"><WaveIcon className="size-3.5 phone:size-4" /></span>
-        </button>
-      )}
+      {on ? <CallCard /> : null}
       <CallHelp />
     </div>
+  )
+}
+
+/** SHEP-135: the voice call's button in the sidebar's brand row, beside Search and as quiet as it. On a call it is in
+ *  the call's green, its wave moving, and opens the call full screen: the card under it has the call's details and
+ *  End, so this one shows the call is on and brings it back, never a second hang-up a stray tap could hit */
+function VoiceButton() {
+  const on = useUI((u) => u.call)
+  return (
+    <IconButton label={on ? 'Voice call: open full screen' : 'Voice call'} data-voice-button
+      onClick={() => (on ? setUI({ callFull: true }) : toggleCall(null))} className={clsx(on && 'text-ready-fg')}>
+      {on ? <Waves className="h-3.5" /> : <WaveIcon className={ic} />}
+    </IconButton>
   )
 }
 
@@ -375,12 +384,12 @@ function CallCard() {
   )
 }
 
-/** SHEP-105, SHEP-108: the end of a phone's bottom bar. Off a call: Talk to Shepherdr, a quiet grey round. On one:
+/** SHEP-105, SHEP-108: the end of a phone's bottom bar. Off a call: Voice call, a quiet grey round. On one:
  *  Mute and the red hang-up, nothing above the bar (the call's details are the sidebar's card) */
 function PhoneCallButton() {
   const on = useUI((u) => u.call)
   return on ? <CallControls size="bar" /> : (
-    <RoundButton label="Talk to Shepherdr" onClick={() => toggleCall(null)} className="size-14 max-[359px]:size-12">
+    <RoundButton label="Voice call" onClick={() => toggleCall(null)} className="size-14 max-[359px]:size-12">
       <WaveIcon className="size-5" />
     </RoundButton>
   )
@@ -421,7 +430,7 @@ function useTop() {
   })
 }
 
-/** the key's card where the sidebar's row doesn't show: above a phone's bar, else at the top */
+/** the key's card where the sidebar doesn't show: above a phone's bar, else at the top */
 function PhoneHelp() {
   return useTop() ? null : <CallHelp className="mx-4 mb-2" />
 }
@@ -643,6 +652,7 @@ export default definePlugin({
   name: 'voice',
   setup(reg) {
     reg.sideTop.push(ShepherdrRow)
+    reg.sideHead.push(VoiceButton)
     reg.phoneBar.push(PhoneCallButton)
     // SHEP-122: no Listening pill above a phone's bar: the minimized call is its bar's buttons alone
     reg.phoneAbove.push(PhoneHelp)

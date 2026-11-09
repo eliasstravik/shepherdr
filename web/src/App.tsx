@@ -152,14 +152,15 @@ function useKeyboard() {
 
 /* ---------- pieces of the frame ---------- */
 
-/** the sidebar's top row, as the window's (workspace-chrome-shepherdr): the mark and name, a search button (Jump,
- *  Ctrl+K) and the sidebar toggle */
+/** the sidebar's top row, as the window's (workspace-chrome-shepherdr): the mark and name, plugins' buttons (the voice
+ *  call, SHEP-135), a search button (Jump, Ctrl+K) and the sidebar toggle */
 export function Brand() {
   const snap = useSnap()!
   return (
     <div className="flex items-center gap-1 px-3.5 pt-3 pb-0.5 text-[0.9375rem] font-semibold desktop:pr-2.5 phone:px-5 phone:pt-3 phone:pb-1 phone:text-[1.125rem]">
       <CrookIcon className="mr-1 size-6" />
       <span className="min-w-0 flex-1 truncate">{snap.name}</span>
+      {registry.sideHead.map((View, i) => <View key={i} />)}
       <SearchButton />
       <PlacesToggle when="open" />
     </div>
@@ -175,7 +176,7 @@ function SearchButton() {
   )
 }
 
-/** what plugins put at the top of the spaces list, above Spaces (the Shepherdr voice call's row) */
+/** what plugins put at the top of the spaces list, above Spaces (the voice call's card) */
 function SideTop() {
   return registry.sideTop.map((View, i) => <View key={i} />)
 }

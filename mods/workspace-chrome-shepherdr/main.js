@@ -2,6 +2,10 @@ import { View, div, image, svg } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { theme, run, props, window, shared, setShared, updates, layout } from "herdr";
 import { openSettings } from "./ui.js";
+import { on as addonOn } from "./addons.js";
+
+// SHEP-135: a voice call is on (mods/chat's shared "chat.calls", its heartbeat in the last 45 s), as spaces-chat's liveCall
+const calling = () => Object.values(shared("chat.calls") ?? {}).some((c) => Date.now() - (c?.beat ?? 0) < 45000);
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -49,6 +53,9 @@ export default class WorkspaceChrome extends View {
     return h_flex().size_full().bg(t.chrome).pl(collapsed ? 6 : 14).pr(10).gap(4).items_center().text_size(13.5)
       .when(window()?.platform === "macos" && !window()?.fullscreen && !collapsed, el => el.pl(76))
       .when(!collapsed, el => el.child(h_flex().flex_1().gap(8).items_center().child(image("frame/welcome/herdr.png").size(20).rounded(5)).child(div().font_semibold().text_color(t.foreground).child("Herdr"))))
+      // SHEP-135: the voice call, beside Search: mods/spaces-chat starts it (shared "voice.startreq"). On a call the card
+      // under this row has it (what it does, Mute, End), so the button steps aside: the window has no full-screen call.
+      .when(!collapsed && addonOn("voice") && !calling(), el => el.child(this.button("voice", svg("mods/workspace-chrome-shepherdr/audio-lines.svg").size(15), () => setShared("voice.startreq", { at: Date.now() }))))
       .when(!collapsed, el => el.child(this.button("search", svg("mods/workspace-chrome-shepherdr/search.svg").size(15), () => run("mod.open", { name: "jump" }))))
       // On the macOS rail the traffic lights fill the row; the agents list's » unfolds it.
       .when(!(collapsed && window()?.platform === "macos"), el => el.child(this.button("sidebar-toggle", svg("mods/workspace-chrome-shepherdr/sidebar.svg").size(15), toggleSidebar)));

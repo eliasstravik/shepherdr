@@ -132,6 +132,15 @@ export default class Spaces extends View {
     cx.timer.every(5000, (cx) => this.readPilots(cx));
     // The voice call card's clock (voiceRow): once a second, only while a call is on.
     cx.timer.every(1000, (cx) => { if (this.calling) cx.notify(); });
+    // SHEP-135: the brand row's voice button (mods/workspace-chrome-shepherdr) asks for a call through shared
+    // "voice.startreq" = { at }: started here, where the spaces and chats are read. One from before this ran is old.
+    this.voiceReqAt = shared("voice.startreq")?.at ?? null;
+    cx.timer.every(250, () => {
+      const req = shared("voice.startreq");
+      if (!req || req.at === this.voiceReqAt) return;
+      this.voiceReqAt = req.at;
+      if (Date.now() - req.at < 5000 && addonOn("voice") && !this.liveCall()) this.startCall();
+    });
     // Each machine's health and plan limits (machines.js): read every 45 s / 10 min, not per render.
     startPolling(cx);
     // spaces-chat.machine (a key, or `herdr-app do`): the details of the shown space's machine.
@@ -174,10 +183,12 @@ export default class Spaces extends View {
       .child(svg("mods/spaces-chat/rocket.svg").size(12).flex_none());
   }
 
-  // SHEP-105: "Talk to Shepherdr" at the top of the sidebar, above the spaces: a voice call with Shepherdr itself, not
-  // one chat. The window runs it in the shown space's Assistant chat (mods/chat voice.ts: shared "chat.callreq"
-  // { pane, at, action: "start" | "mute" | "end" }), but the call hears and reaches every space. On a call the row is the
-  // call card: Shepherdr, what it is doing and its clock, Mute and the red hang-up; on the narrow rail, a green wave that ends it.
+  // SHEP-105, SHEP-135: a voice call with Shepherdr itself, not one chat, started from the voice button in the brand row
+  // beside Search (mods/workspace-chrome-shepherdr, through shared "voice.startreq"). The window runs it in the shown
+  // space's Assistant chat (mods/chat voice.ts: shared "chat.callreq" { pane, at, action: "start" | "mute" | "end" }),
+  // but the call hears and reaches every space. On a call the top of the sidebar is the call card: Shepherdr, what it is
+  // doing and its clock, Mute and the red hang-up; on the narrow rail, a green wave that ends it. Off a call nothing
+  // shows there but, on the rail (no brand row buttons), a quiet wave that starts one.
   liveCall() {
     for (const [pane, c] of Object.entries(shared("chat.calls") ?? {})) if (Date.now() - (c.beat ?? 0) < 45000) return { pane, ...c };
     return null;
@@ -190,7 +201,7 @@ export default class Spaces extends View {
     const tab = sp ? coordinatorTab(sp, undefined, ps) : null;
     const chatIn = (id) => ps.find((p) => p.mod === "chat" && p.tab === id)?.pane ?? null;
     const at = tab && chatIn(tab.id) ? tab.id : (sp?.tabs ?? []).map((t) => t.id).find((id) => chatIn(id)) ?? null;
-    if (!at) return toast({ title: "Talk to Shepherdr", body: "This space has no chat to run the call from: open its Assistant first.", level: "info" });
+    if (!at) return toast({ title: "Voice call", body: "This space has no chat to run the call from: open its Assistant first.", level: "info" });
     if (!sp.tabs.some((t) => t.id === at && t.active)) run("tab.select", { id: at });
     setShared("chat.callreq", { pane: chatIn(at), at: Date.now(), action: "start" });
   }
@@ -206,13 +217,8 @@ export default class Spaces extends View {
       .child(svg(icon).size(13));
     if (collapsed) return h_flex().h(36).flex_none().justify_center().items_center()
       .child(call ? round("voice-end", 26, `${green()}26`, green(), "mods/chat/audio-lines.svg", () => req("end"))
-        : round("voice-start", 26, t.foreground, t.background, "mods/chat/audio-lines.svg", () => this.startCall()));
-    if (!call) return h_flex().id("voice-row").mx(8).mt(4).h(32).pl(8).pr(4).gap(9).flex_none().items_center().rounded(RADIUS.card).cursor_pointer()
-      .hover((s) => s.bg(t.hover))
-      .on_click(() => this.startCall())
-      .child(svg("mods/chat/audio-lines.svg").size(14).flex_none().text_color(t.muted))
-      .child(div().flex_1().min_w(0).truncate().font_medium().text_color(t.foreground).child("Talk to Shepherdr"))
-      .child(round("voice-start", 24, t.foreground, t.background, "mods/chat/audio-lines.svg", () => this.startCall()));
+        : round("voice-start", 26, "#00000000", t.muted, "mods/chat/audio-lines.svg", () => this.startCall()).hover((s) => s.bg(t.hover).text_color(t.foreground)));
+    if (!call) return null;
     this.calling = true;
     const secs = Math.max(0, Math.floor((Date.now() - (call.started ?? Date.now())) / 1000));
     const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
