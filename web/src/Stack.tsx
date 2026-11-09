@@ -243,7 +243,7 @@ export function Drawer({ open, onOpen, can, panel, label, children }: { open: bo
   return (
     <div ref={root} inert={!open} onPointerDown={shut} className="absolute inset-0 z-5 touch-pan-y overflow-hidden">
       <button ref={shade} type="button" aria-label="Close" tabIndex={-1} className="absolute inset-0 bg-black/30" onClick={() => onOpen(false)} />
-      <nav ref={side} aria-label={label} className={clsx('absolute inset-y-0 left-0 flex min-h-0 touch-pan-y flex-col overflow-y-auto overscroll-contain bg-well shadow-drawer will-change-transform', panel)}>
+      <nav ref={side} aria-label={label} className={clsx('absolute inset-y-0 left-0 flex min-h-0 touch-pan-y flex-col overflow-x-hidden overflow-y-auto overscroll-contain bg-well shadow-drawer will-change-transform', panel)}>
         {/* drawn all along, hidden while shut: a swipe doesn't wait for the list to be drawn under the finger */}
         {children}
       </nav>

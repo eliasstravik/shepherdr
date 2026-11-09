@@ -791,7 +791,7 @@ function SpacesHeading() {
   const place = useUI((u) => u.place)
   const m = snap?.machines?.find((x) => x.machine === snap.places.find((p) => p.id === place)?.machine) ?? snap?.machines?.[0]
   return (
-    <div className="flex h-8 items-center justify-between pr-2.5 pl-4 text-[0.75rem] font-medium text-fg3 phone:h-10 phone:pr-3.5 phone:pl-5 phone:text-[0.8125rem]">
+    <div className="flex h-8 items-center justify-between pr-3.5 pl-4 text-[0.75rem] font-medium text-fg3 phone:h-10 phone:pr-5 phone:pl-5 phone:text-[0.8125rem]">
       <h2>Spaces</h2>
       {m ? <span className="flex"><AddButton machine={m.machine} name={m.name} label="New space or section" /></span> : null}
     </div>

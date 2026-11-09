@@ -24,10 +24,11 @@ const set = (v: boolean) => { open = v; for (const f of listeners) f() }
 
 export function AddMachineButton() {
   return (
+    // too narrow a sidebar for both words beside Settings, just the plus (its name still read out)
     <FootButton onClick={() => set(true)}>
       {/* the window's foot row: a plus, "Add machine" */}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="size-4 shrink-0 text-fg3 coarse:text-fg2 phone:size-5 phone:text-fg2"><path d="M12 5v14M5 12h14" /></svg>
-      Add machine
+      <span className="truncate @max-[14rem]:sr-only phone:@max-[17.5rem]:sr-only">Add machine</span>
     </FootButton>
   )
 }
