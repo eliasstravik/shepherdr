@@ -396,6 +396,8 @@ export interface Choice {
   description?: string
   /** the agent marked it (Recommended) */
   recommended?: boolean
+  /** what the agent drew to compare the options (a mockup, code), shown as its prompt shows it (SHEP-139) */
+  preview?: string
 }
 
 export interface Question {

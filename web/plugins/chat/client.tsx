@@ -12,7 +12,7 @@ import { dropFiles, keepFile, keptFile, postFile, retrying, sweepFiles } from '@
 import { AlertIcon, BackIcon, CameraIcon, CheckIcon, CopyIcon, Count, DeleteIcon, dimmed, Dot, DownIcon, DownloadIcon, Empty, field, FileIcon, ic, IconButton, KeyIcon, LinkButton, LiveWave, MachineIcon, Menu, MenuItem, MenuSeparator, MenuSetting, MicIcon, ModeIcon, MoreIcon, NextIcon, PageIcon, PlanIcon, PlusIcon, Primary, QuestionIcon, ReplyIcon, RestartIcon, roundBtn, SearchIcon, SecretField, Sent, SmileIcon, Tab, Tabs, TextBox, UpIcon, useElapsed, XIcon } from '@client/ui.tsx'
 import { canDictate, dictate, dictSample, type Dictation } from '@client/dictation.ts'
 import { extOf, isImage } from '@shared/files.ts'
-import { modelCommand, modeName, taskChatId, type CardAsk, type Chat, type MergeEvidence, type Message, type Place, type Question, type ReplyQuote, type SecretAsk, type UpdateCard } from '@shared/types.ts'
+import { modelCommand, modeName, taskChatId, type CardAsk, type Chat, type Choice, type MergeEvidence, type Message, type Place, type Question, type ReplyQuote, type SecretAsk, type UpdateCard } from '@shared/types.ts'
 import { sendsOnTap } from '@shared/alerts.ts'
 import { buzz, ForkIcon, mine, openBar, openPicker, quick, react, RewindIcon } from '@plugins/reactions/client.tsx'
 import { EDGE } from '@client/gestures.ts'
@@ -1409,6 +1409,19 @@ const optionLook = 'group press relative flex min-h-10 w-full items-center gap-2
 
 /** several questions on one card, as 3.0's: a step for each (its header), its options, Other…, then a step to check
  *  the answers, each opening its question again, and one Submit */
+/** the preview of the option picked (else the first that has one), as Claude's prompt shows the one in focus: a
+ *  mockup or code in its own fixed-width well, scrolling inside itself (SHEP-139) */
+function OptionPreview({ choices, picked }: { choices: Choice[]; picked: number[] }) {
+  const at = picked.length === 1 && choices[picked[0]]?.preview ? picked[0] : choices.findIndex((c) => c.preview)
+  if (at < 0) return null
+  return (
+    <figure className="flex min-w-0 flex-col gap-1">
+      <figcaption className="text-[0.75rem] text-fg2 phone:text-[0.8125rem]">Preview · {choices[at].label}</figcaption>
+      <pre className="max-h-72 overflow-auto rounded-row bg-well p-3 font-mono text-[0.75rem]/5 text-fg shadow-[inset_0_0_0_1px_var(--line2)] phone:text-[0.8125rem]/5">{choices[at].preview}</pre>
+    </figure>
+  )
+}
+
 function StepsCard({ q, chat, source, steady }: { q: Question & { parts: NonNullable<Question['parts']> }; chat: Chat; source?: CardSource; steady?: boolean }) {
   const n = q.parts.length
   const [step, setStep] = useState(0)
@@ -1430,8 +1443,8 @@ function StepsCard({ q, chat, source, steady }: { q: Question & { parts: NonNull
     setPicks((p) => p.map((x, j) => (j !== i ? x : multi ? (x.includes(k) ? x.filter((y) => y !== k) : [...x, k].sort((a, b) => a - b)) : [k])))
     if (!multi) {
       setOthers((o) => o.map((x, j) => (j === i ? null : x)))
-      // one pick moves on: to the next question, or to the answers
-      setStep(i < n - 1 ? i + 1 : n)
+      // one pick moves on: to the next question, or to the answers; with previews it stays to show the one picked
+      if (!q.parts[i].choices.some((c) => c.preview)) setStep(i < n - 1 ? i + 1 : n)
     }
   }
   const submit = async () => {
@@ -1466,6 +1479,7 @@ function StepsCard({ q, chat, source, steady }: { q: Question & { parts: NonNull
               </span>
             </button>
           ))}
+          {part.multi ? null : <OptionPreview choices={part.choices} picked={picks[step]} />}
           <button type="button" aria-pressed={others[step] !== null} disabled={busy} className={optionLook}
             onClick={() => { setOthers((o) => o.map((x, j) => (j === step ? (x === null ? '' : null) : x))); if (!part.multi) setPicks((p) => p.map((x, j) => (j === step ? [] : x))) }}>
             <span aria-hidden="true" className={clsx('size-4 shrink-0 shadow-[inset_0_0_0_1.5px_var(--fg3)] group-aria-pressed:shadow-[inset_0_0_0_5px_var(--fg)]', part.multi ? 'rounded-[4px]' : 'rounded-full')} />
@@ -1476,7 +1490,7 @@ function StepsCard({ q, chat, source, steady }: { q: Question & { parts: NonNull
               onChange={(e) => setOthers((o) => o.map((x, j) => (j === step ? e.target.value : x)))}
               onKeyDown={(e) => e.key === 'Enter' && others[step]!.trim() && setStep(step + 1)} />
           ) : null}
-          {step < n - 1 || part.multi || others[step] !== null ? (
+          {step < n - 1 || part.multi || others[step] !== null || part.choices.some((c) => c.preview) ? (
             <div className="flex justify-end"><button type="button" className="min-h-9 px-2 text-accent" onClick={() => setStep(step + 1)}>Next</button></div>
           ) : null}
         </>
@@ -1610,6 +1624,7 @@ function OneQuestionCard({ q, chat, msg, from, source, steady }: { q: Question; 
           </button>
         )
       })}
+      {sent || q.multi ? null : <OptionPreview choices={q.choices} picked={sel} />}
       {q.other && !sent ? (
         <input
           name="other"
@@ -1644,7 +1659,7 @@ function OneQuestionCard({ q, chat, msg, from, source, steady }: { q: Question; 
           {immediate && !q.noNote ? (
             <button type="button" disabled={busy} className="min-h-11 text-left text-accent" onClick={() => setComposing(true)}>Add a note</button>
           ) : null}
-          {(!q.other || tap) && !q.noNote && !immediate ? (
+          {(!q.other || tap || q.choices.some((c) => c.preview)) && !q.noNote && !immediate ? (
             <TextBox
               ref={noteRef}
               name="note"

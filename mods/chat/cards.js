@@ -11,7 +11,7 @@
 
 import { div } from "gpui-kit";
 import { InputState } from "gpui-base";
-import { allow, deny, answer, answers, chatAbout, dismiss, release } from "./core/asks.js";
+import { allow, deny, answer, answers, annotationsOf, chatAbout, dismiss, release } from "./core/asks.js";
 
 // A card's first strip. opts: { who ("Claude", "HERD-12"), asks (false: what follows `who`
 // instead, e.g. "Kept"), dot (its color; default red), links ([ctl] at the right) }.
@@ -142,7 +142,7 @@ export class AskCards {
     if (!this.done(ask, q)) return;
     const map = Object.fromEntries(ask.words.questions.map((qq, i) => [qq.text, this.answerOf(ask, q, i)]));
     this.drop(ask);
-    this.host.reply(ask, answers(ask.req, map), cx);
+    this.host.reply(ask, answers(ask.req, map, annotationsOf(ask.words, map)), cx);
   }
 
   // A press on one of this ask's strips: its card takes the keys (Esc; a questions card's arrows,
@@ -179,7 +179,12 @@ export class AskCards {
   pick(ask, i, k) {
     const w = ask.words, q = this.state(ask), n = w.questions.length, qq = w.questions[i];
     if (qq.multi) { if (q.picks[i].has(k)) q.picks[i].delete(k); else q.picks[i].add(k); }
-    else { q.picks[i] = new Set([k]); q.other[i] = null; if (n > 1 && i < n - 1) q.step = i + 1; else if (n > 1) q.step = n; }
+    else {
+      q.picks[i] = new Set([k]); q.other[i] = null;
+      // one pick moves on, unless it has previews: it stays to show the one picked (SHEP-139)
+      if (qq.options.some((o) => o.preview)) return;
+      if (n > 1 && i < n - 1) q.step = i + 1; else if (n > 1) q.step = n;
+    }
   }
 
   // "Other…": its box, made here (never in render), then the keyboard in it.
@@ -219,11 +224,17 @@ export class AskCards {
       if (qq.multi) out.push({ key: `multi${step}`, kind: "text", tone: "dim", gap: 2, text: "Pick any that apply." });
       qq.options.forEach((o, k) => out.push({ key: `q${step}-${k}`, kind: "option", gap: k ? 2 : 6, on: q.picks[step].has(k), multi: qq.multi,
         label: o.name, desc: o.description, tag: o.recommended ? "Recommended" : null, fn: () => this.pick(ask, step, k) }));
+      // The picked option's preview (else the first one's), as Claude's prompt shows the one in focus (SHEP-139).
+      const shown = !qq.multi && q.picks[step].size === 1 && qq.options[[...q.picks[step]][0]]?.preview ? [...q.picks[step]][0] : qq.options.findIndex((o) => o.preview);
+      if (!qq.multi && shown >= 0) {
+        out.push({ key: `q${step}-preview-label`, kind: "text", tone: "dim", gap: 6, text: `Preview · ${qq.options[shown].name}` });
+        out.push({ key: `q${step}-preview`, kind: "detail", gap: 2, lines: qq.options[shown].preview.split("\n"), clip: null });
+      }
       out.push({ key: `q${step}-other`, kind: "option", gap: 2, on: q.other[step] !== null, multi: qq.multi, label: "Other…", fn: (cx) => this.openOther(ask, step, cx) });
       if (q.other[step] !== null) out.push({ key: `q${step}-box`, kind: "input", gap: 2, indent: 32, state: q.boxes[step] ?? null, placeholder: "Your answer" });
       out.push({ key: `q${step}-chat`, kind: "option", gap: 2, label: "Chat about this", desc: opts.chatHint ?? "Or type your answer below.",
         fn: (cx) => { this.drop(ask); this.host.reply(ask, chatAbout(), cx); this.host.chatAbout(ask, cx); } });
-      if (many && step < n - 1) out.push({ key: `next${step}`, kind: "controls", align: "end", gap: 4, ctls: [{ id: `q-next-${id}-${step}`, label: "Next", look: "plain", fn: () => this.go(ask, step + 1) }] });
+      if (many && (step < n - 1 || shown >= 0)) out.push({ key: `next${step}`, kind: "controls", align: "end", gap: 4, ctls: [{ id: `q-next-${id}-${step}`, label: "Next", look: "plain", fn: () => this.go(ask, step + 1) }] });
     }
     if (!many || step === n) {
       const ready = this.done(ask, q);
