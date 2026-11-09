@@ -2088,6 +2088,22 @@ class ReviewAsAHelperAgent(unittest.TestCase):
                 f.write(templates.TEMPLATE_HEADS["reviewer"] + "My own words.")
             self.assertEqual(templates.instructions("reviewer"), "My own words.")
 
+    def test_the_reviewer_says_which_checks_its_sandbox_cant_run(self):
+        """#840: herdr-app check hangs and doctor can't reach the service in Codex's read-only sandbox."""
+        sys.path.insert(0, BIN)
+        from unittest import mock
+        from herdr_task import templates
+        with open(os.path.join(ROOT, "templates", "reviewer.md")) as f:
+            words = f.read()
+        for w in (words, templates.REVIEWER_MD):
+            self.assertIn("`herdr-app check` hangs there", w)
+            self.assertIn("Not run in my sandbox:", w)
+        d = tempfile.mkdtemp()
+        with open(os.path.join(d, "reviewer.md"), "w") as f:
+            f.write(templates.TEMPLATE_HEADS["reviewer"] + templates.REVIEWER_MD_BEFORE_SANDBOX)
+        with mock.patch.object(templates, "TEMPLATES", d):
+            self.assertEqual(templates.instructions("reviewer"), templates.REVIEWER_MD.strip())
+
 
 
 class ReviewerLine(unittest.TestCase):

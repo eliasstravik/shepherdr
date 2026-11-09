@@ -104,7 +104,13 @@ REVIEWER_MD_BEFORE_FEEDBACK = REVIEWER_MD_BEFORE_SUBAGENT + ("- You run as the w
 # Since agents offer feedback for Shepherdr itself (SHEP-78): a reviewer's goes through its worker.
 REVIEWER_FEEDBACK = ("- Shepherdr itself misbehaving while you review (a Herdr command or feature failing like a bug, not the task's code): "
                      "one line in your findings starting \"Shepherdr feedback:\", what happened and what you expected; your worker passes it on.\n")
-REVIEWER_MD = REVIEWER_MD_BEFORE_FEEDBACK + REVIEWER_FEEDBACK
+REVIEWER_MD_BEFORE_SANDBOX = REVIEWER_MD_BEFORE_FEEDBACK + REVIEWER_FEEDBACK
+# Since a Codex reviewer's read-only sandbox can't run every check (#840): it says which, and its worker runs them.
+REVIEWER_SANDBOX = ("- A check that can't run in a read-only sandbox (Codex's): `herdr-app check` hangs there on the window's "
+                    "services and `shepherdr doctor` can't reach the Shepherdr service, as with anything needing the network, a "
+                    "window or writes outside the folder. Don't run or wait on those: list them in your findings under \"Not run "
+                    "in my sandbox:\", and your worker runs them and checks the output.\n")
+REVIEWER_MD = REVIEWER_MD_BEFORE_SANDBOX + REVIEWER_SANDBOX
 
 
 # Earlier worker defaults: a file still saying one, unedited, gets today's.
@@ -150,7 +156,8 @@ def instructions(role):
             body = None
         text = None
     if body is None or (role == "worker" and body.strip() in [x.strip() for x in OLD_WORKERS]) \
-            or (role == "reviewer" and body.strip() in (REVIEWER_MD_BEFORE_SUBAGENT.strip(), REVIEWER_MD_BEFORE_FEEDBACK.strip())):
+            or (role == "reviewer" and body.strip() in (REVIEWER_MD_BEFORE_SUBAGENT.strip(), REVIEWER_MD_BEFORE_FEEDBACK.strip(),
+                                                    REVIEWER_MD_BEFORE_SANDBOX.strip())):
         body = WORKER_MD if role == "worker" else REVIEWER_MD
     new = head + body.strip() + "\n"
     if text is None or new.strip() != text.strip():
