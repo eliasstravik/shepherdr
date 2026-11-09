@@ -51,6 +51,8 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
   `navigator.mediaDevices.getUserMedia` with an oscillator `MediaStreamDestination` via eval.
 - Another machine in herdr-task tests: run herdr-task as a subprocess with `HERDR_TASK_STORE=<tmp>` and a fake hc first on
   PATH (see AutomationFromAnotherMachine).
+- Python tests: each `test/test_*.py` imports `home_guard` first (a throwaway HOME for the run; touching the real home
+  fails the test). Run them with `discover -s test` or from `test/`.
 - Bun.spawn ignores a PATH changed inside a test: point the service at fakes with `SHEPHERDR_HERDR_APP` / `SHEPHERDR_HC`.
 - No herdr-app window runs on the dev VM: window-mod UI can only be syntax-checked here, not screenshot. No ImageMagick
   either: crop proof screenshots with python3 PIL. Stop a background stub with `kill $(lsof -t -i:<port>)`, never
