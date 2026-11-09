@@ -264,7 +264,7 @@ export class Compat {
     const w = a.words;
     if (w.kind === "questions") {
       const q = w.questions[0];
-      const choices = (x: any) => x.options.map((o: any) => ({ label: o.name, ...(o.description ? { description: o.description } : {}), ...(o.recommended ? { recommended: true } : {}) }));
+      const choices = (x: any) => x.options.map((o: any) => ({ label: o.name, ...(o.description ? { description: o.description } : {}), ...(o.recommended ? { recommended: true } : {}), ...(o.preview ? { preview: o.preview } : {}) }));
       // several questions: one card with a step for each, then one to check the answers (3.0's card)
       if (w.questions.length > 1)
         return { id: a.id, title: `${w.questions.length} questions`, kind: "Question", to: key, choices: [], other: true,

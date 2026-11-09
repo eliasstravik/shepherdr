@@ -178,6 +178,21 @@ async function answerAsk(dir, id, text, how) {
   if (how) await writeTextFile(`${dir}/end/${id}`, `${how}\n`, null).catch(() => {});
   await writeTextFile(`${dir}/ans/${id}.json`, text, null).catch(() => {});
 }
+// Another machine's asks (SHEP-139), as the service reads and answers them (service/asks.ts):
+// each request there still waiting for this terminal ($1) whose hook lives, one line each ("req",
+// its id, its JSON), then how each id given after it ended ("end", its id, the hook's words).
+const ASKS_THERE = 'd="${HERDR_APP_HOME:-$HOME/.config/herdr-app}/data/chat-asks"';
+const REMOTE_LIST = `${ASKS_THERE}; t=$1; shift
+for f in "$d/req/$t".*.json; do [ -f "$f" ] || continue; n=\${f##*/}; n=\${n%.json}; [ -f "$d/ans/$n.json" ] && continue
+  kill -0 "\${n##*.}" 2>/dev/null || continue; printf 'req\\t%s\\t' "$n"; tr '\\n\\t' '  ' < "$f"; echo; done
+for n in "$@"; do [ -f "$d/end/$n" ] && printf 'end\\t%s\\t%s\\n' "$n" "$(head -n 1 "$d/end/$n")"; done; exit 0`;
+// An answer there: how it went, then the answer ($3) in place at once.
+const REMOTE_ANSWER = `${ASKS_THERE}; mkdir -p "$d/ans" "$d/end"; [ -f "$d/req/$1.json" ] || exit 3
+[ -z "$2" ] || printf '%s\\n' "$2" > "$d/end/$1"
+printf '%s' "$3" > "$d/ans/$1.json.tmp" && mv "$d/ans/$1.json.tmp" "$d/ans/$1.json"`;
+async function answerRemote(machine, id, text, how) {
+  await exec("hc", ["exec", "--on", machine, "sh", "-c", REMOTE_ANSWER, "x", id, how ?? "", text]).catch(() => {});
+}
 // The person's words keep the line breaks they typed: markdown joins single lines, so each one
 // becomes a hard break (outside code fences, which keep theirs). A "<word>" they typed shows as
 // typed, not read as HTML and dropped (core/chat-view.js literal(), #591).
@@ -491,7 +506,7 @@ export default class Chat extends View {
       this.anchor = null; this.pinned = true; this.stick = true;
       cx.notify();
     });
-    if (this.addr && !this.machine) cx.spawn(async (cx) => this.watchAsks(cx));
+    if (this.addr) cx.spawn(async (cx) => this.watchAsks(cx));
     // Keys (keys.json "mod:chat") and the header's buttons (pane-chat) for this chat.
     // At most 5 s per wait (one pending nextCommand), so a reload's old build ends at its next
     // cx use instead of staying in memory.
@@ -643,13 +658,56 @@ export default class Chat extends View {
     await exec("sh", ["-c", 'mkdir -p "$1/open" "$1/req" "$1/ans" && touch "$1/open/$2"', "x", this.askDir, this.addr]);
   }
 
+  // One loop per chat, whichever agent it shows now: this machine's asks are watched in its
+  // folder, another machine's (SHEP-139: a task worker there) read over herdr-core's link.
   async watchAsks(cx) {
+    if (this.askLoop) return;
+    this.askLoop = true;
     await exec("sh", ["-c", 'mkdir -p "$1/open" "$1/req" "$1/ans"', "x", this.askDir]).catch(() => {});
     for (;;) {
+      if (!this.addr) { await cx.sleep(3000); continue; }
+      if (this.machine) {
+        await this.readRemoteAsks(cx).catch(() => {});
+        await cx.sleep(3000);
+        continue;
+      }
       await this.readAsks(cx);
       // One watch at a time, as for the log.
       this.askWatch ??= watchFolder(`${this.askDir}/req`).finally(() => { this.askWatch = null; });
       await Promise.race([this.askWatch, cx.sleep(5000)]);
+    }
+  }
+
+  // Another machine's agent (SHEP-139): its requests there that still wait (their hook alive),
+  // and how each card shown here ended, in one call (as the service's poll, service/asks.ts).
+  // Ids stay that machine's own (<terminal>.<time>.<pid>); its replies go back the same way.
+  async readRemoteAsks(cx) {
+    const machine = this.machine, local = this.addr.slice(machine.length + 1);
+    const r = await exec("hc", ["exec", "--on", machine, "sh", "-c", REMOTE_LIST, "x", local, ...this.asks.map((a) => a.id)]);
+    if (r.code !== 0 || this.machine !== machine) return;
+    const reqs = new Map(), ends = new Map();
+    for (const line of String(r.stdout ?? "").split("\n")) {
+      const [kind, id, ...rest] = line.split("\t");
+      if (!id || !/^[\w.-]+$/.test(id)) continue;
+      if (kind === "req") reqs.set(id, rest.join("\t"));
+      else if (kind === "end" && rest.join("\t").trim()) ends.set(id, rest.join("\t").trim());
+    }
+    const kept = this.asks.filter((a) => reqs.has(a.id));
+    for (const a of this.asks.filter((a) => !reqs.has(a.id))) this.askEnded(a, ends.get(a.id) || "No longer waiting");
+    let added = false;
+    for (const [id, text] of reqs) {
+      if (kept.some((a) => a.id === id)) continue;
+      let req = null;
+      try { req = JSON.parse(text); } catch {}
+      const w = req ? words(req) : { kind: "permission", title: "Claude asks for something the chat can't read", detail: "", unread: true };
+      kept.push({ id, req, words: w, machine });
+      added = true;
+    }
+    if (added || kept.length !== this.asks.length) {
+      this.asks = kept;
+      this.cards.keep(kept.map((a) => a.id));
+      if (added) this.askAlert();
+      cx.notify();
     }
   }
 
@@ -721,7 +779,8 @@ export default class Chat extends View {
     if (how) this.askEnded(ask, how);
     cx.notify();
     // A task worker's ask may show in its Assistant's chat too: that copy reads how it went.
-    cx.spawn(async () => answerAsk(this.askDir, ask.id, text, howAnswered(ask, text, this.thread || this.t?.labels?.["herdr.task"] ? "in the task's chat" : "in its chat")));
+    const where = howAnswered(ask, text, this.thread || this.t?.labels?.["herdr.task"] ? "in the task's chat" : "in its chat");
+    cx.spawn(async () => ask.machine ? answerRemote(ask.machine, ask.id, text, where) : answerAsk(this.askDir, ask.id, text, where));
   }
 
   // ---- a task worker's asks (an Assistant's chat) ---------------------------------------------
@@ -1576,7 +1635,7 @@ export default class Chat extends View {
     this.reset();
     this.phase = "finding";
     cx.spawn(async (cx) => this.follow(cx));
-    if (!this.machine) cx.spawn(async (cx) => this.watchAsks(cx));
+    cx.spawn(async (cx) => this.watchAsks(cx));
     cx.notify();
   }
 
@@ -1692,7 +1751,7 @@ export default class Chat extends View {
         cx.spawn(async () => { const paths = await attach.deliver(msg.files, this.addr, this.machine).catch(() => []); if (paths.length) await personHc(["send", this.addr, paths.join("\n")]); });
       }
       cx.spawn(async (cx) => this.follow(cx));
-      if (!this.machine) cx.spawn(async (cx) => this.watchAsks(cx));
+      cx.spawn(async (cx) => this.watchAsks(cx));
       cx.notify();
       // From the header's Terminal: show its terminal once it runs (the usual Chat → Terminal).
       if (thenTerminal) {

@@ -149,3 +149,18 @@ test("an agent asking with a card needs you once: its card, not a second need fo
   // SHEP-17's card is its one need; SHEP-18 waits with no card
   expect(snap.needs.map((n: any) => [n.chat, n.id === "attention"])).toEqual([["m3:SHEP-18/worker", true], ["m3:SHEP-17/worker", false]]);
 });
+
+// SHEP-139: an option's preview shows on the card, and the answer carries it back (with the person's note) as Claude's
+// own prompt does: updatedInput.annotations[question] = { preview, notes }.
+test("a question's previews show on the card and go back with the pick and its note", async () => {
+  put("t50.100.1", { tool_name: "AskUserQuestion", tool_input: { questions: [{ question: "Which layout?", header: "Layout",
+    options: [{ label: "Grid", description: "Cards", preview: "+--+--+\n|a |b |\n+--+--+" }, { label: "List", preview: "- a\n- b" }] }] } });
+  const asks = new Asks();
+  asks.start();
+  const q = new Compat().question(asks.of("t50")[0], "x/worker");
+  expect(q.choices.map((c: any) => c.preview)).toEqual(["+--+--+\n|a |b |\n+--+--+", "- a\n- b"]);
+  await asks.answer("t50.100.1", { choice: 1, note: "  keep it short " });
+  const d = JSON.parse(readFileSync(join(dir, "ans", "t50.100.1.json"), "utf8")).hookSpecificOutput.decision;
+  expect(d.updatedInput.answers).toEqual({ "Which layout?": "List" });
+  expect(d.updatedInput.annotations).toEqual({ "Which layout?": { preview: "- a\n- b", notes: "keep it short" } });
+});

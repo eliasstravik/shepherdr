@@ -123,6 +123,9 @@ def hc_json(*args):
     except ValueError:
         return None
 APP_HOME = os.path.join(HOME, ".config", "herdr-app")
+# Where a machine that only runs tasks keeps the chat's question-card hook (mods/chat/ask-hook.sh
+# and ask-end.py), synced there beside herdr-task (machines.manifest; launch.ask_hook runs it).
+ASK_HOME = os.path.join(".local", "share", "herdr", "ask")
 # ---- this herdr-task ------------------------------------------------------------------------
 # herdr-task is a thin entry beside this package; on another machine it is one zipapp holding
 # both (remote installs it as ~/.local/bin/herdr-task). ENTRY is what runs it again (agents' own
