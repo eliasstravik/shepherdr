@@ -41,12 +41,12 @@ async function serveStatus(): Promise<any> {
   try { return r.ok ? JSON.parse(r.out || "{}") : {}; } catch { return {}; }
 }
 
-/** The machine owner's login and the machine's tailnet name, or null without Tailscale. */
-export async function whoami(): Promise<Me | null> {
-  const r = await run(["status", "--json"]);
-  if (!r.ok) return null;
+/** The machine owner's login and the machine's tailnet name from `tailscale status --json`'s output, or null.
+ *  User ids can pass 2^53 (#845): JSON.parse would round them and miss their exact key in User, so they are read as
+ *  strings. */
+export function meOf(out: string): Me | null {
   try {
-    const s = JSON.parse(r.out);
+    const s = JSON.parse(out.replace(/"UserID"\s*:\s*(\d+)/g, '"UserID":"$1"'));
     const user = s.User?.[String(s.Self?.UserID)];
     const dns = String(s.Self?.DNSName ?? "").replace(/\.$/, "");
     if (!user?.LoginName || !dns) return null;
@@ -54,6 +54,12 @@ export async function whoami(): Promise<Me | null> {
   } catch {
     return null;
   }
+}
+
+/** The machine owner's login and the machine's tailnet name, or null without Tailscale. */
+export async function whoami(): Promise<Me | null> {
+  const r = await run(["status", "--json"]);
+  return r.ok ? meOf(r.out) : null;
 }
 
 export type Served = { proxy: string | null; port: string | null; funnel: boolean };
