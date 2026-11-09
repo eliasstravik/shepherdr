@@ -1961,6 +1961,22 @@ class MergedOnlyWithOwnWork(unittest.TestCase):
         self.assertEqual(self.task["state"], "done")
         self.assertFalse(self.task.get("merged"))
 
+    def test_ready_rebased_onto_origin_main_waits_for_accept(self):
+        """#737: no commits of its own, its branch rebased onto origin/main while the local main is
+        behind: nothing to merge and nothing to review, never an empty pull request."""
+        from unittest import mock
+        calls = self.github([])
+        self.git(self.main, "update-ref", "refs/remotes/origin/main", self.commit(self.main, "on GitHub"))
+        self.git(self.main, "reset", "-q", "--hard", "HEAD~1")  # local main behind its remote
+        self.git(self.task["worktree"], "rebase", "-q", "origin/main")
+        self.task["head"] = self.git(self.task["worktree"], "rev-parse", "HEAD")
+        self.task["review_gate"] = True
+        with mock.patch.object(self.commands, "review_limits", lambda *a: (True, 2)):
+            self.assertIsNone(self.commands.review_refusal(self.store, self.task, self.task["worktree"]))
+        self.assertEqual(self.ready_said(), "ready")
+        self.assertTrue(self.task["nothing_to_merge"])
+        self.assertNotIn(("pr", "create"), calls)
+
     # SHEP-117: a research task runs in the folder itself (--here), commits nothing and ends with an
     # artifact: ready waits for Accept with no branch or pull request, whatever the merge setting.
     def test_research_in_the_folder_itself_goes_ready_then_done(self):
@@ -2460,6 +2476,136 @@ class AcceptCardArtifacts(unittest.TestCase):
         with mock.patch.object(proof, "artifacts_of", lambda folder: arts):
             self.assertEqual(proof.task_artifacts(s, t, {"id": "proof-0002"}), [{"id": "report-0003", "title": "SHEP-1: Three options"}])
             self.assertEqual([a["id"] for a in proof.task_artifacts(s, t)], ["report-0003", "proof-0002"])
+
+
+class ReviewerFlags(unittest.TestCase):
+    """#803: add/edit's --reviewer-model and --reviewer-effort set the task's reviewer, as --set does."""
+
+    def test_the_flags_set_the_reviewer(self):
+        import argparse
+        sys.path.insert(0, BIN)
+        from herdr_task.settings import set_opts
+        t = {}
+        set_opts(t, argparse.Namespace(reviewer="codex", reviewer_model="gpt-5", reviewer_effort="xhigh"))
+        self.assertEqual((t["reviewer"], t["reviewer_model"], t["reviewer_effort"]), ("codex", "gpt-5", "xhigh"))
+        set_opts(t, argparse.Namespace(set=["reviewer-effort=high", "reviewer_model=default"]))
+        self.assertEqual(t["reviewer_effort"], "high")
+        self.assertNotIn("reviewer_model", t)
+
+
+class MachineHoldFollowsSettings(unittest.TestCase):
+    """#768: limits a tick kept in machine-hold.json (--machine/--hold) never shadow Settings >
+    Machines saved after them; a newer --hold wins again. Throwaway files; nothing is sampled."""
+
+    def setUp(self):
+        import shutil
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.machine as machine
+        import herdr_task.queues as queues
+        import herdr_task.settings as settings
+        self.queues, self.tmp = queues, tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.settings = os.path.join(self.tmp, "shepherdr.json")
+        busy = {"memory": 40, "load": 0.1, "cores": 4, "cpu": 3, "disk": 96}
+        for mod, name, value in ((settings, "SETTINGS", self.settings), (queues, "HOLD_FILE", os.path.join(self.tmp, "machine-hold.json")),
+                                 (machine, "sample", lambda: busy), (queues, "_hold", {})):
+            p = mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def hold(self):
+        self.queues._hold.clear()
+        return self.queues.machine_hold()
+
+    def save_settings(self, disk, at):
+        with open(self.settings, "w") as f:
+            json.dump({"machines": {"vm-demo": {"machine": {"start_disk": disk}}}}, f)
+        os.utime(self.settings, (at, at))
+
+    def test_settings_saved_after_the_hold_win(self):
+        self.queues.set_hold("vm-demo", {"start_load": 1.0, "start_memory": 80, "start_disk": 90})
+        os.utime(self.queues.HOLD_FILE, (1000, 1000))
+        self.assertEqual(self.hold(), "vm-demo's disk is 96% full")
+        self.save_settings(100, 2000)  # raised in Settings > Machines
+        self.assertIsNone(self.hold())
+        self.queues.set_hold("vm-demo", {"start_load": 1.0, "start_memory": 80, "start_disk": 90})  # a newer tick's
+        self.assertEqual(self.hold(), "vm-demo's disk is 96% full")
+
+    def test_no_settings_file_keeps_the_hold(self):
+        self.queues.set_hold("vm-demo", {"start_disk": 90})
+        self.assertEqual(self.hold(), "vm-demo's disk is 96% full")
+
+
+class ReviewedNamesItsCommit(unittest.TestCase):
+    """#797: `reviewed --commit <sha>` records a round on the commit it reviewed, fixes committed
+    since; only a commit on the task's branch. A throwaway git repo; hc and gh are never run."""
+
+    def setUp(self):
+        import argparse
+        import shutil
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.commands as commands
+        self.commands, self.argparse = commands, argparse
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        main, self.wt = os.path.join(self.root, "repo"), os.path.join(self.root, "wt")
+        self.git(self.root, "init", "-q", "-b", "main", main)
+        for k, v in (("user.name", "T"), ("user.email", "t@example.com"), ("commit.gpgsign", "false")):
+            self.git(main, "config", k, v)
+        self.git(main, "commit", "-q", "--allow-empty", "-m", "base")
+        self.git(main, "commit", "-q", "--allow-empty", "-m", "elsewhere")
+        self.other = self.git(main, "rev-parse", "HEAD")
+        self.git(main, "worktree", "add", "-q", "-b", "task/1", self.wt, "HEAD~1")
+        self.store = Store([{"id": 1, "title": "Reactions", "state": "running", "mode": "worktree", "worktree": self.wt,
+                             "branch": "task/1", "base": "main", "start": self.git(self.wt, "rev-parse", "HEAD"), "agents": [],
+                             "review_gate": True}])
+        self.store.loc["folder"] = main
+        self.task = self.store.data["tasks"][0]
+        for name, value in (("open_store", lambda args, write=True: self.store), ("view", lambda s, t, live=None: dict(t)),
+                            ("say", lambda *a: None), ("review_limits", lambda *a: (True, 3))):
+            p = mock.patch.object(commands, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def git(self, cwd, *args):
+        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, check=True).stdout.strip()
+
+    def commit(self, words):
+        self.git(self.wt, "commit", "-q", "--allow-empty", "-m", words)
+        return self.git(self.wt, "rev-parse", "HEAD")
+
+    def reviewed(self, commit=None):
+        self.commands.cmd_reviewed(self.argparse.Namespace(id="SHEP-1", json=True, folder=None, report="one major, fixed",
+                                                           commit=commit))
+        return self.task["reviews"][-1]["head"]
+
+    def test_a_round_on_the_commit_it_reviewed(self):
+        a = self.commit("reactions on the left")
+        b = self.commit("the round's fixes")
+        self.assertEqual(self.reviewed(a[:9]), a)
+        self.task["head"] = b
+        refusal = self.commands.review_refusal(self.store, self.task, self.wt)
+        self.assertIn(f"your final commit {b[:7]} (rounds are recorded on {a[:7]})", refusal)
+        self.assertEqual(self.reviewed(), b)  # by default HEAD, as before
+        self.assertIsNone(self.commands.review_refusal(self.store, self.task, self.wt))
+
+    def test_uncommitted_fixes_still_record_the_named_commit(self):
+        a = self.commit("reactions on the left")
+        with open(os.path.join(self.wt, "fix.txt"), "w") as f:
+            f.write("a fix")
+        self.git(self.wt, "add", "fix.txt")
+        with self.assertRaises(Exception):
+            self.reviewed()
+        self.assertEqual(self.reviewed(a), a)
+
+    def test_only_a_commit_on_its_branch(self):
+        self.commit("reactions on the left")
+        for bad in (self.other, "nope"):
+            with self.assertRaises(Exception):
+                self.reviewed(bad)
+        self.assertNotIn("reviews", self.task)
 
 
 if __name__ == "__main__":

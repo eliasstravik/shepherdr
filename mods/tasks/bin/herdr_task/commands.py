@@ -21,7 +21,7 @@ from .agents import (
 )
 from .sessions import refresh_sessions
 from .github import (already_merged, drop_branch, finish, gh, github, merged_here, needs_approval, own_work, pr_adopt, pr_open,
-                     pr_pending, pr_problem, pr_view, update_main, watch_main)
+                     pr_pending, pr_problem, pr_view, remote_of, update_main, watch_main)
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
@@ -443,7 +443,7 @@ def review_refusal(s, t, wt):
     on, rounds = review_limits(s, t)
     if not on or not t.get("review_gate"):
         return None
-    if wt and t.get("start") and t.get("head") == t["start"]:
+    if wt and t.get("start") and in_base(s, t):
         return None  # no commits of its own: nothing to review (nothing to merge)
     revs = [r for r in t.get("reviews") or [] if r.get("result") in REVIEWED and (r.get("at") or 0) >= (t.get("started") or 0)]
     head = t.get("head") if wt else None
@@ -451,6 +451,9 @@ def review_refusal(s, t, wt):
         return None
     ref, ht, folder = s.ref(t), own_path(), shlex.quote(s.loc["folder"])
     what = f"your final commit {head[:7]}" if head else "this task's work"
+    seen = sorted({r["head"][:7] for r in revs if r.get("head")}) if wt else []
+    if seen:
+        what += f" (rounds are recorded on {', '.join(seen)})"
     if rounds_used(t) >= rounds:
         t["review_out"] = now()
         return (f"All {rounds} review rounds are used and {what} isn't reviewed. Say why in your chat, set your status line to "
@@ -477,9 +480,19 @@ def cmd_reviewed(args):
                        f"Assistant can add a round (herdr-task review-more {s.ref(t)}).")
         wt = t.get("worktree") if t.get("mode") == "worktree" else None
         head = None
-        if wt and os.path.isdir(wt):
+        where = wt if wt and os.path.isdir(wt) else (s.loc["folder"] if s.loc["kind"] == "repo" else None)
+        named = getattr(args, "commit", None)
+        if named:
+            # The commit the round reviewed (#797), fixes perhaps committed since: one on this branch.
+            ok, head, _ = git(where, "rev-parse", "--verify", "--quiet", f"{named}^{{commit}}") if where else (False, "", "")
+            if not ok or not head:
+                raise Fail(f"--commit {named} isn't a commit here.")
+            if not git(where, "merge-base", "--is-ancestor", head, "HEAD")[0]:
+                raise Fail(f"--commit {named} isn't on this task's branch (HEAD or before it).")
+        elif wt and os.path.isdir(wt):
             if git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
-                raise Fail(f"{wt} has uncommitted changes: a review is of a commit. Commit first, then review it.")
+                raise Fail(f"{wt} has uncommitted changes: a review is of a commit. Commit first, then review it "
+                           "(or name the commit it reviewed with --commit).")
             head = git(wt, "rev-parse", "HEAD")[1]
         elif s.loc["kind"] == "repo":
             head = git(s.loc["folder"], "rev-parse", "HEAD")[1] or None
@@ -1031,10 +1044,12 @@ def branch_tip(s, t):
 
 
 def in_base(s, t):
-    """Its branch holds nothing its base branch doesn't: no commits of its own, or it only caught
-    up with its base (`git merge --ff-only main`, SHEP-23). Nothing to merge, and never merged."""
-    tip = branch_tip(s, t)
-    return bool(tip) and (tip == t.get("start") or git(s.loc["folder"], "merge-base", "--is-ancestor", tip, t.get("base") or "main")[0])
+    """Its branch holds nothing its base branch doesn't, here or on its remote: no commits of its
+    own, or it only caught up with its base (`git merge --ff-only main` or `git rebase origin/main`
+    while the local main is behind: SHEP-23, #737). Nothing to merge, and never merged."""
+    tip, main, base = branch_tip(s, t), s.loc["folder"], t.get("base") or "main"
+    return bool(tip) and (tip == t.get("start") or any(
+        git(main, "merge-base", "--is-ancestor", tip, ref)[0] for ref in (base, f"refs/remotes/{remote_of(main)}/{base}")))
 
 
 def ff_merge(s, t):
