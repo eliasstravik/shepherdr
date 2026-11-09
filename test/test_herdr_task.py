@@ -2487,7 +2487,7 @@ class CleanEnv(unittest.TestCase):
         task = {"id": 6, "title": "fake", "agents": []}
         with mock.patch.object(L, "run", run), mock.patch.object(L, "folder_for", lambda s, t: "/tmp"), \
                 mock.patch.object(L, "agent_name", lambda *a: "dev-6-fake"), mock.patch.object(L, "track", lambda *a: None), \
-                mock.patch.object(L, "coordinator_tab", lambda a: None), mock.patch.object(L, "own_argv", lambda a: a), \
+                mock.patch.object(L, "coordinator_tab", lambda a: None), mock.patch.object(L, "own_argv", lambda a, *_: a), \
                 mock.patch.object(L, "in_shell", lambda a: a), mock.patch.object(L, "low_priority", lambda a, n: a):
             L.launch(s, task, ["env"], "sp1")
         hc = ran[0]
@@ -2689,7 +2689,7 @@ class Revive(unittest.TestCase):
         self.terms["t5"] = {"address": "t5", "state": "live", "pid": 500, "cwd": "/wt", "name": "shep-6-web", "argv": ["claude"],
                             "labels": {"herdr.task": "dev#6"}}
         self.crash("t5")
-        with self.mock.patch("herdr_task.launch.own_argv", lambda argv: argv):
+        with self.mock.patch("herdr_task.launch.own_argv", lambda argv, *_: argv):
             self.tick()
         self.assertTrue(self.sent[0][1].startswith("cd /wt && HERDR_BROWSER_TASK='dev#6' claude --resume S1 'Herdr restarted"), self.sent)
 
@@ -3798,3 +3798,57 @@ class CodexAsksOnTheCard(unittest.TestCase):
         argv = launch.own_argv(["codex", "--sandbox", "workspace-write"])
         self.assertIn(f"timeout={launch.ASK_TIMEOUT}", argv[2])
         self.assertEqual(launch.ASK_TIMEOUT, 1800)
+
+    def test_a_codex_workers_proof_and_commits_never_ask(self):
+        """#866: Codex's sandbox can't write Shepherdr's stores nor git's data, so a Codex worker runs its proof and
+        commits escalated: its own hook allows exactly those (not a Claude worker's, nor anything chained or riskier)."""
+        sys.path.insert(0, BIN)
+        from unittest import mock
+        from herdr_task import launch
+        with mock.patch.object(launch.shutil, "which", lambda n: None):
+            own = lambda c, sb=True: launch.own_command("/x/herdr-task", c, sb)  # noqa: E731
+            for c in ("herdr-artifact publish /tmp/p --title 'X · Proof'", "herdr-artifact guide", "herdr-artifact update a-1 /tmp/p",
+                      "git add calc.py", "git commit -m 'Fix add'", "/x/herdr-task ready SHEP-1 --summary hi"):
+                self.assertTrue(own(c), c)
+            for c in ("herdr-artifact publish /tmp/p --custom", "herdr-artifact rm a-1", "git push", "git -c core.hooksPath=/tmp commit",
+                      "git -C /elsewhere commit -m x", "git add . && git commit -m x", "git commit -m \"$(id)\"", "rm -rf build"):
+                self.assertFalse(own(c), c)
+            self.assertFalse(own("git commit -m x", False))
+            self.assertFalse(own("herdr-artifact publish /tmp/p", False))
+        # its review: the reviewer the brief's Reviewer line gives, read-only, and its own helpers only
+        from herdr_task.settings import reviewer_command
+        rv = reviewer_command("codex", folder=tempfile.mkdtemp())
+        with mock.patch.dict(os.environ, {"HERDR_BROWSER_TASK": "demo#1"}):
+            own = lambda c, sb=True: launch.own_command("/x/herdr-task", c, sb)  # noqa: E731
+            yes = [f"hc run --bg --name demo-1-review --label \"herdr.task=$HERDR_BROWSER_TASK\" --label herdr.role=reviewer "
+                   f"--label herdr.agent=codex -- {rv} 'Review it: \"ok\" & $x'",
+                   "hc run --bg --name demo-1-review -- claude --permission-mode plan --model opus 'review'",
+                   "hc wait demo-1-review --timeout 600", "hc read demo-1-review --lines 400", "hc kill demo-1-review"]
+            no = ["hc run --bg --name demo-1-review -- claude --permission-mode plan --dangerously-skip-permissions x",
+                  "hc run --bg --name demo-1-review -- codex --no-daemon --sandbox read-only --ask-for-approval never "
+                  "-c sandbox_mode=\"danger-full-access\" x",
+                  "hc run --bg --name demo-1-review -- sh -c 'rm -rf /'", "hc run --bg --name x -- claude --permission-mode plan x",
+                  "hc kill t15q", "hc send demo-1-review hi"]
+            for c in yes:
+                self.assertTrue(own(c), c)
+            for c in no:
+                self.assertFalse(own(c), c)
+            self.assertFalse(own(yes[2], False))
+        argv = launch.own_argv(["codex", "-s", "workspace-write"])
+        self.assertIn(" _allow --command ", argv[2])
+        self.assertIn(" --sandboxed", argv[2])
+        claude = json.loads(launch.own_argv(["claude", "go"])[2])["hooks"]["PermissionRequest"][0]["hooks"][0]["command"]
+        self.assertNotIn("--sandboxed", claude)
+
+    def test_a_codex_worker_never_stops_on_trust_this_folder(self):
+        """#866: a Codex worker in a folder Codex hasn't seen sat at "Trust this folder?", nobody at the keys."""
+        sys.path.insert(0, BIN)
+        from herdr_task import launch
+        d = os.path.realpath(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", d], check=True)
+        argv = launch.own_argv(["codex", "-s", "workspace-write"], d)
+        self.assertIn("projects={%s={trust_level=\"trusted\"}}" % json.dumps(d), argv)
+        # given already (the person's own argv): left as it is
+        mine = ["codex", "-c", "projects={}"]
+        self.assertEqual(sum(str(a).startswith("projects") for a in launch.own_argv(mine, d)), 1)
+        self.assertFalse(any(str(a).startswith("projects") for a in launch.own_argv(["codex"])))

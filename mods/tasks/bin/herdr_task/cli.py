@@ -446,6 +446,7 @@ def main():
     c.add_argument("--keep", action="store_true", help="add the agent beside the old one")
     c = sub.add_parser("_allow")  # Codex's PermissionRequest hook (own_argv)
     c.add_argument("--command", required=True)
+    c.add_argument("--sandboxed", action="store_true")  # Codex's: its proof and commits run escalated (#866)
     c.set_defaults(fn=cmd_allow, json=False)
     c = sub.add_parser("_session-note")  # the chat's SessionStart hook (mods/chat/session-note.sh): an Assistant's extra words
     c.add_argument("terminal")
