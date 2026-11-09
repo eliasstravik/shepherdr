@@ -4,8 +4,8 @@ import json
 import os
 import shutil
 
-from .base import Fail, GH, git, now, run, STORE
-from .agents import agent_running, live_agents
+from .base import Fail, GH, git, hc_json, now, run, STORE
+from .agents import agent_running, live_agents, live_helpers
 
 
 # ---- GitHub ---------------------------------------------------------------------------------
@@ -297,17 +297,69 @@ def own_work(s, task):
 
 def finish(s, task, even_if_busy=False):
     """Done, its branch merged: removes the worktree and branch when nothing is left uncommitted
-    there and (unless the person merged from Herdr) no agent still works in it."""
+    there and (unless the person merged from Herdr) no agent still works in it. Else tidy_done()
+    removes them once its agents ended."""
     task["state"], task["done_at"] = "done", now()
     for k in ("attention", "merge_requested", "queue", "queued_at", "merge_queued", "kept_open"):
         task.pop(k, None)
     s.dirty = True
-    wt, br, main = task.get("worktree"), task.get("branch"), s.loc["folder"]
-    if not wt or (not even_if_busy and any(agent_running(k) for k in live_agents(s.key(task)))):
+    if not task.get("worktree") or (not even_if_busy and any(agent_running(k) for k in live_agents(s.key(task)))):
         return
+    remove_worktree(s, task)
+
+
+def remove_worktree(s, task):
+    """A finished task's worktree removed when nothing is uncommitted there, then its branch. True
+    once the worktree is gone."""
+    wt, br, main = task.get("worktree"), task.get("branch"), s.loc["folder"]
     if os.path.isdir(wt):
+        if os.path.realpath(wt) == os.path.realpath(main):
+            return False
         ok, out, _ = git(wt, "status", "--porcelain", "--untracked-files=no")
         if not ok or out or not git(main, "worktree", "remove", "--force", wt)[0]:
-            return
+            return False
     if br:
         git(main, "branch", "-D", br)
+    return True
+
+
+# A Done task's worktree left on disk (its agent was still open when it finished, SHEP-161): removed
+# as finish() would have, once nothing runs in it; one that can't go yet (uncommitted work, a
+# terminal there) is looked at again after TIDY_AGAIN_MS. Old leftovers go the same way on the next
+# pass. A task made Done by hand with its work unmerged keeps its worktree (the person's to remove).
+TIDY_AGAIN_MS = 3600000
+
+
+def tidy_due(t):
+    """A Done task, merged or with nothing to merge, whose worktree is still on disk and may be looked at now."""
+    wt = t.get("worktree")
+    return bool(t.get("state") == "done" and t.get("mode") == "worktree" and wt and (t.get("merged") or t.get("nothing_to_merge"))
+                and now() - (t.get("worktree_kept") or 0) >= TIDY_AGAIN_MS and os.path.isdir(wt))
+
+
+def tidy_done(s, t, report=None):
+    """Removes a Done task's leftover worktree and branch (remove_worktree()) when no terminal is
+    live in it (neither the task's own nor any other with its folder there) and its branch has
+    nothing new since its work merged. True when removed."""
+    if not tidy_due(t):
+        return False
+    wt, br, main = t["worktree"], t.get("branch"), s.loc["folder"]
+    terms = hc_json("ls")
+    real = os.path.realpath(wt)
+    inside = lambda p: bool(p) and (os.path.realpath(p) + os.sep).startswith(real + os.sep)
+    busy = terms is None or live_agents(s.key(t)) or live_helpers(s.key(t)) or any(
+        k.get("state") == "live" and inside(k.get("cwd")) for k in terms.get("terminals") or [])
+    ok, tip, _ = git(main, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}") if br else (False, "", "")
+    base = t.get("base") or "main"
+    newer = ok and tip and tip != t.get("own") and not any(
+        git(main, "merge-base", "--is-ancestor", tip, ref)[0] for ref in (base, f"refs/remotes/{remote_of(main)}/{base}"))
+    if busy or newer or not remove_worktree(s, t):
+        t["worktree_kept"] = now()
+        s.dirty = True
+        return False
+    t.pop("worktree_kept", None)
+    t["worktree_removed_at"] = now()
+    s.dirty = True
+    if report is not None:
+        report.setdefault("worktrees_removed", []).append({"task": s.ref(t), "path": wt})
+    return True

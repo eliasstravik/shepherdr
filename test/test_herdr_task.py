@@ -1501,6 +1501,125 @@ class WorkersOwnHelpers(OwnBackgroundWork):
         self.assertEqual([x["role"] for x in v["live"]], ["worker"])
 
 
+class DoneWorktreesGo(unittest.TestCase):
+    """SHEP-161: a Done task whose agent was still open when it finished keeps its worktree only until
+    its agents are gone; leftovers from before go on the next pass. Never with uncommitted work, never
+    a folder a terminal is live in. A throwaway git repo; hc is never run."""
+
+    def setUp(self):
+        from unittest import mock
+        import shutil
+        sys.path.insert(0, BIN)
+        import herdr_task.github as github
+        import herdr_task.tick as tick
+        self.github, self.tick = github, tick
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.main, wt = os.path.join(self.root, "repo"), os.path.join(self.root, "wt")
+        self.git(self.root, "init", "-q", "-b", "main", self.main)
+        for k, v in (("user.name", "T"), ("user.email", "t@example.com"), ("commit.gpgsign", "false")):
+            self.git(self.main, "config", k, v)
+        self.git(self.main, "commit", "-q", "--allow-empty", "-m", "base")
+        self.git(self.main, "worktree", "add", "-q", "-b", "task/1", wt, "HEAD")
+        self.git(wt, "commit", "-q", "--allow-empty", "-m", "reactions")
+        self.git(self.main, "merge", "-q", "--ff-only", "task/1")
+        self.live, self.others = [], []  # the task's live terminals; every live terminal (hc ls)
+        self.store = Store([{"id": 1, "title": "Reactions", "state": "running", "mode": "worktree", "worktree": wt,
+                             "branch": "task/1", "base": "main", "merged": True, "agents": []}])
+        self.store.loc["folder"] = self.main
+        self.task = self.store.data["tasks"][0]
+        live = lambda key: list(self.live)
+        for mod, name, value in ((github, "live_agents", live), (github, "live_helpers", lambda key: []),
+                                 (github, "hc_json", lambda *a: {"terminals": self.live + self.others}),
+                                 (tick, "live_agents", live), (tick, "detail", lambda k: k),
+                                 (tick, "refresh_sessions", lambda *a: None), (tick, "quiet_hc", self.end),
+                                 (tick, "store_files", lambda folder=None: ["/f.json"]),
+                                 (tick, "read_list", lambda p: {"folder": self.main, "tasks": self.store.data["tasks"]}),
+                                 (tick, "locate", lambda f: self.store.loc), (tick, "Store", lambda loc: self.store),
+                                 (tick.time, "sleep", lambda n: None)):
+            p = mock.patch.object(mod, name, value, create=True)  # create: the test runs on the code before too
+            p.start()
+            self.addCleanup(p.stop)
+
+    def git(self, cwd, *args):
+        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, check=True).stdout.strip()
+
+    def end(self, verb, k):
+        self.live = [x for x in self.live if x is not k]
+        return subprocess.CompletedProcess([], 0)
+
+    def agent_open(self):
+        self.live = [{"address": "t1", "state": "live", "agent": "claude", "status": "idle", "cwd": self.task["worktree"],
+                      "labels": {"herdr.role": "worker"}}]
+
+    def later(self, ms):
+        for k in ("done_at", "ended_at", "worktree_kept"):
+            if self.task.get(k):
+                self.task[k] -= ms
+
+    def pass_(self):
+        report = {}
+        self.tick.end_done_pass(report)
+        return report
+
+    def test_its_worktree_goes_once_its_agent_ended(self):
+        self.agent_open()
+        self.github.finish(self.store, self.task)
+        self.assertTrue(os.path.isdir(self.task["worktree"]))  # its agent still open: kept for now
+        self.later(self.tick.DONE_GRACE_MS + 1000)
+        self.pass_()                                             # the agent ends
+        self.assertEqual(self.live, [])
+        report = self.pass_()                                    # nothing left of it: its worktree goes
+        self.assertFalse(os.path.isdir(self.task["worktree"]))
+        self.assertEqual(self.git(self.main, "branch", "--list", "task/1"), "")
+        self.assertEqual(report["worktrees_removed"], [{"task": "SHEP-1", "path": self.task["worktree"]}])
+        self.assertEqual(self.pass_(), {})                       # then never looked at again
+
+    def test_a_leftover_from_before_goes_on_the_next_pass(self):
+        self.task.update(state="done", done_at=1000, ended_at=2000)
+        self.pass_()
+        self.assertFalse(os.path.isdir(self.task["worktree"]))
+
+    def test_uncommitted_work_keeps_it(self):
+        self.task.update(state="done", done_at=1000, ended_at=2000)
+        with open(os.path.join(self.task["worktree"], "a.txt"), "w") as f:
+            f.write("x")
+        self.git(self.task["worktree"], "add", "a.txt")
+        self.pass_()
+        self.assertTrue(os.path.isdir(self.task["worktree"]))
+        self.assertIn("worktree_kept", self.task)
+        self.git(self.task["worktree"], "reset", "-q", "--hard")
+        self.pass_()                                             # not looked at again at once
+        self.assertTrue(os.path.isdir(self.task["worktree"]))
+        self.later(3600000)  # TIDY_AGAIN_MS
+        self.pass_()                                             # clean since: it goes
+        self.assertFalse(os.path.isdir(self.task["worktree"]))
+
+    def test_new_commits_after_the_merge_keep_it(self):
+        self.task.update(state="done", done_at=1000, ended_at=2000)
+        self.git(self.task["worktree"], "commit", "-q", "--allow-empty", "-m", "after the merge")
+        self.pass_()
+        self.assertTrue(os.path.isdir(self.task["worktree"]))
+        self.assertEqual(self.git(self.main, "branch", "--list", "--format=%(refname:short)", "task/1"), "task/1")
+
+    def test_a_terminal_in_it_keeps_it(self):
+        self.task.update(state="done", done_at=1000, ended_at=2000)
+        self.others = [{"address": "t9", "state": "live", "cwd": os.path.join(self.task["worktree"], "web")}]
+        self.pass_()
+        self.assertTrue(os.path.isdir(self.task["worktree"]))
+        self.others = [{"address": "t9", "state": "live", "cwd": self.task["worktree"] + "-other"}]
+        self.later(3600000)  # TIDY_AGAIN_MS
+        self.pass_()
+        self.assertFalse(os.path.isdir(self.task["worktree"]))
+
+    def test_done_by_hand_unmerged_keeps_it(self):
+        self.git(self.main, "reset", "-q", "--hard", "HEAD~1")  # its work never merged
+        self.task.update(state="done", done_at=1000, ended_at=2000, merged=False)
+        self.pass_()
+        self.assertTrue(os.path.isdir(self.task["worktree"]))
+        self.assertEqual(self.git(self.main, "branch", "--list", "--format=%(refname:short)", "task/1"), "task/1")
+
+
 class NewWorktrees(unittest.TestCase):
     """SHEP-74: a new task's worktree starts from its base fetched first (#574), on its own branch
     name or its folder's Branch names pattern (#570). Throwaway repos (a bare origin and a clone)
