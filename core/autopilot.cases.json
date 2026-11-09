@@ -1,5 +1,5 @@
 {
-  "about": "What applies in a space, from .autopilot.json (`file`: each space's switch, and Everywhere's schedule and events from before Settings kept them) and Shepherdr settings (`settings`: ~/.herdr/shepherdr.json's \"autopilot\", Everywhere's and each space's own): core/autopilot.js pilotFor() and herdr-task's resolve() must both give `expect` (core/autopilot.test.js, test/test_herdr_task.py). A space's own wins, else Everywhere's in Settings, else Everywhere's from before, else the defaults; a space has its own on/off.",
+  "about": "What applies in a space, from .autopilot.json (`file`: each space's switch, and Everywhere's schedule and events from before Settings kept them) and Shepherdr settings (`settings`: ~/.config/shepherdr/settings.json's \"autopilot\", Everywhere's and each space's own): core/autopilot.js pilotFor() and herdr-task's resolve() must both give `expect` (core/autopilot.test.js, test/test_herdr_task.py). A space's own wins, else Everywhere's in Settings, else Everywhere's from before, else the defaults; a space has its own on/off.",
   "cases": [
     {
       "name": "nothing set: off, Everywhere's defaults",

@@ -1,4 +1,4 @@
-"""The person's settings (~/.herdr/shepherdr.json and per-folder), the agent each task runs, and
+"""The person's settings (~/.config/shepherdr/settings.json and per-folder), the agent each task runs, and
 the Settings block a task's brief ends with."""
 
 import json
