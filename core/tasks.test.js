@@ -89,9 +89,9 @@ describe("a Ready task back at work (as herdr-task's busy_again)", () => {
     expect(p).toMatchObject({ section: "working", why: WORKING_AGAIN });
     expect(secondLine(p, null, null, back.now)).toBe(WORKING_AGAIN);
   });
-  test("still Ready while it ends the turn it said ready in, or once idle", () => {
+  test("Working, not Working again, while it ends the turn it said ready in; Ready once idle (SHEP-148)", () => {
     const task = { id: 7, state: "ready", ready_at: back.now - 5_000, ready_turns: { t1: 5 } };
-    expect(place(list([task]), task, { live: [{ address: "t1", status: "working", turn: 4 }], now: back.now }).section).toBe("ready");
+    expect(place(list([task]), task, { live: [{ address: "t1", status: "working", turn: 4 }], now: back.now })).toMatchObject({ section: "working", why: null });
     expect(place(list([task]), task, { live: [{ address: "t1", status: "idle", turn: 5 }], now: back.now }).section).toBe("ready");
   });
   test("asking the person while back at work needs them", () => {

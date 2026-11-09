@@ -26,9 +26,11 @@ def view(s, task, live=None):
     if v["needs"] == "reply":
         # Refused ready with its rounds used up (review_refusal): the Assistant can add one.
         v["why"] = own_line(task) or ("Out of review rounds" if task.get("review_out") else None) or last_words(task)
-    # Quiet but on its own background work (SHEP-53): Working; kept on the task for the Tasks panel.
-    v["own_work"] = (v["status"] == "working" and task["state"] == "running" and bool(running)
-                     and all(status_word(k) in ("idle", "done") for k in running) and own_work(task, running))
+    # Quiet but on its own background work (SHEP-53), or said ready but not at rest yet (SHEP-148):
+    # Working; kept on the task for the Tasks panel (core/tasks.js place()).
+    v["own_work"] = (v["status"] == "working" and task["state"] in ("running", "ready") and bool(running)
+                     and all(status_word(k) in ("idle", "done") for k in running)
+                     and own_work(task, running, ready=task["state"] == "ready"))
     if known:
         progress_clock(s, task, v["status"])
     v["report"] = report_of(task, v["status"])

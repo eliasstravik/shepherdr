@@ -1,5 +1,5 @@
 {
- "about": "SHEP-133: a short grace before Needs you. A quiet agent (reply) or a problem Herdr found (attention) needs the person only once it has lasted GRACE_MS (20 s); asking (blocked) and a stopped agent at once. core/tasks.js place() and herdr-task's task_status() both pass these (core/tasks.test.js, test/test_herdr_task.py). now is fixed; each agent is { address, status, turn, role, since (hc's status_ms) }; settles is when core's grace ends (core only).",
+ "about": "SHEP-133: a short grace before Needs you. A quiet agent (reply) or a problem Herdr found (attention) needs the person only once it has lasted GRACE_MS (20 s); asking (blocked) and a stopped agent at once. core/tasks.js place() and herdr-task's task_status() both pass these (core/tasks.test.js, test/test_herdr_task.py). now is fixed; each agent is { address, status, turn, role, since (hc's status_ms) }; settles is when core's grace ends (core only). SHEP-148: a case with a log is an agent's real state (HOME-1, TG-52, SHEP-145 on 2026-11-09, cut down): herdr-task reads its session log (each agent's log LOG is that log, written to a file), core reads task.own_work, which herdr-task's scheduler keeps from that same log (test/test_herdr_task.py checks they agree).",
  "now": 1800000000000,
  "cases": [
   {
@@ -198,6 +198,1313 @@
     "status": "needs",
     "needs": "reply",
     "settles": 1800000018000
+   }
+  },
+  {
+   "name": "HOME-1: quiet past the grace, its background shell and Monitor still running: Working",
+   "task": {
+    "state": "running",
+    "started": 1799996400000,
+    "agents": [
+     {
+      "address": "t1",
+      "log": "LOG"
+     }
+    ],
+    "own_work": true
+   },
+   "log": [
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": "You work on one Herdr task."
+     },
+     "timestamp": "2027-01-15T07:40:00.000Z"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_011qQJYifxP2Px36oPXkcD3S",
+        "name": "Bash",
+        "input": {
+         "command": "cd $S && xargs -0 -n2 -P5 ./gen.sh < prompts.tsv 2>&1",
+         "run_in_background": true
+        }
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:47.000Z"
+    },
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": [
+       {
+        "tool_use_id": "toolu_011qQJYifxP2Px36oPXkcD3S",
+        "type": "tool_result",
+        "content": "Command running in background with ID: bbt3ld2dh. Output is being written to: /tmp/claude-1000/-home-x/s1/tasks/bbt3ld2dh.output.",
+        "is_error": false
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:47.000Z",
+     "toolUseResult": {
+      "stdout": "",
+      "stderr": "",
+      "interrupted": false,
+      "backgroundTaskId": "bbt3ld2dh"
+     }
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01Y6JdqWJaEG4Gt7TF7mB5kd",
+        "name": "Monitor",
+        "input": {
+         "command": "cd ~/media/studio-backgrounds; while true; do ...; sleep 5; done",
+         "description": "new background images landing",
+         "timeout_ms": 1800000
+        }
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:57.000Z"
+    },
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": [
+       {
+        "tool_use_id": "toolu_01Y6JdqWJaEG4Gt7TF7mB5kd",
+        "type": "tool_result",
+        "content": "Monitor started (task bp5r6iwj9, expires in 30m unless the source ends first; you get one notice at expiry).",
+        "is_error": false
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:57.000Z",
+     "toolUseResult": {
+      "taskId": "bp5r6iwj9",
+      "timeoutMs": 1800000,
+      "persistent": false
+     }
+    },
+    {
+     "type": "queue-operation",
+     "operation": "enqueue",
+     "timestamp": "2027-01-15T07:59:28.000Z",
+     "content": "<task-notification>\n<task-id>bp5r6iwj9</task-id>\n<summary>Monitor event: \"new background images landing\"</summary>\n</task-notification>"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Purple one is good too. Waiting for 06–10."
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:59:40.000Z"
+    }
+   ],
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 6,
+     "role": "worker",
+     "since": 1799999975000
+    }
+   ],
+   "expect": {
+    "status": "working",
+    "needs": null
+   }
+  },
+  {
+   "name": "HOME-1: both ended (their notices in), quiet: Needs you",
+   "task": {
+    "state": "running",
+    "started": 1799996400000,
+    "agents": [
+     {
+      "address": "t1",
+      "log": "LOG"
+     }
+    ],
+    "own_work": false
+   },
+   "log": [
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": "You work on one Herdr task."
+     },
+     "timestamp": "2027-01-15T07:40:00.000Z"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_011qQJYifxP2Px36oPXkcD3S",
+        "name": "Bash",
+        "input": {
+         "command": "cd $S && xargs -0 -n2 -P5 ./gen.sh < prompts.tsv 2>&1",
+         "run_in_background": true
+        }
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:47.000Z"
+    },
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": [
+       {
+        "tool_use_id": "toolu_011qQJYifxP2Px36oPXkcD3S",
+        "type": "tool_result",
+        "content": "Command running in background with ID: bbt3ld2dh. Output is being written to: /tmp/claude-1000/-home-x/s1/tasks/bbt3ld2dh.output.",
+        "is_error": false
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:47.000Z",
+     "toolUseResult": {
+      "stdout": "",
+      "stderr": "",
+      "interrupted": false,
+      "backgroundTaskId": "bbt3ld2dh"
+     }
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01Y6JdqWJaEG4Gt7TF7mB5kd",
+        "name": "Monitor",
+        "input": {
+         "command": "cd ~/media/studio-backgrounds; while true; do ...; sleep 5; done",
+         "description": "new background images landing",
+         "timeout_ms": 1800000
+        }
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:57.000Z"
+    },
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": [
+       {
+        "tool_use_id": "toolu_01Y6JdqWJaEG4Gt7TF7mB5kd",
+        "type": "tool_result",
+        "content": "Monitor started (task bp5r6iwj9, expires in 30m unless the source ends first; you get one notice at expiry).",
+        "is_error": false
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:57.000Z",
+     "toolUseResult": {
+      "taskId": "bp5r6iwj9",
+      "timeoutMs": 1800000,
+      "persistent": false
+     }
+    },
+    {
+     "type": "queue-operation",
+     "operation": "enqueue",
+     "timestamp": "2027-01-15T07:59:28.000Z",
+     "content": "<task-notification>\n<task-id>bp5r6iwj9</task-id>\n<summary>Monitor event: \"new background images landing\"</summary>\n</task-notification>"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Purple one is good too. Waiting for 06–10."
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:59:40.000Z"
+    },
+    {
+     "type": "queue-operation",
+     "operation": "enqueue",
+     "timestamp": "2027-01-15T07:59:50.000Z",
+     "content": "<task-notification>\n<task-id>bp5r6iwj9</task-id>\n<status>completed</status>\n<summary>Monitor \"new background images landing\" stream ended</summary>\n</task-notification>"
+    },
+    {
+     "type": "queue-operation",
+     "operation": "enqueue",
+     "timestamp": "2027-01-15T07:59:51.000Z",
+     "content": "<task-notification>\n<task-id>bbt3ld2dh</task-id>\n<status>completed</status>\n<summary>Background command finished</summary>\n</task-notification>"
+    }
+   ],
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 6,
+     "role": "worker",
+     "since": 1799999975000
+    }
+   ],
+   "expect": {
+    "status": "needs",
+    "needs": "reply"
+   }
+  },
+  {
+   "name": "TG-52: a download running in the foreground, Claude Code read idle past the grace: Working",
+   "task": {
+    "state": "running",
+    "started": 1799996400000,
+    "agents": [
+     {
+      "address": "t1",
+      "log": "LOG"
+     }
+    ],
+    "own_work": true
+   },
+   "log": [
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": "You work on one Herdr task."
+     },
+     "timestamp": "2027-01-15T07:40:00.000Z"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Got clean longplays with chapter lists for all 7 games. Now pulling low-res previews to find the exact scenes."
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:50.000Z"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01R4Kq1vF1erP5bi3B5fKhA3",
+        "name": "Bash",
+        "input": {
+         "command": "cd $S && ./bin/yt -f 160 -o low/ruby.mp4 https://youtu.be/QMIyD-rN1gs",
+         "timeout": 120000
+        }
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:59:00.000Z"
+    }
+   ],
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 6,
+     "role": "worker",
+     "since": 1799999960000
+    }
+   ],
+   "expect": {
+    "status": "working",
+    "needs": null
+   }
+  },
+  {
+   "name": "TG-52: that download moved to the background, its turn ended: Working",
+   "task": {
+    "state": "running",
+    "started": 1799996400000,
+    "agents": [
+     {
+      "address": "t1",
+      "log": "LOG"
+     }
+    ],
+    "own_work": true
+   },
+   "log": [
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": "You work on one Herdr task."
+     },
+     "timestamp": "2027-01-15T07:40:00.000Z"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Got clean longplays with chapter lists for all 7 games. Now pulling low-res previews to find the exact scenes."
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:50.000Z"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01R4Kq1vF1erP5bi3B5fKhA3",
+        "name": "Bash",
+        "input": {
+         "command": "cd $S && ./bin/yt -f 160 -o low/ruby.mp4 https://youtu.be/QMIyD-rN1gs",
+         "timeout": 120000
+        }
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:59:00.000Z"
+    },
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": [
+       {
+        "tool_use_id": "toolu_01R4Kq1vF1erP5bi3B5fKhA3",
+        "type": "tool_result",
+        "content": "Command did not complete within its 120s timeout and was moved to the background (ID: bic8cv92s).",
+        "is_error": false
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:59:30.000Z",
+     "toolUseResult": {
+      "stdout": "",
+      "stderr": "",
+      "interrupted": false,
+      "backgroundTaskId": "bic8cv92s",
+      "timedOutAfterMs": 120000
+     }
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "YouTube downloads are slow here; waiting on the background download."
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:59:35.000Z"
+    }
+   ],
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 6,
+     "role": "worker",
+     "since": 1799999975000
+    }
+   ],
+   "expect": {
+    "status": "working",
+    "needs": null
+   }
+  },
+  {
+   "name": "SHEP-145: a browser check running in the foreground, read idle: Working",
+   "task": {
+    "state": "running",
+    "started": 1799996400000,
+    "agents": [
+     {
+      "address": "t1",
+      "log": "LOG"
+     }
+    ],
+    "own_work": true
+   },
+   "log": [
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": "You work on one Herdr task."
+     },
+     "timestamp": "2027-01-15T07:40:00.000Z"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Testing old vs new app side by side in a narrow desktop window now."
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:58.000Z"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_015rjH4tFCNQifkcbLKeN6AX",
+        "name": "Bash",
+        "input": {
+         "command": "B=herdr-browser; for p in 4561 4562; do $B open http://127.0.0.1:$p/; done"
+        }
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:59:00.000Z"
+    }
+   ],
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 6,
+     "role": "worker",
+     "since": 1799999955000
+    }
+   ],
+   "expect": {
+    "status": "working",
+    "needs": null
+   }
+  },
+  {
+   "name": "SHEP-145: a real permission prompt for its command: Needs you at once",
+   "task": {
+    "state": "running",
+    "started": 1799996400000,
+    "agents": [
+     {
+      "address": "t1",
+      "log": "LOG"
+     }
+    ]
+   },
+   "log": [
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": "You work on one Herdr task."
+     },
+     "timestamp": "2027-01-15T07:40:00.000Z"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_016C7V8EvVoQeTWwgCxSJzhK",
+        "name": "Bash",
+        "input": {
+         "command": "for p in 4561 4562; do rm -f $S/*.log; done"
+        }
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:59:30.000Z"
+    }
+   ],
+   "live": [
+    {
+     "address": "t1",
+     "status": "blocked",
+     "turn": 6,
+     "role": "worker",
+     "since": 1799999999000
+    }
+   ],
+   "expect": {
+    "status": "needs",
+    "needs": "asks"
+   }
+  },
+  {
+   "name": "A plain question with nothing running, past the grace: Needs you",
+   "task": {
+    "state": "running",
+    "started": 1799996400000,
+    "agents": [
+     {
+      "address": "t1",
+      "log": "LOG"
+     }
+    ],
+    "own_work": false
+   },
+   "log": [
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": "You work on one Herdr task."
+     },
+     "timestamp": "2027-01-15T07:40:00.000Z"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Both look fine. Should I also update the docs?"
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:59:20.000Z"
+    }
+   ],
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 6,
+     "role": "worker",
+     "since": 1799999970000
+    }
+   ],
+   "expect": {
+    "status": "needs",
+    "needs": "reply"
+   }
+  },
+  {
+   "name": "A plain question while its own background shell still runs: no ask yet, Working",
+   "task": {
+    "state": "running",
+    "started": 1799996400000,
+    "agents": [
+     {
+      "address": "t1",
+      "log": "LOG"
+     }
+    ],
+    "own_work": true
+   },
+   "log": [
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": "You work on one Herdr task."
+     },
+     "timestamp": "2027-01-15T07:40:00.000Z"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_011qQJYifxP2Px36oPXkcD3S",
+        "name": "Bash",
+        "input": {
+         "command": "cd $S && xargs -0 -n2 -P5 ./gen.sh < prompts.tsv 2>&1",
+         "run_in_background": true
+        }
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:47.000Z"
+    },
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": [
+       {
+        "tool_use_id": "toolu_011qQJYifxP2Px36oPXkcD3S",
+        "type": "tool_result",
+        "content": "Command running in background with ID: bbt3ld2dh. Output is being written to: /tmp/claude-1000/-home-x/s1/tasks/bbt3ld2dh.output.",
+        "is_error": false
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:47.000Z",
+     "toolUseResult": {
+      "stdout": "",
+      "stderr": "",
+      "interrupted": false,
+      "backgroundTaskId": "bbt3ld2dh"
+     }
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "The tests run in the background. Should I also update the docs?"
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:59:20.000Z"
+    }
+   ],
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 6,
+     "role": "worker",
+     "since": 1799999970000
+    }
+   ],
+   "expect": {
+    "status": "working",
+    "needs": null
+   }
+  },
+  {
+   "name": "Said ready, still at work in that turn: Working, not Ready yet",
+   "task": {
+    "state": "ready",
+    "ready_at": 1799999910000,
+    "ready_turns": {
+     "t1": 7
+    },
+    "started": 1799996400000,
+    "agents": [
+     {
+      "address": "t1",
+      "log": "LOG"
+     }
+    ]
+   },
+   "log": [
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": "You work on one Herdr task."
+     },
+     "timestamp": "2027-01-15T07:40:00.000Z"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_011qQJYifxP2Px36oPXkcD3S",
+        "name": "Bash",
+        "input": {
+         "command": "cd $S && xargs -0 -n2 -P5 ./gen.sh < prompts.tsv 2>&1",
+         "run_in_background": true
+        }
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:47.000Z"
+    },
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": [
+       {
+        "tool_use_id": "toolu_011qQJYifxP2Px36oPXkcD3S",
+        "type": "tool_result",
+        "content": "Command running in background with ID: bbt3ld2dh. Output is being written to: /tmp/claude-1000/-home-x/s1/tasks/bbt3ld2dh.output.",
+        "is_error": false
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:47.000Z",
+     "toolUseResult": {
+      "stdout": "",
+      "stderr": "",
+      "interrupted": false,
+      "backgroundTaskId": "bbt3ld2dh"
+     }
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01Y6JdqWJaEG4Gt7TF7mB5kd",
+        "name": "Monitor",
+        "input": {
+         "command": "cd ~/media/studio-backgrounds; while true; do ...; sleep 5; done",
+         "description": "new background images landing",
+         "timeout_ms": 1800000
+        }
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:57.000Z"
+    },
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": [
+       {
+        "tool_use_id": "toolu_01Y6JdqWJaEG4Gt7TF7mB5kd",
+        "type": "tool_result",
+        "content": "Monitor started (task bp5r6iwj9, expires in 30m unless the source ends first; you get one notice at expiry).",
+        "is_error": false
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:57.000Z",
+     "toolUseResult": {
+      "taskId": "bp5r6iwj9",
+      "timeoutMs": 1800000,
+      "persistent": false
+     }
+    },
+    {
+     "type": "queue-operation",
+     "operation": "enqueue",
+     "timestamp": "2027-01-15T07:59:28.000Z",
+     "content": "<task-notification>\n<task-id>bp5r6iwj9</task-id>\n<summary>Monitor event: \"new background images landing\"</summary>\n</task-notification>"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Purple one is good too. Waiting for 06–10."
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:59:40.000Z"
+    },
+    {
+     "type": "queue-operation",
+     "operation": "enqueue",
+     "timestamp": "2027-01-15T07:59:50.000Z",
+     "content": "<task-notification>\n<task-id>bp5r6iwj9</task-id>\n<status>completed</status>\n<summary>Monitor \"new background images landing\" stream ended</summary>\n</task-notification>"
+    },
+    {
+     "type": "queue-operation",
+     "operation": "enqueue",
+     "timestamp": "2027-01-15T07:59:51.000Z",
+     "content": "<task-notification>\n<task-id>bbt3ld2dh</task-id>\n<status>completed</status>\n<summary>Background command finished</summary>\n</task-notification>"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Ready."
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:59:55.000Z"
+    }
+   ],
+   "live": [
+    {
+     "address": "t1",
+     "status": "working",
+     "turn": 6,
+     "role": "worker",
+     "since": 1799999940000
+    }
+   ],
+   "expect": {
+    "status": "working",
+    "needs": null
+   }
+  },
+  {
+   "name": "Said ready, a background shell and Monitor still running: Working, not Ready yet",
+   "task": {
+    "state": "ready",
+    "ready_at": 1799999910000,
+    "ready_turns": {
+     "t1": 7
+    },
+    "started": 1799996400000,
+    "agents": [
+     {
+      "address": "t1",
+      "log": "LOG"
+     }
+    ],
+    "own_work": true
+   },
+   "log": [
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": "You work on one Herdr task."
+     },
+     "timestamp": "2027-01-15T07:40:00.000Z"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_011qQJYifxP2Px36oPXkcD3S",
+        "name": "Bash",
+        "input": {
+         "command": "cd $S && xargs -0 -n2 -P5 ./gen.sh < prompts.tsv 2>&1",
+         "run_in_background": true
+        }
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:47.000Z"
+    },
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": [
+       {
+        "tool_use_id": "toolu_011qQJYifxP2Px36oPXkcD3S",
+        "type": "tool_result",
+        "content": "Command running in background with ID: bbt3ld2dh. Output is being written to: /tmp/claude-1000/-home-x/s1/tasks/bbt3ld2dh.output.",
+        "is_error": false
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:47.000Z",
+     "toolUseResult": {
+      "stdout": "",
+      "stderr": "",
+      "interrupted": false,
+      "backgroundTaskId": "bbt3ld2dh"
+     }
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01Y6JdqWJaEG4Gt7TF7mB5kd",
+        "name": "Monitor",
+        "input": {
+         "command": "cd ~/media/studio-backgrounds; while true; do ...; sleep 5; done",
+         "description": "new background images landing",
+         "timeout_ms": 1800000
+        }
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:57.000Z"
+    },
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": [
+       {
+        "tool_use_id": "toolu_01Y6JdqWJaEG4Gt7TF7mB5kd",
+        "type": "tool_result",
+        "content": "Monitor started (task bp5r6iwj9, expires in 30m unless the source ends first; you get one notice at expiry).",
+        "is_error": false
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:57.000Z",
+     "toolUseResult": {
+      "taskId": "bp5r6iwj9",
+      "timeoutMs": 1800000,
+      "persistent": false
+     }
+    },
+    {
+     "type": "queue-operation",
+     "operation": "enqueue",
+     "timestamp": "2027-01-15T07:59:28.000Z",
+     "content": "<task-notification>\n<task-id>bp5r6iwj9</task-id>\n<summary>Monitor event: \"new background images landing\"</summary>\n</task-notification>"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Purple one is good too. Waiting for 06–10."
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:59:40.000Z"
+    }
+   ],
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 7,
+     "role": "worker",
+     "since": 1799999975000
+    }
+   ],
+   "expect": {
+    "status": "working",
+    "needs": null
+   }
+  },
+  {
+   "name": "Said ready, a question in its last words but its Monitor still running: Working",
+   "task": {
+    "state": "ready",
+    "ready_at": 1799999910000,
+    "ready_turns": {
+     "t1": 7
+    },
+    "started": 1799996400000,
+    "agents": [
+     {
+      "address": "t1",
+      "log": "LOG"
+     }
+    ],
+    "own_work": true
+   },
+   "log": [
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": "You work on one Herdr task."
+     },
+     "timestamp": "2027-01-15T07:40:00.000Z"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_011qQJYifxP2Px36oPXkcD3S",
+        "name": "Bash",
+        "input": {
+         "command": "cd $S && xargs -0 -n2 -P5 ./gen.sh < prompts.tsv 2>&1",
+         "run_in_background": true
+        }
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:47.000Z"
+    },
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": [
+       {
+        "tool_use_id": "toolu_011qQJYifxP2Px36oPXkcD3S",
+        "type": "tool_result",
+        "content": "Command running in background with ID: bbt3ld2dh. Output is being written to: /tmp/claude-1000/-home-x/s1/tasks/bbt3ld2dh.output.",
+        "is_error": false
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:47.000Z",
+     "toolUseResult": {
+      "stdout": "",
+      "stderr": "",
+      "interrupted": false,
+      "backgroundTaskId": "bbt3ld2dh"
+     }
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "The tests run in the background. Should I also update the docs?"
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:59:20.000Z"
+    }
+   ],
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 7,
+     "role": "worker",
+     "since": 1799999975000
+    }
+   ],
+   "expect": {
+    "status": "working",
+    "needs": null
+   }
+  },
+  {
+   "name": "Said ready, everything ended: Ready",
+   "task": {
+    "state": "ready",
+    "ready_at": 1799999910000,
+    "ready_turns": {
+     "t1": 7
+    },
+    "started": 1799996400000,
+    "agents": [
+     {
+      "address": "t1",
+      "log": "LOG"
+     }
+    ],
+    "own_work": false
+   },
+   "log": [
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": "You work on one Herdr task."
+     },
+     "timestamp": "2027-01-15T07:40:00.000Z"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_011qQJYifxP2Px36oPXkcD3S",
+        "name": "Bash",
+        "input": {
+         "command": "cd $S && xargs -0 -n2 -P5 ./gen.sh < prompts.tsv 2>&1",
+         "run_in_background": true
+        }
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:47.000Z"
+    },
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": [
+       {
+        "tool_use_id": "toolu_011qQJYifxP2Px36oPXkcD3S",
+        "type": "tool_result",
+        "content": "Command running in background with ID: bbt3ld2dh. Output is being written to: /tmp/claude-1000/-home-x/s1/tasks/bbt3ld2dh.output.",
+        "is_error": false
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:47.000Z",
+     "toolUseResult": {
+      "stdout": "",
+      "stderr": "",
+      "interrupted": false,
+      "backgroundTaskId": "bbt3ld2dh"
+     }
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01Y6JdqWJaEG4Gt7TF7mB5kd",
+        "name": "Monitor",
+        "input": {
+         "command": "cd ~/media/studio-backgrounds; while true; do ...; sleep 5; done",
+         "description": "new background images landing",
+         "timeout_ms": 1800000
+        }
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:57.000Z"
+    },
+    {
+     "type": "user",
+     "isSidechain": false,
+     "message": {
+      "role": "user",
+      "content": [
+       {
+        "tool_use_id": "toolu_01Y6JdqWJaEG4Gt7TF7mB5kd",
+        "type": "tool_result",
+        "content": "Monitor started (task bp5r6iwj9, expires in 30m unless the source ends first; you get one notice at expiry).",
+        "is_error": false
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:58:57.000Z",
+     "toolUseResult": {
+      "taskId": "bp5r6iwj9",
+      "timeoutMs": 1800000,
+      "persistent": false
+     }
+    },
+    {
+     "type": "queue-operation",
+     "operation": "enqueue",
+     "timestamp": "2027-01-15T07:59:28.000Z",
+     "content": "<task-notification>\n<task-id>bp5r6iwj9</task-id>\n<summary>Monitor event: \"new background images landing\"</summary>\n</task-notification>"
+    },
+    {
+     "type": "assistant",
+     "isSidechain": false,
+     "message": {
+      "role": "assistant",
+      "content": [
+       {
+        "type": "text",
+        "text": "Purple one is good too. Waiting for 06–10."
+       }
+      ]
+     },
+     "timestamp": "2027-01-15T07:59:40.000Z"
+    },
+    {
+     "type": "queue-operation",
+     "operation": "enqueue",
+     "timestamp": "2027-01-15T07:59:50.000Z",
+     "content": "<task-notification>\n<task-id>bp5r6iwj9</task-id>\n<status>completed</status>\n<summary>Monitor \"new background images landing\" stream ended</summary>\n</task-notification>"
+    },
+    {
+     "type": "queue-operation",
+     "operation": "enqueue",
+     "timestamp": "2027-01-15T07:59:51.000Z",
+     "content": "<task-notification>\n<task-id>bbt3ld2dh</task-id>\n<status>completed</status>\n<summary>Background command finished</summary>\n</task-notification>"
+    }
+   ],
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 7,
+     "role": "worker",
+     "since": 1799999975000
+    }
+   ],
+   "expect": {
+    "status": "ready",
+    "needs": null
    }
   }
  ]

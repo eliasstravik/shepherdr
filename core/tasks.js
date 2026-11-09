@@ -154,6 +154,10 @@ export function place(list, task, { live = [], helpers = [], loaded = true, now 
     section = (task.merge_requested && live.length) || (task.auto_merge && task.pr && !task.merged) ? "merging" : "ready";
     // As herdr-task's: a pull request that merges by itself once GitHub's checks pass.
     if (section === "merging" && !(task.merge_requested && live.length)) why = "Merges once its checks pass";
+    // Said ready but not at rest yet (SHEP-148, herdr-task's not_at_rest()): still at work in the turn it said ready
+    // in, or its own work still running (a background job, a Monitor, a helper: task.own_work, kept by its scheduler).
+    // Working until it is, and only then Ready.
+    else if (section === "ready" && live.length && (busy || task.own_work || live.some((a) => a.status === "working" && a.role !== "reviewer"))) section = "working";
   }
   // Its agents' terminals aren't known yet (the machine is loading): no verdict yet.
   else if (states.some((x) => x !== "idle" && x !== "done") || (!live.length && !loaded)) section = "working";
