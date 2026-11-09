@@ -205,6 +205,50 @@ class Install(unittest.TestCase):
         self.assertNotEqual(p.returncode, 0)
         self.assertIn("1024", p.stdout + p.stderr)
 
+    def test_https_port(self):
+        """install --https-port (GitHub #778): kept in the service's folder, which updates leave alone; 443 puts the
+        default back; a port out of range is refused."""
+        from importlib.machinery import SourceFileLoader
+        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        self.assertEqual(sh.https_port(self.root), 443, "an install that never set one stays on 443")
+        out = run("install", "--root", self.root, "--yes", "--https-port", "8443").stdout
+        if "needs bun" in out:
+            self.skipTest("bun isn't installed here")
+        f = sh.service_file(self.root, "https-port")
+        self.assertEqual(open(f).read().strip(), "8443")
+        self.assertEqual(sh.https_port(self.root), 8443)
+        run("update", "--root", self.root, "--yes", "--source", ROOT)
+        self.assertEqual(sh.https_port(self.root), 8443, "an update keeps the HTTPS port")
+        run("install", "--root", self.root, "--yes", "--https-port", "443")
+        self.assertFalse(os.path.exists(f))
+        p = run("install", "--root", self.root, "--yes", "--https-port", "70000", ok=False)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("65535", p.stdout + p.stderr)
+
+    def test_doctor_says_why_not_shared(self):
+        """doctor (GitHub #754): when tailscale serve refused the share, it's broken (not a note), in tailscale's own
+        words with another port to use; a custom port is named."""
+        from importlib.machinery import SourceFileLoader
+        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        web = sh.service_file(self.root, "web.json")
+        os.makedirs(os.path.dirname(web), exist_ok=True)
+        why = "Port 443 on this machine's tailnet name is taken (a TCP forward to 127.0.0.1:9000). Pick another port: `shepherdr web https-port 8443`."
+        with open(web, "w") as f:
+            json.dump({"on": True, "link": "https://box.tailnet.example/shepherdr/", "why": why, "share_error": why, "https_port": 443,
+                       "serve": {"host": None, "reachable": True}}, f)
+        bad, notes = sh.serve_check(self.root)
+        self.assertEqual(len(bad), 1)
+        self.assertIn("TCP forward to 127.0.0.1:9000", bad[0])
+        self.assertIn("shepherdr web https-port 8443", bad[0])
+        self.assertFalse(any("taken" in n for n in notes), "said once, as broken")
+        with open(web, "w") as f:
+            json.dump({"on": True, "link": "https://box.tailnet.example:8443/shepherdr/", "why": None, "share_error": None, "https_port": 8443,
+                       "serve": {"host": None, "reachable": True}}, f)
+        bad, notes = sh.serve_check(self.root)
+        self.assertEqual(bad, [])
+        self.assertIn("https://box.tailnet.example:8443/shepherdr/", " ".join(notes))
+        self.assertIn("port 8443", " ".join(notes))
+
     def test_service_answers(self):
         """doctor and install trust only Shepherdr's own service on its port: the id it wrote in service.json, not
         another app answering health there (GitHub #635)."""

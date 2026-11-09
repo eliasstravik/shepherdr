@@ -3,6 +3,7 @@
 
   shepherdr install    [--root DIR] [--adopt] [--guard] [--keys ask|keep|ours] [--no-hooks] [--dry-run] [--yes]
                        [--port N]: the service's port on 127.0.0.1 when another app holds 7788 (updates keep it)
+                       [--https-port N]: the tailnet HTTPS port the web app is shared on, when something else holds 443
   shepherdr update     the same, from the checkout it was installed from (git pull it first); web only too
   (a fresh clone has no web app built: install and update build it with Bun, installing Bun first when it's missing)
   shepherdr install --web               web only: herdr-core, herdr-task, the helpers, the service and the web app
@@ -10,6 +11,8 @@
   shepherdr web serve-from <machine|here> [--take-link]   serve the web app from another machine linked over
                                         herdr-core (an always-on Mac mini or cloud VM), installing it there; here: back
   shepherdr web status                  which machine serves it, and its link
+  shepherdr web https-port [N]          the tailnet HTTPS port this machine shares the web app on (default 443): another
+                                        one when something else here holds 443; no N: the one now
   shepherdr secrets move-to <machine|here> [--restore]   the machine that keeps the secrets (the vault agents use by
                                         name): moves them there, with a backup on both; --restore: the old one takes its
                                         backup back when the other is gone for good
@@ -490,6 +493,56 @@ def set_port(a, rec):
         rec["port"] = p
 
 
+HTTPS_FILE = "https-port"   # in the service's folder: the tailnet HTTPS port (service/tailscale.ts httpsPort); none: 443
+
+
+def https_port(root):
+    """The tailnet HTTPS port this machine shares the web app on: its https-port file, else 443."""
+    try:
+        with open(service_file(root, HTTPS_FILE)) as f:
+            n = int(f.read().strip())
+    except (OSError, ValueError):
+        return 443
+    return n if 1 <= n <= 65535 else 443
+
+
+def write_https_port(root, p, dry=False):
+    """Keeps the tailnet HTTPS port in the service's folder (443: the file goes, the default again). The service looks
+    at it every few seconds and moves its share and links there."""
+    if not 1 <= p <= 65535:
+        raise Stop(f"HTTPS port {p}: pick one from 1 to 65535 (8443 is a common one)")
+    path = service_file(root, HTTPS_FILE)
+    if dry:
+        say(f"  the web app's tailnet HTTPS port: {p}")
+        return
+    if p == 443:
+        if os.path.exists(path):
+            os.unlink(path)
+        return
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    atomic_write(path, f"{p}\n".encode())
+
+
+def set_https_port(a, root):
+    """install --https-port: kept in the service's folder, so updates keep it and `shepherdr web https-port` changes it."""
+    p = getattr(a, "https_port", None)
+    if p is not None:
+        write_https_port(root, p, a.dry_run)
+
+
+def web_outcome(root, since, port=None, wait=15):
+    """What the service last said about the web app, once it wrote web.json after `since` (and, given a port, on that
+    port): its link, or why it isn't shared. None when it hasn't said within `wait` seconds."""
+    end = time.time() + wait
+    while True:
+        w = json_file(service_file(root, "web.json")) or {}
+        if (w.get("at") or 0) / 1000 >= since and (port is None or w.get("https_port", 443) == port):
+            return w
+        if time.time() >= end:
+            return None
+        time.sleep(1)
+
+
 def install_service(r, rec, home):
     """Writes the unit; on the real home, (re)starts the service with it. A scratch root only gets the file."""
     bun = bun_path()
@@ -898,7 +951,10 @@ def cmd_install(a, update=False):
     rec["links"] = link_helpers(r, rec)
     move_data(r, a, home)   # before the service starts again: it then finds the data where it now is
     set_port(a, rec)
+    set_https_port(a, root)
+    started = time.time()
     install_service(r, rec, home)
+    say_web(root, home, a, started)
     if a.guard:
         install_guard(r, src, rec)
     if not a.no_hooks:
@@ -991,7 +1047,10 @@ def cmd_install_web(a, update=False):
         rec["backups"] = [*rec.get("backups", []), r.backup_dir]
     move_data(r, a, home)
     set_port(a, rec)
+    set_https_port(a, root)
+    started = time.time()
     install_service(r, rec, home)
+    say_web(root, home, a, started)
     if not a.dry_run:
         atomic_write(r.p(WEB_RECORD), (json.dumps(rec, indent=2, sort_keys=True) + "\n").encode())
     for x in r.notes:
@@ -1078,6 +1137,19 @@ def data_check(root):
     return bad, notes
 
 
+def say_web(root, home, a, since):
+    """After the service (re)started here: the web app's link, or tailscale's own reason it isn't shared (GitHub #754)."""
+    if a.dry_run or not home or not has_unit(root) or not shutil.which("tailscale"):
+        return
+    w = web_outcome(root, since)
+    if not w or not w.get("on"):
+        return
+    if w.get("share_error"):
+        say(f"  ✗ the web app isn't shared: {w['share_error']}")
+    elif w.get("link") and not (w.get("serve") or {}).get("host"):
+        say(f"  web app: {w['link']}")
+
+
 def serve_check(root):
     """Serve from: which machine serves the web app (what the service last wrote, web.json), and /shepherdr shared here
     only while this machine serves it. Returns (bad, notes)."""
@@ -1091,8 +1163,13 @@ def serve_check(root):
     bad = []
     if sv.get("error"):
         bad.append(f"the last move didn't finish: {sv['error']}")
-    if w.get("why"):
+    if w.get("share_error"):
+        # tailscale serve refused it here: its own words, and another port when the HTTPS port is taken (GitHub #754)
+        bad.append(f"web app isn't shared: {w['share_error']}")
+    elif w.get("why"):
         notes.append(f"web app: {w['why']}")
+    if w.get("https_port", 443) != 443:
+        notes.append(f"web app: on tailnet HTTPS port {w['https_port']} (shepherdr web https-port 443 goes back)")
     if host and not sv.get("reachable"):
         notes.append(f"{host} can't be reached now: this machine keeps its own copy of the shared data until it's back")
     tailscale = shutil.which("tailscale")
@@ -1408,9 +1485,43 @@ def cmd_web_install_on(a):
     return 0
 
 
+def cmd_web_https_port(a):
+    """shepherdr web https-port [N]: the tailnet HTTPS port this machine shares the web app on. With N: kept, and the
+    service (running here) moves its share and links there within seconds: says the new link or tailscale's reason."""
+    root = real_home()
+    if a.machine is None:
+        p = https_port(root)
+        if a.json:
+            print(json.dumps({"https_port": p}))
+        else:
+            say(f"The web app's tailnet HTTPS port here: {p}" + (" (the default)" if p == 443 else " (shepherdr web https-port 443 goes back)"))
+        return 0
+    try:
+        p = int(a.machine)
+    except ValueError:
+        raise Stop(f"{a.machine} isn't a port: shepherdr web https-port <1-65535>, e.g. 8443")
+    since = time.time()
+    write_https_port(root, p)
+    w = web_outcome(root, since, p) if has_unit(root) else None
+    out = {"https_port": p, "link": (w or {}).get("link"), "error": (w or {}).get("share_error")}
+    if a.json:
+        print(json.dumps(out))
+    elif w is None:
+        say(f"Kept: the web app goes on tailnet HTTPS port {p} once Shepherdr's service runs here (`shepherdr doctor` checks).")
+    elif out["error"]:
+        say(f"Kept port {p}, but the web app isn't shared: {out['error']}")
+    elif (w.get("serve") or {}).get("host"):
+        say(f"Kept port {p}: it's used once this machine serves the web app ({w['serve']['host']} serves it now).")
+    else:
+        say(f"The web app is on port {p} now" + (f": {out['link']}" if out["link"] else "."))
+    return 1 if out["error"] else 0
+
+
 def cmd_web(a):
     if a.action == "install-on":
         return cmd_web_install_on(a)
+    if a.action == "https-port":
+        return cmd_web_https_port(a)
     if a.action in ("serve-from", "status"):
         if a.action == "serve-from" and not a.machine:
             raise Stop("which machine? shepherdr web serve-from <machine|here> (hc machine ls lists them)")
@@ -1423,7 +1534,7 @@ def cmd_web(a):
         argv = [bun, script, a.action] + ([a.machine] if a.machine else []) + (["--take-link"] if a.take_link else []) + (["--json"] if a.json else [])
         env = {**os.environ, "SHEPHERDR_CLI": os.path.realpath(__file__)}
         return subprocess.run(argv, env=env).returncode
-    raise Stop("shepherdr web serve-from <machine|here> [--take-link] | shepherdr web status")
+    raise Stop("shepherdr web serve-from <machine|here> [--take-link] | shepherdr web status | shepherdr web https-port [N]")
 
 
 def cmd_where(a):
@@ -1560,10 +1671,12 @@ def main(argv):
             c.add_argument("--web", action="store_true", help="web only: no herdr-app (the service, the web app, herdr-task and the helpers)")
             c.add_argument("--port", type=int, help=f"the port Shepherdr's service listens on, on 127.0.0.1 (default {DEFAULT_PORT}; "
                                                     "kept for updates): when another app already uses it")
+            c.add_argument("--https-port", type=int, help="the tailnet HTTPS port the web app is shared on (default 443; kept "
+                                                          "for updates, `shepherdr web https-port` changes it): when something else here holds 443")
             c.add_argument("--no-build", action="store_true", help="install the web app as it is in the checkout: no build, even when it's missing or old")
     w = sub.add_parser("web", help="where the web app is served from (Serve from)")
-    w.add_argument("action", choices=["serve-from", "status", "install-on"])
-    w.add_argument("machine", nargs="?", help="a machine linked over herdr-core (hc machine ls), or here")
+    w.add_argument("action", choices=["serve-from", "status", "install-on", "https-port"])
+    w.add_argument("machine", nargs="?", help="a machine linked over herdr-core (hc machine ls), or here; https-port: the port")
     w.add_argument("--take-link", action="store_true", help="that machine's /shepherdr is shared to something else: set it aside (moving away puts it back)")
     w.add_argument("--json", action="store_true")
     s = sub.add_parser("secrets", help="which machine keeps the secrets (Settings › Secrets › Kept on)")
