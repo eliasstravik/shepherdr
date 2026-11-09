@@ -16,7 +16,7 @@ import sys
 import time
 
 from .base import ASK_HOME, ENTRY, Fail, git, hc_json, now, run, WORKTREES
-from .settings import agent_key, ASSISTANT_TEMPLATES, bare, BRANCH_PATTERN, branch_pattern_problem, notes, notes_part, review_limits, settings_block, settings_for
+from .settings import agent_key, ASSISTANT_TEMPLATES, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, keep_review, notes, notes_part, review_limits, settings_block, settings_for
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
 from .github import finish, remote_of
@@ -36,6 +36,13 @@ OWN = ["ready", "reviewed", "status", "alert", "feedback", "show", "list", "wher
 # using one by name never ask either, as Shepherdr's secret commands. Written by its full path or
 # its bare name. Reviewers get none (launch() skips own_argv for them; herdr-secret refuses them).
 SECRET = ["ask", "run", "env", "list"]
+# herdr-artifact's verbs a worker uses for its proof (#866): Codex's sandbox can't write its store,
+# so they run escalated and never ask either. Never --custom (a panel installs code in the window).
+ARTIFACT = ["guide", "new", "publish", "update", "show", "list", "link", "preview", "where"]
+# Committing as it goes (#866): Codex keeps every .git read-only in its sandbox, a worktree's
+# (the main checkout's .git) too, so a Codex worker's `git add`/`git commit` run escalated. Only
+# these, as one plain command with no git options before the verb (-c, -C, --git-dir...).
+GIT = ["add", "commit"]
 
 
 def secret_path():
@@ -65,13 +72,19 @@ def own_rules(path):
     return rules
 
 
-def ask_command(path):
+def ask_command(path, sandboxed=False):
     """The PermissionRequest hook every task worker gets at launch (`herdr-task _allow`): its own
-    commands allowed, anything else (a permission, its question tool, a plan) on the chat's card."""
-    return f"{shlex.quote(sys.executable)} {shlex.quote(ENTRY)} _allow --command {shlex.quote(path)}"
+    commands allowed, anything else (a permission, its question tool, a plan) on the chat's card.
+    sandboxed (Codex's): its proof and commits also run escalated, so they're its own too (#866)."""
+    return f"{shlex.quote(sys.executable)} {shlex.quote(ENTRY)} _allow --command {shlex.quote(path)}" + (" --sandboxed" if sandboxed else "")
 
 
-def own_argv(argv):
+def artifact_path():
+    """herdr-artifact on PATH, else None."""
+    return shutil.which("herdr-artifact")
+
+
+def own_argv(argv, folder=None):
     """An agent's argv with its own herdr-task commands allowed and its asks on the chat's card
     (Claude Code and Codex). SHEP-139: a Claude worker gets the card's hook in its --settings too,
     so a machine whose ~/.claude/settings.json lacks Shepherdr's hook (one that only runs tasks)
@@ -112,15 +125,19 @@ def own_argv(argv):
             return out
         return out[:1] + ["--settings", json.dumps(merged)] + out[1:]
     if k == "codex":
-        hook = ask_command(path)
+        hook = ask_command(path, sandboxed=True)
         # Codex runs a new hook only once trusted. This one hook's trust comes with it, for this
         # launch only: Codex's own key and hash for a -c hook (codex-rs/hooks discovery.rs
         # hook_hash, config fingerprint.rs version_for_toml), so no other hook is trusted by it.
         ident = {"event_name": "permission_request", "hooks": [{"async": False, "command": hook, "timeout": ASK_TIMEOUT, "type": "command"}]}
         digest = hashlib.sha256(json.dumps(ident, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
         key = "/<session-flags>/config.toml:permission_request:0:0"
+        # Its folder trusted for this run (#866: "Trust this folder?" would stop it before the brief, nobody at the
+        # keys), its repository's root too: Codex asks for that one in a worktree. Skipped when argv says already.
+        roots = [] if any(str(a).startswith("projects") for a in out) else trust_roots(folder)
+        trust = ["-c", "projects={" + ",".join(f'{json.dumps(r)}={{trust_level="trusted"}}' for r in roots) + "}"] if roots else []
         return out[:1] + ["-c", f"hooks.PermissionRequest=[{{hooks=[{{type=\"command\",command={json.dumps(hook)},timeout={ASK_TIMEOUT}}}]}}]",
-                          "-c", f"hooks.state={{{json.dumps(key)}={{trusted_hash=\"sha256:{digest}\"}}}}"] + out[1:]
+                          "-c", f"hooks.state={{{json.dumps(key)}={{trusted_hash=\"sha256:{digest}\"}}}}", *trust] + out[1:]
     return out
 
 
@@ -129,11 +146,16 @@ WORD = re.compile(r"""(?:[\w@%+=:,./-]+|'[^']*'|"(?:[^"\\$`]|\\["\\])*")+""")
 UNQUOTE = re.compile(r"""'([^']*)'|"((?:[^"\\]|\\.)*)\"""")
 
 
-def own_command(path, text):
+def own_command(path, text, sandboxed=False):
     """Whether a shell command is exactly one of this herdr-task's own verbs: one simple command,
-    nothing that expands, redirects or chains (as Shepherdr's ownCommand)."""
+    nothing that expands, redirects or chains (as Shepherdr's ownCommand). sandboxed (a Codex
+    worker's): herdr-artifact's proof verbs and git add/commit too."""
     if not isinstance(text, str):
         return False
+    task = os.environ.get("HERDR_BROWSER_TASK") or ""
+    if sandboxed and re.fullmatch(r"[\w#.@-]+", task):
+        # the reviewer's label as the brief writes it, its one variable: this worker's own task
+        text = text.replace('"herdr.task=$HERDR_BROWSER_TASK"', f'"herdr.task={task}"')
     words, at, text = [], 0, text.strip()
     while at < len(text):
         if text[at] in " \t":
@@ -149,8 +171,56 @@ def own_command(path, text):
     bp = browser_path()
     if bp and len(words) >= 2 and words[0] in (bp, "herdr-browser"):
         return True
+    ap = artifact_path()
+    if sandboxed and len(words) >= 2 and words[0] in (ap, "herdr-artifact") and words[1] in ARTIFACT and "--custom" not in words:
+        return True
+    if sandboxed and len(words) >= 2 and words[0] == "git" and words[1] in GIT:
+        return True
+    if sandboxed and words and words[0] == "hc" and helper_hc(words):
+        return True
     sp = secret_path()
     return bool(sp) and len(words) >= 2 and words[0] in (sp, "herdr-secret") and words[1] in SECRET
+
+
+# A Codex worker's review (#866): its sandbox can't reach hc, so starting, waiting on, reading and
+# ending its reviewer run escalated. Only a read-only reviewer as the brief's Reviewer line gives it,
+# and only its own helpers (<task>-review, -helper) to wait on, read or end.
+REVIEWERS = {"codex": (["codex", "--no-daemon", "--sandbox", "read-only", "--ask-for-approval", "never"],
+                       {"--disable": re.compile(r"hooks"), "-m": re.compile(r"[\w.:-]+"),
+                        "-c": re.compile(r'projects=\{.*\}|model_reasoning_effort="?\w+"?', re.S)}),
+             "claude": (["claude", "--permission-mode", "plan"], {"--model": re.compile(r"[\w.:\[\]-]+"), "--effort": re.compile(r"\w+")})}
+HELPER = re.compile(r"[\w.-]+-(?:review|helper)(?:-[\w.-]+)?")
+
+
+def helper_hc(words):
+    """Whether `hc ...` is a worker's own reviewer: run as the brief says, or waited on, read, ended."""
+    if len(words) >= 3 and words[1] in ("wait", "read", "kill"):
+        return bool(HELPER.fullmatch(words[2])) and all(w.startswith("--") or re.fullmatch(r"\d+", w) for w in words[3:])
+    if len(words) < 4 or words[1] != "run" or "--" not in words:
+        return False
+    i = words.index("--")
+    opts, cmd = words[2:i], words[i + 1:]
+    j = 0
+    while j < len(opts):
+        if opts[j] == "--bg":
+            j += 1
+        elif opts[j] == "--name" and j + 1 < len(opts) and HELPER.fullmatch(opts[j + 1]):
+            j += 2
+        elif opts[j] == "--label" and j + 1 < len(opts) and re.fullmatch(r"herdr\.(?:task=[\w#.@-]+|role=(?:reviewer|helper)|agent=(?:codex|claude))", opts[j + 1]):
+            j += 2
+        else:
+            return False
+    for base, flags in REVIEWERS.values():
+        if cmd[:len(base)] != base:
+            continue
+        rest = cmd[len(base):]
+        k = 0
+        while k < len(rest) - 1 and rest[k] in flags:
+            if not flags[rest[k]].fullmatch(rest[k + 1]):
+                return False
+            k += 2
+        return len(rest) - k <= 1 and not (rest[k:] and rest[k].startswith("-"))
+    return False
 
 
 def ask_hook():
@@ -200,7 +270,7 @@ def cmd_allow(args):
     if isinstance(cmd, list):
         # ["bash", "-lc", "<command>"] as some tools pass it.
         cmd = cmd[2] if len(cmd) == 3 and cmd[1] in ("-c", "-lc") else shlex.join(cmd)
-    if own_command(args.command, cmd):
+    if own_command(args.command, cmd, getattr(args, "sandboxed", False)):
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}))
         return
     out = ask_card(raw)
@@ -260,7 +330,7 @@ def in_shell(argv):
 # ends whole cgroups, ends that worker rather than the holder that keeps every terminal. On a Mac:
 # nice 10 and the utility QoS clamp (taskpolicy). Anything missing is skipped, never fatal.
 
-LOW = ('echo 500 > /proc/self/oom_score_adj 2>/dev/null; '
+LOW = ('{ echo 500 > /proc/self/oom_score_adj; } 2>/dev/null; '
        'command -v ionice >/dev/null 2>&1 && ionice -c2 -n7 -p $$ >/dev/null 2>&1; '
        'command -v taskpolicy >/dev/null 2>&1 && exec nice -n 10 taskpolicy -c utility "$@"; '
        'exec nice -n 10 "$@"')
@@ -394,7 +464,7 @@ def closing_line(s, task, parent=None, argv=None):
     on, rounds = review_limits(s, task)
     if on:
         text += (f" Review is on: after each review round, record it on the commit it reviewed with `{ht} reviewed {s.ref(task)} "
-                 f"--folder {shlex.quote(s.loc['folder'])} --report \"<its findings in a line>\"` (at most {rounds} rounds); "
+                 f"--folder {shlex.quote(s.loc['folder'])} --report \"<its findings in a line>\"` (add `--commit <sha>` if you committed fixes since; at most {rounds} rounds); "
                  f"ready refuses a final commit no round was recorded on.")
     text += (f" At the start and at each natural step, say how it's going: `{ht} status {s.ref(task)} --folder {shlex.quote(s.loc['folder'])} "
              f"\"<what you're doing now, at most {LINE_MAX} characters>\" --done <% of the whole task> --left <your best guess of how long is left, like 20m>`: "
@@ -413,7 +483,10 @@ def closing_line(s, task, parent=None, argv=None):
         text += (" Secrets (keys, tokens, passwords) are used by name, never seen: `herdr-secret ask NAME --why \"…\"` "
                  "(then end your turn), `herdr-secret run NAME -- <command>`, `herdr-secret list`; these run without asking too.")
     if argv and agent_key(argv) == "codex":
-        text += " Codex's sandbox can't reach Herdr, so give those commands sandbox_permissions \"require_escalated\" from the first try."
+        text += (" Codex's sandbox can't reach Herdr nor write git's data, so give those commands, herdr-artifact's (your proof), "
+                 "`git add`/`git commit` and your review's `hc run`/`hc wait`/`hc read`/`hc kill` (its prompt in single quotes) "
+                 "sandbox_permissions \"require_escalated\" from the first try, each as one plain command (no && chains, no $(…), "
+                 "no git options before the verb): then they run without asking.")
     # No "report to your coordinator": Herdr tells the Assistant itself (news_pass).
     return text
 
@@ -427,6 +500,7 @@ def where_line(task):
 
 def brief(s, task, parent=None, space=None, argv=None):
     instructions("reviewer")  # the file its review's reviewer gets (WORKER_MD)
+    keep_review(s, task, space)
     start = notes_part("Before you start", notes(s, task, "start", space))
     if start and task.get("worktree"):
         start += f"\n(The main folder is {s.loc['folder']}.)"
@@ -614,7 +688,7 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
     key = s.key(task)
     cmd = list(resume or argv)
     if not role:
-        cmd = own_argv(cmd)
+        cmd = own_argv(cmd, folder_for(s, task))
     if message:
         cmd = cmd + [message]
     labels = ["--label", f"herdr.task={key}", "--label", f"herdr.task.space={bare(space)}",

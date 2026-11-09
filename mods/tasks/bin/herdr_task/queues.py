@@ -176,8 +176,9 @@ def queue_reason(s, task):
 # ---- the machine's room (HERD-40) -------------------------------------------------------------
 # New tasks wait while this machine's memory, CPU load or disk is over its start limit (Settings
 # > Machines, as Shepherdr's). Herdr's tick on another machine passes that machine's name and
-# limits (--machine, --hold: the settings live where the window is); they're kept in .hold.json
-# so a start or the scheduler's tick there use them too.
+# limits (--machine, --hold: the settings live where the window is); they're kept in
+# machine-hold.json so a start or the scheduler's tick there use them too, until this machine's
+# settings file is saved after them (#768).
 
 # Beside the task lists, not among them: the Tasks panel reads and watches every file there.
 HOLD_FILE = beside_store("machine-hold", "machine-hold.json")
@@ -192,6 +193,7 @@ def set_hold(machine=None, limits=None):
     try:
         with open(HOLD_FILE) as f:
             if json.load(f) == {"machine": machine, "limits": limits}:
+                os.utime(HOLD_FILE)  # still current: newer than a settings file it agrees with
                 return
     except (OSError, ValueError):
         pass
@@ -212,13 +214,19 @@ def machine_hold():
         return _hold["reason"]
     try:
         from .machine import hold_reason, sample
+        from . import settings
         from .settings import machine_limits, machine_name
         if "limits" not in _hold:
             try:
                 with open(HOLD_FILE) as f:
                     _hold.update(json.load(f))
+                # Settings saved since a tick kept its limits win (#768): Settings > Machines apply
+                # at once, never shadowed by an old --hold.
+                if os.path.getmtime(settings.SETTINGS) > os.path.getmtime(HOLD_FILE):
+                    _hold["limits"] = None
             except (OSError, ValueError):
-                _hold.update({"machine": None, "limits": None})
+                _hold.setdefault("machine", None)
+                _hold.setdefault("limits", None)
         limits = _hold.get("limits") if _hold.get("limits") is not None else machine_limits(_hold.get("machine"))
         why = hold_reason(sample(), limits)
         name = _hold.get("machine") or machine_name()

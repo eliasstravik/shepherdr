@@ -15,6 +15,13 @@ describe("a task's status (as herdr-task's task_status)", () => {
     expect(at({ id: 1, state: "running" }, [{ address: "t1", status: "blocked" }])).toMatchObject({ section: "needs", needs: "asks", why: REASONS.question });
     expect(at({ id: 1, state: "running", waits: "Pick a colour" }, [{ address: "t1", status: "blocked" }]).why).toBe("Pick a colour");
   });
+  test("Claude Code's folder-trust dialog needs you, not Working (#755)", () => {
+    const fresh = [{ address: "t1", status: null }];
+    expect(at({ id: 1, state: "running", started: NOW - 10_000 }, fresh).section).toBe("working");
+    expect(at({ id: 1, state: "running", started: NOW - 10_000, trust_ask: "t1" }, fresh)).toMatchObject({ section: "needs", needs: "asks", why: REASONS.trust });
+    // Answered: it reports a status, and the old mark is no ask.
+    expect(at({ id: 1, state: "running", started: NOW - 10_000, trust_ask: "t1" }, [{ address: "t1", status: "working" }]).section).toBe("working");
+  });
   test("working while its agent works, or while just started", () => {
     expect(at({ id: 1, state: "running" }, [{ address: "t1", status: "working" }]).section).toBe("working");
     expect(at({ id: 1, state: "running", started: NOW - 10_000 }).section).toBe("working");

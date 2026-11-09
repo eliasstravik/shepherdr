@@ -48,8 +48,9 @@ class FakeContext {
   createMediaStreamSource() { return node() }
   createScriptProcessor() { return { ...node(), onaudioprocess: null } }
   createMediaStreamDestination() { return this.dest }
-  createBuffer(_c: number, n: number) { return { duration: n / 16000, getChannelData: () => new Float32Array(n) } }
-  createBufferSource() { return { ...node(), buffer: null, start() {}, stop() {}, onended: null } }
+  createBuffer(_c: number, n: number) { const data = new Float32Array(n); return { duration: n / 16000, getChannelData: () => data } }
+  played: { buffer: { duration: number; getChannelData: () => Float32Array } | null; connected: unknown[]; started: boolean }[] = []
+  createBufferSource() { const src = { ...node(), buffer: null, started: false, start() { this.started = true }, stop() {}, onended: null }; this.played.push(src as any); return src }
 }
 
 let playRefused = false
@@ -92,10 +93,11 @@ const settle = () => new Promise((r) => setTimeout(r, 0))
 beforeEach(() => { call.stopCall(); FakeSocket.all = []; FakeAudio.all = []; playRefused = false; mics = 0 })
 
 const errors: string[] = []
+const endedWhy: (string | null)[] = []
 let hungUp = 0
 const mutes: boolean[] = []
 async function start() {
-  const p = call.startCall('p:h1', (m) => errors.push(m), undefined, undefined, undefined, { title: 'the Home Assistant', hangUp: () => hungUp++, mute: (on) => mutes.push(on) })
+  const p = call.startCall('p:h1', (m) => errors.push(m), undefined, undefined, (why) => endedWhy.push(why), { title: 'the Home Assistant', hangUp: () => hungUp++, mute: (on) => mutes.push(on) })
   const ws = FakeSocket.all.at(-1)!
   ws.open()
   ws.say({ type: 'call', id: 'call-1' })
@@ -121,6 +123,8 @@ test("the agent's voice plays through a real <audio> element (kept playing in th
   expect(el.paused).toBe(false)
   expect(el.attrs.playsinline).toBe('')
   call.stopCall()
+  // the end chime plays through it first (SHEP-173)
+  await new Promise((r) => setTimeout(r, call.CHIME_MS + 50))
   expect(el.paused).toBe(true)
   // a browser that won't play it: the AudioContext's own output, as before
   playRefused = true
@@ -204,10 +208,14 @@ test('the socket drops: the call goes back to it quietly, says Reconnecting mean
   fire('visibilitychange')
   expect(FakeSocket.all.length).toBe(n + 1)
   expect(FakeSocket.all.at(-1)!.url).toContain('resume=call-1')
-  // the call is gone on the server: it says so and stops
+  // the call is gone on the server (SHEP-173: the service started again on an update): it ends, saying why in plain words
+  endedWhy.length = 0
   FakeSocket.all.at(-1)!.open()
-  FakeSocket.all.at(-1)!.say({ type: 'error', message: 'The call ended while the phone was away. Start a new call.' })
-  expect(errors).toEqual(['The call ended while the phone was away. Start a new call.'])
+  FakeSocket.all.at(-1)!.say({ type: 'ended', why: 'the connection was lost' })
+  FakeSocket.all.at(-1)!.close()
+  await new Promise((r) => setTimeout(r, 400))
+  expect(endedWhy).toEqual(['the connection was lost'])
+  expect(errors).toEqual([])
 })
 
 test('End tells the server to end it now (not hold it for the page)', async () => {
@@ -222,7 +230,7 @@ test("a socket that never got a call (the server refused it) is an error at once
   const p = call.startCall('p:h1', (m) => errors.push(m))
   FakeSocket.all.at(-1)!.close()
   await p
-  expect(errors).toEqual(['The voice connection failed. Start a new call.'])
+  expect(errors).toEqual(['The voice connection failed.'])
 })
 
 test('SHEP-113: the call shows Listening, Thinking, Working (what, in plain words) and Speaking from its real events', async () => {
@@ -258,4 +266,38 @@ test('SHEP-124: a voice action minimizes the full-screen call, but not call_view
   expect(stepsAside({ kind: 'call', full: true }, true, false, true)).toBe(false)
   // the bug: a screen click on "Open the call full screen" went full screen, then was minimized at once
   expect(stepsAside({ kind: 'screen', do: 'click', ref: 'e9' }, true, false, true)).toBe(false)
+})
+
+// SHEP-173: a call never ends in silence: a short chime, through the call's own audio (its <audio> element, which a
+// phone keeps playing in the background), then the audio closes.
+test('SHEP-173: every end chimes through the call audio, then it closes', async () => {
+  await start()
+  const ctx = FakeContext.last
+  const el = FakeAudio.all.at(-1)!
+  call.stopCall()
+  const chime = ctx.played.at(-1)!
+  expect(chime.started).toBe(true)
+  // through the voice's meter, so into the <audio> element: heard in the background too
+  expect(chime.connected.length).toBe(1)
+  expect(chime.connected[0]).not.toBe(ctx.destination)
+  const pcm = chime.buffer!.getChannelData()
+  expect(pcm.length / 16000).toBeGreaterThan(0.3)
+  expect(Math.max(...pcm.map(Math.abs))).toBeGreaterThan(0.1)
+  // still open while it plays; closed after
+  expect([ctx.state, el.paused]).toEqual(['running', false])
+  await new Promise((r) => setTimeout(r, call.CHIME_MS + 50))
+  expect([ctx.state, el.paused]).toEqual(['closed', true])
+})
+
+test('SHEP-173: an end by itself says why (the limit, the line); after the person\'s yes it says nothing', async () => {
+  endedWhy.length = 0
+  let ws = await start()
+  ws.say({ type: 'ended', why: 'it reached the 2-hour limit' })
+  ws.close()
+  await new Promise((r) => setTimeout(r, 400))
+  ws = await start()
+  ws.say({ type: 'ended' })
+  ws.close()
+  await new Promise((r) => setTimeout(r, 400))
+  expect(endedWhy).toEqual(['it reached the 2-hour limit', null])
 })

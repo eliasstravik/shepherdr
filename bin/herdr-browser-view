@@ -29,6 +29,9 @@ const task = opt("--task");
 const worker = opt("--worker");
 if (!task) { process.stderr.write("herdr-browser-view --task <slug#id> [--worker <terminal>]\n"); process.exit(2); }
 const name = task.replace(/[^A-Za-z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-/, "").replace(/-$/, "");
+// agent-browser's session, as bin/herdr-browser names it (a name over 32 characters: its last 20 and a hash, SHEP-178)
+const session = name.length <= 32 ? `herdr-${name}`
+  : `herdr-${name.slice(-20).replace(/^-+/, "")}-${require("crypto").createHash("sha256").update(task).digest("hex").slice(0, 8)}`;
 const HOME = process.env.HOME;
 // Shepherdr's state folder once this machine's data moved there (herdr_task/layout.py), else the old ~/.herdr/browser
 const ROOT = (() => {
@@ -237,7 +240,7 @@ async function check() {
       const l = await ab("session", "list", "--json");
       const sessions = json(l.stdout)?.data?.sessions;
       if (l.code !== 0 || !Array.isArray(sessions)) setState("error", (l.stderr || l.stdout).trim() || "agent-browser didn't answer.");
-      else if (!sessions.includes(`herdr-${name}`)) setState("closed");
+      else if (!sessions.includes(session)) setState("closed");
       else await connect();
     }
     await sleep(S.state === "live" ? 3000 : 4000);

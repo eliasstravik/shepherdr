@@ -137,6 +137,10 @@ test("autoKeeper: none has secrets: the web app's machine, but only once every m
   expect(autoKeeper([{ id: "laptop", count: null }, { id: "server", count: 0 }], "server")).toBe(null);
   // nothing serves the web app: nothing to name (each machine keeps its own, as before)
   expect(autoKeeper([{ id: "laptop", count: 0 }], null)).toBe(null);
+  // #800: every machine marked remote, no vault anywhere, nothing serving: one is named, or none ever could keep one
+  expect(autoKeeper([{ id: "m2", count: 0, remote: true }, { id: "m1", count: 0, remote: true }], null)).toEqual({ id: "m1" });
+  expect(autoKeeper([{ id: "m2", count: 0, remote: true }, { id: "m1", count: 0, remote: false }], null)).toBe(null);
+  expect(autoKeeper([{ id: "m2", count: 0, remote: true }, { id: "m1", count: null, remote: true }], null)).toBe(null);
 });
 
 test("followTo: only the machine serving the web app moves them, only when they follow it and are elsewhere", () => {

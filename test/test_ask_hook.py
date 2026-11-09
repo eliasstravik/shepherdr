@@ -101,7 +101,12 @@ class AskHook(unittest.TestCase):
     def test_a_task_workers_codex_hands_it_over_through_its_own_hook(self):
         # Codex runs ~/.codex/hooks.json's copy beside the worker's `herdr-task _allow` and waits for both: this copy
         # steps aside, and the one _allow runs (HERDR_ASK_CHAINED) asks the card
-        self.term({"state": "live", "status": "working", "argv": ["codex", "-c", "hooks.PermissionRequest=[…_allow…]", "_allow"]})
+        # its real argv (#866: the hook is inside a -c value, never a word of its own, and both put up a card)
+        sys_path = os.path.join(ROOT, "mods", "tasks", "bin")
+        code = f"import sys; sys.path.insert(0, {sys_path!r}); from herdr_task.launch import own_argv; import json; print(json.dumps(own_argv(['codex', 'go'])))"
+        argv = json.loads(subprocess.run(["python3", "-c", code], capture_output=True, text=True, check=True).stdout)
+        self.assertNotIn("_allow", argv)
+        self.term({"state": "live", "status": "working", "argv": ["sh", "-c", "x", *argv]})
         out = self.out(self.start())
         self.assertEqual(out, b"")
         self.assertIsNone(self.waiting(0.2))

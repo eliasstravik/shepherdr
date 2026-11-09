@@ -10,6 +10,7 @@
 // server holds the call (service/voice.ts HOLD_MS) and the page goes back to it on its own, then the agent says it's
 // back; nothing said before is lost.
 import { levelOf, meter, TALKING, type Sample } from '@client/meter.ts'
+import { chimePcm } from '@core/voice.js'
 
 let ws: WebSocket | null = null
 let mic: MediaStream | null = null
@@ -43,7 +44,8 @@ const RATE = 16000
 /** how long a dropped call keeps trying to get back (the server holds it 60 s) */
 export const RETRY_MS = 55_000
 
-type Handlers = { chatKey: string | null; onError: (message: string) => void; onNav: (nav: Nav) => NavAck | Promise<NavAck>; onOpen: () => void; onEnded: () => void }
+/** onEnded: the call ended by itself (why: in plain words, "the connection was lost"), or after the person's yes (no why) */
+type Handlers = { chatKey: string | null; onError: (message: string) => void; onNav: (nav: Nav) => NavAck | Promise<NavAck>; onOpen: () => void; onEnded: (why: string | null) => void }
 /** the lock screen's call controls: hang up, and mute (on: true mutes) */
 export type Controls = { title: string; hangUp: () => void; mute: (on: boolean) => void }
 
@@ -213,7 +215,7 @@ function connect(resume: boolean) {
       if (!play(e.data)) { stopCall(); h.onError('Voice audio could not keep up. Start a new call.') }
       return
     }
-    const m = JSON.parse(String(e.data)) as { type: string; id?: number | string; message?: string; state?: typeof phase; doing?: string; nav?: Nav; text?: string }
+    const m = JSON.parse(String(e.data)) as { type: string; id?: number | string; message?: string; state?: typeof phase; doing?: string; nav?: Nav; text?: string; why?: string }
     if (m.type === 'call' && typeof m.id === 'string') callId = m.id
     // back on the call: as it was, the agent says so
     if (m.type === 'resumed') { retryUntil = 0; retries = 0; phase = 'listening'; phaseAt = Date.now(); wakeAudio() }
@@ -238,13 +240,19 @@ function connect(resume: boolean) {
       phase = 'listening'
     }
     if (m.type === 'error') { ws = null; h.onError(m.message ?? 'The voice call could not start.') }
-    if (m.type === 'ended') over = true
+    if (m.type === 'ended') { over = true; overWhy = typeof m.why === 'string' ? m.why.slice(0, 200) : null }
   }
   sock.onclose = () => dropped(sock)
 }
 
-/** the voice agent ended the call (the person said yes, or a long silence): no error, its last words play out */
+/** SHEP-173: a muted call sends nothing; a word now and then keeps every hop (the service, the proxy) from taking the
+ *  socket for idle */
+setInterval(() => { if (on && ws?.readyState === WebSocket.OPEN) try { ws.send('{"type":"keep"}') } catch { /* gone */ } }, 20_000)
+
+/** the voice agent ended the call (the person said yes, or a limit): no error, its last words play out */
 let over = false
+/** why it ended by itself, in plain words (none: the person said yes) */
+let overWhy: string | null = null
 
 /** The socket went. The agent's goodbye: its last words play out. Else the call holds on the server: back to it
  *  quietly (sooner once the page is on screen or online again), until it's clearly gone. */
@@ -256,15 +264,16 @@ function dropped(sock: WebSocket) {
   if (over) {
     muted = true
     const left = ctx ? Math.max(0, playAt - ctx.currentTime) : 0
-    setTimeout(() => { if (on === h) { stopCall(); h.onEnded() } }, Math.min(10000, left * 1000 + 300))
+    const why = overWhy
+    setTimeout(() => { if (on === h) { stopCall(); h.onEnded(why) } }, Math.min(10000, left * 1000 + 300))
     return
   }
   // never got going: nothing to go back to
-  if (!callId) { stopCall(); h.onError('The voice connection failed. Start a new call.'); return }
+  if (!callId) { stopCall(); h.onError('The voice connection failed.'); return }
   phase = 'reconnecting'
   phaseAt = Date.now()
   if (!retryUntil) retryUntil = Date.now() + RETRY_MS
-  if (Date.now() > retryUntil) { stopCall(); h.onError('The voice call lost its connection. Start a new call.'); return }
+  if (Date.now() > retryUntil) { stopCall(); h.onEnded('the connection was lost'); return }
   // what it was saying is gone (the agent says again what was missed)
   sources.forEach((s) => s.stop())
   sources = []
@@ -289,12 +298,13 @@ if (typeof document !== 'undefined') {
 }
 
 
-export async function startCall(chatKey: string | null, onError: (message: string) => void = () => undefined, onNav: (nav: Nav) => NavAck | Promise<NavAck> = () => ({ ok: false, why: 'this page can\'t open things' }), onOpen: () => void = () => undefined, onEnded: () => void = () => undefined, lock: Controls | null = null) {
+export async function startCall(chatKey: string | null, onError: (message: string) => void = () => undefined, onNav: (nav: Nav) => NavAck | Promise<NavAck> = () => ({ ok: false, why: 'this page can\'t open things' }), onOpen: () => void = () => undefined, onEnded: (why: string | null) => void = () => undefined, lock: Controls | null = null) {
   stopCall()
   const h: Handlers = { chatKey, onError, onNav, onOpen, onEnded }
   on = h
   controls = lock
   over = false
+  overWhy = null
   // a call, to the phone: before the microphone, so its audio is set up as one from the start
   setSession(true)
   connect(false)
@@ -346,6 +356,35 @@ export function callSample(): Sample {
   return { level: Math.max(agent, you), who: null }
 }
 
+/** SHEP-173: the end chime, as the call's last sound: through the call's own audio (its <audio> element plays on in
+ *  the background on a phone), then that audio closes. No call audio (it never started): a fresh one, if allowed. */
+export const CHIME_MS = 700
+function chimeThenClose(c: AudioContext | null, el: HTMLAudioElement | null, into: AudioNode | null) {
+  let audio = c
+  if (!audio || audio.state === 'closed') {
+    try { audio = new AudioContext() } catch { audio = null }
+    into = null
+  }
+  const close = () => {
+    if (el) { el.onpause = null; el.pause(); el.srcObject = null }
+    audio?.close().catch(() => undefined)
+    if (c && c !== audio) c.close().catch(() => undefined)
+  }
+  if (!audio) return close()
+  try {
+    audio.resume().catch(() => undefined)
+    const pcm = chimePcm(RATE) as Int16Array
+    const buf = audio.createBuffer(1, pcm.length, RATE)
+    const ch = buf.getChannelData(0)
+    for (let i = 0; i < pcm.length; i++) ch[i] = pcm[i] / 0x8000
+    const src = audio.createBufferSource()
+    src.buffer = buf
+    src.connect(into ?? audio.destination)
+    src.start()
+  } catch { return close() }
+  setTimeout(close, CHIME_MS)
+}
+
 export function stopCall() {
   const was = on
   on = null
@@ -354,8 +393,13 @@ export function stopCall() {
   node?.disconnect()
   micIn?.disconnect()
   mic?.getTracks().forEach((t) => t.stop())
-  if (out) { out.onpause = null; out.pause(); out.srcObject = null }
-  ctx?.close().catch(() => undefined)
+  // what it was still saying stops; the chime plays, then the audio closes
+  sources.forEach((s) => { try { s.stop() } catch { /* not started */ } })
+  if (was) chimeThenClose(ctx, out, theirs)
+  else {
+    if (out) { out.onpause = null; out.pause(); out.srcObject = null }
+    ctx?.close().catch(() => undefined)
+  }
   const closing = ws
   ws = null
   // the person ended it: the server ends it now rather than holding it for the page to come back
@@ -380,4 +424,5 @@ export function stopCall() {
   retries = 0
   controls = null
   over = false
+  overWhy = null
 }

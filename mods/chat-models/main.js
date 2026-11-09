@@ -23,7 +23,7 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex, InputState, Input, VirtualListScrollHandle, v_virtual_list, Scrollbar } from "gpui-base";
 import { theme, props, setShared, closeOverlay, home, readTextFile, writeTextFile } from "herdr";
-import { modelSections, parsePicks, pickKey, withPin, withRecent, PICKS_FILE } from "./core/agents.js";
+import { modelSections, parsePicks, pickKey, withPin, withRecent, PICKS_FILE, permAcross } from "./core/agents.js";
 import { dirs } from "./dirs.js";
 
 const AGENTS = ["claude", "codex"];
@@ -115,9 +115,8 @@ export default class ModelMenu extends View {
     if (next.effort && !m.efforts.includes(next.effort)) next.effort = null;
     if (!m.fast) next.fast = false;
     if (m.agent !== was.agent) {
-      // Another agent: its own permission modes; full access stays full access.
-      const full = was.perm === "bypassPermissions" || was.perm === "full";
-      next.perm = full ? (m.agent === "claude" ? "bypassPermissions" : "full") : this.p.permDefault?.[m.agent] ?? null;
+      // Another agent: its own permission modes, the nearest to the one chosen.
+      next.perm = permAcross(was.perm, m.agent, this.p.permDefault);
       next.fast = false;
     }
     this.sel = next;
@@ -186,10 +185,12 @@ export default class ModelMenu extends View {
       .child(div().id(id).absolute().top(2).left(on ? 14 : 2).size(12).rounded(6).bg(t.background).transition("left", 120));
   }
 
-  // The permission modes, just above the Permissions row.
+  // The permission modes, just above the Permissions row. It takes its own presses: the menu's press closes it, and
+  // closed before the click, the click fell on the Fast row under it (GitHub #767, #740).
   permMenu(t, bottom) {
     const perms = this.p.menus?.[this.sel.agent]?.perms ?? [];
-    return v_flex().absolute().right(5).bottom(bottom).w(180).p(5).rounded(8).bg(t.popover).border_1().border_color(t.border).shadow_md()
+    return v_flex().id("perm-menu").absolute().right(5).bottom(bottom).w(180).p(5).rounded(8).bg(t.popover).border_1().border_color(t.border).shadow_md()
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .children(perms.map((x) => this.row(t, `perm-${x.id}`, true, () => { this.sel = { ...this.sel, perm: x.id }; this.permOpen = false; })
         .child(div().flex_1().child(x.label))
         .child(this.check(t, this.sel.perm === x.id))));
@@ -288,7 +289,9 @@ export default class ModelMenu extends View {
         .child(svg("mods/chat-models/zap.svg").size(14).flex_none().text_color(t.dim))
         .child(div().flex_1().child("Fast"))
         .child(this.toggle(t, this.sel.fast))))
+      // its own press too: else the menu's closes it and the click opens it again
       .when(Boolean(menu?.perms?.length), (el) => el.child(this.row(t, "perms", true, () => { this.permOpen = !this.permOpen; })
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .when(this.permOpen, (el) => el.bg(t.selected))
         .child(svg("mods/chat-models/shield.svg").size(14).flex_none().text_color(t.dim))
         .child(div().flex_1().child("Permissions"))

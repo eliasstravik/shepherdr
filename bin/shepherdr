@@ -35,7 +35,7 @@ What goes where (each under --root, default your home):
 
 Never overwritten: a mod, layout or lib file that isn't ours (it refuses, naming each; --adopt backs
 them up and takes them over), a key you set (unless you say yes), a file you changed since the last
-install (the new copy goes beside it as <file>.new). Everything it replaces goes to
+install (the new copy goes beside it as <file>.new; a mod file Shepherdr changed too is replaced, yours backed up). Everything it replaces goes to
 .config/herdr-app/.shepherdr-backup/<time>/ first; uninstall puts it back. What it installed is
 recorded in .config/herdr-app/data/shepherdr/installed.json (a sha256 per file), so running it again
 changes only what changed. While it replaces a helper or template, a sync hold (sync-hold in
@@ -66,7 +66,7 @@ import sys
 import tempfile
 import time
 
-VERSION = "3.1.28"
+VERSION = "3.1.29"
 HERDR_APP_MIN = "0.1.12"
 HC_MIN = "0.1.17"
 
@@ -379,7 +379,8 @@ def service_items(src):
         for f in walk_files(os.path.join(src, top)):
             if top != "templates" or f.endswith(".md"):
                 items.append(("service", f"{SHARE}/{top}/{f}", os.path.join(src, top, f)))
-    for f in ("mods/artifacts/recipe-view.js", "mods/artifacts/markup.js", "install.sh"):
+    # the artifact guide too (`herdr-artifact guide`), for agents on a web-only machine
+    for f in ("mods/artifacts/recipe-view.js", "mods/artifacts/markup.js", "mods/artifacts/ARTIFACTS.md", "install.sh"):
         items.append(("service", f"{SHARE}/{f}", os.path.join(src, f)))
     # recipe-view.js imports it from beside itself
     items.append(("service", f"{SHARE}/mods/artifacts/core/recipe.js", os.path.join(src, "core", "recipe.js")))
@@ -480,6 +481,26 @@ def service_answers(root):
     return True, port
 
 
+def calls_on(root):
+    """How many voice calls the running service has on now (its health says so to this machine's callers); 0 when
+    it doesn't answer."""
+    try:
+        f = json_file(service_file(root, "service.json"))
+        port, sid = int(f["port"]), f["id"]
+    except (ValueError, KeyError, TypeError):
+        return 0
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=3) as res:
+            h = json.load(res)
+    except (OSError, ValueError):
+        return 0
+    if not isinstance(h, dict) or h.get("id") != sid:
+        return 0
+    n = h.get("calls")
+    return n if isinstance(n, int) and n > 0 else 0
+
+
 def set_port(a, rec):
     """install --port: kept in the record, so an update keeps it; 7788 goes back to the default."""
     p = getattr(a, "port", None)
@@ -553,13 +574,20 @@ def install_service(r, rec, home):
         r.notes.append("the web app isn't built, so the service serves no page yet (./install.sh builds it)")
     rel, text = unit_text(r.root, bun, rec.get("port"))
     data = text.encode()
-    if read(r.p(rel)) != data:
+    same_unit = read(r.p(rel)) == data
+    if not same_unit:
         if r.dry:
             say(f"  unit    {rel}")
             return
         atomic_write(r.p(rel), data)
     rec.setdefault("files", {})[rel] = fsha(rel, data)
     if not home or r.dry:
+        return
+    # SHEP-173: a voice call on now would be cut by the restart: the service starts again on the new code by itself
+    # once no call is on (service/main.ts restart-when-free)
+    if same_unit and has_unit(r.root) and calls_on(r.root):
+        atomic_write(service_file(r.root, "restart-when-free"), b"1\n")
+        r.notes.append("a voice call is on: the Shepherdr service starts again on this update once it ends")
         return
     if sys.platform == "darwin":
         target = f"gui/{os.getuid()}"
@@ -675,7 +703,7 @@ def plan_files(r, rec, items, adopt):
 def apply_mod(r, mod, acts, rec, gone):
     """Puts one mod's changes in place in one swap. gone: recorded files no longer shipped."""
     target = r.p(f"{APP}/mods/{mod}")
-    changes = [a for a in acts if a[2] in ("new", "update", "adopt", "keep")] + gone
+    changes = [a for a in acts if a[2] in ("new", "update", "adopt", "keep", "replace")] + gone
     if not changes:
         return
     if r.dry:
@@ -694,7 +722,13 @@ def apply_mod(r, mod, acts, rec, gone):
         sub = os.path.relpath(rel, f"{APP}/mods/{mod}")
         dest = os.path.join(stage, sub)
         if how == "keep":
-            atomic_write(dest + ".new", data, mode)
+            # Shepherdr's copy is unchanged since the person's edit: theirs stays, nothing to merge
+            r.notes.append(f"kept your {rel} (Shepherdr hasn't changed it since)")
+        elif how == "replace":
+            dest_b = r.backup(rel)
+            atomic_write(dest, data, mode)
+            r.notes.append(f"Shepherdr changed {rel} since you edited it: the new one is in, yours is kept as {dest_b}"
+                           " (put your change back into the new one if you still want it)")
         elif how in ("new", "update", "adopt"):
             atomic_write(dest, data, mode)
     for rel in gone:
@@ -964,6 +998,10 @@ def cmd_install(a, update=False):
         raise Stop(f"these are someone else's (not installed by Shepherdr, and different):\n  {shown}\n"
                    "Nothing was changed. Rename your own mods, or run with --adopt to back these up and take them over.")
     old_files = (rec or {}).get("files", {})
+    # A mod file the person changed that Shepherdr changed too since: theirs could no longer load with the rest of the
+    # new mod (#766), so Shepherdr's goes in and theirs to the backup folder, said in the notes.
+    actions = [(g, rel, "replace" if how == "keep" and g in mods and rel in old_files and old_files[rel] != fsha(rel, data)
+                else how, data, mode) for g, rel, how, data, mode in actions]
     shipped = {x[1] for x in actions}
     gone = [rel for rel in old_files if rel.startswith(f"{APP}/") and rel not in shipped and not rel.startswith(f"{APP}/keys")
             and rel != f"{BIN}/herdr-app" and fsha(rel, read(r.p(rel))) == old_files[rel]]
@@ -1268,6 +1306,49 @@ def update_hint(rec):
     return f"to update: {pull}`shepherdr update`" + (" (web only)" if rec.get("web") else "")
 
 
+def github_checks_check(root):
+    """SHEP-179: doctor's warnings for repos with tasks whose pull requests' checks this machine's GitHub token can't
+    read (a fine-grained token without Checks or Commit statuses read): their tasks would never see them pass.
+    Asks GitHub once per repo; GitHub not answering (no network) leaves what herdr-task last saw there."""
+    gh = os.environ.get("HERDR_TASK_GH") or shutil.which("gh")
+    try:
+        folder = where_for(root).path("tasks")
+        names = sorted(f for f in os.listdir(folder) if f.endswith(".json"))
+    except (OSError, ValueError, AttributeError):
+        return []
+    if not gh:
+        return []
+    out, seen = [], set()
+    for f in names:
+        try:
+            with open(os.path.join(folder, f)) as fh:
+                d = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        repo = (d.get("github") or {}).get("repo") if isinstance(d, dict) else None
+        if not repo or repo in seen or not d.get("tasks"):
+            continue
+        seen.add(repo)
+        missing, unsure = [], False
+        for path, what in (("check-runs?per_page=1", "Checks: read"), ("status", "Commit statuses: read")):
+            try:
+                p = subprocess.run([gh, "api", f"repos/{repo}/commits/HEAD/{path}"], capture_output=True, text=True, timeout=20)
+            except (OSError, subprocess.SubprocessError):
+                unsure = True
+                continue
+            err = (p.stderr + p.stdout).lower()
+            if p.returncode and ("resource not accessible" in err or "http 403" in err):
+                missing.append(what)
+            elif p.returncode:
+                unsure = True
+        if unsure and not missing and (d.get("github_checks") or {}).get("denied"):
+            missing = ["Checks: read", "Commit statuses: read"]
+        if missing:
+            out.append(f"GitHub checks on {repo} can't be read here: its tasks can't see them pass. "
+                       f"Give this machine's GitHub token {' and '.join(missing)} on {repo}")
+    return out
+
+
 def cmd_doctor(a):
     root = os.path.realpath(a.root or real_home())
     home = root == os.path.realpath(real_home())
@@ -1304,7 +1385,8 @@ def cmd_doctor(a):
         if have is None:
             bad.append(f"missing: {rel}")
         elif fsha(rel, have) != sha:
-            warn.append(f"changed since install (kept): {rel}")
+            warn.append(f"changed since install (kept): {rel}" + (f"; Shepherdr's newer one is beside it as {os.path.basename(rel)}.new:"
+                                                                     " merge it in, then remove the .new" if os.path.exists(r.p(rel) + ".new") else ""))
     for name, dest in rec.get("links", {}).items():
         path = r.p(f"{BIN}/{name}")
         if not os.path.islink(path) or os.path.realpath(path) != os.path.realpath(dest):
@@ -1331,6 +1413,8 @@ def cmd_doctor(a):
             warn.append(f"hook missing in {f} ({event}): questions from that CLI won't reach the chat")
     t_bad, t_notes = check_tools(home)
     bad += t_bad
+    if home:
+        warn += github_checks_check(root)
     d_bad, d_notes = data_check(root)
     bad += d_bad
     t_notes = d_notes + t_notes

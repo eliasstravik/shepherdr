@@ -20,6 +20,7 @@ import * as fs from "fs/promises";
 import * as agent from "./agent.js";
 // The button's words and the choices on offer: core/settings.js, shared with the web app's Settings.
 import { modelLabel, choicesFrom } from "./core/settings.js";
+import { permAcross } from "./core/agents.js";
 
 const ROW = 31, LABEL = 110;
 const LEVEL = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra", none: "None" };
@@ -57,7 +58,7 @@ export async function saveLastUsed(sel) {
 const modelOf = (data, sel) => data?.menus?.[sel?.agent]?.models?.find((m) => m.id === sel.model) ?? null;
 
 // A model picked: the effort and speed stay where it has them; another agent brings its own
-// permission modes (full access staying full access).
+// permission modes, the nearest to the one chosen (core/agents.js permAcross).
 function choose(coord, agentKey, id) {
   const { sel, data } = coord;
   const m = data.menus[agentKey]?.models?.find((x) => x.id === id);
@@ -65,10 +66,7 @@ function choose(coord, agentKey, id) {
   const next = { ...sel, agent: agentKey, model: id };
   if (next.effort && !m.efforts.includes(next.effort)) next.effort = null;
   if (!m.fast) next.fast = false;
-  if (agentKey !== sel.agent) {
-    const full = sel.perm === "bypassPermissions" || sel.perm === "full";
-    next.perm = full ? (agentKey === "claude" ? "bypassPermissions" : "full") : data.permDefault[agentKey];
-  }
+  if (agentKey !== sel.agent) next.perm = permAcross(sel.perm, agentKey, data.permDefault);
   coord.sel = next;
 }
 
