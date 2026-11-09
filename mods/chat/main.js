@@ -1953,7 +1953,8 @@ export default class Chat extends View {
   mentioned(text) {
     const t = String(text ?? "");
     // Every message asks on every render: kept per text until the task list changes (HERD-94).
-    if (this.mentionsOf !== this.tasks) { this.mentionsOf = this.tasks; this.mentions = new Map(); }
+    // No list yet (an ended agent's chat never loads one, GitHub #779): still a Map, not undefined === undefined.
+    if (!this.mentions || this.mentionsOf !== this.tasks) { this.mentionsOf = this.tasks; this.mentions = new Map(); }
     const known = this.mentions.get(t);
     if (known) return known;
     // core/send.js: the same matching as the web app's

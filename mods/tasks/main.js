@@ -1003,11 +1003,14 @@ function agentName(address) {
 // where the shown layout has that view. Shared "tasks.thread" = { terminal (its agent, live or its
 // last one; null: never started), task (its id), title, key ({ machine, folder, slug, id }), log
 // ({ path, kind }: an ended agent's own log), note (why one never started waits), at }.
-const hasThread = (n) => Boolean(n && typeof n === "object") && (n.id === "tasks-thread" || (n.children ?? []).some(hasThread));
-const threads = () => hasThread(layout());
+const hasNode = (n, id) => Boolean(n && typeof n === "object") && (n.id === id || (n.children ?? []).some((c) => hasNode(c, id)));
+const threads = () => hasNode(layout(), "tasks-thread");
 function openThread({ terminal = null, task = null, title = null, key = null, log = null, note = null }) {
   setShared("tasks.thread", { terminal, task, title, key, log, note, at: Date.now() });
   run("layout.select", { stack: "tasks", child: "tasks-thread" });
+  // On its chat, as mods/chat/panel.js openTaskThread: the drill-in has one Terminal block, so it would
+  // still show the last task's worker under this task's header (GitHub #756).
+  if (hasNode(layout(), "tasks-thread-body")) run("layout.select", { stack: "tasks-thread-body", child: "tasks-thread-chat" });
 }
 
 // The Accept card's accept under way (shared "tasks.accepting" = { "<machine>:<folder>:<ref>": at },
