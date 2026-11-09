@@ -7,6 +7,7 @@
 // typed message, its pill faded until it goes in.
 import clsx from 'clsx'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from 'react'
+import { copyText } from '@client/copy.ts'
 import { act, definePlugin, setUI, useStore, useUI } from '@client/kernel.ts'
 import { AWAY, buzz, moveTo, project, settleMs, SPRING, useMotion } from '@client/motion.ts'
 import { useDialogFocus } from '@client/focus.ts'
@@ -379,9 +380,9 @@ function Lifted({ msg, chat }: { msg: Message; chat: string }) {
             <>
               <MenuItem
                 icon={<CopyIcon className={ic} />}
-                onClick={() => {
+                onClick={(e) => {
                   // in the tap itself: Safari copies only then
-                  navigator.clipboard?.writeText(text).catch(() => {})
+                  void copyText(text, e.currentTarget)
                   leave()
                 }}
               >

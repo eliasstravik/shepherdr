@@ -6,6 +6,7 @@
 import clsx from 'clsx'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ArrowRightIcon, ChatBubbleLeftEllipsisIcon, CheckIcon as TickIcon, ChevronDownIcon, ChevronRightIcon, PaperClipIcon } from '@heroicons/react/16/solid'
+import { useCopy } from '@client/copy.ts'
 import { act, has, openTask, registry } from '@client/kernel.ts'
 import { AutopilotIcon, CheckIcon, CopyIcon, PageIcon, ReplyIcon, SmileIcon, TermIcon } from '@client/ui.tsx'
 import * as CV from '@core/chat-view.js'
@@ -46,9 +47,7 @@ export const onTerminal = (fn: (chat: string) => void) => void (showTerminal = f
  *  in room that is always kept, so nothing moves. A finger holds the message instead (its own bar). */
 export function Band({ msg, chat, cli }: { msg: Message; chat: string; cli?: boolean }) {
   const you = msg.who === 'you'
-  const [copied, setCopied] = useState(false)
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
-  useEffect(() => () => clearTimeout(timer.current), [])
+  const { copied, copy } = useCopy()
   const acts = bandActs(you ? 'user' : 'agent', msg.text, { fork: cli !== false })
   const react = has('reactions')
   const pills = msg.reactions?.length ? registry.messageEdge.map(({ View }, i) => <View key={i} msg={msg} chat={{ key: chat } as Chat} />) : null
@@ -60,7 +59,7 @@ export function Band({ msg, chat, cli }: { msg: Message; chat: string; cli?: boo
     if (a === 'copy')
       return (
         <button key={a} type="button" aria-label={copied ? 'Copied' : 'Copy'} className={clsx(btn, hover, copied && 'text-fg opacity-100')}
-          onClick={() => { void navigator.clipboard?.writeText(msg.text ?? '').catch(() => undefined); setCopied(true); clearTimeout(timer.current); timer.current = setTimeout(() => setCopied(false), 1500) }}>
+          onClick={(e) => void copy(msg.text ?? '', 'copy', e)}>
           {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
         </button>
       )

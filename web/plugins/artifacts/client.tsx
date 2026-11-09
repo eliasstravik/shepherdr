@@ -518,6 +518,8 @@ function PageFrame({
       ref={ref}
       title={art.title}
       sandbox="allow-scripts allow-forms"
+      // a Copy button in the page may write to the clipboard (SHEP-152); nothing else of the app's is lent to it
+      allow="clipboard-write"
       loading={full ? undefined : 'lazy'}
       src={frameUrl(art.id, loaded, !!full, device, '', opened)}
       onLoad={() => {

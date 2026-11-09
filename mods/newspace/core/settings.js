@@ -339,7 +339,7 @@ export function addonAbout(about, now, stop) {
 }
 
 // ---- Web -------------------------------------------------------------------------------------------------------
-export const WEB = { title: "Shepherdr on the web", link: "Link", copy: "Copy", phone: "Open it on your phone" };
+export const WEB = { title: "Shepherdr on the web", link: "Link", copy: "Copy", copied: "Copied", phone: "Open it on your phone" };
 // The Web page's state line: off (the Web add-on), not read yet, no service, or what the service last said (web.json).
 // Served from another machine (Serve from, core/host.js): says which; a move under way says that first.
 export const webState = (off, loaded, w) => (off ? "Off. Turn it on under Window › Add-ons." : !loaded ? "Reading…"

@@ -7,6 +7,7 @@
 import clsx from 'clsx'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import * as MA from '@core/machine-add.js'
+import { copyText } from '../copy.ts'
 import { act } from '../kernel.ts'
 import { Sheet, SheetClose } from '../Stack.tsx'
 import { CheckCircleIcon, CheckIcon, CopyIcon, FootButton, Ghost, ic, Primary, ServerIcon, Who } from '../ui.tsx'
@@ -93,7 +94,7 @@ function AddMachine() {
       return (
         <div className={clsx('flex items-center gap-2.5 pb-1.5', pad && 'pl-[34px]')}>
           <p className="min-w-0 flex-1 text-[0.75rem] text-fg2 phone:text-[0.8125rem]">{W.manual}</p>
-          <Ghost onClick={() => { void navigator.clipboard?.writeText(MA.command(target)); setCopied(target) }}>
+          <Ghost onClick={(e) => void copyText(MA.command(target), e.currentTarget).then((ok) => ok && setCopied(target))}>
             {copied === target ? <CheckIcon className={ic} /> : <CopyIcon className={ic} />}
             {copied === target ? W.copied : W.copy}
           </Ghost>

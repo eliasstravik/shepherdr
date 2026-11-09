@@ -3,6 +3,7 @@
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import { useMemo, type MouseEvent } from 'react'
+import { copyText } from '@client/copy.ts'
 import { goPlace, openTask, useSnap } from '@client/kernel.ts'
 import * as MNs from '@core/mentions.js'
 import { forMarkdown, hasMention, parseMention, parseTask, stateOf, taskStateOf, TITLE, useReach } from './mentions.tsx'
@@ -89,27 +90,6 @@ function keepIdsWhole(root: HTMLElement) {
   }
 }
 
-/** copy words: the clipboard where the page may use it, the old way on a plain http link */
-export function copyText(text: string) {
-  if (navigator.clipboard && isSecureContext) return navigator.clipboard.writeText(text).catch(() => fallback(text))
-  fallback(text)
-  return Promise.resolve()
-}
-
-function fallback(text: string) {
-  const area = document.createElement('textarea')
-  area.value = text
-  area.setAttribute('readonly', '')
-  area.style.cssText = 'position:fixed;opacity:0;pointer-events:none'
-  document.body.append(area)
-  area.select()
-  try {
-    document.execCommand('copy')
-  } finally {
-    area.remove()
-  }
-}
-
 const shown = new WeakMap<Element, ReturnType<typeof setTimeout>>()
 
 /** a code block's button, or a bit of inline code, says it copied for a moment (to a screen reader too) */
@@ -134,8 +114,7 @@ function onCopy(e: MouseEvent) {
   e.stopPropagation()
   const code = el.tagName === 'CODE' ? el : el.parentElement?.querySelector('pre')
   if (!code?.textContent) return
-  copyText(code.textContent.replace(/\n$/, ''))
-  copied(el)
+  void copyText(code.textContent.replace(/\n$/, ''), el).then((ok) => ok && copied(el))
 }
 
 /** chat: the chat it is in, so a #-mention of a space (core/mentions.js) draws as a chip, open or locked */
