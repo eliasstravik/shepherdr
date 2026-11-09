@@ -109,7 +109,9 @@ def pr_news(s, t, v, report):
     since = t.get("ready_at") or 0
     w = pr.get("watch") or {}
     if w.get("since") != since:
-        w = {"since": since, "seen": [], "checked": 0}
+        # A new ready: the failures and conflicts already told stay told (#796: the same red checks of
+        # the same commit, the base's, aren't news again); a new commit's are.
+        w = {"since": since, "seen": [], "checked": 0, "failed": w.get("failed"), "conflict": w.get("conflict")}
     checks = v.get("statusCheckRollup") or []
     failed = [c for c in checks if (c.get("conclusion") or c.get("state") or "").upper() in BAD - {"CANCELLED"}]
     head = v.get("headRefOid") or ""

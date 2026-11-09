@@ -4325,3 +4325,21 @@ class TaskFlow(unittest.TestCase):
         tip = self.commit(wt, "a fix", "a.txt")
         self.assertEqual(github.pr_open(self.store, self.task, "o/r")["number"], 2918)
         self.assertEqual(self.git(self.root, "--git-dir", remote, "rev-parse", "feature"), tip)
+
+    def test_the_same_red_checks_are_told_once(self):
+        """#796: after ready again, the same failing checks of the same commit aren't news again."""
+        from herdr_task import ghnews, base
+        self.patch(ghnews, "resting", lambda s, t: {"address": "t1"})
+        self.patch(ghnews, "pr_comments", lambda repo, n: [])
+        self.patch(ghnews, "log_tail", lambda repo, rid: None)
+        self.task.update(state="ready", ready_at=base.now() - 1000, pr={"number": 7, "repo": "o/r", "url": "u"})
+        v = {"state": "OPEN", "headRefOid": "abc", "statusCheckRollup": [{"name": "test", "conclusion": "FAILURE", "detailsUrl": "x"}]}
+        ghnews.pr_news(self.store, self.task, v, {})
+        self.assertIn('Check "test" failed', self.task["pr"].pop("news")["text"])  # told, then ready again
+        self.task["ready_at"] = base.now()
+        ghnews.pr_news(self.store, self.task, v, {})
+        self.assertNotIn("news", self.task["pr"])
+        # A new commit's runs failing: news.
+        self.task["ready_at"] = base.now() + 1
+        ghnews.pr_news(self.store, self.task, {**v, "headRefOid": "def"}, {})
+        self.assertIn("news", self.task["pr"])
