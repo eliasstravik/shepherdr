@@ -2218,10 +2218,16 @@ class ReadOnlyStore(unittest.TestCase):
                 self.assertIn("read-only", str(e.exception))
 
 
-class ChecksBeforeReady(unittest.TestCase):
-    """SHEP-175: a task said ready in a GitHub repo is Working (never Ready nor Needs you, no ready
-    news) until its pull request's checks are done and GitHub knows it can merge. A fake gh (what
-    HERDR_TASK_GH points herdr-task at: github.GH here, its store a throwaway) answers each look."""
+class PrLooks(unittest.TestCase):
+    """A Ready task's pull request as the tick sees it. A fake gh (what HERDR_TASK_GH points herdr-task at:
+    github.GH here, its store a throwaway) answers each look (gh_script())."""
+
+    def gh_script(self):
+        return ("#!/usr/bin/env python3\nimport json, sys\n"
+                f"open({self.gh_log!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
+                "if sys.argv[1:3] == ['pr', 'view']:\n"
+                f"    print(open({os.path.join(self.dir, 'view.json')!r}).read())\n"
+                "elif sys.argv[1] == 'api':\n    print('[]')\n")
 
     def setUp(self):
         from unittest import mock
@@ -2237,11 +2243,7 @@ class ChecksBeforeReady(unittest.TestCase):
         self.gh_log = os.path.join(self.dir, "gh.log")
         gh = os.path.join(self.dir, "gh")
         with open(gh, "w") as f:
-            f.write("#!/usr/bin/env python3\nimport json, sys\n"
-                    f"open({self.gh_log!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
-                    "if sys.argv[1:3] == ['pr', 'view']:\n"
-                    f"    print(open({os.path.join(self.dir, 'view.json')!r}).read())\n"
-                    "elif sys.argv[1] == 'api':\n    print('[]')\n")
+            f.write(self.gh_script())
         os.chmod(gh, 0o755)
         self.clock = [50_000_000]
         self.live = [{"address": "t1", "agent": "claude", "status": {"state": "idle"}, "turn": 6, "status_ms": 1,
@@ -2284,6 +2286,12 @@ class ChecksBeforeReady(unittest.TestCase):
         with unittest.mock.patch.object(self.news, "view", lambda s, t, live=None: v):
             event = self.news.news_state(self.store, t, self.live)[1]
         return v["status"], v["why"], event
+
+
+
+class ChecksBeforeReady(PrLooks):
+    """SHEP-175: a task said ready in a GitHub repo is Working (never Ready nor Needs you, no ready
+    news) until its pull request's checks are done and GitHub knows it can merge."""
 
     RUNNING = {"name": "check", "status": "IN_PROGRESS", "conclusion": ""}
     PASSED = {"name": "check", "status": "COMPLETED", "conclusion": "SUCCESS"}
@@ -2339,6 +2347,102 @@ class ChecksBeforeReady(unittest.TestCase):
         self.assertEqual(self.agents.task_status(t, self.live), ("working", None, "Merges once its checks pass"))
         t["merge_requested"] = 1
         self.assertEqual(self.agents.task_status(t, self.live), ("working", None, "Merging"))
+
+
+class ChecksUnreadable(PrLooks):
+    """SHEP-179: a GitHub token that reads the pull request but not its checks (the exe.dev GitHub integration's):
+    gh pr view with statusCheckRollup fails with GitHub's own GraphQL error, and the REST check runs with a 403. The
+    task is never stuck Working on checks nobody can see, and Accept merges (GitHub refuses what its checks block)."""
+
+    ERR = ("GraphQL: Resource not accessible by personal access token (repository.pullRequest.statusCheckRollup.nodes.0"
+           ".commit.statusCheckRollup.contexts.nodes.0), Resource not accessible by personal access token "
+           "(repository.pullRequest.statusCheckRollup.nodes.0.commit.statusCheckRollup.contexts.nodes.1)")
+    DENIED = ('{"message":"Resource not accessible by personal access token","status":"403"}'
+              "gh: Resource not accessible by personal access token (HTTP 403)")
+
+    def gh_script(self):
+        d = self.dir
+        return ("#!/usr/bin/env python3\nimport json, os, sys\n"
+                f"a = sys.argv[1:]\nopen({self.gh_log!r}, 'a').write(json.dumps(a) + '\\n')\n"
+                f"def file(n):\n    p = os.path.join({d!r}, n)\n    return open(p).read() if os.path.exists(p) else None\n"
+                "if a[:2] == ['pr', 'view'] and 'statusCheckRollup' in a[-1]:\n"
+                f"    sys.stderr.write({self.ERR!r}); sys.exit(1)\n"
+                "elif a[:2] == ['pr', 'view']:\n    print(file('view.json'))\n"
+                "elif a[:2] == ['pr', 'merge']:\n"
+                f"    open(os.path.join({d!r}, 'view.json'), 'w').write(json.dumps({{'state': 'MERGED', 'mergeCommit': {{'oid': 'f00'}}}}))\n"
+                "elif a[0] == 'api' and a[1].endswith('/status'):\n"
+                "    print(file('status.json') or json.dumps({'state': 'pending', 'statuses': []}))\n"
+                "elif a[0] == 'api' and '/check-runs' in a[1] and file('runs.json'):\n    print(file('runs.json'))\n"
+                "elif a[0] == 'api':\n"
+                f"    print({self.DENIED!r}); sys.stderr.write('gh: Resource not accessible by personal access token (HTTP 403)'); sys.exit(1)\n")
+
+    def github_says(self, merge_state="CLEAN", mergeable="MERGEABLE", runs=None):
+        with open(os.path.join(self.dir, "view.json"), "w") as f:
+            json.dump({"state": "OPEN", "mergeable": mergeable, "headRefOid": "abc", "mergeStateStatus": merge_state,
+                       "reviewDecision": ""}, f)
+        if runs is not None:
+            with open(os.path.join(self.dir, "runs.json"), "w") as f:
+                json.dump({"check_runs": runs}, f)
+
+    def test_the_view_reads_the_rest_and_says_checks_are_unknown(self):
+        import herdr_task.github as github
+        self.github_says()
+        v = github.pr_view({"pr": {"number": 7, "repo": "o/r"}})
+        self.assertEqual((v["state"], v["mergeable"], v["statusCheckRollup"], v["checks_unknown"]), ("OPEN", "MERGEABLE", [], True))
+        with open(self.gh_log) as f:
+            calls = [json.loads(x) for x in f]
+        self.assertIn(["api", "repos/o/r/commits/abc/check-runs?per_page=100"], calls)
+
+    def test_ready_with_a_note_when_github_says_clean(self):
+        t = self.said_ready()
+        self.github_says("CLEAN")
+        self.assertEqual(self.look(t, after=5000)[:2], ("working", "Checks running"))  # GitHub may not have started them
+        self.assertEqual(self.look(t, after=30_000), ("ready", None, "ready"))
+        self.assertTrue(t["pr"]["checks_unknown"])
+        self.assertEqual(self.store.data["github_checks"]["repo"], "o/r")
+        import herdr_task.proof as proof
+        self.assertEqual(proof.checks_of(t), {"state": "unknown", "text": "Can't read GitHub checks here: check them on GitHub."})
+
+    def test_blocked_waits_a_while_then_is_ready_anyway(self):
+        t = self.said_ready()
+        self.github_says("BLOCKED")
+        self.assertEqual(self.look(t, after=60_000)[:2], ("working", "Checks running"))
+        self.assertEqual(self.look(t, after=10 * 60_000)[:2], ("working", "Checks running"))
+        self.assertEqual(self.look(t, after=10 * 60_000), ("ready", None, "ready"))
+
+    def test_rest_check_runs_still_count_when_graphql_refuses(self):
+        t = self.said_ready()
+        self.github_says("BLOCKED", runs=[{"name": "test", "status": "in_progress", "conclusion": None}])
+        self.assertEqual(self.look(t)[:2], ("working", "Checks running"))
+        self.github_says("CLEAN", runs=[{"name": "test", "status": "completed", "conclusion": "success"}])
+        self.assertEqual(self.look(t), ("ready", None, "ready"))
+        self.assertNotIn("checks_unknown", t["pr"])  # REST read them all: known
+        self.assertNotIn("github_checks", self.store.data)
+        self.github_says("BLOCKED", runs=[{"name": "test", "status": "completed", "conclusion": "failure"}])
+        self.assertEqual(self.look(t, after=1000)[:2], ("working", "Back to its agent to fix"))
+        self.assertEqual(t["attention"], "Checks failing: test.")
+
+    def test_accept_merges_without_check_access(self):
+        t = self.said_ready()
+        t["state"] = "ready"
+        self.github_says("CLEAN")
+        for name in ("watch_main", "update_main"):
+            p = unittest.mock.patch.object(self.commands, name, lambda *a, **k: None)
+            p.start()
+            self.addCleanup(p.stop)
+        p = unittest.mock.patch.object(self.commands, "finish", lambda s, t, even_if_busy=False: t.update(state="done"))
+        p.start()
+        self.addCleanup(p.stop)
+        self.assertIsNone(self.commands.merge_now(self.store, t))
+        self.assertEqual((t["state"], t.get("merged")), ("done", True))
+        with open(self.gh_log) as f:
+            self.assertTrue(any(a[:2] == ["pr", "merge"] for a in map(json.loads, f)))
+
+    def test_a_network_blip_is_not_taken_for_a_permission(self):
+        import herdr_task.github as github
+        self.assertFalse(github.denied("error connecting to api.github.com"))
+        self.assertTrue(github.denied(self.ERR))
+        self.assertTrue(github.denied(self.DENIED))
 
 
 class Store:
