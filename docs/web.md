@@ -10,6 +10,14 @@ on a phone, a tablet or another computer's browser, on the same data. Its look i
 never the open internet); or the always-on machine you serve it from (below). Shepherdr settings → Web shows the link and a QR code for your phone. It needs Tailscale
 running here; without it the service still runs, with no web app.
 
+Another HTTPS port: when something else on this machine already holds the tailnet's 443 (a reverse proxy, a container
+publishing 443, a `tailscale serve --tcp 443` forward), `shepherdr web https-port 8443` moves it to
+`https://<this machine's tailnet name>:8443/shepherdr/` within seconds, and every link Shepherdr gives follows
+(`./install.sh --https-port 8443` sets it at install; updates keep it; `shepherdr web https-port 443` goes back, and
+`shepherdr web https-port` alone says the one now). When sharing fails, Settings → Web and `shepherdr doctor` say
+tailscale's own reason, and name a free port when the one asked for is taken. A port is this machine's own: Serve from
+another machine uses that machine's.
+
 Who gets in: only the tailnet login that owns this machine (Tailscale's own identity header, checked against the
 connection it came on). A page from anywhere else can't change anything: writes need the app's own origin.
 

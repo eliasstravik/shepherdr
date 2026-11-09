@@ -7,14 +7,14 @@
 //   SHEPHERDR_WEB=on|off           serve the web app and share it on the tailnet (default on)
 // Serve from (service/host.ts): one machine serves the web app and holds the shared data; on the others the service
 // reads and writes it there, keeps their settings in step (service/sync.ts) and doesn't share /shepherdr.
-import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, rmSync, watchFile } from "node:fs";
 import { join, normalize } from "node:path";
 import { randomBytes } from "node:crypto";
 import { DATA, SOCK, TOKEN, PORT, HOME, ensureData, settingsFile, where } from "./paths.ts";
 import { holdLock } from "./lock.ts";
 import { gate, localCaller, type Gate } from "./auth.ts";
 import { trustedPeer } from "./peer.ts";
-import { whoami, share, served, unshare, restoreShare, type Me } from "./tailscale.ts";
+import { whoami, share, served, unshare, restoreShare, httpsPort, webLink, webOrigin, HTTPS_PORT_FILE, type Me } from "./tailscale.ts";
 import { qrFile } from "./qr.ts";
 import { Hub } from "./hub.ts";
 import { Store } from "./store.ts";
@@ -112,7 +112,12 @@ const store = new Store(hub, host);
 new Sync(hub, host).start();
 let me: Me | null = await whoami();
 const g: Gate = { owner: me?.login ?? null, dns: me?.dns ?? null, port: PORT, token };
-const live = new Live(hub, store, () => me, VERSION);
+// the tailnet HTTPS port the web app is shared on (tailscale.ts httpsPort: 443 unless this machine set another),
+// looked at again with the rest of the tailnet; ownLink: this machine's own link on it
+let hp = httpsPort();
+g.httpsPort = hp;
+const ownLink = () => (me ? webLink(me.dns, hp) : null);
+const live = new Live(hub, store, () => me, VERSION, ownLink);
 const compat = new Compat();
 const model = new Model(hub, live);
 live.chats = new Chats(hub);
@@ -120,7 +125,7 @@ live.compat = compat;
 compat.reader = (a) => live.chats?.reader(a) ?? null;
 // the chat scrolled to its top: the page before (as the window's loadEarlier)
 (compat as any).earlier = (a: string) => live.chats?.earlier(a);
-const push = new Push(() => (me ? `https://${me.dns}` : "https://herdr.dev"));
+const push = new Push(() => (me ? webOrigin(me.dns, hp) : "https://herdr.dev"));
 // only the machine that serves the web app sends push alerts (its pages subscribed there): never two of one alert
 const pushSend = push.send.bind(push);
 push.send = ((a: any) => (host.serving() ? pushSend(a) : Promise.resolve())) as typeof push.send;
@@ -293,7 +298,7 @@ store.on(() => model.rebuild());
 void store.load().catch(() => {});
 const snapshotOf = (b: Parameters<NonNullable<typeof model.onBuild>>[0]) => live.setSnapshot(alertNewAnd(compat.snapshot({
   host: me?.host ?? "this machine", user: me?.name ?? "You", spaces: b.spaces, sections: b.sections, rows: b.rows, artifacts: artifacts.list, automations: b.automations,
-  settings: [...settings.sections(webNow ?? (me ? `https://${me.dns}/shepherdr/` : null), b.spaces.map((s: any) => ({ id: s.id, name: s.name, machine: s.machine ?? null })), b.machines, me?.host ?? "this machine",
+  settings: [...settings.sections(webNow ?? ownLink(), b.spaces.map((s: any) => ({ id: s.id, name: s.name, machine: s.machine ?? null })), b.machines, me?.host ?? "this machine",
     // Settings › Autopilot (Everywhere's and each space's own), while its add-on is on
     offList().includes("autopilot") ? null : { everywhere: model.pilotEverywhere, trigger: (id) => model.pilotKnown(id)?.trigger }),
     // Secrets, as the window's page (Everywhere's and each space's own): every kept secret and where, and the agents
@@ -336,16 +341,19 @@ async function tailnet() {
   me = await whoami();
   g.owner = me?.login ?? null;
   g.dns = me?.dns ?? null;
+  g.httpsPort = hp = httpsPort();
   const on = webOn(), serving = host.serving();
-  const own = me ? `https://${me.dns}/shepherdr/` : null;
+  const own = ownLink();
   host.link = own;
   // another machine serves it: its link (the window's Settings › Web shows it and its QR code); this one isn't shared
   const link = serving ? own : host.hostLink();
   let why: string | null = me || !serving ? null : "Tailscale isn't running here";
+  // what tailscale serve said when sharing failed (doctor counts it as broken, not a note)
+  let shareWhy: string | null = null;
   if (me && on && serving) {
     const s = await served(me.dns);
     if (s.funnel) { why = "Funnel is on for this machine: the web app stays off until it's off"; g.owner = null; }
-    else why = await share(me.dns, PORT);
+    else why = shareWhy = await share(me.dns, PORT, hp);
   } else if (me && (!on || !serving) && wasOn !== false) {
     await unshare(me.dns, PORT);
     // moved away: what the move here set aside is shared again (shepherdr web serve-from --take-link)
@@ -356,7 +364,7 @@ async function tailnet() {
   let qr: string | null = null;
   try { if (link && on && !why) qr = qrFile(existsSync(join(APP_DATA, "..")) ? APP_DATA : DATA, link); } catch {}
   const serve = serveNow();
-  writeFileSync(join(DATA, "web.json"), JSON.stringify({ on, link, qr, why, serve, at: Date.now() }) + "\n");
+  writeFileSync(join(DATA, "web.json"), JSON.stringify({ on, link, qr, why, share_error: shareWhy, https_port: hp, serve, at: Date.now() }) + "\n");
   let picture: string | null = null;
   try { if (qr) picture = `data:image/svg+xml;base64,${Buffer.from(readFileSync(qr)).toString("base64")}`; } catch {}
   const was = JSON.stringify(webNow);
@@ -393,6 +401,8 @@ async function serveFrom(machine: string | null) {
   await tailnet();
 }
 host.on(() => { void tailnet(); model.rebuild(); });
+// shepherdr web https-port changed the port: move the share and the links within seconds, not at the next minute
+watchFile(HTTPS_PORT_FILE, { interval: 2000 }, () => { if (httpsPort() !== hp) void tailnet(); });
 await tailnet();
 setInterval(tailnet, 60_000);
 
@@ -530,7 +540,7 @@ const voiceIO: VoiceIO = {
         const home = (await exec(hub, ["sh", "-c", 'printf %s "$HOME"'], machine).catch(() => ({ stdout: "" }))).stdout;
         return folders(hub, machine, path || "~", home);
       }
-      case "me": return { machine: me?.host ?? null, link: me ? `https://${me.dns}/shepherdr/` : null, version: VERSION, off: offPlugins() };
+      case "me": return { machine: me?.host ?? null, link: ownLink(), version: VERSION, off: offPlugins() };
     }
     throw new Error(`No such data: ${source}.`);
   },
@@ -693,7 +703,7 @@ const server = Bun.serve<{ who: string }>({
       return srv.upgrade(req, { data: { who: pass.who, voice: { key, resume } } as any }) ? undefined : new Response("upgrade failed", { status: 400 });
     }
     if (socket) return srv.upgrade(req, { data: { who: pass.who } }) ? undefined : new Response("upgrade failed", { status: 400 });
-    if (path === "/api/me") return json({ login: pass.who, via: pass.via, machine: me?.host ?? null, link: me ? `https://${me.dns}/shepherdr/` : null, version: VERSION, off: offPlugins() });
+    if (path === "/api/me") return json({ login: pass.who, via: pass.via, machine: me?.host ?? null, link: ownLink(), version: VERSION, off: offPlugins() });
     if (path === "/api/state" && req.method === "GET") return json(store.doc.version ? store.doc : await store.load());
     if (path === "/api/state" && req.method === "POST") {
       const body = await req.json().catch(() => null);
@@ -905,7 +915,7 @@ const server = Bun.serve<{ who: string }>({
   },
 });
 
-console.log(`Shepherdr ${VERSION} on http://127.0.0.1:${server.port} (data ${DATA})${me && webOn() ? `, https://${me.dns}/shepherdr/` : ""}`);
+console.log(`Shepherdr ${VERSION} on http://127.0.0.1:${server.port} (data ${DATA})${me && webOn() ? `, ${ownLink()}` : ""}`);
 
 // the port is ours now: say where and this start's id (only this user can read it)
 writeFileSync(SERVICE_FILE, JSON.stringify({ port: server.port, id: SERVICE_ID, pid: process.pid, version: VERSION }) + "\n", { mode: 0o600 });

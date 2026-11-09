@@ -32,6 +32,24 @@ describe("through tailscale serve", () => {
     expect(gate(tailnet({ headers: { origin: "https://evil.example" } }), g, true, true)).toMatchObject({ ok: false });
     expect(gate(tailnet({ headers: { origin: "https://box.tailnet.example" } }), g, true, true)).toMatchObject({ ok: true });
   });
+  test("on another HTTPS port (GitHub #778), only that port's host and origin get in", () => {
+    const g2: Gate = { ...g, httpsPort: 8443 };
+    const at = (method = "GET", headers: Record<string, string> = {}) =>
+      tailnet({ method, headers: { host: "box.tailnet.example:8443", ...headers } });
+    expect(gate(at(), g2, false, true)).toMatchObject({ ok: true, via: "tailnet" });
+    expect(gate(tailnet(), g2, false, true)).toMatchObject({ ok: false, status: 421 });
+    expect(gate(tailnet({ headers: { host: "box.tailnet.example:443" } }), g2, false, true)).toMatchObject({ ok: false, status: 421 });
+    expect(gate(at("POST", { origin: "https://box.tailnet.example:8443", "x-shepherdr": "1" }), g2, false, true)).toMatchObject({ ok: true });
+    expect(gate(at("POST", { origin: "https://box.tailnet.example", "x-shepherdr": "1" }), g2, false, true)).toMatchObject({ ok: false, status: 403 });
+    expect(gate(at("GET", { origin: "https://box.tailnet.example:8443" }), g2, true, true)).toMatchObject({ ok: true });
+    expect(gate(at("GET", { origin: "https://box.tailnet.example:9443" }), g2, true, true)).toMatchObject({ ok: false, status: 403 });
+  });
+  test("443 set outright is the default: the bare name and :443 both get in", () => {
+    const g443: Gate = { ...g, httpsPort: 443 };
+    expect(gate(tailnet(), g443, false, true)).toMatchObject({ ok: true });
+    expect(gate(tailnet({ headers: { host: "box.tailnet.example:443" } }), g443, false, true)).toMatchObject({ ok: true });
+    expect(gate(tailnet({ headers: { host: "box.tailnet.example:8443" } }), g443, false, true)).toMatchObject({ ok: false, status: 421 });
+  });
   test("cross-site and preflight requests are refused", () => {
     expect(gate(tailnet({ headers: { "sec-fetch-site": "cross-site" } }), g, false, true)).toMatchObject({ ok: false });
     expect(gate(tailnet({ method: "OPTIONS" }), g, false, true)).toMatchObject({ ok: false });

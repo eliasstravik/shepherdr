@@ -5,6 +5,11 @@
 - On a Mac, you can talk over the agent in a window voice call to interrupt it, as on the web: the call uses
   Apple's echo cancellation, so the microphone stays open while the agent speaks. Other apps' sound dips slightly
   during a call. If echo cancellation can't run, the call works as before.
+- `shepherdr web https-port 8443` (or `./install.sh --https-port 8443`) shares the web app at
+  `https://<machine>:8443/shepherdr/`; the share moves within seconds, and every link Shepherdr gives follows (Settings
+  → Web, `herdr-artifact link`, `shepherdr web status`). Installs that never set one stay on 443 with nothing to do.
+- When tailscale won't share it, `shepherdr doctor`, the installer and Settings → Web say tailscale's own reason; a port
+  held by another app (a TCP forward) is named plainly, with a free port to use instead (GitHub #754, #778).
 
 ## 3.1.28
 

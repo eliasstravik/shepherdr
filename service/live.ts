@@ -23,7 +23,7 @@ export class Live {
   compat: Compat | null = null;
   private snap: string | null = null;
 
-  constructor(private hub: Hub, private store: Store, private me: () => Me | null, private version: string) {
+  constructor(private hub: Hub, private store: Store, private me: () => Me | null, private version: string, private link: () => string | null = () => null) {
     hub.on((e) => {
       if (e.type === "reset") { void this.machines(); this.agents(); }
       else if ("terminal" in e && e.terminal) this.agents();
@@ -36,7 +36,7 @@ export class Live {
     ws.data.seen = Date.now();
     this.pages.add(ws);
     const me = this.me();
-    ws.send(JSON.stringify({ type: "hello", version: this.version, login: ws.data.who, machine: me?.host ?? null, link: me ? `https://${me.dns}/shepherdr/` : null }));
+    ws.send(JSON.stringify({ type: "hello", version: this.version, login: ws.data.who, machine: me?.host ?? null, link: this.link() }));
     for (const [name, text] of this.views) ws.send(`{"type":"view","name":${JSON.stringify(name)},"value":${text}}`);
     if (this.snap) ws.send(this.snap);
     if (!this.views.has("state")) void this.store.load().then((d) => this.put("state", d));

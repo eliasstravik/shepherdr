@@ -70,11 +70,15 @@ It shares itself on your tailnet only (`tailscale serve`, never Funnel). `shephe
 
 ```text
 ./install.sh [--root DIR] [--dry-run] [--adopt] [--guard] [--keys ask|keep|ours] [--no-hooks] [--no-build] [--yes] [--force]
+             [--port N] [--https-port N]
 ./install.sh --web    the web app alone, without the Herdr window
 shepherdr update      the same kind again (layout, or web only), from the checkout it was installed from (git pull it first)
 shepherdr uninstall   [--root DIR] [--dry-run]: takes out what it installed and puts back what it replaced
 shepherdr doctor      [--root DIR]: checks files, links, shared copies, herdr-task and the programs it needs, and says how to update
 ```
+
+`--port N` moves the service off `127.0.0.1:7788`; `--https-port N` shares the web app on the tailnet's port N instead
+of 443, when something else here holds 443 (`shepherdr web https-port N` changes it later; [Web](web.md)). Updates keep both.
 
 `--root DIR` installs under another folder instead of your home (it mirrors `.config/herdr-app`, `.local/bin`,
 `.config/herdr-core/templates`, `.claude`, `.codex`): a scratch try you can look through and diff. It never starts
