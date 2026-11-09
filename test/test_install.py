@@ -94,31 +94,49 @@ class Install(unittest.TestCase):
         self.assertRegex(again, r"files: \d+ same\n", "a second run changes nothing")
         self.assertFalse(os.path.exists(self.p(".herdr/sync-hold")))
 
-        # A file the person changed is kept, the new one goes beside it.
+        # A file the person changed: a template is kept with the new one beside it; a mod file Shepherdr didn't
+        # change is kept as it is; one Shepherdr changed too is replaced (theirs could break the new mod, #766), theirs
+        # to the backup folder, said.
         mine = self.p(APP, "mods/toasts/main.js")
         with open(mine, "a") as f:
             f.write("// mine\n")
+        same = self.p(APP, "mods/toasts/ui.js")
+        with open(same, "a") as f:
+            f.write("// mine too\n")
+        tpl = self.p(".config/herdr-core/templates/worker.md")
+        with open(tpl, "a") as f:
+            f.write("mine\n")
         src = tempfile.mkdtemp(prefix="shepherdr-src-")
         try:
             shutil.copytree(ROOT, os.path.join(src, "s"), ignore=shutil.ignore_patterns(".git"))
             s = os.path.join(src, "s")
-            with open(os.path.join(s, "mods/toasts/main.js"), "a") as f:
-                f.write("// release\n")
-            with open(os.path.join(s, "mods/jump/main.js"), "a") as f:
-                f.write("// release\n")
+            for f_ in ("mods/toasts/main.js", "mods/jump/main.js"):
+                with open(os.path.join(s, f_), "a") as f:
+                    f.write("// release\n")
+            with open(os.path.join(s, "templates/worker.md"), "a") as f:
+                f.write("release\n")
             up = run("update", "--root", self.root, "--source", s).stdout
-            self.assertIn("1 keep", up)
-            self.assertTrue(open(mine).read().endswith("// mine\n"))
-            self.assertTrue(open(mine + ".new").read().endswith("// release\n"))
+            self.assertIn("1 replace", up)
+            self.assertTrue(open(mine).read().endswith("// release\n"), "Shepherdr's changed mod file goes in")
+            self.assertFalse(os.path.exists(mine + ".new"))
+            backup = re.search(r"yours is kept as (\S+)", up).group(1)
+            self.assertTrue(open(backup).read().endswith("// mine\n"), "the person's copy is in the backup")
+            self.assertIn("Shepherdr changed .config/herdr-app/mods/toasts/main.js since you edited it", up)
+            self.assertTrue(open(same).read().endswith("// mine too\n"), "a mod file Shepherdr didn't change stays the person's")
+            self.assertFalse(os.path.exists(same + ".new"))
+            self.assertTrue(open(tpl).read().endswith("mine\n"))
+            self.assertTrue(open(tpl + ".new").read().endswith("release\n"))
             self.assertTrue(open(self.p(APP, "mods/jump/main.js")).read().endswith("// release\n"))
+            d = run("doctor", "--root", self.root, ok=False).stdout
+            self.assertIn("worker.md.new: merge it in", d)
         finally:
             shutil.rmtree(src)
 
-        # Uninstall: everything back as it was, except the mod the person changed.
+        # Uninstall: everything back as it was, except the mod and the template the person changed.
         run("uninstall", "--root", self.root)
         after = tree(self.root)
         left = sorted(set(after) - set(self.before))
-        self.assertTrue(all(x.startswith(f"{APP}/mods/toasts/") or x.startswith(DATA_PLACES) for x in left), left)
+        self.assertTrue(all(x.startswith((f"{APP}/mods/toasts/", ".config/herdr-core/templates/worker.md")) or x.startswith(DATA_PLACES) for x in left), left)
         for k, v in self.before.items():
             if k.endswith(".json"):
                 self.assertEqual(json.loads(after[k]), json.loads(v), k)

@@ -35,7 +35,7 @@ What goes where (each under --root, default your home):
 
 Never overwritten: a mod, layout or lib file that isn't ours (it refuses, naming each; --adopt backs
 them up and takes them over), a key you set (unless you say yes), a file you changed since the last
-install (the new copy goes beside it as <file>.new). Everything it replaces goes to
+install (the new copy goes beside it as <file>.new; a mod file Shepherdr changed too is replaced, yours backed up). Everything it replaces goes to
 .config/herdr-app/.shepherdr-backup/<time>/ first; uninstall puts it back. What it installed is
 recorded in .config/herdr-app/data/shepherdr/installed.json (a sha256 per file), so running it again
 changes only what changed. While it replaces a helper or template, a sync hold (sync-hold in
@@ -703,7 +703,7 @@ def plan_files(r, rec, items, adopt):
 def apply_mod(r, mod, acts, rec, gone):
     """Puts one mod's changes in place in one swap. gone: recorded files no longer shipped."""
     target = r.p(f"{APP}/mods/{mod}")
-    changes = [a for a in acts if a[2] in ("new", "update", "adopt", "keep")] + gone
+    changes = [a for a in acts if a[2] in ("new", "update", "adopt", "keep", "replace")] + gone
     if not changes:
         return
     if r.dry:
@@ -722,7 +722,13 @@ def apply_mod(r, mod, acts, rec, gone):
         sub = os.path.relpath(rel, f"{APP}/mods/{mod}")
         dest = os.path.join(stage, sub)
         if how == "keep":
-            atomic_write(dest + ".new", data, mode)
+            # Shepherdr's copy is unchanged since the person's edit: theirs stays, nothing to merge
+            r.notes.append(f"kept your {rel} (Shepherdr hasn't changed it since)")
+        elif how == "replace":
+            dest_b = r.backup(rel)
+            atomic_write(dest, data, mode)
+            r.notes.append(f"Shepherdr changed {rel} since you edited it: the new one is in, yours is kept as {dest_b}"
+                           " (put your change back into the new one if you still want it)")
         elif how in ("new", "update", "adopt"):
             atomic_write(dest, data, mode)
     for rel in gone:
@@ -992,6 +998,10 @@ def cmd_install(a, update=False):
         raise Stop(f"these are someone else's (not installed by Shepherdr, and different):\n  {shown}\n"
                    "Nothing was changed. Rename your own mods, or run with --adopt to back these up and take them over.")
     old_files = (rec or {}).get("files", {})
+    # A mod file the person changed that Shepherdr changed too since: theirs could no longer load with the rest of the
+    # new mod (#766), so Shepherdr's goes in and theirs to the backup folder, said in the notes.
+    actions = [(g, rel, "replace" if how == "keep" and g in mods and rel in old_files and old_files[rel] != fsha(rel, data)
+                else how, data, mode) for g, rel, how, data, mode in actions]
     shipped = {x[1] for x in actions}
     gone = [rel for rel in old_files if rel.startswith(f"{APP}/") and rel not in shipped and not rel.startswith(f"{APP}/keys")
             and rel != f"{BIN}/herdr-app" and fsha(rel, read(r.p(rel))) == old_files[rel]]
@@ -1332,7 +1342,8 @@ def cmd_doctor(a):
         if have is None:
             bad.append(f"missing: {rel}")
         elif fsha(rel, have) != sha:
-            warn.append(f"changed since install (kept): {rel}")
+            warn.append(f"changed since install (kept): {rel}" + (f"; Shepherdr's newer one is beside it as {os.path.basename(rel)}.new:"
+                                                                     " merge it in, then remove the .new" if os.path.exists(r.p(rel) + ".new") else ""))
     for name, dest in rec.get("links", {}).items():
         path = r.p(f"{BIN}/{name}")
         if not os.path.islink(path) or os.path.realpath(path) != os.path.realpath(dest):
