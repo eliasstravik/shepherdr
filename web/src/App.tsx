@@ -490,6 +490,8 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
   const helper = [...(task.subagents ?? [])].reverse().find((s) => s.status !== 'done')
   const sub = (
     <span className="flex min-w-0 items-center gap-1.5">
+      {/* its status leads its quiet line, so Back alone hangs in the gutter and the title starts where the Assistant's does */}
+      {phone ? null : <Dot s={task.status} p={task.report?.progress} className="size-3" />}
       <span className="shrink-0 text-fg3">{ref}</span>
       {doing ? <span className="flex min-w-0 items-center gap-1.5"><span aria-hidden className="text-fg3">·</span>{doing}</span> : task.base ? <span className="min-w-0 truncate"><span aria-hidden className="text-fg3">· </span>→ {task.base}</span> : null}
       {helper ? <span data-task-subagent className="flex min-w-0 shrink-[4] items-center gap-1.5 whitespace-nowrap"><span aria-hidden className="text-fg3">·</span><span className="truncate">{`${helper.title} ${helper.status === 'needs' ? 'needs it' : 'at work'}`}</span></span> : null}
@@ -540,9 +542,9 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
       className={clsx('@container/task flex min-h-0 min-w-0 flex-1 flex-col border-line', !focus && !middle && 'border-l')}
     >
       {/* as the Assistant's header, in the chat's reading column: its title on the messages' left edge, where the
-          Assistant's is; Back and its status before it, hung in the gutter when there's room (Head's lead). Its views
+          Assistant's is; Back before it, hung in the gutter when there's room (Head's lead). Its views
           (Chat, Terminal, …) on the right; without room for both they wrap under the title, which keeps at least 12rem */}
-      <Head conversation lead={<>{middle ? <SpacesButtons /> : null}<LeadBack onClick={back} /><Dot s={task.status} p={task.report?.progress} halo /></>}>
+      <Head conversation lead={<>{middle ? <SpacesButtons /> : null}<LeadBack onClick={back} /></>}>
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-1.5 py-1.5">
           <div className="flex min-w-0 flex-[1_1_12rem] items-center gap-2.5">
             <Who name={task.name} kind={sub} />

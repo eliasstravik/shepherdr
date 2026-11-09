@@ -1144,8 +1144,8 @@ export function Head({ children, className, conversation, lead }: { children: Re
       const shown = labels.reduce((n, e) => n + e.offsetWidth, 0)
       const all = labels.reduce((n, e) => n + e.scrollWidth, 0)
       const bare = l.offsetWidth - shown
-      // the gutter: from the header's edge to the title's, keeping 8px clear of each
-      const room = c.getBoundingClientRect().left - o.getBoundingClientRect().left + LEAD_PAD - 16
+      // the gutter: from the header's edge to the title's, 4px clear of the edge and 6px of the title
+      const room = c.getBoundingClientRect().left - o.getBoundingClientRect().left + LEAD_PAD - 10
       setHang(bare + all <= room ? 'label' : bare <= room ? 'icon' : null)
     }
     fit()
@@ -1159,8 +1159,9 @@ export function Head({ children, className, conversation, lead }: { children: Re
       {conversation ? (
         <div ref={col} data-conversation-head className="relative mx-auto flex min-h-[51px] w-full max-w-read min-w-0 items-center gap-2.5 pr-3 pl-5 [&_.hit]:rounded-full">
           {lead ? (
-            // hung: its right edge 8px before the title's left (the column's 20px start)
-            <div ref={box} data-lead className="flex shrink-0 items-center gap-1.5 group-data-hang/head:absolute group-data-hang/head:right-[calc(100%-0.75rem)] group-data-hang/head:top-1/2 group-data-hang/head:-translate-y-1/2">
+            // hung: its right edge 6px before the title's left (the column's 20px start). In line, on the title's row
+            // (the header's first: its views may wrap under it), its 28px centred on the title's 38px
+            <div ref={box} data-lead className="mt-[11.5px] flex shrink-0 items-center gap-1.5 self-start group-data-hang/head:absolute group-data-hang/head:mt-0 group-data-hang/head:right-[calc(100%-0.875rem)] group-data-hang/head:top-1/2 group-data-hang/head:-translate-y-1/2">
               {lead}
             </div>
           ) : null}
