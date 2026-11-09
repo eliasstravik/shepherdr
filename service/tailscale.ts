@@ -17,9 +17,14 @@ async function run(args: string[]): Promise<{ ok: boolean; out: string }> {
 /** The machine owner's login and the machine's tailnet name, or null without Tailscale. */
 export async function whoami(): Promise<Me | null> {
   const r = await run(["status", "--json"]);
-  if (!r.ok) return null;
+  return r.ok ? meOf(r.out) : null;
+}
+
+/** `tailscale status --json` -> its owner and name. UserIDs can pass 2^53, where JSON.parse rounds them and the
+ *  lookup into User (keyed by the exact id) misses: they're read as strings. */
+export function meOf(status: string): Me | null {
   try {
-    const s = JSON.parse(r.out);
+    const s = JSON.parse(status.replace(/"UserID":\s*(\d+)/g, '"UserID":"$1"'));
     const user = s.User?.[String(s.Self?.UserID)];
     const dns = String(s.Self?.DNSName ?? "").replace(/\.$/, "");
     if (!user?.LoginName || !dns) return null;
