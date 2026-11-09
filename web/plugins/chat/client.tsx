@@ -98,7 +98,7 @@ function Bubble({ msg, chat, from, out, last, pics, images, writing }: { msg: Me
   const [width, setWidth] = useState(0)
   const shots = pics?.length ? (
     <Thumbs
-      files={pics.map((m) => ({ name: m.file!.alt || m.file!.name, path: m.file!.path, url: fileUrl(chat.key, m.file!.path, false, 'thumb') }))}
+      files={pics.map((m) => ({ name: m.file!.alt || m.file!.name, path: m.file!.path, url: fileUrl(chat.key, m.file!.path, false, 'thumb'), caption: caption(m) }))}
       chat={chat.key} you={you} faded={!!out && out.state === 'sending'} width={width}
       open={(i) => setUI({ photo: out ? { chat: chat.key, file: pics[i].file } : { chat: chat.key, msg: pics[i].id } })}
     />
@@ -612,6 +612,12 @@ export const fileUrl = (chat: string, path: string, download = false, small?: 't
   (!download && small !== 'poster' && previews.get(baseName(path))) ||
   `api/file?chat=${encodeURIComponent(chat)}&path=${encodeURIComponent(path)}${download ? '&download=1' : ''}${small ? `&${small}=1` : ''}`
 
+/** an agent's words for its picture ("Before"), shown under it: none when they only repeat its file's name */
+const caption = (m: Message) => {
+  const alt = m.file?.alt?.trim()
+  return alt && m.who === 'agent' && alt !== m.file!.name && alt !== m.file!.name.replace(/\.[^.]+$/, '') ? alt : undefined
+}
+
 /** a picture on its own, with no words: it shows as a tile, and the viewer pages through every one in the chat */
 export const isPicture = (m: Message) => !!m.file && !m.text && !m.answered && isImage(m.file.name)
 
@@ -682,7 +688,7 @@ function Album({ msgs, chat, from, out, last: lastPart }: { msgs: Message[]; cha
       {msgs[0].newSession ? <SessionLine /> : null}
       {msgs[0].reply ? <ReplyLine q={msgs[0].reply} chat={chat.key} you={you} /> : null}
       <Thumbs
-        files={msgs.map((m) => ({ name: m.file!.alt || m.file!.name, path: m.file!.path, url: fileUrl(chat.key, m.file!.path, false, 'thumb') }))}
+        files={msgs.map((m) => ({ name: m.file!.alt || m.file!.name, path: m.file!.path, url: fileUrl(chat.key, m.file!.path, false, 'thumb'), caption: caption(m) }))}
         chat={chat.key} you={you} width={width}
         open={(i) => setUI({ photo: out ? { chat: chat.key, file: msgs[i].file } : { chat: chat.key, msg: msgs[i].id } })}
       />

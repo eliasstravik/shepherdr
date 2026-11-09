@@ -452,9 +452,11 @@ export function mediaIn(text, { cwd = null, home = null } = {}) {
     if (p.split("/").includes("..")) return null;
     return p;
   };
+  // where each picture was: a mark in its place, read again below (\u0000 never comes in a message)
   const take = (path, alt) => {
-    if (!media.some((m) => m.path === path) && media.length < MEDIA_MAX) media.push({ path, name: path.split("/").pop(), alt: alt.trim(), kind: mediaKind(path) });
-    return true;
+    let i = media.findIndex((m) => m.path === path);
+    if (i < 0 && media.length < MEDIA_MAX) i = media.push({ path, name: path.split("/").pop(), alt: alt.trim(), kind: mediaKind(path) }) - 1;
+    return i;
   };
   // the words outside code: fenced blocks and inline code stay as written
   const parts = src.split(/(^ {0,3}(?:```|~~~)[^\n]*\n[\s\S]*?(?:\n {0,3}(?:```|~~~)[^\n]*(?:\n|$)|$))/m);
@@ -465,13 +467,22 @@ export function mediaIn(text, { cwd = null, home = null } = {}) {
       return bit.replace(/(!?)\[([^\]\n]*)\]\(\s*(<[^>\n]+>|[^\s()]+(?:\([^\s()]*\)[^\s()]*)*)(?:\s+"[^"\n]*")?\s*\)/g, (whole, bang, words, target) => {
         const path = where(target);
         if (!path) return whole;
-        take(path, words);
-        return bang ? "" : words;
+        const i = take(path, words);
+        return bang ? (i >= 0 ? `\u0000${i}\u0000` : "") : words;
       });
     }).join("");
   }).join("");
   if (!media.length) return { text: src, media };
-  // the lines a picture leaves empty go, and the gaps they leave close
-  const words = out.split("\n").map((l) => l.replace(/[ \t]+$/, "")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  // a line with one picture and a short label ("Before:", "**After**") gives the picture its caption and goes; the lines
+  // a picture leaves empty go, and the gaps they leave close
+  const lines = out.split("\n").flatMap((l) => {
+    const marks = [...l.matchAll(/\u0000(\d+)\u0000/g)];
+    if (!marks.length) return [l.replace(/[ \t]+$/, "")];
+    const rest = l.replace(/\u0000\d+\u0000/g, "").replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "").trim();
+    const label = rest.replace(/^[*_]+|[*_]+$/g, "").replace(/:$/, "").replace(/^[*_]+|[*_]+$/g, "").trim();
+    if (marks.length === 1 && label && rest.length <= 40 && (/:[*_]*$/.test(rest) || /^[*_]/.test(rest))) { media[Number(marks[0][1])].alt = label; return []; }
+    return rest ? [l.replace(/\u0000\d+\u0000[ \t]*/g, "").replace(/[ \t]+$/, "")] : [];
+  });
+  const words = lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
   return { text: words, media };
 }

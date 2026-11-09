@@ -10,6 +10,12 @@ test("a Markdown picture of a local file leaves the words and shows under them",
   expect(r.media).toEqual([{ path: "/tmp/shots/after.png", name: "after.png", alt: "after", kind: "image" }]);
 });
 
+test("a short label on a picture's line becomes its caption", () => {
+  const r = mediaIn("The card now previews it.\n\nBefore: ![before](/s/before.png)\n\n**After:** ![](/s/after.png)\n\n- ![x](/s/x.png) see how the long words on this line stay as they are");
+  expect(r.text).toBe("The card now previews it.\n\n- see how the long words on this line stay as they are");
+  expect(r.media.map((m) => m.alt)).toEqual(["Before", "After", "x"]);
+});
+
 test("a link to a video keeps its words; the video shows", () => {
   const r = mediaIn("See [the recording](/tmp/rec.mp4) of it.");
   expect(r.text).toBe("See the recording of it.");
