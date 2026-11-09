@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## 3.1.27
 
-Shepherdr keeps your tasks, settings and secrets in folders of its own now, and moves them there for you.
+Shepherdr keeps your tasks, settings and secrets in folders of its own now, and moves them there for you. Chats show
+pictures and artifact previews, and you can answer task agents' questions right in the chat.
 
 - Updating moves Shepherdr's data out of `~/.herdr` into its own folders, once per machine: `~/.config/shepherdr`
   (settings), `~/.local/share/shepherdr` (tasks, artifacts, secrets, new tasks' worktrees) and
@@ -15,6 +16,16 @@ Shepherdr keeps your tasks, settings and secrets in folders of its own now, and 
   `shepherdr migrate --rollback` puts everything back in `~/.herdr`. Once every machine is updated,
   `shepherdr migrate --cleanup-legacy --yes` removes the old links.
 - A repo's tasks now follow it when you rename or move its folder.
+- Agents' pictures and videos show in the chat, and an artifact's card shows a preview that opens in place.
+- A task agent's question shows as a card in the chat on every machine, with each option's preview and room for a
+  note.
+- The Accept card shows the task's proof inside it.
+- Voice call is a small button beside Search; on a call it turns into Mute and End. The call screen shows the crook
+  instead of the orb.
+- A task's tabs are Chat, Terminal, Artifacts and Browser. Files and Changes stay in the space's side panels.
+- Enter sends on a computer and makes a new line on a phone, in every chat box.
+- Fewer false "Needs you": a quiet agent needs you only after 20 seconds, and a long command still counts as work.
+- The task view's Back link lines up with the tabs.
 
 ## 3.1.26
 

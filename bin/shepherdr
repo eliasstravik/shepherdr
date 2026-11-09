@@ -63,7 +63,7 @@ import sys
 import tempfile
 import time
 
-VERSION = "3.1.26"
+VERSION = "3.1.27"
 HERDR_APP_MIN = "0.1.12"
 HC_MIN = "0.1.17"
 
