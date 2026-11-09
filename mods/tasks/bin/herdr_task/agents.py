@@ -55,14 +55,24 @@ def detail(k):
 
 def agent_running(k):
     fg = k.get("foreground") or {}
-    if fg.get("name"):
-        if os.path.basename(fg["name"]) not in SHELLS:
-            return True
+    fg_name = os.path.basename(fg.get("name") or "")
+    if fg_name and fg_name not in SHELLS:
+        return True
+    if fg_name:
         # fish keeps the agent its child, in its own process group (#780): the terminal's foreground
         # stays the shell running its launch command (fish -ic "claude …; exec fish -i") the whole
         # time. Only once it exec'ed its plain interactive shell has the agent exited.
-        return runs_command(fg.get("argv"))
-    return bool(k.get("agent")) and k.get("agent") not in SHELLS
+        if runs_command(fg.get("argv")):
+            return True
+        # Some terminal implementations retain a plain shell foreground record while the agent
+        # reports its live status separately. An idle prompt without an active status is stopped.
+        status = k.get("status")
+        status = status.get("state") if isinstance(status, dict) else status
+        agent = os.path.basename(str(k.get("agent") or ""))
+        if agent not in SHELLS and status in RANK and status != "idle":
+            return True
+        return False
+    return bool(k.get("agent")) and os.path.basename(str(k.get("agent"))) not in SHELLS
 
 
 def runs_command(argv):
