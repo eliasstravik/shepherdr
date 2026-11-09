@@ -418,18 +418,6 @@
   }
 }
 
-/* A task header's leading buttons (Back) out of the centred reading column to the task's left gutter, where its tabs
-   start (12px); the margin after it gives the room back, so its status and title stay where they were. Needs the
-   @container/task around it. */
-@utility to-task-gutter {
-  --pull: calc(max(0px, (100cqw - 720px) / 2) + 0.5rem);
-  margin-left: calc(-1 * var(--pull));
-  margin-right: var(--pull);
-  @media (width >= 1920px) {
-    --pull: calc(max(0px, (100cqw - 800px) / 2) + 0.5rem);
-  }
-}
-
 /* Rendered agent replies (markdown): paragraphs, lists, inline code, code blocks that scroll sideways */
 @utility prose-reply {
   /* a long link or path breaks rather than pushing the bubble wider */

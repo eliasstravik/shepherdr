@@ -522,28 +522,30 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
       className={clsx('@container/task flex min-h-0 min-w-0 flex-1 flex-col border-line', !focus && !middle && 'border-l')}
     >
       <Head conversation>
-        {/* at the task's left edge, in line with its tabs below, however wide the reading column centres the rest */}
-        <div className="to-task-gutter flex shrink-0 items-center gap-2.5">
-          {middle ? (
-            <>
-              <MenuButton />
-              <PlacesToggle when="closed" />
-            </>
-          ) : null}
-          {/* in a narrow column (the side's) Back is its arrow alone, so the title keeps the room */}
-          <button type="button" onClick={back} aria-label="Tasks" className="press-dim relative inline-flex h-7 shrink-0 items-center gap-0.5 rounded-full px-1.5 text-[0.8125rem] text-fg2 after:absolute after:-inset-y-2 after:inset-x-0 hover:bg-hover hover:text-fg @lg/task:pr-2.5">
-            <BackIcon className={ic} />
-            <span aria-hidden className="hidden @lg/task:inline">Tasks</span>
-          </button>
-        </div>
-        <Dot s={task.status} p={task.report?.progress} halo />
-        <Who name={task.name} kind={sub} />
-        {/* its buttons close together, as a toolbar's, so the name keeps the room */}
-        <div className="flex shrink-0 items-center gap-1">
-          {tools}
+        {/* one row, as the Assistant's header, in the chat's reading column: Back, its status and title on the left, its
+            views (Chat, Terminal, …) on the right. Without room for both, the views wrap under the title, on Back's left
+            edge; Back, status, title and its buttons keep at least 20rem before they do */}
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-1.5 py-2">
+          <div className="flex min-w-0 flex-[1_1_20rem] items-center gap-2.5">
+            {middle ? (
+              <>
+                <MenuButton />
+                <PlacesToggle when="closed" />
+              </>
+            ) : null}
+            {/* in a narrow column (the side's) Back is its arrow alone, so the title keeps the room */}
+            <button type="button" onClick={back} aria-label="Tasks" className="press-dim relative inline-flex h-7 shrink-0 items-center gap-0.5 rounded-full px-1.5 text-[0.8125rem] text-fg2 after:absolute after:-inset-y-2 after:inset-x-0 hover:bg-hover hover:text-fg @lg/task:pr-2.5">
+              <BackIcon className={ic} />
+              <span aria-hidden className="hidden @lg/task:inline">Tasks</span>
+            </button>
+            <Dot s={task.status} p={task.report?.progress} halo />
+            <Who name={task.name} kind={sub} />
+            {/* its buttons close together, as a toolbar's, so the name keeps the room */}
+            {tools ? <div className="flex shrink-0 items-center gap-1">{tools}</div> : null}
+          </div>
+          <TaskTabs task={task} head />
         </div>
       </Head>
-      <TaskTabs task={task} />
       <Scroll chat><TabBody task={task} chatKey={g?.chat ?? ''}>{body}</TabBody></Scroll>
     </section>
   )

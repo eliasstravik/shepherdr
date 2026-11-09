@@ -121,7 +121,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 
 | Element | Window | Web | State |
 |---|---|---|---|
-| Tabs | P:363-372 Chat, Terminal, Pull request (once it has one), Artifacts, Browser (add-ons on); no Files or Changes (SHEP-143: the space's side panels) | N TaskTabs (registry order 10-50, itemsFor) | ✓ |
+| Tabs | P:363-372 Chat, Terminal, Pull request (once it has one), Artifacts, Browser (add-ons on); no Files or Changes (SHEP-143: the space's side panels) | N TaskTabs (registry order 10-50, itemsFor): on a desktop the header's own row, a segmented control right of the title as the Assistant's Chat · Terminal, wrapping under the title without room (SHEP-176); a phone's row under its header | ◇ one header row on the web's wider task view; the window's thread head is a narrow side block (3 rows, layouts/shepherdr.json 127) with no room beside its title |
 | Old Files/Changes links | voice nav: the service sends a task's files/changes as pr, else chat | `?item=files`/`diff` opens Pull request, else Chat (nav itemOfUrl); a saved panel item falls back to Terminal | ✓ |
 | Tabs without an agent | P:340-348 always | A TaskTabs always | ✓ fixed (hidden until an agent started) |
 | Switch in place | P:336 body stack | N TabBody | ✓ |
