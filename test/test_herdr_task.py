@@ -2150,6 +2150,42 @@ class ReviewerLine(unittest.TestCase):
                          % (json.dumps(wt), json.dumps(main)))
 
 
+
+class ReadOnlyStore(unittest.TestCase):
+    """#841: in a read-only sandbox (a Codex reviewer's) show and list read the task list (write="try");
+    a change is refused with a clear message, never a traceback."""
+
+    def test_reads_without_a_writable_lock(self):
+        import builtins
+        import errno
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        from herdr_task import store
+        d = tempfile.mkdtemp()
+        folder = os.path.join(d, "proj")
+        os.makedirs(folder)
+        loc = {"folder": folder, "kind": "folder", "name": "proj", "common": None}
+        with mock.patch.object(store, "STORE", os.path.join(d, "tasks")):
+            with store.Store(loc) as s:
+                s.data["tasks"].append({"id": 1, "title": "x", "state": "running"})
+                s.dirty = True
+            real = builtins.open
+
+            def ro(path, mode="r", *a, **k):
+                if any(c in mode for c in "wax+"):
+                    raise OSError(errno.EROFS, "Read-only file system", path)
+                return real(path, mode, *a, **k)
+            with mock.patch.object(store, "open", ro, create=True):
+                for write in ("try", False):
+                    with store.Store(loc, write=write) as s:
+                        self.assertEqual([t["id"] for t in s.data["tasks"]], [1])
+                        s.dirty = True  # what show learns is kept only where it can be
+                with self.assertRaises(store.Fail) as e:
+                    with store.Store(loc):
+                        pass
+                self.assertIn("read-only", str(e.exception))
+
+
 class Store:
     """Enough of herdr_task.store.Store for the commands, in memory."""
     def __init__(self, tasks):

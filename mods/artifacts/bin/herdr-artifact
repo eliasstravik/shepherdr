@@ -17,6 +17,7 @@ mod with `herdr-app check`, so a broken artifact never reaches the person.
 
 import argparse
 import contextlib
+import errno
 import fcntl
 import hashlib
 import io
@@ -143,9 +144,23 @@ class Store:
         self.dirty = False
 
     def __enter__(self):
-        os.makedirs(STORE, exist_ok=True)
-        self.lock = open(os.path.join(STORE, "." + os.path.basename(self.path) + ".lock"), "a")
-        fcntl.flock(self.lock, fcntl.LOCK_EX if self.write else fcntl.LOCK_SH)
+        lock = os.path.join(STORE, "." + os.path.basename(self.path) + ".lock")
+        try:
+            os.makedirs(STORE, exist_ok=True)
+            self.lock = open(lock, "a")
+        except OSError as e:
+            # Nothing can be written here (a read-only sandbox: a Codex reviewer's, #841): a read
+            # goes on under a shared lock on the file as it is; a change is refused, clearly.
+            if self.write or e.errno not in (errno.EROFS, errno.EACCES, errno.EPERM):
+                if e.errno in (errno.EROFS, errno.EACCES, errno.EPERM):
+                    raise Fail(f"Can't change artifacts here: {STORE} is read-only (a sandbox?). Run this outside it.")
+                raise
+            try:
+                self.lock = open(lock)
+            except OSError:
+                self.lock = None
+        if self.lock:
+            fcntl.flock(self.lock, fcntl.LOCK_EX if self.write else fcntl.LOCK_SH)
         try:
             with open(self.path) as f:
                 self.data = json.load(f)
@@ -167,8 +182,9 @@ class Store:
                     f.write("\n")
                 os.replace(tmp, self.path)
         finally:
-            fcntl.flock(self.lock, fcntl.LOCK_UN)
-            self.lock.close()
+            if self.lock:
+                fcntl.flock(self.lock, fcntl.LOCK_UN)
+                self.lock.close()
 
     def find(self, ref):
         for a in self.data["artifacts"]:

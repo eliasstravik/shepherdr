@@ -54,7 +54,7 @@ def cmd_list(args):
     for folder in folders:
         if not os.path.isdir(folder):
             continue
-        with Store(locate(folder)) as s:
+        with Store(locate(folder), write="try") as s:
             out = []
             archived = sum(1 for t in s.data["tasks"] if t.get("archived"))
             for t in s.data["tasks"]:
@@ -206,7 +206,7 @@ def set_notes(t, args):
 
 
 def cmd_show(args):
-    with open_store(args) as s:
+    with open_store(args, write="try") as s:
         t = s.find(args.id)
         live = [detail(k) for k in live_agents(s.key(t))]
         refresh_sessions(s, t, live)
