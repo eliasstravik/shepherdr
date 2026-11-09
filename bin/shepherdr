@@ -1321,7 +1321,8 @@ def github_checks_check(root):
     out, seen = [], set()
     for f in names:
         try:
-            d = json.load(open(os.path.join(folder, f)))
+            with open(os.path.join(folder, f)) as fh:
+                d = json.load(fh)
         except (OSError, ValueError):
             continue
         repo = (d.get("github") or {}).get("repo") if isinstance(d, dict) else None
