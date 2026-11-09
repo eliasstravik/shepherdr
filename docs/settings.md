@@ -6,7 +6,7 @@ drops the space's own, and it inherits again. A few settings are one for every s
 
 ## Where you set them
 
-- **Settings, the level switch.** At the top of each page a space can set its own of (Agents, Tasks, Autopilot,
+- **Settings, the level switch.** At the top of each page a space can set its own of (Agents, HolyCow Agents, Tasks, Autopilot,
   Notify, Secrets): *Applies to: Everywhere ⌄*. The picker lists Everywhere, then every space by machine (a Find box
   once there are many). Pages that are one for every space (Machines, Window, Web) say so instead.
 - **A space's menu › Space settings…** opens Settings on that space, in the window and on the web.
@@ -154,3 +154,32 @@ your original image or the local image cache. Older Fade settings retain their a
 
 The macOS picker uses Apple’s Command Line Tools. Linux uses the desktop portal and PyGObject /
 GdkPixbuf, as the chat attachment picker does.
+
+
+## HolyCow Agents
+
+Install the [HolyCow skills](https://github.com/NeuralHerd/HolyCow) on each machine that runs them, then enable
+**Use HolyCow** in **HolyCow Agents**. It is off on a fresh install. The Assistant uses HolyCow's guide to select
+the relevant skill for software work; there is no mandatory sequence and routine questions need no skill task.
+
+Guide, Init, Compass, Refine, Lab, Plan, Build, Review, PR and Retro each have their own Claude Code, Codex or
+Cursor model picker, including the selected CLI's reasoning and speed options. Choices inherit from Everywhere
+unless a space sets its own. **Use role model** removes a global skill choice; a space's **Reset** restores
+inheritance. Unset Guide tasks follow Assistant, Review follows Reviewer, and the others follow Workers.
+Guide's picker controls delegated Guide tasks, not the already-running Assistant.
+
+The Assistant creates work with `herdr-task add "Title" --skill hc-build --prompt "Scope and evidence"` (or another
+skill id). The chosen skill is saved on the task. Explicit task model/agent overrides win over its skill's model.
+Changing a skill choice applies to new launches; running sessions and already-queued commands keep their choice.
+`herdr-task edit <id> --skill hc-plan` changes a task's skill; `--skill default` removes it.
+
+Role instructions still provide BossGoat's task, status, proof and review rules. The task also receives the path
+to the selected installed `SKILL.md` and must read it and its references. Repo-local skills take precedence over
+home-installed skills; the selected CLI's skills folder and `.agents/skills` are supported (Cursor also accepts
+shared `.claude/skills`). Missing skills stop the launch with an installation message instead of silently skipping
+them. Existing role instruction files are not overwritten. Remove old hard-coded model routing from custom
+instructions when adopting these settings.
+
+For a HolyCow task whose review is on, its existing worker-led review uses the **Review** model and `hc-review`
+instructions. Review runs read-only regardless of the model picker's permission choice. This does not enable
+review when it is off or add another review loop. Unmarked tasks continue to use the ordinary Workers/Reviewer settings.

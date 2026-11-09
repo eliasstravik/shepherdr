@@ -18,6 +18,7 @@ import time
 from .base import ENTRY, Fail, git, hc_json, now, run, WORKTREES
 from .settings import agent_key, ASSISTANT_TEMPLATES, bare, BRANCH_PATTERN, branch_pattern_problem, notes, notes_part, review_limits, settings_block, settings_for
 from .templates import instructions
+from .holycow import skill_note
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
 from .github import finish, remote_of
 from .browsers import browser_line, browser_path
@@ -305,7 +306,7 @@ def retag_tabs(s):
 def closing_line(s, task, parent=None, argv=None):
     """How the worker finishes: every task, worktree or in the folder, says ready with a summary.
     It names this herdr-task by its full path: only that form runs without asking (own_argv)."""
-    done = "finished and committed" if task.get("mode") == "worktree" else "finished"
+    done = "finished and committed" if task.get("mode") == "worktree" and task.get("skill") != "hc-review" else "finished"
     ht = own_path()
     text = (f"When the work is {done}, run `{ht} ready {s.ref(task)} --folder {shlex.quote(s.loc['folder'])} "
             f"--summary \"<what the person now sees or can do, plain words, at most {SUMMARY_MAX} characters>\"` (optionally "
@@ -348,6 +349,20 @@ def where_line(task):
     return f"You work in {task['worktree']} on branch {task['branch']}{base}."
 
 
+def holycow_brief(s, task, space=None, argv=None):
+    if not task.get("skill"):
+        return ""
+    from .settings import worker_argv, task_settings
+    argv = argv or worker_argv(s, task, space)
+    folder = task.get("worktree") or s.loc["folder"]
+    text = skill_note(task["skill"], folder, agent_key(argv), s.loc["folder"])
+    if review_limits(s, task)[0]:
+        reviewer = next(r["value"] for r in task_settings(s, task, space, argv) if r["label"] == "Reviewer")
+        text += ("\nFor the existing review round only, give your reviewer its role instructions and these skill instructions: "
+                 + skill_note("hc-review", folder, reviewer["agent"], s.loc["folder"]) + " Use the Reviewer line's read-only command.")
+    return text
+
+
 def brief(s, task, parent=None, space=None, argv=None):
     instructions("reviewer")  # the file its review's reviewer gets (WORKER_MD)
     start = notes_part("Before you start", notes(s, task, "start", space))
@@ -355,12 +370,13 @@ def brief(s, task, parent=None, space=None, argv=None):
         start += f"\n(The main folder is {s.loc['folder']}.)"
     body = "Your task, " + s.ref(task) + ":\n" + ((task.get("prompt") or "").strip() or task["title"])
     finish = notes_part("Before you say ready", notes(s, task, "finish", space))
-    return "\n\n".join(x for x in [instructions("worker"), start, body, where_line(task), finish, closing_line(s, task, parent, argv),
+    return "\n\n".join(x for x in [instructions("worker"), holycow_brief(s, task, space, argv), start, body, where_line(task), finish, closing_line(s, task, parent, argv),
                                     settings_block(s, task, space, argv)] if x)
 
 
 def handoff(s, task, prev, parent=None, argv=None):
     lines = [f"You are taking over task {s.ref(task)} \"{task['title']}\" from another agent.", instructions("worker")]
+    lines.append(holycow_brief(s, task, argv=argv))
     lines.append(where_line(task))
     lines.append("The task:\n" + ((task.get("prompt") or "").strip() or task["title"]))
     if prev and prev.get("log"):

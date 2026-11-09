@@ -12,7 +12,7 @@ import * as HC from "../core/host.js";
 import * as APc from "../core/autopilot.js";
 import type { SettingRow, SettingSection } from "../web/shared/types.ts";
 
-const { TASK_ROWS, DEFAULTS, wordFor, valueFor, ROLES: CORE_ROLES, NOTES: CORE_NOTES, ABOUT, BACKUP, REACTIONS, STAR, starState, FEEDBACK, feedbackRepo, upgradeReactions, BASE, BRANCH, branchPattern, MACHINES, OLD_NAMES, SECTIONS,
+const { TASK_ROWS, DEFAULTS, wordFor, valueFor, ROLES: CORE_ROLES, HOLYCOW, NOTES: CORE_NOTES, ABOUT, BACKUP, REACTIONS, STAR, starState, FEEDBACK, feedbackRepo, upgradeReactions, BASE, BRANCH, branchPattern, MACHINES, OLD_NAMES, SECTIONS,
   WEB, modelLabel, roleSel, otherCli, otherCliWords, backupProblem, homeAbout, webState, fromWord, LOADING_AGENTS, RESET, machineLabel } = C as any;
 const AP = APc as any;
 /** Autopilot as Everywhere has it now (herdr-task's view: what Settings keeps, else what it kept before, else the
@@ -138,7 +138,7 @@ export class Settings {
       this.homes = readJson(HOME_ROUND)?.machines ?? {};
     }
     const out: SettingSection[] = [];
-    for (const s of [null, ...spaces]) out.push(this.agents(s), this.tasks(s), ...(pilot ? [this.pilot(s, pilot.everywhere, pilot.trigger)] : []));
+    for (const s of [null, ...spaces]) out.push(this.agents(s), this.holycow(s), this.tasks(s), ...(pilot ? [this.pilot(s, pilot.everywhere, pilot.trigger)] : []));
     // Machines, as the window's page: the limits for every machine, then each machine's block
     out.push({ name: title("machines"), level: "all", rows: [null, LOCAL, ...machines].flatMap((m) => this.machines(m)) });
     out.push(this.web(typeof web === "string" ? { on: true, link: web, why: null } : web ?? { on: true, link: null, why: "Tailscale isn't running here" }));
@@ -224,6 +224,27 @@ export class Settings {
         : { label: STAR.title, key: "star_prompt", value: ON(st.on), options: ["on", "off"], hint: st.about });
     }
     return { name: title("agents"), level: scope ?? "all", rows };
+  }
+
+  private holycow(s: Scope | null): SettingSection {
+    const scope = s?.id ?? null;
+    const enabled = this.pick(scope, "holycow", "enabled");
+    const rows: SettingRow[] = [{ label: HOLYCOW.enabled, key: "holycow.enabled", value: ON(enabled.value === true),
+      options: ["on", "off"], hint: HOLYCOW.about, ...this.follows(s, enabled, (v) => ON(v === true), "holycow", "enabled") }];
+    const worker = this.pick(scope, "worker", null).value?.agent;
+    for (const r of HOLYCOW.skills) {
+      const p = this.pick(scope, "holycow", r.id);
+      const fallback = this.pick(scope, r.role, null).value;
+      const sel = roleSel(r.role, p.value ?? fallback, this.choices, worker).sel;
+      const words = (v: any) => modelLabel(this.choices?.menus, roleSel(r.role, v ?? fallback, this.choices, worker).sel);
+      rows.push({ label: r.title, key: `holycow.${r.id}`, value: words(p.value),
+        hint: `${r.id} · ${r.about}${p.value ? "" : ` Follows ${ROLES.find((x) => x.id === r.role)?.title}.`}`,
+        agent: { role: r.id, pick: p.value, sel, unset: !p.value, other: false },
+        ...(!s && p.value ? { extra: { label: HOLYCOW.follow, key: `holycow.${r.id}` } } : {}),
+        ...this.follows(s, p, words, "holycow", r.id) });
+    }
+    rows.push({ label: "Instructions", key: "", value: "", fixed: true, hint: HOLYCOW.instructions });
+    return { name: HOLYCOW.title, level: scope ?? "all", rows };
   }
 
   private tasks(s: Scope | null): SettingSection {
@@ -432,7 +453,11 @@ export class Settings {
       put("tasks", "branch", v || null);
     } else if (section === "tasks" && /^(start|finish)_notes$/.test(field)) {
       put("tasks", field, word === null ? null : word.slice(0, 8000));
-    } else if (section === "role" && ROLES.some((r) => r.id === field)) {
+    } else if (key === "holycow.enabled") {
+      if (word !== null && word !== "on" && word !== "off") throw new Error("Not one of its choices.");
+      put("holycow", "enabled", word === null ? null : word === "on");
+    } else if ((section === "role" && ROLES.some((r) => r.id === field)) ||
+               (section === "holycow" && HOLYCOW.skills.some((r: any) => r.id === field))) {
       // a role's agent: { agent, model, effort, fast } as the window's model button keeps it
       let v: any = null;
       if (word !== null) {
@@ -445,7 +470,10 @@ export class Settings {
         if (v.perm != null && !PERM[v.agent].includes(v.perm)) throw new Error("Not one of its permission modes.");
         v = { agent: v.agent, model: v.model ?? null, effort: v.effort ?? null, fast: !!v.fast, perm: v.perm ?? null };
       }
-      put(field, null, v);
+      if (section === "holycow") {
+        if (v && field === "hc-review") v.perm = v.agent === "claude" ? "plan" : "read-only";
+        put("holycow", field, v);
+      } else put(field, null, v);
     } else if (section === "autopilot" && AP.FIELDS.includes(field)) {
       // Autopilot, Everywhere's or a space's own: a schedule's words (checked by herdr-task first: service/autopilot.ts),
       // "" for none; events by their names; the heartbeat's words

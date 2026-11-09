@@ -11,6 +11,7 @@ import { SERVE } from "./host.js";
 // the others are one setting for every space (docs/settings.md says which and why).
 export const SECTIONS = [
   { id: "agents", title: "Agents", icon: "bot", space: true },
+  { id: "holycow", title: "HolyCow Agents", icon: "bot", space: true },
   { id: "tasks", title: "Tasks", icon: "list-checks", space: true },
   // Everywhere's heartbeat, schedule and events, and a space's own (core/autopilot.js); a space switches it on in its
   // Assistant's header
@@ -67,6 +68,24 @@ export const ROLES = [
   { id: "reviewer", title: "Reviewer", about: "Checks each task's work before it's ready.", file: "reviewer.md",
     told: "What every reviewer is told first" },
 ];
+export const HOLYCOW = {
+  title: "HolyCow Agents", enabled: "Use HolyCow",
+  about: "The Assistant chooses the relevant skill for software work. Each skill task uses the model below. Install HolyCow skills on each machine first. Changes apply to new launches.",
+  instructions: "Role instructions still govern tasks and reviews. HolyCow adds the installed skill's instructions and references; it does not replace those rules.",
+  follow: "Use role model",
+  skills: [
+    { id: "holycow-guide", title: "Guide", role: "coordinator", about: "Choose the next useful step." },
+    { id: "holycow-init", title: "Init", role: "worker", about: "Understand and set up a repository." },
+    { id: "hc-compass", title: "Compass", role: "worker", about: "Explore questions and gather evidence." },
+    { id: "hc-refine", title: "Refine", role: "worker", about: "Clarify requirements and scope." },
+    { id: "hc-lab", title: "Lab", role: "worker", about: "Try experiments and prototypes." },
+    { id: "hc-plan", title: "Plan", role: "worker", about: "Turn agreed scope into an actionable plan." },
+    { id: "hc-build", title: "Build", role: "worker", about: "Implement and debug changes." },
+    { id: "hc-review", title: "Review", role: "reviewer", about: "Check work for defects, read-only." },
+    { id: "hc-pr", title: "PR", role: "worker", about: "Prepare pull requests." },
+    { id: "hc-retro", title: "Retro", role: "worker", about: "Learn from a completed session." },
+  ],
+};
 export const EDIT_INSTRUCTIONS = "Edit instructions";
 // The instructions editor (mods/coordinator's instructions view, over Settings): its note under the text, by role,
 // and what it says once a change is in the file.
@@ -346,7 +365,7 @@ export const ROUNDS = [[0, "Off"], [1, "1 round"], [2, "2 rounds"], [3, "3 round
 export const ARCHIVE = [[0, "Off"], [1, "1 day"], [3, "3 days"], [7, "1 week"], [30, "1 month"]];
 export const ONOFF = [[true, "On"], [false, "Off"]];
 
-export const DEFAULTS = { tasks: { merge: "ask", review_rounds: 0, must_fix: "major", max_running: 10, worktrees: true, archive_after: 7, proof: true }, automations: { enabled: true },
+export const DEFAULTS = { holycow: { enabled: false }, tasks: { merge: "ask", review_rounds: 0, must_fix: "major", max_running: 10, worktrees: true, archive_after: 7, proof: true }, automations: { enabled: true },
   agents: { reactions: true, feedback: true, feedback_repo: "" } };
 
 // [section, field, label, choices | { min, max }]

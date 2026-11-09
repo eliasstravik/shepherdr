@@ -624,6 +624,7 @@ function Control({ row, phone, set, edit, level }: { row: SettingRow; phone: boo
     return (
       <span className="flex max-w-full flex-wrap items-center justify-end gap-1.5">
         <ModelButton row={row} level={level ?? 'all'} />
+        {row.key.startsWith("holycow.") && row.extra ? <Ghost onClick={() => set(null as unknown as string)}>{ST.HOLYCOW.follow}</Ghost> : null}
         {row.agent.other ? <Ghost onClick={() => set(null as unknown as string)}>{ST.USE_OTHER_CLI}</Ghost> : null}
         {row.file ? <Ghost onClick={() => openRole({ kind: 'file', role, title: told, file: row.file! })}>{ST.EDIT_INSTRUCTIONS}</Ghost> : null}
       </span>

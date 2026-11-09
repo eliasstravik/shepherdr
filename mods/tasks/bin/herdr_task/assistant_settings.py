@@ -16,6 +16,7 @@ from .base import addon_off, hc_json, MAX_RUNNING, now, run, STORE
 from .settings import DEFAULTS, LOCAL_MACHINE, MUST_WORDS, SETTINGS, agent_key, bare, read_settings
 from .launch import coordinators, is_coordinator
 from . import reactions
+from .holycow import assistant_words
 
 # What an Assistant was last told, on its terminal: "review:1a2b3c,merge:…", a short hash of each line.
 LABEL = "herdr.settings"
@@ -105,6 +106,7 @@ def rows(space, d=None, auto=None):
         from .feedback import feedback_repo
         repo = feedback_repo(d)
         return [
+            ("holycow", "HolyCow", assistant_words(cfg), "on" if cfg["holycow"].get("enabled") is True else "off", [("holycow", None)]),
             ("review", "Review", review, "on" if rounds > 0 else "off",
              [("tasks", "review_rounds"), ("tasks", "must_fix"), ("reviewer", None)]),
             ("merge", "Merge", MERGE_SHORT[merge], merge, [("tasks", "merge")]),

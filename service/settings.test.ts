@@ -279,3 +279,27 @@ test("Cursor roles preserve their own model and permissions without pretending t
   expect(() => s.set("role.worker", JSON.stringify({ ...pick, effort: "high" }), scope.id, scope)).toThrow("model ID");
   expect(() => s.set("role.worker", JSON.stringify({ ...pick, perm: "bypassPermissions" }), scope.id, scope)).toThrow("permission");
 });
+
+
+test("HolyCow skill models inherit per space, reset independently and preserve read-only review", () => {
+  writeFileSync(file, JSON.stringify({ everywhere: { worker: { agent: "claude", model: "opus" } } }));
+  const s = new Settings(); s.start();
+  const sp = { id: "holy", name: "Project", machine: null, folder: "/holy" };
+  const rows = (level: string) => s.sections(null, [sp]).find((x) => x.name === "HolyCow Agents" && x.level === level)!.rows;
+  expect(rows("all").filter((r) => r.agent)).toHaveLength(10);
+  expect(rows("all").find((r) => r.key === "holycow.hc-build")!.agent!.sel).toMatchObject({ agent: "claude", model: "opus" });
+  s.set("holycow.enabled", "on");
+  s.set("holycow.hc-plan", JSON.stringify({ agent: "cursor", model: "auto" }));
+  expect(rows(sp.id).find((r) => r.key === "holycow.hc-plan")!.agent!.sel).toMatchObject({ agent: "cursor", model: "auto" });
+  s.set("holycow.hc-plan", JSON.stringify({ agent: "codex", model: "custom", effort: "high" }), sp.id, sp);
+  expect(rows(sp.id).find((r) => r.key === "holycow.hc-plan")!.agent!.sel).toMatchObject({ agent: "codex", model: "custom" });
+  s.set("holycow.hc-plan", null, sp.id, sp);
+  expect(rows(sp.id).find((r) => r.key === "holycow.hc-plan")!.agent!.sel).toMatchObject({ agent: "cursor", model: "auto" });
+  s.set("holycow.hc-review", JSON.stringify({ agent: "cursor", model: "auto", perm: "full" }));
+  expect(rows("all").find((r) => r.key === "holycow.hc-review")!.agent!.sel!.perm).toBe("read-only");
+  s.set("holycow.hc-plan", null);
+  expect(rows("all").find((r) => r.key === "holycow.hc-plan")!.agent!.sel).toMatchObject({ agent: "claude", model: "opus" });
+  expect(() => s.set("holycow.unknown", "{}")).toThrow();
+  expect(() => s.set("holycow.hc-build", JSON.stringify({ agent: "cursor", effort: "high" }))).toThrow("model ID");
+  expect(JSON.parse(readFileSync(file, "utf8")).everywhere.worker).toEqual({ agent: "claude", model: "opus" });
+});

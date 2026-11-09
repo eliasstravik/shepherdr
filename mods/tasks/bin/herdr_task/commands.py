@@ -21,7 +21,7 @@ from .agents import (
 from .sessions import refresh_sessions
 from .github import already_merged, finish, gh, github, merged_here, own_work, pr_adopt, pr_open, pr_pending, pr_problem, pr_view, update_main, watch_main
 from .launch import (
-    base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
+    base_ref, brief, holycow_brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
     own_path, parent_for, resume_argv, retag_tabs, set_branch, tab_title, task_tabs,
 )
 from .store import is_task_list, locate, open_store, prefixes_in_use, read_list, Store, store_files
@@ -257,6 +257,7 @@ def cmd_show(args):
 
 def begin(s, t, argv, space, parent=None):
     """Starts the task's first agent. Returns its record."""
+    holycow_brief(s, t, space, argv)
     t["state"], t["started"] = "running", now()
     # Its brief teaches `reviewed`: ready waits for a review of its final commit (review_refusal).
     t["review_gate"] = True
@@ -734,9 +735,9 @@ def cmd_edit(args):
         if args.prompt_file:
             with open(args.prompt_file) as f:
                 t["prompt"] = f.read()
-        pick = [t.get(k) for k in ("agent", "model", "effort")]
+        pick = [t.get(k) for k in ("skill", "agent", "model", "effort")]
         set_opts(t, args)
-        if [t.get(k) for k in ("agent", "model", "effort")] != pick:
+        if [t.get(k) for k in ("skill", "agent", "model", "effort")] != pick:
             # The next agent started for it runs on the new choice (start_again), a queued one too.
             t["pick_at"] = now()
             q = t.get("queue") or {}

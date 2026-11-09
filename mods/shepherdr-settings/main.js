@@ -40,11 +40,11 @@ import { webSection } from "./web-section.js";
 // herdr-task's merge policy (MERGE): "ask" waits for the person's Accept (which merges), the others merge without it.
 // NOTES: what a task's agent is told to do first and last (tasks.start_notes / finish_notes): herdr-task puts them
 // into its starting prompt; Herdr runs nothing itself.
-import { SECTIONS as SHARED_SECTIONS, ROLES, NOTES, MERGE, MUST_FIX, ROUNDS, ARCHIVE, ABOUT, BACKUP, REACTIONS, STAR, starState, upgradeReactions, NOTIFY_ABOUT, TITLE, SPACE_TITLE,
+import { SECTIONS as SHARED_SECTIONS, ROLES, HOLYCOW, NOTES, MERGE, MUST_FIX, ROUNDS, ARCHIVE, ABOUT, BACKUP, REACTIONS, STAR, starState, upgradeReactions, NOTIFY_ABOUT, TITLE, SPACE_TITLE,
   EVERYWHERE, CHANGED_HERE, RESET, EDIT_INSTRUCTIONS, USE_OTHER_CLI, LOADING_AGENTS, SAVED, sameAs as sameAsWords,
   spacesOwn, otherCliWords, backupProblem, notifyMachineAbout, machineLabel, TASK_ROWS, LEVEL } from "./core/settings.js";
 
-const SECTIONS = [...SHARED_SECTIONS.slice(0, 6), APPEARANCE, ...SHARED_SECTIONS.slice(6)];
+const SECTIONS = SHARED_SECTIONS.flatMap((s) => s.id === "window" ? [APPEARANCE, s] : [s]);
 
 const I = (name) => `mods/shepherdr-settings/${name}.svg`;
 // A page's title, and a Tasks row's (by its key, section.field).
@@ -84,6 +84,7 @@ export default class ShepherdrSettings extends View {
     this.cfg = {};
     this.raw = null;
     this.data = null; // the agents on offer (settings.js loadChoices)
+    this.skills = {};
     this.roles = {}; // role -> { sel, data, saved }: the model buttons' state for this scope
     this.folders = {}; // space id -> its task folder (repo root)
     this.handle = cx.focus_handle();
@@ -229,7 +230,7 @@ export default class ShepherdrSettings extends View {
   reset(key, field, cx) {
     cx.spawn(async (cx) => {
       await this.apply((next) => this.drop(this.layerOf(next), key, field));
-      if (!field) this.resetRoles();
+      if (!field || key === "holycow") this.resetRoles();
       cx.notify();
     });
   }
@@ -328,6 +329,11 @@ export default class ShepherdrSettings extends View {
       }
       sel ??= this.data?.defaults ?? null;
       this.roles[r.id] = { ...(this.roles[r.id] ?? {}), sel: sel ? { ...sel } : null, data: this.data, saved: JSON.stringify(sel), unset };
+    }
+    for (const r of HOLYCOW.skills) {
+      const own = eff.holycow[r.id];
+      const sel = own ?? this.roles[r.role]?.sel;
+      this.skills[r.id] = { sel: sel ? { ...sel } : null, data: this.data, saved: JSON.stringify(sel), unset: !own };
     }
   }
 
@@ -489,6 +495,32 @@ export default class ShepherdrSettings extends View {
       .child(feedbackRow(this, t))
       .children([feedbackRepoRow(this, t)].filter(Boolean))
       .when(!this.scope, (el) => el.child(this.starRow(t, cx)));
+  }
+
+  holycow(t, cx) {
+    for (const r of HOLYCOW.skills) {
+      const c = this.skills[r.id];
+      if (!c?.sel || JSON.stringify(c.sel) === c.saved) continue;
+      if (r.id === "hc-review") c.sel.perm = c.sel.agent === "claude" ? "plan" : "read-only";
+      c.saved = JSON.stringify(c.sel);
+      c.unset = false;
+      this.set("holycow", r.id, { ...c.sel }, cx);
+    }
+    return v_flex()
+      .child(this.title(t, HOLYCOW.title))
+      .child(this.row(t, HOLYCOW.enabled, HOLYCOW.about,
+        toggleSwitch("holycow-enabled", shepherdrFor(this.cfg, this.scope).holycow.enabled === true,
+          (next, _e, cx) => this.set("holycow", "enabled", next, cx)), this.scoped("holycow", "enabled")))
+      .children(HOLYCOW.skills.map((r) => {
+        const c = this.skills[r.id];
+        const control = h_flex().gap(8).items_center()
+          .child(c?.sel ? models.modelButton(t, c, {}, cx) : div().child(LOADING_AGENTS))
+          .when(!this.scope && c && !c.unset, (el) => el.child(button(`follow-${r.id}`, HOLYCOW.follow,
+            { kind: "plain", onClick: (_e, cx) => this.reset("holycow", r.id, cx) })));
+        const role = ROLES.find((x) => x.id === r.role).title;
+        return this.row(t, r.title, `${r.id} · ${r.about}${c?.unset ? ` Follows ${role}.` : ""}`, control, this.scoped("holycow", r.id));
+      }))
+      .child(div().pt(16).text_size(TEXT.label).text_color(t.dim).child(HOLYCOW.instructions));
   }
 
   // Ask for a GitHub star (herdr-task's star.py), Everywhere only: a switch that turns it off before it ever shows;
@@ -691,6 +723,7 @@ export default class ShepherdrSettings extends View {
       .child(div().px(10).pt(6).pb(12).text_size(TEXT.title).font_semibold().text_color(t.foreground)
         .child(this.scope ? SPACE_TITLE : TITLE))
       .children(SECTIONS.filter((s) => this.shows(s.id)).map((s) => navRow(s.id, s.title, I(s.icon), s.id === this.section, (_e, cx) => {
+        this.resetRoles();
         this.section = s.id;
         this.listOpen = null;
         this.levelOpen = false;
@@ -698,6 +731,7 @@ export default class ShepherdrSettings extends View {
         cx.notify();
       })));
     const body = this.section === "agents" ? this.agents(t, cx)
+      : this.section === "holycow" ? this.holycow(t, cx)
       : this.section === "tasks" ? this.tasks(t)
       : this.section === "secrets" ? secretsSection(this, t)
       : this.section === "appearance" ? appearanceSection(this, t)

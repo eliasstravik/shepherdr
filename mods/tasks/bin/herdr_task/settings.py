@@ -7,6 +7,7 @@ import re
 import shutil
 
 from .base import Fail, HOME, MAX_RUNNING
+from .holycow import SKILLS, skill_pick
 
 
 # What each agent key starts by default. Unknown keys run as themselves; --argv overrides.
@@ -23,7 +24,7 @@ OLD_INSTRUCTIONS = os.path.join(HOME, ".herdr", "instructions")
 ASSISTANT_TEMPLATES = ("assistant", "coordinator")  # "coordinator": Assistants started before the rename
 DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "must_fix": "major", "max_running": MAX_RUNNING, "worktrees": True,
                       "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": "", "branch": ""},
-            "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {},
+            "automations": {"enabled": True}, "holycow": {"enabled": False}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {},
             "agents": {"reactions": True, "feedback": True, "feedback_repo": "NeuralHerd/BossGoat"}}
 LEVELS = ["blocker", "major", "minor"]
 
@@ -207,7 +208,8 @@ def worker_pick(s, task, space=None, agent=None):
     """What a task's agent runs on, {agent, model, effort, fast, perm}: Settings' worker, then the
     task's own --agent / --model / --effort, then `agent` (start --agent). Another CLI than
     Settings' starts from its own defaults (models and permissions differ per CLI)."""
-    pick = dict(settings_for(s, space)["worker"] or {})
+    cfg = settings_for(s, space or task.get("space"))
+    pick = skill_pick(cfg, task["skill"]) if task.get("skill") else dict(cfg["worker"] or {})
     for key in (task.get("agent"), agent):
         if key and key != pick.get("agent"):
             pick = {"agent": key}
@@ -216,6 +218,9 @@ def worker_pick(s, task, space=None, agent=None):
     for k in ("model", "effort"):
         if task.get(k):
             pick[k] = task[k]
+    if task.get("skill") == "hc-review":
+        pick["perm"] = "plan" if pick.get("agent") == "claude" else "read-only"
+        pick.pop("argv", None)
     return pick
 
 
@@ -251,13 +256,13 @@ def argv_model(argv):
 
 SETTINGS_HEAD = "Settings: (from herdr-task show; where the brief above says otherwise, it wins)"
 SET_BY = {"task": "set by the assistant for this task", "folder": "this folder's setting", "machine": "this machine's setting",
-          "all": "your setting everywhere"}
+          "all": "your setting everywhere", "holycow": "HolyCow Agents setting"}
 MERGE_WORDS = {"ask": "ask the person first: they accept it in the Tasks panel, which merges it",
                "checks": "after checks: once you say ready, Herdr merges it when its checks pass",
                "auto": "on its own: once you say ready, Herdr merges it"}
 MUST_WORDS = {"blocker": "blocker", "major": "major and up (blocker, major)", "minor": "everything (blocker, major, minor)"}
 # --set's keys (Shepherdr's spellings too) and the task fields they set.
-SET_KEYS = {"review": "review", "brief.review": "review", "merge": "merge", "brief.merge": "merge",
+SET_KEYS = {"skill": "skill", "review": "review", "brief.review": "review", "merge": "merge", "brief.merge": "merge",
             "rounds": "review_rounds", "review.rounds": "review_rounds", "review-rounds": "review_rounds", "review_rounds": "review_rounds",
             "mustfix": "must_fix", "must-fix": "must_fix", "must_fix": "must_fix", "review.mustfix": "must_fix",
             "agent": "agent", "task.agent": "agent", "model": "model", "task.model": "model", "effort": "effort", "task.effort": "effort",
@@ -290,7 +295,11 @@ def set_task(t, key, value):
             t.pop("set", None)
         return
     low = v.lower()
-    if field in ("review", "proof"):
+    if field == "skill":
+        if v not in SKILLS:
+            raise Fail(f"Unknown HolyCow skill: {v}.")
+        t["skill"] = v
+    elif field in ("review", "proof"):
         if low not in ONOFF:
             raise Fail(f"{field} is on or off.")
         sets[field] = ONOFF[low]
@@ -320,7 +329,7 @@ def set_task(t, key, value):
 def set_opts(t, args):
     """add/edit's --set pairs and --agent, --model, --effort, --reviewer, --reviewer-model,
     --reviewer-effort, in that order (a --set pair wins over its flag)."""
-    for flag in ("agent", "model", "effort", "reviewer", "reviewer_model", "reviewer_effort"):
+    for flag in ("skill", "agent", "model", "effort", "reviewer", "reviewer_model", "reviewer_effort"):
         v = getattr(args, flag, None)
         if v is not None:
             set_task(t, flag, v)
@@ -365,13 +374,15 @@ def task_settings(s, t, space=None, argv=None):
         on, rev_by = sets["review_rounds"] > 0, "task"
     else:
         on, rev_by = rounds_cfg > 0, by_layer(s, space, "tasks", "review_rounds", rounds_cfg > 0, False)
+    if t.get("skill") == "hc-review":
+        on, rev_by = False, "task"
     here = t.get("mode") != "worktree"
     add("Review", "off" if not on else "on", on, rev_by)
     # What it runs on: the given argv, else its last agent's, else what it would start with.
     argv = argv or (t["agents"][-1].get("argv") if t.get("agents") else None) or worker_argv(s, t, space)
     agent = agent_key(argv)
     if on:
-        rv = dict(cfg.get("reviewer") or {})
+        rv = skill_pick(cfg, "hc-review") if t.get("skill") else dict(cfg.get("reviewer") or {})
         if t.get("reviewer") and t["reviewer"] != rv.get("agent"):
             rv = {"agent": t["reviewer"]}
         rv_by = "task" if any(t.get(f) for f in ("reviewer", "reviewer_model", "reviewer_effort")) else \
@@ -379,10 +390,17 @@ def task_settings(s, t, space=None, argv=None):
         for f in ("model", "effort"):
             if t.get(f"reviewer_{f}"):
                 rv[f] = t[f"reviewer_{f}"]
+        if t.get("skill") and not any(t.get(f) for f in ("reviewer", "reviewer_model", "reviewer_effort")):
+            rv_by = "holycow"
         who = rv.get("agent") or other_cli(agent)
         text = who + (f", model {rv['model']}" if rv.get("model") else "") + (f", effort {rv['effort']}" if rv.get("effort") else "")
         if not rv.get("agent"):
             text += " (the other CLI)" if who != agent else " (your own CLI: no other is installed)"
+        if t.get("skill"):
+            import shlex
+            rv.update(agent=who, perm="plan" if who == "claude" else "read-only")
+            rv.pop("argv", None)
+            text += "; read-only command: " + shlex.join(argv_for(rv))
         add("Reviewer", text, {"agent": who, "model": rv.get("model"), "effort": rv.get("effort")}, rv_by)
         must = sets.get("must_fix") or (k.get("must_fix") if k.get("must_fix") in LEVELS else "major")
         add("Must fix", MUST_WORDS[must], must, "task" if "must_fix" in sets else by_layer(s, space, "tasks", "must_fix", must, "major"))
@@ -406,6 +424,10 @@ def task_settings(s, t, space=None, argv=None):
     text = agent + (f", model {model}" if model else "") + (f", effort {effort}" if effort else "")
     a_by = "task" if any(t.get(f) for f in ("agent", "model", "effort")) else \
         by_layer(s, space, "worker", None, bool(cfg.get("worker")), False)
+    if t.get("skill"):
+        if a_by != "task":
+            a_by = "holycow"
+        add("HolyCow skill", t["skill"], t["skill"], "task")
     add("Agent", text, {"agent": agent, "model": model, "effort": effort}, a_by)
     return lines
 
