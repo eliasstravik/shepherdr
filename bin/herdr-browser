@@ -3,7 +3,8 @@
 # the task's own session and profile, so every agent of a task drives the same browser and its
 # sign-ins stay with the task:
 #   session  herdr-<task>               (agent-browser --session)
-#   profile  ~/.herdr/browser/<task>    (a Chrome profile folder: cookies and sign-ins kept)
+#   profile  ~/.local/state/shepherdr/browser/<task>    (a Chrome profile folder: cookies and sign-ins kept;
+#            ~/.herdr/browser/<task> on a machine whose Shepherdr data hasn't moved to its own folders yet)
 # <task> is the task's herdr.task key (<slug>#<id>) made safe for a name: ".config-herdr-app#57"
 # is "config-herdr-app-57". Which task: --task <key>, else $HERDR_BROWSER_TASK (herdr-task gives
 # its workers that), else the herdr.task label of the terminal it runs in ($HC_TERMINAL_ID).
@@ -17,7 +18,11 @@
 # --name: prints the session and profile it would use, as JSON, and runs nothing.
 
 PIN=0.41.1
-root="$HOME/.herdr/browser"
+# Shepherdr's state folder once this machine's data moved there (herdr_task/layout.py), else the old ~/.herdr/browser
+if [ -n "${SHEPHERDR_HOME:-}" ]; then shep_data="$SHEPHERDR_HOME/data"; shep_state="$SHEPHERDR_HOME/state"
+else shep_data="${XDG_DATA_HOME:-$HOME/.local/share}/shepherdr"; shep_state="${XDG_STATE_HOME:-$HOME/.local/state}/shepherdr"; fi
+if [ "$(cut -c1 "$shep_data/LAYOUT" 2>/dev/null)" = 2 ] && [ ! -e "$HOME/.herdr/.layout-rollback" ]; then root="$shep_state/browser"
+else root="$HOME/.herdr/browser"; fi
 task=${HERDR_BROWSER_TASK-}
 own=
 while :; do
@@ -40,6 +45,15 @@ fi
 name=$(printf %s "$task" | sed 's/[^A-Za-z0-9_-]/-/g; s/--*/-/g; s/^-//; s/-$//')
 session="herdr-$name"
 profile="$root/$name"
+# A browser made before the data moved keeps the path it was started with (~/.herdr/browser/<name>, a link to the
+# same folder now): agent-browser's running session knows it by that path. New ones use the new place.
+old="$HOME/.herdr/browser/$name"
+if [ "$root" != "$HOME/.herdr/browser" ] && [ -d "$old" ] && [ -d "$profile" ] \
+   && [ "$(cd "$old" && pwd -P)" = "$(cd "$profile" && pwd -P)" ] && [ ! -f "$root/$name.new" ]; then
+  profile=$old
+elif [ ! -d "$profile" ] && [ "$root" != "$HOME/.herdr/browser" ]; then
+  mkdir -p "$root" 2>/dev/null; : > "$root/$name.new" 2>/dev/null || true   # made at the new place: always the new path from now on
+fi
 if [ -n "${show-}" ]; then
   printf '{"task":"%s","session":"%s","profile":"%s","pin":"%s"}\n' "$task" "$session" "$profile" "$PIN"
   exit 0

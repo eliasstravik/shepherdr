@@ -72,7 +72,7 @@ export async function unshare(dns: string, port?: number): Promise<void> {
   if (now.proxy && (port === undefined || now.proxy === `http://127.0.0.1:${port}`)) await run(["serve", `--https=${now.port ?? 443}`, "--set-path", MOUNT, "off"]);
 }
 
-/** What a move here set aside (shepherdr web serve-from --take-link: ~/.herdr/shepherdr/replaced-share.json), shared
+/** What a move here set aside (shepherdr web serve-from --take-link: ~/.local/state/shepherdr/service/replaced-share.json), shared
  *  again once this machine no longer serves the web app. */
 export async function restoreShare(file: string): Promise<boolean> {
   let r: { port?: string; proxy?: string } | null = null;

@@ -30,7 +30,16 @@ const worker = opt("--worker");
 if (!task) { process.stderr.write("herdr-browser-view --task <slug#id> [--worker <terminal>]\n"); process.exit(2); }
 const name = task.replace(/[^A-Za-z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-/, "").replace(/-$/, "");
 const HOME = process.env.HOME;
-const ROOT = path.join(HOME, ".herdr", "browser");
+// Shepherdr's state folder once this machine's data moved there (herdr_task/layout.py), else the old ~/.herdr/browser
+const ROOT = (() => {
+  const env = process.env, abs = (p) => (p && p.startsWith("/") ? p : null);
+  const one = abs(env.SHEPHERDR_HOME);
+  const data = one ? `${one}/data` : `${abs(env.XDG_DATA_HOME) ?? `${HOME}/.local/share`}/shepherdr`;
+  const state = one ? `${one}/state` : `${abs(env.XDG_STATE_HOME) ?? `${HOME}/.local/state`}/shepherdr`;
+  let layout = "";
+  try { layout = fs.readFileSync(`${data}/LAYOUT`, "utf8"); } catch {}
+  return layout.trim().startsWith("2") && !fs.existsSync(path.join(HOME, ".herdr", ".layout-rollback")) ? `${state}/browser` : path.join(HOME, ".herdr", "browser");
+})();
 const BIN = path.join(HOME, ".config", "herdr-app", "bin", "herdr-browser");
 const file = (ext) => path.join(ROOT, name + ext);
 

@@ -30,13 +30,15 @@ import { taskMenu } from "./core/menus.js";
 import { RANK, STATUS, RANK_OF, ORDER, GROUP_BY, groupBy, groupNow, machineOf, machineName, refOf, taskKey, autoPrefix, place,
   queueReason, reportOf as report, secondLine, leftOf, order, matches, day, ago, capital, short, autoWhere, fromLine, inSpace } from "./core/tasks.js";
 import { READ_LISTS, taskLists } from "./core/tasklists.js";
+import { SH } from "./core/paths.js";
+import { dirs } from "./dirs.js";
 import { TEXT, H, RADIUS, red, amber } from "./ui.js";
 
 const CLI = () => `${appHome()}/mods/tasks/bin/herdr-task`;
 const DONE_SHOWN = 5; // Done rows a group shows before "Show N more"
 // Task ids in monospace, small and dim at the start of a row's second line (Herdr ships JetBrains Mono).
 const ID_FONT = "JetBrains Mono", ID_SIZE = TEXT.id;
-// Every list in ~/.herdr/tasks on a machine is read with READ_LISTS and kept by taskLists (one
+// Every list in ~/.local/share/shepherdr/tasks on a machine is read with READ_LISTS and kept by taskLists (one
 // rule with herdr-task's: tasklists.js).
 // Pinned tasks, as Pinned spaces (mods/spaces-chat): a view choice, never a change to the task.
 // Shared "tasks.pinned" = ["<machine, empty here>:<folder>#<id>"] (shared.json: survives
@@ -128,7 +130,7 @@ export default class Tasks extends View {
         cx.notify();
       }
     });
-    // This computer's lists, read again whenever ~/.herdr/tasks changes; every other machine's
+    // This computer's lists, read again whenever ~/.local/share/shepherdr/tasks changes; every other machine's
     // (their files can't be watched) now and then.
     cx.spawn(async (cx) => this.load(cx, null));
     this.watch(cx);
@@ -138,7 +140,7 @@ export default class Tasks extends View {
     cx.timer.every(60000, (cx) => cx.notify());
   }
 
-  // ~/.herdr/tasks here changes: read again. One watch for the panel's life.
+  // ~/.local/share/shepherdr/tasks here changes: read again. One watch for the panel's life.
   watch(cx) {
     if (this.watching) return;
     this.watching = true;
@@ -147,7 +149,7 @@ export default class Tasks extends View {
         let w = null;
         for (;;) {
           // At most 5 s per wait, as the commands above.
-          w ??= watchFolder(`${home()}/.herdr/tasks`).then(() => true);
+          w ??= watchFolder(dirs().tasks).then(() => true);
           if (!(await Promise.race([w, cx.sleep(5000)]))) continue;
           w = null;
           await this.load(cx, null);
@@ -787,7 +789,8 @@ export default class Tasks extends View {
       if (!slug || this.prefixes.has(at) || this.listOf(slug, m)) continue;
       this.prefixes.set(at, null);
       cx.spawn(async (cx) => {
-        const text = await readTextFile(`${home()}/.herdr/tasks/${slug}.json`, { on: m }).catch(() => null);
+        const text = m ? (await exec("sh", ["-c", SH + 'cat "$SHEP_TASKS/$1.json"', "sh", slug], { on: m }).catch(() => null))?.stdout ?? null
+          : await readTextFile(`${dirs().tasks}/${slug}.json`).catch(() => null);
         let d = null;
         try { d = JSON.parse(text || "null"); } catch {}
         if (d?.folder) { this.prefixes.set(at, d.prefix || autoPrefix(d.folder)); cx.notify(); }

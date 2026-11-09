@@ -7,7 +7,7 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Hub } from "./hub.ts";
-import { HOME } from "./paths.ts";
+import { HOME, where } from "./paths.ts";
 import { buildId } from "./build.ts";
 
 const BUILD = buildId();
@@ -73,9 +73,9 @@ export class Host {
       remotes: this.remotes().map((n) => links[n]).filter(Boolean), at: Date.now() };
   }
 
-  /** The machines this one's herdr-task has run tasks on (~/.herdr/tasks/.remote/<name>). */
+  /** The machines this one's herdr-task has run tasks on (~/.local/share/shepherdr/tasks/.remote/<name>). */
   remotes(): string[] {
-    try { return readdirSync(join(HOME, ".herdr", "tasks", ".remote")).filter((x) => /^[\w.-]+$/.test(x) && !x.endsWith(".secret")); } catch { return []; }
+    try { return readdirSync(join(where().tasks, ".remote")).filter((x) => /^[\w.-]+$/.test(x) && !x.endsWith(".secret")); } catch { return []; }
   }
 
   /** Machines with a Shepherdr service of their own, by name here: each does its own machine's work. */

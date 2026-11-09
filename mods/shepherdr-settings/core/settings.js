@@ -1,4 +1,4 @@
-// Shepherdr settings' rows as data: each row's key in ~/.herdr/shepherdr.json, its words and its choices, and every
+// Shepherdr settings' rows as data: each row's key in ~/.config/shepherdr/settings.json, its words and its choices, and every
 // title, line and button word the window's Settings say (mods/shepherdr-settings), so the window, the service and the
 // web app's Settings say the same. herdr-task reads the file (herdr_task/settings.py: settings_for); its defaults are
 // DEFAULTS there and here.
@@ -134,7 +134,7 @@ export function feedbackRepo(v) {
   return /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(s) ? s : null;
 }
 export const BACKUP = { title: "Backup agent", about: "The other CLI takes over a task once when its agent can't go on." };
-// The machines where the other CLI can't take over (herdr-task's check, ~/.herdr/cli-check.json's machines: this
+// The machines where the other CLI can't take over (herdr-task's check, ~/.local/state/shepherdr/cli-check.json's machines: this
 // computer is ""), in one line. m: the scope's machine ("local" or its name), null for Everywhere (every machine).
 export function backupProblem(checks, m, cli) {
   const here = Object.entries(checks ?? {}).filter(([k]) => m === null || k === (m === LOCAL ? "" : m));
@@ -292,7 +292,7 @@ export const OLD_NAMES = { coordinator: "Assistant", worker: "Workers", reviewer
   automations: "Run automations", merge: "Merge", review_rounds: "Review", must_fix: "Must fix", proof: "Proof",
   max_running: "Tasks at once", archive_after: "Archive Done after", worktrees: "Worktrees",
   start_notes: "When a task starts", finish_notes: "When a task finishes", base: "Base branch", branch: "Branch names", agents: "Reactions" };
-// Home Assistant's line: on or off, and what herdr-task's home round last found there (~/.herdr/tasks/.home.json).
+// Home Assistant's line: on or off, and what herdr-task's home round last found there (~/.local/share/shepherdr/tasks/.home.json).
 export function homeAbout(on, st) {
   return !on ? "Off: nobody watches its disk, load and processes."
     : st?.assistant ? "Its home space's Assistant watches its disk, load and processes."

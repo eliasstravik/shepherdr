@@ -580,7 +580,10 @@ def folder_for(s, task):
         raise Fail("Worktrees need a git repo. Use --here.")
     main = s.loc["folder"]
     branch = branch_for(s, task)
-    path = os.path.join(WORKTREES, os.path.basename(main), re.sub(r"[^A-Za-z0-9._-]+", "-", branch).strip("-"))
+    # New worktrees under Shepherdr's data (Settings > Tasks > Worktree folder: another root, a bigger disk);
+    # a task that has one keeps it wherever it is (git keeps its absolute path).
+    root = os.path.expanduser(str(settings_for(s, task.get("space"))["tasks"].get("worktree_root") or "").strip()) or WORKTREES
+    path = os.path.join(root, os.path.basename(main), re.sub(r"[^A-Za-z0-9._-]+", "-", branch).strip("-"))
     # Its own base (--base) branches from that branch; else from what the folder has checked out.
     own = task.get("base") if task.get("base_set") else None
     base = base_ref(main, own) if own else current_base(main)

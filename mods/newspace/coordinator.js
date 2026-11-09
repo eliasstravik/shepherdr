@@ -10,6 +10,8 @@
 // Edit lib/coordinator.js, never a mod's copy, then run bin/sync-shared.
 
 import { appHome, exec, hc, run, openOverlay, shared, setShared, home, machines, focused, readTextFile } from "herdr";
+import { dirs } from "./dirs.js";
+import { isWorktreePath } from "./core/paths.js";
 import { terminals, panes, spaces as allSpaces } from "./live.js";
 import { logSpace } from "./spacelog.js";
 import { toast, plainError } from "./ui.js";
@@ -105,7 +107,7 @@ function folderOf(space) {
 }
 
 // Shepherdr settings (mods/shepherdr-settings writes them; herdr-task reads them too):
-// ~/.herdr/shepherdr.json = { version, everywhere: SETTINGS, machines: { <machine>: SETTINGS },
+// Shepherdr's settings file (~/.config/shepherdr/settings.json) = { version, everywhere: SETTINGS, machines: { <machine>: SETTINGS },
 //   spaces: { <space id>: { folder, name, machine, ...SETTINGS } } }
 // with SETTINGS = { coordinator, worker, reviewer: { agent, model, effort, fast, perm },
 //   tasks: { merge: "auto"|"checks"|"ask", review_rounds, must_fix: "blocker"|"major"|"minor", max_running,
@@ -115,7 +117,7 @@ function folderOf(space) {
 // machine its share (with "here": its name) for its herdr-task. Settings edits only Everywhere and
 // spaces now; a machine's layer holds its machine-only rows (machine, home) and is still read for
 // anything it set for all its spaces before machine scope went.
-export const SHEPHERDR_FILE = () => `${home()}/.herdr/shepherdr.json`;
+export const SHEPHERDR_FILE = () => dirs().settings;   // ~/.config/shepherdr/settings.json (lib/dirs.js)
 export const SHEPHERDR_DEFAULTS = { tasks: { merge: "ask", review_rounds: 0, must_fix: "major", max_running: 10, archive_after: 7 }, automations: { enabled: true },
   agents: { reactions: true, feedback: true, feedback_repo: "" } };
 export const LOCAL_MACHINE = "local";
@@ -243,7 +245,7 @@ export function newSpaceHeight(n, choosing = false) {
 // belong to a task).
 export async function recentFolders(machine = null) {
   const at = new Map();
-  const add = (p, t) => { if (p && !p.includes("/.herdr/worktrees/")) at.set(p, Math.max(at.get(p) ?? 0, t ?? 0)); };
+  const add = (p, t) => { if (p && !isWorktreePath(p)) at.set(p, Math.max(at.get(p) ?? 0, t ?? 0)); };
   const there = (id) => (machine ? id.startsWith(`${machine}/`) : !id.includes("/"));
   for (const k of terminals()) if (there(k.address)) add(k.foreground?.cwd ?? k.cwd, k.created_ms);
   for (const p of panes()) if (p.cwd && there(p.pane) && there(p.tab)) add(p.cwd, Date.now());
@@ -251,7 +253,7 @@ export async function recentFolders(machine = null) {
   const r = await exec("sh", ["-c", 'for d; do [ -d "$d" ] || continue; git -C "$d" rev-parse --show-toplevel 2>/dev/null || echo "$d"; done', "x", ...paths], machine ? { on: machine } : {});
   const out = [];
   for (const p of r.stdout.split("\n").map((l) => l.trim()).filter(Boolean)) {
-    if (!out.includes(p) && !p.includes("/.herdr/worktrees/")) out.push(p);
+    if (!out.includes(p) && !isWorktreePath(p)) out.push(p);
     if (out.length >= 8) break;
   }
   return out;

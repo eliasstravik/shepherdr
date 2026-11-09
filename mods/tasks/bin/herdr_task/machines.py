@@ -22,7 +22,7 @@ import sys
 import threading
 import time
 
-from .base import addon_off, APP_HOME, ASK_HOME, sync_held, bundle, ENTRY, Fail, guard, HOME, hc_json, now, PACKAGE, run, STORE
+from .base import addon_off, APP_HOME, ASK_HOME, sync_held, bundle, ENTRY, Fail, guard, HOME, hc_json, layout, now, PACKAGE, run, STORE, WHERE
 from .news import news_send, send_or_hold, typing
 
 
@@ -30,7 +30,8 @@ from .news import news_send, send_or_hold, typing
 # What a machine needs to run tasks: herdr-task (one zipapp), herdr-artifact (with its guide and
 # markup), herdr-secret (a remote copy: it asks the main machine), herdr-browser once it exists,
 # and the role templates. Each goes to the same place under that machine's home as here
-# (~/.local/bin/..., ~/.config/herdr-core/templates/...). A stamp there (~/.herdr/tools.json)
+# (~/.local/bin/..., ~/.config/herdr-core/templates/...). A stamp there (tools.json in Shepherdr's data;
+# STAMP names its old place, which SHEP turns into wherever it is on that machine)
 # records what was installed (each file's sha256 and its source's time), so a machine that is
 # current is skipped, an older copy never replaces a newer one, and a template someone changed
 # there is kept (--force replaces it). Nothing else there is touched.
@@ -58,7 +59,7 @@ def _real(rel):
 
 def _local_stamp():
     try:
-        with open(os.path.join(HOME, STAMP)) as f:
+        with open(WHERE.path("tools")) as f:
             return json.load(f).get("files") or {}
     except (OSError, ValueError):
         return {}
@@ -84,7 +85,7 @@ def secrets_main_here():
     rec = ((docs.get("shepherdr.secrets") if isinstance(docs, dict) else None) or {}).get("value")
     if isinstance(rec, dict) and rec.get("id"):
         return isinstance(core, dict) and rec["id"] == core.get("id")
-    return os.path.isfile(os.path.join(HOME, ".herdr", "vault.json")) and not os.path.exists(os.path.join(HOME, ".herdr", "secret-remote"))
+    return os.path.isfile(WHERE.path("vault")) and not os.path.exists(WHERE.path("secret-remote"))
 
 
 def manifest():
@@ -153,6 +154,9 @@ import base64, hashlib, json, os, shutil, subprocess, sys, time
 x = json.loads(sys.stdin.read())
 H = os.path.expanduser("~")
 P = lambda r: os.path.join(H, r)
+''' + layout.PY + r'''
+# Shepherdr's own files (the stamp, the secrets' marks) where they are on that machine: its own
+# folders once its data moved there, else ~/.herdr (SHEP: herdr_task/layout.py).
 def sha(p):
     try:
         with open(p, "rb") as f:
@@ -160,7 +164,7 @@ def sha(p):
     except OSError:
         return None
 try:
-    with open(P(x["stamp"])) as f:
+    with open(SHEP(x["stamp"])) as f:
         stamp = json.load(f)
 except Exception:
     stamp = {}
@@ -248,16 +252,16 @@ if x["op"] == "install" and not source:
     for t in x["touch"]:
         if t.get("unless_main") and main_here():
             continue
-        if not os.path.exists(P(t["path"])) and not os.path.exists(P(t["unless"])):
-            os.makedirs(os.path.dirname(P(t["path"])), exist_ok=True)
-            open(P(t["path"]), "a").close()
+        if not os.path.exists(SHEP(t["path"])) and not os.path.exists(SHEP(t["unless"])):
+            os.makedirs(os.path.dirname(SHEP(t["path"])), exist_ok=True)
+            open(SHEP(t["path"]), "a").close()
     ok = all(v in ("current", "installed", "own copy") for v in list(out["files"].values()) + list(out["links"].values()))
     stamp = {"version": x["version"] if ok else stamp.get("version"), "from": x["from"], "at": int(time.time() * 1000), "files": rec}
-    os.makedirs(os.path.dirname(P(x["stamp"])), exist_ok=True)
-    tmp = P(x["stamp"]) + ".tmp"
+    os.makedirs(os.path.dirname(SHEP(x["stamp"])), exist_ok=True)
+    tmp = SHEP(x["stamp"]) + ".tmp"
     with open(tmp, "w") as w:
         json.dump(stamp, w, indent=1)
-    os.replace(tmp, P(x["stamp"]))
+    os.replace(tmp, SHEP(x["stamp"]))
     out["stamp"] = {k: stamp.get(k) for k in ("version", "from", "at")}
 print(json.dumps(out))
 '''
@@ -316,7 +320,7 @@ def sync_machine(machine, m, op="install", force=False):
             res = _remote_python(machine, INSTALL, {**me, "op": "install", "files": send}, timeout=180)
             state, details = _verdict(res)
             for f in m["files"]:
-                mark = {".local/bin/herdr-task": STORE, f"{ARTIFACT_HOME}/bin/herdr-artifact": os.path.join(HOME, ".herdr", "artifacts")}.get(f["path"])
+                mark = {".local/bin/herdr-task": STORE, f"{ARTIFACT_HOME}/bin/herdr-artifact": WHERE.path("artifacts")}.get(f["path"])
                 if mark and res["files"].get(f["path"]) in ("current", "installed"):
                     _mark(os.path.join(mark, ".remote", machine), hashlib.sha1(f["data"]).hexdigest())
     except Fail as e:
@@ -494,6 +498,7 @@ PROBE = r'''
 import json, os, re, shlex, shutil, socket, subprocess, sys, threading
 o = json.loads(sys.argv[1])
 H = os.path.expanduser("~")
+''' + layout.PY + r'''
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=4", "-o", "StrictHostKeyChecking=yes", "-o", "LogLevel=ERROR"]
 def sh(argv, inp=None, timeout=20):
     try:
@@ -511,7 +516,7 @@ me = {"host": socket.gethostname(), "user": os.environ.get("USER") or os.path.ba
 core = (js(sh([hc, "server", "status", "--json"])[1]) or {}).get("core") if hc else None
 me["core"] = core
 try:
-    with open(os.path.join(H, ".herdr/tools.json")) as f:
+    with open(SHEP(".herdr/tools.json")) as f:
         me["tools"] = json.load(f).get("version")
 except Exception:
     me["tools"] = None

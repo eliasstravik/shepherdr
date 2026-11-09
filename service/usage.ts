@@ -1,6 +1,6 @@
 // Usage insights in the service (the "insights" add-on, docs/insights.md): the web app's events (POST /api/action
 // { type: "usage", events }), a voice call's sends and closed asks, appended to this machine's
-// ~/.herdr/shepherdr/usage.jsonl. Kinds, ids, counts and times only (core/usage.js drops the rest). Nothing here
+// ~/.local/state/shepherdr/service/usage.jsonl. Kinds, ids, counts and times only (core/usage.js drops the rest). Nothing here
 // makes a network call: the file stays on this machine; Delete removes it here and on the person's own other
 // machines over herdr-core's link (hc exec --on), the same way every other cross-machine read goes.
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";

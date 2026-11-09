@@ -14,6 +14,7 @@ import { watchViews } from "./usage.js";
 // A tab's name (what runs in it while Herdr named it): core/menus.js, as the web app's tab bar names it.
 import { tabName } from "./core/menus.js";
 import { inRender } from "./live.js";
+import { dirsReady } from "./dirs.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -41,9 +42,9 @@ export default class Tabs extends View {
     startInbox(cx);
     // Usage insights (lib/usage.js, the insights add-on): the space and tab shown, and the time on each.
     watchViews(cx);
-    // The add-ons switched off (lib/addons.js): Everywhere's "off" in ~/.herdr/shepherdr.json, as
+    // The add-ons switched off (lib/addons.js): Everywhere's "off" in ~/.config/shepherdr/settings.json, as
     // the settings window last saved it (or pushed it here), into shared state the mods read.
-    readTextFile(`${home()}/.herdr/shepherdr.json`).then((s) => {
+    dirsReady().then((d) => readTextFile(d.settings)).then((s) => {
       const list = JSON.parse(s ?? "{}")?.everywhere?.off;
       const want = Array.isArray(list) ? list : [];
       if (JSON.stringify(want) !== JSON.stringify(shared("addons.off") ?? [])) setShared("addons.off", want);

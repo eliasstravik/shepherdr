@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 
-from .base import ENTRY, Fail, guard, hc_json, now, STORE
+from .base import ENTRY, Fail, guard, hc_json, layout, now, STORE, WHERE
 from .when import parse_at
 from .settings import bare, settings_for, worker_argv, worktrees_on
 from .agents import agent_running, live_agents, starting, status_of, task_status
@@ -702,12 +702,18 @@ def cmd_scheduler(args):
         say(args, {"running": True}, "Another scheduler is running.")
         return
     started = script_hash()
+    on_layout = WHERE.migrated
+    test = bool(os.environ.get("HERDR_TASK_STORE"))
     with open(os.path.join(STORE, ".scheduler.json"), "w") as f:
         json.dump({"pid": os.getpid(), "hash": started, "at": now(), "terminal": os.environ.get("HC_TERMINAL_ID")}, f)
     print(f"herdr-automations: watching {STORE} every 15 s.", flush=True)
     while True:
         report = {"started": [], "done": [], "attention": [], "fired": []}
         try:
+            if not test:
+                layout.heal_back(WHERE)       # rolled back: what was written at the new paths just after, taken back
+                for k in layout.heal(WHERE):  # an older writer's file at an old path: taken in
+                    print(f"{time.strftime('%H:%M:%S')} took in {k} written at its old path", flush=True)
             one_pass(report)
         except Exception as e:  # one bad list never stops the rest
             print(f"{time.strftime('%H:%M:%S')} error: {e}", flush=True)
@@ -735,8 +741,8 @@ def cmd_scheduler(args):
             say(args, report, None)
             return
         time.sleep(15)
-        # Updated: carry on as the new version.
-        if script_hash() != started:
+        # Updated, or this machine's data moved since: carry on as the new version, on the new paths.
+        if script_hash() != started or (not test and WHERE.migrated != on_layout):
             fcntl.flock(me, fcntl.LOCK_UN)
             os.execv(sys.executable, [sys.executable, ENTRY, "scheduler"])
 

@@ -189,9 +189,13 @@ class WhoPublishes(unittest.TestCase):
             json.dump({"prefix": "SHOP", "tasks": []}, f)
         self.p = mock.patch.object(A, "HOME", self.home)
         self.p.start()
+        # Shepherdr's paths there: that home's old ones (not moved)
+        self.q = mock.patch.object(A, "SHEP", lambda rel: os.path.join(self.home, rel))
+        self.q.start()
 
     def tearDown(self):
         self.p.stop()
+        self.q.stop()
         shutil.rmtree(self.home, ignore_errors=True)
 
     def hc(self, labels, code=0):

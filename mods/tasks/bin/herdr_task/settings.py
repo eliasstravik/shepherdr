@@ -6,7 +6,7 @@ import os
 import re
 import shutil
 
-from .base import Fail, HOME, MAX_RUNNING
+from .base import Fail, HOME, MAX_RUNNING, WHERE
 
 
 # What each agent key starts by default. Unknown keys run as themselves; --argv overrides.
@@ -15,14 +15,15 @@ AGENTS = {"claude": ["claude"], "codex": ["codex", "--no-daemon"]}
 
 # ---- the person's settings ------------------------------------------------------------------
 
-SETTINGS = os.environ.get("HERDR_TASK_SETTINGS") or os.path.join(HOME, ".herdr", "shepherdr.json")
+SETTINGS = os.environ.get("HERDR_TASK_SETTINGS") or WHERE.path("settings")
 # The role instructions are herdr-core templates (`hc templates` lists them): assistant.md (the
 # coordinator's), worker.md and reviewer.md. Workers and reviewers used ~/.herdr/instructions.
 TEMPLATES = os.environ.get("HERDR_TASK_TEMPLATES") or os.path.join(HOME, ".config", "herdr-core", "templates")
 OLD_INSTRUCTIONS = os.path.join(HOME, ".herdr", "instructions")
 ASSISTANT_TEMPLATES = ("assistant", "coordinator")  # "coordinator": Assistants started before the rename
 DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "must_fix": "major", "max_running": MAX_RUNNING, "worktrees": True,
-                      "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": "", "branch": ""},
+                      "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": "", "branch": "",
+                      "worktree_root": ""},
             "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {},
             "agents": {"reactions": True, "feedback": True, "feedback_repo": "eliasstravik/shepherdr"}}
 LEVELS = ["blocker", "major", "minor"]
@@ -120,7 +121,7 @@ def settings_for(s, space=None):
     """The settings for this folder's tasks: Shepherdr settings' Everywhere, then this machine's,
     then the override of the space working in this folder (--space's when several do): the most
     specific wins. The window no longer writes agent or task values for a machine (only its
-    machine-only rows, read by machine_limits/machine_option); ones set before still apply here. Written by the settings window (~/.herdr/shepherdr.json); herdr-task only
+    machine-only rows, read by machine_limits/machine_option); ones set before still apply here. Written by the settings window (~/.config/shepherdr/settings.json); herdr-task only
     reads them."""
     everywhere, machine, pick = settings_layers(s, space)
     out = {k: dict(v) for k, v in DEFAULTS.items()}

@@ -1,7 +1,7 @@
 """The one-time "Enjoying Shepherdr?" card (SHEP-79): an Assistant may ask the person, once ever, to
 star Shepherdr on GitHub, at a good moment it judges by its instructions (assistant.md).
 
-What's kept is Everywhere's `star_prompt` in the settings file (~/.herdr/shepherdr.json), so it
+What's kept is Everywhere's `star_prompt` in the settings file (~/.config/shepherdr/settings.json), so it
 travels to every machine as the other settings do (the window's push, the web host's sync):
   {"off": true}                      Settings › Agents › Ask for a star switched off: never asked
   {"asked": <ms>, "answer": "..."}   asked (and how the person answered): never asked again

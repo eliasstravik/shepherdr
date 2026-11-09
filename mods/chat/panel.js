@@ -30,6 +30,8 @@ import { button, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { on as addonOn } from "./addons.js";
 import { artifactCli } from "./artview.js";
 import { GREP, publishedIds, taskArtifacts } from "./core/task-artifacts.js";
+import { SH } from "./core/paths.js";
+import { dirs } from "./dirs.js";
 
 // The task header's shared left edge, and task ids in the Tasks list's monospace (mods/tasks).
 const EDGE = 12, ID_FONT = "JetBrains Mono";
@@ -132,8 +134,8 @@ export class PanelHost {
     let rec = null;
     if (k) {
       const text = k.machine
-        ? (await exec("sh", ["-c", 'cat "$HOME/.herdr/tasks/$1.json"', "sh", k.slug], { on: k.machine }).catch(() => null))?.stdout
-        : await readTextFile(`${home()}/.herdr/tasks/${k.slug}.json`).catch(() => null);
+        ? (await exec("sh", ["-c", SH + 'cat "$SHEP_TASKS/$1.json"', "sh", k.slug], { on: k.machine }).catch(() => null))?.stdout
+        : await readTextFile(`${dirs().tasks}/${k.slug}.json`).catch(() => null);
       try {
         const d = JSON.parse(text || "null");
         const t = d?.tasks?.find((x) => x.id === k.id);

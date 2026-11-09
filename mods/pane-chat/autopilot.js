@@ -1,6 +1,6 @@
 // Autopilot in an Assistant's header (DECISIONS.md, "Shepherdr gaps being closed": a plain on/off
 // switch on the left, right after the agent name and folder). herdr-task keeps it (`herdr-task
-// autopilot ...`, its scheduler wakes the Assistant) in ~/.herdr/tasks/.autopilot.json; this reads
+// autopilot ...`, its scheduler wakes the Assistant) in ~/.local/share/shepherdr/tasks/.autopilot.json; this reads
 // that file and asks herdr-task to change it. Another machine's space ("vm/sp1") the same, from
 // that machine's file: herdr-task here hands its switch to herdr-task there, whose scheduler wakes
 // it (its Assistant runs there).
@@ -8,7 +8,7 @@
 // The switch: "Autopilot", and when on its next wake dim after it. No menu: the heartbeat, the
 // schedule and the events, Everywhere's or this space's own, live in Shepherdr settings › Autopilot
 // (core/autopilot.js pilotFor: this space's switch, its own or Everywhere's rest, from
-// ~/.herdr/shepherdr.json). It always turns on when clicked; while its heartbeat is still empty a
+// ~/.config/shepherdr/settings.json). It always turns on when clicked; while its heartbeat is still empty a
 // "Write a heartbeat" link after it opens that page, on this space. The switch, its words and Run
 // now are one group (apGroup) on a quiet pill as tall as Chat | Terminal, as the web app's header.
 
@@ -18,9 +18,11 @@ import { link, TEXT, H, RADIUS, openSettings, toast, plainError } from "./ui.js"
 import { theme, home, appHome, exec, readTextFile, notify, shared, setShared } from "herdr";
 import { terminals } from "./live.js";
 import { pilotFor, headerDetail, flipped } from "./core/autopilot.js";
+import { SH } from "./core/paths.js";
+import { dirs } from "./dirs.js";
 
-const FILE = () => `${home()}/.herdr/tasks/.autopilot.json`;
-const SETTINGS = () => `${home()}/.herdr/shepherdr.json`;
+const FILE = () => `${dirs().tasks}/.autopilot.json`;
+const SETTINGS = () => dirs().settings;
 const CLI = () => `${appHome()}/mods/tasks/bin/herdr-task`;
 // A narrow header shows the switch and Run now's ▶ only.
 export const COMPACT_BELOW = 480;
@@ -41,7 +43,7 @@ export function apSpace(address, lazy) {
 // Another machine's space: (its machine, its id there); null for this computer's.
 const remoteOf = (space) => (space.includes("/") ? { machine: space.slice(0, space.indexOf("/")), id: space.slice(space.indexOf("/") + 1) } : null);
 // Its machine's file, read there each third poll (about every 12 s): herdr-core asks it over the link.
-const READ = 'cat "$HOME/.herdr/tasks/.autopilot.json" 2>/dev/null || true';
+const READ = SH + 'cat "$SHEP_TASKS/.autopilot.json" 2>/dev/null || true';
 async function fileOf(view, space) {
   const r = remoteOf(space);
   if (!r) return JSON.parse((await readTextFile(FILE())) ?? "{}");

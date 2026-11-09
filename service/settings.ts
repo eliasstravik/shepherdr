@@ -1,12 +1,13 @@
-// Shepherdr settings for the web app: ~/.herdr/shepherdr.json as the window's settings show it (core/settings.js: the
+// Shepherdr settings for the web app: ~/.config/shepherdr/settings.json as the window's settings show it (core/settings.js: the
 // same words and choices), as 2.1's settings sections, and a change from the web written back to the same file,
 // keeping everything else in it. The window's settings read the file when they open; herdr-task reads it each time.
 // Levels as the window's scopes: Everywhere ("everywhere"), a space ("spaces"[its id], with its repo folder, which is
 // how herdr-task finds it), and for the Machines page each machine ("machines"[its name, "local" here]).
 import { existsSync, readFileSync, renameSync, watch, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { HOME, settingsFile, writableSettings } from "./paths.ts";
+import { HOME, settingsFile, where, writableSettings } from "./paths.ts";
 import * as C from "../core/settings.js";
+import { SH } from "../core/paths.js";
 import * as M from "../core/machines.js";
 import * as HC from "../core/host.js";
 import * as APc from "../core/autopilot.js";
@@ -21,8 +22,8 @@ export type PilotEverywhere = { every: string | null; events: string[]; words: s
 const { HOLD } = M as any;
 const TEMPLATES = join(HOME, ".config", "herdr-core", "templates");
 // herdr-task's check of each machine's CLIs (installed, signed in), and its home round (each machine's home space)
-const CLI_CHECK = join(HOME, ".herdr", "cli-check.json");
-const HOME_ROUND = join(HOME, ".herdr", "tasks", ".home.json");
+const CLI_CHECK = where()["cli-check"];
+const HOME_ROUND = join(where().tasks, ".home.json");
 const LOCAL = "local";
 const { SERVE } = HC as any;
 /** Settings › Web's Serve from, as the service tells it (service/main.ts serveNow) */
@@ -51,7 +52,8 @@ const ON = (v: unknown) => (v ? "on" : "off");
 
 // the window's push to other machines (mods/shepherdr-settings): each gets Everywhere, its machine's and its spaces'
 // (by their ids there), marked so it knows which machine it is; a file there without the mark is that machine's own
-export const PUSH = `f="$HOME/.herdr/shepherdr.json"; mkdir -p "$HOME/.herdr" || exit 1
+// (its settings file wherever that machine keeps it: Shepherdr's folders, or ~/.herdr on an older one: core/paths.js SH)
+export const PUSH = `${SH}f="$SHEP_SETTINGS"; mkdir -p "$(dirname "$f")" || exit 1
 if [ -f "$f" ] && ! grep -q '"pushed_from"' "$f"; then echo own; exit 0; fi
 if [ -f "$f" ] && [ "$(cat "$f")" = "$1" ]; then exit 0; fi
 umask 077; printf '%s\\n' "$1" > "$f.tmp" && mv "$f.tmp" "$f"`;
@@ -69,7 +71,7 @@ export function readSettings(): any {
   try { text = readFileSync(settingsFile(), "utf8"); } catch (e: any) { if (e?.code === "ENOENT") return {}; throw new Error("The settings file can't be read now. Try again."); }
   // SHEP-42's assistant.reactions comes back as agents.reactions, so a change writes it there
   try { const f = JSON.parse(text); if (f && typeof f === "object" && !Array.isArray(f)) return upgradeReactions(f); } catch {}
-  throw new Error("The settings file can't be read now (~/.herdr/shepherdr.json isn't valid JSON).");
+  throw new Error(`The settings file can't be read now (${settingsFile()} isn't valid JSON).`);
 }
 const SAFE = (k: string) => !["__proto__", "constructor", "prototype"].includes(k);
 

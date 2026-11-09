@@ -1,7 +1,7 @@
 // Settings > Machines (HERD-40), as Shepherdr's Machine settings and its health and plan-limits
 // views. Machine-only settings live here as rows (there is no machine scope any more):
 // - When new tasks wait, for all machines: start limits ("machine" in Everywhere's layer of
-//   ~/.herdr/shepherdr.json: { start_load (× cores, shown as a percent of all cores),
+//   ~/.config/shepherdr/settings.json: { start_load (× cores, shown as a percent of all cores),
 //   start_memory, start_disk }; herdr-task's tick holds queued tasks by them), and how task agents
 //   run (low_priority, worker_memory; HERD-61, herdr-task's machine_option()).
 // - Then each machine: its health and what is left of each agent CLI's plan (machines.js), its
@@ -16,6 +16,7 @@ import { machines, home, readTextFile, setShared } from "herdr";
 import { HOLD, machineDetails, pollNow } from "./machines.js";
 import { LOCAL_MACHINE } from "./coordinator.js";
 import { TEXT, button, link, toggleSwitch } from "./ui.js";
+import { dirsReady } from "./dirs.js";
 // The rows' words, a machine block's and Home Assistant's lines: core/settings.js, shared with the web app.
 import { MACHINES, OLD_NAMES, SECTIONS, SET_FOR_MACHINE, RESET, SAME_AS_ALL_MACHINES, machinesOwn, homeAbout, machineLabel } from "./core/settings.js";
 
@@ -43,8 +44,8 @@ function askOnce(view, cx) {
 
 // Home Assistant (HERD-51), as Shepherdr's home spaces: a machine's home space (its ~) has an
 // Assistant that also looks after the machine; this computer's keeps every machine's overview.
-// Per machine in ~/.herdr/shepherdr.json machines[key].home; unset, on for this computer only.
-// What herdr-task's home round last found (~/.herdr/tasks/.home.json) says how each is now.
+// Per machine in ~/.config/shepherdr/settings.json machines[key].home; unset, on for this computer only.
+// What herdr-task's home round last found (~/.local/share/shepherdr/tasks/.home.json) says how each is now.
 export const homeOn = (cfg, key) => {
   const v = cfg?.machines?.[key]?.home;
   return typeof v === "boolean" ? v : key === LOCAL_MACHINE;
@@ -53,7 +54,7 @@ function readHome(view, cx) {
   if (view._homeAt && Date.now() - view._homeAt < 15000) return;
   view._homeAt = Date.now();
   cx.spawn(async (cx) => {
-    try { view._home = JSON.parse((await readTextFile(`${home()}/.herdr/tasks/.home.json`)) ?? "{}") ?? {}; } catch { view._home = {}; }
+    try { view._home = JSON.parse((await readTextFile(`${(await dirsReady()).tasks}/.home.json`)) ?? "{}") ?? {}; } catch { view._home = {}; }
     cx.notify();
   });
 }

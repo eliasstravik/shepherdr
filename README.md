@@ -129,7 +129,7 @@ Only the ones it made. Every task works in its own worktree, on its own branch `
 
 ### Where do my tasks live?
 
-In `~/.herdr/` on each machine: tasks (`~/.herdr/tasks`), worktrees, artifacts, the secrets vault and Shepherdr's settings (`~/.herdr/shepherdr.json`). The window's own state (chat drafts, attachments) is in your Herdr folder's `data/`. Installing, updating or uninstalling never touches either. [Develop](docs/develop.md) covers the code.
+In Shepherdr's own folders on each machine: tasks, artifacts, task worktrees and the secrets vault in `~/.local/share/shepherdr`, Shepherdr's settings in `~/.config/shepherdr`, task browsers and the service's files in `~/.local/state/shepherdr` (`shepherdr where` lists them; older ones stay in `~/.herdr`, which links there). The window's own state (chat drafts, attachments) is in your Herdr folder's `data/`. Uninstalling never touches either. [Develop](docs/develop.md) covers the code.
 
 ### Can I use several machines?
 

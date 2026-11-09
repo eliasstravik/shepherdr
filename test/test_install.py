@@ -29,11 +29,18 @@ def tree(top):
     out = {}
     for d, dirs, files in os.walk(top):
         dirs[:] = [x for x in dirs if x != ".shepherdr-backup"]
-        for f in files:
+        for f in files + [x for x in dirs if os.path.islink(os.path.join(d, x))]:
             p = os.path.join(d, f)
+            if os.path.islink(p):
+                out[os.path.relpath(p, top)] = b"-> " + os.readlink(p).encode()
+                continue
             with open(p, "rb") as fh:
                 out[os.path.relpath(p, top)] = fh.read()
     return out
+
+
+# Shepherdr's own data (layout.py): an install makes its folders and the old paths' links; uninstall leaves the data.
+DATA_PLACES = (".config/shepherdr/", ".local/share/shepherdr/", ".local/state/shepherdr/", ".cache/shepherdr/", ".herdr/")
 
 
 class Install(unittest.TestCase):
@@ -110,13 +117,48 @@ class Install(unittest.TestCase):
         run("uninstall", "--root", self.root)
         after = tree(self.root)
         left = sorted(set(after) - set(self.before))
-        self.assertTrue(all(x.startswith(f"{APP}/mods/toasts/") for x in left), left)
+        self.assertTrue(all(x.startswith(f"{APP}/mods/toasts/") or x.startswith(DATA_PLACES) for x in left), left)
         for k, v in self.before.items():
             if k.endswith(".json"):
                 self.assertEqual(json.loads(after[k]), json.loads(v), k)
             else:
                 self.assertEqual(after[k], v, k)
         self.assertFalse(os.path.lexists(self.p(".local/bin/herdr-task")))
+
+    def test_install_moves_the_data_into_shepherdrs_own_folders(self):
+        """SHEP-141: an install over a 3.1.26 home moves ~/.herdr's Shepherdr data into its own folders in one go, says
+        so in one line, leaves links at the old paths, and doctor and where say where it all is. Again: nothing more."""
+        h = self.p(".herdr")
+        os.makedirs(os.path.join(h, "tasks"))
+        with open(os.path.join(h, "tasks", "dev-shop.json"), "w") as f:
+            json.dump({"folder": "/x", "tasks": [], "prefix": "SHOP"}, f)
+        with open(os.path.join(h, "shepherdr.json"), "w") as f:
+            json.dump({"version": 1, "everywhere": {}}, f)
+        os.makedirs(os.path.join(h, "worktrees", "shop", "task-1"))
+        dry = run("install", "--root", self.root, "--yes", "--dry-run").stdout
+        self.assertIn("data: would move", dry)
+        self.assertFalse(os.path.exists(self.p(".local/share/shepherdr/tasks")))
+        out = run("install", "--root", self.root, "--yes").stdout
+        self.assertIn("Shepherdr's data moved to its own folders", out)
+        self.assertTrue(os.path.isfile(self.p(".local/share/shepherdr/tasks/dev-shop.json")))
+        self.assertTrue(os.path.isfile(self.p(".config/shepherdr/settings.json")))
+        self.assertTrue(os.path.islink(os.path.join(h, "tasks")))
+        self.assertTrue(os.path.isdir(os.path.join(h, "worktrees", "shop", "task-1")), "worktrees stay")
+        where = run("where", "--root", self.root).stdout
+        self.assertIn("layout 2", where)
+        self.assertIn(self.p(".local/share/shepherdr/tasks"), where)
+        doc = run("doctor", "--root", self.root, ok=False).stdout
+        self.assertIn("data: Shepherdr's own folders (layout 2)", doc)
+        self.assertIn("worktrees: 1 still in", doc)
+        self.assertNotIn("Shepherdr's data moved", run("update", "--root", self.root, "--yes").stdout)
+        # rollback, then the next update leaves it on ~/.herdr until `shepherdr migrate`
+        back = run("migrate", "--root", self.root, "--rollback").stdout
+        self.assertIn("back in ~/.herdr", back)
+        self.assertFalse(os.path.islink(os.path.join(h, "tasks")))
+        self.assertIn("rolled back", run("doctor", "--root", self.root, ok=False).stdout)
+        self.assertTrue(os.path.isdir(os.path.join(h, "tasks")) and not os.path.islink(os.path.join(h, "tasks")))
+        run("migrate", "--root", self.root)
+        self.assertTrue(os.path.islink(os.path.join(h, "tasks")))
 
     def test_service_unit_and_files(self):
         """The service and the shared core land in .local/share/shepherdr; a scratch root gets the unit file only

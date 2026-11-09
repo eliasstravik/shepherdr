@@ -37,9 +37,45 @@ def slug_of(folder):
     return s or "root"
 
 
+# ---- a repo's stable id (SHEP-141) ------------------------------------------------------------
+# A repo's tasks are kept by its folder's name (the slug), so renaming or moving the folder would lose them. Each
+# repo gets an id of its own in its .git/config (`git config --local shepherdr.id`: never committed, shared by its
+# worktrees, moved with it), recorded in its task list as "project_id": a folder with no list of its own finds the
+# list whose repo it is, when that list's folder is gone, and goes on with it (same slug, so its tasks' keys stay).
+
+def project_id(folder, make=False):
+    """The repo's id (None outside git); make: give it one when it has none."""
+    ok, out, _ = git(folder, "config", "--local", "--get", "shepherdr.id")
+    if ok and out.strip():
+        return out.strip()
+    if not make:
+        return None
+    import uuid
+    new = str(uuid.uuid4())
+    return new if git(folder, "config", "--local", "shepherdr.id", new)[0] else None
+
+
+def moved_list(folder):
+    """The list of the repo now at `folder` that was kept under its old folder (gone now), or None."""
+    pid = project_id(folder) if os.path.isdir(os.path.join(folder, ".git")) else None
+    if not pid:
+        return None
+    for p in (os.path.join(STORE, f) for f in sorted(os.listdir(STORE))) if os.path.isdir(STORE) else []:
+        if not p.endswith(".json"):
+            continue
+        d = read_list(p)
+        if is_task_list(d) and d.get("project_id") == pid and d.get("folder") != folder and not os.path.isdir(d.get("folder") or ""):
+            return p
+    return None
+
+
 def store_path(folder):
     slug = slug_of(folder)
     p = os.path.join(STORE, slug + ".json")
+    if not os.path.exists(p):
+        moved = moved_list(folder)
+        if moved:
+            return os.path.basename(moved)[:-5], moved
     # Two folders can share a readable slug ("a-b/c", "a/b-c"): the second gets a hash.
     if os.path.exists(p):
         try:
@@ -113,6 +149,8 @@ class Store:
             raise Fail(f"{self.path} isn't valid JSON. Fix it first.")
         d = self.data
         d.setdefault("version", 1)
+        if self.write and d.get("folder") not in (None, self.loc["folder"]) and os.path.exists(self.path):
+            self.dirty = True   # its repo moved (moved_list): kept under its new folder from now on
         d["folder"], d["kind"], d["name"] = self.loc["folder"], self.loc["kind"], self.loc["name"]
         if d.get("slug") != self.slug and os.path.exists(self.path):
             d["slug"] = self.slug
@@ -121,6 +159,11 @@ class Store:
         d.setdefault("next", 1)
         d.setdefault("tasks", [])
         self.new_prefix = False
+        if self.write and self.loc["kind"] == "repo" and not d.get("project_id"):
+            pid = project_id(self.loc["folder"], make=True)
+            if pid:
+                d["project_id"] = pid
+                self.dirty = self.dirty or os.path.exists(self.path)
         if self.write:
             self.migrate()
             if not d.get("prefix"):

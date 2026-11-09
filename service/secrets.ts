@@ -8,14 +8,14 @@ import { existsSync, readFileSync } from "node:fs";
 import type { MachineRow } from "./host.ts";
 import { join } from "node:path";
 import type { Hub } from "./hub.ts";
-import { HOME } from "./paths.ts";
+import { HOME, where } from "./paths.ts";
 import * as SC from "../core/secrets.js";
 import * as HC from "../core/host.js";
 
 const { NAME, ASK, asksIn, keptLine, declinedLine, SECRETS_DOC, secretsRecord, believeRecord, autoKeeper, followTo, COUNT_SCRIPT } = SC as any;
 const { HOST_DOC, newestHost } = HC as any;
-const VAULT = join(HOME, ".herdr", "vault.json");
-const MARK = join(HOME, ".herdr", "secret-remote");
+const VAULT = where().vault;
+const MARK = where()["secret-remote"];
 const APP = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
 const BIN = [join(APP, "bin", "herdr-secret"), join(HOME, ".local", "share", "shepherdr", "bin", "herdr-secret"), join(HOME, ".local", "bin", "herdr-secret")].find(existsSync) ?? "herdr-secret";
 

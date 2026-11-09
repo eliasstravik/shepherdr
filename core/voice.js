@@ -9,6 +9,7 @@
 // Shared core: the source is core/voice.js.
 
 import { DOS } from "./screen.js";
+import { PY } from "./paths.js";
 
 export const API = "https://api.elevenlabs.io/v1";
 
@@ -340,6 +341,7 @@ export const unreachable = (name) => `Can't reach ${name}, which keeps your secr
 // key). Reads the vault's Everywhere entry, else the old secrets/elevenlabs.env there.
 export const KEY_SCRIPT = `
 import hashlib, json, os
+${PY}
 H = os.path.expanduser("~")
 app = os.environ.get("HERDR_APP_HOME") or os.path.join(H, ".config", "herdr-app")
 def env(p):
@@ -358,7 +360,7 @@ def env(p):
     return out
 key = ""
 try:
-    with open(os.path.join(H, ".herdr", "vault.json")) as f:
+    with open(SHEP(".herdr/vault.json")) as f:
         v = json.load(f)
     key = next((e["value"] for e in v.get("secrets", []) if e.get("name") == "${KEY_NAME}" and e.get("scope") == "everywhere" and isinstance(e.get("value"), str)), "")
 except Exception:

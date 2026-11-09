@@ -3,7 +3,7 @@
 Everything in Shepherdr is an add-on made of Herdr mods. [`lib/addons.json`](../lib/addons.json) is the list: each
 add-on's mods, the layout blocks it fills, its keys, helpers, role instructions and what it needs. The installer
 installs all of them (one layout listing gives everything); Shepherdr settings → Window → Add-ons switches the ones
-marked below off and on again, at once and on every machine (Everywhere's `off` in `~/.herdr/shepherdr.json`).
+marked below off and on again, at once and on every machine (Everywhere's `off` in `~/.config/shepherdr/settings.json`).
 
 | Add-on | Switch | What it is | Off means |
 |---|---|---|---|
@@ -29,7 +29,7 @@ Settings says which.
 ## How a switch works
 
 - The window's mods read shared `addons.off` through `lib/addons.js` (`on("voice")`), so a flip shows at once.
-  `tabs-tasks` loads it from `~/.herdr/shepherdr.json` when Herdr starts.
+  `tabs-tasks` loads it from `~/.config/shepherdr/settings.json` when Herdr starts.
 - herdr-task reads Everywhere's `off` (`addon_off()` in `herdr_task/base.py`) for its background work: Autopilot's
   wake-ups, the task browsers, the sync to other machines.
 - An off add-on's keys stay in `keys.json` and do nothing, so turning it back on needs no merge.

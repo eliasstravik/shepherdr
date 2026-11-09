@@ -10,7 +10,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, rmSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { randomBytes } from "node:crypto";
-import { DATA, SOCK, TOKEN, PORT, HOME, ensureData, settingsFile } from "./paths.ts";
+import { DATA, SOCK, TOKEN, PORT, HOME, ensureData, settingsFile, where } from "./paths.ts";
 import { holdLock } from "./lock.ts";
 import { gate, localCaller, type Gate } from "./auth.ts";
 import { trustedPeer } from "./peer.ts";
@@ -213,7 +213,7 @@ const settings = new Settings();
 const readDefaults = async () => {
   try {
     let check: any = {};
-    try { check = JSON.parse(readFileSync(join(HOME, ".herdr", "cli-check.json"), "utf8"))?.machines?.[""] ?? {}; } catch {}
+    try { check = JSON.parse(readFileSync(where()["cli-check"], "utf8"))?.machines?.[""] ?? {}; } catch {}
     settings.choices = SC.choicesFrom(await compat.agents!.ownDefaults(), { claude: check.claude !== "missing", codex: check.codex !== "missing" });
     model.rebuild();
   } catch {}
@@ -314,7 +314,7 @@ model.onBuild = (b) => {
 };
 model.start();
 
-// The Web add-on (Shepherdr settings > Window > Add-ons, Everywhere's "off" in ~/.herdr/shepherdr.json): off, the web
+// The Web add-on (Shepherdr settings > Window > Add-ons, Everywhere's "off" in ~/.config/shepherdr/settings.json): off, the web
 // app stops and /shepherdr is no longer shared; the service keeps its background work.
 const APP_DATA = join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "data", "shepherdr");
 /** where files from a page's message box are kept (the window keeps pasted ones there too) */
@@ -325,7 +325,7 @@ function webOn() {
 }
 
 // Tailscale can come up after the service: look again now and then, and keep /shepherdr shared while web is on. What
-// the window's Shepherdr settings > Web shows goes into ~/.herdr/shepherdr/web.json (the link, its QR code).
+// the window's Shepherdr settings > Web shows goes into ~/.local/state/shepherdr/service/web.json (the link, its QR code).
 let wasOn: boolean | null = null;
 // Serve from: a move this service started (shepherdr web serve-from), until it ends; what went wrong, for a while
 let moving: { to: string; at: number; error?: string } | null = null;

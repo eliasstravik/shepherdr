@@ -49,6 +49,7 @@ import { taskDot, ownProgress } from "./dot.js";
 import * as attach from "./attach.js";
 import * as slash from "./slash.js";
 import * as mentions from "./core/mentions.js";
+import { SH } from "./core/paths.js";
 import * as agent from "./agent.js";
 import { cleanCommand } from "./core/clean-env.js";
 import * as choices from "./settings.js";
@@ -4167,7 +4168,7 @@ export default class Chat extends View {
     this.artsLoading = true;
     cx.spawn(async (cx) => {
       try {
-        const r = await exec("sh", ["-c", 'cd "$HOME/.herdr/artifacts" 2>/dev/null || exit 0; for f in *.json .*.json; do [ -f "$f" ] && cat "$f" && printf "\\n\\036\\n"; done; true'], this.machine ? { on: this.machine } : {});
+        const r = await exec("sh", ["-c", SH + 'cd "$SHEP_ARTIFACTS" 2>/dev/null || exit 0; for f in *.json .*.json; do [ -f "$f" ] && cat "$f" && printf "\\n\\036\\n"; done; true'], this.machine ? { on: this.machine } : {});
         const arts = [];
         for (const part of r.stdout.split("\x1e")) { try { arts.push(...(JSON.parse(part).artifacts ?? [])); } catch {} }
         this.arts = arts;

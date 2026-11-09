@@ -5,6 +5,16 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { envLines, voiceKey } from "./core/voice.js";
+import { roots, pathsFrom, isMigrated, LEGACY, ROLLBACK } from "./core/paths.js";
+
+/** Shepherdr's paths on this machine (core/paths.js): the new ones once its data moved, else the old ~/.herdr ones. */
+export function shepPaths() {
+  const home = process.env.HOME ?? "";
+  const r = roots(home, process.env, process.platform === "darwin");
+  let layout = "";
+  try { layout = readFileSync(join(r.data, "LAYOUT"), "utf8"); } catch {}
+  return pathsFrom(home, r, isMigrated(layout, existsSync(join(home, LEGACY, ROLLBACK))));
+}
 
 export const HOME = process.env.HERDR_APP_HOME || join(process.env.HOME ?? "", ".config/herdr-app");
 export const SECRETS = join(HOME, "secrets");
@@ -27,7 +37,7 @@ export function envFile(file: string): Record<string, string> {
 export const keyFor = () => voiceKey({
   oldFile: () => envFile(join(SECRETS, "elevenlabs.env")).ELEVENLABS_API_KEY || "",
   where: async () => { const out = await output([secretBin(), "where", "--json"]); return out ? JSON.parse(out) : null; },
-  vault: () => { try { return readFileSync(join(process.env.HOME ?? "", ".herdr", "vault.json"), "utf8"); } catch { return null; } },
+  vault: () => { try { return readFileSync(shepPaths().vault, "utf8"); } catch { return null; } },
   ask: (on: string, script: string) => output(["hc", "exec", "--on", on, "--timeout", "15", "--", "python3", "-c", script]),
   // none named to keep them yet: each machine linked from here that is on (SHEP-33)
   machines: async () => {

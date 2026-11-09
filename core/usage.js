@@ -1,5 +1,5 @@
 // Usage insights (the "insights" add-on, docs/insights.md): what the person does on screen, one JSON line per event,
-// kept only on their own machine in ~/.herdr/shepherdr/usage.jsonl, so their own agents can suggest better ways to
+// kept only on their own machine in ~/.local/state/shepherdr/service/usage.jsonl, so their own agents can suggest better ways to
 // work when the person asks. Private: nothing here or in its writers makes a network call; the data never leaves the
 // machine unless the person's own agent reads it over their own machines' link.
 // Only what Shepherdr keeps nowhere else is written here: views opened and the time on them, space and tab switches,
@@ -10,6 +10,7 @@
 // Shared core: the source is core/usage.js; bin/sync-shared copies it into the mods in lib/COPIES. The window writes
 // with lib/usage.js, the service with service/usage.ts (the web app's events go through it).
 
+import { SH } from "./paths.js";
 export const FILE = "usage.jsonl";
 // One older file is kept when the log passes CAP bytes: at most about 2 × CAP on disk.
 export const OLD = "usage.1.jsonl";
@@ -80,4 +81,4 @@ export const APPEND = 'd="$1"; mkdir -p "$d" && chmod 700 "$d"; f="$d/usage.json
   + '[ -f "$f" ] && [ "$(wc -c < "$f")" -gt "$3" ] && mv -f "$f" "$d/usage.1.jsonl"; printf %s "$2" >> "$f"; chmod 600 "$f"';
 
 // The shell line that deletes it all on a machine (Settings' Delete, and an agent asked to), and marks when.
-export const DELETE = 'd="$HOME/.herdr/shepherdr"; rm -f "$d/usage.jsonl" "$d/usage.1.jsonl"; mkdir -p "$d" && touch "$d/usage.deleted"';
+export const DELETE = SH + 'd="$SHEP_SERVICE"; rm -f "$d/usage.jsonl" "$d/usage.1.jsonl"; mkdir -p "$d" && touch "$d/usage.deleted"';
