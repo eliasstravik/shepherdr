@@ -1306,6 +1306,49 @@ def update_hint(rec):
     return f"to update: {pull}`shepherdr update`" + (" (web only)" if rec.get("web") else "")
 
 
+def github_checks_check(root):
+    """SHEP-179: doctor's warnings for repos with tasks whose pull requests' checks this machine's GitHub token can't
+    read (a fine-grained token without Checks or Commit statuses read): their tasks would never see them pass.
+    Asks GitHub once per repo; GitHub not answering (no network) leaves what herdr-task last saw there."""
+    gh = os.environ.get("HERDR_TASK_GH") or shutil.which("gh")
+    try:
+        folder = where_for(root).path("tasks")
+        names = sorted(f for f in os.listdir(folder) if f.endswith(".json"))
+    except (OSError, ValueError, AttributeError):
+        return []
+    if not gh:
+        return []
+    out, seen = [], set()
+    for f in names:
+        try:
+            with open(os.path.join(folder, f)) as fh:
+                d = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        repo = (d.get("github") or {}).get("repo") if isinstance(d, dict) else None
+        if not repo or repo in seen or not d.get("tasks"):
+            continue
+        seen.add(repo)
+        missing, unsure = [], False
+        for path, what in (("check-runs?per_page=1", "Checks: read"), ("status", "Commit statuses: read")):
+            try:
+                p = subprocess.run([gh, "api", f"repos/{repo}/commits/HEAD/{path}"], capture_output=True, text=True, timeout=20)
+            except (OSError, subprocess.SubprocessError):
+                unsure = True
+                continue
+            err = (p.stderr + p.stdout).lower()
+            if p.returncode and ("resource not accessible" in err or "http 403" in err):
+                missing.append(what)
+            elif p.returncode:
+                unsure = True
+        if unsure and not missing and (d.get("github_checks") or {}).get("denied"):
+            missing = ["Checks: read", "Commit statuses: read"]
+        if missing:
+            out.append(f"GitHub checks on {repo} can't be read here: its tasks can't see them pass. "
+                       f"Give this machine's GitHub token {' and '.join(missing)} on {repo}")
+    return out
+
+
 def cmd_doctor(a):
     root = os.path.realpath(a.root or real_home())
     home = root == os.path.realpath(real_home())
@@ -1370,6 +1413,8 @@ def cmd_doctor(a):
             warn.append(f"hook missing in {f} ({event}): questions from that CLI won't reach the chat")
     t_bad, t_notes = check_tools(home)
     bad += t_bad
+    if home:
+        warn += github_checks_check(root)
     d_bad, d_notes = data_check(root)
     bad += d_bad
     t_notes = d_notes + t_notes

@@ -187,17 +187,83 @@ BAD = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP
 PENDING = {"QUEUED", "IN_PROGRESS", "PENDING", "WAITING", "REQUESTED", "EXPECTED"}
 
 
+VIEW = "state,mergeable,headRefOid,mergeCommit,reviewDecision,mergeStateStatus"
+# SHEP-179: a token that may read a pull request but not its checks (a fine-grained one without Checks: read, as
+# the exe.dev GitHub integration's) gets GitHub's "Resource not accessible" for them: a permission, never a blip.
+DENIED = ("resource not accessible", "http 403", "must have", "not have permission", "insufficient scope")
+CANT_READ_CHECKS = "Can't read GitHub checks here: check them on GitHub."
+CHECKS_PERMISSION = "Checks: read and Commit statuses: read"
+
+
+def denied(err):
+    return any(x in (err or "").lower() for x in DENIED)
+
+
 def pr_view(task):
+    """The pull request as GitHub has it (gh pr view's fields), or None when GitHub couldn't be asked. Its checks
+    (statusCheckRollup) unreadable here (SHEP-179): the rest still read, the checks asked another way (check_rows());
+    neither works: "checks_unknown" set, never a wait for checks nobody can see."""
     pr = task["pr"]
-    ok, out, _ = gh("pr", "view", str(pr["number"]), "--repo", pr["repo"], "--json",
-                    "state,mergeable,headRefOid,statusCheckRollup,mergeCommit,reviewDecision,mergeStateStatus")
+    view = lambda fields: gh("pr", "view", str(pr["number"]), "--repo", pr["repo"], "--json", fields)
+    ok, out, err = view(VIEW + ",statusCheckRollup")
+    rest = not ok and denied(err)
+    if rest:
+        ok, out, _ = view(VIEW)
     try:
         v = json.loads(out) if ok else None
     except ValueError:
         return None
-    if isinstance(v, dict) and v.get("statusCheckRollup"):
+    if not isinstance(v, dict):
+        return v
+    if rest:
+        rows, whole = check_rows(pr["repo"], v.get("headRefOid"))
+        v["statusCheckRollup"] = rows
+        if not whole:
+            v["checks_unknown"] = True
+    if v.get("statusCheckRollup"):
         v["statusCheckRollup"] = latest_checks(v["statusCheckRollup"])
     return v
+
+
+def check_rows(repo, sha):
+    """A commit's checks from GitHub's REST API (check runs and commit statuses), as statusCheckRollup's rows:
+    (rows, whole). whole: both could be read. A token with one permission but not the other still sees part."""
+    rows, whole = [], bool(sha)
+    if not sha:
+        return rows, False
+    ok, out, _ = gh("api", f"repos/{repo}/commits/{sha}/check-runs?per_page=100")
+    try:
+        for c in json.loads(out).get("check_runs") or [] if ok else []:
+            rows.append({"name": c.get("name"), "status": (c.get("status") or "").upper(),
+                         "conclusion": (c.get("conclusion") or "").upper(), "startedAt": c.get("started_at") or "",
+                         "completedAt": c.get("completed_at") or "",
+                         "workflowName": ((c.get("app") or {}).get("slug") or "")})
+    except (ValueError, AttributeError):
+        ok = False
+    whole = whole and ok
+    ok, out, _ = gh("api", f"repos/{repo}/commits/{sha}/status")
+    try:
+        for c in json.loads(out).get("statuses") or [] if ok else []:
+            rows.append({"context": c.get("context"), "state": (c.get("state") or "").upper(),
+                         "startedAt": c.get("updated_at") or c.get("created_at") or ""})
+    except (ValueError, AttributeError):
+        ok = False
+    return rows, whole and ok
+
+
+def note_checks(s, task, v):
+    """Remembers on the folder's task list whether its GitHub checks could be read (`shepherdr doctor` warns while
+    they can't), and on the task's pull request (the Accept card says so)."""
+    pr = task.get("pr") or {}
+    if v.get("checks_unknown"):
+        if not pr.get("checks_unknown"):
+            pr["checks_unknown"] = True
+        s.data["github_checks"] = {"repo": pr.get("repo"), "at": now(), "denied": True}
+        s.dirty = True
+    else:
+        if pr.pop("checks_unknown", None) or (s.data.get("github_checks") or {}).get("repo") == pr.get("repo"):
+            s.data.pop("github_checks", None)
+            s.dirty = True
 
 
 def latest_checks(rows):
@@ -279,6 +345,8 @@ def drop_branch(s, task):
 # A pull request just pushed can show no checks for a few seconds before GitHub starts them: none
 # for this long after ready means none are set up (Ready then, SHEP-175).
 NO_CHECKS_MS = 30000
+# SHEP-179: checks that can't be read here, while GitHub blocks the merge: Working this long at most, then Ready.
+UNKNOWN_CHECKS_MS = 20 * 60000
 CHECKS_RUNNING, GITHUB_LOOKS, BACK_TO_AGENT = "Checks running", "Waiting for GitHub", "Back to its agent to fix"
 
 
@@ -295,6 +363,12 @@ def pr_wait(v, since):
     if (v.get("mergeable") or "").upper() not in ("MERGEABLE",):
         return GITHUB_LOOKS
     if not v.get("statusCheckRollup") and now() - (since or 0) < NO_CHECKS_MS:
+        return CHECKS_RUNNING
+    if v.get("checks_unknown") and v.get("mergeStateStatus") == "BLOCKED" and not needs_approval(v) \
+            and now() - (since or 0) < UNKNOWN_CHECKS_MS:
+        # SHEP-179: its checks can't be read here, but GitHub blocks the merge (a required check not passed yet):
+        # Working for a while, then Ready anyway (the Accept card says the checks couldn't be read; GitHub still
+        # refuses a merge its checks block). CLEAN: GitHub says they passed.
         return CHECKS_RUNNING
     return None
 

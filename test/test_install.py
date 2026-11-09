@@ -267,6 +267,29 @@ class Install(unittest.TestCase):
         self.assertIn("https://box.tailnet.example:8443/shepherdr/", " ".join(notes))
         self.assertIn("port 8443", " ".join(notes))
 
+    def test_doctor_warns_when_github_checks_cant_be_read(self):
+        """SHEP-179: a repo with tasks whose checks this machine's GitHub token can't read gets a warning naming the
+        permissions to add; one it can read, or a list without tasks, gets none."""
+        from importlib.machinery import SourceFileLoader
+        from unittest import mock
+        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        folder = sh.where_for(self.root).path("tasks")
+        os.makedirs(folder, exist_ok=True)
+        for slug, repo, tasks in (("a", "o/locked", [{"id": 1}]), ("b", "o/open", [{"id": 1}]), ("c", "o/empty", [])):
+            with open(os.path.join(folder, f"{slug}.json"), "w") as f:
+                json.dump({"github": {"repo": repo, "at": 1}, "tasks": tasks}, f)
+        gh = os.path.join(self.root, "fake-gh")
+        with open(gh, "w") as f:
+            f.write("#!/bin/sh\ncase \"$2\" in\n  repos/o/locked/*check-runs*) echo 'gh: Resource not accessible by personal access token (HTTP 403)' >&2; exit 1;;\n"
+                    "  *) echo '{}';;\nesac\n")
+        os.chmod(gh, 0o755)
+        with mock.patch.dict(os.environ, {"HERDR_TASK_GH": gh}):
+            out = sh.github_checks_check(self.root)
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("o/locked", out[0])
+        self.assertIn("Checks: read", out[0])
+        self.assertNotIn("Commit statuses", out[0])
+
     def test_service_answers(self):
         """doctor and install trust only Shepherdr's own service on its port: the id it wrote in service.json, not
         another app answering health there (GitHub #635)."""
