@@ -32,7 +32,7 @@ import { RANK, STATUS, RANK_OF, ORDER, GROUP_BY, groupBy, groupNow, machineOf, m
   queueReason, reportOf as report, secondLine, leftOf, order, matches, day, ago, capital, short, autoWhere, fromLine, inSpace } from "./core/tasks.js";
 import { READ_LISTS, taskLists } from "./core/tasklists.js";
 import { SH } from "./core/paths.js";
-import { dirs } from "./dirs.js";
+import { dirs, dirsReady } from "./dirs.js";
 import { TEXT, H, RADIUS, red, amber } from "./ui.js";
 
 const CLI = () => `${appHome()}/mods/tasks/bin/herdr-task`;
@@ -142,28 +142,44 @@ export default class Tasks extends View {
     // (their files can't be watched) now and then.
     cx.spawn(async (cx) => this.load(cx, null));
     this.watch(cx);
+    // Watch notifications are hints: a missed event or an unavailable directory must not leave
+    // the local snapshot stale indefinitely. load() coalesces this with any read already in flight.
+    cx.timer.every(10000, (cx) => cx.spawn(async (cx) => this.load(cx, null)));
     this.loadRemote(cx);
     cx.timer.every(10000, (cx) => this.loadRemote(cx));
     // Times like "4m" and "2h ago" move on by the minute.
     cx.timer.every(60000, (cx) => cx.notify());
   }
 
-  // ~/.local/share/shepherdr/tasks here changes: read again. One watch for the panel's life.
+  // Watch the resolved task directory, retry failures, and follow a migration while the view lives.
+  // watchFolder has no cancellation API. Keep at most two outstanding paths (the old and the new
+  // root); if both are silent, the timer still reconciles until one of them resolves.
   watch(cx) {
     if (this.watching) return;
     this.watching = true;
     cx.spawn(async (cx) => {
+      const pending = new Map();
       try {
-        let w = null;
+        let path = (await dirsReady()).tasks, nextPaths = Date.now() + 10000, retryAt = 0;
         for (;;) {
-          // At most 5 s per wait, as the commands above.
-          w ??= watchFolder(dirs().tasks).then(() => true);
-          if (!(await Promise.race([w, cx.sleep(5000)]))) continue;
-          w = null;
-          await this.load(cx, null);
+          if (Date.now() >= nextPaths) {
+            path = (await dirsReady(true)).tasks;
+            nextPaths = Date.now() + 10000;
+          }
+          if (!pending.has(path) && pending.size < 2 && Date.now() >= retryAt) {
+            const watched = path;
+            pending.set(watched, Promise.resolve().then(() => watchFolder(watched))
+              .then(() => ({ path: watched, ok: true }), () => ({ path: watched, ok: false })));
+            // Reconcile after registration as well as before it: changes may have landed in between.
+            cx.spawn(async (cx) => this.load(cx, null));
+          }
+          const event = await Promise.race([...pending.values(), cx.sleep(5000).then(() => null)]);
+          if (!event) continue;
+          pending.delete(event.path);
+          if (event.ok) { retryAt = 0; await this.load(cx, null); }
+          else retryAt = Date.now() + 5000;
         }
-      } catch {}
-      this.watching = false;
+      } catch {} finally { this.watching = false; } // cx is invalidated when the view is disposed
     });
   }
 
