@@ -47,7 +47,7 @@ export function scanned(stdout) {
 
 // Every command an agent knows, its CLI's first: [{ name, about }]. mine: the person's own (Claude Code only).
 export function commandList(kind, mine = []) {
-  const list = (kind === "codex" ? CODEX : CLAUDE).map(([name, about]) => ({ name, about }));
+  const list = (kind === "pi" ? [] : kind === "codex" ? CODEX : CLAUDE).map(([name, about]) => ({ name, about }));
   if (kind !== "claude") return list;
   const seen = new Set(list.map((c) => c.name));
   return [...list, ...mine.filter((c) => !seen.has(c.name) && seen.add(c.name))];

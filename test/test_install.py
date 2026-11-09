@@ -64,6 +64,7 @@ class Install(unittest.TestCase):
 
     def test_install_again_update_uninstall(self):
         os.makedirs(self.p(".codex"))
+        os.makedirs(self.p(".pi/agent"))
         out = run("install", "--root", self.root, "--yes").stdout
         self.assertRegex(out, r"files: \d+ new\n")
         rec = json.load(open(self.p(APP, "data/shepherdr/installed.json")))
@@ -82,6 +83,8 @@ class Install(unittest.TestCase):
         # Codex's approvals come to the chat's card too (SHEP-91)
         codex = json.load(open(self.p(".codex/hooks.json")))
         self.assertIn("ask-hook.sh", json.dumps(codex["hooks"]["PermissionRequest"]))
+        # Pi names its session log for the chat (its extension, where Pi is)
+        self.assertIn("shepherdr/sessions", open(self.p(".pi/agent/extensions/shepherdr-session.ts")).read())
         # Helpers changed: the sync to other machines is held until doctor passes.
         self.assertTrue(os.path.exists(self.p(".herdr/sync-hold")))
         d = run("doctor", "--root", self.root)
@@ -164,6 +167,7 @@ class Install(unittest.TestCase):
         """The service and the shared core land in .local/share/shepherdr; a scratch root gets the unit file only
         (nothing is started), and uninstall takes both away."""
         out = run("install", "--root", self.root, "--yes").stdout
+        self.assertFalse(os.path.exists(self.p(".pi")), "no Pi here: no Pi extension")
         if "needs bun" in out:
             self.skipTest("bun isn't installed here")
         self.assertTrue(os.path.isfile(self.p(".local/share/shepherdr/service/main.ts")))

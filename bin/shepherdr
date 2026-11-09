@@ -29,6 +29,7 @@ What goes where (each under --root, default your home):
   .config/systemd/user/shepherdr.service    Linux: keeps the service running (systemctl --user)
   Library/LaunchAgents/dev.shepherdr.service.plist   macOS: the same with launchd
   ~/.claude/settings.json, ~/.codex/hooks.json   the question-card hooks (not with --no-hooks)
+  ~/.pi/agent/extensions/shepherdr-session.ts   where Pi is: names each Pi's session log, for the chat (not with --no-hooks)
 
 Never overwritten: a mod, layout or lib file that isn't ours (it refuses, naming each; --adopt backs
 them up and takes them over), a key you set (unless you say yes), a file you changed since the last
@@ -68,6 +69,7 @@ HERDR_APP_MIN = "0.1.12"
 HC_MIN = "0.1.17"
 
 APP, BIN, TPL, HERDR = ".config/herdr-app", ".local/bin", ".config/herdr-core/templates", ".herdr"
+PI_EXT = ".pi/agent/extensions/shepherdr-session.ts"   # the chat's Pi extension (mods/chat/pi-session.ts)
 SHARE = ".local/share/shepherdr"   # the service and the web app
 UNIT = ".config/systemd/user/shepherdr.service"
 PLIST = "Library/LaunchAgents/dev.shepherdr.service.plist"
@@ -353,7 +355,15 @@ def source_items(src):
         if f.endswith(".md"):
             items.append(("template", f"{TPL}/{f}", os.path.join(src, "templates", f)))
     items += service_items(src)
+    items.append(("pi", PI_EXT, os.path.join(src, "mods", "chat", "pi-session.ts")))
     return manifest, mods, items
+
+
+def for_pi(r, a, items):
+    """Pi's extension only where Pi is (its ~/.pi/agent), and not with --no-hooks."""
+    if getattr(a, "no_hooks", False) or not os.path.isdir(r.p(".pi/agent")):
+        return [x for x in items if x[0] != "pi"]
+    return items
 
 
 def service_items(src):
@@ -376,7 +386,7 @@ def service_items(src):
         for f in walk_files(os.path.join(src, top)):
             if top != "templates" or f.endswith(".md"):
                 items.append(("service", f"{SHARE}/{top}/{f}", os.path.join(src, top, f)))
-    for f in ("mods/artifacts/recipe-view.js", "mods/artifacts/markup.js", "install.sh"):
+    for f in ("mods/artifacts/recipe-view.js", "mods/artifacts/markup.js", "mods/chat/pi-session.ts", "install.sh"):
         items.append(("service", f"{SHARE}/{f}", os.path.join(src, f)))
     # recipe-view.js imports it from beside itself
     items.append(("service", f"{SHARE}/mods/artifacts/core/recipe.js", os.path.join(src, "core", "recipe.js")))
@@ -834,6 +844,7 @@ def cmd_install(a, update=False):
         r.notes.append(f"{r.p(APP)} didn't exist: made (a scratch root)")
     build_web(r, src, home, a)
     manifest, mods, items = source_items(src)
+    items = for_pi(r, a, items)
     actions, clashes = plan_files(r, rec, items, a.adopt)
     if clashes:
         shown = "\n  ".join(clashes[:40]) + (f"\n  ... and {len(clashes) - 40} more" if len(clashes) > 40 else "")
@@ -931,6 +942,7 @@ def web_items(src):
     for f in sorted(os.listdir(os.path.join(src, "templates"))):
         if f.endswith(".md"):
             items.append(("template", f"{TPL}/{f}", os.path.join(src, "templates", f)))
+    items.append(("pi", PI_EXT, os.path.join(src, "mods", "chat", "pi-session.ts")))
     return items
 
 
@@ -958,7 +970,7 @@ def cmd_install_web(a, update=False):
     say(f"Shepherdr {VERSION} web-only {'update' if update else 'install'} from {src}\n  into {root}{' (dry run: nothing is written)' if a.dry_run else ''}")
     build_web(r, src, home, a)
     n = 0
-    for _g, rel, path in web_items(src):
+    for _g, rel, path in for_pi(r, a, web_items(src)):
         data, mode = read(path), os.stat(path).st_mode & 0o777
         if read(r.p(rel)) == data:
             files[rel] = fsha(rel, data)
@@ -1554,7 +1566,7 @@ def main(argv):
             c.add_argument("--adopt", action="store_true", help="files by these names that aren't Shepherdr's: back them up and take them over")
             c.add_argument("--guard", action="store_true", help="also put the herdr-app guard on the PATH (refuses a window with another home)")
             c.add_argument("--keys", choices=["ask", "keep", "ours"], default="ask", help="a key you already use: ask (default; keep without a terminal), keep yours, or take ours")
-            c.add_argument("--no-hooks", action="store_true", help="leave Claude Code's and Codex's settings alone")
+            c.add_argument("--no-hooks", action="store_true", help="leave Claude Code's, Codex's and Pi's settings alone")
             c.add_argument("--yes", action="store_true", help="ask nothing (keys: keep yours unless --keys ours)")
             c.add_argument("--force", action="store_true", help="install although a check failed")
             c.add_argument("--web", action="store_true", help="web only: no herdr-app (the service, the web app, herdr-task and the helpers)")

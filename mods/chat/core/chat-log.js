@@ -3,7 +3,8 @@
 // Finding an agent's own session log and reading it as a conversation.
 // Claude Code: ~/.claude/sessions/<pid>.json names the session its process writes, so the
 // log is ~/.claude/projects/*/<sessionId>.jsonl. Codex keeps its rollout file open, so the
-// file is whatever rollout-*.jsonl its process (or a child) holds. Both are exact: no
+// file is whatever rollout-*.jsonl its process (or a child) holds. Pi holds none: Shepherdr's Pi extension
+// (mods/chat/pi-session.ts) writes ~/.pi/agent/shepherdr/sessions/<pid> with its log's path. All exact: no
 // guessing by folder or time, so two agents in one folder never get mixed up.
 
 // Prints the log's path on the agent's machine, or nothing. Args: kind, pid.
@@ -19,6 +20,12 @@ for p in "$pid" $(kids "$pid"); do
     id=$(sed -n 's/.*"sessionId":"\\([0-9a-fA-F-]*\\)".*/\\1/p' "$j")
     [ -n "$id" ] || continue
     for f in "$HOME"/.claude/projects/*/"$id".jsonl; do [ -f "$f" ] && { echo "$f"; exit 0; }; done
+    echo "pending"; exit 0
+  elif [ "$kind" = pi ]; then
+    j="$HOME/.pi/agent/shepherdr/sessions/$p"
+    [ -f "$j" ] || continue
+    f=$(head -n 1 "$j")
+    [ -f "$f" ] && { echo "$f"; exit 0; }
     echo "pending"; exit 0
   else
     if [ -d "/proc/$p/fd" ]; then
@@ -55,6 +62,7 @@ BEGIN { pos = base; first = base; msgs = 0 }
   head = substr(line, 1, 400)
   claude = index(head, "\"isSidechain\":false") && index(line, "\"type\":\"user\",\"message\"")
   codex = index(head, "\"type\":\"response_item\"")
+  pi = substr(line, 1, 17) == "{\"type\":\"message\""
   # A background job (a shell, a watcher, a helper) that ended: Claude Code notes it the moment it
   # ends, as a message queued for the agent (which may read it much later).
   if (index(head, "\"type\":\"queue-operation\",\"operation\":\"enqueue\"") && index(line, "<task-notification>") && index(line, "<status>")) {
@@ -68,10 +76,10 @@ BEGIN { pos = base; first = base; msgs = 0 }
     if (length(line) <= 262144) print off "\tJ\t" line
     next
   }
-  if ((claude && index(line, "\"tool_result\"")) || (codex && (index(head, "\"function_call_output\"") || index(head, "\"custom_tool_call_output\"")))) {
+  if ((claude && index(line, "\"tool_result\"")) || (pi && index(head, "\"role\":\"toolResult\"")) || (codex && (index(head, "\"function_call_output\"") || index(head, "\"custom_tool_call_output\"")))) {
     if (count) next
     ids = ""; t = line
-    while (match(t, /"(tool_use_id|call_id)":"[^"]*"/)) { m = substr(t, RSTART, RLENGTH); sub(/^"[a-z_]*":"/, "", m); sub(/"$/, "", m); ids = ids " " m; t = substr(t, RSTART + RLENGTH) }
+    while (match(t, /"(tool_use_id|call_id|toolCallId)":"[^"]*"/)) { m = substr(t, RSTART, RLENGTH); sub(/^"[A-Za-z_]*":"/, "", m); sub(/"$/, "", m); ids = ids " " m; t = substr(t, RSTART + RLENGTH) }
     # A helper (or job) launched to run on its own: its result came at once, it is not done yet.
     if (index(line, "Async agent launched") || index(line, "running in background")) ids = ids " ASYNC"
     # A shell or watcher left running in the background (or moved there mid-run): its task id.
@@ -90,7 +98,11 @@ BEGIN { pos = base; first = base; msgs = 0 }
     next
   }
   keep = 0
-  if (index(head, "\"isSidechain\":false")) {
+  if (pi) {
+    if (index(head, "\"role\":\"user\"") || index(head, "\"role\":\"assistant\"")) keep = 1
+  } else if (index(line, "{\"type\":\"model_change\"") == 1 || index(line, "{\"type\":\"thinking_level_change\"") == 1) {
+    keep = 1
+  } else if (index(head, "\"isSidechain\":false")) {
     if (index(line, "\"type\":\"user\",\"message\"") || index(line, "\"type\":\"assistant\",\"uuid\"") || (index(line, "\"type\":\"attachment\",\"uuid\"") && index(line, "\"queued_command\""))) keep = 1
   } else if (index(head, "\"type\":\"response_item\"")) {
     if (index(head, "\"type\":\"message\"") || index(head, "_call\"")) keep = 1
@@ -104,7 +116,7 @@ BEGIN { pos = base; first = base; msgs = 0 }
   if (count) next
   gsub(/"data":"[^"]*"/, "\"data\":\"\"", line)
   gsub(/"image_url":"data:[^"]*"/, "\"image_url\":\"\"", line)
-  big = (index(line, "\"tool_use\"") || index(head, "_call\"")) ? 32768 : 262144
+  big = (index(line, "\"tool_use\"") || index(line, "\"toolCall\"") || index(head, "_call\"")) ? 32768 : 262144
   if (length(line) > big) {
     nm = ""
     if (match(line, /"name":"[^"]*"/)) nm = substr(line, RSTART + 8, RLENGTH - 9)
@@ -527,6 +539,13 @@ function claudeStep(name, input = {}) {
   return { kind: "tool", line: `Used ${name}`, doing: input.description ? clip(input.description, 60) : `Using ${name}` };
 }
 
+// A Pi call, as the Claude Code call it matches (Pi's built-in tools take `path` where Claude's take `file_path`).
+const PI_TOOLS = { bash: "Bash", read: "Read", edit: "Edit", write: "Write", grep: "Grep", find: "Glob", ls: "Glob" };
+function piStep(name, input = {}) {
+  const a = input && typeof input === "object" ? input : {};
+  return claudeStep(PI_TOOLS[name] ?? name, { ...a, file_path: a.file_path ?? a.path, pattern: a.pattern ?? a.path });
+}
+
 // A Codex call's shell command(s), as one text (sendsOf reads it), else "".
 function codexCommand(args) {
   let a = args;
@@ -839,12 +858,12 @@ export class Conversation {
         // A call too big to send whole: its name and small fields ("file_path=…").
         const [name, ...fields] = r.data.split("\x1f");
         const input = Object.fromEntries(fields.map((f) => { const i = f.indexOf("="); let v = f.slice(i + 1); try { v = JSON.parse(`"${v.replace(/\\$/, "")}"`); } catch {} return [f.slice(0, i), v]; }));
-        if (name) this.step(`big${r.off}`, r.off, claudeStep(name, input) ?? { kind: "tool", line: `Used ${name}`, doing: "Working" });
+        if (name) this.step(`big${r.off}`, r.off, (this.kind === "pi" ? piStep : claudeStep)(name, input) ?? { kind: "tool", line: `Used ${name}`, doing: "Working" });
         continue;
       }
       const l = parse(r.data);
       if (!l || typeof l !== "object") continue;
-      if (this.kind === "codex") this.codex(l, r.off); else this.claude(l, r.off);
+      if (this.kind === "codex") this.codex(l, r.off); else if (this.kind === "pi") this.pi(l, r.off); else this.claude(l, r.off);
     }
   }
 
@@ -933,6 +952,53 @@ export class Conversation {
     }
   }
 
+  // Pi's session log: { type: "message", message: { role: user | assistant, content: [text | thinking | toolCall |
+  // image] } } lines (its tool results come as R records), and its model and thinking-level changes.
+  pi(l, off) {
+    if (l.type === "model_change") { this.meta = { ...this.meta, model: l.modelId ?? this.meta.model }; return; }
+    if (l.type === "thinking_level_change") { this.meta = { ...this.meta, effort: l.thinkingLevel ?? this.meta.effort }; return; }
+    const m = l.message;
+    if (l.type !== "message" || !m) return;
+    const at = time(l.timestamp);
+    if (m.role === "user") {
+      const u = claudeUser(m.content);
+      if (u) this.user(`u${off}`, { ...u, at });
+      return;
+    }
+    if (m.role !== "assistant") return;
+    const u = m.usage ?? {};
+    const used = (u.input ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0) + (u.output ?? 0);
+    this.meta = { ...this.meta, model: m.model ?? this.meta.model, effort: m.thinkingLevel ?? this.meta.effort, used: used || this.meta.used, at };
+    const said = [];
+    let n = 0;
+    const say = () => { if (said.length) this.push({ kind: "agent", id: `a${off}:${n++}`, text: said.splice(0).join("\n\n"), at }); };
+    for (const b of Array.isArray(m.content) ? m.content : []) {
+      if (b?.type === "thinking" && !this.open.size) this.doing = "Thinking";
+      else if (b?.type === "text") { const t = this.agentText(b.text ?? ""); if (t) said.push(t); }
+      else if (b?.type === "toolCall") {
+        say();
+        const name = String(b.name ?? ""), input = b.arguments ?? {};
+        const st = piStep(name, input);
+        if (st) st.at = at || Date.now();
+        this.step(String(b.id), off, st);
+        if (name === "bash") {
+          const cmd = String(input.command ?? "");
+          if (ARTIFACT.test(cmd)) this.push({ kind: "artifact", id: `art${off}`, at });
+          this.sent(cmd, off, at);
+        }
+      }
+    }
+    say();
+    if (m.stopReason === "error" && m.errorMessage) this.push({ kind: "error", id: `e${off}`, text: String(m.errorMessage) });
+    // Its turn is over (anything but a tool call): nothing runs any more.
+    if (m.stopReason && m.stopReason !== "toolUse") {
+      this.open.clear();
+      this.waits.clear();
+      this.waiting = false;
+      this.doing = null;
+    }
+  }
+
   codex(l, off) {
     const p = l.payload;
     if (!p || typeof p !== "object") return;
@@ -1013,6 +1079,8 @@ export function resultText(line, id) {
       const b = c.find((x) => x?.type === "tool_result" && x.tool_use_id === id) ?? c.find((x) => x?.type === "tool_result");
       const v = b?.content;
       text = typeof v === "string" ? v : Array.isArray(v) ? v.map((x) => x?.text ?? "").join("\n") : null;
+      // Pi: the toolResult message's own content is the output
+      if (text === null && l.message?.role === "toolResult") text = c.map((x) => x?.text ?? "").join("\n");
     }
     const o = l.payload?.output;
     if (text === null && o !== undefined) text = typeof o === "string" ? o : String(o?.output ?? o?.content ?? JSON.stringify(o));

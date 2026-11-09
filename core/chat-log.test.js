@@ -5,14 +5,14 @@ import { join } from "node:path";
 import { LOG, Conversation, records, pilotLine, sendsOf } from "./chat-log.js";
 
 // A Claude Code log as LOG reads it, fed to a Conversation.
-async function read(lines) {
+async function read(lines, kind = "claude") {
   const dir = mkdtempSync(join(tmpdir(), "chat-log-"));
   const f = join(dir, "log.jsonl");
   writeFileSync(f, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
   const p = Bun.spawn(["sh", "-c", LOG, "log", "tail", f, "0"], { stdout: "pipe", stderr: "ignore" });
   const out = await new Response(p.stdout).text();
   rmSync(dir, { recursive: true });
-  const c = new Conversation("claude");
+  const c = new Conversation(kind);
   c.feed(records(out).records);
   return c;
 }
@@ -255,4 +255,40 @@ test("a template's example news lines are words, real news lines are news (#589)
   expect(c.items[2]).toMatchObject({ ref: "SHOP-2", event: "ready" });
   // a real tag holding code is still Herdr's: hidden whole, the words around it shown
   expect(c.items[3].text).toBe("And look at `<herdr-news>` too");
+});
+
+// Lines as Pi 1.5 writes them (from a real session log: its keys in its order).
+const pi = (id, message) => ({ type: "message", id, parentId: null, timestamp: at, message });
+const piLog = [
+  { type: "session", version: 3, id: "s1", timestamp: at, cwd: "/repo" },
+  { type: "model_change", id: "m1", parentId: null, timestamp: at, provider: "anthropic", modelId: "claude-opus-5.5" },
+  { type: "thinking_level_change", id: "m2", parentId: "m1", timestamp: at, thinkingLevel: "medium" },
+  pi("p0", { role: "system", content: "", sections: { preamble: "You are a coding assistant" } }),
+  pi("p1", { role: "user", content: [{ type: "text", text: "List the files" }], timestamp: 1 }),
+  pi("p2", { role: "assistant", content: [{ type: "thinking", thinking: "", thinkingSignature: "x" }, { type: "text", text: "Looking." },
+    { type: "toolCall", id: "toolu_9", name: "bash", arguments: { command: "ls" } }], model: "claude-opus-5.5",
+    usage: { input: 2, output: 10, cacheRead: 100, cacheWrite: 20, totalTokens: 132 }, stopReason: "toolUse", timestamp: 2 }),
+  pi("p3", { role: "toolResult", toolCallId: "toolu_9", toolName: "bash", content: [{ type: "text", text: "a.txt" }], isError: false, timestamp: 3 }),
+  pi("p4", { role: "assistant", content: [{ type: "text", text: "One file: a.txt" }], model: "claude-opus-5.5",
+    usage: { input: 1, output: 5, cacheRead: 140, cacheWrite: 0, totalTokens: 146 }, stopReason: "stop", timestamp: 4 }),
+];
+
+test("a Pi log reads as a chat: the person's words, its replies, its calls and its model", async () => {
+  const c = await read(piLog, "pi");
+  expect(c.items.map((x) => x.kind)).toEqual(["user", "agent", "tools", "agent"]);
+  expect(c.items[0].text).toBe("List the files");
+  expect(said(c)).toEqual(["Looking.", "One file: a.txt"]);
+  expect(c.items[2].steps[0].line).toBe("Ran ls");
+  // its call was answered (the R record): nothing runs, and the turn is over
+  expect(c.open.size).toBe(0);
+  expect(c.doing).toBe(null);
+  expect(c.meta).toMatchObject({ model: "claude-opus-5.5", effort: "medium", used: 146 });
+});
+
+test("a Pi call still running shows what it does; an error ends the turn with its words", async () => {
+  const c = await read(piLog.slice(0, 6), "pi");
+  expect(c.doing).toBe("Running ls");
+  const e = await read([...piLog.slice(0, 5), pi("p5", { role: "assistant", content: [], stopReason: "error", errorMessage: "Connection error." })], "pi");
+  expect(e.items.at(-1)).toMatchObject({ kind: "error", text: "Connection error." });
+  expect(e.doing).toBe(null);
 });

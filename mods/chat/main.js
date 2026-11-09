@@ -74,7 +74,7 @@ const PAGE = 200;
 const KEEP = 2000;
 // The conversation's width at most, in px: lines stay readable in a wide pane.
 const COLUMN = 760;
-const KINDS = { "claude-code": "claude", claude: "claude", codex: "codex" };
+const KINDS = { "claude-code": "claude", claude: "claude", codex: "codex", pi: "pi" };
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 // The role templates' folder on the machine a command runs on (sh -c prefix: $dir).
 const TEMPLATE = 'dir="$HOME/.config/herdr-core/templates"; ';
@@ -3050,7 +3050,7 @@ export default class Chat extends View {
 
   // Whose ask a card shows: the CLI's short name ("Claude asks").
   cli() {
-    return this.kind === "codex" ? "Codex" : "Claude";
+    return this.kind === "codex" ? "Codex" : this.kind === "pi" ? "Pi" : "Claude";
   }
 
   // The empty box's words: whom it writes to.
