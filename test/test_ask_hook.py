@@ -1,6 +1,7 @@
 """mods/chat/ask-hook.sh, the PermissionRequest hook of Claude Code and Codex (SHEP-91): every ask waits for the chat's
 card, whether or not a chat shows the agent right now (a person on the web or a phone still gets it), and the terminal
 stays a way to answer. Runs the real script on a throwaway app home with a fake hc; never the real data/chat-asks."""
+import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import json
 import os
 import shutil

@@ -1,5 +1,6 @@
 """The repo as Herdr and the installer see it: the add-on list covers every mod, the layout has no
 live values, nothing personal is shipped, and the version is the same everywhere it's stated."""
+import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import json
 import os
 import re
@@ -424,3 +425,39 @@ class SessionNote(unittest.TestCase):
         out, asked = self.run_hook(None, "")
         self.assertEqual(out, "")
         self.assertFalse(asked)
+
+
+class TestsOnAThrowawayHome(unittest.TestCase):
+    """SHEP-147: no test reaches the person's real home (its question hook, chat cards, data, herdr-core)."""
+
+    def test_every_test_file_loads_the_guard_first(self):
+        import ast
+        for f in sorted(os.listdir(J("test"))):
+            if f.startswith("test") and f.endswith(".py"):
+                body = ast.parse(open(J("test", f)).read()).body
+                first = next(n for n in body if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)))
+                self.assertTrue(isinstance(first, ast.Import) and first.names[0].name == "home_guard",
+                                f"test/{f}: `import home_guard` must be its first statement")
+        preload = open(J("test", "preload.ts")).read()
+        self.assertIn("SHEPHERDR_HC", preload)
+        self.assertIn("HC_TERMINAL_SOCKET", preload)
+
+    def test_the_run_is_on_a_throwaway_home(self):
+        self.assertNotEqual(os.path.realpath(os.path.expanduser("~")), home_guard.REAL)
+        for k in ("HC_TERMINAL_SOCKET", "HC_TERMINAL_ID", "HERDR_APP_HOME"):
+            self.assertNotIn(k, os.environ)
+
+    def test_touching_the_real_home_fails_at_once(self):
+        import subprocess
+        hook = os.path.join(home_guard.REAL, ".local", "share", "herdr", "ask", "ask-hook.sh")
+        with self.assertRaises(home_guard.RealHome):
+            open(hook)
+        with self.assertRaises(home_guard.RealHome):
+            open(os.path.join(home_guard.REAL, ".config", "herdr-app", "data", "chat-asks", "req", "x.json"), "w")
+        with self.assertRaises(home_guard.RealHome):
+            subprocess.run(["true"], env={"HOME": home_guard.REAL, "PATH": os.environ["PATH"]})
+        with self.assertRaises(home_guard.RealHome):
+            subprocess.run(["true"], env={"PATH": os.environ["PATH"]})
+        # this repo's own files are fine, wherever its worktree lives
+        open(J("README.md")).close()
+        subprocess.run(["true"], check=True)

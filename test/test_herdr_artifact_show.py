@@ -2,6 +2,7 @@
 on the machine (a VM) open never crashes: it asks the person's web app page through the core label herdr.show and
 prints the artifact's link, which the web app's host wrote in herdr-core's document shepherdr.web. Runs the real
 command in a throwaway home with a fake hc first on PATH and no herdr-app; nothing is installed."""
+import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import json
 import os
 import shutil

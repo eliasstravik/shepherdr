@@ -1,5 +1,6 @@
 """The installer against scratch roots (--root): install, run again, update with a changed file,
 clashes, --adopt, uninstall. Never touches the real home."""
+import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import re
 import json
 import os

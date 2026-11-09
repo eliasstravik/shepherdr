@@ -1,5 +1,6 @@
 """Usage insights (docs/insights.md) never calls the network: its files use no network API, import nothing that can,
 and the web app's one call goes to its own service (a relative api/action). No analytics or telemetry package either."""
+import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import json, os, re, unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

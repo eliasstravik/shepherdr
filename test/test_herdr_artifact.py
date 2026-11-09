@@ -1,6 +1,7 @@
 """herdr-artifact (SHEP-19): recipes are the default, a custom panel needs --custom and is never a proof, each version
 says its kind, the window's picture of a custom one is kept for the web, and convert keeps an artifact's maker. Runs in
 a throwaway store; herdr-app's check is skipped (not found), and nothing is installed."""
+import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import importlib.machinery
 import importlib.util
 import json

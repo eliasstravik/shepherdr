@@ -2,6 +2,7 @@
 scheduler's sync, `herdr-task machines sync`, herdr-task's and herdr-artifact's self-copy when they
 run a command there, and `herdr-secret install --on`. Every hc call is swapped for a recorder, so
 nothing reaches a machine and nothing runs with another HOME."""
+import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import importlib.machinery
 import importlib.util
 import os
