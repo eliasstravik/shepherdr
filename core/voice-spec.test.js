@@ -1,7 +1,7 @@
 // The voice agent's spec reaches agents made before (ensureAgent): kept and up to date, nothing asked; from another
 // spec, PATCHed (and the tools it replaced removed); gone from ElevenLabs, made again; made with another key, a new one.
 import { expect, test } from "bun:test";
-import { ensureAgent, agentSpec, SPEC, specTag, TOOLS, SYSTEM_TOOLS, agentFile, envLines, opening, prompt, FIRST, LANGUAGES, TTS_MODEL, batchLines, needLine, replyLine, toolWords, turnGate } from "./voice.js";
+import { ensureAgent, agentSpec, SPEC, specTag, TOOLS, SYSTEM_TOOLS, agentFile, envLines, opening, prompt, FIRST, LANGUAGES, TTS_MODEL, VOICE_ID, batchLines, needLine, replyLine, toolWords, turnGate } from "./voice.js";
 
 function fake(o = {}) {
   const calls = [], saved = [];
@@ -115,6 +115,11 @@ test("SHEP-104: English first, then whatever language the person speaks, back an
   // a speech model that speaks them (not an English-only v2), set rather than left to ElevenLabs' default
   expect(c.tts.model_id).toBe(TTS_MODEL);
   expect(TTS_MODEL).not.toMatch(/_v2$/);
+  // SHEP-162: one even voice: no expressive audio tags, one pinned voice, stability above ElevenLabs' 0.5 default
+  expect(c.tts).toMatchObject({ voice_id: VOICE_ID, expressive_mode: false, agent_output_audio_format: "pcm_16000" });
+  expect(c.tts.stability).toBeGreaterThanOrEqual(0.6);
+  expect(Object.values(c.language_presets).every((p) => !p.overrides.tts)).toBe(true);
+  expect(prompt()).toContain("never audio tags");
   // the prompt says to answer in the person's language, the hello stays English
   expect(prompt()).toContain("Speak the language the person speaks");
   expect(opening().conversation_config_override.agent.first_message).toBe(FIRST);
