@@ -4343,3 +4343,36 @@ class TaskFlow(unittest.TestCase):
         self.task["ready_at"] = base.now() + 1
         ghnews.pr_news(self.store, self.task, {**v, "headRefOid": "def"}, {})
         self.assertIn("news", self.task["pr"])
+
+    def test_an_automation_sets_its_tasks_review(self):
+        """#744: auto add/edit --set, kept on the automation and given to each task it adds."""
+        import argparse
+        from herdr_task import automations
+        none = dict(title=None, prompt=None, prompt_file=None, every=None, on="ready", match=None, from_=None, agent=None,
+                    here=False, worktree=False, space=None, parent=None)
+        a = {"id": 1, "title": "Sweep", "prompt": "Read the open pull requests", "space": "sp1"}
+        automations.set_auto_fields(self.store, a, argparse.Namespace(**none, set=["review=off", "reviewer.model=opus"]))
+        self.assertEqual(a["set"], {"review": "off", "reviewer.model": "opus"})
+        with self.assertRaises(Exception):
+            automations.set_auto_fields(self.store, a, argparse.Namespace(**none, set=["colour=red"]))
+        automations.set_auto_fields(self.store, a, argparse.Namespace(**none, set=["reviewer.model="]))
+        self.assertEqual(a["set"], {"review": "off"})
+        self.store.new = lambda title, prompt, mode: self.store.data["tasks"].append(
+            {"id": 2, "title": title, "prompt": prompt, "mode": mode, "state": "todo", "agents": []}) or self.store.data["tasks"][-1]
+        for name, value in (("worker_argv", lambda s, t, space: ["claude"]), ("queue_reason", lambda s, t: None),
+                            ("begin", lambda *a, **k: None)):
+            self.patch(automations, name, value)
+        t = automations.fire(self.store, a, "every")
+        self.assertEqual(t["set"], {"review": "off"})
+
+    def test_a_folder_task_that_changed_nothing_needs_no_review(self):
+        """#744: a task in the folder itself, still on the commit it started at with nothing changed: nothing to review."""
+        self.settings({"everywhere": {"tasks": {"review_rounds": 3}}})
+        self.task.update(mode="here", worktree=None, review_gate=True, folder_start=self.git(self.main, "rev-parse", "HEAD"))
+        self.assertIsNone(self.commands.review_refusal(self.store, self.task, None))
+        with open(os.path.join(self.main, "a.txt"), "w") as f:
+            f.write("x\n")
+        self.git(self.main, "add", "a.txt")
+        self.assertIn("isn't reviewed", self.commands.review_refusal(self.store, self.task, None))  # changed
+        self.git(self.main, "commit", "-q", "-m", "a")
+        self.assertIn("isn't reviewed", self.commands.review_refusal(self.store, self.task, None))  # committed

@@ -268,6 +268,10 @@ def begin(s, t, argv, space, parent=None):
     if t.get("mode") == "worktree" and not t.get("worktree") and not worktrees_on(s, space):
         t["mode"] = "here"
     folder_for(s, t)
+    if t.get("mode") != "worktree" and s.loc["kind"] == "repo":
+        # The folder's commit as it starts: still there, and nothing tracked changed, at ready means
+        # it changed nothing, so there is nothing to review (review_refusal, #744).
+        t["folder_start"] = git(s.loc["folder"], "rev-parse", "HEAD")[1] or None
     parent = parent_for(parent, space)
     return launch(s, t, argv, space, brief(s, t, parent, space, argv), parent=parent)
 
@@ -447,6 +451,8 @@ def review_refusal(s, t, wt):
         return None
     if wt and t.get("start") and in_base(s, t):
         return None  # no commits of its own: nothing to review (nothing to merge)
+    if not wt and t.get("folder_start") and unchanged_folder(s, t):
+        return None  # in the folder itself, and it changed nothing (#744: a run that only reads)
     revs = [r for r in t.get("reviews") or [] if r.get("result") in REVIEWED and (r.get("at") or 0) >= (t.get("started") or 0)]
     head = t.get("head") if wt else None
     if (any(r.get("head") == head for r in revs) if wt else bool(revs)):
@@ -465,6 +471,14 @@ def review_refusal(s, t, wt):
     return (f"Review is on and {what} isn't reviewed. Have it reviewed as your brief says, fix what must be fixed, record the "
             f"round with `{ht} reviewed {ref} --folder {folder} --report \"<findings, a line>\"` (on the commit you'd say "
             f"ready at), then run ready again. {rounds - rounds_used(t)} of {rounds} rounds left.")
+
+
+def unchanged_folder(s, t):
+    """A task in the folder itself left it as it started: on the same commit, nothing tracked changed."""
+    folder = s.loc["folder"]
+    ok, head, _ = git(folder, "rev-parse", "HEAD")
+    clean, changed, _ = git(folder, "status", "--porcelain", "--untracked-files=no")
+    return ok and head == t["folder_start"] and clean and not changed
 
 
 def base_merges_only(s, t, wt, reviewed, head):
