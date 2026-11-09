@@ -18,6 +18,7 @@
 //   button   { label, reply, href, quiet }              a press sends `reply` to the agent; with href (https only) it
 //                                                       opens that page in the person's browser too; quiet: the softer look
 //   buttons  { items: [button] }                        buttons side by side (the first not quiet is the one to press)
+// "cover" (optional, beside "blocks"): the picture beside it that its card in the chat shows first (preview()).
 // Shared core: the source is core/recipe.js; bin/sync-shared copies it into the mods in lib/COPIES.
 
 export const RECIPE = 1;
@@ -66,6 +67,8 @@ export function problems(recipe, files = null) {
     }
   });
   walk(recipe.blocks, "");
+  // the picture its card in the chat shows first (preview()): a file beside it, as a block's
+  if (recipe.cover != null && (!str(recipe.cover) || recipe.cover.includes("..") || recipe.cover.startsWith("/") || (files && !files.includes(recipe.cover)))) out.push('"cover" must be a picture beside recipe.json.');
   if (n > MAX_BLOCKS) out.push(`at most ${MAX_BLOCKS} blocks.`);
   return out;
 }
@@ -120,4 +123,35 @@ export function chartShapes(b) {
   const groups = labels.length || Math.max(0, ...series.map((s) => s.values.length));
   const per = series.length || 1, slot = 1 / Math.max(1, groups), bw = (slot * 0.7) / per;
   return { max, bars: series.flatMap((s, si) => s.values.map((v, i) => ({ series: si, label: labels[i] ?? "", value: v, x: i * slot + slot * 0.15 + si * bw, w: bw, h: Math.max(0, v) / max }))) };
+}
+
+// What an artifact's card in the chat shows of it before it opens (SHEP-142): its key pictures (the cover it names,
+// else the first pictures in it, at most `max`) and its first words (headings and text, in order, up to `chars`).
+// { images: [src], lines: [words] }; Markdown marks are kept for the reader to draw.
+export function preview(recipe, { max = 3, chars = 280 } = {}) {
+  const images = [], lines = [];
+  let used = 0;
+  const pic = (src) => { if (str(src) && !images.includes(src) && images.length < max) images.push(src); };
+  if (str(recipe?.cover)) pic(recipe.cover);
+  const say = (s) => {
+    if (!str(s) || used >= chars) return;
+    const first = s.split(/\n\s*\n/)[0].replace(/\s*\n\s*/g, " ").trim();
+    if (!first) return;
+    const cut = first.length > chars - used ? `${first.slice(0, Math.max(0, chars - used)).replace(/\s+\S*$/, "")}…` : first;
+    lines.push(cut);
+    used += cut.length;
+  };
+  const walk = (blocks) => (arr(blocks) ? blocks : []).forEach((b) => {
+    if (!b || typeof b !== "object") return;
+    if (b.type === "image") pic(b.src);
+    else if (b.type === "pair") { pic(b.before?.src); pic(b.after?.src); }
+    else if (b.type === "heading") say(b.text);
+    else if (b.type === "text") say(b.md);
+    else if (b.type === "callout") say(b.title ? `**${b.title}** ${b.md ?? ""}` : b.md);
+    else if (b.type === "list" && arr(b.items)) say(b.items.slice(0, 3).join(" · "));
+    else if (b.type === "columns" && arr(b.columns)) b.columns.forEach(walk);
+    else if (b.type === "tabs" && arr(b.tabs)) walk(b.tabs[0]?.blocks);
+  });
+  walk(recipe?.blocks);
+  return { images, lines };
 }

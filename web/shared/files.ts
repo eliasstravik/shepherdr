@@ -21,6 +21,9 @@ export const extOf = (name: string) => (name.match(/\.([a-z0-9]+)$/i)?.[1] ?? ''
 
 export const isImage = (name: string) => extOf(name) in IMAGE
 
+/** a video the chat plays in place (core/chat-view.js MEDIA_VIDEO: what an agent's message can show) */
+export const isVideo = (name: string) => ['mp4', 'm4v', 'webm', 'mov', 'ogv'].includes(extOf(name))
+
 /** the type an attachment is served with; anything not listed downloads instead of opening */
 export function fileType(name: string): { type: string; inline: boolean } {
   const ext = extOf(name)

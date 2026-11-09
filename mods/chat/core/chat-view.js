@@ -424,3 +424,52 @@ export function subagentsOf(terms, addr, now = Date.now()) {
   }
   return out.sort((a, b) => a.at - b.at);
 }
+
+// Media an agent puts in its message (SHEP-142): a Markdown picture ![alt](path) or a link [words](path) to a local
+// image or video file (an absolute path, ~/…, file://… or one relative to its folder). The chat shows each one right
+// there, under the words (pictures as thumbnails, a video with a player), and keeps the rest of the words as they are:
+// a picture leaves the words, a link leaves its own words. Code (fenced or `inline`) is never read for media, and a web
+// address stays a link. { text, media: [{ path, name, alt, kind: "image" | "video" }] }, each path once, at most 12.
+export const MEDIA_IMAGE = /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i;
+export const MEDIA_VIDEO = /\.(mp4|m4v|webm|mov|ogv)$/i;
+export const mediaKind = (name) => (MEDIA_IMAGE.test(String(name ?? "")) ? "image" : MEDIA_VIDEO.test(String(name ?? "")) ? "video" : null);
+const MEDIA_MAX = 12;
+export function mediaIn(text, { cwd = null, home = null } = {}) {
+  const src = String(text ?? "");
+  if (!src.includes("](")) return { text: src, media: [] };
+  const media = [];
+  const where = (raw) => {
+    let p = raw.trim().replace(/^<(.*)>$/, "$1");
+    if (/^file:\/\//i.test(p)) { try { p = decodeURIComponent(p.slice(7)); } catch { return null; } }
+    else if (/^[a-z][\w+.-]*:/i.test(p) || p.startsWith("#") || p.startsWith("//")) return null;
+    p = p.replace(/[?#].*$/, "");
+    if (!p || !mediaKind(p)) return null;
+    if (p.startsWith("~/")) p = home ? `${home.replace(/\/$/, "")}/${p.slice(2)}` : p;
+    else if (!p.startsWith("/")) { if (!cwd) return null; p = `${cwd.replace(/\/$/, "")}/${p.replace(/^\.\//, "")}`; }
+    // no way up and out of where it names
+    if (p.split("/").includes("..")) return null;
+    return p;
+  };
+  const take = (path, alt) => {
+    if (!media.some((m) => m.path === path) && media.length < MEDIA_MAX) media.push({ path, name: path.split("/").pop(), alt: alt.trim(), kind: mediaKind(path) });
+    return true;
+  };
+  // the words outside code: fenced blocks and inline code stay as written
+  const parts = src.split(/(^ {0,3}(?:```|~~~)[^\n]*\n[\s\S]*?(?:\n {0,3}(?:```|~~~)[^\n]*(?:\n|$)|$))/m);
+  const out = parts.map((part, i) => {
+    if (i % 2) return part;
+    return part.split(/(`+[^`]*`+)/).map((bit, j) => {
+      if (j % 2) return bit;
+      return bit.replace(/(!?)\[([^\]\n]*)\]\(\s*(<[^>\n]+>|[^\s()]+(?:\([^\s()]*\)[^\s()]*)*)(?:\s+"[^"\n]*")?\s*\)/g, (whole, bang, words, target) => {
+        const path = where(target);
+        if (!path) return whole;
+        take(path, words);
+        return bang ? "" : words;
+      });
+    }).join("");
+  }).join("");
+  if (!media.length) return { text: src, media };
+  // the lines a picture leaves empty go, and the gaps they leave close
+  const words = out.split("\n").map((l) => l.replace(/[ \t]+$/, "")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return { text: words, media };
+}

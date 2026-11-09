@@ -349,7 +349,7 @@ export function Thumbs({ files, chat, you, faded, open, width }: { files: { name
         <button key={f.path} type="button" aria-label={`Open ${f.name}`} onClick={() => open(i)}
           style={{ width: fit.boxes[i].w, height: fit.boxes[i].h }}
           className="relative shrink-0 overflow-hidden rounded-[8px] bg-bubble after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--fg)_10%,transparent)]">
-          <img src={f.url} alt={f.name} draggable={false} className="block size-full"
+          <img src={f.url} alt={f.name} draggable={false} loading="lazy" decoding="async" className="block size-full"
             onLoad={(e) => { const im = e.currentTarget; if (!sizes[f.path] && im.naturalWidth) setSizes((s) => ({ ...s, [f.path]: { w: im.naturalWidth, h: im.naturalHeight } })) }} />
         </button>
       ))}

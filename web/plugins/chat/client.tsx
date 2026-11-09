@@ -11,7 +11,7 @@ import { anchorOf, keyOf, partsOf, placesOf, priorOf, reasonOf, SEND_TIMEOUT, ty
 import { dropFiles, keepFile, keptFile, postFile, retrying, sweepFiles } from '@client/uploads.ts'
 import { AlertIcon, BackIcon, CameraIcon, CheckIcon, CopyIcon, Count, DeleteIcon, dimmed, Dot, DownIcon, DownloadIcon, Empty, field, FileIcon, ic, IconButton, KeyIcon, LinkButton, LiveWave, MachineIcon, Menu, MenuItem, MenuSeparator, MenuSetting, MicIcon, ModeIcon, MoreIcon, NextIcon, PageIcon, PlanIcon, PlusIcon, Primary, QuestionIcon, ReplyIcon, RestartIcon, roundBtn, SearchIcon, SecretField, Sent, SmileIcon, Tab, Tabs, TextBox, UpIcon, useElapsed, XIcon } from '@client/ui.tsx'
 import { canDictate, dictate, dictSample, type Dictation } from '@client/dictation.ts'
-import { extOf, isImage } from '@shared/files.ts'
+import { extOf, isImage, isVideo } from '@shared/files.ts'
 import { modelCommand, modeName, taskChatId, type CardAsk, type Chat, type Choice, type MergeEvidence, type Message, type Place, type Question, type ReplyQuote, type SecretAsk, type UpdateCard } from '@shared/types.ts'
 import { sendsOnTap } from '@shared/alerts.ts'
 import { buzz, ForkIcon, mine, openBar, openPicker, quick, react, RewindIcon } from '@plugins/reactions/client.tsx'
@@ -98,7 +98,7 @@ function Bubble({ msg, chat, from, out, last, pics, images, writing }: { msg: Me
   const [width, setWidth] = useState(0)
   const shots = pics?.length ? (
     <Thumbs
-      files={pics.map((m) => ({ name: m.file!.name, path: m.file!.path, url: fileUrl(chat.key, m.file!.path) }))}
+      files={pics.map((m) => ({ name: m.file!.alt || m.file!.name, path: m.file!.path, url: fileUrl(chat.key, m.file!.path, false, 'thumb') }))}
       chat={chat.key} you={you} faded={!!out && out.state === 'sending'} width={width}
       open={(i) => setUI({ photo: out ? { chat: chat.key, file: pics[i].file } : { chat: chat.key, msg: pics[i].id } })}
     />
@@ -205,7 +205,9 @@ function Bubble({ msg, chat, from, out, last, pics, images, writing }: { msg: Me
         {msg.file
           ? unit(
               <div data-anchor {...hold} className={clsx('relative max-w-full select-none [-webkit-touch-callout:none]', (canReact || pending) && pressable, touchFor(replies), you ? 'self-end' : 'self-start')}>
-                <FileTile name={msg.file.name} chat={chat.key} path={msg.file.path} tucked={!body && !!quote} />
+                {isVideo(msg.file.name)
+                  ? <VideoTile name={msg.file.name} alt={msg.file.alt} chat={chat.key} path={msg.file.path} tucked={!body && !!quote} />
+                  : <FileTile name={msg.file.name} chat={chat.key} path={msg.file.path} tucked={!body && !!quote} />}
               </div>,
               !body,
             )
@@ -604,11 +606,36 @@ const tucks = 'shadow-[0_0_0_2px_var(--bg)]'
 const previews = new Map<string, string>()
 const baseName = (path: string) => path.split('/').pop() ?? path
 
-export const fileUrl = (chat: string, path: string, download = false) =>
-  (!download && previews.get(baseName(path))) || `api/file?chat=${encodeURIComponent(chat)}&path=${encodeURIComponent(path)}${download ? '&download=1' : ''}`
+/** a file a chat shows, from the service; `small`: a big picture's thumbnail or a video's still (the service makes
+ *  them once, service/media.ts; a picture small enough comes as it is) */
+export const fileUrl = (chat: string, path: string, download = false, small?: 'thumb' | 'poster') =>
+  (!download && small !== 'poster' && previews.get(baseName(path))) ||
+  `api/file?chat=${encodeURIComponent(chat)}&path=${encodeURIComponent(path)}${download ? '&download=1' : ''}${small ? `&${small}=1` : ''}`
 
 /** a picture on its own, with no words: it shows as a tile, and the viewer pages through every one in the chat */
 export const isPicture = (m: Message) => !!m.file && !m.text && !m.answered && isImage(m.file.name)
+
+/** a video an agent showed: a player in place, its still first, only what it plays loaded (a part at a time); one
+ *  that can't play here (another machine's too big to bring, a kind the browser lacks) is a file tile to download */
+function VideoTile({ name, alt, chat, path, tucked }: { name: string; alt?: string; chat: string; path: string; tucked?: boolean }) {
+  const [broken, setBroken] = useState(false)
+  if (broken) return <FileTile name={name} chat={chat} path={path} tucked={tucked} />
+  return (
+    <figure className={clsx('flex w-[min(100%,420px)] flex-col gap-1', tucked && tucks)}>
+      <video
+        controls
+        playsInline
+        preload="metadata"
+        poster={fileUrl(chat, path, false, 'poster')}
+        src={fileUrl(chat, path)}
+        aria-label={alt || name}
+        onError={() => setBroken(true)}
+        className="block max-h-[360px] w-full rounded-[8px] bg-black outline-1 -outline-offset-1 outline-fg/10"
+      />
+      <figcaption className="truncate px-0.5 text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{alt || name}</figcaption>
+    </figure>
+  )
+}
 
 function FileTile({ name, chat, path, tucked }: { name: string; chat: string; path: string; tucked?: boolean }) {
   const ext = extOf(name)
@@ -655,7 +682,7 @@ function Album({ msgs, chat, from, out, last: lastPart }: { msgs: Message[]; cha
       {msgs[0].newSession ? <SessionLine /> : null}
       {msgs[0].reply ? <ReplyLine q={msgs[0].reply} chat={chat.key} you={you} /> : null}
       <Thumbs
-        files={msgs.map((m) => ({ name: m.file!.name, path: m.file!.path, url: fileUrl(chat.key, m.file!.path) }))}
+        files={msgs.map((m) => ({ name: m.file!.alt || m.file!.name, path: m.file!.path, url: fileUrl(chat.key, m.file!.path, false, 'thumb') }))}
         chat={chat.key} you={you} width={width}
         open={(i) => setUI({ photo: out ? { chat: chat.key, file: msgs[i].file } : { chat: chat.key, msg: msgs[i].id } })}
       />
