@@ -21,6 +21,16 @@ const PERMS = {
     { id: "plan", label: "Plan" }, { id: "bypassPermissions", label: "Full access" }],
   codex: [{ id: "read-only", label: "Read only" }, { id: "auto", label: "Auto" }, { id: "full", label: "Full access" }],
 };
+// A permission mode carried to the other agent when the agent is switched: its nearest mode there (auto stays auto,
+// full access stays full access, Claude's accept edits is Codex's auto, plan and read only swap), else that agent's
+// default (Claude's ask has no Codex match). Never silently drops auto to ask on a round trip (#758).
+const PERM_ACROSS = {
+  claude: { "read-only": "plan", auto: "auto", full: "bypassPermissions" },
+  codex: { plan: "read-only", auto: "auto", acceptEdits: "auto", bypassPermissions: "full" },
+};
+export function permAcross(perm, agent, permDefault) {
+  return PERM_ACROSS[agent]?.[perm] ?? (PERMS[agent]?.some((p) => p.id === perm) ? perm : null) ?? permDefault?.[agent] ?? null;
+}
 
 // What a model id says, in words: "claude-opus-5-5" → "Opus 5.5", "opus[1m]" → "Opus 1M".
 export function modelName(id) {

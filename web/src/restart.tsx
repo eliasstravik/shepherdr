@@ -367,9 +367,8 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
     if (next.effort && !m.efforts.includes(next.effort)) next.effort = null
     if (!m.fast) next.fast = false
     if (m.agent !== was.agent) {
-      // another agent: its own permission modes; full access stays full access
-      const full = was.perm === 'bypassPermissions' || was.perm === 'full'
-      next.perm = full ? (m.agent === 'claude' ? 'bypassPermissions' : 'full') : d.permDefault[m.agent] ?? null
+      // another agent: its own permission modes, the nearest to the one chosen
+      next.perm = AGc.permAcross(was.perm, m.agent, d.permDefault)
       next.fast = false
     }
     return next
