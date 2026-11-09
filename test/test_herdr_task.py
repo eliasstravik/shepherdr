@@ -4298,3 +4298,30 @@ class TaskFlow(unittest.TestCase):
         with self.assertRaises(Exception) as e:
             github.pr_open(self.store, self.task, "o/r")
         self.assertIn("Couldn't push task/1", str(e.exception))
+
+    def test_ready_keeps_the_pull_request_the_task_continues(self):
+        """#828: the work pushed to an open pull request's own branch: ready takes that one, never a second."""
+        import herdr_task.github as github
+        wt, remote = self.task["worktree"], os.path.join(self.root, "remote.git")
+        self.git(self.root, "init", "-q", "--bare", remote)
+        self.git(self.main, "remote", "add", "origin", remote)
+        tip = self.commit(wt, "finish it", "a.txt")
+        self.git(wt, "push", "-q", "origin", "task/1:refs/heads/feature")  # by the agent
+        asked = []
+
+        def gh(*a, **k):
+            asked.append(a)
+            if a[:2] == ("pr", "list") and "--search" in a:
+                return True, json.dumps([{"number": 2918, "url": "https://github.com/o/r/pull/2918", "isCrossRepository": False,
+                                          "baseRefName": "main", "headRefName": "feature", "headRefOid": tip}]), ""
+            if a[:2] == ("pr", "view"):
+                return True, "OPEN", ""
+            return (False, "", "no") if a[:2] == ("pr", "create") else (True, "[]", "")
+        self.patch(github, "gh", gh)
+        self.assertEqual(github.pr_open(self.store, self.task, "o/r", "Done")["number"], 2918)
+        self.assertNotIn("create", [a[1] for a in asked])
+        self.assertEqual(self.git(self.root, "--git-dir", remote, "branch", "--list", "task/1"), "")  # no branch of its own
+        # A later commit goes to that pull request's branch.
+        tip = self.commit(wt, "a fix", "a.txt")
+        self.assertEqual(github.pr_open(self.store, self.task, "o/r")["number"], 2918)
+        self.assertEqual(self.git(self.root, "--git-dir", remote, "rev-parse", "feature"), tip)
