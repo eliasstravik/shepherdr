@@ -190,7 +190,7 @@ function SideFoot({ drawer }: { drawer?: boolean }) {
   return (
     <div
       className={clsx(
-        'sticky bottom-0 z-2 mt-auto flex border-t border-line bg-well px-1.5 pt-1.5 phone:px-2 phone:pt-2',
+        '@container sticky bottom-0 z-2 mt-auto flex border-t border-line bg-well px-1.5 pt-1.5 phone:px-2 phone:pt-2',
         drawer ? 'pb-2 phone:pb-[max(env(safe-area-inset-bottom),--spacing(2))]' : 'pb-1.5',
       )}
     >
@@ -198,7 +198,7 @@ function SideFoot({ drawer }: { drawer?: boolean }) {
           with the crook, but here it only opens settings */}
       <FootButton onClick={settings} className="flex-1">
         <CogIcon className="size-4 shrink-0 text-fg3 coarse:text-fg2 phone:size-5 phone:text-fg2" />
-        Settings
+        <span className="truncate">Settings</span>
       </FootButton>
       {registry.sideFoot.map(({ View }, i) => (
         <View key={i} />

@@ -1206,7 +1206,7 @@ export function FootButton({ className, children, ...p }: Btn) {
     <button
       type="button"
       className={clsx(
-        'press flex min-h-8 items-center gap-2 rounded-row px-2 text-left text-fg2 hover:bg-hover hover:text-fg keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] focus-visible:outline-none coarse:min-h-11 coarse:text-fg phone:min-h-12 phone:text-fg phone:gap-3 phone:px-3',
+        'press flex min-h-8 min-w-0 items-center gap-2 rounded-row px-2 text-left whitespace-nowrap text-fg2 hover:bg-hover hover:text-fg keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] focus-visible:outline-none coarse:min-h-11 coarse:text-fg phone:min-h-12 phone:text-fg phone:gap-3 phone:px-3',
         className,
       )}
       {...p}
