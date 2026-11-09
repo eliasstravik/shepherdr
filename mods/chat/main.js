@@ -503,6 +503,8 @@ export default class Chat extends View {
     // A Coordinator tab's chat that missed its agent (started, or Herdr restarted, before this
     // copy saw it) takes the slot's live agent as soon as one shows, instead of staying empty.
     if (this.slot && !this.thread) cx.timer.every(2000, (cx) => this.adoptSlot(cx));
+    // a call still on from before this copy (the mod reloaded): carried on (SHEP-173)
+    if (this.addr) cx.timer.after(7000, (cx) => { cx.spawn(async (cx) => this.adoptCall(cx)); });
     // The list drew nothing while it has rows (scrolled past its end, a height gone wrong):
     // forget the heights and go to the newest again. Checked rarely; redraws only then.
     cx.timer.every(1500, (cx) => {
@@ -2382,6 +2384,41 @@ export default class Chat extends View {
     // The helper runs beside the app (setsid: not tied to this mod's exec; macOS has no setsid: its own process group
     // and no hangup instead); it ends itself when the chat stops touching `alive`.
     await exec("sh", ["-c", BUN_PATH + 'if command -v setsid >/dev/null 2>&1; then setsid bun "$2" "$1" "$3" "$4" </dev/null >"$1/log" 2>&1 & else set -m; nohup bun "$2" "$1" "$3" "$4" </dev/null >"$1/log" 2>&1 & fi', "x", dir, `${appHome()}/mods/chat/voice.ts`, this.addr, name]);
+    return this.followCall(cx);
+  }
+
+  // SHEP-173: a call still on from before this copy of the chat started (the chat mod reloaded on an update, which
+  // used to end it 20 s later: nobody touched `alive`): this copy carries on with it. Only once nobody else touched
+  // `alive` for a few seconds (another copy of this chat that runs it does every 4 s), and only one copy (owner).
+  async adoptCall(cx) {
+    if (this.call || !addonOn("voice") || !this.addr) return;
+    const dir = this.callDir;
+    let st = null;
+    try { st = JSON.parse((await readTextFile(`${dir}/state.json`)) ?? "null"); } catch { return; }
+    if (!st || st.phase === "ended" || !Number.isInteger(st.pid)) return;
+    const age = await exec("sh", ["-c", 'kill -0 "$1" 2>/dev/null || exit 1; m=$(stat -c %Y "$2" 2>/dev/null || stat -f %m "$2" 2>/dev/null) || exit 1; echo $(( $(date +%s) - m ))', "x", String(st.pid), `${dir}/alive`]);
+    const secs = Number(age.stdout?.trim());
+    if (age.code !== 0 || !Number.isFinite(secs) || secs < 6 || secs > 17) return;
+    const me = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    await fs.writeFile(`${dir}/owner`, me).catch(() => {});
+    await cx.sleep(300);
+    if ((await readTextFile(`${dir}/owner`).catch(() => null)) !== me || this.call) return;
+    await exec("touch", [`${dir}/alive`]);
+    this.call = { phase: st.phase, doing: st.doing ?? "", who: null, muted: Boolean(st.muted), error: null, started: Number(st.since) || Date.now(), pid: st.pid, said: st.said ?? "" };
+    this.callScreen = new CallScreen(this);
+    this.callWhereWas = null;
+    this.callShared();
+    const call = this.call;
+    cx.spawn(async (cx) => this.followLevels(cx, async () => {
+      const v = Number((await readTextFile(`${this.callDir}.level`).catch(() => null)) ?? 0);
+      return Number.isFinite(v) ? v : 0;
+    }, () => this.call === call));
+    cx.notify();
+    return this.followCall(cx);
+  }
+
+  async followCall(cx) {
+    const dir = this.callDir;
     const call = this.call;
     let touched = 0, lastStatus = null, seen = new Set((this.conv?.items ?? []).map((x) => x.id));
     while (this.call === call) {
