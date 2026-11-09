@@ -334,6 +334,40 @@ class Install(unittest.TestCase):
             shutil.rmtree(root, ignore_errors=True)
             shutil.rmtree(src, ignore_errors=True)
 
+    def test_update_waits_for_a_voice_call(self):
+        """SHEP-173: ElevenLabs' records showed calls cut (1006) a minute after each release: the update restarted the
+        service under them. A call on: the unit stays, nothing restarts, and the service is told to start again once
+        the call ends (restart-when-free). No call: it restarts as before."""
+        from importlib.machinery import SourceFileLoader
+        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        root = tempfile.mkdtemp(prefix="shepherdr-call-")
+        ran = []
+        saved = (sh.bun_path, sh.has_unit, sh.calls_on, sh.subprocess.run, sh.service_answers)
+        try:
+            sh.bun_path = lambda: "/usr/bin/bun"
+            sh.has_unit = lambda r: True
+            sh.service_answers = lambda r: (True, 7788)
+            sh.subprocess.run = lambda argv, **k: ran.append(argv) or subprocess.CompletedProcess(argv, 0, b"", b"")
+            r = sh.Run(root, False)
+            rel, text = sh.unit_text(root, "/usr/bin/bun", None)
+            os.makedirs(os.path.dirname(r.p(rel)), exist_ok=True)
+            with open(r.p(rel), "w") as f:
+                f.write(text)
+            marker = sh.service_file(root, "restart-when-free")
+            sh.calls_on = lambda r: 1
+            sh.install_service(r, {}, True)
+            self.assertEqual(ran, [])
+            self.assertTrue(os.path.isfile(marker))
+            self.assertTrue(any("voice call" in n for n in r.notes))
+            os.remove(marker)
+            sh.calls_on = lambda r: 0
+            sh.install_service(sh.Run(root, False), {}, True)
+            self.assertTrue(ran)
+            self.assertFalse(os.path.exists(marker))
+        finally:
+            sh.bun_path, sh.has_unit, sh.calls_on, sh.subprocess.run, sh.service_answers = saved
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_update_web_only(self):
         """A web-only install updates web only (the record says so), and doctor says how; one whose source is gone says
         that instead of updating from itself."""

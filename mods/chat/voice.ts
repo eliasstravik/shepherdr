@@ -28,7 +28,7 @@
 import { readFileSync, writeFileSync, readdirSync, rmSync, statSync, mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { API, opening, replyLine, statusLine, whereLine, apiError, ensureAgent, agentFile, navWords, toolWords, turnGate } from "./core/voice.js";
+import { API, opening, replyLine, statusLine, whereLine, apiError, ensureAgent, agentFile, navWords, toolWords, turnGate, hangUpGuard, closeWords, chimePcm, HUNG_UP, REFUSED } from "./core/voice.js";
 import { screenWords } from "./core/screen.js";
 import { SECRETS, keyFor, envFile, shepPaths } from "./key.ts";
 import { audio, callAudio, ended as audioEnded, type Audio, type CallSound } from "./audio.ts";
@@ -52,6 +52,9 @@ let busy = 0;
 // SHEP-113: what a tool is doing (plain words), and whether the person's ask is still unanswered (updates wait)
 let doing = "";
 const turn = turnGate();
+// SHEP-173: hang_up ends the call only right after the person's yes (core/voice.js hangUpGuard)
+const guard = hangUpGuard();
+let hangingUp = 0;
 let hears = false;
 // the last thing the voice said (the sidebar's call card shows it)
 let said = "";
@@ -78,7 +81,21 @@ function end(why: string | null = null) {
   sound?.stop(); asking?.kill();
   if (hears) void serviceCall("DELETE", `/api/voice/hear?call=${encodeURIComponent(callId)}`);
   state();
-  setTimeout(() => process.exit(0), 100);
+  // SHEP-173: the end chime, at the system's volume, whatever ended it; then this helper goes
+  const chimed = chime();
+  setTimeout(() => process.exit(0), chimed ? 900 : 100);
+}
+
+/** The end chime through the speaker (audio.ts), when this machine has one: true when it plays. */
+function chime() {
+  if (!tools) return false;
+  try {
+    const p = Bun.spawn(tools.speaker(16000), { stdin: "pipe", stdout: "ignore", stderr: "ignore" });
+    const pcm = chimePcm(16000) as Int16Array;
+    p.stdin.write(new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength));
+    p.stdin.end();
+    return true;
+  } catch { return false; }
 }
 process.on("SIGTERM", () => end());
 process.on("SIGINT", () => end());
@@ -368,9 +385,10 @@ async function main() {
       state();
       try { startSound(); } catch (err: any) { end(`The microphone didn't start: ${err?.message ?? err}`); }
     }
-    else if (m.type === "user_transcript") { turn.seen("user_transcript"); phase = "thinking"; thinkingAt = Date.now(); state(); }
+    else if (m.type === "user_transcript") { turn.seen("user_transcript"); guard.seen("user_transcript"); phase = "thinking"; thinkingAt = Date.now(); state(); }
     else if (m.type === "agent_response") {
       turn.seen("agent_response");
+      guard.seen("agent_response", m.agent_response_event?.agent_response);
       // a word before a tool ("On it."): still working on it
       if (!busy) phase = "listening";
       const text = m.agent_response_event?.agent_response;
@@ -384,6 +402,20 @@ async function main() {
     else if (m.type === "interruption") hush();
     else if (m.type === "client_tool_call") {
       const c = m.client_tool_call ?? {};
+      guard.seen("client_tool_call", String(c.tool_name ?? ""));
+      if (c.tool_name === "hang_up") {
+        const may = guard.may();
+        send({ type: "client_tool_result", tool_call_id: c.tool_call_id, result: may ? HUNG_UP : REFUSED, is_error: !may });
+        // its "Bye." plays out, then the call ends with no note
+        if (may && !hangingUp) {
+          hangingUp = Date.now();
+          const t = setInterval(() => {
+            const now = Date.now();
+            if ((now - hangingUp > 1500 && now > playEnd + 600) || now - hangingUp > 10000) { clearInterval(t); end(); }
+          }, 250);
+        }
+        return;
+      }
       doing = toolWords(String(c.tool_name ?? ""), c.parameters ?? {});
       turn.seen("client_tool_call");
       phase = "working"; thinkingAt = Date.now(); state();
@@ -410,12 +442,14 @@ async function main() {
     }
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "client_tool_result", tool_call_id: c.tool_call_id, result: a.result, is_error: !!a.error }));
   }
-  ws.onerror = () => end("The voice connection failed.");
+  // an error is followed by its close, which says why
+  ws.onerror = () => {};
   ws.onclose = (e) => {
     if (ended) return;
-    if (e.code !== 1000) return end(`The call was closed (${e.code}${e.reason ? `: ${e.reason}` : ""}).`);
-    // the voice agent ended the call (end_call after the person's yes, or a long silence): its last words ("Bye.") play out first
-    setTimeout(() => end(), Math.max(0, Math.min(10000, playEnd - Date.now() + 300)));
+    // SHEP-173: the person said yes and it hung up: no note; else it ended by itself (a limit, the line): the window
+    // says why in plain words, with Call again. Its last words play out first.
+    const why = hangingUp ? null : `Call ended: ${closeWords(e.code, e.reason)}.`;
+    setTimeout(() => end(why), Math.max(0, Math.min(10000, playEnd - Date.now() + 300)));
   };
 }
 

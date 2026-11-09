@@ -480,6 +480,26 @@ def service_answers(root):
     return True, port
 
 
+def calls_on(root):
+    """How many voice calls the running service has on now (its health says so to this machine's callers); 0 when
+    it doesn't answer."""
+    try:
+        f = json_file(service_file(root, "service.json"))
+        port, sid = int(f["port"]), f["id"]
+    except (ValueError, KeyError, TypeError):
+        return 0
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=3) as res:
+            h = json.load(res)
+    except (OSError, ValueError):
+        return 0
+    if not isinstance(h, dict) or h.get("id") != sid:
+        return 0
+    n = h.get("calls")
+    return n if isinstance(n, int) and n > 0 else 0
+
+
 def set_port(a, rec):
     """install --port: kept in the record, so an update keeps it; 7788 goes back to the default."""
     p = getattr(a, "port", None)
@@ -553,13 +573,20 @@ def install_service(r, rec, home):
         r.notes.append("the web app isn't built, so the service serves no page yet (./install.sh builds it)")
     rel, text = unit_text(r.root, bun, rec.get("port"))
     data = text.encode()
-    if read(r.p(rel)) != data:
+    same_unit = read(r.p(rel)) == data
+    if not same_unit:
         if r.dry:
             say(f"  unit    {rel}")
             return
         atomic_write(r.p(rel), data)
     rec.setdefault("files", {})[rel] = fsha(rel, data)
     if not home or r.dry:
+        return
+    # SHEP-173: a voice call on now would be cut by the restart: the service starts again on the new code by itself
+    # once no call is on (service/main.ts restart-when-free)
+    if same_unit and has_unit(r.root) and calls_on(r.root):
+        atomic_write(service_file(r.root, "restart-when-free"), b"1\n")
+        r.notes.append("a voice call is on: the Shepherdr service starts again on this update once it ends")
         return
     if sys.platform == "darwin":
         target = f"gui/{os.getuid()}"

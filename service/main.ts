@@ -38,7 +38,7 @@ import { worktree } from "./worktree.ts";
 import * as W from "../core/worktree.js";
 import * as SPm from "../core/spaces.js";
 import { browserRelay } from "./browser.ts";
-import { voiceCall, callToResume, pageWhere, type ChatView } from "./voice.ts";
+import { voiceCall, callToResume, callsOn, pageWhere, type ChatView } from "./voice.ts";
 import { hearing, type HearIO, type Hearing } from "./voice-hear.ts";
 import { voiceTool, type VoiceIO, type Where } from "./voice-tools.ts";
 import { Artifacts } from "./artifacts.ts";
@@ -666,7 +666,7 @@ const server = Bun.serve<{ who: string }>({
     const url = new URL(req.url);
     const path = url.pathname.startsWith("/shepherdr/") ? url.pathname.slice(10) : url.pathname;
     // the window asks this (lib/service.js): while jobs is true it leaves its background work to the service
-    if (path === "/api/health") return json({ ok: true, app: "shepherdr", ...(localCaller(req, PORT) ? { id: SERVICE_ID } : {}), version: VERSION, core: hub.up, jobs: jobs.on && hub.up, serving: host.serving(), host: host.hubName() ?? null, reachable: host.reachable(),
+    if (path === "/api/health") return json({ ok: true, app: "shepherdr", ...(localCaller(req, PORT) ? { id: SERVICE_ID, calls: callsOn() } : {}), version: VERSION, core: hub.up, jobs: jobs.on && hub.up, serving: host.serving(), host: host.hubName() ?? null, reachable: host.reachable(),
       // the other machines this service ticks (Serve from: the host the ones with no service of their own)
       ticks: jobs.on ? host.tickOn() : [] });
     // the Web add-on switched off: nothing for the tailnet (this machine's own callers still get the API)
@@ -899,7 +899,7 @@ const server = Bun.serve<{ who: string }>({
       if (d.voice?.resume) {
         // back to a call that held for this page; gone (ended, or held too long): the page says so and stops
         d.bridge = callToResume(d.voice.resume, String(d.who ?? ""));
-        if (!d.bridge?.attach(page)) { d.bridge = null; ws.send(JSON.stringify({ type: "error", message: "The call ended while the phone was away. Start a new call." })); ws.close(); }
+        if (!d.bridge?.attach(page)) { d.bridge = null; ws.send(JSON.stringify({ type: "ended", why: "the connection was lost" })); ws.close(); }
         return;
       }
       if (d.voice) noteUsage("feature", { from: "web", type: "voice-call" });
@@ -912,6 +912,8 @@ const server = Bun.serve<{ who: string }>({
     message(ws, msg) { const d: any = ws.data; if (d.voice) d.bridge?.message(msg); else if (d.bridge) d.bridge.message(String(msg)); else live.message(ws, String(msg)); },
     // a call's page that went without ending it holds the call for it to come back (SHEP-102)
     close(ws) { const d: any = ws.data; if (d.voice) d.bridge?.detach(d.page); else if (d.bridge) d.bridge.end(); else live.leave(ws); },
+    // SHEP-173: a muted call sends nothing for minutes (Bun's default closes a quiet socket after 120 s); pages ping too
+    idleTimeout: 600,
   },
 });
 
@@ -920,4 +922,15 @@ console.log(`Shepherdr ${VERSION} on http://127.0.0.1:${server.port} (data ${DAT
 // the port is ours now: say where and this start's id (only this user can read it)
 writeFileSync(SERVICE_FILE, JSON.stringify({ port: server.port, id: SERVICE_ID, pid: process.pid, version: VERSION }) + "\n", { mode: 0o600 });
 
+// SHEP-173: an update while a call is on (bin/shepherdr) leaves this file instead of restarting the service, which
+// would cut the call: the service starts again on the new code by itself once no call is on (launchd's KeepAlive,
+// systemd's Restart=always bring it back).
+const RESTART_WHEN_FREE = join(DATA, "restart-when-free");
+try { rmSync(RESTART_WHEN_FREE); } catch {}
+setInterval(() => {
+  if (callsOn() || !existsSync(RESTART_WHEN_FREE)) return;
+  console.log("Starting again on the update that waited for a call to end.");
+  try { rmSync(RESTART_WHEN_FREE); } catch {}
+  server.stop(true); try { rmSync(SERVICE_FILE); } catch {} release(); process.exit(0);
+}, 5000);
 for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => { server.stop(true); try { rmSync(SERVICE_FILE); } catch {} release(); process.exit(0); });

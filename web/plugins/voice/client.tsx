@@ -216,6 +216,7 @@ export function toggleCall(from: string | null = null) {
   if (ui.dict) cancelDictation()
   // the keyboard goes down: the call is listening
   ;(document.activeElement as HTMLElement | null)?.blur?.()
+  lastFrom = from
   setUI({ call: true, callFull: true, callFrom: from, callStarted: Date.now(), callMuted: false, callError: null, focus: null, plus: null })
   act({ type: 'call', chat: from ?? '', on: true })
   resetScreen()
@@ -229,13 +230,23 @@ export function toggleCall(from: string | null = null) {
   }, voiceNav, () => {
     // the call's socket is open: where this page is, from the start
     if (getState().snap) sendWhere(whereNow())
-  }, () => { if (mine()) endCall() }, {
+  }, (why) => {
+    if (!mine()) return
+    endCall()
+    // SHEP-173: it ended by itself (not the person's End or yes): why, in plain words, with Call again
+    if (why) setUI({ callError: `${ENDED}${why}.` })
+  }, {
     // the lock screen and Control Center show the call: hang up and mute from there (SHEP-102)
     title: 'Shepherdr',
     hangUp: () => { if (mine()) endCall() },
     mute: (on) => { if (!mine()) return; muteCall(on); setUI({ callMuted: on }) },
   }).catch(() => { endCall(); setUI({ callError: 'Audio could not start on this device.' }) })
 }
+
+/** the chat the last call started from (Call again starts there) */
+let lastFrom: string | null = null
+/** a note that starts so is a call that ended by itself, said as it is ("Call ended: the connection was lost.") */
+const ENDED = 'Call ended: '
 
 /** a call couldn't start for want of a key: a card says where it goes */
 let help = false
@@ -628,7 +639,11 @@ function CallError() {
   if (!error) return null
   return (
     <div data-topbar role="status" className={clsx(callPill, 'bg-bubble font-normal text-fg2')}>
-      <span className="min-w-0 flex-1 text-pretty">Voice call: {error}</span>
+      <span className="min-w-0 flex-1 text-pretty">{error.startsWith(ENDED) ? error : `Voice call: ${error}`}</span>
+      <button type="button" data-call-again onClick={() => { setUI({ callError: null }); toggleCall(lastFrom) }}
+        className={clsx('press-dim h-7 shrink-0 rounded-full px-3 text-[0.78125rem] font-medium text-ready-fg phone:h-9 phone:text-[0.875rem]', callTint)}>
+        Call again
+      </button>
       <IconButton label="Close" className="rounded-full!" onClick={() => setUI({ callError: null })}>
         <XIcon className={ic} />
       </IconButton>
