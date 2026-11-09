@@ -48,6 +48,20 @@ test("the model button says what the window's does", () => {
     .toMatchObject({ agent: "codex", model: "gpt-5", effort: null, perm: "full" });
 });
 
+test("switching the worker's agent there and back keeps auto (#758)", () => {
+  const { menus, permDefault } = S.choicesFrom({ claude: { model: "opus", per: {} }, codex: { models: [{ id: "gpt-5", label: "GPT-5", efforts: ["low", "high"] }] } });
+  expect(permDefault.claude).toBe("manual");
+  const toCodex = S.chooseModel(menus, permDefault, { agent: "claude", model: "opus", perm: "auto" }, "codex", "gpt-5");
+  expect(toCodex.perm).toBe("auto");
+  expect(S.chooseModel(menus, permDefault, toCodex, "claude", "opus").perm).toBe("auto");
+  // nearest mode: plan and read only swap, accept edits is Codex's auto, ask (no match) takes the default
+  expect(S.chooseModel(menus, permDefault, { agent: "claude", model: "opus", perm: "plan" }, "codex", "gpt-5").perm).toBe("read-only");
+  expect(S.chooseModel(menus, permDefault, { agent: "codex", model: "gpt-5", perm: "read-only" }, "claude", "opus").perm).toBe("plan");
+  expect(S.chooseModel(menus, permDefault, { agent: "claude", model: "opus", perm: "acceptEdits" }, "codex", "gpt-5").perm).toBe("auto");
+  expect(S.chooseModel(menus, permDefault, { agent: "claude", model: "opus", perm: "manual" }, "codex", "gpt-5").perm).toBe("auto");
+  expect(S.chooseModel(menus, permDefault, { agent: "codex", model: "gpt-5", perm: "full" }, "claude", "opus").perm).toBe("bypassPermissions");
+});
+
 test("Backup's warning, an add-on's line and Web's state, in the window's words", () => {
   const checks = { "": { codex: "ok" }, "vm-ssa": { codex: "signed-out" }, box: { codex: "missing" } };
   expect(S.backupProblem(checks, null, "codex")).toBe("Can't on vm-ssa: Codex is signed out. Can't on box: Codex is not installed.");

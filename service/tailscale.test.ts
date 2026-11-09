@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { freePort, heldBy, httpsPort, shareProblem, webLink, webOrigin } from "./tailscale.ts";
+import { freePort, heldBy, httpsPort, meOf, shareProblem, webLink, webOrigin } from "./tailscale.ts";
 
 describe("the web app's tailnet HTTPS port", () => {
   test("443 unless the https-port file says another", () => {
@@ -44,5 +44,21 @@ describe("why sharing can't work (GitHub #754)", () => {
     expect(shareProblem({}, 443, "error: serve config denied\n\nmore detail\n")).toBe("tailscale serve failed: error: serve config denied more detail");
     expect(shareProblem({}, 443, "")).toBe("tailscale serve failed");
     expect(shareProblem({}, 443, "port 443 is already in use")).toContain("`shepherdr web https-port 8443`");
+  });
+});
+
+describe("who owns this machine (GitHub #845)", () => {
+  const status = (id: string, extra = "") =>
+    `{"Self":{"UserID":${id},"DNSName":"box.tailnet.example.","HostName":"box"},${extra}"User":{"${id}":{"LoginName":"sam@example.com","DisplayName":"Sam"}}}`;
+  test("a small user id finds its owner", () => {
+    expect(meOf(status("12345"))).toEqual({ login: "sam@example.com", name: "Sam", dns: "box.tailnet.example", host: "box" });
+  });
+  test("a user id past 2^53 still finds its owner", () => {
+    expect(meOf(status("9007199254740993"))?.login).toBe("sam@example.com");
+    expect(meOf(status("5934875123456789123", `"Peer":{"k":{"UserID":5934875123456789124}},`))?.login).toBe("sam@example.com");
+  });
+  test("no owner or bad output is null", () => {
+    expect(meOf(`{"Self":{"UserID":1,"DNSName":"box.tailnet.example."},"User":{}}`)).toBeNull();
+    expect(meOf("not json")).toBeNull();
   });
 });

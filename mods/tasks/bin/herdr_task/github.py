@@ -42,9 +42,23 @@ def pr_open(s, task, repo, summary=None):
     """Pushes the task's branch and opens its pull request (or keeps the open one, also one opened
     by hand or by its agent for the branch: SHEP-13's "already exists")."""
     wt, br = task["worktree"], task["branch"]
-    ok, _, err = git(wt, "push", "--force-with-lease", "-u", remote_of(s.loc["folder"]), br)
-    if not ok:
-        raise Fail(f"Couldn't push {br}: {err}")
+    # Continuing a pull request already open on another branch, its work pushed there (#828): that
+    # one is the task's, never a second with the same commits.
+    if not (task.get("pr") or {}).get("number") and pr_at_tip(task, repo):
+        if summary:
+            gh("pr", "comment", str(task["pr"]["number"]), "--repo", repo, "--body", summary)
+        return task["pr"]
+    remote = remote_of(s.loc["folder"])
+    # The pull request it continues (#828) gets its new commits on its own branch, never forced.
+    to = (task.get("pr") or {}).get("branch") or br
+    # Already there at its exact tip (pushed by hand): no second push through its hooks (#795).
+    has, tip, _ = git(wt, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}")
+    seen, there, _ = git(wt, "ls-remote", remote, f"refs/heads/{to}")
+    if not (has and tip and seen and there.split()[:1] == [tip]):
+        ok, _, err = git(wt, "push", "--force-with-lease", "-u", remote, br) if to == br else \
+            git(wt, "push", remote, f"{br}:refs/heads/{to}")
+        if not ok:
+            raise Fail(f"Couldn't push {br}" + (f" to {to}" if to != br else "") + f": {err}")
     pr = task.get("pr") or {}
     if pr.get("number"):
         ok, out, _ = gh("pr", "view", str(pr["number"]), "--repo", repo, "--json", "state", "-q", ".state")
@@ -52,6 +66,10 @@ def pr_open(s, task, repo, summary=None):
             if summary:
                 gh("pr", "comment", str(pr["number"]), "--repo", repo, "--body", summary)
             return pr
+        if pr.get("branch"):
+            # The other branch's pull request it continued was closed or merged: its own branch from here.
+            task.pop("pr")
+            return pr_open(s, task, repo, summary)
     if pr_adopt(task, repo):
         if summary:
             gh("pr", "comment", str(task["pr"]["number"]), "--repo", repo, "--body", summary)
@@ -91,6 +109,25 @@ def pr_adopt(task, repo):
         found = None
     if found:
         task["pr"] = {"number": found["number"], "url": found["url"], "repo": repo}
+    return task.get("pr") if found else None
+
+
+def pr_at_tip(task, repo):
+    """An open pull request from this repo, into the task's base, on another branch whose head is
+    exactly the task branch's tip: recorded on the task, else None (#828)."""
+    ok, tip, _ = git(task["worktree"], "rev-parse", "--verify", "--quiet", f"refs/heads/{task['branch']}")
+    if not (ok and tip):
+        return None
+    ok, out, _ = gh("pr", "list", "--repo", repo, "--state", "open", "--search", tip,
+                    "--json", "number,url,isCrossRepository,baseRefName,headRefName,headRefOid")
+    try:
+        found = next((p for p in json.loads(out) if not p.get("isCrossRepository") and p.get("headRefOid") == tip
+                      and p.get("headRefName") and p.get("headRefName") != task["branch"]
+                      and p.get("baseRefName") == (task.get("base") or "main")), None) if ok and out else None
+    except (ValueError, TypeError, AttributeError):
+        found = None
+    if found:
+        task["pr"] = {"number": found["number"], "url": found["url"], "repo": repo, "branch": found["headRefName"]}
     return task.get("pr") if found else None
 
 
@@ -150,17 +187,83 @@ BAD = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP
 PENDING = {"QUEUED", "IN_PROGRESS", "PENDING", "WAITING", "REQUESTED", "EXPECTED"}
 
 
+VIEW = "state,mergeable,headRefOid,mergeCommit,reviewDecision,mergeStateStatus"
+# SHEP-179: a token that may read a pull request but not its checks (a fine-grained one without Checks: read, as
+# the exe.dev GitHub integration's) gets GitHub's "Resource not accessible" for them: a permission, never a blip.
+DENIED = ("resource not accessible", "http 403", "must have", "not have permission", "insufficient scope")
+CANT_READ_CHECKS = "Can't read GitHub checks here: check them on GitHub."
+CHECKS_PERMISSION = "Checks: read and Commit statuses: read"
+
+
+def denied(err):
+    return any(x in (err or "").lower() for x in DENIED)
+
+
 def pr_view(task):
+    """The pull request as GitHub has it (gh pr view's fields), or None when GitHub couldn't be asked. Its checks
+    (statusCheckRollup) unreadable here (SHEP-179): the rest still read, the checks asked another way (check_rows());
+    neither works: "checks_unknown" set, never a wait for checks nobody can see."""
     pr = task["pr"]
-    ok, out, _ = gh("pr", "view", str(pr["number"]), "--repo", pr["repo"], "--json",
-                    "state,mergeable,headRefOid,statusCheckRollup,mergeCommit,reviewDecision,mergeStateStatus")
+    view = lambda fields: gh("pr", "view", str(pr["number"]), "--repo", pr["repo"], "--json", fields)
+    ok, out, err = view(VIEW + ",statusCheckRollup")
+    rest = not ok and denied(err)
+    if rest:
+        ok, out, _ = view(VIEW)
     try:
         v = json.loads(out) if ok else None
     except ValueError:
         return None
-    if isinstance(v, dict) and v.get("statusCheckRollup"):
+    if not isinstance(v, dict):
+        return v
+    if rest:
+        rows, whole = check_rows(pr["repo"], v.get("headRefOid"))
+        v["statusCheckRollup"] = rows
+        if not whole:
+            v["checks_unknown"] = True
+    if v.get("statusCheckRollup"):
         v["statusCheckRollup"] = latest_checks(v["statusCheckRollup"])
     return v
+
+
+def check_rows(repo, sha):
+    """A commit's checks from GitHub's REST API (check runs and commit statuses), as statusCheckRollup's rows:
+    (rows, whole). whole: both could be read. A token with one permission but not the other still sees part."""
+    rows, whole = [], bool(sha)
+    if not sha:
+        return rows, False
+    ok, out, _ = gh("api", f"repos/{repo}/commits/{sha}/check-runs?per_page=100")
+    try:
+        for c in json.loads(out).get("check_runs") or [] if ok else []:
+            rows.append({"name": c.get("name"), "status": (c.get("status") or "").upper(),
+                         "conclusion": (c.get("conclusion") or "").upper(), "startedAt": c.get("started_at") or "",
+                         "completedAt": c.get("completed_at") or "",
+                         "workflowName": ((c.get("app") or {}).get("slug") or "")})
+    except (ValueError, AttributeError):
+        ok = False
+    whole = whole and ok
+    ok, out, _ = gh("api", f"repos/{repo}/commits/{sha}/status")
+    try:
+        for c in json.loads(out).get("statuses") or [] if ok else []:
+            rows.append({"context": c.get("context"), "state": (c.get("state") or "").upper(),
+                         "startedAt": c.get("updated_at") or c.get("created_at") or ""})
+    except (ValueError, AttributeError):
+        ok = False
+    return rows, whole and ok
+
+
+def note_checks(s, task, v):
+    """Remembers on the folder's task list whether its GitHub checks could be read (`shepherdr doctor` warns while
+    they can't), and on the task's pull request (the Accept card says so)."""
+    pr = task.get("pr") or {}
+    if v.get("checks_unknown"):
+        if not pr.get("checks_unknown"):
+            pr["checks_unknown"] = True
+        s.data["github_checks"] = {"repo": pr.get("repo"), "at": now(), "denied": True}
+        s.dirty = True
+    else:
+        if pr.pop("checks_unknown", None) or (s.data.get("github_checks") or {}).get("repo") == pr.get("repo"):
+            s.data.pop("github_checks", None)
+            s.dirty = True
 
 
 def latest_checks(rows):
@@ -242,6 +345,8 @@ def drop_branch(s, task):
 # A pull request just pushed can show no checks for a few seconds before GitHub starts them: none
 # for this long after ready means none are set up (Ready then, SHEP-175).
 NO_CHECKS_MS = 30000
+# SHEP-179: checks that can't be read here, while GitHub blocks the merge: Working this long at most, then Ready.
+UNKNOWN_CHECKS_MS = 20 * 60000
 CHECKS_RUNNING, GITHUB_LOOKS, BACK_TO_AGENT = "Checks running", "Waiting for GitHub", "Back to its agent to fix"
 
 
@@ -258,6 +363,12 @@ def pr_wait(v, since):
     if (v.get("mergeable") or "").upper() not in ("MERGEABLE",):
         return GITHUB_LOOKS
     if not v.get("statusCheckRollup") and now() - (since or 0) < NO_CHECKS_MS:
+        return CHECKS_RUNNING
+    if v.get("checks_unknown") and v.get("mergeStateStatus") == "BLOCKED" and not needs_approval(v) \
+            and now() - (since or 0) < UNKNOWN_CHECKS_MS:
+        # SHEP-179: its checks can't be read here, but GitHub blocks the merge (a required check not passed yet):
+        # Working for a while, then Ready anyway (the Accept card says the checks couldn't be read; GitHub still
+        # refuses a merge its checks block). CLEAN: GitHub says they passed.
         return CHECKS_RUNNING
     return None
 

@@ -117,21 +117,54 @@ test("the screen tool: done on the page that started the call, the agent hears t
   agent = null;
 });
 
-test("SHEP-67: the voice agent hangs up (end_call after a yes): the page hears it ended, with no error; a broken call still says why", async () => {
+test("SHEP-67, SHEP-173: a call the voice service ends by itself says why in plain words; a broken one too", async () => {
   agent = null;
   const phone = page(null);
   phone.start({ client: "web", device: "phone", machine: "eliass-mac-mini", call: "p:h1" });
   await until(() => !!agent);
-  agent.close(1000);
+  agent.close(1000, "Conversation has exceeded maximum duration");
   await until(() => phone.got.some((m) => m.type === "ended"));
-  expect(phone.got.filter((m) => m.type === "ended" || m.type === "error")).toEqual([{ type: "ended" }]);
+  expect(phone.got.filter((m) => m.type === "ended" || m.type === "error")).toEqual([{ type: "ended", why: "it reached the 2-hour limit" }]);
   agent = null;
   const other = page(null);
   other.start({ client: "web", device: "phone", machine: "eliass-mac-mini", call: "p:h1" });
   await until(() => !!agent);
   agent.close(4000, "quota");
-  await until(() => other.got.some((m) => m.type === "error"));
-  expect(other.got.filter((m) => m.type === "ended" || m.type === "error")).toEqual([{ type: "error", message: "The call was closed (4000: quota)." }]);
+  await until(() => other.got.some((m) => m.type === "ended"));
+  expect(other.got.filter((m) => m.type === "ended" || m.type === "error")).toEqual([{ type: "ended", why: "the voice service closed it (quota)" }]);
+});
+
+// SHEP-173: ElevenLabs' records showed the model ending calls on its own right after "Passed it to ...". hang_up is
+// Shepherdr's: it ends the call only right after the person's yes to a question, else it's refused and the call goes on.
+test("SHEP-173: hang_up after a send is refused and the call goes on; after the person's yes it ends with no note", async () => {
+  agent = null;
+  const phone = page(null);
+  const c = phone.start({ client: "web", device: "phone", machine: "eliass-mac-mini", call: "p:h1" });
+  await until(() => !!agent);
+  const ev = (m: object) => agent.send(JSON.stringify(m));
+  ev({ type: "user_transcript", user_transcription_event: { user_transcript: "Tell the Home Assistant to update codex." } });
+  ev({ type: "agent_response", agent_response_event: { agent_response: "On it." } });
+  ev({ type: "client_tool_call", client_tool_call: { tool_name: "send", tool_call_id: "s1", parameters: { to: "Home", text: "Update codex." } } });
+  await until(() => results.some((r) => r.tool_call_id === "s1"));
+  ev({ type: "agent_response", agent_response_event: { agent_response: "Passed it to the Home Assistant." } });
+  ev({ type: "client_tool_call", client_tool_call: { tool_name: "hang_up", tool_call_id: "h1", parameters: {} } });
+  await until(() => results.some((r) => r.tool_call_id === "h1"));
+  const refused = results.find((r) => r.tool_call_id === "h1");
+  expect(refused.is_error).toBe(true);
+  expect(JSON.parse(refused.result).ok).toBe(false);
+  await Bun.sleep(1800);
+  expect(phone.got.some((m) => m.type === "ended" || m.type === "error")).toBe(false);
+  // the person asks to end it, is asked, says yes: it ends, after its last words, with no note
+  ev({ type: "user_transcript", user_transcription_event: { user_transcript: "End the call." } });
+  ev({ type: "agent_response", agent_response_event: { agent_response: "Are you sure you want to end the call?" } });
+  ev({ type: "user_transcript", user_transcription_event: { user_transcript: "Yes." } });
+  ev({ type: "agent_response", agent_response_event: { agent_response: "Bye." } });
+  ev({ type: "client_tool_call", client_tool_call: { tool_name: "hang_up", tool_call_id: "h2", parameters: {} } });
+  await until(() => results.some((r) => r.tool_call_id === "h2"));
+  expect(results.find((r) => r.tool_call_id === "h2").is_error).toBe(false);
+  for (let i = 0; i < 150 && !phone.got.some((m) => m.type === "ended"); i++) await Bun.sleep(20);
+  expect(phone.got.filter((m) => m.type === "ended" || m.type === "error")).toEqual([{ type: "ended" }]);
+  c.end();
 });
 
 // SHEP-102: a phone that locks (or loses the network) may drop the page's socket. The call holds on the server, with

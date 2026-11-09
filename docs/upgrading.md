@@ -12,7 +12,8 @@ A web-only install (`./install.sh --web`) updates the same way: `shepherdr updat
 updates web only. `shepherdr doctor` says how this install updates. The web app is rebuilt when it's out of date.
 
 Only files Shepherdr put there and you haven't changed are replaced; yours stay, with the new copy beside them as
-`.new`. Each mod is swapped in one step, so Herdr reloads it once. Agents keep running in herdr-core. Until
+`.new`. A mod file you changed that Shepherdr changed too is the exception: your copy could stop the new mod from
+loading, so Shepherdr's goes in and yours goes to the backup folder (the update says where). Each mod is swapped in one step, so Herdr reloads it once. Agents keep running in herdr-core. Until
 `shepherdr doctor` passes, the sync to other machines waits (`a sync hold (`sync-hold` in `~/.local/state/shepherdr`)`).
 
 ## Shepherdr's data moves to its own folders (3.1.27)

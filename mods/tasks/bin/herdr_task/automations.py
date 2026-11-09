@@ -13,7 +13,7 @@ import time
 
 from .base import ENTRY, Fail, guard, hc_json, layout, now, STORE, WHERE
 from .when import parse_at
-from .settings import bare, settings_for, worker_argv, worktrees_on
+from .settings import bare, set_task, settings_for, SET_KEYS, worker_argv, worktrees_on
 from .agents import agent_running, live_agents, starting, status_of, task_status
 from .sessions import session_of
 from .launch import default_space
@@ -205,7 +205,7 @@ def find_auto(s, ref):
 
 
 def auto_view(s, a):
-    v = {k: a.get(k) for k in ("id", "title", "prompt", "mode", "agent", "on", "match", "space", "paused",
+    v = {k: a.get(k) for k in ("id", "title", "prompt", "mode", "agent", "set", "on", "match", "space", "paused",
                                 "next_run", "last_run", "last_task", "last_error", "runs", "created")}
     # machine: None here; herdr-task --on <machine> names it (cli.remote), so a list across machines says whose it is
     v.update(ref=auto_ref(s, a), **{"from": from_text(a["from"]) if a.get("from") else None}, folder=s.loc["folder"], machine=None, prefix=s.prefix, every=(a.get("every") or {}).get("text"),
@@ -256,6 +256,24 @@ def set_auto_fields(s, a, args, adding=False):
         a["space"] = bare(args.space)
     if args.parent:
         a["parent"] = args.parent
+    if getattr(args, "set", None):
+        # Each task it adds gets these (#744: review=off for a run that only reads); checked now.
+        sets = dict(a.get("set") or {})
+        for pair in args.set:
+            if "=" not in pair:
+                raise Fail(f"--set takes key=value, not {pair!r}.")
+            k, v = pair.split("=", 1)
+            set_task({}, k, v)
+            field = SET_KEYS[k.strip().lower()]
+            key = next(x for x, f in SET_KEYS.items() if f == field)  # one name per setting
+            v = v.strip().strip("\"'").strip()
+            if not v or v.lower() == "default":
+                sets.pop(key, None)
+            else:
+                sets[key] = v
+        a["set"] = sets
+        if not sets:
+            a.pop("set")
     if not a.get("every") and not a.get("on"):
         raise Fail("Say when it runs: --every \"weekdays 9:00\" and/or --on ready,merged. " + HOW)
     if a.get("from") and not a.get("on"):
@@ -358,6 +376,8 @@ def fire(s, a, why, brief=None):
     t["automation"] = a["id"]
     if a.get("agent"):
         t["agent"] = a["agent"]
+    for k, v in (a.get("set") or {}).items():
+        set_task(t, k, v)
     space = a.get("space")
     run_rec = {"at": now(), "why": why, "task": s.ref(t)}
     if a.get("from") and why.split(":")[0] in EVENTS:

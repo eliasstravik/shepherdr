@@ -81,6 +81,14 @@ test("macOS: the caller's side of the exact connection, from netstat -anv (Tails
   expect(darwinPids(56080, 7788, forged)).toEqual([4242]);
 });
 
+test("macOS: netstat giving no socket table is said in the refusal, not a bare 'not from Tailscale' (GitHub #777)", async () => {
+  const { netstatProblem } = await import("./peer.ts");
+  expect(netstatProblem("Active Internet connections (including servers)\nProto Recv-Q", 0, "")).toBe(null);
+  expect(netstatProblem("", 0, "")).toBe("netstat gave no socket table here (exit 0, no output)");
+  expect(netstatProblem("", 1, "netstat: sysctl: net.inet.tcp.pcblist_n: Operation not permitted\n")).toContain("Operation not permitted");
+  expect(netstatProblem("", null, "")).toContain("didn't run");
+});
+
 describe("health's id only to this machine's callers (GitHub #635)", () => {
   test("the window on 127.0.0.1 by the service's port", () => expect(localCaller(local(), 7788)).toBe(true));
   test("not through tailscale serve", () => expect(localCaller(tailnet(), 7788)).toBe(false));

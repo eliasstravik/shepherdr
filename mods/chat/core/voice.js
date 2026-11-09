@@ -48,7 +48,8 @@ Moving around (switch to a space or chat, open a task, tab, panel, artifact or S
 - Say what is on screen only when the person asks what it shows.
 
 Ending the call:
-- When the person wants to end the call, ask exactly "Are you sure you want to end the call?" After a clear yes, say "Bye." and use end_call. No yes, no end.
+- When the person wants to end the call, ask exactly "Are you sure you want to end the call?" After a clear yes, say "Bye." and use hang_up. No yes, no end.
+- Never end the call for any other reason: not after a send, not when a task is done, not when it's quiet. The person keeps the call as long as they want.
 - Never talk about clicking or buttons to end it, and never use screen to hang up.
 
 Rules:
@@ -123,6 +124,8 @@ export const TOOLS = [
   tool("call_view", "Show the call full screen (full: the call fills the person's screen) or minimize it (minimized: the app shows, the call in its bar). The web app's call only. Opening things minimizes it by itself.", {
     view: { type: "string", enum: VIEWS, description: "full: the full-screen call. minimized: the app, with the call in its bar." },
   }, ["view"], "auto"),
+  // SHEP-173: Shepherdr ends the call (hangUpGuard), only right after the person said yes to ending it
+  tool("hang_up", "End the call. Only right after the person said yes to \"Are you sure you want to end the call?\" on this call: never after a send, a task or a quiet moment.", {}, [], "auto"),
 ];
 
 /** What the agent says first: short, then it listens. */
@@ -131,8 +134,10 @@ export const FIRST = "Hi, go ahead.";
 // ElevenLabs' own system tools, listed with ours (a built_in_tools field beside inline tools is dropped): end_call hangs
 // up (only after the person's yes, the prompt says), skip_turn stays quiet.
 const system = (name, description, params = {}) => ({ type: "system", name, description, params: { system_tool_type: name, ...params } });
+// SHEP-173: no end_call system tool. The model used it on its own, right after "Passed it to <name>." (ElevenLabs'
+// records: four of the person's calls ended so, with no yes asked); hang_up is ours, and Shepherdr ends the call only
+// when the person just said yes (hangUpGuard).
 export const SYSTEM_TOOLS = [
-  system("end_call", "End the call. Only after the person said yes to ending it on this call."),
   system("skip_turn", "Say nothing this turn: when the person says to wait or hold on, or is clearly talking to someone else.", { wait_timeout_secs: -1 }),
   // switches the call's language (voice and words) all call long, not only at its start (SHEP-104)
   system("language_detection", "Switch the call's language: as soon as the person speaks another language than the call's, or asks for one. Again each time they change, back to English too.", { only_at_conversation_start: false }),
@@ -154,9 +159,10 @@ export const LANGUAGES = ("zh es hi pt pt-br fr de ja ar ko id it nl tr pl ru sv
   "sr sd sl so sw tg te th ur uz yo cy am lo lg sn ckb wo zu").trim().split(" ");
 
 // Silence: the agent never prompts a quiet person (turn_timeout -1: no "are you there?"), and only a call silent for
-// 15 minutes ends (a forgotten call stops costing); any call ends after an hour (ElevenLabs' default is 10 minutes).
-export const SILENT_END_SECS = 900;
-export const MAX_CALL_SECS = 3600;
+// 30 minutes ends (a forgotten call stops costing); any call ends after two hours, the most ElevenLabs allows
+// (SHEP-173: it refuses more than 7200; its default is 10 minutes).
+export const SILENT_END_SECS = 1800;
+export const MAX_CALL_SECS = 7200;
 
 // SHEP-113: the model slow to start a reply: after 3 s a short filler of its own words (in the call's language), the
 // fixed one only if it can't. turn.soft_timeout_config, timeout_seconds 0.5..8 (-1 off):
@@ -248,8 +254,14 @@ export const opening = (where = "") => ({ type: "conversation_initiation_client_
 /** The person moved in the app during the call: a quiet note of where they are now. */
 export const whereLine = (where) => ({ type: "contextual_update", text: `[Update] The person's app now shows: ${String(where).slice(0, 600)}` });
 
-// An agent the call follows replied in its chat: the voice agent says it.
-export const replyLine = (who, text) => ({ type: "user_message", text: `[Update] ${who} replied: """${String(text).slice(0, 3000)}""" Tell the person what it says, briefly.` });
+// An agent the call follows replied in its chat: the voice agent says it. A long reply goes whole; one past REPLY_MAX
+// is cut and says so, so the voice agent knows the rest is in the chat (#785).
+export const REPLY_MAX = 40000;
+export function replyLine(who, text) {
+  const t = String(text);
+  const body = t.length > REPLY_MAX ? `${t.slice(0, REPLY_MAX)}""" (cut short here; the rest is in the chat: look at the chat to read it.)` : `${t}"""`;
+  return { type: "user_message", text: `[Update] ${who} replied: """${body} Tell the person what it says, briefly.` };
+}
 
 /**
  * Several [Update]s that came together, as one (SHEP-105): quiet notes stay quiet notes; what is said out loud goes as
@@ -286,6 +298,7 @@ export function toolWords(name, params = {}) {
   if (name === "act") return p.confirmed === true ? ACT_WORDS[p.action] ?? "making the change" : "checking";
   if (name === "screen") return p.do === "look" ? "reading the screen" : "using the screen";
   if (name === "call_view") return p.view === "full" ? "showing the call" : "minimizing the call";
+  if (name === "hang_up") return "ending the call";
   return "working";
 }
 
@@ -308,6 +321,56 @@ export function turnGate(maxMs = 30000) {
     // a tool that never came back holds four times as long at most
     holding: (now = Date.now()) => (tools > 0 && now - at < maxMs * 4) || (owed && now - at < maxMs),
   };
+}
+
+/**
+ * SHEP-173: whether hang_up may end the call now. Fed the voice agent's events as they come (seen): the call ends only
+ * when the agent's last words before the person's latest were a question ("Are you sure you want to end the call?", in
+ * any language) and no other tool ran since the person spoke. A hang_up right after a send ("Passed it to ...") is
+ * refused, with what to do instead (REFUSED).
+ */
+export function hangUpGuard() {
+  let lastSaid = "", asked = false, spoke = false, toolsSince = 0;
+  return {
+    seen(type, text = "") {
+      if (type === "agent_response") lastSaid = String(text ?? "");
+      else if (type === "user_transcript") { spoke = true; asked = /[?？؟]\s*$/.test(lastSaid.trim()) || /[?？؟]/.test(lastSaid); toolsSince = 0; }
+      else if (type === "client_tool_call" && text !== "hang_up") toolsSince++;
+    },
+    may: () => spoke && asked && toolsSince === 0,
+  };
+}
+export const HUNG_UP = JSON.stringify({ ok: true, result: "The call ends once you've said Bye." });
+export const REFUSED = JSON.stringify({ ok: false, result: "Not ended: the person didn't just say yes to ending the call. Never end it on your own. If they asked to end it, ask exactly \"Are you sure you want to end the call?\" and use hang_up only after their yes; else carry on, say nothing about it." });
+
+/** Why the voice agent's socket closed, in a few plain words for "Call ended: ..." (null: the agent hung up after the
+ *  person's yes, nothing to say). ElevenLabs closes with 1000 at its limits and says which in the reason. */
+export function closeWords(code, reason = "") {
+  const r = String(reason ?? "");
+  if (/max(imum)? duration|duration/i.test(r)) return `it reached the ${Math.round(MAX_CALL_SECS / 3600)}-hour limit`;
+  if (/silen|inactiv|no user message/i.test(r)) return "it was quiet for a long time";
+  if (code === 1000) return "the voice service ended it";
+  if (code !== 1006 && r.trim()) return `the voice service closed it (${r.trim().slice(0, 120)})`;
+  return "the connection to the voice service was lost";
+}
+
+/** SHEP-173: the end chime, two soft notes going down (E5, then C5, about half a second), as 16-bit mono PCM at rate:
+ *  played whenever a call ends, at the system's volume. */
+export function chimePcm(rate = 16000) {
+  const notes = [[659.25, 0, 0.22], [523.25, 0.16, 0.34]];
+  const len = Math.ceil(rate * 0.52);
+  const out = new Int16Array(len);
+  for (const [f, start, dur] of notes) {
+    const a = Math.floor(start * rate), n = Math.floor(dur * rate);
+    for (let i = 0; i < n && a + i < len; i++) {
+      const t = i / rate;
+      // a quick soft attack, then a bell-like fade
+      const env = Math.min(1, t / 0.012) * Math.exp(-t * 7);
+      const v = 0.22 * env * (Math.sin(2 * Math.PI * f * t) + 0.25 * Math.sin(4 * Math.PI * f * t));
+      out[a + i] = Math.max(-32767, Math.min(32767, out[a + i] + v * 32767));
+    }
+  }
+  return out;
 }
 
 /** Something anywhere needs the person (a question, a secret, a task Ready): one short line, said out loud. */

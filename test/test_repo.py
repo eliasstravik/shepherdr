@@ -316,7 +316,7 @@ class Repo(unittest.TestCase):
 
     def test_version_everywhere(self):
         v = re.search(r'^VERSION = "([^"]+)"', open(J("bin", "shepherdr")).read(), re.M).group(1)
-        self.assertEqual(v, "3.1.28")
+        self.assertEqual(v, "3.1.29")
         self.assertRegex(open(J("CHANGELOG.md")).read(), rf"(?m)^## {re.escape(v)}\b", "CHANGELOG's newest entry")
         self.assertIn(v, open(J("RECIPE.md")).read())
         self.assertIn(v, open(J("README.md")).read())
@@ -363,6 +363,14 @@ class ShellScripts(unittest.TestCase):
         self.assertTrue(pat.search("x=$(\n  cat <<EOF\nhi\nEOF\n)"))
         self.assertFalse(pat.search('new=$(jq -r .a <<<"$out")'))
 
+    def test_no_bash4_builtins(self):
+        # #736: macOS's /bin/bash 3.2 has no mapfile/readarray; restart.sh died there before restarting anything
+        pat = re.compile(r"^[^#\n]*\b(mapfile|readarray)\b", re.M)
+        for f in shell_scripts():
+            with open(f, encoding="utf-8") as fh:
+                m = pat.search(fh.read())
+            self.assertIsNone(m, f"{os.path.relpath(f, ROOT)}: bash 4's {m and m.group(1)} (a while read loop works on 3.2)")
+
     def test_each_parses(self):
         import shutil
         import subprocess
@@ -374,6 +382,19 @@ class ShellScripts(unittest.TestCase):
             out = subprocess.run([shell, "-n", f], capture_output=True, text=True)
             self.assertEqual(out.returncode, 0, f"{shell} -n {os.path.relpath(f, ROOT)}: {out.stderr}")
 
+
+class MacAudio(unittest.TestCase):
+    """#789: from Swift 6.4, `import Darwin` no longer shows crt_externs.h (an explicit submodule), so a direct
+    _NSGetEnviron() call stops mods/chat/mac-audio.swift building and the Mac's dictation and calls with it. The helper
+    finds it by dlsym, as it finds responsibility_spawnattrs_setdisclaim."""
+
+    def test_no_crt_externs_call(self):
+        with open(os.path.join(ROOT, "mods", "chat", "mac-audio.swift"), encoding="utf-8") as fh:
+            code = "\n".join(l.split("//")[0] for l in fh.read().splitlines())
+        for name in ("_NSGetEnviron", "_NSGetArgv", "_NSGetArgc", "_NSGetProgname", "_NSGetMachExecuteHeader"):
+            m = re.search(rf"(?<![\"\w]){name}\s*\(", code)
+            self.assertIsNone(m, f"{name}() needs crt_externs.h: dlsym it instead")
+        self.assertIn('dlsym(UnsafeMutableRawPointer(bitPattern: -2), "_NSGetEnviron")', code)
 
 class SessionNote(unittest.TestCase):
     """SHEP-42, SHEP-48: the chat's SessionStart hook (mods/chat/session-note.sh) adds every agent's Reactions

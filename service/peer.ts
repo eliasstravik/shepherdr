@@ -45,7 +45,14 @@ export function peerUid(port: number, service: number): number | null {
  *  process:pid column, after the state). */
 export function darwinPids(port: number, service: number, text?: string): number[] {
   let out = text ?? "";
-  if (text === undefined) try { out = Bun.spawnSync([NETSTAT, "-anv", "-p", "tcp"], { stdout: "pipe", stderr: "ignore" }).stdout.toString(); } catch {}
+  if (text === undefined) {
+    let code: number | null = null, err = "";
+    try {
+      const r = Bun.spawnSync([NETSTAT, "-anv", "-p", "tcp"], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+      out = r.stdout.toString(); code = r.exitCode; err = r.stderr.toString();
+    } catch (e) { err = (e as Error).message; }
+    peerProblem = netstatProblem(out, code, err);
+  }
   const pids: number[] = [];
   for (const line of out.split("\n")) {
     const f = line.trim().split(/\s+/);
@@ -58,6 +65,16 @@ export function darwinPids(port: number, service: number, text?: string): number
   }
   return pids;
 }
+
+/** Why this Mac can't tell who opened a connection (netstat gave no socket table: GitHub #777), or null. */
+export let peerProblem: string | null = null;
+export function netstatProblem(out: string, code: number | null, err: string): string | null {
+  if (/\btcp[46]?\b|Proto/.test(out)) return null;
+  const why = err.trim().split("\n").pop()?.slice(0, 200) || (code === null ? "it didn't run" : `exit ${code}, no output`);
+  return `netstat gave no socket table here (${why})`;
+}
+/** The 403's words: "not from Tailscale", with why when this Mac couldn't look. */
+export const refusedWhy = (why: string) => (why === "not from Tailscale" && peerProblem ? `${why}: can't see who connected: ${peerProblem}` : why);
 
 /** Tailscale (root) or the owner. */
 export const trustedPeer = (port: number | undefined, service: number) => {

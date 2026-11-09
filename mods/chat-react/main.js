@@ -8,11 +8,20 @@
 
 import { View, div, svg } from "gpui-kit";
 import { h_flex, v_flex, InputState, Input, VirtualListScrollHandle, v_virtual_list, Scrollbar } from "gpui-base";
-import { theme, props, setShared, closeOverlay, appHome } from "herdr";
+import { theme, props, setShared, closeOverlay, appHome, settings } from "herdr";
 import * as fs from "fs/promises";
 import DATA from "./emoji-data.js";
 
 const PER = 9, CELL = 36, HEAD = 28, PAD = 6;
+
+// Which column of a row a press was on, from its place in the list's area (rows take no handlers). The window reports
+// that place in pixels at Herdr's zoom (View › Zoom) while the cells are laid out at zoom 1: at zoom 1.7 a press picked
+// the emoji two cells right of it, or nothing past the middle (#751).
+export const columnAt = (pressX) => {
+  if (pressX === null || pressX === undefined) return -1;
+  const c = Math.floor((pressX / (Number(settings()?.zoom) || 1) - PAD) / CELL);
+  return c >= 0 && c < PER ? c : -1;
+};
 const FREQUENT_ICON = "clock";
 const TONES = ["✋", "✋🏻", "✋🏼", "✋🏽", "✋🏾", "✋🏿"];
 const GROUPS = DATA.map(([name, icon, list]) => ({ name, icon, list: list.map(([e, tone, n, words]) => ({ e, tone: Boolean(tone), name: n, words })) }));
@@ -129,8 +138,8 @@ export default class EmojiPicker extends View {
           // Rows take no handlers: the press's place says which emoji.
           .on_item_click((key, cx) => {
             const r = this.rows().find((x) => x.key === key);
-            if (r?.kind !== "row" || this.pressX === null) return;
-            const x = r.list[Math.floor((this.pressX - PAD) / CELL)];
+            if (r?.kind !== "row") return;
+            const x = r.list[columnAt(this.pressX)];
             if (x) this.pick(withTone(x.e, x.tone ? this.tone : 0));
           }))
         .child(Scrollbar.vertical("emoji-list").absolute().inset_0()))

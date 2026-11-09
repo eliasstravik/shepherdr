@@ -68,7 +68,7 @@ class Install(unittest.TestCase):
         out = run("install", "--root", self.root, "--yes").stdout
         self.assertRegex(out, r"files: \d+ new\n")
         rec = json.load(open(self.p(APP, "data/shepherdr/installed.json")))
-        self.assertEqual(rec["version"], "3.1.28")
+        self.assertEqual(rec["version"], "3.1.29")
         self.assertTrue(os.path.isfile(self.p(APP, "mods/tasks/bin/herdr-task")))
         self.assertTrue(os.path.isfile(self.p(APP, "layouts/shepherdr.json")))
         self.assertEqual(os.path.realpath(self.p(".local/bin/herdr-task")), os.path.realpath(self.p(APP, "mods/tasks/bin/herdr-task")))
@@ -94,31 +94,49 @@ class Install(unittest.TestCase):
         self.assertRegex(again, r"files: \d+ same\n", "a second run changes nothing")
         self.assertFalse(os.path.exists(self.p(".herdr/sync-hold")))
 
-        # A file the person changed is kept, the new one goes beside it.
+        # A file the person changed: a template is kept with the new one beside it; a mod file Shepherdr didn't
+        # change is kept as it is; one Shepherdr changed too is replaced (theirs could break the new mod, #766), theirs
+        # to the backup folder, said.
         mine = self.p(APP, "mods/toasts/main.js")
         with open(mine, "a") as f:
             f.write("// mine\n")
+        same = self.p(APP, "mods/toasts/ui.js")
+        with open(same, "a") as f:
+            f.write("// mine too\n")
+        tpl = self.p(".config/herdr-core/templates/worker.md")
+        with open(tpl, "a") as f:
+            f.write("mine\n")
         src = tempfile.mkdtemp(prefix="shepherdr-src-")
         try:
             shutil.copytree(ROOT, os.path.join(src, "s"), ignore=shutil.ignore_patterns(".git"))
             s = os.path.join(src, "s")
-            with open(os.path.join(s, "mods/toasts/main.js"), "a") as f:
-                f.write("// release\n")
-            with open(os.path.join(s, "mods/jump/main.js"), "a") as f:
-                f.write("// release\n")
+            for f_ in ("mods/toasts/main.js", "mods/jump/main.js"):
+                with open(os.path.join(s, f_), "a") as f:
+                    f.write("// release\n")
+            with open(os.path.join(s, "templates/worker.md"), "a") as f:
+                f.write("release\n")
             up = run("update", "--root", self.root, "--source", s).stdout
-            self.assertIn("1 keep", up)
-            self.assertTrue(open(mine).read().endswith("// mine\n"))
-            self.assertTrue(open(mine + ".new").read().endswith("// release\n"))
+            self.assertIn("1 replace", up)
+            self.assertTrue(open(mine).read().endswith("// release\n"), "Shepherdr's changed mod file goes in")
+            self.assertFalse(os.path.exists(mine + ".new"))
+            backup = re.search(r"yours is kept as (\S+)", up).group(1)
+            self.assertTrue(open(backup).read().endswith("// mine\n"), "the person's copy is in the backup")
+            self.assertIn("Shepherdr changed .config/herdr-app/mods/toasts/main.js since you edited it", up)
+            self.assertTrue(open(same).read().endswith("// mine too\n"), "a mod file Shepherdr didn't change stays the person's")
+            self.assertFalse(os.path.exists(same + ".new"))
+            self.assertTrue(open(tpl).read().endswith("mine\n"))
+            self.assertTrue(open(tpl + ".new").read().endswith("release\n"))
             self.assertTrue(open(self.p(APP, "mods/jump/main.js")).read().endswith("// release\n"))
+            d = run("doctor", "--root", self.root, ok=False).stdout
+            self.assertIn("worker.md.new: merge it in", d)
         finally:
             shutil.rmtree(src)
 
-        # Uninstall: everything back as it was, except the mod the person changed.
+        # Uninstall: everything back as it was, except the mod and the template the person changed.
         run("uninstall", "--root", self.root)
         after = tree(self.root)
         left = sorted(set(after) - set(self.before))
-        self.assertTrue(all(x.startswith(f"{APP}/mods/toasts/") or x.startswith(DATA_PLACES) for x in left), left)
+        self.assertTrue(all(x.startswith((f"{APP}/mods/toasts/", ".config/herdr-core/templates/worker.md")) or x.startswith(DATA_PLACES) for x in left), left)
         for k, v in self.before.items():
             if k.endswith(".json"):
                 self.assertEqual(json.loads(after[k]), json.loads(v), k)
@@ -249,6 +267,29 @@ class Install(unittest.TestCase):
         self.assertIn("https://box.tailnet.example:8443/shepherdr/", " ".join(notes))
         self.assertIn("port 8443", " ".join(notes))
 
+    def test_doctor_warns_when_github_checks_cant_be_read(self):
+        """SHEP-179: a repo with tasks whose checks this machine's GitHub token can't read gets a warning naming the
+        permissions to add; one it can read, or a list without tasks, gets none."""
+        from importlib.machinery import SourceFileLoader
+        from unittest import mock
+        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        folder = sh.where_for(self.root).path("tasks")
+        os.makedirs(folder, exist_ok=True)
+        for slug, repo, tasks in (("a", "o/locked", [{"id": 1}]), ("b", "o/open", [{"id": 1}]), ("c", "o/empty", [])):
+            with open(os.path.join(folder, f"{slug}.json"), "w") as f:
+                json.dump({"github": {"repo": repo, "at": 1}, "tasks": tasks}, f)
+        gh = os.path.join(self.root, "fake-gh")
+        with open(gh, "w") as f:
+            f.write("#!/bin/sh\ncase \"$2\" in\n  repos/o/locked/*check-runs*) echo 'gh: Resource not accessible by personal access token (HTTP 403)' >&2; exit 1;;\n"
+                    "  *) echo '{}';;\nesac\n")
+        os.chmod(gh, 0o755)
+        with mock.patch.dict(os.environ, {"HERDR_TASK_GH": gh}):
+            out = sh.github_checks_check(self.root)
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("o/locked", out[0])
+        self.assertIn("Checks: read", out[0])
+        self.assertNotIn("Commit statuses", out[0])
+
     def test_service_answers(self):
         """doctor and install trust only Shepherdr's own service on its port: the id it wrote in service.json, not
         another app answering health there (GitHub #635)."""
@@ -301,6 +342,11 @@ class Install(unittest.TestCase):
             self.assertTrue(os.path.isfile(os.path.join(share, "mods/artifacts/recipe-view.js")))
             p = subprocess.run([sys.executable, os.path.join(share, "mods/tasks/bin/herdr-task"), "--help"], capture_output=True, text=True)
             self.assertEqual(p.returncode, 0, p.stderr)
+            # #735: the artifact guide comes along (agents on the machine serving the web app read it too)
+            p = subprocess.run([sys.executable, os.path.join(share, "mods/artifacts/bin/herdr-artifact"), "guide"], capture_output=True, text=True,
+                               env={**os.environ, "HOME": root})
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertIn("recipe", p.stdout)
             run("uninstall", "--root", root)
             self.assertFalse(os.path.exists(os.path.join(share, "service/main.ts")))
             self.assertFalse(os.path.lexists(os.path.join(root, ".local/bin/herdr-task")))
@@ -324,7 +370,8 @@ class Install(unittest.TestCase):
                 f.write("#!/bin/sh\necho the old one\n")
             run("install", "--web", "--root", root, "--source", src, "--yes", "--force")
             share = os.path.join(root, ".local/share/shepherdr")
-            for f in ("install.sh", "bin/shepherdr", "templates/worker.md", "web/dist/index.html", "service/serve-from.ts", "core/host.js"):
+            for f in ("install.sh", "bin/shepherdr", "templates/worker.md", "web/dist/index.html", "service/serve-from.ts", "core/host.js",
+                      "mods/artifacts/ARTIFACTS.md"):
                 self.assertTrue(os.path.isfile(os.path.join(share, f)), f)
             names = lambda b: sorted(tarfile.open(fileobj=io.BytesIO(b)).getnames())
             self.assertEqual(names(sh.pack(share)), names(sh.pack(ROOT)))
@@ -333,6 +380,40 @@ class Install(unittest.TestCase):
         finally:
             shutil.rmtree(root, ignore_errors=True)
             shutil.rmtree(src, ignore_errors=True)
+
+    def test_update_waits_for_a_voice_call(self):
+        """SHEP-173: ElevenLabs' records showed calls cut (1006) a minute after each release: the update restarted the
+        service under them. A call on: the unit stays, nothing restarts, and the service is told to start again once
+        the call ends (restart-when-free). No call: it restarts as before."""
+        from importlib.machinery import SourceFileLoader
+        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        root = tempfile.mkdtemp(prefix="shepherdr-call-")
+        ran = []
+        saved = (sh.bun_path, sh.has_unit, sh.calls_on, sh.subprocess.run, sh.service_answers)
+        try:
+            sh.bun_path = lambda: "/usr/bin/bun"
+            sh.has_unit = lambda r: True
+            sh.service_answers = lambda r: (True, 7788)
+            sh.subprocess.run = lambda argv, **k: ran.append(argv) or subprocess.CompletedProcess(argv, 0, b"", b"")
+            r = sh.Run(root, False)
+            rel, text = sh.unit_text(root, "/usr/bin/bun", None)
+            os.makedirs(os.path.dirname(r.p(rel)), exist_ok=True)
+            with open(r.p(rel), "w") as f:
+                f.write(text)
+            marker = sh.service_file(root, "restart-when-free")
+            sh.calls_on = lambda r: 1
+            sh.install_service(r, {}, True)
+            self.assertEqual(ran, [])
+            self.assertTrue(os.path.isfile(marker))
+            self.assertTrue(any("voice call" in n for n in r.notes))
+            os.remove(marker)
+            sh.calls_on = lambda r: 0
+            sh.install_service(sh.Run(root, False), {}, True)
+            self.assertTrue(ran)
+            self.assertFalse(os.path.exists(marker))
+        finally:
+            sh.bun_path, sh.has_unit, sh.calls_on, sh.subprocess.run, sh.service_answers = saved
+            shutil.rmtree(root, ignore_errors=True)
 
     def test_update_web_only(self):
         """A web-only install updates web only (the record says so), and doctor says how; one whose source is gone says

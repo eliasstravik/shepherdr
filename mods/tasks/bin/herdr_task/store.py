@@ -1,5 +1,6 @@
 """Where a folder's tasks live (~/.herdr/tasks/<slug>.json) and the locked Store that edits them."""
 
+import errno
 import fcntl
 import hashlib
 import json
@@ -128,18 +129,45 @@ def parse_ref(ref):
     raise Fail(f"{ref!r} isn't a task id; use one like HAT-4 or 4.")
 
 
+def open_lock(path):
+    """(a list's lock file, writable): opened to write, else, where nothing can be written (a
+    read-only sandbox: a Codex reviewer's, #841), to read (a shared lock still works on it), else
+    None when it doesn't exist yet."""
+    try:
+        return open(path, "a"), True
+    except OSError as e:
+        if e.errno not in (errno.EROFS, errno.EACCES, errno.EPERM):
+            raise
+    try:
+        return open(path), False
+    except OSError:
+        return None, False
+
+
 class Store:
-    """One folder's tasks, locked while open. `with Store(loc) as s: s.data[...]; s.dirty = True`."""
+    """One folder's tasks, locked while open. `with Store(loc) as s: s.data[...]; s.dirty = True`.
+    write: True (refused where nothing can be written), False (read only), or "try" (a read that
+    saves what it learns when it can: show, list)."""
 
     def __init__(self, loc, write=True):
-        self.loc, self.write = loc, write
+        self.loc, self.write, self.best_effort = loc, bool(write), write == "try"
         self.slug, self.path = store_path(loc["folder"])
-        self.dirty = False
+        self.dirty = self.read_only = False
 
     def __enter__(self):
-        os.makedirs(STORE, exist_ok=True)
-        self.lock = open(os.path.join(STORE, "." + os.path.basename(self.path) + ".lock"), "a")
-        fcntl.flock(self.lock, fcntl.LOCK_EX if self.write else fcntl.LOCK_SH)
+        try:
+            os.makedirs(STORE, exist_ok=True)
+        except OSError:
+            pass
+        self.lock, can = open_lock(os.path.join(STORE, "." + os.path.basename(self.path) + ".lock"))
+        if not can:
+            if self.write and not self.best_effort:
+                if self.lock:
+                    self.lock.close()
+                raise Fail(f"Can't change the task list here: {STORE} is read-only (a sandbox?). Run this outside it.")
+            self.write, self.read_only = False, True
+        if self.lock:
+            fcntl.flock(self.lock, fcntl.LOCK_EX if self.write else fcntl.LOCK_SH)
         try:
             with open(self.path) as f:
                 self.data = json.load(f)
@@ -185,8 +213,9 @@ class Store:
                     f.write("\n")
                 os.replace(tmp, self.path)
         finally:
-            fcntl.flock(self.lock, fcntl.LOCK_UN)
-            self.lock.close()
+            if self.lock:
+                fcntl.flock(self.lock, fcntl.LOCK_UN)
+                self.lock.close()
         if kind is None and self.new_prefix:
             # A list that just got its prefix: its running tasks' tabs say it too.
             retag_tabs(self)

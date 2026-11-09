@@ -5,6 +5,7 @@
 // reads to hold the agent off); Hand back ends that. While a page shows it, <name>.view stays fresh, as the window's
 // view keeps it, so the session isn't closed as unwatched. This machine's tasks only.
 import { existsSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { HOME, where } from "./paths.ts";
 
@@ -15,6 +16,10 @@ const INPUT = new Set(["input_mouse", "input_keyboard", "input_touch"]);
 type Page = { send(text: string): void; close(): void; buffered(): number };
 
 const nameOf = (task: string) => task.replace(/[^A-Za-z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-/, "").replace(/-$/, "");
+// agent-browser's session, as bin/herdr-browser names it: a name over 32 characters is cut to its last 20 and 8 hex of
+// the key's sha256 (SHEP-178: a long one overflows agent-browser's socket path)
+export const sessionOf = (task: string, name = nameOf(task)) =>
+  name.length <= 32 ? `herdr-${name}` : `herdr-${name.slice(-20).replace(/^-+/, "")}-${createHash("sha256").update(task).digest("hex").slice(0, 8)}`;
 const touch = (f: string) => { const t = new Date(); try { utimesSync(f, t, t); } catch { try { writeFileSync(f, ""); } catch {} } };
 
 /** herdr-browser's answer: its JSON data, or why it failed (its whole message: a missing agent-browser's says the
@@ -31,7 +36,7 @@ const ab = async (task: string, args: string[]) => (await abRun(task, args)).dat
 
 /** One page's view of a task's browser. task: "<list slug>#<id>", as herdr-task labels it. */
 export function browserRelay(task: string, page: Page) {
-  const name = nameOf(task), file = (ext: string) => join(ROOT, name + ext);
+  const name = nameOf(task), session = sessionOf(task, name), file = (ext: string) => join(ROOT, name + ext);
   let ended = false, stream: WebSocket | null = null, driving = false;
   let state = { type: "state", driver: "agent", url: "", title: "", connected: false, viewport: { w: 1280, h: 800 } };
   const say = (m: object) => { if (!ended && page.buffered() < 2 << 20) page.send(JSON.stringify(m)); };
@@ -47,7 +52,7 @@ export function browserRelay(task: string, page: Page) {
     while (!ended) {
       const listed = await abRun(task, ["session", "list", "--json"]);
       const sessions = listed.data?.sessions;
-      if (Array.isArray(sessions) && sessions.includes(`herdr-${name}`)) {
+      if (Array.isArray(sessions) && sessions.includes(session)) {
         let st = await ab(task, ["stream", "status", "--json"]);
         if (st && !st.enabled) { await ab(task, ["stream", "enable"]); st = await ab(task, ["stream", "status", "--json"]); }
         const port = Number(st?.port);
@@ -74,7 +79,7 @@ export function browserRelay(task: string, page: Page) {
         state = { ...state, connected: false, ...(Array.isArray(sessions) ? { closed: true } : { closed: false, error: listed.error || "agent-browser didn't answer." }) } as typeof state;
         show();
       }
-      if (Array.isArray(sessions) && sessions.includes(`herdr-${name}`)) state = { ...state, closed: false, error: undefined } as typeof state;
+      if (Array.isArray(sessions) && sessions.includes(session)) state = { ...state, closed: false, error: undefined } as typeof state;
       await Bun.sleep(3000);
     }
   }

@@ -85,7 +85,7 @@ test("answers: the new screen after an action, a held click to ask about, a fail
 
 test("the voice agent: a screen tool beside look, open, send and act; told to use the tools first", () => {
   const names = TOOLS.map((t) => t.name);
-  expect(names).toEqual(["look", "open", "send", "screen", "act", "call_view"]);
+  expect(names).toEqual(["look", "open", "send", "screen", "act", "call_view", "hang_up"]);
   const screen = TOOLS.find((t) => t.name === "screen");
   expect(screen.parameters.properties.do.enum).toEqual(DOS);
   expect(OPENS).toEqual(expect.arrayContaining(["artifacts", "files", "changes", "terminal"]));

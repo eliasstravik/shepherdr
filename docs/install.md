@@ -1,6 +1,6 @@
 # Install
 
-Shepherdr 3.1.28 is a layout for the Herdr app plus its mods, helpers and role instructions, and a web app for your tailnet ([Web](web.md)). One script puts them in
+Shepherdr 3.1.29 is a layout for the Herdr app plus its mods, helpers and role instructions, and a web app for your tailnet ([Web](web.md)). One script puts them in
 place, never overwrites what you made yourself, and keeps a backup of anything it replaces.
 
 ## Requirements
@@ -45,7 +45,8 @@ What goes where:
 | The guard (`--guard`, opt-in) | `~/.local/bin/herdr-app`: refuses to open a window with another HOME, `HERDR_APP_HOME` or core session (it can overwrite every machine's spaces); subcommands pass through |
 
 What it records: `~/.config/herdr-app/data/shepherdr/installed.json`, a sha256 per file it put there. Running it
-again changes only what changed; a file you edited since is kept (the new copy goes beside it as `.new`).
+again changes only what changed; a file you edited since is kept (the new copy goes beside it as `.new`), except a
+mod file Shepherdr changed too: that one is replaced and yours goes to the backup folder.
 
 What it backs up: anything it replaces or removes, in `~/.config/herdr-app/.shepherdr-backup/<time>/`, at the same
 path under your home.
