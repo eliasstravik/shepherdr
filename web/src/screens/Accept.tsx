@@ -97,7 +97,7 @@ function InlineProof({ art }: { art: Artifact }) {
     <section aria-label={A.ACCEPT.proof} className="flex min-w-0 flex-col gap-1.5 @3xl:min-h-0 @3xl:flex-1">
       <div className="flex min-w-0 items-center gap-2">
         <h3 className="shrink-0 text-[0.8125rem] font-medium text-fg3 phone:text-sm">{A.ACCEPT.proof}</h3>
-        <p className="min-w-0 flex-1 truncate text-[0.8125rem] text-fg2 phone:text-sm">{A.proofTitle(art.title)}</p>
+        <p className="min-w-0 flex-1 truncate text-[0.8125rem] text-fg2 phone:text-sm">{A.proofTitle(art.title).replace(/\s*·\s*Proof$/i, '')}</p>
         <button type="button" onClick={() => openArtifact(art.id)} className="press-dim -my-1 flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-xs text-fg3 hover:bg-hover hover:text-fg phone:h-9 phone:text-[0.8125rem]">
           {A.ACCEPT.open}
           <OpenIcon className="size-3.5 shrink-0" />
@@ -221,7 +221,7 @@ export function AcceptCard() {
         // wide: the proof on the left over the card's height, the summary and the rest beside it; narrow: one scroll
         <div className="@container flex min-h-0 flex-1 flex-col pt-2 text-fg">
           <div className="min-h-0 flex-1 overflow-y-auto @3xl:overflow-hidden">
-            <div className="grid min-w-0 gap-4 pb-1 @3xl:h-full @3xl:grid-cols-[minmax(0,1fr)_320px] @3xl:grid-rows-[auto_minmax(0,1fr)] @3xl:gap-x-6 @3xl:pb-0">
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 pb-1 @3xl:h-full @3xl:grid-cols-[minmax(0,1fr)_320px] @3xl:grid-rows-[auto_minmax(0,1fr)] @3xl:gap-x-6 @3xl:pb-0">
               <p className={clsx('text-pretty @3xl:col-start-2 @3xl:row-start-1', !w.summary && 'text-fg3')}>{w.summary || A.ACCEPT.noSummary}</p>
               <div className="@3xl:col-start-1 @3xl:row-start-1 @3xl:row-span-2 @3xl:flex @3xl:min-h-0 @3xl:flex-col"><InlineProof art={proofArt} /></div>
               <div className="flex min-w-0 flex-col gap-4 @3xl:col-start-2 @3xl:row-start-2 @3xl:min-h-0 @3xl:overflow-y-auto @3xl:pb-1">{rest}</div>
