@@ -179,7 +179,9 @@ function paint() {
 
 function wrap(text, width) {
   const out = [];
-  for (const para of text.replace(/^herdr-browser: /, "").split("\n")) {
+  // the command that fixes it on a line of its own, never split
+  for (const para of text.replace(/^herdr-browser: /, "").replace(/\s*Fix it: /, "\nFix it: ").split("\n")) {
+    if (para.startsWith("Fix it: ") && para.length <= width) { out.push(para); continue; }
     let line = "";
     for (const word of para.split(/\s+/).filter(Boolean)) {
       if (line && line.length + 1 + word.length > width) { out.push(line); line = ""; }
