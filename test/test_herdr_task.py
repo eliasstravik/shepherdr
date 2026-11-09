@@ -2065,11 +2065,13 @@ class ReviewAsAHelperAgent(unittest.TestCase):
         for words in (templates.WORKER_MD, worker):
             self.assertIn("--label herdr.role=reviewer", words)
             self.assertIn("herdr.task=$HERDR_BROWSER_TASK", words)
-            self.assertIn("codex --sandbox read-only --ask-for-approval never", words)
+            self.assertIn("codex --no-daemon --sandbox read-only", words)
             self.assertIn("claude --permission-mode plan", words)
+            self.assertIn("exactly as the Reviewer line gives it", words)
             self.assertIn("hc wait <its name>", words)
             self.assertNotIn("< /dev/null", words)
         self.assertIn(templates.WORKER_MD_BEFORE_SUBAGENTS, templates.OLD_WORKERS)
+        self.assertIn(templates.WORKER_MD_BEFORE_COMMAND, templates.OLD_WORKERS)
         with open(os.path.join(ROOT, "templates", "reviewer.md")) as f:
             self.assertIn(templates.REVIEWER_MD.strip(), f.read())
 
@@ -2085,6 +2087,50 @@ class ReviewAsAHelperAgent(unittest.TestCase):
             with open(os.path.join(d, "reviewer.md"), "w") as f:
                 f.write(templates.TEMPLATE_HEADS["reviewer"] + "My own words.")
             self.assertEqual(templates.instructions("reviewer"), "My own words.")
+
+
+
+class ReviewerLine(unittest.TestCase):
+    """#745: the brief's Reviewer line gives the reviewer's whole command (Codex's on its own app
+    server, --no-daemon), and a CLI the sign-in check says is signed out here never reviews: the
+    task's own CLI does, and the line says how to bring the other back."""
+
+    def setUp(self):
+        sys.path.insert(0, BIN)
+        from unittest import mock
+        from herdr_task import settings, takeover
+        self.settings = settings
+        d = tempfile.mkdtemp()
+        self.checks = os.path.join(d, "cli-check.json")
+        with open(os.path.join(d, "settings.json"), "w") as f:
+            json.dump({"everywhere": {"tasks": {"review_rounds": 2}}}, f)
+        for p in (mock.patch.object(settings, "SETTINGS", os.path.join(d, "settings.json")),
+                  mock.patch.object(takeover, "CLI_CHECK", self.checks),
+                  mock.patch.object(settings.shutil, "which", lambda name: f"/usr/bin/{name}")):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def line(self, codex):
+        with open(self.checks, "w") as f:
+            json.dump({"machines": {"": {"claude": "ready", "codex": codex}}}, f)
+        t = {"id": 1, "title": "x", "mode": "worktree"}
+        return next(x for x in self.settings.task_settings(Store([t]), t, argv=["claude"]) if x["label"] == "Reviewer")
+
+    def test_codex_runs_on_its_own_server(self):
+        r = self.line("ready")
+        self.assertEqual(r["value"]["agent"], "codex")
+        self.assertTrue(r["value"]["command"].startswith("codex --no-daemon --sandbox read-only --ask-for-approval never"))
+        self.assertIn("(the other CLI); start it as `codex --no-daemon", r["text"])
+
+    def test_signed_out_codex_never_reviews(self):
+        r = self.line("signed-out")
+        self.assertEqual(r["value"]["agent"], "claude")
+        self.assertTrue(r["value"]["command"].startswith("claude --permission-mode plan"))
+        self.assertIn("Codex isn't signed in here", r["text"])
+        self.assertIn("`codex login`", r["text"])
+
+    def test_an_unknown_check_keeps_codex(self):
+        self.assertEqual(self.line(None)["value"]["agent"], "codex")
 
 
 class Store:
