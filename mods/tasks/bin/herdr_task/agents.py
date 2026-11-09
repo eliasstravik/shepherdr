@@ -54,9 +54,20 @@ def detail(k):
 
 
 def agent_running(k):
-    fg = (k.get("foreground") or {}).get("name") or ""
+    foreground = k.get("foreground") or {}
+    fg = os.path.basename(foreground.get("name") or "")
+    if fg and fg not in SHELLS:
+        return True
+    # Interactive-shell launches (notably fish -ic <agent>) report the shell as the
+    # foreground process, while the agent is its command. Core's status is authoritative
+    # here: a live Codex/Claude session may still be working inside that shell.
+    status = k.get("status")
+    status = status.get("state") if isinstance(status, dict) else status
+    agent = os.path.basename(str(k.get("agent") or ""))
+    if fg in SHELLS and agent not in SHELLS and status in RANK and status != "idle":
+        return True
     if fg:
-        return os.path.basename(fg) not in SHELLS
+        return False
     return bool(k.get("agent")) and k.get("agent") not in SHELLS
 
 

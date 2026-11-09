@@ -744,6 +744,18 @@ class BackToWork(unittest.TestCase):
                          ("working", None, None))
         self.assertEqual(self.agents.task_status(t, [self.agent({"address": "t1", "status": "idle", "turn": 5, "role": "worker"})])[0], "ready")
 
+    def test_fish_interactive_agent_uses_core_status_not_shell_name(self):
+        """Core keeps `fish -ic codex` as the foreground command while Codex reports working."""
+        k = {"agent": "codex", "foreground": {"name": "fish", "argv": ["fish", "-ic", "codex"]},
+             "status": {"state": "working"}}
+        self.assertTrue(self.agents.agent_running(k))
+        self.assertEqual(self.agents.task_status({"state": "running"}, [k])[0], "working")
+
+    def test_idle_shell_without_a_live_agent_is_not_running(self):
+        k = {"agent": "codex", "foreground": {"name": "fish", "argv": ["fish", "-i"]},
+             "status": {"state": "idle"}}
+        self.assertFalse(self.agents.agent_running(k))
+
     def test_a_problem_its_agent_is_on_reads_working(self):
         """SHEP-8: the cases core/tasks.test.js checks place() on (core/on-it.cases.json)."""
         with open(os.path.join(ROOT, "core", "on-it.cases.json")) as f:
