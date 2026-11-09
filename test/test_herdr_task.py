@@ -4376,3 +4376,27 @@ class TaskFlow(unittest.TestCase):
         self.assertIn("isn't reviewed", self.commands.review_refusal(self.store, self.task, None))  # changed
         self.git(self.main, "commit", "-q", "-m", "a")
         self.assertIn("isn't reviewed", self.commands.review_refusal(self.store, self.task, None))  # committed
+
+    def test_the_folder_trust_dialog_needs_you(self):
+        """#755: Claude Code's folder-trust dialog (no status reported yet) is Needs you, not Working."""
+        from herdr_task import agents, base
+        screen = "Accessing workspace:\\n\\n Quick safety check: Is this a project you created or one you trust?\\n ❯ No, exit\\n   Yes, I trust this folder\\n"
+        shown = [screen]
+        self.patch(agents, "_trust_seen", {})
+        self.patch(base, "run", lambda argv, **k: subprocess.CompletedProcess(argv, 0, shown[0], ""))
+        self.task.update(started=base.now() - 10000, agents=[{"address": "t1", "at": base.now() - 10000}])
+        live = [{"address": "t1", "status": None, "turn": 0}]
+        self.assertEqual(agents.task_status(self.task, live), ("needs", "asks", agents.REASONS["trust"]))
+        agents._trust_seen.clear()
+        shown[0] = "❯ "
+        self.assertEqual(agents.task_status(self.task, live)[0], "working")  # just started, no dialog
+        live[0]["status"] = "working"
+        shown[0] = screen  # never read once it reports
+        self.assertEqual(agents.task_status(self.task, live)[0], "working")
+
+    def test_low_priority_says_nothing_without_proc(self):
+        """#755: no "oom_score_adj: No such file" line where /proc isn't (a Mac)."""
+        from herdr_task import launch
+        low = launch.LOW.replace("/proc/self/oom_score_adj", os.path.join(self.root, "none", "oom_score_adj"))
+        p = subprocess.run(["sh", "-c", low, "herdr-low", "true"], capture_output=True, text=True)
+        self.assertEqual((p.returncode, p.stderr), (0, ""))

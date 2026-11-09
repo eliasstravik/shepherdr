@@ -330,7 +330,7 @@ def in_shell(argv):
 # ends whole cgroups, ends that worker rather than the holder that keeps every terminal. On a Mac:
 # nice 10 and the utility QoS clamp (taskpolicy). Anything missing is skipped, never fatal.
 
-LOW = ('echo 500 > /proc/self/oom_score_adj 2>/dev/null; '
+LOW = ('{ echo 500 > /proc/self/oom_score_adj; } 2>/dev/null; '
        'command -v ionice >/dev/null 2>&1 && ionice -c2 -n7 -p $$ >/dev/null 2>&1; '
        'command -v taskpolicy >/dev/null 2>&1 && exec nice -n 10 taskpolicy -c utility "$@"; '
        'exec nice -n 10 "$@"')

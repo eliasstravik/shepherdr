@@ -114,6 +114,8 @@ def task_status(task, live):
         return ("needs", "provider", r.get("reason")) if r.get("over") else ("working", None, retry_line(r))
     if "blocked" in states:
         return "needs", "asks", REASONS["question"]
+    if trust_asked(live):
+        return "needs", "asks", REASONS["trust"]
     if busy_again(task, live):
         return "working", None, WORKING_AGAIN
     if task.get("attention"):
@@ -281,7 +283,29 @@ LINE_MAX = 40
 # do (as Shepherdr's SUMMARY_MAX); the rest goes in --details or the proof.
 SUMMARY_MAX = 160
 REASONS = {"plan": "Plan to approve", "permission": "Asks permission", "question": "Question for you",
-           "reply": "Waits for your reply", "signed_out": "Signed out"}
+           "reply": "Waits for your reply", "signed_out": "Signed out", "trust": "Asks to trust this folder"}
+
+# Claude Code's folder-trust dialog (#755): shown before it reports any status, so to Herdr the
+# agent looked like it was starting, then Working, until it stalled. Read off its screen.
+TRUST = re.compile(r"Quick safety check|Do you trust the files in this folder|Yes, I trust this folder", re.I)
+_trust_seen = {}
+
+
+def trust_asked(live):
+    """The address of a live agent showing Claude Code's folder-trust dialog, else None. Only an
+    agent that never reported a status nor took a turn: its screen is read at most every 5 s."""
+    from .base import run
+    for k in live:
+        if status_word(k) or k.get("turn") or (k.get("labels") or {}).get("herdr.agent", "claude") != "claude":
+            continue
+        address = k.get("address")
+        seen = _trust_seen.get(address)
+        if not seen or now() - seen[0] > 5000:
+            screen = run(["hc", "read", address, "--lines", "40"]).stdout or ""
+            seen = _trust_seen[address] = (now(), bool(TRUST.search(screen)))
+        if seen[1]:
+            return address
+    return None
 
 
 def fit(text, n=LINE_MAX):
