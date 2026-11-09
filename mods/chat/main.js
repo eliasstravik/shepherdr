@@ -340,8 +340,8 @@ export default class Chat extends View {
     });
     // A paste with no text: the clipboard's image or copied files become attachments.
     this.box.on("paste_other", (_e, cx) => cx.spawn(async (cx) => {
-      const got = await attach.fromClipboard().catch(() => []);
-      if (got.length) { this.addFiles(got); this.saveSoon(cx); cx.notify(); }
+      const got = await attach.fromClipboard().catch((e) => { this.error = String(e?.message ?? e); cx.notify(); return []; });
+      if (got.length) { this.error = null; this.addFiles(got); this.saveSoon(cx); cx.notify(); }
     }));
     this.wasFocused = false;
     // Up/Down/Tab/Escape reach the textarea first, which keeps them. While the "/" list shows
@@ -3971,13 +3971,12 @@ export default class Chat extends View {
     if (this.pinned) this.stick = true;
   }
 
-  // The desktop's own file picker (pick-files.py, xdg-desktop-portal): the chosen files join
+  // The desktop's own file picker (attach.pick(): xdg-desktop-portal's, or macOS's own): the chosen files join
   // the message as tiles, as a drop or a paste makes them.
   pickFiles(cx) {
     cx.spawn(async (cx) => {
-      const r = await exec("sh", ["-c", 'P=/usr/bin/python3; [ -x "$P" ] || P=python3; exec "$P" -I "$1"', "x", `${appHome()}/mods/chat/pick-files.py`]).catch(() => null);
-      const list = (r?.stdout ?? "").split("\n").filter(Boolean);
-      if (r && r.code !== 0) this.error = "Couldn't open the file picker.";
+      const { code, paths: list } = await attach.pick();
+      if (code !== 0) this.error = "Couldn't open the file picker.";
       if (!list.length) { cx.notify(); return; }
       this.addFiles(attach.paths(list));
       this.saveSoon(cx);
