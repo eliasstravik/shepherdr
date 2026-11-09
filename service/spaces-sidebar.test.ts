@@ -3,6 +3,7 @@
 // No window runs here, so gpui and herdr are stand-ins: an element's child()/children() refuse what herdr-app refuses.
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { fakeHerdr } from "./fake-herdr";
+import { fakeGpuiBase, fakeGpuiKit } from "./fake-gpui";
 
 const EL = Symbol("element");
 const ok = (v: unknown) => typeof v === "string" || typeof v === "number" || (v !== null && typeof v === "object" && (v as any)[EL]);
@@ -42,8 +43,8 @@ const herdr = {
   layout: () => ({ id: "root", children: [{ id: "sidebar", size: { px: sidebarPx } }] }),
 };
 mock.module("herdr", () => fakeHerdr(herdr));
-mock.module("gpui-kit", () => ({ View: class {}, div: el, svg: el, image: el }));
-mock.module("gpui-base", () => ({
+mock.module("gpui-kit", () => fakeGpuiKit({ View: class {}, div: el, svg: el, image: el }));
+mock.module("gpui-base", () => fakeGpuiBase({
   v_flex: el, h_flex: el, Input: el, InputState: class {}, VirtualListScrollHandle: class {}, v_virtual_list: el, Scrollbar: el,
 }));
 (globalThis as any).localStorage ??= { getItem: () => null, setItem: () => {}, removeItem: () => {} };
