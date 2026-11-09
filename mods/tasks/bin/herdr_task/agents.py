@@ -58,9 +58,8 @@ def agent_running(k):
     fg = os.path.basename(foreground.get("name") or "")
     if fg and fg not in SHELLS:
         return True
-    # Interactive-shell launches (notably fish -ic <agent>) report the shell as the
-    # foreground process, while the agent is its command. Core's status is authoritative
-    # here: a live Codex/Claude session may still be working inside that shell.
+    # Interactive-shell launches can keep the shell in the foreground while a live
+    # agent reports its identity and status separately.
     status = k.get("status")
     status = status.get("state") if isinstance(status, dict) else status
     agent = os.path.basename(str(k.get("agent") or ""))
