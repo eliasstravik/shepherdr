@@ -301,6 +301,10 @@ function PlaceMarks({ place }: { place: Place }) {
 
 /** The coordinator chat in the middle; a container (named place) so its header can fit what it shows to its width */
 function PlaceColumn({ place, pane }: { place: Place; pane?: number }) {
+  return place.id ? <SpaceColumn place={place} pane={pane} /> : <NoSpaces />
+}
+
+function SpaceColumn({ place, pane }: { place: Place; pane?: number }) {
   const snap = useSnap()!
   const Chat = registry.views.chat
   const term = useUI((u) => u.term)
@@ -334,6 +338,16 @@ function PlaceColumn({ place, pane }: { place: Place; pane?: number }) {
       {Chat ? (
         tabChat ? <Chat key={tabChat} chatKey={tabChat} placeholder={`Message ${tab?.prog ?? 'the agent'}`} /> : <Chat chatKey={place.chat} placeholder="Message the Assistant" unreachable={unreachable(place, snap)} />
       ) : null}
+    </section>
+  )
+}
+
+/** No space left (the last one closed, #747): says so, and New space as the window's empty sidebar offers it */
+function NoSpaces() {
+  return (
+    <section data-drawer-from className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+      <p className="text-fg2">No spaces yet</p>
+      <Primary onClick={() => setUI({ adding: true, drawer: false, menu: false, plus: null, search: false })}>New space</Primary>
     </section>
   )
 }
@@ -584,7 +598,7 @@ function Middle({ snap }: { snap: Snapshot }) {
     <ChatColumn>
       {/* 3.0's tab bar over it: the shown space's tabs, its + and the side panels' buttons */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {TabBar ? <TabBar place={place} /> : null}
+        {TabBar && place.id ? <TabBar place={place} /> : null}
         {panes.length ? <Split snap={snap} panes={panes} /> : task ? <TaskPage key={task.id} task={task} middle /> : <PlaceColumn place={place} />}
       </div>
     </ChatColumn>
@@ -858,11 +872,11 @@ function PhoneHome({ snap }: { snap: Snapshot }) {
         left={<MenuButton />}
         // as 3.0's panels: the chat names its space; Tasks and Artifacts are their panels, everything in them
         name={tab === 'tasks' ? 'Tasks' : tab === 'artifacts' ? 'Artifacts' : place.name}
-        icon={tab === 'chat' ? <PlaceIcon level={2} className="text-fg2" /> : undefined}
-        kind={tab === 'chat' ? placeKind(snap, place) : undefined}
-        mark={tab === 'chat' ? <PlaceMarks place={place} /> : undefined}
+        icon={tab === 'chat' && place.id ? <PlaceIcon level={2} className="text-fg2" /> : undefined}
+        kind={tab === 'chat' && place.id ? placeKind(snap, place) : undefined}
+        mark={tab === 'chat' && place.id ? <PlaceMarks place={place} /> : undefined}
         right={
-          tab === 'chat' ? (
+          tab === 'chat' && !place.id ? null : tab === 'chat' ? (
             <>
               {registry.placeHeader.map(({ View }, i) => (
                 <View key={i} place={place} />
@@ -874,7 +888,9 @@ function PhoneHome({ snap }: { snap: Snapshot }) {
           )
         }
       />
-      {tab === 'chat' ? (
+      {tab === 'chat' && !place.id ? (
+        <NoSpaces />
+      ) : tab === 'chat' ? (
         <div className="flex min-h-0 flex-1 flex-col">
           {Chat ? (
             tabChat ? <Chat key={tabChat} chatKey={tabChat} placeholder={`Message ${place.tabs?.find((t) => t.term === tabChat)?.prog ?? 'the agent'}`} /> : <Chat chatKey={place.chat} placeholder="Message the Assistant" unreachable={unreachable(place, snap)} />
