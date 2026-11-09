@@ -296,6 +296,8 @@ export function newsTimeline(items, tasks, { start = null } = {}) {
   const first = items.find((x) => x.at)?.at ?? 0;
   for (const [ref, x] of tasks) for (const [event, at] of [["started", x.started], ["ready", x.ready_at], ["done", x.done_at]]) {
     if (!Number.isFinite(at) || said.has(`${ref}:${event}`) || (at < first && start !== 0)) continue;
+    // A ready not yet said, while the task is still at work (its checks running, SHEP-175) or needs the person: not ready yet.
+    if (event === "ready" && !["ready", "done"].includes(x.status)) continue;
     all.push({ id: `tn:${ref}:${event}:${at}`, at, ref, event, text: "", made: true });
   }
   all.sort((a, b) => a.at - b.at);

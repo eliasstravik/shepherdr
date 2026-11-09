@@ -91,6 +91,10 @@ describe("rows", () => {
     const out = newsTimeline(items, tasks, { start: 0 });
     expect(out.map((e) => [e.event, e.made ?? false, e.accept])).toEqual([["started", true, false], ["ready", false, true]]);
   });
+  test("no ready line while its checks still run (SHEP-175)", () => {
+    const tasks = new Map([["H-1", { title: "A", status: "working", started: 100, ready_at: 300 }]]);
+    expect(newsTimeline([{ kind: "agent", at: 50 }], tasks, { start: 0 }).map((e) => e.event)).toEqual(["started"]);
+  });
   test("which artifact a publish made", () => {
     const arts = [{ id: "a", title: "Plan", version: 2, versions: [{ v: 1, at: 1000, publisher: "t7" }, { v: 2, at: 9000, publisher: "t7" }] }];
     const r = resolveArtifacts([{ kind: "artifact", id: "x1", at: 900 }, { kind: "artifact", id: "x2", at: 8000 }], arts, "t7");

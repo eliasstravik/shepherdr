@@ -26,7 +26,7 @@ import { spaces, terminals, agents, inRender } from "./live.js";
 import { taskDot } from "./dot.js";
 import { READ_LISTS, taskLists } from "./core/tasklists.js";
 import { SH } from "./core/paths.js";
-import { busyAgain, onIt } from "./core/tasks.js";
+import { busyAgain, onIt, readyWait } from "./core/tasks.js";
 // A space's name as the sidebar (and the web app) says it: never "~" (core/spaces.js).
 import { spaceName } from "./core/spaces.js";
 import { openViewer, showViewer, chatArea } from "./artview.js";
@@ -188,7 +188,7 @@ export default class Jump extends View {
     if ((task.attention && !fixing) || live.some((a) => a.status === "blocked")) return "needs";
     if (fixing) return "working";
     // Back at work after it said ready (core/tasks.js busyAgain()): Working.
-    if (st === "ready" && !busyAgain(task, live)) return task.merge_requested && live.length ? "merging" : "ready";
+    if (st === "ready" && !busyAgain(task, live)) return readyWait(task, live) ? "working" : "ready";
     if (live.some((a) => a.status === "working")) return "working";
     const last = task.agents?.[task.agents.length - 1];
     const started = Math.max(0, ...[task.started, last?.at].filter((x) => typeof x === "number"));

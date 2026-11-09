@@ -22,6 +22,7 @@ from .agents import (
 from .sessions import refresh_sessions
 from .github import (already_merged, drop_branch, finish, gh, github, merged_here, needs_approval, own_work, pr_adopt, pr_open,
                      pr_pending, pr_problem, pr_view, update_main, watch_main)
+from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
     own_path, parent_for, resume_argv, retag_tabs, set_branch, tab_title, task_tabs,
@@ -629,6 +630,7 @@ def finalize(s, t):
     t["state"], t["ready_at"] = "ready", now()
     for k in ("attention", "merge_requested", "review"):
         t.pop(k, None)
+    (t.get("pr") or {}).pop("wait", None)
     s.dirty = True
     wt = t.get("worktree")
     msg = f"{s.ref(t)} is ready."
@@ -643,7 +645,10 @@ def finalize(s, t):
         try:
             pr = pr_open(s, t, repo, t.get("summary"))
             pr["checked"] = 0
-            msg = f"{s.ref(t)} is ready: pull request #{pr['number']}, {pr['url']}."
+            # Working until its checks are done and GitHub knows it can merge (the tick: pr_wait()).
+            pr["wait"] = PR_CHECKS_RUNNING
+            msg = (f"{s.ref(t)} is ready: pull request #{pr['number']}, {pr['url']}. It shows Working until its checks "
+                   "pass and GitHub says it can merge; a failing check or a conflict comes back to you to fix.")
         except Fail as e:
             t["attention"] = str(e)
             return f"{s.ref(t)} is ready, but: {e} Tell the person."

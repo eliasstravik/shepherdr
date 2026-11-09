@@ -239,6 +239,29 @@ def drop_branch(s, task):
         git(main, "push", "--quiet", remote_of(main), "--delete", task["branch"])
 
 
+# A pull request just pushed can show no checks for a few seconds before GitHub starts them: none
+# for this long after ready means none are set up (Ready then, SHEP-175).
+NO_CHECKS_MS = 30000
+CHECKS_RUNNING, GITHUB_LOOKS, BACK_TO_AGENT = "Checks running", "Waiting for GitHub", "Back to its agent to fix"
+
+
+def pr_wait(v, since):
+    """SHEP-175: what a Ready task's pull request (v: pr_view's answer) still waits on before the
+    person has anything to do, in a few words, or None once its checks are done and GitHub knows it
+    can merge. A problem (pr_problem()) goes back to its agent: Working still, never Ready first."""
+    if v.get("state") != "OPEN":
+        return None
+    if pr_problem(v):
+        return BACK_TO_AGENT
+    if pr_pending(v):
+        return CHECKS_RUNNING
+    if (v.get("mergeable") or "").upper() not in ("MERGEABLE",):
+        return GITHUB_LOOKS
+    if not v.get("statusCheckRollup") and now() - (since or 0) < NO_CHECKS_MS:
+        return CHECKS_RUNNING
+    return None
+
+
 def update_main(s, task):
     """After a merge on GitHub: the base branch here catches up when it's checked out and clean."""
     main, base = s.loc["folder"], task.get("base") or "main"

@@ -25,7 +25,7 @@ import { h_flex, v_flex } from "gpui-base";
 import { shared, setShared, run, theme, exec, appHome, home, readTextFile, writeTextFile, notify, layout, openOverlay } from "herdr";
 import { terminals, agents } from "./live.js";
 import { taskDot, ownProgress, estimated } from "./dot.js";
-import { busyAgain, onIt } from "./core/tasks.js";
+import { busyAgain, onIt, readyWait } from "./core/tasks.js";
 import { button, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { on as addonOn } from "./addons.js";
 import { artifactCli } from "./artview.js";
@@ -183,7 +183,7 @@ export class PanelHost {
   // back at work.
   acceptable(st, addr) {
     const r = this.rec;
-    return Boolean(r && r.state === "ready" && !r.attention && st !== "blocked" && !r.merge_requested && !(r.auto_merge && r.pr && !r.merged))
+    return Boolean(r && r.state === "ready" && !r.attention && st !== "blocked" && !readyWait(r, [addr]))
       && !this.again(st, addr);
   }
 
@@ -237,7 +237,7 @@ export class PanelHost {
     const s = ["todo", "queued", "scheduled", "done"].includes(r.state) ? r.state
       : (r.attention && !fixing) || st === "blocked" || r.retry?.over ? "needs"
       : fixing ? "working"
-      : r.state === "ready" && !this.again(st, addr) ? ((r.merge_requested && live) || (r.auto_merge && r.pr && !r.merged) ? "merging" : "ready")
+      : r.state === "ready" && !this.again(st, addr) ? (readyWait(r, live ? [addr] : []) ? "working" : "ready")
       : st === "working" || r.retry || starting ? "working" : "needs";
     return taskDot(s, { pct: ownProgress([addr])?.pct ?? r.progress?.done, halo: true });
   }

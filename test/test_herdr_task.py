@@ -958,7 +958,7 @@ class BackToWork(unittest.TestCase):
         self.assertEqual((t["state"], bool(t.get("merged")), done), ("ready", False, []))
         self.assertTrue(t["merge_queued"])
         self.assertNotIn("attention", t)
-        self.assertEqual(self.agents.task_status(t, []), ("merging", None, "In GitHub's merge queue"))
+        self.assertEqual(self.agents.task_status(t, []), ("working", None, "In GitHub's merge queue"))
         # the queue is remembered for its base: the next merge goes straight to it
         t2 = dict(self.pr_task(), id=8)
         self.store.data["tasks"].append(t2)
@@ -1031,7 +1031,7 @@ class BackToWork(unittest.TestCase):
         self.queue_tick(waiting)
         self.assertFalse(t.get("_pr_fresh"))
         self.assertNotIn("attention", t)
-        self.assertEqual(self.agents.task_status(t, []), ("merging", None, "Merges once it's approved"))
+        self.assertEqual(self.agents.task_status(t, []), ("working", None, "Merges once it's approved"))
         calls, done, _ = self.gh_merges([waiting], [])
         self.assertEqual(self.commands.merge_now(self.store, t), self.commands.WAITS_APPROVAL)
         self.assertEqual((calls, done), ([], []))
@@ -2085,6 +2085,129 @@ class ReviewAsAHelperAgent(unittest.TestCase):
             with open(os.path.join(d, "reviewer.md"), "w") as f:
                 f.write(templates.TEMPLATE_HEADS["reviewer"] + "My own words.")
             self.assertEqual(templates.instructions("reviewer"), "My own words.")
+
+
+class ChecksBeforeReady(unittest.TestCase):
+    """SHEP-175: a task said ready in a GitHub repo is Working (never Ready nor Needs you, no ready
+    news) until its pull request's checks are done and GitHub knows it can merge. A fake gh (what
+    HERDR_TASK_GH points herdr-task at: github.GH here, its store a throwaway) answers each look."""
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.agents as agents
+        import herdr_task.commands as commands
+        import herdr_task.ghnews as ghnews
+        import herdr_task.github as github
+        import herdr_task.news as news
+        import herdr_task.tick as tick
+        self.agents, self.commands, self.ghnews, self.news, self.tick = agents, commands, ghnews, news, tick
+        self.dir = tempfile.mkdtemp()
+        self.gh_log = os.path.join(self.dir, "gh.log")
+        gh = os.path.join(self.dir, "gh")
+        with open(gh, "w") as f:
+            f.write("#!/usr/bin/env python3\nimport json, sys\n"
+                    f"open({self.gh_log!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
+                    "if sys.argv[1:3] == ['pr', 'view']:\n"
+                    f"    print(open({os.path.join(self.dir, 'view.json')!r}).read())\n"
+                    "elif sys.argv[1] == 'api':\n    print('[]')\n")
+        os.chmod(gh, 0o755)
+        self.clock = [50_000_000]
+        self.live = [{"address": "t1", "agent": "claude", "status": {"state": "idle"}, "turn": 6, "status_ms": 1,
+                      "labels": {"herdr.role": "worker"}}]
+        self.sent = []
+        self.store = Store([])
+        for mod, name, value in ((github, "GH", gh), (github, "STORE", self.dir),
+                                 (tick, "now", lambda: self.clock[0]), (agents, "now", lambda: self.clock[0]),
+                                 (github, "now", lambda: self.clock[0]), (ghnews, "now", lambda: self.clock[0]),
+                                 (commands, "now", lambda: self.clock[0]),
+                                 (commands, "live_agents", lambda key: self.live), (commands, "detail", lambda k: k),
+                                 (tick, "live_agents", lambda key: self.live), (tick, "detail", lambda k: k),
+                                 (ghnews, "news_send", lambda to, text: self.sent.append((to, text)) or True)):
+            p = mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def said_ready(self, **more):
+        """A task its agent just said ready for: its pull request opened (as finalize leaves it)."""
+        t = {"id": 9, "title": "Login", "state": "running", "space": "sp1", "agents": [], "mode": "worktree",
+             "worktree": self.dir, "branch": "b", "set": {"merge": "ask"}, **more}
+        self.store.data["tasks"] = [t]
+        opened = {"number": 41, "url": "https://github.com/o/r/pull/41", "repo": "o/r"}
+        with unittest.mock.patch.object(self.commands, "github", lambda s: "o/r"), \
+                unittest.mock.patch.object(self.commands, "pr_open", lambda s, t, repo, summary=None: t.setdefault("pr", dict(opened))):
+            msg = self.commands.finalize(self.store, t)
+        self.assertIn("shows Working until its checks pass", msg)
+        return t
+
+    def github_says(self, mergeable="MERGEABLE", checks=()):
+        with open(os.path.join(self.dir, "view.json"), "w") as f:
+            json.dump({"state": "OPEN", "mergeable": mergeable, "headRefOid": "abc", "statusCheckRollup": list(checks)}, f)
+
+    def look(self, t, after=60_000):
+        """A tick's look at the task, after this long; (status, needs, why) and the news event then."""
+        self.clock[0] += after
+        t["pr"]["checked"] = 0
+        self.tick.facts(self.store, t, {"attention": []})
+        v = {**dict(zip(("status", "needs", "why"), self.agents.task_status(t, self.live))), "own_work": False}
+        with unittest.mock.patch.object(self.news, "view", lambda s, t, live=None: v):
+            event = self.news.news_state(self.store, t, self.live)[1]
+        return v["status"], v["why"], event
+
+    RUNNING = {"name": "check", "status": "IN_PROGRESS", "conclusion": ""}
+    PASSED = {"name": "check", "status": "COMPLETED", "conclusion": "SUCCESS"}
+    FAILED = {"name": "check", "status": "COMPLETED", "conclusion": "FAILURE", "detailsUrl": ""}
+
+    def test_working_while_checks_run_then_ready(self):
+        t = self.said_ready()
+        self.assertEqual(self.agents.task_status(t, self.live), ("working", None, "Checks running"))
+        self.github_says(checks=[self.RUNNING])
+        self.assertEqual(self.look(t), ("working", "Checks running", None))
+        self.github_says(checks=[self.PASSED])
+        self.assertEqual(self.look(t), ("ready", None, "ready"))
+        with open(self.gh_log) as f:
+            self.assertTrue(any(a[:2] == ["pr", "view"] for a in map(json.loads, f)))
+
+    def test_github_still_working_out_mergeable_is_working(self):
+        t = self.said_ready()
+        self.github_says(mergeable="UNKNOWN", checks=[self.PASSED])
+        self.assertEqual(self.look(t), ("working", "Waiting for GitHub", None))
+
+    def test_a_failing_check_goes_back_to_its_agent_never_ready_first(self):
+        t = self.said_ready()
+        self.github_says(checks=[self.FAILED])
+        self.assertEqual(self.look(t, after=1000), ("working", "Back to its agent to fix", None))
+        self.assertEqual(t["attention"], "Checks failing: check.")
+        # handed to its resting agent at once (pr_news, pr_deliver): it is on it, still Working past the grace
+        self.tick.pr_deliver(self.store, t, {})
+        self.assertEqual(self.sent[-1][0], "t1")
+        self.assertIn('Check \\"check\\" failed', json.dumps(self.sent[-1][1]))
+        self.clock[0] += 30_000
+        self.assertEqual(self.agents.task_status(t, self.live)[0], "working")
+        # it never fixes it and stays quiet: Needs you, as only the person can act now
+        self.clock[0] += 10 * 60_000
+        self.assertEqual(self.agents.task_status(t, self.live), ("needs", "attention", "Checks failing: check."))
+
+    def test_a_conflict_goes_back_to_its_agent(self):
+        t = self.said_ready(base="main")
+        self.github_says(mergeable="CONFLICTING", checks=[self.PASSED])
+        self.assertEqual(self.look(t, after=1000), ("working", "Back to its agent to fix", None))
+        self.tick.pr_deliver(self.store, t, {})
+        self.assertIn("It conflicts with main: rebase onto main", self.sent[-1][1])
+        self.assertEqual(self.agents.task_status(t, self.live)[0], "working")
+
+    def test_no_checks_is_ready_once_github_had_time_to_start_them(self):
+        t = self.said_ready()
+        self.github_says(checks=[])
+        self.assertEqual(self.look(t, after=5000), ("working", "Checks running", None))
+        self.assertEqual(self.look(t, after=30_000), ("ready", None, "ready"))
+
+    def test_merging_by_itself_is_working_then_done(self):
+        t = self.said_ready()
+        t["auto_merge"] = "checks"
+        self.assertEqual(self.agents.task_status(t, self.live), ("working", None, "Merges once its checks pass"))
+        t["merge_requested"] = 1
+        self.assertEqual(self.agents.task_status(t, self.live), ("working", None, "Merging"))
 
 
 class Store:
