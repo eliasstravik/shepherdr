@@ -4,6 +4,7 @@ Every test works in a throwaway home (tempfile): never the person's ~/.herdr, ne
 the mixed-version tests are two throwaway homes, one moved and one not, with the shell and Python each version
 really runs against the other.
 """
+import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import errno
 import json
 import os

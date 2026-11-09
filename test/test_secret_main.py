@@ -2,6 +2,7 @@
 only while none is named, a copy installed elsewhere is never marked remote on the machine that keeps them, and
 another machine's set/rm/names go there over hc with the value on stdin and the scopes in that machine's words.
 Everything runs on throwaway folders; hc is a recorder."""
+import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import importlib.machinery
 import importlib.util
 import json

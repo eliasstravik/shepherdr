@@ -1,5 +1,6 @@
 """herdr-task: every module compiles, the add-on switch it reads, and (on CI only, where HOME is
 a throwaway) its commands start. On a person's machine herdr-task never runs with another HOME."""
+import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import json
 import os
 import subprocess
@@ -2046,7 +2047,7 @@ class CleanEnv(unittest.TestCase):
 
     def agent_env(self, argv):
         """What the agent at the end of a launch argv sees, started from a parent environment with the markers."""
-        out = subprocess.run(argv, env={"PATH": os.environ["PATH"], **self.MARKERS, **self.KEPT}, capture_output=True, text=True, timeout=20)
+        out = subprocess.run(argv, env={"PATH": os.environ["PATH"], "HOME": os.environ["HOME"], **self.MARKERS, **self.KEPT}, capture_output=True, text=True, timeout=20)
         self.assertEqual(out.returncode, 0, out.stderr)
         return dict(l.split("=", 1) for l in out.stdout.splitlines() if "=" in l)
 
@@ -2314,7 +2315,11 @@ class AutomationFromAnotherMachine(unittest.TestCase):
                 if not self.b_up:
                     return subprocess.CompletedProcess(argv, 1, "", "hc: vmb: connection refused\n")
                 rest = argv[argv.index("--on") + 2:]
-                return real_run([sys.executable, os.path.join(BIN, "herdr-task"), *rest], env=self.b_env, **kw)
+                # on this run's throwaway HOME herdr-task refuses hc (base.not_real): B's hc is a fake, so let it
+                b = ("import sys, runpy; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]);"
+                     "import herdr_task.base as base; base.not_real = lambda: None;"
+                     "sys.argv = sys.argv[2:]; runpy.run_path(sys.argv[0], run_name='__main__')")
+                return real_run([sys.executable, "-c", b, BIN, os.path.join(BIN, "herdr-task"), *rest], env=self.b_env, **kw)
             return real_run(argv, **kw)
 
         def begin(s, t, argv, space, parent=None):
@@ -3271,7 +3276,7 @@ class CodexAsksOnTheCard(unittest.TestCase):
     """SHEP-91: a Codex worker's PermissionRequest hook (`herdr-task _allow`) allows its own commands, and hands anything
     else to the chat's card (ask-hook.sh, marked HERDR_ASK_CHAINED), waiting as long as the card does."""
 
-    def run_allow(self, command, hook):
+    def run_allow(self, command, hook, home=None):
         app = tempfile.mkdtemp()
         if hook is not None:
             os.makedirs(os.path.join(app, "mods", "chat"))
@@ -3280,7 +3285,9 @@ class CodexAsksOnTheCard(unittest.TestCase):
         code = ("import sys, types, argparse; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]);"
                 "from herdr_task.launch import cmd_allow; cmd_allow(argparse.Namespace(command='/x/herdr-task'))")
         req = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "turn_id": "t1"})
-        env = {**os.environ, "HERDR_APP_HOME": app}
+        # its own HOME too: else, with no hook in the app home, cmd_allow falls back to ~/.local/share/herdr/ask's
+        # copy, and the real one files a real card for this test and waits on it forever (SHEP-147)
+        env = {**os.environ, "HERDR_APP_HOME": app, "HOME": home or app}
         env.pop("HERDR_ASK_CHAINED", None)
         return subprocess.run([sys.executable, "-c", code, BIN], input=req, capture_output=True, text=True, env=env)
 
@@ -3296,6 +3303,22 @@ class CodexAsksOnTheCard(unittest.TestCase):
         # no card answer (answered in the terminal, or no chat hook installed): no decision, Codex asks itself
         self.assertEqual(self.run_allow("rm -rf build", "exit 0").stdout, "")
         self.assertEqual(self.run_allow("rm -rf build", None).stdout, "")
+
+    def test_without_an_app_hook_the_synced_copy_answers(self):
+        """SHEP-147: a machine that only runs tasks has no app-home hook; cmd_allow falls back to the copy a sync left in
+        ~/.local/share/herdr/ask. It is HOME's own: a test's HOME, never the person's real one."""
+        home = tempfile.mkdtemp()
+        ask = os.path.join(home, ".local", "share", "herdr", "ask")
+        os.makedirs(ask)
+        with open(os.path.join(ask, "ask-hook.sh"), "w") as f:
+            f.write('[ "$HERDR_ASK_CHAINED" = 1 ] || exit 0; '
+                    'echo \'{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"synced"}}}\'')
+        out = self.run_allow("rm -rf build", None, home=home)
+        self.assertEqual(json.loads(out.stdout)["hookSpecificOutput"]["decision"]["message"], "synced", out.stderr)
+        # neither: nothing answers, and no other home's copy is asked
+        self.assertEqual(self.run_allow("rm -rf build", None, home=tempfile.mkdtemp()).stdout, "")
+        # this run itself: a throwaway HOME, so no test can reach the real copy (test/home_guard.py)
+        self.assertNotEqual(os.path.realpath(os.path.expanduser("~")), home_guard.REAL)
 
     def test_a_claude_worker_asks_on_the_card_too(self):
         # SHEP-139: a Claude worker's question tool (AskUserQuestion) reached the card only where ~/.claude/settings.json

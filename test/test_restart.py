@@ -1,4 +1,5 @@
 """mods/coordinator/restart.sh for another machine's agent: it runs there, over hc (SHEP-107)."""
+import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import json
 import os
 import subprocess
