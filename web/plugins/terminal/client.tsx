@@ -10,7 +10,7 @@ import { act, agentChat, definePlugin, getState, openItem, placeOf, setUI, shown
 import { CTRL, ic, MenuItem, MenuSeparator, MenuSetting, ModelIcon, shortcut, Small, Tab, Tabs, TermIcon } from '@client/ui.tsx'
 import type { Place, TermScreen } from '@shared/types.ts'
 import { connectTerminal, streamInput } from './stream.ts'
-import { termInPlace } from './shown.ts'
+import { keysTerm, termInPlace } from './shown.ts'
 import { colsOf, fitFont, foldShown, frame, LINE, MAX, MIN, PAD, ZOOM } from './screen.ts'
 
 const KEYMAP: Record<string, string> = {
@@ -412,12 +412,13 @@ export default definePlugin({
           else if (k.text) terminalInput(focused, { type: 'text', text: k.text })
           return true
         }
-        if (!ui.term) return false
+        const term = keysTerm(ui)
+        if (!term) return false
         const k = toKey(e)
         if (!k) return true
         e.preventDefault()
-        if (k.keys) terminalInput(ui.term, { type: 'keys', keys: k.keys })
-        else if (k.text) terminalInput(ui.term, { type: 'text', text: k.text })
+        if (k.keys) terminalInput(term, { type: 'keys', keys: k.keys })
+        else if (k.text) terminalInput(term, { type: 'text', text: k.text })
         return true
       },
     })
