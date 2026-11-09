@@ -1334,8 +1334,20 @@ export default class Chat extends View {
         if (this.phase === "ended" && !this.swapping) {
           // A thread stays open on its notice; ✕ closes it.
           if (this.thread) return;
-          // A Coordinator tab's chat stays: empty again, ready to start the next one.
-          if (this.role) { this.addr = null; this.path = null; this.reset(); this.phase = "fresh"; cx.notify(); return; }
+          // A Coordinator tab's chat stays: empty again, ready to start the next one. One that ended before it ever
+          // ran (its CLI not found on another machine, GitHub #839) says why, and the message goes back in the box.
+          if (this.role) {
+            const lost = !this.path ? this.pending.filter((p) => p.msg || p.text) : [];
+            const why = lost.length ? await this.endedWhy(this.addr) : "";
+            this.addr = null; this.path = null; this.reset(); this.phase = "fresh";
+            if (lost.length) {
+              this.pending = this.pending.filter((p) => !lost.includes(p));
+              if (!this.box.value().trim()) this.box.set_value(lost.map((p) => p.msg?.text ?? p.text).filter(Boolean).join("\n\n"));
+              toast({ title: `The ${this.role === "coordinator" ? "Assistant" : this.role} ended before it started`, body: `${why || "It exited before it was ready."} Your message is back in the box.`, level: "error" });
+            }
+            cx.notify();
+            return;
+          }
           this.closeSelf();
           return;
         }
@@ -1508,6 +1520,14 @@ export default class Chat extends View {
   }
 
   // A message that didn't go, pressed: it goes again.
+  // An agent that ended before it was ready: the last thing its terminal said ("sh: exec: claude: not found"), or "".
+  async endedWhy(addr) {
+    if (!addr) return "";
+    const r = await hc(["read", addr, "--lines", "8"]).catch(() => null);
+    const last = String(r?.stdout ?? "").split("\n").map((l) => l.trim()).filter(Boolean).pop() ?? "";
+    return last ? `It said: ${last.slice(0, 200)}` : "";
+  }
+
   retry(p, cx) {
     this.pending = this.pending.filter((x) => x !== p);
     this.deliver(p.msg, cx);
@@ -1745,7 +1765,9 @@ export default class Chat extends View {
       if (out.address && out.first_message?.sent === false && words) this.firstSend = [words, task].filter(Boolean).join("\n\n");
       if (r.code !== 0 && !late || !out.address) {
         p.failed = (r.stderr || r.stdout || "It didn't start.").trim();
-        if (!msg) toast({ title: `The ${this.role === "coordinator" ? "Assistant" : this.role} didn't start`, body: p.failed, level: "error" });
+        toast({ title: `The ${this.role === "coordinator" ? "Assistant" : this.role} didn't start`, body: msg ? `${p.failed} Your message is back in the box.` : p.failed, level: "error" });
+        // the fresh chat shows no pending rows: the message goes back in the box rather than vanish (GitHub #839)
+        if (msg) { this.pending = this.pending.filter((x) => x !== p); if (!this.box.value().trim()) this.box.set_value(msg.text); }
         this.phase = "fresh";
         cx.notify();
         return;

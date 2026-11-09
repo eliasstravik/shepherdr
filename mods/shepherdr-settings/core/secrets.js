@@ -55,7 +55,9 @@ export function believeRecord(mine, there) {
  *   1. the machine whose vault (~/.local/share/shepherdr/secrets/vault.json) has secrets in it, not marked remote;
  *   2. several: the one with the most that isn't serving the web app (moving it there keeps the other's entries:
  *      `move-to` merges), else the lowest id;
- *   3. none has any: the machine serving the web app.
+ *   3. none has any: the machine serving the web app;
+ *   4. none has any, none serves the web app, and every machine is marked remote (each installed the other's copy):
+ *      the lowest id, else none could ever keep a secret (#800). Some not marked: each keeps its own, as before.
  * machines: [{ id, count, remote }] (count: secrets in its vault, 0 without one; null: unknown, it can't be asked now).
  * host: the id of the machine serving the web app (shepherdr.host), or null.
  * Returns { id } or null: nothing to decide yet (no vault seen with a machine still unknown, or no host to fall back on).
@@ -69,7 +71,8 @@ export function autoKeeper(machines, host) {
   }
   // no vault anywhere seen: only when every machine answered (a sleeping laptop may hold them)
   if (ms.some((m) => m.count == null)) return null;
-  return host ? { id: host } : null;
+  if (host) return { id: host };
+  return ms.length && ms.every((m) => m.remote) ? { id: [...ms].map((m) => m.id).sort()[0] } : null;
 }
 
 /** Secrets that follow Serve from but are kept elsewhere: the id of the machine serving the web app to move them to,

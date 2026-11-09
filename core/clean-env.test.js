@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
-import { CLEAN_ENV, cleanCommand } from "./clean-env.js";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { AGENT_PATH, CLEAN_ENV, cleanCommand } from "./clean-env.js";
 
 // SHEP-86: an Assistant's one-off template command runs under sh -c in the holder's environment. Fake values only.
 const parent = { PATH: process.env.PATH, CLAUDECODE: "1", CLAUDE_PID: "4242", CLAUDE_CODE_CHILD_SESSION: "1", CLAUDE_CODE_SESSION_ID: "fake-session",
@@ -13,6 +15,21 @@ test("an Assistant's command runs without a parent Claude Code session's markers
 });
 
 test("the agent is exec'd once, whether the template's command had exec or not", () => {
-  expect(cleanCommand("claude --model opus")).toBe(`${CLEAN_ENV} exec claude --model opus`);
-  expect(cleanCommand("exec claude")).toBe(`${CLEAN_ENV} exec claude`);
+  expect(cleanCommand("claude --model opus")).toBe(`${CLEAN_ENV} ${AGENT_PATH} exec claude --model opus`);
+  expect(cleanCommand("exec claude")).toBe(`${CLEAN_ENV} ${AGENT_PATH} exec claude`);
+});
+
+test("a holder started over ssh (PATH only /usr/bin:/bin) still finds an agent in ~/.local/bin (GitHub #839)", () => {
+  const home = mkdtempSync(`${tmpdir()}/clean-env-`);
+  try {
+    mkdirSync(`${home}/.local/bin`, { recursive: true });
+    writeFileSync(`${home}/.local/bin/fake-agent`, "#!/bin/sh\necho started \"$@\"\n", { mode: 0o755 });
+    const r = Bun.spawnSync(["/bin/sh", "-c", cleanCommand("fake-agent --model opus")], { env: { HOME: home, PATH: "/usr/bin:/bin:/usr/sbin:/sbin" } });
+    expect([r.exitCode, r.stdout.toString().trim()]).toEqual([0, "started --model opus"]);
+    // the holder's own PATH comes first: an agent it already finds is the one that runs
+    const own = `${home}/own`;
+    mkdirSync(own);
+    writeFileSync(`${own}/fake-agent`, "#!/bin/sh\necho own\n", { mode: 0o755 });
+    expect(Bun.spawnSync(["/bin/sh", "-c", cleanCommand("fake-agent")], { env: { HOME: home, PATH: `${own}:/usr/bin:/bin` } }).stdout.toString().trim()).toBe("own");
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });

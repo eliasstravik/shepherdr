@@ -1,7 +1,7 @@
 // The voice agent's spec reaches agents made before (ensureAgent): kept and up to date, nothing asked; from another
 // spec, PATCHed (and the tools it replaced removed); gone from ElevenLabs, made again; made with another key, a new one.
 import { expect, test } from "bun:test";
-import { ensureAgent, agentSpec, SPEC, specTag, TOOLS, SYSTEM_TOOLS, hangUpGuard, closeWords, chimePcm, HUNG_UP, REFUSED, agentFile, envLines, opening, prompt, FIRST, LANGUAGES, TTS_MODEL, VOICE_ID, batchLines, needLine, replyLine, toolWords, turnGate } from "./voice.js";
+import { ensureAgent, agentSpec, SPEC, specTag, TOOLS, SYSTEM_TOOLS, hangUpGuard, closeWords, chimePcm, HUNG_UP, REFUSED, agentFile, envLines, opening, prompt, FIRST, LANGUAGES, TTS_MODEL, VOICE_ID, batchLines, needLine, replyLine, REPLY_MAX, toolWords, turnGate } from "./voice.js";
 
 function fake(o = {}) {
   const calls = [], saved = [];
@@ -261,4 +261,13 @@ test("SHEP-173: the end chime is short, soft and ends in silence", () => {
   expect(peak).toBeGreaterThan(3000);
   expect(peak).toBeLessThan(16000);
   expect(Math.abs(pcm[pcm.length - 1])).toBeLessThan(800);
+});
+
+test("a long reply is said whole; past the limit it says it was cut and where the rest is (#785)", () => {
+  const five = "Sentence. ".repeat(500) + "Last words.";
+  expect(replyLine("the shop Assistant", five).text).toContain("Last words.");
+  expect(replyLine("the shop Assistant", five).text).not.toContain("cut short");
+  const huge = replyLine("the shop Assistant", "y".repeat(REPLY_MAX + 10)).text;
+  expect(huge).toContain("cut short here; the rest is in the chat");
+  expect(huge).toContain("Tell the person what it says");
 });

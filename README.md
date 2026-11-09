@@ -81,7 +81,7 @@ shepherdr update
 shepherdr doctor
 ```
 
-Shepherdr doesn't update itself: it never follows main, so a merge can't change what runs. An update replaces only the files it put there that you haven't changed (yours stay, with the new copy beside them as `.new`), one mod at a time, and keeps a backup of anything it replaces. Agents keep running in herdr-core meanwhile. Until `shepherdr doctor` says the install is whole, your other machines don't get the new helpers. [Upgrading](docs/upgrading.md) has the details.
+Shepherdr doesn't update itself: it never follows main, so a merge can't change what runs. An update replaces only the files it put there that you haven't changed (yours stay, with the new copy beside them as `.new`, or in the backup when the mod file changed too), one mod at a time, and keeps a backup of anything it replaces. Agents keep running in herdr-core meanwhile. Until `shepherdr doctor` says the install is whole, your other machines don't get the new helpers. [Upgrading](docs/upgrading.md) has the details.
 
 ## Get your questions answered
 

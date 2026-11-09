@@ -13,7 +13,7 @@ import { randomBytes } from "node:crypto";
 import { DATA, SOCK, TOKEN, PORT, HOME, ensureData, settingsFile, where } from "./paths.ts";
 import { holdLock } from "./lock.ts";
 import { gate, localCaller, type Gate } from "./auth.ts";
-import { trustedPeer } from "./peer.ts";
+import { refusedWhy, trustedPeer } from "./peer.ts";
 import { whoami, share, served, unshare, restoreShare, httpsPort, webLink, webOrigin, HTTPS_PORT_FILE, type Me } from "./tailscale.ts";
 import { qrFile } from "./qr.ts";
 import { Hub } from "./hub.ts";
@@ -112,6 +112,8 @@ const store = new Store(hub, host);
 new Sync(hub, host).start();
 let me: Me | null = await whoami();
 const g: Gate = { owner: me?.login ?? null, dns: me?.dns ?? null, port: PORT, token };
+// the 403 reason last logged for a Mac that can't see who connected (peer.ts refusedWhy), said once
+let saidPeer = "";
 // the tailnet HTTPS port the web app is shared on (tailscale.ts httpsPort: 443 unless this machine set another),
 // looked at again with the rest of the tailnet; ownLink: this machine's own link on it
 let hp = httpsPort();
@@ -679,7 +681,11 @@ const server = Bun.serve<{ who: string }>({
     const socket = path === "/api/ws" || path === "/api/terminal" || path === "/api/browser" || path === "/api/voice";
     const viaTailnet = req.headers.has("tailscale-user-login");
     const pass = gate(req, g, socket, viaTailnet && trustedPeer(srv.requestIP(req)?.port, PORT));
-    if (!pass.ok) return new Response(pass.why, { status: pass.status });
+    if (!pass.ok) {
+      const why = refusedWhy(pass.why);
+      if (why !== pass.why && why !== saidPeer) console.error(`web: ${(saidPeer = why)}`);
+      return new Response(why, { status: pass.status });
+    }
     if (path === "/api/browser") {
       // a task's browser (2.1's Browser panel): this machine's tasks
       const t = compat.taskOf(url.searchParams.get("task") ?? "");
