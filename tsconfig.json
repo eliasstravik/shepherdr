@@ -41,6 +41,8 @@
     "web/plugins",
     "web/generated",
     "web/vite.config.ts",
+    "web/vite.viewer.config.ts",
+    "web/viewer",
     "web/build-plugins.ts",
     "core"
   ]
