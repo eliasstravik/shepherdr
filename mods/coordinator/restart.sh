@@ -80,6 +80,8 @@ labels=(--label "herdr.space=$space" --label "herdr.tab=$tab")
 [ "$role" = coordinator ] && labels+=(--label herdr.role=coordinator)
 # An agent in Chat mode (parked behind a chat pane) restarts parked behind the same chat.
 chat=${HERDR_RESTART_CHAT:-$(get '.labels["herdr.chat"]')}
+# The label holds the pane as its own machine names it, never a window's "<machine>/<pane>" (#761).
+chat=${chat##*/}
 if [ -n "$chat" ]; then
   origin=$(get '.labels["herdr.chat.origin"]'); origin=${origin:-$old}
   labels=(--keep --label "herdr.chat=$chat" --label "herdr.chat.origin=$origin")

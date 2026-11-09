@@ -72,5 +72,43 @@ class RemoteRestart(unittest.TestCase):
         self.assertEqual(r.stdout, "")
 
 
+# A fake hc for an agent on this machine: `get` answers its record, `run` logs its arguments.
+LOCAL_HC = r"""#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$FAKE_DIR/calls"
+case $1 in
+  get) echo '{"address":"t2","cwd":"/tmp","labels":{"herdr.chat":"vmb/p7","herdr.role":"coordinator"}}' ;;
+  run) printf '%s\n' "$@" >"$FAKE_DIR/run-args"; echo '{"address":"t9"}' ;;
+  ls) echo '{"terminals":[]}' ;;
+esac
+"""
+
+
+class ChatLabel(unittest.TestCase):
+    """The new agent's herdr.chat holds its pane as its own machine names it, never a window's "<machine>/<pane>"
+    (GitHub #761: another machine's window then misses the pane and ends the agent)."""
+
+    def restart(self, env):
+        d = tempfile.mkdtemp()
+        os.makedirs(os.path.join(d, "bin"))
+        hc = os.path.join(d, "bin", "hc")
+        with open(hc, "w") as f:
+            f.write(LOCAL_HC)
+        os.chmod(hc, 0o755)
+        e = {"PATH": f"{d}/bin:/usr/bin:/bin", "HOME": d, "HERDR_APP_HOME": d, "FAKE_DIR": d, "HERDR_RESTART_RESUME": "1", **env}
+        r = subprocess.run(["bash", SCRIPT, "t2", json.dumps(["claude", "--resume", "s1"])], env=e,
+                           capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "t9")
+        return read(os.path.join(d, "run-args")).split("\n")
+
+    def test_window_name_from_the_chat(self):
+        self.assertIn("herdr.chat=p7", self.restart({"HERDR_RESTART_CHAT": "vmb/p7"}))
+
+    def test_window_name_from_its_label(self):
+        args = self.restart({})
+        self.assertIn("herdr.chat=p7", args)
+        self.assertNotIn("herdr.chat=vmb/p7", args)
+
+
 if __name__ == "__main__":
     unittest.main()

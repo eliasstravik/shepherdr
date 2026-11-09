@@ -26,7 +26,7 @@ import { items as needs, ASKS, toAgent, reasonOf, reqReason, REASONS, fit, tabOf
 import { words } from "./core/asks.js";
 import { taskDot, ownProgress } from "./dot.js";
 import { taskMenu } from "./core/menus.js";
-import { machinesInOrder, machineOrderOf } from "./core/spaces.js";
+import { machinesInOrder, machineOrderOf, chatPane } from "./core/spaces.js";
 // The rules for a task's status, order and words: shared with the web app (core/tasks.js).
 import { RANK, STATUS, RANK_OF, ORDER, GROUP_BY, groupBy, groupNow, machineOf, machineName, refOf, taskKey, autoPrefix, place,
   queueReason, reportOf as report, secondLine, leftOf, order, matches, day, ago, capital, short, autoWhere, fromLine, inSpace } from "./core/tasks.js";
@@ -221,8 +221,7 @@ export default class Tasks extends View {
         const st = a?.status ?? (RANK[k.status] ? k.status : null);
         const tab = k.labels?.["herdr.tab"];
         // Where it shows: its own pane, else the chat pane it's parked behind (mods/chat).
-        const chat = k.labels?.["herdr.chat"];
-        const pane = (f.panes ??= panes()).find((p) => p.terminal === k.address)?.pane ?? (chat ? (m ? `${m}/${chat}` : chat) : null);
+        const pane = (f.panes ??= panes()).find((p) => p.terminal === k.address)?.pane ?? chatPane(k);
         return { address: k.address, status: st, program: a?.program ?? k.program, tab: tab && m ? `${m}/${tab}` : tab, pane,
           role: k.labels?.["herdr.role"] ?? "worker", turn: k.turn,
           // when its status last changed: a quiet agent needs the person only after core/tasks.js GRACE_MS

@@ -26,6 +26,7 @@ import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, TextareaState, Textarea, Scrollbar, VirtualListScrollHandle, TextView, v_virtual_list, InputState, Input } from "gpui-base";
 import { focused, props, run, theme, home, hc, exec, shared, setShared, watchFolder, window, settings, playSound, notify, appHome, readTextFile, writeTextFile, nextCommand, openOverlay, knownAgents, machines, layout } from "herdr";
 import { agents, panes, terminals, spaces, inRender } from "./live.js";
+import { chatPane, chatLabel } from "./core/spaces.js";
 import * as fs from "fs/promises";
 import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names, pilotLine } from "./core/chat-log.js";
 import { BgJobs } from "./core/bg-jobs.js";
@@ -1136,7 +1137,7 @@ export default class Chat extends View {
     // Only to the pane this chat last knew as its own, while that is still a chat pane.
     const pane = this.lastPane ?? (this.slot && this.slotRec()?.pane) ?? null;
     if (!this.thread && !this.inner && !this.swapping && !t.labels?.["herdr.chat"] && pane && !panes().some((p) => p.terminal === this.addr)
-      && panes().some((p) => p.pane === pane && p.mod === "chat")) await hc(["label", this.addr, `herdr.chat=${pane}`]);
+      && panes().some((p) => p.pane === pane && p.mod === "chat")) await hc(["label", this.addr, `herdr.chat=${chatLabel(pane)}`]);
     const kind = KINDS[t.status?.app] ?? KINDS[t.foreground?.name];
     // Back at its shell because the session it resumed is gone: a new agent starts there.
     if (!kind) { if (!(await this.checkLost(this.addr, cx, t))) this.set("unsupported", cx); return; }
@@ -1652,7 +1653,7 @@ export default class Chat extends View {
   slotPane() {
     const rec = this.slotRec();
     if (rec?.pane && panes().some((p) => p.pane === rec.pane)) return rec.pane;
-    const taken = new Set(terminals().filter((k) => k.state === "live").map((k) => k.labels?.["herdr.chat"]).filter(Boolean));
+    const taken = new Set(terminals().filter((k) => k.state === "live").map(chatPane).filter(Boolean));
     const tab = rec?.tab ?? focused()?.tab;
     const free = panes().filter((p) => p.mod === "chat" && p.tab === tab && !taken.has(p.pane));
     return free.length === 1 ? free[0].pane : null;
@@ -1718,7 +1719,7 @@ export default class Chat extends View {
         }
       }
       const args = ["run", "--bg", "--json", "--no-parent", "--keep", ...(machine ? ["--on", machine] : []), ...(folder ? ["--cwd", folder] : []),
-        "--label", `herdr.chat=${pane}`, "--label", `herdr.chat.slot=${this.slot}`, "--label", `herdr.chat.origin=slot:${this.slot}`,
+        "--label", `herdr.chat=${chatLabel(pane)}`, "--label", `herdr.chat.slot=${this.slot}`, "--label", `herdr.chat.origin=slot:${this.slot}`,
         "--label", `herdr.role=${this.role}`,
         ...(space ? ["--label", `herdr.coordinator.space=${String(space.id).split("/").pop()}`] : []),
         ...(rec?.tab ? ["--label", `herdr.coordinator.tab=${String(rec.tab).split("/").pop()}`] : []),
@@ -4191,7 +4192,7 @@ export default class Chat extends View {
     if (!this.addr && this.role) return this.slotPane();
     // A thread's pane is the one its opener recorded for this worker (openThread()).
     if (this.thread) return threadOf(this.addr);
-    const c = terminals().find((x) => x.address === this.addr)?.labels?.["herdr.chat"] ?? null;
+    const c = chatPane(terminals().find((x) => x.address === this.addr));
     if (c && panes().some((p) => p.pane === c && p.mod === "chat")) this.lastPane = c;
     return c || (this.swapping ? this.lastPane : null);
   }
@@ -4273,7 +4274,7 @@ export default class Chat extends View {
       // A worker runs as its coordinator's hc child, with no space of its own: its parent's chat
       // takes it; one whose parent shows no chat goes to the coordinator of the space asked.
       const parent = terminals().find((k) => k.address === tq.terminal)?.parent ?? null;
-      const pc = parent && terminals().find((k) => k.address === parent)?.labels?.["herdr.chat"];
+      const pc = parent && chatPane(terminals().find((k) => k.address === parent));
       const parentChat = Boolean(pc) && panes().some((p) => p.pane === pc && p.mod === "chat");
       if (parent === this.addr || (!parentChat && (!tq.space || tq.space === space))) {
         this.threadReqAt = tq.at;
