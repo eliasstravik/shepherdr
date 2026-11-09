@@ -80,6 +80,8 @@ def status_of(task, live):
 # What people see a task as: one of eight, derived, never stored. From the task's record (todo,
 # scheduled (SHEP-38: starts by itself at a time), queued, ready, done, attention, a merge asked for or waiting on checks) and its agents' own
 # Herdr status (working, blocked, idle/done), which agents report as always.
+IN_QUEUE_LINE = "In GitHub's merge queue"
+APPROVAL_LINE = "Merges once it's approved"
 STATUSES = {"todo": "To do", "scheduled": "Scheduled", "queued": "Queued", "working": "Working", "needs": "Needs you",
             "ready": "Ready", "merging": "Merging", "done": "Done"}
 
@@ -119,8 +121,11 @@ def task_status(task, live):
     if st == "ready":
         if task.get("merge_requested") and live:
             return "merging", None, None
+        # In GitHub's merge queue (#802): Merging until GitHub merged it.
+        if task.get("merge_queued") and task.get("pr"):
+            return "merging", None, IN_QUEUE_LINE
         if task.get("auto_merge") and task.get("pr") and not task.get("merged"):
-            return "merging", None, "Merges once its checks pass"
+            return "merging", None, APPROVAL_LINE if task["pr"].get("needs_approval") else "Merges once its checks pass"
         # Said ready but not at rest yet (SHEP-148): Working until it is, and only then Ready.
         if live and not_at_rest(task, live):
             return "working", None, None

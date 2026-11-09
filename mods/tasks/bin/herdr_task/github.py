@@ -152,11 +152,31 @@ PENDING = {"QUEUED", "IN_PROGRESS", "PENDING", "WAITING", "REQUESTED", "EXPECTED
 
 def pr_view(task):
     pr = task["pr"]
-    ok, out, _ = gh("pr", "view", str(pr["number"]), "--repo", pr["repo"], "--json", "state,mergeable,headRefOid,statusCheckRollup,mergeCommit")
+    ok, out, _ = gh("pr", "view", str(pr["number"]), "--repo", pr["repo"], "--json",
+                    "state,mergeable,headRefOid,statusCheckRollup,mergeCommit,reviewDecision,mergeStateStatus")
     try:
-        return json.loads(out) if ok else None
+        v = json.loads(out) if ok else None
     except ValueError:
         return None
+    if isinstance(v, dict) and v.get("statusCheckRollup"):
+        v["statusCheckRollup"] = latest_checks(v["statusCheckRollup"])
+    return v
+
+
+def latest_checks(rows):
+    """Each check by its newest run (#781): a run that a newer run of the same check superseded (a
+    workflow's cancel-in-progress leaves it CANCELLED beside the one that passed) is left out."""
+    newest = {}
+    for i, c in enumerate(rows):
+        name = c.get("name") or c.get("context")
+        key = (c.get("workflowName") or "", name) if name else i
+        when = c.get("startedAt") or c.get("completedAt") or ""
+        if key not in newest or when >= newest[key][0]:
+            newest[key] = (when, c)
+    return [c for _, c in newest.values()]
+
+
+BEHIND = "It is behind its base branch, which must be up to date to merge."
 
 
 def pr_problem(v):
@@ -170,12 +190,53 @@ def pr_problem(v):
            if (c.get("conclusion") or c.get("state") or "").upper() in BAD]
     if bad:
         return "Checks failing: " + ", ".join(bad[:3]) + (" and more." if len(bad) > 3 else ".")
+    # #743: the base requires it up to date with itself (GitHub says BEHIND only under that rule).
+    if v.get("mergeStateStatus") == "BEHIND":
+        return BEHIND
     return None
 
 
 def pr_pending(v):
     return any((c.get("status") or c.get("state") or "").upper() in PENDING and not (c.get("conclusion") or "")
                for c in v.get("statusCheckRollup") or [])
+
+
+def needs_approval(v):
+    """#743: the base requires an approving review that hasn't landed (or changes were asked for):
+    a merge can't go through yet, and that is nobody's problem to fix here; it waits calmly."""
+    return v.get("reviewDecision") in ("REVIEW_REQUIRED", "CHANGES_REQUESTED")
+
+
+QUEUE_QUERY = """query($owner: String!, $name: String!, $n: Int!) { repository(owner: $owner, name: $name) {
+  pullRequest(number: $n) { state isInMergeQueue autoMergeRequest { enabledAt }
+    timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) { nodes { ... on RemovedFromMergeQueueEvent { reason } } } } } }"""
+
+
+def queue_entry(task):
+    """Its pull request in GitHub's merge queue (#802): {"in": in the queue, "auto": set to merge by
+    itself (it joins the queue once its checks pass), "reason": why the queue last removed it}, or
+    None when GitHub couldn't say."""
+    pr = task["pr"]
+    owner, _, name = pr["repo"].partition("/")
+    ok, out, _ = gh("api", "graphql", "-f", f"query={QUEUE_QUERY}", "-f", f"owner={owner}", "-f", f"name={name}",
+                    "-F", f"n={pr['number']}")
+    try:
+        p = json.loads(out)["data"]["repository"]["pullRequest"] if ok else None
+    except (ValueError, TypeError, KeyError):
+        p = None
+    if not isinstance(p, dict):
+        return None
+    removed = ((p.get("timelineItems") or {}).get("nodes") or [{}])[-1] or {}
+    return {"in": bool(p.get("isInMergeQueue")), "auto": bool(p.get("autoMergeRequest")),
+            "reason": removed.get("reason"), "state": p.get("state")}
+
+
+def drop_branch(s, task):
+    """After GitHub's merge queue merged it: its branch on GitHub goes, as --delete-branch would have
+    (gh refuses that flag on a queue, #801). Already gone (the repo deletes merged branches): fine."""
+    if task.get("branch"):
+        main = s.loc["folder"]
+        git(main, "push", "--quiet", remote_of(main), "--delete", task["branch"])
 
 
 def update_main(s, task):
@@ -238,7 +299,7 @@ def finish(s, task, even_if_busy=False):
     """Done, its branch merged: removes the worktree and branch when nothing is left uncommitted
     there and (unless the person merged from Herdr) no agent still works in it."""
     task["state"], task["done_at"] = "done", now()
-    for k in ("attention", "merge_requested", "queue", "queued_at"):
+    for k in ("attention", "merge_requested", "queue", "queued_at", "merge_queued", "kept_open"):
         task.pop(k, None)
     s.dirty = True
     wt, br, main = task.get("worktree"), task.get("branch"), s.loc["folder"]

@@ -905,7 +905,8 @@ class BackToWork(unittest.TestCase):
     def test_accept_tries_a_failed_merge_again(self):
         t = self.pr_task()
         fine = {"state": "OPEN", "mergeable": "MERGEABLE", "statusCheckRollup": [], "headRefOid": "abc"}
-        self.merging([fine, fine, fine], [(False, "", "GraphQL: Something went wrong"), (True, "", "")])
+        self.merging([fine, fine, fine, {"state": "MERGED", "mergeCommit": {"oid": "f00"}}],
+                     [(False, "", "GraphQL: Something went wrong"), (True, "", "")])
         with self.assertRaises(SystemExit):
             self.commands.cmd_accept(self.args())
         self.assertEqual((t["state"], t["attention"]), ("ready", "GitHub didn't merge it: GraphQL: Something went wrong"))
@@ -927,6 +928,173 @@ class BackToWork(unittest.TestCase):
         self.merging([fine, {"state": "MERGED", "mergeCommit": {"oid": "f00"}}], [(False, "", "GraphQL: Something went wrong")])
         self.commands.cmd_accept(self.args())
         self.assertEqual((t["state"], t.get("merged")), ("done", True))
+
+    # GitHub's merge queue (#742, #801, #802): gh refuses --delete-branch there; the pull request joins the
+    # queue and the task stays Merging until GitHub merged it, then its branch there goes.
+    QUEUE_ERR = "Cannot use `-d` or `--delete-branch` when merge queue enabled"
+    FINE = {"state": "OPEN", "mergeable": "MERGEABLE", "statusCheckRollup": [], "headRefOid": "abc"}
+
+    def gh_merges(self, views, merges):
+        """merging(), with each gh call kept."""
+        calls, merges = [], list(merges)
+        done = self.merging(views, [])
+        p = self.mock.patch.object(self.commands, "gh", lambda *a, **k: (calls.append(a), merges.pop(0))[1])
+        p.start()
+        self.addCleanup(p.stop)
+        dropped = []
+        p = self.mock.patch.object(self.commands, "drop_branch", lambda s, t: dropped.append(t["id"]))
+        p.start()
+        self.addCleanup(p.stop)
+        return calls, done, dropped
+
+    def test_a_merge_queue_queues_it_and_it_is_not_done(self):
+        t = self.pr_task()
+        calls, done, dropped = self.gh_merges([self.FINE, self.FINE], [(False, "", self.QUEUE_ERR), (True, "", "")])
+        self.commands.cmd_accept(self.args())
+        self.assertEqual(len(calls), 2)
+        self.assertIn("--delete-branch", calls[0])
+        self.assertNotIn("--delete-branch", calls[1])
+        self.assertEqual(calls[1][calls[1].index("--match-head-commit") + 1], "abc")
+        self.assertEqual((t["state"], bool(t.get("merged")), done), ("ready", False, []))
+        self.assertTrue(t["merge_queued"])
+        self.assertNotIn("attention", t)
+        self.assertEqual(self.agents.task_status(t, []), ("merging", None, "In GitHub's merge queue"))
+        # the queue is remembered for its base: the next merge goes straight to it
+        t2 = dict(self.pr_task(), id=8)
+        self.store.data["tasks"].append(t2)
+        calls2, _, _ = self.gh_merges([self.FINE, self.FINE], [(True, "", "")])
+        self.assertEqual(self.commands.merge_now(self.store, t2), self.commands.IN_QUEUE)
+        self.assertNotIn("--delete-branch", calls2[0])
+        self.assertEqual(dropped, [])
+
+    def test_merge_again_while_queued_asks_github_nothing_more(self):
+        t = self.pr_task()
+        t["merge_queued"] = 1
+        calls, done, _ = self.gh_merges([self.FINE], [])
+        self.commands.cmd_merge(self.args())
+        self.assertEqual((calls, done, t["state"]), ([], [], "ready"))
+
+    def test_a_repo_without_a_queue_merges_as_before(self):
+        t = self.pr_task()
+        calls, done, dropped = self.gh_merges([self.FINE, {"state": "MERGED", "mergeCommit": {"oid": "f00"}}], [(True, "", "")])
+        self.commands.cmd_accept(self.args())
+        self.assertEqual(len(calls), 1)
+        self.assertIn("--delete-branch", calls[0])
+        self.assertEqual((t["state"], t.get("merged"), dropped), ("done", True, []))
+
+    def queue_tick(self, v, entry=None, clock=10_000_000):
+        """One tick pass over the task with GitHub saying v (and entry for its queue)."""
+        got = {"done": [], "dropped": [], "asked": 0}
+
+        def ask(t):
+            got["asked"] += 1
+            return entry
+        for name, value in (("pr_view", lambda t: v), ("pr_news", lambda *a: None), ("now", lambda: clock),
+                            ("queue_entry", ask), ("watch_main", lambda *a: None), ("update_main", lambda *a: None),
+                            ("drop_branch", lambda s, t: got["dropped"].append(t["id"])),
+                            ("finish", lambda s, t, even_if_busy=False: (t.update(state="done"), got["done"].append(t["id"])))):
+            p = self.mock.patch.object(self.tick, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        t = self.store.data["tasks"][0]
+        t["pr"]["checked"] = 0
+        report = {"attention": [], "done": []}
+        self.tick.facts(self.store, t, report)
+        return got, report
+
+    def test_a_queued_pull_request_is_done_once_github_merged_it(self):
+        t = self.pr_task()
+        t["merge_queued"] = 10_000_000 - 1000
+        got, _ = self.queue_tick(self.FINE, clock=10_000_000)
+        self.assertEqual((t["state"], got["asked"]), ("ready", 0))  # just queued: not asked yet
+        got, _ = self.queue_tick(self.FINE, {"in": True, "auto": False, "reason": None}, clock=20_000_000)
+        self.assertEqual((t["state"], t.get("merge_queued"), got["asked"]), ("ready", 10_000_000 - 1000, 1))
+        got, report = self.queue_tick({"state": "MERGED", "mergeCommit": {"oid": "f00"}})
+        self.assertEqual((t["state"], t.get("merged"), got["dropped"], report["done"]), ("done", True, [7], [7]))
+
+    def test_the_queue_removing_it_needs_you(self):
+        t = self.pr_task()
+        t["merge_queued"] = 1
+        _, report = self.queue_tick(self.FINE, {"in": False, "auto": False, "reason": "The merge commit's checks failed"})
+        self.assertNotIn("merge_queued", t)
+        self.assertEqual(t["attention"], "GitHub's merge queue removed it: The merge commit's checks failed.")
+        self.assertEqual(report["attention"], [7])
+        # the next pass leaves that alone (nothing GitHub says about the pull request itself is wrong)
+        self.queue_tick(self.FINE, clock=20_000_000)
+        self.assertEqual(t["attention"], "GitHub's merge queue removed it: The merge commit's checks failed.")
+
+    # #743: a base that requires an approving review: no merge tried, no Needs you; it merges once approved.
+    def test_merge_after_checks_waits_calmly_for_an_approval(self):
+        t = self.pr_task()
+        t["auto_merge"] = "checks"
+        waiting = dict(self.FINE, reviewDecision="REVIEW_REQUIRED")
+        self.queue_tick(waiting)
+        self.assertFalse(t.get("_pr_fresh"))
+        self.assertNotIn("attention", t)
+        self.assertEqual(self.agents.task_status(t, []), ("merging", None, "Merges once it's approved"))
+        calls, done, _ = self.gh_merges([waiting], [])
+        self.assertEqual(self.commands.merge_now(self.store, t), self.commands.WAITS_APPROVAL)
+        self.assertEqual((calls, done), ([], []))
+        self.assertNotIn("attention", t)
+        # approved: fresh again, and it merges as before
+        self.queue_tick(dict(self.FINE, reviewDecision="APPROVED"))
+        self.assertTrue(t.get("_pr_fresh"))
+        self.assertNotIn("needs_approval", t["pr"])
+
+    def test_accept_waiting_for_an_approval_merges_once_approved(self):
+        t = self.pr_task()
+        t["auto_merge"] = None
+        calls, done, _ = self.gh_merges([dict(self.FINE, reviewDecision="REVIEW_REQUIRED")], [])
+        self.commands.cmd_accept(self.args())
+        self.assertEqual((t["state"], t["auto_merge"], calls, done), ("ready", "checks", [], []))
+
+    def test_a_branch_behind_under_an_up_to_date_rule_says_so(self):
+        import herdr_task.github as github
+        self.assertEqual(github.pr_problem(dict(self.FINE, mergeStateStatus="BEHIND")), github.BEHIND)
+        t = self.pr_task()
+        self.queue_tick(dict(self.FINE, mergeStateStatus="BEHIND"))
+        self.assertEqual(t["attention"], github.BEHIND)
+        self.queue_tick(dict(self.FINE, mergeStateStatus="CLEAN"), clock=20_000_000)
+        self.assertNotIn("attention", t)
+
+    # #781: a run that a newer run of the same check superseded (cancel-in-progress) never counts.
+    def test_a_superseded_cancelled_run_is_not_failing(self):
+        import herdr_task.github as github
+        rollup = [{"__typename": "CheckRun", "name": "check", "workflowName": "Check", "status": "COMPLETED",
+                   "conclusion": "CANCELLED", "startedAt": "2026-11-09T10:00:00Z"},
+                  {"__typename": "CheckRun", "name": "check", "workflowName": "Check", "status": "COMPLETED",
+                   "conclusion": "SUCCESS", "startedAt": "2026-11-09T10:00:05Z"},
+                  {"__typename": "StatusContext", "context": "ci/other", "state": "SUCCESS", "startedAt": "2026-11-09T10:00:00Z"}]
+        out = json.dumps(dict(self.FINE, statusCheckRollup=rollup))
+        with self.mock.patch.object(github, "gh", lambda *a, **k: (True, out, "")):
+            v = github.pr_view(self.pr_task())
+        self.assertEqual([c.get("conclusion") or c.get("state") for c in v["statusCheckRollup"]], ["SUCCESS", "SUCCESS"])
+        self.assertIsNone(github.pr_problem(v))
+        # a cancelled run with no newer one still fails
+        lone = [dict(rollup[0], name="lint")] + rollup[1:]
+        self.assertEqual(github.pr_problem({"statusCheckRollup": github.latest_checks(lone)}), "Checks failing: lint.")
+
+    # #802, #844: a merge GitHub reports never closes a task under its live agent, nor one reopened after it.
+    def test_a_working_task_whose_pull_request_merged_stays_open_while_its_agent_is_there(self):
+        t = self.pr_task()
+        t["state"] = "running"
+        self.live = [{"address": "t1", "status": {"state": "idle"}, "agent": "claude"}]
+        merged = {"state": "MERGED", "mergeCommit": {"oid": "f00"}}
+        self.queue_tick(merged)
+        self.assertEqual((t["state"], t.get("merged")), ("running", None))
+        self.live = []
+        self.queue_tick(merged, clock=20_000_000)
+        self.assertEqual((t["state"], t.get("merged")), ("done", True))
+
+    def test_reopened_after_a_merge_it_stays_open_and_takes_status(self):
+        t = self.pr_task()
+        t.update(state="done", merged=True, started=1)
+        self.commands.cmd_state(self.args(), "reopen")
+        self.assertEqual((t["state"], t.get("kept_open")), ("running", True))
+        self.queue_tick({"state": "MERGED", "mergeCommit": {"oid": "f00"}})
+        self.assertEqual(t["state"], "running")
+        self.commands.cmd_status(self.args(text="Releasing", done=50, left="10m"))
+        self.assertEqual(t["progress"]["text"], "Releasing")
 
     # A pull request its agent opened itself (SHEP-13: "a pull request for branch ... already exists"):
     # ready and Accept adopt it, never fail on it.
