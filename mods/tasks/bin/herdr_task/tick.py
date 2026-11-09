@@ -17,7 +17,7 @@ from .agents import (
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
 from .github import (already_merged, BEHIND, drop_branch, finish, github, merged_here, needs_approval, pr_merged, pr_pending, pr_problem,
-                     pr_view, queue_entry, update_main, watch_main)
+                     pr_view, queue_entry, tidy_done, tidy_due, update_main, watch_main)
 from .launch import default_space
 from .store import locate, read_list, Store, store_files
 from .queues import machine_hold, refresh_ext, running_count, set_hold, waiting_ext, waiting_for
@@ -312,19 +312,25 @@ def end_done(s, t, report, pressed=False):
 
 
 def end_done_pass(report, folder=None, pressed=False):
-    """Every Done task here with agents left ends them (end_done()). Cheap when nothing's left:
-    a task is looked at once after each time it became Done."""
+    """Every Done task here with agents left ends them (end_done()), and once none is left its
+    worktree goes (tidy_done(), SHEP-161). Cheap when nothing's left: a task is looked at once after
+    each time it became Done, and again only while its worktree is still on disk."""
+    ending = lambda t: t.get("state") == "done" and (t.get("ended_at") or 0) <= (t.get("done_at") or 1)
     ended = []
     for p in store_files(folder):
         d = read_list(p)
         tasks = (d or {}).get("tasks") or []
-        if not d or not os.path.isdir(d.get("folder") or "") or not any(
-                t.get("state") == "done" and (t.get("ended_at") or 0) <= (t.get("done_at") or 1) for t in tasks):
+        if not d or not os.path.isdir(d.get("folder") or "") or not any(ending(t) or tidy_due(t) for t in tasks):
             continue
         with Store(locate(d["folder"])) as s:
             for t in s.data["tasks"]:
-                if t.get("state") == "done" and (t.get("ended_at") or 0) <= (t.get("done_at") or 1):
+                if ending(t):
                     ended += end_done(s, t, report, pressed)
+                if not ending(t) and tidy_due(t):
+                    try:
+                        tidy_done(s, t, report)
+                    except Exception as e:  # never stops ending the others
+                        report.setdefault("tidy_error", []).append(f"{s.ref(t)}: {e}")
     if ended:
         # Ended terminals leave hc's list too (a moment after: hc rm takes finished ones only).
         time.sleep(1)
