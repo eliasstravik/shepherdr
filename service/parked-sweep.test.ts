@@ -3,13 +3,14 @@
 // "<machine>/<pane>", its own machine's as just "<pane>". Neither window may take the other's naming for a pane
 // that's gone and end an Assistant whose chat is open.
 import { beforeEach, expect, mock, test } from "bun:test";
+import { fakeHerdr } from "./fake-herdr";
 
 type View = { machines: any[]; panes: any[]; terminals: any[]; spaces: any[] };
 let view: View;
 let killed: string[];
 // bun keeps one "herdr" module for the whole run, and a later file's mock.module can only change the names it has:
-// so this mock has every name another test's mock gives it too (service/local.test.ts).
-mock.module("herdr", () => ({
+// so this mock has every name (fake-herdr.ts).
+mock.module("herdr", () => fakeHerdr({
   home: () => "/nonexistent",
   readTextFile: async () => "",
   setShared: () => {},

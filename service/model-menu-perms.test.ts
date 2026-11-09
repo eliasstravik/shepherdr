@@ -32,7 +32,7 @@ const opened = () => {
   const m: any = new ModelMenu();
   m.init({}, cx);
   m.render(cx);
-  handler(byId("perms"), "on_click")({}, cx);
+  handler(byId("perms"), "on_click")!({}, cx);
   built.length = 0;
   m.render(cx);
   expect(m.permOpen).toBe(true);

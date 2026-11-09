@@ -7,7 +7,7 @@ import { built, byId, fakeGpuiBase, fakeGpuiKit, type Call } from "./fake-gpui";
 
 const none = async () => ({ code: 1, stdout: "", stderr: "" });
 mock.module("herdr", () => fakeHerdr({
-  props: () => ({ overlay: "o1" }), theme: () => new Proxy({}, { get: () => "#000000" }), home: () => "/home/me", exec: none, hc: none,
+  props: () => ({ overlay: "o1" }), theme: () => new Proxy({}, { get: () => "#000000" }), home: () => "/nonexistent-home", exec: none, hc: none,
   shared: () => undefined, setShared: () => {}, machines: () => [], focused: () => null, spaces: () => [], agents: () => [], panes: () => [], terminals: () => [],
 }));
 mock.module("gpui-kit", () => fakeGpuiKit());
@@ -25,7 +25,7 @@ const browsing = (n: number) => {
   Object.assign(d, {
     machine: "vmb", machineOpen: false, listOpen: true, hi: -1, picked: 0, text: "~/code", icon: null, extra: [], recent: [],
     exists: new Map(), repo: new Map(), makeRepo: true, busy: false, error: "", input: {},
-    browse: { dir: "/home/me/code", rows: Array.from({ length: n }, (_, i) => ({ path: `/home/me/code/p${i}` })) },
+    browse: { dir: "/nonexistent-home/code", rows: Array.from({ length: n }, (_, i) => ({ path: `/nonexistent-home/code/p${i}` })) },
   });
   d.draw(cx);
   return byId("folder-rows");
