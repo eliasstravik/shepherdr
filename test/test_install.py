@@ -206,6 +206,58 @@ class Install(unittest.TestCase):
         self.assertFalse(os.path.exists(unit))
         self.assertFalse(os.path.exists(self.p(".local/share/shepherdr/service/main.ts")))
 
+    def test_update_removes_obsolete_hashed_web_assets(self):
+        """A later web build has new hashes: the update removes old recorded assets so doctor can release sync."""
+        src_parent, root = tempfile.mkdtemp(prefix="shepherdr-assets-src-"), tempfile.mkdtemp(prefix="shepherdr-assets-root-")
+        src = os.path.join(src_parent, "s")
+        try:
+            shutil.copytree(ROOT, src, ignore=shutil.ignore_patterns(".git", "node_modules", "__pycache__"))
+            dist = os.path.join(src, "web", "dist")
+            assets = os.path.join(dist, "assets")
+
+            def build(js_hash, css_hash, chunk_hash):
+                shutil.rmtree(assets, ignore_errors=True)
+                os.makedirs(assets)
+                with open(os.path.join(assets, f"index-{js_hash}.js"), "w") as f:
+                    f.write(f"// build {js_hash}\n")
+                with open(os.path.join(assets, f"index-{css_hash}.css"), "w") as f:
+                    f.write(f"/* build {css_hash} */\n")
+                with open(os.path.join(assets, f"chunk-{chunk_hash}.js"), "w") as f:
+                    f.write(f"// chunk {chunk_hash}\n")
+                with open(os.path.join(dist, "index.html"), "w") as f:
+                    f.write(f'<script src="/assets/index-{js_hash}.js"></script>\n<link href="/assets/index-{css_hash}.css" rel="stylesheet">\n')
+
+            build("AAAA1111", "BBBB1111", "EEEE1111")
+            run("install", "--root", root, "--source", src, "--yes")
+            installed_assets = os.path.join(root, ".local/share/shepherdr/web/dist/assets")
+            self.assertTrue(os.path.isfile(os.path.join(installed_assets, "index-AAAA1111.js")))
+            self.assertTrue(os.path.isfile(os.path.join(installed_assets, "index-BBBB1111.css")))
+            self.assertTrue(os.path.isfile(os.path.join(installed_assets, "chunk-EEEE1111.js")))
+            self.assertIn("whole", run("doctor", "--root", root).stdout)
+
+            # Model an install where the old build's hashed files have already disappeared but their
+            # paths remain in installed.json, as on the affected 3.1.29 installation.
+            os.remove(os.path.join(installed_assets, "index-AAAA1111.js"))
+            broken = run("doctor", "--root", root, ok=False).stdout
+            self.assertIn("missing: .local/share/shepherdr/web/dist/assets/index-AAAA1111.js", broken)
+
+            build("CCCC2222", "DDDD2222", "FFFF2222")
+            run("update", "--root", root, "--source", src, "--yes")
+            self.assertTrue(os.path.isfile(os.path.join(installed_assets, "index-CCCC2222.js")))
+            self.assertTrue(os.path.isfile(os.path.join(installed_assets, "index-DDDD2222.css")))
+            self.assertTrue(os.path.isfile(os.path.join(installed_assets, "chunk-FFFF2222.js")))
+            self.assertFalse(os.path.exists(os.path.join(installed_assets, "index-AAAA1111.js")))
+            self.assertFalse(os.path.exists(os.path.join(installed_assets, "index-BBBB1111.css")))
+            self.assertFalse(os.path.exists(os.path.join(installed_assets, "chunk-EEEE1111.js")))
+            with open(os.path.join(root, APP, "data/shepherdr/installed.json")) as f:
+                record = json.load(f)
+            self.assertFalse(any(any(n in p for n in ("index-AAAA1111.js", "index-BBBB1111.css", "chunk-EEEE1111.js"))
+                                 for p in record["files"]))
+            self.assertIn("whole", run("doctor", "--root", root).stdout)
+        finally:
+            shutil.rmtree(src_parent, ignore_errors=True)
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_port(self):
         """install --port (GitHub #635): the unit starts the service on it, the record keeps it for updates, 7788 puts the
         default back; a port out of range is refused."""

@@ -1003,8 +1003,17 @@ def cmd_install(a, update=False):
     actions = [(g, rel, "replace" if how == "keep" and g in mods and rel in old_files and old_files[rel] != fsha(rel, data)
                 else how, data, mode) for g, rel, how, data, mode in actions]
     shipped = {x[1] for x in actions}
-    gone = [rel for rel in old_files if rel.startswith(f"{APP}/") and rel not in shipped and not rel.startswith(f"{APP}/keys")
-            and rel != f"{BIN}/herdr-app" and fsha(rel, read(r.p(rel))) == old_files[rel]]
+    # Also retire files from the service tree (especially Vite's content-hashed web assets). They are
+    # recorded in the same install manifest, but live under SHARE rather than APP; leaving them in the
+    # record makes doctor report missing files forever after a build changes its hashes.
+    owned_roots = (f"{APP}/", f"{SHARE}/")
+    gone = []
+    for rel, sha in old_files.items():
+        if not rel.startswith(owned_roots) or rel in shipped or rel.startswith(f"{APP}/keys") or rel == f"{BIN}/herdr-app":
+            continue
+        have = read(r.p(rel))
+        if have is None or fsha(rel, have) == sha:
+            gone.append(rel)
     counts = {}
     for x in actions:
         counts[x[2]] = counts.get(x[2], 0) + 1
@@ -1047,7 +1056,7 @@ def cmd_install(a, update=False):
         elif how in ("new", "update", "adopt"):
             atomic_write(r.p(rel), data, mode)
     for rel in gone:
-        if not rel.startswith(f"{APP}/mods/") and not r.dry:
+        if not rel.startswith(f"{APP}/mods/") and not r.dry and read(r.p(rel)) is not None:
             os.remove(r.p(rel))
     for g, rel, how, data, mode in actions:
         if how != "keep":
