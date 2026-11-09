@@ -402,10 +402,15 @@ def task_settings(s, t, space=None, argv=None):
         lines.append({"label": label, "text": text, "value": value, "by": by})
 
     rounds_cfg = int(k.get("review_rounds") or 0)
+    # The Review its brief gave (keep_review): a setting changed while it runs is for tasks added
+    # later, as the change's notice says (#750); the Assistant's own --set for it still wins.
+    kept = t.get("brief_review") if "review" not in sets and "review_rounds" not in sets else None
     if "review" in sets:
         on, rev_by = sets["review"] == "on", "task"
     elif "review_rounds" in sets:
         on, rev_by = sets["review_rounds"] > 0, "task"
+    elif kept:
+        on, rev_by = bool(kept.get("on")), kept.get("by")
     else:
         on, rev_by = rounds_cfg > 0, by_layer(s, space, "tasks", "review_rounds", rounds_cfg > 0, False)
     here = t.get("mode") != "worktree"
@@ -441,10 +446,11 @@ def task_settings(s, t, space=None, argv=None):
         add("Reviewer", text, {"agent": who, "model": rv.get("model"), "effort": rv.get("effort"), "command": cmd}, rv_by)
         must = sets.get("must_fix") or (k.get("must_fix") if k.get("must_fix") in LEVELS else "major")
         add("Must fix", MUST_WORDS[must], must, "task" if "must_fix" in sets else by_layer(s, space, "tasks", "must_fix", must, "major"))
-        rounds = sets.get("review_rounds") or (rounds_cfg if rounds_cfg > 0 else 3)
+        rounds = sets.get("review_rounds") or (kept or {}).get("rounds") or (rounds_cfg if rounds_cfg > 0 else 3)
         more = int(t.get("review_rounds_added") or 0)
         add("Review rounds", f"at most {rounds + more}" + (f" ({more} added by the assistant)" if more else ""), rounds + more,
-            "task" if "review_rounds" in sets else by_layer(s, space, "tasks", "review_rounds", rounds, 3))
+            "task" if "review_rounds" in sets else (kept or {}).get("rounds_by") if kept else
+            by_layer(s, space, "tasks", "review_rounds", rounds, 3))
     policy = sets.get("merge") or (k.get("merge") if k.get("merge") in MERGE_WORDS else "ask")
     m_by = "task" if "merge" in sets else by_layer(s, space, "tasks", "merge", policy, "ask")
     if here:
@@ -468,6 +474,17 @@ def task_settings(s, t, space=None, argv=None):
 def settings_block(s, t, space=None, argv=None):
     rows = [f"- {x['label']}: {x['text']}" + (f" ({SET_BY[x['by']]})" if x["by"] else "") for x in task_settings(s, t, space, argv)]
     return "\n".join([SETTINGS_HEAD, *rows])
+
+
+def keep_review(s, t, space=None):
+    """A fresh brief gives today's Review: kept on the task (brief_review), so its Settings block,
+    ready and reviewed keep agreeing with that brief while it runs (#750)."""
+    t.pop("brief_review", None)
+    rows = {x["label"]: x for x in task_settings(s, t, space)}
+    rev, rounds = rows["Review"], rows.get("Review rounds")
+    t["brief_review"] = {"on": bool(rev["value"]), "by": rev["by"]}
+    if rounds:
+        t["brief_review"].update(rounds=rounds["value"] - int(t.get("review_rounds_added") or 0), rounds_by=rounds["by"])
 
 
 def review_limits(s, t):

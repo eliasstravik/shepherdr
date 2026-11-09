@@ -4186,3 +4186,31 @@ class TaskFlow(unittest.TestCase):
         got.clear()
         self.commands.cmd_switch(self.args(space=None, agent="claude", argv=None, parent=None, keep=False))
         self.assertEqual(got, ["sp-a"])  # none given: the old agent's own space
+
+    def settings(self, d):
+        import herdr_task.settings as settings
+        f = os.path.join(self.root, "shepherdr.json")
+        with open(f, "w") as fh:
+            json.dump(d, fh)
+        self.patch(settings, "SETTINGS", f)
+        return settings
+
+    def test_a_running_task_keeps_its_briefs_review(self):
+        """#750: Review turned on everywhere while a task runs: its brief said off, so show and ready say off too."""
+        settings = self.settings({})
+        self.task["agents"] = [{"argv": ["claude"], "agent": "claude"}]
+        settings.keep_review(self.store, self.task)  # its brief: Review off
+        self.task["review_gate"] = True
+        self.commit(self.task["worktree"], "work", "a.txt")
+        self.task["head"] = self.git(self.task["worktree"], "rev-parse", "HEAD")
+        self.settings({"everywhere": {"tasks": {"review_rounds": 3}}})
+        self.assertEqual(settings.review_limits(self.store, self.task)[0], False)
+        self.assertIn("- Review: off", settings.settings_block(self.store, self.task))
+        self.assertIsNone(self.commands.review_refusal(self.store, self.task, self.task["worktree"]))
+        # A fresh brief (a task started now) gets today's: on, three rounds, and ready waits for one.
+        settings.keep_review(self.store, self.task)
+        self.assertEqual(settings.review_limits(self.store, self.task), (True, 3))
+        self.assertIn("isn't reviewed", self.commands.review_refusal(self.store, self.task, self.task["worktree"]))
+        # Turned off again meanwhile: still on for this one, as its brief said.
+        self.settings({})
+        self.assertEqual(settings.review_limits(self.store, self.task), (True, 3))
