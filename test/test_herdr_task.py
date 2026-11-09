@@ -3297,6 +3297,56 @@ class CodexAsksOnTheCard(unittest.TestCase):
         self.assertEqual(self.run_allow("rm -rf build", "exit 0").stdout, "")
         self.assertEqual(self.run_allow("rm -rf build", None).stdout, "")
 
+    def test_a_claude_worker_asks_on_the_card_too(self):
+        # SHEP-139: a Claude worker's question tool (AskUserQuestion) reached the card only where ~/.claude/settings.json
+        # had Herdr's hook: a machine that only runs tasks (synced herdr-task, no Herdr app) showed just "Open terminal".
+        # Its launch now carries the same hook as Codex's, in its --settings, once, beside what was there.
+        sys.path.insert(0, BIN)
+        from herdr_task import launch
+        argv = launch.own_argv(["claude", "--settings", json.dumps({"fastMode": False, "hooks": {"Stop": [{"hooks": []}]}}), "go"])
+        st = json.loads(argv[argv.index("--settings") + 1])
+        [entry] = st["hooks"]["PermissionRequest"]
+        self.assertIn(" _allow --command ", entry["hooks"][0]["command"])
+        self.assertEqual(entry["hooks"][0]["timeout"], launch.ASK_TIMEOUT)
+        self.assertFalse(st["fastMode"])
+        self.assertIn("Stop", st["hooks"])
+        # resumed (its argv given again): still one hook, and its allow rules not repeated
+        again = launch.own_argv(argv)
+        st2 = json.loads(again[again.index("--settings") + 1])
+        self.assertEqual(len(st2["hooks"]["PermissionRequest"]), 1)
+        self.assertEqual(st2["permissions"]["allow"], st["permissions"]["allow"])
+        # no --settings of its own: one is added
+        plain = launch.own_argv(["claude", "go"])
+        self.assertIn("PermissionRequest", json.loads(plain[2])["hooks"])
+
+    def test_the_card_hook_where_only_tasks_run(self):
+        # no Herdr app home here: the copy a sync left in ~/.local/share/herdr/ask is the card's hook
+        home = tempfile.mkdtemp()
+        os.makedirs(os.path.join(home, ".local", "share", "herdr", "ask"))
+        hook = os.path.join(home, ".local", "share", "herdr", "ask", "ask-hook.sh")
+        with open(hook, "w") as f:
+            f.write("exit 0\n")
+        code = ("import sys; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]);"
+                "from herdr_task.launch import ask_hook; print(ask_hook())")
+        env = {**os.environ, "HOME": home, "HERDR_APP_HOME": os.path.join(home, "none")}
+        out = subprocess.run([sys.executable, "-c", code, BIN], capture_output=True, text=True, env=env)
+        self.assertEqual(out.stdout.strip(), hook, out.stderr)
+
+    def test_a_sync_takes_the_card_hook_along(self):
+        sys.path.insert(0, BIN)
+        from herdr_task import machines
+        app = tempfile.mkdtemp()
+        os.makedirs(os.path.join(app, "mods", "chat"))
+        for name in ("ask-hook.sh", "ask-end.py"):
+            with open(os.path.join(app, "mods", "chat", name), "w") as f:
+                f.write(f"# {name}\n")
+        from unittest import mock
+        with mock.patch.object(machines, "APP_HOME", app):
+            files = {f["path"]: f for f in machines.manifest()["files"]}
+        self.assertEqual(files[".local/share/herdr/ask/ask-hook.sh"]["data"], b"# ask-hook.sh\n")
+        self.assertEqual(files[".local/share/herdr/ask/ask-hook.sh"]["mode"], 0o755)
+        self.assertIn(".local/share/herdr/ask/ask-end.py", files)
+
     def test_codex_waits_as_long_as_the_card(self):
         sys.path.insert(0, BIN)
         from herdr_task import launch

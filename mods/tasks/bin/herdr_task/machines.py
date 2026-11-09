@@ -22,7 +22,7 @@ import sys
 import threading
 import time
 
-from .base import addon_off, sync_held, bundle, ENTRY, Fail, guard, HOME, hc_json, now, PACKAGE, run, STORE
+from .base import addon_off, APP_HOME, ASK_HOME, sync_held, bundle, ENTRY, Fail, guard, HOME, hc_json, now, PACKAGE, run, STORE
 from .news import news_send, send_or_hold, typing
 
 
@@ -125,6 +125,13 @@ def manifest():
     browser = _real(".local/bin/herdr-browser")
     if browser:
         add(".local/bin/herdr-browser", _read(browser), 0o755, [browser])
+    # The chat's question-card hook (SHEP-139): a task worker's own hook (herdr-task _allow) runs it,
+    # so a machine that only runs tasks asks on the card too. From Herdr's app home, else the copy
+    # a sync left here (this machine passes it on).
+    for name, mode in (("ask-hook.sh", 0o755), ("ask-end.py", 0o644)):
+        p = next((x for x in (os.path.join(APP_HOME, "mods", "chat", name), os.path.join(HOME, ASK_HOME, name)) if os.path.isfile(x)), None)
+        if p:
+            add(f"{ASK_HOME}/{name}", _read(p), mode, [p])
     for role in ROLES:
         rel = f".config/herdr-core/templates/{role}.md"
         p = os.path.join(HOME, rel)

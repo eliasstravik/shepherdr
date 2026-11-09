@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 
-from .base import ENTRY, Fail, git, hc_json, now, run, WORKTREES
+from .base import ASK_HOME, ENTRY, Fail, git, hc_json, now, run, WORKTREES
 from .settings import agent_key, ASSISTANT_TEMPLATES, bare, BRANCH_PATTERN, branch_pattern_problem, notes, notes_part, review_limits, settings_block, settings_for
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
@@ -65,14 +65,23 @@ def own_rules(path):
     return rules
 
 
+def ask_command(path):
+    """The PermissionRequest hook every task worker gets at launch (`herdr-task _allow`): its own
+    commands allowed, anything else (a permission, its question tool, a plan) on the chat's card."""
+    return f"{shlex.quote(sys.executable)} {shlex.quote(ENTRY)} _allow --command {shlex.quote(path)}"
+
+
 def own_argv(argv):
-    """An agent's argv with its own herdr-task commands allowed (Claude Code and Codex)."""
+    """An agent's argv with its own herdr-task commands allowed and its asks on the chat's card
+    (Claude Code and Codex). SHEP-139: a Claude worker gets the card's hook in its --settings too,
+    so a machine whose ~/.claude/settings.json lacks Shepherdr's hook (one that only runs tasks)
+    still asks on the card; ask-hook.sh's own copy steps aside for it."""
     path, out = own_path(), list(argv)
     k = agent_key(out)
     if k == "claude":
         rules = own_rules(path)
-        if not rules:
-            return out
+        hook = {"hooks": [{"type": "command", "command": ask_command(path), "timeout": ASK_TIMEOUT}]}
+        cur, i = {}, None
         if "--settings" in out[:-1]:
             i = out.index("--settings")
             try:
@@ -83,14 +92,27 @@ def own_argv(argv):
                         cur = json.load(f)
                 except (OSError, ValueError):
                     cur = None
-            if isinstance(cur, dict):
-                perms = dict(cur.get("permissions") or {})
-                perms["allow"] = list(perms.get("allow") or []) + rules
-                out[i + 1] = json.dumps({**cur, "permissions": perms})
-                return out
-        return out[:1] + ["--settings", json.dumps({"permissions": {"allow": rules}})] + out[1:]
+            if not isinstance(cur, dict):
+                # a settings file it can't read: left as it is, and these go in a --settings of their own
+                cur, i = {}, None
+        merged = dict(cur)
+        if rules:
+            perms = dict(cur.get("permissions") or {})
+            perms["allow"] = list(perms.get("allow") or []) + [r for r in rules if r not in (perms.get("allow") or [])]
+            merged["permissions"] = perms
+        hooks = dict(cur.get("hooks") or {}) if isinstance(cur.get("hooks"), dict) else {}
+        asks = list(hooks.get("PermissionRequest") or [])
+        if not any(" _allow --command " in str(h.get("command", "")) for e in asks if isinstance(e, dict)
+                   for h in e.get("hooks") or [] if isinstance(h, dict)):
+            asks.append(hook)
+        hooks["PermissionRequest"] = asks
+        merged["hooks"] = hooks
+        if i is not None:
+            out[i + 1] = json.dumps(merged)
+            return out
+        return out[:1] + ["--settings", json.dumps(merged)] + out[1:]
     if k == "codex":
-        hook = f"{shlex.quote(sys.executable)} {shlex.quote(ENTRY)} _allow --command {shlex.quote(path)}"
+        hook = ask_command(path)
         # Codex runs a new hook only once trusted. This one hook's trust comes with it, for this
         # launch only: Codex's own key and hash for a -c hook (codex-rs/hooks discovery.rs
         # hook_hash, config fingerprint.rs version_for_toml), so no other hook is trusted by it.
@@ -132,10 +154,13 @@ def own_command(path, text):
 
 
 def ask_hook():
-    """The chat's question-card hook (mods/chat/ask-hook.sh) where Herdr's app home has it, else None."""
+    """The chat's question-card hook (mods/chat/ask-hook.sh): Herdr's app home's, else the copy a
+    sync left on a machine that only runs tasks (ASK_HOME); None when there's neither."""
     app = os.environ.get("HERDR_APP_HOME") or os.path.join(os.path.expanduser("~"), ".config", "herdr-app")
-    p = os.path.join(app, "mods", "chat", "ask-hook.sh")
-    return p if os.path.isfile(p) else None
+    for p in (os.path.join(app, "mods", "chat", "ask-hook.sh"), os.path.join(os.path.expanduser("~"), ASK_HOME, "ask-hook.sh")):
+        if os.path.isfile(p):
+            return p
+    return None
 
 
 def ask_card(raw):
@@ -160,8 +185,9 @@ def ask_card(raw):
 
 
 def cmd_allow(args):
-    """Codex's PermissionRequest hook: allows this launch's own herdr-task commands; anything else
-    goes to the chat's card (ask_card), and without one's answer Codex asks the person as usual."""
+    """The PermissionRequest hook of a task worker (Claude Code and Codex, own_argv): allows this
+    launch's own herdr-task commands; anything else goes to the chat's card (ask_card), and without
+    one's answer the agent asks the person in its terminal as usual."""
     raw = sys.stdin.buffer.read(1 << 20)
     try:
         data = json.loads(raw or b"{}")
