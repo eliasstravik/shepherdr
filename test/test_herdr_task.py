@@ -2493,6 +2493,50 @@ class ReviewerFlags(unittest.TestCase):
         self.assertNotIn("reviewer_model", t)
 
 
+class MachineHoldFollowsSettings(unittest.TestCase):
+    """#768: limits a tick kept in machine-hold.json (--machine/--hold) never shadow Settings >
+    Machines saved after them; a newer --hold wins again. Throwaway files; nothing is sampled."""
+
+    def setUp(self):
+        import shutil
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.machine as machine
+        import herdr_task.queues as queues
+        import herdr_task.settings as settings
+        self.queues, self.tmp = queues, tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.settings = os.path.join(self.tmp, "shepherdr.json")
+        busy = {"memory": 40, "load": 0.1, "cores": 4, "cpu": 3, "disk": 96}
+        for mod, name, value in ((settings, "SETTINGS", self.settings), (queues, "HOLD_FILE", os.path.join(self.tmp, "machine-hold.json")),
+                                 (machine, "sample", lambda: busy), (queues, "_hold", {})):
+            p = mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def hold(self):
+        self.queues._hold.clear()
+        return self.queues.machine_hold()
+
+    def save_settings(self, disk, at):
+        with open(self.settings, "w") as f:
+            json.dump({"machines": {"vm-demo": {"machine": {"start_disk": disk}}}}, f)
+        os.utime(self.settings, (at, at))
+
+    def test_settings_saved_after_the_hold_win(self):
+        self.queues.set_hold("vm-demo", {"start_load": 1.0, "start_memory": 80, "start_disk": 90})
+        os.utime(self.queues.HOLD_FILE, (1000, 1000))
+        self.assertEqual(self.hold(), "vm-demo's disk is 96% full")
+        self.save_settings(100, 2000)  # raised in Settings > Machines
+        self.assertIsNone(self.hold())
+        self.queues.set_hold("vm-demo", {"start_load": 1.0, "start_memory": 80, "start_disk": 90})  # a newer tick's
+        self.assertEqual(self.hold(), "vm-demo's disk is 96% full")
+
+    def test_no_settings_file_keeps_the_hold(self):
+        self.queues.set_hold("vm-demo", {"start_disk": 90})
+        self.assertEqual(self.hold(), "vm-demo's disk is 96% full")
+
+
 if __name__ == "__main__":
     unittest.main()
 
