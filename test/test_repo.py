@@ -383,6 +383,19 @@ class ShellScripts(unittest.TestCase):
             self.assertEqual(out.returncode, 0, f"{shell} -n {os.path.relpath(f, ROOT)}: {out.stderr}")
 
 
+class MacAudio(unittest.TestCase):
+    """#789: from Swift 6.4, `import Darwin` no longer shows crt_externs.h (an explicit submodule), so a direct
+    _NSGetEnviron() call stops mods/chat/mac-audio.swift building and the Mac's dictation and calls with it. The helper
+    finds it by dlsym, as it finds responsibility_spawnattrs_setdisclaim."""
+
+    def test_no_crt_externs_call(self):
+        with open(os.path.join(ROOT, "mods", "chat", "mac-audio.swift"), encoding="utf-8") as fh:
+            code = "\n".join(l.split("//")[0] for l in fh.read().splitlines())
+        for name in ("_NSGetEnviron", "_NSGetArgv", "_NSGetArgc", "_NSGetProgname", "_NSGetMachExecuteHeader"):
+            m = re.search(rf"(?<![\"\w]){name}\s*\(", code)
+            self.assertIsNone(m, f"{name}() needs crt_externs.h: dlsym it instead")
+        self.assertIn('dlsym(UnsafeMutableRawPointer(bitPattern: -2), "_NSGetEnviron")', code)
+
 class SessionNote(unittest.TestCase):
     """SHEP-42, SHEP-48: the chat's SessionStart hook (mods/chat/session-note.sh) adds every agent's Reactions
     words (herdr-task _session-note, on or off by its space) to its JSON: an Assistant's, a task worker's, an

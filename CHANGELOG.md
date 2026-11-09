@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- On a Mac with Swift 6.4, dictation and window voice calls work again: their audio helper failed to build
+  (GitHub #789).
 - On a Mac, the agent menu's restart, switch agent and close work again, and so does changing a chat's agent or model:
   they needed Linux's setsid and bash 4 (GitHub #736).
 - The web app is shared again on tailnets whose user ids are very large: Shepherdr misread them and decided Tailscale

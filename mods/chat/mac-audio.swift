@@ -38,11 +38,16 @@ func ownResponsibility() {
   guard posix_spawnattr_init(&attr) == 0 else { return }
   defer { posix_spawnattr_destroy(&attr) }
   guard disclaim(&attr, 1) == 0 else { return }
+  // The environment to pass on, by dlsym too: _NSGetEnviron's header (crt_externs.h) is an explicit submodule that
+  // `import Darwin` no longer shows from Swift 6.4 on (#789), and naming the submodule ties the build to one SDK's layout.
+  typealias Environ = @convention(c) () -> UnsafeMutablePointer<UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?>
+  guard let envSym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "_NSGetEnviron") else { return }
+  let nsEnviron = unsafeBitCast(envSym, to: Environ.self)
   setenv("HERDR_AUDIO_OWN", "1", 1)
   let path = Bundle.main.executablePath ?? CommandLine.arguments[0]
   let argv: [UnsafeMutablePointer<CChar>?] = CommandLine.arguments.map { strdup($0) } + [nil]
   var pid: pid_t = 0
-  let rc = argv.withUnsafeBufferPointer { posix_spawn(&pid, path, nil, &attr, $0.baseAddress, _NSGetEnviron().pointee) }
+  let rc = argv.withUnsafeBufferPointer { posix_spawn(&pid, path, nil, &attr, $0.baseAddress, nsEnviron().pointee) }
   if rc != 0 { unsetenv("HERDR_AUDIO_OWN"); return } // runs here instead
   child = pid
   // (SIGUSR1 too: a call's "drop what's queued", which the child ignores until it's ready for it)
