@@ -521,17 +521,20 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
       className={clsx('@container/task flex min-h-0 min-w-0 flex-1 flex-col border-line', !focus && !middle && 'border-l')}
     >
       <Head conversation>
-        {middle ? (
-          <>
-            <MenuButton />
-            <PlacesToggle when="closed" />
-          </>
-        ) : null}
-        {/* in a narrow column (the side's) Back is its arrow alone, so the title keeps the room */}
-        <button type="button" onClick={back} aria-label="Tasks" className="press-dim relative inline-flex h-7 shrink-0 items-center gap-0.5 rounded-full px-1.5 text-[0.8125rem] text-fg2 after:absolute after:-inset-y-2 after:inset-x-0 hover:bg-hover hover:text-fg @lg/task:pr-2.5">
-          <BackIcon className={ic} />
-          <span aria-hidden className="hidden @lg/task:inline">Tasks</span>
-        </button>
+        {/* at the task's left edge, in line with its tabs below, however wide the reading column centres the rest */}
+        <div className="to-task-gutter flex shrink-0 items-center gap-2.5">
+          {middle ? (
+            <>
+              <MenuButton />
+              <PlacesToggle when="closed" />
+            </>
+          ) : null}
+          {/* in a narrow column (the side's) Back is its arrow alone, so the title keeps the room */}
+          <button type="button" onClick={back} aria-label="Tasks" className="press-dim relative inline-flex h-7 shrink-0 items-center gap-0.5 rounded-full px-1.5 text-[0.8125rem] text-fg2 after:absolute after:-inset-y-2 after:inset-x-0 hover:bg-hover hover:text-fg @lg/task:pr-2.5">
+            <BackIcon className={ic} />
+            <span aria-hidden className="hidden @lg/task:inline">Tasks</span>
+          </button>
+        </div>
         <Dot s={task.status} p={task.report?.progress} halo />
         <Who name={task.name} kind={sub} />
         {/* its buttons close together, as a toolbar's, so the name keeps the room */}
@@ -552,7 +555,8 @@ function TaskTop({ back, task, sub, tools }: { back: () => void; task: Task; sub
   return (
     // under a bar at the top (offline, a call) the notch is already kept clear
     <div data-kb data-chrome className="relative flex shrink-0 items-center gap-2 border-b border-line px-3 pt-[calc(env(safe-area-inset-top)+6px)] pb-1.5 [[data-topbar]~*_&]:pt-1.5">
-      <RoundButton label="Tasks" onClick={back}>
+      {/* in line with the tabs and messages below (16px in); its status and title stay put */}
+      <RoundButton label="Tasks" onClick={back} className="ml-1 -mr-1">
         <BackIcon className={ic} />
       </RoundButton>
       <Dot s={task.status} p={task.report?.progress} halo />
