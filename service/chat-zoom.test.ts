@@ -70,4 +70,17 @@ describe("the window's chat at Herdr's zoom (GitHub #759)", () => {
       expect(folded).toBe(1);
     });
   }
+
+  // #775: a long reply measured with words laid out at an older width overlapped the next row.
+  test("the measurer's rows are new ones after a width change", () => {
+    zoom = 1;
+    const c = chat();
+    const seen: string[] = [];
+    c.row = (_x: any, _t: any, pre: string) => { seen.push(pre); return el(); };
+    c.measurer([{ id: "a", kind: "text" }], ["a"], theme);
+    c.measureGen++;
+    c.heights.clear();
+    c.measurer([{ id: "a", kind: "text" }], ["a"], theme);
+    expect(seen[0]).not.toBe(seen[1]);
+  });
 });

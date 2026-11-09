@@ -4546,6 +4546,8 @@ export default class Chat extends View {
           if (this.anchor && Date.now() < this.anchor.until) this.reanchor = true;
           cx.notify();
         })
-        .child(this.row(rows[i], t, "m-")))));
+        // Its words' ids carry the width's generation too, as the list's rows do: kept from an older width, a
+        // reply measured at the wrap it first had there (shorter or taller than drawn: the next row over it, #775).
+        .child(this.row(rows[i], t, `m${this.measureGen}-`)))));
   }
 }
