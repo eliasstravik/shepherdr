@@ -68,6 +68,24 @@ class Artifacts(unittest.TestCase):
             f.write(PANEL)
         return d
 
+    def test_installed_markup_gets_artifact_local_path_dependencies(self):
+        dst = os.path.join(self.dir, "generated")
+        os.makedirs(dst)
+        A.package_markup(dst)
+        with open(os.path.join(dst, "artifact-markup.js"), encoding="utf-8") as f:
+            markup = f.read()
+        with open(os.path.join(dst, "artifact-dirs.js"), encoding="utf-8") as f:
+            dirs = f.read()
+        with open(os.path.join(dst, "artifact-paths.js"), encoding="utf-8") as f:
+            paths = f.read()
+        self.assertIn('from "./artifact-dirs.js"', markup)
+        self.assertNotIn('from "./dirs.js"', markup)
+        self.assertIn('from "./artifact-paths.js"', dirs)
+        self.assertNotIn('from "./core/paths.js"', dirs)
+        self.assertTrue(paths)
+        self.assertFalse(os.path.exists(os.path.join(dst, "dirs.js")))
+        self.assertFalse(os.path.exists(os.path.join(dst, "core")))
+
     def only(self):
         with A.Store(A.locate(self.folder), write=False) as s:
             return s.data["artifacts"]

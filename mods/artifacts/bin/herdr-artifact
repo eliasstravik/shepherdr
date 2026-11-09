@@ -391,9 +391,33 @@ def wrap_markup(dst):
     if not os.path.isfile(MARKUP):
         return
     os.replace(os.path.join(dst, "main.js"), os.path.join(dst, "artifact-main.js"))
-    shutil.copy2(MARKUP, os.path.join(dst, "artifact-markup.js"))
+    package_markup(dst)
     with open(os.path.join(dst, "main.js"), "w") as f:
         f.write(WRAPPER)
+
+
+def package_markup(dst):
+    """Copies Mark up and its path helpers under artifact-local names.
+
+    Generated art-* mods are deliberately outside lib/COPIES: shipping shared-module names
+    there makes sync-shared mistake generated content for an unregistered shared copy.
+    """
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))
+    deps = ((MARKUP, "artifact-markup.js", 'from "./dirs.js"', 'from "./artifact-dirs.js"'),
+            (os.path.join(root, "lib", "dirs.js"), "artifact-dirs.js", 'from "./core/paths.js"', 'from "./artifact-paths.js"'),
+            (os.path.join(root, "core", "paths.js"), "artifact-paths.js", None, None))
+    for src, name, old, new in deps:
+        try:
+            with open(src, encoding="utf-8") as f:
+                body = f.read()
+        except OSError as e:
+            raise Fail(f"Mark up dependency is missing: {src}: {e}")
+        if old:
+            if body.count(old) != 1:
+                raise Fail(f"Mark up dependency import changed in {src}; update artifact packaging")
+            body = body.replace(old, new)
+        with open(os.path.join(dst, name), "w", encoding="utf-8") as f:
+            f.write(body)
 
 
 def write_mod(src, files, art, mod, agent, machine=None):
@@ -893,8 +917,16 @@ def cmd_pack(o):
 
 def markup_hash():
     try:
-        with open(MARKUP, "rb") as f:
-            return hashlib.sha1(f.read()).hexdigest()[:12]
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))
+        paths = (MARKUP, os.path.join(root, "lib", "dirs.js"), os.path.join(root, "core", "paths.js"))
+        h = hashlib.sha1()
+        for path in paths:
+            with open(path, "rb") as f:
+                h.update(path.encode())
+                h.update(b"\0")
+                h.update(f.read())
+                h.update(b"\0")
+        return h.hexdigest()[:12]
     except OSError:
         return ""
 
