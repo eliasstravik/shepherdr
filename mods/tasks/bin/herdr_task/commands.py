@@ -451,6 +451,9 @@ def review_refusal(s, t, wt):
         return None
     ref, ht, folder = s.ref(t), own_path(), shlex.quote(s.loc["folder"])
     what = f"your final commit {head[:7]}" if head else "this task's work"
+    seen = sorted({r["head"][:7] for r in revs if r.get("head")}) if wt else []
+    if seen:
+        what += f" (rounds are recorded on {', '.join(seen)})"
     if rounds_used(t) >= rounds:
         t["review_out"] = now()
         return (f"All {rounds} review rounds are used and {what} isn't reviewed. Say why in your chat, set your status line to "
@@ -477,9 +480,19 @@ def cmd_reviewed(args):
                        f"Assistant can add a round (herdr-task review-more {s.ref(t)}).")
         wt = t.get("worktree") if t.get("mode") == "worktree" else None
         head = None
-        if wt and os.path.isdir(wt):
+        where = wt if wt and os.path.isdir(wt) else (s.loc["folder"] if s.loc["kind"] == "repo" else None)
+        named = getattr(args, "commit", None)
+        if named:
+            # The commit the round reviewed (#797), fixes perhaps committed since: one on this branch.
+            ok, head, _ = git(where, "rev-parse", "--verify", "--quiet", f"{named}^{{commit}}") if where else (False, "", "")
+            if not ok or not head:
+                raise Fail(f"--commit {named} isn't a commit here.")
+            if not git(where, "merge-base", "--is-ancestor", head, "HEAD")[0]:
+                raise Fail(f"--commit {named} isn't on this task's branch (HEAD or before it).")
+        elif wt and os.path.isdir(wt):
             if git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
-                raise Fail(f"{wt} has uncommitted changes: a review is of a commit. Commit first, then review it.")
+                raise Fail(f"{wt} has uncommitted changes: a review is of a commit. Commit first, then review it "
+                           "(or name the commit it reviewed with --commit).")
             head = git(wt, "rev-parse", "HEAD")[1]
         elif s.loc["kind"] == "repo":
             head = git(s.loc["folder"], "rev-parse", "HEAD")[1] or None

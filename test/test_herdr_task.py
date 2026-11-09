@@ -2537,6 +2537,77 @@ class MachineHoldFollowsSettings(unittest.TestCase):
         self.assertEqual(self.hold(), "vm-demo's disk is 96% full")
 
 
+class ReviewedNamesItsCommit(unittest.TestCase):
+    """#797: `reviewed --commit <sha>` records a round on the commit it reviewed, fixes committed
+    since; only a commit on the task's branch. A throwaway git repo; hc and gh are never run."""
+
+    def setUp(self):
+        import argparse
+        import shutil
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.commands as commands
+        self.commands, self.argparse = commands, argparse
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        main, self.wt = os.path.join(self.root, "repo"), os.path.join(self.root, "wt")
+        self.git(self.root, "init", "-q", "-b", "main", main)
+        for k, v in (("user.name", "T"), ("user.email", "t@example.com"), ("commit.gpgsign", "false")):
+            self.git(main, "config", k, v)
+        self.git(main, "commit", "-q", "--allow-empty", "-m", "base")
+        self.git(main, "commit", "-q", "--allow-empty", "-m", "elsewhere")
+        self.other = self.git(main, "rev-parse", "HEAD")
+        self.git(main, "worktree", "add", "-q", "-b", "task/1", self.wt, "HEAD~1")
+        self.store = Store([{"id": 1, "title": "Reactions", "state": "running", "mode": "worktree", "worktree": self.wt,
+                             "branch": "task/1", "base": "main", "start": self.git(self.wt, "rev-parse", "HEAD"), "agents": [],
+                             "review_gate": True}])
+        self.store.loc["folder"] = main
+        self.task = self.store.data["tasks"][0]
+        for name, value in (("open_store", lambda args, write=True: self.store), ("view", lambda s, t, live=None: dict(t)),
+                            ("say", lambda *a: None), ("review_limits", lambda *a: (True, 3))):
+            p = mock.patch.object(commands, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def git(self, cwd, *args):
+        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, check=True).stdout.strip()
+
+    def commit(self, words):
+        self.git(self.wt, "commit", "-q", "--allow-empty", "-m", words)
+        return self.git(self.wt, "rev-parse", "HEAD")
+
+    def reviewed(self, commit=None):
+        self.commands.cmd_reviewed(self.argparse.Namespace(id="SHEP-1", json=True, folder=None, report="one major, fixed",
+                                                           commit=commit))
+        return self.task["reviews"][-1]["head"]
+
+    def test_a_round_on_the_commit_it_reviewed(self):
+        a = self.commit("reactions on the left")
+        b = self.commit("the round's fixes")
+        self.assertEqual(self.reviewed(a[:9]), a)
+        self.task["head"] = b
+        refusal = self.commands.review_refusal(self.store, self.task, self.wt)
+        self.assertIn(f"your final commit {b[:7]} (rounds are recorded on {a[:7]})", refusal)
+        self.assertEqual(self.reviewed(), b)  # by default HEAD, as before
+        self.assertIsNone(self.commands.review_refusal(self.store, self.task, self.wt))
+
+    def test_uncommitted_fixes_still_record_the_named_commit(self):
+        a = self.commit("reactions on the left")
+        with open(os.path.join(self.wt, "fix.txt"), "w") as f:
+            f.write("a fix")
+        self.git(self.wt, "add", "fix.txt")
+        with self.assertRaises(Exception):
+            self.reviewed()
+        self.assertEqual(self.reviewed(a), a)
+
+    def test_only_a_commit_on_its_branch(self):
+        self.commit("reactions on the left")
+        for bad in (self.other, "nope"):
+            with self.assertRaises(Exception):
+                self.reviewed(bad)
+        self.assertNotIn("reviews", self.task)
+
+
 if __name__ == "__main__":
     unittest.main()
 
