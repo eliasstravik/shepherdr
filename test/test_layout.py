@@ -688,5 +688,73 @@ class OneTable(unittest.TestCase):
         self.assertEqual(name("dev-shop#3")["profile"], os.path.join(home, ".local", "state", "shepherdr", "browser", "dev-shop-3"))
 
 
+class BrowserSessionNames(unittest.TestCase):
+    """SHEP-178: agent-browser's session name stays short (its socket path is at most 103 bytes), whatever the task's
+    folder; the same each call, one per task, and the old names where they fit."""
+
+    LONG = "tmp-" + "very-long-folder-name-" * 6 + "demo#1"
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp(prefix="shep-browser-")
+        self.addCleanup(shutil.rmtree, self.home, True)
+        self.log = os.path.join(self.home, "ab.log")
+        self.bin = os.path.join(self.home, "agent-browser")
+        with open(self.bin, "w") as f:
+            f.write('#!/bin/sh\n[ "$1" = --version ] && { echo "agent-browser 0.41.1"; exit 0; }\necho "$*" >> %s\n' % self.log)
+        os.chmod(self.bin, 0o755)
+
+    def run_it(self, task, *args):
+        env = {"HOME": self.home, "PATH": os.environ["PATH"], "HERDR_BROWSER_BIN": self.bin}
+        return subprocess.run(["sh", os.path.join(ROOT, "bin", "herdr-browser"), "--task", task, *args],
+                              env=env, capture_output=True, text=True)
+
+    def session(self, task):
+        return json.loads(self.run_it(task, "--name").stdout)["session"]
+
+    def calls(self):
+        try:
+            return open(self.log).read().splitlines()
+        except OSError:
+            return []
+
+    def test_a_long_folder_gets_a_short_stable_name(self):
+        from herdr_task.browsers import session_of
+        s = self.session(self.LONG)
+        self.assertLessEqual(len(s), 40)
+        self.assertRegex(s, r"^herdr-[A-Za-z0-9_-]+-[0-9a-f]{8}$")
+        self.assertTrue(s.startswith("herdr-g-folder-name-demo-1-"), s)
+        self.assertEqual(s, self.session(self.LONG))  # the same every call
+        name = json.loads(self.run_it(self.LONG, "--name").stdout)["profile"].rsplit("/", 1)[1]
+        self.assertEqual(session_of(self.LONG, name), s)  # the tick looks for the same one
+
+    def test_two_tasks_with_the_same_tail_differ(self):
+        a = self.session("tmp-aaaaaaaaaaaaaaaaaaaa-my-long-shop-repo#1")
+        b = self.session("tmp-bbbbbbbbbbbbbbbbbbbb-my-long-shop-repo#1")
+        self.assertNotEqual(a, b)
+        self.assertEqual(a.rsplit("-", 1)[0], b.rsplit("-", 1)[0])
+
+    def test_short_names_stay_as_they_were(self):
+        self.assertEqual(self.session("dev-shepherdr#168"), "herdr-dev-shepherdr-168")
+        self.assertEqual(self.session(".config-herdr-app#57"), "herdr-config-herdr-app-57")
+        from herdr_task.browsers import session_of
+        self.assertEqual(session_of("dev-shop#2", "dev-shop-2"), "herdr-dev-shop-2")
+
+    def test_a_browser_opened_under_the_old_name_is_closed_once(self):
+        task = "home-someone-dev-a-rather-long-repo#12"   # 37 characters: fit before, cut now
+        s = self.session(task)
+        self.run_it(task, "open", "about:blank")
+        self.run_it(task, "snapshot")
+        self.assertEqual(self.calls(), [
+            "--session herdr-home-someone-dev-a-rather-long-repo-12 close",
+            "--session %s --profile %s open about:blank" % (s, os.path.join(self.home, ".herdr", "browser", task.replace("#", "-"))),
+            "--session %s --profile %s snapshot" % (s, os.path.join(self.home, ".herdr", "browser", task.replace("#", "-"))),
+        ])
+
+    def test_a_name_too_long_to_have_run_isnt_closed(self):
+        self.run_it(self.LONG, "snapshot")
+        self.assertEqual(len(self.calls()), 1)
+        self.assertIn("snapshot", self.calls()[0])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -7,6 +7,7 @@ bin/herdr-browser-view, is wanted: it ends by itself once this goes stale). A ti
 - one idle longer than the machine's browser_idle_close minutes (Settings > Machines; 10 when not
   set; 0 or "off": never), sign-ins kept. The agent's next command opens it again."""
 
+import hashlib
 import json
 import os
 import shutil
@@ -18,6 +19,14 @@ from .base import addon_off, HOME, STORE, WHERE
 ROOT = WHERE.path("browser")
 IDLE_MIN = 10
 YOU_FRESH_S = 120  # as herdr-browser: a take-over the panel stopped refreshing has ended
+
+
+def session_of(key, name):
+    """agent-browser's session for a task (as bin/herdr-browser): herdr-<name>, or for a name over 32 characters its
+    last 20 and 8 hex of the key's sha256 (SHEP-178: a long one overflows agent-browser's socket path)."""
+    if len(name) <= 32:
+        return "herdr-" + name
+    return "herdr-%s-%s" % (name[-20:].lstrip("-"), hashlib.sha256(key.encode()).hexdigest()[:8])
 
 
 def browser_path():
@@ -119,7 +128,7 @@ def browser_pass(report):
         if t is None or t.get("state") == "done":
             _close(bp, key)
             shutil.rmtree(os.path.join(ROOT, name), ignore_errors=True)
-            for ext in (".used", ".you", ".view", ".new", ".task"):
+            for ext in (".used", ".you", ".view", ".new", ".session", ".task"):
                 try:
                     os.remove(os.path.join(ROOT, name + ext))
                 except OSError:
@@ -130,7 +139,7 @@ def browser_pass(report):
             continue
         if live is None:
             live = _live_sessions(bp)
-        if "herdr-" + name not in live:
+        if session_of(key, name) not in live:
             continue
         you = _age_ms(os.path.join(ROOT, name + ".you"))
         if you is not None and you < YOU_FRESH_S * 1000:
