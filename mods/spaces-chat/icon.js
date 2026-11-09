@@ -8,10 +8,19 @@
 
 import { div, svg } from "gpui-kit";
 import { h_flex, v_flex, InputState, Input, VirtualListScrollHandle, v_virtual_list, Scrollbar } from "gpui-base";
-import { theme, props, closeOverlay, setShared, appHome, readTextFile } from "herdr";
+import { theme, props, closeOverlay, setShared, appHome, readTextFile, settings } from "herdr";
 import { PICK } from "./rename.js";
 
 const PER = 9, CELL = 36, HEAD = 28, PAD = 6;
+
+// Which column of a row a press was on, from its place in the list's area (rows take no handlers). The window reports
+// that place in pixels at Herdr's zoom (View › Zoom) while the cells are laid out at zoom 1: at zoom 1.7 a press picked
+// the emoji two cells right of it, or nothing past the middle (#751).
+export const columnAt = (pressX) => {
+  if (pressX === null || pressX === undefined) return -1;
+  const c = Math.floor((pressX / (Number(settings()?.zoom) || 1) - PAD) / CELL);
+  return c >= 0 && c < PER ? c : -1;
+};
 // The emoji list (emoji-data.js, ~150 KB) is read when a picker first opens, not with the
 // sidebar: once per build, as text (its one export is a JSON array).
 let GROUPS = [], loading = null;
@@ -116,8 +125,8 @@ export class IconPicker {
           // Rows take no handlers: the press's place says which emoji.
           .on_item_click((key) => {
             const r = this.rows().find((x) => x.key === key);
-            if (r?.kind !== "row" || this.pressX === null) return;
-            const x = r.list[Math.floor((this.pressX - PAD) / CELL)];
+            if (r?.kind !== "row") return;
+            const x = r.list[columnAt(this.pressX)];
             if (x) this.pick(x.e);
           }))
         .child(Scrollbar.vertical("emoji-list").absolute().inset_0()))
