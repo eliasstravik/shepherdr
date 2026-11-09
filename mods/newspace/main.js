@@ -35,6 +35,7 @@ import { spaces, inRender } from "./live.js";
 import { dialogFooter, button, TEXT, RADIUS } from "./ui.js";
 import { NEWSPACE as K, readShepherdr, shepherdrFor, LOCAL_MACHINE, autoCoordinator, recentFolders, homeOf } from "./coordinator.js";
 import * as N from "./core/newspace.js";
+import * as S from "./core/spaces.js";
 
 // The suggestions' width (the field's: the dialog's 460 less its padding, the icon, Browse… and the gaps).
 const LIST_W = 290;
@@ -44,8 +45,12 @@ const MACHINE_W = 424;
 // its name unless renamed, its emoji or none (its server or monitor icon).
 const lookOf = (m) => { const l = shared("spaces-chat")?.machines?.[m ?? ""] ?? {}; return { name: l.name || (m ?? "This computer"), icon: l.icon ?? null }; };
 // The machines a space can be made on: this computer and each connected one (coordinator.js newSpace's choosing).
-const reachableMachines = () =>
-  N.reachable([{ key: null, on: true }, ...machines().filter((m) => m.name).map((m) => ({ key: m.name, on: m.layout === "ready" }))]);
+// In the sidebar's order (shared "spaces-chat".machineOrder, SHEP-153).
+const reachableMachines = () => {
+  const list = [{ key: null, on: true }, ...machines().filter((m) => m.name).map((m) => ({ key: m.name, on: m.layout === "ready" }))];
+  const keys = S.machinesInOrder(list.map((m) => m.key), S.machineOrderOf(shared("spaces-chat")));
+  return N.reachable(keys.map((k) => list.find((m) => (m.key ?? "") === k)));
+};
 // The icon picker's answer (mods/spaces-chat rename.js PICK): { for (this overlay), emoji, at }.
 const PICK = "spaces-chat.iconpick";
 // The home folder paths are shown from: the dialog's machine's (props.home).

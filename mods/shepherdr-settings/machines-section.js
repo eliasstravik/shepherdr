@@ -12,7 +12,8 @@
 
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { machines, home, readTextFile, setShared } from "herdr";
+import { machines, home, readTextFile, setShared, shared } from "herdr";
+import { machinesInOrder, machineOrderOf } from "./core/spaces.js";
 import { HOLD, machineDetails, pollNow } from "./machines.js";
 import { LOCAL_MACHINE } from "./coordinator.js";
 import { TEXT, button, link, toggleSwitch } from "./ui.js";
@@ -33,7 +34,9 @@ const FIELDS = [...LIMITS.map((l) => l.field), "low_priority", "worker_memory"];
 
 const toMachine = (key) => (key === LOCAL_MACHINE ? null : key); // machines.js: null is this computer
 const label = machineLabel;
-const keysNow = () => [LOCAL_MACHINE, ...machines().filter((m) => m.name && !m.temporary).map((m) => m.name)];
+// in the sidebar's order (shared "spaces-chat".machineOrder, SHEP-153), as the web app's Settings
+const keysNow = () => machinesInOrder([null, ...machines().filter((m) => m.name && !m.temporary).map((m) => m.name)], machineOrderOf(shared("spaces-chat")))
+  .map((k) => k || LOCAL_MACHINE);
 
 // Reads plan limits older than a minute the first time the section shows.
 function askOnce(view, cx) {

@@ -9,7 +9,8 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { run, props, closeOverlay, openOverlay, theme, setShared } from "herdr";
 import { spaces } from "./live.js";
-import { deleteSection, isPinned, pin } from "./sections.js";
+import { deleteSection, isPinned, pin, data } from "./sections.js";
+import { withMachineOrder } from "./core/spaces.js";
 import { assistantOf, markRead } from "./unread.js";
 import { NOTIFY, notifyOf, setNotify } from "./notify.js";
 import { openRename, openNewSection, openRenameMachine } from "./rename.js";
@@ -57,7 +58,7 @@ export function openMenu(view, p, at = "pointer") {
 
 // Each menu's items: { label, icon, hint, act }, or { sep: true }: core/menus.js's lists (the web app builds its menus
 // from the same ones), each item done here.
-const MENU_ICON = { "check-check": "mods/spaces-chat/check-check.svg", "trash-2": "mods/spaces-chat/trash-2.svg", network: "mods/coordinator/network.svg" };
+const MENU_ICON = { "check-check": "mods/spaces-chat/check-check.svg", "arrow-up": "mods/spaces-chat/arrow-up.svg", "arrow-down": "mods/spaces-chat/arrow-down.svg", "trash-2": "mods/spaces-chat/trash-2.svg", network: "mods/coordinator/network.svg" };
 const built = (list, acts) => list.map((it) => (it.sep ? it : it.setting ? { ...acts[it.id], note: it.note } : { label: it.label, icon: MENU_ICON[it.icon] ?? it.icon, act: acts[it.id] }));
 const ITEMS = {
   // The machine header's +.
@@ -76,8 +77,17 @@ const ITEMS = {
     "worktree-new": () => worktree(p.space, "new"), "worktree-open": () => worktree(p.space, "open"), "worktree-remove": () => worktree(p.space, "remove"),
     close: () => closeSpace(p.space, p.name),
   }),
-  // A machine header's right-click: its name and emoji (rename.js).
-  machine: (p) => built(machineMenu(), { rename: () => openRenameMachine(p.machine) }),
+  // A machine header's right-click: its name and emoji (rename.js), and its place among the machines (p.order: as they
+  // show; shared "spaces-chat".machineOrder, as the web app's Move up / Move down).
+  machine: (p) => {
+    const order = Array.isArray(p.order) ? p.order : [], i = order.indexOf(p.machine ?? null);
+    const step = (by) => {
+      const next = order.filter((k) => k !== (p.machine ?? null));
+      next.splice(i + by, 0, p.machine ?? null);
+      setShared("spaces-chat", withMachineOrder(data(), next));
+    };
+    return built(machineMenu({ first: i <= 0, last: i < 0 || i >= order.length - 1 }), { rename: () => openRenameMachine(p.machine), up: () => step(-1), down: () => step(1) });
+  },
   // Delete is at once; its toast offers Undo (sections.js).
   section: (p) => built(sectionMenu(), { rename: () => openRename({ section: p.section }), delete: () => deleteSection(p.section) }),
 };

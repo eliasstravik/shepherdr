@@ -26,6 +26,7 @@ import { items as needs, ASKS, toAgent, reasonOf, reqReason, REASONS, fit, tabOf
 import { words } from "./core/asks.js";
 import { taskDot, ownProgress } from "./dot.js";
 import { taskMenu } from "./core/menus.js";
+import { machinesInOrder, machineOrderOf } from "./core/spaces.js";
 // The rules for a task's status, order and words: shared with the web app (core/tasks.js).
 import { RANK, STATUS, RANK_OF, ORDER, GROUP_BY, groupBy, groupNow, machineOf, machineName, refOf, taskKey, autoPrefix, place,
   queueReason, reportOf as report, secondLine, leftOf, order, matches, day, ago, capital, short, autoWhere, fromLine, inSpace } from "./core/tasks.js";
@@ -51,8 +52,15 @@ const pinnedKeys = () => { const v = shared(PINS); return Array.isArray(v) ? v :
 // sidebar's order: the list goes by that space's name, else its folder's.
 // spaces() is read once a render (render() fills this), not once a row.
 let spaceAt = null;
+// the machines in the sidebar's order (shared "spaces-chat".machineOrder, SHEP-153): "" this computer, else names
+const machineRank = () => {
+  const keys = machinesInOrder([null, ...machines().map((m) => m.name).filter(Boolean)], machineOrderOf(shared("spaces-chat")));
+  return (m) => { const i = keys.indexOf(m ?? ""); return i < 0 ? keys.length : i; };
+};
+
 function spaceOf(list) {
-  if (!spaceAt) { spaceAt = new Map(); for (const [i, s] of spaces().entries()) { const k = `${s.machine ?? ""}:${s.folder}`; if (!spaceAt.has(k)) spaceAt.set(k, { id: s.id, name: s.name, at: i, active: Boolean(s.active) }); } }
+  // each space's place: its machine's in the sidebar's order, then Herdr's among its machine's
+  if (!spaceAt) { spaceAt = new Map(); const rank = machineRank(), n = spaces().length + 1; for (const [j, s] of spaces().entries()) { const i = rank(s.machine) * n + j; const k = `${s.machine ?? ""}:${s.folder}`; if (!spaceAt.has(k)) spaceAt.set(k, { id: s.id, name: s.name, at: i, active: Boolean(s.active) }); } }
   return spaceAt.get(`${list.machine ?? ""}:${list.folder}`) ?? { name: list.name, at: Infinity };
 }
 const placeName = (list) => spaceOf(list).name;
@@ -192,10 +200,10 @@ export default class Tasks extends View {
     cx.notify();
   }
 
-  // Every machine's lists as one: this computer's first, then the machines' in the sidebar's order.
+  // Every machine's lists as one, the machines in the sidebar's order (this computer first until dragged).
   merge() {
-    const order = [null, ...machines().map((m) => m.name).filter(Boolean)];
-    this.lists = [...this.byMachine.entries()].sort(([a], [b]) => order.indexOf(a || null) - order.indexOf(b || null)).flatMap(([, ls]) => ls);
+    const rank = machineRank();
+    this.lists = [...this.byMachine.entries()].sort(([a], [b]) => rank(a || null) - rank(b || null)).flatMap(([, ls]) => ls);
   }
 
   // A task's agents now: live terminals labelled with its key, on the folder's machine.

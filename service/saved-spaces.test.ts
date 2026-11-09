@@ -194,3 +194,13 @@ test("reorder from the web holds even when the machine can't be reached for Herd
   expect(await act(w.hub as any, { type: "order", under: "m:vm", ids: ["vm/sp2", "vm/sp1"] }, c)).toEqual({ ok: true });
   expect(c.data["spaces-chat"].order).toEqual({ vm: ["vm/sp2", "vm/sp1"] });
 });
+
+test("the machines dragged into a new order: kept for every device, this computer as \"\" (SHEP-153)", async () => {
+  const w = world(), c = compat(w);
+  expect(await act(w.hub as any, { type: "order", under: "all", ids: ["m:vm", "m:mini"] }, c)).toEqual({ ok: true });
+  expect(c.data["spaces-chat"].machineOrder).toEqual(["vm", ""]);
+  // a machine this device doesn't show now (offline elsewhere) keeps its place after the one before it
+  c.data["spaces-chat"].machineOrder = ["far", "", "vm"];
+  await act(w.hub as any, { type: "order", under: "all", ids: ["m:vm", "m:mini"] }, c);
+  expect(c.data["spaces-chat"].machineOrder).toEqual(["far", "vm", ""]);
+});

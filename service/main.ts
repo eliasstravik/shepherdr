@@ -36,6 +36,7 @@ import { Jobs } from "./jobs.ts";
 import { terminalBridge } from "./terminal.ts";
 import { worktree } from "./worktree.ts";
 import * as W from "../core/worktree.js";
+import * as SPm from "../core/spaces.js";
 import { browserRelay } from "./browser.ts";
 import { voiceCall, callToResume, pageWhere, type ChatView } from "./voice.ts";
 import { hearing, type HearIO, type Hearing } from "./voice-hear.ts";
@@ -301,7 +302,9 @@ const snapshotOf = (b: Parameters<NonNullable<typeof model.onBuild>>[0]) => live
       secrets: secretNames.filter((x) => (s.id === "all" ? !x.space : x.space === s.id)) })),
     windowSection((k) => model.value(k))], off: offList(), offPlugins: offPlugins(),
   // every machine the window's sidebar lists: one not connected reads "Offline" (or "Connecting…") under its header
-  machines: [{ name: me?.host ?? "this machine", here: true, state: "connected" }, ...b.known.map((m) => ({ name: m.name, here: false, state: m.state }))],
+  // in the order the person dragged them into (SHEP-153): this computer first until then
+  machines: (SPm.byMachineOrder as any)([{ name: me?.host ?? "this machine", here: true, state: "connected" }, ...b.known.map((m) => ({ name: m.name, here: false, state: m.state }))],
+    (SPm.machineOrderOf as any)(model.value("spaces-chat")), (m: { name: string; here: boolean }) => (m.here ? null : m.name)),
 })));
 // a task that moved on (accepted, done) changes its news lines in its Assistant's chat, whose conversation may not move:
 // open chats are told again (compat.chat reads the rows the snapshot just took)

@@ -8,13 +8,13 @@
 // Worktree spaces nest under their repo's own. A folded section (Pinned too) still shows the space you're in and its
 // unread ones, and adds up its counts on its heading. Menus are core/menus.js's, the window's too: a right click (or a
 // finger held) opens them, no ⋯ on the rows. Spaces drag among their own, into a section or Pinned, or back to their machine's
-// top; machines and sections keep their place. Alt+↑/↓ goes to the space above or below as they show.
+// top; machines drag among themselves, their spaces along (or Move up/down in their menu, Alt+Shift+↑/↓); sections keep their place. Alt+↑/↓ goes to the space above or below as they show.
 import clsx from 'clsx'
 import { openWorktree } from '@client/screens/Worktree.tsx'
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type LiHTMLAttributes, type ReactNode } from 'react'
 import { act, counts, definePlugin, getState, goPlace, manyMachines, openSplit, placeOf, removeSpace, setUI, splitClick, useSnap, useUI, type Pane, type UI } from '@client/kernel.ts'
 import { Dialog, RowMenu, useRowMenu } from '@client/rowmenu.tsx'
-import { AutopilotIcon, BackIcon, BellIcon, CogIcon, BellSlashIcon, AttentionBadge, attentionWords, DeleteIcon, DownIcon, HashIcon, ic, IconButton, List, MenuItem, MenuLabel, MenuSeparator, MenuSetting, Meta, ModelIcon, MonitorIcon, NextIcon, PinnedIcon, PinTaskIcon, PlusIcon, Primary, ReadIcon, RemoveProjectIcon, RenameIcon, rowClass, RowText, SectionIcon, ServerIcon, SplitIcon, TasksIcon, UnpinIcon } from '@client/ui.tsx'
+import { AutopilotIcon, BackIcon, BellIcon, CogIcon, BellSlashIcon, AttentionBadge, attentionWords, DeleteIcon, DownIcon, HashIcon, ic, IconButton, List, MenuItem, MenuLabel, MenuSeparator, MenuSetting, Meta, ModelIcon, MonitorIcon, NextIcon, PinnedIcon, PinTaskIcon, PlusIcon, Primary, ReadIcon, MoveDownIcon, RemoveProjectIcon, RenameIcon, rowClass, RowText, SectionIcon, ServerIcon, SplitIcon, TasksIcon, UnpinIcon, UpIcon } from '@client/ui.tsx'
 import { HealthDot, MachineMeter } from '@plugins/health/client.tsx'
 import { toast } from '@plugins/alerts/toasts.tsx'
 import { MarkRead, markPlaceRead, muted, placeUnread } from '@client/unread.ts'
@@ -394,7 +394,7 @@ function Heading({ id, label, folds, icon: mark, shut, held, toggle, dim, classN
 /** the icon a core menu item names (core/menus.js), drawn with the web's own */
 const MENU_ICONS: Record<string, (p: { className?: string }) => ReactNode> = {
   plus: PlusIcon, 'folder-plus': SectionIcon, 'check-check': ReadIcon, pin: PinTaskIcon, 'pin-off': UnpinIcon, 'square-pen': RenameIcon,
-  settings: CogIcon, 'git-branch': SplitIcon, x: RemoveProjectIcon, 'trash-2': DeleteIcon, network: ModelIcon,
+  settings: CogIcon, 'arrow-up': UpIcon, 'arrow-down': MoveDownIcon, 'git-branch': SplitIcon, x: RemoveProjectIcon, 'trash-2': DeleteIcon, network: ModelIcon,
 }
 type CoreItem = { id?: string; label?: string; icon?: string; sep?: boolean; setting?: boolean; note?: string }
 /** a core menu (core/menus.js, the window's too) as the web draws it: its items in order, each done by `acts` */
@@ -685,11 +685,20 @@ function Emoji({ e }: { e: string }) {
 /** A machine's heading, as the window's (mods/spaces-chat main.js): its emoji (a monitor for this computer, a server for
  *  another without one) and its name; a tap folds its spaces and sections away, nothing opens. Connected: its + (New
  *  space, New section there) and its meter, a red dot when its health couldn't be read. Not connected: "Offline" (or
- *  "Connecting…"), dimmed and folded, a tap opening it for now. Its menu renames it. It stays in its place (machines
- *  don't drag); a space of its own dropped on it goes back to its top. */
-function MachineHeading({ m, shut, className }: { m: Machine; shut: boolean; className?: string }) {
+ *  "Connecting…"), dimmed and folded, a tap opening it for now. Its menu renames it and moves it up or down; it drags
+ *  among the machines (a finger held first), its spaces and sections along (SHEP-153); a space of its own dropped on it
+ *  goes back to its top. order: the machines as they show. */
+function MachineHeading({ m, shut, order, className }: { m: Machine; shut: boolean; order: string[]; className?: string }) {
   const menu = useRowMenu({ beside: true })
   const off = offline(m)
+  const i = order.indexOf(m.id)
+  const step = (by: number) => {
+    const j = i + by
+    if (i < 0 || j < 0 || j >= order.length) return
+    const ids = order.filter((x) => x !== m.id)
+    ids.splice(j, 0, m.id)
+    reorder('all', ids)
+  }
   return (
     <Heading
       id={m.id}
@@ -702,9 +711,15 @@ function MachineHeading({ m, shut, className }: { m: Machine; shut: boolean; cla
       toggle={off ? () => toggleOff(m.id) : undefined}
       data-machine={m.id}
       data-drop={m.id}
-      className={clsx(dropHeading, className, menu.open && 'bg-hover')}
-      // only its menu: a finger held on it opens it (machines keep their place)
-      onPointerDown={(e) => press(e, { id: m.id, siblings: [m.id], level: 'machine', drop: () => {}, hold: menu.hold, lift: menu.close, release: menu.release })}
+      className={clsx(dropHeading, dragged, className, menu.open && 'bg-hover')}
+      // a mouse drags it at once; a finger held opens its menu, and slid on drags it (drag.ts)
+      onPointerDown={(e) => press(e, { id: m.id, siblings: order, level: 'machine', drop: (ids) => reorder('all', ids), hold: menu.hold, lift: menu.close, release: menu.release })}
+      onKeyDown={(e) => {
+        if (!e.altKey || !e.shiftKey || e.metaKey || e.ctrlKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return
+        e.preventDefault()
+        step(e.key === 'ArrowUp' ? -1 : 1)
+      }}
+      aria-keyshortcuts={order.length > 1 ? 'Alt+Shift+ArrowUp Alt+Shift+ArrowDown' : undefined}
       onContextMenu={(e) => (dragging() ? e.preventDefault() : menu.press.onContextMenu(e))}
     >
       {off ? <Meta>{m.connecting ? 'Connecting…' : 'Offline'}</Meta> : null}
@@ -713,8 +728,12 @@ function MachineHeading({ m, shut, className }: { m: Machine; shut: boolean; cla
       {off ? null : <HealthDot m={m} />}
       {menu.open ? (
         <RowMenu menu={menu} label={m.name} className="min-w-56!">
-          {/* a machine's own menu, as the window's (core/menus.js): its name and emoji */}
-          <CoreMenuItems items={MN.machineMenu() as CoreItem[]} acts={{ rename: () => { menu.close(); setTimeout(() => openRename(m.id)) } }} />
+          {/* a machine's own menu, as the window's (core/menus.js): its name and emoji, and its place */}
+          <CoreMenuItems items={(MN.machineMenu as (o: object) => CoreItem[])({ first: i <= 0, last: i < 0 || i >= order.length - 1 })} acts={{
+            rename: () => { menu.close(); setTimeout(() => openRename(m.id)) },
+            up: () => { menu.close(); step(-1) },
+            down: () => { menu.close(); step(1) },
+          }} />
         </RowMenu>
       ) : null}
     </Heading>
@@ -761,8 +780,8 @@ function SectionHeading({ g, snap, at, className }: { g: Group; snap: Snapshot; 
 }
 
 /** an open section with no spaces in it: where they go, as the window's */
-function EmptySection({ inner }: { inner: boolean }) {
-  return <li className={clsx('flex min-h-7 items-center text-[0.75rem] text-fg3 phone:min-h-9 phone:text-[0.8125rem]', inner ? indent.inner : indent.top)}>Drag spaces here</li>
+function EmptySection({ inner, machine }: { inner: boolean; machine?: string }) {
+  return <li data-machine={machine} className={clsx('flex min-h-7 items-center text-[0.75rem] text-fg3 phone:min-h-9 phone:text-[0.8125rem]', inner ? indent.inner : indent.top)}>Drag spaces here</li>
 }
 
 /** the "Spaces" heading over the list, as the window's: its word, and its + (New space or section, on the shown space's
@@ -909,7 +928,7 @@ function Places() {
       <List className={top.length ? 'pt-3 phone:pt-4' : undefined}>
         {tree.map(({ m, shut, shown, sections }, i) => (
           <Fragment key={m.id}>
-            <MachineHeading m={m} shut={shut} className={i ? 'mt-3 phone:mt-4' : undefined} />
+            <MachineHeading m={m} shut={shut} order={tree.map((x) => x.m.id)} className={i ? 'mt-3 phone:mt-4' : undefined} />
             {shown.map((p) => (
               <Space key={p.id} p={p} snap={snap} at="machine" sort={{ under: m.id, ids: shown.map((x) => x.id) }} />
             ))}
@@ -918,7 +937,7 @@ function Places() {
               : sections.map((g) => (
                   <Fragment key={g.s.id}>
                     <SectionHeading g={g} snap={snap} at="inner" />
-                    {!g.shut && !g.spaces.length ? <EmptySection inner /> : null}
+                    {!g.shut && !g.spaces.length ? <EmptySection inner machine={m.id} /> : null}
                     {g.shown.map((p) => (
                       <Space key={p.id} p={p} snap={snap} at="inner" sort={{ under: g.s.id, ids: g.shown.map((x) => x.id) }} />
                     ))}

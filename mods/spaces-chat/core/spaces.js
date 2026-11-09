@@ -208,3 +208,31 @@ export function withOrder(d, machine, ids, now = []) {
   order[orderKey(machine)] = keptOrder(now, ids);
   return { ...x, order };
 }
+
+// ---- the order the person dragged the machines into (SHEP-153) ----
+// Kept beside the spaces' order (shared "spaces-chat".machineOrder: [machine names, "" for this computer]), so the
+// sidebar on every device, the window and the task lists show the machines alike. None saved: this computer first, then
+// the rest as they come. A machine it doesn't name (new) goes at the end; one gone simply isn't shown.
+export const machineOrderOf = (d) => (Array.isArray(d?.machineOrder) ? d.machineOrder.filter((k) => typeof k === "string") : []);
+
+// keys ("" this computer, else names; null reads as "") in the saved order, the rest after them as they came.
+export function machinesInOrder(keys, saved) {
+  const all = [...new Set(keys.map(orderKey))];
+  const first = [...new Set(saved ?? [])].filter((k) => all.includes(k));
+  return [...first, ...all.filter((k) => !first.includes(k))];
+}
+
+// list (anything with a machine) in the machines' order, each machine's own in the order they had.
+export function byMachineOrder(list, saved, machineOf = (x) => x.machine ?? null) {
+  if (!saved?.length) return list;
+  const keys = machinesInOrder(list.map(machineOf), saved);
+  const at = (x) => keys.indexOf(orderKey(machineOf(x)));
+  return list.map((x, i) => [x, i]).sort((a, b) => at(a[0]) - at(b[0]) || a[1] - b[1]).map(([x]) => x);
+}
+
+// The sidebar's data with the machines in a new order: keys as they show ("" this computer); those it had that keys
+// lacks (a machine offline elsewhere, or unknown here) stay after the one they followed.
+export function withMachineOrder(d, keys) {
+  const x = tidyBar(d);
+  return { ...x, machineOrder: keptOrder(machineOrderOf(d), keys.map(orderKey)) };
+}

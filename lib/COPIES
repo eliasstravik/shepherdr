@@ -25,7 +25,7 @@ core/chat-view.js: chat
 core/screens.js: chat
 core/send.js: chat
 core/person.js: chat shepherdr-settings tabs-tasks
-core/spaces.js: chat spaces-chat shepherdr-settings jump pane-chat
+core/spaces.js: chat spaces-chat shepherdr-settings jump pane-chat tasks newspace
 core/autopilot.js: pane-chat shepherdr-settings
 core/chat-reader.js: chat
 core/clean-env.js: chat
