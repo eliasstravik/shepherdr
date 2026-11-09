@@ -10,6 +10,7 @@ import { act, agentChat, definePlugin, getState, openItem, placeOf, setUI, shown
 import { CTRL, ic, MenuItem, MenuSeparator, MenuSetting, ModelIcon, shortcut, Small, Tab, Tabs, TermIcon } from '@client/ui.tsx'
 import type { Place, TermScreen } from '@shared/types.ts'
 import { connectTerminal, streamInput } from './stream.ts'
+import { termInPlace } from './shown.ts'
 import { colsOf, fitFont, foldShown, frame, LINE, MAX, MIN, PAD, ZOOM } from './screen.ts'
 
 const KEYMAP: Record<string, string> = {
@@ -381,7 +382,7 @@ export default definePlugin({
     reg.placeMenu.push({ order: 60, View: PlaceTerm })
     reg.placeHeader.push({ order: 15, View: ChatOrTerminal })
     reg.taskPanel.push({ id: 'terminal', order: 10, label: 'Terminal', Icon: TermIcon, View: ({ chatKey }) => <TerminalView chatKey={chatKey} panel /> })
-    reg.chatBody.push({ when: (ui, key) => ui.term === key, View: TerminalView })
+    reg.chatBody.push({ when: termInPlace, View: TerminalView })
     // Shepherdr 3: one of the space's other tabs, in place of its chat (t:<terminal>)
     reg.chatBody.push({ when: (ui) => !!ui.term?.startsWith('t:') && ui.tabView?.[ui.term] !== 'chat', View: ({ chatKey: _ }: { chatKey: string }) => <TerminalView chatKey={useUI((u) => u.term!)} /> })
     reg.keys.push({
