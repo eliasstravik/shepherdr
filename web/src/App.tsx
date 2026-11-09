@@ -56,6 +56,7 @@ import {
   FitIcon,
   FootButton,
   Head,
+  LeadBack,
   IconButton,
   Menu,
   MenuIcon,
@@ -239,6 +240,16 @@ function Drawer() {
   )
 }
 
+/** Spaces' buttons at a header's start (the drawer's, or Show Spaces while they're hidden); none in a side pane */
+function SpacesButtons({ pane }: { pane?: number }) {
+  return pane ? null : (
+    <>
+      <MenuButton />
+      <PlacesToggle when="closed" />
+    </>
+  )
+}
+
 function MenuButton() {
   const device = useUI((u) => u.device)
   const docked = useStore((s) => placesDocked(s.ui, s.snap))
@@ -319,9 +330,7 @@ function SpaceColumn({ place, pane }: { place: Place; pane?: number }) {
   const tabChat = useUI((u) => (tab && u.tabView?.[tab.term] === 'chat' ? tab.term : null))
   return (
     <section data-drawer-from className="@container/place flex min-h-0 min-w-0 flex-1 flex-col">
-      <Head conversation className="group/head">
-        <MenuButton />
-        {pane ? null : <PlacesToggle when="closed" />}
+      <Head conversation lead={<SpacesButtons pane={pane} />}>
         <div className="flex min-w-24 shrink-[100] items-center">
           <Who name={name} kind={where ? <PaneWhere where={where} /> : undefined} />
         </div>
@@ -481,7 +490,9 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
   const helper = [...(task.subagents ?? [])].reverse().find((s) => s.status !== 'done')
   const sub = (
     <span className="flex min-w-0 items-center gap-1.5">
-      <span className="shrink-0 font-mono text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{ref}</span>
+      {/* its status leads its quiet line, so Back alone hangs in the gutter and the title starts where the Assistant's does */}
+      {phone ? null : <Dot s={task.status} p={task.report?.progress} className="size-3" />}
+      <span className="shrink-0 text-fg3">{ref}</span>
       {doing ? <span className="flex min-w-0 items-center gap-1.5"><span aria-hidden className="text-fg3">·</span>{doing}</span> : task.base ? <span className="min-w-0 truncate"><span aria-hidden className="text-fg3">· </span>→ {task.base}</span> : null}
       {helper ? <span data-task-subagent className="flex min-w-0 shrink-[4] items-center gap-1.5 whitespace-nowrap"><span aria-hidden className="text-fg3">·</span><span className="truncate">{`${helper.title} ${helper.status === 'needs' ? 'needs it' : 'at work'}`}</span></span> : null}
     </span>
@@ -513,9 +524,7 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
   if (pane !== undefined)
     return (
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <Head conversation>
-          {pane ? null : <><MenuButton /><PlacesToggle when="closed" /></>}
-          <Dot s={task.status} p={task.report?.progress} halo />
+        <Head conversation lead={<><SpacesButtons pane={pane} /><Dot s={task.status} p={task.report?.progress} halo /></>}>
           <Who name={task.name} kind={task.report ? <span className="flex min-w-0 gap-1">{task.id} ·<ReportLine w={task.report} head /></span> : `${task.id} · ${coordinator}`} />
           <div className="flex shrink-0 items-center gap-1">
             {tools}
@@ -532,24 +541,12 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
       onFocusCapture={split && !middle ? () => focusPane(-1) : undefined}
       className={clsx('@container/task flex min-h-0 min-w-0 flex-1 flex-col border-line', !focus && !middle && 'border-l')}
     >
-      <Head conversation>
-        {/* one row, as the Assistant's header, in the chat's reading column: Back, its status and title on the left, its
-            views (Chat, Terminal, …) on the right. Without room for both, the views wrap under the title, on Back's left
-            edge; Back, status, title and its buttons keep at least 20rem before they do */}
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-1.5 py-2">
-          <div className="flex min-w-0 flex-[1_1_20rem] items-center gap-2.5">
-            {middle ? (
-              <>
-                <MenuButton />
-                <PlacesToggle when="closed" />
-              </>
-            ) : null}
-            {/* in a narrow column (the side's) Back is its arrow alone, so the title keeps the room */}
-            <button type="button" onClick={back} aria-label="Tasks" className="press-dim relative inline-flex h-7 shrink-0 items-center gap-0.5 rounded-full px-1.5 text-[0.8125rem] text-fg2 after:absolute after:-inset-y-2 after:inset-x-0 hover:bg-hover hover:text-fg @lg/task:pr-2.5">
-              <BackIcon className={ic} />
-              <span aria-hidden className="hidden @lg/task:inline">Tasks</span>
-            </button>
-            <Dot s={task.status} p={task.report?.progress} halo />
+      {/* as the Assistant's header, in the chat's reading column: its title on the messages' left edge, where the
+          Assistant's is; Back before it, hung in the gutter when there's room (Head's lead). Its views
+          (Chat, Terminal, …) on the right; without room for both they wrap under the title, which keeps at least 12rem */}
+      <Head conversation lead={<>{middle ? <SpacesButtons /> : null}<LeadBack onClick={back} /></>}>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-1.5 py-1.5">
+          <div className="flex min-w-0 flex-[1_1_12rem] items-center gap-2.5">
             <Who name={task.name} kind={sub} />
             {/* its buttons close together, as a toolbar's, so the name keeps the room */}
             {tools ? <div className="flex shrink-0 items-center gap-1">{tools}</div> : null}
