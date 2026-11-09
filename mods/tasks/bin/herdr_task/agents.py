@@ -64,8 +64,8 @@ def agent_running(k):
         # time. Only once it exec'ed its plain interactive shell has the agent exited.
         if runs_command(fg.get("argv")):
             return True
-        # Some terminal implementations retain a plain shell foreground record while the agent is
-        # active. A recognized live agent status is then evidence the worker has not exited.
+        # Some terminal implementations retain a plain shell foreground record while the agent
+        # reports its live status separately. An idle prompt without an active status is stopped.
         status = k.get("status")
         status = status.get("state") if isinstance(status, dict) else status
         agent = os.path.basename(str(k.get("agent") or ""))
@@ -141,6 +141,8 @@ def task_status(task, live):
         return ("needs", "provider", r.get("reason")) if r.get("over") else ("working", None, retry_line(r))
     if "blocked" in states:
         return "needs", "asks", REASONS["question"]
+    if trust_asked(live):
+        return "needs", "asks", REASONS["trust"]
     if busy_again(task, live):
         return "working", None, WORKING_AGAIN
     if task.get("attention"):
@@ -308,7 +310,29 @@ LINE_MAX = 40
 # do (as Shepherdr's SUMMARY_MAX); the rest goes in --details or the proof.
 SUMMARY_MAX = 160
 REASONS = {"plan": "Plan to approve", "permission": "Asks permission", "question": "Question for you",
-           "reply": "Waits for your reply", "signed_out": "Signed out"}
+           "reply": "Waits for your reply", "signed_out": "Signed out", "trust": "Asks to trust this folder"}
+
+# Claude Code's folder-trust dialog (#755): shown before it reports any status, so to Herdr the
+# agent looked like it was starting, then Working, until it stalled. Read off its screen.
+TRUST = re.compile(r"Quick safety check|Do you trust the files in this folder|Yes, I trust this folder", re.I)
+_trust_seen = {}
+
+
+def trust_asked(live):
+    """The address of a live agent showing Claude Code's folder-trust dialog, else None. Only an
+    agent that never reported a status nor took a turn: its screen is read at most every 5 s."""
+    from .base import run
+    for k in live:
+        if status_word(k) or k.get("turn") or (k.get("labels") or {}).get("herdr.agent", "claude") != "claude":
+            continue
+        address = k.get("address")
+        seen = _trust_seen.get(address)
+        if not seen or now() - seen[0] > 5000:
+            screen = run(["hc", "read", address, "--lines", "40"]).stdout or ""
+            seen = _trust_seen[address] = (now(), bool(TRUST.search(screen)))
+        if seen[1]:
+            return address
+    return None
 
 
 def fit(text, n=LINE_MAX):
@@ -746,6 +770,10 @@ def waits_on_own(task, address=None, ended=0):
     check, a review or a background job, and no background job of its ended since."""
     p = task.get("progress") or {}
     said = p.get("set") or p.get("at") or 0
+    # Out of review rounds (ready refused, review_out): it waits on its Assistant's review-more,
+    # never on a review of its own, whatever its line says ("waiting for a review round", #784).
+    if task.get("review_out"):
+        return False
     if p.get("by") or not said or said < ended or not own_line(task, address):
         return False
     left = p.get("left") if isinstance(p.get("left"), (int, float)) else 0
