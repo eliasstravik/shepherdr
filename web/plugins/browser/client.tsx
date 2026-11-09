@@ -372,7 +372,7 @@ function LiveView({ task }: { task: Task }) {
           // over the canvas, which may still hold the last page
           <div className="absolute inset-0 grid place-items-center bg-well p-6 text-center">
             <div className="flex max-w-[380px] flex-col items-center gap-1">
-              <Small className={clsx('text-pretty', note.error ? 'text-need-fg' : 'text-fg3')}>{note.text}</Small>
+              <Small className={clsx('text-pretty', note.error ? 'break-words text-need-fg' : 'text-fg3')}>{note.text}</Small>
               {note.more ? <Small className="text-pretty text-fg3 opacity-75">{note.more}</Small> : null}
               {note.open ? (
                 <Ghost className="mt-2" onClick={() => (setOpening(true), link.send({ type: 'open' }))}>

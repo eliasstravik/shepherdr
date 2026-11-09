@@ -10,7 +10,7 @@ place, never overwrites what you made yourself, and keeps a backup of anything i
 - python3 3.8 or newer, git, and Claude Code or Codex, installed and signed in.
 - bun (the service and the web app; the installer installs it from bun.sh when it's missing), and Tailscale for the
   web app.
-- Optional, per add-on: `gh` (pull requests), agent-browser 0.41.1, node and Chrome (the task browser), bun,
+- Optional, per add-on: `gh` (pull requests), node (the task browser in the window), bun,
   `pw-record` and `pw-play` for dictation and voice calls in the window on Linux (on macOS, Apple's command line
   tools: `xcode-select --install`), an ElevenLabs key for voice calls and dictation. A restricted key needs
   "User → Read" (elevenlabs.io › Developers › API Keys) for its credits to show under Plan usage in Settings › Machines.
@@ -41,6 +41,7 @@ What goes where:
 | Role instructions | `~/.config/herdr-core/templates/{assistant,worker,reviewer}.md`; one you edited is kept, the new one goes beside it as `.new` |
 | Helpers on the PATH | links in `~/.local/bin`: `herdr-task`, `herdr-artifact`, `herdr-secret`, `herdr-browser`, `shepherdr` |
 | Question cards | hooks in `~/.claude/settings.json` (SessionStart, PermissionRequest) and `~/.codex/hooks.json` (SessionStart, PermissionRequest); `--no-hooks` leaves them out. Codex asks once to trust a new hook, and needs `hooks = true` in `~/.codex/config.toml` |
+| agent-browser (the task browser) | one already on the PATH when it's 0.41.1 up to 0.41.x, else Shepherdr's own copy in `~/.local/share/shepherdr/agent-browser/<version>/` and Chrome for Testing (`agent-browser install`, into `~/.agent-browser`). See [The task browser's agent-browser](#the-task-browsers-agent-browser) |
 | The guard (`--guard`, opt-in) | `~/.local/bin/herdr-app`: refuses to open a window with another HOME, `HERDR_APP_HOME` or core session (it can overwrite every machine's spaces); subcommands pass through |
 
 What it records: `~/.config/herdr-app/data/shepherdr/installed.json`, a sha256 per file it put there. Running it
@@ -51,6 +52,27 @@ path under your home.
 
 What it refuses: a mod, layout, lib or bin file by the same name that it didn't install and that differs (your own
 mod called `chat`, say). Nothing is written then; it names each one. `--adopt` backs them up and takes them over.
+
+## The task browser's agent-browser
+
+Each task's browser runs [agent-browser](https://github.com/vercel-labs/agent-browser). Shepherdr pins a version
+(0.41.1) and works with any newer 0.41.x too: one you already have on the PATH (npm, Homebrew…) is used as it is, unless Shepherdr has its own copy here.
+When there's none, or it's another version, install, `shepherdr update` and an agent's first `herdr-browser` command
+install Shepherdr's own copy: agent-browser's release binary for this machine (macOS or Linux, x64 or arm64), checked
+against the pinned version's checksum, into `~/.local/share/shepherdr/agent-browser/<version>/`. No npm, no sudo,
+nothing global. When Chrome isn't found it runs `agent-browser install` for Chrome for Testing. A new pin in an
+update installs the new version and removes the old copy; `shepherdr uninstall` removes it.
+
+When it can't (offline, no `curl`, a download that isn't the release), the Browser tab, `herdr-browser` and
+`shepherdr doctor` say why, in full, with the one command that fixes it:
+
+```bash
+herdr-browser --install    # install or repair agent-browser and Chrome now, and say what it found
+herdr-browser --status     # what's here, as JSON (doctor's line comes from it)
+```
+
+A failed try isn't repeated by every command: the next automatic one waits 10 minutes (`--install` tries at once).
+A scratch `--root` install downloads nothing (`SHEPHERDR_AGENT_BROWSER=1` asks it to, into that root).
 
 ## Without the Herdr window
 
@@ -74,7 +96,7 @@ It shares itself on your tailnet only (`tailscale serve`, never Funnel). `shephe
 ./install.sh --web    the web app alone, without the Herdr window
 shepherdr update      the same kind again (layout, or web only), from the checkout it was installed from (git pull it first)
 shepherdr uninstall   [--root DIR] [--dry-run]: takes out what it installed and puts back what it replaced
-shepherdr doctor      [--root DIR]: checks files, links, shared copies, herdr-task and the programs it needs, and says how to update
+shepherdr doctor      [--root DIR]: checks files, links, shared copies, herdr-task and the programs it needs, agent-browser, and says how to update
 ```
 
 `--port N` moves the service off `127.0.0.1:7788`; `--https-port N` shares the web app on the tailnet's port N instead

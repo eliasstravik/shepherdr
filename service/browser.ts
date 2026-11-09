@@ -17,12 +17,17 @@ type Page = { send(text: string): void; close(): void; buffered(): number };
 const nameOf = (task: string) => task.replace(/[^A-Za-z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-/, "").replace(/-$/, "");
 const touch = (f: string) => { const t = new Date(); try { utimesSync(f, t, t); } catch { try { writeFileSync(f, ""); } catch {} } };
 
-async function ab(task: string, args: string[]) {
+/** herdr-browser's answer: its JSON data, or why it failed (its whole message: a missing agent-browser's says the
+ *  command that fixes it) */
+async function abRun(task: string, args: string[]): Promise<{ data: any; error: string }> {
   const p = Bun.spawn([BIN, "--own", "--task", task, ...args], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
-  const out = await new Response(p.stdout).text();
+  const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
   await p.exited;
-  try { return JSON.parse(out)?.data ?? null; } catch { return null; }
+  let data = null;
+  try { data = JSON.parse(out)?.data ?? null; } catch {}
+  return { data, error: p.exitCode ? err.trim().replace(/^herdr-browser: /, "") : "" };
 }
+const ab = async (task: string, args: string[]) => (await abRun(task, args)).data;
 
 /** One page's view of a task's browser. task: "<list slug>#<id>", as herdr-task labels it. */
 export function browserRelay(task: string, page: Page) {
@@ -40,7 +45,8 @@ export function browserRelay(task: string, page: Page) {
     if (looping) return;
     looping = true;
     while (!ended) {
-      const sessions = (await ab(task, ["session", "list", "--json"]))?.sessions;
+      const listed = await abRun(task, ["session", "list", "--json"]);
+      const sessions = listed.data?.sessions;
       if (Array.isArray(sessions) && sessions.includes(`herdr-${name}`)) {
         let st = await ab(task, ["stream", "status", "--json"]);
         if (st && !st.enabled) { await ab(task, ["stream", "enable"]); st = await ab(task, ["stream", "status", "--json"]); }
@@ -65,7 +71,7 @@ export function browserRelay(task: string, page: Page) {
         }
       } else if (!ended) {
         // no session: the window's view says the browser isn't open (its agent opens it when it checks a page)
-        state = { ...state, connected: false, ...(Array.isArray(sessions) ? { closed: true } : { closed: false, error: "agent-browser didn't answer." }) } as typeof state;
+        state = { ...state, connected: false, ...(Array.isArray(sessions) ? { closed: true } : { closed: false, error: listed.error || "agent-browser didn't answer." }) } as typeof state;
         show();
       }
       if (Array.isArray(sessions) && sessions.includes(`herdr-${name}`)) state = { ...state, closed: false, error: undefined } as typeof state;
