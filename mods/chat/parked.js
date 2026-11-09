@@ -7,6 +7,7 @@
 
 import { focused, shared, machines, run, exec, hc, appHome } from "herdr";
 import { panes, terminals, spaces } from "./live.js";
+import { chatPane } from "./core/spaces.js";
 
 export const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 const STATES = ["working", "blocked", "done", "idle"];
@@ -20,7 +21,7 @@ export function chatAgents() {
   const now = focused()?.pane;
   const out = [];
   for (const k of terminals()) {
-    const pane = k.labels?.["herdr.chat"];
+    const pane = chatPane(k);
     const p = pane && chats.get(pane);
     if (!p || k.state !== "live" || own.has(k.address)) continue;
     const e = { terminal: k.address };
@@ -74,7 +75,8 @@ export function sweep() {
   const have = new Set(panes().map((p) => p.pane));
   const own = new Set(panes().map((p) => p.terminal).filter(Boolean));
   for (const k of terminals()) {
-    const chat = k.labels?.["herdr.chat"];
+    // As this window names the pane: a label written by another window (or machine) matches too (#761).
+    const chat = chatPane(k);
     if (!chat || k.state !== "live") { kept.delete(k.address); continue; }
     const machine = k.address.includes("/") ? k.address.split("/")[0] : "";
     if (!ready.has(machine) || have.has(chat) || own.has(k.address)) {

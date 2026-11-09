@@ -12,6 +12,7 @@
 
 import { appHome, home, exec, hc, readTextFile, writeTextFile } from "herdr";
 import { terminals, spaces, panes } from "./live.js";
+import { chatPane } from "./core/spaces.js";
 import { serviceRuns } from "./service.js";
 
 // The ask's label and the words the agent hears: core/secrets.js, shared with the web app.
@@ -39,7 +40,7 @@ export function placeOf(address) {
   for (let i = 0; i < 5 && t; i++) {
     const l = t.labels ?? {};
     // An agent parked behind its chat has only herdr.chat=<chat pane>: the chat's space.
-    const chat = l["herdr.chat"] && panes().find((p) => p.pane === qualify(machine, l["herdr.chat"]));
+    const chat = l["herdr.chat"] && panes().find((p) => p.pane === chatPane(t));
     const sp = SPACE_LABELS.map((k) => l[k]).find(Boolean) ?? (chat && spaces().find((s) => s.tabs?.some((x) => x.id === chat.tab))?.id);
     if (sp) return { machine, space: qualify(machine, sp) };
     if (!t.parent) break;

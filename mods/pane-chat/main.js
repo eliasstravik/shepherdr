@@ -17,7 +17,7 @@ import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { props, run, theme, home, exec, hc, notify, nextCommand, shared, setShared } from "herdr";
 import { panes, terminals, spaces, inRender } from "./live.js";
-import { spaceName } from "./core/spaces.js";
+import { spaceName, chatPane, chatLabel } from "./core/spaces.js";
 import { apSpace, apWatch, apPoll, apGroup, apHeartbeatLink, COMPACT_BELOW } from "./autopilot.js";
 import { button as uiButton, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { on as addonOn } from "./addons.js";
@@ -46,7 +46,7 @@ const chatty = (p) => Boolean(p?.terminal) && (["claude-code", "codex"].includes
 const chatPanes = () => new Set(panes().filter((p) => p.mod === CHAT).map((p) => p.pane));
 // The chat pane showing a terminal, if one is open.
 function chatOf(terminal) {
-  const c = terminals().find((x) => x.address === terminal)?.labels?.[LABEL];
+  const c = chatPane(terminals().find((x) => x.address === terminal));
   return c && chatPanes().has(c) ? c : null;
 }
 // A Coordinator tab's chat with no agent yet (mods/coordinator records it in shared
@@ -54,7 +54,7 @@ function chatOf(terminal) {
 const lazySlot = (pane) => Object.values(shared("coordinator.slots") ?? {}).find((r) => r?.pane === pane) ?? null;
 
 // The agent a chat pane shows.
-const agentOf = (chat) => terminals().find((x) => x.labels?.[LABEL] === chat && x.state === "live")?.address ?? null;
+const agentOf = (chat) => terminals().find((x) => chatPane(x) === chat && x.state === "live")?.address ?? null;
 
 // One app command, waited for (the swap's steps must go in order).
 async function app(name, args) {
@@ -139,7 +139,7 @@ export default class Pane extends View {
         if (!out.pane) throw new Error("Herdr didn't open the chat");
         // The agent knows its chat: if that pane goes with its tab or space, the agents list
         // ends the agent (parked.js sweep), as closing its own pane would have.
-        await hc(["label", terminal, `${LABEL}=${out.pane}`]);
+        await hc(["label", terminal, `${LABEL}=${chatLabel(out.pane)}`]);
         run("pane.focus", { pane: out.pane });
         // Last: parking removes this pane, and this header with it. The chat turns core keep
         // back on once the park has gone through (mods/chat).
