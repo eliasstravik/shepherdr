@@ -31,7 +31,7 @@ import { createHash } from "node:crypto";
 import { API, opening, replyLine, statusLine, whereLine, apiError, ensureAgent, agentFile, navWords, toolWords, turnGate } from "./core/voice.js";
 import { screenWords } from "./core/screen.js";
 import { SECRETS, keyFor, envFile, shepPaths } from "./key.ts";
-import { audio, ended as audioEnded, type Audio } from "./audio.ts";
+import { audio, callAudio, ended as audioEnded, type Audio, type CallSound } from "./audio.ts";
 
 const [dir, addr, name] = process.argv.slice(2);
 if (!dir || !addr) { console.error("usage: bun voice.ts <call folder> <agent address> <agent name>"); process.exit(2); }
@@ -57,7 +57,7 @@ let hears = false;
 let said = "";
 
 function state() {
-  const speaking = player && Date.now() < playEnd + 250;
+  const speaking = Date.now() < playEnd + 250;
   const shown = ended ? "ended" : phase === "connecting" ? "connecting" : speaking ? "speaking"
     : phase === "thinking" && Date.now() - thinkingAt < 20000 ? "thinking" : phase === "working" && Date.now() - thinkingAt < 35000 ? "working" : "listening";
   // Who is talking, for the chat's wave: the agent while its voice plays, else the person
@@ -75,7 +75,7 @@ function end(why: string | null = null) {
   if (why) error = why;
   ended = true;
   try { ws?.close(); } catch {}
-  mic?.kill(); player?.kill(); asking?.kill();
+  sound?.stop(); asking?.kill();
   if (hears) void serviceCall("DELETE", `/api/voice/hear?call=${encodeURIComponent(callId)}`);
   state();
   setTimeout(() => process.exit(0), 100);
@@ -164,8 +164,8 @@ async function hear() {
 // ElevenLabs' answer (none for a 204), or throws its error in words without anything like a key.
 // ---- audio --------------------------------------------------------------------------------
 
-let mic: ReturnType<typeof Bun.spawn> | null = null;
-let player: ReturnType<typeof Bun.spawn> | null = null;
+// the call's mic and speaker (audio.ts callAudio): on a Mac echo-free, so the mic stays open while the agent speaks
+let sound: CallSound | null = null;
 let outRate = 16000;
 let inRate = 16000;
 let playEnd = 0;
@@ -174,16 +174,6 @@ let tools: Audio | null = null;
 // macOS's microphone prompt, while it shows (a hang-up meanwhile ends it)
 let asking: ReturnType<typeof Bun.spawn> | null = null;
 
-function startPlayer() {
-  const mac = tools!.kind === "mac";
-  const p = Bun.spawn(tools!.speaker(outRate), { stdin: "pipe", stdout: "ignore", stderr: mac ? "pipe" : "ignore" });
-  player = p;
-  // On a Mac, a speaker that can't play ends the call with why (one killed for talking over isn't that).
-  if (mac) p.exited.then(async (code) => {
-    const why = audioEnded("speaker", code, await new Response(p.stderr as ReadableStream).text().catch(() => ""));
-    if (why && player === p) end(why);
-  });
-}
 // Loudness of 16-bit samples, scaled so speech fills most of 0..1.
 function loud(pcm: Uint8Array) {
   const s = new Int16Array(pcm.slice(0, pcm.length & ~1).buffer);
@@ -196,56 +186,54 @@ let heard: { at: number; level: number }[] = [];
 let micLevel = 0;
 
 function play(pcm: Uint8Array) {
-  if (!player) startPlayer();
+  if (!sound) return;
   const now = Date.now();
   const from = Math.max(playEnd, now + 120);
   const piece = Math.round(outRate * 2 * 0.1);
   for (let i = 0; i < pcm.length; i += piece) heard.push({ at: from + (i / 2 / outRate) * 1000, level: loud(pcm.subarray(i, i + piece)) });
   if (heard.length > 3000) heard = heard.slice(-3000);
   playEnd = from + (pcm.length / 2 / outRate) * 1000;
-  try { (player!.stdin as any).write(pcm); (player!.stdin as any).flush?.(); } catch {}
+  sound.play(pcm);
   state();
 }
 // Talked over: what it was going to say is dropped.
 function hush() {
-  player?.kill();
-  player = null;
+  sound?.drop();
   playEnd = 0;
   heard = [];
   state();
 }
 
-async function startMic() {
-  const mac = tools!.kind === "mac";
-  const m = Bun.spawn(tools!.mic(inRate), { stdout: "pipe", stderr: mac ? "pipe" : "ignore" });
-  mic = m;
+function startSound() {
   const chunk = Math.round(inRate * 2 * 0.1); // 100 ms
   let buf = new Uint8Array(0);
-  for await (const part of mic.stdout as ReadableStream<Uint8Array>) {
-    if (ended) break;
-    const next = new Uint8Array(buf.length + part.length);
-    next.set(buf); next.set(part, buf.length);
-    buf = next;
-    while (buf.length >= chunk) {
-      let piece = buf.slice(0, chunk);
-      buf = buf.slice(chunk);
-      // Loud enough to be speech (RMS above ~2% of full scale): the person is talking.
-      const pcm = new Int16Array(piece.buffer, piece.byteOffset, piece.length >> 1);
-      let sum = 0;
-      for (let i = 0; i < pcm.length; i += 4) sum += pcm[i] * pcm[i];
-      if (Math.sqrt(sum / Math.max(1, pcm.length >> 2)) > 650 && Date.now() >= playEnd + 350) heardAt = Date.now();
-      micLevel = loud(piece);
-      // No echo cancellation here: while its own voice plays (and a moment after), the voice
-      // agent hears silence instead of hearing itself. Muted sends silence too.
-      if (muted || Date.now() < playEnd + 350) piece = new Uint8Array(chunk);
-      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ user_audio_chunk: Buffer.from(piece).toString("base64") }));
-    }
-  }
-  // On a Mac, a mic that stopped by itself (not allowed, unplugged) ends the call with why.
-  if (mac && !ended) {
-    const why = audioEnded("mic", await m.exited, await new Response(m.stderr as ReadableStream).text().catch(() => ""));
-    if (why) end(why);
-  }
+  sound = callAudio(tools!, inRate, outRate, {
+    failed: (why) => end(why),
+    // (quietly: the call goes on the old way, only a line for whoever reads the log)
+    fellBack: (why) => { if (why) console.error(`voice: no echo cancellation, the mic hushes while the agent speaks (${why})`); },
+    heard(part) {
+      if (ended) return;
+      const next = new Uint8Array(buf.length + part.length);
+      next.set(buf); next.set(part, buf.length);
+      buf = next;
+      while (buf.length >= chunk) {
+        let piece = buf.slice(0, chunk);
+        buf = buf.slice(chunk);
+        // Without echo cancellation, the agent's own voice comes back through the mic: while it plays (and a moment
+        // after) the mic means nothing and the voice agent hears silence instead. With it (a Mac's call), the person
+        // can talk over the agent. Muted sends silence too.
+        const hushed = !sound?.echoFree() && Date.now() < playEnd + 350;
+        // Loud enough to be speech (RMS above ~2% of full scale): the person is talking.
+        const pcm = new Int16Array(piece.buffer, piece.byteOffset, piece.length >> 1);
+        let sum = 0;
+        for (let i = 0; i < pcm.length; i += 4) sum += pcm[i] * pcm[i];
+        if (Math.sqrt(sum / Math.max(1, pcm.length >> 2)) > 650 && !hushed) heardAt = Date.now();
+        micLevel = loud(piece);
+        if (muted || hushed) piece = new Uint8Array(chunk);
+        if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ user_audio_chunk: Buffer.from(piece).toString("base64") }));
+      }
+    },
+  });
 }
 
 // ---- the chat -----------------------------------------------------------------------------
@@ -378,7 +366,7 @@ async function main() {
       inRate = Number(/pcm_(\d+)/.exec(meta.user_input_audio_format ?? "")?.[1] ?? 16000);
       phase = "listening";
       state();
-      startMic().catch((err) => end(`The microphone didn't start: ${err?.message ?? err}`));
+      try { startSound(); } catch (err: any) { end(`The microphone didn't start: ${err?.message ?? err}`); }
     }
     else if (m.type === "user_transcript") { turn.seen("user_transcript"); phase = "thinking"; thinkingAt = Date.now(); state(); }
     else if (m.type === "agent_response") {

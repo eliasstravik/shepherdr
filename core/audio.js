@@ -11,6 +11,8 @@ export const HELPER = "herdr-audio";
 export const DENIED = 3;
 export const NO_DEVICE = 4;
 export const FAILED = 5;
+/** A call's echo cancellation (Apple's voice processing) isn't there: the call records and plays apart instead. */
+export const NO_VOICE_PROCESSING = 6;
 
 const PRIVACY = "System Settings › Privacy & Security › Microphone";
 
@@ -45,6 +47,14 @@ export function micArgs(kind, rate, helper = HELPER) {
 export function speakerArgs(kind, rate, helper = HELPER) {
   if (kind === "mac") return [helper, "play", String(rate)];
   return ["pw-play", "--rate", String(rate), "--channels", "1", "--format", "s16", "--raw", "-"];
+}
+
+/** A voice call's mic and speaker in one, with echo cancellation, so the mic stays open while the agent speaks: the mic
+ *  on stdout at inRate, stdin played at outRate, SIGUSR1 drops what's queued. Only herdr-audio on a Mac (PipeWire: null,
+ *  the call records and plays apart). */
+export function callArgs(kind, inRate, outRate, helper = HELPER) {
+  if (kind === "mac") return [helper, "call", String(inRate), String(outRate)];
+  return null;
 }
 
 /** herdr-audio's embedded Info.plist: its name and why it asks (macOS shows these words in the prompt). */
