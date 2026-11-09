@@ -20,7 +20,8 @@ from .agents import (
     WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
-from .github import already_merged, finish, gh, github, merged_here, own_work, pr_adopt, pr_open, pr_pending, pr_problem, pr_view, update_main, watch_main
+from .github import (already_merged, drop_branch, finish, gh, github, merged_here, needs_approval, own_work, pr_adopt, pr_open,
+                     pr_pending, pr_problem, pr_view, update_main, watch_main)
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
     own_path, parent_for, resume_argv, retag_tabs, set_branch, tab_title, task_tabs,
@@ -709,7 +710,11 @@ def cmd_state(args, state):
         t = s.find(args.id)
         if state == "reopen":
             state = "running" if t.get("started") and t["state"] not in ("queued", "scheduled") else "todo"
-            for k in ("reviews", "review", "auto_merge", "merged", "nothing_to_merge", "accepted_at"):
+            # #844: reopened after its pull request merged: it stays open (the tick would find that
+            # pull request merged and close it again at once) until its agent says ready.
+            if t["state"] == "done" and t.get("merged"):
+                t["kept_open"] = True
+            for k in ("reviews", "review", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "merge_queued"):
                 t.pop(k, None)
         if state == "done" and t.get("worktree") and merged_here(s, t):
             t["merged"] = True
@@ -913,36 +918,71 @@ def local_merge_msg(s, t):
 
 
 MERGE_FAILED = "GitHub didn't merge it"  # a merge that failed: never in the way of the next try
+CHECKS_RUNNING = "Checks are still running."
+WAITS_APPROVAL = "It waits for an approving review."  # #743: not a problem, it merges once approved
+IN_QUEUE = "It is in GitHub's merge queue."  # #802: merging, done once GitHub merged it
+QUEUE_DAY = 24 * 3600000  # how long a base branch's merge queue is remembered
+
+
+def uses_queue(s, base):
+    q = (s.data.get("merge_queue") or {}).get(base)
+    return bool(q) and now() - q < QUEUE_DAY
 
 
 def merge_now(s, t):
     """Merges the task's pull request on GitHub (squash) and tidies up here. Returns why it
-    couldn't, or None when it's merged (and the task done)."""
+    couldn't, or None when it's merged (and the task done). A base branch with GitHub's merge
+    queue (#742, #801, #802): the pull request joins the queue and the task stays Merging until
+    GitHub merged it (the tick finishes it then, and deletes its branch there)."""
     n, repo = str(t["pr"]["number"]), t["pr"]["repo"]
     v = pr_view(t)
     s.dirty = True
     if not v:
         return f"Couldn't reach pull request #{n} on GitHub."
+    queue = False
     if v.get("state") != "MERGED":
         problem = pr_problem(v)
         if problem:
             t["attention"], t["attention_at"] = problem, now()
+            t.pop("merge_queued", None)
             return problem
+        if t.get("merge_queued"):
+            return IN_QUEUE
         if pr_pending(v):
-            return "Checks are still running."
-        ok, _, err = gh("pr", "merge", n, "--repo", repo, "--squash", "--delete-branch",
-                        "--match-head-commit", v.get("headRefOid") or "")
-        # A one-off GitHub error can come after the merge went through: asked again.
-        again = None if ok else pr_view(t)
-        if not ok and (again or {}).get("state") == "MERGED":
+            return CHECKS_RUNNING
+        if needs_approval(v):
+            t["pr"]["needs_approval"] = True
+            return WAITS_APPROVAL
+        t["pr"].pop("needs_approval", None)
+        base = t.get("base") or "main"
+        merge = lambda *extra: gh("pr", "merge", n, "--repo", repo, "--squash", *extra,
+                                  "--match-head-commit", v.get("headRefOid") or "")
+        queue = uses_queue(s, base)
+        ok, _, err = merge() if queue else merge("--delete-branch")
+        if not ok and not queue and "merge queue" in err:
+            # gh refuses --delete-branch on a merge queue: asked again without it, which queues it.
+            s.data.setdefault("merge_queue", {})[base] = now()
+            queue = True
+            ok, _, err = merge()
+        # Merged, or only queued (or set to merge by itself)? Asked again; a one-off GitHub error can
+        # also come after the merge went through.
+        again = pr_view(t)
+        if (again or {}).get("state") == "MERGED":
             v = again
-        elif not ok:
+        elif ok:
+            t["merge_queued"] = now()
+            t.pop("attention", None)
+            t["pr"]["checked"] = 0
+            return IN_QUEUE
+        else:
             t["attention"], t["attention_at"] = f"{MERGE_FAILED}: {err}", now()
             # The next tick reads the pull request at once (merged by hand meanwhile: done).
             t["pr"]["checked"] = 0
             return t["attention"]
     watch_main(s, t, ((v.get("mergeCommit") or {}).get("oid")) if v.get("state") == "MERGED" else None)
     update_main(s, t)
+    if queue or t.get("merge_queued"):
+        drop_branch(s, t)
     t["merged"] = True
     finish(s, t, even_if_busy=True)
     return None
@@ -959,8 +999,12 @@ def cmd_merge(args):
             # On GitHub: Herdr merges the pull request itself (squash), then tidies up here.
             how = "github"
             error = merge_now(s, t)
-            if error == "Checks are still running.":
+            if error == IN_QUEUE:
+                how, error = "queue", None
+            elif error == CHECKS_RUNNING:
                 error += " Merge again when they pass."
+            elif error == WAITS_APPROVAL:
+                error += " Merge again once it's approved."
         else:
             t["merge_requested"] = now()
             s.dirty = True
@@ -970,8 +1014,9 @@ def cmd_merge(args):
         say(args, {**v, "error": error}, None) if args.json else print(f"herdr-task: {error}", file=sys.stderr)
         sys.exit(1)
     text = f"{s.ref(t)}: pull request #{t['pr']['number']} merged; done." if how == "github" else \
+        f"{s.ref(t)}: pull request #{t['pr']['number']} is in GitHub's merge queue; done once GitHub merges it." if how == "queue" else \
         f"{s.ref(t)}: merge asked of {sent}" + (" (a new agent)" if started else "")
-    say(args, {**v, "terminal": sent, "new_agent": started, "merged": how == "github"}, text)
+    say(args, {**v, "terminal": sent, "new_agent": started, "merged": how == "github", "queued": how == "queue"}, text)
 
 
 def branch_tip(s, t):
@@ -1041,9 +1086,11 @@ def cmd_accept(args):
         elif t.get("pr"):
             how = "github"
             error = merge_now(s, t)
-            if error == "Checks are still running.":
-                # Accepted: it merges by itself once they pass (Merging).
-                t["auto_merge"], how, error = "checks", "checks", None
+            if error == IN_QUEUE:
+                how, error = "queue", None
+            elif error in (CHECKS_RUNNING, WAITS_APPROVAL):
+                # Accepted: it merges by itself once they pass, or once it's approved (Merging).
+                t["auto_merge"], how, error = "checks", "checks" if error == CHECKS_RUNNING else "approval", None
         elif merged_here(s, t) or in_base(s, t):
             # Its own work already in the base branch, or none of its own: nothing to merge.
             t["merged"] = merged_here(s, t)
@@ -1066,6 +1113,8 @@ def cmd_accept(args):
             "merged": f"{s.ref(t)} accepted: merged into {t.get('base') or 'main'}; done.",
             "github": f"{s.ref(t)} accepted: pull request #{(t.get('pr') or {}).get('number')} merged; done.",
             "checks": f"{s.ref(t)} accepted: it merges once its checks pass.",
+            "approval": f"{s.ref(t)} accepted: it merges once it's approved.",
+            "queue": f"{s.ref(t)} accepted: pull request #{(t.get('pr') or {}).get('number')} is in GitHub's merge queue; done once GitHub merges it.",
             "agent": f"{s.ref(t)} accepted: merge asked of {sent}" + (" (a new agent)" if started else "")}[how]
     say(args, {**v, "accepted": how, "terminal": sent, "new_agent": started}, text)
 

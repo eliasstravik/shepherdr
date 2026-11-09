@@ -74,7 +74,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Queued | "After HERD-3", "Waits: …", "Starts soon" | compat `sub` (core queueReason) | ✓ |
 | Scheduled | a grey calendar (mods/tasks/scheduled.svg), its time until it starts under it ("6h", core `leftOf`), "Starts Today 18:00" (core `startsLine`) | ui.tsx `.dot.scheduled` (the same drawing), TaskDot `until` (core `untilShort`, live), compat `sub` | ✓ (SHEP-38) |
 | Ready | "Ready 5m ago" + Review (opens the Accept card) | compat `sub` + W `accept` | ✓ |
-| Merging | "Merges once its checks pass" | compat `sub` | ✓ |
+| Merging | "Merges once its checks pass", "Merges once it's approved", "In GitHub's merge queue" (#743, #802) | compat `sub` | ✓ |
 | To do, Done | one line, place at the end | W Line one-line | ✓ |
 | Where it is | T whereOf: the space, only where the grouping doesn't say it; never the machine (SHEP-98); Settings "Where on task rows" off: none | W whereOf / autoWhere, `names` | ✓ |
 | Place gives way | T line(): after the words, it takes only the room left and shrinks first | W Line: whole or not at all (wraps out of sight) | ✓ |

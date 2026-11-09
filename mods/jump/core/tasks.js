@@ -151,9 +151,12 @@ export function place(list, task, { live = [], helpers = [], loaded = true, now 
   else if (busyAgain(task, live, now)) { section = "working"; why = WORKING_AGAIN; }
   else if (fixing) { section = "working"; why = st === "ready" ? WORKING_AGAIN : null; }
   else if (st === "ready") {
-    section = (task.merge_requested && live.length) || (task.auto_merge && task.pr && !task.merged) ? "merging" : "ready";
-    // As herdr-task's: a pull request that merges by itself once GitHub's checks pass.
-    if (section === "merging" && !(task.merge_requested && live.length)) why = "Merges once its checks pass";
+    const queued = Boolean(task.merge_queued && task.pr);
+    section = (task.merge_requested && live.length) || queued || (task.auto_merge && task.pr && !task.merged) ? "merging" : "ready";
+    // As herdr-task's: a pull request in GitHub's merge queue (merging until GitHub merged it), or one that merges by
+    // itself once GitHub's checks pass, or once it's approved.
+    if (section === "merging" && queued) why = "In GitHub's merge queue";
+    else if (section === "merging" && !(task.merge_requested && live.length)) why = task.pr.needs_approval ? "Merges once it's approved" : "Merges once its checks pass";
     // Said ready but not at rest yet (SHEP-148, herdr-task's not_at_rest()): still at work in the turn it said ready
     // in, or its own work still running (a background job, a Monitor, a helper: task.own_work, kept by its scheduler).
     // Working until it is, and only then Ready.

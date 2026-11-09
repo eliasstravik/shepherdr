@@ -16,7 +16,8 @@ from .agents import (
 )
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
-from .github import already_merged, finish, github, merged_here, pr_merged, pr_pending, pr_problem, pr_view, watch_main
+from .github import (already_merged, BEHIND, drop_branch, finish, github, merged_here, needs_approval, pr_merged, pr_pending, pr_problem,
+                     pr_view, queue_entry, update_main, watch_main)
 from .launch import default_space
 from .store import locate, read_list, Store, store_files
 from .queues import machine_hold, refresh_ext, running_count, set_hold, waiting_ext, waiting_for
@@ -37,9 +38,37 @@ def at_work(s, t):
     return any(status_word(k) in ("working", "blocked") for k in live_agents(s.key(t)))
 
 
+def holds_open(s, t):
+    """A merge GitHub reports never closes the task under it (#802, #844): reopened after its pull
+    request merged (until its agent says ready), or Working with its agent still there (its brief
+    may go on after the merge: it says ready, or ends, and is done then)."""
+    return bool(t.get("kept_open")) or (t["state"] == "running" and any(agent_running(k) for k in live_agents(s.key(t))))
+
+
+QUEUE_GRACE = 2 * 60000  # a pull request just queued may take a moment to show in GitHub's queue
+
+
+def queue_pass(s, t, v, report):
+    """A pull request Herdr put in GitHub's merge queue that is still open: still in the queue (or set
+    to join it), it stays Merging; the queue removed it (a check failed there, a conflict), it
+    needs attention, with the queue's reason (#742, #802)."""
+    if v.get("state") != "OPEN":
+        t.pop("merge_queued", None)
+        return
+    if now() - t["merge_queued"] < QUEUE_GRACE:
+        return
+    q = queue_entry(t)
+    if not q or q["in"] or q["auto"] or q.get("state") == "MERGED":
+        return
+    t.pop("merge_queued")
+    why = (q.get("reason") or "").strip().rstrip(".")
+    t["attention"], t["attention_at"] = "GitHub's merge queue removed it" + (f": {why}." if why else "."), now()
+    report["attention"].append(t["id"])
+
+
 def facts(s, t, report):
-    """A worktree task whose own work merged anywhere is done (once its agent is between turns); a
-    pull request's problems need the person."""
+    """A worktree task whose own work merged anywhere is done (once its agent is between turns, and
+    a Working one once its agent is gone or says ready); a pull request's problems need the person."""
     if t.get("pr"):
         pr = t["pr"]
         if now() - pr.get("checked", 0) < PR_EVERY:
@@ -50,15 +79,26 @@ def facts(s, t, report):
         if not v:
             return
         if v.get("state") == "MERGED":
-            if at_work(s, t):
+            if at_work(s, t) or holds_open(s, t):
                 return
             t["merged"] = True
             watch_main(s, t, (v.get("mergeCommit") or {}).get("oid"))
+            if t.get("merge_queued"):
+                # Herdr queued it: its base here catches up and its branch on GitHub goes, as a merge
+                # Herdr made itself would (merge_now()).
+                update_main(s, t)
+                drop_branch(s, t)
             finish(s, t)
             report["done"].append(t["id"])
             return
         problem = pr_problem(v)
-        t["_pr_fresh"] = not problem and not pr_pending(v)
+        if t.get("merge_queued"):
+            queue_pass(s, t, v, report)
+        if needs_approval(v):
+            pr["needs_approval"] = True
+        else:
+            pr.pop("needs_approval", None)
+        t["_pr_fresh"] = not problem and not pr_pending(v) and not needs_approval(v)
         try:
             pr_news(s, t, v, report)
         except Exception as e:  # never stops the tick
@@ -68,14 +108,15 @@ def facts(s, t, report):
         if t["state"] in ("ready", "running") and problem != t.get("attention"):
             if problem:
                 t["attention"], t["attention_at"] = problem, now()
+                t.pop("merge_queued", None)
                 report["attention"].append(t["id"])
-            elif t.get("attention", "").startswith(("Checks failing", "It conflicts", "The pull request was closed", MERGE_FAILED)):
+            elif t.get("attention", "").startswith(("Checks failing", "It conflicts", "The pull request was closed", MERGE_FAILED, BEHIND)):
                 t.pop("attention")
     elif merged_here(s, t) and not at_work(s, t):
         t["merged"] = True
         finish(s, t)
         report["done"].append(t["id"])
-    elif t.get("own") and not at_work(s, t) and now() - t.get("gh_checked", 0) >= PR_EVERY:
+    elif t.get("own") and not at_work(s, t) and not holds_open(s, t) and now() - t.get("gh_checked", 0) >= PR_EVERY:
         # SHEP-59: its pull request squash-merged without the task knowing (opened by its agent), or a
         # Ready one whose work is already in its base: done, as ready would.
         t["gh_checked"] = now()
