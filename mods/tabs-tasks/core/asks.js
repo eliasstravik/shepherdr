@@ -104,3 +104,52 @@ export function howAnswered(ask, text, where) {
   if (ask.words.kind === "questions") return `Left to talk over ${where}`;
   return plan ? `Sent back to planning ${where}` : `Denied ${where}`;
 }
+
+// ---- Codex's own questions (request_user_input) ----------------------------------------------
+// Codex gives no hook for its question tool (its PermissionRequest hook is for approvals only), so its card answers on
+// its screen, as a person would (SHEP-91): each question in turn, a number key picks a choice (and goes on to the next;
+// the last one sends them all), and an answer of one's own goes in the notes of "None of the above" (down to it, tab,
+// the words pasted and Enter). Only while the screen shows the questions the card was drawn from.
+
+/** request_user_input's arguments as the card's questions: [{ text, header, choices: [{ label, description? }] }]. */
+export function codexQuestions(args) {
+  let a = args;
+  try { a = typeof a === "string" ? JSON.parse(a) : a; } catch { return []; }
+  return (Array.isArray(a?.questions) ? a.questions : []).map((q) => ({
+    text: String(q?.question ?? ""), header: String(q?.header ?? ""),
+    choices: (Array.isArray(q?.options) ? q.options : []).map((o) => (typeof o === "string" ? { label: o } : { label: String(o?.label ?? ""), ...(o?.description ? { description: String(o.description) } : {}) })).filter((o) => o.label),
+  })).filter((q) => q.text);
+}
+
+/** A choice as the card shows it: "(Recommended)" as its tag, as Claude's. */
+export const codexChoice = (c) => {
+  const rec = /\s*\(recommended\)\s*$/i.test(c.label);
+  return { label: c.label.replace(/\s*\(recommended\)\s*$/i, ""), ...(c.description ? { description: c.description } : {}), ...(rec ? { recommended: true } : {}) };
+};
+
+/** Whether Codex's screen shows these questions' picker at its first question, none answered yet. */
+export function codexOnScreen(screen, questions) {
+  const s = String(screen ?? "").replace(/\s+/g, " ");
+  const q = questions?.[0];
+  if (!q) return false;
+  const n = questions.length;
+  const one = (w) => s.includes(String(w).replace(/\s+/g, " ").trim());
+  return new RegExp(`Question 1/${n} \\(${n} unanswered\\)`).test(s) && one(q.text) && q.choices.every((c) => one(c.label));
+}
+
+/** The steps that answer them: [{ keys: [...] } | { paste: words }], one answer per question, each its choice's label
+ *  or the person's own words. null when an answer is missing. */
+export function codexSteps(questions, answers) {
+  if (!Array.isArray(answers) || answers.length !== questions.length) return null;
+  const steps = [];
+  for (const [i, q] of questions.entries()) {
+    const said = String(answers[i] ?? "").trim();
+    if (!said) return null;
+    const k = q.choices.findIndex((c) => c.label === said || codexChoice(c).label === said);
+    if (k >= 0 && k < 9) steps.push({ keys: [String(k + 1)] });
+    else if (k >= 0) steps.push({ keys: [...Array(k).fill("down"), "enter"] });
+    // "None of the above", its notes: the words pasted, then Enter (Codex hears "None of the above" and the note)
+    else steps.push({ keys: [...Array(q.choices.length).fill("down"), "tab"] }, { paste: said });
+  }
+  return steps;
+}

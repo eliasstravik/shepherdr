@@ -175,6 +175,11 @@ function SearchButton() {
   )
 }
 
+/** what plugins put at the top of the spaces list, above Spaces (the Shepherdr voice call's row) */
+function SideTop() {
+  return registry.sideTop.map((View, i) => <View key={i} />)
+}
+
 function SideFoot({ drawer }: { drawer?: boolean }) {
   // a phone opens its list of sections; a wider screen the first, beside that list
   const phone = useUI((u) => u.device === 'phone')
@@ -206,6 +211,7 @@ function Sidebar() {
   return (
     <PlacesColumn>
       <Brand />
+      <SideTop />
       {P ? <P /> : null}
       <SideFoot />
     </PlacesColumn>
@@ -228,6 +234,7 @@ function Drawer() {
       panel={phone ? 'w-[84%] pt-[env(safe-area-inset-top)] [[data-topbar]~*_&]:pt-0' : 'w-[320px]'}
     >
       <Brand />
+      <SideTop />
       {P ? <P /> : null}
       <SideFoot drawer />
     </SlideDrawer>
@@ -873,17 +880,19 @@ function PhoneHome({ snap }: { snap: Snapshot }) {
         <div className="min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain">{tab === 'needs' && registry.views.needs ? <registry.views.needs /> : tab === 'artifacts' && Artifacts ? <Artifacts placeId={place.id} /> : Tasks ? <Tasks placeId={place.id} /> : null}</div>
       )}
       {/* the keyboard is up: the message box sits right on it, so more of the chat shows */}
+      {keyboard ? null : registry.phoneAbove.map((View, i) => <View key={i} />)}
       {keyboard ? null : <PhoneBar />}
       <Drawer />
     </div>
   )
 }
 
-/** Chat | Tasks | Artifacts and Search at the bottom of the phone (3.0 has no Needs you view: it is Tasks' first section) */
+/** Chat | Tasks | Artifacts at the bottom of the phone, then what plugins add (the voice call's button). Search is the
+ *  magnifier at the top of the ☰ drawer (SHEP-108). 3.0 has no Needs you view: it is Tasks' first section */
 function PhoneBar() {
   const tab = useUI((u) => u.tab)
   return (
-    <div className="flex shrink-0 items-center gap-2 px-4 pt-1 pb-[max(env(safe-area-inset-bottom),--spacing(4))] max-[359px]:gap-1">
+    <div className="flex shrink-0 items-center gap-2 px-4 pt-1 pb-[max(env(safe-area-inset-bottom),--spacing(4))] max-[359px]:gap-1 max-[359px]:px-2">
       {/* each tab as wide as its words and the rest shared out, so Tasks with its count gets the room it needs and the
           count never crowds the next tab */}
       <div role="group" aria-label="View" className="flex flex-1 rounded-full bg-bubble p-1">
@@ -900,18 +909,18 @@ function PhoneBar() {
             type="button"
             aria-pressed={tab === k}
             onClick={() => setUI({ tab: k, pick: null, plus: null, menu: false })}
-            className="relative flex h-12 min-w-0 flex-auto items-center justify-center gap-1.5 rounded-full text-[0.875rem] whitespace-nowrap text-fg2 aria-pressed:bg-seg-on aria-pressed:text-fg aria-pressed:shadow-seg max-[359px]:gap-1"
+            className="relative flex h-12 min-w-0 flex-auto items-center justify-center gap-1.5 rounded-full text-[0.875rem] whitespace-nowrap text-fg2 aria-pressed:bg-seg-on aria-pressed:text-fg aria-pressed:shadow-seg max-[359px]:gap-1 max-[359px]:px-1.5 max-[359px]:text-[0.8125rem]"
           >
-            {/* four tabs and Search: most phones have room for the words only, a phone in Display Zoom (320px) for fewer */}
+            {/* the tabs and the voice button: most phones have room for the words only, a phone in Display Zoom (320px) for fewer */}
             <Icon className={clsx(ic, 'max-[479px]:hidden')} />
             {k === 'needs' ? <>Needs<span className="max-[359px]:hidden"> you</span></> : l}
             {k === 'tasks' ? <TaskAttention /> : k === 'needs' ? <NeedsAttention /> : null}
           </button>
         ))}
       </div>
-      <RoundButton label="Search" className="size-14 max-[359px]:size-12" onClick={() => setUI({ search: true, searchScope: undefined })}>
-        <SearchIcon className={ic} />
-      </RoundButton>
+      {registry.phoneBar.map((View, i) => (
+        <View key={i} />
+      ))}
     </div>
   )
 }

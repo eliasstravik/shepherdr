@@ -111,3 +111,39 @@ test('what the old name kept is dropped once', () => {
     g.localStorage = was
   }
 })
+
+// SHEP-93: one stuck on its way stayed under the box while newer messages came in above it
+test('one on its way shows right after what was last when it was sent, in the order things were sent', async () => {
+  const { anchorOf, placesOf } = await import('./outbox.ts')
+  const c = chat([
+    { id: 'a1', who: 'agent', text: 'Send them whenever', at: 1 },
+    { id: 'q1', who: 'you', text: 'typed', at: 2, waiting: true },
+    { id: 'ask:1', who: 'agent', at: 3 },
+  ])
+  expect(anchorOf(c)).toBe('a1')
+  // later: the agent answered something else, and you sent another one that came back
+  const ids = [{ id: 'a1' }, { id: 'u2' }, { id: 'a3' }]
+  const places = placesOf(ids, [{ cid: 'stuck', after: 'a1' }, { cid: 'next', after: 'a3' }, { cid: 'old' }, { cid: 'gone', after: 'x' }])
+  expect(places.get('stuck')).toBe(1)
+  expect(places.get('next')).toBe(3)
+  // without its anchor: at the end
+  expect(places.get('old')).toBe(3)
+  expect(places.get('gone')).toBe(3)
+})
+
+test('one still sending keeps trying by itself for minutes (a reload resumes it), then fails with its words kept', () => {
+  const o = sent({ state: 'sending', serverAt: undefined, at: 0 })
+  expect(expire([o], 5 * 60_000)[0].state).toBe('sending')
+  const failed = expire([o], 12 * 60_000)[0]
+  expect(failed.state).toBe('failed')
+  expect(failed.text).toBe('cool')
+})
+
+test('two sent at once: once the first is in the chat, the second stays under it', async () => {
+  const { placesOf } = await import('./outbox.ts')
+  // A and B were sent after a1; A came back from the log (with its id), B is still on its way
+  const rows = [{ id: 'a1' }, { id: 'uA', cid: 'A' }, { id: 'uA:f0', cid: 'A' }]
+  expect(placesOf(rows, [{ cid: 'B', after: 'a1', before: ['A'] }]).get('B')).toBe(3)
+  // without A before it, it would sit right after a1
+  expect(placesOf(rows, [{ cid: 'B', after: 'a1' }]).get('B')).toBe(1)
+})

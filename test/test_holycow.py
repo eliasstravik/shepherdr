@@ -1,5 +1,6 @@
 """Skill routing must launch the chosen CLI, preserve task rules and fail on missing skills."""
 import json
+import contextlib
 import os
 from pathlib import Path
 import sys
@@ -9,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "mods/tasks/bin"))
-from herdr_task import settings, holycow, launch, assistant_settings, commands
+from herdr_task import settings, holycow, launch, assistant_settings, commands, automations
 from herdr_task.base import Fail
 
 
@@ -47,9 +48,9 @@ class HolyCow(unittest.TestCase):
         argv = settings.worker_argv(self.s, {"skill": "hc-plan"})
         self.assertEqual(argv, ["cursor-agent", "--model", "auto", "--auto-review"])
 
-    def test_unset_skills_follow_their_roles_and_unmarked_tasks_keep_workers(self):
+    def test_unset_skills_follow_roles_and_only_nonsoftware_tasks_keep_workers(self):
         self.assertEqual(settings.worker_pick(self.s, {"skill": "holycow-guide"}), {"agent": "cursor", "model": "auto"})
-        self.assertEqual(settings.worker_pick(self.s, {"skill": "hc-retro"}), settings.worker_pick(self.s, {}))
+        self.assertEqual(settings.worker_pick(self.s, {"skill": "hc-retro"}), settings.worker_pick(self.s, {"kind": "non-software"}))
 
     def install_skill(self, skill):
         p = self.root / "home/.agents/skills" / skill / "SKILL.md"
@@ -65,7 +66,7 @@ class HolyCow(unittest.TestCase):
             brief = launch.brief(self.s, task)
         for part in (str(path), "Existing role protocol", "Existing ready protocol", "Only this scope", "HolyCow skill: hc-plan"):
             self.assertIn(part, brief)
-        self.assertEqual(launch.holycow_brief(self.s, {"title": "No skill"}), "")
+        self.assertEqual(launch.holycow_brief(self.s, {"title": "Agenda", "kind": "non-software"}), "")
 
     def test_review_uses_selected_model_read_only_without_extra_review_loop(self):
         task = {"skill": "hc-build", "set": {"review": "on"}, "mode": "here"}
@@ -98,7 +99,8 @@ class HolyCow(unittest.TestCase):
         self.cfg["spaces"]["one"]["holycow"]["hc-build"]["model"] = "new-model"
         after = assistant_settings.rows("one", self.cfg, (False, "every hour", ""))
         self.assertNotEqual(assistant_settings.digest(before), assistant_settings.digest(after))
-        self.assertTrue(holycow.assistant_words({}).startswith("off"))
+        self.assertTrue(holycow.assistant_words({}).startswith("required"))
+        self.assertIn("required", holycow.assistant_words({"holycow": {"enabled": False}}))
 
     def test_missing_skill_does_not_mark_a_task_running_or_create_a_worktree(self):
         task = {"skill": "hc-plan", "state": "todo", "mode": "worktree"}
@@ -118,3 +120,82 @@ class HolyCow(unittest.TestCase):
         own.parent.mkdir(parents=True); own.write_text("Project instructions")
         note = launch.holycow_brief(self.s, {"skill": "hc-plan", "worktree": str(self.root / "worktree")})
         self.assertIn(str(own), note)
+
+    def test_missing_assignment_never_resolves_normal_worker_defaults(self):
+        for task in ({}, {"kind": "software"}, {"agent": "cursor", "model": "auto"}):
+            with self.subTest(task=task), patch.object(settings, "settings_for") as cfg:
+                with self.assertRaisesRegex(Fail, "require a HolyCow skill"):
+                    settings.worker_argv(self.s, task)
+                cfg.assert_not_called()
+
+    def test_unassigned_drafts_are_readable_without_a_fallback_agent(self):
+        rows = settings.task_settings(self.s, {"state": "todo"})
+        self.assertIsNone(next(r for r in rows if r["label"] == "Agent")["value"])
+        self.assertIn("require a HolyCow skill", next(r for r in rows if r["label"] == "HolyCow skill")["text"])
+
+    def test_assignment_validation_rejects_invalid_exemptions(self):
+        for task in ({"kind": "unknown"}, {"skill": "unknown"}, {"kind": "non-software", "skill": "hc-build"}):
+            with self.subTest(task=task), self.assertRaises(Fail):
+                holycow.require_assignment(task)
+        holycow.require_assignment({"kind": "non-software"})
+        task = {}
+        settings.set_opts(task, SimpleNamespace(kind="non-software"))
+        self.assertEqual(task["kind"], "non-software")
+        settings.set_task(task, "kind", "default")
+        with self.assertRaises(Fail):
+            holycow.require_assignment(task)
+
+    def test_cached_commands_cannot_bypass_launch_or_resume_guards(self):
+        for state in ("todo", "queued", "scheduled", "running", "done"):
+            task = {"state": state, "agents": [{"agent": "cursor", "argv": ["cursor-agent"], "session": "old", "at": 1}]}
+            with self.subTest(state=state), patch.object(launch, "run") as run, patch.object(commands, "parent_for") as parent:
+                with self.assertRaisesRegex(Fail, "require a HolyCow skill"):
+                    launch.launch(self.s, task, ["cursor-agent"], "one", resume=["cursor-agent", "--resume", "old"])
+                with self.assertRaisesRegex(Fail, "require a HolyCow skill"):
+                    commands.start_again(self.s, task, "one", argv_json='["cursor-agent"]')
+                run.assert_not_called(); parent.assert_not_called()
+                self.assertEqual(task["state"], state)
+
+    def test_start_refuses_unassigned_tasks_before_scheduling_or_queueing(self):
+        task = {"id": 1, "state": "todo"}
+        self.s.find = lambda _: task
+        self.s.key = lambda _: "test#1"
+        with patch.object(commands, "open_store", return_value=contextlib.nullcontext(self.s)), \
+             patch.object(commands, "live_agents", return_value=[]), patch.object(commands, "schedule") as schedule:
+            with self.assertRaisesRegex(Fail, "require a HolyCow skill"):
+                commands.cmd_start(SimpleNamespace(id=1, at="tomorrow", argv='["cursor-agent"]'))
+            schedule.assert_not_called()
+        self.assertEqual(task["state"], "todo")
+
+    def test_automation_passes_assignment_to_each_run_and_blocks_legacy_unassigned_runs(self):
+        self.s.new = lambda *args: {"state": "todo"}
+        a = {"id": 1, "title": "Build", "space": "one", "skill": "hc-build"}
+        with patch.object(automations, "worktrees_on", return_value=False), \
+             patch.object(automations, "queue_reason", return_value=None), patch.object(automations, "begin") as begin:
+            t = automations.fire(self.s, a, "run now")
+            self.assertEqual(t["skill"], "hc-build")
+            self.assertEqual(begin.call_args.args[2][:3], ["claude", "--model", "space-model"])
+            begin.reset_mock()
+            del a["skill"]
+            t = automations.fire(self.s, a, "run now")
+            self.assertIn("require a HolyCow skill", t["attention"])
+            begin.assert_not_called()
+            a["kind"] = "non-software"
+            t = automations.fire(self.s, a, "run now")
+            self.assertEqual(t["kind"], "non-software")
+            begin.assert_called_once()
+
+    def test_resumed_sessions_receive_current_skill_instructions(self):
+        skill = self.install_skill("hc-plan")
+        self.s.key = lambda _: "test#1"
+        task = {"skill": "hc-plan", "agents": []}
+        with contextlib.ExitStack() as stack:
+            for name, fn in {"own_argv": lambda x: x, "coordinator_tab": lambda _: None,
+                             "agent_name": lambda *a: "test", "folder_for": lambda *a: str(self.root),
+                             "low_priority": lambda x, _: x, "in_shell": lambda x: x, "track": lambda *a: None}.items():
+                stack.enter_context(patch.object(launch, name, fn))
+            run = stack.enter_context(patch.object(launch, "run", return_value=SimpleNamespace(returncode=0, stdout='{"address":"t1"}')))
+            launch.launch(self.s, task, ["cursor-agent"], "one", message="Continue the agreed work", resume=["cursor-agent", "--resume", "old"])
+        prompt = run.call_args.args[0][-1]
+        self.assertIn(str(skill), prompt)
+        self.assertIn("Continue the agreed work", prompt)

@@ -10,6 +10,28 @@ SKILLS = {
 }
 
 
+def assignment_problem(task):
+    kind = task.get("kind", "software")
+    skill = task.get("skill")
+    if kind not in ("software", "non-software"):
+        return "Task kind must be software or non-software."
+    if skill and (not isinstance(skill, str) or skill not in SKILLS):
+        return f"Unknown HolyCow skill: {skill}."
+    if kind == "non-software":
+        return "A task with a HolyCow skill must have kind software." if skill else ""
+    if not skill:
+        return ("Software tasks require a HolyCow skill before starting. "
+                "Assign the relevant skill with `herdr-task edit <id> --skill <skill-id>` "
+                "(for example hc-build or hc-plan; automations use `herdr-task auto edit`). Only genuinely non-software work may use --kind non-software.")
+    return ""
+
+
+def require_assignment(task):
+    problem = assignment_problem(task)
+    if problem:
+        raise Fail(problem)
+
+
 def skill_pick(cfg, skill):
     if skill not in SKILLS:
         raise Fail(f"Unknown HolyCow skill: {skill}.")
@@ -44,17 +66,19 @@ def skill_note(skill, folder, agent, source=None):
 
 
 def assistant_words(cfg):
-    if (cfg.get("holycow") or {}).get("enabled") is not True:
-        return "off (skill tasks can still be explicitly requested with --skill)"
     picks = []
     for skill in SKILLS:
         pick = skill_pick(cfg, skill)
         words = "/".join(str(pick[k]) for k in ("agent", "model", "effort") if pick.get(k)) or f"{SKILLS[skill]} defaults"
         picks.append(f"{skill}: {words}")
-    return ("on. For software work, read the installed holycow-guide/SKILL.md and its routing references "
+    return ("required for all software tasks, even if an older Use HolyCow setting is off. For software work, read the installed holycow-guide/SKILL.md and its routing references "
             "from this repository's or your home agent skills folders (.agents/skills, .claude/skills, "
             ".codex/skills or .cursor/skills). Use the smallest relevant skill, without requiring a full pipeline. "
-            "When creating a skill task, use `herdr-task add ... --skill <skill-id>`; BossGoat chooses its agent "
+            "Tasks default to software; starting, scheduling, resuming or switching an unassigned task is refused. "
+            "Choose the skill yourself from the task's purpose, not keywords. Do not ask the person to name a skill "
+            "unless the scope is unclear. Only genuinely non-software work may use `--kind non-software`; never "
+            "use that exemption to bypass missing skills. Draft tasks may wait for assignment. "
+            "Create software work with `herdr-task add ... --skill <skill-id>`; automations also accept --skill. BossGoat chooses its agent "
             "and model from HolyCow Agents settings. Do not copy stale model choices into --agent/--model/--effort; "
             "use those overrides only when the person asks. Guide's model is for delegated Guide tasks; it does "
             "not replace this running Assistant. Greetings, facts, status and board administration need no skill task. "

@@ -25,6 +25,7 @@ import { appearanceInit, appearanceSection } from "./appearance.js";
 import { APPEARANCE, WALLPAPER } from "./core/wallpaper.js";
 import { wallpaperTheme } from "./wallpaper.js";
 import { manifest } from "./addons.js";
+import { note } from "./usage.js";
 import { secretsInit, secretsSection } from "./secrets-section.js";
 import { baseInit, baseRow } from "./base-branch.js";
 import { branchInit, branchRow } from "./branch-names.js";
@@ -75,6 +76,8 @@ export default class ShepherdrSettings extends View {
     this.scope = p.space && spaceById(p.space) ? p.space : null;
     const want = MOVED[p.section] ?? p.section;
     this.section = this.shows(want) ? want : "agents";
+    // Usage insights (lib/usage.js): Settings opened, and each page shown.
+    note("view", { view: "settings", section: this.section, ...(this.scope ? { space: this.scope } : {}) });
     this.listOpen = null; // the row whose "N spaces set their own" list is open
     // The level switch's picker: open or not, and its Find box (shown once there are many spaces).
     this.levelOpen = false;
@@ -508,9 +511,8 @@ export default class ShepherdrSettings extends View {
     }
     return v_flex()
       .child(this.title(t, HOLYCOW.title))
-      .child(this.row(t, HOLYCOW.enabled, HOLYCOW.about,
-        toggleSwitch("holycow-enabled", shepherdrFor(this.cfg, this.scope).holycow.enabled === true,
-          (next, _e, cx) => this.set("holycow", "enabled", next, cx)), this.scoped("holycow", "enabled")))
+      .child(this.row(t, HOLYCOW.policyTitle, HOLYCOW.about,
+        div().text_size(TEXT.label).text_color(t.muted).child(HOLYCOW.policy)))
       .children(HOLYCOW.skills.map((r) => {
         const c = this.skills[r.id];
         const control = h_flex().gap(8).items_center()
@@ -725,6 +727,7 @@ export default class ShepherdrSettings extends View {
       .children(SECTIONS.filter((s) => this.shows(s.id)).map((s) => navRow(s.id, s.title, I(s.icon), s.id === this.section, (_e, cx) => {
         this.resetRoles();
         this.section = s.id;
+        note("view", { view: "settings", section: s.id });
         this.listOpen = null;
         this.levelOpen = false;
         this.handle.focus();

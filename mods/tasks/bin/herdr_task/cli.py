@@ -161,9 +161,13 @@ def main():
         c.add_argument("--start-notes", help="this task's own \"When a task starts\" notes, replacing the folder's (\"\": the folder's)")
         c.add_argument("--finish-notes", help="this task's own \"When a task finishes\" notes, replacing the folder's (\"\": the folder's)")
 
+    def skill_opts(c):
+        c.add_argument("--skill", help="HolyCow skill id; required before software tasks can start")
+        c.add_argument("--kind", choices=("software", "non-software"), help="task kind (default: software); non-software is an explicit exemption")
+
     def task_opts(c):
-        c.add_argument("--skill", help="HolyCow skill id; uses its model in HolyCow Agents settings (default: no skill)")
-        c.add_argument("--agent", help="the CLI its agent runs (claude, codex, ...; default: Settings' Workers)")
+        skill_opts(c)
+        c.add_argument("--agent", help="the CLI its agent runs (claude, codex, ...; default: skill settings, or Workers for non-software)")
         c.add_argument("--model", help="its agent's model, an id or alias (default: Settings'; \"default\": the CLI's own)")
         c.add_argument("--effort", help="its agent's effort: low, medium, high, xhigh, max... (default: Settings')")
         c.add_argument("--reviewer", help="the CLI its agent's review uses (default: Settings' Reviewer, else the other CLI)")
@@ -307,6 +311,7 @@ def main():
         c.add_argument("--json", action="store_true")
         c.set_defaults(fn=cmd_auto)
         if fields:
+            skill_opts(c)
             c.add_argument("--prompt")
             c.add_argument("--prompt-file")
             c.add_argument("--every", help=HOW)

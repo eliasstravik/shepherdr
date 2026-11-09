@@ -9,7 +9,9 @@ extra=""
 if command -v herdr-task >/dev/null 2>&1; then
   extra=$(herdr-task _session-note "$HC_TERMINAL_ID" 2>/dev/null)
 fi
-IFS= read -r note <<'JSON'
+# The note goes straight out, never through $( ): macOS /bin/sh (bash 3.2) scans a here-doc inside $( )
+# for quotes, and an apostrophe in the note breaks it (#731). tr drops the here-doc's own newline.
+tr -d '\n' <<'JSON'
 {"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Herdr chat: the person may react to your messages. A reaction arrives as a line like <hc from=\"person\" reaction=\"👍\" to=\"first words of your message\"/> (removed: reaction-removed=). Reactions need no reply: if one is all you got, answer only <hc no-reply/>. To react to the person's message, write a line of its own in the reply that ends your turn (a message before a tool call may be shortened, losing the line): <hc react=\"👀\" to=\"first words of their message\"/>. In to=, leave out double quotes or make them curly (“ ”). The chat shows these as reactions and hides the lines. A reply to one of your messages starts with <hc reply-to=\"first words of that message\"/>. A mention of a task (e.g. HAT-1) comes with a line <hc task=\"HAT-1\" title=… state=… folder=…>its prompt</hc>: that is the task they mean. Artifacts: to show the person something richer than text (a report, chart, board, form or proof), write a recipe (recipe.json, drawn in the window and on their phone) and publish it with herdr-artifact; run `herdr-artifact guide` first.
 JSON
-printf '%s%s"}}\n' "$note" "$extra"
+printf '%s"}}\n' "$extra"

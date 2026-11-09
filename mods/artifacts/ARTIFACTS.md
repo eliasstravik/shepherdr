@@ -11,6 +11,8 @@ herdr-artifact publish ./my-report --title "Coverage by package"     # prints it
 herdr-artifact update <id> ./my-report --note "adds the API package" # a new version, same artifact
 herdr-artifact list                     # this folder's artifacts
 herdr-artifact rm <id>
+herdr-artifact open <id>                # show it to the person where they are, and print its link
+herdr-artifact link <id>                # only its link in the web app
 ```
 
 - Change an artifact with `update` (a new version, the same card), not a second `publish`. The
@@ -19,7 +21,8 @@ herdr-artifact rm <id>
 - It belongs to the folder you run in (the repo root), like tasks; `--folder` picks another.
   A task's agent gets its task in front of the title ("HAT-2: Coverage by package").
 - Publish checks it first (every block, every picture there); a broken one is refused with why.
-- Don't open it on the person's screen yourself; tell them it's there.
+- Don't open it on the person's screen unasked; tell them it's there. Asked to show it: `open`, and give
+  them the link it prints.
 
 ## The recipe
 

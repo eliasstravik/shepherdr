@@ -14,14 +14,13 @@ import { existsSync, readdirSync, utimesSync, writeFileSync, mkdirSync } from "n
 import { join } from "node:path";
 import type { Hub } from "./hub.ts";
 import type { Host } from "./host.ts";
-import { HOME } from "./paths.ts";
+import { HOME, appHome, writable } from "./paths.ts";
 
-const APP = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
-const ASKS = join(APP, "data", "chat-asks", "open");
+const asksDir = () => join(appHome(), "data", "chat-asks", "open");
 
 /** A helper by its installed path (systemd's PATH has no ~/.local/bin). */
 function tool(name: string, inApp: string) {
-  for (const p of [join(APP, inApp), join(HOME, ".local", "bin", name)]) if (existsSync(p)) return p;
+  for (const p of [join(appHome(), inApp), join(HOME, ".local", "bin", name)]) if (existsSync(p)) return p;
   return name;
 }
 
@@ -40,8 +39,8 @@ export function windowLeavesIt() {
   if (process.env.SHEPHERDR_JOBS === "off") return false;
   if (process.env.SHEPHERDR_JOBS === "on") return true;
   // no Shepherdr layout installed here (no Herdr at all, or Herdr's own mods only): no window here does it
-  if (!existsSync(join(APP, "data", "shepherdr", "installed.json"))) return true;
-  return existsSync(join(APP, "mods", "tabs-tasks", "service.js"));
+  if (!existsSync(join(appHome(), "data", "shepherdr", "installed.json"))) return true;
+  return existsSync(join(appHome(), "mods", "tabs-tasks", "service.js"));
 }
 
 /** Other machines with a live Assistant or an agent that comes back after a crash (label herdr.resume). */
@@ -131,8 +130,8 @@ export class Jobs {
         continue;
       }
       try {
-        mkdirSync(ASKS, { recursive: true });
-        const f = join(ASKS, a);
+        const f = writable(join(asksDir(), a));
+        mkdirSync(asksDir(), { recursive: true });
         if (existsSync(f)) utimesSync(f, now, now); else writeFileSync(f, "");
       } catch {}
     }

@@ -286,7 +286,7 @@ class Repo(unittest.TestCase):
 
     def test_version_everywhere(self):
         v = re.search(r'^VERSION = "([^"]+)"', open(J("bin", "shepherdr")).read(), re.M).group(1)
-        self.assertEqual(v, "3.1.14")
+        self.assertEqual(v, "3.1.26")
         self.assertRegex(open(J("CHANGELOG.md")).read(), rf"(?m)^## {re.escape(v)}\b", "CHANGELOG's newest entry")
         self.assertIn(v, open(J("RECIPE.md")).read())
         self.assertIn(v, open(J("README.md")).read())
@@ -294,6 +294,55 @@ class Repo(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def shell_scripts():
+    """Every shipped shell script: install.sh and any file under the shipped folders whose first line runs sh or bash."""
+    yield J("install.sh")
+    for f in text_files():
+        try:
+            with open(f, encoding="utf-8") as fh:
+                first = fh.readline()
+        except (UnicodeDecodeError, OSError):
+            continue
+        if re.match(r"#!\s*(/usr/bin/env\s+)?(/bin/)?(ba)?sh\b", first):
+            yield f
+
+
+class ShellScripts(unittest.TestCase):
+    """#731: macOS /bin/sh is bash 3.2, which scans a here-doc inside $( ) for quotes, so one apostrophe in its
+    text breaks the whole script ("unexpected EOF while looking for matching `''"). Shipped scripts keep
+    here-docs out of $( ), and each one parses."""
+
+    def test_found_the_scripts(self):
+        names = {os.path.relpath(f, ROOT) for f in shell_scripts()}
+        self.assertIn(os.path.join("mods", "chat", "session-note.sh"), names)
+        self.assertIn("install.sh", names)
+
+    def test_no_here_doc_inside_command_substitution(self):
+        # $( up to its first ), across lines, holding a here-doc (<< or <<-, not the <<< here-string)
+        pat = re.compile(r"\$\([^)]*?(?<!<)<<-?(?!<)\s*['\"]?\w")
+        for f in shell_scripts():
+            with open(f, encoding="utf-8") as fh:
+                m = pat.search(fh.read())
+            self.assertIsNone(m, f"{os.path.relpath(f, ROOT)}: here-doc inside $( ): {m and m.group(0)!r}")
+
+    def test_pattern_catches_the_old_note(self):
+        pat = re.compile(r"\$\([^)]*?(?<!<)<<-?(?!<)\s*['\"]?\w")
+        self.assertTrue(pat.search("note=$(cat <<'JSON'\nthe person's message\nJSON\n)"))
+        self.assertTrue(pat.search("x=$(\n  cat <<EOF\nhi\nEOF\n)"))
+        self.assertFalse(pat.search('new=$(jq -r .a <<<"$out")'))
+
+    def test_each_parses(self):
+        import shutil
+        import subprocess
+        for f in shell_scripts():
+            with open(f, encoding="utf-8") as fh:
+                shell = "bash" if "bash" in fh.readline() else "sh"
+            if not shutil.which(shell):
+                continue
+            out = subprocess.run([shell, "-n", f], capture_output=True, text=True)
+            self.assertEqual(out.returncode, 0, f"{shell} -n {os.path.relpath(f, ROOT)}: {out.stderr}")
 
 
 class SessionNote(unittest.TestCase):

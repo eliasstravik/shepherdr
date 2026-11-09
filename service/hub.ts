@@ -83,6 +83,8 @@ export class Hub {
       case "lost": if (old) this.terminals.set(t, { ...old, ...data, pid: null }); break;
       case "turn": if (old) this.terminals.set(t, { ...old, turn: data.turn }); break;
       case "status": case "size": case "title": case "keep": if (old) this.terminals.set(t, { ...old, ...data }); break;
+      // the program in front changed (a relaunched agent, a shell's command): its log is found by this pid (SHEP-87)
+      case "foreground": if (old) this.terminals.set(t, { ...old, foreground: p.data ?? null }); break;
     }
     this.emit({ type: p.type, terminal: t, data });
   }

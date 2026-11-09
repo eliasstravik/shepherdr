@@ -9,7 +9,7 @@ import type { Chats, Watcher } from "./chats.ts";
 import type { Compat } from "./compat.ts";
 
 // A page's socket: the chats it follows (by 2.1's chat key), each with the terminal and the watcher it holds.
-type WS = ServerWebSocket<{ who: string; chats?: Map<string, { addr: string; watcher: Watcher }>; push?: string | null; visible?: boolean }>;
+type WS = ServerWebSocket<{ who: string; keys?: string[]; chats?: Map<string, { addr: string; watcher: Watcher }>; push?: string | null; visible?: boolean; seen?: number }>;
 
 export class Live {
   private pages = new Set<WS>();
@@ -33,6 +33,7 @@ export class Live {
   }
 
   join(ws: WS) {
+    ws.data.seen = Date.now();
     this.pages.add(ws);
     const me = this.me();
     ws.send(JSON.stringify({ type: "hello", version: this.version, login: ws.data.who, machine: me?.host ?? null, link: me ? `https://${me.dns}/shepherdr/` : null }));
@@ -56,6 +57,8 @@ export class Live {
 
   /** 2.1's snapshot: everything the screen lists, whole, each time it changes. */
   setSnapshot(snapshot: unknown) {
+    // a chat key may map to another terminal now (a task's worker restarted in a new one, SHEP-90): follow it there
+    for (const ws of this.pages) if (ws.data.keys) this.watch(ws, ws.data.keys);
     const text = JSON.stringify({ type: "snapshot", snapshot });
     if (text === this.snap) return;
     this.snap = text;
@@ -66,6 +69,7 @@ export class Live {
   private watch(ws: WS, keys: string[]) {
     const chats = this.chats, compat = this.compat;
     if (!chats || !compat) return;
+    ws.data.keys = keys;
     const want = new Map<string, string>();
     for (const k of keys.slice(0, 40)) { const a = compat.addrOf(k); if (a) want.set(k, a); }
     ws.data.chats ??= new Map();
@@ -85,6 +89,8 @@ export class Live {
   message(ws: WS, text: string) {
     let m: any;
     try { m = JSON.parse(text); } catch { return; }
+    // a page in use: it moved, came back on screen or woke (where the person is, for show())
+    if (m?.type === "ping" || m?.type === "watch") ws.data.seen = Date.now();
     if (m?.type === "ping") ws.send(JSON.stringify({ type: "pong", at: m.at ?? null }));
     else if (m?.type === "watch" && Array.isArray(m.chats)) {
       this.watch(ws, m.chats.filter((k: unknown) => typeof k === "string" && k.length < 200));
@@ -92,6 +98,16 @@ export class Live {
       ws.data.visible = m.visible !== false;
       this.visibleNow();
     }
+  }
+
+  /** Shows an artifact where the person is (herdr-artifact open, service/show.ts): the page on screen they used
+   *  last opens it. False: no page is on screen. */
+  show(artifact: string) {
+    let best: WS | null = null;
+    for (const ws of this.pages) if (ws.data.visible !== false && ws.readyState === 1 && (!best || (ws.data.seen ?? 0) > (best.data.seen ?? 0))) best = ws;
+    if (!best) return false;
+    best.send(JSON.stringify({ type: "show", artifact }));
+    return true;
   }
 
   /** Sets a view; pages hear about it shortly after, once, if it really changed. */

@@ -158,9 +158,10 @@ GdkPixbuf, as the chat attachment picker does.
 
 ## HolyCow Agents
 
-Install the [HolyCow skills](https://github.com/NeuralHerd/HolyCow) on each machine that runs them, then enable
-**Use HolyCow** in **HolyCow Agents**. It is off on a fresh install. The Assistant uses HolyCow's guide to select
-the relevant skill for software work; there is no mandatory sequence and routine questions need no skill task.
+Install the [HolyCow skills](https://github.com/NeuralHerd/HolyCow) on each machine that runs them.
+**HolyCow Agents → Skill assignment** is **Required for software tasks**. The Assistant uses HolyCow's guide
+to select the relevant skill automatically; there is no mandatory sequence and routine questions need no skill task.
+The old Use HolyCow switch no longer disables this requirement, including in settings files saved with it off.
 
 Guide, Init, Compass, Refine, Lab, Plan, Build, Review, PR and Retro each have their own Claude Code, Codex or
 Cursor model picker, including the selected CLI's reasoning and speed options. Choices inherit from Everywhere
@@ -171,15 +172,32 @@ Guide's picker controls delegated Guide tasks, not the already-running Assistant
 The Assistant creates work with `herdr-task add "Title" --skill hc-build --prompt "Scope and evidence"` (or another
 skill id). The chosen skill is saved on the task. Explicit task model/agent overrides win over its skill's model.
 Changing a skill choice applies to new launches; running sessions and already-queued commands keep their choice.
-`herdr-task edit <id> --skill hc-plan` changes a task's skill; `--skill default` removes it.
+`herdr-task edit <id> --skill hc-plan` changes a task's skill. `--skill default` can remove it from a draft,
+but that draft cannot start until a valid skill is assigned.
 
 Role instructions still provide BossGoat's task, status, proof and review rules. The task also receives the path
 to the selected installed `SKILL.md` and must read it and its references. Repo-local skills take precedence over
 home-installed skills; the selected CLI's skills folder and `.agents/skills` are supported (Cursor also accepts
 shared `.claude/skills`). Missing skills stop the launch with an installation message instead of silently skipping
-them. Existing role instruction files are not overwritten. Remove old hard-coded model routing from custom
+them. Every launch, including queued starts, saved-session resumes, switches and backup agents, validates the
+assignment and installed instructions. Resumed sessions receive the current skill instructions again.
+Existing role instruction files are not overwritten. Remove old hard-coded model routing from custom
 instructions when adopting these settings.
 
 For a HolyCow task whose review is on, its existing worker-led review uses the **Review** model and `hc-review`
 instructions. Review runs read-only regardless of the model picker's permission choice. This does not enable
-review when it is off or add another review loop. Unmarked tasks continue to use the ordinary Workers/Reviewer settings.
+review when it is off or add another review loop.
+
+Tasks default to `--kind software`, including older tasks with no kind. Unassigned drafts remain readable and
+editable, but start/schedule/resume/switch refuses them with the command to assign a skill. An explicit CLI or
+cached launch command does not bypass this check. Already-running agents are not stopped by the upgrade.
+
+Only work that is genuinely unrelated to software may use `--kind non-software`, for example a meeting agenda.
+The Assistant judges the task's purpose; BossGoat does not guess from keywords. This explicit exemption uses
+ordinary Workers/Reviewer settings. A non-software task cannot also carry a HolyCow skill. Greetings, status
+checks and board administration usually stay in the Assistant chat without creating a task.
+
+Automations accept `--skill` and `--kind` on `auto add` and `auto edit`, and carry them into every generated task.
+Software automations require a valid skill before they can be saved or resumed. Older unassigned automations
+report a missing-assignment error instead of launching a worker; assign their skill with
+`herdr-task auto edit <id> --skill <skill-id>`.

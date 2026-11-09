@@ -28,6 +28,7 @@ from .store import is_task_list, locate, open_store, prefixes_in_use, read_list,
 from .queues import after_refs, parse_after, queue_reason, set_after
 from .archive import unarchive
 from .output import line, minutes, say, view
+from .holycow import require_assignment
 from .scheduler import ensure_scheduler
 from .proof import evidence, find_proof
 from .when import when_from
@@ -109,6 +110,7 @@ def cmd_add(args):
         if args.after:
             set_after(s, t, *parse_after(s, args.after))
         if at:
+            require_assignment(t)
             # Started later by the scheduler, with no caller to ask: its space is kept now.
             schedule(s, t, at, {"space": space or default_space()})
         v = view(s, t)
@@ -278,6 +280,7 @@ def cmd_start(args):
             raise Fail(f"{s.ref(t)} is already running ({live[0]['address']}). Use switch or resume.")
         if t["state"] == "done":
             raise Fail(f"{s.ref(t)} is done. Reopen it first.")
+        require_assignment(t)
         if args.here:
             t["mode"] = "here"
         elif args.worktree and worktrees_on(s):
@@ -389,17 +392,16 @@ def cmd_ready(args):
         t = s.find(args.id)
         # Its review is the agent's own, as its brief's Settings block says (herdr-task starts no
         # reviewers). A worktree branch with nothing beyond its base (none of its own, or only its
-        # base caught up with): nothing to merge, so done at once with its summary (as Shepherdr);
-        # no Accept needed. Tasks in the folder itself still land in Ready.
+        # base caught up with: a research or artifact-only task) still waits in Ready for the
+        # person's Accept, its summary, details and artifacts on the card (SHEP-96); no pull request,
+        # and Accept just marks it done and cleans up its worktree.
         if wt and t.get("start") and in_base(s, t) and not merged_here(s, t):
             t["nothing_to_merge"] = True
-            finish(s, t, even_if_busy=True)
-            v = view(s, t)
-            say(args, v, f"{s.ref(t)}: nothing to merge (no commits beyond its base); done.")
-            return
+        else:
+            t.pop("nothing_to_merge", None)
         # Its work already in its base (SHEP-59: its pull request squash-merged, or nothing left to
         # merge): done at once, never a second pull request.
-        gone = already_merged(s, t) if wt and t.get("start") else None
+        gone = already_merged(s, t) if wt and t.get("start") and not t.get("nothing_to_merge") else None
         if gone is not None:
             t["merged"] = True
             if gone:
@@ -599,16 +601,18 @@ def cmd_alert(args):
     say(args, alert, "Alert sent.")
 
 
-def back_to_work(s, t, why, said=WORKING_AGAIN):
+def back_to_work(s, t, why, said=WORKING_AGAIN, auto=False):
     """A Ready task taken back to work (herdr-task fix or resume, or its agent at work again):
     Working, its status line saying so until its agent reports, and no Accept until its next
-    ready. why: what took it back, for its Assistant's news ("SHEP-7 is working again: why")."""
+    ready. why: what took it back, for its Assistant's news ("SHEP-7 is working again: why").
+    auto: only its agent's own turn took it back (a message, a background job's notice), not a
+    fix asked for: Ready again when that turn changed nothing (tick's settle_back())."""
     if t["state"] != "ready":
         return False
     t["state"] = "running"
     for k in ("ready_turns", "merge_requested"):
         t.pop(k, None)
-    t["back"] = {"at": now(), "why": why}
+    t["back"] = {"at": now(), "why": why, **({"auto": True, "progress": t.get("progress")} if auto else {})}
     # by: Herdr's words, not its agent's (on_it() counts only an agent's own line).
     t["progress"] = {"text": fit(said), "at": now(), "set": now(), "by": "herdr"}
     s.dirty = True
@@ -624,10 +628,12 @@ def finalize(s, t):
     s.dirty = True
     wt = t.get("worktree")
     msg = f"{s.ref(t)} is ready."
-    if t.get("mode") != "worktree" or not wt:
-        # Nothing to merge: it waits in Ready for the person's Accept, whatever the merge setting.
+    if t.get("mode") != "worktree" or not wt or t.get("nothing_to_merge"):
+        # Nothing to merge (in the folder itself, or no commits beyond its base): it waits in Ready
+        # for the person's Accept, whatever the merge setting; no pull request.
         t.pop("auto_merge", None)
-        return msg + " The person accepts it in the Tasks panel."
+        return msg + (" Nothing to merge (no commits beyond its base)." if t.get("nothing_to_merge") else "") + \
+            " The person accepts it in the Tasks panel."
     repo = github(s) if wt and os.path.isdir(wt) else None
     if repo:
         try:
@@ -735,9 +741,9 @@ def cmd_edit(args):
         if args.prompt_file:
             with open(args.prompt_file) as f:
                 t["prompt"] = f.read()
-        pick = [t.get(k) for k in ("skill", "agent", "model", "effort")]
+        pick = [t.get(k) for k in ("kind", "skill", "agent", "model", "effort")]
         set_opts(t, args)
-        if [t.get(k) for k in ("skill", "agent", "model", "effort")] != pick:
+        if [t.get(k) for k in ("kind", "skill", "agent", "model", "effort")] != pick:
             # The next agent started for it runs on the new choice (start_again), a queued one too.
             t["pick_at"] = now()
             q = t.get("queue") or {}
@@ -748,6 +754,8 @@ def cmd_edit(args):
         if args.after is not None:
             set_after(s, t, *parse_after(s, args.after))
         at = scheduled_at(args) if (args.at or "").strip() or args.in_ is not None else None
+        if at or t["state"] in ("queued", "scheduled"):
+            require_assignment(t)
         if at:
             schedule(s, t, at)
         elif args.at is not None:
@@ -811,6 +819,7 @@ def last_agent(t):
 def start_again(s, t, space, key=None, argv_json=None, message=None, parent=None):
     """Starts an agent for the task: the last agent's own session when it's the same kind of agent
     and the session is known; else a fresh one with a handoff. `message` goes after either."""
+    require_assignment(t)
     unarchive(s, t)
     prev = last_agent(t)
     parent = parent_for(parent or (prev or {}).get("parent"), space)
@@ -1006,7 +1015,7 @@ def cmd_accept(args):
         # Its agent at work again since it said ready: never accepted half done. Working again
         # (saved), and refused after the store is.
         if busy_again(t, [detail(k) for k in live_agents(s.key(t))]):
-            back = back_to_work(s, t, "its agent is at work again")
+            back = back_to_work(s, t, "its agent is at work again", auto=True)
         # One its agent opened itself, which ready couldn't open again ("already exists"): adopted.
         elif (not t.get("pr") and "already exists" in (t.get("attention") or "")
               and (repo := github(s)) and pr_adopt(t, repo)):
@@ -1038,6 +1047,8 @@ def cmd_accept(args):
         elif merged_here(s, t) or in_base(s, t):
             # Its own work already in the base branch, or none of its own: nothing to merge.
             t["merged"] = merged_here(s, t)
+            if not t["merged"]:
+                t["nothing_to_merge"] = True
             finish(s, t, even_if_busy=True)
         elif ff_merge(s, t):
             how = "merged"

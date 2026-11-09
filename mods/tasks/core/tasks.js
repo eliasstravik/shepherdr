@@ -13,8 +13,18 @@ export const RANK_OF = Object.fromEntries(["needs", "ready", "merging", "working
 // Scheduled (SHEP-38, herdr-task --at/--in): a task that starts by itself at a time, after Queued (it waits longer).
 export const ORDER = ["needs", "ready", "merging", "working", "queued", "scheduled", "todo", "done", "automations"];
 // How the list can be grouped (the ⋯ menu's Group by; Shepherdr's GROUP_WORDS). "folder" was Space's old key.
-export const GROUP_BY = ["status", "space", "machine", "machine-space"];
-export const groupBy = (v) => (v === "folder" ? "space" : GROUP_BY.includes(v) ? v : "status");
+export const GROUP_BY = ["you", "space", "status"];
+// A grouping's key: "folder" was Space's; Machine and Machine › Space are gone (SHEP-98): For you.
+export const groupBy = (v) => (v === "folder" ? "space" : GROUP_BY.includes(v) ? v : "you");
+// The window's grouping now (shared "tasks.group", from its ⋯), For you until chosen. Before SHEP-98
+// it was "tasks.groupby", Status split by space by default: Status with Split by space off stays
+// Status, Space stays Space, the rest is For you. shared: the window's shared(key).
+export const groupNow = (shared) => {
+  const v = shared("tasks.group");
+  if (v) return groupBy(v);
+  const old = shared("tasks.groupby");
+  return old === "space" || old === "folder" ? "space" : old === "status" && shared("tasks.split") === false ? "status" : "you";
+};
 
 export const machineOf = (address) => (address?.includes("/") ? address.split("/")[0] : null);
 // A machine as people read it (the Spaces sidebar's words): its name, or This computer.
@@ -91,6 +101,15 @@ export function onIt(task, live, now = Date.now()) {
   return now - said < Math.max(ON_IT_MS, typeof p.left === "number" ? p.left : 0);
 }
 
+// A short grace before Needs you (SHEP-133), as herdr-task's GRACE_MS: a task often flips to Needs you for a few
+// seconds and moves on by itself (its agent ends a turn a moment before it says ready, a background job's notice wakes
+// it, a problem is found just before its agent is handed it). So a quiet agent (reply) and a problem Herdr found
+// (attention) need the person only once they've lasted GRACE_MS: the agent's own status change (a.since: hc's
+// status_ms) or the problem's attention_at says since when. What really asks (a question, a permission: blocked) needs
+// the person at once.
+export const GRACE_MS = 20000;
+export const quietSince = (live) => Math.max(0, ...live.map((a) => (typeof a.since === "number" ? a.since : 0)));
+
 // A provider retry's line (herdr-task's retry_line): "Provider overloaded · Retry in 2m".
 export function retryLine(r, now = Date.now()) {
   return r.due ? `${r.reason} · Retry in ${Math.max(1, Math.ceil((r.due - now) / 60000))}m` : `${r.reason} · Retrying`;
@@ -98,17 +117,22 @@ export function retryLine(r, now = Date.now()) {
 
 // A task's status (its section), why it needs the person, and its live agents. live: its agents now
 // ([{ address, status, ... }], only while it runs or is ready); loaded: false while its machine's agents
-// aren't known yet; each { address, status, turn, role }. The same rules as herdr-task's task_status(): its record,
+// aren't known yet; each { address, status, turn, role, since (hc's status_ms: GRACE_MS) }. The same rules as herdr-task's task_status(): its record,
 // then its agents' own status.
 // helpers: its worker's own helper agents (SHEP-54: a reviewer it started as its hc child), never among live: one at
 // work or asking keeps the task Working (its worker waits on it; the worker answers what it asks), else they count not.
 export function place(list, task, { live = [], helpers = [], loaded = true, now = Date.now() } = {}) {
+  // A problem Herdr just found: the task reads as it would without it until GRACE_MS have passed (settles: when then).
+  if (task.attention && ["running", "ready"].includes(task.state) && now - (task.attention_at ?? 0) < GRACE_MS) {
+    const p = place(list, { ...task, attention: null }, { live, helpers, loaded, now });
+    return { ...p, task, settles: (task.attention_at ?? 0) + GRACE_MS };
+  }
   const st = task.state;
   if (!(st === "running" || st === "ready")) live = [];
   const status = live.reduce((s, a) => ((RANK[a.status] ?? 0) > (RANK[s] ?? 0) ? a.status : s), null);
   const busy = live.length && helpers.some((a) => a.status === "working" || a.status === "blocked");
   const states = [...live.map((a) => a.status), ...(busy ? ["working"] : [])];
-  let section = ["todo", "queued", "scheduled", "done"].includes(st) ? st : null, needs = null, why = null;
+  let section = ["todo", "queued", "scheduled", "done"].includes(st) ? st : null, needs = null, why = null, settles = 0;
   const need = (kind, text) => { section = "needs"; needs = kind; why = text; };
   if (section) return { list, task, live, status, section, needs, why };
   // Cut off by its model's provider (herdr-task tick): Working while Herdr waits to tell it to
@@ -140,11 +164,13 @@ export function place(list, task, { live = [], helpers = [], loaded = true, now 
   // Monitor still running, or its fresh status line says it waits on CI or a review. Kept on the task
   // by its scheduler (task.own_work); Working, with its own status line.
   else if (live.length && task.own_work && st === "running") section = "working";
+  // Just gone quiet: still Working for GRACE_MS (settles: when it would need the person).
+  else if (live.length && quietSince(live) && now - quietSince(live) < GRACE_MS) { section = "working"; settles = quietSince(live) + GRACE_MS; }
   // Quiet without saying ready (herdr-task ready): alive, it ended its turn (on what: task.waits);
   // its process gone, the agent stopped.
   else if (live.length) need("reply", task.waits ?? REASONS.reply);
   else need("stopped", REASONS.stopped);
-  return { list, task, live, status, section, needs, why };
+  return { list, task, live, status, section, needs, why, ...(settles ? { settles } : {}) };
 }
 
 // Why a queued task waits: the tasks it comes after that aren't done, else the folder is full.

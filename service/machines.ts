@@ -4,19 +4,25 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Hub } from "./hub.ts";
-import { HOME } from "./paths.ts";
+import { HOME, settingsFile } from "./paths.ts";
 import { exec } from "./model.ts";
 import * as MC from "../core/machines.js";
 
 const { holdOf, nextRead, healthMeters } = MC as any;
 const SCRIPT = [join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "mods", "tasks", "bin", "herdr_task", "machine.py"),
   join(HOME, ".local", "share", "shepherdr", "mods", "tasks", "bin", "herdr_task", "machine.py")].find(existsSync);
-const SETTINGS = process.env.HERDR_TASK_SETTINGS || join(HOME, ".herdr", "shepherdr.json");
 
 export class Machines {
   stats = new Map<string | null, any>();
   private busy = false;
   onChange: () => void = () => {};
+
+  /** SHEP-128: the ElevenLabs plan's read (core/voice.js readUsage), null when voice isn't set up; main.ts gives it. */
+  voiceUsage: () => Promise<any | null> = async () => null;
+  /** its last read, shown under this machine's Plan usage (as limits.elevenlabs), and when it was read */
+  private voice: any = null;
+  private voiceAt = 0;
+  private voiceBusy = false;
 
   constructor(private hub: Hub, private list: () => string[]) {}
 
@@ -28,15 +34,31 @@ export class Machines {
   /** Reads every machine's plan limits again now (the limits list's refresh): those older than a minute. */
   async checkNow() {
     for (const s of this.stats.values()) if (Date.now() - (s.limitsAt ?? 0) > 60_000) s.limitsAt = 0;
+    if (Date.now() - this.voiceAt > 60_000) this.voiceAt = 0;
     await this.poll();
   }
 
+  /** ElevenLabs' usage, as often as the plan limits (every 10 minutes, a refresh at most once a minute): one request. */
+  private async readVoice(): Promise<boolean> {
+    if (this.voiceBusy || Date.now() - this.voiceAt < 10 * 60_000) return false;
+    this.voiceBusy = true;
+    this.voiceAt = Date.now();
+    try {
+      const fresh = await this.voiceUsage().catch(() => null);
+      this.voice = fresh ? nextRead(this.voice, fresh) : null;
+      return true;
+    } finally {
+      this.voiceBusy = false;
+    }
+  }
+
   private async poll() {
-    if (this.busy || !SCRIPT) return;
+    const voice = this.readVoice();
+    if (this.busy || !SCRIPT) { if (await voice) this.onChange(); return; }
     this.busy = true;
     try {
       let cfg: any = null;
-      try { cfg = JSON.parse(readFileSync(SETTINGS, "utf8")); } catch {}
+      try { cfg = JSON.parse(readFileSync(settingsFile(), "utf8")); } catch {}
       const script = readFileSync(SCRIPT, "utf8"), now = Date.now();
       await Promise.all([null, ...this.list()].map(async (m) => {
         const was = this.stats.get(m) ?? {};
@@ -56,6 +78,7 @@ export class Machines {
         }
         this.stats.set(m, out);
       }));
+      await voice;
       this.onChange();
     } finally {
       this.busy = false;
@@ -68,8 +91,9 @@ export class Machines {
   /** 2.1's health and limits for a machine (null: here), and `stats`: the reads as the window keeps them, which the web's
    *  machine header and popup read with core/machines.js, as the window's do. */
   of(m: string | null) {
-    const s = this.stats.get(m);
-    if (!s) return {};
+    const got = this.stats.get(m);
+    if (!got) return {};
+    const s = m === null && this.voice ? { ...got, limits: { ...(got.limits ?? {}), elevenlabs: this.voice } } : got;
     const agents = this.windowStats()?.[m ?? ""]?.agents;
     const stats = { at: s.at, ...(s.error ? { error: s.error } : {}), ...(s.limitsAt ? { limitsAt: s.limitsAt } : {}), hold: s.hold,
       ...(s.health ? { health: s.health } : {}), ...(s.limits ? { limits: s.limits } : {}), ...(Array.isArray(agents) ? { agents } : {}) };

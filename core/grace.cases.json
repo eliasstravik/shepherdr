@@ -1,0 +1,204 @@
+{
+ "about": "SHEP-133: a short grace before Needs you. A quiet agent (reply) or a problem Herdr found (attention) needs the person only once it has lasted GRACE_MS (20 s); asking (blocked) and a stopped agent at once. core/tasks.js place() and herdr-task's task_status() both pass these (core/tasks.test.js, test/test_herdr_task.py). now is fixed; each agent is { address, status, turn, role, since (hc's status_ms) }; settles is when core's grace ends (core only).",
+ "now": 1800000000000,
+ "cases": [
+  {
+   "name": "Just went quiet without saying ready: still Working",
+   "task": {
+    "state": "running",
+    "started": 1799996400000,
+    "agents": []
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 6,
+     "role": "worker",
+     "since": 1799999995000
+    }
+   ],
+   "expect": {
+    "status": "working",
+    "needs": null,
+    "settles": 1800000015000
+   }
+  },
+  {
+   "name": "Quiet past the grace: Needs you, waits for a reply",
+   "task": {
+    "state": "running",
+    "started": 1799996400000,
+    "agents": []
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 6,
+     "role": "worker",
+     "since": 1799999975000
+    }
+   ],
+   "expect": {
+    "status": "needs",
+    "needs": "reply"
+   }
+  },
+  {
+   "name": "Turn just done (done, not idle): still Working",
+   "task": {
+    "state": "running",
+    "started": 1799996400000,
+    "agents": []
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "done",
+     "turn": 6,
+     "role": "worker",
+     "since": 1799999999000
+    }
+   ],
+   "expect": {
+    "status": "working",
+    "needs": null,
+    "settles": 1800000019000
+   }
+  },
+  {
+   "name": "Asking (a question tool or a permission) needs you at once",
+   "task": {
+    "state": "running",
+    "started": 1799996400000,
+    "agents": []
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "blocked",
+     "turn": 6,
+     "role": "worker",
+     "since": 1799999999000
+    }
+   ],
+   "expect": {
+    "status": "needs",
+    "needs": "asks"
+   }
+  },
+  {
+   "name": "No status time known: no grace",
+   "task": {
+    "state": "running",
+    "started": 1799996400000,
+    "agents": []
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 6,
+     "role": "worker"
+    }
+   ],
+   "expect": {
+    "status": "needs",
+    "needs": "reply"
+   }
+  },
+  {
+   "name": "Agent gone: stopped at once",
+   "task": {
+    "state": "running",
+    "started": 1799996400000,
+    "agents": []
+   },
+   "live": [],
+   "expect": {
+    "status": "needs",
+    "needs": "stopped"
+   }
+  },
+  {
+   "name": "A problem found a moment ago, Ready: still Ready",
+   "task": {
+    "state": "ready",
+    "ready_at": 1799996400000,
+    "ready_turns": {
+     "t1": 6
+    },
+    "started": 1799992800000,
+    "agents": [],
+    "attention": "It conflicts with the base branch.",
+    "attention_at": 1799999995000
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 6,
+     "role": "worker",
+     "since": 1799997000000
+    }
+   ],
+   "expect": {
+    "status": "ready",
+    "needs": null,
+    "settles": 1800000015000
+   }
+  },
+  {
+   "name": "A problem found past the grace, nobody on it: Needs you",
+   "task": {
+    "state": "ready",
+    "ready_at": 1799996400000,
+    "ready_turns": {
+     "t1": 6
+    },
+    "started": 1799992800000,
+    "agents": [],
+    "attention": "It conflicts with the base branch.",
+    "attention_at": 1799999975000
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 6,
+     "role": "worker",
+     "since": 1799997000000
+    }
+   ],
+   "expect": {
+    "status": "needs",
+    "needs": "attention"
+   }
+  },
+  {
+   "name": "A problem found a moment ago, its agent quiet a while: Needs you only once the problem has lasted",
+   "task": {
+    "state": "running",
+    "started": 1799996400000,
+    "agents": [],
+    "attention": "Checks failing: check.",
+    "attention_at": 1799999998000
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "idle",
+     "turn": 6,
+     "role": "worker",
+     "since": 1799999400000
+    }
+   ],
+   "expect": {
+    "status": "needs",
+    "needs": "reply",
+    "settles": 1800000018000
+   }
+  }
+ ]
+}

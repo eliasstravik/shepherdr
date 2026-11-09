@@ -1,9 +1,7 @@
 // The Tasks panel's small menus (mods/tasks), as popups at the pointer in the look of Herdr's
 // own menu. props().menu:
-//   "group"   the header's ⋯: group the list by status, space, machine, or machine then space
-//             (shared "tasks.groupby", kept); the machine ones only when props().machines (more
-//             than one machine has tasks); by status, Split by space below them (shared "tasks.split":
-//             each status's tasks under their machine · space; on until switched off)
+//   "group"   the header's ⋯: group the list For you, by space or by status (shared "tasks.group",
+//             kept; props().current, the panel's grouping now: core/tasks.js groupNow)
 //   "filter"  the filter row's More: the statuses that don't get a chip of their own;
 //             props().items = [{ key, label, count }], props().current. A pick goes to the
 //             panel as shared "tasks.filterreq" = { key, at }.
@@ -20,9 +18,8 @@ import { props, closeOverlay, theme, shared, setShared, exec, appHome } from "he
 import { menuRow, heading, toast, TEXT } from "./ui.js";
 import { taskMenu } from "./core/menus.js";
 
-// Shepherdr's GROUP_WORDS. "folder" was Space's old key.
-const GROUPS = [{ key: "status", label: "Status" }, { key: "space", label: "Space" },
-  { key: "machine", label: "Machine" }, { key: "machine-space", label: "Machine › Space" }];
+// Shepherdr's GROUP_WORDS (core/tasks.js GROUP_BY).
+const GROUPS = [{ key: "you", label: "For you" }, { key: "space", label: "Space" }, { key: "status", label: "Status" }];
 
 // The menu's sections, each a title (or none), its items, which is checked and what a pick does.
 function sections() {
@@ -30,16 +27,8 @@ function sections() {
   if (p.menu === "row") return rowSections(p);
   if (p.menu === "filter") return [{ title: null, items: p.items ?? [], current: p.current,
     pick: (key) => setShared("tasks.filterreq", { key, at: Date.now() }) }];
-  const items = GROUPS.filter((g) => p.machines || !g.key.startsWith("machine"));
-  // What the list shows now: by machine with one machine is by status, Machine › Space by space.
-  const by = shared("tasks.groupby") === "folder" ? "space" : shared("tasks.groupby");
-  const current = items.some((g) => g.key === by) ? by : by === "machine-space" ? "space" : "status";
-  const out = [{ title: "Group by", items, current, pick: (key) => setShared("tasks.groupby", key) }];
-  // By status: Split by space, a check that turns it off and on.
-  const split = shared("tasks.split") !== false;
-  if (current === "status") out.push({ title: null, items: [{ key: "split", label: "Split by space" }], current: split ? "split" : null,
-    pick: () => setShared("tasks.split", !split) });
-  return out;
+  const current = GROUPS.some((g) => g.key === p.current) ? p.current : "you";
+  return [{ title: "Group by", items: GROUPS, current, pick: (key) => setShared("tasks.group", key) }];
 }
 
 // A row's menu (core/menus.js taskMenu, the web's too): its sections between the lines, a heading

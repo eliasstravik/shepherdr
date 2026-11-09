@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as HC from "../core/host.js";
 import { buildId } from "./build.ts";
+import { underTest } from "./paths.ts";
 
 const { HOST_DOC, NODE_DOC, newestHost, nodeAlive, renamer, relocateDoc, relocateSettings } = HC as any;
 const VERSION = JSON.parse(readFileSync(join(import.meta.dir, "..", "package.json"), "utf8")).version as string;
@@ -47,6 +48,8 @@ async function readFile(rel: string, on: string | null): Promise<string | null> 
   catch (e) { if ((e as any).kind === "not_found") return null; throw e; }
 }
 const writeFile = async (rel: string, text: string, on: string | null) => {
+  // a test never moves the person's settings (paths.ts writableSettings)
+  if (underTest() && rel.endsWith("shepherdr.json")) throw new Error("A test may not write a real ~/.herdr/shepherdr.json.");
   const r = await exec(["sh", "-c", 'mkdir -p "$(dirname "$1")" && umask 077 && cat > "$1.host-tmp" && mv "$1.host-tmp" "$1"', "sh", rel], on, text);
   if (r.code !== 0) throw new Error(`couldn't write ${rel}${on ? ` on ${on}` : ""}`);
 };

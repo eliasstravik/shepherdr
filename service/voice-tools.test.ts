@@ -53,10 +53,11 @@ function io(over: Partial<VoiceIO> = {}) {
 }
 const web: Where = { client: "web", device: "phone", call: "SHEP-45/worker", place: "sp1", task: "SHEP-45", tab: "chat" };
 
-test("look here: the app, the call's agent and what is on screen", async () => {
+test("look here: the app, a call with Shepherdr, and what is on screen", async () => {
   const a = await voiceTool("look", { what: "here" }, web, io());
   expect(a.result).toContain("web app on a phone");
-  expect(a.result).toContain("SHEP 45's agent");
+  expect(a.result).toContain("It is with Shepherdr, not one agent");
+  expect(a.result).toContain("SHEP 45");
   expect(a.result).toContain("the shepherdr space");
   expect(a.result).toContain("1 waiting on the person, 1 ready for review, 1 working");
 });
@@ -159,14 +160,18 @@ test("open: what it shows in the app the call runs in", async () => {
 
 test("send: here, a space's Assistant, a task's agent; one with no agent says so", async () => {
   const x = io();
-  expect((await voiceTool("send", { text: "Run the tests" }, web, x)).result).toBe("Sent to SHEP 45's agent.");
-  expect((await voiceTool("send", { to: "gtm", text: "Add a task: call Bob" }, web, x)).result).toBe("Sent to the gtm Assistant.");
+  const here = await voiceTool("send", { text: "Run the tests" }, web, x);
+  expect(here.result).toStartWith("Sent to SHEP 45's agent.");
+  expect(here.result).toContain('Say "Passed it to SHEP 45\'s agent." and nothing else');
+  // the call follows that chat from now on (voice-hear.ts)
+  expect(here.sent).toBe("SHEP-45/worker");
+  expect((await voiceTool("send", { to: "gtm", text: "Add a task: call Bob" }, web, x)).sent).toBe("p:mini:sp2");
   expect(x.sent).toEqual([{ key: "SHEP-45/worker", text: "Run the tests" }, { key: "p:mini:sp2", text: "Add a task: call Bob" }]);
   const none = await voiceTool("send", { to: "SHEP-41", text: "hi" }, web, x);
   expect(none.error).toBe(true);
   expect(none.result).toContain("has no agent running");
   // an agent made before: its old tools still work
-  expect((await voiceTool("send_to_agent", { text: "old" }, web, x)).result).toBe("Sent to SHEP 45's agent.");
+  expect((await voiceTool("send_to_agent", { text: "old" }, web, x)).result).toStartWith("Sent to SHEP 45's agent.");
   expect((await voiceTool("read_chat", {}, web, x)).result).toContain("is working");
 });
 
@@ -324,4 +329,38 @@ test("screen: checked here, done by the app that started the call, its answer th
   const x = io();
   await voiceTool("screen", { do: "look" }, web, x);
   expect(x.calls).toEqual([]);
+});
+
+test("SHEP-105: a call from the sidebar has no chat of its own: here is what the screen shows", async () => {
+  const x = io();
+  // the shepherdr space's chat on screen, no task open
+  const top: Where = { client: "web", device: "desktop", place: "sp1" };
+  expect((await voiceTool("send", { text: "Check the build" }, top, x)).sent).toBe("p:sp1");
+  // a task open: its agent
+  expect((await voiceTool("send", { to: "here", text: "Go on" }, { ...top, task: "SHEP-45" }, x)).sent).toBe("SHEP-45/worker");
+  // nothing on screen: it asks which
+  const none = await voiceTool("send", { text: "hi" }, { client: "web", device: "phone" }, x);
+  expect(none.error).toBe(true);
+  expect(none.result).toContain("which space or task");
+  expect((await voiceTool("open", { what: "chat" }, top, x)).nav).toMatchObject({ kind: "chat", chat: "p:sp1" });
+});
+
+test("SHEP-124: call_view: the web call full screen or minimized, on screen once the page says so; not in the window", async () => {
+  const full = await voiceTool("call_view", { view: "full" }, web, io());
+  expect(full.nav).toEqual({ kind: "call", full: true });
+  expect(JSON.parse((await shown(full, async () => ({ ok: true }))).result)).toEqual({ ok: true, shown: "the full-screen call" });
+  const small = await voiceTool("call_view", { view: "minimized" }, web, io());
+  expect(small.nav).toEqual({ kind: "call", full: false });
+  const no = await shown(small, async () => ({ ok: false, why: "no call is on in this app" }));
+  expect(no.error).toBe(true);
+  expect(no.result).toContain("no call is on in this app");
+  const bad = await voiceTool("call_view", { view: "huge" }, web, io());
+  expect(bad.error).toBe(true);
+  expect(bad.nav).toBeUndefined();
+  const win = await voiceTool("call_view", { view: "full" }, { client: "window", machine: "vm" }, io());
+  expect(win.error).toBe(true);
+  expect(win.nav).toBeUndefined();
+  // look here says which view the call is in
+  expect((await voiceTool("look", { what: "here" }, { ...web, full: true }, io())).result).toContain("The call fills the screen");
+  expect((await voiceTool("look", { what: "here" }, { ...web, full: false }, io())).result).toContain("The call is minimized");
 });

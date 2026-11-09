@@ -4,7 +4,7 @@
     "core is always installed and always on. Every add-on is installed too (one layout gives everything);",
     "one with \"switch\": true can be turned off in BossGoat settings > Window. The off list is shared",
     "\"addons.off\" (the window's mods, lib/addons.js) and \"off\" in ~/.herdr/shepherdr.json (herdr-task).",
-    "An add-on without a switch is always on in 3.1.14: splitting it from the panels it lives in comes later.",
+    "An add-on without a switch is always on in 3.1.26: splitting it from the panels it lives in comes later.",
     "mods: folders under mods/. blocks: layout node ids it fills. keys: \"<context> <key>\" in keys.json. web: the web app's plugins (web/plugins), left out while it is off.",
     "helpers: links put in ~/.local/bin. templates: ~/.config/herdr-core/templates. needs: other add-ons."
   ],
@@ -64,6 +64,8 @@
     { "id": "machines", "title": "Other machines", "switch": true, "needs": ["tasks"],
       "about": "Keeps herdr-task, its helpers and the role templates the same on every connected machine. Off: nothing is sent.",
       "mods": ["machine-add-chat"] },
+    { "id": "insights", "title": "Usage insights", "switch": true,
+      "about": "A private log of how you use Shepherdr (screens, switches, buttons and times, never your words), kept only on your own machines so your Assistant can suggest better ways to work when you ask. It is never sent to Shepherdr's makers or anyone else. Off: nothing is recorded." },
     { "id": "web", "title": "Web", "switch": true,
       "about": "BossGoat in your browser on phone, tablet and desktop, private to your tailnet. Off: the web app stops; the service keeps working.",
       "service": true }

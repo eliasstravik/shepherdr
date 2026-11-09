@@ -117,7 +117,7 @@ function folderOf(space) {
 // anything it set for all its spaces before machine scope went.
 export const SHEPHERDR_FILE = () => `${home()}/.herdr/shepherdr.json`;
 export const SHEPHERDR_DEFAULTS = { tasks: { merge: "ask", review_rounds: 0, must_fix: "major", max_running: 10, archive_after: 7 }, automations: { enabled: true },
-  holycow: { enabled: false }, agents: { reactions: true, feedback: true, feedback_repo: "" } };
+  holycow: {}, agents: { reactions: true, feedback: true, feedback_repo: "" } };
 export const LOCAL_MACHINE = "local";
 export async function readShepherdr() {
   try { return JSON.parse((await readTextFile(SHEPHERDR_FILE())) ?? "{}") ?? {}; } catch { return {}; }

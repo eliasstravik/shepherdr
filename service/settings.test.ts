@@ -288,7 +288,8 @@ test("HolyCow skill models inherit per space, reset independently and preserve r
   const rows = (level: string) => s.sections(null, [sp]).find((x) => x.name === "HolyCow Agents" && x.level === level)!.rows;
   expect(rows("all").filter((r) => r.agent)).toHaveLength(10);
   expect(rows("all").find((r) => r.key === "holycow.hc-build")!.agent!.sel).toMatchObject({ agent: "claude", model: "opus" });
-  s.set("holycow.enabled", "on");
+  expect(rows("all")[0]).toMatchObject({ value: "Required for software tasks", fixed: true });
+  expect(() => s.set("holycow.enabled", "off")).toThrow("cannot be switched off");
   s.set("holycow.hc-plan", JSON.stringify({ agent: "cursor", model: "auto" }));
   expect(rows(sp.id).find((r) => r.key === "holycow.hc-plan")!.agent!.sel).toMatchObject({ agent: "cursor", model: "auto" });
   s.set("holycow.hc-plan", JSON.stringify({ agent: "codex", model: "custom", effort: "high" }), sp.id, sp);

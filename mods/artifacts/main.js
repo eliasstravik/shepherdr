@@ -13,6 +13,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { spaces, panes, agents, readTextFile, watchFolder, home, theme, closeOverlay, props, shared, setShared } from "herdr";
+import { note } from "./usage.js";
 import { showInSidebar, backToList } from "./sidebar.js";
 import { artifactCli as cli, showViewer } from "./artview.js";
 import { toast, plainError, TEXT, RADIUS } from "./ui.js";
@@ -132,6 +133,7 @@ export default class Artifacts extends View {
     const machine = this.store?.machine ?? null;
     let mod = modOf(machine, a.id);
     this.opening = a.id;
+    note("view", { view: "artifact", artifact: a.id });
     cx.notify();
     cx.spawn(async (cx) => {
       try {

@@ -2,12 +2,14 @@
 // opens and changes Shepherdr for them through its tools (core/voice.js: look, open, send, act),
 // which this machine's Shepherdr service answers (POST /api/voice/tool, service/voice-tools.ts:
 // the reach of the person's web app); without the service, only this chat (send, look at it).
-// The chat feeds it the called agent's replies and status, which it tells the person. Started by
+// SHEP-105: the call is with Shepherdr itself, not this chat: the service says what it hears (POST
+// /api/voice/hear: the chats it sent to, the one on screen, needs anywhere), once the person and the
+// voice are quiet. Without the service, the chat feeds it its own agent's replies and status. Started by
 // the chat mod (a mod has no audio or sockets); one process per call, nothing recorded or kept.
 //   bun voice.ts <call folder> <agent address> <agent name>
 // The call folder links it to the chat:
-//   state.json  written here: { phase, muted, error, since } (phase: connecting, listening,
-//               thinking, speaking, ended)
+//   state.json  written here: { phase, doing, muted, error, since } (phase: connecting, listening,
+//               thinking, working (doing: what, in plain words), speaking, ended)
 //   alive       touched by the chat every few seconds; stale for 20 s ends the call
 //   in/*.json   from the chat: { type: "mute", on } | { type: "hangup" } |
 //               { type: "reply", text } | { type: "status", status, asking? }
@@ -26,7 +28,7 @@
 import { readFileSync, writeFileSync, readdirSync, rmSync, statSync, mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { API, opening, replyLine, statusLine, whereLine, apiError, ensureAgent, agentFile, navWords } from "./core/voice.js";
+import { API, opening, replyLine, statusLine, whereLine, apiError, ensureAgent, agentFile, navWords, toolWords, turnGate } from "./core/voice.js";
 import { screenWords } from "./core/screen.js";
 import { SECRETS, keyFor, envFile } from "./key.ts";
 import { audio, ended as audioEnded, type Audio } from "./audio.ts";
@@ -44,14 +46,24 @@ let since = Date.now();
 let error: string | null = null;
 let thinkingAt = 0;
 let heardAt = 0;
+// the call's id for the service (its folder's name), tools running now, and whether the service hears for it
+const callId = dir.replace(/\/$/, "").split("/").pop() ?? "";
+let busy = 0;
+// SHEP-113: what a tool is doing (plain words), and whether the person's ask is still unanswered (updates wait)
+let doing = "";
+const turn = turnGate();
+let hears = false;
+// the last thing the voice said (the sidebar's call card shows it)
+let said = "";
 
 function state() {
   const speaking = player && Date.now() < playEnd + 250;
-  const shown = ended ? "ended" : phase === "connecting" ? "connecting" : speaking ? "speaking" : phase === "thinking" && Date.now() - thinkingAt < 20000 ? "thinking" : "listening";
+  const shown = ended ? "ended" : phase === "connecting" ? "connecting" : speaking ? "speaking"
+    : phase === "thinking" && Date.now() - thinkingAt < 20000 ? "thinking" : phase === "working" && Date.now() - thinkingAt < 35000 ? "working" : "listening";
   // Who is talking, for the chat's wave: the agent while its voice plays, else the person
   // while the microphone hears them (a moment's hold, so it doesn't flicker).
   const talking = ended ? null : speaking ? "agent" : !muted && Date.now() - heardAt < 400 ? "you" : null;
-  const s = JSON.stringify({ phase: shown, who: talking, muted, error, since, pid: process.pid });
+  const s = JSON.stringify({ phase: shown, doing: shown === "working" ? doing : "", who: talking, muted, error, since, pid: process.pid, said });
   if (s === lastState) return;
   lastState = s;
   try { writeFileSync(join(dir, "state.json.tmp"), s); renameSync(join(dir, "state.json.tmp"), join(dir, "state.json")); } catch {}
@@ -64,6 +76,7 @@ function end(why: string | null = null) {
   ended = true;
   try { ws?.close(); } catch {}
   mic?.kill(); player?.kill(); asking?.kill();
+  if (hears) void serviceCall("DELETE", `/api/voice/hear?call=${encodeURIComponent(callId)}`);
   state();
   setTimeout(() => process.exit(0), 100);
 }
@@ -114,19 +127,38 @@ async function service(): Promise<string | null> {
 
 function where() { try { return JSON.parse(readFileSync(join(dir, "where.json"), "utf8")); } catch { return {}; } }
 
-/** A tool's answer from the service: { result, nav?, error? }, or null when the service can't be asked. */
-async function serviceTool(tool: string, params: unknown): Promise<{ result: string; nav?: any; then?: unknown; shows?: string; error?: boolean } | null> {
+/** The service's JSON answer to a call of this machine's, or null when it can't be asked. */
+async function serviceCall(method: string, path: string, body?: unknown, ms = 25000): Promise<any> {
   let token = "";
   try { token = readFileSync(TOKEN, "utf8").trim(); } catch { return null; }
   const base = await service();
   if (!base) return null;
   try {
-    const r = await fetch(`${base}/api/voice/tool`, { method: "POST", signal: AbortSignal.timeout(25000),
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ addr, tool, params, where: where() }) });
-    if (!r.ok) return null;
-    const a = await r.json();
-    return typeof a?.result === "string" ? a : null;
+    const r = await fetch(`${base}${path}`, { method, signal: AbortSignal.timeout(ms),
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    return r.ok ? await r.json() : null;
   } catch { return null; }
+}
+
+/** A tool's answer from the service: { result, nav?, error? }, or null when the service can't be asked. */
+async function serviceTool(tool: string, params: unknown): Promise<{ result: string; nav?: any; then?: unknown; shows?: string; error?: boolean } | null> {
+  const a = await serviceCall("POST", "/api/voice/tool", { addr, call: callId, tool, params, where: where() });
+  return typeof a?.result === "string" ? a : null;
+}
+
+/** SHEP-105: what the call hears, from the service, said once the person and the voice are both quiet. */
+let hearing = false;
+async function hear() {
+  if (hearing || ended || ws?.readyState !== WebSocket.OPEN) return;
+  hearing = true;
+  try {
+    const now = Date.now();
+    const quiet = !turn.holding(now) && now - heardAt > 1200 && now > playEnd + 1200;
+    const a = await serviceCall("POST", "/api/voice/hear", { call: callId, addr, where: where(), quiet }, 5000);
+    if (!a || !Array.isArray(a.lines)) return;
+    hears = true;
+    for (const line of a.lines) if (line && typeof line.text === "string") send(line);
+  } finally { hearing = false; }
 }
 
 // ElevenLabs' answer (none for a 204), or throws its error in words without anything like a key.
@@ -296,8 +328,9 @@ function inbox() {
     if (!m) continue;
     if (m.type === "hangup") return end();
     if (m.type === "mute") { muted = Boolean(m.on); state(); }
-    if (m.type === "reply" && typeof m.text === "string") send(replyLine(who, m.text));
-    if (m.type === "status" && m.status !== lastStatus) {
+    // the service hears this chat with the rest (hear()); without it, the chat's own agent only
+    if (m.type === "reply" && typeof m.text === "string" && !hears) send(replyLine(who, m.text));
+    if (m.type === "status" && m.status !== lastStatus && !hears) {
       lastStatus = m.status;
       const line = statusLine(who, m.status, m.asking);
       if (line) send(line);
@@ -332,7 +365,7 @@ async function main() {
   const here = (await serviceTool("look", { what: "here" }))?.result ?? "";
   saidWhere = JSON.stringify(where());
   ws.onopen = () => {
-    ws!.send(JSON.stringify(opening(who, here)));
+    ws!.send(JSON.stringify(opening(here)));
   };
   ws.onmessage = async (e) => {
     if (ended) return;
@@ -347,8 +380,15 @@ async function main() {
       state();
       startMic().catch((err) => end(`The microphone didn't start: ${err?.message ?? err}`));
     }
-    else if (m.type === "user_transcript") { phase = "thinking"; thinkingAt = Date.now(); state(); }
-    else if (m.type === "agent_response") { phase = "listening"; state(); }
+    else if (m.type === "user_transcript") { turn.seen("user_transcript"); phase = "thinking"; thinkingAt = Date.now(); state(); }
+    else if (m.type === "agent_response") {
+      turn.seen("agent_response");
+      // a word before a tool ("On it."): still working on it
+      if (!busy) phase = "listening";
+      const text = m.agent_response_event?.agent_response;
+      if (typeof text === "string" && text.trim()) said = text.trim().slice(0, 300);
+      state();
+    }
     else if (m.type === "audio" && typeof m.audio_event?.audio_base_64 === "string") {
       const pcm = Buffer.from(m.audio_event.audio_base_64, "base64");
       if (pcm.length % 2 === 0) play(new Uint8Array(pcm));
@@ -356,21 +396,32 @@ async function main() {
     else if (m.type === "interruption") hush();
     else if (m.type === "client_tool_call") {
       const c = m.client_tool_call ?? {};
-      phase = "thinking"; thinkingAt = Date.now(); state();
-      const name = String(c.tool_name ?? ""), params = c.parameters ?? {};
-      let a = await serviceTool(name, params);
-      if (!a) a = await localTool(name, params);
-      // an open: this window's chat shows it, and says so (navved/), before the agent may say it's on screen
-      // (the screen tool's answer is the screen itself; a space then its panel: the second once the first shows)
-      if (a.nav?.kind === "screen") a = { ...a, ...screenWords(await showHere(a.nav), a.nav.do) };
-      else if (a.nav) {
-        let ack = await showHere(a.nav);
-        if (ack?.ok && a.then) ack = await showHere(a.then);
-        a = { ...a, ...navWords(a.shows ?? "it", ack) };
+      doing = toolWords(String(c.tool_name ?? ""), c.parameters ?? {});
+      turn.seen("client_tool_call");
+      phase = "working"; thinkingAt = Date.now(); state();
+      busy++;
+      try { await tool(c); } finally {
+        busy--;
+        turn.seen("client_tool_result");
+        // its answer next
+        if (!busy) { phase = "thinking"; thinkingAt = Date.now(); state(); }
       }
-      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "client_tool_result", tool_call_id: c.tool_call_id, result: a.result, is_error: !!a.error }));
     }
   };
+  async function tool(c: any) {
+    const name = String(c.tool_name ?? ""), params = c.parameters ?? {};
+    let a = await serviceTool(name, params);
+    if (!a) a = await localTool(name, params);
+    // an open: this window's chat shows it, and says so (navved/), before the agent may say it's on screen
+    // (the screen tool's answer is the screen itself; a space then its panel: the second once the first shows)
+    if (a.nav?.kind === "screen") a = { ...a, ...screenWords(await showHere(a.nav), a.nav.do) };
+    else if (a.nav) {
+      let ack = await showHere(a.nav);
+      if (ack?.ok && a.then) ack = await showHere(a.then);
+      a = { ...a, ...navWords(a.shows ?? "it", ack) };
+    }
+    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "client_tool_result", tool_call_id: c.tool_call_id, result: a.result, is_error: !!a.error }));
+  }
   ws.onerror = () => end("The voice connection failed.");
   ws.onclose = (e) => {
     if (ended) return;
@@ -393,11 +444,13 @@ setInterval(() => {
   try { writeFileSync(`${dir.replace(/\/$/, "")}.level`, level.toFixed(3)); } catch {}
 }, 100);
 
+let hearAt = 0;
 // The chat's commands, and the call's end once the chat stops showing.
 setInterval(() => {
   if (ended) return;
   inbox();
   if (ws?.readyState === WebSocket.OPEN) void moved();
+  if (Date.now() - hearAt > 1000) { hearAt = Date.now(); void hear(); }
   try { if (Date.now() - statSync(join(dir, "alive")).mtimeMs > 20000) end(); } catch { if (Date.now() - since > 20000) end(); }
   state();
 }, 150);

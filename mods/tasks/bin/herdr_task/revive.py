@@ -21,6 +21,7 @@ from .base import HOME, hc_json, now, run, SHELLS
 from .agents import agent_running, status_word
 from .sessions import session_of
 from .settings import ASSISTANT_TEMPLATES
+from .launch import CLEAN_ENV
 
 LABEL = "herdr.resume"
 # Claude Code: "No conversation found with session ID: …". Codex: "ERROR: No saved session found with ID …"
@@ -133,7 +134,10 @@ def shell_line(shell, cwd, env, argv, direct=False):
         words = f"command {words}"
     pre = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in sorted((env or {}).items()))
     cmd = f"{pre} {words}" if pre else words
-    return f"cd {shlex.quote(cwd)} && {cmd}" if cwd else cmd
+    line = f"cd {shlex.quote(cwd)} && {cmd}" if cwd else cmd
+    # The recovered shell has the holder's environment: clear a parent Claude Code session's markers
+    # first (SHEP-86, launch.CLEAN_ENV; POSIX shells: fish has no for-in-do).
+    return line if os.path.basename(shell or "") == "fish" else f"{CLEAN_ENV} {line}"
 
 
 def read_record(k):

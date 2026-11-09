@@ -13,7 +13,8 @@ import time
 
 from .base import ENTRY, Fail, guard, hc_json, now, STORE
 from .when import parse_at
-from .settings import bare, settings_for, worker_argv, worktrees_on
+from .holycow import require_assignment
+from .settings import set_task, bare, settings_for, worker_argv, worktrees_on
 from .agents import agent_running, live_agents, starting, status_of, task_status
 from .sessions import session_of
 from .launch import default_space
@@ -205,7 +206,7 @@ def find_auto(s, ref):
 
 
 def auto_view(s, a):
-    v = {k: a.get(k) for k in ("id", "title", "prompt", "mode", "agent", "on", "match", "space", "paused",
+    v = {k: a.get(k) for k in ("id", "title", "prompt", "mode", "kind", "skill", "agent", "on", "match", "space", "paused",
                                 "next_run", "last_run", "last_task", "last_error", "runs", "created")}
     # machine: None here; herdr-task --on <machine> names it (cli.remote), so a list across machines says whose it is
     v.update(ref=auto_ref(s, a), **{"from": from_text(a["from"]) if a.get("from") else None}, folder=s.loc["folder"], machine=None, prefix=s.prefix, every=(a.get("every") or {}).get("text"),
@@ -221,6 +222,11 @@ def auto_line(v):
 
 
 def set_auto_fields(s, a, args, adding=False):
+    for field in ("kind", "skill"):
+        value = getattr(args, field, None)
+        if value is not None:
+            set_task(a, field, value)
+    require_assignment(a)
     if getattr(args, "title", None):
         a["title"] = args.title.strip()
     if args.prompt is not None:
@@ -299,6 +305,7 @@ def cmd_auto(args):
                 a["paused"] = True
                 msg = f"{auto_ref(s, a)} paused."
             elif sub == "resume":
+                require_assignment(a)
                 a["paused"] = False
                 a["next_run"] = next_run(a.get("every"), now())
                 msg = f"{auto_ref(s, a)} resumed: {trigger_words(a)}."
@@ -356,8 +363,9 @@ def fire(s, a, why, brief=None):
         prompt = f"{prompt.rstrip()}\n\n{brief}" if prompt.strip() else brief
     t = s.new(a["title"], prompt, a.get("mode") or ("worktree" if worktrees_on(s) else "here"))
     t["automation"] = a["id"]
-    if a.get("agent"):
-        t["agent"] = a["agent"]
+    for field in ("kind", "skill", "agent"):
+        if a.get(field):
+            t[field] = a[field]
     space = a.get("space")
     run_rec = {"at": now(), "why": why, "task": s.ref(t)}
     if a.get("from") and why.split(":")[0] in EVENTS:

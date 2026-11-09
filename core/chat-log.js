@@ -7,6 +7,8 @@
 // guessing by folder or time, so two agents in one folder never get mixed up.
 
 // Prints the log's path on the agent's machine, or nothing. Args: kind, pid.
+import { codexQuestions } from "./asks.js";
+
 export const FIND = `
 kind="$1"; pid="$2"
 kids() { for k in $(pgrep -P "$1" 2>/dev/null); do echo "$k"; kids "$k"; done; }
@@ -587,7 +589,7 @@ function codexStep(name, args) {
 //   { kind: "pilot", id, at, reason, steps, said, quiet }  (an Autopilot wake, its quiet line: pilotLine())
 //   { kind: "tools", id, steps: [{ id, kind, line, out? }] }  (calls in a row, between texts;
 //                                             out: where the call's result line is)
-//   { kind: "ask", id, text, closed? }  (the agent's own question tool; closed once its dialog
+//   { kind: "ask", id, text, questions?, closed? }  (the agent's own question tool, Codex's with its questions; closed once its dialog
 //                                          is gone: "answered" | "dismissed")   { kind: "error", id, text }
 // `doing` is what it does right now (the last call not answered yet), for the status line.
 // `meta` is what the agent runs on, from its newest lines: { model, effort, speed, used, window }
@@ -976,7 +978,9 @@ export class Conversation {
           let a = p.arguments;
           try { a = typeof a === "string" ? JSON.parse(a) : a; } catch {}
           const text = (Array.isArray(a?.questions) ? a.questions : []).map((q) => [q?.question, ...(Array.isArray(q?.options) ? q.options.map((o) => `- ${o?.label ?? o}`) : [])].filter(Boolean).join("\n")).join("\n\n");
-          if (text) this.asked(cid, { kind: "ask", id: `q${off}`, text });
+          // its questions as they were asked, for the card that answers them on its screen (core/asks.js codexSteps)
+          const questions = codexQuestions(a);
+          if (text) this.asked(cid, { kind: "ask", id: `q${off}`, text, ...(questions.length ? { questions } : {}) });
           this.open.set(cid, "Asking you something");
           this.doing = "Asking you something";
           return;

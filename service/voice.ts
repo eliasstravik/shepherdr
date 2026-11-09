@@ -1,21 +1,24 @@
 // A voice call from the web (2.1's call: the page streams its microphone here as 16 kHz PCM and plays what comes
 // back), as the window's call (mods/chat/voice.ts) with the phone's microphone and speaker: the same ElevenLabs voice
 // agent (core/voice.js), the same key and agent id (<app home>/secrets), its tools answered here (voice-tools.ts:
-// look, open, send, act, with the reach of the person's web app), and the called agent's replies and status said as
-// [Update]s. The page tells where it is (what it shows) as it moves; an open comes back to it as a nav message.
+// look, open, send, act, with the reach of the person's web app). SHEP-105: the call is with Shepherdr itself, not a
+// chat: it hears the chats it sent to and the one on screen, and what needs the person anywhere (voice-hear.ts), as
+// [Update]s held until the person and the voice are quiet. The page tells where it is (what it shows) as it moves; an
+// open comes back to it as a nav message.
 // Nothing is recorded or kept; a key is never sent to the page or logged.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import type { Hub } from "./hub.ts";
-import { HOME } from "./paths.ts";
+import { HOME, appHome, writable } from "./paths.ts";
 import * as V from "../core/voice.js";
 import { secretBin } from "./secrets.ts";
 import { voiceTool, lookHere, shown, type Ack, type Nav, type VoiceIO, type Where } from "./voice-tools.ts";
+import { hearing, type HearIO } from "./voice-hear.ts";
+export type { ChatView } from "./voice-hear.ts";
 
-const { API, opening, replyLine, statusLine, whereLine, envLines, apiError, voiceKey, ensureAgent, agentFile } = V as any;
-const APP = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
-const SECRETS = join(APP, "secrets");
+const { API, opening, whereLine, envLines, apiError, voiceKey, ensureAgent, agentFile, toolWords, turnGate } = V as any;
+const secretsDir = () => join(appHome(), "secrets");
 
 const envFile = (file: string): Record<string, string> => { try { return envLines(readFileSync(file, "utf8")); } catch { return {}; } };
 
@@ -23,7 +26,7 @@ const envFile = (file: string): Record<string, string> => { try { return envLine
  *  secrets, read over herdr-core's link into memory only. */
 export function keyFor(hub: Pick<Hub, "call">) {
   return voiceKey({
-    oldFile: () => envFile(join(SECRETS, "elevenlabs.env")).ELEVENLABS_API_KEY || "",
+    oldFile: () => envFile(join(secretsDir(), "elevenlabs.env")).ELEVENLABS_API_KEY || "",
     where: async () => {
       const p = Bun.spawn([secretBin(), "where", "--json"], { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
       const out = await new Response(p.stdout).text();
@@ -48,30 +51,57 @@ export async function api(path: string, key: string, init: RequestInit = {}) {
 
 /** The "Herdr chat" voice agent, up to this spec (core/voice.js ensureAgent); only its id, a tag of the key and the
  *  spec are kept here, never the key. */
-export function agentId(key: string, made = "", dir = SECRETS, call = api) {
+export function agentId(key: string, made = "", dir = secretsDir(), call = api) {
   const file = join(dir, "elevenlabs-agent.env");
   const tag = createHash("sha256").update(key).digest("hex").slice(0, 16);
   return ensureAgent({
     saved: envFile(file), tag, made,
     api: (path: string, init?: RequestInit) => call(path, key, init),
-    save: (id: string, spec: string) => { mkdirSync(dir, { recursive: true, mode: 0o700 }); writeFileSync(file, agentFile(id, tag, spec), { mode: 0o600 }); },
+    save: (id: string, spec: string) => { writable(file); mkdirSync(dir, { recursive: true, mode: 0o700 }); writeFileSync(file, agentFile(id, tag, spec), { mode: 0o600 }); },
   }) as Promise<string>;
 }
 
 type Page = { send(x: string | Uint8Array): void; close(): void };
-/** What the call reads of its own chat: the agent's last reply and its status (for the [Update]s). */
-export type ChatView = { lastReply(): { id: string; text: string } | null; status(): string | null; asking(): string | null };
+
+/** SHEP-102: how long a call holds when its page's socket drops (a phone that locks, a lift, a tunnel): the voice
+ *  agent's conversation stays open, and the page comes back to it (resume) with all it was told. */
+export const HOLD_MS = 60_000;
+/** the calls on now, by their id (the page's to come back with; only for the same person) */
+const calls = new Map<string, { who: string; call: ReturnType<typeof voiceCall> }>();
+/** a call a page comes back to, if it is still holding, for that person */
+export function callToResume(id: string, who: string) {
+  const c = calls.get(id);
+  return c && c.who === who ? c.call : null;
+}
+/** the words the voice agent gets when the page is back: say so, and say again what was cut */
+export const backLine = (secs: number) => ({ type: "user_message",
+  text: `[Update] The person's phone lost the call's connection for about ${Math.max(1, Math.round(secs))} s and is back now: they heard nothing of what you said meanwhile. Say you're back in a few words, then repeat briefly anything they missed.` });
+/** how long the person and the voice must both be quiet before the call says its updates (ms) */
+export const QUIET_MS = 1200;
+/** loud enough to be speech: RMS of 16-bit samples above ~2% of full scale */
+const SPEECH = 650;
+/** whether a piece of 16-bit PCM is someone talking */
+export function talking(pcm: Uint8Array) {
+  const b = pcm.byteOffset % 2 ? pcm.slice() : pcm;
+  const s = new Int16Array(b.buffer, b.byteOffset, b.length >> 1);
+  let sum = 0;
+  for (let i = 0; i < s.length; i += 4) sum += s[i] * s[i];
+  return Math.sqrt(sum / Math.max(1, s.length >> 2)) > SPEECH;
+}
 export type CallDeps = {
-  view: ChatView;
   io: VoiceIO;
-  /** keeps the call's chat read while the call is on (its replies are told even with no page on it); the stop */
-  follow(): () => void;
+  /** what the call hears: chats it sent to or the one on screen, and needs anywhere (voice-hear.ts) */
+  hear: HearIO;
   /** the call's start: where it is (the page tells what it shows as it moves) */
   where: Where;
   /** the voice agent's socket address (default: a signed ElevenLabs one for the person's key; a test's fake) */
   dial?: () => Promise<string>;
   /** how long an open waits for the page to say it shows it (ms) */
   navWait?: number;
+  /** how long the call holds for its page to come back (ms) */
+  holdMs?: number;
+  /** who called (a page comes back only as them) */
+  who?: string;
 };
 
 /** The voice agent's socket: a signed address for the "Herdr chat" agent of the person's key. */
@@ -88,12 +118,15 @@ async function dialElevenLabs(hub: Hub) {
 /** The page's "where" message, checked: what it shows now. */
 export function pageWhere(m: any): Partial<Where> {
   const s = (v: unknown, n = 200) => (typeof v === "string" && v.length <= n ? v : null);
-  return { device: s(m.device, 20), place: s(m.place), task: s(m.task), tab: s(m.tab, 40), artifact: s(m.artifact), settings: m.settings === true };
+  return { device: s(m.device, 20), place: s(m.place), task: s(m.task), tab: s(m.tab, 40), artifact: s(m.artifact), settings: m.settings === true, ...(typeof m.full === "boolean" ? { full: m.full } : {}) };
 }
 
 /** One call: the page's audio to the voice agent and back. message(): a frame from the page; end(): the page went. */
-export function voiceCall(hub: Hub, who: string, deps: CallDeps, page: Page) {
-  const { view, io } = deps;
+export function voiceCall(hub: Hub, deps: CallDeps, first: Page) {
+  const { io } = deps;
+  // the page on the call now; none while its socket is down and the call holds for it (SHEP-102)
+  let page: Page | null = first, gone = 0, hold: ReturnType<typeof setTimeout> | null = null;
+  const id = crypto.randomUUID();
   // an open goes to this very page (the socket that started the call: that phone, that browser tab) and counts only
   // once the page says it shows it ({ type: "navved", id, ok, why, where })
   let navs = 0;
@@ -107,37 +140,47 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, page: Page) {
   });
   let where = deps.where;
   let ws: WebSocket | null = null, ended = false;
-  let lastStatus = view.status(), lastReply = view.lastReply()?.id ?? null;
-  const unfollow = deps.follow();
-  const tell = (m: object) => { try { page.send(JSON.stringify(m)); } catch {} };
+  const hear = hearing(deps.hear);
+  // when the person last talked, until when the voice is talking, and whether it still owes the person an answer
+  // (SHEP-113: their ask comes first): updates wait for a quiet moment after it
+  let heardAt = 0, speakUntil = 0, busy = 0;
+  const turn = turnGate();
+  const tell = (m: object) => { try { page?.send(JSON.stringify(m)); } catch {} };
   const toVoice = (m: object) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m)); };
   const here = () => { const s = io.snap(); return s ? lookHere(s, where) : ""; };
+  let doing = "";
   let said = "", saying: ReturnType<typeof setTimeout> | null = null;
   const end = (why: string | null = null) => {
     if (ended) return;
     ended = true;
+    calls.delete(id);
+    if (hold) clearTimeout(hold);
     clearInterval(watch);
     if (saying) clearTimeout(saying);
-    unfollow();
+    hear.stop();
     for (const done of [...waiting.values()]) done({ ok: false, why: "the call ended" });
     if (why) tell({ type: "error", message: why });
     try { ws?.close(); } catch {}
-    try { page.close(); } catch {}
+    try { page?.close(); } catch {}
+    page = null;
   };
-  // the called agent's replies and status, as the window's chat feeds its call
+  calls.set(id, { who: deps.who ?? "", call: null as any });
+  tell({ type: "call", id });
+  // what the call hears (the chats it follows, needs anywhere), said once nobody is talking
+  hear.onScreen(where);
   const watch = setInterval(() => {
     if (ended) return;
-    const st = view.status();
-    if (st !== lastStatus) { lastStatus = st; const line = statusLine(who, st, view.asking()); if (line) toVoice(line); }
-    const r = view.lastReply();
-    if (r && r.id !== lastReply) { lastReply = r.id; toVoice(replyLine(who, r.text)); }
+    hear.onScreen(where);
+    hear.tick();
+    const t = Date.now();
+    if (ws?.readyState === WebSocket.OPEN && !turn.holding(t) && t - heardAt > QUIET_MS && t > speakUntil + QUIET_MS) for (const line of hear.take()) toVoice(line);
   }, 1000);
 
   (async () => {
     const signed_url = await (deps.dial ?? (() => dialElevenLabs(hub)))();
     if (ended) return;
     ws = new WebSocket(signed_url);
-    ws.onopen = () => { said = here(); toVoice(opening(who, said)); };
+    ws.onopen = () => { said = here(); toVoice(opening(said)); };
     ws.onmessage = async (e) => {
       if (ended) return;
       let m: any;
@@ -149,18 +192,39 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, page: Page) {
         if (!/pcm_16000/.test(meta.agent_output_audio_format ?? "pcm_16000")) return end("The voice agent speaks in a format the page can't play.");
         tell({ type: "state", state: "listening" });
       }
-      else if (m.type === "user_transcript") tell({ type: "state", state: "thinking" });
-      else if (m.type === "agent_response") tell({ type: "state", state: "listening" });
+      else if (m.type === "user_transcript") { turn.seen("user_transcript"); tell({ type: "state", state: "thinking" }); }
+      else if (m.type === "agent_response") {
+        turn.seen("agent_response");
+        // a word before a tool ("On it."): the call is still working on it
+        tell(busy ? { type: "state", state: "working", doing } : { type: "state", state: "listening" });
+        // what it said, for the call card (SHEP-105: the last thing the voice said)
+        const text = m.agent_response_event?.agent_response;
+        if (typeof text === "string" && text.trim()) tell({ type: "said", text: text.trim().slice(0, 300) });
+      }
       else if (m.type === "audio" && typeof m.audio_event?.audio_base_64 === "string") {
         const pcm = Buffer.from(m.audio_event.audio_base_64, "base64");
-        if (pcm.length % 2 === 0) page.send(new Uint8Array(pcm));
+        speakUntil = Math.max(speakUntil, Date.now()) + (pcm.length / 2 / 16000) * 1000;
+        if (pcm.length % 2 === 0) try { page?.send(new Uint8Array(pcm)); } catch {}
       }
-      else if (m.type === "interruption") tell({ type: "interrupt" });
+      else if (m.type === "interruption") { speakUntil = 0; tell({ type: "interrupt" }); }
       else if (m.type === "client_tool_call") {
         const c = m.client_tool_call ?? {};
-        tell({ type: "state", state: "thinking" });
-        const a = await shown(await voiceTool(String(c.tool_name ?? ""), c.parameters ?? {}, where, io), show);
-        toVoice({ type: "client_tool_result", tool_call_id: c.tool_call_id, result: a.result, is_error: !!a.error });
+        // SHEP-113: the call shows what it is doing, in plain words ("Working: checking tasks")
+        doing = toolWords(String(c.tool_name ?? ""), c.parameters ?? {});
+        turn.seen("client_tool_call");
+        tell({ type: "state", state: "working", doing });
+        busy++;
+        const asked = Date.now();
+        try {
+          const a = await shown(await voiceTool(String(c.tool_name ?? ""), c.parameters ?? {}, where, io), show);
+          if (a.sent) hear.sentTo(a.sent, asked);
+          toVoice({ type: "client_tool_result", tool_call_id: c.tool_call_id, result: a.result, is_error: !!a.error });
+        } finally {
+          busy--;
+          turn.seen("client_tool_result");
+          // its answer next
+          if (!busy && !ended) tell({ type: "state", state: "thinking" });
+        }
       }
     };
     ws.onerror = () => end("The voice connection failed.");
@@ -173,7 +237,26 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, page: Page) {
     };
   })().catch((err) => end(String(err?.message ?? err)));
 
-  return {
+  const call = {
+    id,
+    /** the page's socket closed without an end: the call holds for it (a locked phone's dropped socket comes back) */
+    detach(from: Page) {
+      if (ended || page !== from) return;
+      page = null;
+      gone = Date.now();
+      hold = setTimeout(() => end(), deps.holdMs ?? HOLD_MS);
+    },
+    /** the page came back (its socket again, with the call's id): it gets the call where it is, the agent says so */
+    attach(to: Page) {
+      if (ended) return false;
+      if (hold) { clearTimeout(hold); hold = null; }
+      const old = page;
+      page = to;
+      if (old && old !== to) try { old.close(); } catch {}
+      tell({ type: "resumed", id });
+      if (gone) { toVoice(backLine((Date.now() - gone) / 1000)); gone = 0; }
+      return true;
+    },
     /** the page's microphone: 16 kHz PCM (the page cancels its own speaker's echo, so the person can talk over it);
      *  or, as text, where the page is now ({ type: "where", place, task, tab, artifact, settings, device }), or what
      *  it did with an open or a screen action ({ type: "navved", id, ok, why?, where?, did?, ask?, screen? }) */
@@ -189,6 +272,8 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, page: Page) {
           waiting.get(m.id)?.({ ok: m.ok === true, why: typeof m.why === "string" ? m.why.slice(0, 300) : null, did: str(m.did, 300), ask: str(m.ask, 300), screen: str(m.screen, 4000) });
           return;
         }
+        // the person ended the call (End, or the lock screen's hang up): no holding for the page
+        if (m?.type === "end") return end();
         if (m?.type !== "where") return;
         where = { ...where, ...pageWhere(m) };
         // told once it settles (a tap through a few screens is one note)
@@ -199,8 +284,11 @@ export function voiceCall(hub: Hub, who: string, deps: CallDeps, page: Page) {
       if (ws?.readyState !== WebSocket.OPEN) return;
       const pcm = Buffer.from(data as ArrayBuffer);
       if (pcm.length > 256 * 1024 || pcm.length % 2) return;
+      if (talking(pcm)) heardAt = Date.now();
       ws.send(JSON.stringify({ user_audio_chunk: pcm.toString("base64") }));
     },
     end: () => end(),
   };
+  calls.get(id)!.call = call;
+  return call;
 }

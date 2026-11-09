@@ -1,5 +1,114 @@
 # Changelog
 
+## 3.1.26
+
+The order you drag your spaces into now stays put.
+
+- In the web app, a space you drag to a new spot in the sidebar stays there, even one that used to snap back to the bottom. The Herdr window shows the same order.
+
+## 3.1.25
+
+Calls are easier on a phone held sideways, and you can see how much voice you have left.
+
+- In the web app, a full-screen call on a phone held sideways puts the orb on the left and the buttons on the right.
+- End hangs up at once, with no "Are you sure" step.
+- Settings → Plan usage shows your ElevenLabs credits. If your key can't read them, it says which permission to add.
+
+## 3.1.24
+
+You can ask the voice call to go full screen or step aside.
+
+- On a call, say "go full screen" or "minimize" and the voice does it itself. When it opens the full screen for you, it
+  no longer shrinks it again right after.
+
+## 3.1.23
+
+A minimized call on a phone keeps out of the way.
+
+- In the web app on a phone, a minimized voice call no longer shows a green Listening pill above the bottom bar.
+  Mute and End stay in the bar.
+
+## 3.1.22
+
+The voice call's orb is a clean circle on iPhone.
+
+- In the web app on an iPhone or iPad, the full-screen call's orb shows only its circle, with no grey square around
+  it.
+
+## 3.1.21
+
+A voice call opens full screen, and research tasks leave your code alone.
+
+- In the web app a call opens full screen: a calm orb that moves with who's talking, plus Minimize, Mute and End.
+  Minimized, the call's card and bar show Full screen where Mute was.
+- A task that only looks things up (reading, research, comparing) works in the folder itself, with no branch or pull
+  request, and hands you its answer as an artifact.
+
+## 3.1.20
+
+A voice call can see everything you can, and lets you know when it's busy.
+
+- A call can read every panel the app shows: tasks, changes, pull requests, files, artifacts, usage insights and each
+  machine's health and plan limits. Secrets stay hidden from it.
+- While it looks something up, a call says a word or two ("On it.") and plays a soft typing sound.
+- The call shows Listening, Thinking, Working (and on what, like "Checking tasks…") or Speaking: on the sidebar card,
+  the top strip and a slim pill above a phone's bottom bar.
+- A call answers what you asked first, before any news from your tasks.
+
+## 3.1.19
+
+On a phone, the voice call lives in the bottom bar, and a chat's round button only sends.
+
+- A phone's voice button sits at the end of its bottom bar; search is in the ☰ menu's magnifier.
+- A chat's round button is always Send: grey until there is something to send. Calls start from Talk to Shepherdr.
+- During a call, a phone's bottom bar has Mute and a red hang-up that asks before it ends the call.
+- The call card is one tidy row: who, what it is doing and how long, with Mute and hang-up.
+
+## 3.1.18
+
+One voice call now talks to all of Shepherdr, and model choice works on every machine.
+
+- A voice call is with Shepherdr itself, not one chat: start it from Talk to Shepherdr at the top of the sidebar or a
+  phone's voice button. It hears every chat it sent to, the one on screen and anything new that needs you, and says it
+  when you're both quiet.
+- What a call opens for you shows an Opened by voice tag for a few seconds.
+- Changing an Assistant's model, reasoning or permissions works for a space on another machine too, and says so if
+  that machine is offline.
+
+## 3.1.17
+
+Voice calls go on with the phone locked, and agents can show you an artifact wherever you are.
+
+- A voice call keeps going with the phone locked, shows on the lock screen, and picks up again after a dropped
+  connection.
+- Voice calls switch to the language you speak, by themselves.
+- An agent can open an artifact for you on the screen you used last, and gives you its link.
+- The Tasks list shows what needs you first, then each space's tasks.
+- A task that changed no code (research, a report) waits for your Accept instead of finishing on its own, and its
+  Accept card links its artifacts.
+- Usage insights, a new add-on you can switch off: a private log on your own machine of how you use Shepherdr, that
+  your agents can read.
+
+## 3.1.16
+
+Every agent question can be answered from the chat, and web messages never get lost.
+
+- Every question or permission an agent asks shows as a card in the chat, on the web and phone too, for Claude Code
+  and Codex.
+- Messages sent from the web go again by themselves after a dropped connection, show how they are going, and are
+  never sent twice.
+- Background processes and subagents each show as one row over the chat box, which opens to the list.
+- A task's chat follows its agent when it restarts in a new terminal, instead of "Can't find this conversation".
+
+## 3.1.15
+
+Agents keep their chat history, a stuck web chat recovers on its own, and the session note works on Macs.
+
+- Agents started from inside Claude Code keep their chat history and folder-trust prompt again.
+- The web chat follows an Assistant that was restarted, instead of showing "not a chat agent" until the service
+  restarts.
+- Macs: the note Shepherdr adds when a Claude Code session starts no longer breaks it (#731).
+
 ## 3.1.14
 
 Shorter voice replies when you ask a call to open something.

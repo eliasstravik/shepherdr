@@ -3,6 +3,7 @@
 // shapes 2.1's screen reads (web/shared/types.ts: Snapshot, Chat), and its chat keys back into terminals.
 //   a space's chat (its Assistant):  p:<space id, "/" as ":">     a task's chat:  <task id>/worker
 // A task id is its ref ("SHEP-7"), "<machine>:<ref>" on another machine, as 2.1 wrote them.
+import { failedOf } from "./send-once.ts";
 import type { Snapshot, Place, Task, Need, Section, Machine, Chat, Message, Status, TaskStatus, StepKind, ActivityAnswer, Question, Artifact, SettingSection, Job } from "../web/shared/types.ts";
 import * as T from "../core/tasks.js";
 import * as SPc from "../core/spaces.js";
@@ -15,15 +16,15 @@ const { senderName, briefLabel, firstUser, firstKeys, newsTimeline, resolveArtif
 import { mentionedIn } from "../core/send.js";
 import * as MEc from "../core/mentions.js";
 import * as SCc from "../core/screens.js";
+import { codexChoice } from "../core/asks.js";
 const { SCREEN } = SCc as any;
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-const APP_HOME = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
 const CLI_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex", cursor: "Cursor" };
 import * as MNc from "../core/menus.js";
 import * as APc from "../core/autopilot.js";
 const { machineLabel } = MNc as any;
-import { HOME } from "./paths.ts";
+import { HOME, appHome } from "./paths.ts";
 const { spaceName } = SPc as any;
 import type { Where } from "./worktree.ts";
 import * as AGc from "../core/agents.js";
@@ -185,6 +186,18 @@ export function artifactOf(a: any, spaces: Space[], program: (addr: string) => s
   };
 }
 
+/** Codex's own questions (a log's ask item with its questions) as a question card: its id cq:<item id>, answered on
+ *  Codex's screen (service/actions.ts, core/asks.js codexSteps). */
+export function codexQuestion(x: any, key: string): Question {
+  const qs: any[] = x.questions ?? [];
+  const choices = (q: any) => q.choices.map(codexChoice);
+  // no note: its picker has nowhere for one beside a pick
+  if (qs.length > 1)
+    return { id: `cq:${x.id}`, title: `${qs.length} questions`, kind: "Question", to: key, choices: [], other: true, noNote: true,
+      parts: qs.map((q) => ({ title: q.text, header: q.header || undefined, choices: choices(q) })) };
+  return { id: `cq:${x.id}`, title: qs[0].text, kind: "Question", to: key, other: true, noNote: true, choices: choices(qs[0]) };
+}
+
 export class Compat {
   /** another machine's key -> the name people read for it (who sent a message: core/chat-view.js fromName) */
   machineNames = new Map<string, string>();
@@ -204,7 +217,7 @@ export class Compat {
   /** A space by its id: its folder and machine. */
   spaceOf(id: string) { const s = this.spaceList.find((x) => x.id === id); return s ? { id: s.id, folder: s.folder, machine: s.machine ?? null } : null; }
   /** Every space: its folder and machine (the worktree dialog's "open" marks). */
-  allSpaces() { return this.spaceList.map((s) => ({ id: s.id as string, folder: s.folder as string, machine: (s.machine ?? null) as string | null })); }
+  allSpaces() { return this.spaceList.map((s) => ({ id: s.id as string, folder: s.folder as string, machine: (s.machine ?? null) as string | null, ...((s as any).own ? { own: true } : {}) })); }
 
   /** The tasks a chat's messages can mention (#HAT-1): its folder's, on its machine, as the window's chat has them. */
   tasksFor(chatKey: string) {
@@ -276,7 +289,7 @@ export class Compat {
    *  again by its words, and shows with the page's id and files */
   sends = new Map<string, Sent[]>();
   noteSend(addr: string, s: Sent) {
-    this.sends.set(addr, [...(this.sends.get(addr) ?? []).filter((x) => Date.now() - x.at < 30 * 60_000), s].slice(-20));
+    this.sends.set(addr, [...(this.sends.get(addr) ?? []).filter((x) => x.cid !== s.cid && Date.now() - x.at < 30 * 60_000), s].slice(-20));
   }
 
   addrOf(key: string) { return this.chats.get(key) ?? null; }
@@ -473,7 +486,7 @@ export class Compat {
   private firsts = new Map<string, { at: number; text: string | null }>();
   firstTask(t: any, addr?: string | null) {
     const safe = (s: string) => String(s).replace(/[^\w.-]/g, "_");
-    const names = firstKeys({ labels: t?.labels, addr }).map((n: string) => join(APP_HOME, "data", "chat-first", `${safe(n)}.txt`));
+    const names = firstKeys({ labels: t?.labels, addr }).map((n: string) => join(appHome(), "data", "chat-first", `${safe(n)}.txt`));
     for (const f of names) {
       const was = this.firsts.get(f);
       if (was && Date.now() - was.at < 10_000) { if (was.text) return was.text; continue; }
@@ -528,6 +541,11 @@ export class Compat {
     // what pages sent it, known again in the log: the page's id comes back on it
     const sends = (own && this.sends.get(own)) || [], takenSends = new Set<string>();
     const asking = !!own && (this.asks?.of(own) ?? []).some((a: any) => a.words?.kind === "questions");
+    // Codex's own questions (request_user_input) waiting on its screen: a card that answers them there (SHEP-91), at
+    // the end, in place of its "Asked you" box
+    const codexAsk = reader.kind === "codex" && t?.status?.state === "blocked"
+      ? [...items].reverse().find((x: any) => x.kind === "ask") : null;
+    const codexCard = codexAsk && !codexAsk.closed && codexAsk.questions?.length ? codexAsk : null;
     // an Assistant started from its chat with the person's words: what they asked (data/chat-first, as the window's)
     // the session's first message: the first user item (core/chat-view.js firstUser)
     const fi = firstUser(items);
@@ -578,7 +596,7 @@ export class Compat {
       else if (x.kind === "agent" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at, ...reactions });
       else if (x.kind === "error" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at, error: true });
       // its own question asked now shows as its card (at the end), in place of its "Asked you" box, as the window's
-      else if (x.kind === "ask" && !x.closed && asking) continue;
+      else if (x.kind === "ask" && !x.closed && (asking || x === codexCard)) continue;
       else if (x.kind === "ask" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at, asked: x.closed === "answered" ? "answered" : x.closed ? "dismissed" : "open" });
       else if (x.kind === "news" && x.ref) {
         // a task's news line in its Assistant's chat (<herdr-news task=… event=…>), as it was said
@@ -614,6 +632,7 @@ export class Compat {
     }
     // what the agent asks now, as cards at the end of its chat
     for (const a of addr ? this.asks?.of(addr) ?? [] : []) messages.push({ id: `ask:${a.id}`, who: "agent", at: a.at, question: this.question(a, key) });
+    if (codexCard) messages.push({ id: `ask:cq:${codexCard.id}`, who: "agent", at: codexCard.at ?? Date.now(), question: codexQuestion(codexCard, key) });
     for (const a of (this.secrets?.asks() ?? []).filter((x) => x.address === addr)) messages.push({ id: `secret:${a.address}:${a.name}`, who: "agent", at: Date.now(), secret: this.secretAsk(a) } as Message);
     // asks that closed, as the window's quiet lines ("✓ Run: npm test · Allowed in the chat"); a question's own line is
     // its "Asked you" box, from the log
@@ -679,6 +698,7 @@ export class Compat {
       : reader.state === "missing" && reader.pinned ? "gone"
       : reader.state === "none" || reader.state === "missing" ? ((t && t.state !== "live") || !t ? "ended" : kind ? "none" : "unsupported")
       : !reader.pinned && (!t || t.state !== "live") && !items.length ? "ended" : null;
-    return { key, messages, ...head, ...under, ...(note ? { note } : {}), ...(notice ? { notice } : {}), ...(agent ? { agent } : {}), ...(jobs.length ? { jobs } : {}), working: st === "working", cli: reader.kind ?? "claude", ...(reader.pinned || (t && t.state !== "live") ? { finished: true } : {}) };
+    const failed = failedOf(addr);
+    return { key, messages, ...(failed.length ? { failed } : {}), ...head, ...under, ...(note ? { note } : {}), ...(notice ? { notice } : {}), ...(agent ? { agent } : {}), ...(jobs.length ? { jobs } : {}), working: st === "working", cli: reader.kind ?? "claude", ...(reader.pinned || (t && t.state !== "live") ? { finished: true } : {}) };
   }
 }

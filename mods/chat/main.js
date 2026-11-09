@@ -30,11 +30,11 @@ import * as fs from "fs/promises";
 import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names, pilotLine } from "./core/chat-log.js";
 import { BgJobs } from "./core/bg-jobs.js";
 import { ChatReader } from "./core/chat-reader.js";
-import { words, howAnswered } from "./core/asks.js";
+import { words, howAnswered, codexOnScreen, codexSteps } from "./core/asks.js";
 // The rows' words and rules the web app's chat draws by too (core/chat-view.js).
-import { WORDS, clock, subagentsOf, subagentWord, senderName, briefLabel, firstUser, firstKeys, literal, fromName, sentTo, selfName, initialOf, newsWords, resolveArtifacts, unsigned, ownWords, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
+import { WORDS, clock, bgGroups, subagentsOf, subagentWord, senderName, briefLabel, firstUser, firstKeys, literal, fromName, sentTo, selfName, initialOf, newsWords, resolveArtifacts, unsigned, ownWords, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
 // Sending the person's words, as the web app does (core/send.js).
-import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine, mentionedIn, sendTyped } from "./core/send.js";
+import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine, mentionedIn, sendTyped, SETTLE } from "./core/send.js";
 // hc whose send goes as the person, with no caller: never "Another agent" on another machine (SHEP-3, core/person.js).
 import { asPerson } from "./core/person.js";
 import { AskCards, linkCtl } from "./cards.js";
@@ -49,6 +49,7 @@ import * as attach from "./attach.js";
 import * as slash from "./slash.js";
 import * as mentions from "./core/mentions.js";
 import * as agent from "./agent.js";
+import { cleanCommand } from "./core/clean-env.js";
 import * as choices from "./settings.js";
 import { Dictation, BUN_PATH, warmAudio } from "./dictate.js";
 
@@ -62,6 +63,7 @@ import { dayLabel, dayOf } from "./days.js";
 import { CallScreen } from "./call-screen.js";
 import { on as addonOn } from "./addons.js";
 import { currentWallpaper, wallpaperLayer, wallpaperTheme } from "./wallpaper.js";
+import { note } from "./usage.js";
 
 // Messages a page of history holds: the newest page first, earlier ones as the person scrolls up.
 const PAGE = 200;
@@ -199,6 +201,16 @@ function parts(text) {
 }
 
 let bound = false;
+
+// What the voice opened, in a few words for its "Opened by voice" toast.
+function voiceOpened(nav) {
+  if (nav.kind === "task") return `${nav.ref ?? String(nav.task ?? "").split(":").pop()}${nav.title ? ` \u00b7 ${nav.title}` : ""}`;
+  if (nav.kind === "artifact") return nav.title ?? "An artifact";
+  if (nav.kind === "tasks" || nav.kind === "needs") return nav.kind === "needs" ? "What needs you" : "The Tasks list";
+  if (nav.kind === "settings") return `Settings${nav.section ? ` \u203a ${nav.section}` : ""}`;
+  if (nav.kind === "panel") return `${nav.panel[0].toUpperCase()}${nav.panel.slice(1)}`;
+  return nav.kind === "space" || nav.kind === "chat" ? "A space" : "";
+}
 
 export default class Chat extends View {
   init(_props, cx) {
@@ -369,6 +381,14 @@ export default class Chat extends View {
       toTerminal: (ask) => { openTaskThread(ask.terminal, ask.ref, ask.title); requestWorkerTerminal(ask.terminal); },
       chatAbout: (ask) => openTaskThread(ask.terminal, ask.ref, ask.title),
     }, cx.focus_handle());
+    // Codex's own questions (request_user_input, no hook): the same question card, its answer
+    // pressed on Codex's screen (codexCard(), answerCodex()).
+    this.codexCards = new AskCards({
+      reply: (ask, text, cx) => this.answerCodex(ask, text, cx),
+      toTerminal: () => this.toTerminal(),
+      chatAbout: () => this.box.focus(),
+    }, cx.focus_handle());
+    this.codexAsk = null;
     this.shownAsks = new Map();
     // Secrets agents ask for (herdr-secret ask): their masked cards, here and for the workers.
     this.secretCards = new SecretCards();
@@ -553,8 +573,9 @@ export default class Chat extends View {
     this.loadingEarlier = false;
   }
 
-  // Closing (back to the terminal, or the pane goes): the hook stops waiting on this chat, so
-  // Claude asks in its terminal instead. A call or a recording ends with it.
+  // Closing (back to the terminal, or the pane goes): its flag goes, and a Codex agent's waiting
+  // asks are released (Codex waits on the hook), so it asks in its terminal instead. Claude's stay
+  // on the web's cards: its terminal shows its own prompt meanwhile. A call or a recording ends with it.
   async close(cx) {
     if (this.host) return this.host.close(cx);
     this.box.release();
@@ -563,7 +584,7 @@ export default class Chat extends View {
     this.dict.cancel();
     if (this.call) await this.hangup();
     if (!this.addr || this.machine) return;
-    await exec("sh", ["-c", 'rm -f "$1/open/$2"; for f in "$1/req/$2".*.json; do [ -f "$f" ] && : > "$1/ans/${f##*/}"; done; true', "x", this.askDir, this.addr]);
+    await exec("sh", ["-c", 'rm -f "$1/open/$2"; for f in "$1/req/$2".*.json; do [ -f "$f" ] && grep -q \'"turn_id"\' "$f" && : > "$1/ans/${f##*/}"; done; true', "x", this.askDir, this.addr]);
   }
 
   // ---- drafts -----------------------------------------------------------------------------
@@ -826,6 +847,8 @@ export default class Chat extends View {
   timelineCards() {
     const out = [];
     for (const a of this.asks) out.push({ id: `card:${a.id}`, at: askAt(a.id), strips: this.cards.strips(a, { who: this.cli() }), owner: this.cards, ask: a, question: a.words.kind === "questions" });
+    const cq = this.codexCard();
+    if (cq) out.push({ id: `card:${cq.id}`, at: cq.at, strips: this.codexCards.strips(cq, { who: "Codex" }), owner: this.codexCards, ask: cq, question: true });
     for (const a of this.sasks ?? []) {
       if (!a.kept) out.push({ id: `card:s:${a.name}`, at: this.seenAt(`s:${a.address}|${a.name}`), strips: this.secretCards.strips(a, { who: this.cli() }) });
     }
@@ -898,6 +921,40 @@ export default class Chat extends View {
   }
 
   // A press on a start screen's choice (its card here or in the Assistant's chat).
+  // Codex's open question (its log's ask with its questions) while it waits on its screen, as
+  // an AskUserQuestion request for the question card; the same object while it stays open, so
+  // the card keeps its picks.
+  codexCard() {
+    if (this.kind !== "codex" || this.status() !== "blocked") return null;
+    const x = [...(this.conv?.items ?? [])].reverse().find((i) => i.kind === "ask");
+    if (!x || x.closed || !x.questions?.length) return null;
+    if (this.codexAsk?.item === x) return this.codexAsk;
+    const req = { tool_name: "AskUserQuestion", tool_input: { questions: x.questions.map((q) => ({ question: q.text, header: q.header, multiSelect: false, options: q.choices })) } };
+    this.codexAsk = { id: `cq-${x.id}`, at: x.at ?? Date.now(), item: x, req, words: words(req) };
+    return this.codexAsk;
+  }
+
+  // The card's answer (as a hook's would be: core/asks.js answers() or a refusal) pressed on
+  // Codex's screen, only while it shows these questions: picks and Other words (codexSteps),
+  // Dismiss and "Chat about this" are Esc, "Answer in terminal" presses nothing.
+  answerCodex(ask, text, cx) {
+    let d = null;
+    try { d = JSON.parse(text).hookSpecificOutput?.decision; } catch {}
+    if (!d) return;
+    const qs = ask.item.questions, map = d.updatedInput?.answers;
+    cx.spawn(async (cx) => {
+      const screen = (await hc(["read", this.addr]).catch(() => null))?.stdout ?? "";
+      if (!codexOnScreen(screen, qs)) { toast({ title: "Codex", body: "Its screen shows something else now: answer it in the terminal.", level: "alert" }); return; }
+      const steps = map ? codexSteps(qs, qs.map((q) => map[q.text] ?? "")) : [{ keys: ["esc"] }];
+      for (const st of steps ?? []) {
+        if (st.paste !== undefined) await hc(["send", "--force", this.addr, st.paste]).catch(() => null);
+        else await hc(["keys", this.addr, ...st.keys]).catch(() => null);
+        await cx.sleep(150);
+      }
+      cx.notify();
+    });
+  }
+
   pressScreen(card, i, cx) {
     if (this.screenBusy.has(card.id)) return;
     this.screenBusy.add(card.id);
@@ -1268,6 +1325,7 @@ export default class Chat extends View {
     // for every later agent: it opens the model picker instead, that model chosen.
     const mm = !msg.files.length && /^\/model(?:\s+(\S+))?\s*$/i.exec(text);
     if (mm) { this.quote = msg.quote; this.modelCommand(mm[1] ?? null, cx); this.saveSoon(cx); cx.notify(); return; }
+    note("send", { n: msg.files.length });
     if (hold && this.status() === "working") this.queue.push(msg);
     else this.deliver(msg, cx);
     this.saveSoon(cx);
@@ -1330,8 +1388,10 @@ export default class Chat extends View {
       try {
         const paths = await attach.deliver(msg.files, this.addr, this.machine);
         p.sent = [body, ...paths].filter(Boolean).join("\n\n");
-        // (a message with pictures: its Enter again if Claude Code lost it, sendTyped())
-        r = await sendTyped(this.sendIo(cx), this.addr, this.kind, p.sent);
+        // (a message with pictures: its Enter again if Claude Code lost it, sendTyped(); one that stayed in its box
+        // last time gets only its Enter now, never typed twice)
+        r = await sendTyped(this.sendIo(cx), this.addr, this.kind, p.sent, SETTLE, !!msg.stuck);
+        msg.stuck = !!r.stuck;
         // Its own dialog is open in its terminal (a question or a permission with no card
         // here): the words answer it the "Reply instead…" way.
         if (r.code !== 0 && refusal(r).kind === "blocked" && (this.kind === "claude" || this.kind === "codex")) r = await this.replyInstead(p.sent, cx);
@@ -1570,15 +1630,16 @@ export default class Chat extends View {
       // agent and its flags, as a one-off template (as restart.sh does), written beside the
       // template on the machine it runs on. There, an agent that isn't installed leaves the
       // template's own command (what that machine's sync put there).
-      // hc runs a template's command under sh -c, and where sh is dash (Debian, Ubuntu) the shell
-      // stays the terminal's program, so the chat wouldn't know its CLI: on another machine the
-      // command always goes through a one-off that execs it.
+      // Every start goes through a one-off (SHEP-86): its command first clears a parent Claude Code
+      // session's markers the holder may carry (core/clean-env.js), then execs the agent: hc runs a
+      // template's command under sh -c, and where sh is dash (Debian, Ubuntu) the shell would stay
+      // the terminal's program, so the chat wouldn't know its CLI.
       let launch = template, oneOff = null, words = "";
       const st = this.choice?.sel ?? props()?.settings;
       const on = machine ? { on: machine } : {};
       const there = !machine || !st?.agent ? true : (await knownAgents(on).catch(() => []))
         .some((a) => (a.key === st.agent || (a.run ?? [])[0] === st.agent) && a.installed !== false);
-      if ((st?.agent && there) || machine) {
+      {
         const q = (a) => (/^[\w@%+=:,./-]+$/.test(a) ? a : `'${String(a).replace(/'/g, "'\\''")}'`);
         const src = (await exec("sh", ["-c", TEMPLATE + 'cat "$dir/$1.md"', "x", template], on).catch(() => null))?.stdout ?? "";
         const head = /^---\n([\s\S]*?)\n---\n?/.exec(src);
@@ -1588,7 +1649,7 @@ export default class Chat extends View {
         if (body.trim() && cmd) {
           words = body.trim();
           oneOff = `herdr-${template}-${Date.now().toString(36)}`;
-          const file = `---\nname: ${oneOff}\ndescription: A one-off ${template} start with chosen settings (mods/chat), removed after use.\ncommand: ${machine && !/^exec\s/.test(cmd) ? "exec " : ""}${cmd}\n---\n${body}`;
+          const file = `---\nname: ${oneOff}\ndescription: A one-off ${template} start with chosen settings (mods/chat), removed after use.\ncommand: ${cleanCommand(cmd)}\n---\n${body}`;
           await exec("sh", ["-c", TEMPLATE + 'printf "%s" "$2" > "$dir/$1.md"', "x", oneOff, file], on);
           launch = oneOff;
         }
@@ -1693,6 +1754,7 @@ export default class Chat extends View {
   // ---- find (Ctrl+F) ----------------------------------------------------------------------------
 
   openFind(cx) {
+    note("feature", { type: "chat-find" });
     this.finding = true;
     this.findJump = true;
     cx.timer.after(0, () => this.findBox.focus());
@@ -2176,6 +2238,7 @@ export default class Chat extends View {
       });
       return;
     }
+    note("feature", { type: "dictation" });
     cx.spawn(async (cx) => {
       await this.dict.start();
       cx.notify();
@@ -2217,6 +2280,7 @@ export default class Chat extends View {
     if (this.call) { cx.spawn(async (cx) => { await this.hangup(); cx.notify(); }); return; }
     if (this.dict.state === "recording") this.dict.cancel();
     this.call = { phase: "connecting", who: null, muted: false, error: null, started: Date.now() };
+    note("feature", { type: "voice-call" });
     if (shared("chat.callError")) setShared("chat.callError", null);
     this.callShared();
     cx.timer.after(0, () => { if (this.call) this.callFocus.focus(); });
@@ -2261,8 +2325,8 @@ export default class Chat extends View {
       let st = null;
       try { st = JSON.parse(s ?? "null"); } catch {}
       if (st) {
-        const changed = st.phase !== call.phase || st.error !== call.error || (st.who ?? null) !== call.who;
-        call.phase = st.phase; call.error = st.error; call.pid = st.pid; call.who = st.who ?? null;
+        const changed = st.phase !== call.phase || (st.doing ?? "") !== (call.doing ?? "") || st.error !== call.error || (st.who ?? null) !== call.who || (st.said ?? "") !== (call.said ?? "");
+        call.phase = st.phase; call.doing = typeof st.doing === "string" ? st.doing.slice(0, 60) : ""; call.error = st.error; call.pid = st.pid; call.who = st.who ?? null; call.said = st.said ?? "";
         if (changed) { this.callShared(); cx.notify(); }
         if (st.phase === "ended") {
           if (st.error) this.callError(st.error);
@@ -2338,6 +2402,8 @@ export default class Chat extends View {
       // said back by the nav's name (voice.ts waits for it before the voice agent may say it's on screen)
       let ack;
       try { ack = this.voiceNav(nav) ?? { ok: true }; } catch (e) { console.error(`voice nav: ${e?.message ?? e}`); ack = { ok: false, why: "it failed in the window" }; }
+      // what the voice opened says why the window changed by itself (SHEP-105): a short quiet toast
+      if (ack.ok && nav.kind !== "screen") toast({ title: "Opened by voice", body: voiceOpened(nav), level: "info", timeout: 3500 });
       await fs.mkdir(`${this.callDir}/navved`, { recursive: true }).catch(() => {});
       await fs.writeFile(`${this.callDir}/navved/${f}`, JSON.stringify(ack)).catch(() => {});
     }
@@ -2451,8 +2517,8 @@ export default class Chat extends View {
     if (pid) exec("sh", ["-c", 'sleep 1; kill "$1" 2>/dev/null; true', "x", String(pid)]);
   }
 
-  // The call for the bar shown while its chat isn't (mods/chat-call): shared "chat.calls" =
-  // { <chat pane>: { phase, who, muted, started, beat, name, tab } }.
+  // The call for the sidebar's call card (mods/spaces-chat voiceRow): shared "chat.calls" =
+  // { <chat pane>: { phase, who, muted, started, beat, name, tab, said } }.
   callShared() {
     const mine = this.myPane() ?? this.lastPane;
     if (!mine) return;
@@ -2460,8 +2526,8 @@ export default class Chat extends View {
     const c = this.call;
     if (c) {
       const tab = panes().find((p) => p.pane === mine)?.tab ?? null;
-      all[mine] = { phase: c.phase, who: c.who, muted: c.muted, started: c.started, beat: c.beat ?? Date.now(),
-        name: agent.NAMES[this.kind] ?? "the agent", tab };
+      all[mine] = { phase: c.phase, doing: c.doing ?? "", who: c.who, muted: c.muted, started: c.started, beat: c.beat ?? Date.now(),
+        name: agent.NAMES[this.kind] ?? "the agent", tab, said: c.said ?? "" };
     } else if (all[mine]) delete all[mine];
     else return;
     setShared("chat.calls", all);
@@ -2504,19 +2570,19 @@ export default class Chat extends View {
         }
         const { dflts, icons, installed } = this.pickCache;
         if (this.kind) dflts[this.kind] = this.dflt ?? dflts[this.kind];
-        // another machine's Assistant: its machine, said once in the menu (only that machine restarts it)
-        const remote = this.machine && !this.t?.labels?.["herdr.task"] ? this.machine : null;
+        // its machine out of reach now: the menu says so once a change is chosen (the restart waits for it)
+        const offline = this.machine && !online(this.machine) ? this.machine : null;
         const currentRow = agent.rowFor(c.agent, c);
         // Installed agents only (and always the one running).
         const menus = Object.fromEntries(["claude", "codex", "cursor"].filter((k) => k === c.agent || installed[k])
           .map((k) => [k, agent.menuFor(k, dflts[k], k === c.agent ? currentRow : null)]));
         // As tall as the menu can get (chat-models' sizes): border and padding, another machine's
-        // line, agent tabs, search, the list (it scrolls past 8 rows), separator, Reasoning header
+        // offline line, agent tabs, search, the list (it scrolls past 8 rows), separator, Reasoning header
         // and levels, Fast, Permissions, the new conversation's two lines, Restart (two lines).
         const W = 340, H = 2 + 10 + 20 + 34 + 36 + 8 * 31 + 9 + 26 + 34 + 31 + 31 + 40 + 50;
         openOverlay({ mod: "chat-models", kind: "popup", frame: "none", width: W, height: H,
           at: at ? { x: Math.max(8, at.x - W + 90), y: Math.max(8, at.y - H - 10) } : "pointer",
-          props: { pane: this.pickKey(), remote, width: W, height: H, select: name ? findModel(menus, name) : null,
+          props: { pane: this.pickKey(), offline, width: W, height: H, select: name ? findModel(menus, name) : null,
             current: { agent: c.agent, model: currentRow, effort: c.effort ?? null, fast: c.fast, perm: c.perm ?? null },
             menus, icons, permDefault: { claude: dflts.claude?.mode ?? "manual", codex: "auto", cursor: "auto" } } });
       } finally {
@@ -3412,10 +3478,11 @@ export default class Chat extends View {
     });
   }
 
-  // Above the box: the CLI's subagents at work, then its background shells and watchers, one row
-  // each as Claude Code and Codex list them (an icon, its name, how long). Five rows, else four and
-  // "+N more" opens the rest. A shell's or watcher's row opens to its command, what it printed last
-  // (Claude Code's), and Stop.
+  // Above the box: the CLI's subagents at work, then its background shells and watchers, at most one
+  // row of each kind (SHEP-92, as the web's): one shows as its own row (an icon, its name, how long),
+  // two or more as one row ("3 background processes", their shared state, the newest's name) that
+  // opens in place to the list of them. A shell's or watcher's row opens to its command, what it
+  // printed last (Claude Code's), and Stop.
   // Shepherdr settings' "Helpers above the chat box" off (shared "chat.helpers" false): no subagents.
   background(t, st, rcx) {
     const now = Date.now();
@@ -3423,8 +3490,6 @@ export default class Chat extends View {
     const kids = shared("chat.helpers") === false || this.phase === "ended" ? [] : subagentsOf(terminals(), this.addr, now).map((k) => ({ ...k, kind: "child", id: `c:${k.address}`, label: k.title }));
     const shown = [...kids, ...(shared("chat.helpers") === false ? [] : this.helpers().map((h) => ({ ...h, kind: "agent" }))), ...this.jobs()];
     if (!shown.length) return null;
-    const open = this.helpersOpen || shown.length <= 5;
-    const list = open ? shown : shown.slice(0, 4);
     const ago = (at) => {
       if (!at) return "";
       const s = Math.max(0, Math.floor((now - at) / 1000));
@@ -3466,13 +3531,29 @@ export default class Chat extends View {
             ? h_flex().h(28).px(10).items_center().text_size(12.5).text_color(t.dim).child(WORDS.stopping)
             : this.button(`job-stop-${h.id}`, "Stop", "mods/chat/stop.svg", "secondary", t, (cx) => this.stopJob(h, cx)))));
     };
+    // two or more of a kind: one row, opening in place to each of them
+    this.groupOpen ??= {};
+    const group = (g) => {
+      const on = Boolean(this.groupOpen[g.kind]);
+      const icon = g.kind === "proc" ? svg("mods/workspace-chrome/terminal.svg").size(12).flex_none().text_color(t.working)
+        : g.status === "working" ? svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)
+        : g.status === "needs" ? div().size(6).mx(3).flex_none().rounded(3).bg(red(t))
+        : svg("mods/chat/check.svg").size(12).flex_none().text_color(t.dim);
+      const head = h_flex().id(`bg-group-${g.kind}`).w_full().h(24).px(6).gap(8).items_center().rounded(6).cursor_pointer().text_size(12)
+        .when(on, (el) => el.bg(t.hover))
+        .hover((s) => s.bg(t.hover))
+        .on_click((_e, cx) => { cx.stop_propagation(); this.groupOpen[g.kind] = !on; cx.notify(); })
+        .child(icon)
+        .child(div().flex_none().font_medium().text_color(t.foreground).child(g.words))
+        .when(g.kind === "sub", (el) => el.child(div().flex_none().text_color(g.status === "needs" ? red(t) : t.dim).child(subagentWord(g.status))))
+        .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(g.newest.label ?? ""))
+        .child(age(g.newest.ended ? { at: Date.now() - (g.newest.ended - g.newest.at) } : g.newest))
+        .child(svg(on ? "mods/chat/chevron-up.svg" : "mods/chat/chevron-down.svg").size(12).flex_none().text_color(t.dim));
+      if (!on) return head;
+      return v_flex().w_full().child(head).child(v_flex().w_full().pl(20).pt(2).children(g.items.map((h) => row(h, shown.indexOf(h)))));
+    };
     return v_flex().flex_none().w_full().max_w(COLUMN + 28).mx_auto().px(14).pt(4)
-      .children(list.map(row))
-      .when(!open, (el) => el.child(h_flex().id("helpers-more").h(22).px(6).gap(6).items_center().rounded(6).cursor_pointer()
-        .text_size(12).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
-        .on_click((_e, cx) => { cx.stop_propagation(); this.helpersOpen = true; cx.notify(); })
-        .child(svg("mods/workspace-chrome/chevron-down.svg").size(12).flex_none())
-        .child(`+${shown.length - 4} more`)));
+      .children(bgGroups(shown).map((g) => (g.words ? group(g) : row(g.items[0], shown.indexOf(g.items[0])))));
   }
 
   // One subagent over the box (SHEP-54), as the web's: its status (a spinner at work, red asking, a check once done),
@@ -3806,7 +3887,7 @@ export default class Chat extends View {
       .child(this.liveRow(t, "chat-call",
         this.round("call-mute", `mods/chat/${c.muted ? "mic-off" : "mic"}.svg`, t, c.muted ? "on" : "quiet", (cx) => this.callMute(cx)),
         word, false, c.started,
-        this.round("call-x", "mods/chat/x.svg", t, "danger", (cx) => cx.spawn(async (cx) => { await this.hangup(); cx.notify(); })))));
+        this.round("call-x", "mods/chat/phone-x.svg", t, "danger", (cx) => cx.spawn(async (cx) => { await this.hangup(); cx.notify(); })))));
   }
 
   // The model button before the first message (loadChoice): the same menu, choosing what it starts on.
@@ -3829,8 +3910,7 @@ export default class Chat extends View {
     // Herdr draws the native caret from its own theme, independently of the chat wallpaper.
     t = theme();
     // An open card, or the agent's own dialog in its terminal, doesn't lock the box: words
-    // written there answer it ("Reply instead…"). Only a call waits until it's free.
-    const blocked = st === "blocked" && !this.asks.length;
+    // written there answer it ("Reply instead…").
     const ready = this.phase === "ready" || this.phase === "fresh";
     const empty = !this.box.value().trim() && !this.files.length;
     const can = ready && !empty;
@@ -3902,11 +3982,9 @@ export default class Chat extends View {
         .when(Boolean(this.addr), (el) => el.children(this.pickParts(t, true)))
         .when(!this.addr && this.phase === "fresh" && Boolean(this.choice?.sel) && Boolean(cx), (el) => el.child(this.freshPick(t, cx)))
         .when(addonOn("voice"), (el) => el.child(this.round("chat-mic", "mods/chat/mic.svg", t, "ghost", (cx) => this.toggleDictation(cx))))
-        // Nothing to send: the same button starts a call, also while the agent works (unless the
-        // Voice add-on is off).
-        .child(empty && ready && !blocked && this.addr && addonOn("voice")
-          ? this.round("chat-send", "mods/chat/audio-lines.svg", t, "call", (cx) => this.toggleCall(cx))
-          : this.round("chat-send", "mods/chat/send.svg", t, can ? "solid" : "off", can ? (cx) => this.send(cx) : null)))));
+        // Always Send (SHEP-108): quiet with nothing to send, filled once there is. A call is with
+        // Shepherdr itself, from the top of the sidebar (SHEP-105), never from a chat's box.
+        .child(this.round("chat-send", "mods/chat/send.svg", t, can ? "solid" : "off", can ? (cx) => this.send(cx) : null)))));
   }
 
   // ---- alerts ---------------------------------------------------------------------------------
@@ -4019,12 +4097,13 @@ export default class Chat extends View {
     this.wasFocused = paneFocused;
     this.hadBox = showsBox;
     this.paneFocused = paneFocused;
-    // The call bar elsewhere (mods/chat-call) ends a call through shared "chat.callreq" =
-    // { pane, at, action: "end" }.
+    // The sidebar's Shepherdr row (mods/spaces-chat voiceRow, SHEP-105) starts, mutes and ends the call it runs here
+    // through shared "chat.callreq" = { pane, at, action: "start" | "mute" | "end" } (none: start or end).
     const req = shared("chat.callreq");
     if (req && req.pane === mine && req.at !== this.callReqAt && Date.now() - req.at < 5000) {
       this.callReqAt = req.at;
-      if (req.action === "end" ? this.call : true) cx.timer.after(0, (cx) => { this.toggleCall(cx); cx.notify(); });
+      if (req.action === "mute") { if (this.call) cx.timer.after(0, (cx) => { this.callMute(cx); }); }
+      else if (req.action === "end" ? this.call : req.action === "start" ? !this.call : true) cx.timer.after(0, (cx) => { this.toggleCall(cx); cx.notify(); });
     }
     // The model picker's Restart (mods/chat-models): shared "chat.restartreq" = { pane, at, pick }.
     const rr = shared("chat.restartreq"), pk = this.pickKey();

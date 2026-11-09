@@ -10,7 +10,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, rmSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { randomBytes } from "node:crypto";
-import { DATA, SOCK, TOKEN, PORT, HOME, ensureData } from "./paths.ts";
+import { DATA, SOCK, TOKEN, PORT, HOME, ensureData, settingsFile } from "./paths.ts";
 import { holdLock } from "./lock.ts";
 import { gate, localCaller, type Gate } from "./auth.ts";
 import { trustedPeer } from "./peer.ts";
@@ -24,6 +24,8 @@ import { Live } from "./live.ts";
 import { Model } from "./model.ts";
 import { checkEvery, runPilot } from "./autopilot.ts";
 import { windowSection, setWindow, offList, offPlugins } from "./window.ts";
+import { record, deleteAll, note as noteUsage, followSwitch, isOn as insightsOn, logLines } from "./usage.ts";
+import { insightsSummary } from "./voice-data.ts";
 import { Chats } from "./chats.ts";
 import { act, hc as hcRun } from "./actions.ts";
 import { AgentWatch } from "./watch.ts";
@@ -34,7 +36,8 @@ import { terminalBridge } from "./terminal.ts";
 import { worktree } from "./worktree.ts";
 import * as W from "../core/worktree.js";
 import { browserRelay } from "./browser.ts";
-import { voiceCall, pageWhere, type ChatView } from "./voice.ts";
+import { voiceCall, callToResume, pageWhere, type ChatView } from "./voice.ts";
+import { hearing, type HearIO, type Hearing } from "./voice-hear.ts";
 import { voiceTool, type VoiceIO, type Where } from "./voice-tools.ts";
 import { Artifacts } from "./artifacts.ts";
 import { TaskLogs } from "./task-logs.ts";
@@ -43,7 +46,9 @@ import { Secrets, SecretsHome } from "./secrets.ts";
 import { Agents } from "./agents.ts";
 import { Machines } from "./machines.ts";
 import { Push, alertsOf, agentAlerts } from "./push.ts";
-import { dictate, liveToken } from "./dictate.ts";
+import { Shows, showInWindow } from "./show.ts";
+import { dictate, liveToken, cachedKey, refused } from "./dictate.ts";
+import { readUsage } from "../core/voice.js";
 import { sh, exec } from "./model.ts";
 import { folders, newSpace, newSpaceInfo } from "./spaces.ts";
 import { kindOf } from "../core/chat-reader.js";
@@ -118,6 +123,13 @@ const push = new Push(() => (me ? `https://${me.dns}` : "https://herdr.dev"));
 const pushSend = push.send.bind(push);
 push.send = ((a: any) => (host.serving() ? pushSend(a) : Promise.resolve())) as typeof push.send;
 live.onVisible = (v) => { push.visible = v; };
+// an agent's herdr-artifact open (service/show.ts): the serving machine's screen the person is on opens the artifact,
+// else its window (an agent on another machine; one here opened it in this window itself)
+const shows = new Shows();
+hub.on((e) => {
+  if (e.type !== "reset" && e.type !== "labels" && e.type !== "created") return;
+  for (const a of shows.take(hub.terminals.values())) if (host.serving() && !live.show(a.artifact) && a.machine) void showInWindow(a).catch(() => {});
+});
 // what was already waiting or ready when the service started: no alert for it
 let alerted: Set<string> | null = null;
 // the agents' own alerts ride on the snapshot (the web app's toasts: web/plugins/alerts/toasts.tsx), then push
@@ -133,10 +145,20 @@ function alertNew(snap: any) {
   alerted = new Set(now.keys());
 }
 compat.agents = new Agents(hub);
+// usage insights (service/usage.ts) record while the add-on is on
+followSwitch(() => !offList().includes("insights"));
 const machines = new Machines(hub, () => model.machineNames());
 machines.onChange = () => model.rebuild();
 compat.machineStats = (m) => machines.of(m);
 machines.windowStats = () => model.value("machines.stats");
+// SHEP-128: the ElevenLabs plan under this machine's Plan usage, with the voice key (kept in memory only); none while the
+// Voice add-on is off or there is no key
+machines.voiceUsage = async () => {
+  if (offList().includes("voice")) return null;
+  const r: any = await readUsage(() => cachedKey(hub).get());
+  if (r?.state === "unknown") refused(r.why);
+  return r;
+};
 machines.start();
 const secrets = new Secrets(hub);
 compat.secrets = secrets;
@@ -294,13 +316,12 @@ model.start();
 
 // The Web add-on (Shepherdr settings > Window > Add-ons, Everywhere's "off" in ~/.herdr/shepherdr.json): off, the web
 // app stops and /shepherdr is no longer shared; the service keeps its background work.
-const SETTINGS = process.env.HERDR_TASK_SETTINGS || join(HOME, ".herdr", "shepherdr.json");
 const APP_DATA = join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "data", "shepherdr");
 /** where files from a page's message box are kept (the window keeps pasted ones there too) */
 const ATTACH = join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "data", "chat-attach");
 function webOn() {
   if (process.env.SHEPHERDR_WEB === "off") return false;
-  try { return !(JSON.parse(readFileSync(SETTINGS, "utf8"))?.everywhere?.off ?? []).includes("web"); } catch { return true; }
+  try { return !(JSON.parse(readFileSync(settingsFile(), "utf8"))?.everywhere?.off ?? []).includes("web"); } catch { return true; }
 }
 
 // Tailscale can come up after the service: look again now and then, and keep /shepherdr shared while web is on. What
@@ -387,12 +408,11 @@ function file(path: string): Response {
   } });
 }
 
-// a call's name for its agent (a space's Assistant by the space, a task's by its id), and what it reads of the chat
-const callName = (key: string) => (key.startsWith("p:") ? `the ${compat.last?.places.find((p) => p.chat === key)?.name ?? "space"} Assistant` : key.split("/")[0]);
+// what a voice call reads of a chat
 function chatView(addr: string): ChatView {
   const items = () => (compat.reader?.(addr)?.conv?.items ?? []) as any[];
   return {
-    lastReply: () => { const x = [...items()].reverse().find((i) => i.kind === "agent" && i.text); return x ? { id: x.id, text: x.text } : null; },
+    lastReply: () => { const x = [...items()].reverse().find((i) => i.kind === "agent" && i.text); return x ? { id: x.id, text: x.text, at: typeof x.at === "number" ? x.at : undefined } : null; },
     status: () => (hub.terminals.get(addr) as any)?.status?.state ?? null,
     asking: () => asks.of(addr)[0]?.words?.title ?? null,
   };
@@ -407,6 +427,25 @@ function follow(addr: string) {
   live.chats?.watch(addr, page);
   return { ready, stop: () => live.chats?.unwatch(addr, page) };
 }
+
+/** What a voice call hears (voice-hear.ts): any chat by its key, kept read while it follows it. */
+const hearIO: HearIO = {
+  snap: () => compat.last,
+  view: (key) => { const addr = compat.addrOf(key); return addr && !addr.startsWith("log:") ? chatView(addr) : null; },
+  follow: (key) => { const addr = compat.addrOf(key); return addr ? follow(addr) : { stop: () => {} }; },
+};
+
+/** The window's calls' hearing (POST /api/voice/hear, mods/chat/voice.ts), by the call's id: let go once a call stops
+ *  asking for half a minute. */
+const windowCalls = new Map<string, { hear: Hearing; at: number }>();
+setInterval(() => { for (const [id, c] of windowCalls) if (Date.now() - c.at > 30_000) { c.hear.stop(); windowCalls.delete(id); } }, 10_000);
+const windowCall = (id: unknown) => {
+  if (typeof id !== "string" || !/^[\w.-]{1,120}$/.test(id)) return null;
+  let c = windowCalls.get(id);
+  if (!c) windowCalls.set(id, (c = { hear: hearing(hearIO), at: Date.now() }));
+  c.at = Date.now();
+  return c.hear;
+};
 
 /** What a voice call's tools reach (service/voice-tools.ts): what the web app shows and does. */
 const voiceIO: VoiceIO = {
@@ -428,8 +467,9 @@ const voiceIO: VoiceIO = {
       return out;
     } finally { f.stop(); }
   },
-  async send(key, text) { await act(hub, { type: "send", chat: key, text, human: true }, compat); },
+  async send(key, text) { noteUsage("send", { from: "voice" }); await act(hub, { type: "send", chat: key, text, human: true }, compat); },
   async action(body) {
+    noteUsage("act", { from: "voice", type: body?.type });
     const r = await doAction(body);
     const text = await r.text();
     if (!r.ok) throw new Error(text.trim() || "That didn't go through.");
@@ -437,6 +477,60 @@ const voiceIO: VoiceIO = {
   },
   addrOf: (key) => compat.addrOf(key),
   taskWhere: (id) => { const t = compat.taskOf(id); return t ? { ref: t.ref, folder: t.folder, machine: t.machine } : null; },
+  // SHEP-110: the web app's other reads (voice-data.ts SOURCES), each as the panel that shows it reads it
+  async read(source, a) {
+    const action = async (body: Record<string, unknown>) => {
+      const r = await doAction(body), text = await r.text();
+      if (!r.ok) throw new Error(text.trim() || "It couldn't be read.");
+      const out = JSON.parse(text);
+      if (out?.ok === false && out.error) throw new Error(String(out.error));
+      return out;
+    };
+    // a task's folder (its worktree), else a space's: what its Files, Changes and Pull request tabs read
+    const tree = () => {
+      const t = a.task ? compat.taskOf(a.task) : null;
+      if (t) return t.where;
+      const sp = a.place ? compat.spaceOf(a.place) : null;
+      if (sp) return { folder: sp.folder, machine: sp.machine };
+      throw new Error("Which task or space?");
+    };
+    const path = String(a.path ?? "").replace(/^\/+/, "");
+    if (/(^|\/)(\.env[^/]*|\.netrc|\.npmrc|\.pypirc|id_[a-z0-9]+|[^/]*\.(pem|key|p12|pfx)|credentials[^/]*|secrets?[^/]*)$/i.test(path)) throw new Error("That file may hold secrets: I don't read it out.");
+    switch (source) {
+      case "insights": return insightsSummary(logLines(), insightsOn());
+      case "evidence": return action({ type: "evidence", task: a.task });
+      case "changes": return worktree(hub, tree(), "diff");
+      case "patch": return worktree(hub, tree(), "patch", path);
+      case "pr": return worktree(hub, tree(), "pr");
+      case "files": return worktree(hub, tree(), "dir", path || undefined);
+      case "file": if (!path) throw new Error("Which file? Put its path after file/."); return worktree(hub, tree(), "file", path);
+      case "artifact": return artifacts.recipe(String(a.artifact), Number(a.v) || 1, a.machine ?? null);
+      case "activity": {
+        const addr = a.chat ? compat.addrOf(a.chat) : null;
+        if (!addr) throw new Error("That chat isn't running.");
+        const f = follow(addr);
+        try {
+          await Promise.race([f.ready, Bun.sleep(8000)]);
+          const r: any = compat.reader?.(addr);
+          const turns = ((r?.conv?.items ?? []) as any[]).filter((i) => i.kind === "tools").slice(-3);
+          return Promise.all(turns.map((x) => activity(r, x.id)));
+        } finally { f.stop(); }
+      }
+      case "model": return action({ type: "restart-info", chat: a.chat });
+      case "models": return action({ type: "role-info" });
+      case "template": return action({ type: "template", role: a.role });
+      case "agents": return action({ type: "tab-agents", place: a.place });
+      case "worktree": return action({ type: "worktree", place: a.place, op: "info" });
+      case "hosts": return action({ type: "machine-hosts" });
+      case "folders": {
+        const machine = a.machine ?? null;
+        const home = (await exec(hub, ["sh", "-c", 'printf %s "$HOME"'], machine).catch(() => ({ stdout: "" }))).stdout;
+        return folders(hub, machine, path || "~", home);
+      }
+      case "me": return { machine: me?.host ?? null, link: me ? `https://${me.dns}/shepherdr/` : null, version: VERSION, off: offPlugins() };
+    }
+    throw new Error(`No such data: ${source}.`);
+  },
 };
 
 
@@ -476,6 +570,14 @@ async function doAction(body: any): Promise<Response> {
     if (moving && !moving.error) return json({ ok: false, error: `Already moving it to ${moving.to}.` });
     void serveFrom(row.here ? null : row.name).catch(() => {});
     return json({ ok: true });
+  }
+  // Usage insights (service/usage.ts): the web app's events, and Settings > Window's Delete (every machine's log)
+  if (body?.type === "usage") return json({ ok: true, on: record(Array.isArray(body.events) ? body.events : []) });
+  if (body?.type === "setting" && body.key === "insights.delete") {
+    const missed = await deleteAll(model.machineNames(), async (args) => (await hcRun(args)).code === 0);
+    // the window's open view counts from now (lib/usage.js; the bridge brings it there)
+    await store.set("usage.deletedAt", Date.now());
+    return json(missed.length ? { ok: false, error: SC.INSIGHTS.missed(missed.join(", ")) } : { ok: true });
   }
   if (body?.type === "setting" && typeof body.key === "string" && /^(window|addon)\./.test(body.key)) {
     try { await setWindow(body.key, typeof body.value === "string" ? body.value : null, (k, v) => store.set(k, v)); return json({ ok: true }); }
@@ -544,6 +646,9 @@ async function doAction(body: any): Promise<Response> {
 const server = Bun.serve<{ who: string }>({
   hostname: "127.0.0.1",
   port: PORT,
+  // a send with many pictures (copied to another machine, Claude Code reading each) can take longer than Bun's 10 s
+  // default: cut off, the page took it as failed while it still went in (SHEP-93)
+  idleTimeout: 180,
   async fetch(req, srv) {
     const url = new URL(req.url);
     const path = url.pathname.startsWith("/shepherdr/") ? url.pathname.slice(10) : url.pathname;
@@ -575,10 +680,14 @@ const server = Bun.serve<{ who: string }>({
       return srv.upgrade(req, { data: { who: pass.who, term } as any }) ? undefined : new Response("upgrade failed", { status: 400 });
     }
     if (path === "/api/voice") {
-      // a voice call with a chat's running agent (the Voice add-on)
-      const key = url.searchParams.get("chat") ?? "", addr = compat.addrOf(key);
-      if (offList().includes("voice") || !addr || addr.startsWith("log:") || hub.terminals.get(addr)?.state !== "live") return new Response("no call here", { status: 404 });
-      return srv.upgrade(req, { data: { who: pass.who, voice: { key, addr } } as any }) ? undefined : new Response("upgrade failed", { status: 400 });
+      // a voice call with Shepherdr (the Voice add-on, SHEP-105): from anywhere; chat, the chat whose call button
+      // started it (its "here" while the screen shows no chat), if it is running
+      if (offList().includes("voice")) return new Response("no calls here", { status: 404 });
+      const asked = (url.searchParams.get("chat") ?? "").slice(0, 300), addr = asked ? compat.addrOf(asked) : null;
+      const key = addr && !addr.startsWith("log:") ? asked : null;
+      // SHEP-102: a page whose socket dropped (a locked phone) comes back to its call with the call's id
+      const resume = (url.searchParams.get("resume") ?? "").slice(0, 64);
+      return srv.upgrade(req, { data: { who: pass.who, voice: { key, resume } } as any }) ? undefined : new Response("upgrade failed", { status: 400 });
     }
     if (socket) return srv.upgrade(req, { data: { who: pass.who } }) ? undefined : new Response("upgrade failed", { status: 400 });
     if (path === "/api/me") return json({ login: pass.who, via: pass.via, machine: me?.host ?? null, link: me ? `https://${me.dns}/shepherdr/` : null, version: VERSION, off: offPlugins() });
@@ -727,10 +836,32 @@ const server = Bun.serve<{ who: string }>({
       if (pass.via !== "local") return json({ error: "not here" }, 403);
       const b = await req.json().catch(() => null);
       const key = typeof b?.addr === "string" ? chatOfAddress(b.addr) : null;
-      if (!key || typeof b.tool !== "string") return json({ error: "no such call" }, 400);
+      if (typeof b?.tool !== "string") return json({ error: "no such call" }, 400);
       const where: Where = { client: "window", call: key, machine: me?.host ?? null, ...pageWhere(b.where ?? {}) };
+      const asked = Date.now();
       const a = await voiceTool(b.tool, b.params ?? {}, where, voiceIO);
+      // a send: that window call follows the chat from now on (SHEP-105)
+      if (a.sent) windowCall(b.call)?.sentTo(a.sent, asked);
       return json(a);
+    }
+    if (path === "/api/voice/hear" && req.method === "POST") {
+      // the window's voice call asks what it should be told, about once a second: the updates it hears (voice-hear.ts)
+      if (pass.via !== "local") return json({ error: "not here" }, 403);
+      const b = await req.json().catch(() => null);
+      const hear = windowCall(b?.call);
+      if (!hear) return json({ error: "no such call" }, 400);
+      const key = typeof b.addr === "string" ? chatOfAddress(b.addr) : null;
+      hear.onScreen({ client: "window", call: key, ...pageWhere(b.where ?? {}) });
+      hear.tick();
+      // held while the person or the voice talks (the window's call says when it's quiet)
+      return json({ lines: b.quiet === true ? hear.take() : [] });
+    }
+    if (path === "/api/voice/hear" && req.method === "DELETE") {
+      if (pass.via !== "local") return json({ error: "not here" }, 403);
+      const id = url.searchParams.get("call") ?? "";
+      windowCalls.get(id)?.hear.stop();
+      windowCalls.delete(id);
+      return json({ ok: true });
     }
     if (path.startsWith("/api/")) return json({ error: "not found" }, 404);
     return file(path);
@@ -739,14 +870,23 @@ const server = Bun.serve<{ who: string }>({
     open(ws) {
       const d: any = ws.data;
       const page = { send: (x: any) => { ws.send(x); }, close: () => ws.close(), buffered: () => ws.getBufferedAmount() };
-      if (d.voice) d.bridge = voiceCall(hub, callName(d.voice.key), { view: chatView(d.voice.addr), io: voiceIO, where: { client: "web", call: d.voice.key, machine: me?.host ?? null },
-        follow: () => follow(d.voice.addr).stop }, page);
+      d.page = page;
+      if (d.voice?.resume) {
+        // back to a call that held for this page; gone (ended, or held too long): the page says so and stops
+        d.bridge = callToResume(d.voice.resume, String(d.who ?? ""));
+        if (!d.bridge?.attach(page)) { d.bridge = null; ws.send(JSON.stringify({ type: "error", message: "The call ended while the phone was away. Start a new call." })); ws.close(); }
+        return;
+      }
+      if (d.voice) noteUsage("feature", { from: "web", type: "voice-call" });
+      if (d.voice) d.bridge = voiceCall(hub, { io: voiceIO, hear: hearIO, where: { client: "web", call: d.voice.key, machine: me?.host ?? null },
+        who: String(d.who ?? "") }, page);
       else if (d.term) d.bridge = terminalBridge(hub, d.term, page);
       else if (d.browser) d.bridge = browserRelay(d.browser, page);
       else live.join(ws);
     },
     message(ws, msg) { const d: any = ws.data; if (d.voice) d.bridge?.message(msg); else if (d.bridge) d.bridge.message(String(msg)); else live.message(ws, String(msg)); },
-    close(ws) { const d: any = ws.data; if (d.bridge) d.bridge.end(); else live.leave(ws); },
+    // a call's page that went without ending it holds the call for it to come back (SHEP-102)
+    close(ws) { const d: any = ws.data; if (d.voice) d.bridge?.detach(d.page); else if (d.bridge) d.bridge.end(); else live.leave(ws); },
   },
 });
 

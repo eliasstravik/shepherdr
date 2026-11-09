@@ -106,7 +106,7 @@ def rows(space, d=None, auto=None):
         from .feedback import feedback_repo
         repo = feedback_repo(d)
         return [
-            ("holycow", "HolyCow", assistant_words(cfg), "on" if cfg["holycow"].get("enabled") is True else "off", [("holycow", None)]),
+            ("holycow", "HolyCow", assistant_words(cfg), "required", [("holycow", None)]),
             ("review", "Review", review, "on" if rounds > 0 else "off",
              [("tasks", "review_rounds"), ("tasks", "must_fix"), ("reviewer", None)]),
             ("merge", "Merge", MERGE_SHORT[merge], merge, [("tasks", "merge")]),

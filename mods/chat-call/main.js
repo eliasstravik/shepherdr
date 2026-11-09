@@ -1,6 +1,6 @@
 // The voice call's note at the top of the work area: a call that ended on an error says why here, until closed.
-// A call going on has no bar (SHEP-51): its space's row in the sidebar has a green mark with its clock that goes back
-// to it (mods/spaces-chat callMark), and its chat's box is the call (Mute, End). Floats over the work area:
+// A call going on has no bar: the sidebar's Shepherdr row is the call card (mods/spaces-chat voiceRow, SHEP-105: Mute,
+// End), and the chat it runs in has the call in its box too. Floats over the work area:
 // { "floating": [{ "content": { "mod": "chat-call" }, "edge": "top", "align": "center" }] }. Draws nothing otherwise.
 // Reads shared "chat.callError" = { text, pane, at }.
 

@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { closeSaved, renameSaved, orderSaved, withoutSpace } from "./saved-spaces.ts";
 
 // Herdr installed, its window shut: a herdr-app that fails every "herdr-app do" (and records it), used in place of the real
-// one, so a real window is never reached. The space log goes to a throwaway app home; act() reads it when imported.
+// one, so a real window is never reached. The space log goes to a throwaway app home, for the whole file: act() reads
+// it at each call (SHEP-131: it once kept the real one from an earlier import and logged these fake spaces there).
 const APP = mkdtempSync(join(tmpdir(), "shep-saved-"));
 const BIN = join(APP, "bin"), CALLS = join(APP, "herdr-app-calls");
 mkdirSync(BIN);
@@ -16,9 +17,11 @@ beforeAll(async () => {
   process.env.HERDR_APP_HOME = APP;
   process.env.SHEPHERDR_HERDR_APP = join(BIN, "herdr-app");   // never a real window's, even on a machine with one
   ({ act } = await import("./actions.ts"));
+});
+afterAll(() => {
+  delete process.env.SHEPHERDR_HERDR_APP;
   if (was === undefined) delete process.env.HERDR_APP_HOME; else process.env.HERDR_APP_HOME = was;
 });
-afterAll(() => { delete process.env.SHEPHERDR_HERDR_APP; });
 
 const tab = (id: string, ...blocks: any[]) => ({ id, name: id, root: { type: "row", id, children: blocks } });
 const term = (pane: string, t: string) => ({ type: "block", id: pane, content: { terminal: t } });
@@ -161,4 +164,33 @@ test("rename and reorder from the web, no window", async () => {
   expect(ids(w.docs.vm)).toEqual(["sp2", "sp1"]);
   await act(w.hub as any, { type: "order", under: "m:mini", ids: ["spC", "spB", "spA"] }, c);
   expect(ids(w.docs.here)).toEqual(["spC", "spB", "spA"]);
+});
+
+// SHEP-130: a drag on the web holds: the order is the sidebar's own (shared "spaces-chat".order), so a space Herdr
+// doesn't keep (the service's own, always last before) moves too, on another machine as well; Herdr's own spaces
+// follow in its document.
+test("reorder from the web: kept in the sidebar's data, a space Herdr doesn't keep moves too", async () => {
+  const w = world(), c = compat(w);
+  c.allSpaces = () => [
+    { id: "spA", machine: null }, { id: "spB", machine: null }, { id: "spC", machine: null },
+    { id: "vm/sp1", machine: "vm" }, { id: "vm/sp2", machine: "vm" }, { id: "vm/spHome", machine: "vm", own: true },
+  ];
+  writeFileSync(CALLS, "");
+  await act(w.hub as any, { type: "order", under: "m:vm", ids: ["vm/spHome", "vm/sp2", "vm/sp1"] }, c);
+  expect(c.data["spaces-chat"].order).toEqual({ vm: ["vm/spHome", "vm/sp2", "vm/sp1"] });
+  expect(c.data["spaces-chat"].pinned).toEqual(["vm/sp1"]);   // the rest of the sidebar's data as it was
+  expect(ids(w.docs.vm)).toEqual(["sp2", "sp1"]);               // Herdr's own spaces follow
+  expect(readFileSync(CALLS, "utf8")).not.toContain("spHome");  // the window is never asked about one it hasn't
+  // this computer's: a space in a section (spB) not in the drag stays where it was among them
+  await act(w.hub as any, { type: "order", under: "m:mini", ids: ["spC", "spA"] }, c);
+  expect(c.data["spaces-chat"].order[""]).toEqual(["spC", "spA", "spB"]);
+  expect(c.data["spaces-chat"].order.vm).toEqual(["vm/spHome", "vm/sp2", "vm/sp1"]);
+});
+
+test("reorder from the web holds even when the machine can't be reached for Herdr's own order", async () => {
+  const w = world(), c = compat(w);
+  const call = w.hub.call.bind(w.hub);
+  w.hub.call = async (m: string, p: any = {}) => { if (p.on === "vm") throw new Error("unreachable"); return call(m, p); };
+  expect(await act(w.hub as any, { type: "order", under: "m:vm", ids: ["vm/sp2", "vm/sp1"] }, c)).toEqual({ ok: true });
+  expect(c.data["spaces-chat"].order).toEqual({ vm: ["vm/sp2", "vm/sp1"] });
 });

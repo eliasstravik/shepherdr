@@ -2,8 +2,9 @@
 // things; the open goes to the page that started the call (a phone, a laptop's browser tab), never another, and the
 // agent hears it's on screen only once that page said so.
 import { afterAll, expect, test } from "bun:test";
-import { voiceCall } from "./voice.ts";
+import { callToResume, voiceCall } from "./voice.ts";
 import type { VoiceIO, Where } from "./voice-tools.ts";
+import type { HearIO } from "./voice-hear.ts";
 
 const now = Date.now();
 const snap: any = {
@@ -16,16 +17,20 @@ const snap: any = {
   artifacts: [{ id: "hulk", title: "Hulk mini game · Proof", place: "h1", v: 1, at: now, when: "1m", by: "x" }],
 };
 const io: VoiceIO = { snap: () => snap, chat: async () => null, send: async () => {}, action: async () => ({ ok: true }) };
+const hear: HearIO = { snap: () => snap, view: () => null, follow: () => ({ stop: () => {} }) };
 
 // the fake voice agent: sends each test's tool calls, keeps what the call answered
 const results: any[] = [];
 let agent: any = null;
+const heard: any[] = [];
+let agentClosed = 0;
 const server = Bun.serve({
   port: 0,
   fetch(req, srv) { return srv.upgrade(req) ? undefined : new Response("no", { status: 400 }); },
   websocket: {
+    close() { agentClosed++; },
     open(ws) { agent = ws; ws.send(JSON.stringify({ type: "conversation_initiation_metadata", conversation_initiation_metadata_event: { agent_output_audio_format: "pcm_16000" } })); },
-    message(_ws, m) { const x = JSON.parse(String(m)); if (x.type === "client_tool_result") results.push(x); },
+    message(_ws, m) { const x = JSON.parse(String(m)); heard.push(x); if (x.type === "client_tool_result") results.push(x); },
   },
 });
 afterAll(() => server.stop(true));
@@ -44,7 +49,7 @@ function page(answer: ((nav: any) => any) | null) {
     },
     close() {},
     start(where: Where, navWait = 1000) {
-      call = voiceCall({} as any, "the Home Assistant", { view: { lastReply: () => null, status: () => null, asking: () => null }, io, where, follow: () => () => {},
+      call = voiceCall({} as any, { io, hear, where,
         dial: async () => `ws://127.0.0.1:${server.port}/`, navWait }, p);
       return call;
     },
@@ -127,4 +132,162 @@ test("SHEP-67: the voice agent hangs up (end_call after a yes): the page hears i
   agent.close(4000, "quota");
   await until(() => other.got.some((m) => m.type === "error"));
   expect(other.got.filter((m) => m.type === "ended" || m.type === "error")).toEqual([{ type: "error", message: "The call was closed (4000: quota)." }]);
+});
+
+// SHEP-102: a phone that locks (or loses the network) may drop the page's socket. The call holds on the server, with
+// the voice agent's conversation still open, and the page goes back to it; the agent hears the phone is back.
+function bare(who = "person@example.com") {
+  const got: any[] = [];
+  let closed = false;
+  const p = { got, get closed() { return closed; }, send(x: string | Uint8Array) { got.push(typeof x === "string" ? JSON.parse(x) : x); }, close() { closed = true; } };
+  const start = (holdMs = 5000) => voiceCall({} as any, { io, hear,
+    where: { client: "web", device: "phone", machine: "eliass-mac-mini", call: "p:h1" }, dial: async () => `ws://127.0.0.1:${server.port}/`, holdMs, who }, p);
+  return { ...p, p, start };
+}
+
+test("SHEP-102: the page's socket drops; the call holds and the page comes back to it, the agent says it's back", async () => {
+  agent = null;
+  const first = bare();
+  const c = first.start();
+  const id = first.got.find((m) => m.type === "call")?.id;
+  expect(typeof id).toBe("string");
+  await until(() => !!agent);
+  const closedBefore = agentClosed;
+  c.detach(first.p);
+  await Bun.sleep(200);
+  // still on with the voice agent
+  expect(agentClosed).toBe(closedBefore);
+  // only the same person gets it back
+  expect(callToResume(id, "someone@example.com")).toBeNull();
+  const again = bare();
+  const n = heard.length;
+  expect(callToResume(id, "person@example.com")!.attach(again.p)).toBe(true);
+  expect(again.got).toEqual([{ type: "resumed", id }]);
+  await until(() => heard.length > n);
+  const back = heard.slice(n).find((m) => m.type === "user_message");
+  expect(back.text).toContain("lost the call's connection");
+  expect(back.text).toContain("Say you're back");
+  // the agent's voice now goes to the page that came back
+  agent.send(JSON.stringify({ type: "audio", audio_event: { audio_base_64: Buffer.from([1, 0, 2, 0]).toString("base64") } }));
+  await until(() => again.got.some((m) => m instanceof Uint8Array));
+  expect(again.got.some((m) => m instanceof Uint8Array)).toBe(true);
+  expect(first.got.some((m) => m instanceof Uint8Array)).toBe(false);
+  // the old socket's late close changes nothing
+  c.detach(first.p);
+  await Bun.sleep(100);
+  expect(again.p.closed).toBe(false);
+  c.end();
+  expect(callToResume(id, "person@example.com")).toBeNull();
+});
+
+test("SHEP-102: a page that never comes back: the call ends once the hold is up; End ends it at once", async () => {
+  agent = null;
+  const gone = bare();
+  const c = gone.start(150);
+  const id = gone.got.find((m) => m.type === "call").id;
+  await until(() => !!agent);
+  const closedBefore = agentClosed;
+  c.detach(gone.p);
+  await until(() => agentClosed > closedBefore);
+  expect(agentClosed).toBe(closedBefore + 1);
+  expect(callToResume(id, "person@example.com")).toBeNull();
+  // the person's End (or the lock screen's hang up): no holding
+  agent = null;
+  const ends = bare();
+  const d = ends.start();
+  const id2 = ends.got.find((m) => m.type === "call").id;
+  await until(() => !!agent);
+  const before = agentClosed;
+  d.message(JSON.stringify({ type: "end" }));
+  await until(() => agentClosed > before);
+  expect(ends.p.closed).toBe(true);
+  expect(callToResume(id2, "person@example.com")).toBeNull();
+  expect(d.attach(bare().p)).toBe(false);
+});
+
+// SHEP-105: what the call hears waits for a quiet moment: nothing is said over the person, then it comes as one line.
+test("SHEP-105: updates wait while the person talks, then come together; a send follows that chat", async () => {
+  agent = null;
+  const box = { reply: null as null | { id: string; text: string } };
+  const hearIO: HearIO = { snap: () => snap, view: (key) => (key === "p:h1" ? { lastReply: () => box.reply, status: () => "idle", asking: () => null } : null), follow: () => ({ stop: () => {} }) };
+  const p = page(null);
+  const sent: string[] = [];
+  const c = voiceCall({} as any, { io: { ...io, send: async (k) => { sent.push(k); } }, hear: hearIO, where: { client: "web", device: "phone", machine: "box" }, dial: async () => `ws://127.0.0.1:${server.port}/` }, p as any);
+  await until(() => !!agent);
+  await Bun.sleep(100);
+  // a sidebar call with no chat: the opening says it is with Shepherdr
+  const open = heard.findLast((m) => m.type === "conversation_initiation_client_data");
+  expect(open.conversation_config_override.agent.prompt.prompt).toContain("It is with Shepherdr, not one agent");
+  // send to Home: followed from now on
+  const n = results.length;
+  agent.send(JSON.stringify({ type: "client_tool_call", client_tool_call: { tool_name: "send", tool_call_id: "s1", parameters: { to: "home on this computer", text: "Check the build" } } }));
+  await until(() => results.length > n);
+  expect(sent).toEqual(["p:h1"]);
+  // its answer to the tool's result (SHEP-113: updates wait until the person's ask is answered)
+  agent.send(JSON.stringify({ type: "agent_response", agent_response_event: { agent_response: "Passed it to Home." } }));
+  // the person keeps talking while a reply comes in
+  const loud = new Uint8Array(new Int16Array(1600).map((_, i) => (i % 2 ? 5000 : -5000)).buffer);
+  const before = heard.length;
+  box.reply = { id: "r1", text: "The build is green." };
+  for (let i = 0; i < 6; i++) { c.message(Buffer.from(loud)); await Bun.sleep(300); }
+  expect(heard.slice(before).some((m) => m.type === "user_message")).toBe(false);
+  // quiet: said once
+  await until(() => heard.slice(before).some((m) => m.type === "user_message"));
+  const said = heard.slice(before).filter((m) => m.type === "user_message");
+  expect(said).toHaveLength(1);
+  expect(said[0].text).toContain('the Home Assistant replied: """The build is green."""');
+  c.end();
+}, 10000);
+
+test("SHEP-113: the person's ask is answered first; updates that came meanwhile wait, then follow; the page sees each state", async () => {
+  agent = null;
+  const box = { reply: null as null | { id: string; text: string } };
+  const hearIO: HearIO = { snap: () => snap, view: (key) => (key === "p:h1" ? { lastReply: () => box.reply, status: () => "idle", asking: () => null } : null), follow: () => ({ stop: () => {} }) };
+  const p = page(null);
+  // the Home space on screen: the call follows its chat's replies
+  const c = voiceCall({} as any, { io, hear: hearIO, where: { client: "web", device: "phone", machine: "box", place: "h1" }, dial: async () => `ws://127.0.0.1:${server.port}/` }, p as any);
+  await until(() => !!agent);
+  await Bun.sleep(100);
+  const states = () => p.got.filter((m) => m.type === "state").map((m) => (m.doing ? `${m.state}: ${m.doing}` : m.state));
+  // the person asks; while the voice works on it, a reply comes in elsewhere
+  const before = heard.length;
+  agent.send(JSON.stringify({ type: "user_transcript", user_transcription_event: { user_transcript: "What's working right now?" } }));
+  await until(() => states().includes("thinking"));
+  box.reply = { id: "r1", text: "The build is green." };
+  agent.send(JSON.stringify({ type: "agent_response", agent_response_event: { agent_response: "On it." } }));
+  const n = results.length;
+  agent.send(JSON.stringify({ type: "client_tool_call", client_tool_call: { tool_name: "look", tool_call_id: "l1", parameters: { what: "tasks", query: "working" } } }));
+  await until(() => results.length > n);
+  // quiet for well past the quiet moment: the update still waits, the answer is owed
+  await Bun.sleep(2600);
+  expect(heard.slice(before).some((m) => m.type === "user_message")).toBe(false);
+  // the answer, then the update after it
+  agent.send(JSON.stringify({ type: "agent_response", agent_response_event: { agent_response: "Nothing is working now." } }));
+  const answeredAt = heard.length;
+  await until(() => heard.slice(before).some((m) => m.type === "user_message"));
+  const said = heard.slice(before).filter((m) => m.type === "user_message");
+  expect(said).toHaveLength(1);
+  expect(said[0].text).toContain("The build is green.");
+  expect(heard.indexOf(said[0])).toBeGreaterThanOrEqual(answeredAt);
+  // the page saw each state, with what the tool did in plain words
+  // ("On it." is said while it shows Speaking: the page shows the voice playing over this state)
+  expect(states()).toEqual(["listening", "thinking", "listening", "working: checking tasks", "thinking", "listening"]);
+  c.end();
+}, 10000);
+
+test("SHEP-124: call_view: the voice agent sets the web call full screen or minimized on the page that started it", async () => {
+  const phone = page((nav) => ({ ok: true, where: { device: "phone", full: nav.full } }));
+  const c = phone.start({ client: "web", device: "phone", machine: "eliass-mac-mini", call: null });
+  await until(() => !!agent);
+  await Bun.sleep(50);
+  for (const view of ["minimized", "full"]) {
+    const n = results.length;
+    agent.send(JSON.stringify({ type: "client_tool_call", client_tool_call: { tool_name: "call_view", tool_call_id: `v-${view}`, parameters: { view } } }));
+    await until(() => results.length > n);
+    expect(phone.got.filter((m) => m.type === "nav").pop().nav).toEqual({ kind: "call", full: view === "full" });
+    expect(JSON.parse(results[n].result).ok).toBe(true);
+    expect(results[n].is_error).toBe(false);
+  }
+  c.end();
+  agent = null;
 });

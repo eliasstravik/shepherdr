@@ -7,7 +7,7 @@ import re
 import shutil
 
 from .base import Fail, HOME, MAX_RUNNING
-from .holycow import SKILLS, skill_pick
+from .holycow import SKILLS, skill_pick, assignment_problem, require_assignment
 
 
 # What each agent key starts by default. Unknown keys run as themselves; --argv overrides.
@@ -24,7 +24,7 @@ OLD_INSTRUCTIONS = os.path.join(HOME, ".herdr", "instructions")
 ASSISTANT_TEMPLATES = ("assistant", "coordinator")  # "coordinator": Assistants started before the rename
 DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "must_fix": "major", "max_running": MAX_RUNNING, "worktrees": True,
                       "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": "", "branch": ""},
-            "automations": {"enabled": True}, "holycow": {"enabled": False}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {},
+            "automations": {"enabled": True}, "holycow": {}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {},
             "agents": {"reactions": True, "feedback": True, "feedback_repo": "NeuralHerd/BossGoat"}}
 LEVELS = ["blocker", "major", "minor"]
 
@@ -205,9 +205,10 @@ def argv_for(pick):
 
 
 def worker_pick(s, task, space=None, agent=None):
-    """What a task's agent runs on, {agent, model, effort, fast, perm}: Settings' worker, then the
+    """What a task's agent runs on, {agent, model, effort, fast, perm}: its skill (Workers for non-software), then the
     task's own --agent / --model / --effort, then `agent` (start --agent). Another CLI than
     Settings' starts from its own defaults (models and permissions differ per CLI)."""
+    require_assignment(task)
     cfg = settings_for(s, space or task.get("space"))
     pick = skill_pick(cfg, task["skill"]) if task.get("skill") else dict(cfg["worker"] or {})
     for key in (task.get("agent"), agent):
@@ -262,7 +263,7 @@ MERGE_WORDS = {"ask": "ask the person first: they accept it in the Tasks panel, 
                "auto": "on its own: once you say ready, Herdr merges it"}
 MUST_WORDS = {"blocker": "blocker", "major": "major and up (blocker, major)", "minor": "everything (blocker, major, minor)"}
 # --set's keys (Shepherdr's spellings too) and the task fields they set.
-SET_KEYS = {"skill": "skill", "review": "review", "brief.review": "review", "merge": "merge", "brief.merge": "merge",
+SET_KEYS = {"kind": "kind", "skill": "skill", "review": "review", "brief.review": "review", "merge": "merge", "brief.merge": "merge",
             "rounds": "review_rounds", "review.rounds": "review_rounds", "review-rounds": "review_rounds", "review_rounds": "review_rounds",
             "mustfix": "must_fix", "must-fix": "must_fix", "must_fix": "must_fix", "review.mustfix": "must_fix",
             "agent": "agent", "task.agent": "agent", "model": "model", "task.model": "model", "effort": "effort", "task.effort": "effort",
@@ -285,7 +286,7 @@ def set_task(t, key, value):
     """One --set key=value (or flag) on task t; an empty value or "default" goes back to Settings'."""
     field = SET_KEYS.get(key.strip().lower())
     if not field:
-        raise Fail(f"--set takes review, review.rounds, review.mustFix, merge, proof, agent, model, effort or reviewer settings, not {key!r}.")
+        raise Fail(f"--set takes kind, skill, review, review.rounds, review.mustFix, merge, proof, agent, model, effort or reviewer settings, not {key!r}.")
     v = value.strip().strip("\"'").strip()
     sets = t.setdefault("set", {})
     if not v or v.lower() == "default":
@@ -295,7 +296,11 @@ def set_task(t, key, value):
             t.pop("set", None)
         return
     low = v.lower()
-    if field == "skill":
+    if field == "kind":
+        if v not in ("software", "non-software"):
+            raise Fail("Task kind must be software or non-software.")
+        t["kind"] = v
+    elif field == "skill":
         if v not in SKILLS:
             raise Fail(f"Unknown HolyCow skill: {v}.")
         t["skill"] = v
@@ -329,7 +334,7 @@ def set_task(t, key, value):
 def set_opts(t, args):
     """add/edit's --set pairs and --agent, --model, --effort, --reviewer, --reviewer-model,
     --reviewer-effort, in that order (a --set pair wins over its flag)."""
-    for flag in ("skill", "agent", "model", "effort", "reviewer", "reviewer_model", "reviewer_effort"):
+    for flag in ("kind", "skill", "agent", "model", "effort", "reviewer", "reviewer_model", "reviewer_effort"):
         v = getattr(args, flag, None)
         if v is not None:
             set_task(t, flag, v)
@@ -379,8 +384,9 @@ def task_settings(s, t, space=None, argv=None):
     here = t.get("mode") != "worktree"
     add("Review", "off" if not on else "on", on, rev_by)
     # What it runs on: the given argv, else its last agent's, else what it would start with.
-    argv = argv or (t["agents"][-1].get("argv") if t.get("agents") else None) or worker_argv(s, t, space)
-    agent = agent_key(argv)
+    problem = assignment_problem(t)
+    argv = argv or (t["agents"][-1].get("argv") if t.get("agents") else None) or ([] if problem else worker_argv(s, t, space))
+    agent = agent_key(argv) if argv else "unassigned"
     if on:
         rv = skill_pick(cfg, "hc-review") if t.get("skill") else dict(cfg.get("reviewer") or {})
         if t.get("reviewer") and t["reviewer"] != rv.get("agent"):
@@ -428,7 +434,10 @@ def task_settings(s, t, space=None, argv=None):
         if a_by != "task":
             a_by = "holycow"
         add("HolyCow skill", t["skill"], t["skill"], "task")
-    add("Agent", text, {"agent": agent, "model": model, "effort": effort}, a_by)
+    if problem:
+        add("HolyCow skill", problem, None, None)
+    add("Agent", text if argv else "Not selected: assign a HolyCow skill before starting",
+        {"agent": agent, "model": model, "effort": effort} if argv else None, a_by if argv else None)
     return lines
 
 

@@ -8,7 +8,7 @@
 
 <p align="center"><a href="https://github.com/NeuralHerd/BossGoat/blob/main/docs/install.md"><img src="assets/buttons/install-shepherdr.svg" alt="Install BossGoat" /></a></p>
 
-<p align="center"><sub>✓&nbsp;Free,&nbsp;MIT&nbsp;licensed &nbsp; ✓&nbsp;Runs&nbsp;on&nbsp;your&nbsp;machines,&nbsp;inside&nbsp;the&nbsp;Herdr&nbsp;app &nbsp; ✓&nbsp;BossGoat&nbsp;3.1.14,&nbsp;herdr-app&nbsp;0.1.12+</sub></p>
+<p align="center"><sub>✓&nbsp;Free,&nbsp;MIT&nbsp;licensed &nbsp; ✓&nbsp;Runs&nbsp;on&nbsp;your&nbsp;machines,&nbsp;inside&nbsp;the&nbsp;Herdr&nbsp;app &nbsp; ✓&nbsp;BossGoat&nbsp;3.1.26,&nbsp;herdr-app&nbsp;0.1.12+</sub></p>
 
 <br />
 
@@ -40,7 +40,7 @@ Each space's Assistant chat is in the middle and its tasks on the right, by what
 
 ### 🧩 Make it yours: everything is an add-on
 
-Tasks, Assistants, chat, artifacts, voice, reactions, the task browser, Autopilot, other machines: every part of BossGoat is an add-on made of Herdr mods, listed in one file with what it needs. Switch Artifacts, Voice, Reactions, the Task browser, Autopilot, the sync to other machines or the web app off in BossGoat settings → Window; the rest is always on in 3.1.14. Your own mods and layouts sit beside BossGoat's in your Herdr folder and are never touched: an update replaces only the files it put there and you didn't change, and keeps a copy of anything it replaces. Herdr's themes and keys stay yours. [Add-ons](docs/addons.md) lists each one and its switch.
+Tasks, Assistants, chat, artifacts, voice, reactions, the task browser, Autopilot, other machines: every part of BossGoat is an add-on made of Herdr mods, listed in one file with what it needs. Switch Artifacts, Voice, Reactions, the Task browser, Autopilot, the sync to other machines or the web app off in BossGoat settings → Window; the rest is always on in 3.1.26. Your own mods and layouts sit beside BossGoat's in your Herdr folder and are never touched: an update replaces only the files it put there and you didn't change, and keeps a copy of anything it replaces. Herdr's themes and keys stay yours. [Add-ons](docs/addons.md) lists each one and its switch.
 
 ### ⚡ Stop briefing every agent yourself
 
@@ -165,4 +165,4 @@ Nowhere: 2.1 is on the `v2.1` branch and 2.0 on the `v2.0` branch, each with its
 
 <p align="center"><a href="https://github.com/NeuralHerd/BossGoat/blob/main/docs/install.md"><img src="assets/buttons/install-shepherdr.svg" alt="Install BossGoat" /></a></p>
 
-<p align="center"><sub>✓&nbsp;Free,&nbsp;MIT&nbsp;licensed &nbsp; ✓&nbsp;Runs&nbsp;on&nbsp;your&nbsp;machines,&nbsp;inside&nbsp;the&nbsp;Herdr&nbsp;app &nbsp; ✓&nbsp;BossGoat&nbsp;3.1.14,&nbsp;herdr-app&nbsp;0.1.12+</sub></p>
+<p align="center"><sub>✓&nbsp;Free,&nbsp;MIT&nbsp;licensed &nbsp; ✓&nbsp;Runs&nbsp;on&nbsp;your&nbsp;machines,&nbsp;inside&nbsp;the&nbsp;Herdr&nbsp;app &nbsp; ✓&nbsp;BossGoat&nbsp;3.1.26,&nbsp;herdr-app&nbsp;0.1.12+</sub></p>

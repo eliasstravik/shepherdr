@@ -68,38 +68,121 @@ export async function steerNow(io, addr) {
 // A picture's path on a line of its own, as a sent file goes after the words.
 const PICTURE = /^[/~]\S*\.(png|jpe?g|gif|webp|bmp|heic)$/im;
 
-// Claude Code's input box: the last line of its screen starting with its prompt mark.
+// Claude Code's input box: the last line of its screen starting with its prompt mark, right under the box's top rule
+// (a past message in the conversation has the same mark, never the rule over it; a dialog shows no box at all).
 export function inputLine(screen) {
   const lines = String(screen ?? "").split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) if (lines[i].startsWith("❯")) return lines[i].trim();
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].startsWith("❯")) continue;
+    return /^\s*─/.test(lines[i - 1] ?? "") ? lines[i].trim() : null;
+  }
   return null;
+}
+
+// The words a message shows in Claude Code's box by: its first line that isn't a sent file's path or a tag line (a
+// picture becomes "[Image #1]", a long paste "[Pasted text #1 +12 lines]").
+function wordsLine(body) {
+  const lines = String(body ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+  // files alone (no words): its first file's path, as typed (a picture shows as its marker instead)
+  return lines.find((l) => !/^[/~]\S+$/.test(l) && !/^<hc\b/.test(l)) ?? lines.find((l) => !/^<hc\b/.test(l) && !PICTURE_LINE.test(l)) ?? "";
+}
+const PICTURE_LINE = /^[/~]\S*\.(png|jpe?g|gif|webp|bmp|heic)$/i;
+const MARKS = /\[(Image|Pasted text) #\d+[^\]]*\]/g;
+
+// Claude Code's box still holds this message, not taken in: its first words in it, or a picture or paste marker (just
+// typed by this send, so the box is its own). exact: only this very message (its words line and markers, nothing
+// else), for one sent again after it stayed in the box.
+export function holds(box, body, exact = false) {
+  const rest = String(box ?? "").replace(/^❯\s?/, "").trim();
+  if (!rest) return false;
+  const words = wordsLine(body);
+  if (exact) {
+    const bare = rest.replace(MARKS, " ").replace(/\s+/g, " ").trim();
+    return bare === words.replace(/\s+/g, " ") || (!bare && /\[(Image|Pasted text) #\d+/.test(rest));
+  }
+  if (words && rest.includes(words.slice(0, 24))) return true;
+  return /\[(Image|Pasted text) #\d+/.test(rest);
+}
+
+// Claude Code's box: its line (null: no box on screen, a dialog), or undefined when the screen couldn't be read
+async function boxOf(io, addr) {
+  const r = await io.hc(["read", addr, "--lines", "0"]).catch(() => null);
+  if (!r || r.code !== 0) return undefined;
+  return inputLine(r.stdout);
+}
+
+// How long a message may sit in Claude Code's box after hc send before it counts as stuck, and how many Enters it gets.
+export const SETTLE = { looks: 40, every: 400, enters: 4 };
+
+// After hc send: Claude Code reads the pictures (or a long paste) a message names before it takes Enter, and an Enter
+// that comes meanwhile is lost, so the message can sit in its box for good. While the box holds it, the same on two
+// looks, it gets its Enter again (a few times at most); once the box is clear it went in. A screen that can't be read
+// proves nothing: it keeps looking (none read at all: hc send's word stands). -> true: in; false: stuck.
+export async function settleBox(io, addr, body, opts = SETTLE) {
+  let last = null, enters = 0, seen = false;
+  for (let i = 0; i < opts.looks; i++) {
+    const box = await boxOf(io, addr);
+    if (box !== undefined) {
+      seen = true;
+      if (box === null || !holds(box, body)) return true;
+      if (box === last && enters < opts.enters) { await io.hc(["keys", addr, "enter"]).catch(() => null); enters++; last = null; }
+      else last = box;
+    }
+    await io.sleep(opts.every);
+  }
+  const box = await boxOf(io, addr);
+  if (box === undefined) return !seen;
+  return box === null || !holds(box, body);
 }
 
 // hc send for one CLI. Claude Code reads the pictures a pasted message names before it takes
 // Enter: an Enter that comes meanwhile is lost, and the message sits in its box ("[Image #1]
 // words") until the next one pushes it in (hc send says so only ~5 s later). While hc send is on
-// its way, a box still holding the pictures, the same on two looks, gets its Enter.
-export async function sendTyped(io, addr, kind, body) {
+// its way, a box still holding the pictures, the same on two looks, gets its Enter; after it, the
+// box is watched until it is clear (settleBox). again: its last send stayed in the box; if the box
+// holds exactly it still, it gets Enter, never typed twice. -> hc's result; stuck: still in the box.
+export async function sendTyped(io, addr, kind, body, opts = SETTLE, again = false) {
+  if (kind !== "claude") return io.hc(["send", addr, body]);
+  if (again) {
+    const box = await boxOf(io, addr);
+    if (holds(box, body, true)) {
+      await io.hc(["keys", addr, "enter"]).catch(() => null);
+      const ok = await settleBox(io, addr, body, opts);
+      return ok ? { code: 0, stdout: "{}", stderr: "" } : { code: 1, stdout: "", stderr: STUCK, stuck: true };
+    }
+    // the box let it go since (Claude Code took it in late): typed again it would go twice
+    if (box !== undefined && !holds(box, body)) return { code: 0, stdout: "{}", stderr: "" };
+  }
   const going = io.hc(["send", addr, body]);
-  if (kind !== "claude" || !PICTURE.test(body)) return going;
   let back = false, last = null;
   const sent = going.finally(() => { back = true; });
-  for (let i = 0; i < 20 && !back; i++) {
-    await Promise.race([io.sleep(100), sent.catch(() => null)]);
-    if (back) break;
-    const box = inputLine((await io.hc(["read", addr, "--lines", "0"]).catch(() => null))?.stdout);
-    if (box && /\[Image #\d+\]/.test(box) && box === last) { await io.hc(["keys", addr, "enter"]).catch(() => null); break; }
-    last = box;
+  if (PICTURE.test(body)) {
+    for (let i = 0; i < 20 && !back; i++) {
+      await Promise.race([io.sleep(100), sent.catch(() => null)]);
+      if (back) break;
+      const box = await boxOf(io, addr);
+      if (box && /\[Image #\d+\]/.test(box) && box === last) { await io.hc(["keys", addr, "enter"]).catch(() => null); break; }
+      last = box;
+    }
   }
-  return sent;
+  const r = await sent;
+  if (r.code !== 0) return r;
+  let started = false;
+  try { started = JSON.parse(r.stdout || "{}").started === true; } catch {}
+  if (started || (await settleBox(io, addr, body, opts))) return r;
+  return { code: 1, stdout: r.stdout, stderr: STUCK, stuck: true };
 }
+
+// A message that stays in Claude Code's box: sending it again presses its Enter (never types it twice).
+export const STUCK = "It's still in the agent's message box: its Enter didn't take.";
 
 // The person's reaction to a message, as the agent reads it (on: added, else removed).
 export const reactionLine = (emoji, text, on = true) => `<hc from="person" ${on ? "reaction" : "reaction-removed"}="${emoji}" to="${excerpt(text)}"/>`;
 
 // Sends the body. kind: "claude", "codex" or another CLI. -> hc's result (code 0: it's in the agent's terminal).
-export async function sendBody(io, addr, kind, body) {
-  let r = await sendTyped(io, addr, kind, body);
+// again: its last send stayed in Claude Code's box (sendTyped).
+export async function sendBody(io, addr, kind, body, again = false) {
+  let r = await sendTyped(io, addr, kind, body, SETTLE, again);
   if (r.code !== 0 && refusal(r).kind === "blocked" && (kind === "claude" || kind === "codex")) r = await replyInstead(io, addr, body);
   if (r.code === 0 && kind === "claude") await steerNow(io, addr);
   return r;

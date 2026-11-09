@@ -1334,6 +1334,8 @@ export type ServerEvent =
   | { type: 'update'; update: UpdateStatus | null }
   /** the answer to a screen's ping: its link still works */
   | { type: 'pong' }
+  /** an agent shows the person an artifact (herdr-artifact open): this screen, the one they used last, opens it */
+  | { type: 'show'; artifact: string }
 
 /** how Shepherdr's last update of itself went (update.json in its folder, written by the supervisor) */
 export interface UpdateStatus {

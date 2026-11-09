@@ -2,39 +2,88 @@
 // person's words to an agent, stop it, mark an Assistant read, accept a Ready task, read a task's evidence.
 // Anything else is refused. Inputs are checked here; commands run with argument lists, never a shell line.
 import type { Hub } from "./hub.ts";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { appHome, writable } from "./paths.ts";
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { sendBody, steerNow, messageBody, refusal, reactionLine, mentionedIn, taskTag } from "../core/send.js";
 import { kindOf } from "../core/chat-reader.js";
 import { WORDS } from "../core/chat-view.js";
 import * as AGa from "../core/agents.js";
+import { answerCodex } from "./codex-ask.ts";
 const { sessionOf, forkArgv } = AGa as any;
 import * as SP from "../core/spaces.js";
-const { READ, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, DELETED, deletedSection, withRestoredSection } = SP as any;
+const { READ, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, withOrder, DELETED, deletedSection, withRestoredSection } = SP as any;
 import type { Compat } from "./compat.ts";
 import { worktreeAct } from "./worktrees.ts";
+import { noteFailed, once } from "./send-once.ts";
 import { execTemplate } from "./spaces.ts";
 import * as MA from "../core/machine-add.js";
 import { exec } from "./model.ts";
 import { closeSaved, renameSaved, orderSaved, withoutSpace, splitId } from "./saved-spaces.ts";
 
-const APP = process.env.HERDR_APP_HOME || join(homedir(), ".config", "herdr-app");
 // The window's own space log (lib/spacelog.js): a space the service closed or renamed with no window is traced there too
-function logSpace(action: string, id: string, name: string | null, extra: Record<string, unknown> = {}) {
+export function logSpace(action: string, id: string, name: string | null, extra: Record<string, unknown> = {}) {
   try {
-    const dir = join(APP, "data", "backups");
-    mkdirSync(dir, { recursive: true });
-    appendFileSync(join(dir, "space-log.jsonl"), JSON.stringify({ at: new Date().toISOString(), machine: splitId(id).machine, space: id, name, action, ...extra, by: "web, no window (service/saved-spaces.ts)" }) + "\n");
+    // where at each call, and never the real one under test (SHEP-131: a test once logged its fake spaces there)
+    const file = writable(join(appHome(), "data", "backups", "space-log.jsonl"));
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(file, JSON.stringify({ at: new Date().toISOString(), machine: splitId(id).machine, space: id, name, action, ...extra, by: "web, no window (service/saved-spaces.ts)" }) + "\n");
   } catch {}
 }
-const ATTACH = join(process.env.HERDR_APP_HOME || join(homedir(), ".config", "herdr-app"), "data", "chat-attach");
+const attachDir = () => join(appHome(), "data", "chat-attach");
+/** files in one message at most (the page says so before it sends: web/plugins/chat/client.tsx) */
+export const MAX_FILES = 50;
 const ADDR = /^([\w.-]+\/)?t[0-9a-z]+$/;
 const REF = /^[A-Z][A-Z0-9]*-\d+$/;
 const MACHINE = /^[\w.-]+$/;
 
+/** One page's message to its agent, its files' paths after its words. -> { ok, at } once it is in the agent's terminal
+ *  (Claude Code's box clear: core/send.js settleBox), or { waiting } held for the agent's turn; else it throws. */
+async function sendNow(hub: Hub, b: any, compat: Compat, again = false) {
+  const a = addr(b.addr);
+  const text = str(b.text ?? "").trim();
+  if (!text && !(Array.isArray(b.attachments) && b.attachments.length)) throw new Error("nothing to send");
+  const t = hub.terminals.get(a);
+  if (!t || t.state !== "live") throw new Error("That agent isn't running.");
+  const io = { hc: asPerson(hub), sleep: (ms: number) => Bun.sleep(ms), status: () => (hub.terminals.get(a) as any)?.status?.state ?? null };
+  // files sent with it: their paths after the words, as the window's chat sends them (copied first to another machine)
+  const sent: string[] = Array.isArray(b.attachments) ? b.attachments : [];
+  // never some of them quietly
+  if (sent.length > MAX_FILES) throw new Error(`At most ${MAX_FILES} files in one message.`);
+  for (const p of sent) if (typeof p !== "string" || !p.startsWith(attachDir() + "/") || p.includes("/../")) throw new Error("That file isn't one sent from here.");
+  // all at once
+  const files = await Promise.all(sent.map(async (p) => {
+    if (!a.includes("/")) return p;
+    const put = await hc(["put", a, p, "--json"]);
+    let landed: string | null = null;
+    try { landed = JSON.parse(put.stdout || "{}").path ?? null; } catch {}
+    if (put.code !== 0 || !landed) throw new Error("A file didn't reach that machine.");
+    return landed;
+  }));
+  const body = [messageBody({ text, quote: typeof b.quote === "string" ? b.quote.slice(0, 2000) : null, tags: typeof b.tags === "string" ? b.tags : "" }), ...files].filter(Boolean).join("\n\n");
+  // held on purpose (Ctrl+Enter, a long press): it goes once the agent stops working
+  const st = (hub.terminals.get(a) as any)?.status?.state;
+  if (b.hold && (st === "working" || st === "blocked")) {
+    const cid = typeof b.cid === "string" ? b.cid.slice(0, 80) : undefined;
+    // once it goes: the chat knows it again by its words (its id and files), so the page sees it went in
+    const note = () => { if (cid) compat.noteSend?.(a, { cid, text, files: sent, at: Date.now() }); };
+    held.push({ addr: a, kind: kindOf(t) ?? "", body, hub, cid, note });
+    drain();
+    return { ok: true, waiting: true, waitsFor: "turn" };
+  }
+  // when it began to go in, by this clock: the page knows it again in the chat by it (web/src/outbox.ts sameAs)
+  const at = Date.now();
+  // what it was, so the chat knows it again while it waits in the CLI's queue
+  if (typeof b.cid === "string") compat.noteSend?.(a, { cid: b.cid.slice(0, 80), text, files: sent, at });
+  const r: any = await sendBody(io, a, kindOf(t) ?? "", body, again);
+  // (stuck: it stayed in Claude Code's box; sent again with this id it gets only its Enter: send-once.ts)
+  if (r.code !== 0) throw Object.assign(new Error(refusal(r).message), { stuck: !!r.stuck });
+  return { ok: true, at };
+}
+
 // Messages held until their agent is free, sent in order, each once.
-const held: { addr: string; kind: string; body: string; hub: Hub; cid?: string; now?: boolean }[] = [];
+const held: { addr: string; kind: string; body: string; hub: Hub; cid?: string; now?: boolean; note?: () => void }[] = [];
 let draining: ReturnType<typeof setInterval> | null = null, busy = false;
 function drain() {
   draining ??= setInterval(async () => {
@@ -49,7 +98,12 @@ function drain() {
         const i = held.indexOf(m);
         if (i < 0) continue;
         held.splice(i, 1);
-        if (alive) await sendBody({ hc: asPerson(m.hub), sleep: (ms: number) => Bun.sleep(ms), status: () => (m.hub.terminals.get(m.addr) as any)?.status?.state ?? null }, m.addr, m.kind, m.body).catch(() => null);
+        // one that can't go now is told to its page (Chat.failed: Not sent, with Retry), never dropped quietly
+        if (alive) m.note?.();
+        const r: any = alive
+          ? await sendBody({ hc: asPerson(m.hub), sleep: (ms: number) => Bun.sleep(ms), status: () => (m.hub.terminals.get(m.addr) as any)?.status?.state ?? null }, m.addr, m.kind, m.body).catch((e: Error) => ({ code: 1, stderr: e.message }))
+          : { code: 1, stderr: "That agent isn't running." };
+        if (r.code !== 0 && m.cid) noteFailed(m.addr, m.cid, refusal(r).message, !!r.stuck);
       }
     } finally {
       busy = false;
@@ -99,6 +153,7 @@ async function run(cmd: string[]) {
 }
 
 export const hc = (args: string[]) => run([process.env.SHEPHERDR_HC || "hc", ...args]);
+
 // hc for core/send.js, its sends as the person's (Hub.send: no <hc from=…> tag on another machine)
 const asPerson = (hub: Hub) => (args: string[]) => args[0] === "send" ? hub.send(args[1], args[2]) : hc(args);
 
@@ -153,6 +208,15 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (b.terminal === true) return { ok: true };
     const why = await (compat as any).watch?.press(str(b.question, 300), typeof b.choice === "number" ? b.choice : -1);
     return why ? { ok: false, error: why } : { ok: true };
+  }
+  if (b?.type === "answer" && typeof b.question === "string" && b.question.startsWith("cq:")) {
+    // Codex's own questions (compat.ts codexQuestion): answered on its screen, as a person would
+    const a = chat(b.chat);
+    const item = (compat.reader?.(a)?.conv?.items ?? []).find((x: any) => x.kind === "ask" && x.id === b.question.slice(3));
+    if (!item?.questions?.length || item.closed) throw new Error("That question was answered already.");
+    const why = await answerCodex(hc, a, item.questions, b);
+    if (why) throw new Error(why);
+    return { ok: true };
   }
   if (b?.type === "answer" && typeof b.question === "string") {
     // a hook ask's card (its id is the request's): answered as the window's card answers it
@@ -209,15 +273,25 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       const order = ids.map(sec).filter(Boolean) as string[];
       d.sections = [...order.map((id) => d.sections.find((y: any) => y.id === id)).filter(Boolean), ...d.sections.filter((y: any) => !order.includes(y.id))];
     } else if (b.under.startsWith("m:")) {
-      for (const [i, id] of ids.entries()) {
-        const r = await run(["herdr-app", "do", "space.move", "--id", id, "--index", String(i + 1)]);
-        if (r.code !== 0) {
-          // no window: the machine's saved spaces in that order (service/saved-spaces.ts)
-          const key = b.under.slice(2);
-          await orderSaved(hub, key === compat.host ? null : key, ids);
-          break;
+      // the order is the sidebar's own (core/spaces.js withOrder), so it holds on every device and for spaces Herdr
+      // doesn't keep (the service's own, always last before SHEP-130); the rest of the machine's stay where they were
+      const key = b.under.slice(2), machine = key === compat.host ? null : key;
+      const all: any[] = compat.allSpaces?.() ?? [];
+      const now = all.filter((s) => (s.machine ?? null) === machine).map((s) => s.id);
+      await sh.set("spaces-chat", withOrder(bar(), machine, ids, now));
+      // and Herdr's own order too, best effort, for the window and a release before this one: its spaces only
+      const own = new Set(all.filter((s) => s.own).map((s) => s.id));
+      const mine = ids.filter((id) => !own.has(id));
+      try {
+        for (const [i, id] of mine.entries()) {
+          const r = await run(["herdr-app", "do", "space.move", "--id", id, "--index", String(i + 1)]);
+          if (r.code !== 0) {
+            // no window: the machine's saved spaces in that order (service/saved-spaces.ts)
+            await orderSaved(hub, machine, mine);
+            break;
+          }
         }
-      }
+      } catch {}
       return { ok: true };
     } else throw new Error("Machines keep their order: drag spaces and sections instead.");
     await sh.set("spaces-chat", d);
@@ -336,7 +410,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const workers = [...hub.terminals.values()].filter((x: any) => x.state === "live" && x.parent === a).length;
     if (b.mode === "count") return { ok: true, workers };
     const tab = t.labels?.["herdr.coordinator.tab"];
-    const script = join(APP, "mods", "coordinator", "close.sh");
+    const script = join(appHome(), "mods", "coordinator", "close.sh");
     if (!tab || !existsSync(script)) throw new Error("Closing an Assistant needs BossGoat's window layout installed.");
     const r = await run(["bash", script, tab, a!, b.mode === "stop" ? "stop" : "keep"]);
     if (r.code !== 0) throw new Error("It didn't close: the Herdr window needs to be open.");
@@ -408,7 +482,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (b.kind != null && !to?.run?.length) throw new Error("Not an agent installed there.");
     const assistant = t.labels?.["herdr.role"] === "coordinator" && !t.labels?.["herdr.agent"];
     const argv = to?.run ?? (assistant ? null : now?.run ?? null);
-    const script = join(APP, "mods", "coordinator", "restart.sh");
+    const script = join(appHome(), "mods", "coordinator", "restart.sh");
     if (!existsSync(script)) throw new Error("Switching agents needs BossGoat's window layout installed.");
     const r = await run(["bash", script, a, ...(argv ? [JSON.stringify(argv)] : [])]);
     if (r.code !== 0) throw new Error("It didn't restart: the Herdr window needs to be open.");
@@ -476,7 +550,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const [slot, rec] = Object.entries(slots).find(([, r]) => r && (r.space === sp.id || r.space === bare)) ?? [];
     const text = str(b.text ?? "").trim();
     if (!text) throw new Error("nothing to send");
-    const files = Array.isArray(b.attachments) && !sp.machine ? b.attachments.filter((p: unknown) => typeof p === "string" && p.startsWith(ATTACH + "/") && !p.includes("/../")) : [];
+    const files = Array.isArray(b.attachments) && !sp.machine ? b.attachments.filter((p: unknown) => typeof p === "string" && p.startsWith(attachDir() + "/") && !p.includes("/../")) : [];
     const task = [text, ...files].join("\n\n");
     // its machine offline: it waits (the web shows it waiting to be reached) and starts once the machine is back
     if (sp.machine && !(await addedMachines()).some((m: any) => m.name === sp.machine && m.state === "connected")) {
@@ -496,10 +570,10 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     try { out = JSON.parse(r.stdout || "{}"); } catch {}
     if (r.code !== 0 || !out.address) throw new Error((r.stderr || r.stdout).trim().split("\n").pop() || "The Assistant didn't start.");
     // what the person asked, for its chat to show apart from the template (the window's data/chat-first)
-    const first = join(process.env.HERDR_APP_HOME || join(homedir(), ".config", "herdr-app"), "data", "chat-first");
+    const first = join(appHome(), "data", "chat-first");
     const addr = sp.machine && !String(out.address).includes("/") ? `${sp.machine}/${out.address}` : String(out.address);
     if (out.first_message?.sent === false && tpl.words) firstWhenIdle(hub, addr, `${tpl.words}\n\n${task}`);
-    try { mkdirSync(first, { recursive: true }); writeFileSync(join(first, `${String(slot ?? addr).replace(/[^\w.-]/g, "_")}.txt`), text); } catch {}
+    try { mkdirSync(first, { recursive: true }); writeFileSync(writable(join(first, `${String(slot ?? addr).replace(/[^\w.-]/g, "_")}.txt`)), text); } catch {}
     return { ok: true, started: true };
   }
   if (b?.type === "send" && typeof b.chat === "string") {
@@ -548,35 +622,10 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
   }
   switch (b?.type) {
     case "send": {
-      const a = addr(b.addr);
-      const text = str(b.text ?? "").trim();
-      if (!text && !(Array.isArray(b.attachments) && b.attachments.length)) throw new Error("nothing to send");
-      const t = hub.terminals.get(a);
-      if (!t || t.state !== "live") throw new Error("That agent isn't running.");
-      const io = { hc: asPerson(hub), sleep: (ms: number) => Bun.sleep(ms), status: () => (hub.terminals.get(a) as any)?.status?.state ?? null };
-      // files sent with it: their paths after the words, as the window's chat sends them (copied first to another machine)
-      const sent: string[] = Array.isArray(b.attachments) ? b.attachments.slice(0, 20) : [];
-      for (const p of sent) if (typeof p !== "string" || !p.startsWith(ATTACH + "/") || p.includes("/../")) throw new Error("That file isn't one sent from here.");
-      // all at once
-      const files = await Promise.all(sent.map(async (p) => {
-        if (!a.includes("/")) return p;
-        const put = await hc(["put", a, p, "--json"]);
-        let landed: string | null = null;
-        try { landed = JSON.parse(put.stdout || "{}").path ?? null; } catch {}
-        if (put.code !== 0 || !landed) throw new Error("A file didn't reach that machine.");
-        return landed;
-      }));
-      const body = [messageBody({ text, quote: typeof b.quote === "string" ? b.quote.slice(0, 2000) : null, tags: typeof b.tags === "string" ? b.tags : "" }), ...files].filter(Boolean).join("\n\n");
-      // held on purpose (Ctrl+Enter, a long press): it goes once the agent stops working
-      const st = (hub.terminals.get(a) as any)?.status?.state;
-      if (b.hold && (st === "working" || st === "blocked")) { held.push({ addr: a, kind: kindOf(t) ?? "", body, hub, cid: typeof b.cid === "string" ? b.cid.slice(0, 80) : undefined }); drain(); return { ok: true, waiting: true, waitsFor: "turn" }; }
-      // when it began to go in, by this clock: the page knows it again in the chat by it (web/src/outbox.ts sameAs)
-      const at = Date.now();
-      // what it was, so the chat knows it again while it waits in the CLI's queue
-      if (typeof b.cid === "string") compat.noteSend?.(a, { cid: b.cid.slice(0, 80), text, files: sent, at });
-      const r = await sendBody(io, a, kindOf(t) ?? "", body);
-      if (r.code !== 0) throw new Error(refusal(r).message);
-      return { ok: true, at };
+      // one page's send asked again (its answer lost on the way, a reload, Retry): the same one, never twice
+      const cid = typeof b.cid === "string" && b.cid ? b.cid.slice(0, 80) : null;
+      if (!cid) return sendNow(hub, b, compat);
+      return once(cid, (again) => sendNow(hub, b, compat, again));
     }
     case "steer": {
       // Send now on a message in Claude Code's own queue (#662): its Ctrl+Enter, only while its screen offers it

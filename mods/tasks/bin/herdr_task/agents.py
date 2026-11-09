@@ -97,6 +97,10 @@ def task_status(task, live):
     for k in live:
         x = k.get("status")
         states.append(x.get("state") if isinstance(x, dict) else x)
+    # A problem Herdr just found (SHEP-133): not Needs you before GRACE_MS have passed, while its
+    # agent is told and takes it up; until then the task reads as it would without it.
+    if task.get("attention") and now() - (task.get("attention_at") or 0) < GRACE_MS:
+        return task_status({**task, "attention": None}, live)
     # What Herdr found that stops it (failing checks, a conflict): Needs you, unless its agent is
     # already on it (on_it()); then it is Working, with its agent's own status line.
     if task.get("attention") and not on_it(task, live):
@@ -130,6 +134,10 @@ def task_status(task, live):
     # status line shown, unless its last message asks the person something.
     if live and own_work(task, live):
         return "working", None, None
+    # Just gone quiet (SHEP-133): still Working for GRACE_MS, as its agent often ends a turn a
+    # moment before it says ready or takes up the next thing on its own.
+    if live and settling(live):
+        return "working", None, None
     # Quiet without saying ready: alive, it ended its turn (view() says on what: its question or
     # its last sentence); its process gone, the agent stopped.
     if live:
@@ -138,6 +146,27 @@ def task_status(task, live):
 
 
 STOPPED = "Agent stopped"
+
+
+# ---- a short grace before Needs you (SHEP-133) ------------------------------------------------
+# A task flips to Needs you for a few seconds and moves on by itself: its agent ends a turn a
+# moment before it runs herdr-task ready or status, a background job's notice wakes it, a problem
+# is found just before its agent is handed it. So a quiet agent (Needs you: reply) and a problem
+# Herdr found (attention) need the person only once they've lasted GRACE_MS: the agent's own
+# status change (hc's status_ms) or the problem's attention_at says since when. What really asks
+# (a question tool, a permission: blocked) needs the person at once. As core/tasks.js GRACE_MS.
+GRACE_MS = 20_000
+
+
+def quiet_since(live):
+    """When its agents last changed status (ms; hc's status_ms), or 0 when none says."""
+    return max([k.get("status_ms") or 0 for k in live if isinstance(k.get("status_ms"), (int, float))] or [0])
+
+
+def settling(live):
+    """Its agents went quiet under GRACE_MS ago."""
+    since = quiet_since(live)
+    return bool(since) and now() - since < GRACE_MS
 
 
 # ---- a Ready task back at work ----------------------------------------------------------------
@@ -349,7 +378,8 @@ def own_line(task, address=None):
     set one since its turn began. Agents set it before they ask or stop to wait; what Herdr
     works out (its question, its last sentence) is only for when it didn't."""
     p = task.get("progress") or {}
-    if not p.get("text"):
+    # Herdr's own words ("Working again": back_to_work()) are never the agent's reason (SHEP-133).
+    if not p.get("text") or p.get("by"):
         return None
     began = turn_began(task, address)
     if began and (p.get("set") or p.get("at") or 0) < began:
@@ -492,7 +522,17 @@ def starting(task):
 # review round 1", "Codex reviewing the change"), and no background job of its ended since.
 # It asks the person something (a question tool or permission: blocked; its last message asks):
 # Needs you all the same. As core/tasks.js place() with task.own_work, which news_pass keeps.
-BG_LOG_BYTES = 1048576
+BG_LOG_BYTES = 64 * 1048576  # a first look at a log reads at most this much of its end
+# A tool call (Claude Code's log line, compact JSON) and its result; one open longer than FG_MAX_MS
+# (a foreground command times out at 10 minutes) no longer counts as running.
+TOOL_USE = re.compile(r'"type":\s*"tool_use",\s*"id":\s*"([^"]+)",\s*"name":\s*"([^"]+)"')
+TOOL_DONE = re.compile(r'"tool_use_id":\s*"([^"]+)"')
+TIMESTAMP = re.compile(r'"timestamp":\s*"([^"]+)"')
+SIDECHAIN = re.compile(r'"isSidechain":\s*true')
+FG_MAX_MS = 15 * 60000
+# Only lines with one of these are parsed: a log's screenshots are megabytes of lines that aren't.
+BG_HINTS = ("<task-notification>", "task_id", "backgroundTaskId", "timeoutMs", "isAsync", "in background with ID",
+            "Monitor started", "Async agent launched", "session_id", "session ID")
 BG_MAX_MS = 3 * 3600_000  # a background job started longer ago than this no longer counts
 BG_STARTED = re.compile(r"Command running in background with ID: (\w+)|Monitor started \(task (\w+)|Async agent launched[\s\S]*?agentId: (\w+)")
 BG_ENDED = re.compile(r"<task-id>(\w+)</task-id>(?:(?!</task-notification>)[\s\S])*?<status>(\w+)</status>")
@@ -526,18 +566,64 @@ def _text(x):
 
 def background_jobs(log):
     """(running, last_ended): its agent's background jobs still running by its session log ({id:
-    started ms}), and when the last one ended (ms, or 0). Cached on the log's size and time."""
+    started ms}), and when the last one ended (ms, or 0). Read as the log grows: only what was
+    added since the last look, so a job started before megabytes of screenshots still counts
+    (SHEP-133: a 1 MB tail lost it, and its quiet agent read Needs you)."""
     try:
         st = os.stat(log)
     except (OSError, TypeError):
         return {}, 0
-    key = (st.st_size, st.st_mtime_ns)
-    hit = _bg_cache.get(log)
-    if hit and hit[0] == key:
-        return hit[1]
-    running, ended, calls = {}, 0, {}
-    for raw in log_lines(log, BG_LOG_BYTES):
-        if "<task-notification>" in raw or "task_id" in raw or '"tool_result"' in raw or "session_id" in raw or "session ID" in raw:
+    c = _bg_cache.get(log)
+    if not c or c["ino"] != st.st_ino or st.st_size < c["offset"]:
+        c = {"ino": st.st_ino, "offset": max(0, st.st_size - BG_LOG_BYTES), "running": {}, "ended": 0, "calls": {}, "cut": True}
+        _bg_cache[log] = c
+    if st.st_size > c["offset"]:
+        try:
+            with open(log, "rb") as f:
+                f.seek(c["offset"])
+                chunk = f.read(st.st_size - c["offset"])
+        except OSError:
+            chunk = b""
+        if c.pop("cut", False) and c["offset"]:
+            nl = chunk.find(b"\n")  # a first line cut in half is left out
+            c["offset"] += nl + 1 if nl >= 0 else 0
+            chunk = chunk[nl + 1:] if nl >= 0 else b""
+        end = chunk.rfind(b"\n") + 1  # a last line still being written waits for its end
+        c["offset"] += end
+        _bg_scan(chunk[:end].decode("utf-8", "replace").split("\n"), c)
+    return {i: t for i, t in c["running"].items() if now() - t < BG_MAX_MS}, c["ended"]
+
+
+def open_tool(log):
+    """The tool call its agent (Claude Code) has open in its log's main thread, started under
+    FG_MAX_MS ago: (name, started ms), or None. A question tool or a plan is no work of its own."""
+    background_jobs(log)
+    c = _bg_cache.get(log) or {}
+    calls = c.get("open") or {}
+    for i in [i for i, (_, at) in calls.items() if now() - at >= FG_MAX_MS]:
+        calls.pop(i)
+    mine = [x for x in calls.values() if x[0] not in ("AskUserQuestion", "ExitPlanMode")]
+    return max(mine, key=lambda x: x[1]) if mine else None
+
+
+def _bg_scan(lines, seen):
+    """background_jobs()'s reading of new lines, into seen: {running, calls, ended, open}. Tool
+    calls open and done are read off the raw line (an image's result is megabytes of JSON)."""
+    running, calls, ended = seen["running"], seen["calls"], seen["ended"]
+    opened = seen.setdefault("open", {})
+    for raw in lines:
+        # Claude Code keeps a copy of each request it sends (api-request-blob): every call and
+        # result so far again, never news of one.
+        if '"api-request' in raw[:200]:
+            continue
+        if '"tool_use"' in raw and not SIDECHAIN.search(raw):
+            stamp = TIMESTAMP.search(raw)
+            for m in TOOL_USE.finditer(raw):
+                opened[m.group(1)] = (m.group(2), (_ms(stamp.group(1)) if stamp else None) or now())
+        if '"tool_use_id"' in raw:
+            for m in TOOL_DONE.finditer(raw):
+                opened.pop(m.group(1), None)
+        if any(h in raw for h in BG_HINTS):
             try:
                 d = json.loads(raw)
             except ValueError:
@@ -584,9 +670,7 @@ def background_jobs(log):
                 if len(sids) == 1 and CODEX_EXITED.search(text) and not CODEX_OBJECT.search(text):
                     if running.pop("codex:" + sids.pop(), None) is not None:
                         ended = max(ended, at)
-    out = ({i: t for i, t in running.items() if now() - t < BG_MAX_MS}, ended)
-    _bg_cache[log] = (key, out)
-    return out
+    seen["ended"] = ended
 
 
 def waits_on_own(task, address=None, ended=0):
@@ -618,5 +702,10 @@ def own_work(task, live):
         log = agent_log(task, address) or agent_log(task)
         jobs, ended = background_jobs(log) if log else ({}, 0)
         if (jobs or waits_on_own(task, address, ended)) and not last_question(task, address):
+            return True
+        # Mid-turn, a long command of its own still running in the foreground: Herdr can read
+        # Claude Code idle then (SHEP-133: HOME-1 read Needs you during a 50 s Bash). Unless a
+        # permission for it waits on the person (the chat's hook holds it).
+        if log and open_tool(log) and not held_ask(address):
             return True
     return False

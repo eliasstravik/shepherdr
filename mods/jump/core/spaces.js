@@ -156,3 +156,55 @@ export function withIcon(d, space, icon) {
   if (icon) x.icons[space] = icon; else delete x.icons[space];
   return x;
 }
+
+// ---- the order the person dragged each machine's spaces into (SHEP-130) ----
+// Kept in the sidebar's own data (shared "spaces-chat".order: { [machine name, "" for this computer]: [space ids] }),
+// so it holds on every device and for every space, those Herdr doesn't keep too (a space the service made with no
+// window is never in Herdr's list, and was always last). The web, the service and the window all show it; spaces it
+// doesn't name keep Herdr's place among the rest (after the one before them there).
+export const orderKey = (machine) => machine ?? "";
+
+// ids in a new order, the ones `was` has that ids lacks put back after the one they followed there (first: at the top).
+export function keptOrder(was, ids) {
+  const out = [...new Set(ids)];
+  for (const [i, id] of was.entries()) {
+    if (out.includes(id)) continue;
+    const after = was.slice(0, i).findLast((x) => out.includes(x));
+    out.splice(after === undefined ? 0 : out.indexOf(after) + 1, 0, id);
+  }
+  return out;
+}
+
+// list (any machines', in Herdr's order) with each machine's spaces in the saved order; each machine's spaces keep the
+// slots they had in list, so the machines stay as they were.
+export function inOrder(list, order, idOf = (s) => s.id, machineOf = (s) => s.machine ?? null) {
+  if (!order || typeof order !== "object" || !Object.keys(order).length) return list;
+  const by = new Map();
+  for (const x of list) {
+    const k = orderKey(machineOf(x));
+    if (!by.has(k)) by.set(k, []);
+    by.get(k).push(x);
+  }
+  const sorted = new Map();
+  for (const [k, xs] of by) {
+    const want = Array.isArray(order[k]) ? order[k] : [];
+    const ids = xs.map(idOf);
+    const of = new Map(xs.map((x) => [idOf(x), x]));
+    sorted.set(k, keptOrder(ids, want.filter((id) => of.has(id))).map((id) => of.get(id)));
+  }
+  const at = new Map();
+  return list.map((x) => {
+    const k = orderKey(machineOf(x)), n = at.get(k) ?? 0;
+    at.set(k, n + 1);
+    return sorted.get(k)[n];
+  });
+}
+
+// The sidebar's data with machine's spaces in a new order: ids as they show (some may be in sections or hidden),
+// `now` the machine's spaces as they show now, all of them; the rest stay where they were among them.
+export function withOrder(d, machine, ids, now = []) {
+  const x = tidyBar(d);
+  const order = x.order && typeof x.order === "object" && !Array.isArray(x.order) ? { ...x.order } : {};
+  order[orderKey(machine)] = keptOrder(now, ids);
+  return { ...x, order };
+}

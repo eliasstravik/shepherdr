@@ -7,7 +7,8 @@ const { typing: slashTyping, match: slashMatch } = SL as any
 import { openAccept } from '@client/screens/Accept.tsx'
 import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ComponentType, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, type RefObject } from 'react'
 import { act, chatName, definePlugin, getDraft, getState, goChat, has, holdReload, openArtifact, openItem, openNeeds, openTask, registry, setDraft, setOutbox, setUI, taskOf, useDraft, useSnap, useStore, useUI, type UI } from '@client/kernel.ts'
-import { keyOf, partsOf, priorOf, reasonOf, SEND_TIMEOUT, type Outgoing } from '@client/outbox.ts'
+import { anchorOf, keyOf, partsOf, placesOf, priorOf, reasonOf, SEND_TIMEOUT, type Outgoing } from '@client/outbox.ts'
+import { dropFiles, keepFile, keptFile, postFile, retrying, sweepFiles } from '@client/uploads.ts'
 import { AlertIcon, BackIcon, CameraIcon, CheckIcon, CopyIcon, Count, DeleteIcon, dimmed, Dot, DownIcon, DownloadIcon, Empty, field, FileIcon, ic, IconButton, KeyIcon, LinkButton, LiveWave, MachineIcon, Menu, MenuItem, MenuSeparator, MenuSetting, MicIcon, ModeIcon, MoreIcon, NextIcon, PageIcon, PlanIcon, PlusIcon, Primary, QuestionIcon, ReplyIcon, RestartIcon, roundBtn, SearchIcon, SecretField, Sent, SmileIcon, Tab, Tabs, TextBox, UpIcon, useElapsed, XIcon } from '@client/ui.tsx'
 import { canDictate, dictate, dictSample, type Dictation } from '@client/dictation.ts'
 import { extOf, isImage } from '@shared/files.ts'
@@ -223,7 +224,7 @@ function Bubble({ msg, chat, from, out, last, pics, images, writing }: { msg: Me
           : null}
         {!body && !msg.file && !art && reacted ? <div className="mt-1.5 flex gap-1">{edge}</div> : null}
         {art ? null : parts}
-        {out?.state === 'failed' && last ? <NotSent out={out} /> : null}
+        {out?.state === 'failed' && last ? <NotSent out={out} /> : out?.state === 'sending' && last ? <Sending out={out} /> : null}
       </div>
     </>
   )
@@ -316,8 +317,36 @@ function NotSent({ out, className }: { out: Outgoing; className?: string }) {
   )
 }
 
+/** under one still on its way: how it goes, in a quiet line (it isn't in the conversation until the agent has it):
+ *  its pictures going up, the message going in, or the network gone, and it goes by itself once it's back */
+function Sending({ out, className }: { out: Outgoing; className?: string }) {
+  const [online, setOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine !== false)
+  useEffect(() => {
+    const on = () => setOnline(navigator.onLine !== false)
+    addEventListener('online', on)
+    addEventListener('offline', on)
+    return () => {
+      removeEventListener('online', on)
+      removeEventListener('offline', on)
+    }
+  }, [])
+  const n = out.files.length
+  const pictures = out.files.every((f) => isImage(f.name)) ? (n === 1 ? 'picture' : 'pictures') : n === 1 ? 'file' : 'files'
+  const words = out.offline || !online ? 'Waiting for a connection. It sends by itself.' : out.up !== undefined && n ? `Uploading ${Math.min(out.up + 1, n)} of ${n} ${pictures}…` : 'Sending…'
+  return (
+    <div role="status" data-sending className={clsx('mt-1 flex items-center justify-end gap-1.5 text-[0.75rem] text-fg3 tabular-nums phone:text-[0.8125rem]', className)}>
+      <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[currentColor] motion-safe:animate-pulse" />
+      {words}
+    </div>
+  )
+}
+
 /** take one you sent out of the chat, its words and files with it */
-const removeOut = (cid: string) => setOutbox((all) => all.filter((o) => o.cid !== cid))
+const removeOut = (cid: string) => setOutbox((all) => {
+  const o = all.find((x) => x.cid === cid)
+  if (o) void dropFiles(o.files.map((f) => f.path).filter(isStandIn))
+  return all.filter((x) => x.cid !== cid)
+})
 
 /** a hold on one still on its way (or ⋯ beside it, with a mouse): Remove takes it out, should it never come back. It
  *  opens above it: what is on its way is always at the end of the chat, over the box */
@@ -630,7 +659,7 @@ function Album({ msgs, chat, from, out, last: lastPart }: { msgs: Message[]; cha
         chat={chat.key} you={you} width={width}
         open={(i) => setUI({ photo: out ? { chat: chat.key, file: msgs[i].file } : { chat: chat.key, msg: msgs[i].id } })}
       />
-      {out?.state === 'failed' && lastPart ? <NotSent out={out} className="self-end" /> : null}
+      {out?.state === 'failed' && lastPart ? <NotSent out={out} className="self-end" /> : out?.state === 'sending' && lastPart ? <Sending out={out} className="self-end" /> : null}
     </div>
   )
 }
@@ -1140,14 +1169,24 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
   const outbox = useStore((s) => s.outbox)
   type Item = { at: number; msg: Message; out?: Outgoing; last?: boolean } | { at: number; album: Message[]; out?: Outgoing; last?: boolean }
   // held messages aren't in the conversation yet: they are rows over the box (Held), as the window's
-  const items: Item[] = chat.messages.filter((m) => !isHeld(m)).map((msg) => ({ at: msg.at ?? 0, msg }))
-  items.sort((a, b) => a.at - b.at)
-  // what you just sent comes last, in one list with the rest: when it comes back it keeps its place in the list, so
-  // nothing is drawn again (a picture doesn't load twice)
-  for (const out of outbox) {
-    if (out.chat !== chat.key || heldOut(out)) continue
+  const shown: Item[] = chat.messages.filter((m) => !isHeld(m)).map((msg) => ({ at: msg.at ?? 0, msg }))
+  shown.sort((a, b) => a.at - b.at)
+  // what you just sent, in one list with the rest: right after what was last when you sent it, so newer messages come
+  // under it and the chat keeps the order things were sent in (SHEP-93: one stuck at the bottom under everything
+  // newer). When it comes back it keeps its place in the list, so nothing is drawn again (a picture doesn't load twice)
+  const mine = outbox.filter((o) => o.chat === chat.key && !heldOut(o))
+  const places = placesOf(shown.map((it) => ('msg' in it ? { id: it.msg.id, cid: it.msg.cid } : { id: '' })), mine)
+  const extra = new Map<number, Item[]>()
+  for (const out of mine) {
     const parts = partsOf(out, chat)
-    parts.forEach((msg, i) => items.push({ at: out.at, msg, out, last: i === parts.length - 1 }))
+    const at = places.get(out.cid)!
+    const list = extra.get(at) ?? extra.set(at, []).get(at)!
+    parts.forEach((msg, i) => list.push({ at: out.at, msg, out, last: i === parts.length - 1 }))
+  }
+  const items: Item[] = []
+  for (let i = 0; i <= shown.length; i++) {
+    items.push(...(extra.get(i) ?? []))
+    if (i < shown.length) items.push(shown[i])
   }
   // as the window's rows: images sent with words go under them (an album of their own when they came alone); the
   // quiet lines (tools, a brief or another agent's message, task news, a publish on its way) sit tight together, one
@@ -1166,10 +1205,13 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
     }
     const words = last && 'msg' in last && last.msg.text && !last.msg.card ? last.msg : null
     const together = (m: Message) => !!words && words.who === m.who && words.at === m.at && words.cid === m.cid
-    if ('msg' in it && it.msg.images && together(it.msg)) { imgLines.set(words!, it.msg.images); continue }
+    // what goes under the words takes over their row's end: one on its way says how it goes under the last of it
+    // (SHEP-93: words with pictures that didn't go showed no Retry)
+    const under = () => { if (it.last) (last as Extract<Item, { msg: Message }>).last = true }
+    if ('msg' in it && it.msg.images && together(it.msg)) { imgLines.set(words!, it.msg.images); under(); continue }
     if (!('msg' in it) || !isPicture(it.msg)) { rows.push(it); continue }
     const m = it.msg
-    if (together(m)) { pics.set(words!, [...(pics.get(words!) ?? []), m]); continue }
+    if (together(m)) { pics.set(words!, [...(pics.get(words!) ?? []), m]); under(); continue }
     const prev = last && 'album' in last ? last.album.at(-1)! : null
     if (prev && prev.who === m.who && !m.newSession && !!prev.waiting === !!m.waiting && m.at === prev.at && prev.cid === m.cid) {
       const album = last as Extract<Item, { album: Message[] }>
@@ -1693,26 +1735,65 @@ export function SecretCard({ ask, chat, source }: { ask: SecretAsk; chat: Chat; 
 
 /* ---------- sending: it shows at once, and settles once it is in ---------- */
 
-async function deliver(o: Outgoing) {
-  const patch = (p: (x: Outgoing) => Partial<Outgoing>) => setOutbox((all) => all.map((x) => (x.cid === o.cid ? { ...x, ...p(x) } : x)))
-  // a reload now would cut it off on its way
-  const release = holdReload()
+/** being sent from this page now, by cid: each once */
+const delivering = new Set<string>()
+/** by cid: done once its send is over (in or failed), for the ones sent after it in its chat */
+const gates = new Map<string, Promise<void>>()
+
+/** send one on its way: its files up first (each once, again by itself when the network cut it off), then the message,
+ *  asked again with the same id while the network is the trouble (the server never sends it twice). It is "sent" only
+ *  once the server says the agent has it; else it fails, its words and files kept for Retry (SHEP-93) */
+async function deliver(cid: string) {
+  if (delivering.has(cid)) return
+  const first = getState().outbox.find((x) => x.cid === cid)
+  if (!first || first.state !== 'sending') return
+  delivering.add(cid)
+  // the agent gets them in the order they were sent: this one's message waits for the ones sent before it in this
+  // chat (words sent while earlier pictures still go up never overtake them); their files go up meanwhile
+  let opened!: () => void
+  const mine = new Promise<void>((r) => (opened = r))
+  const before = getState().outbox.filter((x) => x.chat === first.chat && x.cid !== cid && x.state === 'sending' && x.at <= first.at).map((x) => gates.get(x.cid)).filter(Boolean)
+  gates.set(cid, mine)
+  const patch = (p: (x: Outgoing) => Partial<Outgoing>) => setOutbox((all) => all.map((x) => (x.cid === cid && x.state === 'sending' ? { ...x, ...p(x) } : x)))
+  const since = first.at
+  const onWait = (offline: boolean) => patch((x) => (!!x.offline === offline ? {} : { offline: offline || undefined }))
+  const standIns = first.files.filter((f) => isStandIn(f.path)).map((f) => f.path)
   try {
-    // a file still uploading goes once it is up
-    const files = o.files.some((f) => uploads.has(f.path)) ? await uploaded(o.files) : o.files
-    if (files !== o.files) patch(() => ({ files }))
-    const r = (await act({ type: 'send', chat: o.chat, text: o.text, attachments: files.map((f) => f.path), cid: o.cid, reply: o.reply?.id, human: true, ...(o.hold ? { hold: true } : {}) } as never, AbortSignal.timeout(SEND_TIMEOUT))) as {
-      waiting?: boolean
-      waitsFor?: Outgoing['waitsFor']
-      at?: number
+    let up = 0
+    if (standIns.length) patch(() => ({ up: 0 }))
+    const files = await Promise.all(first.files.map(async (f) => {
+      if (!isStandIn(f.path)) return f
+      const path = await startUpload(first.chat, f.path, since)
+      up++
+      patch(() => ({ up }))
+      return { ...f, path }
+    }))
+    await Promise.all(before)
+    const o = getState().outbox.find((x) => x.cid === cid)
+    if (!o || o.state !== 'sending') return
+    if (standIns.length) patch(() => ({ files, up: undefined }))
+    // a reload now would cut it off on its way
+    const release = holdReload()
+    let r: { waiting?: boolean; waitsFor?: Outgoing['waitsFor']; at?: number }
+    try {
+      r = (await retrying(
+        () => act({ type: 'send', chat: o.chat, text: o.text, attachments: files.map((f) => f.path), cid, reply: o.reply?.id, human: true, ...(o.hold ? { hold: true } : {}) } as never, AbortSignal.timeout(SEND_TIMEOUT)),
+        since,
+        { onWait },
+      )) as typeof r
+    } finally {
+      release()
     }
     // the chat may already show it waiting (queued) or gone in: that knows better than the answer
     const serverAt = typeof r?.at === 'number' ? r.at : undefined
-    patch((x) => ({ state: 'sent', error: undefined, serverAt, ...(x.queued || x.wentAt ? {} : { waiting: r?.waiting || undefined, waitsFor: (r?.waiting && r.waitsFor) || undefined }) }))
+    patch((x) => ({ state: 'sent', error: undefined, offline: undefined, up: undefined, serverAt, ...(x.queued || x.wentAt ? {} : { waiting: r?.waiting || undefined, waitsFor: (r?.waiting && r.waitsFor) || undefined }) }))
+    void dropFiles(standIns)
   } catch (e) {
-    patch((x) => (x.state === 'sending' ? { state: 'failed', error: reasonOf(e) } : {}))
+    patch(() => ({ state: 'failed', error: reasonOf(e), offline: undefined, up: undefined }))
   } finally {
-    release()
+    delivering.delete(cid)
+    gates.delete(cid)
+    opened()
   }
 }
 
@@ -1725,9 +1806,9 @@ function retry(cid: string) {
   const s = getState()
   const o = s.outbox.find((x) => x.cid === cid)
   if (!o) return
-  const again: Outgoing = { ...o, cid: o.lost ? newCid() : o.cid, state: 'sending', error: undefined, lost: undefined, waiting: undefined, waitsFor: undefined, queued: undefined, serverAt: undefined, wentAt: undefined, busyAt: undefined, pastAt: undefined, at: Date.now(), prior: priorOf(s.chats[o.chat]) }
+  const again: Outgoing = { ...o, cid: o.lost ? newCid() : o.cid, state: 'sending', error: undefined, lost: undefined, waiting: undefined, waitsFor: undefined, queued: undefined, serverAt: undefined, wentAt: undefined, busyAt: undefined, pastAt: undefined, offline: undefined, up: undefined, at: Date.now(), prior: priorOf(s.chats[o.chat]), after: anchorOf(s.chats[o.chat]), before: s.outbox.filter((x) => x.chat === o.chat && x.cid !== cid).map((x) => x.cid) }
   setOutbox((all) => all.map((x) => (x.cid === cid ? again : x)))
-  deliver(again)
+  void deliver(again.cid)
 }
 
 /* ---------- composer ---------- */
@@ -1774,7 +1855,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
   const plus = useUI((u) => u.plus === chatKey)
   const ref = useRef<HTMLTextAreaElement>(null)
   const live = useUI((u) => registry.composerLive.find((l) => l.when(u, chatKey)))
-  const Idle = registry.composerIdle
+  const sendable = !!(text.trim() || files.length)
   const Mic = registry.composerMic
   useEffect(() => {
     if (focused && device === 'desktop') ref.current?.focus()
@@ -1888,10 +1969,12 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
       at: Date.now(),
       state: 'sending',
       prior: priorOf(getState().chats[chatKey]),
+      after: anchorOf(getState().chats[chatKey]),
+      before: getState().outbox.filter((o) => o.chat === chatKey).map((o) => o.cid),
       ...(hold ? { hold: true } : {}),
     }
     setOutbox((all) => [...all, out])
-    deliver(out)
+    void deliver(out.cid)
   }
   return (
     // what goes with the box (send, +, a file's x, its menu) leaves the box the focus: a phone's keyboard stays up. What
@@ -1901,7 +1984,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
       <SlashList chatKey={chatKey} text={text} pick={(name) => { setText(`/${name} `); ref.current?.focus() }} />
       <MentionList items={mentions} sel={msel} from={reach?.from ?? null} pick={takeMention} />
       {/* the window's box: the words across its full width, then a row in it of attach on the left and on the right
-          what the agent runs on (the model menu), the mic and Send (or Call); nothing under it. Its corners are half a
+          what the agent runs on (the model menu), the mic and Send; nothing under it. Its corners are half a
           round button and the padding, so the buttons sit in the bottom ones with the same curve round them */}
       <div data-composer className="relative round-box bg-bg p-1.5 shadow-box has-[textarea:focus]:shadow-box-focus">
         {/* what it replies to: one quiet line inside the box, over the words (like WhatsApp and Telegram) */}
@@ -2007,28 +2090,27 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
               <div className="flex-1" />
               <AgentLineKept chatKey={chatKey} cli={cli} />
               {Mic ? <MicKept chatKey={chatKey} /> : null}
-              {text.trim() || files.length || !Idle ? (
-                <button
+              {/* always Send (SHEP-108): quiet while there is nothing to send, filled once there is. A call is with
+                  Shepherdr itself (the sidebar's top, a phone's bottom bar), never from a chat's box */}
+              <button
                   type="button"
-                  aria-label="Send"
-                  // Shepherdr 3 on a phone: a long press on Send holds it until the agent is free (the phone's Ctrl+Enter)
-                  onPointerDown={() => { held.current = false; holdTimer.current = setTimeout(() => { held.current = true; buzz(); send(true) }, 500) }}
-                  onPointerUp={() => clearTimeout(holdTimer.current)}
-                  onPointerLeave={() => clearTimeout(holdTimer.current)}
-                  onContextMenu={(e) => e.preventDefault()}
-                  onClick={() => {
-                    if (held.current) return
-                    // a light tap from the phone as it goes, like ChatGPT's
-                    if (matchMedia('(pointer: coarse)').matches) buzz()
-                    send()
-                  }}
-                  className="press-dim relative grid size-[34px] shrink-0 place-items-center rounded-full bg-fg text-bg after:absolute after:-inset-1.5 phone:size-11"
-                >
-                  <UpIcon className={ic} />
-                </button>
-              ) : (
-                <Idle chatKey={chatKey} />
-              )}
+                aria-label="Send"
+                disabled={!sendable}
+                // Shepherdr 3 on a phone: a long press on Send holds it until the agent is free (the phone's Ctrl+Enter)
+                onPointerDown={() => { held.current = false; holdTimer.current = setTimeout(() => { held.current = true; buzz(); send(true) }, 500) }}
+                onPointerUp={() => clearTimeout(holdTimer.current)}
+                onPointerLeave={() => clearTimeout(holdTimer.current)}
+                onContextMenu={(e) => e.preventDefault()}
+                onClick={() => {
+                  if (held.current) return
+                  // a light tap from the phone as it goes, like ChatGPT's
+                  if (matchMedia('(pointer: coarse)').matches) buzz()
+                  send()
+                }}
+                className="press-dim relative grid size-[34px] shrink-0 place-items-center rounded-full bg-fg text-bg after:absolute after:-inset-1.5 disabled:bg-bubble disabled:text-fg3 phone:size-11"
+              >
+                <UpIcon className={ic} />
+              </button>
             </div>
           </>
         )}
@@ -2203,47 +2285,72 @@ function Pending({ f, chatKey, onRemove }: { f: { name: string; path?: string };
   )
 }
 
-/** a file still uploading, by the stand-in path it waits in the box with: its path once uploaded (none: it failed) */
-const uploads = new Map<string, Promise<string | undefined>>()
+/** a file picked waits in the box (and in a message on its way) by a stand-in path until it is uploaded */
+const isStandIn = (path: string) => path.startsWith('upload:')
+/** a file's upload, by its stand-in path: its path on Shepherdr's machine once up */
+const uploads = new Map<string, Promise<string>>()
+/** the files picked on this page, by stand-in path (the device keeps them too, for after a reload: keepFile) */
+const picked = new Map<string, File>()
 
-/** the paths a message's files went up to, once each has (Send can come before an upload is done) */
-async function uploaded(files: Outgoing['files']) {
-  const paths = await Promise.all(files.map((f) => uploads.get(f.path) ?? f.path))
-  if (paths.some((p) => !p)) throw new Error("A file didn't upload.")
-  return files.map((f, i) => ({ ...f, path: paths[i]! }))
+/** a picked file's upload, once: again by itself while the network is the trouble (from since); one that failed for
+ *  good starts over when asked again (Send, Retry) */
+function startUpload(chatKey: string, id: string, since = Date.now()): Promise<string> {
+  const was = uploads.get(id)
+  if (was) return was
+  const up = (async () => {
+    const f = picked.get(id) ?? (await keptFile(id))
+    if (!f) throw new Error('A picture was lost when the page reloaded: take it out and add it again.')
+    picked.set(id, f)
+    const release = holdReload()
+    try {
+      // the message it goes with says it waits for the network
+      const onWait = (w: boolean) => setOutbox((all) => (all.some((o) => o.state === 'sending' && !!o.offline !== w && o.files.some((x) => x.path === id)) ? all.map((o) => (o.state === 'sending' && o.files.some((x) => x.path === id) ? { ...o, offline: w || undefined } : o)) : all))
+      return await retrying(() => postFile(chatKey, f), since, { onWait })
+    } finally {
+      release()
+    }
+  })()
+  uploads.set(id, up)
+  up.then(
+    (path) => {
+      const url = previews.get(id)
+      if (url) previews.set(baseName(path), url)
+    },
+    () => uploads.delete(id),
+  )
+  return up
 }
 
 /** files from +, a paste or a drop: each shows in the message box at once (a picture as itself, from the device) while
- *  it uploads to Shepherdr, and waits there until it is sent */
+ *  it uploads to Shepherdr, and waits there until it is sent. One whose upload fails keeps its place: Send tries again */
 async function attach(chatKey: string, list: File[]) {
   if (!list.length) return
-  const release = holdReload()
   const added = list.map((f) => {
     const id = `upload:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-    const url = isImage(f.name) ? URL.createObjectURL(f) : null
-    if (url) previews.set(id, url)
-    const up = fetch('api/upload', { method: 'POST', body: form(chatKey, f), headers: { 'x-shepherdr': '1' } })
-      .then((x) => x.json())
-      .then((r) => r?.path as string | undefined, () => undefined)
-      .then((path) => {
-        if (path && url) previews.set(baseName(path), url)
-        // in the box still: its real path (none: it shows as a file that didn't go up)
-        setUI((u) => ({ files: { ...u.files, [chatKey]: (u.files[chatKey] ?? []).map((x) => (x.path === id ? { name: x.name, path } : x)) } }))
-        return path
-      })
-    uploads.set(id, up)
+    if (isImage(f.name)) previews.set(id, URL.createObjectURL(f))
+    picked.set(id, f)
+    void keepFile(id, f)
     return { name: f.name, path: id }
   })
   setUI((u) => ({ plus: null, files: { ...u.files, [chatKey]: [...(u.files[chatKey] ?? []), ...added] } }))
-  await Promise.all(added.map((a) => uploads.get(a.path))).finally(release)
+  await Promise.allSettled(added.map((a) => startUpload(chatKey, a.path)))
 }
 
-function form(chatKey: string, f: File) {
-  const body = new FormData()
-  body.append('chat', chatKey)
-  body.append('file', f)
-  return body
+/** a page opened again: what was still sending goes on (its pictures from the device), and the device lets go of
+ *  files kept over a day */
+async function resume() {
+  void sweepFiles()
+  for (const o of getState().outbox) {
+    for (const f of o.files) {
+      if (!isStandIn(f.path) || previews.has(f.path) || !isImage(f.name)) continue
+      const kept = await keptFile(f.path)
+      if (kept) previews.set(f.path, URL.createObjectURL(kept))
+    }
+    if (o.state === 'sending') void deliver(o.cid)
+  }
 }
+if (typeof window !== 'undefined') setTimeout(() => void resume(), 0)
+
 
 /** the + menu, and the device's file pickers it opens: they stay once the menu has closed, to hear what was picked */
 function PlusMenu({ chatKey }: { chatKey: string }) {

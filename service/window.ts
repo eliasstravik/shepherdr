@@ -10,8 +10,7 @@ import type { SettingRow, SettingSection } from "../web/shared/types.ts";
 // the switches' words and an add-on's line: core/settings.js, the window's own (mods/shepherdr-settings/layout.js)
 import * as C from "../core/settings.js";
 
-const { SWITCHES: CORE_SWITCHES, ADDONS, SECTIONS, addonAbout } = C as any;
-const FILE = process.env.HERDR_TASK_SETTINGS || join(HOME, ".herdr", "shepherdr.json");
+const { SWITCHES: CORE_SWITCHES, ADDONS, SECTIONS, INSIGHTS, addonAbout } = C as any;
 // the repo's lib/addons.json, installed beside the service
 const MANIFEST = join(import.meta.dir, "..", "lib", "addons.json");
 
@@ -46,6 +45,8 @@ export function windowSection(value: (key: string) => unknown): SettingSection {
     // one that others need, or that needs one that's off: its switch shows, greyed, and its line says which
     rows.push({ label: a.title, key: `addon.${a.id}`, value: now ? "on" : "off", options: ["on", "off"], hint: addonAbout(a.about, now, names(stop)),
       group: ADDONS, ...(stop.length ? { disabled: true } : {}) });
+    // Usage insights: its Delete, right under its switch (service/usage.ts deleteAll)
+    if (a.id === "insights") rows.push({ label: INSIGHTS.title, key: "insights.delete", value: "", button: INSIGHTS.button, hint: INSIGHTS.about, group: ADDONS });
   }
   return { name: SECTIONS.find((s: any) => s.id === "window").title, global: true, rows };
 }

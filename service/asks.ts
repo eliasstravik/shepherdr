@@ -6,12 +6,13 @@
 // herdr-core's link.
 import { watch, readdirSync, readFileSync, writeFileSync, renameSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { DATA, HOME } from "./paths.ts";
+import { DATA, appHome, writable } from "./paths.ts";
 import * as A from "../core/asks.js";
 import type { Hub } from "./hub.ts";
+import { note as noteUsage } from "./usage.ts";
 
 const { words, allow, deny, answers, howAnswered, release, chatAbout, dismiss } = A as any;
-const DIR = join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "data", "chat-asks");
+const dir = () => join(appHome(), "data", "chat-asks");
 const ID = /^[\w.-]+$/;
 const MACHINE = /^[\w.-]+$/;
 // On another machine (its folder by its own home): each request still waiting, one line each ("req", its id, its JSON),
@@ -51,15 +52,17 @@ export class Asks {
   private ended(a: Ask, known?: string) {
     if (this.ends.some((e) => e.id === a.id)) return;
     let how = known ?? "";
-    if (!a.machine) try { how = readFileSync(join(DIR, "end", a.id), "utf8").trim(); } catch {}
+    if (!a.machine) try { how = readFileSync(join(dir(), "end", a.id), "utf8").trim(); } catch {}
     this.ends = [...this.ends, { id: a.id, terminal: a.terminal, title: a.words?.title ?? "", how: how || "No longer waiting", at: askAt(a.id), kind: a.words?.kind ?? "" }].slice(-200);
+    // Usage insights (service/usage.ts): how long it waited, and whether it was answered in the agent's terminal
+    noteUsage("ask", { type: a.words?.kind || undefined, ms: Math.max(0, Date.now() - askAt(a.id) + 999), ...(/terminal/i.test(how) ? { from: "terminal" } : {}) });
     try { writeFileSync(`${ENDS}.tmp`, JSON.stringify(this.ends)); renameSync(`${ENDS}.tmp`, ENDS); } catch {}
   }
 
   on(fn: () => void) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
 
   start() {
-    const req = join(DIR, "req");
+    const req = join(dir(), "req");
     if (existsSync(req)) watch(req, () => this.read());
     setInterval(() => this.read(), 4000);
     this.read();
@@ -125,15 +128,15 @@ export class Asks {
     // another machine's are poll()'s
     const next = new Map<string, Ask>([...this.open].filter(([, a]) => a.machine));
     let names: string[] = [];
-    try { names = readdirSync(join(DIR, "req")).filter((n) => n.endsWith(".json")); } catch {}
+    try { names = readdirSync(join(dir(), "req")).filter((n) => n.endsWith(".json")); } catch {}
     for (const n of names) {
       const id = n.slice(0, -5);
-      if (!ID.test(id) || existsSync(join(DIR, "ans", n))) continue;
+      if (!ID.test(id) || existsSync(join(dir(), "ans", n))) continue;
       const old = this.open.get(id);
       if (old) { next.set(id, old); continue; }
       try {
-        const req = JSON.parse(readFileSync(join(DIR, "req", n), "utf8"));
-        next.set(id, { id, terminal: id.split(".")[0], at: statSync(join(DIR, "req", n)).mtimeMs, req, words: words(req) });
+        const req = JSON.parse(readFileSync(join(dir(), "req", n), "utf8"));
+        next.set(id, { id, terminal: id.split(".")[0], at: statSync(join(dir(), "req", n)).mtimeMs, req, words: words(req) });
       } catch {}
     }
     const changed = next.size !== this.open.size || [...next.keys()].some((k) => !this.open.has(k));
@@ -141,7 +144,7 @@ export class Asks {
     for (const [id, a] of this.open) if (!next.has(id)) this.ended(a);
     // the hook writes how a moment after the request goes: a line still saying "No longer waiting" learns it
     for (const e of this.ends) if (e.how === "No longer waiting" && Date.now() - e.at < 120_000) {
-      try { const how = readFileSync(join(DIR, "end", e.id), "utf8").trim(); if (how) e.how = how; } catch {}
+      try { const how = readFileSync(join(dir(), "end", e.id), "utf8").trim(); if (how) e.how = how; } catch {}
     }
     this.open = next;
     if (changed) for (const fn of this.listeners) fn();
@@ -188,8 +191,8 @@ export class Asks {
       for (const fn of this.listeners) fn();
       return;
     }
-    if (how) writeFileSync(join(DIR, "end", id), `${how}\n`);
-    const file = join(DIR, "ans", `${id}.json`);
+    if (how) writeFileSync(writable(join(dir(), "end", id)), `${how}\n`);
+    const file = writable(join(dir(), "ans", `${id}.json`));
     writeFileSync(`${file}.tmp`, out);
     renameSync(`${file}.tmp`, file);
     this.open.delete(id);

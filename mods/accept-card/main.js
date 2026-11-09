@@ -14,6 +14,7 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { openViewer } from "./artview.js";
 import { appHome, closeOverlay, exec, notify, openOverlay, props, shared, setShared, theme } from "herdr";
+import { note } from "./usage.js";
 import { dialogFooter, green, red, amber, H, RADIUS, TEXT } from "./ui.js";
 // The card's words, the summary cut and the details as bullets: core/accept.js, shared with the web app's card.
 import { ACCEPT, words, readable, commitsLine, filesLine, moreLine, proofTitle, whereNow } from "./core/accept.js";
@@ -149,6 +150,7 @@ export default class AcceptCard extends View {
   accept(cx) {
     if (this.busy || !this.t || this.t.state !== "ready") return;
     const p = props() ?? {};
+    note("act", { type: "accept", task: p.ref });
     this.busy = true;
     this.error = null;
     // The task's row in the Tasks list says "Accepting…" meanwhile (shared "tasks.accepting").
@@ -182,12 +184,13 @@ export default class AcceptCard extends View {
 
   // The proof in a modal over this card (artview.js: its mod is made in this app first, pulled
   // from the task's machine); closing it comes back here as it was.
-  openProof(cx) {
-    const proof = this.t?.evidence?.proof, machine = props()?.machine ?? null;
-    if (!proof || this.opening) return;
-    this.opening = true;
+  // Its other artifacts (SHEP-96: a research task's report) open the same way.
+  openProof(cx, art = this.t?.evidence?.proof) {
+    const machine = props()?.machine ?? null;
+    if (!art || this.opening) return;
+    this.opening = art.id;
     cx.spawn(async (cx) => {
-      await openViewer({ id: proof.id, title: proof.title, machine, modal: true });
+      await openViewer({ id: art.id, title: art.title, machine, modal: true });
       this.opening = false;
       cx.notify();
     });
@@ -236,11 +239,20 @@ export default class AcceptCard extends View {
   // Proof: a row that looks pressable, opening the artifact in a modal.
   proof(t, e) {
     if (!e.proof) return div().text_color(t.muted).child(ACCEPT.noProof);
-    return h_flex().id("open-proof").w_full().h(32).px(10).gap(8).items_center().rounded(RADIUS.card)
+    return this.artRow(t, e.proof, "open-proof");
+  }
+
+  // Artifacts: its others (SHEP-96), one row each, as its proof's.
+  artifacts(t, e) {
+    return v_flex().w_full().gap(6).children(e.artifacts.map((a) => this.artRow(t, a, `open-art-${a.id}`)));
+  }
+
+  artRow(t, a, id) {
+    return h_flex().id(id).w_full().h(32).px(10).gap(8).items_center().rounded(RADIUS.card)
       .border_1().border_color(t.border).bg(t.surface).cursor_pointer().hover((s) => s.bg(t.hover))
-      .on_click((_e, cx) => { cx.stop_propagation(); this.openProof(cx); cx.notify(); })
+      .on_click((_e, cx) => { cx.stop_propagation(); this.openProof(cx, a); cx.notify(); })
       .child(div().flex_1().min_w(0).truncate().text_color(t.foreground)
-        .child(this.opening ? ACCEPT.opening : proofTitle(e.proof.title)))
+        .child(this.opening === a.id ? ACCEPT.opening : proofTitle(a.title)))
       .child(div().flex_none().text_size(TEXT.label).text_color(t.muted).child(ACCEPT.open))
       .child(svg("mods/chat-image/external-link.svg").size(13).flex_none().text_color(t.muted));
   }
@@ -290,6 +302,7 @@ export default class AcceptCard extends View {
         .child(this.section(t, ACCEPT.changes, this.changes(t, e)))
         .child(this.section(t, ACCEPT.checks, this.checks(t, e)))
         .child(this.section(t, ACCEPT.proof, this.proof(t, e)))
+        .when(Boolean(e.artifacts?.length), (el) => el.child(this.section(t, ACCEPT.artifacts, this.artifacts(t, e))))
         .when(Boolean(w.details), (el) => el.child(this.detailsSection(t, w.details)));
     return v_flex().id("accept-card").track_focus(this.handle)
       .on_key_down((ev, cx) => {
