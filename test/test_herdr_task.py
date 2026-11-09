@@ -4400,3 +4400,13 @@ class TaskFlow(unittest.TestCase):
         low = launch.LOW.replace("/proc/self/oom_score_adj", os.path.join(self.root, "none", "oom_score_adj"))
         p = subprocess.run(["sh", "-c", low, "herdr-low", "true"], capture_output=True, text=True)
         self.assertEqual((p.returncode, p.stderr), (0, ""))
+
+    def test_an_agent_under_fish_is_running(self):
+        """#780: under fish the foreground stays `fish -ic "<agent>; exec fish -i"` while its agent works."""
+        from herdr_task import agents
+        fg = lambda *argv: {"address": "t1", "foreground": {"name": "fish", "argv": list(argv), "pid": 9}}
+        self.assertTrue(agents.agent_running(fg("/usr/bin/fish", "-ic", "claude --model x; exec fish -i")))
+        self.assertTrue(agents.agent_running(fg("fish", "-l", "--command", "claude; exec fish -i")))
+        self.assertFalse(agents.agent_running(fg("fish", "-i")))  # exec'ed its own shell: the agent exited
+        self.assertFalse(agents.agent_running(fg("bash")))
+        self.assertTrue(agents.agent_running({"foreground": {"name": "claude", "argv": ["claude"]}}))

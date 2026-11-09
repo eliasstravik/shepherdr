@@ -54,10 +54,27 @@ def detail(k):
 
 
 def agent_running(k):
-    fg = (k.get("foreground") or {}).get("name") or ""
-    if fg:
-        return os.path.basename(fg) not in SHELLS
+    fg = k.get("foreground") or {}
+    if fg.get("name"):
+        if os.path.basename(fg["name"]) not in SHELLS:
+            return True
+        # fish keeps the agent its child, in its own process group (#780): the terminal's foreground
+        # stays the shell running its launch command (fish -ic "claude …; exec fish -i") the whole
+        # time. Only once it exec'ed its plain interactive shell has the agent exited.
+        return runs_command(fg.get("argv"))
     return bool(k.get("agent")) and k.get("agent") not in SHELLS
+
+
+def runs_command(argv):
+    """A shell's argv that runs a command (-c, -ic, -lic, --command), not a plain shell."""
+    for a in (argv or [])[1:]:
+        if a == "--command" or a.startswith("--command="):
+            return True
+        if not a.startswith("-") or a.startswith("--"):
+            break
+        if "c" in a[1:]:
+            return True
+    return False
 
 
 def status_of(task, live):
