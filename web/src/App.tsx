@@ -158,7 +158,7 @@ export function Brand() {
   const snap = useSnap()!
   return (
     <div className="flex items-center gap-1 px-3.5 pt-3 pb-0.5 text-[0.9375rem] font-semibold desktop:pr-2.5 phone:px-5 phone:pt-3 phone:pb-1 phone:text-[1.125rem]">
-      <CrookIcon className="mr-1 size-6" />
+      <CrookIcon className="mr-0.5 size-6" />
       <span className="min-w-0 flex-1 truncate">{snap.name}</span>
       {registry.sideHead.map((View, i) => <View key={i} />)}
       <SearchButton />
