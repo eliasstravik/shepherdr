@@ -64,13 +64,12 @@ checks the window's askers say the same).
 
 | Element | Window (file:line, exact words/control) | Web (file:line) | State |
 |---|---|---|---|
-| The bar | full width under the work area, chrome color, a hairline above (`mods/workspace-status-chat/main.js:31`) | `StatusBar` under everything, a hairline above (`web/src/status.tsx:35`, `App.tsx:112`) | ✓ |
-| Machine | monitor (this computer) or server icon + the machine as the sidebar names it (`main.js:32`) | `MonitorIcon`/`ServerIcon` + `machineName` (`status.tsx:37`) | ✓ |
-| Branch | branch icon + the shown space's branch, when it has one (`main.js:33`) | `status.tsx:40` | ✓ |
-| Needs you | the red count badge (everywhere's) + `Needs you`, when something needs you (`main.js:34`) | the red badge + `Needs you`, every need on every machine (`status.tsx:46`) | ✓ |
+| The bar | full width under the work area, chrome color, a hairline above (`mods/workspace-status-chat/main.js:31`) | — | ◇ removed from the web (SHEP-174): the panes and sidebar run to the bottom edge |
+| Machine | monitor (this computer) or server icon + the machine as the sidebar names it (`main.js:32`) | the machine heads its spaces in the sidebar | ◇ |
+| Branch | branch icon + the shown space's branch, when it has one (`main.js:33`) | on the space's row (`gitTail`), unless it is main, master or the space's own name | ◇ |
+| Needs you | the red count badge (everywhere's) + `Needs you`, when something needs you (`main.js:34`) | the red count on each space's row and on the Tasks tab, the cards in Tasks' Needs you | ◇ |
 | No agent count | — | — | ✓ |
 | `Ctrl+Shift+P  Commands` | opens Herdr's command palette (`main.js:36`) | — | ◇ Herdr's palette drives the window; the web has none (Jump is the sidebar's `Search or jump to`) |
-| Phone | — | no bar: the machine heads its spaces, the branch is on the space's row, Needs you on Tasks | ◇ phone: no room |
 
 ## Confirm and prompt dialogs
 
