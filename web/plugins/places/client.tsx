@@ -597,8 +597,8 @@ function Space({ p, snap, sort, at }: { p: Place; snap: Snapshot; sort: Sort; at
   )
 }
 
-/** a row being dragged lifts above the rest */
-const dragged = 'data-dragging:z-10 data-dragging:bg-bg data-dragging:shadow-menu'
+/** a row being dragged lifts above the rest; a machine's rows (its heading, spaces and sections) tint as one block */
+const dragged = 'data-dragging:z-10 not-data-[dragging=machine]:data-dragging:bg-bg not-data-[dragging=machine]:data-dragging:shadow-menu data-[dragging=machine]:bg-hover'
 
 /** a space dragged over another section: its heading lights up, and a line shows where it goes among its spaces */
 const dropHeading = 'data-[drop-over=heading]:bg-sel'
@@ -759,7 +759,7 @@ function SectionHeading({ g, snap, at, className }: { g: Group; snap: Snapshot; 
       data-section={s.id}
       data-machine={at === 'inner' ? `m:${s.machine}` : undefined}
       data-drop={s.id}
-      className={clsx(dropHeading, at === 'inner' && 'pl-5 phone:pl-6', className, menu.open && 'bg-hover')}
+      className={clsx(dropHeading, dragged, at === 'inner' && 'pl-5 phone:pl-6', className, menu.open && 'bg-hover')}
       // only its menu: a finger held on it opens it (sections keep their place)
       onPointerDown={pinned ? undefined : (e) => press(e, { id: s.id, siblings: [s.id], level: 'section', drop: () => {}, hold: menu.hold, lift: menu.close, release: menu.release })}
       onContextMenu={pinned ? undefined : (e) => (dragging() ? e.preventDefault() : menu.press.onContextMenu(e))}
@@ -781,7 +781,7 @@ function SectionHeading({ g, snap, at, className }: { g: Group; snap: Snapshot; 
 
 /** an open section with no spaces in it: where they go, as the window's */
 function EmptySection({ inner, machine }: { inner: boolean; machine?: string }) {
-  return <li data-machine={machine} className={clsx('flex min-h-7 items-center text-[0.75rem] text-fg3 phone:min-h-9 phone:text-[0.8125rem]', inner ? indent.inner : indent.top)}>Drag spaces here</li>
+  return <li data-machine={machine} className={clsx(dragged, 'flex min-h-7 items-center text-[0.75rem] text-fg3 phone:min-h-9 phone:text-[0.8125rem]', inner ? indent.inner : indent.top)}>Drag spaces here</li>
 }
 
 /** the "Spaces" heading over the list, as the window's: its word, and its + (New space or section, on the shown space's
