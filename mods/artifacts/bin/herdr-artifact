@@ -1795,8 +1795,11 @@ def cmd_new(o):
 
 
 def cmd_guide(_o):
-    with open(GUIDE) as f:
-        sys.stdout.write(f.read())
+    try:
+        with open(GUIDE) as f:
+            sys.stdout.write(f.read())
+    except FileNotFoundError:
+        raise Fail(f"The guide isn't installed here ({os.path.realpath(GUIDE)}). Update Shepherdr: `shepherdr update`.")
     return 0
 
 

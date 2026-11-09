@@ -301,6 +301,11 @@ class Install(unittest.TestCase):
             self.assertTrue(os.path.isfile(os.path.join(share, "mods/artifacts/recipe-view.js")))
             p = subprocess.run([sys.executable, os.path.join(share, "mods/tasks/bin/herdr-task"), "--help"], capture_output=True, text=True)
             self.assertEqual(p.returncode, 0, p.stderr)
+            # #735: the artifact guide comes along (agents on the machine serving the web app read it too)
+            p = subprocess.run([sys.executable, os.path.join(share, "mods/artifacts/bin/herdr-artifact"), "guide"], capture_output=True, text=True,
+                               env={**os.environ, "HOME": root})
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertIn("recipe", p.stdout)
             run("uninstall", "--root", root)
             self.assertFalse(os.path.exists(os.path.join(share, "service/main.ts")))
             self.assertFalse(os.path.lexists(os.path.join(root, ".local/bin/herdr-task")))
@@ -324,7 +329,8 @@ class Install(unittest.TestCase):
                 f.write("#!/bin/sh\necho the old one\n")
             run("install", "--web", "--root", root, "--source", src, "--yes", "--force")
             share = os.path.join(root, ".local/share/shepherdr")
-            for f in ("install.sh", "bin/shepherdr", "templates/worker.md", "web/dist/index.html", "service/serve-from.ts", "core/host.js"):
+            for f in ("install.sh", "bin/shepherdr", "templates/worker.md", "web/dist/index.html", "service/serve-from.ts", "core/host.js",
+                      "mods/artifacts/ARTIFACTS.md"):
                 self.assertTrue(os.path.isfile(os.path.join(share, f)), f)
             names = lambda b: sorted(tarfile.open(fileobj=io.BytesIO(b)).getnames())
             self.assertEqual(names(sh.pack(share)), names(sh.pack(ROOT)))
