@@ -49,7 +49,22 @@ export const byId = (id: string): Element | undefined => built.find((e) => e.cal
 export const handler = (e: Element, name: string): ((...a: any[]) => any) | undefined =>
   e.calls.filter(([n]: Call) => n === name).map(([, a]: Call) => a[a.length - 1]).pop();
 
-class Stub { constructor(..._a: unknown[]) {} }
+// A state or handle (InputState, VirtualListScrollHandle …): any method does nothing.
+const inert = (): any => new Proxy({}, { get: (_t, k) => (k === "then" ? undefined : () => undefined) });
+class Stub { constructor(..._a: unknown[]) {} static new(..._a: unknown[]) { return inert(); } }
+
+// A mouse event at `target` as gpui sends it: its handlers for `name` from it up through its parents, until one calls
+// cx.stop_propagation(). Returns the elements whose handler ran.
+export function dispatch(target: Element, name: string, cx: any = {}): Element[] {
+  let stopped = false;
+  const ran: Element[] = [];
+  const ecx = new Proxy(cx, { get: (t, k) => (k === "stop_propagation" ? () => { stopped = true; } : t[k] ?? (() => undefined)) });
+  for (let e: Element | undefined = target; e && !stopped; e = built.find((p) => p.kids.includes(e))) {
+    const f = handler(e, name);
+    if (f) { ran.push(e); f({ position: { x: 0, y: 0 } }, ecx); }
+  }
+  return ran;
+}
 const factory = (kind: string) => Object.assign((..._a: unknown[]) => element(kind), { new: (..._a: unknown[]) => element(kind), vertical: (..._a: unknown[]) => element(kind) });
 
 export function fakeGpuiKit(given: Record<string, unknown> = {}): Record<string, unknown> {
