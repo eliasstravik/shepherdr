@@ -72,7 +72,7 @@ connection it came on). A page from anywhere else can't change anything: writes 
   space named: that space first, then its panel), Tasks filtered by a state and words, and a Settings page by its
   spoken name.
   SHEP-105: a call is with Shepherdr itself, not one chat. It starts from the voice button beside Search in the
-  sidebar's brand row (SHEP-135; on a call it is green and opens the call full screen, and the call card shows at the top of
+  sidebar's brand row (SHEP-135; on a call it steps aside and the call card shows at the top of
   the sidebar: what it is doing, its clock, Full screen, End), or a phone's voice button at the end of the bottom bar (a green Mute and End strip above the bar). A chat's box has no call button
   (SHEP-108): its round button is always Send, grey until there is something to send; where neither card nor bar shows, the strip sits at the top.
   SHEP-118: a web call opens full screen (always dark: Shepherdr, its clock, an orb that breathes while it listens,

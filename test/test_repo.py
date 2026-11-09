@@ -237,7 +237,10 @@ class Repo(unittest.TestCase):
             self.assertNotIn("Talk to Shepherdr", open(J(f)).read(), f)
         voice = open(J("web", "plugins", "voice", "client.tsx")).read()
         self.assertIn("reg.sideHead.push(VoiceButton)", voice)
-        self.assertIn("label={on ? 'Voice call: open full screen' : 'Voice call'}", voice)
+        # on a call the card is the call's one place: the button steps aside, no second icon for it
+        button = voice[voice.index("function VoiceButton("):voice.index("/** SHEP-108: the call's one place")]
+        self.assertIn("if (on) return null", button)
+        self.assertIn('label="Voice call"', button)
         app = open(J("web", "src", "App.tsx")).read()
         brand = app[app.index("export function Brand("):app.index("function SearchButton(")]
         self.assertLess(brand.index("registry.sideHead"), brand.index("<SearchButton />"))

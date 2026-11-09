@@ -352,15 +352,15 @@ function ShepherdrRow() {
   )
 }
 
-/** SHEP-135: the voice call's button in the sidebar's brand row, beside Search and as quiet as it. On a call it is in
- *  the call's green, its wave moving, and opens the call full screen: the card under it has the call's details and
- *  End, so this one shows the call is on and brings it back, never a second hang-up a stray tap could hit */
+/** SHEP-135: the voice call's button in the sidebar's brand row, beside Search and as quiet as it. On a call it steps
+ *  aside: the card under the row is the call's one place (its state, Full screen, End), never a second icon for it.
+ *  Search and the toggle keep their spots (the name takes the room), as the window's brand row does */
 function VoiceButton() {
   const on = useUI((u) => u.call)
+  if (on) return null
   return (
-    <IconButton label={on ? 'Voice call: open full screen' : 'Voice call'} data-voice-button
-      onClick={() => (on ? setUI({ callFull: true }) : toggleCall(null))} className={clsx(on && 'text-ready-fg')}>
-      {on ? <Waves className="h-3.5" /> : <WaveIcon className={ic} />}
+    <IconButton label="Voice call" data-voice-button onClick={() => toggleCall(null)}>
+      <WaveIcon className={ic} />
     </IconButton>
   )
 }

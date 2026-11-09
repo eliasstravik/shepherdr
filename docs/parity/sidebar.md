@@ -18,7 +18,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Element | Window (file:line, exact words/control) | Web (file:line) | State |
 |---|---|---|---|
 | Mark and name | workspace-chrome-shepherdr main.js:51 Herdr's logo, "Herdr" | A:163 the crook, "Shepherdr" (`snap.name`) | ◇ the window's brand row is the Herdr app's own chrome; the web app is Shepherdr's own page, so it names itself |
-| Voice call (SHEP-135) | main.js:58 wave icon button before Search (Voice add-on), asks spaces-chat for a call (shared "voice.startreq"); hidden on a call (the card under the row has it) | A `registry.sideHead`: voice `VoiceButton`, wave icon button before Search, "Voice call"; on a call green, opening the call full screen | ◇ the window has no full-screen call, so on a call its button steps aside |
+| Voice call (SHEP-135) | main.js:58 wave icon button before Search (Voice add-on), asks spaces-chat for a call (shared "voice.startreq"); hidden on a call (the card under the row has it) | A `registry.sideHead`: voice `VoiceButton`, wave icon button before Search, "Voice call"; hidden on a call (the card under the row has it) | ✓ |
 | Search | main.js:59 magnifier icon button, opens Jump (Ctrl+K) | A:174 `SearchButton`: magnifier icon button, opens Jump (Search); title "Search · Ctrl+K" | ✓ (2.1's "Search" box under the brand row removed) |
 | Sidebar toggle | main.js:61 sidebar icon: to the rail and back | A:168 `PlacesToggle` (Frame.tsx): hides or shows the sidebar | ◇ the web hides the column (no rail); on a phone or tablet the sidebar is a drawer |
 | Foot: Settings | main.js:44 cog "Settings" (Herdr's app settings, update dot) | none | ◇ Herdr's own app settings belong to the window app, not to Shepherdr's web page |
