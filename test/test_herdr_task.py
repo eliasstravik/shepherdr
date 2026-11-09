@@ -2132,6 +2132,23 @@ class ReviewerLine(unittest.TestCase):
     def test_an_unknown_check_keeps_codex(self):
         self.assertEqual(self.line(None)["value"]["agent"], "codex")
 
+    def test_codex_skips_its_trust_and_hooks_screens(self):
+        """#798, #753: a reviewer in a task's worktree never stops on "Trust this folder?" (its repo's
+        root and the worktree trusted for this run, as a table: the path has dots) or "Hooks need review"."""
+        import shlex
+        d = os.path.realpath(tempfile.mkdtemp())
+        main, wt = os.path.join(d, "re.po"), os.path.join(d, ".local", "wt")
+        subprocess.run(["git", "init", "-q", main], check=True)
+        subprocess.run(["git", "-C", main, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q",
+                        "--allow-empty", "-m", "x"], check=True)
+        subprocess.run(["git", "-C", main, "worktree", "add", "-q", wt, "-b", "t1"], check=True)
+        cmd = shlex.split(self.settings.reviewer_command("codex", folder=wt))
+        self.assertIn("--disable", cmd)
+        self.assertEqual(cmd[cmd.index("--disable") + 1], "hooks")
+        trust = cmd[cmd.index("-c") + 1]
+        self.assertEqual(trust, "projects={%s={trust_level=\"trusted\"},%s={trust_level=\"trusted\"}}"
+                         % (json.dumps(wt), json.dumps(main)))
+
 
 class Store:
     """Enough of herdr_task.store.Store for the commands, in memory."""
