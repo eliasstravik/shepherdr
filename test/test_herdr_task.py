@@ -739,7 +739,10 @@ class BackToWork(unittest.TestCase):
         t = self.ready()
         self.assertEqual(self.agents.task_status(t, [self.agent({"address": "t1", "status": "working", "turn": 5, "role": "worker"})]),
                          ("working", None, "Working again"))
-        self.assertEqual(self.agents.task_status(t, [self.agent({"address": "t1", "status": "working", "turn": 4, "role": "worker"})])[0], "ready")
+        # still finishing the turn it said ready in: not Working again, but not Ready yet either (SHEP-148)
+        self.assertEqual(self.agents.task_status(t, [self.agent({"address": "t1", "status": "working", "turn": 4, "role": "worker"})]),
+                         ("working", None, None))
+        self.assertEqual(self.agents.task_status(t, [self.agent({"address": "t1", "status": "idle", "turn": 5, "role": "worker"})])[0], "ready")
 
     def test_a_problem_its_agent_is_on_reads_working(self):
         """SHEP-8: the cases core/tasks.test.js checks place() on (core/on-it.cases.json)."""
@@ -1070,12 +1073,17 @@ class OwnBackgroundWork(unittest.TestCase):
                                                                        "content": "Monitor started (task m1, expires in 15m)"}]}})
         self.assertEqual(self.status(), ("working", None, None))
 
-    def test_idle_with_a_question_needs_you_even_with_a_background_shell(self):
+    def test_a_plain_question_needs_you_once_nothing_runs(self):
+        """SHEP-148: a plain question with its own work still running is no ask yet (asking for real
+        is its question tool or a permission: blocked); once nothing runs, it is."""
         self.background(-300_000)
         self.say(-200_000, "Tests run in the background. Should I also update the docs?")
-        self.assertEqual(self.status()[:2], ("needs", "reply"))
-        # asking with its question tool or a permission: blocked, Needs you
+        self.assertEqual(self.status(), ("working", None, None))
+        # asking with its question tool or a permission: blocked, Needs you at once
         self.assertEqual(self.status([dict(self.idle[0], status={"state": "blocked"})])[:2], ("needs", "asks"))
+        # its shell ended: the question is the person's now
+        self.finished(-100_000)
+        self.assertEqual(self.status()[:2], ("needs", "reply"))
 
     def test_idle_with_nothing_running_needs_you(self):
         self.say(-200_000, "Done with the first part.")
@@ -1149,10 +1157,22 @@ class NoFalseNeedsYou(unittest.TestCase):
         self.assertEqual(self.agents.GRACE_MS, 20_000)
         agent = lambda a: {"address": a["address"], "status": {"state": a["status"]}, "turn": a["turn"],
                            "labels": {"herdr.role": a["role"]}, **({"status_ms": a["since"]} if "since" in a else {})}
-        with self.mock.patch.object(self.agents, "now", lambda: g["now"]):
-            for c in g["cases"]:
-                got = self.agents.task_status(dict(c["task"], id=7), [agent(a) for a in c["live"]])
+        with self.mock.patch.object(self.agents, "now", lambda: g["now"]), \
+                self.mock.patch.object(self.agents, "held_ask", lambda address: None):
+            for i, c in enumerate(g["cases"]):
+                task = dict(c["task"], id=7)
+                if "log" in c:
+                    # SHEP-148: an agent's real state, its session log written as Claude Code writes it
+                    log = os.path.join(self.dir, f"case{i}.jsonl")
+                    with open(log, "w") as f:
+                        f.write("".join(json.dumps(d, ensure_ascii=False, separators=(",", ":")) + "\n" for d in c["log"]))
+                    task["agents"] = [dict(a, log=log) for a in task["agents"]]
+                live = [agent(a) for a in c["live"]]
+                got = self.agents.task_status(task, live)
                 self.assertEqual(got[:2], (c["expect"]["status"], c["expect"]["needs"]), c["name"])
+                # core reads task.own_work: what herdr-task's scheduler keeps from that same log
+                if "own_work" in c["task"]:
+                    self.assertEqual(self.agents.own_work(task, live, ready=task["state"] == "ready"), c["task"]["own_work"], c["name"])
 
     def test_a_quiet_agent_needs_you_once_the_grace_is_over(self):
         self.say(-3_000, "Done with the first part.")
@@ -1284,9 +1304,9 @@ class WorkersOwnHelpers(OwnBackgroundWork):
         self.reviewer["status"] = "working"
         self.say(-200_000, "Codex reviews it now.")
         self.assertEqual(self.status(), ("working", None, None))
-        # asking the person still needs them
+        # a plain question while its reviewer still works: no ask yet (SHEP-148), Working
         self.say(-100_000, "Should I also update the docs?")
-        self.assertEqual(self.status()[:2], ("needs", "reply"))
+        self.assertEqual(self.status(), ("working", None, None))
         # the review over: quiet again
         self.lines[:] = self.lines[:1]
         self.say(-100_000, "Done.")

@@ -16,7 +16,8 @@ from .settings import (
     task_settings, worker_argv, worktrees_on,
 )
 from .agents import (
-    agent_running, busy_again, detail, fit, LINE_MAX, live_agents, ready_turns, STATUSES, SUMMARY_MAX, WORKING_AGAIN,
+    agent_log, agent_running, background_jobs, busy_again, detail, fit, LINE_MAX, live_agents, ready_turns, STATUSES, SUMMARY_MAX,
+    WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
 from .github import already_merged, finish, gh, github, merged_here, own_work, pr_adopt, pr_open, pr_pending, pr_problem, pr_view, update_main, watch_main
@@ -409,6 +410,12 @@ def cmd_ready(args):
             say(args, v, f"{s.ref(t)}: {how}; done.")
             return
         msg = finalize(s, t)
+        # Its own background work still running (SHEP-148): the task shows Working until it ends.
+        log = agent_log(t, me) if me else None
+        jobs = background_jobs(log)[0] if log else {}
+        if jobs and t["state"] == "ready":
+            msg += (f" {len(jobs)} background job{'s' if len(jobs) > 1 else ''} of yours still run{'' if len(jobs) > 1 else 's'}: "
+                    "the task shows Working until they end, then Ready. Stop any you don't need (a server, a watcher).")
         if proof:
             msg += f" Proof: {proof['title']}."
         elif asked:
