@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- On a Mac, you can talk over the agent in a window voice call to interrupt it, as on the web: the call uses
+  Apple's echo cancellation, so the microphone stays open while the agent speaks. Other apps' sound dips slightly
+  during a call. If echo cancellation can't run, the call works as before.
+
 ## 3.1.28
 
 Tasks say Ready only when they are truly done, and every machine can open its own artifacts.
