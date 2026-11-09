@@ -116,6 +116,45 @@ class Publish(unittest.TestCase):
         for f in ("recipe-view.js", "recipe.js", "artifact-markup.js", "recipe.json"):
             self.assertTrue(os.stat(os.path.join(mod, f)).st_mode & stat.S_IWUSR, f)
 
+    def test_a_checker_that_does_not_connect_still_publishes_a_recipe(self):
+        """#847: herdr-app's isolated checker doesn't connect (after Herdr restarted): it tries again, then a recipe
+        (already checked against its schema) publishes, saying it wasn't drawn."""
+        os.environ["FAKE_CHECK"] = "noconnect"
+        with mock.patch.object(A, "RETRY_WAIT", 0):
+            out = self.publish(self.recipe())
+        self.assertEqual(out["version"], 1)
+        self.assertIn("did not connect", out["unchecked"])
+        self.assertEqual(len(self.calls()), 2)  # tried twice, then not again for light
+
+    def test_a_custom_panel_still_needs_the_check(self):
+        """#847: a custom panel isn't published undrawn: it says Herdr couldn't check it, and to try again."""
+        os.environ["FAKE_CHECK"] = "noconnect"
+        d = os.path.join(self.dir, "panel")
+        os.makedirs(d)
+        with open(os.path.join(d, "main.js"), "w") as f:
+            f.write('export default class X {}\n')
+        with mock.patch.object(A, "RETRY_WAIT", 0), self.assertRaises(A.Fail) as e:
+            self.publish(d, custom=True)
+        self.assertIn("couldn't draw it", str(e.exception))
+        with A.Store(A.locate(self.folder), write=False) as st:
+            self.assertEqual(st.data["artifacts"], [])
+
+    def test_a_broken_recipe_is_still_refused(self):
+        """A real failure to draw isn't taken for the checker's own trouble."""
+        os.environ["FAKE_CHECK"] = "broken"
+        with self.assertRaises(A.Fail) as e:
+            self.publish(self.recipe())
+        self.assertIn("not iterable", str(e.exception))
+        self.assertEqual(len(self.calls()), 1)
+
+    def test_a_hanging_checker_times_out(self):
+        """#843: a check that never ends (its checker waits forever) gives up, and the recipe publishes."""
+        os.environ["FAKE_CHECK"] = "hang"
+        t = time.time()
+        with mock.patch.object(A, "CHECK_TIMEOUT", 0.5), mock.patch.object(A, "RETRY_WAIT", 0):
+            out = self.publish(self.recipe())
+        self.assertLess(time.time() - t, 10)
+        self.assertIn("didn't finish", out["unchecked"])
 
     def test_waiting_on_another_publish_says_so(self):
         """#843: another publish in the same folder holds its list: this one says what it waits on, then goes on."""
