@@ -4214,3 +4214,47 @@ class TaskFlow(unittest.TestCase):
         # Turned off again meanwhile: still on for this one, as its brief said.
         self.settings({})
         self.assertEqual(settings.review_limits(self.store, self.task), (True, 3))
+
+    def reviewed_task(self):
+        self.settings({"everywhere": {"tasks": {"review_rounds": 3}}})
+        self.task["review_gate"] = True
+        wt = self.task["worktree"]
+        head = self.commit(wt, "work", "a.txt")
+        self.task["reviews"] = [{"round": 1, "result": "report", "at": 2, "head": head}]
+        return wt
+
+    def refusal(self):
+        wt = self.task["worktree"]
+        self.task["head"] = self.git(wt, "rev-parse", "HEAD")
+        return self.commands.review_refusal(self.store, self.task, wt)
+
+    def test_a_clean_merge_from_the_base_needs_no_new_round(self):
+        """#741: merging the base into a reviewed branch, cleanly, keeps it reviewed."""
+        wt = self.reviewed_task()
+        self.assertIsNone(self.refusal())
+        self.commit(self.main, "another task", "b.txt")
+        self.git(wt, "merge", "-q", "--no-edit", "main")
+        self.assertIsNone(self.refusal())
+        self.commit(self.main, "and another", "c.txt")
+        self.git(wt, "merge", "-q", "--no-edit", "main")
+        self.assertIsNone(self.refusal())  # twice over
+        self.commit(wt, "a fix of its own", "a.txt")
+        self.assertIn("isn't reviewed", self.refusal())
+
+    def test_a_merge_with_more_in_it_needs_a_round(self):
+        wt = self.reviewed_task()
+        self.commit(self.main, "another task", "b.txt")
+        self.git(wt, "merge", "-q", "--no-edit", "main")
+        with open(os.path.join(wt, "b.txt"), "a") as f:
+            f.write("slipped in\n")
+        self.git(wt, "commit", "-q", "-a", "--amend", "--no-edit")
+        self.assertIn("isn't reviewed", self.refusal())
+
+    def test_a_merge_with_conflicts_needs_a_round(self):
+        wt = self.reviewed_task()
+        self.commit(self.main, "the same file", "a.txt")
+        subprocess.run(["git", "-C", wt, "merge", "-q", "--no-edit", "main"], capture_output=True)
+        with open(os.path.join(wt, "a.txt"), "w") as f:
+            f.write("resolved\n")
+        self.git(wt, "commit", "-q", "-a", "--no-edit")
+        self.assertIn("isn't reviewed", self.refusal())
