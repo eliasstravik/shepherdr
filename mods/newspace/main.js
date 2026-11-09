@@ -31,6 +31,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Popup } from "gpui-base";
 import { props, theme, home, exec, pickFolder, closeOverlay, openOverlay, shared, setShared, focused, machines } from "herdr";
+import { keepKeys, dropKeys } from "./keyholder.js";
 import { spaces, inRender } from "./live.js";
 import { dialogFooter, button, TEXT, RADIUS } from "./ui.js";
 import { NEWSPACE as K, readShepherdr, shepherdrFor, LOCAL_MACHINE, autoCoordinator, recentFolders, homeOf } from "./coordinator.js";
@@ -61,6 +62,9 @@ const tilde = (p) => N.tilde(p, HOME);
 const base = (p) => N.base(p, HOME);
 const pathOf = (text) => N.pathOf(text, HOME);
 const { scratch, parent, NEW_REPO, SUBFOLDERS, WORDS: W } = N;
+
+// Who holds the keyboard while this dialog is open (keyholder.js).
+const HOLDER = "dialog:newspace";
 
 export default class NewSpace extends View {
   init(_props, cx) {
@@ -93,6 +97,9 @@ export default class NewSpace extends View {
     this.input.on("blur", (_e, cx) => { this.focused = false; cx.notify(); });
     this.input.focus();
     cx.timer.after(300, () => this.input.focus());
+    // The keyboard is this dialog's while it is open: the chat behind it takes nothing back (#752).
+    keepKeys(HOLDER);
+    cx.timer.every(2000, () => { if (!this.closed) keepKeys(HOLDER); });
     this.check(cx);
   }
 
@@ -216,6 +223,8 @@ export default class NewSpace extends View {
   }
 
   close() {
+    this.closed = true;
+    dropKeys(HOLDER);
     closeOverlay(props().overlay);
   }
 
