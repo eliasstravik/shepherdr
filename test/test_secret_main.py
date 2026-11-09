@@ -129,6 +129,7 @@ class Mark(Machine):
         self.assertTrue(os.path.exists(secret.REMOTE_MARK))
 
     def test_install_on_runs_mark_remote_there(self):
+        self.be(M3, None, vault=[])
         calls = []
         with mock.patch.object(secret.subprocess, "run", lambda a, **k: calls.append(list(a)) or types.SimpleNamespace(returncode=0, stdout="", stderr="")), \
                 mock.patch.object(secret, "sync_held", lambda: None), mock.patch("sys.stdout"):
@@ -136,6 +137,19 @@ class Mark(Machine):
         script = calls[-1][-1]
         self.assertIn("herdr-secret\" mark-remote", script)
         self.assertNotIn("secret-remote", script, "no blind mark there")
+
+    def test_install_from_a_machine_without_secrets_marks_nothing_there(self):
+        """#800: two machines with no vault anywhere installing each other's copy were both marked remote."""
+        self.be(M3, None)
+        calls = []
+        with mock.patch.object(secret.subprocess, "run", lambda a, **k: calls.append(list(a)) or types.SimpleNamespace(returncode=0, stdout="", stderr="")), \
+                mock.patch.object(secret, "sync_held", lambda: None), mock.patch("sys.stdout"):
+            secret.cmd_install("mini")
+            self.assertNotIn("mark-remote", calls[-1][-1])
+            # a record names a keeper: marked as before
+            self.be(M3, {"id": VM, "at": 1})
+            secret.cmd_install("mini")
+            self.assertIn("mark-remote", calls[-1][-1])
 
     def test_sync_marks_only_from_the_machine_that_keeps_them(self):
         # the Mac mini (a hub without the vault, marked remote) syncing m3: the bug that marked m3
