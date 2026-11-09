@@ -20,6 +20,8 @@ let web = null, readAt = 0, loaded = false;
 const inApp = (p) => (p.startsWith(`${appHome()}/`) ? p.slice(appHome().length + 1) : p);
 // the list open, the line picked (waiting for Move it), and what the service said to it
 let open = false, picked = null, said = "";
+// the link was copied a moment ago: its button says so
+let copied = false;
 
 // What the service says now, read again at most every 5 s while the page shows (every second while it moves).
 function current(view) {
@@ -89,7 +91,12 @@ export function webSection(view, t) {
     .child(view.row(t, WEB.title, state, div()))
     .when(Boolean(!off && w?.serve?.rows?.length), (el) => el.child(servePicker(view, t, w.serve)))
     .when(Boolean(!off && w?.link && !w?.why), (el) => el
-      .child(view.row(t, WEB.link, w.link, button("web-copy", WEB.copy, { onClick: (_e, cx) => cx.write_to_clipboard(w.link) })))
+      .child(view.row(t, WEB.link, w.link, button("web-copy", copied ? WEB.copied : WEB.copy, { onClick: (_e, cx) => {
+        cx.write_to_clipboard(w.link);
+        copied = true;
+        cx.timer.after(1500, (cx) => { copied = false; cx.notify(); });
+        cx.notify();
+      } })))
       .when(Boolean(w.qr), (el) => el.child(v_flex().py(12).gap(8)
         .child(div().text_size(13).text_color(t.muted).child(WEB.phone))
         .child(h_flex().child(image(inApp(w.qr)).size(168).rounded(8))))));

@@ -16,6 +16,7 @@ import * as STc from '@core/settings.js'
 const ST = STc as any
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type FC, type ReactNode } from 'react'
 import { machineName, type SettingRow, type SettingSection, type Snapshot } from '@shared/types.ts'
+import { useCopy } from './copy.ts'
 import { act, registry, setUI, useSnap, useUI, type UI } from './kernel.ts'
 // Autopilot's schedule words (Custom…, its example), the window's: core/autopilot.js
 import * as APc from '@core/autopilot.js'
@@ -668,7 +669,8 @@ const setExtra = (key: string) => void act({ type: 'setting', key, value: 'on' }
 
 /** Copy, as the window's Web › Link */
 function CopyButton({ text }: { text: string }) {
-  return <Ghost onClick={() => void navigator.clipboard?.writeText(text).catch(() => {})}>{ST.WEB.copy}</Ghost>
+  const { copied, copy } = useCopy()
+  return <Ghost onClick={(e) => void copy(text, 'copy', e)}>{copied ? ST.WEB.copied : ST.WEB.copy}</Ghost>
 }
 
 /** a value set here that is what the row would follow anyway unsets it: it follows again */
