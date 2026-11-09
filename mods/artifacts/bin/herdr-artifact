@@ -334,8 +334,8 @@ def recipe_problems(src, files):
 
 def recipe_parts(dst):
     """The shared recipe view in an installed (or checked) recipe artifact: main.js draws recipe.json natively."""
-    shutil.copy2(RECIPE_VIEW, os.path.join(dst, "recipe-view.js"))
-    shutil.copy2(RECIPE_CORE, os.path.join(dst, "recipe.js"))
+    shutil.copyfile(RECIPE_VIEW, os.path.join(dst, "recipe-view.js"))
+    shutil.copyfile(RECIPE_CORE, os.path.join(dst, "recipe.js"))
     # the recipe as a module the view imports at once (a check then draws every block, not an empty panel)
     with open(os.path.join(dst, "recipe.json")) as f:
         data = f.read()
@@ -347,9 +347,10 @@ def recipe_parts(dst):
 
 
 def copy_files(src, files, dst):
+    # copyfile, not copy2: a copy is ours to rewrite (the light check's imports), even from a read-only install (Nix)
     for rel in files:
         os.makedirs(os.path.dirname(os.path.join(dst, rel)), exist_ok=True)
-        shutil.copy2(os.path.join(src, rel), os.path.join(dst, rel))
+        shutil.copyfile(os.path.join(src, rel), os.path.join(dst, rel))
 
 
 def helper(art, mod, agent, machine=None, custom=False):
@@ -407,7 +408,7 @@ def wrap_markup(dst):
     if not os.path.isfile(MARKUP):
         return
     os.replace(os.path.join(dst, "main.js"), os.path.join(dst, "artifact-main.js"))
-    shutil.copy2(MARKUP, os.path.join(dst, "artifact-markup.js"))
+    shutil.copyfile(MARKUP, os.path.join(dst, "artifact-markup.js"))
     with open(os.path.join(dst, "main.js"), "w") as f:
         f.write(WRAPPER)
 
@@ -1409,7 +1410,7 @@ def cmd_convert(o):
             with open(os.path.join(out, "recipe.json"), "w") as f:
                 json.dump(recipe, f, indent=1, ensure_ascii=False)
             for pic in pics:
-                shutil.copy2(os.path.join(src, pic), os.path.join(out, pic))
+                shutil.copyfile(os.path.join(src, pic), os.path.join(out, pic))
             if o.publish:
                 convert_publish(a, out)
             done.append({"id": a["id"], "blocks": len(recipe["blocks"]), "pictures": len(pics), **({"out": out} if o.out else {})})
