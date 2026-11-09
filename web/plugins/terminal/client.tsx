@@ -10,7 +10,7 @@ import { act, agentChat, definePlugin, getState, openItem, placeOf, setUI, shown
 import { CTRL, ic, MenuItem, MenuSeparator, MenuSetting, ModelIcon, shortcut, Small, Tab, Tabs, TermIcon } from '@client/ui.tsx'
 import type { Place, TermScreen } from '@shared/types.ts'
 import { connectTerminal, streamInput } from './stream.ts'
-import { keysTerm, termInPlace } from './shown.ts'
+import { keysTerm, termInPlace, termInput, touchScreen, typedInBox } from './shown.ts'
 import { colsOf, fitFont, foldShown, frame, LINE, MAX, MIN, PAD, ZOOM } from './screen.ts'
 
 const KEYMAP: Record<string, string> = {
@@ -227,10 +227,9 @@ function TerminalView({ chatKey, panel }: { chatKey: string; panel?: boolean }) 
   const screen = useStore((s) => s.terms[chatKey])
   const streaming = useStore((s) => s.snap?.terminalTransport === 'core')
   const input = useRef<HTMLTextAreaElement>(null)
-  const phone = ui.device === 'phone'
-  // a mouse or keyboard types into a task's terminal while its screen has the focus; a finger, through the hidden box
-  const typed = panel && !phone && ui.device === 'desktop'
-  const touch = phone || (panel && !typed)
+  // a mouse or keyboard types into a task's terminal while its screen has the focus; a finger (any touch screen, a
+  // landscape iPad too), through the hidden box
+  const { typed, touch } = termInput(ui.device, !!panel, touchScreen())
   const keys = (keys: string[]) => terminalInput(chatKey, { type: 'keys', keys })
   return (
     <>
@@ -388,6 +387,7 @@ export default definePlugin({
     reg.keys.push({
       order: 0,
       handle: ({ e, ui, snap }) => {
+        if (typedInBox(e)) return true
         if (ui.device !== 'desktop') return false
         const task = agentChat(ui, snap)?.chat
         const focused = (e.target as HTMLElement | null)?.closest?.<HTMLElement>(SCREEN)?.dataset.termScreen
