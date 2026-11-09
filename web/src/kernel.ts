@@ -1059,9 +1059,15 @@ function awaited(snap: Snapshot, id: string): Place | undefined {
   return { id, name: home ? 'home' : m[2], machine: label, ...(home ? { home: true } : {}), level: home ? 1 : 2, status: 'idle', mode: 'regular', chat: id, connecting: true }
 }
 
-export function placeOf(snap: Snapshot, id: string) {
+export function placeOf(snap: Snapshot, id: string): Place {
   const shown = shownPlaces(snap)
-  return shown.find((p) => p.id === id) ?? awaited(snap, id) ?? shown.find((p) => p.id === placeIdOf(snap, id)) ?? shown.find((p) => p.id === home(snap)) ?? shown[0]
+  return shown.find((p) => p.id === id) ?? awaited(snap, id) ?? shown.find((p) => p.id === placeIdOf(snap, id)) ?? shown.find((p) => p.id === home(snap)) ?? shown[0] ?? noSpace(snap)
+}
+
+/** No space at all (the last one closed, #747): an empty stand-in, so what reads the shown space (its name, chat, tabs)
+ *  doesn't throw; its empty id says so (App.tsx NoSpaces in its place) */
+export function noSpace(snap: Snapshot): Place {
+  return { id: '', name: '', machine: snap.host, level: 2, status: 'idle', mode: 'regular', chat: '', tabs: [] }
 }
 
 export function taskOf(snap: Snapshot, id: string | null) {

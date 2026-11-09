@@ -57,12 +57,14 @@ function terminalsIn(node, out = []) {
 // "<machine>/<id>", as the window's spaces() has them).
 export function spacesFromDoc(doc, machine = null) {
   const at = (id) => (machine ? `${machine}/${id}` : id);
+  // a terminal the window already wrote with its machine ("<machine>/t6") keeps it: never "<machine>/<machine>/t6" (#818)
+  const atTerm = (id) => (machine && String(id).startsWith(`${machine}/`) ? id : at(id));
   return (Array.isArray(doc?.spaces) ? doc.spaces : []).map((s) => ({
     id: at(s.id),
     machine,
     name: s.name ?? "",
     folder: s.folder ?? "",
-    tabs: (s.tabs ?? []).map((t) => ({ id: at(t.id), name: t.name ?? "", terminals: terminalsIn(t.root).map(at) })),
+    tabs: (s.tabs ?? []).map((t) => ({ id: at(t.id), name: t.name ?? "", terminals: terminalsIn(t.root).map(atTerm) })),
   }));
 }
 

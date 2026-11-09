@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { spaceName, tilde, sharedNames, gitTail, inOrder, withOrder, keptOrder, machinesInOrder, byMachineOrder, withMachineOrder, machineOrderOf } from "./spaces.js";
+import { spacesFromDoc, spaceName, tilde, sharedNames, gitTail, inOrder, withOrder, keptOrder, machinesInOrder, byMachineOrder, withMachineOrder, machineOrderOf } from "./spaces.js";
 
 test("two spaces with one name on a machine each show their folder, from ~ (the sidebar's rows, both sides)", () => {
   // built, so the repo's no-home-paths rule has nothing to find
@@ -68,4 +68,16 @@ test("a machine drag keeps the ones it didn't show where they were, and the rest
   expect(d.machineOrder).toEqual(["vm", "", "far"]);
   expect(d.pinned).toEqual(["x"]);
   expect(machineOrderOf({ machineOrder: ["a", 3, "b"] })).toEqual(["a", "b"]);
+});
+
+// #818: another machine's herdr-app document already names its terminals with that machine ("box/t6"): its tab's
+// chat key read "t:box/box/t6", no such terminal, Reconnecting… for ever
+test("another machine's tab keeps one machine on its terminals, as written or not", () => {
+  const doc = { spaces: [{ id: "s1", name: "docs", folder: "/srv/docs", tabs: [{ id: "tab2", name: "Claude Code", root: { children: [{ content: { props: { terminal: "box/t6" } } }, { content: { terminal: "t7" } }] } }] }] };
+  const [s] = spacesFromDoc(doc, "box");
+  expect(s.id).toBe("box/s1");
+  expect(s.tabs[0].id).toBe("box/tab2");
+  expect(s.tabs[0].terminals).toEqual(["box/t6", "box/t7"]);
+  // this machine's own: as written
+  expect(spacesFromDoc(doc, null)[0].tabs[0].terminals).toEqual(["box/t6", "t7"]);
 });
