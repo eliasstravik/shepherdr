@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.1.28
+
+Tasks say Ready only when they are truly done, and every machine can open its own artifacts.
+
+- A task stays Working while its agent still runs anything: a background command, a helper or a subagent. It shows
+  Ready, with its news and alert, only once the agent is at rest.
+- A question in an agent's last words while its own work still runs waits: the task shows Needs you once nothing
+  runs. A question card or a permission still needs you at once.
+- `herdr-artifact preview <id>` opens a machine's own artifact on that machine, even one that can't reach the
+  machine serving the web app. It starts when asked and stops after 30 minutes unused.
+- Shepherdr's own tests can no longer touch the real home's settings or hooks.
+
 ## 3.1.27
 
 Shepherdr keeps your tasks, settings and secrets in folders of its own now, and moves them there for you. Chats show
