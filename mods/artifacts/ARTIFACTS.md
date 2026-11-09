@@ -13,6 +13,7 @@ herdr-artifact list                     # this folder's artifacts
 herdr-artifact rm <id>
 herdr-artifact open <id>                # show it to the person where they are, and print its link
 herdr-artifact link <id>                # only its link in the web app
+herdr-artifact preview <id>             # see it here as the person does: the web app's viewer on 127.0.0.1, for your browser
 ```
 
 - Change an artifact with `update` (a new version, the same card), not a second `publish`. The

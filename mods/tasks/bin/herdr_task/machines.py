@@ -38,6 +38,8 @@ from .news import news_send, send_or_hold, typing
 
 ROLES = ("assistant", "worker", "reviewer")
 ARTIFACT_HOME = ".local/share/herdr/artifacts"
+# The installed web app's artifact viewer in one file (bin/shepherdr installs web/dist there), synced beside herdr-artifact
+VIEWER_BUILT = os.path.join(".local", "share", "shepherdr", "web", "dist", "artifact-viewer.html")
 STAMP = ".herdr/tools.json"
 MACHINES = os.path.join(STORE, ".machines.json")
 SYNC_DEBOUNCE_MS = 30000        # files changed here: wait until they stay put this long
@@ -113,6 +115,11 @@ def manifest():
             p = os.path.join(root, extra)
             if os.path.isfile(p):
                 add(f"{ARTIFACT_HOME}/{extra}", _read(p), 0o644, [p])
+        # The web app's artifact viewer in one file (SHEP-149: herdr-artifact preview shows a machine's own
+        # artifacts there as the person sees them): the copy a sync left beside it, else the installed web app's.
+        viewer = next((p for p in (os.path.join(root, "viewer.html"), os.path.join(HOME, VIEWER_BUILT)) if os.path.isfile(p)), None)
+        if viewer:
+            add(f"{ARTIFACT_HOME}/viewer.html", _read(viewer), 0o644, [viewer])
         # As here: ~/.local/bin/herdr-artifact leads to its folder, where its guide sits beside it.
         links.append({"path": ".local/bin/herdr-artifact", "target": f"{ARTIFACT_HOME}/bin/herdr-artifact"})
     secret = _real(".local/bin/herdr-secret")

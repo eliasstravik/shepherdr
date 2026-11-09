@@ -1533,6 +1533,198 @@ def cmd_open(o):
     return 0 if (screen or window or link) else 1
 
 
+# ---- seeing it here, as the person does (SHEP-149) -----------------------------------------------
+# The person's link leads to the machine that serves the web app, which this one may not reach. `preview` serves the
+# web app's own artifact viewer (web/viewer, built into one file: artifact-viewer.html) for this machine's artifacts on
+# 127.0.0.1 only, started on demand and gone after PREVIEW_IDLE seconds unused; the agent opens its link in its task's
+# browser (herdr-browser) at a phone's or a desktop's width and takes screenshots.
+HERE = os.path.dirname(os.path.realpath(__file__))
+VIEWERS = (os.path.join(HERE, "..", "viewer.html"),                                   # beside it: synced to a machine
+           os.path.join(HOME, ".local", "share", "shepherdr", "web", "dist", "artifact-viewer.html"),  # the installed web app's
+           os.path.join(HERE, "..", "..", "..", "web", "dist", "artifact-viewer.html"))  # a checkout's own build
+PREVIEW_STATE = os.path.join(STORE, ".preview")
+PREVIEW_IDLE = 1800
+PREVIEW_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
+                 ".svg": "image/svg+xml", ".json": "application/json", ".txt": "text/plain; charset=utf-8",
+                 ".md": "text/plain; charset=utf-8", ".csv": "text/plain; charset=utf-8"}
+# the page: its own inline script and styles, its fonts inside; it asks only this server
+VIEWER_CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src data:; "
+              "img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+# an artifact's own file, as the service sends it (service/artifacts.ts)
+FILE_CSP = "sandbox; default-src 'none'; img-src 'self'; style-src 'unsafe-inline'"
+
+
+def viewer_page():
+    return next((os.path.realpath(p) for p in VIEWERS if os.path.isfile(p)), None)
+
+
+NO_VIEWER = ("The artifact viewer isn't on this machine yet: Shepherdr's next sync brings it (`herdr-task machines sync` "
+             "on the main machine), or build it in a checkout: `bun run build`.")
+
+
+def code_stamp():
+    """Which herdr-artifact runs a preview server: one from an older copy is replaced."""
+    try:
+        return str(int(os.path.getmtime(os.path.realpath(__file__))))
+    except OSError:
+        return "0"
+
+
+def preview_alive():
+    """The running preview server's port, when it answers as this herdr-artifact's for this store, else None."""
+    import urllib.request
+    try:
+        with open(PREVIEW_STATE) as f:
+            st = json.load(f)
+        port = int(st["port"])
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping", timeout=2) as r:
+            me_ = json.load(r)
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if me_.get("store") != STORE or me_.get("code") != code_stamp():
+        with contextlib.suppress(OSError, ValueError, TypeError, KeyError):
+            os.kill(int(st["pid"]), 15)
+        return None
+    return port
+
+
+def preview_start():
+    """The port of this machine's preview server, started when none answers."""
+    port = preview_alive()
+    if port:
+        return port
+    os.makedirs(STORE, exist_ok=True)
+    with contextlib.suppress(OSError):
+        os.unlink(PREVIEW_STATE)
+    subprocess.Popen([sys.executable, os.path.realpath(__file__), "_serve"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
+    for _ in range(50):
+        time.sleep(0.1)
+        port = preview_alive()
+        if port:
+            return port
+    raise Fail("The preview server didn't start.")
+
+
+def serve_preview(idle=PREVIEW_IDLE):
+    """The preview server: the viewer page and this machine's artifacts, read only, on 127.0.0.1 (a free port, written
+    to PREVIEW_STATE). Answers only requests addressed to 127.0.0.1 or localhost (no other site's page reaches it
+    through a name of its own). Ends after `idle` seconds without a request."""
+    import http.server
+    import threading
+    last = [time.time()]
+
+    class H(http.server.BaseHTTPRequestHandler):
+        server_version = "herdr-artifact-preview"
+
+        def log_message(self, *_a):
+            pass
+
+        def send(self, code, body, ctype, csp=None, extra=None):
+            if isinstance(body, str):
+                body = body.encode()
+            self.send_response(code)
+            self.send_header("content-type", ctype)
+            self.send_header("content-length", str(len(body)))
+            self.send_header("x-content-type-options", "nosniff")
+            self.send_header("cache-control", "no-store")
+            self.send_header("referrer-policy", "no-referrer")
+            if csp:
+                self.send_header("content-security-policy", csp)
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+
+        def json(self, code, obj):
+            self.send(code, json.dumps(obj), "application/json")
+
+        def do_HEAD(self):
+            self.do_GET()
+
+        def do_GET(self):
+            last[0] = time.time()
+            host = (self.headers.get("host") or "").rsplit(":", 1)[0]
+            if host not in ("127.0.0.1", "localhost"):
+                return self.send(403, "Only on this machine.", "text/plain")
+            u = urllib.parse.urlsplit(self.path)
+            q = urllib.parse.parse_qs(u.query)
+            path = urllib.parse.unquote(u.path)
+            if path == "/api/ping":
+                return self.json(200, {"store": STORE, "code": code_stamp()})
+            if path in ("/", "/index.html"):
+                page = viewer_page()
+                if not page:
+                    return self.send(500, NO_VIEWER, "text/plain; charset=utf-8")
+                with open(page, "rb") as f:
+                    return self.send(200, f.read(), "text/html; charset=utf-8", VIEWER_CSP)
+            m = re.match(r"^/api/artifacts/([\w.-]+)(?:/(recipe|file/(.+)))?$", path)
+            if not m:
+                return self.send(404, "Not here.", "text/plain")
+            aid = m.group(1)
+            try:
+                with Store(find_anywhere(aid), write=False) as s:
+                    a = s.find(aid)
+            except Fail as e:
+                return self.json(404, {"error": str(e)})
+            if not m.group(2):
+                return self.json(200, dict(public(a), kind=(next((x for x in a.get("versions") or [] if x.get("v") == a.get("version")), {}).get("kind")
+                                                            or "recipe")))
+            try:
+                v = int((q.get("v") or [a["version"]])[0])
+            except ValueError:
+                v = 0
+            base = os.path.realpath(os.path.join(FILES, aid, f"v{v}"))
+            rel = "recipe.json" if m.group(2) == "recipe" else m.group(3)
+            p = os.path.realpath(os.path.join(base, rel))
+            ctype = PREVIEW_TYPES.get(os.path.splitext(p)[1].lower())
+            if v < 1 or not p.startswith(base + os.sep) or not os.path.isfile(p):
+                return self.send(404, "No such file.", "text/plain")
+            if not ctype:
+                return self.send(415, "Not shown here.", "text/plain")
+            with open(p, "rb") as f:
+                return self.send(200, f.read(), ctype, FILE_CSP)
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    srv.daemon_threads = True
+    os.makedirs(STORE, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=STORE, prefix=".tmp-")
+    with os.fdopen(fd, "w") as f:
+        json.dump({"port": srv.server_address[1], "pid": os.getpid()}, f)
+    os.replace(tmp, PREVIEW_STATE)
+
+    def watch():
+        while time.time() - last[0] < idle:
+            time.sleep(min(30, idle))
+        srv.shutdown()
+    threading.Thread(target=watch, daemon=True).start()
+    try:
+        srv.serve_forever()
+    finally:
+        with contextlib.suppress(OSError, ValueError):
+            with open(PREVIEW_STATE) as f:
+                if json.load(f).get("pid") == os.getpid():
+                    os.unlink(PREVIEW_STATE)
+    return 0
+
+
+def cmd_preview(o):
+    """This machine's artifact in the web app's viewer, served here on 127.0.0.1: its link, for the task's browser."""
+    with Store(find_anywhere(o.id), write=False) as s:
+        as_version(s.find(o.id), o.version)
+    if not viewer_page():
+        raise Fail(NO_VIEWER)
+    port = preview_start()
+    link = f"http://127.0.0.1:{port}/?artifact={urllib.parse.quote(o.id, safe='')}" + (f"&v={o.version}" if o.version else "")
+    if o.json:
+        print(json.dumps({"id": o.id, "link": link}))
+    else:
+        print(link)
+        print("Open it in your task's browser, as the person sees it on a phone and on a desktop:\n"
+              f"  herdr-browser set viewport 390 844 && herdr-browser open '{link}' && herdr-browser screenshot /abs/phone.png\n"
+              f"  herdr-browser set viewport 1280 800 && herdr-browser open '{link}' && herdr-browser screenshot /abs/desktop.png")
+    return 0
+
+
 EXAMPLE = '''import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme } from "herdr";
@@ -1661,6 +1853,8 @@ def main():
     if argv[:1] == ["--version"]:
         print(VERSION)
         return 0
+    if argv[:1] == ["_serve"]:
+        return serve_preview()
 
     p = argparse.ArgumentParser(prog="herdr-artifact", description="Herdr's artifacts: recipes an agent writes to show the person something, drawn in the window and on the web.",
                                 epilog="`herdr-artifact guide` explains how to write one. Another machine's folder: herdr-artifact --on <machine> <command> ...")
@@ -1715,6 +1909,9 @@ def main():
     c = cmd("link", cmd_link, "an artifact's link in the web app, for the person")
     c.add_argument("id")
     c.add_argument("--from", dest="machine", help="the machine it's on (default: this one)")
+    c = cmd("preview", cmd_preview, "see an artifact here as the person sees it: the web app's viewer on 127.0.0.1, for your task's browser")
+    c.add_argument("id")
+    c.add_argument("--version", type=int, help="an older version (default: the latest)")
     c = cmd("note", cmd_note, "send the person's note on an artifact to the agent that keeps it (the viewer's Mark up)")
     c.add_argument("id")
     c.add_argument("--text", required=True, help="what the person wrote")

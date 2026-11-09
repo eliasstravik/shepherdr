@@ -358,7 +358,7 @@ export function setThisSpace(on: boolean) {
   setUI({ thisSpace: on, cur: 0 })
 }
 
-function deviceFor(w: number): Device {
+export function deviceFor(w: number): Device {
   return w < CHAT_READ + RIGHT.min ? 'phone' : w < 1024 ? 'tablet' : 'desktop'
 }
 
