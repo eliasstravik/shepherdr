@@ -29,6 +29,7 @@ export {
   ArrowPathRoundedSquareIcon as RestartIcon,
   ArrowTopRightOnSquareIcon as OpenIcon,
   ArrowUpIcon as UpIcon,
+  ArrowDownIcon as MoveDownIcon,
   ArrowUturnLeftIcon as ReplyIcon,
   BellIcon,
   BoltIcon as SpeedIcon,

@@ -78,7 +78,7 @@ export function press(e: ReactPointerEvent<HTMLElement>, o: Press) {
     for (const [i, b] of blocks.entries())
       for (const x of b.els) {
         x.style.transition = i === from ? 'none' : still() ? 'none' : EASE
-        if (i === from) x.dataset.dragging = ''
+        if (i === from) x.dataset.dragging = o.level
       }
     if (mouse) document.documentElement.style.cursor = 'grabbing'
     navigator.vibrate?.(10)

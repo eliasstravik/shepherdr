@@ -13,7 +13,7 @@ import * as AGa from "../core/agents.js";
 import { answerCodex } from "./codex-ask.ts";
 const { sessionOf, forkArgv } = AGa as any;
 import * as SP from "../core/spaces.js";
-const { READ, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, withOrder, DELETED, deletedSection, withRestoredSection } = SP as any;
+const { READ, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, withOrder, withMachineOrder, DELETED, deletedSection, withRestoredSection } = SP as any;
 import type { Compat } from "./compat.ts";
 import { worktreeAct } from "./worktrees.ts";
 import { noteFailed, once } from "./send-once.ts";
@@ -293,7 +293,13 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
         }
       } catch {}
       return { ok: true };
-    } else throw new Error("Machines keep their order: drag spaces and sections instead.");
+    } else if (b.under === "all") {
+      // the machines (m:<key>, this computer by its name): their order in the sidebar's data, "" for this computer, so
+      // every device and the window show it (core/spaces.js withMachineOrder, SHEP-153)
+      const keys = ids.filter((id) => id.startsWith("m:")).map((id) => (id.slice(2) === compat.host ? "" : id.slice(2)));
+      await sh.set("spaces-chat", withMachineOrder(bar(), keys));
+      return { ok: true };
+    } else throw new Error("That list keeps its order.");
     await sh.set("spaces-chat", d);
     return { ok: true };
   }

@@ -87,6 +87,8 @@ export function relocate(key, value, rename) {
     return { ...value, sections, icons: mapKeys(value.icons, (id) => moveId(id, rename)), pinned: keep(value.pinned, (id) => moveId(id, rename)),
       ...(isObj(value.machines) ? { machines: mapKeys(value.machines, machineKey("")(rename)) } : {}),
       // each machine's dragged order of its spaces (core/spaces.js withOrder): its key and its ids
+      // the machines' dragged order (core/spaces.js withMachineOrder): "" is this computer, as in machines
+      ...(Array.isArray(value.machineOrder) ? { machineOrder: keep(value.machineOrder, machineKey("")(rename)) } : {}),
       ...(isObj(value.order) ? { order: Object.fromEntries(Object.entries(mapKeys(value.order, machineKey("")(rename))).map(([k, ids]) => [k, keep(ids, (id) => moveId(id, rename))])) } : {}) };
   }
   if (key === "notify" && isObj(value)) {
@@ -113,6 +115,16 @@ export function keepForeign(key, next, old, back) {
     if (isObj(old.icons)) out.icons = { ...Object.fromEntries(Object.entries(old.icons).filter(([id]) => foreignId(id))), ...(next.icons ?? {}) };
     if (Array.isArray(old.pinned)) out.pinned = [...(next.pinned ?? []), ...old.pinned.filter((id) => foreignId(id) && !(next.pinned ?? []).includes(id))];
     if (isObj(old.machines)) out.machines = { ...Object.fromEntries(Object.entries(old.machines).filter(([k]) => back(k === "" ? null : k) === undefined)), ...(next.machines ?? {}) };
+    // the machines the writer can't name keep their place, after the one they followed
+    if (Array.isArray(old.machineOrder) && Array.isArray(next.machineOrder)) {
+      const mo = [...next.machineOrder];
+      for (const [i, k] of old.machineOrder.entries()) {
+        if (mo.includes(k) || back(k === "" ? null : k) !== undefined) continue;
+        const after = old.machineOrder.slice(0, i).findLast((x) => mo.includes(x));
+        mo.splice(after === undefined ? 0 : mo.indexOf(after) + 1, 0, k);
+      }
+      out.machineOrder = mo;
+    }
     if (isObj(old.order)) out.order = { ...Object.fromEntries(Object.entries(old.order).filter(([k]) => back(k === "" ? null : k) === undefined)), ...(next.order ?? {}) };
     return out;
   }

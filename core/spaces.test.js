@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { spaceName, tilde, sharedNames, gitTail, inOrder, withOrder, keptOrder } from "./spaces.js";
+import { spaceName, tilde, sharedNames, gitTail, inOrder, withOrder, keptOrder, machinesInOrder, byMachineOrder, withMachineOrder, machineOrderOf } from "./spaces.js";
 
 test("two spaces with one name on a machine each show their folder, from ~ (the sidebar's rows, both sides)", () => {
   // built, so the repo's no-home-paths rule has nothing to find
@@ -52,4 +52,20 @@ test("a drag keeps the spaces it didn't show (in a section, hidden) where they w
   expect(d.pinned).toEqual(["x"]);
   expect(withOrder({}, "vm", ["vm/home", "vm/t"]).order).toEqual({ vm: ["vm/home", "vm/t"] });
   expect(keptOrder(["a", "b", "c"], ["c", "a"])).toEqual(["c", "a", "b"]);
+});
+
+// SHEP-153: the machines in the order the person dragged them into
+test("machines show in the saved order; a new one goes last, a gone one leaves no gap", () => {
+  expect(machinesInOrder([null, "vm", "mini"], undefined)).toEqual(["", "vm", "mini"]);
+  expect(machinesInOrder([null, "vm", "mini", "new"], ["mini", "gone", "", "vm"])).toEqual(["mini", "", "vm", "new"]);
+  const list = [sp("a"), sp("vm/1", "vm"), sp("b"), sp("mini/1", "mini"), sp("vm/2", "vm")];
+  expect(ids(byMachineOrder(list, ["mini", "vm"]))).toEqual(["mini/1", "vm/1", "vm/2", "a", "b"]);
+  expect(ids(byMachineOrder(list, []))).toEqual(ids(list));
+});
+
+test("a machine drag keeps the ones it didn't show where they were, and the rest of the sidebar's data", () => {
+  const d = withMachineOrder({ pinned: ["x"], machineOrder: ["", "far", "vm"] }, ["vm", null]);
+  expect(d.machineOrder).toEqual(["vm", "", "far"]);
+  expect(d.pinned).toEqual(["x"]);
+  expect(machineOrderOf({ machineOrder: ["a", 3, "b"] })).toEqual(["a", "b"]);
 });

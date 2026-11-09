@@ -27,7 +27,7 @@ import { MachinePopup, openMachine, openMachineSettings } from "./machine-popup.
 import { startPolling, allStats, healthMeters, bars } from "./machines.js";
 import { countBadge, red, green, H, TEXT, RADIUS, toast } from "./ui.js";
 import { on as addonOn } from "./addons.js";
-import { spaceName, gitTail, tilde, sharedNames, inOrder, withOrder } from "./core/spaces.js";
+import { spaceName, gitTail, tilde, sharedNames, inOrder, withOrder, machinesInOrder, machineOrderOf, withMachineOrder } from "./core/spaces.js";
 import { coordinatorTab } from "./coordinator.js";
 import { WORKTREE_RE } from "./core/paths.js";
 import { dirsReady } from "./dirs.js";
@@ -118,6 +118,8 @@ export default class Spaces extends View {
     this.shown = new Set(spaces().map((s) => s.id));
     this.born = {};
     this.pressed = null; // the space being dragged (its id)
+    this.movingMachine = undefined; // the machine whose header is being dragged (null: this computer; undefined: none)
+    this.machineOver = undefined; // the machine header it is over
     this.over = null; // where it would land: "space:<id>", "section:<id>" (its end) or "top:<machine>"
     this.peek = null; // a folded section opened while a space is dragged over it
     this.unread = new Set(); // spaces whose Assistant has something new (unread.js)
@@ -405,7 +407,8 @@ export default class Spaces extends View {
     const draw = (r) => (collapsed ? this.compact(r, t) : this.row(r, t));
     // A machine's spaces: those in no section first, then its sections (the rail has none).
     const body = (m, mine) => (collapsed ? mine.map(draw) : this.sectioned(m, all.filter((r) => (r.w.machine ?? null) === m), t));
-    const remote = [...new Set([...rows.map(r => r.w.machine).filter(Boolean), ...this.machines.map(m => m.name)])].sort();
+    // the other machines as hc lists them (as the web app's), then any only a space names
+    const remote = [...new Set([...this.machines.map(m => m.name), ...rows.map(r => r.w.machine).filter(Boolean)])];
     const loading = m => {
       const layout = machines().find(k => k.name === m)?.layout;
       return layout === "loading" || (!layout && this.machines.some(k => k.name === m && k.state === "connected"))
@@ -414,7 +417,9 @@ export default class Spaces extends View {
     const loadingRow = m => div().id(`machine-loading-${m ?? "local"}`).h(28).flex_none().px(8).flex().items_center().text_size(TEXT.label).text_color(t.dim).child(collapsed ? "…" : "Loading…");
     const pinned = this.pinned(visible, pins, Boolean(remote.length), t);
     if (!remote.length) return [...pinned, ...(loading(null) && !rows.length && !pinned.length ? [loadingRow(null)] : body(null, rows))];
-    const machineNames = [null, ...remote];
+    // in the order the person dragged them into, the same on every device and in the web app (SHEP-153)
+    const machineNames = machinesInOrder([null, ...remote], machineOrderOf(data())).map((k) => k || null);
+    this.machineOrder = machineNames;
     return [...pinned, ...machineNames.flatMap((m) => {
       const mine = rows.filter((r) => (r.w.machine ?? null) === m);
       const machine = this.machines.find(k => k.name === m);
@@ -441,9 +446,14 @@ export default class Spaces extends View {
           }
           cx.notify();
         })
-        .on_mouse_move((_e, cx) => this.drag(`top:${m}`, m, cx))
-        .on_mouse_down("right", (e) => openMenu("machine", { machine: m, row: rectOf(e) }))
+        .on_mouse_move((_e, cx) => { this.drag(`top:${m}`, m, cx); this.dragMachine(m, cx); })
+        // its header drags it among the machines, its spaces along; a press without a move folds it (on_click)
+        .on_mouse_down("left", () => { this.movingMachine = m; this.machineOver = m; })
+        .on_mouse_down("right", (e) => openMenu("machine", { machine: m, row: rectOf(e), order: machineNames }))
         .when(out, el => el.child(this.line(t, "bottom")))
+        .when(this.movingMachine === m && this.machineOver !== m, el => el.opacity(0.5))
+        .when(this.movingMachine !== undefined && this.movingMachine !== m && this.machineOver === m,
+          el => el.child(this.line(t, machineNames.indexOf(this.movingMachine) < machineNames.indexOf(m) ? "bottom" : "top")))
         // Its emoji, or the server / monitor; and the name it was given (Rename), else its own.
         .child(machineLook(m).icon
           ? div().w(14).flex_none().flex().justify_center().text_size(12).when(offline, el => el.opacity(0.5)).child(machineLook(m).icon)
@@ -587,8 +597,23 @@ export default class Spaces extends View {
     }
   }
 
-  // Released: a press without a move selects the space; else it goes where the line shows.
+  // A machine's header dragged over another's: that one's line shows where it lands.
+  dragMachine(m, cx) {
+    if (this.movingMachine === undefined || this.machineOver === m) return;
+    this.machineOver = m;
+    cx.notify();
+  }
+
+  // Released: a press without a move selects the space; else it goes where the line shows. A machine takes the place of
+  // the one it was dropped on (shared "spaces-chat".machineOrder, core/spaces.js withMachineOrder).
   release(cx) {
+    const mm = this.movingMachine, mo = this.machineOver;
+    this.movingMachine = this.machineOver = undefined;
+    if (mm !== undefined && mo !== undefined && mm !== mo && this.machineOrder) {
+      const order = this.machineOrder.filter((k) => k !== mm);
+      order.splice(this.machineOrder.indexOf(mo), 0, mm);
+      setShared("spaces-chat", withMachineOrder(data(), order));
+    }
     const from = this.pressed, over = this.over;
     this.pressed = null;
     this.over = null;
