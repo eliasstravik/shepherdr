@@ -811,8 +811,10 @@ export default class Spaces extends View {
       changed = true;
     }
     if (changed) setShared("space.colors", kept);
+    // null on a wide sidebar (SHEP-135) or with voice off: child(null) throws (GitHub #869)
+    const voice = this.voiceRow(t, collapsed);
     return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
-      .child(this.voiceRow(t, collapsed))
+      .when(Boolean(voice), (el) => el.child(voice))
       .child(h_flex().h(31).pl(16).pr(10).items_center().justify_between().text_size(TEXT.label).font_medium().text_color(t.dim)
         .when(!collapsed, el => el.child("Spaces"))
         // As a machine's +: New space, New section, on the shown space's machine.

@@ -4,11 +4,12 @@ import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fakeHerdr } from "./fake-herdr";
 
 const HOME = mkdtempSync(join(tmpdir(), "shepherdr-local-"));
 const DATA = join(HOME, ".herdr", "shepherdr");
 const shared = new Map<string, unknown>([["notify", { on: true }]]);
-mock.module("herdr", () => ({
+mock.module("herdr", () => fakeHerdr({
   home: () => HOME,
   // the shell lib/dirs.js asks for Shepherdr's folders: no answer, so the old ~/.herdr paths (as before a move)
   exec: async () => ({ code: 1, stdout: "", stderr: "" }),
