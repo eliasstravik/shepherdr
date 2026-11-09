@@ -4,6 +4,7 @@
 // Shown in the side panel, it fills a place's Artifacts list (or a task's Artifacts tab) beside the chat.
 import clsx from 'clsx'
 import { Recipe, UNREADABLE } from '@client/screens/Recipe.tsx'
+import { enterHint, sendsNow } from '@client/enter.ts'
 import * as R from '@core/recipe.js'
 import * as M from '@core/markup.js'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
@@ -190,6 +191,7 @@ function MarkupLayer({ art, v, onEnd }: { art: Artifact; v: number; onEnd: () =>
           <div className="flex items-center gap-1.5">
             <TextBox
               label="Note"
+              enterKeyHint={enterHint()}
               value={text}
               onChange={(t) => {
                 setText(t)
@@ -199,7 +201,7 @@ function MarkupLayer({ art, v, onEnd }: { art: Artifact; v: number; onEnd: () =>
                 }
               }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey && device !== 'phone') {
+                if (sendsNow(e, getState().ui.keyboard)) {
                   e.preventDefault()
                   void send()
                 }

@@ -16,6 +16,7 @@ import { modelCommand, modeName, taskChatId, type CardAsk, type Chat, type Merge
 import { sendsOnTap } from '@shared/alerts.ts'
 import { buzz, ForkIcon, mine, openBar, openPicker, quick, react, RewindIcon } from '@plugins/reactions/client.tsx'
 import { EDGE } from '@client/gestures.ts'
+import { enterHint, sendsNow } from '@client/enter.ts'
 import { still, useArrive } from '@client/motion.ts'
 import { draggingFiles, dropped, named, pasted } from './paste.ts'
 import { dayLabel } from './days.ts'
@@ -1128,7 +1129,8 @@ export function ReplyOnCard({ ask, reply, task, source }: { ask: CardAsk; reply:
         </Sent>
       ) : ask.open ? (
         <>
-          <TextBox name="reply" data-kept label={`Reply to ${task}`} className={noteBox} placeholder="Type something…" value={text} onChange={setText} />
+          <TextBox name="reply" data-kept label={`Reply to ${task}`} className={noteBox} placeholder="Type something…" value={text} onChange={setText} enterKeyHint={enterHint()}
+            onKeyDown={(e) => { if (sendsNow(e, getState().ui.keyboard)) { e.preventDefault(); if (!busy && text.trim()) void send() } }} />
           <div className="flex items-center justify-end gap-2">
             {err ? <span role="alert" className="mr-auto text-[0.75rem] text-need phone:text-[0.8125rem]">{err}</span> : null}
             <Primary soft disabled={busy || !text.trim()} onClick={send}>
@@ -1474,7 +1476,7 @@ function StepsCard({ q, chat, source, steady }: { q: Question & { parts: NonNull
           {others[step] !== null ? (
             <input autoFocus aria-label="Your answer" placeholder="Your answer" className={noteBox} value={others[step]!}
               onChange={(e) => setOthers((o) => o.map((x, j) => (j === step ? e.target.value : x)))}
-              onKeyDown={(e) => e.key === 'Enter' && others[step]!.trim() && setStep(step + 1)} />
+              enterKeyHint="next" onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229 && others[step]!.trim() && setStep(step + 1)} />
           ) : null}
           {step < n - 1 || part.multi || others[step] !== null ? (
             <div className="flex justify-end"><button type="button" className="min-h-9 px-2 text-accent" onClick={() => setStep(step + 1)}>Next</button></div>
@@ -1655,6 +1657,8 @@ function OneQuestionCard({ q, chat, msg, from, source, steady }: { q: Question; 
               placeholder={needNote ? 'Your note for the agent (needed to send it back)' : 'Add a note (optional)'}
               value={note}
               onChange={setNote}
+              enterKeyHint={enterHint()}
+              onKeyDown={(e) => { if (sendsNow(e, getState().ui.keyboard)) { e.preventDefault(); if (!busy && picked) void send() } }}
             />
           ) : null}
           {/* in Needs you, its room is kept: Sending… must not push the cards below under a thumb */}
@@ -2006,6 +2010,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                 rows={1}
                 value={text}
                 placeholder=""
+                enterKeyHint={enterHint()}
                 onChange={(e) => setText(e.target.value)}
                 onPaste={(e) => {
                   // a screenshot or a copied file attaches, as + does; text pastes as text
@@ -2027,7 +2032,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                   if (choosable.length && !e.nativeEvent.isComposing) {
                     const n = choosable.length, at = Math.min(msel, n - 1)
                     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); return setMsel((at + (e.key === 'ArrowDown' ? 1 : n - 1)) % n) }
-                    if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && device === 'desktop')) { e.preventDefault(); return takeMention(choosable[at]) }
+                    if (e.key === 'Tab' || sendsNow(e, getState().ui.keyboard)) { e.preventDefault(); return takeMention(choosable[at]) }
                     if (e.key === 'Escape') { e.preventDefault(); return setMclosed(text) }
                   }
                   // as the window's: Up in an empty box (or one showing a recalled message) brings back your earlier
@@ -2046,7 +2051,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                       }
                     }
                   }
-                  if (e.key === 'Enter' && !e.shiftKey && device === 'desktop' && !e.nativeEvent.isComposing) {
+                  if (sendsNow(e, getState().ui.keyboard)) {
                     e.preventDefault()
                     // Shepherdr 3: Ctrl+Enter holds it until the agent is free
                     send(e.ctrlKey || e.metaKey)
