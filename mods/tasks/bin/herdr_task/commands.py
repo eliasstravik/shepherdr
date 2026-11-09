@@ -425,6 +425,8 @@ def cmd_ready(args):
                     "then run ready again with --proof <its id>.")
         v = view(s, t)
     say(args, v, msg)
+    if msg.startswith(f"{s.ref(t)} {READY_BUT}"):
+        sys.exit(1)  # its push or pull request failed: not ready the way it meant (#795)
 
 
 REVIEWED = ("report", "pass", "changes")  # a recorded review round (report: the agent's own reviewed)
@@ -664,6 +666,9 @@ def back_to_work(s, t, why, said=WORKING_AGAIN, auto=False):
     return True
 
 
+READY_BUT = "is ready, but:"  # finalize() couldn't push or open its pull request
+
+
 def finalize(s, t):
     """Ready: on GitHub its pull request opens; then the merge policy in Settings decides who
     merges: auto (now), checks (once its checks pass) or ask (the person). Returns what to say."""
@@ -691,7 +696,7 @@ def finalize(s, t):
                    "pass and GitHub says it can merge; a failing check or a conflict comes back to you to fix.")
         except Fail as e:
             t["attention"] = str(e)
-            return f"{s.ref(t)} is ready, but: {e} Tell the person."
+            return f"{s.ref(t)} {READY_BUT} {e} Tell the person."
     policy = merge_policy(s, t)
     if policy in ("auto", "checks"):
         t["auto_merge"] = policy

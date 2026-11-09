@@ -4270,3 +4270,31 @@ class TaskFlow(unittest.TestCase):
         self.assertEqual(agents.task_status(self.task, live)[0], "working")  # its own line: on its own review
         self.task["review_out"] = t - 90000
         self.assertEqual(agents.task_status(self.task, live)[:2], ("needs", "reply"))
+
+    def test_ready_pushes_only_what_the_remote_lacks(self):
+        """#795: the branch already on its remote at its tip: no push through a pre-push hook that fails."""
+        import herdr_task.github as github
+        wt, remote = self.task["worktree"], os.path.join(self.root, "remote.git")
+        self.git(self.root, "init", "-q", "--bare", remote)
+        self.git(self.main, "remote", "add", "origin", remote)
+        self.commit(wt, "work", "a.txt")
+        self.git(wt, "push", "-q", "--no-verify", "origin", "task/1")  # by hand
+        hooks = os.path.join(self.main, ".git", "hooks")
+        os.makedirs(hooks, exist_ok=True)
+        with open(os.path.join(hooks, "pre-push"), "w") as f:
+            f.write("#!/bin/sh\necho 'over the time budget' >&2\nexit 1\n")
+        os.chmod(os.path.join(hooks, "pre-push"), 0o755)
+        asked = []
+
+        def gh(*a, **k):
+            asked.append(a[:2])
+            return (True, "https://github.com/o/r/pull/7", "") if a[:2] == ("pr", "create") else (True, "[]", "")
+        self.patch(github, "gh", gh)
+        self.assertEqual(github.pr_open(self.store, self.task, "o/r")["number"], 7)
+        self.assertIn(("pr", "create"), asked)
+        # A commit the remote lacks: pushed, and the hook's failure said.
+        self.task.pop("pr")
+        self.commit(wt, "more", "a.txt")
+        with self.assertRaises(Exception) as e:
+            github.pr_open(self.store, self.task, "o/r")
+        self.assertIn("Couldn't push task/1", str(e.exception))

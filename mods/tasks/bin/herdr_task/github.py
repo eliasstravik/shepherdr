@@ -42,9 +42,14 @@ def pr_open(s, task, repo, summary=None):
     """Pushes the task's branch and opens its pull request (or keeps the open one, also one opened
     by hand or by its agent for the branch: SHEP-13's "already exists")."""
     wt, br = task["worktree"], task["branch"]
-    ok, _, err = git(wt, "push", "--force-with-lease", "-u", remote_of(s.loc["folder"]), br)
-    if not ok:
-        raise Fail(f"Couldn't push {br}: {err}")
+    remote = remote_of(s.loc["folder"])
+    # Already there at its exact tip (pushed by hand): no second push through its hooks (#795).
+    has, tip, _ = git(wt, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}")
+    seen, there, _ = git(wt, "ls-remote", remote, f"refs/heads/{br}")
+    if not (has and tip and seen and there.split()[:1] == [tip]):
+        ok, _, err = git(wt, "push", "--force-with-lease", "-u", remote, br)
+        if not ok:
+            raise Fail(f"Couldn't push {br}: {err}")
     pr = task.get("pr") or {}
     if pr.get("number"):
         ok, out, _ = gh("pr", "view", str(pr["number"]), "--repo", repo, "--json", "state", "-q", ".state")
