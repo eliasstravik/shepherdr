@@ -363,6 +363,14 @@ class ShellScripts(unittest.TestCase):
         self.assertTrue(pat.search("x=$(\n  cat <<EOF\nhi\nEOF\n)"))
         self.assertFalse(pat.search('new=$(jq -r .a <<<"$out")'))
 
+    def test_no_bash4_builtins(self):
+        # #736: macOS's /bin/bash 3.2 has no mapfile/readarray; restart.sh died there before restarting anything
+        pat = re.compile(r"^[^#\n]*\b(mapfile|readarray)\b", re.M)
+        for f in shell_scripts():
+            with open(f, encoding="utf-8") as fh:
+                m = pat.search(fh.read())
+            self.assertIsNone(m, f"{os.path.relpath(f, ROOT)}: bash 4's {m and m.group(1)} (a while read loop works on 3.2)")
+
     def test_each_parses(self):
         import shutil
         import subprocess
