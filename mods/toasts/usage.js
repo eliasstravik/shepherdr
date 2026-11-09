@@ -1,5 +1,5 @@
 // Usage insights in the window (the "insights" add-on): note("view", { view: "settings" }) appends one line to
-// ~/.herdr/shepherdr/usage.jsonl on this machine, and nothing while the add-on is off. Kinds, ids, counts and times
+// usage.jsonl in the service's folder on this machine (~/.local/state/shepherdr/service), and nothing while the add-on is off. Kinds, ids, counts and times
 // only (core/usage.js keeps those and drops the rest). No network call: a local shell append, nothing else.
 // Shared: the source is lib/usage.js; bin/sync-shared copies it into each mod in lib/COPIES.
 // Edit lib/usage.js, never a mod's copy, then run bin/sync-shared.
@@ -9,8 +9,9 @@
 import { exec, home, focused, shared, window as win } from "herdr";
 import { on } from "./addons.js";
 import { lines, sinceDelete, APPEND, DELETED_AT, CAP } from "./core/usage.js";
+import { dirs } from "./dirs.js";
 
-const dir = () => `${home()}/.herdr/shepherdr`;
+const dir = () => dirs().service;
 
 export function note(kind, fields = {}) {
   if (!on("insights")) return;

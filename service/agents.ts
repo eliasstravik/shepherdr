@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { join } from "node:path";
 import type { Hub } from "./hub.ts";
-import { HOME, appHome, writable } from "./paths.ts";
+import { HOME, appHome, where, writable } from "./paths.ts";
 import { sh } from "./model.ts";
 import * as AG from "../core/agents.js";
 import { kindOf } from "../core/chat-reader.js";
@@ -22,7 +22,7 @@ export class Agents {
   constructor(private hub: Hub) {}
 
   /** The person's pinned and recent models (core/agents.js PICKS_FILE), as the window's model menu keeps them here */
-  private picksPath = join(HOME, PICKS_FILE);
+  private picksPath = where()["model-picks"];
   picks() {
     try { return parsePicks(readFileSync(this.picksPath, "utf8")); } catch { return parsePicks(""); }
   }

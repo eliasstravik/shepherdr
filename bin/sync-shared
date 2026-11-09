@@ -15,6 +15,10 @@ A copy that differs from both lib and what this last wrote there (lib/.last/) wa
 hand: it is never overwritten; the run fails and names it (keep its change with --from, or move
 the change into lib/<file>). A fresh checkout or worktree has no lib/.last: what git last
 committed of the source stands in for it (a copy equal to that is ours, not hand-edited).
+
+The helpers that go to other machines as one file each (herdr-secret, herdr-artifact) carry a block of
+Shepherdr's paths between "# ---- SHEP:" and "# ---- end SHEP ----": the source is
+mods/tasks/bin/herdr_task/layout.py's PY, written in here too.
 """
 import hashlib, os, shutil, subprocess, sys
 
@@ -58,6 +62,43 @@ def write(path, data):
     with open(tmp, "wb") as f:
         f.write(data)
     os.replace(tmp, path)
+
+
+SHEP_BLOCKS = ["bin/herdr-secret", "mods/artifacts/bin/herdr-artifact"]
+
+
+def shep_blocks(check):
+    """The SHEP block in each one-file helper, as layout.py's PY says. Returns (bad, made)."""
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("shep_layout", os.path.join(MODS, "tasks", "bin", "herdr_task", "layout.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        want = mod.PY
+    except (OSError, ImportError, SyntaxError) as e:
+        return [f"mods/tasks/bin/herdr_task/layout.py: {e}"], []
+    bad, made = [], []
+    for rel in SHEP_BLOCKS:
+        path = os.path.join(HOME, rel)
+        text = (read(path) or b"").decode()
+        if not text:
+            continue
+        try:
+            a = text.index("\n", text.index("# ---- SHEP:")) + 1
+            b = text.index("# ---- end SHEP ----")
+        except ValueError:
+            bad.append(f"{rel} has no SHEP block")
+            continue
+        if text[a:b] == want.lstrip("\n"):
+            continue
+        if check:
+            bad.append(f"{rel}'s SHEP block differs from layout.py's PY")
+        else:
+            mode = os.stat(path).st_mode
+            write(path, (text[:a] + want.lstrip("\n") + text[b:]).encode())
+            os.chmod(path, mode)
+            made.append(rel)
+    return bad, made
 
 
 def main(argv):
@@ -110,6 +151,9 @@ def main(argv):
             if mod not in mods and (read(path) or b"").split(b"\n", 1)[0] == head:
                 bad.append(f"mods/{mod}/{name} looks like a copy of lib/{name}: add {mod} to lib/COPIES")
 
+    b2, m2 = shep_blocks(check)
+    bad += b2
+    made += m2
     for rel in made:
         print(f"synced {rel}")
     if bad:

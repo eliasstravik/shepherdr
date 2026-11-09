@@ -35,8 +35,18 @@ them up and takes them over), a key you set (unless you say yes), a file you cha
 install (the new copy goes beside it as <file>.new). Everything it replaces goes to
 .config/herdr-app/.shepherdr-backup/<time>/ first; uninstall puts it back. What it installed is
 recorded in .config/herdr-app/data/shepherdr/installed.json (a sha256 per file), so running it again
-changes only what changed. While it replaces a helper or template, .herdr/sync-hold keeps
-herdr-task from sending them to other machines until `shepherdr doctor` finds the install whole.
+changes only what changed. While it replaces a helper or template, a sync hold (sync-hold in
+Shepherdr's state folder, and .herdr/sync-hold for older helpers) keeps herdr-task from sending them
+to other machines until `shepherdr doctor` finds the install whole.
+
+Shepherdr's own data (tasks, artifacts, settings, secrets, browsers, the service's files) lives in its
+own folders: ~/.config/shepherdr, ~/.local/share/shepherdr, ~/.local/state/shepherdr, ~/.cache/shepherdr
+(SHEPHERDR_HOME or XDG_* move them). install and update move it there from ~/.herdr once, leaving links at
+the old paths (mods/tasks/bin/herdr_task/layout.py):
+  shepherdr where                     every path in use, and the move's state
+  shepherdr migrate [--dry-run]       the move now (install, update and herdr-task do it by themselves)
+  shepherdr migrate --rollback        everything back to ~/.herdr (for an older Shepherdr); `migrate` moves again
+  shepherdr migrate --cleanup-legacy  remove the old paths' links, once no machine runs an older Shepherdr
 """
 
 import argparse
@@ -63,7 +73,61 @@ UNIT = ".config/systemd/user/shepherdr.service"
 PLIST = "Library/LaunchAgents/dev.shepherdr.service.plist"
 AGENT = "dev.shepherdr.service"
 RECORD = f"{APP}/data/shepherdr/installed.json"
-HOLD = f"{HERDR}/sync-hold"
+HOLD = f"{HERDR}/sync-hold"          # older helpers look here; this version's look in the state folder too
+
+
+def layout_mod():
+    """herdr_task/layout.py beside this script (a checkout, the app's copy, or a web-only install's)."""
+    here = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    p = os.path.join(here, "mods", "tasks", "bin")
+    if p not in sys.path:
+        sys.path.insert(0, p)
+    sys.dont_write_bytecode = True
+    from herdr_task import layout
+    return layout
+
+
+def where_for(root):
+    """The layout paths for an install root: the real home honours SHEPHERDR_HOME and XDG_*, a scratch
+    root (--root) never does (it would reach the real folders)."""
+    real = os.path.realpath(root) == os.path.realpath(real_home())
+    return layout_mod().Where(home=root, env=None if real else {})
+
+
+def env_for(root):
+    """What decides the folders, as the service must see it too (a user service has none of the shell's)."""
+    if os.path.realpath(root) != os.path.realpath(real_home()):
+        return {}
+    return {k: v for k, v in os.environ.items() if k in ("SHEPHERDR_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME") and v.startswith("/")}
+
+
+def service_file(root, name):
+    """A file of the service's own (service.json, web.json, ...): Shepherdr's state folder once moved, else ~/.herdr/shepherdr."""
+    return os.path.join(where_for(root).path("service"), name)
+
+
+def hold_paths(root):
+    return [os.path.join(root, HOLD), os.path.join(where_for(root).roots["state"], "sync-hold")]
+
+
+def move_data(r, a, home):
+    """The one-time move of Shepherdr's data into its own folders (layout.py), as part of an install or update.
+    Prints one plain line when something moved; never stops the install (doctor says what's wrong)."""
+    L = layout_mod()
+    try:
+        res = L.migrate(home=r.root, env=None if home else {}, dry=a.dry_run)
+    except Exception as e:  # a lock held, a full disk: the data stays on the old paths, still working
+        r.notes.append(f"Shepherdr's data stays in ~/.herdr for now ({e}); `shepherdr migrate` tries again")
+        return
+    if a.dry_run:
+        if res["moved"]:
+            say("  data: would move " + ", ".join(sorted(res["moved"])) + " into Shepherdr's own folders")
+        return
+    line = L.summary(res)
+    if line:
+        say(f"  {line}")
+    for n in res["notes"]:
+        r.notes.append(n)
 # Helpers on the PATH: their name, and where the link leads (under the app home).
 LINKS = {"herdr-task": "mods/tasks/bin/herdr-task", "herdr-artifact": "mods/artifacts/bin/herdr-artifact",
          "herdr-secret": "bin/herdr-secret", "herdr-browser": "bin/herdr-browser", "shepherdr": "bin/shepherdr"}
@@ -329,7 +393,8 @@ def bun_path():
 def unit_text(root, bun, port=None):
     """The user service that keeps Shepherdr's service running (Linux), or its launchd agent (macOS). port: install's
     --port (SHEPHERDR_PORT; none: the service's own 7788). The window and the CLI read the port the service really took
-    from ~/.herdr/shepherdr/service.json, so this is the only place it is set."""
+    from its service.json, so this is the only place it is set. SHEPHERDR_HOME and XDG_* as the installer saw them go
+    along, so the service finds the same folders."""
     main = os.path.join(root, SHARE, "service", "main.ts")
     # hc, herdr-task and the helpers live in ~/.local/bin, which a user service's PATH lacks; and the tools herdr-task
     # and the agents run (gh, git, node, agent-browser, the CLIs…) where this install finds them (mise, nvm, brew…)
@@ -345,11 +410,11 @@ def unit_text(root, bun, port=None):
 <dict>
   <key>Label</key><string>{AGENT}</string>
   <key>ProgramArguments</key><array><string>{bun}</string><string>{main}</string></array>
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>{path}</string>{f"<key>SHEPHERDR_PORT</key><string>{port}</string>" if port else ""}</dict>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>{path}</string>{f"<key>SHEPHERDR_PORT</key><string>{port}</string>" if port else ""}{"".join(f"<key>{k}</key><string>{v}</string>" for k, v in sorted(env_for(root).items()))}</dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>{os.path.join(root, HERDR, "shepherdr", "service.log")}</string>
-  <key>StandardErrorPath</key><string>{os.path.join(root, HERDR, "shepherdr", "service.log")}</string>
+  <key>StandardOutPath</key><string>{service_file(root, "service.log")}</string>
+  <key>StandardErrorPath</key><string>{service_file(root, "service.log")}</string>
 </dict>
 </plist>
 """
@@ -360,7 +425,7 @@ After=network-online.target
 [Service]
 ExecStart={bun} {main}
 Environment=PATH={path}
-{f"Environment=SHEPHERDR_PORT={port}{chr(10)}" if port else ""}Restart=always
+{f"Environment=SHEPHERDR_PORT={port}{chr(10)}" if port else ""}{"".join(f"Environment={k}={v}{chr(10)}" for k, v in sorted(env_for(root).items()))}Restart=always
 RestartSec=2
 
 [Install]
@@ -387,7 +452,7 @@ def json_file(path):
 def our_port(root):
     """The port this machine's service took (service.json), else the one install set, else the default."""
     try:
-        return int(json_file(os.path.join(root, HERDR, "shepherdr", "service.json"))["port"])
+        return int(json_file(service_file(root, "service.json"))["port"])
     except (KeyError, TypeError, ValueError):
         rec = load_record(root) or json_file(os.path.join(root, WEB_RECORD)) or {}
         return rec.get("port") or DEFAULT_PORT
@@ -397,10 +462,10 @@ def service_answers(root):
     """Shepherdr's own service answers here (its health says the id it wrote in service.json, not another app on its
     port): (True, port), or (False, why)."""
     try:
-        f = json_file(os.path.join(root, HERDR, "shepherdr", "service.json"))
+        f = json_file(service_file(root, "service.json"))
         port, sid = int(f["port"]), f["id"]
     except (ValueError, KeyError, TypeError):
-        return False, "the Shepherdr service hasn't started here (no ~/.herdr/shepherdr/service.json)"
+        return False, f"the Shepherdr service hasn't started here (no {service_file(root, 'service.json')})"
     import urllib.request
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=3) as res:
@@ -794,7 +859,8 @@ def cmd_install(a, update=False):
             say(f"  remove  {rel}")
     # The sync to other machines waits until doctor finds this whole.
     if touches_tools and not a.dry_run:
-        atomic_write(r.p(HOLD), f"held by shepherdr {VERSION} install at {r.stamp}: run `shepherdr doctor`\n".encode())
+        for p in hold_paths(root):
+            atomic_write(p, f"held by shepherdr {VERSION} install at {r.stamp}: run `shepherdr doctor`\n".encode())
         r.notes.append("the sync to other machines is held until `shepherdr doctor` finds the install whole")
     rec = rec or {}
     files = dict(old_files)
@@ -830,6 +896,7 @@ def cmd_install(a, update=False):
     rec["mods"] = {m: True for m in mods}
     rec["keys"], keys_changed = merge_keys(r, src, rec, a.keys, a.yes)
     rec["links"] = link_helpers(r, rec)
+    move_data(r, a, home)   # before the service starts again: it then finds the data where it now is
     set_port(a, rec)
     install_service(r, rec, home)
     if a.guard:
@@ -922,13 +989,14 @@ def cmd_install_web(a, update=False):
     # what this run replaced (an older herdr-task, the helpers…): uninstall puts it back
     if r.backed:
         rec["backups"] = [*rec.get("backups", []), r.backup_dir]
+    move_data(r, a, home)
     set_port(a, rec)
     install_service(r, rec, home)
     if not a.dry_run:
         atomic_write(r.p(WEB_RECORD), (json.dumps(rec, indent=2, sort_keys=True) + "\n").encode())
     for x in r.notes:
         say(f"  - {x}")
-    say("  done." + (" Open the link the service prints (journalctl --user -u shepherdr) or ~/.herdr/shepherdr/web.json." if not a.dry_run else ""))
+    say("  done." + (f" Open the link the service prints (journalctl --user -u shepherdr) or {service_file(root, 'web.json')}." if not a.dry_run else ""))
     return 0
 
 
@@ -967,19 +1035,56 @@ def cmd_uninstall_web(a, root):
                 os.rmdir(d)
             except OSError:
                 pass
-    say(f"Shepherdr (web only) uninstalled from {root}{' (dry run)' if a.dry_run else ''}. ~/.herdr stays.")
+    say(f"Shepherdr (web only) uninstalled from {root}{' (dry run)' if a.dry_run else ''}. Your data (`shepherdr where` listed it) stays.")
     return 0
 
 
 # ---- doctor -------------------------------------------------------------------------------------
 
+def short(p):
+    h = real_home()
+    return "~" + p[len(h):] if p.startswith(h + "/") else p
+
+
+def data_check(root):
+    """Where Shepherdr's data is (layout.py): (bad, notes). Not moved while it should be holds the sync."""
+    L = layout_mod()
+    w = where_for(root)
+    st = L.status(home=root, env=None if w.env is os.environ else {})
+    bad, notes = [], []
+    if st["layout"] > L.LAYOUT:
+        bad.append(f"the data here is on layout {st['layout']}, newer than this Shepherdr knows: update Shepherdr")
+    elif st["rolled_back"]:
+        notes.append("data: rolled back to ~/.herdr (`shepherdr migrate` moves it to Shepherdr's own folders again)")
+    elif not st["migrated"]:
+        if st["shared_disk"]:
+            notes.append(f"data: stays in ~/.herdr: {st['shared_disk']} (a network disk); `shepherdr migrate --force` moves it")
+        else:
+            bad.append("data: not moved to Shepherdr's own folders yet: run `shepherdr migrate` (`shepherdr where` shows the plan)")
+    else:
+        r = st["roots"]
+        notes.append(f"data: Shepherdr's own folders (layout {st['layout']}): {short(r['config'])}, {short(r['data'])}, {short(r['state'])}")
+        odd = {k: v["state"] for k, v in st["kinds"].items() if "!" in v["state"] or "plain copy" in v["state"]}
+        for k, s in sorted(odd.items()):
+            (bad if "!" in s else notes).append(f"data: {k}: {s}")
+        kept = [k for k, v in st["kinds"].items() if v["state"].startswith("kept")]
+        if kept:
+            notes.append(f"data: {', '.join(kept)} kept where they were (another disk); the new paths link there")
+        if not (st["journal"] or {}).get("cleaned"):
+            notes.append("data: the old paths in ~/.herdr link to the new ones, for older Shepherdr copies (until `shepherdr migrate --cleanup-legacy`)")
+    if st["worktrees"]["old_left"] and st["worktrees"]["new"] != st["worktrees"]["old"]:
+        notes.append(f"worktrees: {st['worktrees']['old_left']} still in {short(st['worktrees']['old'])} (they stay until their tasks finish); "
+                     f"new ones go to {short(st['worktrees']['new'])}")
+    return bad, notes
+
+
 def serve_check(root):
     """Serve from: which machine serves the web app (what the service last wrote, web.json), and /shepherdr shared here
     only while this machine serves it. Returns (bad, notes)."""
     try:
-        w = json.load(open(os.path.join(root, HERDR, "shepherdr", "web.json")))
+        w = json.load(open(service_file(root, "web.json")))
     except (OSError, ValueError):
-        return [], ["the service hasn't said where the web app is served yet (~/.herdr/shepherdr/web.json)"]
+        return [], [f"the service hasn't said where the web app is served yet ({service_file(root, 'web.json')})"]
     sv = w.get("serve") or {}
     host = sv.get("host")
     notes = [f"web app: served from {host or 'this machine'}" + (f", {w['link']}" if w.get("link") else "")]
@@ -1025,6 +1130,9 @@ def cmd_doctor(a):
         bad += [f"link {BIN}/{n} doesn't lead to {d}" for n, d in rec.get("links", {}).items()
                 if not os.path.islink(r.p(f"{BIN}/{n}")) or os.path.realpath(r.p(f"{BIN}/{n}")) != os.path.realpath(d)]
         s_bad, s_notes = serve_check(root) if home else ([], [])
+        d_bad, d_notes = data_check(root)
+        bad += d_bad
+        s_notes = d_notes + s_notes
         if home and has_unit(root):
             up, why = service_answers(root)
             s_bad += [] if up else [why]
@@ -1072,6 +1180,9 @@ def cmd_doctor(a):
             warn.append(f"hook missing in {f} ({event}): questions from that CLI won't reach the chat")
     t_bad, t_notes = check_tools(home)
     bad += t_bad
+    d_bad, d_notes = data_check(root)
+    bad += d_bad
+    t_notes = d_notes + t_notes
     if home:
         s_bad, s_notes = serve_check(root)
         bad += s_bad
@@ -1085,13 +1196,14 @@ def cmd_doctor(a):
         say(f"  ✗ {x}")
     for x in warn + t_notes + [update_hint(rec)]:
         say(f"  - {x}")
-    hold = r.p(HOLD)
+    holds = [p for p in hold_paths(root) if os.path.exists(p)]
     if bad:
-        if os.path.exists(hold):
+        if holds:
             say("  the sync to other machines stays held until these are fixed")
         return 1
-    if os.path.exists(hold):
-        os.remove(hold)
+    if holds:
+        for p in holds:
+            os.remove(p)
         say("  ✓ whole: the sync to other machines may go again")
     else:
         say("  ✓ whole")
@@ -1189,10 +1301,11 @@ def cmd_uninstall(a):
             else:
                 atomic_write(p, (json.dumps(d, indent=2) + "\n").encode())
     if not a.dry_run:
-        try:
-            os.remove(r.p(HOLD))
-        except FileNotFoundError:
-            pass
+        for p in hold_paths(root):
+            try:
+                os.remove(p)
+            except FileNotFoundError:
+                pass
         os.remove(r.p(RECORD))
         # Folders that only held ours.
         for rel in (f"{APP}/data/shepherdr", f"{APP}/bin", f"{APP}/lib", f"{APP}/core", SHARE):
@@ -1201,7 +1314,7 @@ def cmd_uninstall(a):
                     os.rmdir(d)
                 except OSError:
                     pass
-    say(f"Shepherdr uninstalled from {root}{' (dry run)' if a.dry_run else ''}. Your data/, ~/.herdr and your own changes stay.")
+    say(f"Shepherdr uninstalled from {root}{' (dry run)' if a.dry_run else ''}. Your data/, Shepherdr's data folders (`shepherdr where`) and your own changes stay.")
     for k in kept:
         say(f"  kept (changed or yours): {k}")
     if r.backed:
@@ -1214,7 +1327,7 @@ def cmd_uninstall(a):
 
 def restore_share(root):
     """/shepherdr as it was before a move here took it (serve-from --take-link kept it in replaced-share.json)."""
-    f = os.path.join(root, HERDR, "shepherdr", "replaced-share.json")
+    f = service_file(root, "replaced-share.json")
     try:
         old = json.load(open(f))
     except (OSError, ValueError):
@@ -1313,6 +1426,76 @@ def cmd_web(a):
     raise Stop("shepherdr web serve-from <machine|here> [--take-link] | shepherdr web status")
 
 
+def cmd_where(a):
+    """Every path Shepherdr uses here, and the move's state (as `go env`)."""
+    root = os.path.realpath(a.root or real_home())
+    L = layout_mod()
+    st = L.status(home=root, env=None if root == os.path.realpath(real_home()) else {})
+    if a.json:
+        say(json.dumps(st, indent=1))
+        return 0
+    state = ("Shepherdr's own folders" if st["migrated"] else "rolled back to ~/.herdr" if st["rolled_back"]
+             else "~/.herdr (not moved yet: `shepherdr migrate`)")
+    say(f"layout {st['layout'] or 1} (this Shepherdr knows {st['knows']}): {state}")
+    for k, v in st["roots"].items():
+        say(f"  {k:7} {v}")
+    say("")
+    for k, v in st["kinds"].items():
+        say(f"  {k:14} {v['path']}" + (f"   [{v['state']}]" if st["migrated"] else ""))
+    say(f"  {'worktrees':14} {st['worktrees']['new']} (new tasks)" + (f"; {st['worktrees']['old_left']} older ones stay in {st['worktrees']['old']}" if st["worktrees"]["old_left"] and st["worktrees"]["new"] != st["worktrees"]["old"] else ""))
+    if st["migrated"] and not (st["journal"] or {}).get("cleaned"):
+        say("\nThe old paths in ~/.herdr are links to these, for older Shepherdr copies and other machines not updated yet.")
+    if os.path.exists(st["kinds"]["vault"]["path"]):
+        say("Secrets: a file only you can read (mode 600 in a 700 folder), not encrypted: that permission on this disk is what guards it.")
+    return 0
+
+
+def restart_service(root):
+    """The service reads its folders when it starts: after a move or a rollback by hand, it starts again (when it
+    runs here). The window's mods and herdr-task's scheduler follow by themselves within a minute."""
+    if os.path.realpath(root) != os.path.realpath(real_home()) or not has_unit(root):
+        return
+    if sys.platform == "darwin":
+        ok = subprocess.run(["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{AGENT}"], capture_output=True).returncode == 0
+    else:
+        ok = subprocess.run(["systemctl", "--user", "restart", "shepherdr.service"], capture_output=True).returncode == 0
+    say("  the Shepherdr service started again on the new paths" if ok else "  restart the Shepherdr service (it reads its folders when it starts)")
+
+
+def cmd_migrate(a):
+    root = os.path.realpath(a.root or real_home())
+    L = layout_mod()
+    env = None if root == os.path.realpath(real_home()) else {}
+    if a.rollback:
+        res = L.rollback(home=root, env=env)
+        say("Shepherdr's data is back in ~/.herdr: " + (", ".join(sorted(res["moved"])) or "nothing was moved") + ".")
+        for n in res["notes"]:
+            say(f"  - {n}")
+        say("  An older Shepherdr finds it as it left it; this one stays on ~/.herdr until `shepherdr migrate`.")
+        restart_service(root)
+        return 0
+    if a.cleanup_legacy:
+        if not a.yes:
+            raise Stop("this removes the links at the old paths (~/.herdr/...): an older Shepherdr on this machine, and other "
+                       "machines on an older Shepherdr that read this one, would no longer find the data. Update every "
+                       "machine first (`herdr-task machines` lists them), then run it again with --yes")
+        gone = L.cleanup_legacy(home=root, env=env)
+        say("Removed:" if gone else "Nothing to remove.")
+        for g in gone:
+            say(f"  {g}")
+        return 0
+    res = L.migrate(home=root, env=env, dry=a.dry_run, force=a.force, again=True)
+    if a.dry_run:
+        say(("Would move: " + ", ".join(sorted(res["moved"]))) if res["moved"] else "Nothing to move.")
+    else:
+        say(L.summary(res) or "Already in Shepherdr's own folders.")
+        if res["state"] == "migrated":
+            restart_service(root)
+    for n in res["notes"]:
+        say(f"  - {n}")
+    return 0 if res["state"] in ("done", "migrated", "would migrate") else 1
+
+
 def cmd_secrets(a):
     if a.action == "move-to" and not (a.machine or a.to_id):
         raise Stop("which machine? shepherdr secrets move-to <machine|here> (hc machine ls lists them)")
@@ -1389,6 +1572,16 @@ def main(argv):
     s.add_argument("--restore", action="store_true", help="here: take this machine's backup back (the other one is gone for good)")
     s.add_argument("--to-id", help=argparse.SUPPRESS)
     s.add_argument("--json", action="store_true")
+    wh = sub.add_parser("where", help="every path Shepherdr keeps its data in here, and whether it moved there")
+    wh.add_argument("--root", help=argparse.SUPPRESS)
+    wh.add_argument("--json", action="store_true")
+    mg = sub.add_parser("migrate", help="move Shepherdr's data from ~/.herdr into its own folders (install and update do it)")
+    mg.add_argument("--root", help=argparse.SUPPRESS)
+    mg.add_argument("--dry-run", action="store_true", help="say what would move, move nothing")
+    mg.add_argument("--rollback", action="store_true", help="everything back to ~/.herdr (an older Shepherdr then finds it)")
+    mg.add_argument("--cleanup-legacy", action="store_true", help="remove the links at the old paths (once every machine is updated)")
+    mg.add_argument("--force", action="store_true", help="move even on a network disk (no other machine uses this home)")
+    mg.add_argument("--yes", action="store_true")
     sub.add_parser("version")
     a = ap.parse_args(argv)
     try:
@@ -1409,6 +1602,10 @@ def main(argv):
             return cmd_web(a)
         if a.cmd == "secrets":
             return cmd_secrets(a)
+        if a.cmd == "where":
+            return cmd_where(a)
+        if a.cmd == "migrate":
+            return cmd_migrate(a)
         if a.cmd == "version":
             say(f"shepherdr {VERSION}")
             return 0

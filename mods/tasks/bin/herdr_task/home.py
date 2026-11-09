@@ -18,7 +18,7 @@ import re
 import subprocess
 import threading
 
-from .base import APP_HOME, Fail, guard, HOME, hc_json, now, run, STORE, WORKTREES
+from .base import APP_HOME, Fail, guard, HOME, hc_json, now, run, STORE, WHERE
 from .settings import LOCAL_MACHINE, SETTINGS
 from .output import say
 from .store import is_task_list, read_list, store_files
@@ -106,7 +106,7 @@ def top(rows, n=3):
 
 
 def leftover_worktrees():
-    """Task worktrees (WORKTREES/<repo>/<branch>) whose task finished more than LEFTOVER_MS ago,
+    """Task worktrees (<root>/<repo>/<branch>, in every root: the old ~/.herdr/worktrees drains) whose task finished more than LEFTOVER_MS ago,
     or that no task here knows: [{path, task, state, days, dirty}]. dirty: uncommitted work there,
     never to be removed without the person."""
     known = {}
@@ -118,17 +118,23 @@ def leftover_worktrees():
             if t.get("worktree"):
                 known[os.path.realpath(t["worktree"])] = (f"{d.get('prefix') or 'T'}-{t['id']}", t)
     out = []
-    try:
-        repos = sorted(os.listdir(WORKTREES))
-    except OSError:
-        repos = []
-    for repo in repos:
+    pairs = []
+    for root in WHERE.worktree_roots(str((read_settings().get("everywhere") or {}).get("tasks", {}).get("worktree_root") or "").strip() or None):
         try:
-            branches = sorted(os.listdir(os.path.join(WORKTREES, repo)))
+            pairs += [(root, r) for r in sorted(os.listdir(root))]
+        except OSError:
+            pass
+    seen = set()
+    for wroot, repo in pairs:
+        try:
+            branches = sorted(os.listdir(os.path.join(wroot, repo)))
         except OSError:
             continue
         for b in branches:
-            path = os.path.join(WORKTREES, repo, b)
+            path = os.path.join(wroot, repo, b)
+            if os.path.realpath(path) in seen:
+                continue
+            seen.add(os.path.realpath(path))
             if not os.path.isdir(path):
                 continue
             ref, t = known.get(os.path.realpath(path), (None, None))

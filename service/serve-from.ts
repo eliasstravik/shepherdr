@@ -3,7 +3,7 @@
 //   1. Shepherdr's web service there, installed or brought up to date (shepherdr web install-on, over herdr-core's link),
 //      and running (its node record says so);
 //   2. with --take-link, /shepherdr on that machine's tailnet name shared to something else is set aside (kept in
-//      ~/.herdr/shepherdr/replaced-share.json there; moving away again puts it back);
+//      replaced-share.json in the service's folder there; moving away again puts it back);
 //   3. the shared document, the settings file and the role instructions copied from the machine serving now, in the
 //      new one's words (core/host.js);
 //   4. the host record, newer, written here and on every machine linked from here; each service follows it: the new
@@ -16,6 +16,7 @@ import { join } from "node:path";
 import * as HC from "../core/host.js";
 import { buildId } from "./build.ts";
 import { underTest } from "./paths.ts";
+import { SH } from "../core/paths.js";
 
 const { HOST_DOC, NODE_DOC, newestHost, nodeAlive, renamer, relocateDoc, relocateSettings } = HC as any;
 const VERSION = JSON.parse(readFileSync(join(import.meta.dir, "..", "package.json"), "utf8")).version as string;
@@ -47,9 +48,21 @@ async function readFile(rel: string, on: string | null): Promise<string | null> 
   try { return (await call<{ text: string }>("file.read", { path: rel, ...at(on) })).text; }
   catch (e) { if ((e as any).kind === "not_found") return null; throw e; }
 }
+// The settings file on a machine, wherever it keeps it (its Shepherdr folders, or ~/.herdr on an older one: core/paths.js SH).
+async function readSettingsOn(on: string | null): Promise<string | null> {
+  const r = await exec(["sh", "-c", SH + '[ -e "$SHEP_SETTINGS" ] || exit 3; cat "$SHEP_SETTINGS"'], on);
+  if (r.code === 3) return null;
+  if (r.code !== 0) throw new Error(`couldn't read the settings${on ? ` on ${on}` : ""}: ${r.stderr.trim()}`);
+  return r.stdout;
+}
+async function writeSettingsOn(text: string, on: string | null) {
+  if (underTest()) throw new Error("A test may not write a real settings file.");
+  const r = await exec(["sh", "-c", SH + 'f="$SHEP_SETTINGS"; mkdir -p "$(dirname "$f")" && umask 077 && cat > "$f.host-tmp" && mv "$f.host-tmp" "$f"'], on, text);
+  if (r.code !== 0) throw new Error(`couldn't write the settings${on ? ` on ${on}` : ""}`);
+}
 const writeFile = async (rel: string, text: string, on: string | null) => {
   // a test never moves the person's settings (paths.ts writableSettings)
-  if (underTest() && rel.endsWith("shepherdr.json")) throw new Error("A test may not write a real ~/.herdr/shepherdr.json.");
+  if (underTest() && rel.endsWith("shepherdr.json")) throw new Error("A test may not write a real settings file.");
   const r = await exec(["sh", "-c", 'mkdir -p "$(dirname "$1")" && umask 077 && cat > "$1.host-tmp" && mv "$1.host-tmp" "$1"', "sh", rel], on, text);
   if (r.code !== 0) throw new Error(`couldn't write ${rel}${on ? ` on ${on}` : ""}`);
 };
@@ -100,12 +113,12 @@ if (!there || there.version !== VERSION || (there.build && there.build !== BUILD
 }
 
 // ---- 2. the link there --------------------------------------------------------------------------------------------
-const TAKE = `set -e; f="$HOME/.herdr/shepherdr/replaced-share.json"
+const TAKE = `${SH}set -e; mkdir -p "$SHEP_SERVICE"; f="$SHEP_SERVICE/replaced-share.json"
 s=$(tailscale serve status --json 2>/dev/null || echo '{}')
-printf '%s' "$s" | python3 -c '
+printf '%s' "$s" | SHEP_SERVICE="$SHEP_SERVICE" python3 -c '
 import json, os, sys
 s = json.load(sys.stdin)
-try: port = int(json.load(open(os.path.expanduser("~/.herdr/shepherdr/service.json")))["port"])
+try: port = int(json.load(open(os.path.join(os.environ["SHEP_SERVICE"], "service.json")))["port"])
 except Exception: port = 7788
 for hp, web in (s.get("Web") or {}).items():
     h = (web.get("Handlers") or {}).get("/shepherdr")
@@ -128,12 +141,12 @@ if ((record?.id ?? me.id) !== toId && (was === null || connected.includes(was)))
   const move = renamer(src, dst);
   const doc = (await getDoc("shepherdr", was)).value;
   if (doc && typeof doc === "object") await setDoc("shepherdr", relocateDoc(doc, move), to);
-  const settings = await readFile(".herdr/shepherdr.json", was);
+  const settings = await readSettingsOn(was);
   if (settings) {
     let f: any = null;
     try { f = JSON.parse(settings); } catch { fail("the settings file there isn't valid JSON: fix it first"); }
     // a pushed copy holds only that machine's part: no truth to move
-    if (!("pushed_from" in f)) await writeFile(".herdr/shepherdr.json", JSON.stringify({ ...relocateSettings(f, move), version: 1 }, null, 2) + "\n", to);
+    if (!("pushed_from" in f)) await writeSettingsOn(JSON.stringify({ ...relocateSettings(f, move), version: 1 }, null, 2) + "\n", to);
   }
   for (const t of ["assistant.md", "worker.md", "reviewer.md"]) {
     const text = await readFile(`.config/herdr-core/templates/${t}`, was);

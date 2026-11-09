@@ -3,7 +3,7 @@
 // (plain text) and its saved progress. Otherwise it's the same regular Assistant.
 // Set as Tasks is: Everywhere's heartbeat, schedule and events, and a space's own of any of them
 // (its rows say "Set for this space · Reset" or "Inherited from Everywhere"), kept in Shepherdr
-// settings with the rest ("autopilot" in ~/.herdr/shepherdr.json: main.js set/scoped/reset, so they
+// settings with the rest ("autopilot" in ~/.config/shepherdr/settings.json: main.js set/scoped/reset, so they
 // go to every machine). A space switches it on or off with the switch in its Assistant's header
 // (mods/pane-chat/autopilot.js); this page has no switch and no Run now. herdr-task reads them
 // (its scheduler wakes the spaces that are on) and checks a Custom schedule's words before they're
@@ -17,9 +17,10 @@ import { v_flex, h_flex, InputState, Input, TextareaState, Textarea } from "gpui
 import { exec, appHome, home, readTextFile } from "herdr";
 import { TEXT, RADIUS, H, segmented } from "./ui.js";
 import * as AP from "./core/autopilot.js";
+import { dirs } from "./dirs.js";
 
 const CLI = () => `${appHome()}/mods/tasks/bin/herdr-task`;
-const STATE = () => `${home()}/.herdr/tasks/.autopilot.json`;
+const STATE = () => `${dirs().tasks}/.autopilot.json`;
 const OLD_BEAT = () => `${home()}/.config/herdr-core/autopilot/everywhere.md`;
 const CUSTOM = "custom";
 const MONO = "JetBrains Mono";

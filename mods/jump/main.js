@@ -14,7 +14,7 @@
 //             panel, when the keyboard was there), as a card there opens it (artview.js); else
 //             (a terminal, or its place not known yet) the Artifacts sidebar, else the whole window
 // Ctrl+Shift+K opens this too: it's the one switcher.
-// Tasks and artifacts are read from every machine's ~/.herdr/tasks and ~/.herdr/artifacts once
+// Tasks and artifacts are read from every machine's ~/.local/share/shepherdr/tasks and ~/.local/share/shepherdr/artifacts once
 // as it opens, as the Tasks and Artifacts panels read them.
 
 import { div, svg } from "gpui-kit";
@@ -25,6 +25,7 @@ import { note } from "./usage.js";
 import { spaces, terminals, agents, inRender } from "./live.js";
 import { taskDot } from "./dot.js";
 import { READ_LISTS, taskLists } from "./core/tasklists.js";
+import { SH } from "./core/paths.js";
 import { busyAgain, onIt } from "./core/tasks.js";
 // A space's name as the sidebar (and the web app) says it: never "~" (core/spaces.js).
 import { spaceName } from "./core/spaces.js";
@@ -47,7 +48,7 @@ const STATUS = { needs: "Needs you", working: "Working", merging: "Merging", rea
 
 // The Tasks panel's reads (tasklists.js: READ_LISTS, taskLists); every artifact registry the
 // same way.
-const READ_ARTS = 'cd "$HOME/.herdr/artifacts" 2>/dev/null || exit 0; for f in *.json .*.json; do [ -f "$f" ] && cat "$f" && printf "\\n\\036\\n"; done; true';
+const READ_ARTS = SH + 'cd "$SHEP_ARTIFACTS" 2>/dev/null || exit 0; for f in *.json .*.json; do [ -f "$f" ] && cat "$f" && printf "\\n\\036\\n"; done; true';
 // Each folder's git repo (its common .git folder), a line each: "<folder>\t<common dir>", for a space's name.
 const READ_REPOS = 'for f in "$@"; do r=$(git -C "$f" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); printf "%s\\t%s\\n" "$f" "$r"; done; true';
 // The repo's name from its common .git folder (as the service's model.ts and the sidebar name it).

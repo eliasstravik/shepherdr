@@ -1,7 +1,7 @@
 // Serve from (Shepherdr settings › Web, `shepherdr web serve-from <machine>`): which machine serves the web app, and
 // how every machine keeps one truth with it.
 // - The host serves the web app and holds the truth: the shared document ("shepherdr": pins, the sidebar, Notify, the
-//   Window switches) and the settings file (~/.herdr/shepherdr.json, the role instructions). Another machine's service
+//   Window switches) and the settings file (~/.config/shepherdr/settings.json, the role instructions). Another machine's service
 //   reads and writes them there, through herdr-core's link; its window goes on using its own copy, kept in step.
 // - Which machine it is: herdr-core document "shepherdr.host" = { id, at } on every machine (id: the host's herdr-core
 //   id, the same on every machine). The newest record wins and each service hands it on to the machines it links to,

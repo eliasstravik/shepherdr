@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+Shepherdr keeps your tasks, settings and secrets in folders of its own now, and moves them there for you.
+
+- Updating moves Shepherdr's data out of `~/.herdr` into its own folders, once per machine: `~/.config/shepherdr`
+  (settings), `~/.local/share/shepherdr` (tasks, artifacts, secrets, new tasks' worktrees) and
+  `~/.local/state/shepherdr` (task browsers, the web service's files). Nothing to do: it says so in one line, and
+  `shepherdr where` shows every path. `SHEPHERDR_HOME` or the `XDG_*` folders move them elsewhere.
+- Nothing stops working: the old paths link to the new ones, so a machine not updated yet, an older helper or a path
+  in an old brief still finds everything. Running tasks keep their worktrees where they are; new ones go to the new
+  folder (or the one `tasks.worktree_root` names).
+- Safe to stop halfway and run again; it doesn't move by itself on a network disk. To roll back:
+  `shepherdr migrate --rollback` puts everything back in `~/.herdr`. Once every machine is updated,
+  `shepherdr migrate --cleanup-legacy --yes` removes the old links.
+- A repo's tasks now follow it when you rename or move its folder.
+
 ## 3.1.26
 
 The order you drag your spaces into now stays put.

@@ -33,7 +33,30 @@ import urllib.parse
 
 VERSION = "1"
 HOME = os.path.expanduser("~")
-STORE = os.path.join(HOME, ".herdr", "artifacts")
+# ---- SHEP: Shepherdr's own folders (a copy of herdr_task/layout.py's PY; test/test_layout.py checks it) ----
+def SHEP(rel, _t={'.herdr/shepherdr.json': ('config', 'settings.json'), '.herdr/model-picks.json': ('config', 'model-picks.json'), '.herdr/tasks': ('data', 'tasks'), '.herdr/artifacts': ('data', 'artifacts'), '.herdr/vault.json': ('data', 'secrets/vault.json'), '.herdr/secret-remote': ('data', 'secrets/remote'), '.herdr/tools.json': ('data', 'tools.json'), '.herdr/shepherdr': ('state', 'service'), '.herdr/browser': ('state', 'browser'), '.herdr/secret-drop': ('state', 'secret-drop'), '.herdr/secret-served': ('state', 'secret-served'), '.herdr/cli-check.json': ('state', 'cli-check.json'), '.herdr/machine-hold.json': ('state', 'machine-hold.json')}):
+    H, E = os.path.expanduser("~"), os.environ
+    a = lambda v: E.get(v) if (E.get(v) or "").startswith("/") else None
+    one = a("SHEPHERDR_HOME")
+    R = dict((k, os.path.join(one, k)) for k in ("config", "data", "state")) if one else {
+        "config": os.path.join(a("XDG_CONFIG_HOME") or os.path.join(H, ".config"), "shepherdr"),
+        "data": os.path.join(a("XDG_DATA_HOME") or os.path.join(H, ".local", "share"), "shepherdr"),
+        "state": os.path.join(a("XDG_STATE_HOME") or os.path.join(H, ".local", "state"), "shepherdr")}
+    try:
+        with open(os.path.join(R["data"], "LAYOUT")) as f:
+            on = int((f.read().split() or ["0"])[0]) >= 2 and not os.path.lexists(os.path.join(H, ".herdr", ".layout-rollback"))
+    except (OSError, ValueError):
+        on = False
+    if on:
+        for old, (base, new) in _t.items():
+            if rel == old or rel.startswith(old + "/"):
+                return os.path.join(R[base], new + rel[len(old):])
+    return os.path.join(H, rel)
+# ---- end SHEP ----
+
+# Shepherdr's own folders (~/.local/share/shepherdr/artifacts) once this machine's data moved there,
+# else the old ~/.herdr/artifacts (which then links to the new place).
+STORE = SHEP(".herdr/artifacts")
 FILES = os.path.join(STORE, "files")
 APP = os.environ.get("HERDR_APP_HOME") or os.path.join(HOME, ".config", "herdr-app")
 GUIDE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "ARTIFACTS.md")
@@ -196,7 +219,7 @@ def task_ref(key):
     if not n.isdigit():
         return None
     try:
-        with open(os.path.join(HOME, ".herdr", "tasks", slug + ".json")) as f:
+        with open(os.path.join(SHEP(".herdr/tasks"), slug + ".json")) as f:
             prefix = json.load(f).get("prefix")
     except (OSError, ValueError):
         prefix = None
@@ -945,7 +968,7 @@ def task_worker(task, folder, live):
     prefix, _, n = (task or "").rpartition("-")
     if not prefix or not n.isdigit():
         return None
-    tdir = os.path.join(HOME, ".herdr", "tasks")
+    tdir = SHEP(".herdr/tasks")
     for f in sorted(os.listdir(tdir)) if os.path.isdir(tdir) else []:
         if not f.endswith(".json"):
             continue
@@ -1398,7 +1421,7 @@ def cmd_pull(o):
 # link always works. The machine that serves the web app writes its link in herdr-core's document shepherdr.web on
 # every machine it links (core/host.js WEB_DOC), so an agent on a machine with no web app of its own has it too.
 WEB_DOC = "shepherdr.web"
-WEB_JSON = os.path.join(HOME, ".herdr", "shepherdr", "web.json")
+WEB_JSON = SHEP(".herdr/shepherdr/web.json")
 # The core label an agent's terminal asks with: the serving machine's service hears it (service/show.ts).
 SHOW = "herdr.show"
 
@@ -1572,16 +1595,19 @@ def cmd_guide(_o):
 
 # Shepherdr's installer holds every copy of the helpers to other machines (this file, removed by
 # `shepherdr doctor` once the install is whole), as herdr-task's base.sync_held.
-SYNC_HOLD = os.path.join(HOME, ".herdr", "sync-hold")
+# Its state folder's, or an older installer's in ~/.herdr: either holds.
+SYNC_HOLDS = (os.path.join(os.path.dirname(SHEP(".herdr/secret-drop")), "sync-hold"), os.path.join(HOME, ".herdr", "sync-hold"))
 
 
 def sync_held():
     """Why copies to other machines wait now (the hold's first line), or None."""
-    try:
-        with open(SYNC_HOLD) as f:
-            return f.readline().strip() or "held by Shepherdr's installer"
-    except OSError:
-        return None
+    for p in SYNC_HOLDS:
+        try:
+            with open(p) as f:
+                return f.readline().strip() or "held by Shepherdr's installer"
+        except OSError:
+            continue
+    return None
 
 
 def remote(machine, argv):

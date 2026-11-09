@@ -2,7 +2,7 @@
 // Herdr's other menus (new-menu-tasks), made for any number of agents with any number of models:
 // a tab per installed agent (only when more than one), a search over every agent's models (the
 // keys go to it at once; ↑/↓ and Enter pick, Esc closes), the agent's pinned and recent models on
-// top (core/agents.js modelSections) with a star to pin one (~/.herdr/model-picks.json, the web's
+// top (core/agents.js modelSections) with a star to pin one (~/.config/shepherdr/model-picks.json, the web's
 // too), one word no model has offered as an id to start on; then Reasoning (that model's levels),
 // Fast (where the model has it), Permissions (a small sub-menu), and, only when a choice differs
 // from what runs now, one Restart button, said first to start a new conversation when it switches
@@ -24,13 +24,14 @@ import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex, InputState, Input, VirtualListScrollHandle, v_virtual_list, Scrollbar } from "gpui-base";
 import { theme, props, setShared, closeOverlay, home, readTextFile, writeTextFile } from "herdr";
 import { modelSections, parsePicks, pickKey, withPin, withRecent, PICKS_FILE } from "./core/agents.js";
+import { dirs } from "./dirs.js";
 
 const AGENTS = ["claude", "codex"];
 const LEVEL = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra", none: "None" };
 // Sizes, as the chat counts them for the overlay's height (mods/chat openPicker): the model list
 // scrolls past LIST; NOTE is a quiet line (an offline machine's; a new conversation's, two lines).
 export const ROW = 31, HEAD = 26, SEP = 9, SEG = 34, FOOT = 33, TABS = 34, SEARCH = 36, LIST = 8 * 31, NOTE = 20, STAR = 20;
-const picksPath = () => `${home()}/${PICKS_FILE}`;
+const picksPath = () => dirs()["model-picks"];
 
 export default class ModelMenu extends View {
   init(_props, cx) {

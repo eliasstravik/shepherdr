@@ -1,6 +1,6 @@
 // Settings › Window from the web, as 3.0's: the window's look switches (shared keys the window reads; lib/bridge.js
 // brings a change made here to it) and the add-ons' switches. An add-on's off is kept where the window keeps it:
-// Everywhere's "off" in ~/.herdr/shepherdr.json (herdr-task, other machines) and shared "addons.off" (the window's
+// Everywhere's "off" in ~/.config/shepherdr/settings.json (herdr-task, other machines) and shared "addons.off" (the window's
 // mods). The web app leaves an off add-on's plugins out (lib/addons.json's "web") and its pages with them.
 import { readFileSync } from "node:fs";
 import { readSettings, writeSettings } from "./settings.ts";

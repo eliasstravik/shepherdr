@@ -29,6 +29,8 @@ import { countBadge, red, green, H, TEXT, RADIUS, toast } from "./ui.js";
 import { on as addonOn } from "./addons.js";
 import { spaceName, gitTail, tilde, sharedNames, inOrder, withOrder } from "./core/spaces.js";
 import { coordinatorTab } from "./coordinator.js";
+import { WORKTREE_RE } from "./core/paths.js";
+import { dirsReady } from "./dirs.js";
 
 const POPUPS = { add: Menu, space: Menu, section: Menu, icon: IconPicker, rename: Rename, machine: MachinePopup };
 
@@ -49,7 +51,7 @@ const narrow = () => (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
 
 // Checkouts made for work (~/.herdr/worktrees/<repo>/<branch>, on any machine): a coordinator's
 // task workers run in them, and a worktree space is made in one.
-const WORKTREES = /\/\.herdr\/worktrees\//;
+const WORKTREES = WORKTREE_RE;   // ~/.herdr/worktrees (Herdr's dialog, older tasks) or Shepherdr's data/worktrees
 const inside = (path, folder) => path === folder || path.startsWith(`${folder.replace(/\/+$/, "")}/`);
 
 // Where a space is now: its first terminal's live folder, else where it was made. A task
@@ -125,7 +127,7 @@ export default class Spaces extends View {
     this.machinesRead = false; // hc machine ls answered once: a machine missing from it is offline
     this.refreshMachines(cx);
     cx.timer.every(15000, cx => this.refreshMachines(cx));
-    // Each of this computer's spaces on Autopilot (herdr-task's ~/.herdr/tasks/.autopilot.json): "on", or "waking"
+    // Each of this computer's spaces on Autopilot (herdr-task's ~/.local/share/shepherdr/tasks/.autopilot.json): "on", or "waking"
     // while a wake runs or waits for its Assistant; its row shows a mark (row()). Read every 5 s.
     this.pilots = new Map();
     this.readPilots(cx);
@@ -162,7 +164,7 @@ export default class Spaces extends View {
   readPilots(cx) {
     cx.spawn(async (cx) => {
       let d = null;
-      try { d = JSON.parse((await readTextFile(`${home()}/.herdr/tasks/.autopilot.json`)) ?? "{}"); } catch { return; }
+      try { d = JSON.parse((await readTextFile(`${(await dirsReady()).tasks}/.autopilot.json`)) ?? "{}"); } catch { return; }
       const next = new Map(Object.entries(d?.spaces ?? {}).filter(([, a]) => a?.on).map(([id, a]) => [id, a.inflight || a.pending ? "waking" : "on"]));
       if (JSON.stringify([...next]) === JSON.stringify([...this.pilots])) return;
       this.pilots = next;

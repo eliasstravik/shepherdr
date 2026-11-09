@@ -1,5 +1,5 @@
 // The Web page (Shepherdr 3.1): Shepherdr in a browser on phone, tablet and desktop, private to the tailnet. Its link
-// and a QR code to open it on a phone, as the service last wrote them (~/.herdr/shepherdr/web.json: the service shares
+// and a QR code to open it on a phone, as the service last wrote them (~/.local/state/shepherdr/service/web.json: the service shares
 // /shepherdr with tailscale serve and draws the QR picture under data/). On or off: the Web add-on, under Window.
 // Serve from (core/host.js): the machine that serves it, picked from this computer and every linked one (its line says
 // its system, and Offline when it is), then confirmed under the list; the service moves it (shepherdr web serve-from)
@@ -10,6 +10,7 @@ import { home, appHome, readTextFile } from "herdr";
 import { button, menuRow, red, TEXT, RADIUS, H } from "./ui.js";
 import { on } from "./addons.js";
 import { localService, localToken } from "./local.js";
+import { dirsReady } from "./dirs.js";
 // The page's words and its state line: core/settings.js and core/host.js, shared with the web app.
 import { WEB, SECTIONS, webState } from "./core/settings.js";
 import { SERVE } from "./core/host.js";
@@ -24,7 +25,7 @@ let open = false, picked = null, said = "";
 function current(view) {
   if (Date.now() - readAt > (web?.serve?.moving ? 1000 : 5000)) {
     readAt = Date.now();
-    readTextFile(`${home()}/.herdr/shepherdr/web.json`).then((s) => { web = JSON.parse(s ?? "null"); }).catch(() => { web = null; })
+    dirsReady().then((d) => readTextFile(`${d.service}/web.json`)).then((s) => { web = JSON.parse(s ?? "null"); }).catch(() => { web = null; })
       .finally(() => { loaded = true; });
   }
   return web;

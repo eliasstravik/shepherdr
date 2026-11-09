@@ -6,7 +6,7 @@ import { watch, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Hub } from "./hub.ts";
 import type { Live } from "./live.ts";
-import { HOME, settingsFile } from "./paths.ts";
+import { HOME, settingsFile, where } from "./paths.ts";
 import { READ_LISTS, taskLists, fileIn } from "../core/tasklists.js";
 import * as T from "../core/tasks.js";
 import { isHelper, subagentsOf } from "../core/chat-view.js";
@@ -59,7 +59,7 @@ export class Model {
       else if (e.type === "doc" && (e as any).data?.name === "herdr-app") void this.readDocs();
       else if ("terminal" in e && e.terminal) this.soon();
     });
-    const tasks = join(HOME, ".herdr", "tasks");
+    const tasks = where().tasks;
     if (existsSync(tasks)) watch(tasks, () => this.soon(() => Promise.all([this.readAutopilot(), this.readLists(null)]).then(() => {})));
     if (existsSync(SHARED)) watch(SHARED, () => this.soon(() => this.readShared()));
     setInterval(() => void this.refresh(), 10_000);
@@ -124,7 +124,7 @@ export class Model {
   }
 
   private autopilot: Record<string, any> = {};
-  /** Each other machine's Autopilot file (its ~/.herdr/tasks/.autopilot.json, read with its lists): its spaces' switches
+  /** Each other machine's Autopilot file (its ~/.local/share/shepherdr/tasks/.autopilot.json, read with its lists): its spaces' switches
    *  and wakes, kept and woken there. */
   private pilots = new Map<string, any>();
   /** Shepherdr settings as this machine has them (each space's own Autopilot, another machine's by "vm/sp1"). */

@@ -49,6 +49,8 @@ import { taskDot, ownProgress } from "./dot.js";
 import * as attach from "./attach.js";
 import * as slash from "./slash.js";
 import * as mentions from "./core/mentions.js";
+import { SH } from "./core/paths.js";
+import { dirsReady } from "./dirs.js";
 import * as agent from "./agent.js";
 import { cleanCommand } from "./core/clean-env.js";
 import * as choices from "./settings.js";
@@ -3864,7 +3866,7 @@ export default class Chat extends View {
     for (const r of want) this.peeks.set(`${r.art}:${r.version}`, null);
     cx.timer.after(0, (cx) => cx.spawn(async (cx) => {
       for (const r of want) {
-        const dir = `${home()}/.herdr/artifacts/files/${r.art}/v${r.version}`;
+        const dir = `${(await dirsReady()).artifacts}/files/${r.art}/v${r.version}`;
         try {
           const p = preview(JSON.parse(await readTextFile(`${dir}/recipe.json`)));
           const text = p.lines.join(" · ").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`#>]+/g, "").trim();
@@ -4167,7 +4169,7 @@ export default class Chat extends View {
     this.artsLoading = true;
     cx.spawn(async (cx) => {
       try {
-        const r = await exec("sh", ["-c", 'cd "$HOME/.herdr/artifacts" 2>/dev/null || exit 0; for f in *.json .*.json; do [ -f "$f" ] && cat "$f" && printf "\\n\\036\\n"; done; true'], this.machine ? { on: this.machine } : {});
+        const r = await exec("sh", ["-c", SH + 'cd "$SHEP_ARTIFACTS" 2>/dev/null || exit 0; for f in *.json .*.json; do [ -f "$f" ] && cat "$f" && printf "\\n\\036\\n"; done; true'], this.machine ? { on: this.machine } : {});
         const arts = [];
         for (const part of r.stdout.split("\x1e")) { try { arts.push(...(JSON.parse(part).artifacts ?? [])); } catch {} }
         this.arts = arts;

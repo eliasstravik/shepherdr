@@ -7,10 +7,10 @@ import json
 import os
 import re
 
-from .base import Fail, HOME, git
+from .base import Fail, HOME, git, WHERE
 from .github import BAD, PENDING, pr_view
 
-ARTIFACTS = os.path.join(HOME, ".herdr", "artifacts")
+ARTIFACTS = WHERE.path("artifacts")
 # Files named on the card, and commits.
 FEW = 3
 

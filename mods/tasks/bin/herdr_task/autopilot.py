@@ -22,7 +22,7 @@ from .automations import EVENTS, events_in, HOW, next_run, parse_every, parse_on
 
 
 # ---- autopilot ------------------------------------------------------------------------------
-# How it wakes is a setting, kept with the others in Shepherdr settings (~/.herdr/shepherdr.json,
+# How it wakes is a setting, kept with the others in Shepherdr settings (~/.config/shepherdr/settings.json,
 # which the window pushes to every machine and the web's host keeps in step): "autopilot" =
 # {"every" (an --every rule as written, "" for none), "events" ([--on events]), "heartbeat" (its
 # words)} in "everywhere", and a space's own in "spaces"[its id]: what a space sets wins, what it

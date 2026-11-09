@@ -6,7 +6,7 @@ import re
 import subprocess
 import sys
 
-from .base import ENTRY, Fail, guard, now, STORE
+from .base import beside_store, ENTRY, Fail, guard, now, STORE
 from .agents import agent_running, live_agents
 from .store import parse_ref, prefixes_in_use, read_list, store_path
 
@@ -180,7 +180,7 @@ def queue_reason(s, task):
 # so a start or the scheduler's tick there use them too.
 
 # Beside the task lists, not among them: the Tasks panel reads and watches every file there.
-HOLD_FILE = os.path.join(os.path.dirname(STORE.rstrip("/")), "machine-hold.json")
+HOLD_FILE = beside_store("machine-hold", "machine-hold.json")
 _hold = {}
 
 

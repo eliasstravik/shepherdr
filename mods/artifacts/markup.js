@@ -12,6 +12,7 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { theme, shared, setShared, props, exec, appHome, home, agents } from "herdr";
 import * as A from "./artifact.js";
+import { dirs } from "./dirs.js";
 
 const KEY = "artifacts.markup";
 const MOD = A.dir.slice("mods/".length);
@@ -57,7 +58,7 @@ function picture(m, cx) {
   cx.timer.after(700, () => {
     if (isOn()) { m.pictured = false; return; }
     const o = m.origin, s = m.size;
-    const dir = `${home()}/.herdr/artifacts/notes`, file = `${dir}/shot-${Date.now()}.png`;
+    const dir = `${dirs().artifacts}/notes`, file = `${dir}/shot-${Date.now()}.png`;
     exec("sh", ["-c", 'mkdir -p "$1" && exec herdr-app shot "$2"', "shot", dir, file])
       .then((r) => r.code === 0 && exec(CLI(), ["picture", A.id, "--version", String(A.version), "--shot", file,
         "--panel", [o.x, o.y, s.width, s.height].map(Math.round).join(","), "--json", ...(A.machine ? ["--from", A.machine] : [])]))
@@ -110,7 +111,7 @@ function pick(m, cx) {
   if (!p) return;
   m.press = null;
   m.spot = p.moved ? box(p) : { x: p.x0, y: p.y0, w: 0, h: 0 };
-  const dir = `${home()}/.herdr/artifacts/notes`, file = `${dir}/shot-${Date.now()}.png`;
+  const dir = `${dirs().artifacts}/notes`, file = `${dir}/shot-${Date.now()}.png`;
   m.shot = null;
   exec("sh", ["-c", 'mkdir -p "$1" && exec herdr-app shot "$2"', "shot", dir, file])
     .then((r) => { if (r.code === 0) m.shot = file; })

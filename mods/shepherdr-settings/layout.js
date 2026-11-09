@@ -10,7 +10,7 @@
 // - Show subagents above the chat box: shared "chat.helpers" (mods/chat).
 // - Assistant: shared "coordinator.auto" (coordinator.js watchNewSpaces, mods/newspace).
 // Under them, Add-ons: a switch for each add-on lib/addons.json gives one (lib/addons.js). Off is
-// shared "addons.off" (the mods follow at once) and Everywhere's "off" in ~/.herdr/shepherdr.json
+// shared "addons.off" (the mods follow at once) and Everywhere's "off" in ~/.config/shepherdr/settings.json
 // (herdr-task, here and on other machines). One that others need, or that needs one that's off,
 // can't flip until they do: its line says which.
 // Usage insights has a Delete under its switch: the usage log here and on every linked machine

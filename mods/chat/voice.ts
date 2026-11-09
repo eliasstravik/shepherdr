@@ -30,7 +30,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { API, opening, replyLine, statusLine, whereLine, apiError, ensureAgent, agentFile, navWords, toolWords, turnGate } from "./core/voice.js";
 import { screenWords } from "./core/screen.js";
-import { SECRETS, keyFor, envFile } from "./key.ts";
+import { SECRETS, keyFor, envFile, shepPaths } from "./key.ts";
 import { audio, ended as audioEnded, type Audio } from "./audio.ts";
 
 const [dir, addr, name] = process.argv.slice(2);
@@ -109,9 +109,9 @@ async function agentId(key: string, made = "") {
 
 // ---- the service: the tools ---------------------------------------------------------------
 // This machine's Shepherdr service answers the tools as for the web app, told this call's agent and what the window
-// shows; what it asks to show goes to the chat (nav/). Its token is the local callers' (~/.herdr/shepherdr/token).
+// shows; what it asks to show goes to the chat (nav/). Its token is the local callers' (token in the service's folder).
 
-const DATA = process.env.SHEPHERDR_DATA || join(process.env.HOME ?? "", ".herdr", "shepherdr");
+const DATA = process.env.SHEPHERDR_DATA || shepPaths().service;
 const TOKEN = join(DATA, "token");
 
 /** The service's address, only when Shepherdr's own service answers there (service.json's port and id, as the window's

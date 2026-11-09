@@ -10,7 +10,8 @@
 
 // Prints each file's name on a line, then the file, then a line of its own between files (output
 // stops at a NUL, so not that). Run with exec("sh", ["-c", READ_LISTS], { on }).
-export const READ_LISTS = 'cd "$HOME/.herdr/tasks" 2>/dev/null || exit 0; for f in *.json .*.json; do [ -f "$f" ] && printf "%s\\n" "$f" && cat "$f" && printf "\\n@@herdr-task-list@@\\n"; done; true';
+import { SH } from "./paths.js";
+export const READ_LISTS = SH + 'cd "$SHEP_TASKS" 2>/dev/null || exit 0; for f in *.json .*.json; do [ -f "$f" ] && printf "%s\\n" "$f" && cat "$f" && printf "\\n@@herdr-task-list@@\\n"; done; true';
 
 export const isTaskList = (d) => !!d && typeof d === "object" && !Array.isArray(d) && typeof d.folder === "string" && Array.isArray(d.tasks);
 

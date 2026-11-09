@@ -84,15 +84,38 @@ Herdr there.
 
 Nothing to install by hand. herdr-task copies itself, `herdr-artifact`, `herdr-secret`, `herdr-browser` and the role
 instructions to every connected machine (`herdr-task machines sync --check` shows what it would do). While an install
-or update replaces one of those, `~/.herdr/sync-hold` stops every copy to another machine until `shepherdr doctor`
+or update replaces one of those, `a sync hold (`sync-hold` in `~/.local/state/shepherdr`)` stops every copy to another machine until `shepherdr doctor`
 finds the install whole: the scheduler's sync, `herdr-task machines sync` (it says "held"), herdr-task's and
 herdr-artifact's own copy when they run a command there (the copy already there runs instead), and
 `herdr-secret install --on`. So a half-done copy never reaches every machine. Turning the Other machines add-on off stops the
 sync too.
 
+## Where your data lives
+
+Shepherdr keeps its own data in its own folders, never under Herdr's name (`shepherdr where` prints every path):
+
+```text
+~/.config/shepherdr/          settings.json (Shepherdr settings), model-picks.json
+~/.local/share/shepherdr/     tasks/, artifacts/, secrets/ (the vault, owner-only), worktrees/ (new tasks'), tools.json
+~/.local/state/shepherdr/     service/ (the web service's token, log, usage insights), browser/ (task browsers'
+                              sign-ins), secret-drop/, cli-check.json, machine-hold.json, migrate.json (the move's journal)
+~/.cache/shepherdr/           safe to delete; CACHEDIR.TAG keeps backups out (macOS: ~/Library/Caches/shepherdr)
+```
+
+The same on Linux and macOS. `SHEPHERDR_HOME=<folder>` puts all four under `<folder>/{config,data,state,cache}`;
+otherwise `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` are honoured. Set them before
+installing: the installer writes them into the service's unit so it sees the same folders. A process that doesn't see
+them still lands right through `~/.herdr`'s links. Task worktrees go to `~/.local/share/shepherdr/worktrees` unless
+`tasks.worktree_root` in the settings file names another folder (a bigger disk); a task keeps the worktree it has.
+
+Herdr's own folders get only code: the mods, layout, `lib/`, `core/`, `bin/` and templates, each file listed in the
+install record (`~/.config/herdr-app/data/shepherdr/installed.json`, a sha256 each), so an update rewrites exactly
+those and an uninstall removes exactly those. A Shepherdr from before 3.1.27 kept its data in `~/.herdr`: the first
+install or update moves it ([Upgrading](upgrading.md)).
+
 ## Uninstall
 
 `shepherdr uninstall` removes the files it installed that you haven't changed (a mod you changed stays whole), its
 keys (putting back any it replaced), links, guard and hooks, and puts back what the install replaced. Your Herdr
-`data/`, `~/.herdr` (tasks, worktrees, artifacts, secrets, settings) and your own mods stay. Switch Herdr to another
+`data/`, Shepherdr's data folders (tasks, worktrees, artifacts, secrets, settings: `shepherdr where`) and your own mods stay. Switch Herdr to another
 layout first if Shepherdr's is showing.

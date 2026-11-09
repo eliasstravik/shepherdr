@@ -10,7 +10,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import type { Hub } from "./hub.ts";
-import { HOME, appHome, writable } from "./paths.ts";
+import { HOME, appHome, where, writable } from "./paths.ts";
 import * as V from "../core/voice.js";
 import { secretBin } from "./secrets.ts";
 import { voiceTool, lookHere, shown, type Ack, type Nav, type VoiceIO, type Where } from "./voice-tools.ts";
@@ -32,7 +32,7 @@ export function keyFor(hub: Pick<Hub, "call">) {
       const out = await new Response(p.stdout).text();
       return (await p.exited) === 0 ? JSON.parse(out) : null;
     },
-    vault: () => { try { return readFileSync(join(HOME, ".herdr", "vault.json"), "utf8"); } catch { return null; } },
+    vault: () => { try { return readFileSync(where().vault, "utf8"); } catch { return null; } },
     machines: async () => ((await hub.call<{ machines: any[] }>("machine.list", {})).machines ?? [])
       .filter((m) => !m.temporary && m.state === "connected" && m.name).map((m) => String(m.name)),
     ask: async (on: string, script: string) => {
