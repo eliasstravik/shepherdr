@@ -83,6 +83,8 @@ export const notSent = (why) => `Not sent: ${String(why ?? "").replace(/\.$/, ""
 // An earlier publish of an artifact, as one quiet line; the latest one's card.
 export const published = (title, v) => `Published ${title} v${v}`;
 export const artifactLine = (v) => `Artifact · v${v}`;
+// a video an agent showed, in the window (which can't play one): a line that opens it in the system's player
+export const videoLine = (name) => `${name} · Video`;
 // m:ss, for the working line, a recording and a call.
 export const elapsed = (secs) => `${Math.floor(Math.max(0, secs) / 60)}:${String(Math.floor(Math.max(0, secs)) % 60).padStart(2, "0")}`;
 

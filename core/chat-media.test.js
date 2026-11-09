@@ -17,8 +17,8 @@ test("a link to a video keeps its words; the video shows", () => {
 });
 
 test("relative, home and file:// paths; each once", () => {
-  const r = mediaIn("![a](shots/a.png) ![b](./b.gif) ![c](~/c.webp) ![d](file:///x/d%20e.jpg) ![a again](shots/a.png)", { cwd: "/repo", home: "/home/me" });
-  expect(r.media.map((m) => m.path)).toEqual(["/repo/shots/a.png", "/repo/b.gif", "/home/me/c.webp", "/x/d e.jpg"]);
+  const r = mediaIn("![a](shots/a.png) ![b](./b.gif) ![c](~/c.webp) ![d](file:///x/d%20e.jpg) ![a again](shots/a.png)", { cwd: "/repo", home: "/h/me" });
+  expect(r.media.map((m) => m.path)).toEqual(["/repo/shots/a.png", "/repo/b.gif", "/h/me/c.webp", "/x/d e.jpg"]);
   expect(r.text).toBe("");
 });
 

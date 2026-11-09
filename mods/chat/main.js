@@ -30,9 +30,10 @@ import * as fs from "fs/promises";
 import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names, pilotLine } from "./core/chat-log.js";
 import { BgJobs } from "./core/bg-jobs.js";
 import { ChatReader } from "./core/chat-reader.js";
+import { preview } from "./core/recipe.js";
 import { words, howAnswered, codexOnScreen, codexSteps } from "./core/asks.js";
 // The rows' words and rules the web app's chat draws by too (core/chat-view.js).
-import { WORDS, clock, bgGroups, subagentsOf, subagentWord, senderName, briefLabel, firstUser, firstKeys, literal, fromName, sentTo, selfName, initialOf, newsWords, resolveArtifacts, unsigned, ownWords, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
+import { WORDS, clock, bgGroups, subagentsOf, subagentWord, senderName, briefLabel, firstUser, firstKeys, literal, fromName, sentTo, selfName, initialOf, newsWords, resolveArtifacts, unsigned, ownWords, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, videoLine, mediaIn, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
 // Sending the person's words, as the web app does (core/send.js).
 import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine, mentionedIn, sendTyped, SETTLE } from "./core/send.js";
 // hc whose send goes as the person, with no caller: never "Another agent" on another machine (SHEP-3, core/person.js).
@@ -98,6 +99,8 @@ const ROUND = 28, TEXT_ROW = 34;
 // Image thumbnails: the box's files are squares this many px, this far apart; under sent
 // messages each image keeps its shape, fitted in THUMB_ONE (one image) or THUMB_MANY (w, h).
 const THUMB = 56, THUMB_GAP = 6;
+// An artifact's card in the chat: as wide as this at most (its pictures fit inside: peekOf()).
+const PEEK_W = 420;
 // The live row's level wave: each bar's width and the gap between bars, in px.
 const WAVE_BAR = 3, WAVE_GAP = 2;
 // ONE row under each message, its band (a list row of its own), on the message's side (left
@@ -2859,7 +2862,8 @@ export default class Chat extends View {
         // A published artifact: its card (the latest publish of it; earlier ones a line), or a
         // quiet line while the registry doesn't list it yet.
         const r = arts.get(x.id);
-        if (r) out.push({ kind: "artifact", id: x.id, art: r.id, title: r.title, text: r.title, version: r.version, v: r.v, line: !r.latest });
+        // its latest card shows its key pictures and first lines (peekOf: this machine's artifacts)
+        if (r) out.push({ kind: "artifact", id: x.id, art: r.id, title: r.title, text: r.title, version: r.version, v: r.v, line: !r.latest, ...(r.latest ? { peek: this.peekOf(r.id, r.version) } : {}) });
         else if (Date.now() - (x.at ?? 0) < 180000) out.push({ kind: "artifact", id: x.id, pending: true, text: "" });
         continue;
       }
@@ -2898,10 +2902,13 @@ export default class Chat extends View {
         continue;
       }
       if (x.kind === "agent") {
-        const ps = parts(x.text);
+        // The pictures and videos it named in its words (core/chat-view.js mediaIn, as the web app's chat): the
+        // pictures under its words as the person's are, each video a line that opens it (the window can't play one).
+        const md = mediaIn(x.text, { cwd: this.t?.foreground?.cwd ?? this.t?.cwd ?? null, home: this.machine ? null : home() });
+        const ps = md.text || !md.media.length ? parts(md.text || x.text) : [];
         const first = out.length;
         // A long reply: its first lines (the part where they end cut off there), then Show more.
-        const fold = this.foldOf(x, ps);
+        const fold = ps.length ? this.foldOf(x, ps) : null;
         const clip = (n) => (fold && !fold.open ? fold.clips.get(n) : undefined);
         if (ps.length === 1 && ps[0].type === "md") out.push(clip(0) ? { ...x, clip: clip(0) } : x);
         else ps.forEach((p, n) => {
@@ -2913,6 +2920,11 @@ export default class Chat extends View {
           }
         });
         if (fold) out.push({ kind: "fold", id: `fold:${x.id}`, of: x.id, open: fold.open });
+        const pics = md.media.filter((m) => m.kind === "image").map((m) => m.path);
+        // (another machine's pictures aren't here to draw: a line saying how many, as a person's the chat can't show)
+        if (pics.length && !this.machine) out.push({ kind: "imgs", id: `i:${x.id}`, paths: pics, left: true });
+        else if (pics.length) out.push({ kind: "video", id: `i:${x.id}`, path: null, text: imagesLine(pics.length), pics: true });
+        md.media.filter((m) => m.kind === "video").forEach((m, n) => out.push({ kind: "video", id: `v:${x.id}:${n}`, path: m.path, text: m.alt || m.name.replace(/\.[^.]+$/, "") }));
         // Every message of the agent's gets its own actions and reactions, also while it works;
         // only the one it may still be writing (the newest, while working) waits. The actions go
         // under its last row.
@@ -3061,7 +3073,7 @@ export default class Chat extends View {
     const found = q && String(x.text ?? x.code ?? "").toLowerCase().includes(q.toLowerCase()) ? `|f:${q}` : "";
     const open = (x.kind === "tools" || x.kind === "brief") && this.opened.has(x.id);
     const shown = open && x.steps ? x.steps.filter((s) => this.results.get(s.id) != null).length : 0;
-    return `${x.id}|${x.kind}${x.closed ? `.${x.closed}` : ""}|${open ? `o${x.steps?.length ?? 1}.${shown}` : ""}|${x.text?.length ?? x.code?.length ?? 0}|${x.from ? 1 : 0}${x.failed ? 1 : 0}${x.late ? 1 : 0}${x.waiting ? 1 : 0}${x.images ? 1 : 0}${x.files?.length ?? 0}|${x.paths?.length ?? 0}${x.paths?.every((p) => this.views[p]) ? "v" : ""}|${(x.pills ?? []).map((p) => p.emoji + (p.you ? 1 : 0) + (p.agent ? 1 : 0)).join("")}|${x.bar ? "b" : ""}${x.kind === "artifact" ? `|a${x.version ?? ""}${x.line ? "l" : ""}${x.pending ? "p" : ""}` : ""}${x.kind === "tasknews" ? `|${x.accept ? "a" : ""}` : ""}${x.kind === "cardstrip" ? `|cs${x.sig}${x.first ? "F" : ""}${x.last ? "L" : ""}` : ""}|${x.clip ? `c${x.clip}` : ""}${x.open ? "o" : ""}${x.kind === "day" ? x.text : ""}|${x.top0 ? "T" : ""}${x.bot0 ? "B" : ""}${x.h ?? ""}${found}`;
+    return `${x.id}|${x.kind}${x.closed ? `.${x.closed}` : ""}|${open ? `o${x.steps?.length ?? 1}.${shown}` : ""}|${x.text?.length ?? x.code?.length ?? 0}|${x.from ? 1 : 0}${x.failed ? 1 : 0}${x.late ? 1 : 0}${x.waiting ? 1 : 0}${x.images ? 1 : 0}${x.files?.length ?? 0}|${x.paths?.length ?? 0}${x.paths?.every((p) => this.views[p]) ? "v" : ""}|${(x.pills ?? []).map((p) => p.emoji + (p.you ? 1 : 0) + (p.agent ? 1 : 0)).join("")}|${x.bar ? "b" : ""}${x.kind === "artifact" ? `|a${x.version ?? ""}${x.line ? "l" : ""}${x.pending ? "p" : ""}${x.peek ? `k${x.peek.paths.filter((p) => this.views[p]).length}.${x.peek.text.length}` : ""}` : ""}${x.kind === "tasknews" ? `|${x.accept ? "a" : ""}` : ""}${x.kind === "cardstrip" ? `|cs${x.sig}${x.first ? "F" : ""}${x.last ? "L" : ""}` : ""}|${x.clip ? `c${x.clip}` : ""}${x.open ? "o" : ""}${x.kind === "day" ? x.text : ""}|${x.top0 ? "T" : ""}${x.bot0 ? "B" : ""}${x.h ?? ""}${found}`;
   }
 
   // A row's height before it is measured: bands and gaps are as tall as spaced() made them.
@@ -3079,6 +3091,7 @@ export default class Chat extends View {
       case "replyref": return 22;
       case "chips": return 30;
       case "imgs": return this.fitThumbs(x.paths).h + 8;
+      case "video": return 24;
       case "codehead": return 34;
       case "code": return 16 + (x.clip ?? String(x.code).split("\n").length * 19);
       case "fold": case "queued": return 26;
@@ -3086,7 +3099,7 @@ export default class Chat extends View {
       case "user": case "pending": return 30 + lines(x.text, w * 0.8 - 24) * 20 + (x.from ? 17 : 0) + ((x.images || x.files?.length) ? 20 : 0);
       case "agent": return 30 + (x.clip ?? lines(x.text, w * 0.8 - 24) * 21);
       case "tools": return this.opened.has(x.id) ? 26 + x.steps.length * 19 : 20;
-      case "artifact": return x.pending || x.line ? 20 : 62;
+      case "artifact": return x.pending || x.line ? 20 : 62 + (x.peek?.paths?.some((p) => this.views[p]) ? fitThumbs(x.peek.paths.filter((p) => this.views[p]).map((p) => this.views[p]), PEEK_W - 22).h + 8 : 0) + (x.peek?.text ? 8 + Math.ceil((x.peek.text.length * 7) / (PEEK_W - 22)) * 18 : 0);
       case "tasknews": return x.accept ? 26 : 20;
       case "cardstrip": {
         const s = x.s, edge = (x.first ? 10 : s.gap ?? 8) + (x.last ? 10 : 0);
@@ -3223,8 +3236,14 @@ export default class Chat extends View {
           .when(open, (el) => el.child(div().pl(18).pt(6).text_size(12.5).text_color(t.muted)
             .child(TextView.markdown(`${pre}chat-brief-${x.id}`, literal(x.text) || " ").selectable(true)))), 12, 0);
       }
+      case "video":
+        // A video the agent showed: the window can't play one, so a line that opens it in the system's player (clickRow)
+        return col(h_flex().w_full().py(QUIET_PY).gap(6).items_center().text_size(12.5).text_color(t.muted).rounded(8).cursor_pointer()
+          .hover((s) => s.bg(t.hover).text_color(t.foreground))
+          .child(svg(x.pics ? "mods/chat/paperclip.svg" : "mods/chat/play.svg").size(12).flex_none())
+          .child(div().min_w(0).truncate().child(x.pics ? x.text : videoLine(x.text))), 18, 2);
       case "imgs":
-        return col(h_flex().w_full().gap(THUMB_GAP).items_start().justify_end().when(Boolean(x.faded), (el) => el.opacity(0.55))
+        return col(h_flex().w_full().gap(THUMB_GAP).items_start().when(!x.left, (el) => el.justify_end()).when(Boolean(x.left), (el) => el.justify_start()).when(Boolean(x.faded), (el) => el.opacity(0.55))
           .children(this.fitThumbs(x.paths).boxes.map((b) => this.shot(t, b).cursor_pointer())), 18, 4);
       case "agent":
         return pad(theirs(x.text));
@@ -3280,15 +3299,23 @@ export default class Chat extends View {
         if (x.pending || x.line) return col(h_flex().w_full().py(QUIET_PY).gap(6).items_center().text_size(12).text_color(t.dim).child(icon(12))
           .when(Boolean(x.art) && !x.pending, (el) => el.rounded(8).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.muted)))
           .child(div().min_w(0).truncate().child(x.pending ? WORDS.publishing : published(x.title, x.v))), 18, 0);
-        // The whole card opens it (rows take no handlers; clickRow).
-        return pad(h_flex().w_full().max_w(420).gap(10).items_center().px(10).py(8).rounded(10).cursor_pointer()
-          .bg(t.surface).border_1().border_color(t.border).hover((s) => s.bg(t.hover))
+        // The whole card opens it over this chat (rows take no handlers; clickRow): its title, "Artifact · v3" and Open,
+        // then its key pictures and first lines (core/recipe.js preview, as the web app's card).
+        const peek = x.peek;
+        const head = h_flex().w_full().gap(10).items_center()
           .child(div().size(32).flex_none().flex().items_center().justify_center().rounded(8).bg(t.raised).text_color(t.muted).child(icon(16)))
           .child(v_flex().flex_1().min_w(0).gap(1)
             .child(div().font_medium().text_color(t.foreground).truncate().child(x.title))
             .child(div().text_size(12).text_color(t.dim).child(artifactLine(x.version))))
           .child(h_flex().h(28).px(10).flex_none().items_center().rounded(7).border_1().border_color(t.input).bg(t.background)
-            .text_size(12.5).font_medium().text_color(t.foreground).child("Open")));
+            .text_size(12.5).font_medium().text_color(t.foreground).child("Open"));
+        const shots = peek?.paths?.filter((p) => this.views[p]) ?? [];
+        return pad(v_flex().w_full().max_w(PEEK_W).gap(8).px(10).py(8).rounded(10).cursor_pointer()
+          .bg(t.surface).border_1().border_color(t.border).hover((s) => s.bg(t.hover))
+          .child(head)
+          .when(shots.length > 0, (el) => el.child(h_flex().w_full().gap(THUMB_GAP).items_start()
+            .children(fitThumbs(shots.map((p) => this.views[p]), PEEK_W - 22).boxes.map((b, i) => this.shot(t, { ...b, path: shots[i] })))))
+          .when(Boolean(peek?.text), (el) => el.child(div().w_full().text_size(12.5).text_color(t.muted).child(peek.text))));
       }
       case "tasknews": {
         // A task's news line (newsLines()): its mark, the id, what happened, then its words, dim;
@@ -3393,13 +3420,21 @@ export default class Chat extends View {
       if (off >= 0 && off % (TASK + TASK_GAP) <= TASK && k) this.openTask(k.id);
     }
     else if (row.kind === "imgs") {
-      // Right-aligned thumbnails: which one the press was on (rows take no handlers of their own).
+      // Thumbnails, right-aligned (the person's) or left (the agent's): which one the press was on (rows take no
+      // handlers of their own).
       const x = this.press?.x;
-      const off = x === undefined ? -1 : this.edges().right - x;
       const boxes = this.fitThumbs(row.paths).boxes;
-      for (let i = boxes.length - 1, edge = 0; i >= 0 && off >= 0; edge += boxes[i].w + THUMB_GAP, i--)
-        if (off >= edge && off <= edge + boxes[i].w) { this.openImages(row.paths, i); break; }
+      if (row.left) {
+        const off = x === undefined ? -1 : x - this.edges().left;
+        for (let i = 0, edge = 0; i < boxes.length && off >= 0; edge += boxes[i].w + THUMB_GAP, i++)
+          if (off >= edge && off <= edge + boxes[i].w) { this.openImages(row.paths, i); break; }
+      } else {
+        const off = x === undefined ? -1 : this.edges().right - x;
+        for (let i = boxes.length - 1, edge = 0; i >= 0 && off >= 0; edge += boxes[i].w + THUMB_GAP, i--)
+          if (off >= edge && off <= edge + boxes[i].w) { this.openImages(row.paths, i); break; }
+      }
     }
+    else if (row.kind === "video") this.openVideo(row.path);
     cx.notify();
   }
 
@@ -3803,6 +3838,41 @@ export default class Chat extends View {
     const at = a ? { x: a.x, y: a.y } : "pointer";
     const width = Math.round(this.width), height = Math.round(this.height ?? 700);
     openOverlay({ mod: "chat-image", kind: "popup", frame: "none", width, height, at, props: { textPath: f.path, title: f.name, width, height } });
+  }
+
+  // A video the agent showed, in the system's player: the window can't play one. Another machine's is there, not
+  // here: the web app plays it.
+  openVideo(path) {
+    if (this.machine || !path) { toast({ title: "It's on another machine", body: "Open this chat in the web app to see it.", level: "info" }); return; }
+    const os = window()?.platform;
+    (os === "macos" ? exec("open", [path]) : os === "windows" ? exec("cmd", ["/c", "start", "", path]) : exec("xdg-open", [path])).catch(() => {});
+  }
+
+  // What an artifact's card shows of it: its key pictures (linked for image(): needViews) and its first lines, from its
+  // recipe on this machine (core/recipe.js preview, as the web app's card). Read once per version; null until then,
+  // and for another machine's (its card stays the title and Open).
+  peekOf(id, version) {
+    return this.machine || !id || !version ? null : this.peeks?.get(`${id}:${version}`) ?? null;
+  }
+
+  // Read for the latest cards in these rows that have no preview yet (asked once each; from render, so right after).
+  needPeeks(rows, cx) {
+    if (this.machine) return;
+    this.peeks ??= new Map();
+    const want = rows.filter((r) => r.kind === "artifact" && r.art && !r.line && !r.pending && !this.peeks.has(`${r.art}:${r.version}`));
+    if (!want.length) return;
+    for (const r of want) this.peeks.set(`${r.art}:${r.version}`, null);
+    cx.timer.after(0, (cx) => cx.spawn(async (cx) => {
+      for (const r of want) {
+        const dir = `${home()}/.herdr/artifacts/files/${r.art}/v${r.version}`;
+        try {
+          const p = preview(JSON.parse(await readTextFile(`${dir}/recipe.json`)));
+          const text = p.lines.join(" · ").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`#>]+/g, "").trim();
+          this.peeks.set(`${r.art}:${r.version}`, { paths: p.images.map((src) => `${dir}/${src}`), text: text.length > 200 ? `${text.slice(0, 199)}…` : text });
+        } catch {}
+      }
+      cx.notify();
+    }));
   }
 
   // The viewer (mods/chat-image) on these images, from the i-th.
@@ -4288,7 +4358,8 @@ export default class Chat extends View {
     const current = found.length ? this.findRow(found) : null;
     if (this.findJump && current) { this.findJump = false; this.pinned = false; this.scroll.scroll_to_item(current.index, "center"); }
     const lit = new Set(found.map((m) => m.id));
-    this.needViews([...this.files.filter((f) => f.image).map((f) => f.path), ...rows.flatMap((r) => (r.kind === "imgs" ? r.paths : []))], cx);
+    this.needViews([...this.files.filter((f) => f.image).map((f) => f.path), ...rows.flatMap((r) => (r.kind === "imgs" ? r.paths : r.kind === "artifact" && r.peek ? r.peek.paths : []))], cx);
+    this.needPeeks(rows, cx);
     // What sits under the list (an ask card, the working line) changes its height: stay on the newest.
     const below = `${this.asks.length}|${this.sasks.map((a) => a.name + (a.kept ? "+" : "")).join(",")}|${this.wasks.map((a) => a.id).join(",")}|${[this.addr, ...this.workerTasks().keys()].map((a) => openCard(a)?.id ?? "").join("")}|${st}|${this.focused}|${this.queue.length}|${Boolean(this.call)}|${this.files.length}|${Boolean(this.quote)}`;
     if (below !== this.below) { this.below = below; if (this.pinned) this.stick = true; }
