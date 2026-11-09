@@ -1,4 +1,4 @@
-// An open task's views, as 3.0's task view: Chat, then its items (Terminal, Files, Changes, Pull request, Browser;
+// An open task's views, as 3.0's task view: Chat, then its items (Terminal, Pull request, Artifacts, Browser;
 // plugins add them) as tabs under its header (TaskTabs). On a desktop an item shows in a column right of the chat, on
 // a phone or tablet over it, full screen. A coordinator chat has none.
 import clsx from 'clsx'
@@ -143,7 +143,7 @@ function ItemBody({ item, task, chatKey }: { item: PanelItem; task: Task; chatKe
   return <item.View key={`${task.id}|${item.id}`} task={task} chatKey={chatKey} />
 }
 
-/** A task view's body: its chat, or the tab picked (Terminal, Files, Changes…) in its place, as 3.0's task view */
+/** A task view's body: its chat, or the tab picked (Terminal, Pull request, Artifacts…) in its place, as 3.0's task view */
 export function TabBody({ task, chatKey, children }: { task: Task; chatKey: string; children: ReactNode }) {
   const sheet = useUI((u) => u.sheet)
   // its agent ended while its terminal showed: back to its chat, which stays to read (the window's)
@@ -157,7 +157,7 @@ const termRunning = (task: Task) => !!task.agent?.running
 /** A task's items as 3.0's task view has them: only those it has now (a pull request's once it has one) */
 export const itemsFor = (task: Task) => registry.taskPanel.filter((i) => i.id !== 'pr' || !!task.pr)
 
-/** The task view's tabs, as 3.0's (Chat, Terminal, Files, Changes, Pull request, Browser): Chat is its chat; another
+/** The task view's tabs, as 3.0's (Chat, Terminal, Pull request, Artifacts, Browser): Chat is its chat; another
  *  opens its view, in the side panel on a desktop and over the chat on a phone or tablet */
 export function TaskTabs({ task }: { task: Task }) {
   const ui = useUI()

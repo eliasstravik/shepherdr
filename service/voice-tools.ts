@@ -4,7 +4,7 @@
 // web app reaches, no more. Every answer is a few short sentences to be spoken, never raw data; long ones are cut
 // here. An act changes nothing until the voice agent says the person confirmed it out loud (confirmed: true).
 import type { Snapshot, Task, Place } from "../web/shared/types.ts";
-import { navWords } from "../core/voice.js";
+import { navWords, TABS } from "../core/voice.js";
 import { screenParams, screenWords } from "../core/screen.js";
 import { planRows, windowWords, whyWords, healthWords } from "../core/machines.js";
 import { SOURCES, scrub, render, at, search, segments, type SourceArgs } from "./voice-data.ts";
@@ -661,7 +661,9 @@ function open(snap: Snapshot, where: Where, io: VoiceIO, what: string, id: strin
     case "task": {
       const t = findTask(snap, id, where);
       if (!t) return fail(isHere(id) ? "Which task?" : `I can't find task "${cut(id, 60)}".`);
-      const want = ["chat", "terminal", "files", "changes", "pr", "browser", "review"].includes(tab) ? tab : "chat";
+      // a task has no Files or Changes tab (SHEP-143): its changes are its pull request's, else its chat
+      const asked = tab === "files" || tab === "changes" ? (t.pr ? "pr" : "chat") : tab;
+      const want = TABS.includes(asked) ? asked : "chat";
       if (want === "review" && t.status !== "ready") return fail(`${spoken(t.id)} isn't ready for review: it is ${STATUS[t.status] ?? t.status}.`);
       if (want === "pr" && !t.pr) return fail(`${spoken(t.id)} has no pull request yet.`);
       const at = io.taskWhere?.(t.id);

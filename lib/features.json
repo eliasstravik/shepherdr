@@ -420,16 +420,14 @@
       ]
     },
     {
-      "id": "task-files",
+      "id": "space-files",
       "addon": "tasks",
-      "title": "Files",
+      "title": "Files side panel",
       "core": [
         "worktree"
       ],
       "herdr": {
-        "mods": [
-          "task-files"
-        ]
+        "builtin": "Herdr's Files side panel"
       },
       "web": {
         "files": [
@@ -447,16 +445,14 @@
       ]
     },
     {
-      "id": "task-changes",
+      "id": "space-changes",
       "addon": "tasks",
-      "title": "Changes",
+      "title": "Changes side panel",
       "core": [
         "worktree"
       ],
       "herdr": {
-        "mods": [
-          "task-changes"
-        ]
+        "builtin": "Herdr's Changes side panel"
       },
       "web": {
         "files": [

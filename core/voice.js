@@ -77,7 +77,7 @@ const tool = (name, description, props, required = [], speech = "force") =>
 /** What a look can read, an open can show and an act can do (service/voice-tools.ts answers each). */
 export const LOOKS = ["here", "chat", "spaces", "machines", "tasks", "task", "needs", "news", "autopilot", "automations", "settings", "secrets", "artifacts", "data"];
 export const OPENS = ["space", "task", "tasks", "needs", "artifacts", "files", "changes", "terminal", "artifact", "settings", "chat"];
-export const TABS = ["chat", "terminal", "files", "changes", "pr", "browser", "review"];
+export const TABS = ["chat", "terminal", "pr", "browser", "review"];
 /** the call's own view (call_view): full screen or minimized */
 export const VIEWS = ["full", "minimized"];
 export const ACTS = ["accept", "start", "schedule", "unschedule", "stop", "resume", "done", "reopen", "delete", "pin", "unpin",
@@ -94,7 +94,7 @@ export const TOOLS = [
   tool("open", "Show something in the person's app, the one the call runs in: a space, a task (on a tab), the Tasks panel, Needs you, the shown space's Artifacts, Files or Changes panel or its Assistant's terminal, an artifact, a Settings page, or a chat (a space's Assistant or a task's agent).", {
     what: { type: "string", enum: OPENS, description: "What to show. artifacts, files, changes, terminal: the shown space's panel (id a space's name to switch first). settings: id is the page (Secrets, Window, Voice...)." },
     id: PLACE,
-    tab: { type: "string", enum: TABS, description: "A task's tab: chat, terminal, files, changes, pr (pull request), browser, or review (a Ready task's Accept card)." },
+    tab: { type: "string", enum: TABS, description: "A task's tab: chat, terminal, pr (pull request: its changes), browser, or review (a Ready task's Accept card)." },
     query: { type: "string", description: "tasks: a state to filter by (working, ready, needs, queued, scheduled, todo, done) and/or words to type in its filter box." },
   }, ["what"], "auto"),
   tool("send", "Write a message as the person: to a space's Assistant (by the space's name) or a task's agent (by its id), or the chat on screen (\"here\"). Also how to ask an Assistant to make, plan or change things.", {

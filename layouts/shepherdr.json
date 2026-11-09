@@ -181,20 +181,6 @@
                                   }
                                 },
                                 {
-                                  "id": "tasks-thread-files",
-                                  "type": "block",
-                                  "content": {
-                                    "mod": "task-files"
-                                  }
-                                },
-                                {
-                                  "id": "tasks-thread-changes",
-                                  "type": "block",
-                                  "content": {
-                                    "mod": "task-changes"
-                                  }
-                                },
-                                {
                                   "id": "tasks-thread-pr",
                                   "type": "block",
                                   "content": {

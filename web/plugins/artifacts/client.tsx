@@ -776,7 +776,7 @@ export default definePlugin({
   name: 'artifacts',
   setup(reg) {
     // a task's own: the last of its tabs, always there (its place never moves), counted once it has some
-    reg.taskPanel.push({ id: 'artifacts', order: 60, label: 'Artifacts', Icon: PageIcon, count: (t) => t.artifacts?.length ?? 0, View: TaskArtifacts })
+    reg.taskPanel.push({ id: 'artifacts', order: 30, label: 'Artifacts', Icon: PageIcon, count: (t) => t.artifacts?.length ?? 0, View: TaskArtifacts })
     reg.views.artifacts = ArtifactList
     reg.views.artifact = SplitArtifact
     reg.messageParts.push({ order: 50, View: ArtifactCard })

@@ -165,7 +165,7 @@ class Repo(unittest.TestCase):
                 self.assertNotIn(words, text, f"{os.path.relpath(path, ROOT)} has its own copy of {words!r}")
 
     def test_task_views_from_one_core(self):
-        """The Tasks panel's rows and the task view's Files, Changes and Pull request read their words and rules from
+        """The Tasks panel's rows, the space's Files and Changes and a task's Pull request read their words and rules from
         core on both sides (core/tasks.js, core/needs.js, core/worktree.js): the web app keeps no copy of its own."""
         uses = {
             J("web", "plugins", "tasks", "client.tsx"): ["@core/tasks.js", "@core/needs.js", "TK.capital", "ND.fit", "TK.day", "TK.STATUS", "ND.REASONS"],

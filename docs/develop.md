@@ -2,7 +2,7 @@
 
 ```text
 layouts/shepherdr.json   the layout (two live blocks shipped blank: tasks-thread-term, artifacts-view-body)
-mods/<name>/             the 29 mods, installed as they are (names fixed: data/<mod> state follows them)
+mods/<name>/             the 28 mods, installed as they are (names fixed: data/<mod> state follows them)
 lib/                     shared modules, one source each; bin/sync-shared copies them into the mods in lib/COPIES
 lib/addons.json          the add-ons: mods, blocks, keys, helpers, needs, web plugins (docs/addons.md)
 lib/features.json        every feature: its Herdr side, its web side and its shared logic (CI checks all three)
