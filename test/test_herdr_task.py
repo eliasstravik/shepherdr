@@ -4121,3 +4121,68 @@ class CodexAsksOnTheCard(unittest.TestCase):
         mine = ["codex", "-c", "projects={}"]
         self.assertEqual(sum(str(a).startswith("projects") for a in launch.own_argv(mine, d)), 1)
         self.assertFalse(any(str(a).startswith("projects") for a in launch.own_argv(["codex"])))
+
+class TaskFlow(unittest.TestCase):
+    """SHEP-170's task flow fixes, in a throwaway git repo and store; hc and gh are never run."""
+
+    def setUp(self):
+        from unittest import mock
+        import shutil
+        sys.path.insert(0, BIN)
+        import herdr_task.commands as commands
+        self.commands, self.mock = commands, mock
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.main, wt = os.path.join(self.root, "repo"), os.path.join(self.root, "wt")
+        self.git(self.root, "init", "-q", "-b", "main", self.main)
+        for k, v in (("user.name", "T"), ("user.email", "t@example.com"), ("commit.gpgsign", "false")):
+            self.git(self.main, "config", k, v)
+        self.commit(self.main, "base")
+        self.git(self.main, "worktree", "add", "-q", "-b", "task/1", wt, "HEAD")
+        self.live = []
+        self.said = []
+        self.store = Store([{"id": 1, "title": "Flow", "state": "running", "mode": "worktree", "worktree": wt,
+                             "branch": "task/1", "base": "main", "start": self.git(wt, "rev-parse", "HEAD"), "agents": [],
+                             "started": 1}])
+        self.store.loc["folder"] = self.main
+        self.task = self.store.data["tasks"][0]
+        self.patch(commands, "open_store", lambda args, write=True: self.store)
+        self.patch(commands, "view", lambda s, t, live=None: dict(t))
+        self.patch(commands, "say", lambda args, v, text: self.said.append(text))
+        self.patch(commands, "live_agents", lambda key: self.live)
+        self.patch(commands, "detail", lambda k: k)
+
+    def patch(self, mod, name, value):
+        p = self.mock.patch.object(mod, name, value)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def git(self, cwd, *args):
+        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, check=True).stdout.strip()
+
+    def commit(self, cwd, words, file=None):
+        if file:
+            with open(os.path.join(cwd, file), "a") as f:
+                f.write(words + "\n")
+            self.git(cwd, "add", file)
+        self.git(cwd, "commit", "-q", "--allow-empty", "-m", words)
+        return self.git(cwd, "rev-parse", "HEAD")
+
+    def args(self, **kw):
+        import argparse
+        return argparse.Namespace(**{"id": "SHEP-1", "json": True, "folder": None, **kw})
+
+    def test_switch_moves_the_task_to_the_given_space(self):
+        """#837: an explicit --space wins over the old agent's herdr.task.space label."""
+        self.task["space"] = "sp-a"
+        self.live = [{"address": "t1", "status": {"state": "working"}, "labels": {"herdr.task.space": "sp-a"}}]
+        got = []
+        self.patch(self.commands, "agent_running", lambda k: True)
+        self.patch(self.commands, "refresh_sessions", lambda *a: None)
+        self.patch(self.commands, "run", lambda *a, **k: None)
+        self.patch(self.commands, "start_again", lambda s, t, space, *a, **k: (got.append(space), ({"address": "t2", "agent": "claude"}, False))[1])
+        self.commands.cmd_switch(self.args(space="sp-b", agent="claude", argv=None, parent="t9", keep=False))
+        self.assertEqual(got, ["sp-b"])
+        got.clear()
+        self.commands.cmd_switch(self.args(space=None, agent="claude", argv=None, parent=None, keep=False))
+        self.assertEqual(got, ["sp-a"])  # none given: the old agent's own space

@@ -884,7 +884,8 @@ def cmd_switch(args):
         refresh_sessions(s, t, live)
         old = live[-1] if live else None
         labels = (old or {}).get("labels") or {}
-        space = (labels.get("herdr.task.space") or labels.get("herdr.space") or (bare(args.space) if args.space else None)
+        # A given --space wins: the task moves there (#837); else the old agent's own space.
+        space = ((bare(args.space) if args.space else None) or labels.get("herdr.task.space") or labels.get("herdr.space")
                  or t.get("space") or default_space())
         if t["state"] in ("todo", "scheduled", "queued", "done"):
             t["state"] = "running"
