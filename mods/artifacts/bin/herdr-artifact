@@ -287,6 +287,9 @@ def recipe_problems(src, files):
     if not r.get("blocks"):
         return ['"blocks" must be a list with at least one block.']
     walk(r["blocks"], "")
+    # the picture its card in the chat shows first (core/recipe.js preview()): one beside it
+    if "cover" in r and (not isinstance(r["cover"], str) or r["cover"] not in files):
+        out.append('"cover" must be a picture beside recipe.json.')
     return out
 
 

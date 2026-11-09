@@ -30,6 +30,7 @@ import { Chats } from "./chats.ts";
 import { act, hc as hcRun } from "./actions.ts";
 import { AgentWatch } from "./watch.ts";
 import { Compat, activity, newsKey, placeKey } from "./compat.ts";
+import { keep, served as fileResponse, smaller } from "./media.ts";
 import { Asks } from "./asks.ts";
 import { Jobs } from "./jobs.ts";
 import { terminalBridge } from "./terminal.ts";
@@ -703,16 +704,28 @@ const server = Bun.serve<{ who: string }>({
       const upload = want.startsWith(ATTACH + "/") && !want.slice(ATTACH.length + 1).includes("/") && !!statSync(want, { throwIfNoEntry: false })?.isFile();
       const at = upload ? want : compat.fileOf(key, want);
       const addr = compat.addrOf(key) ?? "", on = !upload && addr.includes("/") ? addr.split("/")[0] : null;
-      if (!at || !at.startsWith("/") || at.includes("/../") || (!on && !existsSync(at))) return json({ error: "not found" }, 404);
-      const named = { "cache-control": "private, max-age=3600", ...(url.searchParams.get("download") ? { "content-disposition": `attachment; filename="${at.split("/").pop()!.replace(/"/g, "")}"` } : {}) };
+      // (another machine's agent may name one in its home: ~/…, read there)
+      if (!at || !(at.startsWith("/") || (on && at.startsWith("~/"))) || at.includes("/../") || (!on && !existsSync(at))) return json({ error: "not found" }, 404);
+      const named: Record<string, string> = url.searchParams.get("download") ? { "content-disposition": `attachment; filename="${at.split("/").pop()!.replace(/"/g, "")}"` } : {};
+      const range = req.headers.get("range"), type = Bun.file(at).type || "application/octet-stream";
       if (on) {
-        // a chat on another machine (one this machine serves the web app for): the file there, through herdr-core
-        const r = await hub.call<{ code: number; stdout: string; truncated?: boolean }>("machine.exec", { on, argv: ["cat", "--", at], timeout: 30 }, 35_000).catch(() => null);
-        if (!r || r.code !== 0 || r.truncated) return json({ error: "not found" }, 404);
-        return new Response(Buffer.from(r.stdout, "base64"), { headers: { "content-type": Bun.file(at).type || "application/octet-stream", ...named } });
+        // a chat on another machine (one this machine serves the web app for): the file there, through herdr-core; kept
+        // a little while, as a player asks for it part by part (service/media.ts)
+        const k = `${on}\0${at}`;
+        let bytes = keep(k);
+        if (!bytes) {
+          const argv = at.startsWith("~/") ? ["sh", "-c", 'cat -- "$HOME/$1"', "cat", at.slice(2)] : ["cat", "--", at];
+          const r = await hub.call<{ code: number; stdout: string; truncated?: boolean }>("machine.exec", { on, argv, timeout: 30 }, 35_000).catch(() => null);
+          if (!r || r.code !== 0 || r.truncated) return json({ error: "not found" }, 404);
+          bytes = keep(k, new Uint8Array(Buffer.from(r.stdout, "base64")))!;
+        }
+        return fileResponse(new Blob([bytes as Uint8Array<ArrayBuffer>]), type, range, named);
       }
-      const f = Bun.file(at);
-      return new Response(f, { headers: { "content-type": f.type || "application/octet-stream", ...named } });
+      // a big picture's thumbnail, a video's still (made here once: service/media.ts); the file itself when it has none
+      const small = url.searchParams.get("thumb") ? await smaller(at, "thumb") : url.searchParams.get("poster") ? await smaller(at, "poster") : null;
+      if (url.searchParams.get("poster") && !small) return json({ error: "no still" }, 404);
+      if (small) return fileResponse(Bun.file(small), "image/jpeg", range);
+      return fileResponse(Bun.file(at), type, range, named);
     }
     // a recipe artifact's files (the web's recipe view asks api/artifacts/<id>/recipe?v=, /file/<path>?v=; &on=<machine>
     // for another machine's, read there)
