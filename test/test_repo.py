@@ -229,6 +229,35 @@ class Repo(unittest.TestCase):
         # Autopilot sits on the right with the other controls (order > 10), after the status
         self.assertIn("{ order: 12, View: StatusMark }, { order: 14, View: AutopilotHeader }", text)
 
+    def test_voice_call_is_a_button_beside_search(self):
+        """SHEP-135: no "Talk to Shepherdr" row at the top of the sidebar: a call starts from a voice button in the
+        brand row, before Search, in the web app and the window alike; the window's asks spaces-chat to start it."""
+        for f in ("web/plugins/voice/client.tsx", "web/src/App.tsx", "mods/spaces-chat/main.js",
+                  "mods/workspace-chrome-shepherdr/main.js"):
+            self.assertNotIn("Talk to Shepherdr", open(J(f)).read(), f)
+        voice = open(J("web", "plugins", "voice", "client.tsx")).read()
+        self.assertIn("reg.sideHead.push(VoiceButton)", voice)
+        # on a call the button turns into Mute and End in one capsule, the call's one place: no card under it
+        button = voice[voice.index("function VoiceButton("):voice.index("function PhoneCallButton(")]
+        self.assertIn('if (on) return <CallControls size="head" />', button)
+        self.assertIn('label="Voice call"', button)
+        self.assertNotIn("function CallCard(", voice)
+        controls = voice[voice.index("function CallControls("):voice.index("/** the soft green of a call")]
+        for label in ("Mute yourself", "End call", 'role="group"'):
+            self.assertIn(label, controls)
+        app = open(J("web", "src", "App.tsx")).read()
+        brand = app[app.index("export function Brand("):app.index("function SearchButton(")]
+        self.assertLess(brand.index("registry.sideHead"), brand.index("<SearchButton />"))
+        chrome = open(J("mods", "workspace-chrome-shepherdr", "main.js")).read()
+        self.assertLess(chrome.index('this.button("voice"'), chrome.index('this.button("search"'))
+        self.assertIn('setShared("voice.startreq"', chrome)
+        self.assertIn('shared("voice.startreq")', open(J("mods", "spaces-chat", "main.js")).read())
+        self.assertIn('callControls(t, call)', chrome)
+        self.assertIn('setShared("chat.callreq"', chrome)
+        for icon in ("mic.svg", "mic-off.svg", "phone-x.svg"):
+            self.assertTrue(os.path.exists(J("mods", "workspace-chrome-shepherdr", icon)), icon)
+        self.assertTrue(os.path.exists(J("mods", "workspace-chrome-shepherdr", "audio-lines.svg")))
+
     def test_tab_bar_from_one_list(self):
         """The tab bar's + menu, a tab's menu, Switch agent, a tab's name and the window header's End agent are
         core/menus.js's on both sides (mods/new-menu-tasks, menu-tasks, coordinator, tabs-tasks, pane-chat and the web app's

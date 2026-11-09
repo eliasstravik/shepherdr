@@ -1,10 +1,9 @@
 // Voice (SHEP-105): a call with Shepherdr itself, not one chat. One voice takes what you say to any space's Assistant
 // or task's agent, tells you when they reply or need you, and opens things here (voiceNav; its screen tool reads and
-// acts on this very page, screen.ts, whichever device started the call). It starts from the "Talk to Shepherdr" row at
-// the top of the sidebar, which becomes the call card while it is on (what it last said, Mute, End); on a phone from
-// the voice button at the end of the bottom bar, with a green strip of Mute and End above the bar (a chat's box has no
-// call button since SHEP-108: it is always Send). Where neither shows (a shut sidebar, a task open on a phone)
-// the strip sits at the top. Whatever the voice opens gets an "Opened by voice" tag for a moment.
+// acts on this very page, screen.ts, whichever device started the call). It starts from the voice button beside Search in
+// the sidebar's brand row, which is the call's Mute and End while it is on (SHEP-135); on a phone from the voice button
+// at the end of the bottom bar, then Full screen, Mute and End (a chat's box has no call button since SHEP-108: it is
+// always Send). Where neither shows (a shut sidebar, a task open on a phone) a strip sits at the top. Whatever the voice opens gets an "Opened by voice" tag for a moment.
 import clsx from 'clsx'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { act, definePlugin, getState, goChat, goPlace, listView, openArtifact, openItem, openTask, placeOf, placesDrawn, registry, setFilter, setUI, shownItem, taskInMiddle, useStore, useUI, visibleChats, type UI } from '@client/kernel.ts'
@@ -313,80 +312,78 @@ function CallMark({ phase, className }: { phase: Phase; className?: string }) {
   return <span data-call-mark={phase} className="contents"><Waves className={clsx('shrink-0', phase !== 'speaking' && 'wv-still', className)} /></span>
 }
 
-/** SHEP-108, SHEP-118: the minimized call's two buttons, one look wherever they show (a phone's bottom bar, the
- *  sidebar's card, the strip at the top): Full screen a quiet grey round that opens the call over everything again
- *  (Mute lives there only), End a red round with the hang-up phone that hangs up at once (SHEP-127: no question first).
- *  size: the bottom bar's, or the card's */
-function CallControls({ size }: { size: 'bar' | 'card' }) {
-  const btn = size === 'bar' ? 'size-14 max-[359px]:size-12' : 'size-8 phone:size-11'
+/** SHEP-108, SHEP-118, SHEP-135: the minimized call's controls, one look wherever they show (the sidebar's brand row, a
+ *  phone's bottom bar, the strip at the top), held together in one outlined capsule so they read as the call's: Full
+ *  screen (where there is room for it) opens the call over everything again; Mute a quiet round, solid while muted;
+ *  End a red round with the hang-up phone that hangs up at once (SHEP-127: no question first). size: the bottom
+ *  bar's, or the brand row's and strip's */
+function CallControls({ size, fit }: { size: 'bar' | 'head'; fit?: boolean }) {
+  const muted = useUI((u) => u.callMuted)
+  // the same pitch inside as beside it: the brand row's buttons are its icon buttons' size, as far apart as Search and
+  // the toggle, the capsule's ring drawn in the margin so it takes no room; the bar's as far apart as the bar's pieces
+  const btn = size === 'bar' ? 'size-12 max-[359px]:size-10' : 'size-7 phone:size-11'
   const glyph = size === 'bar' ? 'size-5' : ic
+  const quiet = 'text-fg2 enabled:hover:bg-hover'
   return (
-    <>
-      <button type="button" aria-label="Open the call full screen" data-call-maximize onClick={() => setUI({ callFull: true })}
-        className={clsx('press-dim relative grid shrink-0 place-items-center rounded-full bg-bubble text-fg2 after:absolute after:-inset-1', btn)}>
-        <FitIcon className={glyph} />
+    <div role="group" aria-label="Call controls" data-call-controls
+      className={clsx('flex shrink-0 items-center rounded-full shadow-[inset_0_0_0_1px_var(--line2)]', size === 'bar' ? 'gap-2 p-1 max-[359px]:gap-1' : '-m-0.5 gap-1 p-0.5')}>
+      {fit ? (
+        <button type="button" aria-label="Open the call full screen" data-call-maximize onClick={() => setUI({ callFull: true })}
+          className={clsx('press-dim grid shrink-0 place-items-center rounded-full', quiet, btn)}>
+          <FitIcon className={glyph} />
+        </button>
+      ) : null}
+      <button type="button" aria-label={muted ? 'Unmute yourself' : 'Mute yourself'} aria-pressed={muted} onClick={toggleMute}
+        className={clsx('press-dim grid shrink-0 place-items-center rounded-full', muted ? 'bg-fg text-bg' : quiet, btn)}>
+        {muted ? <MicOffIcon className={glyph} /> : <MicIcon className={glyph} />}
       </button>
       <button type="button" aria-label="End call" onClick={endCall}
-        className={clsx('press-dim relative grid shrink-0 place-items-center rounded-full bg-need text-white after:absolute after:-inset-1', btn)}>
+        className={clsx('press-dim grid shrink-0 place-items-center rounded-full bg-need text-white', btn)}>
         <EndCallIcon className={glyph} />
       </button>
-    </>
+    </div>
   )
 }
 
 /** the soft green of a call (the old call mark's), its words in the ready colour */
 const callTint = 'bg-[color-mix(in_srgb,var(--ready)_11%,var(--bg))] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--ready)_22%,transparent)]'
 
-/** SHEP-105: the top of the spaces list: "Talk to Shepherdr", above everything it can reach. On a call it is the call
- *  card: Shepherdr, what it is doing and its clock, the last thing it said, Mute and End. */
+/** SHEP-105, SHEP-135: the top of the spaces list: nothing, but the key's card when a call couldn't start for want of
+ *  one. A call shows in the brand row (VoiceButton: Mute and End), never a card here as well */
 function ShepherdrRow() {
-  const on = useUI((u) => u.call)
+  const [helped] = useHelp()
+  if (!helped) return null
   return (
     <div className="flex flex-col gap-2 px-2 pt-1.5 pb-1 phone:px-3 phone:pt-2">
-      {on ? <CallCard /> : (
-        <button type="button" onClick={() => toggleCall(null)} aria-label="Talk to Shepherdr: a voice call"
-          className="press group flex min-h-9 items-center gap-2.5 rounded-row py-1 pr-1 pl-2 text-left text-[0.9375rem]/5 text-fg hover:bg-hover keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] focus-visible:outline-none coarse:min-h-11 phone:min-h-12 phone:pl-3 phone:text-base/6">
-          <WaveIcon className="size-4 text-fg2 phone:size-[18px]" />
-          <span className="min-w-0 flex-1 truncate font-medium">Talk to Shepherdr</span>
-          <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-full bg-fg text-bg phone:size-9"><WaveIcon className="size-3.5 phone:size-4" /></span>
-        </button>
-      )}
       <CallHelp />
     </div>
   )
 }
 
-/** SHEP-108: the call's one place for its details: who, what it is doing and how long, then Mute and End. Never what
- *  was said: that is the chat's */
-function CallCard() {
-  const t = useElapsed(useUI((u) => u.callStarted))
-  const { word, phase } = usePhase()
+/** SHEP-135: the voice call's button in the sidebar's brand row, beside Search and as quiet as it. On a call it turns
+ *  into the call's Mute and End in their capsule, as a phone's bar does: the call's one place, never a card as well */
+function VoiceButton() {
+  const on = useUI((u) => u.call)
+  if (on) return <CallControls size="head" />
   return (
-    <section aria-label="Voice call with Shepherdr" data-call-card data-phase={phase} className={clsx('flex items-center gap-2.5 rounded-[12px] py-1.5 pr-1.5 pl-3 phone:gap-3 phone:py-2 phone:pr-2 phone:pl-3.5', callTint)}>
-      <span className="grid w-4 shrink-0 place-items-center text-ready-fg phone:w-5"><CallMark phase={phase} className="h-3.5 phone:h-4" /></span>
-      <div className="min-w-0 flex-1">
-        <h2 className="truncate text-[0.9375rem]/5 font-semibold text-fg phone:text-base/6">Shepherdr</h2>
-        <p className="flex min-w-0 gap-1 text-[0.75rem]/4 font-medium text-ready-fg tabular-nums phone:text-[0.8125rem]/5">
-          <span role="status" className="min-w-0 truncate">{word}</span><span className="shrink-0">· {t}</span>
-        </p>
-      </div>
-      <CallControls size="card" />
-    </section>
+    <IconButton label="Voice call" data-voice-button onClick={() => toggleCall(null)}>
+      <WaveIcon className={ic} />
+    </IconButton>
   )
 }
 
-/** SHEP-105, SHEP-108: the end of a phone's bottom bar. Off a call: Talk to Shepherdr, a quiet grey round. On one:
- *  Mute and the red hang-up, nothing above the bar (the call's details are the sidebar's card) */
+/** SHEP-105, SHEP-108, SHEP-135: the end of a phone's bottom bar. Off a call: Voice call, a quiet grey round. On one:
+ *  Full screen, Mute and the red hang-up in their capsule, nothing above the bar */
 function PhoneCallButton() {
   const on = useUI((u) => u.call)
-  return on ? <CallControls size="bar" /> : (
-    <RoundButton label="Talk to Shepherdr" onClick={() => toggleCall(null)} className="size-14 max-[359px]:size-12">
+  return on ? <CallControls size="bar" fit /> : (
+    <RoundButton label="Voice call" onClick={() => toggleCall(null)} className="size-14 max-[359px]:size-12">
       <WaveIcon className="size-5" />
     </RoundButton>
   )
 }
 
-/** the strip at the top where neither the sidebar's card nor a phone's bottom bar shows: Shepherdr, what it is doing
+/** the strip at the top where neither the sidebar's brand row nor a phone's bottom bar shows: Shepherdr, what it is doing
  *  and its clock, Mute and End */
 function CallStrip() {
   const t = useElapsed(useUI((u) => u.callStarted))
@@ -398,19 +395,19 @@ function CallStrip() {
       <p className="min-w-0 flex-1 truncate">
         <span className="text-fg">Shepherdr</span> · <span role="status">{word}</span> · {t}
       </p>
-      <CallControls size="card" />
+      <CallControls size="head" fit />
     </div>
   )
 }
 
-/** the strip at the top where no card or bottom bar shows the call: a shut sidebar, a tablet, a phone with a task or
+/** the strip at the top where no brand row or bottom bar shows the call: a shut sidebar, a tablet, a phone with a task or
  *  Settings over its home (SHEP-66's band, now with Mute and End) */
 function CallBanner() {
   const on = useUI((u) => u.call)
   return useTop() && on ? <CallStrip /> : null
 }
 
-/** where the call shows at the top: neither the sidebar's card nor a phone's bottom bar is on screen */
+/** where the call shows at the top: neither the sidebar's brand row nor a phone's bottom bar is on screen */
 function useTop() {
   const width = useWindowWidth()
   return useStore((s) => {
@@ -421,7 +418,7 @@ function useTop() {
   })
 }
 
-/** the key's card where the sidebar's row doesn't show: above a phone's bar, else at the top */
+/** the key's card where the sidebar doesn't show: above a phone's bar, else at the top */
 function PhoneHelp() {
   return useTop() ? null : <CallHelp className="mx-4 mb-2" />
 }
@@ -538,7 +535,7 @@ function minimize() { setUI({ callFull: false }) }
 
 /** The call over everything, phone first (SHEP-118): calm and dark whatever the app's look, Shepherdr and the clock at
  *  the top, the Crook (SHEP-137) in the middle with what the call does under it, and only the call's own buttons: Minimize, Mute,
- *  End. Held sideways (short and wide), the Crook and its word sit left and the rest right (SHEP-126). Minimize (or Escape) puts it back in the bar, card or strip, whose Full screen button brings it back. */
+ *  End. Held sideways (short and wide), the Crook and its word sit left and the rest right (SHEP-126). Minimize (or Escape) puts it back in the brand row, bar or strip; the bar's and strip's Full screen button brings it back. */
 function CallScreen() {
   const on = useUI((u) => u.call && u.callFull)
   return on ? <FullCall /> : null
@@ -643,6 +640,7 @@ export default definePlugin({
   name: 'voice',
   setup(reg) {
     reg.sideTop.push(ShepherdrRow)
+    reg.sideHead.push(VoiceButton)
     reg.phoneBar.push(PhoneCallButton)
     // SHEP-122: no Listening pill above a phone's bar: the minimized call is its bar's buttons alone
     reg.phoneAbove.push(PhoneHelp)

@@ -107,8 +107,10 @@ export interface Registry {
   overlays: FC[]
   /** a line under the top of the screen (voice call elsewhere, offline) */
   topBars: FC[]
-  /** rows at the top of the spaces list, under its brand row, above Spaces (the Shepherdr voice call, SHEP-105) */
+  /** rows at the top of the spaces list, under its brand row, above Spaces (the voice call's card, SHEP-105) */
   sideTop: FC[]
+  /** icon buttons in the sidebar's brand row, before Search (the voice call, SHEP-135) */
+  sideHead: FC[]
   /** round buttons after Search in the phone's bottom bar (the voice call) */
   phoneBar: FC[]
   /** just above the phone's bottom bar (a voice call's Mute and End) */
@@ -147,6 +149,7 @@ export const registry: Registry = {
   overlays: [],
   topBars: [],
   sideTop: [],
+  sideHead: [],
   phoneBar: [],
   phoneAbove: [],
   tasksFooter: [],

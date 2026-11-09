@@ -71,13 +71,13 @@ connection it came on). A page from anywhere else can't change anything: writes 
   act first. `open` also shows the shown space's Artifacts, Files and Changes panels and its Assistant's terminal (a
   space named: that space first, then its panel), Tasks filtered by a state and words, and a Settings page by its
   spoken name.
-  SHEP-105: a call is with Shepherdr itself, not one chat. It starts from "Talk to Shepherdr" at the top of the
-  sidebar (the call card while on: what it is doing, its clock, the last thing it said, Mute, End), or a phone's voice
-  button at the end of the bottom bar (a green Mute and End strip above the bar). A chat's box has no call button
-  (SHEP-108): its round button is always Send, grey until there is something to send; where neither card nor bar shows, the strip sits at the top.
+  SHEP-105: a call is with Shepherdr itself, not one chat. It starts from the voice button beside Search in the
+  sidebar's brand row (SHEP-135; on a call it turns into Mute and End in one outlined capsule, no card under it), or a
+  phone's voice button at the end of the bottom bar (on a call Full screen, Mute and End in the same capsule). A chat's box has no call button
+  (SHEP-108): its round button is always Send, grey until there is something to send; where neither brand row nor bar shows, the strip sits at the top.
   SHEP-118: a web call opens full screen (always dark: Shepherdr, its clock, an orb that breathes while it listens,
   swells with whoever speaks, swirls while it thinks or works and greys while muted; only Minimize, Mute and End).
-  Minimized, the card, bar and strip show Full screen where Mute was: Mute is the full-screen view's only. Whatever
+  Minimized, the bar and strip show Full screen, Mute and End; the brand row Mute and End (SHEP-135). Whatever
   the voice opens or does on the page minimizes it, and its screen tool never reads it (`[data-call-screen]`). SHEP-124:
   the agent's own `call_view` tool (full or minimized, a `{ kind: "call" }` nav) sets the view, never screen clicks; an
   action that itself made the call full screen isn't minimized again (`stepsAside`). `/api/voice` takes

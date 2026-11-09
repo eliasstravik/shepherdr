@@ -18,8 +18,9 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Element | Window (file:line, exact words/control) | Web (file:line) | State |
 |---|---|---|---|
 | Mark and name | workspace-chrome-shepherdr main.js:51 Herdr's logo, "Herdr" | A:163 the crook, "Shepherdr" (`snap.name`) | ◇ the window's brand row is the Herdr app's own chrome; the web app is Shepherdr's own page, so it names itself |
-| Search | main.js:52 magnifier icon button, opens Jump (Ctrl+K) | A:174 `SearchButton`: magnifier icon button, opens Jump (Search); title "Search · Ctrl+K" | ✓ (2.1's "Search" box under the brand row removed) |
-| Sidebar toggle | main.js:54 sidebar icon: to the rail and back | A:168 `PlacesToggle` (Frame.tsx): hides or shows the sidebar | ◇ the web hides the column (no rail); on a phone or tablet the sidebar is a drawer |
+| Voice call (SHEP-135) | main.js:76-77 wave icon button before Search (Voice add-on), asks spaces-chat for a call (shared "voice.startreq"); on a call Mute and End in an outlined capsule, asked of the call's chat (shared "chat.callreq") | A `registry.sideHead`: voice `VoiceButton`, wave icon button before Search, "Voice call"; on a call `CallControls`: Mute and End in an outlined capsule | ✓ |
+| Search | main.js:78 magnifier icon button, opens Jump (Ctrl+K) | A:174 `SearchButton`: magnifier icon button, opens Jump (Search); title "Search · Ctrl+K" | ✓ (2.1's "Search" box under the brand row removed) |
+| Sidebar toggle | main.js:80 sidebar icon: to the rail and back | A:168 `PlacesToggle` (Frame.tsx): hides or shows the sidebar | ◇ the web hides the column (no rail); on a phone or tablet the sidebar is a drawer |
 | Foot: Settings | main.js:44 cog "Settings" (Herdr's app settings, update dot) | none | ◇ Herdr's own app settings belong to the window app, not to Shepherdr's web page |
 | Foot: Shepherdr | main.js:46 crook "Shepherdr": Shepherdr settings | A:196 crook "Shepherdr": Settings | ✓ |
 | Foot: Add machine | main.js:47 plus "Add machine" | AM:12 plus "Add machine" (was a server icon) | ✓ |
