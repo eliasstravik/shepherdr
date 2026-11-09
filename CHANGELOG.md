@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- On a Mac with Swift 6.4, dictation and window voice calls work again: their audio helper failed to build
+  (GitHub #789).
+- On a Mac, the agent menu's restart, switch agent and close work again, and so does changing a chat's agent or model:
+  they needed Linux's setsid and bash 4 (GitHub #736).
+- The web app is shared again on tailnets whose user ids are very large: Shepherdr misread them and decided Tailscale
+  wasn't running (GitHub #845).
 - On a Mac, you can talk over the agent in a window voice call to interrupt it, as on the web: the call uses
   Apple's echo cancellation, so the microphone stays open while the agent speaks. Other apps' sound dips slightly
   during a call. If echo cancellation can't run, the call works as before.
