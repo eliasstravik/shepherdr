@@ -256,6 +256,8 @@ SET_KEYS = {"review": "review", "brief.review": "review", "merge": "merge", "bri
             "mustfix": "must_fix", "must-fix": "must_fix", "must_fix": "must_fix", "review.mustfix": "must_fix",
             "agent": "agent", "task.agent": "agent", "model": "model", "task.model": "model", "effort": "effort", "task.effort": "effort",
             "reviewer": "reviewer", "reviewer.agent": "reviewer", "reviewer.model": "reviewer_model", "reviewer.effort": "reviewer_effort",
+            "reviewer_model": "reviewer_model", "reviewer-model": "reviewer_model",
+            "reviewer_effort": "reviewer_effort", "reviewer-effort": "reviewer_effort",
             "proof": "proof", "brief.proof": "proof"}
 # The Proof line (as Shepherdr's skill asks of its task agents), on and off.
 PROOF_WORDS = {"on": "show verifiable proof in one recipe artifact: each proof with a one-line caption, real and from this work now, "

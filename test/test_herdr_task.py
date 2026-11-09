@@ -2462,6 +2462,21 @@ class AcceptCardArtifacts(unittest.TestCase):
             self.assertEqual([a["id"] for a in proof.task_artifacts(s, t)], ["report-0003", "proof-0002"])
 
 
+class ReviewerFlags(unittest.TestCase):
+    """#803: add/edit's --reviewer-model and --reviewer-effort set the task's reviewer, as --set does."""
+
+    def test_the_flags_set_the_reviewer(self):
+        import argparse
+        sys.path.insert(0, BIN)
+        from herdr_task.settings import set_opts
+        t = {}
+        set_opts(t, argparse.Namespace(reviewer="codex", reviewer_model="gpt-5", reviewer_effort="xhigh"))
+        self.assertEqual((t["reviewer"], t["reviewer_model"], t["reviewer_effort"]), ("codex", "gpt-5", "xhigh"))
+        set_opts(t, argparse.Namespace(set=["reviewer-effort=high", "reviewer_model=default"]))
+        self.assertEqual(t["reviewer_effort"], "high")
+        self.assertNotIn("reviewer_model", t)
+
+
 if __name__ == "__main__":
     unittest.main()
 
