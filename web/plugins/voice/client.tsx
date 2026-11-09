@@ -6,7 +6,7 @@
 // call button since SHEP-108: it is always Send). Where neither shows (a shut sidebar, a task open on a phone)
 // the strip sits at the top. Whatever the voice opens gets an "Opened by voice" tag for a moment.
 import clsx from 'clsx'
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { act, definePlugin, getState, goChat, goPlace, listView, openArtifact, openItem, openTask, placeOf, placesDrawn, registry, setFilter, setUI, shownItem, taskInMiddle, useStore, useUI, visibleChats, type UI } from '@client/kernel.ts'
 import { EndCallIcon, FitIcon, ic, IconButton, MicIcon, MicOffIcon, RoundButton, UnfitIcon, useElapsed, WaveIcon, Waves, XIcon } from '@client/ui.tsx'
 import { useWindowWidth } from '@client/Frame.tsx'
@@ -432,20 +432,93 @@ function TopHelp() {
 
 /* ---------- SHEP-118: the full-screen call ---------- */
 
-/** the orb's swell, each frame from the call's sound: whoever speaks (nothing of yours while muted), smoothed */
-function useOrbLevel(ref: RefObject<HTMLDivElement | null>) {
+/** the logo's staff, exactly (public/icon.svg): its path, round cap and 12° tilt about (16 16); its hook's centre */
+const STAFF = 'M21 60V12a7 7 0 0 0-14 0v2.5'
+const HOOK = [14, 12] as const
+const ease = (x: number) => x * x * (3 - 2 * x)
+const fract = (x: number) => x - Math.floor(x)
+const clamp = (x: number) => Math.min(1, Math.max(0, x))
+
+/** The full-screen call's mark (SHEP-137, option 1 of SHEP-134): the hooked staff from Shepherdr's logo as one white
+ *  line on the call's near-black, green only for the voice. Shepherdr's voice ripples out from the hook, yours ripples
+ *  in; it draws itself while connecting, a green glint runs along it while it thinks or works, and it goes grey and
+ *  still while you are muted. Everything it draws stays inside its own box (no blur, blend or clip: SHEP-120's grey
+ *  square came from those on WebKit), so the box is the room the rings need and nothing else overlaps it. Each frame
+ *  sets a few attributes from the call's sound; React only renders it once per phase */
+function Crook({ phase, className }: { phase: string; className?: string }) {
+  const id = useId()
+  const svg = useRef<SVGSVGElement>(null)
+  const now = useRef(phase)
+  now.current = phase
   useEffect(() => {
-    let raf = 0, v = 0
-    const step = () => {
+    const el = svg.current
+    if (!el) return
+    const g = el.querySelector<SVGGElement>('[data-crook-tilt]')!
+    const line = el.querySelector<SVGPathElement>('[data-crook-line]')!
+    const glint = el.querySelector<SVGPathElement>('[data-crook-glint]')!
+    const rings = [...el.querySelectorAll<SVGCircleElement>('[data-crook-ring]')]
+    const calm = matchMedia('(prefers-reduced-motion: reduce)')
+    // eased values, so a change of phase glides instead of jumping
+    let raf = 0, last = performance.now(), lvl = 0, glow = 0, ring = 0
+    const step = (ms: number) => {
+      const dt = Math.min(0.1, (ms - last) / 1000), still = calm.matches, t = still ? 0 : ms / 1000, p = now.current
+      last = ms
+      const glide = (v: number, to: number, k: number) => v + (to - v) * (1 - Math.pow(1 - k, dt * 60))
+      // the swell, from whoever speaks (nothing of yours while muted): up fast, down slow
       const s = callSample()
       const target = getState().ui.callMuted && s.who !== 'agent' ? 0 : s.level
-      v += (target - v) * (target > v ? 0.35 : 0.12)
-      ref.current?.style.setProperty('--lvl', v.toFixed(3))
+      lvl = glide(lvl, target, target > lvl ? 0.35 : 0.12)
+      const l = still ? lvl * 0.6 : lvl
+      const sway = still ? 0 : Math.sin((t * Math.PI * 2) / 7) * 1.4
+      g.setAttribute('transform', `rotate(${sway.toFixed(2)} 16 41) rotate(12 16 16) translate(${HOOK[0]} ${HOOK[1]}) scale(${(1 + l * 0.03).toFixed(4)}) translate(${-HOOK[0]} ${-HOOK[1]})`)
+      // connecting: it draws itself up from the staff to the hook, holds, and draws again
+      const draw = (p === 'connecting' || p === 'reconnecting') && !still ? Math.max(0, 1 - ease(Math.min(1, fract(t / 2.6) / 0.6))) : 0
+      line.setAttribute('stroke-dashoffset', (draw * 100).toFixed(2))
+      line.setAttribute('stroke-opacity', clamp((1 - draw) * 5).toFixed(3))
+      // thinking or working: a green glint runs along it, from the staff over the hook (still: it rests on the hook)
+      glow = glide(glow, p === 'thinking' || p === 'working' ? 1 : 0, 0.1)
+      glint.setAttribute('stroke-opacity', glow.toFixed(3))
+      glint.setAttribute('stroke-dashoffset', still ? '-70' : (-(fract(t / (p === 'working' ? 1.1 : 1.8)) * 134 - 14)).toFixed(2))
+      // the rings: out from the hook while Shepherdr speaks, in to it while it listens, as bright as the voice
+      const inward = p === 'listening'
+      ring = glide(ring, inward || p === 'speaking' ? 1 : 0, 0.08)
+      rings.forEach((r, i) => {
+        let f = fract(t * 0.45 + i / 4)
+        if (inward) f = 1 - f
+        const a = still ? (i === 1 ? 0.15 + l : 0) : (1 - f) * Math.min(1, 0.05 + l * 1.4) * (inward ? Math.min(1, f * 3 + 0.2) : 1)
+        r.setAttribute('r', (still ? 11.5 + i * 5.7 : 9.5 + f * 18.5).toFixed(2))
+        r.setAttribute('stroke-opacity', (clamp(ring * a) * 0.9).toFixed(3))
+      })
       raf = requestAnimationFrame(step)
     }
     raf = requestAnimationFrame(step)
     return () => cancelAnimationFrame(raf)
-  }, [ref])
+  }, [])
+  const fade = `${id}-fade`, mask = `${id}-mask`
+  return (
+    <svg ref={svg} viewBox="-15 -19 60 75" data-crook data-phase={phase} aria-hidden className={clsx('group overflow-visible', className)}>
+      <defs>
+        {/* the staff fades out below, as the app icon's edge cuts it */}
+        <linearGradient id={fade} gradientUnits="userSpaceOnUse" x1="0" y1="34" x2="0" y2="54">
+          <stop offset="0" stopColor="#fff" />
+          <stop offset="1" stopColor="#fff" stopOpacity="0" />
+        </linearGradient>
+        <mask id={mask} maskUnits="userSpaceOnUse" x="-40" y="-40" width="120" height="120">
+          <rect x="-40" y="-40" width="120" height="120" fill={`url(#${fade})`} />
+        </mask>
+      </defs>
+      <g data-crook-tilt>
+        {[0, 1, 2, 3].map((i) => (
+          <circle key={i} data-crook-ring cx={HOOK[0]} cy={HOOK[1]} r="9.5" strokeWidth="0.9" strokeOpacity="0"
+            className="fill-none stroke-ready transition-[stroke] duration-700 group-data-[phase=connecting]:stroke-fg3 group-data-[phase=muted]:stroke-fg3 group-data-[phase=reconnecting]:stroke-fg3" />
+        ))}
+        <path data-crook-line d={STAFF} pathLength={100} strokeDasharray="100 100" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" mask={`url(#${mask})`}
+          className="fill-none stroke-fg transition-[stroke,opacity] duration-700 group-data-[phase=connecting]:stroke-fg2 group-data-[phase=muted]:stroke-fg3 group-data-[phase=muted]:opacity-80 group-data-[phase=reconnecting]:stroke-fg2" />
+        <path data-crook-glint d={STAFF} pathLength={100} strokeDasharray="14 120" strokeOpacity="0" strokeWidth="4.5" strokeLinecap="round" mask={`url(#${mask})`}
+          className="fill-none stroke-ready" />
+      </g>
+    </svg>
+  )
 }
 
 /** one of the full-screen call's three round buttons, its word under it */
@@ -464,8 +537,8 @@ function BigCallButton({ label, word, onClick, pressed, className, children }: {
 function minimize() { setUI({ callFull: false }) }
 
 /** The call over everything, phone first (SHEP-118): calm and dark whatever the app's look, Shepherdr and the clock at
- *  the top, the orb in the middle with what the call does under it, and only the call's own buttons: Minimize, Mute,
- *  End. Held sideways (short and wide), the orb and its word sit left and the rest right (SHEP-126). Minimize (or Escape) puts it back in the bar, card or strip, whose Full screen button brings it back. */
+ *  the top, the Crook (SHEP-137) in the middle with what the call does under it, and only the call's own buttons: Minimize, Mute,
+ *  End. Held sideways (short and wide), the Crook and its word sit left and the rest right (SHEP-126). Minimize (or Escape) puts it back in the bar, card or strip, whose Full screen button brings it back. */
 function CallScreen() {
   const on = useUI((u) => u.call && u.callFull)
   return on ? <FullCall /> : null
@@ -474,8 +547,6 @@ function FullCall() {
   const t = useElapsed(useUI((u) => u.callStarted))
   const muted = useUI((u) => u.callMuted)
   const { word, phase } = usePhase()
-  const orb = useRef<HTMLDivElement>(null)
-  useOrbLevel(orb)
   const screen = useRef<HTMLDivElement>(null)
   useEffect(() => {
     // the keyboard stays on the call: focus starts on it, Tab goes round its own buttons, Escape minimizes
@@ -500,10 +571,8 @@ function FullCall() {
         <h2 className="text-base/6 font-semibold">Shepherdr</h2>
         <p className="text-sm/5 text-fg2 tabular-nums">{t}</p>
       </header>
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-12 px-6 short:col-start-1 short:row-span-full short:gap-(--orb-short-gap)">
-        <div ref={orb} data-phase={look} aria-hidden className="call-orb w-[min(64vw,38dvh,300px)] short:w-(--orb-short)">
-          <span className="call-orb-body"><span className="call-orb-swirl" /><span className="call-orb-sheen" /></span>
-        </div>
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-12 px-6 short:col-start-1 short:row-span-full short:gap-2">
+        <Crook phase={look} className="h-[min(46dvh,100vw,400px)] short:h-(--crook-short)" />
         <p className="flex h-7 max-w-full min-w-0 items-center gap-2 text-lg/7 font-medium text-fg2">
           <span role="status" className="min-w-0 truncate">{word}</span>
           {phase === 'thinking' || phase === 'working' ? <span aria-hidden className="typing inline-flex shrink-0 items-center gap-[3px] [&>i]:size-[5px]!"><i /><i /><i /></span> : null}
