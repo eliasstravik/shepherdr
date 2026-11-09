@@ -29,7 +29,7 @@ import { taskMenu } from "./core/menus.js";
 import { machinesInOrder, machineOrderOf, chatPane } from "./core/spaces.js";
 // The rules for a task's status, order and words: shared with the web app (core/tasks.js).
 import { RANK, STATUS, RANK_OF, ORDER, GROUP_BY, groupBy, groupNow, machineOf, machineName, refOf, taskKey, autoPrefix, place,
-  queueReason, reportOf as report, secondLine, leftOf, order, matches, day, ago, capital, short, autoWhere, fromLine, inSpace } from "./core/tasks.js";
+  queueReason, reportOf as report, secondLine, leftOf, order, matches, day, ago, capital, short, autoWhere, fromLine, inSpace, withoutDoneInbox } from "./core/tasks.js";
 import { READ_LISTS, taskLists } from "./core/tasklists.js";
 import { SH } from "./core/paths.js";
 import { dirs } from "./dirs.js";
@@ -288,6 +288,7 @@ export default class Tasks extends View {
     this.prunePins(placed, cx);
     // Needs you: asks, stuck agents, problems, failed automations (a task ready to merge is in Ready).
     let inbox = needs();
+    inbox = withoutDoneInbox(inbox, placed);
     if (here) inbox = inbox.filter((x) => this.needHere(here, x));
     this.readAsks(inbox, cx);
     this.readPrefixes(inbox, cx);

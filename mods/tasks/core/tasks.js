@@ -50,6 +50,13 @@ export function inSpace(space, thing) {
   if (!space || !thing || (thing.machine ?? null) !== (space.machine ?? null)) return false;
   return (Boolean(thing.folder) && thing.folder === space.folder) || (thing.space != null && bareId(thing.space) === bareId(space.id));
 }
+
+// The Tasks panel's inbox is a periodic snapshot; never let a stale task entry hide a current Done row.
+export function withoutDoneInbox(inbox, placed) {
+  const done = new Set(placed.filter((p) => p.section === "done")
+    .map((p) => `${p.list.machine ?? ""}:${p.list.folder}:${refOf(p.list, p.task)}`));
+  return inbox.filter((x) => !(x.ref && x.folder && done.has(`${x.machine ?? ""}:${x.folder}:${x.ref}`)));
+}
 // A list's task id: HAT-4.
 export const refOf = (list, task) => `${list.prefix}-${task.id}`;
 // A task's pin key (shared "tasks.pinned"): "<machine, empty here>:<folder>#<id>".

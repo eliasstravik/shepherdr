@@ -54,9 +54,12 @@ def detail(k):
 
 
 def agent_running(k):
-    fg = (k.get("foreground") or {}).get("name") or ""
+    foreground = k.get("foreground") or {}
+    fg = os.path.basename(foreground.get("name") or "")
+    if fg and fg not in SHELLS:
+        return True
     if fg:
-        return os.path.basename(fg) not in SHELLS
+        return False
     return bool(k.get("agent")) and k.get("agent") not in SHELLS
 
 

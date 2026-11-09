@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { place, queueReason, reportOf, estimated, order, ago, autoPrefix, refOf, taskKey, matches, busyAgain, secondLine, leftOf, ORDER, STATUS, WORKING_AGAIN, GRACE_MS, fromLine, autoWhere, inSpace } from "./tasks.js";
+import { place, queueReason, reportOf, estimated, order, ago, autoPrefix, refOf, taskKey, matches, busyAgain, secondLine, leftOf, ORDER, STATUS, WORKING_AGAIN, GRACE_MS, fromLine, autoWhere, inSpace, withoutDoneInbox } from "./tasks.js";
 import { REASONS, fit } from "./needs.js";
 
 const NOW = 1_800_000_000_000;
@@ -62,6 +62,13 @@ test("why a queued task waits", () => {
   expect(queueReason(l, l.tasks[2], 1)).toBe("Waits: 1 task is running here");
   expect(queueReason(l, { id: 4, state: "queued", held: "vm-a's memory is 92% full" }, 0)).toBe("Waits: vm-a's memory is 92% full");
   expect(queueReason(l, { id: 4, state: "queued" }, 0)).toBe("Starts soon");
+});
+
+test("a stale Needs-you snapshot cannot hide the current Done task row", () => {
+  const done = place(list([{ id: 4, state: "done" }]), { id: 4, state: "done" });
+  const inbox = [{ ref: "X-4", folder: "/f", machine: null, kind: "stopped" },
+    { ref: "X-5", folder: "/f", machine: null, kind: "stopped" }];
+  expect(withoutDoneInbox(inbox, [done])).toEqual([inbox[1]]);
 });
 
 test("what the agent last said, with minutes from its very first estimate", () => {
