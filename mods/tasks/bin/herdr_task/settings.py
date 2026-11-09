@@ -4,9 +4,10 @@ the Settings block a task's brief ends with."""
 import json
 import os
 import re
+import shlex
 import shutil
 
-from .base import Fail, HOME, MAX_RUNNING, WHERE
+from .base import Fail, git, HOME, MAX_RUNNING, WHERE
 
 
 # What each agent key starts by default. Unknown keys run as themselves; --argv overrides.
@@ -338,10 +339,56 @@ def by_layer(s, space, section, key, value, default):
     return None
 
 
-def other_cli(agent):
-    """The reviewer by default: the other CLI than the task agent's where it's installed, else its own."""
-    other = {"claude": "codex", "codex": "claude"}.get(agent)
-    return other if other and shutil.which(other) else agent
+def cli_here(kind):
+    """The last sign-in check's word on a CLI here (takeover.py's cli-check, which the scheduler
+    keeps every 15 minutes): "ready", "signed-out", "missing" or None (unknown). Only read, never run."""
+    from .takeover import read_checks
+    return (((read_checks().get("machines") or {}).get("") or {}).get(kind))
+
+
+CLI_NAMES = {"claude": "Claude Code", "codex": "Codex"}
+LOGIN = {"claude": "claude auth login", "codex": "codex login"}
+
+
+def trust_roots(folder):
+    """The folders Codex asks to trust for an agent started in folder: the folder itself and its git
+    repository's root, which for a worktree is the main checkout's (Codex: "Trusting will apply to
+    the repository root")."""
+    if not folder:
+        return []
+    out = [folder]
+    ok, common, _ = git(folder, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if ok and common:
+        root = os.path.dirname(common) if os.path.basename(common) == ".git" else \
+            git(folder, "rev-parse", "--show-toplevel")[1]
+        if root and root not in out:
+            out.append(root)
+    return out
+
+
+def reviewer_command(who, model=None, effort=None, folder=None):
+    """The command a worker starts its reviewer with (the brief's Reviewer line): read-only, and for
+    Codex on its own app server (--no-daemon, as task agents run: a shared one can keep a sign-in
+    since replaced, and every turn then fails, #745). Codex would first stop on its own screens,
+    nobody at the keys (#798, #753): "Trust this folder?" in a folder it hasn't seen (the task's
+    folder and its repository's root are trusted for this run only, as a table: a dotted
+    projects."<path>" key breaks on a dot in the path, as in ~/.local) and "Hooks need review"
+    when a hook is new or changed (hooks off: a read-only reviewer needs none, and they would run
+    outside its sandbox)."""
+    if who == "codex":
+        a = ["codex", "--no-daemon", "--sandbox", "read-only", "--ask-for-approval", "never", "--disable", "hooks"]
+        roots = trust_roots(folder)
+        if roots:
+            a += ["-c", "projects={" + ",".join(f'{json.dumps(r)}={{trust_level="trusted"}}' for r in roots) + "}"]
+        a += ["-m", model] if model else []
+        a += ["-c", f'model_reasoning_effort="{effort}"'] if effort else []
+    elif who == "claude":
+        a = ["claude", "--permission-mode", "plan"]
+        a += ["--model", model] if model else []
+        a += ["--effort", effort] if effort else []
+    else:
+        return None
+    return shlex.join(a)
 
 
 def task_settings(s, t, space=None, argv=None):
@@ -375,11 +422,23 @@ def task_settings(s, t, space=None, argv=None):
         for f in ("model", "effort"):
             if t.get(f"reviewer_{f}"):
                 rv[f] = t[f"reviewer_{f}"]
-        who = rv.get("agent") or other_cli(agent)
+        other = {"claude": "codex", "codex": "claude"}.get(agent)
+        want = rv.get("agent") or (other if other and shutil.which(other) else agent)
+        who = want
+        if want != agent and cli_here(want) == "signed-out":
+            # Signed out here, it would sit at its sign-in screen and never review (#745): the task's own CLI does.
+            who, rv = agent, {}
         text = who + (f", model {rv['model']}" if rv.get("model") else "") + (f", effort {rv['effort']}" if rv.get("effort") else "")
-        if not rv.get("agent"):
+        if who != want:
+            text += (f" (your own CLI: {CLI_NAMES.get(want, want)} isn't signed in here; the person runs "
+                     f"`{LOGIN.get(want, want + ' login')}` on this machine, then asks for the review again)")
+        elif not rv.get("agent"):
             text += " (the other CLI)" if who != agent else " (your own CLI: no other is installed)"
-        add("Reviewer", text, {"agent": who, "model": rv.get("model"), "effort": rv.get("effort")}, rv_by)
+        folder = t.get("worktree") or getattr(s, "loc", {}).get("folder")
+        cmd = reviewer_command(who, rv.get("model"), rv.get("effort"), folder)
+        if cmd:
+            text += f"; start it as `{cmd}`"
+        add("Reviewer", text, {"agent": who, "model": rv.get("model"), "effort": rv.get("effort"), "command": cmd}, rv_by)
         must = sets.get("must_fix") or (k.get("must_fix") if k.get("must_fix") in LEVELS else "major")
         add("Must fix", MUST_WORDS[must], must, "task" if "must_fix" in sets else by_layer(s, space, "tasks", "must_fix", must, "major"))
         rounds = sets.get("review_rounds") or (rounds_cfg if rounds_cfg > 0 else 3)

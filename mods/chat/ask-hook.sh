@@ -39,9 +39,11 @@ command -v hc >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 && watch=1
 [ "$watch" = 1 ] || fresh || exit 0
 # A task worker runs its own hook too (herdr-task _allow: Codex's in its argv, Claude's in its
 # --settings, SHEP-139), which hands this what it doesn't allow itself ($HERDR_ASK_CHAINED): the
-# agent waits for both, so this copy steps aside.
+# agent waits for both, so this copy steps aside. Codex's is inside a -c value (hooks.PermissionRequest=...),
+# never a word of its own: matching only a bare "_allow" put two cards up for each ask (#866).
 if [ -z "${HERDR_ASK_CHAINED:-}" ] && [ "$watch" = 1 ] \
   && hc get "$t" --json 2>/dev/null | jq -e '(.argv // []) as $a | ($a | index("_allow")) != null
+       or any($a[]; tostring | startswith("hooks.PermissionRequest=") and contains(" _allow --command "))
        or (($a | index("--settings")) as $i | $i != null and (($a[$i + 1] // "") | tostring | contains(" _allow --command ")))' >/dev/null 2>&1; then
   exit 0
 fi
