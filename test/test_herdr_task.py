@@ -4258,3 +4258,15 @@ class TaskFlow(unittest.TestCase):
             f.write("resolved\n")
         self.git(wt, "commit", "-q", "-a", "--no-edit")
         self.assertIn("isn't reviewed", self.refusal())
+
+    def test_out_of_rounds_needs_you_whatever_its_line_says(self):
+        """#784: ready refused for rounds, the worker's status line "waiting for a review round" is no work of its own."""
+        from herdr_task import agents, base
+        t = base.now()
+        self.task.update(started=t - 3600000, agents=[{"address": "t1", "at": t - 3600000}],
+                         progress={"text": "Out of review rounds: waiting for a review round", "set": t - 60000, "at": t - 60000})
+        live = [{"address": "t1", "status": {"state": "idle"}, "status_ms": t - 120000}]
+        self.patch(agents, "agent_log", lambda *a, **k: None)
+        self.assertEqual(agents.task_status(self.task, live)[0], "working")  # its own line: on its own review
+        self.task["review_out"] = t - 90000
+        self.assertEqual(agents.task_status(self.task, live)[:2], ("needs", "reply"))

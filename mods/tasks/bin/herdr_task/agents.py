@@ -719,6 +719,10 @@ def waits_on_own(task, address=None, ended=0):
     check, a review or a background job, and no background job of its ended since."""
     p = task.get("progress") or {}
     said = p.get("set") or p.get("at") or 0
+    # Out of review rounds (ready refused, review_out): it waits on its Assistant's review-more,
+    # never on a review of its own, whatever its line says ("waiting for a review round", #784).
+    if task.get("review_out"):
+        return False
     if p.get("by") or not said or said < ended or not own_line(task, address):
         return False
     left = p.get("left") if isinstance(p.get("left"), (int, float)) else 0
