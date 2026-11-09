@@ -117,5 +117,20 @@ class Publish(unittest.TestCase):
             self.assertTrue(os.stat(os.path.join(mod, f)).st_mode & stat.S_IWUSR, f)
 
 
+    def test_waiting_on_another_publish_says_so(self):
+        """#843: another publish in the same folder holds its list: this one says what it waits on, then goes on."""
+        d = self.recipe()
+        with A.Store(A.locate(self.folder)) as s:
+            lock = os.path.join(A.STORE, "." + os.path.basename(s.path) + ".lock")
+        held = open(lock, "a")
+        fcntl.flock(held, fcntl.LOCK_EX)
+        threading.Timer(0.5, lambda: (fcntl.flock(held, fcntl.LOCK_UN), held.close())).start()
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            out = self.publish(d)
+        self.assertEqual(out["version"], 1)
+        self.assertIn("Waiting for another herdr-artifact", err.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

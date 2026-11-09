@@ -160,7 +160,13 @@ class Store:
             except OSError:
                 self.lock = None
         if self.lock:
-            fcntl.flock(self.lock, fcntl.LOCK_EX if self.write else fcntl.LOCK_SH)
+            how = fcntl.LOCK_EX if self.write else fcntl.LOCK_SH
+            try:
+                fcntl.flock(self.lock, how | fcntl.LOCK_NB)
+            except BlockingIOError:
+                # another herdr-artifact (a publish being checked) has this folder's list: say so, never wait silently
+                print(f"Waiting for another herdr-artifact on {self.loc['name']}'s artifacts ({self.path})…", file=sys.stderr, flush=True)
+                fcntl.flock(self.lock, how)
         try:
             with open(self.path) as f:
                 self.data = json.load(f)
