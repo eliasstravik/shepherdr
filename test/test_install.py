@@ -536,5 +536,162 @@ class AudioTools(unittest.TestCase):
             self.assertNotIn(not_want, notes)
 
 
+# A stand-in for agent-browser's release binary: says its version, has Chrome once `install` ran (unless told it fails)
+FAKE_RELEASE = """#!/bin/sh
+case "$1" in
+  --version) echo "agent-browser 0.41.1" ;;
+  doctor) if [ -f "$HOME/chrome" ]; then s=pass; else s=fail; fi; echo "{\\"checks\\":[{\\"id\\":\\"chrome.installed\\",\\"status\\":\\"$s\\"}]}" ;;
+  install) if [ -n "$FAKE_CHROME_FAILS" ]; then echo "Chrome CDN unreachable" >&2; exit 1; fi; : > "$HOME/chrome" ;;
+  *) echo "mine $*" ;;
+esac
+"""
+PLATFORMS = ("darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "linux-musl-arm64", "linux-musl-x64")
+
+
+class AgentBrowser(unittest.TestCase):
+    """herdr-browser finds a usable agent-browser (0.41.1 up to 0.41.x) or installs Shepherdr's own (SHEP-156): the
+    release's binary, checked against the pin's checksum, from a local folder standing in for GitHub."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="shepherdr-ab-")
+        self.home = os.path.join(self.tmp, "home")
+        self.rel = os.path.join(self.tmp, "release")
+        os.makedirs(self.home)
+        os.makedirs(self.rel)
+        for plat in PLATFORMS:
+            with open(os.path.join(self.rel, f"agent-browser-{plat}"), "w") as f:
+                f.write(FAKE_RELEASE)
+        import hashlib
+        self.sha = hashlib.sha256(FAKE_RELEASE.encode()).hexdigest()
+        self.mine = os.path.join(self.home, ".local/share/shepherdr/agent-browser/0.41.1/agent-browser")
+        self.hb = os.path.join(ROOT, "bin", "herdr-browser")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def on_path(self, version):
+        """A folder with an agent-browser of that version (None: none), for the PATH."""
+        d = os.path.join(self.tmp, f"path-{version}")
+        os.makedirs(d, exist_ok=True)
+        if version:
+            with open(os.path.join(d, "agent-browser"), "w") as f:
+                f.write(f'#!/bin/sh\n[ "$1" = --version ] && {{ echo "agent-browser {version}"; exit 0; }}\necho "path $*"\n')
+            os.chmod(os.path.join(d, "agent-browser"), 0o755)
+        return d
+
+    def hbr(self, *args, path=None, url=None, sha=None, **extra):
+        env = {"HOME": self.home, "PATH": f"{path or self.on_path(None)}:/usr/bin:/bin",
+               "HERDR_BROWSER_URL": url or "file://" + self.rel, "HERDR_BROWSER_SHA256": sha or self.sha, **extra}
+        return subprocess.run(["sh", self.hb, *args], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+
+    def status(self, **kw):
+        return json.loads(self.hbr("--status", **kw).stdout)
+
+    def test_missing_installs_its_own_on_first_use(self):
+        p = self.hbr("--task", "a#1", "open", "x")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("installing agent-browser 0.41.1", p.stderr)
+        self.assertIn("mine --session herdr-a-1", p.stdout)
+        self.assertTrue(os.access(self.mine, os.X_OK))
+        self.assertTrue(os.path.exists(os.path.join(self.home, "chrome")), "Chrome: agent-browser install ran")
+        st = self.status()
+        self.assertEqual((st["ok"], st["from"], st["version"]), (True, "shepherdr", "0.41.1"))
+        # next time: no install
+        p = self.hbr("--task", "a#1", "snapshot")
+        self.assertNotIn("installing", p.stderr)
+
+    def test_herdrs_own_views_never_install(self):
+        p = self.hbr("--own", "--task", "a#1", "session", "list")
+        self.assertEqual(p.returncode, 127)
+        self.assertIn("agent-browser isn't installed here", p.stderr)
+        self.assertIn("Fix it: ", p.stderr)
+        self.assertTrue(p.stderr.strip().endswith("--install"), p.stderr)
+        self.assertFalse(os.path.exists(self.mine))
+
+    def test_too_old_is_replaced_by_its_own(self):
+        old = self.on_path("0.34.0")
+        st = self.status(path=old)
+        self.assertFalse(st["ok"])
+        self.assertIn("this machine has 0.34.0", st["problem"])
+        p = self.hbr("--task", "a#1", "open", "x", path=old)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("mine ", p.stdout)
+        self.assertEqual(self.status(path=old)["from"], "shepherdr")
+
+    def test_compatible_newer_is_used_as_it_is(self):
+        for v, ok in (("0.41.1", True), ("0.41.2", True), ("0.41.12", True), ("0.41.3-beta.1", True), ("0.41.0", False),
+                      ("0.42.0", False), ("1.41.1", False), ("0.4.1", False), ("0.41", False)):
+            self.assertEqual(self.status(path=self.on_path(v))["ok"], ok, v)
+        newer = self.on_path("0.41.2")
+        p = self.hbr("--task", "a#1", "open", "x", path=newer)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("path --session herdr-a-1", p.stdout)
+        self.assertNotIn("installing", p.stderr)
+        self.assertFalse(os.path.exists(self.mine))
+        self.assertEqual(self.hbr("--bin", path=newer).stdout.strip(), os.path.join(newer, "agent-browser"))
+
+    def test_install_failing_says_why_and_the_fix(self):
+        # offline: nothing to download
+        p = self.hbr("--task", "a#1", "open", "x", url="file://" + os.path.join(self.tmp, "nowhere"))
+        self.assertEqual(p.returncode, 127)
+        self.assertIn("couldn't install it: couldn't download it", p.stderr)
+        self.assertIn("Fix it: ", p.stderr)
+        # not tried again for a while: the same message at once
+        p = self.hbr("--task", "a#1", "open", "x")
+        self.assertEqual(p.returncode, 127)
+        self.assertNotIn("installing", p.stderr)
+        self.assertIn("couldn't download it", p.stderr)
+        self.assertIn("couldn't download it", self.status()["failed"])
+        # a download that isn't the pinned release is never kept
+        p = self.hbr("--install", sha="0" * 64)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("its checksum differs", p.stderr)
+        self.assertFalse(os.path.exists(self.mine))
+        # --install tries again whenever asked, and clears the failure
+        p = self.hbr("--install")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("is ready", p.stdout)
+        self.assertEqual(self.status()["failed"], "")
+
+    def test_chrome_failing_says_so(self):
+        p = self.hbr("--install", FAKE_CHROME_FAILS="1")
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("couldn't download Chrome (Chrome CDN unreachable)", p.stderr)
+
+    def test_a_new_pin_replaces_the_old_copy(self):
+        old = os.path.join(self.home, ".local/share/shepherdr/agent-browser/0.40.9")
+        os.makedirs(old)
+        with open(os.path.join(old, "agent-browser"), "w") as f:
+            f.write("#!/bin/sh\necho agent-browser 0.40.9\n")
+        self.assertEqual(self.hbr("--install").returncode, 0)
+        self.assertTrue(os.path.exists(self.mine))
+        self.assertFalse(os.path.exists(old))
+
+    def test_install_and_doctor(self):
+        """The installer makes sure of it (only on the real home, or when asked for a scratch root); doctor says how
+        it stands, with the fix when it can't."""
+        root = os.path.join(self.tmp, "root")
+        os.makedirs(os.path.join(root, APP))
+        # the PATH without this machine's own agent-browser
+        path = ":".join(d for d in os.environ["PATH"].split(":") if not os.path.exists(os.path.join(d, "agent-browser")))
+        env = {**os.environ, "PATH": path, "HERDR_BROWSER_URL": "file://" + self.rel,
+               "HERDR_BROWSER_SHA256": self.sha}
+        env.pop("SHEPHERDR_AGENT_BROWSER", None)
+        sh = lambda *a, **e: subprocess.run([sys.executable, SHEPHERDR, *a], capture_output=True, text=True,
+                                            stdin=subprocess.DEVNULL, env={**env, **e})
+        p = sh("install", "--root", root, "--yes", "--no-build")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        mine = os.path.join(root, ".local/share/shepherdr/agent-browser/0.41.1/agent-browser")
+        self.assertFalse(os.path.exists(mine), "a scratch root downloads nothing unless asked")
+        self.assertIn("the task browser: agent-browser isn't installed here. Fix it: ", sh("doctor", "--root", root).stdout)
+        p = sh("update", "--root", root, "--yes", "--no-build", SHEPHERDR_AGENT_BROWSER="1")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("agent-browser 0.41.1 is ready", p.stdout)
+        self.assertTrue(os.path.exists(mine))
+        self.assertIn("agent-browser 0.41.1 for the task browser (Shepherdr's own copy)", sh("doctor", "--root", root).stdout)
+        self.assertEqual(sh("uninstall", "--root", root).returncode, 0)
+        self.assertFalse(os.path.exists(os.path.dirname(mine)), "uninstall takes Shepherdr's agent-browser away")
+
+
 if __name__ == "__main__":
     unittest.main()

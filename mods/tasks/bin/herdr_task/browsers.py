@@ -74,8 +74,19 @@ def _close(bp, key):
         pass
 
 
-def _live_sessions():
-    ab = shutil.which("agent-browser")
+def _agent_browser(bp):
+    """The agent-browser herdr-browser runs (Shepherdr's own copy, or the PATH's), else the PATH's."""
+    try:
+        r = subprocess.run([bp, "--bin"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True, timeout=20)
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return shutil.which("agent-browser")
+
+
+def _live_sessions(bp):
+    ab = _agent_browser(bp)
     if not ab:
         return set()
     try:
@@ -118,7 +129,7 @@ def browser_pass(report):
         if idle is None:
             continue
         if live is None:
-            live = _live_sessions()
+            live = _live_sessions(bp)
         if "herdr-" + name not in live:
             continue
         you = _age_ms(os.path.join(ROOT, name + ".you"))

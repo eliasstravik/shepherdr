@@ -837,6 +837,76 @@ def add_hooks(r, rec):
     return done
 
 
+# ---- agent-browser (the task browser, SHEP-156) ------------------------------------------------
+# herdr-browser owns it: which versions work, where Shepherdr's own copy goes, how it's fetched. Install, update and
+# doctor only ask it (--install, --status), as the installed copy, with the root's home.
+def browser_helper(root):
+    for rel in (f"{APP}/bin/herdr-browser", f"{SHARE}/bin/herdr-browser"):
+        p = os.path.join(root, rel)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def browser_env(root):
+    if os.path.realpath(root) == os.path.realpath(real_home()):
+        return dict(os.environ)
+    drop = ("SHEPHERDR_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME")
+    return {**{k: v for k, v in os.environ.items() if k not in drop}, "HOME": root}
+
+
+def browser_off(root):
+    try:
+        off = (json.load(open(where_for(root).path("settings"))).get("everywhere") or {}).get("off")
+    except (OSError, ValueError, AttributeError):
+        return False
+    return isinstance(off, list) and "browser" in off
+
+
+def ensure_agent_browser(r, home):
+    """A working agent-browser and Chrome for the task browser: the one already here when it fits, else Shepherdr's
+    own copy (installed, or updated when the pin changed). Never stops the install: a failure is a note with the fix.
+    Only for the real home (a scratch --root downloads nothing), unless SHEPHERDR_AGENT_BROWSER=1."""
+    if not home and os.environ.get("SHEPHERDR_AGENT_BROWSER") != "1":
+        return
+    hb = browser_helper(r.root)
+    if not hb or browser_off(r.root):
+        return
+    if r.dry:
+        say("  agent-browser: would make sure it's here (herdr-browser --install)")
+        return
+    try:
+        p = subprocess.run(["sh", hb, "--install"], capture_output=True, text=True, env=browser_env(r.root),
+                           stdin=subprocess.DEVNULL, timeout=1200)
+        out = (p.stdout.strip() or p.stderr.strip()).splitlines()
+        line = out[-1] if out else ""
+        ok = p.returncode == 0
+    except (OSError, subprocess.SubprocessError) as e:
+        line, ok = f"herdr-browser --install didn't finish ({e})", False
+    line = line.replace("herdr-browser: ", "", 1)
+    if ok:
+        say(f"  {line}")
+    else:
+        r.notes.append(f"the task browser: {line}")
+
+
+def agent_browser_state(root):
+    """doctor's line on agent-browser, or None (no herdr-browser here, or the browser add-on is off)."""
+    hb = browser_helper(root)
+    if not hb or browser_off(root):
+        return None
+    try:
+        p = subprocess.run(["sh", hb, "--status"], capture_output=True, text=True, env=browser_env(root),
+                           stdin=subprocess.DEVNULL, timeout=30)
+        st = json.loads(p.stdout)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return "the task browser: herdr-browser --status didn't answer"
+    if st.get("ok"):
+        where = "Shepherdr's own copy" if st.get("from") == "shepherdr" else st.get("bin")
+        return f"agent-browser {st.get('version')} for the task browser ({where})"
+    return "the task browser: " + (st.get("problem") or "agent-browser isn't usable").replace("herdr-browser: ", "", 1)
+
+
 def check_tools(root_is_home):
     """Herdr's versions (when it's here) and the programs Shepherdr needs. -> (problems, notes)."""
     bad, notes = [], []
@@ -857,7 +927,8 @@ def check_tools(root_is_home):
     for name in ("git",):
         if not shutil.which(name):
             bad.append(f"{name} isn't on the PATH")
-    optional = {"gh": "pull requests (tasks)", "agent-browser": "the task browser (0.41.1)", "node": "the task browser",
+    # agent-browser isn't here: Shepherdr installs its own (ensure_agent_browser), doctor says how it stands
+    optional = {"gh": "pull requests (tasks)", "node": "the task browser in the window",
                 "bun": "voice calls and dictation"}
     # the window's mic and speaker: PipeWire on Linux; on a Mac its own audio, through a helper built with swiftc
     if sys.platform == "darwin":
@@ -955,6 +1026,7 @@ def cmd_install(a, update=False):
     started = time.time()
     install_service(r, rec, home)
     say_web(root, home, a, started)
+    ensure_agent_browser(r, home)
     if a.guard:
         install_guard(r, src, rec)
     if not a.no_hooks:
@@ -1051,6 +1123,7 @@ def cmd_install_web(a, update=False):
     started = time.time()
     install_service(r, rec, home)
     say_web(root, home, a, started)
+    ensure_agent_browser(r, home)
     if not a.dry_run:
         atomic_write(r.p(WEB_RECORD), (json.dumps(rec, indent=2, sort_keys=True) + "\n").encode())
     for x in r.notes:
@@ -1216,7 +1289,8 @@ def cmd_doctor(a):
         say(f"Shepherdr {rec.get('version')} (web only) under {root} (from {rec.get('source')}, {rec.get('at')})")
         for x in bad + s_bad:
             say(f"  ✗ {x}")
-        for x in s_notes + [update_hint(rec)]:
+        ab = agent_browser_state(root)
+        for x in s_notes + ([ab] if ab else []) + [update_hint(rec)]:
             say(f"  - {x}")
         if not bad + s_bad:
             say("  ✓ whole")
@@ -1271,7 +1345,8 @@ def cmd_doctor(a):
     say(f"Shepherdr {rec.get('version')} under {root} (from {rec.get('source')}, {rec.get('at')})")
     for x in bad:
         say(f"  ✗ {x}")
-    for x in warn + t_notes + [update_hint(rec)]:
+    ab = agent_browser_state(root)
+    for x in warn + t_notes + ([ab] if ab else []) + [update_hint(rec)]:
         say(f"  - {x}")
     holds = [p for p in hold_paths(root) if os.path.exists(p)]
     if bad:
@@ -1384,6 +1459,8 @@ def cmd_uninstall(a):
             except FileNotFoundError:
                 pass
         os.remove(r.p(RECORD))
+        # the agent-browser Shepherdr installed for the task browser (not data: nothing of the person's is in it)
+        shutil.rmtree(os.path.join(where_for(root).roots["data"], "agent-browser"), ignore_errors=True)
         # Folders that only held ours.
         for rel in (f"{APP}/data/shepherdr", f"{APP}/bin", f"{APP}/lib", f"{APP}/core", SHARE):
             for d, _, _ in sorted(os.walk(r.p(rel)), reverse=True):

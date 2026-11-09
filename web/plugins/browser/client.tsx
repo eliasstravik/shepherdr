@@ -317,14 +317,14 @@ function LiveView({ task }: { task: Task }) {
   }
 
   // what shows when there's no picture: the window's words for each state
-  const note = link.stopped
+  const note: { text: string; more?: string; open?: boolean; error?: boolean; fix?: string } | null = link.stopped
     ? { text: WORDS.stopped }
     : !st
       ? { text: WORDS.starting }
       : opening
         ? { text: WORDS.opening }
         : st.error
-          ? { text: st.error, error: true, open: true }
+          ? { ...fixOf(st.error), error: true, open: true }
           : st.closed
             ? { text: WORDS.closed, more: WORDS.closedMore, open: true }
             : !live
@@ -372,7 +372,12 @@ function LiveView({ task }: { task: Task }) {
           // over the canvas, which may still hold the last page
           <div className="absolute inset-0 grid place-items-center bg-well p-6 text-center">
             <div className="flex max-w-[380px] flex-col items-center gap-1">
-              <Small className={clsx('text-pretty', note.error ? 'text-need-fg' : 'text-fg3')}>{note.text}</Small>
+              <Small className={clsx('text-pretty', note.error ? 'break-words text-need-fg' : 'text-fg3')}>{note.text}</Small>
+              {note.fix ? (
+                <Small className="mt-1 text-fg2">
+                  Fix it: <code className="whitespace-nowrap font-mono select-all">{note.fix}</code>
+                </Small>
+              ) : null}
               {note.more ? <Small className="text-pretty text-fg3 opacity-75">{note.more}</Small> : null}
               {note.open ? (
                 <Ghost className="mt-2" onClick={() => (setOpening(true), link.send({ type: 'open' }))}>
@@ -419,6 +424,12 @@ function LiveView({ task }: { task: Task }) {
       ) : null}
     </div>
   )
+}
+
+/** a browser error's own words and, apart, the one command that fixes it (herdr-browser ends with "Fix it: <command>") */
+function fixOf(error: string): { text: string; fix?: string } {
+  const m = /^(.*?)\s*Fix it: (.+)$/s.exec(error)
+  return m ? { text: m[1], fix: m[2].trim() } : { text: error }
 }
 
 /** why a task's browser can't be watched here: another machine's (the window's words, from the service), or the
