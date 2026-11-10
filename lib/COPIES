@@ -26,9 +26,11 @@ core/screens.js: chat
 core/send.js: chat
 core/person.js: chat shepherdr-settings tabs-tasks
 core/spaces.js: chat spaces-chat shepherdr-settings jump pane-chat
+core/sidebar-icons.js: spaces-chat
 core/autopilot.js: pane-chat shepherdr-settings
 core/chat-reader.js: chat
 core/clean-env.js: chat
+core/assistant-context.js: chat
 core/worktree.js: task-changes task-pr
 core/recipe.js: artifacts
 core/task-artifacts.js: chat task-artifacts
@@ -58,7 +60,7 @@ addons.js: chat pane-chat shepherdr-settings tabs-tasks artifacts jump accept-ca
 live.js: chat coordinator jump menu-tasks new-menu-tasks newspace pane-chat shepherdr-settings spaces-chat tabs-tasks tasks workspace-status-chat
 core/bg-jobs.js: chat
 core/audio.js: chat
-core/wallpaper.js: chat shepherdr-settings
+core/wallpaper.js: chat shepherdr-settings workspace-chrome-shepherdr
 wallpaper.js: chat shepherdr-settings
 usage.js: tabs-tasks chat shepherdr-settings artifacts jump accept-card toasts
 core/usage.js: tabs-tasks chat shepherdr-settings artifacts jump accept-card toasts

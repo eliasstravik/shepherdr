@@ -11,6 +11,8 @@ Shared, so the two can't drift: `core/menus.js` (every sidebar menu, Notify's no
 `core/machines.test.js`), `core/spaces.js` (a row's git tail, `tilde` and `sharedNames` for two spaces with one name,
 a deleted section's toast and its Undo: `core/spaces.test.js`). The window's mods read them as the web does.
 
+Common saved section and space emoji use matching monochrome outline icons through `core/sidebar-icons.js`; custom emoji remain unchanged. Projects without a custom icon use an outline chat icon. Saved names, icons and ordering are unchanged.
+
 State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 
 ## Brand row and foot
@@ -114,6 +116,6 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Drag | main.js:505-578 among its own, into a section or Pinned, back to the top; a folded section opens while dragged over | P:584 drag.ts; a folded heading lights up | ◇ 2.1's drag look (the heading lights instead of the section opening) |
 | Alt+↑/↓ | keys.json space.next / space.prev | P:858 `stepPlace` | ✓ |
 | Alt+Shift+↑/↓ on a focused row | none | P:156 `moveKey` | ◇ the keyboard's form of the window's drag |
-| Rail (sidebar under 160 px) | main.js:666 numbers and a status glyph | none | ◇ the web hides the sidebar instead of narrowing it |
+| Rail (sidebar under 160 px) | Project and section icons with hover names; sections and Pinned keep their grouping, and the sidebar icon expands the rail | none | ◇ the web hides the sidebar instead of narrowing it |
 
 Counts: ✓ 61, ◇ 11, ✗ 0.

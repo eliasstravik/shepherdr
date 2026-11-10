@@ -94,7 +94,7 @@
                     "height": 30,
                     "position": "top"
                   },
-                  "background": "background",
+                  "background": "#f9f9fa00",
                   "border": {
                     "width": 1,
                     "color": "border"
@@ -107,6 +107,10 @@
                   "gap": 8,
                   "lone": true
                 }
+              },
+              "background": {
+                "image": "mods/chat/bossgoat-background.png",
+                "fit": "cover"
               }
             },
             {
@@ -179,7 +183,8 @@
                                   "type": "block",
                                   "content": {
                                     "agent": "focused"
-                                  }
+                                  },
+                                  "background": "#f9f9fa00"
                                 },
                                 {
                                   "id": "tasks-thread-files",
@@ -223,7 +228,11 @@
                                   }
                                 }
                               ],
-                              "active": "tasks-thread-chat"
+                              "active": "tasks-thread-chat",
+                              "background": {
+                                "image": "mods/chat/bossgoat-background.png",
+                                "fit": "cover"
+                              }
                             }
                           ],
                           "background": "background",
@@ -343,5 +352,6 @@
   "traffic_lights": [
     12,
     16
-  ]
+  ],
+  "terminal_opacity": 0
 }

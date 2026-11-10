@@ -74,6 +74,8 @@ SKIP = {"__pycache__", ".DS_Store"}
 # compared without them, so a layout in use still counts as unchanged.
 LIVE_BLOCKS = ("tasks-thread-term", "artifacts-view-body")
 HOOKS = [  # (file under home, event, entry): the question and permission cards (the "needs" add-on)
+    *((".cursor/hooks.json", event, {"command": "python3 '{app}/mods/chat/cursor-status.py'"})
+      for event in ("sessionStart", "beforeSubmitPrompt", "stop", "sessionEnd")),
     (".cursor/hooks.json", "sessionStart",
      {"command": "sh '{app}/mods/chat/cursor-session-note.sh'"}),
     (".claude/settings.json", "SessionStart",

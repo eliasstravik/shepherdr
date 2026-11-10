@@ -4,7 +4,7 @@ Install and sign in to Cursor CLI first. `cursor-agent` must be on the agent mac
 This integration was checked with Cursor CLI `2026.11.05-86047df` and Shepherdr 3.1.14.
 
 After installing, start a fresh session. Settings → Agents offers Cursor for the
-Assistant, workers and reviewer when the CLI is installed. Choose **Auto** or a model from
+Assistant, workers and reviewer when the CLI is installed. Choose **Cursor Auto** or a model from
 your account's `cursor-agent --list-models` output. Existing role choices stay unchanged.
 The same choices are available in the desktop and web chat model menus.
 
@@ -38,11 +38,13 @@ successes; use the terminal for full tool output. Logs without a known session I
 after a crash. Cursor CLI does not expose a conversation-copy command, so Fork reports that it
 is unavailable rather than resuming the same conversation in a second agent.
 
-The installer adds a `sessionStart` entry to `~/.cursor/hooks.json`, preserving existing hooks.
+The installer adds context and lifecycle entries to `~/.cursor/hooks.json`, preserving existing hooks.
+The lifecycle hooks report startup, working, completion and errors to Herdr core via OSC 7501,
+so an Assistant can receive its first message. Existing sessions need a fresh start to load the hooks.
 It supplies Shepherdr's settings, reaction and artifact context only inside Herdr; outside Herdr
 it emits nothing. Uninstall removes only Shepherdr's entries. Use `--no-hooks` to omit this context.
 
-Cursor sign-in/permission cards and desktop interaction still need a live window check. Automatic
+Cursor does not report every permission wait through these hooks; open its terminal when a prompt needs attention. Automatic
 backup takeover remains the existing Claude/Codex feature. No personal model assignments
 or personal settings are built into the integration.
 

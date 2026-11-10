@@ -46,7 +46,7 @@ export const WORDS = {
   agentEnded: "This agent has ended",
   taskEnded: "This task's agent has ended",
   unsupported: "No chat for this agent",
-  unsupportedBody: "Chat reads Claude Code's and Codex's own session logs. This agent works in its terminal only.",
+  unsupportedBody: "Chat reads Claude Code, Codex and Cursor session logs. This agent works in its terminal only.",
   notFound: "Can't find this conversation",
   notFoundBody: "Chat reads the agent's own session log, and Herdr can't tell which one this agent writes. Rather than show the wrong one, it shows none.",
   noAgent: "No agent to show",
@@ -248,12 +248,12 @@ export function literal(text) {
 // agent was started from a template (a coordinator), as a handoff, or for a task (herdr-task); and any message
 // another agent sent with hc. i: its place in the conversation; start: the first byte read (0: the log's start).
 // first: where the session's first message is in the conversation (firstUser()).
-export function briefLabel(x, i, { start = null, template = null, task = false, sender = (f) => f, machineName = (m) => m, here = null, first = 0 } = {}) {
+export function briefLabel(x, i, { start = null, template = null, background = false, task = false, sender = (f) => f, machineName = (m) => m, here = null, first = 0 } = {}) {
   if (x.from) return `Message from ${fromName(x, sender, { machineName, here })}`;
   if (i !== first || start !== 0) return null;
   if (/^<restart>/.test(x.text ?? "")) return "New session";
   if (/^You are taking over this tab/.test(x.text ?? "") || /^herdr-handoff/.test(template ?? "")) return "Handoff from the previous agent";
-  if (template) return "New session";
+  if (template && !background) return "New session";
   if (task) return "Task brief";
   return null;
 }

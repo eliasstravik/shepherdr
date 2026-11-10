@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""Run a Claude Assistant with its editable role instructions outside the conversation."""
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import sys
+import tempfile
+
+CONTEXT = Path.home() / ".config" / "herdr-core" / "assistant-context"
+FRONT = re.compile(r"\A---[ \t]*\r?\n.*?\r?\n---[ \t]*(?:\r?\n|$)", re.S)
+
+
+def read(path):
+    return Path(path).read_bytes().decode("utf-8")
+
+
+def private_write(path, text):
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".context-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def context_argv(template, argv):
+    if not argv or Path(argv[0]).name != "claude":
+        raise ValueError("expected a Claude command after --")
+    role = FRONT.sub("", read(template), count=1)
+    kept, custom = [argv[0]], []
+    i = 1
+    while i < len(argv):
+        arg = argv[i]
+        flag, equal, value = arg.partition("=")
+        if arg == "--":
+            kept.extend(argv[i:])
+            break
+        if flag not in ("--append-system-prompt", "--append-system-prompt-file"):
+            kept.append(arg)
+            i += 1
+            continue
+        if not equal:
+            i += 1
+            if i >= len(argv):
+                raise ValueError(f"{flag} needs a value")
+            value = argv[i]
+        if flag == "--append-system-prompt-file":
+            path = Path(value)
+            if path.resolve().parent == CONTEXT.resolve():
+                # Keep user additions when a restart replaces an earlier managed role snapshot.
+                value = json.loads(read(path.with_suffix(".json")))["custom"]
+            else:
+                value = read(path)
+        if value:
+            custom.append(value)
+        i += 1
+    extra = "\n\n".join(custom)
+    content = role + ("\n\n" + extra if extra else "")
+    identity = json.dumps([role, extra], ensure_ascii=False).encode("utf-8")
+    path = CONTEXT / (hashlib.sha256(identity).hexdigest() + ".txt")
+    CONTEXT.mkdir(mode=0o700, parents=True, exist_ok=True)
+    CONTEXT.chmod(0o700)
+    private_write(path.with_suffix(".json"), json.dumps({"custom": extra}, ensure_ascii=False))
+    private_write(path, content)
+    return [kept[0], "--append-system-prompt-file", str(path.resolve()), *kept[1:]]
+
+
+def main(args):
+    if len(args) < 3 or args[1] != "--":
+        raise ValueError("usage: herdr-assistant-context TEMPLATE -- claude [arguments]")
+    argv = context_argv(args[0], args[2:])
+    os.execvp(argv[0], argv)
+
+
+if __name__ == "__main__":
+    try:
+        main(sys.argv[1:])
+    except (OSError, ValueError, KeyError) as e:
+        print(f"herdr-assistant-context: {e}", file=sys.stderr)
+        sys.exit(1)

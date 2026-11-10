@@ -10,6 +10,7 @@ import * as SPc from "../core/spaces.js";
 import { kindOf as kindOfTerm } from "../core/chat-reader.js";
 import * as CL from "../core/chat-log.js";
 import * as CV from "../core/chat-view.js";
+import { hasAssistantContext } from "../core/assistant-context.js";
 import { taskArtifacts } from "../core/task-artifacts.js";
 const { summary, names, pilotLine } = CL as any;
 const { senderName, briefLabel, firstUser, firstKeys, newsTimeline, resolveArtifacts, unsigned, fromName, sentTo, selfName, subagentsOf, isHelper } = CV as any;
@@ -342,8 +343,9 @@ export class Compat {
       const ak: any = s.assistant ? (this as any).terminalsOf?.(s.assistant) : null;
       const atLabel = ak?.labels?.["herdr.coordinator.tab"] ?? ak?.labels?.["herdr.tab"];
       const own = (s.tabs ?? []).find((t: any) => (t.terminals ?? []).includes(s.assistant) || (atLabel && (t.id === atLabel || t.id === `${s.machine}/${atLabel}`)));
-      const assistantTab = { ...(own ? { id: own.id } : {}), name: named(own?.name) ? own.name : "Assistant", named: named(own?.name), state: s.assistant ? stateOf(ak) : "idle", live: !!s.assistant, ...(kindOfTerm(ak) ? { cli: kindOfTerm(ak) } : {}),
-        ...(agentIn(ak) || kindOfTerm(ak) ? { agent: agentIn(ak)?.key ?? kindOfTerm(ak) } : {}) };
+      const cli = kindOfTerm(ak), agent = agentIn(ak)?.key ?? cli;
+      const assistantTab = { ...(own ? { id: own.id } : {}), name: named(own?.name) ? own.name : "Assistant", named: named(own?.name), state: s.assistant ? stateOf(ak) : "idle", live: !!s.assistant, ...(cli ? { cli } : {}),
+        ...(agent ? { agent } : {}) };
       const name = spaceName(s, { home: s.machine ? null : HOME, repo: s.git?.name ?? null });
       // what 3.0's pane header says under it: "Assistant · Claude Code" (just "Assistant" until it has started), and the
       // folder it works in, home shortened to ~
@@ -536,6 +538,7 @@ export class Compat {
     // which artifact each publish made (core/chat-view.js resolveArtifacts, as the window's chat)
     const arts = resolveArtifacts(items, this.rawArts.filter((a: any) => (a.machine ?? null) === machine), String(reader.addr ?? "").split("/").pop());
     const template = t?.template ?? null, task = Boolean(t?.labels?.["herdr.task"]);
+    const background = t?.labels?.["herdr.assistant.context"] === "background" || hasAssistantContext(t?.foreground?.argv ?? t?.argv ?? []);
     const mentionable = this.tasksFor(key);
     const own = this.chats.get(key);
     // what pages sent it, known again in the log: the page's id comes back on it
@@ -555,15 +558,14 @@ export class Compat {
       if (x.at) at = x.at;
       while (mi < made.length && x.at && made[mi].at < x.at) messages.push(newsLine(made[mi++]));
       const reactions = reactionsOf(reader.conv?.reactions?.get(x.id));
-      // the template's part a quiet "New session" row, the person's words their own message
+      // The template stays in the agent's context; only the person's words appear in chat.
       const first = i === fi && !!ft && x.kind === "user" && String(x.text ?? "").trim().endsWith(ft);
       if (first) {
-        const body = String(x.text).trim().slice(0, -ft!.length).trim();
-        if (body) messages.push({ id: `${x.id}:b`, who: "you", at: x.at, text: body, brief: { label: "New session" } });
         x = { ...x, text: ft };
       }
       // not typed by the person: a launch brief or another agent's message, as one quiet row
-      const brief = x.kind === "user" && !first ? briefLabel(x, i, { start: reader.start, template, task, sender, ...peers, first: fi }) : null;
+      const brief = x.kind === "user" && !first ? briefLabel(x, i, { start: reader.start, template, background, task, sender, ...peers, first: fi }) : null;
+      if (brief === "New session") continue;
       if (brief) {
         const restart = /^<restart>/.test(x.text ?? "");
         messages.push({ id: x.id, who: "you", at: x.at, text: restart ? x.text.replace(/<\/?restart>/g, "") : x.from ? unsigned(x.text) : x.text, brief: { label: brief, ...(restart ? { bare: true } : {}), ...(x.from ? { from: fromName(x, sender, peers) } : {}) } });
@@ -680,7 +682,7 @@ export class Compat {
       const row = rowFor(kind, c), label = menuFor(kind, {}).models.find((m: any) => m.id === row)?.name ?? modelName(c.model);
       // the window's model button (mods/chat pickParts): model, level, Fast
       const words = [c.label ?? modelName(c.model), levelName(c.effort), c.fast ? "Fast" : null].filter(Boolean).join(" · ") || NAMES[kind] || "Agent";
-      agent = { kind, words, ...(c.model ? { model: c.model, modelLabel: label } : {}), ...(c.effort ? { effort: c.effort } : {}), ...(c.model ? { runtime: { model: c.model, modelLabel: label, ...(c.effort ? { effort: c.effort } : {}), speed: c.fast ? "fast" : "normal", source: "session", at: Date.now() } } : {}) };
+      agent = { kind, words, ...(c.perm ? { perm: c.perm } : {}), ...(c.model ? { model: c.model, modelLabel: label } : {}), ...(c.effort ? { effort: c.effort } : {}), ...(c.model ? { runtime: { model: c.model, modelLabel: label, ...(c.effort ? { effort: c.effort } : {}), speed: c.fast ? "fast" : "normal", source: "session", at: Date.now() } } : {}) };
     } catch {}
     // the first row: the log's very start, or earlier pages to load as it scrolls up
     const head = reader.start === 0 ? { top: true } : reader.start ? { earlier: true } : {};

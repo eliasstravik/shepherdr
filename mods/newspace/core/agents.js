@@ -93,7 +93,7 @@ export function parseDefaults(kind, stdout) {
     if (t > 0) out[line.slice(0, t)] = line.slice(t + 1);
   }
   if (kind === "cursor") {
-    const models = [{ id: "auto", label: "Auto" }];
+    const models = [{ id: "auto", label: "Cursor Auto" }];
     for (const line of (stdout ?? "").split("\n")) {
       const m = /^cursor-model\t([\w.\[\]=,/-]+) - (.+)$/.exec(line.replace(/\x1b\[[0-9;]*m/g, ""));
       if (m && !models.some((x) => x.id === m[1])) models.push({ id: m[1], label: m[2].replace(/ \((?:current|default|current, default)\)$/, "") });
@@ -141,7 +141,7 @@ export function current(kind, argv, meta, dflt) {
     const perm = argv.includes("--plan") || ["ask", "plan"].includes(mode) ? "read-only"
       : argv.some((a) => ["--force", "-f", "--yolo"].includes(a)) ? "full"
       : argv.includes("--auto-review") ? "auto" : dflt.mode === "unrestricted" ? "full" : "auto";
-    return { agent: "cursor", model, label: dflt.models?.find((m) => m.id === model)?.label ?? model,
+    return { agent: "cursor", model, label: model === "auto" ? "Cursor Auto" : dflt.models?.find((m) => m.id === model)?.label ?? model,
       effort: null, fast: false, perm, used: null, window: null };
   }
   const o = overrides(argv);
@@ -179,8 +179,8 @@ export function contextWords(c) {
 // `dflt` is that agent's settings (defaults()); `current` its running model, kept in the list.
 export function menuFor(agent, dflt, current = null) {
   if (agent === "cursor") {
-    const all = dflt?.models?.length ? dflt.models : [{ id: "auto", label: "Auto" }];
-    const models = all.map((m) => ({ id: m.id, name: m.label, efforts: [], defaultEffort: null, fast: false }));
+    const all = dflt?.models?.length ? dflt.models : [{ id: "auto", label: "Cursor Auto" }];
+    const models = all.map((m) => ({ id: m.id, name: m.id === "auto" ? "Cursor Auto" : m.label, efforts: [], defaultEffort: null, fast: false }));
     if (current && !models.some((m) => m.id === current)) models.unshift(typedModel(agent, current));
     return { name: NAMES.cursor, perms: PERMS.cursor, models };
   }
@@ -199,7 +199,7 @@ export function menuFor(agent, dflt, current = null) {
 
 // The levels a model typed by id gets: its agent's usual ones.
 export function typedModel(agent, id) {
-  return { id, name: agent === "claude" ? modelName(id) : id, efforts: agent === "cursor" ? [] : agent === "claude" ? CLAUDE_EFFORTS : ["low", "medium", "high", "xhigh"], defaultEffort: null, fast: false, typed: true };
+  return { id, name: agent === "cursor" && id === "auto" ? "Cursor Auto" : agent === "claude" ? modelName(id) : id, efforts: agent === "cursor" ? [] : agent === "claude" ? CLAUDE_EFFORTS : ["low", "medium", "high", "xhigh"], defaultEffort: null, fast: false, typed: true };
 }
 
 // The person's picks in the model menus (the window's and the web's alike), in PICKS_FILE under the
@@ -299,7 +299,7 @@ const CURSOR_BARE = new Set(["--continue", "--plan", "--force", "-f", "--yolo", 
 const CLAUDE_DROP = new Set(["--model", "--effort", "--settings", "--session-id", "--resume", "-r", "--permission-mode"]);
 const CLAUDE_BARE = new Set(["--continue", "-c", "--fork-session", "--dangerously-skip-permissions"]);
 // Flags whose next word is their value (so it isn't taken for a first message).
-const CLAUDE_VALUE = new Set(["--add-dir", "--mcp-config", "--append-system-prompt", "--system-prompt",
+const CLAUDE_VALUE = new Set(["--add-dir", "--mcp-config", "--append-system-prompt", "--append-system-prompt-file", "--system-prompt", "--system-prompt-file", "--system-prompt-snapshot",
   "--allowedTools", "--allowed-tools", "--disallowedTools", "--disallowed-tools", "--agent", "--agents", "--plugin-dir",
   "--fallback-model", "--output-format", "--input-format", "--name", "--setting-sources", "--betas", "--debug-file"]);
 const CODEX_VALUE = new Set(["-c", "--config", "-m", "--model", "-p", "--profile", "-s", "--sandbox", "-a", "--ask-for-approval",

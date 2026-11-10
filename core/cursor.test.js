@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { argvFor, current, freshArgv, forkArgv, menuFor, parseDefaults, sessionOf } from "./agents.js";
-import { choicesFrom, chooseModel } from "./settings.js";
+import { choicesFrom, chooseModel, modelLabel } from "./settings.js";
 import { kindOf } from "./chat-reader.js";
 import { cliOf } from "./screens.js";
 import { FIND, LOG, Conversation, records } from "./chat-log.js";
@@ -87,4 +87,28 @@ test("Cursor log discovery uses its open database's ID, never the newest chat in
     expect((await new Response(p.stdout).text()).trim()).toBe(path);
     expect(await p.exited).toBe(0);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+
+test("Cursor Auto is identifiable in menus and selected labels without changing its model ID", () => {
+  const old = { models: [{ id: "auto", label: "Auto" }] };
+  for (const d of [{}, old, parseDefaults("cursor", "installed\ttrue")]) {
+    const menu = menuFor("cursor", d);
+    expect(menu.models.find((m) => m.id === "auto").name).toBe("Cursor Auto");
+    expect(modelLabel({ cursor: menu }, { agent: "cursor", model: "auto" })).toBe("Cursor Auto");
+    expect(current("cursor", ["cursor-agent", "--model", "auto"], {}, d)).toMatchObject({ model: "auto", label: "Cursor Auto" });
+  }
+});
+
+test("a live Node-hosted Cursor is recognized before hooks, without reviving an exited agent", () => {
+  const cursor = { state: "live", agent: "sh", status: null, foreground: {
+    name: "node", argv: ["/tools/cursor-agent", "--use-system-ca", "/tools/cursor-agent/versions/current/index.js", "--model", "auto"], pid: 123,
+  } };
+  for (const identify of [kindOf, cliOf]) {
+    expect(identify(cursor)).toBe("cursor");
+    expect(identify({ ...cursor, foreground: { name: "zsh", argv: ["zsh"] }, argv: ["cursor-agent"] })).toBeNull();
+    expect(identify({ foreground: { name: "node", argv: ["node", "server.js", "cursor-agent"] } })).toBeNull();
+    expect(identify({ foreground: { name: "sh", argv: ["sh", "-c", "cursor-agent"] } })).toBeNull();
+    expect(identify({ ...cursor, status: { app: "codex", state: "idle" } })).toBe("codex");
+  }
 });

@@ -10,11 +10,13 @@
 // finger held) opens them, no ⋯ on the rows. Spaces drag among their own, into a section or Pinned, or back to their machine's
 // top; machines and sections keep their place. Alt+↑/↓ goes to the space above or below as they show.
 import clsx from 'clsx'
+import { sidebarIcon } from '@core/sidebar-icons.js'
+import { SidebarIcon } from './icons.tsx'
 import { openWorktree } from '@client/screens/Worktree.tsx'
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type LiHTMLAttributes, type ReactNode } from 'react'
 import { act, counts, definePlugin, getState, goPlace, manyMachines, openSplit, placeOf, removeSpace, setUI, splitClick, useSnap, useUI, type Pane, type UI } from '@client/kernel.ts'
 import { Dialog, RowMenu, useRowMenu } from '@client/rowmenu.tsx'
-import { AutopilotIcon, BackIcon, BellIcon, CogIcon, BellSlashIcon, AttentionBadge, attentionWords, DeleteIcon, DownIcon, HashIcon, ic, IconButton, List, MenuItem, MenuLabel, MenuSeparator, MenuSetting, Meta, ModelIcon, MonitorIcon, NextIcon, PinnedIcon, PinTaskIcon, PlusIcon, Primary, ReadIcon, RemoveProjectIcon, RenameIcon, rowClass, RowText, SectionIcon, ServerIcon, SplitIcon, TasksIcon, UnpinIcon } from '@client/ui.tsx'
+import { AutopilotIcon, BackIcon, BellIcon, CogIcon, BellSlashIcon, AttentionBadge, attentionWords, DeleteIcon, DownIcon, ic, IconButton, List, MenuItem, MenuLabel, MenuSeparator, MenuSetting, Meta, ModelIcon, NextIcon, PinTaskIcon, PlusIcon, Primary, ReadIcon, RemoveProjectIcon, RenameIcon, rowClass, RowText, SectionIcon, SplitIcon, TasksIcon, UnpinIcon } from '@client/ui.tsx'
 import { HealthDot, MachineMeter } from '@plugins/health/client.tsx'
 import { toast } from '@plugins/alerts/toasts.tsx'
 import { MarkRead, markPlaceRead, muted, placeUnread } from '@client/unread.ts'
@@ -335,7 +337,7 @@ function usePlaceRow({ p, snap, where }: { p: Place; snap: Snapshot; where?: str
           <AutopilotIcon className="size-3" />
         </span>
         {/* Shepherdr 3: a space's own icon (an emoji) where it has one */}
-        {treeMark.get(p.id) ? <BranchIcon className={clsx(icon, 'text-fg3')} /> : p.emoji ? <span aria-hidden className={clsx(icon, 'grid place-items-center text-[0.9375rem] leading-none', quiet && 'opacity-50')}>{p.emoji}</span> : <HashIcon className={clsx(icon, fresh ? 'text-fg' : sel && !quiet ? 'text-fg2' : 'text-fg3')} />}
+        {treeMark.get(p.id) ? <BranchIcon className={clsx(icon, 'text-fg3')} /> : p.emoji ? <Emoji e={p.emoji} className={quiet ? 'opacity-50' : undefined} /> : <SidebarIcon name="message-square" className={clsx(icon, fresh ? 'text-fg' : sel && !quiet ? 'text-fg2' : 'text-fg3')} />}
       </>
     ),
     name: (
@@ -355,8 +357,8 @@ function usePlaceRow({ p, snap, where }: { p: Place; snap: Snapshot; where?: str
   }
 }
 
-/** a row's icon: a hair under the name's 15px, tucked 2px nearer the name */
-const icon = 'size-[15px] shrink-0 -mr-0.5 phone:size-4'
+/** a row's icon, tucked 2px nearer the name */
+const icon = 'size-5 shrink-0 -mr-0.5'
 
 /* ---------- indents: a space in by a chevron's room, its # under its heading's icon ---------- */
 
@@ -665,18 +667,19 @@ function RemoveBox({ p, snap }: { p: Place; snap: Snapshot }) {
 
 /** A machine's mark: its emoji, or a monitor (this computer) or a server without one; faded while it can't be reached */
 function MachineMark({ m }: { m: Machine }) {
-  const Plain = m.here ? MonitorIcon : ServerIcon
-  return m.emoji ? <span className={clsx('contents', offline(m) && '*:opacity-50')}><Emoji e={m.emoji} /></span> : <Plain className={clsx(icon, 'text-fg3')} />
+  return m.emoji ? <span className={clsx('contents', offline(m) && '*:opacity-50')}><Emoji e={m.emoji} /></span> : <SidebarIcon name={m.here ? 'monitor' : 'server'} className={clsx(icon, 'text-fg3')} />
 }
 
 /** A section's mark: Pinned's pin, its emoji, or a folder without one */
 function SectionMark({ s }: { s: Section }) {
-  return s.id === PINNED ? <PinnedIcon className={clsx(icon, 'text-fg3')} /> : s.emoji ? <Emoji e={s.emoji} /> : <SectionIcon className={clsx(icon, 'text-fg3')} />
+  return s.id === PINNED ? <SidebarIcon name="pin" className={clsx(icon, 'text-fg3')} /> : s.emoji ? <Emoji e={s.emoji} /> : <SidebarIcon name="folder" className={clsx(icon, 'text-fg3')} />
 }
 
-function Emoji({ e }: { e: string }) {
+function Emoji({ e, className }: { e: string; className?: string }) {
+  const name = sidebarIcon(e)
+  if (name) return <SidebarIcon name={name} className={clsx(icon, 'text-fg3', className)} />
   return (
-    <span data-icon="emoji" aria-hidden className="-mr-0.5 grid w-[15px] shrink-0 place-items-center text-[0.9375rem] leading-none phone:w-4 phone:text-base">
+    <span data-icon="emoji" aria-hidden className={clsx(icon, 'grid place-items-center text-xl leading-none', className)}>
       {e}
     </span>
   )

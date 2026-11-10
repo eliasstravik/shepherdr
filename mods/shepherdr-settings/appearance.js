@@ -111,7 +111,8 @@ export function appearanceSection(view, t) {
     .child(div().text_size(TEXT.body).font_medium().text_color(t.foreground).child(WALLPAPER.title))
     .child(div().text_size(TEXT.label).text_color(t.dim).child(WALLPAPER.about))
     .child(modes)
-    .when(mode === "solid", (el) => el.child(palette))
+    .when(mode === "solid", (el) => el.child(palette)
+      .child(div().text_size(TEXT.label).text_color(t.dim).child("For readable Terminal text, pair light colours with a light Herdr theme and dark colours with a dark theme.")))
     .child(preview)
     .child(h_flex().gap(8).items_center()
       .when(mode === "image", (el) => el.child(button("wallpaper-choose", state.busy ? WALLPAPER.choosing : WALLPAPER.choose,

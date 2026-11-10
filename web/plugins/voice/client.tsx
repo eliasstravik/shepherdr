@@ -1,6 +1,6 @@
 // Voice (SHEP-105): a call with Shepherdr itself, not one chat. One voice takes what you say to any space's Assistant
 // or task's agent, tells you when they reply or need you, and opens things here (voiceNav; its screen tool reads and
-// acts on this very page, screen.ts, whichever device started the call). It starts from the "Talk to Shepherdr" row at
+// acts on this very page, screen.ts, whichever device started the call). It starts from the "Talk to BossGoat" row at
 // the top of the sidebar, which becomes the call card while it is on (what it last said, Mute, End); on a phone from
 // the voice button at the end of the bottom bar, with a green strip of Mute and End above the bar (a chat's box has no
 // call button since SHEP-108: it is always Send). Where neither shows (a shut sidebar, a task open on a phone)
@@ -232,7 +232,7 @@ export function toggleCall(from: string | null = null) {
     if (getState().snap) sendWhere(whereNow())
   }, () => { if (mine()) endCall() }, {
     // the lock screen and Control Center show the call: hang up and mute from there (SHEP-102)
-    title: 'Shepherdr',
+    title: 'BossGoat',
     hangUp: () => { if (mine()) endCall() },
     mute: (on) => { if (!mine()) return; muteCall(on); setUI({ callMuted: on }) },
   }).catch(() => { endCall(); setUI({ callError: 'Audio could not start on this device.' }) })
@@ -337,17 +337,17 @@ function CallControls({ size }: { size: 'bar' | 'card' }) {
 /** the soft green of a call (the old call mark's), its words in the ready colour */
 const callTint = 'bg-[color-mix(in_srgb,var(--ready)_11%,var(--bg))] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--ready)_22%,transparent)]'
 
-/** SHEP-105: the top of the spaces list: "Talk to Shepherdr", above everything it can reach. On a call it is the call
+/** SHEP-105: the top of the spaces list: "Talk to BossGoat", above everything it can reach. On a call it is the call
  *  card: Shepherdr, what it is doing and its clock, the last thing it said, Mute and End. */
 function ShepherdrRow() {
   const on = useUI((u) => u.call)
   return (
     <div className="flex flex-col gap-2 px-2 pt-1.5 pb-1 phone:px-3 phone:pt-2">
       {on ? <CallCard /> : (
-        <button type="button" onClick={() => toggleCall(null)} aria-label="Talk to Shepherdr: a voice call"
+        <button type="button" onClick={() => toggleCall(null)} aria-label="Talk to BossGoat: a voice call"
           className="press group flex min-h-9 items-center gap-2.5 rounded-row py-1 pr-1 pl-2 text-left text-[0.9375rem]/5 text-fg hover:bg-hover keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] focus-visible:outline-none coarse:min-h-11 phone:min-h-12 phone:pl-3 phone:text-base/6">
           <WaveIcon className="size-4 text-fg2 phone:size-[18px]" />
-          <span className="min-w-0 flex-1 truncate font-medium">Talk to Shepherdr</span>
+          <span className="min-w-0 flex-1 truncate font-medium">Talk to BossGoat</span>
           <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-full bg-fg text-bg phone:size-9"><WaveIcon className="size-3.5 phone:size-4" /></span>
         </button>
       )}
@@ -362,10 +362,10 @@ function CallCard() {
   const t = useElapsed(useUI((u) => u.callStarted))
   const { word, phase } = usePhase()
   return (
-    <section aria-label="Voice call with Shepherdr" data-call-card data-phase={phase} className={clsx('flex items-center gap-2.5 rounded-[12px] py-1.5 pr-1.5 pl-3 phone:gap-3 phone:py-2 phone:pr-2 phone:pl-3.5', callTint)}>
+    <section aria-label="Voice call with BossGoat" data-call-card data-phase={phase} className={clsx('flex items-center gap-2.5 rounded-[12px] py-1.5 pr-1.5 pl-3 phone:gap-3 phone:py-2 phone:pr-2 phone:pl-3.5', callTint)}>
       <span className="grid w-4 shrink-0 place-items-center text-ready-fg phone:w-5"><CallMark phase={phase} className="h-3.5 phone:h-4" /></span>
       <div className="min-w-0 flex-1">
-        <h2 className="truncate text-[0.9375rem]/5 font-semibold text-fg phone:text-base/6">Shepherdr</h2>
+        <h2 className="truncate text-[0.9375rem]/5 font-semibold text-fg phone:text-base/6">BossGoat</h2>
         <p className="flex min-w-0 gap-1 text-[0.75rem]/4 font-medium text-ready-fg tabular-nums phone:text-[0.8125rem]/5">
           <span role="status" className="min-w-0 truncate">{word}</span><span className="shrink-0">· {t}</span>
         </p>
@@ -375,12 +375,12 @@ function CallCard() {
   )
 }
 
-/** SHEP-105, SHEP-108: the end of a phone's bottom bar. Off a call: Talk to Shepherdr, a quiet grey round. On one:
+/** SHEP-105, SHEP-108: the end of a phone's bottom bar. Off a call: Talk to BossGoat, a quiet grey round. On one:
  *  Mute and the red hang-up, nothing above the bar (the call's details are the sidebar's card) */
 function PhoneCallButton() {
   const on = useUI((u) => u.call)
   return on ? <CallControls size="bar" /> : (
-    <RoundButton label="Talk to Shepherdr" onClick={() => toggleCall(null)} className="size-14 max-[359px]:size-12">
+    <RoundButton label="Talk to BossGoat" onClick={() => toggleCall(null)} className="size-14 max-[359px]:size-12">
       <WaveIcon className="size-5" />
     </RoundButton>
   )
@@ -392,11 +392,11 @@ function CallStrip() {
   const t = useElapsed(useUI((u) => u.callStarted))
   const { word, phase } = usePhase()
   return (
-    <div data-call-strip data-topbar data-phase={phase} role="group" aria-label="Voice call with Shepherdr"
+    <div data-call-strip data-topbar data-phase={phase} role="group" aria-label="Voice call with BossGoat"
       className={clsx('mx-3 mt-2 flex shrink-0 items-center gap-2 rounded-full py-1 pr-1 pl-3.5 text-[0.8125rem] font-medium text-ready-fg tabular-nums [[data-device=phone]>&:first-child]:mt-[calc(env(safe-area-inset-top)+8px)] phone:text-[0.9375rem]', callTint)}>
       <span className="grid w-4 shrink-0 place-items-center"><CallMark phase={phase} className="h-3" /></span>
       <p className="min-w-0 flex-1 truncate">
-        <span className="text-fg">Shepherdr</span> · <span role="status">{word}</span> · {t}
+        <span className="text-fg">BossGoat</span> · <span role="status">{word}</span> · {t}
       </p>
       <CallControls size="card" />
     </div>
@@ -494,10 +494,10 @@ function FullCall() {
   }, [])
   const look = muted && (phase === 'listening' || phase === 'connecting') ? 'muted' : phase
   return (
-    <div ref={screen} tabIndex={-1} data-call-screen data-theme="dark" data-phase={look} role="dialog" aria-label="Voice call with Shepherdr"
+    <div ref={screen} tabIndex={-1} data-call-screen data-theme="dark" data-phase={look} role="dialog" aria-label="Voice call with BossGoat"
       className="call-screen-in outline-none fixed inset-0 z-70 flex flex-col bg-[#08090a] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[max(env(safe-area-inset-bottom),--spacing(8))] pl-[env(safe-area-inset-left)] text-fg antialiased scheme-only-dark short:grid short:grid-cols-2 short:grid-rows-[1fr_auto_auto_1fr] short:pt-[max(env(safe-area-inset-top),--spacing(6))] short:pb-[max(env(safe-area-inset-bottom),--spacing(6))]">
       <header className="flex flex-col items-center gap-0.5 pt-8 short:col-start-2 short:row-start-2 short:pt-0">
-        <h2 className="text-base/6 font-semibold">Shepherdr</h2>
+        <h2 className="text-base/6 font-semibold">BossGoat</h2>
         <p className="text-sm/5 text-fg2 tabular-nums">{t}</p>
       </header>
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-12 px-6 short:col-start-1 short:row-span-full short:gap-(--orb-short-gap)">

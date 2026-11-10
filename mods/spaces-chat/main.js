@@ -29,8 +29,16 @@ import { countBadge, red, green, H, TEXT, RADIUS, toast } from "./ui.js";
 import { on as addonOn } from "./addons.js";
 import { spaceName, gitTail, tilde, sharedNames, inOrder, withOrder } from "./core/spaces.js";
 import { coordinatorTab } from "./coordinator.js";
+import { sidebarIcon } from "./core/sidebar-icons.js";
 
 const POPUPS = { add: Menu, space: Menu, section: Menu, icon: IconPicker, rename: Rename, machine: MachinePopup };
+
+function sidebarGlyph(value, fallback) {
+  const icon = sidebarIcon(value) ?? (!value ? fallback : null);
+  if (!icon) return div().text_size(20).child(value);
+  const folder = ["monitor", "server", "settings", "folder"].includes(icon) ? "workspace-chrome" : "spaces-chat";
+  return svg(`mods/${folder}/${icon}.svg`).size(20);
+}
 
 // Spaces with agents showing as a chat counted in their status.
 const spaces = spacesWithChats;
@@ -85,7 +93,7 @@ export function tone(t, status) {
   return t[status] ?? t.unknown;
 }
 
-// A space's name (or its number on the rail): bold and bright while its Assistant has something
+// A space's name: bold and bright while its Assistant has something
 // new (unread.js), as Slack's unread channels. A hidden bold copy holds the width either way, so
 // nothing beside it moves when it turns bold.
 function nameText(text, fresh, color, t) {
@@ -174,7 +182,7 @@ export default class Spaces extends View {
       .child(svg("mods/spaces-chat/rocket.svg").size(12).flex_none());
   }
 
-  // SHEP-105: "Talk to Shepherdr" at the top of the sidebar, above the spaces: a voice call with Shepherdr itself, not
+  // SHEP-105: "Talk to BossGoat" at the top of the sidebar, above the spaces: a voice call with Shepherdr itself, not
   // one chat. The window runs it in the shown space's Assistant chat (mods/chat voice.ts: shared "chat.callreq"
   // { pane, at, action: "start" | "mute" | "end" }), but the call hears and reaches every space. On a call the row is the
   // call card: Shepherdr, what it is doing and its clock, Mute and the red hang-up; on the narrow rail, a green wave that ends it.
@@ -190,7 +198,7 @@ export default class Spaces extends View {
     const tab = sp ? coordinatorTab(sp, undefined, ps) : null;
     const chatIn = (id) => ps.find((p) => p.mod === "chat" && p.tab === id)?.pane ?? null;
     const at = tab && chatIn(tab.id) ? tab.id : (sp?.tabs ?? []).map((t) => t.id).find((id) => chatIn(id)) ?? null;
-    if (!at) return toast({ title: "Talk to Shepherdr", body: "This space has no chat to run the call from: open its Assistant first.", level: "info" });
+    if (!at) return toast({ title: "Talk to BossGoat", body: "This space has no chat to run the call from: open its Assistant first.", level: "info" });
     if (!sp.tabs.some((t) => t.id === at && t.active)) run("tab.select", { id: at });
     setShared("chat.callreq", { pane: chatIn(at), at: Date.now(), action: "start" });
   }
@@ -211,7 +219,7 @@ export default class Spaces extends View {
       .hover((s) => s.bg(t.hover))
       .on_click(() => this.startCall())
       .child(svg("mods/chat/audio-lines.svg").size(14).flex_none().text_color(t.muted))
-      .child(div().flex_1().min_w(0).truncate().font_medium().text_color(t.foreground).child("Talk to Shepherdr"))
+      .child(div().flex_1().min_w(0).truncate().font_medium().text_color(t.foreground).child("Talk to BossGoat"))
       .child(round("voice-start", 24, t.foreground, t.background, "mods/chat/audio-lines.svg", () => this.startCall()));
     this.calling = true;
     const secs = Math.max(0, Math.floor((Date.now() - (call.started ?? Date.now())) / 1000));
@@ -225,7 +233,7 @@ export default class Spaces extends View {
     return h_flex().id("voice-card").mx(8).mt(4).py(6).pl(10).pr(6).gap(9).flex_none().items_center().rounded(RADIUS.card).bg(`${green()}1c`).border_1().border_color(`${green()}38`)
       .child(svg("mods/chat/audio-lines.svg").size(14).flex_none().text_color(green()).loop("opacity", { from: 0.45, to: 1, period: 1400 }))
       .child(v_flex().flex_1().min_w(0)
-        .child(div().truncate().font_semibold().text_color(t.foreground).child("Shepherdr"))
+        .child(div().truncate().font_semibold().text_color(t.foreground).child("BossGoat"))
         .child(div().truncate().text_size(TEXT.label).font_medium().text_color(green()).child(`${word} \u00b7 ${clock}`)))
       .child(round("voice-mute", 26, call.muted ? t.foreground : t.raised, call.muted ? t.background : t.muted, call.muted ? "mods/chat/mic-off.svg" : "mods/chat/mic.svg", () => req("mute")))
       .child(round("voice-end", 26, red(), "#ffffff", "mods/chat/phone-x.svg", () => req("end")));
@@ -378,7 +386,7 @@ export default class Spaces extends View {
     for (const w of sp) if (!this.shown.has(w.id) && ready(w)) this.shown.add(w.id);
     return sp.filter((w) => this.shown.has(w.id)).map((w) => {
       const g = this.git[where(w, ps)] ?? null, at = place(w, ps);
-      return { w, i: herdr.indexOf(w), g, at, name: this.nameOf(w, g, at) };
+      return { w, i: herdr.findIndex((s) => s.id === w.id), g, at, name: this.nameOf(w, g, at) };
     });
   }
 
@@ -404,17 +412,15 @@ export default class Spaces extends View {
   }
 
   // The rows, under a header per machine once one isn't this computer.
-  // Pinned spaces (sections.js) sit in Pinned at the top instead (not on the rail).
+  // Pinned spaces (sections.js) sit in Pinned at the top in either sidebar view.
   grouped(t, collapsed) {
     const visible = this.visible();
     // Names two spaces on one machine share (a worktree under its repo aside: its branch shows).
     this.dup = sharedNames(visible.map((r) => ({ id: r.w.id, machine: r.w.machine, name: r.name, linked: Boolean(r.g?.linked) })));
-    const pins = collapsed ? [] : data().pinned;
+    const pins = data().pinned;
     const all = visible.filter((r) => !pins.includes(r.w.id));
     const rows = this.ordered(all);
-    const draw = (r) => (collapsed ? this.compact(r, t) : this.row(r, t));
-    // A machine's spaces: those in no section first, then its sections (the rail has none).
-    const body = (m, mine) => (collapsed ? mine.map(draw) : this.sectioned(m, all.filter((r) => (r.w.machine ?? null) === m), t));
+    const body = (m) => this.sectioned(m, all.filter((r) => (r.w.machine ?? null) === m), t, collapsed);
     const remote = [...new Set([...rows.map(r => r.w.machine).filter(Boolean), ...this.machines.map(m => m.name)])].sort();
     const loading = m => {
       const layout = machines().find(k => k.name === m)?.layout;
@@ -422,7 +428,7 @@ export default class Spaces extends View {
         || spaces().some(s => (s.machine ?? null) === m && !this.shown.has(s.id));
     };
     const loadingRow = m => div().id(`machine-loading-${m ?? "local"}`).h(28).flex_none().px(8).flex().items_center().text_size(TEXT.label).text_color(t.dim).child(collapsed ? "…" : "Loading…");
-    const pinned = this.pinned(visible, pins, Boolean(remote.length), t);
+    const pinned = this.pinned(visible, pins, Boolean(remote.length), t, collapsed);
     if (!remote.length) return [...pinned, ...(loading(null) && !rows.length && !pinned.length ? [loadingRow(null)] : body(null, rows))];
     const machineNames = [null, ...remote];
     return [...pinned, ...machineNames.flatMap((m) => {
@@ -454,10 +460,9 @@ export default class Spaces extends View {
         .on_mouse_move((_e, cx) => this.drag(`top:${m}`, m, cx))
         .on_mouse_down("right", (e) => openMenu("machine", { machine: m, row: rectOf(e) }))
         .when(out, el => el.child(this.line(t, "bottom")))
-        // Its emoji, or the server / monitor; and the name it was given (Rename), else its own.
-        .child(machineLook(m).icon
-          ? div().w(14).flex_none().flex().justify_center().text_size(12).when(offline, el => el.opacity(0.5)).child(machineLook(m).icon)
-          : svg(`mods/workspace-chrome/${m ? "server" : "monitor"}.svg`).size(14).flex_none().text_color(offline ? t.dim : t.muted))
+        .child(div().w(22).flex_none().flex().items_center().justify_center().text_color(offline ? t.dim : t.muted)
+          .when(offline, el => el.opacity(0.5)).child(sidebarGlyph(machineLook(m).icon, m ? "server" : "monitor")))
+        .when(collapsed, el => el.justify_center().tooltip(machineLook(m).name).accessibility_label(machineLook(m).name))
         .when(!collapsed, el => el.child(div().flex_1().min_w(0).truncate().child(machineLook(m).name))
           .when(offline, el => el.child(div().flex_none().font_normal().child(state === "connecting" ? "Connecting\u2026" : "Offline")))
           // + (New space or New section, there) hugging its one meter. HERD-70.
@@ -470,7 +475,7 @@ export default class Spaces extends View {
             .child(this.meter(m, t))))
           .when(connected && Boolean(health?.error), el => el.child(div().id(`machine-dot-${m ?? "local"}`).size(6).rounded(3).flex_none().bg(red())))
           .child(svg(`mods/workspace-chrome/chevron-${folded ? "right" : "down"}.svg`).size(12).flex_none().text_color(t.dim)));
-      const own = !collapsed && sectionsOf(m).length;
+      const own = sectionsOf(m).length;
       // An empty machine is just its header: its + makes a space.
       return [head, ...(folded ? [] : mine.length || own ? body(m, mine) : loading(m) ? [loadingRow(m)] : [])];
     })];
@@ -495,7 +500,7 @@ export default class Spaces extends View {
   // Pinned, as Shepherdr's: a heading like a section's (its pin, no menu), shown while it holds
   // any, then its spaces in their own order, each with its machine after its name once there
   // are several. Folded, it still shows the space you're in and its unread ones.
-  pinned(list, pins, many, t) {
+  pinned(list, pins, many, t, collapsed = false) {
     const byId = new Map(list.map((r) => [r.w.id, r]));
     const members = pins.map((id) => byId.get(id)).filter(Boolean);
     if (!members.length) return [];
@@ -503,15 +508,16 @@ export default class Spaces extends View {
     const needs = open ? 0 : members.reduce((n, r) => n + this.needs(r.w), 0);
     const ready = open ? 0 : members.reduce((n, r) => n + this.readyIn(r.w), 0);
     const head = this.groupHead("section-pinned", t)
+      .when(collapsed, el => el.h(36).justify_center().tooltip("Pinned").accessibility_label("Pinned"))
       .on_click(() => foldPinned())
       .on_mouse_move((_e, cx) => this.drag("pinned", ANY, cx))
-      .child(div().w(18).flex_none().flex().justify_center().child(svg("mods/workspace-chrome/pin.svg").size(14)))
-      .child(div().flex_1().min_w(0).truncate().child("Pinned"))
-      .when(needs > 0 || ready > 0, (el) => el.child(countBadge(needs, ready, t.chrome)))
-      .child(svg(`mods/workspace-chrome/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none())
+      .child(div().w(22).flex_none().flex().justify_center().child(svg("mods/workspace-chrome/pin.svg").size(20)))
+      .when(!collapsed, el => el.child(div().flex_1().min_w(0).truncate().child("Pinned"))
+        .when(needs > 0 || ready > 0, (el) => el.child(countBadge(needs, ready, t.chrome)))
+        .child(svg(`mods/workspace-chrome/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none()))
       .when(this.pressed !== null && this.over === "pinned" && !open, (el) => el.child(this.line(t, "bottom")));
     const shown = open ? members : members.filter((r) => r.w.active || this.unread.has(r.w.id));
-    return [head, ...shown.map((r, n) => this.row({ ...r, tree: null, pinned: true, tag: many ? machineLook(r.w.machine ?? null).name : null,
+    return [head, ...shown.map((r, n) => collapsed ? this.compact(r, t) : this.row({ ...r, tree: null, pinned: true, tag: many ? machineLook(r.w.machine ?? null).name : null,
       end: open && n === shown.length - 1 ? "pinned" : null }, t))];
   }
 
@@ -523,44 +529,45 @@ export default class Spaces extends View {
 
   // One machine's rows (`list`: its shown spaces, in Herdr's order): the spaces in no
   // section, then each section's header and, unless folded, its spaces in its order.
-  sectioned(m, list, t) {
+  sectioned(m, list, t, collapsed = false) {
+    const draw = (r) => collapsed ? this.compact(r, t) : this.row(r, t);
     const sections = sectionsOf(m);
     const byId = new Map(list.map((r) => [r.w.id, r]));
     const filed = new Set(sections.flatMap((s) => s.spaces));
-    const out = this.ordered(list.filter((r) => !filed.has(r.w.id))).map((r) => this.row(r, t));
+    const out = this.ordered(list.filter((r) => !filed.has(r.w.id))).map(draw);
     for (const s of sections) {
       const members = s.spaces.map((id) => byId.get(id)).filter(Boolean);
       const open = !s.folded || (this.pressed !== null && this.peek === s.id);
-      out.push(this.sectionHead(s, members, t, open));
+      out.push(this.sectionHead(s, members, t, open, collapsed));
       // Folded, it still shows the space you're in and its unread ones, as Slack does.
       const shown = this.ordered(open ? members : members.filter((r) => r.w.active || this.unread.has(r.w.id)));
       // Dropped on the header, a space goes to the section's end: the line shows under its last row.
-      shown.forEach((r, n) => out.push(this.row({ ...r, end: open && n === shown.length - 1 ? `section:${s.id}` : null }, t)));
-      if (open && !members.length) out.push(this.emptySection(s, t));
+      shown.forEach((r, n) => out.push(draw({ ...r, end: open && n === shown.length - 1 ? `section:${s.id}` : null })));
+      if (open && !members.length && !collapsed) out.push(this.emptySection(s, t));
     }
     return out;
   }
 
-  sectionHead(s, members, t, open) {
+  sectionHead(s, members, t, open, collapsed = false) {
     const needs = open ? 0 : members.reduce((n, r) => n + this.needs(r.w), 0);
     const ready = open ? 0 : members.reduce((n, r) => n + this.readyIn(r.w), 0);
     // Over it, the line shows where the space lands: under the section's last row ("Drag spaces
     // here" when empty), or under the header while it's folded.
     const line = this.pressed !== null && this.over === `section:${s.id}` && !open;
     return this.groupHead(`section-${s.id}`, t)
+      .when(collapsed, el => el.h(36).justify_center().tooltip(s.name).accessibility_label(s.name))
       .on_click(() => foldSection(s.id))
       .on_mouse_down("right", (e) => openMenu("section", { section: s.id, row: rectOf(e) }))
       .on_mouse_move((_e, cx) => this.drag(`section:${s.id}`, s.machine, cx))
-      // Its icon in the spaces' "#" column: the folder, or the emoji picked for it.
-      .child(div().w(18).flex_none().flex().justify_center()
-        .child(s.icon ? div().text_size(13).child(s.icon) : svg("mods/workspace-chrome/folder.svg").size(14)))
-      .child(div().flex_1().min_w(0).truncate().child(s.name))
-      .when(needs > 0 || ready > 0, (el) => el.child(countBadge(needs, ready, t.chrome)))
-      .child(svg(`mods/workspace-chrome/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none())
+      .child(div().w(22).flex_none().flex().items_center().justify_center()
+        .child(sidebarGlyph(s.icon, "folder")))
+      .when(!collapsed, el => el.child(div().flex_1().min_w(0).truncate().child(s.name))
+        .when(needs > 0 || ready > 0, (el) => el.child(countBadge(needs, ready, t.chrome)))
+        .child(svg(`mods/workspace-chrome/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none()))
       .when(line, (el) => el.child(this.line(t, "bottom")));
   }
 
-  // A section's or Pinned's heading, inside its machine: its icon in the spaces' "#" column and its
+  // A section's or Pinned's heading, inside its machine: its icon in the spaces' icon column and its
   // name where theirs start (so it reads as one of the machine's), 12, medium, dim.
   groupHead(id, t) {
     return h_flex().relative().id(id).h(28).flex_none().px(8).gap(9).items_center().rounded(RADIUS.card)
@@ -570,7 +577,7 @@ export default class Spaces extends View {
   emptySection(s, t) {
     return h_flex().relative().id(`section-empty-${s.id}`).h(28).flex_none().px(8).gap(9).items_center().text_size(TEXT.label).text_color(t.dim)
       .on_mouse_move((_e, cx) => this.drag(`section:${s.id}`, s.machine, cx))
-      .child(div().w(18).flex_none())
+      .child(div().w(22).flex_none())
       .child("Drag spaces here")
       .when(this.pressed && this.over === `section:${s.id}`, (el) => el.child(this.line(t, "top")));
   }
@@ -734,10 +741,8 @@ export default class Spaces extends View {
           .gap(9)
           .items_center()
           .when(Boolean(tree), el => el.pl(22).child(svg("mods/workspace-chrome/branch.svg").size(13).text_color(t.dim)))
-          // Slack's channels: a quiet # and the name, bright when it's the shown space.
-          // Or the emoji picked for it (Change icon), in the same slot so names stay aligned.
-          .when(!tree, el => el.child(div().w(18).flex_none().text_center().text_size(iconOf(w.id) ? 14 : 15).text_color(fresh ? t.foreground : w.active && !quiet ? t.muted : t.dim)
-            .when(quiet && Boolean(iconOf(w.id)), (el) => el.opacity(0.5)).child(iconOf(w.id) ?? "#")))
+          .when(!tree, el => el.child(div().w(22).flex_none().flex().items_center().justify_center().text_color(fresh ? t.foreground : w.active && !quiet ? t.muted : t.dim)
+            .when(quiet && Boolean(iconOf(w.id)), (el) => el.opacity(0.5)).child(sidebarGlyph(iconOf(w.id), "message-square"))))
           .child(nameText(name, fresh, quiet ? t.dim : w.active ? t.foreground : t.muted, t))
           .when(Boolean(this.pilotMark(w, t)), (el) => el.child(this.pilotMark(w, t)))
           .child(g ? this.gitTail(g, tree, name, t, label) : h_flex().flex_1().min_w(0).justify_end().text_size(TEXT.label).text_color(t.dim)
@@ -749,22 +754,17 @@ export default class Spaces extends View {
       );
   }
 
-  // The rail's row: its number and status (a voice call shows at the rail's top, voiceRow).
-  compact({ w, i }, t) {
-    return h_flex()
-      .id(`space-${w.id}`)
-      .h(26)
-      .flex_none()
-      .justify_center()
-      .items_center()
-      .gap(4)
-      .rounded(RADIUS.card)
-      .cursor_pointer()
-      .when(w.active, (el) => el.bg(t.raised))
-      .hover((s) => s.bg(t.hover))
+  compact({ w, g, tree, name }, t) {
+    const fresh = this.unread.has(w.id);
+    return h_flex().relative().id(`space-${w.id}`).h(36).flex_none().justify_center().items_center()
+      .rounded(RADIUS.card).cursor_pointer().accessibility_label(name).tooltip(name)
+      .text_color(fresh || w.active ? t.foreground : t.muted)
+      .when(w.active, el => el.bg(t.selected))
+      .hover(s => s.bg(t.hover))
       .on_click(() => run("space.select", { id: w.id }))
-      .child(nameText(String(i + 1), this.unread.has(w.id), muted(w.id) ? t.dim : w.active ? t.foreground : t.muted, t))
-      .child(div().text_color(tone(t, w.status)).child(glyph(w.status)));
+      .on_mouse_down("right", e => this.menu(w, g, name, e))
+      .child(tree ? svg("mods/workspace-chrome/branch.svg").size(20) : sidebarGlyph(iconOf(w.id), "message-square"))
+      .when(fresh || ["blocked", "working", "done"].includes(w.status), el => el.child(div().absolute().right(4).bottom(4).size(5).rounded_full().bg(fresh ? t.accent : tone(t, w.status))));
   }
 
   close() { this.popup?.close?.(); }
@@ -799,6 +799,15 @@ export default class Spaces extends View {
     }
     if (changed) setShared("space.colors", kept);
     return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
+      .when(collapsed, el => el.child(h_flex().h(31).flex_none().items_center().justify_center()
+        .child(div().id("sidebar-expand").size(H.sm).flex().items_center().justify_center().rounded(RADIUS.control)
+          .cursor_pointer().text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
+          .on_click(() => {
+            setShared("sidebar.collapsed", false);
+            run("layout.resize", { id: "sidebar", px: shared("sidebar.width") ?? 268 });
+          })
+          .accessibility_label("Show sidebar").tooltip("Show sidebar")
+          .child(svg("mods/workspace-chrome-shepherdr/sidebar.svg").size(20)))))
       .child(this.voiceRow(t, collapsed))
       .child(h_flex().h(31).pl(16).pr(10).items_center().justify_between().text_size(TEXT.label).font_medium().text_color(t.dim)
         .when(!collapsed, el => el.child("Spaces"))
@@ -807,7 +816,8 @@ export default class Spaces extends View {
           .hover(s => s.bg(t.hover).text_color(t.foreground))
           .on_mouse_down("left", (e) => { this.addAt = rectOf(e); })
           .on_click(() => this.addMenu(sp.find(s => s.active)?.machine ?? null))
-          .child(svg("mods/workspace-chrome/plus.svg").size(14))))
+          .when(collapsed, el => el.tooltip("New space or section").accessibility_label("New space or section"))
+          .child(svg("mods/workspace-chrome/plus.svg").size(20))))
       .child(v_flex().flex_1().min_h(0).px(8).pb(14).overflow_y_scrollbar().mode("always")
         .on_mouse_up("left", (_e, cx) => this.release(cx))
         .children(this.grouped(t, collapsed)));

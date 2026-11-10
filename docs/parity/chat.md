@@ -26,8 +26,8 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | First row, log read from its start | W:2673 "Start of conversation" | R:211 HeadRow (D `top`) | ✓ |
 | First row, earlier pages left | W:2675 "Loading earlier…", loads on scrolling up (W loadEarlier) | R:211 HeadRow, loads when scrolled up to it (D `earlier`, action `earlier` → service/chats.ts `earlier()`) | ✓ |
 | Day line | W:2737 Today, Yesterday, weekday, "Tue 20 Oct" (+ year) | C:888 DateLine, `dayLabel` from core | ✓ (was the browser's locale format) |
-| Your message | W:2679 bubble on the right, accent tint | C:50 Bubble, right, `bg-reply` | ✓ (2.1's bubble look) |
-| Agent's message, markdown | W:2715 bubble on the left | C:50 Bubble, left, Markdown | ✓ |
+| Your message | Neutral bubble on the right, no full-row background | Bubble, right, neutral `bg-reply` | ✓ |
+| Agent's message, markdown | Plain text and Markdown without a message card; configured wallpaper retained | Unboxed Markdown in the same reading column | ✓ |
 | Agent's code block | W:2717 bar: language or "code", Copy / Copied | markdown.tsx toHtml: `.code-head` with language or "code" and Copy / Copied | ✓ |
 | Long reply folds | W FOLD 20 lines past 28, "Show more" / "Show less" with chevron | fold.tsx: past 28×21px to 20×21px, WORDS.showMore / showLess | ✓ |
 | Reply line over a reply | W:2690 reply icon + its start, dim, one line; a press scrolls to it and lights it | R:84 ReplyLine; D finds the message it names (core `names`), a press jumps to it | ✓ (was a tucked quote bubble) |
@@ -35,8 +35,8 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Images under a message | W:2712 each whole, shape kept, 320×220 (one) / 200×140 (many), right, 6px apart; press opens the viewer | R:236 Thumbs, `fitThumbs` from core; under the words (C:50 `pics`) or alone (C:557 Album); press opens Photo (C:593) | ✓ (were cropped 2.1 tiles beside/after the bubble) |
 | Images the chat can't show | W:2679 paperclip line "1 image" / "N images" | R:174 ImagesLine (D `images`) under the bubble | ✓ (was a text bubble) |
 | From another agent | W:2702 quiet row "› Message from Reviewer" + first line, opens to its words | R:132 BriefRow (D `brief`, core `senderName`/`unsigned`) | ✓ (was your own bubble) |
-| Launch brief | W:2702 "New session" / "Task brief" / "Handoff from the previous agent" | R:132 BriefRow (core `briefLabel`) | ✓ |
-| Started from a slot with your words | W:2428 the template part a "New session" row, your words a bubble | D `firstTask()` reads the same data/chat-first/<slot>.txt: "New session" row, then your words | ✓ |
+| Launch brief | Startup instructions hidden; "Task brief" / "Handoff from the previous agent" remain | D hides "New session"; R:132 BriefRow for task briefs and handoffs (core `briefLabel`) | ✓ |
+| Started from a slot with your words | Template hidden, your words a bubble; agent context unchanged | D `firstTask()` reads the same data/chat-first/<slot>.txt: only your words appear | ✓ |
 | Tools row | W:2793 "› Read a file, ran a command" (core summary), opens to each step's line and the first lines it printed | A:316 TurnLine + A:332 ToolSteps (D `activity.summary`, `api/activity` → `results()`) | ✓ (showed raw "Description: command" rows) |
 | Quiet lines sit tight | W spaced(): tools, briefs, news, artifact lines one block, 16px between blocks | C:1084 quiet runs grouped, `gap-4` between blocks | ✓ |
 | Task news line | W:2764 mark (green tick ready, grey tick done, amber started, red needs while live), REF, what, "·", words; Review (opens the Accept card) at the right while Ready | R:138 NewsRow (D `news`, core `newsWords`/`newsTimeline` incl. start/ready/done from the task's record) | ✓ (was a bordered 2.1 card with raw text) |
@@ -92,6 +92,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 |---|---|---|---|
 | Placeholder | W:2547 "Message the Assistant", "Message SHEP-7", "Message Claude Code"; "Reply instead…" while a card or the terminal asks | C:2528 placeholderOf (incl. `blocked`) | ✓ |
 | Attach | W:3286 paperclip "Attach files" → the file picker | C:1838 paperclip "Attach files" → the file picker; a phone gets a menu with its camera | ◇ phone camera |
+| Permissions | Beside Attach: current mode; a focused picker applies it with an explicit Restart. Before launch, changes the chat's pending choice | Beside Attach: current mode; same focused picker and explicit Restart for a running agent | ◇ fresh web chats use the existing launch defaults |
 | Pasted / dropped files | W tiles over the box, × each | C:2024 Attachments | ✓ |
 | Model button | W:3199 "Opus 5.5 · High ⌄" in the box's bottom row, a narrow chat drops "· 1M" | S:384 AgentLine: the same words (D `agent.words`) with a chevron, under the box | ◇ 2.1's one-row box: the button sits under it |
 | /model | W:2225 opens the picker, the named model chosen | C /model → `openModelMenu(chat, name)` | ✓ |
@@ -127,6 +128,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Only waiting | W clock icon, no spinner | A:360 clock (D `waits`) | ✓ |
 | Needs you | W:2979 red dot, "Needs you", what it waits for or "The agent is asking something in the terminal.", Open terminal | A:389 NeedsYou (D `blocked`) | ✓ (was missing) |
 | Starting the Assistant | W:1419 startAgent: the first message in an empty Assistant chat starts it (assistant template, the message its task, the slot's labels), "Starting the Assistant…" | service/actions.ts `send` to a space with no Assistant: the same `hc run` and labels in the window's slot (shared "coordinator.slots"), else the service's own labels; writes data/chat-first; A WorkingLine "Starting the Assistant…" | ✓ |
+| Claude Assistant instructions | Custom assistant template loaded with `--append-system-prompt-file`, outside visible Terminal/Chat messages; user request stays visible | Same background launch through service `execTemplate`; durable context retained on resume | ✓ |
 | Helpers | W:2972 rows: spinner, name, age; past five, four and "+N more" | A JobsTag: the same rows over the box | ✓ |
 | Background shells and watchers | W background(): after the subagents, a row each for the shells and watchers the agent left running (terminal or eye icon, name, age, chevron), live from its log and its processes (core/bg-jobs.js), gone when they end; a tap opens its command, the last lines it printed (Claude Code's) and Stop; Codex's own long-running shells too. Settings' subagents switch leaves them shown. A background call answered without a task id (cancelled, denied, failed) is no row, and one with no task id stays a minute at most (SHEP-20, core/bg-jobs.js: a window still on an older install keeps such a row for hours, like "Keep watching SHEP-10 · 4h", until it updates) | A JobsTag JobLine: the same rows and the same open row (service compat `jobs`, api/activity `what=job`, action `stop-job`) | ✓ |
 

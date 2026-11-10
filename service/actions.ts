@@ -564,7 +564,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
         "--label", `herdr.coordinator.space=${bare}`, ...(rec.tab ? ["--label", `herdr.coordinator.tab=${String(rec.tab).split("/").pop()}`] : [])]
       : ["--label", "herdr.role=coordinator", "--label", `herdr.coordinator.space=${bare}`, "--label", `herdr.space=${bare}`];
     const tpl = await execTemplate(hub, "assistant", sp.machine ?? null);
-    const r = await hc(["run", "--bg", "--json", "--no-parent", "--keep", ...(sp.machine ? ["--on", sp.machine] : []), ...(sp.folder ? ["--cwd", sp.folder] : []), ...labels, tpl.name, task]);
+    const r = await hc(["run", "--bg", "--json", "--no-parent", "--keep", ...(sp.machine ? ["--on", sp.machine] : []), ...(sp.folder ? ["--cwd", sp.folder] : []), ...labels, ...(tpl.background ? ["--label", "herdr.assistant.context=background"] : []), tpl.name, task]);
     tpl.done();
     let out: any = {};
     try { out = JSON.parse(r.stdout || "{}"); } catch {}
@@ -572,7 +572,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     // what the person asked, for its chat to show apart from the template (the window's data/chat-first)
     const first = join(appHome(), "data", "chat-first");
     const addr = sp.machine && !String(out.address).includes("/") ? `${sp.machine}/${out.address}` : String(out.address);
-    if (out.first_message?.sent === false && tpl.words) firstWhenIdle(hub, addr, `${tpl.words}\n\n${task}`);
+    if (out.first_message?.sent === false) firstWhenIdle(hub, addr, [tpl.words, task].filter(Boolean).join("\n\n"));
     try { mkdirSync(first, { recursive: true }); writeFileSync(writable(join(first, `${String(slot ?? addr).replace(/[^\w.-]/g, "_")}.txt`)), text); } catch {}
     return { ok: true, started: true };
   }

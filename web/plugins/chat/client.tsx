@@ -27,7 +27,7 @@ import { typing, working } from './typing.ts'
 import { JobsSheet, JobsTag, NeedsYou, openSubagent, TurnLine, useSubagent, WorkingLine } from './activity.tsx'
 import { ClockIcon } from '@heroicons/react/16/solid'
 import { AskedRow, Band, BriefRow, Chips, EndedRow, ErrorRow, NoteRow, Notice, HeadRow, ImagesLine, NewsRow, onTerminal, PilotRow, PublishingRow, questionsBelow, ReplyLine, Thumbs, WORDS } from './rows.tsx'
-import { AgentLine, openModelMenu, openRestart, RestartSheet } from '@client/restart.tsx'
+import { AgentLine, openModelMenu, openRestart, PermissionLine, RestartSheet } from '@client/restart.tsx'
 import { Sheet, SheetClose } from '@client/Stack.tsx'
 import { expandPicked, forMarkdown, mentionItems, MentionList, pickable, takeItem, useReach, withChips, type Item } from './mentions.tsx'
 import * as MNc from '@core/mentions.js'
@@ -142,7 +142,7 @@ function Bubble({ msg, chat, from, out, last, pics, images, writing }: { msg: Me
           'flex flex-col transition-opacity duration-200',
           you ? 'items-end self-end' : 'items-start self-start',
           // something big (an artifact) takes the chat's whole width; the words above it keep a bubble's
-          wide ? 'w-full' : you ? 'max-w-[88%]' : 'max-w-[92%] phone:max-w-[96%]',
+          wide ? 'w-full' : you ? 'max-w-[88%]' : 'w-full',
           (msg.waiting || out?.state === 'sending') && 'opacity-60',
         )}
       >
@@ -163,12 +163,12 @@ function Bubble({ msg, chat, from, out, last, pics, images, writing }: { msg: Me
           ? unit(
               <div
                 data-anchor
+                data-message-side={you ? 'user' : 'assistant'}
                 {...keys}
                 {...hold}
                 className={clsx(
-                  // mirrored round corners: the small one points at whoever wrote it. Slack's 15/22 message text
-                  'relative max-w-full min-w-0 text-[0.9375rem]/[1.375rem] text-pretty px-3.5 py-2 phone:px-4 phone:py-2.5 phone:text-base/6',
-                  you ? 'rounded-bubble rounded-br-[6px] bg-reply' : 'rounded-bubble rounded-bl-[6px] bg-bubble',
+                  'relative max-w-full min-w-0 text-base/6 text-pretty',
+                  you ? 'rounded-[18px] bg-bubble px-4 py-2.5' : 'w-full py-1',
                   you ? 'self-end' : 'self-start',
                   // on a touch screen a hold reacts (or offers Remove), so it doesn't start selecting text or a link's preview
                   ((canReact && !selecting) || pending) && clsx(pressable, 'pointer-coarse:select-none pointer-coarse:[-webkit-touch-callout:none]'),
@@ -1229,7 +1229,7 @@ const Messages = memo(function Messages({ chat, from }: { chat: Chat; from: stri
   let day = ''
   return (
     // a finger sliding a message left moves them all (--peek), and each one's time comes in at the right, like iMessage
-    <div ref={list} data-messages className="mx-auto flex w-full max-w-read flex-1 flex-col gap-4 px-5 pt-5 pb-3 phone:px-4">
+    <div ref={list} data-messages className="mx-auto flex w-full max-w-read flex-1 flex-col gap-5 px-5 pt-6 pb-5 phone:px-4">
       <HeadRow chat={chat} />
       {!rows.length && !chat.top && !chat.earlier ? (
         // the window's empty Assistant chat; any other agent's, its notice
@@ -1986,7 +1986,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
       {/* the window's box: the words across its full width, then a row in it of attach on the left and on the right
           what the agent runs on (the model menu), the mic and Send; nothing under it. Its corners are half a
           round button and the padding, so the buttons sit in the bottom ones with the same curve round them */}
-      <div data-composer className="relative round-box bg-bg p-1.5 shadow-box has-[textarea:focus]:shadow-box-focus">
+      <div data-composer className="relative rounded-[20px] bg-bg p-2 shadow-box has-[textarea:focus]:shadow-box-focus">
         {/* what it replies to: one quiet line inside the box, over the words (like WhatsApp and Telegram) */}
         <ReplyStrip chatKey={chatKey} />
         {live ? (
@@ -1995,7 +1995,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
           </div>
         ) : (
           <>
-            <div className="relative flex min-w-0">
+            <div className="relative flex min-w-0 text-base/6">
               <textarea
                 ref={ref}
                 name="message"
@@ -2087,6 +2087,7 @@ function Composer({ chatKey, placeholder, cli }: { chatKey: string; placeholder:
                   <PlusIcon className={ic} />
                 </IconButton>
               ) : null}
+              <PermissionLineKept chatKey={chatKey} />
               <div className="flex-1" />
               <AgentLineKept chatKey={chatKey} cli={cli} />
               {Mic ? <MicKept chatKey={chatKey} /> : null}
@@ -2127,6 +2128,7 @@ const ComposerAbove = memo(function ComposerAbove({ chatKey, cli }: { chatKey: s
   return registry.composerAbove.map(({ View }, i) => <View key={i} chatKey={chatKey} cli={cli} />)
 })
 const AgentLineKept = memo(AgentLine)
+const PermissionLineKept = memo(PermissionLine)
 const MicKept = memo(function MicKept({ chatKey }: { chatKey: string }) {
   const Mic = registry.composerMic
   return Mic ? <Mic chatKey={chatKey} /> : null

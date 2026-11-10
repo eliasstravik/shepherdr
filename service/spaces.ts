@@ -12,6 +12,7 @@ import { exec } from "./model.ts";
 import * as NS from "../core/newspace.js";
 import * as SP from "../core/spaces.js";
 import { cleanCommand } from "../core/clean-env.js";
+import { assistantContext } from "../core/assistant-context.js";
 
 export const withWindow = () => existsSync(join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "mods", "spaces-chat"));
 
@@ -64,19 +65,24 @@ export async function newSpaceInfo(hub: Hub, machine: string | null, at: string 
  *  one-off copy, removed by done() once it has started, whose command first clears a parent Claude Code session's
  *  markers the holder may carry (SHEP-86, core/clean-env.js), then execs it: hc runs a template's command under sh -c,
  *  and where sh is dash (Debian, Ubuntu) the shell would stay the terminal's program, so no chat would know its CLI.
- *  words: the template's own words (its first message), when read. Unreadable: the template itself. */
-export async function execTemplate(hub: Hub, name: string, machine: string | null): Promise<{ name: string; words: string; done: () => void }> {
-  const plain = { name, words: "", done: () => {} };
+ *  words: the first-message role, empty when Claude loads it as background context. Unreadable: the template itself. */
+export async function execTemplate(hub: Hub, name: string, machine: string | null): Promise<{ name: string; words: string; background: boolean; done: () => void }> {
+  const plain = { name, words: "", background: false, done: () => {} };
   const DIR = 'dir="$HOME/.config/herdr-core/templates"; ';
   const src = (await exec(hub, ["sh", "-c", DIR + 'cat "$dir/$1.md"', "x", name], machine).catch(() => null))?.stdout ?? "";
   const head = /^---\n([\s\S]*?)\n---\n?/.exec(src);
   const cmd = /^command:[ \t]*(.+)$/m.exec(head?.[1] ?? "")?.[1]?.trim();
   if (!head || !cmd) return plain;
+  const context = assistantContext(cmd, name);
+  const body = context ? "" : src.slice(head[0].length);
   const one = `herdr-${name}-${Date.now().toString(36)}`;
-  const file = `---\nname: ${one}\ndescription: A one-off ${name} start that execs its command (BossGoat's service), removed after use.\ncommand: ${cleanCommand(cmd)}\n---\n${src.slice(head[0].length)}`;
+  const file = `---\nname: ${one}\ndescription: A one-off ${name} start that execs its command (BossGoat's service), removed after use.\ncommand: ${cleanCommand(context ?? cmd)}\n---\n${body}`;
   const w = await exec(hub, ["sh", "-c", DIR + 'printf "%s" "$2" > "$dir/$1.md"', "x", one, file], machine).catch(() => null);
-  if (w?.code !== 0) return plain;
-  return { name: one, words: src.slice(head[0].length).trim(), done: () => void exec(hub, ["sh", "-c", DIR + 'rm -f "$dir/$1.md"', "x", one], machine).catch(() => null) };
+  if (w?.code !== 0) {
+    if (context) throw new Error("Couldn't prepare the Assistant's instructions. Try again.");
+    return plain;
+  }
+  return { name: one, words: body.trim(), background: Boolean(context), done: () => void exec(hub, ["sh", "-c", DIR + 'rm -f "$dir/$1.md"', "x", one], machine).catch(() => null) };
 }
 
 /** The web's id for the space the window made: Herdr already answers another machine's as "<machine>/<id>" (its
@@ -128,7 +134,7 @@ export async function newSpace(hub: Hub, opts: { machine: string | null; path: s
   if (opts.store.value("coordinator.auto") === false) return machine ? `${machine}/${id}` : id;
   const t = await execTemplate(hub, "assistant", machine);
   await run(["hc", "run", "--bg", "--keep", "--no-parent", ...(machine ? ["--on", machine] : []), "--cwd", abs,
-    "--label", "herdr.role=coordinator", "--label", `herdr.coordinator.space=${id}`, "--label", `herdr.space=${id}`, t.name]);
+    "--label", "herdr.role=coordinator", "--label", `herdr.coordinator.space=${id}`, "--label", `herdr.space=${id}`, ...(t.background ? ["--label", "herdr.assistant.context=background"] : []), t.name]);
   t.done();
   return machine ? `${machine}/${id}` : id;
 }

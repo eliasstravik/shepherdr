@@ -2176,6 +2176,23 @@ class Revive(unittest.TestCase):
         self.tick()
         self.assertEqual(len(self.sent), 1)
 
+    def test_background_instructions_survive_resume_and_missing_session(self):
+        self.assistant()
+        file = "/home/me/.config/herdr-core/assistant-context/role.txt"
+        self.terms["t1"]["foreground"]["argv"] = ["claude", "--model", "opus", "--append-system-prompt-file", file]
+        self.tick()
+        rec = json.loads(self.terms["t1"]["labels"]["herdr.resume"])
+        self.assertIn(file, rec["argv"])
+        self.crash("t1")
+        self.tick()
+        self.assertIn("--append-system-prompt-file " + file, self.sent[0][1])
+        self.screens["t1"] = "No conversation found with session ID: S1"
+        with self.mock.patch.object(self.r, "template_of", lambda name="assistant": ("claude", "---\ncommand: claude\n---\nPrivate role instructions.")):
+            self.tick()
+        self.assertIn("<restart>", self.sent[1][1])
+        self.assertIn(file, self.sent[1][1])
+        self.assertNotIn("Private role instructions.", self.sent[1][1])
+
     def test_a_working_agent_carries_on(self):
         self.assistant(status="working")
         self.tick()

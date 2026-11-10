@@ -50,6 +50,7 @@ import * as slash from "./slash.js";
 import * as mentions from "./core/mentions.js";
 import * as agent from "./agent.js";
 import { cleanCommand } from "./core/clean-env.js";
+import { assistantContext, hasAssistantContext } from "./core/assistant-context.js";
 import * as choices from "./settings.js";
 import { Dictation, BUN_PATH, warmAudio } from "./dictate.js";
 
@@ -72,6 +73,7 @@ const PAGE = 200;
 const KEEP = 2000;
 // The conversation's width at most, in px: lines stay readable in a wide pane.
 const COLUMN = 760;
+const replyWidth = (width) => Math.max(120, Math.min(width - 36, COLUMN));
 const KINDS = { "claude-code": "claude", claude: "claude", codex: "codex", cursor: "cursor", "cursor-agent": "cursor", agent: "cursor" };
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 // The role templates' folder on the machine a command runs on (sh -c prefix: $dir).
@@ -95,7 +97,7 @@ const assistant = (k) => k?.labels?.["herdr.role"] === "coordinator";
 // Why hc didn't do it: { kind, message } from its JSON error ("blocked": a dialog is open), else its words.
 // The composer's round buttons (Send, Call, End call, mic, Mute), and the height of its text row
 // (one line of the box), which the call's row keeps so nothing moves when a call starts.
-const ROUND = 28, TEXT_ROW = 34;
+const ROUND = 28, CHAT_TEXT = 16, TEXT_ROW = 37;
 // Image thumbnails: the box's files are squares this many px, this far apart; under sent
 // messages each image keeps its shape, fitted in THUMB_ONE (one image) or THUMB_MANY (w, h).
 const THUMB = 56, THUMB_GAP = 6;
@@ -120,7 +122,7 @@ const ACT = 22, ACT_GAP = 2, BAND_IN = 4, ACT_ROW = BAND_IN + ACT, GAP = 16;
 const QUIET_PY = 1, QUIET_IN = { top: 5, bottom: 6 };
 // A long reply folds (Show more) when it would run past FOLD_TALL lines (estimated from its
 // words), to its first FOLD lines; LINE_H is a reply's line in px.
-const FOLD = 20, FOLD_TALL = 28, LINE_H = 21;
+const FOLD = 20, FOLD_TALL = 28, LINE_H = 24;
 // A session that is gone (LOST), what the new agent hears (lostMessage) and the chat's note: core/chat-view.js, as
 // the service restarts one for the web app.
 // The picker's row a typed name means (/model sonnet, /model claude-opus-5-5, /model gpt-5):
@@ -133,13 +135,13 @@ function findModel(menus, name) {
   return hit ? { agent: hit.agent, model: hit.model } : null;
 }
 // About how many lines words take at a width (px), for a row's height before it's measured.
-const wrapLines = (text, width) => String(text ?? "").split("\n").reduce((n, l) => n + Math.max(1, Math.ceil((l.length * 7) / Math.max(120, width))), 0);
+const wrapLines = (text, width) => String(text ?? "").split("\n").reduce((n, l) => n + Math.max(1, Math.ceil((l.length * CHAT_TEXT / 2) / Math.max(120, width))), 0);
 // A folded reply's words that show: the lines (as wrapLines counts them at `width`) filling `h`
 // px, and a few more under the fade (the estimate can run short); a long paragraph is cut where
 // its last one ends. Only those are laid out: a folded reply drawn whole under its clip was far
 // taller than its row, and scrolling up into one blanked the list (#590).
 const shownLines = (text, h, width) => {
-  const per = Math.floor(Math.max(120, width) / 7);
+  const per = Math.floor(Math.max(120, width) / (CHAT_TEXT / 2));
   const out = [];
   let room = Math.ceil(h / LINE_H) + 3;
   for (const l of String(text ?? "").split("\n")) {
@@ -1003,8 +1005,8 @@ export default class Chat extends View {
     // A task's worker: its task's id (herdr-task names its agents hat-4-fix-login).
     const named = /^([a-z][a-z0-9]*)-(\d+)(?:-|$)/.exec(t.name ?? "");
     const ref = this.workerTasks().get(t.address)?.ref ?? (t.labels?.["herdr.task"] && named ? `${named[1].toUpperCase()}-${named[2]}` : null);
-    // An Assistant's role is in its first message (its template): it gets that again.
-    const template = assistant(t) && !t.address.includes("/") ? await readTextFile(`${home()}/.config/herdr-core/templates/assistant.md`).catch(() => null) : null;
+    // Legacy Assistants need their role again; newer Claude launches keep it in their context file.
+    const template = assistant(t) && !hasAssistantContext(fresh) && !t.address.includes("/") ? await readTextFile(`${home()}/.config/herdr-core/templates/assistant.md`).catch(() => null) : null;
     const msg = lostMessage({ ref, template });
     const mine = t.address === this.addr;
     if (mine) { this.note = { id: `note-${Date.now()}`, text: WORDS.sessionGone }; cx.notify(); }
@@ -1074,7 +1076,7 @@ export default class Chat extends View {
     const pane = this.lastPane ?? (this.slot && this.slotRec()?.pane) ?? null;
     if (!this.thread && !this.inner && !this.swapping && !t.labels?.["herdr.chat"] && pane && !panes().some((p) => p.terminal === this.addr)
       && panes().some((p) => p.pane === pane && p.mod === "chat")) await hc(["label", this.addr, `herdr.chat=${pane}`]);
-    const kind = KINDS[t.status?.app] ?? KINDS[t.foreground?.name];
+    const kind = cliOf(t);
     // Back at its shell because the session it resumed is gone: a new agent starts there.
     if (!kind) { if (!(await this.checkLost(this.addr, cx, t))) this.set("unsupported", cx); return; }
     this.t = t;
@@ -1634,7 +1636,7 @@ export default class Chat extends View {
       // session's markers the holder may carry (core/clean-env.js), then execs the agent: hc runs a
       // template's command under sh -c, and where sh is dash (Debian, Ubuntu) the shell would stay
       // the terminal's program, so the chat wouldn't know its CLI.
-      let launch = template, oneOff = null, words = "";
+      let launch = template, oneOff = null, words = "", background = false;
       const st = this.choice?.sel ?? props()?.settings;
       const on = machine ? { on: machine } : {};
       const there = !machine || !st?.agent ? true : (await knownAgents(on).catch(() => []))
@@ -1647,16 +1649,26 @@ export default class Chat extends View {
         const own = /^command:[ \t]*(.+)$/m.exec(head?.[1] ?? "")?.[1]?.trim();
         const cmd = st?.agent && there ? agent.argvFor(st, { agent: null, argv: [] }).argv.map(q).join(" ") : own;
         if (body.trim() && cmd) {
-          words = body.trim();
+          const context = assistantContext(cmd, template);
+          background = Boolean(context);
+          words = context ? "" : body.trim();
           oneOff = `herdr-${template}-${Date.now().toString(36)}`;
-          const file = `---\nname: ${oneOff}\ndescription: A one-off ${template} start with chosen settings (mods/chat), removed after use.\ncommand: ${cleanCommand(cmd)}\n---\n${body}`;
-          await exec("sh", ["-c", TEMPLATE + 'printf "%s" "$2" > "$dir/$1.md"', "x", oneOff, file], on);
+          const file = `---\nname: ${oneOff}\ndescription: A one-off ${template} start with chosen settings (mods/chat), removed after use.\ncommand: ${cleanCommand(context ?? cmd)}\n---\n${context ? "" : body}`;
+          const wrote = await exec("sh", ["-c", TEMPLATE + 'printf "%s" "$2" > "$dir/$1.md"', "x", oneOff, file], on).catch(() => null);
+          if (wrote?.code !== 0) {
+            p.failed = "Couldn't prepare the Assistant's instructions. Try again.";
+            if (!msg) toast({ title: "Couldn't start the Assistant", body: p.failed });
+            this.phase = "fresh";
+            cx.notify();
+            return;
+          }
           launch = oneOff;
         }
       }
       const args = ["run", "--bg", "--json", "--no-parent", "--keep", ...(machine ? ["--on", machine] : []), ...(folder ? ["--cwd", folder] : []),
         "--label", `herdr.chat=${pane}`, "--label", `herdr.chat.slot=${this.slot}`, "--label", `herdr.chat.origin=slot:${this.slot}`,
         "--label", `herdr.role=${this.role}`,
+        ...(background ? ["--label", "herdr.assistant.context=background"] : []),
         ...(space ? ["--label", `herdr.coordinator.space=${String(space.id).split("/").pop()}`] : []),
         ...(rec?.tab ? ["--label", `herdr.coordinator.tab=${String(rec.tab).split("/").pop()}`] : []),
         launch, ...(task ? [task] : [])];
@@ -1670,7 +1682,7 @@ export default class Chat extends View {
       // idle past that screen (follow()), so the Assistant never starts without its instructions.
       const late = (r.code !== 0 || !out.address) && this.slotAgent();
       if (late) out = { address: late, first_message: { sent: false } };
-      if (out.address && out.first_message?.sent === false && words) this.firstSend = [words, task].filter(Boolean).join("\n\n");
+      if (out.address && out.first_message?.sent === false) this.firstSend = [words, task].filter(Boolean).join("\n\n") || null;
       if (r.code !== 0 && !late || !out.address) {
         p.failed = (r.stderr || r.stdout || "It didn't start.").trim();
         if (!msg) toast({ title: `The ${this.role === "coordinator" ? "Assistant" : this.role} didn't start`, body: p.failed, level: "error" });
@@ -1746,9 +1758,9 @@ export default class Chat extends View {
   fresh(t) {
     const starting = this.phase === "starting";
     return v_flex().flex_1().min_h(0).items_center().justify_center().px(24).gap(6)
-      .child(div().text_size(TEXT.title).font_medium().text_color(t.foreground).when(t.wallpaper, (el) => el.bg(t.surface).px(10).py(5).rounded(8)).child(starting ? WORDS.startingAssistant : WORDS.emptyTitle))
+      .child(div().text_size(TEXT.title).font_medium().text_color(t.foreground).child(starting ? WORDS.startingAssistant : WORDS.emptyTitle))
       .child(div().max_w(380).text_center().text_size(TEXT.label).text_color(t.dim)
-        .when(t.wallpaper, (el) => el.bg(t.surface).px(10).py(5).rounded(8)).child(WORDS.emptyBody));
+        .child(WORDS.emptyBody));
   }
 
   // ---- find (Ctrl+F) ----------------------------------------------------------------------------
@@ -2592,6 +2604,40 @@ export default class Chat extends View {
     });
   }
 
+  permissionsReady() {
+    return !this.restarting && !this.swapping && online(this.machine)
+      && (this.addr ? this.phase === "ready" && Boolean(this.pickKey()) : this.phase === "fresh" && Boolean(this.choice?.sel && this.choice?.data));
+  }
+
+  openPermissions(at) {
+    if (!this.permissionsReady()) return;
+    const fresh = !this.addr, c = fresh ? this.choice.sel : this.current();
+    if (!c) return;
+    const model = fresh ? c.model : agent.rowFor(c.agent, c);
+    const menu = fresh ? this.choice.data.menus[c.agent] : agent.menuFor(c.agent, this.dflt, model);
+    if (!menu?.perms?.length) return;
+    const W = 260, H = fresh ? 10 + 31 * menu.perms.length : 12 + 26 + 31 * menu.perms.length + 40 + 44;
+    const position = at ? { x: Math.max(8, at.x), y: at.y - H - 6 >= 8 ? at.y - H - 6 : at.y + (at.height ?? 28) + 6 } : "pointer";
+    if (fresh) {
+      this.choice.key ??= `ns-${Math.random().toString(36).slice(2, 8)}`;
+      openOverlay({ mod: "chat-models", kind: "popup", width: W, height: H, at: position,
+        props: { pick: "perm", key: this.choice.key, options: menu.perms, current: c.perm, width: W, height: H } });
+    } else {
+      openOverlay({ mod: "chat-models", kind: "popup", frame: "none", width: W, height: H, at: position,
+        props: { mode: "permissions", pane: this.pickKey(), terminal: this.addr, width: W, height: H,
+          current: { agent: c.agent, model, effort: c.effort ?? null, fast: Boolean(c.fast), perm: c.perm ?? null },
+          menus: { [c.agent]: menu } } });
+    }
+  }
+
+  applyPermissions(request, cx) {
+    if (request.terminal !== this.addr || !this.permissionsReady()) return;
+    const c = this.current(), perm = request.pick?.perm;
+    if (!c || c.agent !== request.pick?.agent || c.perm === perm || !agent.menuFor(c.agent, this.dflt).perms.some((p) => p.id === perm)) return;
+    // The CLI may have changed model while the menu was open: only its permission changes.
+    this.applyPick({ agent: c.agent, model: agent.rowFor(c.agent, c), effort: c.effort ?? null, fast: Boolean(c.fast), perm }, cx);
+  }
+
   // /model typed in the box: the picker over the model button (before the first message, the
   // menu that chooses what it starts on), with the model named chosen. Without a picker (no
   // pane, no agent yet) it only says why nothing went.
@@ -2734,11 +2780,12 @@ export default class Chat extends View {
 
   // A full-size message instead of the conversation: finding it, not found, ended.
   notice(t, title, body, actions = []) {
-    return v_flex().flex_1().min_h(0).items_center().justify_center().px(24).gap(6)
+    return v_flex().flex_1().min_h(0).items_center().justify_center().px(24)
+      .child(v_flex().items_center().gap(6).px(18).py(14).rounded(12)
       .child(svg("mods/workspace-chrome/terminal.svg").size(18).flex_none().text_color(t.dim))
       .child(div().pt(4).font_medium().text_color(t.foreground).child(title))
       .when(Boolean(body), (el) => el.child(div().max_w(360).text_center().text_size(12.5).text_color(t.muted).child(body)))
-      .when(actions.length > 0, (el) => el.child(h_flex().pt(8).gap(6).children(actions)));
+      .when(actions.length > 0, (el) => el.child(h_flex().pt(8).gap(6).children(actions))));
   }
 
   // ---- the conversation's rows ----------------------------------------------------------------
@@ -2806,19 +2853,19 @@ export default class Chat extends View {
         continue;
       }
       // This chat started the agent from a template with the person's words as its task: the
-      // template's part is a quiet row, the person's words their own message.
+      // template stays in the agent's context; only the person's words appear in chat.
       const ft = this.firstTask?.trim();
       if (i === first && this.start === 0 && x.kind === "user" && ft && this.t?.template && String(x.text ?? "").trim().endsWith(ft)) {
-        const body = String(x.text).trim().slice(0, -ft.length).trim();
-        if (body) out.push({ kind: "brief", id: `${x.id}:b`, label: "New session", text: body });
         x = { ...x, text: ft };
       }
-      if (x.kind === "user" && !(i === first && ft && x.text === ft) && this.brief(x, i, first)) {
+      const brief = x.kind === "user" && !(i === first && ft && x.text === ft) ? this.brief(x, i, first) : null;
+      if (brief === "New session") continue;
+      if (brief) {
         // Not typed by the person: a launch brief or another agent's message, as a quiet row.
         // A fresh start's handover says it all in its label.
         const restart = /^<restart>/.test(x.text ?? "");
         // Another agent's message (who: its sender) is drawn as a message (SHEP-12).
-        out.push({ kind: "brief", id: x.id, label: this.brief(x, i, first), text: restart ? x.text.replace(/<\/?restart>/g, "") : x.from ? unsigned(x.text) : x.text, bare: restart, ...(x.from ? { who: fromName(x, (f, t) => this.sender(f, t), this.names()), at: x.at } : {}) });
+        out.push({ kind: "brief", id: x.id, label: brief, text: restart ? x.text.replace(/<\/?restart>/g, "") : x.from ? unsigned(x.text) : x.text, bare: restart, ...(x.from ? { who: fromName(x, (f, t) => this.sender(f, t), this.names()), at: x.at } : {}) });
         continue;
       }
       if (x.kind === "user") {
@@ -2904,7 +2951,7 @@ export default class Chat extends View {
   foldOf(x, ps) {
     const q = this.findQuery().toLowerCase();
     if (q && String(x.text).toLowerCase().includes(q)) return null;
-    const w = Math.max(240, Math.floor(Math.min(this.width, COLUMN) * 0.8)) - 24;
+    const w = replyWidth(this.width);
     const est = ps.map((p) => (p.type === "md" ? wrapLines(p.text, w) * LINE_H : 34 + 16 + p.code.split("\n").length * 19));
     if (est.reduce((a, b) => a + b, 0) <= FOLD_TALL * LINE_H) return null;
     if (this.unfolded.has(x.id)) return { open: true, clips: new Map(), last: ps.length - 1 };
@@ -2994,7 +3041,8 @@ export default class Chat extends View {
   brief(x, i, first = 0) {
     // core/chat-view.js: the web app's chat labels them the same way. first: where the session's
     // first message is (firstUser()).
-    return briefLabel(x, i, { first, start: this.start, template: this.t?.template ?? null, task: Boolean(this.t?.labels?.["herdr.task"]), sender: (f, t) => this.sender(f, t), ...this.names() });
+    const background = this.t?.labels?.["herdr.assistant.context"] === "background" || hasAssistantContext(this.t?.foreground?.argv ?? this.t?.argv ?? []);
+    return briefLabel(x, i, { first, start: this.start, template: this.t?.template ?? null, background, task: Boolean(this.t?.labels?.["herdr.task"]), sender: (f, t) => this.sender(f, t), ...this.names() });
   }
 
   // What a row's height depends on: measured once per key and width.
@@ -3025,8 +3073,8 @@ export default class Chat extends View {
       case "code": return 16 + (x.clip ?? String(x.code).split("\n").length * 19);
       case "fold": case "queued": return 26;
       case "day": return 18;
-      case "user": case "pending": return 30 + lines(x.text, w * 0.8 - 24) * 20 + (x.from ? 17 : 0) + ((x.images || x.files?.length) ? 20 : 0);
-      case "agent": return 30 + (x.clip ?? lines(x.text, w * 0.8 - 24) * 21);
+      case "user": case "pending": return 30 + wrapLines(x.text, w * 0.8 - 24) * LINE_H + (x.from ? 17 : 0) + ((x.images || x.files?.length) ? 20 : 0);
+      case "agent": return 14 + (x.clip ?? wrapLines(x.text, replyWidth(this.width)) * LINE_H);
       case "tools": return this.opened.has(x.id) ? 26 + x.steps.length * 19 : 20;
       case "artifact": return x.pending || x.line ? 20 : 62;
       case "tasknews": return x.accept ? 26 : 20;
@@ -3085,21 +3133,18 @@ export default class Chat extends View {
     // A readable column, centered when the pane is wide.
     // At a block's edge a row drops its outer room there: spaced() puts the gap between blocks.
     const col = (el, px = 18, py = 6) => h_flex().w_full().justify_center()
-      .child(div().w_full().max_w(COLUMN + 2 * px).when(t.wallpaper, (el) => el.bg(t.surface).rounded(8)).px(px).pt(x.top0 ? 0 : py).pb(x.bot0 ? 0 : py).child(el));
+      .child(div().w_full().max_w(COLUMN + 2 * px).px(px).pt(x.top0 ? 0 : py).pb(x.bot0 ? 0 : py).child(el));
     const pad = (el) => col(el, 18, 7);
-    // The person's words on the right in an accent tint; the agent's on the left, quieter.
+    // The person's words sit in a quiet bubble; replies use the full reading column.
     const most = Math.max(240, Math.floor(Math.min(this.width, COLUMN) * 0.8));
     const bubble = (text, faded) => h_flex().w_full().justify_end().child(
-      // An accent tint under the normal text color: readable in light and dark themes (the
-      // accent's own text color on the full accent was too faint on light accents).
-      div().max_w(most).px(12).py(8).rounded(12).bg(t.accent + "33").border_1().border_color(t.accent + "4d")
+      div().max_w(most).px(12).py(8).rounded(12).bg(t.hover).text_size(CHAT_TEXT).line_height(1.5)
         .text_color(t.foreground).when(faded, (el) => el.opacity(0.55))
-        .child(TextView.markdown(`${pre}chat-md-${x.id}`, this.findMark(typed(this.mentionsIn(text))) || " ").selectable(true)));
-    const theirs = (text) => h_flex().w_full().justify_start().child(
-      div().max_w(most).px(12).py(8).rounded(12).bg(t.raised).text_color(t.foreground)
+        .child(TextView.markdown(`${pre}chat-md-${x.id}`, this.findMark(typed(this.mentionsIn(text))) || " ").text_size(CHAT_TEXT).line_height(1.5).selectable(true)));
+    const theirs = (text) => div().w_full().text_size(CHAT_TEXT).line_height(1.5).text_color(t.foreground)
         // Folded: only the lines that show (shownLines()), as their own view
-        .child(x.clip ? this.clipped(t.raised, x.clip, TextView.markdown(`${pre}chat-md-fold-${x.id}`, this.findMark(this.mentionsIn(shownLines(text, x.clip, most - 24))) || " ").selectable(true))
-          : TextView.markdown(`${pre}chat-md-${x.id}`, this.findMark(this.mentionsIn(text)) || " ").selectable(true)));
+        .child(x.clip ? this.clipped(t.wallpaper ? null : t.background, x.clip, TextView.markdown(`${pre}chat-md-fold-${x.id}`, this.findMark(this.mentionsIn(shownLines(text, x.clip, replyWidth(this.width)))) || " ").text_size(CHAT_TEXT).line_height(1.5).selectable(true))
+          : TextView.markdown(`${pre}chat-md-${x.id}`, this.findMark(this.mentionsIn(text)) || " ").text_size(CHAT_TEXT).line_height(1.5).selectable(true));
     const fileLine = (label) => h_flex().gap(5).items_center().text_size(12).text_color(t.dim)
       .child(svg("mods/chat/paperclip.svg").size(12).flex_none()).child(div().truncate().child(label));
     switch (x.kind) {
@@ -3195,8 +3240,8 @@ export default class Chat extends View {
             ? div().flex_none().child(this.steering === true ? "Sending…" : this.steering)
             : div().flex_none().cursor_pointer().font_medium().text_color(t.muted).hover((st) => st.text_color(t.foreground)).child(WORDS.sendNow))), 18, 2);
       case "fold":
-        // Show more / Show less, under the reply's bubble, in line with its words (clickRow()).
-        return col(h_flex().w_full().h(22).pl(12).child(h_flex().h(22).gap(4).items_center().cursor_pointer()
+        // Show more / Show less, in line with the reply's words (clickRow()).
+        return col(h_flex().w_full().h(22).child(h_flex().h(22).gap(4).items_center().cursor_pointer()
           .text_size(12.5).font_medium().text_color(t.muted).hover((s) => s.text_color(t.foreground))
           .child(x.open ? WORDS.showLess : WORDS.showMore)
           .child(svg(`mods/chat/chevron-${x.open ? "up" : "down"}.svg`).size(14).flex_none())), 18, 2);
@@ -3280,11 +3325,11 @@ export default class Chat extends View {
     return div();
   }
 
-  // A folded reply's first `h` px of `el`, fading out into `bg` (its bubble's color).
+  // A folded reply's first `h` px of `el`, fading out into its background.
   clipped(bg, h, el) {
     const fade = [0.3, 0.55, 0.8, 0.95];
     return div().relative().w_full().max_h(h).overflow_hidden().child(el)
-      .child(v_flex().absolute().left(0).right(0).bottom(0).children(fade.map((o) => div().w_full().h(8).bg(bg).opacity(o))));
+      .when(Boolean(bg), (el) => el.child(v_flex().absolute().left(0).right(0).bottom(0).children(fade.map((o) => div().w_full().h(8).bg(bg).opacity(o)))));
   }
 
   // A press on a row: open a tools row, copy a code block, or a message action.
@@ -3319,8 +3364,8 @@ export default class Chat extends View {
     }
     else if (row.kind === "brief") { if (this.opened.has(key)) this.opened.delete(key); else this.opened.add(key); }
     else if (row.kind === "fold") {
-      // Only on its words (as rowBare() draws them: the column's edge, the bubble's padding in).
-      const off = (this.press?.x ?? -1) - this.edges().left - 12;
+      // Only on its words, at the reading column's edge (rowBare()).
+      const off = (this.press?.x ?? -1) - this.edges().left;
       if (off >= -4 && off <= 100) this.toggleFold(row, rows);
     }
     else if (row.kind === "replyref") {
@@ -3829,6 +3874,23 @@ export default class Chat extends View {
     ].filter(Boolean);
   }
 
+  permissionsButton(t) {
+    const c = this.addr ? this.current() : this.choice?.sel;
+    if (!c) return null;
+    const menu = this.addr ? agent.menuFor(c.agent, this.dflt) : this.choice?.data?.menus[c.agent];
+    if (!menu?.perms?.length) return null;
+    const label = menu.perms.find((p) => p.id === c.perm)?.label ?? "Permissions";
+    const enabled = this.permissionsReady();
+    return h_flex().id("chat-permissions").h(ROUND).max_w(150).min_w(0).pl(5).pr(4).gap(4).items_center().rounded(6)
+      .text_size(12).text_color(enabled ? t.muted : t.dim)
+      .when(enabled, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
+        .on_mouse_down("left", (e) => { this.permissionsAt = e.bounds ?? e.position; })
+        .on_click((_e, cx) => { cx.stop_propagation(); this.openPermissions(this.permissionsAt); }))
+      .child(svg("mods/chat-models/shield.svg").size(14).flex_none())
+      .child(div().min_w(0).truncate().child(label))
+      .child(svg("mods/workspace-chrome/chevron-down.svg").size(12).flex_none());
+  }
+
   // The live row a call and dictation share, 44 px, all on its midline: a round button on each
   // end, the wave across all the room there is, a word and the time.
   liveRow(t, id, left, word, dot, since, right) {
@@ -3878,7 +3940,7 @@ export default class Chat extends View {
     const word = c.muted && c.phase !== "speaking" ? "Muted"
       : { connecting: "Connecting", listening: "Listening", thinking: "Thinking", speaking: "Speaking" }[c.phase] ?? "Connecting";
     return div().flex_none().w_full().max_w(COLUMN + 28).mx_auto().px(14).pt(8).child(div().id("chat-call-box").w_full()
-      .rounded(10).border_1().border_color(t.input).bg(t.background)
+      .rounded(16).border_1().border_color(t.input).bg(t.background)
       .track_focus(this.callFocus)
       .on_key_down((e, cx) => {
         const m = e.modifiers ?? {};
@@ -3919,7 +3981,7 @@ export default class Chat extends View {
     const recallable = !list.length && (!this.box.value() || this.recall >= 0);
     const take = (fn) => (_e, cx) => { fn(cx); cx.stop_propagation(); cx.notify(); };
     const sel = Math.min(this.slashSel, Math.max(0, list.length - 1));
-    return div().flex_none().w_full().max_w(COLUMN + 28).mx_auto().px(14).pt(8).child(v_flex().id("chat-composer").w_full().rounded(10).border_1().text_color(t.foreground)
+    return div().flex_none().w_full().max_w(COLUMN + 28).mx_auto().px(14).pt(8).child(v_flex().id("chat-composer").w_full().rounded(16).border_1().text_color(t.foreground)
       // Esc stops a working agent while the box is empty and nothing is open over it.
       .key_context([list.length ? "chat_slash" : recallable ? "chat_recall" : "chat_composer",
         st === "working" && !list.length && !this.box.value().trim() && !this.quote ? "chat_stop" : null].filter(Boolean).join(" "))
@@ -3961,15 +4023,15 @@ export default class Chat extends View {
       // scrollbar in an empty box and made it scroll a few pixels on each new line.
       .child(div().relative().w_full().min_h(TEXT_ROW).px(12).pt(9).pb(4)
         // Measured, unseen: a line's height, and the words' height at the box's width (sizeBox()).
-        .child(div().id("chat-line-h").absolute().top(0).left(0).opacity(0).text_size(13).child("Xg")
+        .child(div().id("chat-line-h").absolute().top(0).left(0).opacity(0).text_size(CHAT_TEXT).line_height(1.5).child("Xg")
           .on_size_change((size, cx) => { if (Math.abs((this.lineH ?? 0) - size.height) > 0.1) { this.lineH = size.height; this.sizeBox(); cx.notify(); } }))
         .child(div().absolute().top(0).left(12).right(12).h(0).overflow_hidden().opacity(0)
-          .child(div().id("chat-text-h").w_full().text_size(13)
+          .child(div().id("chat-text-h").w_full().text_size(CHAT_TEXT).line_height(1.5)
             .child(/\n$/.test(this.box.value()) || !this.box.value() ? `${this.box.value()} ` : this.box.value())
             .on_size_change((size, cx) => { if (Math.abs((this.textH ?? 0) - size.height) > 0.1) { this.textH = size.height; this.sizeBox(); cx.notify(); } })))
-        .child(Textarea.new(this.box).w_full().text_size(13).text_color(t.foreground)
+        .child(Textarea.new(this.box).w_full().text_size(CHAT_TEXT).line_height(1.5).text_color(t.foreground)
           .when(Boolean(this.boxSpare && this.lineH), (el) => el.mb(-this.lineH)))
-        .when(!this.box.value().trim(), (el) => el.child(div().absolute().top(9).left(12).text_size(13).text_color(t.dim)
+        .when(!this.box.value().trim(), (el) => el.child(div().absolute().top(9).left(12).text_size(CHAT_TEXT).line_height(1.5).text_color(t.dim)
           .child(this.asks.length || st === "blocked" ? WORDS.replyInstead : this.placeholder()))))
       // While recording: the recording row. Else one row, on the right: what the agent runs on
       // (opens the picker), dictation, Send (or Call). Send never turns into Stop: while the
@@ -3978,6 +4040,7 @@ export default class Chat extends View {
       .when(rec === "idle", (el) => el.child(h_flex().h(36).pl(6).pr(6).gap(4).items_center()
         // Attach on the left, as ChatGPT and Claude have it: the desktop's file picker.
         .child(this.round("chat-attach", "mods/chat/plus.svg", t, "ghost", (cx) => this.pickFiles(cx)))
+        .child(this.permissionsButton(t) ?? div())
         .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.blocked).child(rec === "idle" ? this.dict.error ?? "" : ""))
         .when(Boolean(this.addr), (el) => el.children(this.pickParts(t, true)))
         .when(!this.addr && this.phase === "fresh" && Boolean(this.choice?.sel) && Boolean(cx), (el) => el.child(this.freshPick(t, cx)))
@@ -4109,7 +4172,11 @@ export default class Chat extends View {
     const rr = shared("chat.restartreq"), pk = this.pickKey();
     if (rr && pk && rr.pane === pk && rr.at !== this.restartReqAt && Date.now() - rr.at < 5000) {
       this.restartReqAt = rr.at;
-      cx.timer.after(0, (cx) => { this.applyPick(rr.pick, cx); cx.notify(); });
+      cx.timer.after(0, (cx) => {
+        if (rr.permissions) this.applyPermissions(rr, cx);
+        else this.applyPick(rr.pick, cx);
+        cx.notify();
+      });
     }
     // The header's Terminal on a chat with no agent yet (pane-chat): start it, then show its
     // terminal. Shared "chat.startreq" = { pane, at }.

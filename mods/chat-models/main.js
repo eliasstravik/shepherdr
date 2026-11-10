@@ -14,6 +14,7 @@
 // The overlay is frameless and as tall as the menu at its tallest (the chat counts it with the
 // sizes below); the menu sits at its bottom and grows upward, so nothing is ever cut off.
 // Restart goes back through shared "chat.restartreq" = { pane, at, pick }.
+// Permissions mode shows only the current agent’s modes, with the same explicit Restart.
 // Pick mode (for the coordinator settings rows, mods/chat/settings.js): a plain list,
 //   props { pick: field, key, options: [{ id, label, icon?, tint? }], current, width, height };
 // the choice goes back through shared "newspace.pick" = { key, field, value, at }.
@@ -50,6 +51,7 @@ export default class ModelMenu extends View {
     this.cursor = 0; // the row ↑/↓ are on, among the list's models
     this.picks = parsePicks("");
     this.handle = cx.focus_handle();
+    if (p.mode === "permissions") { cx.timer.after(0, () => this.handle.focus()); return; }
     this.input = InputState.new({ placeholder: Object.keys(p.menus ?? {}).length > 1 ? "Search every agent’s models" : "Search models" });
     this.scroll = VirtualListScrollHandle.new();
     this.input.on("change", (_e, cx) => { this.cursor = 0; this.scroll.scroll_to_item(0, "top"); cx.notify(); });
@@ -134,10 +136,13 @@ export default class ModelMenu extends View {
   }
 
   restart(cx) {
-    const s = this.sel;
-    setShared("chat.restartreq", { pane: this.p.pane, at: Date.now(), pick: { agent: s.agent, model: s.model, effort: this.level(s), fast: s.fast, perm: s.perm } });
+    const s = this.sel, permissions = this.p.mode === "permissions";
+    if (permissions && (s.perm === this.was.perm || !this.p.menus?.[s.agent]?.perms?.some((p) => p.id === s.perm))) return;
+    setShared("chat.restartreq", { pane: this.p.pane, at: Date.now(),
+      ...(permissions ? { permissions: true, terminal: this.p.terminal } : {}),
+      pick: { agent: s.agent, model: s.model, effort: permissions ? s.effort : this.level(s), fast: s.fast, perm: s.perm } });
     // first among the recent ones, here and in the web's menu
-    if (s.model) cx.spawn(async () => {
+    if (s.model && !permissions) cx.spawn(async () => {
       const now = parsePicks(await readTextFile(picksPath()).catch(() => ""));
       await writeTextFile(picksPath(), JSON.stringify(withRecent(now, pickKey(s.agent, s.model)), null, 2)).catch(() => null);
     });
@@ -194,6 +199,34 @@ export default class ModelMenu extends View {
         .child(this.check(t, this.sel.perm === x.id))));
   }
 
+  permissions(t) {
+    const perms = this.p.menus?.[this.sel.agent]?.perms ?? [];
+    const selected = perms.find((p) => p.id === this.sel.perm);
+    const changed = selected && this.sel.perm !== this.was.perm;
+    const box = v_flex().id("permissions-menu").w_full().flex_none().p(5).rounded(8).bg(t.popover).border_1().border_color(t.border).shadow_md()
+      .text_size(12.8).text_color(t.foreground)
+      .child(this.head(t, "Permissions"))
+      .children(perms.map((p) => this.row(t, `perm-${p.id}`, true, () => { this.sel = { ...this.sel, perm: p.id }; })
+        .child(div().flex_1().child(p.label)).child(this.check(t, p.id === this.sel.perm))))
+      .when(Boolean(changed), (el) => el
+        .child(div().min_h(40).px(9).py(5).text_size(11.5).text_color(t.dim).child("Restart this agent to apply the change."))
+        .child(h_flex().id("restart-permissions").w_full().min_h(33).px(10).py(5).justify_center().items_center().rounded(7)
+          .cursor_pointer().bg(t.solid).text_color(t.solid_foreground).text_size(12.5).font_medium().hover((s) => s.opacity(0.88))
+          .on_click((_e, cx) => { cx.stop_propagation(); this.restart(cx); })
+          .child(div().text_center().child(`Restart with ${selected?.label}`))));
+    return v_flex().id("permissions-menu-area").w(this.p.width ?? 260).h(this.p.height ?? 280).justify_end().track_focus(this.handle)
+      .on_key_down((e, cx) => {
+        if (e.key === "escape") closeOverlay(this.p.overlay);
+        else if (e.key === "enter") this.restart(cx);
+        else if (e.key === "down" || e.key === "up") {
+          const i = perms.findIndex((p) => p.id === this.sel.perm);
+          const p = perms[Math.max(0, Math.min(perms.length - 1, i + (e.key === "down" ? 1 : -1)))];
+          if (p) this.sel = { ...this.sel, perm: p.id };
+        } else return;
+        cx.stop_propagation(); cx.notify();
+      }).child(box);
+  }
+
   // Pick mode: one list, the current one checked.
   pickList(t) {
     const p = this.p;
@@ -219,6 +252,7 @@ export default class ModelMenu extends View {
   render(cx) {
     const t = theme();
     if (this.p.pick) return this.pickList(t);
+    if (this.p.mode === "permissions") return this.permissions(t);
     // Settings mode: a change goes back right after the render that shows it.
     if (this.settingsMode && this.told !== JSON.stringify(this.sel)) {
       // A preset choice (select) goes back at once too.

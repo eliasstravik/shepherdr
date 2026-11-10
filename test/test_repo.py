@@ -75,7 +75,7 @@ class Repo(unittest.TestCase):
 
     def test_no_hover_tooltips(self):
         """Nothing pops up on hover (SHEP-25): no `title=` tooltip in the web app, no `.tooltip(` in the window's
-        mods. An icon-only control says its words with `aria-label` instead."""
+        mods, except the desktop sidebar rail whose icons need hover names."""
         found = []
         for top in ("web/src", "web/plugins"):
             for d, _, files in os.walk(J(top)):
@@ -108,7 +108,7 @@ class Repo(unittest.TestCase):
                         p = os.path.join(d, f)
                         with open(p, encoding="utf-8") as fh:
                             for n, line in enumerate(fh, 1):
-                                if ".tooltip(" in line:
+                                if ".tooltip(" in line and os.path.relpath(p, ROOT) not in {"mods/spaces-chat/main.js", "mods/workspace-chrome-shepherdr/main.js"}:
                                     found.append(f"{os.path.relpath(p, ROOT)}:{n}: .tooltip(")
         self.assertFalse(found, "hover tooltips (use aria-label, or show the words):\n" + "\n".join(found))
 

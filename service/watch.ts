@@ -13,6 +13,7 @@ import { HOME, appHome } from "./paths.ts";
 import * as SC from "../core/screens.js";
 import * as CV from "../core/chat-view.js";
 import * as AG from "../core/agents.js";
+import { hasAssistantContext } from "../core/assistant-context.js";
 
 const { ScreenWatch, starting, cliOf, readScreen, screenText, pressKeys, SCREEN } = SC as any;
 const { LOST, lostMessage, shellWord, WORDS, sessionStarted, sessionFailed } = CV as any;
@@ -99,7 +100,7 @@ export class AgentWatch {
       const named = /^([a-z][a-z0-9]*)-(\d+)(?:-|$)/.exec(t.name ?? "");
       const ref = w.ref ?? (t.labels?.["herdr.task"] && named ? `${named[1].toUpperCase()}-${named[2]}` : null);
       const tplFile = join(HOME, ".config", "herdr-core", "templates", "assistant.md");
-      const template = t.labels?.["herdr.role"] === "coordinator" && !addr.includes("/") && existsSync(tplFile) ? readFileSync(tplFile, "utf8") : null;
+      const template = !hasAssistantContext(fresh) && t.labels?.["herdr.role"] === "coordinator" && !addr.includes("/") && existsSync(tplFile) ? readFileSync(tplFile, "utf8") : null;
       const msg = lostMessage({ ref, template });
       if (t.state === "live") {
         // hc send pastes the line into the shell and presses Enter

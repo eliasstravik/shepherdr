@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "bun:test";
-import { wallpaper, cover, DEFAULT_TRANSPARENCY, DEFAULT_WALLPAPER, WALLPAPER_DIR, SOLID_BACKGROUNDS, wallpaperColors } from "./wallpaper.js";
+import { wallpaper, cover, DEFAULT_TRANSPARENCY, DEFAULT_WALLPAPER, WALLPAPER_DIR, SOLID_BACKGROUNDS, wallpaperColors, terminalWallpaper } from "./wallpaper.js";
 
 const chosen = { path: `${WALLPAPER_DIR}/${"a".repeat(64)}.png`, width: 1920, height: 1080, name: "A picture.png", transparency: 60 };
 
@@ -89,4 +89,36 @@ test("light and dark presets keep ordinary chat text readable", () => {
     }
   }
   expect(wallpaperColors(DEFAULT_WALLPAPER).surface).toBe("#ffffff");
+});
+
+
+test("Terminal shares Chat's image, transparency and solid preset without changing layout choices", () => {
+  const tree = { id: "root", terminal_opacity: 1, theme: "paper", children: [
+    { id: "main", size: { px: 600 }, content: { tab: "active", pane: { radius: 10, background: "background" } } },
+    { id: "tasks-thread-body", active: "tasks-thread-term", children: [
+      { id: "tasks-thread-term", content: { terminal: "t9" } },
+    ] },
+    { id: "sidebar", background: "chrome", hidden: true },
+  ] };
+  const snapshot = JSON.stringify(tree);
+  const image = terminalWallpaper(tree, wallpaper(chosen));
+  expect(image.terminal_opacity).toBe(0);
+  expect(image.children[0].background).toEqual({ image: chosen.path, fit: "cover" });
+  expect(image.children[0].content.pane.background).toBe("#f9f9fa99");
+  expect(image.children[1].background).toEqual(image.children[0].background);
+  expect(image.children[1].children[0].background).toBe("#f9f9fa99");
+  for (const [transparency, tint] of [[0, "#f9f9fa00"], [100, "#f9f9faff"]])
+    expect(terminalWallpaper(tree, wallpaper({ ...chosen, transparency })).children[0].content.pane.background).toBe(tint);
+  expect(terminalWallpaper(tree, wallpaper({ ...chosen, transparency: 50 }), "#111413").children[0].content.pane.background).toBe("#11141380");
+  const solid = terminalWallpaper(image, wallpaper({ kind: "solid", preset: "sage" }));
+  expect(solid.children[0].background).toBe("#e3f0e6");
+  expect(solid.children[0].content.pane.background).toBe("#00000000");
+  expect(solid.children[0].size).toEqual(tree.children[0].size);
+  expect(solid.children[1].active).toBe("tasks-thread-term");
+  expect(solid.children[1].children[0].content).toEqual({ terminal: "t9" });
+  expect(solid.children[2]).toEqual(tree.children[2]);
+  expect(solid.theme).toBe("paper");
+  expect(JSON.stringify(tree)).toBe(snapshot);
+  expect(terminalWallpaper(image, wallpaper(chosen))).toEqual(image);
+  expect(terminalWallpaper(tree, wallpaper(chosen, "terminals"))).toBe(tree);
 });

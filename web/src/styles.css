@@ -410,6 +410,13 @@
   }
 }
 
+[data-messages] [data-text] .prose-reply {
+  & p { margin-bottom: 10px; }
+  & :is(ul, ol) { margin-top: 8px; margin-bottom: 10px; }
+  & li + li { margin-top: 4px; }
+  & > :last-child { margin-bottom: 0; }
+}
+
 /* A chat's column of messages and its box: a comfortable line, a little wider on a very wide window */
 @utility max-w-read {
   max-width: 720px;

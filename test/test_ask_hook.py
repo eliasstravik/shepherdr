@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -49,6 +50,12 @@ class AskHook(unittest.TestCase):
         p = subprocess.Popen(["sh", HOOK], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=e)
         p.stdin.write(json.dumps(REQ).encode())
         p.stdin.close()
+        def stop():
+            if p.poll() is None:
+                p.kill()
+                p.wait()
+            p.stdout.close()
+        self.addCleanup(stop)
         return p
 
     @staticmethod
@@ -98,17 +105,32 @@ class AskHook(unittest.TestCase):
         self.assertEqual(out, b"")
 
     def test_a_task_workers_codex_hands_it_over_through_its_own_hook(self):
-        # Codex runs ~/.codex/hooks.json's copy beside the worker's `herdr-task _allow` and waits for both: this copy
-        # steps aside, and the one _allow runs (HERDR_ASK_CHAINED) asks the card
-        self.term({"state": "live", "status": "working", "argv": ["codex", "-c", "hooks.PermissionRequest=[…_allow…]", "_allow"]})
-        out = self.out(self.start())
-        self.assertEqual(out, b"")
-        self.assertIsNone(self.waiting(0.2))
+        sys.path.insert(0, os.path.join(ROOT, "mods", "tasks", "bin"))
+        from herdr_task.launch import own_argv
+        argv = own_argv(["codex", "--sandbox", "workspace-write"])
+        # Use the real launch flags: _allow is inside the hook's config, not an argv entry.
+        for launch in ({"argv": argv},
+                       {"argv": ["sh", "-c", 'exec nice -n 10 "$@"', "x", *argv]},
+                       {"argv": ["sh", "-c", "exec codex"], "foreground": {"argv": argv}}):
+            with self.subTest(launch=launch):
+                self.term({"state": "live", "status": "working", **launch})
+                self.assertEqual(self.out(self.start(), timeout=2), b"")
+                self.assertIsNone(self.waiting(0.2), "the global hook must not duplicate the worker's card")
         p = self.start(HERDR_ASK_CHAINED="1")
-        self.assertIsNotNone(self.waiting())
-        p.kill()
-        p.wait()
-        p.stdout.close()
+        ask = self.waiting()
+        self.assertIsNotNone(ask, "the worker's delegated request must still wait for a decision")
+        with open(os.path.join(self.asks, "ans", ask + ".json"), "w") as f:
+            f.write(ALLOW)
+        self.assertEqual(json.loads(self.out(p)), json.loads(ALLOW))
+
+    def test_mentioning_the_hook_in_a_prompt_does_not_skip_permission(self):
+        self.term({"state": "live", "status": "working", "argv": ["codex", "_allow",
+                   'hooks.PermissionRequest=[{command="herdr-task _allow --command /x/herdr-task"}]']})
+        p = self.start()
+        ask = self.waiting()
+        self.assertIsNotNone(ask)
+        open(os.path.join(self.asks, "ans", ask + ".json"), "w").close()
+        self.assertEqual(self.out(p), b"")
 
     def test_without_hc_only_while_a_chat_shows_it(self):
         # no hc or jq: it can't tell the terminal answered, so only a fresh flag brings the card

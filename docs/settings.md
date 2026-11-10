@@ -134,7 +134,7 @@ selection or download. Existing custom images remain selected. The default trans
 In the desktop sidebar, open **BossGoat → Appearance → Background** and select **Solid colour** or **Image**.
 Solid colours use HolyCow’s [Eden palette](https://github.com/NeuralHerd/HolyCow/blob/main/website/src/styles/eden.css):
 Paper, Pearl, Sage and Peach for light backgrounds; Ink, Midnight and Charcoal for dark backgrounds.
-Dark solids use matching dark chat surfaces and light text. These are plain colours, with no image to load.
+These are plain colours, with no image to load. Message surfaces and text follow the selected Herdr theme. For Terminal text, pair light solids with a light Herdr theme and dark solids with a dark theme.
 Switching modes remembers your last solid colour and image, including its transparency, on this computer.
 
 For an image, choose a PNG, JPEG or WebP file,
@@ -142,9 +142,9 @@ or drop one onto the preview. Images up to 30 MB and 60 megapixels are accepted 
 locally, with a maximum edge of 4096 pixels. The original image stays untouched.
 
 The picture fills the conversation area without stretching. **Transparency** ranges from 0% (fully visible)
-to 100% (hidden), while messages keep light surfaces. Transparency applies only to images. Changes save automatically.
+to 100% (hidden against the selected Herdr theme), while messages keep readable surfaces. Transparency applies only to images. Changes save automatically.
 The message box follows Herdr’s native light or dark theme so its typing cursor stays visible, regardless of the background.
-**Reset to default** restores `bossgoat-background.png` and its default transparency. Other Herdr layouts, terminal panes and the web app
+**Reset to default** restores `bossgoat-background.png` and its default transparency. Chat and Terminal share the same background and transparency. Other Herdr layouts and the web app
 keep their existing appearance.
 
 This preference belongs to this computer, not a space or an agent. It is stored in Herdr’s local

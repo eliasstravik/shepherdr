@@ -1,5 +1,7 @@
 """Cursor launches, exact session recovery, and reversible hooks; never starts a live agent."""
 import json
+import importlib.util
+import io
 import os
 from pathlib import Path
 import subprocess
@@ -79,7 +81,72 @@ class Cursor(unittest.TestCase):
             run("install", "--root", tmp, "--yes")
             run("install", "--root", tmp, "--yes")
             hooks = json.loads(path.read_text())
-            self.assertEqual(len(hooks["hooks"]["sessionStart"]), 2)
-            self.assertIn("cursor-session-note.sh", hooks["hooks"]["sessionStart"][1]["command"])
+            self.assertEqual(len(hooks["hooks"]["sessionStart"]), 3)
+            self.assertIn("cursor-session-note.sh", hooks["hooks"]["sessionStart"][2]["command"])
+            for event in ("sessionStart", "beforeSubmitPrompt", "stop", "sessionEnd"):
+                self.assertEqual(sum("cursor-status.py" in h["command"] for h in hooks["hooks"][event]), 1)
             run("uninstall", "--root", tmp)
             self.assertEqual(json.loads(path.read_text()), mine)
+
+
+class CursorStatus(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("cursor_status", ROOT / "mods/chat/cursor-status.py")
+        cls.hook = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.hook)
+
+    def test_real_lifecycle_signals_preserve_error_and_cancel_outcomes(self):
+        for payload, state in [
+            ({"hook_event_name": "sessionStart"}, "idle"),
+            ({"hook_event_name": "beforeSubmitPrompt"}, "working"),
+            ({"hook_event_name": "stop", "status": "completed"}, "done"),
+            ({"hook_event_name": "stop", "status": "error"}, "error"),
+            ({"hook_event_name": "stop", "status": "aborted"}, "idle"),
+            ({"hook_event_name": "sessionEnd"}, "clear"),
+            ({"hook_event_name": "subagentStop", "status": "completed"}, None),
+            ({"hook_event_name": "stop", "status": "unknown"}, None),
+        ]:
+            with self.subTest(payload=payload):
+                self.assertEqual(self.hook.status(payload), state)
+
+    def test_status_goes_to_the_controlling_terminal_never_hook_stdout(self):
+        with patch.dict(os.environ, {"HC_TERMINAL_ID": "fixture"}), \
+             patch.object(sys, "stdin", io.StringIO('{"hook_event_name":"sessionStart"}')), \
+             patch.object(sys, "stdout", io.StringIO()) as output, \
+             patch.object(self.hook.os, "open", return_value=7) as opened, \
+             patch.object(self.hook.os, "write") as write, patch.object(self.hook.os, "close") as close:
+            self.hook.main()
+            opened.assert_called_once_with("/dev/tty", os.O_WRONLY | os.O_NOCTTY)
+            write.assert_called_once_with(7, b"\x1b]7501;state=idle:app=cursor-agent\x1b\\")
+            close.assert_called_once_with(7)
+            self.assertEqual(output.getvalue(), "")
+
+    def test_non_herdr_and_invalid_input_never_report_readiness(self):
+        for inside, text in [(False, '{"hook_event_name":"sessionStart"}'), (True, 'not json'), (True, '[]'), (True, '{}')]:
+            with patch.dict(os.environ, {}, clear=True), patch.object(sys, "stdin", io.StringIO(text)), patch.object(self.hook.os, "open") as opened:
+                if inside:
+                    os.environ["HC_TERMINAL_ID"] = "fixture"
+                self.hook.main()
+                opened.assert_not_called()
+
+    def test_missing_controlling_terminal_does_not_break_cursor(self):
+        with patch.dict(os.environ, {"HC_TERMINAL_ID": "fixture"}), \
+             patch.object(sys, "stdin", io.StringIO('{"hook_event_name":"sessionStart"}')), \
+             patch.object(self.hook.os, "open", side_effect=OSError("no terminal")), \
+             patch.object(self.hook, "parent_ttys", return_value=iter([])):
+            self.hook.main()
+
+
+    def test_detached_hooks_find_only_an_ancestor_terminal(self):
+        replies = [subprocess.CompletedProcess([], 0, "20 ??\n", ""), subprocess.CompletedProcess([], 0, "10 ttys003\n", ""), subprocess.CompletedProcess([], 0, "1 ??\n", "")]
+        with patch.object(self.hook.os, "getppid", return_value=30), patch.object(self.hook.subprocess, "run", side_effect=replies) as run:
+            self.assertEqual(list(self.hook.parent_ttys()), ["/dev/ttys003"])
+            self.assertEqual([c.args[0][2] for c in run.call_args_list], ["30", "20", "10"])
+        with patch.object(self.hook, "parent_ttys", return_value=iter(["/dev/pts/4"])), \
+             patch.object(self.hook.os, "open", side_effect=[OSError("detached"), 9]) as opened, \
+             patch.object(self.hook.os, "write") as write, patch.object(self.hook.os, "close") as close:
+            self.hook.report("working")
+            self.assertEqual(opened.call_args.args[0], "/dev/pts/4")
+            write.assert_called_once_with(9, b"\x1b]7501;state=working:app=cursor-agent\x1b\\")
+            close.assert_called_once_with(9)

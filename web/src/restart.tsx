@@ -9,6 +9,7 @@ import * as AGc from '@core/agents.js'
 import { taskChatId, type Chat, type Place, type RestartCli, type RestartInfo } from '@shared/types.ts'
 import { act, setUI, taskOf, useSnap, useStore, useUI } from './kernel.ts'
 import { Dialog } from './rowmenu.tsx'
+import { restartPermission } from './permissions.ts'
 import { Pick, shown, Switch, TextValue } from './Settings.tsx'
 import { CheckIcon, DownIcon, EffortIcon, ic, Menu, MenuItem, ModelIcon, ModeIcon, NextIcon, Primary, RestartIcon, SearchIcon, SpeedIcon, Tab, Tabs } from './ui.tsx'
 
@@ -233,7 +234,7 @@ type Picks = { pinned: string[]; recent: string[] }
 type Section = { key: string; title: string | null; agent: string; rows: (MenuModel & { agent: string; pinned: boolean; typed?: boolean })[]; more: number }
 
 /** the menu open: its chat, and the model a typed /model named */
-let menuOpen: { chat: string; typed?: string } | null = null
+let menuOpen: { chat: string; typed?: string; permissions?: boolean } | null = null
 const menuListeners = new Set<() => void>()
 const setMenuOpen = (v: typeof menuOpen) => { menuOpen = v; menuListeners.forEach((f) => f()) }
 const useMenuOpen = () => useSyncExternalStore((f) => (menuListeners.add(f), () => void menuListeners.delete(f)), () => menuOpen)
@@ -353,7 +354,7 @@ export function ModelList({ menus, agent, picks, chosen, disabled, phone, onPick
  *  on top (core/agents.js modelSections), a star to pin one; then Reasoning (that model's levels), Fast (where the
  *  model has it), Permissions (a small sub-menu), and, only when a choice differs from what runs now, one Restart
  *  button that says when it starts a new conversation (another agent). Popover on a desktop, a sheet on a phone. */
-function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
+function ModelMenu({ chat, typed, permissions = false }: { chat: string; typed?: string; permissions?: boolean }) {
   const [data, setData] = useState<MenuData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [sel, setSel] = useState<MenuPick | null>(null)
@@ -387,7 +388,7 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
       .catch((e: Error) => setError(e.message))
   }, [chat, typed])
   const model = (s: MenuPick) => data?.menus[s.agent]?.models.find((m) => m.id === s.model) ?? null
-  const level = (s: MenuPick) => s.effort ?? model(s)?.defaultEffort ?? null
+  const level = (s: MenuPick) => permissions ? s.effort : s.effort ?? model(s)?.defaultEffort ?? null
   const changes = () => {
     if (!data || !sel) return []
     const w = data.current, out: string[] = []
@@ -402,7 +403,7 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
     if (!sel) return
     setBusy(true)
     setError(null)
-    const r = await act({ type: 'restart', chat, kind: sel.agent, model: sel.model ?? '', effort: level(sel) ?? '', speed: sel.fast ? 'fast' : 'normal', perm: sel.perm ?? '' } as never).catch((e: Error) => ({ ok: false, error: e.message }))
+    const r = await (permissions ? restartPermission(act, chat, sel.agent, sel.perm) : act({ type: 'restart', chat, kind: sel.agent, model: sel.model ?? '', effort: level(sel) ?? '', speed: sel.fast ? 'fast' : 'normal', perm: sel.perm ?? '' } as never)).catch((e: Error) => ({ ok: false, error: e.message }))
     setBusy(false)
     if ((r as { ok?: boolean }).ok === false) return setError((r as { error?: string }).error || "The agent didn't restart.")
     close()
@@ -431,18 +432,33 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
   const sheet = (
     <>
       {phone ? <div aria-hidden className="fixed inset-0 z-40 bg-black/30" /> : null}
-      <Menu label="Model" onClose={close} tabs
+      <Menu label={permissions ? "Permissions" : "Model"} onClose={close} tabs
         // a phone's sheet is outside the app's [data-device] (a portal): its own classes, not phone: ones
-        className={phone ? 'fixed inset-x-0 bottom-0 z-40 rounded-b-none pb-[max(env(safe-area-inset-bottom),--spacing(2))]' : 'absolute right-0 bottom-full z-30 mb-2 w-[340px] max-w-[calc(100vw-2rem)] origin-bottom-right'}>
-        <div data-model-menu className="relative flex flex-col text-[0.8rem] coarse:text-[0.9375rem] phone:text-[0.9375rem]">
+        className={phone ? 'fixed inset-x-0 bottom-0 z-40 rounded-b-none pb-[max(env(safe-area-inset-bottom),--spacing(2))]' : clsx('absolute bottom-full z-30 mb-2 max-w-[calc(100vw-2rem)]', permissions ? 'left-0 w-[260px] origin-bottom-left' : 'right-0 w-[340px] origin-bottom-right')}>
+        <div data-model-menu={!permissions || undefined} data-permission-menu={permissions || undefined} className="relative flex flex-col text-[0.8rem] coarse:text-[0.9375rem] phone:text-[0.9375rem]">
           {!data || !sel ? (
             <p className={clsx('px-[9px] py-2 text-fg3', error && 'text-need-fg')}>{error ?? 'Reading what it runs on…'}</p>
           ) : (
             <>
-              <ModelList menus={data.menus} agent={sel.agent} picks={data.picks} chosen={sel} phone={phone} onPick={pick}
-                onPin={(agent, id) => void pin(agent, id)} autoFocus={!phone} />
-              <div className="px-1 py-1"><div className="h-px bg-line" /></div>
-              {m?.efforts?.length ? (
+              {permissions ? (
+                <>
+                  {head('Permissions')}
+                  {menu?.perms?.map((x) => (
+                    <button key={x.id} type="button" role="menuitemradio" aria-checked={sel.perm === x.id} disabled={busy} className={row} onClick={() => setSel({ ...sel, perm: x.id })}>
+                      <span className="flex-1">{x.label}</span>
+                      <span className="grid size-3.5 shrink-0 place-items-center">{sel.perm === x.id ? <CheckIcon className="size-3.5" /> : null}</span>
+                    </button>
+                  ))}
+                  <p className="px-[9px] py-1 text-[0.71875rem] text-fg3">Restart to apply to this agent.</p>
+                </>
+              ) : (
+                <>
+                  <ModelList menus={data.menus} agent={sel.agent} picks={data.picks} chosen={sel} phone={phone} onPick={pick}
+                    onPin={(agent, id) => void pin(agent, id)} autoFocus={!phone} />
+                  <div className="px-1 py-1"><div className="h-px bg-line" /></div>
+                </>
+              )}
+              {!permissions && m?.efforts?.length ? (
                 <>
                   {head('Reasoning')}
                   <div className="px-1 py-[3px]">
@@ -458,7 +474,7 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
                   </div>
                 </>
               ) : null}
-              {m?.fast ? (
+              {!permissions && m?.fast ? (
                 <button type="button" role="menuitemcheckbox" aria-checked={sel.fast} className={row} onClick={() => setSel({ ...sel, fast: !sel.fast })}>
                   <SpeedIcon className="size-3.5 shrink-0 text-fg3" />
                   <span className="flex-1">Fast</span>
@@ -468,7 +484,7 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
                   </span>
                 </button>
               ) : null}
-              {menu?.perms?.length ? (
+              {!permissions && menu?.perms?.length ? (
                 <button type="button" aria-haspopup="menu" aria-expanded={perms} className={clsx(row, perms && 'bg-hover')} onClick={() => setPerms(!perms)}>
                   <ModeIcon className="size-3.5 shrink-0 text-fg3" />
                   <span className="flex-1">Permissions</span>
@@ -476,7 +492,7 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
                   <NextIcon className="size-3 shrink-0 text-fg3" />
                 </button>
               ) : null}
-              {perms && menu?.perms ? (
+              {!permissions && perms && menu?.perms ? (
                 <div role="menu" aria-label="Permissions" className="absolute right-1 bottom-9 z-10 w-[180px] rounded-[8px] bg-bg p-[5px] shadow-menu">
                   {menu.perms.map((x) => (
                     <button key={x.id} type="button" role="menuitemradio" aria-checked={sel.perm === x.id} className={row} onClick={() => { setSel({ ...sel, perm: x.id }); setPerms(false) }}>
@@ -528,13 +544,34 @@ export function AgentLine({ chatKey, cli }: { chatKey: string; cli: string }) {
   // in the box's row, before the mic (as the window's): the menu opens over the box, at its right (the box holds it)
   return (
     <>
-      <button type="button" data-agent-line aria-haspopup="menu" aria-expanded={open?.chat === chatKey}
-        onClick={() => setMenuOpen(open?.chat === chatKey ? null : { chat: chatKey })}
+      <button type="button" data-agent-line aria-haspopup="menu" aria-expanded={open?.chat === chatKey && !open.permissions}
+        onClick={() => setMenuOpen(open?.chat === chatKey && !open.permissions ? null : { chat: chatKey })}
         className={agentPick}>
         <span className="min-w-0 truncate">{shown}</span>
         <DownIcon className="size-3 shrink-0" />
       </button>
-      {open?.chat === chatKey ? <ModelMenu key={`${chatKey}|${open.typed ?? ''}`} chat={chatKey} typed={open.typed} /> : null}
+      {open?.chat === chatKey && !open.permissions ? <ModelMenu key={`${chatKey}|${open.typed ?? ''}`} chat={chatKey} typed={open.typed} /> : null}
+    </>
+  )
+}
+
+export function PermissionLine({ chatKey }: { chatKey: string }) {
+  const chat = useStore((s) => s.chats[chatKey])
+  const agent = chat?.agent
+  const available = !!agent && !agent.planned && !chat.finished && !chat.notice
+  const open = useMenuOpen()
+  const active = open?.chat === chatKey && !!open.permissions
+  const menu = agent && ['claude', 'codex', 'cursor'].includes(agent.kind) ? AGc.menuFor(agent.kind, {}) : null
+  const label = !available ? (chat?.finished ? 'Agent ended' : 'Not started') : menu?.perms?.find((p: { id: string }) => p.id === agent?.perm)?.label ?? 'Permissions'
+  return (
+    <>
+      <button type="button" data-permission-line aria-label={`Permissions: ${label}`} aria-haspopup="menu" aria-expanded={active} disabled={!available}
+        onClick={() => setMenuOpen(active ? null : { chat: chatKey, permissions: true })} className={clsx(agentPick, 'disabled:text-fg3 disabled:hover:bg-transparent')}>
+        <ModeIcon className="size-3.5 shrink-0" />
+        <span className="min-w-0 truncate">{label}</span>
+        <DownIcon className="size-3 shrink-0" />
+      </button>
+      {active ? <ModelMenu key={chatKey} chat={chatKey} permissions /> : null}
     </>
   )
 }

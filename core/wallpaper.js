@@ -28,7 +28,7 @@ export function wallpaperColors(value) {
 export const APPEARANCE = { id: "appearance", title: "Appearance", icon: "image" };
 export const WALLPAPER = {
   title: "Background", scope: "BossGoat on this computer.",
-  about: "Choose a solid colour or an image. Text and controls stay easy to read.",
+  about: "Chat and Terminal share your solid colour or image.",
   choose: "Choose image…", choosing: "Choosing image…", reset: "Reset to default",
   empty: "Choose a picture or drop one here", formats: "PNG, JPEG or WebP · up to 30 MB · stored locally",
   transparency: "Transparency", transparencyAbout: "0% shows the full image. 100% hides it.",
@@ -55,4 +55,24 @@ export function cover(image, width, height) {
   const scale = Math.max(width / image.width, height / image.height);
   const w = image.width * scale, h = image.height * scale;
   return { w, h, left: (width - w) / 2, top: (height - h) / 2 };
+}
+
+export function terminalWallpaper(tree, value, base = "#f9f9fa") {
+  if (!value) return tree;
+  const next = JSON.parse(JSON.stringify(tree));
+  const background = value.kind === "solid" ? value.color : { image: value.path, fit: "cover" };
+  const tint = value.kind === "solid" ? "#00000000"
+    : `${base.slice(0, 7)}${Math.round(value.transparency * 255 / 100).toString(16).padStart(2, "0")}`;
+  next.terminal_opacity = 0;
+  function paint(node) {
+    if (node.id === "main") {
+      node.background = background;
+      if (node.content?.pane) node.content.pane.background = tint;
+    }
+    if (node.id === "tasks-thread-body") node.background = background;
+    if (node.id === "tasks-thread-term") node.background = tint;
+    for (const child of node.children ?? []) paint(child);
+  }
+  paint(next);
+  return next;
 }

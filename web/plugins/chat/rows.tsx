@@ -182,7 +182,7 @@ function AgentRow({ from, to, text, at }: { from: string; to?: string; text?: st
         {time ? <span className="shrink-0 text-fg3 tabular-nums">{time}</span> : null}
       </button>
       {open ? (
-        <div className="mt-1 mb-1 ml-8 max-w-[min(100%_-_2rem,640px)] self-start rounded-[14px] rounded-tl-[4px] bg-bubble px-3 py-2 text-[0.8125rem] text-fg phone:text-[0.9375rem]">
+        <div className="mt-2 mb-1 ml-8 max-w-[min(100%_-_2rem,640px)] self-start border-l border-line pl-3 text-[0.8125rem]/6 text-fg phone:text-[0.9375rem]">
           <Markdown text={text ?? ''} />
         </div>
       ) : null}

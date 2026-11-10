@@ -38,13 +38,23 @@ LOOK_MS = 10 * 60000
 
 # Flags whose next word is their value (core/agents.js CLAUDE_VALUE, CODEX_VALUE), so it isn't taken
 # for a first message.
-CLAUDE_VALUE = {"--add-dir", "--mcp-config", "--append-system-prompt", "--system-prompt", "--allowedTools", "--allowed-tools",
+CLAUDE_VALUE = {"--add-dir", "--mcp-config", "--append-system-prompt", "--append-system-prompt-file", "--system-prompt", "--system-prompt-file", "--system-prompt-snapshot", "--allowedTools", "--allowed-tools",
                 "--disallowedTools", "--disallowed-tools", "--agent", "--agents", "--plugin-dir", "--fallback-model",
                 "--output-format", "--input-format", "--name", "--setting-sources", "--betas", "--debug-file",
                 "--model", "--effort", "--settings", "--permission-mode"}
 CURSOR_VALUE = {"--model", "--mode", "--sandbox", "--workspace", "--add-dir", "--plugin-dir", "--output-format", "--api-key", "--endpoint", "--header", "-H", "-e"}
 CODEX_VALUE = {"-c", "--config", "-m", "--model", "-p", "--profile", "-s", "--sandbox", "-a", "--ask-for-approval",
                "-C", "--cd", "--add-dir", "-i", "--image", "--enable", "--disable", "--local-provider", "--oss"}
+
+
+
+def has_assistant_context(argv):
+    for i, word in enumerate(argv or []):
+        path = word.split("=", 1)[1] if word.startswith("--append-system-prompt-file=") else (
+            argv[i + 1] if word == "--append-system-prompt-file" and i + 1 < len(argv) else "")
+        if "/herdr-core/assistant-context/" in path:
+            return True
+    return False
 
 
 def kind_of(word):
@@ -187,6 +197,10 @@ def record_of(k):
             argv[0] = kind
     if not kind:
         return None
+    # The launch wrapper adds this file when it execs Claude; only the live process has it.
+    fg_kind, fg_argv = base_argv(fg.get("argv"))
+    if fg_kind == "claude" and has_assistant_context(fg_argv):
+        kind, argv = fg_kind, fg_argv
     sid, log = session_of(pid)
     if not sid:
         return None
@@ -275,7 +289,7 @@ def plan(k, rec, running):
     if not argv:
         return None
     # Without a record, an Assistant starts as its template does: without the person's shell.
-    return ("fresh", [*argv, lost_message(task_ref(k), template)], not (rec or {}).get("shell"))
+    return ("fresh", [*argv, lost_message(task_ref(k), None if has_assistant_context(argv) else template)], not (rec or {}).get("shell"))
 
 
 def revive_pass(report):

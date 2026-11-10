@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { argvFor, current, line, menuFor, modelSections, parseDefaults, parsePicks, pickKey, withPin, withRecent } from "./agents.js";
+import { argvFor, freshArgv, current, line, menuFor, modelSections, parseDefaults, parsePicks, pickKey, withPin, withRecent } from "./agents.js";
 
 const codex = { models: Array.from({ length: 250 }, (_, i) => ({ id: `gpt-${i}`, label: `GPT ${i}`, efforts: ["low", "high"] })) };
 const menus = { claude: menuFor("claude", {}), codex: menuFor("codex", codex) };
@@ -68,4 +68,15 @@ test("every agent with a fast mode shows the Fast switch, and turning it off sti
   expect(current("codex", on, {}, dflt).fast).toBe(true);
   const claudeOff = argvFor({ agent: "claude", model: "opus", fast: false }, { agent: "claude", argv: ["claude"] }).argv;
   expect(current("claude", claudeOff, {}, { fast: true }).fast).toBe(false);
+});
+
+
+test("Claude model changes and missing-session recovery retain background instruction files", () => {
+  const file = "/fixture/.config/herdr-core/assistant-context/role.txt";
+  const flags = ["--append-system-prompt-file", file, "--system-prompt-snapshot", "refresh"];
+  const old = { agent: "claude", argv: ["claude", ...flags, "--resume", "gone", "old request"] };
+  expect(freshArgv("claude", old.argv)).toEqual(["claude", ...flags]);
+  const next = argvFor({ agent: "claude", model: "sonnet" }, old).argv;
+  expect(next.slice(next.indexOf("--append-system-prompt-file"), next.indexOf("--append-system-prompt-file") + 2)).toEqual(flags.slice(0, 2));
+  expect(next).not.toContain("old request");
 });
