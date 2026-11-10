@@ -14,7 +14,7 @@ from .base import addon_off, Fail, hc_json, HOME, now, run, STORE
 from .settings import autopilot_layers, bare, read_settings, write_autopilot
 from .agents import agent_running, status_word
 from .launch import caller_labels, coordinator_in
-from .store import locate, read_list, Store, store_files
+from .store import locate, open_lock, read_list, Store, store_files
 from .output import say
 from .news import news_send, typing
 from .scheduler import ensure_scheduler
@@ -248,10 +248,22 @@ def migrate(d):
 
 @contextlib.contextmanager
 def state(write=True):
-    """The autopilot state, locked; written back (atomically) when write."""
-    os.makedirs(STORE, exist_ok=True)
-    lock = open(os.path.join(STORE, ".autopilot.lock"), "a")
-    fcntl.flock(lock, fcntl.LOCK_EX if write else fcntl.LOCK_SH)
+    """The autopilot state, locked; written back (atomically) when write. A read (write=False)
+    never needs a writable lock: where nothing can be written (a read-only sandbox, #900), it
+    reads under the shared lock, or with none when the lock file doesn't exist yet."""
+    try:
+        os.makedirs(STORE, exist_ok=True)
+    except OSError:
+        pass
+    lock, can = open_lock(os.path.join(STORE, ".autopilot.lock"))
+    if not can:
+        if write:
+            if lock:
+                lock.close()
+            raise Fail(f"Can't change the autopilot here: {STORE} is read-only (a sandbox?). Run this outside it.")
+        write = False
+    if lock:
+        fcntl.flock(lock, fcntl.LOCK_EX if write else fcntl.LOCK_SH)
     try:
         d = read_list(STATE) or {}
         d.setdefault("spaces", {})
@@ -266,8 +278,9 @@ def state(write=True):
                 json.dump(d, f, indent=1)
             os.replace(tmp, STATE)
     finally:
-        fcntl.flock(lock, fcntl.LOCK_UN)
-        lock.close()
+        if lock:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            lock.close()
 
 
 def window_spaces():
