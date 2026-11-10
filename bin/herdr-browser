@@ -225,10 +225,47 @@ libs_check() {
   return 1
 }
 
+# Chrome's sandbox (SHEP-203, GitHub #920). Ubuntu 24.04's AppArmor (kernel.apparmor_restrict_unprivileged_userns=1)
+# stops unprivileged user namespaces for any program without a profile that allows them, and Chrome then dies with
+# "No usable sandbox". The sandbox stays on: this says the fix for this machine and runs nothing, the person applies it.
+USERNS_SYSCTL=${HERDR_BROWSER_USERNS_SYSCTL:-/proc/sys/kernel/apparmor_restrict_unprivileged_userns}
+APPARMOR_D=${HERDR_BROWSER_APPARMOR_D:-/etc/apparmor.d}
+_prof=herdr-browser-chrome
+# Only when the restriction is on and a plain unshare of user namespaces fails: other causes are not this one.
+userns_blocked() {
+  [ "$(uname -s)" = Linux ] || return 1
+  [ "$(cat "$USERNS_SYSCTL" 2>/dev/null)" = 1 ] || return 1
+  command -v unshare >/dev/null 2>&1 || return 1
+  unshare -U true >/dev/null 2>&1 && return 1
+  return 0
+}
+# Says the one fix for the Chrome it would start (its profile, then the wider sysctl). -> 0, or 1 (said).
+sandbox_check() {
+  userns_blocked || return 0
+  _c=$(chrome_bin)
+  [ -n "$_c" ] || return 0   # no Chrome yet: the first start installs one, and this runs again then
+  _c=$(readlink -f "$_c" 2>/dev/null || echo "$_c")
+  # The fix is in place when its profile names this Chrome's path: this shell stays unconfined, so unshare still fails
+  grep -qsF "profile $_prof \"$_c\" flags=(unconfined)" "$APPARMOR_D/$_prof" && return 0
+  cat <<EOF
+herdr-browser: Chrome can't start its sandbox: AppArmor blocks unprivileged user namespaces on this machine
+(Ubuntu's kernel.apparmor_restrict_unprivileged_userns), so Chrome stops with "No usable sandbox".
+Chrome's sandbox stays on, and nothing was changed. To let this one Chrome use it, run these two with sudo:
+
+  printf '%s\n' 'abi <abi/4.0>,' 'include <tunables/global>' '' 'profile $_prof "$_c" flags=(unconfined) {' '  userns,' '}' | sudo tee /etc/apparmor.d/$_prof >/dev/null
+  sudo apparmor_parser -r /etc/apparmor.d/$_prof
+
+Then run herdr-browser again. The profile is for this Chrome's path: when agent-browser installs a newer Chrome, its path changes and the two lines are needed again.
+The wider way, for every program on this machine until the next reboot: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+EOF
+  return 1
+}
+
 case "${1-}" in
   --install)
     if ensure; then
       libs_check >&2 || exit 1
+      sandbox_check >&2 || exit 1
       echo "herdr-browser: agent-browser $ver is ready ($bin), with Chrome."
       exit 0
     fi
@@ -315,6 +352,7 @@ if ! usable; then
   if ! usable; then problem >&2; exit 127; fi
 fi
 libs_check >&2 || exit 127
+sandbox_check >&2 || exit 127
 
 # The first word that isn't a flag: what the command does.
 verb=
