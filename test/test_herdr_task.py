@@ -4514,3 +4514,48 @@ class TaskFlow(unittest.TestCase):
         self.assertFalse(agents.agent_running(fg("fish", "-i")))  # exec'ed its own shell: the agent exited
         self.assertFalse(agents.agent_running(fg("bash")))
         self.assertTrue(agents.agent_running({"foreground": {"name": "claude", "argv": ["claude"]}}))
+
+
+class ReachProbeSpaces(unittest.TestCase):
+    """SHEP-185: a machine's reach map lists its spaces from the window's live list (herdr-app ls) when a window there
+    names some, else herdr-core's saved document; the probe runs for real with fake hc and herdr-app on PATH."""
+
+    def probe(self, live=None, saved=None):
+        sys.path.insert(0, BIN)
+        from herdr_task.machines import PROBE
+        root = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(root, ignore_errors=True))
+        bin_ = os.path.join(root, "bin")
+        os.makedirs(bin_)
+        state = os.path.join(root, "state", "herdr-core", "default")
+        os.makedirs(state)
+        with open(os.path.join(state, "docs.json"), "w") as f:
+            json.dump({"herdr-app": {"value": {"spaces": saved or []}, "version": 3}}, f)
+        hc = ('#!/bin/sh\ncase "$1 $2" in\n'
+              '"server status") echo \'{"core":{"id":"c-b","name":"vm-b"}}\' ;;\n'
+              '"machine ls") echo \'{"machines":[]}\' ;;\n'
+              '"ls --json") echo \'{"terminals":[]}\' ;;\n'
+              '*) echo "{}" ;;\nesac\n')
+        for name, body in (("hc", hc), ("herdr-app", None if live is None else '#!/bin/sh\necho \'%s\'\n' % json.dumps({"spaces": live}))):
+            if body is None:
+                continue
+            with open(os.path.join(bin_, name), "w") as f:
+                f.write(body)
+            os.chmod(os.path.join(bin_, name), 0o755)
+        env = {**os.environ, "PATH": bin_, "XDG_STATE_HOME": os.path.join(root, "state")}
+        out = subprocess.run([sys.executable, "-c", "import sys; S = sys.stdin.read(); exec(S)", json.dumps({"depth": 0, "seen": [], "timeout": 20})],
+                             input=PROBE, capture_output=True, text=True, env=env, timeout=120)
+        return json.loads(out.stdout.strip().splitlines()[-1])
+
+    def test_the_window_list_beats_a_saved_document_that_is_empty(self):
+        got = self.probe(live=[{"id": "sp1", "name": "", "folder": os.path.expanduser('~')}], saved=[])
+        self.assertEqual([(s["id"], s["folder"]) for s in got["spaces"]], [("sp1", os.path.expanduser('~'))])
+        self.assertEqual(got["home"], os.path.expanduser("~"))
+
+    def test_without_a_window_the_saved_document_is_read(self):
+        got = self.probe(live=None, saved=[{"id": "sp2", "name": "shop", "folder": "/base/shop"}])
+        self.assertEqual([(s["id"], s["name"]) for s in got["spaces"]], [("sp2", "shop")])
+
+    def test_a_window_without_spaces_falls_back_to_the_document(self):
+        got = self.probe(live=[], saved=[{"id": "sp3", "name": "lab", "folder": "/base/x"}])
+        self.assertEqual([s["id"] for s in got["spaces"]], ["sp3"])

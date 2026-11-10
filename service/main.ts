@@ -68,12 +68,20 @@ const { REACH_FILE, reachable } = MN as any;
 
 // A machine's reach map, as its spaces: kept a minute (its scheduler redraws it every 5)
 const reaches = new Map<string, { at: number; got: Promise<{ from: string | null; spaces: any[]; checked: number | null }> }>();
+// The spaces the service already knows (the sidebar's list, each with its place's name): a reach map that reads a
+// machine's document as empty still lists them (core/mentions.js reachable, SHEP-185).
+function knownSpaces() {
+  return compat.allSpaces().map((s) => {
+    const p = compat.last?.places.find((x) => x.id === s.id);
+    return { id: s.id.split("/").pop()!, name: p?.name ?? "", folder: s.folder, machine: s.machine ?? null, ...(p?.emoji ? { emoji: p.emoji } : {}), assistant: !!p?.assistantTab?.live };
+  });
+}
 function reachOf(machine: string | null) {
   const k = machine ?? "", was = reaches.get(k);
   if (was && Date.now() - was.at < 60_000) return was.got;
   const got = exec(hub, ["sh", "-c", REACH_FILE], machine, 20).then((r) => {
     const d = JSON.parse(r.stdout || "null");
-    return { from: d?.graph?.core?.name ?? machine, spaces: reachable(d?.graph), checked: d?.at ?? null };
+    return { from: d?.graph?.core?.name ?? machine, spaces: reachable(d?.graph, knownSpaces()), checked: d?.at ?? null };
   }).catch(() => null).then((r) => r?.checked ? r : {
     // no map there yet (its scheduler hasn't run): its own spaces, which it always reaches
     from: machine, checked: null,
