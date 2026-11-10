@@ -16,6 +16,7 @@ import * as SP from "../core/spaces.js";
 const { READ, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, withOrder, withMachineOrder, DELETED, deletedSection, withRestoredSection } = SP as any;
 import type { Compat } from "./compat.ts";
 import { worktreeAct } from "./worktrees.ts";
+import { layoutScript } from "./layout-scripts.ts";
 import { noteFailed, once } from "./send-once.ts";
 import { execTemplate } from "./spaces.ts";
 import * as MA from "../core/machine-add.js";
@@ -371,7 +372,10 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (b.type === "model-menu") return { ok: true, menu: await (compat.agents as any).menu(a, reader) };
     if (!["claude", "codex"].includes(b.kind)) throw new Error("Pick Claude Code or Codex.");
     const opt = (v: unknown) => (typeof v === "string" && /^[\w.\[\]-]{1,60}$/.test(v) ? v : undefined);
-    const next = await compat.agents.restart(a, reader, { kind: b.kind, model: opt(b.model), effort: opt(b.effort), speed: opt(b.speed), perm: opt(b.perm) });
+    const pick = { kind: b.kind, model: opt(b.model), effort: opt(b.effort), speed: opt(b.speed), perm: opt(b.perm) };
+    // the model menu (live): in place when only the model, level or Fast changes; the restart sheet restarts
+    if (b.live === true) return { ok: true, ...(await (compat.agents as any).change(a, reader, pick)) };
+    const next = await compat.agents.restart(a, reader, pick);
     return { ok: true, terminal: next };
   }
   if (b?.type === "machine-hosts") {
@@ -488,8 +492,8 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (b.kind != null && !to?.run?.length) throw new Error("Not an agent installed there.");
     const assistant = t.labels?.["herdr.role"] === "coordinator" && !t.labels?.["herdr.agent"];
     const argv = to?.run ?? (assistant ? null : now?.run ?? null);
-    const script = join(appHome(), "mods", "coordinator", "restart.sh");
-    if (!existsSync(script)) throw new Error("Switching agents needs Shepherdr's window layout installed.");
+    const script = layoutScript("restart.sh");
+    if (!script) throw new Error("This install can't restart agents: update Shepherdr on that machine.");
     const r = await run(["bash", script, a, ...(argv ? [JSON.stringify(argv)] : [])]);
     if (r.code !== 0) throw new Error("It didn't restart: the Herdr window needs to be open.");
     return { ok: true };
