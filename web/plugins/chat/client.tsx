@@ -25,6 +25,7 @@ import { Fold } from './fold.tsx'
 import { Markdown } from './markdown.tsx'
 import { answeredBy, cancelReply, canReply, isArtifact, jumpTo, startReply } from './reply.ts'
 import { typing, working } from './typing.ts'
+import { suggestionOf, suggestionsOn } from './suggest.ts'
 import { JobsSheet, JobsTag, NeedsYou, openSubagent, TurnLine, useSubagent, WorkingLine } from './activity.tsx'
 import { ClockIcon } from '@heroicons/react/16/solid'
 import { AskedRow, Band, BriefRow, Chips, EndedRow, ErrorRow, NoteRow, Notice, HeadRow, ImagesLine, NewsRow, onTerminal, PilotRow, PublishingRow, questionsBelow, ReplyLine, Thumbs, WORDS } from './rows.tsx'
@@ -1896,23 +1897,6 @@ function SlashList({ chatKey, text, pick }: { chatKey: string; text: string; pic
       ))}
     </div>
   )
-}
-
-// SHEP-186: the suggested next message the box shows greyed out: the newest text is the agent's, it carries a suggestion
-// (its reply's last line, core/chat-log.js) and the person hasn't written after it. Off in Settings: none. { id, text } or null.
-export function suggestionOf(chat: Chat | undefined, on: boolean): { id: string; text: string } | null {
-  if (!on || !chat) return null
-  for (let i = chat.messages.length - 1; i >= 0; i--) {
-    const m = chat.messages[i]!
-    if (!m.text) continue
-    if (m.who === 'you' || m.error) return null
-    return m.suggest ? { id: m.id, text: m.suggest } : null
-  }
-  return null
-}
-// Settings › Agents › Suggested next message: on unless it's off (the snapshot's rows, as Everywhere has it)
-export function suggestionsOn(settings: { rows: { key: string; value: string }[] }[] | undefined): boolean {
-  return (settings ?? []).flatMap((s) => s.rows).find((r) => r.key === 'agents.suggestions')?.value !== 'off'
 }
 
 function Composer({ chatKey, placeholder, cli, suggest = null }: { chatKey: string; placeholder: string; cli: string; suggest?: { id: string; text: string } | null }) {
