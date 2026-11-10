@@ -32,11 +32,12 @@
                 "mod": "spaces-chat"
               },
               "size": {
-                "weight": 1.0193114280700684
+                "weight": 1
               },
               "min": 90
             }
-          ]
+          ],
+          "resizable": false
         },
         {
           "id": "sidebar-footer",
@@ -115,6 +116,9 @@
                 {
                   "id": "panel-body",
                   "type": "stack",
+                  "size": {
+                    "weight": 1
+                  },
                   "children": [
                     {
                       "id": "files",
@@ -194,11 +198,15 @@
                                     {
                                       "id": "tasks-thread-browser-host",
                                       "type": "block",
+                                      "size": {
+                                        "weight": 1
+                                      },
                                       "content": {
                                         "mod": "task-browser"
                                       }
                                     }
-                                  ]
+                                  ],
+                                  "resizable": false
                                 },
                                 {
                                   "id": "tasks-thread-artifacts",
@@ -273,6 +281,7 @@
                   "active": "tasks"
                 }
               ],
+              "resizable": false,
               "size": {
                 "px": 510
               },
