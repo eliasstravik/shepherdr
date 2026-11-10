@@ -3538,7 +3538,8 @@ class AssistantSettings(unittest.TestCase):
         # nothing differs from Herdr's default: no line says who set it
         self.assertNotIn("; set for", note)
         self.assertNotIn("; your setting", note)
-        self.assertEqual(len(note.split("\n")), 13)  # head, 11 lines, the Reactions guide
+        self.assertEqual(len(note.split("\n")), 14)  # head, 12 lines (Suggested next message included), the Reactions guide
+        self.assertIn("- Suggested next message: on (end each reply", note)
 
     def test_the_block_for_a_space_with_its_own(self):
         self.write({"everywhere": {"tasks": {"review_rounds": 2, "merge": "checks"}, "assistant": {"reactions": True}},
@@ -3565,7 +3566,7 @@ class AssistantSettings(unittest.TestCase):
         labels = self.terminals["t5"]["labels"]
         self.assertEqual(labels["herdr.reactions"], "off")
         self.assertEqual(sorted(self.aset.parse(labels["herdr.settings"])),
-                         sorted(["review", "merge", "proof", "agent", "base", "worktrees", "max_running", "notes", "autopilot", "reactions", "feedback"]))
+                         sorted(["review", "merge", "proof", "agent", "base", "worktrees", "max_running", "notes", "autopilot", "reactions", "suggestions", "feedback"]))
         # another space inherits Everywhere's, with its own merge
         self.assistant("t6", "sp2")
         other = self.aset.session_note("t6")
@@ -4298,6 +4299,16 @@ class TaskFlow(unittest.TestCase):
             json.dump(d, fh)
         self.patch(settings, "SETTINGS", f)
         return settings
+
+    def test_suggested_next_message_in_the_brief(self):
+        """SHEP-186: a worker's brief says whether its replies end with a suggested next message: on by default,
+        and off when Settings › Agents turns it off (the agent then writes no suggest line)."""
+        settings = self.settings({})
+        self.assertIn("- Suggested next message: on (your reply ends with the message you'd likely send next",
+                      settings.settings_block(self.store, self.task))
+        settings = self.settings({"everywhere": {"agents": {"suggestions": False}}})
+        self.assertIn("- Suggested next message: off (no suggested next message) (your setting everywhere)",
+                      settings.settings_block(self.store, self.task))
 
     def test_a_running_task_keeps_its_briefs_review(self):
         """#750: Review turned on everywhere while a task runs: its brief said off, so show and ready say off too."""

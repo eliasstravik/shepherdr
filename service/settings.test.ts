@@ -169,7 +169,7 @@ test("Agents and Tasks say the window's words: the model button, Other CLI, Must
   s.start();
   s.choices = C.choicesFrom({ claude: { model: "opus[1m]", effort: "high", per: {} }, codex: { models: [{ id: "gpt-5", label: "GPT-5", efforts: ["low", "high"] }] } });
   const agents = s.sections(null).find((x) => x.name === "Agents" && x.level === "all")!;
-  expect(agents.rows.map((r) => r.label)).toEqual(["Assistant", "Workers", "Reviewer", "Backup agent", "Reactions", "Feedback offers", "Feedback repo", "Ask for a GitHub star"]);
+  expect(agents.rows.map((r) => r.label)).toEqual(["Assistant", "Workers", "Reviewer", "Backup agent", "Reactions", "Suggested next message", "Feedback offers", "Feedback repo", "Ask for a GitHub star"]);
   expect(agents.rows[0].value).toBe("Opus 5.5 · 1M · High");
   expect(agents.rows[2]).toMatchObject({ value: "Other CLI (Codex)", agent: { unset: true, other: false } });
   const tasks = s.sections(null).find((x) => x.name === "Tasks" && x.level === "all")!;

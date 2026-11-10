@@ -256,3 +256,30 @@ test("a template's example news lines are words, real news lines are news (#589)
   // a real tag holding code is still Herdr's: hidden whole, the words around it shown
   expect(c.items[3].text).toBe("And look at `<herdr-news>` too");
 });
+
+// Suggested next message: an <hc suggest="…"/> line last on a reply rides on that reply's item, never shows, and only the
+// newest words' suggestion counts (an earlier one never leaks onto a later reply).
+test("a reply's suggest line rides on the reply, never shows, and a later reply without one has none", async () => {
+  const c = await read([
+    person,
+    reply("m1", [text('Merge it now?\n<hc suggest="yes, merge it"/>')]),
+    reply("m2", [text("Merged.")]),
+  ]);
+  expect(said(c)).toEqual(["Merge it now?", "Merged."]);
+  expect(c.items.filter((x) => x.kind === "agent").map((x) => x.suggest)).toEqual(["yes, merge it", undefined]);
+});
+
+test("a suggest line in an earlier block doesn't carry onto a later block's words", async () => {
+  const c = await read([person, reply("m1", [text('Done?\n<hc suggest="yes"/>'), { type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }]), reply("m2", [text("More to do.")])]);
+  const agents = c.items.filter((x) => x.kind === "agent");
+  expect(agents.map((x) => x.text)).toEqual(["Done?", "More to do."]);
+  expect(agents[1].suggest).toBeUndefined();
+});
+
+test("an empty suggest line counts as none, and a suggest line inside a code block is just words", async () => {
+  const c = await read([person, reply("m1", [text('Ok.\n<hc suggest=""/>')]), reply("m2", [text("Code:\n```\n<hc suggest=\"x\"/>\n```")])]);
+  const agents = c.items.filter((x) => x.kind === "agent");
+  expect(agents[0].suggest).toBeUndefined();
+  expect(agents[1].suggest).toBeUndefined();
+  expect(agents[1].text).toContain('<hc suggest="x"/>');
+});

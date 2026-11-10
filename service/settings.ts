@@ -13,7 +13,7 @@ import * as HC from "../core/host.js";
 import * as APc from "../core/autopilot.js";
 import type { SettingRow, SettingSection } from "../web/shared/types.ts";
 
-const { TASK_ROWS, DEFAULTS, wordFor, valueFor, ROLES: CORE_ROLES, NOTES: CORE_NOTES, ABOUT, BACKUP, REACTIONS, STAR, starState, FEEDBACK, feedbackRepo, upgradeReactions, BASE, BRANCH, branchPattern, MACHINES, OLD_NAMES, SECTIONS,
+const { TASK_ROWS, DEFAULTS, wordFor, valueFor, ROLES: CORE_ROLES, NOTES: CORE_NOTES, ABOUT, BACKUP, REACTIONS, SUGGESTIONS, STAR, starState, FEEDBACK, feedbackRepo, upgradeReactions, BASE, BRANCH, branchPattern, MACHINES, OLD_NAMES, SECTIONS,
   WEB, modelLabel, roleSel, otherCli, otherCliWords, backupProblem, homeAbout, webState, fromWord, LOADING_AGENTS, RESET, machineLabel } = C as any;
 const AP = APc as any;
 /** Autopilot as Everywhere has it now (herdr-task's view: what Settings keeps, else what it kept before, else the
@@ -209,6 +209,10 @@ export class Settings {
     const re = this.pick(scope, "agents", "reactions");
     rows.push({ label: REACTIONS.title, key: "agents.reactions", value: ON(re.value !== false), options: ["on", "off"], hint: REACTIONS.about,
       ...this.follows(s, re, (v) => ON(v !== false), "agents", "reactions") });
+    // Suggested next message: the agent's guess at what you'd say next, greyed out in the box (SHEP-186; the agents' side is herdr-task's settings)
+    const sg = this.pick(scope, "agents", "suggestions");
+    rows.push({ label: SUGGESTIONS.title, key: "agents.suggestions", value: ON(sg.value !== false), options: ["on", "off"], hint: SUGGESTIONS.about,
+      ...this.follows(s, sg, (v) => ON(v !== false), "agents", "suggestions") });
     // Feedback offers: agents offer once to file a problem in Shepherdr itself, only on your yes (herdr-task's feedback.py);
     // the repo it files to is Everywhere's only
     const fb = this.pick(scope, "agents", "feedback");
@@ -465,6 +469,11 @@ export class Settings {
       if (word !== null && word !== "on" && word !== "off") throw new Error("Not one of its choices.");
       const parent = space ? file.everywhere?.agents?.reactions ?? DEFAULTS.agents.reactions : DEFAULTS.agents.reactions;
       put("agents", "reactions", word === null || (word === "on") === parent ? null : word === "on");
+    } else if (key === "agents.suggestions") {
+      // on or off; the same as what this level would inherit unsets it, so it follows again (as Reactions)
+      if (word !== null && word !== "on" && word !== "off") throw new Error("Not one of its choices.");
+      const parent = space ? file.everywhere?.agents?.suggestions ?? DEFAULTS.agents.suggestions : DEFAULTS.agents.suggestions;
+      put("agents", "suggestions", word === null || (word === "on") === parent ? null : word === "on");
     } else if (key === "star_prompt") {
       // Everywhere only; once asked it stays asked, whatever the switch (never a second ask)
       if (space) throw new Error("This one is the same for every space.");

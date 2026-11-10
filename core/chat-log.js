@@ -174,6 +174,8 @@ const CODEX_INJECTED = /^\s*(# AGENTS\.md instructions|<(environment_context|use
 //   the agent   <hc react="👀" to="first words of the person's message"/>   on a line of its own
 //               <hc no-reply/>   a reply that is only this shows nothing (<no-reply> too); on an Autopilot
 //               wake <hc no-reply why="Waiting on your Accept of TG-2"/> puts its why on the wake's line
+//   the agent   <hc suggest="yes, merge it"/>   last on its reply: the person's likely next message, shown as ghost
+//               text in the box (suggest on the agent item; only the newest reply's counts, none when it has none)
 // Task news Herdr sends an Assistant (herdr-task's news_pass) is one <herdr-news> tag per line:
 // each is a news item of its own ({ kind: "news", ref, event, text }), shown as a slim line in
 // an Assistant's chat (mods/chat newsLines()); the tags themselves never show.
@@ -567,7 +569,7 @@ function codexStep(name, args) {
 
 // The conversation in one log, built from LOG's records ({ off, kind, data }) in file order.
 // Items (ids come from byte offsets, so they stay the same when earlier pages are added):
-//   { kind: "user", id, text, from?, at, images, paths? }   { kind: "agent", id, text, at }
+//   { kind: "user", id, text, from?, at, images, paths? }   { kind: "agent", id, text, at, suggest? }
 //   (images: how many were sent; paths: where the ones Claude Code read from files came from;
 //   replyTo: the start of the message it answers)
 //   { kind: "mark", id }  (a message of only reactions: ends the turn, shows nothing)
@@ -614,6 +616,8 @@ export class Conversation {
     this.meta = {};
     // Reactions by message id: [{ emoji, by: "you" | "agent" }].
     this.reactions = new Map();
+    // The suggested next message the agent's words so far ended with (agentText), until the reply takes it.
+    this.suggestion = null;
     // Calls that only wait, while open (`waiting`: the newest open call is one); and the jobs
     // the agent left running in the background, until their end is logged: { id (its call),
     // task (Claude Code's task id, once its result says), kind: "shell" | "monitor", label, cmd,
@@ -805,10 +809,25 @@ export class Conversation {
     this.reactions.set(target.id, list);
   }
 
+  // The suggested next message a reply ends with: { suggest } for its item, else nothing. Taken once.
+  takeSuggest() {
+    const s = this.suggestion;
+    this.suggestion = null;
+    return s ? { suggest: s } : {};
+  }
+
   // What the agent wrote, without its reaction and no-reply lines (those act instead).
   agentText(text) {
     const out = [];
+    // the newest words decide: a suggestion belongs to the reply it ends, never to an earlier block's words
+    this.suggestion = null;
+    let fenced = false;
     for (const line of String(text).split("\n")) {
+      // The suggestion line: kept for the reply (takeSuggest), never shown. An empty one counts as none; in a code
+      // block it is just words.
+      if (line.trim().startsWith("```")) fenced = !fenced;
+      const sug = !fenced ? tagOf(line) : null;
+      if (sug && "suggest" in sug) { this.suggestion = unattr(sug.suggest).trim() || null; continue; }
       // A react tag also counts at the start of a paragraph, its words after it on the same line;
       // one that still doesn't read (a broken tag) never shows as text either, only what follows it.
       const t = /^\s*<hc\s/.test(line) ? tagAt(line) : null;
@@ -927,9 +946,13 @@ export class Conversation {
         if (said) {
           // One reply can be written over several lines with the same id.
           const prev = this.replies.get(id);
-          if (prev && this.items[this.items.length - 1] === prev) prev.text += "\n\n" + said;
-          else {
-            const item = { kind: "agent", id: `a${off}`, text: said, at: time(l.timestamp) };
+          if (prev && this.items[this.items.length - 1] === prev) {
+            prev.text += "\n\n" + said;
+            // the newest words' suggestion, if they end with one
+            delete prev.suggest;
+            Object.assign(prev, this.takeSuggest());
+          } else {
+            const item = { kind: "agent", id: `a${off}`, text: said, at: time(l.timestamp), ...this.takeSuggest() };
             this.replies.set(id, item);
             if (this.replies.size > 20) this.replies.delete(this.replies.keys().next().value);
             this.push(item);
@@ -974,7 +997,7 @@ export class Conversation {
         if (u) this.user(`u${off}`, { ...u, at: time(l.timestamp) });
       } else if (p.type === "message" && p.role === "assistant") {
         const words = this.agentText((Array.isArray(p.content) ? p.content : []).filter((it) => it?.type === "output_text" && it.text?.trim()).map((it) => it.text.trim()).join("\n\n"));
-        if (words) this.push({ kind: "agent", id: `a${off}`, text: words, at: time(l.timestamp) });
+        if (words) this.push({ kind: "agent", id: `a${off}`, text: words, at: time(l.timestamp), ...this.takeSuggest() });
       } else if ((p.type === "function_call" || p.type === "custom_tool_call" || p.type === "local_shell_call") && p.name !== "wait" && p.name !== "sleep") {
         const cid = String(p.call_id ?? p.id ?? `c${off}`);
         // Codex's own questions (Plan mode): answered in its terminal, shown here as asked.

@@ -26,7 +26,7 @@ DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "must_fix": "major", "
                       "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": "", "branch": "",
                       "worktree_root": ""},
             "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {},
-            "agents": {"reactions": True, "feedback": True, "feedback_repo": "eliasstravik/shepherdr"}}
+            "agents": {"reactions": True, "suggestions": True, "feedback": True, "feedback_repo": "eliasstravik/shepherdr"}}
 LEVELS = ["blocker", "major", "minor"]
 
 
@@ -468,6 +468,10 @@ def task_settings(s, t, space=None, argv=None):
     a_by = "task" if any(t.get(f) for f in ("agent", "model", "effort")) else \
         by_layer(s, space, "worker", None, bool(cfg.get("worker")), False)
     add("Agent", text, {"agent": agent, "model": model, "effort": effort}, a_by)
+    # Suggested next message (SHEP-186): the reply ends with the words the person would likely send next (templates/worker.md)
+    sug = (cfg.get("agents") or {}).get("suggestions") is not False
+    add("Suggested next message", "on (your reply ends with the message you'd likely send next, shown greyed out in the box)" if sug
+        else "off (no suggested next message)", sug, by_layer(s, space, "agents", "suggestions", sug, True))
     return lines
 
 
