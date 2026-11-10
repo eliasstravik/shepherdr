@@ -13,6 +13,8 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
   `git archive` of the tree, since `herdr_task` lives beside `bin/`.
 - herdr-browser's library check: `test/test_herdr_browser_libs.py` fakes ldd and agent-browser; a real missing-library
   Chrome needs gcc, linking a library built with `-Wl,-soname` and then deleted.
+- herdr-browser's AppArmor case: test with `HERDR_BROWSER_USERNS_SYSCTL` and `HERDR_BROWSER_APPARMOR_D` stand-ins; a real
+  refusal: `sudo sysctl user.max_user_namespaces=0`, then restore the old value.
 - Read-only sandbox check: `chmod 555` a scratch dir, run herdr-task with `HERDR_TASK_STORE=<dir>`; a read must not
   need the lock file to be writable.
 - Never run herdr-app or herdr-task with a changed `HOME` or `HERDR_APP_HOME`, never start a second herdr-app window,
