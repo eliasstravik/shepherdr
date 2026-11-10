@@ -9,7 +9,7 @@ import { image } from "gpui-kit";
 import { theme } from "herdr";
 import { asset, reply } from "./artifact.js";
 import data from "./recipe-data.js";
-import { chartShapes, choiceReply, formReply, isLink, withIds } from "./recipe.js";
+import { chartShapes, choiceReply, formReply, isLink, mediaKind, withIds } from "./recipe.js";
 
 const TONE = { info: "surface", good: "done", warn: "working", bad: "blocked" };
 
@@ -73,6 +73,17 @@ export default class RecipeView extends View {
         .child(div().size(10).rounded(5).bg(colors[si % colors.length])).child(div().text_size(12).child(String(x.name ?? "")))))));
   }
 
+  // A clip, a sound or a PDF: the window's player can't play them, so it shows the clip's poster (or a tile) and says
+  // where to play it: the web app (the same artifact on the phone and in a browser plays it).
+  media(b, t, mark, what, poster) {
+    return v_flex().w_full().min_w(0).gap(4)
+      .child(poster ? image(asset(poster)).w_full().rounded(6).border_1().border_color(t.border)
+        : v_flex().w_full().h(96).rounded(6).bg(t.surface).items_center().justify_center().gap(2)
+          .child(div().text_size(17).text_color(t.muted).child(mark))
+          .child(div().text_size(12).text_color(t.muted).child(what)))
+      .child(div().text_size(12).text_color(t.muted).whitespace_normal().child(`${String(b.caption ?? b.src ?? what)} · plays in the web app`));
+  }
+
   block(b, t, cx) {
     switch (b.type) {
       case "heading": return div().text_size((b.level ?? 2) <= 1 ? 17 : 15).font_semibold().whitespace_normal().child(b.text);
@@ -90,11 +101,15 @@ export default class RecipeView extends View {
         .child(div().text_size(12).text_color(t.muted).child(String(x.label)))
         .child(div().text_size(17).font_semibold().child(String(x.value)))
         .when(!!x.note, (e) => e.child(div().text_size(12).text_color(t.dim).child(String(x.note))))));
+      case "video": return this.media(b, t, "▶", "Video", b.poster ? b.poster : null);
+      case "audio": return this.media(b, t, "♪", "Sound", null);
+      case "pdf": return this.media(b, t, "PDF", "PDF", null);
       case "image": return v_flex().gap(4)
         .child(image(asset(b.src)).w_full().when(!!b.w && !!b.h, (e) => e.max_w(b.w)).rounded(6).border_1().border_color(t.border))
         .when(!!b.caption, (e) => e.child(div().text_size(12).text_color(t.muted).whitespace_normal().child(b.caption)));
       case "pair": return h_flex().flex_wrap().gap(10).children([["Before", b.before], ["After", b.after]].map(([w, x]) => v_flex().flex_1().min_w(240).gap(4)
-        .child(image(asset(x.src)).w_full().rounded(6).border_1().border_color(t.border))
+        .child(mediaKind(x.src) === "video" ? this.media(x, t, "▶", "Clip", x.poster ?? null)
+          : image(asset(x.src)).w_full().rounded(6).border_1().border_color(t.border))
         .child(div().text_size(12).text_color(t.muted).child(x.caption ?? w))));
       case "code": return div().w_full().p(10).rounded(8).bg(t.surface).font_family("JetBrains Mono").text_size(12).whitespace_normal().child(b.text);
       case "callout": return v_flex().gap(4).p(12).rounded(8).bg(t[TONE[b.tone ?? "info"]] ? t.surface : t.surface).border_l(3).border_color(t[TONE[b.tone ?? "info"]] ?? t.border)

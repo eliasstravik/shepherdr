@@ -35,6 +35,7 @@ herdr-artifact preview <id>             # see it here as the person does: the we
     { "type": "stats", "items": [{ "label": "Lines", "value": "92%", "note": "+11" }, { "label": "Files", "value": "148" }] },
     { "type": "table", "columns": ["Package", { "label": "Coverage", "align": "right" }], "rows": [["api", "88%"], ["web", "95%"]] },
     { "type": "image", "src": "after.png", "caption": "The new chart, in the window at 1440 px" },
+    { "type": "video", "src": "after.mp4", "caption": "The flow after the fix, 6 s", "loop": true, "muted": true, "autoplay": true },
     { "type": "choice", "question": "Ship it?", "options": [{ "label": "Ship", "description": "merge today" }, { "label": "Wait" }] }
   ]
 }
@@ -51,7 +52,10 @@ Blocks, top to bottom (each may carry an `"id"`; the person's notes point at blo
 | `chart` | `kind` bar, line or pie, `labels`, `series` [{ `name`, `values` (numbers) }] |
 | `stats` | `items` [{ `label`, `value`, `note` }]: a row of big numbers |
 | `image` | `src` (a picture beside recipe.json), `caption`, `w`, `h` |
-| `pair` | `before` and `after`, each { `src`, `caption` }: side by side, stacked on a phone |
+| `video` | `src` (a clip beside it: mp4, webm or mov), `poster` (a picture beside it, optional), `caption`, `autoplay`, `loop`, `muted` |
+| `audio` | `src` (a sound beside it: mp3, m4a, wav or ogg), `caption` |
+| `pdf` | `src` (a PDF beside it), `caption`: shown inline, with a link to open it whole |
+| `pair` | `before` and `after`, each { `src`, `caption` } (a picture, or a clip with an optional `poster`): side by side, stacked on a phone; two clips play together |
 | `code` | `text`, `lang`: command output, a diff, a log |
 | `callout` | `tone` info, good, warn or bad, `title`, `md` |
 | `columns` | `columns`: lists of blocks, side by side (stacked on a phone) |
@@ -64,6 +68,16 @@ Blocks, top to bottom (each may carry an `"id"`; the person's notes point at blo
 
 - **Pictures**: PNG, JPEG, GIF, WebP or SVG files in the folder, named in `src` (no paths up or
   out). Screenshots go in as they are; crop them to what matters first (`magick`).
+- **Clips, sounds, PDFs** (SHEP-209): a `video` plays in place in the web app (controls; `autoplay` with `muted` and
+  `loop` for a short clip that plays itself). **A short clip beats a GIF**: a GIF is big and can't stop or seek; a
+  clip is smaller, has sound and controls, and plays on the phone. No poster given: its first frame is made at publish
+  (with ffmpeg here) and the card shows it. A `.mov` or other clip no browser plays becomes an mp4 copy at publish
+  (ffmpeg here; without it, the notice says so). `audio` is a small player; `pdf` shows the PDF inline, with "Open the
+  PDF" under it (a phone may show only the link). In the window (GPUI) a clip, sound or PDF can't play: it shows its
+  poster (or a tile) and says "plays in the web app", so put the one thing it must show in the caption.
+- **Sizes**: a video at most 40 MB each, a sound 20 MB, a PDF 25 MB, a picture or other file 4 MB; the whole artifact
+  64 MB (every kept version counts). Over that, publish says which file and what to do (e.g. a shorter, smaller
+  `ffmpeg -i in.mov -vf scale=960:-2 -crf 28 -an short.mp4`).
 - **Its card in the chat** previews it: its first pictures and its first lines, and opens in
   place. `"cover": "after.png"` beside `"blocks"` picks the picture it leads with.
 - **In your message too**: the key picture or a short video can also go right in your chat
@@ -72,7 +86,7 @@ Blocks, top to bottom (each may carry an `"id"`; the person's notes point at blo
 - **Forms and answers**: a `choice`, a `form` or a `button` sends the person's words to you as
   `<hc from="artifact" id=… version=… title=…>Ship it?: Ship</hc>`, in the window and on the web
   alike.
-- **Update**: change recipe.json (and pictures), then `herdr-artifact update <id> <dir> --note
+- **Update**: change recipe.json (and pictures or clips), then `herdr-artifact update <id> <dir> --note
   "what changed"`. Each version is kept with its note.
 - **Mark up**: the person can point at a block (or a spot) and write what should change. It
   reaches you as `<hc from="artifact" id=… version=… title=… on="the table “Coverage”">note</hc>`,
@@ -80,13 +94,14 @@ Blocks, top to bottom (each may carry an `"id"`; the person's notes point at blo
 - Don't repeat the title inside it: the viewer shows it right above. Start with the content (a
   one-line summary, the numbers, the picture). No emojis. Data goes in the recipe; it isn't read
   live.
-- Only `.json` and pictures (plus `.txt`, `.md`, `.csv`), at most 4 MB.
+- Only `.json`, pictures, clips, sounds and PDFs (plus `.txt`, `.md`, `.csv`), within the sizes above.
 
 ## A task's proof
 
 A proof is a recipe, always (the person accepts tasks from their phone too): titled "<the task's
 full title> · Proof"; a `text` block saying what changed in one to three plain lines; then each
-proof as an `image`, `pair` or `code` block with a one-line `caption` (or a `text` line above it);
+proof as an `image`, `video` (a short clip of a flow beats a GIF), `pair`, `code` or `pdf` block with a one-line `caption`
+(or a `text` line above it);
 then a `heading` "Not proven" and a `list`. `herdr-artifact publish` refuses a proof that isn't a
 recipe.
 

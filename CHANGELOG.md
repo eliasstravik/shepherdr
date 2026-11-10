@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Artifacts
+
+- A recipe holds clips, sounds and PDFs, not only pictures: a `video` block (mp4, webm or mov) plays in place with its
+  controls, or muted and looping with `autoplay`; an `audio` block is a small player (mp3, m4a, wav, ogg); a `pdf`
+  block shows the PDF inline. A `pair` takes two clips, which play together.
+- A clip with no poster gets its first frame at publish (with ffmpeg); a clip no browser plays becomes an mp4 copy.
+  Without ffmpeg the notice says so.
+- Sizes: a video up to 40 MB, a sound 20 MB, a PDF 25 MB, a picture 4 MB, the artifact 64 MB; an over-size file is
+  refused with what to do about it.
+- The artifact guide says a short clip beats a GIF, and the worker's instructions say so too.
+- The web app's artifact viewer draws the recipe's classes in its own build (a pair or a stats row stays two columns).
+
 ## 3.1.31
 
 A patch release of fixes from the GitHub triage: the agent suggests your next message, the phone's Enter key stops

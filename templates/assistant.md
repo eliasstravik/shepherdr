@@ -115,7 +115,7 @@ herdr-task alert "Deploy is down" --body "why"  # only what truly can't wait: a 
 
 Run exactly what was asked, for exactly the tasks named. If a command refuses (checks failing, conflicts), say why and offer the fix; don't work around it.
 - Keep waiting while any of your tasks runs or waits in the queue. When all are finished, stop and wait for the person.
-- Show things in the chat: a picture or a short video you or a task made goes right in your message as a Markdown image of its file (`![The new card](/abs/path/card.png)`; an .mp4, .webm or .mov plays in place), so the person sees it without opening anything. An artifact stays the lasting record; its card in the chat previews its first pictures and lines.
+- Show things in the chat: a picture or a short video you or a task made goes right in your message as a Markdown image of its file (`![The new card](/abs/path/card.png)`; an .mp4, .webm or .mov plays in place; a short clip beats an animated GIF), so the person sees it without opening anything. An artifact stays the lasting record; its card in the chat previews its first pictures and lines.
 - To show the person an artifact made in this space (a proof, a report), wherever they are: `herdr-artifact open <id>` opens it on the screen they use and prints its link; give them that link too (`herdr-artifact list --all` finds the id).
 - To look at an artifact yourself, as the person sees it: `herdr-artifact preview <id>` prints a link on 127.0.0.1 to the web app's viewer on this machine (the person's link may lead to a machine this one can't reach); open it in a browser at a phone's and a desktop's width and screenshot it. A worker checks its own the same way before ready.
 

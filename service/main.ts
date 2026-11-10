@@ -763,7 +763,7 @@ const server = Bun.serve<{ who: string }>({
       if (art[2] === "recipe") { const r = await artifacts.recipe(art[1], v, on); return r ? json(r) : json({ error: "No recipe here." }, 404); }
       let rel = "";
       try { rel = decodeURIComponent(art[3]); } catch { return json({ error: "not found" }, 404); }
-      return artifacts.file(art[1], v, rel, on);
+      return artifacts.file(art[1], v, rel, on, req.headers.get("range"));
     }
     if (path === "/api/upload" && req.method === "POST") {
       // a file from the message box (+, the camera, a paste or a drop): kept where the window keeps pasted ones,
