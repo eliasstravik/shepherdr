@@ -1,5 +1,28 @@
 # Changelog
 
+## 3.1.30
+
+A small release: a task whose checks GitHub won't show stops waiting forever, the model and effort switch without a
+restart, and the Tasks panel is simpler.
+
+### Tasks
+
+- A pull request whose checks GitHub won't show no longer leaves its task stuck: a Ready task waits at most 20 minutes
+  while GitHub blocks the merge, then shows Ready, and its Accept card says the checks can't be read. Accept still
+  merges, and GitHub still refuses what its checks block.
+- `shepherdr doctor` warns per repo that has tasks when its token can't read checks, and names the permission to add.
+- The Tasks panel has one toggle under its search box: group by status (the default: Needs you and Ready first, Done
+  at the end) or by place (each machine with its spaces). The status chips and the folder headers are gone.
+
+### Chat
+
+- Switch the model, reasoning level and Fast of a running Claude Code or Codex agent without restarting it, for an
+  Assistant and for a worker task. The chat shows the switch at once. Only a change of agent or permission mode still
+  restarts.
+- The Assistant's and a task's chat headers line up: the title sits in the same place in both, with Back and the
+  task's status in the margin on the left.
+- On a web-only install, the Assistant's restart no longer fails with a window layout error.
+
 ## 3.1.29
 
 A big batch of fixes: tasks say where they really are, calls stay calm and end only when you say so, Codex works
