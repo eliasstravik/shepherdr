@@ -3897,6 +3897,13 @@ export default class Chat extends View {
     this.press = { x: unzoom(x), y: unzoom(y), rx: x, ry: y, at: Date.now() };
   }
 
+  // SHEP-192 (GitHub #916): a press in the chat that moves is a drag, which selects the text under it. The selection stays
+  // until the next press in the chat, so refocus() leaves the keyboard where it is meanwhile (Ctrl+C copies it).
+  noteDrag(at) {
+    if (!this.pressing || this.pressMoved || !at || !this.pressWin) return;
+    if (Math.hypot(at.x - this.pressWin.x, at.y - this.pressWin.y) > 3) this.pressMoved = true;
+  }
+
   // This chat pane in the window ({ x, y, width, height }), from the press that opens something
   // over it (the viewers: images, text, artifacts); null before any press.
   paneArea() {
@@ -4286,16 +4293,18 @@ export default class Chat extends View {
   refocus(paneFocused, showsBox, cx) {
     // Focus moves only outside render: from a timer callback right after it.
     // Never while a dialog over it holds the keyboard (New space's field, #752): Herdr counts this pane focused under it.
+    // Never over a text selection (GitHub #916, SHEP-192): a drag over the messages selects them, and the box taking the
+    // keyboard then made Ctrl+C copy nothing. The timers check again when they fire: a drag can start after they're set.
     const dialog = dialogHolds(shared(KEY_HOLDER));
-    if (paneFocused && showsBox && !dialog && (!this.wasFocused || !this.hadBox)) {
-      cx.timer.after(0, () => { if (!dialogHolds(shared(KEY_HOLDER))) this.box.focus(); });
-      cx.timer.after(600, () => { if (!dialogHolds(shared(KEY_HOLDER))) this.box.focus(); });
+    if (paneFocused && showsBox && !dialog && !this.pressMoved && (!this.wasFocused || !this.hadBox)) {
+      cx.timer.after(0, () => { if (!this.pressMoved && !dialogHolds(shared(KEY_HOLDER))) this.box.focus(); });
+      cx.timer.after(600, () => { if (!this.pressMoved && !dialogHolds(shared(KEY_HOLDER))) this.box.focus(); });
     }
     // The pane focused again (a command, a click on its header) can leave the box without the
     // keyboard: give it back, unless the person just pressed something inside the chat.
     // Not while the keyboard is somewhere else in the window that isn't a pane (#633): a task's chat, the list or its
     // search in the Tasks panel (shared "keyboard.holder", keyHolder()); Herdr still counts this pane as focused then.
-    else if (paneFocused && showsBox && !this.call && this.focused === false && Date.now() - (this.press?.at ?? 0) > 1500
+    else if (paneFocused && showsBox && !this.call && !this.pressMoved && this.focused === false && Date.now() - (this.press?.at ?? 0) > 1500
       && !keysElsewhere(liveHolder(shared(KEY_HOLDER)), this.areaKey())
       && Date.now() - (this.refocusAt ?? 0) > 1000) {
       this.refocusAt = Date.now();
@@ -4396,9 +4405,10 @@ export default class Chat extends View {
         this.noteArea(null);
         cx.notify();
       })
-      .on_mouse_move((e) => { if (e.bounds) this.noteArea(e.bounds); })
-      // Where a press was, for the action buttons under messages (rows can't take handlers).
-      .on_mouse_down("left", (e) => { this.notePress(e); holdKeys(this.areaKey()); this.pressWin = e.position; this.keepIcons = null; if (e.bounds) this.noteArea(e.bounds); })
+      .on_mouse_move((e) => { if (e.bounds) this.noteArea(e.bounds); this.noteDrag(e.position); })
+      // Where a press was, for the action buttons under messages (rows can't take handlers). A new press ends any selection.
+      .on_mouse_down("left", (e) => { this.notePress(e); holdKeys(this.areaKey()); this.pressWin = e.position; this.keepIcons = null; this.pressing = true; this.pressMoved = false; if (e.bounds) this.noteArea(e.bounds); })
+      .on_mouse_up("left", () => { this.pressing = false; })
       // Files dropped anywhere on the chat go with the next message.
       .on_drop((e, cx) => { this.addFiles(attach.paths(e.paths ?? [])); this.saveSoon(cx); this.box.focus(); cx.notify(); });
 
