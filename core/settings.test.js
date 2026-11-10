@@ -82,11 +82,11 @@ test("Reactions are on by default, in the core, the window's chain and herdr-tas
   expect(S.DEFAULTS.assistant).toBeUndefined();
   // lib/coordinator.js needs the window's runtime: its defaults and its chain, as written
   const lib = read("lib/coordinator.js");
-  expect(lib).toMatch(/SHEPHERDR_DEFAULTS = \{[^;]*agents: \{ reactions: true, feedback: true, feedback_repo: "" \}/);
+  expect(lib).toMatch(/SHEPHERDR_DEFAULTS = \{[^;]*agents: \{ reactions: true, suggestions: true, feedback: true, feedback_repo: "" \}/);
   expect(lib).toContain('for (const k of ["tasks", "automations", "agents"])');
   // SHEP-42's key still counts in the window's chain where a layer has no agents'
   expect(lib).toContain('typeof l.obj.assistant?.reactions === "boolean" ? { reactions: l.obj.assistant.reactions, ...l.obj.agents }');
-  expect(read("mods/tasks/bin/herdr_task/settings.py")).toContain('"agents": {"reactions": True, "feedback": True, "feedback_repo": "eliasstravik/shepherdr"}');
+  expect(read("mods/tasks/bin/herdr_task/settings.py")).toContain('"agents": {"reactions": True, "suggestions": True, "feedback": True, "feedback_repo": "eliasstravik/shepherdr"}');
   expect(S.REACTIONS.title).toBe("Reactions");
 });
 

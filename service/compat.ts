@@ -597,7 +597,8 @@ export class Compat {
         // the pictures and videos it put in its words (core/chat-view.js mediaIn), each right under them as a file of
         // its own, as the person's are; only files a chat names are ever served (fileOf)
         const md = (CV as any).mediaIn(x.text, { cwd: t?.foreground?.cwd ?? t?.cwd ?? null, home: machine ? null : HOME }) as { text: string; media: { path: string; name: string; alt: string }[] };
-        if (md.text || !md.media.length) messages.push({ id: x.id, who: "agent", text: md.text || x.text, at: x.at, ...reactions });
+        // the suggested next message it ends with (SHEP-186): the box shows it greyed out while nothing is typed
+        if (md.text || !md.media.length) messages.push({ id: x.id, who: "agent", text: md.text || x.text, at: x.at, ...reactions, ...(x.suggest ? { suggest: x.suggest } : {}) });
         for (const [n, m] of md.media.entries()) {
           (this.files.get(key) ?? this.files.set(key, new Set()).get(key)!).add(m.path);
           messages.push({ id: `${x.id}:m${n}`, who: "agent", at: x.at, file: { name: m.name, path: m.path, ...(m.alt ? { alt: m.alt } : {}) }, ...(md.text || n ? {} : reactions) } as Message);

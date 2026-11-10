@@ -542,6 +542,8 @@ export interface Reaction {
 export interface Message {
   id: string
   who: 'you' | 'agent'
+  /** the agent's suggested next message (its reply's last line): greyed out in the box until something is typed (SHEP-186) */
+  suggest?: string
   /** a live row: when it last changed; at keeps its place in the chat */
   updated?: number
   /** plain text (yours) or markdown (the agent's) */
