@@ -3128,9 +3128,9 @@ class Revive(unittest.TestCase):
         self.log = os.path.join(self.dir, "S1.jsonl")
         open(self.log, "w").close()
         self.terms = {}
-        self.sent, self.screens, self.sessions = [], {}, {}
+        self.sent, self.sent_env, self.screens, self.sessions = [], [], {}, {}
 
-        def hc(args):
+        def hc(args, env=None):
             out, code = "", 0
             if args[:2] == ["hc", "label"]:
                 k, v = args[3].split("=", 1)
@@ -3139,6 +3139,7 @@ class Revive(unittest.TestCase):
                 # each line first clears a parent Claude Code session's markers (SHEP-86)
                 self.assertTrue(args[3].startswith(revive.CLEAN_ENV + " "), args[3])
                 self.sent.append((args[2], args[3][len(revive.CLEAN_ENV) + 1:]))
+                self.sent_env.append(env)
             elif args[:2] == ["hc", "read"]:
                 out = self.screens.get(args[2], "")
             else:
@@ -3188,6 +3189,21 @@ class Revive(unittest.TestCase):
         # Once: the next tick types nothing again, even while the agent starts.
         self.tick()
         self.assertEqual(len(self.sent), 1)
+
+    def test_the_line_goes_into_the_shell_with_no_caller(self):
+        """SHEP-202 (GitHub #925): the scheduler runs under an agent's HC_TERMINAL_ID, and hc then wraps the typed
+        line in <hc from=…> when the shell reports its status, so bash or zsh can't run it. Sent with no caller."""
+        with self.mock.patch.dict(os.environ, {"HC_TERMINAL_ID": "t2"}):
+            self.assistant()
+            self.tick()
+            self.crash("t1")
+            self.tick()
+            # None would mean the inherited environment, which holds HC_TERMINAL_ID here
+            env = self.sent_env[0] if self.sent_env and self.sent_env[0] is not None else dict(os.environ)
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("command claude --model opus --resume S1", self.sent[0][1])
+        self.assertNotIn("HC_TERMINAL_ID", env)
+        self.assertIn("PATH", env)
 
     def test_a_working_agent_carries_on(self):
         self.assistant(status="working")
