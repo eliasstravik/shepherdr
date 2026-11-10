@@ -6,6 +6,8 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 
 - Quick checks are fine here (seconds): `bin/sync-shared --check`, `python3 -m unittest discover -s test` and the
   `node --check` loop in [docs/develop.md](docs/develop.md). The installer tests use throwaway roots only.
+- Shell checks: plain `bash -n` is the real one. Dash (`sh -n` here) misses bash-only parse errors that macOS's bash 3.2
+  hits, so run `bash -n` on every script.
 - Never run herdr-app or herdr-task with a changed `HOME` or `HERDR_APP_HOME`, never start a second herdr-app window,
   and never install into the real `~/.config/herdr-app` for a try: use `./install.sh --root <scratch>`. A window or
   scheduler on another home can overwrite every machine's spaces.
