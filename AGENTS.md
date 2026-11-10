@@ -11,6 +11,8 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - Installer tests run from `test/`: `cd test && python3 -m unittest test_install`. To run an older installer copy for a
   before-check, export `SHEPHERDR_HANDED_OVER=1` (else it hands over to the source's `bin/shepherdr`), and use a full
   `git archive` of the tree, since `herdr_task` lives beside `bin/`.
+- herdr-browser's library check: `test/test_herdr_browser_libs.py` fakes ldd and agent-browser; a real missing-library
+  Chrome needs gcc, linking a library built with `-Wl,-soname` and then deleted.
 - Never run herdr-app or herdr-task with a changed `HOME` or `HERDR_APP_HOME`, never start a second herdr-app window,
   and never install into the real `~/.config/herdr-app` for a try: use `./install.sh --root <scratch>`. A window or
   scheduler on another home can overwrite every machine's spaces.
