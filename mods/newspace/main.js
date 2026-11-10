@@ -378,7 +378,9 @@ export default class NewSpace extends View {
   draw(cx) {
     const t = theme();
     const rq = shared(PICK);
-    if (rq?.for === props()?.overlay && rq.at > this.picked) {
+    // A reply must exist and name this dialog's overlay: with no overlay prop and no reply, both sides were
+    // undefined, so the old check matched and then read rq.at of nothing (SHEP-197).
+    if (rq && rq.for != null && rq.for === props()?.overlay && rq.at > this.picked) {
       this.picked = rq.at;
       this.icon = rq.emoji ?? null;
       cx.timer.after(0, () => this.input.focus());
