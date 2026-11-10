@@ -372,15 +372,20 @@ class ShellScripts(unittest.TestCase):
             self.assertIsNone(m, f"{os.path.relpath(f, ROOT)}: bash 4's {m and m.group(1)} (a while read loop works on 3.2)")
 
     def test_each_parses(self):
+        # #908: macOS's bash is 3.2, and `bash -n` on a script that quotes an apostrophe inside a double-quoted ${...}
+        # fails there ("syntax error near unexpected token `('"); plain bash fails it too, bash --posix and dash don't.
+        # So every script parses under plain bash, and one whose first line says sh also under sh (dash here).
         import shutil
         import subprocess
         for f in shell_scripts():
             with open(f, encoding="utf-8") as fh:
-                shell = "bash" if "bash" in fh.readline() else "sh"
-            if not shutil.which(shell):
-                continue
-            out = subprocess.run([shell, "-n", f], capture_output=True, text=True)
-            self.assertEqual(out.returncode, 0, f"{shell} -n {os.path.relpath(f, ROOT)}: {out.stderr}")
+                first = fh.readline()
+            runs = [["bash", "-n"]] + ([] if "bash" in first else [["sh", "-n"]])
+            for cmd in runs:
+                if not shutil.which(cmd[0]):
+                    continue
+                out = subprocess.run(cmd + [f], capture_output=True, text=True)
+                self.assertEqual(out.returncode, 0, f"{' '.join(cmd)} {os.path.relpath(f, ROOT)}: {out.stderr}")
 
 
 class MacAudio(unittest.TestCase):
