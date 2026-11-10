@@ -863,6 +863,20 @@ class BackToWork(unittest.TestCase):
             self.commands.cmd_resume(self.args(space=None, agent=None, argv=None, parent=None))
         self.assertEqual((t["state"], t["back"]["why"], t["progress"]["text"]), ("running", "resumed", "Working again"))
 
+    def test_resume_nudges_the_resumed_agent(self):
+        """SHEP-189: a resumed session comes back with no message; resume sends it a carry-on, so it
+        doesn't sit idle until someone writes to it."""
+        self.ready(space="sp1")
+        got = {}
+
+        def fake(s, t, space, *a, **k):
+            got.update(k)
+            return {"address": "t2"}, True
+        with self.mock.patch.object(self.commands, "start_again", fake):
+            self.commands.cmd_resume(self.args(space=None, agent=None, argv=None, parent=None))
+        self.assertEqual(got.get("message"), self.commands.RESUME_NUDGE)
+        self.assertIn("Carry on where you left off", got["message"])
+
     def test_accept_refuses_a_task_back_at_work(self):
         t = self.ready()
         self.live = [self.agent({"address": "t1", "status": "working", "turn": 5, "role": "worker"})]
@@ -4604,3 +4618,27 @@ class ReachProbeSpaces(unittest.TestCase):
     def test_a_window_without_spaces_falls_back_to_the_document(self):
         got = self.probe(live=[], saved=[{"id": "sp3", "name": "lab", "folder": "/base/x"}])
         self.assertEqual([s["id"] for s in got["spaces"]], ["sp3"])
+
+
+class StopLog(unittest.TestCase):
+    """SHEP-189: the stop log keeps the last lines as JSON, and never raises into the work it logs."""
+
+    def test_keeps_the_last_lines_as_json(self):
+        import herdr_task.base as base
+        d = tempfile.mkdtemp()
+        from unittest import mock
+        with mock.patch.object(base, "STOP_LOG", os.path.join(d, "stops.jsonl")):
+            for i in range(base.STOP_LOG_LINES + 5):
+                base.stop_note("end-done", n=i)
+            with open(base.STOP_LOG) as f:
+                lines = f.read().splitlines()
+        self.assertEqual(len(lines), base.STOP_LOG_LINES)
+        last = json.loads(lines[-1])
+        self.assertEqual((last["kind"], last["n"]), ("end-done", base.STOP_LOG_LINES + 4))
+        self.assertIn("at", last)
+
+    def test_a_log_that_cannot_be_written_does_not_raise(self):
+        import herdr_task.base as base
+        from unittest import mock
+        with mock.patch.object(base, "STOP_LOG", "/proc/forbidden/stops.jsonl"):
+            base.stop_note("gone", task="SHEP-1")  # must not raise

@@ -79,6 +79,32 @@ def now():
     return int(time.time() * 1000)
 
 
+# ---- the stop log (SHEP-189) ----------------------------------------------------------------------
+# Every time an agent goes (Shepherdr ends it, or its terminal is gone while its task is running),
+# one line here: when, what, which terminal, and what Herdr knew then. Kept small: the last
+# STOP_LOG_LINES lines. Never raises: logging must not stop the work it records.
+STOP_LOG = os.path.join(STORE, ".stops.jsonl")
+STOP_LOG_LINES = 500
+
+
+def stop_note(kind, **fields):
+    """Appends {at, kind, ...fields} to the stop log (a JSON line)."""
+    try:
+        os.makedirs(os.path.dirname(STOP_LOG), exist_ok=True)
+        try:
+            with open(STOP_LOG) as f:
+                lines = f.readlines()
+        except OSError:
+            lines = []
+        lines = lines[-(STOP_LOG_LINES - 1):] + [json.dumps({"at": now(), "kind": kind, **fields}, ensure_ascii=False) + "\n"]
+        tmp = f"{STOP_LOG}.{os.getpid()}.tmp"
+        with open(tmp, "w") as f:
+            f.writelines(lines)
+        os.replace(tmp, STOP_LOG)
+    except Exception:  # noqa: BLE001 - a log line never stops the agent work it records
+        pass
+
+
 # ---- the real environment -------------------------------------------------------------------
 # With a changed HOME, HERDR_APP_HOME or another herdr-core session (a test's), herdr-app and hc
 # could still reach the person's real window and core and overwrite every machine's spaces. So

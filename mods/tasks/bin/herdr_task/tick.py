@@ -8,7 +8,7 @@ import secrets
 import subprocess
 import time
 
-from .base import Fail, git, guard, hc_json, now, PR_EVERY, run, SHELLS, STORE
+from .base import Fail, git, guard, hc_json, now, PR_EVERY, run, SHELLS, STORE, stop_note
 from .settings import machine_name, worker_argv
 from .agents import (
     agent_log, agent_running, busy_again, detail, held_ask, last_question, live_agents, own_work, ready_turns, status_word,
@@ -319,6 +319,7 @@ def end_done(s, t, report, pressed=False):
         if agent_running(k) and status_word(k) == "working" and now() - done_at < DONE_WORKING_MS:
             continue
         if quiet_hc("kill", k).returncode == 0:
+            stop_note("end-done", task=s.ref(t), terminal=k["address"], status=status_word(k), pressed=pressed)
             ended.append(k)
     if ended:
         report.setdefault("ended", []).append({"task": s.ref(t), "terminals": [k["address"] for k in ended]})
@@ -383,6 +384,8 @@ def memory_guard(report):
     if ended:
         h = sample()
     report["memory_guard"] = {"memory": h["memory"], "ended": ended}
+    if ended:
+        stop_note("memory-guard", memory=h["memory"], terminals=ended)
     if h["memory"] <= GUARD_MEMORY or now() - (g.get("alerted") or 0) < GUARD_ALERT_EVERY_MS:
         return
     k = hc_json("get", SCHEDULER)
@@ -498,6 +501,19 @@ def retry_pass(report):
                         rows[k["address"]] = row
                     if row and not row.get("stale"):
                         want = {x: row[x] for x in ("address", "reason", "tries", "due", "over") if x in row}
+                # SHEP-189: a running task whose agents were all running and now are not has gone
+                # "stopped". Logged once at the moment it happens: which terminals, what Herdr saw.
+                up = any(agent_running(k) and (k.get("labels") or {}).get("herdr.role") != "reviewer" for k in mine)
+                if t.get("alive") and not up:
+                    from .machine import sample
+                    h = sample()
+                    stop_note("gone", task=s.ref(t), memory=h["memory"], load=h["load"], terminals=[
+                        {"address": k["address"], "state": k.get("state"), "status": status_word(k),
+                         "foreground": (k.get("foreground") or {}).get("name"), "role": (k.get("labels") or {}).get("herdr.role")}
+                        for k in mine if (k.get("labels") or {}).get("herdr.role") != "reviewer"])
+                if bool(t.get("alive")) != up:
+                    t["alive"] = up
+                    s.dirty = True
                 if (t.get("retry") or None) != want:
                     if want:
                         t["retry"] = want
