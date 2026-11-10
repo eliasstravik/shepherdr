@@ -340,6 +340,8 @@ class Install(unittest.TestCase):
             self.assertTrue(os.path.isfile(os.path.join(share, "service/main.ts")))
             self.assertEqual(os.path.realpath(os.path.join(root, ".local/bin/herdr-task")), os.path.realpath(os.path.join(share, "mods/tasks/bin/herdr-task")))
             self.assertTrue(os.path.isfile(os.path.join(share, "mods/artifacts/recipe-view.js")))
+            # SHEP-181: restarting an Assistant from the web needs no window layout
+            self.assertTrue(os.path.isfile(os.path.join(share, "mods/coordinator/restart.sh")))
             p = subprocess.run([sys.executable, os.path.join(share, "mods/tasks/bin/herdr-task"), "--help"], capture_output=True, text=True)
             self.assertEqual(p.returncode, 0, p.stderr)
             # #735: the artifact guide comes along (agents on the machine serving the web app read it too)

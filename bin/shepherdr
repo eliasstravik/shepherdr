@@ -380,7 +380,9 @@ def service_items(src):
             if top != "templates" or f.endswith(".md"):
                 items.append(("service", f"{SHARE}/{top}/{f}", os.path.join(src, top, f)))
     # the artifact guide too (`herdr-artifact guide`), for agents on a web-only machine
-    for f in ("mods/artifacts/recipe-view.js", "mods/artifacts/markup.js", "mods/artifacts/ARTIFACTS.md", "install.sh"):
+    # and restart.sh, which the service runs to restart an Assistant from the web (service/layout-scripts.ts)
+    for f in ("mods/artifacts/recipe-view.js", "mods/artifacts/markup.js", "mods/artifacts/ARTIFACTS.md", "install.sh",
+              "mods/coordinator/restart.sh"):
         items.append(("service", f"{SHARE}/{f}", os.path.join(src, f)))
     # recipe-view.js imports it from beside itself
     items.append(("service", f"{SHARE}/mods/artifacts/core/recipe.js", os.path.join(src, "core", "recipe.js")))

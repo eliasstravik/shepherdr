@@ -582,6 +582,23 @@ function codexStep(name, args) {
 // `meta` is what the agent runs on, from its newest lines: { model, effort, speed, used, window }
 // (used: tokens in its context window now; window: that window's size when the log says it;
 // at: when the model was last named).
+// What a Claude Code /model, /effort or /fast said it switched to (its <local-command-stdout>), as log meta: the model as
+// the id its turns name ("Set model to `Opus 5.5 (1M context)`" → claude-opus-5-5, alias claude-opus-5-5[1m]: the
+// row, 1M or not), the level, the speed; or null.
+export function claudeSwitch(text) {
+  const t = String(text ?? "").replace(/<\/?local-command-stdout>/g, "");
+  let m = /^Set model to `?([A-Z][a-z]+) (\d+)(?:\.(\d+))?(?: \(([^)]*)\))?`?/.exec(t);
+  if (m) {
+    const model = `claude-${m[1].toLowerCase()}-${m[2]}${m[3] ? `-${m[3]}` : ""}`;
+    return { model, alias: /1M/i.test(m[4] ?? "") ? `${model}[1m]` : model };
+  }
+  m = /^(?:Set effort level to|Effort level set to) (\w+)/.exec(t);
+  if (m) return { effort: m[1] };
+  m = /^Fast mode (ON|OFF)\b/.exec(t);
+  if (m) return { speed: m[1] === "ON" ? "fast" : "standard" };
+  return null;
+}
+
 export class Conversation {
   constructor(kind) {
     this.kind = kind;
@@ -850,6 +867,12 @@ export class Conversation {
 
   claude(l, off) {
     if (l.isSidechain) return;
+    // a /model, /effort or /fast run in place (SHEP-181): what it runs on from now, before its next turn says so
+    const local = l.type === "user" && typeof l.message?.content === "string" ? l.message.content : l.type === "system" && l.subtype === "local_command" && typeof l.content === "string" ? l.content : null;
+    if (local?.startsWith("<local-command-stdout>")) {
+      const meta = claudeSwitch(local);
+      if (meta) this.meta = { ...this.meta, ...meta, at: time(l.timestamp) };
+    }
     if (l.type === "queue-operation") { this.queueOp(l, off); return; }
     if (l.type === "user" && l.origin?.kind === "task-notification") {
       // A helper or a background job finished (Claude Code tells the agent so): it's done.
@@ -971,6 +994,11 @@ export class Conversation {
         if (ARTIFACT.test(JSON.stringify(p.arguments ?? p.input ?? p.action ?? ""))) this.push({ kind: "artifact", id: `art${off}`, at: time(l.timestamp) });
         this.sent(codexCommand(p.arguments ?? p.input ?? p.action), off, time(l.timestamp));
       }
+    } else if (p.type === "thread_settings_applied" && p.thread_settings) {
+      // its settings as applied: at start, and on a /model or /fast in place (SHEP-181)
+      const t = p.thread_settings;
+      this.meta = { ...this.meta, model: t.model ?? this.meta.model, effort: t.reasoning_effort ?? this.meta.effort,
+        ...(t.service_tier !== undefined ? { speed: ["fast", "priority"].includes(t.service_tier) ? "fast" : "standard" } : {}), at: time(l.timestamp) };
     } else if (l.type === "turn_context") {
       this.meta = { ...this.meta, model: p.model ?? this.meta.model, effort: p.effort ?? p.reasoning_effort ?? this.meta.effort, at: time(l.timestamp) };
     } else if (p.type === "token_count") {
