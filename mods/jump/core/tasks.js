@@ -193,6 +193,20 @@ export function place(list, task, { live = [], helpers = [], loaded = true, now 
   return { list, task, live, status, section, needs, why, ...(settles ? { settles } : {}) };
 }
 
+// Needs-you items about a task (check, stopped, waiting) that the task's own status has moved past. The
+// inbox is read from herdr-task every 20 s, the lists as they change: when a task reads otherwise now (Done,
+// Working, Queued, ...), its item is stale and its row shows the task's real status. truth: Map of
+// "<machine>:<folder>:<ref>" (the key an item has) -> its place() result, every task, archived ones too.
+// An item with no list read for its task (another machine not loaded) is kept.
+const TASK_ITEMS = new Set(["check", "stopped", "waiting"]);
+export function holdingItems(items, truth) {
+  return items.filter((x) => {
+    if (!TASK_ITEMS.has(x.kind) || !x.ref || !x.folder) return true;
+    const p = truth.get(`${x.machine ?? ""}:${x.folder}:${x.ref}`);
+    return !p || p.section === "needs";
+  });
+}
+
 // Why a queued task waits: the tasks it comes after that aren't done, else the folder is full.
 // running: how many of the list's tasks run with a live agent now.
 export function queueReason(list, task, running) {

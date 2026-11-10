@@ -29,7 +29,7 @@ import { taskMenu } from "./core/menus.js";
 import { machinesInOrder, machineOrderOf, chatPane } from "./core/spaces.js";
 // The rules for a task's status, order and words: shared with the web app (core/tasks.js).
 import { RANK, STATUS, RANK_OF, ORDER, GROUP_BY, groupBy, groupNow, machineOf, machineName, refOf, taskKey, autoPrefix, place,
-  queueReason, reportOf as report, secondLine, leftOf, order, matches, day, ago, capital, short, autoWhere, fromLine, inSpace } from "./core/tasks.js";
+  queueReason, reportOf as report, secondLine, leftOf, order, matches, day, ago, capital, short, autoWhere, fromLine, inSpace, holdingItems } from "./core/tasks.js";
 import { READ_LISTS, taskLists } from "./core/tasklists.js";
 import { SH } from "./core/paths.js";
 import { dirs } from "./dirs.js";
@@ -144,6 +144,8 @@ export default class Tasks extends View {
     this.watch(cx);
     this.loadRemote(cx);
     cx.timer.every(10000, (cx) => this.loadRemote(cx));
+    // The watch can end or fail (see watch()): this computer's lists are read again every 10 s anyway.
+    cx.timer.every(10000, (cx) => this.load(cx, null));
     // Times like "4m" and "2h ago" move on by the minute.
     cx.timer.every(60000, (cx) => cx.notify());
   }
@@ -152,18 +154,18 @@ export default class Tasks extends View {
   watch(cx) {
     if (this.watching) return;
     this.watching = true;
+    // A failed watch is tried again after 5 s (it used to end here for good: no live updates until the panel reopened).
     cx.spawn(async (cx) => {
-      try {
-        let w = null;
-        for (;;) {
-          // At most 5 s per wait, as the commands above.
-          w ??= watchFolder(dirs().tasks).then(() => true);
-          if (!(await Promise.race([w, cx.sleep(5000)]))) continue;
-          w = null;
-          await this.load(cx, null);
-        }
-      } catch {}
-      this.watching = false;
+      let w = null;
+      for (;;) {
+        // At most 5 s per wait, as the commands above.
+        w ??= watchFolder(dirs().tasks).then(() => true, () => false);
+        const got = await Promise.race([w, cx.sleep(5000).then(() => "wait")]);
+        if (got === "wait") continue;
+        w = null;
+        if (got) await this.load(cx, null);
+        else await cx.sleep(5000);
+      }
     });
   }
 
@@ -280,6 +282,8 @@ export default class Tasks extends View {
     // This space: the shown space's only; not for Ctrl+K's jump while its words are still in the search field.
     const here = this.here && filters && !(this.jumpQ && this.query.value() === this.jumpQ) ? spaces().find((s) => s.active) ?? null : null;
     let placed = this.lists.flatMap((l) => l.tasks.map((task) => this.place(l, task)));
+    // Each task's status as its list says it now, archived ones too: a Needs-you item the list has moved past is stale.
+    const truth = new Map(placed.map((p) => [`${p.list.machine ?? ""}:${p.list.folder}:${refOf(p.list, p.task)}`, p]));
     if (here) placed = placed.filter((p) => inSpace(here, { machine: p.list.machine ?? null, folder: p.list.folder, space: p.task.space }));
     // Archived tasks (herdr-task: Done ones archive themselves after a while) leave every list and
     // count: only the Archived view and a search show them, the latest archived first.
@@ -287,7 +291,7 @@ export default class Tasks extends View {
     placed = placed.filter((p) => !archived.includes(p));
     this.prunePins(placed, cx);
     // Needs you: asks, stuck agents, problems, failed automations (a task ready to merge is in Ready).
-    let inbox = needs();
+    let inbox = holdingItems(needs(), truth);
     if (here) inbox = inbox.filter((x) => this.needHere(here, x));
     this.readAsks(inbox, cx);
     this.readPrefixes(inbox, cx);

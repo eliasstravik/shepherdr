@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { place, queueReason, reportOf, estimated, order, ago, autoPrefix, refOf, taskKey, matches, busyAgain, secondLine, leftOf, ORDER, STATUS, WORKING_AGAIN, GRACE_MS, fromLine, autoWhere, inSpace } from "./tasks.js";
+import { place, queueReason, reportOf, estimated, order, ago, autoPrefix, refOf, taskKey, matches, busyAgain, secondLine, leftOf, ORDER, STATUS, WORKING_AGAIN, GRACE_MS, fromLine, autoWhere, inSpace, holdingItems } from "./tasks.js";
 import { REASONS, fit } from "./needs.js";
 
 const NOW = 1_800_000_000_000;
@@ -210,5 +210,26 @@ describe("This space (inSpace)", () => {
   });
   test("no space: nothing is in it", () => {
     expect(inSpace(null, { machine: null, folder: "/work/shop" })).toBe(false);
+  });
+});
+
+describe("Needs-you items the task's own status has moved past (SHEP-195)", () => {
+  // The task as its list says it now, keyed as the Tasks panel keys items.
+  const truthOf = (...ps) => new Map(ps.map((p) => [`${p.list.machine ?? ""}:${p.list.folder}:${refOf(p.list, p.task)}`, p]));
+  const item = (kind, extra = {}) => ({ kind, machine: null, folder: "/f", ref: "X-3", ...extra });
+  test("a check or waiting item for a task now Done is dropped; its row shows Done", () => {
+    const done = at({ id: 3, state: "done", attention: "CI failed", title: "T" });
+    const truth = truthOf(done);
+    expect(holdingItems([item("check"), item("waiting")], truth)).toEqual([]);
+    expect(done.section).toBe("done");
+  });
+  test("an item for a task still needing the person stays", () => {
+    const stuck = at({ id: 3, state: "running", attention: "CI failed" });
+    expect(holdingItems([item("check")], truthOf(stuck))).toHaveLength(1);
+  });
+  test("an item whose task no list has (another machine not loaded) stays, as do asks and provider items", () => {
+    const done = at({ id: 3, state: "done" });
+    const items = [item("check", { ref: "X-9" }), item("blocked", { terminal: "t1" }), item("provider")];
+    expect(holdingItems(items, truthOf(done))).toHaveLength(3);
   });
 });
