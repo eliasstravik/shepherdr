@@ -4553,6 +4553,36 @@ class TaskFlow(unittest.TestCase):
             github.pr_open(self.store, self.task, "o/r")
         self.assertIn("Couldn't push task/1", str(e.exception))
 
+    def test_the_pull_request_title_and_body_are_short(self):
+        """SHEP-198 (GitHub #924): the title follows the repo's commit titles ("SHEP-198: ..."), and the
+        body is the summary, details and proof's title, never the brief."""
+        import herdr_task.github as github
+        wt, remote = self.task["worktree"], os.path.join(self.root, "remote.git")
+        self.git(self.root, "init", "-q", "--bare", remote)
+        self.git(self.main, "remote", "add", "origin", remote)
+        self.commit(wt, "work", "a.txt")
+        ref = self.store.ref(self.task)
+        self.task.update({"title": "Flow", "prompt": "BRIEF-ONLY-LINE do the whole thing", "details": "- Checked the flow",
+                          "proof": {"id": "a-1", "title": f"{ref}: Flow · Proof"}})
+        asked = []
+
+        def gh(*a, **k):
+            asked.append(a)
+            return (True, "https://github.com/o/r/pull/9", "") if a[:2] == ("pr", "create") else (True, "[]", "")
+        self.patch(github, "gh", gh)
+        self.assertEqual(github.pr_open(self.store, self.task, "o/r", "The flow works now")["number"], 9)
+        create = next(a for a in asked if a[:2] == ("pr", "create"))
+        title, body = create[create.index("--title") + 1], create[create.index("--body") + 1]
+        self.assertEqual(title, f"{ref}: Flow")
+        self.assertNotIn("BRIEF-ONLY-LINE", body)
+        self.assertIn(f"Task: {ref}", body)
+        self.assertIn("The flow works now", body)
+        self.assertIn("- Checked the flow", body)
+        self.assertIn(f"{ref}: Flow · Proof", body)
+        self.assertLess(len(body), 400)
+        # A title that already names the ref doesn't name it twice.
+        self.assertEqual(github.pr_title(self.store, {**self.task, "title": f"{ref} Flow"}), f"{ref}: Flow")
+
     def test_ready_keeps_the_pull_request_the_task_continues(self):
         """#828: the work pushed to an open pull request's own branch: ready takes that one, never a second."""
         import herdr_task.github as github
