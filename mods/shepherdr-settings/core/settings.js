@@ -88,6 +88,9 @@ export const otherCli = (worker) => (worker === "codex" ? "claude" : "codex");
 // some of your messages with an emoji; off, none does. Kept as agents.reactions; SHEP-42 kept it as assistant.reactions
 // (upgradeReactions moves it).
 export const REACTIONS = { title: "Reactions", about: "Agents react to some of your messages with an emoji, as a person would." };
+// Suggested next message (SHEP-186): an agent ends its reply with what you would likely say next, shown greyed out in the
+// box: Enter sends it, Tab fills it in, typing replaces it. Off: no agent suggests, and none is shown.
+export const SUGGESTIONS = { title: "Suggested next message", about: "Your agents suggest what you'd likely say next, greyed out in the box: Enter sends it, Tab fills it in." };
 // A settings file's layers (everywhere, machines, spaces) with SHEP-42's assistant.reactions moved to agents.reactions
 // (a layer that has both keeps agents'). Changes cfg in place and returns it; true when anything moved.
 export function upgradeReactions(cfg) {
@@ -354,7 +357,7 @@ export const ARCHIVE = [[0, "Off"], [1, "1 day"], [3, "3 days"], [7, "1 week"], 
 export const ONOFF = [[true, "On"], [false, "Off"]];
 
 export const DEFAULTS = { tasks: { merge: "ask", review_rounds: 0, must_fix: "major", max_running: 10, worktrees: true, archive_after: 7, proof: true }, automations: { enabled: true },
-  agents: { reactions: true, feedback: true, feedback_repo: "" } };
+  agents: { reactions: true, suggestions: true, feedback: true, feedback_repo: "" } };
 
 // [section, field, label, choices | { min, max }]
 export const TASK_ROWS = [
