@@ -9,7 +9,10 @@
 //   list     { items: [md], ordered }                   table    { columns: [label | { label, align }], rows: [[cell]] }
 //   chart    { kind: bar | line | pie, labels: [], series: [{ name, values: [] }] }
 //   stats    { items: [{ label, value, note }] }        image    { src, caption, w, h }  (src: a file beside it)
-//   pair     { before: { src, caption }, after: { src, caption } }
+//   video    { src, poster, caption, loop, muted, autoplay }   a clip: mp4, webm or mov (poster: a picture beside it)
+//   audio    { src, caption }                           a sound: mp3, m4a, wav or ogg
+//   pdf      { src, caption }                           a PDF, shown inline (on a phone: its first page and a link)
+//   pair     { before: { src, caption }, after: { src, caption } }   a picture or a video each; videos play together
 //   code     { text, lang }                             callout  { tone: info | good | warn | bad, title, md }
 //   columns  { columns: [[blocks]] }                    tabs     { tabs: [{ label, blocks }] }
 //   details  { summary, blocks }                        divider  {}
@@ -22,7 +25,18 @@
 // Shared core: the source is core/recipe.js; bin/sync-shared copies it into the mods in lib/COPIES.
 
 export const RECIPE = 1;
-export const TYPES = ["heading", "text", "list", "table", "chart", "stats", "image", "pair", "code", "callout", "columns", "tabs", "details", "divider", "choice", "form", "button", "buttons"];
+export const TYPES = ["heading", "text", "list", "table", "chart", "stats", "image", "video", "audio", "pdf", "pair", "code", "callout", "columns", "tabs", "details", "divider", "choice", "form", "button", "buttons"];
+// The files a block can show, by extension (what the browser plays or draws; a .mov the browser can't play is still
+// served, and the web app says so and offers the file).
+export const PICTURES = ["png", "jpg", "jpeg", "gif", "webp", "svg"];
+export const VIDEOS = ["mp4", "m4v", "webm", "mov"];
+export const AUDIOS = ["mp3", "m4a", "wav", "ogg"];
+export const DOCUMENTS = ["pdf"];
+// What a file is, from its name: "image", "video", "audio", "pdf", or null when none of them.
+export const mediaKind = (src) => {
+  const e = typeof src === "string" ? (src.match(/\.([a-z0-9]+)$/i)?.[1] ?? "").toLowerCase() : "";
+  return PICTURES.includes(e) ? "image" : VIDEOS.includes(e) ? "video" : AUDIOS.includes(e) ? "audio" : DOCUMENTS.includes(e) ? "pdf" : null;
+};
 export const TONES = ["info", "good", "warn", "bad"];
 export const CHARTS = ["bar", "line", "pie"];
 export const FIELDS = ["text", "textarea", "select", "checkbox"];
@@ -46,6 +60,8 @@ export function problems(recipe, files = null) {
     if (b.id != null) { if (!str(b.id) || ids.has(b.id)) out.push(`block ${where}: id must be a word used once.`); ids.add(b.id); }
     const need = (cond, what) => { if (!cond) out.push(`block ${where} (${b.type}): ${what}.`); };
     const pic = (src) => { need(str(src) && !src.includes("..") && !src.startsWith("/"), "src must be a file beside recipe.json"); if (files && str(src)) need(files.includes(src), `${src} isn't beside recipe.json`); };
+    // a file beside it of one of these kinds (mediaKind): a clip, a sound, a PDF or a picture
+    const file = (src, kinds, what) => { pic(src); need(str(src) && kinds.includes(mediaKind(src)), what); };
     switch (b.type) {
       case "heading": need(str(b.text), "needs text"); break;
       case "text": need(str(b.md), "needs md"); break;
@@ -53,8 +69,11 @@ export function problems(recipe, files = null) {
       case "table": need(arr(b.columns) && arr(b.rows) && b.rows.every(arr), "needs columns and rows (lists)"); break;
       case "chart": need(CHARTS.includes(b.kind), `kind must be ${CHARTS.join(", ")}`); need(arr(b.labels) && arr(b.series) && b.series.every((s) => arr(s?.values) && s.values.every((v) => typeof v === "number")), "needs labels and series of numbers"); break;
       case "stats": need(arr(b.items) && b.items.every((x) => x && "label" in x && "value" in x), "items need a label and a value"); break;
-      case "image": pic(b.src); break;
-      case "pair": pic(b.before?.src); pic(b.after?.src); break;
+      case "image": pic(b.src); need(!b.src || mediaKind(b.src) === "image", "src must be a picture (png, jpg, gif, webp or svg): a clip, a sound or a PDF has its own block"); break;
+      case "video": file(b.src, ["video"], "src must be a clip (mp4, webm or mov)"); if (b.poster != null) file(b.poster, ["image"], "poster must be a picture beside it"); need(b.caption == null || str(b.caption), "caption must be words"); break;
+      case "audio": file(b.src, ["audio"], "src must be a sound (mp3, m4a, wav or ogg)"); break;
+      case "pdf": file(b.src, ["pdf"], "src must be a PDF beside it"); break;
+      case "pair": for (const x of [b.before, b.after]) { file(x?.src, ["image", "video"], "a side's src must be a picture or a clip"); if (x?.poster != null) file(x.poster, ["image"], "a side's poster must be a picture beside it"); } break;
       case "code": need(str(b.text), "needs text"); break;
       case "callout": need(!b.tone || TONES.includes(b.tone), `tone must be ${TONES.join(", ")}`); need(str(b.md) || str(b.title), "needs md or a title"); break;
       case "columns": need(arr(b.columns) && b.columns.every(arr), "columns must be lists of blocks"); if (arr(b.columns)) b.columns.forEach((c, j) => arr(c) && walk(c, `${where}.${j + 1}.`)); break;
@@ -97,7 +116,7 @@ export function withIds(recipe) {
 export function blockName(b) {
   const what = { heading: "heading", text: "text", list: "list", table: "table", chart: "chart", stats: "numbers", image: "picture",
     pair: "before and after", code: "code", callout: "callout", columns: "columns", tabs: "tabs", details: "folded section",
-    divider: "line", choice: "choice", form: "form", button: "button", buttons: "buttons" }[b?.type] ?? "block";
+    divider: "line", choice: "choice", form: "form", button: "button", buttons: "buttons", video: "video", audio: "audio", pdf: "PDF" }[b?.type] ?? "block";
   const name = b?.text ?? b?.title ?? b?.question ?? b?.summary ?? b?.caption ?? b?.label ?? b?.items?.[0]?.label ?? null;
   return name ? `the ${what} “${String(name).slice(0, 60)}”` : `the ${what} ${b?.id ?? ""}`.trim();
 }
@@ -126,12 +145,19 @@ export function chartShapes(b) {
 }
 
 // What an artifact's card in the chat shows of it before it opens (SHEP-142): its key pictures (the cover it names,
-// else the first pictures in it, at most `max`) and its first words (headings and text, in order, up to `chars`).
-// { images: [src], lines: [words] }; Markdown marks are kept for the reader to draw.
+// else the first pictures in it, at most `max`; a clip's poster), the clips with no poster (their first frame) and its
+// first words (headings and text, in order, up to `chars`). { images: [src], videos: [src], lines: [words] }; Markdown
+// marks are kept for the reader to draw.
 export function preview(recipe, { max = 3, chars = 280 } = {}) {
-  const images = [], lines = [];
+  const images = [], videos = [], lines = [];
   let used = 0;
   const pic = (src) => { if (str(src) && !images.includes(src) && images.length < max) images.push(src); };
+  // a picture, or a clip: its poster when it has one (a still), else the clip itself, which the card shows at its first frame
+  const side = (x) => {
+    const kind = mediaKind(x?.src);
+    if (kind === "video") { if (str(x.poster)) pic(x.poster); else if (!videos.includes(x.src) && videos.length < max) videos.push(x.src); }
+    else if (kind === "image") pic(x.src);
+  };
   if (str(recipe?.cover)) pic(recipe.cover);
   const say = (s) => {
     if (!str(s) || used >= chars) return;
@@ -143,8 +169,8 @@ export function preview(recipe, { max = 3, chars = 280 } = {}) {
   };
   const walk = (blocks) => (arr(blocks) ? blocks : []).forEach((b) => {
     if (!b || typeof b !== "object") return;
-    if (b.type === "image") pic(b.src);
-    else if (b.type === "pair") { pic(b.before?.src); pic(b.after?.src); }
+    if (b.type === "image" || b.type === "video") side(b);
+    else if (b.type === "pair") { side(b.before); side(b.after); }
     else if (b.type === "heading") say(b.text);
     else if (b.type === "text") say(b.md);
     else if (b.type === "callout") say(b.title ? `**${b.title}** ${b.md ?? ""}` : b.md);
@@ -153,5 +179,5 @@ export function preview(recipe, { max = 3, chars = 280 } = {}) {
     else if (b.type === "tabs" && arr(b.tabs)) walk(b.tabs[0]?.blocks);
   });
   walk(recipe?.blocks);
-  return { images, lines };
+  return { images, videos, lines };
 }

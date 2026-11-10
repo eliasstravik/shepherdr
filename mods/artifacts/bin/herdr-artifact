@@ -69,8 +69,8 @@ MARKUP_HELPERS = ("dirs.js", os.path.join("core", "paths.js"))
 # A recipe artifact (recipe.json, Shepherdr 3.1) is drawn by the shared recipe view: copied into its installed mod.
 RECIPE_VIEW = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "recipe-view.js")
 RECIPE_CORE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "core", "recipe.js")
-RECIPE_TYPES = {"heading", "text", "list", "table", "chart", "stats", "image", "pair", "code", "callout", "columns", "tabs",
-                "details", "divider", "choice", "form", "button", "buttons"}
+RECIPE_TYPES = {"heading", "text", "list", "table", "chart", "stats", "image", "video", "audio", "pdf", "pair", "code", "callout",
+                "columns", "tabs", "details", "divider", "choice", "form", "button", "buttons"}
 NOTES = os.path.join(STORE, "notes")
 # A custom artifact's picture, as the window last showed it (a version's folder; the web shows it in its place).
 PICTURE = ".window.png"
@@ -79,9 +79,20 @@ PROOF = re.compile(r"\bproof\b", re.I)
 NARROW = 320
 KEEP = 20
 MAX_FILES = 200
-MAX_BYTES = 4 * 1024 * 1024
-# What a mod folder may hold: code, text and pictures. No binaries, no node_modules.
-ALLOWED = {".js", ".mjs", ".json", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".md", ".txt", ".csv", ".ttf", ".otf"}
+MB = 1024 * 1024
+# The whole artifact (every version is kept, so every byte counts 20 times over: the limits are sized for that)
+MAX_BYTES = 64 * MB
+MAX_FILE = 4 * MB
+# Media (SHEP-209): a clip, a sound or a PDF is a block of its own, and may be bigger than a picture. Browsers play
+# these kinds; the window draws their poster or a placeholder (its player plays nothing).
+MEDIA = {"video": ("mp4", "m4v", "webm", "mov"), "audio": ("mp3", "m4a", "wav", "ogg"), "pdf": ("pdf",)}
+MEDIA_MAX = {"video": 40 * MB, "audio": 20 * MB, "pdf": 25 * MB}
+# The codecs a browser plays (ffprobe's names); anything else is converted to an mp4 copy when ffmpeg is here.
+BROWSER_VIDEO = ("h264", "vp8", "vp9", "av1")
+BROWSER_AUDIO = ("aac", "mp3", "opus", "vorbis", "flac", "pcm_s16le", "pcm_s24le", "pcm_f32le")
+# What a mod folder may hold: code, text, pictures and media. No node_modules.
+ALLOWED = {".js", ".mjs", ".json", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".md", ".txt", ".csv", ".ttf", ".otf",
+           *(f".{e}" for kind in MEDIA for e in MEDIA[kind])}
 SKIP = {"jsconfig.json", "gpui-kit.d.ts", "herdr.d.ts", "artifact.js", "artifact-main.js", "artifact-markup.js", ".version"}
 
 
@@ -253,6 +264,23 @@ def task_ref(key):
 
 # ---- files -------------------------------------------------------------------------------
 
+def kind_of(name):
+    """A file's media kind: "video", "audio", "pdf", or None (a picture or anything else)."""
+    e = os.path.splitext(name)[1].lower().lstrip(".")
+    return next((k for k, es in MEDIA.items() if e in es), None)
+
+
+def too_big(rel, n, kind):
+    mb = n / MB
+    if kind == "video":
+        return (f"{rel} is {mb:.0f} MB: a video can be at most {MEDIA_MAX[kind] // MB} MB. Make it shorter or smaller, e.g. "
+                f"`ffmpeg -i {rel} -vf scale=960:-2 -crf 28 -an short.mp4` (-an drops the sound), then use short.mp4.")
+    if kind:
+        noun = {"video": "a video", "audio": "a sound", "pdf": "a PDF"}[kind]
+        return f"{rel} is {mb:.0f} MB: {noun} can be at most {MEDIA_MAX[kind] // MB} MB."
+    return f"{rel} is {mb:.1f} MB: a picture or other file can be at most {MAX_FILE // MB} MB (crop or compress it)."
+
+
 def gather(src):
     """The files of a mod folder to keep, relative paths. Fails on anything a mod can't hold."""
     src = os.path.realpath(os.path.expanduser(src))
@@ -268,11 +296,15 @@ def gather(src):
             if n.startswith(".") or n in SKIP or n.endswith(".error"):
                 continue
             if os.path.splitext(n)[1].lower() not in ALLOWED:
-                raise Fail(f"{rel}: an artifact holds only .js, .json, .svg, pictures, fonts and text.")
-            size += os.path.getsize(os.path.join(root, n))
+                raise Fail(f"{rel}: an artifact holds only .js, .json, .svg, pictures, videos, sounds, PDFs, fonts and text.")
+            n_bytes = os.path.getsize(os.path.join(root, n))
+            kind = kind_of(n)
+            if n_bytes > MEDIA_MAX.get(kind, MAX_FILE):
+                raise Fail(too_big(rel, n_bytes, kind))
+            size += n_bytes
             out.append(rel)
     if len(out) > MAX_FILES or size > MAX_BYTES:
-        raise Fail(f"Too big: {len(out)} files, {size // 1024} KB (at most {MAX_FILES} files, {MAX_BYTES // 1048576} MB).")
+        raise Fail(f"Too big: {len(out)} files, {size // MB} MB (at most {MAX_FILES} files, {MAX_BYTES // MB} MB in all).")
     return src, sorted(out)
 
 
@@ -291,6 +323,17 @@ def version_kind(aid, v):
 NOT_RECIPE = ("{src} is a custom panel (main.js): only the Herdr window runs it, so the web app on the person's phone shows "
               "just a picture of it. Write it as a recipe instead (recipe.json: text, tables, charts, pictures, forms; "
               "`herdr-artifact guide`). Only when a recipe truly can't do it (a game, a live tool), publish it with --custom.")
+
+
+MEDIA_BLOCKS = {"image": ("image",), "video": ("video",), "audio": ("audio",), "pdf": ("pdf",), "pair": ("image", "video")}
+PICTURE_EXT = ("png", "jpg", "jpeg", "gif", "webp", "svg")
+
+
+def file_kind(name):
+    """What a recipe's file is: "image", "video", "audio", "pdf", or None."""
+    if os.path.splitext(name)[1].lower().lstrip(".") in PICTURE_EXT:
+        return "image"
+    return kind_of(name)
 
 
 def recipe_problems(src, files):
@@ -313,9 +356,18 @@ def recipe_problems(src, files):
             if not isinstance(b, dict) or b.get("type") not in RECIPE_TYPES:
                 out.append(f"block {where}: type must be one of {', '.join(sorted(RECIPE_TYPES))}.")
                 continue
-            for x in ([b.get("src")] if b["type"] == "image" else [(b.get("before") or {}).get("src"), (b.get("after") or {}).get("src")] if b["type"] == "pair" else []):
+            want = MEDIA_BLOCKS.get(b["type"])
+            sides = [b] if b["type"] in ("image", "video", "audio", "pdf") else [b.get(k) or {} for k in ("before", "after")] if b["type"] == "pair" else []
+            for side in sides if want else []:
+                x = side.get("src")
                 if not isinstance(x, str) or x not in files:
                     out.append(f"block {where} ({b['type']}): {x!r} isn't a file beside recipe.json.")
+                elif file_kind(x) not in want:
+                    out.append(f"block {where} ({b['type']}): {x} must be {' or '.join(want)} (png, jpg, gif, webp or svg for a picture; mp4, webm or mov for a clip; mp3, m4a, wav or ogg for a sound; pdf for a PDF).")
+                if b["type"] == "video" and side.get("poster") is not None and side.get("poster") not in files:
+                    out.append(f"block {where} (video): poster {side.get('poster')!r} isn't a file beside recipe.json.")
+                elif side.get("poster") is not None and file_kind(str(side.get("poster"))) != "image":
+                    out.append(f"block {where} ({b['type']}): poster must be a picture beside recipe.json.")
             for x in ([b] if b["type"] == "button" else (b.get("items") or [None]) if b["type"] == "buttons" else []):
                 # a button: words, and a reply, a plain https link or both (core/recipe.js buttonProblem)
                 x = x if isinstance(x, dict) else {}
@@ -353,6 +405,103 @@ def recipe_parts(dst):
     with open(os.path.join(dst, "main.js"), "w") as f:
         f.write('// Written by herdr-artifact: this artifact is a recipe (recipe.json), drawn by the shared recipe view.\n'
                 'export { default } from "./recipe-view.js";\n')
+
+
+def probe(path):
+    """A clip's first video and audio codec names (ffprobe's, "" for none), or None when ffprobe isn't here."""
+    if not shutil.which("ffprobe"):
+        return None
+
+    def codec(sel):
+        r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", sel, "-show_entries", "stream=codec_name",
+                            "-of", "csv=p=0", path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+        return r.stdout.decode().strip().split("\n")[0] if r.returncode == 0 else ""
+    return codec("v:0"), codec("a:0")
+
+
+def media_blocks(blocks):
+    """Every block (and pair side) that shows a clip, as its dict, in order; the blocks nested in columns, tabs and details too."""
+    for b in blocks or []:
+        if not isinstance(b, dict):
+            continue
+        if b.get("type") == "video":
+            yield b
+        if b.get("type") == "pair":
+            yield from (x for x in (b.get("before"), b.get("after")) if isinstance(x, dict) and file_kind(str(x.get("src", ""))) == "video")
+        if b.get("type") == "columns":
+            for c in b.get("columns") or []:
+                yield from media_blocks(c)
+        if b.get("type") == "tabs":
+            for t in b.get("tabs") or []:
+                yield from media_blocks((t or {}).get("blocks"))
+        if b.get("type") == "details":
+            yield from media_blocks(b.get("blocks"))
+
+
+def ready_media(keep, files):
+    """The stored copy of a recipe made ready for every browser (SHEP-209): a clip the browser can't play becomes an
+    mp4 copy (ffmpeg here), and a clip with no poster gets its first frame as one. Only the stored version changes, never
+    the folder the person keeps. Returns (files, notes for the person)."""
+    rp = os.path.join(keep, "recipe.json")
+    with open(rp) as f:
+        recipe = json.load(f)
+    notes, changed = [], False
+    ffmpeg = shutil.which("ffmpeg") is not None
+    codecs = {x: probe(os.path.join(keep, x)) for x in files if file_kind(x) == "video"} if ffmpeg else {}
+    frames = {}  # a clip's first frame, made once however many blocks show it
+    for b in media_blocks(recipe.get("blocks")):
+        src = b.get("src")
+        if not isinstance(src, str) or src not in files:
+            continue
+        stem = os.path.splitext(src)[0]
+        if not ffmpeg:
+            if src.lower().endswith(".mov"):
+                notes.append(f"{src} is a .mov: Safari plays it, Chrome and Firefox may not. ffmpeg here would make an mp4 copy for every browser.")
+            continue
+        got = codecs.get(src)
+        if got and (got[0] not in BROWSER_VIDEO or (got[1] and got[1] not in BROWSER_AUDIO)):
+            out = free(f"{stem}.web.mp4", files)
+            r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", os.path.join(keep, src), "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                                "-preset", "veryfast", "-crf", "23", "-c:a", "aac", "-movflags", "+faststart", os.path.join(keep, out)],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600)
+            if r.returncode == 0:
+                os.remove(os.path.join(keep, src))
+                files = sorted([x for x in files if x != src] + [out])
+                b["src"] = out
+                changed = True
+                why = f"its video is {got[0]}" if got[0] not in BROWSER_VIDEO else f"its sound is {got[1]}"
+                notes.append(f"{src}: {why}, which browsers mostly don't play. Made {out}, an mp4 every browser plays.")
+                src = out
+            else:
+                why = (r.stderr.decode().strip().splitlines() or ["ffmpeg failed"])[-1][:160]
+                notes.append(f"{src} couldn't be converted to mp4 ({why}). Browsers that can't play it show a download link.")
+        if not b.get("poster"):
+            if src not in frames:
+                out = free(f"{stem}.poster.jpg", files)
+                r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", os.path.join(keep, src), "-frames:v", "1", "-q:v", "3",
+                                    os.path.join(keep, out)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
+                frames[src] = out if r.returncode == 0 and os.path.isfile(os.path.join(keep, out)) else None
+                if frames[src]:
+                    files = sorted(set(files) | {out})
+                    changed = True
+                else:
+                    notes.append(f"{src}: no first frame could be made, so the window shows a tile for it.")
+            if frames[src]:
+                b["poster"] = frames[src]
+    if changed:
+        with open(rp, "w") as f:
+            json.dump(recipe, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+    return files, notes
+
+
+def free(name, files):
+    """name, or name with a number before its extension when the folder already holds that name."""
+    stem, ext = os.path.splitext(name)
+    out, n = name, 2
+    while out in files:
+        out, n = f"{stem}-{n}{ext}", n + 1
+    return out
 
 
 def copy_files(src, files, dst):
@@ -830,6 +979,10 @@ def cmd_publish(o):
             raise Fail(f"herdr-app check failed, nothing was published:\n{err}")
         keep = os.path.join(FILES, art["id"], f"v{v}")
         copy_files(src, files, keep)
+        # the stored copy is made ready for every browser (a poster, an mp4 for a clip no browser plays): SHEP-209
+        media_notes = []
+        if not custom:
+            files, media_notes = ready_media(keep, files)
         at = now()
         publisher = art.get("publisher") if as_maker else who["terminal"]
         # each version's kind (the web draws a recipe, and shows a custom one's picture); older ones from their files
@@ -851,7 +1004,7 @@ def cmd_publish(o):
         installed = None if getattr(o, "no_install", False) else write_mod(keep, files, art, f"art-{art['id']}", publisher)
         prune_versions(art)
     out = dict(public(art), mod=f"art-{art['id']}", installed=bool(installed), warnings=warnings,
-               **({"unchecked": unchecked} if unchecked else {}))
+               **({"unchecked": unchecked} if unchecked else {}), **({"notes": media_notes} if media_notes else {}))
     if o.json:
         print(json.dumps(out))
     else:
@@ -860,6 +1013,8 @@ def cmd_publish(o):
         if custom:
             print("A custom panel: the web app on the person's phone shows only a picture of it, taken when the window "
                   "shows this version. A recipe opens everywhere: make it one when you can.")
+        for n in media_notes:
+            print(f"Media: {n}")
         if unchecked:
             print(f"Herdr couldn't draw it to check ({unchecked}), so only its recipe was checked. "
                   "Look at it in the Artifacts panel, or publish it again later to have it drawn.")
@@ -1631,12 +1786,28 @@ PREVIEW_STATE = os.path.join(STORE, ".preview")
 PREVIEW_IDLE = 1800
 PREVIEW_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
                  ".svg": "image/svg+xml", ".json": "application/json", ".txt": "text/plain; charset=utf-8",
-                 ".md": "text/plain; charset=utf-8", ".csv": "text/plain; charset=utf-8"}
-# the page: its own inline script and styles, its fonts inside; it asks only this server
+                 ".md": "text/plain; charset=utf-8", ".csv": "text/plain; charset=utf-8",
+                 ".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
+                 ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav", ".ogg": "audio/ogg", ".pdf": "application/pdf"}
+# the page: its own inline script and styles, its fonts inside; it asks only this server (its clips, sounds and PDFs too)
 VIEWER_CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src data:; "
-              "img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+              "img-src 'self' data:; media-src 'self'; frame-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; "
+              "frame-ancestors 'none'")
 # an artifact's own file, as the service sends it (service/artifacts.ts)
-FILE_CSP = "sandbox; default-src 'none'; img-src 'self'; style-src 'unsafe-inline'"
+FILE_CSP = "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'"
+
+
+def span(header, size):
+    """A Range header's one span of a file size bytes long: (start, end) with end included, "bad" when it can't be met,
+    None for the whole file (service/media.ts's span, the same rules)."""
+    m = re.fullmatch(r"bytes=(\d*)-(\d*)", (header or "").strip())
+    if not m or not (m.group(1) or m.group(2)):
+        return None
+    if not m.group(1):
+        start, end = max(0, size - int(m.group(2))), size - 1
+    else:
+        start, end = int(m.group(1)), (min(int(m.group(2)), size - 1) if m.group(2) else size - 1)
+    return "bad" if start > end or start >= size else (start, end)
 
 
 def viewer_page():
@@ -1716,6 +1887,8 @@ def serve_preview(idle=PREVIEW_IDLE):
             self.send_header("referrer-policy", "no-referrer")
             if csp:
                 self.send_header("content-security-policy", csp)
+            for k, v in (extra or {}).items():
+                self.send_header(k, v)
             self.end_headers()
             if self.command != "HEAD":
                 self.wfile.write(body)
@@ -1766,8 +1939,21 @@ def serve_preview(idle=PREVIEW_IDLE):
                 return self.send(404, "No such file.", "text/plain")
             if not ctype:
                 return self.send(415, "Not shown here.", "text/plain")
+            # a clip is played part by part (Range), so a player can seek: the same answers as service/media.ts
+            size = os.path.getsize(p)
+            part = span(self.headers.get("range"), size)
+            if part == "bad":
+                self.send_response(416)
+                self.send_header("content-range", f"bytes */{size}")
+                self.send_header("content-length", "0")
+                self.end_headers()
+                return None
+            start, end = part or (0, size - 1)
             with open(p, "rb") as f:
-                return self.send(200, f.read(), ctype, FILE_CSP)
+                f.seek(start)
+                body = f.read(end - start + 1)
+            self.send(206 if part else 200, body, ctype, FILE_CSP, {"accept-ranges": "bytes", "content-range": f"bytes {start}-{end}/{size}"} if part else {"accept-ranges": "bytes"})
+            return None
 
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
     srv.daemon_threads = True

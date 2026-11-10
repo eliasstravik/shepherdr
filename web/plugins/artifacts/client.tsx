@@ -567,8 +567,8 @@ function ArtifactCard({ msg, chat }: { msg: Message; chat: Chat; from: string })
 
 /** what an artifact's card shows of it (core/recipe.js preview: its key pictures, its first words), by artifact and
  *  version: read once, kept while the chat scrolls. { pics: their addresses, lines } */
-type Peek = { pics: string[]; lines: string[] }
-const peeks = new Map<string, { images: string[]; lines: string[] } | 'none'>()
+type Peek = { pics: string[]; vids: string[]; lines: string[] }
+const peeks = new Map<string, { images: string[]; videos?: string[]; lines: string[] } | 'none'>()
 function usePeek(art: Artifact): Peek | null {
   const kind = art.versions.find((x) => x.n === art.v)?.kind ?? art.kind
   const key = `${art.machine ?? ''}:${art.id}:${art.v}`
@@ -587,11 +587,13 @@ function usePeek(art: Artifact): Peek | null {
   if (kind === 'gpui') {
     // a custom panel: the picture the window last took of it (newest first)
     const pic = art.versions.find((x) => x.n <= art.v && (x.kind ?? art.kind) === 'gpui' && !!x.picture)
-    return pic ? { pics: [`${base}/file/.window.png?v=${pic.n}&t=${pic.picture}${on}`], lines: [] } : null
+    return pic ? { pics: [`${base}/file/.window.png?v=${pic.n}&t=${pic.picture}${on}`], vids: [], lines: [] } : null
   }
   const p = peeks.get(key)
   if (!p || p === 'none') return null
-  return { pics: p.images.map((src) => `${base}/file/${src.split('/').map(encodeURIComponent).join('/')}?v=${art.v}${on}`), lines: p.lines }
+  const addr = (src: string) => `${base}/file/${src.split('/').map(encodeURIComponent).join('/')}?v=${art.v}${on}`
+  // a clip with no poster: its first frame, shown by the browser (SHEP-209)
+  return { pics: p.images.map(addr), vids: (p.videos ?? []).map(addr), lines: p.lines }
 }
 
 /** the cards that are open in place, by artifact (it stays open as new versions come) */
@@ -604,7 +606,9 @@ function PreviewCard({ art, gap }: { art: Artifact; gap?: string }) {
   const [open, setOpen] = useState(() => opened.has(art.id))
   const toggle = (on: boolean) => { if (on) opened.add(art.id); else opened.delete(art.id); setOpen(on) }
   const pics = peek?.pics ?? []
+  const vids = peek?.vids ?? []
   const lines = peek?.lines ?? []
+  const tiles = pics.length + vids.length
   const kind = art.versions.find((x) => x.n === art.v)?.kind ?? art.kind
   return (
     <div data-card className={clsx(gap, 'flex w-full flex-col overflow-hidden rounded-box bg-bubble shadow-[inset_0_0_0_1px_var(--line2)]', open ? 'max-w-[720px]' : 'max-w-[480px]')}>
@@ -630,12 +634,16 @@ function PreviewCard({ art, gap }: { art: Artifact; gap?: string }) {
         </div>
       ) : (
         <>
-          {pics.length ? (
+          {tiles ? (
             <button type="button" onClick={() => toggle(true)} aria-label={`${WORDS.showMore}: ${art.title}`}
-              className={clsx('grid gap-1.5 px-2.5', pics.length === 1 ? 'grid-cols-1' : pics.length === 2 ? 'grid-cols-2' : 'grid-cols-3')}>
+              className={clsx('grid gap-1.5 px-2.5', tiles === 1 ? 'grid-cols-1' : tiles === 2 ? 'grid-cols-2' : 'grid-cols-3')}>
               {pics.map((src) => (
                 <img key={src} src={src} alt="" loading="lazy" decoding="async" draggable={false}
-                  className={clsx('w-full rounded-[8px] bg-bg object-cover object-top outline-1 -outline-offset-1 outline-fg/10', pics.length === 1 ? 'max-h-[240px]' : 'aspect-[4/3]')} />
+                  className={clsx('w-full rounded-[8px] bg-bg object-cover object-top outline-1 -outline-offset-1 outline-fg/10', tiles === 1 ? 'max-h-[240px]' : 'aspect-[4/3]')} />
+              ))}
+              {vids.map((src) => (
+                <video key={src} src={src} preload="metadata" muted playsInline aria-label=""
+                  className={clsx('w-full rounded-[8px] bg-black object-cover object-top outline-1 -outline-offset-1 outline-fg/10', tiles === 1 ? 'max-h-[240px]' : 'aspect-[4/3]')} />
               ))}
             </button>
           ) : null}
@@ -644,7 +652,7 @@ function PreviewCard({ art, gap }: { art: Artifact; gap?: string }) {
               <Markdown text={lines.join(' · ')} />
             </div>
           ) : null}
-          {pics.length || lines.length || kind !== 'recipe' ? (
+          {tiles || lines.length || kind !== 'recipe' ? (
             <button type="button" onClick={() => toggle(true)}
               className="press-dim flex items-center gap-1 self-start rounded-row px-3 pt-1.5 pb-2.5 text-[0.8125rem] font-medium text-fg2 hover:text-fg phone:min-h-11 phone:text-[0.875rem]">
               {WORDS.showMore}

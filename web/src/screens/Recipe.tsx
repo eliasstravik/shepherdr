@@ -3,7 +3,7 @@
 // A choice, a form or a button sends its words to the agent that made it (reply), once: then it says "Sent", as the
 // window's (mods/artifacts/recipe-view.js). Mark up lays its own layer over the whole recipe (plugins/artifacts).
 import clsx from 'clsx'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { ArrowUpRightIcon } from '@heroicons/react/16/solid'
 import { Markdown } from '@plugins/chat/markdown.tsx'
 import { Primary } from '../ui.tsx'
@@ -113,6 +113,80 @@ function Button({ b, reply, className }: { b: Block; reply?: Props['reply']; cla
   )
 }
 
+/** a clip (mp4, webm or mov) in place: its controls, its poster, or muted and looping for a short one that plays itself.
+ *  A browser that can't play it says so and offers the file (SHEP-209). videoRef and events let a pair play two together. */
+function Clip({ src, poster, caption, loop, muted, autoplay, asset, videoRef, events, label }: { src: string; poster?: string; caption?: string; loop?: boolean; muted?: boolean; autoplay?: boolean; asset: (src: string) => string; videoRef?: RefObject<HTMLVideoElement | null>; events?: Record<string, () => void>; label?: string }) {
+  const [broken, setBroken] = useState(false)
+  const own = useRef<HTMLVideoElement>(null)
+  const ref = videoRef ?? own
+  const silent = !!muted || !!autoplay
+  // React doesn't write the muted attribute, so a silent clip is muted on the element (autoplay needs it)
+  useEffect(() => { if (ref.current && silent) ref.current.muted = true }, [silent, ref])
+  return (
+    <figure className="flex min-w-0 flex-col gap-1.5">
+      {broken ? (
+        <p className="rounded-box bg-well p-3 text-fg2">This browser can't play this clip. <a className="underline" href={asset(src)} target="_blank" rel="noopener noreferrer" download>Open the file</a></p>
+      ) : (
+        <video ref={ref} src={asset(src)} poster={poster ? asset(poster) : undefined} controls autoPlay={!!autoplay} loop={!!loop} muted={silent} playsInline preload="metadata"
+          aria-label={label ?? caption ?? 'Clip'} onError={() => setBroken(true)} {...events}
+          className="block h-auto max-h-[70vh] w-full rounded-box bg-black shadow-box" />
+      )}
+      {caption ? <figcaption className="text-fg2">{caption}</figcaption> : null}
+    </figure>
+  )
+}
+
+/** a sound (mp3, m4a, wav or ogg) in a small player */
+function Sound({ src, caption, asset }: { src: string; caption?: string; asset: (src: string) => string }) {
+  const [broken, setBroken] = useState(false)
+  return (
+    <figure className="flex min-w-0 flex-col gap-1.5 rounded-box bg-well p-3 shadow-soft">
+      {broken ? <p className="text-fg2">This browser can't play this sound. <a className="underline" href={asset(src)} target="_blank" rel="noopener noreferrer" download>Open the file</a></p>
+        : <audio controls preload="metadata" src={asset(src)} aria-label={caption ?? 'Sound'} onError={() => setBroken(true)} className="w-full" />}
+      {caption ? <figcaption className="text-fg2">{caption}</figcaption> : null}
+    </figure>
+  )
+}
+
+/** a PDF inline: its own pages in a frame, with a link to open it whole (phones often can't show one in a frame) */
+function Pdf({ src, caption, asset }: { src: string; caption?: string; asset: (src: string) => string }) {
+  return (
+    <figure className="flex min-w-0 flex-col gap-1.5">
+      <iframe src={asset(src)} title={caption ?? 'PDF'} className="h-[70vh] min-h-[320px] w-full rounded-box bg-well shadow-box" />
+      <figcaption className="flex flex-wrap items-center gap-x-3 text-fg2">
+        {caption ? <span>{caption}</span> : null}
+        <a className="underline" href={asset(src)} target="_blank" rel="noopener noreferrer">Open the PDF</a>
+      </figcaption>
+    </figure>
+  )
+}
+
+/** before and after side by side: a picture or a clip each; two clips play together (one's play, pause and seek are the other's) */
+function Pair({ b, asset }: { b: Block; asset: (src: string) => string }) {
+  const left = useRef<HTMLVideoElement>(null), right = useRef<HTMLVideoElement>(null)
+  const sides = [['Before', b.before, left, right], ['After', b.after, right, left]] as const
+  const clips = R.mediaKind(b.before?.src) === 'video' && R.mediaKind(b.after?.src) === 'video'
+  // the other clip: follows this one's play, pause and seek (a seek only when it has drifted, so the two don't fight)
+  const follow = (me: RefObject<HTMLVideoElement | null>, other: RefObject<HTMLVideoElement | null>) => ({
+    onPlay: () => { other.current?.play().catch(() => undefined) },
+    onPause: () => { other.current?.pause() },
+    onSeeked: () => { const o = other.current, m = me.current; if (o && m && Math.abs(o.currentTime - m.currentTime) > 0.05) o.currentTime = m.currentTime },
+  })
+  return (
+    <div className="grid gap-3 @lg:grid-cols-2">
+      {sides.map(([w, x, mine, theirs]) => {
+        const kind = R.mediaKind(x?.src)
+        return kind === 'video' ? (
+          <Clip key={w} src={x.src} poster={x.poster} caption={x.caption ?? w} asset={asset} videoRef={mine} label={`${w}: ${x.caption ?? w}`}
+            events={clips ? follow(mine, theirs) : undefined} />
+        ) : (
+          <figure key={w} className="flex min-w-0 flex-col gap-1.5"><img src={asset(x.src)} alt={x.caption ?? w} className="h-auto max-w-full rounded-box shadow-box" loading="lazy" /><figcaption className="text-fg2">{x.caption ?? w}</figcaption></figure>
+        )
+      })}
+    </div>
+  )
+}
+
 function Tabs({ b, render }: { b: Block; render: (bs: Block[]) => ReactNode }) {
   const [on, setOn] = useState(0)
   return (
@@ -144,7 +218,10 @@ export function Recipe({ recipe, asset, reply }: Props) {
       case 'chart': return <Chart b={b} />
       case 'stats': return <dl className="grid grid-cols-2 gap-3 @lg:grid-cols-4">{b.items.map((x: any, i: number) => <div key={i} className="rounded-box bg-well p-3 shadow-soft"><dt className="text-fg2">{x.label}</dt><dd className="text-xl font-semibold tabular-nums">{String(x.value)}</dd>{x.note ? <dd className="text-fg3">{x.note}</dd> : null}</div>)}</dl>
       case 'image': return <figure className="flex flex-col gap-1.5"><img src={asset(b.src)} alt={b.caption ?? ''} width={b.w} height={b.h} className="h-auto max-w-full rounded-box shadow-box" loading="lazy" />{b.caption ? <figcaption className="text-fg2">{b.caption}</figcaption> : null}</figure>
-      case 'pair': return <div className="grid gap-3 @lg:grid-cols-2">{[['Before', b.before], ['After', b.after]].map(([w, x]: any) => <figure key={w} className="flex flex-col gap-1.5"><img src={asset(x.src)} alt={x.caption ?? w} className="h-auto max-w-full rounded-box shadow-box" loading="lazy" /><figcaption className="text-fg2">{x.caption ?? w}</figcaption></figure>)}</div>
+      case 'video': return <Clip src={b.src} poster={b.poster} caption={b.caption} loop={b.loop} muted={b.muted} autoplay={b.autoplay} asset={asset} />
+      case 'audio': return <Sound src={b.src} caption={b.caption} asset={asset} />
+      case 'pdf': return <Pdf src={b.src} caption={b.caption} asset={asset} />
+      case 'pair': return <Pair b={b} asset={asset} />
       case 'code': return <pre data-selectable className="overflow-x-auto rounded-box bg-well p-3 font-mono text-[0.8125rem] shadow-soft"><code>{b.text}</code></pre>
       case 'callout': return <div className={clsx('rounded-box p-3.5', TONE[b.tone ?? 'info'])}>{b.title ? <p className="font-medium">{b.title}</p> : null}{b.md ? <Markdown text={b.md} /> : null}</div>
       case 'columns': return <div className="grid gap-4 @2xl:grid-flow-col @2xl:auto-cols-fr">{b.columns.map((c: Block[], i: number) => <div key={i} className="flex min-w-0 flex-col gap-4">{c.map(wrap)}</div>)}</div>

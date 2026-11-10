@@ -64,9 +64,9 @@ test("an artifact's preview: its cover, then its first pictures, then its first 
       { type: "list", items: ["one", "two", "three", "four"] },
     ],
   };
-  expect(preview(recipe)).toEqual({ images: ["cover.png", "before.png", "after.png"], lines: ["Coverage", "**92%** of lines are covered.", "one · two · three"] });
+  expect(preview(recipe)).toEqual({ images: ["cover.png", "before.png", "after.png"], videos: [], lines: ["Coverage", "**92%** of lines are covered.", "one · two · three"] });
   expect(preview(recipe, { chars: 16 }).lines).toEqual(["Coverage", "**92%**…"]);
-  expect(preview({ blocks: [] })).toEqual({ images: [], lines: [] });
+  expect(preview({ blocks: [] })).toEqual({ images: [], videos: [], lines: [] });
 });
 
 test("a cover must be a picture beside it", () => {

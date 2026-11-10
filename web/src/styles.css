@@ -3,6 +3,8 @@
 
 /* Plugins' client parts live outside src/ */
 @source "../plugins";
+/* the recipe view (an artifact in the viewer page, whose build starts in web/viewer): its classes, e.g. @lg: columns */
+@source "./screens";
 
 /* Device shapes: the root carries data-device (phone, tablet, desktop) */
 @custom-variant phone (&:where([data-device=phone], [data-device=phone] *));
