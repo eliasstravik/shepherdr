@@ -18,6 +18,8 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
   settings to other machines).
 - Window-mod methods (e.g. chat's `refocus()`) can be tested by extracting the method text from `mods/chat/main.js`
   and running it in node with stubs (see `test/test_chat_refocus.py`).
+- Mark up (`mods/artifacts/markup.js`) imports must be listed in `MARKUP_HELPERS` in `mods/artifacts/bin/herdr-artifact`
+  so each published artifact carries them; `test_every_installed_import_resolves` checks the imports.
 - Header layout checks: the web app keeps its pinned-lists and sidebar state across page loads, so a stub page can
   start with leftovers; set localStorage then reload, or use a new port. Never `pkill -f` a stub: it matches your own
   shell.
