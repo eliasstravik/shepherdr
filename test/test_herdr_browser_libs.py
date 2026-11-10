@@ -1,7 +1,9 @@
 """herdr-browser checks Chrome's shared libraries before it starts Chrome (SHEP-200, GitHub #918). A library Chrome needs
 that the machine lacks makes Chrome exit 127 at once; agent-browser's doctor only checks that Chrome's file is there,
 so the task browser used to fail with the loader's line buried in a stderr dump. Now it names the library and the
-install command for the distro, and runs nothing. Throwaway homes and folders; the agent-browser is a stand-in."""
+install command for the distro, and runs nothing. The same goes for Ubuntu's AppArmor block of user namespaces
+(SHEP-203, GitHub #920): Chrome's sandbox stays on, and the fix for this Chrome is said, never run. Throwaway homes
+and folders; the agent-browser is a stand-in."""
 import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import os
 import shutil
@@ -75,8 +77,11 @@ class MissingLibraries(unittest.TestCase):
             f.write(text)
 
     def run_hb(self, *args, path=None, extra=None):
+        # no AppArmor restriction unless a test sets one (this machine's real sysctl must not decide the tests)
         env = {"HOME": self.home, "PATH": f"{path or self.fakes}:{self.bin}:/usr/bin:/bin",
-               "HERDR_BROWSER_BIN": self.ab, "HERDR_BROWSER_OS_RELEASE": self.osr, **(extra or {})}
+               "HERDR_BROWSER_BIN": self.ab, "HERDR_BROWSER_OS_RELEASE": self.osr,
+               "HERDR_BROWSER_USERNS_SYSCTL": os.path.join(self.tmp, "no-such-sysctl"),
+               "HERDR_BROWSER_APPARMOR_D": os.path.join(self.tmp, "no-apparmor.d"), **(extra or {})}
         return subprocess.run(["sh", HB, *args], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL,
                               timeout=60)
 
@@ -169,6 +174,87 @@ class MissingLibraries(unittest.TestCase):
         p = self.run_hb("--install")
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
         self.assertIn("ready", p.stdout)
+
+    # AppArmor's userns block (SHEP-203, GitHub #920): Chrome's sandbox stays on; the fix is said, never run.
+    def fake_unshare(self, ok):
+        path = os.path.join(self.fakes, "unshare")
+        with open(path, "w") as f:
+            f.write("#!/bin/sh\nexit %d\n" % (0 if ok else 1))
+        os.chmod(path, 0o755)
+
+    def sysctl(self, value):
+        path = os.path.join(self.tmp, "apparmor_restrict_unprivileged_userns")
+        with open(path, "w") as f:
+            f.write(value)
+        return path
+
+    def test_userns_blocked_says_the_fix_and_runs_nothing(self):
+        self.fake_ldd(RESOLVED)
+        self.fake_unshare(ok=False)
+        self.os_release("ID=ubuntu\nID_LIKE=debian\n")
+        p = self.run_hb("--task", "a#1", "open", "x", extra={"HERDR_BROWSER_USERNS_SYSCTL": self.sysctl("1\n")})
+        self.assertEqual(p.returncode, 127, p.stdout + p.stderr)
+        self.assertNotIn("ran ", p.stdout, "agent-browser must not start")
+        chrome = os.path.realpath(self.chrome)
+        self.assertIn("AppArmor blocks unprivileged user namespaces", p.stderr)
+        self.assertIn("Chrome's sandbox stays on, and nothing was changed.", p.stderr)
+        self.assertIn(f"profile herdr-browser-chrome \"{chrome}\" flags=(unconfined) {{", p.stderr)
+        self.assertIn("'  userns,'", p.stderr)
+        self.assertIn("sudo tee /etc/apparmor.d/herdr-browser-chrome", p.stderr)
+        self.assertIn("sudo apparmor_parser -r /etc/apparmor.d/herdr-browser-chrome", p.stderr)
+        self.assertIn("sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0", p.stderr)
+        self.assertNotIn("no-sandbox", p.stderr)
+        self.assertNotIn("missing system libraries", p.stderr)
+
+    def test_userns_works_or_restriction_off_runs(self):
+        self.fake_ldd(RESOLVED)
+        self.os_release("ID=ubuntu\n")
+        for ok, value in ((False, "0\n"), (True, "1\n")):
+            with self.subTest(unshare_ok=ok, sysctl=value):
+                self.fake_unshare(ok=ok)
+                p = self.run_hb("--task", "a#1", "open", "x",
+                                extra={"HERDR_BROWSER_USERNS_SYSCTL": self.sysctl(value)})
+                self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+                self.assertIn("ran --session herdr-a-1", p.stdout)
+                self.assertNotIn("AppArmor", p.stderr)
+
+    def test_profile_for_this_chrome_is_the_fix_in_place(self):
+        # the fix applied: the profile names this Chrome's path, and the (unconfined) shell still can't unshare
+        self.fake_ldd(RESOLVED)
+        self.fake_unshare(ok=False)
+        self.os_release("ID=ubuntu\n")
+        apparmor = os.path.join(self.tmp, "apparmor.d")
+        os.makedirs(apparmor)
+        with open(os.path.join(apparmor, "herdr-browser-chrome"), "w") as f:
+            f.write(f'abi <abi/4.0>,\nprofile herdr-browser-chrome "{os.path.realpath(self.chrome)}" flags=(unconfined) {{\n  userns,\n}}\n')
+        extra = {"HERDR_BROWSER_USERNS_SYSCTL": self.sysctl("1\n"), "HERDR_BROWSER_APPARMOR_D": apparmor}
+        p = self.run_hb("--task", "a#1", "open", "x", extra=extra)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("ran --session herdr-a-1", p.stdout)
+        # a profile for another Chrome (an older version's path) is not the fix for this one
+        with open(os.path.join(apparmor, "herdr-browser-chrome"), "w") as f:
+            f.write('profile herdr-browser-chrome "/home/someone/chrome-150/chrome" flags=(unconfined) {\n  userns,\n}\n')
+        p = self.run_hb("--task", "a#1", "open", "x", extra=extra)
+        self.assertEqual(p.returncode, 127, p.stdout + p.stderr)
+        self.assertIn("AppArmor blocks unprivileged user namespaces", p.stderr)
+
+    def test_no_sysctl_here_is_not_this_problem(self):
+        # a machine without the Ubuntu sysctl (macOS, other distros) with a failing unshare: not AppArmor's
+        self.fake_ldd(RESOLVED)
+        self.fake_unshare(ok=False)
+        self.os_release("ID=debian\n")
+        p = self.run_hb("--task", "a#1", "open", "x")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertNotIn("AppArmor", p.stderr)
+
+    def test_install_says_the_userns_fix(self):
+        self.fake_ldd(RESOLVED)
+        self.fake_unshare(ok=False)
+        self.os_release("ID=ubuntu\n")
+        p = self.run_hb("--install", extra={"HERDR_BROWSER_USERNS_SYSCTL": self.sysctl("1\n")})
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn("AppArmor blocks unprivileged user namespaces", p.stderr)
+        self.assertNotIn("ready", p.stdout)
 
 
 if __name__ == "__main__":
