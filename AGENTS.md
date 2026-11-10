@@ -13,6 +13,8 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
   `git archive` of the tree, since `herdr_task` lives beside `bin/`.
 - herdr-browser's library check: `test/test_herdr_browser_libs.py` fakes ldd and agent-browser; a real missing-library
   Chrome needs gcc, linking a library built with `-Wl,-soname` and then deleted.
+- Read-only sandbox check: `chmod 555` a scratch dir, run herdr-task with `HERDR_TASK_STORE=<dir>`; a read must not
+  need the lock file to be writable.
 - Never run herdr-app or herdr-task with a changed `HOME` or `HERDR_APP_HOME`, never start a second herdr-app window,
   and never install into the real `~/.config/herdr-app` for a try: use `./install.sh --root <scratch>`. A window or
   scheduler on another home can overwrite every machine's spaces.
