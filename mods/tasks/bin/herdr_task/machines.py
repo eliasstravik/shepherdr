@@ -520,6 +520,7 @@ def js(text):
         return None
 hc = shutil.which("hc") or (os.path.join(H, ".local/bin/hc") if os.path.isfile(os.path.join(H, ".local/bin/hc")) else None)
 me = {"host": socket.gethostname(), "user": os.environ.get("USER") or os.path.basename(H), "os": os.uname().sysname, "hc": bool(hc), "links": []}
+me["home"] = H  # where Herdr names a space "Home" (a space with no name of its own)
 core = (js(sh([hc, "server", "status", "--json"])[1]) or {}).get("core") if hc else None
 me["core"] = core
 try:
@@ -540,12 +541,20 @@ if hc:
                 continue
             if args or t.get("template") in ("assistant", "coordinator"):
                 seen[t["address"]] = t
-    docs = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(H, ".local/state"), "herdr-core", "default", "docs.json")
-    try:
-        with open(docs) as f:
-            spaces = ((json.load(f).get("herdr-app") or {}).get("value") or {}).get("spaces") or []
-    except Exception:
-        spaces = []
+    # The spaces: the window's live list when a window here names some (`herdr-app ls`, as autopilot's window_spaces),
+    # else herdr-core's saved herdr-app document (docs.json), which a window may not have written since its last change.
+    spaces = []
+    if shutil.which("herdr-app"):
+        live = js(sh(["herdr-app", "ls"], timeout=10)[1]) or {}
+        if isinstance(live, dict) and isinstance(live.get("spaces"), list):
+            spaces = [s for s in live["spaces"] if isinstance(s, dict) and s.get("id") and not s.get("machine")]
+    if not spaces:
+        docs = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(H, ".local/state"), "herdr-core", "default", "docs.json")
+        try:
+            with open(docs) as f:
+                spaces = ((json.load(f).get("herdr-app") or {}).get("value") or {}).get("spaces") or []
+        except Exception:
+            spaces = []
     me["spaces"] = [{"id": s.get("id"), "name": s.get("name"), "folder": s.get("folder"), "machine": s.get("machine"), "icon": s.get("icon")} for s in spaces]
     names = {s["id"]: s for s in me["spaces"]}
     me["assistants"] = []

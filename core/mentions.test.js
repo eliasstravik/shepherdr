@@ -29,6 +29,38 @@ test("the spaces a reach map reaches: here first, each machine's own, the route 
   expect(reachable(null)).toEqual([]);
 });
 
+// SHEP-185: the map reached two machines over herdr-core, but their saved documents listed no spaces, and
+// vm-b's one space had no name: the # list left them out (or showed its id). Each machine's spaces come from the
+// service's known list too, and an unnamed space is named as Herdr names it.
+test("a machine whose document lists no spaces still lists the spaces the service knows, named, and pickable", () => {
+  const map = {
+    core: { id: "c-x", name: "mac-x" }, host: "mac-x", home: "/base/alpha", spaces: [], assistants: [],
+    links: [
+      { how: "herdr-core", to: "vm-a", ok: true, id: "c-vs", next: { core: { id: "c-vs", name: "vm-a" }, home: "/base/alpha", spaces: [], links: [] } },
+      { how: "herdr-core", to: "vm-b", ok: true, id: "c-plu", next: { core: { id: "c-plu", name: "vm-b" }, home: "/base/gamma",
+        spaces: [{ id: "sp8c0069b90399cae8fb2944eccc07150a", name: "", folder: "/base/gamma" }], links: [] } },
+    ],
+  };
+  const known = [
+    { id: "spHOME1", name: "", folder: "/base/alpha", machine: "vm-a", assistant: true },
+    { id: "spM3", name: "Home", folder: "/base/beta", machine: "box-c" },
+    { id: "spMAC", name: "Home", folder: "/base/alpha", machine: null },
+  ];
+  const got = reachable(map, known);
+  expect(got.map((s) => [s.name, s.machine, s.target, s.assistant])).toEqual([
+    ["Home", "mac-x", "spMAC", false],
+    ["Home", "vm-a", "vm-a/spHOME1", true],
+    ["Home", "vm-b", "vm-b/sp8c0069b90399cae8fb2944eccc07150a", false],
+  ]);
+  // box-c is not in the map, so its space is not reachable: left out (the list shows it locked)
+  expect(got.some((s) => s.id === "spM3")).toBe(false);
+  // a space that is nobody's name and not at home: its folder's name, never its id
+  const plain = reachable({ core: { id: "c", name: "mac-x" }, spaces: [{ id: "sp-x", name: "", folder: "/base/alpha/dev/shop/" }], links: [] });
+  expect(plain.map((s) => s.name)).toEqual(["shop"]);
+  // the same space known and in the map: listed once, with the map's own entry
+  expect(reachable(map, [{ id: "sp8c0069b90399cae8fb2944eccc07150a", name: "Plu home", folder: "/base/gamma", machine: "vm-b" }]).length).toBe(1);
+});
+
 test("what is typed after #, and the spaces that match it", () => {
   expect(typing("tell #sh")).toBe("sh");
   expect(typing("#")).toBe("");
