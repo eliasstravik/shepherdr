@@ -1186,7 +1186,6 @@ export function LeadBack({ onClick, to }: { onClick: () => void; to: string }) {
       type="button"
       onClick={onClick}
       aria-label={label}
-      title={label}
       className="press-dim relative inline-flex h-7 w-[18px] shrink-0 items-center justify-center rounded-full text-fg2 after:absolute after:-inset-y-2 after:-inset-x-1 hover:bg-hover hover:text-fg"
     >
       <BackIcon className={ic} />
