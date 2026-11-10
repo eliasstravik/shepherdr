@@ -330,7 +330,7 @@ function SpaceColumn({ place, pane }: { place: Place; pane?: number }) {
   const tabChat = useUI((u) => (tab && u.tabView?.[tab.term] === 'chat' ? tab.term : null))
   return (
     <section data-drawer-from className="@container/place flex min-h-0 min-w-0 flex-1 flex-col">
-      <Head conversation lead={<SpacesButtons pane={pane} />}>
+      <Head conversation reserve={pane === undefined} lead={<SpacesButtons pane={pane} />}>
         <div className="flex min-w-24 shrink-[100] items-center">
           <Who name={name} kind={where ? <PaneWhere where={where} /> : undefined} />
         </div>
@@ -474,6 +474,8 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
   const back = () => setUI({ task: null })
   const phone = useUI((u) => u.device === 'phone')
   const desktop = useUI((u) => u.device === 'desktop')
+  // the place whose chat shows in the middle: where Back goes there
+  const shownPlace = useUI((u) => u.place)
   const keyboard = useUI((u) => u.keyboard)
   const coordinator = placeOf(snap, task.place).name
   const accepting = useAccepting(task.id) || !!task.accepting
@@ -544,7 +546,7 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
       {/* as the Assistant's header, in the chat's reading column: its title on the messages' left edge, where the
           Assistant's is; Back before it, hung in the gutter when there's room (Head's lead). Its views
           (Chat, Terminal, …) on the right; without room for both they wrap under the title, which keeps at least 12rem */}
-      <Head conversation lead={<>{middle ? <SpacesButtons /> : null}<LeadBack onClick={back} /></>}>
+      <Head conversation lead={middle ? <SpacesButtons /> : null} back={<LeadBack onClick={back} to={middle ? placeOf(snap, shownPlace).name : 'Tasks'} />}>
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-1.5 py-1.5">
           <div className="flex min-w-0 flex-[1_1_12rem] items-center gap-2.5">
             <Who name={task.name} kind={sub} />

@@ -1126,64 +1126,81 @@ export function Small({ children, className, ...p }: HTMLAttributes<HTMLDivEleme
 }
 
 /** Column header: 52px with a hairline under it; its icon buttons are round, like its ⋯.
- *  A conversation's (the Assistant's, a task's) sits in the chat's reading column, its title on the messages' left edge.
- *  Its lead (Spaces, Back, a task's status) hangs in the empty gutter left of that edge when it fits there, so the
- *  title is at the same spot in every chat; without the room it comes back in line before the title. A
- *  [data-lead-label] in it (Back's "Tasks") shows only when it fits too. */
-export function Head({ children, className, conversation, lead }: { children: ReactNode; className?: string; conversation?: boolean; lead?: ReactNode }) {
+ *  A conversation's (the Assistant's, a task's) sits in the chat's reading column with its title in from the edge:
+ *  the gutter its Back needs (a 32px button, then 16px to the title). Its lead (Spaces, a pane's status) hangs in the
+ *  margin left of Back when the window leaves room, else it sits in line before Back: the title is at the same spot
+ *  in both, and in a chat with a Back or a reserved gutter (`reserve`, the Assistant's) it is one x. */
+export function Head({ children, className, conversation, lead, back, reserve }: { children: ReactNode; className?: string; conversation?: boolean; lead?: ReactNode; back?: ReactNode; reserve?: boolean }) {
   const outer = useRef<HTMLDivElement>(null)
   const col = useRef<HTMLDivElement>(null)
-  const box = useRef<HTMLDivElement>(null)
-  const [hang, setHang] = useState<'label' | 'icon' | null>(null)
+  const [hung, setHung] = useState(true)
   useLayoutEffect(() => {
-    const o = outer.current, c = col.current, l = box.current
-    if (!o || !c || !l) return
+    const o = outer.current, c = col.current
+    if (!o || !c) return
     const fit = () => {
-      const labels = [...l.querySelectorAll<HTMLElement>('[data-lead-label]')]
-      // what it takes without its labels, and what they add (each keeps its full width as scrollWidth when folded)
-      const shown = labels.reduce((n, e) => n + e.offsetWidth, 0)
-      const all = labels.reduce((n, e) => n + e.scrollWidth, 0)
-      const bare = l.offsetWidth - shown
-      // the gutter: from the header's edge to the title's, 4px clear of the edge and 6px of the title
-      const room = c.getBoundingClientRect().left - o.getBoundingClientRect().left + LEAD_PAD - 10
-      setHang(bare + all <= room ? 'label' : bare <= room ? 'icon' : null)
+      const l = c.querySelector<HTMLElement>('[data-lead]')
+      const bare = l ? l.offsetWidth : 0
+      // the room left of the column, 4px clear of the Back button's left (what the lead must clear)
+      const room = c.getBoundingClientRect().left - o.getBoundingClientRect().left - LEAD_GAP
+      setHung(bare === 0 || bare <= room)
     }
     fit()
     const ro = new ResizeObserver(fit)
     ro.observe(o)
-    ro.observe(l)
+    ro.observe(c)
     return () => ro.disconnect()
-  }, [!!lead])
+  })
+  const gutter = !!back || !!reserve
+  const inline = !!lead && !hung
+  const backRow = back ?? (reserve ? <span aria-hidden className="block size-8 shrink-0" /> : null)
+  if (!conversation)
+    return (
+      <div data-chrome className={clsx('relative flex min-h-[52px] shrink-0 items-center gap-2.5 border-b border-line pr-3 pl-4 [&_.hit]:rounded-full', className)}>
+        {children}
+      </div>
+    )
   return (
-    <div ref={outer} data-chrome data-hang={hang ?? undefined} className={clsx('group/head relative flex min-h-[52px] shrink-0 items-center gap-2.5 border-b border-line pr-3 pl-4 [&_.hit]:rounded-full', conversation && 'px-0!', className)}>
-      {conversation ? (
-        <div ref={col} data-conversation-head className="relative mx-auto flex min-h-[51px] w-full max-w-read min-w-0 items-center gap-2.5 pr-3 pl-5 [&_.hit]:rounded-full">
-          {lead ? (
-            // hung: its right edge 6px before the title's left (the column's 20px start). In line, on the title's row
-            // (the header's first: its views may wrap under it), its 28px centred on the title's 38px
-            <div ref={box} data-lead className="mt-[11.5px] flex shrink-0 items-center gap-1.5 self-start group-data-hang/head:absolute group-data-hang/head:mt-0 group-data-hang/head:right-[calc(100%-0.875rem)] group-data-hang/head:top-1/2 group-data-hang/head:-translate-y-1/2">
-              {lead}
-            </div>
-          ) : null}
-          {children}
-        </div>
-      ) : (
-        children
-      )}
+    <div ref={outer} data-chrome data-hang={inline ? 'inline' : undefined} className={clsx('relative flex min-h-[52px] shrink-0 items-center gap-2.5 border-b border-line pr-3 pl-4 px-0! [&_.hit]:rounded-full', className)}>
+      <div
+        ref={col}
+        data-conversation-head
+        className={clsx('relative mx-auto flex min-h-[51px] w-full max-w-read min-w-0 items-center gap-2.5 pr-3 [&_.hit]:rounded-full', inline ? 'pl-0' : gutter ? 'pl-14' : 'pl-5')}
+      >
+        {inline ? (
+          // no room in the margin: the lead, then Back (or its reserved space), in line before the title
+          <div className="mr-1.5 flex shrink-0 items-center gap-1">
+            {lead ? <div data-lead className="flex shrink-0 items-center gap-1.5">{lead}</div> : null}
+            {backRow}
+          </div>
+        ) : (
+          <>
+            {lead ? (
+              <div data-lead className="absolute top-[6px] right-[calc(100%-4px)] flex h-5 items-center gap-1.5">
+                {lead}
+              </div>
+            ) : null}
+            {backRow ? <div className="absolute top-[6px] right-[calc(100%-40px)] flex h-5 items-center">{backRow}</div> : null}
+          </>
+        )}
+        {children}
+      </div>
     </div>
   )
 }
-// the conversation header's start padding (pl-5): the title's left edge in its column
-const LEAD_PAD = 20
+// what a hung lead keeps clear of Back's left edge (the title's gutter is pl-14: Back at 8px in, 16px clear of the title)
+const LEAD_GAP = 4
 
-/** Back to the tasks list, in a conversation header's lead: its chevron, and "Tasks" when the gutter has the room */
-export function LeadBack({ onClick }: { onClick: () => void }) {
+/** Back, in a conversation header: a plain chevron in a 32px target, named for where it goes (the place's chat or the
+ *  Tasks list). No hover tooltip (the repo's rule): its name is for screen readers */
+export function LeadBack({ onClick, to }: { onClick: () => void; to: string }) {
   return (
-    <button type="button" onClick={onClick} aria-label="Tasks" className="press-dim relative inline-flex h-7 shrink-0 items-center rounded-full px-1.5 text-[0.8125rem] whitespace-nowrap text-fg2 after:absolute after:-inset-y-2 after:inset-x-0 hover:bg-hover hover:text-fg">
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`Back to ${to}`}
+      className="press-dim relative inline-flex size-8 shrink-0 items-center justify-center rounded-full text-fg2 hover:bg-hover hover:text-fg"
+    >
       <BackIcon className={ic} />
-      <span aria-hidden data-lead-label className="inline-block max-w-0 overflow-hidden group-data-[hang=label]/head:max-w-none">
-        <span className="pr-1 pl-0.5">Tasks</span>
-      </span>
     </button>
   )
 }
