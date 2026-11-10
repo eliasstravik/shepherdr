@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 
-from .base import Fail, git, guard, now, run, STORE, VERSION
+from .base import Fail, git, guard, now, run, STORE, stop_note, VERSION
 from .settings import (
     agent_argv, agent_key, bare, merge_policy, review_limits, set_opts, settings_block, settings_for, space_base,
     task_settings, worker_argv, worktrees_on,
@@ -905,6 +905,12 @@ def start_again(s, t, space, key=None, argv_json=None, message=None, parent=None
     return launch(s, t, argv, space, text, parent=parent), False
 
 
+# SHEP-189: what a resumed agent hears first. Its session comes back with no message, so without this
+# it sat idle until someone wrote to it.
+RESUME_NUDGE = ("Shepherdr resumed your session because your agent had stopped. Carry on where you left off: check "
+                "what is already done with `herdr-task show`, then keep going with the task.")
+
+
 def cmd_resume(args):
     with open_store(args) as s:
         t = s.find(args.id)
@@ -917,7 +923,7 @@ def cmd_resume(args):
         if t["state"] == "done":
             t["state"] = "running"
         back_to_work(s, t, "resumed")
-        a, resumed = start_again(s, t, space, args.agent, args.argv, parent=args.parent)
+        a, resumed = start_again(s, t, space, args.agent, args.argv, parent=args.parent, message=RESUME_NUDGE)
         v = view(s, t)
     say(args, {**v, "terminal": a["address"], "space": space, "parent": a.get("parent"), "resumed": resumed},
         f"{s.ref(t)} {'resumed its session' if resumed else 'started with a handoff'}: {a['address']}")
@@ -943,6 +949,7 @@ def cmd_switch(args):
     ended = []
     if old and not args.keep:
         # The new agent took over: end the old one (its terminal, shell and all).
+        stop_note("switch-kill", task=s.ref(t), terminal=old["address"], by="switch")
         run(["hc", "kill", old["address"]])
         ended.append(old["address"])
     say(args, {**v, "terminal": a["address"], "space": space, "parent": a.get("parent"), "resumed": resumed, "ended": ended},
