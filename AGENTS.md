@@ -16,6 +16,10 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
   scheduler on another home can overwrite every machine's spaces.
 - `herdr-app check <mod folder>` runs a mod's `init()` for real: never for `shepherdr-settings` (its init pushes
   settings to other machines).
+- Window-mod methods (e.g. chat's `refocus()`) can be tested by extracting the method text from `mods/chat/main.js`
+  and running it in node with stubs (see `test/test_chat_refocus.py`).
+- Header layout checks: the web app keeps its pinned-lists and sidebar state across page loads, so a stub page can
+  start with leftovers; set localStorage then reload, or use a new port.
 - GitHub runs the whole check on every pull request to main and after each merge: the Check workflow
   (`.github/workflows/check.yml`). Merging waits for it. A failure's log is `gh run view <run> --log-failed`.
 - Still write tests with your change: the installer's in `test/test_install.py`, the repo's rules in
