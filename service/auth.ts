@@ -12,13 +12,24 @@ export type Pass = { ok: true; who: string; via: "tailnet" | "local" } | { ok: f
 
 const READS = new Set(["GET", "HEAD"]);
 
+// A link from another site (Slack, a page, a bookmark) opens the entry page: a GET top-level navigation to a page, not
+// the API or a socket (GitHub #913). Browsers mark a page inside a frame, a script or a fetch with other Sec-Fetch
+// values, so those stay refused. Everything the page then asks for is same-origin.
+function pageLink(req: Request, socket: boolean) {
+  const h = req.headers;
+  if (socket || req.method !== "GET") return false;
+  if (h.get("sec-fetch-mode") !== "navigate" || h.get("sec-fetch-dest") !== "document") return false;
+  const path = new URL(req.url).pathname.replace(/^\/shepherdr(?=\/)/, "");
+  return !/^\/api(\/|$)/.test(path);
+}
+
 export function gate(req: Request, g: Gate, socket = false, peerTrusted = false): Pass {
   const h = req.headers;
   const host = (h.get("host") ?? "").toLowerCase();
   const login = h.get("tailscale-user-login");
   const write = socket || !READS.has(req.method);
   if (req.method === "OPTIONS") return { ok: false, status: 403, why: "no cross-site requests" };
-  if (h.get("sec-fetch-site") === "cross-site") return { ok: false, status: 403, why: "cross-site" };
+  if (h.get("sec-fetch-site") === "cross-site" && !pageLink(req, socket)) return { ok: false, status: 403, why: "cross-site" };
 
   if (login !== null) {
     if (!g.owner || !g.dns) return { ok: false, status: 503, why: "Tailscale isn't running here" };

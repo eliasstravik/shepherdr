@@ -54,6 +54,47 @@ describe("through tailscale serve", () => {
     expect(gate(tailnet({ headers: { "sec-fetch-site": "cross-site" } }), g, false, true)).toMatchObject({ ok: false });
     expect(gate(tailnet({ method: "OPTIONS" }), g, false, true)).toMatchObject({ ok: false });
   });
+  describe("a link from another site (GitHub #913, SHEP-191)", () => {
+    // a top-level navigation: a link clicked in Slack or another site, a typed or bookmarked page
+    const nav = { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" };
+    const page = (path: string, headers: Record<string, string> = {}, method = "GET") =>
+      new Request(`http://box.tailnet.example${path}`, {
+        method,
+        headers: { host: "box.tailnet.example", "tailscale-user-login": "me@example.com", ...headers },
+      });
+
+    test("the owner's cross-site link opens the entry page", () => {
+      expect(gate(page("/", nav), g, false, true)).toMatchObject({ ok: true, via: "tailnet" });
+      expect(gate(page("/?task=abc", nav), g, false, true)).toMatchObject({ ok: true, via: "tailnet" });
+      expect(gate(page("/shepherdr/", nav), g, false, true)).toMatchObject({ ok: true, via: "tailnet" });
+    });
+    test("the link still needs the owner, the host and Tailscale's connection", () => {
+      expect(gate(page("/", { ...nav, "tailscale-user-login": "other@example.com" }), g, false, true)).toMatchObject({ ok: false, status: 403 });
+      expect(gate(page("/", nav), g, false, false)).toMatchObject({ ok: false, status: 403 });
+      expect(gate(page("/", { ...nav, host: "evil.example" }), g, false, true)).toMatchObject({ ok: false, status: 421 });
+    });
+    test("a cross-site API read is still refused, even as a navigation", () => {
+      expect(gate(page("/api/me", nav), g, false, true)).toMatchObject({ ok: false, status: 403 });
+      expect(gate(page("/shepherdr/api/me", nav), g, false, true)).toMatchObject({ ok: false, status: 403 });
+    });
+    test("a cross-site page that isn't a top-level navigation is refused", () => {
+      const iframe = { ...nav, "sec-fetch-dest": "iframe" };
+      expect(gate(page("/", iframe), g, false, true)).toMatchObject({ ok: false, status: 403 });
+      const script = { "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "script" };
+      expect(gate(page("/", script), g, false, true)).toMatchObject({ ok: false, status: 403 });
+      const fetched = { "sec-fetch-site": "cross-site", "sec-fetch-mode": "cors", "sec-fetch-dest": "empty" };
+      expect(gate(page("/", fetched), g, false, true)).toMatchObject({ ok: false, status: 403 });
+    });
+    test("a cross-site write is refused, even when it is a form's navigation", () => {
+      expect(gate(page("/", { ...nav, origin: "https://evil.example", "x-shepherdr": "1" }, "POST"), g, false, true)).toMatchObject({ ok: false, status: 403 });
+      expect(gate(page("/", { ...nav, origin: "https://box.tailnet.example", "x-shepherdr": "1" }, "POST"), g, false, true)).toMatchObject({ ok: false, status: 403 });
+      expect(gate(page("/", { ...nav, origin: "https://box.tailnet.example", "x-shepherdr": "1" }, "PUT"), g, false, true)).toMatchObject({ ok: false, status: 403 });
+    });
+    test("a cross-site WebSocket is refused, even when it looks like a navigation", () => {
+      expect(gate(page("/api/ws", nav), g, true, true)).toMatchObject({ ok: false, status: 403 });
+      expect(gate(page("/api/ws", { "sec-fetch-site": "cross-site", "sec-fetch-mode": "websocket", "sec-fetch-dest": "empty", origin: "https://evil.example" }), g, true, true)).toMatchObject({ ok: false, status: 403 });
+    });
+  });
 });
 
 describe("on this machine", () => {
