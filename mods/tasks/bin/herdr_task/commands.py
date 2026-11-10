@@ -40,7 +40,7 @@ from .when import when_from
 
 def cmd_where(args):
     loc = locate(args.folder)
-    with Store(loc) as st:  # makes ~/.herdr/tasks and moves old lists in
+    with Store(loc, write="try") as st:  # makes ~/.herdr/tasks and moves old lists in, where it can (#900)
         pass
     slug, path = st.slug, st.path
     say(args, {**loc, "slug": slug, "store": path, "prefix": st.prefix, "version": VERSION}, f"{loc['folder']}\n{path}")

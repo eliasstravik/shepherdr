@@ -2357,6 +2357,44 @@ class ReadOnlyStore(unittest.TestCase):
                 self.assertIn("read-only", str(e.exception))
 
 
+class ReadOnlyAutopilot(unittest.TestCase):
+    """#900: autopilot list and show read the autopilot state in a read-only sandbox (a Codex
+    reviewer's) without a writable lock; a change is refused with a clear message, never a traceback."""
+
+    def test_reads_without_a_writable_lock(self):
+        import builtins
+        import errno
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        from herdr_task import autopilot, store
+        d = tempfile.mkdtemp()
+        stash = os.path.join(d, "tasks")
+        os.makedirs(stash)
+        state_file = os.path.join(stash, ".autopilot.json")
+        with open(state_file, "w") as f:
+            json.dump({"version": 2, "spaces": {"sp1": {"on": True}}}, f)
+        real = builtins.open
+
+        def ro(path, mode="r", *a, **k):
+            if any(c in mode for c in "wax+"):
+                raise OSError(errno.EROFS, "Read-only file system", path)
+            return real(path, mode, *a, **k)
+        with mock.patch.object(autopilot, "STORE", stash), mock.patch.object(autopilot, "STATE", state_file), \
+                mock.patch.object(store, "STORE", stash), mock.patch.object(store, "open", ro, create=True), \
+                mock.patch.object(autopilot, "open", ro, create=True):
+            # No lock file yet (read-only, so it can't be made): a read still works.
+            with autopilot.state(write=False) as st:
+                self.assertTrue(st["spaces"]["sp1"]["on"])
+            # With a lock file there, a read takes it shared.
+            open(os.path.join(stash, ".autopilot.lock"), "w").close()
+            with autopilot.state(write=False) as st:
+                self.assertTrue(st["spaces"]["sp1"]["on"])
+            with self.assertRaises(autopilot.Fail) as e:
+                with autopilot.state(write=True):
+                    pass
+            self.assertIn("read-only", str(e.exception))
+
+
 class PrLooks(unittest.TestCase):
     """A Ready task's pull request as the tick sees it. A fake gh (what HERDR_TASK_GH points herdr-task at:
     github.GH here, its store a throwaway) answers each look (gh_script())."""
