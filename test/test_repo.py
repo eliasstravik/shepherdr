@@ -51,6 +51,23 @@ class Repo(unittest.TestCase):
         self.assertEqual(used - ours - shipped, set(), "the layout uses a mod nobody ships")
         self.assertEqual(d["id"], "root")
 
+    def test_lone_child_containers_fill_their_space(self):
+        # Herdr keeps a saved px size for a resizable container's child (SHEP-193, GitHub #915): a row or column with
+        # one child must not be resizable, and that child takes the whole space by weight, never a fixed size.
+        def walk(node):
+            kids = node.get("children") or []
+            if node.get("type") in ("row", "column") and len(kids) == 1:
+                yield node, kids[0]
+            for k in kids:
+                yield from walk(k)
+
+        d = json.load(open(J("layouts", "shepherdr.json")))
+        found = list(walk(d))
+        self.assertTrue(found)
+        for node, child in found:
+            self.assertIs(node.get("resizable"), False, f"{node['id']} holds one child and is resizable")
+            self.assertEqual((child.get("size") or {}).get("weight"), 1, f"{child['id']} is the only child of {node['id']} but has no weight 1")
+
     def test_keys_name_our_layout_and_parse(self):
         keys = json.load(open(J("keys.json")))
         layouts = [c for c in keys if c.startswith("layout:")]
