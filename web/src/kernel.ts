@@ -6,7 +6,7 @@ import { expire, loadOutbox, prune, saveOutbox, settle, type Outgoing } from './
 import { HttpError, wakeAll } from './uploads.ts'
 import { keptOf, mayReload, type Kept } from './reload.ts'
 import { OPEN_WITHIN, PONG_WITHIN, retryIn, SAY_LOST_AFTER } from './link.ts'
-import { groupFor, groupTasks, loadAllDone, loadGroups, loadShut, keepTasks, namesFor, saveAllDone, saveGroups, saveShut, shownGroup, type GroupBy, type Groups, type TaskGroup } from './groups.ts'
+import { groupTasks, loadAllDone, loadGroups, loadShut, keepTasks, namesFor, saveAllDone, saveGroups, saveShut, shownGroup, type GroupBy, type TaskGroup } from './groups.ts'
 import { canDock, CHAT_READ, fit as fitSidebars, focused, loadSidebars, PANEL, RIGHT, saveSidebars, showPanel, toggleFocus as focusTo, type Sidebars } from './sidebars.ts'
 import { hush } from './motion.ts'
 import { closed, loadPanes, MAX_PANES, normal, only, opened, PANE_MIN, replaced, samePane, savePanes, type Pane, type Panes } from './panes.ts'
@@ -263,19 +263,16 @@ export interface UI {
   plus: string | null
   /** the coordinator chat's top-right menu is open */
   menu: boolean
-  /** how All machines and a machine group their tasks, remembered on this device */
-  groups: Groups
+  /** how the Tasks panel groups its tasks (by status or by place), remembered on this device */
+  groups: GroupBy
   /** task groups showing all their Done tasks ("place|group"), remembered on this device */
   allDone: string[]
   /** task headings folded shut, each view its own ("place|group", "place|m:machine"), remembered on this device */
   shut: string[]
   /** the lists (by their key) whose tasks column shows their Archived tasks instead */
   archived: string | null
-  /** the Tasks panel's status filter, as 3.0's chips: all, needs, working, merging, ready, queued, todo, done or
-   *  automations; kept on this device */
-  taskFilter: string
-  /** This space (the filter row's first chip, SHEP-72): the Tasks list shows only the place picked's tasks, automations
-   *  and what its agents ask, whatever status is picked; kept on this device */
+  /** Only this space (the Tasks ⋯ menu, SHEP-72): the Tasks list shows only the place picked's tasks, automations and
+   *  what its agents ask; kept on this device */
   thisSpace: boolean
   /** what each list is filtered by, while typed: "place|tasks", "place|artifacts" (*pinned for the pinned chips) */
   filter: Record<string, string>
@@ -332,27 +329,11 @@ function tabOf(t: string | null): UI['tab'] {
   return t === 'needs' ? 'tasks' : t === 'tasks' || t === 'artifacts' ? t : 'chat'
 }
 
-const TASK_FILTER = 'shepherdr.taskFilter'
-const FILTERS = ['all', 'needs', 'working', 'merging', 'ready', 'queued', 'scheduled', 'todo', 'done', 'automations']
-function loadTaskFilter(): string {
-  try {
-    const v = localStorage.getItem(TASK_FILTER) ?? 'all'
-    return FILTERS.includes(v) ? v : 'all'
-  } catch {
-    return 'all'
-  }
-}
-/** pick the Tasks panel's status filter (3.0's chips and More), remembered on this device */
-export function setTaskFilter(f: string) {
-  try { localStorage.setItem(TASK_FILTER, f) } catch { /* private window: All statuses next time */ }
-  setUI({ taskFilter: f, cur: 0 })
-}
-
 const THIS_SPACE = 'shepherdr.thisSpace'
 function loadThisSpace(): boolean {
   try { return localStorage.getItem(THIS_SPACE) === '1' } catch { return false }
 }
-/** This space on or off (the filter row's first chip), remembered on this device */
+/** Only this space on or off (the Tasks ⋯ menu), remembered on this device */
 export function setThisSpace(on: boolean) {
   try { localStorage.setItem(THIS_SPACE, on ? '1' : '0') } catch { /* private window: off next time */ }
   setUI({ thisSpace: on, cur: 0 })
@@ -460,7 +441,6 @@ let state: State = {
     allDone: loadAllDone(),
     shut: loadShut(),
     archived: null,
-    taskFilter: loadTaskFilter(),
     thisSpace: loadThisSpace(),
     filter: {},
     pick: null,
@@ -1147,7 +1127,7 @@ export function openNeeds() {
   const { ui, snap } = state
   if (!snap) return
   // 3.0: the Tasks panel, its Needs you
-  setUI(ui.device === 'phone' ? { task: null, tab: 'tasks', taskFilter: 'all', pick: null, plus: null, menu: false } : { task: ui.task && !taskInMiddle(ui, snap) ? null : ui.task, side: 'tasks', taskFilter: 'all' })
+  setUI(ui.device === 'phone' ? { task: null, tab: 'tasks', pick: null, plus: null, menu: false } : { task: ui.task && !taskInMiddle(ui, snap) ? null : ui.task, side: 'tasks' })
 }
 
 /** What waits on you at a place: red counts its whole subtree, own only the place itself (its own coordinator's chat: the sidebar's count). */
@@ -1161,7 +1141,7 @@ export function counts(snap: Snapshot, placeId: string) {
 
 /* ---------- a place's tasks, grouped (groups.ts) ---------- */
 
-export { GROUPS, groupChoices, groupFor, keepTasks, namesFor, type GroupBy, type Groups, type TaskGroup } from './groups.ts'
+export { GROUPS, keepTasks, namesFor, type GroupBy, type TaskGroup } from './groups.ts'
 
 /** a list's tasks in their groups, in the order they show (groups.ts groupTasks) */
 export function taskGroups(snap: Snapshot, list: ListView, by: GroupBy): TaskGroup[] {
@@ -1173,16 +1153,15 @@ export function taskGroups(snap: Snapshot, list: ListView, by: GroupBy): TaskGro
   return groupTasks(snap.places, snap.machines ?? [], tasks, by, list.level)
 }
 
-/** For you's Done: shut until opened ("done:open" in shut), its count showing alone */
+/** Done: shut until opened ("done:open" in shut), its count showing alone */
 export const DONE_OPEN = 'done:open'
 
 /** a list's task groups as this screen shows them: grouped as this device chose, Done cut short until Show all, a
- *  group folded shut showing none of its tasks (For you's Done shut until opened) */
+ *  group folded shut showing none of its tasks (Done shut until opened) */
 export function shownGroups(snap: Snapshot, list: ListView, ui: Pick<UI, 'groups' | 'allDone' | 'shut'> = state.ui) {
   const shut = (key: string) => ui.shut.includes(`${list.key}|${key}`)
   const all = (key: string) => ui.allDone.includes(`${list.key}|${key}`)
-  const by = groupFor(ui.groups, list.level)
-  return taskGroups(snap, list, by).map((g) => shownGroup(g, all(g.key), by === 'you' && g.key === 'done' ? !shut(DONE_OPEN) : shut(g.key)))
+  return taskGroups(snap, list, ui.groups).map((g) => shownGroup(g, all(g.key), g.key === 'done' ? !shut(DONE_OPEN) : shut(g.key)))
 }
 
 /** fold a heading of a list's tasks shut or open ("group", "m:machine"); with siblings, them too, the same way */
@@ -1201,9 +1180,9 @@ export function toggleAllDone(listKey: string, key: string) {
   setUI((ui) => ({ allDone: ui.allDone.includes(k) ? ui.allDone.filter((x) => x !== k) : [...ui.allDone, k] }))
 }
 
-/** how lists of this level group their tasks (a place's level: 0 more machines', 1 one machine's) */
-export function setGroup(level: number, by: GroupBy) {
-  setUI((ui) => ({ groups: { ...ui.groups, [level === 0 ? 'all' : 'machine']: by }, lists: { ...ui.lists, chips: state.snap ? ownChips(ui, state.snap) : [], at: ui.place }, cur: 0 }))
+/** how the lists group their tasks: by status or by place */
+export function setGroup(by: GroupBy) {
+  setUI((ui) => ({ groups: by, lists: { ...ui.lists, chips: state.snap ? ownChips(ui, state.snap) : [], at: ui.place }, cur: 0 }))
 }
 
 /** whether every word typed is in one of these, any case: ⌘K's search and the lists' filters */
@@ -1225,7 +1204,7 @@ export function setFilter(listKey: string, list: 'tasks' | 'artifacts', q: strin
 
 /** A list's tasks filtered: in their groups, every Done one, and then its archived ones; groups with none left out */
 export function filteredGroups(snap: Snapshot, list: ListView, q: string, ui: Pick<UI, 'groups'> = state.ui) {
-  const groups: TaskGroup[] = taskGroups(snap, { ...list, attention: false }, groupFor(ui.groups, list.level))
+  const groups: TaskGroup[] = taskGroups(snap, { ...list, attention: false }, ui.groups)
   const archived = archivedIn(snap, list)
   if (archived.length) groups.push({ key: 'archived', label: 'Archived', tasks: archived, names: namesFor(list.level) })
   return groups.map((g) => keepTasks(g, (t) => taskMatches(t, q))).filter((g) => g.tasks.length)

@@ -11,52 +11,43 @@ const task = (p: string, status: Task['status'], more: Partial<Task> = {}) => {
   return { id: `${pl.machine}:T-${++n}`, name: `t${n}`, status, place: p, listName: pl.name, on: pl.machine, age: '', created: '', ...more } as Task
 }
 
-describe('For you, then space (SHEP-98)', () => {
-  test('needs you then ready on top, then each space in the sidebar order, Done last', () => {
-    const ts = [task('b:gtm', 'work'), task('a:shep', 'ready'), task('a:tor', 'need'), task('a:shep', 'todo'), task('a:shep', 'done', { doneAt: 5 }), task('a:shep', 'scheduled'), task('b:gtm', 'need')]
-    const gs = groupTasks(places, machines, ts, 'you', 0)
-    expect(gs.map((g) => [g.key, g.tasks.map((t) => t.status)])).toEqual([
-      ['you', ['need', 'need', 'ready']],
-      ['a:shep', ['scheduled', 'todo']],
-      ['b:gtm', ['work']],
-      ['done', ['done']],
+describe('Group by status or by place (SHEP-182)', () => {
+  const ts = () => [task('b:gtm', 'work'), task('a:shep', 'ready'), task('a:tor', 'need'), task('a:shep', 'todo'), task('a:shep', 'done', { doneAt: 5 }), task('a:shep', 'queued'), task('b:gtm', 'need')]
+  test('status: who acts first, rows saying machine and space, Done last', () => {
+    const gs = groupTasks(places, machines, ts(), 'status', 0)
+    expect(gs.map((g) => [g.key, g.tasks.length])).toEqual([['need', 2], ['ready', 1], ['work', 1], ['queued', 1], ['todo', 1], ['done', 1]])
+    expect(gs[0].names).toEqual({ machine: true, project: true })
+  })
+  test('one machine: rows say only their space', () => {
+    expect(groupTasks(places, machines, ts(), 'status', 1)[0].names).toEqual({ machine: false, project: true })
+  })
+  test('place: machine by machine, a space in the sidebar order with every status, Done last', () => {
+    const gs = groupTasks(places, machines, ts(), 'place', 0)
+    expect(gs.map((g) => [g.key, g.machine, g.tasks.map((t) => t.status)])).toEqual([
+      ['a:shep', 'vm-a', ['ready', 'queued', 'todo']],
+      ['a:tor', 'vm-a', ['need']],
+      ['b:gtm', 'mac', ['need', 'work']],
+      ['done', undefined, ['done']],
     ])
-    // rows under For you say their space, never their machine; a space's rows say nothing
-    expect(gs[0].names).toEqual({ machine: false, project: true })
-    expect(gs[1].names).toEqual({ machine: false, project: false })
-    expect([gs[1].label, gs[1].emoji, gs[1].place, gs[1].note]).toEqual(['shepherdr', '🐑', 'a:shep', undefined])
+    expect([gs[0].emoji, gs[0].place]).toEqual(['🐑', 'a:shep'])
   })
-  test('a pinned task needing you stays in For you; other pinned ones get Pinned', () => {
-    const gs = groupTasks(places, machines, [task('a:shep', 'need', { pinned: 1 }), task('a:tor', 'work', { pinned: 1 }), task('a:tor', 'work')], 'you', 0)
-    expect(gs.map((g) => [g.key, g.tasks.length])).toEqual([['you', 1], ['pinned', 1], ['a:tor', 1]])
+  test('a pinned task gets Pinned on top in both', () => {
+    const t = [task('a:shep', 'need', { pinned: 1 }), task('a:tor', 'work')]
+    expect(groupTasks(places, machines, t, 'status', 0).map((g) => g.key)).toEqual(['pinned', 'work'])
+    expect(groupTasks(places, machines, t, 'place', 0).map((g) => g.key)).toEqual(['pinned', 'a:tor'])
   })
-  test('the machine shows only when two machines have a space of that name', () => {
-    const two = [...places, place('b:shep', 'shepherdr', 'b')]
-    const ts = [task('a:shep', 'work'), task('a:tor', 'work'), { ...task('a:shep', 'work'), id: 'b:T-x', place: 'b:shep', on: 'b' } as Task]
-    const gs = groupTasks(two, machines, ts, 'you', 0)
-    expect(gs.map((g) => [g.label, g.note])).toEqual([['shepherdr', 'vm-a'], ['tor-gameboy', undefined], ['shepherdr', 'mac']])
-  })
-  test("Done shows only its count while shut, and its latest five once opened", () => {
-    const ts = Array.from({ length: 7 }, (_, i) => task('a:shep', 'done', { doneAt: 100 + i }))
-    const [done] = groupTasks(places, machines, ts, 'you', 0)
+  test('Done shows only its count while shut, and its latest five once opened', () => {
+    const t = Array.from({ length: 7 }, (_, i) => task('a:shep', 'done', { doneAt: 100 + i }))
+    const [done] = groupTasks(places, machines, t, 'status', 0)
     expect(shownGroup(done, false, true)).toMatchObject({ count: 7, tasks: [] })
     expect(shownGroup(done, false, false)).toMatchObject({ count: 7, more: 2 })
   })
-  test('Status and Space say the space on rows, never the machine', () => {
-    const ts = [task('a:shep', 'work'), task('b:gtm', 'need')]
-    expect(groupTasks(places, machines, ts, 'status', 0).map((g) => [g.key, g.names])).toEqual([['need', { machine: false, project: true }], ['work', { machine: false, project: true }]])
-    expect(groupTasks(places, machines, ts, 'project', 0).map((g) => g.key)).toEqual(['need', 'a:shep'])
-  })
-  test('the kept choice: For you by default; old Status split by space and the machine ones become For you', () => {
+  test('the kept choice: Status until Place is chosen', () => {
     const store = new Map<string, string>()
     globalThis.localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) } as Storage
-    expect(loadGroups()).toEqual({ all: 'you', machine: 'you' })
-    store.set('shepherdr.grouping', JSON.stringify({ all: 'status', machine: 'machine-project', split: true }))
-    expect(loadGroups()).toEqual({ all: 'you', machine: 'you' })
-    store.set('shepherdr.grouping', JSON.stringify({ all: 'status', machine: 'project', split: false }))
-    expect(loadGroups()).toEqual({ all: 'status', machine: 'project' })
-    saveGroups({ all: 'status', machine: 'you' })
-    expect(loadGroups()).toEqual({ all: 'status', machine: 'you' })
+    expect(loadGroups()).toBe('status')
+    saveGroups('place')
+    expect(loadGroups()).toBe('place')
   })
 })
 

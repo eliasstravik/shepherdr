@@ -1,11 +1,9 @@
-// Tasks, as Shepherdr 3's Tasks panel (mods/tasks): every task on every machine, grouped by the header's Group by (kept
-// on this device). For you, the default (SHEP-98): what needs the person on top (Needs you, what any agent asks, then
-// Ready), then Pinned, then each space's other work in status order under the space's name (a tap opens its chat), Done
-// hidden behind its count at the end; the machine only in a space's heading when two machines share its name. Space:
-// Needs you, then one group per space. Status: one group per status. A filter row picks one status (All statuses,
-// Needs you, Working, Ready, the rest under More). Each status or Pinned heading folds what is under it away. This space, first in the filter row (kept on this device), narrows it all to the place picked. A row says where its task is, as far as the grouping doesn't; a Ready row has Review. A
-// row's menu only pins it (core/menus.js taskMenu, the window's too); the Assistant does the rest. Done tasks archive
-// themselves: the Archived row at the bottom opens them.
+// Tasks, as Shepherdr 3's Tasks panel (mods/tasks): every task on every machine, grouped by the toggle under the search
+// box (kept on this device, SHEP-182). Status, the default: what needs the person first (Needs you, Ready), then Working,
+// Queued and the rest, each row saying its machine and space, Done hidden behind its count at the end. Place: each
+// machine, its spaces inside it, every status mixed (a row's icon says which). Pinned tasks first in both. Each group
+// folds. ⋯ narrows it all to the space picked. A Ready row has Review. A row's menu only pins it (core/menus.js taskMenu,
+// the window's too); the Assistant does the rest. Done tasks archive themselves: the Archived row at the bottom opens them.
 import clsx from 'clsx'
 import { openAccept, useAccepting } from '@client/screens/Accept.tsx'
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
@@ -17,15 +15,12 @@ import {
   matches,
   filteredGroups,
   goChat,
-  setTaskFilter,
   setThisSpace,
   inList,
   tasksIn,
   namesFor,
   filterOf,
   getState,
-  groupChoices,
-  groupFor,
   listView,
   openTask,
   openSplit,
@@ -284,18 +279,11 @@ function TaskMenu({ t, menu }: { t: Task; menu: RowMenuState }) {
  *  heading says it ("vm-str · gtm") */
 function whereOf(snap: Snapshot, t: Task, names: TaskGroup['names']) {
   const p = placeOf(snap, t.place)
-  const m = names.machine && p.machine !== snap.host ? snap.machines?.find((x) => x.machine === p.machine) : undefined
+  const m = names.machine ? snap.machines?.find((x) => x.machine === p.machine) : undefined
   // Settings › Window › Show space on task rows off: no place on the right
   if (snap.look?.place === false) return []
   return [m?.name, names.project ? (t.listName || p.name) : undefined].filter((x): x is string => !!x)
 }
-
-/** 3.0's statuses (core/tasks.js ORDER) as the web's task statuses, and their words */
-const FILTER_STATUS: Record<string, Task['status']> = { working: 'work', merging: 'merging', ready: 'ready', queued: 'queued', scheduled: 'scheduled', todo: 'todo', done: 'done' }
-const FILTER_WORDS: Record<string, string> = { needs: 'Needs you', working: 'Working', merging: 'Merging', ready: 'Ready', queued: 'Queued', scheduled: 'Scheduled', todo: 'To do', done: 'Done', automations: 'Automations' }
-const FILTER_ORDER = ['needs', 'ready', 'merging', 'working', 'queued', 'scheduled', 'todo', 'done', 'automations']
-/** the chips that show beside All statuses before More, as far as there is room (3.0's filterRow) */
-const PRIMARY = ['needs', 'working', 'ready']
 
 /** what needs you that is no task's: an agent asking (an Assistant's question, a secret, its turn waiting), or an
  *  automation that didn't run or didn't start its task (the window's inbox items) */
@@ -342,79 +330,6 @@ function AgentNeedRow({ n, listKey, spaceOnly }: { n: AgentNeed; listKey: string
   )
 }
 
-/** The filter row (3.0's): All statuses, then Needs you, Working and Ready while they hold something, then More with
- *  the rest that do (and Automations) */
-function StatusFilters(p: { counts: Record<string, number>; filter: string }) {
-  // Settings › Window › Status filters in Tasks off: no row
-  return useSnap()?.look?.filters === false ? null : <StatusFilterRow {...p} />
-}
-
-function StatusFilterRow({ counts, filter }: { counts: Record<string, number>; filter: string }) {
-  const [open, setOpen] = useState(false)
-  const here = useUI((u) => u.thisSpace)
-  // as 3.0's: never wraps, never scrolls; a chip that doesn't fit goes in More (widths estimated, about 7.5px a letter)
-  const row = useRef<HTMLDivElement>(null)
-  const [width, setWidth] = useState(360)
-  useLayoutEffect(() => {
-    const el = row.current
-    if (!el) return
-    const seen = new ResizeObserver(() => setWidth(el.clientWidth))
-    seen.observe(el)
-    return () => seen.disconnect()
-  }, [])
-  const est = (text: string, n: number) => 24 + text.length * 7.5 + (n ? 6 + String(n).length * 8 : 0)
-  const chips = FILTER_ORDER.filter((k) => counts[k] || k === filter)
-  const primary = PRIMARY.filter((k) => chips.includes(k))
-  const shown: string[] = []
-  let room = width - 8 - est('This space', 0) - 2 - est('All statuses', 0)
-  for (const [i, k] of primary.entries()) {
-    const w = est(FILTER_WORDS[k], counts[k] ?? 0)
-    if (w + (chips.length > primary.length || i < primary.length - 1 ? 70 : 0) > room) break
-    shown.push(k)
-    room -= w
-  }
-  const more = chips.filter((k) => !shown.includes(k))
-  const picked = more.includes(filter) ? filter : null
-  const chip = (k: string, label: string, n: number) => (
-    <button key={k} type="button" aria-pressed={filter === k} onClick={() => setTaskFilter(k)}
-      className="press inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[0.8125rem] text-fg2 hover:bg-hover hover:text-fg aria-pressed:bg-sel aria-pressed:text-fg coarse:h-9 phone:h-9 phone:px-3 phone:text-[0.875rem]">
-      {label}
-      {n ? <span className="text-fg3 tabular-nums">{n}</span> : null}
-    </button>
-  )
-  return (
-    <div ref={row} role="group" aria-label="Status" className="flex items-center gap-0.5 px-1.5 pt-1.5 phone:px-2">
-      {/* This space: a toggle before the status chips (they pick one status; this narrows to the place picked) */}
-      <button type="button" aria-pressed={here} onClick={() => setThisSpace(!here)}
-        className="press inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[0.8125rem] text-fg2 hover:bg-hover hover:text-fg aria-pressed:bg-sel aria-pressed:text-fg coarse:h-9 phone:h-9 phone:px-3 phone:text-[0.875rem]">
-        This space
-      </button>
-      {chip('all', 'All statuses', 0)}
-      {shown.map((k) => chip(k, FILTER_WORDS[k], counts[k] ?? 0))}
-      {more.length ? (
-        <div className="relative shrink-0">
-          <button type="button" aria-haspopup="menu" aria-expanded={open} aria-pressed={!!picked} onClick={() => setOpen(!open)}
-            className="press inline-flex h-7 items-center gap-1 rounded-full pr-2 pl-2.5 text-[0.8125rem] text-fg2 hover:bg-hover hover:text-fg aria-expanded:bg-hover aria-pressed:bg-sel aria-pressed:text-fg coarse:h-9 phone:h-9 phone:text-[0.875rem]">
-            {picked ? FILTER_WORDS[picked] : 'More'}
-            {picked && counts[picked] ? <span className="text-fg3 tabular-nums">{counts[picked]}</span> : null}
-            <DownIcon aria-hidden className="size-3.5 text-fg3" />
-          </button>
-          {open ? (
-            <Menu label="More statuses" onClose={() => setOpen(false)} className="absolute top-full left-0 z-21 mt-1.5 max-w-[calc(100vw-24px)] origin-top-left">
-              {more.map((k) => (
-                <MenuItem key={k} role="menuitemradio" aria-checked={filter === k} icon={filter === k ? <CheckIcon className={ic} /> : null} hint={counts[k] ? String(counts[k]) : undefined}
-                  onClick={() => { setOpen(false); setTaskFilter(k) }}>
-                  {FILTER_WORDS[k]}
-                </MenuItem>
-              ))}
-            </Menu>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
 /** a task the search finds, as the window's (mods/tasks found()): by its id, title, status line or pull request's
  *  number, or where it is: its space or list, and machine */
 function found(snap: Snapshot, t: Task, q: string) {
@@ -454,22 +369,38 @@ function AutoRow({ a, where, from }: { a: Automation; where?: string; from?: str
   )
 }
 
+/** The toggle under the search box: group by status or by place (SHEP-182), kept on this device */
+function ByToggle() {
+  const by = useUI((u) => u.groups)
+  const opt = (k: GroupBy, label: string) => (
+    <button key={k} type="button" role="radio" aria-checked={by === k} onClick={() => setGroup(k)}
+      className="press inline-flex h-6 items-center rounded-full px-3 text-[0.75rem] text-fg2 hover:text-fg aria-checked:bg-sel aria-checked:text-fg coarse:h-8 phone:h-8 phone:px-4 phone:text-[0.875rem]">
+      {label}
+    </button>
+  )
+  return (
+    <div role="radiogroup" aria-label="Group by" className="flex items-center gap-0.5 px-2.5 pt-2 phone:px-3.5">
+      <span className="pr-1.5 text-[0.75rem] text-fg3 phone:text-[0.875rem]">Group by</span>
+      {opt('status', 'Status')}
+      {opt('place', 'Place')}
+    </div>
+  )
+}
+
 function TaskList(_: { placeId: string }) {
   const snap = useSnap()!
   const view = useStore((s) => listView(s.ui, snap))
   const key = view.key
-  const chosen = useUI((u) => u.groups)
+  const by = useUI((u) => u.groups)
   const allDone = useUI((u) => u.allDone)
   const shut = useUI((u) => u.shut)
   const archived = useUI((u) => u.archived === key)
-  const wanted = useUI((u) => u.taskFilter)
   const here = useUI((u) => u.thisSpace && view.chips.length === 1 && view.chips[0] === u.place)
   const q = useUI((u) => filterOf(u, view.search, 'tasks'))
   const place = placeOf(snap, getState().ui.place)
-  const by = groupFor(chosen, view.level)
   // a task moving to another group glides there; a new one fades in; what a filter, Show more or a fold leaves just shows
   const list = useRef<HTMLDivElement>(null)
-  useFlip(list, `${key}|${by}|${q}|${wanted}|${allDone.join()}|${shut.join()}`)
+  useFlip(list, `${key}|${by}|${q}|${allDone.join()}|${shut.join()}`)
   // headings stay on screen while their group scrolls under the search field (it is sticky too): --stick is its height
   useLayoutEffect(() => {
     const el = list.current
@@ -485,46 +416,16 @@ function TaskList(_: { placeId: string }) {
   const asks = agentNeeds(snap, view.chips).filter((n) => !q || matches(q, n.who, n.why, n.where))
   const live = tasksIn(snap, view).filter((t) => !q || found(snap, t, q))
   const autos = autosIn(snap, view.chips).filter((a) => !q || matches(q, a.name, a.listName, a.machine ? machineName(snap.machines, a.machine) : undefined))
-  // the chips' counts: what each status holds now, as far as the search lets it (Needs you: its tasks and what else
-  // needs you)
-  const counts: Record<string, number> = { needs: live.filter((t) => t.status === 'need').length + asks.length, automations: autos.length }
-  for (const [k, st] of Object.entries(FILTER_STATUS)) counts[k] = live.filter((t) => t.status === st).length
-  // Settings › Window › Status filters off: no row, all shown
-  const filters = snap.look?.filters !== false
-  const filter = filters && FILTER_ORDER.includes(wanted) && (counts[wanted] || q) ? wanted : 'all'
-  const footer = q || filter !== 'all' ? null : registry.tasksFooter.map((F, i) => <F key={i} place={place} list={view} />)
-  // one status picked: its rows alone, no headings, each saying its space
-  if (filter !== 'all') {
-    const rows = filter === 'needs' ? live.filter((t) => t.status === 'need') : filter === 'automations' ? [] : live.filter((t) => t.status === FILTER_STATUS[filter])
-    const shown = filter === 'done' ? doneNewestFirst(rows) : rows
-    const what = filter === 'needs' ? 'tasks that need you' : filter === 'automations' ? 'automations' : `${STATUS[filter]} tasks`
-    const any = shown.length || (filter === 'needs' && asks.length) || (filter === 'automations' && autos.length)
-    return (
-      <>
-        <TaskFilter listKey={view.search} order={shown} />
-        <StatusFilters counts={counts} filter={filter} />
-        <div ref={list} className="relative pt-1">
-          {any ? (
-            <List>
-              {shown.map((t, i) => <TaskRow key={t.id} t={t} ix={i} where={whereOf(snap, t, namesFor(view.level))} />)}
-              {filter === 'needs' ? asks.map((n) => <AgentNeedRow key={n.id} n={n} listKey={key} spaceOnly />) : null}
-              {filter === 'automations' ? autos.map((a) => <AutoRow key={`${a.machine ?? ''}:${a.listName}:${a.name}`} a={a} where={autoWhere(snap, a)} from={autoFrom(snap, a)} />) : null}
-            </List>
-          ) : <Empty className="pt-3 text-fg3">No {what} match “{q}”.</Empty>}
-        </div>
-      </>
-    )
-  }
+  const footer = q ? null : registry.tasksFooter.map((F, i) => <F key={i} place={place} list={view} />)
   // searching, Done and archived tasks are in it too, each group whole and open, folded shut or not
   let groups = q
-    ? filteredGroups(snap, view, '', { groups: chosen }).map((g) => keepTasks(g, (t) => found(snap, t, q))).filter((g) => g.tasks.length)
+    ? filteredGroups(snap, view, '', { groups: by }).map((g) => keepTasks(g, (t) => found(snap, t, q))).filter((g) => g.tasks.length)
       .map((g) => ({ ...g, count: g.tasks.length, more: 0, less: false, shut: false }))
-    : shownGroups(snap, view, { groups: chosen, allDone, shut })
-  // what agents ask needs you too: For you (or Needs you) is a group of its own when no task is in it, first but Pinned
-  const askKey = by === 'you' ? 'you' : 'need'
-  if (asks.length && !groups.some((g) => g.key === askKey)) {
-    const at = by !== 'you' && groups[0]?.key === 'pinned' ? 1 : 0
-    groups = [...groups.slice(0, at), { key: askKey, label: by === 'you' ? 'For you' : 'Needs you', tasks: [], names: namesFor(view.level), count: 0, more: 0, less: false, shut: !q && shut.includes(`${key}|${askKey}`) }, ...groups.slice(at)]
+    : shownGroups(snap, view, { groups: by, allDone, shut })
+  // what agents ask needs you too: Needs you is a group of its own when no task is in it, first but Pinned
+  if (asks.length && !groups.some((g) => g.key === 'need')) {
+    const at = groups[0]?.key === 'pinned' ? 1 : 0
+    groups = [...groups.slice(0, at), { key: 'need', label: 'Needs you', tasks: [], names: namesFor(view.level), count: 0, more: 0, less: false, shut: !q && shut.includes(`${key}|need`) }, ...groups.slice(at)]
   }
   // what the keyboard walks: the rows on screen
   const order = groups.flatMap((g) => g.tasks)
@@ -538,52 +439,43 @@ function TaskList(_: { placeId: string }) {
       {autoShut ? null : <List>{autos.map((a) => <AutoRow key={`${a.machine ?? ''}:${a.listName}:${a.name}`} a={a} where={autoWhere(snap, a)} from={autoFrom(snap, a)} />)}</List>}
     </div>
   ) : null
-  const rows = (g: (typeof groups)[number], extra: AgentNeed[] = []) => {
-    // For you: what needs you (tasks, then what agents ask), then Ready
-    const need = extra.length && by === 'you' ? g.tasks.filter((t) => t.status === 'need') : g.tasks
-    const after = need === g.tasks ? [] : g.tasks.filter((t) => !need.includes(t))
-    const row = (t: Task) => <TaskRow key={t.id} t={t} ix={order.indexOf(t)} where={whereOf(snap, t, g.names)} />
-    return (
-      <List>
-        {need.map(row)}
-        {extra.map((n) => <AgentNeedRow key={n.id} n={n} listKey={key} spaceOnly />)}
-        {after.map(row)}
-      </List>
-    )
-  }
+  let lastOn: string | undefined
   return (
     <>
       <TaskFilter listKey={view.search} order={order} />
-      {/* the filter row: All statuses, and a chip for each status that holds something now */}
-      <StatusFilters counts={counts} filter="all" />
+      <ByToggle />
       <div ref={list} className="relative">
         {!loaded ? <Empty className="pt-3 text-fg3">Reading tasks…</Empty> : null}
         {groups.filter((g) => g !== archivedGroup).map((g) => {
           const fold: Fold | undefined = q ? undefined : { shut: g.shut, toggle: (all) => toggleShut(key, g.key, all ? groups.filter((x) => x !== g).map((x) => x.key) : []) }
-          const extra = g.key === askKey ? asks : []
-          // For you: a space's work under its name, a tap opening its chat
-          if (by === 'you' && g.key !== 'you' && g.key !== 'pinned' && g.key !== 'done') {
-            const p = g.place ? snap.places.find((x) => x.id === g.place) : undefined
+          const extra = g.key === 'need' ? asks : []
+          const row = (t: Task) => <TaskRow key={t.id} t={t} ix={order.indexOf(t)} where={whereOf(snap, t, g.names)} />
+          const rows = <List>{g.tasks.map(row)}{extra.map((n) => <AgentNeedRow key={n.id} n={n} listKey={key} spaceOnly />)}</List>
+          // by place: a space's work under its name, under its machine's name where more show; both fold
+          if (g.on !== undefined) {
+            const mShut = !q && shut.includes(`${key}|m:${g.on}`)
+            const first = g.on !== lastOn
+            lastOn = g.on
+            const mine = groups.filter((x) => x.on === g.on)
+            const head = view.level === 0 && first ? <MachineHeading name={g.machine ?? g.on} count={mine.reduce((n, x) => n + x.count, 0)} fold={q ? undefined : { shut: mShut, toggle: () => toggleShut(key, `m:${g.on}`) }} /> : null
+            if (view.level === 0 && mShut) return head ? <div key={g.key}>{head}</div> : null
             return (
               <div key={g.key}>
-                <SpaceHeading group={g} count={g.count} onOpen={p?.chat ? () => goChat(p.chat) : undefined} />
-                {rows(g)}
+                {head}
+                <SpaceHeading group={g} count={g.count} fold={fold} />
+                {g.shut ? null : rows}
               </div>
             )
           }
-          // For you's Done: only its count, a quiet line, until opened
-          if (by === 'you' && g.key === 'done' && g.shut) {
+          // Done, shut: only its count, a quiet line, until opened
+          if (g.key === 'done' && g.shut) {
             return <DoneLine key="done" count={g.count} today={g.count === live.filter((t) => t.status === 'done' && !t.archived && !t.pinned && isToday(t.doneAt)).length} onClick={() => toggleShut(key, DONE_OPEN)} />
           }
-          const doneFold: Fold | undefined = by === 'you' && g.key === 'done' && !q ? { shut: false, toggle: () => toggleShut(key, DONE_OPEN) } : fold
+          const doneFold: Fold | undefined = g.key === 'done' && !q ? { shut: false, toggle: () => toggleShut(key, DONE_OPEN) } : fold
           return (
             <div key={g.key}>
-              {g.key === 'you' ? (
-                <YouHeading count={g.count + extra.length} fold={fold} />
-              ) : (
-                <GroupHeading label={g.label} note={g.note} count={g.count + extra.length} flip={`group:${g.key}`} fold={doneFold} />
-              )}
-              {g.shut ? null : rows(g, extra)}
+              <GroupHeading label={g.label} note={g.note} count={g.count + extra.length} flip={`group:${g.key}`} fold={doneFold} />
+              {g.shut ? null : rows}
               {g.more || g.less ? (
                 <div data-flip={`more:${g.key}`}>
                   <DoneToggle more={g.more} onClick={() => toggleAllDone(key, g.key)} />
@@ -600,7 +492,7 @@ function TaskList(_: { placeId: string }) {
           <div key="archived">
             <GroupHeading label="Archived" count={archivedGroup.tasks.length} flip="group:archived" />
             <List>
-              {archivedGroup.tasks.map((t) => <TaskRow key={t.id} t={t} ix={order.indexOf(t)} where={whereOf(snap, t, { machine: true, project: true })} />)}
+              {archivedGroup.tasks.map((t) => <TaskRow key={t.id} t={t} ix={order.indexOf(t)} where={whereOf(snap, t, { machine: view.level === 0, project: true })} />)}
             </List>
           </div>
         ) : null}
@@ -608,6 +500,15 @@ function TaskList(_: { placeId: string }) {
         {footer}
       </div>
     </>
+  )
+}
+
+/** By place: a machine's name over its spaces (when more than one machine has tasks); folds them all */
+function MachineHeading({ name, count, fold }: { name: string; count: number; fold?: Fold }) {
+  return (
+    <FoldHeading name={name} fold={fold} flip={`machine:${name}`} count={count} className="pt-4" sticky>
+      <h3 className="min-w-0 truncate text-[0.8125rem] font-semibold text-fg phone:text-base">{name}</h3>
+    </FoldHeading>
   )
 }
 
@@ -661,50 +562,22 @@ function GroupHeading({ label, note, count, flip, fold }: { label: string; note?
   )
 }
 
-/** For you's heading: a step above the others (the list's first thing to read), its count plain beside it */
-function YouHeading({ count, fold }: { count: number; fold?: Fold }) {
+/** By place: a space's name over its work, its emoji beside it if it has one; the whole heading folds it */
+function SpaceHeading({ group: g, count, fold }: { group: Pick<TaskGroup, 'label' | 'emoji' | 'key'>; count: number; fold?: Fold }) {
   return (
-    <FoldHeading name="For you" fold={fold} flip="group:you" count={count} className="pt-2 phone:pt-3" sticky>
-      <h3 className="min-w-0 truncate text-[0.8125rem] font-semibold text-fg phone:text-base">For you</h3>
-    </FoldHeading>
-  )
-}
-
-/** For you: a space's name over its work, its emoji (else #) where the rows' dots are, its machine quiet after it only
- *  when two machines have a space of that name, its count. A tap opens the space's chat (a list no space works in:
- *  just its name). */
-function SpaceHeading({ group: g, count, onOpen }: { group: Pick<TaskGroup, 'label' | 'note' | 'emoji' | 'key'>; count: number; onOpen?: () => void }) {
-  const inner = (
-    <>
-      <span aria-hidden className="grid h-5 w-3.5 shrink-0 place-items-center phone:h-6 phone:w-4">
-        {g.emoji ? <span className="text-[0.8125rem] leading-none phone:text-[0.9375rem]">{g.emoji}</span> : <HashIcon className="size-3.5 text-fg3" />}
-      </span>
-      <span className="min-w-0 truncate text-[0.75rem] font-medium text-fg2 group-hover/s:text-fg phone:text-[0.875rem]">
+    <FoldHeading name={g.label} fold={fold} flip={`group:${g.key}`} count={count} className="pt-3" sticky>
+      <span className="min-w-0 truncate text-[0.75rem] font-medium text-fg2 phone:text-[0.875rem]">
+        {g.emoji ? <span className="mr-1.5">{g.emoji}</span> : null}
         {g.label}
-        {g.note ? <span className="font-normal text-fg3"> · {g.note}</span> : null}
       </span>
-      <span className="shrink-0 text-[0.75rem] text-fg3 tabular-nums phone:text-[0.875rem]">{count}</span>
-    </>
-  )
-  const look = 'flex min-h-8 w-full items-center gap-3 rounded-row px-2 text-left phone:min-h-11 phone:px-3'
-  return (
-    <div data-flip={`group:${g.key}`} data-heading={g.label} className="sticky top-(--stick,0px) z-1 bg-bg px-1.5 pt-3 phone:px-2">
-      {onOpen ? (
-        <button type="button" aria-label={`${g.label}${g.note ? ` · ${g.note}` : ''}, ${count}: open its chat`} onClick={onOpen}
-          className={clsx(look, 'press group/s cursor-pointer outline-none select-none hover:bg-hover keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] coarse:min-h-11')}>
-          {inner}
-        </button>
-      ) : (
-        <div className={look}>{inner}</div>
-      )}
-    </div>
+    </FoldHeading>
   )
 }
 
 /** a Done time today, on this device's clock */
 const isToday = (ms?: number) => !!ms && new Date(ms).toDateString() === new Date().toDateString()
 
-/** For you's Done, shut: one quiet line, "3 done today" (or "12 done", some older), a tap shows them */
+/** Done, shut: one quiet line, "3 done today" (or "12 done", some older), a tap shows them */
 function DoneLine({ count, today, onClick }: { count: number; today: boolean; onClick: () => void }) {
   return (
     <div data-flip="group:done" className="px-1.5 pt-2 phone:px-2">
@@ -828,22 +701,16 @@ function multiMachine(snap: Snapshot) {
   return new Set([...snap.tasks.map((t) => t.on), ...Object.values(snap.automations ?? {}).flat().map((a) => a.machine || snap.host)]).size > 1
 }
 
-const GROUP_WORDS: Record<GroupBy, string> = { you: 'For you', project: 'Space', status: 'Status' }
-
-/** The Tasks header's ⋯: group the list For you (what needs you, then each space), by Space or by Status. place, the
- *  place picked, is for plugins of old */
+/** The Tasks header's ⋯: narrow the list to the space picked (the one thing the old chip row had that the toggle doesn't) */
 function TasksMenu(_: { place: Place }) {
-  const snap = useSnap()!
-  const view = useStore((s) => listView(s.ui, snap))
-  const level = view.level
-  const by = groupFor(useUI((u) => u.groups), level)
+  const here = useUI((u) => u.thisSpace)
   const phone = useUI((u) => u.device === 'phone')
   const [open, setOpen] = useState(false)
   const B = phone ? RoundButton : IconButton
   return (
     <div className="relative">
       <B
-        label="Group by"
+        label="Tasks options"
         aria-haspopup="menu"
         aria-expanded={open}
         className={clsx('rounded-full!', phone ? 'aria-expanded:bg-line2' : 'aria-expanded:bg-hover')}
@@ -852,24 +719,10 @@ function TasksMenu(_: { place: Place }) {
         <MoreIcon className={ic} />
       </B>
       {open ? (
-        <Menu label="Group by" onClose={() => setOpen(false)} className="absolute top-full right-0 z-21 mt-1.5 max-w-[calc(100vw-24px)] origin-top-right">
-          <div role="group" aria-label="Group by">
-            <MenuLabel>Group by</MenuLabel>
-            {groupChoices(level).map((c) => (
-              <MenuItem
-                key={c}
-                role="menuitemradio"
-                aria-checked={by === c}
-                icon={by === c ? <CheckIcon className={ic} /> : null}
-                onClick={() => {
-                  setOpen(false)
-                  setGroup(level, c)
-                }}
-              >
-                {GROUP_WORDS[c]}
-              </MenuItem>
-            ))}
-          </div>
+        <Menu label="Tasks options" onClose={() => setOpen(false)} className="absolute top-full right-0 z-21 mt-1.5 max-w-[calc(100vw-24px)] origin-top-right">
+          <MenuItem role="menuitemcheckbox" aria-checked={here} icon={here ? <CheckIcon className={ic} /> : null} onClick={() => { setOpen(false); setThisSpace(!here) }}>
+            Only this space
+          </MenuItem>
         </Menu>
       ) : null}
     </div>
