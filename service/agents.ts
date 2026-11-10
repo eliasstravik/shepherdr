@@ -149,10 +149,13 @@ export class Agents {
     if (state === "working") throw new Error("It's busy with a turn. Switch once it's done, or stop it first.");
     if (state === "blocked") throw new Error("It's waiting on a question. Answer it, then switch.");
     const hc = (args: string[]) => run([process.env.SHEPHERDR_HC || "hc", ...args]);
+    // a send returns once a turn starts or ~5 s pass, and a command starts none: its answer on screen is what counts,
+    // so each is waited for only as long as a refusal takes (it comes at once), not for the rest
     const io = {
       send: async (text: string) => {
-        const r = await this.hub.send(addr, text);
-        if (r.code !== 0) throw new Error("It couldn't be reached to switch.");
+        const p = this.hub.send(addr, text);
+        const r = await Promise.race([p, Bun.sleep(800).then(() => null)]);
+        if (r && r.code !== 0) throw new Error("It couldn't be reached to switch.");
       },
       keys: async (...keys: string[]) => { await hc(["keys", addr, ...keys]); },
       screen: async () => (await hc(["read", addr, "--lines", "2000"])).out,

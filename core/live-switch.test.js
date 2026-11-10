@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import { claudeCommands, claudeRestore, codexEffortRow, codexModelRow, codexPicker, codexRestore, codexRows, liveChanges, liveOK, moveTo, switchLive } from "./live-switch.js";
-import { claudeSwitch, Conversation } from "./chat-log.js";
+import { claudeSwitch, Conversation, LOG, records } from "./chat-log.js";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { current, rowFor } from "./agents.js";
 
 test("only another CLI or permission mode needs a restart", () => {
@@ -155,4 +158,31 @@ test("the log says what it runs on as soon as the switch is made", () => {
   x.codex({ type: "event_msg", payload: { type: "thread_settings_applied", thread_settings: { model: "gpt-6-sol", reasoning_effort: "ultra", service_tier: "default" } }, timestamp: "2026-11-10T11:00:00Z" }, 0);
   const cx = current("codex", ["codex", "-m", "gpt-6-luna", "-c", 'service_tier="fast"'], x.meta, {});
   expect([cx.model, cx.effort, cx.fast]).toEqual(["gpt-6-sol", "ultra", false]);
+});
+
+/** A log as LOG reads it (its filter keeps only the lines the chat uses), fed to a Conversation */
+async function viaLog(kind, lines) {
+  const dir = mkdtempSync(join(tmpdir(), "live-switch-"));
+  const f = join(dir, "log.jsonl");
+  writeFileSync(f, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const out = await new Response(Bun.spawn(["sh", "-c", LOG, "log", "tail", f, "0"], { stdout: "pipe", stderr: "ignore" }).stdout).text();
+  rmSync(dir, { recursive: true });
+  const c = new Conversation(kind);
+  c.feed(records(out).records);
+  return c;
+}
+
+test("the log reader keeps the lines a switch writes (Claude Code 2.1.308, Codex 0.163, their keys in order)", async () => {
+  const at = "2026-11-10T11:27:28.013Z";
+  const c = await viaLog("claude", [
+    { parentUuid: "a", isSidechain: false, promptId: "p", type: "user", message: { role: "user", content: "<local-command-stdout>Set model to `Sonnet 5.5` and saved as your default for new sessions</local-command-stdout>" }, uuid: "b", timestamp: at },
+    { parentUuid: "b", isSidechain: false, type: "system", subtype: "local_command", content: "<local-command-stdout>Fast mode ON</local-command-stdout>", level: "info", timestamp: at, uuid: "c" },
+  ]);
+  expect(c.meta).toMatchObject({ model: "claude-sonnet-5-5", speed: "fast" });
+  // and the chat shows no message for them
+  expect(c.items.filter((x) => x.kind === "user" || x.kind === "agent")).toEqual([]);
+  const x = await viaLog("codex", [
+    { timestamp: at, ordinal: 16, type: "event_msg", payload: { type: "thread_settings_applied", thread_id: "t", thread_settings: { model: "gpt-6-sol", model_provider_id: "openai", service_tier: "priority", reasoning_effort: "medium" } } },
+  ]);
+  expect(x.meta).toMatchObject({ model: "gpt-6-sol", effort: "medium", speed: "fast" });
 });
