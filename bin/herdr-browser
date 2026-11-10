@@ -165,9 +165,70 @@ problem() {
 
 json_str() { printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()), end="")'; }
 
+# Chrome's shared libraries (SHEP-200). agent-browser's doctor only checks that Chrome's file is there, so a Chrome
+# missing a library passes and then exits 127 with the loader's one line. Say which library is missing, and how to
+# install it, before anything starts.
+# Chrome: $AGENT_BROWSER_EXECUTABLE_PATH, else the newest one agent-browser installed.
+chrome_bin() {
+  if [ -n "${AGENT_BROWSER_EXECUTABLE_PATH:-}" ]; then echo "$AGENT_BROWSER_EXECUTABLE_PATH"; return; fi
+  _c=
+  for _f in "$HOME/.agent-browser/browsers"/chrome-*/chrome; do [ -x "$_f" ] && _c=$_f; done
+  echo "$_c"
+}
+# The libraries ldd says Chrome can't find, space-separated. Nothing where ldd can't say (macOS, no Chrome yet).
+missing_libs() {
+  [ "$(uname -s)" = Linux ] && command -v ldd >/dev/null 2>&1 || return 0
+  _c=$(chrome_bin)
+  [ -n "$_c" ] || return 0
+  ldd "$_c" 2>/dev/null | awk '/=> not found/ { printf "%s ", $1 }' | sed 's/ $//'
+}
+# The package that provides a library, by distro family: debian, fedora, arch, alpine (one name each, in that order).
+lib_pkgs() {
+  case "$1" in
+    libgbm.so*) echo "libgbm1 mesa-libgbm libgbm mesa-gbm" ;;
+    libnss3.so*|libnssutil3.so*|libsmime3.so*) echo "libnss3 nss nss nss" ;;
+    libnspr4.so*) echo "libnspr4 nspr nspr nspr" ;;
+    libasound.so*) echo "libasound2 alsa-lib alsa-lib alsa-lib" ;;
+    libatk-1.0.so*) echo "libatk1.0-0 atk atk atk" ;;
+    libatk-bridge-2.0.so*) echo "libatk-bridge2.0-0 at-spi2-atk at-spi2-atk at-spi2-atk" ;;
+    libcups.so*) echo "libcups2 cups-libs libcups cups-libs" ;;
+    libdrm.so*) echo "libdrm2 libdrm libdrm libdrm" ;;
+    libxkbcommon.so*) echo "libxkbcommon0 libxkbcommon libxkbcommon libxkbcommon" ;;
+    *) ;;
+  esac
+}
+# The install command for this distro with the packages of the libraries given, and the ones it can't name.
+install_hint() {
+  _ids=$(grep -E '^(ID|ID_LIKE)=' "${HERDR_BROWSER_OS_RELEASE:-/etc/os-release}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr '\n' ' ')
+  case " $_ids " in
+    *" debian "*|*" ubuntu "*) _col=1; _cmd="sudo apt-get install -y" ;;
+    *" fedora "*|*" rhel "*|*" centos "*) _col=2; _cmd="sudo dnf install -y" ;;
+    *" arch "*) _col=3; _cmd="sudo pacman -S --needed" ;;
+    *" alpine "*) _col=4; _cmd="sudo apk add" ;;
+    *) _col= ;;
+  esac
+  _pk=; _no=
+  for _l in $1; do
+    _p=
+    [ -n "$_col" ] && _p=$(lib_pkgs "$_l" | cut -d' ' -f"$_col")
+    if [ -n "$_p" ]; then _pk="$_pk $_p"; else _no="$_no $_l"; fi
+  done
+  if [ -n "$_pk" ]; then echo "Install: $_cmd$_pk"; fi
+  if [ -n "$_no" ]; then echo "No package name is known here for:$_no. Find the package that provides each file (your distro's package search)."; fi
+}
+# Chrome can't start without its libraries: says which are missing and how to install them. -> 0, or 1 (said).
+libs_check() {
+  _m=$(missing_libs)
+  [ -n "$_m" ] || return 0
+  echo "herdr-browser: Chrome can't start: missing system libraries: $_m."
+  install_hint "$_m"
+  return 1
+}
+
 case "${1-}" in
   --install)
     if ensure; then
+      libs_check >&2 || exit 1
       echo "herdr-browser: agent-browser $ver is ready ($bin), with Chrome."
       exit 0
     fi
@@ -253,6 +314,7 @@ if ! usable; then
   fi
   if ! usable; then problem >&2; exit 127; fi
 fi
+libs_check >&2 || exit 127
 
 # The first word that isn't a flag: what the command does.
 verb=
