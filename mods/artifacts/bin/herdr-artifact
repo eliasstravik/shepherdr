@@ -64,6 +64,8 @@ APP = os.environ.get("HERDR_APP_HOME") or os.path.join(HOME, ".config", "herdr-a
 GUIDE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "ARTIFACTS.md")
 # Mark up (the person points at a spot and writes to the agent), laid over every installed artifact.
 MARKUP = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "markup.js")
+# What Mark up imports beside it (markup.js's dirs.js, and dirs.js's core/paths.js): each copy carries them too (#870).
+MARKUP_HELPERS = ("dirs.js", os.path.join("core", "paths.js"))
 # A recipe artifact (recipe.json, Shepherdr 3.1) is drawn by the shared recipe view: copied into its installed mod.
 RECIPE_VIEW = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "recipe-view.js")
 RECIPE_CORE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "core", "recipe.js")
@@ -411,11 +413,16 @@ export default class MarkedArtifact extends Artifact {
 
 def wrap_markup(dst):
     """Lays Mark up over an installed artifact: its main.js becomes artifact-main.js under a
-    wrapper. Without the markup template (an old copy on another machine) it stays as it is."""
-    if not os.path.isfile(MARKUP):
+    wrapper, and Mark up's helpers come along beside it. Without the markup template or its helpers (an old copy on
+    another machine) it stays as it is."""
+    here = os.path.dirname(MARKUP)
+    if not os.path.isfile(MARKUP) or not all(os.path.isfile(os.path.join(here, h)) for h in MARKUP_HELPERS):
         return
     os.replace(os.path.join(dst, "main.js"), os.path.join(dst, "artifact-main.js"))
     shutil.copyfile(MARKUP, os.path.join(dst, "artifact-markup.js"))
+    for h in MARKUP_HELPERS:
+        os.makedirs(os.path.dirname(os.path.join(dst, h)), exist_ok=True)
+        shutil.copyfile(os.path.join(here, h), os.path.join(dst, h))
     with open(os.path.join(dst, "main.js"), "w") as f:
         f.write(WRAPPER)
 
@@ -966,11 +973,15 @@ def cmd_pack(o):
 
 
 def markup_hash():
+    """The version of Mark up and its helpers: a change to any of them reinstalls the artifacts that carry it."""
+    h = hashlib.sha1()
     try:
-        with open(MARKUP, "rb") as f:
-            return hashlib.sha1(f.read()).hexdigest()[:12]
+        for p in [MARKUP] + [os.path.join(os.path.dirname(MARKUP), x) for x in MARKUP_HELPERS]:
+            with open(p, "rb") as f:
+                h.update(f.read())
     except OSError:
         return ""
+    return h.hexdigest()[:12]
 
 
 def current(mod, version):

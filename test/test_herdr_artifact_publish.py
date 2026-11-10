@@ -8,6 +8,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import stat
 import sys
@@ -104,6 +105,12 @@ class Publish(unittest.TestCase):
             shutil.copyfile(src, dst)
             os.chmod(dst, 0o444)
             parts[name] = dst
+        # Mark up's helpers sit beside it (#870), in the same read-only folder.
+        for h in A.MARKUP_HELPERS:
+            os.makedirs(os.path.dirname(os.path.join(ro, h)), exist_ok=True)
+            dst = os.path.join(ro, h)
+            shutil.copyfile(os.path.join(os.path.dirname(A.MARKUP), h), dst)
+            os.chmod(dst, 0o444)
         os.chmod(ro, 0o555)
         d = self.recipe()
         os.chmod(os.path.join(d, "recipe.json"), 0o444)
@@ -113,7 +120,7 @@ class Publish(unittest.TestCase):
         self.assertTrue(out["installed"])
         self.assertEqual(len(self.calls()), 2)  # dark and light
         mod = os.path.join(self.dir, "app", "mods", out["mod"])
-        for f in ("recipe-view.js", "recipe.js", "artifact-markup.js", "recipe.json"):
+        for f in ("recipe-view.js", "recipe.js", "artifact-markup.js", "dirs.js", "core/paths.js", "recipe.json"):
             self.assertTrue(os.stat(os.path.join(mod, f)).st_mode & stat.S_IWUSR, f)
 
     def test_a_checker_that_does_not_connect_still_publishes_a_recipe(self):
@@ -155,6 +162,33 @@ class Publish(unittest.TestCase):
             out = self.publish(self.recipe())
         self.assertLess(time.time() - t, 10)
         self.assertIn("didn't finish", out["unchecked"])
+
+    def test_every_installed_import_resolves(self):
+        """#870: the installed Mark up imports dirs.js (and that imports core/paths.js), which the artifact's mod
+        must carry: a relative import with no file beside it fails the whole artifact in the desktop app."""
+        pat = re.compile(r"""(?:^|[\s;}])(?:import|export)\b[^'"`;]*?(?:from\s*)?['"](\.{1,2}/[^'"]+)['"]|import\s*\(\s*['"](\.{1,2}/[^'"]+)['"]""", re.M)
+        os.makedirs(os.path.join(self.dir, "app", "mods"))
+        for kind, d in (("recipe", self.recipe()), ("custom panel", self.panel())):
+            with self.subTest(kind=kind):
+                out = self.publish(d, custom=kind == "custom panel")
+                mod = os.path.join(self.dir, "app", "mods", out["mod"])
+                js = [os.path.join(r, n) for r, _, names in os.walk(mod) for n in names if n.endswith(".js")]
+                self.assertIn("artifact-markup.js", [os.path.basename(f) for f in js])
+                missing = []
+                for f in js:
+                    with open(f) as fh:
+                        for m in pat.finditer(fh.read()):
+                            target = os.path.normpath(os.path.join(os.path.dirname(f), m.group(1) or m.group(2)))
+                            if not os.path.isfile(target):
+                                missing.append(f"{os.path.relpath(f, mod)} imports {m.group(1) or m.group(2)}")
+                self.assertEqual(missing, [])
+
+    def panel(self):
+        d = os.path.join(self.dir, "panel")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "main.js"), "w") as f:
+            f.write('export default class X {}\n')
+        return d
 
     def test_waiting_on_another_publish_says_so(self):
         """#843: another publish in the same folder holds its list: this one says what it waits on, then goes on."""
