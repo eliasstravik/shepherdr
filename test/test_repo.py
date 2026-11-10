@@ -249,6 +249,10 @@ class Repo(unittest.TestCase):
         app = open(J("web", "src", "App.tsx")).read()
         brand = app[app.index("export function Brand("):app.index("function SearchButton(")]
         self.assertLess(brand.index("registry.sideHead"), brand.index("<SearchButton />"))
+        layout = json.load(open(J("layouts", "BossGoat.json")))
+        sidebar = next(n for n in layout["children"] if n["id"] == "sidebar")
+        header = next(n for n in sidebar["children"] if n["id"] == "brand")
+        self.assertEqual(header["content"]["mod"], "workspace-chrome-shepherdr", "mount the header with voice controls")
         chrome = open(J("mods", "workspace-chrome-shepherdr", "main.js")).read()
         self.assertLess(chrome.index('this.button("voice"'), chrome.index('this.button("search"'))
         self.assertIn('setShared("voice.startreq"', chrome)

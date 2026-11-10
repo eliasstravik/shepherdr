@@ -15,7 +15,7 @@
           "id": "brand",
           "type": "block",
           "content": {
-            "mod": "workspace-chrome"
+            "mod": "workspace-chrome-shepherdr"
           },
           "size": {
             "px": 46

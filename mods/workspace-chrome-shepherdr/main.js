@@ -65,8 +65,9 @@ export default class WorkspaceChrome extends View {
 
   button(id, label, action) {
     const t = theme();
+    const hint = id === "voice" ? "Talk to BossGoat" : id === "search" ? "Search" : narrow() ? "Show sidebar" : "Hide sidebar";
     return div().id(id).size(32).flex_none().flex().items_center().justify_center().rounded(6).cursor_pointer().text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
-      .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click(action).child(label);
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click(action).accessibility_label(hint).tooltip(hint).child(label);
   }
   // SHEP-135: on a call the voice button turns into the call's Mute and End, held in one outlined capsule (as the web's
   // brand row and phone bar): its buttons the row's size and as far apart as Search and the toggle, the ring drawn in
