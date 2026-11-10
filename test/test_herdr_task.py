@@ -1322,6 +1322,97 @@ class OwnBackgroundWork(unittest.TestCase):
         self.assertEqual((v["status"], v["own_work"]), ("working", True))
 
 
+class CodexCodeMode(unittest.TestCase):
+    """SHEP-207: Codex 0.163+ code mode runs its commands from a script (one exec call with
+    tools.exec_command and tools.write_stdin inside Promise.allSettled). A poll's result drops its
+    session id once the command exited, so each result is matched to the session its call polled,
+    and a Codex job counts only while its agent's process tree runs something besides the code-mode
+    host. The items are a real run's (fixtures/codex-code-mode); the process tree is faked (ps)."""
+
+    setUp = OwnBackgroundWork.setUp
+    stamp, status = OwnBackgroundWork.stamp, OwnBackgroundWork.status
+
+    def setUp_ps(self, ps=""):
+        """The `ps` output codex_working() reads (the rest of the test's processes: none)."""
+        from types import SimpleNamespace
+        if not hasattr(self, "ps"):
+            p = self.mock.patch.object(self.agents, "run", lambda args, **kw: SimpleNamespace(stdout=self.ps), create=True)
+            p.start()
+            self.addCleanup(p.stop)
+        self.ps = ps
+
+    def replay(self, n=None):
+        with open(os.path.join(ROOT, "test", "fixtures", "codex-code-mode", "rollout-items.jsonl")) as f:
+            items = [json.loads(line) for line in f if line.strip()]
+        for i, item in enumerate(items[:n]):
+            self.stamp(-300_000 + i * 1000, item)
+
+    def codex(self, ps_pid=100):
+        return [{"address": "t1", "status": {"state": "idle"}, "labels": {"herdr.role": "worker"},
+                 "foreground": {"pid": ps_pid, "name": "codex"}}]
+
+    def test_each_poll_ends_its_own_session(self):
+        self.setUp_ps()
+        self.replay(2)  # both commands started: their results carry their session ids
+        self.assertEqual(sorted(self.agents.background_jobs(self.log)[0]), ["codex:50495", "codex:69674"])
+        self.replay(4)  # the script polls both in one call: "Script running with cell ID 2"
+        self.assertEqual(sorted(self.agents.background_jobs(self.log)[0]), ["codex:50495", "codex:69674"])
+        self.replay()  # wait on cell 2: alpha's result has no session id (exited), beta still runs
+        jobs, ended = self.agents.background_jobs(self.log)
+        self.assertEqual(list(jobs), ["codex:50495"])
+        self.assertGreater(ended, 0)
+
+    def test_a_result_without_its_id_ends_the_session_its_place_polled(self):
+        self.setUp_ps()
+        self.stamp(-300_000, {"type": "response_item", "payload": {"type": "custom_tool_call", "call_id": "p1", "name": "exec",
+                              "input": "await Promise.allSettled([tools.write_stdin({session_id:7, chars:''}), tools.write_stdin({session_id:8, chars:''})])"}})
+        self.stamp(-299_000, {"type": "response_item", "payload": {"type": "function_call_output", "call_id": "p1", "output": [
+            {"type": "input_text", "text": "[{\"status\":\"fulfilled\",\"value\":{\"exit_code\":0,\"output\":\"\"}},"
+                                         "{\"status\":\"fulfilled\",\"value\":{\"session_id\":8,\"output\":\"\"}}]"}]}})
+        self.assertEqual(list(self.agents.background_jobs(self.log)[0]), ["codex:8"])
+
+    def test_a_code_mode_job_with_no_process_is_over(self):
+        """The bug: the log still counts beta, but its agent is idle and no command runs under it."""
+        self.setUp_ps("100 1 codex --no-daemon\n101 100 /usr/local/lib/codex/codex-code-mode-host\n")
+        self.replay(4)
+        live = self.codex()
+        self.assertEqual(self.status(live)[:2], ("needs", "reply"))
+        self.assertFalse(self.agents.own_work(self.task, live, ready=True))
+
+    def test_a_running_command_under_the_agent_is_still_work(self):
+        self.setUp_ps("100 1 codex --no-daemon\n101 100 /usr/local/lib/codex/codex-code-mode-host\n"
+                      "102 101 /bin/bash -lc sleep 60\n")
+        self.replay(4)
+        live = self.codex()
+        self.assertEqual(self.status(live)[:2], ("working", None))
+        self.assertTrue(self.agents.own_work(self.task, live, ready=True))
+
+    def test_an_agent_without_a_pid_keeps_the_log_s_word(self):
+        self.setUp_ps()
+        self.replay(4)
+        self.assertEqual(self.status()[:2], ("working", None))
+
+    def test_the_old_write_stdin_format_still_ends(self):
+        self.setUp_ps()
+        self.stamp(-300_000, {"type": "response_item", "payload": {"type": "function_call", "call_id": "c1", "name": "exec_command",
+                              "arguments": json.dumps({"cmd": "gh run watch"})}})
+        self.stamp(-300_000, {"type": "response_item", "payload": {"type": "function_call_output", "call_id": "c1",
+                              "output": "Process running with session ID 42"}})
+        self.stamp(-200_000, {"type": "response_item", "payload": {"type": "function_call", "call_id": "c2", "name": "write_stdin",
+                              "arguments": json.dumps({"session_id": 42, "chars": ""})}})
+        self.stamp(-100_000, {"type": "response_item", "payload": {"type": "function_call_output", "call_id": "c2",
+                              "output": "Process exited with code 0\nOutput:\nok"}})
+        self.assertEqual(self.agents.background_jobs(self.log)[0], {})
+
+    def test_codex_working_reads_the_process_tree(self):
+        codex = {"foreground": {"pid": 100}}
+        self.setUp_ps("100 1 codex\n101 100 codex-code-mode-host\n")
+        self.assertFalse(self.agents.codex_working(codex))
+        self.setUp_ps("100 1 codex\n101 100 codex-code-mode-host\n102 101 sleep 9\n")
+        self.assertTrue(self.agents.codex_working(codex))
+        self.assertTrue(self.agents.codex_working({}))  # no pid: its log decides
+
+
 class NoFalseNeedsYou(unittest.TestCase):
     """SHEP-133: no Needs you for a few seconds that moves on by itself. A quiet agent or a problem
     Herdr found needs the person only after a grace (GRACE_MS); asking needs them at once; Herdr's
