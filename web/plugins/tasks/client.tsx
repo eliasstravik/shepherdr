@@ -62,18 +62,20 @@ import {
   MenuLabel,
   MenuSeparator,
   Meta,
+  MonitorIcon,
   MoreIcon,
   NextIcon,
   PinTaskIcon,
   PlayIcon,
   RoundButton,
   rowClass,
+  ServerIcon,
   TaskDot,
   UnpinIcon,
   XIcon,
   field,
 } from '@client/ui.tsx'
-import { doneNewestFirst, machineName, type Automation, type Place, type Snapshot, type Task } from '@shared/types.ts'
+import { doneNewestFirst, machineName, type Automation, type Machine, type Place, type Snapshot, type Task } from '@shared/types.ts'
 import { useFlip } from '@client/motion.ts'
 import { RowMenu, useRowMenu, type RowMenuState } from '@client/rowmenu.tsx'
 import * as MN from '@core/menus.js'
@@ -165,7 +167,11 @@ function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, le
 }) {
   const said = sub ? capital(sub) : undefined
   const shown = said ? fit(said) : undefined
-  const two = !!(ref_ || shown || where)
+  // the rows under the title: REF · where (always, the same on every status), then the status line on its own line
+  const second = !!(ref_ || where)
+  const rows = 1 + (second ? 1 : 0) + (shown ? 1 : 0)
+  const two = rows > 1
+  const statusRow = second ? 'row-start-3' : 'row-start-2'
   const end = action ?? (meta ? <span className="shrink-0 text-[0.75rem] whitespace-nowrap text-fg3 tabular-nums phone:text-[0.8125rem]">{meta}</span> : null)
   return (
     <li data-flip={flip} className={clsx(rowClass(sel, kb), 'group @container relative p-0! select-none [-webkit-touch-callout:none]', menu?.open && !sel && 'bg-hover')} {...(menu?.press ?? {})}>
@@ -186,24 +192,23 @@ function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, le
         <span aria-hidden className="col-start-1 row-start-1 grid h-5 w-3.5 place-items-center phone:h-6 phone:w-4">{glyph}</span>
         {/* the time left under the glyph, as tall as the second line so it sits level with it */}
         {two && left ? (
-          <span aria-hidden className={clsx('col-start-1 row-start-2 flex h-4 w-3.5 items-center justify-center font-mono text-[0.6875rem] font-semibold whitespace-nowrap tabular-nums @max-[24rem]:h-6 phone:h-6 phone:w-4 phone:text-[0.75rem]', leftQuiet ? 'text-fg3' : 'text-work-fg')}>{left}</span>
+          <span aria-hidden className={clsx('col-start-1 row-start-2 flex h-5 w-3.5 items-center justify-center font-mono text-[0.6875rem] font-semibold whitespace-nowrap tabular-nums phone:h-6 phone:w-4 phone:text-[0.75rem]', leftQuiet ? 'text-fg3' : 'text-work-fg')}>{left}</span>
         ) : null}
         <span aria-hidden={!!onOpen} className={clsx('col-start-2 row-start-1 min-w-0 truncate text-[0.875rem]/5 phone:text-base/6', dim ? 'text-fg2' : 'text-fg', two && '@max-[24rem]:col-end-4')}>{title}</span>
-        {two ? (
-          <span aria-hidden={!!onOpen} className="col-start-2 row-start-2 flex h-4 min-w-0 @max-[24rem]:h-6 items-center gap-1.5 text-[0.75rem]/4 phone:h-6 phone:text-[0.8125rem]/5">
+        {second ? (
+          <span aria-hidden={!!onOpen} className="col-start-2 row-start-2 flex h-5 min-w-0 items-center gap-1.5 phone:h-6 text-[0.75rem]/4 phone:h-6 phone:text-[0.8125rem]/5">
             {ref_ ? <span className="shrink-0 font-mono text-[0.6875rem] text-fg3 phone:text-[0.75rem]">{ref_}</span> : null}
-            {shown ? <span className="min-w-0 shrink truncate text-fg2">{shown}</span> : null}
-            {/* where it is takes the room left after the words, whole or not at all: it drops under the line, out of
-                sight (the empty first item keeps the line its height), never a cut "shep…" */}
-            {where ? (
-              <span className="flex h-full min-w-0 flex-1 basis-0 flex-wrap content-start overflow-hidden">
-                <span className="h-full" />
-                <span className="flex h-full shrink-0 items-center gap-1.5 whitespace-nowrap text-fg3">{ref_ || shown ? <span aria-hidden>·</span> : null}{where}</span>
-              </span>
-            ) : null}
+            {ref_ && where ? <span aria-hidden className="shrink-0 text-fg3">·</span> : null}
+            {/* where it is: its machine and space, whole as long as the row has room */}
+            {where ? <span className="min-w-0 truncate text-fg3">{where}</span> : null}
           </span>
         ) : null}
-        {end ? <span className={clsx('col-start-3 row-start-1 flex items-center', two && 'row-span-2 @max-[24rem]:row-span-1 @max-[24rem]:row-start-2')}>{end}</span> : null}
+        {shown ? (
+          <span aria-hidden={!!onOpen} className={clsx('col-start-2 flex h-5 min-w-0 items-center text-[0.75rem]/4 phone:h-6 phone:text-[0.8125rem]/5', statusRow)}>
+            <span className="min-w-0 truncate text-fg2">{shown}</span>
+          </span>
+        ) : null}
+        {end ? <span className={clsx('col-start-3 row-start-1 flex items-center', two && (rows === 3 ? 'row-span-3' : 'row-span-2'), two && '@max-[24rem]:row-span-1 @max-[24rem]:row-start-2')}>{end}</span> : null}
       </div>
       {children}
     </li>
@@ -279,10 +284,12 @@ function TaskMenu({ t, menu }: { t: Task; menu: RowMenuState }) {
  *  heading says it ("vm-str · gtm") */
 function whereOf(snap: Snapshot, t: Task, names: TaskGroup['names']) {
   const p = placeOf(snap, t.place)
-  const m = names.machine ? snap.machines?.find((x) => x.machine === p.machine) : undefined
+  // the machine is the task's own (t.on), not its space's: a task whose space isn't listed falls back to the home
+  // space, on the main machine, and would show that machine's name
+  const m = names.machine ? machineName(snap.machines, t.on) : undefined
   // Settings › Window › Show space on task rows off: no place on the right
   if (snap.look?.place === false) return []
-  return [m?.name, names.project ? (t.listName || p.name) : undefined].filter((x): x is string => !!x)
+  return [m, names.project ? (t.listName || p.name) : undefined].filter((x): x is string => !!x)
 }
 
 /** what needs you that is no task's: an agent asking (an Assistant's question, a secret, its turn waiting), or an
@@ -457,13 +464,14 @@ function TaskList(_: { placeId: string }) {
             const first = g.on !== lastOn
             lastOn = g.on
             const mine = groups.filter((x) => x.on === g.on)
-            const head = view.level === 0 && first ? <MachineHeading name={g.machine ?? g.on} count={mine.reduce((n, x) => n + x.count, 0)} fold={q ? undefined : { shut: mShut, toggle: () => toggleShut(key, `m:${g.on}`) }} /> : null
+            const head = view.level === 0 && first ? <MachineHeading name={g.machine ?? g.on} machine={snap.machines?.find((x) => x.machine === g.on)} count={mine.reduce((n, x) => n + x.count, 0)} fold={q ? undefined : { shut: mShut, toggle: () => toggleShut(key, `m:${g.on}`) }} /> : null
             if (view.level === 0 && mShut) return head ? <div key={g.key}>{head}</div> : null
             return (
               <div key={g.key}>
                 {head}
                 <SpaceHeading group={g} count={g.count} fold={fold} />
-                {g.shut ? null : rows}
+                {/* its tasks indented under the space's heading */}
+                {g.shut ? null : <div className="pl-5 phone:pl-6">{rows}</div>}
               </div>
             )
           }
@@ -504,12 +512,24 @@ function TaskList(_: { placeId: string }) {
 }
 
 /** By place: a machine's name over its spaces (when more than one machine has tasks); folds them all */
-function MachineHeading({ name, count, fold }: { name: string; count: number; fold?: Fold }) {
+/** a machine's heading in Place: its mark (emoji, a monitor for this computer, a server) and its name, muted and regular,
+ *  as the Spaces sidebar's machine rows; the hierarchy is the icon and the indent, not weight */
+function MachineHeading({ name, machine, count, fold }: { name: string; machine?: Machine; count: number; fold?: Fold }) {
   return (
     <FoldHeading name={name} fold={fold} flip={`machine:${name}`} count={count} className="pt-4" sticky>
-      <h3 className="min-w-0 truncate text-[0.8125rem] font-semibold text-fg phone:text-base">{name}</h3>
+      <span className="flex min-w-0 items-center gap-1.5 text-[0.8125rem] text-fg2 phone:text-base">
+        <MachineGlyph m={machine} />
+        <h3 className="min-w-0 truncate font-normal">{name}</h3>
+      </span>
     </FoldHeading>
   )
+}
+
+/** a machine's mark, as the Spaces sidebar draws it */
+function MachineGlyph({ m }: { m?: Machine }) {
+  if (m?.emoji) return <span data-icon="emoji" aria-hidden className="-mr-0.5 grid w-[15px] shrink-0 place-items-center text-[0.9375rem] leading-none phone:w-4 phone:text-base">{m.emoji}</span>
+  const Plain = m?.here ? MonitorIcon : ServerIcon
+  return <Plain className="size-[15px] shrink-0 -mr-0.5 text-fg3 phone:size-4" />
 }
 
 /** a heading's fold: shut or open, and what a tap does (all: Alt/Option held, its siblings go the same way) */
@@ -565,10 +585,11 @@ function GroupHeading({ label, note, count, flip, fold }: { label: string; note?
 /** By place: a space's name over its work, its emoji beside it if it has one; the whole heading folds it */
 function SpaceHeading({ group: g, count, fold }: { group: Pick<TaskGroup, 'label' | 'emoji' | 'key'>; count: number; fold?: Fold }) {
   return (
-    <FoldHeading name={g.label} fold={fold} flip={`group:${g.key}`} count={count} className="pt-3" sticky>
-      <span className="min-w-0 truncate text-[0.75rem] font-medium text-fg2 phone:text-[0.875rem]">
-        {g.emoji ? <span className="mr-1.5">{g.emoji}</span> : null}
-        {g.label}
+    // indented under its machine's heading, its icon (the space's emoji, else #) level with the machine's name's room
+    <FoldHeading name={g.label} fold={fold} flip={`group:${g.key}`} count={count} className="pt-2 pl-5 phone:pl-6" sticky>
+      <span className="flex min-w-0 items-center gap-1.5 text-[0.8125rem] text-fg2 phone:text-base">
+        {g.emoji ? <span data-icon="emoji" aria-hidden className="-mr-0.5 grid w-[15px] shrink-0 place-items-center text-[0.9375rem] leading-none phone:w-4 phone:text-base">{g.emoji}</span> : <HashIcon className="size-[15px] shrink-0 -mr-0.5 text-fg3 phone:size-4" />}
+        <span className="min-w-0 truncate">{g.label}</span>
       </span>
     </FoldHeading>
   )
