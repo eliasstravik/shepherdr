@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 
 from .base import Fail, GH, git, hc_json, now, run, STORE
@@ -80,18 +81,36 @@ def pr_open(s, task, repo, summary=None):
     if done:
         raise Fail(f"Pull request #{done['number']} for {br} is already merged, and {br} has commits since. "
                    f"Put them on a new branch (a new task) rather than a second pull request.")
-    body = (task.get("prompt") or "").strip() or task["title"]
-    if summary:
-        body += "\n\n## Summary\n\n" + summary.strip()
-    if (task.get("details") or "").strip():
-        body += "\n\n## Details\n\n" + task["details"].strip()
     ok, out, err = gh("pr", "create", "--repo", repo, "--head", br, "--base", task.get("base") or "main",
-                      "--title", f"{s.ref(task)} {task['title']}", "--body", body)
+                      "--title", pr_title(s, task), "--body", pr_body(s, task, summary))
     if not ok or not out:
         raise Fail(f"Couldn't open a pull request: {err}")
     url = out.split()[-1]
     task["pr"] = {"number": int(url.rstrip("/").split("/")[-1]), "url": url, "repo": repo}
     return task["pr"]
+
+
+def pr_title(s, task):
+    """The repo's commit titles read "SHEP-198: the task's title" (a squash merge adds "(#945)"): the
+    task's ref first, so the pull request stays findable by it."""
+    ref = s.ref(task)
+    title = " ".join(str(task.get("title") or "").split())
+    rest = re.sub(rf"^{re.escape(ref)}\b[:\s-]*", "", title, flags=re.I)
+    return f"{ref}: {rest or ref}"
+
+
+def pr_body(s, task, summary=None):
+    """Short: the task's ref, what ready said (summary), the details and its proof's title. Never the
+    brief: that stays with the task in Shepherdr."""
+    lines = [f"Task: {s.ref(task)}"]
+    if summary and summary.strip():
+        lines += ["", "## Summary", "", summary.strip()]
+    if (task.get("details") or "").strip():
+        lines += ["", "## Details", "", task["details"].strip()]
+    proof = (task.get("proof") or {}).get("title")
+    if proof:
+        lines += ["", "## Proof", "", f"Shepherdr's proof artifact: {proof}"]
+    return "\n".join(lines)
 
 
 def pr_adopt(task, repo):
