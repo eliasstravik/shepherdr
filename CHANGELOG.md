@@ -1,5 +1,55 @@
 # Changelog
 
+## 3.1.31
+
+A patch release of fixes from the GitHub triage: the agent suggests your next message, the phone's Enter key stops
+lagging, Codex tasks stop saying Working after they finish, and the Tasks rows show where each task is.
+
+### Tasks
+
+- Each Tasks row's second line is its reference, machine and space. What the agent is doing sits on a third line when
+  there is one.
+- A row shows the task's real status: a task accepted as Done no longer keeps an old Needs-you icon (GitHub #871).
+- A task's folder stays while its agent is still working or asking after it said ready, so an auto-merge no longer
+  pulls it out from under the agent (GitHub #919).
+- A resumed agent gets a carry-on message instead of sitting idle, and an agent that stops is logged (GitHub #872).
+- A Codex task whose commands finish no longer stays Working (Codex 0.163 and later).
+- `herdr-task ready` titles the pull request with the task's title, in the repo's convention, and its body is the
+  summary and proof, not the whole brief (GitHub #924).
+- Resume and revive type the agent's command into a plain shell as it is, so zsh and bash run it (GitHub #925).
+- `herdr-task list`, `show`, `where` and `autopilot list` work in a read-only sandbox such as a Codex reviewer's
+  (GitHub #900).
+- On a Mac, the memory check that holds new tasks reads macOS's own free memory, so a Mac with plenty free is no longer
+  held at 80% (GitHub #922).
+
+### Chat
+
+- The agent suggests your next message, one line, and it shows as grey ghost text in the box. Enter or Send sends it,
+  Tab fills it in to edit, and typing or a new reply replaces it. Settings → Agents → Suggested next message turns it
+  off (built from the idea in GitHub #907).
+- On a phone, Enter and the key row go down the same stream as your typing, so they land right after the text, not
+  3 seconds later (GitHub #892).
+- Ctrl+C copies highlighted chat text: a drag over messages keeps its selection (GitHub #916).
+- Chat pictures show their thumbnails again, without ImageMagick, on ffprobe 8 (GitHub #914).
+- A task's chat no longer cuts off its last row and message box at some zoom levels (GitHub #915).
+- A task's chat header and the Assistant's line up: Back is a chevron on the title's line, in the same place in both.
+- A published proof opens in the desktop app (GitHub #870).
+- A link from another site, such as Slack, opens the web app instead of an error (GitHub #913).
+
+### Spaces
+
+- The # list shows the spaces each reachable machine has, named as Herdr names them, not as locked or as raw ids.
+- New Space no longer crashes when its icon reply is missing (GitHub #917).
+
+### Install and the task browser
+
+- An update removes mods and helper files Shepherdr no longer ships, backs up what it changed and says so. An install
+  that leaves a problem says NOT DONE (GitHub #895, #905).
+- A Linux machine missing a system library for Chrome gets the library names and the install command, before the task
+  browser starts Chrome (GitHub #918).
+- On Ubuntu, when Chrome refuses to start because of AppArmor, the task browser says the exact fix (GitHub #920).
+- The task browser's script runs under macOS's bash, so an update no longer skips agent-browser (GitHub #908).
+
 ## 3.1.30
 
 A small release: a task whose checks GitHub won't show stops waiting forever, the model and effort switch without a
