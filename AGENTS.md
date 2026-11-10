@@ -57,6 +57,8 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
   PATH (see AutomationFromAnotherMachine).
 - Python tests: each `test/test_*.py` imports `home_guard` first (a throwaway HOME for the run; touching the real home
   fails the test). Run them with `discover -s test` or from `test/`.
+- Tests that run accept or merge with the real `finish()` must stub `github.live_agents` and `live_helpers` (hc is
+  refused under test).
 - Bun.spawn ignores a PATH changed inside a test: point the service at fakes with `SHEPHERDR_HERDR_APP` / `SHEPHERDR_HC`.
 - Window-mod render tests: `bun test` in service/ with `mock.module` for gpui-kit/gpui-base and herdr via
   service/fake-herdr.ts (bun's mocks are per process, so every herdr stand-in needs every name); see
