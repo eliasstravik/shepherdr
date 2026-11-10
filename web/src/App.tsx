@@ -330,7 +330,7 @@ function SpaceColumn({ place, pane }: { place: Place; pane?: number }) {
   const tabChat = useUI((u) => (tab && u.tabView?.[tab.term] === 'chat' ? tab.term : null))
   return (
     <section data-drawer-from className="@container/place flex min-h-0 min-w-0 flex-1 flex-col">
-      <Head conversation lead={<SpacesButtons pane={pane} />}>
+      <Head conversation reserve={pane === undefined} lead={<SpacesButtons pane={pane} />}>
         <div className="flex min-w-24 shrink-[100] items-center">
           <Who name={name} kind={where ? <PaneWhere where={where} /> : undefined} />
         </div>
