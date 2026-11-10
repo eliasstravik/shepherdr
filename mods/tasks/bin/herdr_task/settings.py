@@ -183,7 +183,7 @@ def argv_for(pick):
             raise Fail("Choose Cursor reasoning and speed through its model ID.")
         a = ["cursor-agent", "--model", pick.get("model") or "auto"]
         perm = pick.get("perm")
-        a += ["--force"] if perm == "full" else ["--mode", "ask"] if perm == "read-only" else ["--auto-review"]
+        a += ["--force"] if perm == "full" else ["--mode", "ask"] if perm == "read-only" else [] if perm == "ask" else ["--auto-review"]
         return a
     if agent == "codex":
         a = ["codex", "--no-daemon"]
@@ -200,6 +200,8 @@ def argv_for(pick):
             a += ["-s", "read-only", "-a", "on-request"]
         elif perm:
             a += ["-s", "workspace-write", "-a", "on-request"]
+        if perm in ("ask", "approve"):
+            a += ["-c", 'approvals_reviewer="%s"' % ("auto_review" if perm == "approve" else "user")]
         return a
     return [agent] if agent else None
 

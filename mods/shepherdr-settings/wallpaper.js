@@ -1,8 +1,8 @@
 import { div, image } from "gpui-kit";
 import { shared, theme } from "herdr";
-import { wallpaper, cover, WALLPAPER_KEY } from "./core/wallpaper.js";
+import { visibleWallpaper, cover, WALLPAPER_KEY } from "./core/wallpaper.js";
 
-export const currentWallpaper = () => wallpaper(shared(WALLPAPER_KEY), shared("layout"));
+export const currentWallpaper = (cx) => visibleWallpaper(shared(WALLPAPER_KEY), shared("layout"), cx.theme().appearance);
 export function wallpaperLayer(value, width, height) {
   if (value.kind === "solid") return div().absolute().inset_0().bg(value.color);
   const box = cover(value, width, height);

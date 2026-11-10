@@ -8,9 +8,12 @@ import { act } from '../kernel.ts'
 import { ModelList } from '../restart.tsx'
 import { CheckIcon, DownIcon, ic, Menu, MenuItem, MenuLabel, MenuSeparator, MenuSwitch, ModeIcon, NextIcon, Primary, SpeedIcon, Tab, Tabs, TextBox } from '../ui.tsx'
 import * as AG from '@core/agents.js'
+import { permissionOptions } from '@core/agents.js'
+import { PermissionInfo, PermissionIcon } from '../PermissionInfo.tsx'
 import * as ST from '@core/settings.js'
 
-const { levelName, NAMES } = AG as unknown as { levelName: (e: string | null) => string | null; NAMES: Record<string, string> }
+const { levelName, NAMES, menuFor } = AG as unknown as { levelName: (e: string | null) => string | null; NAMES: Record<string, string>; menuFor: (agent: string, defaults: object) => ModelMenus['menus'][string] }
+const reviewPerm = (agent: string) => agent === 'claude' ? 'plan' : 'read-only'
 const { MODEL_MENU, chooseModel, modelLabel } = ST as unknown as {
   MODEL_MENU: { reasoning: string; fast: string; permissions: string }
   chooseModel: (menus: ModelMenus['menus'], permDefault: ModelMenus['permDefault'], sel: AgentPick, agent: string, id: string) => AgentPick
@@ -43,7 +46,9 @@ export function ModelButton({ row, level }: { row: SettingRow; level: string }) 
   const [open, setOpen] = useState(false)
   const [up, setUp] = useState(false)
   const ref = useRef<HTMLSpanElement>(null)
-  const sel = row.agent?.sel ?? null
+  const readOnly = row.key === 'holycow.hc-review'
+  const raw = row.agent?.sel ?? null
+  const sel = readOnly && raw ? { ...raw, perm: reviewPerm(raw.agent) } : raw
   const toggle = () => {
     const r = ref.current?.getBoundingClientRect()
     const below = r ? innerHeight - r.bottom : 999
@@ -64,15 +69,53 @@ export function ModelButton({ row, level }: { row: SettingRow; level: string }) 
         <span className="truncate">{row.value}</span>
         <DownIcon className={clsx(ic, 'size-3.5')} />
       </button>
-      {open && sel ? <ModelMenu start={sel} up={up} onClose={() => setOpen(false)} save={(next) => act({ type: 'setting', key: row.key, value: JSON.stringify(next), place: level } as never)} /> : null}
+      {open && sel ? <ModelMenu start={sel} up={up} readOnly={readOnly} onClose={() => setOpen(false)} save={(next) => act({ type: 'setting', key: row.key, value: JSON.stringify(next), place: level } as never)} /> : null}
     </span>
   )
+}
+
+export function PermissionButton({ row, level }: { row: SettingRow; level: string }) {
+  const [open, setOpen] = useState(false)
+  const [up, setUp] = useState(false)
+  const ref = useRef<HTMLSpanElement>(null)
+  const [error, setError] = useState('')
+  const sel = row.agent?.sel
+  if (!sel) return null
+  const locked = row.key === 'holycow.hc-review'
+  const current = locked ? reviewPerm(sel.agent) : sel.perm
+  const perms = permissionOptions(menuFor(sel.agent, {}).perms, current)
+  const label = perms.find((p) => p.id === current)?.label ?? 'CLI default'
+  const choose = (perm: string) => {
+    if (locked) return
+    if (perm === current) { setOpen(false); return }
+    setError('')
+    void act({ type: 'setting', key: row.key, value: JSON.stringify({ ...sel, perm }), place: level } as never)
+      .then((r: any) => r?.ok === false ? setError(r.error ?? 'It did not save.') : setOpen(false), (e: Error) => setError(e.message))
+  }
+  const toggle = () => {
+    const r = ref.current?.getBoundingClientRect()
+    const below = r ? innerHeight - r.bottom : 999
+    setUp(!!r && below < 40 + 40 * perms.length && r.top > below)
+    setOpen(!open)
+  }
+  return <span ref={ref} className="relative inline-flex max-w-full items-center">
+    <button type="button" disabled={locked} aria-label={`${row.label} permissions: ${label}`} aria-haspopup="menu" aria-expanded={open}
+      onClick={toggle} className="press-dim inline-flex h-7 items-center gap-1.5 rounded-row px-2 text-[0.8125rem] whitespace-nowrap text-fg2 enabled:hover:bg-hover coarse:h-9 phone:h-9">
+      <PermissionIcon kind={perms.find((p) => p.id === current)?.icon} /><span>{label}</span>{!locked ? <DownIcon className={clsx(ic, 'size-3.5')} /> : null}
+    </button>
+    <PermissionInfo agent={sel.agent} perm={current} />
+    {open ? <Menu label={MODEL_MENU.permissions} onClose={() => setOpen(false)} className={clsx('absolute right-0 z-20 w-[250px] max-w-[calc(100vw-2rem)]', up ? 'bottom-full mb-1' : 'top-full mt-1')}>
+      <MenuLabel>{MODEL_MENU.permissions}</MenuLabel>
+      {perms.map((p) => <MenuItem key={p.id} role="menuitemradio" aria-checked={p.id === current} icon={<PermissionIcon kind={p.icon} />} hint={p.id === current ? <CheckIcon className={ic} /> : null} onClick={() => choose(p.id)}>{p.label}</MenuItem>)}
+      {error ? <p role="alert" className="px-3 py-2 text-[0.75rem] text-need-fg">{error}</p> : null}
+    </Menu> : null}
+  </span>
 }
 
 /** the window's model menu in settings mode: the model list as the chat's (restart.tsx ModelList: agent tabs,
  *  search, pinned and recent; picking another CLI's switches agent), Reasoning (that model's levels), Fast (where the model has it), Permissions (a small list); no Restart, each change
  *  saved as it is made */
-function ModelMenu({ start, up, onClose, save }: { start: AgentPick; up: boolean; onClose: () => void; save: (sel: AgentPick) => Promise<any> }) {
+function ModelMenu({ start, up, readOnly = false, onClose, save }: { start: AgentPick; up: boolean; readOnly?: boolean; onClose: () => void; save: (sel: AgentPick) => Promise<any> }) {
   const [data, setData] = useState<ModelMenus | null>(null)
   const [sel, setSel] = useState<AgentPick>(start)
   const [perms, setPerms] = useState(false)
@@ -81,11 +124,14 @@ function ModelMenu({ start, up, onClose, save }: { start: AgentPick; up: boolean
   const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
   useEffect(() => { void menusNow().then((m) => (m ? (setData(m), setPicks(m.picks)) : setError('Could not read the agents.'))) }, [])
   const change = (next: AgentPick) => {
+    if (readOnly) next = { ...next, perm: reviewPerm(next.agent) }
     setSel(next)
     setError('')
     void save(next).then((r: any) => r?.ok === false && setError(r.error ?? 'It did not save.'), (e: Error) => setError(e.message))
   }
-  const menu = data?.menus[sel.agent]
+  const offeredMenu = data?.menus[sel.agent]
+  const menu = readOnly && offeredMenu ? { ...offeredMenu, perms: offeredMenu.perms.filter((p) => p.id === reviewPerm(sel.agent)) } : offeredMenu
+  const permissions = permissionOptions(menu?.perms, sel.perm)
   const model = menu?.models.find((m) => m.id === sel.model)
   const level = sel.effort ?? model?.defaultEffort ?? null
   const fast = !!model?.fast
@@ -114,12 +160,13 @@ function ModelMenu({ start, up, onClose, save }: { start: AgentPick; up: boolean
                 hint={<span className="inline-flex items-center gap-1">{perm?.label ?? ''}<NextIcon className={clsx('size-3 transition-transform', perms && 'rotate-90')} /></span>}>
                 {MODEL_MENU.permissions}
               </MenuItem>
-              {perms ? menu.perms.map((p) => (
-                <MenuItem key={p.id} role="menuitemradio" aria-checked={p.id === sel.perm} className="pl-8 phone:pl-10" icon={p.id === sel.perm ? <CheckIcon className={ic} /> : null}
+              {perms ? permissions.map((p) => (
+                <MenuItem key={p.id} role="menuitemradio" aria-checked={p.id === sel.perm} className="pl-8 phone:pl-10" icon={<PermissionIcon kind={p.icon} />} hint={p.id === sel.perm ? <CheckIcon className={ic} /> : null}
                   onClick={() => { setPerms(false); if (p.id !== sel.perm) change({ ...sel, perm: p.id }) }}>
                   {p.label}
                 </MenuItem>
               )) : null}
+              {perms ? <PermissionInfo agent={sel.agent} perm={sel.perm} /> : null}
             </>
           ) : null}
           {error ? <p role="alert" className="px-3 pt-1 pb-2 text-[0.75rem] text-need-fg">{error}</p> : null}

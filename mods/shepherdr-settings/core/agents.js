@@ -17,11 +17,57 @@ const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 // Permission modes as each CLI has them (Claude: --permission-mode, or
 // --dangerously-skip-permissions for full access; Codex: its sandbox and approvals).
 const PERMS = {
-  cursor: [{ id: "auto", label: "Auto review" }, { id: "read-only", label: "Read only" }, { id: "full", label: "Full access" }],
-  claude: [{ id: "manual", label: "Ask" }, { id: "auto", label: "Auto" }, { id: "acceptEdits", label: "Accept edits" },
-    { id: "plan", label: "Plan" }, { id: "bypassPermissions", label: "Full access" }],
-  codex: [{ id: "read-only", label: "Read only" }, { id: "auto", label: "Auto" }, { id: "full", label: "Full access" }],
+  claude: [{ id: "manual", label: "Ask for approval", icon: "ask" }, { id: "auto", label: "Approve for me", icon: "approve" },
+    { id: "bypassPermissions", label: "Full access", icon: "full" }, { id: "plan", label: "Read only", icon: "read", custom: true },
+    { id: "acceptEdits", label: "Custom", icon: "ask", custom: true }],
+  codex: [{ id: "ask", label: "Ask for approval", icon: "ask" }, { id: "approve", label: "Approve for me", icon: "approve" },
+    { id: "full", label: "Full access", icon: "full" }, { id: "read-only", label: "Read only", icon: "read", custom: true },
+    { id: "auto", label: "Custom", icon: "ask", custom: true }],
+  cursor: [{ id: "ask", label: "Ask for approval", icon: "ask" }, { id: "auto", label: "Approve for me", icon: "approve" },
+    { id: "full", label: "Full access", icon: "full" }, { id: "read-only", label: "Read only", icon: "read", custom: true }],
 };
+
+// Keep saved CLI-specific modes valid without offering them as shared permission presets.
+/** @param {{id: string, label: string, icon?: string, custom?: boolean}[] | undefined} perms
+ * @param {string | null | undefined} current */
+export function permissionOptions(perms, current) {
+  return (perms ?? []).filter((p) => !p.custom || p.id === current);
+}
+
+/** @param {string | null | undefined} fallback */
+export function mapPermission(from, perm, to, fallback = null) {
+  if (from === to) return perm;
+  if (!perm) return fallback;
+  if (perm === "plan" || perm === "read-only") return to === "claude" ? "plan" : "read-only";
+  if (perm === "bypassPermissions" || perm === "full") return to === "claude" ? "bypassPermissions" : "full";
+  if (perm === "approve" || perm === "auto" && from !== "codex") return to === "codex" ? "approve" : "auto";
+  return to === "claude" ? "manual" : "ask";
+}
+
+export function permissionHelp(agent, current) {
+  const ask = {
+    claude: "Asks before edits and commands unless your saved rules already allow them.",
+    codex: "Can edit and run commands in the workspace. Asks you before actions needing broader access, including blocked network access.",
+    cursor: "Uses Cursor's normal approval flow without forced or automatic approval flags. Saved Cursor approval settings and allow rules still apply.",
+  };
+  const approve = {
+    claude: "Claude reviews actions in the background and asks when it cannot approve them. Requires Auto mode support for your account and model.",
+    codex: "Keeps workspace restrictions and sends eligible approval requests to automatic review. Some actions still need you; availability depends on your Codex version and policy.",
+    cursor: "Cursor's Auto-review checks actions in the background and asks for the rest. Requires a supported model and team policy.",
+  };
+  const full = {
+    claude: "Skips normal permission prompts. Required interaction and managed restrictions can still apply.",
+    codex: "Bypasses approval prompts and the sandbox, allowing access outside the workspace and to the network.",
+    cursor: "Force-allows commands unless explicitly denied. Cursor's sandbox and organization restrictions still apply.",
+  };
+  const rows = [{ label: "Ask for approval", icon: "ask", about: ask[agent] }, { label: "Approve for me", icon: "approve", about: approve[agent] },
+    { label: "Full access", icon: "full", about: full[agent] }];
+  if (["plan", "read-only"].includes(current)) rows.push({ label: "Read only", icon: "read", about: "This agent is set to inspect and review without editing source files. HolyCow Review always keeps this restriction." });
+  if (agent === "claude" && current === "acceptEdits") rows.push({ label: "Custom (saved)", icon: "ask", about: "Your saved Claude Accept edits mode allows file edits and common file commands without asking. It stays unchanged until you select another mode." });
+  if (agent === "codex" && current === "auto") rows.push({ label: "Custom (saved)", icon: "ask", about: "Your saved mode allows workspace changes and inherits the approval reviewer from Codex settings. Select Ask for approval or Approve for me to choose it explicitly." });
+  return rows;
+}
+
 
 // What a model id says, in words: "claude-opus-5-5" → "Opus 5.5", "opus[1m]" → "Opus 1M".
 export function modelName(id) {
@@ -140,7 +186,7 @@ export function current(kind, argv, meta, dflt) {
     const mode = flag(argv, "--mode");
     const perm = argv.includes("--plan") || ["ask", "plan"].includes(mode) ? "read-only"
       : argv.some((a) => ["--force", "-f", "--yolo"].includes(a)) ? "full"
-      : argv.includes("--auto-review") ? "auto" : dflt.mode === "unrestricted" ? "full" : "auto";
+      : argv.includes("--auto-review") ? "auto" : dflt.mode === "unrestricted" ? "full" : dflt.mode === "auto-review" ? "auto" : "ask";
     return { agent: "cursor", model, label: model === "auto" ? "Cursor Auto" : dflt.models?.find((m) => m.id === model)?.label ?? model,
       effort: null, fast: false, perm, used: null, window: null };
   }
@@ -149,7 +195,7 @@ export function current(kind, argv, meta, dflt) {
   const model = meta.model ?? flag(argv, "-m", "--model") ?? o.model ?? dflt.model;
   const sandbox = flag(argv, "-s", "--sandbox") ?? o.sandbox_mode ?? dflt.sandbox;
   const perm = argv.includes("--dangerously-bypass-approvals-and-sandbox") || sandbox === "danger-full-access" ? "full"
-    : sandbox === "read-only" ? "read-only" : "auto";
+    : sandbox === "read-only" ? "read-only" : o.approvals_reviewer === "auto_review" ? "approve" : o.approvals_reviewer === "user" ? "ask" : "auto";
   return { agent: "codex", model, label: dflt.models?.find((m) => m.id === model)?.label ?? null, perm,
     effort: meta.effort ?? o.model_reasoning_effort ?? dflt.effort,
     fast: tier ? ["fast", "priority"].includes(tier) : Boolean(dflt.fast), used: meta.used ?? null, window: meta.window ?? null };
@@ -387,7 +433,7 @@ export function argvFor(pick, old) {
     const a = ["cursor-agent", ...flags, "--model", pick.model || "auto"];
     if (pick.perm === "full") a.push("--force");
     else if (pick.perm === "read-only") a.push("--mode", "ask");
-    else a.push("--auto-review");
+    else if (pick.perm !== "ask") a.push("--auto-review");
     return { argv: same && old.session ? [...a, "--resume", old.session] : a, resume: Boolean(same && old.session), base: a };
   }
   if (pick.agent !== "codex") throw new Error("Unknown agent: " + pick.agent);
@@ -400,6 +446,7 @@ export function argvFor(pick, old) {
   if (pick.perm === "full") a.push("--dangerously-bypass-approvals-and-sandbox");
   else if (pick.perm === "read-only") a.push("-s", "read-only", "-a", "on-request");
   else if (pick.perm) a.push("-s", "workspace-write", "-a", "on-request");
+  if (["ask", "approve"].includes(pick.perm)) a.push("-c", `approvals_reviewer="${pick.perm === "approve" ? "auto_review" : "user"}"`);
   if (same && old.session) return { argv: ["codex", "resume", ...a, old.session], resume: true, base: ["codex", ...a] };
   return { argv: ["codex", ...a], resume: false, base: ["codex", ...a] };
 }

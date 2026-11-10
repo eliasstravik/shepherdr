@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "bun:test";
-import { wallpaper, cover, DEFAULT_TRANSPARENCY, DEFAULT_WALLPAPER, WALLPAPER_DIR, SOLID_BACKGROUNDS, wallpaperColors, terminalWallpaper } from "./wallpaper.js";
+import { wallpaper, visibleWallpaper, cover, DEFAULT_TRANSPARENCY, DEFAULT_WALLPAPER, WALLPAPER_DIR, SOLID_BACKGROUNDS, wallpaperColors, terminalWallpaper } from "./wallpaper.js";
 
 const chosen = { path: `${WALLPAPER_DIR}/${"a".repeat(64)}.png`, width: 1920, height: 1080, name: "A picture.png", transparency: 60 };
 
@@ -39,7 +39,8 @@ test("cover fills a resized workspace without stretching the photo", () => {
 });
 
 
-test("fresh installations and reset use the bundled image without a local file selection", () => {
+test("fresh installations and reset show the bundled image at half transparency", () => {
+  expect(wallpaper().transparency).toBe(50);
   expect(wallpaper()).toEqual(DEFAULT_WALLPAPER);
   expect(wallpaper(null)).toEqual(DEFAULT_WALLPAPER);
   expect(wallpaper({ ...DEFAULT_WALLPAPER, path: "mods/chat/Warp_bg.png", name: "Warp_bg.png", transparency: 45 }))
@@ -121,4 +122,22 @@ test("Terminal shares Chat's image, transparency and solid preset without changi
   expect(JSON.stringify(tree)).toBe(snapshot);
   expect(terminalWallpaper(image, wallpaper(chosen))).toEqual(image);
   expect(terminalWallpaper(tree, wallpaper(chosen, "terminals"))).toBe(tree);
+});
+
+
+test("light mode hides images without losing the saved dark-mode wallpaper", () => {
+  const saved = { ...chosen }, before = JSON.stringify(saved);
+  const light = visibleWallpaper(saved, "BossGoat", "light");
+  expect(light).toMatchObject({ kind: "solid", preset: "paper", color: "#f9f9fa" });
+  expect(light.path).toBeUndefined();
+  expect(JSON.stringify(saved)).toBe(before);
+  expect(visibleWallpaper(saved, "BossGoat", "dark")).toEqual(saved);
+  expect(visibleWallpaper(undefined, "BossGoat", "dark")).toEqual(DEFAULT_WALLPAPER);
+  expect(visibleWallpaper(saved, "main", "light")).toBeNull();
+  expect(visibleWallpaper({ kind: "solid", preset: "sage" }, "BossGoat", "light").preset).toBe("sage");
+  expect(visibleWallpaper({ kind: "solid", preset: "ink" }, "BossGoat", "light").preset).toBe("paper");
+  const tree = { id: "main", content: { pane: { background: "background" } } };
+  const terminal = terminalWallpaper(tree, light);
+  expect(terminal.background).toBe(light.color);
+  expect(terminalWallpaper(terminal, visibleWallpaper(saved)).background).toEqual({ image: saved.path, fit: "cover" });
 });

@@ -20,6 +20,7 @@ import { props, theme, machines, home, exec, readTextFile, writeTextFile, closeO
 import { spaces, inRender } from "./live.js";
 import { SHEPHERDR_FILE, SHEPHERDR_DEFAULTS, LOCAL_MACHINE, shepherdrFor, shepherdrLayers, machineOfSpace } from "./coordinator.js";
 import * as models from "./settings.js";
+import { permissionOptions } from "./core/agents.js";
 import { layoutSection } from "./layout.js";
 import { appearanceInit, appearanceSection } from "./appearance.js";
 import { APPEARANCE, WALLPAPER } from "./core/wallpaper.js";
@@ -88,6 +89,7 @@ export default class ShepherdrSettings extends View {
     this.raw = null;
     this.data = null; // the agents on offer (settings.js loadChoices)
     this.skills = {};
+    this.skill = HOLYCOW.skills[0].id;
     this.roles = {}; // role -> { sel, data, saved }: the model buttons' state for this scope
     this.folders = {}; // space id -> its task folder (repo root)
     this.handle = cx.focus_handle();
@@ -335,8 +337,15 @@ export default class ShepherdrSettings extends View {
     }
     for (const r of HOLYCOW.skills) {
       const own = eff.holycow[r.id];
-      const sel = own ?? this.roles[r.role]?.sel;
-      this.skills[r.id] = { sel: sel ? { ...sel } : null, data: this.data, saved: JSON.stringify(sel), unset: !own };
+      let sel = own ?? this.roles[r.role]?.sel;
+      let data = this.data;
+      if (r.id === "hc-review" && data) {
+        const mode = (a) => a === "claude" ? "plan" : "read-only";
+        if (sel) sel = { ...sel, perm: mode(sel.agent) };
+        data = { ...data, menus: Object.fromEntries(Object.entries(data.menus).map(([a, m]) => [a, { ...m, perms: m.perms.filter((p) => p.id === mode(a)) }])),
+          permDefault: Object.fromEntries(Object.keys(data.menus).map((a) => [a, mode(a)])) };
+      }
+      this.skills[r.id] = { sel: sel ? { ...sel } : null, data, saved: JSON.stringify(sel), unset: !own };
     }
   }
 
@@ -440,7 +449,7 @@ export default class ShepherdrSettings extends View {
     if (this.scope) {
       return sc.mine
         ? line.child(div().text_color(t.muted).child(CHANGED_HERE)).child(div().text_color(t.dim).child("·"))
-          .child(div().child(link(`reset-${sc.id}`, RESET, (_e, cx) => sc.reset(cx))))
+          .child(div().child(link(`reset-${sc.id}`, sc.id.startsWith("holycow-") ? HOLYCOW.reset : RESET, (_e, cx) => sc.reset(cx))))
         : line.child(div().text_color(t.dim).child(sc.from));
     }
     if (!sc.others?.length) return null;
@@ -500,6 +509,25 @@ export default class ShepherdrSettings extends View {
       .when(!this.scope, (el) => el.child(this.starRow(t, cx)));
   }
 
+  skillPermissions(t, c, locked) {
+    const sel = c?.sel, perms = permissionOptions(c?.data?.menus?.[sel?.agent]?.perms, sel?.perm);
+    if (!sel || !perms.length) return div();
+    const label = perms.find((p) => p.id === sel.perm)?.label ?? "CLI default";
+    return h_flex().id(`skill-permissions-${c.key}`).h(28).px(7).gap(5).items_center().rounded(7).text_size(12).text_color(t.muted)
+      .when(!locked, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
+        .on_mouse_down("left", (e) => { c.permAt = e.bounds ?? e.position; })
+        .on_click((_e, cx) => {
+          cx.stop_propagation();
+          const W = 260, H = 41 + 31 * perms.length, b = c.permAt;
+          const at = b ? { x: Math.max(8, b.x + (b.width ?? 0) - W), y: b.y - H - 6 >= 8 ? b.y - H - 6 : b.y + (b.height ?? 28) + 6 } : "pointer";
+          openOverlay({ mod: "chat-models", kind: "popup", frame: "none", at, width: W, height: H,
+            props: { pick: "perm", agent: sel.agent, key: c.key, options: perms, current: sel.perm, width: W, height: H } });
+        }))
+      .child(svg(`mods/chat-models/permission-${perms.find((p) => p.id === sel.perm)?.icon ?? "ask"}.svg`).size(16).flex_none())
+      .child(div().child(label))
+      .when(!locked, (el) => el.child(svg("mods/workspace-chrome/chevron-down.svg").size(12).flex_none()));
+  }
+
   holycow(t, cx) {
     for (const r of HOLYCOW.skills) {
       const c = this.skills[r.id];
@@ -509,20 +537,30 @@ export default class ShepherdrSettings extends View {
       c.unset = false;
       this.set("holycow", r.id, { ...c.sel }, cx);
     }
+    const r = HOLYCOW.skills.find((s) => s.id === this.skill) ?? HOLYCOW.skills[0];
+    const c = this.skills[r.id], role = ROLES.find((x) => x.id === r.role).title;
+    const skillTabs = v_flex().gap(6).py(16).children([0, 5].map((start) =>
+      h_flex().gap(6).children(HOLYCOW.skills.slice(start, start + 5).map((skill) =>
+        div().id(`skill-${skill.id}`).flex_1().min_w(0).h(32).flex().items_center().justify_center().rounded(7)
+          .text_size(TEXT.body).text_color(skill.id === r.id ? t.foreground : t.muted)
+          .bg(skill.id === r.id ? t.selected : "#00000000").cursor_pointer()
+          .hover((s) => s.bg(t.hover)).accessibility_label(skill.title)
+          .on_click((_e, cx) => { this.skill = skill.id; cx.notify(); }).child(skill.title)))));
     return v_flex()
       .child(this.title(t, HOLYCOW.title))
-      .child(this.row(t, HOLYCOW.policyTitle, HOLYCOW.about,
-        div().text_size(TEXT.label).text_color(t.muted).child(HOLYCOW.policy)))
-      .children(HOLYCOW.skills.map((r) => {
-        const c = this.skills[r.id];
-        const control = h_flex().gap(8).items_center()
-          .child(c?.sel ? models.modelButton(t, c, {}, cx) : div().child(LOADING_AGENTS))
-          .when(!this.scope && c && !c.unset, (el) => el.child(button(`follow-${r.id}`, HOLYCOW.follow,
-            { kind: "plain", onClick: (_e, cx) => this.reset("holycow", r.id, cx) })));
-        const role = ROLES.find((x) => x.id === r.role).title;
-        return this.row(t, r.title, `${r.id} · ${r.about}${c?.unset ? ` Follows ${role}.` : ""}`, control, this.scoped("holycow", r.id));
-      }))
-      .child(div().pt(16).text_size(TEXT.label).text_color(t.dim).child(HOLYCOW.instructions));
+      .child(div().text_size(TEXT.label).text_color(t.dim).child("Choose a skill to configure its model and permissions."))
+      .child(skillTabs)
+      .child(div().pt(8).text_size(TEXT.body).font_medium().text_color(t.foreground).child(r.title))
+      .child(div().pt(4).pb(12).text_size(TEXT.label).text_color(t.dim).child(`${r.about} Uses ${role} defaults unless customized.`))
+      .child(this.row(t, "Model", null, c?.sel ? models.modelButton(t, c, {}, cx) : div().child(LOADING_AGENTS)))
+      .child(this.row(t, "Permissions", r.id === "hc-review" ? HOLYCOW.reviewPermissions : null,
+        h_flex().gap(8).items_center().child(this.skillPermissions(t, c, r.id === "hc-review"))
+          .child(c?.sel ? models.permissionInfoButton(t, c.sel.agent, c.sel.perm) : div())))
+      .child(div().pt(12).child(this.scopeLine(t, this.scoped("holycow", r.id)) ?? div()))
+      .when(!this.scope && c && !c.unset, (el) => el.child(button(`follow-${r.id}`, HOLYCOW.follow,
+        { kind: "plain", onClick: (_e, cx) => this.reset("holycow", r.id, cx) })))
+      .child(div().pt(12).text_size(TEXT.label).text_color(t.dim).child(this.scope ? HOLYCOW.resetAbout : HOLYCOW.followAbout))
+      .child(div().pt(24).text_size(TEXT.label).text_color(t.dim).child(`${HOLYCOW.policy}. ${HOLYCOW.instructions}`));
   }
 
   // Ask for a GitHub star (herdr-task's star.py), Everywhere only: a switch that turns it off before it ever shows;
@@ -662,7 +700,7 @@ export default class ShepherdrSettings extends View {
       .child(svg(I(this.scope ? "hash" : "globe")).size(14).flex_none().text_color(this.scope ? t.accent : t.dim))
       .child(div().flex_1().min_w(0).truncate().text_size(TEXT.body).font_medium().text_color(t.foreground).child(this.scopeName()))
       .child(svg("mods/workspace-chrome/chevron-down.svg").size(12).flex_none().text_color(t.dim));
-    return v_flex().relative().w_full().mb(18).px(12).py(10).gap(6).rounded(RADIUS.card).bg(t.raised)
+    return v_flex().w_full().mb(20).pb(16).gap(8).border_b(1).border_color(t.border)
       .child(h_flex().gap(10).items_center()
         .child(div().flex_none().text_size(TEXT.label).text_color(t.muted).child(LEVEL.label))
         .child(picker))
@@ -691,7 +729,7 @@ export default class ShepherdrSettings extends View {
     };
     const pick = (id) => (_e, cx) => this.pickScope(id, cx);
     const machinesHere = [...new Set(shown.map((s) => s.machine))];
-    return v_flex().id("level-menu").absolute().top(46).left(12).w(300).max_h(340).overflow_y_scroll().p(5).gap(1)
+    return v_flex().id("level-menu").w_full().max_h(280).flex_none().overflow_y_scroll().p(5).gap(1)
       .rounded(RADIUS.card).bg(t.popover).border_1().border_color(t.border).shadow_md()
       .on_click((_e, cx) => cx.stop_propagation())
       .when(all.length > 8, (el) => el.child(div().mb(4).h(H.lg).px(9).flex().items_center().rounded(RADIUS.control)
@@ -737,7 +775,7 @@ export default class ShepherdrSettings extends View {
       : this.section === "holycow" ? this.holycow(t, cx)
       : this.section === "tasks" ? this.tasks(t)
       : this.section === "secrets" ? secretsSection(this, t)
-      : this.section === "appearance" ? appearanceSection(this, t)
+      : this.section === "appearance" ? appearanceSection(this, t, cx)
       : this.section === "window" ? layoutSection(this, t)
       : this.section === "web" ? webSection(this, t)
       : this.section === "notify" ? this.notify(t)

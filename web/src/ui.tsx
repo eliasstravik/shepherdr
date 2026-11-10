@@ -4,6 +4,8 @@ import clsx from 'clsx'
 import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type HTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type Ref, type RefObject, type TextareaHTMLAttributes } from 'react'
 import { ChevronLeftIcon, ChevronUpDownIcon, MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/16/solid'
 
+export const CowIcon = (p: { className?: string }) => <svg aria-hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M7 7 3 5v4l3 2m11-4 4-2v4l-3 2M8 6 7 2m9 4 1-4M6 16V9c0-5 12-5 12 0v7"/><ellipse cx="12" cy="17" rx="7" ry="4"/><path d="M8.5 11h.01M15.5 11h.01M9 17h.01M15 17h.01"/></svg>
+
 /** ‹, every Back's icon: marked, so a voice call's close and back find the screen's own Back (SHEP-51, voice/screen.ts) */
 export const BackIcon = (p: { className?: string }) => <ChevronLeftIcon data-back="" {...p} />
 import type { Status, Task, Report } from '@shared/types.ts'

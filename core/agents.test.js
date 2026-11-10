@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { argvFor, freshArgv, current, line, menuFor, modelSections, parseDefaults, parsePicks, pickKey, withPin, withRecent } from "./agents.js";
+import { argvFor, freshArgv, current, line, menuFor, permissionOptions, permissionHelp, mapPermission, modelSections, parseDefaults, parsePicks, pickKey, withPin, withRecent } from "./agents.js";
 
 const codex = { models: Array.from({ length: 250 }, (_, i) => ({ id: `gpt-${i}`, label: `GPT ${i}`, efforts: ["low", "high"] })) };
 const menus = { claude: menuFor("claude", {}), codex: menuFor("codex", codex) };
@@ -79,4 +79,47 @@ test("Claude model changes and missing-session recovery retain background instru
   const next = argvFor({ agent: "claude", model: "sonnet" }, old).argv;
   expect(next.slice(next.indexOf("--append-system-prompt-file"), next.indexOf("--append-system-prompt-file") + 2)).toEqual(flags.slice(0, 2));
   expect(next).not.toContain("old request");
+});
+
+
+test("shared permissions keep distinct approval reviewers and survive an agent switch", () => {
+  const expected = { claude: ["manual", "auto", "bypassPermissions"], codex: ["ask", "approve", "full"], cursor: ["ask", "auto", "full"] };
+  for (const [agent, ids] of Object.entries(expected)) {
+    const choices = permissionOptions(menuFor(agent, {}).perms, null);
+    expect(choices.map((p) => p.label)).toEqual(["Ask for approval", "Approve for me", "Full access"]);
+    expect(choices.map((p) => p.id)).toEqual(ids);
+    expect(choices.every((p) => p.icon)).toBe(true);
+    expect(permissionHelp(agent, null).every((p) => p.about)).toBe(true);
+    for (const [other, mapped] of Object.entries(expected)) {
+      ids.forEach((id, i) => expect(mapPermission(agent, id, other)).toBe(mapped[i]));
+      expect(mapPermission(agent, agent === "claude" ? "plan" : "read-only", other)).toBe(other === "claude" ? "plan" : "read-only");
+    }
+  }
+});
+
+test("shared permission launches actually select manual or automatic review", () => {
+  const launch = (agent, perm, argv = []) => argvFor({ agent, perm }, { agent, argv, session: "existing" }).argv;
+  for (const perm of ["ask", "approve"]) {
+    const argv = launch("codex", perm, ["codex", "-c", 'approvals_reviewer="auto_review"']);
+    expect(argv).toContain(`approvals_reviewer="${perm === "approve" ? "auto_review" : "user"}"`);
+    expect(argv).toContain("workspace-write");
+    expect(argv).not.toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(current("codex", argv, {}, {}).perm).toBe(perm);
+  }
+  expect(launch("claude", "manual")).toContain("default");
+  expect(launch("claude", "auto")).toContain("auto");
+  const ask = launch("cursor", "ask", ["cursor-agent", "--force", "--auto-review"]);
+  expect(ask).not.toContain("--force");
+  expect(ask).not.toContain("--auto-review");
+  expect(current("cursor", ask, {}, {}).perm).toBe("ask");
+  expect(launch("cursor", "auto")).toContain("--auto-review");
+});
+
+test("saved special permissions remain valid without changing their launch behavior", () => {
+  const claude = permissionOptions(menuFor("claude", {}).perms, "acceptEdits");
+  expect(claude.find((p) => p.id === "acceptEdits").label).toBe("Custom");
+  expect(argvFor({ agent: "claude", perm: "acceptEdits" }, {}).argv).toContain("acceptEdits");
+  const codex = argvFor({ agent: "codex", perm: "auto" }, {}).argv;
+  expect(codex).toContain("workspace-write");
+  expect(codex.some((arg) => arg.startsWith("approvals_reviewer="))).toBe(false);
 });

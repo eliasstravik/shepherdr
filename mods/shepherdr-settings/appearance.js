@@ -3,7 +3,7 @@ import { h_flex, v_flex, SliderState, Slider, SliderTrack, SliderIndicator, Slid
 import { appHome, exec, readTextFile, shared, setShared } from "herdr";
 import * as fs from "fs/promises";
 import { button, TEXT } from "./ui.js";
-import { wallpaper, WALLPAPER_KEY, WALLPAPER_DIR, DEFAULT_TRANSPARENCY, DEFAULT_WALLPAPER, SOLID_BACKGROUNDS, WALLPAPER, APPEARANCE } from "./core/wallpaper.js";
+import { wallpaper, visibleWallpaper, WALLPAPER_KEY, WALLPAPER_DIR, DEFAULT_TRANSPARENCY, DEFAULT_WALLPAPER, SOLID_BACKGROUNDS, WALLPAPER, APPEARANCE } from "./core/wallpaper.js";
 import { wallpaperLayer, wallpaperTheme } from "./wallpaper.js";
 
 export function appearanceInit() {
@@ -65,10 +65,11 @@ function choose(state, cx, paths) {
   });
 }
 
-export function appearanceSection(view, t) {
+export function appearanceSection(view, t, cx) {
   const state = view.appearance, value = wallpaper(shared(WALLPAPER_KEY));
   const mode = value?.kind === "solid" ? "solid" : "image";
-  const previewTheme = wallpaperTheme(t, value);
+  const visible = visibleWallpaper(shared(WALLPAPER_KEY), "BossGoat", cx.theme().appearance);
+  const previewTheme = wallpaperTheme(t, visible);
   const modes = h_flex().gap(8).children([["solid", "Solid colour"], ["image", "Image"]].map(([kind, label]) =>
     button(`background-${kind}`, label, { disabled: state.busy, onClick: (_e, cx) => {
       if (mode === kind) return;
@@ -102,7 +103,7 @@ export function appearanceSection(view, t) {
     .border_1().border_color("#1d1d1f21").bg("#f9f9fa").items_center().justify_center()
     .on_size_change((size, cx) => { if (state.width !== size.width) { state.width = size.width; cx.notify(); } })
     .on_drop((e, cx) => { cx.stop_propagation(); choose(state, cx, e.paths ?? []); })
-    .when(Boolean(value), (el) => el.child(wallpaperLayer(value, state.width, 180)))
+    .when(Boolean(value), (el) => el.child(wallpaperLayer(visible, state.width, 180)))
     .child(v_flex().relative().px(20).py(14).gap(7).rounded(10).bg(previewTheme.surface).border_1().border_color(previewTheme.border)
       .child(div().text_size(TEXT.body).font_medium().text_color(previewTheme.foreground).child(value ? "Your workspace, your style." : WALLPAPER.empty))
       .child(div().text_size(TEXT.label).text_color(previewTheme.muted).child(value ? "Conversations stay easy to read." : WALLPAPER.formats)));
@@ -114,6 +115,8 @@ export function appearanceSection(view, t) {
     .when(mode === "solid", (el) => el.child(palette)
       .child(div().text_size(TEXT.label).text_color(t.dim).child("For readable Terminal text, pair light colours with a light Herdr theme and dark colours with a dark theme.")))
     .child(preview)
+    .when(cx.theme().appearance === "light" && mode === "image", (el) => el.child(div().text_size(TEXT.label).text_color(t.dim)
+      .child("Light mode uses a solid background. Your image returns in dark mode.")))
     .child(h_flex().gap(8).items_center()
       .when(mode === "image", (el) => el.child(button("wallpaper-choose", state.busy ? WALLPAPER.choosing : WALLPAPER.choose,
         { disabled: state.busy, onClick: (_e, cx) => choose(state, cx) })

@@ -66,8 +66,7 @@ function choose(coord, agentKey, id) {
   if (next.effort && !m.efforts.includes(next.effort)) next.effort = null;
   if (!m.fast) next.fast = false;
   if (agentKey !== sel.agent) {
-    const full = sel.perm === "bypassPermissions" || sel.perm === "full";
-    next.perm = full ? (agentKey === "claude" ? "bypassPermissions" : "full") : data.permDefault[agentKey];
+    next.perm = agent.mapPermission(sel.agent, sel.perm, agentKey, data.permDefault[agentKey]);
   }
   coord.sel = next;
 }
@@ -90,8 +89,8 @@ export function settingsRows(t, coord, opts = {}, cx = null) {
   const row = (label, control) => h_flex().h(ROW).flex_none().px(9).gap(10).items_center()
     .child(div().w(LABEL).flex_none().text_color(t.muted).child(label))
     .child(h_flex().flex_1().min_w(0).justify_end().child(control));
-  const pickAt = (field, options, current) => openOverlay({ mod: "chat-models", kind: "popup", width: 260, height: 10 + ROW * options.length,
-    props: { pick: field, key: coord.key, options, current, width: 260, height: 10 + ROW * options.length } });
+  const pickAt = (field, options, current) => openOverlay({ mod: "chat-models", kind: "popup", frame: "none", at: "pointer", width: 260, height: 10 + ROW * options.length + (field === "perm" ? ROW : 0),
+    props: { pick: field, agent: sel.agent, key: coord.key, options, current, width: 260, height: 10 + ROW * options.length + (field === "perm" ? ROW : 0) } });
   const select = (id, content, fn) => h_flex().id(id).h(26).max_w(260).pl(8).pr(6).gap(6).items_center().rounded(7).border_1().border_color(t.input)
     .when(!off, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => { cx.stop_propagation(); fn(); cx.notify(); }))
     .children(content)
@@ -114,8 +113,8 @@ export function settingsRows(t, coord, opts = {}, cx = null) {
       .when(!off, (el) => el.cursor_pointer().on_click((_e, cx) => { cx.stop_propagation(); coord.sel = { ...coord.sel, fast: !coord.sel.fast }; cx.notify(); }))
       .child(div().id("ns-fast-knob").absolute().top(2).left(sel.fast ? 14 : 2).size(12).rounded(6).bg(t.background).transition("left", 120)))))
     .when(Boolean(menu?.perms?.length), (el) => el.child(row("Permissions", select("ns-perm",
-      [svg("mods/chat-models/shield.svg").size(14).flex_none().text_color(t.dim), div().min_w(0).truncate().child(perm?.label ?? "Default")],
-      () => pickAt("perm", menu.perms.map((p) => ({ id: p.id, label: p.label })), sel.perm)))));
+      [svg(`mods/chat-models/permission-${perm?.icon ?? "ask"}.svg`).size(16).flex_none().text_color(t.dim), div().min_w(0).truncate().child(perm?.label ?? "Default")],
+      () => pickAt("perm", agent.permissionOptions(menu.perms, sel.perm), sel.perm)))));
 }
 
 // The answers from the model menu (settings mode) and the pick lists, into coord.sel.
@@ -171,3 +170,13 @@ export function openMenu(coord, select = null) {
 
 // Also known as settingsButton (the name agreed for the New space dialog).
 export const settingsButton = modelButton;
+
+export function permissionInfoButton(t, agent, perm) {
+  return h_flex().id(`permission-info-${agent}-${perm}`).size(24).items_center().justify_center().rounded(12)
+    .text_size(14).text_color(t.muted).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
+    .on_click((_e, cx) => {
+      cx.stop_propagation();
+      openOverlay({ mod: "chat-models", kind: "dialog", frame: "none", width: 460, height: 500,
+        props: { mode: "permission-info", agent, perm } });
+    }).child("ⓘ");
+}

@@ -282,25 +282,44 @@ test("Cursor roles preserve their own model and permissions without pretending t
 
 
 test("HolyCow skill models inherit per space, reset independently and preserve read-only review", () => {
-  writeFileSync(file, JSON.stringify({ everywhere: { worker: { agent: "claude", model: "opus" } } }));
+  writeFileSync(file, JSON.stringify({ everywhere: { worker: { agent: "claude", model: "opus", perm: "manual" } } }));
   const s = new Settings(); s.start();
   const sp = { id: "holy", name: "Project", machine: null, folder: "/holy" };
-  const rows = (level: string) => s.sections(null, [sp]).find((x) => x.name === "HolyCow Agents" && x.level === level)!.rows;
+  const rows = (level: string) => s.sections(null, [sp]).find((x) => x.name === "HolyCow" && x.level === level)!.rows;
   expect(rows("all").filter((r) => r.agent)).toHaveLength(10);
-  expect(rows("all").find((r) => r.key === "holycow.hc-build")!.agent!.sel).toMatchObject({ agent: "claude", model: "opus" });
+  expect(rows("all").find((r) => r.key === "holycow.hc-build")!.agent!.sel).toMatchObject({ agent: "claude", model: "opus", perm: "manual" });
   expect(rows("all")[0]).toMatchObject({ value: "Required for software tasks", fixed: true });
   expect(() => s.set("holycow.enabled", "off")).toThrow("cannot be switched off");
-  s.set("holycow.hc-plan", JSON.stringify({ agent: "cursor", model: "auto" }));
-  expect(rows(sp.id).find((r) => r.key === "holycow.hc-plan")!.agent!.sel).toMatchObject({ agent: "cursor", model: "auto" });
-  s.set("holycow.hc-plan", JSON.stringify({ agent: "codex", model: "custom", effort: "high" }), sp.id, sp);
-  expect(rows(sp.id).find((r) => r.key === "holycow.hc-plan")!.agent!.sel).toMatchObject({ agent: "codex", model: "custom" });
+  s.set("holycow.hc-plan", JSON.stringify({ agent: "cursor", model: "auto", perm: "auto" }));
+  expect(rows(sp.id).find((r) => r.key === "holycow.hc-plan")!.agent!.sel).toMatchObject({ agent: "cursor", model: "auto", perm: "auto" });
+  s.set("holycow.hc-plan", JSON.stringify({ agent: "codex", model: "custom", effort: "high", fast: true, perm: "full" }), sp.id, sp);
+  expect(rows(sp.id).find((r) => r.key === "holycow.hc-plan")!.agent!.sel).toMatchObject({ agent: "codex", model: "custom", effort: "high", fast: true, perm: "full" });
+  expect(JSON.parse(readFileSync(file, "utf8")).spaces[sp.id].holycow["hc-plan"]).toEqual({ agent: "codex", model: "custom", effort: "high", fast: true, perm: "full" });
   s.set("holycow.hc-plan", null, sp.id, sp);
-  expect(rows(sp.id).find((r) => r.key === "holycow.hc-plan")!.agent!.sel).toMatchObject({ agent: "cursor", model: "auto" });
+  expect(rows(sp.id).find((r) => r.key === "holycow.hc-plan")!.agent!.sel).toMatchObject({ agent: "cursor", model: "auto", perm: "auto" });
   s.set("holycow.hc-review", JSON.stringify({ agent: "cursor", model: "auto", perm: "full" }));
   expect(rows("all").find((r) => r.key === "holycow.hc-review")!.agent!.sel!.perm).toBe("read-only");
   s.set("holycow.hc-plan", null);
-  expect(rows("all").find((r) => r.key === "holycow.hc-plan")!.agent!.sel).toMatchObject({ agent: "claude", model: "opus" });
+  expect(rows("all").find((r) => r.key === "holycow.hc-plan")!.agent!.sel).toMatchObject({ agent: "claude", model: "opus", perm: "manual" });
   expect(() => s.set("holycow.unknown", "{}")).toThrow();
   expect(() => s.set("holycow.hc-build", JSON.stringify({ agent: "cursor", effort: "high" }))).toThrow("model ID");
-  expect(JSON.parse(readFileSync(file, "utf8")).everywhere.worker).toEqual({ agent: "claude", model: "opus" });
+  expect(JSON.parse(readFileSync(file, "utf8")).everywhere.worker).toEqual({ agent: "claude", model: "opus", perm: "manual" });
+});
+
+
+test("shared permission choices persist for roles and HolyCow without changing the model", () => {
+  writeFileSync(file, JSON.stringify({ everywhere: {} }));
+  const s = new Settings(); s.start();
+  for (const [agent, modes] of Object.entries({ claude: ["manual", "auto", "bypassPermissions"], codex: ["ask", "approve", "full"], cursor: ["ask", "auto", "full"] })) {
+    for (const perm of modes) {
+      const pick = { agent, model: "chosen", effort: null, fast: false, perm };
+      s.set("role.worker", JSON.stringify(pick));
+      s.set("holycow.hc-pr", JSON.stringify(pick));
+      const saved = JSON.parse(readFileSync(file, "utf8")).everywhere;
+      expect(saved.worker).toEqual(pick);
+      expect(saved.holycow["hc-pr"]).toEqual(pick);
+      s.set("holycow.hc-review", JSON.stringify(pick));
+      expect(JSON.parse(readFileSync(file, "utf8")).everywhere.holycow["hc-review"].perm).toBe(agent === "claude" ? "plan" : "read-only");
+    }
+  }
 });

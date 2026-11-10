@@ -1,7 +1,7 @@
 // Desktop wallpaper preferences stay in this window's shared state, outside synced agent settings.
 export const WALLPAPER_KEY = "bossgoat.wallpaper";
 export const WALLPAPER_DIR = "data/bossgoat-wallpaper";
-export const DEFAULT_TRANSPARENCY = 0;
+export const DEFAULT_TRANSPARENCY = 50;
 export const DEFAULT_WALLPAPER = { path: "mods/chat/bossgoat-background.png", width: 1588, height: 991,
   transparency: DEFAULT_TRANSPARENCY, name: "bossgoat-background.png" };
 // HolyCow's website/src/styles/eden.css: paper surfaces, pastel accents and inverse ink tones.
@@ -28,7 +28,7 @@ export function wallpaperColors(value) {
 export const APPEARANCE = { id: "appearance", title: "Appearance", icon: "image" };
 export const WALLPAPER = {
   title: "Background", scope: "BossGoat on this computer.",
-  about: "Chat and Terminal share your solid colour or image.",
+  about: "Dark mode shows your image or solid colour. Light mode uses a solid colour.",
   choose: "Choose image…", choosing: "Choosing image…", reset: "Reset to default",
   empty: "Choose a picture or drop one here", formats: "PNG, JPEG or WebP · up to 30 MB · stored locally",
   transparency: "Transparency", transparencyAbout: "0% shows the full image. 100% hides it.",
@@ -50,6 +50,13 @@ export function wallpaper(value, layout = "BossGoat") {
   const transparency = Number.isFinite(saved) ? Math.max(0, Math.min(100, saved)) : DEFAULT_TRANSPARENCY;
   return { path: value.path, width: value.width, height: value.height, transparency, name: String(value.name ?? "Wallpaper").slice(0, 200) };
 }
+export function visibleWallpaper(value, layout = "BossGoat", appearance = "dark") {
+  const selected = wallpaper(value, layout);
+  if (!selected || appearance !== "light") return selected;
+  return selected.kind === "solid" && selected.tone === "light"
+    ? selected : wallpaper({ kind: "solid", preset: "paper" }, layout);
+}
+
 export function cover(image, width, height) {
   if (!image || image.kind === "solid" || !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
   const scale = Math.max(width / image.width, height / image.height);

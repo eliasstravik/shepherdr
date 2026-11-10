@@ -180,6 +180,20 @@ class Install(unittest.TestCase):
                 self.assertEqual(after[k], v, k)
         self.assertFalse(os.path.lexists(self.p(".local/bin/herdr-task")))
 
+    def test_default_dark_preserves_saved_appearance(self):
+        path = Path(self.p(APP, "settings.json"))
+        run("install", "--root", self.root, "--yes", "--dry-run")
+        self.assertFalse(path.exists())
+        run("install", "--root", self.root, "--yes")
+        self.assertEqual(json.loads(path.read_text())["appearance"], "dark")
+        path.write_text('{"appearance":"light","font_size":18}')
+        run("update", "--root", self.root, "--source", ROOT)
+        self.assertEqual(json.loads(path.read_text()), {"appearance": "light", "font_size": 18})
+        run("uninstall", "--root", self.root)
+        self.assertEqual(json.loads(path.read_text()), {"appearance": "light", "font_size": 18})
+        run("install", "--root", self.root, "--yes")
+        self.assertEqual(json.loads(path.read_text())["appearance"], "light")
+
     def test_service_unit_and_files(self):
         """The service and the shared core land in .local/share/shepherdr; a scratch root gets the unit file only
         (nothing is started), and uninstall takes both away."""

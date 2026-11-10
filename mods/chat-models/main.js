@@ -23,8 +23,8 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex, InputState, Input, VirtualListScrollHandle, v_virtual_list, Scrollbar } from "gpui-base";
-import { theme, props, setShared, closeOverlay, home, readTextFile, writeTextFile } from "herdr";
-import { modelSections, parsePicks, pickKey, withPin, withRecent, PICKS_FILE } from "./core/agents.js";
+import { theme, props, setShared, closeOverlay, home, readTextFile, writeTextFile, openOverlay } from "herdr";
+import { modelSections, parsePicks, pickKey, withPin, withRecent, PICKS_FILE, permissionOptions, permissionHelp, mapPermission, NAMES } from "./core/agents.js";
 
 const AGENTS = ["claude", "codex", "cursor"];
 const LEVEL = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra", none: "None" };
@@ -37,7 +37,7 @@ export default class ModelMenu extends View {
   init(_props, cx) {
     const p = props() ?? {};
     this.p = p;
-    if (p.pick) { this.handle = cx.focus_handle(); cx.timer.after(0, () => this.handle.focus()); return; }
+    if (p.mode === "permission-info" || p.pick) { this.handle = cx.focus_handle(); cx.timer.after(0, () => this.handle.focus()); return; }
     const c = p.current ?? {};
     this.was = { agent: c.agent, model: c.model, effort: c.effort ?? null, fast: Boolean(c.fast), perm: c.perm ?? null };
     this.sel = { ...this.was };
@@ -117,8 +117,7 @@ export default class ModelMenu extends View {
     if (!m.fast) next.fast = false;
     if (m.agent !== was.agent) {
       // Another agent: its own permission modes; full access stays full access.
-      const full = was.perm === "bypassPermissions" || was.perm === "full";
-      next.perm = full ? (m.agent === "claude" ? "bypassPermissions" : "full") : this.p.permDefault?.[m.agent] ?? null;
+      next.perm = mapPermission(was.agent, was.perm, m.agent, this.p.permDefault?.[m.agent]);
       next.fast = false;
     }
     this.sel = next;
@@ -192,21 +191,24 @@ export default class ModelMenu extends View {
 
   // The permission modes, just above the Permissions row.
   permMenu(t, bottom) {
-    const perms = this.p.menus?.[this.sel.agent]?.perms ?? [];
+    const perms = permissionOptions(this.p.menus?.[this.sel.agent]?.perms, this.sel.perm);
     return v_flex().absolute().right(5).bottom(bottom).w(180).p(5).rounded(8).bg(t.popover).border_1().border_color(t.border).shadow_md()
       .children(perms.map((x) => this.row(t, `perm-${x.id}`, true, () => { this.sel = { ...this.sel, perm: x.id }; this.permOpen = false; })
+        .child(svg(`mods/chat-models/permission-${x.icon ?? "ask"}.svg`).size(16).flex_none())
         .child(div().flex_1().child(x.label))
-        .child(this.check(t, this.sel.perm === x.id))));
+        .child(this.check(t, this.sel.perm === x.id))))
+      .child(this.infoButton(t, this.sel.agent, this.sel.perm));
   }
 
   permissions(t) {
-    const perms = this.p.menus?.[this.sel.agent]?.perms ?? [];
+    const perms = permissionOptions(this.p.menus?.[this.sel.agent]?.perms, this.sel.perm);
     const selected = perms.find((p) => p.id === this.sel.perm);
     const changed = selected && this.sel.perm !== this.was.perm;
     const box = v_flex().id("permissions-menu").w_full().flex_none().p(5).rounded(8).bg(t.popover).border_1().border_color(t.border).shadow_md()
       .text_size(12.8).text_color(t.foreground)
-      .child(this.head(t, "Permissions"))
+      .child(this.infoButton(t, this.sel.agent, this.sel.perm))
       .children(perms.map((p) => this.row(t, `perm-${p.id}`, true, () => { this.sel = { ...this.sel, perm: p.id }; })
+        .child(svg(`mods/chat-models/permission-${p.icon ?? "ask"}.svg`).size(16).flex_none())
         .child(div().flex_1().child(p.label)).child(this.check(t, p.id === this.sel.perm))))
       .when(Boolean(changed), (el) => el
         .child(div().min_h(40).px(9).py(5).text_size(11.5).text_color(t.dim).child("Restart this agent to apply the change."))
@@ -227,6 +229,25 @@ export default class ModelMenu extends View {
       }).child(box);
   }
 
+  infoButton(t, agent, perm) {
+    return this.row(t, "permission-info", true, () => {
+      openOverlay({ mod: "chat-models", kind: "dialog", frame: "none", width: 460, height: 500,
+        props: { mode: "permission-info", agent, perm } });
+    }).child(div().text_color(t.muted).child("ⓘ  About permissions"));
+  }
+
+  permissionInfo(t) {
+    return v_flex().size_full().p(20).gap(14).rounded(12).bg(t.popover).border_1().border_color(t.border)
+      .text_size(13).text_color(t.foreground).track_focus(this.handle)
+      .on_key_down((e, cx) => { if (e.key === "escape") { closeOverlay(this.p.overlay); cx.stop_propagation(); } })
+      .child(div().text_size(16).font_medium().child(`Permissions · ${NAMES[this.p.agent] ?? "Agent"}`))
+      .children(permissionHelp(this.p.agent, this.p.perm).map((p) => v_flex().gap(4)
+        .child(h_flex().gap(8).items_center().child(svg(`mods/chat-models/permission-${p.icon}.svg`).size(18).flex_none()).child(div().font_medium().child(p.label)))
+        .child(div().text_color(t.muted).child(p.about))))
+      .child(div().text_size(12).text_color(t.dim).child("Settings apply to new launches. Chat changes restart only that agent. Task permissions are set separately."))
+      .child(this.row(t, "permission-info-close", true, () => closeOverlay(this.p.overlay)).child("Done"));
+  }
+
   // Pick mode: one list, the current one checked.
   pickList(t) {
     const p = this.p;
@@ -236,10 +257,13 @@ export default class ModelMenu extends View {
     };
     return v_flex().id("pick-list").w(p.width ?? 260).h(p.height ?? 200).p(5).bg(t.popover).text_size(12.8).text_color(t.foreground)
       .track_focus(this.handle)
+      .on_key_down((e, cx) => { if (e.key === "escape") { closeOverlay(p.overlay); cx.stop_propagation(); } })
       .children((p.options ?? []).map((o) => this.row(t, `pick-${o.id}`, true, () => pick(o))
-        .when(Boolean(o.icon), (el) => el.child(o.tint ? svg(o.icon).size(14).flex_none().text_color(t.foreground) : image(o.icon).size(14).flex_none()))
+        .when(p.pick === "perm", (el) => el.child(svg(`mods/chat-models/permission-${o.icon ?? "ask"}.svg`).size(16).flex_none()))
+        .when(p.pick !== "perm" && Boolean(o.icon), (el) => el.child(o.tint ? svg(o.icon).size(14).flex_none().text_color(t.foreground) : image(o.icon).size(14).flex_none()))
         .child(div().flex_1().min_w(0).truncate().child(o.label))
-        .child(this.check(t, o.id === p.current))));
+        .child(this.check(t, o.id === p.current))))
+      .when(p.pick === "perm", (el) => el.child(this.infoButton(t, p.agent, p.current)));
   }
 
   // Settings mode: the choice goes back as soon as it changes.
@@ -251,6 +275,7 @@ export default class ModelMenu extends View {
 
   render(cx) {
     const t = theme();
+    if (this.p.mode === "permission-info") return this.permissionInfo(t);
     if (this.p.pick) return this.pickList(t);
     if (this.p.mode === "permissions") return this.permissions(t);
     // Settings mode: a change goes back right after the render that shows it.

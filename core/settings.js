@@ -3,7 +3,7 @@
 // web app's Settings say the same. herdr-task reads the file (herdr_task/settings.py: settings_for); its defaults are
 // DEFAULTS there and here.
 // Shared core: the source is core/settings.js; bin/sync-shared copies it into the mods in lib/COPIES.
-import { NAMES, levelName, current, rowFor, menuFor } from "./agents.js";
+import { NAMES, levelName, current, rowFor, menuFor, mapPermission } from "./agents.js";
 import { SERVE } from "./host.js";
 
 // ---- the frame -------------------------------------------------------------------------------------------------
@@ -11,7 +11,7 @@ import { SERVE } from "./host.js";
 // the others are one setting for every space (docs/settings.md says which and why).
 export const SECTIONS = [
   { id: "agents", title: "Agents", icon: "bot", space: true },
-  { id: "holycow", title: "HolyCow Agents", icon: "bot", space: true },
+  { id: "holycow", title: "HolyCow", icon: "cow", space: true },
   { id: "tasks", title: "Tasks", icon: "list-checks", space: true },
   // Everywhere's heartbeat, schedule and events, and a space's own (core/autopilot.js); a space switches it on in its
   // Assistant's header
@@ -69,10 +69,13 @@ export const ROLES = [
     told: "What every reviewer is told first" },
 ];
 export const HOLYCOW = {
-  title: "HolyCow Agents", policyTitle: "Skill assignment", policy: "Required for software tasks",
+  title: "HolyCow", policyTitle: "Skill assignment", policy: "Required for software tasks",
   about: "The Assistant assigns a HolyCow skill before software work starts. Unassigned tasks wait for a skill. Each skill uses the model below; install its instructions on every machine that runs it.",
   instructions: "Role instructions still govern tasks and reviews. HolyCow adds the installed skill's instructions and references; it does not replace those rules.",
-  follow: "Use role model",
+  follow: "Use role defaults", reset: "Reset to inherited settings",
+  followAbout: "Use role defaults restores this skill's model, reasoning, speed, and permissions from its configured role.",
+  resetAbout: "Reset restores inherited skill settings, including any Everywhere override.",
+  reviewPermissions: "Review permissions are always read-only.",
   skills: [
     { id: "holycow-guide", title: "Guide", role: "coordinator", about: "Choose the next useful step." },
     { id: "holycow-init", title: "Init", role: "worker", about: "Understand and set up a repository." },
@@ -197,8 +200,7 @@ export function chooseModel(menus, permDefault, sel, agent, id) {
   if (next.effort && !m.efforts.includes(next.effort)) next.effort = null;
   if (!m.fast) next.fast = false;
   if (agent !== sel.agent) {
-    const full = sel.perm === "bypassPermissions" || sel.perm === "full";
-    next.perm = full ? (agent === "claude" ? "bypassPermissions" : "full") : permDefault?.[agent] ?? null;
+    next.perm = mapPermission(sel.agent, sel.perm, agent, permDefault?.[agent]);
     next.fast = false;
   }
   return next;

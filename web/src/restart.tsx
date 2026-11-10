@@ -6,6 +6,7 @@ import { StarIcon as StarSolid } from '@heroicons/react/16/solid'
 import { StarIcon as StarOutline } from '@heroicons/react/24/outline'
 import { createPortal } from 'react-dom'
 import * as AGc from '@core/agents.js'
+import { PermissionInfo, PermissionIcon } from './PermissionInfo.tsx'
 import { taskChatId, type Chat, type Place, type RestartCli, type RestartInfo } from '@shared/types.ts'
 import { act, setUI, taskOf, useSnap, useStore, useUI } from './kernel.ts'
 import { Dialog } from './rowmenu.tsx'
@@ -369,8 +370,7 @@ function ModelMenu({ chat, typed, permissions = false }: { chat: string; typed?:
     if (!m.fast) next.fast = false
     if (m.agent !== was.agent) {
       // another agent: its own permission modes; full access stays full access
-      const full = was.perm === 'bypassPermissions' || was.perm === 'full'
-      next.perm = full ? (m.agent === 'claude' ? 'bypassPermissions' : 'full') : d.permDefault[m.agent] ?? null
+      next.perm = AGc.mapPermission(was.agent, was.perm, m.agent, d.permDefault[m.agent])
       next.fast = false
     }
     return next
@@ -423,6 +423,7 @@ function ModelMenu({ chat, typed, permissions = false }: { chat: string; typed?:
   }
   const offline = data?.offline ?? null
   const menu = sel ? data?.menus[sel.agent] : undefined
+  const permissionChoices = AGc.permissionOptions(menu?.perms, sel?.perm)
   const m = sel ? model(sel) : null
   const on = sel ? level(sel) : null
   const perm = sel ? menu?.perms?.find((x) => x.id === sel.perm) : undefined
@@ -442,10 +443,10 @@ function ModelMenu({ chat, typed, permissions = false }: { chat: string; typed?:
             <>
               {permissions ? (
                 <>
-                  {head('Permissions')}
-                  {menu?.perms?.map((x) => (
+                  <div className="flex items-center justify-between">{head('Permissions')}<PermissionInfo agent={sel.agent} perm={sel.perm} /></div>
+                  {permissionChoices.map((x) => (
                     <button key={x.id} type="button" role="menuitemradio" aria-checked={sel.perm === x.id} disabled={busy} className={row} onClick={() => setSel({ ...sel, perm: x.id })}>
-                      <span className="flex-1">{x.label}</span>
+                      <PermissionIcon kind={x.icon} /><span className="flex-1">{x.label}</span>
                       <span className="grid size-3.5 shrink-0 place-items-center">{sel.perm === x.id ? <CheckIcon className="size-3.5" /> : null}</span>
                     </button>
                   ))}
@@ -493,13 +494,14 @@ function ModelMenu({ chat, typed, permissions = false }: { chat: string; typed?:
                 </button>
               ) : null}
               {!permissions && perms && menu?.perms ? (
-                <div role="menu" aria-label="Permissions" className="absolute right-1 bottom-9 z-10 w-[180px] rounded-[8px] bg-bg p-[5px] shadow-menu">
-                  {menu.perms.map((x) => (
+                <div role="menu" aria-label="Permissions" className="absolute right-1 bottom-9 z-10 w-[240px] rounded-[8px] bg-bg p-[5px] shadow-menu">
+                  {permissionChoices.map((x) => (
                     <button key={x.id} type="button" role="menuitemradio" aria-checked={sel.perm === x.id} className={row} onClick={() => { setSel({ ...sel, perm: x.id }); setPerms(false) }}>
-                      <span className="flex-1">{x.label}</span>
+                      <PermissionIcon kind={x.icon} /><span className="flex-1">{x.label}</span>
                       <span className="grid size-3.5 shrink-0 place-items-center">{sel.perm === x.id ? <CheckIcon className="size-3.5" /> : null}</span>
                     </button>
                   ))}
+                  <PermissionInfo agent={sel.agent} perm={sel.perm} />
                 </div>
               ) : null}
               {error ? <p className="px-[9px] pt-1 text-[0.75rem] text-need-fg">{error}</p> : null}
@@ -567,7 +569,7 @@ export function PermissionLine({ chatKey }: { chatKey: string }) {
     <>
       <button type="button" data-permission-line aria-label={`Permissions: ${label}`} aria-haspopup="menu" aria-expanded={active} disabled={!available}
         onClick={() => setMenuOpen(active ? null : { chat: chatKey, permissions: true })} className={clsx(agentPick, 'disabled:text-fg3 disabled:hover:bg-transparent')}>
-        <ModeIcon className="size-3.5 shrink-0" />
+        <PermissionIcon kind={menu?.perms?.find((p: { id: string }) => p.id === agent?.perm)?.icon} />
         <span className="min-w-0 truncate">{label}</span>
         <DownIcon className="size-3 shrink-0" />
       </button>

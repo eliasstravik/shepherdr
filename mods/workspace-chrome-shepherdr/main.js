@@ -2,7 +2,7 @@ import { View, div, image, svg } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { theme, run, props, window, shared, setShared, updates, layout, appHome, readTextFile, writeTextFile } from "herdr";
 import { openSettings, toast, plainError } from "./ui.js";
-import { wallpaper, terminalWallpaper, WALLPAPER_KEY } from "./core/wallpaper.js";
+import { visibleWallpaper, terminalWallpaper, WALLPAPER_KEY } from "./core/wallpaper.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -30,7 +30,7 @@ export default class WorkspaceChrome extends View {
     if (!props()?.footer) return;
     let last = null, busy = false;
     const sync = (cx) => {
-      const value = wallpaper(shared(WALLPAPER_KEY), shared("layout"));
+      const value = visibleWallpaper(shared(WALLPAPER_KEY), shared("layout"), cx.theme().appearance);
       if (!value) { last = null; return; }
       const base = theme().background;
       const key = JSON.stringify([value, base]);

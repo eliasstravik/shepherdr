@@ -809,7 +809,9 @@ export default class Spaces extends View {
           .accessibility_label("Show sidebar").tooltip("Show sidebar")
           .child(svg("mods/workspace-chrome-shepherdr/sidebar.svg").size(20)))))
       .child(this.voiceRow(t, collapsed))
-      .child(h_flex().h(31).pl(16).pr(10).items_center().justify_between().text_size(TEXT.label).font_medium().text_color(t.dim)
+      .child(h_flex().h(31).flex_none().items_center()
+        .when(collapsed, el => el.justify_center())
+        .when(!collapsed, el => el.pl(16).pr(10).justify_between()).text_size(TEXT.label).font_medium().text_color(t.dim)
         .when(!collapsed, el => el.child("Spaces"))
         // As a machine's +: New space, New section, on the shown space's machine.
         .child(div().id("space-new").size(H.sm).flex_none().flex().items_center().justify_center().rounded(RADIUS.control).cursor_pointer()

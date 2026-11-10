@@ -823,7 +823,18 @@ def cmd_install(a, update=False):
     if touches_tools and not a.dry_run:
         atomic_write(r.p(HOLD), f"held by shepherdr {VERSION} install at {r.stamp}: run `shepherdr doctor`\n".encode())
         r.notes.append("the sync to other machines is held until `shepherdr doctor` finds the install whole")
+    fresh = not rec
     rec = rec or {}
+    if fresh and not r.dry:
+        path = r.p(f"{APP}/settings.json")
+        raw = read(path)
+        preferences = json_file(path) if raw is not None else {}
+        if isinstance(preferences, dict) and "appearance" not in preferences:
+            if raw is not None:
+                r.backup(f"{APP}/settings.json")
+            preferences["appearance"] = "dark"
+            atomic_write(path, (json.dumps(preferences, indent=2) + "\n").encode())
+            rec["appearance_default"] = {"created": raw is None}
     files = dict(old_files)
     # Mods: one swap each.
     for m in mods:
@@ -1165,6 +1176,15 @@ def cmd_uninstall(a):
             r.backup(rel, move=True)
         elif read(path) is not None and fsha(rel, read(path)) != sha:
             kept.append(rel)
+    if rec.get("appearance_default") and not r.dry:
+        path = r.p(f"{APP}/settings.json")
+        preferences = json_file(path)
+        if isinstance(preferences, dict) and preferences.get("appearance") == "dark":
+            del preferences["appearance"]
+            if not preferences and rec["appearance_default"]["created"]:
+                os.remove(path)
+            else:
+                atomic_write(path, (json.dumps(preferences, indent=2) + "\n").encode())
     # Keys: ours removed, the person's from before put back.
     path = r.p(f"{APP}/keys.json")
     try:

@@ -6,7 +6,7 @@ drops the space's own, and it inherits again. A few settings are one for every s
 
 ## Where you set them
 
-- **Settings, the level switch.** At the top of each page a space can set its own of (Agents, HolyCow Agents, Tasks, Autopilot,
+- **Settings, the level switch.** At the top of each page a space can set its own of (Agents, HolyCow, Tasks, Autopilot,
   Notify, Secrets): *Applies to: Everywhere ⌄*. The picker lists Everywhere, then every space by machine (a Find box
   once there are many). Pages that are one for every space (Machines, Window, Web) say so instead.
 - **A space's menu › Space settings…** opens Settings on that space, in the window and on the web.
@@ -129,19 +129,19 @@ then the space's own), without guessing (`herdr_task/assistant_settings.py`):
 ## BossGoat desktop background
 
 BossGoat includes `bossgoat-background.png` as its default background, so a new installation needs no file
-selection or download. Existing custom images remain selected. The default transparency is 0% (fully visible).
+selection or download. Existing custom images remain selected. The default transparency is 50%; saved image transparency is preserved.
 
 In the desktop sidebar, open **BossGoat → Appearance → Background** and select **Solid colour** or **Image**.
 Solid colours use HolyCow’s [Eden palette](https://github.com/NeuralHerd/HolyCow/blob/main/website/src/styles/eden.css):
 Paper, Pearl, Sage and Peach for light backgrounds; Ink, Midnight and Charcoal for dark backgrounds.
-These are plain colours, with no image to load. Message surfaces and text follow the selected Herdr theme. For Terminal text, pair light solids with a light Herdr theme and dark solids with a dark theme.
+New installations default to dark mode unless an appearance is already saved. Light mode always uses a solid background: a selected light colour, or Paper when an image or dark colour is selected. Switching back to dark restores the saved image or colour. Chat and Terminal follow the same rule.
 Switching modes remembers your last solid colour and image, including its transparency, on this computer.
 
 For an image, choose a PNG, JPEG or WebP file,
 or drop one onto the preview. Images up to 30 MB and 60 megapixels are accepted and copied
 locally, with a maximum edge of 4096 pixels. The original image stays untouched.
 
-The picture fills the conversation area without stretching. **Transparency** ranges from 0% (fully visible)
+In dark mode, the picture fills the conversation area without stretching. **Transparency** ranges from 0% (fully visible)
 to 100% (hidden against the selected Herdr theme), while messages keep readable surfaces. Transparency applies only to images. Changes save automatically.
 The message box follows Herdr’s native light or dark theme so its typing cursor stays visible, regardless of the background.
 **Reset to default** restores `bossgoat-background.png` and its default transparency. Chat and Terminal share the same background and transparency. Other Herdr layouts and the web app
@@ -156,17 +156,17 @@ The macOS picker uses Apple’s Command Line Tools. Linux uses the desktop porta
 GdkPixbuf, as the chat attachment picker does.
 
 
-## HolyCow Agents
+## HolyCow
 
 Install the [HolyCow skills](https://github.com/NeuralHerd/HolyCow) on each machine that runs them.
-**HolyCow Agents → Skill assignment** is **Required for software tasks**. The Assistant uses HolyCow's guide
+**HolyCow → Skill assignment** is **Required for software tasks**. The Assistant uses HolyCow's guide
 to select the relevant skill automatically; there is no mandatory sequence and routine questions need no skill task.
 The old Use HolyCow switch no longer disables this requirement, including in settings files saved with it off.
 
 Guide, Init, Compass, Refine, Lab, Plan, Build, Review, PR and Retro each have their own Claude Code, Codex or
-Cursor model picker, including the selected CLI's reasoning and speed options. Choices inherit from Everywhere
-unless a space sets its own. **Use role model** removes a global skill choice; a space's **Reset** restores
-inheritance. Unset Guide tasks follow Assistant, Review follows Reviewer, and the others follow Workers.
+Cursor model picker, including the selected CLI's reasoning, speed and permission options. Permissions are also shown beside each skill's model. Choices inherit from Everywhere
+unless a space sets its own. **Use role defaults** removes the complete global skill choice, including permissions; a space's **Reset to inherited settings** restores
+its inherited choice. The running Assistant's chat permissions do not change these task defaults. Unset Guide tasks follow Assistant, Review follows Reviewer, and the others follow Workers.
 Guide's picker controls delegated Guide tasks, not the already-running Assistant.
 
 The Assistant creates work with `herdr-task add "Title" --skill hc-build --prompt "Scope and evidence"` (or another
@@ -201,3 +201,20 @@ Automations accept `--skill` and `--kind` on `auto add` and `auto edit`, and car
 Software automations require a valid skill before they can be saved or resumed. Older unassigned automations
 report a missing-assignment error instead of launching a worker; assign their skill with
 `herdr-task auto edit <id> --skill <skill-id>`.
+
+
+### Shared permission choices
+
+Chat, Agents and HolyCow use the same three choices, with icons and an About permissions button:
+
+| Choice | Claude Code | Codex | Cursor |
+| --- | --- | --- | --- |
+| Ask for approval | Manual permission mode | Workspace write, approval on request, user reviewer | Normal launch without forced or automatic approval flags |
+| Approve for me | Auto permission mode | Workspace write, approval on request, automatic reviewer | Auto-review |
+| Full access | Bypass permissions | Bypass approvals and sandbox | Force allow, except denied commands |
+
+Approval checks still differ by agent. Cursor's saved approval settings and allow rules apply to its normal launch. Automatic review needs support from the installed CLI, account, model and organization policy. Full access does not override every provider or organization restriction. The info button explains the active agent's behavior.
+
+Existing special modes remain saved and appear as Custom (or Read only); opening a menu never migrates them. HolyCow Review remains read-only. Changing agents maps the selected shared choice to the new CLI and preserves read-only restrictions. Settings affect new launches; chat changes restart only the current agent.
+
+Mappings follow the [official OpenAI sandbox documentation](https://learn.chatgpt.com/docs/sandboxing), [Claude permission modes](https://code.claude.com/docs/en/permissions), and [Cursor CLI parameters](https://cursor.com/docs/cli/reference/parameters). Cursor Auto-review is also verified against the installed CLI's help.

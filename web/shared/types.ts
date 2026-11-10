@@ -1013,7 +1013,7 @@ export interface AgentPick { agent: string; model?: string | null; effort?: stri
 
 /** Settings › Agents' model menu, as the window's (mods/chat-models, settings mode; core/agents.js menuFor) */
 export interface ModelMenus {
-  menus: Record<string, { name: string; models: { id: string; name: string; efforts: string[]; defaultEffort?: string | null; fast?: boolean }[]; perms: { id: string; label: string }[] }>
+  menus: Record<string, { name: string; models: { id: string; name: string; efforts: string[]; defaultEffort?: string | null; fast?: boolean }[]; perms: { id: string; label: string; icon?: string; custom?: boolean }[] }>
   permDefault: Record<string, string>
 }
 

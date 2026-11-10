@@ -37,7 +37,7 @@ test("Cursor launches and resumes with its own flags and explicit permissions", 
 test("switching to Cursor clears unsupported effort and keeps permission intent", () => {
   const menus = { cursor: menuFor("cursor", {}) };
   expect(chooseModel(menus, { cursor: "auto" }, { agent: "claude", effort: "high", fast: true, perm: "manual" }, "cursor", "auto"))
-    .toMatchObject({ agent: "cursor", model: "auto", effort: null, fast: false, perm: "auto" });
+    .toMatchObject({ agent: "cursor", model: "auto", effort: null, fast: false, perm: "ask" });
 });
 
 test("Cursor recovery keeps flags without replaying old prompts or pretending it can fork", () => {

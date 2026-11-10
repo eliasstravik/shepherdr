@@ -463,7 +463,7 @@ export class Settings {
         if (!["claude", "codex", "cursor"].includes(v?.agent) || !ok(v.model) || !ok(v.effort)) throw new Error("Pick Claude Code, Codex or Cursor.");
         if (v.agent === "cursor" && (v.effort || v.fast)) throw new Error("Choose Cursor reasoning and speed through its model ID.");
         // its permission mode, as the window's Permissions pick (one of the CLI's modes; none: the CLI's own default)
-        const PERM: Record<string, string[]> = { claude: ["manual", "auto", "acceptEdits", "plan", "bypassPermissions"], codex: ["read-only", "auto", "full"], cursor: ["read-only", "auto", "full"] };
+        const PERM: Record<string, string[]> = { claude: ["manual", "auto", "acceptEdits", "plan", "bypassPermissions"], codex: ["read-only", "auto", "ask", "approve", "full"], cursor: ["read-only", "ask", "auto", "full"] };
         if (v.perm != null && !PERM[v.agent].includes(v.perm)) throw new Error("Not one of its permission modes.");
         v = { agent: v.agent, model: v.model ?? null, effort: v.effort ?? null, fast: !!v.fast, perm: v.perm ?? null };
       }

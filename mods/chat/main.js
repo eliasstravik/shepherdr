@@ -2616,12 +2616,13 @@ export default class Chat extends View {
     const model = fresh ? c.model : agent.rowFor(c.agent, c);
     const menu = fresh ? this.choice.data.menus[c.agent] : agent.menuFor(c.agent, this.dflt, model);
     if (!menu?.perms?.length) return;
-    const W = 260, H = fresh ? 10 + 31 * menu.perms.length : 12 + 26 + 31 * menu.perms.length + 40 + 44;
+    const perms = agent.permissionOptions(menu.perms, c.perm);
+    const W = 260, H = fresh ? 41 + 31 * perms.length : 12 + 31 + 31 * perms.length + 40 + 44;
     const position = at ? { x: Math.max(8, at.x), y: at.y - H - 6 >= 8 ? at.y - H - 6 : at.y + (at.height ?? 28) + 6 } : "pointer";
     if (fresh) {
       this.choice.key ??= `ns-${Math.random().toString(36).slice(2, 8)}`;
       openOverlay({ mod: "chat-models", kind: "popup", width: W, height: H, at: position,
-        props: { pick: "perm", key: this.choice.key, options: menu.perms, current: c.perm, width: W, height: H } });
+        props: { pick: "perm", agent: c.agent, key: this.choice.key, options: perms, current: c.perm, width: W, height: H } });
     } else {
       openOverlay({ mod: "chat-models", kind: "popup", frame: "none", width: W, height: H, at: position,
         props: { mode: "permissions", pane: this.pickKey(), terminal: this.addr, width: W, height: H,
@@ -3881,12 +3882,12 @@ export default class Chat extends View {
     if (!menu?.perms?.length) return null;
     const label = menu.perms.find((p) => p.id === c.perm)?.label ?? "Permissions";
     const enabled = this.permissionsReady();
-    return h_flex().id("chat-permissions").h(ROUND).max_w(150).min_w(0).pl(5).pr(4).gap(4).items_center().rounded(6)
+    return h_flex().id("chat-permissions").h(ROUND).max_w(200).min_w(0).pl(5).pr(4).gap(4).items_center().rounded(6)
       .text_size(12).text_color(enabled ? t.muted : t.dim)
       .when(enabled, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
         .on_mouse_down("left", (e) => { this.permissionsAt = e.bounds ?? e.position; })
         .on_click((_e, cx) => { cx.stop_propagation(); this.openPermissions(this.permissionsAt); }))
-      .child(svg("mods/chat-models/shield.svg").size(14).flex_none())
+      .child(svg(`mods/chat-models/permission-${menu.perms.find((p) => p.id === c.perm)?.icon ?? "ask"}.svg`).size(16).flex_none())
       .child(div().min_w(0).truncate().child(label))
       .child(svg("mods/workspace-chrome/chevron-down.svg").size(12).flex_none());
   }
@@ -4229,7 +4230,7 @@ export default class Chat extends View {
     if (this.call && paneFocused && !this.callHadFocus) cx.timer.after(0, () => { if (this.call) this.callFocus.focus(); });
     this.callHadFocus = Boolean(this.call && paneFocused);
     this.alerts(cx);
-    const picture = currentWallpaper();
+    const picture = currentWallpaper(cx);
     const t = wallpaperTheme(theme(), picture);
     const st = this.status() ?? null;
     if (st === "working" && this.lastWorking !== "working") this.workingSince = Date.now();
