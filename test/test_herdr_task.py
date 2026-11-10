@@ -4300,6 +4300,16 @@ class TaskFlow(unittest.TestCase):
         self.patch(settings, "SETTINGS", f)
         return settings
 
+    def test_suggested_next_message_in_the_brief(self):
+        """SHEP-186: a worker's brief says whether its replies end with a suggested next message: on by default,
+        and off when Settings › Agents turns it off (the agent then writes no suggest line)."""
+        settings = self.settings({})
+        self.assertIn("- Suggested next message: on (your reply ends with the message you'd likely send next",
+                      settings.settings_block(self.store, self.task))
+        settings = self.settings({"everywhere": {"agents": {"suggestions": False}}})
+        self.assertIn("- Suggested next message: off (no suggested next message) (your setting everywhere)",
+                      settings.settings_block(self.store, self.task))
+
     def test_a_running_task_keeps_its_briefs_review(self):
         """#750: Review turned on everywhere while a task runs: its brief said off, so show and ready say off too."""
         settings = self.settings({})
