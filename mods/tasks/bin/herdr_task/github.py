@@ -5,7 +5,7 @@ import os
 import shutil
 
 from .base import Fail, GH, git, hc_json, now, run, STORE
-from .agents import agent_running, live_agents, live_helpers
+from .agents import agent_running, live_agents, live_helpers, status_word
 
 
 # ---- GitHub ---------------------------------------------------------------------------------
@@ -429,15 +429,22 @@ def own_work(s, task):
     return task.get("own")
 
 
+def mid_turn(s, task):
+    """Its agent, or a helper of its own, is mid-turn (working, or asking): its folder stays until the
+    turn ends (SHEP-188). Even when the merge came from Herdr itself (even_if_busy)."""
+    key = s.key(task)
+    return any(status_word(k) in ("working", "blocked") for k in live_agents(key) + live_helpers(key))
+
+
 def finish(s, task, even_if_busy=False):
     """Done, its branch merged: removes the worktree and branch when nothing is left uncommitted
-    there and (unless the person merged from Herdr) no agent still works in it. Else tidy_done()
-    removes them once its agents ended."""
+    there and no agent still works in it: none mid-turn (mid_turn()), and (unless the person merged
+    from Herdr) none running at all. Else tidy_done() removes them once its agents ended."""
     task["state"], task["done_at"] = "done", now()
     for k in ("attention", "merge_requested", "queue", "queued_at", "merge_queued", "kept_open"):
         task.pop(k, None)
     s.dirty = True
-    if not task.get("worktree") or (not even_if_busy and any(agent_running(k) for k in live_agents(s.key(task)))):
+    if not task.get("worktree") or mid_turn(s, task) or (not even_if_busy and any(agent_running(k) for k in live_agents(s.key(task)))):
         return
     remove_worktree(s, task)
 

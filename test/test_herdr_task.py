@@ -1619,6 +1619,38 @@ class DoneWorktreesGo(unittest.TestCase):
         self.assertTrue(os.path.isdir(self.task["worktree"]))
         self.assertEqual(self.git(self.main, "branch", "--list", "--format=%(refname:short)", "task/1"), "task/1")
 
+    def auto_merge(self, status):
+        """The tick's auto-merge of a Ready task whose pull request GitHub merged: merge_now() with its
+        agent at the given status (SHEP-188). Nothing but GitHub and git is stubbed."""
+        from unittest import mock
+        import herdr_task.commands as commands
+        wt = self.task["worktree"]
+        self.live = [{"address": "t1", "state": "live", "agent": "claude", "status": status, "cwd": wt,
+                      "labels": {"herdr.role": "worker"}}]
+        self.task.update(state="ready", merged=False, auto_merge="checks", pr={"number": 5, "repo": "o/r"})
+        merged = {"state": "MERGED", "mergeCommit": {"oid": "f00"}}
+        for name, value in (("pr_view", lambda t: merged), ("note_checks", lambda s, t, v: None),
+                            ("watch_main", lambda *a: None), ("update_main", lambda *a: None)):
+            p = mock.patch.object(commands, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        self.assertIsNone(commands.merge_now(self.store, self.task))
+        self.assertEqual(self.task["state"], "done")
+        return os.path.isdir(wt)
+
+    def test_an_auto_merge_keeps_the_folder_while_its_agent_is_mid_turn(self):
+        self.assertTrue(self.auto_merge("working"))              # its turn after ready: not pulled out
+        self.live = []                                           # its agent ended (end_done after the grace)
+        self.later(self.tick.DONE_GRACE_MS + 1000)
+        self.pass_()
+        self.assertFalse(os.path.isdir(self.task["worktree"]))   # then its worktree goes
+
+    def test_an_auto_merge_while_its_agent_asks_keeps_the_folder(self):
+        self.assertTrue(self.auto_merge("blocked"))
+
+    def test_an_auto_merge_with_its_agent_idle_still_removes_the_folder(self):
+        self.assertFalse(self.auto_merge("idle"))                # as before: nothing mid-turn, gone at once
+
 
 class NewWorktrees(unittest.TestCase):
     """SHEP-74: a new task's worktree starts from its base fetched first (#574), on its own branch
@@ -1927,7 +1959,9 @@ class MergedOnlyWithOwnWork(unittest.TestCase):
         import argparse
         from unittest import mock
         import herdr_task.github as github
-        with mock.patch.object(self.commands, "finish", github.finish):  # the real one: worktree and branch go
+        with mock.patch.object(self.commands, "finish", github.finish), \
+                mock.patch.object(github, "live_agents", lambda key: self.live), \
+                mock.patch.object(github, "live_helpers", lambda key: []):  # the real one: worktree and branch go
             self.commands.cmd_accept(argparse.Namespace(id="SHEP-1", json=True, folder=None))
 
     def test_ready_with_no_commits_waits_for_accept(self):
