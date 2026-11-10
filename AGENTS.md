@@ -8,6 +8,9 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
   `node --check` loop in [docs/develop.md](docs/develop.md). The installer tests use throwaway roots only.
 - Shell checks: plain `bash -n` is the real one. Dash (`sh -n` here) misses bash-only parse errors that macOS's bash 3.2
   hits, so run `bash -n` on every script.
+- Installer tests run from `test/`: `cd test && python3 -m unittest test_install`. To run an older installer copy for a
+  before-check, export `SHEPHERDR_HANDED_OVER=1` (else it hands over to the source's `bin/shepherdr`), and use a full
+  `git archive` of the tree, since `herdr_task` lives beside `bin/`.
 - Never run herdr-app or herdr-task with a changed `HOME` or `HERDR_APP_HOME`, never start a second herdr-app window,
   and never install into the real `~/.config/herdr-app` for a try: use `./install.sh --root <scratch>`. A window or
   scheduler on another home can overwrite every machine's spaces.
