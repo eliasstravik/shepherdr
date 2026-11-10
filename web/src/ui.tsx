@@ -1128,9 +1128,8 @@ export function Small({ children, className, ...p }: HTMLAttributes<HTMLDivEleme
 /** Column header: 52px with a hairline under it; its icon buttons are round, like its ⋯.
  *  A conversation's (the Assistant's, a task's) sits in the chat's reading column, its title on the messages' left edge.
  *  Its lead (Spaces, Back, a task's status) hangs in the empty gutter left of that edge when it fits there, so the
- *  title is at the same spot in every chat; without the room it comes back in line before the title. A
- *  [data-lead-label] in it (Back's "Tasks") shows only when it fits too. */
-export function Head({ children, className, conversation, lead }: { children: ReactNode; className?: string; conversation?: boolean; lead?: ReactNode }) {
+ *  title is at the same spot in every chat; without the room it comes back in line before the title. */
+export function Head({ children, className, conversation, lead, back }: { children: ReactNode; className?: string; conversation?: boolean; lead?: ReactNode; back?: ReactNode }) {
   const outer = useRef<HTMLDivElement>(null)
   const col = useRef<HTMLDivElement>(null)
   const box = useRef<HTMLDivElement>(null)
@@ -1144,8 +1143,8 @@ export function Head({ children, className, conversation, lead }: { children: Re
       const shown = labels.reduce((n, e) => n + e.offsetWidth, 0)
       const all = labels.reduce((n, e) => n + e.scrollWidth, 0)
       const bare = l.offsetWidth - shown
-      // the gutter: from the header's edge to the title's, 4px clear of the edge and 6px of the title
-      const room = c.getBoundingClientRect().left - o.getBoundingClientRect().left + LEAD_PAD - 10
+      // the gutter: from the header's edge to the title's, 2px clear of the title (the back button needs no room here)
+      const room = c.getBoundingClientRect().left - o.getBoundingClientRect().left + LEAD_PAD - 2
       setHang(bare + all <= room ? 'label' : bare <= room ? 'icon' : null)
     }
     fit()
@@ -1158,6 +1157,8 @@ export function Head({ children, className, conversation, lead }: { children: Re
     <div ref={outer} data-chrome data-hang={hang ?? undefined} className={clsx('group/head relative flex min-h-[52px] shrink-0 items-center gap-2.5 border-b border-line pr-3 pl-4 [&_.hit]:rounded-full', conversation && 'px-0!', className)}>
       {conversation ? (
         <div ref={col} data-conversation-head className="relative mx-auto flex min-h-[51px] w-full max-w-read min-w-0 items-center gap-2.5 pr-3 pl-5 [&_.hit]:rounded-full">
+          {/* Back: on the title's line (the row's py-1.5 above it), in the 18px before the title's edge: it never moves the title */}
+          {back ? <div className="absolute top-[6px] right-[calc(100%-18px)] flex h-5 items-center">{back}</div> : null}
           {lead ? (
             // hung: its right edge 6px before the title's left (the column's 20px start). In line, on the title's row
             // (the header's first: its views may wrap under it), its 28px centred on the title's 38px
@@ -1176,14 +1177,19 @@ export function Head({ children, className, conversation, lead }: { children: Re
 // the conversation header's start padding (pl-5): the title's left edge in its column
 const LEAD_PAD = 20
 
-/** Back to the tasks list, in a conversation header's lead: its chevron, and "Tasks" when the gutter has the room */
-export function LeadBack({ onClick }: { onClick: () => void }) {
+/** Back, in a conversation header's lead: a plain chevron, named for where it goes (the place's chat or the Tasks list).
+ *  Narrow as the padding before the title, so it hangs in the gutter even where the column has no margin */
+export function LeadBack({ onClick, to }: { onClick: () => void; to: string }) {
+  const label = `Back to ${to}`
   return (
-    <button type="button" onClick={onClick} aria-label="Tasks" className="press-dim relative inline-flex h-7 shrink-0 items-center rounded-full px-1.5 text-[0.8125rem] whitespace-nowrap text-fg2 after:absolute after:-inset-y-2 after:inset-x-0 hover:bg-hover hover:text-fg">
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="press-dim relative inline-flex h-7 w-[18px] shrink-0 items-center justify-center rounded-full text-fg2 after:absolute after:-inset-y-2 after:-inset-x-1 hover:bg-hover hover:text-fg"
+    >
       <BackIcon className={ic} />
-      <span aria-hidden data-lead-label className="inline-block max-w-0 overflow-hidden group-data-[hang=label]/head:max-w-none">
-        <span className="pr-1 pl-0.5">Tasks</span>
-      </span>
     </button>
   )
 }
