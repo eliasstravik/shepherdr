@@ -48,8 +48,15 @@ What it records: `~/.config/herdr-app/data/shepherdr/installed.json`, a sha256 p
 again changes only what changed; a file you edited since is kept (the new copy goes beside it as `.new`), except a
 mod file Shepherdr changed too: that one is replaced and yours goes to the backup folder.
 
+What it retires: a file Shepherdr shipped before and no longer ships (or a mod `lib/addons.json` dropped) is removed on
+the next update, whether you edited it or not; a changed one is backed up first and the update says where. A one-file
+helper copy from an older release that doctor rejects (no current SHEP block) is replaced the same way.
+
 What it backs up: anything it replaces or removes, in `~/.config/herdr-app/.shepherdr-backup/<time>/`, at the same
 path under your home.
+
+Last, it checks the install is whole (what `shepherdr doctor` checks). When it isn't, the update says `NOT DONE` with
+each `✗` reason, and doctor keeps failing until they're fixed.
 
 What it refuses: a mod, layout, lib or bin file by the same name that it didn't install and that differs (your own
 mod called `chat`, say). Nothing is written then; it names each one. `--adopt` backs them up and takes them over.
