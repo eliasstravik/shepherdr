@@ -3,8 +3,8 @@
     "BossGoat's add-ons (3.0.0, everything is a plugin): each feature, what it is made of and what it needs.",
     "core is always installed and always on. Every add-on is installed too (one layout gives everything);",
     "one with \"switch\": true can be turned off in BossGoat settings > Window. The off list is shared",
-    "\"addons.off\" (the window's mods, lib/addons.js) and \"off\" in ~/.herdr/shepherdr.json (herdr-task).",
-    "An add-on without a switch is always on in 3.1.26: splitting it from the panels it lives in comes later.",
+    "\"addons.off\" (the window's mods, lib/addons.js) and \"off\" in ~/.config/shepherdr/settings.json (herdr-task).",
+    "An add-on without a switch is always on in 3.1.30: splitting it from the panels it lives in comes later.",
     "mods: folders under mods/. blocks: layout node ids it fills. keys: \"<context> <key>\" in keys.json. web: the web app's plugins (web/plugins), left out while it is off.",
     "helpers: links put in ~/.local/bin. templates: ~/.config/herdr-core/templates. needs: other add-ons."
   ],
@@ -26,7 +26,7 @@
   "addons": [
     { "id": "tasks", "title": "Tasks", "switch": false,
       "about": "The Tasks panel, the Accept card and herdr-task: every task with its own agent, worktree, review and merge.",
-      "mods": ["tasks", "tasks-menu", "accept-card", "task-files", "task-changes", "task-pr"],
+      "mods": ["tasks", "tasks-menu", "accept-card", "task-pr"],
       "blocks": ["tasks", "tasks-list", "tasks-thread"],
       "helpers": ["herdr-task"], "templates": ["worker", "reviewer"] },
     { "id": "assistants", "title": "Assistants", "switch": false, "needs": ["tasks"],

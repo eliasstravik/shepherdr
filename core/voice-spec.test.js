@@ -1,7 +1,7 @@
 // The voice agent's spec reaches agents made before (ensureAgent): kept and up to date, nothing asked; from another
 // spec, PATCHed (and the tools it replaced removed); gone from ElevenLabs, made again; made with another key, a new one.
 import { expect, test } from "bun:test";
-import { ensureAgent, agentSpec, SPEC, specTag, TOOLS, SYSTEM_TOOLS, agentFile, envLines, opening, prompt, FIRST, LANGUAGES, TTS_MODEL, batchLines, needLine, replyLine, toolWords, turnGate } from "./voice.js";
+import { ensureAgent, agentSpec, SPEC, specTag, TOOLS, SYSTEM_TOOLS, hangUpGuard, closeWords, chimePcm, HUNG_UP, REFUSED, agentFile, envLines, opening, prompt, FIRST, LANGUAGES, TTS_MODEL, VOICE_ID, batchLines, needLine, replyLine, REPLY_MAX, toolWords, turnGate } from "./voice.js";
 
 function fake(o = {}) {
   const calls = [], saved = [];
@@ -61,8 +61,8 @@ test("one kept for another key isn't used: a new one", async () => {
   expect(await ensureAgent(f.io)).toBe("agent_new");
 });
 
-test("the spec: six client tools (screen the fallback, call_view the call's own view), a version that follows its words, and a file without the key", () => {
-  expect(TOOLS.map((t) => t.name)).toEqual(["look", "open", "send", "screen", "act", "call_view"]);
+test("the spec: seven client tools (screen the fallback, call_view the call's own view, hang_up), a version that follows its words, and a file without the key", () => {
+  expect(TOOLS.map((t) => t.name)).toEqual(["look", "open", "send", "screen", "act", "call_view", "hang_up"]);
   for (const t of TOOLS) { expect(t.type).toBe("client"); expect(t.expects_response).toBe(true); expect(t.response_timeout_secs).toBeLessThanOrEqual(120); }
   expect(TOOLS.find((t) => t.name === "act").parameters.required).toContain("confirmed");
   expect(SPEC).toBe(specTag(agentSpec()));
@@ -76,19 +76,22 @@ test("the spec: six client tools (screen the fallback, call_view the call's own 
 
 test("SHEP-67: ends the call itself after a yes, waits quietly through silence, speaks briefly", () => {
   const c = agentSpec().conversation_config;
-  // ElevenLabs' end_call and skip_turn, listed with ours (a separate built_in_tools field beside inline tools is dropped)
-  expect(c.agent.prompt.tools.map((t) => t.name)).toEqual(["look", "open", "send", "screen", "act", "call_view", "end_call", "skip_turn", "language_detection"]);
-  expect(SYSTEM_TOOLS.map((t) => [t.type, t.params.system_tool_type])).toEqual([["system", "end_call"], ["system", "skip_turn"], ["system", "language_detection"]]);
+  // ElevenLabs' skip_turn, listed with ours (a separate built_in_tools field beside inline tools is dropped); SHEP-173:
+  // no end_call of ElevenLabs': our hang_up, which Shepherdr allows only after the person's yes
+  expect(c.agent.prompt.tools.map((t) => t.name)).toEqual(["look", "open", "send", "screen", "act", "call_view", "hang_up", "skip_turn", "language_detection"]);
+  expect(SYSTEM_TOOLS.map((t) => [t.type, t.params.system_tool_type])).toEqual([["system", "skip_turn"], ["system", "language_detection"]]);
+  expect(c.agent.prompt.tools.find((t) => t.name === "hang_up").type).toBe("client");
   expect(c.agent.prompt.built_in_tools).toBeUndefined();
-  // no "are you there?" after a silence; only a 15-minute silence or an hour-long call ends it
-  expect(c.turn).toMatchObject({ turn_timeout: -1, silence_end_call_timeout: 900 });
-  expect(c.conversation.max_duration_seconds).toBe(3600);
+  // no "are you there?" after a silence; SHEP-173: only a 30-minute silence or a 2-hour call (ElevenLabs' most) ends it
+  expect(c.turn).toMatchObject({ turn_timeout: -1, silence_end_call_timeout: 1800 });
+  expect(c.conversation.max_duration_seconds).toBe(7200);
   // a short hello, on the spec and on each call
   expect(c.agent.first_message).toBe(FIRST);
   expect(opening().conversation_config_override.agent.first_message).toBe(FIRST);
   expect(FIRST.split(" ").length).toBeLessThanOrEqual(4);
   const p = prompt();
-  expect(p).toContain('ask exactly "Are you sure you want to end the call?" After a clear yes, say "Bye." and use end_call');
+  expect(p).toContain('ask exactly "Are you sure you want to end the call?" After a clear yes, say "Bye." and use hang_up');
+  expect(p).toContain("Never end the call for any other reason: not after a send");
   expect(p).not.toContain('"End the call?"');
   // moving around: one word once it's shown, a few words only when it failed or is unclear (SHEP-83)
   expect(p).toContain('reply with one word: "Opened.", "Switched.", "Closed." or "Done." Nothing else');
@@ -115,6 +118,11 @@ test("SHEP-104: English first, then whatever language the person speaks, back an
   // a speech model that speaks them (not an English-only v2), set rather than left to ElevenLabs' default
   expect(c.tts.model_id).toBe(TTS_MODEL);
   expect(TTS_MODEL).not.toMatch(/_v2$/);
+  // SHEP-162: one even voice: no expressive audio tags, one pinned voice, stability above ElevenLabs' 0.5 default
+  expect(c.tts).toMatchObject({ voice_id: VOICE_ID, expressive_mode: false, agent_output_audio_format: "pcm_16000" });
+  expect(c.tts.stability).toBeGreaterThanOrEqual(0.6);
+  expect(Object.values(c.language_presets).every((p) => !p.overrides.tts)).toBe(true);
+  expect(prompt()).toContain("never audio tags");
   // the prompt says to answer in the person's language, the hello stays English
   expect(prompt()).toContain("Speak the language the person speaks");
   expect(opening().conversation_config_override.agent.first_message).toBe(FIRST);
@@ -149,7 +157,7 @@ test("SHEP-105: one Shepherdr voice for everything, never tied to the chat it st
 test("SHEP-113: a word before a slow tool, a filler for a slow reply, a sound while a tool runs, the ask first", () => {
   const c = agentSpec().conversation_config;
   // ElevenLabs' pre-tool speech: always before look, send and act; ElevenLabs decides for the quick open and screen
-  expect(Object.fromEntries(TOOLS.map((t) => [t.name, t.pre_tool_speech]))).toEqual({ look: "force", open: "auto", send: "force", screen: "auto", act: "force", call_view: "auto" });
+  expect(Object.fromEntries(TOOLS.map((t) => [t.name, t.pre_tool_speech]))).toEqual({ look: "force", open: "auto", send: "force", screen: "auto", act: "force", call_view: "auto", hang_up: "auto" });
   for (const t of TOOLS) { expect(t.force_pre_tool_speech).toBeUndefined(); expect(t.tool_call_sound).toBe("typing"); expect(t.tool_call_sound_behavior).toBe("auto"); }
   // a slow model: a short filler of its own after 3 s (within ElevenLabs' 0.5..8)
   const soft = c.turn.soft_timeout_config;
@@ -206,4 +214,60 @@ test("SHEP-124: call_view sets the call's own view (full or minimized), never sc
   expect(p).toContain('"Back to the call", "maximize the call", "full screen": call_view full');
   expect(p).toContain("Never screen for this.");
   expect(p).toContain("Opening or moving around minimizes a full-screen call by itself");
+});
+
+// SHEP-173: ElevenLabs' records of the person's calls: "Passed it to the Home Assistant." then end_call, no yes asked
+test("SHEP-173: hang_up only right after the person answered a question, with no tool since", () => {
+  const g = hangUpGuard();
+  expect(g.may()).toBe(false);
+  g.seen("user_transcript", "Tell Home to update codex.");
+  g.seen("agent_response", "On it.");
+  g.seen("client_tool_call", "send");
+  g.seen("agent_response", "Passed it to the Home Assistant.");
+  g.seen("client_tool_call", "hang_up");
+  expect(g.may()).toBe(false);
+  // asked, then a yes: may (in any language: only the question mark counts)
+  g.seen("user_transcript", "End the call.");
+  g.seen("agent_response", "Are you sure you want to end the call?");
+  g.seen("user_transcript", "Yes.");
+  g.seen("agent_response", "Bye.");
+  g.seen("client_tool_call", "hang_up");
+  expect(g.may()).toBe(true);
+  const sv = hangUpGuard();
+  sv.seen("agent_response", "Vill du verkligen avsluta samtalet?");
+  sv.seen("user_transcript", "Ja.");
+  expect(sv.may()).toBe(true);
+  // a question, a yes, then a send before hanging up: not
+  sv.seen("client_tool_call", "send");
+  expect(sv.may()).toBe(false);
+  expect(JSON.parse(HUNG_UP).ok).toBe(true);
+  expect(JSON.parse(REFUSED).ok).toBe(false);
+});
+
+test("SHEP-173: why a call ended, in plain words", () => {
+  expect(closeWords(1000, "Conversation has exceeded maximum duration")).toBe("it reached the 2-hour limit");
+  expect(closeWords(1002, "No user message received for a long period of time - probably a network error occurred.")).toBe("it was quiet for a long time");
+  expect(closeWords(1000, "")).toBe("the voice service ended it");
+  expect(closeWords(1006, "")).toBe("the connection to the voice service was lost");
+  expect(closeWords(4000, "quota")).toBe("the voice service closed it (quota)");
+});
+
+test("SHEP-173: the end chime is short, soft and ends in silence", () => {
+  const pcm = chimePcm(16000);
+  expect(pcm).toBeInstanceOf(Int16Array);
+  expect(pcm.length / 16000).toBeGreaterThan(0.3);
+  expect(pcm.length / 16000).toBeLessThan(0.7);
+  const peak = pcm.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+  expect(peak).toBeGreaterThan(3000);
+  expect(peak).toBeLessThan(16000);
+  expect(Math.abs(pcm[pcm.length - 1])).toBeLessThan(800);
+});
+
+test("a long reply is said whole; past the limit it says it was cut and where the rest is (#785)", () => {
+  const five = "Sentence. ".repeat(500) + "Last words.";
+  expect(replyLine("the shop Assistant", five).text).toContain("Last words.");
+  expect(replyLine("the shop Assistant", five).text).not.toContain("cut short");
+  const huge = replyLine("the shop Assistant", "y".repeat(REPLY_MAX + 10)).text;
+  expect(huge).toContain("cut short here; the rest is in the chat");
+  expect(huge).toContain("Tell the person what it says");
 });

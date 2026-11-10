@@ -10,7 +10,10 @@
 // Edit lib/coordinator.js, never a mod's copy, then run bin/sync-shared.
 
 import { appHome, exec, hc, run, openOverlay, shared, setShared, home, machines, focused, readTextFile } from "herdr";
+import { dirs } from "./dirs.js";
+import { isWorktreePath } from "./core/paths.js";
 import { terminals, panes, spaces as allSpaces } from "./live.js";
+import { chatPane, chatLabel } from "./core/spaces.js";
 import { logSpace } from "./spacelog.js";
 import { toast, plainError } from "./ui.js";
 
@@ -29,7 +32,7 @@ export function coordinatorIn(tabId, all = terminals(), ps = null) {
   if (direct) return direct;
   // In Chat mode the agent has no pane and no tab label: its chat pane (herdr.chat) says where it is.
   const chats = new Set((ps ?? panes()).filter((p) => p.mod === "chat" && p.tab === tabId).map((p) => p.pane));
-  return chats.size ? all.find((k) => isCoordinator(k) && chats.has(k.labels?.["herdr.chat"])) ?? null : null;
+  return chats.size ? all.find((k) => isCoordinator(k) && chats.has(chatPane(k))) ?? null : null;
 }
 
 // The agentless coordinator chat in a tab ({ slot, space, tab, pane, folder }), or null.
@@ -89,9 +92,11 @@ export function entryFor(k, known) {
   return known.find((a) => a.key === k.program?.key) ?? known.find((a) => base(a.run?.[0]) === base(k.foreground?.argv?.[0] ?? k.argv?.[0])) ?? null;
 }
 
-// The helper scripts run detached: the menu that starts one closes at once.
+// The helper scripts run detached: the menu that starts one closes at once. macOS has no setsid (#736): there the
+// script runs in a job of its own (set -m) under nohup, so it outlives the menu all the same.
+export const DETACH = 'if command -v setsid >/dev/null 2>&1; then setsid -f bash "$0" "$@"; else set -m; nohup bash "$0" "$@" & fi >/dev/null 2>&1 </dev/null';
 function script(name, args) {
-  return exec("bash", ["-c", 'setsid -f bash "$0" "$@" >/dev/null 2>&1 </dev/null', `${appHome()}/mods/coordinator/${name}.sh`, ...args]);
+  return exec("bash", ["-c", DETACH, `${appHome()}/mods/coordinator/${name}.sh`, ...args]);
 }
 
 // Where a space's coordinator works: its focused (else first) terminal's folder.
@@ -100,12 +105,12 @@ function folderOf(space) {
   const p = panes().find((p) => mine.has(p.tab) && p.focused && p.cwd) ?? panes().find((p) => mine.has(p.tab) && p.cwd);
   // A pane in Chat mode isn't a terminal pane: its agent's folder stands in for it.
   const chat = !p && panes().find((q) => mine.has(q.tab) && q.mod === "chat");
-  const agent = chat && terminals().find((k) => k.labels?.["herdr.chat"] === chat.pane);
+  const agent = chat && terminals().find((k) => chatPane(k) === chat.pane);
   return p?.cwd || agent?.cwd || space.folder || home();
 }
 
 // Shepherdr settings (mods/shepherdr-settings writes them; herdr-task reads them too):
-// ~/.herdr/shepherdr.json = { version, everywhere: SETTINGS, machines: { <machine>: SETTINGS },
+// Shepherdr's settings file (~/.config/shepherdr/settings.json) = { version, everywhere: SETTINGS, machines: { <machine>: SETTINGS },
 //   spaces: { <space id>: { folder, name, machine, ...SETTINGS } } }
 // with SETTINGS = { coordinator, worker, reviewer: { agent, model, effort, fast, perm },
 //   tasks: { merge: "auto"|"checks"|"ask", review_rounds, must_fix: "blocker"|"major"|"minor", max_running,
@@ -115,9 +120,9 @@ function folderOf(space) {
 // machine its share (with "here": its name) for its herdr-task. Settings edits only Everywhere and
 // spaces now; a machine's layer holds its machine-only rows (machine, home) and is still read for
 // anything it set for all its spaces before machine scope went.
-export const SHEPHERDR_FILE = () => `${home()}/.herdr/shepherdr.json`;
+export const SHEPHERDR_FILE = () => dirs().settings;   // ~/.config/shepherdr/settings.json (lib/dirs.js)
 export const SHEPHERDR_DEFAULTS = { tasks: { merge: "ask", review_rounds: 0, must_fix: "major", max_running: 10, archive_after: 7 }, automations: { enabled: true },
-  holycow: {}, agents: { reactions: true, feedback: true, feedback_repo: "" } };
+  holycow: {}, agents: { reactions: true, suggestions: true, feedback: true, feedback_repo: "" } };
 export const LOCAL_MACHINE = "local";
 export async function readShepherdr() {
   try { return JSON.parse((await readTextFile(SHEPHERDR_FILE())) ?? "{}") ?? {}; } catch { return {}; }
@@ -162,7 +167,7 @@ const machineReady = (name) => machines().find((m) => (m.name ?? null) === (name
 // the web app, or its tab closed while it ran on): the new tab takes it instead of starting another.
 function runningAssistant(space, ps = panes()) {
   const id = String(space.id).split("/").pop(), machine = space.machine ?? "";
-  const shown = (k) => ps.some((p) => p.terminal === k.address || (p.mod === "chat" && p.pane === k.labels?.["herdr.chat"]));
+  const shown = (k) => ps.some((p) => p.terminal === k.address || (p.mod === "chat" && p.pane === chatPane(k)));
   return terminals().find((k) => isCoordinator(k) && split(k.address)[0] === machine && !shown(k)
     && [k.labels?.["herdr.coordinator.space"], k.labels?.["herdr.space"]].includes(id)) ?? null;
 }
@@ -189,7 +194,7 @@ export async function openCoordinator(space, show = true, settings = null) {
     const pane = out.pane ?? panes().find((p) => p.tab === out.tab && p.mod === "chat")?.pane ?? null;
     setShared("coordinator.slots", { ...liveSlots(), [slot]: { space: space.id, tab: out.tab, pane, folder } });
     // The chat follows the agent its slot names (mods/chat adoptSlot).
-    if (running && pane) await hc(["label", running.address, `herdr.chat=${pane}`, `herdr.chat.slot=${slot}`, `herdr.chat.origin=slot:${slot}`,
+    if (running && pane) await hc(["label", running.address, `herdr.chat=${chatLabel(pane)}`, `herdr.chat.slot=${slot}`, `herdr.chat.origin=slot:${slot}`,
       `herdr.coordinator.tab=${String(out.tab).split("/").pop()}`]).catch(() => {});
     await app("tab.move", { id: out.tab, index: 1 });
     if (show) {
@@ -243,7 +248,7 @@ export function newSpaceHeight(n, choosing = false) {
 // belong to a task).
 export async function recentFolders(machine = null) {
   const at = new Map();
-  const add = (p, t) => { if (p && !p.includes("/.herdr/worktrees/")) at.set(p, Math.max(at.get(p) ?? 0, t ?? 0)); };
+  const add = (p, t) => { if (p && !isWorktreePath(p)) at.set(p, Math.max(at.get(p) ?? 0, t ?? 0)); };
   const there = (id) => (machine ? id.startsWith(`${machine}/`) : !id.includes("/"));
   for (const k of terminals()) if (there(k.address)) add(k.foreground?.cwd ?? k.cwd, k.created_ms);
   for (const p of panes()) if (p.cwd && there(p.pane) && there(p.tab)) add(p.cwd, Date.now());
@@ -251,7 +256,7 @@ export async function recentFolders(machine = null) {
   const r = await exec("sh", ["-c", 'for d; do [ -d "$d" ] || continue; git -C "$d" rev-parse --show-toplevel 2>/dev/null || echo "$d"; done', "x", ...paths], machine ? { on: machine } : {});
   const out = [];
   for (const p of r.stdout.split("\n").map((l) => l.trim()).filter(Boolean)) {
-    if (!out.includes(p) && !p.includes("/.herdr/worktrees/")) out.push(p);
+    if (!out.includes(p) && !isWorktreePath(p)) out.push(p);
     if (out.length >= 8) break;
   }
   return out;

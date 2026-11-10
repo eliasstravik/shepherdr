@@ -8,7 +8,7 @@
 
 <p align="center"><a href="https://github.com/NeuralHerd/BossGoat/blob/main/docs/install.md"><img src="assets/buttons/install-shepherdr.svg" alt="Install BossGoat" /></a></p>
 
-<p align="center"><sub>✓&nbsp;Free,&nbsp;MIT&nbsp;licensed &nbsp; ✓&nbsp;Runs&nbsp;on&nbsp;your&nbsp;machines,&nbsp;inside&nbsp;the&nbsp;Herdr&nbsp;app &nbsp; ✓&nbsp;BossGoat&nbsp;3.1.26,&nbsp;herdr-app&nbsp;0.1.12+</sub></p>
+<p align="center"><sub>✓&nbsp;Free,&nbsp;MIT&nbsp;licensed &nbsp; ✓&nbsp;Runs&nbsp;on&nbsp;your&nbsp;machines,&nbsp;inside&nbsp;the&nbsp;Herdr&nbsp;app &nbsp; ✓&nbsp;BossGoat&nbsp;3.1.30,&nbsp;herdr-app&nbsp;0.1.12+</sub></p>
 
 <br />
 
@@ -40,7 +40,7 @@ Each space's Assistant chat is in the middle and its tasks on the right, by what
 
 ### 🧩 Make it yours: everything is an add-on
 
-Tasks, Assistants, chat, artifacts, voice, reactions, the task browser, Autopilot, other machines: every part of BossGoat is an add-on made of Herdr mods, listed in one file with what it needs. Switch Artifacts, Voice, Reactions, the Task browser, Autopilot, the sync to other machines or the web app off in BossGoat settings → Window; the rest is always on in 3.1.26. Your own mods and layouts sit beside BossGoat's in your Herdr folder and are never touched: an update replaces only the files it put there and you didn't change, and keeps a copy of anything it replaces. Herdr's themes and keys stay yours. [Add-ons](docs/addons.md) lists each one and its switch.
+Tasks, Assistants, chat, artifacts, voice, reactions, the task browser, Autopilot, other machines: every part of BossGoat is an add-on made of Herdr mods, listed in one file with what it needs. Switch Artifacts, Voice, Reactions, the Task browser, Autopilot, the sync to other machines or the web app off in BossGoat settings → Window; the rest is always on in 3.1.30. Your own mods and layouts sit beside BossGoat's in your Herdr folder and are never touched: an update replaces only the files it put there and you didn't change, and keeps a copy of anything it replaces. Herdr's themes and keys stay yours. [Add-ons](docs/addons.md) lists each one and its switch.
 
 ### ⚡ Stop briefing every agent yourself
 
@@ -81,7 +81,7 @@ shepherdr update
 shepherdr doctor
 ```
 
-BossGoat doesn't update itself: it never follows main, so a merge can't change what runs. An update replaces only the files it put there that you haven't changed (yours stay, with the new copy beside them as `.new`), one mod at a time, and keeps a backup of anything it replaces. Agents keep running in herdr-core meanwhile. Until `shepherdr doctor` says the install is whole, your other machines don't get the new helpers. [Upgrading](docs/upgrading.md) has the details.
+BossGoat doesn't update itself: it never follows main, so a merge can't change what runs. An update replaces only the files it put there that you haven't changed (yours stay, with the new copy beside them as `.new`, or in the backup when the mod file changed too), one mod at a time, and keeps a backup of anything it replaces. Agents keep running in herdr-core meanwhile. Until `shepherdr doctor` says the install is whole, your other machines don't get the new helpers. [Upgrading](docs/upgrading.md) has the details.
 
 ## Get your questions answered
 
@@ -129,7 +129,7 @@ Only the ones it made. Every task works in its own worktree, on its own branch `
 
 ### Where do my tasks live?
 
-In `~/.herdr/` on each machine: tasks (`~/.herdr/tasks`), worktrees, artifacts, the secrets vault and BossGoat's settings (`~/.herdr/shepherdr.json`). The window's own state (chat drafts, attachments) is in your Herdr folder's `data/`. Installing, updating or uninstalling never touches either. [Develop](docs/develop.md) covers the code.
+In BossGoat's own folders on each machine: tasks, artifacts, task worktrees and the secrets vault in `~/.local/share/shepherdr`, BossGoat's settings in `~/.config/shepherdr`, task browsers and the service's files in `~/.local/state/shepherdr` (`shepherdr where` lists them; older ones stay in `~/.herdr`, which links there). The window's own state (chat drafts, attachments) is in your Herdr folder's `data/`. Uninstalling never touches either. [Develop](docs/develop.md) covers the code.
 
 ### Can I use several machines?
 
@@ -165,4 +165,4 @@ Nowhere: 2.1 is on the `v2.1` branch and 2.0 on the `v2.0` branch, each with its
 
 <p align="center"><a href="https://github.com/NeuralHerd/BossGoat/blob/main/docs/install.md"><img src="assets/buttons/install-shepherdr.svg" alt="Install BossGoat" /></a></p>
 
-<p align="center"><sub>✓&nbsp;Free,&nbsp;MIT&nbsp;licensed &nbsp; ✓&nbsp;Runs&nbsp;on&nbsp;your&nbsp;machines,&nbsp;inside&nbsp;the&nbsp;Herdr&nbsp;app &nbsp; ✓&nbsp;BossGoat&nbsp;3.1.26,&nbsp;herdr-app&nbsp;0.1.12+</sub></p>
+<p align="center"><sub>✓&nbsp;Free,&nbsp;MIT&nbsp;licensed &nbsp; ✓&nbsp;Runs&nbsp;on&nbsp;your&nbsp;machines,&nbsp;inside&nbsp;the&nbsp;Herdr&nbsp;app &nbsp; ✓&nbsp;BossGoat&nbsp;3.1.30,&nbsp;herdr-app&nbsp;0.1.12+</sub></p>

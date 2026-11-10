@@ -57,7 +57,7 @@ export async function saveLastUsed(sel) {
 const modelOf = (data, sel) => data?.menus?.[sel?.agent]?.models?.find((m) => m.id === sel.model) ?? null;
 
 // A model picked: the effort and speed stay where it has them; another agent brings its own
-// permission modes (full access staying full access).
+// permission modes, the nearest to the one chosen (core/agents.js mapPermission).
 function choose(coord, agentKey, id) {
   const { sel, data } = coord;
   const m = data.menus[agentKey]?.models?.find((x) => x.id === id);

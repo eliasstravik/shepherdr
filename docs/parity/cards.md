@@ -24,7 +24,7 @@ checks the window's askers say the same).
 | Summary | `words()`: an old long summary keeps its first sentence, the rest under Details; empty: `No summary.` muted (`main.js:289`) | `A.words(e)`, `A.ACCEPT.noSummary` (`Accept.tsx:147`) | ✓ |
 | Changes | `N commits · N files changed +a −r`, `Not a git folder.`, `No commits.`, `· Couldn't read the files`, newest commits (sha, subject), biggest files, `And N more` (`main.js:204`) | `Changes` (`Accept.tsx:52`) from `A.commitsLine`, `A.filesLine`, `A.moreLine` | ✓ |
 | Checks | dot (green passed, red failed/unknown, amber running) + its text; `No GitHub checks here` (`main.js:228`) | `Accept.tsx:149` | ✓ |
-| Proof | a pressable row: title without its ref, `Open`, external-link icon; `No proof artifact.` (`main.js:237`) | `Accept.tsx:155`, `A.proofTitle`, `OpenIcon` | ✓ |
+| Proof | a pressable row: title without its ref, `Open`, external-link icon; `No proof artifact.` (`main.js:237`) | SHEP-138: the proof drawn right in the card (`InlineProof`, the viewer's `ArtifactFrame`), the card large (up to 1100 wide, 90% tall): the proof beside the rest when wide, under the summary when narrow, a small `Open ↗` for the viewer; a proof the app doesn't know yet keeps the row; `No proof artifact.` (`Accept.tsx`) | ◇ the window's card is a fixed 640×640 overlay of its own mod: showing the proof in it means reopening it as a wider layout with the proof's mod beside it, not tried yet (no window to see it in on the dev VM) |
 | Proof opens | a modal of a fitting size over the card, the card as it was under it (`artview.js` showModal) | the web's artifact viewer over the card (z-40 over the card's z-30); closing it shows the card again | ◇ the web has one artifact viewer, full screen on a phone |
 | Proof `Opening…` | while its mod is pulled (`main.js:243`) | the viewer says `Opening…` until the artifact is there (`web/plugins/artifacts/client.tsx` Viewer) | ✓ |
 | Details | folded, a chevron (right/down) + `Details`; the long text as bullets (`readable`), selectable (`main.js:250`) | chevron + `A.ACCEPT.details`, `A.readable(w.details)` in Markdown, `data-selectable` (`Accept.tsx:164`) | ✓ |
@@ -64,13 +64,12 @@ checks the window's askers say the same).
 
 | Element | Window (file:line, exact words/control) | Web (file:line) | State |
 |---|---|---|---|
-| The bar | full width under the work area, chrome color, a hairline above (`mods/workspace-status-chat/main.js:31`) | `StatusBar` under everything, a hairline above (`web/src/status.tsx:35`, `App.tsx:112`) | ✓ |
-| Machine | monitor (this computer) or server icon + the machine as the sidebar names it (`main.js:32`) | `MonitorIcon`/`ServerIcon` + `machineName` (`status.tsx:37`) | ✓ |
-| Branch | branch icon + the shown space's branch, when it has one (`main.js:33`) | `status.tsx:40` | ✓ |
-| Needs you | the red count badge (everywhere's) + `Needs you`, when something needs you (`main.js:34`) | the red badge + `Needs you`, every need on every machine (`status.tsx:46`) | ✓ |
+| The bar | full width under the work area, chrome color, a hairline above (`mods/workspace-status-chat/main.js:31`) | — | ◇ removed from the web (SHEP-174): the panes and sidebar run to the bottom edge |
+| Machine | monitor (this computer) or server icon + the machine as the sidebar names it (`main.js:32`) | the machine heads its spaces in the sidebar | ◇ |
+| Branch | branch icon + the shown space's branch, when it has one (`main.js:33`) | on the space's row (`gitTail`), unless it is main, master or the space's own name | ◇ |
+| Needs you | the red count badge (everywhere's) + `Needs you`, when something needs you (`main.js:34`) | the red count on each space's row and on the Tasks tab, the cards in Tasks' Needs you | ◇ |
 | No agent count | — | — | ✓ |
 | `Ctrl+Shift+P  Commands` | opens Herdr's command palette (`main.js:36`) | — | ◇ Herdr's palette drives the window; the web has none (Jump is the sidebar's `Search or jump to`) |
-| Phone | — | no bar: the machine heads its spaces, the branch is on the space's row, Needs you on Tasks | ◇ phone: no room |
 
 ## Confirm and prompt dialogs
 

@@ -2,7 +2,7 @@
 // Herdr's other menus (new-menu-tasks), made for any number of agents with any number of models:
 // a tab per installed agent (only when more than one), a search over every agent's models (the
 // keys go to it at once; ↑/↓ and Enter pick, Esc closes), the agent's pinned and recent models on
-// top (core/agents.js modelSections) with a star to pin one (~/.herdr/model-picks.json, the web's
+// top (core/agents.js modelSections) with a star to pin one (~/.config/shepherdr/model-picks.json, the web's
 // too), one word no model has offered as an id to start on; then Reasoning (that model's levels),
 // Fast (where the model has it), Permissions (a small sub-menu), and, only when a choice differs
 // from what runs now, one Restart button, said first to start a new conversation when it switches
@@ -25,13 +25,14 @@ import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex, InputState, Input, VirtualListScrollHandle, v_virtual_list, Scrollbar } from "gpui-base";
 import { theme, props, setShared, closeOverlay, home, readTextFile, writeTextFile, openOverlay } from "herdr";
 import { modelSections, parsePicks, pickKey, withPin, withRecent, PICKS_FILE, permissionOptions, permissionHelp, mapPermission, NAMES } from "./core/agents.js";
+import { dirs } from "./dirs.js";
 
 const AGENTS = ["claude", "codex", "cursor"];
 const LEVEL = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra", none: "None" };
 // Sizes, as the chat counts them for the overlay's height (mods/chat openPicker): the model list
 // scrolls past LIST; NOTE is a quiet line (an offline machine's; a new conversation's, two lines).
 export const ROW = 31, HEAD = 26, SEP = 9, SEG = 34, FOOT = 33, TABS = 34, SEARCH = 36, LIST = 8 * 31, NOTE = 20, STAR = 20;
-const picksPath = () => `${home()}/${PICKS_FILE}`;
+const picksPath = () => dirs()["model-picks"];
 
 export default class ModelMenu extends View {
   init(_props, cx) {
@@ -189,10 +190,12 @@ export default class ModelMenu extends View {
       .child(div().id(id).absolute().top(2).left(on ? 14 : 2).size(12).rounded(6).bg(t.background).transition("left", 120));
   }
 
-  // The permission modes, just above the Permissions row.
+  // The permission modes, just above the Permissions row. It takes its own presses: the menu's press closes it, and
+  // closed before the click, the click fell on the Fast row under it (GitHub #767, #740).
   permMenu(t, bottom) {
     const perms = permissionOptions(this.p.menus?.[this.sel.agent]?.perms, this.sel.perm);
-    return v_flex().absolute().right(5).bottom(bottom).w(180).p(5).rounded(8).bg(t.popover).border_1().border_color(t.border).shadow_md()
+    return v_flex().id("perm-menu").absolute().right(5).bottom(bottom).w(180).p(5).rounded(8).bg(t.popover).border_1().border_color(t.border).shadow_md()
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .children(perms.map((x) => this.row(t, `perm-${x.id}`, true, () => { this.sel = { ...this.sel, perm: x.id }; this.permOpen = false; })
         .child(svg(`mods/chat-models/permission-${x.icon ?? "ask"}.svg`).size(16).flex_none())
         .child(div().flex_1().child(x.label))
@@ -346,7 +349,9 @@ export default class ModelMenu extends View {
         .child(svg("mods/chat-models/zap.svg").size(14).flex_none().text_color(t.dim))
         .child(div().flex_1().child("Fast"))
         .child(this.toggle(t, this.sel.fast))))
+      // its own press too: else the menu's closes it and the click opens it again
       .when(Boolean(menu?.perms?.length), (el) => el.child(this.row(t, "perms", true, () => { this.permOpen = !this.permOpen; })
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .when(this.permOpen, (el) => el.bg(t.selected))
         .child(svg("mods/chat-models/shield.svg").size(14).flex_none().text_color(t.dim))
         .child(div().flex_1().child("Permissions"))

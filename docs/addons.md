@@ -3,17 +3,17 @@
 Everything in Shepherdr is an add-on made of Herdr mods. [`lib/addons.json`](../lib/addons.json) is the list: each
 add-on's mods, the layout blocks it fills, its keys, helpers, role instructions and what it needs. The installer
 installs all of them (one layout listing gives everything); Shepherdr settings → Window → Add-ons switches the ones
-marked below off and on again, at once and on every machine (Everywhere's `off` in `~/.herdr/shepherdr.json`).
+marked below off and on again, at once and on every machine (Everywhere's `off` in `~/.config/shepherdr/settings.json`).
 
 | Add-on | Switch | What it is | Off means |
 |---|---|---|---|
 | Core | always on | The layout: sidebar (spaces-chat), tab bar (tabs-tasks), pane header (pane-chat), sidebar foot, status bar, toasts, menus and dialogs, Shepherdr settings | — |
-| Tasks | always on in 3.1.26 | The Tasks panel, a task's view (files, changes, pull request), the Accept card, `herdr-task`, worker.md and reviewer.md | — |
-| Assistants | always on in 3.1.26 | An Assistant per space (coordinator, assistant.md), task news. Needs Tasks | — |
-| Chat | always on in 3.1.26 | Agents as a chat, model choice, opened images | — |
-| Questions and permissions | always on in 3.1.26 | Question and permission cards from Claude Code and Codex hooks. Needs Chat | — |
-| Secrets | always on in 3.1.26 | `herdr-secret`, the masked card, Settings → Secrets | — |
-| Keyboard | always on in 3.1.26 | Jump (Ctrl+K), the keys list (Ctrl+Shift+?) | — |
+| Tasks | always on in 3.1.30 | The Tasks panel, a task's view (files, changes, pull request), the Accept card, `herdr-task`, worker.md and reviewer.md | — |
+| Assistants | always on in 3.1.30 | An Assistant per space (coordinator, assistant.md), task news. Needs Tasks | — |
+| Chat | always on in 3.1.30 | Agents as a chat, model choice, opened images | — |
+| Questions and permissions | always on in 3.1.30 | Question and permission cards from Claude Code and Codex hooks. Needs Chat | — |
+| Secrets | always on in 3.1.30 | `herdr-secret`, the masked card, Settings → Secrets | — |
+| Keyboard | always on in 3.1.30 | Jump (Ctrl+K), the keys list (Ctrl+Shift+?) | — |
 | Artifacts | yes | Agents' reports and draft screens beside the chat, `herdr-artifact` | No Artifacts button in the tab bar |
 | Voice and dictation | yes | Calls with Shepherdr (ElevenLabs), dictation (ElevenLabs speech to text, the same key). Needs Chat | No call or mic buttons; their keys do nothing |
 | Reactions | yes | React to a message with an emoji. Needs Chat | No smiley on messages (agents' own reactions still show) |
@@ -29,7 +29,7 @@ Settings says which.
 ## How a switch works
 
 - The window's mods read shared `addons.off` through `lib/addons.js` (`on("voice")`), so a flip shows at once.
-  `tabs-tasks` loads it from `~/.herdr/shepherdr.json` when Herdr starts.
+  `tabs-tasks` loads it from `~/.config/shepherdr/settings.json` when Herdr starts.
 - herdr-task reads Everywhere's `off` (`addon_off()` in `herdr_task/base.py`) for its background work: Autopilot's
   wake-ups, the task browsers, the sync to other machines.
 - An off add-on's keys stay in `keys.json` and do nothing, so turning it back on needs no merge.
@@ -39,4 +39,4 @@ Settings says which.
 ## Later
 
 Splitting the always-on add-ons out of the panels they live in (Chat out of the pane, Tasks out of the side panel)
-comes after 3.1.26, with standalone add-on mods listed on herdr.dev.
+comes after 3.1.30, with standalone add-on mods listed on herdr.dev.

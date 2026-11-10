@@ -7,6 +7,7 @@
 import clsx from 'clsx'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import * as MA from '@core/machine-add.js'
+import { copyText } from '../copy.ts'
 import { act } from '../kernel.ts'
 import { Sheet, SheetClose } from '../Stack.tsx'
 import { CheckCircleIcon, CheckIcon, CopyIcon, FootButton, Ghost, ic, Primary, ServerIcon, Who } from '../ui.tsx'
@@ -23,10 +24,11 @@ const set = (v: boolean) => { open = v; for (const f of listeners) f() }
 
 export function AddMachineButton() {
   return (
+    // too narrow a sidebar for both words beside Settings, just the plus (its name still read out)
     <FootButton onClick={() => set(true)}>
       {/* the window's foot row: a plus, "Add machine" */}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="size-4 shrink-0 text-fg3 coarse:text-fg2 phone:size-5 phone:text-fg2"><path d="M12 5v14M5 12h14" /></svg>
-      Add machine
+      <span className="truncate @max-[14rem]:sr-only phone:@max-[17.5rem]:sr-only">Add machine</span>
     </FootButton>
   )
 }
@@ -93,7 +95,7 @@ function AddMachine() {
       return (
         <div className={clsx('flex items-center gap-2.5 pb-1.5', pad && 'pl-[34px]')}>
           <p className="min-w-0 flex-1 text-[0.75rem] text-fg2 phone:text-[0.8125rem]">{W.manual}</p>
-          <Ghost onClick={() => { void navigator.clipboard?.writeText(MA.command(target)); setCopied(target) }}>
+          <Ghost onClick={(e) => void copyText(MA.command(target), e.currentTarget).then((ok) => ok && setCopied(target))}>
             {copied === target ? <CheckIcon className={ic} /> : <CopyIcon className={ic} />}
             {copied === target ? W.copied : W.copy}
           </Ghost>

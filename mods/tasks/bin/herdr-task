@@ -3,7 +3,7 @@
 
 A task is a name and a prompt that belongs to one folder: the repo root when the folder is in
 git (a linked worktree counts as its main repo), else the folder itself. Each folder's tasks are
-one JSON file on the machine where the folder lives, ~/.herdr/tasks/<slug>.json, never inside a
+one JSON file on the machine where the folder lives, ~/.local/share/shepherdr/tasks/<slug>.json, never inside a
 repo. Every write takes the file's lock and replaces it atomically, so the Tasks panel, agents and
 coordinators never clash.
 
@@ -23,6 +23,12 @@ import sys
 # Its package beside it (or inside it, as a zipapp); no __pycache__ in the mod's folder.
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+
+# Shepherdr's data in its own folders: moved there once, before anything reads a path (herdr_task/layout.py).
+from herdr_task import layout  # noqa: E402
+
+if layout.ensure() == "newer":
+    sys.exit("herdr-task: this machine's Shepherdr data is on a newer layout than this herdr-task knows: update Shepherdr.")
 
 from herdr_task.cli import main  # noqa: E402
 

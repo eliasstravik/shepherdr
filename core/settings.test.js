@@ -48,6 +48,20 @@ test("the model button says what the window's does", () => {
     .toMatchObject({ agent: "codex", model: "gpt-5", effort: null, perm: "full" });
 });
 
+test("switching the worker's agent there and back preserves approval intent (#758)", () => {
+  const { menus, permDefault } = S.choicesFrom({ claude: { model: "opus", per: {} }, codex: { models: [{ id: "gpt-5", label: "GPT-5", efforts: ["low", "high"] }] } });
+  expect(permDefault.claude).toBe("manual");
+  const toCodex = S.chooseModel(menus, permDefault, { agent: "claude", model: "opus", perm: "auto" }, "codex", "gpt-5");
+  expect(toCodex.perm).toBe("approve");
+  expect(S.chooseModel(menus, permDefault, toCodex, "claude", "opus").perm).toBe("auto");
+  // Review stays read-only; saved accept-edits and manual modes must not silently enable automatic review.
+  expect(S.chooseModel(menus, permDefault, { agent: "claude", model: "opus", perm: "plan" }, "codex", "gpt-5").perm).toBe("read-only");
+  expect(S.chooseModel(menus, permDefault, { agent: "codex", model: "gpt-5", perm: "read-only" }, "claude", "opus").perm).toBe("plan");
+  expect(S.chooseModel(menus, permDefault, { agent: "claude", model: "opus", perm: "acceptEdits" }, "codex", "gpt-5").perm).toBe("ask");
+  expect(S.chooseModel(menus, permDefault, { agent: "claude", model: "opus", perm: "manual" }, "codex", "gpt-5").perm).toBe("ask");
+  expect(S.chooseModel(menus, permDefault, { agent: "codex", model: "gpt-5", perm: "full" }, "claude", "opus").perm).toBe("bypassPermissions");
+});
+
 test("Backup's warning, an add-on's line and Web's state, in the window's words", () => {
   const checks = { "": { codex: "ok" }, "vm-ssa": { codex: "signed-out" }, box: { codex: "missing" } };
   expect(S.backupProblem(checks, null, "codex")).toBe("Can't on vm-ssa: Codex is signed out. Can't on box: Codex is not installed.");
@@ -68,11 +82,11 @@ test("Reactions are on by default, in the core, the window's chain and herdr-tas
   expect(S.DEFAULTS.assistant).toBeUndefined();
   // lib/coordinator.js needs the window's runtime: its defaults and its chain, as written
   const lib = read("lib/coordinator.js");
-  expect(lib).toMatch(/SHEPHERDR_DEFAULTS = \{[^;]*agents: \{ reactions: true, feedback: true, feedback_repo: "" \}/);
+  expect(lib).toMatch(/SHEPHERDR_DEFAULTS = \{[^;]*agents: \{ reactions: true, suggestions: true, feedback: true, feedback_repo: "" \}/);
   expect(lib).toContain('for (const k of ["tasks", "automations", "agents", "holycow"])');
   // SHEP-42's key still counts in the window's chain where a layer has no agents'
   expect(lib).toContain('typeof l.obj.assistant?.reactions === "boolean" ? { reactions: l.obj.assistant.reactions, ...l.obj.agents }');
-  expect(read("mods/tasks/bin/herdr_task/settings.py")).toContain('"agents": {"reactions": True, "feedback": True, "feedback_repo": "NeuralHerd/BossGoat"}');
+  expect(read("mods/tasks/bin/herdr_task/settings.py")).toContain('"agents": {"reactions": True, "suggestions": True, "feedback": True, "feedback_repo": "NeuralHerd/BossGoat"}');
   expect(S.REACTIONS.title).toBe("Reactions");
 });
 

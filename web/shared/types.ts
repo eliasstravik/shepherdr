@@ -397,6 +397,8 @@ export interface Choice {
   description?: string
   /** the agent marked it (Recommended) */
   recommended?: boolean
+  /** what the agent drew to compare the options (a mockup, code), shown as its prompt shows it (SHEP-139) */
+  preview?: string
 }
 
 export interface Question {
@@ -541,6 +543,8 @@ export interface Reaction {
 export interface Message {
   id: string
   who: 'you' | 'agent'
+  /** the agent's suggested next message (its reply's last line): greyed out in the box until something is typed (SHEP-186) */
+  suggest?: string
   /** a live row: when it last changed; at keeps its place in the chat */
   updated?: number
   /** plain text (yours) or markdown (the agent's) */
@@ -558,8 +562,9 @@ export interface Message {
   /** why it waits: a menu is up (typed text could pick an option), the agent is starting, a CLI command waits for the
    *  turn to end, it is in the CLI's own queue until its next step, or nothing here: its machine is out of reach */
   waitsFor?: 'menu' | 'start' | 'turn' | 'queue'
-  /** an attached file: each one is a message of its own, right after the text it came with */
-  file?: { name: string; path: string }
+  /** an attached file: each one is a message of its own, right after the text it came with; an agent's picture or
+   *  video named in its words (core/chat-view.js mediaIn) comes the same way, with its Markdown words as alt */
+  file?: { name: string; path: string; alt?: string }
   /** the id the screen gave what you sent: it showed it at once, and this message takes its place */
   cid?: string
   /** what it answers: a short quote of that message, and its id while the chat still has it (a tap jumps to it) */

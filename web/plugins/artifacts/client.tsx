@@ -4,8 +4,11 @@
 // Shown in the side panel, it fills a place's Artifacts list (or a task's Artifacts tab) beside the chat.
 import clsx from 'clsx'
 import { Recipe, UNREADABLE } from '@client/screens/Recipe.tsx'
+import { enterHint, sendsNow } from '@client/enter.ts'
 import * as R from '@core/recipe.js'
 import * as M from '@core/markup.js'
+import * as CV from '@core/chat-view.js'
+import { Markdown } from '@plugins/chat/markdown.tsx'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import {
   act,
@@ -33,6 +36,7 @@ import { isDark, useDark } from '@client/theme.ts'
 import {
   BackIcon,
   CheckIcon,
+  DownIcon,
   NextIcon,
   dimmed,
   FilterBox,
@@ -52,7 +56,8 @@ import {
 import type { Artifact, ArtifactVersion, Chat, Message, Task } from '@shared/types.ts'
 import { titleInTask } from '@core/task-artifacts.js'
 
-const { withIds } = R as any
+const { withIds, preview } = R as any
+const { WORDS, artifactLine } = CV as any
 const { MARKUP, markupHint, markupSent, describe } = M as any
 
 export type Pick = { text: string; selector: string; component?: string; x: number; y: number }
@@ -190,6 +195,7 @@ function MarkupLayer({ art, v, onEnd }: { art: Artifact; v: number; onEnd: () =>
           <div className="flex items-center gap-1.5">
             <TextBox
               label="Note"
+              enterKeyHint={enterHint()}
               value={text}
               onChange={(t) => {
                 setText(t)
@@ -199,7 +205,7 @@ function MarkupLayer({ art, v, onEnd }: { art: Artifact; v: number; onEnd: () =>
                 }
               }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey && device !== 'phone') {
+                if (sendsNow(e, getState().ui.keyboard)) {
                   e.preventDefault()
                   void send()
                 }
@@ -512,6 +518,8 @@ function PageFrame({
       ref={ref}
       title={art.title}
       sandbox="allow-scripts allow-forms"
+      // a Copy button in the page may write to the clipboard (SHEP-152); nothing else of the app's is lent to it
+      allow="clipboard-write"
       loading={full ? undefined : 'lazy'}
       src={frameUrl(art.id, loaded, !!full, device, '', opened)}
       onLoad={() => {
@@ -553,19 +561,106 @@ function ArtifactCard({ msg, chat }: { msg: Message; chat: Chat; from: string })
         <span className="min-w-0 truncate">Published {art.title} v{post.v}</span>
       </button>
     )
-  // its latest publish: the window's card, its title, "Artifact · v3" (its latest version) and Open
+  // its latest publish: the window's card, its title, "Artifact · v3" (its latest version) and Open, over what is in it
+  return <PreviewCard art={art} gap={gap || undefined} />
+}
+
+/** what an artifact's card shows of it (core/recipe.js preview: its key pictures, its first words), by artifact and
+ *  version: read once, kept while the chat scrolls. { pics: their addresses, lines } */
+type Peek = { pics: string[]; lines: string[] }
+const peeks = new Map<string, { images: string[]; lines: string[] } | 'none'>()
+function usePeek(art: Artifact): Peek | null {
+  const kind = art.versions.find((x) => x.n === art.v)?.kind ?? art.kind
+  const key = `${art.machine ?? ''}:${art.id}:${art.v}`
+  const on = art.machine ? `&on=${encodeURIComponent(art.machine)}` : ''
+  const base = `api/artifacts/${encodeURIComponent(art.id)}`
+  const [, redraw] = useState(0)
+  useEffect(() => {
+    if (kind !== 'recipe' || peeks.has(key)) return
+    let gone = false
+    fetch(`${base}/recipe?v=${art.v}${on}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('gone'))))
+      .then((r) => peeks.set(key, preview(r)), () => peeks.set(key, 'none'))
+      .finally(() => !gone && redraw((n) => n + 1))
+    return () => { gone = true }
+  }, [key, kind, base, on, art.v])
+  if (kind === 'gpui') {
+    // a custom panel: the picture the window last took of it (newest first)
+    const pic = art.versions.find((x) => x.n <= art.v && (x.kind ?? art.kind) === 'gpui' && !!x.picture)
+    return pic ? { pics: [`${base}/file/.window.png?v=${pic.n}&t=${pic.picture}${on}`], lines: [] } : null
+  }
+  const p = peeks.get(key)
+  if (!p || p === 'none') return null
+  return { pics: p.images.map((src) => `${base}/file/${src.split('/').map(encodeURIComponent).join('/')}?v=${art.v}${on}`), lines: p.lines }
+}
+
+/** the cards that are open in place, by artifact (it stays open as new versions come) */
+const opened = new Set<string>()
+
+/** An artifact's latest card in the chat: its title, "Artifact · v3" and Open, then its key pictures and first lines;
+ *  Show more opens all of it right here, in the chat, and Open takes it full screen. A new version redraws it in place. */
+function PreviewCard({ art, gap }: { art: Artifact; gap?: string }) {
+  const peek = usePeek(art)
+  const [open, setOpen] = useState(() => opened.has(art.id))
+  const toggle = (on: boolean) => { if (on) opened.add(art.id); else opened.delete(art.id); setOpen(on) }
+  const pics = peek?.pics ?? []
+  const lines = peek?.lines ?? []
+  const kind = art.versions.find((x) => x.n === art.v)?.kind ?? art.kind
   return (
-    <button type="button" data-card onClick={(e) => (splitClick(e) ? openSplit({ kind: 'artifact', id: art.id }) : openArtifact(art.id))}
-      className={clsx(gap, 'press flex w-full max-w-[420px] items-center gap-2.5 rounded-box bg-bubble px-2.5 py-2 text-left shadow-[inset_0_0_0_1px_var(--line2)] hover:bg-hover')}>
-      <span className="grid size-8 shrink-0 place-items-center rounded-row bg-bg text-fg2 phone:size-10">
-        <PageIcon className={ic} />
-      </span>
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate font-medium">{art.title}</span>
-        <span className="text-[0.75rem] text-fg3 tabular-nums phone:text-[0.8125rem]">Artifact · v{art.v}</span>
-      </span>
-      <span className="grid h-7 shrink-0 place-items-center rounded-row bg-bg px-2.5 text-[0.8125rem] font-medium shadow-[inset_0_0_0_1px_var(--line2)] phone:h-9">Open</span>
-    </button>
+    <div data-card className={clsx(gap, 'flex w-full flex-col overflow-hidden rounded-box bg-bubble shadow-[inset_0_0_0_1px_var(--line2)]', open ? 'max-w-[720px]' : 'max-w-[480px]')}>
+      <div className="flex items-center gap-2.5 px-2.5 py-2">
+        <button type="button" onClick={() => toggle(!open)} aria-expanded={open} aria-label={`${open ? WORDS.showLess : WORDS.showMore}: ${art.title}`}
+          className="press-dim flex min-w-0 flex-1 items-center gap-2.5 rounded-row text-left">
+          <span className="grid size-8 shrink-0 place-items-center rounded-row bg-bg text-fg2 phone:size-10">
+            <PageIcon className={ic} />
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate font-medium">{art.title}</span>
+            <span className="text-[0.75rem] text-fg3 tabular-nums phone:text-[0.8125rem]">{artifactLine(art.v)}</span>
+          </span>
+        </button>
+        <button type="button" onClick={(e) => (splitClick(e) ? openSplit({ kind: 'artifact', id: art.id }) : openArtifact(art.id))}
+          className="press grid h-7 shrink-0 place-items-center rounded-row bg-bg px-2.5 text-[0.8125rem] font-medium shadow-[inset_0_0_0_1px_var(--line2)] hover:bg-hover phone:h-9">
+          Open
+        </button>
+      </div>
+      {open ? (
+        <div className="border-t border-line">
+          <ArtifactFrame art={art} v={art.v} />
+        </div>
+      ) : (
+        <>
+          {pics.length ? (
+            <button type="button" onClick={() => toggle(true)} aria-label={`${WORDS.showMore}: ${art.title}`}
+              className={clsx('grid gap-1.5 px-2.5', pics.length === 1 ? 'grid-cols-1' : pics.length === 2 ? 'grid-cols-2' : 'grid-cols-3')}>
+              {pics.map((src) => (
+                <img key={src} src={src} alt="" loading="lazy" decoding="async" draggable={false}
+                  className={clsx('w-full rounded-[8px] bg-bg object-cover object-top outline-1 -outline-offset-1 outline-fg/10', pics.length === 1 ? 'max-h-[240px]' : 'aspect-[4/3]')} />
+              ))}
+            </button>
+          ) : null}
+          {lines.length ? (
+            <div className="line-clamp-3 px-3 pt-2 text-[0.875rem]/5 text-fg2 phone:text-[0.9375rem]/6 [&_p]:inline">
+              <Markdown text={lines.join(' · ')} />
+            </div>
+          ) : null}
+          {pics.length || lines.length || kind !== 'recipe' ? (
+            <button type="button" onClick={() => toggle(true)}
+              className="press-dim flex items-center gap-1 self-start rounded-row px-3 pt-1.5 pb-2.5 text-[0.8125rem] font-medium text-fg2 hover:text-fg phone:min-h-11 phone:text-[0.875rem]">
+              {WORDS.showMore}
+              <DownIcon className="size-3.5" />
+            </button>
+          ) : null}
+        </>
+      )}
+      {open ? (
+        <button type="button" onClick={() => toggle(false)}
+          className="press-dim flex items-center gap-1 self-start rounded-row px-3 py-2 text-[0.8125rem] font-medium text-fg2 hover:text-fg phone:min-h-11 phone:text-[0.875rem]">
+          {WORDS.showLess}
+          <UpIcon className="size-3.5" />
+        </button>
+      ) : null}
+    </div>
   )
 }
 
@@ -776,7 +871,7 @@ export default definePlugin({
   name: 'artifacts',
   setup(reg) {
     // a task's own: the last of its tabs, always there (its place never moves), counted once it has some
-    reg.taskPanel.push({ id: 'artifacts', order: 60, label: 'Artifacts', Icon: PageIcon, count: (t) => t.artifacts?.length ?? 0, View: TaskArtifacts })
+    reg.taskPanel.push({ id: 'artifacts', order: 30, label: 'Artifacts', Icon: PageIcon, count: (t) => t.artifacts?.length ?? 0, View: TaskArtifacts })
     reg.views.artifacts = ArtifactList
     reg.views.artifact = SplitArtifact
     reg.messageParts.push({ order: 50, View: ArtifactCard })

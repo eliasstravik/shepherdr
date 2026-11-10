@@ -233,6 +233,7 @@ def main():
     c = cmd("reviewed", cmd_reviewed, "a task's agent records one review round of its current commit (Review: on): ready then "
                                       "accepts that commit; uses one of its Review rounds")
     c.add_argument("--report", help="the round's findings in a line (levels, what was fixed)")
+    c.add_argument("--commit", help="the commit the round reviewed, when fixes were committed since (default: HEAD)")
     cmd("review-more", cmd_review_more, "the Assistant gives a task one more review round, once all are used (never its own agent)")
     c = cmd("status", cmd_status, "a task's agent says what it's doing now, at the start and each natural step: status 4 \"Fixing the two failing tests\" --done 40 --left 5m")
     c.add_argument("text", help=f"what it is doing, at most {LINE_MAX} characters (longer is cut at a word)")
@@ -322,6 +323,9 @@ def main():
             c.add_argument("--agent")
             c.add_argument("--space", help="the space its tasks start in (default: yours)")
             c.add_argument("--parent", help="its tasks' agents' parent (default: you)")
+            c.add_argument("--set", action="append", metavar="KEY=VALUE",
+                           help="a setting for each task it adds, as add --set: review=on|off, review.rounds=1..10, proof=on|off, "
+                                "merge=..., ... (\"\": Settings' again)")
             g = c.add_mutually_exclusive_group()
             g.add_argument("--here", action="store_true")
             g.add_argument("--worktree", action="store_true")
@@ -452,6 +456,7 @@ def main():
     c.add_argument("--keep", action="store_true", help="add the agent beside the old one")
     c = sub.add_parser("_allow")  # Codex's PermissionRequest hook (own_argv)
     c.add_argument("--command", required=True)
+    c.add_argument("--sandboxed", action="store_true")  # Codex's: its proof and commits run escalated (#866)
     c.set_defaults(fn=cmd_allow, json=False)
     c = sub.add_parser("_session-note")  # the chat's SessionStart hook (mods/chat/session-note.sh): an Assistant's extra words
     c.add_argument("terminal")

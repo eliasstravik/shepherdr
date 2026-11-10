@@ -83,6 +83,8 @@ export const notSent = (why) => `Not sent: ${String(why ?? "").replace(/\.$/, ""
 // An earlier publish of an artifact, as one quiet line; the latest one's card.
 export const published = (title, v) => `Published ${title} v${v}`;
 export const artifactLine = (v) => `Artifact · v${v}`;
+// a video an agent showed, in the window (which can't play one): a line that opens it in the system's player
+export const videoLine = (name) => `${name} · Video`;
 // m:ss, for the working line, a recording and a call.
 export const elapsed = (secs) => `${Math.floor(Math.max(0, secs) / 60)}:${String(Math.floor(Math.max(0, secs)) % 60).padStart(2, "0")}`;
 
@@ -294,6 +296,8 @@ export function newsTimeline(items, tasks, { start = null } = {}) {
   const first = items.find((x) => x.at)?.at ?? 0;
   for (const [ref, x] of tasks) for (const [event, at] of [["started", x.started], ["ready", x.ready_at], ["done", x.done_at]]) {
     if (!Number.isFinite(at) || said.has(`${ref}:${event}`) || (at < first && start !== 0)) continue;
+    // A ready not yet said, while the task is still at work (its checks running, SHEP-175) or needs the person: not ready yet.
+    if (event === "ready" && !["ready", "done"].includes(x.status)) continue;
     all.push({ id: `tn:${ref}:${event}:${at}`, at, ref, event, text: "", made: true });
   }
   all.sort((a, b) => a.at - b.at);
@@ -423,4 +427,64 @@ export function subagentsOf(terms, addr, now = Date.now()) {
     out.push({ ...s, title: subagentTitle(s) });
   }
   return out.sort((a, b) => a.at - b.at);
+}
+
+// Media an agent puts in its message (SHEP-142): a Markdown picture ![alt](path) or a link [words](path) to a local
+// image or video file (an absolute path, ~/…, file://… or one relative to its folder). The chat shows each one right
+// there, under the words (pictures as thumbnails, a video with a player), and keeps the rest of the words as they are:
+// a picture leaves the words, a link leaves its own words. Code (fenced or `inline`) is never read for media, and a web
+// address stays a link. { text, media: [{ path, name, alt, kind: "image" | "video" }] }, each path once, at most 12.
+export const MEDIA_IMAGE = /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i;
+export const MEDIA_VIDEO = /\.(mp4|m4v|webm|mov|ogv)$/i;
+export const mediaKind = (name) => (MEDIA_IMAGE.test(String(name ?? "")) ? "image" : MEDIA_VIDEO.test(String(name ?? "")) ? "video" : null);
+const MEDIA_MAX = 12;
+export function mediaIn(text, { cwd = null, home = null } = {}) {
+  const src = String(text ?? "");
+  if (!src.includes("](")) return { text: src, media: [] };
+  const media = [];
+  const where = (raw) => {
+    let p = raw.trim().replace(/^<(.*)>$/, "$1");
+    if (/^file:\/\//i.test(p)) { try { p = decodeURIComponent(p.slice(7)); } catch { return null; } }
+    else if (/^[a-z][\w+.-]*:/i.test(p) || p.startsWith("#") || p.startsWith("//")) return null;
+    p = p.replace(/[?#].*$/, "");
+    if (!p || !mediaKind(p)) return null;
+    if (p.startsWith("~/")) p = home ? `${home.replace(/\/$/, "")}/${p.slice(2)}` : p;
+    else if (!p.startsWith("/")) { if (!cwd) return null; p = `${cwd.replace(/\/$/, "")}/${p.replace(/^\.\//, "")}`; }
+    // no way up and out of where it names
+    if (p.split("/").includes("..")) return null;
+    return p;
+  };
+  // where each picture was: a mark in its place, read again below (\u0000 never comes in a message)
+  const take = (path, alt) => {
+    let i = media.findIndex((m) => m.path === path);
+    if (i < 0 && media.length < MEDIA_MAX) i = media.push({ path, name: path.split("/").pop(), alt: alt.trim(), kind: mediaKind(path) }) - 1;
+    return i;
+  };
+  // the words outside code: fenced blocks and inline code stay as written
+  const parts = src.split(/(^ {0,3}(?:```|~~~)[^\n]*\n[\s\S]*?(?:\n {0,3}(?:```|~~~)[^\n]*(?:\n|$)|$))/m);
+  const out = parts.map((part, i) => {
+    if (i % 2) return part;
+    return part.split(/(`+[^`]*`+)/).map((bit, j) => {
+      if (j % 2) return bit;
+      return bit.replace(/(!?)\[([^\]\n]*)\]\(\s*(<[^>\n]+>|[^\s()]+(?:\([^\s()]*\)[^\s()]*)*)(?:\s+"[^"\n]*")?\s*\)/g, (whole, bang, words, target) => {
+        const path = where(target);
+        if (!path) return whole;
+        const i = take(path, words);
+        return bang ? (i >= 0 ? `\u0000${i}\u0000` : "") : words;
+      });
+    }).join("");
+  }).join("");
+  if (!media.length) return { text: src, media };
+  // a line with one picture and a short label ("Before:", "**After**") gives the picture its caption and goes; the lines
+  // a picture leaves empty go, and the gaps they leave close
+  const lines = out.split("\n").flatMap((l) => {
+    const marks = [...l.matchAll(/\u0000(\d+)\u0000/g)];
+    if (!marks.length) return [l.replace(/[ \t]+$/, "")];
+    const rest = l.replace(/\u0000\d+\u0000/g, "").replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "").trim();
+    const label = rest.replace(/^[*_]+|[*_]+$/g, "").replace(/:$/, "").replace(/^[*_]+|[*_]+$/g, "").trim();
+    if (marks.length === 1 && label && rest.length <= 40 && (/:[*_]*$/.test(rest) || /^[*_]/.test(rest))) { media[Number(marks[0][1])].alt = label; return []; }
+    return rest ? [l.replace(/\u0000\d+\u0000[ \t]*/g, "").replace(/[ \t]+$/, "")] : [];
+  });
+  const words = lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return { text: words, media };
 }

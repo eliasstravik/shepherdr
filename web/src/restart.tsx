@@ -353,8 +353,9 @@ export function ModelList({ menus, agent, picks, chosen, disabled, phone, onPick
 /** The model menu, for any number of agents with any number of models each: a tab per installed agent (only when more
  *  than one), a search over every agent's models (type anywhere in the menu), the agent's pinned and recent models
  *  on top (core/agents.js modelSections), a star to pin one; then Reasoning (that model's levels), Fast (where the
- *  model has it), Permissions (a small sub-menu), and, only when a choice differs from what runs now, one Restart
- *  button that says when it starts a new conversation (another agent). Popover on a desktop, a sheet on a phone. */
+ *  model has it), Permissions (a small sub-menu), and, only when a choice differs from what runs now, one button:
+ *  Switch (the model, level or Fast change in place, SHEP-181), or Restart for another agent (said to start a new
+ *  conversation) or permission mode. Popover on a desktop, a sheet on a phone. */
 function ModelMenu({ chat, typed, permissions = false }: { chat: string; typed?: string; permissions?: boolean }) {
   const [data, setData] = useState<MenuData | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -403,9 +404,9 @@ function ModelMenu({ chat, typed, permissions = false }: { chat: string; typed?:
     if (!sel) return
     setBusy(true)
     setError(null)
-    const r = await (permissions ? restartPermission(act, chat, sel.agent, sel.perm) : act({ type: 'restart', chat, kind: sel.agent, model: sel.model ?? '', effort: level(sel) ?? '', speed: sel.fast ? 'fast' : 'normal', perm: sel.perm ?? '' } as never)).catch((e: Error) => ({ ok: false, error: e.message }))
+    const r = await (permissions ? restartPermission(act, chat, sel.agent, sel.perm) : act({ type: 'restart', live: true, chat, kind: sel.agent, model: sel.model ?? '', effort: level(sel) ?? '', speed: sel.fast ? 'fast' : 'normal', perm: sel.perm ?? '' } as never)).catch((e: Error) => ({ ok: false, error: e.message }))
     setBusy(false)
-    if ((r as { ok?: boolean }).ok === false) return setError((r as { error?: string }).error || "The agent didn't restart.")
+    if ((r as { ok?: boolean }).ok === false) return setError((r as { error?: string }).error || (restarts ? "The agent didn't restart." : "It didn't switch."))
     close()
   }
   const pick = (row: MenuModel & { agent: string; typed?: boolean }) => {
@@ -428,6 +429,8 @@ function ModelMenu({ chat, typed, permissions = false }: { chat: string; typed?:
   const on = sel ? level(sel) : null
   const perm = sel ? menu?.perms?.find((x) => x.id === sel.perm) : undefined
   const ch = changes()
+  // only another agent or permission mode needs a restart: the rest changes in place, the conversation going on
+  const restarts = !!data && !!sel && (sel.agent !== data.current.agent || (!!sel.perm && sel.perm !== data.current.perm))
   const row = 'flex min-h-[31px] w-full items-center gap-2.5 rounded-[7px] px-[9px] text-left enabled:hover:bg-hover focus-visible:bg-hover focus-visible:outline-none disabled:text-fg3 coarse:min-h-11 phone:min-h-11'
   const head = (t: string) => <div className="px-[9px] pt-2 pb-1 text-[0.6875rem] text-fg3 coarse:text-[0.8125rem] phone:text-[0.8125rem]">{t}</div>
   const sheet = (
@@ -513,6 +516,12 @@ function ModelMenu({ chat, typed, permissions = false }: { chat: string; typed?:
                       {data.menus[sel.agent]?.name} starts a new conversation. This one stays in {data.menus[data.current.agent]?.name ?? 'its old agent'}’s history.
                     </p>
                   ) : null}
+                  {/* a permission mode is set when the agent starts: said before the press too */}
+                  {restarts && sel.agent === data.current.agent ? (
+                    <p className="px-[9px] text-pretty text-[0.71875rem] text-fg3 coarse:text-[0.8125rem] phone:text-[0.8125rem]">
+                      A new permission mode restarts the agent. The conversation carries on.
+                    </p>
+                  ) : null}
                   {/* another machine out of reach: said when a change is chosen, the button still tries */}
                   {offline && !error ? (
                     <p className="px-[9px] text-pretty text-[0.71875rem] text-need-fg coarse:text-[0.8125rem] phone:text-[0.8125rem]">
@@ -520,7 +529,7 @@ function ModelMenu({ chat, typed, permissions = false }: { chat: string; typed?:
                     </p>
                   ) : null}
                   <button type="button" disabled={busy} onClick={() => void restart()} className="press-dim min-h-7 w-full rounded-[7px] bg-fg px-2.5 py-1 text-balance text-[0.78125rem] font-medium text-bg disabled:opacity-60 coarse:min-h-11 phone:min-h-11 coarse:text-[0.9375rem] phone:text-[0.9375rem]">
-                    {busy ? 'Restarting…' : `Restart with ${ch.join(' · ')}`}
+                    {busy ? (restarts ? 'Restarting…' : 'Switching…') : `${restarts ? 'Restart with' : 'Switch to'} ${ch.join(' · ')}`}
                   </button>
                 </div>
               ) : null}

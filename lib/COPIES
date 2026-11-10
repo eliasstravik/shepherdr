@@ -14,7 +14,7 @@ core/needs.js: chat jump spaces-chat tabs-tasks tasks workspace-status-chat toas
 core/tasks.js: chat jump tasks
 core/notify.js: chat spaces-chat tabs-tasks tasks shepherdr-settings workspace-status-chat
 parked.js: chat spaces-chat tabs-tasks workspace-status-chat
-keyholder.js: chat tasks
+keyholder.js: chat tasks newspace
 unread.js: chat spaces-chat
 agent.js: chat newspace shepherdr-settings
 settings.js: chat newspace shepherdr-settings
@@ -25,14 +25,14 @@ core/chat-view.js: chat
 core/screens.js: chat
 core/send.js: chat
 core/person.js: chat shepherdr-settings tabs-tasks
-core/spaces.js: chat spaces-chat shepherdr-settings jump pane-chat
+core/spaces.js: chat spaces-chat shepherdr-settings jump pane-chat tasks newspace coordinator menu-tasks new-menu-tasks tabs-tasks workspace-status-chat
 core/sidebar-icons.js: spaces-chat
 core/autopilot.js: pane-chat shepherdr-settings
 core/chat-reader.js: chat
 core/clean-env.js: chat
 core/assistant-context.js: chat
-core/worktree.js: task-changes task-pr
-core/recipe.js: artifacts
+core/worktree.js: task-pr
+core/recipe.js: artifacts chat
 core/task-artifacts.js: chat task-artifacts
 core/newspace.js: newspace
 core/machine-add.js: machine-add-chat
@@ -44,7 +44,7 @@ core/agents.js: chat chat-models newspace shepherdr-settings coordinator
 core/settings.js: chat newspace shepherdr-settings coordinator
 core/host.js: chat newspace shepherdr-settings coordinator
 core/secrets.js: chat shepherdr-settings tabs-tasks
-taskwhere.js: task-files task-changes task-pr task-browser
+taskwhere.js: task-pr task-browser
 emoji-data.js: chat-react spaces-chat
 notify.js: chat spaces-chat tabs-tasks tasks shepherdr-settings workspace-status-chat
 spacelog.js: coordinator menu-tasks new-menu-tasks newspace shepherdr-settings tabs-tasks tasks spaces-chat
@@ -53,10 +53,10 @@ service.js: chat shepherdr-settings tabs-tasks
 bridge.js: tabs-tasks
 local.js: chat shepherdr-settings tabs-tasks
 machines.js: spaces-chat shepherdr-settings
-ui.js: accept-card artifacts chat chat-call chat-image chat-models chat-react coordinator jump toasts menu-tasks new-menu-tasks newspace pane-chat shepherdr-settings spaces-chat tabs-tasks task-browser task-changes task-files task-pr tasks tasks-menu workspace-chrome-shepherdr workspace-status-chat confirm-chat prompt-chat machine-add-chat keybinds task-artifacts
+ui.js: accept-card artifacts chat chat-call chat-image chat-models chat-react coordinator jump toasts menu-tasks new-menu-tasks newspace pane-chat shepherdr-settings spaces-chat tabs-tasks task-browser task-pr tasks tasks-menu workspace-chrome-shepherdr workspace-status-chat confirm-chat prompt-chat machine-add-chat keybinds task-artifacts
 artview.js: accept-card artifacts chat chat-image jump task-artifacts
 artifact-sidebar.js: chat-image jump
-addons.js: chat pane-chat shepherdr-settings tabs-tasks artifacts jump accept-card toasts spaces-chat
+addons.js: chat pane-chat shepherdr-settings tabs-tasks artifacts jump accept-card toasts spaces-chat workspace-chrome-shepherdr
 live.js: chat coordinator jump menu-tasks new-menu-tasks newspace pane-chat shepherdr-settings spaces-chat tabs-tasks tasks workspace-status-chat
 core/bg-jobs.js: chat
 core/audio.js: chat
@@ -64,3 +64,5 @@ core/wallpaper.js: chat shepherdr-settings workspace-chrome-shepherdr
 wallpaper.js: chat shepherdr-settings
 usage.js: tabs-tasks chat shepherdr-settings artifacts jump accept-card toasts
 core/usage.js: tabs-tasks chat shepherdr-settings artifacts jump accept-card toasts
+dirs.js: accept-card artifacts chat chat-models coordinator jump menu-tasks new-menu-tasks newspace pane-chat shepherdr-settings spaces-chat tabs-tasks task-browser tasks toasts workspace-status-chat
+core/paths.js: accept-card artifacts chat chat-models coordinator jump menu-tasks new-menu-tasks newspace pane-chat shepherdr-settings spaces-chat tabs-tasks task-browser tasks toasts workspace-status-chat

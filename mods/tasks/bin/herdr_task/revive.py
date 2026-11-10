@@ -226,7 +226,7 @@ def task_record(k, t):
     if not kind:
         return None
     if (k.get("labels") or {}).get("herdr.role") != "reviewer":
-        argv = own_argv(argv)
+        argv = own_argv(argv, k.get("cwd"))
     return {"kind": kind, "session": a.get("session"), "log": a.get("log"), "argv": argv, "cwd": k.get("cwd"),
             "pid": None, "working": t.get("state") == "running", "shell": True}
 

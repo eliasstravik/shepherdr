@@ -14,7 +14,7 @@ import { existsSync, readdirSync, utimesSync, writeFileSync, mkdirSync } from "n
 import { join } from "node:path";
 import type { Hub } from "./hub.ts";
 import type { Host } from "./host.ts";
-import { HOME, appHome, writable } from "./paths.ts";
+import { HOME, appHome, where, writable } from "./paths.ts";
 
 const asksDir = () => join(appHome(), "data", "chat-asks", "open");
 
@@ -86,7 +86,7 @@ export class Jobs {
       if (ensure) await run([cli, "scheduler", "--ensure", "--json"]);
       let remote: string[] = [];
       if (this.host) remote = this.host.tickOn();
-      else try { remote = readdirSync(join(HOME, ".herdr", "tasks", ".remote")).filter((x) => /^[\w.-]+$/.test(x) && !x.endsWith(".secret")); } catch {}
+      else try { remote = readdirSync(join(where().tasks, ".remote")).filter((x) => /^[\w.-]+$/.test(x) && !x.endsWith(".secret")); } catch {}
       // and those running an Assistant with no tasks yet: their tick brings it back after a crash (herdr-task revive.py)
       if (!this.host || this.host.serving() || !this.host.reachable()) {
         const own = this.host?.participants() ?? new Set<string>();

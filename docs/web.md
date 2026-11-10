@@ -10,6 +10,14 @@ on a phone, a tablet or another computer's browser, on the same data. Its look i
 never the open internet); or the always-on machine you serve it from (below). Shepherdr settings → Web shows the link and a QR code for your phone. It needs Tailscale
 running here; without it the service still runs, with no web app.
 
+Another HTTPS port: when something else on this machine already holds the tailnet's 443 (a reverse proxy, a container
+publishing 443, a `tailscale serve --tcp 443` forward), `shepherdr web https-port 8443` moves it to
+`https://<this machine's tailnet name>:8443/shepherdr/` within seconds, and every link Shepherdr gives follows
+(`./install.sh --https-port 8443` sets it at install; updates keep it; `shepherdr web https-port 443` goes back, and
+`shepherdr web https-port` alone says the one now). When sharing fails, Settings → Web and `shepherdr doctor` say
+tailscale's own reason, and name a free port when the one asked for is taken. A port is this machine's own: Serve from
+another machine uses that machine's.
+
 Who gets in: only the tailnet login that owns this machine (Tailscale's own identity header, checked against the
 connection it came on). A page from anywhere else can't change anything: writes need the app's own origin.
 
@@ -18,7 +26,7 @@ connection it came on). A page from anywhere else can't change anything: writes 
 - One always-on service, `~/.local/share/shepherdr/service/main.ts` on Bun, kept running by `systemctl --user`
   (`shepherdr.service`) or launchd (`dev.shepherdr.service`). It listens on `127.0.0.1:7788` only
   (another port: `./install.sh --port <n>`, kept for updates). Once the port is its own, it writes the port and a fresh
-  id into `~/.herdr/shepherdr/service.json`; the window (`lib/local.js`), the CLI and a voice call read the port there
+  id into `~/.local/state/shepherdr/service/service.json`; the window (`lib/local.js`), the CLI and a voice call read the port there
   and send the token or the shared state only when `/api/health` answers that id, never to another app on the port.
 - It reads what the window reads, through herdr-core (`hc`): the spaces, Assistants, chats and task lists of every
   connected machine, and herdr-task's files. Shared choices (pins, sidebar sections, Notify, the Window switches)
@@ -37,7 +45,11 @@ connection it came on). A page from anywhere else can't change anything: writes 
 - The task browser: Kitty in the window, a live view of the same browser on the web.
 - Voice calls and dictation: the machine's microphone in the window, the phone's on the web, through the service
   (the same ElevenLabs voice agent, `core/voice.js`; ElevenLabs speech to text, Scribe, for dictation, with the
-  same key). Dictation writes the words while you speak (realtime Scribe: the page with a single-use token from
+  same key). You can talk over the agent to interrupt it: the browser cancels its echo on the web, and on a Mac
+  the window's call runs the mic and speaker in one helper with Apple's echo cancellation (`herdr-audio call`,
+  `mods/chat/mac-audio.swift`; other apps' sound dips slightly meanwhile). Where that can't run (Linux, no voice
+  processing, the helper failing), the call goes on with the mic hushed while the agent speaks (`mods/chat/audio.ts`
+  callAudio). Dictation writes the words while you speak (realtime Scribe: the page with a single-use token from
   `/api/dictate/live`, the window's `record.ts` with the key in memory), so Done lands them in about 0.2 s; the
   recording is uploaded to `/api/dictate` only when the live words can't come. The voice agent has four Shepherdr tools (`core/voice.js` TOOLS), answered by the service with the web app's
   reach (`service/voice-tools.ts`): `look` reads anything (the call's context, any chat or a search in it, spaces,
@@ -71,13 +83,13 @@ connection it came on). A page from anywhere else can't change anything: writes 
   act first. `open` also shows the shown space's Artifacts, Files and Changes panels and its Assistant's terminal (a
   space named: that space first, then its panel), Tasks filtered by a state and words, and a Settings page by its
   spoken name.
-  SHEP-105: a call is with Shepherdr itself, not one chat. It starts from "Talk to Shepherdr" at the top of the
-  sidebar (the call card while on: what it is doing, its clock, the last thing it said, Mute, End), or a phone's voice
-  button at the end of the bottom bar (a green Mute and End strip above the bar). A chat's box has no call button
-  (SHEP-108): its round button is always Send, grey until there is something to send; where neither card nor bar shows, the strip sits at the top.
+  SHEP-105: a call is with Shepherdr itself, not one chat. It starts from the voice button beside Search in the
+  sidebar's brand row (SHEP-135; on a call it turns into Mute and End in one outlined capsule, no card under it), or a
+  phone's voice button at the end of the bottom bar (on a call Full screen, Mute and End in the same capsule). A chat's box has no call button
+  (SHEP-108): its round button is always Send, grey until there is something to send; where neither brand row nor bar shows, the strip sits at the top.
   SHEP-118: a web call opens full screen (always dark: Shepherdr, its clock, an orb that breathes while it listens,
   swells with whoever speaks, swirls while it thinks or works and greys while muted; only Minimize, Mute and End).
-  Minimized, the card, bar and strip show Full screen where Mute was: Mute is the full-screen view's only. Whatever
+  Minimized, the bar and strip show Full screen, Mute and End; the brand row Mute and End (SHEP-135). Whatever
   the voice opens or does on the page minimizes it, and its screen tool never reads it (`[data-call-screen]`). SHEP-124:
   the agent's own `call_view` tool (full or minimized, a `{ kind: "call" }` nav) sets the view, never screen clicks; an
   action that itself made the call full screen isn't minimized again (`stepsAside`). `/api/voice` takes
@@ -114,7 +126,7 @@ Settings → Web shows the new link and its QR code everywhere. It needs Python 
 ### One truth, wherever it is served
 
 - **The host** (the machine serving the web app) holds the shared data: the `shepherdr` document (pins, the sidebar's
-  sections and icons, Notify, the Window switches), `~/.herdr/shepherdr.json` and the role instructions. Chosen
+  sections and icons, Notify, the Window switches), `~/.config/shepherdr/settings.json` and the role instructions. Chosen
   because it is the one that stays on: a pin made on the phone lands there with the window's machine asleep.
 - **Every other machine's service** reads and writes the shared document there, through herdr-core's link, and keeps
   its own settings file and role instructions merged with the host's every 5 s (each side's own changes go to the

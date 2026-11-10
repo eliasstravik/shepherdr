@@ -1,4 +1,5 @@
 """Cursor launches, exact session recovery, and reversible hooks; never starts a live agent."""
+import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import json
 import importlib.util
 import io

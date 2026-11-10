@@ -4,7 +4,7 @@
 // web app reaches, no more. Every answer is a few short sentences to be spoken, never raw data; long ones are cut
 // here. An act changes nothing until the voice agent says the person confirmed it out loud (confirmed: true).
 import type { Snapshot, Task, Place } from "../web/shared/types.ts";
-import { navWords } from "../core/voice.js";
+import { navWords, REPLY_MAX, TABS } from "../core/voice.js";
 import { screenParams, screenWords } from "../core/screen.js";
 import { planRows, windowWords, whyWords, healthWords } from "../core/machines.js";
 import { SOURCES, scrub, render, at, search, segments, type SourceArgs } from "./voice-data.ts";
@@ -81,7 +81,7 @@ function list(items: string[], n: number, what: string) {
   const shown = items.slice(0, n);
   return shown.join("\n") + (items.length > n ? `\n…and ${items.length - n} more ${what}.` : "");
 }
-const done = (result: string, nav?: Nav): Answer => ({ result: result.length > MAX ? `${result.slice(0, MAX - 1)}…` : result, ...(nav ? { nav } : {}) });
+const done = (result: string, nav?: Nav, max = MAX): Answer => ({ result: result.length > max ? `${result.slice(0, max - 1)}…` : result, ...(nav ? { nav } : {}) });
 const fail = (result: string): Answer => ({ result, error: true });
 
 export const STATUS: Record<string, string> = {
@@ -317,7 +317,9 @@ async function lookChat(io: VoiceIO, snap: Snapshot, where: Where, id: unknown, 
   const read = await io.chat(c.key);
   if (!read) return fail(`I can't read ${c.name}'s chat right now: its agent isn't running.`);
   const st = read.status === "working" ? `working${read.doing ? `: ${cut(read.doing, 120)}` : ""}` : read.status === "blocked" ? "waiting for the person" : read.status === "done" || read.status === "idle" ? "idle, waiting for a message" : read.status ?? "not running";
-  const line = (x: ChatRead["items"][number]) => `${x.who === "you" ? "Person" : x.who === "news" ? "From elsewhere" : "Agent"}${x.at ? ` (${ago(x.at)})` : ""}: ${cut(x.text, query ? 300 : 500)}`;
+  // without a query the newest agent reply goes whole (up to REPLY_MAX, like a reply the call says), the rest cut short (#785)
+  const newest = query ? null : [...read.items].reverse().find((x) => x.who !== "you" && x.who !== "news");
+  const line = (x: ChatRead["items"][number]) => `${x.who === "you" ? "Person" : x.who === "news" ? "From elsewhere" : "Agent"}${x.at ? ` (${ago(x.at)})` : ""}: ${cut(x.text, x === newest ? REPLY_MAX : query ? 300 : 500)}`;
   if (query) {
     const ws = words(query);
     const find = () => read.items.filter((x) => ws.every((w) => x.text.toLowerCase().includes(w)));
@@ -327,8 +329,11 @@ async function lookChat(io: VoiceIO, snap: Snapshot, where: Where, id: unknown, 
     if (!hits.length) return done(`Nothing about "${cut(query, 60)}" in ${c.name}'s chat (as far back as I can read).`);
     return done(`${hits.length} message${hits.length === 1 ? "" : "s"} in ${c.name}'s chat about "${cut(query, 60)}", oldest first:\n${hits.map(line).join("\n")}`);
   }
-  const last = read.items.slice(-count);
-  return done(`${c.name} is ${st}.${last.length ? `\nIts last ${last.length} message${last.length === 1 ? "" : "s"}, oldest first:\n${last.map(line).join("\n")}` : " Its chat is empty."}`);
+  // the newest reply whole; the others, oldest dropped first, stay within MAX
+  let last = read.items.slice(-count);
+  const size = (xs: typeof last) => xs.filter((x) => x !== newest).map(line).join("\n").length;
+  while (last.length > 1 && size(last) > MAX - 200) last = last.slice(1);
+  return done(`${c.name} is ${st}.${last.length ? `\nIts last ${last.length} message${last.length === 1 ? "" : "s"}, oldest first:\n${last.map(line).join("\n")}` : " Its chat is empty."}`, undefined, MAX + REPLY_MAX);
 }
 
 function lookSpaces(snap: Snapshot) {
@@ -661,7 +666,9 @@ function open(snap: Snapshot, where: Where, io: VoiceIO, what: string, id: strin
     case "task": {
       const t = findTask(snap, id, where);
       if (!t) return fail(isHere(id) ? "Which task?" : `I can't find task "${cut(id, 60)}".`);
-      const want = ["chat", "terminal", "files", "changes", "pr", "browser", "review"].includes(tab) ? tab : "chat";
+      // a task has no Files or Changes tab (SHEP-143): its changes are its pull request's, else its chat
+      const asked = tab === "files" || tab === "changes" ? (t.pr ? "pr" : "chat") : tab;
+      const want = TABS.includes(asked) ? asked : "chat";
       if (want === "review" && t.status !== "ready") return fail(`${spoken(t.id)} isn't ready for review: it is ${STATUS[t.status] ?? t.status}.`);
       if (want === "pr" && !t.pr) return fail(`${spoken(t.id)} has no pull request yet.`);
       const at = io.taskWhere?.(t.id);

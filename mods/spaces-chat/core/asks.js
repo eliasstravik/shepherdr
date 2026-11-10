@@ -6,6 +6,8 @@
 
 // A card shows up to this many lines (the whole of any real request), each up to LINE characters.
 const SHOWN = 2000, LINE = 2000;
+// An option's preview, at most this many characters.
+const PREVIEW = 8000;
 const clip = (s, n) => { s = String(s ?? ""); return s.length > n ? s.slice(0, n - 1) + "…" : s; };
 const base = (p) => String(p ?? "").split("/").filter(Boolean).pop() ?? "";
 const firstLine = (s) => String(s ?? "").split("\n")[0];
@@ -44,7 +46,9 @@ export function words(req) {
         text: String(q?.question ?? ""), header: String(q?.header ?? ""), multi: q?.multiSelect === true,
         options: (Array.isArray(q?.options) ? q.options : []).map((o) => {
           const label = typeof o === "string" ? o : String(o?.label ?? "");
-          return { label, name: label.replace(/\s*\(recommended\)\s*$/i, ""), recommended: /\(recommended\)\s*$/i.test(label), description: typeof o === "object" ? o?.description ?? "" : "" };
+          // its preview (SHEP-139): a mockup, code or a diagram the agent drew to compare the options, as its prompt shows it
+          const preview = typeof o === "object" && typeof o?.preview === "string" ? clip(o.preview, PREVIEW) : "";
+          return { label, name: label.replace(/\s*\(recommended\)\s*$/i, ""), recommended: /\(recommended\)\s*$/i.test(label), description: typeof o === "object" ? o?.description ?? "" : "", ...(preview ? { preview } : {}) };
         }).filter((o) => o.label),
       })).filter((q) => q.text);
       return { kind: "questions", title: questions[0]?.text ?? "A question", detail: "", questions, cut: false };
@@ -78,7 +82,23 @@ export const deny = (message = "The person declined this in the chat.") => out({
 export const answer = (req, label) => out({ behavior: "allow", updatedInput: { ...(req.tool_input ?? {}), answers: { [String(req.tool_input?.questions?.[0]?.question ?? "")]: label } } });
 // All of a question card's answers: { [question text]: answer } (several picks joined with ", ",
 // "Other" as written), as Claude's own prompt would give them.
-export const answers = (req, map) => out({ behavior: "allow", updatedInput: { ...(req.tool_input ?? {}), answers: map } });
+// annotations (SHEP-139): { [question text]: { preview?, notes? } }, as Claude's prompt adds them: the preview of the
+// option picked, and the person's note.
+export const answers = (req, map, annotations) => out({ behavior: "allow", updatedInput: { ...(req.tool_input ?? {}), answers: map,
+  ...(annotations && Object.keys(annotations).length ? { annotations } : {}) } });
+// The annotations of a question card's answers: each question's picked option's preview (one pick), and a note for the
+// first question when the person wrote one. w: words(req); map: as answers() takes it.
+export function annotationsOf(w, map, note) {
+  const out = {};
+  (w?.questions ?? []).forEach((q, i) => {
+    const a = {};
+    const o = q.multi ? null : q.options.find((x) => x.name === map?.[q.text]);
+    if (o?.preview) a.preview = o.preview;
+    if (i === 0 && note && String(note).trim()) a.notes = String(note).trim();
+    if (Object.keys(a).length) out[q.text] = a;
+  });
+  return out;
+}
 // "Chat about this": no answers; Claude hears the person wants to talk it over first.
 export const chatAbout = () => deny("The person wants to talk about these questions before answering. Don't ask them again now: wait for their message in the chat and answer it.");
 // "Dismiss" (or Esc on the card): closed without an answer, as Esc in Claude's own prompt, except Claude goes on

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Artifact</title>
+    <meta name="robots" content="noindex" />
+    <script>
+      /* light or dark as the web app picks it (?theme=dark|light wins: a screenshot of either) */
+      ;(function () {
+        var t = new URLSearchParams(location.search).get('theme')
+        var dark = t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+      })()
+      /* which artifact, kept before the web app's shared code takes the address bar */
+      window.viewerLink = location.search
+    </script>
+  </head>
+  <body class="antialiased">
+    <div id="root" class="isolate"></div>
+    <script type="module" src="./viewer.tsx"></script>
+  </body>
+</html>

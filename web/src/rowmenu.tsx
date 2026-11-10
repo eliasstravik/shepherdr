@@ -110,7 +110,7 @@ export function RowMenu({ menu, label, className, children }: { menu: RowMenuSta
  * The window's larger cards (the Accept card): sub, a muted line under the title; closer, the × at its top right that
  * closes it as Cancel does; foot, lines over the buttons that stay put while the body scrolls; wide, 640 across.
  */
-export function Dialog({ title, sub, closer, foot, wide, children, buttons, safe, cancel = 'Cancel', onCancel }: { title: string; sub?: ReactNode; closer?: boolean; foot?: ReactNode; wide?: boolean; children: ReactNode; buttons: ReactNode; safe?: boolean; cancel?: string; onCancel: () => void }) {
+export function Dialog({ title, sub, closer, foot, wide, large, children, buttons, safe, cancel = 'Cancel', onCancel }: { title: string; sub?: ReactNode; closer?: boolean; foot?: ReactNode; wide?: boolean; /** up to 1100px wide and most of the screen tall: its body fills what's left over the buttons, which stay in view (the Accept card with a proof) */ large?: boolean; children: ReactNode; buttons: ReactNode; safe?: boolean; cancel?: string; onCancel: () => void }) {
   const phone = useUI((u) => u.device === 'phone')
   const shade = useRef<HTMLDivElement>(null)
   const box = useRef<HTMLDivElement>(null)
@@ -139,8 +139,8 @@ export function Dialog({ title, sub, closer, foot, wide, children, buttons, safe
     }
   }, [opener])
   return (
-    <div ref={shade} className="absolute inset-0 z-30 flex items-start justify-center bg-black/35 px-6 py-12 phone:items-end phone:p-3 phone:pb-[max(env(safe-area-inset-bottom),--spacing(3))]" onClick={(e) => e.target === e.currentTarget && onCancel()}>
-      <div ref={box} data-panel role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-desc" className={clsx('w-full rounded-box bg-bg p-5 shadow-dialog phone:max-w-none', wide ? 'max-w-[640px]' : 'max-w-[400px]')}>
+    <div ref={shade} className={clsx('absolute inset-0 z-30 flex items-start justify-center bg-black/35 px-6 phone:items-end phone:p-3 phone:pb-[max(env(safe-area-inset-bottom),--spacing(3))]', large ? 'py-[5dvh]' : 'py-12')} onClick={(e) => e.target === e.currentTarget && onCancel()}>
+      <div ref={box} data-panel role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-desc" className={clsx('w-full rounded-box bg-bg p-5 shadow-dialog phone:max-w-none', large ? 'flex h-full max-w-[1100px] flex-col' : wide ? 'max-w-[640px]' : 'max-w-[400px]')}>
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
             <h2 id="confirm-title" className="font-semibold">
@@ -154,7 +154,7 @@ export function Dialog({ title, sub, closer, foot, wide, children, buttons, safe
             </button>
           ) : null}
         </div>
-        <div id="confirm-desc" className="mt-1.5 text-pretty text-fg2">
+        <div id="confirm-desc" className={clsx('mt-1.5 text-pretty text-fg2', large && 'flex min-h-0 flex-1 flex-col')}>
           {children}
         </div>
         {foot ? <div className="mt-4 flex flex-col gap-2.5">{foot}</div> : null}

@@ -9,11 +9,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Hub } from "./hub.ts";
-import { HOME, appHome } from "./paths.ts";
+import { HOME } from "./paths.ts";
 import * as SC from "../core/screens.js";
 import * as CV from "../core/chat-view.js";
 import * as AG from "../core/agents.js";
 import { hasAssistantContext } from "../core/assistant-context.js";
+import { layoutScript } from "./layout-scripts.ts";
 
 const { ScreenWatch, starting, cliOf, readScreen, screenText, pressKeys, SCREEN } = SC as any;
 const { LOST, lostMessage, shellWord, WORDS, sessionStarted, sessionFailed } = CV as any;
@@ -110,8 +111,8 @@ export class AgentWatch {
         // herdr-task would resume the same gone session again: its task starts it anew
         if (t.labels?.["herdr.task"]) throw new Error("ask the Assistant to resume its task.");
         const pane = t.labels?.["herdr.chat"];
-        const script = join(appHome(), "mods", "coordinator", "restart.sh");
-        if (!pane || !existsSync(script)) throw new Error("its chat isn't open in the Herdr window.");
+        const script = layoutScript("restart.sh");
+        if (!pane || !script) throw new Error("its chat isn't open in the Herdr window.");
         const p = Bun.spawn(["bash", script, addr, JSON.stringify([...fresh, msg])], { stdout: "pipe", stderr: "pipe", stdin: "ignore",
           env: { ...process.env, HERDR_RESTART_CHAT: pane, HERDR_RESTART_RESUME: "1" } });
         const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);

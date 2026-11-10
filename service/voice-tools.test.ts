@@ -70,6 +70,18 @@ test("look chat: the call's own by default, its status and last messages, oldest
   expect(a.result.indexOf("On it")).toBeLessThan(a.result.indexOf("read_chat bug"));
 });
 
+test("look chat gives the newest agent reply whole, older messages cut short (#785)", async () => {
+  const long = "word ".repeat(1200).trim() + " THE END.";
+  const x = io({ chat: async () => ({ status: "idle", items: [
+    { who: "agent", text: "older " + "x".repeat(900), at: now - 200_000 },
+    { who: "you", text: "Tell me everything", at: now - 100_000 },
+    { who: "agent", text: long, at: now - 50_000 },
+  ] }) as any });
+  const a = await voiceTool("look", { what: "chat", count: 3 }, web, x);
+  expect(a.result).toContain("THE END.");
+  expect(a.result).not.toContain("x".repeat(600));
+});
+
 test("look chat with a query searches it, and reads further back when it has to", async () => {
   let pulled = 0;
   const x = io({ chat: async () => ({ ...chats["SHEP-45/worker"], items: [...chats["SHEP-45/worker"].items], earlier: async () => (++pulled < 2) }) });
@@ -153,6 +165,9 @@ test("open: what it shows in the app the call runs in", async () => {
   const review = await voiceTool("open", { what: "task", id: "45", tab: "review" }, web, io());
   expect(review.error).toBe(true);
   expect((await voiceTool("open", { what: "task", id: "41", tab: "review" }, web, io())).nav).toMatchObject({ kind: "task", task: "SHEP-41", tab: "review" });
+  // a task has no Files or Changes tab (SHEP-143): its pull request, else its chat
+  expect((await voiceTool("open", { what: "task", id: "41", tab: "changes" }, web, io())).nav).toMatchObject({ kind: "task", task: "SHEP-41", tab: "pr" });
+  expect((await voiceTool("open", { what: "task", id: "45", tab: "files" }, web, io())).nav).toMatchObject({ kind: "task", task: "SHEP-45", tab: "chat" });
   expect((await voiceTool("open", { what: "tasks", query: "ready" }, web, io())).nav).toEqual({ kind: "tasks", filter: "ready" });
   expect((await voiceTool("open", { what: "artifact", id: "model menu proof" }, web, io())).nav).toMatchObject({ kind: "artifact", artifact: "a1" });
   expect((await voiceTool("open", { what: "chat" }, web, io())).nav).toEqual({ kind: "chat", chat: "SHEP-45/worker", addr: "t1" });
@@ -211,7 +226,10 @@ test("finding spaces by name, words and here; the window's here", () => {
 test("results stay short, and evidence words read plainly", async () => {
   const big = { ...chats["SHEP-45/worker"], items: Array.from({ length: 30 }, (_, i) => ({ who: "agent", text: "x".repeat(2000) + i })) };
   const a = await voiceTool("look", { what: "chat", count: 30 }, web, io({ chat: async () => big }));
-  expect(a.result.length).toBeLessThanOrEqual(3500);
+  // all but the newest reply (said whole, #785) stays within 3500, the newest ones kept
+  expect(a.result.length).toBeLessThanOrEqual(3500 + 2010);
+  expect(a.result).toContain("x29");
+  expect(a.result.endsWith("x29")).toBe(true);
   expect(evidenceWords({ checks: [{ name: "build", conclusion: "failure" }, { name: "lint", conclusion: "success" }] })).toBe("Checks: 1 failed (build).");
   expect(evidenceWords(null)).toBe("");
 });

@@ -1,4 +1,5 @@
 """Local image import, cancellation and picker errors without opening a desktop dialog."""
+import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import importlib.util
 import json
 from pathlib import Path

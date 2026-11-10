@@ -1,5 +1,5 @@
 // A task's worktree as its side views read it: what it changed against its base (Changes) and its pull request
-// (Pull request), for the window's mods (task-changes, task-pr) and the web app's Diff and Pull request alike. git and
+// (Pull request), for the window's task-pr mod and the web app's Changes and Pull request alike. git and
 // gh run through a runner the caller gives (the window's exec, the service's herdr-core), on the task's machine.
 // Shared core: the source is core/worktree.js; bin/sync-shared copies it into the mods in lib/COPIES.
 
@@ -64,9 +64,8 @@ export function checksLine(cs) {
 // Failed first, then running, passed, skipped: what needs a look sits on top.
 export const CHECK_ORDER = { fail: 0, pending: 1, pass: 2, skip: 3 };
 
-// The side views' words, as the window's mods show them (task-files, task-changes, task-pr): the web app's Files,
-// Changes and Pull request say the same (core/worktree.test.js checks the mods still say these, but All files: the
-// web's back button's label, where the window's chevron says nothing).
+// The side views' words: the web app's Files and Changes (the space's side panels) and Pull request (a task's tab,
+// as the window's mods/task-pr says it: core/worktree.test.js checks it still says its words).
 export const VIEW_WORDS = {
   allFiles: "All files",
   loadingFiles: "Loading files…",

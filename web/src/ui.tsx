@@ -31,6 +31,7 @@ export {
   ArrowPathRoundedSquareIcon as RestartIcon,
   ArrowTopRightOnSquareIcon as OpenIcon,
   ArrowUpIcon as UpIcon,
+  ArrowDownIcon as MoveDownIcon,
   ArrowUturnLeftIcon as ReplyIcon,
   BellIcon,
   BoltIcon as SpeedIcon,
@@ -1125,12 +1126,66 @@ export function Small({ children, className, ...p }: HTMLAttributes<HTMLDivEleme
   )
 }
 
-/** Column header: 52px with a hairline under it; its icon buttons are round, like its ⋯ */
-export function Head({ children, className, conversation }: { children: ReactNode; className?: string; conversation?: boolean }) {
+/** Column header: 52px with a hairline under it; its icon buttons are round, like its ⋯.
+ *  A conversation's (the Assistant's, a task's) sits in the chat's reading column, its title on the messages' left edge.
+ *  Its lead (Spaces, Back, a task's status) hangs in the empty gutter left of that edge when it fits there, so the
+ *  title is at the same spot in every chat; without the room it comes back in line before the title. A
+ *  [data-lead-label] in it (Back's "Tasks") shows only when it fits too. */
+export function Head({ children, className, conversation, lead }: { children: ReactNode; className?: string; conversation?: boolean; lead?: ReactNode }) {
+  const outer = useRef<HTMLDivElement>(null)
+  const col = useRef<HTMLDivElement>(null)
+  const box = useRef<HTMLDivElement>(null)
+  const [hang, setHang] = useState<'label' | 'icon' | null>(null)
+  useLayoutEffect(() => {
+    const o = outer.current, c = col.current, l = box.current
+    if (!o || !c || !l) return
+    const fit = () => {
+      const labels = [...l.querySelectorAll<HTMLElement>('[data-lead-label]')]
+      // what it takes without its labels, and what they add (each keeps its full width as scrollWidth when folded)
+      const shown = labels.reduce((n, e) => n + e.offsetWidth, 0)
+      const all = labels.reduce((n, e) => n + e.scrollWidth, 0)
+      const bare = l.offsetWidth - shown
+      // the gutter: from the header's edge to the title's, 4px clear of the edge and 6px of the title
+      const room = c.getBoundingClientRect().left - o.getBoundingClientRect().left + LEAD_PAD - 10
+      setHang(bare + all <= room ? 'label' : bare <= room ? 'icon' : null)
+    }
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(o)
+    ro.observe(l)
+    return () => ro.disconnect()
+  }, [!!lead])
   return (
-    <div data-chrome className={clsx('relative flex min-h-[52px] shrink-0 items-center gap-2.5 border-b border-line pr-3 pl-4 [&_.hit]:rounded-full', conversation && 'px-0!', className)}>
-      {conversation ? <div data-conversation-head className="mx-auto flex min-h-[51px] w-full max-w-read min-w-0 items-center gap-2.5 pr-3 pl-5 [&_.hit]:rounded-full">{children}</div> : children}
+    <div ref={outer} data-chrome data-hang={hang ?? undefined} className={clsx('group/head relative flex min-h-[52px] shrink-0 items-center gap-2.5 border-b border-line pr-3 pl-4 [&_.hit]:rounded-full', conversation && 'px-0!', className)}>
+      {conversation ? (
+        <div ref={col} data-conversation-head className="relative mx-auto flex min-h-[51px] w-full max-w-read min-w-0 items-center gap-2.5 pr-3 pl-5 [&_.hit]:rounded-full">
+          {lead ? (
+            // hung: its right edge 6px before the title's left (the column's 20px start). In line, on the title's row
+            // (the header's first: its views may wrap under it), its 28px centred on the title's 38px
+            <div ref={box} data-lead className="mt-[11.5px] flex shrink-0 items-center gap-1.5 self-start group-data-hang/head:absolute group-data-hang/head:mt-0 group-data-hang/head:right-[calc(100%-0.875rem)] group-data-hang/head:top-1/2 group-data-hang/head:-translate-y-1/2">
+              {lead}
+            </div>
+          ) : null}
+          {children}
+        </div>
+      ) : (
+        children
+      )}
     </div>
+  )
+}
+// the conversation header's start padding (pl-5): the title's left edge in its column
+const LEAD_PAD = 20
+
+/** Back to the tasks list, in a conversation header's lead: its chevron, and "Tasks" when the gutter has the room */
+export function LeadBack({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} aria-label="Tasks" className="press-dim relative inline-flex h-7 shrink-0 items-center rounded-full px-1.5 text-[0.8125rem] whitespace-nowrap text-fg2 after:absolute after:-inset-y-2 after:inset-x-0 hover:bg-hover hover:text-fg">
+      <BackIcon className={ic} />
+      <span aria-hidden data-lead-label className="inline-block max-w-0 overflow-hidden group-data-[hang=label]/head:max-w-none">
+        <span className="pr-1 pl-0.5">Tasks</span>
+      </span>
+    </button>
   )
 }
 
@@ -1206,7 +1261,7 @@ export function FootButton({ className, children, ...p }: Btn) {
     <button
       type="button"
       className={clsx(
-        'press flex min-h-8 items-center gap-2 rounded-row px-2 text-left text-fg2 hover:bg-hover hover:text-fg keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] focus-visible:outline-none coarse:min-h-11 coarse:text-fg phone:min-h-12 phone:text-fg phone:gap-3 phone:px-3',
+        'press flex min-h-8 min-w-0 items-center gap-2 rounded-row px-2 text-left whitespace-nowrap text-fg2 hover:bg-hover hover:text-fg keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] focus-visible:outline-none coarse:min-h-11 coarse:text-fg phone:min-h-12 phone:text-fg phone:gap-3 phone:px-3',
         className,
       )}
       {...p}

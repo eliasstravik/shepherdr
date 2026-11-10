@@ -1,12 +1,11 @@
 // Voice (SHEP-105): a call with Shepherdr itself, not one chat. One voice takes what you say to any space's Assistant
 // or task's agent, tells you when they reply or need you, and opens things here (voiceNav; its screen tool reads and
-// acts on this very page, screen.ts, whichever device started the call). It starts from the "Talk to BossGoat" row at
-// the top of the sidebar, which becomes the call card while it is on (what it last said, Mute, End); on a phone from
-// the voice button at the end of the bottom bar, with a green strip of Mute and End above the bar (a chat's box has no
-// call button since SHEP-108: it is always Send). Where neither shows (a shut sidebar, a task open on a phone)
-// the strip sits at the top. Whatever the voice opens gets an "Opened by voice" tag for a moment.
+// acts on this very page, screen.ts, whichever device started the call). It starts from the voice button beside Search in
+// the sidebar's brand row, which is the call's Mute and End while it is on (SHEP-135); on a phone from the voice button
+// at the end of the bottom bar, then Full screen, Mute and End (a chat's box has no call button since SHEP-108: it is
+// always Send). Where neither shows (a shut sidebar, a task open on a phone) a strip sits at the top. Whatever the voice opens gets an "Opened by voice" tag for a moment.
 import clsx from 'clsx'
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { act, definePlugin, getState, goChat, goPlace, listView, openArtifact, openItem, openTask, placeOf, placesDrawn, registry, setFilter, setUI, shownItem, taskInMiddle, useStore, useUI, visibleChats, type UI } from '@client/kernel.ts'
 import { EndCallIcon, FitIcon, ic, IconButton, MicIcon, MicOffIcon, RoundButton, UnfitIcon, useElapsed, WaveIcon, Waves, XIcon } from '@client/ui.tsx'
 import { useWindowWidth } from '@client/Frame.tsx'
@@ -16,10 +15,8 @@ import { openAccept } from '@client/screens/Accept.tsx'
 import { callDoing, callPhase, callSample, muteCall, sendWhere, startCall, stepsAside, stopCall, type Nav, type NavAck } from './call.ts'
 import { key, press, resetScreen, screenAction, type Head } from './screen.ts'
 
-/** the Tasks panel's filter for a task state the voice agent named */
-const FILTER: Record<string, string> = { need: 'needs', work: 'working', ready: 'ready', merging: 'merging', queued: 'queued', scheduled: 'scheduled', todo: 'todo', done: 'done', automations: 'automations' }
 /** a task's tab as the side panel names it */
-const ITEM: Record<string, string> = { terminal: 'terminal', files: 'files', changes: 'diff', pr: 'pr', browser: 'browser' }
+const ITEM: Record<string, string> = { terminal: 'terminal', pr: 'pr', browser: 'browser' }
 const PANEL_WORDS: Record<string, string> = { tasks: 'Tasks', artifacts: 'Artifacts', files: 'Files', changes: 'Changes', needs: 'Needs you' }
 
 /** what this page shows now, as the call is told it */
@@ -154,13 +151,12 @@ async function doNav(nav: Nav): Promise<NavAck> {
   }
   if (nav.kind === 'tasks' || nav.kind === 'needs') {
     setUI(LAYERS_OFF)
-    const taskFilter = nav.kind === 'needs' ? 'needs' : FILTER[str(nav.filter)] ?? 'all'
-    setUI(ui.device === 'phone' ? { task: null, tab: 'tasks', taskFilter, pick: null } : { side: 'tasks', sideShut: false, taskFilter, ...(ui.task && taskInMiddle(ui, snap) ? { task: null } : {}) })
+    setUI(ui.device === 'phone' ? { task: null, tab: 'tasks', pick: null } : { side: 'tasks', sideShut: false, ...(ui.task && taskInMiddle(ui, snap) ? { task: null } : {}) })
     // words to filter by (a task's name or id): typed in the panel's filter box, as the person would
     const view = listView(getState().ui, snap)
     if (nav.kind === 'tasks') setFilter(view.search, 'tasks', str(nav.search))
     const now = getState().ui
-    return check(now.taskFilter === taskFilter && (ui.device === 'phone' ? now.tab === 'tasks' : now.side === 'tasks'), 'the Tasks panel didn\'t open')
+    return check((ui.device === 'phone' ? now.tab === 'tasks' : now.side === 'tasks'), 'the Tasks panel didn\'t open')
   }
   if (nav.kind === 'panel') {
     const panel = str(nav.panel)
@@ -174,7 +170,7 @@ async function doNav(nav: Nav): Promise<NavAck> {
     if (panel === 'artifacts' && !registry.views.artifacts) return no('Artifacts is turned off in this app')
     if ((panel === 'files' || panel === 'changes') && !(snap.panels ?? ['files', 'changes']).includes(panel)) return no(`this space has no ${panel} panel`)
     if (ui.device === 'phone') {
-      if (panel === 'files' || panel === 'changes') return no(`a phone shows ${panel} only on a task: open the task's ${panel} tab`)
+      if (panel === 'files' || panel === 'changes') return no(`a phone has no ${panel} panel: it shows on a tablet or computer`)
       setUI({ task: null, tab: panel as UI['tab'], pick: null })
       return check(getState().ui.tab === panel, `the ${panel} tab didn't open`)
     }
@@ -217,6 +213,7 @@ export function toggleCall(from: string | null = null) {
   if (ui.dict) cancelDictation()
   // the keyboard goes down: the call is listening
   ;(document.activeElement as HTMLElement | null)?.blur?.()
+  lastFrom = from
   setUI({ call: true, callFull: true, callFrom: from, callStarted: Date.now(), callMuted: false, callError: null, focus: null, plus: null })
   act({ type: 'call', chat: from ?? '', on: true })
   resetScreen()
@@ -230,13 +227,23 @@ export function toggleCall(from: string | null = null) {
   }, voiceNav, () => {
     // the call's socket is open: where this page is, from the start
     if (getState().snap) sendWhere(whereNow())
-  }, () => { if (mine()) endCall() }, {
+  }, (why) => {
+    if (!mine()) return
+    endCall()
+    // SHEP-173: it ended by itself (not the person's End or yes): why, in plain words, with Call again
+    if (why) setUI({ callError: `${ENDED}${why}.` })
+  }, {
     // the lock screen and Control Center show the call: hang up and mute from there (SHEP-102)
     title: 'BossGoat',
     hangUp: () => { if (mine()) endCall() },
     mute: (on) => { if (!mine()) return; muteCall(on); setUI({ callMuted: on }) },
   }).catch(() => { endCall(); setUI({ callError: 'Audio could not start on this device.' }) })
 }
+
+/** the chat the last call started from (Call again starts there) */
+let lastFrom: string | null = null
+/** a note that starts so is a call that ended by itself, said as it is ("Call ended: the connection was lost.") */
+const ENDED = 'Call ended: '
 
 /** a call couldn't start for want of a key: a card says where it goes */
 let help = false
@@ -313,80 +320,78 @@ function CallMark({ phase, className }: { phase: Phase; className?: string }) {
   return <span data-call-mark={phase} className="contents"><Waves className={clsx('shrink-0', phase !== 'speaking' && 'wv-still', className)} /></span>
 }
 
-/** SHEP-108, SHEP-118: the minimized call's two buttons, one look wherever they show (a phone's bottom bar, the
- *  sidebar's card, the strip at the top): Full screen a quiet grey round that opens the call over everything again
- *  (Mute lives there only), End a red round with the hang-up phone that hangs up at once (SHEP-127: no question first).
- *  size: the bottom bar's, or the card's */
-function CallControls({ size }: { size: 'bar' | 'card' }) {
-  const btn = size === 'bar' ? 'size-14 max-[359px]:size-12' : 'size-8 phone:size-11'
+/** SHEP-108, SHEP-118, SHEP-135: the minimized call's controls, one look wherever they show (the sidebar's brand row, a
+ *  phone's bottom bar, the strip at the top), held together in one outlined capsule so they read as the call's: Full
+ *  screen (where there is room for it) opens the call over everything again; Mute a quiet round, solid while muted;
+ *  End a red round with the hang-up phone that hangs up at once (SHEP-127: no question first). size: the bottom
+ *  bar's, or the brand row's and strip's */
+function CallControls({ size, fit }: { size: 'bar' | 'head'; fit?: boolean }) {
+  const muted = useUI((u) => u.callMuted)
+  // the same pitch inside as beside it: the brand row's buttons are its icon buttons' size, as far apart as Search and
+  // the toggle, the capsule's ring drawn in the margin so it takes no room; the bar's as far apart as the bar's pieces
+  const btn = size === 'bar' ? 'size-12 max-[359px]:size-10' : 'size-7 phone:size-11'
   const glyph = size === 'bar' ? 'size-5' : ic
+  const quiet = 'text-fg2 enabled:hover:bg-hover'
   return (
-    <>
-      <button type="button" aria-label="Open the call full screen" data-call-maximize onClick={() => setUI({ callFull: true })}
-        className={clsx('press-dim relative grid shrink-0 place-items-center rounded-full bg-bubble text-fg2 after:absolute after:-inset-1', btn)}>
-        <FitIcon className={glyph} />
+    <div role="group" aria-label="Call controls" data-call-controls
+      className={clsx('flex shrink-0 items-center rounded-full shadow-[inset_0_0_0_1px_var(--line2)]', size === 'bar' ? 'gap-2 p-1 max-[359px]:gap-1' : '-m-0.5 gap-1 p-0.5')}>
+      {fit ? (
+        <button type="button" aria-label="Open the call full screen" data-call-maximize onClick={() => setUI({ callFull: true })}
+          className={clsx('press-dim grid shrink-0 place-items-center rounded-full', quiet, btn)}>
+          <FitIcon className={glyph} />
+        </button>
+      ) : null}
+      <button type="button" aria-label={muted ? 'Unmute yourself' : 'Mute yourself'} aria-pressed={muted} onClick={toggleMute}
+        className={clsx('press-dim grid shrink-0 place-items-center rounded-full', muted ? 'bg-fg text-bg' : quiet, btn)}>
+        {muted ? <MicOffIcon className={glyph} /> : <MicIcon className={glyph} />}
       </button>
       <button type="button" aria-label="End call" onClick={endCall}
-        className={clsx('press-dim relative grid shrink-0 place-items-center rounded-full bg-need text-white after:absolute after:-inset-1', btn)}>
+        className={clsx('press-dim grid shrink-0 place-items-center rounded-full bg-need text-white', btn)}>
         <EndCallIcon className={glyph} />
       </button>
-    </>
+    </div>
   )
 }
 
 /** the soft green of a call (the old call mark's), its words in the ready colour */
 const callTint = 'bg-[color-mix(in_srgb,var(--ready)_11%,var(--bg))] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--ready)_22%,transparent)]'
 
-/** SHEP-105: the top of the spaces list: "Talk to BossGoat", above everything it can reach. On a call it is the call
- *  card: Shepherdr, what it is doing and its clock, the last thing it said, Mute and End. */
+/** SHEP-105, SHEP-135: the top of the spaces list: nothing, but the key's card when a call couldn't start for want of
+ *  one. A call shows in the brand row (VoiceButton: Mute and End), never a card here as well */
 function ShepherdrRow() {
-  const on = useUI((u) => u.call)
+  const [helped] = useHelp()
+  if (!helped) return null
   return (
     <div className="flex flex-col gap-2 px-2 pt-1.5 pb-1 phone:px-3 phone:pt-2">
-      {on ? <CallCard /> : (
-        <button type="button" onClick={() => toggleCall(null)} aria-label="Talk to BossGoat: a voice call"
-          className="press group flex min-h-9 items-center gap-2.5 rounded-row py-1 pr-1 pl-2 text-left text-[0.9375rem]/5 text-fg hover:bg-hover keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] focus-visible:outline-none coarse:min-h-11 phone:min-h-12 phone:pl-3 phone:text-base/6">
-          <WaveIcon className="size-4 text-fg2 phone:size-[18px]" />
-          <span className="min-w-0 flex-1 truncate font-medium">Talk to BossGoat</span>
-          <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-full bg-fg text-bg phone:size-9"><WaveIcon className="size-3.5 phone:size-4" /></span>
-        </button>
-      )}
       <CallHelp />
     </div>
   )
 }
 
-/** SHEP-108: the call's one place for its details: who, what it is doing and how long, then Mute and End. Never what
- *  was said: that is the chat's */
-function CallCard() {
-  const t = useElapsed(useUI((u) => u.callStarted))
-  const { word, phase } = usePhase()
+/** SHEP-135: the voice call's button in the sidebar's brand row, beside Search and as quiet as it. On a call it turns
+ *  into the call's Mute and End in their capsule, as a phone's bar does: the call's one place, never a card as well */
+function VoiceButton() {
+  const on = useUI((u) => u.call)
+  if (on) return <CallControls size="head" />
   return (
-    <section aria-label="Voice call with BossGoat" data-call-card data-phase={phase} className={clsx('flex items-center gap-2.5 rounded-[12px] py-1.5 pr-1.5 pl-3 phone:gap-3 phone:py-2 phone:pr-2 phone:pl-3.5', callTint)}>
-      <span className="grid w-4 shrink-0 place-items-center text-ready-fg phone:w-5"><CallMark phase={phase} className="h-3.5 phone:h-4" /></span>
-      <div className="min-w-0 flex-1">
-        <h2 className="truncate text-[0.9375rem]/5 font-semibold text-fg phone:text-base/6">BossGoat</h2>
-        <p className="flex min-w-0 gap-1 text-[0.75rem]/4 font-medium text-ready-fg tabular-nums phone:text-[0.8125rem]/5">
-          <span role="status" className="min-w-0 truncate">{word}</span><span className="shrink-0">· {t}</span>
-        </p>
-      </div>
-      <CallControls size="card" />
-    </section>
+    <IconButton label="Talk to BossGoat" data-voice-button onClick={() => toggleCall(null)}>
+      <WaveIcon className={ic} />
+    </IconButton>
   )
 }
 
-/** SHEP-105, SHEP-108: the end of a phone's bottom bar. Off a call: Talk to BossGoat, a quiet grey round. On one:
- *  Mute and the red hang-up, nothing above the bar (the call's details are the sidebar's card) */
+/** SHEP-105, SHEP-108, SHEP-135: the end of a phone's bottom bar. Off a call: Voice call, a quiet grey round. On one:
+ *  Full screen, Mute and the red hang-up in their capsule, nothing above the bar */
 function PhoneCallButton() {
   const on = useUI((u) => u.call)
-  return on ? <CallControls size="bar" /> : (
+  return on ? <CallControls size="bar" fit /> : (
     <RoundButton label="Talk to BossGoat" onClick={() => toggleCall(null)} className="size-14 max-[359px]:size-12">
       <WaveIcon className="size-5" />
     </RoundButton>
   )
 }
 
-/** the strip at the top where neither the sidebar's card nor a phone's bottom bar shows: Shepherdr, what it is doing
+/** the strip at the top where neither the sidebar's brand row nor a phone's bottom bar shows: Shepherdr, what it is doing
  *  and its clock, Mute and End */
 function CallStrip() {
   const t = useElapsed(useUI((u) => u.callStarted))
@@ -398,19 +403,19 @@ function CallStrip() {
       <p className="min-w-0 flex-1 truncate">
         <span className="text-fg">BossGoat</span> · <span role="status">{word}</span> · {t}
       </p>
-      <CallControls size="card" />
+      <CallControls size="head" fit />
     </div>
   )
 }
 
-/** the strip at the top where no card or bottom bar shows the call: a shut sidebar, a tablet, a phone with a task or
+/** the strip at the top where no brand row or bottom bar shows the call: a shut sidebar, a tablet, a phone with a task or
  *  Settings over its home (SHEP-66's band, now with Mute and End) */
 function CallBanner() {
   const on = useUI((u) => u.call)
   return useTop() && on ? <CallStrip /> : null
 }
 
-/** where the call shows at the top: neither the sidebar's card nor a phone's bottom bar is on screen */
+/** where the call shows at the top: neither the sidebar's brand row nor a phone's bottom bar is on screen */
 function useTop() {
   const width = useWindowWidth()
   return useStore((s) => {
@@ -421,7 +426,7 @@ function useTop() {
   })
 }
 
-/** the key's card where the sidebar's row doesn't show: above a phone's bar, else at the top */
+/** the key's card where the sidebar doesn't show: above a phone's bar, else at the top */
 function PhoneHelp() {
   return useTop() ? null : <CallHelp className="mx-4 mb-2" />
 }
@@ -432,20 +437,93 @@ function TopHelp() {
 
 /* ---------- SHEP-118: the full-screen call ---------- */
 
-/** the orb's swell, each frame from the call's sound: whoever speaks (nothing of yours while muted), smoothed */
-function useOrbLevel(ref: RefObject<HTMLDivElement | null>) {
+/** the logo's staff, exactly (public/icon.svg): its path, round cap and 12° tilt about (16 16); its hook's centre */
+const STAFF = 'M21 60V12a7 7 0 0 0-14 0v2.5'
+const HOOK = [14, 12] as const
+const ease = (x: number) => x * x * (3 - 2 * x)
+const fract = (x: number) => x - Math.floor(x)
+const clamp = (x: number) => Math.min(1, Math.max(0, x))
+
+/** The full-screen call's mark (SHEP-137, option 1 of SHEP-134): the hooked staff from Shepherdr's logo as one white
+ *  line on the call's near-black, green only for the voice. Shepherdr's voice ripples out from the hook, yours ripples
+ *  in; it draws itself while connecting, a green glint runs along it while it thinks or works, and it goes grey and
+ *  still while you are muted. Everything it draws stays inside its own box (no blur, blend or clip: SHEP-120's grey
+ *  square came from those on WebKit), so the box is the room the rings need and nothing else overlaps it. Each frame
+ *  sets a few attributes from the call's sound; React only renders it once per phase */
+function Crook({ phase, className }: { phase: string; className?: string }) {
+  const id = useId()
+  const svg = useRef<SVGSVGElement>(null)
+  const now = useRef(phase)
+  now.current = phase
   useEffect(() => {
-    let raf = 0, v = 0
-    const step = () => {
+    const el = svg.current
+    if (!el) return
+    const g = el.querySelector<SVGGElement>('[data-crook-tilt]')!
+    const line = el.querySelector<SVGPathElement>('[data-crook-line]')!
+    const glint = el.querySelector<SVGPathElement>('[data-crook-glint]')!
+    const rings = [...el.querySelectorAll<SVGCircleElement>('[data-crook-ring]')]
+    const calm = matchMedia('(prefers-reduced-motion: reduce)')
+    // eased values, so a change of phase glides instead of jumping
+    let raf = 0, last = performance.now(), lvl = 0, glow = 0, ring = 0
+    const step = (ms: number) => {
+      const dt = Math.min(0.1, (ms - last) / 1000), still = calm.matches, t = still ? 0 : ms / 1000, p = now.current
+      last = ms
+      const glide = (v: number, to: number, k: number) => v + (to - v) * (1 - Math.pow(1 - k, dt * 60))
+      // the swell, from whoever speaks (nothing of yours while muted): up fast, down slow
       const s = callSample()
       const target = getState().ui.callMuted && s.who !== 'agent' ? 0 : s.level
-      v += (target - v) * (target > v ? 0.35 : 0.12)
-      ref.current?.style.setProperty('--lvl', v.toFixed(3))
+      lvl = glide(lvl, target, target > lvl ? 0.35 : 0.12)
+      const l = still ? lvl * 0.6 : lvl
+      const sway = still ? 0 : Math.sin((t * Math.PI * 2) / 7) * 1.4
+      g.setAttribute('transform', `rotate(${sway.toFixed(2)} 16 41) rotate(12 16 16) translate(${HOOK[0]} ${HOOK[1]}) scale(${(1 + l * 0.03).toFixed(4)}) translate(${-HOOK[0]} ${-HOOK[1]})`)
+      // connecting: it draws itself up from the staff to the hook, holds, and draws again
+      const draw = (p === 'connecting' || p === 'reconnecting') && !still ? Math.max(0, 1 - ease(Math.min(1, fract(t / 2.6) / 0.6))) : 0
+      line.setAttribute('stroke-dashoffset', (draw * 100).toFixed(2))
+      line.setAttribute('stroke-opacity', clamp((1 - draw) * 5).toFixed(3))
+      // thinking or working: a green glint runs along it, from the staff over the hook (still: it rests on the hook)
+      glow = glide(glow, p === 'thinking' || p === 'working' ? 1 : 0, 0.1)
+      glint.setAttribute('stroke-opacity', glow.toFixed(3))
+      glint.setAttribute('stroke-dashoffset', still ? '-70' : (-(fract(t / (p === 'working' ? 1.1 : 1.8)) * 134 - 14)).toFixed(2))
+      // the rings: out from the hook while Shepherdr speaks, in to it while it listens, as bright as the voice
+      const inward = p === 'listening'
+      ring = glide(ring, inward || p === 'speaking' ? 1 : 0, 0.08)
+      rings.forEach((r, i) => {
+        let f = fract(t * 0.45 + i / 4)
+        if (inward) f = 1 - f
+        const a = still ? (i === 1 ? 0.15 + l : 0) : (1 - f) * Math.min(1, 0.05 + l * 1.4) * (inward ? Math.min(1, f * 3 + 0.2) : 1)
+        r.setAttribute('r', (still ? 11.5 + i * 5.7 : 9.5 + f * 18.5).toFixed(2))
+        r.setAttribute('stroke-opacity', (clamp(ring * a) * 0.9).toFixed(3))
+      })
       raf = requestAnimationFrame(step)
     }
     raf = requestAnimationFrame(step)
     return () => cancelAnimationFrame(raf)
-  }, [ref])
+  }, [])
+  const fade = `${id}-fade`, mask = `${id}-mask`
+  return (
+    <svg ref={svg} viewBox="-15 -19 60 75" data-crook data-phase={phase} aria-hidden className={clsx('group overflow-visible', className)}>
+      <defs>
+        {/* the staff fades out below, as the app icon's edge cuts it */}
+        <linearGradient id={fade} gradientUnits="userSpaceOnUse" x1="0" y1="34" x2="0" y2="54">
+          <stop offset="0" stopColor="#fff" />
+          <stop offset="1" stopColor="#fff" stopOpacity="0" />
+        </linearGradient>
+        <mask id={mask} maskUnits="userSpaceOnUse" x="-40" y="-40" width="120" height="120">
+          <rect x="-40" y="-40" width="120" height="120" fill={`url(#${fade})`} />
+        </mask>
+      </defs>
+      <g data-crook-tilt>
+        {[0, 1, 2, 3].map((i) => (
+          <circle key={i} data-crook-ring cx={HOOK[0]} cy={HOOK[1]} r="9.5" strokeWidth="0.9" strokeOpacity="0"
+            className="fill-none stroke-ready transition-[stroke] duration-700 group-data-[phase=connecting]:stroke-fg3 group-data-[phase=muted]:stroke-fg3 group-data-[phase=reconnecting]:stroke-fg3" />
+        ))}
+        <path data-crook-line d={STAFF} pathLength={100} strokeDasharray="100 100" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" mask={`url(#${mask})`}
+          className="fill-none stroke-fg transition-[stroke,opacity] duration-700 group-data-[phase=connecting]:stroke-fg2 group-data-[phase=muted]:stroke-fg3 group-data-[phase=muted]:opacity-80 group-data-[phase=reconnecting]:stroke-fg2" />
+        <path data-crook-glint d={STAFF} pathLength={100} strokeDasharray="14 120" strokeOpacity="0" strokeWidth="4.5" strokeLinecap="round" mask={`url(#${mask})`}
+          className="fill-none stroke-ready" />
+      </g>
+    </svg>
+  )
 }
 
 /** one of the full-screen call's three round buttons, its word under it */
@@ -464,8 +542,8 @@ function BigCallButton({ label, word, onClick, pressed, className, children }: {
 function minimize() { setUI({ callFull: false }) }
 
 /** The call over everything, phone first (SHEP-118): calm and dark whatever the app's look, Shepherdr and the clock at
- *  the top, the orb in the middle with what the call does under it, and only the call's own buttons: Minimize, Mute,
- *  End. Held sideways (short and wide), the orb and its word sit left and the rest right (SHEP-126). Minimize (or Escape) puts it back in the bar, card or strip, whose Full screen button brings it back. */
+ *  the top, the Crook (SHEP-137) in the middle with what the call does under it, and only the call's own buttons: Minimize, Mute,
+ *  End. Held sideways (short and wide), the Crook and its word sit left and the rest right (SHEP-126). Minimize (or Escape) puts it back in the brand row, bar or strip; the bar's and strip's Full screen button brings it back. */
 function CallScreen() {
   const on = useUI((u) => u.call && u.callFull)
   return on ? <FullCall /> : null
@@ -474,8 +552,6 @@ function FullCall() {
   const t = useElapsed(useUI((u) => u.callStarted))
   const muted = useUI((u) => u.callMuted)
   const { word, phase } = usePhase()
-  const orb = useRef<HTMLDivElement>(null)
-  useOrbLevel(orb)
   const screen = useRef<HTMLDivElement>(null)
   useEffect(() => {
     // the keyboard stays on the call: focus starts on it, Tab goes round its own buttons, Escape minimizes
@@ -500,10 +576,8 @@ function FullCall() {
         <h2 className="text-base/6 font-semibold">BossGoat</h2>
         <p className="text-sm/5 text-fg2 tabular-nums">{t}</p>
       </header>
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-12 px-6 short:col-start-1 short:row-span-full short:gap-(--orb-short-gap)">
-        <div ref={orb} data-phase={look} aria-hidden className="call-orb w-[min(64vw,38dvh,300px)] short:w-(--orb-short)">
-          <span className="call-orb-body"><span className="call-orb-swirl" /><span className="call-orb-sheen" /></span>
-        </div>
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-12 px-6 short:col-start-1 short:row-span-full short:gap-2">
+        <Crook phase={look} className="h-[min(46dvh,100vw,400px)] short:h-(--crook-short)" />
         <p className="flex h-7 max-w-full min-w-0 items-center gap-2 text-lg/7 font-medium text-fg2">
           <span role="status" className="min-w-0 truncate">{word}</span>
           {phase === 'thinking' || phase === 'working' ? <span aria-hidden className="typing inline-flex shrink-0 items-center gap-[3px] [&>i]:size-[5px]!"><i /><i /><i /></span> : null}
@@ -562,7 +636,11 @@ function CallError() {
   if (!error) return null
   return (
     <div data-topbar role="status" className={clsx(callPill, 'bg-bubble font-normal text-fg2')}>
-      <span className="min-w-0 flex-1 text-pretty">Voice call: {error}</span>
+      <span className="min-w-0 flex-1 text-pretty">{error.startsWith(ENDED) ? error : `Voice call: ${error}`}</span>
+      <button type="button" data-call-again onClick={() => { setUI({ callError: null }); toggleCall(lastFrom) }}
+        className={clsx('press-dim h-7 shrink-0 rounded-full px-3 text-[0.78125rem] font-medium text-ready-fg phone:h-9 phone:text-[0.875rem]', callTint)}>
+        Call again
+      </button>
       <IconButton label="Close" className="rounded-full!" onClick={() => setUI({ callError: null })}>
         <XIcon className={ic} />
       </IconButton>
@@ -574,6 +652,7 @@ export default definePlugin({
   name: 'voice',
   setup(reg) {
     reg.sideTop.push(ShepherdrRow)
+    reg.sideHead.push(VoiceButton)
     reg.phoneBar.push(PhoneCallButton)
     // SHEP-122: no Listening pill above a phone's bar: the minimized call is its bar's buttons alone
     reg.phoneAbove.push(PhoneHelp)

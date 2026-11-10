@@ -121,6 +121,6 @@ an add-on's line and Web's state; `service/settings.test.ts` checks the rows the
 | Element | Window | Web | State |
 |---|---|---|---|
 | Shepherdr on the web | `web-section.js:30` state line: "On, private to your tailnet." / why / "Off. Turn it on under Window › Add-ons." | `service/settings.ts` web() (webState, the service's own state) | ✓ (was only a Link row) |
-| Link | `:32` the link, Copy | link as its line, Copy (CopyButton) | ✓ |
+| Link | `:32` the link, Copy, "Copied" for 1.5 s | link as its line, Copy (CopyButton), "Copied" for 1.5 s once it really copied (copy.ts) | ✓ |
 | QR code | `:34` "Open it on your phone", the picture | the same SVG (`service/main.ts` webNow), its words | ✓ (was missing) |
 | "Reading…", "Shepherdr's service isn't running here." | before the first read, no service | never: the page comes from the service | ◇ the web is the service's own page |

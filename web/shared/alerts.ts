@@ -53,7 +53,8 @@ export const choicesLine = (q: Question) => q.choices.map((_, i) => short(q, i))
 
 /** a choice sends on its own tap: not a pick of several or one that needs a note, and never a plan or a merge, which
  *  stay a deliberate pick and Send. A note typed first brings Send back on any card. */
-export const sendsOnTap = (q: Question) => q.kind !== 'Plan' && !q.multi && q.noteRequiredFor === undefined && !q.evidence && !/^merge\b/i.test(q.title) && !q.id.startsWith('menu:')
+// options with previews (SHEP-139): a tap picks one and shows its preview; Send answers
+export const sendsOnTap = (q: Question) => q.kind !== 'Plan' && !q.multi && q.noteRequiredFor === undefined && !q.evidence && !/^merge\b/i.test(q.title) && !q.id.startsWith('menu:') && !q.choices.some((c) => c.preview)
 
 /** the choices a notification button may send at once: not a pick of several, not one that needs a note, not a grant
  *  for good, never a terminal menu (its first choices all say yes, and an old alert's button would press keys in whatever menu is up then);

@@ -29,8 +29,20 @@ const task = opt("--task");
 const worker = opt("--worker");
 if (!task) { process.stderr.write("herdr-browser-view --task <slug#id> [--worker <terminal>]\n"); process.exit(2); }
 const name = task.replace(/[^A-Za-z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-/, "").replace(/-$/, "");
+// agent-browser's session, as bin/herdr-browser names it (a name over 32 characters: its last 20 and a hash, SHEP-178)
+const session = name.length <= 32 ? `herdr-${name}`
+  : `herdr-${name.slice(-20).replace(/^-+/, "")}-${require("crypto").createHash("sha256").update(task).digest("hex").slice(0, 8)}`;
 const HOME = process.env.HOME;
-const ROOT = path.join(HOME, ".herdr", "browser");
+// Shepherdr's state folder once this machine's data moved there (herdr_task/layout.py), else the old ~/.herdr/browser
+const ROOT = (() => {
+  const env = process.env, abs = (p) => (p && p.startsWith("/") ? p : null);
+  const one = abs(env.SHEPHERDR_HOME);
+  const data = one ? `${one}/data` : `${abs(env.XDG_DATA_HOME) ?? `${HOME}/.local/share`}/shepherdr`;
+  const state = one ? `${one}/state` : `${abs(env.XDG_STATE_HOME) ?? `${HOME}/.local/state`}/shepherdr`;
+  let layout = "";
+  try { layout = fs.readFileSync(`${data}/LAYOUT`, "utf8"); } catch {}
+  return layout.trim().startsWith("2") && !fs.existsSync(path.join(HOME, ".herdr", ".layout-rollback")) ? `${state}/browser` : path.join(HOME, ".herdr", "browser");
+})();
 const BIN = path.join(HOME, ".config", "herdr-app", "bin", "herdr-browser");
 const file = (ext) => path.join(ROOT, name + ext);
 
@@ -152,10 +164,11 @@ function paint() {
       checking: ["Looking for this task's browser…"],
       opening: ["Opening the browser…"],
       closed: ["This task's browser isn't open.", "Its agent opens it when it checks a page; it closes after a while unused."],
-      error: [S.why || "The browser didn't answer."],
+      // the whole message, wrapped (its last words are the command that fixes it)
+      error: wrap(S.why || "The browser didn't answer.", Math.max(20, S.cols - 4)),
     }[S.state] ?? [];
     const top = Math.max(0, Math.floor((r - 1) / 2) - lines.length);
-    lines.forEach((l, i) => { l = l.slice(0, S.cols - 2); w(`\x1b[${top + i + 1};${Math.max(1, Math.floor((S.cols - l.length) / 2) + 1)}H${i ? ESC(2) : ""}${l}${ESC(0)}`); });
+    lines.forEach((l, i) => { l = l.slice(0, S.cols - 2); w(`\x1b[${top + i + 1};${Math.max(1, Math.floor((S.cols - l.length) / 2) + 1)}H${i && S.state !== "error" ? ESC(2) : ""}${l}${ESC(0)}`); });
     if (S.state === "closed" || S.state === "error") {
       const btns = [[" Open browser ", () => openBrowser(false)], [" Open in a window ", () => openBrowser(true)]];
       const total = btns.reduce((n, [l]) => n + l.length + 2, 0);
@@ -165,6 +178,22 @@ function paint() {
     }
   }
   bar();
+}
+
+function wrap(text, width) {
+  const out = [];
+  // the command that fixes it on a line of its own, never split
+  for (const para of text.replace(/^herdr-browser: /, "").replace(/\s*Fix it: /, "\nFix it: ").split("\n")) {
+    if (para.startsWith("Fix it: ") && para.length <= width) { out.push(para); continue; }
+    let line = "";
+    for (const word of para.split(/\s+/).filter(Boolean)) {
+      if (line && line.length + 1 + word.length > width) { out.push(line); line = ""; }
+      line = line ? `${line} ${word}` : word;
+      while (line.length > width) { out.push(line.slice(0, width)); line = line.slice(width); }
+    }
+    if (line) out.push(line);
+  }
+  return out;
 }
 
 function button(row, x, label, fn, boxed) {
@@ -210,8 +239,8 @@ async function check() {
     if (S.state !== "live" && S.state !== "opening") {
       const l = await ab("session", "list", "--json");
       const sessions = json(l.stdout)?.data?.sessions;
-      if (l.code !== 0 || !Array.isArray(sessions)) setState("error", (l.stderr || l.stdout).trim().split("\n")[0] || "agent-browser didn't answer.");
-      else if (!sessions.includes(`herdr-${name}`)) setState("closed");
+      if (l.code !== 0 || !Array.isArray(sessions)) setState("error", (l.stderr || l.stdout).trim() || "agent-browser didn't answer.");
+      else if (!sessions.includes(session)) setState("closed");
       else await connect();
     }
     await sleep(S.state === "live" ? 3000 : 4000);
@@ -335,7 +364,7 @@ async function openBrowser(headed) {
   if (!wasLive) setState("opening");
   // Headed: the same session and profile relaunched with its window shown, on the page it was on.
   const r = await ab(...(headed ? ["--headed"] : []), "open", S.url || "about:blank");
-  if (r.code !== 0) setState("error", (r.stderr || r.stdout).trim().split("\n")[0] || "The browser didn't start.");
+  if (r.code !== 0) setState("error", (r.stderr || r.stdout).trim() || "The browser didn't start.");
   else if (!wasLive) setState("checking");
 }
 

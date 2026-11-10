@@ -1,6 +1,6 @@
 {
   "name": "shepherdr",
-  "version": "3.1.26",
+  "version": "3.1.30",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -8,7 +8,7 @@
   "scripts": {
     "service": "bun service/main.ts",
     "dev": "vite --config web/vite.config.ts",
-    "build": "vite build --config web/vite.config.ts",
+    "build": "vite build --config web/vite.config.ts && vite build --config web/vite.viewer.config.ts",
     "test": "bun test service core web",
     "typecheck": "tsc --noEmit"
   },

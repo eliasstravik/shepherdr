@@ -103,6 +103,7 @@ def rows(space, d=None, auto=None):
         a_on, a_every, a_dir = autopilot
         reacting = (cfg.get("agents") or {}).get("reactions") is not False
         offering = (cfg.get("agents") or {}).get("feedback") is not False
+        suggesting = (cfg.get("agents") or {}).get("suggestions") is not False
         from .feedback import feedback_repo
         repo = feedback_repo(d)
         return [
@@ -127,6 +128,8 @@ def rows(space, d=None, auto=None):
              [("autopilot", "every"), ("autopilot", "events"), ("autopilot", "direction"), ("autopilot", None)]),
             ("reactions", "Reactions", "on (react to some of the person's messages with one emoji)" if reacting
              else "off (never react to the person's messages)", "on" if reacting else "off", [("agents", "reactions")]),
+            ("suggestions", "Suggested next message", "on (end each reply with the message you'd likely send next, greyed out in the box)"
+             if suggesting else "off (no suggested next message)", "on" if suggesting else "off", [("agents", "suggestions")]),
             ("feedback", "Feedback offers", f"on (offer once to file a BossGoat problem as an issue on {repo}, only on the person's yes)"
              if offering else "off (never offer feedback for Shepherdr; file nothing)", "on" if offering else "off",
              [("agents", "feedback"), ("agents", "feedback_repo")]),

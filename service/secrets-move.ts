@@ -1,4 +1,5 @@
-// shepherdr secrets move-to <machine|here> [--restore] [--json]: moves the secrets (the vault, ~/.herdr/vault.json) to
+// shepherdr secrets move-to <machine|here> [--restore] [--json]: moves the secrets (the vault: secrets/vault.json in
+// Shepherdr's data folder, or ~/.herdr/vault.json on a machine whose data hasn't moved yet: core/paths.js SH) to
 // another machine linked over herdr-core, which then keeps them (Settings › Secrets › Kept on runs this). Run anywhere:
 // a machine that doesn't keep them passes the move to the one that does. On the machine that keeps them, in order:
 //   1. herdr-secret there knows where secrets are kept (a release that has `herdr-secret where`), and its names for
@@ -18,8 +19,9 @@
 import { CoreClient } from "./hc/client.ts";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync, copyFileSync, chmodSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
-import { HOME } from "./paths.ts";
+import { dirname, join } from "node:path";
+import { HOME, where } from "./paths.ts";
+import { SH } from "../core/paths.js";
 import * as SC from "../core/secrets.js";
 import * as HC from "../core/host.js";
 
@@ -33,8 +35,8 @@ const [cmd, target] = args.filter((a, i) => !a.startsWith("--") && args[i - 1] !
 const say = (s: string) => { if (!json) console.log(s); };
 function fail(s: string): never { if (json) console.log(JSON.stringify({ ok: false, error: s })); else console.error(`shepherdr: ${s}`); process.exit(1); }
 
-const HERDR = join(HOME, ".herdr");
-const VAULT = join(HERDR, "vault.json"), MARK = join(HERDR, "secret-remote");
+const HERDR = join(HOME, ".herdr");   // an older Shepherdr's backups are here
+const VAULT = where().vault, MARK = where()["secret-remote"], SECRETS = dirname(VAULT);
 // herdr-secret and hc there, wherever they were installed (PATH over herdr-core's exec may not have them)
 const PATHS = 'PATH="$HOME/.local/bin:$HOME/.local/share/shepherdr/bin:${HERDR_APP_HOME:-$HOME/.config/herdr-app}/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; export PATH; ';
 
@@ -90,16 +92,18 @@ const to: string | null = toMaybe;
 
 // ---- rollback with the machine that keeps them gone ---------------------------------------------------------------
 function backups() {
-  try { return readdirSync(HERDR).filter((f) => /^vault\.json\.moved-\d{8}T\d{6}$/.test(f)).sort(); } catch { return []; }
+  // newest last, in the secrets folder or (made by an older Shepherdr) in ~/.herdr
+  const of = (d: string) => { try { return readdirSync(d).filter((f) => /^vault\.json\.moved-\d{8}T\d{6}$/.test(f)).map((f) => join(d, f)); } catch { return []; } };
+  return [...new Set([...of(HERDR), ...of(SECRETS)])].sort((a, b) => a.slice(a.lastIndexOf("/")).localeCompare(b.slice(b.lastIndexOf("/"))));
 }
 if (restore) {
   if (to !== null) fail("--restore puts this machine's own backup back: shepherdr secrets move-to here --restore.");
   if (amMain) fail("This computer keeps the secrets already.");
   if (typeof mainName === "string" && connected.includes(mainName)) fail(`${mainName} keeps them and can be reached: move them back from there, with what was added since (shepherdr secrets move-to ${me.name} --json, or Settings › Secrets).`);
-  const b = backups().pop();
+  const bp = backups().pop(), b = bp?.slice(bp.lastIndexOf("/") + 1);
   if (!existsSync(VAULT)) {
-    if (!b) fail("There's no backup of the secrets here (~/.herdr/vault.json.moved-*).");
-    copyFileSync(join(HERDR, b), VAULT);
+    if (!b) fail(`There's no backup of the secrets here (${SECRETS}/vault.json.moved-*).`);
+    copyFileSync(bp!, VAULT);
     chmodSync(VAULT, 0o600);
   }
   const next = { id: me.id, at: Date.now(), by: me.id };
@@ -160,7 +164,7 @@ const rename = renamer({ id: me.id, links }, { id: toId, links: theirs });
 // ---- 2. the vault here, in the words there; the one there backed up ----------------------------------------------
 let mine: any = { version: 1, secrets: [] };
 if (existsSync(VAULT)) {
-  try { mine = JSON.parse(readFileSync(VAULT, "utf8")); } catch { fail("The vault here (~/.herdr/vault.json) isn't valid JSON: fix it first."); }
+  try { mine = JSON.parse(readFileSync(VAULT, "utf8")); } catch { fail(`The vault here (${VAULT}) isn't valid JSON: fix it first.`); }
   if (!mine || !Array.isArray(mine.secrets)) fail("The vault here isn't a Herdr vault.");
 }
 const unnamed: string[] = [];
@@ -179,8 +183,12 @@ const moved = mine.secrets.map((e: any) => {
 });
 const key = (e: any) => `${e?.name}|${e?.scope}|${e?.machine ?? ""}|${e?.space ?? ""}`;
 let there: string | null = null;
-try { there = (await call<{ text: string }>("file.read", { path: ".herdr/vault.json", on: to })).text; }
-catch (e) { if ((e as any).kind !== "not_found") fail(`couldn't read the vault on ${to}: ${(e as Error).message}`); }
+// wherever that machine keeps it (its Shepherdr folders, or ~/.herdr on an older one)
+{
+  const r = await exec(["sh", "-c", SH + '[ -e "$SHEP_VAULT" ] || exit 3; cat "$SHEP_VAULT"'], to).catch((e) => fail(`couldn't read the vault on ${to}: ${(e as Error).message}`));
+  if (r.code === 0) there = r.stdout;
+  else if (r.code !== 3) fail(`couldn't read the vault on ${to}: ${r.stderr.trim()}`);
+}
 let keptThere: any[] = [], backup: string | null = null;
 if (there !== null && there.trim()) {
   let t: any = null;
@@ -188,7 +196,7 @@ if (there !== null && there.trim()) {
   if (!t || !Array.isArray(t.secrets)) fail(`The vault on ${to} isn't readable: move it aside there first.`);
   if (t.secrets.length) {
     backup = `vault.json.before-move-${stamp()}`;
-    const b = await exec(["sh", "-c", 'cd "$HOME/.herdr" && cp -p vault.json "$1" && chmod 600 "$1"', "sh", backup], to);
+    const b = await exec(["sh", "-c", SH + 'd=$(dirname "$SHEP_VAULT"); cp -p "$SHEP_VAULT" "$d/$1" && chmod 600 "$d/$1"', "sh", backup], to);
     if (b.code !== 0) fail(`couldn't back up the vault on ${to}: ${b.stderr.trim()}`);
     const ours = new Set(moved.map(key));
     keptThere = t.secrets.filter((e: any) => !ours.has(key(e)));
@@ -197,14 +205,14 @@ if (there !== null && there.trim()) {
 const text = JSON.stringify({ ...mine, secrets: [...moved, ...keptThere] }, null, 1);
 
 // ---- 3. written there whole, and read back --------------------------------------------------------------------------
-const WRITE = `set -e; umask 077; mkdir -p "$HOME/.herdr"; f="$HOME/.herdr/vault.json"; cat > "$f.move-tmp"
+const WRITE = `${SH}set -e; umask 077; mkdir -p "$(dirname "$SHEP_VAULT")"; f="$SHEP_VAULT"; cat > "$f.move-tmp"
 python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$f.move-tmp"`;
 const wr = await exec(["sh", "-c", WRITE], to, text);
 if (wr.code !== 0 || wr.stdout.trim() !== sha(text)) {
-  await exec(["sh", "-c", 'rm -f "$HOME/.herdr/vault.json.move-tmp"'], to).catch(() => {});
+  await exec(["sh", "-c", SH + 'rm -f "$SHEP_VAULT.move-tmp"'], to).catch(() => {});
   fail(`the vault didn't arrive whole on ${to}: nothing changed.`);
 }
-const sw = await exec(["sh", "-c", 'set -e; cd "$HOME/.herdr"; chmod 600 vault.json.move-tmp; mv vault.json.move-tmp vault.json; rm -f secret-remote'], to);
+const sw = await exec(["sh", "-c", SH + 'set -e; chmod 600 "$SHEP_VAULT.move-tmp"; mv "$SHEP_VAULT.move-tmp" "$SHEP_VAULT"; rm -f "$SHEP_SECRET_REMOTE"'], to);
 if (sw.code !== 0) fail(`couldn't put the vault in place on ${to}: ${sw.stderr.trim()}`);
 say(`Copied ${moved.length} secret${moved.length === 1 ? "" : "s"} to ${to}${keptThere.length ? ` (kept ${keptThere.length} it had)` : ""}${backup ? `; its old vault is ${backup} there` : ""}.`);
 
@@ -217,11 +225,11 @@ for (const m of connected) if (m !== to) await setDoc(SECRETS_DOC, next, m).catc
 // ---- 5. this machine's vault set aside ------------------------------------------------------------------------------
 await Bun.sleep(5000);
 const aside = `vault.json.moved-${stamp()}`;
-if (existsSync(VAULT)) { renameSync(VAULT, join(HERDR, aside)); chmodSync(join(HERDR, aside), 0o600); }
+if (existsSync(VAULT)) { renameSync(VAULT, join(SECRETS, aside)); chmodSync(join(SECRETS, aside), 0o600); }
 writeFileSync(MARK, "");
-if (json) console.log(JSON.stringify({ ok: true, to, moved: moved.length, keptThere: keptThere.length, unnamed, backupHere: existsSync(join(HERDR, aside)) ? aside : null, backupThere: backup }));
+if (json) console.log(JSON.stringify({ ok: true, to, moved: moved.length, keptThere: keptThere.length, unnamed, backupHere: existsSync(join(SECRETS, aside)) ? aside : null, backupThere: backup }));
 else {
-  say(`${to} keeps the secrets now. This computer's copy is ~/.herdr/${aside} (to roll back: shepherdr secrets move-to ${me.name}, from anywhere).`);
+  say(`${to} keeps the secrets now. This computer's copy is ${join(SECRETS, aside)} (to roll back: shepherdr secrets move-to ${me.name}, from anywhere).`);
   if (unnamed.length) say(`${to} doesn't link what these were kept for, so they keep this machine's names: ${unnamed.join(", ")}.`);
 }
 c.close();

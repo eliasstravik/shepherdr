@@ -2,6 +2,7 @@
 // person keeps or declines one (never the value). The window's masked card (lib/secrets.js) and the web app's say the
 // same. Shared core: the source is core/secrets.js; bin/sync-shared copies it into the mods in lib/COPIES.
 
+import { PY } from "./paths.js";
 export const NAME = /^[A-Za-z_][A-Za-z0-9_]{0,99}$/;
 export const ASK = "herdr.secret.ask.";
 
@@ -25,7 +26,7 @@ export const declinedLine = (name) => `<hc from="person" secret="${name}">Declin
 // services name the one they're on now (autoKeeper) and the machine serving the web app moves them to itself, the safe
 // way (followTo: `shepherdr secrets move-to`, with its backup and rollback); a later Serve from change carries them along
 // the same way. The person picking another machine in Kept on overrides it (a record without auto); picking the Serve
-// from machine follows it again. No record anywhere yet: the machine without ~/.herdr/secret-remote keeps them
+// from machine follows it again. No record anywhere yet: the machine without ~/.local/share/shepherdr/secrets/remote keeps them
 // (bin/herdr-secret remote()). `shepherdr secrets move-to <machine>` moves them (service/secrets-move.ts).
 export const SECRETS_DOC = "shepherdr.secrets";
 
@@ -51,10 +52,12 @@ export function believeRecord(mine, there) {
 /**
  * The machine that keeps the secrets now, when nobody named one (the same answer on every machine that sees the same
  * facts): where they already are, so nothing moves under a running agent (followTo then moves them to Serve from):
- *   1. the machine whose vault (~/.herdr/vault.json) has secrets in it, not marked remote;
+ *   1. the machine whose vault (~/.local/share/shepherdr/secrets/vault.json) has secrets in it, not marked remote;
  *   2. several: the one with the most that isn't serving the web app (moving it there keeps the other's entries:
  *      `move-to` merges), else the lowest id;
- *   3. none has any: the machine serving the web app.
+ *   3. none has any: the machine serving the web app;
+ *   4. none has any, none serves the web app, and every machine is marked remote (each installed the other's copy):
+ *      the lowest id, else none could ever keep a secret (#800). Some not marked: each keeps its own, as before.
  * machines: [{ id, count, remote }] (count: secrets in its vault, 0 without one; null: unknown, it can't be asked now).
  * host: the id of the machine serving the web app (shepherdr.host), or null.
  * Returns { id } or null: nothing to decide yet (no vault seen with a machine still unknown, or no host to fall back on).
@@ -68,7 +71,8 @@ export function autoKeeper(machines, host) {
   }
   // no vault anywhere seen: only when every machine answered (a sleeping laptop may hold them)
   if (ms.some((m) => m.count == null)) return null;
-  return host ? { id: host } : null;
+  if (host) return { id: host };
+  return ms.length && ms.every((m) => m.remote) ? { id: [...ms].map((m) => m.id).sort()[0] } : null;
 }
 
 /** Secrets that follow Serve from but are kept elsewhere: the id of the machine serving the web app to move them to,
@@ -81,14 +85,14 @@ export function followTo(record, host, me) {
 // Run with python3 on a machine: how many secrets its vault has (never a value), and whether it's marked remote.
 export const COUNT_SCRIPT = `
 import json, os
-h = os.path.join(os.path.expanduser("~"), ".herdr")
+${PY}
 n = 0
 try:
-    with open(os.path.join(h, "vault.json")) as f:
+    with open(SHEP(".herdr/vault.json")) as f:
         n = len(json.load(f).get("secrets") or [])
 except Exception:
     n = 0
-print(json.dumps({"count": n, "remote": os.path.exists(os.path.join(h, "secret-remote"))}))
+print(json.dumps({"count": n, "remote": os.path.exists(SHEP(".herdr/secret-remote"))}))
 `;
 
 /** The words for where secrets are kept: "This computer", a machine's name, or its id when it isn't linked. */

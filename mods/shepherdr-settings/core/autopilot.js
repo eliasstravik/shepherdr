@@ -1,9 +1,9 @@
 // Autopilot's words and picks, the same in the window (Settings › Autopilot: mods/shepherdr-settings/autopilot-section.js;
 // the header's switch: mods/pane-chat/autopilot.js) and on the web (service/compat.ts, web/plugins/coordinators).
 // Set as Tasks is: Everywhere's heartbeat, schedule and events, and a space's own where it sets one (Shepherdr settings,
-// ~/.herdr/shepherdr.json "autopilot" = { every, events, heartbeat } in "everywhere" and in "spaces"[id], travelling
+// ~/.config/shepherdr/settings.json "autopilot" = { every, events, heartbeat } in "everywhere" and in "spaces"[id], travelling
 // to every machine with the rest). A space switches it on or off in its Assistant's header. herdr-task keeps each
-// space's switch and how its wakes go (mods/tasks/bin/herdr_task/autopilot.py, ~/.herdr/tasks/.autopilot.json, whose
+// space's switch and how its wakes go (mods/tasks/bin/herdr_task/autopilot.py, ~/.local/share/shepherdr/tasks/.autopilot.json, whose
 // "everywhere" {every, events} and the heartbeat file everywhere.md are Everywhere's from before Settings kept them,
 // still read where Settings sets none). pilotFor() is herdr-task's resolve(), for the header, which reads the files
 // itself, and for a space herdr-task has no record of yet; core/autopilot.cases.json holds the cases both sides are

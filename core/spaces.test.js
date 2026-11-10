@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { spaceName, tilde, sharedNames, gitTail, inOrder, withOrder, keptOrder } from "./spaces.js";
+import { spacesFromDoc, spaceName, tilde, sharedNames, gitTail, inOrder, withOrder, keptOrder, machinesInOrder, byMachineOrder, withMachineOrder, machineOrderOf } from "./spaces.js";
 
 test("two spaces with one name on a machine each show their folder, from ~ (the sidebar's rows, both sides)", () => {
   // built, so the repo's no-home-paths rule has nothing to find
@@ -52,4 +52,32 @@ test("a drag keeps the spaces it didn't show (in a section, hidden) where they w
   expect(d.pinned).toEqual(["x"]);
   expect(withOrder({}, "vm", ["vm/home", "vm/t"]).order).toEqual({ vm: ["vm/home", "vm/t"] });
   expect(keptOrder(["a", "b", "c"], ["c", "a"])).toEqual(["c", "a", "b"]);
+});
+
+// SHEP-153: the machines in the order the person dragged them into
+test("machines show in the saved order; a new one goes last, a gone one leaves no gap", () => {
+  expect(machinesInOrder([null, "vm", "mini"], undefined)).toEqual(["", "vm", "mini"]);
+  expect(machinesInOrder([null, "vm", "mini", "new"], ["mini", "gone", "", "vm"])).toEqual(["mini", "", "vm", "new"]);
+  const list = [sp("a"), sp("vm/1", "vm"), sp("b"), sp("mini/1", "mini"), sp("vm/2", "vm")];
+  expect(ids(byMachineOrder(list, ["mini", "vm"]))).toEqual(["mini/1", "vm/1", "vm/2", "a", "b"]);
+  expect(ids(byMachineOrder(list, []))).toEqual(ids(list));
+});
+
+test("a machine drag keeps the ones it didn't show where they were, and the rest of the sidebar's data", () => {
+  const d = withMachineOrder({ pinned: ["x"], machineOrder: ["", "far", "vm"] }, ["vm", null]);
+  expect(d.machineOrder).toEqual(["vm", "", "far"]);
+  expect(d.pinned).toEqual(["x"]);
+  expect(machineOrderOf({ machineOrder: ["a", 3, "b"] })).toEqual(["a", "b"]);
+});
+
+// #818: another machine's herdr-app document already names its terminals with that machine ("box/t6"): its tab's
+// chat key read "t:box/box/t6", no such terminal, Reconnecting… for ever
+test("another machine's tab keeps one machine on its terminals, as written or not", () => {
+  const doc = { spaces: [{ id: "s1", name: "docs", folder: "/srv/docs", tabs: [{ id: "tab2", name: "Claude Code", root: { children: [{ content: { props: { terminal: "box/t6" } } }, { content: { terminal: "t7" } }] } }] }] };
+  const [s] = spacesFromDoc(doc, "box");
+  expect(s.id).toBe("box/s1");
+  expect(s.tabs[0].id).toBe("box/tab2");
+  expect(s.tabs[0].terminals).toEqual(["box/t6", "box/t7"]);
+  // this machine's own: as written
+  expect(spacesFromDoc(doc, null)[0].tabs[0].terminals).toEqual(["box/t6", "t7"]);
 });

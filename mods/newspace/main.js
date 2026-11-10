@@ -31,10 +31,12 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Popup } from "gpui-base";
 import { props, theme, home, exec, pickFolder, closeOverlay, openOverlay, shared, setShared, focused, machines } from "herdr";
+import { keepKeys, dropKeys } from "./keyholder.js";
 import { spaces, inRender } from "./live.js";
 import { dialogFooter, button, TEXT, RADIUS } from "./ui.js";
 import { NEWSPACE as K, readShepherdr, shepherdrFor, LOCAL_MACHINE, autoCoordinator, recentFolders, homeOf } from "./coordinator.js";
 import * as N from "./core/newspace.js";
+import * as S from "./core/spaces.js";
 
 // The suggestions' width (the field's: the dialog's 460 less its padding, the icon, Browse… and the gaps).
 const LIST_W = 290;
@@ -44,8 +46,12 @@ const MACHINE_W = 424;
 // its name unless renamed, its emoji or none (its server or monitor icon).
 const lookOf = (m) => { const l = shared("spaces-chat")?.machines?.[m ?? ""] ?? {}; return { name: l.name || (m ?? "This computer"), icon: l.icon ?? null }; };
 // The machines a space can be made on: this computer and each connected one (coordinator.js newSpace's choosing).
-const reachableMachines = () =>
-  N.reachable([{ key: null, on: true }, ...machines().filter((m) => m.name).map((m) => ({ key: m.name, on: m.layout === "ready" }))]);
+// In the sidebar's order (shared "spaces-chat".machineOrder, SHEP-153).
+const reachableMachines = () => {
+  const list = [{ key: null, on: true }, ...machines().filter((m) => m.name).map((m) => ({ key: m.name, on: m.layout === "ready" }))];
+  const keys = S.machinesInOrder(list.map((m) => m.key), S.machineOrderOf(shared("spaces-chat")));
+  return N.reachable(keys.map((k) => list.find((m) => (m.key ?? "") === k)));
+};
 // The icon picker's answer (mods/spaces-chat rename.js PICK): { for (this overlay), emoji, at }.
 const PICK = "spaces-chat.iconpick";
 // The home folder paths are shown from: the dialog's machine's (props.home).
@@ -56,6 +62,9 @@ const tilde = (p) => N.tilde(p, HOME);
 const base = (p) => N.base(p, HOME);
 const pathOf = (text) => N.pathOf(text, HOME);
 const { scratch, parent, NEW_REPO, SUBFOLDERS, WORDS: W } = N;
+
+// Who holds the keyboard while this dialog is open (keyholder.js).
+const HOLDER = "dialog:newspace";
 
 export default class NewSpace extends View {
   init(_props, cx) {
@@ -88,6 +97,9 @@ export default class NewSpace extends View {
     this.input.on("blur", (_e, cx) => { this.focused = false; cx.notify(); });
     this.input.focus();
     cx.timer.after(300, () => this.input.focus());
+    // The keyboard is this dialog's while it is open: the chat behind it takes nothing back (#752).
+    keepKeys(HOLDER);
+    cx.timer.every(2000, () => { if (!this.closed) keepKeys(HOLDER); });
     this.check(cx);
   }
 
@@ -211,6 +223,8 @@ export default class NewSpace extends View {
   }
 
   close() {
+    this.closed = true;
+    dropKeys(HOLDER);
     closeOverlay(props().overlay);
   }
 
@@ -382,9 +396,12 @@ export default class NewSpace extends View {
     const choosing = N.choosesMachine(keys);
     const input = Input.new(this.input).w_full().h(K.field).px(10).items_center().rounded(RADIUS.control).border(1)
       .border_color(this.focused ? t.accent : t.input).bg(t.background).text_color(t.foreground);
-    // The suggestions hang under the field in the window's top layer, only while they're open.
+    // The suggestions hang under the field in the window's top layer, only while they're open. At most 8 rows
+    // show and the rest scroll: a definite height, as overflow_y_scrollbar()'s box takes the height but not a
+    // max_h (with one, it had nothing to scroll and cut off the rows past 8, GitHub #842).
+    const shown = Math.min(8, rows.length + (empty ? 1 : 0));
     const list = Popup.new("folder-list", input).flex_1().min_w(0).anchor("top_left")
-      .when(rows.length > 0 || Boolean(empty), (el) => el.content(v_flex().id("folder-rows").w(LIST_W).max_h(K.row * 8 + 8).overflow_y_scrollbar().mt(4).p(4).rounded(8).border(1).border_color(t.border).bg(t.popover).shadow_lg().text_size(13)
+      .when(rows.length > 0 || Boolean(empty), (el) => el.content(v_flex().id("folder-rows").w(LIST_W).h(K.row * shown + 8).overflow_y_scrollbar().mt(4).p(4).rounded(8).border(1).border_color(t.border).bg(t.popover).shadow_lg().text_size(13)
         .children(rows.map((r, i) => this.row(t, `folder-${i}`, i === this.hi, r.path, (cx) => this.pick(r.path, cx), r.up)))
         .when(Boolean(empty), (el) => el.child(div().h(K.row).flex_none().px(9).flex().items_center().text_color(t.dim).child(empty)))));
     const panel = v_flex().id("newspace").w_full().flex_none().p(K.pad).rounded(10).border(1).border_color(t.border).bg(t.popover).shadow_lg().text_size(13)

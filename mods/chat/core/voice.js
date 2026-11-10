@@ -9,6 +9,7 @@
 // Shared core: the source is core/voice.js.
 
 import { DOS } from "./screen.js";
+import { PY } from "./paths.js";
 
 export const API = "https://api.elevenlabs.io/v1";
 
@@ -36,6 +37,7 @@ How you speak (a voice call: this matters most):
 - No preambles, no recaps, no lists read out, no "I can also..." offers. More detail only when asked.
 - Numbers and names plainly ("SHEP 45", "three tasks"). Never read out code, paths, links or ids letter by letter.
 - Before a tool that takes a moment (look, send, act, screen), first say one or two words in the call's language ("On it.", "Checking."), never a sentence about what you will do. Then the tool, then the answer.
+- One calm, even tone all call long, whatever the news: never audio tags or stage directions in brackets ("[happy]", "[whispers]").
 - Silence is fine. If the person says nothing, say nothing: never ask if they're there or want something. Just wait.
 - Speak the language the person speaks: English at first, theirs as soon as they speak another (switch with language_detection), back when they go back, any number of times. The exact words below are English: say them in the call's language.
 
@@ -46,7 +48,8 @@ Moving around (switch to a space or chat, open a task, tab, panel, artifact or S
 - Say what is on screen only when the person asks what it shows.
 
 Ending the call:
-- When the person wants to end the call, ask exactly "Are you sure you want to end the call?" After a clear yes, say "Bye." and use end_call. No yes, no end.
+- When the person wants to end the call, ask exactly "Are you sure you want to end the call?" After a clear yes, say "Bye." and use hang_up. No yes, no end.
+- Never end the call for any other reason: not after a send, not when a task is done, not when it's quiet. The person keeps the call as long as they want.
 - Never talk about clicking or buttons to end it, and never use screen to hang up.
 
 Rules:
@@ -77,7 +80,7 @@ const tool = (name, description, props, required = [], speech = "force") =>
 /** What a look can read, an open can show and an act can do (service/voice-tools.ts answers each). */
 export const LOOKS = ["here", "chat", "spaces", "machines", "tasks", "task", "needs", "news", "autopilot", "automations", "settings", "secrets", "artifacts", "data"];
 export const OPENS = ["space", "task", "tasks", "needs", "artifacts", "files", "changes", "terminal", "artifact", "settings", "chat"];
-export const TABS = ["chat", "terminal", "files", "changes", "pr", "browser", "review"];
+export const TABS = ["chat", "terminal", "pr", "browser", "review"];
 /** the call's own view (call_view): full screen or minimized */
 export const VIEWS = ["full", "minimized"];
 export const ACTS = ["accept", "start", "schedule", "unschedule", "stop", "resume", "done", "reopen", "delete", "pin", "unpin",
@@ -94,7 +97,7 @@ export const TOOLS = [
   tool("open", "Show something in the person's app, the one the call runs in: a space, a task (on a tab), the Tasks panel, Needs you, the shown space's Artifacts, Files or Changes panel or its Assistant's terminal, an artifact, a Settings page, or a chat (a space's Assistant or a task's agent).", {
     what: { type: "string", enum: OPENS, description: "What to show. artifacts, files, changes, terminal: the shown space's panel (id a space's name to switch first). settings: id is the page (Secrets, Window, Voice...)." },
     id: PLACE,
-    tab: { type: "string", enum: TABS, description: "A task's tab: chat, terminal, files, changes, pr (pull request), browser, or review (a Ready task's Accept card)." },
+    tab: { type: "string", enum: TABS, description: "A task's tab: chat, terminal, pr (pull request: its changes), browser, or review (a Ready task's Accept card)." },
     query: { type: "string", description: "tasks: a state to filter by (working, ready, needs, queued, scheduled, todo, done) and/or words to type in its filter box." },
   }, ["what"], "auto"),
   tool("send", "Write a message as the person: to a space's Assistant (by the space's name) or a task's agent (by its id), or the chat on screen (\"here\"). Also how to ask an Assistant to make, plan or change things.", {
@@ -121,6 +124,8 @@ export const TOOLS = [
   tool("call_view", "Show the call full screen (full: the call fills the person's screen) or minimize it (minimized: the app shows, the call in its bar). The web app's call only. Opening things minimizes it by itself.", {
     view: { type: "string", enum: VIEWS, description: "full: the full-screen call. minimized: the app, with the call in its bar." },
   }, ["view"], "auto"),
+  // SHEP-173: Shepherdr ends the call (hangUpGuard), only right after the person said yes to ending it
+  tool("hang_up", "End the call. Only right after the person said yes to \"Are you sure you want to end the call?\" on this call: never after a send, a task or a quiet moment.", {}, [], "auto"),
 ];
 
 /** What the agent says first: short, then it listens. */
@@ -129,8 +134,10 @@ export const FIRST = "Hi, go ahead.";
 // ElevenLabs' own system tools, listed with ours (a built_in_tools field beside inline tools is dropped): end_call hangs
 // up (only after the person's yes, the prompt says), skip_turn stays quiet.
 const system = (name, description, params = {}) => ({ type: "system", name, description, params: { system_tool_type: name, ...params } });
+// SHEP-173: no end_call system tool. The model used it on its own, right after "Passed it to <name>." (ElevenLabs'
+// records: four of the person's calls ended so, with no yes asked); hang_up is ours, and Shepherdr ends the call only
+// when the person just said yes (hangUpGuard).
 export const SYSTEM_TOOLS = [
-  system("end_call", "End the call. Only after the person said yes to ending it on this call."),
   system("skip_turn", "Say nothing this turn: when the person says to wait or hold on, or is clearly talking to someone else.", { wait_timeout_secs: -1 }),
   // switches the call's language (voice and words) all call long, not only at its start (SHEP-104)
   system("language_detection", "Switch the call's language: as soon as the person speaks another language than the call's, or asks for one. Again each time they change, back to English too.", { only_at_conversation_start: false }),
@@ -140,14 +147,22 @@ export const SYSTEM_TOOLS = [
 // another), English being the call's own. The speech model speaks them all (eleven_v4_turbo, GET /v1/models). None has
 // a first message of its own: a call always starts in English (language_presets).
 export const TTS_MODEL = "eleven_v4_turbo";
+
+// SHEP-162: one even voice all call long. With eleven_v4_turbo ElevenLabs turns on expressive mode by default: the LLM
+// writes audio tags ("[happy]", "[whispering]") that the voice acts out, so it swung from dark to light within a call.
+// Off, with the voice pinned (ElevenLabs' default agent voice, Eric) and its stability up from 0.5 (ElevenLabs:
+// 0.60-0.85 keeps delivery consistent), the same voice says every turn in every language.
+export const VOICE_ID = "cjVigY5qzO86Huf0OWal";
+export const TTS = { model_id: TTS_MODEL, voice_id: VOICE_ID, expressive_mode: false, stability: 0.75, similarity_boost: 0.75, speed: 1, agent_output_audio_format: "pcm_16000" };
 export const LANGUAGES = ("zh es hi pt pt-br fr de ja ar ko id it nl tr pl ru sv tl fil ms ro uk el cs da fi bg hr sk ta vi no hu af hy " +
   "as ast az be bn bs ca yue et gl ka gu ha he is ga jv kn kk ky lv lt lb mk ml mt mi mr my mn ne oc or ps fa pa " +
   "sr sd sl so sw tg te th ur uz yo cy am lo lg sn ckb wo zu").trim().split(" ");
 
 // Silence: the agent never prompts a quiet person (turn_timeout -1: no "are you there?"), and only a call silent for
-// 15 minutes ends (a forgotten call stops costing); any call ends after an hour (ElevenLabs' default is 10 minutes).
-export const SILENT_END_SECS = 900;
-export const MAX_CALL_SECS = 3600;
+// 30 minutes ends (a forgotten call stops costing); any call ends after two hours, the most ElevenLabs allows
+// (SHEP-173: it refuses more than 7200; its default is 10 minutes).
+export const SILENT_END_SECS = 1800;
+export const MAX_CALL_SECS = 7200;
 
 // SHEP-113: the model slow to start a reply: after 3 s a short filler of its own words (in the call's language), the
 // fixed one only if it can't. turn.soft_timeout_config, timeout_seconds 0.5..8 (-1 off):
@@ -169,7 +184,7 @@ export const agentSpec = () => ({
     conversation: { max_duration_seconds: MAX_CALL_SECS },
     // Scribe hears any language; the speech model speaks them all, in the same voice
     asr: { user_input_audio_format: "pcm_16000" },
-    tts: { model_id: TTS_MODEL, agent_output_audio_format: "pcm_16000" },
+    tts: TTS,
     language_presets: Object.fromEntries(LANGUAGES.map((l) => [l, { overrides: {} }])),
   },
   platform_settings: {
@@ -239,8 +254,14 @@ export const opening = (where = "") => ({ type: "conversation_initiation_client_
 /** The person moved in the app during the call: a quiet note of where they are now. */
 export const whereLine = (where) => ({ type: "contextual_update", text: `[Update] The person's app now shows: ${String(where).slice(0, 600)}` });
 
-// An agent the call follows replied in its chat: the voice agent says it.
-export const replyLine = (who, text) => ({ type: "user_message", text: `[Update] ${who} replied: """${String(text).slice(0, 3000)}""" Tell the person what it says, briefly.` });
+// An agent the call follows replied in its chat: the voice agent says it. A long reply goes whole; one past REPLY_MAX
+// is cut and says so, so the voice agent knows the rest is in the chat (#785).
+export const REPLY_MAX = 40000;
+export function replyLine(who, text) {
+  const t = String(text);
+  const body = t.length > REPLY_MAX ? `${t.slice(0, REPLY_MAX)}""" (cut short here; the rest is in the chat: look at the chat to read it.)` : `${t}"""`;
+  return { type: "user_message", text: `[Update] ${who} replied: """${body} Tell the person what it says, briefly.` };
+}
 
 /**
  * Several [Update]s that came together, as one (SHEP-105): quiet notes stay quiet notes; what is said out loud goes as
@@ -277,6 +298,7 @@ export function toolWords(name, params = {}) {
   if (name === "act") return p.confirmed === true ? ACT_WORDS[p.action] ?? "making the change" : "checking";
   if (name === "screen") return p.do === "look" ? "reading the screen" : "using the screen";
   if (name === "call_view") return p.view === "full" ? "showing the call" : "minimizing the call";
+  if (name === "hang_up") return "ending the call";
   return "working";
 }
 
@@ -299,6 +321,56 @@ export function turnGate(maxMs = 30000) {
     // a tool that never came back holds four times as long at most
     holding: (now = Date.now()) => (tools > 0 && now - at < maxMs * 4) || (owed && now - at < maxMs),
   };
+}
+
+/**
+ * SHEP-173: whether hang_up may end the call now. Fed the voice agent's events as they come (seen): the call ends only
+ * when the agent's last words before the person's latest were a question ("Are you sure you want to end the call?", in
+ * any language) and no other tool ran since the person spoke. A hang_up right after a send ("Passed it to ...") is
+ * refused, with what to do instead (REFUSED).
+ */
+export function hangUpGuard() {
+  let lastSaid = "", asked = false, spoke = false, toolsSince = 0;
+  return {
+    seen(type, text = "") {
+      if (type === "agent_response") lastSaid = String(text ?? "");
+      else if (type === "user_transcript") { spoke = true; asked = /[?？؟]\s*$/.test(lastSaid.trim()) || /[?？؟]/.test(lastSaid); toolsSince = 0; }
+      else if (type === "client_tool_call" && text !== "hang_up") toolsSince++;
+    },
+    may: () => spoke && asked && toolsSince === 0,
+  };
+}
+export const HUNG_UP = JSON.stringify({ ok: true, result: "The call ends once you've said Bye." });
+export const REFUSED = JSON.stringify({ ok: false, result: "Not ended: the person didn't just say yes to ending the call. Never end it on your own. If they asked to end it, ask exactly \"Are you sure you want to end the call?\" and use hang_up only after their yes; else carry on, say nothing about it." });
+
+/** Why the voice agent's socket closed, in a few plain words for "Call ended: ..." (null: the agent hung up after the
+ *  person's yes, nothing to say). ElevenLabs closes with 1000 at its limits and says which in the reason. */
+export function closeWords(code, reason = "") {
+  const r = String(reason ?? "");
+  if (/max(imum)? duration|duration/i.test(r)) return `it reached the ${Math.round(MAX_CALL_SECS / 3600)}-hour limit`;
+  if (/silen|inactiv|no user message/i.test(r)) return "it was quiet for a long time";
+  if (code === 1000) return "the voice service ended it";
+  if (code !== 1006 && r.trim()) return `the voice service closed it (${r.trim().slice(0, 120)})`;
+  return "the connection to the voice service was lost";
+}
+
+/** SHEP-173: the end chime, two soft notes going down (E5, then C5, about half a second), as 16-bit mono PCM at rate:
+ *  played whenever a call ends, at the system's volume. */
+export function chimePcm(rate = 16000) {
+  const notes = [[659.25, 0, 0.22], [523.25, 0.16, 0.34]];
+  const len = Math.ceil(rate * 0.52);
+  const out = new Int16Array(len);
+  for (const [f, start, dur] of notes) {
+    const a = Math.floor(start * rate), n = Math.floor(dur * rate);
+    for (let i = 0; i < n && a + i < len; i++) {
+      const t = i / rate;
+      // a quick soft attack, then a bell-like fade
+      const env = Math.min(1, t / 0.012) * Math.exp(-t * 7);
+      const v = 0.22 * env * (Math.sin(2 * Math.PI * f * t) + 0.25 * Math.sin(4 * Math.PI * f * t));
+      out[a + i] = Math.max(-32767, Math.min(32767, out[a + i] + v * 32767));
+    }
+  }
+  return out;
 }
 
 /** Something anywhere needs the person (a question, a secret, a task Ready): one short line, said out loud. */
@@ -340,6 +412,7 @@ export const unreachable = (name) => `Can't reach ${name}, which keeps your secr
 // key). Reads the vault's Everywhere entry, else the old secrets/elevenlabs.env there.
 export const KEY_SCRIPT = `
 import hashlib, json, os
+${PY}
 H = os.path.expanduser("~")
 app = os.environ.get("HERDR_APP_HOME") or os.path.join(H, ".config", "herdr-app")
 def env(p):
@@ -358,7 +431,7 @@ def env(p):
     return out
 key = ""
 try:
-    with open(os.path.join(H, ".herdr", "vault.json")) as f:
+    with open(SHEP(".herdr/vault.json")) as f:
         v = json.load(f)
     key = next((e["value"] for e in v.get("secrets", []) if e.get("name") == "${KEY_NAME}" and e.get("scope") == "everywhere" and isinstance(e.get("value"), str)), "")
 except Exception:

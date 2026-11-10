@@ -30,7 +30,13 @@ export function spaceMenu({ unread = false, pinned = false, git = null, assistan
   ];
 }
 
-export const machineMenu = () => [{ id: "rename", label: "Rename…", icon: "square-pen" }];
+// A machine's menu: its name and emoji, and its place among the machines (SHEP-153; first and last can't go further).
+export const machineMenu = ({ first = true, last = true } = {}) => [
+  { id: "rename", label: "Rename…", icon: "square-pen" },
+  ...(first && last ? [] : [{ sep: true }]),
+  ...(first ? [] : [{ id: "up", label: "Move up", icon: "arrow-up" }]),
+  ...(last ? [] : [{ id: "down", label: "Move down", icon: "arrow-down" }]),
+];
 
 export const sectionMenu = () => [
   { id: "rename", label: "Rename…", icon: "square-pen" },

@@ -7,10 +7,10 @@ import json
 import os
 import re
 
-from .base import Fail, HOME, git
-from .github import BAD, PENDING, pr_view
+from .base import Fail, HOME, git, WHERE
+from .github import BAD, CANT_READ_CHECKS, PENDING, pr_view
 
-ARTIFACTS = os.path.join(HOME, ".herdr", "artifacts")
+ARTIFACTS = WHERE.path("artifacts")
 # Files named on the card, and commits.
 FEW = 3
 
@@ -88,6 +88,9 @@ def checks_of(t):
         return {"state": "failed", "text": f"{len(bad)} failing: " + ", ".join(bad[:FEW])}
     if running:
         return {"state": "running", "text": f"{len(running)} of {len(rows)} still running"}
+    if v.get("checks_unknown"):
+        # SHEP-179: this machine's GitHub token can't read its checks: never said to pass
+        return {"state": "unknown", "text": CANT_READ_CHECKS}
     if not rows:
         return {"state": "none", "text": "No checks on its pull request"}
     return {"state": "passed", "text": f"All {len(rows)} passed"}

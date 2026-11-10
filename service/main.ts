@@ -7,14 +7,14 @@
 //   SHEPHERDR_WEB=on|off           serve the web app and share it on the tailnet (default on)
 // Serve from (service/host.ts): one machine serves the web app and holds the shared data; on the others the service
 // reads and writes it there, keeps their settings in step (service/sync.ts) and doesn't share /shepherdr.
-import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, rmSync, watchFile } from "node:fs";
 import { join, normalize } from "node:path";
 import { randomBytes } from "node:crypto";
-import { DATA, SOCK, TOKEN, PORT, HOME, ensureData, settingsFile } from "./paths.ts";
+import { DATA, SOCK, TOKEN, PORT, HOME, ensureData, settingsFile, where } from "./paths.ts";
 import { holdLock } from "./lock.ts";
 import { gate, localCaller, type Gate } from "./auth.ts";
-import { trustedPeer } from "./peer.ts";
-import { whoami, share, served, unshare, restoreShare, type Me } from "./tailscale.ts";
+import { refusedWhy, trustedPeer } from "./peer.ts";
+import { whoami, share, served, unshare, restoreShare, httpsPort, webLink, webOrigin, HTTPS_PORT_FILE, type Me } from "./tailscale.ts";
 import { qrFile } from "./qr.ts";
 import { Hub } from "./hub.ts";
 import { Store } from "./store.ts";
@@ -30,13 +30,15 @@ import { Chats } from "./chats.ts";
 import { act, hc as hcRun } from "./actions.ts";
 import { AgentWatch } from "./watch.ts";
 import { Compat, activity, newsKey, placeKey } from "./compat.ts";
+import { keep, served as fileResponse, smaller } from "./media.ts";
 import { Asks } from "./asks.ts";
 import { Jobs } from "./jobs.ts";
 import { terminalBridge } from "./terminal.ts";
 import { worktree } from "./worktree.ts";
 import * as W from "../core/worktree.js";
+import * as SPm from "../core/spaces.js";
 import { browserRelay } from "./browser.ts";
-import { voiceCall, callToResume, pageWhere, type ChatView } from "./voice.ts";
+import { voiceCall, callToResume, callsOn, pageWhere, type ChatView } from "./voice.ts";
 import { hearing, type HearIO, type Hearing } from "./voice-hear.ts";
 import { voiceTool, type VoiceIO, type Where } from "./voice-tools.ts";
 import { Artifacts } from "./artifacts.ts";
@@ -66,12 +68,20 @@ const { REACH_FILE, reachable } = MN as any;
 
 // A machine's reach map, as its spaces: kept a minute (its scheduler redraws it every 5)
 const reaches = new Map<string, { at: number; got: Promise<{ from: string | null; spaces: any[]; checked: number | null }> }>();
+// The spaces the service already knows (the sidebar's list, each with its place's name): a reach map that reads a
+// machine's document as empty still lists them (core/mentions.js reachable, SHEP-185).
+function knownSpaces() {
+  return compat.allSpaces().map((s) => {
+    const p = compat.last?.places.find((x) => x.id === s.id);
+    return { id: s.id.split("/").pop()!, name: p?.name ?? "", folder: s.folder, machine: s.machine ?? null, ...(p?.emoji ? { emoji: p.emoji } : {}), assistant: !!p?.assistantTab?.live };
+  });
+}
 function reachOf(machine: string | null) {
   const k = machine ?? "", was = reaches.get(k);
   if (was && Date.now() - was.at < 60_000) return was.got;
   const got = exec(hub, ["sh", "-c", REACH_FILE], machine, 20).then((r) => {
     const d = JSON.parse(r.stdout || "null");
-    return { from: d?.graph?.core?.name ?? machine, spaces: reachable(d?.graph), checked: d?.at ?? null };
+    return { from: d?.graph?.core?.name ?? machine, spaces: reachable(d?.graph, knownSpaces()), checked: d?.at ?? null };
   }).catch(() => null).then((r) => r?.checked ? r : {
     // no map there yet (its scheduler hasn't run): its own spaces, which it always reaches
     from: machine, checked: null,
@@ -110,7 +120,14 @@ const store = new Store(hub, host);
 new Sync(hub, host).start();
 let me: Me | null = await whoami();
 const g: Gate = { owner: me?.login ?? null, dns: me?.dns ?? null, port: PORT, token };
-const live = new Live(hub, store, () => me, VERSION);
+// the 403 reason last logged for a Mac that can't see who connected (peer.ts refusedWhy), said once
+let saidPeer = "";
+// the tailnet HTTPS port the web app is shared on (tailscale.ts httpsPort: 443 unless this machine set another),
+// looked at again with the rest of the tailnet; ownLink: this machine's own link on it
+let hp = httpsPort();
+g.httpsPort = hp;
+const ownLink = () => (me ? webLink(me.dns, hp) : null);
+const live = new Live(hub, store, () => me, VERSION, ownLink);
 const compat = new Compat();
 const model = new Model(hub, live);
 live.chats = new Chats(hub);
@@ -118,7 +135,7 @@ live.compat = compat;
 compat.reader = (a) => live.chats?.reader(a) ?? null;
 // the chat scrolled to its top: the page before (as the window's loadEarlier)
 (compat as any).earlier = (a: string) => live.chats?.earlier(a);
-const push = new Push(() => (me ? `https://${me.dns}` : "https://herdr.dev"));
+const push = new Push(() => (me ? webOrigin(me.dns, hp) : "https://herdr.dev"));
 // only the machine that serves the web app sends push alerts (its pages subscribed there): never two of one alert
 const pushSend = push.send.bind(push);
 push.send = ((a: any) => (host.serving() ? pushSend(a) : Promise.resolve())) as typeof push.send;
@@ -212,7 +229,7 @@ const settings = new Settings();
 const readDefaults = async () => {
   try {
     let check: any = {};
-    try { check = JSON.parse(readFileSync(join(HOME, ".herdr", "cli-check.json"), "utf8"))?.machines?.[""] ?? {}; } catch {}
+    try { check = JSON.parse(readFileSync(where()["cli-check"], "utf8"))?.machines?.[""] ?? {}; } catch {}
     const defaults = await compat.agents!.ownDefaults();
     settings.choices = SC.choicesFrom(defaults, { claude: check.claude !== "missing", codex: check.codex !== "missing", cursor: defaults.cursor.installed });
     model.rebuild();
@@ -292,7 +309,7 @@ store.on(() => model.rebuild());
 void store.load().catch(() => {});
 const snapshotOf = (b: Parameters<NonNullable<typeof model.onBuild>>[0]) => live.setSnapshot(alertNewAnd(compat.snapshot({
   host: me?.host ?? "this machine", user: me?.name ?? "You", spaces: b.spaces, sections: b.sections, rows: b.rows, artifacts: artifacts.list, automations: b.automations,
-  settings: [...settings.sections(webNow ?? (me ? `https://${me.dns}/shepherdr/` : null), b.spaces.map((s: any) => ({ id: s.id, name: s.name, machine: s.machine ?? null })), b.machines, me?.host ?? "this machine",
+  settings: [...settings.sections(webNow ?? ownLink(), b.spaces.map((s: any) => ({ id: s.id, name: s.name, machine: s.machine ?? null })), b.machines, me?.host ?? "this machine",
     // Settings › Autopilot (Everywhere's and each space's own), while its add-on is on
     offList().includes("autopilot") ? null : { everywhere: model.pilotEverywhere, trigger: (id) => model.pilotKnown(id)?.trigger }),
     // Secrets, as the window's page (Everywhere's and each space's own): every kept secret and where, and the agents
@@ -301,7 +318,9 @@ const snapshotOf = (b: Parameters<NonNullable<typeof model.onBuild>>[0]) => live
       secrets: secretNames.filter((x) => (s.id === "all" ? !x.space : x.space === s.id)) })),
     windowSection((k) => model.value(k))], off: offList(), offPlugins: offPlugins(),
   // every machine the window's sidebar lists: one not connected reads "Offline" (or "Connecting…") under its header
-  machines: [{ name: me?.host ?? "this machine", here: true, state: "connected" }, ...b.known.map((m) => ({ name: m.name, here: false, state: m.state }))],
+  // in the order the person dragged them into (SHEP-153): this computer first until then
+  machines: (SPm.byMachineOrder as any)([{ name: me?.host ?? "this machine", here: true, state: "connected" }, ...b.known.map((m) => ({ name: m.name, here: false, state: m.state }))],
+    (SPm.machineOrderOf as any)(model.value("spaces-chat")), (m: { name: string; here: boolean }) => (m.here ? null : m.name)),
 })));
 // a task that moved on (accepted, done) changes its news lines in its Assistant's chat, whose conversation may not move:
 // open chats are told again (compat.chat reads the rows the snapshot just took)
@@ -314,7 +333,7 @@ model.onBuild = (b) => {
 };
 model.start();
 
-// The Web add-on (Shepherdr settings > Window > Add-ons, Everywhere's "off" in ~/.herdr/shepherdr.json): off, the web
+// The Web add-on (Shepherdr settings > Window > Add-ons, Everywhere's "off" in ~/.config/shepherdr/settings.json): off, the web
 // app stops and /shepherdr is no longer shared; the service keeps its background work.
 const APP_DATA = join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "data", "shepherdr");
 /** where files from a page's message box are kept (the window keeps pasted ones there too) */
@@ -325,7 +344,7 @@ function webOn() {
 }
 
 // Tailscale can come up after the service: look again now and then, and keep /shepherdr shared while web is on. What
-// the window's Shepherdr settings > Web shows goes into ~/.herdr/shepherdr/web.json (the link, its QR code).
+// the window's Shepherdr settings > Web shows goes into ~/.local/state/shepherdr/service/web.json (the link, its QR code).
 let wasOn: boolean | null = null;
 // Serve from: a move this service started (shepherdr web serve-from), until it ends; what went wrong, for a while
 let moving: { to: string; at: number; error?: string } | null = null;
@@ -333,16 +352,19 @@ async function tailnet() {
   me = await whoami();
   g.owner = me?.login ?? null;
   g.dns = me?.dns ?? null;
+  g.httpsPort = hp = httpsPort();
   const on = webOn(), serving = host.serving();
-  const own = me ? `https://${me.dns}/shepherdr/` : null;
+  const own = ownLink();
   host.link = own;
   // another machine serves it: its link (the window's Settings › Web shows it and its QR code); this one isn't shared
   const link = serving ? own : host.hostLink();
   let why: string | null = me || !serving ? null : "Tailscale isn't running here";
+  // what tailscale serve said when sharing failed (doctor counts it as broken, not a note)
+  let shareWhy: string | null = null;
   if (me && on && serving) {
     const s = await served(me.dns);
     if (s.funnel) { why = "Funnel is on for this machine: the web app stays off until it's off"; g.owner = null; }
-    else why = await share(me.dns, PORT);
+    else why = shareWhy = await share(me.dns, PORT, hp);
   } else if (me && (!on || !serving) && wasOn !== false) {
     await unshare(me.dns, PORT);
     // moved away: what the move here set aside is shared again (shepherdr web serve-from --take-link)
@@ -353,7 +375,7 @@ async function tailnet() {
   let qr: string | null = null;
   try { if (link && on && !why) qr = qrFile(existsSync(join(APP_DATA, "..")) ? APP_DATA : DATA, link); } catch {}
   const serve = serveNow();
-  writeFileSync(join(DATA, "web.json"), JSON.stringify({ on, link, qr, why, serve, at: Date.now() }) + "\n");
+  writeFileSync(join(DATA, "web.json"), JSON.stringify({ on, link, qr, why, share_error: shareWhy, https_port: hp, serve, at: Date.now() }) + "\n");
   let picture: string | null = null;
   try { if (qr) picture = `data:image/svg+xml;base64,${Buffer.from(readFileSync(qr)).toString("base64")}`; } catch {}
   const was = JSON.stringify(webNow);
@@ -390,6 +412,8 @@ async function serveFrom(machine: string | null) {
   await tailnet();
 }
 host.on(() => { void tailnet(); model.rebuild(); });
+// shepherdr web https-port changed the port: move the share and the links within seconds, not at the next minute
+watchFile(HTTPS_PORT_FILE, { interval: 2000 }, () => { if (httpsPort() !== hp) void tailnet(); });
 await tailnet();
 setInterval(tailnet, 60_000);
 
@@ -527,7 +551,7 @@ const voiceIO: VoiceIO = {
         const home = (await exec(hub, ["sh", "-c", 'printf %s "$HOME"'], machine).catch(() => ({ stdout: "" }))).stdout;
         return folders(hub, machine, path || "~", home);
       }
-      case "me": return { machine: me?.host ?? null, link: me ? `https://${me.dns}/shepherdr/` : null, version: VERSION, off: offPlugins() };
+      case "me": return { machine: me?.host ?? null, link: ownLink(), version: VERSION, off: offPlugins() };
     }
     throw new Error(`No such data: ${source}.`);
   },
@@ -653,7 +677,7 @@ const server = Bun.serve<{ who: string }>({
     const url = new URL(req.url);
     const path = url.pathname.startsWith("/shepherdr/") ? url.pathname.slice(10) : url.pathname;
     // the window asks this (lib/service.js): while jobs is true it leaves its background work to the service
-    if (path === "/api/health") return json({ ok: true, app: "shepherdr", ...(localCaller(req, PORT) ? { id: SERVICE_ID } : {}), version: VERSION, core: hub.up, jobs: jobs.on && hub.up, serving: host.serving(), host: host.hubName() ?? null, reachable: host.reachable(),
+    if (path === "/api/health") return json({ ok: true, app: "shepherdr", ...(localCaller(req, PORT) ? { id: SERVICE_ID, calls: callsOn() } : {}), version: VERSION, core: hub.up, jobs: jobs.on && hub.up, serving: host.serving(), host: host.hubName() ?? null, reachable: host.reachable(),
       // the other machines this service ticks (Serve from: the host the ones with no service of their own)
       ticks: jobs.on ? host.tickOn() : [] });
     // the Web add-on switched off: nothing for the tailnet (this machine's own callers still get the API)
@@ -666,7 +690,11 @@ const server = Bun.serve<{ who: string }>({
     const socket = path === "/api/ws" || path === "/api/terminal" || path === "/api/browser" || path === "/api/voice";
     const viaTailnet = req.headers.has("tailscale-user-login");
     const pass = gate(req, g, socket, viaTailnet && trustedPeer(srv.requestIP(req)?.port, PORT));
-    if (!pass.ok) return new Response(pass.why, { status: pass.status });
+    if (!pass.ok) {
+      const why = refusedWhy(pass.why);
+      if (why !== pass.why && why !== saidPeer) console.error(`web: ${(saidPeer = why)}`);
+      return new Response(why, { status: pass.status });
+    }
     if (path === "/api/browser") {
       // a task's browser (2.1's Browser panel): this machine's tasks
       const t = compat.taskOf(url.searchParams.get("task") ?? "");
@@ -690,7 +718,7 @@ const server = Bun.serve<{ who: string }>({
       return srv.upgrade(req, { data: { who: pass.who, voice: { key, resume } } as any }) ? undefined : new Response("upgrade failed", { status: 400 });
     }
     if (socket) return srv.upgrade(req, { data: { who: pass.who } }) ? undefined : new Response("upgrade failed", { status: 400 });
-    if (path === "/api/me") return json({ login: pass.who, via: pass.via, machine: me?.host ?? null, link: me ? `https://${me.dns}/shepherdr/` : null, version: VERSION, off: offPlugins() });
+    if (path === "/api/me") return json({ login: pass.who, via: pass.via, machine: me?.host ?? null, link: ownLink(), version: VERSION, off: offPlugins() });
     if (path === "/api/state" && req.method === "GET") return json(store.doc.version ? store.doc : await store.load());
     if (path === "/api/state" && req.method === "POST") {
       const body = await req.json().catch(() => null);
@@ -704,16 +732,28 @@ const server = Bun.serve<{ who: string }>({
       const upload = want.startsWith(ATTACH + "/") && !want.slice(ATTACH.length + 1).includes("/") && !!statSync(want, { throwIfNoEntry: false })?.isFile();
       const at = upload ? want : compat.fileOf(key, want);
       const addr = compat.addrOf(key) ?? "", on = !upload && addr.includes("/") ? addr.split("/")[0] : null;
-      if (!at || !at.startsWith("/") || at.includes("/../") || (!on && !existsSync(at))) return json({ error: "not found" }, 404);
-      const named = { "cache-control": "private, max-age=3600", ...(url.searchParams.get("download") ? { "content-disposition": `attachment; filename="${at.split("/").pop()!.replace(/"/g, "")}"` } : {}) };
+      // (another machine's agent may name one in its home: ~/…, read there)
+      if (!at || !(at.startsWith("/") || (on && at.startsWith("~/"))) || at.includes("/../") || (!on && !existsSync(at))) return json({ error: "not found" }, 404);
+      const named: Record<string, string> = url.searchParams.get("download") ? { "content-disposition": `attachment; filename="${at.split("/").pop()!.replace(/"/g, "")}"` } : {};
+      const range = req.headers.get("range"), type = Bun.file(at).type || "application/octet-stream";
       if (on) {
-        // a chat on another machine (one this machine serves the web app for): the file there, through herdr-core
-        const r = await hub.call<{ code: number; stdout: string; truncated?: boolean }>("machine.exec", { on, argv: ["cat", "--", at], timeout: 30 }, 35_000).catch(() => null);
-        if (!r || r.code !== 0 || r.truncated) return json({ error: "not found" }, 404);
-        return new Response(Buffer.from(r.stdout, "base64"), { headers: { "content-type": Bun.file(at).type || "application/octet-stream", ...named } });
+        // a chat on another machine (one this machine serves the web app for): the file there, through herdr-core; kept
+        // a little while, as a player asks for it part by part (service/media.ts)
+        const k = `${on}\0${at}`;
+        let bytes = keep(k);
+        if (!bytes) {
+          const argv = at.startsWith("~/") ? ["sh", "-c", 'cat -- "$HOME/$1"', "cat", at.slice(2)] : ["cat", "--", at];
+          const r = await hub.call<{ code: number; stdout: string; truncated?: boolean }>("machine.exec", { on, argv, timeout: 30 }, 35_000).catch(() => null);
+          if (!r || r.code !== 0 || r.truncated) return json({ error: "not found" }, 404);
+          bytes = keep(k, new Uint8Array(Buffer.from(r.stdout, "base64")))!;
+        }
+        return fileResponse(new Blob([bytes as Uint8Array<ArrayBuffer>]), type, range, named);
       }
-      const f = Bun.file(at);
-      return new Response(f, { headers: { "content-type": f.type || "application/octet-stream", ...named } });
+      // a big picture's thumbnail, a video's still (made here once: service/media.ts); the file itself when it has none
+      const small = url.searchParams.get("thumb") ? await smaller(at, "thumb") : url.searchParams.get("poster") ? await smaller(at, "poster") : null;
+      if (url.searchParams.get("poster") && !small) return json({ error: "no still" }, 404);
+      if (small) return fileResponse(Bun.file(small), "image/jpeg", range);
+      return fileResponse(Bun.file(at), type, range, named);
     }
     // a recipe artifact's files (the web's recipe view asks api/artifacts/<id>/recipe?v=, /file/<path>?v=; &on=<machine>
     // for another machine's, read there)
@@ -874,7 +914,7 @@ const server = Bun.serve<{ who: string }>({
       if (d.voice?.resume) {
         // back to a call that held for this page; gone (ended, or held too long): the page says so and stops
         d.bridge = callToResume(d.voice.resume, String(d.who ?? ""));
-        if (!d.bridge?.attach(page)) { d.bridge = null; ws.send(JSON.stringify({ type: "error", message: "The call ended while the phone was away. Start a new call." })); ws.close(); }
+        if (!d.bridge?.attach(page)) { d.bridge = null; ws.send(JSON.stringify({ type: "ended", why: "the connection was lost" })); ws.close(); }
         return;
       }
       if (d.voice) noteUsage("feature", { from: "web", type: "voice-call" });
@@ -887,12 +927,25 @@ const server = Bun.serve<{ who: string }>({
     message(ws, msg) { const d: any = ws.data; if (d.voice) d.bridge?.message(msg); else if (d.bridge) d.bridge.message(String(msg)); else live.message(ws, String(msg)); },
     // a call's page that went without ending it holds the call for it to come back (SHEP-102)
     close(ws) { const d: any = ws.data; if (d.voice) d.bridge?.detach(d.page); else if (d.bridge) d.bridge.end(); else live.leave(ws); },
+    // SHEP-173: a muted call sends nothing for minutes (Bun's default closes a quiet socket after 120 s); pages ping too
+    idleTimeout: 600,
   },
 });
 
-console.log(`BossGoat ${VERSION} on http://127.0.0.1:${server.port} (data ${DATA})${me && webOn() ? `, https://${me.dns}/shepherdr/` : ""}`);
+console.log(`BossGoat ${VERSION} on http://127.0.0.1:${server.port} (data ${DATA})${me && webOn() ? `, ${ownLink()}` : ""}`);
 
 // the port is ours now: say where and this start's id (only this user can read it)
 writeFileSync(SERVICE_FILE, JSON.stringify({ port: server.port, id: SERVICE_ID, pid: process.pid, version: VERSION }) + "\n", { mode: 0o600 });
 
+// SHEP-173: an update while a call is on (bin/shepherdr) leaves this file instead of restarting the service, which
+// would cut the call: the service starts again on the new code by itself once no call is on (launchd's KeepAlive,
+// systemd's Restart=always bring it back).
+const RESTART_WHEN_FREE = join(DATA, "restart-when-free");
+try { rmSync(RESTART_WHEN_FREE); } catch {}
+setInterval(() => {
+  if (callsOn() || !existsSync(RESTART_WHEN_FREE)) return;
+  console.log("Starting again on the update that waited for a call to end.");
+  try { rmSync(RESTART_WHEN_FREE); } catch {}
+  server.stop(true); try { rmSync(SERVICE_FILE); } catch {} release(); process.exit(0);
+}, 5000);
 for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => { server.stop(true); try { rmSync(SERVICE_FILE); } catch {} release(); process.exit(0); });

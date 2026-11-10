@@ -54,10 +54,27 @@ def detail(k):
 
 
 def agent_running(k):
-    fg = (k.get("foreground") or {}).get("name") or ""
-    if fg:
-        return os.path.basename(fg) not in SHELLS
+    fg = k.get("foreground") or {}
+    if fg.get("name"):
+        if os.path.basename(fg["name"]) not in SHELLS:
+            return True
+        # fish keeps the agent its child, in its own process group (#780): the terminal's foreground
+        # stays the shell running its launch command (fish -ic "claude …; exec fish -i") the whole
+        # time. Only once it exec'ed its plain interactive shell has the agent exited.
+        return runs_command(fg.get("argv"))
     return bool(k.get("agent")) and k.get("agent") not in SHELLS
+
+
+def runs_command(argv):
+    """A shell's argv that runs a command (-c, -ic, -lic, --command), not a plain shell."""
+    for a in (argv or [])[1:]:
+        if a == "--command" or a.startswith("--command="):
+            return True
+        if not a.startswith("-") or a.startswith("--"):
+            break
+        if "c" in a[1:]:
+            return True
+    return False
 
 
 def status_of(task, live):
@@ -80,6 +97,8 @@ def status_of(task, live):
 # What people see a task as: one of eight, derived, never stored. From the task's record (todo,
 # scheduled (SHEP-38: starts by itself at a time), queued, ready, done, attention, a merge asked for or waiting on checks) and its agents' own
 # Herdr status (working, blocked, idle/done), which agents report as always.
+IN_QUEUE_LINE = "In GitHub's merge queue"
+APPROVAL_LINE = "Merges once it's approved"
 STATUSES = {"todo": "To do", "scheduled": "Scheduled", "queued": "Queued", "working": "Working", "needs": "Needs you",
             "ready": "Ready", "merging": "Merging", "done": "Done"}
 
@@ -112,15 +131,21 @@ def task_status(task, live):
         return ("needs", "provider", r.get("reason")) if r.get("over") else ("working", None, retry_line(r))
     if "blocked" in states:
         return "needs", "asks", REASONS["question"]
+    if trust_asked(live):
+        return "needs", "asks", REASONS["trust"]
     if busy_again(task, live):
         return "working", None, WORKING_AGAIN
     if task.get("attention"):
         return "working", None, WORKING_AGAIN if st == "ready" else None
     if st == "ready":
-        if task.get("merge_requested") and live:
-            return "merging", None, None
-        if task.get("auto_merge") and task.get("pr") and not task.get("merged"):
-            return "merging", None, "Merges once its checks pass"
+        # Nothing for the person yet (SHEP-175): its merge under way (asked, in GitHub's merge queue, or
+        # by itself), or its pull request's checks still running. Working, with what it waits for.
+        wait = ready_wait(task, live)
+        if wait:
+            return "working", None, wait
+        # Said ready but not at rest yet (SHEP-148): Working until it is, and only then Ready.
+        if live and not_at_rest(task, live):
+            return "working", None, None
         return "ready", None, None
     # An agent that hasn't reported yet is starting: working.
     if any(x not in ("idle", "done", "blocked") for x in states):
@@ -146,6 +171,26 @@ def task_status(task, live):
 
 
 STOPPED = "Agent stopped"
+
+
+# ---- Ready only when the person must act (SHEP-175) ----------------------------------------------
+# A task said ready is Ready (and its news and alerts) only once the person's Accept is what's
+# left: not while its pull request's checks still run or GitHub works out whether it can merge
+# (pr["wait"], kept by the tick), nor while it merges by itself. Then it is Working, its row saying
+# in small words what it waits for. As core/tasks.js readyWait().
+MERGING, MERGES_ITSELF = "Merging", "Merges once its checks pass"
+
+
+def ready_wait(task, live):
+    """What a Ready task waits on that needs nobody, in a few words; None when it's the person's."""
+    if task.get("merge_requested") and live:
+        return MERGING
+    if task.get("merge_queued") and task.get("pr"):
+        return IN_QUEUE_LINE
+    if task.get("auto_merge") and task.get("pr") and not task.get("merged"):
+        # #743: waits calmly for a review GitHub requires
+        return APPROVAL_LINE if task["pr"].get("needs_approval") else MERGES_ITSELF
+    return (task.get("pr") or {}).get("wait") or None
 
 
 # ---- a short grace before Needs you (SHEP-133) ------------------------------------------------
@@ -196,6 +241,21 @@ def busy_again(task, live):
                and (k.get("turn") or 0) >= (seen or {}).get(k.get("address"), 0) for k in live)
 
 
+# ---- Ready only at rest (SHEP-148) --------------------------------------------------------------
+# An agent often says ready and carries on in the same turn (a last check, its final message), or
+# leaves its own work running: a background shell, a Monitor, a subagent, a helper of its own. That
+# is no Ready yet: the person would be told to accept work that is still moving. Working until its
+# agents are at rest, then Ready (and its news). A later turn is busy_again()'s.
+
+
+def not_at_rest(task, live):
+    """A Ready task's agent still at it: at work in the turn it said ready in, or its own work
+    still running (own_work(), its hard signs only: no status line, a question asked doesn't end it)."""
+    if any(status_word(k) == "working" and (k.get("labels") or {}).get("herdr.role") != "reviewer" for k in live):
+        return True
+    return own_work(task, live, ready=True)
+
+
 # ---- someone is on what needs the person -------------------------------------------------------
 # A task's attention (failing checks, a conflict, a failed merge) needs the person only while
 # nobody is on it (SHEP-8). On it: one of its agents is at work (working, or asking: then the
@@ -240,7 +300,29 @@ LINE_MAX = 40
 # do (as Shepherdr's SUMMARY_MAX); the rest goes in --details or the proof.
 SUMMARY_MAX = 160
 REASONS = {"plan": "Plan to approve", "permission": "Asks permission", "question": "Question for you",
-           "reply": "Waits for your reply", "signed_out": "Signed out"}
+           "reply": "Waits for your reply", "signed_out": "Signed out", "trust": "Asks to trust this folder"}
+
+# Claude Code's folder-trust dialog (#755): shown before it reports any status, so to Herdr the
+# agent looked like it was starting, then Working, until it stalled. Read off its screen.
+TRUST = re.compile(r"Quick safety check|Do you trust the files in this folder|Yes, I trust this folder", re.I)
+_trust_seen = {}
+
+
+def trust_asked(live):
+    """The address of a live agent showing Claude Code's folder-trust dialog, else None. Only an
+    agent that never reported a status nor took a turn: its screen is read at most every 5 s."""
+    from .base import run
+    for k in live:
+        if status_word(k) or k.get("turn") or (k.get("labels") or {}).get("herdr.agent", "claude") != "claude":
+            continue
+        address = k.get("address")
+        seen = _trust_seen.get(address)
+        if not seen or now() - seen[0] > 5000:
+            screen = run(["hc", "read", address, "--lines", "40"]).stdout or ""
+            seen = _trust_seen[address] = (now(), bool(TRUST.search(screen)))
+        if seen[1]:
+            return address
+    return None
 
 
 def fit(text, n=LINE_MAX):
@@ -520,8 +602,8 @@ def starting(task):
 # running with a session id, until an output says it exited). Or it said so: its status line, set
 # this turn and still fresh, says it waits on CI, a check, a review or a background job ("Waiting on
 # review round 1", "Codex reviewing the change"), and no background job of its ended since.
-# It asks the person something (a question tool or permission: blocked; its last message asks):
-# Needs you all the same. As core/tasks.js place() with task.own_work, which news_pass keeps.
+# It asks the person something (a question tool or permission: blocked): Needs you all the same; a
+# plain question in its last message only once nothing of its own runs (SHEP-148). As core/tasks.js place() with task.own_work, which news_pass keeps.
 BG_LOG_BYTES = 64 * 1048576  # a first look at a log reads at most this much of its end
 # A tool call (Claude Code's log line, compact JSON) and its result; one open longer than FG_MAX_MS
 # (a foreground command times out at 10 minutes) no longer counts as running.
@@ -678,6 +760,10 @@ def waits_on_own(task, address=None, ended=0):
     check, a review or a background job, and no background job of its ended since."""
     p = task.get("progress") or {}
     said = p.get("set") or p.get("at") or 0
+    # Out of review rounds (ready refused, review_out): it waits on its Assistant's review-more,
+    # never on a review of its own, whatever its line says ("waiting for a review round", #784).
+    if task.get("review_out"):
+        return False
     if p.get("by") or not said or said < ended or not own_line(task, address):
         return False
     left = p.get("left") if isinstance(p.get("left"), (int, float)) else 0
@@ -687,21 +773,24 @@ def waits_on_own(task, address=None, ended=0):
     return bool(WAITS_ON.search(text)) and not WAITS_ON_PERSON.search(text)
 
 
-def own_work(task, live):
-    """Its quiet agent is on its own work (above), and its last message asks the person nothing.
-    A helper of its own at work (its reviewer, SHEP-54) counts too."""
+def own_work(task, live, ready=False):
+    """Its quiet agent is on its own work (above). What really runs (a background job, a command
+    open in the foreground, a helper of its own at work: SHEP-54) counts whatever its last message
+    says: a plain question with work still running is no ask yet (SHEP-148; asking for real is its
+    question tool or a permission: blocked). Its status line alone counts only when its last message
+    asks nothing, and never for a Ready task (ready: not_at_rest())."""
     for k in live:
         if (k.get("labels") or {}).get("herdr.role") == "reviewer" or status_word(k) == "blocked":
             continue
         address = k.get("address")
         key = (k.get("labels") or {}).get("herdr.task")
         if key and any(parent_of(h) == address and status_word(h) in ("working", "blocked") for h in live_helpers(key)):
-            if not last_question(task, address):
-                return True
-            continue
+            return True
         log = agent_log(task, address) or agent_log(task)
         jobs, ended = background_jobs(log) if log else ({}, 0)
-        if (jobs or waits_on_own(task, address, ended)) and not last_question(task, address):
+        if jobs:
+            return True
+        if not ready and waits_on_own(task, address, ended) and not last_question(task, address):
             return True
         # Mid-turn, a long command of its own still running in the foreground: Herdr can read
         # Claude Code idle then (SHEP-133: HOME-1 read Needs you during a 50 s Bash). Unless a

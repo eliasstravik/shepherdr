@@ -63,10 +63,12 @@ jobs:
           bun test service core web
           bun run build
       - name: shell scripts parse
-        # each with the shell its first line names (bash scripts use bash-only syntax; sh is dash here)
+        # every script under plain bash (macOS's bash 3.2 is what people run; #908), and one whose first line says sh
+        # also under sh (dash here). test_repo's test_each_parses checks the same list.
         run: |
-          for f in install.sh guard/herdr-app $(find mods -name '*.sh'); do
-            case "$(head -1 "$f")" in *bash*) bash -n "$f" ;; *) sh -n "$f" ;; esac || { echo "::error file=$f::doesn't parse"; exit 1; }
+          for f in install.sh bin/herdr-browser guard/herdr-app $(find mods -name '*.sh'); do
+            bash -n "$f" || { echo "::error file=$f::doesn't parse under bash"; exit 1; }
+            case "$(head -1 "$f")" in *bash*) ;; *) sh -n "$f" || { echo "::error file=$f::doesn't parse under sh"; exit 1; } ;; esac
           done
       - name: tests (repo rules, installer, herdr-task)
         run: python3 -m unittest discover -s test -v

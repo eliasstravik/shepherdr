@@ -1,6 +1,7 @@
 #!/bin/sh
 # The PermissionRequest hook of Claude Code (~/.claude/settings.json) and Codex (~/.codex/hooks.json,
-# and a task worker's own `herdr-task _allow`, which hands it what it doesn't allow itself): lets
+# and a task worker's own `herdr-task _allow`, which hands it what it doesn't allow itself, also on a
+# machine that only runs tasks, where a sync keeps a copy in ~/.local/share/herdr/ask/): lets
 # the person answer a permission, a question (AskUserQuestion) or a plan (ExitPlanMode) on the
 # agent's chat card, wherever they read it: the window, the web app, a phone.
 #
@@ -36,14 +37,17 @@ watch=0
 command -v hc >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 && watch=1
 # Without hc and jq it can't see the terminal answered: only while a chat shows the agent.
 [ "$watch" = 1 ] || fresh || exit 0
-# A task worker's Codex runs its own hook too (herdr-task _allow, in its argv), which hands this
-# what it doesn't allow itself ($HERDR_ASK_CHAINED): Codex waits for both, so this copy steps aside.
+# A task worker runs its own hook too (herdr-task _allow: Codex's in its argv, Claude's in its
+# --settings, SHEP-139), which hands this what it doesn't allow itself ($HERDR_ASK_CHAINED): the
+# agent waits for both, so this copy steps aside. Codex's is inside a -c value (hooks.PermissionRequest=...),
+# never a word of its own: matching only a bare "_allow" put two cards up for each ask (#866).
 if [ -z "${HERDR_ASK_CHAINED:-}" ] && [ "$watch" = 1 ] \
   && hc get "$t" --json 2>/dev/null | jq -e '
     (.foreground.argv // .argv // []) as $args |
     any(range(1; $args | length);
-      ($args[. - 1] == "-c" or $args[. - 1] == "--config") and
-      ($args[.] | startswith("hooks.PermissionRequest=") and contains(" _allow --command ")))
+      (($args[. - 1] == "-c" or $args[. - 1] == "--config") and
+       ($args[.] | startswith("hooks.PermissionRequest=") and contains(" _allow --command "))) or
+      ($args[. - 1] == "--settings" and ($args[.] | contains(" _allow --command "))))
   ' >/dev/null 2>&1; then
   exit 0
 fi

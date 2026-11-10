@@ -13,6 +13,7 @@ herdr-artifact list                     # this folder's artifacts
 herdr-artifact rm <id>
 herdr-artifact open <id>                # show it to the person where they are, and print its link
 herdr-artifact link <id>                # only its link in the web app
+herdr-artifact preview <id>             # see it here as the person does: the web app's viewer on 127.0.0.1, for your browser
 ```
 
 - Change an artifact with `update` (a new version, the same card), not a second `publish`. The
@@ -63,6 +64,11 @@ Blocks, top to bottom (each may carry an `"id"`; the person's notes point at blo
 
 - **Pictures**: PNG, JPEG, GIF, WebP or SVG files in the folder, named in `src` (no paths up or
   out). Screenshots go in as they are; crop them to what matters first (`magick`).
+- **Its card in the chat** previews it: its first pictures and its first lines, and opens in
+  place. `"cover": "after.png"` beside `"blocks"` picks the picture it leads with.
+- **In your message too**: the key picture or a short video can also go right in your chat
+  message, as a Markdown image of its file (`![After](/abs/path/after.png)`; .mp4, .webm or
+  .mov play in place). The artifact stays the lasting record.
 - **Forms and answers**: a `choice`, a `form` or a `button` sends the person's words to you as
   `<hc from="artifact" id=… version=… title=…>Ship it?: Ship</hc>`, in the window and on the web
   alike.

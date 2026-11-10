@@ -1,5 +1,6 @@
 """The repo as Herdr and the installer see it: the add-on list covers every mod, the layout has no
 live values, nothing personal is shipped, and the version is the same everywhere it's stated."""
+import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import json
 import os
 import re
@@ -165,7 +166,7 @@ class Repo(unittest.TestCase):
                 self.assertNotIn(words, text, f"{os.path.relpath(path, ROOT)} has its own copy of {words!r}")
 
     def test_task_views_from_one_core(self):
-        """The Tasks panel's rows and the task view's Files, Changes and Pull request read their words and rules from
+        """The Tasks panel's rows, the space's Files and Changes and a task's Pull request read their words and rules from
         core on both sides (core/tasks.js, core/needs.js, core/worktree.js): the web app keeps no copy of its own."""
         uses = {
             J("web", "plugins", "tasks", "client.tsx"): ["@core/tasks.js", "@core/needs.js", "TK.capital", "ND.fit", "TK.day", "TK.STATUS", "ND.REASONS"],
@@ -229,6 +230,35 @@ class Repo(unittest.TestCase):
         # Autopilot sits on the right with the other controls (order > 10), after the status
         self.assertIn("{ order: 12, View: StatusMark }, { order: 14, View: AutopilotHeader }", text)
 
+    def test_voice_call_is_a_button_beside_search(self):
+        """SHEP-135: no "Talk to Shepherdr" row at the top of the sidebar: a call starts from a voice button in the
+        brand row, before Search, in the web app and the window alike; the window's asks spaces-chat to start it."""
+        for f in ("web/plugins/voice/client.tsx", "web/src/App.tsx", "mods/spaces-chat/main.js",
+                  "mods/workspace-chrome-shepherdr/main.js"):
+            self.assertNotIn("Talk to Shepherdr", open(J(f)).read(), f)
+        voice = open(J("web", "plugins", "voice", "client.tsx")).read()
+        self.assertIn("reg.sideHead.push(VoiceButton)", voice)
+        # on a call the button turns into Mute and End in one capsule, the call's one place: no card under it
+        button = voice[voice.index("function VoiceButton("):voice.index("function PhoneCallButton(")]
+        self.assertIn('if (on) return <CallControls size="head" />', button)
+        self.assertIn('label="Talk to BossGoat"', button)
+        self.assertNotIn("function CallCard(", voice)
+        controls = voice[voice.index("function CallControls("):voice.index("/** the soft green of a call")]
+        for label in ("Mute yourself", "End call", 'role="group"'):
+            self.assertIn(label, controls)
+        app = open(J("web", "src", "App.tsx")).read()
+        brand = app[app.index("export function Brand("):app.index("function SearchButton(")]
+        self.assertLess(brand.index("registry.sideHead"), brand.index("<SearchButton />"))
+        chrome = open(J("mods", "workspace-chrome-shepherdr", "main.js")).read()
+        self.assertLess(chrome.index('this.button("voice"'), chrome.index('this.button("search"'))
+        self.assertIn('setShared("voice.startreq"', chrome)
+        self.assertIn('shared("voice.startreq")', open(J("mods", "spaces-chat", "main.js")).read())
+        self.assertIn('callControls(t, call)', chrome)
+        self.assertIn('setShared("chat.callreq"', chrome)
+        for icon in ("mic.svg", "mic-off.svg", "phone-x.svg"):
+            self.assertTrue(os.path.exists(J("mods", "workspace-chrome-shepherdr", icon)), icon)
+        self.assertTrue(os.path.exists(J("mods", "workspace-chrome-shepherdr", "audio-lines.svg")))
+
     def test_tab_bar_from_one_list(self):
         """The tab bar's + menu, a tab's menu, Switch agent, a tab's name and the window header's End agent are
         core/menus.js's on both sides (mods/new-menu-tasks, menu-tasks, coordinator, tabs-tasks, pane-chat and the web app's
@@ -286,7 +316,7 @@ class Repo(unittest.TestCase):
 
     def test_version_everywhere(self):
         v = re.search(r'^VERSION = "([^"]+)"', open(J("bin", "shepherdr")).read(), re.M).group(1)
-        self.assertEqual(v, "3.1.26")
+        self.assertEqual(v, "3.1.30")
         self.assertRegex(open(J("CHANGELOG.md")).read(), rf"(?m)^## {re.escape(v)}\b", "CHANGELOG's newest entry")
         self.assertIn(v, open(J("RECIPE.md")).read())
         self.assertIn(v, open(J("README.md")).read())
@@ -333,17 +363,43 @@ class ShellScripts(unittest.TestCase):
         self.assertTrue(pat.search("x=$(\n  cat <<EOF\nhi\nEOF\n)"))
         self.assertFalse(pat.search('new=$(jq -r .a <<<"$out")'))
 
+    def test_no_bash4_builtins(self):
+        # #736: macOS's /bin/bash 3.2 has no mapfile/readarray; restart.sh died there before restarting anything
+        pat = re.compile(r"^[^#\n]*\b(mapfile|readarray)\b", re.M)
+        for f in shell_scripts():
+            with open(f, encoding="utf-8") as fh:
+                m = pat.search(fh.read())
+            self.assertIsNone(m, f"{os.path.relpath(f, ROOT)}: bash 4's {m and m.group(1)} (a while read loop works on 3.2)")
+
     def test_each_parses(self):
+        # #908: macOS's bash is 3.2, and `bash -n` on a script that quotes an apostrophe inside a double-quoted ${...}
+        # fails there ("syntax error near unexpected token `('"); plain bash fails it too, bash --posix and dash don't.
+        # So every script parses under plain bash, and one whose first line says sh also under sh (dash here).
         import shutil
         import subprocess
         for f in shell_scripts():
             with open(f, encoding="utf-8") as fh:
-                shell = "bash" if "bash" in fh.readline() else "sh"
-            if not shutil.which(shell):
-                continue
-            out = subprocess.run([shell, "-n", f], capture_output=True, text=True)
-            self.assertEqual(out.returncode, 0, f"{shell} -n {os.path.relpath(f, ROOT)}: {out.stderr}")
+                first = fh.readline()
+            runs = [["bash", "-n"]] + ([] if "bash" in first else [["sh", "-n"]])
+            for cmd in runs:
+                if not shutil.which(cmd[0]):
+                    continue
+                out = subprocess.run(cmd + [f], capture_output=True, text=True)
+                self.assertEqual(out.returncode, 0, f"{' '.join(cmd)} {os.path.relpath(f, ROOT)}: {out.stderr}")
 
+
+class MacAudio(unittest.TestCase):
+    """#789: from Swift 6.4, `import Darwin` no longer shows crt_externs.h (an explicit submodule), so a direct
+    _NSGetEnviron() call stops mods/chat/mac-audio.swift building and the Mac's dictation and calls with it. The helper
+    finds it by dlsym, as it finds responsibility_spawnattrs_setdisclaim."""
+
+    def test_no_crt_externs_call(self):
+        with open(os.path.join(ROOT, "mods", "chat", "mac-audio.swift"), encoding="utf-8") as fh:
+            code = "\n".join(l.split("//")[0] for l in fh.read().splitlines())
+        for name in ("_NSGetEnviron", "_NSGetArgv", "_NSGetArgc", "_NSGetProgname", "_NSGetMachExecuteHeader"):
+            m = re.search(rf"(?<![\"\w]){name}\s*\(", code)
+            self.assertIsNone(m, f"{name}() needs crt_externs.h: dlsym it instead")
+        self.assertIn('dlsym(UnsafeMutableRawPointer(bitPattern: -2), "_NSGetEnviron")', code)
 
 class SessionNote(unittest.TestCase):
     """SHEP-42, SHEP-48: the chat's SessionStart hook (mods/chat/session-note.sh) adds every agent's Reactions
@@ -401,3 +457,39 @@ class SessionNote(unittest.TestCase):
         out, asked = self.run_hook(None, "")
         self.assertEqual(out, "")
         self.assertFalse(asked)
+
+
+class TestsOnAThrowawayHome(unittest.TestCase):
+    """SHEP-147: no test reaches the person's real home (its question hook, chat cards, data, herdr-core)."""
+
+    def test_every_test_file_loads_the_guard_first(self):
+        import ast
+        for f in sorted(os.listdir(J("test"))):
+            if f.startswith("test") and f.endswith(".py"):
+                body = ast.parse(open(J("test", f)).read()).body
+                first = next(n for n in body if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)))
+                self.assertTrue(isinstance(first, ast.Import) and first.names[0].name == "home_guard",
+                                f"test/{f}: `import home_guard` must be its first statement")
+        preload = open(J("test", "preload.ts")).read()
+        self.assertIn("SHEPHERDR_HC", preload)
+        self.assertIn("HC_TERMINAL_SOCKET", preload)
+
+    def test_the_run_is_on_a_throwaway_home(self):
+        self.assertNotEqual(os.path.realpath(os.path.expanduser("~")), home_guard.REAL)
+        for k in ("HC_TERMINAL_SOCKET", "HC_TERMINAL_ID", "HERDR_APP_HOME"):
+            self.assertNotIn(k, os.environ)
+
+    def test_touching_the_real_home_fails_at_once(self):
+        import subprocess
+        hook = os.path.join(home_guard.REAL, ".local", "share", "herdr", "ask", "ask-hook.sh")
+        with self.assertRaises(home_guard.RealHome):
+            open(hook)
+        with self.assertRaises(home_guard.RealHome):
+            open(os.path.join(home_guard.REAL, ".config", "herdr-app", "data", "chat-asks", "req", "x.json"), "w")
+        with self.assertRaises(home_guard.RealHome):
+            subprocess.run(["true"], env={"HOME": home_guard.REAL, "PATH": os.environ["PATH"]})
+        with self.assertRaises(home_guard.RealHome):
+            subprocess.run(["true"], env={"PATH": os.environ["PATH"]})
+        # this repo's own files are fine, wherever its worktree lives
+        open(J("README.md")).close()
+        subprocess.run(["true"], check=True)

@@ -6,14 +6,14 @@ import { watch, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Hub } from "./hub.ts";
 import type { Live } from "./live.ts";
-import { HOME, settingsFile } from "./paths.ts";
+import { HOME, settingsFile, where } from "./paths.ts";
 import { READ_LISTS, taskLists, fileIn } from "../core/tasklists.js";
 import * as T from "../core/tasks.js";
 import { isHelper, subagentsOf } from "../core/chat-view.js";
 // The core is plain JavaScript; its defaults read as narrow types to TypeScript.
 const { place, refOf, taskKey, autoPrefix, reportOf, secondLine, leftOf, queueReason, machineOf } = T as any;
 import * as S from "../core/spaces.js";
-const { spacesFromDoc, sidebarOf, assistantOf, isUnread, inOrder } = S as any;
+const { spacesFromDoc, sidebarOf, assistantOf, isUnread, inOrder, byMachineOrder, machineOrderOf } = S as any;
 import * as N from "../core/notify.js";
 const { spaceLevel } = N as any;
 import * as AP from "../core/autopilot.js";
@@ -59,7 +59,7 @@ export class Model {
       else if (e.type === "doc" && (e as any).data?.name === "herdr-app") void this.readDocs();
       else if ("terminal" in e && e.terminal) this.soon();
     });
-    const tasks = join(HOME, ".herdr", "tasks");
+    const tasks = where().tasks;
     if (existsSync(tasks)) watch(tasks, () => this.soon(() => Promise.all([this.readAutopilot(), this.readLists(null)]).then(() => {})));
     if (existsSync(SHARED)) watch(SHARED, () => this.soon(() => this.readShared()));
     setInterval(() => void this.refresh(), 10_000);
@@ -124,7 +124,7 @@ export class Model {
   }
 
   private autopilot: Record<string, any> = {};
-  /** Each other machine's Autopilot file (its ~/.herdr/tasks/.autopilot.json, read with its lists): its spaces' switches
+  /** Each other machine's Autopilot file (its ~/.local/share/shepherdr/tasks/.autopilot.json, read with its lists): its spaces' switches
    *  and wakes, kept and woken there. */
   private pilots = new Map<string, any>();
   /** Shepherdr settings as this machine has them (each space's own Autopilot, another machine's by "vm/sp1"). */
@@ -282,7 +282,8 @@ export class Model {
     const own = (Array.isArray(this.doc().spaces) ? this.doc().spaces : []).map((x: any) => ({ id: x.machine ? `${x.machine}/${x.id}` : x.id, machine: x.machine ?? null, name: x.name, folder: x.folder, tabs: [], own: true }));
     const fromDocs = [null, ...this.machines].flatMap((m) => spacesFromDoc(this.docs.get(m), m));
     // each machine's spaces in the order the person dragged them into (core/spaces.js inOrder), Herdr's for the rest
-    const spaces = inOrder([...fromDocs, ...own.filter((x: any) => !fromDocs.some((y: any) => y.id === x.id))], this.value("spaces-chat")?.order).map((s: any, at: number) => {
+    // and the machines in the order the person dragged them into (SHEP-153)
+    const spaces = byMachineOrder(inOrder([...fromDocs, ...own.filter((x: any) => !fromDocs.some((y: any) => y.id === x.id))], this.value("spaces-chat")?.order), machineOrderOf(this.value("spaces-chat"))).map((s: any, at: number) => {
       const k = assistantOf(s, terminals as any[]);
       // a task belongs to the space that started it, else to the space in its folder (as the window's counts)
       const here = rows.filter((r) => !r.archived && (r.space ? r.space === s.id : (r.machine ?? null) === (s.machine ?? null) && r.folder === s.folder));

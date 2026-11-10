@@ -1,4 +1,5 @@
 """Assistant roles remain available on resume without becoming terminal messages."""
+import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import importlib.machinery
 import importlib.util
 import json

@@ -17,6 +17,7 @@ mod with `herdr-app check`, so a broken artifact never reaches the person.
 
 import argparse
 import contextlib
+import errno
 import fcntl
 import hashlib
 import io
@@ -25,6 +26,7 @@ import os
 import re
 import secrets
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -33,7 +35,30 @@ import urllib.parse
 
 VERSION = "1"
 HOME = os.path.expanduser("~")
-STORE = os.path.join(HOME, ".herdr", "artifacts")
+# ---- SHEP: Shepherdr's own folders (a copy of herdr_task/layout.py's PY; test/test_layout.py checks it) ----
+def SHEP(rel, _t={'.herdr/shepherdr.json': ('config', 'settings.json'), '.herdr/model-picks.json': ('config', 'model-picks.json'), '.herdr/tasks': ('data', 'tasks'), '.herdr/artifacts': ('data', 'artifacts'), '.herdr/vault.json': ('data', 'secrets/vault.json'), '.herdr/secret-remote': ('data', 'secrets/remote'), '.herdr/tools.json': ('data', 'tools.json'), '.herdr/shepherdr': ('state', 'service'), '.herdr/browser': ('state', 'browser'), '.herdr/secret-drop': ('state', 'secret-drop'), '.herdr/secret-served': ('state', 'secret-served'), '.herdr/cli-check.json': ('state', 'cli-check.json'), '.herdr/machine-hold.json': ('state', 'machine-hold.json')}):
+    H, E = os.path.expanduser("~"), os.environ
+    a = lambda v: E.get(v) if (E.get(v) or "").startswith("/") else None
+    one = a("SHEPHERDR_HOME")
+    R = dict((k, os.path.join(one, k)) for k in ("config", "data", "state")) if one else {
+        "config": os.path.join(a("XDG_CONFIG_HOME") or os.path.join(H, ".config"), "shepherdr"),
+        "data": os.path.join(a("XDG_DATA_HOME") or os.path.join(H, ".local", "share"), "shepherdr"),
+        "state": os.path.join(a("XDG_STATE_HOME") or os.path.join(H, ".local", "state"), "shepherdr")}
+    try:
+        with open(os.path.join(R["data"], "LAYOUT")) as f:
+            on = int((f.read().split() or ["0"])[0]) >= 2 and not os.path.lexists(os.path.join(H, ".herdr", ".layout-rollback"))
+    except (OSError, ValueError):
+        on = False
+    if on:
+        for old, (base, new) in _t.items():
+            if rel == old or rel.startswith(old + "/"):
+                return os.path.join(R[base], new + rel[len(old):])
+    return os.path.join(H, rel)
+# ---- end SHEP ----
+
+# Shepherdr's own folders (~/.local/share/shepherdr/artifacts) once this machine's data moved there,
+# else the old ~/.herdr/artifacts (which then links to the new place).
+STORE = SHEP(".herdr/artifacts")
 FILES = os.path.join(STORE, "files")
 APP = os.environ.get("HERDR_APP_HOME") or os.path.join(HOME, ".config", "herdr-app")
 GUIDE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "ARTIFACTS.md")
@@ -120,9 +145,29 @@ class Store:
         self.dirty = False
 
     def __enter__(self):
-        os.makedirs(STORE, exist_ok=True)
-        self.lock = open(os.path.join(STORE, "." + os.path.basename(self.path) + ".lock"), "a")
-        fcntl.flock(self.lock, fcntl.LOCK_EX if self.write else fcntl.LOCK_SH)
+        lock = os.path.join(STORE, "." + os.path.basename(self.path) + ".lock")
+        try:
+            os.makedirs(STORE, exist_ok=True)
+            self.lock = open(lock, "a")
+        except OSError as e:
+            # Nothing can be written here (a read-only sandbox: a Codex reviewer's, #841): a read
+            # goes on under a shared lock on the file as it is; a change is refused, clearly.
+            if self.write or e.errno not in (errno.EROFS, errno.EACCES, errno.EPERM):
+                if e.errno in (errno.EROFS, errno.EACCES, errno.EPERM):
+                    raise Fail(f"Can't change artifacts here: {STORE} is read-only (a sandbox?). Run this outside it.")
+                raise
+            try:
+                self.lock = open(lock)
+            except OSError:
+                self.lock = None
+        if self.lock:
+            how = fcntl.LOCK_EX if self.write else fcntl.LOCK_SH
+            try:
+                fcntl.flock(self.lock, how | fcntl.LOCK_NB)
+            except BlockingIOError:
+                # another herdr-artifact (a publish being checked) has this folder's list: say so, never wait silently
+                print(f"Waiting for another herdr-artifact on {self.loc['name']}'s artifacts ({self.path})…", file=sys.stderr, flush=True)
+                fcntl.flock(self.lock, how)
         try:
             with open(self.path) as f:
                 self.data = json.load(f)
@@ -144,8 +189,9 @@ class Store:
                     f.write("\n")
                 os.replace(tmp, self.path)
         finally:
-            fcntl.flock(self.lock, fcntl.LOCK_UN)
-            self.lock.close()
+            if self.lock:
+                fcntl.flock(self.lock, fcntl.LOCK_UN)
+                self.lock.close()
 
     def find(self, ref):
         for a in self.data["artifacts"]:
@@ -196,7 +242,7 @@ def task_ref(key):
     if not n.isdigit():
         return None
     try:
-        with open(os.path.join(HOME, ".herdr", "tasks", slug + ".json")) as f:
+        with open(os.path.join(SHEP(".herdr/tasks"), slug + ".json")) as f:
             prefix = json.load(f).get("prefix")
     except (OSError, ValueError):
         prefix = None
@@ -287,13 +333,16 @@ def recipe_problems(src, files):
     if not r.get("blocks"):
         return ['"blocks" must be a list with at least one block.']
     walk(r["blocks"], "")
+    # the picture its card in the chat shows first (core/recipe.js preview()): one beside it
+    if "cover" in r and (not isinstance(r["cover"], str) or r["cover"] not in files):
+        out.append('"cover" must be a picture beside recipe.json.')
     return out
 
 
 def recipe_parts(dst):
     """The shared recipe view in an installed (or checked) recipe artifact: main.js draws recipe.json natively."""
-    shutil.copy2(RECIPE_VIEW, os.path.join(dst, "recipe-view.js"))
-    shutil.copy2(RECIPE_CORE, os.path.join(dst, "recipe.js"))
+    shutil.copyfile(RECIPE_VIEW, os.path.join(dst, "recipe-view.js"))
+    shutil.copyfile(RECIPE_CORE, os.path.join(dst, "recipe.js"))
     # the recipe as a module the view imports at once (a check then draws every block, not an empty panel)
     with open(os.path.join(dst, "recipe.json")) as f:
         data = f.read()
@@ -305,9 +354,10 @@ def recipe_parts(dst):
 
 
 def copy_files(src, files, dst):
+    # copyfile, not copy2: a copy is ours to rewrite (the light check's imports), even from a read-only install (Nix)
     for rel in files:
         os.makedirs(os.path.dirname(os.path.join(dst, rel)), exist_ok=True)
-        shutil.copy2(os.path.join(src, rel), os.path.join(dst, rel))
+        shutil.copyfile(os.path.join(src, rel), os.path.join(dst, rel))
 
 
 def helper(art, mod, agent, machine=None, custom=False):
@@ -365,7 +415,7 @@ def wrap_markup(dst):
     if not os.path.isfile(MARKUP):
         return
     os.replace(os.path.join(dst, "main.js"), os.path.join(dst, "artifact-main.js"))
-    shutil.copy2(MARKUP, os.path.join(dst, "artifact-markup.js"))
+    shutil.copyfile(MARKUP, os.path.join(dst, "artifact-markup.js"))
     with open(os.path.join(dst, "main.js"), "w") as f:
         f.write(WRAPPER)
 
@@ -439,15 +489,56 @@ def stage_theme(stage, light):
                     f.write(new)
 
 
+# How long one `herdr-app check` may take, and the wait before trying again when Herdr's checker couldn't start.
+CHECK_TIMEOUT = 90
+RETRY_WAIT = 3
+# herdr-app's own trouble drawing it (its isolated checker didn't connect, after Herdr restarted), not the artifact's
+CHECKER_DOWN = re.compile(r"isolated checker|did not connect|timed out", re.I)
+
+
+def check_run(stage):
+    """`herdr-app check <stage> --print-spec`: (code, stdout, stderr), or None when it didn't finish in time
+    (its whole process group is ended: a checker it started too)."""
+    p = subprocess.Popen(["herdr-app", "check", stage, "--print-spec"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         stdin=subprocess.DEVNULL, universal_newlines=True, start_new_session=True)
+    try:
+        out, err = p.communicate(timeout=CHECK_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(OSError):
+            os.killpg(p.pid, signal.SIGKILL)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            p.communicate(timeout=5)
+        return None
+    return p.returncode, out, err
+
+
+def check_tries(stage):
+    """check_run, once more after a moment when Herdr's checker couldn't start: (code, stdout, stderr), or
+    (None, "", why) when it still couldn't."""
+    for attempt in (1, 2):
+        r = check_run(stage)
+        if r is None:
+            why = f"herdr-app check didn't finish in {CHECK_TIMEOUT:g} s"
+        elif r[0] != 0 and CHECKER_DOWN.search(r[2] or ""):
+            why = (r[2] or "").strip().splitlines()[-1]
+        else:
+            return r
+        if attempt == 1:
+            time.sleep(RETRY_WAIT)
+    return None, "", why
+
+
 def check(src, files, art):
     """herdr-app check on a staged copy (with its artifact.js), in light and in dark.
-    Returns (error text or None, [warnings])."""
+    Returns (error text or None, [warnings], why it wasn't drawn or None). When Herdr's checker can't run (it doesn't
+    connect, or hangs), a recipe (its schema checked here, drawn by the shared recipe view) is still published, with
+    why; a custom panel is not."""
     if is_recipe(files):
         bad = recipe_problems(src, files)
         if bad:
-            return "\n".join(bad[:20]), []
+            return "\n".join(bad[:20]), [], None
     if not shutil.which("herdr-app"):
-        return None, []
+        return None, [], None
     specs = {}
     with tempfile.TemporaryDirectory(prefix="herdr-artifact-") as d:
         for look in ("dark", "light"):
@@ -459,17 +550,22 @@ def check(src, files, art):
                 f.write(helper(art, f"art-{art['id']}", None))
             if look == "light":
                 stage_theme(stage, True)
-            r = run(["herdr-app", "check", stage, "--print-spec"])
-            if r.returncode != 0:
-                text = r.stderr.strip() or r.stdout.strip() or "herdr-app check failed"
+            code, stdout, stderr = check_tries(stage)
+            if code is None:
+                if is_recipe(files):
+                    return None, [], stderr
+                return (f"Herdr couldn't draw it to check ({stderr}). Try again in a minute; if it keeps failing, "
+                        "restart Herdr."), [], None
+            if code != 0:
+                text = stderr.strip() or stdout.strip() or "herdr-app check failed"
                 text = "\n".join(l for l in text.replace(stage + "/", "").replace(SHIM_NAME, "herdr").splitlines()
                                  if not l.startswith("check failed:")).strip()
-                return (f"In {look}: {text}" if look == "light" else text), []
-            specs[look] = r.stdout
+                return (f"In {look}: {text}" if look == "light" else text), [], None
+            specs[look] = stdout
     try:
-        return None, review(specs)
+        return None, review(specs), None
     except Exception:  # a spec this version can't read: the load check above still stands
-        return None, []
+        return None, [], None
 
 
 # ---- what the check reads in the built UI ------------------------------------------------------
@@ -720,7 +816,7 @@ def cmd_publish(o):
                        "`herdr-artifact guide` shows how (A task's proof).")
         v = (art["versions"][-1]["v"] if art["versions"] else 0) + 1
         draft = dict(art, title=title, version=v, folder=loc["folder"])
-        err, warnings = check(src, files, draft)
+        err, warnings, unchecked = check(src, files, draft)
         if err:
             if not o.id:
                 s.data["artifacts"].remove(art)
@@ -747,7 +843,8 @@ def cmd_publish(o):
         s.dirty = True
         installed = None if getattr(o, "no_install", False) else write_mod(keep, files, art, f"art-{art['id']}", publisher)
         prune_versions(art)
-    out = dict(public(art), mod=f"art-{art['id']}", installed=bool(installed), warnings=warnings)
+    out = dict(public(art), mod=f"art-{art['id']}", installed=bool(installed), warnings=warnings,
+               **({"unchecked": unchecked} if unchecked else {}))
     if o.json:
         print(json.dumps(out))
     else:
@@ -756,7 +853,10 @@ def cmd_publish(o):
         if custom:
             print("A custom panel: the web app on the person's phone shows only a picture of it, taken when the window "
                   "shows this version. A recipe opens everywhere: make it one when you can.")
-        if warnings:
+        if unchecked:
+            print(f"Herdr couldn't draw it to check ({unchecked}), so only its recipe was checked. "
+                  "Look at it in the Artifacts panel, or publish it again later to have it drawn.")
+        elif warnings:
             print(f"\nThe check (light, dark, {NARROW} px wide) found what to fix, then update it:")
             for w in warnings:
                 print(f"  - {w}")
@@ -942,7 +1042,7 @@ def task_worker(task, folder, live):
     prefix, _, n = (task or "").rpartition("-")
     if not prefix or not n.isdigit():
         return None
-    tdir = os.path.join(HOME, ".herdr", "tasks")
+    tdir = SHEP(".herdr/tasks")
     for f in sorted(os.listdir(tdir)) if os.path.isdir(tdir) else []:
         if not f.endswith(".json"):
             continue
@@ -1367,7 +1467,7 @@ def cmd_convert(o):
             with open(os.path.join(out, "recipe.json"), "w") as f:
                 json.dump(recipe, f, indent=1, ensure_ascii=False)
             for pic in pics:
-                shutil.copy2(os.path.join(src, pic), os.path.join(out, pic))
+                shutil.copyfile(os.path.join(src, pic), os.path.join(out, pic))
             if o.publish:
                 convert_publish(a, out)
             done.append({"id": a["id"], "blocks": len(recipe["blocks"]), "pictures": len(pics), **({"out": out} if o.out else {})})
@@ -1395,7 +1495,7 @@ def cmd_pull(o):
 # link always works. The machine that serves the web app writes its link in herdr-core's document shepherdr.web on
 # every machine it links (core/host.js WEB_DOC), so an agent on a machine with no web app of its own has it too.
 WEB_DOC = "shepherdr.web"
-WEB_JSON = os.path.join(HOME, ".herdr", "shepherdr", "web.json")
+WEB_JSON = SHEP(".herdr/shepherdr/web.json")
 # The core label an agent's terminal asks with: the serving machine's service hears it (service/show.ts).
 SHOW = "herdr.show"
 
@@ -1507,6 +1607,198 @@ def cmd_open(o):
     return 0 if (screen or window or link) else 1
 
 
+# ---- seeing it here, as the person does (SHEP-149) -----------------------------------------------
+# The person's link leads to the machine that serves the web app, which this one may not reach. `preview` serves the
+# web app's own artifact viewer (web/viewer, built into one file: artifact-viewer.html) for this machine's artifacts on
+# 127.0.0.1 only, started on demand and gone after PREVIEW_IDLE seconds unused; the agent opens its link in its task's
+# browser (herdr-browser) at a phone's or a desktop's width and takes screenshots.
+HERE = os.path.dirname(os.path.realpath(__file__))
+VIEWERS = (os.path.join(HERE, "..", "viewer.html"),                                   # beside it: synced to a machine
+           os.path.join(HOME, ".local", "share", "shepherdr", "web", "dist", "artifact-viewer.html"),  # the installed web app's
+           os.path.join(HERE, "..", "..", "..", "web", "dist", "artifact-viewer.html"))  # a checkout's own build
+PREVIEW_STATE = os.path.join(STORE, ".preview")
+PREVIEW_IDLE = 1800
+PREVIEW_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
+                 ".svg": "image/svg+xml", ".json": "application/json", ".txt": "text/plain; charset=utf-8",
+                 ".md": "text/plain; charset=utf-8", ".csv": "text/plain; charset=utf-8"}
+# the page: its own inline script and styles, its fonts inside; it asks only this server
+VIEWER_CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src data:; "
+              "img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+# an artifact's own file, as the service sends it (service/artifacts.ts)
+FILE_CSP = "sandbox; default-src 'none'; img-src 'self'; style-src 'unsafe-inline'"
+
+
+def viewer_page():
+    return next((os.path.realpath(p) for p in VIEWERS if os.path.isfile(p)), None)
+
+
+NO_VIEWER = ("The artifact viewer isn't on this machine yet: Shepherdr's next sync brings it (`herdr-task machines sync` "
+             "on the main machine), or build it in a checkout: `bun run build`.")
+
+
+def code_stamp():
+    """Which herdr-artifact runs a preview server: one from an older copy is replaced."""
+    try:
+        return str(int(os.path.getmtime(os.path.realpath(__file__))))
+    except OSError:
+        return "0"
+
+
+def preview_alive():
+    """The running preview server's port, when it answers as this herdr-artifact's for this store, else None."""
+    import urllib.request
+    try:
+        with open(PREVIEW_STATE) as f:
+            st = json.load(f)
+        port = int(st["port"])
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping", timeout=2) as r:
+            me_ = json.load(r)
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if me_.get("store") != STORE or me_.get("code") != code_stamp():
+        with contextlib.suppress(OSError, ValueError, TypeError, KeyError):
+            os.kill(int(st["pid"]), 15)
+        return None
+    return port
+
+
+def preview_start():
+    """The port of this machine's preview server, started when none answers."""
+    port = preview_alive()
+    if port:
+        return port
+    os.makedirs(STORE, exist_ok=True)
+    with contextlib.suppress(OSError):
+        os.unlink(PREVIEW_STATE)
+    subprocess.Popen([sys.executable, os.path.realpath(__file__), "_serve"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
+    for _ in range(50):
+        time.sleep(0.1)
+        port = preview_alive()
+        if port:
+            return port
+    raise Fail("The preview server didn't start.")
+
+
+def serve_preview(idle=PREVIEW_IDLE):
+    """The preview server: the viewer page and this machine's artifacts, read only, on 127.0.0.1 (a free port, written
+    to PREVIEW_STATE). Answers only requests addressed to 127.0.0.1 or localhost (no other site's page reaches it
+    through a name of its own). Ends after `idle` seconds without a request."""
+    import http.server
+    import threading
+    last = [time.time()]
+
+    class H(http.server.BaseHTTPRequestHandler):
+        server_version = "herdr-artifact-preview"
+
+        def log_message(self, *_a):
+            pass
+
+        def send(self, code, body, ctype, csp=None, extra=None):
+            if isinstance(body, str):
+                body = body.encode()
+            self.send_response(code)
+            self.send_header("content-type", ctype)
+            self.send_header("content-length", str(len(body)))
+            self.send_header("x-content-type-options", "nosniff")
+            self.send_header("cache-control", "no-store")
+            self.send_header("referrer-policy", "no-referrer")
+            if csp:
+                self.send_header("content-security-policy", csp)
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+
+        def json(self, code, obj):
+            self.send(code, json.dumps(obj), "application/json")
+
+        def do_HEAD(self):
+            self.do_GET()
+
+        def do_GET(self):
+            last[0] = time.time()
+            host = (self.headers.get("host") or "").rsplit(":", 1)[0]
+            if host not in ("127.0.0.1", "localhost"):
+                return self.send(403, "Only on this machine.", "text/plain")
+            u = urllib.parse.urlsplit(self.path)
+            q = urllib.parse.parse_qs(u.query)
+            path = urllib.parse.unquote(u.path)
+            if path == "/api/ping":
+                return self.json(200, {"store": STORE, "code": code_stamp()})
+            if path in ("/", "/index.html"):
+                page = viewer_page()
+                if not page:
+                    return self.send(500, NO_VIEWER, "text/plain; charset=utf-8")
+                with open(page, "rb") as f:
+                    return self.send(200, f.read(), "text/html; charset=utf-8", VIEWER_CSP)
+            m = re.match(r"^/api/artifacts/([\w.-]+)(?:/(recipe|file/(.+)))?$", path)
+            if not m:
+                return self.send(404, "Not here.", "text/plain")
+            aid = m.group(1)
+            try:
+                with Store(find_anywhere(aid), write=False) as s:
+                    a = s.find(aid)
+            except Fail as e:
+                return self.json(404, {"error": str(e)})
+            if not m.group(2):
+                return self.json(200, dict(public(a), kind=(next((x for x in a.get("versions") or [] if x.get("v") == a.get("version")), {}).get("kind")
+                                                            or "recipe")))
+            try:
+                v = int((q.get("v") or [a["version"]])[0])
+            except ValueError:
+                v = 0
+            base = os.path.realpath(os.path.join(FILES, aid, f"v{v}"))
+            rel = "recipe.json" if m.group(2) == "recipe" else m.group(3)
+            p = os.path.realpath(os.path.join(base, rel))
+            ctype = PREVIEW_TYPES.get(os.path.splitext(p)[1].lower())
+            if v < 1 or not p.startswith(base + os.sep) or not os.path.isfile(p):
+                return self.send(404, "No such file.", "text/plain")
+            if not ctype:
+                return self.send(415, "Not shown here.", "text/plain")
+            with open(p, "rb") as f:
+                return self.send(200, f.read(), ctype, FILE_CSP)
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    srv.daemon_threads = True
+    os.makedirs(STORE, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=STORE, prefix=".tmp-")
+    with os.fdopen(fd, "w") as f:
+        json.dump({"port": srv.server_address[1], "pid": os.getpid()}, f)
+    os.replace(tmp, PREVIEW_STATE)
+
+    def watch():
+        while time.time() - last[0] < idle:
+            time.sleep(min(30, idle))
+        srv.shutdown()
+    threading.Thread(target=watch, daemon=True).start()
+    try:
+        srv.serve_forever()
+    finally:
+        with contextlib.suppress(OSError, ValueError):
+            with open(PREVIEW_STATE) as f:
+                if json.load(f).get("pid") == os.getpid():
+                    os.unlink(PREVIEW_STATE)
+    return 0
+
+
+def cmd_preview(o):
+    """This machine's artifact in the web app's viewer, served here on 127.0.0.1: its link, for the task's browser."""
+    with Store(find_anywhere(o.id), write=False) as s:
+        as_version(s.find(o.id), o.version)
+    if not viewer_page():
+        raise Fail(NO_VIEWER)
+    port = preview_start()
+    link = f"http://127.0.0.1:{port}/?artifact={urllib.parse.quote(o.id, safe='')}" + (f"&v={o.version}" if o.version else "")
+    if o.json:
+        print(json.dumps({"id": o.id, "link": link}))
+    else:
+        print(link)
+        print("Open it in your task's browser, as the person sees it on a phone and on a desktop:\n"
+              f"  herdr-browser set viewport 390 844 && herdr-browser open '{link}' && herdr-browser screenshot /abs/phone.png\n"
+              f"  herdr-browser set viewport 1280 800 && herdr-browser open '{link}' && herdr-browser screenshot /abs/desktop.png")
+    return 0
+
+
 EXAMPLE = '''import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme } from "herdr";
@@ -1560,8 +1852,11 @@ def cmd_new(o):
 
 
 def cmd_guide(_o):
-    with open(GUIDE) as f:
-        sys.stdout.write(f.read())
+    try:
+        with open(GUIDE) as f:
+            sys.stdout.write(f.read())
+    except FileNotFoundError:
+        raise Fail(f"The guide isn't installed here ({os.path.realpath(GUIDE)}). Update Shepherdr: `shepherdr update`.")
     return 0
 
 
@@ -1569,16 +1864,19 @@ def cmd_guide(_o):
 
 # Shepherdr's installer holds every copy of the helpers to other machines (this file, removed by
 # `shepherdr doctor` once the install is whole), as herdr-task's base.sync_held.
-SYNC_HOLD = os.path.join(HOME, ".herdr", "sync-hold")
+# Its state folder's, or an older installer's in ~/.herdr: either holds.
+SYNC_HOLDS = (os.path.join(os.path.dirname(SHEP(".herdr/secret-drop")), "sync-hold"), os.path.join(HOME, ".herdr", "sync-hold"))
 
 
 def sync_held():
     """Why copies to other machines wait now (the hold's first line), or None."""
-    try:
-        with open(SYNC_HOLD) as f:
-            return f.readline().strip() or "held by Shepherdr's installer"
-    except OSError:
-        return None
+    for p in SYNC_HOLDS:
+        try:
+            with open(p) as f:
+                return f.readline().strip() or "held by Shepherdr's installer"
+        except OSError:
+            continue
+    return None
 
 
 def remote(machine, argv):
@@ -1632,6 +1930,8 @@ def main():
     if argv[:1] == ["--version"]:
         print(VERSION)
         return 0
+    if argv[:1] == ["_serve"]:
+        return serve_preview()
 
     p = argparse.ArgumentParser(prog="herdr-artifact", description="Herdr's artifacts: recipes an agent writes to show the person something, drawn in the window and on the web.",
                                 epilog="`herdr-artifact guide` explains how to write one. Another machine's folder: herdr-artifact --on <machine> <command> ...")
@@ -1686,6 +1986,9 @@ def main():
     c = cmd("link", cmd_link, "an artifact's link in the web app, for the person")
     c.add_argument("id")
     c.add_argument("--from", dest="machine", help="the machine it's on (default: this one)")
+    c = cmd("preview", cmd_preview, "see an artifact here as the person sees it: the web app's viewer on 127.0.0.1, for your task's browser")
+    c.add_argument("id")
+    c.add_argument("--version", type=int, help="an older version (default: the latest)")
     c = cmd("note", cmd_note, "send the person's note on an artifact to the agent that keeps it (the viewer's Mark up)")
     c.add_argument("id")
     c.add_argument("--text", required=True, help="what the person wrote")

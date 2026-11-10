@@ -19,6 +19,7 @@ export async function worktreeAct(hub: Hub, space: Spot, b: any, store: any, clo
     return { ok: r.code === 0, out: (r.stdout ?? "").trim(), err: (r.stderr || r.stdout || "").trim() };
   };
   const home = (await homeOf(hub, on)) ?? "";
+  // Herdr's own place for them (its worktree dialog's: ~/.herdr is Herdr's folder), not Shepherdr's task worktrees
   const root = `${home}/.herdr/worktrees`;
   // the repo the space's folder belongs to: its main checkout and name, and whether the folder is a linked worktree
   const top = await git(space.folder, ["rev-parse", "--show-toplevel"]);

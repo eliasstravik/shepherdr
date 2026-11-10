@@ -11,7 +11,7 @@ import * as A from "../core/asks.js";
 import type { Hub } from "./hub.ts";
 import { note as noteUsage } from "./usage.ts";
 
-const { words, allow, deny, answers, howAnswered, release, chatAbout, dismiss } = A as any;
+const { words, allow, deny, answers, annotationsOf, howAnswered, release, chatAbout, dismiss } = A as any;
 const dir = () => join(appHome(), "data", "chat-asks");
 const ID = /^[\w.-]+$/;
 const MACHINE = /^[\w.-]+$/;
@@ -168,12 +168,15 @@ export class Asks {
       // the multi-step card: each question's answer in order, all of them
       const got = (a.answers ?? []).map((x) => String(x ?? "").trim());
       if (got.length !== w.questions.length || got.some((x) => !x)) throw new Error("Answer every question first.");
-      out = answers(ask.req, Object.fromEntries(w.questions.map((q: any, i: number) => [q.text, got[i]])));
+      const map = Object.fromEntries(w.questions.map((q: any, i: number) => [q.text, got[i]]));
+      out = answers(ask.req, map, annotationsOf(w, map, a.note));
     } else if (w.kind === "questions") {
       const q = w.questions[0];
       const picked = a.other ? [a.other] : (a.choices ?? (a.choice != null ? [a.choice] : [])).map((i) => q.options[i]?.name).filter(Boolean);
       if (!picked.length) throw new Error("Pick an answer first.");
-      out = answers(ask.req, { [q.text]: picked.join(", ") });
+      const map = { [q.text]: picked.join(", ") };
+      // the picked option's preview and the person's note go with it, as Claude's prompt gives them (SHEP-139)
+      out = answers(ask.req, map, annotationsOf(w, map, a.note));
     } else if (a.choice === 0) {
       // never allowed unseen: a request too long for the card is answered where it shows whole, the terminal
       if (w.cut) throw new Error("Too long to show here in full: answer it in the terminal.");

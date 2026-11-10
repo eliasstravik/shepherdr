@@ -1,5 +1,5 @@
 // Secrets for agents (bin/herdr-secret): the vault on the machine that keeps them (Settings ›
-// Secrets › Kept on, `herdr-secret where`), ~/.herdr/vault.json there (owner-only), values by name
+// Secrets › Kept on, `herdr-secret where`), ~/.local/share/shepherdr/secrets/vault.json there (owner-only), values by name
 // for Everywhere, a machine or a space, the most specific winning. On another machine every read
 // and write goes there through herdr-secret (names, set, rm: it passes them on over hc). The
 // person's masked boxes (an agent's ask card in its chat, Settings > Secrets) write it here
@@ -12,16 +12,18 @@
 
 import { appHome, home, exec, hc, readTextFile, writeTextFile } from "herdr";
 import { terminals, spaces, panes } from "./live.js";
+import { chatPane } from "./core/spaces.js";
 import { serviceRuns } from "./service.js";
 
 // The ask's label and the words the agent hears: core/secrets.js, shared with the web app.
 import { NAME, ASK, asksIn, keptLine, declinedLine } from "./core/secrets.js";
 import { sendAsPerson } from "./core/person.js";
+import { dirs, dirsReady } from "./dirs.js";
 export { NAME };
 const WANT = "herdr.secret.want";
 const SPACE_LABELS = ["herdr.space", "herdr.task.space", "herdr.coordinator.space"];
 const bin = () => `${appHome()}/bin/herdr-secret`;
-const vault = () => `${home()}/.herdr/vault.json`;
+const vault = () => dirs().vault;
 
 // ---- scopes ---------------------------------------------------------------------------------
 // A scope: { scope: "everywhere" | "machine" | "space", machine, space } (machine null: this one;
@@ -38,7 +40,7 @@ export function placeOf(address) {
   for (let i = 0; i < 5 && t; i++) {
     const l = t.labels ?? {};
     // An agent parked behind its chat has only herdr.chat=<chat pane>: the chat's space.
-    const chat = l["herdr.chat"] && panes().find((p) => p.pane === qualify(machine, l["herdr.chat"]));
+    const chat = l["herdr.chat"] && panes().find((p) => p.pane === chatPane(t));
     const sp = SPACE_LABELS.map((k) => l[k]).find(Boolean) ?? (chat && spaces().find((s) => s.tabs?.some((x) => x.id === chat.tab))?.id);
     if (sp) return { machine, space: qualify(machine, sp) };
     if (!t.parent) break;
@@ -119,7 +121,7 @@ async function read() {
   if (text == null) return { text: null, data: { version: 1, secrets: [] } };
   let data = null;
   try { data = JSON.parse(text); } catch {}
-  if (!data || !Array.isArray(data.secrets)) throw new Error("The vault (~/.herdr/vault.json) isn't readable; fix or move it first.");
+  if (!data || !Array.isArray(data.secrets)) throw new Error(`The vault (${vault()}) isn't readable; fix or move it first.`);
   return { text, data };
 }
 
@@ -160,8 +162,8 @@ export async function keep(name, scope, value) {
     });
   } else {
     // to the machine that keeps them: a mod's exec has no stdin, so the value waits in an owner-only file in
-    // ~/.herdr/secret-drop (0700) that herdr-secret reads and removes at once, then sends on over hc's link
-    const drop = `${home()}/.herdr/secret-drop`;
+    // the secret-drop folder (0700) that herdr-secret reads and removes at once, then sends on over hc's link
+    const drop = (await dirsReady())["secret-drop"];
     await exec("sh", ["-c", 'mkdir -p "$1" && chmod 700 "$1"', "x", drop]);
     const file = `${drop}/set-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     await writeTextFile(file, v, null);

@@ -2,7 +2,7 @@
 
 ```text
 layouts/BossGoat.json   the layout (two live blocks shipped blank: tasks-thread-term, artifacts-view-body)
-mods/<name>/             the 29 mods, installed as they are (names fixed: data/<mod> state follows them)
+mods/<name>/             the 28 mods, installed as they are (names fixed: data/<mod> state follows them)
 lib/                     shared modules, one source each; bin/sync-shared copies them into the mods in lib/COPIES
 lib/addons.json          the add-ons: mods, blocks, keys, helpers, needs, web plugins (docs/addons.md)
 lib/features.json        every feature: its Herdr side, its web side and its shared logic (CI checks all three)
@@ -12,6 +12,8 @@ web/                     the web app (React, Vite, Tailwind; 2.1's design): src/
 bin/shepherdr            the installer (install, update, uninstall, doctor); ./install.sh runs it
 bin/                     herdr-secret, herdr-browser, herdr-browser-view, sync-shared (installed to the app's bin/)
 mods/tasks/bin/          herdr-task (entry) and its herdr_task package
+mods/tasks/bin/herdr_task/layout.py   where Shepherdr's data lives, and the move there from ~/.herdr (the one source)
+core/paths.js, lib/dirs.js            the same paths for the service, the web app and the window's mods
 mods/artifacts/bin/      herdr-artifact
 templates/               assistant.md, worker.md, reviewer.md (herdr-core templates)
 guard/herdr-app          the window guard (--guard)
@@ -29,6 +31,19 @@ RECIPE.md, preview.png   the herdr.dev listing (repo topic herdr-layout)
 - Nothing personal: no absolute home paths (use `home()`, `appHome()`, `$HOME`), no machine or account names, no
   live terminal or artifact ids in the layout. `test/test_repo.py` checks.
 - Version: `VERSION` in `bin/shepherdr`, the top of `CHANGELOG.md`, `RECIPE.md` and the README say the same.
+
+## Where data lives (SHEP-141)
+
+- Shepherdr's data is in its own folders ([Install](install.md), Where your data lives). Never write a `~/.herdr/...`
+  path in new code: Python reads `layout.Where().path(kind)` (herdr-task: `base.WHERE`), the service `where()` from
+  `service/paths.ts`, a mod `dirs()` from `lib/dirs.js`, a one-file helper (herdr-secret, herdr-artifact) its SHEP
+  block (`bin/sync-shared` writes it from `layout.py`). A script run on another machine starts with `SH` (core/paths.js
+  or layout.py) and uses `$SHEP_TASKS`, `$SHEP_SETTINGS`, ...: right on a machine moved or not yet.
+- A new kind of data: add it to `KINDS` in `layout.py` and `core/paths.js` (test/test_layout.py checks they agree),
+  then `bin/sync-shared`.
+- Tests never touch the real folders: herdr-task moves nothing when `HERDR_TASK_STORE`, `HERDR_TASK_SETTINGS` or
+  `SHEPHERDR_NO_MIGRATE` is set; `test/test_layout.py` builds throwaway homes (`layout.migrate(home=..., env={})`).
+  `shepherdr --root <scratch>` ignores `SHEPHERDR_HOME` and `XDG_*`.
 
 ## Checks
 

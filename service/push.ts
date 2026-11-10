@@ -1,10 +1,10 @@
 // Push alerts to phones and browsers that asked for them (2.1's alerts: the service worker web/public/sw.js shows
-// them). Web Push with nothing but WebCrypto: a VAPID key pair kept owner-only in ~/.herdr/shepherdr/vapid.json, each
+// them). Web Push with nothing but WebCrypto: a VAPID key pair kept owner-only in the service's folder (vapid.json), each
 // alert encrypted for its subscription (RFC 8291, aes128gcm) and signed (RFC 8292, ES256). Subscriptions are kept in
 // push.json. A device whose app is on screen gets none (the page says so over its socket).
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DATA } from "./paths.ts";
+import { DATA, where } from "./paths.ts";
 import * as T from "../core/toasts.js";
 import { alertUrl, DEFAULT_TOPICS, notifies, notifyOf, pushTopics, taskWho, type PushTopic } from "../web/shared/alerts.ts";
 
@@ -68,7 +68,7 @@ export function agentAlerts(terminals: Iterable<any>, snap: any, chatOf: (addres
   // Assistants here that their model's provider kept cutting off (herdr-task tick's .retries.json), once per cut, as
   // the window's (lib/inbox.js readRetries): "<who> · <why>", "Write to it to carry on, or restart it."
   let rows: Record<string, any> = {};
-  try { rows = JSON.parse(readFileSync(join(home, ".herdr", "tasks", ".retries.json"), "utf8")) ?? {}; } catch {}
+  try { rows = JSON.parse(readFileSync(join(where(home).tasks, ".retries.json"), "utf8")) ?? {}; } catch {}
   const live = new Map([...all].map((k) => [k.address, k]));
   for (const r of Object.values(rows)) {
     if (r?.role !== "coordinator" || !r.over || !r.reason || r.stale || live.get(r.address)?.state !== "live") continue;

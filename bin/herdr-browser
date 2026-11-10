@@ -2,8 +2,10 @@
 # herdr-browser: a Herdr task's own browser (HERD-57). agent-browser at the version Herdr pins, on
 # the task's own session and profile, so every agent of a task drives the same browser and its
 # sign-ins stay with the task:
-#   session  herdr-<task>               (agent-browser --session)
-#   profile  ~/.herdr/browser/<task>    (a Chrome profile folder: cookies and sign-ins kept)
+#   session  herdr-<task>               (agent-browser --session; a <task> over 32 characters is cut to its
+#            last 20 and a hash of the task's key: herdr-<tail>-<8 hex>, as agent-browser's socket path is short)
+#   profile  ~/.local/state/shepherdr/browser/<task>    (a Chrome profile folder: cookies and sign-ins kept;
+#            ~/.herdr/browser/<task> on a machine whose Shepherdr data hasn't moved to its own folders yet)
 # <task> is the task's herdr.task key (<slug>#<id>) made safe for a name: ".config-herdr-app#57"
 # is "config-herdr-app-57". Which task: --task <key>, else $HERDR_BROWSER_TASK (herdr-task gives
 # its workers that), else the herdr.task label of the terminal it runs in ($HC_TERMINAL_ID).
@@ -15,9 +17,177 @@
 #                 it is fresh (the panel touches it every 30 s), so the agent holds off
 # --own: Herdr's own commands (the panel); they don't count as the agent using it, nor get refused.
 # --name: prints the session and profile it would use, as JSON, and runs nothing.
+#
+# agent-browser itself (SHEP-156): any 0.41.x from the pin on, found on the PATH, or Shepherdr's own copy in
+# ~/.local/share/shepherdr/agent-browser/<pin>/ (preferred once there). When there's none, an agent's first command
+# installs it there: agent-browser's own release binary for this machine, checked against the pin's checksum (no
+# npm, no sudo), and Chrome for Testing with `agent-browser install` when no Chrome is found. Install and update run
+# --install too. A failed try isn't repeated for 10 minutes, except by --install.
+# --install  makes sure a working agent-browser and Chrome are here (installs them), and says what it found
+# --status   what's here, as JSON, installing nothing (shepherdr doctor)
+# --bin      the agent-browser it runs, installing nothing (herdr-task's tick)
 
 PIN=0.41.1
-root="$HOME/.herdr/browser"
+# The pinned release's binaries (github.com/vercel-labs/agent-browser/releases), by platform: sha256.
+sha_for() {
+  case "$1" in
+    darwin-arm64) echo 63b0a97b85a54b4c9b2871318af74104c29b80abd507b53a30316884e062854b ;;
+    darwin-x64) echo 7802f053e7fb25e10548ee10ca60d892c73d42ed2dbb7fc30c2d5925a5c82859 ;;
+    linux-arm64) echo f0b3bdaa40abf2a5111ec08e6d242110aaf56045ef5108cbc633bacc8e53ca17 ;;
+    linux-x64) echo 2a89295b62ddd497986a9a80b52e1dbe4c1f6bd68ffde67eaae82eec2206af61 ;;
+    linux-musl-arm64) echo 3afdec8f37bfd80b2ecc30e2297c95c3bae9ddb3775ebe531534ea6e3662f44c ;;
+    linux-musl-x64) echo 951c795e21fddab1d4091ad2ca4f0e69f1eea6534288e6a251598df11ca8e9af ;;
+  esac
+}
+# Shepherdr's state folder once this machine's data moved there (herdr_task/layout.py), else the old ~/.herdr/browser
+if [ -n "${SHEPHERDR_HOME:-}" ]; then shep_data="$SHEPHERDR_HOME/data"; shep_state="$SHEPHERDR_HOME/state"
+else shep_data="${XDG_DATA_HOME:-$HOME/.local/share}/shepherdr"; shep_state="${XDG_STATE_HOME:-$HOME/.local/state}/shepherdr"; fi
+if [ "$(cut -c1 "$shep_data/LAYOUT" 2>/dev/null)" = 2 ] && [ ! -e "$HOME/.herdr/.layout-rollback" ]; then root="$shep_state/browser"
+else root="$HOME/.herdr/browser"; fi
+# Shepherdr's own agent-browser (always in its data folder, whatever the layout)
+abdir="$shep_data/agent-browser"
+mine="$abdir/$PIN/agent-browser"
+# the one command that fixes it, as the person can type it
+if [ "$(command -v herdr-browser 2>/dev/null)" ]; then fix="herdr-browser --install"; else fix="$0 --install"; fi
+
+# Same major and minor as the pin, and not older: 0.41.1, 0.41.2… (0.42 may change what Herdr relies on).
+compatible() {
+  _v=${1%%[-+]*}
+  case "$_v" in [0-9]*.[0-9]*.[0-9]*) ;; *) return 1 ;; esac
+  case "$_v" in *[!0-9.]*|*.*.*.*) return 1 ;; esac
+  [ "${_v%.*}" = "${PIN%.*}" ] && [ "${_v##*.}" -ge "${PIN##*.}" ]
+}
+
+# A binary's version, asked once per binary (its path and change time), then kept.
+version_of() {
+  _real=$(readlink -f "$1" 2>/dev/null || echo "$1")
+  _stamp="$_real $(stat -c %Y "$_real" 2>/dev/null || stat -f %m "$_real" 2>/dev/null)"
+  _ver=
+  [ -f "$root/.version" ] && _ver=$(awk -v s="$_stamp" 'substr($0, 1, length(s)) == s { print $NF }' "$root/.version")
+  if [ -z "$_ver" ]; then
+    _ver=$("$1" --version 2>/dev/null | awk '{ print $NF }')
+    [ -n "$_ver" ] && mkdir -p "$root" 2>/dev/null && chmod 700 "$root" 2>/dev/null && printf '%s %s\n' "$_stamp" "$_ver" >> "$root/.version"
+  fi
+  echo "$_ver"
+}
+
+# Which agent-browser: $HERDR_BROWSER_BIN, else Shepherdr's own, else the PATH's. Sets bin, ver, from.
+pick() {
+  if [ -n "${HERDR_BROWSER_BIN:-}" ]; then bin=$HERDR_BROWSER_BIN; from=env
+  elif [ -x "$mine" ]; then bin=$mine; from=shepherdr
+  else bin=$(command -v agent-browser 2>/dev/null); from=path; fi
+  ver=
+  if [ -n "$bin" ]; then ver=$(version_of "$bin"); else from=; fi
+}
+usable() { [ -n "$bin" ] && compatible "$ver"; }
+
+# Puts agent-browser $PIN's own binary for this machine at $mine. -> 0, or 1 with $why.
+install_mine() {
+  case "$(uname -s)" in
+    Darwin) _os=darwin ;;
+    Linux) _os=linux; if (ldd --version 2>&1 || true) | grep -qi musl; then _os=linux-musl; fi ;;
+    *) why="agent-browser has no build for $(uname -s)"; return 1 ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) _arch=x64 ;;
+    arm64|aarch64) _arch=arm64 ;;
+    *) why="agent-browser has no build for $(uname -m)"; return 1 ;;
+  esac
+  _plat=$_os-$_arch
+  _want=${HERDR_BROWSER_SHA256:-$(sha_for "$_plat")}
+  [ -n "$_want" ] || { why="agent-browser has no build for $_plat"; return 1; }
+  command -v curl >/dev/null 2>&1 || { why="curl isn't installed"; return 1; }
+  _url="${HERDR_BROWSER_URL:-https://github.com/vercel-labs/agent-browser/releases/download/v$PIN}/agent-browser-$_plat"
+  mkdir -p "$abdir/$PIN" 2>/dev/null || { why="can't write to $abdir"; return 1; }
+  _tmp="$abdir/.part.$$"
+  if ! _err=$(curl -fsSL --retry 2 --connect-timeout 15 --max-time 600 -o "$_tmp" "$_url" 2>&1); then
+    rm -f "$_tmp"
+    why="couldn't download it (${_err:-no answer}; offline?)"; return 1
+  fi
+  _got=$( (sha256sum "$_tmp" 2>/dev/null || shasum -a 256 "$_tmp" 2>/dev/null) | awk '{ print $1 }')
+  if [ "$_got" != "$_want" ]; then
+    rm -f "$_tmp"; why="the download isn't agent-browser $PIN (its checksum differs)"; return 1
+  fi
+  chmod 755 "$_tmp" && mv -f "$_tmp" "$mine" || { rm -f "$_tmp"; why="can't write to $abdir"; return 1; }
+  # an older pin's copy: no longer used
+  for _d in "$abdir"/*/; do
+    [ -d "$_d" ] && [ "${_d%/}" != "$abdir/$PIN" ] && rm -rf "${_d%/}"
+  done
+  return 0
+}
+
+# Chrome for the binary picked: agent-browser's own check, else `agent-browser install` (Chrome for Testing into
+# ~/.agent-browser). -> 0, or 1 with $why.
+chrome() {
+  "$bin" doctor --offline --quick --json 2>/dev/null | python3 -c 'import json,sys
+try: sys.exit(0 if any(c.get("id") == "chrome.installed" and c.get("status") == "pass" for c in json.load(sys.stdin)["checks"]) else 1)
+except Exception: sys.exit(1)' && return 0
+  echo "herdr-browser: downloading Chrome for the task browser (agent-browser install)…" >&2
+  if ! _err=$("$bin" install 2>&1 </dev/null); then
+    why="agent-browser couldn't download Chrome ($(printf '%s\n' "$_err" | grep . | tail -n 1))"; return 1
+  fi
+  return 0
+}
+
+# Makes sure a usable agent-browser and Chrome are here; one at a time. -> 0, or 1 with $why (kept in .failed).
+ensure() {
+  why=
+  mkdir -p "$abdir" 2>/dev/null || { why="can't write to $abdir"; return 1; }
+  _n=0
+  until mkdir "$abdir/.lock" 2>/dev/null; do
+    # another one is installing: wait for it (a lock left by one that died goes after 10 minutes)
+    if [ -n "$(find "$abdir/.lock" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then rmdir "$abdir/.lock" 2>/dev/null; continue; fi
+    _n=$((_n + 1)); [ "$_n" -gt 600 ] && { why="another install is still running"; return 1; }
+    sleep 1
+  done
+  pick
+  _ok=0
+  if ! usable; then
+    echo "herdr-browser: installing agent-browser $PIN for Shepherdr into $abdir (once)…" >&2
+    install_mine || _ok=1
+    [ "$_ok" = 0 ] && pick
+  fi
+  [ "$_ok" = 0 ] && { chrome || _ok=1; }
+  if [ "$_ok" = 0 ]; then rm -f "$abdir/.failed"; else printf '%s\n' "$why" > "$abdir/.failed"; fi
+  rmdir "$abdir/.lock" 2>/dev/null
+  return $_ok
+}
+
+# What's wrong, and the one command that fixes it.
+problem() {
+  if [ -z "$bin" ]; then _what="agent-browser isn't installed here"
+  else _what="Shepherdr runs agent-browser $PIN (or a newer ${PIN%.*}.x); this machine has ${ver:-an unknown version} ($bin)"; fi
+  # The apostrophe sits outside ${...}: bash (3.2 on macOS too) reads one inside a double-quoted ${...} as a quote
+  _why=
+  if [ -n "$why" ]; then _why=", and Shepherdr couldn't install it: $why"; fi
+  echo "herdr-browser: $_what$_why. Fix it: $fix"
+}
+
+json_str() { printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()), end="")'; }
+
+case "${1-}" in
+  --install)
+    if ensure; then
+      echo "herdr-browser: agent-browser $ver is ready ($bin), with Chrome."
+      exit 0
+    fi
+    pick; problem >&2
+    exit 1 ;;
+  --status)
+    pick; why=
+    [ -f "$abdir/.failed" ] && why=$(cat "$abdir/.failed")
+    if usable; then ok=true; msg=; else ok=false; msg=$(problem); fi
+    printf '{"ok":%s,"pin":"%s","accepts":"%s","bin":%s,"version":%s,"from":%s,"failed":%s,"problem":%s,"fix":%s}\n' \
+      "$ok" "$PIN" "$PIN to ${PIN%.*}.x" "$(json_str "$bin")" "$(json_str "$ver")" "$(json_str "$from")" \
+      "$(json_str "$why")" "$(json_str "$msg")" "$(json_str "$fix")"
+    exit 0 ;;
+  --bin)
+    pick
+    usable || exit 1
+    echo "$bin"
+    exit 0 ;;
+esac
+
 task=${HERDR_BROWSER_TASK-}
 own=
 while :; do
@@ -39,7 +209,23 @@ if [ -z "$task" ]; then
 fi
 name=$(printf %s "$task" | sed 's/[^A-Za-z0-9_-]/-/g; s/--*/-/g; s/^-//; s/-$//')
 session="herdr-$name"
+# A long name is cut (SHEP-178): its last 20 characters and the first 8 hex of the key's sha256, the same every call.
+# Kept in step with herdr_task/browsers.py, service/browser.ts and bin/herdr-browser-view (sessionOf).
+if [ ${#name} -gt 32 ]; then
+  h=$(printf %s "$task" | sha256sum 2>/dev/null | cut -c1-8)
+  [ -n "$h" ] || h=$(printf %s "$task" | shasum -a 256 2>/dev/null | cut -c1-8)
+  session="herdr-$(printf %s "$name" | tail -c 20 | sed 's/^-*//')-$h"
+fi
 profile="$root/$name"
+# A browser made before the data moved keeps the path it was started with (~/.herdr/browser/<name>, a link to the
+# same folder now): agent-browser's running session knows it by that path. New ones use the new place.
+old="$HOME/.herdr/browser/$name"
+if [ "$root" != "$HOME/.herdr/browser" ] && [ -d "$old" ] && [ -d "$profile" ] \
+   && [ "$(cd "$old" && pwd -P)" = "$(cd "$profile" && pwd -P)" ] && [ ! -f "$root/$name.new" ]; then
+  profile=$old
+elif [ ! -d "$profile" ] && [ "$root" != "$HOME/.herdr/browser" ]; then
+  mkdir -p "$root" 2>/dev/null; : > "$root/$name.new" 2>/dev/null || true   # made at the new place: always the new path from now on
+fi
 if [ -n "${show-}" ]; then
   printf '{"task":"%s","session":"%s","profile":"%s","pin":"%s"}\n' "$task" "$session" "$profile" "$PIN"
   exit 0
@@ -54,25 +240,18 @@ for a in "$@"; do
   esac
 done
 
-# The pinned version: two versions on one session keep restarting its daemon. Asked once per
-# binary (its path and change time), then kept.
-bin=${HERDR_BROWSER_BIN:-$(command -v agent-browser)}
-if [ -z "$bin" ]; then
-  echo "herdr-browser: agent-browser isn't installed here. Install it: npm i -g agent-browser@$PIN, then agent-browser install (Chrome)." >&2
-  exit 127
-fi
+# A usable agent-browser (one version per session: two keep restarting its daemon). None yet: an agent's first command
+# installs it (Herdr's own views only say so, they never wait on a download), unless a try failed in the last 10 minutes.
 mkdir -p "$root" 2>/dev/null && chmod 700 "$root" 2>/dev/null
-real=$(readlink -f "$bin" 2>/dev/null || echo "$bin")
-stamp="$real $(stat -c %Y "$real" 2>/dev/null || stat -f %m "$real" 2>/dev/null)"
-ver=
-[ -f "$root/.version" ] && ver=$(awk -v s="$stamp" 'substr($0, 1, length(s)) == s { print $NF }' "$root/.version")
-if [ -z "$ver" ]; then
-  ver=$("$bin" --version 2>/dev/null | awk '{ print $NF }')
-  [ -n "$ver" ] && printf '%s %s\n' "$stamp" "$ver" > "$root/.version"
-fi
-if [ "$ver" != "$PIN" ]; then
-  echo "herdr-browser: Herdr runs agent-browser $PIN; this machine has ${ver:-an unknown version} ($bin). Install it: npm i -g agent-browser@$PIN" >&2
-  exit 127
+pick
+if ! usable; then
+  why=
+  [ -n "$(find "$abdir/.failed" -mmin -10 2>/dev/null)" ] && why=$(cat "$abdir/.failed")
+  if [ -z "$own" ] && [ -z "$why" ] && [ -z "${HERDR_BROWSER_BIN:-}" ]; then
+    ensure || { pick; usable && echo "herdr-browser: $why. Fix it: $fix" >&2; }
+    pick
+  fi
+  if ! usable; then problem >&2; exit 127; fi
 fi
 
 # The first word that isn't a flag: what the command does.
@@ -93,6 +272,12 @@ if [ -z "$own" ]; then
   touch "$root/$name.used" 2>/dev/null
 fi
 [ -f "$root/$name.task" ] || printf '%s\n' "$task" > "$root/$name.task"
+# A browser opened before names were cut (a name of 33-64 characters still fit agent-browser's socket path) holds the
+# profile: closed once, quietly, so the new session can open it (sign-ins are in the profile and stay).
+if [ "$session" != "herdr-$name" ] && [ ! -f "$root/$name.session" ]; then
+  [ ${#name} -le 64 ] && "$bin" --session "herdr-$name" close >/dev/null 2>&1
+  printf '%s\n' "$session" > "$root/$name.session" 2>/dev/null
+fi
 
 # Pages see prefers-reduced-motion (Chrome draws them in software, so an animation costs a core);
 # an agent whose page must move turns it off with: set media no-preference.

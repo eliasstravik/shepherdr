@@ -1,7 +1,7 @@
 # Tasks panel and task view
 
-Window: `mods/tasks/main.js` (T), `mods/tasks-menu/main.js` (TM), `mods/chat/panel.js` (P), `mods/task-files/main.js`
-(F), `mods/task-changes/main.js` (C), `mods/task-pr/main.js` (PR), `mods/task-browser/main.js` (B). Web:
+Window: `mods/tasks/main.js` (T), `mods/tasks-menu/main.js` (TM), `mods/chat/panel.js` (P), `mods/task-pr/main.js`
+(PR), `mods/task-browser/main.js` (B). Web:
 `web/plugins/tasks/client.tsx` (W), `web/src/groups.ts` (G), `web/src/App.tsx` TaskPage (A), `web/src/Panel.tsx`
 (TaskTabs, TabBody) (N), `web/plugins/worktree/client.tsx` (K), `web/plugins/browser/client.tsx` (BR), and the data
 from `service/compat.ts`, `service/worktree.ts`.
@@ -9,8 +9,7 @@ from `service/compat.ts`, `service/worktree.ts`.
 Shared, so the two can't drift: `core/tasks.js` (status words, `capital`, `day`, the second line and minutes left,
 already the service's), `core/needs.js` (`fit` to 40 characters, `REASONS`), `core/menus.js` (`taskMenu`),
 `core/worktree.js` (new: `VIEW_WORDS`, `CHANGE_WORDS`, `CHECK_WORDS`, `PR_STATES`, `LIST_DIR`, `dirEntries`,
-`markOf`). `core/worktree.test.js` checks every one of those words is still in the window's mods, word for word, and
-that Files lists a folder with the window's own script; `test/test_repo.py` `test_task_views_from_one_core` checks the
+`markOf`). `core/worktree.test.js` checks the Pull request words are still in mods/task-pr, word for word; `test/test_repo.py` `test_task_views_from_one_core` checks the
 web and the service read them from core.
 
 State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
@@ -75,7 +74,7 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 | Queued | "After HERD-3", "Waits: …", "Starts soon" | compat `sub` (core queueReason) | ✓ |
 | Scheduled | a grey calendar (mods/tasks/scheduled.svg), its time until it starts under it ("6h", core `leftOf`), "Starts Today 18:00" (core `startsLine`) | ui.tsx `.dot.scheduled` (the same drawing), TaskDot `until` (core `untilShort`, live), compat `sub` | ✓ (SHEP-38) |
 | Ready | "Ready 5m ago" + Review (opens the Accept card) | compat `sub` + W `accept` | ✓ |
-| Merging | "Merges once its checks pass" | compat `sub` | ✓ |
+| Merging | "Merges once its checks pass", "Merges once it's approved", "In GitHub's merge queue" (#743, #802) | compat `sub` | ✓ |
 | To do, Done | one line, place at the end | W Line one-line | ✓ |
 | Where it is | T whereOf: the space, only where the grouping doesn't say it; never the machine (SHEP-98); Settings "Where on task rows" off: none | W whereOf / autoWhere, `names` | ✓ |
 | Place gives way | T line(): after the words, it takes only the room left and shrinks first | W Line: whole or not at all (wraps out of sight) | ✓ |
@@ -122,38 +121,19 @@ State: ✓ matches, ◇ web-only form (why), ✗ still differs (why).
 
 | Element | Window | Web | State |
 |---|---|---|---|
-| Tabs | P:340-348 Chat, Terminal, Files, Changes, Pull request (once it has one), Browser (add-on on) | N TaskTabs (registry order 10-50, itemsFor) | ✓ |
+| Tabs | P:363-372 Chat, Terminal, Pull request (once it has one), Artifacts, Browser (add-ons on); no Files or Changes (SHEP-143: the space's side panels) | N TaskTabs (registry order 10-50, itemsFor): on a desktop the header's own row, a segmented control right of the title as the Assistant's Chat · Terminal, wrapping under the title without room (SHEP-176); a phone's row under its header | ◇ one header row on the web's wider task view; the window's thread head is a narrow side block (3 rows, layouts/shepherdr.json 127) with no room beside its title |
+| Old Files/Changes links | voice nav: the service sends a task's files/changes as pr, else chat | `?item=files`/`diff` opens Pull request, else Chat (nav itemOfUrl); a saved panel item falls back to Terminal | ✓ |
 | Tabs without an agent | P:340-348 always | A TaskTabs always | ✓ fixed (hidden until an agent started) |
 | Switch in place | P:336 body stack | N TabBody | ✓ |
 | Terminal dead | P:342 dim, disabled, tooltip "Not running" | N `termRunning`, aria-disabled, title "Not running" | ✓ fixed (opened onto nothing) |
 | Ended while shown | P:327 back to its chat | N TabBody/TaskTabs | ✓ fixed |
-| Files, Changes never dim | (window) | K no useOff | ✓ fixed (dimmed "is done: its worktree was put away") |
 | PR once found by gh | P:337 also when gh found one the record lacks | N itemsFor: the record's PR only | ◇ the service fills `pr` from herdr-task's record; a PR an agent opened itself shows once herdr-task records it |
 | Never started | P:273, T:746 "This task hasn't started." / its queue reason | A `body` | ✓ fixed (2.1's "is starting…" words) |
 
-### Files
+### Files and Changes
 
-| Element | Window | Web | State |
-|---|---|---|---|
-| Bar | F:166-171 the folder ("~/…", "vm:/…"); with a file: back, tooltip "All files", the file's path | K FilesView/FileView Bar, service `dir` root | ✓ fixed |
-| Listing | F:17-32 one folder at a time as opened, .git left out, folders first, 500 a folder | K Entries/Folder, service `dir` (core LIST_DIR, dirEntries) | ✓ fixed (was git ls-files, a search box) |
-| Row | F:150-155 chevron, folder/file icon, name, change letter A/M/D/U colored | K Entries, service `marks` (core markOf) | ✓ fixed |
-| Empty | F:173 error "This task's folder can't be read. It may have been removed after the task finished.", "Loading files…", "No files", "No folder for this task" | K, core VIEW_WORDS | ✓ fixed |
-| Limited | F:174 "File list limited to 500 entries per folder and 5,000 total" | K | ✓ |
-| File | F:133-140,175 "Loading file…", "This file is no longer available.", "Binary file · No text preview", "… (file truncated)" | K FileView | ✓ fixed |
-| Refresh button, find box, two panes | (none) | removed | ✓ fixed |
-| Read again | F:39 every 10 s and on change | K every 10 s | ✓ |
-
-### Changes
-
-| Element | Window | Web | State |
-|---|---|---|---|
-| Bar | C:159-166 "N files" +a −d, then "Against main" / "Uncommitted" with the compare icon | K DiffView Bar (core filesCount, againstLine) | ✓ fixed |
-| List | C:167-175 at most 200 high; colored dot (word on hover: Added, Changed, Deleted, Conflict), folder dim + name, +a −d | K | ✓ fixed (a tree with letters) |
-| First file open | C:89-90 its diff shows until you pick another; a second tap closes it | K `open` | ✓ fixed |
-| Diff | C:138-143,177-181 hunk rows, one number column, + green, − red tint | K PatchView | ✓ fixed (two number columns) |
-| Words | C:73,76,93,106-116,148-150,176,182 "This task's folder isn't a git repository.", "This repository has no commits.", "Loading changes…", "No changes against main", "No uncommitted changes", "Select a file to see its changes.", "Can't preview this diff. It's too large or unreadable.", "Binary file changed", "No text diff available", "Showing the first 1,000 changed files" | K + service/worktree.ts, core VIEW_WORDS | ✓ fixed |
-| Two panes, Refresh | (none) | removed | ✓ fixed |
+No longer a task's tabs (SHEP-143). The web's FilesView and DiffView (K) show only in the space's Files and Changes
+side panels (web/plugins/coordinators SpacePanel), the window's are Herdr's own `files` and `changes` panels.
 
 ### Pull request
 

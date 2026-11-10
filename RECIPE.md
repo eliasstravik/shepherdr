@@ -3,7 +3,7 @@
 Mission control for your coding agents inside Herdr: your spaces in a sidebar, each with its own Assistant you talk to
 as a chat, and a Tasks panel on the right that shows which task needs you, which is ready and which is still working.
 You tell the Assistant what needs doing; it turns it into tasks, each run by its own agent in its own git worktree,
-and asks you on a card when it needs a decision. BossGoat 3.1.26, for herdr-app 0.1.12 and herdr-core 0.1.17 or newer.
+and asks you on a card when it needs a decision. BossGoat 3.1.30, for herdr-app 0.1.12 and herdr-core 0.1.17 or newer.
 
 ![BossGoat](preview.png)
 
@@ -23,7 +23,7 @@ Left to right, on the theme's `canvas` background, no title bar:
   bubbles with question, permission and secret cards in the timeline, a box with attach, model choice, dictation and
   Send. Panes are 10px rounded with a 1px border, accent when focused, 8px apart.
 - **Side panel** (510px, 280–900): one of Files, Changes, Tasks or Artifacts. Tasks is one list grouped by status
-  (Needs you, Ready, Merging, Working, Queued, Scheduled, To do, Done), a filter box and status chips; a working
+  (Needs you, Ready, Merging, Working, Queued, Scheduled, To do, Done), or by place, picked by one toggle under its search box; a working
   task's dot fills like a pie with its % done, and its second line is what its agent is doing (at most 40 characters).
   A task opens in place: a 127px head (‹ Tasks, base branch, Pin, Accept; the task and its status line; the switcher)
   over its Chat, Terminal, Files, Changes, Pull request and Browser. Artifacts lists agents' reports and draft
@@ -44,7 +44,7 @@ Left to right, on the theme's `canvas` background, no title bar:
   calls the Assistant, Ctrl+F finds in the chat. Alt+1…9 pick a tab, Alt+Up/Down a space, Alt+Enter splits.
 - BossGoat settings (the sidebar foot): Agents, Tasks, Autopilot, Notify, Secrets, Machines, Window and Web. Window
   holds the look switches and the add-on switches: Artifacts, Voice and dictation, Reactions, Task browser, Autopilot,
-  Other machines, Web and Usage insights can be turned off; the rest is always on in 3.1.26. Web shows the web app's link and Serve
+  Other machines, Web and Usage insights can be turned off; the rest is always on in 3.1.30. Web shows the web app's link and Serve
   from, the machine that serves it.
 - The web app (`https://<this machine>/shepherdr/`, your tailnet only): the same spaces, Assistants, tasks, cards,
   artifacts and settings on a phone, a tablet or another browser, on the same data.
@@ -55,9 +55,9 @@ Left to right, on the theme's `canvas` background, no title bar:
   `sidebar-footer` workspace-chrome-shepherdr `{footer: true}`) and `work` column (`tabs` tabs-tasks, `work-body` row
   of `main` `{tab: "active"}` with the pane-chat header and `panel` column → `panel-body` stack of files, changes,
   `tasks` stack (`tasks-list` tasks; `tasks-thread`: chat `{panel, head}`, then a stack of chat `{panel}`, a terminal
-  block, task-files, task-changes, task-pr, task-browser) and `artifacts` stack; `status` workspace-status-chat).
+  block, task-pr, task-browser) and `artifacts` stack; `status` workspace-status-chat).
   Floating `chat-call` (top, center) and `toasts` (bottom, end).
-- 29 mods in `mods/` (lib/addons.json lists them by add-on), plus Herdr's shipped `files`, `changes` and
+- 28 mods in `mods/` (lib/addons.json lists them by add-on), plus Herdr's shipped `files`, `changes` and
   `workspace-chrome`. Shared modules have one source in `lib/` and are copied into each mod (`bin/sync-shared`).
 - Programs: `herdr-task` (mods/tasks/bin, Python: the tasks and their scheduler), `herdr-artifact`
   (mods/artifacts/bin), `herdr-secret` and `herdr-browser` (bin/), linked into `~/.local/bin`; the role instructions
@@ -77,8 +77,8 @@ Left to right, on the theme's `canvas` background, no title bar:
   back out). `./install.sh --dry-run` shows everything first.
 - Mod names are fixed (`chat`, `tasks`, …): their state in `data/<mod>` and pane names follow them. The installer
   refuses a folder by the same name that isn't BossGoat's.
-- Needs python3 3.8+ and git; bun and Tailscale for the web app; gh for pull requests, agent-browser 0.41.1 and node
-  for the task browser, bun and pw-record/pw-play (Linux) or Apple's command line tools (macOS) for voice and dictation,
+- Needs python3 3.8+ and git; bun and Tailscale for the web app; gh for pull requests, node for the task browser
+  (BossGoat installs agent-browser 0.41.x and Chrome itself), bun and pw-record/pw-play (Linux) or Apple's command line tools (macOS) for voice and dictation,
   an ElevenLabs key for calls and dictation. Claude Code or Codex as the agents.
 - Two blocks are rewritten while you use it (`tasks-thread-term` points at the shown task's terminal,
   `artifacts-view-body` at the opened artifact): ship them blank.

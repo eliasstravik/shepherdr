@@ -1,5 +1,5 @@
-// An open task's views, as 3.0's task view: Chat, then its items (Terminal, Files, Changes, Pull request, Browser;
-// plugins add them) as tabs under its header (TaskTabs). On a desktop an item shows in a column right of the chat, on
+// An open task's views, as 3.0's task view: Chat, then its items (Terminal, Pull request, Artifacts, Browser;
+// plugins add them) as tabs on its header's row (TaskTabs; a phone's under it). On a desktop an item shows in a column right of the chat, on
 // a phone or tablet over it, full screen. A coordinator chat has none.
 import clsx from 'clsx'
 import { useEffect, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from 'react'
@@ -143,7 +143,7 @@ function ItemBody({ item, task, chatKey }: { item: PanelItem; task: Task; chatKe
   return <item.View key={`${task.id}|${item.id}`} task={task} chatKey={chatKey} />
 }
 
-/** A task view's body: its chat, or the tab picked (Terminal, Files, Changes…) in its place, as 3.0's task view */
+/** A task view's body: its chat, or the tab picked (Terminal, Pull request, Artifacts…) in its place, as 3.0's task view */
 export function TabBody({ task, chatKey, children }: { task: Task; chatKey: string; children: ReactNode }) {
   const sheet = useUI((u) => u.sheet)
   // its agent ended while its terminal showed: back to its chat, which stays to read (the window's)
@@ -157,9 +157,11 @@ const termRunning = (task: Task) => !!task.agent?.running
 /** A task's items as 3.0's task view has them: only those it has now (a pull request's once it has one) */
 export const itemsFor = (task: Task) => registry.taskPanel.filter((i) => i.id !== 'pr' || !!task.pr)
 
-/** The task view's tabs, as 3.0's (Chat, Terminal, Files, Changes, Pull request, Browser): Chat is its chat; another
+/** The task view's tabs, as 3.0's (Chat, Terminal, Pull request, Artifacts, Browser): Chat is its chat; another
  *  opens its view, in the side panel on a desktop and over the chat on a phone or tablet */
-export function TaskTabs({ task }: { task: Task }) {
+/** A task's views. In a desktop's header (head): a segmented control, as the Assistant's Chat | Terminal, on the header's
+ *  row; on a phone a row of its own under the header */
+export function TaskTabs({ task, head }: { task: Task; head?: boolean }) {
   const ui = useUI()
   const items = itemsFor(task)
   const bar = useRef<HTMLDivElement>(null)
@@ -173,13 +175,17 @@ export function TaskTabs({ task }: { task: Task }) {
   // dead: it can't open now (the window's disabled segment, its reason in its label): only Terminal, once its agent ended
   const tab = (id: string, label: string, dead: string | null, go: () => void, n?: number) => (
     <button key={id} type="button" role="tab" aria-selected={on === id} aria-disabled={dead ? true : undefined} data-off={dead ? '' : undefined} aria-label={dead ? `${label}: ${dead}` : undefined} onClick={dead ? undefined : go}
-      className="relative inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[0.8125rem] whitespace-nowrap text-fg2 after:absolute after:-inset-y-1.5 after:inset-x-0 hover:bg-hover aria-selected:bg-sel aria-selected:text-fg data-off:cursor-default data-off:text-fg3 data-off:hover:bg-transparent coarse:h-9 phone:h-9 phone:px-3 phone:text-[0.875rem]">
+      className={clsx(
+        'relative inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[0.8125rem] whitespace-nowrap text-fg2 after:absolute after:inset-x-0 aria-selected:text-fg data-off:cursor-default data-off:text-fg3 data-off:hover:bg-transparent coarse:h-9',
+        // the segment picked as the Assistant's (Tab): raised, bordered
+        head ? 'after:-inset-y-2 aria-selected:bg-seg-on aria-selected:shadow-[0_0_0_1px_var(--line2)] not-aria-selected:hover:text-fg' : 'after:-inset-y-1.5 hover:bg-hover aria-selected:bg-sel phone:h-9 phone:px-3 phone:text-[0.875rem]',
+      )}>
       {label}
       <Count n={n} />
     </button>
   )
   return (
-    <div ref={bar} role="tablist" aria-label={`${task.id} views`} className="scroll-x flex shrink-0 items-center gap-0.5 border-b border-line px-3 py-1.5 phone:px-4">
+    <div ref={bar} role="tablist" aria-label={`${task.id} views`} className={clsx('scroll-x flex items-center gap-0.5', head ? 'max-w-full min-w-0 rounded-full bg-hover p-0.5' : 'shrink-0 border-b border-line px-3 py-1.5 phone:px-4')}>
       {tab('chat', 'Chat', null, closeSheet)}
       {items.map((i) => tab(i.id, i.label, i.id === 'terminal' && !termRunning(task) ? 'Not running' : null, () => setUI({ sheet: i.id, taskMenu: false, plus: null, pick: null }), i.count?.(task)))}
     </div>

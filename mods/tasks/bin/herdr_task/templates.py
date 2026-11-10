@@ -86,9 +86,25 @@ WORKER_MD_BEFORE_FEEDBACK = WORKER_MD_BEFORE_SUBAGENTS.replace(SUBAGENTS_OLD, SU
 # Since agents offer feedback for Shepherdr itself through their Assistant (SHEP-78).
 FEEDBACK_RULE = ("- Shepherdr itself misbehaving, not your task's own code (a Shepherdr, herdr-task, web app or window feature that doesn't work as meant, a Herdr command failing like a bug, the person frustrated with Shepherdr, or a \"Shepherdr feedback:\" line in your reviewer's findings): run the `herdr-task feedback` command given at the end of your brief, once per problem, then carry on. It returns at once and your Assistant asks the person whether to file it; never file an issue yourself, and put no secrets, private paths or whole logs in it.\n")
 WORKER_MD_BEFORE_CURSOR = WORKER_MD_BEFORE_FEEDBACK + FEEDBACK_RULE
-WORKER_MD = (WORKER_MD_BEFORE_CURSOR.replace("<codex or claude>", "<codex, claude or cursor>")
+WORKER_MD_WITH_CURSOR = (WORKER_MD_BEFORE_CURSOR.replace("<codex or claude>", "<codex, claude or cursor>")
              .replace("or `claude --permission-mode plan` (never `codex exec` or `claude -p`: nobody sees those)",
                       "or `claude --permission-mode plan` or `cursor-agent --mode ask` (never `codex exec`, `claude -p` or `cursor-agent -p`: nobody sees those)"))
+WORKER_MD_BEFORE_COMMAND = WORKER_MD_BEFORE_FEEDBACK + FEEDBACK_RULE
+# Since the brief's Reviewer line gives the reviewer's whole command: Codex's with --no-daemon (#745).
+COMMAND_OLD = "its command `codex --sandbox read-only --ask-for-approval never` or `claude --permission-mode plan` (never"
+COMMAND_RULE = ("its command exactly as the Reviewer line gives it (`codex --no-daemon --sandbox read-only …` or "
+                "`claude --permission-mode plan …`; never")
+WORKER_MD_BEFORE_SUGGEST = WORKER_MD_BEFORE_COMMAND.replace(COMMAND_OLD, COMMAND_RULE)
+# Since a reply can end with the person's likely next message (SHEP-186): the chat shows it greyed out in the box.
+SUGGEST_RULE = ("- Suggested next message, when your Settings block says \"Suggested next message: on\": end each reply with one line of its own, "
+                "last in the reply, holding `<hc suggest=\"…\"/>`: the one short message the person would most likely send next, in their own words, "
+                "as a tab-complete would (\"yes, merge it\", \"show me the diff\", \"try again on main\"). One line, under about 60 characters. "
+                "Write none when there's no sensible next message, when you ask a multiple-choice question that already has its own cards, or when "
+                "the reply is only a notice. Never write it when the Settings block says off. The chat shows it greyed out in the box; its words never show as text.\n")
+WORKER_MD = ((WORKER_MD_BEFORE_SUGGEST + SUGGEST_RULE)
+             .replace("<codex or claude>", "<codex, claude or cursor>")
+             .replace("`claude --permission-mode plan …`; never `codex exec` or `claude -p`",
+                      "`claude --permission-mode plan …` or `cursor-agent --mode ask …`; never `codex exec`, `claude -p` or `cursor-agent -p`"))
 
 REVIEWER_MD_BEFORE_SUBAGENT = """You review one Herdr task's work before it can merge. Read only: never edit files, commit or push.
 - Read the task, then the diff of its branch against its base, and run the project's checks.
@@ -102,7 +118,13 @@ REVIEWER_MD_BEFORE_FEEDBACK = REVIEWER_MD_BEFORE_SUBAGENT + ("- You run as the w
 # Since agents offer feedback for Shepherdr itself (SHEP-78): a reviewer's goes through its worker.
 REVIEWER_FEEDBACK = ("- Shepherdr itself misbehaving while you review (a Herdr command or feature failing like a bug, not the task's code): "
                      "one line in your findings starting \"Shepherdr feedback:\", what happened and what you expected; your worker passes it on.\n")
-REVIEWER_MD = REVIEWER_MD_BEFORE_FEEDBACK + REVIEWER_FEEDBACK
+REVIEWER_MD_BEFORE_SANDBOX = REVIEWER_MD_BEFORE_FEEDBACK + REVIEWER_FEEDBACK
+# Since a Codex reviewer's read-only sandbox can't run every check (#840): it says which, and its worker runs them.
+REVIEWER_SANDBOX = ("- A check that can't run in a read-only sandbox (Codex's): `herdr-app check` hangs there on the window's "
+                    "services and `shepherdr doctor` can't reach the Shepherdr service, as with anything needing the network, a "
+                    "window or writes outside the folder. Don't run or wait on those: list them in your findings under \"Not run "
+                    "in my sandbox:\", and your worker runs them and checks the output.\n")
+REVIEWER_MD = REVIEWER_MD_BEFORE_SANDBOX + REVIEWER_SANDBOX
 
 
 # Earlier worker defaults: a file still saying one, unedited, gets today's.
@@ -115,7 +137,7 @@ OLD_WORKER_READY = """You work on one Herdr task. Stay within the task's scope a
 - When the work is finished, run the `herdr-task ready` command given at the end of your brief, with a short summary. That puts the task in Ready for the person, who accepts it. Never mark a task done yourself.
 """
 OLD_WORKER_MD = OLD_WORKER_READY.split("- When the work is finished")[0]
-OLD_WORKERS = (WORKER_MD_BEFORE_CURSOR, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
+OLD_WORKERS = (WORKER_MD_WITH_CURSOR, WORKER_MD_BEFORE_CURSOR, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
 
 
 TEMPLATE_HEADS = {
@@ -148,7 +170,8 @@ def instructions(role):
             body = None
         text = None
     if body is None or (role == "worker" and body.strip() in [x.strip() for x in OLD_WORKERS]) \
-            or (role == "reviewer" and body.strip() in (REVIEWER_MD_BEFORE_SUBAGENT.strip(), REVIEWER_MD_BEFORE_FEEDBACK.strip())):
+            or (role == "reviewer" and body.strip() in (REVIEWER_MD_BEFORE_SUBAGENT.strip(), REVIEWER_MD_BEFORE_FEEDBACK.strip(),
+                                                    REVIEWER_MD_BEFORE_SANDBOX.strip())):
         body = WORKER_MD if role == "worker" else REVIEWER_MD
     new = head + body.strip() + "\n"
     if text is None or new.strip() != text.strip():

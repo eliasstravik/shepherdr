@@ -10,6 +10,7 @@
 import { exec, hc, appHome } from "herdr";
 // The rules (names, menus, argv) are core/agents.js, shared with the web app.
 import { DEFAULTS, parseDefaults } from "./core/agents.js";
+import { chatLabel } from "./core/spaces.js";
 export * from "./core/agents.js";
 
 export async function defaults(kind, machine) {
@@ -28,13 +29,13 @@ export async function restart(t, built, pane) {
     try { out = JSON.parse(r.stdout || "{}"); } catch {}
     if (r.code !== 0 || !out.terminal) throw new Error((r.stderr || r.stdout).trim() || "herdr-task switch failed");
     const origin = t.labels?.["herdr.chat.origin"] || t.address;
-    await hc(["label", out.terminal, `herdr.chat=${pane}`, `herdr.chat.origin=${origin}`]);
+    await hc(["label", out.terminal, `herdr.chat=${chatLabel(pane)}`, `herdr.chat.origin=${origin}`]);
     // It started in the tab: park it behind this chat, as the Chat switch does.
     await exec("herdr-app", ["do", "terminal.park", "--terminal", out.terminal]);
     return out.terminal;
   }
   const env = `HERDR_RESTART_CHAT="$1"${built.resume ? " HERDR_RESTART_RESUME=1" : ""}`;
-  const r = await exec("sh", ["-c", `${env} bash "$2" "$3" "$4"`, "x", pane, `${appHome()}/mods/coordinator/restart.sh`, t.address, JSON.stringify(built.argv)]);
+  const r = await exec("sh", ["-c", `${env} bash "$2" "$3" "$4"`, "x", chatLabel(pane), `${appHome()}/mods/coordinator/restart.sh`, t.address, JSON.stringify(built.argv)]);
   const addr = r.stdout.trim().split("\n").pop();
   if (r.code !== 0 || !addr) throw new Error(r.stderr.trim() || "The agent didn't restart.");
   return addr;

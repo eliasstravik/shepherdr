@@ -1,10 +1,10 @@
 {
   "//": [
-    "BossGoat's features list (3.1.26): every feature the layout ships, on both sides. Each has its shared logic (core/<name>.js,",
+    "BossGoat's features list (3.1.30): every feature the layout ships, on both sides. Each has its shared logic (core/<name>.js,",
     "or the service's service/<file> where herdr-core itself is the logic), its Herdr side (the mods it lives in, or a Herdr",
     "built-in) and its web side (files under web/: 2.1's screens and plugins, and web/src/screens). test/test_repo.py checks it:",
     "a feature missing a side, a mod that belongs to no feature, or a listed file that isn't there fails CI. \"planned\" says what",
-    "its web side still lacks; none may be left when 3.1.26 is released.",
+    "its web side still lacks; none may be left when 3.1.30 is released.",
     "addon: the add-on in lib/addons.json; off there means off on both sides. view_only: per-device look, no shared logic."
   ],
   "features": [
@@ -420,16 +420,14 @@
       ]
     },
     {
-      "id": "task-files",
+      "id": "space-files",
       "addon": "tasks",
-      "title": "Files",
+      "title": "Files side panel",
       "core": [
         "worktree"
       ],
       "herdr": {
-        "mods": [
-          "task-files"
-        ]
+        "builtin": "Herdr's Files side panel"
       },
       "web": {
         "files": [
@@ -447,16 +445,14 @@
       ]
     },
     {
-      "id": "task-changes",
+      "id": "space-changes",
       "addon": "tasks",
-      "title": "Changes",
+      "title": "Changes side panel",
       "core": [
         "worktree"
       ],
       "herdr": {
-        "mods": [
-          "task-changes"
-        ]
+        "builtin": "Herdr's Changes side panel"
       },
       "web": {
         "files": [

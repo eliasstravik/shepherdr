@@ -2,6 +2,7 @@
 scheduler's sync, `herdr-task machines sync`, herdr-task's and herdr-artifact's self-copy when they
 run a command there, and `herdr-secret install --on`. Every hc call is swapped for a recorder, so
 nothing reaches a machine and nothing runs with another HOME."""
+import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import importlib.machinery
 import importlib.util
 import os
@@ -51,8 +52,8 @@ class Hold(unittest.TestCase):
         self.dir = tempfile.mkdtemp(prefix="shepherdr-hold-")
         self.hold = os.path.join(self.dir, "sync-hold")
         self.store = os.path.join(self.dir, "tasks")
-        self.patches = [mock.patch.object(base, "SYNC_HOLD", self.hold), mock.patch.object(artifact, "SYNC_HOLD", self.hold),
-                        mock.patch.object(secret, "SYNC_HOLD", self.hold), mock.patch.object(cli, "STORE", self.store),
+        self.patches = [mock.patch.object(base, "SYNC_HOLDS", (self.hold,)), mock.patch.object(artifact, "SYNC_HOLDS", (self.hold,)),
+                        mock.patch.object(secret, "SYNC_HOLDS", (self.hold,)), mock.patch.object(cli, "STORE", self.store),
                         mock.patch.object(artifact, "STORE", self.store)]
         for p in self.patches:
             p.start()

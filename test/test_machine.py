@@ -1,4 +1,5 @@
 """Cursor plan usage reads real limits without starting agents or changing sign-ins."""
+import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import json
 import os
 from pathlib import Path

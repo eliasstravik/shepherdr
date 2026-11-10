@@ -1,4 +1,5 @@
 """Skill routing must launch the chosen CLI, preserve task rules and fail on missing skills."""
+import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import json
 import contextlib
 import os
@@ -252,7 +253,7 @@ class HolyCow(unittest.TestCase):
         self.s.key = lambda _: "test#1"
         task = {"skill": "hc-plan", "agents": []}
         with contextlib.ExitStack() as stack:
-            for name, fn in {"own_argv": lambda x: x, "coordinator_tab": lambda _: None,
+            for name, fn in {"own_argv": lambda x, folder=None: x, "coordinator_tab": lambda _: None,
                              "agent_name": lambda *a: "test", "folder_for": lambda *a: str(self.root),
                              "low_priority": lambda x, _: x, "in_shell": lambda x: x, "track": lambda *a: None}.items():
                 stack.enter_context(patch.object(launch, name, fn))

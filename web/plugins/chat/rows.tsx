@@ -6,6 +6,7 @@
 import clsx from 'clsx'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ArrowRightIcon, ChatBubbleLeftEllipsisIcon, CheckIcon as TickIcon, ChevronDownIcon, ChevronRightIcon, PaperClipIcon } from '@heroicons/react/16/solid'
+import { useCopy } from '@client/copy.ts'
 import { act, has, openTask, registry } from '@client/kernel.ts'
 import { AutopilotIcon, CheckIcon, CopyIcon, PageIcon, ReplyIcon, SmileIcon, TermIcon } from '@client/ui.tsx'
 import * as CV from '@core/chat-view.js'
@@ -46,9 +47,7 @@ export const onTerminal = (fn: (chat: string) => void) => void (showTerminal = f
  *  in room that is always kept, so nothing moves. A finger holds the message instead (its own bar). */
 export function Band({ msg, chat, cli }: { msg: Message; chat: string; cli?: boolean }) {
   const you = msg.who === 'you'
-  const [copied, setCopied] = useState(false)
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
-  useEffect(() => () => clearTimeout(timer.current), [])
+  const { copied, copy } = useCopy()
   const acts = bandActs(you ? 'user' : 'agent', msg.text, { fork: cli !== false })
   const react = has('reactions')
   const pills = msg.reactions?.length ? registry.messageEdge.map(({ View }, i) => <View key={i} msg={msg} chat={{ key: chat } as Chat} />) : null
@@ -60,7 +59,7 @@ export function Band({ msg, chat, cli }: { msg: Message; chat: string; cli?: boo
     if (a === 'copy')
       return (
         <button key={a} type="button" aria-label={copied ? 'Copied' : 'Copy'} className={clsx(btn, hover, copied && 'text-fg opacity-100')}
-          onClick={() => { void navigator.clipboard?.writeText(msg.text ?? '').catch(() => undefined); setCopied(true); clearTimeout(timer.current); timer.current = setTimeout(() => setCopied(false), 1500) }}>
+          onClick={(e) => void copy(msg.text ?? '', 'copy', e)}>
           {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
         </button>
       )
@@ -340,18 +339,22 @@ export function HeadRow({ chat }: { chat: Chat }) {
 
 /** each image whole, its shape kept, fitted in 320×220 (one) or 200×140 (several), on the message's side; a press opens
  *  the viewer. sizes are learnt as each one loads */
-export function Thumbs({ files, chat, you, faded, open, width }: { files: { name: string; path: string; url: string }[]; chat: string; you: boolean; faded?: boolean; open: (i: number) => void; width: number }) {
+export function Thumbs({ files, chat, you, faded, open, width }: { files: { name: string; path: string; url: string; caption?: string }[]; chat: string; you: boolean; faded?: boolean; open: (i: number) => void; width: number }) {
   const [sizes, setSizes] = useState<Record<string, { w: number; h: number }>>({})
   const fit = fitThumbs(files.map((f) => sizes[f.path] ?? null), width || Infinity)
   return (
     <div className={clsx('flex max-w-full items-start', you ? 'justify-end self-end' : 'justify-start self-start', faded && 'opacity-55')} style={{ gap: THUMB_GAP }} data-thumbs={chat}>
       {files.map((f, i) => (
-        <button key={f.path} type="button" aria-label={`Open ${f.name}`} onClick={() => open(i)}
-          style={{ width: fit.boxes[i].w, height: fit.boxes[i].h }}
-          className="relative shrink-0 overflow-hidden rounded-[8px] bg-bubble after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--fg)_10%,transparent)]">
-          <img src={f.url} alt={f.name} draggable={false} className="block size-full"
-            onLoad={(e) => { const im = e.currentTarget; if (!sizes[f.path] && im.naturalWidth) setSizes((s) => ({ ...s, [f.path]: { w: im.naturalWidth, h: im.naturalHeight } })) }} />
-        </button>
+        <div key={f.path} className="flex shrink-0 flex-col gap-1" style={{ width: fit.boxes[i].w }}>
+          <button type="button" aria-label={`Open ${f.name}`} onClick={() => open(i)}
+            style={{ width: fit.boxes[i].w, height: fit.boxes[i].h }}
+            className="relative shrink-0 overflow-hidden rounded-[8px] bg-bubble after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--fg)_10%,transparent)]">
+            <img src={f.url} alt={f.name} draggable={false} loading="lazy" decoding="async" className="block size-full"
+              onLoad={(e) => { const im = e.currentTarget; if (!sizes[f.path] && im.naturalWidth) setSizes((s) => ({ ...s, [f.path]: { w: im.naturalWidth, h: im.naturalHeight } })) }} />
+          </button>
+          {/* an agent's words for it ("Before", "After"), when it gave some */}
+          {f.caption ? <div className="truncate px-0.5 text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{f.caption}</div> : null}
+        </div>
       ))}
     </div>
   )

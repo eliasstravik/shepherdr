@@ -1,6 +1,7 @@
 """herdr-artifact (SHEP-19): recipes are the default, a custom panel needs --custom and is never a proof, each version
 says its kind, the window's picture of a custom one is kept for the web, and convert keeps an artifact's maker. Runs in
 a throwaway store; herdr-app's check is skipped (not found), and nothing is installed."""
+import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import importlib.machinery
 import importlib.util
 import json
@@ -189,9 +190,13 @@ class WhoPublishes(unittest.TestCase):
             json.dump({"prefix": "SHOP", "tasks": []}, f)
         self.p = mock.patch.object(A, "HOME", self.home)
         self.p.start()
+        # Shepherdr's paths there: that home's old ones (not moved)
+        self.q = mock.patch.object(A, "SHEP", lambda rel: os.path.join(self.home, rel))
+        self.q.start()
 
     def tearDown(self):
         self.p.stop()
+        self.q.stop()
         shutil.rmtree(self.home, ignore_errors=True)
 
     def hc(self, labels, code=0):
@@ -216,6 +221,34 @@ class WhoPublishes(unittest.TestCase):
             os.environ.pop("HERDR_BROWSER_TASK", None)
             self.assertEqual(A.me(), {"terminal": "t5", "task": None})
 
+
+class ReadOnlySandbox(unittest.TestCase):
+    """#841: in a read-only sandbox (a Codex reviewer's) show and list still read; a change is refused clearly."""
+
+    setUp, tearDown, ns, publish = Artifacts.setUp, Artifacts.tearDown, Artifacts.ns, Artifacts.publish
+
+    def test_reads_without_a_writable_lock(self):
+        import builtins
+        import errno
+        d = os.path.join(self.dir, "r")
+        os.makedirs(d)
+        with open(os.path.join(d, "recipe.json"), "w") as f:
+            json.dump({"recipe": 1, "title": "T", "blocks": [{"type": "text", "md": "hi"}]}, f)
+        self.publish(d, title="T")
+        real = builtins.open
+
+        def ro(path, mode="r", *a, **k):
+            if any(c in mode for c in "wax+"):
+                raise OSError(errno.EROFS, "Read-only file system", path)
+            return real(path, mode, *a, **k)
+        loc = A.locate(self.folder)
+        with mock.patch.object(A, "open", ro, create=True), mock.patch.object(A.os, "makedirs", side_effect=OSError(errno.EROFS, "ro")):
+            with A.Store(loc, write=False) as st:
+                self.assertEqual(len(st.data["artifacts"]), 1)
+            with self.assertRaises(A.Fail) as e:
+                with A.Store(loc):
+                    pass
+            self.assertIn("read-only", str(e.exception))
 
 if __name__ == "__main__":
     unittest.main()

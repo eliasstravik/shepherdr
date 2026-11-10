@@ -11,10 +11,10 @@ import sys
 import threading
 import time
 
-from .base import ENTRY, Fail, guard, hc_json, now, STORE
+from .base import ENTRY, Fail, guard, hc_json, layout, now, STORE, WHERE
 from .when import parse_at
 from .holycow import require_assignment
-from .settings import set_task, bare, settings_for, worker_argv, worktrees_on
+from .settings import bare, set_task, settings_for, SET_KEYS, worker_argv, worktrees_on
 from .agents import agent_running, live_agents, starting, status_of, task_status
 from .sessions import session_of
 from .launch import default_space
@@ -206,7 +206,7 @@ def find_auto(s, ref):
 
 
 def auto_view(s, a):
-    v = {k: a.get(k) for k in ("id", "title", "prompt", "mode", "kind", "skill", "agent", "on", "match", "space", "paused",
+    v = {k: a.get(k) for k in ("id", "title", "prompt", "mode", "kind", "skill", "agent", "set", "on", "match", "space", "paused",
                                 "next_run", "last_run", "last_task", "last_error", "runs", "created")}
     # machine: None here; herdr-task --on <machine> names it (cli.remote), so a list across machines says whose it is
     v.update(ref=auto_ref(s, a), **{"from": from_text(a["from"]) if a.get("from") else None}, folder=s.loc["folder"], machine=None, prefix=s.prefix, every=(a.get("every") or {}).get("text"),
@@ -262,6 +262,24 @@ def set_auto_fields(s, a, args, adding=False):
         a["space"] = bare(args.space)
     if args.parent:
         a["parent"] = args.parent
+    if getattr(args, "set", None):
+        # Each task it adds gets these (#744: review=off for a run that only reads); checked now.
+        sets = dict(a.get("set") or {})
+        for pair in args.set:
+            if "=" not in pair:
+                raise Fail(f"--set takes key=value, not {pair!r}.")
+            k, v = pair.split("=", 1)
+            set_task({}, k, v)
+            field = SET_KEYS[k.strip().lower()]
+            key = next(x for x, f in SET_KEYS.items() if f == field)  # one name per setting
+            v = v.strip().strip("\"'").strip()
+            if not v or v.lower() == "default":
+                sets.pop(key, None)
+            else:
+                sets[key] = v
+        a["set"] = sets
+        if not sets:
+            a.pop("set")
     if not a.get("every") and not a.get("on"):
         raise Fail("Say when it runs: --every \"weekdays 9:00\" and/or --on ready,merged. " + HOW)
     if a.get("from") and not a.get("on"):
@@ -366,6 +384,8 @@ def fire(s, a, why, brief=None):
     for field in ("kind", "skill", "agent"):
         if a.get(field):
             t[field] = a[field]
+    for k, v in (a.get("set") or {}).items():
+        set_task(t, k, v)
     space = a.get("space")
     run_rec = {"at": now(), "why": why, "task": s.ref(t)}
     if a.get("from") and why.split(":")[0] in EVENTS:
@@ -710,12 +730,18 @@ def cmd_scheduler(args):
         say(args, {"running": True}, "Another scheduler is running.")
         return
     started = script_hash()
+    on_layout = WHERE.migrated
+    test = bool(os.environ.get("HERDR_TASK_STORE"))
     with open(os.path.join(STORE, ".scheduler.json"), "w") as f:
         json.dump({"pid": os.getpid(), "hash": started, "at": now(), "terminal": os.environ.get("HC_TERMINAL_ID")}, f)
     print(f"herdr-automations: watching {STORE} every 15 s.", flush=True)
     while True:
         report = {"started": [], "done": [], "attention": [], "fired": []}
         try:
+            if not test:
+                layout.heal_back(WHERE)       # rolled back: what was written at the new paths just after, taken back
+                for k in layout.heal(WHERE):  # an older writer's file at an old path: taken in
+                    print(f"{time.strftime('%H:%M:%S')} took in {k} written at its old path", flush=True)
             one_pass(report)
         except Exception as e:  # one bad list never stops the rest
             print(f"{time.strftime('%H:%M:%S')} error: {e}", flush=True)
@@ -743,8 +769,8 @@ def cmd_scheduler(args):
             say(args, report, None)
             return
         time.sleep(15)
-        # Updated: carry on as the new version.
-        if script_hash() != started:
+        # Updated, or this machine's data moved since: carry on as the new version, on the new paths.
+        if script_hash() != started or (not test and WHERE.migrated != on_layout):
             fcntl.flock(me, fcntl.LOCK_UN)
             os.execv(sys.executable, [sys.executable, ENTRY, "scheduler"])
 

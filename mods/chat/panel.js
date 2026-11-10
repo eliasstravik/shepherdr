@@ -13,9 +13,9 @@
 // A Ready task (its worker said ready) gets Accept in the header, as its row in the list does:
 // the person's one action on tasks (herdr-task accept: merges first when there's something to
 // merge, else done). The task's record is read from its list file (its herdr.task label).
-// Beside the chat and terminal the body stack holds the task's Files, Changes (against its base)
-// and Pull request (mods task-files, task-changes, task-pr), and its Browser (mods/task-browser: a
-// live viewer in a terminal block of its own), picked in the header's second row, as Shepherdr's
+// Beside the chat and terminal the body stack holds the task's Pull request (mods/task-pr), its
+// Artifacts (mods/task-artifacts) and its Browser (mods/task-browser: a live viewer in a terminal
+// block of its own), picked in the header's second row, as Shepherdr's
 // task side panel. All are one switcher (only one shows at a time), the main chat's header switch
 // (ui.js segmented); Pull request only once the task has one. They show the task the header
 // publishes (shared "tasks.thread.where", from its record: lib/taskwhere.js).
@@ -25,18 +25,20 @@ import { h_flex, v_flex } from "gpui-base";
 import { shared, setShared, run, theme, exec, appHome, home, readTextFile, writeTextFile, notify, layout, openOverlay } from "herdr";
 import { terminals, agents } from "./live.js";
 import { taskDot, ownProgress, estimated } from "./dot.js";
-import { busyAgain, onIt } from "./core/tasks.js";
+import { busyAgain, onIt, readyWait } from "./core/tasks.js";
 import { button, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { on as addonOn } from "./addons.js";
 import { artifactCli } from "./artview.js";
 import { GREP, publishedIds, taskArtifacts } from "./core/task-artifacts.js";
+import { SH } from "./core/paths.js";
+import { dirs } from "./dirs.js";
 
 // The task header's shared left edge, and task ids in the Tasks list's monospace (mods/tasks).
 const EDGE = 12, ID_FONT = "JetBrains Mono";
 
 export const STACK = "tasks", LIST = "tasks-list", THREAD = "tasks-thread";
 export const BODY = "tasks-thread-body", CHAT = "tasks-thread-chat", TERM = "tasks-thread-term";
-export const FILES = "tasks-thread-files", CHANGES = "tasks-thread-changes", PR = "tasks-thread-pr";
+export const PR = "tasks-thread-pr";
 export const BROWSER = "tasks-thread-browser";
 // The task's Artifacts (mods/task-artifacts, SHEP-60): what its agent and its helpers made.
 export const ARTIFACTS = "tasks-thread-artifacts";
@@ -132,8 +134,8 @@ export class PanelHost {
     let rec = null;
     if (k) {
       const text = k.machine
-        ? (await exec("sh", ["-c", 'cat "$HOME/.herdr/tasks/$1.json"', "sh", k.slug], { on: k.machine }).catch(() => null))?.stdout
-        : await readTextFile(`${home()}/.herdr/tasks/${k.slug}.json`).catch(() => null);
+        ? (await exec("sh", ["-c", SH + 'cat "$SHEP_TASKS/$1.json"', "sh", k.slug], { on: k.machine }).catch(() => null))?.stdout
+        : await readTextFile(`${dirs().tasks}/${k.slug}.json`).catch(() => null);
       try {
         const d = JSON.parse(text || "null");
         const t = d?.tasks?.find((x) => x.id === k.id);
@@ -181,7 +183,7 @@ export class PanelHost {
   // back at work.
   acceptable(st, addr) {
     const r = this.rec;
-    return Boolean(r && r.state === "ready" && !r.attention && st !== "blocked" && !r.merge_requested && !(r.auto_merge && r.pr && !r.merged))
+    return Boolean(r && r.state === "ready" && !r.attention && st !== "blocked" && !readyWait(r, [addr]))
       && !this.again(st, addr);
   }
 
@@ -235,7 +237,7 @@ export class PanelHost {
     const s = ["todo", "queued", "scheduled", "done"].includes(r.state) ? r.state
       : (r.attention && !fixing) || st === "blocked" || r.retry?.over ? "needs"
       : fixing ? "working"
-      : r.state === "ready" && !this.again(st, addr) ? ((r.merge_requested && live) || (r.auto_merge && r.pr && !r.merged) ? "merging" : "ready")
+      : r.state === "ready" && !this.again(st, addr) ? (readyWait(r, live ? [addr] : []) ? "working" : "ready")
       : st === "working" || r.retry || starting ? "working" : "needs";
     return taskDot(s, { pct: ownProgress([addr])?.pct ?? r.progress?.done, halo: true });
   }
@@ -266,7 +268,7 @@ export class PanelHost {
     });
   }
 
-  // Chat | Terminal | Files | Changes | Pull request | Browser: the main chat's header switch
+  // Chat | Terminal | Pull request | Artifacts | Browser: the main chat's header switch
   // (ui.js segmented, as mods/pane-chat). segs: { key, label, on, dead (can't open now), fn }.
   switcher(t, segs) {
     return segmented("thread-mode", segs.map((x) => [x.key, x.label, { disabled: x.dead }]),
@@ -366,13 +368,12 @@ export class PanelHost {
     const segs = [
       { key: "chat", label: "Chat", on: shownNow === CHAT, fn: () => showWorkerChat() },
       { key: "term", label: "Terminal", on: shownNow === TERM, dead: !live, fn: (cx) => this.toTerminal(addr, cx) },
-      { key: "files", label: "Files", on: shownNow === FILES, fn: pick(FILES) },
-      { key: "changes", label: "Changes", on: shownNow === CHANGES, fn: pick(CHANGES) },
+      // No Files or Changes (SHEP-143): the space's side panels show those; a task's changes are its pull request's.
       ...(hasPr ? [{ key: "pr", label: "Pull request", on: shownNow === PR, fn: pick(PR) }] : []),
-      // The task's own browser, watched live (mods/task-browser), when the layout has it.
-      ...(find(layout(), BROWSER) && addonOn("browser") ? [{ key: "browser", label: "Browser", on: shownNow === BROWSER, fn: pick(BROWSER) }] : []),
       // What its agent made (mods/task-artifacts): always there, counted once it has some.
       ...(find(layout(), ARTIFACTS) && addonOn("artifacts") ? [{ key: "artifacts", label: this.artsLabel(want), on: shownNow === ARTIFACTS, fn: pick(ARTIFACTS) }] : []),
+      // The task's own browser, watched live (mods/task-browser), when the layout has it.
+      ...(find(layout(), BROWSER) && addonOn("browser") ? [{ key: "browser", label: "Browser", on: shownNow === BROWSER, fn: pick(BROWSER) }] : []),
     ];
     // Three rows on one left edge (EDGE): a slim bar (‹ Tasks; base, Accept), the task (its
     // dot, id and title, and under them what its agent is doing), then the switcher.

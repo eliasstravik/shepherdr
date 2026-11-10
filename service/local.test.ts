@@ -4,18 +4,21 @@ import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fakeHerdr } from "./fake-herdr";
 
 const HOME = mkdtempSync(join(tmpdir(), "shepherdr-local-"));
 const DATA = join(HOME, ".herdr", "shepherdr");
 const shared = new Map<string, unknown>([["notify", { on: true }]]);
-mock.module("herdr", () => ({
+mock.module("herdr", () => fakeHerdr({
   home: () => HOME,
+  // the shell lib/dirs.js asks for Shepherdr's folders: no answer, so the old ~/.herdr paths (as before a move)
+  exec: async () => ({ code: 1, stdout: "", stderr: "" }),
   readTextFile: async (p: string) => Bun.file(p).text(),
   shared: (k: string) => shared.get(k),
   setShared: (k: string, v: unknown) => shared.set(k, v),
 }));
-const { localService, serviceFile } = await import("../lib/local.js");
-const { startBridge } = await import("../lib/bridge.js");
+const { localService, serviceFile } = await import("../mods/tabs-tasks/local.js");
+const { startBridge } = await import("../mods/tabs-tasks/bridge.js");
 
 const seen: { app: string; path: string; auth: string | null }[] = [];
 // Shepherdr's service on a port of its own choosing, and another app that answers health too

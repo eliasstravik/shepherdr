@@ -1,14 +1,18 @@
 // The model menu and restart from the web (2.1's restart sheet): what an agent runs on now and what its CLIs offer
-// (core/agents.js, as the window's model menu), and restarting it on another model, effort or speed the window's way:
-// herdr-task switch for a task's agent, the Assistant's restart.sh for an Assistant, parked behind its chat.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+// (core/agents.js, as the window's model menu); another model, level or Fast in place (core/live-switch.js, SHEP-181:
+// the CLI's own commands, the same conversation); and a restart for what can't change in place (another CLI or
+// permission mode): herdr-task switch for a task's agent, the Assistant's restart.sh for an Assistant, parked behind
+// its chat.
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { join } from "node:path";
 import type { Hub } from "./hub.ts";
-import { HOME, appHome, writable } from "./paths.ts";
+import { where, writable } from "./paths.ts";
 import { sh } from "./model.ts";
+import { layoutScript } from "./layout-scripts.ts";
 import * as AG from "../core/agents.js";
+import { chatLabel } from "../core/spaces.js";
 import { kindOf } from "../core/chat-reader.js";
+import * as LS from "../core/live-switch.js";
 
 const { DEFAULTS, parseDefaults, current, menuFor, rowFor, argvFor, sessionOf, NAMES, line, PICKS_FILE, parsePicks, pickKey, withPin, withRecent } = AG as any;
 
@@ -22,7 +26,7 @@ export class Agents {
   constructor(private hub: Hub) {}
 
   /** The person's pinned and recent models (core/agents.js PICKS_FILE), as the window's model menu keeps them here */
-  private picksPath = join(HOME, PICKS_FILE);
+  private picksPath = where()["model-picks"];
   picks() {
     try { return parsePicks(readFileSync(this.picksPath, "utf8")); } catch { return parsePicks(""); }
   }
@@ -127,6 +131,51 @@ export class Agents {
     return { role: t.labels?.["herdr.task"] ? "task" : "coordinator", on, onKnown: true, onWords: line(c), want: on, clis, working: t.status?.state === "working" };
   }
 
+  /** The model menu's pick: in place when only the model, level or Fast changes (the same agent, its conversation
+   *  on), else a restart. Resolves with { live } or { terminal } (the restarted agent's address). */
+  async change(addr: string, reader: any, pick: { kind: string; model?: string; effort?: string; speed?: string; perm?: string }) {
+    const t: any = this.hub.terminals.get(addr);
+    if (!t || t.state !== "live") throw new Error("That agent isn't running.");
+    const machine = addr.includes("/") ? addr.split("/")[0] : null;
+    const kind = kindOf(t) ?? reader?.kind ?? "claude";
+    const dflt = await this.defaults(kind, machine);
+    let meta = reader?.conv?.meta ?? {};
+    if (t.created_ms && meta.at && meta.at < t.created_ms) meta = { used: meta.used, window: meta.window };
+    const c = current(kind, t.foreground?.argv ?? t.argv ?? [], meta, dflt);
+    const from = { agent: kind, model: rowFor(kind, c) ?? "", effort: c.effort ?? "", fast: !!c.fast, perm: c.perm ?? "" };
+    const to = { agent: pick.kind, model: pick.model ?? "", effort: pick.effort ?? "", fast: pick.speed === "fast", perm: pick.perm ?? "" };
+    if (!LS.liveOK(from, to)) return { terminal: await this.restart(addr, reader, pick) };
+    const state = t.status?.state;
+    if (state === "working") throw new Error("It's busy with a turn. Switch once it's done, or stop it first.");
+    if (state === "blocked") throw new Error("It's waiting on a question. Answer it, then switch.");
+    const hc = (args: string[]) => run([process.env.SHEPHERDR_HC || "hc", ...args]);
+    // a send returns once a turn starts or ~5 s pass, and a command starts none: its answer on screen is what counts,
+    // so each is waited for only as long as a refusal takes (it comes at once), not for the rest
+    const io = {
+      send: async (text: string) => {
+        const p = this.hub.send(addr, text);
+        const r = await Promise.race([p, Bun.sleep(800).then(() => null)]);
+        if (r && r.code !== 0) throw new Error("It couldn't be reached to switch.");
+      },
+      keys: async (...keys: string[]) => { await hc(["keys", addr, ...keys]); },
+      screen: async () => (await hc(["read", addr, "--lines", "2000"])).out,
+      readFile: async (rel: string) => {
+        const r = await sh(this.hub, 'cat "$HOME/$1"', ["read", rel], machine);
+        if (r.code !== 0) throw new Error("no file");
+        return r.stdout;
+      },
+      writeFile: async (rel: string, text: string) => {
+        await sh(this.hub, 'printf %s "$2" > "$HOME/$1"', ["write", rel, text], machine);
+      },
+      sleep: (ms: number) => Bun.sleep(ms),
+    };
+    const names = Object.fromEntries(menuFor(kind, dflt, from.model || null).models.map((m: any) => [m.id, m.name]));
+    await LS.switchLive(io, kind, from, to, { names });
+    this.known.delete(`${machine ?? ""}|${kind}`);
+    this.used(pick);
+    return { live: true };
+  }
+
   /** Restarts it on the picked CLI, model, effort and speed; resolves with the new agent's address. */
   async restart(addr: string, reader: any, pick: { kind: string; model?: string; effort?: string; speed?: string; perm?: string }) {
     const t: any = this.hub.terminals.get(addr);
@@ -141,13 +190,13 @@ export class Agents {
       let out: any = {};
       try { out = JSON.parse(r.out || "{}"); } catch {}
       if (r.code !== 0 || !out.terminal) throw new Error((r.err || r.out).trim() || "herdr-task switch failed");
-      if (pane) await run(["hc", "label", out.terminal, `herdr.chat=${pane}`, `herdr.chat.origin=${t.labels?.["herdr.chat.origin"] || addr}`]);
+      if (pane) await run([process.env.SHEPHERDR_HC || "hc", "label", out.terminal, `herdr.chat=${chatLabel(pane)}`, `herdr.chat.origin=${t.labels?.["herdr.chat.origin"] || addr}`]);
       await run(["herdr-app", "do", "terminal.park", "--terminal", out.terminal]);
       this.used(pick);
       return out.terminal as string;
     }
-    const script = join(appHome(), "mods", "coordinator", "restart.sh");
-    if (!existsSync(script)) throw new Error("Restarting an Assistant needs BossGoat's window layout installed.");
+    const script = layoutScript("restart.sh");
+    if (!script) throw new Error("This install can't restart an Assistant: update BossGoat on that machine.");
     const p = Bun.spawn(["bash", script, addr, JSON.stringify(built.argv)], { stdout: "pipe", stderr: "pipe", stdin: "ignore",
       env: { ...process.env, HERDR_RESTART_CHAT: pane, ...(built.resume ? { HERDR_RESTART_RESUME: "1" } : {}) } });
     const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
