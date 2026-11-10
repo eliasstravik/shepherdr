@@ -15,8 +15,6 @@ import { openAccept } from '@client/screens/Accept.tsx'
 import { callDoing, callPhase, callSample, muteCall, sendWhere, startCall, stepsAside, stopCall, type Nav, type NavAck } from './call.ts'
 import { key, press, resetScreen, screenAction, type Head } from './screen.ts'
 
-/** the Tasks panel's filter for a task state the voice agent named */
-const FILTER: Record<string, string> = { need: 'needs', work: 'working', ready: 'ready', merging: 'merging', queued: 'queued', scheduled: 'scheduled', todo: 'todo', done: 'done', automations: 'automations' }
 /** a task's tab as the side panel names it */
 const ITEM: Record<string, string> = { terminal: 'terminal', pr: 'pr', browser: 'browser' }
 const PANEL_WORDS: Record<string, string> = { tasks: 'Tasks', artifacts: 'Artifacts', files: 'Files', changes: 'Changes', needs: 'Needs you' }
@@ -153,13 +151,12 @@ async function doNav(nav: Nav): Promise<NavAck> {
   }
   if (nav.kind === 'tasks' || nav.kind === 'needs') {
     setUI(LAYERS_OFF)
-    const taskFilter = nav.kind === 'needs' ? 'needs' : FILTER[str(nav.filter)] ?? 'all'
-    setUI(ui.device === 'phone' ? { task: null, tab: 'tasks', taskFilter, pick: null } : { side: 'tasks', sideShut: false, taskFilter, ...(ui.task && taskInMiddle(ui, snap) ? { task: null } : {}) })
+    setUI(ui.device === 'phone' ? { task: null, tab: 'tasks', pick: null } : { side: 'tasks', sideShut: false, ...(ui.task && taskInMiddle(ui, snap) ? { task: null } : {}) })
     // words to filter by (a task's name or id): typed in the panel's filter box, as the person would
     const view = listView(getState().ui, snap)
     if (nav.kind === 'tasks') setFilter(view.search, 'tasks', str(nav.search))
     const now = getState().ui
-    return check(now.taskFilter === taskFilter && (ui.device === 'phone' ? now.tab === 'tasks' : now.side === 'tasks'), 'the Tasks panel didn\'t open')
+    return check((ui.device === 'phone' ? now.tab === 'tasks' : now.side === 'tasks'), 'the Tasks panel didn\'t open')
   }
   if (nav.kind === 'panel') {
     const panel = str(nav.panel)
