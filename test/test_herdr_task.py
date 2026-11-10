@@ -2895,6 +2895,58 @@ class MachineHoldFollowsSettings(unittest.TestCase):
         self.assertEqual(self.hold(), "vm-demo's disk is 96% full")
 
 
+class MacMemoryIsWhatMacOSCallsFree(unittest.TestCase):
+    """SHEP-199 / GitHub #922: on a Mac the memory hold reads macOS's own free share
+    (kern.memorystatus_level, the figure memory_pressure prints), not a sum of vm_stat pages that
+    leaves out the cache macOS counts as free. Only sysctl and vm_stat are faked; the numbers are
+    the report's: vm_stat's sum says 81% used, macOS says 39% free (61% used)."""
+
+    TOTAL = 16 * 2 ** 30  # 16 GB, 16 KB pages: 1048576 pages
+    VM_STAT = """Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                                 40000.
+Pages active:                              300000.
+Pages inactive:                            120000.
+Pages speculative:                           9000.
+Pages throttled:                                0.
+Pages wired down:                          150000.
+Pages purgeable:                            30000.
+File-backed pages:                          90000.
+Anonymous pages:                           250000.
+Pages stored in compressor:                 80000.
+Pages occupied by compressor:               40000.
+"""
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.machine as machine
+        self.machine = machine
+        self.sysctl_level = "39\n"
+        fake = {"sysctl -n hw.memsize": "%d\n" % self.TOTAL, "vm_stat": self.VM_STAT}
+
+        def run(argv, timeout=10):
+            key = " ".join(argv)
+            if key == "sysctl -n kern.memorystatus_level":
+                return self.sysctl_level
+            return fake.get(key, "")
+        for name, value in (("MAC", True), ("_run", run)):
+            p = mock.patch.object(machine, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_uses_the_free_share_macos_reports(self):
+        total, used = self.machine._memory()
+        self.assertEqual(total, self.TOTAL)
+        self.assertEqual(round(used * 100 / total), 61)  # 100 - 39, not vm_stat's 81
+        self.assertEqual(self.machine.sample()["memory"], 61)
+
+    def test_without_the_sysctl_counts_vm_stat_pages(self):
+        self.sysctl_level = ""
+        total, used = self.machine._memory()
+        # free + inactive + speculative + purgeable = 199000 of 1048576 pages: 81% used
+        self.assertEqual(round(used * 100 / total), 81)
+
+
 class ReviewedNamesItsCommit(unittest.TestCase):
     """#797: `reviewed --commit <sha>` records a round on the commit it reviewed, fixes committed
     since; only a commit on the task's branch. A throwaway git repo; hc and gh are never run."""

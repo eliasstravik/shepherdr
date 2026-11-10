@@ -51,6 +51,11 @@ def _memory():
         total = kb("MemTotal")
         return total, max(0, total - (kb("MemAvailable") or kb("MemFree")))
     total = int(_run(["sysctl", "-n", "hw.memsize"]).strip() or 0)
+    # macOS's own free share (kern.memorystatus_level: the figure memory_pressure prints) counts the
+    # cache it can take back as free, which a sum of vm_stat's pages doesn't (SHEP-199, #922).
+    level = _run(["sysctl", "-n", "kern.memorystatus_level"]).strip()
+    if total and level.isdigit():
+        return total, total * (100 - min(100, int(level))) // 100
     vm = _run(["vm_stat"])
     page = int((re.search(r"page size of (\d+)", vm) or [0, 4096])[1])
 
