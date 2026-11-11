@@ -230,7 +230,7 @@ def main():
     c.add_argument("--report", help="the round's findings in a line (levels, what was fixed)")
     c.add_argument("--commit", help="the commit the round reviewed, when fixes were committed since (default: HEAD)")
     cmd("review-more", cmd_review_more, "the Assistant gives a task one more review round, once all are used (never its own agent)")
-    c = cmd("status", cmd_status, "a task's agent says what it's doing now, at the start and each natural step: status 4 \"Fixing the two failing tests\" --done 40 --left 5m")
+    c = cmd("status", cmd_status, "a task's agent says what it's doing now, at the start, each natural step and at least every 5 minutes: status 4 \"Fixing the two failing tests\" --done 40 --left 5m")
     c.add_argument("text", help=f"what it is doing, at most {LINE_MAX} characters (longer is cut at a word)")
     c.add_argument("--done", type=int, help="how far through the whole task, 0-100 (%%)")
     c.add_argument("--left", help="your best guess of how long is left: 5m, 90s, 1h30m; on every status, the first too (a rough guess beats none)")

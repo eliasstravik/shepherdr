@@ -595,8 +595,8 @@ def parse_left(text):
 
 
 def cmd_status(args):
-    """A task agent says what it's doing, how far along it is and the time left, at the start and
-    at each natural step (as Shepherdr's `shepherdr status`). Herdr guesses nothing: it shows
+    """A task agent says what it's doing, how far along it is and the time left, at the start, at
+    each natural step and at least every 5 minutes (as Shepherdr's `shepherdr status`). Herdr guesses nothing: it shows
     what the agent said and counts the minutes down while it works."""
     text = " ".join(str(args.text or "").split())
     if not text:

@@ -97,7 +97,14 @@ SUGGEST_RULE = ("- Suggested next message, when your Settings block says \"Sugge
                 "as a tab-complete would (\"yes, merge it\", \"show me the diff\", \"try again on main\"). One line, under about 60 characters. "
                 "Write none when there's no sensible next message, when you ask a multiple-choice question that already has its own cards, or when "
                 "the reply is only a notice. Never write it when the Settings block says off. The chat shows it greyed out in the box; its words never show as text.\n")
-WORKER_MD = WORKER_MD_BEFORE_SUGGEST + SUGGEST_RULE
+WORKER_MD_BEFORE_OFTEN = WORKER_MD_BEFORE_SUGGEST + SUGGEST_RULE
+# Since a status comes at least every 5 minutes, its time left revised honestly each time (SHEP-214).
+OFTEN_OLD = "- Say how it's going: at the start and at each natural step, run the"
+OFTEN_RULE = "- Say how it's going: at the start, at each natural step and at least every 5 minutes while you work, run the"
+HONEST_OLD = "from your very first status on, and update it at every step as you learn more. A rough guess beats none."
+HONEST_RULE = ("from your very first status on. Each time, revise it honestly from how the work is really going (slower than "
+               "you thought: say more), never just count it down. A rough guess beats none.")
+WORKER_MD = WORKER_MD_BEFORE_OFTEN.replace(OFTEN_OLD, OFTEN_RULE).replace(HONEST_OLD, HONEST_RULE)
 
 REVIEWER_MD_BEFORE_SUBAGENT = """You review one Herdr task's work before it can merge. Read only: never edit files, commit or push.
 - Read the task, then the diff of its branch against its base, and run the project's checks.
@@ -130,7 +137,7 @@ OLD_WORKER_READY = """You work on one Herdr task. Stay within the task's scope a
 - When the work is finished, run the `herdr-task ready` command given at the end of your brief, with a short summary. That puts the task in Ready for the person, who accepts it. Never mark a task done yourself.
 """
 OLD_WORKER_MD = OLD_WORKER_READY.split("- When the work is finished")[0]
-OLD_WORKERS = (WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
+OLD_WORKERS = (WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
 
 
 TEMPLATE_HEADS = {

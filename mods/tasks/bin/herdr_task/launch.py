@@ -466,9 +466,10 @@ def closing_line(s, task, parent=None, argv=None):
         text += (f" Review is on: after each review round, record it on the commit it reviewed with `{ht} reviewed {s.ref(task)} "
                  f"--folder {shlex.quote(s.loc['folder'])} --report \"<its findings in a line>\"` (add `--commit <sha>` if you committed fixes since; at most {rounds} rounds); "
                  f"ready refuses a final commit no round was recorded on.")
-    text += (f" At the start and at each natural step, say how it's going: `{ht} status {s.ref(task)} --folder {shlex.quote(s.loc['folder'])} "
+    text += (f" At the start, at each natural step and at least every 5 minutes while you work, say how it's going: `{ht} status {s.ref(task)} --folder {shlex.quote(s.loc['folder'])} "
              f"\"<what you're doing now, at most {LINE_MAX} characters>\" --done <% of the whole task> --left <your best guess of how long is left, like 20m>`: "
-             f"always give `--left`, from your very first status on, and update it at every step; a rough guess beats none.")
+             f"always give `--left`, from your very first status on, and revise it honestly each time from how the work is really going; "
+             f"a rough guess beats none.")
     text += (f" Only for what truly can't wait, `{ht} alert \"<what, a few words>\" --body \"<why>\"` reaches the person at once "
              f"(a toast and a sound); a question waits in your chat instead.")
     from .feedback import feedback_on
