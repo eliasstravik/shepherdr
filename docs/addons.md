@@ -8,12 +8,12 @@ marked below off and on again, at once and on every machine (Everywhere's `off` 
 | Add-on | Switch | What it is | Off means |
 |---|---|---|---|
 | Core | always on | The layout: sidebar (spaces-chat), tab bar (tabs-tasks), pane header (pane-chat), sidebar foot, status bar, toasts, menus and dialogs, Shepherdr settings | — |
-| Tasks | always on in 3.1.31 | The Tasks panel, a task's view (files, changes, pull request), the Accept card, `herdr-task`, worker.md and reviewer.md | — |
-| Assistants | always on in 3.1.31 | An Assistant per space (coordinator, assistant.md), task news. Needs Tasks | — |
-| Chat | always on in 3.1.31 | Agents as a chat, model choice, opened images | — |
-| Questions and permissions | always on in 3.1.31 | Question and permission cards from Claude Code and Codex hooks. Needs Chat | — |
-| Secrets | always on in 3.1.31 | `herdr-secret`, the masked card, Settings → Secrets | — |
-| Keyboard | always on in 3.1.31 | Jump (Ctrl+K), the keys list (Ctrl+Shift+?) | — |
+| Tasks | always on in 3.1.32 | The Tasks panel, a task's view (files, changes, pull request), the Accept card, `herdr-task`, worker.md and reviewer.md | — |
+| Assistants | always on in 3.1.32 | An Assistant per space (coordinator, assistant.md), task news. Needs Tasks | — |
+| Chat | always on in 3.1.32 | Agents as a chat, model choice, opened images | — |
+| Questions and permissions | always on in 3.1.32 | Question and permission cards from Claude Code and Codex hooks. Needs Chat | — |
+| Secrets | always on in 3.1.32 | `herdr-secret`, the masked card, Settings → Secrets | — |
+| Keyboard | always on in 3.1.32 | Jump (Ctrl+K), the keys list (Ctrl+Shift+?) | — |
 | Artifacts | yes | Agents' reports and draft screens beside the chat, `herdr-artifact` | No Artifacts button in the tab bar |
 | Voice and dictation | yes | Calls with Shepherdr (ElevenLabs), dictation (ElevenLabs speech to text, the same key). Needs Chat | No call or mic buttons; their keys do nothing |
 | Reactions | yes | React to a message with an emoji. Needs Chat | No smiley on messages (agents' own reactions still show) |
@@ -39,4 +39,4 @@ Settings says which.
 ## Later
 
 Splitting the always-on add-ons out of the panels they live in (Chat out of the pane, Tasks out of the side panel)
-comes after 3.1.31, with standalone add-on mods listed on herdr.dev.
+comes after 3.1.32, with standalone add-on mods listed on herdr.dev.
