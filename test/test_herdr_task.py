@@ -2207,6 +2207,24 @@ class TimeLeft(unittest.TestCase):
             self.assertIn("rough guess beats none", words)
         self.assertIn(templates.WORKER_MD_BEFORE_LEFT, templates.OLD_WORKERS)  # an unedited old one gets today's
 
+    def test_a_status_at_least_every_5_minutes_its_time_left_revised_honestly(self):
+        """SHEP-214: the system prompt and the brief's footer both ask for a status at least every 5
+        minutes and an honest --left each time; an unedited earlier template gets today's words."""
+        from herdr_task import templates
+        with open(os.path.join(BIN, "herdr_task", "launch.py")) as f:
+            launch = f.read()
+        with open(os.path.join(ROOT, "templates", "worker.md")) as f:
+            worker = f.read()
+        for words in (templates.WORKER_MD, worker, launch):
+            self.assertIn("at least every 5 minutes while you work", words)
+            self.assertIn("revise it honestly", words)
+            self.assertNotIn("update it at every step", words)
+        with open(os.path.join(ROOT, "templates", "worker.md")) as f:
+            line = [x for x in f.read().splitlines() if x.startswith("- Say how it's going")]
+        self.assertEqual(line, [x for x in templates.WORKER_MD.splitlines() if x.startswith("- Say how it's going")])
+        self.assertIn(templates.WORKER_MD_BEFORE_OFTEN, templates.OLD_WORKERS)
+        self.assertNotEqual(templates.WORKER_MD_BEFORE_OFTEN, templates.WORKER_MD)
+
 
 class ReviewAsAHelperAgent(unittest.TestCase):
     """SHEP-54: workers run their review as an interactive hc child people see, never headless; an
