@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.1.33
+
+A small release: task agents say how it's going more often, and their time left is more honest.
+
+### Tasks
+
+- A task's agent updates its status line at least every 5 minutes while it works, not only at the start and at each
+  step, so the Tasks panel never sits on an old line for long.
+- Its time left is revised honestly each time from how the work is really going: when it's slower than thought, the
+  time left goes up instead of just counting down.
+
 ## 3.1.32
 
 A small release: artifacts hold clips, sounds and PDFs, Back sits beside a task's title, and switching a task's agent
