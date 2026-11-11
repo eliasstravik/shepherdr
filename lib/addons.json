@@ -4,7 +4,7 @@
     "core is always installed and always on. Every add-on is installed too (one layout gives everything);",
     "one with \"switch\": true can be turned off in Shepherdr settings > Window. The off list is shared",
     "\"addons.off\" (the window's mods, lib/addons.js) and \"off\" in ~/.config/shepherdr/settings.json (herdr-task).",
-    "An add-on without a switch is always on in 3.1.31: splitting it from the panels it lives in comes later.",
+    "An add-on without a switch is always on in 3.1.32: splitting it from the panels it lives in comes later.",
     "mods: folders under mods/. blocks: layout node ids it fills. keys: \"<context> <key>\" in keys.json. web: the web app's plugins (web/plugins), left out while it is off.",
     "helpers: links put in ~/.local/bin. templates: ~/.config/herdr-core/templates. needs: other add-ons."
   ],
