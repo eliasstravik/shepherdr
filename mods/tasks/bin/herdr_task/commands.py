@@ -886,9 +886,10 @@ def last_agent(t):
     return t["agents"][-1] if t["agents"] else None
 
 
-def start_again(s, t, space, key=None, argv_json=None, message=None, parent=None):
+def start_again(s, t, space, key=None, argv_json=None, message=None, parent=None, nudge=None):
     """Starts an agent for the task: the last agent's own session when it's the same kind of agent
-    and the session is known; else a fresh one with a handoff. `message` goes after either."""
+    and the session is known; else a fresh one with a handoff. `message` goes after either; `nudge`
+    is a resumed session's first message when no `message` is given (a handoff needs none)."""
     unarchive(s, t)
     prev = last_agent(t)
     parent = parent_for(parent or (prev or {}).get("parent"), space)
@@ -899,7 +900,7 @@ def start_again(s, t, space, key=None, argv_json=None, message=None, parent=None
     same = prev and agent_key(argv) == prev.get("agent")
     res = resume_argv(argv, prev["session"]) if same and prev.get("session") else None
     if res:
-        return launch(s, t, argv, space, message, parent=parent, resume=res), True
+        return launch(s, t, argv, space, message or nudge, parent=parent, resume=res), True
     text = handoff(s, t, prev, parent, argv) + (("\n\n" + message) if message else "")
     t["review_gate"] = True
     return launch(s, t, argv, space, text, parent=parent), False
@@ -929,6 +930,20 @@ def cmd_resume(args):
         f"{s.ref(t)} {'resumed its session' if resumed else 'started with a handoff'}: {a['address']}")
 
 
+# SHEP-211: what a session resumed by switch hears first. Without it the new agent sat idle on the old one's
+# interrupted turn ("Interrupted · What should Claude do instead?") and the task showed a false "needs you".
+SWITCH_NUDGE = ("Shepherdr restarted your session on a new agent (the task's agent, model or settings changed), "
+                "which stopped your last turn part-way. Nothing is wrong and nobody is waiting on you: carry on "
+                "where you left off (check what is already done with `herdr-task show` and git), then keep going "
+                "with the task.")
+
+
+def end_agent(s, t, address):
+    """Ends a task's agent (its terminal, shell and all); hc kill returns once it's gone."""
+    stop_note("switch-kill", task=s.ref(t), terminal=address, by="switch")
+    run(["hc", "kill", address])
+
+
 def cmd_switch(args):
     with open_store(args) as s:
         t = s.find(args.id)
@@ -944,13 +959,26 @@ def cmd_switch(args):
             t.setdefault("started", now())
             t.pop("queue", None)
             t.pop("scheduled_for", None)
-        a, resumed = start_again(s, t, space, args.agent, args.argv, parent=args.parent)
+        ended = []
+        # An agent switching itself can't end first: that would end this command too.
+        me = os.environ.get("HC_TERMINAL_ID")
+        own = bool(old and me and old["address"].split("/")[-1] == me)
+        if old and not args.keep and not own:
+            # The old agent ends before the new one starts (SHEP-211): the new one may resume the same session,
+            # and killing the old one after that cut the session's turn short under the new agent, which then
+            # sat on "Interrupted" with nothing to do. Its worktree and session stay for the new agent.
+            end_agent(s, t, old["address"])
+            ended.append(old["address"])
+        try:
+            a, resumed = start_again(s, t, space, args.agent, args.argv, parent=args.parent, nudge=SWITCH_NUDGE)
+        except Fail as e:
+            if ended:
+                raise Fail(f"{e} The old agent {ended[0]} already ended: its work is kept, `herdr-task resume "
+                           f"{s.ref(t)}` starts it again.")
+            raise
         v = view(s, t)
-    ended = []
-    if old and not args.keep:
-        # The new agent took over: end the old one (its terminal, shell and all).
-        stop_note("switch-kill", task=s.ref(t), terminal=old["address"], by="switch")
-        run(["hc", "kill", old["address"]])
+    if own and not args.keep:
+        end_agent(s, t, old["address"])
         ended.append(old["address"])
     say(args, {**v, "terminal": a["address"], "space": space, "parent": a.get("parent"), "resumed": resumed, "ended": ended},
         f"{s.ref(t)}: {a['agent']} {a['address']} {'resumed its session' if resumed else 'took over'}" + (f", {old['address']} ended" if ended else ""))

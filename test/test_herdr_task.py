@@ -4537,6 +4537,48 @@ class TaskFlow(unittest.TestCase):
         self.commands.cmd_switch(self.args(space=None, agent="claude", argv=None, parent=None, keep=False))
         self.assertEqual(got, ["sp-a"])  # none given: the old agent's own space
 
+    def switch_events(self, me=None):
+        """cmd_switch with the old agent t1 mid-turn on session S1: what it ran, in order."""
+        self.live = [{"address": "t1", "status": {"state": "working"}, "labels": {"herdr.task.space": "sp-a"}}]
+        self.task["agents"] = [{"address": "t1", "agent": "claude", "argv": ["claude"], "at": 1, "session": "S1"}]
+        events = []
+        self.patch(self.commands, "agent_running", lambda k: True)
+        self.patch(self.commands, "refresh_sessions", lambda *a: None)
+        self.patch(self.commands, "stop_note", lambda *a, **k: None)
+        self.patch(self.commands, "unarchive", lambda *a: None)
+        self.patch(self.commands, "parent_for", lambda parent, space: parent)
+        self.patch(self.commands, "run", lambda argv, **k: events.append(("run", argv)))
+
+        def launch(s, t, argv, space, message=None, parent=None, resume=None, role=None):
+            events.append(("launch", resume, message))
+            return {"address": "t2", "agent": "claude", "argv": argv}
+        self.patch(self.commands, "launch", launch)
+        env = {k: v for k, v in os.environ.items() if k != "HC_TERMINAL_ID"}
+        if me:
+            env["HC_TERMINAL_ID"] = me
+        with self.mock.patch.dict(os.environ, env, clear=True):
+            self.commands.cmd_switch(self.args(space=None, agent=None, argv='["claude", "--model", "opus"]', parent=None,
+                                               keep=False))
+        return events
+
+    def test_switch_ends_the_old_agent_before_resuming_its_session(self):
+        """SHEP-211: switch resumed the old agent's session while the old agent was mid-turn, then killed it: the
+        new agent sat on "Interrupted" with no message (a false "needs you"). Now the old one ends first, and the
+        resumed session gets a first message to carry on."""
+        events = self.switch_events()
+        self.assertEqual(events[0], ("run", ["hc", "kill", "t1"]))
+        self.assertEqual([e[0] for e in events], ["run", "launch"])
+        _, resume, message = events[1]
+        self.assertEqual(resume, ["claude", "--model", "opus", "--resume", "S1"])
+        self.assertEqual(message, self.commands.SWITCH_NUDGE)
+        self.assertEqual(self.said[-1], "SHEP-1: claude t2 resumed its session, t1 ended")
+
+    def test_an_agent_switching_itself_ends_after_the_new_one_starts(self):
+        """SHEP-211: ending the caller first would end the switch command with it."""
+        events = self.switch_events(me="t1")
+        self.assertEqual([e[0] for e in events], ["launch", "run"])
+        self.assertEqual(events[1], ("run", ["hc", "kill", "t1"]))
+
     def settings(self, d):
         import herdr_task.settings as settings
         f = os.path.join(self.root, "shepherdr.json")
