@@ -813,7 +813,7 @@ export default class Spaces extends View {
     if (changed) setShared("space.colors", kept);
     // null on a wide sidebar (SHEP-135) or with voice off: child(null) throws (GitHub #869)
     const voice = this.voiceRow(t, collapsed);
-    return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
+    return v_flex().size_full().min_h(0).bg(shared("layout") === "BossGoat" ? "#00000000" : t.chrome).text_size(13)
       .when(collapsed, el => el.child(h_flex().h(31).flex_none().items_center().justify_center()
         .child(div().id("sidebar-expand").size(H.sm).flex().items_center().justify_center().rounded(RADIUS.control)
           .cursor_pointer().text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))

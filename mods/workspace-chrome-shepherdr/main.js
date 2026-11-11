@@ -85,6 +85,7 @@ export default class WorkspaceChrome extends View {
 
   render() {
     const t = theme();
+    const chrome = shared("layout") === "BossGoat" ? "#00000000" : t.chrome;
     const collapsed = narrow();
     const call = !collapsed && addonOn("voice") ? liveCall() : null;
     if (props()?.footer) {
@@ -94,14 +95,14 @@ export default class WorkspaceChrome extends View {
         .when(collapsed, el => el.justify_center().tooltip(label))
         .child(svg(`mods/workspace-chrome-shepherdr/${icon}.svg`).size(20))
         .when(!collapsed, el => el.child(label));
-      return v_flex().size_full().bg(t.chrome).border_t(1).border_color(t.border).px(8).pt(4).pb(8).text_size(13)
+      return v_flex().size_full().bg(chrome).border_t(1).border_color(t.border).px(8).pt(4).pb(8).text_size(13)
         // Herdr's settings (with its update dot), then BossGoat's settings.
         .child(row("settings", "settings", "Settings", () => run("app.settings"))
           .when(Boolean(updates().app.ready), el => el.child(div().size(6).rounded_full().bg(t.accent))))
         .child(row("shepherdr", "goat", "BossGoat", () => openSettings()))
         .child(row("machine", "plus", "Add machine", () => run("mod.open", { name: "machine-add-chat" })));
     }
-    return h_flex().size_full().bg(t.chrome).pl(collapsed ? 6 : 14).pr(10).gap(4).items_center().text_size(13.5)
+    return h_flex().size_full().bg(chrome).pl(collapsed ? 6 : 14).pr(10).gap(4).items_center().text_size(13.5)
       .when(window()?.platform === "macos" && !window()?.fullscreen && !collapsed, el => el.pl(76))
       .when(!collapsed, el => el.child(h_flex().flex_1().gap(8).items_center().child(image("frame/welcome/herdr.png").size(20).rounded(5)).child(div().font_semibold().text_color(t.foreground).child("Herdr"))))
       // SHEP-135: the voice call, beside Search: mods/spaces-chat starts it (shared "voice.startreq"); on a call, its

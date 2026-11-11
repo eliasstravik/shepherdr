@@ -99,25 +99,27 @@ test("Terminal shares Chat's image, transparency and solid preset without changi
     { id: "tasks-thread-body", active: "tasks-thread-term", children: [
       { id: "tasks-thread-term", content: { terminal: "t9" } },
     ] },
-    { id: "sidebar", background: "chrome", hidden: true },
+    { id: "sidebar", background: "chrome", hidden: true, size: { px: 268 }, colors: { accent: "#0070d9" } },
   ] };
   const snapshot = JSON.stringify(tree);
   const image = terminalWallpaper(tree, wallpaper(chosen));
   expect(image.terminal_opacity).toBe(0);
-  expect(image.children[0].background).toEqual({ image: chosen.path, fit: "cover" });
-  expect(image.children[0].content.pane.background).toBe("#f9f9fa99");
-  expect(image.children[1].background).toEqual(image.children[0].background);
+  expect(image.background).toEqual({ image: chosen.path, fit: "cover" });
+  expect(image.children[0].background).toBe("#f9f9fa99");
+  expect(image.children[0].content.pane.background).toBe("#00000000");
+  expect(image.children[1].background).toEqual(image.background);
   expect(image.children[1].children[0].background).toBe("#f9f9fa99");
   for (const [transparency, tint] of [[0, "#f9f9fa00"], [100, "#f9f9faff"]])
-    expect(terminalWallpaper(tree, wallpaper({ ...chosen, transparency })).children[0].content.pane.background).toBe(tint);
-  expect(terminalWallpaper(tree, wallpaper({ ...chosen, transparency: 50 }), "#111413").children[0].content.pane.background).toBe("#11141380");
+    expect(terminalWallpaper(tree, wallpaper({ ...chosen, transparency })).children[0].background).toBe(tint);
+  expect(terminalWallpaper(tree, wallpaper({ ...chosen, transparency: 50 }), "#111413").children[0].background).toBe("#11141380");
   const solid = terminalWallpaper(image, wallpaper({ kind: "solid", preset: "sage" }));
-  expect(solid.children[0].background).toBe("#e3f0e6");
+  expect(solid.background).toBe("#e3f0e6");
+  expect(solid.children[0].background).toBe("#00000000");
   expect(solid.children[0].content.pane.background).toBe("#00000000");
   expect(solid.children[0].size).toEqual(tree.children[0].size);
   expect(solid.children[1].active).toBe("tasks-thread-term");
   expect(solid.children[1].children[0].content).toEqual({ terminal: "t9" });
-  expect(solid.children[2]).toEqual(tree.children[2]);
+  expect(solid.children[2]).toEqual({ ...tree.children[2], background: "#00000000" });
   expect(solid.theme).toBe("paper");
   expect(JSON.stringify(tree)).toBe(snapshot);
   expect(terminalWallpaper(image, wallpaper(chosen))).toEqual(image);
@@ -136,8 +138,24 @@ test("light mode hides images without losing the saved dark-mode wallpaper", () 
   expect(visibleWallpaper(saved, "main", "light")).toBeNull();
   expect(visibleWallpaper({ kind: "solid", preset: "sage" }, "BossGoat", "light").preset).toBe("sage");
   expect(visibleWallpaper({ kind: "solid", preset: "ink" }, "BossGoat", "light").preset).toBe("paper");
-  const tree = { id: "main", content: { pane: { background: "background" } } };
+  const tree = { id: "root", children: [{ id: "main", content: { pane: { background: "background" } } }] };
   const terminal = terminalWallpaper(tree, light);
   expect(terminal.background).toBe(light.color);
   expect(terminalWallpaper(terminal, visibleWallpaper(saved)).background).toEqual({ image: saved.path, fit: "cover" });
+});
+
+
+test("one window wallpaper continues behind the sidebar without opaque chrome or double tint", () => {
+  const tree = { id: "root", children: [
+    { id: "sidebar", background: "chrome", children: [{ id: "brand" }, { id: "spaces" }, { id: "sidebar-footer" }] },
+    { id: "work", children: [{ id: "main", content: { pane: { background: "background" } } }] },
+  ] };
+  for (const transparency of [0, 50, 100]) {
+    const result = terminalWallpaper(tree, wallpaper({ ...chosen, transparency }), "#111413");
+    const sidebar = result.children[0], main = result.children[1].children[0];
+    expect(result.background).toEqual({ image: chosen.path, fit: "cover" });
+    expect(sidebar.background).toBe(main.background);
+    expect(main.content.pane.background).toBe("#00000000");
+    expect(sidebar.children).toEqual(tree.children[0].children.map((node) => ({ ...node, background: "#00000000" })));
+  }
 });

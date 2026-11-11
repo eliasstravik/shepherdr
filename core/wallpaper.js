@@ -71,11 +71,16 @@ export function terminalWallpaper(tree, value, base = "#f9f9fa") {
   const tint = value.kind === "solid" ? "#00000000"
     : `${base.slice(0, 7)}${Math.round(value.transparency * 255 / 100).toString(16).padStart(2, "0")}`;
   next.terminal_opacity = 0;
+  next.background = background;
   function paint(node) {
     if (node.id === "main") {
-      node.background = background;
-      if (node.content?.pane) node.content.pane.background = tint;
+      node.background = tint;
+      if (node.content?.pane) node.content.pane.background = "#00000000";
     }
+    if (node.id === "sidebar") {
+      node.background = tint;
+    }
+    if (["brand", "sidebar-lists", "spaces", "sidebar-footer"].includes(node.id)) node.background = "#00000000";
     if (node.id === "tasks-thread-body") node.background = background;
     if (node.id === "tasks-thread-term") node.background = tint;
     for (const child of node.children ?? []) paint(child);
