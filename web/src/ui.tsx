@@ -3,6 +3,7 @@
 import clsx from 'clsx'
 import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type HTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type Ref, type RefObject, type TextareaHTMLAttributes } from 'react'
 import { ChevronLeftIcon, ChevronUpDownIcon, MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/16/solid'
+import { ChevronLeftIcon as BackMini } from '@heroicons/react/20/solid'
 
 /** ‹, every Back's icon: marked, so a voice call's close and back find the screen's own Back (SHEP-51, voice/screen.ts) */
 export const BackIcon = (p: { className?: string }) => <ChevronLeftIcon data-back="" {...p} />
@@ -1167,19 +1168,21 @@ export function Head({ children, className, conversation, lead, back, reserve }:
         className={clsx('relative mx-auto flex min-h-[51px] w-full max-w-read min-w-0 items-center gap-2.5 pr-3 [&_.hit]:rounded-full', inline ? 'pl-0' : gutter ? 'pl-14' : 'pl-5')}
       >
         {inline ? (
-          // no room in the margin: the lead, then Back (or its reserved space), in line before the title
-          <div className="mr-1.5 flex shrink-0 items-center gap-1">
+          // no room in the margin: the lead, then Back (or its reserved space), in line before the title, centred on
+          // the header's first row (the title's two lines; its views may wrap under it)
+          <div className="-mr-0.5 flex h-[51px] shrink-0 items-center gap-1 self-start">
             {lead ? <div data-lead className="flex shrink-0 items-center gap-1.5">{lead}</div> : null}
             {backRow}
           </div>
         ) : (
           <>
+            {/* hung, each centred on the header's first row, the title's two lines (its views may wrap under it) */}
             {lead ? (
-              <div data-lead className="absolute top-[6px] right-[calc(100%-4px)] flex h-5 items-center gap-1.5">
+              <div data-lead className="absolute top-0 right-[calc(100%-4px)] flex h-[51px] items-center gap-1.5">
                 {lead}
               </div>
             ) : null}
-            {backRow ? <div className="absolute top-[6px] right-[calc(100%-40px)] flex h-5 items-center">{backRow}</div> : null}
+            {backRow ? <div className="absolute top-0 right-[calc(100%-48px)] flex h-[51px] items-center">{backRow}</div> : null}
           </>
         )}
         {children}
@@ -1187,11 +1190,11 @@ export function Head({ children, className, conversation, lead, back, reserve }:
     </div>
   )
 }
-// what a hung lead keeps clear of Back's left edge (the title's gutter is pl-14: Back at 8px in, 16px clear of the title)
+// what a hung lead keeps clear of the column's left (the title's gutter is pl-14: Back at 16px in, 8px clear of the title)
 const LEAD_GAP = 4
 
-/** Back, in a conversation header: a plain chevron in a 32px target, named for where it goes (the place's chat or the
- *  Tasks list). No hover tooltip (the repo's rule): its name is for screen readers */
+/** Back, in a conversation header: a plain 20px chevron in a 32px target, named for where it goes (the place's chat or
+ *  the Tasks list). No hover tooltip (the repo's rule): its name is for screen readers */
 export function LeadBack({ onClick, to }: { onClick: () => void; to: string }) {
   return (
     <button
@@ -1200,7 +1203,7 @@ export function LeadBack({ onClick, to }: { onClick: () => void; to: string }) {
       aria-label={`Back to ${to}`}
       className="press-dim relative inline-flex size-8 shrink-0 items-center justify-center rounded-full text-fg2 hover:bg-hover hover:text-fg"
     >
-      <BackIcon className={ic} />
+      <BackMini className="size-5 shrink-0" />
     </button>
   )
 }
