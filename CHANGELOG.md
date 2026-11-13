@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.1.34
+
+A small release: creating a new space works again, and finished Codex tasks show Ready.
+
+### Spaces
+
+- Creating a new space works again: pressing Create while the folder suggestions were open did nothing, and now it
+  makes the space.
+
+### Tasks
+
+- A task run by Codex shows Ready once it's finished, instead of staying on Working when it had waited on several
+  background jobs at once.
+
 ## 3.1.33
 
 A small release: task agents say how it's going more often, and their time left is more honest.
