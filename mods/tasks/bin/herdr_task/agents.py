@@ -621,15 +621,13 @@ BG_MAX_MS = 3 * 3600_000  # a background job started longer ago than this no lon
 BG_STARTED = re.compile(r"Command running in background with ID: (\w+)|Monitor started \(task (\w+)|Async agent launched[\s\S]*?agentId: (\w+)")
 BG_ENDED = re.compile(r"<task-id>(\w+)</task-id>(?:(?!</task-notification>)[\s\S])*?<status>(\w+)</status>")
 CODEX_RUNNING = re.compile(r"Process running with session ID (\d+)")
-CODEX_EXITED = re.compile(r"\"exit_code\"\s*:|Process exited with code")
 # Codex 0.163+ code mode (SHEP-207): a script starts commands and polls them with tools.exec_command /
 # tools.write_stdin, all inside one exec call. Its output says "Script running with cell ID N" while
 # it waits, and a wait call names that cell; the script's results come as one JSON array, in the order
 # its calls were made, and a poll's result drops its session_id once the command has exited.
 CODEX_CELL = re.compile(r"Script running with cell ID (\d+)")
 CODEX_CELL_ARG = re.compile(r'"cell_id"\s*:\s*"?(\d+)')
-CODEX_SESSION_ARG = re.compile(r"session_id\W{0,4}(\d+)")
-CODEX_INNER = re.compile(r"\{[^{}]*\}")  # an object with no object inside: a result's own fields
+CODEX_SESSION_ARG = re.compile(r"session_id[\"']?\s*:\s*[\"']?(\d+)[\"']?\s*(?=[,}])")
 CODEX_HOST = "codex-code-mode-host"  # Codex's code-mode process: no job of its own
 WAITS_ON = re.compile(r"\b(wait\w*|watch\w*|polling)\b.*\b(ci|checks?|reviews?|reviewer|build|tests?|background|jobs?|deploy\w*|"
                       r"release|github|pipeline|actions?|run|workflow)\b|\breviewing\b", re.I)
@@ -751,30 +749,76 @@ def _bg_scan(lines, seen):
             elif d.get("type") == "response_item" and p.get("type") in ("function_call_output", "custom_tool_call_output"):
                 call = calls.get(p.get("call_id")) or ""
                 cell = CODEX_CELL_ARG.search(call)  # a wait on a code-mode cell: the sessions it polls
-                polled = cells.get(cell.group(1), []) if cell else CODEX_SESSION_ARG.findall(call)
-                if _codex_output(_text(p.get("output")), polled, cells, running, at):
+                polled = cells.get(cell.group(1), []) if cell else _codex_polled(call)
+                if _codex_output(p.get("output"), polled, cells, running, at):
                     ended = max(ended, at)
     seen["ended"] = ended
 
 
-def _codex_output(text, polled, cells, running, at):
+def _codex_polled(call):
+    """Recognise literal polls and the numeric for-of batch emitted by Codex.
+
+    Keep command slots too: an exec_command result must never end a neighbouring poll.
+    Unknown JavaScript stays unresolved; never execute an agent's script to read its log.
+    """
+    loop = re.compile(r"for\s*\(const\s+(\w+)\s+of\s+\[([\d,\s]+)\]\s*\)\s*\{(.*?)\}\s*\}", re.S)
+    def expand(m):
+        body = m.group(3) + "}"
+        return "\n".join(re.sub(r"session_id\s*:\s*" + re.escape(m.group(1)) + r"\b",
+                                    "session_id:" + sid.strip(), body)
+                         for sid in m.group(2).split(",") if sid.strip())
+    call = loop.sub(expand, call)
+    slots = []
+    for m in re.finditer(r"tools\.(exec_command|write_stdin)\s*\(\s*\{([^{}]*)\}", call):
+        sid = CODEX_SESSION_ARG.search(m.group(2) + "}") if m.group(1) == "write_stdin" else None
+        slots.append(sid.group(1) if sid else None)
+    if slots:
+        return slots
+    try:  # legacy write_stdin takes a JSON argument object
+        sid = json.loads(call).get("session_id")
+        return [str(sid)] if isinstance(sid, (int, str)) and str(sid).isdigit() else []
+    except (ValueError, AttributeError):
+        return []
+
+
+def _codex_results(output):
+    """Read result envelopes, never JSON or session-id examples inside command stdout."""
+    results = []
+    blocks = output if isinstance(output, list) else [output]
+    def add(value):
+        if isinstance(value, list):
+            for item in value:
+                add(item)
+        elif isinstance(value, dict):
+            if value.get("status") == "fulfilled":
+                add(value.get("value"))
+            elif value.get("status") == "rejected":
+                results.append({})  # preserves its place in allSettled
+            elif "session_id" in value or "exit_code" in value:
+                results.append(value)
+    for block in blocks:
+        text = _text(block)
+        try:
+            add(json.loads(text))
+        except ValueError:
+            pass
+    return results
+
+
+def _codex_output(output, polled, cells, running, at):
     """One Codex output's word on the sessions it covers, applied to running ({"codex:<id>": started
     ms}). polled: the session ids the call that made it polled, in order (a code-mode script's
     calls, or a write_stdin's own). Returns True when a session ended."""
+    text = _text(output)
     ended = False
-    for m in CODEX_RUNNING.finditer(text):
-        running.setdefault("codex:" + m.group(1), at)
+    results = _codex_results(output)
+    # Legacy plain-text output only. Structured command stdout is not tool metadata.
+    if not results:
+        for m in CODEX_RUNNING.finditer(text):
+            running.setdefault("codex:" + m.group(1), at)
     cell = CODEX_CELL.search(text)
     if cell:
-        cells[cell.group(1)] = polled  # a wait call that names this cell polls these sessions
-    results = []
-    for m in CODEX_INNER.finditer(text):
-        try:
-            d = json.loads(m.group(0))
-        except ValueError:
-            continue
-        if isinstance(d, dict) and ("session_id" in d or "exit_code" in d):
-            results.append(d)
+        cells[cell.group(1)] = polled
     for i, d in enumerate(results):
         sid = d.get("session_id")
         if sid is None and len(results) == len(polled):
@@ -782,12 +826,12 @@ def _codex_output(text, polled, cells, running, at):
         if sid is None:
             continue
         key = "codex:" + str(sid)
-        if "exit_code" in d:
+        if d.get("exit_code") is not None:
             ended = running.pop(key, None) is not None or ended
-        else:
+        elif d.get("session_id") is not None:
             running.setdefault(key, at)
     # a poll of one session whose output says it exited (no session id in it, or the old format's text)
-    if len(polled) == 1 and CODEX_EXITED.search(text) and not any("session_id" in d for d in results):
+    if len(polled) == 1 and polled[0] is not None and not results and re.search(r"^Process exited with code", text, re.M):
         ended = running.pop("codex:" + str(polled[0]), None) is not None or ended
     return ended
 

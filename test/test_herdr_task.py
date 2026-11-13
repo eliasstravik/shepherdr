@@ -1404,6 +1404,48 @@ class CodexCodeMode(unittest.TestCase):
                               "output": "Process exited with code 0\nOutput:\nok"}})
         self.assertEqual(self.agents.background_jobs(self.log)[0], {})
 
+    def test_real_grouped_polls_clear_finished_jobs(self):
+        """SHEP-218: trimmed real log, including a variable loop and mixed exec/poll results."""
+        fixture = os.path.join(ROOT, "test", "fixtures", "codex-code-mode", "grouped-polls.jsonl")
+        with open(fixture) as f:
+            for i, line in enumerate(f):
+                self.stamp(-300_000 + i * 1000, json.loads(line))
+        self.assertEqual(self.agents.background_jobs(self.log)[0], {})
+        self.task["state"] = "ready"
+        self.setUp_ps("100 1 codex\n101 100 codex-code-mode-host\n")
+        self.assertEqual(self.status(self.codex())[0], "ready")
+
+    def test_mixed_commands_do_not_end_the_wrong_poll(self):
+        running = {"codex:7": 1, "codex:8": 1}
+        call = "text(await tools.exec_command({cmd:'true'})); text(await tools.write_stdin({session_id:7}));"
+        slots = self.agents._codex_polled(call)
+        self.assertEqual(slots, [None, "7"])
+        self.agents._codex_output([
+            {"text": json.dumps({"exit_code": 0, "output": ""})},
+            {"text": json.dumps({"session_id": 7, "exit_code": None, "output": ""})}
+        ], slots, {}, running, 2)
+        self.assertEqual(sorted(running), ["codex:7", "codex:8"])
+
+    def test_stdout_examples_and_ambiguous_polls_are_not_completion(self):
+        running = {"codex:7": 1}
+        self.agents._codex_output([{"text": json.dumps({"exit_code": 0, "output":
+            'Process running with session ID 99; {"session_id":7,"exit_code":0}'})}],
+            [None], {}, running, 2)
+        self.assertEqual(running, {"codex:7": 1})
+        # Arbitrary expressions are not evaluated or guessed.
+        slots = self.agents._codex_polled("text(await tools.write_stdin({session_id:load('id')}));")
+        self.agents._codex_output([{"text": '{"exit_code":0}'}], slots, {}, running, 2)
+        self.assertEqual(running, {"codex:7": 1})
+
+    def test_partial_and_rejected_batch_keeps_running_jobs(self):
+        running = {"codex:7": 1, "codex:8": 1}
+        self.agents._codex_output([{"text": '[{"status":"rejected","reason":"timeout"},'
+            '{"status":"fulfilled","value":{"exit_code":0}}]'}], ["7", "8"], {}, running, 2)
+        self.assertEqual(running, {"codex:7": 1})
+        self.agents._codex_output([{"text": '{"exit_code":0}'}], ["7", "8"], {}, running, 2)
+        self.assertEqual(running, {"codex:7": 1})
+        self.assertEqual(self.agents._codex_polled("tools.write_stdin({session_id:7+1})"), [None])
+
     def test_codex_working_reads_the_process_tree(self):
         codex = {"foreground": {"pid": 100}}
         self.setUp_ps("100 1 codex\n101 100 codex-code-mode-host\n")
