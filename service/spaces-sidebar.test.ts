@@ -30,9 +30,10 @@ function el(): any {
 const shared = new Map<string, unknown>();
 let sidebarPx = 260;
 const space = (id: string, active = false) => ({ id, name: id, active, machine: null, tabs: [], folder: "/tmp/x" });
+let liveSpaces = [space("s1", true), space("s2")];
 const theme = new Proxy({}, { get: () => "#000000" });
 const herdr = {
-  agents: () => [], panes: () => [], terminals: () => [], spaces: () => [space("s1", true), space("s2")],
+  agents: () => [], panes: () => [], terminals: () => [], spaces: () => liveSpaces,
   appHome: () => "/nonexistent-app", home: () => "/nonexistent-home",
   exec: async () => ({ code: 1, stdout: "", stderr: "" }), hc: async () => ({ code: 1, stdout: "", stderr: "" }),
   run: () => {}, openOverlay: () => {}, closeOverlay: () => {}, notify: () => {}, playSound: () => {},
@@ -54,7 +55,7 @@ const cx: any = new Proxy({ timer: { every: () => {}, after: () => {} } }, { get
 const sidebar = () => { const s: any = new Spaces(); s.init({}, cx); return s.render(cx); };
 
 describe("Spaces sidebar without a voice row (GitHub #869)", () => {
-  beforeEach(() => { shared.clear(); sidebarPx = 260; });
+  beforeEach(() => { shared.clear(); sidebarPx = 260; liveSpaces = [space("s1", true), space("s2")]; });
 
   test("wide sidebar, voice on: no voice row, still draws", () => {
     expect(sidebar()[EL]).toBe(true);
@@ -65,6 +66,16 @@ describe("Spaces sidebar without a voice row (GitHub #869)", () => {
     expect(sidebar()[EL]).toBe(true);
     sidebarPx = 100;
     expect(sidebar()[EL]).toBe(true);
+  });
+
+  test("a newly created space joins the sidebar after its folder lookup grace period", () => {
+    const s: any = new Spaces(); s.init({}, cx);
+    liveSpaces.push(space("s3"));
+    s.visible();
+    // The window gives git lookup a moment to avoid a row jumping to its repo. It must eventually appear.
+    s.born.s3 = Date.now() - 1600;
+    expect(s.visible().map((r: any) => r.w.id)).toContain("s3");
+    expect(s.render(cx)[EL]).toBe(true);
   });
 
   test("the narrow rail keeps its voice button", () => {

@@ -252,7 +252,8 @@ function NewSpaceDialog() {
         <Who name={W.title} kind={remote && !choosing ? W.on(remote) : undefined} />
         <SheetClose onClose={close} />
       </div>
-      <div className="flex min-h-0 flex-col px-4 pt-3.5 pb-4" onPointerDown={(e) => listOpen && !(e.target as HTMLElement).closest('[data-folders]') && e.target !== input.current && shut()}>
+      {/* Keep buttons in place through pointerup: hiding suggestions on press moves Create out from under the click. */}
+      <div className="flex min-h-0 flex-col px-4 pt-3.5 pb-4" onPointerDown={(e) => listOpen && !(e.target as HTMLElement).closest('[data-folders], button') && e.target !== input.current && shut()}>
         {choosing ? <MachineChoice id={`${listId}-machine`} machines={on} value={machine} onChange={switchTo} label={label} /> : null}
         <label htmlFor={`${listId}-path`} className={label}>
           {W.label}
