@@ -1015,6 +1015,21 @@ def ensure_agent_browser(r, home):
         r.notes.append(f"the task browser: {line}")
 
 
+def codex_sandbox_state(root_is_home):
+    """doctor's line when Codex's sandbox (bwrap) can't start on this machine (SHEP-227, #998), else None.
+    herdr-task's own check, asked once and kept: `herdr-task sandbox` gives the fix."""
+    if not root_is_home or not shutil.which("codex"):
+        return None
+    try:
+        layout_mod()
+        from herdr_task import sandbox
+        broken = sandbox.check()
+    except Exception:
+        return None
+    return (f"Codex's sandbox can't start here ({broken.get('error') or 'bwrap refused'}): Codex workers and "
+            "reviewers can't run commands. `herdr-task sandbox` says the fix") if broken else None
+
+
 def agent_browser_state(root):
     """doctor's line on agent-browser, or None (no herdr-browser here, or the browser add-on is off)."""
     hb = browser_helper(root)
@@ -1547,7 +1562,8 @@ def cmd_doctor(a):
         for x in bad + s_bad:
             say(f"  ✗ {x}")
         ab = agent_browser_state(root)
-        for x in s_notes + ([ab] if ab else []) + [update_hint(rec)]:
+        cs = codex_sandbox_state(home)
+        for x in s_notes + ([ab] if ab else []) + ([cs] if cs else []) + [update_hint(rec)]:
             say(f"  - {x}")
         if not bad + s_bad:
             say("  ✓ whole")
@@ -1575,7 +1591,8 @@ def cmd_doctor(a):
     for x in bad:
         say(f"  ✗ {x}")
     ab = agent_browser_state(root)
-    for x in warn + t_notes + ([ab] if ab else []) + [update_hint(rec)]:
+    cs = codex_sandbox_state(home)
+    for x in warn + t_notes + ([ab] if ab else []) + ([cs] if cs else []) + [update_hint(rec)]:
         say(f"  - {x}")
     holds = [p for p in hold_paths(root) if os.path.exists(p)]
     if bad:

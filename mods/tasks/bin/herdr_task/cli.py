@@ -24,6 +24,7 @@ from .autopilot import cmd_autopilot, cmd_complete, cmd_progress
 from .home import cmd_home
 from .assistant_settings import cmd_session_note
 from .feedback import cmd_feedback
+from .sandbox import cmd_sandbox
 
 
 # ---- another machine ------------------------------------------------------------------------
@@ -450,6 +451,9 @@ def main():
     c.add_argument("to")
     c.add_argument("text")
     c.set_defaults(fn=lambda a: __import__("herdr_task.news", fromlist=["hold"]).hold(a.to, a.text, "news"), json=False)
+    c = cmd("sandbox", cmd_sandbox, "whether Codex's sandbox (bwrap) can start on this machine, and the fix for it when it can't "
+            "(asked once and kept; --check asks again)", id=False)
+    c.add_argument("--check", action="store_true", help="ask again now")
     c = sub.add_parser("_track")
     c.add_argument("id")
     c.add_argument("address")
@@ -461,7 +465,7 @@ def main():
         p.print_help()
         return 1
     try:
-        args.fn(args)
+        rc = args.fn(args)
     except Fail as e:
         return _refused(args, str(e))
     except OSError as e:
@@ -470,7 +474,7 @@ def main():
         # (busy_again's). Said plainly instead (a store open when it failed is left as it was).
         what = os.path.basename(str(e.filename)) if e.filename else "a program it needs"
         return _refused(args, f"couldn't start {what} ({e.strerror or e}). Try again in a moment.")
-    return 0
+    return rc if type(rc) is int else 0
 
 
 def _refused(args, why):

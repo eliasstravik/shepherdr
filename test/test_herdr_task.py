@@ -5033,6 +5033,26 @@ class TaskFlow(unittest.TestCase):
         self.settings({})
         self.assertEqual(settings.review_limits(self.store, self.task), (True, 3))
 
+    def test_a_broken_codex_sandbox_is_in_the_brief(self):
+        """SHEP-227 (#998): Codex's sandbox can't start here: a Codex worker's or reviewer's brief says so and why, and
+        tells it to leave the sandbox on and tell the person. A Claude-only task, or a sandbox that starts, says nothing."""
+        import herdr_task.sandbox as sandbox
+        settings = self.settings({})
+        broken = {"error": "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted", "bwrap": "/usr/bin/bwrap", "userns": True}
+        self.patch(sandbox, "check", lambda fresh=False: broken)
+        self.assertNotIn("- Sandbox:", settings.settings_block(self.store, self.task, argv=["claude"]))
+        block = settings.settings_block(self.store, self.task, argv=["codex", "--no-daemon", "-s", "workspace-write"])
+        self.assertIn("- Sandbox: Codex's sandbox can't start on this machine (bwrap: loopback: Failed RTM_NEWADDR", block)
+        self.assertIn("Don't loosen the sandbox yourself: tell the person", block)
+        # full access runs no sandbox: nothing to say
+        self.assertNotIn("- Sandbox:", settings.settings_block(self.store, self.task,
+                                                                argv=["codex", "--dangerously-bypass-approvals-and-sandbox"]))
+        # a Claude worker with a Codex reviewer: the review can't read files, so it is said too
+        self.settings({"everywhere": {"tasks": {"review_rounds": 1}, "reviewer": {"agent": "codex"}}})
+        self.assertIn("- Sandbox: Codex's sandbox", settings.settings_block(self.store, self.task, argv=["claude"]))
+        self.patch(sandbox, "check", lambda fresh=False: None)
+        self.assertNotIn("- Sandbox:", settings.settings_block(self.store, self.task, argv=["codex", "--no-daemon"]))
+
     def reviewed_task(self):
         self.settings({"everywhere": {"tasks": {"review_rounds": 3}}})
         self.task["review_gate"] = True
@@ -5751,3 +5771,89 @@ class ProcessTable(unittest.TestCase):
             if not os.path.isdir("/proc/self"):
                 self.skipTest("no /proc")
             self.assertIn(str(p.pid), self.sessions.kids(os.getpid()))
+class CodexSandbox(unittest.TestCase):
+    """SHEP-227 (#998, #1024): Codex's bwrap sandbox refused on this host (Ubuntu's AppArmor user-namespace limit) is
+    found once, by a real `codex sandbox -- true` (here a fake codex), said with the fix for this host, never loosened."""
+
+    def setUp(self):
+        sys.dont_write_bytecode = True
+        sys.path.insert(0, BIN)
+        import herdr_task.sandbox as sandbox
+        self.sandbox = sandbox
+        self.dir = tempfile.mkdtemp()
+        self.calls = os.path.join(self.dir, "calls")
+        self.codex = os.path.join(self.dir, "codex")
+        self.userns = os.path.join(self.dir, "userns")
+        with open(self.userns, "w") as f:
+            f.write("1\n")
+        self.fake("echo 'bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted' >&2; exit 1")
+        self.saved = {k: getattr(sandbox, k) for k in ("CACHE", "USERNS_SYSCTL", "APPARMOR_D")}
+        sandbox.CACHE = os.path.join(self.dir, "state", "codex-sandbox.json")
+        sandbox.USERNS_SYSCTL = self.userns
+        sandbox.APPARMOR_D = os.path.join(self.dir, "apparmor.d")
+        self.path = os.environ.get("PATH", "")
+        os.environ["PATH"] = self.dir + os.pathsep + self.path
+
+    def tearDown(self):
+        for k, v in self.saved.items():
+            setattr(self.sandbox, k, v)
+        os.environ["PATH"] = self.path
+        sys.path.remove(BIN)
+
+    def fake(self, body):
+        with open(self.codex, "w") as f:
+            f.write(f"#!/bin/sh\necho \"$*\" >> {self.calls}\n{body}\n")
+        os.chmod(self.codex, 0o755)
+
+    def probes(self):
+        try:
+            with open(self.calls) as f:
+                return f.read().splitlines()
+        except OSError:
+            return []
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "bwrap is Linux's")
+    def test_found_once_and_said_with_the_fix(self):
+        b = self.sandbox.check()
+        self.assertEqual(b["error"], "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted")
+        self.assertTrue(b["userns"])
+        self.assertEqual(self.probes(), ["sandbox -- true"])
+        # asked once: kept until something it depends on changes
+        self.assertEqual(self.sandbox.check(), b)
+        self.assertEqual(len(self.probes()), 1)
+        text = self.sandbox.notice(b)
+        self.assertIn("AppArmor blocks it", text)
+        self.assertIn("flags=(unconfined)", text)
+        self.assertIn("apparmor_parser -r", text)
+        self.assertIn("The sandbox stays on and nothing was changed", text)
+        # the person adds the profile: asked again, and it starts now
+        os.makedirs(self.sandbox.APPARMOR_D)
+        with open(os.path.join(self.sandbox.APPARMOR_D, self.sandbox.PROFILE), "w") as f:
+            f.write("profile x {}\n")
+        self.fake("exit 0")
+        self.assertIsNone(self.sandbox.check())
+        self.assertEqual(len(self.probes()), 2)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "bwrap is Linux's")
+    def test_without_apparmor_its_own_words(self):
+        with open(self.userns, "w") as f:
+            f.write("0\n")
+        b = self.sandbox.check()
+        self.assertFalse(b["userns"])
+        self.assertNotIn("apparmor_parser", self.sandbox.notice(b))
+        self.assertIn("user namespace", self.sandbox.notice(b))
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "bwrap is Linux's")
+    def test_other_failures_say_nothing(self):
+        """Only bwrap's own refusal counts: an older Codex without `sandbox`, or a slow one, is no word."""
+        self.fake("echo \"error: unrecognized subcommand 'sandbox'\" >&2; exit 2")
+        self.assertIsNone(self.sandbox.check(fresh=True))
+
+    def test_which_commands_run_in_the_sandbox(self):
+        sb = self.sandbox.sandboxed
+        self.assertTrue(sb(["codex", "--no-daemon", "-s", "workspace-write", "-a", "on-request"]))
+        self.assertTrue(sb(["codex", "--no-daemon", "--sandbox", "read-only"]))
+        self.assertFalse(sb(["codex", "--dangerously-bypass-approvals-and-sandbox"]))
+        self.assertFalse(sb(["codex", "-s", "danger-full-access"]))
+        self.assertFalse(sb(["claude", "--model", "opus"]))
+        self.assertFalse(sb(None))

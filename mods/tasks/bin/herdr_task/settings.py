@@ -545,8 +545,24 @@ def task_settings(s, t, space=None, argv=None, live=False):
 
 
 def settings_block(s, t, space=None, argv=None, live=False):
-    rows = [f"- {x['label']}: {x['text']}" + (f" ({SET_BY[x['by']]})" if x["by"] else "") for x in task_settings(s, t, space, argv, live)]
+    lines = task_settings(s, t, space, argv, live)
+    rows = [f"- {x['label']}: {x['text']}" + (f" ({SET_BY[x['by']]})" if x["by"] else "") for x in lines]
+    # Codex's sandbox can't start here (SHEP-227, #998): the worker hears it in its brief and tells the person.
+    word = sandbox_word(lines, argv or (t["agents"][-1].get("argv") if t.get("agents") else None) or worker_argv(s, t, space))
+    if word:
+        rows.append(f"- Sandbox: {word}")
     return "\n".join([SETTINGS_HEAD, *rows])
+
+
+def sandbox_word(lines, argv):
+    """The Settings block's Sandbox line when this task's worker or reviewer runs Codex in its
+    sandbox and that sandbox can't start on this machine (sandbox.check), else None."""
+    from . import sandbox
+    rv = next((x["value"] for x in lines if x["label"] == "Reviewer"), None) or {}
+    if not (sandbox.sandboxed(argv) or rv.get("agent") == "codex"):
+        return None
+    broken = sandbox.check()
+    return sandbox.notice(broken, short=True) if broken else None
 
 
 def keep_review(s, t, space=None):
