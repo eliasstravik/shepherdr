@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import time
 
 from .base import HOME, now, run
 from .agents import agent_running, detail
@@ -11,12 +12,64 @@ from .agents import agent_running, detail
 
 # ---- agent sessions -------------------------------------------------------------------------
 
+# GitHub #1013: a `pgrep -P` per process (each reads every process on the machine) for each agent of each
+# task, from every tracker and list, kept a busy machine's CPUs full. One read of the process table now
+# serves all of a pass's lookups: /proc on Linux (no process started), one `ps` elsewhere (macOS).
+
+TABLE_FOR = 2.0          # seconds a read of the process table serves (a pass's agents, a list's tasks)
+_table = {"at": None, "children": {}}
+
+
+def _read_table():
+    """{parent pid: [child pid, …]} of every process now, all as strings."""
+    children = {}
+    if os.path.isdir("/proc/self"):
+        for n in os.listdir("/proc"):
+            if not n.isdigit():
+                continue
+            try:
+                with open(f"/proc/{n}/stat", "rb") as f:
+                    stat = f.read()
+                # "pid (name) state ppid …": the name may hold spaces and brackets, so read after its last ")"
+                ppid = stat[stat.rindex(b")") + 2:].split(None, 2)[1].decode()
+            except (OSError, ValueError, IndexError):
+                continue   # it ended while being read
+            children.setdefault(ppid, []).append(n)
+        return children
+    for line in run(["ps", "-axo", "pid=,ppid="]).stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1].isdigit():
+            children.setdefault(parts[1], []).append(parts[0])
+    return children
+
+
+def _ordered(children):
+    """Each parent's children by pid, as pgrep -P gave them (two agents under one shell: the older first)."""
+    for v in children.values():
+        v.sort(key=int)
+    return children
+
+
+def process_children():
+    """The process table's {parent: [children]}, read at most once per TABLE_FOR."""
+    t = time.monotonic()
+    if _table["at"] is None or t - _table["at"] > TABLE_FOR:
+        _table["children"], _table["at"] = _ordered(_read_table()), t
+    return _table["children"]
+
+
 def kids(pid):
-    r = run(["pgrep", "-P", str(pid)])
-    out = []
-    for p in r.stdout.split():
-        out.append(p)
-        out.extend(kids(p))
+    """Every process under pid, from the shared process table, in the order the pgrep walk gave: each child, then
+    everything under it, then its next sibling (session_of takes the first that names a session)."""
+    children = process_children()
+    out, todo, seen = [], [str(pid)], {str(pid)}
+    while todo:
+        p = todo.pop()
+        if p != str(pid):
+            out.append(p)
+        fresh = [c for c in children.get(p, []) if c not in seen]
+        seen.update(fresh)
+        todo.extend(reversed(fresh))
     return out
 
 

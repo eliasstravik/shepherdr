@@ -5687,3 +5687,67 @@ class ReadyMergeGit(unittest.TestCase):
         self.assertEqual(launch.folder_for(self.store, t), path)
         self.assertEqual((t["worktree"], t["branch"], t["base"]), (path, "task/1-flow-reland", "main"))
         self.assertEqual(t["start"], self.git(self.main, "rev-parse", "main"))
+
+
+class ProcessTable(unittest.TestCase):
+    """GitHub #1013: finding an agent's session walked its process tree with a `pgrep -P` per process (each one
+    reading every process), per agent, per task, from every tracker and list. One read of the process table now
+    serves a pass: no process started on Linux, one `ps` on macOS."""
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.sessions as sessions
+        self.sessions, self.mock = sessions, mock
+        sessions._table["at"] = None
+        self.addCleanup(lambda: sessions._table.update(at=None, children={}))
+
+    def test_a_real_tree_from_one_read(self):
+        import signal
+        tree = subprocess.Popen(["sh", "-c", "sh -c 'sleep 30 & wait' & sleep 30 & wait"], start_new_session=True)
+        self.addCleanup(lambda: (os.killpg(tree.pid, signal.SIGKILL), tree.wait()))
+        import time
+        time.sleep(0.3)
+        ran, reads = [], []
+        real = self.sessions._read_table
+        with self.mock.patch.object(self.sessions, "run", lambda args, **kw: ran.append(args)), \
+                self.mock.patch.object(self.sessions, "_read_table", lambda: reads.append(1) or real()):
+            under = self.sessions.kids(tree.pid)
+            for _ in range(20):   # a pass's other agents and session lookups share the same read
+                self.sessions.kids(tree.pid)
+                self.sessions.session_of(tree.pid)
+        self.assertEqual(len(under), 3, under)   # the inner sh and both sleeps
+        if os.path.isdir("/proc/self"):
+            self.assertEqual(ran, [])   # nothing started: no pgrep, no ps
+        self.assertEqual(len(reads), 1)
+        # the next pass (TABLE_FOR later) reads it again, so new processes show
+        self.sessions._table["at"] -= self.sessions.TABLE_FOR + 1
+        with self.mock.patch.object(self.sessions, "_read_table", lambda: reads.append(1) or real()):
+            self.sessions.kids(tree.pid)
+        self.assertEqual(len(reads), 2)
+
+    def test_macos_reads_one_ps(self):
+        from types import SimpleNamespace
+        ps = "  1     0\n 13     1\n 10     1\n 11    10\n 12    11\n 99    98\n"
+        ran = []
+        real_isdir = os.path.isdir
+        with self.mock.patch.object(self.sessions.os.path, "isdir", lambda p: False if p == "/proc/self" else real_isdir(p)), \
+                self.mock.patch.object(self.sessions, "run", lambda args, **kw: ran.append(args) or SimpleNamespace(stdout=ps)):
+            self.assertEqual(self.sessions.kids(10), ["11", "12"])
+            # as the pgrep walk gave them: a child, all under it, then its next sibling by pid
+            self.assertEqual(self.sessions.kids(1), ["10", "11", "12", "13"])
+            self.assertEqual(self.sessions.kids(99), [])
+        self.assertEqual(ran, [["ps", "-axo", "pid=,ppid="]])
+
+    def test_a_name_with_brackets_and_spaces(self):
+        """/proc/<pid>/stat's name can hold ") " itself: the parent is read after its last bracket."""
+        with tempfile.TemporaryDirectory() as d:
+            exe = os.path.join(d, "a) b (c")
+            os.symlink("/bin/sleep", exe)
+            p = subprocess.Popen([exe, "30"])
+            self.addCleanup(lambda: (p.kill(), p.wait()))
+            import time
+            time.sleep(0.2)
+            if not os.path.isdir("/proc/self"):
+                self.skipTest("no /proc")
+            self.assertIn(str(p.pid), self.sessions.kids(os.getpid()))
