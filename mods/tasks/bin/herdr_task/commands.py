@@ -924,8 +924,15 @@ def cmd_resume(args):
         space = bare(args.space) if args.space else (t.get("space") or default_space())
         if t["state"] == "done":
             t["state"] = "running"
+        gone = [k["address"] for k in live_agents(s.key(t))]  # its agents' terminals, none running an agent
         back_to_work(s, t, "resumed")
         a, resumed = start_again(s, t, space, args.agent, args.argv, parent=args.parent, message=RESUME_NUDGE)
+        # #1022: the old agent's terminal, its plain shell left (with the status it last reported when
+        # it died mid-turn), kept counting as the task's agent: it goes, as switch ends the one it replaces.
+        for address in gone:
+            if address != a["address"]:
+                stop_note("resume-retire", task=s.ref(t), terminal=address, by="resume")
+                run(["hc", "kill", address])
         v = view(s, t)
     say(args, {**v, "terminal": a["address"], "space": space, "parent": a.get("parent"), "resumed": resumed},
         f"{s.ref(t)} {'resumed its session' if resumed else 'started with a handoff'}: {a['address']}")

@@ -21,6 +21,16 @@ const { everywhereOf, pilotFor, levelOf, STARTER, currentBeat } = AP as any;
 
 const SHARED = join(HOME, ".config", "herdr-app", "shared.json");
 const SHELL = /^(ba|z|fi|da|k|tc|c)?sh$|^nu$|^pwsh$/;
+/** A shell's argv that runs a command (-c, -ic, -lic, --command), not a plain shell (herdr-task's runs_command()). */
+export function runsCommand(argv: unknown): boolean {
+  if (!Array.isArray(argv)) return true; // unknown: as before, its status decides
+  for (const a of argv.slice(1).map(String)) {
+    if (a === "--command" || a.startsWith("--command=")) return true;
+    if (!a.startsWith("-") || a.startsWith("--")) break;
+    if (a.slice(1).includes("c")) return true;
+  }
+  return false;
+}
 
 /** Runs a command on a machine through herdr-core (null: here). Output comes back base64. */
 export async function exec(hub: Hub, argv: string[], on: string | null = null, timeout = 60) {
@@ -212,7 +222,10 @@ export class Model {
     for (const k of this.hub.terminals.values()) {
       if (k.state !== "live" || k.labels?.["herdr.task"] !== key || machineOf(k.address) !== (list.machine ?? null)) continue;
       const st = typeof k.status === "object" ? k.status?.state ?? null : null;
-      if (!st && SHELL.test(String((k as any).foreground?.name ?? ""))) continue;
+      // a plain shell in front: its agent is gone, whatever status hc kept (#1022: one that died mid-turn keeps
+      // "working" for good); a shell that runs a command (fish -ic "claude ...", #780) still holds its agent
+      const fg = (k as any).foreground;
+      if (SHELL.test(String(fg?.name ?? "").split("/").pop() ?? "") && (!st || !runsCommand(fg?.argv))) continue;
       // its worker's own helper (SHEP-54: its reviewer, an hc child): never one of its agents (helpersOf)
       if (isHelper(k)) continue;
       // turn: its finished turns, for a Ready task back at work (core busyAgain()); since: when its status last

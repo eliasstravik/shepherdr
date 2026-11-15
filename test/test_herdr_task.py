@@ -898,6 +898,36 @@ class BackToWork(unittest.TestCase):
         self.assertEqual(self.news.news_line(self.store, t, {}, "working-again"),
                          '<herdr-news task="SHEP-7" event="working-again">SHEP-7 is working again: its agent is at work again (Web client)</herdr-news>')
 
+    def test_a_dead_agents_shell_is_no_agent(self):
+        """#1022: a Codex worker that died mid-turn left its plain shell, hc still saying "working" (as real hc does
+        after kill -9): the task stayed Working, a Ready one went back to work. Its leftover is no agent now, a fish
+        running its agent (#780) still is, and resume retires the leftover terminal."""
+        dead = {"address": "t1", "status": {"app": "codex", "state": "working"}, "turn": 9, "labels": {"herdr.role": "worker"},
+                "agent": "bash", "foreground": {"name": "bash", "argv": ["/bin/bash", "-i"]}}
+        fish = dict(dead, agent="fish", foreground={"name": "fish", "argv": ["fish", "-ic", "claude go; exec fish -i"]})
+        live = dict(dead, agent="codex", foreground={"name": "codex", "argv": ["codex"]})
+        self.assertEqual([k["agent"] for k in self.agents.mid_turn_agents([dead, fish, live])], ["fish", "codex"])
+        # hc ls alone (no foreground): only a shell in front makes it look closer
+        bare = {k: v for k, v in dead.items() if k != "foreground"}
+        with self.mock.patch.object(self.agents, "detail", lambda k: dead if k["agent"] == "bash" else k):
+            self.assertEqual(self.agents.mid_turn_agents([bare, {**bare, "agent": "codex"}]), [{**bare, "agent": "codex"}])
+        t = self.ready(space="sp1")
+        self.live = [dead]
+        report = {}
+        self.tick.back_pass(self.store, t, report)
+        self.assertEqual(t["state"], "ready")
+        self.assertNotIn("working_again", report)
+        self.assertFalse(self.tick.at_work(self.store, t))
+        # resume: the new agent starts, the old terminal goes
+        killed = []
+        self.live = [dict(dead, status=None)]
+        with self.mock.patch.object(self.commands, "start_again", lambda *a, **k: ({"address": "t2"}, True)), \
+                self.mock.patch.object(self.commands, "agent_running", lambda k: False), \
+                self.mock.patch.object(self.commands, "stop_note", lambda *a, **k: None), \
+                self.mock.patch.object(self.commands, "run", lambda args, **k: killed.append(args)):
+            self.commands.cmd_resume(self.args(space=None, agent=None, argv=None, parent=None))
+        self.assertEqual(killed, [["hc", "kill", "t1"]])
+
     def test_a_question_asked_between_two_ticks_is_heard(self):
         """#1000: GitHub news woke a Ready worker, it asked "pick one" in its own terminal and went quiet before
         any tick saw it working: the task stayed Ready and nobody heard. Its finished turn is seen now."""
@@ -1789,6 +1819,7 @@ class DoneWorktreesGo(unittest.TestCase):
         self.task = self.store.data["tasks"][0]
         live = lambda key: list(self.live)
         for mod, name, value in ((github, "live_agents", live), (github, "live_helpers", lambda key: []),
+                                 (github, "detail", lambda k: k),
                                  (github, "hc_json", lambda *a: {"terminals": self.live + self.others}),
                                  (tick, "live_agents", live), (tick, "detail", lambda k: k),
                                  (tick, "refresh_sessions", lambda *a: None), (tick, "quiet_hc", self.end),
@@ -2066,7 +2097,7 @@ class MergedOnlyWithOwnWork(unittest.TestCase):
         self.store.loc["folder"] = self.main
         self.task = self.store.data["tasks"][0]
         done = lambda s, t, even_if_busy=False: t.update(state="done")
-        for mod, name, value in ((tick, "live_agents", lambda key: self.live), (tick, "finish", done),
+        for mod, name, value in ((tick, "live_agents", lambda key: self.live), (tick, "detail", lambda k: k), (tick, "finish", done),
                                  (tick, "watch_main", lambda *a: None), (commands, "finish", done),
                                  (commands, "open_store", lambda args, write=True: self.store),
                                  (commands, "view", lambda s, t, live=None: dict(t)), (commands, "say", lambda *a: None),

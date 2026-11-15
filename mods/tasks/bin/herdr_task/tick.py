@@ -11,7 +11,8 @@ import time
 from .base import Fail, git, guard, hc_json, now, PR_EVERY, run, SHELLS, STORE, stop_note
 from .settings import machine_name, worker_argv
 from .agents import (
-    agent_log, agent_running, busy_again, detail, held_ask, last_question, live_agents, own_work, ready_turns, status_word,
+    agent_log, agent_running, busy_again, detail, held_ask, last_question, live_agents, mid_turn_agents, own_work, ready_turns,
+    status_word,
     task_status,
 )
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
@@ -38,7 +39,7 @@ PR_WAIT_EVERY = 20000  # how often a pull request whose checks still run is read
 def at_work(s, t):
     """Its agent is mid-turn (working, or asking): a task is never marked merged under it (SHEP-23);
     a later tick looks again."""
-    return any(status_word(k) in ("working", "blocked") for k in live_agents(s.key(t)))
+    return bool(mid_turn_agents(live_agents(s.key(t)), detail))
 
 
 def holds_open(s, t):
@@ -160,7 +161,7 @@ def back_pass(s, t, report):
     again until its next ready (busy_again()); its Assistant hears it (news: working-again)."""
     live = live_agents(s.key(t))
     # Cheap while nothing works: hc ls alone; its records in full (roles) only then.
-    if any(status_word(k) == "working" for k in live) and busy_again(t, [detail(k) for k in live]):
+    if any(status_word(k) == "working" for k in live) and busy_again(t, mid_turn_agents(live, detail)):
         back_to_work(s, t, "its agent is at work again", auto=True)
         report.setdefault("working_again", []).append(s.ref(t))
         return

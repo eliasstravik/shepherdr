@@ -78,6 +78,23 @@ def runs_command(argv):
     return False
 
 
+def mid_turn_agents(records, look=None):
+    """Those of these hc records (hc ls is enough) mid-turn: working or asking, their agent still
+    there. #1022: an agent that died mid-turn (crashed, killed) leaves its plain shell, and hc keeps
+    the status it last reported ("working" for good, its ls even naming the dead agent), holding its
+    task in Working. So a record that says mid-turn is read in full (look: hc get) for what is in
+    front: a plain shell is no agent; fish running its agent (#780) still is."""
+    out = []
+    for k in records:
+        if status_word(k) not in ("working", "blocked"):
+            continue
+        full = k if (k.get("foreground") or {}).get("name") else (look or detail)(k)
+        if (full.get("foreground") or {}).get("name") and not agent_running(full):
+            continue
+        out.append(full)
+    return out
+
+
 def status_of(task, live):
     """A task's status now: its stored state, or for running tasks the most urgent agent status
     (blocked > done > working > idle), or "stopped" when no agent is left."""

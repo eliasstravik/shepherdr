@@ -6,7 +6,7 @@ import re
 import shutil
 
 from .base import Fail, GH, git, hc_json, now, run, STORE
-from .agents import agent_running, live_agents, live_helpers, status_word
+from .agents import agent_running, detail, live_agents, live_helpers, mid_turn_agents
 
 
 # ---- GitHub ---------------------------------------------------------------------------------
@@ -459,7 +459,7 @@ def mid_turn(s, task):
     """Its agent, or a helper of its own, is mid-turn (working, or asking): its folder stays until the
     turn ends (SHEP-188). Even when the merge came from Herdr itself (even_if_busy)."""
     key = s.key(task)
-    return any(status_word(k) in ("working", "blocked") for k in live_agents(key) + live_helpers(key))
+    return bool(mid_turn_agents(live_agents(key) + live_helpers(key), detail))
 
 
 def finish(s, task, even_if_busy=False):
