@@ -70,8 +70,9 @@ export function FindMachines({ phone }: { phone: boolean }) {
         </div>
       </div>
       {got?.error ? <Small role="status" className={clsx('pt-1.5 text-pretty text-need-fg!', phone && 'px-4')}>{got.error}</Small> : null}
+      {done.length ? <h4 className={clsx('pt-4 pb-1 text-[0.8125rem] font-medium text-fg2', phone && 'px-4')}>Last run</h4> : null}
       {done.length ? (
-        <dl className={clsx('pt-2', phone && card)} aria-label="Last run">
+        <dl className={phone ? card : undefined} aria-label="Last run">
           {done.map((h) => (
             <div key={h.to} className={rowLook(phone)}>
               <dt className="min-w-0 flex-1 truncate">{h.to}</dt>
