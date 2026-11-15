@@ -4,6 +4,7 @@ import datetime
 import json
 import os
 import re
+import time
 
 from .base import hc_json, HOME, now, RANK, SHELLS, run
 
@@ -867,29 +868,53 @@ def waits_on_own(task, address=None, ended=0):
     return bool(WAITS_ON.search(text)) and not WAITS_ON_PERSON.search(text)
 
 
+# Codex starts its tool servers (MCP servers from its config, its own runtime helpers) as its own
+# children within a second or two of starting, and they live as long as it does (#946). A command of
+# the agent's own starts in a turn, after the model answered: never this soon.
+CODEX_STARTUP_S = 5
+
+
+def _ps_started(stamp):
+    """ps's lstart ("Sun Nov 15 10:50:03 2026", in the C locale) as epoch seconds, or None."""
+    try:
+        return time.mktime(time.strptime(" ".join(stamp.split()), "%a %b %d %H:%M:%S %Y"))
+    except (ValueError, OverflowError):
+        return None
+
+
 def codex_working(k):
     """Whether a Codex agent has a process of its own running under it: a background terminal or a
-    command of its code mode, but not its code-mode host (SHEP-207). Its pid unknown: True, so its
-    log decides as before. One `ps` for all processes, so it works on macOS too."""
+    command of its code mode, but not its code-mode host (SHEP-207), nor what it started with itself:
+    its MCP servers and runtime helpers and all under them (#946: they kept finished jobs counting).
+    Its pid unknown: True, so its log decides as before. One `ps` for all processes, so it works on
+    macOS too."""
     fg = k.get("foreground") or {}
     if not fg.get("pid") and k.get("address"):
         fg = detail(k).get("foreground") or {}
     if not fg.get("pid"):
         return True
-    children = {}
-    for line in run(["ps", "-axo", "pid=,ppid=,args="]).stdout.splitlines():
-        parts = line.split(None, 2)
-        if len(parts) >= 2 and parts[1].isdigit():
-            children.setdefault(parts[1], []).append(parts)
-    todo, seen_pids = [str(fg["pid"])], set()
+    children, started = {}, {}
+    out = run(["ps", "-axo", "pid=,ppid=,lstart=,args="], env=dict(os.environ, LC_ALL="C", LANG="C")).stdout
+    for line in out.splitlines():
+        parts = line.split(None, 7)  # pid, ppid, the five words of lstart, args
+        if len(parts) >= 7 and parts[1].isdigit():
+            started[parts[0]] = _ps_started(" ".join(parts[2:7]))
+            children.setdefault(parts[1], []).append((parts[0], parts[7] if len(parts) > 7 else ""))
+    root = str(fg["pid"])
+    born = started.get(root)
+    todo, seen_pids = [root], set()
     while todo:
-        for parts in children.get(todo.pop(), []):
-            if parts[0] in seen_pids:
+        for pid, args in children.get(todo.pop(), []):
+            if pid in seen_pids:
                 continue
-            seen_pids.add(parts[0])
-            todo.append(parts[0])
-            if len(parts) > 2 and CODEX_HOST not in parts[2]:
-                return True
+            seen_pids.add(pid)
+            if CODEX_HOST in args:
+                todo.append(pid)  # its code mode's commands run under it
+                continue
+            at = started.get(pid)
+            if born is not None and at is not None and at - born <= CODEX_STARTUP_S:
+                continue  # started with Codex itself: a tool server, never a job (nor anything under it)
+            return True
     return False
 
 

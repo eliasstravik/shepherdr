@@ -3,6 +3,7 @@ a throwaway) its commands start. On a person's machine herdr-task never runs wit
 import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -1395,13 +1396,21 @@ class CodexCodeMode(unittest.TestCase):
     stamp, status = OwnBackgroundWork.stamp, OwnBackgroundWork.status
 
     def setUp_ps(self, ps=""):
-        """The `ps` output codex_working() reads (the rest of the test's processes: none)."""
+        """The `ps` output codex_working() reads (the rest of the test's processes: none). Each line "pid ppid
+        [+seconds] args", as ps writes it with its start time (lstart): the agent (ppid 1) at 10:00:00, the
+        others a minute later unless +seconds says when."""
         from types import SimpleNamespace
         if not hasattr(self, "ps"):
             p = self.mock.patch.object(self.agents, "run", lambda args, **kw: SimpleNamespace(stdout=self.ps), create=True)
             p.start()
             self.addCleanup(p.stop)
-        self.ps = ps
+        rows = []
+        for line in ps.splitlines():
+            pid, ppid, rest = line.split(None, 2)
+            m = re.match(r"\+(\d+) (.*)", rest)
+            after, args = (int(m.group(1)), m.group(2)) if m else (0 if ppid == "1" else 60, rest)
+            rows.append(f"{pid} {ppid} Sun Nov 15 10:{after // 60:02d}:{after % 60:02d} 2026 {args}")
+        self.ps = "\n".join(rows) + "\n"
 
     def replay(self, n=None):
         with open(os.path.join(ROOT, "test", "fixtures", "codex-code-mode", "rollout-items.jsonl")) as f:
@@ -1515,6 +1524,25 @@ class CodexCodeMode(unittest.TestCase):
         self.setUp_ps("100 1 codex\n101 100 codex-code-mode-host\n102 101 sleep 9\n")
         self.assertTrue(self.agents.codex_working(codex))
         self.assertTrue(self.agents.codex_working({}))  # no pid: its log decides
+
+    def test_its_tool_servers_are_no_job(self):
+        """#946/#1022: a Codex worker's MCP servers (its children since it started, as real Codex 0.163 starts
+        them) kept finished jobs counting: the task stayed Working after ready. A command it started later still
+        counts, and so does one under its code-mode host; a helper an MCP server starts later is the server's."""
+        codex = {"foreground": {"pid": 100}}
+        self.setUp_ps("100 1 codex --no-daemon\n101 100 +1 python3 tiny_mcp.py\n102 100 +4 codex-code-mode-host\n"
+                      "103 101 +300 chrome --headless\n")
+        self.assertFalse(self.agents.codex_working(codex))
+        self.setUp_ps("100 1 codex --no-daemon\n101 100 +1 python3 tiny_mcp.py\n104 100 +83 sleep 400\n")
+        self.assertTrue(self.agents.codex_working(codex))
+        self.setUp_ps("100 1 codex --no-daemon\n101 100 +1 python3 tiny_mcp.py\n102 100 +4 codex-code-mode-host\n"
+                      "105 102 +90 /bin/bash -lc sleep 60\n")
+        self.assertTrue(self.agents.codex_working(codex))
+        # its log still says a session is open, but only its tool servers run: over, the task Ready
+        self.setUp_ps("100 1 codex --no-daemon\n101 100 +1 python3 tiny_mcp.py\n102 100 +4 codex-code-mode-host\n")
+        self.replay(4)
+        live = self.codex()
+        self.assertFalse(self.agents.own_work(self.task, live, ready=True))
 
 
 class NoFalseNeedsYou(unittest.TestCase):
