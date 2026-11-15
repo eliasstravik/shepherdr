@@ -1,6 +1,6 @@
 // #-mentions of spaces in a chat, the window's and the web app's: typing "#" lists the spaces the machine that runs this
 // chat's agent can reach (herdr-task's reach map, the same one `herdr-task assistants` and `tell-assistant` follow:
-// herdr-core links and ssh it can log into, one way as each machine sees it), and a picked one goes to the agent as
+// the herdr-core links the person added, one way as each machine sees it), and a picked one goes to the agent as
 // `[#shop](space:vm-demo/sp1)`: its name, then the target `herdr-task tell-assistant` takes (the route from the agent's
 // machine, then the space's id; a space on the agent's own machine is just its id). Rows show it as a chip; a space the
 // agent can't reach (or the viewer doesn't see) shows locked, like Slack's private channel links.
