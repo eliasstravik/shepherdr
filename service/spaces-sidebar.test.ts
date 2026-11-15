@@ -36,7 +36,7 @@ const execImpl = async (_cmd: string, args: string[], opts?: { on?: string }) =>
   opts?.on && String(args?.[1] ?? "").includes(".autopilot.json") && farFiles[opts.on] != null
     ? { code: 0, stdout: farFiles[opts.on], stderr: "" } : { code: 1, stdout: "", stderr: "" };
 let sidebarPx = 260;
-const space = (id: string, active = false) => ({ id, name: id, active, machine: null, tabs: [], folder: "/tmp/x" });
+const space = (id: string, active = false) => ({ id, name: id, active, machine: null as string | null, tabs: [] as unknown[], folder: "/tmp/x" });
 let liveSpaces = [space("s1", true), space("s2")];
 const theme = new Proxy({}, { get: () => "#000000" });
 const herdr = {
