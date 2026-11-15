@@ -12,6 +12,7 @@ import { machines, exec, home } from "herdr";
 import { spaces, terminals } from "./live.js";
 import * as vault from "./secrets.js";
 import { TEXT, RADIUS, H } from "./ui.js";
+import { over } from "./over.js";
 // Every word on the page: core/settings.js, shared with the web app.
 import { SECRETS as W, SECTIONS, EVERYWHERE as EVERYWHERE_WORD } from "./core/settings.js";
 
@@ -133,8 +134,7 @@ export function secretsSection(view, t) {
         .when(Boolean(s.name.value().trim() && s.value.value()) && !s.busy, (el) => el.cursor_pointer().bg(t.solid).text_color(t.solid_foreground).hover((st) => st.opacity(0.88))
           .on_click((_e, cx) => save(s, cx)))
         .when(!(s.name.value().trim() && s.value.value()) || s.busy, (el) => el.bg(t.raised).text_color(t.dim))
-        .child(s.busy ? W.saving : W.save)))
-    .when(s.open, (el) => el.child(menu));
+        .child(s.busy ? W.saving : W.save)));
 
   const list = s.list ?? [];
   const sorted = [...list].sort((a, b) => a.name.localeCompare(b.name) || a.scope.localeCompare(b.scope));
@@ -190,19 +190,21 @@ export function secretsSection(view, t) {
       .child(h_flex().gap(4).justify_end()
         .child(small("sec-kept-no", W.keep, () => { s.keptSure = null; }, "ghost"))
         .child(small("sec-kept-yes", W.moveVerb, (cx) => moveTo(s, s.keptSure, cx))))))
-    .child(div().text_size(TEXT.label).line_height("17px").text_color(s.moveErr || !reach ? t.blocked : t.dim).child(keptStatus))
-    .when(s.keptOpen, (el) => el.child(keptMenu));
+    .child(div().text_size(TEXT.label).line_height("17px").text_color(s.moveErr || !reach ? t.blocked : t.dim).child(keptStatus));
 
   return v_flex()
     .child(view.title(t, SECTIONS.find((x) => x.id === "secrets").title))
     .child(div().text_size(TEXT.label).line_height("17px").text_color(t.dim).child(W.about))
     .child(view.heading(t, W.keptOn))
-    .child(keptRow)
-    .when(asks.length > 0, (el) => el.child(view.heading(t, W.asked)).children(askRows))
-    .child(view.heading(t, W.add))
-    .child(form)
-    .child(view.heading(t, W.kept))
-    .when(s.list === null, (el) => el.child(div().py(10).text_size(TEXT.body).text_color(t.dim).child(W.loading)))
-    .when(s.list !== null && !rows.length, (el) => el.child(div().py(10).text_size(TEXT.body).text_color(t.dim).child(W.none)))
-    .children(rows);
+    // Each menu is drawn after the rows under it (over.js, #1002), measured from the row it opens from.
+    .child(over(keptRow, [
+      ...(asks.length > 0 ? [view.heading(t, W.asked), ...askRows] : []),
+      view.heading(t, W.add),
+      over(form, [
+        view.heading(t, W.kept),
+        ...(s.list === null ? [div().py(10).text_size(TEXT.body).text_color(t.dim).child(W.loading)] : []),
+        ...(s.list !== null && !rows.length ? [div().py(10).text_size(TEXT.body).text_color(t.dim).child(W.none)] : []),
+        ...rows,
+      ], s.open ? menu : null),
+    ], s.keptOpen ? keptMenu : null));
 }

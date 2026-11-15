@@ -28,18 +28,25 @@ function el(): any {
 }
 
 const shared = new Map<string, unknown>();
+// #1010: a linked machine's Autopilot file, read there (exec with { on }); this computer's through readTextFile.
+let machinesNow: { name: string | null; layout?: string }[] = [];
+let localPilot: string | null = null;
+const farFiles: Record<string, string> = {};
+const execImpl = async (_cmd: string, args: string[], opts?: { on?: string }) =>
+  opts?.on && String(args?.[1] ?? "").includes(".autopilot.json") && farFiles[opts.on] != null
+    ? { code: 0, stdout: farFiles[opts.on], stderr: "" } : { code: 1, stdout: "", stderr: "" };
 let sidebarPx = 260;
-const space = (id: string, active = false) => ({ id, name: id, active, machine: null, tabs: [], folder: "/tmp/x" });
+const space = (id: string, active = false) => ({ id, name: id, active, machine: null as string | null, tabs: [] as unknown[], folder: "/tmp/x" });
 let liveSpaces = [space("s1", true), space("s2")];
 const theme = new Proxy({}, { get: () => "#000000" });
 const herdr = {
   agents: () => [], panes: () => [], terminals: () => [], spaces: () => liveSpaces,
   appHome: () => "/nonexistent-app", home: () => "/nonexistent-home",
-  exec: async () => ({ code: 1, stdout: "", stderr: "" }), hc: async () => ({ code: 1, stdout: "", stderr: "" }),
+  exec: async (cmd: string, args: string[], opts?: { on?: string }) => execImpl(cmd, args, opts), hc: async () => ({ code: 1, stdout: "", stderr: "" }),
   run: () => {}, openOverlay: () => {}, closeOverlay: () => {}, notify: () => {}, playSound: () => {},
   shared: (k: string) => shared.get(k), setShared: (k: string, v: unknown) => { shared.set(k, v); },
-  machines: () => [], focused: () => null, knownAgents: () => [], settings: () => ({}),
-  readTextFile: async () => null, writeTextFile: async () => {}, watchFolder: () => {},
+  machines: () => machinesNow, focused: () => null, knownAgents: () => [], settings: () => ({}),
+  readTextFile: async (path: string) => (path.endsWith("/.autopilot.json") ? localPilot : null), writeTextFile: async () => {}, watchFolder: () => {},
   props: () => ({}), theme: () => theme, window: () => ({ platform: "linux" }), nextCommand: () => null,
   layout: () => ({ id: "root", children: [{ id: "sidebar", size: { px: sidebarPx } }] }),
 };
@@ -50,7 +57,7 @@ mock.module("gpui-base", () => fakeGpuiBase({
 }));
 (globalThis as any).localStorage ??= { getItem: () => null, setItem: () => {}, removeItem: () => {} };
 
-const { default: Spaces } = await import("../mods/spaces-chat/main.js");
+const { default: Spaces, pilotKey } = await import("../mods/spaces-chat/main.js");
 const cx: any = new Proxy({ timer: { every: () => {}, after: () => {} } }, { get: (t, k) => (t as any)[k] ?? (() => {}) });
 const sidebar = () => { const s: any = new Spaces(); s.init({}, cx); return s.render(cx); };
 
@@ -83,5 +90,49 @@ describe("Spaces sidebar without a voice row (GitHub #869)", () => {
     const s: any = new Spaces(); s.init({}, cx);
     expect(s.voiceRow(theme, true)?.[EL]).toBe(true);
     expect(s.render(cx)[EL]).toBe(true);
+  });
+});
+
+describe("Autopilot rocket for a linked machine's spaces (GitHub #1010)", () => {
+  const remote = (id: string) => ({ id: `vmb/${id}`, name: id, active: false, machine: "vmb", tabs: [], folder: "/tmp/y" });
+  // cx.spawn runs the read at once and hands back its promise, so the test waits for it.
+  let last: Promise<unknown> | null = null;
+  const run: any = new Proxy({ timer: { every: () => {}, after: () => {} }, spawn: (f: any) => { last = f(run); } }, { get: (t, k) => (t as any)[k] ?? (() => {}) });
+  const read = async (s: any) => { s.readPilots(run); await last; };
+
+  beforeEach(() => {
+    shared.clear(); sidebarPx = 260;
+    liveSpaces = [space("s1", true), remote("sp1"), remote("sp2")];
+    machinesNow = [{ name: null, layout: "ready" }, { name: "vmb", layout: "ready" }];
+    localPilot = JSON.stringify({ spaces: { s1: { on: true } } });
+    farFiles.vmb = JSON.stringify({ spaces: { sp1: { on: true }, sp2: { on: true, inflight: true } } });
+  });
+
+  test("a linked machine's space on Autopilot gets the rocket, as this computer's does", async () => {
+    const s: any = new Spaces(); s.init({}, cx); s.pilotTick = 0;
+    await read(s);
+    expect(s.pilots.get(pilotKey(liveSpaces[0]))).toBe("on");
+    expect(s.pilots.get(pilotKey(liveSpaces[1]))).toBe("on");
+    expect(s.pilots.get(pilotKey(liveSpaces[2]))).toBe("waking");
+    expect(s.pilotMark(liveSpaces[1], theme)?.[EL]).toBe(true);
+    expect(s.render(cx)[EL]).toBe(true);
+  });
+
+  test("an offline machine isn't asked; what it said last stays until it answers", async () => {
+    const s: any = new Spaces(); s.pilots = new Map();
+    await read(s);
+    machinesNow = [{ name: null, layout: "ready" }, { name: "vmb", layout: "offline" }];
+    delete farFiles.vmb;
+    await read(s); await read(s); await read(s);
+    expect(s.pilots.get("vmb/sp1")).toBe("on");
+  });
+
+  test("turned off there: its rocket goes at the next read there", async () => {
+    const s: any = new Spaces(); s.pilots = new Map();
+    await read(s);
+    farFiles.vmb = JSON.stringify({ spaces: { sp1: { on: false } } });
+    await read(s); await read(s); await read(s);
+    expect(s.pilots.has("vmb/sp1")).toBe(false);
+    expect(s.pilotMark(liveSpaces[1], theme)).toBeNull();
   });
 });

@@ -312,6 +312,13 @@ function kept(kind, argv) {
 // The same agent, model and flags as `argv`, without what resumed a conversation (and without a
 // first message), or null when argv resumed none: for a fresh start once that session is gone.
 export function freshArgv(kind, argv) {
+  const s = stripSession(kind, argv);
+  return s?.resumed ? s.out : null;
+}
+
+// argv without its session (a resume, fork, session id or first message): { out, resumed }, or null when no
+// claude/codex word is in it.
+function stripSession(kind, argv) {
   argv = argv ?? [];
   const at = agentAt(argv);
   if (at < 0) return null;
@@ -333,7 +340,7 @@ export function freshArgv(kind, argv) {
     // A word that isn't a flag or a flag's value: the session's id or a first message.
     if (a.startsWith("-")) out.push(a);
   }
-  return resumed ? out.filter((x) => x !== undefined) : null;
+  return { out: out.filter((x) => x !== undefined), resumed };
 }
 
 // How to start the chosen agent: { argv, resume } (resume: argv already continues the session).
@@ -368,6 +375,13 @@ export function argvFor(pick, old) {
 export function sessionOf(kind, path) {
   const m = kind === "claude" ? /([0-9a-f-]{36})\.jsonl$/.exec(path ?? "") : /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/.exec(path ?? "");
   return m ? m[1] : null;
+}
+
+// The same conversation again, after its agent ended (an Assistant's /exit, GitHub #1039): its own flags, model, effort
+// and speed, resuming `session`.
+export function resumeArgv(kind, argv, session) {
+  const out = stripSession(kind, argv)?.out ?? [kind];
+  return kind === "claude" ? [...out, "--resume", session] : [out[0], "resume", ...out.slice(1), session];
 }
 
 // A copy of the conversation in a new tab beside this one, through the CLI's own fork.

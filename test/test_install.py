@@ -783,6 +783,52 @@ class Install(unittest.TestCase):
         self.assertEqual(tree(self.root), self.before)
 
 
+class LayoutBrandRow(unittest.TestCase):
+    """#1032: the sidebar's top row (layout block "brand") is Shepherdr's own, with the voice call button beside Search.
+    A layout from before, which the person's sizes made their own (kept on update), gets only that block changed."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="shepherdr-test-")
+        os.makedirs(os.path.join(self.root, APP))
+        self.src = tempfile.mkdtemp(prefix="shepherdr-src-")
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+        shutil.rmtree(self.src, ignore_errors=True)
+
+    @staticmethod
+    def brand(d):
+        return next(c for c in d["children"][0]["children"] if c["id"] == "brand")
+
+    def test_the_shipped_layout_uses_shepherdrs_brand_row(self):
+        d = json.load(open(os.path.join(ROOT, "layouts", "shepherdr.json")))
+        self.assertEqual(self.brand(d)["content"]["mod"], "workspace-chrome-shepherdr")
+
+    def test_an_older_layout_the_person_resized_gets_only_its_brand_row_moved(self):
+        old = os.path.join(self.src, "s")
+        shutil.copytree(ROOT, old, ignore=shutil.ignore_patterns(".git", "node_modules"))
+        lay = os.path.join(old, "layouts", "shepherdr.json")
+        d = json.load(open(lay))
+        self.brand(d)["content"]["mod"] = "workspace-chrome"
+        with open(lay, "w") as f:
+            f.write(json.dumps(d, indent=2) + "\n")
+        run("install", "--root", self.root, "--yes", "--source", old)
+        mine = os.path.join(self.root, APP, "layouts", "shepherdr.json")
+        d = json.load(open(mine))
+        d["children"][0]["size"] = {"px": 312}
+        with open(mine, "w") as f:
+            f.write(json.dumps(d, indent=2) + "\n")
+        up = run("update", "--root", self.root, "--source", ROOT).stdout
+        d = json.load(open(mine))
+        self.assertEqual(self.brand(d)["content"]["mod"], "workspace-chrome-shepherdr")
+        self.assertEqual(d["children"][0]["size"], {"px": 312}, "the person's sidebar width stays")
+        self.assertIn("the voice call button beside Search", up)
+        self.assertTrue(os.path.exists(mine + ".new"))
+        # Again: nothing more to move.
+        again = run("update", "--root", self.root, "--source", ROOT).stdout
+        self.assertNotIn("the voice call button beside Search", again)
+
+
 class AudioTools(unittest.TestCase):
     def test_doctor_names_the_mic_and_speaker_tools_per_platform(self):
         """Linux names pw-record and pw-play; a Mac names Apple's command line tools (swiftc) instead."""

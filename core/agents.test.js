@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { argvFor, current, forkArgv, FORK_LIVE, line, liveTaskAgent, menuFor, modelSections, parseDefaults, parsePicks, pickKey, rowFor, withPin, withRecent } from "./agents.js";
+import { argvFor, current, forkArgv, FORK_LIVE, line, liveTaskAgent, menuFor, modelSections, parseDefaults, parsePicks, pickKey, resumeArgv, rowFor, withPin, withRecent } from "./agents.js";
 
 const codex = { models: Array.from({ length: 250 }, (_, i) => ({ id: `gpt-${i}`, label: `GPT ${i}`, efforts: ["low", "high"] })) };
 const menus = { claude: menuFor("claude", {}), codex: menuFor("codex", codex) };
@@ -107,4 +107,24 @@ test("#1050: forking a task's chat while its agent runs asks first; a plain chat
   // only the reviewer left
   expect(liveTaskAgent(worker, [all[1]])).toBe(null);
   expect(FORK_LIVE.verb).toBe("Fork anyway");
+});
+
+// Restart Assistant after an /exit (GitHub #1039): the same conversation, with the flags it ran with.
+test("an ended Claude Assistant resumes its own session with its own flags", () => {
+  const argv = ["claude", "--model", "opus", "--effort", "high", "--dangerously-skip-permissions"];
+  expect(resumeArgv("claude", argv, "11111111-2222-3333-4444-555555555555"))
+    .toEqual(["claude", "--model", "opus", "--effort", "high", "--dangerously-skip-permissions", "--resume", "11111111-2222-3333-4444-555555555555"]);
+});
+
+test("an ended Codex Assistant resumes with codex resume <session>", () => {
+  const out = resumeArgv("codex", ["codex", "--no-daemon", "-m", "gpt-5"], "abc");
+  expect(out[0]).toBe("codex");
+  expect(out[1]).toBe("resume");
+  expect(out.at(-1)).toBe("abc");
+  expect(out).toContain("--no-daemon");
+  expect(out).not.toContain("fork");
+});
+
+test("an Assistant that was itself resumed resumes the session it ran last, once", () => {
+  expect(resumeArgv("claude", ["claude", "--resume", "old-id", "--model", "opus"], "new-id")).toEqual(["claude", "--model", "opus", "--resume", "new-id"]);
 });
