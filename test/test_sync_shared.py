@@ -27,9 +27,12 @@ class ArtifactModsAreNotCopies(unittest.TestCase):
         top = os.path.join(self.mods, name)
         for rel in ("dirs.js", os.path.join("core", "paths.js")):
             os.makedirs(os.path.dirname(os.path.join(top, rel)), exist_ok=True)
-            data = open(os.path.join(self.mods, "artifacts", rel), "rb").read()
-            open(os.path.join(top, rel), "wb").write(data + (b"\n// older release\n" if stale else b""))
-        open(os.path.join(top, "main.js"), "w").write("export default {}\n")
+            with open(os.path.join(self.mods, "artifacts", rel), "rb") as f:
+                data = f.read()
+            with open(os.path.join(top, rel), "wb") as f:
+                f.write(data + (b"\n// older release\n" if stale else b""))
+        with open(os.path.join(top, "main.js"), "w") as f:
+            f.write("export default {}\n")
 
     def run_sync(self, *args):
         return subprocess.run([sys.executable, os.path.join(self.tmp, "bin", "sync-shared"), *args],
@@ -45,10 +48,13 @@ class ArtifactModsAreNotCopies(unittest.TestCase):
 
     def test_sync_leaves_artifact_mods_alone(self):
         self.art_mod("art-notes-1a2b", stale=True)
-        before = open(os.path.join(self.mods, "art-notes-1a2b", "dirs.js"), "rb").read()
+        dirs = os.path.join(self.mods, "art-notes-1a2b", "dirs.js")
+        with open(dirs, "rb") as f:
+            before = f.read()
         p = self.run_sync()
         self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertEqual(open(os.path.join(self.mods, "art-notes-1a2b", "dirs.js"), "rb").read(), before)
+        with open(dirs, "rb") as f:
+            self.assertEqual(f.read(), before)
 
     def test_a_real_unlisted_copy_is_still_named(self):
         top = os.path.join(self.mods, "partly")
