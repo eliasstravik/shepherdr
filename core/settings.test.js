@@ -102,6 +102,14 @@ test("upgradeReactions moves the Assistant's Reactions to every agent's", () => 
   expect(S.upgradeReactions({})).toEqual({});
 });
 
+// SHEP-225 (#981): the GitHub star card is gone; an old file's star_prompt is dropped, the rest kept
+test("an old star_prompt is dropped and the file still loads", () => {
+  const cfg = { version: 1, everywhere: { star_prompt: { asked: 1, answer: "no" }, tasks: { merge: "checks" } } };
+  expect(S.upgradeReactions(cfg)).toEqual({ version: 1, everywhere: { tasks: { merge: "checks" } } });
+  expect(S.STAR).toBeUndefined();
+  expect(S.starState).toBeUndefined();
+});
+
 // SHEP-78: Feedback offers on by default; the repo as owner/name, a github.com link made one, anything else refused.
 test("Feedback offers and the repo they file to", () => {
   expect(S.DEFAULTS.agents.feedback).toBe(true);

@@ -92,8 +92,10 @@ export const REACTIONS = { title: "Reactions", about: "Agents react to some of y
 // box: Enter sends it, Tab fills it in, typing replaces it. Off: no agent suggests, and none is shown.
 export const SUGGESTIONS = { title: "Suggested next message", about: "Your agents suggest what you'd likely say next, greyed out in the box: Enter sends it, Tab fills it in." };
 // A settings file's layers (everywhere, machines, spaces) with SHEP-42's assistant.reactions moved to agents.reactions
-// (a layer that has both keeps agents'). Changes cfg in place and returns it; true when anything moved.
+// (a layer that has both keeps agents'), and Everywhere's star_prompt dropped (the one-time GitHub star card, SHEP-79,
+// is gone: SHEP-225). Changes cfg in place and returns it.
 export function upgradeReactions(cfg) {
+  if (cfg?.everywhere && typeof cfg.everywhere === "object") delete cfg.everywhere.star_prompt;
   const layers = [cfg?.everywhere, ...Object.values(cfg?.machines ?? {}), ...Object.values(cfg?.spaces ?? {})];
   for (const l of layers) {
     const old = l && typeof l === "object" ? l.assistant : null;
@@ -103,21 +105,6 @@ export function upgradeReactions(cfg) {
     if (!Object.keys(old).length) delete l.assistant;
   }
   return cfg;
-}
-// Ask for a star (SHEP-79, herdr-task's star.py): once, ever, after things went well, an Assistant may show a small
-// card with a plain link to Shepherdr on GitHub. Everywhere only; kept as star_prompt ({ off } before it shows, then
-// { asked, answer }). Once asked it never shows again, whatever the switch says.
-export const STAR = {
-  title: "Ask for a GitHub star",
-  about: "Once, ever, after things go well, your Assistant may show a small card with a link to Shepherdr on GitHub.",
-  asked: (at, answer) => `Asked on ${new Date(at).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}${answer === "github" ? " (you opened GitHub)" : answer === "no" ? " (no thanks)" : ""}. It won't ask again.`,
-};
-// What Everywhere's star_prompt says: whether the switch is on (off: never asks) and the line under it once asked.
-export function starState(cfg) {
-  const s = cfg?.everywhere?.star_prompt;
-  const v = s && typeof s === "object" ? s : {};
-  return { on: !v.off && !v.asked, asked: Number.isFinite(v.asked) ? v.asked : null, answer: v.answer ?? null,
-    about: Number.isFinite(v.asked) ? `${STAR.about}\n${STAR.asked(v.asked, v.answer)}` : STAR.about };
 }
 // Feedback offers (herdr-task's feedback.py, SHEP-78): an agent that hits a problem in Shepherdr itself offers once to
 // file it as a GitHub issue, filed only on your yes. Kept as agents.feedback (on unless turned off) and, Everywhere's

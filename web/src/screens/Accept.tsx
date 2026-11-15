@@ -26,6 +26,8 @@ type Evidence = {
   commits?: { count: number; list: { sha: string; subject: string }[] }
   diff?: { files: number; added: number; removed: number; list: { path: string; added: number; removed: number }[] } | null
   checks?: { state: 'passed' | 'failed' | 'running' | 'none' | 'unknown'; text: string }
+  /** Accept merges its branch first (it has work to merge): the button says "Accept and merge" */
+  merges?: boolean
 }
 type Shown = { ref: string; title: string; state: string; status_text?: string; accepted_at?: number; evidence?: Evidence }
 
@@ -214,7 +216,7 @@ export function AcceptCard() {
         </>
       ) : null}
       // Accept shows while it is read too, not yet pressable; once settled only Close is left
-      buttons={settled ? null : <Primary disabled={!ready || busy} onClick={accept}>{busy ? A.ACCEPT.accepting : A.ACCEPT.accept}</Primary>}>
+      buttons={settled ? null : <Primary disabled={!ready || busy} onClick={accept}>{busy ? A.ACCEPT.accepting : A.acceptLabel(e)}</Primary>}>
       {!t ? (
         <div className="pt-2 pb-1"><p className={error ? 'text-need-fg' : 'text-fg3'} role={error ? 'alert' : undefined}>{error ?? A.ACCEPT.reading}</p></div>
       ) : proofArt ? (
