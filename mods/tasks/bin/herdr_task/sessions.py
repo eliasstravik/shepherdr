@@ -43,24 +43,33 @@ def _read_table():
     return children
 
 
+def _ordered(children):
+    """Each parent's children by pid, as pgrep -P gave them (two agents under one shell: the older first)."""
+    for v in children.values():
+        v.sort(key=int)
+    return children
+
+
 def process_children():
     """The process table's {parent: [children]}, read at most once per TABLE_FOR."""
     t = time.monotonic()
     if _table["at"] is None or t - _table["at"] > TABLE_FOR:
-        _table["children"], _table["at"] = _read_table(), t
+        _table["children"], _table["at"] = _ordered(_read_table()), t
     return _table["children"]
 
 
 def kids(pid):
-    """Every process under pid (children first, then theirs), from the shared process table."""
+    """Every process under pid, from the shared process table, in the order the pgrep walk gave: each child, then
+    everything under it, then its next sibling (session_of takes the first that names a session)."""
     children = process_children()
     out, todo, seen = [], [str(pid)], {str(pid)}
     while todo:
-        for c in children.get(todo.pop(0), []):
-            if c not in seen:
-                seen.add(c)
-                out.append(c)
-                todo.append(c)
+        p = todo.pop()
+        if p != str(pid):
+            out.append(p)
+        fresh = [c for c in children.get(p, []) if c not in seen]
+        seen.update(fresh)
+        todo.extend(reversed(fresh))
     return out
 
 

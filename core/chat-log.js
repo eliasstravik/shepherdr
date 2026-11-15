@@ -14,7 +14,7 @@ import { codexQuestions } from "./asks.js";
 export const FIND = `
 kind="$1"; pid="$2"
 procs() { if [ -r /proc/self/stat ]; then cat /proc/[0-9]*/stat 2>/dev/null | awk '{ p = $1; sub(/.*\\) /, ""); print p, $2 }'; else ps -axo pid=,ppid= 2>/dev/null; fi; }
-kids() { procs | awk -v r="$1" '{ k[$2] = k[$2] " " $1 } END { q = r; s[r] = 1; while (q != "") { n = split(q, a, " "); q = ""; for (i = 1; i <= n; i++) { m = split(k[a[i]], c, " "); for (j = 1; j <= m; j++) if (!(c[j] in s)) { s[c[j]] = 1; print c[j]; q = q " " c[j] } } } }'; }
+kids() { procs | sort -n | awk -v r="$1" 'function walk(p,  c, m, j) { m = split(k[p], c, " "); for (j = 1; j <= m; j++) if (!(c[j] in s)) { s[c[j]] = 1; print c[j]; walk(c[j]) } } { k[$2] = k[$2] " " $1 } END { s[r] = 1; walk(r) }'; }
 for p in "$pid" $(kids "$pid"); do
   if [ "$kind" = claude ]; then
     j="$HOME/.claude/sessions/$p.json"

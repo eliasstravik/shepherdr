@@ -5623,13 +5623,14 @@ class ProcessTable(unittest.TestCase):
 
     def test_macos_reads_one_ps(self):
         from types import SimpleNamespace
-        ps = "  1     0\n 10     1\n 11    10\n 12    11\n 13     1\n 99    98\n"
+        ps = "  1     0\n 13     1\n 10     1\n 11    10\n 12    11\n 99    98\n"
         ran = []
         real_isdir = os.path.isdir
         with self.mock.patch.object(self.sessions.os.path, "isdir", lambda p: False if p == "/proc/self" else real_isdir(p)), \
                 self.mock.patch.object(self.sessions, "run", lambda args, **kw: ran.append(args) or SimpleNamespace(stdout=ps)):
             self.assertEqual(self.sessions.kids(10), ["11", "12"])
-            self.assertEqual(sorted(self.sessions.kids(1)), ["10", "11", "12", "13"])
+            # as the pgrep walk gave them: a child, all under it, then its next sibling by pid
+            self.assertEqual(self.sessions.kids(1), ["10", "11", "12", "13"])
             self.assertEqual(self.sessions.kids(99), [])
         self.assertEqual(ran, [["ps", "-axo", "pid=,ppid="]])
 
