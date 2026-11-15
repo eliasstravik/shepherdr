@@ -662,6 +662,16 @@ def folder_for(s, task):
     # Its own base (--base) branches from that branch; else from what the folder has checked out.
     own = task.get("base") if task.get("base_set") else None
     base = base_ref(main, own) if own else current_base(main)
+    have = registered_worktree(main, path)
+    if have:
+        # #1023: its worktree is still there, registered with this repo, though the task no longer
+        # names it (its agent may have switched it to another branch): it goes on there, on the branch
+        # checked out now, never a failed "already exists".
+        br = have.get("branch") or branch
+        base = task.get("base") or base
+        start = task.get("start") or git(main, "merge-base", base, have.get("head") or br)[1] or have.get("head")
+        task.update(worktree=path, branch=br, base=base, start=start)
+        return path
     exists = git(main, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}")[0]
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if exists:
@@ -677,6 +687,22 @@ def folder_for(s, task):
     start = git(path, "rev-parse", "HEAD")[1] if not exists else task.get("start")
     task.update(worktree=path, branch=branch, base=task.get("base") or base, start=start)
     return path
+
+
+def registered_worktree(main, path):
+    """The worktree git has registered at path for the repo at main ({path, head, branch}: branch
+    None when detached), when its folder is there; else None."""
+    if not os.path.isdir(path):
+        return None
+    ok, out, _ = git(main, "worktree", "list", "--porcelain")
+    want = os.path.realpath(path)
+    for block in out.split("\n\n") if ok else []:
+        rows = dict((ln.split(" ", 1) + [""])[:2] for ln in block.splitlines() if ln.strip())
+        if rows.get("worktree") and os.path.realpath(rows["worktree"]) == want and "prunable" not in rows:
+            ref = rows.get("branch") or ""
+            return {"path": path, "head": rows.get("HEAD"),
+                    "branch": ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else None}
+    return None
 
 
 def launch(s, task, argv, space, message=None, parent=None, resume=None, role=None):

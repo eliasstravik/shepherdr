@@ -17,7 +17,7 @@ from .agents import (
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
 from .github import (already_merged, BEHIND, CHECKS_NEVER, checks_missing, checks_since, drop_branch, expected_checks, finish, github, merged_here, needs_approval, note_checks, pr_merged, pr_pending, pr_problem,
-                     pr_view, pr_wait, queue_entry, tidy_done, tidy_due, update_main, watch_main)
+                     pr_view, pr_wait, queue_entry, queue_merge, tidy_done, tidy_due, update_main, watch_main)
 from .launch import default_space
 from .store import locate, read_list, Store, store_files
 from .queues import machine_hold, refresh_ext, running_count, set_hold, waiting_ext, waiting_for
@@ -51,10 +51,14 @@ def holds_open(s, t):
 QUEUE_GRACE = 2 * 60000  # a pull request just queued may take a moment to show in GitHub's queue
 
 
+QUEUE_REMOVED = "GitHub's merge queue removed it"
+
+
 def queue_pass(s, t, v, report):
     """A pull request Herdr put in GitHub's merge queue that is still open: still in the queue (or set
     to join it), it stays Merging; the queue removed it (a check failed there, a conflict), it
-    needs attention, with the queue's reason (#742, #802)."""
+    needs attention, with the queue's reason (#742, #802). Removed only because its checks there
+    timed out (busy runners: #1041), it is queued again once by itself, at the same commit."""
     if v.get("state") != "OPEN":
         t.pop("merge_queued", None)
         return
@@ -65,8 +69,30 @@ def queue_pass(s, t, v, report):
         return
     t.pop("merge_queued")
     why = (q.get("reason") or "").strip().rstrip(".")
-    t["attention"], t["attention_at"] = "GitHub's merge queue removed it" + (f": {why}." if why else "."), now()
+    head = v.get("headRefOid")
+    if "timed_out" in why.lower().replace(" ", "_") and head and t.get("requeued") != head and not pr_problem(v):
+        ok, err = queue_merge(t, head)
+        if ok:
+            t["requeued"], t["merge_queued"] = head, now()
+            report.setdefault("requeued", []).append(s.ref(t))
+            return
+        why += f"; queuing it again failed: {err}"
+    t["attention"], t["attention_at"] = QUEUE_REMOVED + (f": {why}." if why else "."), now()
     report["attention"].append(t["id"])
+
+
+def back_in_queue(s, t, report):
+    """#1041: a pull request the merge queue removed, queued again by hand (gh pr merge --auto, GitHub's
+    button): Merging again, its "removed" attention gone, once GitHub shows it in the queue."""
+    if t.get("merge_queued") or not (t.get("attention") or "").startswith(QUEUE_REMOVED):
+        return
+    q = queue_entry(t)
+    if q and (q["in"] or q["auto"]):
+        t.pop("attention", None)
+        t.pop("attention_at", None)
+        t["merge_queued"] = now()
+        s.dirty = True
+        report.setdefault("requeued", []).append(s.ref(t))
 
 
 def facts(s, t, report):
@@ -98,6 +124,8 @@ def facts(s, t, report):
         problem = pr_problem(v)
         if t.get("merge_queued"):
             queue_pass(s, t, v, report)
+        else:
+            back_in_queue(s, t, report)
         if needs_approval(v):
             pr["needs_approval"] = True
         else:
@@ -134,7 +162,8 @@ def facts(s, t, report):
             # Checks that should have started never did: it doesn't merge by itself (the person's Accept still can).
             t["attention"], t["attention_at"] = CHECKS_NEVER, now()
             report["attention"].append(t["id"])
-    elif merged_here(s, t) and not at_work(s, t):
+    elif merged_here(s, t) and not at_work(s, t) and not t.get("kept_open"):
+        # #989: reopened after its work merged (kept_open, until its agent says ready): its fix goes on.
         t["merged"] = True
         finish(s, t)
         report["done"].append(t["id"])
