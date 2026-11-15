@@ -20,7 +20,7 @@ from .agents import (
     WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
-from .github import (already_merged, drop_branch, finish, gh, github, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
+from .github import (already_merged, checks_missing, checks_since, drop_branch, expected_checks, finish, gh, github, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
                      pr_pending, pr_problem, pr_view, remote_of, update_main, watch_main)
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
 from .launch import (
@@ -276,10 +276,21 @@ def begin(s, t, argv, space, parent=None):
     return launch(s, t, argv, space, brief(s, t, parent, space, argv), parent=parent)
 
 
+# #1053: an agent just launched still shows its shell for a moment (agent_running() says no): a task
+# whose agent started this recently is starting, never started a second time.
+STARTING_MS = 120000
+
+
+def just_started(t):
+    """The agent its queue or a start launched moments ago, while it is Working: its record, or None."""
+    fresh = [a for a in t.get("agents") or [] if now() - (a.get("at") or 0) < STARTING_MS]
+    return fresh[-1] if t.get("state") == "running" and fresh else None
+
+
 def cmd_start(args):
     with open_store(args) as s:
         t = s.find(args.id)
-        live = [k for k in map(detail, live_agents(s.key(t))) if agent_running(k)]
+        live = [k for k in map(detail, live_agents(s.key(t))) if agent_running(k)] or [a for a in [just_started(t)] if a]
         if live:
             raise Fail(f"{s.ref(t)} is already running ({live[0]['address']}). Use switch or resume.")
         if t["state"] == "done":
@@ -915,7 +926,7 @@ RESUME_NUDGE = ("Shepherdr resumed your session because your agent had stopped. 
 def cmd_resume(args):
     with open_store(args) as s:
         t = s.find(args.id)
-        live = [k for k in map(detail, live_agents(s.key(t))) if agent_running(k)]
+        live = [k for k in map(detail, live_agents(s.key(t))) if agent_running(k)] or [a for a in [just_started(t)] if a]
         if live:
             raise Fail(f"{s.ref(t)} still has an agent ({live[0]['address']}). Use switch to replace it.")
         if t["state"] in ("todo", "scheduled", "queued"):
@@ -995,6 +1006,10 @@ def tell(s, t, msg, args):
     Returns (terminal, started)."""
     unarchive(s, t)
     live = workers(s, t)
+    fresh = None if live else just_started(t)
+    if fresh:
+        # #1053: its agent is still starting (its brief on the way): never a second one beside it.
+        raise Fail(f"{s.ref(t)} started its agent moments ago ({fresh['address']}); send this again once it is up.")
     if live:
         # While the person writes to it, the message waits for them (news.py's held_pass).
         from .news import send_or_hold
@@ -1021,12 +1036,6 @@ MERGE_FAILED = "GitHub didn't merge it"  # a merge that failed: never in the way
 CHECKS_RUNNING = "Checks are still running."
 WAITS_APPROVAL = "It waits for an approving review."  # #743: not a problem, it merges once approved
 IN_QUEUE = "It is in GitHub's merge queue."  # #802: merging, done once GitHub merged it
-QUEUE_DAY = 24 * 3600000  # how long a base branch's merge queue is remembered
-
-
-def uses_queue(s, base):
-    q = (s.data.get("merge_queue") or {}).get(base)
-    return bool(q) and now() - q < QUEUE_DAY
 
 
 def merge_now(s, t):
@@ -1040,7 +1049,6 @@ def merge_now(s, t):
     if not v:
         return f"Couldn't reach pull request #{n} on GitHub."
     note_checks(s, t, v)
-    queue = False
     if v.get("state") != "MERGED":
         problem = pr_problem(v)
         if problem:
@@ -1049,28 +1057,25 @@ def merge_now(s, t):
             return problem
         if t.get("merge_queued"):
             return IN_QUEUE
-        if pr_pending(v):
+        # #1044: no checks yet while some will come is never "none set up": it merges once they ran.
+        if pr_pending(v) or checks_missing(v, checks_since(s, t, v), expected_checks(s, t, v.get("headRefOid"))) == "waiting":
             return CHECKS_RUNNING
         if needs_approval(v):
             t["pr"]["needs_approval"] = True
             return WAITS_APPROVAL
         t["pr"].pop("needs_approval", None)
-        base = t.get("base") or "main"
-        merge = lambda *extra: gh("pr", "merge", n, "--repo", repo, "--squash", *extra,
-                                  "--match-head-commit", v.get("headRefOid") or "")
-        queue = uses_queue(s, base)
-        ok, _, err = merge() if queue else merge("--delete-branch")
-        if not ok and not queue and "merge queue" in err:
-            # gh refuses --delete-branch on a merge queue: asked again without it, which queues it.
-            s.data.setdefault("merge_queue", {})[base] = now()
-            queue = True
-            ok, _, err = merge()
+        # #1045: never --delete-branch. gh deletes the branch right after its merge call whenever it
+        # doesn't know the base has a merge queue (a ruleset's queue, an older gh): GitHub only queued
+        # it, and a pull request whose branch goes is closed and leaves the queue. Its branch on GitHub
+        # goes below, once GitHub says it merged (drop_branch()).
+        ok, _, err = gh("pr", "merge", n, "--repo", repo, "--squash", "--match-head-commit", v.get("headRefOid") or "")
         # Merged, or only queued (or set to merge by itself)? Asked again; a one-off GitHub error can
         # also come after the merge went through.
         again = pr_view(t)
         if (again or {}).get("state") == "MERGED":
             v = again
         elif ok:
+            # Open after gh said yes: GitHub's merge queue has it (merges once the queue's checks pass).
             t["merge_queued"] = now()
             t.pop("attention", None)
             t["pr"]["checked"] = 0
@@ -1082,8 +1087,8 @@ def merge_now(s, t):
             return t["attention"]
     watch_main(s, t, ((v.get("mergeCommit") or {}).get("oid")) if v.get("state") == "MERGED" else None)
     update_main(s, t)
-    if queue or t.get("merge_queued"):
-        drop_branch(s, t)
+    # Its branch on GitHub goes now that it merged (the repo may have deleted it already: fine).
+    drop_branch(s, t)
     t["merged"] = True
     finish(s, t, even_if_busy=True)
     return None

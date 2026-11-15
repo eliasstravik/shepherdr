@@ -16,7 +16,7 @@ from .agents import (
 )
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
-from .github import (already_merged, BEHIND, drop_branch, finish, github, merged_here, needs_approval, note_checks, pr_merged, pr_pending, pr_problem,
+from .github import (already_merged, BEHIND, CHECKS_NEVER, checks_missing, checks_since, drop_branch, expected_checks, finish, github, merged_here, needs_approval, note_checks, pr_merged, pr_pending, pr_problem,
                      pr_view, pr_wait, queue_entry, tidy_done, tidy_due, update_main, watch_main)
 from .launch import default_space
 from .store import locate, read_list, Store, store_files
@@ -102,10 +102,13 @@ def facts(s, t, report):
             pr["needs_approval"] = True
         else:
             pr.pop("needs_approval", None)
-        t["_pr_fresh"] = not problem and not pr_pending(v) and not needs_approval(v)
+        since, expect = checks_since(s, t, v), expected_checks(s, t, v.get("headRefOid"))
+        # #1044, #1018: no checks yet (at its newest commit) while some will come is never "all passed".
+        missing = checks_missing(v, since, expect)
+        t["_pr_fresh"] = not problem and not pr_pending(v) and not needs_approval(v) and not missing
         # Ready only once its checks are done and GitHub knows it can merge (SHEP-175): Working till then.
         if t["state"] == "ready":
-            wait = pr_wait(v, t.get("ready_at"))
+            wait = pr_wait(v, since, expect)
             if wait != pr.get("wait"):
                 if wait:
                     pr["wait"] = wait
@@ -124,8 +127,13 @@ def facts(s, t, report):
                 t["attention"], t["attention_at"] = problem, now()
                 t.pop("merge_queued", None)
                 report["attention"].append(t["id"])
-            elif t.get("attention", "").startswith(("Checks failing", "It conflicts", "The pull request was closed", MERGE_FAILED, BEHIND)):
+            elif t.get("attention", "").startswith(("Checks failing", "It conflicts", "The pull request was closed", MERGE_FAILED, BEHIND)) \
+                    or (t.get("attention") == CHECKS_NEVER and missing != "never"):
                 t.pop("attention")
+        if t["state"] == "ready" and t.get("auto_merge") and missing == "never" and not t.get("attention"):
+            # Checks that should have started never did: it doesn't merge by itself (the person's Accept still can).
+            t["attention"], t["attention_at"] = CHECKS_NEVER, now()
+            report["attention"].append(t["id"])
     elif merged_here(s, t) and not at_work(s, t):
         t["merged"] = True
         finish(s, t)

@@ -241,7 +241,24 @@ def pr_view(task):
             v["checks_unknown"] = True
     if v.get("statusCheckRollup"):
         v["statusCheckRollup"] = latest_checks(v["statusCheckRollup"])
+    if v.get("state") == "OPEN" and not pr_pending(v) and runs_pending(pr["repo"], v.get("headRefOid")):
+        # #1044: a workflow run at its head not finished, its jobs not all shown as checks yet (a job
+        # that waits on another's needs, a run waiting for a runner): its checks still run.
+        v["runs_pending"] = True
     return v
+
+
+def runs_pending(repo, sha):
+    """GitHub Actions has a run at commit sha not finished yet (queued, waiting, in progress). False
+    when none, or GitHub couldn't say."""
+    if not sha:
+        return False
+    ok, out, _ = gh("api", f"repos/{repo}/actions/runs?head_sha={sha}&per_page=50", "-q", "[.workflow_runs[].status]")
+    try:
+        states = json.loads(out) if ok else []
+    except ValueError:
+        return False
+    return any(st != "completed" for st in states if isinstance(st, str))
 
 
 def check_rows(repo, sha):
@@ -319,6 +336,8 @@ def pr_problem(v):
 
 
 def pr_pending(v):
+    if v.get("runs_pending"):
+        return True
     return any((c.get("status") or c.get("state") or "").upper() in PENDING and not (c.get("conclusion") or "")
                for c in v.get("statusCheckRollup") or [])
 
@@ -361,18 +380,127 @@ def drop_branch(s, task):
         git(main, "push", "--quiet", remote_of(main), "--delete", task["branch"])
 
 
-# A pull request just pushed can show no checks for a few seconds before GitHub starts them: none
-# for this long after ready means none are set up (Ready then, SHEP-175).
-NO_CHECKS_MS = 30000
+# #1044, #1018: a pull request just pushed shows no checks until GitHub starts them, which can take
+# minutes. No checks yet is never "none set up" while its repo says some will come: its workflows at
+# its head run on pull requests, or GitHub blocks the merge with none there (a required check).
+NO_CHECKS_MS = 30000  # no workflow of its own: this long for checks from elsewhere (another CI's statuses)
+MAYBE_CHECKS_MS = 5 * 60000  # a workflow whose filters (paths, branches, a push) may leave it out: this long
+CHECKS_START_MS = 20 * 60000  # one that runs on it: this long, then "they never started" (no merge by itself)
 # SHEP-179: checks that can't be read here, while GitHub blocks the merge: Working this long at most, then Ready.
 UNKNOWN_CHECKS_MS = 20 * 60000
 CHECKS_RUNNING, GITHUB_LOOKS, BACK_TO_AGENT = "Checks running", "Waiting for GitHub", "Back to its agent to fix"
+CHECKS_NEVER = "Its checks never started on GitHub."
+WORKFLOWS = ".github/workflows"
+PR_EVENTS = ("pull_request", "pull_request_target")
 
 
-def pr_wait(v, since):
+def _block(lines, i):
+    """The lines nested under lines[i] (more indented), and where they end."""
+    ind = len(lines[i]) - len(lines[i].lstrip())
+    j = i + 1
+    while j < len(lines) and len(lines[j]) - len(lines[j].lstrip()) > ind:
+        j += 1
+    return lines[i + 1:j], j
+
+
+def _key(line):
+    k, colon, rest = line.strip().partition(":")
+    return (k.strip().strip("'\""), rest.strip()) if colon else (None, line.strip())
+
+
+def workflow_checks(text, base="main"):
+    """One workflow file's say on a task's pull request into base: "yes" (it runs on pull requests,
+    unfiltered or for base), "maybe" (only on a push, or filtered by paths or other branches), or None
+    (never on one). Its "on:" read by indentation (no YAML parser here)."""
+    lines = [ln.split(" #")[0].rstrip() for ln in text.splitlines()]
+    lines = [ln for ln in lines if ln.strip() and not ln.lstrip().startswith("#")]
+    for i, ln in enumerate(lines):
+        if ln[:1].isspace() or _key(ln)[0] not in ("on", "true"):
+            continue
+        inline = _key(ln)[1]
+        words = set(re.findall(r"[\w-]+", inline))
+        if inline:
+            return "yes" if words & set(PR_EVENTS) else "maybe" if "push" in words else None
+        body, _ = _block(lines, i)
+        say = None
+        j = 0
+        while j < len(body):
+            k, rest = _key(body[j].lstrip("- ").rstrip()) if body[j].lstrip().startswith("-") else _key(body[j])
+            sub, end = _block(body, j)
+            j = end if end > j else j + 1
+            if k in PR_EVENTS or rest in PR_EVENTS:
+                keys = {}
+                m = 0
+                while m < len(sub):
+                    sk, sv = _key(sub[m])
+                    inner, e = _block(sub, m)
+                    keys[sk] = sv + " " + " ".join(x.strip() for x in inner)
+                    m = e
+                if keys.keys() & {"paths", "paths-ignore", "branches-ignore"}:
+                    say = say or "maybe"
+                elif "branches" in keys and not re.search(rf"(?<![\w/.-]){re.escape(base)}(?![\w/.-])|\*", keys["branches"]):
+                    say = say or "maybe"
+                else:
+                    return "yes"
+            elif k == "push" or rest == "push":
+                say = say or "maybe"
+        return say
+    return None
+
+
+def expected_checks(s, task, sha):
+    """Whether checks will come for its pull request at commit sha, from its repo's workflows there:
+    "yes", "maybe" or None (workflow_checks()). Kept on the pull request per commit."""
+    pr = task.get("pr") or {}
+    seen = pr.get("expects") or {}
+    if sha and seen.get("sha") == sha:
+        return seen.get("is")
+    main = s.loc["folder"]
+    ref = sha if sha and git(main, "cat-file", "-e", f"{sha}^{{commit}}")[0] else (task.get("branch") or task.get("head"))
+    ok, out, _ = git(main, "ls-tree", "--name-only", f"{ref}:{WORKFLOWS}") if ref else (False, "", "")
+    found = None
+    for name in out.split() if ok else []:
+        if name.endswith((".yml", ".yaml")):
+            said = workflow_checks(git(main, "show", f"{ref}:{WORKFLOWS}/{name}")[1], task.get("base") or "main")
+            found = "yes" if "yes" in (found, said) else said or found
+    if sha:
+        pr["expects"] = {"sha": sha, "is": found}
+        s.dirty = True
+    return found
+
+
+def checks_since(s, task, v):
+    """Since when its pull request's head has been what it is (ms): when it said ready, or when a newer
+    commit was first seen there (#1018: a push after ready, its checks start again)."""
+    pr = task.get("pr") or {}
+    sha = v.get("headRefOid")
+    if sha and pr.get("head_sha") != sha:
+        pr["head_at"] = now() if pr.get("head_sha") else (task.get("ready_at") or now())
+        pr["head_sha"] = sha
+        s.dirty = True
+    return max(task.get("ready_at") or 0, pr.get("head_at") or 0)
+
+
+def checks_missing(v, since, expect=None):
+    """No checks on its pull request yet (#1044): None when it has some or none are coming; "waiting"
+    while they may still start; "never" when they should have and didn't (CHECKS_START_MS)."""
+    if v.get("statusCheckRollup"):
+        return None
+    gone = now() - (since or 0)
+    if v.get("checks_unknown"):
+        # Checks that can't be read here (SHEP-179): a moment for GitHub, then pr_wait() decides.
+        return "waiting" if gone < NO_CHECKS_MS else None
+    blocked = v.get("mergeStateStatus") == "BLOCKED" and not needs_approval(v)
+    if expect == "yes" or blocked:
+        return "waiting" if gone < CHECKS_START_MS else "never"
+    return "waiting" if gone < (MAYBE_CHECKS_MS if expect == "maybe" else NO_CHECKS_MS) else None
+
+
+def pr_wait(v, since, expect=None):
     """SHEP-175: what a Ready task's pull request (v: pr_view's answer) still waits on before the
     person has anything to do, in a few words, or None once its checks are done and GitHub knows it
-    can merge. A problem (pr_problem()) goes back to its agent: Working still, never Ready first."""
+    can merge. A problem (pr_problem()) goes back to its agent: Working still, never Ready first.
+    expect: expected_checks(); since: checks_since()."""
     if v.get("state") != "OPEN":
         return None
     if pr_problem(v):
@@ -381,7 +509,7 @@ def pr_wait(v, since):
         return CHECKS_RUNNING
     if (v.get("mergeable") or "").upper() not in ("MERGEABLE",):
         return GITHUB_LOOKS
-    if not v.get("statusCheckRollup") and now() - (since or 0) < NO_CHECKS_MS:
+    if checks_missing(v, since, expect) == "waiting":
         return CHECKS_RUNNING
     if v.get("checks_unknown") and v.get("mergeStateStatus") == "BLOCKED" and not needs_approval(v) \
             and now() - (since or 0) < UNKNOWN_CHECKS_MS:
