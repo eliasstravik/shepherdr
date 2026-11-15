@@ -62,6 +62,8 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
   `?task=<id>`. Answer the client's `watch` message with `{type:'chat',chat}` per key; `sections: []` lists places
   under their machine in the sidebar. A stub chat message can carry any Message field (brief, activity, news) to
   screenshot quiet rows without a real log.
+- Two throwaway cores on one VM: `herdr-task --on <it>` installs its bundle into the real `~/.local/bin/herdr-task` unless
+  `$HERDR_TASK_STORE/.remote/<machine>` already says `source`; write that first.
 - A cross-machine send without ssh: two throwaway cores (`HC_SESSION=a`/`b`, clean `env -i`) and
   `hc machine add --via 'sh -c' --name vmb --session b` on a; the wrap only shows with a real agent (e.g.
   `claude --model haiku`) as the target.
