@@ -726,6 +726,44 @@ class MemoryGuardRepeat(unittest.TestCase):
         self.assertEqual(len(labels), 3)
 
 
+class AcceptWhenHcCantStart(unittest.TestCase):
+    """#1057: Accept ended in a traceback at its first hc call (busy_again(t, [detail(k) for k in live_agents(...)])) when
+    hc couldn't be started. A real herdr-task accept on a throwaway store, its hc one the system can't run."""
+
+    def test_a_plain_refusal_never_a_traceback(self):
+        tmp = tempfile.mkdtemp()
+        store, repo, fakebin = (os.path.join(tmp, n) for n in ("store", "repo", "bin"))
+        os.makedirs(fakebin)
+        subprocess.run(["git", "init", "-q", repo], check=True)
+        subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+        hc = os.path.join(fakebin, "hc")
+        with open(hc, "w") as f:
+            f.write('#!/bin/sh\necho \'{"terminals": []}\'\n')
+        os.chmod(hc, 0o755)
+        # on this run's throwaway HOME herdr-task refuses hc (base.not_real): this hc is a fake, so let it
+        b = ("import sys, runpy; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]);"
+             "import herdr_task.base as base; base.not_real = lambda: None;"
+             "sys.argv = sys.argv[2:]; runpy.run_path(sys.argv[0], run_name='__main__')")
+        env = {**os.environ, "HERDR_TASK_STORE": store, "PATH": fakebin + os.pathsep + "/usr/bin:/bin"}
+        ht = lambda *a: subprocess.run([sys.executable, "-c", b, BIN, os.path.join(BIN, "herdr-task"), *a, "--folder", repo],
+                                       capture_output=True, text=True, env=env, cwd=repo)
+        self.assertEqual(ht("add", "Try accept", "--here").returncode, 0)
+        [path] = [os.path.join(store, f) for f in os.listdir(store) if f.endswith(".json")]
+        with open(path) as f:
+            d = json.load(f)
+        d["tasks"][0].update(state="ready", ready_at=1, ready_turns={})
+        with open(path, "w") as f:
+            json.dump(d, f)
+        with open(hc, "w") as f:
+            f.write("echo no first line, so the system can't start it\n")  # Exec format error
+        p = ht("accept", "1")
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("herdr-task: couldn't start hc", p.stderr)
+        with open(path) as f:
+            self.assertEqual(json.load(f)["tasks"][0]["state"], "ready")
+
+
 class BackToWork(unittest.TestCase):
     """A Ready task that goes back to work is Working again (busy_again(), back_to_work()), and
     Accept retries a merge that failed once. In memory: hc, git and gh are never run."""

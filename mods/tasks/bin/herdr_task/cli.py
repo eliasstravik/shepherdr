@@ -472,9 +472,19 @@ def main():
     try:
         args.fn(args)
     except Fail as e:
-        if getattr(args, "json", False):
-            print(json.dumps({"error": str(e)}))
-        else:
-            print(f"herdr-task: {e}", file=sys.stderr)
-        return 1
+        return _refused(args, str(e))
+    except OSError as e:
+        # #1057: a program it runs (hc, git, gh) that couldn't be started (the system refusing a new process
+        # under memory pressure, hc missing or broken) ended Accept with a traceback at its first hc call
+        # (busy_again's). Said plainly instead (a store open when it failed is left as it was).
+        what = os.path.basename(str(e.filename)) if e.filename else "a program it needs"
+        return _refused(args, f"couldn't start {what} ({e.strerror or e}). Try again in a moment.")
     return 0
+
+
+def _refused(args, why):
+    if getattr(args, "json", False):
+        print(json.dumps({"error": why}))
+    else:
+        print(f"herdr-task: {why}", file=sys.stderr)
+    return 1
