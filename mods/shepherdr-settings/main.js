@@ -23,6 +23,7 @@ import * as models from "./settings.js";
 import { layoutSection } from "./layout.js";
 import { manifest } from "./addons.js";
 import { note } from "./usage.js";
+import { over } from "./over.js";
 import { secretsInit, secretsSection } from "./secrets-section.js";
 import { baseInit, baseRow } from "./base-branch.js";
 import { branchInit, branchRow } from "./branch-names.js";
@@ -620,8 +621,7 @@ export default class ShepherdrSettings extends View {
         .child(picker))
       .child(div().text_size(TEXT.label).line_height("17px").text_color(t.dim)
         .child(this.scope ? LEVEL.space(where) : LEVEL.everywhere))
-      .when(Boolean(folder), (el) => el.child(div().truncate().font_family("JetBrains Mono").text_size(TEXT.id).text_color(t.dim).child(folder)))
-      .when(this.levelOpen, (el) => el.child(this.levelMenu(t)));
+      .when(Boolean(folder), (el) => el.child(div().truncate().font_family("JetBrains Mono").text_size(TEXT.id).text_color(t.dim).child(folder)));
   }
 
   // Every space the picker offers, by machine (this computer's first): [{ id, name, machine }].
@@ -706,8 +706,7 @@ export default class ShepherdrSettings extends View {
       .child(div().relative().flex_1().min_w(0).h_full()
         .child(div().id("sh-body").size_full().overflow_y_scroll()
           .child(div().px(28).py(22)
-            .child(this.levelBar(t))
-            .child(body)))
+            .child(over(this.levelBar(t), [body], this.levelOpen && SECTIONS.find((sc) => sc.id === this.section)?.space ? this.levelMenu(t) : null))))
         .child(Scrollbar.vertical("sh-body").absolute().inset_0()));
     return div().id("sh-root").size_full().flex().items_center().justify_center().on_click(() => this.close()).child(card);
   }
