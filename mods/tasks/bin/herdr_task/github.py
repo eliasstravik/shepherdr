@@ -56,10 +56,10 @@ def pr_open(s, task, repo, summary=None):
     has, tip, _ = git(wt, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}")
     seen, there, _ = git(wt, "ls-remote", remote, f"refs/heads/{to}")
     if not (has and tip and seen and there.split()[:1] == [tip]):
-        ok, _, err = git(wt, "push", "--force-with-lease", "-u", remote, br) if to == br else \
+        ok, out, err = git(wt, "push", "--force-with-lease", "-u", remote, br) if to == br else \
             git(wt, "push", remote, f"{br}:refs/heads/{to}")
         if not ok:
-            raise Fail(f"Couldn't push {br}" + (f" to {to}" if to != br else "") + f": {err}")
+            raise Fail(f"Couldn't push {br}" + (f" to {to}" if to != br else "") + f": {push_error(out, err)}")
     pr = task.get("pr") or {}
     if pr.get("number"):
         ok, out, _ = gh("pr", "view", str(pr["number"]), "--repo", repo, "--json", "state", "-q", ".state")
@@ -88,6 +88,13 @@ def pr_open(s, task, repo, summary=None):
     url = out.split()[-1]
     task["pr"] = {"number": int(url.rstrip("/").split("/")[-1]), "url": url, "repo": repo}
     return task["pr"]
+
+
+def push_error(out, err, lines=15):
+    """What a failed push said, for ready's refusal (#963): a pre-push hook's own words (what failed,
+    where its log is) often go to stdout, which git leaves there; both, its last lines only."""
+    said = [x for x in (out + "\n" + err).splitlines() if x.strip()]
+    return "\n".join(said[-lines:]) or "git push failed"
 
 
 def pr_title(s, task):

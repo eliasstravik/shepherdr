@@ -1166,6 +1166,33 @@ class BackToWork(unittest.TestCase):
         self.assertIn("#704", str(e.exception))
         self.assertNotIn(("pr", "create"), calls)
 
+    def test_a_failed_push_says_what_its_hook_said(self):
+        """#963: a pre-push hook's own words (what failed, where its log is) went to stdout, and ready showed only
+        git's "failed to push some refs". A real repo and remote, gh faked."""
+        import herdr_task.github as github
+        d = tempfile.mkdtemp()
+        subprocess.run(["git", "init", "-q", "--bare", os.path.join(d, "remote.git")], check=True)
+        wt = os.path.join(d, "wt")
+        subprocess.run(["git", "init", "-q", "-b", "main", wt], check=True)
+        for c in (["remote", "add", "origin", os.path.join(d, "remote.git")],
+                  ["-c", "user.email=a@example.com", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "x"],
+                  ["checkout", "-q", "-b", "b"]):
+            subprocess.run(["git", "-C", wt, *c], check=True)
+        hook = os.path.join(wt, ".git", "hooks", "pre-push")
+        with open(hook, "w") as f:
+            f.write('#!/bin/sh\necho "typecheck: 3 errors in src/app.ts"\necho "full log: /tmp/typecheck.log" >&2\nexit 1\n')
+        os.chmod(hook, 0o755)
+        t = self.ready(mode="worktree", worktree=wt, branch="b")
+        with self.mock.patch.object(github, "gh", lambda *a, **k: (False, "", "")), \
+                self.mock.patch.dict(self.store.loc, {"folder": wt}):
+            with self.assertRaises(self.commands.Fail) as e:
+                github.pr_open(self.store, t, "o/r")
+        said = str(e.exception)
+        self.assertIn("typecheck: 3 errors in src/app.ts", said)
+        self.assertIn("full log: /tmp/typecheck.log", said)
+        self.assertIn("failed to push some refs", said)
+        self.assertEqual(github.push_error("\n".join(map(str, range(30))), ""), "\n".join(map(str, range(15, 30))))
+
     def test_ready_opens_one_when_there_is_none(self):
         github, calls = self.github_has([])
         t = self.ready(mode="worktree", worktree="/w", branch="b")
