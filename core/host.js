@@ -205,6 +205,12 @@ export const SERVE = {
   verb: "Move it",
 };
 
+/** A Kept on / Serve from pick as the service acts on it: null for this machine (its own name, "here" or nothing),
+ * else the other machine's name. The pages send "here" for "This computer" (#1042). */
+export function pickedMachine(pick, me) {
+  return typeof pick === "string" && pick && pick !== "here" && pick !== me ? pick : null;
+}
+
 /** A machine's line in the picker: "mac-mini · macOS", "vm-demo · Linux · Offline". */
 export function serveChoice(m) {
   const os = m.os === "darwin" ? "macOS" : m.os === "linux" ? "Linux" : m.os || null;

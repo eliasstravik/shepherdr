@@ -737,7 +737,12 @@ async function act(snap: Snapshot, where: Where, io: VoiceIO, p: any, id: string
     switch (action) {
       case "accept":
         if (t.status !== "ready") return fail(`${spoken(t.id)} isn't ready to accept: it is ${STATUS[t.status] ?? t.status}.`);
-        ask = `Accept ${n}? That merges it.`; body = { type: "accept", task: t.id }; said = `Accepted ${spoken(t.id)}: it merges now.`; break;
+      {
+        // as the Accept button (SHEP-225): it merges only a task with a branch or pull request of its own; else it's just done
+        const merges = Boolean(t.branch || t.pr);
+        ask = merges ? `Accept ${n}? That merges it.` : `Accept ${n}? That marks it done; nothing merges.`; body = { type: "accept", task: t.id };
+        said = merges ? `Accepted ${spoken(t.id)}: it merges now.` : `Accepted ${spoken(t.id)}: done.`; break;
+      }
       case "start": ask = `Start ${n} now?`; body = { type: "schedule", chat, now: true }; said = `${spoken(t.id)} starts now.`; break;
       case "schedule":
         if (!value) return fail("When? Say a time, like in 2 hours or tomorrow at 9.");

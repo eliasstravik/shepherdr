@@ -32,6 +32,7 @@ import { RANK, STATUS, RANK_OF, ORDER, GROUP_BY, groupBy, groupNow, machineOf, m
   queueReason, reportOf as report, secondLine, leftOf, order, matches, day, ago, capital, short, autoWhere, fromLine, inSpace, holdingItems } from "./core/tasks.js";
 import { READ_LISTS, taskLists } from "./core/tasklists.js";
 import { SH } from "./core/paths.js";
+import { settle } from "./core/pending.js";
 import { dirs } from "./dirs.js";
 import { TEXT, H, RADIUS, red, amber } from "./ui.js";
 
@@ -68,7 +69,8 @@ const placeName = (list) => spaceOf(list).name;
 // herdr-task, here or (through its --on) on the machine that holds the folder. Resolves with its
 // JSON output; rejects with its error.
 async function cli(machine, [command, ...args], folder) {
-  const r = await exec(CLI(), [...(machine ? ["--on", machine] : []), command, "--json", "--folder", folder, ...args]);
+  // still running there after a slow or dropped link: its real result, followed (core/pending.js)
+  const r = await settle((a) => exec(CLI(), a), await exec(CLI(), [...(machine ? ["--on", machine] : []), command, "--json", "--folder", folder, ...args]));
   let out = null;
   try { out = JSON.parse(r.stdout || "null"); } catch {}
   if (r.code !== 0 || !out || out.error) throw new Error(out?.error || r.stderr?.trim() || "herdr-task failed");

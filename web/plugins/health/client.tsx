@@ -10,6 +10,7 @@ import { sectionOf } from '@client/Settings.tsx'
 import { CogIcon, Floating, ic, MonitorIcon, NextIcon, ServerIcon, useDismiss } from '@client/ui.tsx'
 import type { Machine, MachineStats } from '@shared/types.ts'
 import * as MC from '@core/machines.js'
+import { FindMachines } from './find.tsx'
 
 type Level = 'ok' | 'busy' | 'over'
 interface Meter { name: string; pct: number; level: Level; detail: string }
@@ -243,5 +244,8 @@ function MachinePopup({ m, onClose }: { m: Machine; onClose: () => void }) {
 // 3.0 shows a machine's health in the sidebar (MachineMeter, HealthDot), not over a space's chat
 export default definePlugin({
   name: 'health',
-  setup() {},
+  setup(reg) {
+    // Settings › Machines: Find machines, the only way Shepherdr ever tries hosts you didn't link (#967)
+    reg.settingsPages.push({ name: 'Find machines', into: 'Machines', Icon: ServerIcon, when: () => true, View: FindMachines })
+  },
 })

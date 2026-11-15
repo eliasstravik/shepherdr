@@ -8,6 +8,15 @@ const list = (tasks, more = {}) => ({ slug: "dev-x", prefix: "X", folder: "/f", 
 const at = (task, live = [], loaded = true) => place(list([task]), task, { live, loaded, now: NOW });
 
 describe("a task's status (as herdr-task's task_status)", () => {
+  test("#1040: out of review rounds needs you at once, also after a conflict its agent was on", () => {
+    const task = { id: 1, state: "running", started: NOW - 3600000, attention: "Conflicts with main", attention_at: NOW - 600000,
+      progress: { text: "Merging main in", set: NOW - 300000 } };
+    const idle = [{ address: "t1", status: "idle", since: NOW - 5000 }];
+    expect(at(task, idle).section).toBe("working");
+    const out = at({ ...task, review_out: NOW - 5000 }, idle);
+    expect([out.section, out.needs, out.why]).toEqual(["needs", "reply", "Out of review rounds"]);
+    expect(at({ ...task, review_out: NOW - 5000 }, [{ ...idle[0], status: "working" }]).section).toBe("working");
+  });
   test("todo, queued and done come from the record", () => {
     for (const s of ["todo", "queued", "done"]) expect(at({ id: 1, state: s }).section).toBe(s);
   });

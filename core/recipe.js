@@ -128,6 +128,28 @@ export function formReply(b, values) {
   return [b.title ?? b.submit ?? "Form", ...lines].join("\n");
 }
 
+// Markdown cut at its fenced code blocks (``` or ~~~, indented too, as in a list item), in order: { md } for the
+// words between, { code, lang } for each block, its lines without the fence's indent. The window draws each block in
+// its own box with a Copy button (recipe-view.js), so a command in a text, list item or callout copies whole. An
+// unclosed fence runs to the end, as CommonMark has it. Blank words between blocks are left out.
+export function mdParts(md) {
+  const out = [], words = [];
+  const lines = String(md ?? "").split("\n");
+  const flush = () => { const w = words.join("\n"); if (w.trim()) out.push({ md: w }); words.length = 0; };
+  for (let i = 0; i < lines.length; i++) {
+    const open = /^( *)(`{3,}|~{3,})\s*([^`\s]*)[^`]*$/.exec(lines[i]);
+    if (!open) { words.push(lines[i]); continue; }
+    const [, indent, fence, lang] = open;
+    const close = new RegExp(`^ *${fence[0]}{${fence.length},}\\s*$`);
+    const body = [];
+    for (i++; i < lines.length && !close.test(lines[i]); i++) body.push(lines[i].replace(new RegExp(`^ {0,${indent.length}}`), ""));
+    flush();
+    out.push({ code: body.join("\n"), lang });
+  }
+  flush();
+  return out;
+}
+
 // A chart's numbers as shapes, for both renderers: bars (x, y, w, h as 0-1 of the plot), a line's points, or a pie's
 // slices (start and end angles, 0 at twelve o'clock, clockwise, in radians).
 export function chartShapes(b) {

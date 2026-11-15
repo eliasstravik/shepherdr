@@ -150,6 +150,13 @@ def task_status(task, live):
         return "needs", "asks", REASONS["question"]
     if trust_asked(live):
         return "needs", "asks", REASONS["trust"]
+    # Out of review rounds (ready refused, review_out): its agent was told to end its turn and wait for its
+    # Assistant's review-more, so once it's quiet that is the Assistant's at once (#784). #1040: a problem it had
+    # been on (a conflict it fixed by merging the base) kept it Working while its status line was fresh, and only
+    # the 20-minute stall woke the Assistant. As core/tasks.js place().
+    if st == "running" and task.get("review_out") and live and not any(
+            status_word(k) == "working" and (k.get("labels") or {}).get("herdr.role") != "reviewer" for k in live):
+        return "needs", "reply", OUT_OF_ROUNDS
     if busy_again(task, live):
         return "working", None, WORKING_AGAIN
     if task.get("attention"):
@@ -188,6 +195,7 @@ def task_status(task, live):
 
 
 STOPPED = "Agent stopped"
+OUT_OF_ROUNDS = "Out of review rounds"
 
 
 # ---- Ready only when the person must act (SHEP-175) ----------------------------------------------

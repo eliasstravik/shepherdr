@@ -2,14 +2,20 @@
 looks after the machine, as Shepherdr's home coordinator: its disk, load and memory (HERD-40's
 health sample), processes stuck busy, and worktrees finished tasks left behind. Herdr tells it in
 tagged lines only what changed (a meter crossing its alert limit or coming back, a process newly
-stuck, worktrees newly left over); it tells the person only what matters. The main machine's home
-Assistant (where the window lives) also keeps every machine's overview: every space's task news,
-one line each, and each home machine's health news.
+stuck, worktrees newly left over); it tells the person only what matters. The lead machine's home
+Assistant also keeps every machine's overview: every space's task news, one line each, and each
+home machine's health news.
 
 Opt-in per machine: Shepherdr settings machines[<name> | "local"].home (true / false); unset, on
-for this computer only. The main machine's scheduler does all of it (home_pass): it reads each
-home machine (`herdr-task home report` there, over its herdr-core link) once a minute, judges,
-and sends. Nothing is installed or run on another machine beyond herdr-task itself.
+for this computer only. Each machine with a window runs it (home_pass): it reads itself and each
+machine it links to (`herdr-task home report` there, over its herdr-core link) once a minute,
+judges, and sends. Nothing is installed or run on another machine beyond herdr-task itself.
+
+The lead (#1029): with windows on several machines, one keeps the overview, the hub, the one the
+others link to (lead_of). Each window still tells its own machine's home Assistant its own health;
+what the lead reads anyway (itself and the machines it links to) only the lead sends. A window the
+lead doesn't link to passes its own news to the lead's home Assistant over its own link. A lone
+window, or windows that don't link to each other, each lead as before.
 """
 
 import json
@@ -33,6 +39,7 @@ STUCK_AFTER_S = 30 * 60        # busy since at least this long ...
 STUCK_SHARE = 0.9              # ... at this share of one core all along: stuck
 LEFTOVER_MS = 24 * 3600000     # a finished task's worktree this long after it finished: left over
 KEEP_MS = 6 * 3600000          # lines nobody could be told (no live home Assistant) this long: dropped
+LEAD_KEEP_MS = 10 * 60000      # a lead that misses a round still leads this long (one slow answer never doubles the overview)
 
 
 def main_here():
@@ -154,6 +161,39 @@ def leftover_worktrees():
     return out
 
 
+def _core_file(name):
+    from .machines import _core_dir
+    try:
+        with open(os.path.join(_core_dir(), name)) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def link_facts():
+    """What picks the lead (lead_of): {core (this machine's herdr-core id), overview (a window with
+    Home on here), links (the core ids it reads: its connected herdr-core links), linked_by (how
+    many machines' cores link to this one)}."""
+    from .machines import connected_machines
+    core, peers, cfg = _core_file("core.json"), _core_file("peers.json"), read_settings()
+    return {"core": core.get("id") if isinstance(core, dict) else None, "core_name": core.get("name") if isinstance(core, dict) else None,
+            "overview": main_here() and home_on(cfg, cfg.get("here") or LOCAL_MACHINE),
+            "links": sorted(m["id"] for m in connected_machines() if m.get("id") and m.get("state") == "connected"),
+            "linked_by": len(peers) if isinstance(peers, dict) else 0}
+
+
+def lead_of(me, others):
+    """Which window keeps the overview, as this one sees it: None (this one) or the key of the one
+    it gives way to. me/others: link_facts() of this machine and of the machines it reads. Another
+    window leads over this one when it doesn't link back (this one links to it: the hub), or, both
+    linking to each other, when more machines link to it (then the lower core id): both sides
+    agree. Windows that don't link to each other each lead."""
+    rank = lambda f: (-(f.get("linked_by") or 0), f.get("core") or "")
+    over = [k for k, f in others.items()
+            if f.get("overview") and (me.get("core") not in (f.get("links") or []) or rank(f) < rank(me))]
+    return min(over, key=lambda k: rank(others[k])) if over else None
+
+
 def assistant_in(space):
     """The space's live Assistant here, or None."""
     from .launch import coordinator_in
@@ -165,9 +205,18 @@ def local_report(candidates=None, since=None, news_only=False):
     news}. candidates: [[space id, folder]] of this machine's spaces; the first at the home folder
     is the home space. since: news log lines after this time (ms); None: none."""
     from .machine import sample
-    out = {"home": HOME, "at": now()}
+    out = {"home": HOME, "at": now(), **link_facts()}
     real = os.path.realpath(HOME)
     space = next((sid for sid, folder in candidates or [] if folder and os.path.realpath(folder) == real), None)
+    if not space and candidates is not None and out["overview"]:
+        # A window here knows its own home space even when the asking window doesn't list it (#1029: the lead's).
+        r = run(["herdr-app", "ls"])
+        try:
+            own = json.loads(r.stdout).get("spaces") or [] if r.returncode == 0 else []
+        except ValueError:
+            own = []
+        space = next((s["id"].split("/")[-1] for s in own if not s.get("machine") and s.get("folder")
+                      and os.path.realpath(s["folder"]) == real), None)
     if space:
         out["space"], out["assistant"] = space, assistant_in(space)
     if since is not None:
@@ -184,7 +233,7 @@ def local_report(candidates=None, since=None, news_only=False):
 
 
 def log_news(entries):
-    """news_pass's sent batches go here too (at most NEWSLOG_KEEP lines): the main machine's home
+    """news_pass's sent batches go here too (at most NEWSLOG_KEEP lines): the lead machine's home
     Assistant reads every machine's (overview)."""
     try:
         with open(NEWSLOG) as f:
@@ -321,10 +370,10 @@ def deliver(to, lines, quiet=None, idle_only=False):
 
 
 def home_pass(report, force=False, only=None, to=None):
-    """The main machine's round, at most every EVERY_MS: each home machine's health news to its own
-    home Assistant; every machine's task news and each home machine's health news, one line each,
-    to the main machine's home Assistant. only: just this machine ("local" or a name; a test).
-    to: send everything to this address instead (a test's own Assistant)."""
+    """A window's round, at most every EVERY_MS: each home machine's health news to its own home
+    Assistant; every machine's task news and each home machine's health news, one line each, to
+    the lead's home Assistant (lead_of; module doc). only: just this machine ("local" or a name; a
+    test). to: send everything to this address instead (a test's own Assistant)."""
     if not main_here() and not to:
         return
     try:
@@ -342,7 +391,9 @@ def home_pass(report, force=False, only=None, to=None):
     except ValueError:
         spaces = []
     from .machines import connected_machines
-    names = [None] + [m["name"] for m in connected_machines() if m.get("state") == "connected"]
+    linked = [m for m in connected_machines() if m.get("state") == "connected"]
+    names = [None] + [m["name"] for m in linked]
+    ids = {m["name"]: m.get("id") for m in linked}
     key = lambda m: m or LOCAL_MACHINE
     if only:
         names = [m for m in names if key(m) == only]
@@ -373,7 +424,30 @@ def home_pass(report, force=False, only=None, to=None):
         t.join()
     outbox = state.setdefault("outbox", [])
     main_rep = reports.get(LOCAL_MACHINE) or {}
-    main_to = to or main_rep.get("assistant")
+    # Who leads (#1029): what each machine said of its links, this round or (a missed answer) lately.
+    facts = {}
+    for m in names:
+        k = key(m)
+        st, rep = machines.get(k), reports.get(k)
+        if st is None:
+            continue
+        if rep and "linked_by" in rep:
+            st["facts"] = {**{x: rep.get(x) for x in ("core", "core_name", "overview", "links", "linked_by")}, "at": now()}
+        f = st.get("facts")
+        if f and now() - f.get("at", 0) < LEAD_KEEP_MS:
+            facts[k] = f
+    me = facts.get(LOCAL_MACHINE) or {}
+    lead = None if to else lead_of(me, {k: f for k, f in facts.items() if k != LOCAL_MACHINE})
+    state["lead"] = lead
+    lead_links = set((facts.get(lead) or {}).get("links") or [])
+    core_of = lambda m: me.get("core") if m is None else ids.get(m) or (facts.get(m) or {}).get("core")
+    # What this window tells the overview: all it reads when it leads, else only what the lead doesn't read.
+    mine = lambda m: lead is None or (key(m) != lead and core_of(m) not in lead_links)
+    # Its own health to a machine's home Assistant: a window tells its own; the lead, or else whoever reads it, the rest.
+    tells_home = lambda m: m is None or (not (facts.get(key(m)) or {}).get("overview") and mine(m))
+    over_to = "home:local" if lead is None else f"home:{lead}"
+    me_name = None if lead is None else me.get("core_name") or os.uname().nodename
+    named = lambda m: m or me_name
     for m in names:
         k = key(m)
         rep = reports.get(k)
@@ -382,34 +456,38 @@ def home_pass(report, force=False, only=None, to=None):
         st = machines[k]
         if rep.get("news"):
             st["news_at"] = max(x.get("at", 0) for x in rep["news"])
+        st["assistant"] = rep.get("assistant") and (f"{m}/{rep['assistant']}" if m else rep["assistant"])
         if not home_on(cfg, k) or "health" not in rep:
             continue
         st["space"] = rep.get("space")
-        st["assistant"] = rep.get("assistant") and (f"{m}/{rep['assistant']}" if m else rep["assistant"])
         for line, words in health_lines(m, rep, st):
-            outbox.append({"to": f"home:{k}", "line": line, "at": now()})
-            if m and main_on:
-                outbox.append({"to": "home:local", "line": tagged("herdr-overview", f"Machine {m}: {words}", machine=m, event="health"), "at": now()})
+            if tells_home(m):
+                outbox.append({"to": f"home:{k}", "line": line, "at": now()})
+            if named(m) and main_on and mine(m):
+                outbox.append({"to": over_to, "line": tagged("herdr-overview", f"Machine {named(m)}: {words}", machine=named(m), event="health"), "at": now()})
+    over_addr = to or (main_rep.get("assistant") if lead is None else machines.get(lead, {}).get("assistant"))
     if main_on:
         names_by_id = {s["id"]: s.get("name") for s in spaces}
         for m in names:
+            if not mine(m):
+                continue  # the lead reads it itself
             for x in (reports.get(key(m)) or {}).get("news") or []:
                 to_there = f"{m}/{x['to']}" if m and x.get("to") else x.get("to")
-                if to_there and to_there == main_to:
+                if to_there and to_there == over_addr:
                     continue  # its own space's news: it had them
                 sid = f"{m}/{x.get('space')}" if m else x.get("space")
                 space = names_by_id.get(sid) or x.get("folder") or "?"
-                place = f"{m} · {space}" if m else space
+                place = f"{named(m)} · {space}" if named(m) else space
                 for line in x.get("lines") or []:
                     mt = re.match(r'<herdr-news task="([^"]*)" event="([^"]*)">(.*)</herdr-news>$', line)
                     task, event, text = mt.groups() if mt else (None, None, re.sub(r"<[^>]+>", "", line))
                     text = text.split(" · For AGENTS.md:")[0]  # the space's own Assistant decides that
-                    outbox.append({"to": "home:local", "line": tagged("herdr-overview", f"{place}: {text}", machine=m or "",
-                                                                                space=space, task=task, event=event), "at": now()})
+                    outbox.append({"to": over_to, "line": tagged("herdr-overview", f"{place}: {text}", machine=named(m) or "",
+                                                                               space=space, task=task, event=event), "at": now()})
     # Each line waits for its home's Assistant (as seen this round): one that isn't live yet, or
     # whose machine didn't answer, gets it on a later round.
     homes = {f"home:{k}": to or machines[k].get("assistant") for k in reports if k in machines}
-    homes["home:local"] = main_to
+    homes["home:local"] = to or main_rep.get("assistant")
     quiet = state.setdefault("quiet", {})
     sent = report.setdefault("home", [])
     outbox[:] = [x for x in outbox if now() - x["at"] < KEEP_MS]
@@ -466,13 +544,19 @@ def cmd_home(args):
     cwd = (me or {}).get("cwd") or os.getcwd()
     home = home_on(cfg, here) and os.path.realpath(cwd) == os.path.realpath(HOME)
     rep = local_report()
-    out = {"home": home, "main": home and main_here(), "machine": None if here == LOCAL_MACHINE else here,
+    try:
+        with open(HOME_STATE) as f:
+            lead = json.load(f).get("lead")
+    except (OSError, ValueError):
+        lead = None
+    out = {"home": home, "main": home and main_here() and not lead, "lead": lead, "machine": None if here == LOCAL_MACHINE else here,
            "on": home_on(cfg, here), "health": rep["health"], "top": rep["top"], "stuck": rep["stuck"], "worktrees": rep["worktrees"]}
     if args.json:
         print(json.dumps(out))
         return
-    role = ("the main machine's home Assistant: this machine, plus every machine's overview" if out["main"]
-            else "this machine's home Assistant" if home else
+    role = ("the lead machine's home Assistant: this machine, plus every machine's overview" if out["main"]
+            else f"this machine's home Assistant ({lead} keeps the overview)" if home and lead else
+            "this machine's home Assistant" if home else
             "not a home Assistant" + ("" if out["on"] else " (Home Assistant is off for this machine in Settings)"))
     print(f"You are {role}.")
     print(f"Now: {meters_words(rep['health'])}")

@@ -1,6 +1,6 @@
 // Asks before something destructive, e.g. "Close space?" (Herdr's confirm, ours: the app's one
 // dialog footer). Opened as a dialog with props { title, detail, verb (the button, e.g. "Close
-// space"), danger (default true), command: { name, args } }. The button says what it does, never
+// space"), cancel (its other button, default "Cancel"), danger (default true), command: { name, args } }. The button says what it does, never
 // "Confirm". On a destructive ask Enter does nothing (only a click runs it); otherwise Enter runs
 // it. Esc cancels. openConfirm sizes it.
 
@@ -43,7 +43,7 @@ export default class Confirm extends View {
       .child(div().text_size(TEXT.title).font_semibold().text_color(t.foreground).child(p.title ?? "Are you sure?"))
       .child(div().flex_1().min_h(0).text_color(t.muted).child(p.detail ?? ""))
       .child(div().h(8).flex_none())
-      .child(dialogFooter({ onCancel: () => closeOverlay(props().overlay),
+      .child(dialogFooter({ onCancel: () => closeOverlay(props().overlay), cancelLabel: p.cancel ?? "Cancel",
         primary: { id: "yes", label: p.verb ?? "OK", onClick: () => this.yes() } }));
   }
 }

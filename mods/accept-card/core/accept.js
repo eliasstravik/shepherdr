@@ -24,9 +24,15 @@ export const ACCEPT = {
   cancel: "Cancel",
   close: "Close",
   accept: "Accept",
+  acceptMerge: "Accept and merge",
   accepting: "Accepting…",
   noTask: "No task to accept.",
 };
+
+// The Accept button's words (SHEP-225, #1046): what pressing it will do. herdr-task's evidence says `merges` when its
+// branch has work to merge (whatever the Merge setting, Accept merges that first); plain Accept when it only marks the
+// task done (it worked in the folder itself, or nothing is left to merge), and while the card is still being read.
+export const acceptLabel = (e) => (e?.merges ? ACCEPT.acceptMerge : ACCEPT.accept);
 
 export const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 // "3 commits", "12 files changed", "And 4 more"

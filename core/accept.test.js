@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ACCEPT, words, readable, whereNow, commitsLine, filesLine, moreLine, proofTitle } from "./accept.js";
+import { ACCEPT, acceptLabel, words, readable, whereNow, commitsLine, filesLine, moreLine, proofTitle } from "./accept.js";
 
 const root = join(import.meta.dir, "..");
 const read = (p) => readFileSync(join(root, p), "utf8");
@@ -26,6 +26,16 @@ test("the card's words", () => {
   expect(whereNow({ state: "work", status_text: "Working" })).toBe("Not ready right now: it's in Working.");
   expect([commitsLine(1), filesLine(3), moreLine(2)]).toEqual(["1 commit", "3 files changed", "And 2 more"]);
   expect(proofTitle("HERD-4: Login works")).toBe("Login works");
+});
+
+// SHEP-225 (#1046): the button says what pressing it does
+test("Accept says whether it merges", () => {
+  expect(acceptLabel({ merges: true })).toBe("Accept and merge");
+  expect(acceptLabel({ merges: false })).toBe("Accept");
+  expect(acceptLabel(undefined)).toBe("Accept"); // still being read
+  const mod = read("mods/accept-card/main.js"), web = read("web/src/screens/Accept.tsx");
+  expect(mod).toContain("acceptLabel(e)");
+  expect(web).toContain("A.acceptLabel(e)");
 });
 
 test("the window's card and the web's read their words from here, not their own", () => {

@@ -1,6 +1,6 @@
 // SHEP-79: a button may carry a plain https link (href), alone or with a reply; buttons sit side by side
 import { expect, test } from "bun:test";
-import { problems, blockName, preview, mediaKind } from "./recipe.js";
+import { problems, blockName, preview, mediaKind, mdParts } from "./recipe.js";
 
 const one = (b) => problems({ recipe: 1, blocks: [b] });
 
@@ -68,4 +68,20 @@ test("preview: a clip's poster is its still; a clip with none is shown at its fi
   const pair = preview({ recipe: 1, blocks: [{ type: "pair", before: { src: "shot.png" }, after: { src: "a.webm" } }] });
   expect(pair.images).toEqual(["shot.png"]);
   expect(pair.videos).toEqual(["a.webm"]);
+});
+
+// SHEP-228: the window gives each fenced code block in Markdown its own box with a Copy button.
+test("mdParts cuts Markdown at its fenced code blocks", () => {
+  expect(mdParts("Just words, with `inline code`.")).toEqual([{ md: "Just words, with `inline code`." }]);
+  expect(mdParts("Run:\n\n```sh\nbun i\nbun run build\n```\n\nDone.")).toEqual([
+    { md: "Run:\n" }, { code: "bun i\nbun run build", lang: "sh" }, { md: "\nDone." }]);
+  // a fence in a list item: its indent comes off the lines; ~~~ fences too
+  expect(mdParts("1. Then:\n   ```\n   git pull\n     --rebase\n   ```")).toEqual([{ md: "1. Then:" }, { code: "git pull\n  --rebase", lang: "" }]);
+  expect(mdParts("~~~\na ``` b\n~~~")).toEqual([{ code: "a ``` b", lang: "" }]);
+  // a closing fence is at least as long as the opening; an unclosed one runs to the end
+  expect(mdParts("````\n```\n````")).toEqual([{ code: "```", lang: "" }]);
+  expect(mdParts("```\nnever closed")).toEqual([{ code: "never closed", lang: "" }]);
+  // inline triple backticks aren't a fence
+  expect(mdParts("``` not a fence ```")).toEqual([{ md: "``` not a fence ```" }]);
+  expect(mdParts(undefined)).toEqual([]);
 });

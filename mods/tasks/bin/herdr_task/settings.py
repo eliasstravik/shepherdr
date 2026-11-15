@@ -6,6 +6,7 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
 
 from .base import Fail, git, HOME, MAX_RUNNING, WHERE
 
@@ -326,6 +327,9 @@ def set_opts(t, args):
             raise Fail(f"--set takes key=value, not {pair!r}.")
         k, v = pair.split("=", 1)
         set_task(t, k, v)
+    if getattr(args, "reviewer_model", None) or getattr(args, "reviewer", None) or any(
+            SET_KEYS.get(p.split("=", 1)[0].strip().lower()) in ("reviewer", "reviewer_model") for p in getattr(args, "set", None) or []):
+        check_reviewer_model(t)
 
 
 def by_layer(s, space, section, key, value, default):
@@ -348,6 +352,55 @@ def cli_here(kind):
 
 CLI_NAMES = {"claude": "Claude Code", "codex": "Codex"}
 LOGIN = {"claude": "claude auth login", "codex": "codex login"}
+
+
+def codex_models():
+    """The model ids Codex offers here: its models_cache.json, which Codex fetches for the account it is signed in
+    with (a ChatGPT account gets fewer than an API key, #948); None when there is none to read."""
+    home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
+    try:
+        with open(os.path.join(home, "models_cache.json")) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None
+    ids = [m.get("slug") for m in (d.get("models") or [] if isinstance(d, dict) else []) if isinstance(m, dict) and m.get("slug")]
+    return ids or None
+
+
+def codex_lacks(model):
+    """The models Codex offers here when `model` isn't one of them (it would refuse to start on it), else None."""
+    ids = codex_models()
+    return ids if model and ids and model not in ids else None
+
+
+CLAUDE_MODEL = re.compile(r"^(claude-|opus|sonnet|haiku|fable)", re.I)
+
+
+def check_reviewer_model(t):
+    """add/edit: a reviewer model Codex here can't use is refused when it is set (#948), not found at review time."""
+    m = t.get("reviewer_model")
+    if not m or t.get("reviewer") == "claude" or (not t.get("reviewer") and CLAUDE_MODEL.match(m)):
+        return
+    ids = codex_lacks(m)
+    if ids:
+        raise Fail(f"Codex here doesn't offer {m} for the account it is signed in with: pick one of {', '.join(ids)} "
+                   "(or leave the reviewer model unset for Codex's own default).")
+
+
+def codex_login_now():
+    """Codex's own word on its sign-in here, asked now (#947): (True, "") signed in, (False, what it said) when not
+    (an unreadable auth file says an error, and Codex then opens its sign-in screen), (None, "") when unknown."""
+    if not shutil.which("codex"):
+        return None, ""
+    try:
+        r = subprocess.run(["codex", "login", "status"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None, ""
+    out = f"{r.stdout}\n{r.stderr}"
+    if re.search(r"^\s*logged in", out, re.I | re.M):
+        return True, ""
+    said = next((ln.strip() for ln in out.splitlines() if ln.strip()), "")
+    return False, said[:160]
 
 
 def trust_roots(folder):
@@ -391,8 +444,9 @@ def reviewer_command(who, model=None, effort=None, folder=None):
     return shlex.join(a)
 
 
-def task_settings(s, t, space=None, argv=None):
-    """The settings that shape this task's work, each {label, text, value, by}."""
+def task_settings(s, t, space=None, argv=None, live=False):
+    """The settings that shape this task's work, each {label, text, value, by}. live: for a brief, so its Reviewer
+    line is checked against what Codex says now (sign-in and models), not only the last periodic check."""
     space = space or t.get("space")
     cfg = settings_for(s, space)
     k, sets = cfg["tasks"], t.get("set") or {}
@@ -429,14 +483,29 @@ def task_settings(s, t, space=None, argv=None):
                 rv[f] = t[f"reviewer_{f}"]
         other = {"claude": "codex", "codex": "claude"}.get(agent)
         want = rv.get("agent") or (other if other and shutil.which(other) else agent)
-        who = want
+        who, said = want, ""
         if want != agent and cli_here(want) == "signed-out":
             # Signed out here, it would sit at its sign-in screen and never review (#745): the task's own CLI does.
             who, rv = agent, {}
+        elif want == "codex" and want != agent and live:
+            # #947: the periodic check can't read every answer (an unreadable auth file says an error, not "Not logged
+            # in"), so a brief asks Codex now; anything but signed in would leave the reviewer on its sign-in screen
+            ok, said = codex_login_now()
+            if ok is False:
+                who, rv = agent, {}
+        # #948: a model Codex here doesn't offer this account stops it at once: its own default instead, said
+        lacks = codex_lacks(rv.get("model")) if who == "codex" else None
+        dropped = rv.get("model")
+        if lacks:
+            rv = {k: v for k, v in rv.items() if k != "model"}
         text = who + (f", model {rv['model']}" if rv.get("model") else "") + (f", effort {rv['effort']}" if rv.get("effort") else "")
+        if lacks:
+            text += (f" (Codex's own default model: Codex here doesn't offer {dropped} "
+                     "for the account it is signed in with)")
         if who != want:
-            text += (f" (your own CLI: {CLI_NAMES.get(want, want)} isn't signed in here; the person runs "
-                     f"`{LOGIN.get(want, want + ' login')}` on this machine, then asks for the review again)")
+            text += (f" (your own CLI: {CLI_NAMES.get(want, want)} isn't signed in here"
+                     + (f", `{LOGIN.get(want, want + ' login')} status` says \"{said}\"" if said and not re.match(r"not logged in", said, re.I) else "")
+                     + f"; the person runs `{LOGIN.get(want, want + ' login')}` on this machine, then asks for the review again)")
         elif not rv.get("agent"):
             text += " (the other CLI)" if who != agent else " (your own CLI: no other is installed)"
         folder = t.get("worktree") or getattr(s, "loc", {}).get("folder")
@@ -475,9 +544,25 @@ def task_settings(s, t, space=None, argv=None):
     return lines
 
 
-def settings_block(s, t, space=None, argv=None):
-    rows = [f"- {x['label']}: {x['text']}" + (f" ({SET_BY[x['by']]})" if x["by"] else "") for x in task_settings(s, t, space, argv)]
+def settings_block(s, t, space=None, argv=None, live=False):
+    lines = task_settings(s, t, space, argv, live)
+    rows = [f"- {x['label']}: {x['text']}" + (f" ({SET_BY[x['by']]})" if x["by"] else "") for x in lines]
+    # Codex's sandbox can't start here (SHEP-227, #998): the worker hears it in its brief and tells the person.
+    word = sandbox_word(lines, argv or (t["agents"][-1].get("argv") if t.get("agents") else None) or worker_argv(s, t, space))
+    if word:
+        rows.append(f"- Sandbox: {word}")
     return "\n".join([SETTINGS_HEAD, *rows])
+
+
+def sandbox_word(lines, argv):
+    """The Settings block's Sandbox line when this task's worker or reviewer runs Codex in its
+    sandbox and that sandbox can't start on this machine (sandbox.check), else None."""
+    from . import sandbox
+    rv = next((x["value"] for x in lines if x["label"] == "Reviewer"), None) or {}
+    if not (sandbox.sandboxed(argv) or rv.get("agent") == "codex"):
+        return None
+    broken = sandbox.check()
+    return sandbox.notice(broken, short=True) if broken else None
 
 
 def keep_review(s, t, space=None):

@@ -1,13 +1,14 @@
 """Machines: the same task tools on every machine (sync), what each machine reaches (the reach
 map, hop by hop), the Assistants there (the directory) and messages between them.
 
-Reach is only what the real links allow, seen from where each link starts: a machine's own
-herdr-core links (`hc machine ls` there), the ssh hosts it can log into with what it already has
-(its ~/.ssh/config and its online Tailscale peers, tried in batch mode, never trusting a new host
-key) and its Tailscale peers (network only). Through a machine it reaches, the map shows what that
-one reaches, and so on: each hop's links are checked on that hop, by that hop. Nothing here makes
-keys, trust, tunnels or listeners, and nothing narrows what the links allow. One-way links are
-normal: a machine reachable from here may not reach back.
+Reach is only what the person's own herdr-core links allow, seen from where each link starts: a
+machine's links (`hc machine ls` there), and through each, what that one links to, hop by hop over
+those same links. The map opens no new connection to anything (#967): no ssh, no Tailscale peers,
+nothing the person didn't add. With the Other machines add-on off it follows no link at all.
+Trying the ssh config's hosts and the online Tailscale peers (Find) runs only when the person asks,
+on this machine only, once per FIND_EVERY_MS, and says first what it will contact; what it finds
+is reported, never added to the map. Nothing here makes keys, trust, tunnels or listeners. One-way
+links are normal: a machine reachable from here may not reach back.
 """
 
 import base64
@@ -17,6 +18,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import threading
@@ -45,7 +47,9 @@ MACHINES = os.path.join(STORE, ".machines.json")
 SYNC_DEBOUNCE_MS = 30000        # files changed here: wait until they stay put this long
 SYNC_RETRY_MS = 10 * 60000      # a machine whose sync failed: tried again after this
 REACH_EVERY_MS = 5 * 60000      # the scheduler refreshes the reach map this often
-REACH_DEPTH = 3                 # hops the map follows past this machine
+REACH_DEPTH = 3                 # hops the map follows past this machine, over herdr-core links only
+FIND_EVERY_MS = 10 * 60000      # Find machines: at most once in this long
+FIND_AT_ONCE = 4                # Find machines: hosts tried at the same time
 
 
 def _read(path):
@@ -409,6 +413,8 @@ def cmd_machines(args):
     from .output import say
     if args.machines == "reach":
         return cmd_reach(args)
+    if args.machines == "find":
+        return cmd_find(args)
     if args.machines == "sync":
         r = sync(args.machine or None, "check" if args.check else "install", args.force)
         if args.json:
@@ -453,7 +459,8 @@ def machines_pass(report):
     """Each round: after the tools here change (once they've stayed put SYNC_DEBOUNCE_MS), and
     when a machine connects, syncs the machines that need it; refreshes the reach map every
     REACH_EVERY_MS. Both run detached: the round never waits on another machine. No syncs while
-    the machines add-on is off or an install holds them (base.SYNC_HOLD)."""
+    the machines add-on is off or an install holds them (base.SYNC_HOLD). The map's refresh only
+    asks herdr-core: this machine's links, and with the add-on on, the linked machines' over them."""
     ms = connected_machines()
     version = manifest()["version"]
     t = now()
@@ -496,17 +503,16 @@ def cmd_sync_auto(names):
 
 # ---- the reach map --------------------------------------------------------------------------
 # PROBE runs on a machine (python3 -c, its own source on stdin as S, its options as argv[1]) and
-# answers what that machine is and reaches: its herdr-core links, the ssh hosts it can log into,
-# its Tailscale peers, its Assistants and spaces. Then, while hops are left, it runs itself on
-# each machine it reaches that nobody on the way has looked at yet, through that very link
-# (`hc exec --on`, or ssh), and puts the answer under the link as "next".
+# answers what that machine is and reaches: its herdr-core links, its Assistants and spaces. Then,
+# while hops are left, it runs itself on each linked machine nobody on the way has looked at yet,
+# through that very link (`hc exec --on`), and puts the answer under the link as "next". It never
+# opens a connection of its own: no ssh, no Tailscale, only herdr-core's links (#967).
 
 PROBE = r'''
-import json, os, re, shlex, shutil, socket, subprocess, sys, threading
+import json, os, shutil, socket, subprocess, sys, threading
 o = json.loads(sys.argv[1])
 H = os.path.expanduser("~")
 ''' + layout.PY + r'''
-SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=4", "-o", "StrictHostKeyChecking=yes", "-o", "LogLevel=ERROR"]
 def sh(argv, inp=None, timeout=20):
     try:
         r = subprocess.run(argv, input=inp, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout)
@@ -567,60 +573,17 @@ if hc:
         s = names.get(sp) or {}
         me["assistants"].append({"address": a, "space": sp, "space_name": s.get("name") or (os.path.basename(k.get("cwd") or "") or None),
                                  "folder": s.get("folder") or k.get("cwd"), "template": k.get("template"), "name": k.get("name")})
-# ssh: the hosts its own config names, and its online Tailscale peers; batch mode, no new host keys.
-hosts = {}
-try:
-    with open(os.path.join(H, ".ssh/config")) as f:
-        for line in f:
-            w = line.split()
-            if len(w) > 1 and w[0].lower() == "host":
-                for h in w[1:]:
-                    if not re.search(r"[*?!]", h):
-                        hosts[h] = {"how": "ssh", "to": h, "over": "ssh config"}
-except Exception:
-    pass
-ts = shutil.which("tailscale")
-if ts:
-    st = js(sh([ts, "status", "--json"], timeout=8)[1]) or {}
-    for p in (st.get("Peer") or {}).values():
-        dns = (p.get("DNSName") or "").rstrip(".")
-        if not dns:
-            continue
-        me["links"].append({"how": "tailscale", "to": dns.split(".")[0], "name": p.get("HostName"), "target": dns, "os": p.get("OS"), "ok": bool(p.get("Online")),
-                            "state": "online" if p.get("Online") else "offline"})
-        if p.get("Online") and p.get("OS") not in ("iOS", "android") and dns not in hosts:
-            hosts[dns] = {"how": "ssh", "to": dns, "over": "tailscale"}
-def try_ssh(l):
-    code, out, err = sh(SSH + [l["to"], 'PATH="$HOME/.local/bin:/usr/local/bin:$PATH"; hc server status --json 2>/dev/null || echo "{}"'], timeout=10)
-    l["ok"] = code == 0
-    why = (err.strip().splitlines() or ["no answer"])[-1][:120]
-    l["state"] = "ok" if code == 0 else "host key not trusted here" if "Host key verification failed" in why else why
-    if code == 0:
-        c = (js(out.strip().splitlines()[-1] if out.strip() else "{}") or {}).get("core")
-        if c:
-            l["id"], l["core"] = c.get("id"), c.get("name")
-ths = [threading.Thread(target=try_ssh, args=(l,)) for l in hosts.values()]
-for t in ths:
-    t.start()
-for t in ths:
-    t.join()
-for l in hosts.values():
-    if not (core and l.get("id") == core.get("id")):
-        me["links"].append(l)
-# Next hops: through each link that works, to a machine with herdr-core nobody on the way looks at.
+# Next hops: through each herdr-core link that works, to a machine nobody on the way looks at.
 if o["depth"] > 0 and core:
-    look = [l for l in me["links"] if l.get("ok") and l.get("id") and l["how"] in ("herdr-core", "ssh") and l["id"] not in o["seen"]]
+    look = [l for l in me["links"] if l.get("ok") and l.get("id") and l["how"] == "herdr-core" and l["id"] not in o["seen"]]
     chosen = {}
-    for l in sorted(look, key=lambda l: l["how"] != "herdr-core"):
+    for l in look:
         chosen.setdefault(l["id"], l)
     seen2 = sorted(set(o["seen"]) | {core["id"]} | set(chosen))
     sub = json.dumps({"depth": o["depth"] - 1, "seen": seen2, "timeout": max(15, o["timeout"] - 15)})
     boot = "import sys; S = sys.stdin.read(); exec(S)"
     def hop(l):
-        if l["how"] == "herdr-core":
-            argv = [hc, "exec", "--on", l["to"], "--stdin", "--timeout", str(o["timeout"]), "--", "python3", "-c", boot, sub]
-        else:
-            argv = SSH + [l["to"], "python3 -c " + shlex.quote(boot) + " " + shlex.quote(sub)]
+        argv = [hc, "exec", "--on", l["to"], "--stdin", "--timeout", str(o["timeout"]), "--", "python3", "-c", boot, sub]
         code, out, err = sh(argv, inp=S, timeout=o["timeout"] + 10)
         res = js(out.strip().splitlines()[-1]) if out.strip() else None
         l["next"] = res if isinstance(res, dict) else {"error": (err.strip() or out.strip() or "no answer")[-200:]}
@@ -644,7 +607,10 @@ def _reach_cache():
 
 
 def probe(depth=REACH_DEPTH, timeout=90):
-    """The reach map from this machine, hops and all, checked now."""
+    """The reach map from this machine, hops and all, checked now. With the Other machines add-on
+    off: this machine alone, no link followed."""
+    if addon_off("machines"):
+        depth = 0
     boot = "import sys; S = sys.stdin.read(); exec(S)"
     r = subprocess.run([sys.executable, "-c", boot, json.dumps({"depth": depth, "seen": [], "timeout": timeout})], input=PROBE,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout + 60)
@@ -735,6 +701,173 @@ def cmd_reach(args):
                 ok = [l["to"] + (f" (={l['core']})" if l.get("core") and l["core"] != l["to"] else "") for l in ls if l.get("ok")]
                 no = [l["to"] for l in ls if not l.get("ok")]
                 print(f"  {how}: " + (", ".join(ok) or "none") + (f"; can't: {', '.join(no)}" if no else ""))
+
+
+# ---- Find machines: only when the person asks (#967) ----------------------------------------
+# The hosts this machine's ~/.ssh/config names (no patterns) and its online Tailscale peers (not
+# phones), minus the machines it already links to. `machines find` lists them and contacts none;
+# `machines find --go` tries each once (batch mode, no new host keys, a few at a time), at most once
+# per FIND_EVERY_MS, and says which have herdr-core and aren't linked yet. What it finds goes in
+# FOUND for the person to read, never into the reach map: a machine is used once they link it.
+
+FOUND = os.path.join(STORE, ".found.json")
+FIND_SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=4", "-o", "StrictHostKeyChecking=yes", "-o", "LogLevel=ERROR"]
+
+
+def _found():
+    try:
+        with open(FOUND) as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _save_found(d):
+    os.makedirs(os.path.dirname(FOUND), exist_ok=True)
+    tmp = f"{FOUND}.{os.getpid()}.tmp"
+    with open(tmp, "w") as f:
+        json.dump(d, f)
+    os.replace(tmp, FOUND)
+
+
+def _linked():
+    """This machine's herdr-core links (`hc machine ls`, local): their names, targets' hosts and core ids."""
+    names, ids = set(), set()
+    hc = shutil.which("hc")
+    if not hc:
+        return names, ids
+    try:
+        r = subprocess.run([hc, "machine", "ls", "--json"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True, timeout=20)
+        ms = (json.loads(r.stdout or "{}") or {}).get("machines") or []
+    except (OSError, ValueError, subprocess.SubprocessError):
+        ms = []
+    for m in ms:
+        for v in (m.get("name"), (m.get("target") or "").split("@")[-1]):
+            if v:
+                names.add(v)
+        if m.get("id"):
+            ids.add(m["id"])
+    return names, ids
+
+
+def find_hosts(linked=None):
+    """What Find would contact, read from local files and the local Tailscale daemon only:
+    [{to, over}]."""
+    names = (linked or _linked())[0]
+    hosts = {}
+    try:
+        with open(os.path.join(os.path.expanduser("~"), ".ssh", "config")) as f:
+            for line in f:
+                w = line.split()
+                if len(w) > 1 and w[0].lower() == "host":
+                    for h in w[1:]:
+                        if not re.search(r"[*?!]", h) and h not in names:
+                            hosts.setdefault(h, {"to": h, "over": "ssh config"})
+    except OSError:
+        pass
+    ts = shutil.which("tailscale")
+    if ts:
+        try:
+            st = json.loads(subprocess.run([ts, "status", "--json"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                           universal_newlines=True, timeout=8).stdout or "{}")
+        except (OSError, ValueError, subprocess.SubprocessError):
+            st = {}
+        for p in (st.get("Peer") or {}).values():
+            dns = (p.get("DNSName") or "").rstrip(".")
+            if dns and p.get("Online") and p.get("OS") not in ("iOS", "android") and dns.split(".")[0] not in names and dns not in names:
+                hosts.setdefault(dns, {"to": dns, "over": "tailscale"})
+    return list(hosts.values())
+
+
+def _try_host(h, ids):
+    try:
+        r = subprocess.run(FIND_SSH + [h["to"], 'PATH="$HOME/.local/bin:/usr/local/bin:$PATH"; hc server status --json 2>/dev/null || echo "{}"'],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=15)
+        code, out, err = r.returncode, r.stdout, r.stderr
+    except (OSError, subprocess.SubprocessError) as e:
+        code, out, err = 255, "", str(e)
+    h = dict(h, ok=code == 0)
+    why = (err.strip().splitlines() or ["no answer"])[-1][:120]
+    h["state"] = "logged in" if code == 0 else "host key not trusted here" if "Host key verification failed" in why else why
+    if code == 0:
+        try:
+            c = (json.loads(out.strip().splitlines()[-1]) if out.strip() else {}).get("core")
+        except (ValueError, AttributeError):
+            c = None
+        if c:
+            h["core"], h["linked"] = c.get("name"), c.get("id") in ids
+    return h
+
+
+def find(go=False):
+    """Find machines: without go, what it would contact (and the last run's answer); with go, try
+    each once now. Refused while the Other machines add-on is off, or within FIND_EVERY_MS of the last."""
+    if addon_off("machines"):
+        raise Fail("Find machines is off while the Other machines add-on is off: turn it on in Settings › Add-ons first")
+    linked = _linked()
+    hosts = find_hosts(linked)
+    last = _found()
+    wait = max(0, FIND_EVERY_MS - (now() - (last or {}).get("at", 0)))
+    if not go:
+        return {"hosts": hosts, "last": last, "wait_ms": wait}
+    if wait:
+        raise Fail(f"Find machines ran {(FIND_EVERY_MS - wait) // 60000} min ago; try again in {-(-wait // 60000)} min")
+    os.makedirs(STORE, exist_ok=True)
+    lock = open(os.path.join(STORE, ".find.lock"), "a")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lock.close()
+        raise Fail("Find machines is already running")
+    try:
+        _save_found({"at": now(), "hosts": [], "running": True})  # counts for the wait even if this run dies
+        out, todo = [None] * len(hosts), list(enumerate(hosts))
+        mu = threading.Lock()
+
+        def worker():
+            while True:
+                with mu:
+                    if not todo:
+                        return
+                    i, h = todo.pop(0)
+                out[i] = _try_host(h, linked[1])
+        ths = [threading.Thread(target=worker) for _ in range(min(FIND_AT_ONCE, len(hosts)))]
+        for t in ths:
+            t.start()
+        for t in ths:
+            t.join()
+        d = {"at": now(), "hosts": out}
+        _save_found(d)
+        return {"hosts": out, "last": d, "wait_ms": FIND_EVERY_MS}
+    finally:
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        lock.close()
+
+
+def cmd_find(args):
+    r = find(go=args.go)
+    if args.json:
+        print(json.dumps(r))
+        return
+    if not args.go:
+        if not r["hosts"]:
+            print("Nothing to try: no hosts in ~/.ssh/config and no online Tailscale peers that aren't linked already.")
+        else:
+            print(f"Find machines would try to log in once (ssh, batch mode) to these {len(r['hosts'])} host(s):")
+            for h in r["hosts"]:
+                print(f"  {h['to']}  (from {h['over']})")
+            print("Run `herdr-task machines find --go` to try them now." if not r["wait_ms"] else
+                  f"It ran recently; it can run again in {-(-r['wait_ms'] // 60000)} min.")
+        if r.get("last") and r["last"].get("hosts"):
+            print("\nLast run:")
+    rows = r["hosts"] if args.go else ((r.get("last") or {}).get("hosts") or [])
+    for h in rows:
+        if not h:
+            continue
+        what = (f"herdr-core {h['core']!r}, " + ("linked already" if h.get("linked") else "not linked: add it with Add machine")) if h.get("core") else \
+            "logged in, no herdr-core there" if h.get("ok") else f"can't log in ({h.get('state')})"
+        print(f"  {h['to']}: {what}")
 
 
 # ---- the Assistant directory and messages ---------------------------------------------------

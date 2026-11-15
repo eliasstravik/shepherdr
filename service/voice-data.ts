@@ -45,6 +45,7 @@ export const NOT_DATA: Record<string, string> = {
   "api:push": "this device's own notification subscription (the notification settings are in the snapshot's settings)",
   "api:commands": "the / picker's command list above the message box",
   "api:reach": "the # picker's spaces above the message box (the same spaces as the snapshot's places)",
+  "api:machines": "Find machines (Settings › Machines): reading it lists hosts nobody linked, pressing it logs in to them; only the person starts it (#967)",
   "action:earlier": "a chat's older messages: look chat reads further back itself",
 };
 

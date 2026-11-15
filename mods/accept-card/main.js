@@ -17,7 +17,8 @@ import { appHome, closeOverlay, exec, notify, openOverlay, props, shared, setSha
 import { note } from "./usage.js";
 import { dialogFooter, green, red, amber, H, RADIUS, TEXT } from "./ui.js";
 // The card's words, the summary cut and the details as bullets: core/accept.js, shared with the web app's card.
-import { ACCEPT, words, readable, commitsLine, filesLine, moreLine, proofTitle, whereNow } from "./core/accept.js";
+import { ACCEPT, acceptLabel, words, readable, commitsLine, filesLine, moreLine, proofTitle, whereNow } from "./core/accept.js";
+import { settle } from "./core/pending.js";
 
 export { words, readable };
 
@@ -25,7 +26,9 @@ const CLI = () => `${appHome()}/mods/tasks/bin/herdr-task`;
 const MONO = "JetBrains Mono";
 
 async function task(p, args) {
+  // still running there after a slow or dropped link: its real result, followed (core/pending.js)
   const r = await exec(CLI(), [...(p.machine ? ["--on", p.machine] : []), ...args, "--folder", p.folder, "--json"])
+    .then((r) => settle((a) => exec(CLI(), a), r))
     .catch((e) => ({ code: 1, stdout: "", stderr: String(e?.message ?? e) }));
   let out = null;
   try { out = JSON.parse(r.stdout || "null"); } catch {}
@@ -326,6 +329,6 @@ export default class AcceptCard extends View {
         // to accept.
         .child(settled ? dialogFooter({ onCancel: () => this.close(), cancelLabel: ACCEPT.close })
           : dialogFooter({ onCancel: () => this.close(), cancelLabel: ACCEPT.cancel,
-            primary: { id: "accept", label: this.busy ? ACCEPT.accepting : ACCEPT.accept, disabled: !(ready && !this.busy), onClick: (_e, cx) => this.accept(cx) } })));
+            primary: { id: "accept", label: this.busy ? ACCEPT.accepting : acceptLabel(e), disabled: !(ready && !this.busy), onClick: (_e, cx) => this.accept(cx) } })));
   }
 }

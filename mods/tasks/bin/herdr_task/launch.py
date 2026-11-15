@@ -327,10 +327,48 @@ def cmd_allow(args):
 # ---- starting agents ------------------------------------------------------------------------
 
 
-def resume_argv(argv, session):
+def claude_mode(argv, folder=None):
+    """The permission mode a new Claude Code session would start in (#1056): argv's own flag, else the defaultMode of
+    its --settings, the folder's .claude/settings.local.json and .claude/settings.json, then the person's
+    (CLAUDE_CONFIG_DIR or ~/.claude), as Claude Code ranks them; "default" when none says."""
+    for i, a in enumerate(argv):
+        if a == "--dangerously-skip-permissions":
+            return None
+        if a == "--permission-mode" and i + 1 < len(argv):
+            return argv[i + 1]
+        if a.startswith("--permission-mode="):
+            return a.split("=", 1)[1]
+    found = []
+    for i, a in enumerate(argv[:-1]):
+        if a == "--settings":
+            found.append(argv[i + 1])
+    home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    files = ([os.path.join(folder, ".claude", "settings.local.json"), os.path.join(folder, ".claude", "settings.json")] if folder else []) \
+        + [os.path.join(home, "settings.json")]
+    for src in found + files:
+        try:
+            if src.lstrip().startswith("{"):
+                d = json.loads(src)
+            else:
+                with open(os.path.expanduser(src)) as f:
+                    d = json.load(f)
+        except (OSError, ValueError):
+            continue
+        mode = ((d.get("permissions") or {}) if isinstance(d, dict) else {}).get("defaultMode")
+        if isinstance(mode, str) and mode:
+            return mode
+    return "default"
+
+
+def resume_argv(argv, session, folder=None):
+    """argv resuming `session`. Claude Code brings a resumed session back in the permission mode it ended in (#1056: a
+    switch replacing a stuck agent came up in plan or ask mode, not the person's auto): the mode a new one would get
+    is said, unless argv already says one."""
     k = agent_key(argv)
     if k == "claude":
-        return argv + ["--resume", session]
+        mode = claude_mode(argv, folder)
+        has = mode is None or any(a == "--permission-mode" or a.startswith("--permission-mode=") for a in argv)
+        return argv + ([] if has else ["--permission-mode", mode]) + ["--resume", session]
     if k == "codex":
         return [argv[0], "resume"] + argv[1:] + [session]
     return None
@@ -554,7 +592,7 @@ def brief(s, task, parent=None, space=None, argv=None):
     body = "Your task, " + s.ref(task) + ":\n" + ((task.get("prompt") or "").strip() or task["title"])
     finish = notes_part("Before you say ready", notes(s, task, "finish", space))
     return "\n\n".join(x for x in [instructions("worker"), start, body, where_line(task), finish, closing_line(s, task, parent, argv),
-                                    settings_block(s, task, space, argv)] if x)
+                                    settings_block(s, task, space, argv, live=True)] if x)
 
 
 def handoff(s, task, prev, parent=None, argv=None):
@@ -568,7 +606,7 @@ def handoff(s, task, prev, parent=None, argv=None):
     lines.append(notes_part("Before you continue, if it isn't done yet", notes(s, task, "start")))
     lines.append(notes_part("Before you say ready", notes(s, task, "finish")))
     lines.append(closing_line(s, task, parent, argv))
-    lines.append(settings_block(s, task, None, argv))
+    lines.append(settings_block(s, task, None, argv, live=True))
     return "\n\n".join(x for x in lines if x)
 
 
@@ -708,6 +746,16 @@ def folder_for(s, task):
     # Its own base (--base) branches from that branch; else from what the folder has checked out.
     own = task.get("base") if task.get("base_set") else None
     base = base_ref(main, own) if own else current_base(main)
+    have = registered_worktree(main, path)
+    if have:
+        # #1023: its worktree is still there, registered with this repo, though the task no longer
+        # names it (its agent may have switched it to another branch): it goes on there, on the branch
+        # checked out now, never a failed "already exists".
+        br = have.get("branch") or branch
+        base = task.get("base") or base
+        start = task.get("start") or git(main, "merge-base", base, have.get("head") or br)[1] or have.get("head")
+        task.update(worktree=path, branch=br, base=base, start=start)
+        return path
     exists = git(main, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}")[0]
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if exists:
@@ -723,6 +771,22 @@ def folder_for(s, task):
     start = git(path, "rev-parse", "HEAD")[1] if not exists else task.get("start")
     task.update(worktree=path, branch=branch, base=task.get("base") or base, start=start)
     return path
+
+
+def registered_worktree(main, path):
+    """The worktree git has registered at path for the repo at main ({path, head, branch}: branch
+    None when detached), when its folder is there; else None."""
+    if not os.path.isdir(path):
+        return None
+    ok, out, _ = git(main, "worktree", "list", "--porcelain")
+    want = os.path.realpath(path)
+    for block in out.split("\n\n") if ok else []:
+        rows = dict((ln.split(" ", 1) + [""])[:2] for ln in block.splitlines() if ln.strip())
+        if rows.get("worktree") and os.path.realpath(rows["worktree"]) == want and "prunable" not in rows:
+            ref = rows.get("branch") or ""
+            return {"path": path, "head": rows.get("HEAD"),
+                    "branch": ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else None}
+    return None
 
 
 def launch(s, task, argv, space, message=None, parent=None, resume=None, role=None):

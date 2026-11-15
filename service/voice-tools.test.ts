@@ -197,6 +197,12 @@ test("act changes nothing until confirmed, then sends the web app's action", asy
   expect(x.calls).toEqual([]);
   expect((await voiceTool("act", { action: "accept", id: "41", confirmed: true }, web, x)).result).toBe("Accepted SHEP 41: it merges now.");
   expect(x.calls.pop()).toEqual({ type: "accept", task: "SHEP-41" });
+  // SHEP-225: one with nothing of its own to merge (worked in the folder) says so, as the Accept button does
+  const t41 = snap.tasks.find((t: any) => t.id === "SHEP-41"), pr = t41.pr;
+  delete t41.pr;
+  try {
+    expect((await voiceTool("act", { action: "accept", id: "41", confirmed: false }, web, x)).result).toContain("That marks it done; nothing merges.");
+  } finally { t41.pr = pr; }
   expect((await voiceTool("act", { action: "accept", id: "45", confirmed: true }, web, x)).error).toBe(true);
   await voiceTool("act", { action: "schedule", id: "this", value: "in 2 hours", confirmed: true }, web, x);
   expect(x.calls.pop()).toEqual({ type: "schedule", chat: "SHEP-45/worker", in: "2 hours" });

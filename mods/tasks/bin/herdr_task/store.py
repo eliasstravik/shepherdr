@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+from contextlib import contextmanager
 
 from .base import Fail, git, hc_json, HOME, LEGACY, MAX_RUNNING, now, run, STORE
 from .settings import settings_for
@@ -29,6 +30,19 @@ def locate(path):
         return {"folder": main, "kind": "repo", "name": os.path.basename(main) or "/", "common": common}
     name = "~" if path == HOME else (os.path.basename(path) or "/")
     return {"folder": path, "kind": "folder", "name": name, "common": None}
+
+
+def bare_by_mistake(path):
+    """#1052: a repo whose .git/config says core.bare = true though its files are checked out (a .git
+    folder with work beside it): git then sees no work tree, so to herdr-task it looked like a plain
+    folder and tasks quietly worked in it, Worktrees on or not. Returns what to say, else None."""
+    ok, out, _ = git(path, "rev-parse", "--is-bare-repository", "--path-format=absolute", "--git-dir")
+    lines = out.split("\n") if ok else []
+    if len(lines) != 2 or lines[0] != "true" or os.path.basename(lines[1]) != ".git":
+        return None
+    folder = os.path.dirname(lines[1])
+    return (f"{folder} is a git repo, but its .git/config says core.bare = true, so git sees no work tree here and "
+            f"tasks would quietly skip their worktrees. If its files belong there, run: git -C {folder} config core.bare false")
 
 
 def slug_of(folder):
@@ -204,14 +218,56 @@ class Store:
                 self.dirty = self.new_prefix = bool(d["tasks"]) or os.path.exists(self.path)
         return self
 
+    def save(self):
+        if self.write and self.dirty:
+            tmp = f"{self.path}.{os.getpid()}.tmp"
+            with open(tmp, "w") as f:
+                json.dump(self.data, f, indent=2)
+                f.write("\n")
+            os.replace(tmp, self.path)
+            self.dirty = False
+
+    @contextmanager
+    def released(self):
+        """The lock let go while slow work outside the list runs (#1007: a git push through the repo's
+        pre-push hook can take many minutes, and every other command here waited on it): what changed
+        is saved first, and the list read again after, since others may have changed it meanwhile.
+        Each task's dict stays the same object, updated in place, so a caller's `t` sees the new state.
+        Never inside a loop over the tasks (the list itself is a new one after)."""
+        if not (self.lock and self.write):
+            yield
+            return
+        self.save()
+        fcntl.flock(self.lock, fcntl.LOCK_UN)
+        try:
+            yield
+        finally:
+            fcntl.flock(self.lock, fcntl.LOCK_EX)
+            try:
+                with open(self.path) as f:
+                    fresh = json.load(f)
+            except (OSError, ValueError):
+                fresh = None
+            if isinstance(fresh, dict) and isinstance(fresh.get("tasks"), list):
+                mine = {t.get("id"): t for t in self.data.get("tasks") or []}
+                tasks = []
+                for t in fresh["tasks"]:
+                    old = mine.get(t.get("id")) if isinstance(t, dict) else None
+                    if old is not None:
+                        old.clear()
+                        old.update(t)
+                        t = old
+                    tasks.append(t)
+                fresh["tasks"] = tasks
+                self.data.clear()
+                self.data.update(fresh)
+            # Saved again on the way out: the caller goes on changing its task without saying so.
+            self.dirty = True
+
     def __exit__(self, kind, *_):
         try:
-            if kind is None and self.write and self.dirty:
-                tmp = f"{self.path}.{os.getpid()}.tmp"
-                with open(tmp, "w") as f:
-                    json.dump(self.data, f, indent=2)
-                    f.write("\n")
-                os.replace(tmp, self.path)
+            if kind is None:
+                self.save()
         finally:
             if self.lock:
                 fcntl.flock(self.lock, fcntl.LOCK_UN)
