@@ -1499,10 +1499,14 @@ class NoFalseNeedsYou(unittest.TestCase):
         self.assertEqual(self.agents.GRACE_MS, 20_000)
         agent = lambda a: {"address": a["address"], "status": {"state": a["status"]}, "turn": a["turn"],
                            "labels": {"herdr.role": a["role"]}, **({"status_ms": a["since"]} if "since" in a else {})}
+        held = {}  # #995: the card's request herdr-task reads, as the scheduler keeps it on the task (held_ask)
         with self.mock.patch.object(self.agents, "now", lambda: g["now"]), \
-                self.mock.patch.object(self.agents, "held_ask", lambda address: None):
+                self.mock.patch.object(self.agents, "held_ask", lambda address: held.get(address)):
             for i, c in enumerate(g["cases"]):
                 task = dict(c["task"], id=7)
+                held.clear()
+                if task.get("held_ask"):
+                    held[task["held_ask"]] = {"tool_name": "AskUserQuestion", "tool_input": {}}
                 if "log" in c:
                     # SHEP-148: an agent's real state, its session log written as Claude Code writes it
                     log = os.path.join(self.dir, f"case{i}.jsonl")
@@ -1515,6 +1519,24 @@ class NoFalseNeedsYou(unittest.TestCase):
                 # core reads task.own_work: what herdr-task's scheduler keeps from that same log
                 if "own_work" in c["task"]:
                     self.assertEqual(self.agents.own_work(task, live, ready=task["state"] == "ready"), c["task"]["own_work"], c["name"])
+
+    def test_a_question_on_the_card_needs_you_while_it_reads_working(self):
+        """#995: a worker sat on its AskUserQuestion card, the task Working (needs None) and then stalled. The card's
+        request (ask-hook.sh's file) makes it Needs you, with the question as its reason; one a killed hook left
+        behind, older than the hook's 30 minutes, doesn't."""
+        req = os.path.join(self.agents.HOME, ".config", "herdr-app", "data", "chat-asks", "req")
+        os.makedirs(req, exist_ok=True)
+        self.addCleanup(lambda: [os.remove(os.path.join(req, n)) for n in os.listdir(req)])
+        p = os.path.join(req, "t1.1799999000.42.json")
+        with open(p, "w") as f:
+            json.dump({"tool_name": "AskUserQuestion", "tool_input": {"questions": [{"question": "Scope or green?"}]}}, f)
+        working = [dict(self.idle[0], status={"state": "working"})]
+        os.utime(p, (self.clock / 1000 - 60, self.clock / 1000 - 60))
+        self.assertEqual(self.status(working)[:2], ("needs", "asks"))
+        self.assertTrue(self.agents.asking(working[0]))
+        self.assertEqual(self.agents.ask_reason(self.task, "t1", self.agents.held_ask("t1")), "Scope or green?")
+        os.utime(p, (self.clock / 1000 - 32 * 60, self.clock / 1000 - 32 * 60))
+        self.assertEqual(self.status(working), ("working", None, None))
 
     def test_a_quiet_agent_needs_you_once_the_grace_is_over(self):
         self.say(-3_000, "Done with the first part.")
@@ -1568,7 +1590,7 @@ class NoFalseNeedsYou(unittest.TestCase):
         self.assertEqual(self.status(), ("working", None, None))
         self.assertEqual(self.agents.open_tool(self.log)[0], "Bash")
         held["t1"] = {"tool_name": "Bash", "tool_input": {"command": "./finish.sh"}}
-        self.assertEqual(self.status()[:2], ("needs", "reply"))
+        self.assertEqual(self.status()[:2], ("needs", "asks"))  # #995: a permission held on the card asks
         held.clear()
         # its result in: quiet, Needs you
         self.lines.append('{"parentUuid":"b","isSidechain":false,"type":"user","message":{"role":"user","content":[{"tool_use_id":'
@@ -4795,7 +4817,8 @@ class TaskFlow(unittest.TestCase):
         out = self.refusal()
         self.assertIn("A fix made after the last round needs a round of its own", out)
         self.assertIn("review-more", out)
-        guide = open(os.path.join(ROOT, "templates", "assistant.md")).read()
+        with open(os.path.join(ROOT, "templates", "assistant.md")) as f:
+            guide = f.read()
         [line] = [x for x in guide.splitlines() if x.startswith("- A task out of review rounds")]
         self.assertIn("that fix needs a round of its own", line)
         self.assertIn("Never tell it to say ready without one", line)

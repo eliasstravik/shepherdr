@@ -112,10 +112,9 @@ def task_status(task, live):
         return "scheduled", None, starts_words(task.get("scheduled_for") or now(), now())
     if st not in ("running", "ready"):
         return (st if st in STATUSES else "todo"), None, None
-    states = []
-    for k in live:
-        x = k.get("status")
-        states.append(x.get("state") if isinstance(x, dict) else x)
+    # #995: a question or permission waiting on the chat's card counts as asking, whatever the
+    # agent's own status says (Codex reads working until its hook returns; Claude Code may too).
+    states = ["blocked" if asking(k) else status_word(k) for k in live]
     # A problem Herdr just found (SHEP-133): not Needs you before GRACE_MS have passed, while its
     # agent is told and takes it up; until then the task reads as it would without it.
     if task.get("attention") and now() - (task.get("attention_at") or 0) < GRACE_MS:
@@ -567,6 +566,11 @@ def ask_reason(task, address, req=None, kind=None, msg=None):
     return last_question(task, address) or REASONS["question"]
 
 
+# ask-hook.sh holds an ask at most 30 minutes (its loop, the hooks' timeout): a request file older
+# than that was left by a hook that was killed, and holds nothing.
+HELD_MAX_MS = 31 * 60_000
+
+
 def held_ask(address):
     """The ask Herdr's chat hook holds for this terminal (mods/chat/ask-hook.sh), or None."""
     d = os.path.join(HOME, ".config", "herdr-app", "data", "chat-asks", "req")
@@ -576,11 +580,20 @@ def held_ask(address):
         return None
     for n in reversed(names):
         try:
-            with open(os.path.join(d, n)) as f:
+            p = os.path.join(d, n)
+            if now() - os.path.getmtime(p) * 1000 > HELD_MAX_MS:
+                continue
+            with open(p) as f:
                 return json.load(f)
         except (OSError, ValueError):
             continue
     return None
+
+
+def asking(k):
+    """Whether a live agent asks the person now: its own status says blocked, or the chat's card
+    holds its question or permission (#995: a Codex agent reads working while its hook waits)."""
+    return status_word(k) == "blocked" or bool(k.get("address") and held_ask(k["address"]))
 
 
 STARTING_MS = 90_000

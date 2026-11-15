@@ -162,6 +162,9 @@ export function place(list, task, { live = [], helpers = [], loaded = true, now 
   // Claude Code's folder-trust dialog (#755): its agent reports no status while it shows; herdr-task's scheduler read
   // it off the screen (task.trust_ask: that agent's address).
   else if (task.trust_ask && live.some((a) => a.address === task.trust_ask && !a.status)) need("asks", task.waits ?? REASONS.trust);
+  // #995: its question or permission waits on the chat's card while its agent reads working (Codex, until its hook
+  // returns): herdr-task's scheduler saw the card's request (task.held_ask: that agent's address).
+  else if (task.held_ask && live.some((a) => a.address === task.held_ask)) need("asks", task.waits ?? REASONS.question);
   // Back at work after it said ready: no Accept until it says ready again.
   else if (busyAgain(task, live, now)) { section = "working"; why = WORKING_AGAIN; }
   else if (fixing) { section = "working"; why = st === "ready" ? WORKING_AGAIN : null; }

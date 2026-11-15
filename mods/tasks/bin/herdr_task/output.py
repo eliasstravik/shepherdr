@@ -4,7 +4,7 @@ import json
 
 from .base import now
 from .agents import (
-    agent_running, detail, live_helpers, ask_reason, held_ask, last_words, own_line, own_work, status_word, STATUSES, task_status,
+    agent_running, asking, detail, live_helpers, ask_reason, held_ask, last_words, own_line, own_work, status_word, STATUSES, task_status,
 )
 from .queues import waiting_ext, waiting_for
 
@@ -20,7 +20,7 @@ def view(s, task, live=None):
     v["status"], v["needs"], v["why"] = task_status(task, running)
     if v["needs"] == "asks":
         # Why it waits, at most LINE_MAX characters: a standard reason or its own question.
-        k = next((k for k in running if status_word(k) == "blocked"), None)
+        k = next((k for k in running if status_word(k) == "blocked"), None) or next((k for k in running if asking(k)), None)
         st = k.get("status") if k and isinstance(k.get("status"), dict) else {}
         v["why"] = own_line(task, k and k["address"]) or (ask_reason(task, k["address"], held_ask(k["address"]), st.get("kind"), st.get("msg")) if k else v["why"])
     if v["needs"] == "reply":
