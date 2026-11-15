@@ -19,7 +19,7 @@ marked below off and on again, at once and on every machine (Everywhere's `off` 
 | Reactions | yes | React to a message with an emoji. Needs Chat | No smiley on messages (agents' own reactions still show) |
 | Task browser | yes | A browser per task you can watch and take over (`herdr-browser`). Needs Tasks | No Browser tab; workers aren't given a browser |
 | Autopilot | yes | An Assistant works on its own from its heartbeat. Needs Assistants | No Autopilot switch in the header; no wake-ups |
-| Other machines | yes | Keeps herdr-task, its helpers and the role instructions the same on every connected machine. Needs Tasks | Nothing is sent to other machines |
+| Other machines | yes | Keeps herdr-task, its helpers and the role instructions the same on every connected machine, and maps their Assistants. Needs Tasks | Nothing is sent to other machines; the reach map stays on this machine and Find machines is off ([what Shepherdr contacts](install.md#what-shepherdr-contacts)) |
 | Usage insights | yes | A private log of how you use Shepherdr, only on your own machines, for your Assistant's tips when you ask ([insights.md](insights.md)) | Nothing is recorded; what was kept stays until you delete it |
 | Web | yes | The web app on your tailnet (docs/web.md) | The web app stops and isn't shared; the service keeps its background work |
 

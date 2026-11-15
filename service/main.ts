@@ -27,7 +27,7 @@ import { windowSection, setWindow, offList, offPlugins } from "./window.ts";
 import { record, deleteAll, note as noteUsage, followSwitch, isOn as insightsOn, logLines } from "./usage.ts";
 import { insightsSummary } from "./voice-data.ts";
 import { Chats } from "./chats.ts";
-import { act, hc as hcRun } from "./actions.ts";
+import { act, findMachines, hc as hcRun } from "./actions.ts";
 import { AgentWatch } from "./watch.ts";
 import { Compat, activity, newsKey, placeKey } from "./compat.ts";
 import { keep, served as fileResponse, smaller } from "./media.ts";
@@ -802,6 +802,7 @@ const server = Bun.serve<{ who: string }>({
       const machine = a ? (a.includes("/") ? a.split("/")[0] : null) : sp?.machine ?? null;
       return json(await reachOf(machine));
     }
+    if (path === "/api/machines/find") return json(await findMachines(req.method === "POST"));
     if (path === "/api/folders") {
       const m = url.searchParams.get("machine"), machine = !m || m === me?.host ? null : m;
       const home = (await exec(hub, ["sh", "-c", 'printf %s "$HOME"'], machine).catch(() => ({ stdout: "" }))).stdout;

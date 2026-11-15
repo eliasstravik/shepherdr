@@ -155,6 +155,14 @@ async function run(cmd: string[]) {
 
 export const hc = (args: string[]) => run([process.env.SHEPHERDR_HC || "hc", ...args]);
 
+/** Settings › Machines › Find machines (#967): what it would try (go false: contacts nothing), or one run now, as
+ *  herdr-task machines find gives it on this machine; its refusals (add-on off, ran recently) come back as error */
+export async function findMachines(go: boolean) {
+  const r = await run(["herdr-task", "machines", "find", "--json", ...(go ? ["--go"] : [])]);
+  try { return JSON.parse(r.stdout.trim().split("\n").pop() || ""); }
+  catch { return { hosts: [], last: null, wait_ms: 0, error: r.stderr.trim().split("\n").pop() || "Find machines failed." }; }
+}
+
 // hc for core/send.js, its sends as the person's (Hub.send: no <hc from=…> tag on another machine)
 const asPerson = (hub: Hub) => (args: string[]) => args[0] === "send" ? hub.send(args[1], args[2]) : hc(args);
 
