@@ -457,6 +457,7 @@ export default class Chat extends View {
     // subagents, its background shells) count seconds for their first minute, then minutes.
     let ticks = 0;
     cx.timer.every(1000, (cx) => {
+      this.forgetHidden();
       if (this.call) return;
       ticks++;
       const rows = [...this.helpers(), ...this.jobs()];
@@ -4318,6 +4319,17 @@ export default class Chat extends View {
       this.refocusAt = Date.now();
       cx.timer.after(0, () => this.box.focus());
     }
+  }
+
+  // A copy in a tab the window doesn't show (another space or tab) isn't drawn, so the wasFocused of its last draw
+  // stayed true and coming back to it never counted as the pane newly focused: its box stayed without the keyboard
+  // whenever another area held it (#1059). Forgotten while hidden (the 1 s timer runs for hidden copies too), so the
+  // first draw back puts the keyboard in the box. A task's chat in the Tasks panel has no tab of its own: left alone.
+  forgetHidden(ps = panes(), tab = focused()?.tab) {
+    if (!this.wasFocused || this.thread || this.inner || !tab) return;
+    const mine = this.myPane();
+    const p = mine && ps.find((x) => x.pane === mine);
+    if (p?.tab && p.tab !== tab) this.wasFocused = false;
   }
 
   render(cx) {
