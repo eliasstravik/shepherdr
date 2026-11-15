@@ -12,6 +12,9 @@ import data from "./recipe-data.js";
 import { chartShapes, choiceReply, formReply, isLink, mediaKind, withIds } from "./recipe.js";
 
 const TONE = { info: "surface", good: "done", warn: "working", bad: "blocked" };
+// The window binds no copy key to a page's selected text, so each piece of code gets a Copy button: a code block,
+// and every fenced block inside a text, list item or callout. A fence closes on the same run that opened it.
+const fenced = (md) => [...String(md ?? "").matchAll(/^(`{3,}|~{3,})[^\n]*\n([\s\S]*?)\n\1[ \t]*$/gm)].map((m) => m[2]);
 
 export default class RecipeView extends View {
   init() {
@@ -22,11 +25,24 @@ export default class RecipeView extends View {
     this.sent = new Map();     // a choice's or form's words, once sent
     this.inputs = new Map();   // a form field's InputState
     this.checks = new Map();   // a form checkbox's value
+    this.copied = new Set();   // Copy buttons pressed, so each says Copied
     try { this.recipe = withIds(data); } catch { this.error = "This artifact's recipe can't be read."; }
   }
 
   md(id, text, t) {
-    return div().w_full().min_w(0).text_size(13).text_color(t.foreground).child(TextView.markdown(`md-${id}`, String(text ?? " ")).selectable(true));
+    const body = div().w_full().min_w(0).text_size(13).text_color(t.foreground).child(TextView.markdown(`md-${id}`, String(text ?? " ")).selectable(true));
+    const codes = fenced(text);
+    if (!codes.length) return body;
+    return v_flex().w_full().min_w(0).gap(6).child(body)
+      .child(h_flex().gap(6).flex_wrap().children(codes.map((c, i) => this.copyButton(`${id}-f${i}`, c, codes.length > 1 ? `Copy ${i + 1}` : "Copy", t))));
+  }
+
+  copyButton(key, text, label, t) {
+    const done = this.copied.has(key);
+    return div().id(`copy-${key}`).h(24).px(10).flex().items_center().rounded(6).cursor_pointer()
+      .border_1().border_color(t.border).bg(done ? t.surface : t.background).hover((s) => s.bg(t.surface))
+      .on_click((_e, cx) => { cx.stop_propagation(); cx.write_to_clipboard(String(text)); this.copied.add(key); cx.notify(); })
+      .child(div().text_size(12).text_color(done ? t.foreground : t.muted).child(done ? "Copied" : label));
   }
 
   send(key, text, cx) {
@@ -111,7 +127,9 @@ export default class RecipeView extends View {
         .child(mediaKind(x.src) === "video" ? this.media(x, t, "▶", "Clip", x.poster ?? null)
           : image(asset(x.src)).w_full().rounded(6).border_1().border_color(t.border))
         .child(div().text_size(12).text_color(t.muted).child(x.caption ?? w))));
-      case "code": return div().w_full().p(10).rounded(8).bg(t.surface).font_family("JetBrains Mono").text_size(12).whitespace_normal().child(b.text);
+      case "code": return v_flex().w_full().gap(6)
+        .child(div().w_full().p(10).rounded(8).bg(t.surface).font_family("JetBrains Mono").text_size(12).whitespace_normal().child(b.text))
+        .child(h_flex().child(this.copyButton(`${b.id}-code`, b.text, "Copy", t)));
       case "callout": return v_flex().gap(4).p(12).rounded(8).bg(t[TONE[b.tone ?? "info"]] ? t.surface : t.surface).border_l(3).border_color(t[TONE[b.tone ?? "info"]] ?? t.border)
         .when(!!b.title, (e) => e.child(div().text_size(13).font_semibold().child(b.title)))
         .when(!!b.md, (e) => e.child(this.md(b.id, b.md, t)));
