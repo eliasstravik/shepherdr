@@ -109,6 +109,15 @@ class Preview(unittest.TestCase):
         self.assertNotEqual(out.returncode, 0)
         self.assertIn("isn't kept", out.stderr)
 
+    def test_a_server_that_cant_start_says_why(self):
+        """#975: the server's own error and its log, not only "didn't start"; it is tried twice."""
+        os.makedirs(os.path.join(self.home, ".herdr", "artifacts", ".preview"))  # where it writes its port: a folder
+        out = self.run_tool("preview", self.aid)
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("The preview server didn't start: it ended at once (exit 1)", out.stderr)
+        self.assertIn("IsADirectoryError", out.stderr)
+        self.assertIn(".preview.log", out.stderr)
+
     def test_no_viewer_here_says_so(self):
         os.unlink(self.viewer)
         out = self.run_tool("preview", self.aid)

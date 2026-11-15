@@ -1885,22 +1885,46 @@ def preview_alive():
     return port
 
 
+PREVIEW_LOG = os.path.join(STORE, ".preview.log")
+PREVIEW_WAIT = 20
+
+
 def preview_start():
-    """The port of this machine's preview server, started when none answers."""
+    """The port of this machine's preview server, started when none answers. Its own output goes to PREVIEW_LOG, so a
+    start that fails says why (#975); a busy machine gets PREVIEW_WAIT seconds, and a server that ended at once one
+    more try."""
     port = preview_alive()
     if port:
         return port
     os.makedirs(STORE, exist_ok=True)
-    with contextlib.suppress(OSError):
-        os.unlink(PREVIEW_STATE)
-    subprocess.Popen([sys.executable, os.path.realpath(__file__), "_serve"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
-    for _ in range(50):
-        time.sleep(0.1)
-        port = preview_alive()
-        if port:
-            return port
-    raise Fail("The preview server didn't start.")
+    why = None
+    for _ in (1, 2):
+        with contextlib.suppress(OSError):
+            os.unlink(PREVIEW_STATE)
+        with open(PREVIEW_LOG, "w") as log:
+            p = subprocess.Popen([sys.executable, os.path.realpath(__file__), "_serve"], stdin=subprocess.DEVNULL,
+                                 stdout=log, stderr=log, start_new_session=True, close_fds=True)
+        end = time.time() + PREVIEW_WAIT
+        while time.time() < end:
+            time.sleep(0.1)
+            port = preview_alive()
+            if port:
+                return port
+            if p.poll() is not None:
+                break
+        try:
+            with open(PREVIEW_LOG) as f:
+                tail = [l.rstrip() for l in f.read().strip().splitlines()[-3:]]
+        except OSError:
+            tail = []
+        if p.poll() is None:
+            why = f"it didn't answer within {PREVIEW_WAIT} s"
+            with contextlib.suppress(OSError):
+                p.kill()
+            break
+        why = f"it ended at once (exit {p.returncode})" + (": " + " / ".join(tail) if tail else "")
+    raise Fail(f"The preview server didn't start: {why}. Its log: {PREVIEW_LOG}. Try again; if it keeps failing, "
+               "`herdr-artifact link <id>` gives the person's link instead.")
 
 
 def serve_preview(idle=PREVIEW_IDLE):
