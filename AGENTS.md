@@ -112,6 +112,9 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - herdr-task's scheduler re-execs itself within 15 s when its code changes. Its live code is either the zipapp
   `mods/tasks/bin/herdr-task` or the `herdr_task/` folder beside it (`zipfile.is_zipfile` says which).
 
+- Reach map tests: `test/test_reach.py` puts logging fake ssh/tailscale/hc on PATH and runs the real probe; reuse it for
+  anything that might contact other hosts.
+
 ## Add-ons
 
 - `lib/addons.json` lists every mod by add-on; a new mod goes in one (the tests check). Shared modules have one
