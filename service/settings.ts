@@ -13,7 +13,7 @@ import * as HC from "../core/host.js";
 import * as APc from "../core/autopilot.js";
 import type { SettingRow, SettingSection } from "../web/shared/types.ts";
 
-const { TASK_ROWS, DEFAULTS, wordFor, valueFor, ROLES: CORE_ROLES, NOTES: CORE_NOTES, ABOUT, BACKUP, REACTIONS, SUGGESTIONS, STAR, starState, FEEDBACK, feedbackRepo, upgradeReactions, BASE, BRANCH, branchPattern, MACHINES, OLD_NAMES, SECTIONS,
+const { TASK_ROWS, DEFAULTS, wordFor, valueFor, ROLES: CORE_ROLES, NOTES: CORE_NOTES, ABOUT, BACKUP, REACTIONS, SUGGESTIONS, FEEDBACK, feedbackRepo, upgradeReactions, BASE, BRANCH, branchPattern, MACHINES, OLD_NAMES, SECTIONS,
   WEB, modelLabel, roleSel, otherCli, otherCliWords, backupProblem, homeAbout, webState, fromWord, LOADING_AGENTS, RESET, machineLabel } = C as any;
 const AP = APc as any;
 /** Autopilot as Everywhere has it now (herdr-task's view: what Settings keeps, else what it kept before, else the
@@ -229,12 +229,6 @@ export class Settings {
       const repo = this.pick(null, "agents", "feedback_repo");
       rows.push({ label: FEEDBACK.repoTitle, key: "agents.feedback_repo", value: String(repo.value ?? ""), text: true, hint: FEEDBACK.repoAbout,
         placeholder: FEEDBACK.repo } as SettingRow);
-    }
-    // Ask for a star (herdr-task's star.py), Everywhere only: a switch until it has asked, then just when it did
-    if (!s) {
-      const st = starState(this.file);
-      rows.push(st.asked ? { label: STAR.title, key: "star_prompt", value: "Asked", fixed: true, hint: st.about }
-        : { label: STAR.title, key: "star_prompt", value: ON(st.on), options: ["on", "off"], hint: st.about });
     }
     return { name: title("agents"), level: scope ?? "all", rows };
   }
@@ -481,15 +475,6 @@ export class Settings {
       if (word !== null && word !== "on" && word !== "off") throw new Error("Not one of its choices.");
       const parent = space ? file.everywhere?.agents?.suggestions ?? DEFAULTS.agents.suggestions : DEFAULTS.agents.suggestions;
       put("agents", "suggestions", word === null || (word === "on") === parent ? null : word === "on");
-    } else if (key === "star_prompt") {
-      // Everywhere only; once asked it stays asked, whatever the switch (never a second ask)
-      if (space) throw new Error("This one is the same for every space.");
-      if (word !== null && word !== "on" && word !== "off") throw new Error("Not one of its choices.");
-      const was = file.everywhere?.star_prompt;
-      if (was?.asked) throw new Error("It already asked once, and won't ask again.");
-      next.everywhere ??= {};
-      if (word === "off") next.everywhere.star_prompt = { off: true };
-      else delete next.everywhere.star_prompt;
     } else if (key === "agents.feedback") {
       // on or off; the same as what this level would inherit unsets it, so it follows again (as Reactions)
       if (word !== null && word !== "on" && word !== "off") throw new Error("Not one of its choices.");
