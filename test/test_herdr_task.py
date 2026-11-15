@@ -897,6 +897,41 @@ class BackToWork(unittest.TestCase):
         self.assertEqual(self.news.news_line(self.store, t, {}, "working-again"),
                          '<herdr-news task="SHEP-7" event="working-again">SHEP-7 is working again: its agent is at work again (Web client)</herdr-news>')
 
+    def test_a_question_asked_between_two_ticks_is_heard(self):
+        """#1000: GitHub news woke a Ready worker, it asked "pick one" in its own terminal and went quiet before
+        any tick saw it working: the task stayed Ready and nobody heard. Its finished turn is seen now."""
+        t = self.ready(space="sp1")  # said ready in turn 5 (ready_turns: the first new one)
+        asked = {}
+        p = self.mock.patch.object(self.tick, "last_question", lambda task, address=None: asked.get(address))
+        p.start()
+        self.addCleanup(p.stop)
+        report = {}
+        self.live = [self.agent({"address": "t1", "status": "idle", "turn": 5, "role": "worker"})]
+        self.tick.back_pass(self.store, t, report)
+        self.assertEqual(t["state"], "ready")  # its ready turn ended: nothing new
+        # a whole turn since, nothing asked nor changed (a background job's notice): Ready, its turns moved on
+        self.live = [self.agent({"address": "t1", "status": "idle", "turn": 6, "role": "worker"})]
+        self.tick.back_pass(self.store, t, report)
+        self.assertEqual((t["state"], t["ready_turns"]), ("ready", {"t1": 6}))
+        self.assertNotIn("working_again", report)
+        # the next one asks: back to work (Needs you once it stays quiet), and its Assistant hears
+        asked["t1"] = "Which fix: A or B?"
+        self.live = [self.agent({"address": "t1", "status": "idle", "turn": 7, "role": "worker"})]
+        self.tick.back_pass(self.store, t, report)
+        self.assertEqual((t["state"], report["working_again"]), ("running", ["SHEP-7"]))
+        self.assertEqual(self.news.news_line(self.store, t, {}, "working-again"),
+                         '<herdr-news task="SHEP-7" event="working-again">SHEP-7 is working again: its agent asked something (Web client)</herdr-news>')
+        # and the words: GitHub's news and the brief tell a woken Ready worker to ask with its question tool
+        from herdr_task import ghnews, templates
+        with open(os.path.join(ROOT, "templates", "worker.md")) as f:
+            worker = f.read()
+        for words in (templates.WORKER_MD, worker):
+            self.assertIn(templates.ASK_RULE, words)
+            self.assertNotIn(templates.ASK_OLD, words)
+        self.assertIn(templates.WORKER_MD_BEFORE_ASK, templates.OLD_WORKERS)  # an unedited old one gets today's
+        with open(ghnews.__file__) as f:
+            self.assertIn("ask the person with your CLI's question tool", f.read())
+
     # A merge that failed once (t75: "GraphQL: Something went wrong") never blocks the next Accept, and a pull
     # request merged meanwhile (by hand) makes the task done.
     def merging(self, views, merges):

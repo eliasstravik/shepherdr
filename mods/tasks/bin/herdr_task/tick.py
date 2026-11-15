@@ -163,6 +163,27 @@ def back_pass(s, t, report):
     if any(status_word(k) == "working" for k in live) and busy_again(t, [detail(k) for k in live]):
         back_to_work(s, t, "its agent is at work again", auto=True)
         report.setdefault("working_again", []).append(s.ref(t))
+        return
+    # #1000: a whole turn between two passes (GitHub news woke it, it listed options and asked "pick
+    # one" in its own terminal): never seen working, so the task stayed Ready and nobody heard. A
+    # turn that asked or changed its branch takes it back to work: Needs you once it stays quiet
+    # (settle_back() keeps it there). One that left nothing behind only moves its turns on.
+    seen = t.get("ready_turns")
+    if not isinstance(seen, dict) or t.get("merge_requested"):
+        return
+    turned = [k for k in live if status_word(k) in ("idle", "done") and k.get("address") in seen
+              and (k.get("labels") or {}).get("herdr.role") != "reviewer" and (k.get("turn") or 0) > seen[k["address"]]]
+    if not turned:
+        return
+    wt = t.get("worktree") if t.get("mode") == "worktree" else None
+    moved = bool(wt and t.get("head") and os.path.isdir(wt)
+                 and (git(wt, "rev-parse", "HEAD")[1] != t["head"] or git(wt, "status", "--porcelain", "--untracked-files=no")[1]))
+    if moved or any(last_question(t, k["address"]) for k in turned):
+        back_to_work(s, t, "its agent asked something" if not moved else "its agent changed its work", auto=True)
+        report.setdefault("working_again", []).append(s.ref(t))
+        return
+    t["ready_turns"] = {**seen, **{k["address"]: k.get("turn") or 0 for k in turned}}
+    s.dirty = True
 
 
 def settle_back(s, t, report):
