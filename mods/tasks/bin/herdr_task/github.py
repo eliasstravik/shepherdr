@@ -7,7 +7,7 @@ import re
 import shutil
 
 from .base import Fail, GH, git, hc_json, now, run, STORE
-from .agents import agent_running, live_agents, live_helpers, status_word
+from .agents import agent_running, detail, live_agents, live_helpers, mid_turn_agents
 
 
 # ---- GitHub ---------------------------------------------------------------------------------
@@ -86,10 +86,10 @@ def pr_push(s, task, repo):
     if has and tip and seen and there.split()[:1] == [tip]:
         return
     with released(s):
-        ok, _, err = git(wt, "push", "--force-with-lease", "-u", remote, br) if to == br else \
+        ok, out, err = git(wt, "push", "--force-with-lease", "-u", remote, br) if to == br else \
             git(wt, "push", remote, f"{br}:refs/heads/{to}")
     if not ok:
-        raise Fail(f"Couldn't push {br}" + (f" to {to}" if to != br else "") + f": {err}")
+        raise Fail(f"Couldn't push {br}" + (f" to {to}" if to != br else "") + f": {push_error(out, err)}")
 
 
 def pr_open(s, task, repo, summary=None):
@@ -136,6 +136,13 @@ def pr_open(s, task, repo, summary=None):
     if summary and summary.strip():
         task["pr_note"] = {"number": task["pr"]["number"], "said": summary.strip()}  # its body says it already
     return task["pr"]
+
+
+def push_error(out, err, lines=15):
+    """What a failed push said, for ready's refusal (#963): a pre-push hook's own words (what failed,
+    where its log is) often go to stdout, which git leaves there; both, its last lines only."""
+    said = [x for x in (out + "\n" + err).splitlines() if x.strip()]
+    return "\n".join(said[-lines:]) or "git push failed"
 
 
 def pr_note(task, repo, summary):
@@ -686,7 +693,7 @@ def mid_turn(s, task):
     """Its agent, or a helper of its own, is mid-turn (working, or asking): its folder stays until the
     turn ends (SHEP-188). Even when the merge came from Herdr itself (even_if_busy)."""
     key = s.key(task)
-    return any(status_word(k) in ("working", "blocked") for k in live_agents(key) + live_helpers(key))
+    return bool(mid_turn_agents(live_agents(key) + live_helpers(key), detail))
 
 
 def finish(s, task, even_if_busy=False):

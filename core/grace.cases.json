@@ -1506,6 +1506,49 @@
     "status": "ready",
     "needs": null
    }
+  },
+  {
+   "name": "#995: its question held on the chat's card while its agent reads working: Needs you at once",
+   "task": {
+    "state": "running",
+    "started": 1799996400000,
+    "agents": [],
+    "held_ask": "t1"
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "working",
+     "turn": 6,
+     "role": "worker"
+    }
+   ],
+   "expect": {
+    "status": "needs",
+    "needs": "asks"
+   }
+  },
+  {
+   "name": "#995: a Ready task's agent asks on the card: Needs you, not Working again",
+   "task": {
+    "state": "ready",
+    "started": 1799996400000,
+    "ready_at": 1799990000000,
+    "agents": [],
+    "held_ask": "t1"
+   },
+   "live": [
+    {
+     "address": "t1",
+     "status": "working",
+     "turn": 9,
+     "role": "worker"
+    }
+   ],
+   "expect": {
+    "status": "needs",
+    "needs": "asks"
+   }
   }
  ]
 }

@@ -3,6 +3,7 @@ a throwaway) its commands start. On a person's machine herdr-task never runs wit
 import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -1123,6 +1124,71 @@ class BackToWork(unittest.TestCase):
         self.assertEqual(self.news.news_line(self.store, t, {}, "working-again"),
                          '<herdr-news task="SHEP-7" event="working-again">SHEP-7 is working again: its agent is at work again (Web client)</herdr-news>')
 
+    def test_a_dead_agents_shell_is_no_agent(self):
+        """#1022: a Codex worker that died mid-turn left its plain shell, hc still saying "working" (as real hc does
+        after kill -9): the task stayed Working, a Ready one went back to work. Its leftover is no agent now, a fish
+        running its agent (#780) still is, and resume retires the leftover terminal."""
+        dead = {"address": "t1", "status": {"app": "codex", "state": "working"}, "turn": 9, "labels": {"herdr.role": "worker"},
+                "agent": "bash", "foreground": {"name": "bash", "argv": ["/bin/bash", "-i"]}}
+        fish = dict(dead, agent="fish", foreground={"name": "fish", "argv": ["fish", "-ic", "claude go; exec fish -i"]})
+        live = dict(dead, agent="codex", foreground={"name": "codex", "argv": ["codex"]})
+        self.assertEqual([k["agent"] for k in self.agents.mid_turn_agents([dead, fish, live])], ["fish", "codex"])
+        # hc ls alone (no foreground): only a shell in front makes it look closer
+        bare = {k: v for k, v in dead.items() if k != "foreground"}
+        with self.mock.patch.object(self.agents, "detail", lambda k: dead if k["agent"] == "bash" else k):
+            self.assertEqual(self.agents.mid_turn_agents([bare, {**bare, "agent": "codex"}]), [{**bare, "agent": "codex"}])
+        t = self.ready(space="sp1")
+        self.live = [dead]
+        report = {}
+        self.tick.back_pass(self.store, t, report)
+        self.assertEqual(t["state"], "ready")
+        self.assertNotIn("working_again", report)
+        self.assertFalse(self.tick.at_work(self.store, t))
+        # resume: the new agent starts, the old terminal goes
+        killed = []
+        self.live = [dict(dead, status=None)]
+        with self.mock.patch.object(self.commands, "start_again", lambda *a, **k: ({"address": "t2"}, True)), \
+                self.mock.patch.object(self.commands, "agent_running", lambda k: False), \
+                self.mock.patch.object(self.commands, "stop_note", lambda *a, **k: None), \
+                self.mock.patch.object(self.commands, "run", lambda args, **k: killed.append(args)):
+            self.commands.cmd_resume(self.args(space=None, agent=None, argv=None, parent=None))
+        self.assertEqual(killed, [["hc", "kill", "t1"]])
+
+    def test_a_question_asked_between_two_ticks_is_heard(self):
+        """#1000: GitHub news woke a Ready worker, it asked "pick one" in its own terminal and went quiet before
+        any tick saw it working: the task stayed Ready and nobody heard. Its finished turn is seen now."""
+        t = self.ready(space="sp1")  # said ready in turn 5 (ready_turns: the first new one)
+        asked = {}
+        p = self.mock.patch.object(self.tick, "last_question", lambda task, address=None: asked.get(address))
+        p.start()
+        self.addCleanup(p.stop)
+        report = {}
+        self.live = [self.agent({"address": "t1", "status": "idle", "turn": 5, "role": "worker"})]
+        self.tick.back_pass(self.store, t, report)
+        self.assertEqual(t["state"], "ready")  # its ready turn ended: nothing new
+        # a whole turn since, nothing asked nor changed (a background job's notice): Ready, its turns moved on
+        self.live = [self.agent({"address": "t1", "status": "idle", "turn": 6, "role": "worker"})]
+        self.tick.back_pass(self.store, t, report)
+        self.assertEqual((t["state"], t["ready_turns"]), ("ready", {"t1": 6}))
+        self.assertNotIn("working_again", report)
+        # the next one asks: back to work (Needs you once it stays quiet), and its Assistant hears
+        asked["t1"] = "Which fix: A or B?"
+        self.live = [self.agent({"address": "t1", "status": "idle", "turn": 7, "role": "worker"})]
+        self.tick.back_pass(self.store, t, report)
+        self.assertEqual((t["state"], report["working_again"]), ("running", ["SHEP-7"]))
+        self.assertEqual(self.news.news_line(self.store, t, {}, "working-again"),
+                         '<herdr-news task="SHEP-7" event="working-again">SHEP-7 is working again: its agent asked something (Web client)</herdr-news>')
+        # and the words: GitHub's news and the brief tell a woken Ready worker to ask with its question tool
+        from herdr_task import ghnews, templates
+        with open(os.path.join(ROOT, "templates", "worker.md")) as f:
+            worker = f.read()
+        for words in (templates.WORKER_MD, worker):
+            self.assertIn(templates.ASK_RULE, words)
+            self.assertNotIn(templates.ASK_OLD, words)
+        self.assertIn(templates.WORKER_MD_BEFORE_ASK, templates.OLD_WORKERS)  # an unedited old one gets today's
+        with open(ghnews.__file__) as f:
+            self.assertIn("ask the person with your CLI's question tool", f.read())
+
     # A merge that failed once (t75: "GraphQL: Something went wrong") never blocks the next Accept, and a pull
     # request merged meanwhile (by hand) makes the task done.
     def merging(self, views, merges):
@@ -1511,6 +1577,33 @@ class BackToWork(unittest.TestCase):
         self.assertIn("#704", str(e.exception))
         self.assertNotIn(("pr", "create"), calls)
 
+    def test_a_failed_push_says_what_its_hook_said(self):
+        """#963: a pre-push hook's own words (what failed, where its log is) went to stdout, and ready showed only
+        git's "failed to push some refs". A real repo and remote, gh faked."""
+        import herdr_task.github as github
+        d = tempfile.mkdtemp()
+        subprocess.run(["git", "init", "-q", "--bare", os.path.join(d, "remote.git")], check=True)
+        wt = os.path.join(d, "wt")
+        subprocess.run(["git", "init", "-q", "-b", "main", wt], check=True)
+        for c in (["remote", "add", "origin", os.path.join(d, "remote.git")],
+                  ["-c", "user.email=a@example.com", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "x"],
+                  ["checkout", "-q", "-b", "b"]):
+            subprocess.run(["git", "-C", wt, *c], check=True)
+        hook = os.path.join(wt, ".git", "hooks", "pre-push")
+        with open(hook, "w") as f:
+            f.write('#!/bin/sh\necho "typecheck: 3 errors in src/app.ts"\necho "full log: /tmp/typecheck.log" >&2\nexit 1\n')
+        os.chmod(hook, 0o755)
+        t = self.ready(mode="worktree", worktree=wt, branch="b")
+        with self.mock.patch.object(github, "gh", lambda *a, **k: (False, "", "")), \
+                self.mock.patch.dict(self.store.loc, {"folder": wt}):
+            with self.assertRaises(self.commands.Fail) as e:
+                github.pr_open(self.store, t, "o/r")
+        said = str(e.exception)
+        self.assertIn("typecheck: 3 errors in src/app.ts", said)
+        self.assertIn("full log: /tmp/typecheck.log", said)
+        self.assertIn("failed to push some refs", said)
+        self.assertEqual(github.push_error("\n".join(map(str, range(30))), ""), "\n".join(map(str, range(15, 30))))
+
     def test_ready_opens_one_when_there_is_none(self):
         github, calls = self.github_has([])
         t = self.ready(mode="worktree", worktree="/w", branch="b")
@@ -1678,13 +1771,21 @@ class CodexCodeMode(unittest.TestCase):
     stamp, status = OwnBackgroundWork.stamp, OwnBackgroundWork.status
 
     def setUp_ps(self, ps=""):
-        """The `ps` output codex_working() reads (the rest of the test's processes: none)."""
+        """The `ps` output codex_working() reads (the rest of the test's processes: none). Each line "pid ppid
+        [+seconds] args", as ps writes it with its start time (lstart): the agent (ppid 1) at 10:00:00, the
+        others a minute later unless +seconds says when."""
         from types import SimpleNamespace
         if not hasattr(self, "ps"):
             p = self.mock.patch.object(self.agents, "run", lambda args, **kw: SimpleNamespace(stdout=self.ps), create=True)
             p.start()
             self.addCleanup(p.stop)
-        self.ps = ps
+        rows = []
+        for line in ps.splitlines():
+            pid, ppid, rest = line.split(None, 2)
+            m = re.match(r"\+(\d+) (.*)", rest)
+            after, args = (int(m.group(1)), m.group(2)) if m else (0 if ppid == "1" else 60, rest)
+            rows.append(f"{pid} {ppid} Sun Nov 15 10:{after // 60:02d}:{after % 60:02d} 2026 {args}")
+        self.ps = "\n".join(rows) + "\n"
 
     def replay(self, n=None):
         with open(os.path.join(ROOT, "test", "fixtures", "codex-code-mode", "rollout-items.jsonl")) as f:
@@ -1799,6 +1900,25 @@ class CodexCodeMode(unittest.TestCase):
         self.assertTrue(self.agents.codex_working(codex))
         self.assertTrue(self.agents.codex_working({}))  # no pid: its log decides
 
+    def test_its_tool_servers_are_no_job(self):
+        """#946/#1022: a Codex worker's MCP servers (its children since it started, as real Codex 0.163 starts
+        them) kept finished jobs counting: the task stayed Working after ready. A command it started later still
+        counts, and so does one under its code-mode host; a helper an MCP server starts later is the server's."""
+        codex = {"foreground": {"pid": 100}}
+        self.setUp_ps("100 1 codex --no-daemon\n101 100 +1 python3 tiny_mcp.py\n102 100 +4 codex-code-mode-host\n"
+                      "103 101 +300 chrome --headless\n")
+        self.assertFalse(self.agents.codex_working(codex))
+        self.setUp_ps("100 1 codex --no-daemon\n101 100 +1 python3 tiny_mcp.py\n104 100 +83 sleep 400\n")
+        self.assertTrue(self.agents.codex_working(codex))
+        self.setUp_ps("100 1 codex --no-daemon\n101 100 +1 python3 tiny_mcp.py\n102 100 +4 codex-code-mode-host\n"
+                      "105 102 +90 /bin/bash -lc sleep 60\n")
+        self.assertTrue(self.agents.codex_working(codex))
+        # its log still says a session is open, but only its tool servers run: over, the task Ready
+        self.setUp_ps("100 1 codex --no-daemon\n101 100 +1 python3 tiny_mcp.py\n102 100 +4 codex-code-mode-host\n")
+        self.replay(4)
+        live = self.codex()
+        self.assertFalse(self.agents.own_work(self.task, live, ready=True))
+
 
 class NoFalseNeedsYou(unittest.TestCase):
     """SHEP-133: no Needs you for a few seconds that moves on by itself. A quiet agent or a problem
@@ -1817,10 +1937,14 @@ class NoFalseNeedsYou(unittest.TestCase):
         self.assertEqual(self.agents.GRACE_MS, 20_000)
         agent = lambda a: {"address": a["address"], "status": {"state": a["status"]}, "turn": a["turn"],
                            "labels": {"herdr.role": a["role"]}, **({"status_ms": a["since"]} if "since" in a else {})}
+        held = {}  # #995: the card's request herdr-task reads, as the scheduler keeps it on the task (held_ask)
         with self.mock.patch.object(self.agents, "now", lambda: g["now"]), \
-                self.mock.patch.object(self.agents, "held_ask", lambda address: None):
+                self.mock.patch.object(self.agents, "held_ask", lambda address: held.get(address)):
             for i, c in enumerate(g["cases"]):
                 task = dict(c["task"], id=7)
+                held.clear()
+                if task.get("held_ask"):
+                    held[task["held_ask"]] = {"tool_name": "AskUserQuestion", "tool_input": {}}
                 if "log" in c:
                     # SHEP-148: an agent's real state, its session log written as Claude Code writes it
                     log = os.path.join(self.dir, f"case{i}.jsonl")
@@ -1833,6 +1957,24 @@ class NoFalseNeedsYou(unittest.TestCase):
                 # core reads task.own_work: what herdr-task's scheduler keeps from that same log
                 if "own_work" in c["task"]:
                     self.assertEqual(self.agents.own_work(task, live, ready=task["state"] == "ready"), c["task"]["own_work"], c["name"])
+
+    def test_a_question_on_the_card_needs_you_while_it_reads_working(self):
+        """#995: a worker sat on its AskUserQuestion card, the task Working (needs None) and then stalled. The card's
+        request (ask-hook.sh's file) makes it Needs you, with the question as its reason; one a killed hook left
+        behind, older than the hook's 30 minutes, doesn't."""
+        req = os.path.join(self.agents.HOME, ".config", "herdr-app", "data", "chat-asks", "req")
+        os.makedirs(req, exist_ok=True)
+        self.addCleanup(lambda: [os.remove(os.path.join(req, n)) for n in os.listdir(req)])
+        p = os.path.join(req, "t1.1799999000.42.json")
+        with open(p, "w") as f:
+            json.dump({"tool_name": "AskUserQuestion", "tool_input": {"questions": [{"question": "Scope or green?"}]}}, f)
+        working = [dict(self.idle[0], status={"state": "working"})]
+        os.utime(p, (self.clock / 1000 - 60, self.clock / 1000 - 60))
+        self.assertEqual(self.status(working)[:2], ("needs", "asks"))
+        self.assertTrue(self.agents.asking(working[0]))
+        self.assertEqual(self.agents.ask_reason(self.task, "t1", self.agents.held_ask("t1")), "Scope or green?")
+        os.utime(p, (self.clock / 1000 - 32 * 60, self.clock / 1000 - 32 * 60))
+        self.assertEqual(self.status(working), ("working", None, None))
 
     def test_a_quiet_agent_needs_you_once_the_grace_is_over(self):
         self.say(-3_000, "Done with the first part.")
@@ -1886,7 +2028,7 @@ class NoFalseNeedsYou(unittest.TestCase):
         self.assertEqual(self.status(), ("working", None, None))
         self.assertEqual(self.agents.open_tool(self.log)[0], "Bash")
         held["t1"] = {"tool_name": "Bash", "tool_input": {"command": "./finish.sh"}}
-        self.assertEqual(self.status()[:2], ("needs", "reply"))
+        self.assertEqual(self.status()[:2], ("needs", "asks"))  # #995: a permission held on the card asks
         held.clear()
         # its result in: quiet, Needs you
         self.lines.append('{"parentUuid":"b","isSidechain":false,"type":"user","message":{"role":"user","content":[{"tool_use_id":'
@@ -2022,6 +2164,7 @@ class DoneWorktreesGo(unittest.TestCase):
         self.task = self.store.data["tasks"][0]
         live = lambda key: list(self.live)
         for mod, name, value in ((github, "live_agents", live), (github, "live_helpers", lambda key: []),
+                                 (github, "detail", lambda k: k),
                                  (github, "hc_json", lambda *a: {"terminals": self.live + self.others}),
                                  (tick, "live_agents", live), (tick, "detail", lambda k: k),
                                  (tick, "refresh_sessions", lambda *a: None), (tick, "quiet_hc", self.end),
@@ -2299,7 +2442,7 @@ class MergedOnlyWithOwnWork(unittest.TestCase):
         self.store.loc["folder"] = self.main
         self.task = self.store.data["tasks"][0]
         done = lambda s, t, even_if_busy=False: t.update(state="done")
-        for mod, name, value in ((tick, "live_agents", lambda key: self.live), (tick, "finish", done),
+        for mod, name, value in ((tick, "live_agents", lambda key: self.live), (tick, "detail", lambda k: k), (tick, "finish", done),
                                  (tick, "watch_main", lambda *a: None), (commands, "finish", done),
                                  (commands, "open_store", lambda args, write=True: self.store),
                                  (commands, "view", lambda s, t, live=None: dict(t)), (commands, "say", lambda *a: None),
@@ -4862,6 +5005,42 @@ class CodexAsksOnTheCard(unittest.TestCase):
         self.assertEqual(sum(str(a).startswith("projects") for a in launch.own_argv(mine, d)), 1)
         self.assertFalse(any(str(a).startswith("projects") for a in launch.own_argv(["codex"])))
 
+    def test_a_codex_worker_never_stops_on_shepherdrs_own_hooks(self):
+        """#977: Shepherdr's chat hooks in ~/.codex/hooks.json, new or updated, stopped a resumed Codex worker at
+        "Hooks need review" while the task showed Working. Its launch trusts exactly those, as Codex hashes them
+        (the hash below is what real Codex 0.163 wrote to config.toml on "Trust all")."""
+        sys.path.insert(0, BIN)
+        from unittest import mock
+        from herdr_task import launch
+        home = tempfile.mkdtemp()
+        note = "sh '/x/mods/chat/session-note.sh'"
+        with open(os.path.join(home, "hooks.json"), "w") as f:
+            json.dump({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": note, "timeout": 10}]}],
+                                 "PermissionRequest": [{"hooks": [{"type": "command", "command": "sh mine.sh", "timeout": 5}]},
+                                                       {"hooks": [{"type": "command", "command": "sh '/x/mods/chat/ask-hook.sh'",
+                                                                   "timeout": 1800}]}]}}, f)
+        with mock.patch.dict(os.environ, {"CODEX_HOME": home}):
+            argv = launch.own_argv(["codex", "-s", "workspace-write"])
+        [state] = [a for a in argv if str(a).startswith("hooks.state=")]
+        self.assertIn('%s={trusted_hash="sha256:27e15e7a6fd4251f1d46d945ad404948371404ab0a0d725f899e178a8417bbb4"}'
+                      % json.dumps(home + "/hooks.json:session_start:0:0"), state)
+        self.assertIn(json.dumps(home + "/hooks.json:permission_request:1:0"), state)
+        self.assertNotIn(":permission_request:0:0\"={", state.replace("/<session-flags>/config.toml:permission_request:0:0", ""))
+        self.assertIn('"/<session-flags>/config.toml:permission_request:0:0"', state)  # its own -c hook, as before
+        # no hooks.json: only its own -c hook
+        with mock.patch.dict(os.environ, {"CODEX_HOME": tempfile.mkdtemp()}):
+            [state] = [a for a in launch.own_argv(["codex"]) if str(a).startswith("hooks.state=")]
+        self.assertEqual(state.count("trusted_hash"), 1)
+
+    def test_a_claude_worker_never_compacts_while_idle(self):
+        """#1021: a Ready Claude worker flipped to Working about hourly: Claude Code's idle compaction is a turn."""
+        sys.path.insert(0, BIN)
+        from herdr_task import launch
+        st = json.loads(launch.own_argv(["claude", "go"])[2])
+        self.assertIs(st["idleCompaction"], False)
+        mine = launch.own_argv(["claude", "--settings", json.dumps({"idleCompaction": True}), "go"])
+        self.assertIs(json.loads(mine[2])["idleCompaction"], True)  # the person's own argv says otherwise: theirs
+
 class TaskFlow(unittest.TestCase):
     """SHEP-170's task flow fixes, in a throwaway git repo and store; hc and gh are never run."""
 
@@ -5096,6 +5275,23 @@ class TaskFlow(unittest.TestCase):
             f.write("resolved\n")
         self.git(wt, "commit", "-q", "-a", "--no-edit")
         self.assertIn("isn't reviewed", self.refusal())
+
+    def test_a_fix_after_the_last_round_asks_for_one_more(self):
+        """#951: the fix of the last round's findings was refused, and the Assistant had told the worker to just
+        say ready. The refusal and the Assistant's guide both say that fix needs a round of its own (review-more)."""
+        wt = self.reviewed_task()
+        head = self.task["reviews"][0]["head"]
+        self.task["reviews"] += [{"round": 2, "result": "report", "at": 3, "head": head},
+                                 {"round": 3, "result": "report", "at": 4, "head": head}]
+        self.commit(wt, "fix round 3's majors", "a.txt")
+        out = self.refusal()
+        self.assertIn("A fix made after the last round needs a round of its own", out)
+        self.assertIn("review-more", out)
+        with open(os.path.join(ROOT, "templates", "assistant.md")) as f:
+            guide = f.read()
+        [line] = [x for x in guide.splitlines() if x.startswith("- A task out of review rounds")]
+        self.assertIn("that fix needs a round of its own", line)
+        self.assertIn("Never tell it to say ready without one", line)
 
     def test_out_of_rounds_needs_you_whatever_its_line_says(self):
         """#784: ready refused for rounds, the worker's status line "waiting for a review round" is no work of its own."""

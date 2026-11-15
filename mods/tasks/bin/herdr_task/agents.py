@@ -4,6 +4,7 @@ import datetime
 import json
 import os
 import re
+import time
 
 from .base import hc_json, HOME, now, RANK, SHELLS, run
 
@@ -77,6 +78,23 @@ def runs_command(argv):
     return False
 
 
+def mid_turn_agents(records, look=None):
+    """Those of these hc records (hc ls is enough) mid-turn: working or asking, their agent still
+    there. #1022: an agent that died mid-turn (crashed, killed) leaves its plain shell, and hc keeps
+    the status it last reported ("working" for good, its ls even naming the dead agent), holding its
+    task in Working. So a record that says mid-turn is read in full (look: hc get) for what is in
+    front: a plain shell is no agent; fish running its agent (#780) still is."""
+    out = []
+    for k in records:
+        if status_word(k) not in ("working", "blocked"):
+            continue
+        full = k if (k.get("foreground") or {}).get("name") else (look or detail)(k)
+        if (full.get("foreground") or {}).get("name") and not agent_running(full):
+            continue
+        out.append(full)
+    return out
+
+
 def status_of(task, live):
     """A task's status now: its stored state, or for running tasks the most urgent agent status
     (blocked > done > working > idle), or "stopped" when no agent is left."""
@@ -112,10 +130,9 @@ def task_status(task, live):
         return "scheduled", None, starts_words(task.get("scheduled_for") or now(), now())
     if st not in ("running", "ready"):
         return (st if st in STATUSES else "todo"), None, None
-    states = []
-    for k in live:
-        x = k.get("status")
-        states.append(x.get("state") if isinstance(x, dict) else x)
+    # #995: a question or permission waiting on the chat's card counts as asking, whatever the
+    # agent's own status says (Codex reads working until its hook returns; Claude Code may too).
+    states = ["blocked" if asking(k) else status_word(k) for k in live]
     # A problem Herdr just found (SHEP-133): not Needs you before GRACE_MS have passed, while its
     # agent is told and takes it up; until then the task reads as it would without it.
     if task.get("attention") and now() - (task.get("attention_at") or 0) < GRACE_MS:
@@ -575,6 +592,11 @@ def ask_reason(task, address, req=None, kind=None, msg=None):
     return last_question(task, address) or REASONS["question"]
 
 
+# ask-hook.sh holds an ask at most 30 minutes (its loop, the hooks' timeout): a request file older
+# than that was left by a hook that was killed, and holds nothing.
+HELD_MAX_MS = 31 * 60_000
+
+
 def held_ask(address):
     """The ask Herdr's chat hook holds for this terminal (mods/chat/ask-hook.sh), or None."""
     d = os.path.join(HOME, ".config", "herdr-app", "data", "chat-asks", "req")
@@ -584,11 +606,20 @@ def held_ask(address):
         return None
     for n in reversed(names):
         try:
-            with open(os.path.join(d, n)) as f:
+            p = os.path.join(d, n)
+            if now() - os.path.getmtime(p) * 1000 > HELD_MAX_MS:
+                continue
+            with open(p) as f:
                 return json.load(f)
         except (OSError, ValueError):
             continue
     return None
+
+
+def asking(k):
+    """Whether a live agent asks the person now: its own status says blocked, or the chat's card
+    holds its question or permission (#995: a Codex agent reads working while its hook waits)."""
+    return status_word(k) == "blocked" or bool(k.get("address") and held_ask(k["address"]))
 
 
 STARTING_MS = 90_000
@@ -862,29 +893,53 @@ def waits_on_own(task, address=None, ended=0):
     return bool(WAITS_ON.search(text)) and not WAITS_ON_PERSON.search(text)
 
 
+# Codex starts its tool servers (MCP servers from its config, its own runtime helpers) as its own
+# children within a second or two of starting, and they live as long as it does (#946). A command of
+# the agent's own starts in a turn, after the model answered: never this soon.
+CODEX_STARTUP_S = 5
+
+
+def _ps_started(stamp):
+    """ps's lstart ("Sun Nov 15 10:50:03 2026", in the C locale) as epoch seconds, or None."""
+    try:
+        return time.mktime(time.strptime(" ".join(stamp.split()), "%a %b %d %H:%M:%S %Y"))
+    except (ValueError, OverflowError):
+        return None
+
+
 def codex_working(k):
     """Whether a Codex agent has a process of its own running under it: a background terminal or a
-    command of its code mode, but not its code-mode host (SHEP-207). Its pid unknown: True, so its
-    log decides as before. One `ps` for all processes, so it works on macOS too."""
+    command of its code mode, but not its code-mode host (SHEP-207), nor what it started with itself:
+    its MCP servers and runtime helpers and all under them (#946: they kept finished jobs counting).
+    Its pid unknown: True, so its log decides as before. One `ps` for all processes, so it works on
+    macOS too."""
     fg = k.get("foreground") or {}
     if not fg.get("pid") and k.get("address"):
         fg = detail(k).get("foreground") or {}
     if not fg.get("pid"):
         return True
-    children = {}
-    for line in run(["ps", "-axo", "pid=,ppid=,args="]).stdout.splitlines():
-        parts = line.split(None, 2)
-        if len(parts) >= 2 and parts[1].isdigit():
-            children.setdefault(parts[1], []).append(parts)
-    todo, seen_pids = [str(fg["pid"])], set()
+    children, started = {}, {}
+    out = run(["ps", "-axo", "pid=,ppid=,lstart=,args="], env=dict(os.environ, LC_ALL="C", LANG="C")).stdout
+    for line in out.splitlines():
+        parts = line.split(None, 7)  # pid, ppid, the five words of lstart, args
+        if len(parts) >= 7 and parts[1].isdigit():
+            started[parts[0]] = _ps_started(" ".join(parts[2:7]))
+            children.setdefault(parts[1], []).append((parts[0], parts[7] if len(parts) > 7 else ""))
+    root = str(fg["pid"])
+    born = started.get(root)
+    todo, seen_pids = [root], set()
     while todo:
-        for parts in children.get(todo.pop(), []):
-            if parts[0] in seen_pids:
+        for pid, args in children.get(todo.pop(), []):
+            if pid in seen_pids:
                 continue
-            seen_pids.add(parts[0])
-            todo.append(parts[0])
-            if len(parts) > 2 and CODEX_HOST not in parts[2]:
-                return True
+            seen_pids.add(pid)
+            if CODEX_HOST in args:
+                todo.append(pid)  # its code mode's commands run under it
+                continue
+            at = started.get(pid)
+            if born is not None and at is not None and at - born <= CODEX_STARTUP_S:
+                continue  # started with Codex itself: a tool server, never a job (nor anything under it)
+            return True
     return False
 
 

@@ -487,8 +487,9 @@ def review_refusal(s, t, wt):
         what += f" (rounds are recorded on {', '.join(seen)})"
     if rounds_used(t) >= rounds:
         t["review_out"] = now()
-        return (f"All {rounds} review rounds are used and {what} isn't reviewed. Say why in your chat, set your status line to "
-                f"it, and end your turn: only your Assistant can add a round (herdr-task review-more {ref}).")
+        return (f"All {rounds} review rounds are used and {what} isn't reviewed. A fix made after the last round needs a round "
+                f"of its own: say why in your chat (what the fix changed), set your status line to it, and end your turn: only "
+                f"your Assistant can add a round (herdr-task review-more {ref}).")
     return (f"Review is on and {what} isn't reviewed. Have it reviewed as your brief says, fix what must be fixed, record the "
             f"round with `{ht} reviewed {ref} --folder {folder} --report \"<findings, a line>\"` (on the commit you'd say "
             f"ready at), then run ready again. {rounds - rounds_used(t)} of {rounds} rounds left.")
@@ -955,8 +956,15 @@ def cmd_resume(args):
         space = bare(args.space) if args.space else (t.get("space") or default_space())
         if t["state"] == "done":
             t["state"] = "running"
+        gone = [k["address"] for k in live_agents(s.key(t))]  # its agents' terminals, none running an agent
         back_to_work(s, t, "resumed")
         a, resumed = start_again(s, t, space, args.agent, args.argv, parent=args.parent, message=RESUME_NUDGE)
+        # #1022: the old agent's terminal, its plain shell left (with the status it last reported when
+        # it died mid-turn), kept counting as the task's agent: it goes, as switch ends the one it replaces.
+        for address in gone:
+            if address != a["address"]:
+                stop_note("resume-retire", task=s.ref(t), terminal=address, by="resume")
+                run(["hc", "kill", address])
         v = view(s, t)
     say(args, {**v, "terminal": a["address"], "space": space, "parent": a.get("parent"), "resumed": resumed},
         f"{s.ref(t)} {'resumed its session' if resumed else 'started with a handoff'}: {a['address']}")

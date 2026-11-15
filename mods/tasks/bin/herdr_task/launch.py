@@ -120,6 +120,9 @@ def own_argv(argv, folder=None):
             asks.append(hook)
         hooks["PermissionRequest"] = asks
         merged["hooks"] = hooks
+        # #1021: a Ready worker rests for hours; Claude Code's idle compaction would start a turn
+        # nobody asked for about hourly, and each one flips the task back to Working.
+        merged.setdefault("idleCompaction", False)
         if i is not None:
             out[i + 1] = json.dumps(merged)
             return out
@@ -130,14 +133,57 @@ def own_argv(argv, folder=None):
         # launch only: Codex's own key and hash for a -c hook (codex-rs/hooks discovery.rs
         # hook_hash, config fingerprint.rs version_for_toml), so no other hook is trusted by it.
         ident = {"event_name": "permission_request", "hooks": [{"async": False, "command": hook, "timeout": ASK_TIMEOUT, "type": "command"}]}
-        digest = hashlib.sha256(json.dumps(ident, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
-        key = "/<session-flags>/config.toml:permission_request:0:0"
+        state = {"/<session-flags>/config.toml:permission_request:0:0": codex_hook_hash(ident)}
+        # #977: Shepherdr's own hooks in ~/.codex/hooks.json (the chat's question card) trusted for
+        # this launch too, else a new or updated one stops the worker at "Hooks need review" with
+        # nobody at its keys. Only ours, exactly as written there: the person's own stay theirs.
+        state.update(own_codex_hooks())
         # Its folder trusted for this run (#866: "Trust this folder?" would stop it before the brief, nobody at the
         # keys), its repository's root too: Codex asks for that one in a worktree. Skipped when argv says already.
         roots = [] if any(str(a).startswith("projects") for a in out) else trust_roots(folder)
         trust = ["-c", "projects={" + ",".join(f'{json.dumps(r)}={{trust_level="trusted"}}' for r in roots) + "}"] if roots else []
         return out[:1] + ["-c", f"hooks.PermissionRequest=[{{hooks=[{{type=\"command\",command={json.dumps(hook)},timeout={ASK_TIMEOUT}}}]}}]",
-                          "-c", f"hooks.state={{{json.dumps(key)}={{trusted_hash=\"sha256:{digest}\"}}}}", *trust] + out[1:]
+                          "-c", "hooks.state={" + ",".join(f'{json.dumps(k)}={{trusted_hash="sha256:{v}"}}' for k, v in state.items()) + "}",
+                          *trust] + out[1:]
+    return out
+
+
+def codex_hook_hash(ident):
+    """Codex's trusted_hash for one hook group (codex-rs/hooks discovery.rs hook_hash)."""
+    return hashlib.sha256(json.dumps(ident, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
+# Codex's event names in hooks.state keys, from hooks.json's.
+CODEX_EVENTS = {"SessionStart": "session_start", "PermissionRequest": "permission_request"}
+
+
+def own_codex_hooks():
+    """{hooks.state key: hash} for Shepherdr's own hooks in Codex's hooks.json (the installer's
+    session-note.sh and ask-hook.sh), as Codex keys and hashes them; {} when there are none or
+    one has a shape whose hash we can't be sure of (it then asks, as before)."""
+    path = os.path.join(os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"), "hooks.json")
+    try:
+        with open(path) as f:
+            hooks = json.load(f).get("hooks") or {}
+    except (OSError, ValueError, AttributeError):
+        return {}
+    out = {}
+    for event, name in CODEX_EVENTS.items():
+        groups = hooks.get(event) if isinstance(hooks, dict) else None
+        for g, group in enumerate(groups if isinstance(groups, list) else []):
+            entries = group.get("hooks") if isinstance(group, dict) else None
+            if not isinstance(entries, list) or len(entries) != 1 or set(group) - {"hooks", "matcher"}:
+                continue
+            h = entries[0]
+            cmd = h.get("command") if isinstance(h, dict) else None
+            if (not isinstance(cmd, str) or not re.search(r"/mods/chat/(session-note|ask-hook)\.sh'?$", cmd)
+                    or set(h) - {"type", "command", "timeout", "async"} or not isinstance(h.get("timeout"), int)):
+                continue
+            ident = {"event_name": name, "hooks": [{"async": bool(h.get("async", False)), "command": cmd,
+                                                    "timeout": h["timeout"], "type": h.get("type", "command")}]}
+            if group.get("matcher") is not None:
+                ident["matcher"] = group["matcher"]
+            out[f"{path}:{name}:{g}:0"] = codex_hook_hash(ident)
     return out
 
 

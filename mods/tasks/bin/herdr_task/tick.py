@@ -11,7 +11,8 @@ import time
 from .base import Fail, git, guard, hc_json, now, PR_EVERY, run, SHELLS, STORE, stop_note
 from .settings import machine_name, worker_argv
 from .agents import (
-    agent_log, agent_running, busy_again, detail, held_ask, last_question, live_agents, own_work, ready_turns, status_word,
+    agent_log, agent_running, busy_again, detail, held_ask, last_question, live_agents, mid_turn_agents, own_work, ready_turns,
+    status_word,
     task_status,
 )
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
@@ -38,7 +39,7 @@ PR_WAIT_EVERY = 20000  # how often a pull request whose checks still run is read
 def at_work(s, t):
     """Its agent is mid-turn (working, or asking): a task is never marked merged under it (SHEP-23);
     a later tick looks again."""
-    return any(status_word(k) in ("working", "blocked") for k in live_agents(s.key(t)))
+    return bool(mid_turn_agents(live_agents(s.key(t)), detail))
 
 
 def holds_open(s, t):
@@ -197,9 +198,30 @@ def back_pass(s, t, report):
     again until its next ready (busy_again()); its Assistant hears it (news: working-again)."""
     live = live_agents(s.key(t))
     # Cheap while nothing works: hc ls alone; its records in full (roles) only then.
-    if any(status_word(k) == "working" for k in live) and busy_again(t, [detail(k) for k in live]):
+    if any(status_word(k) == "working" for k in live) and busy_again(t, mid_turn_agents(live, detail)):
         back_to_work(s, t, "its agent is at work again", auto=True)
         report.setdefault("working_again", []).append(s.ref(t))
+        return
+    # #1000: a whole turn between two passes (GitHub news woke it, it listed options and asked "pick
+    # one" in its own terminal): never seen working, so the task stayed Ready and nobody heard. A
+    # turn that asked or changed its branch takes it back to work: Needs you once it stays quiet
+    # (settle_back() keeps it there). One that left nothing behind only moves its turns on.
+    seen = t.get("ready_turns")
+    if not isinstance(seen, dict) or t.get("merge_requested"):
+        return
+    turned = [k for k in live if status_word(k) in ("idle", "done") and k.get("address") in seen
+              and (k.get("labels") or {}).get("herdr.role") != "reviewer" and (k.get("turn") or 0) > seen[k["address"]]]
+    if not turned:
+        return
+    wt = t.get("worktree") if t.get("mode") == "worktree" else None
+    moved = bool(wt and t.get("head") and os.path.isdir(wt)
+                 and (git(wt, "rev-parse", "HEAD")[1] != t["head"] or git(wt, "status", "--porcelain", "--untracked-files=no")[1]))
+    if moved or any(last_question(t, k["address"]) for k in turned):
+        back_to_work(s, t, "its agent asked something" if not moved else "its agent changed its work", auto=True)
+        report.setdefault("working_again", []).append(s.ref(t))
+        return
+    t["ready_turns"] = {**seen, **{k["address"]: k.get("turn") or 0 for k in turned}}
+    s.dirty = True
 
 
 def settle_back(s, t, report):
