@@ -379,6 +379,70 @@ if [ "$session" != "herdr-$name" ] && [ ! -f "$root/$name.session" ]; then
   printf '%s\n' "$session" > "$root/$name.session" 2>/dev/null
 fi
 
+# A file it writes lands where the agent is (#964): agent-browser's daemon saves a relative path from the folder it
+# was started in, maybe another task's. So a screenshot, PDF, recording, download or profile path (and
+# --screenshot-dir, --download-path) is made absolute from here.
+abs_path() { case "$1" in /*|\~*) printf %s "$1" ;; *) printf %s "$PWD/$1" ;; esac; }
+is_file() {
+  case "$1" in -*|@*|/*|\~*|http:*|https:*|file:*|data:*|about:*) return 1 ;; esac
+  case "$1" in *.png|*.PNG|*.jpg|*.JPG|*.jpeg|*.JPEG|*.webp|*.pdf|*.webm|*.mp4|*.mov|*.json|*.gif) return 0 ;; esac
+  return 1
+}
+n=$#; i=0; prev=; pos=0
+while [ $i -lt $n ]; do
+  a=$1; shift; i=$((i + 1))
+  case "$prev" in
+    --screenshot-dir|--download-path) a=$(abs_path "$a") ;;
+    *)
+      case "$a" in
+        --screenshot-dir=*) a="--screenshot-dir=$(abs_path "${a#*=}")" ;;
+        --download-path=*) a="--download-path=$(abs_path "${a#*=}")" ;;
+        -*) ;;
+        *)
+          pos=$((pos + 1))
+          case "$verb" in
+            screenshot|pdf|record|profiler) is_file "$a" && a=$(abs_path "$a") ;;
+            download) [ $pos -eq 3 ] && case "$a" in /*|\~*) ;; *) a=$(abs_path "$a") ;; esac ;;
+          esac ;;
+      esac ;;
+  esac
+  set -- "$@" "$a"; prev=$a
+done
+
+# A page that can't be reached (#1034): Chrome waits on it past agent-browser's own wait, so `open` came back with
+# only "Resource temporarily unavailable" and the stuck tab made the next command hang too. A web address whose
+# server doesn't answer a connection within HERDR_BROWSER_CONNECT_WAIT seconds (default 10) is refused here with
+# why, before the browser goes there. A name that doesn't resolve, or a refused connection, Chrome answers at once.
+reach='
+import socket, sys, urllib.parse
+u, wait = sys.argv[1], float(sys.argv[2])
+if "://" not in u:
+    if u.split("/")[0].split(":")[0] in ("localhost", "127.0.0.1"): u = "http://" + u
+    elif "." in u.split("/")[0]: u = "https://" + u
+    else: sys.exit(0)
+p = urllib.parse.urlsplit(u)
+if p.scheme not in ("http", "https") or not p.hostname: sys.exit(0)
+try:
+    port = p.port or (443 if p.scheme == "https" else 80)
+    socket.create_connection((p.hostname, port), timeout=wait).close()
+except socket.timeout:
+    print(f"{p.hostname}:{port} did not answer within {wait:g} s")
+except (OSError, ValueError):
+    pass
+'
+case "$verb" in
+  open|goto|navigate)
+    url=
+    for a in "$@"; do case "$a" in -*|"$verb") ;; *) url=$a; break ;; esac; done
+    if [ -n "$url" ] && [ -z "${HTTPS_PROXY:-}${https_proxy:-}${HTTP_PROXY:-}${http_proxy:-}${ALL_PROXY:-}" ]; then
+      why=$(python3 -c "$reach" "$url" "${HERDR_BROWSER_CONNECT_WAIT:-10}" 2>/dev/null)
+      if [ -n "$why" ]; then
+        echo "herdr-browser: can't open $url: $why, so the browser wasn't sent there (it would hang). Check the address and that its server is running and reachable from this machine, then open it again." >&2
+        exit 4
+      fi
+    fi ;;
+esac
+
 # Pages see prefers-reduced-motion (Chrome draws them in software, so an animation costs a core);
 # an agent whose page must move turns it off with: set media no-preference.
 export AGENT_BROWSER_ARGS="${AGENT_BROWSER_ARGS:---force-prefers-reduced-motion}"

@@ -27,11 +27,13 @@ import re
 import secrets
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.parse
+import zlib
 
 VERSION = "1"
 HOME = os.path.expanduser("~")
@@ -150,7 +152,7 @@ def store_path(folder):
 
 
 class Store:
-    """One folder's artifacts, locked while open."""
+    """One folder's artifacts: a change holds the folder's lock while open; a read takes none."""
 
     def __init__(self, loc, write=True):
         self.loc, self.write = loc, write
@@ -158,29 +160,26 @@ class Store:
         self.dirty = False
 
     def __enter__(self):
-        lock = os.path.join(STORE, "." + os.path.basename(self.path) + ".lock")
-        try:
-            os.makedirs(STORE, exist_ok=True)
-            self.lock = open(lock, "a")
-        except OSError as e:
-            # Nothing can be written here (a read-only sandbox: a Codex reviewer's, #841): a read
-            # goes on under a shared lock on the file as it is; a change is refused, clearly.
-            if self.write or e.errno not in (errno.EROFS, errno.EACCES, errno.EPERM):
+        # A read takes no lock (#972, #971): every write replaces the list whole (os.replace), so a reader sees the old
+        # list or the new one, never half. Readers that locked (a preview reads on every request) kept a publish
+        # waiting for minutes, and a preview waited behind a publish's check: it stayed on Loading. A read-only
+        # sandbox (a Codex reviewer's, #841) reads as anywhere else.
+        self.lock = None
+        if self.write:
+            lock = os.path.join(STORE, "." + os.path.basename(self.path) + ".lock")
+            try:
+                os.makedirs(STORE, exist_ok=True)
+                self.lock = open(lock, "a")
+            except OSError as e:
                 if e.errno in (errno.EROFS, errno.EACCES, errno.EPERM):
                     raise Fail(f"Can't change artifacts here: {STORE} is read-only (a sandbox?). Run this outside it.")
                 raise
             try:
-                self.lock = open(lock)
-            except OSError:
-                self.lock = None
-        if self.lock:
-            how = fcntl.LOCK_EX if self.write else fcntl.LOCK_SH
-            try:
-                fcntl.flock(self.lock, how | fcntl.LOCK_NB)
+                fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                # another herdr-artifact (a publish being checked) has this folder's list: say so, never wait silently
+                # another herdr-artifact (a publish being saved) has this folder's list: say so, never wait silently
                 print(f"Waiting for another herdr-artifact on {self.loc['name']}'s artifacts ({self.path})…", file=sys.stderr, flush=True)
-                fcntl.flock(self.lock, how)
+                fcntl.flock(self.lock, fcntl.LOCK_EX)
         try:
             with open(self.path) as f:
                 self.data = json.load(f)
@@ -645,9 +644,11 @@ def stage_theme(stage, light):
                     f.write(new)
 
 
-# How long one `herdr-app check` may take, and the wait before trying again when Herdr's checker couldn't start.
+# How long one `herdr-app check` may take, and the waits before trying again when Herdr's checker couldn't start: its
+# checker has its own short deadline to connect, which a busy machine misses (#987), so it is tried three times, waiting
+# longer each time. A check that ran out of time is tried once more.
 CHECK_TIMEOUT = 90
-RETRY_WAIT = 3
+RETRY_WAITS = (3, 10)
 # herdr-app's own trouble drawing it (its isolated checker didn't connect, after Herdr restarted), not the artifact's
 CHECKER_DOWN = re.compile(r"isolated checker|did not connect|timed out", re.I)
 
@@ -669,19 +670,21 @@ def check_run(stage):
 
 
 def check_tries(stage):
-    """check_run, once more after a moment when Herdr's checker couldn't start: (code, stdout, stderr), or
+    """check_run, again after a wait (longer each time) when Herdr's checker couldn't start: (code, stdout, stderr), or
     (None, "", why) when it still couldn't."""
-    for attempt in (1, 2):
+    waits, timeouts = list(RETRY_WAITS), 0
+    while True:
         r = check_run(stage)
         if r is None:
+            timeouts += 1
             why = f"herdr-app check didn't finish in {CHECK_TIMEOUT:g} s"
         elif r[0] != 0 and CHECKER_DOWN.search(r[2] or ""):
             why = (r[2] or "").strip().splitlines()[-1]
         else:
             return r
-        if attempt == 1:
-            time.sleep(RETRY_WAIT)
-    return None, "", why
+        if not waits or timeouts > 1:
+            return None, "", why
+        time.sleep(waits.pop(0))
 
 
 def check(src, files, art):
@@ -946,37 +949,52 @@ def cmd_publish(o):
     as_maker = getattr(o, "as_maker", False)
     who = {"terminal": None, "task": None} if as_maker else me()
     loc = find_anywhere(o.id) if o.id and not o.folder else locate(o.folder)
+    # Drawn and checked first, with no lock held (#972): a check can take minutes under load, and the folder's lock held
+    # through it kept every other publish (and, before reads stopped locking, every preview) waiting. The lock is
+    # taken only to save, from the list as it is then.
+    with Store(loc, write=False) as s:
+        art = s.find(o.id) if o.id else None
+    if art:
+        title = o.title or art["title"]
+    else:
+        if not o.title:
+            raise Fail("Give it a title: --title \"Coverage by package\".")
+        title = o.title
+        base = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:24].strip("-") or "artifact"
+        os.makedirs(FILES, exist_ok=True)
+        while True:  # its files' folder, made now: the id is this publish's (another can't pick it meanwhile)
+            aid = f"{base}-{secrets.token_hex(2)}"
+            try:
+                os.mkdir(os.path.join(FILES, aid))
+                break
+            except FileExistsError:
+                pass
+        art = {"id": aid, "created": now(), "versions": []}
+    fresh = not o.id
+    # A task's agent names its task first: "HAT-2: Coverage by package".
+    task = o.task or art.get("task") or who["task"]
+    if task and not title.upper().startswith(task.upper()):
+        title = f"{task}: {title}"
+
+    def drop():
+        if fresh:
+            shutil.rmtree(os.path.join(FILES, art["id"]), ignore_errors=True)
+    if custom and PROOF.search(title):
+        drop()
+        raise Fail("A task's proof is always a recipe (recipe.json), so the person can open it on their phone too. "
+                   "`herdr-artifact guide` shows how (A task's proof).")
+    v = (art["versions"][-1]["v"] if art["versions"] else 0) + 1
+    draft = dict(art, title=title, version=v, folder=loc["folder"])
+    err, warnings, unchecked = check(src, files, draft)
+    if err:
+        drop()
+        raise Fail(f"herdr-app check failed, nothing was published:\n{err}")
     with Store(loc) as s:
-        if o.id:
-            art = s.find(o.id)
-            title = o.title or art["title"]
-        else:
-            if not o.title:
-                raise Fail("Give it a title: --title \"Coverage by package\".")
-            title = o.title
-            base = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:24].strip("-") or "artifact"
-            while True:
-                aid = f"{base}-{secrets.token_hex(2)}"
-                if not os.path.exists(os.path.join(FILES, aid)):
-                    break
-            art = {"id": aid, "created": now(), "versions": []}
+        if fresh:
             s.data["artifacts"].insert(0, art)
-        # A task's agent names its task first: "HAT-2: Coverage by package".
-        task = o.task or art.get("task") or who["task"]
-        if task and not title.upper().startswith(task.upper()):
-            title = f"{task}: {title}"
-        if custom and PROOF.search(title):
-            if not o.id:
-                s.data["artifacts"].remove(art)
-            raise Fail("A task's proof is always a recipe (recipe.json), so the person can open it on their phone too. "
-                       "`herdr-artifact guide` shows how (A task's proof).")
-        v = (art["versions"][-1]["v"] if art["versions"] else 0) + 1
-        draft = dict(art, title=title, version=v, folder=loc["folder"])
-        err, warnings, unchecked = check(src, files, draft)
-        if err:
-            if not o.id:
-                s.data["artifacts"].remove(art)
-            raise Fail(f"herdr-app check failed, nothing was published:\n{err}")
+        else:
+            art = s.find(o.id)  # as it is now: another publish may have saved a version meanwhile
+            v = (art["versions"][-1]["v"] if art["versions"] else 0) + 1
         keep = os.path.join(FILES, art["id"], f"v{v}")
         copy_files(src, files, keep)
         # the stored copy is made ready for every browser (a poster, an mp4 for a clip no browser plays): SHEP-209
@@ -1017,7 +1035,7 @@ def cmd_publish(o):
             print(f"Media: {n}")
         if unchecked:
             print(f"Herdr couldn't draw it to check ({unchecked}), so only its recipe was checked. "
-                  "Look at it in the Artifacts panel, or publish it again later to have it drawn.")
+                  f"It is published. Draw it later, when the machine is less busy: herdr-artifact check {art['id']}")
         elif warnings:
             print(f"\nThe check (light, dark, {NARROW} px wide) found what to fix, then update it:")
             for w in warnings:
@@ -1025,6 +1043,31 @@ def cmd_publish(o):
         else:
             print(f"Checked in light and dark and at {NARROW} px wide: nothing to fix. (The check reads the built UI; it doesn't take a picture.)")
     return 0
+
+
+def cmd_check(o):
+    """Draws a published version again with `herdr-app check`, as publish does, changing nothing: for a publish whose
+    drawing was skipped because Herdr's checker couldn't start (#987)."""
+    with Store(find_anywhere(o.id), write=False) as s:
+        a = as_version(s.find(o.id), o.version)
+    keep = os.path.join(FILES, a["id"], f"v{a['version']}")
+    keep, files = gather(keep)
+    err, warnings, unchecked = check(keep, files, a)
+    out = {"id": a["id"], "version": a["version"], "ok": not err and not unchecked, "warnings": warnings,
+           **({"error": err} if err else {}), **({"unchecked": unchecked} if unchecked else {})}
+    if o.json:
+        print(json.dumps(out))
+    elif err:
+        print(f"v{a['version']} of {a['id']} doesn't draw:\n{err}\nFix it, then: herdr-artifact update {a['id']} <dir>")
+    elif unchecked:
+        print(f"Herdr still couldn't draw it ({unchecked}). Try again in a minute: herdr-artifact check {a['id']}")
+    elif warnings:
+        print(f"The check (light, dark, {NARROW} px wide) found what to fix in v{a['version']}, then update it:")
+        for w in warnings:
+            print(f"  - {w}")
+    else:
+        print(f"v{a['version']} of {a['id']}: drawn in light and dark and at {NARROW} px wide, nothing to fix.")
+    return 1 if err else 2 if unchecked else 0
 
 
 def version_mod(base, v):
@@ -1241,25 +1284,163 @@ def attr(s):
     return re.sub(r"[<>]", "", str(s)).replace('"', "”")
 
 
+# ---- pictures without ImageMagick (#1054) ------------------------------------------------------
+# A stock machine may have no ImageMagick and no PIL: an 8-bit RGB or RGBA PNG (what herdr-app shot and herdr-browser
+# screenshot write) is cut and outlined here in plain Python. ImageMagick is used when it is there (faster).
+
+def png_read(path, upto=None):
+    """(width, height, channels, rows) of an 8-bit RGB or RGBA PNG, not interlaced; rows (bytearrays) only down to
+    `upto` when given (a crop needs none below it)."""
+    with open(path, "rb") as f:
+        data = f.read()
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("not a PNG")
+    i, idat, head = 8, [], None
+    while i + 8 <= len(data):
+        n, t = struct.unpack(">I4s", data[i:i + 8])
+        body = data[i + 8:i + 8 + n]
+        if t == b"IHDR":
+            head = struct.unpack(">IIBBBBB", body)
+        elif t == b"IDAT":
+            idat.append(body)
+        elif t == b"IEND":
+            break
+        i += 12 + n
+    if not head:
+        raise ValueError("no PNG header")
+    w, h, depth, ctype, _c, _f, inter = head
+    if depth != 8 or ctype not in (2, 6) or inter:
+        raise ValueError("only an 8-bit RGB or RGBA PNG, not interlaced, is read without ImageMagick")
+    ch = 3 if ctype == 2 else 4
+    stride, rows, prev = w * ch, [], bytearray(w * ch)
+    z, raw = zlib.decompressobj(), b""
+    chunks = iter(idat)
+    for y in range(min(h, upto if upto is not None else h)):
+        while len(raw) < stride + 1:
+            nxt = next(chunks, None)
+            raw += z.decompress(nxt) if nxt is not None else z.flush()
+            if nxt is None and len(raw) < stride + 1:
+                raise ValueError("a PNG cut short")
+        ft, line, raw = raw[0], bytearray(raw[1:stride + 1]), raw[stride + 1:]
+        if ft == 1:
+            for x in range(ch, stride):
+                line[x] = (line[x] + line[x - ch]) & 255
+        elif ft == 2:
+            line = bytearray((a + b) & 255 for a, b in zip(line, prev))
+        elif ft == 3:
+            for x in range(stride):
+                line[x] = (line[x] + (((line[x - ch] if x >= ch else 0) + prev[x]) >> 1)) & 255
+        elif ft == 4:
+            for x in range(stride):
+                a, b = (line[x - ch] if x >= ch else 0), prev[x]
+                c = prev[x - ch] if x >= ch else 0
+                pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
+                line[x] = (line[x] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+        rows.append(line)
+        prev = line
+    return w, h, ch, rows
+
+
+def png_write(path, w, h, ch, rows):
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+    raw = b"".join(b"\0" + bytes(r) for r in rows)
+    with open(path, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2 if ch == 3 else 6, 0, 0, 0))
+                + chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b""))
+
+
+def png_size(path):
+    with open(path, "rb") as f:
+        head = f.read(24)
+    if head[:8] != b"\x89PNG\r\n\x1a\n" or head[12:16] != b"IHDR":
+        raise ValueError("not a PNG")
+    return struct.unpack(">II", head[16:24])
+
+
+def png_cut(src, out, x, y, w, h, outline=None, stroke=2, longest=None):
+    """src's rectangle (px) as a PNG at out; outline: ("rect", x0, y0, x1, y1) or ("circle", cx, cy, r) inside the cut,
+    drawn in blue; longest: shrunk (never grown) so its longest side is at most that."""
+    x, y, w, h = max(0, int(x)), max(0, int(y)), int(w), int(h)
+    W, H, ch, rows = png_read(src, upto=min(png_size(src)[1], y + h))
+    w, h = max(1, min(int(w), W - x)), max(1, min(int(h), H - y))
+    cut = [bytearray(r[x * ch:(x + w) * ch]) for r in rows[y:y + h]]
+    if outline:
+        blue = bytes((0x2F, 0x81, 0xF7, 255)[:ch])
+
+        def dot(px, py):
+            px, py = int(px), int(py)
+            for dy in range(stroke):
+                for dx in range(stroke):
+                    qx, qy = px + dx - stroke // 2, py + dy - stroke // 2
+                    if 0 <= qx < w and 0 <= qy < h:
+                        cut[qy][qx * ch:(qx + 1) * ch] = blue
+        if outline[0] == "rect":
+            x0, y0, x1, y1 = outline[1:]
+            for px in range(int(x0), int(x1) + 1):
+                dot(px, y0), dot(px, y1)
+            for py in range(int(y0), int(y1) + 1):
+                dot(x0, py), dot(x1, py)
+        else:
+            import math
+            cx, cy, r = outline[1:]
+            for k in range(int(2 * math.pi * r) * 2 + 8):
+                t = k / (int(2 * math.pi * r) * 2 + 8) * 2 * math.pi
+                dot(cx + r * math.cos(t), cy + r * math.sin(t))
+    if longest and max(w, h) > longest:
+        f = max(w, h) / longest
+        nw, nh = max(1, round(w / f)), max(1, round(h / f))
+        cut = [bytearray(b"".join(bytes(cut[int(j * f)][int(i * f) * ch:(int(i * f) + 1) * ch]) for i in range(nw))) for j in range(nh)]
+        w, h = nw, nh
+    png_write(out, w, h, ch, cut)
+    return True
+
+
+def cmd_crop(o):
+    """A picture cut to what matters, for an artifact: no ImageMagick or PIL needed (#1054)."""
+    x, y, w, h = rect(o.rect)
+    if w < 1 or h < 1:
+        raise Fail("The rect needs a width and a height: x,y,w,h in pixels.")
+    try:
+        png_cut(os.path.expanduser(o.src), os.path.expanduser(o.out), x, y, w, h, longest=o.max)
+    except (OSError, ValueError) as e:
+        raise Fail(f"Couldn't crop {o.src}: {e}.")
+    W, H = png_size(os.path.expanduser(o.out))
+    print(json.dumps({"out": os.path.expanduser(o.out), "width": W, "height": H}) if o.json else f"Wrote {o.out} ({W}x{H}).")
+    return 0
+
+
 def crop_shot(shot, panel, area, out):
     """The artifact's panel cut from a window shot (logical px rects), the spot outlined (area None:
     just the panel). The shot is at the window's physical size: its scale is the shot's width over
-    the window's (window.json), snapped to a quarter."""
-    r = run(["magick", "identify", "-format", "%w", shot])
+    the window's (window.json), snapped to a quarter. ImageMagick when it is there, else plain Python (#1054)."""
+    magick = shutil.which("magick")
     try:
-        pw = int(r.stdout.strip())
+        pw = int(run(["magick", "identify", "-format", "%w", shot]).stdout.strip()) if magick else png_size(shot)[0]
         with open(os.path.join(APP, "window.json")) as f:
             ww = float(json.load(f)["bounds"][2])
         scale = max(1.0, round(pw / ww * 4) / 4)
-    except (ValueError, OSError, KeyError, IndexError, TypeError, ZeroDivisionError):
+    except (ValueError, OSError, KeyError, IndexError, TypeError, ZeroDivisionError, struct.error):
         return False
     px, py, pw_, ph = (round(v * scale) for v in panel)
     if area is None:
+        if not magick:
+            try:
+                return png_cut(shot, out, px, py, pw_, ph, longest=1600)
+            except (OSError, ValueError, struct.error, zlib.error):
+                return False
         r = run(["magick", shot, "-crop", f"{pw_}x{ph}+{px}+{py}", "+repage", "-resize", "1600x1600>", out])
         return r.returncode == 0 and os.path.isfile(out)
     ax, ay, aw, ah = ((v - o) * scale for v, o in zip(area, (panel[0], panel[1], 0, 0)))
-    if aw < 8 * scale and ah < 8 * scale:
-        cx, cy = ax + aw / 2, ay + ah / 2
+    small = aw < 8 * scale and ah < 8 * scale
+    cx, cy = ax + aw / 2, ay + ah / 2
+    if not magick:
+        try:
+            return png_cut(shot, out, px, py, pw_, ph, stroke=max(2, round(2 * scale)),
+                           outline=("circle", cx, cy, 14 * scale) if small else ("rect", ax, ay, ax + aw, ay + ah))
+        except (OSError, ValueError, struct.error, zlib.error):
+            return False
+    if small:
         draw = f"circle {cx:.0f},{cy:.0f} {cx + 14 * scale:.0f},{cy:.0f}"
     else:
         draw = f"rectangle {ax:.0f},{ay:.0f} {ax + aw:.0f},{ay + ah:.0f}"
@@ -1844,22 +2025,46 @@ def preview_alive():
     return port
 
 
+PREVIEW_LOG = os.path.join(STORE, ".preview.log")
+PREVIEW_WAIT = 20
+
+
 def preview_start():
-    """The port of this machine's preview server, started when none answers."""
+    """The port of this machine's preview server, started when none answers. Its own output goes to PREVIEW_LOG, so a
+    start that fails says why (#975); a busy machine gets PREVIEW_WAIT seconds, and a server that ended at once one
+    more try."""
     port = preview_alive()
     if port:
         return port
     os.makedirs(STORE, exist_ok=True)
-    with contextlib.suppress(OSError):
-        os.unlink(PREVIEW_STATE)
-    subprocess.Popen([sys.executable, os.path.realpath(__file__), "_serve"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
-    for _ in range(50):
-        time.sleep(0.1)
-        port = preview_alive()
-        if port:
-            return port
-    raise Fail("The preview server didn't start.")
+    why = None
+    for _ in (1, 2):
+        with contextlib.suppress(OSError):
+            os.unlink(PREVIEW_STATE)
+        with open(PREVIEW_LOG, "w") as log:
+            p = subprocess.Popen([sys.executable, os.path.realpath(__file__), "_serve"], stdin=subprocess.DEVNULL,
+                                 stdout=log, stderr=log, start_new_session=True, close_fds=True)
+        end = time.time() + PREVIEW_WAIT
+        while time.time() < end:
+            time.sleep(0.1)
+            port = preview_alive()
+            if port:
+                return port
+            if p.poll() is not None:
+                break
+        try:
+            with open(PREVIEW_LOG) as f:
+                tail = [l.rstrip() for l in f.read().strip().splitlines()[-3:]]
+        except OSError:
+            tail = []
+        if p.poll() is None:
+            why = f"it didn't answer within {PREVIEW_WAIT} s"
+            with contextlib.suppress(OSError):
+                p.kill()
+            break
+        why = f"it ended at once (exit {p.returncode})" + (": " + " / ".join(tail) if tail else "")
+    raise Fail(f"The preview server didn't start: {why}. Its log: {PREVIEW_LOG}. Try again; if it keeps failing, "
+               "`herdr-artifact link <id>` gives the person's link instead.")
 
 
 def serve_preview(idle=PREVIEW_IDLE):
@@ -2155,6 +2360,14 @@ def main():
     c.add_argument("--note")
     c.add_argument("--custom", action="store_true", help="a custom GPUI panel (main.js), only when a recipe truly can't")
     c.set_defaults(folder=None, task=None)
+    c = cmd("check", cmd_check, "draw a published version again to check it (when publish couldn't), changing nothing")
+    c.add_argument("id")
+    c.add_argument("--version", type=int, help="an older version (default: the latest)")
+    c = cmd("crop", cmd_crop, "cut a PNG to what matters (a screenshot for an artifact), with nothing else installed")
+    c.add_argument("src", help="the PNG to cut")
+    c.add_argument("out", help="where the cut PNG goes")
+    c.add_argument("--rect", required=True, help="the part to keep, in the picture's pixels: x,y,w,h")
+    c.add_argument("--max", type=int, help="shrink it so its longest side is at most this many pixels")
     c = cmd("list", cmd_list, "a folder's artifacts, newest first")
     c.add_argument("--folder")
     c.add_argument("--all", action="store_true", help="every folder's on this machine")

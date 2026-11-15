@@ -161,6 +161,17 @@ function Pdf({ src, caption, asset }: { src: string; caption?: string; asset: (s
   )
 }
 
+/** A picture at its own size, never wider than its column (a flex column would stretch it: #954). One that fails to
+ *  load (a version still being copied, a hiccup reaching another machine) is asked for again a few times, under a
+ *  new address so no cached failure answers (#983). */
+function Pic({ src, alt, w, h }: { src: string; alt: string; w?: number; h?: number }) {
+  const [tries, setTries] = useState(0)
+  useEffect(() => setTries(0), [src])
+  const retry = () => { if (tries < 3) setTimeout(() => setTries((n) => n + 1), 1000 * 2 ** tries) }
+  const url = tries ? `${src}${src.includes('?') ? '&' : '?'}retry=${tries}` : src
+  return <img src={url} alt={alt} width={w} height={h} onError={retry} className="h-auto max-w-full self-start rounded-box shadow-box" loading="lazy" />
+}
+
 /** before and after side by side: a picture or a clip each; two clips play together (one's play, pause and seek are the other's) */
 function Pair({ b, asset }: { b: Block; asset: (src: string) => string }) {
   const left = useRef<HTMLVideoElement>(null), right = useRef<HTMLVideoElement>(null)
@@ -180,7 +191,7 @@ function Pair({ b, asset }: { b: Block; asset: (src: string) => string }) {
           <Clip key={w} src={x.src} poster={x.poster} caption={x.caption ?? w} asset={asset} videoRef={mine} label={`${w}: ${x.caption ?? w}`}
             events={clips ? follow(mine, theirs) : undefined} />
         ) : (
-          <figure key={w} className="flex min-w-0 flex-col gap-1.5"><img src={asset(x.src)} alt={x.caption ?? w} className="h-auto max-w-full rounded-box shadow-box" loading="lazy" /><figcaption className="text-fg2">{x.caption ?? w}</figcaption></figure>
+          <figure key={w} className="flex min-w-0 flex-col gap-1.5"><Pic src={asset(x.src)} alt={x.caption ?? w} /><figcaption className="text-fg2">{x.caption ?? w}</figcaption></figure>
         )
       })}
     </div>
@@ -217,7 +228,7 @@ export function Recipe({ recipe, asset, reply }: Props) {
       )
       case 'chart': return <Chart b={b} />
       case 'stats': return <dl className="grid grid-cols-2 gap-3 @lg:grid-cols-4">{b.items.map((x: any, i: number) => <div key={i} className="rounded-box bg-well p-3 shadow-soft"><dt className="text-fg2">{x.label}</dt><dd className="text-xl font-semibold tabular-nums">{String(x.value)}</dd>{x.note ? <dd className="text-fg3">{x.note}</dd> : null}</div>)}</dl>
-      case 'image': return <figure className="flex flex-col gap-1.5"><img src={asset(b.src)} alt={b.caption ?? ''} width={b.w} height={b.h} className="h-auto max-w-full rounded-box shadow-box" loading="lazy" />{b.caption ? <figcaption className="text-fg2">{b.caption}</figcaption> : null}</figure>
+      case 'image': return <figure className="flex flex-col gap-1.5"><Pic src={asset(b.src)} alt={b.caption ?? ''} w={b.w} h={b.h} />{b.caption ? <figcaption className="text-fg2">{b.caption}</figcaption> : null}</figure>
       case 'video': return <Clip src={b.src} poster={b.poster} caption={b.caption} loop={b.loop} muted={b.muted} autoplay={b.autoplay} asset={asset} />
       case 'audio': return <Sound src={b.src} caption={b.caption} asset={asset} />
       case 'pdf': return <Pdf src={b.src} caption={b.caption} asset={asset} />

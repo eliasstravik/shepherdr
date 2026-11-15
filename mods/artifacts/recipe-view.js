@@ -24,6 +24,14 @@ export default class RecipeView extends View {
     this.checks = new Map();   // a form checkbox's value
     this.copied = null;        // the code box just copied, for its "Copied" a moment
     try { this.recipe = withIds(data); } catch { this.error = "This artifact's recipe can't be read."; }
+    // every form field's InputState now: GPUI refuses InputState.new during render (#1026)
+    const walk = (bs) => (Array.isArray(bs) ? bs : []).forEach((b) => {
+      if (b?.type === "form") (b.fields ?? []).forEach((f) => f.kind !== "checkbox" && this.input(b, f));
+      else if (b?.type === "columns") (b.columns ?? []).forEach(walk);
+      else if (b?.type === "tabs") (b.tabs ?? []).forEach((x) => walk(x?.blocks));
+      else if (b?.type === "details") walk(b.blocks);
+    });
+    walk(this.recipe?.blocks);
   }
 
   // Markdown words; each fenced code block in them gets its own code box with a Copy button (core/recipe.js mdParts).
@@ -61,6 +69,7 @@ export default class RecipeView extends View {
     cx.spawn(async (cx) => { if (!(await reply(text))) this.sent.delete(key); cx.notify(); });
   }
 
+  // a form field's InputState, made in init() (render only reads it)
   input(b, f) {
     const k = `${b.id}:${f.name}`;
     if (!this.inputs.has(k)) this.inputs.set(k, InputState.new({ placeholder: f.label ?? f.name, ...(f.kind === "textarea" ? { multi_line: true } : {}) }));
