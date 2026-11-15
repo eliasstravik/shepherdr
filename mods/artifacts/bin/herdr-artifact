@@ -150,7 +150,7 @@ def store_path(folder):
 
 
 class Store:
-    """One folder's artifacts, locked while open."""
+    """One folder's artifacts: a change holds the folder's lock while open; a read takes none."""
 
     def __init__(self, loc, write=True):
         self.loc, self.write = loc, write
@@ -158,29 +158,26 @@ class Store:
         self.dirty = False
 
     def __enter__(self):
-        lock = os.path.join(STORE, "." + os.path.basename(self.path) + ".lock")
-        try:
-            os.makedirs(STORE, exist_ok=True)
-            self.lock = open(lock, "a")
-        except OSError as e:
-            # Nothing can be written here (a read-only sandbox: a Codex reviewer's, #841): a read
-            # goes on under a shared lock on the file as it is; a change is refused, clearly.
-            if self.write or e.errno not in (errno.EROFS, errno.EACCES, errno.EPERM):
+        # A read takes no lock (#972, #971): every write replaces the list whole (os.replace), so a reader sees the old
+        # list or the new one, never half. Readers that locked (a preview reads on every request) kept a publish
+        # waiting for minutes, and a preview waited behind a publish's check: it stayed on Loading. A read-only
+        # sandbox (a Codex reviewer's, #841) reads as anywhere else.
+        self.lock = None
+        if self.write:
+            lock = os.path.join(STORE, "." + os.path.basename(self.path) + ".lock")
+            try:
+                os.makedirs(STORE, exist_ok=True)
+                self.lock = open(lock, "a")
+            except OSError as e:
                 if e.errno in (errno.EROFS, errno.EACCES, errno.EPERM):
                     raise Fail(f"Can't change artifacts here: {STORE} is read-only (a sandbox?). Run this outside it.")
                 raise
             try:
-                self.lock = open(lock)
-            except OSError:
-                self.lock = None
-        if self.lock:
-            how = fcntl.LOCK_EX if self.write else fcntl.LOCK_SH
-            try:
-                fcntl.flock(self.lock, how | fcntl.LOCK_NB)
+                fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                # another herdr-artifact (a publish being checked) has this folder's list: say so, never wait silently
+                # another herdr-artifact (a publish being saved) has this folder's list: say so, never wait silently
                 print(f"Waiting for another herdr-artifact on {self.loc['name']}'s artifacts ({self.path})…", file=sys.stderr, flush=True)
-                fcntl.flock(self.lock, how)
+                fcntl.flock(self.lock, fcntl.LOCK_EX)
         try:
             with open(self.path) as f:
                 self.data = json.load(f)
@@ -645,9 +642,11 @@ def stage_theme(stage, light):
                     f.write(new)
 
 
-# How long one `herdr-app check` may take, and the wait before trying again when Herdr's checker couldn't start.
+# How long one `herdr-app check` may take, and the waits before trying again when Herdr's checker couldn't start: its
+# checker has its own short deadline to connect, which a busy machine misses (#987), so it is tried three times, waiting
+# longer each time. A check that ran out of time is tried once more.
 CHECK_TIMEOUT = 90
-RETRY_WAIT = 3
+RETRY_WAITS = (3, 10)
 # herdr-app's own trouble drawing it (its isolated checker didn't connect, after Herdr restarted), not the artifact's
 CHECKER_DOWN = re.compile(r"isolated checker|did not connect|timed out", re.I)
 
@@ -669,19 +668,21 @@ def check_run(stage):
 
 
 def check_tries(stage):
-    """check_run, once more after a moment when Herdr's checker couldn't start: (code, stdout, stderr), or
+    """check_run, again after a wait (longer each time) when Herdr's checker couldn't start: (code, stdout, stderr), or
     (None, "", why) when it still couldn't."""
-    for attempt in (1, 2):
+    waits, timeouts = list(RETRY_WAITS), 0
+    while True:
         r = check_run(stage)
         if r is None:
+            timeouts += 1
             why = f"herdr-app check didn't finish in {CHECK_TIMEOUT:g} s"
         elif r[0] != 0 and CHECKER_DOWN.search(r[2] or ""):
             why = (r[2] or "").strip().splitlines()[-1]
         else:
             return r
-        if attempt == 1:
-            time.sleep(RETRY_WAIT)
-    return None, "", why
+        if not waits or timeouts > 1:
+            return None, "", why
+        time.sleep(waits.pop(0))
 
 
 def check(src, files, art):
@@ -946,37 +947,52 @@ def cmd_publish(o):
     as_maker = getattr(o, "as_maker", False)
     who = {"terminal": None, "task": None} if as_maker else me()
     loc = find_anywhere(o.id) if o.id and not o.folder else locate(o.folder)
+    # Drawn and checked first, with no lock held (#972): a check can take minutes under load, and the folder's lock held
+    # through it kept every other publish (and, before reads stopped locking, every preview) waiting. The lock is
+    # taken only to save, from the list as it is then.
+    with Store(loc, write=False) as s:
+        art = s.find(o.id) if o.id else None
+    if art:
+        title = o.title or art["title"]
+    else:
+        if not o.title:
+            raise Fail("Give it a title: --title \"Coverage by package\".")
+        title = o.title
+        base = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:24].strip("-") or "artifact"
+        os.makedirs(FILES, exist_ok=True)
+        while True:  # its files' folder, made now: the id is this publish's (another can't pick it meanwhile)
+            aid = f"{base}-{secrets.token_hex(2)}"
+            try:
+                os.mkdir(os.path.join(FILES, aid))
+                break
+            except FileExistsError:
+                pass
+        art = {"id": aid, "created": now(), "versions": []}
+    fresh = not o.id
+    # A task's agent names its task first: "HAT-2: Coverage by package".
+    task = o.task or art.get("task") or who["task"]
+    if task and not title.upper().startswith(task.upper()):
+        title = f"{task}: {title}"
+
+    def drop():
+        if fresh:
+            shutil.rmtree(os.path.join(FILES, art["id"]), ignore_errors=True)
+    if custom and PROOF.search(title):
+        drop()
+        raise Fail("A task's proof is always a recipe (recipe.json), so the person can open it on their phone too. "
+                   "`herdr-artifact guide` shows how (A task's proof).")
+    v = (art["versions"][-1]["v"] if art["versions"] else 0) + 1
+    draft = dict(art, title=title, version=v, folder=loc["folder"])
+    err, warnings, unchecked = check(src, files, draft)
+    if err:
+        drop()
+        raise Fail(f"herdr-app check failed, nothing was published:\n{err}")
     with Store(loc) as s:
-        if o.id:
-            art = s.find(o.id)
-            title = o.title or art["title"]
-        else:
-            if not o.title:
-                raise Fail("Give it a title: --title \"Coverage by package\".")
-            title = o.title
-            base = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:24].strip("-") or "artifact"
-            while True:
-                aid = f"{base}-{secrets.token_hex(2)}"
-                if not os.path.exists(os.path.join(FILES, aid)):
-                    break
-            art = {"id": aid, "created": now(), "versions": []}
+        if fresh:
             s.data["artifacts"].insert(0, art)
-        # A task's agent names its task first: "HAT-2: Coverage by package".
-        task = o.task or art.get("task") or who["task"]
-        if task and not title.upper().startswith(task.upper()):
-            title = f"{task}: {title}"
-        if custom and PROOF.search(title):
-            if not o.id:
-                s.data["artifacts"].remove(art)
-            raise Fail("A task's proof is always a recipe (recipe.json), so the person can open it on their phone too. "
-                       "`herdr-artifact guide` shows how (A task's proof).")
-        v = (art["versions"][-1]["v"] if art["versions"] else 0) + 1
-        draft = dict(art, title=title, version=v, folder=loc["folder"])
-        err, warnings, unchecked = check(src, files, draft)
-        if err:
-            if not o.id:
-                s.data["artifacts"].remove(art)
-            raise Fail(f"herdr-app check failed, nothing was published:\n{err}")
+        else:
+            art = s.find(o.id)  # as it is now: another publish may have saved a version meanwhile
+            v = (art["versions"][-1]["v"] if art["versions"] else 0) + 1
         keep = os.path.join(FILES, art["id"], f"v{v}")
         copy_files(src, files, keep)
         # the stored copy is made ready for every browser (a poster, an mp4 for a clip no browser plays): SHEP-209
@@ -1017,7 +1033,7 @@ def cmd_publish(o):
             print(f"Media: {n}")
         if unchecked:
             print(f"Herdr couldn't draw it to check ({unchecked}), so only its recipe was checked. "
-                  "Look at it in the Artifacts panel, or publish it again later to have it drawn.")
+                  f"It is published. Draw it later, when the machine is less busy: herdr-artifact check {art['id']}")
         elif warnings:
             print(f"\nThe check (light, dark, {NARROW} px wide) found what to fix, then update it:")
             for w in warnings:
@@ -1025,6 +1041,31 @@ def cmd_publish(o):
         else:
             print(f"Checked in light and dark and at {NARROW} px wide: nothing to fix. (The check reads the built UI; it doesn't take a picture.)")
     return 0
+
+
+def cmd_check(o):
+    """Draws a published version again with `herdr-app check`, as publish does, changing nothing: for a publish whose
+    drawing was skipped because Herdr's checker couldn't start (#987)."""
+    with Store(find_anywhere(o.id), write=False) as s:
+        a = as_version(s.find(o.id), o.version)
+    keep = os.path.join(FILES, a["id"], f"v{a['version']}")
+    keep, files = gather(keep)
+    err, warnings, unchecked = check(keep, files, a)
+    out = {"id": a["id"], "version": a["version"], "ok": not err and not unchecked, "warnings": warnings,
+           **({"error": err} if err else {}), **({"unchecked": unchecked} if unchecked else {})}
+    if o.json:
+        print(json.dumps(out))
+    elif err:
+        print(f"v{a['version']} of {a['id']} doesn't draw:\n{err}\nFix it, then: herdr-artifact update {a['id']} <dir>")
+    elif unchecked:
+        print(f"Herdr still couldn't draw it ({unchecked}). Try again in a minute: herdr-artifact check {a['id']}")
+    elif warnings:
+        print(f"The check (light, dark, {NARROW} px wide) found what to fix in v{a['version']}, then update it:")
+        for w in warnings:
+            print(f"  - {w}")
+    else:
+        print(f"v{a['version']} of {a['id']}: drawn in light and dark and at {NARROW} px wide, nothing to fix.")
+    return 1 if err else 2 if unchecked else 0
 
 
 def version_mod(base, v):
@@ -2155,6 +2196,9 @@ def main():
     c.add_argument("--note")
     c.add_argument("--custom", action="store_true", help="a custom GPUI panel (main.js), only when a recipe truly can't")
     c.set_defaults(folder=None, task=None)
+    c = cmd("check", cmd_check, "draw a published version again to check it (when publish couldn't), changing nothing")
+    c.add_argument("id")
+    c.add_argument("--version", type=int, help="an older version (default: the latest)")
     c = cmd("list", cmd_list, "a folder's artifacts, newest first")
     c.add_argument("--folder")
     c.add_argument("--all", action="store_true", help="every folder's on this machine")
