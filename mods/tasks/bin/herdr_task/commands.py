@@ -466,8 +466,9 @@ def review_refusal(s, t, wt):
         what += f" (rounds are recorded on {', '.join(seen)})"
     if rounds_used(t) >= rounds:
         t["review_out"] = now()
-        return (f"All {rounds} review rounds are used and {what} isn't reviewed. Say why in your chat, set your status line to "
-                f"it, and end your turn: only your Assistant can add a round (herdr-task review-more {ref}).")
+        return (f"All {rounds} review rounds are used and {what} isn't reviewed. A fix made after the last round needs a round "
+                f"of its own: say why in your chat (what the fix changed), set your status line to it, and end your turn: only "
+                f"your Assistant can add a round (herdr-task review-more {ref}).")
     return (f"Review is on and {what} isn't reviewed. Have it reviewed as your brief says, fix what must be fixed, record the "
             f"round with `{ht} reviewed {ref} --folder {folder} --report \"<findings, a line>\"` (on the commit you'd say "
             f"ready at), then run ready again. {rounds - rounds_used(t)} of {rounds} rounds left.")

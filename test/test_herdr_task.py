@@ -4757,6 +4757,22 @@ class TaskFlow(unittest.TestCase):
         self.git(wt, "commit", "-q", "-a", "--no-edit")
         self.assertIn("isn't reviewed", self.refusal())
 
+    def test_a_fix_after_the_last_round_asks_for_one_more(self):
+        """#951: the fix of the last round's findings was refused, and the Assistant had told the worker to just
+        say ready. The refusal and the Assistant's guide both say that fix needs a round of its own (review-more)."""
+        wt = self.reviewed_task()
+        head = self.task["reviews"][0]["head"]
+        self.task["reviews"] += [{"round": 2, "result": "report", "at": 3, "head": head},
+                                 {"round": 3, "result": "report", "at": 4, "head": head}]
+        self.commit(wt, "fix round 3's majors", "a.txt")
+        out = self.refusal()
+        self.assertIn("A fix made after the last round needs a round of its own", out)
+        self.assertIn("review-more", out)
+        guide = open(os.path.join(ROOT, "templates", "assistant.md")).read()
+        [line] = [x for x in guide.splitlines() if x.startswith("- A task out of review rounds")]
+        self.assertIn("that fix needs a round of its own", line)
+        self.assertIn("Never tell it to say ready without one", line)
+
     def test_out_of_rounds_needs_you_whatever_its_line_says(self):
         """#784: ready refused for rounds, the worker's status line "waiting for a review round" is no work of its own."""
         from herdr_task import agents, base
