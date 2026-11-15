@@ -29,7 +29,7 @@ import { countBadge, red, green, H, TEXT, RADIUS, toast } from "./ui.js";
 import { on as addonOn } from "./addons.js";
 import { spaceName, gitTail, tilde, sharedNames, inOrder, withOrder, machinesInOrder, machineOrderOf, withMachineOrder } from "./core/spaces.js";
 import { coordinatorTab } from "./coordinator.js";
-import { WORKTREE_RE } from "./core/paths.js";
+import { WORKTREE_RE, SH } from "./core/paths.js";
 import { dirsReady } from "./dirs.js";
 
 const POPUPS = { add: Menu, space: Menu, section: Menu, icon: IconPicker, rename: Rename, machine: MachinePopup };
@@ -97,6 +97,19 @@ function nameText(text, fresh, color, t) {
       .when(fresh, (el) => el.font_semibold()).child(text));
 }
 
+// A machine's Autopilot file (herdr-task's .autopilot.json there), read over herdr-core.
+const READ_PILOTS = SH + 'cat "$SHEP_TASKS/.autopilot.json" 2>/dev/null || true';
+
+// The spaces on Autopilot in a machine's file -> [[key, "on" | "waking"]] ("waking" while a wake runs or waits for its
+// Assistant): this computer's by space id, a linked machine's as "<machine>/<its id there>".
+export function pilotEntries(d, machine = null) {
+  return Object.entries(d?.spaces ?? {}).filter(([, a]) => a?.on)
+    .map(([id, a]) => [machine ? `${machine}/${String(id).split("/").pop()}` : id, a.inflight || a.pending ? "waking" : "on"]);
+}
+
+// A sidebar space's key in pilotEntries' map.
+export const pilotKey = (w) => (w.machine ? `${w.machine}/${String(w.id).split("/").pop()}` : w.id);
+
 export default class Spaces extends View {
   init(_props, cx) {
     const Popup = POPUPS[props()?.view];
@@ -129,7 +142,7 @@ export default class Spaces extends View {
     this.machinesRead = false; // hc machine ls answered once: a machine missing from it is offline
     this.refreshMachines(cx);
     cx.timer.every(15000, cx => this.refreshMachines(cx));
-    // Each of this computer's spaces on Autopilot (herdr-task's ~/.local/share/shepherdr/tasks/.autopilot.json): "on", or "waking"
+    // Each space on Autopilot, this computer's and linked machines' (herdr-task's ~/.local/share/shepherdr/tasks/.autopilot.json): "on", or "waking"
     // while a wake runs or waits for its Assistant; its row shows a mark (row()). Read every 5 s.
     this.pilots = new Map();
     this.readPilots(cx);
@@ -163,11 +176,28 @@ export default class Spaces extends View {
     cx.timer.every(250, (cx) => this.checkNew(cx));
   }
 
+  // This computer's file every read; each linked machine's that has spaces here every third (about every 15 s, as the
+  // machines refresh), read there over herdr-core as the Assistant's header does (GitHub #1010). A machine that
+  // doesn't answer keeps what it last said.
   readPilots(cx) {
+    this.pilotTick = (this.pilotTick ?? 0) + 1;
+    const far = this.pilotTick % 3 === 1;
     cx.spawn(async (cx) => {
       let d = null;
-      try { d = JSON.parse((await readTextFile(`${(await dirsReady()).tasks}/.autopilot.json`)) ?? "{}"); } catch { return; }
-      const next = new Map(Object.entries(d?.spaces ?? {}).filter(([, a]) => a?.on).map(([id, a]) => [id, a.inflight || a.pending ? "waking" : "on"]));
+      try { d = JSON.parse((await readTextFile(`${(await dirsReady()).tasks}/.autopilot.json`)) ?? "{}"); } catch {}
+      const next = new Map(d ? pilotEntries(d) : [...this.pilots].filter(([k]) => !k.includes("/")));
+      if (far) {
+        const there = new Set(allSpaces().map((sp) => sp.machine).filter(Boolean));
+        const ready = machines().filter((m) => m.name && there.has(m.name) && m.layout === "ready").map((m) => m.name);
+        const read = await Promise.all(ready.map(async (m) => {
+          try { return [m, JSON.parse((await exec("sh", ["-c", READ_PILOTS], { on: m })).stdout || "{}")]; } catch { return [m, null]; }
+        }));
+        const was = this.farPilots ?? new Map();
+        const answered = new Set(read.filter(([, f]) => f).map(([m]) => m));
+        this.farPilots = new Map([...[...was].filter(([k]) => !answered.has(k.slice(0, k.indexOf("/")))),
+          ...read.flatMap(([m, f]) => (f ? pilotEntries(f, m) : []))]);
+      }
+      for (const [k, v] of this.farPilots ?? []) next.set(k, v);
       if (JSON.stringify([...next]) === JSON.stringify([...this.pilots])) return;
       this.pilots = next;
       cx.notify();
@@ -175,10 +205,9 @@ export default class Spaces extends View {
   }
 
   // A space's Autopilot mark after its name (SHEP-5): a small rocket, as its chat's wake lines have, dim while on, in
-  // the working colour and breathing while a wake runs or waits. This computer's spaces only (another machine's file
-  // is read where its header shows).
+  // the working colour and breathing while a wake runs or waits. A linked machine's spaces too (#1010), by pilotKey().
   pilotMark(w, t) {
-    const p = w.machine ? null : this.pilots?.get(w.id);
+    const p = this.pilots?.get(pilotKey(w));
     if (!p) return null;
     return div().id(`pilot-${w.id}`).flex_none().text_color(p === "waking" ? t.working : t.dim)
       .when(p === "waking", (el) => el.loop("opacity", { from: 0.35, to: 1, period: 1200 }))
