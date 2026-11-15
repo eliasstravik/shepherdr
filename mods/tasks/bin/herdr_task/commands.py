@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 
+from . import sandbox
 from .base import Fail, git, guard, now, run, STORE, stop_note, VERSION
 from .settings import (
     agent_argv, agent_key, bare, merge_policy, review_limits, set_opts, settings_block, settings_for, space_base,
@@ -338,7 +339,13 @@ def cmd_start(args):
         say(args, {**v, "queued": True, "reason": reason}, f"{s.ref(t)} is queued ({reason}). It starts by itself when it can.")
         return
     out = {**v, "terminal": a["address"], "space": space, "parent": a.get("parent")}
-    say(args, out, f"{s.ref(t)} started: {a['address']} in {folder_desc(t, s)}")
+    text = f"{s.ref(t)} started: {a['address']} in {folder_desc(t, s)}"
+    # Codex's sandbox can't start here (SHEP-227, #998): whoever started it hears why and the fix, once per start.
+    broken = sandbox.check() if sandbox.sandboxed(argv) else None
+    if broken:
+        out["sandbox"] = sandbox.notice(broken)
+        text += "\n\n" + out["sandbox"]
+    say(args, out, text)
 
 
 def folder_desc(t, s):

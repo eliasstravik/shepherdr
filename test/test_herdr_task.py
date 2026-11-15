@@ -5033,6 +5033,26 @@ class TaskFlow(unittest.TestCase):
         self.settings({})
         self.assertEqual(settings.review_limits(self.store, self.task), (True, 3))
 
+    def test_a_broken_codex_sandbox_is_in_the_brief(self):
+        """SHEP-227 (#998): Codex's sandbox can't start here: a Codex worker's or reviewer's brief says so and why, and
+        tells it to leave the sandbox on and tell the person. A Claude-only task, or a sandbox that starts, says nothing."""
+        import herdr_task.sandbox as sandbox
+        settings = self.settings({})
+        broken = {"error": "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted", "bwrap": "/usr/bin/bwrap", "userns": True}
+        self.patch(sandbox, "check", lambda fresh=False: broken)
+        self.assertNotIn("- Sandbox:", settings.settings_block(self.store, self.task, argv=["claude"]))
+        block = settings.settings_block(self.store, self.task, argv=["codex", "--no-daemon", "-s", "workspace-write"])
+        self.assertIn("- Sandbox: Codex's sandbox can't start on this machine (bwrap: loopback: Failed RTM_NEWADDR", block)
+        self.assertIn("Don't loosen the sandbox yourself: tell the person", block)
+        # full access runs no sandbox: nothing to say
+        self.assertNotIn("- Sandbox:", settings.settings_block(self.store, self.task,
+                                                                argv=["codex", "--dangerously-bypass-approvals-and-sandbox"]))
+        # a Claude worker with a Codex reviewer: the review can't read files, so it is said too
+        self.settings({"everywhere": {"tasks": {"review_rounds": 1}, "reviewer": {"agent": "codex"}}})
+        self.assertIn("- Sandbox: Codex's sandbox", settings.settings_block(self.store, self.task, argv=["claude"]))
+        self.patch(sandbox, "check", lambda fresh=False: None)
+        self.assertNotIn("- Sandbox:", settings.settings_block(self.store, self.task, argv=["codex", "--no-daemon"]))
+
     def reviewed_task(self):
         self.settings({"everywhere": {"tasks": {"review_rounds": 3}}})
         self.task["review_gate"] = True
@@ -5751,3 +5771,188 @@ class ProcessTable(unittest.TestCase):
             if not os.path.isdir("/proc/self"):
                 self.skipTest("no /proc")
             self.assertIn(str(p.pid), self.sessions.kids(os.getpid()))
+class CodexSandbox(unittest.TestCase):
+    """SHEP-227 (#998, #1024): Codex's bwrap sandbox refused on this host (Ubuntu's AppArmor user-namespace limit) is
+    found once, by a real `codex sandbox -- true` (here a fake codex), said with the fix for this host, never loosened."""
+
+    def setUp(self):
+        sys.dont_write_bytecode = True
+        sys.path.insert(0, BIN)
+        import herdr_task.sandbox as sandbox
+        self.sandbox = sandbox
+        self.dir = tempfile.mkdtemp()
+        self.calls = os.path.join(self.dir, "calls")
+        self.codex = os.path.join(self.dir, "codex")
+        self.userns = os.path.join(self.dir, "userns")
+        with open(self.userns, "w") as f:
+            f.write("1\n")
+        self.fake("echo 'bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted' >&2; exit 1")
+        self.saved = {k: getattr(sandbox, k) for k in ("CACHE", "USERNS_SYSCTL", "APPARMOR_D")}
+        sandbox.CACHE = os.path.join(self.dir, "state", "codex-sandbox.json")
+        sandbox.USERNS_SYSCTL = self.userns
+        sandbox.APPARMOR_D = os.path.join(self.dir, "apparmor.d")
+        self.path = os.environ.get("PATH", "")
+        os.environ["PATH"] = self.dir + os.pathsep + self.path
+
+    def tearDown(self):
+        for k, v in self.saved.items():
+            setattr(self.sandbox, k, v)
+        os.environ["PATH"] = self.path
+        sys.path.remove(BIN)
+
+    def fake(self, body):
+        with open(self.codex, "w") as f:
+            f.write(f"#!/bin/sh\necho \"$*\" >> {self.calls}\n{body}\n")
+        os.chmod(self.codex, 0o755)
+
+    def probes(self):
+        try:
+            with open(self.calls) as f:
+                return f.read().splitlines()
+        except OSError:
+            return []
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "bwrap is Linux's")
+    def test_found_once_and_said_with_the_fix(self):
+        b = self.sandbox.check()
+        self.assertEqual(b["error"], "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted")
+        self.assertTrue(b["userns"])
+        self.assertEqual(self.probes(), ["sandbox -- true"])
+        # asked once: kept until something it depends on changes
+        self.assertEqual(self.sandbox.check(), b)
+        self.assertEqual(len(self.probes()), 1)
+        text = self.sandbox.notice(b)
+        self.assertIn("AppArmor blocks it", text)
+        self.assertIn("flags=(unconfined)", text)
+        self.assertIn("apparmor_parser -r", text)
+        self.assertIn("The sandbox stays on and nothing was changed", text)
+        # the person adds the profile: asked again, and it starts now
+        os.makedirs(self.sandbox.APPARMOR_D)
+        with open(os.path.join(self.sandbox.APPARMOR_D, self.sandbox.PROFILE), "w") as f:
+            f.write("profile x {}\n")
+        self.fake("exit 0")
+        self.assertIsNone(self.sandbox.check())
+        self.assertEqual(len(self.probes()), 2)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "bwrap is Linux's")
+    def test_without_apparmor_its_own_words(self):
+        with open(self.userns, "w") as f:
+            f.write("0\n")
+        b = self.sandbox.check()
+        self.assertFalse(b["userns"])
+        self.assertNotIn("apparmor_parser", self.sandbox.notice(b))
+        self.assertIn("user namespace", self.sandbox.notice(b))
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "bwrap is Linux's")
+    def test_other_failures_say_nothing(self):
+        """Only bwrap's own refusal counts: an older Codex without `sandbox`, or a slow one, is no word."""
+        self.fake("echo \"error: unrecognized subcommand 'sandbox'\" >&2; exit 2")
+        self.assertIsNone(self.sandbox.check(fresh=True))
+
+    def test_which_commands_run_in_the_sandbox(self):
+        sb = self.sandbox.sandboxed
+        self.assertTrue(sb(["codex", "--no-daemon", "-s", "workspace-write", "-a", "on-request"]))
+        self.assertTrue(sb(["codex", "--no-daemon", "--sandbox", "read-only"]))
+        self.assertFalse(sb(["codex", "--dangerously-bypass-approvals-and-sandbox"]))
+        self.assertFalse(sb(["codex", "-s", "danger-full-access"]))
+        self.assertFalse(sb(["claude", "--model", "opus"]))
+        self.assertFalse(sb(None))
+
+
+class LinkActions(unittest.TestCase):
+    """SHEP-227 (#1055, #1016): the person's action on another machine runs there as its own hc terminal (a dropped
+    link doesn't end it) and its result is read back across a reconnect; still running, it's "pending" with a job to
+    follow; a link that never comes back gets words that say what may have happened. hc is faked: a script of answers."""
+
+    LOST = '{"error":{"kind":"unavailable","message":"lost the line to vmb during the call"}}'
+    DOWN = '{"error":{"kind":"unavailable","message":"vmb is unreachable: cannot reach it"}}'
+
+    def setUp(self):
+        sys.dont_write_bytecode = True
+        sys.path.insert(0, BIN)
+        import herdr_task.link as link
+        self.link = link
+        self.calls = []
+        self.saved = (link.run, link.time.sleep)
+        link.time.sleep = lambda s: None
+        os.environ["HERDR_TASK_ACTION_WAIT"] = "5"
+
+    def tearDown(self):
+        self.link.run, self.link.time.sleep = self.saved
+        os.environ.pop("HERDR_TASK_ACTION_WAIT", None)
+        sys.path.remove(BIN)
+
+    def hc(self, starts, polls):
+        """Fake hc: `hc run` answers from starts, `hc exec` (the poll) from polls; each (code, stdout, stderr)."""
+        def run(argv, **k):
+            self.calls.append(argv[1])
+            seq = starts if argv[1] == "run" else polls
+            code, out, err = seq.pop(0) if len(seq) > 1 else seq[0]
+            return subprocess.CompletedProcess(argv, code, out, err)
+        self.link.run = run
+
+    def test_a_drop_mid_action_is_waited_out(self):
+        result = json.dumps({"rc": 0, "out": '{"id": 1, "state": "done"}\n', "err": ""})
+        self.hc([(0, '{"address":"vmb/t3"}', "")], [(0, "running\n", ""), (5, "", self.LOST), (5, "", self.LOST),
+                                                     (0, "running\n", ""), (0, "done\n" + result, "")])
+        r = self.link.action("vmb", ["accept", "1", "--json"])
+        self.assertEqual((r.returncode, json.loads(r.stdout)), (0, {"id": 1, "state": "done"}))
+        self.assertEqual(self.calls.count("run"), 1)   # started once, never again
+
+    def test_its_own_failure_is_its_own(self):
+        result = json.dumps({"rc": 1, "out": '{"error": "SHEP-1 is done. Reopen it first."}\n', "err": ""})
+        self.hc([(0, "{}", "")], [(0, "done\n" + result, "")])
+        r = self.link.action("vmb", ["start", "1", "--json"])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Reopen it first", r.stdout)
+
+    def test_still_running_is_pending_with_its_job(self):
+        self.hc([(0, "{}", "")], [(0, "running\n", "")])
+        os.environ["HERDR_TASK_ACTION_WAIT"] = "0.05"
+        r = self.link.action("vmb", ["accept", "1", "--json"])
+        out = json.loads(r.stdout)
+        self.assertEqual((r.returncode, out["machine"]), (self.link.PENDING, "vmb"))
+        self.assertIn(f"_job {out['pending']}", out["error"])
+        self.assertIn("slow to answer", out["error"])
+
+    def test_a_start_cut_off_starts_once_the_machine_says_it_never_began(self):
+        result = json.dumps({"rc": 0, "out": "{}", "err": ""})
+        self.hc([(5, "", self.LOST), (0, "{}", "")], [(5, "", self.LOST), (0, "none\n", ""), (0, "none\n", ""),
+                                                      (0, "running\n", ""), (0, "done\n" + result, "")])
+        r = self.link.action("vmb", ["edit", "1", "--title", "x", "--json"])
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(self.calls.count("run"), 2)
+
+    def test_a_start_cut_off_that_had_begun_runs_once(self):
+        result = json.dumps({"rc": 0, "out": "{}", "err": ""})
+        self.hc([(5, "", self.LOST)], [(0, "running\n", ""), (0, "done\n" + result, "")])
+        self.assertEqual(self.link.action("vmb", ["merge", "1", "--json"]).returncode, 0)
+        self.assertEqual(self.calls.count("run"), 1)
+
+    def test_a_link_that_never_comes_back_says_what_may_have_happened(self):
+        os.environ["HERDR_TASK_ACTION_WAIT"] = "0.05"
+        self.hc([(5, "", self.DOWN)], [(5, "", self.DOWN)])
+        r = self.link.action("vmb", ["accept", "1"])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Can't reach vmb", r.stderr)
+        self.assertIn("nothing was run there", r.stderr)
+        self.hc([(5, "", self.LOST)], [(5, "", self.DOWN)])
+        r = self.link.action("vmb", ["accept", "1", "--json"])
+        self.assertIn("it may have run there", json.loads(r.stdout)["error"])
+        # started, then the link went: it keeps running there, followed later with its job
+        self.hc([(0, "{}", "")], [(5, "", self.LOST)])
+        r = self.link.action("vmb", ["accept", "1", "--json"])
+        self.assertEqual(r.returncode, self.link.PENDING)
+        self.assertIn("its link dropped", json.loads(r.stdout)["error"])
+
+    def test_hc_refusing_is_said_as_it_was(self):
+        self.hc([(4, "", '{"error":{"kind":"machine_unknown","message":"unknown machine \\"vmb\\""}}')], [(0, "", "")])
+        r = self.link.action("vmb", ["accept", "1"])
+        self.assertEqual(r.returncode, 4)
+        self.assertEqual(self.calls, ["run"])
+
+    def test_reads_run_again_once_the_link_is_back(self):
+        answers = [(5, "", self.LOST), (5, "", self.DOWN), (0, "[]", "")]
+        r = self.link.again("vmb", ["list"], lambda: subprocess.CompletedProcess([], *answers.pop(0)))
+        self.assertEqual((r.returncode, r.stdout), (0, "[]"))
+        self.assertFalse(self.link.lost(subprocess.CompletedProcess([], 1, "", "herdr-task: no such task")))
