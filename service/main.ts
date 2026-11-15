@@ -224,6 +224,8 @@ setInterval(() => {
   void moveSecrets(null).catch(() => {});
 }, 30_000);
 const settings = new Settings();
+// a space's Assistant started from the web runs the agent Settings › Agents chooses for it, as the window's (#1051)
+compat.assistantPick = (space) => settings.role(space, "coordinator");
 // Settings › Agents' model menu and buttons (core/settings.js choicesFrom), from each CLI's own settings here, read
 // again every ten minutes; a CLI herdr-task's check finds missing here isn't offered
 const readDefaults = async () => {
@@ -816,7 +818,7 @@ const server = Bun.serve<{ who: string }>({
       try {
         const machine = !b?.machine || b.machine === me?.host ? null : String(b.machine);
         const icon = typeof b?.icon === "string" && b.icon ? b.icon.slice(0, 16) : null;
-        const place = await newSpace(hub, { machine, path: String(b?.path ?? ""), makeRepo: !!b?.makeRepo, icon, store: compat.shared! });
+        const place = await newSpace(hub, { machine, path: String(b?.path ?? ""), makeRepo: !!b?.makeRepo, icon, store: compat.shared!, pick: compat.assistantPick });
         // the page opens it once the sidebar has it: in the snapshot before the answer, not at the next 10 s read
         await model.waitSpace(place);
         return json({ place });

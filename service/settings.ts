@@ -118,6 +118,13 @@ export class Settings {
     return { value: scope ? own ?? parent : every ?? dflt, own: own !== undefined, parent, level: mach !== undefined ? "machine" : "everywhere", machine: m };
   }
 
+  /** The agent a role runs in a space (null: Everywhere's), as the window's chat starts it (lib/coordinator.js
+   *  shepherdrFor): { agent, model, effort, fast, perm }, or null when none is set (the template's own command). */
+  role(scope: string | null, role: string): any {
+    const v = this.pick(scope, role, null).value;
+    return v && typeof v === "object" && v.agent ? v : null;
+  }
+
   /** What the agents offer (core/settings.js choicesFrom: menus, permission defaults, what an unset role runs), set by
    *  the service from each CLI's own settings; null until read. */
   choices: any = null;

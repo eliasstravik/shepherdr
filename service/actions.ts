@@ -572,7 +572,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       ? ["--label", `herdr.chat=${SP.chatLabel(rec.pane)}`, "--label", `herdr.chat.slot=${slot}`, "--label", `herdr.chat.origin=slot:${slot}`, "--label", "herdr.role=coordinator",
         "--label", `herdr.coordinator.space=${bare}`, ...(rec.tab ? ["--label", `herdr.coordinator.tab=${String(rec.tab).split("/").pop()}`] : [])]
       : ["--label", "herdr.role=coordinator", "--label", `herdr.coordinator.space=${bare}`, "--label", `herdr.space=${bare}`];
-    const tpl = await execTemplate(hub, "assistant", sp.machine ?? null);
+    const tpl = await execTemplate(hub, "assistant", sp.machine ?? null, compat.assistantPick?.(sp.id) ?? null);
     const r = await hc(["run", "--bg", "--json", "--no-parent", "--keep", ...(sp.machine ? ["--on", sp.machine] : []), ...(sp.folder ? ["--cwd", sp.folder] : []), ...labels, tpl.name, task]);
     tpl.done();
     let out: any = {};
