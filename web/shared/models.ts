@@ -47,7 +47,7 @@ const codex = (id: string, label: string, effort: string, ultra = true): Model =
 /** what each CLI takes when it can't be asked (kept up to date by hand; the CLI's own answer wins) */
 export const TABLE: Record<string, CliModels> = {
   claude: {
-    models: [claude('claude-fable-5-1', 'Fable 5.1', 'high'), claude('claude-opus-5-5', 'Opus 5.5', 'medium'), claude('claude-sonnet-5-5', 'Sonnet 5.5', 'medium'), claude('claude-haiku-5-5', 'Haiku 5.5', 'medium')],
+    models: [claude('claude-fable-5-2', 'Fable 5.2', 'high'), claude('claude-opus-5-5', 'Opus 5.5', 'medium'), claude('claude-sonnet-5-5', 'Sonnet 5.5', 'medium'), claude('claude-haiku-5-5', 'Haiku 5.5', 'medium')],
     efforts: CLAUDE_LEVELS,
     default: 'claude-opus-5-5',
   },

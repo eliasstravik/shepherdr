@@ -2307,7 +2307,15 @@ export default class Chat extends View {
     const tab = panes().find((p) => p.pane === this.myPane())?.tab;
     const space = spaces().find((s) => s.tabs.some((x) => x.id === tab));
     const folder = this.t?.foreground?.cwd ?? this.t?.cwd ?? undefined;
-    run("tab.new", { space: space?.id, folder, argv: agent.forkArgv(this.kind, this.argv, session) });
+    const args = { space: space?.id, folder, argv: agent.forkArgv(this.kind, this.argv, session) };
+    // #1050: the task's agent still runs in that folder: a fork would be a second agent there, so ask first
+    if (agent.liveTaskAgent(this.t, terminals())) {
+      const ask = agent.FORK_LIVE;
+      openOverlay({ mod: "confirm-chat", kind: "dialog", width: 420, height: 188, props: { title: ask.title, detail: ask.detail,
+        verb: ask.verb, cancel: ask.cancel, command: { name: "tab.new", args } } });
+      return;
+    }
+    run("tab.new", args);
   }
 
   // ---- dictation ----------------------------------------------------------------------------

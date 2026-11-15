@@ -2727,6 +2727,85 @@ class ReviewerLine(unittest.TestCase):
     def test_an_unknown_check_keeps_codex(self):
         self.assertEqual(self.line(None)["value"]["agent"], "codex")
 
+    def test_codex_asked_now_for_a_brief(self):
+        """#947: an unreadable Codex auth file answers `codex login status` with an error, which the periodic check
+        can't read (unknown), and the reviewer sat on Codex's sign-in screen. A brief asks Codex now: not signed in,
+        the task's own CLI reviews and the line says what Codex said."""
+        from unittest import mock
+        with open(self.checks, "w") as f:
+            json.dump({"machines": {"": {"claude": "ready", "codex": None}}}, f)
+        t = {"id": 1, "title": "x", "mode": "worktree"}
+        said = "Error: premature end of input at line 10 column 46"
+        with mock.patch.object(self.settings, "codex_login_now", lambda: (False, said)):
+            r = next(x for x in self.settings.task_settings(Store([t]), t, argv=["claude"], live=True) if x["label"] == "Reviewer")
+            shown = next(x for x in self.settings.task_settings(Store([t]), t, argv=["claude"]) if x["label"] == "Reviewer")
+        self.assertEqual(r["value"]["agent"], "claude")
+        self.assertIn("Codex isn't signed in here", r["text"])
+        self.assertIn(said, r["text"])
+        self.assertEqual(shown["value"]["agent"], "codex", "show never runs Codex: only a brief asks it now")
+        with mock.patch.object(self.settings, "codex_login_now", lambda: (True, "")):
+            r = next(x for x in self.settings.task_settings(Store([t]), t, argv=["claude"], live=True) if x["label"] == "Reviewer")
+        self.assertEqual(r["value"]["agent"], "codex")
+
+    def test_codex_login_now_reads_its_answer(self):
+        """codex login status's own words: logged in, not logged in, or an error (also not signed in)."""
+        from unittest import mock
+        d = tempfile.mkdtemp()
+        codex = os.path.join(d, "codex")
+        for out, want in (("Logged in using ChatGPT", True), ("Not logged in", False),
+                          ("Error: premature end of input at line 10 column 46", False)):
+            with open(codex, "w") as f:
+                f.write(f"#!/bin/sh\necho '{out}' >&2\nexit 1\n" if want is False else f"#!/bin/sh\necho '{out}'\n")
+            os.chmod(codex, 0o755)
+            with mock.patch.dict(os.environ, {"PATH": d + ":" + os.environ["PATH"]}), \
+                    mock.patch.object(self.settings.shutil, "which", lambda name: codex):
+                ok, said = self.settings.codex_login_now()
+            self.assertEqual(ok, want, out)
+            self.assertEqual(said, "" if want else out)
+
+    def models_cache(self, *ids):
+        from unittest import mock
+        d = tempfile.mkdtemp()
+        with open(os.path.join(d, "models_cache.json"), "w") as f:
+            json.dump({"models": [{"slug": i, "display_name": i} for i in ids]}, f)
+        p = mock.patch.dict(os.environ, {"CODEX_HOME": d})
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_a_model_codex_lacks_is_its_default(self):
+        """#948: Codex refused gpt-6.1-sol on a ChatGPT account, every round. The brief gives Codex's own default
+        instead, and says why."""
+        self.models_cache("gpt-6-sol", "gpt-6-luna")
+        with open(self.checks, "w") as f:
+            json.dump({"machines": {"": {"claude": "ready", "codex": "ready"}}}, f)
+        t = {"id": 1, "title": "x", "mode": "worktree", "reviewer": "codex", "reviewer_model": "gpt-6.1-sol"}
+        r = next(x for x in self.settings.task_settings(Store([t]), t, argv=["claude"]) if x["label"] == "Reviewer")
+        self.assertEqual(r["value"]["agent"], "codex")
+        self.assertIsNone(r["value"]["model"])
+        self.assertNotIn("-m gpt-6.1-sol", r["value"]["command"])
+        self.assertIn("Codex here doesn't offer gpt-6.1-sol", r["text"])
+        t["reviewer_model"] = "gpt-6-sol"
+        r = next(x for x in self.settings.task_settings(Store([t]), t, argv=["claude"]) if x["label"] == "Reviewer")
+        self.assertIn("-m gpt-6-sol", r["value"]["command"])
+
+    def test_a_model_codex_lacks_is_refused_when_set(self):
+        """#948: caught when it is picked (add/edit --reviewer-model or --set reviewer.model), with what Codex offers."""
+        from types import SimpleNamespace
+        self.models_cache("gpt-6-sol", "gpt-6-luna")
+        args = lambda **k: SimpleNamespace(**{"agent": None, "model": None, "effort": None, "reviewer": None,
+                                              "reviewer_model": None, "reviewer_effort": None, "set": None, **k})
+        with self.assertRaises(self.settings.Fail) as e:
+            self.settings.set_opts({}, args(reviewer_model="gpt-6.1-sol"))
+        self.assertIn("gpt-6-sol, gpt-6-luna", str(e.exception))
+        with self.assertRaises(self.settings.Fail):
+            self.settings.set_opts({}, args(set=["reviewer.model=gpt-6.1-sol"]))
+        t = {}
+        self.settings.set_opts(t, args(reviewer_model="gpt-6-sol"))
+        self.assertEqual(t["reviewer_model"], "gpt-6-sol")
+        # a Claude model, or a Claude reviewer, isn't Codex's to judge
+        self.settings.set_opts({}, args(reviewer_model="opus"))
+        self.settings.set_opts({}, args(reviewer="claude", reviewer_model="some-model"))
+
     def test_codex_skips_its_trust_and_hooks_screens(self):
         """#798, #753: a reviewer in a task's worktree never stops on "Trust this folder?" (its repo's
         root and the worktree trusted for this run, as a table: the path has dots) or "Hooks need review"."""
@@ -4880,9 +4959,35 @@ class TaskFlow(unittest.TestCase):
         self.assertEqual(events[0], ("run", ["hc", "kill", "t1"]))
         self.assertEqual([e[0] for e in events], ["run", "launch"])
         _, resume, message = events[1]
-        self.assertEqual(resume, ["claude", "--model", "opus", "--resume", "S1"])
+        # #1056: the mode a new session would get (none set on this home: default), not the old session's
+        self.assertEqual(resume, ["claude", "--model", "opus", "--permission-mode", "default", "--resume", "S1"])
         self.assertEqual(message, self.commands.SWITCH_NUDGE)
         self.assertEqual(self.said[-1], "SHEP-1: claude t2 resumed its session, t1 ended")
+
+    def test_a_resumed_claude_starts_in_the_configured_mode(self):
+        """#1056: Claude Code resumes a session in the permission mode it ended in (a stuck agent left in plan or
+        ask came back so after switch). The resume says the mode a new session gets: argv's own, else its
+        --settings', the folder's settings, then the person's ~/.claude/settings.json."""
+        from herdr_task import launch
+        from unittest import mock
+        d = tempfile.mkdtemp()
+        home, folder = os.path.join(d, "claude"), os.path.join(d, "repo")
+        os.makedirs(home)
+        os.makedirs(os.path.join(folder, ".claude"))
+        with open(os.path.join(home, "settings.json"), "w") as f:
+            json.dump({"permissions": {"defaultMode": "auto"}}, f)
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": home}):
+            self.assertEqual(launch.resume_argv(["claude"], "S1", folder), ["claude", "--permission-mode", "auto", "--resume", "S1"])
+            with open(os.path.join(folder, ".claude", "settings.json"), "w") as f:
+                json.dump({"permissions": {"defaultMode": "acceptEdits"}}, f)
+            self.assertEqual(launch.resume_argv(["claude"], "S1", folder)[1:3], ["--permission-mode", "acceptEdits"])
+            argv = ["claude", "--settings", json.dumps({"permissions": {"defaultMode": "plan"}})]
+            self.assertEqual(launch.resume_argv(argv, "S1", folder)[3:5], ["--permission-mode", "plan"])
+            # said already: kept as it is
+            for argv in (["claude", "--permission-mode", "bypassPermissions"], ["claude", "--dangerously-skip-permissions"]):
+                self.assertEqual(launch.resume_argv(argv, "S1", folder), argv + ["--resume", "S1"])
+        # Codex's sandbox is in its argv already
+        self.assertEqual(launch.resume_argv(["codex", "-s", "read-only"], "S1"), ["codex", "resume", "-s", "read-only", "S1"])
 
     def test_an_agent_switching_itself_ends_after_the_new_one_starts(self):
         """SHEP-211: ending the caller first would end the switch command with it."""

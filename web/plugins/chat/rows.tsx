@@ -14,6 +14,7 @@ import type { Chat, Message, ReplyQuote } from '@shared/types.ts'
 import { openAccept, useAccepting } from '@client/screens/Accept.tsx'
 import { ForkIcon, openPicker, RewindIcon } from '@plugins/reactions/client.tsx'
 import { Markdown } from './markdown.tsx'
+import { forkChat } from './fork.ts'
 import { jumpTo, startReply } from './reply.ts'
 
 const { WORDS, clock, initialOf, bandActs, bandOrder, imagesLine, fitThumbs, THUMB_GAP, questionsBelow, literal } = CV as unknown as {
@@ -65,7 +66,7 @@ export function Band({ msg, chat, cli }: { msg: Message; chat: string; cli?: boo
       )
     if (a === 'rewind')
       return <button key={a} type="button" aria-label="Rewind" className={clsx(btn, hover)} onClick={() => void act({ type: 'rewind', chat, message: msg.id } as never).then(() => showTerminal(chat), (e: Error) => alert(e.message))}><RewindIcon className="size-3.5" /></button>
-    return <button key={a} type="button" aria-label="Fork" className={clsx(btn, hover)} onClick={() => void act({ type: 'fork', chat } as never).catch((e: Error) => alert(e.message))}><ForkIcon className="size-3.5" /></button>
+    return <button key={a} type="button" aria-label="Fork" className={clsx(btn, hover)} onClick={() => void forkChat(chat).catch((e: Error) => alert(e.message))}><ForkIcon className="size-3.5" /></button>
   }
   const smiley = react ? (
     <button key="react" type="button" aria-label="React" className={clsx(btn, hover)} onClick={() => openPicker(chat, msg.id)}>

@@ -23,6 +23,7 @@ export const RewindIcon = (p: { className?: string }) => (
 )
 import type { Message } from '@shared/types.ts'
 import { canReply, startReply } from '@plugins/chat/reply.ts'
+import { forkChat } from '@plugins/chat/fork.ts'
 import { frequent, loadEmoji, quickRow, remember, search, setTone, tone, TONES, withTone, type Emoji, type Group } from './emoji.ts'
 import { setDown } from './leave.ts'
 
@@ -392,7 +393,7 @@ function Lifted({ msg, chat }: { msg: Message; chat: string }) {
               {/* Shepherdr 3: an agent's message forks the conversation into a new tab; yours rewinds it there (the CLI's own) */}
               {/* as the window's: Rewind on yours but a /command, Fork on the agent's */}
               {msg.card || (msg.who !== 'agent' && msg.text?.trimStart().startsWith('/')) ? null : msg.who === 'agent' ? (
-                <MenuItem icon={<ForkIcon className={ic} />} onClick={() => leave(() => void act({ type: 'fork', chat } as never).catch((e) => alert(e.message)))}>
+                <MenuItem icon={<ForkIcon className={ic} />} onClick={() => leave(() => void forkChat(chat).catch((e) => alert(e.message)))}>
                   Fork
                 </MenuItem>
               ) : (
