@@ -1,5 +1,6 @@
 """GitHub and merging: pull requests, checks, and finishing a merged task."""
 
+import contextlib
 import json
 import os
 import re
@@ -22,16 +23,49 @@ def gh(*args, cwd=None):
 
 def github(s):
     """The repo on GitHub ("owner/name") when it has a GitHub remote and gh works there; asked
-    again after an hour. None: tasks merge locally."""
+    again after an hour. None: tasks merge locally. gh failing on a repo whose remote is on GitHub
+    (a network blip, its sign-in lapsed) is never remembered as "not on GitHub" (#988: that hour of
+    None merged a task locally while its pull request stayed open): None, with why in
+    github_unreachable(s)."""
     if s.loc["kind"] != "repo" or not shutil.which(GH):
         return None
     g = s.data.get("github") or {}
     if g and now() - g.get("at", 0) < 3600000:
         return g.get("repo")
-    ok, out, _ = gh("repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner", cwd=s.loc["folder"])
+    ok, out, err = gh("repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner", cwd=s.loc["folder"])
+    if not (ok and out) and not settled(err) and on_github(s.loc["folder"]):
+        s.github_error = err or "gh couldn't read the repo"
+        return None
     s.data["github"] = {"repo": out if ok and out else None, "at": now()}
     s.dirty = True
     return s.data["github"]["repo"]
+
+
+# gh's answers that say for sure it won't work here (never signed in, no such repo or no access): tasks
+# merge locally, as before; anything else (the network, GitHub's own errors) may pass.
+SETTLED = ("auth login", "not logged in", "could not resolve to a repository", "none of the git remotes",
+           "no git remotes", "not a git repository", "isn't installed")
+
+
+def settled(err):
+    return any(x in (err or "").lower() for x in SETTLED)
+
+
+def on_github(folder):
+    """A remote of the repo at folder points at github.com."""
+    ok, out, _ = git(folder, "remote", "-v")
+    return ok and bool(re.search(r"github\.com[:/]", out))
+
+
+def github_unreachable(s):
+    """Why GitHub couldn't be asked about a repo whose remote is there (github() said None), else None."""
+    return getattr(s, "github_error", None) if s.loc["kind"] == "repo" and shutil.which(GH) else None
+
+
+def released(s):
+    """The task list's lock let go around slow git work (Store.released(), #1007); a no-op elsewhere."""
+    let_go = getattr(s, "released", None)
+    return let_go() if let_go else contextlib.nullcontext()
 
 
 def remote_of(main):
@@ -39,31 +73,42 @@ def remote_of(main):
     return "origin" if "origin" in names else (names[0] if names else "origin")
 
 
+def pr_push(s, task, repo):
+    """Pushes the task's branch for its pull request, with the task list's lock let go meanwhile
+    (#1007: a pre-push hook can run for many minutes, and every other herdr-task command here waited
+    on it). Only what its remote lacks (#795); a pull request it continues gets its new commits on
+    its own branch, never forced (#828)."""
+    wt, br = task["worktree"], task["branch"]
+    remote = remote_of(s.loc["folder"])
+    to = (task.get("pr") or {}).get("branch") or br
+    has, tip, _ = git(wt, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}")
+    seen, there, _ = git(wt, "ls-remote", remote, f"refs/heads/{to}")
+    if has and tip and seen and there.split()[:1] == [tip]:
+        return
+    with released(s):
+        ok, _, err = git(wt, "push", "--force-with-lease", "-u", remote, br) if to == br else \
+            git(wt, "push", remote, f"{br}:refs/heads/{to}")
+    if not ok:
+        raise Fail(f"Couldn't push {br}" + (f" to {to}" if to != br else "") + f": {err}")
+
+
 def pr_open(s, task, repo, summary=None):
     """Pushes the task's branch and opens its pull request (or keeps the open one, also one opened
-    by hand or by its agent for the branch: SHEP-13's "already exists")."""
-    wt, br = task["worktree"], task["branch"]
+    by hand or by its agent for the branch: SHEP-13's "already exists"). Its description follows
+    each ready (#1004) when Herdr wrote it."""
+    br = task["branch"]
     # Continuing a pull request already open on another branch, its work pushed there (#828): that
     # one is the task's, never a second with the same commits.
     if not (task.get("pr") or {}).get("number") and pr_at_tip(task, repo):
         if summary:
             pr_note(task, repo, summary)
         return task["pr"]
-    remote = remote_of(s.loc["folder"])
-    # The pull request it continues (#828) gets its new commits on its own branch, never forced.
-    to = (task.get("pr") or {}).get("branch") or br
-    # Already there at its exact tip (pushed by hand): no second push through its hooks (#795).
-    has, tip, _ = git(wt, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}")
-    seen, there, _ = git(wt, "ls-remote", remote, f"refs/heads/{to}")
-    if not (has and tip and seen and there.split()[:1] == [tip]):
-        ok, _, err = git(wt, "push", "--force-with-lease", "-u", remote, br) if to == br else \
-            git(wt, "push", remote, f"{br}:refs/heads/{to}")
-        if not ok:
-            raise Fail(f"Couldn't push {br}" + (f" to {to}" if to != br else "") + f": {err}")
+    pr_push(s, task, repo)
     pr = task.get("pr") or {}
     if pr.get("number"):
         ok, out, _ = gh("pr", "view", str(pr["number"]), "--repo", repo, "--json", "state", "-q", ".state")
         if ok and out == "OPEN":
+            pr_describe(s, task, summary)
             if summary:
                 pr_note(task, repo, summary)
             return pr
@@ -72,6 +117,7 @@ def pr_open(s, task, repo, summary=None):
             task.pop("pr")
             return pr_open(s, task, repo, summary)
     if pr_adopt(task, repo):
+        pr_describe(s, task, summary)
         if summary:
             pr_note(task, repo, summary)
         return task["pr"]
@@ -115,6 +161,19 @@ def pr_note(task, repo, summary):
         task["pr_note"] = {"number": number, "id": int(m.group(1)) if m else None, "said": summary}
 
 
+def pr_describe(s, task, summary=None):
+    """#1004: an open pull request whose description Herdr wrote (pr_body(), "Task: SHEP-n" first)
+    gets the one this ready says (its summary, details and proof); one written by a person or an
+    agent, or another branch's it continues (#828), is left as it is."""
+    pr = task.get("pr") or {}
+    if not pr.get("number") or pr.get("branch"):
+        return
+    ok, body, _ = gh("pr", "view", str(pr["number"]), "--repo", pr["repo"], "--json", "body", "-q", ".body")
+    want = pr_body(s, task, summary)
+    if ok and body.strip().splitlines()[:1] == [f"Task: {s.ref(task)}"] and body.strip() != want.strip():
+        gh("pr", "edit", str(pr["number"]), "--repo", pr["repo"], "--body", want)
+
+
 def pr_title(s, task):
     """The repo's commit titles read "SHEP-198: the task's title" (a squash merge adds "(#945)"): the
     task's ref first, so the pull request stays findable by it."""
@@ -154,6 +213,18 @@ def pr_adopt(task, repo):
     if found:
         task["pr"] = {"number": found["number"], "url": found["url"], "repo": repo}
     return task.get("pr") if found else None
+
+
+def pr_for_branch(task, repo):
+    """The open pull request from this repo for the task's branch into its base, whatever its head
+    (opened by its agent, ready never knowing: #988), as gh lists it, or None."""
+    ok, out, _ = gh("pr", "list", "--repo", repo, "--head", task["branch"], "--state", "open",
+                    "--json", "number,url,isCrossRepository,baseRefName,headRefOid")
+    try:
+        return next((p for p in json.loads(out) if not p.get("isCrossRepository")
+                     and p.get("baseRefName") == (task.get("base") or "main")), None) if ok and out else None
+    except (ValueError, TypeError, AttributeError):
+        return None
 
 
 def pr_at_tip(task, repo):
@@ -402,7 +473,17 @@ def drop_branch(s, task):
     (gh refuses that flag on a queue, #801). Already gone (the repo deletes merged branches): fine."""
     if task.get("branch"):
         main = s.loc["folder"]
-        git(main, "push", "--quiet", remote_of(main), "--delete", task["branch"])
+        # --no-verify: a pre-push hook (a typecheck) checks what is pushed; a deletion has nothing to
+        # check, and the hook would hold the task list's lock for minutes (#1007).
+        git(main, "push", "--quiet", "--no-verify", remote_of(main), "--delete", task["branch"])
+
+
+def queue_merge(task, head):
+    """Asks GitHub to merge its pull request (squash) at exactly head: merged now, or queued in its
+    merge queue. Never --delete-branch (#1045: drop_branch() once it merged). (ok, err)."""
+    pr = task["pr"]
+    ok, _, err = gh("pr", "merge", str(pr["number"]), "--repo", pr["repo"], "--squash", "--match-head-commit", head or "")
+    return ok, err
 
 
 # #1044, #1018: a pull request just pushed shows no checks until GitHub starts them, which can take

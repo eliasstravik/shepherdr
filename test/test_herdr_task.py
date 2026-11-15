@@ -5346,3 +5346,239 @@ class DoubleStart(unittest.TestCase):
             s.dirty = True
         self.run_cmd(self.commands.cmd_start, id="1", now=True)
         self.assertEqual(len(self.task(1)["agents"]), 2)
+
+
+class ReadyMergeGit(unittest.TestCase):
+    """SHEP-231: ready, merge and git fixes (#1007, #1004, #988, #989, #1041, #1052, #1023), in TaskFlow's
+    throwaway repo and store; hc and gh are never run."""
+    setUp, patch, git, commit, args = TaskFlow.setUp, TaskFlow.patch, TaskFlow.git, TaskFlow.commit, TaskFlow.args
+
+    def patch_new(self, mod, name, value):
+        """A name the fix adds (create: so the same test runs against the code before it)."""
+        p = self.mock.patch.object(mod, name, value, create=True)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def remote(self):
+        remote = os.path.join(self.root, "remote.git")
+        self.git(self.root, "init", "-q", "--bare", remote)
+        self.git(self.main, "remote", "add", "origin", remote)
+        return remote
+
+    def test_ready_pushes_without_holding_the_task_list(self):
+        """#1007: while ready's push runs the repo's pre-push hook, the task list's lock is free, and what another
+        command saved meanwhile (a status line) is kept."""
+        import herdr_task.github as github
+        import herdr_task.store as store
+        tasks = os.path.join(self.root, "tasks")
+        self.patch(store, "STORE", tasks)
+        self.remote()
+        self.commit(self.task["worktree"], "work", "a.txt")
+        seen = os.path.join(self.root, "seen")
+        hook = os.path.join(self.root, "hook.py")
+        with open(hook, "w") as f:
+            f.write("import fcntl, glob, json, os, sys\n"
+                    "tasks, seen = sys.argv[1], sys.argv[2]\n"
+                    "lock = open(glob.glob(os.path.join(tasks, '.*.lock'))[0], 'a')\n"
+                    "try:\n"
+                    "    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+                    "except OSError:\n"
+                    "    open(seen, 'w').write('held')\n"
+                    "    sys.exit(0)\n"
+                    "p = [x for x in glob.glob(os.path.join(tasks, '*.json'))][0]\n"
+                    "d = json.load(open(p))\n"
+                    "d['tasks'][0]['progress'] = {'text': 'said by another command'}\n"
+                    "json.dump(d, open(p, 'w'))\n"
+                    "open(seen, 'w').write('free')\n")
+        hooks = os.path.join(self.main, ".git", "hooks")
+        os.makedirs(hooks, exist_ok=True)
+        with open(os.path.join(hooks, "pre-push"), "w") as f:
+            f.write(f"#!/bin/sh\n{sys.executable} {hook} {tasks} {seen}\nexit 0\n")
+        os.chmod(os.path.join(hooks, "pre-push"), 0o755)
+        self.patch(github, "gh", lambda *a, **k: (True, "https://github.com/o/r/pull/7", "") if a[:2] == ("pr", "create") else (True, "[]", ""))
+        loc = {"folder": self.main, "kind": "repo", "name": "repo", "common": os.path.join(self.main, ".git")}
+        with store.Store(loc) as s:
+            s.data["tasks"] = [dict(self.task, id=1)]
+            s.data["next"] = 2
+            s.dirty = True
+        with store.Store(loc) as s:
+            t = s.find("1")
+            self.assertEqual(github.pr_open(s, t, "o/r")["number"], 7)
+        with open(seen) as f:
+            self.assertEqual(f.read(), "free")
+        with store.Store(loc, write=False) as s:
+            t = s.find("1")
+            self.assertEqual((t["pr"]["number"], t["progress"]["text"]), (7, "said by another command"))
+
+    def test_a_second_ready_updates_the_pull_request_description(self):
+        """#1004: the open pull request Herdr opened gets this ready's details; one a person wrote is left alone."""
+        import herdr_task.github as github
+        self.remote()
+        self.commit(self.task["worktree"], "work", "a.txt")
+        self.task.update(pr={"number": 7, "url": "u", "repo": "o/r"}, details="- The second round's fix")
+        body = ["Task: SHEP-1\n\n## Details\n\n- The first round"]
+        asked = []
+
+        def gh(*a, **k):
+            asked.append(a)
+            if a[:2] == ("pr", "view") and "body" in a:
+                return True, body[0], ""
+            return (True, "OPEN", "") if a[:2] == ("pr", "view") else (True, "[]", "")
+        self.patch(github, "gh", gh)
+        github.pr_open(self.store, self.task, "o/r", "Fixed after review")
+        edit = [a for a in asked if a[:2] == ("pr", "edit")]
+        self.assertEqual(len(edit), 1)
+        self.assertIn("- The second round's fix", edit[0][edit[0].index("--body") + 1])
+        self.assertIn("Fixed after review", edit[0][edit[0].index("--body") + 1])
+        asked.clear()
+        body[0] = "My own words on this change"
+        github.pr_open(self.store, self.task, "o/r", "Fixed after review")
+        self.assertEqual([a for a in asked if a[:2] == ("pr", "edit")], [])
+
+    def own_commit(self):
+        from herdr_task import github
+        self.patch(github, "live_agents", lambda key: [])
+        self.patch(github, "live_helpers", lambda key: [])
+        tip = self.commit(self.task["worktree"], "work", "a.txt")
+        self.task.update(state="ready", head=tip)
+        github.own_work(self.store, self.task)  # as ready records it
+        return tip
+
+    def test_accept_merges_the_open_pull_request_not_here(self):
+        """#988: no pull request on record, its agent opened one: Accept merges that one on GitHub, the base here untouched."""
+        import herdr_task.github as github
+        tip = self.own_commit()
+        base = self.git(self.main, "rev-parse", "main")
+        self.patch(self.commands, "github", lambda s: "o/r")
+        self.patch(github, "gh", lambda *a, **k: (True, json.dumps([{"number": 12, "url": "https://github.com/o/r/pull/12",
+                                                                        "isCrossRepository": False, "baseRefName": "main",
+                                                                        "headRefOid": tip}]), "") if a[:2] == ("pr", "list") else (True, "", ""))
+        merged = []
+        self.patch(self.commands, "merge_now", lambda s, t: merged.append(t["pr"]["number"]))
+        self.commands.cmd_accept(self.args())
+        self.assertEqual(merged, [12])
+        self.assertEqual(self.git(self.main, "rev-parse", "main"), base)
+
+    def test_accept_never_merges_here_when_github_cant_be_asked(self):
+        """#988: a repo on GitHub that gh couldn't reach just now: nothing merged here; a pull request behind the tip: refused too."""
+        import herdr_task.github as github
+        self.own_commit()
+        base = self.git(self.main, "rev-parse", "main")
+        self.patch(self.commands, "github", lambda s: None)
+        self.patch_new(self.commands, "github_unreachable", lambda s: "HTTP 502")
+        with self.assertRaises(self.commands.Fail) as e:
+            self.commands.cmd_accept(self.args())
+        self.assertIn("HTTP 502", str(e.exception))
+        self.patch(self.commands, "github", lambda s: "o/r")
+        self.patch(github, "gh", lambda *a, **k: (True, json.dumps([{"number": 12, "url": "u", "isCrossRepository": False,
+                                                                        "baseRefName": "main", "headRefOid": "0" * 40}]), ""))
+        with self.assertRaises(self.commands.Fail) as e:
+            self.commands.cmd_accept(self.args())
+        self.assertIn("#12", str(e.exception))
+        self.assertEqual(self.git(self.main, "rev-parse", "main"), base)
+        self.assertNotIn("pr", self.task)
+
+    def test_github_down_is_not_remembered_as_no_github(self):
+        """#988: gh failing on a repo whose remote is on GitHub isn't kept for an hour as "merge locally"."""
+        import herdr_task.github as github
+        self.git(self.main, "remote", "add", "origin", "git@github.com:o/r.git")
+        self.store.data = {"tasks": [self.task]}
+        self.store.loc["kind"] = "repo"
+        self.patch(github.shutil, "which", lambda x: "/usr/bin/gh")
+        self.patch(github, "gh", lambda *a, **k: (False, "", "error connecting to api.github.com"))
+        self.assertIsNone(github.github(self.store))
+        self.assertNotIn("github", self.store.data)
+        self.assertIn("api.github.com", github.github_unreachable(self.store))
+        # ready then says it couldn't open its pull request, never Ready as if merged here.
+        self.store.data["tasks"] = [self.task]
+        self.patch(self.commands, "github", github.github)
+        self.patch(self.commands, "merge_policy", lambda s, t: "ask")
+        msg = self.commands.finalize(self.store, self.task)
+        self.assertIn("Couldn't reach GitHub", msg)
+        self.assertIn("Couldn't reach GitHub", self.task["attention"])
+        # gh never signed in here: no GitHub for tasks (they merge locally), as before.
+        self.patch(github, "gh", lambda *a, **k: (False, "", "To get started with GitHub CLI, please run:  gh auth login"))
+        self.assertIsNone(github.github(self.store))
+        self.assertEqual(self.store.data["github"]["repo"], None)
+
+    def test_a_reopened_task_merged_here_stays_open(self):
+        """#989: reopened after its work merged here: the tick doesn't mark it done again under its fix."""
+        from herdr_task import tick
+        self.own_commit()
+        self.git(self.main, "merge", "-q", "--ff-only", "task/1")
+        self.task["state"] = "done"
+        self.task["merged"] = True
+        self.patch(self.commands, "unarchive", lambda *a: None)
+        self.commands.cmd_state(self.args(), "reopen")
+        self.assertEqual(self.task["state"], "running")
+        self.patch(tick, "live_agents", lambda key: [])
+        done = []
+        self.patch(tick, "finish", lambda s, t, *a, **k: done.append(t["id"]))
+        tick.facts(self.store, self.task, {"done": [], "attention": []})
+        self.assertEqual(done, [])
+        self.task.pop("kept_open")  # as before #989: done at once
+        tick.facts(self.store, self.task, {"done": [], "attention": []})
+        self.assertEqual(done, [1])
+
+    def test_a_merge_queue_timeout_is_queued_again_once(self):
+        """#1041: removed from the merge queue for checks_timed_out: queued again once by itself; a second time at
+        the same commit needs the person; queued again by hand, its attention goes."""
+        from herdr_task import tick, base
+        self.task.update(state="ready", pr={"number": 7, "url": "u", "repo": "o/r"}, merge_queued=base.now() - 10 * 60000)
+        q = {"in": False, "auto": False, "reason": "CHECKS_TIMED_OUT", "state": "OPEN"}
+        self.patch(tick, "queue_entry", lambda t: dict(q))
+        merged = []
+        self.patch_new(tick, "queue_merge", lambda t, head: (merged.append(head), (True, ""))[1])
+        v = {"state": "OPEN", "headRefOid": "abc", "mergeable": "MERGEABLE", "statusCheckRollup": []}
+        report = {"attention": []}
+        tick.queue_pass(self.store, self.task, v, report)
+        self.assertEqual((merged, self.task.get("attention"), bool(self.task.get("merge_queued"))), (["abc"], None, True))
+        self.task["merge_queued"] = base.now() - 10 * 60000
+        tick.queue_pass(self.store, self.task, v, report)
+        self.assertEqual(merged, ["abc"])
+        self.assertEqual(self.task["attention"], "GitHub's merge queue removed it: CHECKS_TIMED_OUT.")
+        q["in"] = True  # the person queued it again
+        tick.back_in_queue(self.store, self.task, report)
+        self.assertNotIn("attention", self.task)
+        self.assertTrue(self.task.get("merge_queued"))
+        # A failed check there is never queued again.
+        self.task.update(merge_queued=base.now() - 10 * 60000, requeued=None)
+        q.update({"in": False, "reason": "FAILED_CHECKS"})
+        tick.queue_pass(self.store, self.task, v, report)
+        self.assertEqual(merged, ["abc"])
+        self.assertTrue(self.task["attention"].endswith("FAILED_CHECKS."))
+
+    def test_add_refuses_a_repo_set_to_bare_by_mistake(self):
+        """#1052: core.bare = true in a checked-out repo: add says so instead of quietly working in the folder."""
+        from herdr_task import store
+        self.git(self.main, "config", "core.bare", "true")
+        self.store.loc.update(folder=self.main, kind="folder")
+        args = self.args(title="Next", prompt="x", prompt_file=None, here=False, worktree=False, space=None, base=None,
+                         branch=None, after=None, at=None, **{"in": None})
+        self.patch(self.commands, "scheduled_at", lambda a: None)
+        self.store.new = lambda title, prompt, mode: (_ for _ in ()).throw(AssertionError(f"added, in mode {mode!r}"))
+        with self.assertRaises(self.commands.Fail) as e:
+            self.commands.cmd_add(args)
+        self.assertIn("core.bare", str(e.exception))
+        self.assertEqual(len(self.store.data["tasks"]), 1)
+        self.git(self.main, "config", "core.bare", "false")
+        self.assertIsNone(store.bare_by_mistake(self.main))
+        real = os.path.join(self.root, "real.git")
+        self.git(self.root, "init", "-q", "--bare", real)
+        self.assertIsNone(store.bare_by_mistake(real))  # a real bare repo isn't a mistake
+
+    def test_a_start_reuses_its_registered_worktree(self):
+        """#1023: the task lost its worktree fields while its worktree stayed, switched by its agent to another branch:
+        it starts there again, on that branch, never "already exists"."""
+        from herdr_task import launch
+        wts = os.path.join(self.root, "worktrees")
+        self.patch(launch, "settings_for", lambda s, space=None: {"tasks": {"worktree_root": wts}})
+        path = os.path.join(wts, "repo", "task-1-flow")
+        self.git(self.main, "worktree", "add", "-q", "-b", "task/1-flow", path, "main")
+        self.commit(path, "work", "a.txt")
+        self.git(path, "switch", "-q", "-c", "task/1-flow-reland")
+        t = {"id": 1, "title": "Flow", "state": "running", "mode": "worktree", "agents": []}
+        self.store.data["tasks"] = [t]
+        self.assertEqual(launch.folder_for(self.store, t), path)
+        self.assertEqual((t["worktree"], t["branch"], t["base"]), (path, "task/1-flow-reland", "main"))
+        self.assertEqual(t["start"], self.git(self.main, "rev-parse", "main"))

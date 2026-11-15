@@ -20,14 +20,14 @@ from .agents import (
     WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
-from .github import (already_merged, checks_missing, checks_since, drop_branch, expected_checks, finish, gh, github, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
+from .github import (already_merged, checks_missing, github_unreachable, pr_for_branch, checks_since, drop_branch, expected_checks, finish, gh, github, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
                      pr_pending, pr_problem, pr_view, remote_of, update_main, watch_main)
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
     own_path, parent_for, resume_argv, retag_tabs, set_branch, tab_title, task_tabs,
 )
-from .store import is_task_list, locate, open_store, prefixes_in_use, read_list, Store, store_files
+from .store import bare_by_mistake, is_task_list, locate, open_store, prefixes_in_use, read_list, Store, store_files
 from .queues import after_refs, parse_after, queue_reason, set_after
 from .archive import unarchive
 from .output import line, minutes, say, view
@@ -99,6 +99,9 @@ def cmd_add(args):
     at = scheduled_at(args)  # refused before anything is added
     with open_store(args) as s:
         repo = s.loc["kind"] == "repo"
+        wrong = None if repo else bare_by_mistake(s.loc["folder"])
+        if wrong:
+            raise Fail(wrong)
         if args.worktree and not repo:
             raise Fail("Worktrees need a git repo; this folder isn't one.")
         # The person's setting wins: worktrees off for this repo means in the folder, --worktree or not.
@@ -697,31 +700,42 @@ READY_BUT = "is ready, but:"  # finalize() couldn't push or open its pull reques
 def finalize(s, t):
     """Ready: on GitHub its pull request opens; then the merge policy in Settings decides who
     merges: auto (now), checks (once its checks pass) or ask (the person). Returns what to say."""
+    wt = t.get("worktree")
+    local = t.get("mode") != "worktree" or not wt or t.get("nothing_to_merge")
+    repo = github(s) if not local and os.path.isdir(wt) else None
+    failed = None
+    if repo:
+        # Pushed and opened before it shows Ready: the push lets the task list go while its hooks run
+        # (#1007), and a Ready task without its pull request yet could be accepted (merged here) meanwhile.
+        try:
+            pr = pr_open(s, t, repo, t.get("summary"))
+        except Fail as e:
+            failed = str(e)
+    elif not local and os.path.isdir(wt) and github_unreachable(s):
+        # #988: a GitHub repo gh couldn't reach just now: never on as if it had no GitHub (Accept would
+        # merge it here while a pull request, its agent's, stays open there).
+        failed = f"Couldn't reach GitHub to open its pull request: {github_unreachable(s)}"
     t["state"], t["ready_at"] = "ready", now()
     for k in ("attention", "merge_requested", "review"):
         t.pop(k, None)
     (t.get("pr") or {}).pop("wait", None)
     s.dirty = True
-    wt = t.get("worktree")
     msg = f"{s.ref(t)} is ready."
-    if t.get("mode") != "worktree" or not wt or t.get("nothing_to_merge"):
+    if local:
         # Nothing to merge (in the folder itself, or no commits beyond its base): it waits in Ready
         # for the person's Accept, whatever the merge setting; no pull request.
         t.pop("auto_merge", None)
         return msg + (" Nothing to merge (no commits beyond its base)." if t.get("nothing_to_merge") else "") + \
             " The person accepts it in the Tasks panel."
-    repo = github(s) if wt and os.path.isdir(wt) else None
+    if failed:
+        t["attention"] = failed
+        return f"{s.ref(t)} {READY_BUT} {failed} Tell the person."
     if repo:
-        try:
-            pr = pr_open(s, t, repo, t.get("summary"))
-            pr["checked"] = 0
-            # Working until its checks are done and GitHub knows it can merge (the tick: pr_wait()).
-            pr["wait"] = PR_CHECKS_RUNNING
-            msg = (f"{s.ref(t)} is ready: pull request #{pr['number']}, {pr['url']}. It shows Working until its checks "
-                   "pass and GitHub says it can merge; a failing check or a conflict comes back to you to fix.")
-        except Fail as e:
-            t["attention"] = str(e)
-            return f"{s.ref(t)} {READY_BUT} {e} Tell the person."
+        pr["checked"] = 0
+        # Working until its checks are done and GitHub knows it can merge (the tick: pr_wait()).
+        pr["wait"] = PR_CHECKS_RUNNING
+        msg = (f"{s.ref(t)} is ready: pull request #{pr['number']}, {pr['url']}. It shows Working until its checks "
+               "pass and GitHub says it can merge; a failing check or a conflict comes back to you to fix.")
     policy = merge_policy(s, t)
     if policy in ("auto", "checks"):
         t["auto_merge"] = policy
@@ -1094,6 +1108,28 @@ def merge_now(s, t):
     return None
 
 
+def own_open_pr(s, t):
+    """#988: a task with no pull request on record, in a GitHub repo: the open one for its branch (its
+    agent opened it, ready never knew) is recorded on the task, so it merges there, never here behind
+    it. Refused (nothing merged) when GitHub can't be asked, or when that pull request isn't at the
+    branch's newest commit here (merging it would leave work out). None when there is none."""
+    repo = github(s)
+    if not repo:
+        why = github_unreachable(s)
+        if why:
+            raise Fail(f"Couldn't ask GitHub whether {s.ref(t)} has a pull request ({why}); nothing merged. Try again.")
+        return None
+    found = pr_for_branch(t, repo)
+    if not found:
+        return None
+    if found.get("headRefOid") != branch_tip(s, t):
+        raise Fail(f"{s.ref(t)} has pull request #{found['number']} open on GitHub, but not at its branch's newest commit "
+                   f"here; nothing merged. Its agent pushes it (herdr-task ready), then try again.")
+    t["pr"] = {"number": found["number"], "url": found["url"], "repo": repo}
+    s.dirty = True
+    return t["pr"]
+
+
 def cmd_merge(args):
     error = None
     with open_store(args) as s:
@@ -1101,7 +1137,7 @@ def cmd_merge(args):
         if t.get("mode") != "worktree" or not t.get("worktree"):
             raise Fail(f"{s.ref(t)} works in the folder itself; there is nothing to merge.")
         sent, started, how = None, False, "agent"
-        if t.get("pr"):
+        if t.get("pr") or own_open_pr(s, t):
             # On GitHub: Herdr merges the pull request itself (squash), then tidies up here.
             how = "github"
             error = merge_now(s, t)
@@ -1191,7 +1227,7 @@ def cmd_accept(args):
         if not wt:
             # Worked in the folder itself: nothing to merge.
             finish(s, t)
-        elif t.get("pr"):
+        elif t.get("pr") or own_open_pr(s, t):
             how = "github"
             error = merge_now(s, t)
             if error == IN_QUEUE:
