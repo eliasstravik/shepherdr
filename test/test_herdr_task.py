@@ -764,6 +764,155 @@ class AcceptWhenHcCantStart(unittest.TestCase):
             self.assertEqual(json.load(f)["tasks"][0]["state"], "ready")
 
 
+def home_round(home, machines_mod, world, here, store, cfg=None, at=None, down=()):
+    """One home round (home_pass) as machine `here` of a fake `world` runs it: {name: {core, window,
+    links (names it reads), linked_by, space, assistant, news, health}}. hc, herdr-app and the
+    other machines are never reached: their reports come from the world (`down`: not answering).
+    Returns [(to, line)] it sent. Also used for #1029's before/after proof."""
+    from unittest import mock
+    me = world[here]
+    sent = []
+
+    def report(name, since, news_only):
+        w = world[name]
+        out = {"home": "/home/" + name, "at": 0, "space": w["space"], "assistant": w["assistant"], "core": w["core"],
+               "core_name": name, "overview": w["window"], "links": sorted(world[n]["core"] for n in w["links"]),
+               "linked_by": w["linked_by"]}
+        if since is not None:
+            out["news"] = [dict(x, at=since + 1) for x in w.get("news") or []]
+        if not news_only:
+            out.update(health=w["health"], top={}, stuck=[], worktrees=[])
+        return out
+
+    def remote(m, candidates, since, news_only, timeout=40):
+        if m in down:
+            raise home.Fail("timed out")
+        return report(m, since, news_only)
+
+    spaces = [{"id": (n + "/" if n != here else "") + world[n]["space"], "machine": None if n == here else n,
+               "name": "~", "folder": "/home/" + n} for n in world]
+    ls = mock.Mock(returncode=0, stdout=json.dumps({"spaces": spaces}))
+    patches = [mock.patch.object(home, "HOME_STATE", os.path.join(store, ".home-" + here + ".json")),
+               mock.patch.object(home, "main_here", lambda: me["window"]),
+               mock.patch.object(home, "read_settings", lambda: cfg or {}),
+               mock.patch.object(home, "run", lambda *a, **k: ls),
+               mock.patch.object(home, "local_report", lambda c, since=None, news_only=False: report(here, since, news_only)),
+               mock.patch.object(home, "remote_report", remote),
+               mock.patch.object(home, "deliver", lambda to, lines, quiet=None, idle_only=False: sent.extend((to, l) for l in lines) or True),
+               mock.patch.object(machines_mod, "connected_machines",
+                                 lambda: [{"name": n, "id": world[n]["core"], "state": "connected"} for n in me["links"]])]
+    if at is not None:
+        patches.append(mock.patch.object(home, "now", lambda: at))
+    for p in patches:
+        p.start()
+    try:
+        home.home_pass({}, force=True)
+    finally:
+        for p in patches:
+            p.stop()
+    return sent
+
+
+def home_world(mini_links_laptop=True):
+    """Two Macs with a window each: the laptop links to the mini (the hub, which the VM links to as
+    well); the mini links back unless told not to. Each has one task's news and a full disk."""
+    disk = {"cpu": 5, "load": 0.1, "cores": 8, "memory": 20, "disk": 97, "disks": []}
+    news = lambda task: [{"to": "t9", "space": "sp-shop", "folder": "~/shop",
+                          "lines": [f'<herdr-news task="{task}" event="ready">{task} is ready</herdr-news>']}]
+    return {"mini": {"core": "c-mini", "window": True, "links": ["laptop"] if mini_links_laptop else [], "linked_by": 2,
+                     "space": "sp1", "assistant": "t1", "news": news("SHOP-1"), "health": disk},
+            "laptop": {"core": "c-laptop", "window": True, "links": ["mini"], "linked_by": 1 if mini_links_laptop else 0,
+                       "space": "sp2", "assistant": "t2", "news": news("SHOP-2"), "health": disk}}
+
+
+class HomeLead(unittest.TestCase):
+    """#1029: with windows on two machines, the hub (the one the others link to) keeps the overview;
+    each window still tells its own home Assistant its own health. home_pass with a fake world."""
+
+    CFG = {"machines": {"mini": {"home": True}, "laptop": {"home": True}}}
+
+    def setUp(self):
+        sys.path.insert(0, BIN)
+        import herdr_task.home as home
+        import herdr_task.machines as machines
+        self.home, self.machines = home, machines
+        self.store = tempfile.mkdtemp()
+
+    def round(self, world, here, **kw):
+        return home_round(self.home, self.machines, world, here, self.store, cfg=self.CFG, **kw)
+
+    def overview(self, sent):
+        return [(to, l) for to, l in sent if l.startswith("<herdr-overview")]
+
+    def lead(self, name):
+        with open(os.path.join(self.store, f".home-{name}.json")) as f:
+            return json.load(f)["lead"]
+
+    def test_the_hub_leads_and_each_window_tells_its_own_health(self):
+        world = home_world()
+        mini, laptop = self.round(world, "mini"), self.round(world, "laptop")
+        # The mini (more machines link to it) leads: both machines' news and the laptop's health, once.
+        ov = self.overview(mini)
+        self.assertEqual({to for to, _ in ov}, {"t1"})
+        self.assertEqual(sorted(l.split(">", 1)[1].split("<")[0] for _, l in ov),
+                         ["Machine laptop: Disk crossed its alert limit (Disk 97%)", "laptop · ~/shop: SHOP-2 is ready", "~/shop: SHOP-1 is ready"])
+        self.assertEqual(self.overview(laptop), [], "the laptop sent the overview too")
+        # Health: each window tells its own home Assistant, never the other's.
+        health = lambda sent: [to for to, l in sent if l.startswith("<herdr-health")]
+        self.assertEqual(health(mini), ["t1"])
+        self.assertEqual(health(laptop), ["t2"])
+        self.assertEqual((self.lead("mini"), self.lead("laptop")), (None, "mini"))
+
+    def test_a_hub_that_doesnt_link_back_gets_the_others_news(self):
+        world = home_world(mini_links_laptop=False)
+        mini, laptop = self.round(world, "mini"), self.round(world, "laptop")
+        self.assertEqual([l.split(">", 1)[1].split("<")[0] for _, l in self.overview(mini)], ["~/shop: SHOP-1 is ready"])
+        # The laptop's own news, and only its own, goes to the mini's home Assistant over its link.
+        ov = self.overview(laptop)
+        self.assertEqual({to for to, _ in ov}, {"mini/t1"})
+        self.assertEqual(sorted(l.split(">", 1)[1].split("<")[0] for _, l in ov),
+                         ["Machine laptop: Disk crossed its alert limit (Disk 97%)", "laptop · ~/shop: SHOP-2 is ready"])
+        self.assertTrue(all('machine="laptop"' in l for _, l in ov))
+
+    def test_a_lone_window_leads(self):
+        world = {"mini": dict(home_world()["mini"], links=[], linked_by=0)}
+        sent = self.round(world, "mini")
+        self.assertEqual([l.split(">", 1)[1].split("<")[0] for _, l in self.overview(sent)], ["~/shop: SHOP-1 is ready"])
+        self.assertEqual({to for to, _ in sent}, {"t1"})
+
+    def test_two_way_ties_agree(self):
+        """Both link to each other and as many machines link to each: the lower core id leads, seen from either."""
+        world = home_world()
+        world["mini"]["linked_by"] = world["laptop"]["linked_by"] = 1
+        self.round(world, "mini"), self.round(world, "laptop")
+        self.assertEqual((self.lead("mini"), self.lead("laptop")), ("laptop", None))
+
+    def test_a_lead_gone_quiet_is_taken_over_later(self):
+        world, t = home_world(), 10 ** 12
+        self.round(world, "laptop", at=t)
+        # one missed answer: the laptop still gives way (nothing doubled), and waits to tell the mini
+        sent = self.round(world, "laptop", at=t + 60000, down=("mini",))
+        self.assertEqual(self.overview(sent), [])
+        # gone longer than LEAD_KEEP_MS: the laptop keeps the overview itself
+        sent = self.round(world, "laptop", at=t + self.home.LEAD_KEEP_MS + 120000, down=("mini",))
+        self.assertTrue(self.overview(sent))
+        self.assertEqual({to for to, _ in self.overview(sent)}, {"t2"})
+
+    def test_link_facts_counts_who_links_here(self):
+        from unittest import mock
+        core = tempfile.mkdtemp()
+        for name, d in (("core.json", {"id": "c-mini", "name": "mini"}),
+                        ("peers.json", {"c-laptop": {"name": "laptop", "calls_me": "mini"}, "c-vm": {"name": "vm", "calls_me": "mini"}})):
+            with open(os.path.join(core, name), "w") as f:
+                json.dump(d, f)
+        with mock.patch.object(self.machines, "_core_dir", lambda: core), \
+                mock.patch.object(self.machines, "connected_machines", lambda: [{"name": "laptop", "id": "c-laptop", "state": "connected"},
+                                                                               {"name": "old", "id": "c-old", "state": "disconnected"}]), \
+                mock.patch.object(self.home, "main_here", lambda: True), mock.patch.object(self.home, "read_settings", lambda: {}):
+            f = self.home.link_facts()
+        self.assertEqual(f, {"core": "c-mini", "core_name": "mini", "overview": True, "links": ["c-laptop"], "linked_by": 2})
+
+
 class BackToWork(unittest.TestCase):
     """A Ready task that goes back to work is Working again (busy_again(), back_to_work()), and
     Accept retries a merge that failed once. In memory: hc, git and gh are never run."""
