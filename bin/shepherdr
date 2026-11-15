@@ -396,6 +396,23 @@ def bun_path():
     return None
 
 
+def tool_dir(name, path):
+    """The folder to put on the service's PATH for a tool found at path: the folder it really lives in (a link from
+    ~/.local/bin to mise's or nvm's copy), but the link's own folder when it is a link to another name or into the Nix
+    store, whose folders change on every upgrade and go once garbage-collected (a profile's bin stays)."""
+    real = os.path.realpath(path)
+    if os.path.basename(real) != name or real.startswith("/nix/store/"):
+        return os.path.dirname(path)
+    return os.path.dirname(real)
+
+
+def managed_unit(root):
+    """Where the service's unit links to when something else keeps it (a Nix home-manager unit is a link into
+    /nix/store; Shepherdr only ever writes a plain file there), else None."""
+    path = os.path.join(root, PLIST if sys.platform == "darwin" else UNIT)
+    return os.readlink(path) if os.path.islink(path) else None
+
+
 def unit_text(root, bun, port=None):
     """The user service that keeps Shepherdr's service running (Linux), or its launchd agent (macOS). port: install's
     --port (SHEPHERDR_PORT; none: the service's own 7788). The window and the CLI read the port the service really took
@@ -404,9 +421,10 @@ def unit_text(root, bun, port=None):
     main = os.path.join(root, SHARE, "service", "main.ts")
     # hc, herdr-task and the helpers live in ~/.local/bin, which a user service's PATH lacks; and the tools herdr-task
     # and the agents run (gh, git, node, agent-browser, the CLIs…) where this install finds them (mise, nvm, brew…)
-    tools = ["gh", "git", "node", "agent-browser", "claude", "codex", "python3", "tailscale", "pw-record", "pw-play", "jq"]
-    found = [os.path.dirname(os.path.realpath(p)) if os.path.basename(os.path.realpath(p)) == t else os.path.dirname(p)
-             for t in tools for p in [shutil.which(t)] if p]
+    # hc (herdr-core) too, wherever it is: a Nix or other package manager's install isn't in ~/.local/bin (GitHub #1048)
+    tools = ["hc", "herdr-app", "gh", "git", "node", "agent-browser", "claude", "codex", "python3", "tailscale", "pw-record",
+             "pw-play", "jq"]
+    found = [tool_dir(t, p) for t in tools for p in [shutil.which(t)] if p]
     dirs = [os.path.join(root, BIN), os.path.dirname(bun), *found, "/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
     path = ":".join(dict.fromkeys(dirs))
     if sys.platform == "darwin":
@@ -576,13 +594,21 @@ def install_service(r, rec, home):
         r.notes.append("the web app isn't built, so the service serves no page yet (./install.sh builds it)")
     rel, text = unit_text(r.root, bun, rec.get("port"))
     data = text.encode()
-    same_unit = read(r.p(rel)) == data
+    managed = managed_unit(r.root)
+    if managed:
+        # GitHub #1048: someone else's unit (Nix home-manager) stays as it is, with its own PATH and code; the service
+        # only starts again so it picks up what this run changed
+        rec.get("files", {}).pop(rel, None)
+        r.notes.append(f"the Shepherdr service's unit links to {managed}, so something else (Nix home-manager?) keeps it: "
+                       "left as it is; change the service there")
+    same_unit = managed is not None or read(r.p(rel)) == data
     if not same_unit:
         if r.dry:
             say(f"  unit    {rel}")
             return
         atomic_write(r.p(rel), data)
-    rec.setdefault("files", {})[rel] = fsha(rel, data)
+    if not managed:
+        rec.setdefault("files", {})[rel] = fsha(rel, data)
     if not home or r.dry:
         return
     # SHEP-173: a voice call on now would be cut by the restart: the service starts again on the new code by itself
@@ -607,19 +633,23 @@ def install_service(r, rec, home):
             time.sleep(1)
     else:
         subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
-        ok = subprocess.run(["systemctl", "--user", "enable", "shepherdr.service"], capture_output=True).returncode == 0
+        ok = managed is not None or subprocess.run(["systemctl", "--user", "enable", "shepherdr.service"],
+                                                   capture_output=True).returncode == 0
         ok = ok and subprocess.run(["systemctl", "--user", "restart", "shepherdr.service"], capture_output=True).returncode == 0
+    why = "it didn't start"
     if ok:
         # started is not answering: another app may hold its port (GitHub #635), and the service then stops at once
         for _ in range(20):
-            ok = service_answers(r.root)[0]
+            ok, why = service_answers(r.root)
             if ok:
                 break
             time.sleep(0.5)
     port = rec.get("port") or DEFAULT_PORT
+    # only an answer from another app says it holds the port; no answer yet may be a slow start (GitHub #1048)
     r.notes.append("the Shepherdr service is running" if ok else
-                   f"the Shepherdr service isn't answering on port {port}: another app may hold it (install again with "
-                   "--port <a free one>); `shepherdr doctor` says more")
+                   f"{why}; `shepherdr doctor` says more" if str(why).startswith("another app") else
+                   f"the Shepherdr service isn't answering on port {port} yet: it may still be starting, or another app "
+                   "may hold the port (install again with --port <a free one>); `shepherdr doctor` says more")
 
 
 # ---- the record ---------------------------------------------------------------------------------
@@ -1283,7 +1313,7 @@ def cmd_uninstall_web(a, root):
     if root == os.path.realpath(real_home()) and not a.dry_run:
         if sys.platform == "darwin":
             subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{AGENT}"], capture_output=True)
-        else:
+        elif not managed_unit(root):   # someone else's unit (#1048) is theirs to stop
             subprocess.run(["systemctl", "--user", "disable", "--now", "shepherdr.service"], capture_output=True)
     for name, dest in rec.get("links", {}).items():
         p = r.p(f"{BIN}/{name}")

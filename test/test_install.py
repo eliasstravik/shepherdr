@@ -506,6 +506,68 @@ class Install(unittest.TestCase):
             sh.bun_path, sh.has_unit, sh.calls_on, sh.subprocess.run, sh.service_answers = saved
             shutil.rmtree(root, ignore_errors=True)
 
+    def test_linked_unit_is_left_alone(self):
+        """GitHub #1048: a Nix home-manager unit is a link into /nix/store. An update leaves it a link (no file written,
+        none recorded, so uninstall never takes it), restarts the service without enabling it, and says so."""
+        from importlib.machinery import SourceFileLoader
+        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        if sys.platform == "darwin":
+            self.skipTest("a systemd unit")
+        root = tempfile.mkdtemp(prefix="shepherdr-nix-")
+        ran = []
+        saved = (sh.bun_path, sh.calls_on, sh.subprocess.run, sh.service_answers)
+        try:
+            sh.bun_path = lambda: "/usr/bin/bun"
+            sh.calls_on = lambda r: 0
+            sh.service_answers = lambda r: (True, 7788)
+            sh.subprocess.run = lambda argv, **k: ran.append(argv) or subprocess.CompletedProcess(argv, 0, b"", b"")
+            store = os.path.join(root, "store-unit.service")   # stands in for /nix/store/<hash>-shepherdr.service
+            with open(store, "w") as f:
+                f.write("[Service]\nExecStart=nix's own\n")
+            unit = os.path.join(root, sh.UNIT)
+            os.makedirs(os.path.dirname(unit))
+            os.symlink(store, unit)
+            r, rec = sh.Run(root, False), {"files": {sh.UNIT: "an older sha"}}
+            sh.install_service(r, rec, True)
+            self.assertTrue(os.path.islink(unit))
+            self.assertEqual(open(store).read(), "[Service]\nExecStart=nix's own\n")
+            self.assertNotIn(sh.UNIT, rec["files"])
+            self.assertTrue(any("links to " + store in n and "left as it is" in n for n in r.notes), r.notes)
+            self.assertIn(["systemctl", "--user", "restart", "shepherdr.service"], ran)
+            self.assertNotIn(["systemctl", "--user", "enable", "shepherdr.service"], ran)
+            # a plain unit (ours) is still written and recorded as before
+            os.remove(unit)
+            r, rec, ran[:] = sh.Run(root, False), {}, []
+            sh.install_service(r, rec, True)
+            self.assertFalse(os.path.islink(unit))
+            self.assertIn(sh.UNIT, rec["files"])
+            self.assertIn(["systemctl", "--user", "enable", "shepherdr.service"], ran)
+        finally:
+            sh.bun_path, sh.calls_on, sh.subprocess.run, sh.service_answers = saved
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_unit_path_has_hc(self):
+        """GitHub #1048: the unit's PATH holds the folder hc was found in, wherever that is (a Nix profile, not
+        ~/.local/bin); a tool linked into the Nix store goes on by its profile's folder, which outlives an upgrade."""
+        from importlib.machinery import SourceFileLoader
+        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        tmp = tempfile.mkdtemp(prefix="shepherdr-path-")
+        old = os.environ["PATH"]
+        try:
+            prof = os.path.join(tmp, "profile", "bin")
+            os.makedirs(prof)
+            with open(os.path.join(prof, "hc"), "w") as f:
+                f.write("#!/bin/sh\n")
+            os.chmod(os.path.join(prof, "hc"), 0o755)
+            os.environ["PATH"] = prof + os.pathsep + old
+            rel, text = sh.unit_text(tmp, "/usr/bin/bun", None)
+            path = next(l for l in text.splitlines() if "PATH" in l)
+            self.assertIn(prof, path)
+            self.assertEqual(sh.tool_dir("hc", "/home/u/.nix-profile/bin/hc"), "/home/u/.nix-profile/bin")
+        finally:
+            os.environ["PATH"] = old
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_update_web_only(self):
         """A web-only install updates web only (the record says so), and doctor says how; one whose source is gone says
         that instead of updating from itself."""
