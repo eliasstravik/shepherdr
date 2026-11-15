@@ -305,6 +305,7 @@ DONE_WORKING_MS = 15 * 60000   # an agent still working this long after Done end
 GUARD_MEMORY = 85              # memory in use (%) past which the guard acts (memory_guard())
 GUARD_FILE = os.path.join(STORE, ".memory-guard.json")
 GUARD_ALERT_EVERY_MS = 30 * 60000
+GUARD_BACK_UNDER = 75          # memory (%) the guard's alert time is forgotten under: dips around GUARD_MEMORY keep it (#1047)
 
 
 def end_done(s, t, report, pressed=False):
@@ -385,8 +386,13 @@ def memory_guard(report):
     except (OSError, ValueError):
         g = {}
     if h["memory"] <= GUARD_MEMORY:
-        if g:
-            os.remove(GUARD_FILE)
+        # #1047: removed at every dip to 85%, memory hovering at 85-86% alerted each tick (every 15 s); the alert
+        # time stays until memory is well under, so one toast per GUARD_ALERT_EVERY_MS while it stays near the limit
+        if g and h["memory"] <= GUARD_BACK_UNDER:
+            try:
+                os.remove(GUARD_FILE)
+            except OSError:
+                pass
         return
     ended = end_done_pass(report, pressed=True)
     if ended:

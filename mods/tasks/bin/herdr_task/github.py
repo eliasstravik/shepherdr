@@ -47,7 +47,7 @@ def pr_open(s, task, repo, summary=None):
     # one is the task's, never a second with the same commits.
     if not (task.get("pr") or {}).get("number") and pr_at_tip(task, repo):
         if summary:
-            gh("pr", "comment", str(task["pr"]["number"]), "--repo", repo, "--body", summary)
+            pr_note(task, repo, summary)
         return task["pr"]
     remote = remote_of(s.loc["folder"])
     # The pull request it continues (#828) gets its new commits on its own branch, never forced.
@@ -65,7 +65,7 @@ def pr_open(s, task, repo, summary=None):
         ok, out, _ = gh("pr", "view", str(pr["number"]), "--repo", repo, "--json", "state", "-q", ".state")
         if ok and out == "OPEN":
             if summary:
-                gh("pr", "comment", str(pr["number"]), "--repo", repo, "--body", summary)
+                pr_note(task, repo, summary)
             return pr
         if pr.get("branch"):
             # The other branch's pull request it continued was closed or merged: its own branch from here.
@@ -73,7 +73,7 @@ def pr_open(s, task, repo, summary=None):
             return pr_open(s, task, repo, summary)
     if pr_adopt(task, repo):
         if summary:
-            gh("pr", "comment", str(task["pr"]["number"]), "--repo", repo, "--body", summary)
+            pr_note(task, repo, summary)
         return task["pr"]
     # SHEP-59: never a second pull request for a branch that already had one merged (one at its tip
     # is done before this: already_merged()); commits made since go on a new branch.
@@ -87,7 +87,32 @@ def pr_open(s, task, repo, summary=None):
         raise Fail(f"Couldn't open a pull request: {err}")
     url = out.split()[-1]
     task["pr"] = {"number": int(url.rstrip("/").split("/")[-1]), "url": url, "repo": repo}
+    if summary and summary.strip():
+        task["pr_note"] = {"number": task["pr"]["number"], "said": summary.strip()}  # its body says it already
     return task["pr"]
+
+
+def pr_note(task, repo, summary):
+    """Ready's summary on the task's open pull request: one comment, edited in place on a later ready, and
+    nothing when it says the same as last time (#1058: each ready posted another copy under the person's
+    name). task["pr_note"] = {number, id (the comment's), said}, for the pull request it was on."""
+    summary = (summary or "").strip()
+    number = task["pr"]["number"]
+    note = task.get("pr_note") or {}
+    if note.get("number") != number:
+        note = {"number": number}
+    if not summary or note.get("said") == summary:
+        return
+    if note.get("id"):
+        ok, _, _ = gh("api", "-X", "PATCH", f"repos/{repo}/issues/comments/{note['id']}", "-f", f"body={summary}")
+        if ok:
+            task["pr_note"] = {**note, "said": summary}
+            return
+    # none yet, or it was deleted: a new one, its id (gh prints the comment's link, …#issuecomment-<id>) kept
+    ok, out, _ = gh("pr", "comment", str(number), "--repo", repo, "--body", summary)
+    if ok:
+        m = re.search(r"#issuecomment-(\d+)", out or "")
+        task["pr_note"] = {"number": number, "id": int(m.group(1)) if m else None, "said": summary}
 
 
 def pr_title(s, task):

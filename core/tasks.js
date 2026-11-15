@@ -162,6 +162,9 @@ export function place(list, task, { live = [], helpers = [], loaded = true, now 
   // Claude Code's folder-trust dialog (#755): its agent reports no status while it shows; herdr-task's scheduler read
   // it off the screen (task.trust_ask: that agent's address).
   else if (task.trust_ask && live.some((a) => a.address === task.trust_ask && !a.status)) need("asks", task.waits ?? REASONS.trust);
+  // Out of review rounds (herdr-task's review_out: ready refused): quiet, it waits on its Assistant's review-more, at
+  // once, never Working on a problem it had been on (#1040: a conflict it fixed by merging the base).
+  else if (st === "running" && task.review_out && live.length && !live.some((a) => a.status === "working" && a.role !== "reviewer")) need("reply", task.waits ?? "Out of review rounds");
   // Back at work after it said ready: no Accept until it says ready again.
   else if (busyAgain(task, live, now)) { section = "working"; why = WORKING_AGAIN; }
   else if (fixing) { section = "working"; why = st === "ready" ? WORKING_AGAIN : null; }

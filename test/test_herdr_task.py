@@ -687,6 +687,83 @@ class SchedulerRound(unittest.TestCase):
         self.assertEqual(len(ran), 1)
 
 
+class MemoryGuardRepeat(unittest.TestCase):
+    """#1047: memory hovering at 85-86% toasted every tick: each dip to 85% removed the guard file and with it
+    the time of the last alert. Now one alert per 30 min while it stays near the limit."""
+
+    def test_one_alert_while_memory_hovers(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.tick as tick
+        import herdr_task.machine as machine
+        store = tempfile.mkdtemp()
+        mem, clock, labels = [86], [10_000_000], []
+        ok = type("R", (), {"returncode": 0})()
+        for obj, name, value in ((tick, "GUARD_FILE", os.path.join(store, ".memory-guard.json")),
+                                 (machine, "sample", lambda: {"memory": mem[0]}), (tick, "now", lambda: clock[0]),
+                                 (tick, "end_done_pass", lambda r, pressed=False: []),
+                                 (tick, "hc_json", lambda *a: {"state": "live"} if a[0] == "get" else {"terminals": []}),
+                                 (tick, "run", lambda argv: (labels.append(argv), ok)[1]), (tick, "machine_name", lambda: "vm")):
+            p = mock.patch.object(obj, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        for reading in [86, 85, 86, 85, 86, 86, 85, 86]:  # one tick every 15 s for two minutes
+            mem[0] = reading
+            tick.memory_guard({})
+            clock[0] += 15_000
+        self.assertEqual(len(labels), 1, "alerted again after a dip to the limit")
+        clock[0] += tick.GUARD_ALERT_EVERY_MS
+        mem[0] = 86
+        tick.memory_guard({})
+        self.assertEqual(len(labels), 2, "half an hour on, still high: told again")
+        # well under: forgotten, so a new climb is told at once
+        mem[0] = 60
+        tick.memory_guard({})
+        self.assertFalse(os.path.exists(tick.GUARD_FILE))
+        clock[0] += 15_000
+        mem[0] = 90
+        tick.memory_guard({})
+        self.assertEqual(len(labels), 3)
+
+
+class AcceptWhenHcCantStart(unittest.TestCase):
+    """#1057: Accept ended in a traceback at its first hc call (busy_again(t, [detail(k) for k in live_agents(...)])) when
+    hc couldn't be started. A real herdr-task accept on a throwaway store, its hc one the system can't run."""
+
+    def test_a_plain_refusal_never_a_traceback(self):
+        tmp = tempfile.mkdtemp()
+        store, repo, fakebin = (os.path.join(tmp, n) for n in ("store", "repo", "bin"))
+        os.makedirs(fakebin)
+        subprocess.run(["git", "init", "-q", repo], check=True)
+        subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+        hc = os.path.join(fakebin, "hc")
+        with open(hc, "w") as f:
+            f.write('#!/bin/sh\necho \'{"terminals": []}\'\n')
+        os.chmod(hc, 0o755)
+        # on this run's throwaway HOME herdr-task refuses hc (base.not_real): this hc is a fake, so let it
+        b = ("import sys, runpy; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]);"
+             "import herdr_task.base as base; base.not_real = lambda: None;"
+             "sys.argv = sys.argv[2:]; runpy.run_path(sys.argv[0], run_name='__main__')")
+        env = {**os.environ, "HERDR_TASK_STORE": store, "PATH": fakebin + os.pathsep + "/usr/bin:/bin"}
+        ht = lambda *a: subprocess.run([sys.executable, "-c", b, BIN, os.path.join(BIN, "herdr-task"), *a, "--folder", repo],
+                                       capture_output=True, text=True, env=env, cwd=repo)
+        self.assertEqual(ht("add", "Try accept", "--here").returncode, 0)
+        [path] = [os.path.join(store, f) for f in os.listdir(store) if f.endswith(".json")]
+        with open(path) as f:
+            d = json.load(f)
+        d["tasks"][0].update(state="ready", ready_at=1, ready_turns={})
+        with open(path, "w") as f:
+            json.dump(d, f)
+        with open(hc, "w") as f:
+            f.write("echo no first line, so the system can't start it\n")  # Exec format error
+        p = ht("accept", "1")
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("herdr-task: couldn't start hc", p.stderr)
+        with open(path) as f:
+            self.assertEqual(json.load(f)["tasks"][0]["state"], "ready")
+
+
 class BackToWork(unittest.TestCase):
     """A Ready task that goes back to work is Working again (busy_again(), back_to_work()), and
     Accept retries a merge that failed once. In memory: hc, git and gh are never run."""
@@ -1213,6 +1290,49 @@ class BackToWork(unittest.TestCase):
         self.assertEqual(t["pr"], {"number": 599, "url": "https://github.com/o/r/pull/599", "repo": "o/r"})
         self.assertNotIn(("pr", "create"), calls)
         self.assertIn(("pr", "comment"), calls)  # the summary still reaches it
+
+    def test_ready_again_edits_one_comment_never_a_second(self):
+        """#1058: each ready posted the summary again; now one comment, edited when the summary changes."""
+        import herdr_task.github as github
+        calls = []
+
+        def fake(*a, **k):
+            calls.append(a)
+            if a[:2] == ("pr", "view"):
+                return True, "OPEN", ""
+            if a[:2] == ("pr", "comment"):
+                return True, "https://github.com/o/r/pull/599#issuecomment-4242", ""
+            return True, "", ""
+        with self.mock.patch.object(github, "gh", fake), self.mock.patch.object(github, "git", lambda *a: (True, "abc", "")):
+            t = self.ready(mode="worktree", worktree="/w", branch="b", pr={"number": 599, "url": "u", "repo": "o/r"})
+            for summary in ("Done.", "Done.", "Done.", "Done, and the findings fixed."):
+                github.pr_open(self.store, t, "o/r", summary)
+        posts = [c for c in calls if c[:2] == ("pr", "comment")]
+        edits = [c for c in calls if c[:1] == ("api",)]
+        self.assertEqual(len(posts), 1, "a second comment for the same pull request")
+        self.assertEqual(len(edits), 1)
+        self.assertIn("repos/o/r/issues/comments/4242", edits[0])
+        self.assertIn("body=Done, and the findings fixed.", edits[0])
+        self.assertEqual(t["pr_note"], {"number": 599, "id": 4242, "said": "Done, and the findings fixed."})
+
+    def test_a_new_pull_request_says_it_in_its_body_only(self):
+        import herdr_task.github as github
+        calls = []
+
+        def fake(*a, **k):
+            calls.append(a)
+            if a[:2] == ("pr", "list"):
+                return True, "[]", ""
+            if a[:2] == ("pr", "create"):
+                return True, "https://github.com/o/r/pull/600", ""
+            return True, "", ""
+        with self.mock.patch.object(github, "gh", fake), self.mock.patch.object(github, "git", lambda *a: (True, "abc", "")):
+            t = self.ready(mode="worktree", worktree="/w", branch="b")
+            github.pr_open(self.store, t, "o/r", "Done.")
+            calls.append(("pr", "view"))  # (now it's open)
+            with self.mock.patch.object(github, "gh", lambda *a, **k: (calls.append(a), (True, "OPEN", ""))[1]):
+                github.pr_open(self.store, t, "o/r", "Done.")
+        self.assertNotIn(("pr", "comment"), [c[:2] for c in calls])
 
     def test_ready_never_adopts_a_forks_or_another_ones(self):
         mine = {"number": 599, "url": "https://github.com/o/r/pull/599", "isCrossRepository": False, "baseRefName": "main", "headRefOid": "abc"}
@@ -4808,6 +4928,22 @@ class TaskFlow(unittest.TestCase):
         self.assertEqual(agents.task_status(self.task, live)[0], "working")  # its own line: on its own review
         self.task["review_out"] = t - 90000
         self.assertEqual(agents.task_status(self.task, live)[:2], ("needs", "reply"))
+
+    def test_out_of_rounds_after_fixing_a_conflict_needs_you_at_once(self):
+        """#1040: a conflict its agent fixed by merging the base, then ready refused for rounds: its fresh status
+        line kept it Working on the conflict, and only the 20-minute stall reached the Assistant."""
+        from herdr_task import agents, base
+        t = base.now()
+        self.task.update(started=t - 3600000, agents=[{"address": "t1", "at": t - 3600000}],
+                         attention="Conflicts with main", attention_at=t - 600000,
+                         progress={"text": "Merging main in", "set": t - 300000, "at": t - 300000})
+        live = [{"address": "t1", "status": {"state": "idle"}, "status_ms": t - 5000}]
+        self.patch(agents, "agent_log", lambda *a, **k: None)
+        self.assertEqual(agents.task_status(self.task, live)[0], "working")  # on the conflict
+        self.task["review_out"] = t - 5000
+        self.assertEqual(agents.task_status(self.task, live), ("needs", "reply", "Out of review rounds"))
+        # still at it (its turn not ended yet): Working
+        self.assertEqual(agents.task_status(self.task, [{**live[0], "status": {"state": "working"}}])[0], "working")
 
     def test_ready_pushes_only_what_the_remote_lacks(self):
         """#795: the branch already on its remote at its tip: no push through a pre-push hook that fails."""
