@@ -111,7 +111,6 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
   herdr-task against other machines spreads that branch fleet-wide until the next update. Prefer local tests.
 - herdr-task's scheduler re-execs itself within 15 s when its code changes. Its live code is either the zipapp
   `mods/tasks/bin/herdr-task` or the `herdr_task/` folder beside it (`zipfile.is_zipfile` says which).
-
 - Reach map tests: `test/test_reach.py` puts logging fake ssh/tailscale/hc on PATH and runs the real probe; reuse it for
   anything that might contact other hosts.
 
