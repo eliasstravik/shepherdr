@@ -687,6 +687,45 @@ class SchedulerRound(unittest.TestCase):
         self.assertEqual(len(ran), 1)
 
 
+class MemoryGuardRepeat(unittest.TestCase):
+    """#1047: memory hovering at 85-86% toasted every tick: each dip to 85% removed the guard file and with it
+    the time of the last alert. Now one alert per 30 min while it stays near the limit."""
+
+    def test_one_alert_while_memory_hovers(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.tick as tick
+        import herdr_task.machine as machine
+        store = tempfile.mkdtemp()
+        mem, clock, labels = [86], [10_000_000], []
+        ok = type("R", (), {"returncode": 0})()
+        for obj, name, value in ((tick, "GUARD_FILE", os.path.join(store, ".memory-guard.json")),
+                                 (machine, "sample", lambda: {"memory": mem[0]}), (tick, "now", lambda: clock[0]),
+                                 (tick, "end_done_pass", lambda r, pressed=False: []),
+                                 (tick, "hc_json", lambda *a: {"state": "live"} if a[0] == "get" else {"terminals": []}),
+                                 (tick, "run", lambda argv: (labels.append(argv), ok)[1]), (tick, "machine_name", lambda: "vm")):
+            p = mock.patch.object(obj, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        for reading in [86, 85, 86, 85, 86, 86, 85, 86]:  # one tick every 15 s for two minutes
+            mem[0] = reading
+            tick.memory_guard({})
+            clock[0] += 15_000
+        self.assertEqual(len(labels), 1, "alerted again after a dip to the limit")
+        clock[0] += tick.GUARD_ALERT_EVERY_MS
+        mem[0] = 86
+        tick.memory_guard({})
+        self.assertEqual(len(labels), 2, "half an hour on, still high: told again")
+        # well under: forgotten, so a new climb is told at once
+        mem[0] = 60
+        tick.memory_guard({})
+        self.assertFalse(os.path.exists(tick.GUARD_FILE))
+        clock[0] += 15_000
+        mem[0] = 90
+        tick.memory_guard({})
+        self.assertEqual(len(labels), 3)
+
+
 class BackToWork(unittest.TestCase):
     """A Ready task that goes back to work is Working again (busy_again(), back_to_work()), and
     Accept retries a merge that failed once. In memory: hc, git and gh are never run."""
