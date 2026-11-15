@@ -4,7 +4,7 @@
 // screenshot of it is what the person gets. Choices and forms say Sent but reach no one: it is a preview.
 import '../src/styles.css'
 import clsx from 'clsx'
-import { StrictMode, useEffect, useState } from 'react'
+import { Component, StrictMode, useEffect, useState, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Recipe, UNREADABLE } from '../src/screens/Recipe.tsx'
 import * as R from '@core/recipe.js'
@@ -35,23 +35,61 @@ function useDevice() {
   return d
 }
 
+/** a fetch that gives up after `ms` (the preview server could be stuck or gone: say so, never Loading forever, #971) */
+async function get(url: string, ms = 15000) {
+  const ctl = new AbortController()
+  const t = setTimeout(() => ctl.abort(), ms)
+  try {
+    const r = await fetch(url, { signal: ctl.signal, cache: 'no-store' })
+    const body = await r.json().catch(() => null)
+    if (!r.ok) throw new Error(body?.error || (r.status === 404 ? 'This artifact is gone.' : UNREADABLE))
+    return body
+  } catch (e) {
+    if ((e as Error).name === 'AbortError') throw new Error(`The preview server didn't answer in ${ms / 1000} s. Run herdr-artifact preview ${id} again for a fresh link.`)
+    if (e instanceof TypeError) throw new Error(`The preview server can't be reached (it may have stopped). Run herdr-artifact preview ${id} again for a fresh link.`)
+    throw e
+  } finally {
+    clearTimeout(t)
+  }
+}
+
+/** how often an open preview looks for a newer version (#1043): a publish shows here without a reload */
+const FOLLOW_MS = 3000
+
 function Viewer() {
   const device = useDevice()
   const [meta, setMeta] = useState<Meta | null>(null)
-  const [recipe, setRecipe] = useState<{ blocks: unknown[] } | null>(null)
+  const [recipe, setRecipe] = useState<{ blocks: unknown[]; v: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const pinned = Number(q.get('v')) || null
   useEffect(() => {
-    fetch(api)
-      .then((r) => (r.ok ? r.json() : r.json().then((e) => Promise.reject(new Error(e.error || 'gone')))))
-      .then((m: Meta) => {
+    let live = true, shown = 0, timer: ReturnType<typeof setTimeout> | undefined
+    // the artifact's record, then the recipe of the version to show: the pinned one, else the newest, again whenever a
+    // newer one is published (its pictures' addresses carry the version, so none comes from the cache of the last)
+    const look = async () => {
+      try {
+        const m: Meta = await get(api)
+        if (!live) return
         setMeta(m)
         document.title = m.title
-        const v = Number(q.get('v')) || m.version
-        return fetch(`${api}/recipe?v=${v}`).then((r) => (r.ok ? r.json() : Promise.reject(new Error(UNREADABLE))))
-      })
-      .then((r) => setRecipe(withIds(r)), (e: Error) => setError(e.message || UNREADABLE))
+        const v = pinned || m.version
+        if (v !== shown) {
+          const r = await get(`${api}/recipe?v=${v}`)
+          if (!live) return
+          shown = v
+          setRecipe({ ...withIds(r), v })
+        }
+        setError(null)
+      } catch (e) {
+        // a hiccup while following keeps what shows; with nothing shown yet, say why
+        if (live && !shown) setError((e as Error).message || UNREADABLE)
+      }
+      if (live && !pinned) timer = setTimeout(look, FOLLOW_MS)
+    }
+    look()
+    return () => { live = false; clearTimeout(timer) }
   }, [])
-  const v = Number(q.get('v')) || meta?.version
+  const v = recipe?.v ?? pinned ?? meta?.version
   const when = meta?.versions.find((x) => x.v === v)?.at
   return (
     // the web app's viewer: a slim bar (its title, which version) over the artifact, the whole screen its
@@ -63,15 +101,28 @@ function Viewer() {
       </div>
       <div className="relative min-h-0 flex-1">
         <div className="absolute inset-0">
-          {error ? <p className="p-4 text-fg3">{error}</p> : !recipe ? <p className="p-4 text-fg3">Loading…</p> : (
+          {error ? <p role="alert" className="p-4 text-fg3">{error}</p> : !recipe ? <p className="p-4 text-fg3">Loading…</p> : (
             <div className={clsx('h-full overflow-y-auto p-4 phone:p-5')}>
-              <Recipe recipe={recipe} asset={(src) => `${api}/file/${src.split('/').map(encodeURIComponent).join('/')}?v=${v}`} reply={async () => undefined} />
+              <Shown key={recipe.v}>
+                <Recipe recipe={recipe} asset={(src) => `${api}/file/${src.split('/').map(encodeURIComponent).join('/')}?v=${recipe.v}`} reply={async () => undefined} />
+              </Shown>
             </div>
           )}
         </div>
       </div>
     </div>
   )
+}
+
+/** A recipe that fails to draw says so, with what went wrong, instead of leaving the page blank (#1025). */
+class Shown extends Component<{ children: ReactNode }, { failed: string | null }> {
+  state = { failed: null as string | null }
+  static getDerivedStateFromError(e: Error) { return { failed: e?.message || String(e) } }
+  render() {
+    return this.state.failed
+      ? <p role="alert" className="text-fg3">This version couldn't be drawn here ({this.state.failed}). <button type="button" className="underline" onClick={() => location.reload()}>Reload</button></p>
+      : this.props.children
+  }
 }
 
 createRoot(document.getElementById('root')!).render(<StrictMode><Viewer /></StrictMode>)

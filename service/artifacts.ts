@@ -114,11 +114,11 @@ export class Artifacts {
     if (machine) {
       // there: the same path under its own artifacts/files (new or old layout), read only if it is a file
       const r = await this.exec(machine, ["sh", "-c", SH + 'f="$SHEP_ARTIFACTS/files/$1/v$2/$3"; [ -f "$f" ] && exec cat -- "$f"; exit 1', "file", id, String(v), rel]).catch(() => null);
-      if (!r || r.code !== 0) return new Response("no such file", { status: 404 });
+      if (!r || r.code !== 0) return new Response("no such file", { status: 404, headers: { "cache-control": "no-store" } });
       return served(new Blob([r.out]), type, range, headers);
     }
     const p = join(FILES, id, `v${v}`, rel);
-    if (!p.startsWith(join(FILES, id, `v${v}`) + "/") || !existsSync(p) || !statSync(p).isFile()) return new Response("no such file", { status: 404 });
+    if (!p.startsWith(join(FILES, id, `v${v}`) + "/") || !existsSync(p) || !statSync(p).isFile()) return new Response("no such file", { status: 404, headers: { "cache-control": "no-store" } });
     return served(Bun.file(p), type, range, headers);
   }
 
