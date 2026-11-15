@@ -44,6 +44,8 @@ export const WORDS = {
   opening: "Opening the conversation…",
   restarting: "Restarting the agent…",
   agentEnded: "This agent has ended",
+  assistantEnded: "The Assistant has ended",
+  assistantEndedBody: "Restart it to carry on the same conversation here.",
   taskEnded: "This task's agent has ended",
   unsupported: "No chat for this agent",
   unsupportedBody: "Chat reads Claude Code's and Codex's own session logs. This agent works in its terminal only.",
