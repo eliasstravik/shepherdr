@@ -74,6 +74,8 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - Python tests: each `test/test_*.py` imports `home_guard` first (a throwaway HOME for the run; touching the real home
   fails the test). Run them with `discover -s test` or from `test/`; one class from `test/` with
   `cd test && python3 -m unittest test_herdr_task.ClassName` (from the repo root the module import fails).
+- herdr-task tests that need a real task list on disk plus a faked `begin()`: reuse Scheduled's setUp/run_cmd/tick_at as class
+  attributes (see DoubleStart) instead of subclassing, which reruns Scheduled's tests.
 - Tests that run accept or merge with the real `finish()` must stub `github.live_agents` and `live_helpers` (hc is
   refused under test).
 - Bun.spawn ignores a PATH changed inside a test: point the service at fakes with `SHEPHERDR_HERDR_APP` / `SHEPHERDR_HC`.
