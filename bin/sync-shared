@@ -26,6 +26,9 @@ HOME = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 LIB, MODS = os.path.join(HOME, "lib"), os.path.join(HOME, "mods")
 src_of = lambda name: os.path.join(HOME, name) if name.startswith("core/") else os.path.join(LIB, name)
 LAST = os.path.join(LIB, ".last")
+# A published artifact's mod (art-<id>, art-<id>--v<n>) is generated: herdr-artifact copies the markup helpers
+# (dirs.js, core/paths.js) into it as they were then. Those are frozen copies, not ones to sync (GitHub #1008).
+GENERATED_PREFIX = "art-"
 
 
 def read(path):
@@ -147,6 +150,8 @@ def main(argv):
         # A copy made by hand in a mod lib/COPIES doesn't list (same name, same start).
         head = lib.split(b"\n", 1)[0]
         for mod in sorted(os.listdir(MODS)):
+            if mod.startswith(GENERATED_PREFIX):
+                continue
             path = os.path.join(MODS, mod, name)
             if mod not in mods and (read(path) or b"").split(b"\n", 1)[0] == head:
                 bad.append(f"mods/{mod}/{name} looks like a copy of lib/{name}: add {mod} to lib/COPIES")
