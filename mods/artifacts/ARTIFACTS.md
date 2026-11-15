@@ -67,7 +67,9 @@ Blocks, top to bottom (each may carry an `"id"`; the person's notes point at blo
 | `button` | `label`, `reply`: a press sends `reply` |
 
 - **Pictures**: PNG, JPEG, GIF, WebP or SVG files in the folder, named in `src` (no paths up or
-  out). Screenshots go in as they are; crop them to what matters first (`magick`).
+  out). Screenshots go in as they are, so take only what matters: one element with
+  `herdr-browser screenshot '<css selector>' /abs/shot.png`, or a smaller viewport. To cut a PNG you have:
+  `herdr-artifact crop in.png out.png --rect x,y,w,h` (needs nothing else installed; `--max 1600` shrinks it).
 - **Clips, sounds, PDFs** (SHEP-209): a `video` plays in place in the web app (controls; `autoplay` with `muted` and
   `loop` for a short clip that plays itself). **A short clip beats a GIF**: a GIF is big and can't stop or seek; a
   clip is smaller, has sound and controls, and plays on the phone. No poster given: its first frame is made at publish
