@@ -4532,6 +4532,42 @@ class CodexAsksOnTheCard(unittest.TestCase):
         self.assertEqual(sum(str(a).startswith("projects") for a in launch.own_argv(mine, d)), 1)
         self.assertFalse(any(str(a).startswith("projects") for a in launch.own_argv(["codex"])))
 
+    def test_a_codex_worker_never_stops_on_shepherdrs_own_hooks(self):
+        """#977: Shepherdr's chat hooks in ~/.codex/hooks.json, new or updated, stopped a resumed Codex worker at
+        "Hooks need review" while the task showed Working. Its launch trusts exactly those, as Codex hashes them
+        (the hash below is what real Codex 0.163 wrote to config.toml on "Trust all")."""
+        sys.path.insert(0, BIN)
+        from unittest import mock
+        from herdr_task import launch
+        home = tempfile.mkdtemp()
+        note = "sh '/x/mods/chat/session-note.sh'"
+        with open(os.path.join(home, "hooks.json"), "w") as f:
+            json.dump({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": note, "timeout": 10}]}],
+                                 "PermissionRequest": [{"hooks": [{"type": "command", "command": "sh mine.sh", "timeout": 5}]},
+                                                       {"hooks": [{"type": "command", "command": "sh '/x/mods/chat/ask-hook.sh'",
+                                                                   "timeout": 1800}]}]}}, f)
+        with mock.patch.dict(os.environ, {"CODEX_HOME": home}):
+            argv = launch.own_argv(["codex", "-s", "workspace-write"])
+        [state] = [a for a in argv if str(a).startswith("hooks.state=")]
+        self.assertIn('%s={trusted_hash="sha256:27e15e7a6fd4251f1d46d945ad404948371404ab0a0d725f899e178a8417bbb4"}'
+                      % json.dumps(home + "/hooks.json:session_start:0:0"), state)
+        self.assertIn(json.dumps(home + "/hooks.json:permission_request:1:0"), state)
+        self.assertNotIn(":permission_request:0:0\"={", state.replace("/<session-flags>/config.toml:permission_request:0:0", ""))
+        self.assertIn('"/<session-flags>/config.toml:permission_request:0:0"', state)  # its own -c hook, as before
+        # no hooks.json: only its own -c hook
+        with mock.patch.dict(os.environ, {"CODEX_HOME": tempfile.mkdtemp()}):
+            [state] = [a for a in launch.own_argv(["codex"]) if str(a).startswith("hooks.state=")]
+        self.assertEqual(state.count("trusted_hash"), 1)
+
+    def test_a_claude_worker_never_compacts_while_idle(self):
+        """#1021: a Ready Claude worker flipped to Working about hourly: Claude Code's idle compaction is a turn."""
+        sys.path.insert(0, BIN)
+        from herdr_task import launch
+        st = json.loads(launch.own_argv(["claude", "go"])[2])
+        self.assertIs(st["idleCompaction"], False)
+        mine = launch.own_argv(["claude", "--settings", json.dumps({"idleCompaction": True}), "go"])
+        self.assertIs(json.loads(mine[2])["idleCompaction"], True)  # the person's own argv says otherwise: theirs
+
 class TaskFlow(unittest.TestCase):
     """SHEP-170's task flow fixes, in a throwaway git repo and store; hc and gh are never run."""
 
