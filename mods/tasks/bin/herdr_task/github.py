@@ -33,12 +33,22 @@ def github(s):
     if g and now() - g.get("at", 0) < 3600000:
         return g.get("repo")
     ok, out, err = gh("repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner", cwd=s.loc["folder"])
-    if not (ok and out) and on_github(s.loc["folder"]):
+    if not (ok and out) and not settled(err) and on_github(s.loc["folder"]):
         s.github_error = err or "gh couldn't read the repo"
         return None
     s.data["github"] = {"repo": out if ok and out else None, "at": now()}
     s.dirty = True
     return s.data["github"]["repo"]
+
+
+# gh's answers that say for sure it won't work here (never signed in, no such repo or no access): tasks
+# merge locally, as before; anything else (the network, GitHub's own errors) may pass.
+SETTLED = ("auth login", "not logged in", "could not resolve to a repository", "none of the git remotes",
+           "no git remotes", "not a git repository", "isn't installed")
+
+
+def settled(err):
+    return any(x in (err or "").lower() for x in SETTLED)
 
 
 def on_github(folder):
