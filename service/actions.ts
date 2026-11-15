@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import { sendBody, steerNow, messageBody, refusal, reactionLine, mentionedIn, taskTag } from "../core/send.js";
 import { kindOf } from "../core/chat-reader.js";
 import { WORDS } from "../core/chat-view.js";
+import { settle } from "../core/pending.js";
 import * as AGa from "../core/agents.js";
 import { answerCodex } from "./codex-ask.ts";
 const { sessionOf, forkArgv, liveTaskAgent, FORK_LIVE } = AGa as any;
@@ -171,8 +172,9 @@ async function addedMachines() {
   const r = await hc(["machine", "ls", "--json"]).catch(() => null);
   try { return r?.code === 0 ? (JSON.parse(r.stdout).machines ?? []).filter((m: any) => !m.temporary) : []; } catch { return []; }
 }
-const task = (args: string[], folder: string, machine: string | null) =>
-  run(["herdr-task", ...(machine ? ["--on", machine] : []), ...args, "--folder", folder, "--json"]);
+// still running there after a slow or dropped link: its real result, followed (core/pending.js, SHEP-227)
+const task = async (args: string[], folder: string, machine: string | null) =>
+  settle((a: string[]) => run(["herdr-task", ...a]), await run(["herdr-task", ...(machine ? ["--on", machine] : []), ...args, "--folder", folder, "--json"]));
 
 function str(v: unknown, max = 100_000) {
   if (typeof v !== "string" || v.length > max) throw new Error("bad input");

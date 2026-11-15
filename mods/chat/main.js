@@ -51,6 +51,7 @@ import * as attach from "./attach.js";
 import * as slash from "./slash.js";
 import * as mentions from "./core/mentions.js";
 import { SH } from "./core/paths.js";
+import { settle } from "./core/pending.js";
 import { dirsReady } from "./dirs.js";
 import * as agent from "./agent.js";
 import { cleanCommand } from "./core/clean-env.js";
@@ -2799,8 +2800,9 @@ export default class Chat extends View {
         const built = agent.argvFor(pick, { agent: this.kind, argv: t.foreground?.argv ?? [] });
         const on = k?.machine ?? this.machine;
         this.swapping = true;
-        const r = await exec(`${appHome()}/mods/tasks/bin/herdr-task`, [...(on ? ["--on", on] : []), "switch", ref, "--folder", folder,
-          "--argv", JSON.stringify(built.base), "--json"]);
+        const cli = (a) => exec(`${appHome()}/mods/tasks/bin/herdr-task`, a);
+        const r = await settle(cli, await cli([...(on ? ["--on", on] : []), "switch", ref, "--folder", folder,
+          "--argv", JSON.stringify(built.base), "--json"]));
         let out = null;
         try { out = JSON.parse(r.stdout || "null"); } catch {}
         if (r.code !== 0 || !out?.terminal) throw new Error(out?.error || r.stderr?.trim().split("\n").pop() || "Its agent didn't start.");
@@ -2825,7 +2827,8 @@ export default class Chat extends View {
     this.resuming = true;
     cx.spawn(async (cx) => {
       try {
-        const r = await exec(`${appHome()}/mods/tasks/bin/herdr-task`, [...(k.machine ? ["--on", k.machine] : []), "resume", String(k.id), "--json", "--folder", k.folder]);
+        const cli = (a) => exec(`${appHome()}/mods/tasks/bin/herdr-task`, a);
+        const r = await settle(cli, await cli([...(k.machine ? ["--on", k.machine] : []), "resume", String(k.id), "--json", "--folder", k.folder]));
         let out = null;
         try { out = JSON.parse(r.stdout || "null"); } catch {}
         if (r.code !== 0 || !out?.terminal) throw new Error(out?.error || r.stderr?.trim().split("\n").pop() || "Its agent didn't start.");

@@ -7,7 +7,9 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 
+from . import link
 from .base import bundle, Fail, guard, run, STORE, sync_held, VERSION
 from .agents import LINE_MAX, SUMMARY_MAX
 from .launch import cmd_allow, name_tabs
@@ -73,7 +75,10 @@ def remote_run(machine, argv, timeout=None):
         guard(["hc"])
         # A machine with Herdr's own install (its window's) holds herdr-task's source: copies come from there, it's
         # never written to (machines.py, the same rule). Its link ~/.local/bin/herdr-task leads into that install.
-        if run(["hc", "exec", "--on", machine, "--", "test", "-d", ".config/herdr-app/mods/tasks/bin/herdr_task"]).returncode == 0:
+        there = run(["hc", "exec", "--on", machine, "--", "test", "-d", ".config/herdr-app/mods/tasks/bin/herdr_task"])
+        if link.lost(there):
+            raise Fail(f"Can't reach {machine}: its link is down, and nothing was run there. Try again once it's back.")
+        if there.returncode == 0:
             os.makedirs(os.path.dirname(mark), exist_ok=True)
             with open(mark, "w") as f:
                 f.write("source")
@@ -90,9 +95,15 @@ def remote_run(machine, argv, timeout=None):
     if not installed and not sync_held():
         install()
     install_secret(machine)
+    if argv[:1] == ["_job"]:
+        # an action that was still running there (link.PENDING): its result, waiting again
+        return link.follow(machine, argv[1] if len(argv) > 1 else "", argv, time.monotonic() + link.wait_s())
+    if argv[:1] and argv[0] in link.ACTIONS:
+        # the person's action: runs there whole even when the link drops, its result read back (SHEP-227, #1055)
+        return link.action(machine, argv, install)
     wait = ["--timeout", str(timeout)] if timeout else []
     call = ["hc", "exec", "--on", machine, *wait, "--", "sh", "-c", 'exec "$HOME/.local/bin/herdr-task" "$@"', "herdr-task", *argv]
-    r = run(call)
+    r = link.again(machine, argv, lambda: run(call)) if argv[:1] and argv[0] in link.READS else run(call)
     if r.returncode == 127 or "not found" in r.stderr and not r.stdout:
         install()
         r = run(call)
@@ -139,7 +150,14 @@ def remote(machine, argv):
 def main():
     argv = sys.argv[1:]
     if argv[:1] == ["--on"] and len(argv) > 1:
-        return remote(argv[1], argv[2:])
+        try:
+            return remote(argv[1], argv[2:])
+        except Fail as e:
+            if "--json" in argv:
+                print(json.dumps({"error": str(e)}))
+            else:
+                print(f"herdr-task: {e}", file=sys.stderr)
+            return 1
     if argv[:1] == ["--version"]:
         print(VERSION)
         return 0

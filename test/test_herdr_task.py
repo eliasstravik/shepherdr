@@ -5857,3 +5857,102 @@ class CodexSandbox(unittest.TestCase):
         self.assertFalse(sb(["codex", "-s", "danger-full-access"]))
         self.assertFalse(sb(["claude", "--model", "opus"]))
         self.assertFalse(sb(None))
+
+
+class LinkActions(unittest.TestCase):
+    """SHEP-227 (#1055, #1016): the person's action on another machine runs there as its own hc terminal (a dropped
+    link doesn't end it) and its result is read back across a reconnect; still running, it's "pending" with a job to
+    follow; a link that never comes back gets words that say what may have happened. hc is faked: a script of answers."""
+
+    LOST = '{"error":{"kind":"unavailable","message":"lost the line to vmb during the call"}}'
+    DOWN = '{"error":{"kind":"unavailable","message":"vmb is unreachable: cannot reach it"}}'
+
+    def setUp(self):
+        sys.dont_write_bytecode = True
+        sys.path.insert(0, BIN)
+        import herdr_task.link as link
+        self.link = link
+        self.calls = []
+        self.saved = (link.run, link.time.sleep)
+        link.time.sleep = lambda s: None
+        os.environ["HERDR_TASK_ACTION_WAIT"] = "5"
+
+    def tearDown(self):
+        self.link.run, self.link.time.sleep = self.saved
+        os.environ.pop("HERDR_TASK_ACTION_WAIT", None)
+        sys.path.remove(BIN)
+
+    def hc(self, starts, polls):
+        """Fake hc: `hc run` answers from starts, `hc exec` (the poll) from polls; each (code, stdout, stderr)."""
+        def run(argv, **k):
+            self.calls.append(argv[1])
+            seq = starts if argv[1] == "run" else polls
+            code, out, err = seq.pop(0) if len(seq) > 1 else seq[0]
+            return subprocess.CompletedProcess(argv, code, out, err)
+        self.link.run = run
+
+    def test_a_drop_mid_action_is_waited_out(self):
+        result = json.dumps({"rc": 0, "out": '{"id": 1, "state": "done"}\n', "err": ""})
+        self.hc([(0, '{"address":"vmb/t3"}', "")], [(0, "running\n", ""), (5, "", self.LOST), (5, "", self.LOST),
+                                                     (0, "running\n", ""), (0, "done\n" + result, "")])
+        r = self.link.action("vmb", ["accept", "1", "--json"])
+        self.assertEqual((r.returncode, json.loads(r.stdout)), (0, {"id": 1, "state": "done"}))
+        self.assertEqual(self.calls.count("run"), 1)   # started once, never again
+
+    def test_its_own_failure_is_its_own(self):
+        result = json.dumps({"rc": 1, "out": '{"error": "SHEP-1 is done. Reopen it first."}\n', "err": ""})
+        self.hc([(0, "{}", "")], [(0, "done\n" + result, "")])
+        r = self.link.action("vmb", ["start", "1", "--json"])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Reopen it first", r.stdout)
+
+    def test_still_running_is_pending_with_its_job(self):
+        self.hc([(0, "{}", "")], [(0, "running\n", "")])
+        os.environ["HERDR_TASK_ACTION_WAIT"] = "0.05"
+        r = self.link.action("vmb", ["accept", "1", "--json"])
+        out = json.loads(r.stdout)
+        self.assertEqual((r.returncode, out["machine"]), (self.link.PENDING, "vmb"))
+        self.assertIn(f"_job {out['pending']}", out["error"])
+        self.assertIn("slow to answer", out["error"])
+
+    def test_a_start_cut_off_starts_once_the_machine_says_it_never_began(self):
+        result = json.dumps({"rc": 0, "out": "{}", "err": ""})
+        self.hc([(5, "", self.LOST), (0, "{}", "")], [(5, "", self.LOST), (0, "none\n", ""), (0, "none\n", ""),
+                                                      (0, "running\n", ""), (0, "done\n" + result, "")])
+        r = self.link.action("vmb", ["edit", "1", "--title", "x", "--json"])
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(self.calls.count("run"), 2)
+
+    def test_a_start_cut_off_that_had_begun_runs_once(self):
+        result = json.dumps({"rc": 0, "out": "{}", "err": ""})
+        self.hc([(5, "", self.LOST)], [(0, "running\n", ""), (0, "done\n" + result, "")])
+        self.assertEqual(self.link.action("vmb", ["merge", "1", "--json"]).returncode, 0)
+        self.assertEqual(self.calls.count("run"), 1)
+
+    def test_a_link_that_never_comes_back_says_what_may_have_happened(self):
+        os.environ["HERDR_TASK_ACTION_WAIT"] = "0.05"
+        self.hc([(5, "", self.DOWN)], [(5, "", self.DOWN)])
+        r = self.link.action("vmb", ["accept", "1"])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Can't reach vmb", r.stderr)
+        self.assertIn("nothing was run there", r.stderr)
+        self.hc([(5, "", self.LOST)], [(5, "", self.DOWN)])
+        r = self.link.action("vmb", ["accept", "1", "--json"])
+        self.assertIn("it may have run there", json.loads(r.stdout)["error"])
+        # started, then the link went: it keeps running there, followed later with its job
+        self.hc([(0, "{}", "")], [(5, "", self.LOST)])
+        r = self.link.action("vmb", ["accept", "1", "--json"])
+        self.assertEqual(r.returncode, self.link.PENDING)
+        self.assertIn("its link dropped", json.loads(r.stdout)["error"])
+
+    def test_hc_refusing_is_said_as_it_was(self):
+        self.hc([(4, "", '{"error":{"kind":"machine_unknown","message":"unknown machine \\"vmb\\""}}')], [(0, "", "")])
+        r = self.link.action("vmb", ["accept", "1"])
+        self.assertEqual(r.returncode, 4)
+        self.assertEqual(self.calls, ["run"])
+
+    def test_reads_run_again_once_the_link_is_back(self):
+        answers = [(5, "", self.LOST), (5, "", self.DOWN), (0, "[]", "")]
+        r = self.link.again("vmb", ["list"], lambda: subprocess.CompletedProcess([], *answers.pop(0)))
+        self.assertEqual((r.returncode, r.stdout), (0, "[]"))
+        self.assertFalse(self.link.lost(subprocess.CompletedProcess([], 1, "", "herdr-task: no such task")))

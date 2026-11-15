@@ -17,6 +17,7 @@ import { v_flex } from "gpui-base";
 import { props, closeOverlay, theme, shared, setShared, exec, appHome } from "herdr";
 import { menuRow, heading, toast, TEXT } from "./ui.js";
 import { taskMenu } from "./core/menus.js";
+import { settle } from "./core/pending.js";
 
 // Shepherdr's GROUP_WORDS (core/tasks.js GROUP_BY).
 const GROUPS = [{ key: "you", label: "For you" }, { key: "space", label: "Space" }, { key: "status", label: "Status" }];
@@ -59,7 +60,9 @@ function rowPick(p, key) {
   const args = it.id === "start-now" ? ["start", p.ref, "--now"] : it.id === "unschedule" ? ["edit", p.ref, "--at", ""]
     : ["edit", p.ref, ...(it.in ? ["--in", it.in] : ["--at", it.at])];
   // herdr-task, here or (--on) on the folder's machine; the list shows the change on its next read.
-  exec(`${appHome()}/mods/tasks/bin/herdr-task`, [...(p.machine ? ["--on", p.machine] : []), ...args, "--json", "--folder", p.folder])
+  const cli = (a) => exec(`${appHome()}/mods/tasks/bin/herdr-task`, a);
+  cli([...(p.machine ? ["--on", p.machine] : []), ...args, "--json", "--folder", p.folder])
+    .then((r) => settle(cli, r))
     .then((r) => {
       let out = null;
       try { out = JSON.parse(r.stdout || "null"); } catch {}
