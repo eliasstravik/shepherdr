@@ -20,19 +20,24 @@ if [[ "$old" == */* ]]; then
   envs=()
   [ -n "${HERDR_RESTART_CHAT:-}" ] && envs+=(--env "HERDR_RESTART_CHAT=$HERDR_RESTART_CHAT")
   [ -n "${HERDR_RESTART_RESUME:-}" ] && envs+=(--env "HERDR_RESTART_RESUME=1")
-  out=$(hc exec --on "$on" --stdin --timeout 300 ${envs[@]+"${envs[@]}"} -- bash -s "$here" "$argv" <"$0" 2>/dev/null)
+  # its own say on why it didn't (#980: a silent exit there read only as "It didn't restart"), kept apart from hc's
+  errf=$(mktemp "${TMPDIR:-/tmp}/herdr-restart.XXXXXX")
+  out=$(hc exec --on "$on" --stdin --timeout 300 ${envs[@]+"${envs[@]}"} -- bash -s "$here" "$argv" <"$0" 2>"$errf")
   code=$?
+  why=$(grep -v '^[[:space:]]*$' "$errf" 2>/dev/null | tail -n 1)
+  rm -f "$errf"
   new=$(tail -n 1 <<<"$out")
   if [ "$code" -ne 0 ] || [ -z "$new" ]; then
     state=$(hc machine ls --json 2>/dev/null | jq -r --arg m "${on%%/*}" '.machines[]? | select(.name == $m) | .state' 2>/dev/null)
     if [ -n "$state" ] && [ "$state" != connected ]; then echo "$on is offline. Try again once it's back." >&2
+    elif [ -n "$why" ]; then echo "It didn't restart on $on: $why" >&2
     else echo "It didn't restart on $on." >&2; fi
     exit 1
   fi
   echo "$on/$new"
   exit 0
 fi
-info=$(hc get "$old" --json) || exit 1
+info=$(hc get "$old" --json) || { echo "$old isn't running here any more." >&2; exit 1; }
 get() { jq -r "$1 // empty" <<<"$info"; }
 space=$(get '.labels["herdr.space"]') tab=$(get '.labels["herdr.tab"]') role=$(get '.labels["herdr.role"]')
 # Assistants start from the assistant template (earlier ones from "coordinator").
@@ -41,7 +46,12 @@ cwd=$(get .cwd) app=$(get .status.app) pid=$(get .foreground.pid) created=$(get 
 # A parked agent (behind a chat) has no tab labels: the chat names where it goes instead.
 # A coordinator in Chat mode says where it lives in its own labels (its workers name that tab).
 [ -n "$tab" ] || tab=$(get '.labels["herdr.coordinator.tab"]')
-[ -n "$space" ] && [ -n "$tab" ] || [ -n "${HERDR_RESTART_CHAT:-}" ] || [ -n "$(get '.labels["herdr.chat"]')" ] || exit 1
+# Somewhere to start the new one: a tab, a chat, or (#980) a space alone: the service's own Assistant on a machine
+# without the window (service/spaces.ts) has a space but no tab or chat, and restarts in the background there too.
+if [ -z "$space" ] && [ -z "${HERDR_RESTART_CHAT:-}" ] && [ -z "$(get '.labels["herdr.chat"]')" ]; then
+  echo "$old has no space, tab or chat to restart into." >&2
+  exit 1
+fi
 
 # What the previous agent did: its screen, and its session log when we can find it.
 dir=${HERDR_APP_HOME:-$HOME/.config/herdr-app}/data/coordinator/handoff
@@ -76,7 +86,14 @@ if [ "$role" = coordinator ]; then
   fi
 fi
 
-labels=(--label "herdr.space=$space" --label "herdr.tab=$tab")
+if [ -n "$tab" ]; then
+  labels=(--label "herdr.space=$space" --label "herdr.tab=$tab")
+else
+  # #980: no tab (an Assistant the service started without the window): kept in the background under its space,
+  # as the service starts it, so its space's chat finds the new one
+  labels=(--keep --label "herdr.space=$space")
+  v=$(get '.labels["herdr.coordinator.space"]'); [ -n "$v" ] && labels+=(--label "herdr.coordinator.space=$v")
+fi
 [ "$role" = coordinator ] && labels+=(--label herdr.role=coordinator)
 # An agent in Chat mode (parked behind a chat pane) restarts parked behind the same chat.
 chat=${HERDR_RESTART_CHAT:-$(get '.labels["herdr.chat"]')}

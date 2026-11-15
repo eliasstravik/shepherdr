@@ -898,7 +898,7 @@ def start_again(s, t, space, key=None, argv_json=None, message=None, parent=None
     argv = agent_argv(None, argv_json) if argv_json else worker_argv(s, t, space, key) if key else \
         (prev["argv"] if keep else worker_argv(s, t, space))
     same = prev and agent_key(argv) == prev.get("agent")
-    res = resume_argv(argv, prev["session"]) if same and prev.get("session") else None
+    res = resume_argv(argv, prev["session"], folder_for(s, t)) if same and prev.get("session") else None
     if res:
         return launch(s, t, argv, space, message or nudge, parent=parent, resume=res), True
     text = handoff(s, t, prev, parent, argv) + (("\n\n" + message) if message else "")

@@ -9,7 +9,7 @@ export const NAMES = { claude: "Claude Code", codex: "Codex" };
 const CLAUDE_MODELS = [
   { id: "opus", name: "Opus 5.5", match: ["opus", "claude-opus-5-5"] },
   { id: "opus[1m]", name: "Opus 5.5 · 1M", match: ["opus[1m]", "claude-opus-5-5[1m]"] },
-  { id: "claude-fable-5-1", name: "Fable 5.1", match: ["fable", "claude-fable-5-1"] },
+  { id: "claude-fable-5-2", name: "Fable 5.2", match: ["fable", "claude-fable-5-2"] },
   { id: "sonnet", name: "Sonnet 5.5", match: ["sonnet", "claude-sonnet-5-5"] },
   { id: "haiku", name: "Haiku 5.5", match: ["haiku", "claude-haiku-5-5"] },
 ];
@@ -278,11 +278,17 @@ const CLAUDE_VALUE = new Set(["--add-dir", "--mcp-config", "--append-system-prom
 const CODEX_VALUE = new Set(["-c", "--config", "-m", "--model", "-p", "--profile", "-s", "--sandbox", "-a", "--ask-for-approval",
   "-C", "--cd", "--add-dir", "-i", "--image", "--enable", "--disable", "--local-provider", "--oss"]);
 
+// Where the agent's own word (claude, codex) is in argv: a terminal's argv starts with what launched it (nice,
+// sh -c, env, the person's `bash -ic`), whose words are no agent flags (#1001: its -ic was Codex's `-i c`, an image).
+function agentAt(argv) {
+  return argv.findIndex((a, i) => (i === 0 || !String(a).startsWith("-")) && /^(claude|codex)$/.test(String(a).split("/").pop()));
+}
+
 // The old agent's flags worth keeping (permissions, folders, ...), without what is chosen again
 // or a first message.
 function kept(kind, argv) {
   const out = [];
-  const rest = argv.slice(1);
+  const rest = argv.slice(Math.max(agentAt(argv), 0) + 1);
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (kind === "claude") {
@@ -307,7 +313,7 @@ function kept(kind, argv) {
 // first message), or null when argv resumed none: for a fresh start once that session is gone.
 export function freshArgv(kind, argv) {
   argv = argv ?? [];
-  const at = argv.findIndex((a, i) => (i === 0 || !a.startsWith("-")) && /^(claude|codex)$/.test(String(a).split("/").pop()));
+  const at = agentAt(argv);
   if (at < 0) return null;
   const rest = argv.slice(at + 1), out = [argv[at]];
   let resumed = false;
@@ -378,3 +384,23 @@ export function forkArgv(kind, argv, session) {
   const flags = [...kept(kind, argv), ...same];
   return kind === "claude" ? ["claude", ...flags, "--resume", session, "--fork-session"] : ["codex", "fork", ...flags, session];
 }
+
+// #1050: a fork of a task's conversation while the task's agent runs works in the same folder, so two agents would
+// edit one worktree. The task's live agent (a terminal record from `all`, reviewers and helpers aside) when `t` is a
+// task's terminal, else null: the fork then asks first (FORK_LIVE).
+const AGENT_APPS = new Set(["claude-code", "claude", "codex"]);
+export function liveTaskAgent(t, all) {
+  const task = t?.labels?.["herdr.task"];
+  if (!task) return null;
+  return [...(all ?? [])].find((k) => k?.state === "live" && k.labels?.["herdr.task"] === task
+    && !["reviewer", "helper"].includes(k.labels?.["herdr.role"])
+    // an agent runs there (a record that doesn't say what runs counts: better to ask once too often)
+    && (AGENT_APPS.has(k.status?.app) || AGENT_APPS.has(k.foreground?.name) || (!k.status?.app && !k.foreground))) ?? null;
+}
+// The ask, in the window's confirm and the web's alike: keep the live agent (Cancel) or fork anyway.
+export const FORK_LIVE = {
+  title: "This task's agent is still running",
+  detail: "A fork starts a second agent in the task's folder, and both would edit the same files. Keep working with the live one, or fork anyway.",
+  verb: "Fork anyway",
+  cancel: "Keep the live one",
+};
