@@ -638,7 +638,7 @@ async function doAction(body: any): Promise<Response> {
   if (body?.type === "limits-check") { await machines.checkNow(); return json({ ok: true }); }
   if (body?.type === "secrets-move") {
     // Settings › Secrets › Kept on: the vault moves (shepherdr secrets move-to); the page sees it as it goes
-    const m = typeof body.machine === "string" && body.machine && body.machine !== home.me?.name ? body.machine : null;
+    const m = HCORE.pickedMachine(body.machine, home.me?.name);
     if (m !== null && !home.machines.has(m)) return json({ ok: false, error: "That machine isn't linked." });
     if (secretsMoving && !secretsMoving.error) return json({ ok: false, error: `Already moving them to ${secretsMoving.to}.` });
     void moveSecrets(m).catch(() => {});
@@ -646,7 +646,7 @@ async function doAction(body: any): Promise<Response> {
   }
   if (body?.type === "serve-from") {
     // Settings › Web's Serve from: the move runs on (the page sees it in Settings › Web as it goes)
-    const m = typeof body.machine === "string" && body.machine && body.machine !== host.me?.name ? body.machine : null;
+    const m = HCORE.pickedMachine(body.machine, host.me?.name);
     if (m !== null && !host.machines.has(m)) return json({ ok: false, error: "That machine isn't linked." });
     if (moving && !moving.error) return json({ ok: false, error: `Already moving it to ${moving.to}.` });
     void serveFrom(m).catch(() => {});

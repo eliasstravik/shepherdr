@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { newestHost, renamer, moveId, relocate, relocateDoc, keepForeign, relocateSettings, merge3, serveChoice, nodeAlive } from "./host.js";
+import { newestHost, renamer, moveId, relocate, relocateDoc, keepForeign, relocateSettings, merge3, serveChoice, nodeAlive, pickedMachine } from "./host.js";
 
 // the laptop (id L) calls the mini "mac-mini"; the mini (id M) calls the laptop "m3"; both call the VM "vm"
 const laptop = { id: "L", links: { "mac-mini": "M", vm: "V" } };
@@ -101,4 +101,13 @@ test("the machines' dragged order reads the same on both machines; one only the 
   // the laptop moves itself first; the mini's "lonely" (the laptop can't name it) stays after vm, where it was
   const merged = keepForeign("spaces-chat", relocate("spaces-chat", { machineOrder: ["", "vm", "mac-mini"] }, toMini), { machineOrder: ["vm", "lonely", "m3", ""] }, toLaptop);
   expect(merged.machineOrder).toEqual(["m3", "vm", "lonely", ""]);
+});
+
+test("a Kept on / Serve from pick of this computer is null, whichever way the page says it (#1042)", () => {
+  expect(pickedMachine("here", "m3")).toBe(null);
+  expect(pickedMachine("m3", "m3")).toBe(null);
+  expect(pickedMachine("", "m3")).toBe(null);
+  expect(pickedMachine(undefined, "m3")).toBe(null);
+  expect(pickedMachine("here", undefined)).toBe(null);
+  expect(pickedMachine("mac-mini", "m3")).toBe("mac-mini");
 });
