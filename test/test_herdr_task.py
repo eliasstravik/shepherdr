@@ -1177,6 +1177,49 @@ class BackToWork(unittest.TestCase):
         self.assertNotIn(("pr", "create"), calls)
         self.assertIn(("pr", "comment"), calls)  # the summary still reaches it
 
+    def test_ready_again_edits_one_comment_never_a_second(self):
+        """#1058: each ready posted the summary again; now one comment, edited when the summary changes."""
+        import herdr_task.github as github
+        calls = []
+
+        def fake(*a, **k):
+            calls.append(a)
+            if a[:2] == ("pr", "view"):
+                return True, "OPEN", ""
+            if a[:2] == ("pr", "comment"):
+                return True, "https://github.com/o/r/pull/599#issuecomment-4242", ""
+            return True, "", ""
+        with self.mock.patch.object(github, "gh", fake), self.mock.patch.object(github, "git", lambda *a: (True, "abc", "")):
+            t = self.ready(mode="worktree", worktree="/w", branch="b", pr={"number": 599, "url": "u", "repo": "o/r"})
+            for summary in ("Done.", "Done.", "Done.", "Done, and the findings fixed."):
+                github.pr_open(self.store, t, "o/r", summary)
+        posts = [c for c in calls if c[:2] == ("pr", "comment")]
+        edits = [c for c in calls if c[:1] == ("api",)]
+        self.assertEqual(len(posts), 1, "a second comment for the same pull request")
+        self.assertEqual(len(edits), 1)
+        self.assertIn("repos/o/r/issues/comments/4242", edits[0])
+        self.assertIn("body=Done, and the findings fixed.", edits[0])
+        self.assertEqual(t["pr_note"], {"number": 599, "id": 4242, "said": "Done, and the findings fixed."})
+
+    def test_a_new_pull_request_says_it_in_its_body_only(self):
+        import herdr_task.github as github
+        calls = []
+
+        def fake(*a, **k):
+            calls.append(a)
+            if a[:2] == ("pr", "list"):
+                return True, "[]", ""
+            if a[:2] == ("pr", "create"):
+                return True, "https://github.com/o/r/pull/600", ""
+            return True, "", ""
+        with self.mock.patch.object(github, "gh", fake), self.mock.patch.object(github, "git", lambda *a: (True, "abc", "")):
+            t = self.ready(mode="worktree", worktree="/w", branch="b")
+            github.pr_open(self.store, t, "o/r", "Done.")
+            calls.append(("pr", "view"))  # (now it's open)
+            with self.mock.patch.object(github, "gh", lambda *a, **k: (calls.append(a), (True, "OPEN", ""))[1]):
+                github.pr_open(self.store, t, "o/r", "Done.")
+        self.assertNotIn(("pr", "comment"), [c[:2] for c in calls])
+
     def test_ready_never_adopts_a_forks_or_another_ones(self):
         mine = {"number": 599, "url": "https://github.com/o/r/pull/599", "isCrossRepository": False, "baseRefName": "main", "headRefOid": "abc"}
         for other in ({"isCrossRepository": True}, {"baseRefName": "dev"}, {"headRefOid": "f00"}):
