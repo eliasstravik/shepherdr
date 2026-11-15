@@ -4,7 +4,7 @@ import json
 
 from .base import now
 from .agents import (
-    agent_running, detail, live_helpers, ask_reason, held_ask, last_words, own_line, own_work, status_word, STATUSES, task_status,
+    agent_running, detail, live_helpers, ask_reason, held_ask, last_words, own_line, own_work, OUT_OF_ROUNDS, status_word, STATUSES, task_status,
 )
 from .queues import waiting_ext, waiting_for
 
@@ -25,7 +25,7 @@ def view(s, task, live=None):
         v["why"] = own_line(task, k and k["address"]) or (ask_reason(task, k["address"], held_ask(k["address"]), st.get("kind"), st.get("msg")) if k else v["why"])
     if v["needs"] == "reply":
         # Refused ready with its rounds used up (review_refusal): the Assistant can add one.
-        v["why"] = own_line(task) or ("Out of review rounds" if task.get("review_out") else None) or last_words(task)
+        v["why"] = own_line(task) or (OUT_OF_ROUNDS if task.get("review_out") else None) or last_words(task)
     # Quiet but on its own background work (SHEP-53), or said ready but not at rest yet (SHEP-148):
     # Working; kept on the task for the Tasks panel (core/tasks.js place()).
     v["own_work"] = (v["status"] == "working" and task["state"] in ("running", "ready") and bool(running)

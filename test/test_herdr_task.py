@@ -4853,6 +4853,22 @@ class TaskFlow(unittest.TestCase):
         self.task["review_out"] = t - 90000
         self.assertEqual(agents.task_status(self.task, live)[:2], ("needs", "reply"))
 
+    def test_out_of_rounds_after_fixing_a_conflict_needs_you_at_once(self):
+        """#1040: a conflict its agent fixed by merging the base, then ready refused for rounds: its fresh status
+        line kept it Working on the conflict, and only the 20-minute stall reached the Assistant."""
+        from herdr_task import agents, base
+        t = base.now()
+        self.task.update(started=t - 3600000, agents=[{"address": "t1", "at": t - 3600000}],
+                         attention="Conflicts with main", attention_at=t - 600000,
+                         progress={"text": "Merging main in", "set": t - 300000, "at": t - 300000})
+        live = [{"address": "t1", "status": {"state": "idle"}, "status_ms": t - 5000}]
+        self.patch(agents, "agent_log", lambda *a, **k: None)
+        self.assertEqual(agents.task_status(self.task, live)[0], "working")  # on the conflict
+        self.task["review_out"] = t - 5000
+        self.assertEqual(agents.task_status(self.task, live), ("needs", "reply", "Out of review rounds"))
+        # still at it (its turn not ended yet): Working
+        self.assertEqual(agents.task_status(self.task, [{**live[0], "status": {"state": "working"}}])[0], "working")
+
     def test_ready_pushes_only_what_the_remote_lacks(self):
         """#795: the branch already on its remote at its tip: no push through a pre-push hook that fails."""
         import herdr_task.github as github
