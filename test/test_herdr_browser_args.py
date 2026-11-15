@@ -82,7 +82,7 @@ class BrowserArgs(unittest.TestCase):
             self.skipTest("this network refuses the silent address at once")
         p = self.run_it("open", f"http://{SILENT}/", HERDR_BROWSER_CONNECT_WAIT="0.5")
         self.assertEqual(p.returncode, 4)
-        self.assertIn(f"can't open http://{SILENT}/: {SILENT}:80 didn't answer within 0.5 s", p.stderr)
+        self.assertIn(f"can't open http://{SILENT}/: {SILENT}:80 did not answer within 0.5 s", p.stderr)
         self.assertFalse(os.path.exists(self.log), "the browser wasn't sent there")
 
 

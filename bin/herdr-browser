@@ -413,12 +413,7 @@ done
 # only "Resource temporarily unavailable" and the stuck tab made the next command hang too. A web address whose
 # server doesn't answer a connection within HERDR_BROWSER_CONNECT_WAIT seconds (default 10) is refused here with
 # why, before the browser goes there. A name that doesn't resolve, or a refused connection, Chrome answers at once.
-case "$verb" in
-  open|goto|navigate)
-    url=
-    for a in "$@"; do case "$a" in -*|"$verb") ;; *) url=$a; break ;; esac; done
-    if [ -n "$url" ] && [ -z "${HTTPS_PROXY:-}${https_proxy:-}${HTTP_PROXY:-}${http_proxy:-}${ALL_PROXY:-}" ]; then
-      why=$(python3 - "$url" "${HERDR_BROWSER_CONNECT_WAIT:-10}" 2>/dev/null <<'EOF'
+reach='
 import socket, sys, urllib.parse
 u, wait = sys.argv[1], float(sys.argv[2])
 if "://" not in u:
@@ -431,11 +426,16 @@ try:
     port = p.port or (443 if p.scheme == "https" else 80)
     socket.create_connection((p.hostname, port), timeout=wait).close()
 except socket.timeout:
-    print(f"{p.hostname}:{port} didn't answer within {wait:g} s")
+    print(f"{p.hostname}:{port} did not answer within {wait:g} s")
 except (OSError, ValueError):
     pass
-EOF
-)
+'
+case "$verb" in
+  open|goto|navigate)
+    url=
+    for a in "$@"; do case "$a" in -*|"$verb") ;; *) url=$a; break ;; esac; done
+    if [ -n "$url" ] && [ -z "${HTTPS_PROXY:-}${https_proxy:-}${HTTP_PROXY:-}${http_proxy:-}${ALL_PROXY:-}" ]; then
+      why=$(python3 -c "$reach" "$url" "${HERDR_BROWSER_CONNECT_WAIT:-10}" 2>/dev/null)
       if [ -n "$why" ]; then
         echo "herdr-browser: can't open $url: $why, so the browser wasn't sent there (it would hang). Check the address and that its server is running and reachable from this machine, then open it again." >&2
         exit 4
