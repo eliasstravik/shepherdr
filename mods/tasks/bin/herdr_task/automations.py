@@ -206,7 +206,7 @@ def find_auto(s, ref):
 
 def auto_view(s, a):
     v = {k: a.get(k) for k in ("id", "title", "prompt", "mode", "agent", "set", "on", "match", "space", "paused",
-                                "next_run", "last_run", "last_task", "last_error", "runs", "created")}
+                                "next_run", "last_run", "last_task", "last_error", "from_error", "runs", "created")}
     # machine: None here; herdr-task --on <machine> names it (cli.remote), so a list across machines says whose it is
     v.update(ref=auto_ref(s, a), **{"from": from_text(a["from"]) if a.get("from") else None}, folder=s.loc["folder"], machine=None, prefix=s.prefix, every=(a.get("every") or {}).get("text"),
              trigger=trigger_words(a), enabled=settings_for(s, a.get("space"))["automations"].get("enabled", True))
@@ -216,7 +216,8 @@ def auto_view(s, a):
 def auto_line(v):
     state = "paused" if v["paused"] else ("off in Settings" if not v["enabled"] else
                                           (f"next {datetime.datetime.fromtimestamp(v['next_run'] / 1000):%a %H:%M}" if v.get("next_run") else "on events"))
-    err = f"  ! {v['last_error']['message']}" if v.get("last_error") else ""
+    err = (f"  ! {v['last_error']['message']}" if v.get("last_error") else
+           f"  ~ {v['from_error']['message']} ({v['from_error']['misses']} round(s) so far)" if v.get("from_error") else "")
     return f"{v['ref']:<9} {v['title']}  ({v['trigger']}; {state}){err}"
 
 
@@ -558,6 +559,20 @@ def feeds_for(lists):
     return out
 
 
+# A --from source that fails every round for this long (and at least this many rounds) is flagged.
+FROM_GRACE_MS = 15 * 60 * 1000
+FROM_GRACE_MISSES = 3
+
+
+def from_down_words(src, since):
+    """A long --from outage in plain words: "Can't reach vm-b since 23:03" (a day or more: "since Mon 23:03")."""
+    at = datetime.datetime.fromtimestamp(since / 1000)
+    when = f"{at:%H:%M}" if now() - since < 20 * 3600 * 1000 else f"{at:%a %H:%M}"
+    if src.get("machine"):
+        return f"Can't reach {src['machine']} since {when}"
+    return f"Can't read {os.path.basename(src['folder'].rstrip('/')) or src['folder']} since {when}"
+
+
 def from_events(s, a, feeds):
     """The --from folder's events since this automation last looked: [(event, facts)]. Its record
     changes in the store, with the runs they fire (one save)."""
@@ -565,13 +580,25 @@ def from_events(s, a, feeds):
     if d is None:
         return []
     if isinstance(d, Exception):
-        err = {"at": now(), "message": f"Couldn't ask {from_text(a['from'])}: {d}", "kind": "from"}
-        if (a.get("last_error") or {}).get("message") != err["message"]:
-            a["last_error"] = err
-            s.dirty = True
+        # A blip (a busy line, a sleeping machine) is no news: it's kept in from_error for auto show,
+        # and only becomes a Needs-you error once it failed every round for FROM_GRACE_MS.
+        t = now()
+        fe = a.get("from_error") or {}
+        fe = {"since": fe.get("since") or t, "at": t, "misses": int(fe.get("misses") or 0) + 1,
+              "message": f"Couldn't ask {from_text(a['from'])}: {d}"}
+        a["from_error"] = fe
+        s.dirty = True
+        if t - fe["since"] >= FROM_GRACE_MS and fe["misses"] >= FROM_GRACE_MISSES:
+            words = from_down_words(a["from"], fe["since"])
+            if (a.get("last_error") or {}).get("message") != words:
+                a["last_error"] = {"at": t, "message": words, "detail": fe["message"], "kind": "from"}
         return []
+    if a.get("from_error"):
+        a.pop("from_error")
+        s.dirty = True
     if (a.get("last_error") or {}).get("kind") == "from":
         a.pop("last_error")
+        s.dirty = True
     seen = a.setdefault("from_seen", {})
     before = json.dumps(seen, sort_keys=True)
     out = diff_events(d["tasks"], seen)
