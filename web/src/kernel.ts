@@ -401,6 +401,8 @@ function saveSide(side: UI['side']) {
 }
 
 const params = new URLSearchParams(location.search)
+/** the address the page loaded at, before the app writes its own (SHEP-238: `voice=1` opens into a call) */
+export const launchHref = location.href
 // a reload for a new build draws at once what it showed: the last snapshot and the chats on screen, until the server's
 const { text: keptText, snap: keptSnap, chats: keptChats, ...keptUI } = kept()
 let state: State = {
