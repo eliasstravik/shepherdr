@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.1.37
+
+A small release: your phone's wake word now starts the call in the Shepherdr page you already have open on it.
+
+### Voice
+
+- Saying your phone's wake word starts a voice call with your Assistant in the Shepherdr page already open on that
+  phone, instead of opening a new one. If no page is open yet, the call starts in the one you open within 15 seconds.
+- Only the phone you spoke to starts the call: Shepherdr open on your other devices stays as it was.
+
 ## 3.1.36
 
 A small release: your phone's wake word can open Shepherdr straight into a voice call.
