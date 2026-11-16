@@ -14,7 +14,7 @@ import { DATA, SOCK, TOKEN, PORT, HOME, ensureData, settingsFile, where } from "
 import { holdLock } from "./lock.ts";
 import { gate, localCaller, type Gate } from "./auth.ts";
 import { refusedWhy, trustedPeer } from "./peer.ts";
-import { whoami, share, served, unshare, restoreShare, httpsPort, webLink, webOrigin, HTTPS_PORT_FILE, type Me } from "./tailscale.ts";
+import { whoami, share, served, unshare, restoreShare, httpsPort, webLink, webOrigin, deviceOf, forwardedFrom, HTTPS_PORT_FILE, type Me } from "./tailscale.ts";
 import { qrFile } from "./qr.ts";
 import { Hub } from "./hub.ts";
 import { Store } from "./store.ts";
@@ -668,6 +668,13 @@ async function doAction(body: any): Promise<Response> {
   } catch (err) { return new Response((err as Error).message, { status: 400 }); }
 }
 
+/** The tailnet device a request came from (tailscale serve's forwarded address, as its node's id), or null: this
+ *  machine's own callers (the window, the CLI) aren't a device of the tailnet. */
+async function deviceFrom(req: Request, via: "tailnet" | "local") {
+  const ip = via === "tailnet" ? forwardedFrom(req) : null;
+  return ip ? await deviceOf(ip) : null;
+}
+
 const server = Bun.serve<{ who: string }>({
   hostname: "127.0.0.1",
   port: PORT,
@@ -718,7 +725,11 @@ const server = Bun.serve<{ who: string }>({
       const resume = (url.searchParams.get("resume") ?? "").slice(0, 64);
       return srv.upgrade(req, { data: { who: pass.who, voice: { key, resume } } as any }) ? undefined : new Response("upgrade failed", { status: 400 });
     }
-    if (socket) return srv.upgrade(req, { data: { who: pass.who } }) ? undefined : new Response("upgrade failed", { status: 400 });
+    if (socket) {
+      // the device a page is on (a wake word reaches only its own device's pages, SHEP-240)
+      const from = await deviceFrom(req, pass.via);
+      return srv.upgrade(req, { data: { who: pass.who, from } as any }) ? undefined : new Response("upgrade failed", { status: 400 });
+    }
     if (path === "/api/me") return json({ login: pass.who, via: pass.via, machine: me?.host ?? null, link: ownLink(), version: VERSION, off: offPlugins() });
     if (path === "/api/state" && req.method === "GET") return json(store.doc.version ? store.doc : await store.load());
     if (path === "/api/state" && req.method === "POST") {
@@ -873,6 +884,14 @@ const server = Bun.serve<{ who: string }>({
       return json(await activity(r, id));
     }
     if (path === "/api/action" && req.method === "POST") return doAction(await req.json().catch(() => null));
+    if (path === "/api/voice/wake" && req.method === "POST") {
+      // a wake word heard on a phone (Shepherdr Wake, SHEP-240): its Shepherdr page already open starts a call, as
+      // ?voice=1 would, without the phone opening a second page. shown: false, it waits 15 s for that page to show up.
+      if (offList().includes("voice")) return json({ error: "voice is off" }, 409);
+      const from = await deviceFrom(req, pass.via);
+      if (!from) return json({ error: "only from a device on the tailnet" }, 400);
+      return json({ ok: true, shown: live.voiceWake(from) });
+    }
     if (path === "/api/voice/tool" && req.method === "POST") {
       // the window's voice call (mods/chat/voice.ts) asks its tools here, from this machine only
       if (pass.via !== "local") return json({ error: "not here" }, 403);

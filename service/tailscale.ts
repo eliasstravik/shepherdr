@@ -62,6 +62,23 @@ export async function whoami(): Promise<Me | null> {
   return r.ok ? meOf(r.out) : null;
 }
 
+/** The tailnet device a request came through tailscale serve from (SHEP-240): its node's id, by `tailscale whois` of the
+ *  address tailscaled puts in X-Forwarded-For (it sets that header itself, replacing any the caller sent). One device
+ *  comes from its IPv4 or its IPv6 address; whois gives both the same id. No whois answer: the address itself. */
+export async function deviceOf(ip: string, whois = (a: string) => run(["whois", "--json", a])): Promise<string> {
+  const hit = devices.get(ip);
+  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.id;
+  const r = await whois(ip);
+  let id = ip;
+  try { id = r.ok ? String(JSON.parse(r.out)?.Node?.StableID || ip) : ip; } catch {}
+  // a passing failure isn't kept: the next connection asks again
+  if (id !== ip || r.ok) devices.set(ip, { id, at: Date.now() });
+  return id;
+}
+const devices = new Map<string, { id: string; at: number }>();
+/** The address tailscale serve says a request came from, or null (not through it). */
+export const forwardedFrom = (req: Request) => req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || null;
+
 export type Served = { proxy: string | null; port: string | null; funnel: boolean };
 
 /** What tailscale serve does with /shepherdr now: its target, the HTTPS port, and whether Funnel is on there. */
