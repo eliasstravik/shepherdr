@@ -4091,6 +4091,71 @@ class AutomationFromAnotherMachine(unittest.TestCase):
         self.assertEqual(shown["from"], f"vmb:{self.b_folder}")
         self.assertEqual(shown["runs"][-1]["from"], f"vmb:{self.b_folder}")
 
+    def round_at(self, at_ms):
+        from unittest import mock
+        with mock.patch.object(self.au, "now", lambda: at_ms):
+            return self.round()
+
+    def test_a_blip_is_no_needs_you(self):
+        """SHEP-242: B not answering for a round or two (a busy line) flags nothing; auto show keeps why."""
+        self.b_task("Fix one")
+        self.auto("add", title="Update", prompt="Go.", on="merged", from_=f"vmb:{self.b_folder}")
+        t0 = 1_800_000_000_000
+        self.round_at(t0)
+        self.b_up = False
+        self.round_at(t0 + 15_000)
+        self.round_at(t0 + 30_000)
+        shown = self.auto("show", id="1")
+        self.assertIsNone(shown["last_error"])  # no Needs you
+        self.assertEqual(shown["from_error"]["misses"], 2)
+        self.assertIn("connection refused", shown["from_error"]["message"])
+        listed = self.auto("list", all=False)
+        self.assertFalse(any(a.get("last_error") for a in listed))
+        self.b_up = True
+        self.round_at(t0 + 45_000)
+        self.assertIsNone(self.auto("show", id="1")["from_error"])
+
+    def test_a_long_outage_says_so_then_clears_on_recovery(self):
+        """SHEP-242: B down every round for 15 minutes: Needs you, in plain words ("Can't reach vmb since ..."),
+        not "Didn't start its task"; B back: the flag goes, and is saved."""
+        import datetime
+        self.b_task("Fix one")
+        self.auto("add", title="Update", prompt="Go.", on="merged", from_=f"vmb:{self.b_folder}")
+        t0 = 1_800_000_000_000
+        self.round_at(t0)
+        self.b_up = False
+        down = t0 + 15_000
+        for k in range(0, 14 * 60_000, 60_000):
+            self.round_at(down + k)
+        self.assertIsNone(self.auto("show", id="1")["last_error"])  # 14 minutes: still quiet
+        self.round_at(down + 15 * 60_000)
+        err = self.auto("show", id="1")["last_error"]
+        since = f"{datetime.datetime.fromtimestamp(down / 1000):%H:%M}"
+        self.assertEqual(err["kind"], "from")
+        self.assertEqual(err["message"], f"Can't reach vmb since {since}")
+        self.assertIn("connection refused", err["detail"])
+        self.assertNotIn("start", err["message"])
+        # B answers again: the flag is gone from the saved list, with nothing else to save that round
+        self.b_up = True
+        self.round_at(down + 16 * 60_000)
+        shown = self.auto("show", id="1")
+        self.assertIsNone(shown["last_error"])
+        self.assertIsNone(shown["from_error"])
+
+    def test_recovery_saves_a_cleared_error(self):
+        """SHEP-242: a "from" error (as an older herdr-task kept it, no from_error) clears on B's next answer and is
+        saved, though that round changes nothing else."""
+        self.b_task("Fix one")
+        self.auto("add", title="Update", prompt="Go.", on="merged", from_=f"vmb:{self.b_folder}")
+        self.round()
+        from herdr_task.store import locate, Store
+        with Store(locate(self.a_folder)) as s:
+            s.data["automations"][0]["last_error"] = {"at": 1, "message": "Couldn't ask vmb: down", "kind": "from"}
+            s.dirty = True
+        self.assertIsNotNone(self.auto("show", id="1")["last_error"])
+        self.round()
+        self.assertIsNone(self.auto("show", id="1")["last_error"])
+
     def test_missed_while_down_is_caught_up_once(self):
         self.b_task("Fix one")
         self.auto("add", title="Update", prompt="Go.", on="merged", from_=f"vmb:{self.b_folder}")
@@ -4100,11 +4165,12 @@ class AutomationFromAnotherMachine(unittest.TestCase):
         self.b_merge(1)
         self.b_task("Fix two", state="done", merged=True)  # added and merged while unseen
         self.assertEqual(self.round(), [])
-        self.assertIn("Couldn't ask vmb", self.auto("show", id="1")["last_error"]["message"])
+        self.assertIn("Couldn't ask vmb", self.auto("show", id="1")["from_error"]["message"])
         # B is back: each merge fires once, the error goes
         self.b_up = True
         self.assertEqual(sorted(f["why"] for f in self.round()), ["merged: vmb:SHEP-1", "merged: vmb:SHEP-2"])
         self.assertEqual(self.round(), [])
+        self.assertIsNone(self.auto("show", id="1")["from_error"])
         self.assertIsNone(self.auto("show", id="1")["last_error"])
         # A was down (no rounds) while B merged another: once, on A's next round
         self.b_task("Fix three")

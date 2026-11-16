@@ -310,9 +310,10 @@ function agentNeeds(snap: Snapshot, chips: string[]): AgentNeed[] {
     // an agent's item: its name (a space's agent is its Assistant), where it is: its machine and space
     return { id: n.id, chat: n.chat, who: 'Assistant', why, where: where(p?.machine, p?.name), space: p?.name }
   })
-  // an automation goes by its name, with no id: "Didn't run" or "Didn't start its task"
+  // an automation goes by its name, with no id: "Didn't run", "Didn't start its task", or a --from source down for a
+  // while in its own words ("Can't reach vm-b since 23:03")
   const autos = autosIn(snap, chips).filter((a) => a.error)
-    .map((a) => ({ id: `auto:${a.machine ?? ''}:${a.listName}:${a.name}`, who: a.name, why: a.failed === 'fire' ? "Didn't run" : "Didn't start its task", where: where(a.machine, a.listName), space: a.listName, auto: a }))
+    .map((a) => ({ id: `auto:${a.machine ?? ''}:${a.listName}:${a.name}`, who: a.name, why: a.failed === 'fire' ? "Didn't run" : a.failed === 'from' && a.error ? a.error : "Didn't start its task", where: where(a.machine, a.listName), space: a.listName, auto: a }))
   return [...asks, ...autos]
 }
 
@@ -367,7 +368,7 @@ function AutoRow({ a, where, from }: { a: Automation; where?: string; from?: str
       glyph={<RepeatIcon className={clsx('size-3.5', a.error ? 'text-need' : 'text-fg3')} />}
       title={a.name}
       dim={!a.on}
-      sub={a.error ? "Didn't start" : !a.on ? 'Paused' : from}
+      sub={a.error ? (a.failed === 'from' ? a.error : "Didn't start") : !a.on ? 'Paused' : from}
       meta={a.nextAt ? day(a.nextAt) : undefined}
       where={where}
       tip={a.error}
