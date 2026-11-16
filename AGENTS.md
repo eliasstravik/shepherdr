@@ -145,3 +145,4 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
   yes.
 - Version bumps are patch only (2.0.0 → 2.0.1) unless the human explicitly asks for a minor or major one.
 - From SHEP-238: headless Chrome with flags herdr-browser ignores (e.g. --autoplay-policy=no-user-gesture-required, fake mic): run ~/.agent-browser/browsers/chrome-*/chrome --headless=new --user-data-dir=<scratch> --screenshot/--dump-dom directly.
+- From SHEP-240: a second visible browser page on the dev VM: run ~/.agent-browser/browsers/chrome-*/chrome --headless=new --remote-debugging-port=<p> <url> in the background and screenshot over CDP (Page.captureScreenshot); herdr-browser's --headers don't reach WebSockets.
