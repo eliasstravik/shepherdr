@@ -1340,6 +1340,8 @@ export type ServerEvent =
   | { type: 'pong' }
   /** an agent shows the person an artifact (herdr-artifact open): this screen, the one they used last, opens it */
   | { type: 'show'; artifact: string }
+  /** a wake word was heard on this screen's device (SHEP-240): it starts a voice call, or shows the one on */
+  | { type: 'voice' }
 
 /** how Shepherdr's last update of itself went (update.json in its folder, written by the supervisor) */
 export interface UpdateStatus {

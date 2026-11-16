@@ -9,7 +9,10 @@ import type { Chats, Watcher } from "./chats.ts";
 import type { Compat } from "./compat.ts";
 
 // A page's socket: the chats it follows (by 2.1's chat key), each with the terminal and the watcher it holds.
-type WS = ServerWebSocket<{ who: string; keys?: string[]; chats?: Map<string, { addr: string; watcher: Watcher }>; push?: string | null; visible?: boolean; seen?: number }>;
+type WS = ServerWebSocket<{ who: string; keys?: string[]; chats?: Map<string, { addr: string; watcher: Watcher }>; push?: string | null; visible?: boolean; seen?: number; from?: string | null }>;
+
+/** how long a wake word waits for a page of its device to show up */
+export const WAKE_HELD_MS = 15_000;
 
 export class Live {
   private pages = new Set<WS>();
@@ -22,6 +25,8 @@ export class Live {
   onVisible: ((endpoints: Set<string>) => void) | null = null;
   compat: Compat | null = null;
   private snap: string | null = null;
+  /** a wake word no page of its device had on screen yet (voiceWake): the next one that shows up takes it */
+  private wake: { from: string; at: number } | null = null;
 
   constructor(private hub: Hub, private store: Store, private me: () => Me | null, private version: string, private link: () => string | null = () => null) {
     hub.on((e) => {
@@ -97,7 +102,25 @@ export class Live {
       ws.data.push = typeof m.push === "string" ? m.push : null;
       ws.data.visible = m.visible !== false;
       this.visibleNow();
+      if (this.wake && ws.data.from === this.wake.from && ws.data.visible && Date.now() - this.wake.at < WAKE_HELD_MS) {
+        this.wake = null;
+        ws.send(JSON.stringify({ type: "voice" }));
+      }
     }
+  }
+
+  /** A wake word was heard on device `from` (POST /api/voice/wake, SHEP-240): that device's page on screen, the one used
+   *  last, starts a voice call (or shows the one on: never hangs up). Pages of other devices never hear it. None on
+   *  screen yet (a phone bringing Shepherdr forward or starting it): the first that shows up within 15 s does. True: a
+   *  page got it now. */
+  voiceWake(from: string) {
+    let best: WS | null = null;
+    for (const ws of this.pages)
+      if (ws.data.from === from && ws.data.visible !== false && ws.readyState === 1 && (!best || (ws.data.seen ?? 0) > (best.data.seen ?? 0))) best = ws;
+    if (!best) { this.wake = { from, at: Date.now() }; return false; }
+    this.wake = null;
+    best.send(JSON.stringify({ type: "voice" }));
+    return true;
   }
 
   /** Shows an artifact where the person is (herdr-artifact open, service/show.ts): the page on screen they used

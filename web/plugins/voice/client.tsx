@@ -722,6 +722,9 @@ export default definePlugin({
     reg.overlays.push(OpenedTag, CallScreen, StartAsk)
     // SHEP-238: opened at ?voice=1 (a wake word): straight into a call, once the page has drawn
     setTimeout(watchLaunches, 0)
+    // SHEP-240: a wake word on this device reaches the page already open (Android can't hand it a link): the same as
+    // ?voice=1, so a call on shows its screen and never hangs up
+    reg.voiceWake = () => void launch(location.origin + location.pathname + '?voice=1')
     // 3.0 calls with Ctrl+Shift+Space (the keyboard plugin): no V or M keys of its own
   },
 })
