@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.1.36
+
+A small release: your phone's wake word can open Shepherdr straight into a voice call.
+
+### Voice
+
+- Saying your phone's wake word (or opening the web app's link with `?voice=1`) opens Shepherdr straight into a voice
+  call with your Assistant. If a call is already on, it shows that one.
+- If Shepherdr is already open, it reuses that window instead of opening a second one.
+- When the browser wants a tap before it can use the microphone, a big Start voice call button asks for it.
+
 ## 3.1.35
 
 The 15 November fixes from GitHub: Shepherdr no longer tries SSH to machines you never linked, tasks stop getting stuck
