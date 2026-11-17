@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.1.40
+
+A tiny fix for the phone and watch app: the number by each section now always matches what it lists.
+
+### Phone and watch
+
+- The Needs you number in the phone and watch app now counts everything listed under it, including an Assistant's
+  unread message and an agent's alert, so the number and the list never disagree.
+- The app shows its sections in the same order and with the same names as the web app's Tasks panel.
+
 ## 3.1.39
 
 A small release for the phone and watch app: it stays up to date with little data, and an alert never buzzes twice.
