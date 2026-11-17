@@ -72,7 +72,7 @@ export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now()):
   const spaceOf = (id?: string) => (id ? places.get(id) : null);
   const alertAt = new Map<string, number>((snap.alerts ?? []).map((a: any) => [`alert:${a.id}`, Number(a.at) || 0]));
   const alertChat = new Map<string, string>((snap.alerts ?? []).filter((a: any) => a.chat).map((a: any) => [`alert:${a.id}`, String(a.chat)]));
-  /** a task's short name: its ref, without the machine ("VIBE-10", not "vm-stravik:VIBE-10"; the machine is its own field) */
+  /** a task's short name: its ref, without the machine ("VIBE-10", not "m3:VIBE-10"; the machine is its own field) */
   const ref = (id: string) => id.slice(id.lastIndexOf(":") + 1);
   const needOf = new Map<string, any>((snap.needs ?? []).map((n: any) => [`need:${n.chat}:${n.id}`, n]));
   const items: Item[] = [];
