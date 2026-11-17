@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.1.41
+
+A small release: what needs you is the same everywhere, and a call keeps going when your phone locks.
+
+### Needs you
+
+- The Tasks panel, the counts in the sidebar and header, the app icon's number and the phone and watch app now all use
+  one rule for what needs you, so a "2 need you" on your phone always matches what the Tasks panel lists.
+
+### Voice
+
+- A call can carry on in your pocket: hand it from the web page to the Shepherdr Wake app and keep talking with the
+  phone locked. The page shows Carrying on in your pocket, with Take it back.
+- On a locked phone the call is for talking only: the agent can still pass on messages for you, but it takes no actions
+  and shows no secrets or settings. Unlock the phone for those.
+
 ## 3.1.40
 
 A tiny fix for the phone and watch app: the number by each section now always matches what it lists.
