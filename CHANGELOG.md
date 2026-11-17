@@ -1,5 +1,23 @@
 # Changelog
 
+## 3.1.39
+
+A small release for the phone and watch app: it stays up to date with little data, and an alert never buzzes twice.
+
+### Phone and watch
+
+- The phone and watch app gets a small live feed of what needs you, what's ready and what's working, sent only when
+  that changes. It uses a tiny part of the data the full web page needs.
+- A device that shows Shepherdr's alerts itself no longer also gets the web page's notification, so one alert buzzes
+  once. If that app loses its link for more than 2 minutes, the web notifications take over again.
+- Tapping an alert in the app can open it right in the Shepherdr page you already have open on that device.
+
+### Alerts
+
+- In the phone and watch app, an agent's alert shows for 15 minutes at most, and goes once its task is done.
+- A low-memory alert clears itself once the machine has enough memory again, instead of staying for days.
+- Tapping a notification about a task that's ready opens its Accept card in the page you have open.
+
 ## 3.1.38
 
 A small release: answer your agents straight from a notification on your phone or watch, and fewer false alarms from
