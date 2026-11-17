@@ -22,7 +22,7 @@ function worker(answer: (body: any) => { status: number; body: unknown }, opts: 
     showNotification: async (title: string, options: any) => { shown.push({ title, options }); live.push({ title, tag: options.tag, data: options.data, close: () => closed.push(title) }) },
     getNotifications: async (f?: { tag?: string }) => live.filter((n) => !f?.tag || n.tag === f.tag),
   }
-  class NotificationEvent { notification: any; action: string; reply?: string }
+  class NotificationEvent { notification: any; action = ""; reply?: string }
   if (opts.reply === false) delete (NotificationEvent.prototype as any).reply
   else (NotificationEvent.prototype as any).reply = null
   const fetch = async (url: URL | string, init?: any) => {
