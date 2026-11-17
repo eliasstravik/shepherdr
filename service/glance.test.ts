@@ -108,15 +108,15 @@ test("every need lists (a quiet space's too, without alerting), with an Assistan
 const listed = (g: any) => Object.fromEntries(["needs", "working", "ready", "done"].map((k) => [k, g.items.filter((i) => i.kind === k).length]));
 
 test("SHEP-248: Needs you's count is what it lists: an Assistant's unread message and a task's question make 2, not 1", () => {
-  // as on the phone: the Assistant of vm-stravik's space has a new message, ELIA-53 asks a question
+  // as on the phone: the Assistant of vm-demo's space has a new message, HERD-53 asks a question
   const snap = snapOf({
-    places: [{ id: "vm-stravik:sp1", name: "Home", chat: "p:vm-stravik:sp1", machine: "vm-stravik" }],
-    tasks: [{ id: "ELIA-53", name: "Watch voice", status: "need", place: "vm-stravik:sp1", at: NOW - 9000 }],
-    needs: [{ id: "q1", chat: "ELIA-53/worker", place: "vm-stravik:sp1", task: "ELIA-53", at: NOW - 5000, question: q() }],
-    last: { "p:vm-stravik:sp1": NOW - 50 }, read: {},
+    places: [{ id: "vm-demo:sp1", name: "Home", chat: "p:vm-demo:sp1", machine: "vm-demo" }],
+    tasks: [{ id: "HERD-53", name: "Watch voice", status: "need", place: "vm-demo:sp1", at: NOW - 9000 }],
+    needs: [{ id: "q1", chat: "HERD-53/worker", place: "vm-demo:sp1", task: "HERD-53", at: NOW - 5000, question: q() }],
+    last: { "p:vm-demo:sp1": NOW - 50 }, read: {},
   });
   const g = doc(snap);
-  expect(g.items.filter((i) => i.kind === "needs").map((i) => i.tag).sort()).toEqual(["ELIA-53", "msg:p:vm-stravik:sp1"]);
+  expect(g.items.filter((i) => i.kind === "needs").map((i) => i.tag).sort()).toEqual(["HERD-53", "msg:p:vm-demo:sp1"]);
   expect(g.counts.needs).toBe(2);
   expect(g.groups.find((x) => x.kind === "needs").count).toBe(2);
 });
