@@ -38,7 +38,7 @@ import { worktree } from "./worktree.ts";
 import * as W from "../core/worktree.js";
 import * as SPm from "../core/spaces.js";
 import { browserRelay } from "./browser.ts";
-import { voiceCall, callToResume, callsOn, pageWhere, type ChatView } from "./voice.ts";
+import { voiceCall, callToResume, callsOn, handOff, pageWhere, type ChatView } from "./voice.ts";
 import { hearing, type HearIO, type Hearing } from "./voice-hear.ts";
 import { voiceTool, type VoiceIO, type Where } from "./voice-tools.ts";
 import { Artifacts } from "./artifacts.ts";
@@ -742,7 +742,9 @@ const server = Bun.serve<{ who: string }>({
       const key = addr && !addr.startsWith("log:") ? asked : null;
       // SHEP-102: a page whose socket dropped (a locked phone) comes back to its call with the call's id
       const resume = (url.searchParams.get("resume") ?? "").slice(0, 64);
-      return srv.upgrade(req, { data: { who: pass.who, voice: { key, resume } } as any }) ? undefined : new Response("upgrade failed", { status: 400 });
+      // the device it is on: Shepherdr Wake takes a call over from its own device's page only (SHEP-251)
+      const from = await deviceFrom(req, pass.via);
+      return srv.upgrade(req, { data: { who: pass.who, from, voice: { key, resume } } as any }) ? undefined : new Response("upgrade failed", { status: 400 });
     }
     if (socket) {
       // the device a page is on (a wake word reaches only its own device's pages, SHEP-240)
@@ -928,6 +930,15 @@ const server = Bun.serve<{ who: string }>({
       if (!from) return json({ error: "only from a device on the tailnet" }, 400);
       return json({ ok: true, shown: live.voiceWake(from) });
     }
+    if (path === "/api/voice/handoff" && req.method === "POST") {
+      // SHEP-251: the phone locks during a call on its page (Shepherdr Wake): the page lets go, the call holds, and
+      // Wake comes back to it by its id (/api/voice?resume=<id>), as a page after a dropped socket does
+      if (offList().includes("voice")) return json({ error: "voice is off" }, 409);
+      const from = await deviceFrom(req, pass.via);
+      if (!from) return json({ error: "only from a device on the tailnet" }, 400);
+      const id = handOff(from, String(pass.who ?? ""));
+      return json(id ? { ok: true, id } : { ok: false });
+    }
     if (path === "/api/voice/tool" && req.method === "POST") {
       // the window's voice call (mods/chat/voice.ts) asks its tools here, from this machine only
       if (pass.via !== "local") return json({ error: "not here" }, 403);
@@ -971,12 +982,12 @@ const server = Bun.serve<{ who: string }>({
       if (d.voice?.resume) {
         // back to a call that held for this page; gone (ended, or held too long): the page says so and stops
         d.bridge = callToResume(d.voice.resume, String(d.who ?? ""));
-        if (!d.bridge?.attach(page)) { d.bridge = null; ws.send(JSON.stringify({ type: "ended", why: "the connection was lost" })); ws.close(); }
+        if (!d.bridge?.attach(page, d.from ?? null)) { d.bridge = null; ws.send(JSON.stringify({ type: "ended", why: "the connection was lost" })); ws.close(); }
         return;
       }
       if (d.voice) noteUsage("feature", { from: "web", type: "voice-call" });
       if (d.voice) d.bridge = voiceCall(hub, { io: voiceIO, hear: hearIO, where: { client: "web", call: d.voice.key, machine: me?.host ?? null },
-        who: String(d.who ?? "") }, page);
+        who: String(d.who ?? ""), from: d.from ?? null }, page);
       else if (d.term) d.bridge = terminalBridge(hub, d.term, page);
       else if (d.browser) d.bridge = browserRelay(d.browser, page);
       else live.join(ws);

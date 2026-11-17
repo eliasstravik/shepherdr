@@ -301,3 +301,40 @@ test('SHEP-173: an end by itself says why (the limit, the line); after the perso
   await new Promise((r) => setTimeout(r, 400))
   expect(endedWhy).toEqual(['it reached the 2-hour limit', null])
 })
+
+test('SHEP-251: handed on to Shepherdr Wake: the page lets go quietly (no end, no reconnect, no chime) and can take it back', async () => {
+  errors.length = 0
+  endedWhy.length = 0
+  const handed: string[] = []
+  const p = call.startCall('p:h1', (m) => errors.push(m), undefined, undefined, (why) => endedWhy.push(why), { title: 'Shepherdr', hangUp: () => {}, mute: () => {} }, (id) => handed.push(id))
+  const ws = FakeSocket.all.at(-1)!
+  ws.open()
+  ws.say({ type: 'call', id: 'call-9' })
+  await p
+  const c = FakeContext.last, chimesBefore = c.played.length
+  ws.say({ type: 'handed' })
+  expect(handed).toEqual(['call-9'])
+  // no end for the server, the socket closed, the microphone off, the audio closed without the end chime
+  expect(ws.sent.filter((m) => (m as { type?: string })?.type === 'end')).toEqual([])
+  expect(ws.readyState).toBe(3)
+  expect(tracks.at(-1)!.readyState).toBe('ended')
+  expect(c.state).toBe('closed')
+  expect(c.played.length).toBe(chimesBefore)
+  expect(audioSession.type).toBe('auto')
+  // no reconnect, even back on screen
+  const n = FakeSocket.all.length
+  fire('visibilitychange')
+  await new Promise((r) => setTimeout(r, 300))
+  expect(FakeSocket.all.length).toBe(n)
+  expect(errors).toEqual([])
+  expect(endedWhy).toEqual([])
+  // Take it back: the same call by its id
+  const back = call.startCall('p:h1', (m) => errors.push(m), undefined, undefined, (why) => endedWhy.push(why), null, (id) => handed.push(id), 'call-9')
+  const again = FakeSocket.all.at(-1)!
+  expect(again.url).toBe('wss://box.example.ts.net/shepherdr/api/voice?chat=p%3Ah1&resume=call-9')
+  again.open()
+  again.say({ type: 'resumed', id: 'call-9' })
+  await back
+  expect(call.callPhase()).toBe('listening')
+  expect(errors).toEqual([])
+})

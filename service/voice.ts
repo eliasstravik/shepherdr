@@ -75,6 +75,13 @@ export function callToResume(id: string, who: string) {
   const c = calls.get(id);
   return c && c.who === who ? c.call : null;
 }
+/** SHEP-251: Shepherdr Wake takes the call of device `from`'s page as the phone locks (POST /api/voice/handoff): that
+ *  page is told it was handed on and let go, and the call holds for Wake to come back to it by its id. Null: that
+ *  device has no page on a call. */
+export function handOff(from: string, who: string) {
+  for (const [id, c] of calls) if (c.who === who && c.call.handOff(from)) return id;
+  return null;
+}
 /** the words the voice agent gets when the page is back: say so, and say again what was cut */
 export const backLine = (secs: number) => ({ type: "user_message",
   text: `[Update] The person's phone lost the call's connection for about ${Math.max(1, Math.round(secs))} s and is back now: they heard nothing of what you said meanwhile. Say you're back in a few words, then repeat briefly anything they missed.` });
@@ -104,6 +111,8 @@ export type CallDeps = {
   holdMs?: number;
   /** who called (a page comes back only as them) */
   who?: string;
+  /** the tailnet device the page is on (a handoff to Shepherdr Wake finds the call by it, SHEP-251) */
+  from?: string | null;
 };
 
 /** The voice agent's socket: a signed address for the "Herdr chat" agent of the person's key. */
@@ -120,7 +129,9 @@ async function dialElevenLabs(hub: Hub) {
 /** The page's "where" message, checked: what it shows now. */
 export function pageWhere(m: any): Partial<Where> {
   const s = (v: unknown, n = 200) => (typeof v === "string" && v.length <= n ? v : null);
-  return { device: s(m.device, 20), place: s(m.place), task: s(m.task), tab: s(m.tab, 40), artifact: s(m.artifact), settings: m.settings === true, ...(typeof m.full === "boolean" ? { full: m.full } : {}) };
+  return { device: s(m.device, 20), place: s(m.place), task: s(m.task), tab: s(m.tab, 40), artifact: s(m.artifact), settings: m.settings === true, ...(typeof m.full === "boolean" ? { full: m.full } : {}),
+    // SHEP-251: Shepherdr Wake's call says whether the phone is locked and its screen on
+    ...(typeof m.locked === "boolean" ? { locked: m.locked } : {}), ...(typeof m.screen === "boolean" ? { screen: m.screen } : {}) };
 }
 
 /** One call: the page's audio to the voice agent and back. message(): a frame from the page; end(): the page went. */
@@ -128,6 +139,8 @@ export function voiceCall(hub: Hub, deps: CallDeps, first: Page) {
   const { io } = deps;
   // the page on the call now; none while its socket is down and the call holds for it (SHEP-102)
   let page: Page | null = first, gone = 0, hold: ReturnType<typeof setTimeout> | null = null;
+  // the device the page on the call is on (SHEP-251)
+  let device = deps.from ?? null;
   const id = crypto.randomUUID();
   // an open goes to this very page (the socket that started the call: that phone, that browser tab) and counts only
   // once the page says it shows it ({ type: "navved", id, ok, why, where })
@@ -273,13 +286,26 @@ export function voiceCall(hub: Hub, deps: CallDeps, first: Page) {
       gone = Date.now();
       hold = setTimeout(() => end(), deps.holdMs ?? HOLD_MS);
     },
-    /** the page came back (its socket again, with the call's id): it gets the call where it is, the agent says so */
-    attach(to: Page) {
+    /** SHEP-251: the page on device `from` hands the call on (to Shepherdr Wake, the phone locking): it is told
+     *  { type: "handed" } (it stops without ending the call) and let go as a dropped socket is, so the call holds */
+    handOff(from: string) {
+      if (ended || !page || !from || device !== from) return false;
+      const old = page;
+      tell({ type: "handed" });
+      call.detach(old);
+      try { old.close(); } catch {}
+      return true;
+    },
+    /** the page came back (its socket again, with the call's id): it gets the call where it is, the agent says so.
+     *  One still on the call (Shepherdr Wake, or the page when Wake comes back) is told it was handed on first, so the
+     *  two never fight over the call (SHEP-251). */
+    attach(to: Page, from: string | null = null) {
       if (ended) return false;
       if (hold) { clearTimeout(hold); hold = null; }
       const old = page;
       page = to;
-      if (old && old !== to) try { old.close(); } catch {}
+      device = from ?? device;
+      if (old && old !== to) { try { old.send(JSON.stringify({ type: "handed" })); } catch {} try { old.close(); } catch {} }
       tell({ type: "resumed", id });
       if (gone) { toVoice(backLine((Date.now() - gone) / 1000)); gone = 0; }
       return true;

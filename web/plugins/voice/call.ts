@@ -45,7 +45,7 @@ const RATE = 16000
 export const RETRY_MS = 55_000
 
 /** onEnded: the call ended by itself (why: in plain words, "the connection was lost"), or after the person's yes (no why) */
-type Handlers = { chatKey: string | null; onError: (message: string) => void; onNav: (nav: Nav) => NavAck | Promise<NavAck>; onOpen: () => void; onEnded: (why: string | null) => void }
+type Handlers = { chatKey: string | null; onError: (message: string) => void; onNav: (nav: Nav) => NavAck | Promise<NavAck>; onOpen: () => void; onEnded: (why: string | null) => void; onHanded: (id: string) => void }
 /** the lock screen's call controls: hang up, and mute (on: true mutes) */
 export type Controls = { title: string; hangUp: () => void; mute: (on: boolean) => void }
 
@@ -217,6 +217,9 @@ function connect(resume: boolean) {
     }
     const m = JSON.parse(String(e.data)) as { type: string; id?: number | string; message?: string; state?: typeof phase; doing?: string; nav?: Nav; text?: string; why?: string }
     if (m.type === 'call' && typeof m.id === 'string') callId = m.id
+    // SHEP-251: the call moved (to Shepherdr Wake as the phone locked, or to another page): this page lets go quietly,
+    // no end, no reconnect; the call goes on there and this page may take it back by its id
+    if (m.type === 'handed') return handedOn(h)
     // back on the call: as it was, the agent says so
     if (m.type === 'resumed') { retryUntil = 0; retries = 0; phase = 'listening'; phaseAt = Date.now(); wakeAudio() }
     // the voice agent asked to show something: shown here, on this very page, and said back (the agent says it's on
@@ -281,6 +284,18 @@ function dropped(sock: WebSocket) {
   retry = setTimeout(() => { retry = null; if (on === h && !ws) connect(true) }, Math.min(4000, 250 * 2 ** retries++))
 }
 
+/** SHEP-251: this page's part of the call stops (microphone, audio, socket) without ending the call */
+function handedOn(h: Handlers) {
+  const id = callId
+  if (!id || on !== h) return
+  const sock = ws
+  ws = null
+  try { sock?.close() } catch { /* gone */ }
+  on = null
+  release(false, true)
+  h.onHanded(id)
+}
+
 /** the page is on screen or online again: a call that is getting back tries now, and its audio wakes */
 function comeBack() {
   if (!on) return
@@ -298,16 +313,18 @@ if (typeof document !== 'undefined') {
 }
 
 
-export async function startCall(chatKey: string | null, onError: (message: string) => void = () => undefined, onNav: (nav: Nav) => NavAck | Promise<NavAck> = () => ({ ok: false, why: 'this page can\'t open things' }), onOpen: () => void = () => undefined, onEnded: (why: string | null) => void = () => undefined, lock: Controls | null = null) {
+/** resume: the id of a call this page handed on (SHEP-251), taken back */
+export async function startCall(chatKey: string | null, onError: (message: string) => void = () => undefined, onNav: (nav: Nav) => NavAck | Promise<NavAck> = () => ({ ok: false, why: 'this page can\'t open things' }), onOpen: () => void = () => undefined, onEnded: (why: string | null) => void = () => undefined, lock: Controls | null = null, onHanded: (id: string) => void = () => undefined, resume: string | null = null) {
   stopCall()
-  const h: Handlers = { chatKey, onError, onNav, onOpen, onEnded }
+  const h: Handlers = { chatKey, onError, onNav, onOpen, onEnded, onHanded }
   on = h
   controls = lock
   over = false
   overWhy = null
   // a call, to the phone: before the microphone, so its audio is set up as one from the start
   setSession(true)
-  connect(false)
+  if (resume) callId = resume
+  connect(!!resume)
   // The microphone first, then the audio: an iPhone sets its sound up for playing only when the audio comes first,
   // and the microphone then sends silence. Its voice waits until the audio is there.
   const stream = await askMic()
@@ -388,6 +405,17 @@ function chimeThenClose(c: AudioContext | null, el: HTMLAudioElement | null, int
 export function stopCall() {
   const was = on
   on = null
+  const closing = ws
+  ws = null
+  // the person ended it: the server ends it now rather than holding it for the page to come back
+  try { if (closing?.readyState === WebSocket.OPEN) closing.send(JSON.stringify({ type: 'end' })) } catch { /* gone */ }
+  closing?.close()
+  release(!!was, !!was)
+}
+
+/** the call's microphone, audio and state let go (chime: the end chime plays first; session: the phone's call
+ *  session and lock screen too) */
+function release(chime: boolean, session: boolean) {
   if (retry) clearTimeout(retry)
   retry = null
   node?.disconnect()
@@ -395,17 +423,12 @@ export function stopCall() {
   mic?.getTracks().forEach((t) => t.stop())
   // what it was still saying stops; the chime plays, then the audio closes
   sources.forEach((s) => { try { s.stop() } catch { /* not started */ } })
-  if (was) chimeThenClose(ctx, out, theirs)
+  if (chime) chimeThenClose(ctx, out, theirs)
   else {
     if (out) { out.onpause = null; out.pause(); out.srcObject = null }
     ctx?.close().catch(() => undefined)
   }
-  const closing = ws
-  ws = null
-  // the person ended it: the server ends it now rather than holding it for the page to come back
-  try { if (closing?.readyState === WebSocket.OPEN) closing.send(JSON.stringify({ type: 'end' })) } catch { /* gone */ }
-  closing?.close()
-  if (was) { setLockScreen(null); setSession(false) }
+  if (session) { setLockScreen(null); setSession(false) }
   node = null
   micIn = null
   mic = null

@@ -388,3 +388,29 @@ test("SHEP-124: call_view: the web call full screen or minimized, on screen once
   expect((await voiceTool("look", { what: "here" }, { ...web, full: true }, io())).result).toContain("The call fills the screen");
   expect((await voiceTool("look", { what: "here" }, { ...web, full: false }, io())).result).toContain("The call is minimized");
 });
+
+test("SHEP-251: a locked phone talks and passes messages; every action (and look secrets or settings) is refused before any yes", async () => {
+  const locked: Where = { ...web, locked: true, screen: false };
+  const x = io();
+  for (const p of [{ action: "accept", id: "41" }, { action: "start", id: "50" }, { action: "stop", id: "45" }, { action: "done", id: "45" },
+    { action: "delete", id: "45" }, { action: "autopilot_on", id: "shepherdr" }, { action: "setting", key: "review", value: "on" }]) {
+    for (const confirmed of [false, true]) {
+      const a = await voiceTool("act", { ...p, confirmed }, locked, x);
+      expect(a).toEqual({ result: "The phone is locked: unlock it, then ask again.", error: true });
+    }
+  }
+  expect(x.calls).toEqual([]);
+  for (const what of ["secrets", "settings"]) expect((await voiceTool("look", { what }, locked, x)).result).toBe("The phone is locked: unlock it, then ask again.");
+  // talking still works: a send goes, other looks answer
+  expect((await voiceTool("send", { to: "this", text: "Ship it" }, locked, x)).result).toContain("Sent to");
+  expect(x.sent).toEqual([{ key: "SHEP-45/worker", text: "Ship it" }]);
+  expect((await voiceTool("look", { what: "tasks" }, locked, x)).error).toBeUndefined();
+  // the agent is told so in the where line
+  expect((await voiceTool("look", { what: "here" }, locked, x)).result).toContain("The person is on their phone with it locked: you can talk and pass messages, not act.");
+  // unlocked, or a where with no locked at all (the page, the watch, the window): the yes is asked as before
+  for (const w of [{ ...web, locked: false }, web, { client: "window", machine: "vm" } as Where]) {
+    const ask = await voiceTool("act", { action: "accept", id: "41", confirmed: false }, w, x);
+    expect(ask.result).toContain("Nothing changed yet. Ask the person");
+    expect((await voiceTool("look", { what: "here" }, w, x)).result).not.toContain("locked");
+  }
+});
