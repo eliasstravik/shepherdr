@@ -7,6 +7,7 @@
 // (an item with no time of its own never takes "now": that changed `v` on every snapshot), and to list what the app
 // lists: every need (one its space's Notify keeps quiet too, without alerting), an agent's alert only while it stands.
 import { needAlert, needKey } from "./push.ts";
+import { GROUPS } from "../web/shared/types.ts";
 
 /** the doc's format: a change the Android app can't read as before bumps it (new fields alone don't) */
 export const GLANCE_FORMAT = 1;
@@ -44,10 +45,23 @@ export type Item = {
   answer?: { chat: string; question: string; choices: Choice[]; other?: boolean };
   reply?: { chat: string; to?: string };
 };
-export type Counts = { needs: number; working: number; ready: number; done: number };
+export type Kind = Item["kind"];
+export type Counts = Record<Kind, number>;
+/** a section of the list, in the web app's Tasks panel order (Needs you, Ready, Working, Done): its kind, its name there,
+ *  and how many items it holds (all of them, even past the 40 items) */
+export type Group = { key: Kind; label: string; count: number };
 /** v: changes with anything; urgent: changes only with what notifies (a new or gone alert, its words, the counts): a
  *  stream sends an urgent change at once and the rest (status lines, progress) at most once a minute */
-export type Glance = { format: number; v: string; urgent: string; at: number; counts: Counts; items: Item[] };
+export type Glance = { format: number; v: string; urgent: string; at: number; counts: Counts; groups: Group[]; items: Item[] };
+
+/** the Tasks panel's statuses each kind lists (merging is Working here) */
+const KIND_OF: Partial<Record<string, Kind>> = { need: "needs", ready: "ready", merging: "working", work: "working", done: "done" };
+/** the status whose name a kind takes */
+const NAMED: Record<Kind, string> = { needs: "need", ready: "ready", working: "work", done: "done" };
+/** the kinds in the Tasks panel's order, with its names (web/shared/types.ts GROUPS, as the web app's groups.ts) */
+export const KINDS: { key: Kind; label: string }[] = GROUPS.flatMap(([s]) => KIND_OF[s] ?? [])
+  .filter((k, i, all) => all.indexOf(k) === i)
+  .map((key) => ({ key, label: GROUPS.find(([s]) => s === NAMED[key])![1] }));
 
 export const WATCH_TITLE = 30, WATCH_BODY = 80, LABEL = 24, MAX_ITEMS = 40;
 /** an agent's own alert (herdr-task alert) is a moment, as in the app (a toast, once), not something that waits: the
@@ -142,16 +156,16 @@ export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now()):
     items.push({ key: `task:${t.id}`, kind, type: "task", tag: t.id, task: t.id, title: clip(`${ref(t.id)} · ${kind === "working" ? "Working" : kind === "done" ? "Done" : "Needs you"}`, WATCH_TITLE),
       body: clip(t.name, WATCH_BODY), ...taskRow(t), ...(at ? { at } : {}), alert: false, url: urlOf(t.place, t.id) });
   }
-  const order = { needs: 0, working: 1, ready: 2, done: 3 } as const;
+  const order = Object.fromEntries(KINDS.map((k, i) => [k.key, i])) as Record<Kind, number>;
   items.sort((a, b) => order[a.kind] - order[b.kind] || (a.kind === "done" ? (b.at ?? 0) - (a.at ?? 0) : (a.at ?? 0) - (b.at ?? 0)));
+  // each count is what its section lists (SHEP-248: Needs you said 1 over an Assistant's message and a task's card)
   const counts: Counts = { needs: 0, working: 0, ready: 0, done: 0 };
-  // the app's own counts (its Needs you, Working, Ready, Done today): an Assistant's new message and an agent's alert
-  // are notifications, not counted
-  for (const i of items) if (i.type !== "alert" && i.type !== "msg") counts[i.kind]++;
+  for (const i of items) counts[i.kind]++;
+  const groups: Group[] = KINDS.map((k) => ({ ...k, count: counts[k.key] }));
   const kept = items.slice(0, MAX_ITEMS);
   const v = Bun.hash(JSON.stringify([GLANCE_FORMAT, counts, kept])).toString(36);
   const urgent = Bun.hash(JSON.stringify([GLANCE_FORMAT, counts, kept.filter((i) => i.alert).map((i) => [i.key, i.title, i.body])])).toString(36);
-  return { format: GLANCE_FORMAT, v, urgent, at: now, counts, items: kept };
+  return { format: GLANCE_FORMAT, v, urgent, at: now, counts, groups, items: kept };
 }
 
 /** how long a device's web push stays quiet after its native stream dropped (a phone reconnecting) */

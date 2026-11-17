@@ -3,20 +3,11 @@
 // saying its machine and space; Done last, behind its count. Place: a group per space, under its machine when more than
 // one machine has tasks, every status mixed in each (the row's icon says which); Done last too. Pinned tasks get a
 // Pinned group on top in both.
-import { doneNewestFirst, type Machine, type Place, type Task } from '@shared/types.ts'
+import { doneNewestFirst, GROUPS, type Machine, type Place, type Task } from '@shared/types.ts'
 
 export type GroupBy = 'status' | 'place'
 
-export const GROUPS: [Task['status'], string][] = [
-  ['need', 'Needs you'],
-  ['ready', 'Ready'],
-  ['merging', 'Merging'],
-  ['work', 'Working'],
-  ['queued', 'Queued'],
-  ['scheduled', 'Scheduled'],
-  ['todo', 'To do'],
-  ['done', 'Done'],
-]
+export { GROUPS }
 
 const KEY = 'shepherdr.tasksBy'
 
