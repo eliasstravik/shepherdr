@@ -1,5 +1,25 @@
 # Changelog
 
+## 3.1.38
+
+A small release: answer your agents straight from a notification on your phone or watch, and fewer false alarms from
+automations that watch another machine.
+
+### Notifications
+
+- A notification can carry one button: Accept on a task that's ready, the first choice on an agent's question (like
+  "Yes"), or Reply to type an answer to an Assistant or an agent. Tap the notification itself for everything else.
+- After a button, the notification says what happened: Accepted, Answered, Sent, or Already handled if you did it
+  elsewhere first.
+- An Assistant's new message shows its own words in the notification instead of "Tap to read it".
+- Notifications are short enough to read on a watch.
+- A phone that turns notifications on now also hears when a task is ready for you, not only what needs you.
+
+### Automations
+
+- An automation that watches another machine no longer flags a short hiccup. Only when that machine hasn't answered
+  for 15 minutes does it need you, and it says so plainly: "Can't reach vm-b since 23:03".
+
 ## 3.1.37
 
 A small release: your phone's wake word now starts the call in the Shepherdr page you already have open on it.
