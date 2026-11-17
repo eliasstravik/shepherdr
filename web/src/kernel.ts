@@ -1,4 +1,5 @@
 import { actionable, attentionCounts } from './attention.ts'
+import { needsYou, type Waiting } from '@shared/needs-you.ts'
 // The screen's small kernel: plugin slots, the store (server data + what's on screen), and the link to the server.
 import { useSyncExternalStore, type FC, type ReactNode } from 'react'
 import { buildId } from '@shared/build.ts'
@@ -1159,14 +1160,24 @@ export function counts(snap: Snapshot, placeId: string) {
 
 export { GROUPS, keepTasks, namesFor, type GroupBy, type TaskGroup } from './groups.ts'
 
+/** a list's Needs you, oldest first, one rule for every view (web/shared/needs-you.ts, SHEP-250: the phone's widgets, lock
+ *  screen and watch list the same): its tasks (the Tasks panel's Needs you group) and the rest (rows of their own there).
+ *  One of no place (a machine's memory alert) only in a list of every space. */
+export function needsIn(snap: Snapshot, list: Pick<ListView, 'chips'>, ws: Waiting[] = needsYou(snap)): Waiting[] {
+  const ids = new Set(tasksIn(snap, list).map((t) => t.id))
+  return ws.filter((w) => (w.task ? ids.has(w.task) : w.place ? inList(snap, list.chips, w.place) : !list.chips.length))
+}
+
 /** a list's tasks in their groups, in the order they show (groups.ts groupTasks) */
 export function taskGroups(snap: Snapshot, list: ListView, by: GroupBy): TaskGroup[] {
   const tasks = tasksIn(snap, list)
+  // Needs you's tasks, in its order (web/shared/needs-you.ts: the phone's glance feed lists the same)
+  const waits = needsIn(snap, list).flatMap((w) => (w.task ? [w.task] : []))
   if (list.attention) return snap.places.flatMap((p) => (['need', 'ready'] as const).flatMap((status) => {
-    const rows = tasks.filter((t) => t.place === p.id && t.status === status)
+    const rows = status === 'need' ? waits.map((id) => tasks.find((t) => t.id === id)!).filter((t) => t.place === p.id) : tasks.filter((t) => t.place === p.id && t.status === status && !waits.includes(t.id))
     return rows.length ? [{ key: `${p.id}|${status}`, label: `${p.name} · ${status === 'need' ? 'Needs you' : 'Ready'}`, note: machineName(snap.machines, p.machine), tasks: rows, names: { machine: false, project: false } }] : []
   }))
-  return groupTasks(snap.places, snap.machines ?? [], tasks, by, list.level)
+  return groupTasks(snap.places, snap.machines ?? [], tasks, by, list.level, waits)
 }
 
 /** Done: shut until opened ("done:open" in shut), its count showing alone */

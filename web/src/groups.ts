@@ -93,17 +93,22 @@ export interface TaskGroup {
  * - Place: one group per space, machine by machine in the sidebar's order, its tasks in status order, then Done.
  * level: the view's (0 more machines, 1 a machine, 2 a space), which says what its rows needn't.
  */
-export function groupTasks(places: Place[], machines: Machine[], ts: Task[], by: GroupBy, level = 1): TaskGroup[] {
+export function groupTasks(places: Place[], machines: Machine[], ts: Task[], by: GroupBy, level = 1, waits?: string[]): TaskGroup[] {
   // archived tasks are in no group: only their place's Archived view shows them
   const all = doneNewestFirst(GROUPS.flatMap(([s]) => ts.filter((t) => t.status === s && !t.archived)))
   const names = namesFor(level)
-  const pinned = all.filter((t) => t.pinned)
-  const rest = all.filter((t) => !t.pinned)
+  // by status, Needs you is what waits on you (web/shared/needs-you.ts, SHEP-250: the phone's glance feed lists the same),
+  // in its order: a task in it, pinned or working with an alert, is in no other group
+  const waiting = by === 'status' && waits ? new Set(waits) : null
+  const needs = waiting ? waits!.map((id) => all.find((t) => t.id === id && t.status !== 'done')).filter((t): t is Task => !!t) : []
+  const pinned = all.filter((t) => t.pinned && !waiting?.has(t.id))
+  const rest = all.filter((t) => !t.pinned && !waiting?.has(t.id))
   const done = rest.filter((t) => t.status === 'done')
   const open = rest.filter((t) => t.status !== 'done')
+  const inGroup = (s: string) => (waiting ? (s === 'need' ? needs : open.filter((t) => t.status === s && s !== 'need')) : open.filter((t) => t.status === s))
   return [
     ...(pinned.length ? [{ key: 'pinned', label: 'Pinned', tasks: pinned, names }] : []),
-    ...(by === 'status' ? GROUPS.filter(([s]) => s !== 'done').map(([s, label]) => ({ key: s, label, tasks: open.filter((t) => t.status === s), names })).filter((g) => g.tasks.length) : projectGroups(places, machines, open)),
+    ...(by === 'status' ? GROUPS.filter(([s]) => s !== 'done').map(([s, label]) => ({ key: s, label, tasks: inGroup(s), names })).filter((g) => g.tasks.length) : projectGroups(places, machines, open)),
     ...(done.length ? [{ key: 'done', label: 'Done', tasks: done, names }] : []),
   ]
 }

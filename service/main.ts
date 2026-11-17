@@ -48,6 +48,7 @@ import { Secrets, SecretsHome } from "./secrets.ts";
 import { Agents } from "./agents.ts";
 import { Machines } from "./machines.ts";
 import { Push, alertsOf, agentAlerts } from "./push.ts";
+import { waiting } from "../web/shared/alerts.ts";
 import { GlanceFeed, glanceOf, openUrlOk } from "./glance.ts";
 import { Shows, showInWindow } from "./show.ts";
 import { dictate, liveToken, cachedKey, refused } from "./dictate.ts";
@@ -174,7 +175,7 @@ function alertNew(snap: any) {
   // the phone's and watch's glance, with these same words (service/glance.ts)
   try { glance.set(glanceOf(snap, now)); } catch (err) { console.error(`glance: ${(err as Error).message}`); }
   woke = new Set((snap.places ?? []).filter((p: any) => p.pilot?.on && (p.pilot.inflight || p.pilot.pending)).map((p: any) => p.id));
-  waitingNow = { count: (snap.needs?.length ?? 0) + (snap.tasks ?? []).filter((t: any) => t.status === "ready" && !t.archived).length, tags: [...new Set([...now.values()].filter((x) => x.waits).map((x) => x.tag))] };
+  waitingNow = { count: waiting(snap).count, tags: [...new Set([...now.values()].filter((x) => x.waits).map((x) => x.tag))] };
   if (alerted) for (const [k, a] of now) if (!alerted.has(k)) void push.send({ ...a, badge: waitingNow.count, open: waitingNow.tags });
   alerted = new Set(now.keys());
 }

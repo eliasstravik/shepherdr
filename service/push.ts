@@ -8,6 +8,7 @@ import { DATA, where } from "./paths.ts";
 import * as T from "../core/toasts.js";
 import { alertUrl, ACCEPT, choiceButtons, DEFAULT_TOPICS, notifies, notifyOf, pushTopics, REPLY, taskWho, WATCH_BODY, WATCH_TITLE, watchTitle, type PushAction, type PushTopic } from "../web/shared/alerts.ts";
 import { excerpt } from "../web/shared/excerpt.ts";
+import { unread } from "../web/shared/needs-you.ts";
 
 /** a push alert; its buttons (SHEP-243) and what each does: answer a card, accept a task, reply in its chat */
 type Out = {
@@ -51,8 +52,9 @@ export function alertsOf(snap: any, woke: Set<string> = new Set(), said: (chat: 
     now.set(`done:${t.id}`, { title: T.toastTitle(taskWho(snap, t.id), "Done"), body: t.name, tag: t.id, topic: "done", place: t.place, url: alertUrl({ place: t.place, task: t.id }) });
   // an Assistant's new message (its chat's last moved on, not yet read), unless its space's Notify is Off
   for (const p of snap.places ?? []) {
-    const last = Number(snap.last?.[p.chat]) || 0;
-    if (!last || last <= (Number(snap.read?.[p.chat]) || 0)) continue;
+    // unread as everywhere else (web/shared/needs-you.ts: Needs you lists it until read)
+    if (!unread(snap, p.chat)) continue;
+    const last = Number(snap.last[p.chat]);
     // its question already says so (Needs you)
     if ((snap.needs ?? []).some((n: any) => n.chat === p.chat)) continue;
     if (snap.settings && notifyOf(snap, p.id) === "Off") continue;
