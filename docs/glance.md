@@ -62,11 +62,12 @@ Unchanged from the web push buttons (SHEP-243): `POST /api/action` with
   "urgent": "1xpxeyin8gdj7",       // changes only with what notifies (alerts, their words, the counts)
   "at": 1794937795469,             // when it was built (ms)
   "counts": { "needs": 3, "working": 4, "ready": 0, "done": 24 },   // what each section lists, even past the 40 items
-  "groups": [                      // the sections, in the web app's Tasks panel order: show them in this order
-    { "key": "needs", "label": "Needs you", "count": 3 },
-    { "key": "ready", "label": "Ready", "count": 0 },
-    { "key": "working", "label": "Working", "count": 4 },
-    { "key": "done", "label": "Done", "count": 24 }
+  "order": ["needs", "ready", "working", "done"],   // the sections, in the web app's Tasks panel order: show them so
+  "groups": [                      // the same sections in that order, with the Tasks panel's names and the counts
+    { "kind": "needs", "label": "Needs you", "count": 3 },
+    { "kind": "ready", "label": "Ready", "count": 0 },
+    { "kind": "working", "label": "Working", "count": 4 },
+    { "kind": "done", "label": "Done", "count": 24 }
   ],
   "items": [                       // in the groups' order (needs, ready, working, done today); 40 at most
     {
@@ -105,10 +106,11 @@ The feed never says more than Shepherdr's own screens, so phone, watch and app a
 - `counts` are what each section lists, item for item (all of them, even past the 40 items): a header's number never
   differs from its list. The web app's Needs you badge counts its cards only; an Assistant's unread message shows there
   as the space's unread dot, and an agent's alert as a toast.
-- `groups` are the sections in the order of the web app's Tasks panel (Status view: Needs you, Ready, Working, Done
-  last), with its names and each count. They come from the same list the Tasks panel uses (`web/shared/types.ts`
-  `GROUPS`; Merging is listed under Working), so an app follows `groups` instead of a fixed order. Every group is always
-  there, an empty one with count 0.
+- `order` lists the sections' kinds in the order of the web app's Tasks panel (Status view: Needs you, Ready,
+  Working, Done last): an app shows its sections in that order, not a fixed one. `groups` are the same sections in
+  the same order, with the Tasks panel's names and each count. Both come from the list the Tasks panel uses
+  (`web/shared/types.ts` `GROUPS`; Merging is listed under Working). Every section is always there, an empty one with
+  count 0.
 
 Titles and bodies are the web push's own words (`service/push.ts` `alertsOf`), so a native notification says exactly
 what a web push would. `answer.choices` follows Shepherdr's button rules: never on a plan, a form, a merge, a pick of

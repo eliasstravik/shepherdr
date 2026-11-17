@@ -118,7 +118,7 @@ test("SHEP-248: Needs you's count is what it lists: an Assistant's unread messag
   const g = doc(snap);
   expect(g.items.filter((i) => i.kind === "needs").map((i) => i.tag).sort()).toEqual(["ELIA-53", "msg:p:vm-stravik:sp1"]);
   expect(g.counts.needs).toBe(2);
-  expect(g.groups.find((x) => x.key === "needs").count).toBe(2);
+  expect(g.groups.find((x) => x.kind === "needs").count).toBe(2);
 });
 
 test("counts and groups always match the list, section by section, in the Tasks panel's order and names", () => {
@@ -127,14 +127,15 @@ test("counts and groups always match the list, section by section, in the Tasks 
     const g = doc(snap);
     expect(g.counts).toEqual(listed(g));
     expect(g.groups).toEqual([
-      { key: "needs", label: "Needs you", count: g.counts.needs },
-      { key: "ready", label: "Ready", count: g.counts.ready },
-      { key: "working", label: "Working", count: g.counts.working },
-      { key: "done", label: "Done", count: g.counts.done },
+      { kind: "needs", label: "Needs you", count: g.counts.needs },
+      { kind: "ready", label: "Ready", count: g.counts.ready },
+      { kind: "working", label: "Working", count: g.counts.working },
+      { kind: "done", label: "Done", count: g.counts.done },
     ]);
-    // the items follow the groups' order
+    expect(g.order).toEqual(["needs", "ready", "working", "done"]);
+    // the items follow that order
     const kinds = g.items.map((i) => i.kind);
-    expect(kinds).toEqual(g.groups.flatMap((x) => kinds.filter((k) => k === x.key)));
+    expect(kinds).toEqual(g.order.flatMap((o) => kinds.filter((k) => k === o)));
   }
 });
 
