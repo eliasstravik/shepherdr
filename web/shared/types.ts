@@ -275,6 +275,19 @@ export interface Report {
  * starting and not yet at work on its brief; done: merged */
 export type TaskStatus = 'need' | 'ready' | 'merging' | 'work' | 'queued' | 'scheduled' | 'todo' | 'done'
 
+/** the Tasks panel's Status groups, in its order (who has to act first; Done last): the web app's groups and the glance
+ *  feed's (service/glance.ts) both come from here, so phone, watch and app list them alike */
+export const GROUPS: [TaskStatus, string][] = [
+  ['need', 'Needs you'],
+  ['ready', 'Ready'],
+  ['merging', 'Merging'],
+  ['work', 'Working'],
+  ['queued', 'Queued'],
+  ['scheduled', 'Scheduled'],
+  ['todo', 'To do'],
+  ['done', 'Done'],
+]
+
 /** A task's one agent: tapping the task opens its chat. */
 export interface TaskAgent {
   /** chat key */

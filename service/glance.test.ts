@@ -43,16 +43,16 @@ const doc = (snap: any, now = NOW) => glanceOf(snap, alertsOf(snap), now);
 
 /* ---------- the doc ---------- */
 
-test("needs first, then working, ready, done today; never a done task from yesterday", () => {
+test("the Tasks panel's order: needs first, then ready, working, done today; never a done task from yesterday", () => {
   const g = doc(snapOf());
-  expect(g.items.map((i) => [i.kind, i.key])).toEqual([["needs", "need:HERD-5/worker:q1"], ["working", "task:HERD-3"], ["ready", "ready:HERD-4"], ["done", "task:HERD-2"]]);
+  expect(g.items.map((i) => [i.kind, i.key])).toEqual([["needs", "need:HERD-5/worker:q1"], ["ready", "ready:HERD-4"], ["working", "task:HERD-3"], ["done", "task:HERD-2"]]);
   expect(g.counts).toEqual({ needs: 1, working: 1, ready: 1, done: 1 });
   expect(g.format).toBe(1);
   const need = g.items[0];
   expect(need).toMatchObject({ type: "need", tag: "HERD-5", task: "HERD-5", title: "HERD-5 · Needs you", body: "Rerun CI on main?", space: "Home", machine: "Mac mini", progress: 8, left: "5h", alert: true, at: NOW - 5000 });
   expect(need.url).toBe("./?place=sp1&task=HERD-5&focus=q1");
-  expect(g.items[2]).toMatchObject({ accept: { task: "HERD-4" }, url: "./#accept=HERD-4", alert: true });
-  expect(g.items[1]).toMatchObject({ alert: false, title: "HERD-3 · Working", line: "Designing the per-hop timing logs" });
+  expect(g.items[1]).toMatchObject({ accept: { task: "HERD-4" }, url: "./#accept=HERD-4", alert: true });
+  expect(g.items[2]).toMatchObject({ alert: false, title: "HERD-3 · Working", line: "Designing the per-hop timing logs" });
 });
 
 test("a 3-choice question gives 3 buttons; a plan, a menu, a merge, a pick of several give none", () => {
@@ -92,7 +92,7 @@ test("only what the app shows: no alert from a finished terminal, a done task, d
   expect(shown([al({ memory: true })], mem(60))).toBe(0);
 });
 
-test("counts are the app's: every need (a quiet space's too, without alerting); an Assistant's message and an agent's alert notify but don't count", () => {
+test("every need lists (a quiet space's too, without alerting), with an Assistant's message and an agent's alert, and each counts", () => {
   const notifyOff = [{ name: "Notify", level: "sp1", rows: [{ key: "notify", value: "Off" }] }];
   const snap = snapOf({ settings: notifyOff, tasks: [], needs: [{ id: "q9", chat: "sp1", place: "sp1", at: NOW - 100, question: q({ id: "q9" }) }],
     places: [{ id: "sp1", name: "Home", chat: "sp1" }, { id: "sp2", name: "Shop", chat: "sp2" }], last: { sp2: NOW - 50 }, read: {},
@@ -102,7 +102,41 @@ test("counts are the app's: every need (a quiet space's too, without alerting); 
   expect(need).toMatchObject({ kind: "needs", type: "need", alert: false, title: "Home Assistant · Needs you" });
   expect(need.answer.choices.length).toBe(3);
   expect(g.items.map((i) => i.type).sort()).toEqual(["alert", "msg", "need"]);
-  expect(g.counts.needs).toBe(1);
+  expect(g.counts.needs).toBe(3);
+});
+
+const listed = (g: any) => Object.fromEntries(["needs", "working", "ready", "done"].map((k) => [k, g.items.filter((i) => i.kind === k).length]));
+
+test("SHEP-248: Needs you's count is what it lists: an Assistant's unread message and a task's question make 2, not 1", () => {
+  // as on the phone: the Assistant of vm-demo's space has a new message, HERD-53 asks a question
+  const snap = snapOf({
+    places: [{ id: "vm-demo:sp1", name: "Home", chat: "p:vm-demo:sp1", machine: "vm-demo" }],
+    tasks: [{ id: "HERD-53", name: "Watch voice", status: "need", place: "vm-demo:sp1", at: NOW - 9000 }],
+    needs: [{ id: "q1", chat: "HERD-53/worker", place: "vm-demo:sp1", task: "HERD-53", at: NOW - 5000, question: q() }],
+    last: { "p:vm-demo:sp1": NOW - 50 }, read: {},
+  });
+  const g = doc(snap);
+  expect(g.items.filter((i) => i.kind === "needs").map((i) => i.tag).sort()).toEqual(["HERD-53", "msg:p:vm-demo:sp1"]);
+  expect(g.counts.needs).toBe(2);
+  expect(g.groups.find((x) => x.kind === "needs").count).toBe(2);
+});
+
+test("counts and groups always match the list, section by section, in the Tasks panel's order and names", () => {
+  const snaps = [snapOf(), snapOf({ needs: [] }), snapOf({ places: [{ id: "sp1", name: "Home", chat: "sp1" }], last: { sp1: NOW - 50 }, read: {}, alerts: [{ id: "a1", at: NOW - 100, title: "x · Look", body: "now", chat: "HERD-3/worker", notify: true }] })];
+  for (const snap of snaps) {
+    const g = doc(snap);
+    expect(g.counts).toEqual(listed(g));
+    expect(g.groups).toEqual([
+      { kind: "needs", label: "Needs you", count: g.counts.needs },
+      { kind: "ready", label: "Ready", count: g.counts.ready },
+      { kind: "working", label: "Working", count: g.counts.working },
+      { kind: "done", label: "Done", count: g.counts.done },
+    ]);
+    expect(g.order).toEqual(["needs", "ready", "working", "done"]);
+    // the items follow that order
+    const kinds = g.items.map((i) => i.kind);
+    expect(kinds).toEqual(g.order.flatMap((o) => kinds.filter((k) => k === o)));
+  }
 });
 
 test("v and urgent stay put while nothing changes; a status line moves v only; a new alert moves both", () => {
