@@ -22,17 +22,25 @@ type Out = {
  * message (an Autopilot update when its Autopilot woke it: woke, the spaces whose wake was under way a moment ago).
  * Keyed so each goes once; each with its topic and space, which every device chooses by (Settings › Notifications).
  */
+/** a need's alert key: one per card or wait */
+export const needKey = (n: any) => `need:${n.chat}:${n.id}`;
+
+/** what a need's alert says (whether it is sent or not: its space's Notify decides), in words that fit a watch */
+export function needAlert(snap: any, n: any): Out {
+  const who = n.task ? taskWho(snap, n.task) : T.assistantWho(snap.places?.find((p: any) => p.id === n.place)?.name);
+  const go = alertUrl({ place: n.place, ...(n.task ? { task: n.task } : {}), ...(n.question?.id ? { focus: n.question.id } : {}) });
+  // its card's choices as buttons; a question with none a button may send opens the app; no card: a reply
+  const buttons = n.question ? choiceButtons(n.question) : [];
+  const acts = n.question ? (buttons.length ? { actions: buttons, answer: { chat: n.chat, question: n.question.id } } : {})
+    : n.secret ? {} : { actions: [REPLY], reply: { chat: n.chat, ...(n.reply ? { to: n.reply } : {}) } };
+  return { title: watchTitle(T.toastTitle(who, T.NEEDS_YOU)), body: excerpt(T.needReason(n), WATCH_BODY), tag: n.task ?? n.chat, topic: "needs", place: n.place, waits: true, url: go, ...acts };
+}
+
 export function alertsOf(snap: any, woke: Set<string> = new Set(), said: (chat: string) => string | undefined = () => undefined): Map<string, Out> {
   const now = new Map<string, Out>();
-  const who = (n: any) => n.task ? taskWho(snap, n.task) : T.assistantWho(snap.places?.find((p: any) => p.id === n.place)?.name);
   for (const n of snap.needs ?? []) {
     if (snap.settings && !notifies(snap, { go: { place: n.place }, task: n.task ? true : undefined })) continue;
-    const go = alertUrl({ place: n.place, ...(n.task ? { task: n.task } : {}), ...(n.question?.id ? { focus: n.question.id } : {}) });
-    // its card's choices as buttons; a question with none a button may send opens the app; no card: a reply
-    const buttons = n.question ? choiceButtons(n.question) : [];
-    const acts = n.question ? (buttons.length ? { actions: buttons, answer: { chat: n.chat, question: n.question.id } } : {})
-      : n.secret ? {} : { actions: [REPLY], reply: { chat: n.chat, ...(n.reply ? { to: n.reply } : {}) } };
-    now.set(`need:${n.chat}:${n.id}`, { title: T.toastTitle(who(n), T.NEEDS_YOU), body: T.needReason(n), tag: n.task ?? n.chat, topic: "needs", place: n.place, waits: true, url: go, ...acts });
+    now.set(needKey(n), needAlert(snap, n));
   }
   // a task ready for the person's Accept (Ready is only that: one Settings merge by itself shows Working meanwhile,
   // core/tasks.js readyWait), the same Accept as the Tasks panel's
@@ -65,7 +73,7 @@ export function alertsOf(snap: any, woke: Set<string> = new Set(), said: (chat: 
  * task's agent or an alert about a task always; an Assistant's by its space's Notify). chatOf: a terminal's chat key.
  */
 export function agentAlerts(terminals: Iterable<any>, snap: any, chatOf: (address: string) => string | null, home: string) {
-  const out: { id: string; at: number; title: string; body: string; chat?: string; place?: string; notify: boolean }[] = [];
+  const out: { id: string; at: number; title: string; body: string; chat?: string; place?: string; notify: boolean; ended?: true; machine?: string | null; memory?: true }[] = [];
   const all = [...terminals];
   for (const k of all) {
     let a: any = null;
@@ -78,7 +86,13 @@ export function agentAlerts(terminals: Iterable<any>, snap: any, chatOf: (addres
     const who = ref || (k.labels?.["herdr.role"] === "coordinator" || coord ? T.assistantWho(coord?.name) : k.program?.name ?? "Agent");
     const place = task?.place ?? coord?.id;
     const notify = Boolean(a.about || task || k.labels?.["herdr.task"] || !place || notifies(snap, { go: { place } }));
-    out.push({ id: String(a.id), at: Number(a.at) || 0, title: T.clip(T.toastTitle(who, String(a.title ?? "")), 60), body: T.clip(String(a.body ?? ""), 300), ...(chat ? { chat } : {}), ...(place ? { place } : {}), notify });
+    // SHEP-246: what the glance feed needs to keep only what is still true: its terminal finished, its machine, and a
+    // memory guard's alert (herdr-task tick memory_guard: a machine's state, over once memory is back under)
+    const ended = k.state !== undefined && k.state !== "live";
+    const machine = String(k.address ?? "").includes("/") ? String(k.address).slice(0, String(k.address).indexOf("/")) : null;
+    const memory = a.about && /^Memory at \d+%/.test(String(a.title ?? ""));
+    out.push({ id: String(a.id), at: Number(a.at) || 0, title: T.clip(T.toastTitle(who, String(a.title ?? "")), 60), body: T.clip(String(a.body ?? ""), 300), ...(chat ? { chat } : {}), ...(place ? { place } : {}), notify,
+      ...(ended ? { ended: true as const } : {}), ...(machine ? { machine } : {}), ...(memory ? { memory: true as const } : {}) });
   }
   // Assistants here that their model's provider kept cutting off (herdr-task tick's .retries.json), once per cut, as
   // the window's (lib/inbox.js readRetries): "<who> · <why>", "Write to it to carry on, or restart it."

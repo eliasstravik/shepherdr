@@ -86,6 +86,18 @@ Unchanged from the web push buttons (SHEP-243): `POST /api/action` with
 }
 ```
 
+## What it lists: what the app shows
+
+The feed never says more than Shepherdr's own screens, so phone, watch and app agree:
+
+- `kind: "needs"`, `type: "need"`: every need the app's Needs you view lists (one in a space whose Notify is quiet too,
+  with `alert: false`); `type: "task"`: a task's row that needs you with no card of its own.
+- `type: "msg"` (an Assistant's unread message) and `type: "alert"` (an agent's `herdr-task alert`) are notifications:
+  listed under needs so the phone can notify and act, but not in `counts`. An agent's alert is a moment, as in the app
+  (a toast, once): listed only for 15 minutes, only while its terminal still runs and its task isn't done, and a
+  machine's memory alert only while that machine's memory is still over 75%.
+- `counts` are the app's own: Needs you, Working, Ready, Done today (all of them, even past the 40 items).
+
 Titles and bodies are the web push's own words (`service/push.ts` `alertsOf`), so a native notification says exactly
 what a web push would. `answer.choices` follows Shepherdr's button rules: never on a plan, a form, a merge, a pick of
 several or a terminal menu, never a choice that needs a note or grants for good; three at most (labels <= 24).

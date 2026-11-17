@@ -19,7 +19,9 @@ const PHONE = "nPhone1CNTRL", MAC = "nMac1CNTRL";
 let hits: string[] = [];
 const realFetch = globalThis.fetch;
 beforeAll(() => { globalThis.fetch = (async (url: string) => { hits.push(String(url).split("/").pop()!); return new Response(null, { status: 201 }); }) as any; });
-afterAll(() => { globalThis.fetch = realFetch; rmSync(dir, { recursive: true, force: true }); });
+// the service's data folder is read once per test process: removed only when the process ends (other files' tests use it)
+afterAll(() => { globalThis.fetch = realFetch; });
+process.on("exit", () => rmSync(dir, { recursive: true, force: true }));
 beforeEach(() => { hits = []; });
 afterEach(() => setSystemTime());
 
@@ -69,6 +71,38 @@ test("an agent's own alert from a chat takes Reply; titles fit a watch line, bod
   const a = g.items.find((i) => i.type === "alert");
   expect(a.reply).toEqual({ chat: "HERD-3/worker" });
   for (const i of g.items) { expect(i.title.length).toBeLessThanOrEqual(30); expect(i.body.length).toBeLessThanOrEqual(80); }
+});
+
+test("only what the app shows: no alert from a finished terminal, a done task, days ago, or a machine back under its memory limit", () => {
+  const al = (over: any) => ({ id: "a" + Math.random(), at: NOW - 60_000, title: "x · Look", body: "now", notify: true, ...over });
+  const shown = (alerts: any[], over: any = {}) => doc(snapOf({ needs: [], alerts, ...over })).items.filter((i) => i.type === "alert").length;
+  expect(shown([al({})])).toBe(1);
+  // a finished helper's (ELIA-45's sign-in test)
+  expect(shown([al({ ended: true, chat: "HERD-3/helper" })])).toBe(0);
+  // a done task's agent
+  expect(shown([al({ chat: "HERD-2/worker" })])).toBe(0);
+  // 3.4 days old: a moment long gone, as in the app (a toast, once)
+  expect(shown([al({ at: NOW - 3.4 * 86400_000 })])).toBe(0);
+  // not for the person (an Assistant's, its space's Notify off)
+  expect(shown([al({ notify: false })])).toBe(0);
+  // the memory guard's: over once its machine is back under; still short of memory, it stands
+  const mem = (pct: number) => ({ machines: [{ machine: "box", here: true, stats: { health: { memory: pct } } }, { machine: "vm-demo", stats: { health: { memory: 7 } } }] });
+  expect(shown([al({ memory: true, machine: "vm-demo" })], mem(90))).toBe(0);
+  expect(shown([al({ memory: true })], mem(91))).toBe(1);
+  expect(shown([al({ memory: true })], mem(60))).toBe(0);
+});
+
+test("counts are the app's: every need (a quiet space's too, without alerting); an Assistant's message and an agent's alert notify but don't count", () => {
+  const notifyOff = [{ name: "Notify", level: "sp1", rows: [{ key: "notify", value: "Off" }] }];
+  const snap = snapOf({ settings: notifyOff, tasks: [], needs: [{ id: "q9", chat: "sp1", place: "sp1", at: NOW - 100, question: q({ id: "q9" }) }],
+    places: [{ id: "sp1", name: "Home", chat: "sp1" }, { id: "sp2", name: "Shop", chat: "sp2" }], last: { sp2: NOW - 50 }, read: {},
+    alerts: [{ id: "a1", at: NOW - 100, title: "HERD-3 · Look", body: "now", notify: true }] });
+  const g = doc(snap);
+  const need = g.items.find((i) => i.key === "need:sp1:q9");
+  expect(need).toMatchObject({ kind: "needs", type: "need", alert: false, title: "Home Assistant · Needs you" });
+  expect(need.answer.choices.length).toBe(3);
+  expect(g.items.map((i) => i.type).sort()).toEqual(["alert", "msg", "need"]);
+  expect(g.counts.needs).toBe(1);
 });
 
 test("v and urgent stay put while nothing changes; a status line moves v only; a new alert moves both", () => {

@@ -4,7 +4,9 @@
 // (push.ts alertsOf), so a native notification says exactly what a web push says. The format: docs/glance.md.
 //
 // glanceOf started as ELIA-54's reference (glance-feed/glance.ts in shepherdr-wake), kept as it is but for a stable `at`
-// (an item with no time of its own never takes "now": that changed `v` on every snapshot).
+// (an item with no time of its own never takes "now": that changed `v` on every snapshot), and to list what the app
+// lists: every need (one its space's Notify keeps quiet too, without alerting), an agent's alert only while it stands.
+import { needAlert, needKey } from "./push.ts";
 
 /** the doc's format: a change the Android app can't read as before bumps it (new fields alone don't) */
 export const GLANCE_FORMAT = 1;
@@ -48,6 +50,28 @@ export type Counts = { needs: number; working: number; ready: number; done: numb
 export type Glance = { format: number; v: string; urgent: string; at: number; counts: Counts; items: Item[] };
 
 export const WATCH_TITLE = 30, WATCH_BODY = 80, LABEL = 24, MAX_ITEMS = 40;
+/** an agent's own alert (herdr-task alert) is a moment, as in the app (a toast, once), not something that waits: the
+ *  feed lists it this long, so a phone that was away a while still hears it, then lets it go */
+export const ALERT_FRESH_MS = 15 * 60_000;
+/** a memory guard's alert is over once its machine's memory is back under this (herdr-task tick GUARD_BACK_UNDER) */
+export const MEMORY_BACK_UNDER = 75;
+
+/**
+ * Is an agent's alert (snapshot.alerts, push.ts agentAlerts) still something to show: what reaches the person (notify),
+ * from a terminal still running (a finished helper's is over), of a task not done, fresh, and for a memory alert, its
+ * machine still short of memory (its last read; none: by age alone).
+ */
+export function alertStands(a: any, snap: any, now: number) {
+  if (!a?.notify || a.ended || !(now - (Number(a.at) || 0) < ALERT_FRESH_MS)) return false;
+  const task = a.chat?.includes("/") ? (snap.tasks ?? []).find((t: any) => t.id === a.chat.slice(0, a.chat.lastIndexOf("/"))) : null;
+  if (task && (task.archived || task.status === "done")) return false;
+  if (a.memory) {
+    const m = (snap.machines ?? []).find((x: any) => (a.machine ? x.machine === a.machine && !x.here : x.here));
+    const mem = m?.stats?.health?.memory;
+    if (typeof mem === "number" && mem <= MEMORY_BACK_UNDER) return false;
+  }
+  return true;
+}
 const clip = (s: string, n: number) => { const t = String(s ?? "").replace(/\s+/g, " ").trim(); return t.length <= n ? t : t.slice(0, n - 1).trimEnd() + "…"; };
 const urlOf = (place: string, task?: string, focus?: string) => { const q = new URLSearchParams({ place }); if (task) q.set("task", task); if (focus) q.set("focus", focus); return `./?${q}`; };
 
@@ -71,6 +95,7 @@ export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now()):
   const places = new Map<string, any>((snap.places ?? []).map((p: any) => [p.id, p]));
   const spaceOf = (id?: string) => (id ? places.get(id) : null);
   const alertAt = new Map<string, number>((snap.alerts ?? []).map((a: any) => [`alert:${a.id}`, Number(a.at) || 0]));
+  const standing = new Set<string>((snap.alerts ?? []).filter((a: any) => alertStands(a, snap, now)).map((a: any) => `alert:${a.id}`));
   const alertChat = new Map<string, string>((snap.alerts ?? []).filter((a: any) => a.chat).map((a: any) => [`alert:${a.id}`, String(a.chat)]));
   /** a task's short name: its ref, without the machine ("VIBE-10", not "m3:VIBE-10"; the machine is its own field) */
   const ref = (id: string) => id.slice(id.lastIndexOf(":") + 1);
@@ -82,17 +107,20 @@ export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now()):
       progress: typeof t.report?.progress === "number" ? Math.max(0, Math.min(100, Math.round(t.report.progress))) : null, left: t.left ?? null };
   };
   const tasks = new Map<string, any>((snap.tasks ?? []).map((t: any) => [t.id, t]));
-  for (const [key, a] of alerts) {
+  // the app's Needs you lists every need; one whose space's Notify is quiet lists without alerting
+  const quiet = new Map<string, any>();
+  for (const n of snap.needs ?? []) if (!alerts.has(needKey(n))) quiet.set(needKey(n), needAlert(snap, n));
+  for (const [key, a] of [...alerts, ...quiet]) {
     if (key.startsWith("done:")) continue;
     const type = key.startsWith("need:") ? "need" : key.startsWith("msg:") ? "msg" : key.startsWith("alert:") ? "alert" : key.startsWith("ready:") ? "task" : null;
-    if (!type) continue;
+    if (!type || (type === "alert" && !standing.has(key))) continue;
     const n = needOf.get(key);
     const t = n?.task ? tasks.get(n.task) : key.startsWith("ready:") ? tasks.get(key.slice(6)) : null;
     const sp = spaceOf(a.place);
     // its own time: the need's, the agent's alert's, the message's (msg:<chat>:<at>), the task's; never "now"
     const at = n?.at ?? alertAt.get(key) ?? (type === "msg" ? Number(key.slice(key.lastIndexOf(":") + 1)) || undefined : undefined) ?? t?.at;
     const it: Item = { key, kind: key.startsWith("ready:") ? "ready" : "needs", type, tag: a.tag, title: clip(a.title, WATCH_TITLE), body: clip(a.body, WATCH_BODY),
-      ...(t ? { task: t.id, ...taskRow(t) } : { space: sp?.name ?? "", machine: sp?.machine ?? null }), ...(at ? { at } : {}), alert: true,
+      ...(t ? { task: t.id, ...taskRow(t) } : { space: sp?.name ?? "", machine: sp?.machine ?? null }), ...(at ? { at } : {}), alert: !quiet.has(key),
       url: a.url ?? (a.place ? urlOf(a.place) : "./") };
     if (a.accept) it.accept = a.accept;
     if (a.reply) it.reply = a.reply;
@@ -117,7 +145,9 @@ export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now()):
   const order = { needs: 0, working: 1, ready: 2, done: 3 } as const;
   items.sort((a, b) => order[a.kind] - order[b.kind] || (a.kind === "done" ? (b.at ?? 0) - (a.at ?? 0) : (a.at ?? 0) - (b.at ?? 0)));
   const counts: Counts = { needs: 0, working: 0, ready: 0, done: 0 };
-  for (const i of items) counts[i.kind]++;
+  // the app's own counts (its Needs you, Working, Ready, Done today): an Assistant's new message and an agent's alert
+  // are notifications, not counted
+  for (const i of items) if (i.type !== "alert" && i.type !== "msg") counts[i.kind]++;
   const kept = items.slice(0, MAX_ITEMS);
   const v = Bun.hash(JSON.stringify([GLANCE_FORMAT, counts, kept])).toString(36);
   const urgent = Bun.hash(JSON.stringify([GLANCE_FORMAT, counts, kept.filter((i) => i.alert).map((i) => [i.key, i.title, i.body])])).toString(36);

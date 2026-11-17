@@ -726,6 +726,46 @@ class MemoryGuardRepeat(unittest.TestCase):
         tick.memory_guard({})
         self.assertEqual(len(labels), 3)
 
+    def test_its_alert_label_goes_once_memory_is_back_under(self):
+        """SHEP-246: the guard's herdr.alert stayed on the scheduler for days after memory dropped (a phone's glance
+        listed "Memory at 90%" at 7%): back under, the label goes; an agent's own alert there stays."""
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.tick as tick
+        import herdr_task.machine as machine
+        store = tempfile.mkdtemp()
+        mem, labels = [60], []
+        held = [json.dumps({"id": "a1", "at": 1, "title": "Memory at 90%", "body": "x", "about": True, "task": "vm"})]
+        ok = type("R", (), {"returncode": 0})()
+        for obj, name, value in ((tick, "GUARD_FILE", os.path.join(store, ".memory-guard.json")),
+                                 (machine, "sample", lambda: {"memory": mem[0]}), (tick, "now", lambda: 10_000_000),
+                                 (tick, "end_done_pass", lambda r, pressed=False: []),
+                                 (tick, "hc_json", lambda *a: {"state": "live", "labels": {"herdr.alert": held[0]}} if a[0] == "get" else {"terminals": []}),
+                                 (tick, "run", lambda argv: (labels.append(argv), ok)[1]), (tick, "machine_name", lambda: "vm"),
+                                 (tick, "_guard_label_checked", False)):
+            p = mock.patch.object(obj, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        # a label left by an older version, no guard file: cleared once at the scheduler's start
+        tick.memory_guard({})
+        self.assertEqual(labels, [["hc", "label", tick.SCHEDULER, "herdr.alert="]])
+        tick.memory_guard({})
+        self.assertEqual(len(labels), 1, "checked once, not every tick")
+        # high, alerted, then back under: cleared
+        mem[0] = 92
+        tick.memory_guard({})
+        self.assertEqual(len(labels), 2)
+        mem[0] = 50
+        tick.memory_guard({})
+        self.assertEqual(labels[-1], ["hc", "label", tick.SCHEDULER, "herdr.alert="])
+        # an agent's own alert on that terminal is not the guard's: left alone
+        held[0] = json.dumps({"id": "b2", "at": 1, "title": "Look now", "body": "y"})
+        with open(tick.GUARD_FILE, "w") as f:
+            json.dump({"alerted": 1}, f)
+        n = len(labels)
+        tick.memory_guard({})
+        self.assertEqual(len(labels), n)
+
 
 class AcceptWhenHcCantStart(unittest.TestCase):
     """#1057: Accept ended in a traceback at its first hc call (busy_again(t, [detail(k) for k in live_agents(...)])) when
