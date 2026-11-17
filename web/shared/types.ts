@@ -1343,6 +1343,8 @@ export type ServerEvent =
   | { type: 'show'; artifact: string }
   /** a wake word was heard on this screen's device (SHEP-240): it starts a voice call, or shows the one on */
   | { type: 'voice' }
+  /** a tap on the phone app's alert (POST /api/open, SHEP-246): this screen goes where it points, in place */
+  | { type: 'go'; url: string }
 
 /** how Shepherdr's last update of itself went (update.json in its folder, written by the supervisor) */
 export interface UpdateStatus {

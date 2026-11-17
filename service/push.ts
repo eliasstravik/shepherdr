@@ -97,7 +97,9 @@ export const PROVIDER_BODY = "Write to it to carry on, or restart it.";
 
 /** a device's subscription: what it is told about (none kept: what it got before it could choose) and the spaces it hears
  *  nothing from */
-type Sub = { endpoint: string; keys: { p256dh: string; auth: string }; device?: string; at: number; topics?: PushTopic[]; muted?: string[] };
+type Sub = { endpoint: string; keys: { p256dh: string; auth: string }; device?: string; at: number; topics?: PushTopic[]; muted?: string[];
+  /** the tailnet device it is on (main.ts deviceFrom): a device whose phone app shows its own alerts gets none (SHEP-246) */
+  node?: string };
 
 /** does a device want this alert: its topic chosen, its space not muted; an alert with no topic (a test) always */
 export function wants(s: Pick<Sub, "topics" | "muted">, a: { topic?: string; place?: string }) {
@@ -145,6 +147,8 @@ export class Push {
   private vapid: { publicKey: string; privateJwk: JsonWebKey } | null = null;
   /** endpoints of devices whose app is on screen now (their pages say so) */
   visible = new Set<string>();
+  /** a tailnet device whose own app shows the alerts now (the glance feed's native stream, SHEP-246): no web push */
+  quiet: (node: string | undefined) => boolean = () => false;
 
   constructor(private subject: () => string, private file = join(DATA, "push.json")) {
     try { this.subs = JSON.parse(readFileSync(this.file, "utf8")); } catch {}
@@ -163,11 +167,20 @@ export class Push {
   }
 
   /** a device turned on (or again, with a new subscription: from: the one it had); it keeps what it chose */
-  subscribe(sub: any, device?: string, from?: string) {
+  subscribe(sub: any, device?: string, from?: string, node?: string | null) {
     if (typeof sub?.endpoint !== "string" || !/^https:\/\//.test(sub.endpoint) || typeof sub?.keys?.p256dh !== "string" || typeof sub?.keys?.auth !== "string") throw new Error("Not a push subscription.");
     const had = this.subs.find((s) => s.endpoint === sub.endpoint) ?? (from ? this.subs.find((s) => s.endpoint === from) : undefined);
     const chose = had ? { topics: pushTopics(had.topics), ...(had.muted?.length ? { muted: had.muted } : {}) } : { topics: [...DEFAULT_TOPICS] };
-    this.subs = [...this.subs.filter((s) => s.endpoint !== sub.endpoint && s !== had), { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth }, device: String(device ?? "").slice(0, 200), at: Date.now(), ...chose }].slice(-20);
+    this.subs = [...this.subs.filter((s) => s.endpoint !== sub.endpoint && s !== had), { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth }, device: String(device ?? "").slice(0, 200), at: Date.now(), ...chose,
+      ...(node ? { node } : had?.node ? { node: had.node } : {}) }].slice(-20);
+    this.save();
+  }
+
+  /** the tailnet device a subscription is on, told by its page's socket (one subscribed before SHEP-246 had none) */
+  nodeOf(endpoint: string, node: string | null | undefined) {
+    const s = node ? this.subs.find((x) => x.endpoint === endpoint) : undefined;
+    if (!s || s.node === node) return;
+    s.node = node!;
     this.save();
   }
 
@@ -217,11 +230,12 @@ export class Push {
     } catch { return 0; }
   }
 
-  /** Sends an alert to every subscribed device whose app isn't on screen and that wants it (its topic, its space). */
+  /** Sends an alert to every subscribed device whose app isn't on screen, whose phone app doesn't show it natively, and
+   *  that wants it (its topic, its space). */
   async send(alert: Record<string, unknown> & { topic?: string; place?: string }) {
     const payload = enc(JSON.stringify(alert));
     for (const s of [...this.subs]) {
-      if (this.visible.has(s.endpoint) || !wants(s, alert)) continue;
+      if (this.visible.has(s.endpoint) || this.quiet(s.node) || !wants(s, alert)) continue;
       await this.deliver(s, payload);
     }
   }

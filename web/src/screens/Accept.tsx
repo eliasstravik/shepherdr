@@ -249,4 +249,6 @@ if (typeof window !== 'undefined') {
   // index.html keeps the first one, before the app writes its own address
   fromLink((window as { shepherdrLink?: string }).shepherdrLink ?? '')
   addEventListener('hashchange', () => fromLink(location.hash))
+  // an alert's Accept opened in this page (kernel openGo: the phone app's tap, or a tap with the app open)
+  addEventListener('shepherdr:accept', (e) => typeof (e as CustomEvent).detail === 'string' && openAccept((e as CustomEvent).detail))
 }

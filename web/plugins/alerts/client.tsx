@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { definePlugin, openLink, setPushEndpoint, useSnap, useStore, visibleChats } from '@client/kernel.ts'
+import { definePlugin, openGo, setPushEndpoint, useSnap, useStore, visibleChats } from '@client/kernel.ts'
 import { keptTags, waiting } from '@shared/alerts.ts'
 import { BellIcon } from '@heroicons/react/24/outline'
 import { Toasts } from './toasts.tsx'
@@ -60,7 +60,7 @@ export default definePlugin({
       .catch(() => undefined)
     // a tap on an alert while the app is open: straight to its card, without reloading
     navigator.serviceWorker.addEventListener('message', (e) => {
-      if (e.data?.type === 'open' && typeof e.data.url === 'string') openLink(e.data.url)
+      if (e.data?.type === 'open' && typeof e.data.url === 'string') openGo(e.data.url)
     })
   },
 })

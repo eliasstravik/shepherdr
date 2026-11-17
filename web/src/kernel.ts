@@ -679,6 +679,15 @@ export function openLink(href: string) {
   forgetJump()
 }
 
+/** go where an alert points: its place, task and card, or a Ready task's Accept card (./#accept=<id>: the Accept screen
+ *  listens, as for the link a page opens with) */
+export function openGo(url: string) {
+  const u = new URL(url, location.href)
+  const m = /^#accept=(.+)$/.exec(u.hash)
+  if (m) return void dispatchEvent(new CustomEvent('shepherdr:accept', { detail: decodeURIComponent(m[1]) }))
+  openLink(u.href)
+}
+
 // the card to bring into view is not part of the address: a reload or a step back doesn't bring it into view again
 let jumpTimer: ReturnType<typeof setTimeout> | null = null
 function forgetJump() {
@@ -794,6 +803,7 @@ export function connect() {
     if (msg.type === 'pong') return
     if (msg.type === 'show') return openArtifact(msg.artifact)
     if (msg.type === 'voice') return registry.voiceWake?.()
+    if (msg.type === 'go') return openGo(msg.url)
     if (msg.type === 'snapshot') {
       // an add-on switched on or off in Settings › Window: the page starts again with its plugins in or out (main.tsx)
       const booted = (window as { shepherdrOff?: string[] }).shepherdrOff
