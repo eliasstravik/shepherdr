@@ -54,23 +54,24 @@ test("an agent's own alert, from its label", () => {
 
 // SHEP-243: each alert's buttons do the thing from the phone or the watch, in words that fit a watch
 const watch = (snap: any) => [...alertsOf(snap, new Set(), (c) => (c === "sp1" ? "Merged **SHEP-9**, all green.\n\nNext: the login page." : undefined)).values()];
-test("a ready task's alert offers Accept and Not now, the Tasks panel's Accept", () => {
+test("a ready task's alert offers Accept, the Tasks panel's Accept", () => {
   const [a] = watch({ places: [], tasks: [{ id: "m3:HERD-4", name: "Fix login", status: "ready", place: "sp1" }], needs: [], settings: [] });
-  expect(a.actions).toEqual([{ action: "accept", title: "Accept" }, { action: "later", title: "Not now" }]);
+  // one button: Chrome on Android hands every site button over as the last one's action
+  expect(a.actions).toEqual([{ action: "accept", title: "Accept" }]);
   expect(a.accept).toEqual({ task: "m3:HERD-4" });
   // it goes once the task isn't ready any more (accepted from the app)
   expect(a.waits).toBe(true);
 });
 
-test("a question's choices are its buttons: a grant for good never; more than fit: the last opens the app", () => {
+test("a question's first sendable choice is its button: never a grant for good", () => {
   const perm = { id: "r1", kind: "Question", title: "Run: npm test", choices: [{ label: "Yes" }, { label: "Yes, and don't ask again" }, { label: "No" }], always: 1 };
   const [a] = watch({ places: [], tasks: [], settings: [], needs: [{ id: "r1", chat: "HERD-5/worker", place: "sp1", task: "HERD-5", question: perm }] });
-  expect(a.actions).toEqual([{ action: "0", title: "Yes" }, { action: "2", title: "No" }]);
+  expect(a.actions).toEqual([{ action: "0", title: "Yes" }]);
   expect(a.answer).toEqual({ chat: "HERD-5/worker", question: "r1" });
   expect(a.url).toBe("./?place=sp1&task=HERD-5&focus=r1");
   const three = { id: "q", kind: "Question", title: "Which?", choices: [{ label: "Red" }, { label: "Green" }, { label: "Blue" }] };
   const [b] = watch({ places: [], tasks: [], settings: [], needs: [{ id: "q", chat: "HERD-5/worker", place: "sp1", task: "HERD-5", question: three }] });
-  expect(b.actions).toEqual([{ action: "0", title: "Red" }, { action: "open", title: "Open" }]);
+  expect(b.actions).toEqual([{ action: "0", title: "Red" }]);
   // a plan, a pick of several and a terminal menu stay in the app
   for (const q of [{ ...three, kind: "Plan" }, { ...three, multi: true }, { ...three, id: "menu:x" }]) {
     const [c] = watch({ places: [], tasks: [], settings: [], needs: [{ id: "q", chat: "HERD-5/worker", place: "sp1", task: "HERD-5", question: q }] });
@@ -82,7 +83,7 @@ test("an agent waiting for words, and an Assistant's message, take a reply", () 
   const snap = { places: [{ id: "sp1", name: "tt-repo", chat: "sp1" }], tasks: [], settings: [{ name: "Notify", level: "sp1", rows: [{ key: "notify", value: "All" }] }],
     needs: [{ id: "attention", chat: "HERD-5/worker", place: "sp1", task: "HERD-5", text: "Which branch should I use?", reply: "m9" }], last: { sp1: 9 }, read: { sp1: 1 } };
   const [need, msg] = watch(snap);
-  expect(need.actions?.map((x) => x.action)).toEqual(["reply", "open"]);
+  expect(need.actions?.map((x) => x.action)).toEqual(["reply"]);
   expect(need.reply).toEqual({ chat: "HERD-5/worker", to: "m9" });
   // the Assistant's own words, short and plain
   expect(msg.title).toBe("tt-repo · New message");

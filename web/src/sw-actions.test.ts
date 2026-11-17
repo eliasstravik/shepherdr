@@ -56,12 +56,12 @@ function worker(answer: (body: any) => { status: number; body: unknown }, opts: 
   return { push, click, shown, posted, opened, closed }
 }
 
-const ready = { title: 'HERD-4 · Finished', body: 'Fix login', tag: 'HERD-4', waits: true, url: './#accept=HERD-4', actions: [{ action: 'accept', title: 'Accept' }, { action: 'later', title: 'Not now' }], accept: { task: 'HERD-4' } }
+const ready = { title: 'HERD-4 · Finished', body: 'Fix login', tag: 'HERD-4', waits: true, url: './#accept=HERD-4', actions: [{ action: 'accept', title: 'Accept' }], accept: { task: 'HERD-4' } }
 
 test("Accept on a ready task's alert accepts it as the Tasks panel does, and says so", async () => {
   const w = worker(() => ({ status: 200, body: { ok: true } }))
   await w.push(ready)
-  expect(w.shown[0].options.actions).toEqual([{ action: 'accept', title: 'Accept' }, { action: 'later', title: 'Not now' }])
+  expect(w.shown[0].options.actions).toEqual([{ action: 'accept', title: 'Accept' }])
   await w.click('accept')
   expect(w.posted).toEqual([{ url: `${SCOPE}api/action`, headers: { 'content-type': 'application/json', 'x-shepherdr': '1' }, body: { type: 'accept', task: 'HERD-4' } }])
   expect(w.shown.at(-1)!.title).toBe('Accepted ✓')
@@ -113,15 +113,15 @@ test('Reply sends what was typed into the notification once; where nothing can b
   await w.click('reply', ' Ship it ')
   expect(w.posted[0].body).toEqual({ type: 'send', chat: 'sp1', text: 'Ship it', cid: 'push:msg:sp1:42', human: true })
   expect(w.shown.at(-1)).toMatchObject({ title: 'Sent ✓', options: { body: 'Ship it' } })
-  // a browser with no typed replies: no Reply button, Open only
+  // a browser with no typed replies: no Reply button; a tap on the alert opens the chat
   const old = worker(() => ({ status: 200, body: { ok: true } }), { reply: false })
-  await old.push(reply)
-  expect(old.shown[0].options.actions).toEqual([{ action: 'open', title: 'Open' }])
+  await old.push({ ...reply, actions: [reply.actions[0]] })
+  expect(old.shown[0].options.actions).toBeUndefined()
 })
 
-test('Not now only closes it; no more buttons than the device shows', async () => {
-  const w = worker(() => ({ status: 200, body: { ok: true } }), { max: 1 })
-  await w.push(ready)
+test('one button at most, whatever the server sends (Chrome on Android sends every tap as the last button); an old Not now does nothing', async () => {
+  const w = worker(() => ({ status: 200, body: { ok: true } }))
+  await w.push({ ...ready, actions: [{ action: 'accept', title: 'Accept' }, { action: 'later', title: 'Not now' }] })
   expect(w.shown[0].options.actions).toEqual([{ action: 'accept', title: 'Accept' }])
   await w.click('later')
   expect(w.posted).toEqual([])

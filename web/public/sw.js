@@ -2,7 +2,7 @@
 // about. With the app on screen, an alert shows nothing: the server already skips this device then, and this catches
 // the rest. One alert per task: a task's newer alert takes its old one's place (its tag), and alerts about what no
 // longer waits on you go with the next one. Where alerts have buttons (Android and so a Wear OS watch, desktop Chrome),
-// they do the thing from there (SHEP-243): a card's choices answer it, Accept accepts a Ready task as the Tasks panel
+// one button does the thing from there (SHEP-243): a card's first choice answers it, Accept accepts a Ready task as the Tasks panel
 // does, Reply sends what was typed into the notification (else it opens the chat). Each says on the notification what
 // came of it ("Accepted ✓", "Already handled"); an old alert's button can't do harm: an answer goes to that one card
 // only, and Accept only to a task still Ready. An iPhone shows no buttons.
@@ -30,12 +30,13 @@ const room = () => (typeof Notification !== 'undefined' && Notification.maxActio
 /** words typed into the notification itself come back (Chrome on Android): else Reply opens the chat */
 const typed = () => typeof NotificationEvent !== 'undefined' && 'reply' in NotificationEvent.prototype
 
-/** the buttons this device shows: Reply only where it can be typed into, as many as fit */
+/** the button this device shows: Reply only where it can be typed into */
 const fit = (actions) => {
   const n = room()
   if (!n || !Array.isArray(actions)) return []
   const kept = actions.filter((x) => x.action !== 'reply' || typed()).map((x) => (x.type === 'text' ? x : { action: x.action, title: x.title }))
-  return kept.slice(0, n)
+  // one: Chrome on Android hands every site button's tap over as the last button's action (web/shared/alerts.ts)
+  return kept.slice(0, 1)
 }
 
 self.addEventListener('install', () => self.skipWaiting())

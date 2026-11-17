@@ -148,25 +148,23 @@ export function watchTitle(title: string): string {
   return `${who.length + what.length + 3 <= WATCH_TITLE ? who : clip(who, WATCH_TITLE - what.length - 3)} · ${what}`
 }
 
-/** a button on a push alert: a choice's index ("0", "1"), accept, later, reply (typed in, where the browser lets one) or
- *  open; the service worker keeps only as many as the device shows (Notification.maxActions: 2 on Android) */
+/** a button on a push alert: a choice's index ("0", "1"), accept, or reply (typed in, where the browser lets one). One
+ *  per alert: Chrome on Android (149, SHEP-243) hands every site button's tap to the service worker as the last
+ *  button's action, so with two, "Yes" would arrive as "No". A tap on the alert itself opens the app for the rest. */
 export type PushAction = { action: string; title: string; type?: 'text'; placeholder?: string }
-export const OPEN: PushAction = { action: 'open', title: 'Open' }
 export const REPLY: PushAction = { action: 'reply', title: 'Reply', type: 'text', placeholder: 'Reply…' }
+export const ACCEPT: PushAction = { action: 'accept', title: 'Accept' }
 
 /** a card answered from a button, as on its card: never a plan, a merge or a form, which stay a deliberate pick in the
  *  app (sendsOnTap's rule) */
 const quick = (q: Question) => q.kind !== 'Plan' && !(q.parts && q.parts.length > 1) && !/^merge\b/i.test(q.title) && !(q as { evidence?: unknown }).evidence
 
-/** a question's buttons: its choices a button may send (quickChoices' rule: not a pick of several, a note, a grant for
- *  good or a terminal menu), as many as the device shows; more than that: the last button opens the app */
-export function choiceButtons(q: Question, max = 2): PushAction[] {
+/** a question's button: its first choice a button may send (quickChoices' rule: not a pick of several, a note, a grant
+ *  for good or a terminal menu, so "Yes" on a permission); the other choices are a tap on the alert away */
+export function choiceButtons(q: Question): PushAction[] {
   if (!q?.choices?.length || !quick(q) || q.multi || String(q.id ?? '').startsWith('menu:')) return []
-  const all = q.choices
-    .map((_, i) => ({ action: String(i), title: clip(short(q, i), ACTION_MAX) }))
-    .filter((c) => Number(c.action) !== q.noteRequiredFor && Number(c.action) !== q.always)
-  if (!all.length) return []
-  return all.length > max ? [...all.slice(0, Math.max(0, max - 1)), OPEN] : all
+  const first = q.choices.findIndex((_, i) => i !== q.noteRequiredFor && i !== q.always)
+  return first < 0 ? [] : [{ action: String(first), title: clip(short(q, first), ACTION_MAX) }]
 }
 
 /** what came of a button, said on the notification in its place: done, already done elsewhere, or why it didn't go */
