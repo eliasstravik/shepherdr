@@ -23,11 +23,13 @@ function pageLink(req: Request, socket: boolean) {
   return !/^\/api(\/|$)/.test(path);
 }
 
-export function gate(req: Request, g: Gate, socket = false, peerTrusted = false): Pass {
+// asWrite: a GET checked as a write (the glance feed, SHEP-246: its stream with native=1 quiets that device's web push):
+// the origin and x-shepherdr: 1
+export function gate(req: Request, g: Gate, socket = false, peerTrusted = false, asWrite = false): Pass {
   const h = req.headers;
   const host = (h.get("host") ?? "").toLowerCase();
   const login = h.get("tailscale-user-login");
-  const write = socket || !READS.has(req.method);
+  const write = socket || asWrite || !READS.has(req.method);
   if (req.method === "OPTIONS") return { ok: false, status: 403, why: "no cross-site requests" };
   if (h.get("sec-fetch-site") === "cross-site" && !pageLink(req, socket)) return { ok: false, status: 403, why: "cross-site" };
 
