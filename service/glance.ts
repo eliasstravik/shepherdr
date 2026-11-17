@@ -6,8 +6,9 @@
 // glanceOf started as ELIA-54's reference (glance-feed/glance.ts in shepherdr-wake), kept as it is but for a stable `at`
 // (an item with no time of its own never takes "now": that changed `v` on every snapshot), and to list what the app
 // lists: every need (one its space's Notify keeps quiet too, without alerting), an agent's alert only while it stands.
-import { needAlert, needKey } from "./push.ts";
+import { needAlert } from "./push.ts";
 import { GROUPS } from "../web/shared/types.ts";
+import { ALERT_FRESH_MS, MEMORY_BACK_UNDER, alertStands, needsYou, waitingTasks } from "../web/shared/needs-you.ts";
 
 /** the doc's format: a change the Android app can't read as before bumps it (new fields alone don't) */
 export const GLANCE_FORMAT = 1;
@@ -64,28 +65,8 @@ export const KINDS: { kind: Kind; label: string }[] = GROUPS.flatMap(([s]) => KI
   .map((kind) => ({ kind, label: GROUPS.find(([s]) => s === NAMED[kind])![1] }));
 
 export const WATCH_TITLE = 30, WATCH_BODY = 80, LABEL = 24, MAX_ITEMS = 40;
-/** an agent's own alert (herdr-task alert) is a moment, as in the app (a toast, once), not something that waits: the
- *  feed lists it this long, so a phone that was away a while still hears it, then lets it go */
-export const ALERT_FRESH_MS = 15 * 60_000;
-/** a memory guard's alert is over once its machine's memory is back under this (herdr-task tick GUARD_BACK_UNDER) */
-export const MEMORY_BACK_UNDER = 75;
-
-/**
- * Is an agent's alert (snapshot.alerts, push.ts agentAlerts) still something to show: what reaches the person (notify),
- * from a terminal still running (a finished helper's is over), of a task not done, fresh, and for a memory alert, its
- * machine still short of memory (its last read; none: by age alone).
- */
-export function alertStands(a: any, snap: any, now: number) {
-  if (!a?.notify || a.ended || !(now - (Number(a.at) || 0) < ALERT_FRESH_MS)) return false;
-  const task = a.chat?.includes("/") ? (snap.tasks ?? []).find((t: any) => t.id === a.chat.slice(0, a.chat.lastIndexOf("/"))) : null;
-  if (task && (task.archived || task.status === "done")) return false;
-  if (a.memory) {
-    const m = (snap.machines ?? []).find((x: any) => (a.machine ? x.machine === a.machine && !x.here : x.here));
-    const mem = m?.stats?.health?.memory;
-    if (typeof mem === "number" && mem <= MEMORY_BACK_UNDER) return false;
-  }
-  return true;
-}
+// the rule of what stands (an agent's alert while it lasts) is Needs you's own, shared with the web app
+export { ALERT_FRESH_MS, MEMORY_BACK_UNDER, alertStands };
 const clip = (s: string, n: number) => { const t = String(s ?? "").replace(/\s+/g, " ").trim(); return t.length <= n ? t : t.slice(0, n - 1).trimEnd() + "…"; };
 const urlOf = (place: string, task?: string, focus?: string) => { const q = new URLSearchParams({ place }); if (task) q.set("task", task); if (focus) q.set("focus", focus); return `./?${q}`; };
 
@@ -108,12 +89,8 @@ const today = (now: number) => { const d = new Date(now); d.setHours(0, 0, 0, 0)
 export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now()): Glance {
   const places = new Map<string, any>((snap.places ?? []).map((p: any) => [p.id, p]));
   const spaceOf = (id?: string) => (id ? places.get(id) : null);
-  const alertAt = new Map<string, number>((snap.alerts ?? []).map((a: any) => [`alert:${a.id}`, Number(a.at) || 0]));
-  const standing = new Set<string>((snap.alerts ?? []).filter((a: any) => alertStands(a, snap, now)).map((a: any) => `alert:${a.id}`));
-  const alertChat = new Map<string, string>((snap.alerts ?? []).filter((a: any) => a.chat).map((a: any) => [`alert:${a.id}`, String(a.chat)]));
   /** a task's short name: its ref, without the machine ("VIBE-10", not "m3:VIBE-10"; the machine is its own field) */
   const ref = (id: string) => id.slice(id.lastIndexOf(":") + 1);
-  const needOf = new Map<string, any>((snap.needs ?? []).map((n: any) => [`need:${n.chat}:${n.id}`, n]));
   const items: Item[] = [];
   const taskRow = (t: any) => {
     const sp = spaceOf(t.place);
@@ -121,40 +98,48 @@ export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now()):
       progress: typeof t.report?.progress === "number" ? Math.max(0, Math.min(100, Math.round(t.report.progress))) : null, left: t.left ?? null };
   };
   const tasks = new Map<string, any>((snap.tasks ?? []).map((t: any) => [t.id, t]));
-  // the app's Needs you lists every need; one whose space's Notify is quiet lists without alerting
-  const quiet = new Map<string, any>();
-  for (const n of snap.needs ?? []) if (!alerts.has(needKey(n))) quiet.set(needKey(n), needAlert(snap, n));
-  for (const [key, a] of [...alerts, ...quiet]) {
-    if (key.startsWith("done:")) continue;
-    const type = key.startsWith("need:") ? "need" : key.startsWith("msg:") ? "msg" : key.startsWith("alert:") ? "alert" : key.startsWith("ready:") ? "task" : null;
-    if (!type || (type === "alert" && !standing.has(key))) continue;
-    const n = needOf.get(key);
-    const t = n?.task ? tasks.get(n.task) : key.startsWith("ready:") ? tasks.get(key.slice(6)) : null;
-    const sp = spaceOf(a.place);
-    // its own time: the need's, the agent's alert's, the message's (msg:<chat>:<at>), the task's; never "now"
-    const at = n?.at ?? alertAt.get(key) ?? (type === "msg" ? Number(key.slice(key.lastIndexOf(":") + 1)) || undefined : undefined) ?? t?.at;
-    const it: Item = { key, kind: key.startsWith("ready:") ? "ready" : "needs", type, tag: a.tag, title: clip(a.title, WATCH_TITLE), body: clip(a.body, WATCH_BODY),
-      ...(t ? { task: t.id, ...taskRow(t) } : { space: sp?.name ?? "", machine: sp?.machine ?? null }), ...(at ? { at } : {}), alert: !quiet.has(key),
-      url: a.url ?? (a.place ? urlOf(a.place) : "./") };
+  const taskItem = (t: any, kind: Kind, at?: number): Item => ({ key: `task:${t.id}`, kind, type: "task", tag: t.id, task: t.id,
+    title: clip(`${ref(t.id)} · ${kind === "working" ? "Working" : kind === "done" ? "Done" : "Needs you"}`, WATCH_TITLE), body: clip(t.name, WATCH_BODY), ...taskRow(t), ...(at ? { at } : {}), alert: false, url: urlOf(t.place, t.id) });
+  // Needs you: what the web app's Tasks panel lists there, in its order (web/shared/needs-you.ts, SHEP-250). Each says
+  // what its push alert says; one that isn't pushed (its space's Notify keeps it quiet, a failed automation) lists
+  // without alerting
+  const waits = needsYou(snap, now);
+  for (const w of waits) {
+    const t = w.task ? tasks.get(w.task) : null;
+    if (w.type === "task") { items.push(taskItem(t, "needs", w.at || undefined)); continue; }
+    const pushed = alerts.get(w.key);
+    const a: any = pushed ?? (w.need ? needAlert(snap, w.need) : w.alert ? { title: w.alert.title, body: w.alert.body, tag: w.key, ...(w.place ? { place: w.place, url: urlOf(w.place) } : {}) }
+      : w.auto ? { title: `${w.auto.name} · ${w.auto.failed === "fire" ? "Didn't run" : w.auto.failed === "from" && w.auto.error ? w.auto.error : "Didn't start its task"}`, body: w.auto.error ?? "", tag: w.key, place: w.place }
+      : { title: `${spaceOf(w.place)?.name ?? ""} Assistant · New message`.trim(), body: "Tap to read it.", tag: `msg:${w.chat}`, place: w.place, reply: { chat: w.chat } });
+    const sp = spaceOf(a.place ?? w.place);
+    const it: Item = { key: w.key, kind: "needs", type: w.type === "auto" ? "need" : w.type, tag: a.tag, title: clip(a.title, WATCH_TITLE), body: clip(a.body, WATCH_BODY),
+      ...(t ? { task: t.id, ...taskRow(t) } : { space: sp?.name ?? w.auto?.listName ?? "", machine: sp?.machine ?? null }), ...(w.at ? { at: w.at } : {}), alert: !!pushed,
+      url: a.url ?? (a.place ?? w.place ? urlOf(a.place ?? w.place) : "./") };
     if (a.accept) it.accept = a.accept;
     if (a.reply) it.reply = a.reply;
     // an agent's own alert from a chat: Reply writes to that agent
-    else if (type === "alert" && alertChat.has(key)) it.reply = { chat: alertChat.get(key)! };
+    else if (w.alert?.chat) it.reply = { chat: w.alert.chat };
+    const n = w.need;
     if (n?.question) {
       const choices = buttonChoices(n.question);
       if (choices.length) it.answer = { chat: n.chat, question: n.question.id, choices, ...(n.question.other && n.question.kind !== "Plan" ? { other: true } : {}) };
     }
     items.push(it);
   }
-  const waiting = new Set(items.map((i) => i.task).filter(Boolean));
+  // a task in Needs you is in no other section
+  const waiting = waitingTasks(waits);
+  for (const [key, a] of alerts) {
+    if (!key.startsWith("ready:")) continue;
+    const t = tasks.get(key.slice(6));
+    if (!t || waiting.has(t.id)) continue;
+    items.push({ key, kind: "ready", type: "task", tag: a.tag, title: clip(a.title, WATCH_TITLE), body: clip(a.body, WATCH_BODY), task: t.id, ...taskRow(t), ...(t.at ? { at: t.at } : {}), alert: true,
+      url: a.url ?? urlOf(t.place, t.id), ...(a.accept ? { accept: a.accept } : {}) });
+  }
   const start = today(now);
   for (const t of snap.tasks ?? []) {
     if (t.archived || waiting.has(t.id)) continue;
-    const kind = t.status === "work" || t.status === "merging" ? "working" : t.status === "need" ? "needs" : t.status === "done" && (t.doneAt ?? 0) >= start ? "done" : null;
-    if (!kind) continue;
-    const at = kind === "done" ? t.doneAt : t.at;
-    items.push({ key: `task:${t.id}`, kind, type: "task", tag: t.id, task: t.id, title: clip(`${ref(t.id)} · ${kind === "working" ? "Working" : kind === "done" ? "Done" : "Needs you"}`, WATCH_TITLE),
-      body: clip(t.name, WATCH_BODY), ...taskRow(t), ...(at ? { at } : {}), alert: false, url: urlOf(t.place, t.id) });
+    const kind = t.status === "work" || t.status === "merging" ? "working" : t.status === "done" && (t.doneAt ?? 0) >= start ? "done" : null;
+    if (kind) items.push(taskItem(t, kind, kind === "done" ? t.doneAt : t.at));
   }
   const rank = Object.fromEntries(KINDS.map((k, i) => [k.kind, i])) as Record<Kind, number>;
   items.sort((a, b) => rank[a.kind] - rank[b.kind] || (a.kind === "done" ? (b.at ?? 0) - (a.at ?? 0) : (a.at ?? 0) - (b.at ?? 0)));

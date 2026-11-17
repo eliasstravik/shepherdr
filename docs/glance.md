@@ -95,17 +95,22 @@ Unchanged from the web push buttons (SHEP-243): `POST /api/action` with
 
 ## What it lists: what the app shows
 
-The feed never says more than Shepherdr's own screens, so phone, watch and app agree:
+The feed never says more than Shepherdr's own screens, so phone, watch and app agree. Needs you is one rule for every
+view (SHEP-250, `web/shared/needs-you.ts` `needsYou`): the web app's Tasks panel lists the same things under Needs you,
+in the same order, and its counts and badges count them.
 
-- `kind: "needs"`, `type: "need"`: every need the app's Needs you view lists (one in a space whose Notify is quiet too,
-  with `alert: false`); `type: "task"`: a task's row that needs you with no card of its own.
-- `type: "msg"` (an Assistant's unread message) and `type: "alert"` (an agent's `herdr-task alert`) are notifications:
-  listed and counted under needs, so the phone can notify and act. An agent's alert is a moment, as in the app
-  (a toast, once): listed only for 15 minutes, only while its terminal still runs and its task isn't done, and a
-  machine's memory alert only while that machine's memory is still over 75%.
+- Needs you, oldest first, each thing once and a task at most once (its oldest card stands for it): an agent's card or
+  wait (`type: "need"`; one in a space whose Notify is quiet too, with `alert: false`), a task whose status says Needs
+  you with no card (`type: "task"`), an agent's own `herdr-task alert` while it stands (`type: "alert"`), an
+  Assistant's new message not yet read, its space not muted (`type: "msg"`), and an automation that didn't run or
+  didn't start its task (`type: "need"`, `alert: false`, key `auto:…`).
+- A task in Needs you is in no other section: a working task with a standing alert is under needs (its alert item) and
+  back under working once the alert goes. An agent's alert is a moment, as in the app (a toast, once): it stands only
+  for 15 minutes, only while its terminal still runs and its task isn't done, and a machine's memory alert only while
+  that machine's memory is still over 75%.
+- Each leaves everywhere at the same moment: answered, read, its alert over, the automation running again.
 - `counts` are what each section lists, item for item (all of them, even past the 40 items): a header's number never
-  differs from its list. The web app's Needs you badge counts its cards only; an Assistant's unread message shows there
-  as the space's unread dot, and an agent's alert as a toast.
+  differs from its list, nor from the web app's Needs you, its sidebar's red counts or its app icon's count.
 - `order` lists the sections' kinds in the order of the web app's Tasks panel (Status view: Needs you, Ready,
   Working, Done last): an app shows its sections in that order, not a fixed one. `groups` are the same sections in
   the same order, with the Tasks panel's names and each count. Both come from the list the Tasks panel uses

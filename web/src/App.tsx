@@ -1,4 +1,5 @@
 import { attentionCounts } from './attention.ts'
+import { needsYou } from '@shared/needs-you.ts'
 // The layout: places | coordinator chat | tasks or artifacts on a desktop (sidebars resize, places hides), and an open
 // task's side panel after them (focus hides places and the chat, for the task); chat | tasks or artifacts with places in a drawer on a tablet; one column with a
 // Chat | Tasks | Artifacts switch on a phone, where a task's panel items open as sheets. Every part inside comes from a
@@ -409,7 +410,7 @@ function TaskAttention() {
 /** Everything that needs you, every space and machine: the sidebar's counts added up. */
 function NeedsAttention() {
   const snap = useSnap()!
-  return <AttentionBadge need={snap.needs.length} ready={0} scope="everywhere" />
+  return <AttentionBadge need={needsYou(snap).length} ready={0} scope="everywhere" />
 }
 
 /** The lists' tasks, or their artifacts: what their chips hold */

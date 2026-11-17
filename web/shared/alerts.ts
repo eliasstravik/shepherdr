@@ -4,6 +4,7 @@
 import { excerpt } from './excerpt.ts'
 import { machineName, splitFacts, taskChatId, type Alert, type Chat, type Message, type Question, type Snapshot } from './types.ts'
 import * as T from '../../core/toasts.js'
+import { needsYou, waitingTasks, type NeedsSnap } from './needs-you.ts'
 
 /** about what an iPhone's lock screen shows of a title (one line) and of a body (a few lines) */
 export const TITLE_MAX = 40
@@ -27,20 +28,22 @@ export function taskWho(snap: Pick<Snapshot, 'machines'>, id: string): string {
 /** the tag of a coordinator's open question: one alert per coordinator, as one per task */
 export const askTag = (place: string) => `ask:${place}`
 
-/** what waits on you everywhere: the count the app icon shows (the sidebar's own counts added up: every need, and each
- *  Ready task) and the tag of each thing, so alerts about what no longer waits can go */
-export function waiting(snap: Pick<Snapshot, 'places' | 'tasks' | 'asks' | 'needs'>): { count: number; tags: string[] } {
+/** what waits on you everywhere: the count the app icon shows (Needs you's items, web/shared/needs-you.ts, and each Ready
+ *  task not in it: the glance feed's needs and ready counts added up) and the tag of each thing, so alerts about what no
+ *  longer waits can go */
+export function waiting(snap: NeedsSnap & Pick<Snapshot, 'asks'>, now = Date.now()): { count: number; tags: string[] } {
   const places = new Set(snap.places.map((p) => p.id))
   const tasks = snap.tasks.filter((t) => places.has(t.place) && !t.archived && (t.status === 'need' || t.status === 'ready')).map((t) => t.id)
-  const asks = Object.keys(snap.asks).filter((p) => places.has(p) && snap.asks[p]).map(askTag)
-  const needs = snap.needs.filter((n) => places.has(n.place))
-  const ready = snap.tasks.filter((t) => places.has(t.place) && !t.archived && t.status === 'ready')
+  const asks = Object.keys(snap.asks ?? {}).filter((p) => places.has(p) && snap.asks[p]).map(askTag)
+  const needs = needsYou(snap, now)
+  const held = waitingTasks(needs)
+  const ready = snap.tasks.filter((t) => !t.archived && t.status === 'ready' && !held.has(t.id))
   return { count: needs.length + ready.length, tags: [...tasks, ...asks] }
 }
 
 /** the tags of the alerts that may stay: what still waits on you, less the chats on screen right now (a task's, a
  *  coordinator's: you opened its card) */
-export function keptTags(snap: Pick<Snapshot, 'places' | 'tasks' | 'asks' | 'needs'>, onScreen: string[]) {
+export function keptTags(snap: NeedsSnap & Pick<Snapshot, 'asks'>, onScreen: string[]) {
   const seen = new Set(onScreen.map((k) => taskChatId(k) ?? askTag(k)))
   return waiting(snap).tags.filter((t) => !seen.has(t))
 }
