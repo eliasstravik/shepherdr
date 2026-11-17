@@ -2,7 +2,7 @@
 // things; the open goes to the page that started the call (a phone, a laptop's browser tab), never another, and the
 // agent hears it's on screen only once that page said so.
 import { afterAll, expect, test } from "bun:test";
-import { callToResume, voiceCall } from "./voice.ts";
+import { callToResume, handOff, pageWhere, voiceCall } from "./voice.ts";
 import type { VoiceIO, Where } from "./voice-tools.ts";
 import type { HearIO } from "./voice-hear.ts";
 
@@ -323,4 +323,57 @@ test("SHEP-124: call_view: the voice agent sets the web call full screen or mini
   }
   c.end();
   agent = null;
+});
+
+test("SHEP-251: pageWhere keeps Wake's locked and screen; a where without them adds neither", () => {
+  expect(pageWhere({ device: "phone", locked: true, screen: false })).toMatchObject({ device: "phone", locked: true, screen: false });
+  const plain = pageWhere({ device: "phone", place: "h1" });
+  expect("locked" in plain).toBe(false);
+  expect("screen" in plain).toBe(false);
+  expect("locked" in pageWhere({ locked: "yes" })).toBe(false);
+});
+
+test("SHEP-251: the phone locks: its page hands the call to Shepherdr Wake, which comes back to it; Take it back hands it again", async () => {
+  agent = null;
+  const who = "person@example.com";
+  const tab = bare();
+  const c = voiceCall({} as any, { io, hear, where: { client: "web", device: "phone", machine: "eliass-mac-mini" },
+    dial: async () => `ws://127.0.0.1:${server.port}/`, holdMs: 5000, who, from: "pixel" }, tab.p);
+  const id = tab.got.find((m) => m.type === "call").id;
+  await until(() => !!agent);
+  const closedBefore = agentClosed;
+  // another device, or another person: nothing to hand on
+  expect(handOff("laptop", who)).toBeNull();
+  expect(handOff("pixel", "someone@example.com")).toBeNull();
+  expect(tab.got.some((m) => m.type === "handed")).toBe(false);
+  // the phone's own: the page is told and let go, the call holds (the voice agent stays on)
+  expect(handOff("pixel", who)).toBe(id);
+  expect(tab.got.at(-1)).toEqual({ type: "handed" });
+  expect(tab.p.closed).toBe(true);
+  await Bun.sleep(100);
+  expect(agentClosed).toBe(closedBefore);
+  // a page no longer on it: no second handoff
+  expect(handOff("pixel", who)).toBeNull();
+  // Wake comes back to it by its id, as a page after a dropped socket
+  const wake = bare();
+  const n = heard.length;
+  expect(callToResume(id, who)!.attach(wake.p, "pixel")).toBe(true);
+  expect(wake.got).toEqual([{ type: "resumed", id }]);
+  await until(() => heard.some((m, i) => i >= n && m.type === "user_message"));
+  // its locked where: an act is refused
+  c.message(JSON.stringify({ type: "where", device: "phone", locked: true, screen: false }));
+  results.length = 0;
+  agent.send(JSON.stringify({ type: "client_tool_call", client_tool_call: { tool_name: "act", tool_call_id: "lk", parameters: { action: "start", id: "x", confirmed: true } } }));
+  await until(() => results.length > 0);
+  expect(results[0]).toMatchObject({ tool_call_id: "lk", result: "The phone is locked: unlock it, then ask again.", is_error: true });
+  // Take it back: the page comes back with the id; Wake is told the call moved before its socket closes
+  const back = bare();
+  expect(callToResume(id, who)!.attach(back.p, "pixel")).toBe(true);
+  expect(wake.got.at(-1)).toEqual({ type: "handed" });
+  expect(wake.p.closed).toBe(true);
+  expect(back.got).toEqual([{ type: "resumed", id }]);
+  // Wake's late close changes nothing
+  c.detach(wake.p);
+  expect(back.p.closed).toBe(false);
+  c.end();
 });

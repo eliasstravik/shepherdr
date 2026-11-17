@@ -207,10 +207,11 @@ function CallWhere() {
 }
 
 /** Start a call with Shepherdr (from: the chat whose call button started it, its "here" while the screen shows no
- *  chat), or end the one on. */
-export function toggleCall(from: string | null = null) {
+ *  chat), or end the one on. resume: a call this page handed on to Shepherdr Wake, taken back (SHEP-251). */
+export function toggleCall(from: string | null = null, resume: string | null = null) {
   const ui = getState().ui
   if (ui.call) return endCall()
+  setHanded(null)
   if (ui.dict) cancelDictation()
   // the keyboard goes down: the call is listening
   ;(document.activeElement as HTMLElement | null)?.blur?.()
@@ -238,8 +239,20 @@ export function toggleCall(from: string | null = null) {
     title: 'Shepherdr',
     hangUp: () => { if (mine()) endCall() },
     mute: (on) => { if (!mine()) return; muteCall(on); setUI({ callMuted: on }) },
-  }).catch(() => { endCall(); setUI({ callError: 'Audio could not start on this device.' }) })
+  }, (id) => {
+    if (!mine()) return
+    // SHEP-251: the phone locked and Shepherdr Wake carries the call on: this page lets go, and can take it back
+    const was = getState().ui
+    setUI({ call: false, callFull: false, callFrom: null, callMuted: false })
+    act({ type: 'call', chat: was.callFrom ?? '', on: false })
+    setHanded({ id, from })
+  }, resume).catch(() => { endCall(); setUI({ callError: 'Audio could not start on this device.' }) })
 }
+
+/** SHEP-251: the call this page handed on to Shepherdr Wake (the phone locked), until taken back or closed */
+let handed: { id: string; from: string | null } | null = null
+const handedWatch = new Set<() => void>()
+function setHanded(h: typeof handed) { handed = h; handedWatch.forEach((f) => f()) }
 
 /** the chat the last call started from (Call again starts there) */
 let lastFrom: string | null = null
@@ -649,6 +662,27 @@ function CallError() {
   )
 }
 
+/** SHEP-251: the call goes on in Shepherdr Wake (the phone locked): says so at the top, with Take it back */
+function CallHanded() {
+  const [, tick] = useState(0)
+  useEffect(() => { const f = () => tick((x) => x + 1); handedWatch.add(f); return () => void handedWatch.delete(f) }, [])
+  const on = useUI((u) => u.call)
+  if (!handed || on) return null
+  const h = handed
+  return (
+    <div data-topbar data-call-handed role="status" className={clsx(callPill, 'text-ready-fg', callTint)}>
+      <span className="min-w-0 flex-1 text-pretty">Carrying on in your pocket (Shepherdr Wake)</span>
+      <button type="button" data-take-back onClick={() => toggleCall(h.from, h.id)}
+        className="press-dim h-7 shrink-0 rounded-full bg-bg px-3 text-[0.78125rem] font-medium text-fg shadow-[inset_0_0_0_1px_var(--line2)] phone:h-9 phone:text-[0.875rem]">
+        Take it back
+      </button>
+      <IconButton label="Close" className="rounded-full!" onClick={() => setHanded(null)}>
+        <XIcon className={ic} />
+      </IconButton>
+    </div>
+  )
+}
+
 /* ---------- opened into a call (SHEP-238) ---------- */
 
 /** the browser lets a call's sound and microphone start now, with no tap: a tap just happened, or a new audio runs
@@ -718,7 +752,7 @@ export default definePlugin({
     reg.phoneBar.push(PhoneCallButton)
     // SHEP-122: no Listening pill above a phone's bar: the minimized call is its bar's buttons alone
     reg.phoneAbove.push(PhoneHelp)
-    reg.topBars.push(CallBanner, TopHelp, CallError, CallWhere)
+    reg.topBars.push(CallBanner, TopHelp, CallError, CallHanded, CallWhere)
     reg.overlays.push(OpenedTag, CallScreen, StartAsk)
     // SHEP-238: opened at ?voice=1 (a wake word): straight into a call, once the page has drawn
     setTimeout(watchLaunches, 0)
