@@ -51,3 +51,52 @@ test("an agent's own alert, from its label", () => {
   const out = agentAlerts(terms, snap, (a) => (a === "t1" ? "sp1" : null), "/nonexistent");
   expect(out).toEqual([{ id: "x", at: 5, title: "tt-repo Assistant · Can't wait", body: "Look now", chat: "sp1", place: "sp1", notify: true }]);
 });
+
+// SHEP-243: each alert's buttons do the thing from the phone or the watch, in words that fit a watch
+const watch = (snap: any) => [...alertsOf(snap, new Set(), (c) => (c === "sp1" ? "Merged **SHEP-9**, all green.\n\nNext: the login page." : undefined)).values()];
+test("a ready task's alert offers Accept, the Tasks panel's Accept", () => {
+  const [a] = watch({ places: [], tasks: [{ id: "m3:HERD-4", name: "Fix login", status: "ready", place: "sp1" }], needs: [], settings: [] });
+  // one button: Chrome on Android hands every site button over as the last one's action
+  expect(a.actions).toEqual([{ action: "accept", title: "Accept" }]);
+  expect(a.accept).toEqual({ task: "m3:HERD-4" });
+  // it goes once the task isn't ready any more (accepted from the app)
+  expect(a.waits).toBe(true);
+});
+
+test("a question's first sendable choice is its button: never a grant for good", () => {
+  const perm = { id: "r1", kind: "Question", title: "Run: npm test", choices: [{ label: "Yes" }, { label: "Yes, and don't ask again" }, { label: "No" }], always: 1 };
+  const [a] = watch({ places: [], tasks: [], settings: [], needs: [{ id: "r1", chat: "HERD-5/worker", place: "sp1", task: "HERD-5", question: perm }] });
+  expect(a.actions).toEqual([{ action: "0", title: "Yes" }]);
+  expect(a.answer).toEqual({ chat: "HERD-5/worker", question: "r1" });
+  expect(a.url).toBe("./?place=sp1&task=HERD-5&focus=r1");
+  const three = { id: "q", kind: "Question", title: "Which?", choices: [{ label: "Red" }, { label: "Green" }, { label: "Blue" }] };
+  const [b] = watch({ places: [], tasks: [], settings: [], needs: [{ id: "q", chat: "HERD-5/worker", place: "sp1", task: "HERD-5", question: three }] });
+  expect(b.actions).toEqual([{ action: "0", title: "Red" }]);
+  // a plan, a pick of several and a terminal menu stay in the app
+  for (const q of [{ ...three, kind: "Plan" }, { ...three, multi: true }, { ...three, id: "menu:x" }]) {
+    const [c] = watch({ places: [], tasks: [], settings: [], needs: [{ id: "q", chat: "HERD-5/worker", place: "sp1", task: "HERD-5", question: q }] });
+    expect(c.actions).toBeUndefined();
+  }
+});
+
+test("an agent waiting for words, and an Assistant's message, take a reply", () => {
+  const snap = { places: [{ id: "sp1", name: "tt-repo", chat: "sp1" }], tasks: [], settings: [{ name: "Notify", level: "sp1", rows: [{ key: "notify", value: "All" }] }],
+    needs: [{ id: "attention", chat: "HERD-5/worker", place: "sp1", task: "HERD-5", text: "Which branch should I use?", reply: "m9" }], last: { sp1: 9 }, read: { sp1: 1 } };
+  const [need, msg] = watch(snap);
+  expect(need.actions?.map((x) => x.action)).toEqual(["reply"]);
+  expect(need.reply).toEqual({ chat: "HERD-5/worker", to: "m9" });
+  // the Assistant's own words, short and plain
+  expect(msg.title).toBe("tt-repo · New message");
+  expect(msg.body).toBe("Merged SHEP-9, all green. Next: the login page.");
+  expect(msg.reply).toEqual({ chat: "sp1" });
+});
+
+test("every title and body fits a watch", () => {
+  const long = "x".repeat(200);
+  const all = watch({ places: [{ id: "sp1", name: "a-very-long-space-name-indeed", chat: "sp1" }], tasks: [{ id: "HERD-4", name: long, status: "ready", place: "sp1" }], settings: [],
+    needs: [{ id: "q1", chat: "sp1", place: "sp1", question: { id: "q1", kind: "Question", title: long, choices: [{ label: long }] } }], alerts: [{ id: "a", title: long, body: long, notify: true }] });
+  expect(all.length).toBe(3);
+  for (const a of all) { expect(a.title.length).toBeLessThanOrEqual(30); expect(a.body.length).toBeLessThanOrEqual(80); }
+  expect(all[0].title).toBe("a-very-long-space… · Needs you");
+  expect(all[0].actions?.[0].title.length).toBeLessThanOrEqual(24);
+});

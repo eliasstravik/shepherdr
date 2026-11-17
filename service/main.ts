@@ -154,11 +154,20 @@ const chatOfAddress = (a: string) => { for (const [k, v] of ((compat as any).cha
 const alertNewAnd = (snap: any) => { try { snap.alerts = agentAlerts(hub.terminals.values(), snap, chatOfAddress, HOME); alertNew(snap); } catch {} return snap; };
 // the spaces whose Autopilot wake was under way at the last snapshot: a message just after it is its update
 let woke = new Set<string>();
+// what waits on you now, as the last alerts said it: the app icon's count and the tags of the alerts that may stay (the
+// service worker asks after a notification's button did something: GET /api/waiting)
+let waitingNow = { count: 0, tags: [] as string[] };
+// an Assistant's last words, for its New message alert
+const lastSaid = (key: string) => {
+  const a = compat.addrOf(key), items: any[] = (a ? live.chats?.reader(a)?.conv?.items : null) ?? [];
+  return items.findLast((x) => x.kind === "agent" && x.text)?.text as string | undefined;
+};
 function alertNew(snap: any) {
   // their words, as the window's toasts: service/push.ts alertsOf
-  const now = alertsOf(snap, woke);
+  const now = alertsOf(snap, woke, lastSaid);
   woke = new Set((snap.places ?? []).filter((p: any) => p.pilot?.on && (p.pilot.inflight || p.pilot.pending)).map((p: any) => p.id));
-  if (alerted) for (const [k, a] of now) if (!alerted.has(k)) void push.send({ ...a, badge: (snap.needs?.length ?? 0) + (snap.tasks ?? []).filter((t: any) => t.status === "ready" && !t.archived).length, open: [...now.values()].filter((x) => x.waits).map((x) => x.tag) });
+  waitingNow = { count: (snap.needs?.length ?? 0) + (snap.tasks ?? []).filter((t: any) => t.status === "ready" && !t.archived).length, tags: [...new Set([...now.values()].filter((x) => x.waits).map((x) => x.tag))] };
+  if (alerted) for (const [k, a] of now) if (!alerted.has(k)) void push.send({ ...a, badge: waitingNow.count, open: waitingNow.tags });
   alerted = new Set(now.keys());
 }
 compat.agents = new Agents(hub);
@@ -837,6 +846,7 @@ const server = Bun.serve<{ who: string }>({
       } catch (err) { return json({ error: (err as Error).message }, 400); }
     }
     if (path === "/api/push/key") return json({ key: await push.key() });
+    if (path === "/api/waiting") return json(waitingNow);
     if (path === "/api/push/subscribe" && req.method === "POST") {
       const body = await req.json().catch(() => null);
       try { push.subscribe(body?.sub, body?.device, typeof body?.from === "string" ? body.from : undefined); return json({ ok: true, ...push.state(body.sub.endpoint) }); } catch (err) { return json({ error: (err as Error).message }, 400); }
