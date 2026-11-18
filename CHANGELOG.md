@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.1.43
+
+A tiny fix: Needs you shows only tasks.
+
+### Needs you
+
+- What belongs to no task, like an Assistant's question card, a sign-in helper's "Finish sign-in", a memory warning or
+  a failed automation, no longer shows in the Tasks panel, its counts or the phone and watch app's Needs you. You still
+  get their pop-ups and pushes, and a failed automation still says so in Automations. A task's helper alert now shows
+  on that task's row.
+
 ## 3.1.42
 
 A tiny fix: the Tasks panel lists only tasks again.
