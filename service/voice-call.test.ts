@@ -360,12 +360,13 @@ test("SHEP-251: the phone locks: its page hands the call to Shepherdr Wake, whic
   expect(callToResume(id, who)!.attach(wake.p, "pixel")).toBe(true);
   expect(wake.got).toEqual([{ type: "resumed", id }]);
   await until(() => heard.some((m, i) => i >= n && m.type === "user_message"));
-  // its locked where: an act is refused
+  // its locked where (SHEP-261): an act runs as unlocked, never refused for the lock
   c.message(JSON.stringify({ type: "where", device: "phone", locked: true, screen: false }));
   results.length = 0;
   agent.send(JSON.stringify({ type: "client_tool_call", client_tool_call: { tool_name: "act", tool_call_id: "lk", parameters: { action: "start", id: "x", confirmed: true } } }));
   await until(() => results.length > 0);
-  expect(results[0]).toMatchObject({ tool_call_id: "lk", result: "The phone is locked: unlock it, then ask again.", is_error: true });
+  expect(results[0]).toMatchObject({ tool_call_id: "lk" });
+  expect(String(results[0].result)).not.toContain("locked");
   // Take it back: the page comes back with the id; Wake is told the call moved before its socket closes
   const back = bare();
   expect(callToResume(id, who)!.attach(back.p, "pixel")).toBe(true);

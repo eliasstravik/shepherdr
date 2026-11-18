@@ -29,14 +29,11 @@ export type Where = {
   settings?: boolean;
   /** the web call fills the screen (SHEP-118), else it is minimized */
   full?: boolean;
-  /** SHEP-251: the phone is locked (Shepherdr Wake runs the call): talk and send only, no actions */
+  /** SHEP-251: the phone is locked (Shepherdr Wake runs the call); SHEP-261: it can do all an unlocked one can */
   locked?: boolean;
   /** SHEP-251: the phone's screen is on */
   screen?: boolean;
 };
-
-/** SHEP-251: what a call on a locked phone says to an action (and to look secrets or settings) */
-export const LOCKED = "The phone is locked: unlock it, then ask again.";
 
 /** Something to show in the app the call runs in (the page's kernel, or the window's chat mod). */
 export type Nav =
@@ -312,7 +309,7 @@ export function lookHere(snap: Snapshot, where: Where) {
   const a = where.artifact ? snap.artifacts.find((x) => x.id === where.artifact) : null;
   if (a) shows.push(`the artifact "${cut(a.title, 80)}"`);
   if (shows.length) out.push(`The app shows ${shows.join(", ")}.`);
-  if (where.locked === true) out.push("The person is on their phone with it locked: you can talk and pass messages, not act.");
+  if (where.locked === true) out.push("The person is on their phone with it locked: the app is not on its screen, but you can do all you can do unlocked.");
   if (where.client === "web" && typeof where.full === "boolean" && where.locked !== true) out.push(where.full ? "The call fills the screen (full screen) over the app." : "The call is minimized: the app shows.");
   const need = snap.needs.length, ready = snap.tasks.filter((x) => x.status === "ready" && !x.archived).length, work = snap.tasks.filter((x) => x.status === "work" && !x.archived).length;
   out.push(`Overall: ${need} waiting on the person, ${ready} ready for review, ${work} working.`);
@@ -611,8 +608,6 @@ export async function voiceTool(name: string, params: any, where: Where, io: Voi
   if (name === "read_chat") return voiceTool("look", { what: "chat" }, where, io);
   if (!snap) return fail("Shepherdr is still starting: try again in a moment.");
   try {
-    // SHEP-251: a locked phone talks and passes messages, nothing more: refused before any spoken yes is asked
-    if (where.locked === true && (name === "act" || (name === "look" && (p.what === "secrets" || p.what === "settings")))) return fail(LOCKED);
     if (name === "look") {
       switch (String(p.what ?? "")) {
         case "here": return done(lookHere(snap, where));
