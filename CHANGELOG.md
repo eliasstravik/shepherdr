@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.1.42
+
+A tiny fix: the Tasks panel lists only tasks again.
+
+### Needs you
+
+- Assistants' new messages no longer show in the Tasks panel, its badge or the phone and watch app's Needs you. They
+  stay in Chat, with its own unread dots. Tasks that wait on you and an Assistant's question cards still show.
+
 ## 3.1.41
 
 A small release: what needs you is the same everywhere, and a call keeps going when your phone locks.
