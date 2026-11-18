@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.1.44
+
+A small release: Codex's newest models, and a crash fix for updates.
+
+### Models
+
+- Codex's GPT-6.2 Sol and Astra are in the model menus, in the window, the web app and Settings. Update Codex to get
+  them.
+- Where Codex offers it, an Ultrafast switch sits next to Fast, and you can flip it while the agent runs.
+
+### Updates
+
+- The task helper (`herdr-task`) no longer breaks with a zip error when an update lands while it runs.
+
 ## 3.1.43
 
 A tiny fix: Needs you shows only tasks.
