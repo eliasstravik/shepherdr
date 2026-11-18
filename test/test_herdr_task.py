@@ -3541,6 +3541,16 @@ class FastOffIsSaid(unittest.TestCase):
         self.assertIn('service_tier="fast"', argv_for({"agent": "codex", "fast": True}))
         self.assertIn('{"fastMode": false}', argv_for({"agent": "claude", "fast": False}))
 
+    def test_codex_ultrafast(self):
+        """SHEP-258: a role set to Codex's Ultrafast starts on that tier; Claude Code reads it as Fast."""
+        sys.path.insert(0, BIN)
+        from herdr_task.settings import argv_for
+        a = argv_for({"agent": "codex", "model": "gpt-6.2-sol", "effort": "low", "fast": "ultrafast"})
+        self.assertEqual(a, ["codex", "--no-daemon", "-m", "gpt-6.2-sol", "-c", 'model_reasoning_effort="low"',
+                             "-c", 'service_tier="ultrafast"'])
+        self.assertIn('service_tier="fast"', argv_for({"agent": "codex", "model": "gpt-6.2-astra", "fast": True}))
+        self.assertIn('{"fastMode": true}', argv_for({"agent": "claude", "fast": "ultrafast"}))
+
 
 class AcceptCardArtifacts(unittest.TestCase):
     """SHEP-96: the Accept card links the task's other artifacts (a research report) beside its proof."""

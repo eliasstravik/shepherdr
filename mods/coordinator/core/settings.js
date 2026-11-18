@@ -3,7 +3,7 @@
 // web app's Settings say the same. herdr-task reads the file (herdr_task/settings.py: settings_for); its defaults are
 // DEFAULTS there and here.
 // Shared core: the source is core/settings.js; bin/sync-shared copies it into the mods in lib/COPIES.
-import { NAMES, levelName, current, rowFor, menuFor, permAcross } from "./agents.js";
+import { NAMES, levelName, current, rowFor, menuFor, permAcross, speedName, speedFor } from "./agents.js";
 import { SERVE } from "./host.js";
 
 // ---- the frame -------------------------------------------------------------------------------------------------
@@ -134,12 +134,12 @@ export function backupProblem(checks, m, cli) {
 
 // The model menu's words (mods/chat-models, settings mode) and its button's: "Opus 5.5 · 1M · High".
 // the model list's headings come from core/agents.js modelSections (Pinned, Recent, Models)
-export const MODEL_MENU = { reasoning: "Reasoning", fast: "Fast", permissions: "Permissions" };
+export const MODEL_MENU = { reasoning: "Reasoning", fast: "Fast", ultrafast: "Ultrafast", permissions: "Permissions" };
 const modelOf = (menus, sel) => menus?.[sel?.agent]?.models?.find((m) => m.id === sel.model) ?? null;
 export function modelLabel(menus, sel) {
   const m = modelOf(menus, sel);
   const level = sel?.effort ?? m?.defaultEffort ?? null;
-  return [m?.name ?? sel?.model, levelName(level), sel?.fast ? "Fast" : null].filter(Boolean).join(" · ") || "Choose a model";
+  return [m?.name ?? sel?.model, levelName(level), speedName(sel?.fast)].filter(Boolean).join(" · ") || "Choose a model";
 }
 // What the agents offer, from each CLI's own settings (agents.js parseDefaults) and which are installed:
 // { menus, permDefault, defaults } (defaults: the first installed CLI's own, what an unset role runs).
@@ -166,7 +166,7 @@ export function chooseModel(menus, permDefault, sel, agent, id) {
   if (!m) return sel;
   const next = { ...sel, agent, model: id };
   if (next.effort && !m.efforts.includes(next.effort)) next.effort = null;
-  if (!m.fast) next.fast = false;
+  next.fast = speedFor(m, next.fast);
   if (agent !== sel.agent) {
     next.perm = permAcross(sel.perm, agent, permDefault);
     next.fast = false;

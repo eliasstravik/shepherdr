@@ -224,9 +224,10 @@ function SpeedWords({ speed }: { speed: Worn }) {
 
 /* ---------- the window's model button and menu (mods/chat pickParts, mods/chat-models) ---------- */
 
-export type MenuModel = { id: string; name: string; efforts: string[]; defaultEffort?: string | null; fast?: boolean }
+export type MenuModel = { id: string; name: string; efforts: string[]; defaultEffort?: string | null; fast?: boolean; ultrafast?: boolean }
 export type AgentMenu = { name: string; models: MenuModel[]; perms?: { id: string; label: string }[] }
-type MenuPick = { agent: string; model: string | null; effort: string | null; fast: boolean; perm: string | null }
+/** fast: true (Fast), false (standard) or 'ultrafast' (Codex's Ultrafast tier, SHEP-258) */
+type MenuPick = { agent: string; model: string | null; effort: string | null; fast: boolean | 'ultrafast'; perm: string | null }
 type MenuData = { current: MenuPick; menus: Record<string, AgentMenu>; permDefault: Record<string, string>; picks?: Picks; offline?: string | null }
 /** a stretch of the model list (core/agents.js modelSections): Pinned, Recent, All models, or an agent's matches */
 type Picks = { pinned: string[]; recent: string[] }
@@ -366,7 +367,7 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
   const choose = (d: MenuData, was: MenuPick, m: MenuModel & { agent: string }): MenuPick => {
     const next = { ...was, agent: m.agent, model: m.id }
     if (next.effort && !m.efforts.includes(next.effort)) next.effort = null
-    if (!m.fast) next.fast = false
+    next.fast = AGc.speedFor(m, next.fast)
     if (m.agent !== was.agent) {
       // another agent: its own permission modes, the nearest to the one chosen
       next.perm = AGc.permAcross(was.perm, m.agent, d.permDefault)
@@ -394,7 +395,7 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
     if (sel.agent !== w.agent) out.push(data.menus[sel.agent]?.name ?? sel.agent)
     if (sel.agent !== w.agent || sel.model !== w.model) out.push(model(sel)?.name ?? sel.model ?? '')
     if (level(sel) && level(sel) !== level(w)) out.push(LEVEL[level(sel)!] ?? level(sel)!)
-    if (sel.fast !== w.fast) out.push(sel.fast ? 'Fast' : 'Standard')
+    if (sel.fast !== w.fast) out.push(AGc.speedName(sel.fast) ?? 'Standard')
     if (sel.perm && sel.perm !== w.perm) out.push(data.menus[sel.agent]?.perms?.find((x) => x.id === sel.perm)?.label ?? sel.perm)
     return out
   }
@@ -403,7 +404,7 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
     setBusy(true)
     setError(null)
     // live: the model, level or Fast change in place (SHEP-181); another agent or permission mode restarts it
-    const r = await act({ type: 'restart', live: true, chat, kind: sel.agent, model: sel.model ?? '', effort: level(sel) ?? '', speed: sel.fast ? 'fast' : 'normal', perm: sel.perm ?? '' } as never).catch((e: Error) => ({ ok: false, error: e.message }))
+    const r = await act({ type: 'restart', live: true, chat, kind: sel.agent, model: sel.model ?? '', effort: level(sel) ?? '', speed: AGc.speedWordOf(sel.fast), perm: sel.perm ?? '' } as never).catch((e: Error) => ({ ok: false, error: e.message }))
     setBusy(false)
     if ((r as { ok?: boolean }).ok === false) return setError((r as { error?: string }).error || (restarts ? "The agent didn't restart." : "It didn't switch."))
     close()
@@ -461,16 +462,17 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
                   </div>
                 </>
               ) : null}
-              {m?.fast ? (
-                <button type="button" role="menuitemcheckbox" aria-checked={sel.fast} className={row} onClick={() => setSel({ ...sel, fast: !sel.fast })}>
+              {/* Fast, and Codex's Ultrafast where the model has it (SHEP-258): one speed, so turning one on turns the other off */}
+              {([['fast', true, !!m?.fast], ['ultrafast', 'ultrafast', !!m?.ultrafast]] as const).map(([key, value, has]) => has ? (
+                <button key={key} type="button" role="menuitemcheckbox" aria-checked={sel.fast === value} className={row} onClick={() => setSel({ ...sel, fast: sel.fast === value ? false : value })}>
                   <SpeedIcon className="size-3.5 shrink-0 text-fg3" />
-                  <span className="flex-1">Fast</span>
+                  <span className="flex-1">{key === 'fast' ? 'Fast' : 'Ultrafast'}</span>
                   {/* a switch as wide as two thumbs, a touch bigger for a finger */}
-                  <span aria-hidden className={clsx('inline-flex h-4 w-7 shrink-0 rounded-full p-0.5 transition-colors coarse:h-5 coarse:w-9 phone:h-5 phone:w-9', sel.fast ? 'bg-accent' : 'bg-line2')}>
-                    <span className={clsx('aspect-square h-full rounded-full bg-bg shadow-soft transition-transform', sel.fast && 'translate-x-full')} />
+                  <span aria-hidden className={clsx('inline-flex h-4 w-7 shrink-0 rounded-full p-0.5 transition-colors coarse:h-5 coarse:w-9 phone:h-5 phone:w-9', sel.fast === value ? 'bg-accent' : 'bg-line2')}>
+                    <span className={clsx('aspect-square h-full rounded-full bg-bg shadow-soft transition-transform', sel.fast === value && 'translate-x-full')} />
                   </span>
                 </button>
-              ) : null}
+              ) : null)}
               {menu?.perms?.length ? (
                 <button type="button" aria-haspopup="menu" aria-expanded={perms} className={clsx(row, perms && 'bg-hover')} onClick={() => setPerms(!perms)}>
                   <ModeIcon className="size-3.5 shrink-0 text-fg3" />

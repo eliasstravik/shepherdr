@@ -691,8 +691,8 @@ export class Compat {
       const c = current(kind, t?.foreground?.argv ?? t?.argv ?? [], meta, dflt);
       const row = rowFor(kind, c), label = menuFor(kind, {}).models.find((m: any) => m.id === row)?.name ?? modelName(c.model);
       // the window's model button (mods/chat pickParts): model, level, Fast
-      const words = [c.label ?? modelName(c.model), levelName(c.effort), c.fast ? "Fast" : null].filter(Boolean).join(" · ") || NAMES[kind] || "Agent";
-      agent = { kind, words, ...(c.model ? { model: c.model, modelLabel: label } : {}), ...(c.effort ? { effort: c.effort } : {}), ...(c.model ? { runtime: { model: c.model, modelLabel: label, ...(c.effort ? { effort: c.effort } : {}), speed: c.fast ? "fast" : "normal", source: "session", at: Date.now() } } : {}) };
+      const words = [c.label ?? modelName(c.model), levelName(c.effort), c.fast === "ultrafast" ? "Ultrafast" : c.fast ? "Fast" : null].filter(Boolean).join(" · ") || NAMES[kind] || "Agent";
+      agent = { kind, words, ...(c.model ? { model: c.model, modelLabel: label } : {}), ...(c.effort ? { effort: c.effort } : {}), ...(c.model ? { runtime: { model: c.model, modelLabel: label, ...(c.effort ? { effort: c.effort } : {}), speed: c.fast === "ultrafast" ? "ultrafast" : c.fast ? "fast" : "normal", source: "session", at: Date.now() } } : {}) };
     } catch {}
     // the first row: the log's very start, or earlier pages to load as it scrolls up
     const head = reader.start === 0 ? { top: true } : reader.start ? { earlier: true } : {};

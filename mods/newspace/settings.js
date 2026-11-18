@@ -20,7 +20,7 @@ import * as fs from "fs/promises";
 import * as agent from "./agent.js";
 // The button's words and the choices on offer: core/settings.js, shared with the web app's Settings.
 import { modelLabel, choicesFrom } from "./core/settings.js";
-import { permAcross } from "./core/agents.js";
+import { permAcross, speedFor } from "./core/agents.js";
 
 const ROW = 31, LABEL = 110;
 const LEVEL = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra", none: "None" };
@@ -44,7 +44,7 @@ export async function lastUsed(data) {
   let s = null;
   try { s = JSON.parse(await fs.readFile(LAST(), "utf8")); } catch {}
   const m = s && data.menus[s.agent]?.models?.find((x) => x.id === s.model);
-  return m ? { agent: s.agent, model: s.model, effort: m.efforts.includes(s.effort) ? s.effort : null, fast: Boolean(s.fast && m.fast),
+  return m ? { agent: s.agent, model: s.model, effort: m.efforts.includes(s.effort) ? s.effort : null, fast: speedFor(m, s.fast),
     perm: data.menus[s.agent].perms.some((p) => p.id === s.perm) ? s.perm : data.permDefault[s.agent] } : { ...data.defaults };
 }
 
@@ -65,7 +65,7 @@ function choose(coord, agentKey, id) {
   if (!m) return;
   const next = { ...sel, agent: agentKey, model: id };
   if (next.effort && !m.efforts.includes(next.effort)) next.effort = null;
-  if (!m.fast) next.fast = false;
+  next.fast = speedFor(m, next.fast);
   if (agentKey !== sel.agent) next.perm = permAcross(sel.perm, agentKey, data.permDefault);
   coord.sel = next;
 }
@@ -98,6 +98,9 @@ export function settingsRows(t, coord, opts = {}, cx = null) {
   const levels = m?.efforts ?? [];
   const level = sel.effort ?? m?.defaultEffort ?? null;
   const fastOk = Boolean(m?.fast);
+  const speedRow = (label, id, value) => row(label, div().id(id).relative().w(28).h(16).flex_none().rounded(8).bg(sel.fast === value ? t.accent : t.input)
+    .when(!off, (el) => el.cursor_pointer().on_click((_e, cx) => { cx.stop_propagation(); coord.sel = { ...coord.sel, fast: coord.sel.fast === value ? false : value }; cx.notify(); }))
+    .child(div().id(`${id}-knob`).absolute().top(2).left(sel.fast === value ? 14 : 2).size(12).rounded(6).bg(t.background).transition("left", 120)));
   const perm = menu?.perms?.find((p) => p.id === sel.perm);
   return v_flex().w_full().text_size(12.8).text_color(t.foreground).when(off, (el) => el.opacity(0.45))
     .child(row("Agent", select("ns-model", [icon(sel.agent), div().min_w(0).truncate().child(m?.name ?? sel.model ?? "Choose")],
@@ -108,9 +111,9 @@ export function settingsRows(t, coord, opts = {}, cx = null) {
         .when(level !== e, (el) => el.text_color(t.muted).when(!off, (el) => el.cursor_pointer().hover((s) => s.text_color(t.foreground))
           .on_click((_e, cx) => { cx.stop_propagation(); coord.sel = { ...coord.sel, effort: e }; cx.notify(); })))
         .child(LEVEL[e] ?? e)))))
-    .when(fastOk, (el) => el.child(row("Fast", div().id("ns-fast").relative().w(28).h(16).flex_none().rounded(8).bg(sel.fast ? t.accent : t.input)
-      .when(!off, (el) => el.cursor_pointer().on_click((_e, cx) => { cx.stop_propagation(); coord.sel = { ...coord.sel, fast: !coord.sel.fast }; cx.notify(); }))
-      .child(div().id("ns-fast-knob").absolute().top(2).left(sel.fast ? 14 : 2).size(12).rounded(6).bg(t.background).transition("left", 120)))))
+    .when(fastOk, (el) => el.child(speedRow("Fast", "ns-fast", true)))
+    // Codex's Ultrafast tier where the model has it (SHEP-258): one speed with Fast, so on turns Fast off
+    .when(Boolean(m?.ultrafast), (el) => el.child(speedRow("Ultrafast", "ns-ultrafast", "ultrafast")))
     .when(Boolean(menu?.perms?.length), (el) => el.child(row("Permissions", select("ns-perm",
       [svg("mods/chat-models/shield.svg").size(14).flex_none().text_color(t.dim), div().min_w(0).truncate().child(perm?.label ?? "Default")],
       () => pickAt("perm", menu.perms.map((p) => ({ id: p.id, label: p.label })), sel.perm)))));
@@ -157,13 +160,13 @@ export function modelButton(t, coord, opts = {}, cx = null) {
 export function openMenu(coord, select = null) {
   const { sel, data } = coord;
   // border and padding, agent tabs, search, the list (it scrolls past 8 rows), separator,
-  // Reasoning header and levels, Fast, Permissions (chat-models' sizes)
-  const W = 340, H = 2 + 10 + 34 + 36 + 8 * 31 + 9 + 26 + 34 + 31 + 31;
+  // Reasoning header and levels, Fast, Ultrafast, Permissions (chat-models' sizes)
+  const W = 340, H = 2 + 10 + 34 + 36 + 8 * 31 + 9 + 26 + 34 + 31 + 31 + 31;
   const b = coord.at;
   const at = b ? { x: Math.max(8, b.x + b.width - W), y: b.y - H - 6 >= 8 ? b.y - H - 6 : b.y + b.height + 6 } : "pointer";
   openOverlay({ mod: "chat-models", kind: "popup", frame: "none", width: W, height: H, at,
     props: { mode: "settings", key: coord.key, width: W, height: H, remote: null, select,
-      current: { agent: sel.agent, model: sel.model, effort: sel.effort ?? null, fast: Boolean(sel.fast), perm: sel.perm ?? null },
+      current: { agent: sel.agent, model: sel.model, effort: sel.effort ?? null, fast: sel.fast === "ultrafast" ? "ultrafast" : Boolean(sel.fast), perm: sel.perm ?? null },
       menus: data.menus, icons: data.icons, permDefault: data.permDefault } });
 }
 

@@ -449,7 +449,7 @@ export class Settings {
         // its permission mode, as the window's Permissions pick (one of the CLI's modes; none: the CLI's own default)
         const PERM: Record<string, string[]> = { claude: ["manual", "auto", "acceptEdits", "plan", "bypassPermissions"], codex: ["read-only", "auto", "full"] };
         if (v.perm != null && !PERM[v.agent].includes(v.perm)) throw new Error("Not one of its permission modes.");
-        v = { agent: v.agent, model: v.model ?? null, effort: v.effort ?? null, fast: !!v.fast, perm: v.perm ?? null };
+        v = { agent: v.agent, model: v.model ?? null, effort: v.effort ?? null, fast: v.fast === "ultrafast" && v.agent === "codex" ? "ultrafast" : !!v.fast, perm: v.perm ?? null };
       }
       put(field, null, v);
     } else if (section === "autopilot" && AP.FIELDS.includes(field)) {

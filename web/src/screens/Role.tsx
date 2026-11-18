@@ -12,7 +12,7 @@ import * as ST from '@core/settings.js'
 
 const { levelName, NAMES } = AG as unknown as { levelName: (e: string | null) => string | null; NAMES: Record<string, string> }
 const { MODEL_MENU, chooseModel, modelLabel } = ST as unknown as {
-  MODEL_MENU: { reasoning: string; fast: string; permissions: string }
+  MODEL_MENU: { reasoning: string; fast: string; ultrafast: string; permissions: string }
   chooseModel: (menus: ModelMenus['menus'], permDefault: ModelMenus['permDefault'], sel: AgentPick, agent: string, id: string) => AgentPick
   modelLabel: (menus: ModelMenus['menus'] | undefined, sel: AgentPick | null | undefined) => string
 }
@@ -107,7 +107,9 @@ function ModelMenu({ start, up, onClose, save }: { start: AgentPick; up: boolean
               ))}
             </Tabs>
           </div>
-          {fast ? <MenuSwitch name={MODEL_MENU.fast} icon={<SpeedIcon className={ic} />} on={!!sel.fast} onClick={() => change({ ...sel, fast: !sel.fast })} /> : null}
+          {fast ? <MenuSwitch name={MODEL_MENU.fast} icon={<SpeedIcon className={ic} />} on={sel.fast === true} onClick={() => change({ ...sel, fast: sel.fast !== true })} /> : null}
+          {/* Codex's Ultrafast tier (SHEP-258), where the model has it: on turns Fast off, the two are one speed */}
+          {model?.ultrafast ? <MenuSwitch name={MODEL_MENU.ultrafast} icon={<SpeedIcon className={ic} />} on={sel.fast === 'ultrafast'} onClick={() => change({ ...sel, fast: sel.fast === 'ultrafast' ? false : 'ultrafast' })} /> : null}
           {menu?.perms.length ? (
             <>
               <MenuItem icon={<ModeIcon className={ic} />} aria-expanded={perms} onClick={() => setPerms(!perms)}

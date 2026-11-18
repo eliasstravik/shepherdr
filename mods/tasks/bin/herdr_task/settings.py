@@ -187,7 +187,8 @@ def argv_for(pick):
         if pick.get("effort"):
             a += ["-c", f'model_reasoning_effort="{pick["effort"]}"']
         # always said, so Fast off wins over a service_tier in config.toml (default: the standard tier)
-        a += ["-c", 'service_tier="%s"' % ("fast" if pick.get("fast") else "default")]
+        # Ultrafast: Codex's fastest tier (SHEP-258), on models whose catalog offers it
+        a += ["-c", 'service_tier="%s"' % ("ultrafast" if pick.get("fast") == "ultrafast" else "fast" if pick.get("fast") else "default")]
         perm = pick.get("perm")
         if perm == "full":
             a.append("--dangerously-bypass-approvals-and-sandbox")

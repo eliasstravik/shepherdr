@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { argvFor, current, forkArgv, FORK_LIVE, line, liveTaskAgent, menuFor, modelSections, parseDefaults, parsePicks, pickKey, resumeArgv, rowFor, withPin, withRecent } from "./agents.js";
+import { argvFor, current, forkArgv, FORK_LIVE, line, liveTaskAgent, menuFor, modelSections, parseDefaults, parsePicks, pickKey, resumeArgv, rowFor, withPin, withRecent, speedFor, speedOf, codexTier, speedName, speedWordOf } from "./agents.js";
 
 const codex = { models: Array.from({ length: 250 }, (_, i) => ({ id: `gpt-${i}`, label: `GPT ${i}`, efforts: ["low", "high"] })) };
 const menus = { claude: menuFor("claude", {}), codex: menuFor("codex", codex) };
@@ -127,4 +127,41 @@ test("an ended Codex Assistant resumes with codex resume <session>", () => {
 
 test("an Assistant that was itself resumed resumes the session it ran last, once", () => {
   expect(resumeArgv("claude", ["claude", "--resume", "old-id", "--model", "opus"], "new-id")).toEqual(["claude", "--model", "opus", "--resume", "new-id"]);
+});
+
+// SHEP-258: Codex's Ultrafast tier (service_tier="ultrafast"), beside Fast, on the models whose catalog offers it.
+test("Ultrafast shows where Codex's catalog offers it, and starts Codex on that tier", () => {
+  const cache = JSON.stringify({ models: [
+    { slug: "gpt-6.2-sol", display_name: "GPT-6.2-Sol", default_reasoning_level: "low", supported_reasoning_levels: ["low", "medium", "high", "xhigh", "max", "ultra"].map((effort) => ({ effort })),
+      service_tiers: [{ id: "priority", name: "Fast" }, { id: "ultrafast", name: "Ultrafast" }] },
+    { slug: "gpt-6.2-astra", display_name: "GPT-6.2-Astra", default_reasoning_level: "low", supported_reasoning_levels: [{ effort: "low" }], service_tiers: [{ id: "priority", name: "Fast" }] }] });
+  const dflt = parseDefaults("codex", `model\tgpt-6.2-sol\nservice_tier\tultrafast\nmodels\t${cache}\n`);
+  expect(dflt.fast).toBe("ultrafast");
+  const menu = menuFor("codex", dflt);
+  expect(menu.models.map((m) => [m.id, m.name, m.fast, !!m.ultrafast])).toEqual([["gpt-6.2-sol", "GPT-6.2-Sol", true, true], ["gpt-6.2-astra", "GPT-6.2-Astra", true, false]]);
+  expect(menu.models[0].efforts).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
+  // started on it: said on the command line, read back, and in words
+  const { argv } = argvFor({ agent: "codex", model: "gpt-6.2-sol", effort: "high", fast: "ultrafast" }, { agent: "codex", argv: ["codex", "-c", 'service_tier="fast"'] });
+  expect(argv).toEqual(["codex", "--no-daemon", "-m", "gpt-6.2-sol", "-c", 'model_reasoning_effort="high"', "-c", 'service_tier="ultrafast"']);
+  expect(current("codex", argv, {}, dflt).fast).toBe("ultrafast");
+  expect(line(current("codex", argv, {}, dflt))).toBe("Codex · GPT-6.2-Sol · High · Ultrafast");
+  // the log's word wins, and Fast stays Fast
+  expect(current("codex", argv, { speed: "fast" }, dflt).fast).toBe(true);
+  expect(current("codex", ["codex"], { speed: "ultrafast" }, {}).fast).toBe("ultrafast");
+  // a fork keeps it
+  expect(forkArgv("codex", argv, "S")).toContain('service_tier="ultrafast"');
+  // Claude Code has no Ultrafast: it reads as Fast
+  expect(argvFor({ agent: "claude", model: "opus", fast: "ultrafast" }, { agent: "claude", argv: ["claude"] }).argv).toContain('{"fastMode":true}');
+});
+
+test("a model without Ultrafast falls back to Fast, one without Fast to standard", () => {
+  expect(speedFor({ fast: true, ultrafast: true }, "ultrafast")).toBe("ultrafast");
+  expect(speedFor({ fast: true }, "ultrafast")).toBe(true);
+  expect(speedFor({ fast: false }, "ultrafast")).toBe(false);
+  expect(speedFor({ fast: true }, true)).toBe(true);
+  expect(speedFor({}, true)).toBe(false);
+  expect([speedOf("priority"), speedOf("ultrafast"), speedOf("default"), speedOf("standard")]).toEqual([true, "ultrafast", false, false]);
+  expect([codexTier("ultrafast"), codexTier(true), codexTier(false)]).toEqual(["ultrafast", "fast", "default"]);
+  expect([speedName("ultrafast"), speedName(true), speedName(false)]).toEqual(["Ultrafast", "Fast", null]);
+  expect([speedWordOf("ultrafast"), speedWordOf(true), speedWordOf(false)]).toEqual(["ultrafast", "fast", "normal"]);
 });
