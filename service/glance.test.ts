@@ -92,7 +92,7 @@ test("only what the app shows: no alert from a finished terminal, a done task, d
   expect(shown([al({ memory: true })], mem(60))).toBe(0);
 });
 
-test("every need lists (a quiet space's too, without alerting), with an Assistant's message and an agent's alert, and each counts", () => {
+test("every need lists (a quiet space's too, without alerting), with an agent's alert, and each counts; an Assistant's message is only unread", () => {
   const notifyOff = [{ name: "Notify", level: "sp1", rows: [{ key: "notify", value: "Off" }] }];
   const snap = snapOf({ settings: notifyOff, tasks: [], needs: [{ id: "q9", chat: "sp1", place: "sp1", at: NOW - 100, question: q({ id: "q9" }) }],
     places: [{ id: "sp1", name: "Home", chat: "sp1" }, { id: "sp2", name: "Shop", chat: "sp2" }], last: { sp2: NOW - 50 }, read: {},
@@ -101,13 +101,15 @@ test("every need lists (a quiet space's too, without alerting), with an Assistan
   const need = g.items.find((i) => i.key === "need:sp1:q9");
   expect(need).toMatchObject({ kind: "needs", type: "need", alert: false, title: "Home Assistant · Needs you" });
   expect(need.answer.choices.length).toBe(3);
-  expect(g.items.map((i) => i.type).sort()).toEqual(["alert", "msg", "need"]);
-  expect(g.counts.needs).toBe(3);
+  // SHEP-253: an Assistant's new message is Chat's (unread), no item in Needs you
+  expect(g.items.map((i) => i.type).sort()).toEqual(["alert", "need"]);
+  expect(g.counts.needs).toBe(2);
+  expect(g.unread).toBe(1);
 });
 
 const listed = (g: any) => Object.fromEntries(["needs", "working", "ready", "done"].map((k) => [k, g.items.filter((i) => i.kind === k).length]));
 
-test("SHEP-248: Needs you's count is what it lists: an Assistant's unread message and a task's question make 2, not 1", () => {
+test("SHEP-248: Needs you's count is what it lists; SHEP-253: an Assistant's unread message is no task, so only the task's question counts", () => {
   // as on the phone: the Assistant of vm-demo's space has a new message, HERD-53 asks a question
   const snap = snapOf({
     places: [{ id: "vm-demo:sp1", name: "Home", chat: "p:vm-demo:sp1", machine: "vm-demo" }],
@@ -116,9 +118,10 @@ test("SHEP-248: Needs you's count is what it lists: an Assistant's unread messag
     last: { "p:vm-demo:sp1": NOW - 50 }, read: {},
   });
   const g = doc(snap);
-  expect(g.items.filter((i) => i.kind === "needs").map((i) => i.tag).sort()).toEqual(["HERD-53", "msg:p:vm-demo:sp1"]);
-  expect(g.counts.needs).toBe(2);
-  expect(g.groups.find((x) => x.kind === "needs").count).toBe(2);
+  expect(g.items.filter((i) => i.kind === "needs").map((i) => i.tag).sort()).toEqual(["HERD-53"]);
+  expect(g.counts.needs).toBe(1);
+  expect(g.groups.find((x) => x.kind === "needs").count).toBe(1);
+  expect(g.unread).toBe(1);
 });
 
 test("counts and groups always match the list, section by section, in the Tasks panel's order and names", () => {

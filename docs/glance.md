@@ -73,7 +73,7 @@ Unchanged from the web push buttons (SHEP-243): `POST /api/action` with
     {
       "key": "need:ELIA-53/worker:q1",   // one thing, stable while it lasts: a new key is a new alert
       "kind": "needs",                   // needs | working | ready | done
-      "type": "need",                    // need | msg (an Assistant's new message) | alert (herdr-task alert) | task
+      "type": "need",                    // need | alert (herdr-task alert) | task
       "tag": "ELIA-53",                  // one notification per tag: a newer one takes its place
       "task": "ELIA-53",
       "title": "ELIA-53 · Needs you",    // <= 30 characters (a watch line)
@@ -89,7 +89,8 @@ Unchanged from the web push buttons (SHEP-243): `POST /api/action` with
                   "other": true },        // the card takes free words: Reply answers it as "Other"
       "reply":  { "chat": "ELIA-53/worker" }          // also on an agent's own alert that has a chat
     }
-  ]
+  ],
+  "unread": 2                      // Assistants' chats with a new message not yet read: a Chat badge, not Needs you
 }
 ```
 
@@ -101,14 +102,16 @@ in the same order, and its counts and badges count them.
 
 - Needs you, oldest first, each thing once and a task at most once (its oldest card stands for it): an agent's card or
   wait (`type: "need"`; one in a space whose Notify is quiet too, with `alert: false`), a task whose status says Needs
-  you with no card (`type: "task"`), an agent's own `herdr-task alert` while it stands (`type: "alert"`), an
-  Assistant's new message not yet read, its space not muted (`type: "msg"`), and an automation that didn't run or
-  didn't start its task (`type: "need"`, `alert: false`, key `auto:…`).
+  you with no card (`type: "task"`), an agent's own `herdr-task alert` while it stands (`type: "alert"`), and
+  an automation that didn't run or didn't start its task (`type: "need"`, `alert: false`, key `auto:…`).
+- An Assistant's new message is not a task, so it is not in Needs you (SHEP-253), here or in the Tasks panel: it
+  belongs to Chat. `unread` counts the Assistants' chats with a new message not yet read (their space not muted, no
+  card of their own waiting), for a Chat badge; its web push still goes as before.
 - A task in Needs you is in no other section: a working task with a standing alert is under needs (its alert item) and
   back under working once the alert goes. An agent's alert is a moment, as in the app (a toast, once): it stands only
   for 15 minutes, only while its terminal still runs and its task isn't done, and a machine's memory alert only while
   that machine's memory is still over 75%.
-- Each leaves everywhere at the same moment: answered, read, its alert over, the automation running again.
+- Each leaves everywhere at the same moment: answered, its alert over, the automation running again.
 - `counts` are what each section lists, item for item (all of them, even past the 40 items): a header's number never
   differs from its list, nor from the web app's Needs you, its sidebar's red counts or its app icon's count.
 - `order` lists the sections' kinds in the order of the web app's Tasks panel (Status view: Needs you, Ready,

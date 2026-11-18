@@ -8,9 +8,10 @@
 // - a task whose status is Needs you with no such record;
 // - an agent's own alert (herdr-task alert) while it stands (alertStands), a working task's too: that task is in Needs
 //   you, not Working, until it goes;
-// - an Assistant's new message you haven't read (its space not muted, and no card of its own already waiting);
 // - an automation that didn't run, or didn't start its task.
-// Each leaves at the same moment everywhere: answered (its need goes), read (the read mark moves), its alert over (its
+// An Assistant's new message is not in it (SHEP-253): it is no task, so it stays in Chat (its unread dot and badge);
+// unreadChats lists those for a Chat badge (the glance feed's `unread`).
+// Each leaves at the same moment everywhere: answered (its need goes), its alert over (its
 // agent ended, its task done, 15 minutes old, or its machine's memory back), the automation running again.
 import { notifyOf } from './alerts.ts'
 import type { Automation, Need, Place, Snapshot, Task } from './types.ts'
@@ -18,9 +19,9 @@ import type { Automation, Need, Place, Snapshot, Task } from './types.ts'
 type Alert = NonNullable<Snapshot['alerts']>[number]
 
 export type Waiting = {
-  /** stable while it lasts, the glance feed's item key: need:<chat>:<id>, task:<id>, alert:<id>, msg:<chat>:<at>, auto:… */
+  /** stable while it lasts, the glance feed's item key: need:<chat>:<id>, task:<id>, alert:<id>, auto:… */
   key: string
-  type: 'need' | 'task' | 'alert' | 'msg' | 'auto'
+  type: 'need' | 'task' | 'alert' | 'auto'
   /** since when it waits (ms): the list goes oldest first */
   at: number
   /** the space it belongs to (a task's place, an automation's list) */
@@ -29,8 +30,6 @@ export type Waiting = {
   task?: string
   need?: Need
   alert?: Alert
-  /** an unread message's chat */
-  chat?: string
   auto?: Automation
 }
 
@@ -93,16 +92,22 @@ export function needsYou(snap: NeedsSnap, now = Date.now()): Waiting[] {
     const t = taskOfChat(snap, a.chat)
     add({ key: `alert:${a.id}`, type: 'alert', at: Number(a.at) || 0, ...(a.place ?? t?.place ? { place: a.place ?? t!.place } : {}), ...(t ? { task: t.id } : {}), alert: a })
   }
-  const asking = new Set(snap.needs.map((n) => n.chat))
-  for (const p of snap.places as Place[]) {
-    if (!p.chat || !unread(snap, p.chat) || asking.has(p.chat)) continue
-    if (snap.settings && notifyOf({ settings: snap.settings }, p.id) === 'Off') continue
-    const last = snap.last![p.chat]
-    add({ key: `msg:${p.chat}:${last}`, type: 'msg', at: last, place: p.id, chat: p.chat })
-  }
   for (const [place, autos] of Object.entries(snap.automations ?? {}))
     for (const a of autos) if (a.error) add({ key: autoKey(a), type: 'auto', at: a.runs?.[0]?.at ?? 0, place, auto: a })
   return out.sort((a, b) => a.at - b.at || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+}
+
+/** the Assistants' chats with a new message you haven't read (their space not muted, no card of their own waiting):
+ *  Chat's, never Needs you's (SHEP-253) */
+export function unreadChats(snap: NeedsSnap): { chat: string; place: string; at: number }[] {
+  const asking = new Set(snap.needs.map((n) => n.chat))
+  const out: { chat: string; place: string; at: number }[] = []
+  for (const p of snap.places as Place[]) {
+    if (!p.chat || !unread(snap, p.chat) || asking.has(p.chat)) continue
+    if (snap.settings && notifyOf({ settings: snap.settings }, p.id) === 'Off') continue
+    out.push({ chat: p.chat, place: p.id, at: snap.last![p.chat] })
+  }
+  return out
 }
 
 /** the tasks in Needs you (they show there, in no other group) */

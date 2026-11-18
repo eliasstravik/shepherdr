@@ -317,7 +317,6 @@ function agentNeeds(snap: Snapshot, chips: string[], ws: Waiting[]): AgentNeed[]
       const cut = w.alert.title.indexOf(' · ')
       return { id: w.key, chat: w.alert.chat ?? p?.chat, who: cut < 0 ? w.alert.title : w.alert.title.slice(0, cut), why: fit(cut < 0 ? w.alert.body : w.alert.title.slice(cut + 3)), ...at }
     }
-    if (w.type === 'msg') return { id: w.key, chat: w.chat, who: 'Assistant', why: 'New message', ...at }
     // why, in the window's words (core/needs.js REASONS, reqReason): a plan, a permission's own words, a question
     const n = w.need!
     const q = n.question

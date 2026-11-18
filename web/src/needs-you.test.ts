@@ -114,7 +114,6 @@ describe('Needs you is one rule: the web app and the glance feed list the same (
       'task:vmb:SHOP-4', // two cards, one row
       'need:c:p:vmb:shop:q5', // the shop Assistant's question
       'need:c:p:vmb:shop:s1', // its secret ask
-      `msg:c:p:vma:home:${NOW - 4 * MIN}`, // home's Assistant's unread message
       'task:vma:ELIA-57', // a working task's alert
     ])
     // the pinned task waits, so it is in Needs you only
@@ -125,11 +124,11 @@ describe('Needs you is one rule: the web app and the glance feed list the same (
     const snap = fleet()
     const web = panel(snap), app = phone(snap)
     expect(web.counts).toEqual({ needs: app.counts.needs, ready: app.counts.ready, working: app.counts.working })
-    expect(app.counts).toMatchObject({ needs: 9, ready: 1, working: 3 })
-    expect(app.doc.groups.find((x) => x.kind === 'needs')!.count).toBe(9)
+    expect(app.counts).toMatchObject({ needs: 8, ready: 1, working: 3 })
+    expect(app.doc.groups.find((x) => x.kind === 'needs')!.count).toBe(8)
     // the header's Needs you, the spaces' red counts added up, the app icon
-    expect(needsYou(snap, NOW).length).toBe(9)
-    expect(snap.places.reduce((n, p) => n + counts(snap, p.id).ownNeed, 0)).toBe(9)
+    expect(needsYou(snap, NOW).length).toBe(8)
+    expect(snap.places.reduce((n, p) => n + counts(snap, p.id).ownNeed, 0)).toBe(8)
     expect(waiting(snap, NOW).count).toBe(app.counts.needs + app.counts.ready)
   })
 
@@ -158,8 +157,23 @@ describe('Needs you is one rule: the web app and the glance feed list the same (
       needs: [], automations: {}, alerts: [fleet().alerts![0]], read: { 'c:p:vma:home': NOW - 50 * MIN, 'c:p:vmb:shop': NOW },
     })
     const web = panel(snap), app = phone(snap)
-    expect(app.counts.needs).toBe(2)
+    // SHEP-253: the Assistant's message is Chat's, not a task: only the task's alert needs you
+    expect(app.needs).toEqual(['task:vma:ELIA-57'])
     expect(web.needs).toEqual(app.needs)
-    expect(web.counts).toMatchObject({ needs: 2, working: 2 })
+    expect(web.counts).toMatchObject({ needs: 1, working: 2 })
+    expect(app.doc.unread).toBe(1)
+  })
+
+  test('an Assistant\'s unread messages are no rows, no counts, no badge in Tasks; the feed has them as unread (SHEP-253)', () => {
+    const snap = fleet({ tasks: [], needs: [], automations: {}, alerts: [], read: {} })
+    const web = panel(snap), app = phone(snap)
+    expect(web.needs).toEqual([])
+    expect(app.needs).toEqual([])
+    expect(app.counts.needs).toBe(0)
+    expect(needsYou(snap, NOW)).toEqual([])
+    expect(snap.places.reduce((n, p) => n + counts(snap, p.id).ownNeed, 0)).toBe(0)
+    expect(waiting(snap, NOW).count).toBe(0)
+    expect(app.doc.items.some((i) => (i.type as string) === 'msg')).toBe(false)
+    expect(app.doc.unread).toBeGreaterThan(0)
   })
 })
