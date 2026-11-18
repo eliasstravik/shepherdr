@@ -1,38 +1,72 @@
-// A task's priority flag (MSHEP-1): its icon, and the small picker a click on it opens (the five levels and No flag).
-// Choosing one saves it as the person's other task edits are (kernel setPriority: herdr-task edit --priority).
+// A task's priority (MSHEP-1): its flag in a pill (P0 to P4), and the small picker a click on it opens. Choosing one saves
+// it as the person's other task edits are (kernel setPriority: herdr-task edit --priority). The colours are theme
+// variables (styles.css --pri-pN: Heat); the person's own (Settings › Tasks › Priority colours) are written over them
+// by PriorityColorSync.
 import clsx from 'clsx'
-import { useRef, useState } from 'react'
-import { PRIORITIES, PRIORITY_INFO, type Priority } from '@shared/priority.ts'
-import type { Task } from '@shared/types.ts'
-import { setPriority } from './kernel.ts'
-import { CheckIcon, Floating, ic, Menu, MenuItem } from './ui.tsx'
+import { useEffect, useRef, useState } from 'react'
+import { colorsFor, PRIORITIES, PRIORITY_INFO, pillBg, type Priority } from '@shared/priority.ts'
+import type { Snapshot, Task } from '@shared/types.ts'
+import { setPriority, useSnap } from './kernel.ts'
+import { Floating, ic, Menu, MenuItem } from './ui.tsx'
 
-// Drawn here: chevrons for Highest/High and Low/Lowest, two bars for Medium. Each level's colour is a theme variable
-// (styles.css --pri-*): Jira's hues, a shade deeper in light mode where the spec's would not reach 3:1 on white.
-const PATHS: Record<Priority, string[]> = {
-  highest: ['m4.5 12.5 7.5-7 7.5 7', 'm4.5 18.5 7.5-7 7.5 7'],
-  high: ['m4.5 15.5 7.5-8 7.5 8'],
-  medium: ['M5 9.5h14', 'M5 14.5h14'],
-  low: ['m4.5 8.5 7.5 8 7.5-8'],
-  lowest: ['m4.5 5.5 7.5 7 7.5-7', 'm4.5 11.5 7.5 7 7.5-7'],
-}
-
-/** a level's icon in its colour; none draws a faint dashed circle (the placeholder of an unflagged task) */
-export function PriorityIcon({ level, className }: { level?: Priority; className?: string }) {
+/** the flag: a pole and a filled pennant; P4 (Backlog) an outline one; none a faint dashed outline */
+export function FlagIcon({ level, className }: { level?: Priority; className?: string }) {
   return (
-    <svg aria-hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
-      className={className} style={level ? { color: `var(--pri-${level})` } : undefined}>
-      {level ? PATHS[level].map((d) => <path key={d} d={d} />) : <circle cx="12" cy="12" r="7" strokeDasharray="3 3.4" strokeWidth="2" />}
+    <svg aria-hidden viewBox="0 0 24 24" strokeLinejoin="round" strokeLinecap="round" className={className} style={level ? { color: `var(--pri-${level})` } : undefined}>
+      <path d="M6 3.5v17" fill="none" stroke="currentColor" strokeWidth="2.2" />
+      {level && level !== 'p4' ? (
+        <path d="M6.8 4.5h11.2l-3.2 4.2 3.2 4.2H6.8z" fill="currentColor" stroke="currentColor" strokeWidth="1.6" />
+      ) : (
+        <path d="M6.8 4.5h11.2l-3.2 4.2 3.2 4.2H6.8z" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray={level ? undefined : '2.6 2.6'} />
+      )}
     </svg>
   )
 }
 
-export const priorityLabel = (p?: Priority) => (p ? `${PRIORITY_INFO[p].label} priority` : 'No priority flag')
+/** the flag and its number in a small pill, its background the colour at about 14% (a pill: never colour alone) */
+export function PriorityPill({ level, className }: { level: Priority; className?: string }) {
+  return (
+    <span className={clsx('inline-flex h-5 items-center gap-1 rounded-full pr-1.5 pl-1 text-[0.6875rem]/none font-semibold tabular-nums phone:h-6 phone:text-[0.75rem]/none', className)}
+      style={{ color: `var(--pri-${level})`, background: pillBg(`var(--pri-${level})`) }}>
+      <FlagIcon level={level} className="size-3.5 phone:size-4" />
+      {PRIORITY_INFO[level].num}
+    </span>
+  )
+}
+
+export const priorityLabel = (p?: Priority) => (p ? `${PRIORITY_INFO[p].num} ${PRIORITY_INFO[p].name}` : 'No priority')
+
+/** the person's own colours (Settings › Tasks › Priority colours), read off the settings rows the snapshot carries */
+export function customColors(snap?: Pick<Snapshot, 'settings'> | null): Partial<Record<Priority, string>> {
+  const out: Partial<Record<Priority, string>> = {}
+  for (const sec of snap?.settings ?? [])
+    for (const r of sec.rows) {
+      const m = /^tasks\.priority_color_(p[0-4])$/.exec(r.key)
+      if (m && r.custom && !(m[1] in out)) out[m[1] as Priority] = r.value
+    }
+  return out
+}
+
+/** Writes the colours in use over Heat's variables, for both themes (a colour of the person's own gets a darker shade
+ *  for the light theme). Rendered once, by the app. */
+export function PriorityColorSync() {
+  const snap = useSnap()
+  const custom = JSON.stringify(customColors(snap))
+  useEffect(() => {
+    const root = document.documentElement.style
+    const c = colorsFor(JSON.parse(custom))
+    for (const p of PRIORITIES) {
+      root.setProperty(`--pri-${p}-d`, c[p].dark)
+      root.setProperty(`--pri-${p}-l`, c[p].light)
+    }
+  }, [custom])
+  return null
+}
 
 /**
- * The flag at a task row's end (or in its header): its icon, which opens the picker. An unflagged task shows a faint
- * placeholder on hover or focus (always, faintly, where there is no hover: a touch screen). `bare`: no hover fade (the
- * task view's header).
+ * A task's priority at its row's end (or in its header): its pill, which opens the picker. Unflagged, a faint dashed flag
+ * on hover or focus (always, faintly, where there is no hover: a touch screen). `bare`: always shown (the task view's header).
+ * The picker's rows take their number key too.
  */
 export function PriorityFlag({ task, bare = false, className }: { task: Task; bare?: boolean; className?: string }) {
   const [open, setOpen] = useState(false)
@@ -45,13 +79,31 @@ export function PriorityFlag({ task, bare = false, className }: { task: Task; ba
     setError(null)
     setPriority(task, p).then((r) => r?.ok === false && setError(r.error ?? "Couldn't save it.")).catch((e: Error) => setError(e.message))
   }
+  const choose = useRef(pick)
+  choose.current = pick
+  // 0 to 4 pick a level while the picker is open
+  useEffect(() => {
+    if (!open) return
+    const on = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      const p = PRIORITIES[Number(e.key)]
+      if (e.key.length === 1 && e.key >= '0' && e.key <= '4' && p) {
+        e.preventDefault()
+        e.stopPropagation()
+        choose.current(p)
+      }
+    }
+    addEventListener('keydown', on, true)
+    return () => removeEventListener('keydown', on, true)
+  }, [open])
   return (
     <>
       <button ref={btn} type="button" aria-haspopup="menu" aria-expanded={open} aria-label={`${priorityLabel(task.priority)}. Change priority`} title={priorityLabel(task.priority)}
         onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
-        className={clsx('hit press-dim pointer-events-auto relative z-1 grid size-6 shrink-0 place-items-center rounded-full text-fg3 hover:bg-hover aria-expanded:bg-hover keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)] phone:size-8',
+        className={clsx('hit press-dim pointer-events-auto relative z-1 inline-grid shrink-0 place-items-center rounded-full text-fg3 hover:bg-hover aria-expanded:bg-hover keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)]',
+          task.priority ? 'min-h-6' : 'size-6 phone:size-8',
           !task.priority && !bare && 'opacity-0 group-hover:opacity-70 focus-visible:opacity-100 aria-expanded:opacity-100 coarse:opacity-35', className)}>
-        <PriorityIcon level={task.priority} className={clsx(ic, 'phone:size-5')} />
+        {task.priority ? <PriorityPill level={task.priority} /> : <FlagIcon className={clsx(ic, 'phone:size-5')} />}
       </button>
       {/* what it refused (or why it couldn't save), under the flag until a click elsewhere */}
       {error ? (
@@ -62,13 +114,13 @@ export function PriorityFlag({ task, bare = false, className }: { task: Task; ba
       {open ? (
         <Floating anchor={btn.current} place="below-end" gap={4} onClose={close}>
           <Menu label="Priority" onClose={close}>
-            {PRIORITIES.map((p) => (
-              <MenuItem key={p} role="menuitemradio" aria-checked={task.priority === p} icon={<PriorityIcon level={p} className={ic} />} hint={task.priority === p ? <CheckIcon className={ic} /> : null} onClick={() => pick(p)}>
-                {PRIORITY_INFO[p].label}
+            {PRIORITIES.map((p, i) => (
+              <MenuItem key={p} role="menuitemradio" aria-checked={task.priority === p} icon={<FlagIcon level={p} className={ic} />} hint={<kbd className="font-mono">{i}</kbd>} onClick={() => pick(p)}>
+                <span className="font-semibold" style={{ color: `var(--pri-${p})` }}>{PRIORITY_INFO[p].num}</span> {PRIORITY_INFO[p].name}
               </MenuItem>
             ))}
-            <MenuItem role="menuitemradio" aria-checked={!task.priority} icon={<PriorityIcon className={ic} />} hint={!task.priority ? <CheckIcon className={ic} /> : null} onClick={() => pick('none')}>
-              No flag
+            <MenuItem role="menuitemradio" aria-checked={!task.priority} icon={<FlagIcon className={ic} />} onClick={() => pick('none')}>
+              No priority
             </MenuItem>
           </Menu>
         </Floating>

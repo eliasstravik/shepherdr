@@ -183,7 +183,7 @@ def main():
         c.add_argument("--finish-notes", help="this task's own \"When a task finishes\" notes, replacing the folder's (\"\": the folder's)")
 
     def task_opts(c):
-        c.add_argument("--priority", help="its priority flag: highest, high, medium, low, lowest (none: no flag)")
+        c.add_argument("--priority", help="its priority: p0 (Urgent), p1 (High), p2 (Medium), p3 (Low), p4 (Backlog); none: no priority")
         c.add_argument("--agent", help="the CLI its agent runs (claude, codex, ...; default: Settings' Workers)")
         c.add_argument("--model", help="its agent's model, an id or alias (default: Settings'; \"default\": the CLI's own)")
         c.add_argument("--effort", help="its agent's effort: low, medium, high, xhigh, max... (default: Settings')")

@@ -6285,41 +6285,41 @@ class PriorityFlags(unittest.TestCase):
         return self.run_cmd(self.commands.cmd_list, all=False, archived=False)["tasks"]
 
     def test_add_with_a_priority_and_without(self):
-        v = self.add("Flagged", priority="Highest")
-        self.assertEqual(v["priority"], "highest")
+        v = self.add("Flagged", priority="P0")
+        self.assertEqual(v["priority"], "p0")
         plain = self.add("Plain")
         self.assertNotIn("priority", plain)
         self.assertNotIn("priority", self.task(plain["id"]))
-        self.assertEqual(self.task(v["id"])["priority"], "highest")
+        self.assertEqual(self.task(v["id"])["priority"], "p0")
 
     def test_edit_sets_changes_and_clears_it(self):
         n = self.add("Task")["id"]
-        self.assertEqual(self.run_cmd(self.commands.cmd_edit, id=str(n), priority="low")["priority"], "low")
-        self.assertEqual(self.task(n)["priority"], "low")
-        self.run_cmd(self.commands.cmd_edit, id=str(n), priority="medium")
-        self.assertEqual(self.task(n)["priority"], "medium")
+        self.assertEqual(self.run_cmd(self.commands.cmd_edit, id=str(n), priority="p3")["priority"], "p3")
+        self.assertEqual(self.task(n)["priority"], "p3")
+        self.run_cmd(self.commands.cmd_edit, id=str(n), priority="p2")
+        self.assertEqual(self.task(n)["priority"], "p2")
         # no --priority leaves it; none takes it off (the field goes, as an old file has it)
         self.run_cmd(self.commands.cmd_edit, id=str(n), prompt="More words")
-        self.assertEqual(self.task(n)["priority"], "medium")
+        self.assertEqual(self.task(n)["priority"], "p2")
         self.run_cmd(self.commands.cmd_edit, id=str(n), priority="none")
         self.assertNotIn("priority", self.task(n))
 
     def test_an_unknown_level_is_refused_and_changes_nothing(self):
-        n = self.add("Task", priority="high")["id"]
+        n = self.add("Task", priority="p1")["id"]
         with self.assertRaises(self.Fail) as err:
-            self.run_cmd(self.commands.cmd_edit, id=str(n), priority="urgent")
-        self.assertIn("highest, high, medium, low, lowest", str(err.exception))
-        self.assertEqual(self.task(n)["priority"], "high")
+            self.run_cmd(self.commands.cmd_edit, id=str(n), priority="highest")
+        self.assertIn("p0 (Urgent), p1 (High)", str(err.exception))
+        self.assertEqual(self.task(n)["priority"], "p1")
         with self.assertRaises(self.Fail):
-            self.add("Bad", priority="urgent")
+            self.add("Bad", priority="highest")
 
     def test_show_and_list_carry_it_and_old_tasks_without_it_work(self):
         a = self.add("Old")["id"]
-        b = self.add("New", priority="lowest")["id"]
-        self.assertEqual(self.show(str(b))["priority"], "lowest")
+        b = self.add("New", priority="p4")["id"]
+        self.assertEqual(self.show(str(b))["priority"], "p4")
         self.assertNotIn("priority", self.show(str(a)))
         by_id = {t["id"]: t for t in self.listed()}
-        self.assertEqual(by_id[b]["priority"], "lowest")
+        self.assertEqual(by_id[b]["priority"], "p4")
         self.assertNotIn("priority", by_id[a])
         # a file written before the field existed reads as before
         import herdr_task.store as store

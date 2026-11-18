@@ -988,6 +988,11 @@ export interface SettingRow {
   hidden?: string
   /** a row that is one button (its words): pressing it sets the row's key back (null), as the window's Reset rows */
   button?: string
+  /** Priority colours: a colour, set with a swatch and a hex box; custom: the person set it (Reset puts Heat's back) */
+  color?: boolean
+  custom?: boolean
+  /** Priority colours: the row that shows the five pills as they look now */
+  pills?: boolean
   /** its control can't be used now */
   disabled?: boolean
   /** a "Set its own" row: it opens the rows hidden under this name */

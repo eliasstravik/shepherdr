@@ -31,6 +31,7 @@ drops the space's own, and it inherits again. A few settings are one for every s
 | Tasks | Worktrees | Everywhere, space | A folder that isn't a repo, or one that can't take worktrees |
 | Tasks | Base branch | Space only | A branch only means something in one repo |
 | Tasks | Branch names (a pattern: `{n}`, `{key}`, `{slug}`; empty: `task/{n}-{slug}`; a task's own `--branch` wins) | Everywhere, space | A team may name branches after its tickets |
+| Tasks | Priority colours (five colours for P0 to P4, a swatch and a hex box each, a preview, a reset each and Reset all to Heat; the light theme shows a darker shade of each) | Everywhere only | A colour is the person's own taste, not a repo's; it applies in the web and phone panels (the window's Settings page doesn't list it yet) |
 | Tasks | Run automations | Everywhere, space | Pause one repo's automations |
 | Tasks | When a task starts / finishes | Everywhere, space | Setup and cleanup steps are a repo's |
 | Autopilot | Heartbeat, Schedule, Events | Everywhere, space | Each space works toward its own goal, at its own pace |

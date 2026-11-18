@@ -50,12 +50,23 @@
   --thumb: rgb(9 9 11 / 0.2);
   --thumb-held: rgb(9 9 11 / 0.36);
   --need: #e5484d;
-  /* a task's priority flag (MSHEP-1): Jira's hues; High and Medium a shade deeper here, as the originals fall under 3:1 on white */
-  --pri-highest: #ff5630;
-  --pri-high: #e8532f;
-  --pri-medium: #c77f00;
-  --pri-low: #0065ff;
-  --pri-lowest: #2684ff;
+  /* a task's priority (MSHEP-1), the Heat palette: -l the light theme's shades, -d the dark theme's; a colour the person
+     set is written over them (priority.tsx PriorityColorSync) */
+  --pri-p0-l: #d93036;
+  --pri-p1-l: #e8590c;
+  --pri-p2-l: #b7791f;
+  --pri-p3-l: #2f6fde;
+  --pri-p4-l: #5c6778;
+  --pri-p0-d: #f2555a;
+  --pri-p1-d: #ff8a3d;
+  --pri-p2-d: #f5b83d;
+  --pri-p3-d: #5b9bff;
+  --pri-p4-d: #9aa6ba;
+  --pri-p0: var(--pri-p0-l);
+  --pri-p1: var(--pri-p1-l);
+  --pri-p2: var(--pri-p2-l);
+  --pri-p3: var(--pri-p3-l);
+  --pri-p4: var(--pri-p4-l);
   --ready: #30a46c;
   --work: #e2a336;
   --muted: #a1a1aa;
@@ -140,11 +151,11 @@
   --thumb: rgb(255 255 255 / 0.18);
   --thumb-held: rgb(255 255 255 / 0.32);
   --need: #ff6369;
-  --pri-highest: #ff5630;
-  --pri-high: #ff7452;
-  --pri-medium: #ffab00;
-  --pri-low: #0065ff;
-  --pri-lowest: #2684ff;
+  --pri-p0: var(--pri-p0-d);
+  --pri-p1: var(--pri-p1-d);
+  --pri-p2: var(--pri-p2-d);
+  --pri-p3: var(--pri-p3-d);
+  --pri-p4: var(--pri-p4-d);
   --ready: #3dd68c;
   --work: #f5b544;
   --muted: #71717a;

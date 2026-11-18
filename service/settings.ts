@@ -12,6 +12,7 @@ import * as M from "../core/machines.js";
 import * as HC from "../core/host.js";
 import * as APc from "../core/autopilot.js";
 import type { SettingRow, SettingSection } from "../web/shared/types.ts";
+import { hexOf, HEAT_DARK, PRIORITIES, PRIORITY_INFO } from "../web/shared/priority.ts";
 
 const { TASK_ROWS, DEFAULTS, wordFor, valueFor, ROLES: CORE_ROLES, NOTES: CORE_NOTES, ABOUT, BACKUP, REACTIONS, SUGGESTIONS, FEEDBACK, feedbackRepo, upgradeReactions, BASE, BRANCH, branchPattern, MACHINES, OLD_NAMES, SECTIONS,
   WEB, modelLabel, roleSel, otherCli, otherCliWords, backupProblem, homeAbout, webState, fromWord, LOADING_AGENTS, RESET, machineLabel } = C as any;
@@ -268,6 +269,17 @@ export class Settings {
       const p = this.pick(scope, "tasks", `${n.id}_notes`);
       rows.push({ label: n.title, key: `tasks.${n.id}_notes`, value: p.value ?? "", multiline: true, hint: n.about, placeholder: n.example, ...this.follows(s, p, (v) => v ?? "", "tasks", `${n.id}_notes`) });
     }
+    // Priority colours (MSHEP-1): the person's own, for every space at once (Heat when none): a swatch and a hex box a level,
+    // the five pills as they look, and a reset of all. Kept as everywhere.tasks.priority_colors { p0: "#rrggbb", ... }.
+    if (!s) {
+      const set = this.pick(null, "tasks", "priority_colors").value;
+      const own = (p: string) => hexOf(set && typeof set === "object" ? set[p] : undefined);
+      PRIORITIES.forEach((p: string, i: number) => rows.push({ label: `${PRIORITY_INFO[p as keyof typeof PRIORITY_INFO].num} ${PRIORITY_INFO[p as keyof typeof PRIORITY_INFO].name} colour`, key: `tasks.priority_color_${p}`,
+        value: own(p) ?? HEAT_DARK[p as keyof typeof HEAT_DARK], color: true, custom: !!own(p), group: i === 0 ? "Priority colours" : undefined,
+        hint: i === 0 ? "The flag and pill of each priority. The light theme uses a darker shade of your colour." : undefined } as SettingRow));
+      rows.push({ label: "Preview", key: "", value: "", fixed: true, pills: true } as SettingRow);
+      rows.push({ label: "All priority colours", key: "tasks.priority_colors", value: "", button: "Reset all to Heat", disabled: !PRIORITIES.some((p: string) => own(p)) } as SettingRow);
+    }
     return { name: title("tasks"), level: scope ?? "all", rows };
   }
 
@@ -427,6 +439,19 @@ export class Settings {
       if (value === undefined || (typeof value === "number" && !Number.isFinite(value))) throw new Error("Not one of its choices.");
       if (!Array.isArray(choices) && value !== null) value = Math.max(choices.min, Math.min(choices.max, Math.round(value)));
       put(section, field, value);
+    } else if (/^tasks\.priority_color_p[0-4]$/.test(key) || key === "tasks.priority_colors") {
+      // Everywhere's only. A colour is #rgb or #rrggbb (anything else is refused and the old one kept); empty or null: Heat's
+      if (space) throw new Error("Priority colours are set for every space at once.");
+      const cur = file.everywhere?.tasks?.priority_colors;
+      const colors: Record<string, string> = cur && typeof cur === "object" ? { ...cur } : {};
+      if (key === "tasks.priority_colors") for (const k of Object.keys(colors)) delete colors[k];
+      else {
+        const level = key.slice(-2);
+        const hex = word === null || word.trim() === "" || word === "reset" ? null : hexOf(word);
+        if (hex === undefined) throw new Error("A colour is #rgb or #rrggbb, like #5b9bff.");
+        if (hex === null) delete colors[level]; else colors[level] = hex;
+      }
+      put("tasks", "priority_colors", Object.keys(colors).length ? colors : null);
     } else if (key === "tasks.base") {
       // a space's own (the service checked the branch is there first); empty: back to the folder's branch
       if (!space) throw new Error("A base branch is set per space.");

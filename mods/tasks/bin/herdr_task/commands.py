@@ -201,11 +201,13 @@ def set_base(s, t, base, space=None, new=False):
         t["base"], t["base_set"] = base, True
 
 
-PRIORITIES = ("highest", "high", "medium", "low", "lowest")
+PRIORITIES = ("p0", "p1", "p2", "p3", "p4")
+PRIORITY_NAMES = {"p0": "Urgent", "p1": "High", "p2": "Medium", "p3": "Low", "p4": "Backlog"}
 
 
 def set_priority(t, args):
-    """--priority highest|high|medium|low|lowest, or none to clear it (a task without the field has no flag)."""
+    """--priority p0..p4, or none to clear it (a task without the field has no flag). P0 Urgent, P1 High, P2 Medium,
+    P3 Low, P4 Backlog."""
     v = getattr(args, "priority", None)
     if v is None:
         return
@@ -215,7 +217,7 @@ def set_priority(t, args):
     elif low in PRIORITIES:
         t["priority"] = low
     else:
-        raise Fail(f"priority is one of {', '.join(PRIORITIES)} (or none).")
+        raise Fail("priority is one of p0 (Urgent), p1 (High), p2 (Medium), p3 (Low), p4 (Backlog), or none.")
 
 
 def set_notes(t, args):
@@ -255,7 +257,7 @@ def cmd_show(args):
     elif v.get("branch") and v.get("mode") == "worktree":
         text.append(f"branch: {v['branch']} (set for this task)")
     if v.get("priority"):
-        text.append(f"priority: {v['priority']}")
+        text.append(f"priority: {v['priority'].upper()} {PRIORITY_NAMES.get(v['priority'], '')}".strip())
     if v.get("base_set"):
         text.append(f"merges into: {v['base']} (" + ("its space's base branch" if v.get("base_by") == "space" else "set for this task") + ")")
     if v.get("after_refs"):

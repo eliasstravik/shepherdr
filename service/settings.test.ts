@@ -244,3 +244,27 @@ test("Feedback offers and its repo", () => {
   s.set("agents.feedback_repo", "", "all");
   expect(JSON.parse(readFileSync(file, "utf8")).everywhere?.agents).toBeUndefined();
 });
+
+test("Priority colours (MSHEP-1): Heat until set, hex checked, per-level and all-at-once reset", () => {
+  const s = new Settings();
+  s.start();
+  const rows = () => s.sections("https://box/shepherdr/").find((x) => x.name === "Tasks" && x.level === "all")!.rows;
+  const p0 = () => rows().find((r) => r.key === "tasks.priority_color_p0")!;
+  expect(p0()).toMatchObject({ value: "#F2555A", color: true, custom: false });
+  expect(rows().find((r) => r.key === "tasks.priority_colors")).toMatchObject({ button: "Reset all to Heat", disabled: true });
+  s.set("tasks.priority_color_p0", "#0F0");
+  s.set("tasks.priority_color_p3", "5B9BFF");
+  expect(p0()).toMatchObject({ value: "#00ff00", custom: true });
+  expect(JSON.parse(readFileSync(file, "utf8")).everywhere.tasks.priority_colors).toEqual({ p0: "#00ff00", p3: "#5b9bff" });
+  // nonsense is refused and what was kept stays
+  expect(() => s.set("tasks.priority_color_p0", "red")).toThrow();
+  expect(() => s.set("tasks.priority_color_p1", "#12")).toThrow();
+  expect(p0().value).toBe("#00ff00");
+  // a space can't have its own
+  expect(() => s.set("tasks.priority_color_p0", "#fff", "sp2", { id: "sp2", name: "web", machine: null, folder: "/repo" })).toThrow();
+  s.set("tasks.priority_color_p0", "reset");
+  expect(JSON.parse(readFileSync(file, "utf8")).everywhere.tasks.priority_colors).toEqual({ p3: "#5b9bff" });
+  s.set("tasks.priority_colors", null);
+  expect(JSON.parse(readFileSync(file, "utf8")).everywhere.tasks?.priority_colors).toBeUndefined();
+  expect(p0()).toMatchObject({ value: "#F2555A", custom: false });
+});

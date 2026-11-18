@@ -24,6 +24,8 @@ import * as APc from '@core/autopilot.js'
 const AP = APc as any
 import { usePluginErrors } from './guard.tsx'
 import { PlacesToggle } from './Frame.tsx'
+import { PriorityPill } from './priority.tsx'
+import { hexOf, PRIORITIES } from '@shared/priority.ts'
 import { Stack } from './Stack.tsx'
 import {
   AppearanceIcon,
@@ -235,6 +237,20 @@ function Choices({
 
 /** a number as the screen says it: "7 days", "1.5× cores", "Off" */
 const numShown = (v: string, num: NonNullable<SettingRow['num']>) => (v === 'off' ? 'Off' : v.replace(/^(\d+(?:\.\d+)?)(\s*).*$/, (_, n, sp) => `${n}${num.unit ? `${sp}${Number(n) === 1 && num.one ? num.one : num.unit}` : ''}`))
+
+/** a priority's colour: a swatch (the browser's colour picker) beside its hex box, saved when you leave the box; Reset
+ *  (only once it is the person's own) puts Heat's back. A value that isn't #rgb or #rrggbb is refused by the service. */
+function ColorValue({ row, set, edit }: { row: SettingRow; set: (v: string) => void; edit: () => void }) {
+  const hex = hexOf(row.value) ?? '#000000'
+  return (
+    <span className="flex items-center gap-2">
+      <input type="color" aria-label={`${row.label}: swatch`} value={hex} onChange={(e) => set(e.target.value)}
+        className="size-7 shrink-0 cursor-pointer rounded-full border-0 bg-transparent p-0 shadow-[inset_0_0_0_1px_var(--line2)] coarse:size-9 phone:size-9 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0 [&::-webkit-color-swatch-wrapper]:p-0" />
+      <TextValue label={`${row.label}: hex`} value={row.value} placeholder="#rrggbb" onEdit={edit} onSave={(v) => (hexOf(v) ? set(hexOf(v)!) : undefined)} />
+      {row.custom ? <Ghost onClick={() => set('reset')}>Reset</Ghost> : null}
+    </span>
+  )
+}
 
 /** a value you type: a box as wide as its words, saved when you leave it (Enter too) */
 export function TextValue({ value, onSave, onEdit, label, placeholder }: { value: string; onSave: (v: string) => void; onEdit: () => void; label: string; placeholder?: string }) {
@@ -633,6 +649,9 @@ function Control({ row, phone, set, edit, level }: { row: SettingRow; phone: boo
   // Web's link: Copy beside it
   if (row.copy) return <CopyButton text={row.copy} />
   if (row.steps) return <Stepper row={row} set={set} />
+  // Priority colours: the five pills as they look now; a colour's swatch and hex box, with its own Reset
+  if (row.pills) return <span className="flex flex-wrap justify-end gap-1.5">{PRIORITIES.map((p) => <PriorityPill key={p} level={p} />)}</span>
+  if (row.color) return <ColorValue row={row} set={set} edit={edit} />
   const onOff = options.length === 2 && options.every((o) => /^(on|off)$/i.test(o))
   const only = !row.num && !row.text && !row.multi && !action && !onOff && options.length <= 1 && (options[0] ?? row.value) === row.value
   if (row.fixed || !row.key || only) return <span className="text-right text-pretty text-fg2 [overflow-wrap:anywhere]">{shown(row.value)}</span>

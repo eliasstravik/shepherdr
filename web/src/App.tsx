@@ -35,7 +35,7 @@ import {
   type Pane,
 } from './kernel.ts'
 import { PANE_MIN } from './panes.ts'
-import { PriorityFlag } from './priority.tsx'
+import { PriorityColorSync, PriorityFlag } from './priority.tsx'
 import { ChatColumn, Frame, PanelColumn, PlacesColumn, PlacesToggle } from './Frame.tsx'
 import { PanelSheet, TabBody, TaskPanel, TaskTabs } from './Panel.tsx'
 import { openAccept, useAccepting } from './screens/Accept.tsx'
@@ -99,6 +99,7 @@ export default function App() {
         device !== 'phone' && !keyboard && 'pb-[env(safe-area-inset-bottom)]',
       )}
     >
+      <PriorityColorSync />
       {registry.topBars.map((Bar, i) => (
         <Bar key={i} />
       ))}
