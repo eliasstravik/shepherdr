@@ -4,6 +4,7 @@
 //   a space's chat (its Assistant):  p:<space id, "/" as ":">     a task's chat:  <task id>/worker
 // A task id is its ref ("SHEP-7"), "<machine>:<ref>" on another machine, as 2.1 wrote them.
 import { failedOf } from "./send-once.ts";
+import { priorityOf } from "../web/shared/priority.ts";
 import type { Snapshot, Place, Task, Need, Section, Machine, Chat, Message, Status, TaskStatus, StepKind, ActivityAnswer, Question, Artifact, SettingSection, Job } from "../web/shared/types.ts";
 import * as T from "../core/tasks.js";
 import * as SPc from "../core/spaces.js";
@@ -383,6 +384,7 @@ export class Compat {
         // the minutes left under a Working row's dot, as the window writes them (core/tasks.js leftOf: "6m", "<1m", "2h")
         ...(r.left ? { left: r.left } : {}),
         ...(r.scheduled_for ? { startsAt: r.scheduled_for } : {}),
+        ...(priorityOf(r.priority) ? { priority: priorityOf(r.priority) } : {}),
         ...(r.done_at ? { doneAt: r.done_at } : {}),
         // it ran (an agent once started): never "hasn't started", its summary when its chat is gone (SHEP-26)
         ...(r.started ? { started: r.started } : {}), ...(r.summary ? { summary: r.summary } : {}), ...(r.details ? { details: r.details } : {}),

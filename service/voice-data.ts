@@ -52,7 +52,7 @@ export const NOT_DATA: Record<string, string> = {
 /** The web app's actions that change something (act, send or screen do them), not data to read. */
 export const WRITES = ["plugin", "limits-check", "send", "react", "secret", "secret-saved", "answer", "page-send", "page-note", "artifact-send",
   "artifact-note", "artifact-say", "artifact-delete", "browser-notes", "mode", "autopilot-run", "setting", "accept", "close", "delete", "archive",
-  "reopen", "task-resume", "schedule", "stop", "stop-job", "steer", "pin", "rename", "order", "move", "section", "space-remove", "space-commit",
+  "reopen", "task-resume", "schedule", "priority", "stop", "stop-job", "steer", "pin", "rename", "order", "move", "section", "space-remove", "space-commit",
   "assistant-close", "tab-new", "tab-close", "tab-rename", "tab-switch", "tab-move", "restart", "model-pin", "rewind", "fork", "handback", "held-drop",
   "held-now", "read", "keys", "text", "dictation", "call", "machine-add", "machine-mac-open", "secrets-move", "serve-from", "pause", "usage",
   "automation", "effort", "model"];

@@ -109,6 +109,7 @@ def cmd_add(args):
         mode = "here" if args.here or not worktrees_on(s) else "worktree"
         t = s.new(args.title.strip(), prompt, mode)
         set_opts(t, args)
+        set_priority(t, args)
         space = bare(args.space) if args.space else caller_space()
         set_base(s, t, args.base, space, new=True)
         set_branch(s, t, getattr(args, "branch", None))
@@ -200,6 +201,23 @@ def set_base(s, t, base, space=None, new=False):
         t["base"], t["base_set"] = base, True
 
 
+PRIORITIES = ("highest", "high", "medium", "low", "lowest")
+
+
+def set_priority(t, args):
+    """--priority highest|high|medium|low|lowest, or none to clear it (a task without the field has no flag)."""
+    v = getattr(args, "priority", None)
+    if v is None:
+        return
+    low = v.strip().lower()
+    if low in ("none", "", "no", "off", "clear"):
+        t.pop("priority", None)
+    elif low in PRIORITIES:
+        t["priority"] = low
+    else:
+        raise Fail(f"priority is one of {', '.join(PRIORITIES)} (or none).")
+
+
 def set_notes(t, args):
     """--start-notes / --finish-notes: this task's own, replacing its folder's ("" goes back to the folder's)."""
     for which in ("start", "finish"):
@@ -236,6 +254,8 @@ def cmd_show(args):
         text.append(f"worktree: {v['worktree']} (branch {v['branch']}, base {v.get('base')})")
     elif v.get("branch") and v.get("mode") == "worktree":
         text.append(f"branch: {v['branch']} (set for this task)")
+    if v.get("priority"):
+        text.append(f"priority: {v['priority']}")
     if v.get("base_set"):
         text.append(f"merges into: {v['base']} (" + ("its space's base branch" if v.get("base_by") == "space" else "set for this task") + ")")
     if v.get("after_refs"):
@@ -856,6 +876,7 @@ def cmd_edit(args):
                 q["argv"] = worker_argv(s, t, q.get("space"))
         set_base(s, t, args.base)
         set_notes(t, args)
+        set_priority(t, args)
         if args.after is not None:
             set_after(s, t, *parse_after(s, args.after))
         at = scheduled_at(args) if (args.at or "").strip() or args.in_ is not None else None

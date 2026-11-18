@@ -1,6 +1,7 @@
 // The view model every source (live herdr, demo) fills and the screen draws.
 // Plain JSON both ways: the server sends a Snapshot and chat contents; the client sends Actions.
 import type { BrowserNote } from './browser.ts'
+import type { Priority } from './priority.ts'
 
 /** Status marks: red needs you, green ready, green turning ring merging, amber working, grey ring idle or to do, grey
  * clock queued, grey check done, dashed ring unreachable. */
@@ -364,6 +365,8 @@ export interface Task {
   archived?: number
   /** when it was pinned (ms): it shows in the Pinned group at the top of its lists */
   pinned?: number
+  /** its priority flag (MSHEP-1, herdr-task --priority): none when unflagged */
+  priority?: Priority
   /** the shared browser (the browser plugin), for a task not merged: whether it works on its machine, and if not why */
   browser?: { ready: boolean; hint?: string }
   /** what its row says it is in (3.0's Tasks): the space working in its list's folder, else the list's name */
@@ -1310,6 +1313,8 @@ export type Action =
   /** SHEP-38: start a task that hasn't started by itself later (herdr-task edit --at / --in, the words as typed), take that
    *  back (off: back to To do) or start a scheduled one now */
   | { type: 'schedule'; chat: string; at?: string; in?: string; off?: boolean; now?: boolean }
+  /** MSHEP-1: set a task's priority flag (herdr-task edit --priority); 'none' clears it */
+  | { type: 'priority'; chat: string; priority: Priority | 'none' }
   /** delete a task: its agent, herdr space, worktree, branch, chat and record; refused while it holds work, unless force */
   | { type: 'delete'; chat: string; force?: boolean }
   /** forget a space (shepherdr space remove): its folder and code stay on disk, its coordinator closes, and its open

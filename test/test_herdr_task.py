@@ -6268,3 +6268,62 @@ class LinkActions(unittest.TestCase):
         r = self.link.again("vmb", ["list"], lambda: subprocess.CompletedProcess([], *answers.pop(0)))
         self.assertEqual((r.returncode, r.stdout), (0, "[]"))
         self.assertFalse(self.link.lost(subprocess.CompletedProcess([], 1, "", "herdr-task: no such task")))
+
+
+class PriorityFlags(unittest.TestCase):
+    """MSHEP-1: a task's optional priority flag (add/edit --priority, show, list --json). Scheduled's real throwaway
+    store and git repo, borrowed as class attributes."""
+    setUp = Scheduled.setUp
+    run_cmd = Scheduled.run_cmd
+    add = Scheduled.add
+    task = Scheduled.task
+
+    def show(self, ref):
+        return self.run_cmd(self.commands.cmd_show, id=ref)
+
+    def listed(self):
+        return self.run_cmd(self.commands.cmd_list, all=False, archived=False)["tasks"]
+
+    def test_add_with_a_priority_and_without(self):
+        v = self.add("Flagged", priority="Highest")
+        self.assertEqual(v["priority"], "highest")
+        plain = self.add("Plain")
+        self.assertNotIn("priority", plain)
+        self.assertNotIn("priority", self.task(plain["id"]))
+        self.assertEqual(self.task(v["id"])["priority"], "highest")
+
+    def test_edit_sets_changes_and_clears_it(self):
+        n = self.add("Task")["id"]
+        self.assertEqual(self.run_cmd(self.commands.cmd_edit, id=str(n), priority="low")["priority"], "low")
+        self.assertEqual(self.task(n)["priority"], "low")
+        self.run_cmd(self.commands.cmd_edit, id=str(n), priority="medium")
+        self.assertEqual(self.task(n)["priority"], "medium")
+        # no --priority leaves it; none takes it off (the field goes, as an old file has it)
+        self.run_cmd(self.commands.cmd_edit, id=str(n), prompt="More words")
+        self.assertEqual(self.task(n)["priority"], "medium")
+        self.run_cmd(self.commands.cmd_edit, id=str(n), priority="none")
+        self.assertNotIn("priority", self.task(n))
+
+    def test_an_unknown_level_is_refused_and_changes_nothing(self):
+        n = self.add("Task", priority="high")["id"]
+        with self.assertRaises(self.Fail) as err:
+            self.run_cmd(self.commands.cmd_edit, id=str(n), priority="urgent")
+        self.assertIn("highest, high, medium, low, lowest", str(err.exception))
+        self.assertEqual(self.task(n)["priority"], "high")
+        with self.assertRaises(self.Fail):
+            self.add("Bad", priority="urgent")
+
+    def test_show_and_list_carry_it_and_old_tasks_without_it_work(self):
+        a = self.add("Old")["id"]
+        b = self.add("New", priority="lowest")["id"]
+        self.assertEqual(self.show(str(b))["priority"], "lowest")
+        self.assertNotIn("priority", self.show(str(a)))
+        by_id = {t["id"]: t for t in self.listed()}
+        self.assertEqual(by_id[b]["priority"], "lowest")
+        self.assertNotIn("priority", by_id[a])
+        # a file written before the field existed reads as before
+        import herdr_task.store as store
+        with store.Store(store.locate(self.folder)) as s:
+            s.find(a).pop("priority", None)
+            s.dirty = True
+        self.assertEqual(self.show(str(a))["title"], "Old")

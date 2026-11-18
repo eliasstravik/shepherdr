@@ -1,6 +1,7 @@
 // What a web page may do, each the same way the window does it (the shared core, hc and herdr-task): send the
 // person's words to an agent, stop it, mark an Assistant read, accept a Ready task, read a task's evidence.
 // Anything else is refused. Inputs are checked here; commands run with argument lists, never a shell line.
+import { priorityOf } from "../web/shared/priority.ts";
 import type { Hub } from "./hub.ts";
 import { dirname, join } from "node:path";
 import { appHome, writable } from "./paths.ts";
@@ -611,7 +612,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (!r || !b.job.startsWith("b:") || !(await r.stopJob(b.job.slice(2)))) throw new Error("It isn't running any more.");
     return { ok: true };
   }
-  else if ((b?.type === "close" || b?.type === "delete" || b?.type === "archive" || b?.type === "reopen" || b?.type === "task-resume" || b?.type === "schedule") && typeof b.chat === "string") {
+  else if ((b?.type === "close" || b?.type === "delete" || b?.type === "archive" || b?.type === "reopen" || b?.type === "task-resume" || b?.type === "schedule" || b?.type === "priority") && typeof b.chat === "string") {
     // a task's row menu: its chat key is "<task>/worker" (or 2.1's "/Agent")
     const t = compat.taskOf(b.chat.split("/")[0]);
     if (!t) throw new Error("That task isn't here any more.");
@@ -699,6 +700,17 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       try { out = JSON.parse(r.stdout); } catch {}
       if (r.code !== 0 || out?.error) return { ok: false, error: out?.error || r.stderr.trim().split("\n").pop() || "herdr-task refused it." };
       return { ok: true, why: out?.why ?? null };
+    }
+    // a task's priority flag (MSHEP-1): herdr-task edit --priority, one of the five levels or none
+    case "priority": {
+      const { ref, folder, machine } = taskOf(b);
+      const level = b.priority === "none" ? "none" : priorityOf(b.priority);
+      if (!level) throw new Error("Priority is one of Highest, High, Medium, Low, Lowest or none.");
+      const r = await task(["edit", ref, "--priority", level], folder, machine);
+      let out: any = null;
+      try { out = JSON.parse(r.stdout); } catch {}
+      if (r.code !== 0 || out?.error) return { ok: false, error: out?.error || r.stderr.trim().split("\n").pop() || "herdr-task refused it." };
+      return { ok: true };
     }
     // the person's own calls on a task, as herdr-task makes them: done, removed, or back from the archive
     case "close": case "delete": case "archive": case "reopen": {

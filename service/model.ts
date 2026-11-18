@@ -9,6 +9,7 @@ import type { Live } from "./live.ts";
 import { HOME, settingsFile, where } from "./paths.ts";
 import { READ_LISTS, taskLists, fileIn } from "../core/tasklists.js";
 import * as T from "../core/tasks.js";
+import { priorityOf } from "../web/shared/priority.ts";
 import { isHelper, subagentsOf } from "../core/chat-view.js";
 // The core is plain JavaScript; its defaults read as narrow types to TypeScript.
 const { place, refOf, taskKey, autoPrefix, reportOf, secondLine, leftOf, queueReason, machineOf } = T as any;
@@ -271,6 +272,7 @@ export class Model {
         // the space whose Assistant started it (herdr-task keeps it): the window counts and lists it there
         space: task.space ? (list.machine ? `${list.machine}/${task.space}` : task.space) : null,
         worker, archived: !!task.archived, pinned: pins.has(taskKey(list, task)),
+        priority: priorityOf(task.priority) ?? null,
         scheduled_for: task.state === "scheduled" ? task.scheduled_for ?? null : null,
         started: task.started ?? null, ready_at: task.ready_at ?? null, done_at: task.done_at ?? null,
         summary: task.summary ?? null, details: task.details ?? null, pr: task.pr ?? null, prompt: String(task.prompt ?? "").slice(0, 500), why: p.why ?? null,

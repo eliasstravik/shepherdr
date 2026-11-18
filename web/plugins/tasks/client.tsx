@@ -30,6 +30,7 @@ import {
   registry,
   setFilter,
   setGroup,
+  setSort,
   setUI,
   toggleAllDone,
   toggleShut,
@@ -43,6 +44,8 @@ import {
   type TaskGroup,
 } from '@client/kernel.ts'
 import { keysMoved } from '@client/focus.ts'
+import { PriorityFlag } from '@client/priority.tsx'
+import { byPriority, SORTS } from '@shared/priority.ts'
 import {
   ArchivedIcon,
   BackIcon,
@@ -123,6 +126,8 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
         {busy ? 'Accepting…' : 'Review'}
       </button>
     ) : null
+  // its priority flag (MSHEP-1): a click opens the picker; unflagged, a faint placeholder on hover
+  const flag = <PriorityFlag task={t} />
   return (
     <Line
       flip={t.id}
@@ -138,7 +143,7 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
       leftQuiet={t.status === 'scheduled'}
       dim={t.status === 'done'}
       where={where?.join(' · ')}
-      action={accept}
+      action={flag || accept ? <>{flag}{accept}</> : undefined}
       // with ⌘ (Ctrl off a Mac), beside the focused pane in split view
       onOpen={(e) => !menu.held() && (splitClick(e) ? openSplit({ kind: 'task', id: t.id }) : openTask(t.id))}
       menu={t.archived ? undefined : menu}
@@ -347,6 +352,7 @@ function AutoRow({ a, where, from }: { a: Automation; where?: string; from?: str
 /** The toggle under the search box: group by status or by place (SHEP-182), kept on this device */
 function ByToggle() {
   const by = useUI((u) => u.groups)
+  const sort = useUI((u) => u.sort)
   const opt = (k: GroupBy, label: string) => (
     <button key={k} type="button" role="radio" aria-checked={by === k} onClick={() => setGroup(k)}
       className="press inline-flex h-6 items-center rounded-full px-3 text-[0.75rem] text-fg2 hover:text-fg aria-checked:bg-sel aria-checked:text-fg coarse:h-8 phone:h-8 phone:px-4 phone:text-[0.875rem]">
@@ -354,10 +360,22 @@ function ByToggle() {
     </button>
   )
   return (
-    <div role="radiogroup" aria-label="Group by" className="flex items-center gap-0.5 px-2.5 pt-2 phone:px-3.5">
-      <span className="pr-1.5 text-[0.75rem] text-fg3 phone:text-[0.875rem]">Group by</span>
-      {opt('status', 'Status')}
-      {opt('place', 'Place')}
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2.5 pt-2 phone:px-3.5">
+      <div role="radiogroup" aria-label="Group by" className="flex items-center gap-0.5">
+        <span className="pr-1.5 text-[0.75rem] text-fg3 phone:text-[0.875rem]">Group by</span>
+        {opt('status', 'Status')}
+        {opt('place', 'Place')}
+      </div>
+      {/* MSHEP-1: the order within a group, kept on this device */}
+      <div role="radiogroup" aria-label="Sort by" className="flex items-center gap-0.5">
+        <span className="pr-1.5 text-[0.75rem] text-fg3 phone:text-[0.875rem]">Sort</span>
+        {SORTS.map((s) => (
+          <button key={s.key} type="button" role="radio" aria-checked={sort === s.key} onClick={() => setSort(s.key)}
+            className="press inline-flex h-6 items-center rounded-full px-3 text-[0.75rem] text-fg2 hover:text-fg aria-checked:bg-sel aria-checked:text-fg coarse:h-8 phone:h-8 phone:px-4 phone:text-[0.875rem]">
+            {s.label}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
@@ -367,6 +385,7 @@ function TaskList(_: { placeId: string }) {
   const view = useStore((s) => listView(s.ui, snap))
   const key = view.key
   const by = useUI((u) => u.groups)
+  const sort = useUI((u) => u.sort)
   const allDone = useUI((u) => u.allDone)
   const shut = useUI((u) => u.shut)
   const archived = useUI((u) => u.archived === key)
@@ -375,7 +394,7 @@ function TaskList(_: { placeId: string }) {
   const place = placeOf(snap, getState().ui.place)
   // a task moving to another group glides there; a new one fades in; what a filter, Show more or a fold leaves just shows
   const list = useRef<HTMLDivElement>(null)
-  useFlip(list, `${key}|${by}|${q}|${allDone.join()}|${shut.join()}`)
+  useFlip(list, `${key}|${by}|${sort}|${q}|${allDone.join()}|${shut.join()}`)
   // headings stay on screen while their group scrolls under the search field (it is sticky too): --stick is its height
   useLayoutEffect(() => {
     const el = list.current
@@ -395,9 +414,9 @@ function TaskList(_: { placeId: string }) {
   const footer = q ? null : registry.tasksFooter.map((F, i) => <F key={i} place={place} list={view} />)
   // searching, Done and archived tasks are in it too, each group whole and open, folded shut or not
   const groups = q
-    ? filteredGroups(snap, view, '', { groups: by }).map((g) => keepTasks(g, (t) => found(snap, t, q))).filter((g) => g.tasks.length)
+    ? filteredGroups(snap, view, '', { groups: by, sort }).map((g) => keepTasks(g, (t) => found(snap, t, q))).filter((g) => g.tasks.length)
       .map((g) => ({ ...g, count: g.tasks.length, more: 0, less: false, shut: false }))
-    : shownGroups(snap, view, { groups: by, allDone, shut })
+    : shownGroups(snap, view, { groups: by, sort, allDone, shut })
   // what the keyboard walks: the rows on screen
   const order = groups.flatMap((g) => g.tasks)
   const nothing = !groups.length && !autos.length
@@ -423,7 +442,7 @@ function TaskList(_: { placeId: string }) {
           // Needs you: oldest first, as the phone lists them
           const rank = (k: string) => { const i = ws.findIndex((w) => w.task === k); return i < 0 ? ws.length : i }
           const rows = <List>{g.key === 'need'
-            ? g.tasks.map((t) => ({ r: rank(t.id), el: row(t) })).sort((a, b) => a.r - b.r).map((x) => x.el)
+            ? (sort === 'priority' ? byPriority : (x: Task[]) => x)(g.tasks.map((t) => ({ r: rank(t.id), t })).sort((a, b) => a.r - b.r).map((x) => x.t)).map(row)
             : g.tasks.map(row)}</List>
           // by place: a space's work under its name, under its machine's name where more show; both fold
           if (g.on !== undefined) {

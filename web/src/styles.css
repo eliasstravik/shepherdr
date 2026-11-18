@@ -50,6 +50,12 @@
   --thumb: rgb(9 9 11 / 0.2);
   --thumb-held: rgb(9 9 11 / 0.36);
   --need: #e5484d;
+  /* a task's priority flag (MSHEP-1): Jira's hues; High and Medium a shade deeper here, as the originals fall under 3:1 on white */
+  --pri-highest: #ff5630;
+  --pri-high: #e8532f;
+  --pri-medium: #c77f00;
+  --pri-low: #0065ff;
+  --pri-lowest: #2684ff;
   --ready: #30a46c;
   --work: #e2a336;
   --muted: #a1a1aa;
@@ -134,6 +140,11 @@
   --thumb: rgb(255 255 255 / 0.18);
   --thumb-held: rgb(255 255 255 / 0.32);
   --need: #ff6369;
+  --pri-highest: #ff5630;
+  --pri-high: #ff7452;
+  --pri-medium: #ffab00;
+  --pri-low: #0065ff;
+  --pri-lowest: #2684ff;
   --ready: #3dd68c;
   --work: #f5b544;
   --muted: #71717a;

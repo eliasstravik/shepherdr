@@ -7,13 +7,14 @@ import { expire, loadOutbox, prune, saveOutbox, settle, type Outgoing } from './
 import { HttpError, wakeAll } from './uploads.ts'
 import { keptOf, mayReload, type Kept } from './reload.ts'
 import { OPEN_WITHIN, PONG_WITHIN, retryIn, SAY_LOST_AFTER } from './link.ts'
-import { groupTasks, loadAllDone, loadGroups, loadShut, keepTasks, namesFor, saveAllDone, saveGroups, saveShut, shownGroup, type GroupBy, type TaskGroup } from './groups.ts'
+import { groupTasks, loadAllDone, loadGroups, loadShut, loadSort, keepTasks, namesFor, saveAllDone, saveGroups, saveShut, saveSort, shownGroup, type GroupBy, type TaskGroup } from './groups.ts'
 import { canDock, CHAT_READ, fit as fitSidebars, focused, loadSidebars, PANEL, RIGHT, saveSidebars, showPanel, toggleFocus as focusTo, type Sidebars } from './sidebars.ts'
 import { hush } from './motion.ts'
 import { closed, loadPanes, MAX_PANES, normal, only, opened, PANE_MIN, replaced, samePane, savePanes, type Pane, type Panes } from './panes.ts'
 import { setupGuarded } from './guard.tsx'
 import { followOff, note as noteUsage, noteAct, noteView, startUsage } from './usage.ts'
 import { decide, itemOfUrl, screenOf, screenOfUrl, stepKey, stepsTo, systemSwipe, urlOf, type Entry } from './nav.ts'
+import type { Priority, SortBy } from '@shared/priority.ts'
 import { machineName, taskChatId, type Action, type Chat, type Message, type Place, type ReplyQuote, type ServerEvent, type Snapshot, type Task, type TermScreen, type UpdateStatus } from '@shared/types.ts'
 
 /* ---------- slots ---------- */
@@ -269,6 +270,8 @@ export interface UI {
   menu: boolean
   /** how the Tasks panel groups its tasks (by status or by place), remembered on this device */
   groups: GroupBy
+  /** how the Tasks panel orders them within a group (MSHEP-1): the default, or by priority flag; remembered on this device */
+  sort: SortBy
   /** task groups showing all their Done tasks ("place|group"), remembered on this device */
   allDone: string[]
   /** task headings folded shut, each view its own ("place|group", "place|m:machine"), remembered on this device */
@@ -444,6 +447,7 @@ let state: State = {
     plus: null,
     menu: false,
     groups: loadGroups(),
+    sort: loadSort(),
     allDone: loadAllDone(),
     shut: loadShut(),
     archived: null,
@@ -529,6 +533,7 @@ export function setUI(patch: Partial<UI> | ((ui: UI) => Partial<UI>)) {
   if (p.sidebars) saveSidebars(p.sidebars)
   if (p.split) savePanes(p.split)
   if (p.groups) saveGroups(p.groups)
+  if (p.sort) saveSort(p.sort)
   if (p.allDone) saveAllDone(p.allDone)
   if (p.shut) saveShut(p.shut)
   if (p.lists) saveLists(p.lists)
@@ -1169,7 +1174,7 @@ export function needsIn(snap: Snapshot, list: Pick<ListView, 'chips'>, ws: Waiti
 }
 
 /** a list's tasks in their groups, in the order they show (groups.ts groupTasks) */
-export function taskGroups(snap: Snapshot, list: ListView, by: GroupBy): TaskGroup[] {
+export function taskGroups(snap: Snapshot, list: ListView, by: GroupBy, sort: SortBy = 'default'): TaskGroup[] {
   const tasks = tasksIn(snap, list)
   // Needs you's tasks, in its order (web/shared/needs-you.ts: the phone's glance feed lists the same)
   const waits = needsIn(snap, list).flatMap((w) => (w.task ? [w.task] : []))
@@ -1177,7 +1182,7 @@ export function taskGroups(snap: Snapshot, list: ListView, by: GroupBy): TaskGro
     const rows = status === 'need' ? waits.map((id) => tasks.find((t) => t.id === id)!).filter((t) => t.place === p.id) : tasks.filter((t) => t.place === p.id && t.status === status && !waits.includes(t.id))
     return rows.length ? [{ key: `${p.id}|${status}`, label: `${p.name} · ${status === 'need' ? 'Needs you' : 'Ready'}`, note: machineName(snap.machines, p.machine), tasks: rows, names: { machine: false, project: false } }] : []
   }))
-  return groupTasks(snap.places, snap.machines ?? [], tasks, by, list.level, waits)
+  return groupTasks(snap.places, snap.machines ?? [], tasks, by, list.level, waits, sort)
 }
 
 /** Done: shut until opened ("done:open" in shut), its count showing alone */
@@ -1185,10 +1190,10 @@ export const DONE_OPEN = 'done:open'
 
 /** a list's task groups as this screen shows them: grouped as this device chose, Done cut short until Show all, a
  *  group folded shut showing none of its tasks (Done shut until opened) */
-export function shownGroups(snap: Snapshot, list: ListView, ui: Pick<UI, 'groups' | 'allDone' | 'shut'> = state.ui) {
+export function shownGroups(snap: Snapshot, list: ListView, ui: Pick<UI, 'groups' | 'allDone' | 'shut'> & Partial<Pick<UI, 'sort'>> = state.ui) {
   const shut = (key: string) => ui.shut.includes(`${list.key}|${key}`)
   const all = (key: string) => ui.allDone.includes(`${list.key}|${key}`)
-  return taskGroups(snap, list, ui.groups).map((g) => shownGroup(g, all(g.key), g.key === 'done' ? !shut(DONE_OPEN) : shut(g.key)))
+  return taskGroups(snap, list, ui.groups, ui.sort ?? 'default').map((g) => shownGroup(g, all(g.key), g.key === 'done' ? !shut(DONE_OPEN) : shut(g.key)))
 }
 
 /** fold a heading of a list's tasks shut or open ("group", "m:machine"); with siblings, them too, the same way */
@@ -1205,6 +1210,16 @@ export function toggleShut(listKey: string, key: string, siblings: string[] = []
 export function toggleAllDone(listKey: string, key: string) {
   const k = `${listKey}|${key}`
   setUI((ui) => ({ allDone: ui.allDone.includes(k) ? ui.allDone.filter((x) => x !== k) : [...ui.allDone, k] }))
+}
+
+/** the Tasks panel's order within its groups: the default, or by priority flag (MSHEP-1) */
+export function setSort(sort: SortBy) {
+  setUI({ sort, cur: 0 })
+}
+
+/** set a task's priority flag (herdr-task edit --priority); 'none' clears it. error: herdr-task's words if it refused */
+export function setPriority(t: Task, priority: Priority | 'none'): Promise<{ ok?: boolean; error?: string }> {
+  return act({ type: 'priority', chat: t.agent?.chat ?? `${t.id}/Agent`, priority })
 }
 
 /** how the lists group their tasks: by status or by place */
@@ -1230,8 +1245,8 @@ export function setFilter(listKey: string, list: 'tasks' | 'artifacts', q: strin
 }
 
 /** A list's tasks filtered: in their groups, every Done one, and then its archived ones; groups with none left out */
-export function filteredGroups(snap: Snapshot, list: ListView, q: string, ui: Pick<UI, 'groups'> = state.ui) {
-  const groups: TaskGroup[] = taskGroups(snap, { ...list, attention: false }, ui.groups)
+export function filteredGroups(snap: Snapshot, list: ListView, q: string, ui: Pick<UI, 'groups'> & Partial<Pick<UI, 'sort'>> = state.ui) {
+  const groups: TaskGroup[] = taskGroups(snap, { ...list, attention: false }, ui.groups, ui.sort ?? 'default')
   const archived = archivedIn(snap, list)
   if (archived.length) groups.push({ key: 'archived', label: 'Archived', tasks: archived, names: namesFor(list.level) })
   return groups.map((g) => keepTasks(g, (t) => taskMatches(t, q))).filter((g) => g.tasks.length)

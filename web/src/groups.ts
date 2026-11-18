@@ -4,8 +4,28 @@
 // one machine has tasks, every status mixed in each (the row's icon says which); Done last too. Pinned tasks get a
 // Pinned group on top in both.
 import { doneNewestFirst, GROUPS, type Machine, type Place, type Task } from '@shared/types.ts'
+import { byPriority, type SortBy } from '@shared/priority.ts'
 
 export type GroupBy = 'status' | 'place'
+
+const SORT_KEY = 'shepherdr.tasksSort'
+
+/** the kept order within the groups (MSHEP-1): today's default until Priority is chosen, remembered on this device */
+export function loadSort(): SortBy {
+  try {
+    return localStorage.getItem(SORT_KEY) === 'priority' ? 'priority' : 'default'
+  } catch {
+    return 'default'
+  }
+}
+
+export function saveSort(by: SortBy) {
+  try {
+    localStorage.setItem(SORT_KEY, by)
+  } catch {
+    /* private window: the default order again next time */
+  }
+}
 
 export { GROUPS }
 
@@ -92,8 +112,10 @@ export interface TaskGroup {
  *   opened). Rows say their machine and space.
  * - Place: one group per space, machine by machine in the sidebar's order, its tasks in status order, then Done.
  * level: the view's (0 more machines, 1 a machine, 2 a space), which says what its rows needn't.
+ * sort: 'priority' puts each group's flagged tasks first, Highest to Lowest, the unflagged last and ties as they were (Done
+ * keeps its newest-first order).
  */
-export function groupTasks(places: Place[], machines: Machine[], ts: Task[], by: GroupBy, level = 1, waits?: string[]): TaskGroup[] {
+export function groupTasks(places: Place[], machines: Machine[], ts: Task[], by: GroupBy, level = 1, waits?: string[], sort: SortBy = 'default'): TaskGroup[] {
   // archived tasks are in no group: only their place's Archived view shows them
   const all = doneNewestFirst(GROUPS.flatMap(([s]) => ts.filter((t) => t.status === s && !t.archived)))
   const names = namesFor(level)
@@ -106,11 +128,12 @@ export function groupTasks(places: Place[], machines: Machine[], ts: Task[], by:
   const done = rest.filter((t) => t.status === 'done')
   const open = rest.filter((t) => t.status !== 'done')
   const inGroup = (s: string) => (waiting ? (s === 'need' ? needs : open.filter((t) => t.status === s && s !== 'need')) : open.filter((t) => t.status === s))
-  return [
+  const groups: TaskGroup[] = [
     ...(pinned.length ? [{ key: 'pinned', label: 'Pinned', tasks: pinned, names }] : []),
     ...(by === 'status' ? GROUPS.filter(([s]) => s !== 'done').map(([s, label]) => ({ key: s, label, tasks: inGroup(s), names })).filter((g) => g.tasks.length) : projectGroups(places, machines, open)),
     ...(done.length ? [{ key: 'done', label: 'Done', tasks: done, names }] : []),
   ]
+  return sort === 'priority' ? groups.map((g) => (g.key === 'done' ? g : { ...g, tasks: byPriority(g.tasks) })) : groups
 }
 
 /** what rows must say of where each task is, in a view of this level grouped by nothing that says it: the machine
