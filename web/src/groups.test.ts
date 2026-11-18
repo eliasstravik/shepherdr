@@ -63,3 +63,23 @@ describe("the window's grouping (core/tasks.js groupNow)", () => {
     expect(from({ 'tasks.group': 'status', 'tasks.groupby': 'space' })).toBe('status')
   })
 })
+
+describe('Sort by priority (MSHEP-1)', () => {
+  const mk = () => [
+    task('a:shep', 'todo', { priority: 'low' }), task('a:shep', 'todo'), task('a:shep', 'todo', { priority: 'highest' }), task('a:shep', 'todo', { priority: 'low' }),
+    task('a:shep', 'done', { doneAt: 9 }), task('a:shep', 'done', { doneAt: 5, priority: 'high' }), task('a:shep', 'done', { doneAt: 7, priority: 'high' }),
+  ]
+  const names = (gs: ReturnType<typeof groupTasks>, key: string) => gs.find((g) => g.key === key)!.tasks.map((t) => t.priority ?? '-')
+  test('default order is untouched', () => {
+    expect(names(groupTasks(places, machines, mk(), 'status', 2), 'todo')).toEqual(['low', '-', 'highest', 'low'])
+  })
+  test('Highest first, unflagged last, ties as they were (Done: newest first among equals)', () => {
+    const gs = groupTasks(places, machines, mk(), 'status', 2, undefined, 'priority')
+    expect(names(gs, 'todo')).toEqual(['highest', 'low', 'low', '-'])
+    expect(names(gs, 'done')).toEqual(['high', 'high', '-'])
+    expect(gs.find((g) => g.key === 'done')!.tasks.map((t) => t.doneAt)).toEqual([7, 5, 9])
+  })
+  test('by place too', () => {
+    expect(names(groupTasks(places, machines, mk(), 'place', 2, undefined, 'priority'), 'a:shep')).toEqual(['highest', 'low', 'low', '-'])
+  })
+})

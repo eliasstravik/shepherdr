@@ -14,7 +14,7 @@ import { closed, loadPanes, MAX_PANES, normal, only, opened, PANE_MIN, replaced,
 import { setupGuarded } from './guard.tsx'
 import { followOff, note as noteUsage, noteAct, noteView, startUsage } from './usage.ts'
 import { decide, itemOfUrl, screenOf, screenOfUrl, stepKey, stepsTo, systemSwipe, urlOf, type Entry } from './nav.ts'
-import type { Priority, SortBy } from '@shared/priority.ts'
+import { byPriority, type Priority, type SortBy } from '@shared/priority.ts'
 import { machineName, taskChatId, type Action, type Chat, type Message, type Place, type ReplyQuote, type ServerEvent, type Snapshot, type Task, type TermScreen, type UpdateStatus } from '@shared/types.ts'
 
 /* ---------- slots ---------- */
@@ -1180,7 +1180,7 @@ export function taskGroups(snap: Snapshot, list: ListView, by: GroupBy, sort: So
   const waits = needsIn(snap, list).flatMap((w) => (w.task ? [w.task] : []))
   if (list.attention) return snap.places.flatMap((p) => (['need', 'ready'] as const).flatMap((status) => {
     const rows = status === 'need' ? waits.map((id) => tasks.find((t) => t.id === id)!).filter((t) => t.place === p.id) : tasks.filter((t) => t.place === p.id && t.status === status && !waits.includes(t.id))
-    return rows.length ? [{ key: `${p.id}|${status}`, label: `${p.name} · ${status === 'need' ? 'Needs you' : 'Ready'}`, note: machineName(snap.machines, p.machine), tasks: rows, names: { machine: false, project: false } }] : []
+    return rows.length ? [{ key: `${p.id}|${status}`, label: `${p.name} · ${status === 'need' ? 'Needs you' : 'Ready'}`, note: machineName(snap.machines, p.machine), tasks: sort === 'priority' ? byPriority(rows) : rows, names: { machine: false, project: false } }] : []
   }))
   return groupTasks(snap.places, snap.machines ?? [], tasks, by, list.level, waits, sort)
 }

@@ -113,7 +113,7 @@ export interface TaskGroup {
  * - Place: one group per space, machine by machine in the sidebar's order, its tasks in status order, then Done.
  * level: the view's (0 more machines, 1 a machine, 2 a space), which says what its rows needn't.
  * sort: 'priority' puts each group's flagged tasks first, Highest to Lowest, the unflagged last and ties as they were (Done
- * keeps its newest-first order).
+ * tasks of one level stay newest first).
  */
 export function groupTasks(places: Place[], machines: Machine[], ts: Task[], by: GroupBy, level = 1, waits?: string[], sort: SortBy = 'default'): TaskGroup[] {
   // archived tasks are in no group: only their place's Archived view shows them
@@ -133,7 +133,7 @@ export function groupTasks(places: Place[], machines: Machine[], ts: Task[], by:
     ...(by === 'status' ? GROUPS.filter(([s]) => s !== 'done').map(([s, label]) => ({ key: s, label, tasks: inGroup(s), names })).filter((g) => g.tasks.length) : projectGroups(places, machines, open)),
     ...(done.length ? [{ key: 'done', label: 'Done', tasks: done, names }] : []),
   ]
-  return sort === 'priority' ? groups.map((g) => (g.key === 'done' ? g : { ...g, tasks: byPriority(g.tasks) })) : groups
+  return sort === 'priority' ? groups.map((g) => ({ ...g, tasks: byPriority(g.tasks) })) : groups
 }
 
 /** what rows must say of where each task is, in a view of this level grouped by nothing that says it: the machine

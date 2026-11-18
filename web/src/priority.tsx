@@ -53,7 +53,12 @@ export function PriorityFlag({ task, bare = false, className }: { task: Task; ba
           !task.priority && !bare && 'opacity-0 group-hover:opacity-70 focus-visible:opacity-100 aria-expanded:opacity-100 coarse:opacity-35', className)}>
         <PriorityIcon level={task.priority} className={clsx(ic, 'phone:size-5')} />
       </button>
-      {error ? <span role="alert" className="sr-only">{error}</span> : null}
+      {/* what it refused (or why it couldn't save), under the flag until a click elsewhere */}
+      {error ? (
+        <Floating anchor={btn.current} place="below-end" gap={4} onClose={() => setError(null)}>
+          <div role="alert" className="max-w-64 rounded-box bg-bg px-3 py-2 text-[0.8125rem]/5 text-need-fg shadow-menu phone:text-base/6">{error}</div>
+        </Floating>
+      ) : null}
       {open ? (
         <Floating anchor={btn.current} place="below-end" gap={4} onClose={close}>
           <Menu label="Priority" onClose={close}>

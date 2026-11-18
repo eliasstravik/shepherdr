@@ -486,7 +486,7 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
   // menu pins it
   const review = task.status === 'ready' && !task.archived ? <HeadButton disabled={accepting} onClick={() => openAccept(task.id)}>{accepting ? 'Accepting…' : 'Review'}</HeadButton> : null
   // its priority flag (MSHEP-1) before it: the same picker as its row's
-  const tools = <>{task.archived ? null : <PriorityFlag task={task} bare />}{review}</>
+  const tools = <><PriorityFlag task={task} bare />{review}</>
   // its title alone on the first line, so it keeps the room; under it, quieter, its id in the list's monospace, then what
   // its agent is doing (working with no % yet, or a provider retry's line: its row's words, as the window's header says
   // them), else where it merges
