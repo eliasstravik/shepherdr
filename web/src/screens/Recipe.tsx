@@ -62,8 +62,8 @@ function Chart({ b }: { b: Block }) {
 }
 
 /** a list item or a table cell: its Markdown, then small tag chips (words, or { md, chips }) */
-function Cell({ x }: { x: unknown }) {
-  const p = parts(x)
+function Cell({ x, column }: { x: unknown; column?: unknown }) {
+  const p = parts(x, column)
   if (!p.chips.length) return <Markdown text={p.md} />
   return (
     <span className="flex flex-wrap items-center gap-1.5">
@@ -261,8 +261,8 @@ export function Recipe({ recipe, asset, reply }: Props) {
       case 'table': return (
         <div className="overflow-x-auto rounded-box shadow-box">
           <table className="w-full border-collapse">
-            <thead><tr>{b.columns.map((c: any, i: number) => <th key={i} className={clsx('border-b border-line px-3 py-2 text-left font-medium text-fg2', (c.align ?? '') === 'right' && 'text-right')}>{c.label ?? c}</th>)}</tr></thead>
-            <tbody>{b.rows.map((r: unknown[], i: number) => <tr key={i} className="border-b border-line last:border-0">{r.map((c, j) => <td key={j} className={clsx('px-3 py-2 align-top', b.columns[j]?.align === 'right' && 'text-right tabular-nums')}><Cell x={c} /></td>)}</tr>)}</tbody>
+            <thead><tr>{b.columns.map((c: any, i: number) => <th key={i} className={clsx('border-b border-line px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-fg2', (c.align ?? '') === 'right' && 'text-right')}>{c.label ?? c}</th>)}</tr></thead>
+            <tbody>{b.rows.map((r: unknown[], i: number) => <tr key={i} className="border-b border-line last:border-0">{r.map((c, j) => <td key={j} className={clsx('px-3 py-2 align-top', b.columns[j]?.align === 'right' && 'text-right tabular-nums')}><Cell x={c} column={b.columns[j]} /></td>)}</tr>)}</tbody>
           </table>
         </div>
       )

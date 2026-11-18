@@ -120,3 +120,12 @@ test("parts reads a cell as Markdown and chips", () => {
   expect(parts({ chip: "on", tone: "good" })).toEqual({ md: "", chips: [{ text: "on", tone: "good" }] });
   expect(parts({ md: "x", chips: ["a", { text: "b", tone: "bad" }] }).chips).toEqual([{ text: "a", tone: "mute" }, { text: "b", tone: "bad" }]);
 });
+
+test("code cells and code columns set words in monospace", () => {
+  expect(parts({ code: "a-flag" }).md).toBe("`a-flag`");
+  expect(parts("a-flag", { label: "Flag", code: true }).md).toBe("`a-flag`");
+  expect(parts("plain", { label: "Flag" }).md).toBe("plain");
+  expect(parts({ code: "a`b" }).md).toBe("`a'b`");
+  expect(one({ type: "table", columns: [{ label: "Flag", code: true }], rows: [[{ code: "x" }]] })).toEqual([]);
+  expect(one({ type: "table", columns: ["Flag"], rows: [[{ code: 5 }]] }).length).toBe(1);
+});

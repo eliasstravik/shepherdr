@@ -66,12 +66,12 @@ export default class RecipeView extends View {
 
   chip(text, tone, t) {
     const c = toneColor(t, tone);
-    return div().h(18).px(7).flex().flex_none().items_center().rounded(9).bg(c + "24").text_color(c).text_size(11).font_medium().child(text);
+    return div().h(18).px(7).flex().min_w(0).max_w_full().items_center().rounded(9).bg(c + "24").text_color(c).text_size(11).font_medium().child(div().min_w(0).truncate().child(text));
   }
 
   // A list item or a table cell: its Markdown, then its chips (an item or cell may be words, or { md, chips })
-  cell(id, x, t) {
-    const p = parts(x);
+  cell(id, x, t, column = null) {
+    const p = parts(x, column);
     if (!p.chips.length) return this.md(id, p.md, t);
     return h_flex().w_full().min_w(0).gap(6).items_center().flex_wrap()
       .when(!!p.md, (e) => e.child(div().min_w(0).child(this.md(id, p.md, t))))
@@ -142,10 +142,10 @@ export default class RecipeView extends View {
         .child(div().flex_none().w(16).text_size(13).text_color(t.muted).child(b.ordered ? `${i + 1}.` : "•"))
         .child(this.cell(`${b.id}-${i}`, x, t))));
       case "table": return v_flex().w_full().rounded(8).border_1().border_color(t.border).overflow_hidden()
-        .child(h_flex().w_full().px(10).py(6).bg(t.surface).children(b.columns.map((c, i) => div().flex_1().min_w(0).text_size(12).font_medium().text_color(t.muted)
-          .when((c.align ?? "") === "right", (e) => e.text_right()).child(String(c.label ?? c)))))
+        .child(h_flex().w_full().px(10).py(6).bg(t.surface).children(b.columns.map((c, i) => div().flex_1().min_w(0).text_size(11).font_medium().text_color(t.muted)
+          .when((c.align ?? "") === "right", (e) => e.text_right()).child(String(c.label ?? c).toUpperCase()))))
         .children(b.rows.map((r, ri) => h_flex().w_full().px(10).py(6).border_t_1().border_color(t.border)
-          .children(r.map((c, i) => div().flex_1().min_w(0).text_size(13).whitespace_normal().when(b.columns[i]?.align === "right", (e) => e.text_right()).child(this.cell(`${b.id}-${ri}-${i}`, c, t))))));
+          .children(r.map((c, i) => div().flex_1().min_w(0).text_size(13).whitespace_normal().when(b.columns[i]?.align === "right", (e) => e.text_right()).child(this.cell(`${b.id}-${ri}-${i}`, c, t, b.columns[i]))))));
       case "chart": return this.chart(b, t);
       case "stats": return h_flex().flex_wrap().gap(8).children(b.items.map((x) => v_flex().min_w(120).flex_1().p(10).gap(2).rounded(8).bg(t.surface)
         .when(!!x.tone, (e) => e.border_l(3).border_color(toneColor(t, x.tone)))

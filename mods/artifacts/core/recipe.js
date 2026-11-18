@@ -6,9 +6,10 @@
 //
 // Blocks (each may carry an "id", which markup notes and answers point at; one is given when it has none):
 //   heading  { text, level: 1-3 }                       text     { md }  (Markdown)
-//   list     { items: [item], ordered }                 table    { columns: [label | { label, align }], rows: [[cell]] }
+//   list     { items: [item], ordered }                 table    { columns: [label | { label, align, code }], rows: [[cell]] }
 //             item and cell: Markdown words, or { md, chip | chips: [chip] } (chip: words, or { text, tone }; tone: info | good |
-//             warn | bad | mute, the default): the words with small tag chips after them. A chip cell: { chip: "on", tone: "good" }.
+//             warn | bad | mute, the default): the words with small tag chips after them. A chip cell: { chip: "on", tone: "good" }; a code cell: { code: "flag-name" }
+//             (a column with code: true sets all its plain words that way).
 //   chart    { kind: bar | line | pie, labels: [], series: [{ name, values: [] }] }
 //   stats    { items: [{ label, value, note, tone }] }  tone (info | good | warn | bad): a coloured left edge and value        image    { src, caption, w, h }  (src: a file beside it)
 //   video    { src, poster, caption, loop, muted, autoplay }   a clip: mp4, webm or mov (poster: a picture beside it)
@@ -114,16 +115,19 @@ function partsOk(x) {
   if (str(x) || typeof x === "number") return true;
   if (!x || typeof x !== "object" || arr(x)) return false;
   if (x.md != null && !str(x.md)) return false;
+  if (x.code != null && !str(x.code)) return false;
   const chips = arr(x.chips) ? x.chips : x.chip != null ? [x.chip] : [];
-  return (x.md != null || chips.length > 0) && chips.every((c) => chipOk(c, x.tone));
+  return (x.md != null || x.code != null || chips.length > 0) && chips.every((c) => chipOk(c, x.tone));
 }
 
-// A list item or a table cell as parts: { md, chips: [{ text, tone }] } (what both renderers draw).
-export function parts(x) {
+// A list item or a table cell as parts: { md, chips: [{ text, tone }] } (what both renderers draw). A cell may be
+// { code: "words" } (monospace), and a column { label, code: true } sets all its plain words in monospace.
+export function parts(x, column = null) {
+  const code = (md) => (md ? `\`${md.replace(/`/g, "'")}\`` : "");
   if (x == null) return { md: "", chips: [] };
-  if (typeof x !== "object") return { md: String(x), chips: [] };
+  if (typeof x !== "object") return { md: column?.code ? code(String(x)) : String(x), chips: [] };
   const list = arr(x.chips) ? x.chips : x.chip != null ? [x.chip] : [];
-  return { md: x.md ?? "", chips: list.map((c) => ({ text: String(str(c) ? c : c?.text ?? ""), tone: (str(c) ? null : c?.tone) ?? x.tone ?? "mute" })) };
+  return { md: str(x.code) ? code(x.code) : x.md ?? "", chips: list.map((c) => ({ text: String(str(c) ? c : c?.text ?? ""), tone: (str(c) ? null : c?.tone) ?? x.tone ?? "mute" })) };
 }
 
 // A pr block's fields: where the pull request is, its title and link, and its state; ci and review are optional chips.
