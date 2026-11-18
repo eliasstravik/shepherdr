@@ -159,7 +159,7 @@ def manifest():
 
 # Runs on the other machine (python3, 3.8+), its input on stdin: checks or installs, then prints
 # what it found. Each file: written beside its place, tried (its --version), the old one kept as
-# <file>.bak, then swapped in one step (os.replace).
+# <file>.bak, then swapped in one step (os.replace): a herdr-task running there keeps its old file (SHEP-259).
 INSTALL = r'''
 import base64, hashlib, json, os, shutil, subprocess, sys, time
 x = json.loads(sys.stdin.read())
@@ -205,11 +205,13 @@ for f in x["files"]:
     else:
         st = "behind"
     if x["op"] == "install" and st in ("missing", "behind") and "data" in f:
-        tmp = p + ".herdr-new"
+        tmp = p + ".herdr-new." + str(os.getpid())
         try:
             os.makedirs(os.path.dirname(p), exist_ok=True)
             with open(tmp, "wb") as w:
                 w.write(base64.b64decode(f["data"]))
+                w.flush()
+                os.fsync(w.fileno())
             os.chmod(tmp, f["mode"])
             if f.get("test"):
                 t = subprocess.run([sys.executable, tmp] + f["test"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)

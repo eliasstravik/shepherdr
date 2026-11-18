@@ -24,6 +24,68 @@ import sys
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
+
+def _hold_package(archive):
+    """As a zipapp (herdr_task inside this one file): its package read into memory once, from one open of the file,
+    and imported from there. Python's own zipimport opens the file by name again for every import, so an update
+    that swapped in a new copy meanwhile made a running herdr-task's next import fail ("bad local file header",
+    SHEP-259). Returns whether it holds it."""
+    import importlib.abc
+    import importlib.util
+    import io
+    import time
+    import zipfile
+    src = None
+    for _ in range(20):
+        try:
+            with open(archive, "rb") as f:
+                z = zipfile.ZipFile(io.BytesIO(f.read()))
+                src = {n: z.read(n) for n in z.namelist() if n.startswith("herdr_task/") and n.endswith(".py")}
+            break
+        except Exception:
+            # an older writer still filling the file in place: read it again once it's whole
+            time.sleep(0.05)
+    if not src:
+        return False
+
+    class Held(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+        def _rel(self, name):
+            key = name.replace(".", "/")
+            for rel, pkg in ((key + "/__init__.py", True), (key + ".py", False)):
+                if rel in src:
+                    return rel, pkg
+            return None, False
+
+        def find_spec(self, name, path=None, target=None):
+            if name != "herdr_task" and not name.startswith("herdr_task."):
+                return None
+            rel, pkg = self._rel(name)
+            if rel is None:
+                return None
+            spec = importlib.util.spec_from_loader(name, self, origin=os.path.join(archive, rel), is_package=pkg)
+            spec.has_location = True
+            if pkg:
+                spec.submodule_search_locations = [os.path.join(archive, name.replace(".", "/"))]
+            return spec
+
+        def create_module(self, spec):
+            return None
+
+        def exec_module(self, module):
+            rel, _ = self._rel(module.__name__)
+            exec(compile(src[rel], module.__spec__.origin, "exec", dont_inherit=True), module.__dict__)
+
+        def get_source(self, name):
+            rel, _ = self._rel(name)
+            return src[rel].decode("utf-8") if rel else None
+
+    sys.meta_path.insert(0, Held())
+    return True
+
+
+if os.path.isfile(os.path.dirname(os.path.realpath(__file__))):
+    _hold_package(os.path.dirname(os.path.realpath(__file__)))
+
 # Shepherdr's data in its own folders: moved there once, before anything reads a path (herdr_task/layout.py).
 from herdr_task import layout  # noqa: E402
 

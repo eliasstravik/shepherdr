@@ -83,10 +83,13 @@ def remote_run(machine, argv, timeout=None):
             with open(mark, "w") as f:
                 f.write("source")
             return
-        r = subprocess.run(["hc", "file", "write", "--on", machine, target], input=body, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # Written beside its place, then swapped in with one rename (SHEP-259): a herdr-task running there keeps
+        # its whole old file, never a half-written one.
+        tmp = f"{target}.herdr-new.{os.getpid()}"
+        r = subprocess.run(["hc", "file", "write", "--on", machine, tmp], input=body, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if r.returncode != 0:
             raise Fail(f"Couldn't install herdr-task on {machine}: {r.stderr.decode().strip()}")
-        run(["hc", "exec", "--on", machine, "--", "chmod", "+x", target], check=True)
+        run(["hc", "exec", "--on", machine, "--", "sh", "-c", 'chmod +x "$1" && mv -f "$1" "$2"', "sh", tmp, target], check=True)
         os.makedirs(os.path.dirname(mark), exist_ok=True)
         with open(mark, "w") as f:
             f.write(digest)

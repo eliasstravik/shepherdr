@@ -54,10 +54,38 @@ def touches(path):
     return _inside(path, REAL_DIRS) and not _inside(path, [os.path.realpath(ROOT)])
 
 
+# The person's installed commands (herdr-task's zipapp and the links beside it): a test may read them, never write
+# them. One once replaced the real ~/.local/bin/herdr-task (SHEP-227), and a copy changed under running herdr-tasks
+# broke their imports (SHEP-259).
+REAL_BIN = [os.path.join(REAL, ".local", "bin")]
+_WRITES = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+
+
+def writes_bin(path):
+    if not isinstance(path, (str, bytes, os.PathLike)):
+        return False
+    path = os.fsdecode(path)
+    if not os.path.isabs(path):
+        path = os.path.join(os.getcwd(), path)
+    # the folder itself, not where a link in it leads: ~/.local/bin/herdr-task may lead into this repo
+    d, base = os.path.split(path)
+    return _inside(os.path.join(os.path.realpath(d), base), REAL_BIN) or _inside(d, REAL_BIN)
+
+
 def _audit(event, args):
     if event == "open":
         if touches(args[0]):
             raise RealHome(f"a test opened {args[0]} in the real home: use a throwaway folder (test/home_guard.py)")
+        flags = args[2] if len(args) > 2 and isinstance(args[2], int) else 0
+        if flags & _WRITES and writes_bin(args[0]):
+            raise RealHome(f"a test wrote {args[0]}, the person's installed command: use a throwaway folder "
+                           "(test/home_guard.py)")
+    elif event in ("os.rename", "os.remove", "os.symlink", "os.chmod", "os.truncate", "os.link", "os.unlink"):
+        # a link's or a hard link's target (its first argument) is only read
+        for p in (args[1:2] if event in ("os.symlink", "os.link") else args[:2]):
+            if writes_bin(p):
+                raise RealHome(f"a test changed {p}, the person's installed command ({event}): use a throwaway folder "
+                               "(test/home_guard.py)")
     elif event == "subprocess.Popen":
         env = args[3] if len(args) > 3 and args[3] is not None else os.environ
         home = env.get("HOME") if hasattr(env, "get") else None
