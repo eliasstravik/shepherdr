@@ -14,7 +14,11 @@ import { chatLabel } from "../core/spaces.js";
 import { kindOf } from "../core/chat-reader.js";
 import * as LS from "../core/live-switch.js";
 
-const { DEFAULTS, parseDefaults, current, menuFor, rowFor, argvFor, sessionOf, NAMES, line, PICKS_FILE, parsePicks, pickKey, withPin, withRecent } = AG as any;
+const { DEFAULTS, parseDefaults, current, menuFor, rowFor, argvFor, sessionOf, NAMES, line, PICKS_FILE, parsePicks, pickKey, withPin, withRecent, speedOf, speedWordOf } = AG as any;
+/** a chat's speed as kept: false, true (Fast) or "ultrafast" */
+const fastOf = (f: unknown) => (f === "ultrafast" ? "ultrafast" : !!f);
+/** the speeds a CLI's models offer: normal, then fast and ultrafast where one has them (SHEP-258) */
+const speedsOf = (models: any[]) => ["normal", ...(models.some((x) => x.fast) ? ["fast"] : []), ...(models.some((x) => x.ultrafast) ? ["ultrafast"] : [])];
 
 async function run(cmd: string[]) {
   const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
@@ -75,7 +79,7 @@ export class Agents {
     const c = current(kind, t.foreground?.argv ?? t.argv ?? [], meta, dflts[kind]);
     const row = rowFor(kind, c);
     const menus = Object.fromEntries(["claude", "codex"].filter((k) => k === kind || !have || have.has(k)).map((k) => [k, menuFor(k, dflts[k], k === kind ? row : null)]));
-    return { current: { agent: kind, model: row, effort: c.effort ?? null, fast: !!c.fast, perm: c.perm ?? null }, menus,
+    return { current: { agent: kind, model: row, effort: c.effort ?? null, fast: fastOf(c.fast), perm: c.perm ?? null }, menus,
       permDefault: { claude: claude?.mode ?? "manual", codex: "auto" }, picks: this.picks(), offline: machine && !(await this.reachable(machine)) ? machine : null };
   }
 
@@ -109,7 +113,7 @@ export class Agents {
       const m = menuFor(k, dflt[k], null);
       // its permission modes, and the one a new agent gets unless picked (the CLI's own: Claude Code's settings mode)
       return { kind: k, name: NAMES[k], models: m.models.map((x: any) => ({ id: x.id, label: x.name, efforts: x.efforts, ...(x.defaultEffort ? { defaultEffort: x.defaultEffort } : {}) })),
-        speeds: m.models.some((x: any) => x.fast) ? ["normal", "fast"] : ["normal"], perms: m.perms ?? [], permDefault: k === "claude" ? dflt.claude?.mode ?? "manual" : "auto" };
+        speeds: speedsOf(m.models), perms: m.perms ?? [], permDefault: k === "claude" ? dflt.claude?.mode ?? "manual" : "auto" };
     });
   }
 
@@ -125,9 +129,9 @@ export class Agents {
     const clis = ["claude", "codex"].map((k) => {
       const m = menuFor(k, dflt[k], k === kind ? c.model : null);
       return { kind: k, name: NAMES[k], models: m.models.map((x: any) => ({ id: x.id, label: x.name, efforts: x.efforts, ...(x.defaultEffort ? { defaultEffort: x.defaultEffort } : {}) })),
-        speeds: m.models.some((x: any) => x.fast) ? ["normal", "fast"] : ["normal"] };
+        speeds: speedsOf(m.models) };
     });
-    const on = { kind, model: rowFor(kind, c) ?? undefined, effort: c.effort ?? undefined, speed: c.fast ? "fast" : "normal" };
+    const on = { kind, model: rowFor(kind, c) ?? undefined, effort: c.effort ?? undefined, speed: speedWordOf(c.fast) };
     return { role: t.labels?.["herdr.task"] ? "task" : "coordinator", on, onKnown: true, onWords: line(c), want: on, clis, working: t.status?.state === "working" };
   }
 
@@ -142,8 +146,8 @@ export class Agents {
     let meta = reader?.conv?.meta ?? {};
     if (t.created_ms && meta.at && meta.at < t.created_ms) meta = { used: meta.used, window: meta.window };
     const c = current(kind, t.foreground?.argv ?? t.argv ?? [], meta, dflt);
-    const from = { agent: kind, model: rowFor(kind, c) ?? "", effort: c.effort ?? "", fast: !!c.fast, perm: c.perm ?? "" };
-    const to = { agent: pick.kind, model: pick.model ?? "", effort: pick.effort ?? "", fast: pick.speed === "fast", perm: pick.perm ?? "" };
+    const from = { agent: kind, model: rowFor(kind, c) ?? "", effort: c.effort ?? "", fast: fastOf(c.fast), perm: c.perm ?? "" };
+    const to = { agent: pick.kind, model: pick.model ?? "", effort: pick.effort ?? "", fast: speedOf(pick.speed), perm: pick.perm ?? "" };
     if (!LS.liveOK(from, to)) return { terminal: await this.restart(addr, reader, pick) };
     const state = t.status?.state;
     if (state === "working") throw new Error("It's busy with a turn. Switch once it's done, or stop it first.");
@@ -182,7 +186,7 @@ export class Agents {
     if (!t || t.state !== "live") throw new Error("That agent isn't running.");
     const kind = kindOf(t) ?? "claude";
     const old = { agent: kind, argv: t.foreground?.argv ?? t.argv ?? [], session: sessionOf(kind, reader?.path ?? null) };
-    const built = argvFor({ agent: pick.kind, model: pick.model, effort: pick.effort, fast: pick.speed === "fast", perm: pick.perm ?? current(kind, old.argv, {}, {}).perm }, old);
+    const built = argvFor({ agent: pick.kind, model: pick.model, effort: pick.effort, fast: speedOf(pick.speed), perm: pick.perm ?? current(kind, old.argv, {}, {}).perm }, old);
     const pane = t.labels?.["herdr.chat"] ?? "";
     const task = t.labels?.["herdr.task"];
     if (task) {

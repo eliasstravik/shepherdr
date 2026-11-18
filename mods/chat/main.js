@@ -2764,8 +2764,8 @@ export default class Chat extends View {
           .map((k) => [k, agent.menuFor(k, dflts[k], k === c.agent ? currentRow : null)]));
         // As tall as the menu can get (chat-models' sizes): border and padding, another machine's
         // offline line, agent tabs, search, the list (it scrolls past 8 rows), separator, Reasoning header
-        // and levels, Fast, Permissions, the new conversation's two lines, Restart (two lines).
-        const W = 340, H = 2 + 10 + 20 + 34 + 36 + 8 * 31 + 9 + 26 + 34 + 31 + 31 + 40 + 50;
+        // and levels, Fast, Ultrafast, Permissions, the new conversation's two lines, Restart (two lines).
+        const W = 340, H = 2 + 10 + 20 + 34 + 36 + 8 * 31 + 9 + 26 + 34 + 31 + 31 + 31 + 40 + 50;
         openOverlay({ mod: "chat-models", kind: "popup", frame: "none", width: W, height: H,
           at: at ? { x: Math.max(8, at.x - W + 90), y: Math.max(8, at.y - H - 10) } : "pointer",
           props: { pane: this.pickKey(), offline, width: W, height: H, select: name ? findModel(menus, name) : null,
@@ -4093,7 +4093,7 @@ export default class Chat extends View {
     const c = this.current();
     // Sized to its words, never cut: a narrow chat drops "· 1M" first.
     const model = String(c?.label ?? agent.modelName(c?.model) ?? "");
-    const pick = [(this.width ?? 600) < 460 ? model.replace(/\s*·?\s*1M$/, "") : model, agent.levelName(c?.effort), c?.fast ? "Fast" : null].filter(Boolean).join(" · ") || agent.NAMES[this.kind] || "Agent";
+    const pick = [(this.width ?? 600) < 460 ? model.replace(/\s*·?\s*1M$/, "") : model, agent.levelName(c?.effort), agent.speedName(c?.fast)].filter(Boolean).join(" · ") || agent.NAMES[this.kind] || "Agent";
     return [
       h_flex().id("chat-agent-pick").h(ROUND).pl(8).pr(5).gap(4).flex_none().items_center().rounded(6)
         .text_size(12).font_medium().text_color(t.muted)

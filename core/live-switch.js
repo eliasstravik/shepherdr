@@ -4,7 +4,8 @@
 //   sessions in ~/.claude/settings.json, so the keys it touched are put back afterwards (the running agent keeps the
 //   new choice: it doesn't reread them).
 //   Codex: /model opens a picker (model, then its reasoning level); "s" there applies it to this session only. /fast
-//   toggles and saves service_tier in ~/.codex/config.toml, put back the same way.
+//   and /ultrafast toggle (the active one again: back to Standard) and save service_tier in ~/.codex/config.toml, put
+//   back the same way.
 // Another CLI or another permission mode still needs a restart (liveOK says which).
 // `io` is where it runs: { send(text), keys(...names), screen(), readFile(rel), writeFile(rel, text), sleep(ms) }, rel
 // under the agent's machine's home.
@@ -21,14 +22,16 @@ export function liveOK(from, to) {
   return !!from && !!to && from.agent === to.agent && (!to.perm || !from.perm || to.perm === from.perm);
 }
 
-/** What changes: { model, effort, fast } (each only when it differs; model/effort '' for the CLI's default). A new
- *  model always says its level again: Claude Code keeps a level per model, so a model switch can move it. */
+/** What changes: { model, effort, fast } (each only when it differs; model/effort '' for the CLI's default; fast
+ *  true, false or "ultrafast", with `wasFast` what ran). A new model always says its level again: Claude Code keeps a
+ *  level per model, so a model switch can move it. */
 export function liveChanges(from, to) {
   const out = {};
   const model = to.model ?? "", effort = to.effort ?? "";
   if (model !== (from.model ?? "")) out.model = model;
   if (out.model !== undefined || effort !== (from.effort ?? "")) out.effort = effort;
-  if (!!to.fast !== !!from.fast) out.fast = !!to.fast;
+  const speed = (f) => (f === "ultrafast" ? "ultrafast" : !!f);
+  if (speed(to.fast) !== speed(from.fast)) { out.fast = speed(to.fast); if (from.fast === "ultrafast") out.wasFast = "ultrafast"; }
   return out;
 }
 
@@ -226,16 +229,19 @@ async function codex(io, ch, labels) {
       }
     }
     if (ch.fast !== undefined) {
+      // each a toggle of its own tier: Ultrafast's to go to or leave Ultrafast, else Fast's (SHEP-258)
+      const cmd = ch.fast === "ultrafast" || (!ch.fast && ch.wasFast === "ultrafast") ? "/ultrafast" : "/fast";
+      const name = cmd === "/ultrafast" ? "Ultrafast" : "Fast";
       const was = count(await io.screen(), TIER);
-      await io.send("/fast");
+      await io.send(cmd);
       const s = await waitFor(io, (s) => count(s, TIER) > was);
-      if (!s) throw new Error("Codex didn't confirm Fast.");
+      if (!s) throw new Error(`Codex didn't confirm ${name}.`);
       const said = String(s).split("\n").filter((l) => TIER.test(l)).pop();
-      const on = /set to (fast|priority)/i.test(said);
+      const now = /set to ultrafast/i.test(said) ? "ultrafast" : /set to (fast|priority)/i.test(said);
       // a toggle: once more if it went the other way
-      if (on !== ch.fast) {
+      if (now !== ch.fast) {
         await io.sleep(300);
-        await io.send("/fast");
+        await io.send(cmd);
         await io.sleep(1000);
       }
     }

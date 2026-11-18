@@ -24,8 +24,8 @@ export interface CliModels {
   at?: number
 }
 
-/** the speeds a chat can be restarted on; each CLI's own word for them is in server/core/agents.ts */
-export const SPEEDS = ['normal', 'fast']
+/** the speeds a chat can be restarted on (ultrafast: Codex's, SHEP-258); each CLI's own word for them is in core/agents.js */
+export const SPEEDS = ['normal', 'fast', 'ultrafast']
 
 /** a speed as a CLI logs it, in plain words: Claude Code's usage.speed and Codex's service_tier (priority is what its
  *  config calls fast); one Shepherdr doesn't know stays as logged */
@@ -52,7 +52,7 @@ export const TABLE: Record<string, CliModels> = {
     default: 'claude-opus-5-5',
   },
   codex: {
-    models: [codex('gpt-6.1-sol', 'GPT-6.1-Sol', 'low'), codex('gpt-6-astra', 'GPT-6-Astra', 'medium'), codex('gpt-6-sol', 'GPT-6-Sol', 'medium'), codex('gpt-6-luna', 'GPT-6-Luna', 'medium', false), codex('gpt-5.6-sol', 'GPT-5.6-Sol', 'low'), codex('gpt-5.6-terra', 'GPT-5.6-Terra', 'medium'), codex('gpt-5.6-luna', 'GPT-5.6-Luna', 'medium', false)],
+    models: [codex('gpt-6.2-sol', 'GPT-6.2-Sol', 'low'), codex('gpt-6.2-astra', 'GPT-6.2-Astra', 'low'), codex('gpt-6.1-sol', 'GPT-6.1-Sol', 'low'), codex('gpt-6-astra', 'GPT-6-Astra', 'medium'), codex('gpt-6-sol', 'GPT-6-Sol', 'medium'), codex('gpt-6-luna', 'GPT-6-Luna', 'medium', false), codex('gpt-5.6-sol', 'GPT-5.6-Sol', 'low'), codex('gpt-5.6-terra', 'GPT-5.6-Terra', 'medium'), codex('gpt-5.6-luna', 'GPT-5.6-Luna', 'medium', false)],
     efforts: [...CLAUDE_LEVELS, 'ultra'],
   },
   // pi reaches many providers' models: only pi itself can list them

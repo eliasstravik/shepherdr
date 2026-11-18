@@ -1026,7 +1026,7 @@ export class Conversation {
       // its settings as applied: at start, and on a /model or /fast in place (SHEP-181)
       const t = p.thread_settings;
       this.meta = { ...this.meta, model: t.model ?? this.meta.model, effort: t.reasoning_effort ?? this.meta.effort,
-        ...(t.service_tier !== undefined ? { speed: ["fast", "priority"].includes(t.service_tier) ? "fast" : "standard" } : {}), at: time(l.timestamp) };
+        ...(t.service_tier !== undefined ? { speed: t.service_tier === "ultrafast" ? "ultrafast" : ["fast", "priority"].includes(t.service_tier) ? "fast" : "standard" } : {}), at: time(l.timestamp) };
     } else if (l.type === "turn_context") {
       this.meta = { ...this.meta, model: p.model ?? this.meta.model, effort: p.effort ?? p.reasoning_effort ?? this.meta.effort, at: time(l.timestamp) };
     } else if (p.type === "token_count") {

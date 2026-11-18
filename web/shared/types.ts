@@ -907,7 +907,7 @@ export interface RestartCli {
   efforts?: string[]
   defaultModel?: string
   defaultEffort?: string
-  /** the speeds it can start on: normal, fast */
+  /** the speeds it can start on: normal, fast, ultrafast (Codex, SHEP-258) */
   speeds?: string[]
   /** its permission modes (Settings › Agents), and the one a new agent gets unless picked */
   perms?: { id: string; label: string }[]
@@ -1027,11 +1027,12 @@ export interface RoleAgent {
   unset?: boolean
   other?: boolean
 }
-export interface AgentPick { agent: string; model?: string | null; effort?: string | null; fast?: boolean; perm?: string | null }
+/** fast: true (Fast), false (standard) or 'ultrafast' (Codex's Ultrafast tier) */
+export interface AgentPick { agent: string; model?: string | null; effort?: string | null; fast?: boolean | 'ultrafast'; perm?: string | null }
 
 /** Settings › Agents' model menu, as the window's (mods/chat-models, settings mode; core/agents.js menuFor) */
 export interface ModelMenus {
-  menus: Record<string, { name: string; models: { id: string; name: string; efforts: string[]; defaultEffort?: string | null; fast?: boolean }[]; perms: { id: string; label: string }[] }>
+  menus: Record<string, { name: string; models: { id: string; name: string; efforts: string[]; defaultEffort?: string | null; fast?: boolean; ultrafast?: boolean }[]; perms: { id: string; label: string }[] }>
   permDefault: Record<string, string>
 }
 
@@ -1300,7 +1301,7 @@ export type Action =
   | { type: 'restart-info'; chat: string }
   /** start a coordinator or a task's agent again on this CLI, model and effort (none: the CLI's own; no kind: all as
       Settings say for its role); save: as its space's Settings for its role too */
-  /** speed: normal or fast, '' for the CLI's own; left out keeps what it was started on. It lasts as long as this chat, and save leaves it out of Settings. */
+  /** speed: normal, fast or ultrafast, '' for the CLI's own; left out keeps what it was started on. It lasts as long as this chat, and save leaves it out of Settings. */
   | { type: 'restart'; chat: string; kind?: string; model?: string; effort?: string; speed?: string; save?: boolean }
   /** mark a task done with nothing merged (shepherdr task close); refused (held) while it holds unmerged work, unless force */
   | { type: 'close'; chat: string; force?: boolean }

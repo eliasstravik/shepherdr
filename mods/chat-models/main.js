@@ -23,7 +23,7 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex, InputState, Input, VirtualListScrollHandle, v_virtual_list, Scrollbar } from "gpui-base";
 import { theme, props, setShared, closeOverlay, home, readTextFile, writeTextFile } from "herdr";
-import { modelSections, parsePicks, pickKey, withPin, withRecent, PICKS_FILE, permAcross } from "./core/agents.js";
+import { modelSections, parsePicks, pickKey, withPin, withRecent, PICKS_FILE, permAcross, speedFor, speedName } from "./core/agents.js";
 import { dirs } from "./dirs.js";
 
 const AGENTS = ["claude", "codex"];
@@ -39,7 +39,7 @@ export default class ModelMenu extends View {
     this.p = p;
     if (p.pick) { this.handle = cx.focus_handle(); cx.timer.after(0, () => this.handle.focus()); return; }
     const c = p.current ?? {};
-    this.was = { agent: c.agent, model: c.model, effort: c.effort ?? null, fast: Boolean(c.fast), perm: c.perm ?? null };
+    this.was = { agent: c.agent, model: c.model, effort: c.effort ?? null, fast: c.fast === "ultrafast" ? "ultrafast" : Boolean(c.fast), perm: c.perm ?? null };
     this.sel = { ...this.was };
     // Typed as /model <name> in the chat: that model comes chosen, Restart ready.
     const pre = p.select && this.models().find((m) => m.agent === p.select.agent && m.id === p.select.model);
@@ -113,7 +113,7 @@ export default class ModelMenu extends View {
     const was = this.sel;
     const next = { ...was, agent: m.agent, model: m.id };
     if (next.effort && !m.efforts.includes(next.effort)) next.effort = null;
-    if (!m.fast) next.fast = false;
+    next.fast = speedFor(m, next.fast);
     if (m.agent !== was.agent) {
       // Another agent: its own permission modes, the nearest to the one chosen.
       next.perm = permAcross(was.perm, m.agent, this.p.permDefault);
@@ -128,7 +128,7 @@ export default class ModelMenu extends View {
     if (s.agent !== w.agent) out.push(this.p.menus?.[s.agent]?.name ?? s.agent);
     if (s.agent !== w.agent || s.model !== w.model) out.push(this.model()?.name ?? s.model);
     if (this.level(s) && this.level(s) !== this.level(w)) out.push(LEVEL[this.level(s)] ?? this.level(s));
-    if (s.fast !== w.fast) out.push(s.fast ? "Fast" : "Standard");
+    if (s.fast !== w.fast) out.push(speedName(s.fast) ?? "Standard");
     if (s.perm && s.perm !== w.perm) out.push(this.p.menus?.[s.agent]?.perms?.find((x) => x.id === s.perm)?.label ?? s.perm);
     return out;
   }
@@ -285,10 +285,15 @@ export default class ModelMenu extends View {
         .child(Scrollbar.vertical("model-list").absolute().inset_0()))
       .child(div().h(SEP).flex_none().py(4).px(4).child(div().h(1).w_full().bg(t.border)))
       .when(Boolean(m?.efforts?.length), (el) => el.child(this.head(t, "Reasoning")).child(this.levels(t)))
-      .when(fast, (el) => el.child(this.row(t, "fast", true, () => { this.sel = { ...this.sel, fast: !this.sel.fast }; })
+      .when(fast, (el) => el.child(this.row(t, "fast", true, () => { this.sel = { ...this.sel, fast: this.sel.fast !== true }; })
         .child(svg("mods/chat-models/zap.svg").size(14).flex_none().text_color(t.dim))
         .child(div().flex_1().child("Fast"))
-        .child(this.toggle(t, this.sel.fast))))
+        .child(this.toggle(t, this.sel.fast === true))))
+      // Codex's Ultrafast tier where the model has it (SHEP-258): one speed with Fast, so on turns Fast off
+      .when(Boolean(m?.ultrafast), (el) => el.child(this.row(t, "ultrafast", true, () => { this.sel = { ...this.sel, fast: this.sel.fast === "ultrafast" ? false : "ultrafast" }; })
+        .child(svg("mods/chat-models/zap.svg").size(14).flex_none().text_color(t.dim))
+        .child(div().flex_1().child("Ultrafast"))
+        .child(this.toggle(t, this.sel.fast === "ultrafast", "ultrafast-knob"))))
       // its own press too: else the menu's closes it and the click opens it again
       .when(Boolean(menu?.perms?.length), (el) => el.child(this.row(t, "perms", true, () => { this.permOpen = !this.permOpen; })
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())

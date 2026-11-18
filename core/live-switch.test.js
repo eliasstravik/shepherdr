@@ -186,3 +186,39 @@ test("the log reader keeps the lines a switch writes (Claude Code 2.1.308, Codex
   ]);
   expect(x.meta).toMatchObject({ model: "gpt-6-sol", effort: "medium", speed: "fast" });
 });
+
+// SHEP-258: Codex's /ultrafast is a toggle of its own: the active one again goes back to Standard.
+test("Codex: Ultrafast on, off and from Fast, each through /ultrafast or /fast", async () => {
+  const tier = (word) => (text, f) => { f[".codex/config.toml"] = `service_tier = "${word}"\n`; return `› ${text}\n• Service tier set to ${word}\n`; };
+  const on = fakeTerm({ send: tier("ultrafast") }, { ".codex/config.toml": "" });
+  expect(await switchLive(on.io, "codex", { model: "gpt-6.2-sol", effort: "low", fast: false }, { model: "gpt-6.2-sol", effort: "low", fast: "ultrafast" }))
+    .toEqual({ fast: "ultrafast" });
+  expect(on.sent).toEqual(["/ultrafast"]);
+  expect(on.files[".codex/config.toml"]).toBe("");
+  // off from Ultrafast: /ultrafast again, not /fast (which would land on Fast)
+  const off = fakeTerm({ send: tier("default") }, {});
+  await switchLive(off.io, "codex", { model: "gpt-6.2-sol", effort: "low", fast: "ultrafast" }, { model: "gpt-6.2-sol", effort: "low", fast: false });
+  expect(off.sent).toEqual(["/ultrafast"]);
+  // Fast to Ultrafast
+  const up = fakeTerm({ send: tier("ultrafast") }, {});
+  await switchLive(up.io, "codex", { model: "gpt-6.2-sol", fast: true }, { model: "gpt-6.2-sol", fast: "ultrafast" });
+  expect(up.sent).toEqual(["/ultrafast"]);
+  // Ultrafast to Fast
+  const down = fakeTerm({ send: tier("fast") }, {});
+  await switchLive(down.io, "codex", { model: "gpt-6.2-sol", fast: "ultrafast" }, { model: "gpt-6.2-sol", fast: true });
+  expect(down.sent).toEqual(["/fast"]);
+  // a toggle that went the other way is sent once more
+  let n = 0;
+  const twice = fakeTerm({ send: (text, f) => `• Service tier set to ${++n === 1 ? "default" : "ultrafast"}\n` }, {});
+  await switchLive(twice.io, "codex", { model: "gpt-6.2-sol", fast: false }, { model: "gpt-6.2-sol", fast: "ultrafast" });
+  expect(twice.sent).toEqual(["/ultrafast", "/ultrafast"]);
+});
+
+test("Codex's log saying ultrafast reads as Ultrafast", () => {
+  const x = new Conversation("codex");
+  x.codex({ type: "event_msg", payload: { type: "thread_settings_applied", thread_settings: { model: "gpt-6.2-sol", reasoning_effort: "low", service_tier: "ultrafast" } }, timestamp: "2026-11-18T11:00:00Z" }, 0);
+  expect(x.meta.speed).toBe("ultrafast");
+  expect(current("codex", ["codex", "-c", 'service_tier="default"'], x.meta, {}).fast).toBe("ultrafast");
+  expect(liveChanges({ fast: "ultrafast" }, { fast: true })).toEqual({ fast: true, wasFast: "ultrafast" });
+  expect(liveChanges({ fast: "ultrafast" }, { fast: "ultrafast" })).toEqual({});
+});

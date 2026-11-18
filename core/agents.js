@@ -97,13 +97,14 @@ export function parseDefaults(kind, stdout) {
         id: m.slug, label: m.display_name || m.slug,
         efforts: (m.supported_reasoning_levels ?? []).map((l) => l.effort).filter(Boolean),
         fast: (m.service_tiers ?? []).length > 0,
+        ultrafast: (m.service_tiers ?? []).some((t) => t?.id === "ultrafast"),
         defaultEffort: m.default_reasoning_level ?? null,
       }));
     } catch {}
   }
   return kind === "claude"
     ? { model: out.model || null, effort: out.effort || null, fast: Boolean(out.fast), per: parsePer(out.per), mode: out.mode || null }
-    : { model: out.model || null, effort: out.model_reasoning_effort || null, fast: ["fast", "priority"].includes(out.service_tier),
+    : { model: out.model || null, effort: out.model_reasoning_effort || null, fast: speedOf(out.service_tier),
       sandbox: out.sandbox_mode || null, approval: out.approval_policy || null, models };
 }
 
@@ -118,7 +119,7 @@ export function current(kind, argv, meta, dflt) {
     let fast = dflt.fast;
     const s = flag(argv, "--settings");
     if (s && /"fastMode"\s*:\s*(true|false)/.test(s)) fast = /"fastMode"\s*:\s*true/.test(s);
-    if (meta.speed) fast = meta.speed === "fast";
+    if (meta.speed) fast = speedOf(meta.speed) === true;
     const big = /\[1m\]/.test(alias ?? "") || (meta.used ?? 0) > 200000;
     // Claude keeps an effort per model (modelSettings), known once the log names the model.
     const per = meta.model ? dflt.per?.[meta.model] ?? dflt.per?.[meta.model.replace(/-\d+$/, "")] : null;
@@ -134,8 +135,24 @@ export function current(kind, argv, meta, dflt) {
     : sandbox === "read-only" ? "read-only" : "auto";
   return { agent: "codex", model, label: dflt.models?.find((m) => m.id === model)?.label ?? null, perm,
     effort: meta.effort ?? o.model_reasoning_effort ?? dflt.effort,
-    fast: meta.speed ? meta.speed === "fast" : tier ? ["fast", "priority"].includes(tier) : Boolean(dflt.fast), used: meta.used ?? null, window: meta.window ?? null };
+    fast: meta.speed ? speedOf(meta.speed) : tier ? speedOf(tier) : dflt.fast === "ultrafast" ? "ultrafast" : Boolean(dflt.fast), used: meta.used ?? null, window: meta.window ?? null };
 }
+
+// A chat's speed is its `fast`: false (standard), true (Fast) or "ultrafast" (Codex's Ultrafast tier, SHEP-258).
+// From a word a CLI logs or a config says: Codex's service_tier (priority is what its config calls fast), Claude
+// Code's usage.speed.
+export function speedOf(word) {
+  const w = String(word ?? "").trim().toLowerCase();
+  return w === "ultrafast" ? "ultrafast" : w === "fast" || w === "priority";
+}
+// The service_tier Codex is started on: always said, so Fast off wins over one in config.toml (default: standard).
+export const codexTier = (fast) => (fast === "ultrafast" ? "ultrafast" : fast ? "fast" : "default");
+// The speed as a word the web app and the restart sheet pass: normal, fast or ultrafast.
+export const speedWordOf = (fast) => (fast === "ultrafast" ? "ultrafast" : fast ? "fast" : "normal");
+// The speed as the person reads it, null for standard.
+export const speedName = (fast) => (fast === "ultrafast" ? "Ultrafast" : fast ? "Fast" : null);
+// The speed a model can run on: an Ultrafast it lacks falls back to Fast, a Fast it lacks to standard.
+export const speedFor = (m, fast) => (fast === "ultrafast" ? (m?.ultrafast ? "ultrafast" : m?.fast ? true : false) : Boolean(fast && m?.fast));
 
 // An effort level as the person reads it: "xhigh" -> "Extra high". The CLIs still get the raw value.
 const LEVELS = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra", none: "None" };
@@ -146,7 +163,7 @@ export function levelName(e) {
 // "Claude Code · Opus 5.5 · High · Fast"
 export function line(c) {
   if (!c) return "";
-  return [NAMES[c.agent], c.label ?? modelName(c.model), levelName(c.effort), c.fast ? "Fast" : null].filter(Boolean).join(" · ");
+  return [NAMES[c.agent], c.label ?? modelName(c.model), levelName(c.effort), speedName(c.fast)].filter(Boolean).join(" · ");
 }
 
 // How full the context window is: "38% context", or null.
@@ -156,7 +173,7 @@ export function contextWords(c) {
 }
 
 // What the model picker (mods/chat-models, the web's restart.tsx) shows for one agent, as plain data:
-// { name, models: [{ id, name, efforts, defaultEffort, fast }], perms }: every model the CLI
+// { name, models: [{ id, name, efforts, defaultEffort, fast, ultrafast }], perms }: every model the CLI
 // offers (Codex: its own models_cache.json; Claude Code: its /model menu), the picker searches them.
 // `dflt` is that agent's settings (defaults()); `current` its running model, kept in the list.
 export function menuFor(agent, dflt, current = null) {
@@ -168,7 +185,7 @@ export function menuFor(agent, dflt, current = null) {
     return { name: NAMES.claude, perms: PERMS.claude, models };
   }
   const all = (dflt?.models ?? []).map((m) => ({ id: m.id, name: m.label, efforts: m.efforts?.length ? m.efforts : ["low", "medium", "high", "xhigh"],
-    defaultEffort: m.defaultEffort ?? dflt?.effort ?? null, fast: m.fast }));
+    defaultEffort: m.defaultEffort ?? dflt?.effort ?? null, fast: m.fast, ...(m.ultrafast ? { ultrafast: true } : {}) }));
   if (current && !all.some((m) => m.id === current)) all.unshift({ id: current, name: current, efforts: ["low", "medium", "high", "xhigh"], defaultEffort: dflt?.effort ?? null, fast: false });
   return { name: NAMES.codex, perms: PERMS.codex, models: all };
 }
@@ -363,7 +380,7 @@ export function argvFor(pick, old) {
   if (pick.model) a.push("-m", pick.model);
   if (pick.effort) a.push("-c", `model_reasoning_effort="${pick.effort}"`);
   // always said, so Fast off wins over a service_tier in config.toml (default: the standard tier)
-  a.push("-c", `service_tier="${pick.fast ? "fast" : "default"}"`);
+  a.push("-c", `service_tier="${codexTier(pick.fast)}"`);
   if (pick.perm === "full") a.push("--dangerously-bypass-approvals-and-sandbox");
   else if (pick.perm === "read-only") a.push("-s", "read-only", "-a", "on-request");
   else if (pick.perm) a.push("-s", "workspace-write", "-a", "on-request");
