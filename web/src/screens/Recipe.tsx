@@ -18,6 +18,7 @@ export const UNREADABLE = "This artifact's recipe can't be read."
 const { chartShapes, choiceReply, formReply, isLink, parts } = R as any
 const PALETTE = ['var(--accent)', 'var(--focus)', 'var(--ready)', 'var(--work)', 'var(--merged)', 'var(--need)']
 const CHIP: Record<string, string> = { info: 'text-accent bg-accent/12', good: 'text-ready-fg bg-ready/12', warn: 'text-work bg-work/12', bad: 'text-need-fg bg-need/12', mute: 'text-fg2 bg-hover' }
+const DOT: Record<string, string> = { info: 'text-accent border-accent', good: 'text-ready border-ready', warn: 'text-work border-work', bad: 'text-need border-need', mute: 'text-fg3 border-fg3' }
 const EDGE: Record<string, string> = { info: 'border-accent text-accent', good: 'border-ready text-ready-fg', warn: 'border-work text-work', bad: 'border-need text-need-fg' }
 const TONE: Record<string, string> = { info: 'bg-well shadow-soft', good: 'bg-ready/10', warn: 'bg-work/12', bad: 'bg-need/10' }
 
@@ -282,6 +283,18 @@ export function Recipe({ recipe, asset, reply }: Props) {
       case 'choice': return <Choice b={b} reply={reply} />
       case 'form': return <Form b={b} reply={reply} />
       case 'pr': return <Pr b={b} />
+      case 'timeline': return (
+        <ol role="list" className="relative flex flex-col gap-3">
+          <span aria-hidden className="absolute bottom-2 left-[5px] top-2 w-px bg-line" />
+          {b.items.map((x: any, i: number) => (
+            <li key={i} className="relative flex min-w-0 items-start gap-2.5">
+              <span aria-hidden className={clsx('mt-1.5 size-[11px] shrink-0 rounded-full border-2', DOT[x.tone] ?? DOT.mute, x.hollow ? 'bg-bg' : 'bg-current')} />
+              <span className="w-[52px] shrink-0 font-mono text-xs/6 text-fg2">{x.time ?? ''}</span>
+              <span className="min-w-0 flex-1"><Markdown text={x.md} /></span>
+            </li>
+          ))}
+        </ol>
+      )
       case 'button': return <Button b={b} reply={reply} className="self-start" />
       case 'buttons': return <div className="flex flex-wrap items-center gap-2">{b.items.map((x: Block, i: number) => <Button key={i} b={x} reply={reply} />)}</div>
     }

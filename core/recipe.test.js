@@ -129,3 +129,10 @@ test("code cells and code columns set words in monospace", () => {
   expect(one({ type: "table", columns: [{ label: "Flag", code: true }], rows: [[{ code: "x" }]] })).toEqual([]);
   expect(one({ type: "table", columns: ["Flag"], rows: [[{ code: 5 }]] }).length).toBe(1);
 });
+
+test("a timeline's items need md; time, tone and hollow are optional", () => {
+  expect(one({ type: "timeline", items: [{ time: "12:20", md: "ok", tone: "good" }, { time: "1:06", md: "x", hollow: true }, { md: "no time" }] })).toEqual([]);
+  expect(one({ type: "timeline", items: [{ time: "1", md: "x", tone: "loud" }] }).length).toBe(1);
+  expect(one({ type: "timeline", items: [{ time: "1" }] }).length).toBe(1);
+  expect(one({ type: "timeline", items: [{ md: "x", hollow: "yes" }] }).length).toBe(1);
+});

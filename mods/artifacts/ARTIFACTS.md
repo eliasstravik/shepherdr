@@ -64,6 +64,7 @@ Blocks, top to bottom (each may carry an `"id"`; the person's notes point at blo
 | `divider` | nothing |
 | `choice` | `question`, `options` [{ `label`, `description` }]: the person picks one |
 | `form` | `fields` [{ `name`, `label`, `kind` text, textarea, select or checkbox, `options` }], `submit` |
+| `timeline` | `items` [{ `time`, `md`, `tone` info, good, warn, bad or mute, `hollow` }]: a dated list down a line, a tone dot each (`hollow`: a ring, not filled) |
 | `button` | `label`, `reply`: a press sends `reply` |
 | `pr` | `repo` (owner/name), `number`, `title`, `url` (https), `state` open, draft, merged or closed, `ci` pass, fail or pending, `review` approved, changes or required, `at`: a pull request card, the title the link. A snapshot: `herdr-artifact pr-block owner/name#12` prints the block from `gh` now; paste it in |
 

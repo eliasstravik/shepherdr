@@ -212,6 +212,15 @@ export default class RecipeView extends View {
             }).child(sent ? "Sent" : b.submit ?? "Send"));
       }
       case "pr": return this.pr(b, t);
+      case "timeline": return v_flex().relative().w_full().gap(10)
+        .child(div().absolute().left(5).top(8).bottom(8).w(1).bg(t.border))
+        .children(b.items.map((x, i) => {
+          const c = toneColor(t, x.tone);
+          return h_flex().w_full().min_w(0).gap(10).items_start()
+            .child(div().flex_none().mt(4).size(11).rounded(6).bg(x.hollow ? t.background : c).border_2().border_color(c))
+            .child(div().flex_none().w(52).text_size(12).font_family("JetBrains Mono").text_color(t.muted).child(String(x.time ?? "")))
+            .child(div().flex_1().min_w(0).child(this.md(`${b.id}-${i}`, x.md, t)));
+        }));
       case "button": return this.button(b, b.id, t).self_start();
       case "buttons": return h_flex().flex_wrap().gap(8).items_center().children(b.items.map((x, i) => this.button(x, `${b.id}-${i}`, t)));
     }
