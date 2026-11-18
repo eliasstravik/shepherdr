@@ -102,19 +102,17 @@ export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now()):
   const tasks = new Map<string, any>((snap.tasks ?? []).map((t: any) => [t.id, t]));
   const taskItem = (t: any, kind: Kind, at?: number): Item => ({ key: `task:${t.id}`, kind, type: "task", tag: t.id, task: t.id,
     title: clip(`${ref(t.id)} · ${kind === "working" ? "Working" : kind === "done" ? "Done" : "Needs you"}`, WATCH_TITLE), body: clip(t.name, WATCH_BODY), ...taskRow(t), ...(at ? { at } : {}), alert: false, url: urlOf(t.place, t.id) });
-  // Needs you: what the web app's Tasks panel lists there, in its order (web/shared/needs-you.ts, SHEP-250). Each says
-  // what its push alert says; one that isn't pushed (its space's Notify keeps it quiet, a failed automation) lists
+  // Needs you: what the web app's Tasks panel lists there, in its order (web/shared/needs-you.ts, SHEP-250): tasks only
+  // (SHEP-255). Each says what its push alert says; one that isn't pushed (its space's Notify keeps it quiet) lists
   // without alerting
   const waits = needsYou(snap, now);
   for (const w of waits) {
-    const t = w.task ? tasks.get(w.task) : null;
+    const t = tasks.get(w.task);
     if (w.type === "task") { items.push(taskItem(t, "needs", w.at || undefined)); continue; }
     const pushed = alerts.get(w.key);
-    const a: any = pushed ?? (w.need ? needAlert(snap, w.need) : w.alert ? { title: w.alert.title, body: w.alert.body, tag: w.key, ...(w.place ? { place: w.place, url: urlOf(w.place) } : {}) }
-      : { title: `${w.auto!.name} · ${w.auto!.failed === "fire" ? "Didn't run" : w.auto!.failed === "from" && w.auto!.error ? w.auto!.error : "Didn't start its task"}`, body: w.auto!.error ?? "", tag: w.key, place: w.place });
-    const sp = spaceOf(a.place ?? w.place);
-    const it: Item = { key: w.key, kind: "needs", type: w.type === "auto" ? "need" : w.type, tag: a.tag, title: clip(a.title, WATCH_TITLE), body: clip(a.body, WATCH_BODY),
-      ...(t ? { task: t.id, ...taskRow(t) } : { space: sp?.name ?? w.auto?.listName ?? "", machine: sp?.machine ?? null }), ...(w.at ? { at: w.at } : {}), alert: !!pushed,
+    const a: any = pushed ?? (w.need ? needAlert(snap, w.need) : { title: w.alert!.title, body: w.alert!.body, tag: w.key, ...(w.place ? { place: w.place, url: urlOf(w.place) } : {}) });
+    const it: Item = { key: w.key, kind: "needs", type: w.type, tag: a.tag, title: clip(a.title, WATCH_TITLE), body: clip(a.body, WATCH_BODY),
+      task: t.id, ...taskRow(t), ...(w.at ? { at: w.at } : {}), alert: !!pushed,
       url: a.url ?? (a.place ?? w.place ? urlOf(a.place ?? w.place) : "./") };
     if (a.accept) it.accept = a.accept;
     if (a.reply) it.reply = a.reply;

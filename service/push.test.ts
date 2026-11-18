@@ -52,6 +52,21 @@ test("an agent's own alert, from its label", () => {
   expect(out).toEqual([{ id: "x", at: 5, title: "tt-repo Assistant · Can't wait", body: "Look now", chat: "sp1", place: "sp1", notify: true }]);
 });
 
+test("SHEP-255: an alert carries the task it is about: its chat's, or a task's helper's by its herdr.task label; a helper of no task's none", () => {
+  const snap = { places: [{ id: "sp1", name: "home", chat: "sp1" }], tasks: [{ id: "SHOP-1", place: "sp1" }, { id: "vmb:SHOP-2", place: "vmb/sp2" }], settings: [] };
+  const al = (id: string) => JSON.stringify({ id, at: 5, title: "Look", body: "now" });
+  const terms = [
+    { address: "t1", name: "worker", state: "live", labels: { "herdr.task": "shop#1", "herdr.alert": al("a") } },
+    { address: "vmb/t2", name: "shop-2-review", state: "live", labels: { "herdr.task": "shop#2", "herdr.role": "reviewer", "herdr.alert": al("b") } },
+    { address: "t3", name: "vm-signin", state: "live", labels: { "herdr.alert": al("c") } },
+  ];
+  const chats: Record<string, string> = { t1: "SHOP-1/worker", "vmb/t2": "shop-2-review", t3: "vm-signin" };
+  const out = agentAlerts(terms, snap, (a) => chats[a] ?? null, "/nonexistent");
+  expect(out.map((a) => [a.id, a.task ?? null])).toEqual([["a", "SHOP-1"], ["b", "vmb:SHOP-2"], ["c", null]]);
+  // the sign-in helper's still reaches the person (a toast, a push): only Tasks leaves it out
+  expect(out[2].notify).toBe(true);
+});
+
 // SHEP-243: each alert's buttons do the thing from the phone or the watch, in words that fit a watch
 const watch = (snap: any) => [...alertsOf(snap, new Set(), (c) => (c === "sp1" ? "Merged **SHEP-9**, all green.\n\nNext: the login page." : undefined)).values()];
 test("a ready task's alert offers Accept, the Tasks panel's Accept", () => {
