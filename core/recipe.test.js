@@ -85,3 +85,14 @@ test("mdParts cuts Markdown at its fenced code blocks", () => {
   expect(mdParts("``` not a fence ```")).toEqual([{ md: "``` not a fence ```" }]);
   expect(mdParts(undefined)).toEqual([]);
 });
+
+// a pr block: a pull request snapshot, with optional ci and review chips
+const pr = { type: "pr", repo: "eliasstravik/shepherdr", number: 12, title: "Add a pr block", url: "https://github.com/eliasstravik/shepherdr/pull/12", state: "open" };
+
+test("a pr block needs a repo, number, title, https url and state", () => {
+  expect(one(pr)).toEqual([]);
+  expect(one({ ...pr, ci: "pass", review: "approved", at: "2026-11-18 09:00 UTC" })).toEqual([]);
+  for (const bad of [{ repo: "nope" }, { number: 0 }, { number: "12" }, { title: "" }, { url: "http://github.com/x/y/pull/1" }, { state: "done" }, { ci: "green" }, { review: "lgtm" }])
+    expect(one({ ...pr, ...bad }).length).toBe(1);
+  expect(blockName(pr)).toBe("the pull request “Add a pr block”");
+});

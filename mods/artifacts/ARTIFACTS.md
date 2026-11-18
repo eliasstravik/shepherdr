@@ -48,7 +48,7 @@ Blocks, top to bottom (each may carry an `"id"`; the person's notes point at blo
 | `heading` | `text`, `level` 1-3 |
 | `text` | `md` (Markdown: bold, links, `code`, lists) |
 | `list` | `items` (Markdown each), `ordered` |
-| `table` | `columns` (labels, or `{ label, align }`), `rows` (lists of cells) |
+| `table` | `columns` (labels, or `{ label, align }`), `rows` (lists of cells; a cell is Markdown, so `[text](https://…)` is a link) |
 | `chart` | `kind` bar, line or pie, `labels`, `series` [{ `name`, `values` (numbers) }] |
 | `stats` | `items` [{ `label`, `value`, `note` }]: a row of big numbers |
 | `image` | `src` (a picture beside recipe.json), `caption`, `w`, `h` |
@@ -65,6 +65,7 @@ Blocks, top to bottom (each may carry an `"id"`; the person's notes point at blo
 | `choice` | `question`, `options` [{ `label`, `description` }]: the person picks one |
 | `form` | `fields` [{ `name`, `label`, `kind` text, textarea, select or checkbox, `options` }], `submit` |
 | `button` | `label`, `reply`: a press sends `reply` |
+| `pr` | `repo` (owner/name), `number`, `title`, `url` (https), `state` open, draft, merged or closed, `ci` pass, fail or pending, `review` approved, changes or required, `at`: a pull request card, the title the link. A snapshot: `herdr-artifact pr-block owner/name#12` prints the block from `gh` now; paste it in |
 
 - **Pictures**: PNG, JPEG, GIF, WebP or SVG files in the folder, named in `src` (no paths up or
   out). Screenshots go in as they are, so take only what matters: one element with

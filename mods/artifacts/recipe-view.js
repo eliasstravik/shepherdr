@@ -5,7 +5,7 @@
 // the agent that made it (artifact.js reply), from a click only.
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, TextView, InputState, Input } from "gpui-base";
-import { image } from "gpui-kit";
+import { image, svg } from "gpui-kit";
 import { theme } from "herdr";
 import { asset, reply } from "./artifact.js";
 import data from "./recipe-data.js";
@@ -129,7 +129,7 @@ export default class RecipeView extends View {
         .child(h_flex().w_full().px(10).py(6).bg(t.surface).children(b.columns.map((c, i) => div().flex_1().min_w(0).text_size(12).font_medium().text_color(t.muted)
           .when((c.align ?? "") === "right", (e) => e.text_right()).child(String(c.label ?? c)))))
         .children(b.rows.map((r, ri) => h_flex().w_full().px(10).py(6).border_t_1().border_color(t.border)
-          .children(r.map((c, i) => div().flex_1().min_w(0).text_size(13).whitespace_normal().when(b.columns[i]?.align === "right", (e) => e.text_right()).child(String(c ?? ""))))));
+          .children(r.map((c, i) => div().flex_1().min_w(0).text_size(13).whitespace_normal().when(b.columns[i]?.align === "right", (e) => e.text_right()).child(this.md(`${b.id}-${ri}-${i}`, c ?? "", t).text_size(13))))));
       case "chart": return this.chart(b, t);
       case "stats": return h_flex().flex_wrap().gap(8).children(b.items.map((x) => v_flex().min_w(120).flex_1().p(10).gap(2).rounded(8).bg(t.surface)
         .child(div().text_size(12).text_color(t.muted).child(String(x.label)))
@@ -194,10 +194,29 @@ export default class RecipeView extends View {
               this.send(b.id, formReply(b, values), cx);
             }).child(sent ? "Sent" : b.submit ?? "Send"));
       }
+      case "pr": return this.pr(b, t);
       case "button": return this.button(b, b.id, t).self_start();
       case "buttons": return h_flex().flex_wrap().gap(8).items_center().children(b.items.map((x, i) => this.button(x, `${b.id}-${i}`, t)));
     }
     return div();
+  }
+
+  // A pull request as a snapshot (taken with gh at publish time): the mark in its state's colour, the title as the link,
+  // repo#number under it, and small chips for its state, checks and review. A press opens it in the browser.
+  pr(b, t) {
+    const color = { open: t.ansi2, draft: t.muted, merged: t.ansi5, closed: t.muted }[b.state] ?? t.muted;
+    const chip = (text, c) => div().h(18).px(7).flex().flex_none().items_center().rounded(9).bg(c + "24").text_color(c).text_size(11).font_medium().child(text);
+    const ci = { pass: ["✓ Checks passed", t.ansi2], fail: ["✕ Checks failed", t.ansi1], pending: ["● Checks running", t.working] }[b.ci];
+    const review = { approved: ["✓ Approved", t.ansi2], changes: ["Changes requested", t.ansi1], required: ["Review needed", t.working] }[b.review];
+    const words = { open: "Open", draft: "Draft", merged: "Merged", closed: "Closed" }[b.state] ?? b.state;
+    return h_flex().id(`pr-${b.id}`).w_full().min_w(0).gap(10).items_start().p(12).rounded(8).border_1().border_color(t.border).bg(t.surface)
+      .when(isLink(b.url), (e) => e.cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => cx.open_url(b.url)))
+      .child(svg("mods/artifacts/github.svg").size(18).flex_none().text_color(color))
+      .child(v_flex().flex_1().min_w(0).gap(4)
+        .child(div().text_size(13).font_semibold().whitespace_normal().child(b.title))
+        .child(div().text_size(12).text_color(t.muted).child(`${b.repo}#${b.number}`))
+        .child(h_flex().flex_wrap().gap(6).child(chip(words, color))
+          .when(!!ci, (e) => e.child(chip(ci[0], ci[1]))).when(!!review, (e) => e.child(chip(review[0], review[1])))));
   }
 
   // A button: a press sends its reply, once; with an href (https only) it opens that page in the browser each press, a

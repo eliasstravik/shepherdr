@@ -113,6 +113,32 @@ function Button({ b, reply, className }: { b: Block; reply?: Props['reply']; cla
   )
 }
 
+const PR_MARK = 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'
+const PR_STATE: Record<string, [string, string]> = { open: ['Open', 'text-ready-fg bg-ready/12'], draft: ['Draft', 'text-fg2 bg-hover'], merged: ['Merged', 'text-merged bg-merged/12'], closed: ['Closed', 'text-fg2 bg-hover'] }
+const PR_CI: Record<string, [string, string]> = { pass: ['✓ Checks passed', 'text-ready-fg bg-ready/12'], fail: ['✕ Checks failed', 'text-need-fg bg-need/12'], pending: ['● Checks running', 'text-work bg-work/12'] }
+const PR_REVIEW: Record<string, [string, string]> = { approved: ['✓ Approved', 'text-ready-fg bg-ready/12'], changes: ['Changes requested', 'text-need-fg bg-need/12'], required: ['Review needed', 'text-work bg-work/12'] }
+
+/** a pull request as a snapshot taken at publish time: the GitHub mark in its state's colour, the title as the link,
+ *  repo#number under it, and small chips for state, checks and review (the window draws the same: recipe-view.js) */
+function Pr({ b }: { b: Block }) {
+  const state = PR_STATE[b.state] ?? PR_STATE.open
+  const chip = ([words, tone]: [string, string]) => <span key={words} className={clsx('inline-flex h-5 items-center rounded-full px-2 text-xs font-medium', tone)}>{words}</span>
+  const body = (
+    <>
+      <svg viewBox="0 0 16 16" aria-hidden className={clsx('mt-0.5 size-[18px] shrink-0', state[1].split(' ')[0])} fill="currentColor"><path d={PR_MARK} /></svg>
+      <span className="flex min-w-0 flex-col gap-1">
+        <span className="font-semibold">{b.title}</span>
+        <span className="text-fg2">{b.repo}#{b.number}</span>
+        <span className="flex flex-wrap gap-1.5">{chip(state)}{PR_CI[b.ci] ? chip(PR_CI[b.ci]) : null}{PR_REVIEW[b.review] ? chip(PR_REVIEW[b.review]) : null}</span>
+      </span>
+    </>
+  )
+  const cls = 'flex items-start gap-2.5 rounded-box bg-well p-3 shadow-soft'
+  return isLink(b.url)
+    ? <a href={b.url} target="_blank" rel="noopener noreferrer" aria-label={`${b.title}, ${b.repo}#${b.number}${b.at ? `, as of ${b.at}` : ''}`} className={clsx(cls, 'no-underline hover:bg-hover')}>{body}</a>
+    : <div className={cls}>{body}</div>
+}
+
 /** a clip (mp4, webm or mov) in place: its controls, its poster, or muted and looping for a short one that plays itself.
  *  A browser that can't play it says so and offers the file (SHEP-209). videoRef and events let a pair play two together. */
 function Clip({ src, poster, caption, loop, muted, autoplay, asset, videoRef, events, label }: { src: string; poster?: string; caption?: string; loop?: boolean; muted?: boolean; autoplay?: boolean; asset: (src: string) => string; videoRef?: RefObject<HTMLVideoElement | null>; events?: Record<string, () => void>; label?: string }) {
@@ -222,7 +248,7 @@ export function Recipe({ recipe, asset, reply }: Props) {
         <div className="overflow-x-auto rounded-box shadow-box">
           <table className="w-full border-collapse">
             <thead><tr>{b.columns.map((c: any, i: number) => <th key={i} className={clsx('border-b border-line px-3 py-2 text-left font-medium text-fg2', (c.align ?? '') === 'right' && 'text-right')}>{c.label ?? c}</th>)}</tr></thead>
-            <tbody>{b.rows.map((r: unknown[], i: number) => <tr key={i} className="border-b border-line last:border-0">{r.map((c, j) => <td key={j} className={clsx('px-3 py-2 align-top', b.columns[j]?.align === 'right' && 'text-right tabular-nums')}>{String(c ?? '')}</td>)}</tr>)}</tbody>
+            <tbody>{b.rows.map((r: unknown[], i: number) => <tr key={i} className="border-b border-line last:border-0">{r.map((c, j) => <td key={j} className={clsx('px-3 py-2 align-top', b.columns[j]?.align === 'right' && 'text-right tabular-nums')}><Markdown text={String(c ?? '')} /></td>)}</tr>)}</tbody>
           </table>
         </div>
       )
@@ -241,6 +267,7 @@ export function Recipe({ recipe, asset, reply }: Props) {
       case 'divider': return <hr className="border-line" />
       case 'choice': return <Choice b={b} reply={reply} />
       case 'form': return <Form b={b} reply={reply} />
+      case 'pr': return <Pr b={b} />
       case 'button': return <Button b={b} reply={reply} className="self-start" />
       case 'buttons': return <div className="flex flex-wrap items-center gap-2">{b.items.map((x: Block, i: number) => <Button key={i} b={x} reply={reply} />)}</div>
     }

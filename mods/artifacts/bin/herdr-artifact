@@ -17,6 +17,7 @@ mod with `herdr-app check`, so a broken artifact never reaches the person.
 
 import argparse
 import contextlib
+import datetime
 import errno
 import fcntl
 import hashlib
@@ -72,7 +73,7 @@ MARKUP_HELPERS = ("dirs.js", os.path.join("core", "paths.js"))
 RECIPE_VIEW = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "recipe-view.js")
 RECIPE_CORE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "core", "recipe.js")
 RECIPE_TYPES = {"heading", "text", "list", "table", "chart", "stats", "image", "video", "audio", "pdf", "pair", "code", "callout",
-                "columns", "tabs", "details", "divider", "choice", "form", "button", "buttons"}
+                "columns", "tabs", "details", "divider", "choice", "form", "button", "buttons", "pr"}
 NOTES = os.path.join(STORE, "notes")
 # A custom artifact's picture, as the window last showed it (a version's folder; the web shows it in its place).
 PICTURE = ".window.png"
@@ -335,6 +336,30 @@ def file_kind(name):
     return kind_of(name)
 
 
+PR_STATES = ("open", "draft", "merged", "closed")
+PR_CI = ("pass", "fail", "pending")
+PR_REVIEWS = ("approved", "changes", "required")
+
+
+def pr_problems(b, where):
+    """A pr block's fields (core/recipe.js prProblem)."""
+    out = []
+    num = b.get("number")
+    for ok, what in (
+        (isinstance(b.get("repo"), str) and re.fullmatch(r"[\w.-]+/[\w.-]+", b["repo"]), "repo must be owner/name"),
+        (isinstance(num, int) and not isinstance(num, bool) and num > 0, "number must be a pull request number"),
+        (isinstance(b.get("title"), str) and b["title"], "needs a title"),
+        (isinstance(b.get("url"), str) and re.fullmatch(r'https://[^\s"<>]+', b["url"]), "url must be an https:// link"),
+        (b.get("state") in PR_STATES, f"state must be {', '.join(PR_STATES)}"),
+        (b.get("ci") is None or b["ci"] in PR_CI, f"ci must be {', '.join(PR_CI)}"),
+        (b.get("review") is None or b["review"] in PR_REVIEWS, f"review must be {', '.join(PR_REVIEWS)}"),
+        (b.get("at") is None or isinstance(b["at"], str), "at must be a time in words"),
+    ):
+        if not ok:
+            out.append(f"block {where} (pr): {what}.")
+    return out
+
+
 def recipe_problems(src, files):
     """What's wrong with a recipe.json, in words (core/recipe.js's problems(), its main rules)."""
     try:
@@ -375,6 +400,8 @@ def recipe_problems(src, files):
                     out.append(f"block {where} ({b['type']}): a button needs a label and a reply or an href.")
                 if href is not None and not (isinstance(href, str) and re.fullmatch(r'https://[^\s"<>]+', href)):
                     out.append(f"block {where} ({b['type']}): href must be an https:// link.")
+            if b["type"] == "pr":
+                out.extend(pr_problems(b, where))
             if b["type"] == "columns":
                 for j, c in enumerate(b.get("columns") or []):
                     walk(c, f"{where}.{j + 1}.")
@@ -1113,6 +1140,56 @@ def cmd_list(o):
         print("No artifacts.")
     for a in out["artifacts"]:
         print(f"{a['id']:<32} v{a['version']:<3} {a['title']}")
+    return 0
+
+
+def parse_pr_ref(ref):
+    """('owner/name' or None, number) from `owner/name#12`, `#12`, `12` or a github.com pull request URL."""
+    m = re.fullmatch(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)(?:[/?#].*)?", ref.strip())
+    if m:
+        return m.group(1), int(m.group(2))
+    m = re.fullmatch(r"(?:([\w.-]+/[\w.-]+))?#?(\d+)", ref.strip())
+    if not m:
+        raise Fail(f"{ref!r} isn't a pull request: use owner/name#12 or its github.com URL.")
+    return m.group(1), int(m.group(2))
+
+
+def pr_block(view, repo):
+    """A `pr` recipe block (core/recipe.js) from `gh pr view --json ...`: a snapshot, not read live."""
+    state = {"MERGED": "merged", "CLOSED": "closed"}.get(view.get("state"), "draft" if view.get("isDraft") else "open")
+    checks = view.get("statusCheckRollup") or []
+    bad = {"FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "STARTUP_FAILURE", "ACTION_REQUIRED"}
+    outcome = [str(c.get("conclusion") or c.get("state") or "").upper() for c in checks]
+    done = {"SUCCESS", "NEUTRAL", "SKIPPED"}
+    ci = "fail" if any(x in bad for x in outcome) else "pending" if any(x not in done for x in outcome) else "pass" if outcome else None
+    review = {"APPROVED": "approved", "CHANGES_REQUESTED": "changes", "REVIEW_REQUIRED": "required"}.get(view.get("reviewDecision") or "")
+    block = {"type": "pr", "repo": repo, "number": view["number"], "title": view["title"], "url": view["url"], "state": state}
+    if ci:
+        block["ci"] = ci
+    if review:
+        block["review"] = review
+    block["at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return block
+
+
+def cmd_pr_block(o):
+    repo, number = parse_pr_ref(o.ref)
+    args = ["gh", "pr", "view", str(number), "--json", "number,title,url,state,isDraft,statusCheckRollup,reviewDecision"]
+    if repo:
+        args += ["-R", repo]
+    r = run(args)
+    if r.returncode != 0:
+        raise Fail(f"gh couldn't read the pull request: {(r.stderr or r.stdout).strip() or 'no answer'}")
+    try:
+        view = json.loads(r.stdout)
+    except ValueError:
+        raise Fail("gh answered something that isn't JSON.")
+    if not repo:
+        m = re.match(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/", view.get("url", ""))
+        repo = m.group(1) if m else None
+    if not repo:
+        raise Fail("Couldn't tell the repository: give owner/name#number.")
+    print(json.dumps(pr_block(view, repo), indent=None if o.json else 2))
     return 0
 
 
@@ -2384,6 +2461,8 @@ def main():
     c = cmd("new", cmd_new, "write a starting recipe.json into a folder")
     c.add_argument("dir")
     c.add_argument("--custom", action="store_true", help="a starting main.js instead (a custom panel, only when a recipe truly can't)")
+    c = cmd("pr-block", cmd_pr_block, "print a `pr` block for a recipe: a pull request's title, state, checks and review, from gh now")
+    c.add_argument("ref", help="owner/name#12, or its github.com URL")
     cmd("guide", cmd_guide, "how to write an artifact")
     c = cmd("where", cmd_where, "where a folder's artifacts are listed")
     c.add_argument("--folder")

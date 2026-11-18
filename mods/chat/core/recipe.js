@@ -21,11 +21,15 @@
 //   button   { label, reply, href, quiet }              a press sends `reply` to the agent; with href (https only) it
 //                                                       opens that page in the person's browser too; quiet: the softer look
 //   buttons  { items: [button] }                        buttons side by side (the first not quiet is the one to press)
+//   pr       { repo, number, title, url, state, ci, review, at }   a pull request, a snapshot taken with gh at publish time
+//                                                       (herdr-artifact pr-block <repo>#<n> prints one); state: open | draft |
+//                                                       merged | closed; ci: pass | fail | pending; review: approved | changes | required
+// Table cells, list items and text are Markdown: a link in a cell is a link.
 // "cover" (optional, beside "blocks"): the picture beside it that its card in the chat shows first (preview()).
 // Shared core: the source is core/recipe.js; bin/sync-shared copies it into the mods in lib/COPIES.
 
 export const RECIPE = 1;
-export const TYPES = ["heading", "text", "list", "table", "chart", "stats", "image", "video", "audio", "pdf", "pair", "code", "callout", "columns", "tabs", "details", "divider", "choice", "form", "button", "buttons"];
+export const TYPES = ["heading", "text", "list", "table", "chart", "stats", "image", "video", "audio", "pdf", "pair", "code", "callout", "columns", "tabs", "details", "divider", "choice", "form", "button", "buttons", "pr"];
 // The files a block can show, by extension (what the browser plays or draws; a .mov the browser can't play is still
 // served, and the web app says so and offers the file).
 export const PICTURES = ["png", "jpg", "jpeg", "gif", "webp", "svg"];
@@ -40,6 +44,9 @@ export const mediaKind = (src) => {
 export const TONES = ["info", "good", "warn", "bad"];
 export const CHARTS = ["bar", "line", "pie"];
 export const FIELDS = ["text", "textarea", "select", "checkbox"];
+export const PR_STATES = ["open", "draft", "merged", "closed"];
+export const PR_CI = ["pass", "fail", "pending"];
+export const PR_REVIEWS = ["approved", "changes", "required"];
 const MAX_BLOCKS = 400;
 
 const str = (v) => typeof v === "string";
@@ -82,6 +89,7 @@ export function problems(recipe, files = null) {
       case "choice": need(str(b.question) && arr(b.options) && b.options.every((o) => str(o?.label)), "needs a question and options with labels"); break;
       case "form": need(arr(b.fields) && b.fields.every((f) => str(f?.name) && FIELDS.includes(f.kind ?? "text")), `fields need a name and a kind (${FIELDS.join(", ")})`); break;
       case "button": buttonProblem(b, need); break;
+      case "pr": prProblem(b, need); break;
       case "buttons": need(arr(b.items) && b.items.length > 0 && b.items.length <= 4, "items must be 1 to 4 buttons"); if (arr(b.items)) b.items.forEach((x) => buttonProblem(x ?? {}, need)); break;
     }
   });
@@ -96,6 +104,17 @@ export function problems(recipe, files = null) {
 function buttonProblem(b, need) {
   need(str(b.label) && (str(b.reply) || str(b.href)), "a button needs a label and a reply or an href");
   if (b.href != null) need(isLink(b.href), "href must be an https:// link");
+}
+// A pr block's fields: where the pull request is, its title and link, and its state; ci and review are optional chips.
+function prProblem(b, need) {
+  need(str(b.repo) && /^[\w.-]+\/[\w.-]+$/.test(b.repo), "repo must be owner/name");
+  need(Number.isInteger(b.number) && b.number > 0, "number must be a pull request number");
+  need(str(b.title) && b.title.length > 0, "needs a title");
+  need(isLink(b.url), "url must be an https:// link");
+  need(PR_STATES.includes(b.state), `state must be ${PR_STATES.join(", ")}`);
+  need(b.ci == null || PR_CI.includes(b.ci), `ci must be ${PR_CI.join(", ")}`);
+  need(b.review == null || PR_REVIEWS.includes(b.review), `review must be ${PR_REVIEWS.join(", ")}`);
+  need(b.at == null || str(b.at), "at must be a time in words");
 }
 export const isLink = (v) => typeof v === "string" && /^https:\/\/[^\s"<>]+$/.test(v);
 
@@ -116,7 +135,7 @@ export function withIds(recipe) {
 export function blockName(b) {
   const what = { heading: "heading", text: "text", list: "list", table: "table", chart: "chart", stats: "numbers", image: "picture",
     pair: "before and after", code: "code", callout: "callout", columns: "columns", tabs: "tabs", details: "folded section",
-    divider: "line", choice: "choice", form: "form", button: "button", buttons: "buttons", video: "video", audio: "audio", pdf: "PDF" }[b?.type] ?? "block";
+    divider: "line", choice: "choice", form: "form", button: "button", buttons: "buttons", pr: "pull request", video: "video", audio: "audio", pdf: "PDF" }[b?.type] ?? "block";
   const name = b?.text ?? b?.title ?? b?.question ?? b?.summary ?? b?.caption ?? b?.label ?? b?.items?.[0]?.label ?? null;
   return name ? `the ${what} “${String(name).slice(0, 60)}”` : `the ${what} ${b?.id ?? ""}`.trim();
 }
