@@ -8,7 +8,7 @@
 // lists: every need (one its space's Notify keeps quiet too, without alerting), an agent's alert only while it stands.
 import { needAlert } from "./push.ts";
 import { GROUPS } from "../web/shared/types.ts";
-import { ALERT_FRESH_MS, MEMORY_BACK_UNDER, alertStands, needsYou, waitingTasks } from "../web/shared/needs-you.ts";
+import { ALERT_FRESH_MS, MEMORY_BACK_UNDER, alertStands, needsYou, unreadChats, waitingTasks } from "../web/shared/needs-you.ts";
 
 /** the doc's format: a change the Android app can't read as before bumps it (new fields alone don't) */
 export const GLANCE_FORMAT = 1;
@@ -17,11 +17,11 @@ export type Choice = { i: number; label: string };
 export type Item = {
   /** one thing, stable while it lasts: a new key is a new alert */
   key: string;
-  /** the list's section: needs (an agent or an Assistant waits on you), working, ready (to accept), done (today) */
+  /** the list's section: needs (an agent waits on you), working, ready (to accept), done (today) */
   kind: "needs" | "working" | "ready" | "done";
-  /** what it is: need (a question, a permission, a stalled agent), msg (an Assistant's new message), alert (herdr-task
-   *  alert), task (a task's row) */
-  type: "need" | "msg" | "alert" | "task";
+  /** what it is: need (a question, a permission, a stalled agent), alert (herdr-task alert), task (a task's row). An
+   *  Assistant's new message is no item (SHEP-253): Glance.unread counts those for a Chat badge */
+  type: "need" | "alert" | "task";
   /** a notification's tag: one per task or chat, a newer alert takes the old one's place */
   tag: string;
   task?: string;
@@ -53,7 +53,9 @@ export type Counts = Record<Kind, number>;
 export type Group = { kind: Kind; label: string; count: number };
 /** v: changes with anything; urgent: changes only with what notifies (a new or gone alert, its words, the counts): a
  *  stream sends an urgent change at once and the rest (status lines, progress) at most once a minute */
-export type Glance = { format: number; v: string; urgent: string; at: number; counts: Counts; order: Kind[]; groups: Group[]; items: Item[] };
+/** unread: how many Assistants' chats have a new message not yet read (their space not muted): Chat's badge, never in
+ *  Needs you (SHEP-253) */
+export type Glance = { format: number; v: string; urgent: string; at: number; counts: Counts; order: Kind[]; groups: Group[]; items: Item[]; unread: number };
 
 /** the Tasks panel's statuses each kind lists (merging is Working here) */
 const KIND_OF: Partial<Record<string, Kind>> = { need: "needs", ready: "ready", merging: "working", work: "working", done: "done" };
@@ -109,8 +111,7 @@ export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now()):
     if (w.type === "task") { items.push(taskItem(t, "needs", w.at || undefined)); continue; }
     const pushed = alerts.get(w.key);
     const a: any = pushed ?? (w.need ? needAlert(snap, w.need) : w.alert ? { title: w.alert.title, body: w.alert.body, tag: w.key, ...(w.place ? { place: w.place, url: urlOf(w.place) } : {}) }
-      : w.auto ? { title: `${w.auto.name} · ${w.auto.failed === "fire" ? "Didn't run" : w.auto.failed === "from" && w.auto.error ? w.auto.error : "Didn't start its task"}`, body: w.auto.error ?? "", tag: w.key, place: w.place }
-      : { title: `${spaceOf(w.place)?.name ?? ""} Assistant · New message`.trim(), body: "Tap to read it.", tag: `msg:${w.chat}`, place: w.place, reply: { chat: w.chat } });
+      : { title: `${w.auto!.name} · ${w.auto!.failed === "fire" ? "Didn't run" : w.auto!.failed === "from" && w.auto!.error ? w.auto!.error : "Didn't start its task"}`, body: w.auto!.error ?? "", tag: w.key, place: w.place });
     const sp = spaceOf(a.place ?? w.place);
     const it: Item = { key: w.key, kind: "needs", type: w.type === "auto" ? "need" : w.type, tag: a.tag, title: clip(a.title, WATCH_TITLE), body: clip(a.body, WATCH_BODY),
       ...(t ? { task: t.id, ...taskRow(t) } : { space: sp?.name ?? w.auto?.listName ?? "", machine: sp?.machine ?? null }), ...(w.at ? { at: w.at } : {}), alert: !!pushed,
@@ -149,9 +150,10 @@ export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now()):
   const groups: Group[] = KINDS.map((k) => ({ ...k, count: counts[k.kind] }));
   const order = KINDS.map((k) => k.kind);
   const kept = items.slice(0, MAX_ITEMS);
-  const v = Bun.hash(JSON.stringify([GLANCE_FORMAT, counts, kept])).toString(36);
+  const unread = unreadChats(snap).length;
+  const v = Bun.hash(JSON.stringify([GLANCE_FORMAT, counts, kept, unread])).toString(36);
   const urgent = Bun.hash(JSON.stringify([GLANCE_FORMAT, counts, kept.filter((i) => i.alert).map((i) => [i.key, i.title, i.body])])).toString(36);
-  return { format: GLANCE_FORMAT, v, urgent, at: now, counts, order, groups, items: kept };
+  return { format: GLANCE_FORMAT, v, urgent, at: now, counts, order, groups, items: kept, unread };
 }
 
 /** how long a device's web push stays quiet after its native stream dropped (a phone reconnecting) */
