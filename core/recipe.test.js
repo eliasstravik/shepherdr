@@ -96,3 +96,27 @@ test("a pr block needs a repo, number, title, https url and state", () => {
     expect(one({ ...pr, ...bad }).length).toBe(1);
   expect(blockName(pr)).toBe("the pull request “Add a pr block”");
 });
+
+// stats tone, and chips on list items and table cells
+import { parts } from "./recipe.js";
+
+test("a stats item may carry a tone", () => {
+  expect(one({ type: "stats", items: [{ label: "Live", value: "1", tone: "bad" }] })).toEqual([]);
+  expect(one({ type: "stats", items: [{ label: "Live", value: "1", tone: "red" }] }).length).toBe(1);
+});
+
+test("list items and table cells are words or { md, chips }", () => {
+  expect(one({ type: "list", items: ["a", { md: "b", chip: "P1" }, { md: "c", chips: ["x", { text: "y", tone: "warn" }] }] })).toEqual([]);
+  expect(one({ type: "table", columns: ["f", "q"], rows: [["flag", { chip: "on", tone: "good" }], [1, null]] })).toEqual([]);
+  expect(one({ type: "list", items: [{ md: 3 }] }).length).toBe(1);
+  expect(one({ type: "list", items: [{}] }).length).toBe(1);
+  expect(one({ type: "table", columns: ["f"], rows: [[{ chip: "on", tone: "loud" }]] }).length).toBe(1);
+  expect(one({ type: "table", columns: ["f"], rows: [[{ chips: [{ tone: "good" }] }]] }).length).toBe(1);
+});
+
+test("parts reads a cell as Markdown and chips", () => {
+  expect(parts("hi")).toEqual({ md: "hi", chips: [] });
+  expect(parts(7)).toEqual({ md: "7", chips: [] });
+  expect(parts({ chip: "on", tone: "good" })).toEqual({ md: "", chips: [{ text: "on", tone: "good" }] });
+  expect(parts({ md: "x", chips: ["a", { text: "b", tone: "bad" }] }).chips).toEqual([{ text: "a", tone: "mute" }, { text: "b", tone: "bad" }]);
+});

@@ -6,9 +6,11 @@
 //
 // Blocks (each may carry an "id", which markup notes and answers point at; one is given when it has none):
 //   heading  { text, level: 1-3 }                       text     { md }  (Markdown)
-//   list     { items: [md], ordered }                   table    { columns: [label | { label, align }], rows: [[cell]] }
+//   list     { items: [item], ordered }                 table    { columns: [label | { label, align }], rows: [[cell]] }
+//             item and cell: Markdown words, or { md, chip | chips: [chip] } (chip: words, or { text, tone }; tone: info | good |
+//             warn | bad | mute, the default): the words with small tag chips after them. A chip cell: { chip: "on", tone: "good" }.
 //   chart    { kind: bar | line | pie, labels: [], series: [{ name, values: [] }] }
-//   stats    { items: [{ label, value, note }] }        image    { src, caption, w, h }  (src: a file beside it)
+//   stats    { items: [{ label, value, note, tone }] }  tone (info | good | warn | bad): a coloured left edge and value        image    { src, caption, w, h }  (src: a file beside it)
 //   video    { src, poster, caption, loop, muted, autoplay }   a clip: mp4, webm or mov (poster: a picture beside it)
 //   audio    { src, caption }                           a sound: mp3, m4a, wav or ogg
 //   pdf      { src, caption }                           a PDF, shown inline (on a phone: its first page and a link)
@@ -44,6 +46,7 @@ export const mediaKind = (src) => {
 export const TONES = ["info", "good", "warn", "bad"];
 export const CHARTS = ["bar", "line", "pie"];
 export const FIELDS = ["text", "textarea", "select", "checkbox"];
+export const CHIP_TONES = [...TONES, "mute"];
 export const PR_STATES = ["open", "draft", "merged", "closed"];
 export const PR_CI = ["pass", "fail", "pending"];
 export const PR_REVIEWS = ["approved", "changes", "required"];
@@ -72,10 +75,10 @@ export function problems(recipe, files = null) {
     switch (b.type) {
       case "heading": need(str(b.text), "needs text"); break;
       case "text": need(str(b.md), "needs md"); break;
-      case "list": need(arr(b.items) && b.items.every(str), "items must be a list of words"); break;
-      case "table": need(arr(b.columns) && arr(b.rows) && b.rows.every(arr), "needs columns and rows (lists)"); break;
+      case "list": need(arr(b.items) && b.items.every(partsOk), "items must be a list of words, or { md, chips }"); break;
+      case "table": need(arr(b.columns) && arr(b.rows) && b.rows.every(arr), "needs columns and rows (lists)"); need(!arr(b.rows) || b.rows.every((r) => !arr(r) || r.every((c) => c == null || partsOk(c))), "a cell is words, or { md, chip | chips }"); break;
       case "chart": need(CHARTS.includes(b.kind), `kind must be ${CHARTS.join(", ")}`); need(arr(b.labels) && arr(b.series) && b.series.every((s) => arr(s?.values) && s.values.every((v) => typeof v === "number")), "needs labels and series of numbers"); break;
-      case "stats": need(arr(b.items) && b.items.every((x) => x && "label" in x && "value" in x), "items need a label and a value"); break;
+      case "stats": need(arr(b.items) && b.items.every((x) => x && "label" in x && "value" in x), "items need a label and a value"); need(!arr(b.items) || b.items.every((x) => x?.tone == null || TONES.includes(x.tone)), `a tone must be ${TONES.join(", ")}`); break;
       case "image": pic(b.src); need(!b.src || mediaKind(b.src) === "image", "src must be a picture (png, jpg, gif, webp or svg): a clip, a sound or a PDF has its own block"); break;
       case "video": file(b.src, ["video"], "src must be a clip (mp4, webm or mov)"); if (b.poster != null) file(b.poster, ["image"], "poster must be a picture beside it"); need(b.caption == null || str(b.caption), "caption must be words"); break;
       case "audio": file(b.src, ["audio"], "src must be a sound (mp3, m4a, wav or ogg)"); break;
@@ -105,6 +108,24 @@ function buttonProblem(b, need) {
   need(str(b.label) && (str(b.reply) || str(b.href)), "a button needs a label and a reply or an href");
   if (b.href != null) need(isLink(b.href), "href must be an https:// link");
 }
+// A list item or a table cell: words, or { md, chip | chips }, each chip words or { text, tone }.
+const chipOk = (c, tone) => (str(c) || (c && typeof c === "object" && str(c.text))) && [tone, c?.tone].every((t) => t == null || CHIP_TONES.includes(t));
+function partsOk(x) {
+  if (str(x) || typeof x === "number") return true;
+  if (!x || typeof x !== "object" || arr(x)) return false;
+  if (x.md != null && !str(x.md)) return false;
+  const chips = arr(x.chips) ? x.chips : x.chip != null ? [x.chip] : [];
+  return (x.md != null || chips.length > 0) && chips.every((c) => chipOk(c, x.tone));
+}
+
+// A list item or a table cell as parts: { md, chips: [{ text, tone }] } (what both renderers draw).
+export function parts(x) {
+  if (x == null) return { md: "", chips: [] };
+  if (typeof x !== "object") return { md: String(x), chips: [] };
+  const list = arr(x.chips) ? x.chips : x.chip != null ? [x.chip] : [];
+  return { md: x.md ?? "", chips: list.map((c) => ({ text: String(str(c) ? c : c?.text ?? ""), tone: (str(c) ? null : c?.tone) ?? x.tone ?? "mute" })) };
+}
+
 // A pr block's fields: where the pull request is, its title and link, and its state; ci and review are optional chips.
 function prProblem(b, need) {
   need(str(b.repo) && /^[\w.-]+\/[\w.-]+$/.test(b.repo), "repo must be owner/name");
@@ -215,7 +236,7 @@ export function preview(recipe, { max = 3, chars = 280 } = {}) {
     else if (b.type === "heading") say(b.text);
     else if (b.type === "text") say(b.md);
     else if (b.type === "callout") say(b.title ? `**${b.title}** ${b.md ?? ""}` : b.md);
-    else if (b.type === "list" && arr(b.items)) say(b.items.slice(0, 3).join(" · "));
+    else if (b.type === "list" && arr(b.items)) say(b.items.slice(0, 3).map((x) => parts(x).md).join(" · "));
     else if (b.type === "columns" && arr(b.columns)) b.columns.forEach(walk);
     else if (b.type === "tabs" && arr(b.tabs)) walk(b.tabs[0]?.blocks);
   });

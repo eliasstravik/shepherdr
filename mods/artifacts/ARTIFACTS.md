@@ -47,10 +47,10 @@ Blocks, top to bottom (each may carry an `"id"`; the person's notes point at blo
 |---|---|
 | `heading` | `text`, `level` 1-3 |
 | `text` | `md` (Markdown: bold, links, `code`, lists) |
-| `list` | `items` (Markdown each), `ordered` |
-| `table` | `columns` (labels, or `{ label, align }`), `rows` (lists of cells; a cell is Markdown, so `[text](https://…)` is a link) |
+| `list` | `items` (Markdown each, or `{ md, chips }`: chips are small tags after the words), `ordered` |
+| `table` | `columns` (labels, or `{ label, align }`), `rows` (lists of cells; a cell is Markdown, so `[text](https://…)` is a link, or `{ md, chips }`, or `{ chip: "on", tone: "good" }` for a tag) |
 | `chart` | `kind` bar, line or pie, `labels`, `series` [{ `name`, `values` (numbers) }] |
-| `stats` | `items` [{ `label`, `value`, `note` }]: a row of big numbers |
+| `stats` | `items` [{ `label`, `value`, `note`, `tone` }]: a row of big numbers; `tone` info, good, warn or bad gives a coloured left edge and value |
 | `image` | `src` (a picture beside recipe.json), `caption`, `w`, `h` |
 | `video` | `src` (a clip beside it: mp4, webm or mov), `poster` (a picture beside it, optional), `caption`, `autoplay`, `loop`, `muted` |
 | `audio` | `src` (a sound beside it: mp3, m4a, wav or ogg), `caption` |

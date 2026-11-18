@@ -15,8 +15,10 @@ type Props = { recipe: { blocks: Block[] }; asset: (src: string) => string; repl
 /** the window's words when a recipe can't be read */
 export const UNREADABLE = "This artifact's recipe can't be read."
 
-const { chartShapes, choiceReply, formReply, isLink } = R as any
+const { chartShapes, choiceReply, formReply, isLink, parts } = R as any
 const PALETTE = ['var(--accent)', 'var(--focus)', 'var(--ready)', 'var(--work)', 'var(--merged)', 'var(--need)']
+const CHIP: Record<string, string> = { info: 'text-accent bg-accent/12', good: 'text-ready-fg bg-ready/12', warn: 'text-work bg-work/12', bad: 'text-need-fg bg-need/12', mute: 'text-fg2 bg-hover' }
+const EDGE: Record<string, string> = { info: 'border-accent text-accent', good: 'border-ready text-ready-fg', warn: 'border-work text-work', bad: 'border-need text-need-fg' }
 const TONE: Record<string, string> = { info: 'bg-well shadow-soft', good: 'bg-ready/10', warn: 'bg-work/12', bad: 'bg-need/10' }
 
 function Chart({ b }: { b: Block }) {
@@ -56,6 +58,18 @@ function Chart({ b }: { b: Block }) {
         <figcaption className="flex flex-wrap gap-3 text-fg2">{b.series.map((x: any, i: number) => <span key={i} className="flex items-center gap-1.5"><span className="size-2.5 rounded-full" style={{ background: PALETTE[i % PALETTE.length] }} />{x.name}</span>)}</figcaption>
       ) : null}
     </figure>
+  )
+}
+
+/** a list item or a table cell: its Markdown, then small tag chips (words, or { md, chips }) */
+function Cell({ x }: { x: unknown }) {
+  const p = parts(x)
+  if (!p.chips.length) return <Markdown text={p.md} />
+  return (
+    <span className="flex flex-wrap items-center gap-1.5">
+      {p.md ? <span className="min-w-0"><Markdown text={p.md} /></span> : null}
+      {p.chips.map((c: any, i: number) => <span key={i} className={clsx('inline-flex h-5 items-center rounded-full px-2 text-xs font-medium whitespace-nowrap', CHIP[c.tone] ?? CHIP.mute)}>{c.text}</span>)}
+    </span>
   )
 }
 
@@ -243,17 +257,17 @@ export function Recipe({ recipe, asset, reply }: Props) {
     switch (b.type) {
       case 'heading': { const H = (`h${Math.min(3, Math.max(1, b.level ?? 2)) + 1}`) as 'h2'; return <H className={clsx('font-semibold text-balance', (b.level ?? 2) <= 1 ? 'text-xl' : 'text-base')}>{b.text}</H> }
       case 'text': return <Markdown text={b.md} />
-      case 'list': { const L = b.ordered ? 'ol' : 'ul'; return <L className={clsx('flex flex-col gap-1 pl-5', b.ordered ? 'list-decimal' : 'list-disc')}>{b.items.map((x: string, i: number) => <li key={i}><Markdown text={x} /></li>)}</L> }
+      case 'list': { const L = b.ordered ? 'ol' : 'ul'; return <L className={clsx('flex flex-col gap-1 pl-5', b.ordered ? 'list-decimal' : 'list-disc')}>{b.items.map((x: unknown, i: number) => <li key={i}><Cell x={x} /></li>)}</L> }
       case 'table': return (
         <div className="overflow-x-auto rounded-box shadow-box">
           <table className="w-full border-collapse">
             <thead><tr>{b.columns.map((c: any, i: number) => <th key={i} className={clsx('border-b border-line px-3 py-2 text-left font-medium text-fg2', (c.align ?? '') === 'right' && 'text-right')}>{c.label ?? c}</th>)}</tr></thead>
-            <tbody>{b.rows.map((r: unknown[], i: number) => <tr key={i} className="border-b border-line last:border-0">{r.map((c, j) => <td key={j} className={clsx('px-3 py-2 align-top', b.columns[j]?.align === 'right' && 'text-right tabular-nums')}><Markdown text={String(c ?? '')} /></td>)}</tr>)}</tbody>
+            <tbody>{b.rows.map((r: unknown[], i: number) => <tr key={i} className="border-b border-line last:border-0">{r.map((c, j) => <td key={j} className={clsx('px-3 py-2 align-top', b.columns[j]?.align === 'right' && 'text-right tabular-nums')}><Cell x={c} /></td>)}</tr>)}</tbody>
           </table>
         </div>
       )
       case 'chart': return <Chart b={b} />
-      case 'stats': return <dl className="grid grid-cols-2 gap-3 @lg:grid-cols-4">{b.items.map((x: any, i: number) => <div key={i} className="rounded-box bg-well p-3 shadow-soft"><dt className="text-fg2">{x.label}</dt><dd className="text-xl font-semibold tabular-nums">{String(x.value)}</dd>{x.note ? <dd className="text-fg3">{x.note}</dd> : null}</div>)}</dl>
+      case 'stats': return <dl className="grid grid-cols-2 gap-3 @lg:grid-cols-4">{b.items.map((x: any, i: number) => <div key={i} className={clsx('rounded-box bg-well p-3 shadow-soft', x.tone && 'border-l-[3px]', x.tone && EDGE[x.tone]?.split(' ')[0])}><dt className="text-fg2">{x.label}</dt><dd className={clsx('text-xl font-semibold tabular-nums', x.tone && EDGE[x.tone]?.split(' ')[1])}>{String(x.value)}</dd>{x.note ? <dd className="text-fg3">{x.note}</dd> : null}</div>)}</dl>
       case 'image': return <figure className="flex flex-col gap-1.5"><Pic src={asset(b.src)} alt={b.caption ?? ''} w={b.w} h={b.h} />{b.caption ? <figcaption className="text-fg2">{b.caption}</figcaption> : null}</figure>
       case 'video': return <Clip src={b.src} poster={b.poster} caption={b.caption} loop={b.loop} muted={b.muted} autoplay={b.autoplay} asset={asset} />
       case 'audio': return <Sound src={b.src} caption={b.caption} asset={asset} />

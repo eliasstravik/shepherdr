@@ -9,8 +9,10 @@ import { image, svg } from "gpui-kit";
 import { theme } from "herdr";
 import { asset, reply } from "./artifact.js";
 import data from "./recipe-data.js";
-import { chartShapes, choiceReply, formReply, isLink, mdParts, mediaKind, withIds } from "./recipe.js";
+import { chartShapes, choiceReply, formReply, isLink, mdParts, mediaKind, parts, withIds } from "./recipe.js";
 
+// a chip's or a stats edge's colour, by tone
+const toneColor = (t, tone) => ({ info: t.accent, good: t.ansi2, warn: t.working, bad: t.ansi1 }[tone] ?? t.muted);
 const TONE = { info: "surface", good: "done", warn: "working", bad: "blocked" };
 
 export default class RecipeView extends View {
@@ -60,6 +62,20 @@ export default class RecipeView extends View {
     this.copied = key;
     cx.notify();
     cx.timer.after(1500, (cx) => { if (this.copied === key) { this.copied = null; cx.notify(); } });
+  }
+
+  chip(text, tone, t) {
+    const c = toneColor(t, tone);
+    return div().h(18).px(7).flex().flex_none().items_center().rounded(9).bg(c + "24").text_color(c).text_size(11).font_medium().child(text);
+  }
+
+  // A list item or a table cell: its Markdown, then its chips (an item or cell may be words, or { md, chips })
+  cell(id, x, t) {
+    const p = parts(x);
+    if (!p.chips.length) return this.md(id, p.md, t);
+    return h_flex().w_full().min_w(0).gap(6).items_center().flex_wrap()
+      .when(!!p.md, (e) => e.child(div().min_w(0).child(this.md(id, p.md, t))))
+      .children(p.chips.map((c) => this.chip(c.text, c.tone, t)));
   }
 
   send(key, text, cx) {
@@ -124,16 +140,17 @@ export default class RecipeView extends View {
       case "text": return this.md(b.id, b.md, t);
       case "list": return v_flex().gap(4).children(b.items.map((x, i) => h_flex().gap(8).items_start()
         .child(div().flex_none().w(16).text_size(13).text_color(t.muted).child(b.ordered ? `${i + 1}.` : "•"))
-        .child(this.md(`${b.id}-${i}`, x, t))));
+        .child(this.cell(`${b.id}-${i}`, x, t))));
       case "table": return v_flex().w_full().rounded(8).border_1().border_color(t.border).overflow_hidden()
         .child(h_flex().w_full().px(10).py(6).bg(t.surface).children(b.columns.map((c, i) => div().flex_1().min_w(0).text_size(12).font_medium().text_color(t.muted)
           .when((c.align ?? "") === "right", (e) => e.text_right()).child(String(c.label ?? c)))))
         .children(b.rows.map((r, ri) => h_flex().w_full().px(10).py(6).border_t_1().border_color(t.border)
-          .children(r.map((c, i) => div().flex_1().min_w(0).text_size(13).whitespace_normal().when(b.columns[i]?.align === "right", (e) => e.text_right()).child(this.md(`${b.id}-${ri}-${i}`, c ?? "", t).text_size(13))))));
+          .children(r.map((c, i) => div().flex_1().min_w(0).text_size(13).whitespace_normal().when(b.columns[i]?.align === "right", (e) => e.text_right()).child(this.cell(`${b.id}-${ri}-${i}`, c, t))))));
       case "chart": return this.chart(b, t);
       case "stats": return h_flex().flex_wrap().gap(8).children(b.items.map((x) => v_flex().min_w(120).flex_1().p(10).gap(2).rounded(8).bg(t.surface)
+        .when(!!x.tone, (e) => e.border_l(3).border_color(toneColor(t, x.tone)))
         .child(div().text_size(12).text_color(t.muted).child(String(x.label)))
-        .child(div().text_size(17).font_semibold().child(String(x.value)))
+        .child(div().text_size(17).font_semibold().when(!!x.tone, (e) => e.text_color(toneColor(t, x.tone))).child(String(x.value)))
         .when(!!x.note, (e) => e.child(div().text_size(12).text_color(t.dim).child(String(x.note))))));
       case "video": return this.media(b, t, "▶", "Video", b.poster ? b.poster : null);
       case "audio": return this.media(b, t, "♪", "Sound", null);
