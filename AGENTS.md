@@ -146,3 +146,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - Version bumps are patch only (2.0.0 → 2.0.1) unless the human explicitly asks for a minor or major one.
 - From SHEP-238: headless Chrome with flags herdr-browser ignores (e.g. --autoplay-policy=no-user-gesture-required, fake mic): run ~/.agent-browser/browsers/chrome-*/chrome --headless=new --user-data-dir=<scratch> --screenshot/--dump-dom directly.
 - From SHEP-240: a second visible browser page on the dev VM: run ~/.agent-browser/browsers/chrome-*/chrome --headless=new --remote-debugging-port=<p> <url> in the background and screenshot over CDP (Page.captureScreenshot); herdr-browser's --headers don't reach WebSockets.
+- From SHEP-258: Codex's model list comes from its own catalog: npm i --prefix <scratch> @openai/codex@<ver> and run its codex debug models to see a newer CLI's models and service_tiers without touching the installed one.
+- From SHEP-259: Python's zipimport reopens a zipapp by path on every import: test a swap by starting the zipapp, replacing its file, then importing (test/test_zipapp_swap.py).
