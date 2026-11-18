@@ -74,7 +74,7 @@ test("an agent's own alert from a chat takes Reply; titles fit a watch line, bod
 });
 
 test("only what the app shows: no alert from a finished terminal, a done task, days ago, or a machine back under its memory limit", () => {
-  const al = (over: any) => ({ id: "a" + Math.random(), at: NOW - 60_000, title: "x · Look", body: "now", notify: true, ...over });
+  const al = (over: any) => ({ id: "a" + Math.random(), at: NOW - 60_000, title: "x · Look", body: "now", chat: "HERD-3/worker", notify: true, ...over });
   const shown = (alerts: any[], over: any = {}) => doc(snapOf({ needs: [], alerts, ...over })).items.filter((i) => i.type === "alert").length;
   expect(shown([al({})])).toBe(1);
   // a finished helper's (ELIA-45's sign-in test)
@@ -85,24 +85,25 @@ test("only what the app shows: no alert from a finished terminal, a done task, d
   expect(shown([al({ at: NOW - 3.4 * 86400_000 })])).toBe(0);
   // not for the person (an Assistant's, its space's Notify off)
   expect(shown([al({ notify: false })])).toBe(0);
-  // the memory guard's: over once its machine is back under; still short of memory, it stands
-  const mem = (pct: number) => ({ machines: [{ machine: "box", here: true, stats: { health: { memory: pct } } }, { machine: "vm-demo", stats: { health: { memory: 7 } } }] });
-  expect(shown([al({ memory: true, machine: "vm-demo" })], mem(90))).toBe(0);
-  expect(shown([al({ memory: true })], mem(91))).toBe(1);
-  expect(shown([al({ memory: true })], mem(60))).toBe(0);
+  // SHEP-255: one of no task (a helper's, the memory guard's) is Chat's and notifications', never Needs you's
+  expect(shown([al({ chat: "vm-signin" })])).toBe(0);
+  expect(shown([al({ chat: undefined, memory: true })], { machines: [{ machine: "box", here: true, stats: { health: { memory: 91 } } }] })).toBe(0);
+  // a task's helper (herdr.task): on its task
+  expect(shown([al({ chat: "shep-3-review", task: "HERD-3" })])).toBe(1);
 });
 
-test("every need lists (a quiet space's too, without alerting), with an agent's alert, and each counts; an Assistant's message is only unread", () => {
+test("only tasks need you: a task's card lists, with a task's alert; an Assistant's card, alert and message are Chat's", () => {
   const notifyOff = [{ name: "Notify", level: "sp1", rows: [{ key: "notify", value: "Off" }] }];
-  const snap = snapOf({ settings: notifyOff, tasks: [], needs: [{ id: "q9", chat: "sp1", place: "sp1", at: NOW - 100, question: q({ id: "q9" }) }],
+  const snap = snapOf({ settings: notifyOff, tasks: [{ id: "HERD-3", name: "Tidy the docs", status: "work", place: "sp1", at: NOW - 7000 }, { id: "HERD-6", name: "Logo", status: "work", place: "sp1", at: NOW - 7000 }],
+    needs: [{ id: "q8", chat: "HERD-6/worker", place: "sp1", task: "HERD-6", at: NOW - 100, question: q({ id: "q8" }) }, { id: "q9", chat: "sp1", place: "sp1", at: NOW - 100, question: q({ id: "q9" }) }],
     places: [{ id: "sp1", name: "Home", chat: "sp1" }, { id: "sp2", name: "Shop", chat: "sp2" }], last: { sp2: NOW - 50 }, read: {},
-    alerts: [{ id: "a1", at: NOW - 100, title: "HERD-3 · Look", body: "now", notify: true }] });
+    alerts: [{ id: "a1", at: NOW - 100, title: "HERD-3 · Look", body: "now", chat: "HERD-3/worker", notify: true }, { id: "a2", at: NOW - 100, title: "Home Assistant · Look", body: "now", chat: "sp1", notify: true }] });
   const g = doc(snap);
-  const need = g.items.find((i) => i.key === "need:sp1:q9");
-  expect(need).toMatchObject({ kind: "needs", type: "need", alert: false, title: "Home Assistant · Needs you" });
+  const need = g.items.find((i) => i.key === "need:HERD-6/worker:q8");
+  expect(need).toMatchObject({ kind: "needs", type: "need", task: "HERD-6" });
   expect(need.answer.choices.length).toBe(3);
-  // SHEP-253: an Assistant's new message is Chat's (unread), no item in Needs you
-  expect(g.items.map((i) => i.type).sort()).toEqual(["alert", "need"]);
+  // SHEP-255: the Assistant's question and alert are not here; SHEP-253: its new message is Chat's (unread)
+  expect(g.items.filter((i) => i.kind === "needs").map((i) => i.key).sort()).toEqual(["alert:a1", "need:HERD-6/worker:q8"]);
   expect(g.counts.needs).toBe(2);
   expect(g.unread).toBe(1);
 });

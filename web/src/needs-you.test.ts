@@ -108,14 +108,12 @@ describe('Needs you is one rule: the web app and the glance feed list the same (
     expect(web.needs).toEqual(app.needs)
     expect(app.needs).toEqual([
       'task:vma:ELIA-60', // a need with no record, 90 min
-      'auto:vmb:shop:nightly', // a failed automation, 35 min
       'task:vmb:SHOP-3', // its question, 30 min
       'task:vma:ELIA-59', // pinned, but it waits: in Needs you
       'task:vmb:SHOP-4', // two cards, one row
-      'need:c:p:vmb:shop:q5', // the shop Assistant's question
-      'need:c:p:vmb:shop:s1', // its secret ask
       'task:vma:ELIA-57', // a working task's alert
     ])
+    // SHEP-255: tasks only: the shop Assistant's question and secret ask, the failed automation are not in it
     // the pinned task waits, so it is in Needs you only
     expect(web.pinned).toEqual([])
   })
@@ -124,11 +122,11 @@ describe('Needs you is one rule: the web app and the glance feed list the same (
     const snap = fleet()
     const web = panel(snap), app = phone(snap)
     expect(web.counts).toEqual({ needs: app.counts.needs, ready: app.counts.ready, working: app.counts.working })
-    expect(app.counts).toMatchObject({ needs: 8, ready: 1, working: 3 })
-    expect(app.doc.groups.find((x) => x.kind === 'needs')!.count).toBe(8)
+    expect(app.counts).toMatchObject({ needs: 5, ready: 1, working: 3 })
+    expect(app.doc.groups.find((x) => x.kind === 'needs')!.count).toBe(5)
     // the header's Needs you, the spaces' red counts added up, the app icon
-    expect(needsYou(snap, NOW).length).toBe(8)
-    expect(snap.places.reduce((n, p) => n + counts(snap, p.id).ownNeed, 0)).toBe(8)
+    expect(needsYou(snap, NOW).length).toBe(5)
+    expect(snap.places.reduce((n, p) => n + counts(snap, p.id).ownNeed, 0)).toBe(5)
     expect(waiting(snap, NOW).count).toBe(app.counts.needs + app.counts.ready)
   })
 
@@ -175,5 +173,20 @@ describe('Needs you is one rule: the web app and the glance feed list the same (
     expect(waiting(snap, NOW).count).toBe(0)
     expect(app.doc.items.some((i) => (i.type as string) === 'msg')).toBe(false)
     expect(app.doc.unread).toBeGreaterThan(0)
+  })
+
+  test("Tasks shows only tasks: a helper's alert of no task stays out; a task's helper's shows on its row (SHEP-255)", () => {
+    const signin = { id: 'h1', at: NOW - 2 * MIN, title: 'Agent · Finish sign-in: vm-a', body: 'Approve on your phone', chat: 'vma/vm-signin', place: 'p:vma:home', notify: true }
+    const memory = { id: 'm1', at: NOW - 2 * MIN, title: 'Memory at 91% on vm-b', body: 'Close something', machine: 'vmb', notify: true, memory: true as const }
+    const review = { id: 'r1', at: NOW - 1 * MIN, title: 'SHOP-1 · Reviewer stuck', body: 'Needs a go', chat: 'vmb/shop-1-review', task: 'vmb:SHOP-1', place: 'p:vmb:shop', notify: true }
+    const snap = fleet({ tasks: fleet().tasks.filter((t) => t.status === 'work'), needs: [], automations: {}, alerts: [signin, memory, review], read: {} })
+    const web = panel(snap), app = phone(snap)
+    expect(app.needs).toEqual(['task:vmb:SHOP-1'])
+    expect(web.needs).toEqual(app.needs)
+    expect(app.counts.needs).toBe(1)
+    expect(snap.places.reduce((n, p) => n + counts(snap, p.id).ownNeed, 0)).toBe(1)
+    expect(app.doc.items.find((i) => i.kind === 'needs')!.title).toContain('Reviewer stuck')
+    // its notifications still go out (push), the sign-in's too
+    expect([...alertsOf(snap).keys()]).toEqual(expect.arrayContaining(['alert:h1', 'alert:r1']))
   })
 })

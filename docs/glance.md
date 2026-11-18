@@ -100,10 +100,12 @@ The feed never says more than Shepherdr's own screens, so phone, watch and app a
 view (SHEP-250, `web/shared/needs-you.ts` `needsYou`): the web app's Tasks panel lists the same things under Needs you,
 in the same order, and its counts and badges count them.
 
-- Needs you, oldest first, each thing once and a task at most once (its oldest card stands for it): an agent's card or
-  wait (`type: "need"`; one in a space whose Notify is quiet too, with `alert: false`), a task whose status says Needs
-  you with no card (`type: "task"`), an agent's own `herdr-task alert` while it stands (`type: "alert"`), and
-  an automation that didn't run or didn't start its task (`type: "need"`, `alert: false`, key `auto:…`).
+- Needs you lists only tasks (SHEP-255), oldest first, each once (its oldest card stands for it): a task's agent's
+  card or wait (`type: "need"`), a task whose status says Needs you with no card (`type: "task"`), and a task's
+  agent's own `herdr-task alert` while it stands (`type: "alert"`; a helper labelled `herdr.task` counts as its task's).
+- What is no task's is not in it, here or in the Tasks panel: an Assistant's card, a helper's alert of no task (the VM
+  sign-in helper's), a machine's memory alert, a failed automation (its row in Automations says so). Their toasts and
+  web pushes still go as before.
 - An Assistant's new message is not a task, so it is not in Needs you (SHEP-253), here or in the Tasks panel: it
   belongs to Chat. `unread` counts the Assistants' chats with a new message not yet read (their space not muted, no
   card of their own waiting), for a Chat badge; its web push still goes as before.
@@ -111,7 +113,7 @@ in the same order, and its counts and badges count them.
   back under working once the alert goes. An agent's alert is a moment, as in the app (a toast, once): it stands only
   for 15 minutes, only while its terminal still runs and its task isn't done, and a machine's memory alert only while
   that machine's memory is still over 75%.
-- Each leaves everywhere at the same moment: answered, its alert over, the automation running again.
+- Each leaves everywhere at the same moment: answered, or its alert over.
 - `counts` are what each section lists, item for item (all of them, even past the 40 items): a header's number never
   differs from its list, nor from the web app's Needs you, its sidebar's red counts or its app icon's count.
 - `order` lists the sections' kinds in the order of the web app's Tasks panel (Status view: Needs you, Ready,

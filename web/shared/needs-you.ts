@@ -4,36 +4,36 @@
 // alert, so one screen said "2 need you" over a panel with no Needs you at all.
 //
 // What waits on you, each thing once, a task at most once:
-// - a card or wait of an agent (snapshot.needs: a question, a permission, a plan, a secret ask, a turn waiting);
+// - a card or wait of a task's agent (snapshot.needs: a question, a permission, a plan, a secret ask, a turn waiting);
 // - a task whose status is Needs you with no such record;
-// - an agent's own alert (herdr-task alert) while it stands (alertStands), a working task's too: that task is in Needs
+// - a task's agent's own alert (herdr-task alert, or a helper's labelled herdr.task) while it stands (alertStands), a working task's too: that task is in Needs
 //   you, not Working, until it goes;
-// - an automation that didn't run, or didn't start its task.
-// An Assistant's new message is not in it (SHEP-253): it is no task, so it stays in Chat (its unread dot and badge);
-// unreadChats lists those for a Chat badge (the glance feed's `unread`).
+// Only tasks are in it (SHEP-255): what isn't a task's goes to Chat and notifications, where it already shows. An
+// Assistant's new message (SHEP-253; unreadChats lists those for a Chat badge, the glance feed's `unread`), an
+// Assistant's own card, a helper's alert that is no task's (the VM sign-in helper's "Finish sign-in"), a machine's
+// memory alert, an automation that failed (its row in Automations says so): none of them are rows, counts or badges here.
 // Each leaves at the same moment everywhere: answered (its need goes), its alert over (its
-// agent ended, its task done, 15 minutes old, or its machine's memory back), the automation running again.
+// agent ended, its task done, 15 minutes old, or its machine's memory back).
 import { notifyOf } from './alerts.ts'
-import type { Automation, Need, Place, Snapshot, Task } from './types.ts'
+import type { Need, Place, Snapshot, Task } from './types.ts'
 
 type Alert = NonNullable<Snapshot['alerts']>[number]
 
 export type Waiting = {
-  /** stable while it lasts, the glance feed's item key: need:<chat>:<id>, task:<id>, alert:<id>, auto:… */
+  /** stable while it lasts, the glance feed's item key: need:<chat>:<id>, task:<id>, alert:<id> */
   key: string
-  type: 'need' | 'task' | 'alert' | 'auto'
+  type: 'need' | 'task' | 'alert'
   /** since when it waits (ms): the list goes oldest first */
   at: number
-  /** the space it belongs to (a task's place, an automation's list) */
+  /** the space its task belongs to */
   place?: string
   /** the task it is about: that task shows in Needs you, nowhere else */
-  task?: string
+  task: string
   need?: Need
   alert?: Alert
-  auto?: Automation
 }
 
-export type NeedsSnap = Pick<Snapshot, 'places' | 'tasks' | 'needs'> & Partial<Pick<Snapshot, 'alerts' | 'last' | 'read' | 'settings' | 'automations' | 'machines'>>
+export type NeedsSnap = Pick<Snapshot, 'places' | 'tasks' | 'needs'> & Partial<Pick<Snapshot, 'alerts' | 'last' | 'read' | 'settings' | 'machines'>>
 
 /** an agent's own alert is a moment, as in the app (a toast, once): Needs you lists it this long, then lets it go */
 export const ALERT_FRESH_MS = 15 * 60_000
@@ -50,6 +50,8 @@ export function unread(snap: Pick<Snapshot, 'last' | 'read'>, key: string | unde
 /** the task a chat belongs to (a task's chats are <task id>/<agent>) */
 const taskOfChat = (snap: Pick<Snapshot, 'tasks'>, chat?: string) =>
   chat?.includes('/') ? snap.tasks.find((t) => t.id === chat.slice(0, chat.lastIndexOf('/'))) : undefined
+/** the task an alert is about: its own (service/push.ts agentAlerts), else its chat's */
+const taskOfAlert = (snap: Pick<Snapshot, 'tasks'>, a: Alert) => (a.task ? snap.tasks.find((t) => t.id === a.task) : undefined) ?? taskOfChat(snap, a.chat)
 
 /**
  * Is an agent's alert still something that waits: what reaches the person (notify), from a terminal still running (a
@@ -58,7 +60,7 @@ const taskOfChat = (snap: Pick<Snapshot, 'tasks'>, chat?: string) =>
  */
 export function alertStands(a: Alert | undefined | null, snap: Pick<NeedsSnap, 'tasks' | 'machines'>, now: number): boolean {
   if (!a?.notify || a.ended || !(now - (Number(a.at) || 0) < ALERT_FRESH_MS)) return false
-  const task = taskOfChat(snap, a.chat)
+  const task = taskOfAlert(snap, a)
   if (task && (task.archived || task.status === 'done')) return false
   if (a.memory) {
     const m = (snap.machines ?? []).find((x) => (a.machine ? x.machine === a.machine && !x.here : x.here))
@@ -68,32 +70,28 @@ export function alertStands(a: Alert | undefined | null, snap: Pick<NeedsSnap, '
   return true
 }
 
-/** an automation's key, as the Tasks panel's row has it */
-export const autoKey = (a: Automation) => `auto:${a.machine ?? ''}:${a.listName}:${a.name}`
 
 /**
- * Everything that waits on you, oldest first (ties by key), a task once (its oldest). now: the clock alerts age by.
+ * The tasks that wait on you, oldest first (ties by key), each once (its oldest). now: the clock alerts age by.
  */
 export function needsYou(snap: NeedsSnap, now = Date.now()): Waiting[] {
   const out: Waiting[] = []
   const tasks = new Map<string, Task>(snap.tasks.map((t) => [t.id, t]))
   const open = (id?: string) => { const t = id ? tasks.get(id) : undefined; return !!t && !t.archived && t.status !== 'done' }
   const taken = new Set<string>()
-  const add = (w: Waiting) => { if (w.task) { if (taken.has(w.task)) return; taken.add(w.task) } out.push(w) }
+  const add = (w: Waiting) => { if (taken.has(w.task)) return; taken.add(w.task); out.push(w) }
   // a task's cards: its oldest stands for it (one row, one item)
   const needs = [...snap.needs].sort((a, b) => a.at - b.at)
   for (const n of needs) {
-    if (n.task && !open(n.task)) continue
-    add({ key: `need:${n.chat}:${n.id}`, type: 'need', at: n.at, place: n.place, ...(n.task ? { task: n.task } : {}), need: n })
+    if (!n.task || !open(n.task)) continue
+    add({ key: `need:${n.chat}:${n.id}`, type: 'need', at: n.at, place: n.place, task: n.task, need: n })
   }
   for (const t of snap.tasks) if (t.status === 'need' && !t.archived) add({ key: `task:${t.id}`, type: 'task', at: t.at ?? 0, place: t.place, task: t.id })
   for (const a of snap.alerts ?? []) {
-    if (!alertStands(a, snap, now)) continue
-    const t = taskOfChat(snap, a.chat)
-    add({ key: `alert:${a.id}`, type: 'alert', at: Number(a.at) || 0, ...(a.place ?? t?.place ? { place: a.place ?? t!.place } : {}), ...(t ? { task: t.id } : {}), alert: a })
+    const t = taskOfAlert(snap, a)
+    if (!t || !alertStands(a, snap, now)) continue
+    add({ key: `alert:${a.id}`, type: 'alert', at: Number(a.at) || 0, place: t.place, task: t.id, alert: a })
   }
-  for (const [place, autos] of Object.entries(snap.automations ?? {}))
-    for (const a of autos) if (a.error) add({ key: autoKey(a), type: 'auto', at: a.runs?.[0]?.at ?? 0, place, auto: a })
   return out.sort((a, b) => a.at - b.at || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
 }
 
@@ -111,4 +109,4 @@ export function unreadChats(snap: NeedsSnap): { chat: string; place: string; at:
 }
 
 /** the tasks in Needs you (they show there, in no other group) */
-export const waitingTasks = (ws: Waiting[]) => new Set(ws.map((w) => w.task).filter((t): t is string => !!t))
+export const waitingTasks = (ws: Waiting[]) => new Set(ws.map((w) => w.task))

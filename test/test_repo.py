@@ -184,7 +184,7 @@ class Repo(unittest.TestCase):
         """The Tasks panel's rows, the space's Files and Changes and a task's Pull request read their words and rules from
         core on both sides (core/tasks.js, core/needs.js, core/worktree.js): the web app keeps no copy of its own."""
         uses = {
-            J("web", "plugins", "tasks", "client.tsx"): ["@core/tasks.js", "@core/needs.js", "TK.capital", "ND.fit", "TK.day", "TK.STATUS", "ND.REASONS"],
+            J("web", "plugins", "tasks", "client.tsx"): ["@core/tasks.js", "@core/needs.js", "TK.capital", "ND.fit", "TK.day", "TK.STATUS"],
             J("web", "plugins", "worktree", "client.tsx"): ["@core/worktree.js", "W.VIEW_WORDS", "W.CHANGE_WORDS", "W.CHECK_WORDS", "W.PR_STATES", "W.checksLine"],
             J("service", "worktree.ts"): ["core/worktree.js", "VIEW_WORDS", "LIST_DIR", "dirEntries", "MARK_ARGS"],
         }

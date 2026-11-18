@@ -75,7 +75,7 @@ export function alertsOf(snap: any, woke: Set<string> = new Set(), said: (chat: 
  * task's agent or an alert about a task always; an Assistant's by its space's Notify). chatOf: a terminal's chat key.
  */
 export function agentAlerts(terminals: Iterable<any>, snap: any, chatOf: (address: string) => string | null, home: string) {
-  const out: { id: string; at: number; title: string; body: string; chat?: string; place?: string; notify: boolean; ended?: true; machine?: string | null; memory?: true }[] = [];
+  const out: { id: string; at: number; title: string; body: string; chat?: string; task?: string; place?: string; notify: boolean; ended?: true; machine?: string | null; memory?: true }[] = [];
   const all = [...terminals];
   for (const k of all) {
     let a: any = null;
@@ -86,14 +86,19 @@ export function agentAlerts(terminals: Iterable<any>, snap: any, chatOf: (addres
     const coord = !task && chat ? snap.places?.find((p: any) => p.chat === chat) : null;
     const ref = a.task ?? (task ? taskWho(snap, task.id) : null) ?? (k.labels?.["herdr.task"] ? (/^([a-z][a-z0-9]*-\d+)/.exec(k.name ?? "")?.[1] ?? "").toUpperCase() : "");
     const who = ref || (k.labels?.["herdr.role"] === "coordinator" || coord ? T.assistantWho(coord?.name) : k.program?.name ?? "Agent");
-    const place = task?.place ?? coord?.id;
+    // SHEP-255: the task it is about, so Tasks shows it on that task's row: its chat's task, else its herdr.task
+    // label's (a task's own helper, by its name "<ref>-…" on its machine: a task here is "<ref>", elsewhere "<machine>:<ref>"); none: no task's, Chat and notifications only
+    const machineOf = String(k.address ?? "").includes("/") ? String(k.address).slice(0, String(k.address).indexOf("/")) : null;
+    const labelled = !task && k.labels?.["herdr.task"] && ref ? snap.tasks?.find((t: any) => t.id === (machineOf ? `${machineOf}:${ref}` : ref)) : null;
+    const of = task ?? labelled;
+    const place = of?.place ?? coord?.id;
     const notify = Boolean(a.about || task || k.labels?.["herdr.task"] || !place || notifies(snap, { go: { place } }));
     // SHEP-246: what the glance feed needs to keep only what is still true: its terminal finished, its machine, and a
     // memory guard's alert (herdr-task tick memory_guard: a machine's state, over once memory is back under)
     const ended = k.state !== undefined && k.state !== "live";
     const machine = String(k.address ?? "").includes("/") ? String(k.address).slice(0, String(k.address).indexOf("/")) : null;
     const memory = a.about && /^Memory at \d+%/.test(String(a.title ?? ""));
-    out.push({ id: String(a.id), at: Number(a.at) || 0, title: T.clip(T.toastTitle(who, String(a.title ?? "")), 60), body: T.clip(String(a.body ?? ""), 300), ...(chat ? { chat } : {}), ...(place ? { place } : {}), notify,
+    out.push({ id: String(a.id), at: Number(a.at) || 0, title: T.clip(T.toastTitle(who, String(a.title ?? "")), 60), body: T.clip(String(a.body ?? ""), 300), ...(chat ? { chat } : {}), ...(of ? { task: of.id } : {}), ...(place ? { place } : {}), notify,
       ...(ended ? { ended: true as const } : {}), ...(machine ? { machine } : {}), ...(memory ? { memory: true as const } : {}) });
   }
   // Assistants here that their model's provider kept cutting off (herdr-task tick's .retries.json), once per cut, as
