@@ -283,6 +283,27 @@ export function Recipe({ recipe, asset, reply }: Props) {
       case 'choice': return <Choice b={b} reply={reply} />
       case 'form': return <Form b={b} reply={reply} />
       case 'pr': return <Pr b={b} />
+      case 'board': return (
+        <div className="grid items-start gap-3 @lg:grid-flow-col @lg:auto-cols-fr">
+          {b.columns.map((col: any, ci: number) => (
+            <div key={ci} className="flex min-w-0 flex-col gap-2">
+              <div className="flex items-center gap-2"><h3 className="min-w-0 flex-1 truncate font-semibold">{col.title}</h3><span className={clsx('inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-medium', CHIP[col.tone ?? 'info'])}>{col.cards.length}</span></div>
+              {col.cards.map((k: any, ki: number) => {
+                const inner = (
+                  <>
+                    {k.ref ? <span className="font-mono text-xs font-semibold text-accent">{k.ref}</span> : null}
+                    {k.title ? <span>{k.title}</span> : null}
+                    {k.note ? <span className="text-fg2">{k.note}</span> : null}
+                    {(k.chips ?? []).length ? <span className="flex flex-wrap gap-1.5">{k.chips.map((c: any, i: number) => { const x = typeof c === 'string' ? { text: c, tone: 'mute' } : c; return <span key={i} className={clsx('inline-flex h-5 items-center rounded-full px-2 text-xs font-medium', CHIP[x.tone ?? 'mute'])}>{x.text}</span> })}</span> : null}
+                  </>
+                )
+                const cls = 'flex min-w-0 flex-col gap-1 rounded-box p-3 shadow-box'
+                return isLink(k.url) ? <a key={ki} href={k.url} target="_blank" rel="noopener noreferrer" className={clsx(cls, 'no-underline hover:bg-hover')}>{inner}</a> : <div key={ki} className={cls}>{inner}</div>
+              })}
+            </div>
+          ))}
+        </div>
+      )
       case 'timeline': return (
         <ol role="list" className="relative flex flex-col gap-3">
           <span aria-hidden className="absolute bottom-2 left-[5px] top-2 w-px bg-line" />

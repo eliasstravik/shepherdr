@@ -73,7 +73,7 @@ MARKUP_HELPERS = ("dirs.js", os.path.join("core", "paths.js"))
 RECIPE_VIEW = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "recipe-view.js")
 RECIPE_CORE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "core", "recipe.js")
 RECIPE_TYPES = {"heading", "text", "list", "table", "chart", "stats", "image", "video", "audio", "pdf", "pair", "code", "callout",
-                "columns", "tabs", "details", "divider", "choice", "form", "button", "buttons", "pr", "timeline"}
+                "columns", "tabs", "details", "divider", "choice", "form", "button", "buttons", "pr", "timeline", "board"}
 NOTES = os.path.join(STORE, "notes")
 # A custom artifact's picture, as the window last showed it (a version's folder; the web shows it in its place).
 PICTURE = ".window.png"

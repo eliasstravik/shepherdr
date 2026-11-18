@@ -136,3 +136,13 @@ test("a timeline's items need md; time, tone and hollow are optional", () => {
   expect(one({ type: "timeline", items: [{ time: "1" }] }).length).toBe(1);
   expect(one({ type: "timeline", items: [{ md: "x", hollow: "yes" }] }).length).toBe(1);
 });
+
+test("a board's columns have a title and cards; a card has a title or ref", () => {
+  const card = { ref: "#108699", title: "Retire General post type", note: "Green.", url: "https://github.com/x/y/pull/1", chips: ["P1", { text: "x", tone: "warn" }] };
+  expect(one({ type: "board", columns: [{ title: "Ready", tone: "warn", cards: [card, { title: "plain" }] }, { title: "Empty", cards: [] }] })).toEqual([]);
+  expect(one({ type: "board", columns: [] }).length).toBe(1);
+  expect(one({ type: "board", columns: [{ cards: [] }] }).length).toBe(1);
+  expect(one({ type: "board", columns: [{ title: "a", cards: [{ note: "x" }] }] }).length).toBe(1);
+  expect(one({ type: "board", columns: [{ title: "a", cards: [{ title: "t", url: "http://x.y" }] }] }).length).toBe(1);
+  expect(one({ type: "board", columns: [{ title: "a", tone: "loud", cards: [] }] }).length).toBe(1);
+});

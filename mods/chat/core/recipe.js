@@ -26,6 +26,9 @@
 //   buttons  { items: [button] }                        buttons side by side (the first not quiet is the one to press)
 //   timeline { items: [{ time, md, tone, hollow }] }     a dated list down a line: time words, a tone dot (info | good | warn | bad |
 //                                                       mute, the default; hollow: a ring, not a filled dot) and Markdown
+//   board    { columns: [{ title, tone, cards: [{ ref, title, note, url, chips }] }] }   columns of cards, a count badge on each
+//                                                       column (tone colours it); a card with url opens it; ref: a small id
+//                                                       (#108699) over the title; note: words under it; chips as in a list item
 //   pr       { repo, number, title, url, state, ci, review, at }   a pull request, a snapshot taken with gh at publish time
 //                                                       (herdr-artifact pr-block <repo>#<n> prints one); state: open | draft |
 //                                                       merged | closed; ci: pass | fail | pending; review: approved | changes | required
@@ -34,7 +37,7 @@
 // Shared core: the source is core/recipe.js; bin/sync-shared copies it into the mods in lib/COPIES.
 
 export const RECIPE = 1;
-export const TYPES = ["heading", "text", "list", "table", "chart", "stats", "image", "video", "audio", "pdf", "pair", "code", "callout", "columns", "tabs", "details", "divider", "choice", "form", "button", "buttons", "pr", "timeline"];
+export const TYPES = ["heading", "text", "list", "table", "chart", "stats", "image", "video", "audio", "pdf", "pair", "code", "callout", "columns", "tabs", "details", "divider", "choice", "form", "button", "buttons", "pr", "timeline", "board"];
 // The files a block can show, by extension (what the browser plays or draws; a .mov the browser can't play is still
 // served, and the web app says so and offers the file).
 export const PICTURES = ["png", "jpg", "jpeg", "gif", "webp", "svg"];
@@ -96,6 +99,7 @@ export function problems(recipe, files = null) {
       case "form": need(arr(b.fields) && b.fields.every((f) => str(f?.name) && FIELDS.includes(f.kind ?? "text")), `fields need a name and a kind (${FIELDS.join(", ")})`); break;
       case "button": buttonProblem(b, need); break;
       case "pr": prProblem(b, need); break;
+      case "board": need(arr(b.columns) && b.columns.length > 0 && b.columns.every((c) => c && str(c.title) && arr(c.cards) && (c.tone == null || CHIP_TONES.includes(c.tone)) && c.cards.every((k) => k && typeof k === "object" && (str(k.title) || str(k.ref)) && [k.ref, k.title, k.note].every((v) => v == null || str(v)) && (k.url == null || isLink(k.url)) && (k.chips == null || (arr(k.chips) && k.chips.every((x) => chipOk(x, null)))))), `columns need a title and cards; a card needs a title or ref, an https url if any, and chips of words or { text, tone }`); break;
       case "timeline": need(arr(b.items) && b.items.every((x) => x && typeof x === "object" && str(x.md) && (x.time == null || str(x.time) || typeof x.time === "number") && (x.tone == null || CHIP_TONES.includes(x.tone)) && (x.hollow == null || typeof x.hollow === "boolean")), `items need md, and a tone of ${CHIP_TONES.join(", ")}`); break;
       case "buttons": need(arr(b.items) && b.items.length > 0 && b.items.length <= 4, "items must be 1 to 4 buttons"); if (arr(b.items)) b.items.forEach((x) => buttonProblem(x ?? {}, need)); break;
     }
@@ -163,7 +167,7 @@ export function withIds(recipe) {
 export function blockName(b) {
   const what = { heading: "heading", text: "text", list: "list", table: "table", chart: "chart", stats: "numbers", image: "picture",
     pair: "before and after", code: "code", callout: "callout", columns: "columns", tabs: "tabs", details: "folded section",
-    divider: "line", choice: "choice", form: "form", button: "button", buttons: "buttons", pr: "pull request", timeline: "timeline", video: "video", audio: "audio", pdf: "PDF" }[b?.type] ?? "block";
+    divider: "line", choice: "choice", form: "form", button: "button", buttons: "buttons", pr: "pull request", timeline: "timeline", board: "board", video: "video", audio: "audio", pdf: "PDF" }[b?.type] ?? "block";
   const name = b?.text ?? b?.title ?? b?.question ?? b?.summary ?? b?.caption ?? b?.label ?? b?.items?.[0]?.label ?? null;
   return name ? `the ${what} “${String(name).slice(0, 60)}”` : `the ${what} ${b?.id ?? ""}`.trim();
 }

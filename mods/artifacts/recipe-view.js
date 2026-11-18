@@ -13,6 +13,7 @@ import { chartShapes, choiceReply, formReply, isLink, mdParts, mediaKind, parts,
 
 // a chip's or a stats edge's colour, by tone
 const toneColor = (t, tone) => ({ info: t.accent, good: t.ansi2, warn: t.working, bad: t.ansi1 }[tone] ?? t.muted);
+const arr = Array.isArray;
 const TONE = { info: "surface", good: "done", warn: "working", bad: "blocked" };
 
 export default class RecipeView extends View {
@@ -212,6 +213,17 @@ export default class RecipeView extends View {
             }).child(sent ? "Sent" : b.submit ?? "Send"));
       }
       case "pr": return this.pr(b, t);
+      case "board": return h_flex().flex_wrap().gap(12).items_start().w_full()
+        .children(b.columns.map((col, ci) => v_flex().flex_1().min_w(220).gap(8)
+          .child(h_flex().w_full().items_center().gap(8)
+            .child(div().flex_1().min_w(0).text_size(13).font_semibold().truncate().child(col.title))
+            .child(div().h(18).min_w(18).px(5).flex().flex_none().items_center().justify_center().rounded(9).bg(toneColor(t, col.tone ?? "info") + "24").text_color(toneColor(t, col.tone ?? "info")).text_size(11).font_medium().child(String(col.cards.length))))
+          .children(col.cards.map((k, ki) => v_flex().id(`bd-${b.id}-${ci}-${ki}`).w_full().min_w(0).gap(4).p(10).rounded(8).border_1().border_color(t.border).bg(t.background)
+            .when(isLink(k.url), (e) => e.cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => cx.open_url(k.url)))
+            .when(!!k.ref, (e) => e.child(div().text_size(12).font_family("JetBrains Mono").font_semibold().text_color(t.accent).whitespace_normal().child(k.ref)))
+            .when(!!k.title, (e) => e.child(div().text_size(13).whitespace_normal().child(k.title)))
+            .when(!!k.note, (e) => e.child(div().text_size(12).text_color(t.muted).whitespace_normal().child(k.note)))
+            .when(arr(k.chips) && k.chips.length > 0, (e) => e.child(h_flex().flex_wrap().gap(6).children(k.chips.map((c) => this.chip(c.text ?? c, c.tone ?? "mute", t)))))))));
       case "timeline": return v_flex().relative().w_full().gap(10)
         .child(div().absolute().left(5).top(8).bottom(8).w(1).bg(t.border))
         .children(b.items.map((x, i) => {
