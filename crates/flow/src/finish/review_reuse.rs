@@ -9,7 +9,7 @@ use std::path::Path;
 /// Unknown evidence, remote references or an uncommitted source tree require a fresh review.
 pub fn input_identity(t: &Task, change: &Value, text: &str, ch: &Obj, check: &str) -> Option<String> {
     let head = change.s("head");
-    if head.is_empty() || !crate::flow::git::dirty(&cwd_of(t)).is_empty() { return None; }
+    if head.is_empty() || crate::flow::git::head_of(&cwd_of(t)) != head || !crate::flow::git::dirty(&cwd_of(t)).is_empty() { return None; }
     let note = crate::flow::task::note_stat(t)?.1;
     let root = cwd_of(t);
     let report = crate::research::report_folder(t);
