@@ -19,8 +19,11 @@ fn reviewed() -> (World, String) {
 }
 fn reviewers(w: &World) -> usize { calls(w).iter().filter(|c| c.starts_with("agent start") && c.contains("--kind agy")).count() }
 fn finish_again(id: &str) {
-    let mut g = sw::runner::Guard::free(id);
+    let t = sw::runner::claim(id, "pipeline", |t| { t.put("stage", "checking"); }).unwrap().unwrap();
+    let mut g = sw::runner::Guard::new(id);
+    g.expect(&t, &[]);
     sw::finish::pipeline::pipeline(id, &mut g, "Did v1.", false, "", None).unwrap();
+    sw::runner::release(id, false);
 }
 
 #[test]
