@@ -224,7 +224,7 @@ test("past a start screen the first message still goes in: Codex's turn for comi
   expect(sent).toEqual(["the template\n\nhello"]);
   // it took a turn and its log is there (hc got the message in after all, or the person typed): nothing is sent twice
   sent.length = 0;
-  log = "/home/x/.codex/sessions/rollout-1.jsonl\n";
+  log = "/srv/codex/sessions/rollout-1.jsonl\n";
   firstWhenIdle(at({ ...idle, turn: 2 }), "t1", "again", 10);
   await Bun.sleep(120);
   expect(sent).toEqual([]);
