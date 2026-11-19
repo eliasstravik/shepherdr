@@ -61,6 +61,9 @@ export class ChatReader {
     // "Hooks need review", trust this folder), which shows as a card under an empty chat, as the window's chat has it
     // (SHEP-263: the web said "Can't find this conversation" instead, and the card never showed).
     if (!path && starting(t)) path = "pending";
+    // Codex opens its log with its first message: past those screens and idle, with no message yet, it has none.
+    // Still an empty chat (the first message can be typed here), until it has worked a turn with no log to show.
+    if (!path && kind === "codex" && t?.state === "live" && !((t.turn ?? 0) > 1) && (t.status?.state ?? "idle") !== "blocked") path = "pending";
     if (path === "pending" || !path) {
       const was = this.state;
       this.reset();

@@ -1171,6 +1171,9 @@ export default class Chat extends View {
     // Not in its session yet (no report, no turn): perhaps on its own start screen, which
     // shows as a card under an empty chat.
     if (!path && starting(t)) path = "pending";
+    // Codex opens its log with its first message: past those screens and idle, with no message yet, it has none
+    // (core/chat-reader.js, the web's: the same rule).
+    if (!path && kind === "codex" && t.state === "live" && !(t.turn > 1) && t.status?.state !== "blocked") path = "pending";
     if (path === "pending") {
       // A Claude Code that hasn't written its first line yet has no file: an empty chat.
       if (this.phase === "finding") { this.kind = kind; this.conv = new Conversation(kind); this.start = 0; this.set("ready", cx); }
@@ -1364,7 +1367,9 @@ export default class Chat extends View {
         const k = this.ownTerminal();
         if (k && (starting(k) || openCard(this.addr))) { await this.screens.tick(this.addr, k); cx.notify(); }
         // The first message hc couldn't hand over (startAgent): once the agent is idle with no screen to answer.
-        if (this.firstSend && k?.turn > 0) this.firstSend = null;
+        // It took a turn already: nothing to send. A turn counts only once its log is there: Codex counts one for
+        // coming up, before any message, and past its own screens its first message was dropped (SHEP-263).
+        if (this.firstSend && k?.turn > 0 && this.path) this.firstSend = null;
         if (this.firstSend && k?.status?.state === "idle" && !openCard(this.addr)) {
           const text = this.firstSend;
           this.firstSend = null;

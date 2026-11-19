@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { Agents } from "./agents.ts";
 import { Compat } from "./compat.ts";
 import { Live, FRESH_AFTER_MS } from "./live.ts";
-import { act } from "./actions.ts";
+import { act, firstWhenIdle } from "./actions.ts";
 import { ChatReader } from "../core/chat-reader.js";
 import * as AG from "../core/agents.js";
 const { CHOICE_KEY, choiceOf } = AG as any;
@@ -65,7 +65,7 @@ function world(settings: any = SOL) {
   compat.shared = { value: (k: string) => doc[k], set: async (k: string, v: unknown) => { doc[k] = v; } };
   compat.assistantPick = (space: string) => choiceOf(doc[CHOICE_KEY], space) ?? settings;
   compat.spaceList = [{ id: "sp1", machine: null, folder: home, assistant: null }];
-  return { compat: compat as Compat & Record<string, any>, doc };
+  return { compat, doc };
 }
 
 test("before its first message the chat says what Settings will start it on: Codex's model, its level, Ultrafast", async () => {
@@ -108,7 +108,12 @@ test("the first message starts it on the choice (Codex, its model, service_tier 
   const { compat, doc } = world({ agent: "claude", model: "opus", effort: null, fast: false, perm: "manual" });
   // the window's chat (or the web's menu) chose Sol on Ultrafast for this space before the first message
   doc[CHOICE_KEY] = { sp1: { ...SOL, at: 5 } };
-  expect(await act(hub, { type: "send", chat: "p:sp1", text: "hello" }, compat)).toEqual({ ok: true, started: true });
+  const began = Date.now();
+  const sent: any = await act(hub, { type: "send", chat: "p:sp1", text: "hello", cid: "c1" }, compat);
+  expect(sent).toMatchObject({ ok: true, started: true });
+  // the page's own id for its message is kept for the chat to give back, with when it began to go in
+  expect(sent.at).toBeGreaterThanOrEqual(began);
+  expect(compat.sends.get("t9")).toMatchObject([{ cid: "c1", text: "hello" }]);
   const { args, template } = JSON.parse(readFileSync(ran, "utf8"));
   expect(args.slice(0, 2)).toEqual(["run", "--bg"]);
   expect(args).toContain("herdr.role=coordinator");
@@ -191,8 +196,42 @@ test("a CLI held on its own start screen is an empty chat (its card shows), not 
   const { compat } = world();
   const chat = compat.chat("t:t1", r, held);
   expect(chat.notice).toBeUndefined();
-  // in its session (it reports) with no log to be found: the notice, as before
+  // past its screens and idle, no message yet (Codex opens its log with its first message): still an empty chat
+  const idle: any = new ChatReader(io, "t3");
+  await idle.locate({ ...held, address: "t3", status: { state: "idle", app: "codex" }, turn: 1 });
+  expect(idle.state).toBe("pending");
+  // it worked a turn and no log is to be found: the notice, as before; Claude Code's too
   const lost: any = new ChatReader(io, "t2");
-  await lost.locate({ ...held, address: "t2", status: { state: "idle", app: "codex" } });
+  await lost.locate({ ...held, address: "t2", status: { state: "idle", app: "codex" }, turn: 2 });
   expect(lost.state).toBe("none");
+  const claude: any = new ChatReader(io, "t4");
+  await claude.locate({ ...held, address: "t4", status: { state: "idle", app: "claude" }, foreground: { name: "claude", pid: 7 }, turn: 1 });
+  expect(claude.state).toBe("none");
+});
+
+test("past a start screen the first message still goes in: Codex's turn for coming up is no turn taken", async () => {
+  // as hc tells it of a real Codex past "Hooks need review": idle, turn 1, and no session log open yet
+  const sent: string[] = [];
+  let log = "";
+  const at = (t: any): any => ({
+    terminals: new Map([["t1", t]]),
+    call: async (m: string) => (m === "machine.exec" ? { code: 0, stdout: Buffer.from(log).toString("base64"), stderr: "" } : {}),
+    send: async (_a: string, text: string) => { sent.push(text); return { code: 0, stdout: "", stderr: "" }; },
+  });
+  const idle = { address: "t1", state: "live", status: { state: "idle", app: "codex" }, turn: 1, foreground: { name: "codex", pid: 9 } };
+  firstWhenIdle(at(idle), "t1", "the template\n\nhello", 10);
+  await Bun.sleep(120);
+  expect(sent).toEqual(["the template\n\nhello"]);
+  // it took a turn and its log is there (hc got the message in after all, or the person typed): nothing is sent twice
+  sent.length = 0;
+  log = "/home/x/.codex/sessions/rollout-1.jsonl\n";
+  firstWhenIdle(at({ ...idle, turn: 2 }), "t1", "again", 10);
+  await Bun.sleep(120);
+  expect(sent).toEqual([]);
+  // still on its screen (no report yet): it waits
+  log = "";
+  const timer = firstWhenIdle(at({ ...idle, status: null, turn: 0 }), "t1", "later", 10);
+  await Bun.sleep(80);
+  expect(sent).toEqual([]);
+  clearInterval(timer);
 });
