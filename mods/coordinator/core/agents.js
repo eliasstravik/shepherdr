@@ -154,6 +154,26 @@ export const speedName = (fast) => (fast === "ultrafast" ? "Ultrafast" : fast ? 
 // The speed a model can run on: an Ultrafast it lacks falls back to Fast, a Fast it lacks to standard.
 export const speedFor = (m, fast) => (fast === "ultrafast" ? (m?.ultrafast ? "ultrafast" : m?.fast ? true : false) : Boolean(fast && m?.fast));
 
+// What a space's Assistant starts on, chosen before its first message (SHEP-263): shared "coordinator.choice" =
+// { [space id]: { agent, model, effort, fast, perm, at } }. The window's chat keeps it there when its model button's
+// pick changes (mods/chat freshPick), the web's model menu too (service/actions.ts), and each follows the other.
+// Whoever starts the Assistant (the window's chat, or the service for a first message from the web) starts it on
+// that and forgets it. None kept: what Shepherdr settings say for the space's Assistant.
+export const CHOICE_KEY = "coordinator.choice";
+// A space's choice as { agent, model, effort, fast, perm }, or null when none (or none that names an agent) is kept.
+export function choiceOf(all, space) {
+  const c = space && all && typeof all === "object" ? all[space] : null;
+  if (!c || (c.agent !== "claude" && c.agent !== "codex")) return null;
+  return { agent: c.agent, model: c.model ?? null, effort: c.effort ?? null, fast: c.fast === "ultrafast" ? "ultrafast" : Boolean(c.fast), perm: c.perm ?? null };
+}
+export const sameChoice = (a, b) => JSON.stringify(choiceOf({ x: a }, "x")) === JSON.stringify(choiceOf({ x: b }, "x"));
+// The choices with a space's kept (sel null: forgotten); only the newest 40 stay.
+export function withChoice(all, space, sel, now = Date.now()) {
+  const c = sel ? choiceOf({ x: sel }, "x") : null;
+  const rest = Object.entries(all && typeof all === "object" ? all : {}).filter(([k]) => k !== space);
+  return Object.fromEntries((c ? [[space, { ...c, at: now }], ...rest] : rest).sort((a, b) => (b[1]?.at ?? 0) - (a[1]?.at ?? 0)).slice(0, 40));
+}
+
 // An effort level as the person reads it: "xhigh" -> "Extra high". The CLIs still get the raw value.
 const LEVELS = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra", none: "None" };
 export function levelName(e) {

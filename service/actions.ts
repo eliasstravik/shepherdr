@@ -12,7 +12,7 @@ import { WORDS } from "../core/chat-view.js";
 import { settle } from "../core/pending.js";
 import * as AGa from "../core/agents.js";
 import { answerCodex } from "./codex-ask.ts";
-const { sessionOf, forkArgv, liveTaskAgent, FORK_LIVE } = AGa as any;
+const { sessionOf, forkArgv, liveTaskAgent, FORK_LIVE, CHOICE_KEY, choiceOf, withChoice, speedOf } = AGa as any;
 import * as SP from "../core/spaces.js";
 const { READ, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, withOrder, withMachineOrder, DELETED, deletedSection, withRestoredSection } = SP as any;
 import type { Compat } from "./compat.ts";
@@ -377,6 +377,17 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
   if ((b?.type === "restart-info" || b?.type === "model-menu" || b?.type === "restart") && typeof b.chat === "string" && compat.agents) {
     // the model menu: what it runs on and its choices (model-menu: the window's, mods/chat-models); a restart on
     // another model, effort, speed, permission mode or CLI
+    const fresh = b.type !== "restart-info" && b.chat.startsWith("p:") && !compat.addrOf(b.chat) ? compat.spaceOf(b.chat.slice(2).replace(":", "/")) : null;
+    if (fresh) {
+      // a space's Assistant that hasn't started (SHEP-263): the menu shows what its first message starts it on, and a
+      // pick only changes that choice (nothing runs yet), kept where the window's chat keeps its own (CHOICE_KEY)
+      if (b.type === "model-menu") return { ok: true, menu: await (compat.agents as any).freshMenu(fresh.machine, compat.assistantPick?.(fresh.id) ?? null) };
+      if (!["claude", "codex"].includes(b.kind)) throw new Error("Pick Claude Code or Codex.");
+      const opt = (v: unknown) => (typeof v === "string" && /^[\w.\[\]-]{1,60}$/.test(v) ? v : null);
+      if (!compat.shared) throw new Error("The choice couldn't be kept.");
+      await compat.shared.set(CHOICE_KEY, withChoice(compat.shared.value(CHOICE_KEY), fresh.id, { agent: b.kind, model: opt(b.model), effort: opt(b.effort), fast: speedOf(opt(b.speed)), perm: opt(b.perm) }));
+      return { ok: true, chosen: true };
+    }
     const a = chat(b.chat), reader = compat.reader?.(a);
     if (b.type === "restart-info") return compat.agents.info(a, reader);
     if (b.type === "model-menu") return { ok: true, menu: await (compat.agents as any).menu(a, reader) };
@@ -595,6 +606,8 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const addr = sp.machine && !String(out.address).includes("/") ? `${sp.machine}/${out.address}` : String(out.address);
     if (out.first_message?.sent === false && tpl.words) firstWhenIdle(hub, addr, `${tpl.words}\n\n${task}`);
     try { mkdirSync(first, { recursive: true }); writeFileSync(writable(join(first, `${String(slot ?? addr).replace(/[^\w.-]/g, "_")}.txt`)), text); } catch {}
+    // it started on the choice made in its chat (assistantPick): that choice is spent, the next start is Settings' again
+    if (compat.shared && choiceOf(compat.shared.value(CHOICE_KEY), sp.id)) void compat.shared.set(CHOICE_KEY, withChoice(compat.shared.value(CHOICE_KEY), sp.id, null)).catch(() => null);
     return { ok: true, started: true };
   }
   if (b?.type === "send" && typeof b.chat === "string") {

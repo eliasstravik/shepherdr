@@ -822,8 +822,12 @@ export function connect() {
         pruned = true
       }
     } else if (msg.type === 'chat') {
-      state = { ...state, chats: { ...state.chats, [msg.chat.key]: msg.chat } }
-      putOutbox(settle(state.outbox, msg.chat))
+      // an Assistant with no agent (SHEP-263: not started yet, or ended): what its next start runs on, on the model
+      // button; a conversation the screen still shows stays, and nothing pending is settled against an empty chat
+      const was = state.chats[msg.chat.key]
+      const chat = msg.chat.fresh && was && !was.fresh && was.messages.length ? { ...was, agent: msg.chat.agent, cli: msg.chat.cli } : msg.chat
+      state = { ...state, chats: { ...state.chats, [msg.chat.key]: chat } }
+      if (!msg.chat.fresh) putOutbox(settle(state.outbox, msg.chat))
     }
     else if (msg.type === 'terminal') state = { ...state, terms: { ...state.terms, [msg.chat]: { ansi: msg.ansi, cols: msg.cols, rows: msg.rows } } }
     else if (msg.type === 'update') state = { ...state, update: msg.update }

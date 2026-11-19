@@ -10,9 +10,10 @@ import { shared, setShared } from "herdr";
 import { localService, localToken } from "./local.js";
 
 // the person's pins, sidebar and Notify; the Window page's switches and the add-ons switched off (Settings › Window);
-// Usage insights' last Delete (lib/usage.js: a view open then counts from it)
+// Usage insights' last Delete (lib/usage.js: a view open then counts from it); what each Assistant that hasn't started
+// will start on, chosen in its chat here or on the web (core/agents.js CHOICE_KEY, SHEP-263)
 export const KEYS = ["tasks.pinned", "spaces-chat", "notify", "addons.off", "tabbar.tabs", "sidebar.worktrees", "sidebar.unread", "counts.red",
-  "counts.green", "tasks.filters", "tasks.place", "chat.helpers", "coordinator.auto", "usage.deletedAt"];
+  "counts.green", "tasks.filters", "tasks.place", "chat.helpers", "coordinator.auto", "usage.deletedAt", "coordinator.choice"];
 // the same value whatever order its keys are in (herdr-core keeps a document's keys sorted, a mod writes its own order;
 // another machine's words come back in another): never a change by itself
 const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === "object"

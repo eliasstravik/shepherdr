@@ -6,6 +6,7 @@
 
 import { FIND, LOG, Conversation, records, resultText } from "./chat-log.js";
 import { BgJobs } from "./bg-jobs.js";
+import { starting } from "./screens.js";
 
 export const PAGE = 200;
 export const KEEP = 2000;
@@ -55,7 +56,11 @@ export class ChatReader {
     if (!kind || !pid) { const was = this.state; if (was !== "none") { this.reset(); this.state = "none"; } return was !== "none"; }
     if (this.path && this.kind === kind && this.pid === pid) return false;
     const f = await this.io.sh(FIND, ["chat", kind, String(pid)], this.machine);
-    const path = String(f.stdout ?? "").trim().split("\n").pop() ?? "";
+    let path = String(f.stdout ?? "").trim().split("\n").pop() ?? "";
+    // Not in its session yet (no report, no turn): perhaps on its CLI's own start screen (Codex's "Update available",
+    // "Hooks need review", trust this folder), which shows as a card under an empty chat, as the window's chat has it
+    // (SHEP-263: the web said "Can't find this conversation" instead, and the card never showed).
+    if (!path && starting(t)) path = "pending";
     if (path === "pending" || !path) {
       const was = this.state;
       this.reset();

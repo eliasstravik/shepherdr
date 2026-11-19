@@ -31,6 +31,8 @@ test("the shared document reads the same on both machines", () => {
       sections: [{ id: "a", machine: null, name: "Work", spaces: ["sp1"] }, { id: "b", machine: "mac-mini", name: "Home", spaces: ["mac-mini/sp2"] }] },
     notify: { everywhere: "All", machines: { local: "Off", vm: "All" }, spaces: { "mac-mini/sp2": "Off" } },
     "coordinator.auto": true,
+    // what each space's Assistant starts on (SHEP-263): by space id, as the icons
+    "coordinator.choice": { sp1: { agent: "codex", at: 1 }, "mac-mini/sp2": { agent: "claude", at: 2 }, "gone/sp9": { agent: "claude", at: 3 } },
   };
   const there = relocateDoc(here, toMini);
   expect(there["tasks.pinned"]).toEqual(["m3:/srv/app#4", ":/srv/x#2"]);
@@ -40,6 +42,7 @@ test("the shared document reads the same on both machines", () => {
   expect(there["spaces-chat"].sections.map((s) => [s.machine, s.spaces])).toEqual([["m3", ["m3/sp1"]], [null, ["sp2"]]]);
   expect(there.notify).toEqual({ everywhere: "All", machines: { m3: "Off", vm: "All" }, spaces: { sp2: "Off" } });
   expect(there["coordinator.auto"]).toBe(true);
+  expect(there["coordinator.choice"]).toEqual({ "m3/sp1": { agent: "codex", at: 1 }, sp2: { agent: "claude", at: 2 } });
   // and back again, the same (but the machine only the laptop knew)
   const back = relocateDoc(there, toLaptop);
   expect(back["spaces-chat"]).toEqual(here["spaces-chat"]);
@@ -56,6 +59,8 @@ test("a change from the laptop keeps what only the mini can name", () => {
   expect(merged.sections.map((s) => s.id)).toEqual(["z"]);
   expect(merged.machines).toEqual({ lonely: { icon: "🦊" } });
   expect(keepForeign("tasks.pinned", ["m3:/a#1"], ["lonely:/b#2", ":/c#3"], toLaptop)).toEqual(["m3:/a#1", "lonely:/b#2"]);
+  expect(keepForeign("coordinator.choice", { "m3/sp1": { agent: "codex" } }, { "lonely/sp9": { agent: "claude" }, sp2: { agent: "claude" } }, toLaptop))
+    .toEqual({ "lonely/sp9": { agent: "claude" }, "m3/sp1": { agent: "codex" } });
 });
 
 test("the settings file moves to the host as an own file", () => {

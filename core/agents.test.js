@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import * as AGall from "./agents.js";
 import { argvFor, current, forkArgv, FORK_LIVE, line, liveTaskAgent, menuFor, modelSections, parseDefaults, parsePicks, pickKey, resumeArgv, rowFor, withPin, withRecent, speedFor, speedOf, codexTier, speedName, speedWordOf } from "./agents.js";
 
 const codex = { models: Array.from({ length: 250 }, (_, i) => ({ id: `gpt-${i}`, label: `GPT ${i}`, efforts: ["low", "high"] })) };
@@ -164,4 +165,27 @@ test("a model without Ultrafast falls back to Fast, one without Fast to standard
   expect([codexTier("ultrafast"), codexTier(true), codexTier(false)]).toEqual(["ultrafast", "fast", "default"]);
   expect([speedName("ultrafast"), speedName(true), speedName(false)]).toEqual(["Ultrafast", "Fast", null]);
   expect([speedWordOf("ultrafast"), speedWordOf(true), speedWordOf(false)]).toEqual(["ultrafast", "fast", "normal"]);
+});
+
+// SHEP-263: what a space's Assistant starts on, chosen before its first message, kept where the window's chat, the
+// web's model menu and the service's start all read it
+test("a space's choice before the first message: kept whole (Ultrafast too), compared by what it starts, forgotten", () => {
+  const { CHOICE_KEY, choiceOf, sameChoice, withChoice } = AGall;
+  expect(CHOICE_KEY).toBe("coordinator.choice");
+  let all = withChoice(undefined, "sp1", { agent: "codex", model: "gpt-6.2-sol", fast: "ultrafast", perm: "full", extra: 1 }, 10);
+  expect(all).toEqual({ sp1: { agent: "codex", model: "gpt-6.2-sol", effort: null, fast: "ultrafast", perm: "full", at: 10 } });
+  expect(choiceOf(all, "sp1")).toEqual({ agent: "codex", model: "gpt-6.2-sol", effort: null, fast: "ultrafast", perm: "full" });
+  expect(argvFor(choiceOf(all, "sp1"), { agent: null, argv: [] }).argv).toContain('service_tier="ultrafast"');
+  expect(choiceOf(all, "sp2")).toBeNull();
+  expect(choiceOf({ sp1: { agent: "vim" } }, "sp1")).toBeNull();
+  expect(sameChoice(all.sp1, { agent: "codex", model: "gpt-6.2-sol", effort: null, fast: "ultrafast", perm: "full" })).toBe(true);
+  expect(sameChoice(all.sp1, { ...all.sp1, fast: true })).toBe(false);
+  // another machine's space beside it; only the newest 40 stay; a start forgets its own
+  all = withChoice(all, "vm/sp2", { agent: "claude", model: "opus", fast: 1 }, 20);
+  expect(Object.keys(all)).toEqual(["vm/sp2", "sp1"]);
+  expect(all["vm/sp2"].fast).toBe(true);
+  for (let i = 0; i < 60; i++) all = withChoice(all, `s${i}`, { agent: "claude" }, 100 + i);
+  expect(Object.keys(all).length).toBe(40);
+  expect(choiceOf(all, "sp1")).toBeNull();
+  expect(withChoice({ a: { agent: "claude", at: 1 } }, "a", null)).toEqual({});
 });

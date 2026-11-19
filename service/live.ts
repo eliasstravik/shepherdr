@@ -9,7 +9,13 @@ import type { Chats, Watcher } from "./chats.ts";
 import type { Compat } from "./compat.ts";
 
 // A page's socket: the chats it follows (by 2.1's chat key), each with the terminal and the watcher it holds.
-type WS = ServerWebSocket<{ who: string; keys?: string[]; chats?: Map<string, { addr: string; watcher: Watcher }>; push?: string | null; visible?: boolean; seen?: number; from?: string | null }>;
+type WS = ServerWebSocket<{ who: string; keys?: string[]; chats?: Map<string, { addr: string; watcher: Watcher }>; push?: string | null; visible?: boolean; seen?: number; from?: string | null;
+  /** the fresh chats it was sent (an Assistant that hasn't started), as sent; when a followed chat's agent went; the timer that looks again */
+  fresh?: Map<string, string>; left?: Map<string, number>; freshTimer?: ReturnType<typeof setTimeout> | null }>;
+
+/** how long an Assistant must be gone before its chat says what a new one would start on: a restart ends one and
+ *  starts another a moment later, and the chat shouldn't flicker in between */
+export const FRESH_AFTER_MS = 5000;
 
 /** how long a wake word (or an open, SHEP-246) waits for a page of its device to show up */
 export const WAKE_HELD_MS = 15_000;
@@ -35,7 +41,8 @@ export class Live {
       if (e.type === "reset") { void this.machines(); this.agents(); }
       else if ("terminal" in e && e.terminal) this.agents();
     });
-    store.on((d) => this.put("state", d));
+    // the shared document changed: a choice for an Assistant that hasn't started may be one of them
+    store.on((d) => { this.put("state", d); this.refresh(); });
     setInterval(() => void this.machines(), 15_000);
   }
 
@@ -60,6 +67,7 @@ export class Live {
     this.pages.delete(ws);
     this.visibleNow();
     for (const w of ws.data.chats?.values() ?? []) this.chats?.unwatch(w.addr, w.watcher);
+    if (ws.data.freshTimer) clearTimeout(ws.data.freshTimer);
   }
 
   /** 2.1's snapshot: everything the screen lists, whole, each time it changes. */
@@ -80,7 +88,11 @@ export class Live {
     const want = new Map<string, string>();
     for (const k of keys.slice(0, 40)) { const a = compat.addrOf(k); if (a) want.set(k, a); }
     ws.data.chats ??= new Map();
-    for (const [k, w] of ws.data.chats) if (want.get(k) !== w.addr) { chats.unwatch(w.addr, w.watcher); ws.data.chats.delete(k); }
+    for (const [k, w] of ws.data.chats) if (want.get(k) !== w.addr) {
+      chats.unwatch(w.addr, w.watcher); ws.data.chats.delete(k);
+      if (!want.has(k)) (ws.data.left ??= new Map()).set(k, Date.now());
+    }
+    this.fresh(ws, keys.slice(0, 40).filter((k) => !want.has(k)));
     for (const [k, addr] of want) {
       if (ws.data.chats.has(k)) continue;
       let sent = "";
@@ -91,6 +103,31 @@ export class Live {
       ws.data.chats.set(k, { addr, watcher });
       chats.watch(addr, watcher);
     }
+  }
+
+  /** The open chats with no agent: a space's Assistant that hasn't started gets its fresh chat (compat.freshChat: what
+   *  its first message starts it on), sent again only when it changed. One whose Assistant just went waits a moment. */
+  private fresh(ws: WS, keys: string[]) {
+    const compat = this.compat as any, sent = (ws.data.fresh ??= new Map());
+    for (const k of [...sent.keys()]) if (!keys.includes(k)) sent.delete(k);
+    for (const k of keys) {
+      if (!k.startsWith("p:")) continue;
+      const left = ws.data.left?.get(k) ?? 0, wait = left + FRESH_AFTER_MS - Date.now();
+      if (wait > 0) {
+        ws.data.freshTimer ??= setTimeout(() => { ws.data.freshTimer = null; if (this.pages.has(ws) && ws.data.keys) this.watch(ws, ws.data.keys); }, wait + 50);
+        continue;
+      }
+      ws.data.left?.delete(k);
+      const chat = compat?.freshChat?.(k);
+      if (!chat) { sent.delete(k); continue; }
+      const text = JSON.stringify({ type: "chat", chat });
+      if (sent.get(k) !== text && ws.readyState === 1) { sent.set(k, text); ws.send(text); }
+    }
+  }
+
+  /** What the pages' open chats show may have changed without a new snapshot (a choice kept, a machine's CLIs read). */
+  refresh() {
+    for (const ws of this.pages) if (ws.data.keys) this.watch(ws, ws.data.keys);
   }
 
   message(ws: WS, text: string) {

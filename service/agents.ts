@@ -13,6 +13,7 @@ import * as AG from "../core/agents.js";
 import { chatLabel } from "../core/spaces.js";
 import { kindOf } from "../core/chat-reader.js";
 import * as LS from "../core/live-switch.js";
+import * as SC from "../core/settings.js";
 
 const { DEFAULTS, parseDefaults, current, menuFor, rowFor, argvFor, sessionOf, NAMES, line, PICKS_FILE, parsePicks, pickKey, withPin, withRecent, speedOf, speedWordOf } = AG as any;
 /** a chat's speed as kept: false, true (Fast) or "ultrafast" */
@@ -62,6 +63,54 @@ export class Agents {
     return was?.value ?? null;
   }
 
+  /** which of the CLIs are installed on a machine (null: it couldn't be asked, so both are offered) */
+  private have(machine: string | null): Promise<Set<string> | null> {
+    return sh(this.hub, 'for c in "$@"; do command -v "$c" >/dev/null 2>&1 && echo "$c"; done', ["agents", "claude", "codex"], machine)
+      .then((r: any) => new Set(String(r?.stdout ?? "").split("\n").filter(Boolean)), () => null);
+  }
+
+  /** What the CLIs on a machine offer a new Assistant (core/settings.js choicesFrom: menus, permission defaults and
+   *  the first installed CLI's own defaults), as the window's chat reads it before its first message (loadChoice). */
+  private async readOffer(machine: string | null) {
+    const [claude, codex, have] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine), this.have(machine)]);
+    const value = (SC as any).choicesFrom({ claude, codex }, { claude: !have || have.has("claude"), codex: !have || have.has("codex") });
+    const k = machine ?? "", was = this.offers.get(k)?.value;
+    this.offers.set(k, { at: Date.now(), value });
+    if (JSON.stringify(was ?? null) !== JSON.stringify(value)) this.onOffer?.();
+    return value;
+  }
+  private offers = new Map<string, { at: number; value: any }>();
+  /** told when a machine's offer was read and differs from what was known (the fresh chats' buttons say it again) */
+  onOffer: (() => void) | null = null;
+  /** a machine's offer as last read, read again in the background at most once a minute; null until first read */
+  private offer(machine: string | null) {
+    const k = machine ?? "", was = this.offers.get(k);
+    if (!was || Date.now() - was.at > 60_000) {
+      this.offers.set(k, { at: Date.now(), value: was?.value ?? null });
+      void this.readOffer(machine).catch(() => undefined);
+    }
+    return was?.value ?? null;
+  }
+
+  /** An Assistant that hasn't started (SHEP-263): what its first message starts it on, as the window's chat says it
+   *  on its model button before then. pick: the choice kept for its space, else Shepherdr settings' Assistant
+   *  ({ agent, model, effort, fast, perm }), else null: the CLI's own. sel is that with what the machine offers;
+   *  words the button's ("GPT-6.2 Sol · High · Ultrafast"). Until the machine's CLIs were read, the pick as it is. */
+  fresh(machine: string | null, pick: any) {
+    const offer = this.offer(machine) ?? (SC as any).choicesFrom({}, { claude: true, codex: true });
+    const sel = (SC as any).freshSel(pick, offer);
+    const m = offer.menus?.[sel.agent]?.models?.find((x: any) => x.id === sel.model) ?? null;
+    return { sel, words: (SC as any).modelLabel(offer.menus, sel) as string, label: (m?.name ?? sel.model ?? null) as string | null, effort: (sel.effort ?? m?.defaultEffort ?? null) as string | null };
+  }
+
+  /** The model menu for an Assistant that hasn't started: the same menu, its choice what it will start on. */
+  async freshMenu(machine: string | null, pick: any) {
+    const offer = await this.readOffer(machine);
+    const sel = (SC as any).freshSel(pick, offer);
+    return { current: { agent: sel.agent, model: sel.model ?? null, effort: sel.effort ?? null, fast: fastOf(sel.fast), perm: sel.perm ?? null }, menus: offer.menus,
+      permDefault: offer.permDefault, picks: this.picks(), offline: machine && !(await this.reachable(machine)) ? machine : null, fresh: true };
+  }
+
   /** The window's model menu (mods/chat openPicker → mods/chat-models) for the agent at addr: what it runs on, each
    *  installed CLI's models, levels, Fast and permission modes, the person's pinned and recent ones; offline: the
    *  machine it runs on when that machine can't be reached now (a restart there waits for it) */
@@ -70,8 +119,7 @@ export class Agents {
     if (!t) throw new Error("That agent isn't here any more.");
     const machine = addr.includes("/") ? addr.split("/")[0] : null;
     const kind = kindOf(t) ?? reader?.kind ?? "claude";
-    const [claude, codex, have] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine),
-      sh(this.hub, 'for c in "$@"; do command -v "$c" >/dev/null 2>&1 && echo "$c"; done', ["agents", "claude", "codex"], machine).then((r: any) => new Set(String(r?.stdout ?? "").split("\n").filter(Boolean)), () => null)]);
+    const [claude, codex, have] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine), this.have(machine)]);
     const dflts: any = { claude, codex };
     let meta = reader?.conv?.meta ?? {};
     // a resumed conversation's log names the model it ran on before: until this process writes, its arguments say

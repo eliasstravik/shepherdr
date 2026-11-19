@@ -159,6 +159,12 @@ export function roleSel(role, own, choices, worker) {
     return { sel: { agent: o, model: choices.menus[o].models[0]?.id ?? null, effort: null, fast: false, perm: choices.permDefault?.[o] ?? null }, unset: true };
   return { sel: choices?.defaults ? { ...choices.defaults } : null, unset: true };
 }
+// What an Assistant's chat starts on before its first message, as its model button says it (the window's chat
+// loadChoice, the web's): the choice kept or set (`st`: { agent, model, effort, fast, perm }) when its agent is on
+// offer there, else the defaults (the first installed CLI's own).
+export function freshSel(st, choices) {
+  return st?.agent && choices?.menus?.[st.agent] ? { perm: choices.permDefault?.[st.agent] ?? null, effort: null, fast: false, ...st } : { ...(choices?.defaults ?? {}) };
+}
 // A model picked in the menu: the effort and speed stay where it has them; another agent brings its own permission
 // modes, the nearest to the one chosen (agents.js permAcross).
 export function chooseModel(menus, permDefault, sel, agent, id) {
