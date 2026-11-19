@@ -83,9 +83,31 @@ fn failed_stale_and_legacy_reviews_do_not_reuse_and_history_preserves_identity()
     let key = t.at("review").t("inputIdentity");
     assert!(reusable(&t, &key).is_some());
     assert_eq!(t.arr("reviews").last().unwrap().s("inputIdentity"), key);
-    for patch in [json!({ "stale": true }), json!({ "meets": false, "pass": false }), json!({ "inputIdentity": null })] {
+    for patch in [json!({ "stale": true }), json!({ "meets": false, "pass": false }), json!({ "inputIdentity": null }), json!({ "error": "interrupted" })] {
         let mut changed = t.clone();
         for (k, v) in patch.as_object().unwrap() { changed.obj_mut("review").put(k, v.clone()); }
         assert!(reusable(&changed, &key).is_none());
     }
+}
+
+#[test]
+fn out_of_tree_binary_and_missing_artifacts_require_verification() {
+    let (w, id) = reviewed();
+    let t = task(&id);
+    let tree = std::path::Path::new(t.s("worktree"));
+    let exclude = git(tree, &["rev-parse", "--git-path", "info/exclude"]);
+    std::fs::write(exclude, ".proof/\n").unwrap();
+    let proof = tree.join(".proof");
+    std::fs::create_dir_all(&proof).unwrap();
+    let change = sw::flow::git::change_of(&t).unwrap();
+    let ch = sw::store::settings::lookup::work(Some(&t));
+    let outside = w.base.join("outside.txt");
+    std::fs::write(&outside, "untracked evidence").unwrap();
+    std::fs::write(proof.join("proof.md"), format!("Evidence: {}", outside.display())).unwrap();
+    assert!(input_identity(&t, &change, "Did v1.", &ch, "").is_none());
+    std::fs::write(proof.join("proof.md"), "[missing](missing.txt)").unwrap();
+    assert!(input_identity(&t, &change, "Did v1.", &ch, "").is_none());
+    std::fs::write(proof.join("proof.md"), "local evidence").unwrap();
+    std::fs::write(proof.join("capture.png"), [0, 255]).unwrap();
+    assert!(input_identity(&t, &change, "Did v1.", &ch, "").is_none());
 }

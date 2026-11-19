@@ -6,6 +6,8 @@ use crate::store::tasks::Task;
 use std::collections::BTreeMap;
 use std::path::Path;
 
+const MAX_EVIDENCE_BYTES: u64 = 4_000_000;
+
 /// Unknown evidence, remote references or an uncommitted source tree require a fresh review.
 pub fn input_identity(t: &Task, change: &Value, text: &str, ch: &Obj, check: &str) -> Option<String> {
     let head = change.s("head");
@@ -30,7 +32,7 @@ pub fn input_identity(t: &Task, change: &Value, text: &str, ch: &Obj, check: &st
 
 pub fn reusable(t: &Task, identity: &str) -> Option<Value> {
     let rv = t.at("review");
-    if identity.is_empty() || rv.s("inputIdentity") != identity || rv.b("stale") || !gate::passes(rv) { return None; }
+    if identity.is_empty() || rv.s("inputIdentity") != identity || rv.b("stale") || rv.b("error") || !gate::is_tagged(rv) || !gate::passes(rv) { return None; }
     Some(rv.clone())
 }
 
@@ -44,7 +46,8 @@ fn collect(path: &Path, evidence: &mut BTreeMap<String, String>, root: &Path, re
     };
     if meta.is_dir() {
         for entry in std::fs::read_dir(path).ok()? { collect(&entry.ok()?.path(), evidence, root, report)?; }
-    } else if meta.is_file() && meta.len() <= 4_000_000 {
+    } else if meta.is_file() && meta.len() <= MAX_EVIDENCE_BYTES {
+        if !matches!(path.extension()?.to_str()?, "md" | "txt" | "log" | "json") { return None; }
         let text = std::fs::read_to_string(path).ok()?;
         local_references(&text, path.parent()?, root, report)?;
         evidence.insert(path.display().to_string(), digest(&text));
