@@ -40,7 +40,11 @@ fn unchanged_finish_keeps_round_artifacts_and_does_not_launch_another_reviewer()
 #[test]
 fn new_evidence_or_specification_requires_a_new_review() {
     let (w, id) = reviewed();
-    let proof = std::path::Path::new(task(&id).s("worktree")).join(".proof");
+    let t = task(&id);
+    let tree = std::path::Path::new(t.s("worktree"));
+    let exclude = git(tree, &["rev-parse", "--git-path", "info/exclude"]);
+    std::fs::write(exclude, ".proof/\n").unwrap();
+    let proof = tree.join(".proof");
     std::fs::create_dir_all(&proof).unwrap();
     std::fs::write(proof.join("proof.md"), "New local evidence.\n").unwrap();
     finish_again(&id);

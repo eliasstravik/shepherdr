@@ -76,4 +76,4 @@ jobs:
           GIT_AUTHOR_EMAIL: ci@example.com
           GIT_COMMITTER_NAME: ci
           GIT_COMMITTER_EMAIL: ci@example.com
-        run: npm run check plan-sandbox plan-steps detached-jobs home-folder-more finish-commit warm-start take-over-more coordinator-levels board-coordinators-inks
+        run: npm run check agent-rules review-reuse plan-sandbox plan-steps detached-jobs home-folder-more finish-commit warm-start take-over-more coordinator-levels board-coordinators-inks
