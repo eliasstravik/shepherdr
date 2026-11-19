@@ -98,7 +98,7 @@ export function PriorityFlag({ task, bare = false, className }: { task: Task; ba
   }, [open])
   return (
     <>
-      <button ref={btn} type="button" aria-haspopup="menu" aria-expanded={open} aria-label={`${priorityLabel(task.priority)}. Change priority`} title={priorityLabel(task.priority)}
+      <button ref={btn} type="button" aria-haspopup="menu" aria-expanded={open} aria-label={`${priorityLabel(task.priority)}. Change priority`}
         onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
         className={clsx('hit press-dim pointer-events-auto relative z-1 inline-grid shrink-0 place-items-center rounded-full text-fg3 hover:bg-hover aria-expanded:bg-hover keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)]',
           task.priority ? 'min-h-6' : 'size-6 phone:size-8',
