@@ -73,6 +73,22 @@ def kids(pid):
     return out
 
 
+def _approval_reviewer(meta):
+    source = meta.get("source")
+    subagent = source.get("subagent") if isinstance(source, dict) else None
+    return isinstance(subagent, dict) and subagent.get("other") == "guardian"
+
+
+def _codex_conversation(path):
+    """Codex keeps its approval reviewer's log open too. Persist only the worker's own session for resume."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            entry = json.loads(f.readline())
+        return entry.get("type") == "session_meta" and not _approval_reviewer(entry["payload"])
+    except (OSError, ValueError, AttributeError, KeyError):
+        return False
+
+
 def session_of(pid):
     """(session id, log path) of the agent process pid (or a child), as mods/chat/log.js finds it:
     Claude Code names its session in ~/.claude/sessions/<pid>.json; Codex holds its rollout open."""
@@ -105,7 +121,7 @@ def session_of(pid):
             files = [l[1:] for l in run(["lsof", "-p", p, "-Fn"]).stdout.split("\n") if l.startswith("n")]
         for f in files:
             m = re.search(r"/rollout-.*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$", f)
-            if m:
+            if m and _codex_conversation(f):
                 return m.group(1), f
     return None, None
 
@@ -165,6 +181,9 @@ def _start(path):
                     continue
                 p = o.get("payload") or {}
                 if o.get("type") == "session_meta":
+                    # A reviewer can quote the task ID in its own first message.
+                    if _approval_reviewer(p):
+                        return None, ""
                     at = at or _ms(p.get("timestamp") or o.get("timestamp"))
                 elif o.get("type") == "user" and not o.get("isMeta"):
                     at = at or _ms(o.get("timestamp"))

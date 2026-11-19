@@ -3,8 +3,8 @@
 // Finding an agent's own session log and reading it as a conversation.
 // Claude Code: ~/.claude/sessions/<pid>.json names the session its process writes, so the
 // log is ~/.claude/projects/*/<sessionId>.jsonl. Codex keeps its rollout file open, so the
-// file is whatever rollout-*.jsonl its process (or a child) holds. Both are exact: no
-// guessing by folder or time, so two agents in one folder never get mixed up.
+// file is a rollout-*.jsonl its process (or a child) holds. Codex may also hold its
+// approval reviewer's rollout open, so check session metadata before showing it.
 
 // Prints the log's path on the agent's machine, or nothing. Args: kind, pid. The processes under pid come
 // from one read of /proc, else one ps (macOS) (GitHub #1013: a pgrep per process read every process each
@@ -15,23 +15,43 @@ export const FIND = `
 kind="$1"; pid="$2"
 procs() { if [ -r /proc/self/stat ]; then cat /proc/[0-9]*/stat 2>/dev/null | awk '{ p = $1; sub(/.*\\) /, ""); print p, $2 }'; else ps -axo pid=,ppid= 2>/dev/null; fi; }
 kids() { procs | sort -n | awk -v r="$1" 'function walk(p,  c, m, j) { m = split(k[p], c, " "); for (j = 1; j <= m; j++) if (!(c[j] in s)) { s[c[j]] = 1; print c[j]; walk(c[j]) } } { k[$2] = k[$2] " " $1 } END { s[r] = 1; walk(r) }'; }
-for p in "$pid" $(kids "$pid"); do
-  if [ "$kind" = claude ]; then
+if [ "$kind" = claude ]; then
+  for p in "$pid" $(kids "$pid"); do
     j="$HOME/.claude/sessions/$p.json"
     [ -f "$j" ] || continue
     id=$(sed -n 's/.*"sessionId":"\\([0-9a-fA-F-]*\\)".*/\\1/p' "$j")
     [ -n "$id" ] || continue
     for f in "$HOME"/.claude/projects/*/"$id".jsonl; do [ -f "$f" ] && { echo "$f"; exit 0; }; done
     echo "pending"; exit 0
-  else
+  done
+else
+  for p in "$pid" $(kids "$pid"); do
     if [ -d "/proc/$p/fd" ]; then
-      f=$(for d in /proc/$p/fd/*; do readlink "$d"; done 2>/dev/null | grep '/rollout-.*\\.jsonl$' | head -1)
+      for d in /proc/$p/fd/*; do readlink "$d"; done 2>/dev/null
     else
-      f=$(lsof -p "$p" -Fn 2>/dev/null | sed -n 's/^n//p' | grep '/rollout-.*\\.jsonl$' | head -1)
+      lsof -p "$p" -Fn 2>/dev/null | sed -n 's/^n//p'
     fi
-    [ -n "$f" ] && { echo "$f"; exit 0; }
-  fi
-done
+  done | grep '/rollout-.*\\.jsonl$' | python3 -c '
+import json
+import sys
+
+for line in sys.stdin:
+    path = line.rstrip("\\n")
+    try:
+        with open(path, encoding="utf-8") as f:
+            entry = json.loads(f.readline())
+        if entry.get("type") != "session_meta":
+            continue
+        source = entry["payload"].get("source")
+        subagent = source.get("subagent") if isinstance(source, dict) else None
+        if isinstance(subagent, dict) and subagent.get("other") == "guardian":
+            continue
+    except (OSError, ValueError, AttributeError, KeyError):
+        continue
+    print(path)
+    break
+'
+fi
 true`;
 
 // Reads a log on the agent's machine, sending back only what the chat shows. Each kept line

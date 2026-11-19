@@ -4,6 +4,7 @@ import home_guard  # noqa: F401  (first: every test on a throwaway home, never t
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -6033,6 +6034,37 @@ class ProcessTable(unittest.TestCase):
         self.sessions, self.mock = sessions, mock
         sessions._table["at"] = None
         self.addCleanup(lambda: sessions._table.update(at=None, children={}))
+
+    @unittest.skipUnless(os.path.isdir("/proc/self") and shutil.which("node"), "needs Linux /proc and Node")
+    def test_codex_open_reviewer_is_not_the_conversation(self):
+        from pathlib import Path
+
+        # Codex can hold the approval review and the conversation open in the same process.
+        # Lower-numbered descriptors make the old first-file rule select the wrong transcript.
+        with tempfile.TemporaryDirectory() as root:
+            reviewer = Path(root) / "rollout-00000000-0000-0000-0000-000000000001.jsonl"
+            primary = Path(root) / "rollout-00000000-0000-0000-0000-000000000002.jsonl"
+            for path, source in ((reviewer, {"subagent": {"other": "guardian"}}), (primary, "cli")):
+                path.write_text(json.dumps({"type": "session_meta", "payload": {"source": source}}) + "\n")
+            holder = subprocess.Popen([sys.executable, "-c", """
+import os, sys
+for fd, path in enumerate(sys.argv[1:], 40):
+    with open(path) as f:
+        os.dup2(f.fileno(), fd)
+print('ready', flush=True)
+sys.stdin.read()
+""", str(reviewer), str(primary)], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+            try:
+                self.assertEqual(holder.stdout.readline(), b"ready\n")
+                _, session_log = self.sessions.session_of(holder.pid)
+                self.assertEqual(session_log, str(primary))
+                finder = subprocess.check_output(
+                    ["node", "--input-type=module", "-e", "import { FIND } from './core/chat-log.js'; process.stdout.write(FIND);"],
+                    cwd=ROOT, text=True)
+                found = subprocess.check_output(["sh", "-c", finder, "chat", "codex", str(holder.pid)], text=True)
+                self.assertEqual(found.strip(), str(primary))
+            finally:
+                holder.communicate(timeout=5)
 
     def test_a_real_tree_from_one_read(self):
         import signal
