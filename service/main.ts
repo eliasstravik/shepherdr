@@ -58,6 +58,7 @@ import { folders, newSpace, newSpaceInfo } from "./spaces.ts";
 import { kindOf } from "../core/chat-reader.js";
 import * as SL from "../core/slash.js";
 import * as SCORE from "../core/settings.js";
+import { CHOICE_KEY, choiceOf } from "../core/agents.js";
 const SC = SCORE as any;
 const { SCAN, scanned, commandList, MENU } = SL as any;
 import * as HCORE from "../core/host.js";
@@ -180,6 +181,7 @@ function alertNew(snap: any) {
   alerted = new Set(now.keys());
 }
 compat.agents = new Agents(hub);
+(compat.agents as Agents).onOffer = () => live.refresh();
 // usage insights (service/usage.ts) record while the add-on is on
 followSwitch(() => !offList().includes("insights"));
 const machines = new Machines(hub, () => model.machineNames());
@@ -243,7 +245,9 @@ setInterval(() => {
 }, 30_000);
 const settings = new Settings();
 // a space's Assistant started from the web runs the agent Settings › Agents chooses for it, as the window's (#1051)
-compat.assistantPick = (space) => settings.role(space, "coordinator");
+// unless the person chose in its chat before its first message (the window's model button or the web's model menu:
+// core/agents.js CHOICE_KEY, SHEP-263)
+compat.assistantPick = (space) => choiceOf(model.value(CHOICE_KEY), space) ?? settings.role(space, "coordinator");
 // Settings › Agents' model menu and buttons (core/settings.js choicesFrom), from each CLI's own settings here, read
 // again every ten minutes; a CLI herdr-task's check finds missing here isn't offered
 const readDefaults = async () => {

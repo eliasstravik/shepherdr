@@ -870,6 +870,9 @@ export interface Chat {
   blocked?: string
   /** a note at the conversation's end (a lost session being started again) */
   note?: string
+  /** a space's Assistant that hasn't started (SHEP-263): nothing said yet, and `agent` is what its first message
+   *  starts it on (its model menu changes that choice, nothing runs yet) */
+  fresh?: boolean
   /** 3.0's notice instead of the conversation: opening it, not a chat agent, its log not found, its agent ended */
   notice?: 'opening' | 'unsupported' | 'none' | 'ended' | 'gone'
   /** the turn that runs now: how far it got and its step on now, drawn as one quiet line at the end of the chat */

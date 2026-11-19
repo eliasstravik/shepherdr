@@ -228,7 +228,9 @@ export type MenuModel = { id: string; name: string; efforts: string[]; defaultEf
 export type AgentMenu = { name: string; models: MenuModel[]; perms?: { id: string; label: string }[] }
 /** fast: true (Fast), false (standard) or 'ultrafast' (Codex's Ultrafast tier, SHEP-258) */
 type MenuPick = { agent: string; model: string | null; effort: string | null; fast: boolean | 'ultrafast'; perm: string | null }
-type MenuData = { current: MenuPick; menus: Record<string, AgentMenu>; permDefault: Record<string, string>; picks?: Picks; offline?: string | null }
+type MenuData = { current: MenuPick; menus: Record<string, AgentMenu>; permDefault: Record<string, string>; picks?: Picks; offline?: string | null
+  /** an Assistant that hasn't started (SHEP-263): the choice is what its first message starts it on, and a pick only changes it */
+  fresh?: boolean }
 /** a stretch of the model list (core/agents.js modelSections): Pinned, Recent, All models, or an agent's matches */
 type Picks = { pinned: string[]; recent: string[] }
 type Section = { key: string; title: string | null; agent: string; rows: (MenuModel & { agent: string; pinned: boolean; typed?: boolean })[]; more: number }
@@ -389,6 +391,16 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
   }, [chat, typed])
   const model = (s: MenuPick) => data?.menus[s.agent]?.models.find((m) => m.id === s.model) ?? null
   const level = (s: MenuPick) => s.effort ?? model(s)?.defaultEffort ?? null
+  // an Assistant that hasn't started: each pick is kept at once, as the window's model button before the first message
+  // (nothing runs yet, so there is nothing to switch or restart, and no button)
+  useEffect(() => {
+    if (!data?.fresh || !sel || JSON.stringify(sel) === JSON.stringify(data.current)) return
+    setData({ ...data, current: sel })
+    setError(null)
+    act({ type: 'restart', chat, kind: sel.agent, model: sel.model ?? '', effort: sel.effort ?? '', speed: AGc.speedWordOf(sel.fast), perm: sel.perm ?? '' } as never)
+      .then((r) => { if ((r as { ok?: boolean }).ok === false) setError((r as { error?: string }).error || "It wasn't kept.") })
+      .catch((e: Error) => setError(e.message))
+  }, [sel, data, chat])
   const changes = () => {
     if (!data || !sel) return []
     const w = data.current, out: string[] = []

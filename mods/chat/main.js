@@ -56,6 +56,7 @@ import { dirsReady } from "./dirs.js";
 import * as agent from "./agent.js";
 import { cleanCommand } from "./core/clean-env.js";
 import * as choices from "./settings.js";
+import { CHOICE_KEY, choiceOf, sameChoice, withChoice } from "./core/agents.js";
 import { Dictation, BUN_PATH, warmAudio } from "./dictate.js";
 
 // Writing down after Done this long says it's taking longer than usual (SHEP-63).
@@ -1170,6 +1171,9 @@ export default class Chat extends View {
     // Not in its session yet (no report, no turn): perhaps on its own start screen, which
     // shows as a card under an empty chat.
     if (!path && starting(t)) path = "pending";
+    // Codex opens its log with its first message: past those screens and idle, with no message yet, it has none
+    // (core/chat-reader.js, the web's: the same rule).
+    if (!path && kind === "codex" && t.state === "live" && !(t.turn > 1) && t.status?.state !== "blocked") path = "pending";
     if (path === "pending") {
       // A Claude Code that hasn't written its first line yet has no file: an empty chat.
       if (this.phase === "finding") { this.kind = kind; this.conv = new Conversation(kind); this.start = 0; this.set("ready", cx); }
@@ -1363,7 +1367,9 @@ export default class Chat extends View {
         const k = this.ownTerminal();
         if (k && (starting(k) || openCard(this.addr))) { await this.screens.tick(this.addr, k); cx.notify(); }
         // The first message hc couldn't hand over (startAgent): once the agent is idle with no screen to answer.
-        if (this.firstSend && k?.turn > 0) this.firstSend = null;
+        // It took a turn already: nothing to send. A turn counts only once its log is there: Codex counts one for
+        // coming up, before any message, and past its own screens its first message was dropped (SHEP-263).
+        if (this.firstSend && k?.turn > 0 && this.path) this.firstSend = null;
         if (this.firstSend && k?.status?.state === "idle" && !openCard(this.addr)) {
           const text = this.firstSend;
           this.firstSend = null;
@@ -1732,7 +1738,8 @@ export default class Chat extends View {
       // template's command under sh -c, and where sh is dash (Debian, Ubuntu) the shell would stay
       // the terminal's program, so the chat wouldn't know its CLI.
       let launch = template, oneOff = null, words = "";
-      const st = this.choice?.sel ?? props()?.settings;
+      // (the choice kept for the space first: a pick in the web app's model menu this chat hasn't drawn yet)
+      const st = choiceOf(shared(CHOICE_KEY), space?.id) ?? this.choice?.sel ?? props()?.settings;
       const on = machine ? { on: machine } : {};
       const there = !machine || !st?.agent ? true : (await knownAgents(on).catch(() => []))
         .some((a) => (a.key === st.agent || (a.run ?? [])[0] === st.agent) && a.installed !== false);
@@ -1784,6 +1791,8 @@ export default class Chat extends View {
       }
       this.addr = machine && !out.address.includes("/") ? `${machine}/${out.address}` : out.address;
       this.machine = this.addr.includes("/") ? this.addr.split("/")[0] : null;
+      // It started on the choice kept for its space: that choice is spent (the next start is Settings' again).
+      if (space && choiceOf(shared(CHOICE_KEY), space.id)) setShared(CHOICE_KEY, withChoice(shared(CHOICE_KEY), space.id, null));
       await this.flag();
       this.phase = "finding";
       this.wasFocused = false;
@@ -1815,9 +1824,14 @@ export default class Chat extends View {
         const data = await choices.loadChoices(space?.machine ?? null);
         let kept = null;
         try { kept = JSON.parse(localStorage.getItem(`choice:${this.slot}`) ?? "null"); } catch {}
-        const st = kept?.agent ? kept : props()?.settings;
+        // The choice kept for its space wins (core/agents.js CHOICE_KEY, SHEP-263): this chat's own pick, or one made
+        // in the web app's model menu. A pick kept here before choices were shared is told once (tell), so the web
+        // app's model button and a start from there say and use it too.
+        const spaceId = space?.id ?? props()?.space ?? this.slotRec()?.space ?? null;
+        const told = spaceId ? shared(CHOICE_KEY)?.[spaceId] ?? null : null;
+        const st = choiceOf({ x: told }, "x") ?? (kept?.agent ? kept : props()?.settings);
         const sel = st?.agent && data.menus[st.agent] ? { perm: data.permDefault[st.agent], effort: null, fast: false, ...st } : { ...data.defaults };
-        this.choice = { sel, data, key: this.choice.key };
+        this.choice = { sel, data, key: this.choice.key, space: spaceId, toldAt: told?.at ?? null, tell: !told && Boolean(kept?.agent) };
       } catch { this.choice = null; }
       cx.notify();
     });
@@ -4170,9 +4184,24 @@ export default class Chat extends View {
   freshPick(t, cx) {
     // A pick lands in this.choice.sel just after a render (settings.js applyReply), which then
     // redraws: a changed one is kept per slot here.
-    const now = JSON.stringify(this.choice.sel);
-    if (this.choice.saved !== undefined && now !== this.choice.saved && this.slot) try { localStorage.setItem(`choice:${this.slot}`, now); } catch {}
-    this.choice.saved = now;
+    const c = this.choice, all = c.space ? shared(CHOICE_KEY) : null, told = c.space ? all?.[c.space] ?? null : null;
+    // A pick made elsewhere for this space since (the web app's model menu): this chat follows it.
+    if (told?.at && told.at !== c.toldAt) {
+      c.toldAt = told.at;
+      const st = choiceOf(all, c.space);
+      if (st && c.data?.menus?.[st.agent] && !sameChoice(st, c.sel)) c.sel = { ...st };
+    }
+    const now = JSON.stringify(c.sel);
+    const changed = c.saved !== undefined && now !== c.saved;
+    if (changed && this.slot) try { localStorage.setItem(`choice:${this.slot}`, now); } catch {}
+    // This chat's pick goes where the web app's model button and a start from there read it.
+    if (c.space && cx && (changed || c.tell) && !sameChoice(c.sel, told)) {
+      const at = Date.now(), space = c.space, sel = { ...c.sel };
+      c.toldAt = at;
+      cx.timer.after(0, () => setShared(CHOICE_KEY, withChoice(shared(CHOICE_KEY), space, sel, at)));
+    }
+    c.tell = false;
+    c.saved = now;
     return choices.modelButton(t, this.choice, {}, cx);
   }
 

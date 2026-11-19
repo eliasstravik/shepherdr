@@ -120,3 +120,14 @@ test("Feedback offers and the repo they file to", () => {
   expect(S.feedbackRepo("not a repo")).toBeNull();
   expect(read("mods/shepherdr-settings/main.js")).toContain("feedbackRow(this, t)");
 });
+
+// SHEP-263: what an Assistant's chat starts on before its first message, the window's and the web's alike
+test("a fresh chat starts on the choice when its agent is on offer there, else on the first installed CLI's own", () => {
+  const choices = S.choicesFrom({ claude: { model: "opus[1m]", mode: "auto" }, codex: { models: [{ id: "gpt-6.2-sol", label: "GPT-6.2 Sol", efforts: ["low"], fast: true, ultrafast: true }] } });
+  const sol = { agent: "codex", model: "gpt-6.2-sol", fast: "ultrafast" };
+  expect(S.freshSel(sol, choices)).toEqual({ perm: "auto", effort: null, fast: "ultrafast", agent: "codex", model: "gpt-6.2-sol" });
+  expect(S.modelLabel(choices.menus, S.freshSel(sol, choices))).toBe("GPT-6.2 Sol · Ultrafast");
+  expect(S.freshSel(null, choices)).toEqual(choices.defaults);
+  // Codex isn't installed there: the defaults, as the start falls back to the template's own
+  expect(S.freshSel(sol, S.choicesFrom({ claude: {} }, { claude: true, codex: false })).agent).toBe("claude");
+});

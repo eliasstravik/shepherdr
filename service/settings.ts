@@ -3,8 +3,8 @@
 // keeping everything else in it. The window's settings read the file when they open; herdr-task reads it each time.
 // Levels as the window's scopes: Everywhere ("everywhere"), a space ("spaces"[its id], with its repo folder, which is
 // how herdr-task finds it), and for the Machines page each machine ("machines"[its name, "local" here]).
-import { existsSync, readFileSync, renameSync, watch, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync, renameSync, statSync, watch, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { HOME, settingsFile, where, writableSettings } from "./paths.ts";
 import * as C from "../core/settings.js";
 import { SH } from "../core/paths.js";
@@ -95,11 +95,26 @@ export class Settings {
 
   start() {
     this.read();
-    if (existsSync(dirname(settingsFile()))) watch(dirname(settingsFile()), (_e, name) => { if (name === "shepherdr.json") this.read(); });
+    // the file by the name it has now (SHEP-263: this still waited for "shepherdr.json", its name before SHEP-141, so a
+    // change made in the window's Settings never reached the service: an Assistant started from the web ran on what
+    // Settings said when the service started). A writer renames a temporary file onto it, so any name that starts
+    // with the file's counts, and one the watcher can't name too.
+    const file = settingsFile();
+    if (existsSync(dirname(file))) watch(dirname(file), (_e, name) => { if (!name || String(name).startsWith(basename(file))) this.read(); });
+  }
+
+  /** The file changed since it was read (its time or size): read again. Asked before a start reads a role, so one
+   *  never runs on settings a missed watch event left stale. */
+  private stamp = "";
+  private fresh() {
+    let now = "";
+    try { const st = statSync(settingsFile()); now = `${st.mtimeMs}:${st.size}`; } catch {}
+    if (now !== this.stamp) this.read();
   }
 
   private read() {
     let next: any = {};
+    try { const st = statSync(settingsFile()); this.stamp = `${st.mtimeMs}:${st.size}`; } catch { this.stamp = ""; }
     try { next = upgradeReactions(JSON.parse(readFileSync(settingsFile(), "utf8")) ?? {}); } catch {}
     if (JSON.stringify(next) === JSON.stringify(this.file)) return;
     this.file = next;
@@ -121,6 +136,7 @@ export class Settings {
   /** The agent a role runs in a space (null: Everywhere's), as the window's chat starts it (lib/coordinator.js
    *  shepherdrFor): { agent, model, effort, fast, perm }, or null when none is set (the template's own command). */
   role(scope: string | null, role: string): any {
+    this.fresh();
     const v = this.pick(scope, role, null).value;
     return v && typeof v === "object" && v.agent ? v : null;
   }

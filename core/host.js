@@ -95,6 +95,8 @@ export function relocate(key, value, rename) {
     return { ...value, ...(isObj(value.machines) ? { machines: mapKeys(value.machines, machineKey("local")(rename)) } : {}),
       ...(isObj(value.spaces) ? { spaces: mapKeys(value.spaces, (id) => moveId(id, rename)) } : {}) };
   }
+  // what each space's Assistant starts on, chosen before its first message (core/agents.js CHOICE_KEY): by space id
+  if (key === "coordinator.choice" && isObj(value)) return mapKeys(value, (id) => moveId(id, rename));
   return value;
 }
 
@@ -134,6 +136,7 @@ export function keepForeign(key, next, old, back) {
     if (isObj(old.spaces)) out.spaces = { ...Object.fromEntries(Object.entries(old.spaces).filter(([id]) => foreignId(id))), ...(next.spaces ?? {}) };
     return out;
   }
+  if (key === "coordinator.choice" && isObj(next) && isObj(old)) return { ...Object.fromEntries(Object.entries(old).filter(([id]) => foreignId(id))), ...next };
   return next;
 }
 
