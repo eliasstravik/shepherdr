@@ -126,7 +126,7 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
         {busy ? 'Accepting…' : 'Review'}
       </button>
     ) : null
-  // its priority flag (MSHEP-1): a click opens the picker; unflagged, a faint placeholder on hover
+  // its priority flag (MSHEP-1), to the right of Review: a click opens the picker; unflagged, a faint placeholder on hover
   const flag = <PriorityFlag task={t} />
   return (
     <Line
@@ -143,7 +143,7 @@ function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
       leftQuiet={t.status === 'scheduled'}
       dim={t.status === 'done'}
       where={where?.join(' · ')}
-      action={flag || accept ? <>{flag}{accept}</> : undefined}
+      action={flag || accept ? <>{accept}{flag}</> : undefined}
       // with ⌘ (Ctrl off a Mac), beside the focused pane in split view
       onOpen={(e) => !menu.held() && (splitClick(e) ? openSplit({ kind: 'task', id: t.id }) : openTask(t.id))}
       menu={t.archived ? undefined : menu}
