@@ -15,11 +15,11 @@ pub fn input_identity(t: &Task, change: &Value, text: &str, ch: &Obj, check: &st
     let report = crate::research::report_folder(t);
     let mut evidence = BTreeMap::new();
     evidence.insert("closing-note".to_string(), digest(&note));
-    collect(&root.join(".proof"), &mut evidence)?;
-    collect(&report, &mut evidence)?;
+    collect(&root.join(".proof"), &mut evidence, &root, &report)?;
+    collect(&report, &mut evidence, &root, &report)?;
     // A remote or out-of-tree artifact can change without any local input changing.
     for content in [text, note.as_str()] {
-        local_references(content, &root, &report)?;
+        local_references(content, &root, &root, &report)?;
     }
     let policy: Obj = ch.iter().filter(|(k, _)| k.starts_with("reviewer.") || k.starts_with("review.") || k.starts_with("check.")).map(|(k, v)| (k.clone(), v.clone())).collect();
     Some(digest(&json!({ "id": t.at("id"), "head": head, "range": change.at("range"),
@@ -36,28 +36,30 @@ pub fn reusable(t: &Task, identity: &str) -> Option<Value> {
 
 fn digest(text: &str) -> String { sha1_smol::Sha1::from(text).digest().to_string() }
 
-fn collect(path: &Path, evidence: &mut BTreeMap<String, String>) -> Option<()> {
+fn collect(path: &Path, evidence: &mut BTreeMap<String, String>, root: &Path, report: &Path) -> Option<()> {
     let meta = match std::fs::symlink_metadata(path) {
         Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(()),
         Err(_) => return None,
     };
     if meta.is_dir() {
-        for entry in std::fs::read_dir(path).ok()? { collect(&entry.ok()?.path(), evidence)?; }
+        for entry in std::fs::read_dir(path).ok()? { collect(&entry.ok()?.path(), evidence, root, report)?; }
     } else if meta.is_file() && meta.len() <= 4_000_000 {
         let text = std::fs::read_to_string(path).ok()?;
-        if text.contains("://") { return None; }
+        local_references(&text, path.parent()?, root, report)?;
         evidence.insert(path.display().to_string(), digest(&text));
     } else { return None; }
     Some(())
 }
 
-fn local_references(text: &str, root: &Path, report: &Path) -> Option<()> {
-    if text.contains("://") { return None; }
-    for link in crate::re!(r"\]\(([^)]+)\)").captures_iter(text) {
-        let target = link.get(1)?.as_str().split('#').next()?.trim_matches(['<', '>']);
+fn local_references(text: &str, base: &Path, root: &Path, report: &Path) -> Option<()> {
+    if text.contains("://") || text.contains("../") || text.contains("href=") || text.contains("src=") { return None; }
+    let links = crate::re!(r"\]\(([^)]+)\)").captures_iter(text).filter_map(|m| m.get(1).map(|m| m.as_str()));
+    let paths = crate::re!(r#"(?:^|[\s\"'`(])((?:/|~/|\$TMPDIR/)[^\s\"'`<>),;]+)"#).captures_iter(text).filter_map(|m| m.get(1).map(|m| m.as_str()));
+    for target in links.chain(paths) {
+        let target = target.split('#').next()?.trim_matches(['<', '>']);
         if target.is_empty() { continue; }
-        let path = if Path::new(target).is_absolute() { Path::new(target).to_path_buf() } else { root.join(target) };
+        let path = if Path::new(target).is_absolute() { Path::new(target).to_path_buf() } else { base.join(target) };
         let path = path.canonicalize().ok()?;
         if !path.starts_with(root) && !path.starts_with(report) { return None; }
         // Tracked source is covered by head; local evidence must be in the collected directories.

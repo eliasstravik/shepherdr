@@ -1,5 +1,6 @@
 //! A working task's line before the Watcher's first look of a run: the last sentence kept with its age, or "Just
 //! started", never a bare "…"; and what the Watcher or an agent wrote, on the row exactly as written.
+mod review_reuse;
 use crate::common;
 use common::*;
 use serde_json::{json, Value};

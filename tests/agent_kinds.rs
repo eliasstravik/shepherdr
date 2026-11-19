@@ -1,6 +1,7 @@
 //! herdr's other programs (issue #138, HP-13): how each is started from the table (its model, effort, access, a new
 //! or a reopened conversation, its own executable), its one-shot for the Watcher, other names a setting may give it,
 //! and every role a program cannot do refused with the reason.
+mod rules;
 use crate::common;
 use common::*;
 use serde_json::json;
