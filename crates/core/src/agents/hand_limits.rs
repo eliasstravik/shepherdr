@@ -23,7 +23,7 @@ pub fn typed_command(kind: &str, args: &[String]) -> String {
 }
 /// The words that point a program at its standing rules in `file`, for a program that takes them only inline.
 pub fn rules_pointer(file: &Path) -> String {
-    format!("Your standing rules are in the file {}. Read all of that file now, before anything else, and follow it for the whole session; read it again whenever you are unsure of them.", file.display())
+    format!("Your standing rules are in the file {}. Read it fully before starting work. On resume, check for changes and restore your checkpoint; reread changed, missing or uncertain instructions. Follow it throughout the session.", file.display())
 }
 fn message_file(text: &str) -> std::path::PathBuf {
     let h = sha1_smol::Sha1::from(text).digest().to_string();

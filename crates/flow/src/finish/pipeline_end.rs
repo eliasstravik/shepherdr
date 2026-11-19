@@ -60,16 +60,25 @@ pub fn after_review(c: Ctx, g: &mut Guard) -> Res<()> {
     let ch = work(get(id).as_ref());
     let review_needed = ch.s("review.when") != "never";
     let mut review: Option<Value> = None;
-    if review_needed && c.kept.is_some() && to_land {
+    let identity = change.as_ref().and_then(|change| super::review_reuse::input_identity(&t, change, c.text, &ch, c.check));
+    let cached = identity.as_deref().and_then(|key| super::review_reuse::reusable(&t, key));
+    let kept = c.kept.clone().or(cached);
+    if review_needed && kept.is_some() && to_land {
         let head = change.as_ref().map(|x| x.t("head")).unwrap_or_default();
-        let mut k = c.kept.clone().and_then(|v| v.as_object().cloned()).unwrap_or_default();
+        let mut k = kept.and_then(|v| v.as_object().cloned()).unwrap_or_default();
         let mut how = c.kept_how.clone().and_then(|v| v.as_object().cloned()).unwrap_or_default();
         how.put("head", head.clone()); how.put("check", c.check);
         k.put("head", head); k.put("keptAt", now()); k.put("kept", how.clone());
         g.set(|t| log_kept(t, &Value::Object(how.clone())))?; // the task's history says what happened instead of a review
         review = Some(Value::Object(k));
     } else if review_needed {
-        let r = run_review(id, g, c.text, change.as_ref(), to_land, &ch, c.check)?;
+        let mut r = run_review(id, g, c.text, change.as_ref(), to_land, &ch, c.check)?;
+        if let (Some(key), Some(rv), Some(change)) = (&identity, &mut r.review, &change) {
+            let current = g.check()?;
+            if super::review_reuse::input_identity(&current, change, c.text, &ch, c.check).as_ref() == Some(key) {
+                rv.put("inputIdentity", key.clone());
+            }
+        }
         if r.aborted { return Ok(()); }
         // The task keeps every review it had. A review the provider cut off is not one: it is not on the list.
         if !r.cut { let entry = r.review.clone().map(Value::Object).unwrap_or_else(|| json!({ "error": r.error })); g.set(|t| log_review(t, &entry))?; }

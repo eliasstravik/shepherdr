@@ -84,13 +84,20 @@ pub fn standing(kind: &str, text: &str, dir: &Path) -> Res<Vec<String>> {
     if kind == "codex" {
         let inline = serde_json::to_string(text)?;
         if inline.len() <= super::hand_limits::ARG_MAX { return Ok(vec!["-c".into(), format!("developer_instructions={inline}")]); }
-        let f = dir.join("rules.md"); fs::write(&f, text)?;
+        let f = dir.join("rules.md"); write_rules(&f, text)?;
         return Ok(vec!["-c".into(), format!("developer_instructions={}", serde_json::to_string(&super::hand_limits::rules_pointer(&f))?)]);
     }
     let Some(a) = super::kinds::kind(kind).filter(|a| !a.standing.is_empty()) else { return Ok(vec![]) };
     let f = dir.join("rules.md");
-    fs::write(&f, text)?;
+    write_rules(&f, text)?;
     Ok(fill(a.standing, &f.display().to_string()))
+}
+fn write_rules(file: &Path, text: &str) -> Res<()> {
+    match fs::read(file) {
+        Ok(before) if before == text.as_bytes() => Ok(()),
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+        _ => { fs::write(file, text)?; Ok(()) }
+    }
 }
 pub fn has_standing(kind: &str) -> bool { kind == "codex" || super::kinds::kind(kind).map(|a| !a.standing.is_empty()).unwrap_or(false) }
 fn real(p: &Path) -> PathBuf { fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf()) }

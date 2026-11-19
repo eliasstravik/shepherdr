@@ -24,6 +24,7 @@ fn review_entry(rv: &Value, round: i64, at: &Value) -> Value {
     e.put("checks", if rv.at("checks").is_array() { rv.at("checks").clone() } else { json!([]) });
     e.put("limitations", if rv.at("limitations").is_array() { rv.at("limitations").clone() } else { json!([]) });
     if rv.b("offPlan") { e.put("offPlan", rv.at("offPlan").clone()); } // where the build left its approved plan (plan/)
+    if rv.b("inputIdentity") { e.put("inputIdentity", rv.at("inputIdentity").clone()); }
     e.put("head", if rv.b("head") { rv.at("head").clone() } else { Value::Null });
     Value::Object(e)
 }
