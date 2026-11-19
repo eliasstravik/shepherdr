@@ -891,6 +891,7 @@ export default class Tasks extends View {
     const key = taskKey(list, task);
     return this.line(`task-${key}`, {
       go: this.target(p), glyph: this.glyph(p, w), ref: refOf(list, task), title: task.title, sub, left, leftColor: section === "scheduled" ? t.dim : null,
+      hoverable: !task.priority,
       dim: section === "done", selected: focused, where: bare ? null : this.whereOf(list.machine, placeName(list)),
       // Review (Ready), then the priority flag to its right
       action: this.rowEnd(p, key, section === "ready" ? this.acceptButton(p, t) : null),
@@ -901,7 +902,8 @@ export default class Tasks extends View {
 
   // A row's end: Review (Ready only) and the priority flag at its right. A click on the flag opens the picker.
   rowEnd(p, key, review) {
-    if (p.section === "done" && !p.task.priority) return review;
+    // Unflagged: no flag until the row is hovered (this.hoverRow, set by line()'s on_hover), its room kept so nothing shifts.
+    if (!p.task.priority && this.hoverRow !== `task-${key}`) return h_flex().flex_none().gap(6).items_center().when(Boolean(review), (el) => el.child(review)).child(div().size(24).flex_none());
     const flag = priorityPill(`prio-${key}`, p.task.priority, () => openOverlay({ mod: "tasks-menu", kind: "popup", at: "pointer", width: 200, height: 8 + 6 * 32,
       props: { menu: "priority", current: p.task.priority ?? "none", machine: p.list.machine ?? null, folder: p.list.folder, ref: refOf(p.list, p.task) } }));
     return h_flex().flex_none().gap(6).items_center().when(Boolean(review), (el) => el.child(review)).child(flag);
@@ -975,7 +977,7 @@ export default class Tasks extends View {
   //   run (`meta`).
   // A row with nothing under its title is one line. Nothing shows on hover: no tooltips (SHEP-25).
   // `pin`: { key, on }: Pin / Unpin in the row's right-click menu.
-  line(id, { go, glyph, ref, title, sub, left, leftColor, dim, selected, meta, metaColor, where, action, pin }, t) {
+  line(id, { go, glyph, ref, title, sub, left, leftColor, dim, selected, meta, metaColor, where, action, pin, hoverable }, t) {
     // Every second line is at most 40 characters (herdr-task cuts an agent's own; this catches the
     // derived ones: a long queue, a check's message).
     const said = sub ? capital(sub) : null;
@@ -984,6 +986,8 @@ export default class Tasks extends View {
     const end = action ?? (meta ? div().flex_none().whitespace_nowrap().text_size(TEXT.label).text_color(metaColor ?? t.dim).child(meta) : null);
     const row = h_flex().id(id).relative().flex_none().px(8).gap(12).items_center().rounded(RADIUS.card)
       .when(Boolean(selected), (el) => el.bg(t.selected))
+      // an unflagged task's priority flag shows while its row is hovered (rowEnd)
+      .when(Boolean(hoverable), (el) => el.on_hover((hovered, cx) => { if (hovered) this.hoverRow = id; else if (this.hoverRow === id) this.hoverRow = null; else return; cx.notify(); }))
       .when(Boolean(pin), (el) => el.on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.rowMenu(pin); }))
       .when(Boolean(go), (el) => el.cursor_pointer().hover((s) => s.bg(selected ? t.selected : t.hover)).on_click((_e, cx) => { go(); cx.notify(); }));
     const mark = h_flex().w(14).h(20).flex_none().items_center().justify_center().child(glyph);

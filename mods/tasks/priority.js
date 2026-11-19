@@ -45,7 +45,7 @@ export function refreshColors(onChange) {
 const dark = () => settings()?.dark !== false;
 export const colorOf = (level) => (custom[level] ? (dark() ? custom[level] : darker(custom[level])) : (dark() ? HEAT_DARK : HEAT_LIGHT)[level]);
 
-// The flag in its pill at a row's end, or (unflagged) nothing until the row is hovered: a faint dashed flag. `onClick` opens the picker.
+// The flag in its pill at a row's end, or (unflagged, shown by the row only while it is hovered) a faint dashed flag. `onClick` opens the picker.
 export function pill(id, level, onClick) {
   const t = theme();
   const lv = levelOf(level);
