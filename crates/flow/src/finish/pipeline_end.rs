@@ -62,11 +62,13 @@ pub fn after_review(c: Ctx, g: &mut Guard) -> Res<()> {
     let mut review: Option<Value> = None;
     let identity = change.as_ref().and_then(|change| super::review_reuse::input_identity(&t, change, c.text, &ch, c.check));
     let cached = identity.as_deref().and_then(|key| super::review_reuse::reusable(&t, key));
+    let unchanged = c.kept.is_none() && cached.is_some();
     let kept = c.kept.clone().or(cached);
     if review_needed && kept.is_some() && to_land {
         let head = change.as_ref().map(|x| x.t("head")).unwrap_or_default();
         let mut k = kept.and_then(|v| v.as_object().cloned()).unwrap_or_default();
         let mut how = c.kept_how.clone().and_then(|v| v.as_object().cloned()).unwrap_or_default();
+        if unchanged { how.put("unchanged", true); }
         how.put("head", head.clone()); how.put("check", c.check);
         k.put("head", head); k.put("keptAt", now()); k.put("kept", how.clone());
         g.set(|t| log_kept(t, &Value::Object(how.clone())))?; // the task's history says what happened instead of a review

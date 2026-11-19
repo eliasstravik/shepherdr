@@ -38,6 +38,11 @@ fn unchanged_finish_keeps_round_artifacts_and_does_not_launch_another_reviewer()
     assert_eq!(next.i("reviewRound"), first.i("reviewRound"));
     assert_eq!(next.at("review").at("artifacts"), &artifacts);
     assert_eq!(next.s("stage"), "approval");
+    let how = next.at("review").at("kept");
+    assert!(how.b("unchanged"));
+    let words = sw::store::reviews::kept_words(how, next.i("reviewRound"));
+    assert!(words.starts_with("review inputs unchanged"));
+    assert!(!words.contains("re-merged"));
 }
 
 #[test]
