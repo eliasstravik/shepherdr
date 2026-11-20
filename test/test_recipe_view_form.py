@@ -22,7 +22,7 @@ export const setRendering = (v) => { rendering = v; };
 const el = () => new Proxy(function () {}, { get: (t, k) => (k === "then" ? undefined : (...a) => {
   if (k === "when" && a[0]) a[1](el()); return el(); }), apply: () => el() });
 export class View {}
-export const div = () => el(), image = () => el(), v_flex = () => el(), h_flex = () => el();
+export const div = () => el(), image = () => el(), svg = () => el(), v_flex = () => el(), h_flex = () => el();
 export const TextView = { markdown: () => el() };
 export const Input = { new: () => el() };
 export const made = [];
