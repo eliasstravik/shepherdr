@@ -17,7 +17,9 @@
 //   columns  { columns: [[blocks]] }                    tabs     { tabs: [{ label, blocks }] }
 //   details  { summary, blocks }                        divider  {}
 //   choice   { question, options: [{ label, description }] }   one pick, sent to the agent as a reply
-//   form     { fields: [{ name, label, kind: text | textarea | select | checkbox, options }], submit }
+//   form     { fields: [{ name, label, kind: text | textarea | select | checkbox, options, value }], submit }
+//            value (optional): what the field starts with, and replies when left untouched: one of a select's options,
+//            true or false for a checkbox, words for text (GitHub #1212)
 //   button   { label, reply, href, quiet }              a press sends `reply` to the agent; with href (https only) it
 //                                                       opens that page in the person's browser too; quiet: the softer look
 //   buttons  { items: [button] }                        buttons side by side (the first not quiet is the one to press)
@@ -80,7 +82,9 @@ export function problems(recipe, files = null) {
       case "tabs": need(arr(b.tabs) && b.tabs.every((t) => str(t?.label) && arr(t?.blocks)), "tabs need a label and blocks"); if (arr(b.tabs)) b.tabs.forEach((t, j) => arr(t?.blocks) && walk(t.blocks, `${where}.${j + 1}.`)); break;
       case "details": need(str(b.summary) && arr(b.blocks), "needs a summary and blocks"); if (arr(b.blocks)) walk(b.blocks, `${where}.`); break;
       case "choice": need(str(b.question) && arr(b.options) && b.options.every((o) => str(o?.label)), "needs a question and options with labels"); break;
-      case "form": need(arr(b.fields) && b.fields.every((f) => str(f?.name) && FIELDS.includes(f.kind ?? "text")), `fields need a name and a kind (${FIELDS.join(", ")})`); break;
+      case "form": need(arr(b.fields) && b.fields.every((f) => str(f?.name) && FIELDS.includes(f.kind ?? "text")), `fields need a name and a kind (${FIELDS.join(", ")})`);
+        if (arr(b.fields)) for (const f of b.fields) if (f?.value != null) need(fieldValueOk(f), `field ${f.name}'s value must be ${f.kind === "select" ? "one of its options" : f.kind === "checkbox" ? "true or false" : "words"}`);
+        break;
       case "button": buttonProblem(b, need); break;
       case "buttons": need(arr(b.items) && b.items.length > 0 && b.items.length <= 4, "items must be 1 to 4 buttons"); if (arr(b.items)) b.items.forEach((x) => buttonProblem(x ?? {}, need)); break;
     }
@@ -123,8 +127,21 @@ export function blockName(b) {
 
 // The reply a choice or a form sends to its agent: plain words, as the person would write them.
 export function choiceReply(b, label) { return `${b.question}: ${label}`; }
+// A form field's starting value (its value, when it has a fitting one): what it shows first and replies untouched.
+export function fieldValueOk(f) {
+  const v = f?.value;
+  if (f?.kind === "checkbox") return typeof v === "boolean";
+  if (f?.kind === "select") return typeof v === "string" && (f.options ?? []).includes(v);
+  return typeof v === "string";
+}
+export function fieldStart(f) {
+  return f?.value != null && fieldValueOk(f) ? f.value : f?.kind === "checkbox" ? false : "";
+}
 export function formReply(b, values) {
-  const lines = (b.fields ?? []).map((f) => `${f.label ?? f.name}: ${f.kind === "checkbox" ? (values[f.name] ? "yes" : "no") : String(values[f.name] ?? "").trim() || "(empty)"}`);
+  const lines = (b.fields ?? []).map((f) => {
+    const v = values[f.name] ?? fieldStart(f);
+    return `${f.label ?? f.name}: ${f.kind === "checkbox" ? (v ? "yes" : "no") : String(v ?? "").trim() || "(empty)"}`;
+  });
   return [b.title ?? b.submit ?? "Form", ...lines].join("\n");
 }
 

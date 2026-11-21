@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { freePort, heldBy, httpsPort, meOf, shareProblem, webLink, webOrigin } from "./tailscale.ts";
+import { SERVE_ADMIN, SERVE_WAIT, freePort, heldBy, httpsPort, meOf, runCmd, serveNotEnabled, shareProblem, webLink, webOrigin } from "./tailscale.ts";
 
 describe("the web app's tailnet HTTPS port", () => {
   test("443 unless the https-port file says another", () => {
@@ -61,4 +61,54 @@ describe("who owns this machine (GitHub #845)", () => {
     expect(meOf(`{"Self":{"UserID":1,"DNSName":"box.tailnet.example."},"User":{}}`)).toBeNull();
     expect(meOf("not json")).toBeNull();
   });
+});
+
+describe("Serve not turned on for the tailnet (GitHub #1229, #1114)", () => {
+  const said = "Serve is not enabled on your tailnet.\nTo enable, visit:\n\n         https://login.tailscale.example/f/serve?node=n123\n";
+  test("says it plainly with tailscale's own link", () => {
+    expect(serveNotEnabled(said)).toBe("Tailscale Serve isn't turned on for your tailnet. An admin can turn it on here: https://login.tailscale.example/f/serve?node=n123");
+    expect(shareProblem({}, 443, said, true)).toBe(serveNotEnabled(said)!);
+  });
+  test("no link of its own: the admin console's", () => {
+    expect(serveNotEnabled("Serve is not enabled on your tailnet.")).toContain(SERVE_ADMIN);
+  });
+  test("other failures keep tailscale's own words", () => {
+    expect(serveNotEnabled("error: serve config denied")).toBeNull();
+    expect(shareProblem({}, 443, "", true)).toBe(`tailscale serve didn't answer in ${SERVE_WAIT / 1000} seconds`);
+  });
+  test("a command that waits forever is ended in time, keeping what it printed", async () => {
+    const t = Date.now();
+    const r = await runCmd(["sh", "-c", "echo 'Serve is not enabled on your tailnet.'; echo 'https://login.tailscale.example/f/serve?node=x'; exec sleep 30"], 500);
+    expect(Date.now() - t).toBeLessThan(5000);
+    expect(r).toMatchObject({ ok: false, timedOut: true });
+    expect(serveNotEnabled(r.out)).toContain("https://login.tailscale.example/f/serve?node=x");
+  });
+  test("a quick one isn't marked as timed out", async () => {
+    expect(await runCmd(["sh", "-c", "echo hi"], 5000)).toEqual({ ok: true, out: "hi\n", err: "" });
+  });
+});
+
+describe("one tailscale serve at a time (GitHub #1229)", () => {
+  test("looks while one waits share its answer; nothing is left running", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "shep-ts-"));
+    const log = join(dir, "log");
+    // a tailscale whose serve waits on its consent link, as on a tailnet without Serve
+    writeFileSync(join(dir, "tailscale"), `#!/bin/sh
+case "$1 $2" in
+  "serve status") echo '{}' ;;
+  "serve --bg") echo serve >> "${log}"; echo 'Serve is not enabled on your tailnet.'; echo 'To enable, visit:'; echo '  https://login.tailscale.example/f/serve?node=n1'; exec sleep 30 ;;
+esac
+`, { mode: 0o755 });
+    const script = join(dir, "run.ts");
+    writeFileSync(script, `import * as ts from ${JSON.stringify(join(import.meta.dir, "tailscale.ts"))};
+const said = await Promise.all([ts.share("box.example", 7788), ts.share("box.example", 7788), ts.share("box.example", 7788)]);
+console.log(JSON.stringify(said));`);
+    const p = Bun.spawn([process.execPath, script], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, SHEPHERDR_TEST_SERVE_WAIT: "700" }, stdout: "pipe", stderr: "pipe" });
+    const out = await new Response(p.stdout).text();
+    await p.exited;
+    const said = JSON.parse(out.trim().split("\n").pop()!);
+    expect(said).toHaveLength(3);
+    for (const s of said) expect(s).toBe("Tailscale Serve isn't turned on for your tailnet. An admin can turn it on here: https://login.tailscale.example/f/serve?node=n1");
+    expect(readFileSync(log, "utf8")).toBe("serve\n");
+  }, 15_000);
 });

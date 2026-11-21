@@ -17,7 +17,7 @@ from .agents import (
 )
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
-from .github import (already_merged, BEHIND, CHECKS_NEVER, checks_missing, checks_since, drop_branch, expected_checks, finish, github, merged_here, needs_approval, note_checks, pr_merged, pr_pending, pr_problem,
+from .github import (already_merged, BEHIND, CHECKS_NEVER, checks_missing, checks_since, drop_branch, merge_checks, expected_checks, finish, github, merged_here, needs_approval, note_checks, pr_merged, pr_pending, pr_problem,
                      pr_view, pr_wait, queue_entry, queue_merge, tidy_done, tidy_due, update_main, watch_main)
 from .launch import default_space
 from .store import locate, read_list, Store, store_files
@@ -127,6 +127,10 @@ def facts(s, t, report):
             finish(s, t)
             report["done"].append(t["id"])
             return
+        # merging by itself: only the base branch's required checks count (#1221), for its news too (a red optional
+        # check sent to its agent would take it out of Ready, and the merge with it)
+        if t.get("auto_merge"):
+            v = merge_checks(t, v)
         problem = pr_problem(v)
         if t.get("merge_queued"):
             queue_pass(s, t, v, report)

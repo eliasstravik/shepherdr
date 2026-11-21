@@ -482,6 +482,24 @@ class Autopilot(unittest.TestCase):
         self.lists = []
         self.assertNotIn("Waiting on the person", self.ap.message("sp1", a, ["schedule"]))
 
+    def test_a_task_that_merges_by_itself_isnt_waiting_on_an_accept(self):
+        """GitHub #1216: merge after checks (or right away): a Ready task merges on green, waiting on nobody's Accept.
+        Said only when something stops it."""
+        p = os.path.join(self.tmp, "tasks", "dev-self-merge.json")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w") as f:
+            json.dump({"folder": self.folder, "prefix": "SM", "tasks": [
+                {"id": 1, "state": "ready", "space": "sp1", "auto_merge": "checks"},
+                {"id": 2, "state": "queued", "after": [1]},
+                {"id": 3, "state": "ready", "space": "sp1", "auto_merge": "auto", "attention": "Checks failing: build."},
+                {"id": 4, "state": "queued", "after": [3]},
+                {"id": 5, "state": "ready", "space": "sp1"},
+                {"id": 6, "state": "queued", "after": [5]}]}, f)
+        self.lists = [p]
+        self.assertEqual(self.ap.waiting("sp1", {"folder": self.folder}), [
+            "SM-3 is Ready, won't merge by itself (Checks failing: build); SM-4 waits behind it",
+            "SM-5 is Ready, waiting on the person's Accept; SM-6 waits behind it"])
+
     def wake(self, ago, turn=3):
         """sp1 on, with a wake delivered to t9 `ago` ms back (its turn then: `turn`)."""
         self.cmd("on", space="sp1")
@@ -3510,6 +3528,105 @@ class ChecksBeforeReady(PrLooks):
         self.assertEqual(self.agents.task_status(t, self.live), ("working", None, "Merges once its checks pass"))
         t["merge_requested"] = 1
         self.assertEqual(self.agents.task_status(t, self.live), ("working", None, "Merging"))
+
+
+class RequiredChecksOnly(PrLooks):
+    """GitHub #1221: merge 'after checks' waits on the base branch's required checks only (GitHub marks them: the
+    GraphQL isRequired), so a red or running optional check never stops it merging or queueing."""
+
+    BUILD = {"name": "build", "status": "COMPLETED", "conclusion": "SUCCESS"}
+    LINT_RED = {"name": "lint", "status": "COMPLETED", "conclusion": "FAILURE", "detailsUrl": ""}
+    BUILD_RED = {"name": "build", "status": "COMPLETED", "conclusion": "FAILURE", "detailsUrl": ""}
+
+    def gh_script(self):
+        required = os.path.join(self.dir, "required.json")
+        return ("#!/usr/bin/env python3\nimport json, sys\n"
+                f"open({self.gh_log!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
+                "if sys.argv[1:3] == ['pr', 'view']:\n"
+                f"    print(open({os.path.join(self.dir, 'view.json')!r}).read())\n"
+                "elif sys.argv[1:3] == ['api', 'graphql'] and 'isRequired' in ' '.join(sys.argv):\n"
+                f"    print(open({required!r}).read())\n"
+                "elif sys.argv[1] == 'api':\n    print('[]')\n")
+
+    def requires(self, *names, rows=("build", "lint")):
+        nodes = [{"__typename": "CheckRun", "name": n, "isRequired": n in names} for n in rows]
+        with open(os.path.join(self.dir, "required.json"), "w") as f:
+            json.dump({"data": {"repository": {"pullRequest": {"commits": {"nodes": [
+                {"commit": {"statusCheckRollup": {"contexts": {"nodes": nodes}}}}]}}}}}, f)
+
+    def auto(self):
+        t = self.said_ready()
+        t["auto_merge"], t["state"], t["ready_at"] = "checks", "ready", 1
+        return t
+
+    def merge(self, t):
+        for name in ("watch_main", "update_main"):
+            p = unittest.mock.patch.object(self.commands, name, lambda *a, **k: None)
+            p.start()
+            self.addCleanup(p.stop)
+        p = unittest.mock.patch.object(self.commands, "finish", lambda s, t, even_if_busy=False: t.update(state="done"))
+        p.start()
+        self.addCleanup(p.stop)
+        return self.commands.merge_now(self.store, t)
+
+    def merged(self):
+        with open(self.gh_log) as f:
+            return any(a[:2] == ["pr", "merge"] for a in map(json.loads, f))
+
+    def test_a_red_optional_check_never_stops_it(self):
+        t = self.auto()
+        self.requires("build")
+        self.github_says(checks=[self.BUILD, self.LINT_RED])
+        self.look(t)
+        self.assertNotIn("attention", t)
+        self.assertNotIn("wait", t["pr"])
+        self.assertEqual(self.merge(t), self.commands.IN_QUEUE)  # merged on GitHub (this fake's pull request stays open)
+        self.assertTrue(self.merged())
+
+    def test_a_red_required_check_still_does(self):
+        t = self.auto()
+        self.requires("build")
+        self.github_says(checks=[self.BUILD_RED, self.LINT_RED])
+        self.look(t, after=1000)
+        self.assertEqual(t["attention"], "Checks failing: build.")
+        self.assertEqual(self.merge(t), "Checks failing: build.")
+        self.assertFalse(self.merged())
+
+    def test_a_running_optional_check_isnt_waited_on(self):
+        t = self.auto()
+        self.requires("build")
+        self.github_says(checks=[self.BUILD, {"name": "lint", "status": "IN_PROGRESS", "conclusion": ""}])
+        self.assertEqual(self.merge(t), self.commands.IN_QUEUE)  # merged on GitHub (this fake's pull request stays open)
+        self.assertTrue(self.merged())
+
+    def test_no_required_checks_waits_on_every_one_as_before(self):
+        t = self.auto()
+        self.requires()
+        self.github_says(checks=[self.BUILD, self.LINT_RED])
+        self.look(t, after=1000)
+        self.assertEqual(t["attention"], "Checks failing: lint.")
+
+    def test_github_unable_to_say_waits_on_every_one(self):
+        t = self.auto()
+        with open(os.path.join(self.dir, "required.json"), "w") as f:
+            f.write("not json")
+        self.github_says(checks=[self.BUILD, self.LINT_RED])
+        self.assertEqual(self.merge(t), "Checks failing: lint.")
+
+    def test_all_green_asks_github_nothing_more(self):
+        t = self.auto()
+        self.requires("build")
+        self.github_says(checks=[self.BUILD])
+        self.assertEqual(self.merge(t), self.commands.IN_QUEUE)  # merged on GitHub (this fake's pull request stays open)
+        with open(self.gh_log) as f:
+            self.assertFalse(any(a[:2] == ["api", "graphql"] for a in map(json.loads, f)))
+
+    def test_accept_without_after_checks_still_bounces_a_red_optional_check_to_its_agent(self):
+        # Not merging by itself: a Ready task's red check still goes back to its agent, as before.
+        t = self.said_ready()
+        self.requires("build")
+        self.github_says(checks=[self.BUILD, self.LINT_RED])
+        self.assertEqual(self.look(t, after=1000)[:2], ("working", "Back to its agent to fix"))
 
 
 class ChecksUnreadable(PrLooks):

@@ -418,6 +418,30 @@ class Install(unittest.TestCase):
                 s.shutdown()
                 s.server_close()
 
+    def test_the_artifact_viewer_goes_with_the_artifacts_mod(self):
+        """GitHub #1214: herdr-artifact preview looks beside itself first; the built viewer is installed there with the
+        artifacts mod, so a machine without the Web add-on (or a sync) still previews. Not built: nothing to ship."""
+        from importlib.machinery import SourceFileLoader
+        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        src = tempfile.mkdtemp(prefix="shepherdr-src-")
+        try:
+            for top in ("lib", "mods", "core", "templates", "bin"):
+                shutil.copytree(os.path.join(ROOT, top), os.path.join(src, top), ignore=shutil.ignore_patterns("node_modules", "__pycache__"))
+            shutil.copy(os.path.join(ROOT, "package.json"), src)
+            want = (".config/herdr-app/mods/artifacts/viewer.html")
+            self.assertNotIn(want, [rel for _, rel, _ in sh.source_items(src)[2]])
+            os.makedirs(os.path.join(src, "web", "dist"))
+            page = os.path.join(src, "web", "dist", "artifact-viewer.html")
+            with open(page, "w") as f:
+                f.write("<!doctype html><title>viewer</title>")
+            got = [(g, path) for g, rel, path in sh.source_items(src)[2] if rel == want]
+            self.assertEqual(got, [("artifacts", page)])
+            # where herdr-artifact looks first: beside its bin/
+            art = open(os.path.join(ROOT, "mods/artifacts/bin/herdr-artifact"), encoding="utf-8").read()
+            self.assertIn('os.path.join(HERE, "..", "viewer.html")', art)
+        finally:
+            shutil.rmtree(src, ignore_errors=True)
+
     def test_web_only(self):
         """install --web: the service, the web app, herdr-task and the helpers under .local/share/shepherdr, linked from
         .local/bin; nothing in herdr-app; herdr-task runs from there; uninstall takes it all back out."""

@@ -596,10 +596,14 @@ def waiting(space, a):
                     if i in (x.get("after") or []) and x.get("state") in ("queued", "todo") and x not in behind:
                         behind.append(x)
                         look.append(x["id"])
-            if behind:
+            # GitHub #1216: one that merges by itself (merge after checks, or right away) waits on nobody's Accept;
+            # said only when something stops it (its attention)
+            stuck = (t.get("attention") or "").strip().rstrip(".")
+            if behind and (stuck or not t.get("auto_merge")):
                 names = [ref(x) for x in behind]
                 names = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
-                out.append(f"{ref(t)} is Ready, waiting on the person's Accept; {names} wait{'s' if len(behind) == 1 else ''} behind it")
+                state = f"won't merge by itself ({stuck})" if t.get("auto_merge") else "waiting on the person's Accept"
+                out.append(f"{ref(t)} is Ready, {state}; {names} wait{'s' if len(behind) == 1 else ''} behind it")
     return out
 
 

@@ -32,7 +32,7 @@ herdr-app ls              # every space, its tabs and their terminals
 
 Split the ask into tasks. Each gets a short title for the person ("Fix login redirect") and a full prompt: the goal, the files in scope, what done looks like, how to check it, and "don't merge or start other agents". Tasks that can't start before others are done say so with `--after`. If the split isn't obvious, show the person the plan first.
 
-Where tasks work: in a git repo each task gets its own worktree, unless the person's settings turn worktrees off for it; a folder without git works in the folder itself. `herdr-task config --json` says which (`worktrees`: true or false). In the folder itself, tasks share one checkout, so queue them smartly: for each task, work out which files it will touch (read the code first). Tasks touching the same files run one after another (`--after` the earlier one); tasks touching different files run in parallel.
+Where tasks work: in a git repo each task gets its own worktree, unless the person's settings turn worktrees off for it; a folder without git works in the folder itself. `herdr-task config --json` says which (`worktrees`: true or false). In the folder itself, tasks share one checkout, so queue them smartly: for each task, work out which files it will touch (read the code first). Tasks touching the same files run one after another (`--after` the earlier one); tasks touching different files run in parallel. With worktrees too, check what's already queued or running before you add: when a new task's brief touches the same file or area as one of those (a hotspot file, one screen), chain it `--after` that one, as parallel edits there conflict at merge.
 
 ## Start the workers (one per task)
 

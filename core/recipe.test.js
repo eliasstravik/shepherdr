@@ -1,6 +1,6 @@
 // SHEP-79: a button may carry a plain https link (href), alone or with a reply; buttons sit side by side
 import { expect, test } from "bun:test";
-import { problems, blockName, preview, mediaKind, mdParts, cellMd } from "./recipe.js";
+import { problems, blockName, preview, mediaKind, mdParts, cellMd, fieldStart, formReply } from "./recipe.js";
 import { marked } from "marked";
 
 const one = (b) => problems({ recipe: 1, blocks: [b] });
@@ -111,4 +111,21 @@ test("cellMd: a table cell is inline Markdown", () => {
   expect(cellMd("1.5")).toBe("1.5");
   expect(cellMd("-5")).toBe("-5");
   expect(cellMd("**bold** start")).toBe("**bold** start");
+});
+
+// GitHub #1212: a form field may start on a chosen value; untouched, it replies with it
+test("a form field's value: its start and its untouched reply", () => {
+  const form = { type: "form", title: "Review", fields: [
+    { name: "a", label: "A", kind: "select", options: ["x", "y"], value: "y" },
+    { name: "b", label: "B", kind: "checkbox", value: true },
+    { name: "c", label: "C", kind: "text", value: "keep" },
+    { name: "d", label: "D", kind: "select", options: ["x", "y"] }] };
+  expect(one(form)).toEqual([]);
+  expect(form.fields.map(fieldStart)).toEqual(["y", true, "keep", ""]);
+  expect(formReply(form, {})).toBe("Review\nA: y\nB: yes\nC: keep\nD: (empty)");
+  // what the person changed wins
+  expect(formReply(form, { a: "x", b: false, c: "" })).toBe("Review\nA: x\nB: no\nC: (empty)\nD: (empty)");
+  // a value that doesn't fit is refused
+  expect(one({ type: "form", fields: [{ name: "a", kind: "select", options: ["x"], value: "z" }] })[0]).toContain("one of its options");
+  expect(one({ type: "form", fields: [{ name: "b", kind: "checkbox", value: "yes" }] })[0]).toContain("true or false");
 });
