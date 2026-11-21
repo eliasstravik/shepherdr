@@ -92,6 +92,8 @@ def own_argv(argv, folder=None):
     path, out = own_path(), list(argv)
     k = agent_key(out)
     if k == "claude":
+        if dont_ask_default(out, folder):
+            out = out[:1] + ["--permission-mode", "default"] + out[1:]
         rules = own_rules(path)
         hook = {"hooks": [{"type": "command", "command": ask_command(path), "timeout": ASK_TIMEOUT}]}
         cur, i = {}, None
@@ -359,7 +361,9 @@ def cmd_allow(args):
 def claude_mode(argv, folder=None):
     """The permission mode a new Claude Code session would start in (#1056): argv's own flag, else the defaultMode of
     its --settings, the folder's .claude/settings.local.json and .claude/settings.json, then the person's
-    (CLAUDE_CONFIG_DIR or ~/.claude), as Claude Code ranks them; "default" when none says."""
+    (CLAUDE_CONFIG_DIR or ~/.claude), as Claude Code ranks them; "default" when none says. A task worker never takes
+    a settings default of dontAsk (#1110: refused every edit and command, its question card too, with nobody to
+    answer): "default" instead, which asks on the chat's card."""
     for i, a in enumerate(argv):
         if a == "--dangerously-skip-permissions":
             return None
@@ -367,6 +371,25 @@ def claude_mode(argv, folder=None):
             return argv[i + 1]
         if a.startswith("--permission-mode="):
             return a.split("=", 1)[1]
+    mode = settings_mode(argv, folder)
+    return "default" if mode == DONT_ASK else mode
+
+
+DONT_ASK = "dontAsk"
+
+
+def dont_ask_default(argv, folder=None):
+    """Whether this Claude worker would start in don't-ask mode from the person's settings alone (#1110), argv saying
+    no mode of its own: own_argv then starts it in the default mode, and its start says so."""
+    if agent_key(argv) != "claude":
+        return False
+    if any(a in ("--dangerously-skip-permissions", "--permission-mode") or str(a).startswith("--permission-mode=") for a in argv):
+        return False
+    return settings_mode(argv, folder) == DONT_ASK
+
+
+def settings_mode(argv, folder=None):
+    """The defaultMode Claude Code takes from its settings (claude_mode's order), "default" when none says."""
     found = []
     for i, a in enumerate(argv[:-1]):
         if a == "--settings":

@@ -445,6 +445,12 @@ def cmd_start(args):
     out = {**v, "terminal": a["address"], "space": space, "parent": a.get("parent")}
     text = f"{s.ref(t)} started: {a['address']} in {folder_desc(t, s)}"
     # Codex's sandbox can't start here (SHEP-227, #998): whoever started it hears why and the fix, once per start.
+    from .launch import dont_ask_default, folder_for
+    if dont_ask_default(argv, folder_for(s, t)):
+        # #1110: the person's defaultMode, dontAsk, refuses a worker everything instead of asking
+        out["mode"] = ("Claude Code's settings start new sessions in don't-ask mode, which refuses instead of asking: "
+                       "this worker starts in the default mode, asking on its card.")
+        text += "\n\n" + out["mode"]
     broken = sandbox.check() if sandbox.sandboxed(argv) else None
     if broken:
         out["sandbox"] = sandbox.notice(broken)

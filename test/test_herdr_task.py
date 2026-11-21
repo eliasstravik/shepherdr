@@ -5806,6 +5806,34 @@ class TaskFlow(unittest.TestCase):
         # Codex's sandbox is in its argv already
         self.assertEqual(launch.resume_argv(["codex", "-s", "read-only"], "S1"), ["codex", "resume", "-s", "read-only", "S1"])
 
+    def test_a_dont_ask_default_never_starts_a_worker(self):
+        """#1110: the person's defaultMode dontAsk started every worker (a switch's too) refusing each edit, command and
+        question card. A worker starts in the default mode instead (it asks on its card), and its start says so; a mode
+        its own argv says stays."""
+        from herdr_task import launch
+        from unittest import mock
+        d = tempfile.mkdtemp()
+        home, folder = os.path.join(d, "claude"), os.path.join(d, "repo")
+        os.makedirs(home)
+        os.makedirs(folder)
+        with open(os.path.join(home, "settings.json"), "w") as f:
+            json.dump({"permissions": {"defaultMode": "dontAsk"}}, f)
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": home}):
+            self.assertTrue(launch.dont_ask_default(["claude"], folder))
+            argv = launch.own_argv(["claude", "go"], folder)
+            self.assertEqual(argv[argv.index("--permission-mode") + 1], "default")
+            # once: its argv given again (revive, a resume) adds no second flag
+            self.assertEqual(launch.own_argv(argv, folder).count("--permission-mode"), 1)
+            self.assertEqual(launch.resume_argv(["claude"], "S1", folder), ["claude", "--permission-mode", "default", "--resume", "S1"])
+            for argv in (["claude", "--permission-mode", "dontAsk"], ["claude", "--dangerously-skip-permissions"], ["codex"]):
+                self.assertFalse(launch.dont_ask_default(argv, folder), argv)
+            a = launch.own_argv(["claude", "--permission-mode", "auto"], folder)
+            self.assertEqual(a[a.index("--permission-mode") + 1], "auto")
+            with open(os.path.join(home, "settings.json"), "w") as f:
+                json.dump({"permissions": {"defaultMode": "auto"}}, f)
+            self.assertFalse(launch.dont_ask_default(["claude"], folder))
+            self.assertNotIn("--permission-mode", launch.own_argv(["claude", "go"], folder))
+
     def test_an_agent_switching_itself_ends_after_the_new_one_starts(self):
         """SHEP-211: ending the caller first would end the switch command with it."""
         events = self.switch_events(me="t1")
