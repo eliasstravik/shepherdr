@@ -177,3 +177,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - Never pkill -f a pattern that appears in your own command line (e.g. a unittest name): it kills your shell; use TaskStop or kill by pid. (from SHEP-288)
 
 - Window-mod methods that read terminals()/subagentsOf can be tested like chat's refocus(): extract the method from mods/chat/main.js and stub those two (see test/test_chat_jobs.py). (from SHEP-284)
+
+- bin/sync-shared (no --check) can wrongly call a mods/*/core copy "edited by hand" in a worktree: when git diff main shows the copy untouched, cp core/<file> over the copies instead of using --from (that would undo your change). (from SHEP-287)
