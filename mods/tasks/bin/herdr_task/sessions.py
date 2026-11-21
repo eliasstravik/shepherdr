@@ -74,8 +74,9 @@ def kids(pid):
 
 
 def session_of(pid):
-    """(session id, log path) of the agent process pid (or a child), as mods/chat/log.js finds it:
-    Claude Code names its session in ~/.claude/sessions/<pid>.json; Codex holds its rollout open."""
+    """(session id, log path) of the agent process pid (or a child), as core/chat-log.js finds it:
+    Claude Code names its session in ~/.claude/sessions/<pid>.json; Codex holds its rollout open
+    (beside its subagents', which are skipped)."""
     for p in [str(pid)] + kids(pid):
         j = os.path.join(HOME, ".claude", "sessions", p + ".json")
         if os.path.isfile(j):
@@ -105,9 +106,22 @@ def session_of(pid):
             files = [l[1:] for l in run(["lsof", "-p", p, "-Fn"]).stdout.split("\n") if l.startswith("n")]
         for f in files:
             m = re.search(r"/rollout-.*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$", f)
-            if m:
+            if m and not subagent_rollout(f):
                 return m.group(1), f
     return None, None
+
+
+def subagent_rollout(path):
+    """Whether a Codex rollout is one of its subagents' (the approval reviewer, "guardian", or a spawned
+    helper), which its process holds open beside its own (GitHub #1201): its session_meta's source is
+    {"subagent": …}. Never the session to show or resume."""
+    try:
+        with open(path, errors="replace") as f:
+            o = json.loads(f.readline())
+    except (OSError, ValueError):
+        return False
+    src = ((o.get("payload") or {}) if isinstance(o, dict) and o.get("type") == "session_meta" else {}).get("source")
+    return isinstance(src, dict) and "subagent" in src
 
 
 def refresh_sessions(s, task, live):
