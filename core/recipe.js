@@ -6,7 +6,7 @@
 //
 // Blocks (each may carry an "id", which markup notes and answers point at; one is given when it has none):
 //   heading  { text, level: 1-3 }                       text     { md }  (Markdown)
-//   list     { items: [md], ordered }                   table    { columns: [label | { label, align }], rows: [[cell]] }
+//   list     { items: [md], ordered }                   table    { columns: [label | { label, align }], rows: [[cell]] }  (a cell: inline Markdown)
 //   chart    { kind: bar | line | pie, labels: [], series: [{ name, values: [] }] }
 //   stats    { items: [{ label, value, note }] }        image    { src, caption, w, h }  (src: a file beside it)
 //   video    { src, poster, caption, loop, muted, autoplay }   a clip: mp4, webm or mov (poster: a picture beside it)
