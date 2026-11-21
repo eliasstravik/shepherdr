@@ -263,7 +263,8 @@ def let_go(s, base, ep, held, green, report):
         if q and (q["in"] or q["auto"]):
             t["merge_queued"] = now()  # queued again by hand meanwhile
             continue
-        if green and head and t["state"] == "ready" and t.get("requeued") != head:
+        if green and head and t["state"] == "ready" and t.get("requeued") != head and (q or {}).get("mergeable") != "CONFLICTING":
+            # #1174: never back in the queue while it conflicts with its base (Needs you below; its agent hears).
             ok, err = queue_merge(t, head)
             if ok:
                 t["requeued"], t["merge_queued"] = head, now()

@@ -122,6 +122,11 @@ def pr_news(s, t, v, report):
     # A conflict with its base goes back to its agent too (SHEP-175), once per commit.
     conflict = (f"{head}:conflict" if v.get("mergeable") == "CONFLICTING"
                 else f"{head}:behind" if v.get("mergeStateStatus") == "BEHIND" else None)
+    # #1174: the merge queue dropped it at this commit, its merge group failed: back to its agent to merge
+    # the base in (never queued again as it is: queue_refusal()), once per commit.
+    out = t.get("queue_out") or {}
+    if not conflict and out.get("head") and out["head"] == head:
+        conflict = f"{head}:queue"
     # A new failure or conflict goes to its agent at once: the task stays Working, never Needs you first.
     new = (mark and mark != w.get("failed")) or (conflict and conflict != w.get("conflict"))
     if (now() - (w.get("checked") or 0) < PR_NEWS_EVERY and not new) or not resting(s, t):
@@ -147,7 +152,13 @@ def pr_news(s, t, v, report):
     if not news_checks and not fresh and not news_conflict:
         return
     lines = [f"GitHub news on pull request #{pr['number']} ({pr.get('url') or ''}), since you said ready:"]
-    if news_conflict:
+    if news_conflict and news_conflict.endswith(":queue"):
+        base = t.get("base") or "main"
+        lines.append(f"- GitHub's merge queue dropped it at this commit ({out.get('why') or 'its merge group failed'}): with "
+                     f"{base}'s newest commits it fails, even if git sees no conflict. Herdr won't queue it again as it is, and "
+                     f"don't queue it yourself: merge {base} into your branch, run the checks, fix what broke, commit, then "
+                     "run your ready command again.")
+    elif news_conflict:
         base = t.get("base") or "main"
         what = "conflicts with" if news_conflict.endswith(":conflict") else "is behind, and must be up to date with,"
         lines.append(f"- It {what} {base}: rebase onto {base}, resolve any conflicts, run the checks, then run your "
