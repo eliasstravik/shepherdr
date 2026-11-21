@@ -6,7 +6,7 @@ import re
 import subprocess
 import sys
 
-from .base import beside_store, ENTRY, Fail, guard, now, STORE
+from .base import beside_store, ENTRY, Fail, guard, HOME, now, STORE
 from .agents import agent_running, live_agents
 from .store import parse_ref, prefixes_in_use, read_list, store_path
 
@@ -207,6 +207,51 @@ def set_hold(machine=None, limits=None):
         pass
 
 
+# What fills a disk that holds new tasks (SHEP-275): its biggest folders, found by du in the background
+# (`herdr-task _disk-top`, never in a tick or a start) and kept here a while; the hold says them once known.
+DISK_TOP = os.path.join(os.path.dirname(HOLD_FILE), "disk-top.json")
+DISK_TOP_MS = 30 * 60000      # how long what was found stands
+DISK_TOP_RETRY_MS = 10 * 60000  # a look that never wrote back (du slow, killed) is tried again after this
+
+
+def disk_top(path):
+    """What fills `path`'s disk, in a few words, as last found (None until then); starts a fresh look in
+    the background when there's none or it's old."""
+    try:
+        with open(DISK_TOP) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        d = {}
+    mine = d.get("path") == path
+    if not (mine and now() - (d.get("at") or 0) < DISK_TOP_MS) and now() - (d.get("started") or 0) >= DISK_TOP_RETRY_MS:
+        write_disk_top({**(d if mine else {}), "path": path, "started": now()})
+        try:
+            subprocess.Popen([sys.executable, ENTRY, "_disk-top", path], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError:
+            pass
+    return d.get("words") if mine else None
+
+
+def write_disk_top(d):
+    try:
+        os.makedirs(os.path.dirname(DISK_TOP), exist_ok=True)
+        tmp = f"{DISK_TOP}.{os.getpid()}.tmp"
+        with open(tmp, "w") as f:
+            json.dump(d, f)
+        os.replace(tmp, DISK_TOP)
+    except OSError:
+        pass
+
+
+def cmd_disk_top(args):
+    """Background: finds what fills a disk (machine.biggest) and keeps it for disk_top()."""
+    from .machine import biggest, biggest_words
+    top = biggest(args.path)
+    write_disk_top({"path": args.path, "at": now(), "started": now(), "words": biggest_words(top) if top else None})
+    return 0
+
+
 def machine_hold():
     """Why new tasks wait on this machine now ("vm-a's memory is 92% full"), or None. Sampled once per
     run; anything that fails to read leaves the queue alone."""
@@ -228,7 +273,14 @@ def machine_hold():
                 _hold.setdefault("machine", None)
                 _hold.setdefault("limits", None)
         limits = _hold.get("limits") if _hold.get("limits") is not None else machine_limits(_hold.get("machine"))
-        why = hold_reason(sample(), limits)
+        h = sample()
+        why = hold_reason(h, limits)
+        if why and why.startswith("disk"):
+            # SHEP-275: what fills it, once a look in the background found out.
+            full = max(h.get("disks") or [], key=lambda x: x["pct"], default=None)
+            top = disk_top(HOME if full["path"] == "home" else full["path"]) if full else None
+            if top:
+                why += f" (biggest: {top})"
         name = _hold.get("machine") or machine_name()
         reason = (f"{name}'s {why}" if name else f"This computer's {why}") if why else None
     except Exception:

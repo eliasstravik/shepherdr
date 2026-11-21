@@ -297,7 +297,17 @@ export function secondLine(p, w, queued = null, now = Date.now()) {
   return section === "needs" || section === "merging" ? p.why : section === "working" ? p.why ?? w?.text ?? null
     : section === "queued" ? queued
     : section === "scheduled" ? startsLine(p.task.scheduled_for, now)
-    : section === "ready" ? (p.task.ready_at ? `Ready ${ago(p.task.ready_at, true, now)}` : "Ready to accept") : null;
+    : section === "ready" ? (p.task.ready_at ? `Ready ${ago(p.task.ready_at, true, now)}` : "Ready to accept")
+    : section === "done" ? acceptLine(p.task) : null;
+}
+
+// A Done task whose space's "When a task is accepted" command failed (herdr-task's after_accept.py): said on its row.
+// The task stays Done; its Assistant is told too.
+export function acceptLine(task) {
+  const aa = task.after_accept;
+  if (aa?.state !== "failed") return null;
+  const last = String(aa.tail ?? "").trim().split("\n").pop();
+  return `Cleanup failed${"code" in aa && aa.code == null ? ": still running after 10 min" : aa.code != null ? ` (exit ${aa.code})` : ""}${last ? `: ${last.slice(0, 200)}` : ""}`;
 }
 
 // The minutes left under a working row's dot ("6m"), once its agent gave them; a scheduled one's time until it starts

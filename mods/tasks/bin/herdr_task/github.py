@@ -8,6 +8,7 @@ import shutil
 
 from .base import Fail, GH, git, hc_json, now, run, STORE
 from .agents import agent_running, detail, live_agents, live_helpers, mid_turn_agents
+from .after_accept import start as after_accept
 
 
 # ---- GitHub ---------------------------------------------------------------------------------
@@ -708,6 +709,8 @@ def finish(s, task, even_if_busy=False):
     for k in ("attention", "merge_requested", "queue", "queued_at", "merge_queued", "kept_open", "base_hold", "queue_fail"):
         task.pop(k, None)
     s.dirty = True
+    # The space's "When a task is accepted" command, in the background (after_accept.py): never waited on.
+    after_accept(s, task)
     if not task.get("worktree") or mid_turn(s, task) or (not even_if_busy and any(agent_running(k) for k in live_agents(s.key(task)))):
         return
     remove_worktree(s, task)
