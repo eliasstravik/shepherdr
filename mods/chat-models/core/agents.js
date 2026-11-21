@@ -384,6 +384,9 @@ function stripSession(kind, argv) {
 // `session`: the old conversation's id when it can be resumed (same agent only).
 export function argvFor(pick, old) {
   const same = pick.agent === old.agent;
+  // #1219: a mode in the other CLI's words (a switch carries the old agent's) is said in this one's: Claude's full access
+  // is Codex's full access, never its sandbox
+  if (pick.perm) pick = { ...pick, perm: PERM_ACROSS[pick.agent]?.[pick.perm] ?? pick.perm };
   const flags = same ? kept(pick.agent, old.argv ?? []) : [];
   if (pick.agent === "claude") {
     const a = ["claude", ...flags];

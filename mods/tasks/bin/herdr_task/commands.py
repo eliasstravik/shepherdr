@@ -17,7 +17,7 @@ from .settings import (
     task_settings, worker_argv, worktrees_on,
 )
 from .agents import (
-    agent_log, agent_running, background_jobs, busy_again, detail, fit, LINE_MAX, live_agents, ready_turns, STATUSES, SUMMARY_MAX,
+    agent_log, agent_running, background_jobs, busy_again, job_names, own_jobs, detail, fit, LINE_MAX, live_agents, ready_turns, STATUSES, SUMMARY_MAX,
     WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
@@ -546,11 +546,14 @@ def cmd_ready(args):
             return
         msg = finalize(s, t)
         # Its own background work still running (SHEP-148): the task shows Working until it ends.
-        log = agent_log(t, me) if me else None
-        jobs = background_jobs(log)[0] if log else {}
+        # #1093: named, and Codex's only while something of its own really runs (ended ones never listed)
+        mine = next((k for k in live_agents(s.key(t)) if k.get("address") == me), None) if me else None
+        jobs, log = own_jobs(t, mine) if mine else ({}, None)
         if jobs and t["state"] == "ready":
-            msg += (f" {len(jobs)} background job{'s' if len(jobs) > 1 else ''} of yours still run{'' if len(jobs) > 1 else 's'}: "
-                    "the task shows Working until they end, then Ready. Stop any you don't need (a server, a watcher).")
+            names = job_names(log, sorted(jobs, key=jobs.get))
+            msg += (f" {len(jobs)} background job{'s' if len(jobs) > 1 else ''} of yours still run{'' if len(jobs) > 1 else 's'} "
+                    f"({', '.join(names[:6])}{', …' if len(names) > 6 else ''}): the task shows Working until they end, then Ready. "
+                    "Stop any you don't need (a server, a watcher).")
         if proof:
             msg += f" Proof: {proof['title']}."
         elif asked:
