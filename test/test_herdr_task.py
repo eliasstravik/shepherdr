@@ -482,6 +482,24 @@ class Autopilot(unittest.TestCase):
         self.lists = []
         self.assertNotIn("Waiting on the person", self.ap.message("sp1", a, ["schedule"]))
 
+    def test_a_task_that_merges_by_itself_isnt_waiting_on_an_accept(self):
+        """GitHub #1216: merge after checks (or right away): a Ready task merges on green, waiting on nobody's Accept.
+        Said only when something stops it."""
+        p = os.path.join(self.tmp, "tasks", "dev-self-merge.json")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w") as f:
+            json.dump({"folder": self.folder, "prefix": "SM", "tasks": [
+                {"id": 1, "state": "ready", "space": "sp1", "auto_merge": "checks"},
+                {"id": 2, "state": "queued", "after": [1]},
+                {"id": 3, "state": "ready", "space": "sp1", "auto_merge": "auto", "attention": "Checks failing: build."},
+                {"id": 4, "state": "queued", "after": [3]},
+                {"id": 5, "state": "ready", "space": "sp1"},
+                {"id": 6, "state": "queued", "after": [5]}]}, f)
+        self.lists = [p]
+        self.assertEqual(self.ap.waiting("sp1", {"folder": self.folder}), [
+            "SM-3 is Ready, won't merge by itself (Checks failing: build); SM-4 waits behind it",
+            "SM-5 is Ready, waiting on the person's Accept; SM-6 waits behind it"])
+
     def wake(self, ago, turn=3):
         """sp1 on, with a wake delivered to t9 `ago` ms back (its turn then: `turn`)."""
         self.cmd("on", space="sp1")
