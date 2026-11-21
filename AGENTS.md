@@ -169,3 +169,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - Real Codex versions for repros: `npm i --prefix <scratch> @openai/codex@<ver>`, then hc run it with env PATH=<scratch>/node_modules/.bin:<node dir>:$PATH (hc run children get a bare PATH and do not inherit the caller's). (from SHEP-278)
 
 - herdr-task's typing() reads a worker's session log from its hc herdr.resume label (log key): fake it with a temp JSONL and patch news.screen_raw (see ReadyAndPrFlow). (from SHEP-283)
+
+- The dev VM has a real hc in /usr/local/bin: a test whose fake hc cannot exec (no shebang) falls through to it if that folder is on PATH (Python's subprocess tries later PATH entries on ENOEXEC). (from SHEP-286)
