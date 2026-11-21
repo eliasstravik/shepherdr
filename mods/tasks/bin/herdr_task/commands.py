@@ -394,6 +394,16 @@ def just_started(t):
     return fresh[-1] if t.get("state") == "running" and fresh else None
 
 
+def other_worktree(s, folder):
+    """#1210: the work tree `folder` is in, when that is another worktree of this repo than its own folder (a start
+    there --here would run in the repo's folder instead), else None."""
+    if not folder or s.loc.get("kind") != "repo":
+        return None
+    ok, top, _ = git(os.path.realpath(os.path.expanduser(folder)), "rev-parse", "--show-toplevel")
+    top = os.path.realpath(top) if ok and top else None
+    return top if top and top != os.path.realpath(s.loc["folder"]) else None
+
+
 def cmd_start(args):
     with open_store(args) as s:
         t = s.find(args.id)
@@ -406,6 +416,11 @@ def cmd_start(args):
             t["mode"] = "here"
         elif args.worktree and worktrees_on(s):
             t["mode"] = "worktree"
+        if t.get("mode") != "worktree":
+            other = other_worktree(s, getattr(args, "folder", None))
+            if other:
+                raise Fail(f"{other} is another worktree of {s.loc['folder']}: a start in the folder itself (--here) runs in "
+                           f"{s.loc['folder']}, never there. Start it without --here to give it a worktree of its own.")
         set_branch(s, t, getattr(args, "branch", None))
         take_pr(s, t, getattr(args, "pr", None))
         q = t.get("queue") or {}

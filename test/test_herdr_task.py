@@ -6513,6 +6513,21 @@ class DoubleStart(unittest.TestCase):
         self.run_cmd(self.commands.cmd_start, id="1", now=True)
         self.assertEqual(len(self.task(1)["agents"]), 2)
 
+    def test_a_here_start_in_another_worktree_is_refused(self):
+        """#1210: start --here --folder <a worktree of the repo> ran in the repo's own folder, on another branch. It
+        says so and starts nothing; the repo's own folder (or a folder in it) still starts --here."""
+        wt = os.path.join(self.tmp, "app-wt")
+        subprocess.run(["git", "-C", self.folder, "worktree", "add", "-q", "-b", "feat", wt], check=True)
+        self.add("Go on there", folder=wt)
+        with self.assertRaises(self.Fail) as e:
+            self.run_cmd(self.commands.cmd_start, id="1", here=True, folder=wt, now=True)
+        self.assertIn(f"{os.path.realpath(wt)} is another worktree of", str(e.exception))
+        self.assertIn("without --here", str(e.exception))
+        self.assertEqual((self.started, self.task(1)["state"]), ([], "todo"))
+        os.makedirs(os.path.join(self.folder, "web"))
+        self.run_cmd(self.commands.cmd_start, id="1", here=True, folder=os.path.join(self.folder, "web"), now=True)
+        self.assertEqual(self.started, ["APP-1"])
+
 
 class ReadyMergeGit(unittest.TestCase):
     """SHEP-231: ready, merge and git fixes (#1007, #1004, #988, #989, #1041, #1052, #1023), in TaskFlow's
