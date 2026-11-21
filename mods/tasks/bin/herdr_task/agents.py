@@ -715,13 +715,14 @@ FG_MAX_MS = 15 * 60000
 BG_HINTS = ("<task-notification>", "task_id", "backgroundTaskId", "timeoutMs", "isAsync", "in background with ID",
             "Monitor started", "Async agent launched", "session_id", "session ID",
             # Codex (SHEP-207): a poll's result without its session id, a wait on a code-mode cell
-            "exit_code", "Process exited", "cell_id", "cell ID", "exec_command",
+            "exit_code", "Process exited", "cell_id", "cell ID", "exec_command", "Unknown process id",
             # Codex 0.163+: its own word that a command ended (#1093)
             '"item_completed"')
 BG_MAX_MS = 3 * 3600_000  # a background job started longer ago than this no longer counts
 BG_STARTED = re.compile(r"Command running in background with ID: (\w+)|Monitor started \(task (\w+)|Async agent launched[\s\S]*?agentId: (\w+)")
 BG_ENDED = re.compile(r"<task-id>(\w+)</task-id>(?:(?!</task-notification>)[\s\S])*?<status>(\w+)</status>")
 CODEX_RUNNING = re.compile(r"Process running with session ID (\d+)")
+CODEX_GONE = re.compile(r"Unknown process id:? (\d+)", re.I)
 # Codex 0.163+ code mode (SHEP-207): a script starts commands and polls them with tools.exec_command /
 # tools.write_stdin, all inside one exec call. Its output says "Script running with cell ID N" while
 # it waits, and a wait call names that cell; the script's results come as one JSON array, in the order
@@ -1026,6 +1027,9 @@ def _codex_output(output, polled, cells, running, at, done=None):
             ended = running.pop(key, None) is not None or ended
         elif d.get("session_id") is not None:
             start(key)
+    # #1143: a poll of a session Codex no longer knows (its process gone): ended, wherever it sits in a batch
+    for m in CODEX_GONE.finditer(text):
+        ended = running.pop("codex:" + m.group(1), None) is not None or ended
     # a poll of one session whose output says it exited (no session id in it, or the old format's text)
     if len(polled) == 1 and polled[0] is not None and not results and re.search(r"^Process exited with code", text, re.M):
         ended = running.pop("codex:" + str(polled[0]), None) is not None or ended

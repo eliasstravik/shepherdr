@@ -7918,6 +7918,16 @@ class CodexBatch278(unittest.TestCase):
         self.assertEqual(jobs, {})
         self.assertGreater(ended, 0)
 
+    def test_a_poll_of_a_process_codex_no_longer_knows_ends_it(self):
+        """#1143: a batch polled two jobs read back already; Codex answered "Unknown process id" for one: it ended."""
+        start = [self.call("c1", 'text(await tools.exec_command({cmd:"sleep 100"}));\ntext(await tools.exec_command({cmd:"npm test"}));\n'),
+                 self.out("c1", {"session_id": 11, "output": ""}, {"session_id": 12, "output": ""})]
+        self.assertEqual(sorted(self.agents.background_jobs(self.log(start))[0]), ["codex:11", "codex:12"])
+        gone = {"type": "response_item", "payload": {"type": "custom_tool_call_output", "call_id": "c2", "output":
+                [{"type": "input_text", "text": "Script failed\nError: Unknown process id 11"}]}}
+        log = self.log([*start, self.call("c2", 'text(await tools.write_stdin({session_id:11,chars:""}));\n'), gone])
+        self.assertEqual(sorted(self.agents.background_jobs(log)[0]), ["codex:12"])
+
     def test_ready_names_its_jobs_and_skips_codex_s_ended_ones(self):
         log = self.log([self.call("c1", 'text(await tools.exec_command({cmd:"python3 -m http.server 8000"}));\n'),
                         self.out("c1", {"session_id": 7, "output": ""})])
