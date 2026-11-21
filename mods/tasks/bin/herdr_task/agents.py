@@ -597,8 +597,65 @@ def ask_reason(task, address, req=None, kind=None, msg=None):
 HELD_MAX_MS = 31 * 60_000
 
 
+HELD_SETTLE_MS = 3000  # the agent's log written this long after the ask: it went on without an answer
+
+
+def _hook_alive(name):
+    """Whether the hook that left request <terminal>.<time>.<pid>.json still runs (as the chat's
+    readAsks() tells): one killed (its call cancelled, its turn interrupted) holds nothing."""
+    try:
+        os.kill(int(name[:-5].rsplit(".", 1)[1]), 0)
+    except (ValueError, IndexError):
+        return True  # a name without a pid: can't tell
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # alive under another user
+    return True
+
+
+def moved_on(req, at):
+    """#1077 #1097 #1139: the agent went on past the ask its hook made at `at` (ms), the hook still waiting
+    (its log: the request's transcript_path). Codex: its turn ended (task_complete, turn_aborted), or its
+    model answered again after a sampling that ended past the ask (token_count), which it can't while a
+    call waits. Claude: the call asked about has its result, or a newer message of the model follows it."""
+    log = req.get("transcript_path") if isinstance(req, dict) else None
+    if not log:
+        return False
+    rows = log_tail(log, 262144)
+    sampled, use, msg, past = False, None, None, False
+    for d in rows:
+        p = d.get("payload") or {}
+        if d.get("type") in ("event_msg", "response_item"):
+            when = _ms(d.get("timestamp")) if d.get("timestamp") else None
+            if when is None or when < at + HELD_SETTLE_MS:
+                continue
+            if d["type"] == "event_msg" and p.get("type") in ("task_complete", "turn_aborted"):
+                return True
+            if d["type"] == "event_msg" and p.get("type") == "token_count":
+                sampled = True
+            elif sampled and p.get("type") in ("function_call", "custom_tool_call", "message") and p.get("role", "assistant") == "assistant":
+                return True
+            continue
+        if d.get("isSidechain") or d.get("type") not in ("assistant", "user"):
+            continue
+        m = d.get("message") or {}
+        c = m.get("content")
+        blocks = [x for x in c if isinstance(x, dict)] if isinstance(c, list) else []
+        same = [x for x in blocks if x.get("type") == "tool_use" and x.get("name") == req.get("tool_name") and x.get("input") == req.get("tool_input")]
+        if same:  # the call asked about (its latest: a call tried again after a cancel is asked anew)
+            use, msg, past = same[-1].get("id"), m.get("id"), False
+            continue
+        if use and d["type"] == "assistant" and m.get("id") and m.get("id") != msg:
+            past = True
+        if use and any(x.get("type") == "tool_result" and x.get("tool_use_id") == use for x in blocks):
+            past = True
+    return past
+
+
 def held_ask(address):
-    """The ask Herdr's chat hook holds for this terminal (mods/chat/ask-hook.sh), or None."""
+    """The ask Herdr's chat hook holds for this terminal (mods/chat/ask-hook.sh), or None: none once its
+    hook is gone or its agent went on without an answer (a cancelled call: #1077 #1097 #1139 #1140 #1144)."""
     d = os.path.join(HOME, ".config", "herdr-app", "data", "chat-asks", "req")
     try:
         names = sorted(n for n in os.listdir(d) if n.startswith(address + ".") and n.endswith(".json"))
@@ -607,12 +664,15 @@ def held_ask(address):
     for n in reversed(names):
         try:
             p = os.path.join(d, n)
-            if now() - os.path.getmtime(p) * 1000 > HELD_MAX_MS:
+            at = os.path.getmtime(p) * 1000
+            if now() - at > HELD_MAX_MS or not _hook_alive(n):
                 continue
             with open(p) as f:
-                return json.load(f)
+                req = json.load(f)
         except (OSError, ValueError):
             continue
+        if not moved_on(req, at):
+            return req
     return None
 
 

@@ -1,6 +1,7 @@
 """herdr-task: every module compiles, the add-on switch it reads, and (on CI only, where HOME is
 a throwaway) its commands start. On a person's machine herdr-task never runs with another HOME."""
 import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
+import datetime
 import json
 import os
 import re
@@ -2187,7 +2188,7 @@ class NoFalseNeedsYou(unittest.TestCase):
         req = os.path.join(self.agents.HOME, ".config", "herdr-app", "data", "chat-asks", "req")
         os.makedirs(req, exist_ok=True)
         self.addCleanup(lambda: [os.remove(os.path.join(req, n)) for n in os.listdir(req)])
-        p = os.path.join(req, "t1.1799999000.42.json")
+        p = os.path.join(req, f"t1.1799999000.{os.getpid()}.json")  # its hook: a live process
         with open(p, "w") as f:
             json.dump({"tool_name": "AskUserQuestion", "tool_input": {"questions": [{"question": "Scope or green?"}]}}, f)
         working = [dict(self.idle[0], status={"state": "working"})]
@@ -2197,6 +2198,72 @@ class NoFalseNeedsYou(unittest.TestCase):
         self.assertEqual(self.agents.ask_reason(self.task, "t1", self.agents.held_ask("t1")), "Scope or green?")
         os.utime(p, (self.clock / 1000 - 32 * 60, self.clock / 1000 - 32 * 60))
         self.assertEqual(self.status(working), ("working", None, None))
+
+    def held(self, req, hook_pid=None, ago_s=60):
+        d = os.path.join(self.agents.HOME, ".config", "herdr-app", "data", "chat-asks", "req")
+        os.makedirs(d, exist_ok=True)
+        self.addCleanup(lambda: [os.remove(os.path.join(d, n)) for n in os.listdir(d)])
+        p = os.path.join(d, f"t1.1799999000.{hook_pid or os.getpid()}.json")
+        with open(p, "w") as f:
+            json.dump(req, f)
+        os.utime(p, (self.clock / 1000 - ago_s, self.clock / 1000 - ago_s))
+        return self.clock - ago_s * 1000
+
+    def codex_log(self, rows):
+        log = os.path.join(tempfile.mkdtemp(), "rollout.jsonl")
+        with open(log, "w") as f:
+            for at, typ, payload in rows:
+                stamp = datetime.datetime.fromtimestamp(at / 1000, datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+                f.write(json.dumps({"timestamp": stamp, "type": typ, "payload": payload}) + "\n")
+        return log
+
+    def test_a_cancelled_codex_approval_is_not_needs_you(self):
+        """#1077 #1097 #1139 #1140 #1144: a Codex approval cancelled (its hook killed, or its call's cell ended and the
+        agent went on) kept the task at Needs you, after ready too. Only a live hook its agent still waits on holds."""
+        working = [dict(self.idle[0], status={"state": "working"})]
+        ask = {"tool_name": "Bash", "tool_input": {"command": "python3 scripts/check.py"}, "turn_id": "u1"}
+        # the hook was killed with its call: its request left behind holds nothing
+        dead = subprocess.Popen(["true"])
+        dead.wait()
+        self.held(ask, hook_pid=dead.pid)
+        self.assertIsNone(self.agents.held_ask("t1"))
+        self.assertEqual(self.status(working), ("working", None, None))
+
+    def test_a_codex_approval_its_agent_went_past_is_not_needs_you(self):
+        working = [dict(self.idle[0], status={"state": "working"})]
+        at = self.clock - 60_000
+        asked = [(at - 1000, "response_item", {"type": "function_call", "name": "exec_command", "call_id": "c1"}),
+                 (at + 4000, "response_item", {"type": "function_call", "name": "exec_command", "call_id": "c2"}),  # same batch, streamed late
+                 (at + 5000, "event_msg", {"type": "token_count"})]
+        log = self.codex_log(asked)
+        self.held({"tool_name": "Bash", "tool_input": {"command": "x"}, "turn_id": "u1", "transcript_path": log})
+        # still waiting: the rest of its own batch came in after it, nothing new since
+        self.assertEqual(self.status(working)[:2], ("needs", "asks"))
+        # its model answered again (the call's cell ended without it): it went on
+        log = self.codex_log(asked + [(at + 9000, "response_item", {"type": "message", "role": "assistant", "content": []})])
+        self.held({"tool_name": "Bash", "tool_input": {"command": "x"}, "turn_id": "u1", "transcript_path": log})
+        self.assertEqual(self.status(working), ("working", None, None))
+        # its turn was interrupted
+        log = self.codex_log(asked[:1] + [(at + 9000, "event_msg", {"type": "turn_aborted", "turn_id": "u1"})])
+        self.held({"tool_name": "Bash", "tool_input": {"command": "x"}, "turn_id": "u1", "transcript_path": log})
+        self.assertIsNone(self.agents.held_ask("t1"))
+
+    def test_a_claude_permission_its_agent_went_past_is_not_held(self):
+        log = os.path.join(tempfile.mkdtemp(), "s.jsonl")
+        use = {"type": "tool_use", "id": "u1", "name": "Bash", "input": {"command": "ls"}}
+        row = lambda typ, mid, content: json.dumps({"type": typ, "isSidechain": False, "message": {"id": mid, "role": typ, "content": content}})
+        with open(log, "w") as f:
+            f.write(row("assistant", "m1", [use]) + "\n")
+        ask = {"tool_name": "Bash", "tool_input": {"command": "ls"}, "transcript_path": log}
+        self.held(ask)
+        self.assertEqual(self.agents.held_ask("t1"), ask)
+        with open(log, "a") as f:
+            f.write(row("user", None, [{"type": "tool_result", "tool_use_id": "u1", "is_error": True, "content": "interrupted"}]) + "\n")
+        self.assertIsNone(self.agents.held_ask("t1"))
+        # the same call tried again: asked anew, held
+        with open(log, "a") as f:
+            f.write(row("assistant", "m2", [dict(use, id="u2")]) + "\n")
+        self.assertEqual(self.agents.held_ask("t1"), ask)
 
     def test_a_quiet_agent_needs_you_once_the_grace_is_over(self):
         self.say(-3_000, "Done with the first part.")
