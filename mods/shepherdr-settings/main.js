@@ -39,8 +39,9 @@ import { SH } from "./core/paths.js";
 import { dirs } from "./dirs.js";
 // Every page's, row's and button's words, and the rows' choices: core/settings.js, shared with the web app.
 // herdr-task's merge policy (MERGE): "ask" waits for the person's Accept (which merges), the others merge without it.
-// NOTES: what a task's agent is told to do first and last (tasks.start_notes / finish_notes): herdr-task puts them
-// into its starting prompt; Herdr runs nothing itself.
+// NOTES: the command run in each new worktree before its agent (tasks.setup: herdr-task runs it in the agent's
+// terminal), then what a task's agent is told to do first and last (tasks.start_notes / finish_notes): herdr-task
+// puts those into its starting prompt.
 import { SECTIONS, ROLES, NOTES, MERGE, MUST_FIX, ROUNDS, ARCHIVE, ABOUT, BACKUP, REACTIONS, upgradeReactions, NOTIFY_ABOUT, TITLE, SPACE_TITLE,
   EVERYWHERE, CHANGED_HERE, RESET, EDIT_INSTRUCTIONS, USE_OTHER_CLI, LOADING_AGENTS, SAVED, sameAs as sameAsWords,
   spacesOwn, otherCliWords, backupProblem, notifyMachineAbout, machineLabel, TASK_ROWS, LEVEL } from "./core/settings.js";
@@ -103,7 +104,7 @@ export default class ShepherdrSettings extends View {
     // The add-ons Window's switches offer (lib/addons.json, layout.js).
     this.addons = null;
     cx.spawn(async (cx) => { this.addons = await manifest(); cx.notify(); });
-    // The two notes' text boxes: saved a moment after typing stops, on leaving the box, and on
+    // The notes' text boxes (and Before the agent starts' command): saved a moment after typing stops, on leaving the box, and on
     // close; "Saved" shows dim for a moment after.
     this.notes = {};
     for (const n of NOTES) {
@@ -350,7 +351,7 @@ export default class ShepherdrSettings extends View {
     const k = shepherdrFor(this.cfg, this.scope).tasks;
     for (const n of NOTES) {
       const note = this.notes[n.id];
-      note.saved = k[`${n.id}_notes`] ?? "";
+      note.saved = k[n.field] ?? "";
       note.box.set_value(note.saved);
     }
   }
@@ -360,7 +361,7 @@ export default class ShepherdrSettings extends View {
   flushNotes(scope = this.scope) {
     const changed = NOTES.filter((n) => this.notes[n.id].box.value() !== this.notes[n.id].saved);
     if (!changed.length) return (this.writing ?? Promise.resolve()).then(() => []);
-    const values = Object.fromEntries(changed.map((n) => [`${n.id}_notes`, (this.notes[n.id].saved = this.notes[n.id].box.value())]));
+    const values = Object.fromEntries(changed.map((n) => [n.field, (this.notes[n.id].saved = this.notes[n.id].box.value())]));
     this.writing = this.apply((next) => { const tg = this.target(next, scope); tg.tasks = { ...(tg.tasks ?? {}), ...values }; });
     return this.writing.then((ok) => (ok ? changed.map((n) => n.id) : []));
   }
@@ -378,7 +379,7 @@ export default class ShepherdrSettings extends View {
 
   resetNote(id, cx) {
     cx.spawn(async (cx) => {
-      await this.apply((next) => this.drop(this.layerOf(next), "tasks", `${id}_notes`));
+      await this.apply((next) => this.drop(this.layerOf(next), "tasks", NOTES.find((n) => n.id === id).field));
       this.resetNotes();
       cx.notify();
     });
@@ -583,14 +584,16 @@ export default class ShepherdrSettings extends View {
   // A note: its title and what it's for, then the text box under them, as wide as the page.
   noteRow(t, n) {
     const note = this.notes[n.id];
-    const sc = this.scoped("tasks", `${n.id}_notes`, (cx) => this.resetNote(n.id, cx));
+    const sc = this.scoped("tasks", n.field, (cx) => this.resetNote(n.id, cx));
     const saved = Date.now() - note.savedAt < 2000;
+    // A command (Before the agent starts) in monospace, as the heartbeat's box.
+    const mono = (el) => (n.mono ? el.font_family("JetBrains Mono") : el);
     const box = div().relative().w_full()
-      .child(Textarea.new(note.box).w_full().px(10).py(8).rounded(RADIUS.control).border(1)
+      .child(mono(Textarea.new(note.box).w_full().px(10).py(8).rounded(RADIUS.control).border(1)
         .border_color(this.noteFocus === n.id ? t.accent : t.input).bg(t.background)
-        .text_size(TEXT.body).line_height("19px").text_color(t.foreground))
-      .when(!note.box.value(), (el) => el.child(div().absolute().top(9).left(11).right(11)
-        .text_size(TEXT.body).line_height("19px").text_color(t.dim).child(n.example)));
+        .text_size(TEXT.body).line_height("19px").text_color(t.foreground)))
+      .when(!note.box.value(), (el) => el.child(mono(div().absolute().top(9).left(11).right(11)
+        .text_size(TEXT.body).line_height("19px").text_color(t.dim)).child(n.example)));
     return this.row(t, n.title, n.about, saved ? div().text_size(TEXT.label).text_color(t.dim).child(SAVED) : null, sc, box);
   }
 

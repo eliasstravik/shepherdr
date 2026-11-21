@@ -968,6 +968,8 @@ export interface SettingRow {
   trigger?: TriggerRow
   /** a whole file's words (a coordinator's HEARTBEAT.md), in a box as wide as the page */
   doc?: boolean
+  /** a command (Tasks › Before the agent starts): its box in monospace */
+  mono?: boolean
   /** Complete generated launch settings, plain text after the editable Heartbeat. */
   instructions?: string
   /** read-only row (plugins, machines) */
