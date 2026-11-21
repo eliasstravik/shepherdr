@@ -221,20 +221,38 @@ def own_command(path, text, sandboxed=False):
             return False
         words.append(UNQUOTE.sub(lambda g: g.group(1) if g.group(1) is not None else re.sub(r"\\(.)", r"\1", g.group(2)), m.group(0)))
         at = m.end()
-    if len(words) >= 2 and words[0] == path and words[1] in OWN:
+    if words:
+        # #1098: a tool written by its full path (or the bare name of the one on PATH) is the same tool
+        words[0] = tool_name(words[0], path)
+    if len(words) >= 2 and words[0] == "@herdr-task" and words[1] in OWN:
         return True
-    bp = browser_path()
-    if bp and len(words) >= 2 and words[0] in (bp, "herdr-browser"):
+    if len(words) >= 2 and words[0] == "@herdr-browser" and browser_path():
         return True
-    ap = artifact_path()
-    if sandboxed and len(words) >= 2 and words[0] in (ap, "herdr-artifact") and words[1] in ARTIFACT and "--custom" not in words:
+    if sandboxed and len(words) >= 2 and words[0] == "@herdr-artifact" and words[1] in ARTIFACT and "--custom" not in words:
         return True
     if sandboxed and len(words) >= 2 and words[0] == "git" and words[1] in GIT:
         return True
-    if sandboxed and words and words[0] == "hc" and helper_hc(words):
+    if sandboxed and words and words[0] == "@hc" and helper_hc(words):
         return True
-    sp = secret_path()
-    return bool(sp) and len(words) >= 2 and words[0] in (sp, "herdr-secret") and words[1] in SECRET
+    return bool(secret_path()) and len(words) >= 2 and words[0] == "@herdr-secret" and words[1] in SECRET
+
+
+def tool_name(word, path):
+    """The tool a command's first word runs, as "@<name>" when it is one own_command knows: this herdr-task (its path, or the bare
+    name when PATH's is this one), herdr-browser, herdr-artifact, herdr-secret or hc by their path on PATH or their
+    bare name (#1098: a Codex worker's full-path `/…/hc read` asked and hung, the bare one didn't); else the word."""
+    real = lambda p: os.path.realpath(os.path.expanduser(p)) if p else None  # noqa: E731
+    if word == path or (word == "herdr-task" and real(shutil.which("herdr-task")) == real(path)):
+        return "@herdr-task"
+    if word in ("herdr-browser", "herdr-artifact", "herdr-secret", "hc"):
+        return "@" + word
+    if os.sep not in word:
+        return word
+    for name, at in (("herdr-browser", browser_path()), ("herdr-artifact", artifact_path()),
+                     ("herdr-secret", secret_path()), ("hc", shutil.which("hc"))):
+        if at and (word == at or real(word) == real(at)):
+            return "@" + name
+    return word
 
 
 # A Codex worker's review (#866): its sandbox can't reach hc, so starting, waiting on, reading and
@@ -248,8 +266,8 @@ HELPER = re.compile(r"[\w.-]+-(?:review|helper)(?:-[\w.-]+)?")
 
 
 def helper_hc(words):
-    """Whether `hc ...` is a worker's own reviewer: run as the brief says, or waited on, read, ended."""
-    if len(words) >= 3 and words[1] in ("wait", "read", "kill"):
+    """Whether `hc ...` is a worker's own reviewer: run as the brief says, or waited on, read, looked up (#1136), ended."""
+    if len(words) >= 3 and words[1] in ("wait", "read", "kill", "get"):
         return bool(HELPER.fullmatch(words[2])) and all(w.startswith("--") or re.fullmatch(r"\d+", w) for w in words[3:])
     if len(words) < 4 or words[1] != "run" or "--" not in words:
         return False

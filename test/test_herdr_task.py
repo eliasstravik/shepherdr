@@ -5553,6 +5553,31 @@ class CodexAsksOnTheCard(unittest.TestCase):
         claude = json.loads(launch.own_argv(["claude", "go"])[2])["hooks"]["PermissionRequest"][0]["hooks"][0]["command"]
         self.assertNotIn("--sandboxed", claude)
 
+    def test_a_tool_by_its_full_path_is_the_same_tool(self):
+        """#1098: a Codex worker's `/…/hc read <its reviewer>` asked (and hung on the card) where the bare `hc read`
+        ran at once. A tool written by its full path, or herdr-task by its bare name when PATH's is this one, matches."""
+        sys.path.insert(0, BIN)
+        from unittest import mock
+        from herdr_task import launch
+        d = tempfile.mkdtemp()
+        tools = {}
+        for name in ("hc", "herdr-artifact", "herdr-task"):
+            tools[name] = os.path.join(d, name)
+            open(tools[name], "w").close()
+        os.symlink(tools["hc"], os.path.join(d, "hc-link"))
+        with mock.patch.object(launch.shutil, "which", lambda n: tools.get(n)), \
+                mock.patch.dict(os.environ, {"HERDR_BROWSER_TASK": "demo#1"}):
+            own = lambda c, sb=True: launch.own_command(tools["herdr-task"], c, sb)  # noqa: E731
+            for c in (f"{d}/hc read demo-1-review --lines 400", f"{d}/hc-link wait demo-1-review --timeout 600",
+                      "hc get demo-1-review --json", f"{d}/herdr-artifact publish /tmp/p", "herdr-task status SHEP-1 hi",
+                      f"{d}/herdr-task ready SHEP-1 --summary hi"):
+                self.assertTrue(own(c), c)
+            for c in ("/tmp/evil/hc read demo-1-review", f"{d}/hc send demo-1-review hi", "/tmp/evil/herdr-task status x",
+                      f"{d}/hc read t15q", "/tmp/x/git commit -m x"):
+                self.assertFalse(own(c), c)
+            # herdr-task on PATH that isn't this one: its bare name isn't this launch's
+            self.assertFalse(launch.own_command("/elsewhere/herdr-task", "herdr-task status SHEP-1 hi", True))
+
     def test_a_codex_worker_never_stops_on_trust_this_folder(self):
         """#866: a Codex worker in a folder Codex hasn't seen sat at "Trust this folder?", nobody at the keys."""
         sys.path.insert(0, BIN)
