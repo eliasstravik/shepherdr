@@ -22,7 +22,7 @@ from .agents import (
 )
 from .sessions import refresh_sessions
 from .github import (already_merged, checks_missing, github_unreachable, pr_for_branch, checks_since, drop_branch, expected_checks, finish, gh, github, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
-                     pr_pending, pr_problem, pr_view, remote_of, update_main, watch_main)
+                     merge_checks, pr_pending, pr_problem, pr_view, remote_of, update_main, watch_main)
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
@@ -1079,6 +1079,8 @@ def merge_now(s, t):
         return f"Couldn't reach pull request #{n} on GitHub."
     note_checks(s, t, v)
     if v.get("state") != "MERGED":
+        # only the base branch's required checks hold a merge (#1221)
+        v = merge_checks(t, v)
         problem = pr_problem(v)
         if problem:
             t["attention"], t["attention_at"] = problem, now()

@@ -438,6 +438,54 @@ def pr_problem(v):
     return None
 
 
+REQUIRED_QUERY = """query($owner: String!, $name: String!, $n: Int!) { repository(owner: $owner, name: $name) {
+  pullRequest(number: $n) { commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
+    __typename ... on CheckRun { name isRequired(pullRequestNumber: $n) }
+    ... on StatusContext { context isRequired(pullRequestNumber: $n) } } } } } } } } } }"""
+
+
+def required_checks(task):
+    """The names of its pull request's checks that its base branch requires (GitHub marks them: branch protection,
+    rulesets), or None when GitHub couldn't say."""
+    pr = task.get("pr") or {}
+    owner, _, name = (pr.get("repo") or "").partition("/")
+    if not (owner and name and pr.get("number")):
+        return None
+    ok, out, _ = gh("api", "graphql", "-f", f"query={REQUIRED_QUERY}", "-f", f"owner={owner}", "-f", f"name={name}",
+                    "-F", f"n={pr['number']}")
+    try:
+        nodes = json.loads(out)["data"]["repository"]["pullRequest"]["commits"]["nodes"] if ok else None
+        rows = ((nodes[-1]["commit"]["statusCheckRollup"] or {}).get("contexts") or {}).get("nodes") or [] if nodes else []
+    except (ValueError, TypeError, KeyError, IndexError):
+        return None
+    if not ok:
+        return None
+    return {c.get("name") or c.get("context") for c in rows if isinstance(c, dict) and c.get("isRequired")}
+
+
+def _unsettled(c):
+    return (c.get("conclusion") or c.get("state") or "").upper() in BAD or \
+        ((c.get("status") or c.get("state") or "").upper() in PENDING and not (c.get("conclusion") or ""))
+
+
+def merge_checks(task, v):
+    """GitHub #1221: what a merge waits on is its base branch's required checks: v with only those, once one isn't
+    passed (a red or running optional check never stops a merge, nor its queueing). The base requires none, or GitHub
+    couldn't say: every check, as before. A running optional one left out while GitHub still blocks the merge (a
+    required check it doesn't show yet): runs_pending, so it waits."""
+    rows = v.get("statusCheckRollup") or []
+    if not any(_unsettled(c) for c in rows):
+        return v
+    names = required_checks(task)
+    keep = [c for c in rows if (c.get("name") or c.get("context")) in (names or ())]
+    if not keep or len(keep) == len(rows):
+        return v
+    out = {**v, "statusCheckRollup": keep, "optional_checks": [c.get("name") or c.get("context") for c in rows if c not in keep]}
+    if v.get("mergeStateStatus") == "BLOCKED" and not needs_approval(v):
+        out["runs_pending"] = True
+    return out
+
+
 def pr_pending(v):
     if v.get("runs_pending"):
         return True
