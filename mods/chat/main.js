@@ -3695,7 +3695,9 @@ export default class Chat extends View {
     const jobs = this.bgJobs;
     if (jobs.due(this.kind, this.conv) && await jobs.look((s, a) => this.runThere(s, a), this.kind, pid, this.conv)) cx.notify();
     const open = this.jobs().find((j) => j.id === this.jobOpen);
-    if (this.jobOpen && !open) { this.jobOpen = null; cx.notify(); }
+    // #1103: an open subagent row (c:<address>) is no job: it stays open while its subagent is listed.
+    const kid = String(this.jobOpen ?? "").startsWith("c:") && subagentsOf(terminals(), this.addr, Date.now()).some((k) => `c:${k.address}` === this.jobOpen);
+    if (this.jobOpen && !open && !kid) { this.jobOpen = null; cx.notify(); }
     if (open?.path) {
       const text = await jobs.output((s, a) => this.runThere(s, a), open);
       if (text !== null && text !== this.jobOut.get(open.id)) { this.jobOut.set(open.id, text); cx.notify(); }
