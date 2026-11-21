@@ -753,19 +753,27 @@ def checks_missing(v, since, expect=None):
     return "waiting" if gone < (MAYBE_CHECKS_MS if expect == "maybe" else NO_CHECKS_MS) else None
 
 
-def pr_wait(v, since, expect=None):
+# #1151: GitHub says mergeable UNKNOWN for a moment each time the base branch moves: a head it already called
+# MERGEABLE stays Ready through it, and a fresh one waits this long at most.
+UNKNOWN_MERGEABLE_MS = 5 * 60000
+
+
+def pr_wait(v, since, expect=None, mergeable_head=None):
     """SHEP-175: what a Ready task's pull request (v: pr_view's answer) still waits on before the
     person has anything to do, in a few words, or None once its checks are done and GitHub knows it
     can merge. A problem (pr_problem()) goes back to its agent: Working still, never Ready first.
-    expect: expected_checks(); since: checks_since()."""
+    expect: expected_checks(); since: checks_since(); mergeable_head: the head GitHub last called MERGEABLE."""
     if v.get("state") != "OPEN":
         return None
     if pr_problem(v):
         return BACK_TO_AGENT
     if pr_pending(v):
         return CHECKS_RUNNING
-    if (v.get("mergeable") or "").upper() not in ("MERGEABLE",):
-        return GITHUB_LOOKS
+    mergeable = (v.get("mergeable") or "").upper()
+    if mergeable != "MERGEABLE":
+        seen = mergeable_head and mergeable_head == v.get("headRefOid")
+        if not (mergeable == "UNKNOWN" and (seen or now() - (since or 0) >= UNKNOWN_MERGEABLE_MS)):
+            return GITHUB_LOOKS
     if checks_missing(v, since, expect) == "waiting":
         return CHECKS_RUNNING
     if v.get("checks_unknown") and v.get("mergeStateStatus") == "BLOCKED" and not needs_approval(v) \

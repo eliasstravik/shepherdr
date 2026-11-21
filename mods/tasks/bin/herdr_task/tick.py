@@ -188,8 +188,10 @@ def facts(s, t, report):
         missing = checks_missing(v, since, expect)
         t["_pr_fresh"] = not problem and not pr_pending(v) and not needs_approval(v) and not missing
         # Ready only once its checks are done and GitHub knows it can merge (SHEP-175): Working till then.
+        if (v.get("mergeable") or "").upper() == "MERGEABLE" and v.get("headRefOid"):
+            pr["mergeable_head"] = v["headRefOid"]  # #1151: its later brief UNKNOWNs are no wait
         if t["state"] == "ready":
-            wait = pr_wait(v, since, expect)
+            wait = pr_wait(v, since, expect, pr.get("mergeable_head"))
             if wait != pr.get("wait"):
                 if wait:
                     pr["wait"] = wait

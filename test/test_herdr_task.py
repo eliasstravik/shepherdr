@@ -3520,6 +3520,22 @@ class ChecksBeforeReady(PrLooks):
         self.github_says(mergeable="UNKNOWN", checks=[self.PASSED])
         self.assertEqual(self.look(t), ("working", "Waiting for GitHub", None))
 
+    def test_a_brief_unknown_after_mergeable_stays_ready(self):
+        # #1151: the base moved, GitHub works mergeable out again: the same head stays Ready
+        t = self.said_ready()
+        self.github_says(checks=[self.PASSED])
+        self.assertEqual(self.look(t), ("ready", None, "ready"))
+        self.github_says(mergeable="UNKNOWN", checks=[self.PASSED])
+        self.assertEqual(self.look(t), ("ready", None, "ready"))
+        self.assertNotIn("wait", t["pr"])
+
+    def test_unknown_for_minutes_is_ready_anyway(self):
+        # #1151: GitHub never settles on a new head: Working a few minutes at most
+        t = self.said_ready()
+        self.github_says(mergeable="UNKNOWN", checks=[self.PASSED])
+        self.assertEqual(self.look(t), ("working", "Waiting for GitHub", None))
+        self.assertEqual(self.look(t, after=5 * 60_000)[:2], ("ready", None))
+
     def test_a_failing_check_goes_back_to_its_agent_never_ready_first(self):
         t = self.said_ready()
         self.github_says(checks=[self.FAILED])
