@@ -6196,8 +6196,9 @@ class ProcessTable(unittest.TestCase):
         import time
         time.sleep(0.3)
         ran, reads = [], []
-        real = self.sessions._read_table
-        with self.mock.patch.object(self.sessions, "run", lambda args, **kw: ran.append(args)), \
+        real, real_run = self.sessions._read_table, self.sessions.run
+        # #1108: logged, then run for real (macOS reads its table with ps: a stub returning None broke it there)
+        with self.mock.patch.object(self.sessions, "run", lambda args, **kw: ran.append(args) or real_run(args, **kw)), \
                 self.mock.patch.object(self.sessions, "_read_table", lambda: reads.append(1) or real()):
             under = self.sessions.kids(tree.pid)
             for _ in range(20):   # a pass's other agents and session lookups share the same read
