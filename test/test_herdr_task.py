@@ -904,16 +904,31 @@ class HomeLead(unittest.TestCase):
         self.assertEqual(health(laptop), ["t2"])
         self.assertEqual((self.lead("mini"), self.lead("laptop")), (None, "mini"))
 
-    def test_a_hub_that_doesnt_link_back_gets_the_others_news(self):
+    def test_a_hub_that_doesnt_link_back_gets_none_of_the_others_news(self):
+        """#1188: the mini can't reach the laptop, so its home Assistant never gets the laptop's news
+        (it could only sum up items it can't check); the laptop's own home Assistant keeps them."""
         world = home_world(mini_links_laptop=False)
         mini, laptop = self.round(world, "mini"), self.round(world, "laptop")
         self.assertEqual([l.split(">", 1)[1].split("<")[0] for _, l in self.overview(mini)], ["~/shop: SHOP-1 is ready"])
-        # The laptop's own news, and only its own, goes to the mini's home Assistant over its link.
-        ov = self.overview(laptop)
-        self.assertEqual({to for to, _ in ov}, {"mini/t1"})
-        self.assertEqual(sorted(l.split(">", 1)[1].split("<")[0] for _, l in ov),
-                         ["Machine laptop: Disk crossed its alert limit (Disk 97%)", "laptop · ~/shop: SHOP-2 is ready"])
-        self.assertTrue(all('machine="laptop"' in l for _, l in ov))
+        self.assertEqual(self.lead("laptop"), "mini")
+        self.assertNotIn("mini/t1", {to for to, _ in laptop}, "the laptop sent its news to a home Assistant that can't reach it")
+        self.assertEqual([(to, l.split(">", 1)[1].split("<")[0]) for to, l in self.overview(laptop)], [("t2", "~/shop: SHOP-2 is ready")])
+
+    def test_stale_overview_lines_are_dropped(self):
+        """#1188: overview lines queued for another machine's home Assistant (an older version's way),
+        or waiting over OVERVIEW_KEEP_MS (30 min), are never sent."""
+        world, t = home_world(mini_links_laptop=False), 10 ** 12
+        path = os.path.join(self.store, ".home-laptop.json")
+        old = lambda to, text, at: {"to": to, "line": f'<herdr-overview machine="laptop">{text}</herdr-overview>', "at": at}
+        with open(path, "w") as f:
+            json.dump({"at": 0, "outbox": [old("home:mini", "queued for the mini", t - 1000),
+                                           old("home:local", "long ago", t - 31 * 60000),
+                                           old("home:local", "a minute ago", t - 60000)]}, f)
+        world["laptop"]["news"] = []
+        sent = self.round(world, "laptop", at=t)
+        self.assertEqual([(to, l.split(">", 1)[1].split("<")[0]) for to, l in self.overview(sent)], [("t2", "a minute ago")])
+        with open(path) as f:
+            self.assertEqual(json.load(f)["outbox"], [])
 
     def test_a_lone_window_leads(self):
         world = {"mini": dict(home_world()["mini"], links=[], linked_by=0)}
