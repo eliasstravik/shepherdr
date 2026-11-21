@@ -1403,6 +1403,7 @@ export default class Chat extends View {
   // Enter: now (while the agent works, it takes it mid-turn). Ctrl+Enter while it
   // works: held, and sent by itself once it is free.
   send(cx, hold = false) {
+    this.pickError = null;
     // A picked "#space" goes as its mention, which names its target (core/mentions.js).
     const text = mentions.expandTasks(mentions.expand(this.box.value().trim(), this.picked), this.pickedTasks);
     this.picked = [];
@@ -4078,8 +4079,9 @@ export default class Chat extends View {
   // the message as tiles, as a drop or a paste makes them.
   pickFiles(cx) {
     cx.spawn(async (cx) => {
-      const { code, paths: list } = await attach.pick();
-      if (code !== 0) this.error = "Couldn't open the file picker.";
+      const { code, paths: list, why } = await attach.pick();
+      // said beside the + button (#1225), not at the pane's edge
+      this.pickError = code !== 0 ? `Couldn't open the file picker${why ? `: ${why}` : "."}` : null;
       if (!list.length) { cx.notify(); return; }
       this.addFiles(attach.paths(list));
       this.saveSoon(cx);
@@ -4285,7 +4287,7 @@ export default class Chat extends View {
       .when(rec === "idle", (el) => el.child(h_flex().h(36).pl(6).pr(6).gap(4).items_center()
         // Attach on the left, as ChatGPT and Claude have it: the desktop's file picker.
         .child(this.round("chat-attach", "mods/chat/plus.svg", t, "ghost", (cx) => this.pickFiles(cx)))
-        .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.blocked).child(rec === "idle" ? this.dict.error ?? "" : ""))
+        .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.blocked).child(rec === "idle" ? this.dict.error ?? this.pickError ?? "" : ""))
         .when(Boolean(this.addr), (el) => el.children(this.pickParts(t, true)))
         .when(!this.addr && this.phase === "fresh" && Boolean(this.choice?.sel) && Boolean(cx), (el) => el.child(this.freshPick(t, cx)))
         .when(addonOn("voice"), (el) => el.child(this.round("chat-mic", "mods/chat/mic.svg", t, "ghost", (cx) => this.toggleDictation(cx))))
