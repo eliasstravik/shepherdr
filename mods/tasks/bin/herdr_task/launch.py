@@ -423,11 +423,12 @@ def in_shell(argv):
 # first, never herdr-core's holder or an Assistant. Where systemd's user manager runs, each worker
 # also gets its own scope (with the optional per-worker memory cap as MemoryHigh), so oomd, which
 # ends whole cgroups, ends that worker rather than the holder that keeps every terminal. On a Mac:
-# nice 10 and the utility QoS clamp (taskpolicy). Anything missing is skipped, never fatal.
+# nice 10 alone. #1109: never the utility QoS clamp (taskpolicy -c utility): on a busy Mac it made a
+# worker's lane echo keys 20 to 100 times slower for the person typing in it. Anything missing is
+# skipped, never fatal.
 
 LOW = ('{ echo 500 > /proc/self/oom_score_adj; } 2>/dev/null; '
        'command -v ionice >/dev/null 2>&1 && ionice -c2 -n7 -p $$ >/dev/null 2>&1; '
-       'command -v taskpolicy >/dev/null 2>&1 && exec nice -n 10 taskpolicy -c utility "$@"; '
        'exec nice -n 10 "$@"')
 _scope = {}
 

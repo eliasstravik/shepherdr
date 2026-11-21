@@ -6301,6 +6301,22 @@ class TaskFlow(unittest.TestCase):
         p = subprocess.run(["sh", "-c", low, "herdr-low", "true"], capture_output=True, text=True)
         self.assertEqual((p.returncode, p.stderr), (0, ""))
 
+    def test_low_priority_never_clamps_qos(self):
+        """#1109: on a Mac a worker runs under nice alone, never taskpolicy's utility clamp (keys echoed 20-100x slower)."""
+        from herdr_task import launch
+        bin_ = os.path.join(self.root, "qosbin")
+        os.makedirs(bin_, exist_ok=True)
+        mark = os.path.join(self.root, "taskpolicy-ran")
+        with open(os.path.join(bin_, "taskpolicy"), "w") as f:
+            f.write('#!/bin/sh\ntouch %s\nshift 2\nexec "$@"\n' % mark)
+        os.chmod(os.path.join(bin_, "taskpolicy"), 0o755)
+        low = launch.LOW.replace("/proc/self/oom_score_adj", os.path.join(self.root, "none", "oom_score_adj"))
+        p = subprocess.run(["sh", "-c", low, "herdr-low", "sh", "-c", "echo ran"], capture_output=True, text=True,
+                           env={**os.environ, "PATH": bin_ + os.pathsep + os.environ["PATH"]})
+        self.assertEqual(p.stdout.strip(), "ran")
+        self.assertFalse(os.path.exists(mark))
+        self.assertNotIn("taskpolicy", launch.LOW)
+
     def test_an_agent_under_fish_is_running(self):
         """#780: under fish the foreground stays `fish -ic "<agent>; exec fish -i"` while its agent works."""
         from herdr_task import agents
