@@ -28,7 +28,8 @@ from .output import progress_clock, say
 from .commands import back_to_work, begin, merge_now, MERGE_FAILED
 from .news import news_pass, typing
 from .takeover import cant_go_on, takeover
-from .ghnews import main_pass, pr_deliver, pr_news
+from .ghnews import held_by_base, main_pass, pr_deliver, pr_news
+from .systemic import dropped, systemic_pass
 from .scheduler import SCHEDULER
 from .revive import revive_pass
 
@@ -68,9 +69,13 @@ def queue_pass(s, t, v, report):
     q = queue_entry(t)
     if not q or q["in"] or q["auto"] or q.get("state") == "MERGED":
         return
-    t.pop("merge_queued")
+    since = t.pop("merge_queued")
     why = (q.get("reason") or "").strip().rstrip(".")
     head = v.get("headRefOid")
+    # SHEP-270: dropped because its group failed (another pull request's doing: queued again once), or
+    # because its base fails the same check (held until it is green again, the Assistant told once).
+    if "failed_checks" in why.lower().replace(" ", "_") and dropped(s, t, v, since, report):
+        return
     if "timed_out" in why.lower().replace(" ", "_") and head and t.get("requeued") != head and not pr_problem(v):
         ok, err = queue_merge(t, head)
         if ok:
@@ -151,6 +156,8 @@ def facts(s, t, report):
             report.setdefault("github_error", []).append(f"{s.ref(t)}: {e}")
         # Kept up to date while it is back at work too (a fix pushed: the problem goes away), so its
         # agent going quiet with the problem still there reads Needs you (on_it()).
+        if problem and problem.startswith("Checks failing") and held_by_base(s, t, v):
+            problem = None  # SHEP-270: its base fails the same checks: no Needs you till it is green again
         if t["state"] in ("ready", "running") and problem != t.get("attention"):
             if problem:
                 t["attention"], t["attention_at"] = problem, now()
@@ -317,6 +324,11 @@ def tick_store(s, report):
             continue
         n += 1
         report["started"].append({"folder": s.loc["folder"], "id": t["id"], "ref": s.ref(t), "terminal": a["address"]})
+    if s.data.get("systemic"):
+        try:
+            systemic_pass(s, report)
+        except Exception as e:  # never stops the tick
+            report["systemic_error"] = str(e)
     if s.data.get("main_watch"):
         try:
             main_pass(s, report)
@@ -647,7 +659,7 @@ def cmd_tick(args):
     for p in store_files(args.folder):
         d = read_list(p)
         tasks = (d or {}).get("tasks") or []
-        if not d or not os.path.isdir(d.get("folder") or "") or not (d.get("main_watch") or any(
+        if not d or not os.path.isdir(d.get("folder") or "") or not (d.get("main_watch") or d.get("systemic") or any(
                 t.get("state") in ("queued", "scheduled", "ready") or (t.get("worktree") and t.get("state") == "running") for t in tasks)):
             continue
         with Store(locate(d["folder"])) as s:

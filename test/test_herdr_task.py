@@ -6518,3 +6518,160 @@ class LinkActions(unittest.TestCase):
         r = self.link.again("vmb", ["list"], lambda: subprocess.CompletedProcess([], *answers.pop(0)))
         self.assertEqual((r.returncode, r.stdout), (0, "[]"))
         self.assertFalse(self.link.lost(subprocess.CompletedProcess([], 1, "", "herdr-task: no such task")))
+
+
+class Systemic(unittest.TestCase):
+    """SHEP-270 (#1195, #1174): one failing check behind several tasks (a red base, or one check failing
+    merge-queue groups for several pull requests): the Assistant hears once, the tasks' fix requests wait
+    until the base is green again, and a pull request dropped only because its group failed goes back in
+    the queue once. GitHub is faked; gh and hc never run."""
+    setUp_flow, patch, git, commit = TaskFlow.setUp, TaskFlow.patch, TaskFlow.git, TaskFlow.commit
+
+    def setUp(self):
+        self.setUp_flow()
+        from herdr_task import systemic, tick, ghnews, github
+        self.systemic, self.tick, self.ghnews = systemic, tick, ghnews
+        self.clock = [100_000_000]
+        for mod in (systemic, tick, ghnews, github):
+            self.patch(mod, "now", lambda: self.clock[0])
+        self.groups = []      # merge-group runs: (sha, prs, failed checks)
+        self.queue = {}       # pr number -> {"state", "in"}
+        self.base = {"head": "m1", "red": None, "checks": []}
+        self.merges, self.sent = [], []
+
+        def gh(*a, **k):
+            if a[:2] == ("run", "list"):
+                return True, json.dumps([{"headBranch": f"gh-readonly-queue/main/pr-{prs[-1]}-x", "headSha": sha,
+                                          "status": "completed", "conclusion": "failure", "workflowName": "Check",
+                                          "createdAt": "2026-11-21T10:00:00Z"} for sha, prs, _ in self.groups]), ""
+            if a[0] == "api" and "/compare/" in a[1]:
+                sha = a[1].rsplit("...", 1)[1]
+                prs = next(p for s, p, _ in self.groups if s == sha)
+                return True, json.dumps([f"Work {n} (#{n})" for n in prs]), ""
+            if a[:2] == ("api", "graphql"):
+                return True, json.dumps({"data": {"repository": {f"p{n}": {"state": q["state"], "isInMergeQueue": q["in"],
+                                                                            "autoMergeRequest": None} for n, q in self.queue.items()}}}), ""
+            return False, "", "unexpected"
+        self.patch(systemic, "gh", gh)
+        self.patch(systemic, "check_rows", lambda repo, sha: ([{"name": c, "conclusion": "FAILURE"} for s, _, cs in self.groups
+                                                               if s == sha for c in cs] or
+                                                              [{"name": c, "conclusion": "FAILURE"} for c in self.base["checks"]], True))
+        self.patch(systemic, "base_history", lambda repo, base: (
+            [self.base["head"], "m0"],
+            [{"headSha": self.base["red"] or self.base["head"], "status": "completed",
+              "conclusion": "failure" if self.base["red"] else "success", "url": "u", "workflowName": "Check"}]))
+        self.patch(systemic, "queue_merge", lambda t, head: (self.merges.append((t["id"], head)), (True, ""))[1])
+        self.patch(systemic, "coordinator_in", lambda space: "coord" if space else None)
+        self.patch(systemic, "news_send", lambda to, text: self.sent.append(text) or True)
+        self.patch(systemic, "queue_entry", lambda t: {"in": False, "auto": False, "state": "OPEN"})
+        self.task.update(state="ready", space="sp1", pr={"number": 7, "url": "u7", "repo": "o/r"})
+
+    def other(self, i, n):
+        t = {"id": i, "title": f"Task {i}", "state": "ready", "mode": "worktree", "worktree": "/nowhere", "branch": f"task/{i}",
+             "base": "main", "space": "sp1", "agents": [], "pr": {"number": n, "url": f"u{n}", "repo": "o/r"}}
+        self.store.data["tasks"].append(t)
+        return t
+
+    def drop(self, t, head="abc", checks=()):
+        """GitHub's merge queue just dropped t's pull request for failed checks."""
+        self.patch(self.tick, "queue_entry", lambda t: {"in": False, "auto": False, "reason": "FAILED_CHECKS", "state": "OPEN"})
+        t["merge_queued"] = self.clock[0] - 10 * 60000
+        report = {"attention": []}
+        v = {"state": "OPEN", "headRefOid": head, "mergeable": "MERGEABLE", "statusCheckRollup": list(checks)}
+        self.tick.queue_pass(self.store, t, v, report)
+        return report
+
+    def test_a_pull_request_dropped_with_its_group_goes_back_once(self):
+        """#1174: #3 failed the group it shared with #7; #7's own checks pass: queued again once, no Needs you."""
+        self.groups = [("g1", [3, 7], ["unit"])]
+        self.queue = {3: {"state": "OPEN", "in": False}}
+        report = self.drop(self.task)
+        self.assertEqual((self.merges, self.task.get("attention"), report.get("requeued")), ([(1, "abc")], None, ["SHEP-1"]))
+        self.assertTrue(self.task.get("merge_queued"))
+        # Dropped again at the same commit: its own doing now, Needs you.
+        self.drop(self.task)
+        self.assertEqual(len(self.merges), 1)
+        self.assertTrue(self.task["attention"].startswith("GitHub's merge queue removed it"))
+
+    def test_the_one_ahead_merged_so_the_failure_is_its_own(self):
+        """The other pull request in its group merged (its own group passed): #7 broke its group: Needs you."""
+        self.groups = [("g1", [3, 7], ["unit"])]
+        self.queue = {3: {"state": "MERGED", "in": False}}
+        self.drop(self.task)
+        self.assertEqual(self.merges, [])
+        self.assertEqual(self.task["attention"], "GitHub's merge queue removed it: FAILED_CHECKS.")
+        self.assertEqual(self.task["queue_fail"]["checks"], ["unit"])
+
+    def test_one_check_failing_several_groups_is_one_systemic_event(self):
+        """#1215's night: one check fails the groups of #7, then #8 and #9, each alone: one systemic news naming the
+        check and the tasks, no Needs you; once main moved on and isn't red, each goes back in the queue once."""
+        self.groups = [("g1", [7], ["help-corpus"])]
+        self.drop(self.task)
+        self.assertTrue(self.task["attention"].startswith("GitHub's merge queue removed it"))  # one failure: its own, so far
+        t8, t9 = self.other(2, 8), self.other(3, 9)
+        self.groups.append(("g2", [8], ["help-corpus"]))
+        self.drop(t8, head="h8")
+        self.groups.append(("g3", [9], ["help-corpus"]))
+        self.drop(t9, head="h9")
+        for t in (self.task, t8, t9):
+            self.assertNotIn("attention", t)
+            self.assertIn("base_hold", t)
+        report = {}
+        self.tick.systemic_pass(self.store, report)
+        self.assertEqual(self.sent, [])  # settles first, so the rest join
+        self.clock[0] += 2 * 60000
+        self.tick.systemic_pass(self.store, report)
+        self.tick.systemic_pass(self.store, report)
+        self.assertEqual(len(self.sent), 1)
+        news = self.sent[0]
+        self.assertTrue(news.startswith('<herdr-news event="systemic" branch="main">'))
+        for words in ('"help-corpus"', "SHEP-1", "SHEP-2", "SHEP-3", "#7, #8, #9"):
+            self.assertIn(words, news)
+        # main moved on (a group passed and merged), not red: the three go back in the queue, once.
+        self.base["head"] = "m2"
+        self.clock[0] += 3 * 60000
+        self.tick.systemic_pass(self.store, report)
+        self.assertEqual(sorted(self.merges), [(1, "abc"), (2, "h8"), (3, "h9")])
+        self.assertIn('event="systemic-over"', self.sent[1])
+        self.assertNotIn("hold", self.store.data["systemic"]["main"])
+        self.assertFalse(any(t.get("base_hold") for t in self.store.data["tasks"]))
+
+    def test_main_red_holds_the_failing_check_news_and_needs_you(self):
+        """#1195 1: main is red on the same test: the task's failing check neither goes to its agent nor makes it
+        Needs you; once main is green, it does."""
+        from herdr_task import ghnews
+        self.base.update(red="m1", checks=["unit"])
+        failing = [{"name": "unit", "status": "COMPLETED", "conclusion": "FAILURE", "detailsUrl": "d"}]
+        v = {"state": "OPEN", "headRefOid": "abc", "mergeable": "MERGEABLE", "statusCheckRollup": failing}
+        self.patch(ghnews, "resting", lambda s, t: {"address": "t1"})
+        self.patch(ghnews, "pr_comments", lambda repo, n: [])
+        self.patch(ghnews, "log_tail", lambda repo, rid: None)
+        self.task["ready_at"] = 1
+        ghnews.pr_news(self.store, self.task, v, {})
+        self.assertNotIn("news", self.task["pr"])
+        self.assertTrue(ghnews.held_by_base(self.store, self.task, v))
+        self.assertIn("base_hold", self.task)
+        # A check main doesn't fail is the task's own: news as before.
+        own = failing + [{"name": "lint", "status": "COMPLETED", "conclusion": "FAILURE", "detailsUrl": "d2"}]
+        self.assertFalse(ghnews.held_by_base(self.store, self.task, {**v, "statusCheckRollup": own}))
+        # Green again: let go, and the failure (if still there) reaches its agent.
+        self.base.update(red=None, checks=[], head="m2")
+        self.clock[0] += 3 * 60000
+        self.tick.systemic_pass(self.store, {})
+        self.assertNotIn("base_hold", self.task)
+        self.assertEqual(self.merges, [])  # never dropped from a queue: nothing to queue again
+        self.clock[0] += 3 * 60000
+        ghnews.pr_news(self.store, self.task, v, {})
+        self.assertIn('Check "unit" failed', self.task["pr"]["news"]["text"])
+
+    def test_a_hold_runs_out(self):
+        """Main stays red for hours: the hold lets go anyway, a dropped pull request then Needs you."""
+        self.base.update(red="m1", checks=["unit"])
+        self.groups = [("g1", [7], ["unit"])]
+        self.drop(self.task)
+        self.assertIn("base_hold", self.task)
+        self.assertNotIn("attention", self.task)
+        self.clock[0] += 7 * 3600000
+        self.tick.systemic_pass(self.store, {})
+        self.assertEqual(self.merges, [])
+        self.assertTrue(self.task["attention"].startswith("GitHub's merge queue removed it"))
