@@ -395,6 +395,7 @@ def main():
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_autopilot)
     ap_cmd("run-now", "wake its Assistant now (queued until it is idle)")
+    ap_cmd("brief", "the whole instructions a full wake brings (heartbeat, direction, saved progress), for an Assistant whose short wake says so")
     ap_cmd("heartbeat", "the heartbeat this space works from (--everywhere: Everywhere's), and Everywhere's file from before (made with a starter when missing)", everywhere=True)
     c = sub.add_parser("progress", help="an Assistant on Autopilot saves its progress and next step: progress \"Started HAT-4; next: check its review\"")
     c.add_argument("text")

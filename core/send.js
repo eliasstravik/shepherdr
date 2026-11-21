@@ -176,6 +176,12 @@ export async function sendTyped(io, addr, kind, body, opts = SETTLE, again = fal
 // A message that stays in Claude Code's box: sending it again presses its Enter (never types it twice).
 export const STUCK = "It's still in the agent's message box: its Enter didn't take.";
 
+// The person wrote to this agent: its terminal says when (herdr.said=<ms>), so Autopilot waits while they chat
+// (herdr-task's news.py chatting, #1217). Never waited on, never fails the send.
+export function markSaid(io, addr, at = Date.now()) {
+  Promise.resolve().then(() => io.hc(["label", addr, `herdr.said=${at}`])).catch(() => {});
+}
+
 // The person's reaction to a message, as the agent reads it (on: added, else removed).
 export const reactionLine = (emoji, text, on = true) => `<hc from="person" ${on ? "reaction" : "reaction-removed"}="${emoji}" to="${excerpt(text)}"/>`;
 

@@ -161,11 +161,17 @@ def facts(s, t, report):
         if t["state"] in ("ready", "running") and problem != t.get("attention"):
             if problem:
                 t["attention"], t["attention_at"] = problem, now()
+                # its pull request's commit then: one failed event per commit (automations.same_failure)
+                if v.get("headRefOid"):
+                    t["attention_head"] = v["headRefOid"]
+                else:
+                    t.pop("attention_head", None)
                 t.pop("merge_queued", None)
                 report["attention"].append(t["id"])
             elif t.get("attention", "").startswith(("Checks failing", "It conflicts", "The pull request was closed", MERGE_FAILED, BEHIND)) \
                     or (t.get("attention") == CHECKS_NEVER and missing != "never"):
                 t.pop("attention")
+                t.pop("attention_head", None)
         if t["state"] == "ready" and t.get("auto_merge") and missing == "never" and not t.get("attention"):
             # Checks that should have started never did: it doesn't merge by itself (the person's Accept still can).
             t["attention"], t["attention_at"] = CHECKS_NEVER, now()
