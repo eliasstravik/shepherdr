@@ -100,7 +100,22 @@ install_mine() {
   _url="${HERDR_BROWSER_URL:-https://github.com/vercel-labs/agent-browser/releases/download/v$PIN}/agent-browser-$_plat"
   mkdir -p "$abdir/$PIN" 2>/dev/null || { why="can't write to $abdir"; return 1; }
   _tmp="$abdir/.part.$$"
-  if ! _err=$(curl -fsSL --retry 2 --connect-timeout 15 --max-time 600 -o "$_tmp" "$_url" 2>&1); then
+  # Said as it goes (GitHub #1173): a slow network took minutes with no word, which looked like a hang.
+  curl -fsSL --retry 2 --connect-timeout 15 --max-time 600 -o "$_tmp" "$_url" 2>"$_tmp.err" &
+  _pid=$!
+  _t=0
+  while kill -0 "$_pid" 2>/dev/null; do
+    sleep 1; _t=$((_t + 1))
+    if [ $((_t % ${HERDR_BROWSER_PROGRESS_EVERY:-10})) = 0 ]; then
+      _sz=$(wc -c < "$_tmp" 2>/dev/null | tr -d ' ')
+      _slow=
+      [ "$_t" -ge 60 ] && _slow=" (a slow network: it may take up to 10 minutes)"
+      echo "herdr-browser: downloading agent-browser $PIN: $(awk -v b="${_sz:-0}" 'BEGIN { printf "%.1f", b / 1048576 }') MB after ${_t} s$_slow…" >&2
+    fi
+  done
+  wait "$_pid"; _rc=$?
+  _err=$(cat "$_tmp.err" 2>/dev/null); rm -f "$_tmp.err"
+  if [ "$_rc" != 0 ]; then
     rm -f "$_tmp"
     why="couldn't download it (${_err:-no answer}; offline?)"; return 1
   fi
@@ -135,6 +150,7 @@ ensure() {
   mkdir -p "$abdir" 2>/dev/null || { why="can't write to $abdir"; return 1; }
   _n=0
   until mkdir "$abdir/.lock" 2>/dev/null; do
+    [ "$_n" = 0 ] && echo "herdr-browser: another herdr-browser is installing agent-browser $PIN; waiting for it…" >&2
     # another one is installing: wait for it (a lock left by one that died goes after 10 minutes)
     if [ -n "$(find "$abdir/.lock" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then rmdir "$abdir/.lock" 2>/dev/null; continue; fi
     _n=$((_n + 1)); [ "$_n" -gt 600 ] && { why="another install is still running"; return 1; }
@@ -261,7 +277,23 @@ EOF
   return 1
 }
 
+# herdr-browser's own help, and agent-browser's when it's here. Never installs anything (GitHub #1173: --help waited on
+# a download).
+own_help() {
+  cat <<EOF
+herdr-browser: this task's own browser: agent-browser $PIN on the task's session and profile.
+  herdr-browser <agent-browser command>   e.g. open <url>, snapshot -i, click @e2, screenshot /abs/shot.png
+  herdr-browser --install                 install agent-browser $PIN and Chrome, saying what it found
+  herdr-browser --status                  what's here, as JSON
+EOF
+  pick
+  if usable; then echo; "$bin" --help 2>&1; return 0; fi
+  echo
+  echo "agent-browser $PIN isn't here yet (${ver:+this machine has $ver; }the first browser command installs it, or run: $fix)."
+}
+
 case "${1-}" in
+  --help|-h|help) own_help; exit 0 ;;
   --install)
     if ensure; then
       libs_check >&2 || exit 1
@@ -343,6 +375,8 @@ done
 mkdir -p "$root" 2>/dev/null && chmod 700 "$root" 2>/dev/null
 pick
 if ! usable; then
+  [ "${1-}" = help ] && { own_help; exit 0; }
+  for a in "$@"; do case "$a" in --help|-h) own_help; exit 0 ;; esac; done
   why=
   [ -n "$(find "$abdir/.failed" -mmin -10 2>/dev/null)" ] && why=$(cat "$abdir/.failed")
   if [ -z "$own" ] && [ -z "$why" ] && [ -z "${HERDR_BROWSER_BIN:-}" ]; then
