@@ -347,6 +347,11 @@ def source_items(src):
         if not os.path.isdir(top):
             raise Stop(f"lib/addons.json names mods/{m}, which isn't in {src}")
         items += [(m, f"{APP}/mods/{m}/{f}", os.path.join(top, f)) for f in walk_files(top)]
+    # GitHub #1214: the artifact viewer (one built file) goes with the artifacts mod, beside herdr-artifact, so
+    # `herdr-artifact preview` works on every machine, with or without the Web add-on, and syncs on from there
+    viewer = os.path.join(src, "web", "dist", "artifact-viewer.html")
+    if "artifacts" in mods and os.path.isfile(viewer):
+        items.append(("artifacts", f"{APP}/mods/artifacts/viewer.html", viewer))
     for name in manifest["core"]["layouts"]:
         items.append(("layout", f"{APP}/layouts/{name}.json", os.path.join(src, "layouts", f"{name}.json")))
     for f in walk_files(os.path.join(src, "lib")):

@@ -1960,7 +1960,7 @@ def cmd_open(o):
 # 127.0.0.1 only, started on demand and gone after PREVIEW_IDLE seconds unused; the agent opens its link in its task's
 # browser (herdr-browser) at a phone's or a desktop's width and takes screenshots.
 HERE = os.path.dirname(os.path.realpath(__file__))
-VIEWERS = (os.path.join(HERE, "..", "viewer.html"),                                   # beside it: synced to a machine
+VIEWERS = (os.path.join(HERE, "..", "viewer.html"),                                   # beside it: installed or synced (#1214)
            os.path.join(HOME, ".local", "share", "shepherdr", "web", "dist", "artifact-viewer.html"),  # the installed web app's
            os.path.join(HERE, "..", "..", "..", "web", "dist", "artifact-viewer.html"))  # a checkout's own build
 PREVIEW_STATE = os.path.join(STORE, ".preview")
@@ -1995,8 +1995,9 @@ def viewer_page():
     return next((os.path.realpath(p) for p in VIEWERS if os.path.isfile(p)), None)
 
 
-NO_VIEWER = ("The artifact viewer isn't on this machine yet: Shepherdr's next sync brings it (`herdr-task machines sync` "
-             "on the main machine), or build it in a checkout: `bun run build`.")
+NO_VIEWER = ("The artifact viewer isn't on this machine yet: it comes with Shepherdr's artifacts add-on from its next "
+             "update (`shepherdr update`), on another machine with the next sync (`herdr-task machines sync` on the main "
+             "machine), or build it in a checkout: `bun run build`.")
 
 
 def code_stamp():
