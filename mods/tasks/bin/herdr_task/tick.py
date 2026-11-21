@@ -50,6 +50,17 @@ def holds_open(s, t):
     return bool(t.get("kept_open")) or (t["state"] == "running" and any(agent_running(k) for k in live_agents(s.key(t))))
 
 
+def merge_held(s, t):
+    """Whether its pull request's merge waits to close the task (at_work(), holds_open()). #1124: once the task said
+    ready on this pull request, its merge outranks an agent that only waits (idle, or asking the person): done, its
+    running slot freed; only an agent mid-work still holds it, and a reopened task (kept_open) until it says ready."""
+    if t.get("kept_open"):
+        return True
+    if t.get("ready_at"):
+        return any(status_word(k) == "working" for k in mid_turn_agents(live_agents(s.key(t)), detail))
+    return at_work(s, t) or holds_open(s, t)
+
+
 QUEUE_GRACE = 2 * 60000  # a pull request just queued may take a moment to show in GitHub's queue
 
 
@@ -141,8 +152,13 @@ def facts(s, t, report):
         if not v:
             return
         note_checks(s, t, v)
+        # #1106: its Accept card then says Accept, not "Accept and merge" (proof.evidence)
+        if v.get("state") == "CLOSED":
+            pr["closed"] = True
+        else:
+            pr.pop("closed", None)
         if v.get("state") == "MERGED":
-            if at_work(s, t) or holds_open(s, t):
+            if merge_held(s, t):
                 return
             t["merged"] = True
             watch_main(s, t, (v.get("mergeCommit") or {}).get("oid"))

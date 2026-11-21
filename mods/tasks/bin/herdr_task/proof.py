@@ -193,5 +193,6 @@ def evidence(s, t):
     out["docs"] = docs_of(main, rev, changed, bool(changed) and all(MARKDOWN.search(p) for p in changed)) if rev else None
     out["checks"] = checks_of(t)
     # What Accept does (cmd_accept): a worktree task's branch with work of its own is merged first; else only done.
-    out["merges"] = bool(t.get("mode") == "worktree" and t.get("branch") and (t.get("pr") or commits))
+    out["merges"] = bool(t.get("mode") == "worktree" and t.get("branch") and (t.get("pr") or commits)
+                         and not (t.get("pr") or {}).get("closed"))  # #1106: closed on GitHub, Accept merges nothing
     return out
