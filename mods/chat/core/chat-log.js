@@ -3,7 +3,9 @@
 // Finding an agent's own session log and reading it as a conversation.
 // Claude Code: ~/.claude/sessions/<pid>.json names the session its process writes, so the
 // log is ~/.claude/projects/*/<sessionId>.jsonl. Codex keeps its rollout file open, so the
-// file is whatever rollout-*.jsonl its process (or a child) holds. Both are exact: no
+// file is whatever rollout-*.jsonl its process (or a child) holds, skipping the rollouts of its own
+// subagents (the approval reviewer, "guardian", and spawned helpers: their session_meta's source is
+// {"subagent":…}), which the same process also holds open (GitHub #1201). Both are exact: no
 // guessing by folder or time, so two agents in one folder never get mixed up.
 
 // Prints the log's path on the agent's machine, or nothing. Args: kind, pid. The processes under pid come
@@ -14,6 +16,8 @@ import { codexQuestions } from "./asks.js";
 export const FIND = `
 kind="$1"; pid="$2"
 procs() { if [ -r /proc/self/stat ]; then cat /proc/[0-9]*/stat 2>/dev/null | awk '{ p = $1; sub(/.*\\) /, ""); print p, $2 }'; else ps -axo pid=,ppid= 2>/dev/null; fi; }
+# The first open rollout that is not a subagent's: its first line (session_meta) names the source.
+main() { while IFS= read -r r; do head -n 1 "$r" 2>/dev/null | grep -q '"source":{"subagent"' || { echo "$r"; return; }; done; }
 kids() { procs | sort -n | awk -v r="$1" 'function walk(p,  c, m, j) { m = split(k[p], c, " "); for (j = 1; j <= m; j++) if (!(c[j] in s)) { s[c[j]] = 1; print c[j]; walk(c[j]) } } { k[$2] = k[$2] " " $1 } END { s[r] = 1; walk(r) }'; }
 for p in "$pid" $(kids "$pid"); do
   if [ "$kind" = claude ]; then
@@ -25,9 +29,9 @@ for p in "$pid" $(kids "$pid"); do
     echo "pending"; exit 0
   else
     if [ -d "/proc/$p/fd" ]; then
-      f=$(for d in /proc/$p/fd/*; do readlink "$d"; done 2>/dev/null | grep '/rollout-.*\\.jsonl$' | head -1)
+      f=$(for d in /proc/$p/fd/*; do readlink "$d"; done 2>/dev/null | grep '/rollout-.*\\.jsonl$' | main)
     else
-      f=$(lsof -p "$p" -Fn 2>/dev/null | sed -n 's/^n//p' | grep '/rollout-.*\\.jsonl$' | head -1)
+      f=$(lsof -p "$p" -Fn 2>/dev/null | sed -n 's/^n//p' | grep '/rollout-.*\\.jsonl$' | main)
     fi
     [ -n "$f" ] && { echo "$f"; exit 0; }
   fi

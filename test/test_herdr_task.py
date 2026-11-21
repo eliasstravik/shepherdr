@@ -6036,6 +6036,75 @@ class ReadyMergeGit(unittest.TestCase):
         self.assertEqual(t["start"], self.git(self.main, "rev-parse", "main"))
 
 
+class CodexGuardianRollout(unittest.TestCase):
+    """GitHub #1201: a Codex process holds its approval reviewer's ("guardian") rollout open beside its own (and
+    its spawned helpers'). The task's recorded session and the Assistant's saved resume record (herdr.resume) must
+    name its own conversation, whichever file it opened first."""
+
+    OWN, GUARDIAN, HELPER = ("00000000-0000-0000-0000-00000000000" + c for c in "cab")
+
+    def setUp(self):
+        sys.path.insert(0, BIN)
+        import herdr_task.sessions as sessions
+        import herdr_task.revive as revive
+        self.sessions, self.revive = sessions, revive
+        sessions._table["at"] = None
+        self.addCleanup(lambda: sessions._table.update(at=None, children={}))
+        d = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(d))
+
+        def rollout(n, sid, source):
+            f = os.path.join(d, f"rollout-2026-11-21T10-00-0{n}-{sid}.jsonl")
+            with open(f, "w") as out:
+                out.write(json.dumps({"timestamp": "2026-11-21T10:00:00.000Z", "type": "session_meta",
+                                      "payload": {"id": sid, "cwd": "/w", "originator": "codex-tui", "source": source}}) + "\n")
+            return f
+        self.guardian = rollout(1, self.GUARDIAN, {"subagent": {"other": "guardian"}})
+        self.helper = rollout(2, self.HELPER, {"subagent": {"thread_spawn": {"parent_thread_id": self.OWN, "depth": 1}}})
+        self.own = rollout(3, self.OWN, "cli")
+
+    def holding(self, files):
+        code = "import sys,time\nfs=[open(p) for p in sys.argv[1:]]\nprint(1,flush=True)\ntime.sleep(30)"
+        p = subprocess.Popen([sys.executable, "-c", code, *files], stdout=subprocess.PIPE)
+        self.addCleanup(lambda: (p.kill(), p.wait(), p.stdout.close()))
+        p.stdout.readline()
+        return p.pid
+
+    @unittest.skipUnless(os.path.isdir("/proc/self/fd"), "reads /proc")
+    def test_session_is_its_own_never_the_guardians(self):
+        for order in ([self.guardian, self.helper, self.own], [self.own, self.guardian], [self.helper, self.own]):
+            self.assertEqual(self.sessions.session_of(self.holding(order)), (self.OWN, self.own), order)
+        # its own not written yet: nothing, rather than the guardian
+        self.assertEqual(self.sessions.session_of(self.holding([self.guardian, self.helper])), (None, None))
+
+    def test_through_lsof_as_on_macos(self):
+        from unittest import mock
+        from types import SimpleNamespace
+        out = "p4242\n" + "".join(f"f{i}\nn{f}\n" for i, f in enumerate([self.guardian, self.helper, self.own]))
+        real_isdir = os.path.isdir
+        with mock.patch.object(self.sessions.os.path, "isdir", lambda p: False if p.startswith("/proc") else real_isdir(p)), \
+                mock.patch.object(self.sessions.shutil, "which", lambda n: "/usr/sbin/" + n), \
+                mock.patch.object(self.sessions, "run", lambda args, **kw: SimpleNamespace(stdout=out if args[0] == "lsof" else "")):
+            self.assertEqual(self.sessions.session_of(4242), (self.OWN, self.own))
+
+    @unittest.skipUnless(os.path.isdir("/proc/self/fd"), "reads /proc")
+    def test_the_assistants_resume_record_names_its_own_session(self):
+        pid = self.holding([self.guardian, self.own])
+        k = {"address": "t1", "pid": 1, "cwd": "/w", "argv": ["codex", "resume", self.OWN],
+             "foreground": {"pid": pid, "argv": ["codex", "resume", self.OWN], "cwd": "/w"}}
+        rec = self.revive.record_of(k)
+        self.assertEqual((rec["session"], rec["log"]), (self.OWN, self.own))
+        self.assertEqual(self.revive.resume_argv(rec["kind"], rec["argv"], rec["session"]), ["codex", "resume", self.OWN])
+
+    def test_a_rollout_with_no_meta_yet_still_counts(self):
+        empty = os.path.join(os.path.dirname(self.own), f"rollout-2026-11-21T10-00-04-{self.OWN}.jsonl")
+        open(empty, "w").close()
+        self.assertFalse(self.sessions.subagent_rollout(empty))
+        self.assertFalse(self.sessions.subagent_rollout(self.own))
+        self.assertTrue(self.sessions.subagent_rollout(self.guardian))
+        self.assertTrue(self.sessions.subagent_rollout(self.helper))
+
+
 class ProcessTable(unittest.TestCase):
     """GitHub #1013: finding an agent's session walked its process tree with a `pgrep -P` per process (each one
     reading every process), per agent, per task, from every tracker and list. One read of the process table now

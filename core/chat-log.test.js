@@ -283,3 +283,47 @@ test("an empty suggest line counts as none, and a suggest line inside a code blo
   expect(agents[1].suggest).toBeUndefined();
   expect(agents[1].text).toContain('<hc suggest="x"/>');
 });
+
+// GitHub #1201: a Codex process holds its approval reviewer's ("guardian") and its spawned helpers' rollouts open
+// beside its own; the chat must show its own, whichever the process opened first.
+import { FIND } from "./chat-log.js";
+import { mkdirSync, chmodSync } from "node:fs";
+const meta = (id, source) => JSON.stringify({ timestamp: "2026-11-21T10:00:00.000Z", type: "session_meta",
+  payload: { id, timestamp: "2026-11-21T10:00:00.000Z", cwd: "/w", originator: "codex-tui", source } }) + "\n";
+function rollouts() {
+  const dir = mkdtempSync(join(tmpdir(), "chat-find-"));
+  const at = (n, id, source) => { const f = join(dir, `rollout-2026-11-21T10-00-0${n}-${id}.jsonl`); writeFileSync(f, meta(id, source)); return f; };
+  return { dir,
+    guardian: at(1, "00000000-0000-0000-0000-00000000000a", { subagent: { other: "guardian" } }),
+    helper: at(2, "00000000-0000-0000-0000-00000000000b", { subagent: { thread_spawn: { parent_thread_id: "x", depth: 1 } } }),
+    own: at(3, "00000000-0000-0000-0000-00000000000c", "cli") };
+}
+// (bash, as macOS's sh: a busybox sh, as on the dev VM, runs its own lsof applet whatever PATH says)
+const find = async (pid, path = process.env.PATH, sh = "sh") => (await new Response(Bun.spawn(["env", `PATH=${path}`, sh, "-c", FIND, "chat", "codex", String(pid)], { stdout: "pipe", stderr: "ignore" }).stdout).text()).trim();
+
+test("FIND: a Codex process's own rollout, never its guardian's or a helper's (#1201, Linux)", async () => {
+  if (!require("node:fs").existsSync("/proc/self/fd")) return;
+  const r = rollouts();
+  for (const order of [[r.guardian, r.helper, r.own], [r.own, r.guardian], [r.helper, r.own, r.guardian]]) {
+    const code = `import time\nfs=[open(p) for p in ${JSON.stringify(order)}]\nprint(1,flush=True)\ntime.sleep(30)`;
+    const p = Bun.spawn(["python3", "-c", code], { stdout: "pipe" });
+    await p.stdout.getReader().read();
+    try { expect(await find(p.pid)).toBe(r.own); } finally { p.kill(); }
+  }
+  // Only its subagents' open (its own not written yet): nothing, rather than the wrong one.
+  const code = `import time\nfs=[open(p) for p in ${JSON.stringify([r.guardian, r.helper])}]\nprint(1,flush=True)\ntime.sleep(30)`;
+  const p = Bun.spawn(["python3", "-c", code], { stdout: "pipe" });
+  await p.stdout.getReader().read();
+  try { expect(await find(p.pid)).toBe(""); } finally { p.kill(); }
+  rmSync(r.dir, { recursive: true });
+});
+
+test("FIND: the same through lsof, as on macOS (#1201)", async () => {
+  const r = rollouts();
+  const bin = join(r.dir, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "lsof"), `#!/bin/sh\nprintf 'p999999\\nf3\\nn${r.guardian}\\nf4\\nn${r.helper}\\nf5\\nn${r.own}\\n'\n`);
+  chmodSync(join(bin, "lsof"), 0o755);
+  expect(await find(999999, `${bin}:${process.env.PATH}`, "bash")).toBe(r.own);
+  rmSync(r.dir, { recursive: true });
+});
