@@ -543,6 +543,8 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
  *  the model menu */
 export function AgentLine({ chatKey, cli }: { chatKey: string; cli: string }) {
   const words = useStore((s) => s.chats[chatKey]?.agent?.words)
+  // #1222: the extra flags it was started with, after the model (they give way first)
+  const flags = useStore((s) => s.chats[chatKey]?.agent?.flags)?.join(' ') ?? ''
   const open = useMenuOpen()
   const phone = useUI((u) => u.device === 'phone')
   if (!words) return <OldAgentLine chatKey={chatKey} cli={cli} />
@@ -552,9 +554,11 @@ export function AgentLine({ chatKey, cli }: { chatKey: string; cli: string }) {
   return (
     <>
       <button type="button" data-agent-line aria-haspopup="menu" aria-expanded={open?.chat === chatKey}
+        aria-label={flags ? `${shown} · ${flags}` : undefined}
         onClick={() => setMenuOpen(open?.chat === chatKey ? null : { chat: chatKey })}
         className={agentPick}>
-        <span className="min-w-0 truncate">{shown}</span>
+        <span className={clsx(flags ? 'shrink-0' : 'min-w-0 truncate')}>{shown}</span>
+        {flags ? <span data-agent-flags className="min-w-0 shrink-[50] truncate">{'\u00a0·\u00a0'}<span className="font-mono text-[0.6875rem]">{flags}</span></span> : null}
         <DownIcon className="size-3 shrink-0" />
       </button>
       {open?.chat === chatKey ? <ModelMenu key={`${chatKey}|${open.typed ?? ''}`} chat={chatKey} typed={open.typed} /> : null}
@@ -595,7 +599,7 @@ function OldAgentLine({ chatKey, cli }: { chatKey: string; cli: string }) {
       className={agentPick}
     >
       {planned ? <span className="min-w-0 truncate italic">{planned}</span> : bits.length ? [...seen, ...requested].map(part) : <span className="min-w-0 truncate">{`${cli} · Not known yet`}</span>}
-      {flags ? <span data-agent-flags className="min-w-0 shrink-[2] truncate font-mono text-[0.6875rem]">{'\u00a0·\u00a0'}{flags}</span> : null}
+      {flags ? <span data-agent-flags className="min-w-0 shrink-[50] truncate">{'\u00a0·\u00a0'}<span className="font-mono text-[0.6875rem]">{flags}</span></span> : null}
       <DownIcon className="size-3 shrink-0" />
     </button>
   )

@@ -222,7 +222,7 @@ export const BRANCH = {
 // keeps them one word each (--advisor=opus); a task's own (--flags, --set flags=) replace them.
 export const FLAGS = {
   rows: [["claude", "Claude Code flags"], ["codex", "Codex flags"]],
-  about: (cli) => `Extra flags for ${cli} when it runs a task, as you'd type them. A task can set its own. Empty: the level above's; none: none.`,
+  about: (cli) => `Extra flags for ${cli} when it runs a task, as you'd type them. A task can set its own. Empty: the level above's; "none": no extra flags.`,
   example: { claude: "--advisor opus", codex: "--search" },
   none: "none",
 };
