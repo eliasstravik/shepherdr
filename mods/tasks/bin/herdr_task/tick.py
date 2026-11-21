@@ -207,6 +207,12 @@ def facts(s, t, report):
         # agent going quiet with the problem still there reads Needs you (on_it()).
         if problem and problem.startswith("Checks failing") and held_by_base(s, t, v):
             problem = None  # SHEP-270: its base fails the same checks: no Needs you till it is green again
+        w = t.get("fix_withdrawn")
+        if w and problem == w.get("attention") and (v.get("headRefOid") or None) == w.get("head"):
+            problem = None  # #1086: its fix was withdrawn: the same problem at the same commit isn't raised again
+        elif w:
+            t.pop("fix_withdrawn")
+            s.dirty = True
         if t["state"] in ("ready", "running") and problem != t.get("attention"):
             if problem:
                 t["attention"], t["attention_at"] = problem, now()

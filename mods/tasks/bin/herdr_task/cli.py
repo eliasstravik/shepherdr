@@ -485,6 +485,8 @@ def main():
     agent_opts(c)
     c.add_argument("--space")
     c.add_argument("--reason", help="what to fix (default: what Herdr found)")
+    c.add_argument("--withdraw", action="store_true", help="take back a fix request that no longer applies (its agent stood "
+                   "down, or it was fixed elsewhere): the task goes back to Ready and that problem isn't raised again at the same commit")
     c = cmd("merge", cmd_merge, "ask the task's agent to merge it (the Merge button)")
     agent_opts(c)
     c.add_argument("--space")

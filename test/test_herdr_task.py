@@ -1298,6 +1298,35 @@ class BackToWork(unittest.TestCase):
         self.assertNotIn("ready_turns", t)
         self.assertNotIn("merge_requested", t)
 
+    def test_a_fix_withdrawn_stops_waking_it(self):
+        """#1086: a fix request that no longer applies (fixed through another task; its worker told to stand down)
+        is withdrawn: Ready again, no fix pending, and the tick doesn't raise the same problem at the same commit."""
+        t = self.ready(mode="worktree", worktree="/w", branch="b", space="sp1",
+                       pr={"number": 3, "repo": "o/r", "checked": 0, "news": {"text": "x", "at": 1, "since": 1}},
+                       attention="Checks failing: check.", attention_head="a", attention_at=1)
+        self.store.loc["folder"] = "/main"
+        with self.mock.patch.object(self.commands, "tell", lambda s, t, msg, args: ("t1", False)):
+            self.commands.cmd_fix(self.args(reason=None))
+        self.assertEqual(t["state"], "running")
+        self.live = [self.agent({"address": "t1", "status": "idle", "turn": 7, "role": "worker"})]
+        self.commands.cmd_fix(self.args(reason=None, withdraw=True))
+        self.assertEqual((t["state"], t["ready_turns"]), ("ready", {"t1": 7}))
+        for k in ("back", "attention", "fix_requested", "handed_at", "progress"):
+            self.assertNotIn(k, t)
+        self.assertNotIn("news", t["pr"])
+        self.assertEqual(self.agents.task_status(t, self.live)[0], "ready")
+        # GitHub still says the same at the same commit: not raised again
+        red = {"state": "OPEN", "mergeable": "MERGEABLE", "headRefOid": "a", "statusCheckRollup": [{"name": "check", "conclusion": "FAILURE"}]}
+        with self.mock.patch.object(self.tick, "pr_view", lambda t: red), self.mock.patch.object(self.tick, "pr_news", lambda *a: None):
+            self.tick.facts(self.store, t, {"attention": []})
+            self.assertNotIn("attention", t)
+            # a new commit that fails again is a new problem
+            red["headRefOid"] = "b"
+            t["pr"]["checked"] = 0
+            self.tick.facts(self.store, t, {"attention": []})
+        self.assertEqual(t["attention"], "Checks failing: check.")
+        self.assertNotIn("fix_withdrawn", t)
+
     def test_resume_takes_it_back_to_work(self):
         t = self.ready(space="sp1")
         with self.mock.patch.object(self.commands, "start_again", lambda *a, **k: ({"address": "t2"}, True)):

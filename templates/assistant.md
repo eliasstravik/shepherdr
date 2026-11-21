@@ -109,6 +109,7 @@ herdr-task accept HAT-1 --json                  # the person's Accept on a Ready
 herdr-task merge HAT-1 --json                   # merge it (in a GitHub repo: squash-merges its pull request); it becomes done
 herdr-task resume HAT-2 --space "$SPACE" --parent "$HC_TERMINAL_ID" --json  # continue one whose agent stopped ("Stopped before finishing")
 herdr-task fix HAT-3                            # ask its agent to fix what keeps it from merging
+herdr-task fix HAT-3 --withdraw                 # take back a fix that no longer applies (fixed elsewhere, its agent told to stop)
 herdr-task review-more HAT-3                    # one more review round, only once all are used
 herdr-task done HAT-5                           # mark it done by hand (only when the person asks)
 herdr-task reopen HAT-5                         # undo done or ready
