@@ -5,7 +5,9 @@
 // short summary first, then small sections: Changes (commits, files), Checks, Proof (opens its
 // proof artifact in a modal of a fitting size over this card: the artifact viewer's toolbar,
 // mods/chat-image's bar, over the artifact's mod) and a folded Details with the agent's long
-// text, as short markdown bullets.
+// text, as short markdown bullets. Above Changes, Documents (SHEP-273, #1150): its new and changed
+// Markdown files (a plan, an email draft), each folded under its path, drawn by mdView as plain
+// text runs (nothing in a file can run or load here).
 // Accept runs `herdr-task accept` (merges first when there is something to merge); Cancel, the X
 // and Esc close it. A task that isn't Ready (accepted from elsewhere a moment ago, say) says so
 // calmly, with only Close.
@@ -17,7 +19,7 @@ import { appHome, closeOverlay, exec, notify, openOverlay, props, shared, setSha
 import { note } from "./usage.js";
 import { dialogFooter, green, red, amber, H, RADIUS, TEXT } from "./ui.js";
 // The card's words, the summary cut and the details as bullets: core/accept.js, shared with the web app's card.
-import { ACCEPT, acceptLabel, words, readable, commitsLine, filesLine, moreLine, proofTitle, whereNow } from "./core/accept.js";
+import { ACCEPT, acceptLabel, docOpen, docsMore, words, readable, commitsLine, filesLine, moreLine, proofTitle, whereNow } from "./core/accept.js";
 import { settle } from "./core/pending.js";
 
 export { words, readable };
@@ -53,6 +55,16 @@ function mdBlocks(md) {
     let m;
     if (!line) out.push({ kind: "gap" });
     else if ((m = line.match(/^#{1,6}\s+(.*)$/))) out.push({ kind: "heading", text: m[1] });
+    // a table's rows as mono lines (its |---| rule goes), a quote as a quiet paragraph
+    else if (/^\|.*\|$/.test(line)) {
+      if (/^\|[\s:|-]+\|$/.test(line)) continue;
+      if (last?.kind === "code" && last.table) last.text += `\n${line}`;
+      else out.push({ kind: "code", text: line, table: true });
+    }
+    else if ((m = line.match(/^>\s?(.*)$/))) {
+      if (last?.kind === "quote") last.text += ` ${m[1]}`;
+      else out.push({ kind: "quote", text: m[1] });
+    }
     else if ((m = line.match(/^(?:[-*+]|\d+[.)])\s+(.*)$/))) out.push({ kind: "item", text: m[1], deep: /^\s{2,}/.test(raw) });
     else if (last && (last.kind === "item" || last.kind === "para")) last.text += ` ${line}`;
     else out.push({ kind: "para", text: line });
@@ -109,12 +121,14 @@ function inlineRun(t, s) {
       : div().when(Boolean(p.bold), (el) => el.font_semibold()).child(p.text)))));
 }
 
-function mdView(t, md) {
+// asIs: a document's words as written (an agent's details start each block with a capital).
+function mdView(t, md, asIs = false) {
   return v_flex().w_full().gap(8).line_height("21px").text_color(t.foreground)
     .children(mdBlocks(md).map((b) => {
       if (b.kind === "code") return div().w_full().p(10).rounded(RADIUS.control).bg(t.raised).font_family(MONO).text_size(12).line_height("18px").child(b.text);
-      const run = inlineRun(t, b.text.startsWith("`") ? b.text : capital(b.text));
+      const run = inlineRun(t, asIs || b.text.startsWith("`") ? b.text : capital(b.text));
       if (b.kind === "heading") return div().w_full().pt(4).font_semibold().child(run);
+      if (b.kind === "quote") return div().w_full().pl(10).border_l(2).border_color(t.border).text_color(t.muted).child(run);
       if (b.kind === "para") return run;
       return h_flex().w_full().items_start().gap(8).when(b.deep, (el) => el.pl(16))
         .child(div().h(21).w(8).flex_none().flex().items_center().justify_center().child(div().size(4).rounded(2).bg(t.dim)))
@@ -131,6 +145,7 @@ export default class AcceptCard extends View {
     this.busy = false;    // accepting
     this.opening = false; // pulling the proof
     this.details = false; // Details unfolded
+    this.docs = {};       // its documents unfolded or folded by hand, by path (else as docOpen says)
     const p = props() ?? {};
     // Opened without a task (the palette's mod.open, say): nothing to approve, so it goes.
     if (!p.ref || !p.folder) {
@@ -231,6 +246,29 @@ export default class AcceptCard extends View {
         .when(d.files > d.list.length, (el) => el.child(div().text_size(12).text_color(t.dim).child(moreLine(d.files - d.list.length))))));
   }
 
+  // Documents: a row per file (its folder quiet, New or Changed at the end) that unfolds it, rendered.
+  documents(t, e) {
+    const docs = e.docs, more = docsMore(docs);
+    const doc = (d, i) => {
+      const open = this.docs[d.path] ?? docOpen(docs, i);
+      const name = d.path.split("/").pop(), dir = d.path.slice(0, d.path.length - name.length);
+      return v_flex().w_full().min_w(0)
+        .child(h_flex().id(`doc-${i}`).w_full().h(32).px(10).gap(8).items_center().rounded(RADIUS.card)
+          .border_1().border_color(t.border).bg(t.surface).cursor_pointer().hover((s) => s.bg(t.hover))
+          .on_click((_e, cx) => { cx.stop_propagation(); this.docs[d.path] = !open; cx.notify(); })
+          .child(svg(`mods/workspace-chrome/chevron-${open ? "down" : "right"}.svg`).size(13).flex_none().text_color(t.muted))
+          .child(h_flex().flex_1().min_w(0).font_family(MONO).text_size(12)
+            .when(Boolean(dir), (el) => el.child(div().flex_none().text_color(t.muted).child(dir)))
+            .child(div().min_w(0).truncate().text_color(t.foreground).child(name)))
+          .child(div().flex_none().text_size(TEXT.label).text_color(t.muted).child(d.new ? ACCEPT.docNew : ACCEPT.docChanged)))
+        .when(open, (el) => el.child(v_flex().w_full().min_w(0).gap(8).px(10).pt(12).pb(4)
+          .child(mdView(t, d.text, true))
+          .when(Boolean(d.cut), (el) => el.child(div().text_size(12).text_color(t.dim).child(ACCEPT.docCut)))));
+    };
+    return v_flex().w_full().gap(6).children(docs.list.map(doc))
+      .when(more > 0, (el) => el.child(div().text_size(12).text_color(t.dim).child(moreLine(more))));
+  }
+
   checks(t, e) {
     const c = e.checks ?? { state: "none", text: ACCEPT.noChecks };
     const color = { passed: green(), failed: red(), running: amber(), unknown: red() }[c.state] ?? t.muted;
@@ -302,6 +340,7 @@ export default class AcceptCard extends View {
       : v_flex().w_full().gap(16).pb(4)
         .child(div().max_w(560).text_size(TEXT.body).line_height("20px").text_color(w.summary ? t.foreground : t.muted)
           .child(w.summary || ACCEPT.noSummary))
+        .when(Boolean(e.docs?.list?.length), (el) => el.child(this.section(t, ACCEPT.documents, this.documents(t, e))))
         .child(this.section(t, ACCEPT.changes, this.changes(t, e)))
         .child(this.section(t, ACCEPT.checks, this.checks(t, e)))
         .child(this.section(t, ACCEPT.proof, this.proof(t, e)))

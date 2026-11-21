@@ -1,5 +1,5 @@
 // The Accept card (Shepherdr 3's mods/accept-card), in 2.1's dialog: what the person approves before a Ready task
-// merges. Its summary, then Changes (commits and files), Checks, Proof and folded Details, all from
+// merges. Its summary, then Documents (its Markdown files, rendered), Changes (commits and files), Checks, Proof and folded Details, all from
 // `herdr-task show --evidence`; Accept runs `herdr-task accept`, which merges first when there is something to merge.
 // A task no longer Ready says where it is now, with only Close. On a phone it slides up as a sheet.
 // With a proof (SHEP-138) the card grows large and the proof shows right in it, drawn as the artifact viewer draws it
@@ -25,6 +25,8 @@ type Evidence = {
   git?: boolean
   commits?: { count: number; list: { sha: string; subject: string }[] }
   diff?: { files: number; added: number; removed: number; list: { path: string; added: number; removed: number }[] } | null
+  /** its new and changed Markdown files, to read right in the card (SHEP-273); only: it changed nothing else */
+  docs?: { count: number; only: boolean; list: { path: string; new: boolean; text: string; cut: boolean }[] } | null
   checks?: { state: 'passed' | 'failed' | 'running' | 'none' | 'unknown'; text: string }
   /** Accept merges its branch first (it has work to merge): the button says "Accept and merge" */
   merges?: boolean
@@ -88,6 +90,38 @@ function Changes({ e }: { e: Evidence }) {
           {d.files > d.list.length ? <li className="font-sans text-fg3 tabular-nums">{A.moreLine(d.files - d.list.length)}</li> : null}
         </ul>
       ) : null}
+    </div>
+  )
+}
+
+// Its Markdown documents (SHEP-273, #1150): each a row with its path that unfolds it, rendered as a reply is
+// (marked, then DOMPurify: nothing in it can run); a task that changed only Markdown opens its first.
+function Doc({ d, first }: { d: NonNullable<Evidence['docs']>['list'][number]; first: boolean }) {
+  const [open, setOpen] = useState(first)
+  const name = d.path.split('/').pop()!, dir = d.path.slice(0, d.path.length - name.length)
+  return (
+    <div className="flex min-w-0 flex-col">
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="press-dim flex h-9 w-full min-w-0 items-center gap-2 rounded-[var(--row-radius)] bg-well px-2.5 text-left shadow-soft hover:bg-hover phone:h-11">
+        {open ? <DownIcon className="size-3.5 shrink-0 text-fg3" /> : <NextIcon className="size-3.5 shrink-0 text-fg3" />}
+        <span className="min-w-0 flex-1 truncate font-mono text-xs"><span className="text-fg3">{dir}</span>{name}</span>
+        <span className="shrink-0 text-xs text-fg3">{d.new ? A.ACCEPT.docNew : A.ACCEPT.docChanged}</span>
+      </button>
+      {open ? (
+        <div data-selectable className="min-w-0 px-2.5 pt-3 pb-1">
+          <Markdown text={d.text} />
+          {d.cut ? <p className="pt-2 text-xs text-fg3">{A.ACCEPT.docCut}</p> : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function Docs({ docs }: { docs: NonNullable<Evidence['docs']> }) {
+  const more = A.docsMore(docs)
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      {docs.list.map((d, i) => <Doc key={d.path} d={d} first={A.docOpen(docs, i)} />)}
+      {more ? <p className="text-xs text-fg3 tabular-nums">{A.moreLine(more)}</p> : null}
     </div>
   )
 }
@@ -175,6 +209,7 @@ export function AcceptCard() {
   // what follows the summary (and the proof, when it shows in the card)
   const rest = (
     <>
+      {e.docs?.list?.length ? <Section label={A.ACCEPT.documents}><Docs key={task} docs={e.docs} /></Section> : null}
       <Section label={A.ACCEPT.changes}><Changes e={e} /></Section>
       <Section label={A.ACCEPT.checks}>
         <p className="flex items-center gap-2">
