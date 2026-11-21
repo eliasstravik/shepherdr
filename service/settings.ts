@@ -13,7 +13,7 @@ import * as HC from "../core/host.js";
 import * as APc from "../core/autopilot.js";
 import type { SettingRow, SettingSection } from "../web/shared/types.ts";
 
-const { TASK_ROWS, DEFAULTS, wordFor, valueFor, ROLES: CORE_ROLES, NOTES: CORE_NOTES, ABOUT, BACKUP, REACTIONS, SUGGESTIONS, FEEDBACK, feedbackRepo, upgradeReactions, BASE, BRANCH, branchPattern, MACHINES, OLD_NAMES, SECTIONS,
+const { TASK_ROWS, DEFAULTS, wordFor, valueFor, ROLES: CORE_ROLES, NOTES: CORE_NOTES, ABOUT, BACKUP, REACTIONS, SUGGESTIONS, FEEDBACK, feedbackRepo, upgradeReactions, BASE, BRANCH, branchPattern, FLAGS, flagWords, MACHINES, OLD_NAMES, SECTIONS,
   WEB, modelLabel, roleSel, otherCli, otherCliWords, backupProblem, homeAbout, webState, fromWord, LOADING_AGENTS, RESET, machineLabel } = C as any;
 const AP = APc as any;
 /** Autopilot as Everywhere has it now (herdr-task's view: what Settings keeps, else what it kept before, else the
@@ -280,6 +280,14 @@ export class Settings {
       rows.splice(at, 0, { label: BRANCH.title, key: "tasks.branch", value: String(p.value ?? "").trim(), text: true, hint: BRANCH.about,
         placeholder: BRANCH.pattern, ...this.follows(s, p, (v) => v || BRANCH.pattern, "tasks", "branch") });
     }
+    // Extra flags (#1222), one box per CLI: Everywhere's or a space's own; a list (none: [] says "none")
+    for (const [cli, label] of FLAGS.rows) {
+      const p = this.pick(scope, "tasks", `${cli}_flags`);
+      const words = (v: any) => (Array.isArray(v) ? (v.length ? flagWords(v) : FLAGS.none) : "");
+      const at = rows.findIndex((r) => r.key === "automations.enabled");
+      rows.splice(at, 0, { label, key: `tasks.${cli}_flags`, value: words(p.value), text: true, hint: FLAGS.about(label.replace(/ flags$/, "")),
+        placeholder: FLAGS.example[cli], ...this.follows(s, p, (v) => words(v) || FLAGS.none, "tasks", `${cli}_flags`) });
+    }
     for (const n of NOTES) {
       const p = this.pick(scope, "tasks", n.field);
       rows.push({ label: n.title, key: `tasks.${n.field}`, value: p.value ?? "", multiline: true, ...(n.mono ? { mono: true } : {}), hint: n.about, placeholder: n.example, ...this.follows(s, p, (v) => v ?? "", "tasks", n.field) });
@@ -447,6 +455,14 @@ export class Settings {
       // a space's own (the service checked the branch is there first); empty: back to the folder's branch
       if (!space) throw new Error("A base branch is set per space.");
       put("tasks", "base", word?.trim() ? word.trim() : null);
+    } else if (key === "tasks.claude_flags" || key === "tasks.codex_flags") {
+      // herdr-task's own list (service/main.ts asked `herdr-task flags` first); null: back to the level above
+      let v: unknown = null;
+      if (word !== null && word.trim()) {
+        try { v = JSON.parse(word); } catch { throw new Error("Not a list of flags."); }
+        if (!Array.isArray(v) || v.some((x) => typeof x !== "string" || !x.startsWith("-"))) throw new Error("Not a list of flags.");
+      }
+      put("tasks", field, v);
     } else if (key === "tasks.branch") {
       // a pattern herdr-task can fill in (core/settings.js branchPattern); empty: back to the level above
       const v = word?.trim() ?? "";

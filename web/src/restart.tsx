@@ -10,7 +10,7 @@ import { taskChatId, type Chat, type Place, type RestartCli, type RestartInfo } 
 import { act, setUI, taskOf, useSnap, useStore, useUI } from './kernel.ts'
 import { Dialog } from './rowmenu.tsx'
 import { Pick, shown, Switch, TextValue } from './Settings.tsx'
-import { CheckIcon, DownIcon, EffortIcon, ic, Menu, MenuItem, ModelIcon, ModeIcon, NextIcon, Primary, RestartIcon, SearchIcon, SpeedIcon, Tab, Tabs } from './ui.tsx'
+import { CheckIcon, DownIcon, EffortIcon, ic, Menu, MenuItem, ModelIcon, ModeIcon, NextIcon, Primary, RestartIcon, SearchIcon, SpeedIcon, Tab, Tabs, TermIcon } from './ui.tsx'
 
 /* ---------- the sheet ---------- */
 
@@ -543,6 +543,8 @@ function ModelMenu({ chat, typed }: { chat: string; typed?: string }) {
  *  the model menu */
 export function AgentLine({ chatKey, cli }: { chatKey: string; cli: string }) {
   const words = useStore((s) => s.chats[chatKey]?.agent?.words)
+  // #1222: the extra flags it was started with, after the model (they give way first)
+  const flags = useStore((s) => s.chats[chatKey]?.agent?.flags)?.join(' ') ?? ''
   const open = useMenuOpen()
   const phone = useUI((u) => u.device === 'phone')
   if (!words) return <OldAgentLine chatKey={chatKey} cli={cli} />
@@ -552,9 +554,11 @@ export function AgentLine({ chatKey, cli }: { chatKey: string; cli: string }) {
   return (
     <>
       <button type="button" data-agent-line aria-haspopup="menu" aria-expanded={open?.chat === chatKey}
+        aria-label={flags ? `${shown} · ${flags}` : undefined}
         onClick={() => setMenuOpen(open?.chat === chatKey ? null : { chat: chatKey })}
         className={agentPick}>
-        <span className="min-w-0 truncate">{shown}</span>
+        <span className={clsx(flags ? 'shrink-0' : 'min-w-0 truncate')}>{shown}</span>
+        {flags ? <span data-agent-flags className="min-w-0 shrink-[50] truncate">{'\u00a0·\u00a0'}<span className="font-mono text-[0.6875rem]">{flags}</span></span> : null}
         <DownIcon className="size-3 shrink-0" />
       </button>
       {open?.chat === chatKey ? <ModelMenu key={`${chatKey}|${open.typed ?? ''}`} chat={chatKey} typed={open.typed} /> : null}
@@ -575,7 +579,9 @@ function OldAgentLine({ chatKey, cli }: { chatKey: string; cli: string }) {
   // Shepherdr 3: labels start with a capital ("Opus 5.5 · 1M · High")
   const bits = [model, effort, speed?.text === 'Normal' && !speed.requested ? undefined : speed].filter((w): w is Worn => !!w)
   const seen = bits.filter((w) => !w.requested), requested = bits.filter((w) => w.requested)
-  const words = planned ?? ([...seen.map((w) => w.text), requested.length ? `Asked for: ${requested.map((w) => w.text).join(' · ')}` : ''].filter(Boolean).join(' · ') || `${cli} · Not known yet`)
+  // #1222: its extra flags after them (they give way first)
+  const flags = agent?.flags?.length ? agent.flags.join(' ') : ''
+  const words = [planned ?? ([...seen.map((w) => w.text), requested.length ? `Asked for: ${requested.map((w) => w.text).join(' · ')}` : ''].filter(Boolean).join(' · ') || `${cli} · Not known yet`), flags].filter(Boolean).join(' · ')
   // a long model id is what gives way: effort and speed stay in view
   const part = (w: Worn, i: number) => (
     <span key={w.text} className={clsx(w === model ? 'min-w-0 truncate' : 'shrink-0', w.requested && 'italic')}>
@@ -593,6 +599,7 @@ function OldAgentLine({ chatKey, cli }: { chatKey: string; cli: string }) {
       className={agentPick}
     >
       {planned ? <span className="min-w-0 truncate italic">{planned}</span> : bits.length ? [...seen, ...requested].map(part) : <span className="min-w-0 truncate">{`${cli} · Not known yet`}</span>}
+      {flags ? <span data-agent-flags className="min-w-0 shrink-[50] truncate">{'\u00a0·\u00a0'}<span className="font-mono text-[0.6875rem]">{flags}</span></span> : null}
       <DownIcon className="size-3 shrink-0" />
     </button>
   )
@@ -607,7 +614,8 @@ export function AgentControls({ chatKey, cli }: { chatKey: string; cli: string }
     openRestart(chatKey, taskChatId(chatKey) ?? 'this space', true)
   }
   return <div data-agent-controls>
-    {([['Agent', agent ? cli : `${cli} · unknown`, ModeIcon], ['Model', inMenu(model), ModelIcon], ['Effort', inMenu(effort), EffortIcon], ['Speed', inMenu(speed), SpeedIcon]] as const).map(([label, value, Icon]) =>
+    {([['Agent', agent ? cli : `${cli} · unknown`, ModeIcon], ['Model', inMenu(model), ModelIcon], ['Effort', inMenu(effort), EffortIcon], ['Speed', inMenu(speed), SpeedIcon],
+      ...(agent?.flags?.length ? [['Flags', agent.flags.join(' '), TermIcon] as const] : [])] as const).map(([label, value, Icon]) =>
       <MenuItem key={label} icon={<Icon className={ic} />} aria-label={`${label}: ${value}. Select and restart`} onClick={open}>
         <span className="flex min-w-0 items-center justify-between gap-4">
           <span>{label}</span>

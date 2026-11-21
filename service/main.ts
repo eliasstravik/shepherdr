@@ -23,6 +23,7 @@ import { Sync } from "./sync.ts";
 import { Live } from "./live.ts";
 import { Model } from "./model.ts";
 import { checkEvery, runPilot } from "./autopilot.ts";
+import { checkFlags } from "./flags.ts";
 import { windowSection, setWindow, offList, offPlugins } from "./window.ts";
 import { record, deleteAll, note as noteUsage, followSwitch, isOn as insightsOn, logLines } from "./usage.ts";
 import { insightsSummary } from "./voice-data.ts";
@@ -643,6 +644,9 @@ async function doAction(body: any): Promise<Response> {
       const home = /^machine\.(makehome|home)@([\w.-]+)$/.exec(body.key);
       if (home && (home[1] === "makehome" || value === "on")) await store.set("home.makereq", { machine: home[2] === "local" ? null : home[2], at: Date.now() });
       if (home?.[1] === "makehome") return json({ ok: true });
+      // Extra flags (#1222): herdr-task checks them and says how it keeps them (a list); "none": none, empty: the level above's
+      const fl = /^tasks\.(claude|codex)_flags$/.exec(body.key);
+      if (fl && value !== null) value = /^\s*none\s*$/i.test(value) ? "[]" : value.trim() ? JSON.stringify(await checkFlags(fl[1], value)) : null;
       // Base branch: checked before it's saved, here or on origin as git last fetched it (the window's words)
       if (body.key === "tasks.base" && value?.trim()) {
         const want = value.trim();
