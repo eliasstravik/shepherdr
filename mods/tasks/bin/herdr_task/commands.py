@@ -791,6 +791,9 @@ def parse_left(text):
     return int(sum(float(n) * {"h": 3600000, "m": 60000, "s": 1000}[u[0]] for n, u in parts))
 
 
+STATUS_WAIT = 15
+
+
 def cmd_status(args):
     """A task agent says what it's doing, how far along it is and the time left, at the start, at
     each natural step and at least every 5 minutes (as Shepherdr's `shepherdr status`). Herdr guesses nothing: it shows
@@ -801,7 +804,8 @@ def cmd_status(args):
     if args.done is not None and not 0 <= args.done <= 100:
         raise Fail("--done is a percentage, 0 to 100.")
     left = parse_left(args.left) if args.left else None
-    with open_store(args) as s:
+    # #1130: a status line never waits minutes behind a busy list: it gives up after STATUS_WAIT, saying so
+    with open_store(args, wait=STATUS_WAIT) as s:
         t = s.find(args.id)
         if t["state"] not in ("running", "ready"):
             raise Fail(f"{s.ref(t)} isn't being worked on ({STATUSES.get(t['state'], t['state'])}); nothing to report.")

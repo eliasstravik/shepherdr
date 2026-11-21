@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from contextlib import contextmanager
 
 from .base import Fail, git, hc_json, HOME, LEGACY, MAX_RUNNING, now, run, STORE
@@ -163,10 +164,11 @@ class Store:
     write: True (refused where nothing can be written), False (read only), or "try" (a read that
     saves what it learns when it can: show, list)."""
 
-    def __init__(self, loc, write=True):
+    def __init__(self, loc, write=True, wait=None):
         self.loc, self.write, self.best_effort = loc, bool(write), write == "try"
         self.slug, self.path = store_path(loc["folder"])
         self.dirty = self.read_only = False
+        self.wait = wait  # seconds a change waits for the lock before it gives up (None: as long as it takes)
 
     def __enter__(self):
         try:
@@ -180,8 +182,14 @@ class Store:
                     self.lock.close()
                 raise Fail(f"Can't change the task list here: {STORE} is read-only (a sandbox?). Run this outside it.")
             self.write, self.read_only = False, True
-        if self.lock:
-            fcntl.flock(self.lock, fcntl.LOCK_EX if self.write else fcntl.LOCK_SH)
+        # #1130: a read never waits for the lock. Every save replaces the list whole (os.replace), so a read sees the old
+        # list or the new one, never half: a plain read takes no lock, and one that would save what it learns (show,
+        # list) saves only when the lock is free now; else it reads like any other. A change waits, up to `wait`.
+        if self.lock and not self.write:
+            self.lock.close()
+            self.lock = None
+        elif self.lock:
+            self.take_lock()
         try:
             with open(self.path) as f:
                 self.data = json.load(f)
@@ -217,6 +225,32 @@ class Store:
                 d["prefix"] = base if n == 1 else f"{base}{n}"
                 self.dirty = self.new_prefix = bool(d["tasks"]) or os.path.exists(self.path)
         return self
+
+    def take_lock(self):
+        try:
+            fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            pass
+        if self.best_effort:
+            self.lock.close()
+            self.lock, self.write = None, False
+            return
+        if self.wait is None:
+            fcntl.flock(self.lock, fcntl.LOCK_EX)
+            return
+        end = time.time() + self.wait
+        while True:
+            try:
+                fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return
+            except BlockingIOError:
+                if time.time() >= end:
+                    self.lock.close()
+                    self.lock = None
+                    raise Fail(f"The task list for {self.loc['name']} is busy: another herdr-task has held it for over "
+                               f"{self.wait:g} s (the scheduler, or a slow command), so nothing was changed. Try again in a minute.")
+                time.sleep(0.2)
 
     def save(self):
         if self.write and self.dirty:
@@ -352,7 +386,7 @@ class Store:
             self.dirty = True
 
 
-def open_store(args, write=True):
+def open_store(args, write=True, wait=None):
     """The list a command works on: --folder's, else the one whose prefix the id names (HAT-4
     from anywhere), else the current folder's."""
     folder = getattr(args, "folder", None)
@@ -361,7 +395,7 @@ def open_store(args, write=True):
         m = re.fullmatch(r"([A-Za-z]+[0-9]*)-[Aa]?[0-9]+", str(ref).strip())
         if m:
             folder = prefixes_in_use().get(m.group(1).upper())
-    return Store(locate(folder), write)
+    return Store(locate(folder), write, wait)
 
 
 def is_task_list(d):

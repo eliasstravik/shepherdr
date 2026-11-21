@@ -1119,7 +1119,7 @@ class BackToWork(unittest.TestCase):
         self.live = []  # the task's agents now (hc records)
         self.store = Store([])
         for mod, name, value in ((commands, "run", never), (commands, "git", never), (commands, "gh", never),
-                                 (commands, "open_store", lambda args, write=True: self.store),
+                                 (commands, "open_store", lambda args, write=True, wait=None: self.store),
                                  (commands, "view", lambda s, t, live=None: dict(t)), (commands, "say", lambda *a: None),
                                  (commands, "live_agents", lambda key: self.live), (commands, "detail", lambda k: k),
                                  (commands, "refresh_sessions", lambda *a: None),
@@ -2782,7 +2782,7 @@ class MergedOnlyWithOwnWork(unittest.TestCase):
         done = lambda s, t, even_if_busy=False: t.update(state="done")
         for mod, name, value in ((tick, "live_agents", lambda key: self.live), (tick, "detail", lambda k: k), (tick, "finish", done),
                                  (tick, "watch_main", lambda *a: None), (commands, "finish", done),
-                                 (commands, "open_store", lambda args, write=True: self.store),
+                                 (commands, "open_store", lambda args, write=True, wait=None: self.store),
                                  (commands, "view", lambda s, t, live=None: dict(t)), (commands, "say", lambda *a: None),
                                  (commands, "live_agents", lambda key: self.live), (commands, "detail", lambda k: k)):
             p = mock.patch.object(mod, name, value)
@@ -3112,7 +3112,7 @@ class TimeLeft(unittest.TestCase):
         import herdr_task.commands as commands
         self.commands, self.said = commands, []
         self.store = Store([{"id": 7, "title": "Web client", "state": "running", "agents": []}])
-        for name, value in (("open_store", lambda args, write=True: self.store), ("view", lambda s, t, live=None: {}),
+        for name, value in (("open_store", lambda args, write=True, wait=None: self.store), ("view", lambda s, t, live=None: {}),
                             ("live_agents", lambda key: []), ("say", lambda args, data, text: self.said.append(text))):
             p = mock.patch.object(commands, name, value)
             p.start()
@@ -4154,7 +4154,7 @@ class ReviewedNamesItsCommit(unittest.TestCase):
                              "review_gate": True}])
         self.store.loc["folder"] = main
         self.task = self.store.data["tasks"][0]
-        for name, value in (("open_store", lambda args, write=True: self.store), ("view", lambda s, t, live=None: dict(t)),
+        for name, value in (("open_store", lambda args, write=True, wait=None: self.store), ("view", lambda s, t, live=None: dict(t)),
                             ("say", lambda *a: None), ("review_limits", lambda *a: (True, 3))):
             p = mock.patch.object(commands, name, value)
             p.start()
@@ -5650,7 +5650,7 @@ class TaskFlow(unittest.TestCase):
                              "started": 1}])
         self.store.loc["folder"] = self.main
         self.task = self.store.data["tasks"][0]
-        self.patch(commands, "open_store", lambda args, write=True: self.store)
+        self.patch(commands, "open_store", lambda args, write=True, wait=None: self.store)
         self.patch(commands, "view", lambda s, t, live=None: dict(t))
         self.patch(commands, "say", lambda args, v, text: self.said.append(text))
         self.patch(commands, "live_agents", lambda key: self.live)
@@ -6512,6 +6512,34 @@ class DoubleStart(unittest.TestCase):
             s.dirty = True
         self.run_cmd(self.commands.cmd_start, id="1", now=True)
         self.assertEqual(len(self.task(1)["agents"]), 2)
+
+    def test_reads_never_wait_for_a_busy_list_and_a_status_gives_up(self):
+        """#1130: the scheduler (or any slow command) holding the list's lock kept show, list and status waiting for
+        minutes. Reads go on at once (saves replace the list whole); a status gives up after a short wait, saying so."""
+        import fcntl
+        import time
+        from unittest import mock
+        self.add("Busy")
+        with self.store_mod.Store(self.store_mod.locate(self.folder), write=False) as s:
+            lock = os.path.join(self.store_mod.STORE, "." + os.path.basename(s.path) + ".lock")
+        held = open(lock, "a")
+        self.addCleanup(held.close)
+        fcntl.flock(held, fcntl.LOCK_EX)
+        t = time.time()
+        self.assertEqual(self.task(1)["title"], "Busy")
+        shown = self.run_cmd(self.commands.cmd_show, id="1")
+        self.assertEqual(shown["title"], "Busy")
+        listed = self.run_cmd(self.commands.cmd_list, all=False, archived=False)
+        self.assertIn("Busy", json.dumps(listed))
+        self.assertLess(time.time() - t, 5)
+        with mock.patch.object(self.commands, "STATUS_WAIT", 0.5), self.assertRaises(self.Fail) as e:
+            self.run_cmd(self.commands.cmd_status, id="1", text="Working", done=None, left=None)
+        self.assertIn("is busy", str(e.exception))
+        self.assertIn("nothing was changed", str(e.exception))
+        fcntl.flock(held, fcntl.LOCK_UN)
+        # free again: a read that learns something saves it, as before
+        with self.store_mod.Store(self.store_mod.locate(self.folder), write="try") as s:
+            self.assertTrue(s.write)
 
     def test_a_here_start_in_another_worktree_is_refused(self):
         """#1210: start --here --folder <a worktree of the repo> ran in the repo's own folder, on another branch. It

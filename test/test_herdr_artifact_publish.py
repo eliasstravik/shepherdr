@@ -192,6 +192,7 @@ class Publish(unittest.TestCase):
             out = self.publish(self.recipe())
         self.assertLess(time.time() - t, 10)
         self.assertIn("didn't finish", out["unchecked"])
+        self.assertEqual(len(self.calls()), 1)  # #1130: a check that ran out of time isn't run again
 
     def test_every_installed_import_resolves(self):
         """#870: the installed Mark up imports dirs.js (and that imports core/paths.js), which the artifact's mod
