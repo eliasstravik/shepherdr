@@ -2542,6 +2542,52 @@ class MergedOnlyWithOwnWork(unittest.TestCase):
             self.task.update(mode="here")  # worked in the folder itself: never merges
             self.assertFalse(merges())
 
+    def test_the_accept_card_shows_its_markdown_documents(self):
+        """SHEP-273 (#1150): the evidence carries its new and changed Markdown files as they are on its branch, new
+        ones first, a deleted one gone, other files never; `only` when every file it changed is Markdown."""
+        from unittest import mock
+        import herdr_task.proof as proof
+        wt = self.task["worktree"]
+
+        def write(path, text):
+            os.makedirs(os.path.dirname(os.path.join(wt, path)) or wt, exist_ok=True)
+            with open(os.path.join(wt, path), "w") as f:
+                f.write(text)
+            self.git(wt, "add", path)
+
+        write("README.md", "# Old\n")
+        write("gone.md", "bye\n")
+        self.git(wt, "commit", "-q", "-m", "before")
+        self.git(self.main, "merge", "-q", "--ff-only", "task/1")
+        with mock.patch.object(proof, "artifacts_of", lambda folder: []):
+            docs = lambda: proof.evidence(self.store, self.task)["docs"]
+            self.assertIsNone(docs())  # nothing of its own yet
+            write("plans/q3.md", "# Plan\n\n- one\n")
+            write("README.md", "# New\n")
+            self.git(wt, "rm", "-q", "gone.md")
+            self.git(wt, "commit", "-q", "-m", "the plan")
+            d = docs()
+            self.assertEqual([(x["path"], x["new"]) for x in d["list"]], [("plans/q3.md", True), ("README.md", False)])
+            self.assertEqual(d["list"][0]["text"], "# Plan\n\n- one")
+            self.assertTrue(d["only"])
+            self.assertEqual(d["count"], 2)
+            write("app.py", "print(1)\n")
+            write("long.markdown", "line\n" * (proof.DOC_MAX // 4))
+            self.git(wt, "commit", "-q", "-m", "code too")
+            d = docs()
+            self.assertFalse(d["only"])
+            long = next(x for x in d["list"] if x["path"] == "long.markdown")
+            self.assertTrue(long["cut"])
+            self.assertLessEqual(len(long["text"]), proof.DOC_MAX)
+            self.assertTrue(long["text"].endswith("line"))
+            self.assertNotIn("app.py", [x["path"] for x in d["list"]])
+            # worked in the folder itself: its commits there, read as they are now
+            self.task.update(mode="here", started=0, ready_at=0)
+            self.store.loc["folder"] = wt
+            d = docs()
+            self.assertIn("plans/q3.md", [x["path"] for x in d["list"]])
+            self.assertNotIn("gone.md", [x["path"] for x in d["list"]])
+
     def test_a_branch_caught_up_with_main_is_not_merged(self):
         self.commit(self.main, "another task merged")
         self.git(self.task["worktree"], "merge", "-q", "--ff-only", "main")  # SHEP-17's agent

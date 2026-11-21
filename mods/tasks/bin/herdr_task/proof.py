@@ -13,6 +13,10 @@ from .github import BAD, CANT_READ_CHECKS, PENDING, pr_view
 ARTIFACTS = WHERE.path("artifacts")
 # Files named on the card, and commits.
 FEW = 3
+# Its Markdown documents shown in full on the card (SHEP-273, #1150): at most this many, each cut at this many characters.
+DOCS = 5
+DOC_MAX = 60000
+MARKDOWN = re.compile(r"\.(md|markdown)$", re.I)
 
 
 def artifacts_of(folder):
@@ -72,6 +76,43 @@ def numstat(out, files):
             cur[1] += int(r) if r.isdigit() else 0
 
 
+def name_status(out, seen):
+    """git --name-status lines into seen {path: "A" | "M"}, oldest first (a file added, then changed, stays new);
+    a deleted one goes (it may come back, as new)."""
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 2:
+            continue
+        kind, path = parts[0][:1], parts[1]
+        if kind == "D":
+            seen.pop(path, None)
+        elif kind in ("A", "M"):
+            seen.setdefault(path, kind)
+
+
+def docs_of(main, rev, changed, only):
+    """Its new and changed Markdown files as they are at rev, for the card to render (SHEP-273, #1150):
+    {count, only (every file it changed is Markdown: a plan's, an email draft's task), list: [{path, new, text,
+    cut}]}, new ones first; None when it changed none. changed is {path: "A" | "M"}, any file."""
+    paths = sorted((p for p in changed if MARKDOWN.search(p)), key=lambda p: (changed[p] != "A", p))
+    if not paths:
+        return None
+    out = []
+    for p in paths[:DOCS]:
+        try:
+            ok, text, _ = git(main, "show", f"{rev}:{p}")
+        except (UnicodeDecodeError, ValueError):
+            ok, text = False, ""
+        if not ok:
+            continue
+        cut = len(text) > DOC_MAX
+        if cut:
+            text = text[:DOC_MAX]
+            text = text[:text.rfind("\n")] if "\n" in text else text
+        out.append({"path": p, "new": changed[p] == "A", "text": text, "cut": cut})
+    return {"count": len(paths), "only": only, "list": out} if out else None
+
+
 def checks_of(t):
     """GitHub's checks on its pull request, in words: {state, text}; failed and running say so,
     so a green one is never assumed."""
@@ -98,11 +139,12 @@ def checks_of(t):
 
 def evidence(s, t):
     """What an Accept card shows: {summary, details, commits: {count, list}, diff: {files, added, removed,
-    list} or None, git (False: not a git folder), scope, checks, proof, artifacts (its others), merges (Accept
-    merges its branch first: an open pull request or commits past its base; the button says so)}."""
+    list} or None, docs (its Markdown files to read: docs_of) or None, git (False: not a git folder), scope, checks,
+    proof, artifacts (its others), merges (Accept merges its branch first: an open pull request or commits past its
+    base; the button says so)}."""
     main, out = s.loc["folder"], {"summary": t.get("summary"), "details": t.get("details"), "proof": t.get("proof") or find_proof(s, t)}
     out["artifacts"] = task_artifacts(s, t, out["proof"])
-    commits, files = [], {}
+    commits, files, changed, rev = [], {}, {}, None
     fmt = "--format=%h%x09%s"
     if s.loc["kind"] != "repo":
         out.update(git=False, commits={"count": 0, "list": []}, diff=None, checks=checks_of(t), merges=False)
@@ -121,6 +163,10 @@ def evidence(s, t):
                 numstat(diff, files)
             else:
                 files = None
+            ok, names, _ = git(main, "diff", "--name-status", "--no-renames", f"{since}...{tip}")
+            if ok:
+                name_status(names, changed)
+            rev = tip
         out["scope"] = f"{t['branch']} into {base}"
     else:
         # In the folder itself: the commits made here while it worked (other work committed here
@@ -134,12 +180,17 @@ def evidence(s, t):
             numstat(diff, files)
         else:
             files = None
+        ok, names, _ = git(main, "log", "--reverse", "--name-status", "--no-renames", "--format=", *rng)
+        if ok:
+            name_status(names, changed)
+        rev = "HEAD"
         out["scope"] = "committed here while it worked"
     out["git"] = True
     out["commits"] = {"count": len(commits), "list": [{"sha": c[0], "subject": c[1]} for c in commits[:FEW]]}
     out["diff"] = None if files is None else {
         "files": len(files), "added": sum(v[0] for v in files.values()), "removed": sum(v[1] for v in files.values()),
         "list": [{"path": p, "added": v[0], "removed": v[1]} for p, v in sorted(files.items(), key=lambda x: -(x[1][0] + x[1][1]))[:FEW]]}
+    out["docs"] = docs_of(main, rev, changed, bool(changed) and all(MARKDOWN.search(p) for p in changed)) if rev else None
     out["checks"] = checks_of(t)
     # What Accept does (cmd_accept): a worktree task's branch with work of its own is merged first; else only done.
     out["merges"] = bool(t.get("mode") == "worktree" and t.get("branch") and (t.get("pr") or commits))
