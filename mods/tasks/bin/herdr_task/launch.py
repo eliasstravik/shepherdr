@@ -620,8 +620,10 @@ def closing_line(s, task, parent=None, argv=None):
         text += (" Secrets (keys, tokens, passwords) are used by name, never seen: `herdr-secret ask NAME --why \"…\"` "
                  "(then end your turn), `herdr-secret run NAME -- <command>`, `herdr-secret list`; these run without asking too.")
     if argv and agent_key(argv) == "codex":
-        text += (" Codex's sandbox can't reach Herdr nor write git's data, so give those commands, herdr-artifact's (your proof), "
-                 "`git add`/`git commit` and your review's `hc run`/`hc wait`/`hc read`/`hc kill` (its prompt in single quotes) "
+        # #1136 #1142: run in the sandbox, hc can't open Herdr's core and the browser's socket folder is read-only
+        text += (" Codex's sandbox can't reach Herdr nor write git's data, so give those commands, herdr-browser's (your task's "
+                 "browser), herdr-artifact's (your proof), `git add`/`git commit` and your review's `hc run`/`hc wait`/`hc read`/"
+                 "`hc get`/`hc kill` (its prompt in single quotes) "
                  "sandbox_permissions \"require_escalated\" from the first try, each as one plain command (no && chains, no $(…), "
                  "no git options before the verb): then they run without asking.")
     # No "report to your coordinator": Herdr tells the Assistant itself (news_pass).

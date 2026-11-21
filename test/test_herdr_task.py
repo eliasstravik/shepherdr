@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import types
 import time
 import unittest
 
@@ -4408,6 +4409,68 @@ class Revive(unittest.TestCase):
         self.assertTrue(line.startswith("cd /home/me/app && command claude --model opus '<restart>Your earlier session is gone"), line)
         self.assertIn("You are the Assistant.", line)
         self.assertNotIn("--resume", line)
+
+    def worker(self, addr="t5", pid=300, agent_pid=301, record=True):
+        self.terms[addr] = {"address": addr, "state": "live", "pid": pid, "cwd": "/home/me/app", "name": "dev-6-fix",
+                            "argv": ["sh", "-c", "x", "codex", "--no-daemon", "-s", "workspace-write", "Your task..."],
+                            "status": {"state": "working"},
+                            "foreground": {"pid": agent_pid, "name": "codex", "argv": ["codex"], "cwd": "/home/me/app"},
+                            "labels": {"herdr.task": "dev#6"}}
+        if record:
+            self.sessions[agent_pid] = ("S1", self.log)
+
+    def test_a_worker_nothing_brings_back_says_it_needs_a_resume(self):
+        """#1080: a Codex worker came back as a plain shell after a restart, its task still Working; the Assistant had
+        to notice and switch it. Its task now says it needs a resume."""
+        self.worker(record=False)
+        self.tick()
+        self.crash("t5")
+        # a shell with something in it (not a bare one) and no record: nothing to type, so its task is told
+        self.terms["t5"]["argv"] = ["/bin/bash", "-l"]
+        report = self.tick()
+        self.assertEqual(self.sent, [])
+        self.assertEqual(report["revive_needed"], [{"task": "dev#6", "terminal": "t5", "why": self.r.NEEDS_RESUME}])
+        # a task no longer Working, or a reviewer: never
+        self.tasks["dev#6"]["state"] = "ready"
+        self.assertNotIn("revive_needed", self.tick())
+
+    def test_a_typed_resume_that_never_starts_says_so_later(self):
+        self.worker()
+        self.tick()
+        self.crash("t5")
+        report = self.tick()
+        self.assertEqual(report["revived"][0]["how"], "resume")
+        self.assertNotIn("revive_needed", self.tick(), "it may still be starting")
+        rec = json.loads(self.terms["t5"]["labels"]["herdr.resume"])
+        rec["sent"] -= self.r.START_MS + 1000
+        self.terms["t5"]["labels"]["herdr.resume"] = json.dumps(rec)
+        self.assertEqual(self.tick()["revive_needed"][0]["task"], "dev#6")
+
+    def test_a_worker_that_quit_at_its_shell_needs_no_resume(self):
+        self.worker()
+        self.tick()
+        self.terms["t5"]["foreground"] = {"pid": 300, "name": "bash", "argv": ["/bin/bash"]}
+        self.assertNotIn("revive_needed", self.tick())
+
+    def test_its_task_says_so_until_its_agent_runs_again(self):
+        """#1080: the tick puts the word on a Working task, never over another, and takes it off once its agent runs."""
+        from herdr_task import tick
+        s = types.SimpleNamespace(key=lambda t: "dev#6", dirty=False)
+        t = {"id": 6, "state": "running"}
+        why = self.r.NEEDS_RESUME
+        tick.revive_attention(s, t, {"dev#6": why})
+        self.assertTrue(t["attention"].startswith(why))
+        with self.mock.patch.object(tick, "live_agents", lambda key: [{"x": 1}]), \
+                self.mock.patch.object(tick, "agent_running", lambda k: False):
+            tick.revive_attention(s, t, {})
+        self.assertIn("attention", t, "still a shell")
+        with self.mock.patch.object(tick, "live_agents", lambda key: [{"x": 1}]), \
+                self.mock.patch.object(tick, "agent_running", lambda k: True):
+            tick.revive_attention(s, t, {})
+        self.assertNotIn("attention", t)
+        other = {"id": 6, "state": "running", "attention": "Couldn't start: x"}
+        tick.revive_attention(s, other, {"dev#6": why})
+        self.assertEqual(other["attention"], "Couldn't start: x")
 
     def test_a_resume_the_cli_refuses_starts_anew_once(self):
         self.assistant()
