@@ -73,12 +73,38 @@ def kids(pid):
     return out
 
 
+def own_claude_dir(pid):
+    """The CLAUDE_CONFIG_DIR process pid was started with (GitHub #1120: a profile per folder, a dev container's
+    /app/claude), read from its environment: /proc on Linux, `ps -E` elsewhere (macOS); None when it has none."""
+    try:
+        with open(f"/proc/{pid}/environ", "rb") as f:
+            words = f.read().decode("utf-8", "replace").split("\0")
+    except OSError:
+        if os.path.isdir("/proc/self") or not shutil.which("ps"):
+            return None
+        words = run(["ps", "-wwE", "-o", "command=", "-p", str(pid)]).stdout.split()
+    for w in words:
+        if w.startswith("CLAUDE_CONFIG_DIR=") and len(w) > 18:
+            return w[18:]
+    return None
+
+
+def claude_homes():
+    """Claude Code's config folders to look in without a process to ask: herdr-task's own CLAUDE_CONFIG_DIR, then
+    ~/.claude (#1120)."""
+    return list(dict.fromkeys(x for x in (os.environ.get("CLAUDE_CONFIG_DIR"), os.path.join(HOME, ".claude")) if x))
+
+
 def session_of(pid):
     """(session id, log path) of the agent process pid (or a child), as core/chat-log.js finds it:
-    Claude Code names its session in ~/.claude/sessions/<pid>.json; Codex holds its rollout open
-    (beside its subagents', which are skipped)."""
+    Claude Code names its session in <its config folder>/sessions/<pid>.json (~/.claude, or the
+    process's own CLAUDE_CONFIG_DIR: #1120); Codex holds its rollout open (beside its subagents',
+    which are skipped)."""
     for p in [str(pid)] + kids(pid):
-        j = os.path.join(HOME, ".claude", "sessions", p + ".json")
+        c = os.path.join(HOME, ".claude")
+        if not os.path.isfile(os.path.join(c, "sessions", p + ".json")):
+            c = own_claude_dir(p) or c
+        j = os.path.join(c, "sessions", p + ".json")
         if os.path.isfile(j):
             try:
                 with open(j) as f:
@@ -87,7 +113,7 @@ def session_of(pid):
                 sid = None
             if sid:
                 log = None
-                base = os.path.join(HOME, ".claude", "projects")
+                base = os.path.join(c, "projects")
                 for d in os.listdir(base) if os.path.isdir(base) else []:
                     f = os.path.join(base, d, sid + ".jsonl")
                     if os.path.isfile(f):
@@ -194,9 +220,9 @@ def _start(path):
     return at, said
 
 
-def project_dir(folder):
+def project_dir(folder, home=None):
     """Claude Code's projects folder for a cwd: every character but a letter or digit becomes "-"."""
-    return os.path.join(HOME, ".claude", "projects", re.sub(r"[^A-Za-z0-9]", "-", folder))
+    return os.path.join(home or os.path.join(HOME, ".claude"), "projects", re.sub(r"[^A-Za-z0-9]", "-", folder))
 
 
 def log_by_session(kind, sid):
@@ -204,7 +230,7 @@ def log_by_session(kind, sid):
     if kind == "codex":
         found = glob.glob(os.path.join(HOME, ".codex", "sessions", "*", "*", "*", f"rollout-*{sid}.jsonl"))
     else:
-        found = glob.glob(os.path.join(HOME, ".claude", "projects", "*", sid + ".jsonl"))
+        found = [f for h in claude_homes() for f in glob.glob(os.path.join(h, "projects", "*", sid + ".jsonl"))]
     return found[0] if found else None
 
 
@@ -225,7 +251,7 @@ def find_log(a, ref, folders, taken=()):
         days = {datetime.date.fromtimestamp((at + d) / 1000) for d in (-86400000, 0, 86400000)}
         files = [f for day in days for f in glob.glob(os.path.join(HOME, ".codex", "sessions", f"{day:%Y}", f"{day:%m}", f"{day:%d}", "rollout-*.jsonl"))]
     else:
-        files = [f for d in dict.fromkeys(x for x in folders if x) for f in glob.glob(os.path.join(project_dir(d), "*.jsonl"))]
+        files = [f for h in claude_homes() for d in dict.fromkeys(x for x in folders if x) for f in glob.glob(os.path.join(project_dir(d, h), "*.jsonl"))]
     named = re.compile(rf"(?<![\w-]){re.escape(ref)}(?![\w-])")
     best = None
     for f in files:

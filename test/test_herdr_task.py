@@ -1205,7 +1205,7 @@ class BackToWork(unittest.TestCase):
         self.live = []  # the task's agents now (hc records)
         self.store = Store([])
         for mod, name, value in ((commands, "run", never), (commands, "git", never), (commands, "gh", never),
-                                 (commands, "open_store", lambda args, write=True: self.store),
+                                 (commands, "open_store", lambda args, write=True, wait=None: self.store),
                                  (commands, "view", lambda s, t, live=None: dict(t)), (commands, "say", lambda *a: None),
                                  (commands, "live_agents", lambda key: self.live), (commands, "detail", lambda k: k),
                                  (commands, "refresh_sessions", lambda *a: None),
@@ -2869,7 +2869,7 @@ class MergedOnlyWithOwnWork(unittest.TestCase):
         done = lambda s, t, even_if_busy=False: t.update(state="done")
         for mod, name, value in ((tick, "live_agents", lambda key: self.live), (tick, "detail", lambda k: k), (tick, "finish", done),
                                  (tick, "watch_main", lambda *a: None), (commands, "finish", done),
-                                 (commands, "open_store", lambda args, write=True: self.store),
+                                 (commands, "open_store", lambda args, write=True, wait=None: self.store),
                                  (commands, "view", lambda s, t, live=None: dict(t)), (commands, "say", lambda *a: None),
                                  (commands, "live_agents", lambda key: self.live), (commands, "detail", lambda k: k)):
             p = mock.patch.object(mod, name, value)
@@ -3199,7 +3199,7 @@ class TimeLeft(unittest.TestCase):
         import herdr_task.commands as commands
         self.commands, self.said = commands, []
         self.store = Store([{"id": 7, "title": "Web client", "state": "running", "agents": []}])
-        for name, value in (("open_store", lambda args, write=True: self.store), ("view", lambda s, t, live=None: {}),
+        for name, value in (("open_store", lambda args, write=True, wait=None: self.store), ("view", lambda s, t, live=None: {}),
                             ("live_agents", lambda key: []), ("say", lambda args, data, text: self.said.append(text))):
             p = mock.patch.object(commands, name, value)
             p.start()
@@ -3259,12 +3259,16 @@ class ReviewAsAHelperAgent(unittest.TestCase):
             self.assertIn("--label herdr.role=reviewer", words)
             self.assertIn("herdr.task=$HERDR_BROWSER_TASK", words)
             self.assertIn("codex --no-daemon --sandbox read-only", words)
-            self.assertIn("claude --permission-mode plan", words)
+            self.assertIn("claude --permission-mode dontAsk", words)
+            self.assertNotIn("permission-mode plan", words)  # #1181
+            self.assertIn("still at turn 0 after one, `hc read <its name>` to see why", words)  # #1191
+            self.assertIn("`hc keys <its name> enter`", words)
             self.assertIn("exactly as the Reviewer line gives it", words)
             self.assertIn("hc wait <its name>", words)
             self.assertNotIn("< /dev/null", words)
         self.assertIn(templates.WORKER_MD_BEFORE_SUBAGENTS, templates.OLD_WORKERS)
         self.assertIn(templates.WORKER_MD_BEFORE_COMMAND, templates.OLD_WORKERS)
+        self.assertIn(templates.WORKER_MD_BEFORE_WAIT, templates.OLD_WORKERS)
         with open(os.path.join(ROOT, "templates", "reviewer.md")) as f:
             self.assertIn(templates.REVIEWER_MD.strip(), f.read())
 
@@ -3334,7 +3338,7 @@ class ReviewerLine(unittest.TestCase):
     def test_signed_out_codex_never_reviews(self):
         r = self.line("signed-out")
         self.assertEqual(r["value"]["agent"], "claude")
-        self.assertTrue(r["value"]["command"].startswith("claude --permission-mode plan"))
+        self.assertIn("claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash", r["value"]["command"])
         self.assertIn("Codex isn't signed in here", r["text"])
         self.assertIn("`codex login`", r["text"])
 
@@ -4237,7 +4241,7 @@ class ReviewedNamesItsCommit(unittest.TestCase):
                              "review_gate": True}])
         self.store.loc["folder"] = main
         self.task = self.store.data["tasks"][0]
-        for name, value in (("open_store", lambda args, write=True: self.store), ("view", lambda s, t, live=None: dict(t)),
+        for name, value in (("open_store", lambda args, write=True, wait=None: self.store), ("view", lambda s, t, live=None: dict(t)),
                             ("say", lambda *a: None), ("review_limits", lambda *a: (True, 3))):
             p = mock.patch.object(commands, name, value)
             p.start()
@@ -5684,18 +5688,23 @@ class CodexAsksOnTheCard(unittest.TestCase):
             own = lambda c, sb=True: launch.own_command("/x/herdr-task", c, sb)  # noqa: E731
             yes = [f"hc run --bg --name demo-1-review --label \"herdr.task=$HERDR_BROWSER_TASK\" --label herdr.role=reviewer "
                    f"--label herdr.agent=codex -- {rv} 'Review it: \"ok\" & $x'",
-                   "hc run --bg --name demo-1-review -- claude --permission-mode plan --model opus 'review'",
-                   "hc wait demo-1-review --timeout 600", "hc read demo-1-review --lines 400", "hc kill demo-1-review"]
-            no = ["hc run --bg --name demo-1-review -- claude --permission-mode plan --dangerously-skip-permissions x",
+                   "hc run --bg --name demo-1-review -- claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash --model opus 'review'",
+                   f"hc run --bg --name demo-1-review -- {reviewer_command('claude', 'opus', 'high')} 'review'",
+                   "hc wait demo-1-review --timeout 600", "hc read demo-1-review --lines 400", "hc kill demo-1-review",
+                   "hc keys demo-1-review enter", "hc keys demo-1-review down enter"]
+            no = ["hc run --bg --name demo-1-review -- claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash --dangerously-skip-permissions x",
+                  "hc run --bg --name demo-1-review -- claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash,Edit x",
+                  "hc run --bg --name demo-1-review -- claude --permission-mode plan x",
+                  "hc run --bg --name demo-1-review -- env \"CLAUDE_CONFIG_DIR=$HOME\" claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash x",
                   "hc run --bg --name demo-1-review -- codex --no-daemon --sandbox read-only --ask-for-approval never "
                   "-c sandbox_mode=\"danger-full-access\" x",
-                  "hc run --bg --name demo-1-review -- sh -c 'rm -rf /'", "hc run --bg --name x -- claude --permission-mode plan x",
-                  "hc kill t15q", "hc send demo-1-review hi"]
+                  "hc run --bg --name demo-1-review -- sh -c 'rm -rf /'", "hc run --bg --name x -- claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash x",
+                  "hc kill t15q", "hc send demo-1-review hi", "hc keys t15q enter", "hc keys demo-1-review --text 'rm -rf /'"]
             for c in yes:
                 self.assertTrue(own(c), c)
             for c in no:
                 self.assertFalse(own(c), c)
-            self.assertFalse(own(yes[2], False))
+            self.assertFalse(own(yes[3], False))
         argv = launch.own_argv(["codex", "-s", "workspace-write"])
         self.assertIn(" _allow --command ", argv[2])
         self.assertIn(" --sandboxed", argv[2])
@@ -5815,7 +5824,7 @@ class TaskFlow(unittest.TestCase):
                              "started": 1}])
         self.store.loc["folder"] = self.main
         self.task = self.store.data["tasks"][0]
-        self.patch(commands, "open_store", lambda args, write=True: self.store)
+        self.patch(commands, "open_store", lambda args, write=True, wait=None: self.store)
         self.patch(commands, "view", lambda s, t, live=None: dict(t))
         self.patch(commands, "say", lambda args, v, text: self.said.append(text))
         self.patch(commands, "live_agents", lambda key: self.live)
@@ -6503,6 +6512,22 @@ class TaskFlow(unittest.TestCase):
         p = subprocess.run(["sh", "-c", low, "herdr-low", "true"], capture_output=True, text=True)
         self.assertEqual((p.returncode, p.stderr), (0, ""))
 
+    def test_low_priority_never_clamps_qos(self):
+        """#1109: on a Mac a worker runs under nice alone, never taskpolicy's utility clamp (keys echoed 20-100x slower)."""
+        from herdr_task import launch
+        bin_ = os.path.join(self.root, "qosbin")
+        os.makedirs(bin_, exist_ok=True)
+        mark = os.path.join(self.root, "taskpolicy-ran")
+        with open(os.path.join(bin_, "taskpolicy"), "w") as f:
+            f.write('#!/bin/sh\ntouch %s\nshift 2\nexec "$@"\n' % mark)
+        os.chmod(os.path.join(bin_, "taskpolicy"), 0o755)
+        low = launch.LOW.replace("/proc/self/oom_score_adj", os.path.join(self.root, "none", "oom_score_adj"))
+        p = subprocess.run(["sh", "-c", low, "herdr-low", "sh", "-c", "echo ran"], capture_output=True, text=True,
+                           env={**os.environ, "PATH": bin_ + os.pathsep + os.environ["PATH"]})
+        self.assertEqual(p.stdout.strip(), "ran")
+        self.assertFalse(os.path.exists(mark))
+        self.assertNotIn("taskpolicy", launch.LOW)
+
     def test_an_agent_under_fish_is_running(self):
         """#780: under fish the foreground stays `fish -ic "<agent>; exec fish -i"` while its agent works."""
         from herdr_task import agents
@@ -6689,6 +6714,49 @@ class DoubleStart(unittest.TestCase):
             s.dirty = True
         self.run_cmd(self.commands.cmd_start, id="1", now=True)
         self.assertEqual(len(self.task(1)["agents"]), 2)
+
+    def test_reads_never_wait_for_a_busy_list_and_a_status_gives_up(self):
+        """#1130: the scheduler (or any slow command) holding the list's lock kept show, list and status waiting for
+        minutes. Reads go on at once (saves replace the list whole); a status gives up after a short wait, saying so."""
+        import fcntl
+        import time
+        from unittest import mock
+        self.add("Busy")
+        with self.store_mod.Store(self.store_mod.locate(self.folder), write=False) as s:
+            lock = os.path.join(self.store_mod.STORE, "." + os.path.basename(s.path) + ".lock")
+        held = open(lock, "a")
+        self.addCleanup(held.close)
+        fcntl.flock(held, fcntl.LOCK_EX)
+        t = time.time()
+        self.assertEqual(self.task(1)["title"], "Busy")
+        shown = self.run_cmd(self.commands.cmd_show, id="1")
+        self.assertEqual(shown["title"], "Busy")
+        listed = self.run_cmd(self.commands.cmd_list, all=False, archived=False)
+        self.assertIn("Busy", json.dumps(listed))
+        self.assertLess(time.time() - t, 5)
+        with mock.patch.object(self.commands, "STATUS_WAIT", 0.5), self.assertRaises(self.Fail) as e:
+            self.run_cmd(self.commands.cmd_status, id="1", text="Working", done=None, left=None)
+        self.assertIn("is busy", str(e.exception))
+        self.assertIn("nothing was changed", str(e.exception))
+        fcntl.flock(held, fcntl.LOCK_UN)
+        # free again: a read that learns something saves it, as before
+        with self.store_mod.Store(self.store_mod.locate(self.folder), write="try") as s:
+            self.assertTrue(s.write)
+
+    def test_a_here_start_in_another_worktree_is_refused(self):
+        """#1210: start --here --folder <a worktree of the repo> ran in the repo's own folder, on another branch. It
+        says so and starts nothing; the repo's own folder (or a folder in it) still starts --here."""
+        wt = os.path.join(self.tmp, "app-wt")
+        subprocess.run(["git", "-C", self.folder, "worktree", "add", "-q", "-b", "feat", wt], check=True)
+        self.add("Go on there", folder=wt)
+        with self.assertRaises(self.Fail) as e:
+            self.run_cmd(self.commands.cmd_start, id="1", here=True, folder=wt, now=True)
+        self.assertIn(f"{os.path.realpath(wt)} is another worktree of", str(e.exception))
+        self.assertIn("without --here", str(e.exception))
+        self.assertEqual((self.started, self.task(1)["state"]), ([], "todo"))
+        os.makedirs(os.path.join(self.folder, "web"))
+        self.run_cmd(self.commands.cmd_start, id="1", here=True, folder=os.path.join(self.folder, "web"), now=True)
+        self.assertEqual(self.started, ["APP-1"])
 
 
 class ReadyMergeGit(unittest.TestCase):
@@ -7014,6 +7082,68 @@ class CodexGuardianRollout(unittest.TestCase):
         self.assertFalse(self.sessions.subagent_rollout(self.own))
         self.assertTrue(self.sessions.subagent_rollout(self.guardian))
         self.assertTrue(self.sessions.subagent_rollout(self.helper))
+
+
+class ClaudeConfigDir(unittest.TestCase):
+    """GitHub #1120: an agent run with its own CLAUDE_CONFIG_DIR (a profile per folder, a dev container's /app/claude)
+    keeps its session file and log there; herdr-task reads the folder from the process's environment (/proc, else
+    ps -E on macOS) and finds them, never only ~/.claude."""
+    SID = "11111111-2222-3333-4444-555555555555"
+
+    def setUp(self):
+        sys.path.insert(0, BIN)
+        import herdr_task.sessions as sessions
+        self.sessions = sessions
+        sessions._table["at"] = None
+        self.addCleanup(lambda: sessions._table.update(at=None, children={}))
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.root))
+        self.cfg = os.path.join(self.root, "app_claude")
+        os.makedirs(os.path.join(self.cfg, "projects", "-w"))
+        os.makedirs(os.path.join(self.cfg, "sessions"))
+        self.log = os.path.join(self.cfg, "projects", "-w", self.SID + ".jsonl")
+        open(self.log, "w").close()
+        from unittest import mock
+        p = mock.patch.object(sessions, "HOME", os.path.join(self.root, "home"))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def name_session(self, pid):
+        with open(os.path.join(self.cfg, "sessions", f"{pid}.json"), "w") as f:
+            json.dump({"pid": pid, "sessionId": self.SID}, f)
+
+    @unittest.skipUnless(os.path.isfile("/proc/self/environ"), "reads /proc")
+    def test_the_session_in_the_processs_own_config_dir(self):
+        p = subprocess.Popen([sys.executable, "-c", "import time\nprint(1,flush=True)\ntime.sleep(30)"], stdout=subprocess.PIPE,
+                             env={**os.environ, "CLAUDE_CONFIG_DIR": self.cfg})
+        self.addCleanup(lambda: (p.kill(), p.wait(), p.stdout.close()))
+        p.stdout.readline()
+        self.name_session(p.pid)
+        self.assertEqual(self.sessions.own_claude_dir(p.pid), self.cfg)
+        self.assertEqual(self.sessions.session_of(p.pid), (self.SID, self.log))
+
+    def test_through_ps_as_on_macos(self):
+        from unittest import mock
+        from types import SimpleNamespace
+        self.name_session(4242)
+        real_isdir = os.path.isdir
+        seen = []
+
+        def run(args, **kw):
+            seen.append(args)
+            return SimpleNamespace(stdout=f"claude --model x HOME=/x CLAUDE_CONFIG_DIR={self.cfg} TERM=y\n" if args[0] == "ps" else "")
+        with mock.patch.object(self.sessions.os.path, "isdir", lambda p: False if p.startswith("/proc") else real_isdir(p)), \
+                mock.patch.object(self.sessions.shutil, "which", lambda n: "/bin/" + n), \
+                mock.patch.object(self.sessions, "run", run):
+            self.assertEqual(self.sessions.session_of(4242), (self.SID, self.log))
+        self.assertIn(["ps", "-wwE", "-o", "command=", "-p", "4242"], seen)
+
+    def test_a_log_by_session_in_herdr_tasks_own_config_dir(self):
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg}):
+            self.assertEqual(self.sessions.log_by_session("claude", self.SID), self.log)
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": ""}):
+            self.assertIsNone(self.sessions.log_by_session("claude", self.SID))
 
 
 class ProcessTable(unittest.TestCase):
@@ -7909,7 +8039,24 @@ class CodexBatch278(unittest.TestCase):
 
     def test_claude_in_the_system_folders_needs_nothing(self):
         self.patch(self.settings.shutil, "which", lambda name: f"/usr/bin/{name}")
-        self.assertEqual(self.settings.reviewer_command("claude"), "claude --permission-mode plan")
+        self.assertEqual(self.settings.reviewer_command("claude"),
+                         'env ${CLAUDE_CONFIG_DIR:+"CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR"} claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash')
+
+    # ---- #1131 #1181 -----------------------------------------------------------------------------
+    def test_a_claude_reviewer_gets_the_workers_profile_never_plan_mode(self):
+        """#1131: hc run gives the reviewer hc's environment, so the brief's command carries the worker's own
+        CLAUDE_CONFIG_DIR, expanded by the worker's shell; none when the worker has none (an empty one is not ~/.claude).
+        #1181: read-only without plan mode, the prompt after its tools never taken as one."""
+        bin_dir = os.path.join(self.dir, "claudebin")
+        self.script(os.path.join(bin_dir, "claude"), '#!/bin/sh\necho "dir=${CLAUDE_CONFIG_DIR-unset}"; for a in "$@"; do echo "arg=$a"; done\n')
+        self.patch(self.settings.shutil, "which", lambda name: os.path.join(bin_dir, name))
+        cmd = self.settings.reviewer_command("claude", "opus", "high") + ' "review it"'
+        self.assertNotIn("plan", cmd)
+        for given, want in (({"CLAUDE_CONFIG_DIR": "/app/my claude"}, "dir=/app/my claude"), ({}, "dir=unset")):
+            out = subprocess.run(["sh", "-c", cmd], env={"PATH": "/usr/bin:/bin", "HOME": self.dir, **given}, capture_output=True, text=True).stdout
+            self.assertEqual(out.splitlines()[0], want, out)
+            self.assertIn("arg=--tools=Read,Grep,Glob,Bash", out)
+            self.assertEqual(out.splitlines()[-1], "arg=review it")
 
     def test_a_codex_worker_s_review_run_is_still_its_own(self):
         bin_dir = self.nvm()
@@ -8204,6 +8351,101 @@ class ExtraFlags(unittest.TestCase):
         with self.redirect(out):
             self.flags.cmd_flags(argparse.Namespace(agent="claude", json=True, words=["--", "--advisor opus"]))
         self.assertEqual(json.loads(out.getvalue())["flags"], ["--advisor=opus"])
+
+
+class WorktreeRemovalStopsItsServers(unittest.TestCase):
+    """#1127: a done task's dev server still running in its worktree kept writing there, so the removal left part of
+    the folder behind (git's record gone) and the server ran on. Now it is stopped first, the folder is really gone,
+    a leftover is removed on a later try, and one that won't go is noted with why. A real repo and real processes."""
+
+    def setUp(self):
+        sys.path.insert(0, BIN)
+        import herdr_task.github as github
+        self.github = github
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        self.main = os.path.join(self.tmp, "app")
+        os.makedirs(self.main)
+        g = lambda *a, cwd=self.main: subprocess.run(["git", "-C", cwd, "-c", "user.name=T", "-c", "user.email=t@example.com", *a],
+                                                     check=True, capture_output=True)  # noqa: E731
+        g("init", "-q", "-b", "main", cwd=self.main)
+        g("commit", "-q", "--allow-empty", "-m", "start")
+        self.wt = os.path.join(self.tmp, "wts", "app", "task-1")
+        g("worktree", "add", "-q", "-b", "task/1", self.wt)
+
+        class S:
+            loc = {"folder": self.main}
+            dirty = False
+        self.s = S()
+        self.task = {"id": 1, "worktree": self.wt, "branch": "task/1"}
+
+    def server(self, ignore_term=False):
+        """A stand-in dev server: started in the worktree, writing a file there every 20 ms."""
+        code = ("import os,signal,time\n" + ("signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" if ignore_term else "") +
+                "os.makedirs('.next', exist_ok=True)\nprint(1, flush=True)\n"
+                "while True:\n    open(os.path.join(os.getcwd(), '.next', 'dev.log'), 'a').write('x')\n    time.sleep(0.02)\n")
+        p = subprocess.Popen([sys.executable, "-c", code], cwd=self.wt, stdout=subprocess.PIPE)
+        self.addCleanup(lambda: (p.kill(), p.wait(), p.stdout.close()))
+        p.stdout.readline()
+        return p
+
+    @unittest.skipUnless(os.path.isdir("/proc/self"), "reads /proc")
+    def test_a_running_server_is_stopped_and_the_folder_is_gone(self):
+        p = self.server()
+        self.assertIn(p.pid, [pid for pid, _ in self.github.procs_in(self.wt)])
+        self.assertTrue(self.github.remove_worktree(self.s, self.task))
+        self.assertFalse(os.path.exists(self.wt))
+        self.assertIsNotNone(p.wait(timeout=5))
+        self.assertEqual(self.task["worktree_stopped"], [f"{os.path.basename(sys.executable)[:15]} (pid {p.pid})"])
+        self.assertNotIn("task/1", subprocess.run(["git", "-C", self.main, "branch"], capture_output=True, text=True).stdout)
+
+    @unittest.skipUnless(os.path.isdir("/proc/self"), "reads /proc")
+    def test_one_that_ignores_term_is_killed(self):
+        from unittest import mock
+        p = self.server(ignore_term=True)
+        with mock.patch.object(self.github, "STOP_WAIT", 0.5):
+            self.assertTrue(self.github.remove_worktree(self.s, self.task))
+        self.assertEqual(p.wait(timeout=5), -9)
+        self.assertFalse(os.path.exists(self.wt))
+
+    def test_a_leftover_folder_is_removed_on_a_later_try(self):
+        """What the old removal left: git's record gone, files still there; git worktree remove can't take it."""
+        subprocess.run(["git", "-C", self.main, "worktree", "remove", "--force", self.wt], check=True)
+        os.makedirs(os.path.join(self.wt, ".next", "types"))
+        open(os.path.join(self.wt, "next.config.js"), "w").close()
+        self.assertTrue(self.github.removal_leftover(self.wt))
+        self.assertTrue(self.github.remove_worktree(self.s, self.task))
+        self.assertFalse(os.path.exists(self.wt))
+
+    def test_a_folder_git_never_listed_is_not_ours(self):
+        other = os.path.join(self.tmp, "wts", "app", "someone-elses")
+        subprocess.run(["git", "init", "-q", other], check=True)
+        self.task["worktree"] = other
+        self.assertFalse(self.github.remove_worktree(self.s, self.task))
+        self.assertTrue(os.path.isdir(other))
+
+    def test_uncommitted_work_keeps_it(self):
+        with open(os.path.join(self.wt, "tracked.txt"), "w") as f:
+            f.write("x")
+        subprocess.run(["git", "-C", self.wt, "add", "tracked.txt"], check=True)
+        self.assertFalse(self.github.remove_worktree(self.s, self.task))
+        self.assertTrue(os.path.isdir(self.wt))
+
+    def test_one_that_wont_go_says_why(self):
+        from unittest import mock
+        with mock.patch.object(self.github.shutil, "rmtree", lambda *a, **k: None), \
+                mock.patch.object(self.github, "procs_in", lambda folder, table=None: [(4242, "next-server")]), \
+                mock.patch.object(self.github, "stop_in", lambda folder: []), \
+                mock.patch.object(self.github, "git", lambda *a: (True, "", "")):
+            self.assertFalse(self.github.remove_worktree(self.s, self.task))
+        self.assertEqual(self.task["worktree_left"]["running"], ["next-server (pid 4242)"])
+        self.assertTrue(self.task["worktree_removing"])
+
+    def test_a_terminals_own_program_and_agents_are_never_stopped(self):
+        wt = os.path.realpath(self.wt)
+        table = [(10, 1, "herdr-core", "/"), (11, 10, "bash", wt), (12, 11, "claude", wt), (13, 12, "bash", wt),
+                 (14, 13, "next-server", os.path.join(wt, "apps")), (15, 1, "node", "/elsewhere"), (16, 1, "codex", wt)]
+        self.assertEqual(self.github.procs_in(self.wt, table), [(13, "bash"), (14, "next-server")])
 
 
 class ReadyAndPrFlow(unittest.TestCase):

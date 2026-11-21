@@ -659,7 +659,7 @@ def stage_theme(stage, light):
 
 # How long one `herdr-app check` may take, and the waits before trying again when Herdr's checker couldn't start: its
 # checker has its own short deadline to connect, which a busy machine misses (#987), so it is tried three times, waiting
-# longer each time. A check that ran out of time is tried once more.
+# longer each time. A check that ran out of time isn't tried again (#1130: twice made a publish wait three minutes).
 CHECK_TIMEOUT = 90
 RETRY_WAITS = (3, 10)
 # herdr-app's own trouble drawing it (its isolated checker didn't connect, after Herdr restarted), not the artifact's
@@ -695,7 +695,7 @@ def check_tries(stage):
             why = (r[2] or "").strip().splitlines()[-1]
         else:
             return r
-        if not waits or timeouts > 1:
+        if not waits or timeouts:
             return None, "", why
         time.sleep(waits.pop(0))
 

@@ -16,7 +16,7 @@ import sys
 import time
 
 from .base import ASK_HOME, ENTRY, Fail, git, hc_json, now, run, WORKTREES
-from .settings import agent_key, ASSISTANT_TEMPLATES, cli_env, codex_too_old, codex_update_words, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, keep_review, notes, notes_part, review_limits, settings_block, settings_for
+from .settings import agent_key, ASSISTANT_TEMPLATES, cli_env, CLAUDE_PROFILE, REVIEW_TOOLS, codex_too_old, codex_update_words, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, keep_review, notes, notes_part, review_limits, settings_block, settings_for
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
 from .github import finish, remote_of
@@ -207,12 +207,14 @@ def own_command(path, text, sandboxed=False):
     if sandboxed and re.fullmatch(r"[\w#.@-]+", task):
         # the reviewer's label as the brief writes it, its one variable: this worker's own task
         text = text.replace('"herdr.task=$HERDR_BROWSER_TASK"', f'"herdr.task={task}"')
-    if sandboxed and "$PATH" in text:
-        # #1228: the reviewer's PATH as the brief writes it (its CLI's own folders, then $PATH), only exactly that
+    if sandboxed and "$" in text:
+        # #1228: the reviewer's PATH as the brief writes it (its CLI's own folders, then $PATH), only exactly that;
+        # #1131: a Claude reviewer's the worker's own CLAUDE_CONFIG_DIR too (CLAUDE_PROFILE)
         for who in REVIEWERS:
             pre = cli_env(who)
-            if pre and f"-- {pre}{who} " in text:
-                text = text.replace(f"-- {pre}{who} ", f"-- env PATH=@herdr-reviewer {who} ", 1)
+            for env in ((pre or "env ") + CLAUDE_PROFILE,) if who == "claude" else (pre,):
+                if env and f"-- {env}{who} " in text:
+                    text = text.replace(f"-- {env}{who} ", f"-- env PATH=@herdr-reviewer {who} ", 1)
     words, at, text = [], 0, text.strip()
     while at < len(text):
         if text[at] in " \t":
@@ -263,7 +265,8 @@ def tool_name(word, path):
 REVIEWERS = {"codex": (["codex", "--no-daemon", "--sandbox", "read-only", "--ask-for-approval", "never"],
                        {"--disable": re.compile(r"hooks"), "-m": re.compile(r"[\w.:-]+"),
                         "-c": re.compile(r'projects=\{.*\}|model_reasoning_effort="?\w+"?', re.S)}),
-             "claude": (["claude", "--permission-mode", "plan"], {"--model": re.compile(r"[\w.:\[\]-]+"), "--effort": re.compile(r"\w+")})}
+             "claude": (["claude", "--permission-mode", "dontAsk", "--tools=" + REVIEW_TOOLS],
+                        {"--model": re.compile(r"[\w.:\[\]-]+"), "--effort": re.compile(r"\w+")})}
 HELPER = re.compile(r"[\w.-]+-(?:review|helper)(?:-[\w.-]+)?")
 
 
@@ -271,6 +274,9 @@ def helper_hc(words):
     """Whether `hc ...` is a worker's own reviewer: run as the brief says, or waited on, read, looked up (#1136), ended."""
     if len(words) >= 3 and words[1] in ("wait", "read", "kill", "get"):
         return bool(HELPER.fullmatch(words[2])) and all(w.startswith("--") or re.fullmatch(r"\d+", w) for w in words[3:])
+    if len(words) >= 4 and words[1] == "keys":
+        # #1191: answering its startup dialog (enter, down enter, 1): plain key names only, never typed text
+        return bool(HELPER.fullmatch(words[2])) and all(re.fullmatch(r"[a-z0-9]{1,9}", w) for w in words[3:])
     if len(words) < 4 or words[1] != "run" or "--" not in words:
         return False
     i = words.index("--")
@@ -464,11 +470,12 @@ def in_shell(argv):
 # first, never herdr-core's holder or an Assistant. Where systemd's user manager runs, each worker
 # also gets its own scope (with the optional per-worker memory cap as MemoryHigh), so oomd, which
 # ends whole cgroups, ends that worker rather than the holder that keeps every terminal. On a Mac:
-# nice 10 and the utility QoS clamp (taskpolicy). Anything missing is skipped, never fatal.
+# nice 10 alone. #1109: never the utility QoS clamp (taskpolicy -c utility): on a busy Mac it made a
+# worker's lane echo keys 20 to 100 times slower for the person typing in it. Anything missing is
+# skipped, never fatal.
 
 LOW = ('{ echo 500 > /proc/self/oom_score_adj; } 2>/dev/null; '
        'command -v ionice >/dev/null 2>&1 && ionice -c2 -n7 -p $$ >/dev/null 2>&1; '
-       'command -v taskpolicy >/dev/null 2>&1 && exec nice -n 10 taskpolicy -c utility "$@"; '
        'exec nice -n 10 "$@"')
 _scope = {}
 

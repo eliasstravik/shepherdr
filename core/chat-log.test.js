@@ -327,3 +327,54 @@ test("FIND: the same through lsof, as on macOS (#1201)", async () => {
   expect(await find(999999, `${bin}:${process.env.PATH}`, "bash")).toBe(r.own);
   rmSync(r.dir, { recursive: true });
 });
+
+// GitHub #1120: a Claude Code run with its own CLAUDE_CONFIG_DIR (a profile, a dev container's /app/claude) keeps its
+// session file and log in that folder; the chat reads it from the process's environment (/proc, else ps -E on macOS).
+const findClaude = async (pid, env = {}, sh = "sh") => (await new Response(Bun.spawn(["env", ...Object.entries(env).map(([k, v]) => `${k}=${v}`), sh, "-c", FIND, "chat", "claude", String(pid)], { stdout: "pipe", stderr: "ignore" }).stdout).text()).trim();
+function profile(pid, id) {
+  const root = mkdtempSync(join(tmpdir(), "chat-profile-"));
+  const cfg = join(root, "app claude"), home = join(root, "home");
+  mkdirSync(join(cfg, "sessions"), { recursive: true });
+  mkdirSync(join(cfg, "projects", "-w"), { recursive: true });
+  mkdirSync(home);
+  writeFileSync(join(cfg, "sessions", `${pid}.json`), JSON.stringify({ pid, sessionId: id }));
+  const log = join(cfg, "projects", "-w", `${id}.jsonl`);
+  writeFileSync(log, "{}\n");
+  return { root, cfg, home, log };
+}
+
+test("FIND: a Claude Code session in the process's own CLAUDE_CONFIG_DIR (#1120, Linux)", async () => {
+  if (!require("node:fs").existsSync("/proc/self/environ")) return;
+  const id = "11111111-2222-3333-4444-555555555555";
+  const root = mkdtempSync(join(tmpdir(), "chat-profile-"));
+  const cfg = join(root, "app claude");
+  const p = Bun.spawn(["python3", "-c", "import time\nprint(1,flush=True)\ntime.sleep(30)"], { stdout: "pipe", env: { ...process.env, CLAUDE_CONFIG_DIR: cfg } });
+  await p.stdout.getReader().read();
+  try {
+    const f = profile(p.pid, id);
+    rmSync(cfg, { recursive: true, force: true });
+    require("node:fs").renameSync(f.cfg, cfg);
+    expect(await findClaude(p.pid, { HOME: f.home })).toBe(join(cfg, "projects", "-w", `${id}.jsonl`));
+    rmSync(f.root, { recursive: true });
+  } finally { p.kill(); }
+  // Without the variable on the process: only ~/.claude, so nothing here.
+  const q = Bun.spawn(["python3", "-c", "import time\nprint(1,flush=True)\ntime.sleep(30)"], { stdout: "pipe" });
+  await q.stdout.getReader().read();
+  try { expect(await findClaude(q.pid, { HOME: join(root, "nohome") })).toBe(""); } finally { q.kill(); }
+  rmSync(root, { recursive: true });
+});
+
+test("FIND: the same through ps -E, as on macOS (#1120)", async () => {
+  const f = profile(999999, "11111111-2222-3333-4444-666666666666");
+  const bin = join(f.root, "bin");
+  mkdirSync(bin);
+  // No /proc on a Mac: FIND asks ps for the environment ("command VAR=value ..."); a fake ps and a fake procs root.
+  writeFileSync(join(bin, "ps"), `#!/bin/sh\ncase "$*" in *wwE*) echo "claude --model x HOME=/x CLAUDE_CONFIG_DIR=${f.cfg.replace(/ /g, "_")} TERM=x" ;; *) : ;; esac\n`);
+  chmodSync(join(bin, "ps"), 0o755);
+  // (a path with a space can't come through ps's output, so this one has none)
+  require("node:fs").renameSync(f.cfg, f.cfg.replace(/ /g, "_"));
+  const shim = FIND.replace(/\/proc\//g, "/nonexistent-proc/");
+  const out = (await new Response(Bun.spawn(["env", `HOME=${f.home}`, `PATH=${bin}:${process.env.PATH}`, "bash", "-c", shim, "chat", "claude", "999999"], { stdout: "pipe", stderr: "ignore" }).stdout).text()).trim();
+  expect(out).toBe(f.log.replace("app claude", "app_claude"));
+  rmSync(f.root, { recursive: true });
+});

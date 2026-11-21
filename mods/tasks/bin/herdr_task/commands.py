@@ -401,6 +401,16 @@ def just_started(t):
     return fresh[-1] if t.get("state") == "running" and fresh else None
 
 
+def other_worktree(s, folder):
+    """#1210: the work tree `folder` is in, when that is another worktree of this repo than its own folder (a start
+    there --here would run in the repo's folder instead), else None."""
+    if not folder or s.loc.get("kind") != "repo":
+        return None
+    ok, top, _ = git(os.path.realpath(os.path.expanduser(folder)), "rev-parse", "--show-toplevel")
+    top = os.path.realpath(top) if ok and top else None
+    return top if top and top != os.path.realpath(s.loc["folder"]) else None
+
+
 def cmd_start(args):
     with open_store(args) as s:
         t = s.find(args.id)
@@ -413,6 +423,11 @@ def cmd_start(args):
             t["mode"] = "here"
         elif args.worktree and worktrees_on(s):
             t["mode"] = "worktree"
+        if t.get("mode") != "worktree":
+            other = other_worktree(s, getattr(args, "folder", None))
+            if other:
+                raise Fail(f"{other} is another worktree of {s.loc['folder']}: a start in the folder itself (--here) runs in "
+                           f"{s.loc['folder']}, never there. Start it without --here to give it a worktree of its own.")
         set_branch(s, t, getattr(args, "branch", None))
         take_pr(s, t, getattr(args, "pr", None))
         q = t.get("queue") or {}
@@ -875,6 +890,9 @@ def parse_left(text):
     return int(sum(float(n) * {"h": 3600000, "m": 60000, "s": 1000}[u[0]] for n, u in parts))
 
 
+STATUS_WAIT = 15
+
+
 def cmd_status(args):
     """A task agent says what it's doing, how far along it is and the time left, at the start, at
     each natural step and at least every 5 minutes (as Shepherdr's `shepherdr status`). Herdr guesses nothing: it shows
@@ -885,7 +903,8 @@ def cmd_status(args):
     if args.done is not None and not 0 <= args.done <= 100:
         raise Fail("--done is a percentage, 0 to 100.")
     left = parse_left(args.left) if args.left else None
-    with open_store(args) as s:
+    # #1130: a status line never waits minutes behind a busy list: it gives up after STATUS_WAIT, saying so
+    with open_store(args, wait=STATUS_WAIT) as s:
         t = s.find(args.id)
         if t["state"] not in ("running", "ready"):
             raise Fail(f"{s.ref(t)} isn't being worked on ({STATUSES.get(t['state'], t['state'])}); nothing to report.")

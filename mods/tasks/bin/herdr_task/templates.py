@@ -109,7 +109,14 @@ WORKER_MD_BEFORE_ASK = WORKER_MD_BEFORE_OFTEN.replace(OFTEN_OLD, OFTEN_RULE).rep
 ASK_OLD = "Anything else: ask the person in one short message. Then run ready again."
 ASK_RULE = ("Anything else: ask the person with your CLI's question tool, as below (a question in plain text reaches "
             "nobody while the task is Ready). Then run ready again.")
-WORKER_MD = WORKER_MD_BEFORE_ASK.replace(ASK_OLD, ASK_RULE)
+WORKER_MD_BEFORE_WAIT = WORKER_MD_BEFORE_ASK.replace(ASK_OLD, ASK_RULE)
+# Since a helper stuck on a startup dialog is read and answered, not waited on for 20 minutes (#1191), and a Claude
+# reviewer runs in don't-ask mode, never plan mode (#1181).
+WAIT_OLD = "(again on a timeout, or while it says turn 0: it hadn't started)"
+WAIT_RULE = ('(again on a timeout; still at turn 0 after one, `hc read <its name>` to see why: a startup dialog such as "Allow external CLAUDE.md imports?" or "Trust this folder?" waits for an answer, which you give with `hc keys <its name> enter` (or `down enter`), then wait again)')
+PLAN_OLD = '`claude --permission-mode plan …`; never'
+PLAN_RULE = '`env … claude --permission-mode dontAsk …`; never'
+WORKER_MD = WORKER_MD_BEFORE_WAIT.replace(WAIT_OLD, WAIT_RULE).replace(PLAN_OLD, PLAN_RULE)
 
 REVIEWER_MD_BEFORE_SUBAGENT = """You review one Herdr task's work before it can merge. Read only: never edit files, commit or push.
 - Read the task, then the diff of its branch against its base, and run the project's checks.
@@ -129,7 +136,9 @@ REVIEWER_SANDBOX = ("- A check that can't run in a read-only sandbox (Codex's): 
                     "services and `shepherdr doctor` can't reach the Shepherdr service, as with anything needing the network, a "
                     "window or writes outside the folder. Don't run or wait on those: list them in your findings under \"Not run "
                     "in my sandbox:\", and your worker runs them and checks the output.\n")
-REVIEWER_MD = REVIEWER_MD_BEFORE_SANDBOX + REVIEWER_SANDBOX
+REVIEWER_MD_BEFORE_CLAUDE = REVIEWER_MD_BEFORE_SANDBOX + REVIEWER_SANDBOX
+# Since a Claude reviewer runs in don't-ask mode, which refuses any command that isn't read-only (#1181).
+REVIEWER_MD = REVIEWER_MD_BEFORE_CLAUDE.replace("- A check that can't run in a read-only sandbox (Codex's):", "- A check that can't run in a read-only sandbox (Codex's, or Claude's don't-ask mode, which refuses any command that isn't read-only, tests too):")
 
 
 # Earlier worker defaults: a file still saying one, unedited, gets today's.
@@ -142,7 +151,7 @@ OLD_WORKER_READY = """You work on one Herdr task. Stay within the task's scope a
 - When the work is finished, run the `herdr-task ready` command given at the end of your brief, with a short summary. That puts the task in Ready for the person, who accepts it. Never mark a task done yourself.
 """
 OLD_WORKER_MD = OLD_WORKER_READY.split("- When the work is finished")[0]
-OLD_WORKERS = (WORKER_MD_BEFORE_ASK, WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
+OLD_WORKERS = (WORKER_MD_BEFORE_WAIT, WORKER_MD_BEFORE_ASK, WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
 
 
 TEMPLATE_HEADS = {
@@ -176,7 +185,7 @@ def instructions(role):
         text = None
     if body is None or (role == "worker" and body.strip() in [x.strip() for x in OLD_WORKERS]) \
             or (role == "reviewer" and body.strip() in (REVIEWER_MD_BEFORE_SUBAGENT.strip(), REVIEWER_MD_BEFORE_FEEDBACK.strip(),
-                                                    REVIEWER_MD_BEFORE_SANDBOX.strip())):
+                                                    REVIEWER_MD_BEFORE_SANDBOX.strip(), REVIEWER_MD_BEFORE_CLAUDE.strip())):
         body = WORKER_MD if role == "worker" else REVIEWER_MD
     new = head + body.strip() + "\n"
     if text is None or new.strip() != text.strip():

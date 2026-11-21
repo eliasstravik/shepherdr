@@ -858,17 +858,154 @@ def finish(s, task, even_if_busy=False):
 
 def remove_worktree(s, task):
     """A finished task's worktree removed when nothing is uncommitted there, then its branch. True
-    once the worktree is gone."""
+    once the worktree is gone. #1127: what still runs there (a dev server outliving its task) is stopped
+    first, and the folder must really be gone: a server writing on made git drop its record while files
+    stayed. A folder left over that way is removed on a later try; one that won't go is noted
+    (worktree_left) for the health check to say why."""
+    from .launch import registered_worktree
     wt, br, main = task.get("worktree"), task.get("branch"), s.loc["folder"]
     if os.path.isdir(wt):
         if os.path.realpath(wt) == os.path.realpath(main):
             return False
-        ok, out, _ = git(wt, "status", "--porcelain", "--untracked-files=no")
-        if not ok or out or not git(main, "worktree", "remove", "--force", wt)[0]:
+        reg = registered_worktree(main, wt)
+        if reg:
+            ok, out, _ = git(wt, "status", "--porcelain", "--untracked-files=no")
+            if not ok or out:
+                return False
+        elif not (task.get("worktree_removing") or removal_leftover(wt)):
+            return False  # a folder git doesn't list, not one of our own removals: never ours to delete
+        task["worktree_removing"] = True
+        s.dirty = True
+        stopped = stop_in(wt)
+        if reg:
+            git(main, "worktree", "remove", "--force", wt)
+        for _ in range(2):
+            if not os.path.isdir(wt):
+                break
+            shutil.rmtree(wt, ignore_errors=True)
+            if os.path.isdir(wt):
+                stopped += stop_in(wt)
+        git(main, "worktree", "prune")
+        if os.path.isdir(wt):
+            left = procs_in(wt)
+            task["worktree_left"] = {"at": now(), "running": [f"{n} (pid {p})" for p, n in left][:5],
+                                     "stopped": stopped[:5]}
             return False
+        task.pop("worktree_removing", None)
+        task.pop("worktree_left", None)
+        if stopped:
+            task["worktree_stopped"] = stopped[:5]
     if br:
         git(main, "branch", "-D", br)
     return True
+
+
+def removal_leftover(wt):
+    """Whether wt looks like what a removal left (#1127): no .git there, or one naming a worktree git has dropped."""
+    dot = os.path.join(wt, ".git")
+    if not os.path.lexists(dot):
+        return True
+    if os.path.isfile(dot):
+        try:
+            with open(dot) as f:
+                m = re.match(r"gitdir:\s*(.+)", f.read().strip())
+        except OSError:
+            return False
+        return bool(m) and not os.path.isdir(m.group(1))
+    return False
+
+
+# ---- what still runs in a worktree (#1127) ---------------------------------------------------
+# A task's dev server (next dev, vite) outlives its agent and keeps writing into the worktree, so its removal
+# left part of the folder behind, and the server holding GBs ran on for hours. Before a removal everything whose
+# folder is inside it is stopped, but never a terminal's own program (its shell or agent: a child of
+# herdr-core), an agent CLI, herdr-task itself or what started it.
+KEEP_NAMES = re.compile(r"(?:herdr|hc$|claude$|codex$|pi$|opencode$)")
+STOP_WAIT = 5.0
+
+
+def _cwds():
+    """[(pid, parent pid, name, folder)] of every process whose folder can be read: /proc on Linux, else lsof
+    and ps (macOS)."""
+    out = []
+    if os.path.isdir("/proc/self"):
+        for n in os.listdir("/proc"):
+            if not n.isdigit():
+                continue
+            try:
+                cwd = os.readlink(f"/proc/{n}/cwd")
+                with open(f"/proc/{n}/stat") as f:
+                    st = f.read()
+            except OSError:
+                continue
+            name = st[st.index("(") + 1:st.rindex(")")]
+            out.append((int(n), int(st[st.rindex(")") + 2:].split()[1]), name, cwd))
+        return out
+    if not shutil.which("lsof"):
+        return out
+    parent = {}
+    for line in run(["ps", "-axo", "pid=,ppid=,comm="]).stdout.splitlines():
+        w = line.split(None, 2)
+        if len(w) == 3 and w[0].isdigit() and w[1].isdigit():
+            parent[int(w[0])] = (int(w[1]), os.path.basename(w[2]))
+    pid = None
+    for line in run(["lsof", "-w", "-d", "cwd", "-Fpn"]).stdout.splitlines():
+        if line.startswith("p") and line[1:].isdigit():
+            pid = int(line[1:])
+        elif line.startswith("n") and pid in parent:
+            out.append((pid, parent[pid][0], parent[pid][1], line[1:]))
+    return out
+
+
+def procs_in(folder, table=None):
+    """[(pid, name)] of what runs with its folder inside `folder` and may be stopped (see KEEP_NAMES)."""
+    table = _cwds() if table is None else table
+    real = os.path.realpath(folder) + os.sep
+    by = {p: (pp, n) for p, pp, n, _ in table}
+    mine, p = set(), os.getpid()
+    while p and p not in mine:
+        mine.add(p)
+        p = by.get(p, (0,))[0]
+    out = []
+    for pid, ppid, name, cwd in table:
+        if not (os.path.realpath(cwd) + os.sep).startswith(real) or pid in mine:
+            continue
+        if KEEP_NAMES.match(name) or by.get(ppid, (0, ""))[1].startswith("herdr-core"):
+            continue
+        out.append((pid, name))
+    return out
+
+
+def stop_in(folder):
+    """Stops what runs in folder (procs_in): a TERM, then a KILL for what is still there after STOP_WAIT. The
+    stopped as ["name (pid N)"]."""
+    import signal
+    import time
+    found = procs_in(folder)
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        for pid, _ in found:
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                pass
+        end = time.time() + (STOP_WAIT if sig == signal.SIGTERM else 2)
+        while time.time() < end and any(_alive(p) for p, _ in found):
+            time.sleep(0.1)
+        if not any(_alive(p) for p, _ in found):
+            break
+    return [f"{n} (pid {p})" for p, n in found]
+
+
+def _alive(pid):
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return f.read().rsplit(")", 1)[1].split()[0] != "Z"  # a zombie is gone, only not yet reaped
+    except OSError:
+        return True
 
 
 # A Done task's worktree left on disk (its agent was still open when it finished, SHEP-161): removed
