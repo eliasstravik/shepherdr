@@ -641,8 +641,8 @@ def same_own_changes(s, t, wt, reviewed, head):
         if not git(wt, "rev-parse", "--verify", "--quiet", f"{b}^{{commit}}")[0]:
             continue
         mine = own_diff(wt, b, head)
-        if mine is None:
-            continue
+        if not mine:
+            continue   # unknown, or nothing of its own to compare (empty commits say nothing)
         for r in list(reviewed)[-10:]:
             if own_diff(wt, b, r) == mine:
                 return True
