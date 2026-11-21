@@ -48,7 +48,7 @@ Blocks, top to bottom (each may carry an `"id"`; the person's notes point at blo
 | `heading` | `text`, `level` 1-3 |
 | `text` | `md` (Markdown: bold, links, `code`, lists) |
 | `list` | `items` (Markdown each), `ordered` |
-| `table` | `columns` (labels, or `{ label, align }`), `rows` (lists of cells) |
+| `table` | `columns` (labels, or `{ label, align }`), `rows` (lists of cells; a cell may hold links, **bold** and `code`) |
 | `chart` | `kind` bar, line or pie, `labels`, `series` [{ `name`, `values` (numbers) }] |
 | `stats` | `items` [{ `label`, `value`, `note` }]: a row of big numbers |
 | `image` | `src` (a picture beside recipe.json), `caption`, `w`, `h` |

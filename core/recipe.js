@@ -6,7 +6,7 @@
 //
 // Blocks (each may carry an "id", which markup notes and answers point at; one is given when it has none):
 //   heading  { text, level: 1-3 }                       text     { md }  (Markdown)
-//   list     { items: [md], ordered }                   table    { columns: [label | { label, align }], rows: [[cell]] }
+//   list     { items: [md], ordered }                   table    { columns: [label | { label, align }], rows: [[cell]] }  (a cell: inline Markdown)
 //   chart    { kind: bar | line | pie, labels: [], series: [{ name, values: [] }] }
 //   stats    { items: [{ label, value, note }] }        image    { src, caption, w, h }  (src: a file beside it)
 //   video    { src, poster, caption, loop, muted, autoplay }   a clip: mp4, webm or mov (poster: a picture beside it)
@@ -126,6 +126,18 @@ export function choiceReply(b, label) { return `${b.question}: ${label}`; }
 export function formReply(b, values) {
   const lines = (b.fields ?? []).map((f) => `${f.label ?? f.name}: ${f.kind === "checkbox" ? (values[f.name] ? "yes" : "no") : String(values[f.name] ?? "").trim() || "(empty)"}`);
   return [b.title ?? b.submit ?? "Form", ...lines].join("\n");
+}
+
+// A table cell as inline Markdown, the same on both sides: links, **bold**, *italic* and `code` show as such, but a cell
+// never turns into a block (a heading, a list, a quote, a rule or a code block): its lines join into one, and a mark
+// at its start that would open a block is escaped ("1. Fix" stays "1. Fix"). Raw HTML shows as the text it is: each
+// "<" is escaped (but in `code`). A number or null is its plain text.
+export function cellMd(c) {
+  const s = String(c ?? "").replace(/\s*\n\s*/g, " ").trim()
+    .replace(/(`+)[\s\S]*?\1|(\\*)</g, (m, tick, bs) => (tick ? m : bs.length % 2 ? m : `${bs}\\<`));   // in `code`: its own
+  if (/^([-*_])( *\1){2,} *$/.test(s)) return `\\${s}`;   // --- *** ___ : a rule
+  if (/^([-+*]|#{1,6})( |$)/.test(s) || /^(>|`{3}|~{3})/.test(s)) return `\\${s}`;
+  return s.replace(/^(\d{1,9})([.)])( |$)/, "$1\\$2$3");
 }
 
 // Markdown cut at its fenced code blocks (``` or ~~~, indented too, as in a list item), in order: { md } for the

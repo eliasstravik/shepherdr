@@ -15,7 +15,7 @@ type Props = { recipe: { blocks: Block[] }; asset: (src: string) => string; repl
 /** the window's words when a recipe can't be read */
 export const UNREADABLE = "This artifact's recipe can't be read."
 
-const { chartShapes, choiceReply, formReply, isLink } = R as any
+const { cellMd, chartShapes, choiceReply, formReply, isLink } = R as any
 const PALETTE = ['var(--accent)', 'var(--focus)', 'var(--ready)', 'var(--work)', 'var(--merged)', 'var(--need)']
 const TONE: Record<string, string> = { info: 'bg-well shadow-soft', good: 'bg-ready/10', warn: 'bg-work/12', bad: 'bg-need/10' }
 
@@ -222,7 +222,7 @@ export function Recipe({ recipe, asset, reply }: Props) {
         <div className="overflow-x-auto rounded-box shadow-box">
           <table className="w-full border-collapse">
             <thead><tr>{b.columns.map((c: any, i: number) => <th key={i} className={clsx('border-b border-line px-3 py-2 text-left font-medium text-fg2', (c.align ?? '') === 'right' && 'text-right')}>{c.label ?? c}</th>)}</tr></thead>
-            <tbody>{b.rows.map((r: unknown[], i: number) => <tr key={i} className="border-b border-line last:border-0">{r.map((c, j) => <td key={j} className={clsx('px-3 py-2 align-top', b.columns[j]?.align === 'right' && 'text-right tabular-nums')}>{String(c ?? '')}</td>)}</tr>)}</tbody>
+            <tbody>{b.rows.map((r: unknown[], i: number) => <tr key={i} className="border-b border-line last:border-0">{r.map((c, j) => <td key={j} className={clsx('px-3 py-2 align-top', b.columns[j]?.align === 'right' && 'text-right tabular-nums')}><Markdown text={cellMd(c)} /></td>)}</tr>)}</tbody>
           </table>
         </div>
       )

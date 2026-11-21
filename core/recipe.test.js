@@ -1,6 +1,7 @@
 // SHEP-79: a button may carry a plain https link (href), alone or with a reply; buttons sit side by side
 import { expect, test } from "bun:test";
-import { problems, blockName, preview, mediaKind, mdParts } from "./recipe.js";
+import { problems, blockName, preview, mediaKind, mdParts, cellMd } from "./recipe.js";
+import { marked } from "marked";
 
 const one = (b) => problems({ recipe: 1, blocks: [b] });
 
@@ -84,4 +85,30 @@ test("mdParts cuts Markdown at its fenced code blocks", () => {
   // inline triple backticks aren't a fence
   expect(mdParts("``` not a fence ```")).toEqual([{ md: "``` not a fence ```" }]);
   expect(mdParts(undefined)).toEqual([]);
+});
+
+// SHEP-268: a table cell's links, bold and code show as such on both sides, but a cell never becomes a block, nor HTML
+test("cellMd: a table cell is inline Markdown", () => {
+  const html = (c) => marked.parse(cellMd(c), { async: false, gfm: true }).trim();
+  expect(html("[PR #12](https://github.com/x/y/pull/12) is **merged**")).toBe('<p><a href="https://github.com/x/y/pull/12">PR #12</a> is <strong>merged</strong></p>');
+  expect(html("run `a<b`")).toBe("<p>run <code>a&lt;b</code></p>");
+  // block marks at the start stay words
+  expect(html("1. Fix")).toBe("<p>1. Fix</p>");
+  expect(html("- a")).toBe("<p>- a</p>");
+  expect(html("# h")).toBe("<p># h</p>");
+  expect(html("> q")).toBe("<p>&gt; q</p>");
+  expect(html("---")).toBe("<p>---</p>");
+  expect(html("```js")).toBe("<p>```js</p>");
+  expect(html("    four spaces")).toBe("<p>four spaces</p>");
+  expect(html("two\nlines")).toBe("<p>two lines</p>");
+  // raw HTML is shown as text, an escaped one too
+  expect(html("<b>x</b><img src=x onerror=alert(1)>")).not.toContain("<b>");
+  expect(html("<img src=x onerror=alert(1)>")).not.toContain("<img");
+  expect(html("\\<b>x")).not.toContain("<b>");
+  // plain values stay as they were
+  expect(cellMd(42)).toBe("42");
+  expect(cellMd(null)).toBe("");
+  expect(cellMd("1.5")).toBe("1.5");
+  expect(cellMd("-5")).toBe("-5");
+  expect(cellMd("**bold** start")).toBe("**bold** start");
 });
