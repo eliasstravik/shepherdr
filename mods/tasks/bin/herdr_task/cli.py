@@ -16,7 +16,7 @@ from .launch import cmd_allow, name_tabs
 from .commands import (
     cmd_accept, cmd_add, cmd_alert, cmd_config, cmd_edit, cmd_fix, cmd_list, cmd_merge, cmd_ready,
     cmd_resume, cmd_review, cmd_review_more, cmd_reviewed, cmd_rm, cmd_show, cmd_start, cmd_state, cmd_status,
-    cmd_switch, cmd_unarchive, cmd_where,
+    cmd_setup_failed, cmd_switch, cmd_unarchive, cmd_where,
 )
 from .tick import cmd_tick
 from .backups import cmd_backup, cmd_restore_spaces
@@ -481,6 +481,12 @@ def main():
     c = cmd("sandbox", cmd_sandbox, "whether Codex's sandbox (bwrap) can start on this machine, and the fix for it when it can't "
             "(asked once and kept; --check asks again)", id=False)
     c.add_argument("--check", action="store_true", help="ask again now")
+    c = sub.add_parser("_setup-failed")  # a task's setup before its agent failed in its terminal (launch.SETUP_SH)
+    c.add_argument("id")
+    c.add_argument("--folder")
+    c.add_argument("--code", type=int, default=1)
+    c.add_argument("--log", default="")
+    c.set_defaults(fn=cmd_setup_failed, json=False)
     c = sub.add_parser("_track")
     c.add_argument("id")
     c.add_argument("address")

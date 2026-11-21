@@ -2471,6 +2471,97 @@ class NewWorktrees(unittest.TestCase):
             set_branch(self.store, self.task(mode="here"), "ABC-4")
 
 
+class SetupBeforeTheAgent(unittest.TestCase):
+    """#1197 (SHEP-272): Settings > Tasks > Before the agent starts (tasks.setup): a shell command run in each new
+    worktree, in the agent's own terminal ahead of it; a failure holds the task with why and starts no agent.
+    Throwaway repos and settings (NewWorktrees'); hc is never run."""
+
+    setUp, git, commit, task, write_settings = (NewWorktrees.setUp, NewWorktrees.git, NewWorktrees.commit,
+                                                NewWorktrees.task, NewWorktrees.write_settings)
+
+    def begin(self, t, space="sp1"):
+        """commands.begin with only the agent's start faked: what launch was given."""
+        import herdr_task.commands as commands
+        got = {}
+        from unittest import mock
+        with mock.patch.object(commands, "launch", lambda s, t, argv, space, message=None, parent=None, setup=None: got.update(setup=setup) or {"address": "x"}), \
+                mock.patch.object(commands, "brief", lambda *a: "brief"), mock.patch.object(commands, "parent_for", lambda p, sp: None):
+            commands.begin(self.store, t, ["claude"], space)
+        return got["setup"]
+
+    def test_runs_in_a_new_worktree_only(self):
+        self.write_settings({"spaces": {"sp1": {"folder": self.main, "tasks": {"setup": "  bun install  "}}}})
+        t = self.task()
+        self.assertEqual(self.begin(t), "bun install")
+        self.assertTrue(os.path.isdir(t["worktree"]))
+        # started again in the worktree it has: not again
+        self.assertIsNone(self.begin(t))
+        # its last setup failed: again
+        t["setup_failed"] = {"code": 1}
+        self.assertEqual(self.begin(t), "bun install")
+        self.assertNotIn("setup_failed", t)
+        # a task in the folder itself, or a space with none set: nothing
+        self.assertIsNone(self.begin(self.task(mode="here")))
+        self.write_settings({})
+        self.assertIsNone(self.begin(self.task()))
+        # Everywhere's applies to every space
+        self.write_settings({"everywhere": {"tasks": {"setup": "make deps"}}})
+        self.assertEqual(self.begin(self.task(), space="other"), "make deps")
+
+    def wrapper(self, setup):
+        """SETUP_SH for real in sh: (exit code, its output, whether the agent ran, what _setup-failed got)."""
+        d = tempfile.mkdtemp(dir=self.root)
+        ht, called, ran = os.path.join(d, "ht"), os.path.join(d, "called"), os.path.join(d, "ran")
+        with open(ht, "w") as f:
+            f.write(f'#!/bin/sh\necho "$@" > {called}\n')
+        os.chmod(ht, 0o755)
+        log = os.path.join(d, "logs", "f-1.log")
+        r = subprocess.run(["sh", "-c", self.launch.SETUP_SH, "herdr-setup", setup, log, ht, "SHEP-1", self.main,
+                            "sh", "-c", f"echo agent > {ran}"], capture_output=True, text=True, cwd=self.main, stdin=subprocess.DEVNULL)
+        got = open(called).read().strip() if os.path.exists(called) else None
+        return r.returncode, r.stdout, os.path.exists(ran), got, log
+
+    def test_the_agent_starts_only_after_it_succeeds(self):
+        code, out, ran, called, log = self.wrapper("echo linking deps; ls >/dev/null")
+        self.assertEqual((code, ran, called), (0, True, None))
+        self.assertIn("linking deps", out)
+        self.assertIn("Setup done. Starting the agent.", out)
+        self.assertIn("linking deps", open(log).read())
+        self.assertFalse(os.path.exists(log + ".rc"))
+
+    def test_a_failure_holds_the_task_without_its_agent(self):
+        code, out, ran, called, log = self.wrapper("echo missing bun >&2; exit 3")
+        self.assertEqual((code, ran), (3, False))
+        self.assertIn("Setup failed (exit 3), so the agent was not started.", out)
+        self.assertEqual(called, f"_setup-failed SHEP-1 --folder {self.main} --code 3 --log {log}")
+        self.assertIn("missing bun", open(log).read())  # stderr too
+
+    def test_setup_failed_says_why(self):
+        import herdr_task.commands as commands
+        import herdr_task.base as base
+        from herdr_task.agents import task_status
+        from unittest import mock
+        log = os.path.join(self.root, "f-1.log")
+        with open(log, "w") as f:
+            f.write("resolving\n\x1b[31merror: lockfile had changes\x1b[0m\n\n")
+        t = self.task(state="running", agents=[{"address": "t1", "at": base.now()}], attention_at=1)
+        args = __import__("argparse").Namespace(id="SHEP-1", folder=self.main, code=1, log=log)
+        with mock.patch.object(commands, "open_store", lambda a: self.store):
+            commands.cmd_setup_failed(args)
+        self.assertEqual(t["setup_failed"]["code"], 1)
+        self.assertIn("setup before the agent failed (exit 1): error: lockfile had changes. The agent didn't start.", t["attention"])
+        self.assertIn(log, t["attention"])
+        self.assertEqual(task_status(t, [])[:2], ("needs", "attention"))
+        # started again at once: not "already running"
+        self.assertIsNone(commands.just_started(t))
+
+    def test_the_wrapper_goes_before_the_agent_in_its_command(self):
+        cmd = self.launch.setup_argv(self.store, {"id": 4}, "bun install", ["claude", "brief"])
+        self.assertEqual(cmd[:5], ["sh", "-c", self.launch.SETUP_SH, "herdr-setup", "bun install"])
+        self.assertTrue(cmd[5].endswith(os.path.join(".setup", "f-4.log")))
+        self.assertEqual(cmd[-4:], ["SHEP-4", self.main, "claude", "brief"])
+
+
 class MergedOnlyWithOwnWork(unittest.TestCase):
     """SHEP-23: a task counts as merged only when work of its own landed (its pull request merged, or
     commits made on its branch now in the base), never when its branch just caught up with main, and
@@ -4600,18 +4691,19 @@ class AssistantSettings(unittest.TestCase):
         self.assertTrue(note.startswith("Your settings: "))
         for label, words in [("Review", "off"), ("Merge", "ask the person first"), ("Proof", "on"), ("Task agent", "claude"),
                              ("Base branch", "the folder's checked-out branch"), ("Worktrees", "on"), ("Tasks at once", "10 per folder"),
-                             ("Task notes", "none"), ("Autopilot", "off"), ("Reactions", "on"),
+                             ("Task notes", "none"), ("Before the agent starts", "none"), ("Autopilot", "off"), ("Reactions", "on"),
                              ("Feedback offers", "on (offer once to file a Shepherdr problem as an issue on eliasstravik/shepherdr")]:
             self.assertTrue(self.line(note, label).startswith(f"- {label}: {words}"), self.line(note, label))
         # nothing differs from Herdr's default: no line says who set it
         self.assertNotIn("; set for", note)
         self.assertNotIn("; your setting", note)
-        self.assertEqual(len(note.split("\n")), 14)  # head, 12 lines (Suggested next message included), the Reactions guide
+        self.assertEqual(len(note.split("\n")), 15)  # head, 13 lines (Suggested next message included), the Reactions guide
         self.assertIn("- Suggested next message: on (end each reply", note)
 
     def test_the_block_for_a_space_with_its_own(self):
         self.write({"everywhere": {"tasks": {"review_rounds": 2, "merge": "checks"}, "assistant": {"reactions": True}},
-                    "spaces": {"sp1": {"tasks": {"base": "dev", "start_notes": "bun install", "max_running": 3, "worktrees": False},
+                    "spaces": {"sp1": {"tasks": {"base": "dev", "start_notes": "bun install", "max_running": 3, "worktrees": False,
+                                                  "setup": "ln -s ../node_modules ."},
                                        "worker": {"agent": "codex", "model": "gpt-5", "effort": "high"},
                                        "reviewer": {"agent": "claude", "model": "opus"},
                                        "assistant": {"reactions": False}},
@@ -4627,6 +4719,7 @@ class AssistantSettings(unittest.TestCase):
         self.assertIn("- Worktrees: off (tasks work in the folder itself); set for this space", note)
         self.assertIn("- Tasks at once: 3 per folder", note)
         self.assertIn("- Task notes: start notes set", note)
+        self.assertIn("- Before the agent starts: ln -s ../node_modules . (runs in each new worktree first", note)
         self.assertEqual(self.line(note, "Autopilot"), "- Autopilot: on, every 30 minutes, direction: Ship the beta; set for this space")
         self.assertIn("- Reactions: off", note)
         self.assertIn("never react", note.split("\n")[-1])
@@ -4634,7 +4727,7 @@ class AssistantSettings(unittest.TestCase):
         labels = self.terminals["t5"]["labels"]
         self.assertEqual(labels["herdr.reactions"], "off")
         self.assertEqual(sorted(self.aset.parse(labels["herdr.settings"])),
-                         sorted(["review", "merge", "proof", "agent", "base", "worktrees", "max_running", "notes", "autopilot", "reactions", "suggestions", "feedback"]))
+                         sorted(["review", "merge", "proof", "agent", "base", "worktrees", "max_running", "notes", "setup", "autopilot", "reactions", "suggestions", "feedback"]))
         # another space inherits Everywhere's, with its own merge
         self.assistant("t6", "sp2")
         other = self.aset.session_note("t6")

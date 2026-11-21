@@ -26,7 +26,7 @@ from .github import (already_merged, checks_missing, github_unreachable, pr_for_
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
-    own_path, parent_for, resume_argv, retag_tabs, set_branch, tab_title, task_tabs,
+    own_path, parent_for, resume_argv, retag_tabs, set_branch, setup_for, tab_title, task_tabs,
 )
 from .store import bare_by_mistake, is_task_list, locate, open_store, prefixes_in_use, read_list, Store, store_files
 from .queues import after_refs, parse_after, queue_reason, set_after
@@ -339,13 +339,45 @@ def begin(s, t, argv, space, parent=None):
         t.pop(k, None)
     if t.get("mode") == "worktree" and not t.get("worktree") and not worktrees_on(s, space):
         t["mode"] = "here"
+    had = bool(t.get("mode") == "worktree" and t.get("worktree") and os.path.isdir(t["worktree"]))
     folder_for(s, t)
+    # Settings > Tasks > Before the agent starts: run first in a new worktree, in the agent's terminal (launch.py).
+    setup = setup_for(s, t, space, had)
     if t.get("mode") != "worktree" and s.loc["kind"] == "repo":
         # The folder's commit as it starts: still there, and nothing tracked changed, at ready means
         # it changed nothing, so there is nothing to review (review_refusal, #744).
         t["folder_start"] = git(s.loc["folder"], "rev-parse", "HEAD")[1] or None
     parent = parent_for(parent, space)
-    return launch(s, t, argv, space, brief(s, t, parent, space, argv), parent=parent)
+    return launch(s, t, argv, space, brief(s, t, parent, space, argv), parent=parent, setup=setup)
+
+
+def tilde(p):
+    home = os.path.expanduser("~")
+    return "~" + p[len(home):] if p.startswith(home + os.sep) else p
+
+
+def cmd_setup_failed(args):
+    """A task's setup command (Settings > Tasks > Before the agent starts) failed in its terminal, so its agent
+    didn't start (launch.SETUP_SH): the task waits for the person with why, its output's last line and where
+    the rest is. Starting it again runs the setup again."""
+    tail = ""
+    try:
+        with open(args.log, errors="replace") as f:
+            lines = [ln.strip() for ln in f.read()[-20000:].splitlines() if ln.strip()]
+        tail = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", lines[-1])[:160] if lines else ""
+    except OSError:
+        pass
+    with open_store(args) as s:
+        t = s.find(args.id)
+        t["setup_failed"] = {"code": args.code, "log": args.log, "at": now()}
+        # Its agent never started: never "already running" (just_started) when it's started again at once.
+        for ag in (t.get("agents") or [])[-1:]:
+            ag.setdefault("ended", now())
+        t["attention"] = (f"Its setup before the agent failed (exit {args.code})" + (f": {tail}" if tail else "") +
+                          f". The agent didn't start. Full output: {tilde(args.log)}. Fix the setup in Settings › Tasks "
+                          f"› Before the agent starts (or the worktree), then start it again.")
+        t.pop("attention_at", None)
+        s.dirty = True
 
 
 # #1053: an agent just launched still shows its shell for a moment (agent_running() says no): a task
@@ -355,7 +387,7 @@ STARTING_MS = 120000
 
 def just_started(t):
     """The agent its queue or a start launched moments ago, while it is Working: its record, or None."""
-    fresh = [a for a in t.get("agents") or [] if now() - (a.get("at") or 0) < STARTING_MS]
+    fresh = [a for a in t.get("agents") or [] if now() - (a.get("at") or 0) < STARTING_MS and not a.get("ended")]
     return fresh[-1] if t.get("state") == "running" and fresh else None
 
 

@@ -192,11 +192,16 @@ export const ABOUT = {
   "tasks.worktrees": "In a git repo, each task gets its own worktree and branch.",
   "automations.enabled": "Tasks an agent set to start on a schedule or an event.",
 };
-// What a task's agent is told to do first and last (tasks.start_notes / finish_notes), each a box under its words.
+// Each a box under its words, saved in tasks.<field>: the shell command run in each new worktree before its agent
+// (tasks.setup, #1197: herdr-task runs it, a failure holds the task), then what a task's agent is told to do first
+// and last (tasks.start_notes / finish_notes). mono: a command, in monospace.
 export const NOTES = [
-  { id: "start", title: "When a task starts", about: "Steps its agent does before the work.",
+  { id: "setup", field: "setup", mono: true, title: "Before the agent starts",
+    about: "A shell command run in each new worktree first. If it fails, the agent doesn't start and the task says why.",
+    example: "bun install" },
+  { id: "start", field: "start_notes", title: "When a task starts", about: "Steps its agent does before the work.",
     example: "Install packages, copy .env from the main folder" },
-  { id: "finish", title: "When a task finishes", about: "Steps its agent does before it says the task is ready.",
+  { id: "finish", field: "finish_notes", title: "When a task finishes", about: "Steps its agent does before it says the task is ready.",
     example: "Stop the dev server you started, delete temp files" },
 ];
 export const SAVED = "Saved";
@@ -286,7 +291,7 @@ export const MACHINES = {
 export const OLD_NAMES = { coordinator: "Assistant", worker: "Workers", reviewer: "Reviewer", backup: "Backup agent",
   automations: "Run automations", merge: "Merge", review_rounds: "Review", must_fix: "Must fix", proof: "Proof",
   max_running: "Tasks at once", archive_after: "Archive Done after", worktrees: "Worktrees",
-  start_notes: "When a task starts", finish_notes: "When a task finishes", base: "Base branch", branch: "Branch names", agents: "Reactions" };
+  setup: "Before the agent starts", start_notes: "When a task starts", finish_notes: "When a task finishes", base: "Base branch", branch: "Branch names", agents: "Reactions" };
 // Home Assistant's line: on or off, and what herdr-task's home round last found there (~/.local/share/shepherdr/tasks/.home.json).
 export function homeAbout(on, st) {
   return !on ? "Off: nobody watches its disk, load and processes."

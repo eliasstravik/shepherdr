@@ -35,7 +35,7 @@ const readJson = (f: string) => { try { return JSON.parse(readFileSync(f, "utf8"
 export type Scope = { id: string; name: string; machine: string | null; folder?: string | null };
 
 export const ROLES: { id: string; title: string; about: string; file: string; told: string }[] = CORE_ROLES;
-const NOTES: { id: string; title: string; about: string; example: string }[] = CORE_NOTES;
+const NOTES: { id: string; field: string; mono?: boolean; title: string; about: string; example: string }[] = CORE_NOTES;
 // Machines: when new tasks wait (each a percent; CPU as a share of all cores), and how task agents run
 const LIMIT_STEPS: Record<string, { min: number; max: number; step: number; scale: number }> = {
   start_memory: { min: 10, max: 100, step: 5, scale: 1 },
@@ -281,8 +281,8 @@ export class Settings {
         placeholder: BRANCH.pattern, ...this.follows(s, p, (v) => v || BRANCH.pattern, "tasks", "branch") });
     }
     for (const n of NOTES) {
-      const p = this.pick(scope, "tasks", `${n.id}_notes`);
-      rows.push({ label: n.title, key: `tasks.${n.id}_notes`, value: p.value ?? "", multiline: true, hint: n.about, placeholder: n.example, ...this.follows(s, p, (v) => v ?? "", "tasks", `${n.id}_notes`) });
+      const p = this.pick(scope, "tasks", n.field);
+      rows.push({ label: n.title, key: `tasks.${n.field}`, value: p.value ?? "", multiline: true, ...(n.mono ? { mono: true } : {}), hint: n.about, placeholder: n.example, ...this.follows(s, p, (v) => v ?? "", "tasks", n.field) });
     }
     return { name: title("tasks"), level: scope ?? "all", rows };
   }
@@ -453,7 +453,7 @@ export class Settings {
       const why = branchPattern(v);
       if (why) throw new Error(why);
       put("tasks", "branch", v || null);
-    } else if (section === "tasks" && /^(start|finish)_notes$/.test(field)) {
+    } else if (section === "tasks" && NOTES.some((n) => n.field === field)) {
       put("tasks", field, word === null ? null : word.slice(0, 8000));
     } else if (section === "role" && ROLES.some((r) => r.id === field)) {
       // a role's agent: { agent, model, effort, fast } as the window's model button keeps it
