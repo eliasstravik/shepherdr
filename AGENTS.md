@@ -155,3 +155,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - The dev VM's sh is busybox (/exe.dev/bin/sh): its lsof applet ignores a fake lsof on PATH, so test macOS lsof paths under bash. (from SHEP-267)
 
 - Accept card screenshots with real evidence: run herdr_task.proof.evidence on a scratch repo (mock artifacts_of), dump the JSON, and serve it from a stub's /api/action evidence reply. (from SHEP-273)
+
+- A real herdr-task CLI run with HERDR_TASK_STORE=<tmp>, a fake gh via HERDR_TASK_GH and a fake hc on PATH still makes worktrees under the real ~/.local/share/shepherdr/worktrees/<repo folder name>: give the scratch repo a unique name and rm that folder after. (from SHEP-271)
