@@ -24,7 +24,7 @@ import { machines, layout, layouts, exec, home, run, theme, props, closeOverlay,
 import { note } from "./usage.js";
 import { spaces, terminals, agents, inRender } from "./live.js";
 import { taskDot } from "./dot.js";
-import { READ_LISTS, taskLists } from "./core/tasklists.js";
+import { READ_PANEL, panelArgs, panelLists } from "./core/tasklists.js";
 import { SH } from "./core/paths.js";
 import { busyAgain, onIt, readyWait } from "./core/tasks.js";
 // A space's name as the sidebar (and the web app) says it: never "~" (core/spaces.js).
@@ -46,7 +46,7 @@ const LIST_MAX = 420;
 const ID_FONT = "JetBrains Mono", ID_SIZE = TEXT.id, ID_CHAR = ID_SIZE * 0.6;
 const STATUS = { needs: "Needs you", working: "Working", merging: "Merging", ready: "Ready", queued: "Queued", scheduled: "Scheduled", todo: "To do", done: "Done" };
 
-// The Tasks panel's reads (tasklists.js: READ_LISTS, taskLists); every artifact registry the
+// The Tasks panel's reads (tasklists.js: READ_PANEL, panelLists); every artifact registry the
 // same way.
 const READ_ARTS = SH + 'cd "$SHEP_ARTIFACTS" 2>/dev/null || exit 0; for f in *.json .*.json; do [ -f "$f" ] && cat "$f" && printf "\\n\\036\\n"; done; true';
 // Each folder's git repo (its common .git folder), a line each: "<folder>\t<common dir>", for a space's name.
@@ -114,6 +114,7 @@ export default class Jump extends View {
     note("feature", { type: "jump" });
     this.openedAt = Date.now(); // a chat's box letting go of the keyboard about now had it (chatArea())
     this.lists = new Map(); // "" (this computer) or a machine -> its task lists
+    this.listFiles = new Map(); // the same -> its lists' files as read (READ_PANEL sends only changed ones again)
     this.arts = new Map();  // the same -> its artifacts, each with { machine, folder }
     this.repos = new Map(); // "<machine>|<folder>" -> its git repo's name (null: not a repo)
     this.loading = new Set();
@@ -139,13 +140,15 @@ export default class Jump extends View {
     this.loading.add(k);
     try {
       const folders = [...new Set(spaces().filter((s) => (s.machine ?? null) === machine && s.folder).map((s) => s.folder))];
-      const [lists, arts, repos] = await Promise.all([exec("sh", ["-c", READ_LISTS], on), exec("sh", ["-c", READ_ARTS], on),
+      const [lists, arts, repos] = await Promise.all([exec("sh", ["-c", READ_PANEL, ...panelArgs(this.listFiles.get(k))], on), exec("sh", ["-c", READ_ARTS], on),
         folders.length ? exec("sh", ["-c", READ_REPOS, "repos", ...folders], on).catch(() => null) : null]);
       for (const line of (repos?.stdout ?? "").split("\n")) {
         const [f, common] = line.split("\t");
         if (f) this.repos.set(`${k}|${f}`, repoName(common));
       }
-      this.lists.set(k, taskLists(lists.stdout)
+      const read = panelLists(lists.stdout, this.listFiles.get(k));
+      this.listFiles.set(k, read.files);
+      this.lists.set(k, read.lists
         .map((d) => ({ ...d, machine, prefix: d.prefix || autoPrefix(d.folder), tasks: Array.isArray(d.tasks) ? d.tasks : [] })));
       const found = [];
       for (const part of arts.stdout.split("\x1e")) {
