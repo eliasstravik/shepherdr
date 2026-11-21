@@ -163,6 +163,14 @@ def news_pass(report, folder=None):
                     else:
                         t.pop("held_ask", None)
                     s.dirty = True
+                # #1082: Ready through a turn nobody asked for (a compaction, a toast): Ready in the Tasks panel too.
+                unasked = v["status"] == "ready" and any(status_word(k) == "working" for k in live)
+                if s.write and bool(t.get("unasked_turn")) != unasked:
+                    if unasked:
+                        t["unasked_turn"] = True
+                    else:
+                        t.pop("unasked_turn", None)
+                    s.dirty = True
                 # Quiet on its own background work (SHEP-53): Working in the Tasks panel too.
                 if s.write and bool(t.get("own_work")) != bool(v.get("own_work")):
                     if v.get("own_work"):

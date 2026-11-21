@@ -254,16 +254,49 @@ def ready_turns(live):
 
 
 def busy_again(task, live):
-    """A Ready task whose agent is at work again since it said ready. Not while it merges as
-    asked (the merge is its work), nor a reviewer's turn. A ready said before turns were kept:
-    any work once STARTING_MS have passed."""
+    """A Ready task whose agent is at work again since it said ready, on a message someone sent it
+    (prompted()). Not while it merges as asked (the merge is its work), nor a reviewer's turn. A ready
+    said before turns were kept: any work once STARTING_MS have passed."""
     if task["state"] != "ready" or task.get("merge_requested"):
         return False
     seen = task.get("ready_turns")
     if seen is None and now() - (task.get("ready_at") or 0) < STARTING_MS:
         return False
     return any(status_word(k) == "working" and (k.get("labels") or {}).get("herdr.role") != "reviewer"
-               and (k.get("turn") or 0) >= (seen or {}).get(k.get("address"), 0) for k in live)
+               and (k.get("turn") or 0) >= (seen or {}).get(k.get("address"), 0) and prompted(task, k) for k in live)
+
+
+def unasked_turn(task, k):
+    """#1082: a Ready task's agent at work on a turn of its own, nobody's message behind it (a compaction, a
+    toast, a background job's notice): no new work yet. Judged once it ends by what it left (tick's back_pass)."""
+    seen = task.get("ready_turns")
+    return task["state"] == "ready" and isinstance(seen, dict) and k.get("address") in seen \
+        and status_word(k) == "working" and (k.get("turn") or 0) >= seen[k["address"]] and not prompted(task, k)
+
+
+# Lines in its log that are no one's message: Claude Code's own (a compaction's summary, a command's output),
+# a background job's notice.
+NOT_A_PROMPT = re.compile(r"^\s*<(task-notification|local-command-\w+|command-name|system-reminder)\b")
+
+
+def prompted(task, k):
+    """Someone wrote to this agent since its task said ready (its session log): the person, its Assistant,
+    news, a fix. True when its log can't be read (as before #1082)."""
+    log = agent_log(task, k.get("address"))
+    rows = log_tail(log, 131072) if log else None
+    if not rows:
+        return True
+    since = task.get("ready_at") or 0
+    for d in reversed(rows):
+        when = _ms(d.get("timestamp")) if d.get("timestamp") else None
+        if when is not None and when < since:
+            return False
+        if d.get("isCompactSummary") or d.get("isMeta") or d.get("isVisibleInTranscriptOnly"):
+            continue
+        words = from_person(d)
+        if words and not NOT_A_PROMPT.match(words):
+            return True
+    return False
 
 
 # ---- Ready only at rest (SHEP-148) --------------------------------------------------------------
@@ -276,7 +309,8 @@ def busy_again(task, live):
 def not_at_rest(task, live):
     """A Ready task's agent still at it: at work in the turn it said ready in, or its own work
     still running (own_work(), its hard signs only: no status line, a question asked doesn't end it)."""
-    if any(status_word(k) == "working" and (k.get("labels") or {}).get("herdr.role") != "reviewer" for k in live):
+    if any(status_word(k) == "working" and (k.get("labels") or {}).get("herdr.role") != "reviewer" and not unasked_turn(task, k)
+           for k in live):
         return True
     return own_work(task, live, ready=True)
 

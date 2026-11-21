@@ -1157,6 +1157,34 @@ class BackToWork(unittest.TestCase):
                          ("working", None, None))
         self.assertEqual(self.agents.task_status(t, [self.agent({"address": "t1", "status": "idle", "turn": 5, "role": "worker"})])[0], "ready")
 
+    def test_a_turn_nobody_asked_for_keeps_it_ready(self):
+        """#1082: a Ready task's Claude compacted (or showed a toast, or a background job's notice woke it): no message
+        from anyone, so it stays Ready (no working-again, no second ready news); a message sent to it is new work."""
+        log = os.path.join(tempfile.mkdtemp(), "s.jsonl")
+        stamp = lambda ms: datetime.datetime.fromtimestamp(ms / 1000, datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+        user = lambda ms, content, **more: json.dumps({"type": "user", "isSidechain": False, "timestamp": stamp(ms),
+                                                         "message": {"role": "user", "content": content}, **more}) + "\n"
+        ready_at = 1_800_000_000_000
+        with open(log, "w") as f:
+            f.write(user(ready_at - 600_000, "Build the login page"))
+            f.write(user(ready_at + 60_000, "This session is being continued from a previous conversation...", isCompactSummary=True))
+            f.write(user(ready_at + 90_000, "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>"))
+        t = self.ready(ready_at=ready_at, agents=[{"address": "t1", "log": log}])
+        working = [self.agent({"address": "t1", "status": "working", "turn": 5, "role": "worker"})]
+        self.assertFalse(self.agents.busy_again(t, working))
+        self.assertEqual(self.agents.task_status(t, working), ("ready", None, None))
+        # the tick leaves it Ready while that turn runs, and once it ends with nothing changed
+        report = {}
+        self.live = working
+        with self.mock.patch.object(self.tick, "mid_turn_agents", lambda live, look=None: live):
+            self.tick.back_pass(self.store, t, report)
+        self.assertEqual((t["state"], report), ("ready", {}))
+        # someone writes to it: Working again
+        with open(log, "a") as f:
+            f.write(user(ready_at + 120_000, "Also add a logout button"))
+        self.assertTrue(self.agents.busy_again(t, working))
+        self.assertEqual(self.agents.task_status(t, working), ("working", None, "Working again"))
+
     def test_a_problem_its_agent_is_on_reads_working(self):
         """SHEP-8: the cases core/tasks.test.js checks place() on (core/on-it.cases.json)."""
         with open(os.path.join(ROOT, "core", "on-it.cases.json")) as f:
