@@ -86,6 +86,16 @@ def pr_push(s, task, repo):
     seen, there, _ = git(wt, "ls-remote", remote, f"refs/heads/{to}")
     if has and tip and seen and there.split()[:1] == [tip]:
         return
+    # #1215: GitHub locks a branch while its pull request sits in the merge queue (its push is refused):
+    # out of the queue first; ready puts it back once its checks pass (finalize()).
+    pr = task.get("pr") or {}
+    q = queue_entry(task) if pr.get("number") and pr.get("repo") else None
+    if q and q["in"]:
+        ok, err = unqueue(q)
+        if not ok:
+            raise Fail(f"Couldn't take pull request #{pr['number']} out of GitHub's merge queue to push {br}: {err}")
+        task["dequeued"] = now()
+        task.pop("merge_queued", None)
     with released(s):
         ok, out, err = git(wt, "push", "--force-with-lease", "-u", remote, br) if to == br else \
             git(wt, "push", remote, f"{br}:refs/heads/{to}")
@@ -505,7 +515,7 @@ def needs_approval(v):
 
 
 QUEUE_QUERY = """query($owner: String!, $name: String!, $n: Int!) { repository(owner: $owner, name: $name) {
-  pullRequest(number: $n) { state isInMergeQueue autoMergeRequest { enabledAt }
+  pullRequest(number: $n) { id state mergeable isInMergeQueue autoMergeRequest { enabledAt }
     timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) { nodes { ... on RemovedFromMergeQueueEvent { reason } } } } } }"""
 
 
@@ -525,7 +535,45 @@ def queue_entry(task):
         return None
     removed = ((p.get("timelineItems") or {}).get("nodes") or [{}])[-1] or {}
     return {"in": bool(p.get("isInMergeQueue")), "auto": bool(p.get("autoMergeRequest")),
-            "reason": removed.get("reason"), "state": p.get("state")}
+            "reason": removed.get("reason"), "state": p.get("state"), "id": p.get("id"), "mergeable": p.get("mergeable")}
+
+
+DEQUEUE = "mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }"
+NO_AUTO = "mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }"
+
+
+def unqueue(q):
+    """Takes a pull request (q: queue_entry()) out of GitHub's merge queue, and off merging by itself
+    (it would join the queue again once its checks pass). (ok, err)."""
+    if not (q and q.get("id")):
+        return False, "GitHub didn't say which pull request"
+    for query, on in ((DEQUEUE, q.get("in")), (NO_AUTO, q.get("auto") and not q.get("in"))):
+        if on:
+            ok, _, err = gh("api", "graphql", "-f", f"query={query}", "-f", f"id={q['id']}")
+            if not ok:
+                return False, err or "GitHub refused"
+    return True, None
+
+
+def queue_dropped_why(why):
+    """#1174: the merge queue's reason for removing a pull request says its merge group (it with the
+    base's newest commits) failed or conflicted: queued again as it is, it fails again."""
+    w = (why or "").lower().replace(" ", "_")
+    return "fail" in w or "conflict" in w
+
+
+def queue_refusal(task, v):
+    """#1174: why its pull request (v: pr_view's answer, or queue_entry's) must not go into GitHub's
+    merge queue as it is, or None: it conflicts with its base, or the queue dropped it at this very
+    commit because its merge group failed (queue_out, kept by the tick). Its agent merges the base
+    in first; each try costs every pull request behind it in the queue a new merge group."""
+    if (v.get("mergeable") or "") == "CONFLICTING":
+        return "It conflicts with its base branch."
+    out, head = task.get("queue_out") or {}, v.get("headRefOid") or v.get("head")
+    if out.get("head") and out["head"] == head:
+        return (f"GitHub's merge queue dropped it at this same commit ({out.get('why') or 'its merge group failed'}): "
+                f"its agent merges {task.get('base') or 'main'} in and fixes what broke first.")
+    return None
 
 
 def drop_branch(s, task):
@@ -754,7 +802,8 @@ def finish(s, task, even_if_busy=False):
     there and no agent still works in it: none mid-turn (mid_turn()), and (unless the person merged
     from Herdr) none running at all. Else tidy_done() removes them once its agents ended."""
     task["state"], task["done_at"] = "done", now()
-    for k in ("attention", "merge_requested", "queue", "queued_at", "merge_queued", "kept_open", "base_hold", "queue_fail"):
+    for k in ("attention", "merge_requested", "queue", "queued_at", "merge_queued", "kept_open", "base_hold", "queue_fail",
+              "queue_out", "queue_refused", "dequeued"):
         task.pop(k, None)
     s.dirty = True
     # The space's "When a task is accepted" command, in the background (after_accept.py): never waited on.

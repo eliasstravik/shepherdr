@@ -5956,6 +5956,78 @@ class TaskFlow(unittest.TestCase):
         self.assertEqual(github.pr_open(self.store, self.task, "o/r")["number"], 2918)
         self.assertEqual(self.git(self.root, "--git-dir", remote, "rev-parse", "feature"), tip)
 
+    def test_ready_takes_its_pull_request_out_of_the_merge_queue_to_push(self):
+        """#1215: GitHub locks a branch while its pull request sits in the merge queue (here: the remote refuses pushes
+        while it is queued). Ready takes it out first, pushes, and it goes back in once its checks pass."""
+        import herdr_task.github as github
+        wt, remote = self.task["worktree"], os.path.join(self.root, "remote.git")
+        self.git(self.root, "init", "-q", "--bare", remote)
+        self.git(self.main, "remote", "add", "origin", remote)
+        self.commit(wt, "work", "a.txt")
+        self.git(wt, "push", "-q", "origin", "task/1")
+        queued = os.path.join(self.root, "queued")
+        open(queued, "w").close()
+        with open(os.path.join(remote, "hooks", "pre-receive"), "w") as f:
+            f.write(f"#!/bin/sh\nif [ -e '{queued}' ]; then echo 'protected branch hook declined' >&2; exit 1; fi\n")
+        os.chmod(os.path.join(remote, "hooks", "pre-receive"), 0o755)
+        asked = []
+
+        def gh(*a, **k):
+            asked.append(a)
+            if a[:2] == ("api", "graphql"):
+                q = next(x for x in a if x.startswith("query="))
+                if "dequeuePullRequest" in q:
+                    os.remove(queued)
+                    return True, "{}", ""
+                return True, json.dumps({"data": {"repository": {"pullRequest": {
+                    "id": "PR_n7", "state": "OPEN", "mergeable": "CONFLICTING", "isInMergeQueue": os.path.exists(queued),
+                    "autoMergeRequest": None, "timelineItems": {"nodes": []}}}}}), ""
+            if a[:2] == ("pr", "view"):
+                return True, "OPEN", ""
+            return True, "[]", ""
+        self.patch(github, "gh", gh)
+        self.task.update(pr={"number": 7, "url": "u7", "repo": "o/r"}, merge_queued=1, state="ready")
+        tip = self.commit(wt, "merge main in", "a.txt")
+        self.assertEqual(github.pr_open(self.store, self.task, "o/r")["number"], 7)
+        self.assertEqual(self.git(self.root, "--git-dir", remote, "rev-parse", "task/1"), tip)
+        dequeue = [a for a in asked if any("dequeuePullRequest" in x for x in a)]
+        self.assertEqual([x for x in dequeue[0] if x.startswith("id=")], ["id=PR_n7"])
+        self.assertNotIn("merge_queued", self.task)  # out of the queue: not "removed" news for the tick
+        # Ready then: back in the queue once its checks pass (merge after checks), whatever the merge setting.
+        self.patch(self.commands, "github", lambda s: "o/r")
+        self.patch(self.commands, "pr_open", lambda s, t, repo, summary=None: t["pr"])
+        self.patch(self.commands, "merge_policy", lambda s, t: "ask")
+        msg = self.commands.finalize(self.store, self.task)
+        self.assertEqual(self.task.get("auto_merge"), "checks")
+        self.assertIn("goes back in once its checks pass", msg)
+        self.assertNotIn("dequeued", self.task)
+        # A later ready (out of the queue now) is the merge setting's again.
+        self.task.pop("auto_merge")
+        self.commands.finalize(self.store, self.task)
+        self.assertNotIn("auto_merge", self.task)
+
+    def test_a_queue_that_refuses_to_let_go_is_said(self):
+        """#1215: GitHub refusing the dequeue: ready says why it couldn't push, nothing pushed."""
+        import herdr_task.github as github
+        wt, remote = self.task["worktree"], os.path.join(self.root, "remote.git")
+        self.git(self.root, "init", "-q", "--bare", remote)
+        self.git(self.main, "remote", "add", "origin", remote)
+        self.commit(wt, "work", "a.txt")
+
+        def gh(*a, **k):
+            q = next((x for x in a if x.startswith("query=")), "")
+            if "dequeuePullRequest" in q:
+                return False, "", "Resource not accessible by integration"
+            return True, json.dumps({"data": {"repository": {"pullRequest": {
+                "id": "PR_n7", "state": "OPEN", "isInMergeQueue": True, "timelineItems": {"nodes": []}}}}}), ""
+        self.patch(github, "gh", gh)
+        self.task["pr"] = {"number": 7, "url": "u7", "repo": "o/r"}
+        with self.assertRaises(Exception) as e:
+            github.pr_push(self.store, self.task, "o/r")
+        self.assertIn("out of GitHub's merge queue", str(e.exception))
+        self.assertIn("Resource not accessible", str(e.exception))
+        self.assertEqual(self.git(self.root, "--git-dir", remote, "branch", "--list", "task/1"), "")
+
     def taking(self, prs):
         """A GitHub remote (a bare repo) and gh answering `pr view` from prs ({number: fields}); what gh was asked."""
         import herdr_task.github as github
@@ -7134,6 +7206,93 @@ class Systemic(unittest.TestCase):
         self.assertEqual(self.merges, [])
         self.assertTrue(self.task["attention"].startswith("GitHub's merge queue removed it"))
 
+    def test_its_own_failed_group_is_never_queued_again_as_it_is(self):
+        """#1174: #7 failed its own merge group (the one ahead merged): an Accept doesn't queue it again at that commit,
+        and its agent hears to merge main in; a new commit can go in again."""
+        from herdr_task import ghnews
+        self.groups = [("g1", [3, 7], ["unit"])]
+        self.queue = {3: {"state": "MERGED", "in": False}}
+        self.drop(self.task)
+        self.assertEqual(self.task["queue_out"]["head"], "abc")
+        # Its agent hears it, once: merge main in, don't queue it.
+        self.patch(ghnews, "resting", lambda s, t: {"address": "t1"})
+        self.patch(ghnews, "pr_comments", lambda repo, n: [])
+        self.task["ready_at"] = 1
+        v = {"state": "OPEN", "headRefOid": "abc", "mergeable": "MERGEABLE",
+             "statusCheckRollup": [{"name": "unit", "status": "COMPLETED", "conclusion": "SUCCESS"}]}
+        ghnews.pr_news(self.store, self.task, v, {})
+        text = self.task["pr"].pop("news")["text"]
+        self.assertIn("merge queue dropped it at this commit", text)
+        self.assertIn("merge main into your branch", text)
+        ghnews.pr_news(self.store, self.task, v, {})
+        self.assertNotIn("news", self.task["pr"])  # once per commit
+        # The person's Accept (or merge after checks): refused, no gh merge.
+        calls = []
+        self.patch(self.commands, "pr_view", lambda t: v)
+        self.patch(self.commands, "gh", lambda *a, **k: (calls.append(a), (True, "", ""))[1])
+        self.patch(self.commands, "note_checks", lambda *a: None)
+        why = self.commands.merge_now(self.store, self.task)
+        self.assertIn("dropped it at this same commit", why)
+        self.assertEqual((calls, self.task["attention"]), ([], why))
+        self.assertNotIn("merge_queued", self.task)
+        # Main merged in: a new commit queues as before.
+        v = {**v, "headRefOid": "def"}
+        self.assertEqual(self.commands.merge_now(self.store, self.task), self.commands.IN_QUEUE)
+        self.assertEqual(len(calls), 1)
+
+    def outside(self, v, entry):
+        """One tick over the task, its pull request v, its queue entry (put there from outside Herdr); what GitHub was asked."""
+        asked = []
+        self.patch(self.tick, "queue_entry", lambda t: dict(entry))
+        self.patch(self.tick, "unqueue", lambda q: (asked.append(q["id"]), (True, None))[1])
+        self.patch(self.tick, "pr_view", lambda t: v)
+        self.patch(self.tick, "pr_news", lambda *a: None)
+        self.task["pr"]["checked"] = 0
+        report = {"attention": [], "done": []}
+        self.tick.facts(self.store, self.task, report)
+        return asked, report
+
+    def test_queued_again_from_outside_after_its_group_failed_comes_out_once(self):
+        """#1174: an agent (or the Assistant) puts it back in the queue by hand at the commit whose group just failed:
+        taken out again, Needs you stays; a second time at that commit is the person's call (followed)."""
+        self.groups = [("g1", [7], ["unit"])]
+        self.drop(self.task)
+        attention = self.task["attention"]
+        v = {"state": "OPEN", "headRefOid": "abc", "mergeable": "MERGEABLE", "statusCheckRollup": []}
+        entry = {"in": True, "auto": False, "state": "OPEN", "id": "PR_n7", "mergeable": "MERGEABLE"}
+        asked, report = self.outside(v, entry)
+        self.assertEqual((asked, report.get("unqueued"), self.task["attention"]), (["PR_n7"], ["SHEP-1"], attention))
+        self.assertNotIn("merge_queued", self.task)
+        asked, report = self.outside(v, entry)
+        self.assertEqual(asked, [])
+        self.assertNotIn("attention", self.task)  # back_in_queue followed it: Merging
+        self.assertTrue(self.task.get("merge_queued"))
+
+    def test_a_conflicting_pull_request_never_sits_in_the_queue(self):
+        """#1174: a pull request that conflicts with main sitting in (or set to join) the queue, as UNMERGEABLE: taken out,
+        each time; its agent hears of the conflict as before (pr_news)."""
+        v = {"state": "OPEN", "headRefOid": "abc", "mergeable": "CONFLICTING", "statusCheckRollup": []}
+        for entry in ({"in": True, "auto": False, "state": "OPEN", "id": "PR_n7"}, {"in": False, "auto": True, "state": "OPEN", "id": "PR_n7"}):
+            asked, _ = self.outside(v, entry)
+            self.assertEqual(asked, ["PR_n7"])
+            self.assertEqual(self.task["attention"], "It conflicts with the base branch.")
+        # Nothing wrong with it: a pull request queued by hand is left alone.
+        self.task.pop("attention")
+        asked, _ = self.outside({**v, "mergeable": "MERGEABLE"}, {"in": True, "auto": False, "state": "OPEN", "id": "PR_n7"})
+        self.assertEqual(asked, [])
+
+    def test_a_hold_ending_never_queues_a_conflicting_pull_request(self):
+        """#1174: main green again, but the held pull request now conflicts with it: not queued again; Needs you."""
+        self.base.update(red="m1", checks=["unit"])
+        self.groups = [("g1", [7], ["unit"])]
+        self.drop(self.task)
+        self.assertIn("base_hold", self.task)
+        self.patch(self.systemic, "queue_entry", lambda t: {"in": False, "auto": False, "state": "OPEN", "mergeable": "CONFLICTING"})
+        self.base.update(red=None, checks=[], head="m2")
+        self.clock[0] += 3 * 60000
+        self.tick.systemic_pass(self.store, {})
+        self.assertEqual(self.merges, [])
+        self.assertTrue(self.task["attention"].startswith("GitHub's merge queue removed it"))
 
 class AcceptCommand(unittest.TestCase):
     """#1102, SHEP-275: a space's "When a task is accepted" command (tasks.accept_command) runs once a

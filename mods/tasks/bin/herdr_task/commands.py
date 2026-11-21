@@ -22,7 +22,7 @@ from .agents import (
 )
 from .sessions import refresh_sessions
 from .github import (already_merged, checks_missing, github_unreachable, pr_for_branch, checks_since, drop_branch, expected_checks, finish, gh, github, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
-                     merge_checks, pr_pending, pr_problem, pr_view, remote_of, update_main, watch_main)
+                     merge_checks, pr_pending, pr_problem, pr_view, queue_refusal, remote_of, update_main, watch_main)
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
@@ -853,6 +853,12 @@ def finalize(s, t):
         msg = (f"{s.ref(t)} is ready: pull request #{pr['number']}, {pr['url']}. It shows Working until its checks "
                "pass and GitHub says it can merge; a failing check or a conflict comes back to you to fix.")
     policy = merge_policy(s, t)
+    if t.pop("dequeued", None) and t.get("pr") and policy not in ("auto", "checks"):
+        # #1215: its push took it out of GitHub's merge queue, where an Accept had put it: back in once
+        # its checks pass and GitHub says it can merge (never while it conflicts: merge_now()).
+        t["auto_merge"] = "checks"
+        return msg + (" It was in GitHub's merge queue: Herdr took it out to push, and it goes back in once its "
+                      "checks pass.")
     if policy in ("auto", "checks"):
         t["auto_merge"] = policy
         if t.get("pr"):
@@ -1190,8 +1196,10 @@ def merge_now(s, t):
     if v.get("state") != "MERGED":
         # only the base branch's required checks hold a merge (#1221)
         v = merge_checks(t, v)
-        problem = pr_problem(v)
+        problem = pr_problem(v) or queue_refusal(t, v)
         if problem:
+            # #1174: never into GitHub's merge queue while it conflicts, nor again at the commit whose
+            # merge group just failed there.
             t["attention"], t["attention_at"] = problem, now()
             t.pop("merge_queued", None)
             return problem
