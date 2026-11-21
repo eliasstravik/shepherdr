@@ -16,7 +16,7 @@ import sys
 import time
 
 from .base import ASK_HOME, ENTRY, Fail, git, hc_json, now, run, WORKTREES
-from .settings import agent_key, ASSISTANT_TEMPLATES, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, keep_review, notes, notes_part, review_limits, settings_block, settings_for
+from .settings import agent_key, ASSISTANT_TEMPLATES, cli_env, codex_too_old, codex_update_words, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, keep_review, notes, notes_part, review_limits, settings_block, settings_for
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
 from .github import finish, remote_of
@@ -205,6 +205,12 @@ def own_command(path, text, sandboxed=False):
     if sandboxed and re.fullmatch(r"[\w#.@-]+", task):
         # the reviewer's label as the brief writes it, its one variable: this worker's own task
         text = text.replace('"herdr.task=$HERDR_BROWSER_TASK"', f'"herdr.task={task}"')
+    if sandboxed and "$PATH" in text:
+        # #1228: the reviewer's PATH as the brief writes it (its CLI's own folders, then $PATH), only exactly that
+        for who in REVIEWERS:
+            pre = cli_env(who)
+            if pre and f"-- {pre}{who} " in text:
+                text = text.replace(f"-- {pre}{who} ", f"-- env PATH=@herdr-reviewer {who} ", 1)
     words, at, text = [], 0, text.strip()
     while at < len(text):
         if text[at] in " \t":
@@ -249,6 +255,8 @@ def helper_hc(words):
         return False
     i = words.index("--")
     opts, cmd = words[2:i], words[i + 1:]
+    if cmd[:2] == ["env", "PATH=@herdr-reviewer"]:
+        cmd = cmd[2:]
     j = 0
     while j < len(opts):
         if opts[j] == "--bg":
@@ -894,6 +902,11 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
     apart from the task's agents. Returns its record."""
     key = s.key(task)
     cmd = list(resume or argv)
+    if agent_key(argv) == "codex" and "--no-daemon" in cmd:
+        # #1190: an old Codex exits 2 on --no-daemon in a shell nobody watches: say so here instead
+        old = codex_too_old()
+        if old:
+            raise Fail(codex_update_words(old))
     if not role:
         cmd = own_argv(cmd, folder_for(s, task))
     if message:

@@ -7629,3 +7629,217 @@ class DiskHoldSaysWhatFillsIt(unittest.TestCase):
         self.assertEqual([(os.path.relpath(p, root), os.path.relpath(k, root) if k else None) for p, n, k in top],
                          [("dev", "dev/app"), ("cache", None)])
         self.assertGreaterEqual(top[0][1], 4 * 2 ** 20)
+class CodexBatch278(unittest.TestCase):
+    """SHEP-278: #1219 a task switched to Codex keeps the space's permission; #1228 the reviewer finds a Codex only
+    the person's shell has (nvm: with its node); #1190 an old Codex is named, not started; #1227 nothing automatic is
+    pasted into a Codex mid-turn and its input box is checked after a send; #1093 a Codex job ends on Codex's own
+    word that its command ended, and ready names what it waits on. Fake CLIs and logs in temp folders; hc is faked."""
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        from herdr_task import settings, launch, news, agents
+        self.settings, self.launch, self.news, self.agents, self.mock = settings, launch, news, agents, mock
+        self.dir = tempfile.mkdtemp()
+        settings._cli.clear()
+        settings._codex_old.clear()
+
+    def patch(self, obj, name, value):
+        p = self.mock.patch.object(obj, name, value)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def script(self, path, body):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(body)
+        os.chmod(path, 0o755)
+        return path
+
+    # ---- #1219 -----------------------------------------------------------------------------------
+    def worker(self, worker, task_agent="codex"):
+        with open(os.path.join(self.dir, "settings.json"), "w") as f:
+            json.dump({"everywhere": {"worker": worker}}, f)
+        self.patch(self.settings, "SETTINGS", os.path.join(self.dir, "settings.json"))
+        return self.settings.worker_argv(Store([]), {"id": 1, "title": "x", "agent": task_agent})
+
+    def test_switch_to_codex_keeps_full_access(self):
+        argv = self.worker({"agent": "claude", "perm": "bypassPermissions"})
+        self.assertEqual(argv[0], "codex")
+        self.assertIn("--dangerously-bypass-approvals-and-sandbox", argv)
+        self.assertNotIn("workspace-write", argv)
+
+    def test_switch_carries_each_mode_to_its_nearest(self):
+        self.assertEqual(self.worker({"agent": "claude", "perm": "plan"})[-4:], ["-s", "read-only", "-a", "on-request"])
+        self.assertIn("--dangerously-skip-permissions", self.worker({"agent": "codex", "perm": "full"}, "claude"))
+        # a custom argv's mode is read off it
+        self.assertIn("--dangerously-bypass-approvals-and-sandbox", self.worker({"argv": ["claude", "--dangerously-skip-permissions"]}))
+        # Claude's Ask has no Codex match: Codex's own default (Auto)
+        self.assertEqual(self.worker({"agent": "claude", "perm": "manual"})[-4:], ["-s", "workspace-write", "-a", "on-request"])
+        self.assertIn("--dangerously-bypass-approvals-and-sandbox", self.settings.argv_for({"agent": "codex", "perm": "bypassPermissions"}))
+
+    # ---- #1228 -----------------------------------------------------------------------------------
+    def nvm(self, help_text="Usage: codex [OPTIONS]\n      --no-daemon\n"):
+        """A Codex as npm installs it under nvm: a node script beside its node, found only by the person's shell."""
+        bin_dir = os.path.join(self.dir, ".nvm", "versions", "node", "v22", "bin")
+        self.script(os.path.join(bin_dir, "node"), '#!/bin/sh\n# stands in for node: runs the script it is given\nshift 0\nexec sh "$@"\n')
+        self.script(os.path.join(bin_dir, "codex"), "#!/usr/bin/env node\n" + (
+            'case "$1" in --help) printf %s "' + help_text + '";; --version) echo codex-cli 0.144.5;; *) echo codex-started "$@";; esac\n'))
+        shell = self.script(os.path.join(self.dir, "fake-shell"),
+                            f'#!/bin/sh\n# the person\'s interactive shell: nvm\'s folder on its PATH\nPATH="{bin_dir}:$PATH"; export PATH\nshift\nexec /bin/sh -c "$@"\n')
+        self.patch(self.settings.shutil, "which", lambda name: None)
+        self.patch(os, "environ", dict(os.environ, SHELL=shell))
+        return bin_dir
+
+    def test_reviewer_command_brings_nvm_s_folder(self):
+        bin_dir = self.nvm()
+        cmd = self.settings.reviewer_command("codex")
+        self.assertTrue(cmd.startswith(f'env "PATH={bin_dir}:$PATH" codex --no-daemon --sandbox read-only'), cmd)
+        # as hc run starts it: a bare PATH. The brief's command starts; the bare name doesn't.
+        bare = {"PATH": "/usr/bin:/bin", "HOME": self.dir}
+        ok = subprocess.run(["sh", "-c", cmd.replace("--sandbox", "x --sandbox", 1).split(" --no-daemon")[0] + " --version"],
+                            env=bare, capture_output=True, text=True)
+        self.assertEqual(ok.stdout.strip(), "codex-cli 0.144.5", ok.stderr)
+        bad = subprocess.run(["sh", "-c", "codex --version"], env=bare, capture_output=True, text=True)
+        self.assertNotEqual(bad.returncode, 0)
+
+    def test_claude_in_the_system_folders_needs_nothing(self):
+        self.patch(self.settings.shutil, "which", lambda name: f"/usr/bin/{name}")
+        self.assertEqual(self.settings.reviewer_command("claude"), "claude --permission-mode plan")
+
+    def test_a_codex_worker_s_review_run_is_still_its_own(self):
+        bin_dir = self.nvm()
+        self.patch(os, "environ", dict(os.environ, HERDR_BROWSER_TASK="x-1"))
+        run = ('hc run --bg --name x-1-review --label "herdr.task=$HERDR_BROWSER_TASK" --label herdr.role=reviewer '
+               '--label herdr.agent=codex -- ' + self.settings.reviewer_command("codex") + ' "review it"')
+        self.assertTrue(self.launch.own_command("/x/herdr-task", run, sandboxed=True))
+        # another folder first on its PATH is not the brief's reviewer
+        self.assertFalse(self.launch.own_command("/x/herdr-task", run.replace(bin_dir, "/tmp/evil"), sandboxed=True))
+
+    # ---- #1190 -----------------------------------------------------------------------------------
+    def test_an_old_codex_is_named_not_started(self):
+        self.nvm(help_text="Usage: codex [OPTIONS]\n      --sandbox\n")
+        old = self.settings.codex_too_old()
+        self.assertIn("codex-cli 0.144.5", old)
+        words = self.settings.codex_update_words(old)
+        self.assertIn("Update it", words)
+        self.assertIn("npm install -g @openai/codex@latest", words)
+        t = {"id": 1, "title": "x", "mode": "here", "agents": []}
+
+        class S:
+            loc = {"folder": self.dir, "kind": "folder"}
+            key = ref = lambda self, t: "X-1"
+        with self.assertRaises(self.settings.Fail) as e:
+            self.launch.launch(S(), t, ["codex", "--no-daemon"], "sp1")
+        self.assertIn("too old", str(e.exception))
+
+    def test_an_old_codex_never_reviews(self):
+        self.nvm(help_text="Usage: codex [OPTIONS]\n")
+        self.patch(self.settings, "cli_here", lambda kind: "ready")
+        with open(os.path.join(self.dir, "settings.json"), "w") as f:
+            json.dump({"everywhere": {"tasks": {"review_rounds": 2}, "reviewer": {"agent": "codex"}}}, f)
+        self.patch(self.settings, "SETTINGS", os.path.join(self.dir, "settings.json"))
+        t = {"id": 1, "title": "x", "mode": "worktree"}
+        r = next(x for x in self.settings.task_settings(Store([t]), t, argv=["claude"]) if x["label"] == "Reviewer")
+        self.assertEqual(r["value"]["agent"], "claude")
+        self.assertIn("Codex here is too old", r["text"])
+
+    def test_a_new_codex_passes(self):
+        self.nvm()
+        self.assertIsNone(self.settings.codex_too_old())
+
+    # ---- #1227 -----------------------------------------------------------------------------------
+    def fake_hc(self, k, screens):
+        sent = []
+        self.patch(self.news, "hc_json", lambda *a: k)
+        self.patch(self.news, "typing", lambda *a, **kw: None)
+        self.patch(self.news.time, "sleep", lambda s: None)
+        self.patch(self.news, "guard", lambda a: None)
+        it = iter(screens)
+
+        def run(args, **kw):
+            sent.append(args[1:])
+            from types import SimpleNamespace
+            return SimpleNamespace(returncode=0, stdout=next(it, screens[-1]) if args[1] == "read" else "", stderr="")
+        self.patch(self.news, "run", run)
+        self.patch(self.news.subprocess, "run", lambda args, **kw: (sent.append(args[1:]), run(args))[1])
+        return sent
+
+    CODEX = {"state": "live", "labels": {"herdr.agent": "codex"}, "status": {"app": "codex", "state": "working"}}
+
+    def test_nothing_is_pasted_into_a_working_codex(self):
+        sent = self.fake_hc(self.CODEX, [""])
+        self.assertFalse(self.news.news_send("t9", "Change of plan: stop"))
+        held = []
+        self.patch(self.news, "hold", lambda *a: held.append(a))
+        self.assertEqual(self.news.send_or_hold("t9", "Change of plan: stop"), "held")
+        self.assertEqual(sent, [])
+        self.assertEqual(held, [("t9", "Change of plan: stop", "send")])
+
+    def test_a_draft_left_for_the_queue_is_queued(self):
+        sent = self.fake_hc(dict(self.CODEX, status={"app": "codex", "state": "idle"}),
+                            ["• Ran tests\n\n› hange of plan: stop\n  tab to queue message"])
+        self.assertTrue(self.news.news_send("t9", "Change of plan: stop"))
+        self.assertIn(["keys", "t9", "tab"], sent)
+
+    def test_a_draft_still_in_the_box_is_sent_and_an_empty_box_left(self):
+        sent = self.fake_hc(dict(self.CODEX, status={"app": "codex", "state": "idle"}), ["› hange of plan: stop the build\n  ? for shortcuts"])
+        self.assertTrue(self.news.news_send("t9", "Change of plan: stop the build"))
+        self.assertIn(["keys", "t9", "enter"], sent)
+        sent = self.fake_hc(dict(self.CODEX, status={"app": "codex", "state": "idle"}),
+                            ["› Change of plan: stop the build\n\n• Stopping it.\n\n› Ask Codex to do anything"])
+        self.assertTrue(self.news.news_send("t9", "Change of plan: stop the build"))
+        self.assertFalse([a for a in sent if a[0] == "keys"])
+
+    # ---- #1093 #1143 -----------------------------------------------------------------------------
+    def log(self, items):
+        path = os.path.join(self.dir, "rollout.jsonl")
+        with open(path, "w") as f:
+            for i, d in enumerate(items):
+                f.write(json.dumps(dict(d, timestamp=f"2026-11-20T10:00:{i:02d}Z")) + "\n")
+        self.agents._bg_cache.clear()
+        self.patch(self.agents, "now", lambda: 1_794_996_000_000 + 60_000)
+        return path
+
+    def call(self, cid, script):
+        return {"type": "response_item", "payload": {"type": "custom_tool_call", "call_id": cid, "name": "exec", "input": script}}
+
+    def out(self, cid, *results):
+        return {"type": "response_item", "payload": {"type": "custom_tool_call_output", "call_id": cid, "output":
+                [{"type": "input_text", "text": "Script completed\nOutput:\n"}] + [{"type": "input_text", "text": json.dumps(r)} for r in results]}}
+
+    def completed(self, pid, status="completed"):
+        return {"type": "event_msg", "payload": {"type": "item_completed", "item": {"type": "CommandExecution", "process_id": str(pid),
+                "command": ["/bin/bash", "-lc", "x"], "source": "unified_exec_startup", "status": status, "exit_code": 0}}}
+
+    def test_codex_s_own_word_ends_a_job_its_polls_never_matched(self):
+        """A real shape (Codex 0.167): a CI watcher polled in batches, never seen to exit by a poll, then Codex's own
+        item_completed for its process id. Before: it counted forever."""
+        log = self.log([
+            self.call("c1", 'text(await tools.exec_command({cmd:"gh pr checks 1035 --watch --interval 10","yield_time_ms":1000}));\n'
+                            'text(await tools.exec_command({cmd:"npm test","yield_time_ms":1000}));\n'),
+            self.out("c1", {"session_id": 95493, "output": "pending"}, {"session_id": 4711, "output": "..."}),
+            self.call("c2", 'text(await tools.write_stdin({session_id:95493,chars:""}));\n'),
+            self.out("c2", {"session_id": 95493, "output": "pending"}),
+        ])
+        self.assertEqual(sorted(self.agents.background_jobs(log)[0]), ["codex:4711", "codex:95493"])
+        self.assertEqual(self.agents.job_names(log, ["codex:95493", "codex:4711"]),
+                         ["`gh pr checks 1035 --watch --interval 10`", "`npm test`"])
+        log = self.log([*[json.loads(x) for x in open(log)], self.completed(95493), self.completed(4711, "failed"),
+                        # a poll's answer written just after its end never brings it back
+                        self.out("c2", {"session_id": 95493, "output": "pending"})])
+        jobs, ended = self.agents.background_jobs(log)
+        self.assertEqual(jobs, {})
+        self.assertGreater(ended, 0)
+
+    def test_ready_names_its_jobs_and_skips_codex_s_ended_ones(self):
+        log = self.log([self.call("c1", 'text(await tools.exec_command({cmd:"python3 -m http.server 8000"}));\n'),
+                        self.out("c1", {"session_id": 7, "output": ""})])
+        task = {"id": 1, "agents": [{"address": "t1", "log": log}]}
+        k = {"address": "t1", "foreground": {"pid": 100}}
+        self.patch(self.agents, "agent_log", lambda t, a=None: log)
+        self.patch(self.agents, "codex_working", lambda k: True)
+        jobs, _ = self.agents.own_jobs(task, k)
+        self.assertEqual(self.agents.job_names(log, list(jobs)), ["`python3 -m http.server 8000`"])
+        self.patch(self.agents, "codex_working", lambda k: False)  # nothing of its own runs under it any more
+        self.assertEqual(self.agents.own_jobs(task, k)[0], {})
