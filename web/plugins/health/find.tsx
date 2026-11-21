@@ -7,9 +7,7 @@ import { useEffect, useState } from 'react'
 import clsx from 'clsx'
 import { Ghost, Small } from '@client/ui.tsx'
 import { card, heading, rowLook } from '@client/Settings.tsx'
-
-type Host = { to: string; over: string; ok?: boolean; state?: string; core?: string; linked?: boolean }
-type Got = { hosts: Host[]; last: { at: number; hosts: (Host | null)[]; running?: boolean } | null; wait_ms: number; error?: string }
+import { left, nextLook, retryRead, settle, type Got, type Host } from './find-state.ts'
 
 const call = (go: boolean): Promise<Got> =>
   fetch('api/machines/find', go ? { method: 'POST', headers: { 'x-shepherdr': '1' } } : undefined)
@@ -27,18 +25,27 @@ function result(h: Host) {
 export function FindMachines({ phone }: { phone: boolean }) {
   const [got, setGot] = useState<Got | null>(null)
   const [busy, setBusy] = useState(false)
-  useEffect(() => void call(false).then(setGot), [])
+  const [now, setNow] = useState(Date.now)
+  const take = (r: Got) => setGot((prev) => settle(prev, r, Date.now()))
+  useEffect(() => void call(false).then(take), [])
 
   const go = async () => {
     setBusy(true)
-    const r = await call(true)
-    setGot(r.error ? { ...(got ?? { hosts: [], last: null, wait_ms: 0 }), error: r.error } : r)
+    take(await call(!retryRead(got)))
+    setNow(Date.now())
     setBusy(false)
   }
 
   const hosts = got?.hosts ?? []
   const done = (got?.last?.hosts ?? []).filter((h): h is Host => !!h)
-  const wait = got?.wait_ms ?? 0
+  const wait = left(got, now)
+  const retry = retryRead(got)
+  // the cooldown counts down (#1108): looked at again as its minute changes, and when it ends
+  useEffect(() => {
+    if (!wait) return
+    const t = setTimeout(() => setNow(Date.now()), nextLook(wait))
+    return () => clearTimeout(t)
+  }, [wait])
   return (
     <section className="w-full" aria-labelledby="find-machines">
       <h3 id="find-machines" className={heading(phone)}>Find machines</h3>
@@ -63,8 +70,9 @@ export function FindMachines({ phone }: { phone: boolean }) {
             <Small>Nothing to try: no other hosts in ssh config or Tailscale.</Small>
           )}
           <span className="flex items-center justify-end">
-            <Ghost disabled={busy || !got || !!wait || !hosts.length} onClick={go}>
-              {busy ? 'Trying…' : wait ? `Again in ${mins(wait)} min` : `Try ${hosts.length} ${hosts.length === 1 ? 'host' : 'hosts'}`}
+            <Ghost disabled={busy || !got || (!retry && (!!wait || !hosts.length))} onClick={go}>
+              {busy ? 'Trying…' : retry ? 'Try again' : wait ? `Again in ${mins(wait)} min`
+                : `Try ${hosts.length} ${hosts.length === 1 ? 'host' : 'hosts'}`}
             </Ghost>
           </span>
         </div>
