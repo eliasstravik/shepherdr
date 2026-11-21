@@ -159,7 +159,10 @@ def leftover_worktrees():
                                stderr=subprocess.DEVNULL, universal_newlines=True)
             out.append({"path": path.replace(HOME, "~", 1), "task": ref, "state": (t or {}).get("state"),
                         "days": int((now() - ((t or {}).get("done_at") or now())) / 86400000) if t else None,
-                        "dirty": bool(r.stdout.strip()) if r.returncode == 0 else None})
+                        "dirty": bool(r.stdout.strip()) if r.returncode == 0 else None,
+                        # #1127: what its removal couldn't stop there
+                        **({"running": ((t or {}).get("worktree_left") or {})["running"]}
+                           if ((t or {}).get("worktree_left") or {}).get("running") else {})})
     return out
 
 
@@ -349,7 +352,8 @@ def health_lines(name, rep, st):
     if new_wt:
         def one(w):
             why = f"{w['task']} done {w['days']} d ago" if w.get("task") else "no task knows it"
-            return f"{w['path']} ({why}{', has uncommitted changes' if w.get('dirty') else ''})"
+            run = f", still running there: {', '.join(w['running'])}" if w.get("running") else ""
+            return f"{w['path']} ({why}{', has uncommitted changes' if w.get('dirty') else ''}{run})"
         listed = "; ".join(one(w) for w in new_wt[:6]) + (f"; and {len(new_wt) - 6} more" if len(new_wt) > 6 else "")
         text = (f"{len(new_wt)} leftover worktree{'s' if len(new_wt) > 1 else ''} of finished tasks: {listed}. Tell the person and "
                 "offer to clean up only what is safely finished (`git worktree remove` in its repo); never remove one with uncommitted changes.")

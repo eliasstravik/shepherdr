@@ -8121,3 +8121,98 @@ class ExtraFlags(unittest.TestCase):
         with self.redirect(out):
             self.flags.cmd_flags(argparse.Namespace(agent="claude", json=True, words=["--", "--advisor opus"]))
         self.assertEqual(json.loads(out.getvalue())["flags"], ["--advisor=opus"])
+
+
+class WorktreeRemovalStopsItsServers(unittest.TestCase):
+    """#1127: a done task's dev server still running in its worktree kept writing there, so the removal left part of
+    the folder behind (git's record gone) and the server ran on. Now it is stopped first, the folder is really gone,
+    a leftover is removed on a later try, and one that won't go is noted with why. A real repo and real processes."""
+
+    def setUp(self):
+        sys.path.insert(0, BIN)
+        import herdr_task.github as github
+        self.github = github
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        self.main = os.path.join(self.tmp, "app")
+        os.makedirs(self.main)
+        g = lambda *a, cwd=self.main: subprocess.run(["git", "-C", cwd, "-c", "user.name=T", "-c", "user.email=t@example.com", *a],
+                                                     check=True, capture_output=True)  # noqa: E731
+        g("init", "-q", "-b", "main", cwd=self.main)
+        g("commit", "-q", "--allow-empty", "-m", "start")
+        self.wt = os.path.join(self.tmp, "wts", "app", "task-1")
+        g("worktree", "add", "-q", "-b", "task/1", self.wt)
+
+        class S:
+            loc = {"folder": self.main}
+            dirty = False
+        self.s = S()
+        self.task = {"id": 1, "worktree": self.wt, "branch": "task/1"}
+
+    def server(self, ignore_term=False):
+        """A stand-in dev server: started in the worktree, writing a file there every 20 ms."""
+        code = ("import os,signal,time\n" + ("signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" if ignore_term else "") +
+                "os.makedirs('.next', exist_ok=True)\nprint(1, flush=True)\n"
+                "while True:\n    open(os.path.join(os.getcwd(), '.next', 'dev.log'), 'a').write('x')\n    time.sleep(0.02)\n")
+        p = subprocess.Popen([sys.executable, "-c", code], cwd=self.wt, stdout=subprocess.PIPE)
+        self.addCleanup(lambda: (p.kill(), p.wait(), p.stdout.close()))
+        p.stdout.readline()
+        return p
+
+    @unittest.skipUnless(os.path.isdir("/proc/self"), "reads /proc")
+    def test_a_running_server_is_stopped_and_the_folder_is_gone(self):
+        p = self.server()
+        self.assertIn(p.pid, [pid for pid, _ in self.github.procs_in(self.wt)])
+        self.assertTrue(self.github.remove_worktree(self.s, self.task))
+        self.assertFalse(os.path.exists(self.wt))
+        self.assertIsNotNone(p.wait(timeout=5))
+        self.assertEqual(self.task["worktree_stopped"], [f"{os.path.basename(sys.executable)[:15]} (pid {p.pid})"])
+        self.assertNotIn("task/1", subprocess.run(["git", "-C", self.main, "branch"], capture_output=True, text=True).stdout)
+
+    @unittest.skipUnless(os.path.isdir("/proc/self"), "reads /proc")
+    def test_one_that_ignores_term_is_killed(self):
+        from unittest import mock
+        p = self.server(ignore_term=True)
+        with mock.patch.object(self.github, "STOP_WAIT", 0.5):
+            self.assertTrue(self.github.remove_worktree(self.s, self.task))
+        self.assertEqual(p.wait(timeout=5), -9)
+        self.assertFalse(os.path.exists(self.wt))
+
+    def test_a_leftover_folder_is_removed_on_a_later_try(self):
+        """What the old removal left: git's record gone, files still there; git worktree remove can't take it."""
+        subprocess.run(["git", "-C", self.main, "worktree", "remove", "--force", self.wt], check=True)
+        os.makedirs(os.path.join(self.wt, ".next", "types"))
+        open(os.path.join(self.wt, "next.config.js"), "w").close()
+        self.assertTrue(self.github.removal_leftover(self.wt))
+        self.assertTrue(self.github.remove_worktree(self.s, self.task))
+        self.assertFalse(os.path.exists(self.wt))
+
+    def test_a_folder_git_never_listed_is_not_ours(self):
+        other = os.path.join(self.tmp, "wts", "app", "someone-elses")
+        subprocess.run(["git", "init", "-q", other], check=True)
+        self.task["worktree"] = other
+        self.assertFalse(self.github.remove_worktree(self.s, self.task))
+        self.assertTrue(os.path.isdir(other))
+
+    def test_uncommitted_work_keeps_it(self):
+        with open(os.path.join(self.wt, "tracked.txt"), "w") as f:
+            f.write("x")
+        subprocess.run(["git", "-C", self.wt, "add", "tracked.txt"], check=True)
+        self.assertFalse(self.github.remove_worktree(self.s, self.task))
+        self.assertTrue(os.path.isdir(self.wt))
+
+    def test_one_that_wont_go_says_why(self):
+        from unittest import mock
+        with mock.patch.object(self.github.shutil, "rmtree", lambda *a, **k: None), \
+                mock.patch.object(self.github, "procs_in", lambda folder, table=None: [(4242, "next-server")]), \
+                mock.patch.object(self.github, "stop_in", lambda folder: []), \
+                mock.patch.object(self.github, "git", lambda *a: (True, "", "")):
+            self.assertFalse(self.github.remove_worktree(self.s, self.task))
+        self.assertEqual(self.task["worktree_left"]["running"], ["next-server (pid 4242)"])
+        self.assertTrue(self.task["worktree_removing"])
+
+    def test_a_terminals_own_program_and_agents_are_never_stopped(self):
+        wt = os.path.realpath(self.wt)
+        table = [(10, 1, "herdr-core", "/"), (11, 10, "bash", wt), (12, 11, "claude", wt), (13, 12, "bash", wt),
+                 (14, 13, "next-server", os.path.join(wt, "apps")), (15, 1, "node", "/elsewhere"), (16, 1, "codex", wt)]
+        self.assertEqual(self.github.procs_in(self.wt, table), [(13, "bash"), (14, "next-server")])
