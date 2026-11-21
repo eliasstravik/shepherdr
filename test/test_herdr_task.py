@@ -569,6 +569,118 @@ class Autopilot(unittest.TestCase):
         self.assertEqual([w["outcome"] for w in v["wakes"]], ["Turn ended, no progress saved", "Delivered"])
 
 
+    def deliver(self, reasons, k, at=None):
+        """sp1 on (no wake in flight), `reasons` waiting since `at`, delivered to t9 as `k` (hc get's):
+        (what deliver() said, the messages sent, sp1's record)."""
+        from unittest import mock
+        sent = []
+        k = {"state": "live", "foreground": {"name": "claude"}, "status": {"state": "idle"}, "created_ms": 111, "turn": 3, **k}
+        with mock.patch.object(self.ap, "hc_json", lambda *a: k), mock.patch.object(self.ap, "coordinator_in", lambda s: "t9"), \
+                mock.patch.object(self.ap, "typing", lambda *a: False), \
+                mock.patch.object(self.ap, "news_send", lambda to, m, check=True: sent.append(m) or True), self.ap.state() as d:
+            a = d["spaces"]["sp1"]
+            a.pop("inflight", None)
+            a.pop("pending", None)
+            for r in reasons:
+                self.ap.queue(a, r)
+            if at is not None:
+                a["pending"]["at"] = at
+            got = self.ap.deliver("sp1", a)
+            return got, sent, json.loads(json.dumps(a))
+
+    def test_later_wakes_are_short(self):
+        """#1089: the whole instructions go on the first wake to an Assistant only; later ones say why
+        it woke. Full again for a restarted Assistant, a changed heartbeat, or after BRIEF_MAX_MS."""
+        self.wake(5000)
+        got, sent, a = self.deliver(["schedule"], {})
+        self.assertEqual(got, "delivered")
+        self.assertIn("Heartbeat (", sent[0])
+        self.assertNotIn('short="1"', sent[0])
+        got, sent, a = self.deliver(["event:ready TT-1"], {"turn": 5}, at=self.ap.now() - self.ap.NEWS_FIRST_MS - 1000)
+        self.assertIn('short="1"', sent[0])
+        self.assertIn("herdr-task autopilot brief", sent[0])
+        self.assertIn("event:ready TT-1", sent[0])
+        self.assertNotIn("Heartbeat (", sent[0])
+        self.assertLess(len(sent[0]), 700)
+        # restarted (a new terminal or process): full again
+        self.assertIn("Heartbeat (", self.deliver(["schedule"], {"created_ms": 222})[1][0])
+        self.assertIn('short="1"', self.deliver(["schedule"], {"created_ms": 222, "turn": 9})[1][0])
+        # the person changed the heartbeat: full again, with the new words
+        self.cmd("set", space="sp1", heartbeat="Only fix the login bugs.")
+        m = self.deliver(["schedule"], {"created_ms": 222, "turn": 9})[1][0]
+        self.assertIn("Only fix the login bugs.", m)
+        # long since the last full one: full again
+        with self.ap.state() as d:
+            d["spaces"]["sp1"]["briefed"]["at"] -= self.ap.BRIEF_MAX_MS
+        self.assertIn("Heartbeat (", self.deliver(["schedule"], {"created_ms": 222, "turn": 9})[1][0])
+        # what a short wake leaves out, on asking
+        v = self.cmd("brief", space="sp1")
+        self.assertIn("Only fix the login bugs.", v["text"])
+
+    def test_no_wake_while_the_person_chats(self):
+        """#1217: the person wrote to the Assistant in the last few minutes: a scheduled wake is skipped,
+        an event's waits; one they asked for (Run now, switching on) still goes."""
+        self.wake(5000)
+        chat = {"labels": {"herdr.said": str(self.ap.now() - 60000)}}
+        got, sent, a = self.deliver(["schedule"], chat)
+        self.assertEqual((got, sent, a.get("pending")), ("skipped", [], None))
+        self.assertEqual(a["last_wake"]["outcome"], "Skipped: you were chatting with its Assistant")
+        got, sent, a = self.deliver(["schedule", "event:added TT-3"], chat)
+        self.assertEqual((got, sent), (None, []))
+        self.assertEqual(a["pending"]["reasons"], ["event:added TT-3"])
+        self.assertIn("chatting", a["pending"]["note"])
+        got, sent, a = self.deliver(["run now"], chat)
+        self.assertEqual((got, len(sent)), ("delivered", 1))
+        # quiet long enough: it goes
+        old = {"labels": {"herdr.said": str(self.ap.now() - 5 * 60000 - 1000)}}
+        got, sent, a = self.deliver(["event:added TT-3"], old)
+        self.assertEqual((got, len(sent)), ("delivered", 1))
+
+    def test_an_event_told_as_news_wakes_no_more(self):
+        """#1089: an event the Assistant got as task news is no second wake (the news is its wake)."""
+        from unittest import mock
+        import herdr_task.home as home
+        log = os.path.join(self.tmp, "newslog.json")
+        p = mock.patch.object(home, "NEWSLOG", log)
+        p.start()
+        self.addCleanup(p.stop)
+        self.wake(5000)
+        # waits a moment for the news first
+        got, sent, a = self.deliver(["event:ready TT-1"], {})
+        self.assertEqual((got, sent), (None, []))
+        with open(log, "w") as f:
+            json.dump([{"at": self.ap.now(), "space": "sp1", "to": "t9", "lines": [
+                '<herdr-news task="TT-1" event="ready">TT-1 is ready: x</herdr-news>',
+                '<herdr-news task="TT-2" event="done">TT-2 is done: merged (y)</herdr-news>']},
+                {"at": self.ap.now(), "space": "sp1", "to": "t4", "lines": ['<herdr-news task="TT-5" event="ready">z</herdr-news>']}], f)
+        late = self.ap.now() - self.ap.NEWS_FIRST_MS - 1000
+        got, sent, a = self.deliver(["event:ready TT-1", "event:merged TT-2"], {}, at=late)
+        self.assertEqual((got, sent), ("skipped", []))
+        self.assertEqual(a["last_wake"]["outcome"], "Skipped: its Assistant got it as news")
+        # news to another Assistant, or of another event, tells this one nothing
+        got, sent, a = self.deliver(["event:ready TT-5", "event:stalled TT-1", "event:ready TT-1"], {}, at=late)
+        self.assertEqual(got, "delivered")
+        self.assertIn('reason="event:ready TT-5"', sent[0])
+        self.assertIn("event:stalled TT-1", sent[0])
+        self.assertNotIn("event:ready TT-1", sent[0])
+
+    def test_one_failed_wake_per_commit(self):
+        """#1089: a second job failing on the same pull request commit is no new failure; a fix pushed
+        that fails again is."""
+        from herdr_task.automations import diff_events
+        seen = {}
+        f = lambda att, head: [{"id": 1, "state": "running", "status": "working", "needs": None, "attention": att, "attention_head": head}]
+        self.assertEqual(diff_events(f(None, None), seen), [])
+        evs = lambda att, head: [e for e, _ in diff_events(f(att, head), seen)]
+        self.assertEqual(evs("Checks failing: a.", "h1"), ["failed"])
+        self.assertEqual(evs("Checks failing: a, b.", "h1"), [])
+        self.assertEqual(evs("Checks failing: a, b and c.", "h1"), [])
+        self.assertEqual(evs("Checks failing: a.", "h2"), ["failed"])
+        self.assertEqual(evs("It conflicts with main.", "h2"), ["failed"])
+        self.assertEqual(evs(None, None), [])
+        self.assertEqual(evs("Checks failing: a.", "h2"), ["failed"])
+
+
 class RemoteInstall(unittest.TestCase):
     """herdr-task --on installs itself on the other machine first, never over a machine that holds its source."""
 

@@ -16,7 +16,7 @@ from .agents import agent_running, status_word
 from .launch import caller_labels, coordinator_in
 from .store import locate, open_lock, read_list, Store, store_files
 from .output import say
-from .news import news_send, typing
+from .news import chatting, news_send, NEWS_SETTLE_MS, typing
 from .scheduler import ensure_scheduler
 from .automations import EVENTS, events_in, HOW, next_run, parse_every, parse_on, trigger_words
 
@@ -54,6 +54,13 @@ REMOTE_WAIT = 30                 # seconds another machine has to answer
 PENDING_MAX_MS = 6 * 3600000     # a wake that found no Assistant this long: missed
 TURN_MAX_MS = 3600000            # a wake's turn not seen ending this long: closed anyway
 IDLE_AFTER_MS = 120000           # a wake this old whose Assistant sits idle: its turn ended
+BRIEF_MAX_MS = 12 * 3600000     # a full wake at least this often, whatever came between (#1089)
+NEWS_FIRST_MS = NEWS_SETTLE_MS + 60000  # an event wake waits this long for the news that tells the same (#1089)
+# Wakes the person asked for: never paused while they chat (they are there).
+ASKED = ("switched on", "run now")
+# An event's news line (news.py news_line), by Autopilot's event name: what the Assistant got already.
+NEWS_EVENTS = {"ready": ("ready",), "merged": ("done",), "needs-you": ("needs-you",), "failed": ("failed", "needs-you"),
+               "stalled": ("stalled",)}
 HEARTBEAT_MAX = 8000             # characters of the heartbeat in a wake (the rest: read the file)
 DIRECTION_MAX = 300              # a Direction's one line (core/autopilot.js DIRECTION_MAX)
 # The heartbeat Everywhere has until someone writes one: a real one, ready as it is in any project
@@ -596,9 +603,40 @@ def waiting(space, a):
     return out
 
 
-def message(space, a, reasons):
+def brief_sig(space):
+    """What a full wake told that a short one leaves out and the person can change: the heartbeat and
+    direction. Changed since the last full wake: the next one is full again."""
+    import hashlib
+    return hashlib.sha1(json.dumps([heartbeat_of(space)[0], direction_of(space)]).encode()).hexdigest()[:12]
+
+
+def needs_full(space, a, to, k):
+    """Whether this wake brings the whole instructions (#1089): the first to this Assistant (another
+    terminal, or the same one restarted), the heartbeat or direction changed since, its turns
+    counted back, or the last full one older than BRIEF_MAX_MS. Else a short wake."""
+    b = a.get("briefed") or {}
+    return not (b.get("to") == to and b.get("created") == (k or {}).get("created_ms") and b.get("sig") == brief_sig(space)
+                and ((k or {}).get("turn") or 0) >= (b.get("turn") or 0) and now() - (b.get("at") or 0) < BRIEF_MAX_MS)
+
+
+def message(space, a, reasons, full=True):
     """The wake: one tagged message. The chat shows it as one quiet line ("Autopilot woke · on schedule",
-    core/chat-log.js pilotLine), never its words, then the Assistant's answer or "nothing new"."""
+    core/chat-log.js pilotLine), never its words, then the Assistant's answer or "nothing new".
+    full: the whole instructions, heartbeat, direction and saved progress; else (a later wake to the
+    same Assistant, which has them) only why it woke and what waits on the person (#1089)."""
+    why = reasons[0] + (f" (also: {', '.join(reasons[1:])})" if len(reasons) > 1 else "")
+    waits = "\n".join(f"- {x}" for x in waiting(space, a))
+    reason = reasons[0].replace('"', "'")
+    if not full:
+        since = when((a.get("briefed") or {}).get("at"))
+        body = (f"Autopilot wake: {why}, {when(now())}.\n"
+                f"Same instructions, heartbeat and direction as your full Autopilot wake{f' of {since}' if since else ''}; "
+                "if you no longer have them, run herdr-task autopilot brief first. Look at the tasks (herdr-task list "
+                "--json), do the most useful work they permit, then save progress with herdr-task progress \"...\", "
+                "or end with <hc no-reply why=\"...\"/>."
+                + (f"\n\nWaiting on the person:\n{waits}" if waits else ""))
+        body = body.replace("</herdr-autopilot", "</ herdr-autopilot")
+        return f'<herdr-autopilot reason="{reason}" space="{space}" short="1">\n{body}\n</herdr-autopilot>'
     beat, where = heartbeat_of(space)
     beat = "" if blank(beat) else beat.strip()
     path = heartbeat_path()
@@ -608,8 +646,6 @@ def message(space, a, reasons):
         beat = beat[:HEARTBEAT_MAX] + (f"\n… (cut here: read the rest in {path})" if where == "file" else "\n… (cut here)")
     p = a.get("progress")
     prog = f"Saved progress ({when(p['at'])}):\n{p['text']}" if p else "Saved progress: none yet (this is the first wake)."
-    why = reasons[0] + (f" (also: {', '.join(reasons[1:])})" if len(reasons) > 1 else "")
-    waits = "\n".join(f"- {x}" for x in waiting(space, a))
     aim = direction_of(space)
     aim = (f"Direction (set by the person, Shepherdr settings > Autopilot): {aim}" if aim else
            "Direction: none set. Work out what matters most from the project itself: its README, docs and goals, "
@@ -622,7 +658,8 @@ def message(space, a, reasons):
             "space that can't wait (spending money, deploying or publishing, deleting data, credentials, a security "
             "problem) or being stuck after retrying twice: don't do it, send one herdr-task alert \"<what>\" "
             "--body \"<why>\", say it in one line and carry on with other work. A problem in Shepherdr itself is no question either: note it with herdr-task feedback \"<one line>\" --details \"…\" --later "
-            "and offer it once the person is back. Read the heartbeat, the "
+            "and offer it once the person is back. While you're on Autopilot, task news (<herdr-news>) about this space's tasks is "
+            "a wake too: act on it as on one; no separate wake comes for what news told you. Read the heartbeat, the "
             "direction and your saved progress below, look at the tasks (herdr-task list --json), and do the most "
             "useful work the heartbeat permits: unblock and check what's open, start what's ready to start, and, "
             "unless the heartbeat says otherwise, look at the project and add and start the next most valuable "
@@ -642,7 +679,6 @@ def message(space, a, reasons):
             + (f"Waiting on the person:\n{waits}\n\n" if waits else "")
             + f"{prog}")
     body = body.replace("</herdr-autopilot", "</ herdr-autopilot")
-    reason = reasons[0].replace('"', "'")
     return f'<herdr-autopilot reason="{reason}" space="{space}">\n{body}\n</herdr-autopilot>'
 
 
@@ -667,13 +703,70 @@ def deliver(space, a):
     if typing(to, k):
         p["note"] = "Waiting: you're writing to its Assistant"
         return None
-    if not news_send(to, message(space, a, p["reasons"]), check=False):
+    asked = any(r in ASKED for r in p["reasons"])
+    if not asked:
+        # The person is chatting with it (#1217): a schedule's wake is skipped (the next one comes),
+        # an event's waits until they've been quiet a while.
+        if chatting(k):
+            rest = [r for r in p["reasons"] if r != "schedule"]
+            if not rest:
+                a.pop("pending")
+                log_wake(a, "schedule", "Skipped: you were chatting with its Assistant")
+                return "skipped"
+            p["reasons"] = rest
+            p["note"] = "Paused: you're chatting with its Assistant"
+            return None
+        # An event its news tells too goes as that news, not as a second wake (#1089): waits a
+        # moment for the news, then drops what the Assistant got that way.
+        if all(news_events(r) for r in p["reasons"]) and now() - p["at"] < NEWS_FIRST_MS:
+            p["note"] = "Waiting a moment: its news may tell it"
+            return None
+        told = told_as_news(to, p["at"] - NEWS_FIRST_MS)
+        rest = [r for r in p["reasons"] if not (set(news_events(r)) & told.get(event_ref(r), set()))]
+        if not rest:
+            a.pop("pending")
+            log_wake(a, p["reasons"][0], "Skipped: its Assistant got it as news")
+            return "skipped"
+        p["reasons"] = rest
+    full = needs_full(space, a, to, k)
+    if not news_send(to, message(space, a, p["reasons"], full), check=False):
         p["note"] = "Waiting: its Assistant couldn't take it yet"
         return None
     a.pop("pending")
+    if full:
+        a["briefed"] = {"to": to, "created": k.get("created_ms"), "sig": brief_sig(space), "at": now(), "turn": k.get("turn") or 0}
     a["inflight"] = {"at": now(), "reason": p["reasons"][0], "to": to, "turn": k.get("turn") or 0}
     log_wake(a, p["reasons"][0], "Delivered")
     return "delivered"
+
+
+def news_events(reason):
+    """The news events that tell what an "event:<ev> <ref>" reason says ((): none, or not an event)."""
+    m = re.match(r"event:(\S+) ", reason)
+    return NEWS_EVENTS.get(m.group(1), ()) if m else ()
+
+
+def event_ref(reason):
+    return reason.split(" ", 1)[1] if reason.startswith("event:") and " " in reason else None
+
+
+def told_as_news(to, since):
+    """The news this Assistant got since (news_pass's sent batches, home.py NEWSLOG): {task ref: {events}}."""
+    from .home import NEWSLOG
+    try:
+        with open(NEWSLOG) as f:
+            log = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for x in log if isinstance(log, list) else []:
+        if not isinstance(x, dict) or x.get("to") != to or (x.get("at") or 0) < since:
+            continue
+        for line in x.get("lines") or []:
+            m = re.match(r'<herdr-news task="([^"]*)" event="([^"]*)"', str(line))
+            if m:
+                out.setdefault(m.group(1).replace("&amp;", "&"), set()).add(m.group(2))
+    return out
 
 
 def settle(a):
@@ -820,13 +913,14 @@ def cmd_autopilot(args):
     if space is None and sub in ("on", "off", "run-now"):
         raise Fail(PER_SPACE if sub != "run-now" else "Run now wakes one space's Assistant: pass --space.")
     msg = ""
-    with state(write=sub not in ("show", "heartbeat")) as d:
+    reads = ("show", "heartbeat", "brief")
+    with state(write=sub not in reads) as d:
         a = None
         if space is not None:
             a = d["spaces"].get(space)
             if a is None:
-                a = {} if sub in ("show", "heartbeat") else d["spaces"].setdefault(space, {})
-            if sub not in ("show", "heartbeat") and not a.get("folder"):
+                a = {} if sub in reads else d["spaces"].setdefault(space, {})
+            if sub not in reads and not a.get("folder"):
                 # Told by the machine whose window lists it (forward()), else this one's window.
                 told = (getattr(args, "name", None), getattr(args, "space_folder", None))
                 a["name"], a["folder"] = (told[0], folder_of(told[1])) if told[1] else space_info(space)
@@ -862,6 +956,11 @@ def cmd_autopilot(args):
             msg = "Woke its Assistant." if got == "delivered" else f"Queued: {(a.get('pending') or {}).get('note') or 'it goes when its Assistant is idle'}."
         elif sub == "heartbeat":
             ensure_heartbeat()
+        elif sub == "brief":
+            # A short wake's instructions again, for an Assistant that no longer has them (#1089).
+            text = message(space, a, ["asked for the instructions again"])
+            print(json.dumps({"space": space, "text": text}) if getattr(args, "json", False) else text)
+            return
         v = everywhere_view(d) if space is None else view(d, space, a)
     if sub in ("on", "run-now"):
         # This machine's scheduler wakes it (a machine with no window or service starts none by itself).

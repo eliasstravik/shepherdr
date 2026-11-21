@@ -423,7 +423,18 @@ def task_facts(s, t):
     return {"id": t["id"], "ref": s.ref(t), "title": t["title"], "branch": t.get("branch"), "state": t["state"],
             "status": status_of(t, working_ones) if t["state"] == "running" else t["state"],
             "needs": task_status(t, working_ones)[1], "attention": t.get("attention"), "merged": bool(t.get("merged")),
+            "attention_head": t.get("attention_head") if t.get("attention") else None,
             "automation": t.get("automation"), "starting": bool(t["state"] == "running" and starting(t))}
+
+
+def same_failure(prev, f):
+    """Whether a task's problem now is the one it had (#1089): the same kind ("Checks failing", the
+    words before ":") at the same pull request commit. A second job failing on that commit
+    ("Checks failing: a" -> "Checks failing: a, b") is no new failure; a fix pushed that fails
+    again is."""
+    kind = lambda x: str(x or "").split(":", 1)[0].strip()
+    return bool(prev.get("attention")) and kind(prev.get("attention")) == kind(f.get("attention")) \
+        and prev.get("attention_head") == f.get("attention_head")
 
 
 def diff_events(facts, seen):
@@ -436,7 +447,7 @@ def diff_events(facts, seen):
         key = str(f["id"])
         prev = seen.get(key)
         status, needs = f["status"], f["needs"]
-        cur = {"state": f["state"], "status": status, "needs": needs, "attention": f.get("attention"),
+        cur = {"state": f["state"], "status": status, "needs": needs, "attention": f.get("attention"), "attention_head": f.get("attention_head"),
                "quiet": (prev or {}).get("quiet"), "stalled": (prev or {}).get("stalled")}
         # Quiet since: a running task whose agents aren't working.
         cur["quiet"] = None if status in ("working",) or f["state"] != "running" else (cur["quiet"] or now())
@@ -454,7 +465,7 @@ def diff_events(facts, seen):
                 out.append(("ready", f))
             if f["state"] == "done" and prev["state"] != "done" and f.get("merged"):
                 out.append(("merged", f))
-            if f.get("attention") and f.get("attention") != prev.get("attention"):
+            if f.get("attention") and not same_failure(prev, f):
                 out.append(("failed", f))
             # Needs you: its agent asks something, or waits for a reply (the status people see).
             if needs in ("asks", "reply") and prev.get("needs") not in ("asks", "reply"):

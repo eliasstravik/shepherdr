@@ -299,6 +299,19 @@ def news_send(address, text, check=True):
 
 TYPING = "herdr.typing"
 TYPING_KEEP_MS = 5 * 60000     # unsent words untouched this long hold nothing any more
+# The person's last message to an agent: the chat (window or web) labels its terminal herdr.said=<ms>
+# as it sends (core/send.js markSaid). Autopilot waits while they chat (#1217).
+SAID = "herdr.said"
+CHATTING_MS = 5 * 60000        # a message this recent: the person is chatting with it
+
+
+def chatting(k):
+    """Whether the person wrote to this agent (k: its hc get) in the last CHATTING_MS."""
+    try:
+        at = int(((k or {}).get("labels") or {}).get(SAID) or 0)
+    except ValueError:
+        return False
+    return bool(at) and now() - at < CHATTING_MS
 HELD = os.path.join(STORE, ".held.json")  # {address: [{text, how, at}]}: held_pass sends them
 ESCAPES = re.compile(r"\x1b(?:\[([0-9;:?<=>!]*)[ -/]*([@-~])|\][^\x07\x1b]*(?:\x07|\x1b\\)|P[^\x1b]*\x1b\\|[()*+][0-9A-Za-z]|.)"
                      r"|[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]|[\r\n]|[^\x1b\x00-\x1f\x7f]+", re.S)
