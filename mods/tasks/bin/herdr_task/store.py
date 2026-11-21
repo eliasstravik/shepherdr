@@ -222,7 +222,9 @@ class Store:
         if self.write and self.dirty:
             tmp = f"{self.path}.{os.getpid()}.tmp"
             with open(tmp, "w") as f:
-                json.dump(self.data, f, indent=2)
+                # compact (#1175: the panels read every list through one capped exec; indented, a busy list was
+                # a third spaces); ASCII-escaped still, since readers open it in the locale's encoding
+                json.dump(self.data, f, separators=(",", ":"))
                 f.write("\n")
             os.replace(tmp, self.path)
             self.dirty = False

@@ -2032,13 +2032,13 @@ def code_stamp():
 
 
 def preview_alive():
-    """The running preview server's port, when it answers as this herdr-artifact's for this store, else None."""
+    """The running preview server's (port, token), when it answers as this herdr-artifact's for this store, else None."""
     import urllib.request
     try:
         with open(PREVIEW_STATE) as f:
             st = json.load(f)
-        port = int(st["port"])
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping", timeout=2) as r:
+        port, token = int(st["port"]), str(st["token"])
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping?t={urllib.parse.quote(token, safe='')}", timeout=2) as r:
             me_ = json.load(r)
     except (OSError, ValueError, KeyError, TypeError):
         return None
@@ -2046,7 +2046,7 @@ def preview_alive():
         with contextlib.suppress(OSError, ValueError, TypeError, KeyError):
             os.kill(int(st["pid"]), 15)
         return None
-    return port
+    return port, token
 
 
 PREVIEW_LOG = os.path.join(STORE, ".preview.log")
@@ -2054,12 +2054,12 @@ PREVIEW_WAIT = 20
 
 
 def preview_start():
-    """The port of this machine's preview server, started when none answers. Its own output goes to PREVIEW_LOG, so a
+    """The (port, token) of this machine's preview server, started when none answers. Its own output goes to PREVIEW_LOG, so a
     start that fails says why (#975); a busy machine gets PREVIEW_WAIT seconds, and a server that ended at once one
     more try."""
-    port = preview_alive()
-    if port:
-        return port
+    alive = preview_alive()
+    if alive:
+        return alive
     os.makedirs(STORE, exist_ok=True)
     why = None
     for _ in (1, 2):
@@ -2071,9 +2071,9 @@ def preview_start():
         end = time.time() + PREVIEW_WAIT
         while time.time() < end:
             time.sleep(0.1)
-            port = preview_alive()
-            if port:
-                return port
+            alive = preview_alive()
+            if alive:
+                return alive
             if p.poll() is not None:
                 break
         try:
@@ -2094,10 +2094,18 @@ def preview_start():
 def serve_preview(idle=PREVIEW_IDLE):
     """The preview server: the viewer page and this machine's artifacts, read only, on 127.0.0.1 (a free port, written
     to PREVIEW_STATE). Answers only requests addressed to 127.0.0.1 or localhost (no other site's page reaches it
-    through a name of its own). Ends after `idle` seconds without a request."""
+    through a name of its own) that carry its random token (#1096: any account on this machine can reach a loopback
+    port, and the artifacts are the owner's alone): `?t=` on the link, which sets a cookie for the page's own requests
+    (its API calls, images, clips). The token is kept only in PREVIEW_STATE (0600). Ends after `idle` seconds without
+    a request."""
+    import hmac
     import http.server
     import threading
     last = [time.time()]
+    token = secrets.token_urlsafe(32)
+
+    def has_token(given):
+        return bool(given) and hmac.compare_digest(given.encode(), token.encode())
 
     class H(http.server.BaseHTTPRequestHandler):
         server_version = "herdr-artifact-preview"
@@ -2136,6 +2144,14 @@ def serve_preview(idle=PREVIEW_IDLE):
             u = urllib.parse.urlsplit(self.path)
             q = urllib.parse.parse_qs(u.query)
             path = urllib.parse.unquote(u.path)
+            given = (q.get("t") or [""])[0]
+            cookie = f"herdr_preview_{self.server.server_address[1]}"   # cookies don't keep ports apart
+            jar = {}
+            for part in (self.headers.get("cookie") or "").split(";"):
+                k, _, v = part.strip().partition("=")
+                jar.setdefault(k, v)
+            if not has_token(given) and not has_token(jar.get(cookie, "")):
+                return self.send(403, "This link needs its token: `herdr-artifact preview <id>` gives the whole link.", "text/plain")
             if path == "/api/ping":
                 return self.json(200, {"store": STORE, "code": code_stamp()})
             if path in ("/", "/index.html"):
@@ -2143,7 +2159,8 @@ def serve_preview(idle=PREVIEW_IDLE):
                 if not page:
                     return self.send(500, NO_VIEWER, "text/plain; charset=utf-8")
                 with open(page, "rb") as f:
-                    return self.send(200, f.read(), "text/html; charset=utf-8", VIEWER_CSP)
+                    return self.send(200, f.read(), "text/html; charset=utf-8", VIEWER_CSP,
+                                     {"set-cookie": f"{cookie}={token}; Path=/; HttpOnly; SameSite=Strict"})
             m = re.match(r"^/api/artifacts/([\w.-]+)(?:/(recipe|file/(.+)))?$", path)
             if not m:
                 return self.send(404, "Not here.", "text/plain")
@@ -2189,7 +2206,7 @@ def serve_preview(idle=PREVIEW_IDLE):
     os.makedirs(STORE, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=STORE, prefix=".tmp-")
     with os.fdopen(fd, "w") as f:
-        json.dump({"port": srv.server_address[1], "pid": os.getpid()}, f)
+        json.dump({"port": srv.server_address[1], "pid": os.getpid(), "token": token}, f)
     os.replace(tmp, PREVIEW_STATE)
 
     def watch():
@@ -2213,8 +2230,9 @@ def cmd_preview(o):
         as_version(s.find(o.id), o.version)
     if not viewer_page():
         raise Fail(NO_VIEWER)
-    port = preview_start()
-    link = f"http://127.0.0.1:{port}/?artifact={urllib.parse.quote(o.id, safe='')}" + (f"&v={o.version}" if o.version else "")
+    port, token = preview_start()
+    link = (f"http://127.0.0.1:{port}/?artifact={urllib.parse.quote(o.id, safe='')}" + (f"&v={o.version}" if o.version else "")
+            + f"&t={urllib.parse.quote(token, safe='')}")
     if o.json:
         print(json.dumps({"id": o.id, "link": link}))
     else:

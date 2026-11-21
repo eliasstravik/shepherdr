@@ -20,7 +20,7 @@ import { note } from "./usage.js";
 import { dialogFooter, green, red, amber, H, RADIUS, TEXT } from "./ui.js";
 // The card's words, the summary cut and the details as bullets: core/accept.js, shared with the web app's card.
 import { ACCEPT, acceptLabel, docOpen, docsMore, words, readable, commitsLine, filesLine, moreLine, proofTitle, whereNow } from "./core/accept.js";
-import { settle } from "./core/pending.js";
+import { detach, settle } from "./core/pending.js";
 
 export { words, readable };
 
@@ -29,7 +29,7 @@ const MONO = "JetBrains Mono";
 
 async function task(p, args) {
   // still running there after a slow or dropped link: its real result, followed (core/pending.js)
-  const r = await exec(CLI(), [...(p.machine ? ["--on", p.machine] : []), ...args, "--folder", p.folder, "--json"])
+  const r = await exec(CLI(), detach([...(p.machine ? ["--on", p.machine] : []), ...args, "--folder", p.folder, "--json"]))
     .then((r) => settle((a) => exec(CLI(), a), r))
     .catch((e) => ({ code: 1, stdout: "", stderr: String(e?.message ?? e) }));
   let out = null;

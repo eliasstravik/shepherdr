@@ -2577,6 +2577,32 @@ class NewWorktrees(unittest.TestCase):
         _, path = self.new_worktree()
         self.assertEqual(self.git(path, "rev-parse", "HEAD"), here)
 
+    def test_a_package_json_above_doesnt_reach_the_worktree(self):
+        """#1132: Shepherdr's own package.json (type: module) sits above its worktrees folder; a repo with none of
+        its own ran as ESM there, so its require() (tests, git hooks) failed. A plain one at the root stops Node."""
+        import shutil
+        wt = os.path.join(self.root, "wt")
+        self.assertFalse(os.path.exists(os.path.join(wt, "package.json")))   # nothing above yet: nothing written
+        _, first = self.new_worktree()
+        self.assertFalse(os.path.exists(os.path.join(wt, "package.json")))
+        with open(os.path.join(self.root, "package.json"), "w") as f:
+            f.write('{"type": "module"}')
+        _, path = self.new_worktree()
+        with open(os.path.join(path, "hook.js"), "w") as f:
+            f.write("const fs = require('fs'); console.log(typeof fs.readFileSync)")
+        node = shutil.which("node")
+        if node:
+            out = subprocess.run([node, os.path.join(path, "hook.js")], capture_output=True, text=True)
+            self.assertEqual((out.returncode, out.stdout.strip()), (0, "function"), out.stderr)
+        with open(os.path.join(wt, "package.json")) as f:
+            self.assertNotIn("type", json.load(f))
+        # a person's own file there stays as it is
+        with open(os.path.join(wt, "package.json"), "w") as f:
+            f.write('{"type": "module", "mine": 1}')
+        self.new_worktree()
+        with open(os.path.join(wt, "package.json")) as f:
+            self.assertEqual(json.load(f)["mine"], 1)
+
     def test_default_branch_name_stays(self):
         t, _ = self.new_worktree(self.task("Fix the login page"))
         self.assertEqual(t["branch"], "task/1-fix-the-login-page")
@@ -5826,6 +5852,58 @@ class TaskFlow(unittest.TestCase):
         self.git(wt, "commit", "-q", "-a", "--no-edit")
         self.assertIn("isn't reviewed", self.refusal())
 
+    def lines_file(self, cwd, name, lines, words):
+        with open(os.path.join(cwd, name), "w") as f:
+            f.write("".join(f"{x}\n" for x in lines))
+        self.git(cwd, "add", name)
+        self.git(cwd, "commit", "-q", "-m", words)
+        return self.git(cwd, "rev-parse", "HEAD")
+
+    def test_the_same_own_changes_on_a_newer_base_need_no_round(self):
+        """#1178: a reviewed branch moved onto a newer base (here a rebase, which no merge walk sees) changes
+        what it changed before: its review holds. Something of its own since still needs a round."""
+        wt = self.reviewed_task()
+        self.commit(self.main, "another task", "b.txt")
+        self.git(wt, "rebase", "-q", "main")
+        self.assertIsNone(self.refusal())
+        self.commit(wt, "a fix of its own", "a.txt")
+        self.assertIn("isn't reviewed", self.refusal())
+
+    def test_a_conflict_resolved_keeping_both_sides_needs_no_round(self):
+        """#1178: merging main hit a conflict next to the task's lines; resolved by keeping both, the task adds and
+        takes away the same lines as reviewed. Dropping main's line instead is a change of its own."""
+        wt = self.task["worktree"]
+        self.settings({"everywhere": {"tasks": {"review_rounds": 3}}})
+        self.task["review_gate"] = True
+        self.lines_file(self.main, "a.txt", ["one", "two", "three", "four"], "lines")
+        self.git(wt, "merge", "-q", "--no-edit", "main")
+        head = self.lines_file(wt, "a.txt", ["one", "TWO", "three", "four"], "the task's line")
+        self.task["reviews"] = [{"round": 1, "result": "report", "at": 2, "head": head}]
+        self.lines_file(self.main, "a.txt", ["one", "two", "THREE", "four"], "main's line")
+        self.assertNotEqual(subprocess.run(["git", "-C", wt, "merge", "-q", "--no-edit", "main"], capture_output=True).returncode, 0)
+        self.lines_file(wt, "a.txt", ["one", "TWO", "THREE", "four"], "merged main, both kept")
+        self.assertIsNone(self.refusal())
+        self.git(wt, "reset", "-q", "--hard", head)
+        subprocess.run(["git", "-C", wt, "merge", "-q", "--no-edit", "main"], capture_output=True)
+        self.lines_file(wt, "a.txt", ["one", "TWO", "three", "four"], "merged main, its line dropped")
+        self.assertIn("isn't reviewed", self.refusal())
+
+    def test_reviewed_spends_no_round_on_a_clean_merge(self):
+        """#1178: out of rounds, an agent that merged main ran `reviewed` again, was refused and waited for its
+        Assistant's review-more. A commit that only adds the base to a reviewed one is said so, with no round used."""
+        import argparse
+        wt = self.reviewed_task()
+        self.task["reviews"] += [{"round": 2, "result": "report", "at": 3, "head": self.task["reviews"][0]["head"]},
+                                 {"round": 3, "result": "report", "at": 4, "head": self.task["reviews"][0]["head"]}]
+        self.commit(self.main, "another task", "b.txt")
+        self.git(wt, "merge", "-q", "--no-edit", "main")
+        self.commands.cmd_reviewed(argparse.Namespace(id="SHEP-1", json=True, folder=None, report="", commit=None))
+        self.assertEqual(len(self.task["reviews"]), 3)
+        self.assertIn("its review holds, no round used", self.said[-1])
+        self.commit(wt, "a fix of its own", "a.txt")
+        with self.assertRaises(self.commands.Fail):
+            self.commands.cmd_reviewed(argparse.Namespace(id="SHEP-1", json=True, folder=None, report="", commit=None))
+
     def test_a_fix_after_the_last_round_asks_for_one_more(self):
         """#951: the fix of the last round's findings was refused, and the Assistant had told the worker to just
         say ready. The refusal and the Assistant's guide both say that fix needs a round of its own (review-more)."""
@@ -6828,6 +6906,60 @@ class CodexSandbox(unittest.TestCase):
         self.assertFalse(sb(["codex", "-s", "danger-full-access"]))
         self.assertFalse(sb(["claude", "--model", "opus"]))
         self.assertFalse(sb(None))
+
+
+class DetachedActions(unittest.TestCase):
+    """#1211: the window stops a command at 30 s, and an Accept waiting on GitHub's squash merge took 72 s, so it was
+    killed half done. From the window an action here runs as its own job (`herdr-task --detach`) answering within the
+    wait; still running, PENDING with machine "", followed with `herdr-task _job` (core/pending.js). Real processes,
+    a throwaway TMPDIR for the jobs' files and a slow stand-in for herdr-task."""
+
+    def setUp(self):
+        import shutil
+        self.dir = tempfile.mkdtemp(prefix="shepherdr-detach-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.env = dict(os.environ, TMPDIR=self.dir, HERDR_TASK_ACTION_WAIT="0.5", PYTHONDONTWRITEBYTECODE="1")
+        self.slow = os.path.join(self.dir, "slow-herdr-task")
+        with open(self.slow, "w") as f:
+            f.write('#!/bin/sh\nsleep 2\necho "{\\"id\\": 1, \\"state\\": \\"done\\", \\"args\\": \\"$*\\"}"\n')
+        os.chmod(self.slow, 0o755)
+
+    def py(self, code, *argv):
+        return subprocess.run([sys.executable, "-c", f"import sys; sys.path.insert(0, {BIN!r}); {code}", *argv],
+                              env=self.env, capture_output=True, text=True, timeout=30)
+
+    def test_a_slow_action_is_pending_then_followed_to_its_result(self):
+        r = self.py("from herdr_task import link; r = link.local_action(['accept', '1', '--json'], sys.argv[1]); "
+                    "print(r.returncode); print(r.stdout, end='')", self.slow)
+        code, _, out = r.stdout.partition("\n")
+        self.assertEqual(int(code), 75, r.stderr)
+        job = json.loads(out)
+        self.assertEqual(job["machine"], "")
+        self.assertIn(f"herdr-task _job {job['pending']}", job["error"])
+        # the caller is gone (the window stopped it): the action carries on, and _job gives its real result
+        self.env["HERDR_TASK_ACTION_WAIT"] = "10"
+        r = subprocess.run([sys.executable, os.path.join(BIN, "herdr-task"), "_job", job["pending"], "--json"],
+                           env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout), {"id": 1, "state": "done", "args": "accept 1 --json"})
+
+    def test_a_quick_action_answers_as_itself(self):
+        folder = os.path.join(self.dir, "folder")
+        os.makedirs(folder)
+        self.env["HERDR_TASK_ACTION_WAIT"] = "20"
+        self.env["HERDR_TASK_STORE"] = os.path.join(self.dir, "store")
+        r = subprocess.run([sys.executable, os.path.join(BIN, "herdr-task"), "--detach", "star", "99", "--json", "--folder", folder],
+                           env=self.env, capture_output=True, text=True, timeout=30)
+        plain = subprocess.run([sys.executable, os.path.join(BIN, "herdr-task"), "star", "99", "--json", "--folder", folder],
+                               env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual((r.returncode, r.stdout), (plain.returncode, plain.stdout))
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_an_unknown_job_says_so(self):
+        r = subprocess.run([sys.executable, os.path.join(BIN, "herdr-task"), "_job", "nope", "--json"],
+                           env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("No action nope here", json.loads(r.stdout)["error"])
 
 
 class LinkActions(unittest.TestCase):
