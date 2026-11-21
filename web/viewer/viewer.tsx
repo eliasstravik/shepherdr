@@ -9,10 +9,9 @@ import { createRoot } from 'react-dom/client'
 import { Recipe, UNREADABLE } from '../src/screens/Recipe.tsx'
 import * as R from '@core/recipe.js'
 import { deviceFor as deviceOf } from '../src/kernel.ts'
+import { lookOnce, type Meta } from './follow.ts'
 
 const { withIds } = R as any
-
-type Meta = { id: string; title: string; version: number; versions: { v: number; at: number; note?: string }[] }
 
 const q = new URLSearchParams((window as any).viewerLink ?? location.search)
 const id = q.get('artifact') ?? ''
@@ -68,16 +67,17 @@ function Viewer() {
     // newer one is published (its pictures' addresses carry the version, so none comes from the cache of the last)
     const look = async () => {
       try {
-        const m: Meta = await get(api)
-        if (!live) return
-        setMeta(m)
-        document.title = m.title
-        const v = pinned || m.version
-        if (v !== shown) {
-          const r = await get(`${api}/recipe?v=${v}`)
+        const next = await lookOnce(get, api, pinned, shown, (m) => {
           if (!live) return
-          shown = v
-          setRecipe({ ...withIds(r), v })
+          setMeta(m)
+          document.title = m.title
+        }, (r) => {
+          try { return withIds(r) } catch { throw new Error(UNREADABLE) }   // the person's words, not a TypeError's
+        })
+        if (!live) return
+        if (next) {
+          shown = next.v
+          setRecipe(next)
         }
         setError(null)
       } catch (e) {

@@ -151,6 +151,12 @@ def store_path(folder):
     return slug, p
 
 
+def read_only(e):
+    """Fails with the person's words when an OSError is the store being read-only (a sandbox); else returns."""
+    if e.errno in (errno.EROFS, errno.EACCES, errno.EPERM):
+        raise Fail(f"Can't change artifacts here: {STORE} is read-only (a sandbox?). Run this outside it.")
+
+
 class Store:
     """One folder's artifacts: a change holds the folder's lock while open; a read takes none."""
 
@@ -171,8 +177,7 @@ class Store:
                 os.makedirs(STORE, exist_ok=True)
                 self.lock = open(lock, "a")
             except OSError as e:
-                if e.errno in (errno.EROFS, errno.EACCES, errno.EPERM):
-                    raise Fail(f"Can't change artifacts here: {STORE} is read-only (a sandbox?). Run this outside it.")
+                read_only(e)
                 raise
             try:
                 fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -280,8 +285,9 @@ def too_big(rel, n, kind):
     return f"{rel} is {mb:.1f} MB: a picture or other file can be at most {MAX_FILE // MB} MB (crop or compress it)."
 
 
-def gather(src):
-    """The files of a mod folder to keep, relative paths. Fails on anything a mod can't hold."""
+def gather(src, limits=True):
+    """The files of a mod folder to keep, relative paths. Fails on anything a mod can't hold. limits: False for a
+    version already kept, which its publish may have grown past them (a poster, an mp4 copy: #1108)."""
     src = os.path.realpath(os.path.expanduser(src))
     if os.path.isfile(src) and os.path.basename(src) == "main.js":
         src = os.path.dirname(src)
@@ -298,11 +304,11 @@ def gather(src):
                 raise Fail(f"{rel}: an artifact holds only .js, .json, .svg, pictures, videos, sounds, PDFs, fonts and text.")
             n_bytes = os.path.getsize(os.path.join(root, n))
             kind = kind_of(n)
-            if n_bytes > MEDIA_MAX.get(kind, MAX_FILE):
+            if limits and n_bytes > MEDIA_MAX.get(kind, MAX_FILE):
                 raise Fail(too_big(rel, n_bytes, kind))
             size += n_bytes
             out.append(rel)
-    if len(out) > MAX_FILES or size > MAX_BYTES:
+    if limits and (len(out) > MAX_FILES or size > MAX_BYTES):
         raise Fail(f"Too big: {len(out)} files, {size // MB} MB (at most {MAX_FILES} files, {MAX_BYTES // MB} MB in all).")
     return src, sorted(out)
 
@@ -961,20 +967,25 @@ def cmd_publish(o):
             raise Fail("Give it a title: --title \"Coverage by package\".")
         title = o.title
         base = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:24].strip("-") or "artifact"
-        os.makedirs(FILES, exist_ok=True)
         while True:  # its files' folder, made now: the id is this publish's (another can't pick it meanwhile)
             aid = f"{base}-{secrets.token_hex(2)}"
             try:
+                os.makedirs(FILES, exist_ok=True)
                 os.mkdir(os.path.join(FILES, aid))
                 break
             except FileExistsError:
                 pass
+            except OSError as e:  # a read-only store (a sandbox) says so, as an update does (#1108)
+                read_only(e)
+                raise
         art = {"id": aid, "created": now(), "versions": []}
     fresh = not o.id
-    # A task's agent names its task first: "HAT-2: Coverage by package".
-    task = o.task or art.get("task") or who["task"]
-    if task and not title.upper().startswith(task.upper()):
-        title = f"{task}: {title}"
+
+    def named(art, title):
+        """(title, task): a task's agent names its task first, "HAT-2: Coverage by package"."""
+        task = o.task or art.get("task") or who["task"]
+        return (f"{task}: {title}" if task and not title.upper().startswith(task.upper()) else title), task
+    title, task = named(art, title)
 
     def drop():
         if fresh:
@@ -995,6 +1006,8 @@ def cmd_publish(o):
         else:
             art = s.find(o.id)  # as it is now: another publish may have saved a version meanwhile
             v = (art["versions"][-1]["v"] if art["versions"] else 0) + 1
+            # its title and task too: what this one didn't give comes from that newest one, never the older read (#1108)
+            title, task = named(art, o.title or art["title"])
         keep = os.path.join(FILES, art["id"], f"v{v}")
         copy_files(src, files, keep)
         # the stored copy is made ready for every browser (a poster, an mp4 for a clip no browser plays): SHEP-209
@@ -1050,8 +1063,10 @@ def cmd_check(o):
     drawing was skipped because Herdr's checker couldn't start (#987)."""
     with Store(find_anywhere(o.id), write=False) as s:
         a = as_version(s.find(o.id), o.version)
+    if not shutil.which("herdr-app"):  # #1108: nothing draws it here, so nothing to say it drew
+        raise Fail("herdr-app isn't here: it draws the artifact to check it. Run this on a machine with Herdr's window.")
     keep = os.path.join(FILES, a["id"], f"v{a['version']}")
-    keep, files = gather(keep)
+    keep, files = gather(keep, limits=False)
     err, warnings, unchecked = check(keep, files, a)
     out = {"id": a["id"], "version": a["version"], "ok": not err and not unchecked, "warnings": warnings,
            **({"error": err} if err else {}), **({"unchecked": unchecked} if unchecked else {})}
@@ -1300,28 +1315,33 @@ def png_read(path, upto=None):
         n, t = struct.unpack(">I4s", data[i:i + 8])
         body = data[i + 8:i + 8 + n]
         if t == b"IHDR":
-            head = struct.unpack(">IIBBBBB", body)
+            head = struct.unpack(">IIBBBBB", body) if len(body) == 13 else ()
         elif t == b"IDAT":
             idat.append(body)
         elif t == b"IEND":
             break
         i += 12 + n
-    if not head:
+    if not head or len(head) != 7:
         raise ValueError("no PNG header")
     w, h, depth, ctype, _c, _f, inter = head
     if depth != 8 or ctype not in (2, 6) or inter:
         raise ValueError("only an 8-bit RGB or RGBA PNG, not interlaced, is read without ImageMagick")
     ch = 3 if ctype == 2 else 4
     stride, rows, prev = w * ch, [], bytearray(w * ch)
-    z, raw = zlib.decompressobj(), b""
+    # what is inflated but not yet read: buf from pos (#1108: slicing off each row copied the rest, quadratic)
+    z, buf, pos = zlib.decompressobj(), bytearray(), 0
     chunks = iter(idat)
     for y in range(min(h, upto if upto is not None else h)):
-        while len(raw) < stride + 1:
+        while len(buf) - pos < stride + 1:
+            if pos > len(buf) // 2:
+                del buf[:pos]
+                pos = 0
             nxt = next(chunks, None)
-            raw += z.decompress(nxt) if nxt is not None else z.flush()
-            if nxt is None and len(raw) < stride + 1:
+            buf += z.decompress(nxt) if nxt is not None else z.flush()
+            if nxt is None and len(buf) - pos < stride + 1:
                 raise ValueError("a PNG cut short")
-        ft, line, raw = raw[0], bytearray(raw[1:stride + 1]), raw[stride + 1:]
+        ft, line = buf[pos], bytearray(buf[pos + 1:pos + 1 + stride])
+        pos += stride + 1
         if ft == 1:
             for x in range(ch, stride):
                 line[x] = (line[x] + line[x - ch]) & 255
@@ -1362,7 +1382,10 @@ def png_cut(src, out, x, y, w, h, outline=None, stroke=2, longest=None):
     """src's rectangle (px) as a PNG at out; outline: ("rect", x0, y0, x1, y1) or ("circle", cx, cy, r) inside the cut,
     drawn in blue; longest: shrunk (never grown) so its longest side is at most that."""
     x, y, w, h = max(0, int(x)), max(0, int(y)), int(w), int(h)
-    W, H, ch, rows = png_read(src, upto=min(png_size(src)[1], y + h))
+    W, H = png_size(src)
+    if x >= W or y >= H:  # #1108: nothing of it to cut (a cut of nothing wrote a PNG with no pixels)
+        raise ValueError(f"the rect starts outside the picture ({W}x{H} px)")
+    W, H, ch, rows = png_read(src, upto=min(H, y + h))
     w, h = max(1, min(int(w), W - x)), max(1, min(int(h), H - y))
     cut = [bytearray(r[x * ch:(x + w) * ch]) for r in rows[y:y + h]]
     if outline:
@@ -1403,7 +1426,7 @@ def cmd_crop(o):
         raise Fail("The rect needs a width and a height: x,y,w,h in pixels.")
     try:
         png_cut(os.path.expanduser(o.src), os.path.expanduser(o.out), x, y, w, h, longest=o.max)
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, struct.error, zlib.error) as e:  # a corrupt or short PNG too (#1108)
         raise Fail(f"Couldn't crop {o.src}: {e}.")
     W, H = png_size(os.path.expanduser(o.out))
     print(json.dumps({"out": os.path.expanduser(o.out), "width": W, "height": H}) if o.json else f"Wrote {o.out} ({W}x{H}).")

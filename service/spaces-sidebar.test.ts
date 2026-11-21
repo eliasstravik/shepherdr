@@ -31,9 +31,14 @@ const shared = new Map<string, unknown>();
 // #1010: a linked machine's Autopilot file, read there (exec with { on }); this computer's through readTextFile.
 let machinesNow: { name: string | null; layout?: string }[] = [];
 let localPilot: string | null = null;
+// #1108: the next local reads' answers, each held back until its gate opens (a slow disk); else localPilot at once
+const localQueue: { v: string | null; gate: Promise<void> }[] = [];
 const farFiles: Record<string, string> = {};
+const farUnreadable = new Set<string>();       // #1108: there, but cat can't read it
 const execImpl = async (_cmd: string, args: string[], opts?: { on?: string }) =>
-  opts?.on && String(args?.[1] ?? "").includes(".autopilot.json") && farFiles[opts.on] != null
+  opts?.on && farUnreadable.has(opts.on) && String(args?.[1] ?? "").includes(".autopilot.json")
+    ? { code: 1, stdout: "", stderr: "cat: Permission denied" }
+    : opts?.on && String(args?.[1] ?? "").includes(".autopilot.json") && farFiles[opts.on] != null
     ? { code: 0, stdout: farFiles[opts.on], stderr: "" } : { code: 1, stdout: "", stderr: "" };
 let sidebarPx = 260;
 const space = (id: string, active = false) => ({ id, name: id, active, machine: null as string | null, tabs: [] as unknown[], folder: "/tmp/x" });
@@ -46,7 +51,13 @@ const herdr = {
   run: () => {}, openOverlay: () => {}, closeOverlay: () => {}, notify: () => {}, playSound: () => {},
   shared: (k: string) => shared.get(k), setShared: (k: string, v: unknown) => { shared.set(k, v); },
   machines: () => machinesNow, focused: () => null, knownAgents: () => [], settings: () => ({}),
-  readTextFile: async (path: string) => (path.endsWith("/.autopilot.json") ? localPilot : null), writeTextFile: async () => {}, watchFolder: () => {},
+  readTextFile: async (path: string) => {
+    if (!path.endsWith("/.autopilot.json")) return null;
+    const q = localQueue.shift();
+    if (!q) return localPilot;
+    await q.gate;
+    return q.v;
+  }, writeTextFile: async () => {}, watchFolder: () => {},
   props: () => ({}), theme: () => theme, window: () => ({ platform: "linux" }), nextCommand: () => null,
   layout: () => ({ id: "root", children: [{ id: "sidebar", size: { px: sidebarPx } }] }),
 };
@@ -125,6 +136,28 @@ describe("Autopilot rocket for a linked machine's spaces (GitHub #1010)", () => 
     delete farFiles.vmb;
     await read(s); await read(s); await read(s);
     expect(s.pilots.get("vmb/sp1")).toBe("on");
+  });
+
+  test("a file there that can't be read keeps its rockets (#1108)", async () => {
+    const s: any = new Spaces(); s.pilots = new Map();
+    await read(s);
+    farUnreadable.add("vmb");
+    try {
+      await read(s); await read(s); await read(s);
+      expect(s.pilots.get("vmb/sp1")).toBe("on");
+    } finally { farUnreadable.delete("vmb"); }
+  });
+
+  test("an older read that ends late never puts back what a newer one changed (#1108)", async () => {
+    const s: any = new Spaces(); s.pilots = new Map(); s.pilotTick = 1;   // near reads only
+    let open!: () => void;
+    localQueue.push({ v: localPilot, gate: new Promise((r) => { open = r; }) });
+    s.readPilots(run); const older = last;          // reads s1 on, held back
+    localQueue.push({ v: JSON.stringify({ spaces: { s1: { on: false } } }), gate: Promise.resolve() });
+    await read(s);                                   // a newer read: s1 turned off
+    expect(s.pilots.has("s1")).toBe(false);
+    open(); await older;
+    expect(s.pilots.has("s1")).toBe(false);
   });
 
   test("turned off there: its rocket goes at the next read there", async () => {

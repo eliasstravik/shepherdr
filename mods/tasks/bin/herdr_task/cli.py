@@ -16,7 +16,7 @@ from .launch import cmd_allow, name_tabs
 from .commands import (
     cmd_accept, cmd_add, cmd_alert, cmd_config, cmd_edit, cmd_fix, cmd_list, cmd_merge, cmd_ready,
     cmd_resume, cmd_review, cmd_review_more, cmd_reviewed, cmd_rm, cmd_show, cmd_start, cmd_state, cmd_status,
-    cmd_switch, cmd_unarchive, cmd_where,
+    cmd_setup_failed, cmd_switch, cmd_unarchive, cmd_where,
 )
 from .tick import cmd_tick
 from .backups import cmd_backup, cmd_restore_spaces
@@ -199,6 +199,8 @@ def main():
                                       "setting, else the folder's current branch)")
         c.add_argument("--branch", help="its branch's exact name, e.g. a ticket's ABC-2137 (default: the folder's Branch names "
                                         "setting, else task/<n>-<title words>); refused when that branch exists already (\"\": the pattern's)")
+        c.add_argument("--pr", help="take a pull request already open, by its number (#1155): its review, checks and Accept go there "
+                                "instead of a new one, and ready pushes to its branch (\"\" lets go)")
 
     def agent_opts(c):
         c.add_argument("--agent", help="agent key (claude, codex, ...)")
@@ -236,6 +238,8 @@ def main():
     c.add_argument("--parent", help="a coordinator's terminal: the agent's hc parent (default: the space's coordinator)")
     c.add_argument("--now", action="store_true", help="skip the queue (a scheduled task: start it now)")
     c.add_argument("--branch", help="its branch's exact name (as add --branch), before its worktree is made")
+    c.add_argument("--pr", help="take a pull request already open, by its number (#1155): its review, checks and Accept go there "
+                                "instead of a new one, and ready pushes to its branch (\"\" lets go)")
     g = c.add_mutually_exclusive_group()
     g.add_argument("--here", action="store_true")
     g.add_argument("--worktree", action="store_true")
@@ -249,6 +253,8 @@ def main():
     c.add_argument("--proof", help="its proof artifact's id (herdr-artifact publish prints it); default: its newest artifact titled \"... · Proof\"")
     c.add_argument("--agents-md", help="\"For AGENTS.md\": one line about setting up or testing this repo that the next agent "
                                        "would need and AGENTS.md lacks; the Assistant decides whether to add it")
+    c.add_argument("--pr", help="take a pull request already open, by its number (#1155): its review, checks and Accept go there "
+                                "instead of a new one, and ready pushes to its branch (\"\" lets go)")
     c = cmd("reviewed", cmd_reviewed, "a task's agent records one review round of its current commit (Review: on): ready then "
                                       "accepts that commit; uses one of its Review rounds")
     c.add_argument("--report", help="the round's findings in a line (levels, what was fixed)")
@@ -398,6 +404,7 @@ def main():
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_autopilot)
     ap_cmd("run-now", "wake its Assistant now (queued until it is idle)")
+    ap_cmd("brief", "the whole instructions a full wake brings (heartbeat, direction, saved progress), for an Assistant whose short wake says so")
     ap_cmd("heartbeat", "the heartbeat this space works from (--everywhere: Everywhere's), and Everywhere's file from before (made with a starter when missing)", everywhere=True)
     c = sub.add_parser("progress", help="an Assistant on Autopilot saves its progress and next step: progress \"Started HAT-4; next: check its review\"")
     c.add_argument("text")
@@ -420,7 +427,7 @@ def main():
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=lambda a: cmd_sync_auto(a.machine) if a.auto else cmd_machines(a))
     c = ma.add_parser("reach", help="the reach map: the machines this one links to over herdr-core, and through each, what that one links to (contacts nothing else)")
-    c.add_argument("--refresh", action="store_true", help="check every link now (default: the scheduler's map, at most 10 minutes old)")
+    c.add_argument("--refresh", action="store_true", help="check every link now, and make each unreachable one try to connect again first (default: the scheduler's map, at most 10 minutes old)")
     c.add_argument("--quiet", action="store_true", help=argparse.SUPPRESS)
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_machines)
@@ -484,6 +491,19 @@ def main():
     c = cmd("sandbox", cmd_sandbox, "whether Codex's sandbox (bwrap) can start on this machine, and the fix for it when it can't "
             "(asked once and kept; --check asks again)", id=False)
     c.add_argument("--check", action="store_true", help="ask again now")
+    c = sub.add_parser("_setup-failed")  # a task's setup before its agent failed in its terminal (launch.SETUP_SH)
+    c.add_argument("id")
+    c.add_argument("--folder")
+    c.add_argument("--code", type=int, default=1)
+    c.add_argument("--log", default="")
+    c.set_defaults(fn=cmd_setup_failed, json=False)
+    c = sub.add_parser("_after-accept")  # a Done task's "When a task is accepted" command, run in the background (after_accept.py)
+    c.add_argument("id")
+    c.add_argument("--folder")
+    c.set_defaults(fn=lambda a: __import__("herdr_task.after_accept", fromlist=["cmd_after_accept"]).cmd_after_accept(a), json=False)
+    c = sub.add_parser("_disk-top")  # what fills a disk that holds new tasks, found in the background (queues.disk_top)
+    c.add_argument("path")
+    c.set_defaults(fn=lambda a: __import__("herdr_task.queues", fromlist=["cmd_disk_top"]).cmd_disk_top(a), json=False)
     c = sub.add_parser("_track")
     c.add_argument("id")
     c.add_argument("address")

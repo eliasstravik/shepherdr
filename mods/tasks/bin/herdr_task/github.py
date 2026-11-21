@@ -8,6 +8,7 @@ import shutil
 
 from .base import Fail, GH, git, hc_json, now, run, STORE
 from .agents import agent_running, detail, live_agents, live_helpers, mid_turn_agents
+from .after_accept import start as after_accept
 
 
 # ---- GitHub ---------------------------------------------------------------------------------
@@ -112,6 +113,10 @@ def pr_open(s, task, repo, summary=None):
             if summary:
                 pr_note(task, repo, summary)
             return pr
+        if ok and pr.get("taken"):
+            # --pr (#1155): the pull request it took is closed: said, never a new one of its own instead.
+            raise Fail(f"Pull request #{pr['number']}, which this task took, is {out.lower() or 'not open'}. Reopen it, take "
+                       f"another (ready --pr <n>), or let it go (ready --pr \"\") for a pull request of its own.")
         if pr.get("branch"):
             # The other branch's pull request it continued was closed or merged: its own branch from here.
             task.pop("pr")
@@ -701,9 +706,11 @@ def finish(s, task, even_if_busy=False):
     there and no agent still works in it: none mid-turn (mid_turn()), and (unless the person merged
     from Herdr) none running at all. Else tidy_done() removes them once its agents ended."""
     task["state"], task["done_at"] = "done", now()
-    for k in ("attention", "merge_requested", "queue", "queued_at", "merge_queued", "kept_open"):
+    for k in ("attention", "merge_requested", "queue", "queued_at", "merge_queued", "kept_open", "base_hold", "queue_fail"):
         task.pop(k, None)
     s.dirty = True
+    # The space's "When a task is accepted" command, in the background (after_accept.py): never waited on.
+    after_accept(s, task)
     if not task.get("worktree") or mid_turn(s, task) or (not even_if_busy and any(agent_running(k) for k in live_agents(s.key(task)))):
         return
     remove_worktree(s, task)

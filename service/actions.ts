@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { appHome, writable } from "./paths.ts";
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { sendBody, steerNow, messageBody, refusal, reactionLine, mentionedIn, taskTag } from "../core/send.js";
+import { sendBody, steerNow, messageBody, refusal, reactionLine, mentionedIn, taskTag, markSaid } from "../core/send.js";
 import { kindOf } from "../core/chat-reader.js";
 import { WORDS } from "../core/chat-view.js";
 import { settle } from "../core/pending.js";
@@ -50,6 +50,8 @@ async function sendNow(hub: Hub, b: any, compat: Compat, again = false) {
   const t = hub.terminals.get(a);
   if (!t || t.state !== "live") throw new Error("That agent isn't running.");
   const io = { hc: asPerson(hub), sleep: (ms: number) => Bun.sleep(ms), status: () => (hub.terminals.get(a) as any)?.status?.state ?? null };
+  // the person is chatting with it: Autopilot waits (core/send.js markSaid)
+  markSaid(io, a);
   // files sent with it: their paths after the words, as the window's chat sends them (copied first to another machine)
   const sent: string[] = Array.isArray(b.attachments) ? b.attachments : [];
   // never some of them quietly

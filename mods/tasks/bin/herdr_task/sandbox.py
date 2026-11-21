@@ -70,20 +70,19 @@ def _key(codex):
 
 
 def probe(codex):
-    """(ok, the error's first bwrap line or '') from a real `codex sandbox -- true`."""
+    """(ok, the error's first bwrap line or '', sure) from a real `codex sandbox -- true`. sure: False when it didn't
+    answer (too slow, couldn't start): no word now, and nothing kept (#1108: such a run was kept as a success for days)."""
     try:
         r = subprocess.run([codex, "sandbox", "--", "true"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE, text=True, timeout=PROBE_TIMEOUT, cwd=os.path.expanduser("~"))
-    except subprocess.TimeoutExpired:
-        return True, ""   # slow, not refused: no word
-    except OSError:
-        return True, ""
+    except (subprocess.TimeoutExpired, OSError):
+        return True, "", False   # slow or not started, not refused: no word, asked again next time
     if r.returncode == 0:
-        return True, ""
+        return True, "", True
     lines = [x.strip() for x in (r.stderr or "").splitlines() if x.strip()]
     said = next((x for x in lines if "bwrap" in x or "namespace" in x.lower() or "RTM_NEWADDR" in x), None)
     # Only the sandbox refusing counts: an older codex without `sandbox`, or another failure, says nothing.
-    return (False, said[:300]) if said else (True, "")
+    return (False, said[:300], True) if said else (True, "", True)
 
 
 def check(fresh=False):
@@ -103,8 +102,10 @@ def check(fresh=False):
         kept = None
     if not fresh and isinstance(kept, dict) and kept.get("key") == key and time.time() - kept.get("at", 0) < KEEP:
         return kept.get("broken")
-    ok, said = probe(codex)
+    ok, said, sure = probe(codex)
     broken = None if ok else {"error": said, "bwrap": key["bwrap"], "userns": key["userns"] == "1", "at": int(time.time())}
+    if not sure:
+        return broken
     try:
         os.makedirs(os.path.dirname(CACHE), exist_ok=True)
         tmp = CACHE + ".tmp"

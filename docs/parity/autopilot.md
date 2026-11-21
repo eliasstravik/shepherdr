@@ -35,6 +35,14 @@ in `.autopilot.json` (version 1) are dropped on the next read.
 | `herdr-task autopilot show --space <id>` / `--everywhere`, `list [--here] [--json]` | what applies there, `own` (the fields the space sets itself), next and last wake, progress; `list` is `{everywhere, spaces}`, its text first `Everywhere: Every hour`, then every space the window lists by name (never `~`), this machine's then each other machine's (`exedev on vm-stravik`, asked there at once; `can't tell, … didn't answer` when it's away), with "its own schedule" where it has one; `--here`: this machine's only |
 | Another machine's space (`--space vm/sp1`) | `on`, `off`, `run-now`, `show`, `heartbeat` are done by herdr-task on that machine (installed there first when it isn't this one's), told the space's name and folder from the window here; its own record and scheduler wake it there, so a wake is never sent twice and goes on while this machine sleeps. `set` writes this machine's settings under `vm/sp1`, which reach it with the rest. `on` and `run-now` start that machine's scheduler when it isn't running |
 | `run-now --space <id>`, `progress`, `complete` | as before, per space |
+| `herdr-task autopilot brief [--space <id>]` | the whole instructions a full wake brings (heartbeat, direction, saved progress), for an Assistant whose short wake says so |
+
+How wakes go (#1089, #1217): the first wake to an Assistant (or after a restart, a changed heartbeat or direction, or 12 hours)
+brings the whole instructions; later ones are short (`short="1"`: why it woke, what waits on the person). A task event its
+news tells too (ready, merged, needs you, failed, stalled) waits a minute for that news and is then no wake of its own.
+A failed event comes once per problem and pull request commit. While the person wrote to the Assistant in the last 5
+minutes (the chat labels it `herdr.said=<ms>` as it sends), a scheduled wake is skipped and an event's waits; Run now and
+switching on still go.
 
 ## The page
 

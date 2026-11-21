@@ -99,6 +99,7 @@ def rows(space, d=None, auto=None):
                                             f"reviewer {pick_words(cfg.get('reviewer'), 'the other CLI')}")
         merge = t.get("merge") if t.get("merge") in MERGE_SHORT else "ask"
         notes = [w for w, k in (("start", "start_notes"), ("finish", "finish_notes")) if str(t.get(k) or "").strip()]
+        setup = " ".join(str(t.get("setup") or "").split())[:200]
         a_on, a_every, a_dir = autopilot
         reacting = (cfg.get("agents") or {}).get("reactions") is not False
         offering = (cfg.get("agents") or {}).get("feedback") is not False
@@ -121,6 +122,8 @@ def rows(space, d=None, auto=None):
              str(t.get("max_running") or MAX_RUNNING), [("tasks", "max_running")]),
             ("notes", "Task notes", (" and ".join(notes) + " notes set (every brief includes them)") if notes else "none",
              ",".join(notes) or "none", [("tasks", "start_notes"), ("tasks", "finish_notes")]),
+            ("setup", "Before the agent starts", (f"{setup} (runs in each new worktree first; if it fails the task waits "
+             "with why and its agent doesn't start)") if setup else "none", "on" if setup else "off", [("tasks", "setup")]),
             ("autopilot", "Autopilot", ("on, " + a_every + (f", direction: {a_dir}" if a_dir else "")) if a_on
              else "off" + (f" (direction when on: {a_dir})" if a_dir else ""), "on" if a_on else "off",
              [("autopilot", "every"), ("autopilot", "events"), ("autopilot", "direction"), ("autopilot", None)]),

@@ -32,7 +32,9 @@ drops the space's own, and it inherits again. A few settings are one for every s
 | Tasks | Base branch | Space only | A branch only means something in one repo |
 | Tasks | Branch names (a pattern: `{n}`, `{key}`, `{slug}`; empty: `task/{n}-{slug}`; a task's own `--branch` wins) | Everywhere, space | A team may name branches after its tickets |
 | Tasks | Run automations | Everywhere, space | Pause one repo's automations |
+| Tasks | Before the agent starts (a shell command) | Everywhere, space | A repo's dependencies, needed before its agent loads |
 | Tasks | When a task starts / finishes | Everywhere, space | Setup and cleanup steps are a repo's |
+| Tasks | When a task is accepted (a shell command Herdr runs in the repo once a task is done) | Everywhere, space | What a repo's tasks leave behind (test databases, containers) is the repo's |
 | Autopilot | Heartbeat, Schedule, Events | Everywhere, space | Each space works toward its own goal, at its own pace |
 | Autopilot | On or off | Space only | The header's switch: Everywhere never turns a space on |
 | Notify | All / Needs me / Off | Everywhere, space | A busy space can be quiet |
@@ -57,9 +59,22 @@ task values a machine set before (the old machine scope) still apply there until
   ids there), and when the web app is served from another machine its service keeps the file in step with that host
   (`service/sync.ts`). So a space on any machine, and the web on the Mac mini, see the same values. On a machine
   still on an older Shepherdr the file is `~/.herdr/shepherdr.json`; pushes and syncs find it there.
+- `tasks.accept_command` (#1102): run by herdr-task itself (`after_accept.py`), once per task, as it becomes Done
+  (accepted and merged, merged on GitHub, or nothing to merge), in the background with `/bin/sh -c` in the repo's main
+  folder, at most 10 min. It gets `HERDR_TASK_ID` (SHEP-4), `HERDR_TASK_NUMBER`, `HERDR_TASK_TITLE`, `HERDR_TASK_BRANCH`,
+  `HERDR_TASK_BASE`, `HERDR_TASK_WORKTREE` (which may already be removed) and `HERDR_TASK_FOLDER`. How it went is kept on
+  the task (`after_accept`: running, ok or failed, its exit code and last lines; the whole output in
+  `<tasks>/.after-accept/<list>-<n>.log`). A failure never undoes the Done: its row says "Cleanup failed", `herdr-task
+  show` says why, and its space's Assistant is told once (news event `accept-failed`).
 - `tasks.worktree_root` (in `everywhere`, a machine's or a space's `tasks`; no row in the window yet): the folder new
   task worktrees go in, e.g. a bigger disk (`~` allowed). Unset: `~/.local/share/shepherdr/worktrees`. A task keeps
   the worktree it has.
+- `tasks.setup` (Tasks › Before the agent starts, #1197): a shell command herdr-task runs in each new task worktree,
+  in the agent's own terminal just before the agent (e.g. `bun install`, or linking the main folder's `node_modules`),
+  so an agent that loads project code at startup finds it there. Its output shows in that terminal and is kept in
+  `~/.local/share/shepherdr/tasks/.setup/<list>-<id>.log`. It fails: the agent isn't started, and the task shows Needs
+  you with the exit code, the output's last line and the log (`herdr-task _setup-failed`); starting it again runs the
+  setup again. It never runs for a task working in the folder itself, nor again in a worktree whose setup passed.
 - Secrets live in one vault, `~/.local/share/shepherdr/secrets/vault.json` on the machine that keeps them (Secrets › Kept on). Which one:
   herdr-core document `shepherdr.secrets` = `{ id, at, by }` on every machine, handed on by each service as
   `shepherdr.host` is (`core/secrets.js`). `herdr-secret` on any other machine passes `set`, `rm` and `names` there

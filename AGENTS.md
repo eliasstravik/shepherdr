@@ -149,3 +149,17 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - From SHEP-258: Codex's model list comes from its own catalog: npm i --prefix <scratch> @openai/codex@<ver> and run its codex debug models to see a newer CLI's models and service_tiers without touching the installed one.
 - From SHEP-259: Python's zipimport reopens a zipapp by path on every import: test a swap by starting the zipapp, replacing its file, then importing (test/test_zipapp_swap.py).
 - From SHEP-263: a real service on a throwaway core: HOME=<scratch home> (with ~/.local/share/shepherdr/LAYOUT copied), SHEPHERDR_HC=<wrapper exporting HC_SESSION, exec hc> (the hub drops HC_SESSION: without it the service attaches to the REAL core), fake herdr-task/herdr-app/tailscale first on PATH.
+
+- Run `bun install` in a fresh worktree before `bun test core/`: core tests that import marked fail without it. (from SHEP-268)
+
+- The dev VM's sh is busybox (/exe.dev/bin/sh): its lsof applet ignores a fake lsof on PATH, so test macOS lsof paths under bash. (from SHEP-267)
+
+- Accept card screenshots with real evidence: run herdr_task.proof.evidence on a scratch repo (mock artifacts_of), dump the JSON, and serve it from a stub's /api/action evidence reply. (from SHEP-273)
+
+- A real herdr-task CLI run with HERDR_TASK_STORE=<tmp>, a fake gh via HERDR_TASK_GH and a fake hc on PATH still makes worktrees under the real ~/.local/share/shepherdr/worktrees/<repo folder name>: give the scratch repo a unique name and rm that folder after. (from SHEP-271)
+
+- A real herdr-task start in worktree mode without touching people's tasks: env -i with HERDR_TASK_STORE, HERDR_TASK_SETTINGS (tasks.worktree_root to scratch), SHEPHERDR_NO_MIGRATE=1 and a fake hc exporting HC_SESSION; start --argv '["sh","-c","..."]' stands in for the agent. (from SHEP-272)
+
+- Fake a dropped herdr-core link: hc machine add --via <script> --session b on a throwaway core, make the script fail while a flag file exists, kill the core's `herdr-core connect` child; hc machine login only retries with a terminal (give it a pty). (from SHEP-276)
+
+- Web viewer before/after on the dev VM: `bunx vite build --config web/vite.viewer.config.ts` writes a single-file web/dist/artifact-viewer.html; serve it with a tiny Bun stub answering /api/artifacts/<id> and /recipe. (from SHEP-274)

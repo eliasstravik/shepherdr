@@ -45,6 +45,27 @@ test("a space's own values go in its layer with its folder, and Reset drops them
   expect(() => s.set("tasks.merge", "Right away", "sp3", null)).toThrow();
 });
 
+test("Before the agent starts (#1197): a space's own command, in a monospace box before the notes", () => {
+  const s = new Settings();
+  s.start();
+  const scope = { id: "sp7", name: "pi", machine: null, folder: "/pi" };
+  const rows = () => s.sections(null, [scope]).find((x) => x.name === "Tasks" && x.level === "sp7")!.rows;
+  const row = () => rows().find((r) => r.key === "tasks.setup")!;
+  expect(row()).toMatchObject({ label: "Before the agent starts", multiline: true, mono: true, value: "", placeholder: "bun install" });
+  // first of the boxes: it runs before the agent reads the notes
+  const keys = rows().map((r) => r.key);
+  expect(keys.indexOf("tasks.setup")).toBe(keys.indexOf("tasks.start_notes") - 1);
+  s.set("tasks.setup", "ln -s ../../node_modules .", "sp7", scope);
+  expect(JSON.parse(readFileSync(file, "utf8")).spaces.sp7.tasks.setup).toBe("ln -s ../../node_modules .");
+  expect(row()).toMatchObject({ value: "ln -s ../../node_modules ." });
+  s.set("tasks.setup", null, "sp7", scope);
+  expect(JSON.parse(readFileSync(file, "utf8")).spaces.sp7.tasks).toBeUndefined();
+  // the notes keep their keys
+  s.set("tasks.start_notes", "Read the README", "all");
+  expect(JSON.parse(readFileSync(file, "utf8")).everywhere.tasks.start_notes).toBe("Read the README");
+  s.set("tasks.start_notes", null, "all");
+});
+
 test("Branch names (#570): Everywhere's or a space's own pattern, checked before it's kept", () => {
   const s = new Settings();
   s.start();
@@ -262,4 +283,19 @@ test("Extra flags (#1222): a box per CLI, Everywhere's or a space's own, kept as
   expect(() => s.set("tasks.codex_flags", JSON.stringify(["a prompt"]), "all")).toThrow("Not a list of flags.");
   s.set("tasks.claude_flags", null, "sp7", scope);
   expect(JSON.parse(readFileSync(file, "utf8")).spaces.sp7.tasks).toBeUndefined();
+});
+
+test("SHEP-275: When a task is accepted is a command box under the notes, Everywhere's or a space's own", () => {
+  const s = new Settings();
+  s.start();
+  const scope = { id: "sp3", name: "api", machine: null, folder: "/api" };
+  s.set("tasks.accept_command", 'dropdb --if-exists "test_$HERDR_TASK_ID"', "sp3", scope);
+  const f = JSON.parse(readFileSync(file, "utf8"));
+  expect(f.spaces.sp3.tasks).toEqual({ accept_command: 'dropdb --if-exists "test_$HERDR_TASK_ID"' });
+  const tasks = s.sections(null, [scope]).find((x) => x.name === "Tasks" && x.level === "sp3")!;
+  const keys = tasks.rows.map((r) => r.key);
+  expect(keys.slice(-3)).toEqual(["tasks.start_notes", "tasks.finish_notes", "tasks.accept_command"]);
+  expect(tasks.rows.at(-1)).toMatchObject({ label: "When a task is accepted", multiline: true, mono: true, value: 'dropdb --if-exists "test_$HERDR_TASK_ID"' });
+  s.set("tasks.accept_command", null, "sp3", scope);
+  expect(JSON.parse(readFileSync(file, "utf8")).spaces.sp3.tasks?.accept_command).toBeUndefined();
 });

@@ -19,6 +19,7 @@ import os
 import re
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -48,6 +49,8 @@ SYNC_DEBOUNCE_MS = 30000        # files changed here: wait until they stay put t
 SYNC_RETRY_MS = 10 * 60000      # a machine whose sync failed: tried again after this
 REACH_EVERY_MS = 5 * 60000      # the scheduler refreshes the reach map this often
 REACH_DEPTH = 3                 # hops the map follows past this machine, over herdr-core links only
+RELINK_S = 10                   # a refresh's forced retry of one unreachable link waits this long at most (#1104)
+NET_AGAIN_MS = 30000            # after the network changes, links still unreachable get one more try this much later
 FIND_EVERY_MS = 10 * 60000      # Find machines: at most once in this long
 FIND_AT_ONCE = 4                # Find machines: hosts tried at the same time
 
@@ -487,8 +490,37 @@ def machines_pass(report):
     if due and not _busy(".machines-sync.lock"):
         _spawn(["machines", "sync", "--auto", *due], ".machines-sync.log")
         report.setdefault("synced", []).extend(due)
+    # #1104: when the network changes (Tailscale back on, another Wi-Fi) while a link is unreachable, a refresh now,
+    # which makes those links try again, and once more NET_AGAIN_MS later (DNS can lag the network by a moment).
+    down = any(m.get("state") == "unreachable" for m in ms)
+    net, st = _net(), _load_state()
+    changed = net != st.get("net")
+    retry = down and not addon_off("machines") and (changed or t >= (st.get("net_again") or float("inf")))
+    if retry and _busy(".reach.lock"):
+        pass  # a refresh is under way: the next round looks again (the new network stays unrecorded till then)
+    elif retry:
+        _spawn(["machines", "reach", "--refresh", "--quiet"], ".reach.log")
+        _save_state(lambda d: d.update(net=net, net_again=t + NET_AGAIN_MS if changed else None))
+        return
+    elif changed or (st.get("net_again") and not down):
+        _save_state(lambda d: d.update(net=net, net_again=None))
     if t - (_reach_cache() or {}).get("at", 0) >= REACH_EVERY_MS and not _busy(".reach.lock"):
         _spawn(["machines", "reach", "--refresh", "--quiet"], ".reach.log")
+
+
+def _net():
+    """This machine's network as a cheap fingerprint, contacting nobody: the address it would send from to Tailscale's
+    own 100.100.100.100 and to the internet (a UDP connect only picks a route; nothing is sent). Tailscale going on or
+    off, or another network, changes it."""
+    out = []
+    for ip in ("100.100.100.100", "192.0.2.1"):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect((ip, 9))
+                out.append(s.getsockname()[0])
+        except OSError:
+            out.append(None)
+    return out
 
 
 def cmd_sync_auto(names):
@@ -536,11 +568,39 @@ try:
         me["tools"] = json.load(f).get("version")
 except Exception:
     me["tools"] = None
+def relink(name):
+    # #1104: an unreachable link can sit on its last failure (a DNS error from before Tailscale came back) while
+    # herdr-core backs off. `hc machine login` makes it try now, but only with a terminal: a pseudo-terminal it gets,
+    # in a session of its own (no controlling terminal, so ssh can't sit on a password prompt); never typed into.
+    try:
+        import pty
+        mfd, sfd = pty.openpty()
+    except Exception:
+        return
+    try:
+        subprocess.run([hc, "machine", "login", name], stdin=sfd, stdout=sfd, stderr=sfd, timeout=o["relink"], start_new_session=True)
+    except Exception:
+        pass
+    finally:
+        os.close(sfd)
+        os.close(mfd)
+def links():
+    return [m for m in (js(sh([hc, "machine", "ls", "--json"])[1]) or {}).get("machines") or [] if not m.get("temporary")]
 if hc:
-    for m in (js(sh([hc, "machine", "ls", "--json"])[1]) or {}).get("machines") or []:
-        if not m.get("temporary"):
-            me["links"].append({"how": "herdr-core", "to": m.get("name"), "id": m.get("id"), "target": m.get("target"),
-                                "state": m.get("state"), "ok": m.get("state") == "connected"})
+    ms = links()
+    # A refresh (o["relink"]): every link herdr-core holds as unreachable tries again now, then the map reads it anew.
+    # needs_login is left alone: that one waits for a person to type.
+    down = [m.get("name") for m in ms if m.get("state") == "unreachable" and m.get("name")] if o.get("relink") else []
+    if down:
+        ths = [threading.Thread(target=relink, args=(n,)) for n in down]
+        for t in ths:
+            t.start()
+        for t in ths:
+            t.join()
+        ms = links()
+    for m in ms:
+        me["links"].append({"how": "herdr-core", "to": m.get("name"), "id": m.get("id"), "target": m.get("target"),
+                            "state": m.get("state"), "ok": m.get("state") == "connected"})
     # Assistants: live terminals labelled herdr.role=coordinator, or started from the assistant template.
     seen = {}
     for args in (["--label", "herdr.role=coordinator"], []):
@@ -582,7 +642,7 @@ if o["depth"] > 0 and core:
     for l in look:
         chosen.setdefault(l["id"], l)
     seen2 = sorted(set(o["seen"]) | {core["id"]} | set(chosen))
-    sub = json.dumps({"depth": o["depth"] - 1, "seen": seen2, "timeout": max(15, o["timeout"] - 15)})
+    sub = json.dumps({"depth": o["depth"] - 1, "seen": seen2, "timeout": max(15, o["timeout"] - 15), "relink": o.get("relink")})
     boot = "import sys; S = sys.stdin.read(); exec(S)"
     def hop(l):
         argv = [hc, "exec", "--on", l["to"], "--stdin", "--timeout", str(o["timeout"]), "--", "python3", "-c", boot, sub]
@@ -608,13 +668,14 @@ def _reach_cache():
         return None
 
 
-def probe(depth=REACH_DEPTH, timeout=90):
+def probe(depth=REACH_DEPTH, timeout=90, relink=False):
     """The reach map from this machine, hops and all, checked now. With the Other machines add-on
-    off: this machine alone, no link followed."""
+    off: this machine alone, no link followed. relink: every machine on the way first makes its
+    unreachable links try again now (#1104), each for at most RELINK_S."""
     if addon_off("machines"):
-        depth = 0
+        depth, relink = 0, False
     boot = "import sys; S = sys.stdin.read(); exec(S)"
-    r = subprocess.run([sys.executable, "-c", boot, json.dumps({"depth": depth, "seen": [], "timeout": timeout})], input=PROBE,
+    r = subprocess.run([sys.executable, "-c", boot, json.dumps({"depth": depth, "seen": [], "timeout": timeout, "relink": RELINK_S if relink else None})], input=PROBE,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout + 60)
     try:
         graph = json.loads(r.stdout.strip().splitlines()[-1])
@@ -636,7 +697,7 @@ def reach(refresh=False, max_age=REACH_EVERY_MS * 2):
         fcntl.flock(lock, fcntl.LOCK_EX)  # one check at a time; a second waits and reads the first's
         try:
             d2 = _reach_cache()
-            d = d2 if d2 and d2.get("at", 0) > (d or {}).get("at", 0) and not refresh else probe()
+            d = d2 if d2 and d2.get("at", 0) > (d or {}).get("at", 0) and not refresh else probe(relink=refresh)
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
             lock.close()
@@ -823,6 +884,10 @@ def find(go=False):
         lock.close()
         raise Fail("Find machines is already running")
     try:
+        # #1108: another Find may have run and let go of the lock since the wait was read: read it again, held
+        wait = max(0, FIND_EVERY_MS - (now() - (_found() or {}).get("at", 0)))
+        if wait:
+            raise Fail(f"Find machines ran {(FIND_EVERY_MS - wait) // 60000} min ago; try again in {-(-wait // 60000)} min")
         _save_found({"at": now(), "hosts": [], "running": True})  # counts for the wait even if this run dies
         out, todo = [None] * len(hosts), list(enumerate(hosts))
         mu = threading.Lock()

@@ -28,12 +28,14 @@ READS = {"list", "show", "where"}
 WAIT = 25.0      # the window stops a command at 30 s: answer before that
 PENDING = 75     # exit code: still running there, follow it with _job
 STEP_MAX = 1.0
+POLL_MAX = 15    # one poll's longest wait there; the last ones get only what is left before the deadline
 
 # There: run herdr-task with its output and exit code in files, as hc exec would run it (no terminal's ids:
-# herdr-task would take the terminal for an agent's). Old results go after an hour.
+# herdr-task would take the terminal for an agent's). Old results go after an hour. The job's .out is made with
+# noclobber first (#1108): a start whose reply was lost, started again, finds it taken and runs nothing.
 RUN = r'''d="${TMPDIR:-/tmp}/herdr-task-jobs-$(id -u)"; mkdir -p "$d" && chmod 700 "$d" || exit 1
 j=$1; b=${2:-$HOME/.local/bin/herdr-task}; shift 2
-: > "$d/$j.out"
+(set -C; : > "$d/$j.out") 2>/dev/null || exit 0
 find "$d" -type f -mmin +60 -exec rm -f {} + 2>/dev/null
 unset HC_TERMINAL_ID HC_TERMINAL_SOCKET TERM_PROGRAM
 "$b" "$@" > "$d/$j.out" 2> "$d/$j.err" < /dev/null
@@ -100,9 +102,9 @@ def start(machine, job, argv):
                 os.environ.get("HERDR_TASK_REMOTE_BIN", ""), *argv])
 
 
-def poll(machine, job):
+def poll(machine, job, timeout=POLL_MAX):
     """("done", {rc, out, err}) | ("running"|"none", None) | ("lost", hc's run) | ("error", hc's run)."""
-    r = run(["hc", "exec", "--on", machine, "--timeout", "15", "--", "python3", "-c", POLL, job])
+    r = run(["hc", "exec", "--on", machine, "--timeout", str(timeout), "--", "python3", "-c", POLL, job])
     if r.returncode != 0:
         return ("lost" if lost(r) else "error"), r
     head, _, rest = r.stdout.partition("\n")
@@ -136,7 +138,8 @@ def follow(machine, job, argv, deadline, restart=None, maybe=False):
     mid-call (it may have begun there), not refused before it reached the machine."""
     step, nones, last = 0.2, 0, None
     while True:
-        state, got = poll(machine, job)
+        # #1108: a poll started near the deadline gets only what is left (a whole 15 s could answer after 30 s)
+        state, got = poll(machine, job, max(1, min(POLL_MAX, int(deadline - time.monotonic()))))
         if state == "done":
             return _done(argv, got.get("rc", 1), got.get("out", ""), got.get("err", ""))
         if state == "error":
@@ -159,7 +162,8 @@ def follow(machine, job, argv, deadline, restart=None, maybe=False):
                 else:
                     maybe = maybe or cut(r)
         else:
-            last = None
+            # running there: known to have started, so the deadline says pending, never "may have run" (#1108)
+            last, restart = None, None
         if time.monotonic() + step >= deadline:
             break
         time.sleep(step)

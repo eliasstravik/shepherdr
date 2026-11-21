@@ -114,6 +114,9 @@ def pr_news(s, t, v, report):
         w = {"since": since, "seen": [], "checked": 0, "failed": w.get("failed"), "conflict": w.get("conflict")}
     checks = v.get("statusCheckRollup") or []
     failed = [c for c in checks if (c.get("conclusion") or c.get("state") or "").upper() in BAD - {"CANCELLED"}]
+    if failed and held_by_base(s, t, v):
+        # SHEP-270: the same checks fail its base (or many pull requests): held until it is green again.
+        failed = []
     head = v.get("headRefOid") or ""
     mark = f"{head}:" + ",".join(sorted(c.get("name") or c.get("context") or "check" for c in failed)) if failed else None
     # A conflict with its base goes back to its agent too (SHEP-175), once per commit.
@@ -176,6 +179,12 @@ def pr_news(s, t, v, report):
                                             **({"conflict": True} if news_conflict else {})})
 
 
+def held_by_base(s, t, v):
+    """Its failed checks all explained by its base (systemic.covered()): its fix request waits."""
+    from .systemic import covered, failing
+    return bool(covered(s, t, failing(v.get("statusCheckRollup"))))
+
+
 def pr_deliver(s, t, report):
     """Passes a Ready task's waiting GitHub news to its agent once, when it rests. News of an
     earlier ready, or older than NOTICE_KEEP_MS, is dropped."""
@@ -209,11 +218,9 @@ def verdict(runs, sha):
     return "pass", []
 
 
-def main_check(s, base, w, report):
-    """One look at a watched base branch on GitHub: its newest commit whose push runs all finished
-    decides. Red for the first time since it was green: news for the Assistant (w["notice"]),
-    with the failing runs, the end of a failed log and what merged since it was last green."""
-    repo = w["repo"]
+def base_history(repo, base):
+    """A base branch on GitHub: (its newest commits, newest first; its push runs), or None when GitHub
+    didn't answer."""
     ok, out, _ = gh("api", f"repos/{repo}/commits?sha={base}&per_page=50", "--jq", "map(.sha)")
     try:
         history = json.loads(out) if ok else None
@@ -226,8 +233,20 @@ def main_check(s, base, w, report):
     except ValueError:
         runs = None
     if not isinstance(history, list) or not isinstance(runs, list):
+        return None
+    return history, runs
+
+
+def main_check(s, base, w, report):
+    """One look at a watched base branch on GitHub: its newest commit whose push runs all finished
+    decides. Red for the first time since it was green: news for the Assistant (w["notice"]),
+    with the failing runs, the end of a failed log and what merged since it was last green."""
+    repo = w["repo"]
+    got = base_history(repo, base)
+    if not got:
         w["error"] = "GitHub didn't answer."
         return
+    history, runs = got
     w.pop("error", None)
     for sha in history:
         state, failed = verdict(runs, sha)

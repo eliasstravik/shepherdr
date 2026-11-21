@@ -36,7 +36,7 @@ import { words, howAnswered, codexOnScreen, codexSteps } from "./core/asks.js";
 // The rows' words and rules the web app's chat draws by too (core/chat-view.js).
 import { WORDS, clock, bgGroups, subagentsOf, subagentWord, senderName, briefLabel, firstUser, firstKeys, literal, fromName, sentTo, selfName, initialOf, newsWords, resolveArtifacts, unsigned, ownWords, fitThumbs, bandActs, bandOrder, imagesLine, questionsBelow, notSent, published, artifactLine, videoLine, mediaIn, elapsed, reportMsg, doingWords, LOST, lostMessage, shellWord, sessionStarted, sessionFailed } from "./core/chat-view.js";
 // Sending the person's words, as the web app does (core/send.js).
-import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine, mentionedIn, sendTyped, SETTLE } from "./core/send.js";
+import { refusal, taskTag, messageBody, replyInstead, steerNow, reactionLine, mentionedIn, sendTyped, SETTLE, markSaid } from "./core/send.js";
 // hc whose send goes as the person, with no caller: never "Another agent" on another machine (SHEP-3, core/person.js).
 import { asPerson } from "./core/person.js";
 import { AskCards, linkCtl } from "./cards.js";
@@ -1485,6 +1485,7 @@ export default class Chat extends View {
         p.sent = [body, ...paths].filter(Boolean).join("\n\n");
         // (a message with pictures: its Enter again if Claude Code lost it, sendTyped(); one that stayed in its box
         // last time gets only its Enter now, never typed twice)
+        markSaid(this.sendIo(cx), this.addr);
         r = await sendTyped(this.sendIo(cx), this.addr, this.kind, p.sent, SETTLE, !!msg.stuck);
         msg.stuck = !!r.stuck;
         // Its own dialog is open in its terminal (a question or a permission with no card
@@ -2160,15 +2161,18 @@ export default class Chat extends View {
   restartAssistant(cx) {
     const mine = this.myPane() ?? this.lastPane;
     if (this.restarting || !mine || !this.addr) return;
+    // what it restarts, read now (#1108): "Start a new one" pressed while hc answers empties the chat, and that wins
+    const addr = this.addr, kind = this.kind, path = this.path;
     this.restarting = true;
     cx.notify();
     cx.spawn(async (cx) => {
       try {
-        const r = await hc(["get", this.addr, "--json"]);
+        const r = await hc(["get", addr, "--json"]);
+        if (this.addr !== addr || this.phase === "fresh") { this.restarting = false; cx.notify(); return; }
         let t = null;
         try { t = JSON.parse(r.stdout || "null"); } catch {}
         if (!t || t.error) throw new Error("Its old terminal is gone. Start a new Assistant instead.");
-        const argv = agent.resumeArgv(this.kind, this.argv ?? t.argv ?? [this.kind], agent.sessionOf(this.kind, this.path));
+        const argv = agent.resumeArgv(kind, this.argv ?? t.argv ?? [kind], agent.sessionOf(kind, path));
         this.swapping = true;
         const next = await agent.restart(t, { argv, resume: true, base: argv }, mine);
         this.endedAssistant = false;

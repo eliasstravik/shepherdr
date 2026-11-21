@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { inputLine, sendBody, steerNow } from "./send.js";
+import { inputLine, sendBody, steerNow, markSaid } from "./send.js";
 import { LOG, Conversation, records } from "./chat-log.js";
 
 // A Claude Code terminal as hc sees it: what its screen shows after each call.
@@ -209,4 +209,15 @@ test("a file alone (no words, not a picture) still in the box is not taken as se
   expect(holds("❯ /var/files/t1/report.txt", "/var/files/t1/report.txt")).toBe(true);
   expect(holds("❯ /var/files/t1/report.txt", "/var/files/t1/report.txt", true)).toBe(true);
   expect(holds("❯ ", "/var/files/t1/report.txt")).toBe(false);
+});
+
+test("markSaid labels the agent with when the person wrote, and never fails the send (#1217)", async () => {
+  const calls = [];
+  markSaid({ hc: async (args) => { calls.push(args.join(" ")); return { code: 0 }; } }, "vm/t4", 1234);
+  await Promise.resolve(); await Promise.resolve();
+  expect(calls).toEqual(["label vm/t4 herdr.said=1234"]);
+  // hc throwing or refusing: nothing breaks
+  expect(() => markSaid({ hc: () => { throw new Error("no hc"); } }, "t1")).not.toThrow();
+  markSaid({ hc: async () => { throw new Error("down"); } }, "t1");
+  await new Promise((r) => setTimeout(r, 5));
 });

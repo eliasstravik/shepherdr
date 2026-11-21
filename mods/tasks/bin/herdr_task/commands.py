@@ -26,7 +26,7 @@ from .github import (already_merged, checks_missing, github_unreachable, pr_for_
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
-    own_path, parent_for, resume_argv, retag_tabs, set_branch, tab_title, task_tabs,
+    own_path, parent_for, resume_argv, retag_tabs, set_branch, setup_for, tab_title, task_tabs,
 )
 from .store import bare_by_mistake, is_task_list, locate, open_store, prefixes_in_use, read_list, Store, store_files
 from .queues import after_refs, parse_after, queue_reason, set_after
@@ -112,6 +112,7 @@ def cmd_add(args):
         set_opts(t, args, s, space)
         set_base(s, t, args.base, space, new=True)
         set_branch(s, t, getattr(args, "branch", None))
+        take_pr(s, t, getattr(args, "pr", None))
         set_notes(t, args)
         if args.after:
             set_after(s, t, *parse_after(s, args.after))
@@ -200,6 +201,73 @@ def set_base(s, t, base, space=None, new=False):
         t["base"], t["base_set"] = base, True
 
 
+PR_FIELDS = "number,url,state,isCrossRepository,headRefName,headRefOid,baseRefName"
+
+
+def take_pr(s, t, number):
+    """--pr <n> (#1155, #1195): the task takes a pull request that is already open (a person's, a bot's,
+    one its agent opened on another branch) instead of opening its own. Its review, checks news and
+    Accept work on that one; ready pushes the task's commits to its branch, never forced, and leaves its
+    description as it is (pr["branch"], as #828's). Before its worktree is made, the worktree starts from
+    that branch and takes its base; after, the task's branch must already hold its latest commit.
+    "" lets go of a pull request taken this way (ready opens the task's own again)."""
+    if number is None:
+        return
+    number = str(number).strip().lstrip("#")
+    if not number:
+        if (t.get("pr") or {}).get("taken"):
+            t.pop("pr")
+        return
+    if not number.isdigit():
+        raise Fail(f"--pr takes a pull request's number, like 42; not {number!r}.")
+    if t.get("mode") != "worktree":
+        raise Fail("--pr is for tasks in a worktree; this one works in the folder itself.")
+    repo = github(s)
+    if not repo:
+        raise Fail(github_unreachable(s) or "--pr needs a folder whose remote is on GitHub.")
+    ok, out, err = gh("pr", "view", number, "--repo", repo, "--json", PR_FIELDS)
+    try:
+        v = json.loads(out) if ok else None
+    except ValueError:
+        v = None
+    if not isinstance(v, dict) or not v.get("number"):
+        raise Fail(f"Couldn't find pull request #{number} in {repo}: {err or out or 'no answer'}")
+    n, head, into = v["number"], v.get("headRefName") or "", v.get("baseRefName") or "main"
+    if v.get("state") != "OPEN":
+        raise Fail(f"Pull request #{n} is {str(v.get('state') or 'not open').lower()}: only an open one can be taken.")
+    if v.get("isCrossRepository"):
+        raise Fail(f"Pull request #{n} comes from a fork: Herdr can't push to its branch. Leave --pr out, so ready "
+                   "opens the task's own.")
+    mine = t.get("pr") or {}
+    if mine.get("number") == n and mine.get("repo") == repo:
+        return
+    other = next((o for o in s.data["tasks"] if o is not t and o.get("state") != "done"
+                  and (o.get("pr") or {}).get("number") == n and (o.get("pr") or {}).get("repo") == repo), None)
+    if other:
+        raise Fail(f"Pull request #{n} is already {s.ref(other)}'s.")
+    main, wt = s.loc["folder"], t.get("worktree")
+    if wt:
+        if into != (t.get("base") or "main"):
+            raise Fail(f"Pull request #{n} merges into {into}, and {s.ref(t)} into {t.get('base') or 'main'}: its "
+                       "worktree's base can't change now. Take it in a new task (add --pr).")
+        if head != t.get("branch"):
+            remote = remote_of(main)
+            git(main, "fetch", "--quiet", "--no-tags", remote, f"+refs/heads/{head}:refs/remotes/{remote}/{head}")
+            if not git(main, "merge-base", "--is-ancestor", v.get("headRefOid") or "-", t["branch"])[0]:
+                raise Fail(f"{t['branch']} doesn't hold pull request #{n}'s latest commit, so its commits can't go on {head}. "
+                           f"Merge it in first (git fetch {remote} {head}, then git merge FETCH_HEAD), commit, and run "
+                           "this again.")
+    else:
+        if (t.get("base") or into) != into and t.get("base_by") != "space":
+            raise Fail(f"Pull request #{n} merges into {into}, not {t['base']}: leave --base out.")
+        set_base(s, t, into)
+    t["pr"] = {"number": n, "url": v.get("url"), "repo": repo, "taken": True,
+               **({"branch": head} if head and head != t.get("branch") else {})}
+    for k in ("pr_note", "merge_queued"):
+        t.pop(k, None)
+    s.dirty = True
+
+
 def set_notes(t, args):
     """--start-notes / --finish-notes: this task's own, replacing its folder's ("" goes back to the folder's)."""
     for which in ("start", "finish"):
@@ -252,6 +320,9 @@ def cmd_show(args):
         text.append(f"needs the person: {v['why']}")
     if v.get("proof"):
         text.append(f"proof: {v['proof']['title']} ({v['proof']['id']})")
+    if v.get("after_accept"):
+        from .after_accept import describe
+        text.append(f"when accepted: {describe(v['after_accept'])}")
     if v.get("archived"):
         text.append(f"archived: {time.strftime('%Y-%m-%d %H:%M', time.localtime(v['archived'] / 1000))} (still kept; writing to it brings it back)")
     for k in v["live"]:
@@ -271,13 +342,45 @@ def begin(s, t, argv, space, parent=None):
         t.pop(k, None)
     if t.get("mode") == "worktree" and not t.get("worktree") and not worktrees_on(s, space):
         t["mode"] = "here"
+    had = bool(t.get("mode") == "worktree" and t.get("worktree") and os.path.isdir(t["worktree"]))
     folder_for(s, t)
+    # Settings > Tasks > Before the agent starts: run first in a new worktree, in the agent's terminal (launch.py).
+    setup = setup_for(s, t, space, had)
     if t.get("mode") != "worktree" and s.loc["kind"] == "repo":
         # The folder's commit as it starts: still there, and nothing tracked changed, at ready means
         # it changed nothing, so there is nothing to review (review_refusal, #744).
         t["folder_start"] = git(s.loc["folder"], "rev-parse", "HEAD")[1] or None
     parent = parent_for(parent, space)
-    return launch(s, t, argv, space, brief(s, t, parent, space, argv), parent=parent)
+    return launch(s, t, argv, space, brief(s, t, parent, space, argv), parent=parent, setup=setup)
+
+
+def tilde(p):
+    home = os.path.expanduser("~")
+    return "~" + p[len(home):] if p.startswith(home + os.sep) else p
+
+
+def cmd_setup_failed(args):
+    """A task's setup command (Settings > Tasks > Before the agent starts) failed in its terminal, so its agent
+    didn't start (launch.SETUP_SH): the task waits for the person with why, its output's last line and where
+    the rest is. Starting it again runs the setup again."""
+    tail = ""
+    try:
+        with open(args.log, errors="replace") as f:
+            lines = [ln.strip() for ln in f.read()[-20000:].splitlines() if ln.strip()]
+        tail = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", lines[-1])[:160] if lines else ""
+    except OSError:
+        pass
+    with open_store(args) as s:
+        t = s.find(args.id)
+        t["setup_failed"] = {"code": args.code, "log": args.log, "at": now()}
+        # Its agent never started: never "already running" (just_started) when it's started again at once.
+        for ag in (t.get("agents") or [])[-1:]:
+            ag.setdefault("ended", now())
+        t["attention"] = (f"Its setup before the agent failed (exit {args.code})" + (f": {tail}" if tail else "") +
+                          f". The agent didn't start. Full output: {tilde(args.log)}. Fix the setup in Settings › Tasks "
+                          f"› Before the agent starts (or the worktree), then start it again.")
+        t.pop("attention_at", None)
+        s.dirty = True
 
 
 # #1053: an agent just launched still shows its shell for a moment (agent_running() says no): a task
@@ -287,7 +390,7 @@ STARTING_MS = 120000
 
 def just_started(t):
     """The agent its queue or a start launched moments ago, while it is Working: its record, or None."""
-    fresh = [a for a in t.get("agents") or [] if now() - (a.get("at") or 0) < STARTING_MS]
+    fresh = [a for a in t.get("agents") or [] if now() - (a.get("at") or 0) < STARTING_MS and not a.get("ended")]
     return fresh[-1] if t.get("state") == "running" and fresh else None
 
 
@@ -304,6 +407,7 @@ def cmd_start(args):
         elif args.worktree and worktrees_on(s):
             t["mode"] = "worktree"
         set_branch(s, t, getattr(args, "branch", None))
+        take_pr(s, t, getattr(args, "pr", None))
         q = t.get("queue") or {}
         space = bare(args.space) if args.space else (q.get("space") or default_space())
         argv = agent_argv(None, args.argv) if args.argv else worker_argv(s, t, space, args.agent) if args.agent else \
@@ -377,7 +481,11 @@ def cmd_ready(args):
             if git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
                 raise Fail(f"{wt} has uncommitted changes. Commit them, then run ready again.")
             t["head"] = git(wt, "rev-parse", "HEAD")[1]
+            # --pr: its work goes on a pull request already open (#1155), checked before anything changes.
+            take_pr(s, t, getattr(args, "pr", None))
             own_work(s, t)
+        elif getattr(args, "pr", None):
+            raise Fail("--pr is for tasks in a worktree; this one works in the folder itself.")
         refused = review_refusal(s, t, wt)
         if refused:
             # Kept (the task's line says why it waits); refused after the store is saved.
@@ -872,6 +980,7 @@ def cmd_edit(args):
         if t["mode"] != "worktree" and not t.get("worktree"):
             t.pop("branch", None)
         set_branch(s, t, getattr(args, "branch", None))
+        take_pr(s, t, getattr(args, "pr", None))
         s.dirty = True
         tabs = task_tabs(s, t) if t["title"] != old else []
         v = view(s, t)

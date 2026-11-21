@@ -111,12 +111,140 @@ class Reach(unittest.TestCase):
         machines.probe(depth=machines.REACH_DEPTH, timeout=20)
         self.assertEqual(len(self.calls("ssh")), 3)
 
+    def test_find_reads_the_wait_again_once_it_holds_the_lock(self):
+        """#1108: two Finds at once: the second read the wait before the first saved its run, and took the lock after
+        the first let go. It reads the wait again under the lock: refused, nobody contacted twice."""
+        machines._save_found({"at": machines.now(), "hosts": []})   # the first one's run, just saved
+        real, reads = machines._found, []
+
+        def found():   # its first read, before the lock, missed that run
+            reads.append(1)
+            return None if len(reads) == 1 else real()
+        with mock.patch.object(machines, "_found", found):
+            with self.assertRaisesRegex(base.Fail, "again in"):
+                machines.find(go=True)
+        self.assertEqual(self.calls("ssh"), [])
+
     def test_find_refused_with_the_add_on_off(self):
         self.off = ["machines"]
         with self.assertRaisesRegex(base.Fail, "Other machines"):
             machines.find(go=True)
         self.assertEqual(self.calls("ssh"), [])
 
+
+# #1104: vm1's link sits unreachable on a stale DNS failure; `hc machine login` brings it back, but only with a
+# terminal (as the real hc: "logging in needs a terminal" otherwise). vm2 needs a typed login and is left alone.
+RELINK_HC = r"""#!/bin/sh
+echo "hc $*" >> "$FAKE_LOG"
+case "$1 $2" in
+  "server status") echo '{"core": {"id": "c-here", "name": "here"}}'; exit 0 ;;
+  "machine ls")
+    s=unreachable; [ -f "$FAKE_LOG.up" ] && s=connected
+    echo "{\"machines\": [{\"name\": \"vm1\", \"id\": \"c-vm1\", \"state\": \"$s\"}, {\"name\": \"vm2\", \"id\": \"c-vm2\", \"state\": \"needs_login\"}]}"; exit 0 ;;
+  "machine login")
+    [ -t 0 ] || { echo '{"error": {"message": "logging in needs a terminal"}}'; exit 2; }
+    [ "$3" = vm1 ] && touch "$FAKE_LOG.up"; echo "logged in to $3: connected"; exit 0 ;;
+esac
+case "$1" in
+  ls) echo '{"terminals": []}'; exit 0 ;;
+  exec) while [ "$1" != "--" ]; do shift; done; shift; exec "$@" ;;
+esac
+exit 1
+"""
+
+
+class Relink(unittest.TestCase):
+    calls = Reach.calls  # Reach's set-up, not its tests
+
+    def setUp(self):
+        Reach.setUp(self)
+        with open(os.path.join(self.tmp, "bin", "hc"), "w") as f:
+            f.write(RELINK_HC)
+
+    def links(self, d):
+        return [(l["to"], l["state"], l["ok"]) for l in d["graph"]["links"]]
+
+    def test_refresh_makes_an_unreachable_link_try_again(self):
+        d = machines.reach(refresh=True)
+        self.assertEqual(self.links(d), [("vm1", "connected", True), ("vm2", "needs_login", False)])
+        logins = [c for c in self.calls("hc") if c.startswith("machine login")]
+        self.assertEqual(logins, ["machine login vm1"], "only the unreachable link is retried; needs_login waits for a person")
+        self.assertTrue(any(c.startswith("exec --on vm1 ") for c in self.calls("hc")), "the map follows the link it brought back")
+        self.assertEqual(self.calls("ssh"), [])
+
+    def test_the_cached_map_retries_nothing(self):
+        machines.probe(depth=machines.REACH_DEPTH, timeout=20)
+        self.assertEqual([c for c in self.calls("hc") if c.startswith("machine login")], [])
+        self.assertEqual(self.links(machines._reach_cache())[0], ("vm1", "unreachable", False))
+
+    def test_add_on_off_retries_nothing(self):
+        self.off = ["machines"]
+        machines.reach(refresh=True)
+        self.assertEqual([c for c in self.calls("hc") if c.startswith(("machine login", "exec"))], [])
+
+
+class NetworkBack(unittest.TestCase):
+    """The scheduler's round: a network change while a link is unreachable starts a refresh (which retries it), and
+    once more NET_AGAIN_MS later; no change, nothing unreachable, or the add-on off: nothing extra."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.state, self.net, self.links, self.t, self.off, self.spawned = "unreachable", ["100.64.0.1", "10.0.0.2"], None, 10**12, [], []
+        for p in (mock.patch.object(machines, "STORE", self.tmp), mock.patch.object(machines, "MACHINES", os.path.join(self.tmp, ".machines.json")),
+                  mock.patch.object(machines, "REACH", os.path.join(self.tmp, ".reach.json")),
+                  mock.patch.object(machines, "connected_machines", lambda: [{"name": "vm1", "state": self.state}]),
+                  mock.patch.object(machines, "manifest", lambda: {"version": "v1"}),
+                  mock.patch.object(machines, "now", lambda: self.t),
+                  mock.patch.object(machines, "_net", lambda: list(self.net), create=True),
+                  mock.patch.object(machines, "addon_off", lambda n: n in self.off),
+                  mock.patch.object(machines, "sync_held", lambda: True),
+                  mock.patch.object(machines, "_spawn", lambda argv, log: self.spawned.append(argv))):
+            p.start()
+            self.addCleanup(p.stop)
+        with open(machines.REACH, "w") as f:
+            json.dump({"at": self.t, "graph": {}}, f)  # the 5-minute map is fresh: only the network retry can spawn
+
+    def round(self, after_ms=15000):
+        self.t += after_ms
+        n = len(self.spawned)
+        machines.machines_pass({})
+        return self.spawned[n:]
+
+    def test_network_change_retries_the_unreachable_link(self):
+        self.round()  # the first round only learns the network
+        self.spawned.clear()
+        self.assertEqual(self.round(), [], "no change: no extra refresh")
+        self.net = ["100.89.1.2", "10.0.0.2"]  # Tailscale back on
+        self.assertEqual(self.round(), [["machines", "reach", "--refresh", "--quiet"]])
+        self.assertEqual(self.round(), [], "one refresh per change")
+        self.assertEqual(self.round(machines.NET_AGAIN_MS), [["machines", "reach", "--refresh", "--quiet"]], "once more a little later")
+        self.assertEqual(self.round(machines.NET_AGAIN_MS), [], "then the 5-minute map takes over")
+
+    def test_no_unreachable_link_no_refresh(self):
+        self.state = "connected"
+        self.round()
+        self.net = ["10.1.1.1", "10.1.1.1"]
+        self.assertEqual(self.round(), [])
+        self.state = "unreachable"
+        self.assertEqual(self.round(), [], "the network was already seen: hc's own retries and the 5-minute map cover it")
+
+    def test_add_on_off_no_refresh(self):
+        self.off = ["machines"]
+        self.round()
+        self.net = ["100.89.1.2", "10.0.0.2"]
+        self.assertEqual(self.round(), [])
+
+
+
+class Net(unittest.TestCase):
+    def test_net_contacts_nobody(self):
+        """A UDP connect only picks the route: nothing is sent, nobody is asked."""
+        with mock.patch.object(machines.socket.socket, "send", side_effect=AssertionError("sent")), \
+             mock.patch.object(machines.socket.socket, "sendto", side_effect=AssertionError("sent")):
+            got = machines._net()
+        self.assertEqual(len(got), 2)
+        self.assertEqual(got, machines._net(), "the same network reads the same")
 
 if __name__ == "__main__":
     unittest.main()
