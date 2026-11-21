@@ -28,6 +28,7 @@ import time
 from .base import addon_off, APP_HOME, ASK_HOME, sync_held, bundle, ENTRY, Fail, guard, HOME, hc_json, layout, now, PACKAGE, run, STORE, WHERE
 from .news import news_send, send_or_hold, typing
 from .settings import TEMPLATES
+from .addons import off_note
 
 
 # ---- sync: the same task tools on every machine ---------------------------------------------
@@ -443,6 +444,9 @@ def cmd_machines(args):
                 word = {"current": "current", "source": "holds the source (left alone)", "drift": "out of date", "failed": "failed", "unreachable": "can't reach", "held": "held", "unsupported": "not supported"}.get(x["state"], x["state"])
                 more = f" (updated {len(x['changed'])} file(s))" if x.get("changed") else ""
                 print(f"  {x['machine']}: {word}{more}" + "".join(f"\n      {d}" for d in x["details"]))
+            note = off_note("machines")
+            if note:
+                print(note.replace("is off on this machine:", "is off on this machine, so nothing syncs by itself:"))
         if args.check and any(x["state"] not in ("current", "source") for x in r["machines"]):
             raise SystemExit(1)
 
@@ -968,9 +972,14 @@ def directory(refresh=False, max_age=30000):
 
 def cmd_assistants(args):
     _, rows = directory(refresh=args.refresh)
+    note = off_note("machines")  # #1091: only this machine's then, and it says why
     if args.json:
         print(json.dumps(rows))
+        if note:
+            print(note, file=sys.stderr)
         return
+    if note:
+        print(note.replace("is off on this machine:", "is off on this machine, so only its own Assistants show:"))
     if not rows:
         print("No live Assistants on any machine reachable from here.")
     for a in rows:
@@ -1049,7 +1058,8 @@ def tell(target, text, sender=None):
         d, rows = directory(refresh=True)
         hits = _find(rows, target)
     if not hits:
-        raise Fail(f"no live Assistant {target!r} reachable from here (herdr-task assistants lists them)")
+        note = off_note("machines")
+        raise Fail(f"no live Assistant {target!r} reachable from here (herdr-task assistants lists them)" + (f". {note}" if note else ""))
     if len(hits) > 1:
         raise Fail(f"{target!r} is more than one Assistant: " + ", ".join(a["target"] for a in hits))
     to = hits[0]

@@ -193,5 +193,83 @@ class BarePath(unittest.TestCase):
             self.assertEqual(r.stdout.strip(), os.path.join(home, ".local", "bin", "hc"), helper + r.stderr)
 
 
+class AddonOffSays(unittest.TestCase):
+    """#1091: herdr-task obeys the add-ons switched off since 3.1.35; it now says so, and `herdr-task addons` switches one."""
+
+    def herdr_task(self, *argv, settings=None):
+        home = getattr(self, "home", None) or scratch(self)
+        self.home = home
+        self.settings = os.path.join(home, "settings.json")
+        if settings is not None:
+            with open(self.settings, "w") as f:
+                json.dump(settings, f)
+        env = {"HOME": home, "PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HERDR_TASK_SETTINGS": self.settings,
+               "HERDR_TASK_STORE": os.path.join(home, "tasks")}
+        return subprocess.run([sys.executable, os.path.join(BIN, "herdr-task"), *argv], env=env, capture_output=True, text=True, timeout=60)
+
+    def test_names_agree_with_the_manifest(self):
+        from herdr_task import addons
+        with open(os.path.join(ROOT, "lib", "addons.json")) as f:
+            titles = {a["id"]: a["title"] for a in json.load(f)["addons"]}
+        for k, v in addons.NAMES.items():
+            self.assertEqual(titles.get(k), v, k)
+
+    def test_list_and_switch_in_the_settings_file(self):
+        r = self.herdr_task("addons", "--json", settings={"everywhere": {"off": ["machines", "autopilot"], "theme": "x"}})
+        rows = {x["id"]: x["on"] for x in json.loads(r.stdout)["addons"]}
+        self.assertEqual((rows["machines"], rows["autopilot"]), (False, False), r.stderr)
+        r = self.herdr_task("addons", "on", "Other machines")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Other machines is on now", r.stdout)
+        with open(self.settings) as f:
+            d = json.load(f)
+        self.assertEqual(d["everywhere"], {"off": ["autopilot"], "theme": "x"})
+        r = self.herdr_task("addons", "on", "autopilot")
+        with open(self.settings) as f:
+            self.assertNotIn("off", json.load(f)["everywhere"])
+        r = self.herdr_task("addons", "on", "nope")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("No add-on 'nope'", r.stderr)
+
+    def test_a_pushed_copy_is_not_switched_here(self):
+        r = self.herdr_task("addons", "on", "machines", settings={"pushed_from": "herdr-app", "everywhere": {"off": ["machines"]}})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("switch it there", r.stderr)
+
+    def test_autopilot_list_says_it_is_off(self):
+        r = self.herdr_task("autopilot", "list", settings={"everywhere": {"off": ["autopilot"]}})
+        self.assertIn("The Autopilot add-on is off on this machine", r.stdout.splitlines()[0], r.stderr)
+        r = self.herdr_task("autopilot", "list", "--json")
+        self.assertIn("herdr-task addons on autopilot", json.loads(r.stdout)["addon_off"])
+
+    def test_tell_says_other_machines_is_off(self):
+        from unittest import mock
+        from herdr_task import base
+        p = os.path.join(scratch(self), "s.json")
+        with open(p, "w") as f:
+            json.dump({"everywhere": {"off": ["machines"]}}, f)
+        with mock.patch.dict(os.environ, {"HERDR_TASK_SETTINGS": p}), mock.patch.object(machines, "directory", lambda refresh=False: ({"graph": {}}, [])):
+            with self.assertRaises(base.Fail) as e:
+                machines.tell("vm-demo/t3", "hi")
+        self.assertIn("The Other machines add-on is off", str(e.exception))
+        self.assertIn("herdr-task addons on machines", str(e.exception))
+
+    def test_doctor_names_an_off_addon(self):
+        import importlib.machinery
+        import importlib.util
+        loader = importlib.machinery.SourceFileLoader("shepherdr_bin2", os.path.join(ROOT, "bin", "shepherdr"))
+        spec = importlib.util.spec_from_loader("shepherdr_bin2", loader)
+        sh = importlib.util.module_from_spec(spec)
+        loader.exec_module(sh)
+        root = scratch(self)
+        path = sh.where_for(root).path("settings")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump({"everywhere": {"off": ["machines", "voice"]}}, f)
+        notes = sh.addons_off_notes(root)
+        self.assertEqual(len(notes), 1)
+        self.assertIn("Other machines is off", notes[0])
+
+
 if __name__ == "__main__":
     unittest.main()

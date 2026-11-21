@@ -22,6 +22,7 @@ from .tick import cmd_tick
 from .backups import cmd_backup, cmd_restore_spaces
 from .automations import auto_list, cmd_auto, cmd_scheduler, cmd_track, EVENTS, HOW
 from .machines import cmd_assistants, cmd_machines, cmd_sync_auto, cmd_tell
+from .addons import cmd_addons
 from .autopilot import cmd_autopilot, cmd_complete, cmd_progress
 from .flags import cmd_flags
 from .home import cmd_home
@@ -466,6 +467,16 @@ def main():
     c.add_argument("--to", help="send everything to this Assistant instead (a test's own)")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_home)
+    ad = sub.add_parser("addons", help="Shepherdr's add-ons: which are off (list), and switch one on or off as Settings › Add-ons does")
+    ad.set_defaults(fn=cmd_addons, addons=None)
+    ads = ad.add_subparsers(dest="addons")
+    c = ads.add_parser("list")
+    c.add_argument("--json", action="store_true")
+    for word in ("on", "off"):
+        c = ads.add_parser(word)
+        c.add_argument("addon", help="its id or title (list shows them), e.g. machines, autopilot")
+        c.add_argument("--json", action="store_true")
+    ad.add_argument("--json", action="store_true")
     c = sub.add_parser("assistants", help="every live Assistant on every machine reachable from here: its address (machine/terminal), space and folder")
     c.add_argument("--refresh", action="store_true", help="look again now")
     c.add_argument("--json", action="store_true")

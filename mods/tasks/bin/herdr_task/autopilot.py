@@ -18,6 +18,7 @@ from .store import locate, open_lock, read_list, Store, store_files
 from .output import say
 from .news import chatting, news_send, NEWS_SETTLE_MS, typing
 from .scheduler import ensure_scheduler
+from .addons import off_note
 from .automations import EVENTS, events_in, HOW, next_run, parse_every, parse_on, trigger_words
 
 
@@ -906,12 +907,15 @@ def set_values(args):
 def cmd_autopilot(args):
     sub = args.autopilot
     ensure_heartbeat(make=False)  # an earlier version's starter in the file: today's, before anyone reads it
+    note = off_note("autopilot")  # #1091: no wake goes while the add-on is off, and it says so
     if sub == "list":
         out = list_all(getattr(args, "here", False))
+        if note:
+            out["addon_off"] = note
         if args.json:
             print(json.dumps(out))
         else:
-            print("\n".join([line_of(out["everywhere"])] + [line_of(v) for v in out["spaces"]]))
+            print("\n".join(([note] if note else []) + [line_of(out["everywhere"])] + [line_of(v) for v in out["spaces"]]))
         return
     if sub == "check":
         # a schedule as Settings would keep it, checked without saving
@@ -991,6 +995,9 @@ def cmd_autopilot(args):
             print(json.dumps({"space": space, "text": text}) if getattr(args, "json", False) else text)
             return
         v = everywhere_view(d) if space is None else view(d, space, a)
+    if note and sub in ("on", "run-now", "show"):
+        v["addon_off"] = note
+        msg = f"{msg or line_of(v)} {note.replace('is off on this machine:', 'is off on this machine, so nothing wakes:')}"
     if sub in ("on", "run-now"):
         # This machine's scheduler wakes it (a machine with no window or service starts none by itself).
         ensure_scheduler(quiet=True)
