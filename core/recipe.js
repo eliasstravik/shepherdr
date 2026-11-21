@@ -195,6 +195,18 @@ export function chartShapes(b) {
   return { max, bars: series.flatMap((s, si) => s.values.map((v, i) => ({ series: si, label: labels[i] ?? "", value: v, x: i * slot + slot * 0.15 + si * bw, w: bw, h: Math.max(0, v) / max }))) };
 }
 
+// Where a chart's labels go along its bottom (GitHub #1148): a line chart's under their points, which run edge to
+// edge, so the first is anchored at its start and the last at its end (centred, they'd be cut off); a bar chart's
+// centred under their group. [{ text, x: 0..1, anchor: "start" | "middle" | "end" }]
+export function chartLabels(b) {
+  const labels = arr(b?.labels) ? b.labels : [], n = labels.length;
+  if (b?.kind === "line") return labels.map((l, i) => ({
+    text: String(l ?? ""), x: n > 1 ? i / (n - 1) : 0.5,
+    anchor: n > 1 && i === 0 ? "start" : n > 1 && i === n - 1 ? "end" : "middle",
+  }));
+  return labels.map((l, i) => ({ text: String(l ?? ""), x: (i + 0.5) / Math.max(1, n), anchor: "middle" }));
+}
+
 // What an artifact's card in the chat shows of it before it opens (SHEP-142): its key pictures (the cover it names,
 // else the first pictures in it, at most `max`; a clip's poster), the clips with no poster (their first frame) and its
 // first words (headings and text, in order, up to `chars`). { images: [src], videos: [src], lines: [words] }; Markdown

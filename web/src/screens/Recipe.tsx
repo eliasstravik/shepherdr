@@ -15,7 +15,7 @@ type Props = { recipe: { blocks: Block[] }; asset: (src: string) => string; repl
 /** the window's words when a recipe can't be read */
 export const UNREADABLE = "This artifact's recipe can't be read."
 
-const { cellMd, chartShapes, choiceReply, fieldStart, formReply, isLink } = R as any
+const { cellMd, chartLabels, chartShapes, choiceReply, fieldStart, formReply, isLink } = R as any
 const PALETTE = ['var(--accent)', 'var(--focus)', 'var(--ready)', 'var(--work)', 'var(--merged)', 'var(--need)']
 const TONE: Record<string, string> = { info: 'bg-well shadow-soft', good: 'bg-ready/10', warn: 'bg-work/12', bad: 'bg-need/10' }
 
@@ -48,8 +48,8 @@ function Chart({ b }: { b: Block }) {
         {b.kind === 'line'
           ? s.lines.map((l: any, i: number) => <polyline key={i} fill="none" stroke={PALETTE[i % PALETTE.length]} strokeWidth="2" points={l.points.map((p: any) => `${p.x * (W - 8) + 4},${H - p.y * (H - 8)}`).join(' ')} />)
           : s.bars.map((x: any, i: number) => <rect key={i} x={x.x * W} y={H - x.h * (H - 4)} width={x.w * W} height={x.h * (H - 4)} rx="2" fill={PALETTE[x.series % PALETTE.length]} />)}
-        {(b.labels ?? []).map((l: string, i: number, all: string[]) => (
-          <text key={i} x={((i + 0.5) / all.length) * W} y={H + 14} textAnchor="middle" fontSize="10" fill="var(--fg3)">{l}</text>
+        {chartLabels(b).map((l: any, i: number) => (
+          <text key={i} x={b.kind === 'line' ? l.x * (W - 8) + 4 : l.x * W} y={H + 14} textAnchor={l.anchor} fontSize="10" fill="var(--fg3)">{l.text}</text>
         ))}
       </svg>
       {(b.series ?? []).length > 1 ? (
