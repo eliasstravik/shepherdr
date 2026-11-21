@@ -4382,19 +4382,26 @@ export default class Chat extends View {
     // keyboard then made Ctrl+C copy nothing. The timers check again when they fire: a drag can start after they're set.
     const dialog = dialogHolds(shared(KEY_HOLDER));
     if (paneFocused && showsBox && !dialog && !this.pressMoved && (!this.wasFocused || !this.hadBox)) {
-      cx.timer.after(0, () => { if (!this.pressMoved && !dialogHolds(shared(KEY_HOLDER))) this.box.focus(); });
-      cx.timer.after(600, () => { if (!this.pressMoved && !dialogHolds(shared(KEY_HOLDER))) this.box.focus(); });
+      cx.timer.after(0, () => { if (!this.pressMoved && !dialogHolds(shared(KEY_HOLDER)) && !this.cardKeys()) this.box.focus(); });
+      cx.timer.after(600, () => { if (!this.pressMoved && !dialogHolds(shared(KEY_HOLDER)) && !this.cardKeys()) this.box.focus(); });
     }
     // The pane focused again (a command, a click on its header) can leave the box without the
     // keyboard: give it back, unless the person just pressed something inside the chat.
     // Not while the keyboard is somewhere else in the window that isn't a pane (#633): a task's chat, the list or its
     // search in the Tasks panel (shared "keyboard.holder", keyHolder()); Herdr still counts this pane as focused then.
+    // Never while a card's own box has it (a question's Other…, a secret's masked box: GitHub #1224): each key redraws.
     else if (paneFocused && showsBox && !this.call && !this.pressMoved && this.focused === false && Date.now() - (this.press?.at ?? 0) > 1500
+      && !this.cardKeys()
       && !keysElsewhere(liveHolder(shared(KEY_HOLDER)), this.areaKey())
       && Date.now() - (this.refocusAt ?? 0) > 1000) {
       this.refocusAt = Date.now();
       cx.timer.after(0, () => this.box.focus());
     }
+  }
+
+  // Whether a card's own box (Other…, a secret's) has the keyboard.
+  cardKeys() {
+    return [this.cards, this.workerCards, this.codexCards, this.secretCards].some((c) => c?.holdsKeys?.());
   }
 
   // A copy in a tab the window doesn't show (another space or tab) isn't drawn, so the wasFocused of its last draw
