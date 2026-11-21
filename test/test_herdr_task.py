@@ -1916,6 +1916,18 @@ class CodexCodeMode(unittest.TestCase):
         self.setUp_ps("100 1 codex\n101 100 codex-code-mode-host\n")
         self.assertEqual(self.status(self.codex())[0], "ready")
 
+    def test_a_one_call_batch_loop_ends_both_sessions(self):
+        """#1108: `for (const sid of [7, 8]) { results.push(await tools.write_stdin(...)); }`, a body with no block of
+        its own, is written out per session like the try-block form: both exited polls end their sessions."""
+        call = ('const results = []; for (const sid of [7, 8]) { results.push(await tools.write_stdin({session_id: sid, '
+                'chars: "}"})); } text(JSON.stringify(results));')
+        slots = self.agents._codex_polled(call)
+        self.assertEqual(slots, ["7", "8"])
+        running = {"codex:7": 1, "codex:8": 1}
+        self.agents._codex_output([{"text": json.dumps([{"exit_code": 0, "output": ""}, {"exit_code": 0, "output": ""}])}],
+                                  slots, {}, running, 2)
+        self.assertEqual(running, {})
+
     def test_mixed_commands_do_not_end_the_wrong_poll(self):
         running = {"codex:7": 1, "codex:8": 1}
         call = "text(await tools.exec_command({cmd:'true'})); text(await tools.write_stdin({session_id:7}));"
