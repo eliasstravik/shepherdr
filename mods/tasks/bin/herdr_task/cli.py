@@ -269,6 +269,12 @@ def main():
                                        "would need and AGENTS.md lacks; the Assistant decides whether to add it")
     c.add_argument("--pr", help="take a pull request already open, by its number (#1155): its review, checks and Accept go there "
                                 "instead of a new one, and ready pushes to its branch (\"\" lets go)")
+    c.add_argument("--pr-title", help="the pull request's title, when the repo wants its own form (#1087; default: "
+                                      "\"<task ref>: <task title>\"); a later ready with it renames the open one")
+    c.add_argument("--pr-body", help="the pull request's description, as written (#1087; default: Shepherdr's summary, "
+                                     "details and proof); a later ready with it replaces the open one's")
+    c.add_argument("--draft", action="store_true", help="open its pull request as a draft (#1155); Accept marks it ready "
+                                                        "for review before merging")
     c = cmd("reviewed", cmd_reviewed, "a task's agent records one review round of its current commit (Review: on): ready then "
                                       "accepts that commit; uses one of its Review rounds")
     c.add_argument("--report", help="the round's findings in a line (levels, what was fixed)")
