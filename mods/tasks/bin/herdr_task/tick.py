@@ -220,6 +220,10 @@ def back_pass(s, t, report):
         back_to_work(s, t, "its agent asked something" if not moved else "its agent changed its work", auto=True)
         report.setdefault("working_again", []).append(s.ref(t))
         return
+    # #1108: a turn that left its own work running (a background job) isn't over yet: kept unrecorded, so a change
+    # that work makes later is still this turn's and takes the task back to work
+    if own_work(t, [detail(k) for k in turned], ready=True):
+        return
     t["ready_turns"] = {**seen, **{k["address"]: k.get("turn") or 0 for k in turned}}
     s.dirty = True
 

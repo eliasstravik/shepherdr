@@ -1209,6 +1209,30 @@ class BackToWork(unittest.TestCase):
             self.commands.cmd_resume(self.args(space=None, agent=None, argv=None, parent=None))
         self.assertEqual(killed, [["hc", "kill", "t1"]])
 
+    def test_a_background_jobs_later_change_is_working_again(self):
+        """#1108: a Ready worker's turn ended with its own background job still running and nothing changed yet: the
+        turn stays unrecorded, so when the job changes the branch later the task is working again."""
+        wt = tempfile.mkdtemp()
+        t = self.ready(space="sp1", mode="worktree", worktree=wt, branch="b", head="a")
+        heads, jobs = ["a"], [True]
+        for name, value in (("git", lambda cwd, *a: (True, heads[0] if a[0] == "rev-parse" else "", "")),
+                            ("own_work", lambda task, live, ready=False: jobs[0]),
+                            ("last_question", lambda task, address=None: None)):
+            p = self.mock.patch.object(self.tick, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        report = {}
+        self.live = [self.agent({"address": "t1", "status": "idle", "turn": 6, "role": "worker"})]
+        self.tick.back_pass(self.store, t, report)
+        self.assertEqual((t["state"], t["ready_turns"]), ("ready", {"t1": 5}))
+        heads[0], jobs[0] = "c", False   # the job committed, then ended
+        self.tick.back_pass(self.store, t, report)
+        self.assertEqual((t["state"], report["working_again"]), ("running", ["SHEP-7"]))
+        # a job that ends with nothing changed: its turn is recorded then
+        t2 = self.ready(space="sp1", mode="worktree", worktree=wt, branch="b", head="c")
+        self.tick.back_pass(self.store, t2, {})
+        self.assertEqual((t2["state"], t2["ready_turns"]), ("ready", {"t1": 6}))
+
     def test_a_question_asked_between_two_ticks_is_heard(self):
         """#1000: GitHub news woke a Ready worker, it asked "pick one" in its own terminal and went quiet before
         any tick saw it working: the task stayed Ready and nobody heard. Its finished turn is seen now."""
