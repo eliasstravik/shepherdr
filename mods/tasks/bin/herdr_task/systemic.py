@@ -8,7 +8,7 @@ import json
 import re
 
 from .base import now
-from .github import BAD, check_rows, gh, pr_problem, queue_merge
+from .github import BAD, check_rows, gh, pr_problem, queue_entry, queue_merge
 from .ghnews import attr, base_history, esc, RED, verdict, when
 from .launch import coordinator_in
 from .news import news_send
@@ -259,6 +259,10 @@ def let_go(s, base, ep, held, green, report):
         (t.get("pr") or {}).pop("checked", None)  # looked at again on the next tick
         head = h.get("dropped")
         err = None
+        q = queue_entry(t) if head and t.get("pr") else None
+        if q and (q["in"] or q["auto"]):
+            t["merge_queued"] = now()  # queued again by hand meanwhile
+            continue
         if green and head and t["state"] == "ready" and t.get("requeued") != head:
             ok, err = queue_merge(t, head)
             if ok:

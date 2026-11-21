@@ -6397,6 +6397,7 @@ class Systemic(unittest.TestCase):
         self.patch(systemic, "queue_merge", lambda t, head: (self.merges.append((t["id"], head)), (True, ""))[1])
         self.patch(systemic, "coordinator_in", lambda space: "coord" if space else None)
         self.patch(systemic, "news_send", lambda to, text: self.sent.append(text) or True)
+        self.patch(systemic, "queue_entry", lambda t: {"in": False, "auto": False, "state": "OPEN"})
         self.task.update(state="ready", space="sp1", pr={"number": 7, "url": "u7", "repo": "o/r"})
 
     def other(self, i, n):
