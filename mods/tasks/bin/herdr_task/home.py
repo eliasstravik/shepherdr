@@ -14,8 +14,9 @@ judges, and sends. Nothing is installed or run on another machine beyond herdr-t
 The lead (#1029): with windows on several machines, one keeps the overview, the hub, the one the
 others link to (lead_of). Each window still tells its own machine's home Assistant its own health;
 what the lead reads anyway (itself and the machines it links to) only the lead sends. A window the
-lead doesn't link to passes its own news to the lead's home Assistant over its own link. A lone
-window, or windows that don't link to each other, each lead as before.
+lead doesn't link to keeps its own overview for what the lead doesn't read (#1188): news never goes
+to a home Assistant that can't reach the machine it's about. A lone window, or windows that don't
+link to each other, each lead as before.
 """
 
 import json
@@ -39,6 +40,7 @@ STUCK_AFTER_S = 30 * 60        # busy since at least this long ...
 STUCK_SHARE = 0.9              # ... at this share of one core all along: stuck
 LEFTOVER_MS = 24 * 3600000     # a finished task's worktree this long after it finished: left over
 KEEP_MS = 6 * 3600000          # lines nobody could be told (no live home Assistant) this long: dropped
+OVERVIEW_KEEP_MS = 30 * 60000  # overview lines this old: stale (the space's own Assistant has handled it by now)
 LEAD_KEEP_MS = 10 * 60000      # a lead that misses a round still leads this long (one slow answer never doubles the overview)
 
 
@@ -372,7 +374,7 @@ def deliver(to, lines, quiet=None, idle_only=False):
 def home_pass(report, force=False, only=None, to=None):
     """A window's round, at most every EVERY_MS: each home machine's health news to its own home
     Assistant; every machine's task news and each home machine's health news, one line each, to
-    the lead's home Assistant (lead_of; module doc). only: just this machine ("local" or a name; a
+    this window's own home Assistant, leaving out what the lead reads (lead_of; module doc). only: just this machine ("local" or a name; a
     test). to: send everything to this address instead (a test's own Assistant)."""
     if not main_here() and not to:
         return
@@ -445,9 +447,9 @@ def home_pass(report, force=False, only=None, to=None):
     mine = lambda m: lead is None or (key(m) != lead and core_of(m) not in lead_links)
     # Its own health to a machine's home Assistant: a window tells its own; the lead, or else whoever reads it, the rest.
     tells_home = lambda m: m is None or (not (facts.get(key(m)) or {}).get("overview") and mine(m))
-    over_to = "home:local" if lead is None else f"home:{lead}"
-    me_name = None if lead is None else me.get("core_name") or os.uname().nodename
-    named = lambda m: m or me_name
+    # The overview always goes to this window's own home Assistant, never the lead's (#1188): what
+    # the lead doesn't read, it can't reach either, so its Assistant could only sum up news it can't check.
+    over_to = "home:local"
     for m in names:
         k = key(m)
         rep = reports.get(k)
@@ -463,9 +465,9 @@ def home_pass(report, force=False, only=None, to=None):
         for line, words in health_lines(m, rep, st):
             if tells_home(m):
                 outbox.append({"to": f"home:{k}", "line": line, "at": now()})
-            if named(m) and main_on and mine(m):
-                outbox.append({"to": over_to, "line": tagged("herdr-overview", f"Machine {named(m)}: {words}", machine=named(m), event="health"), "at": now()})
-    over_addr = to or (main_rep.get("assistant") if lead is None else machines.get(lead, {}).get("assistant"))
+            if m and main_on and mine(m):
+                outbox.append({"to": over_to, "line": tagged("herdr-overview", f"Machine {m}: {words}", machine=m, event="health"), "at": now()})
+    over_addr = to or main_rep.get("assistant")
     if main_on:
         names_by_id = {s["id"]: s.get("name") for s in spaces}
         for m in names:
@@ -477,12 +479,12 @@ def home_pass(report, force=False, only=None, to=None):
                     continue  # its own space's news: it had them
                 sid = f"{m}/{x.get('space')}" if m else x.get("space")
                 space = names_by_id.get(sid) or x.get("folder") or "?"
-                place = f"{named(m)} · {space}" if named(m) else space
+                place = f"{m} · {space}" if m else space
                 for line in x.get("lines") or []:
                     mt = re.match(r'<herdr-news task="([^"]*)" event="([^"]*)">(.*)</herdr-news>$', line)
                     task, event, text = mt.groups() if mt else (None, None, re.sub(r"<[^>]+>", "", line))
                     text = text.split(" · For AGENTS.md:")[0]  # the space's own Assistant decides that
-                    outbox.append({"to": over_to, "line": tagged("herdr-overview", f"{place}: {text}", machine=named(m) or "",
+                    outbox.append({"to": over_to, "line": tagged("herdr-overview", f"{place}: {text}", machine=m or "",
                                                                                space=space, task=task, event=event), "at": now()})
     # Each line waits for its home's Assistant (as seen this round): one that isn't live yet, or
     # whose machine didn't answer, gets it on a later round.
@@ -490,13 +492,17 @@ def home_pass(report, force=False, only=None, to=None):
     homes["home:local"] = to or main_rep.get("assistant")
     quiet = state.setdefault("quiet", {})
     sent = report.setdefault("home", [])
-    outbox[:] = [x for x in outbox if now() - x["at"] < KEEP_MS]
+    # Stale lines go (#1188): any older than KEEP_MS, overview lines older than OVERVIEW_KEEP_MS, and
+    # overview lines an older version queued for another machine's home Assistant.
+    overview = lambda x: x["line"].startswith("<herdr-overview")
+    outbox[:] = [x for x in outbox if now() - x["at"] < KEEP_MS
+                 and not (overview(x) and (now() - x["at"] >= OVERVIEW_KEEP_MS or x["to"] != over_to))]
     by = {}
     for x in outbox:
         if homes.get(x["to"]):
             by.setdefault(homes[x["to"]], []).append(x)
     for dest, batch in by.items():
-        idle_only = all(x["line"].startswith("<herdr-overview") for x in batch)
+        idle_only = all(overview(x) for x in batch)
         if deliver(dest, [x["line"] for x in batch], quiet, idle_only):
             outbox[:] = [x for x in outbox if x not in batch]
             sent.append({"to": dest, "lines": [x["line"] for x in batch]})
