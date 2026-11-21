@@ -6341,6 +6341,55 @@ class LinkActions(unittest.TestCase):
         self.assertEqual(r.returncode, self.link.PENDING)
         self.assertIn("its link dropped", json.loads(r.stdout)["error"])
 
+    def test_a_late_poll_gets_only_the_time_left(self):
+        """#1108: each poll may take its whole --timeout there: one started near the deadline gets only what is left,
+        so the answer comes before the window's 30 s, never a full 15 s poll past a 25 s deadline."""
+        clock = [0.0]
+        saved = self.link.time.monotonic
+        self.link.time.monotonic = lambda: clock[0]
+        self.addCleanup(setattr, self.link.time, "monotonic", saved)
+        self.link.time.sleep = lambda s: clock.__setitem__(0, clock[0] + s)
+        os.environ["HERDR_TASK_ACTION_WAIT"] = "25"
+        ends = []
+
+        def run(argv, **k):
+            if argv[1] == "run":
+                return subprocess.CompletedProcess(argv, 0, "{}", "")
+            t = int(argv[argv.index("--timeout") + 1])
+            ends.append(clock[0] + t)
+            clock[0] += t   # a slow machine: every poll takes all it is given
+            return subprocess.CompletedProcess(argv, 0, "running\n", "")
+        self.link.run = run
+        r = self.link.action("vmb", ["accept", "1", "--json"])
+        self.assertEqual(r.returncode, self.link.PENDING)
+        self.assertLessEqual(max(ends), 26)
+        self.assertLessEqual(clock[0], 26)
+
+    def test_seen_running_then_the_link_goes_is_pending(self):
+        """#1108: a start whose reply was lost, then seen running there, is known to have started: the deadline says
+        pending (follow its job), never "it may have run there" (exit 1)."""
+        os.environ["HERDR_TASK_ACTION_WAIT"] = "0.05"
+        self.hc([(5, "", self.LOST)], [(0, "running\n", ""), (5, "", self.LOST)])
+        r = self.link.action("vmb", ["accept", "1", "--json"])
+        self.assertEqual(r.returncode, self.link.PENDING)
+        self.assertIn("pending", json.loads(r.stdout))
+
+    def test_a_job_started_twice_runs_once(self):
+        """#1108: a start whose reply was lost may have begun there; started again with the same job, it runs nothing
+        (the first one claimed the job's files)."""
+        with tempfile.TemporaryDirectory() as d:
+            prog = os.path.join(d, "fake-herdr-task")
+            with open(prog, "w") as f:
+                f.write('#!/bin/sh\necho ran >> "$TMPDIR/count"; echo "{}"\n')
+            os.chmod(prog, 0o755)
+            env = dict(os.environ, TMPDIR=d)
+            for _ in range(2):
+                subprocess.run(["sh", "-c", self.link.RUN, "sh", "job1", prog, "accept", "1"], env=env, check=True)
+            with open(os.path.join(d, "count")) as f:
+                self.assertEqual(f.read(), "ran\n")
+            out = subprocess.run(["python3", "-c", self.link.POLL, "job1"], env=env, capture_output=True, text=True).stdout
+            self.assertEqual(json.loads(out.split("\n", 1)[1])["rc"], 0)
+
     def test_hc_refusing_is_said_as_it_was(self):
         self.hc([(4, "", '{"error":{"kind":"machine_unknown","message":"unknown machine \\"vmb\\""}}')], [(0, "", "")])
         r = self.link.action("vmb", ["accept", "1"])
