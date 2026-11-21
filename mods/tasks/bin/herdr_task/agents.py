@@ -655,7 +655,9 @@ FG_MAX_MS = 15 * 60000
 BG_HINTS = ("<task-notification>", "task_id", "backgroundTaskId", "timeoutMs", "isAsync", "in background with ID",
             "Monitor started", "Async agent launched", "session_id", "session ID",
             # Codex (SHEP-207): a poll's result without its session id, a wait on a code-mode cell
-            "exit_code", "Process exited", "cell_id", "cell ID")
+            "exit_code", "Process exited", "cell_id", "cell ID", "exec_command",
+            # Codex 0.163+: its own word that a command ended (#1093)
+            '"item_completed"')
 BG_MAX_MS = 3 * 3600_000  # a background job started longer ago than this no longer counts
 BG_STARTED = re.compile(r"Command running in background with ID: (\w+)|Monitor started \(task (\w+)|Async agent launched[\s\S]*?agentId: (\w+)")
 BG_ENDED = re.compile(r"<task-id>(\w+)</task-id>(?:(?!</task-notification>)[\s\S])*?<status>(\w+)</status>")
@@ -783,14 +785,33 @@ def _bg_scan(lines, seen):
                     running.setdefault(str(i), at)
             # Codex: a process left running has a session id until an output says it exited.
             p = d.get("payload") or {}
+            # #1093 #1143: Codex says itself when a command ended, whatever polled it (a batch, an id no
+            # longer known): its CommandExecution item, completed or failed, with the session's process id
+            item = p.get("item") if d.get("type") == "event_msg" and p.get("type") == "item_completed" else None
+            if isinstance(item, dict) and item.get("type") == "CommandExecution" and item.get("process_id") is not None \
+                    and item.get("status") in ("completed", "failed", "declined"):
+                if running.pop("codex:" + str(item["process_id"]), None) is not None:
+                    ended = max(ended, at)
+                seen.setdefault("done", {})["codex:" + str(item["process_id"])] = at
+                continue
             if d.get("type") == "response_item" and p.get("type") in ("function_call", "custom_tool_call"):
                 calls[p.get("call_id")] = str(p.get("arguments") or p.get("input") or "")
             elif d.get("type") == "response_item" and p.get("type") in ("function_call_output", "custom_tool_call_output"):
                 call = calls.get(p.get("call_id")) or ""
                 cell = CODEX_CELL_ARG.search(call)  # a wait on a code-mode cell: the sessions it polls
                 polled = cells.get(cell.group(1), []) if cell else _codex_polled(call)
-                if _codex_output(p.get("output"), polled, cells, running, at):
+                before = set(running)
+                if _codex_output(p.get("output"), polled, cells, running, at, seen.get("done")):
                     ended = max(ended, at)
+                if any(k not in before for k in running):  # what each started job runs, for ready to name it (#1093)
+                    what, cmds = seen.setdefault("what", {}), _codex_cmds(call)
+                    results = _codex_results(p.get("output"))
+                    for i, r in enumerate(results if len(results) == len(cmds) else []):
+                        if r.get("session_id") is not None and cmds[i] and "codex:" + str(r["session_id"]) not in before:
+                            what["codex:" + str(r["session_id"])] = cmds[i]
+                    for k in running:
+                        if k not in before and k not in what and len([c for c in cmds if c]) == 1:
+                            what[k] = next(c for c in cmds if c)  # the legacy call: its one command
     seen["ended"] = ended
 
 
@@ -850,6 +871,46 @@ def _expand_loops(call):
         i = j
 
 
+def _codex_cmds(call):
+    """What each tool call in a Codex call runs, in order: an exec_command's cmd string, None for a write_stdin
+    (code mode's script); a legacy exec_command's JSON arguments: its one cmd."""
+    out = []
+    for m in re.finditer(r'tools\.(exec_command|write_stdin)\s*\(', call):
+        c = re.match(r'\s*\{\s*"?cmd"?\s*:\s*"((?:[^"\\]|\\.)*)"', call[m.end():]) if m.group(1) == "exec_command" else None
+        try:
+            out.append(json.loads('"' + c.group(1) + '"') if c else None)
+        except ValueError:
+            out.append(None)
+    if out:
+        return out
+    try:
+        cmd = json.loads(call).get("cmd")
+    except (ValueError, AttributeError):
+        return []
+    return [" ".join(map(str, cmd)) if isinstance(cmd, list) else str(cmd)] if cmd else []
+
+
+def job_names(log, ids):
+    """Each job's words for the agent: what a Codex job runs ("gh pr checks --watch"), else its id."""
+    what = (_bg_cache.get(log) or {}).get("what") or {}
+    out = []
+    for i in ids:
+        cmd = " ".join(str(what.get(i) or "").split())
+        out.append(f"`{cmd[:60]}{'…' if len(cmd) > 60 else ''}`" if cmd else i.replace("codex:", "Codex session "))
+    return out
+
+
+def own_jobs(task, k):
+    """Its agent's background jobs still running ({id: started ms}, as background_jobs()), Codex's only while
+    a process of its own runs under it (SHEP-207)."""
+    address = k.get("address")
+    log = agent_log(task, address) or agent_log(task)
+    jobs = background_jobs(log)[0] if log else {}
+    if any(i.startswith("codex:") for i in jobs) and not codex_working(k):
+        jobs = {i: t for i, t in jobs.items() if not i.startswith("codex:")}
+    return jobs, log
+
+
 def _codex_results(output):
     """Read result envelopes, never JSON or session-id examples inside command stdout."""
     results = []
@@ -874,17 +935,23 @@ def _codex_results(output):
     return results
 
 
-def _codex_output(output, polled, cells, running, at):
+def _codex_output(output, polled, cells, running, at, done=None):
     """One Codex output's word on the sessions it covers, applied to running ({"codex:<id>": started
     ms}). polled: the session ids the call that made it polled, in order (a code-mode script's
-    calls, or a write_stdin's own). Returns True when a session ended."""
+    calls, or a write_stdin's own). done: sessions Codex said ended ({key: ms}), never counted again by an
+    output written just after. Returns True when a session ended."""
     text = _text(output)
     ended = False
+    done = done or {}
+
+    def start(key):
+        if at - done.get(key, -10**15) > 60000:
+            running.setdefault(key, at)
     results = _codex_results(output)
     # Legacy plain-text output only. Structured command stdout is not tool metadata.
     if not results:
         for m in CODEX_RUNNING.finditer(text):
-            running.setdefault("codex:" + m.group(1), at)
+            start("codex:" + m.group(1))
     cell = CODEX_CELL.search(text)
     if cell:
         cells[cell.group(1)] = polled
@@ -898,7 +965,7 @@ def _codex_output(output, polled, cells, running, at):
         if d.get("exit_code") is not None:
             ended = running.pop(key, None) is not None or ended
         elif d.get("session_id") is not None:
-            running.setdefault(key, at)
+            start(key)
     # a poll of one session whose output says it exited (no session id in it, or the old format's text)
     if len(polled) == 1 and polled[0] is not None and not results and re.search(r"^Process exited with code", text, re.M):
         ended = running.pop("codex:" + str(polled[0]), None) is not None or ended
@@ -986,12 +1053,10 @@ def own_work(task, live, ready=False):
         key = (k.get("labels") or {}).get("herdr.task")
         if key and any(parent_of(h) == address and status_word(h) in ("working", "blocked") for h in live_helpers(key)):
             return True
-        log = agent_log(task, address) or agent_log(task)
-        jobs, ended = background_jobs(log) if log else ({}, 0)
         # Codex's jobs are only what its process tree shows (SHEP-207): a session the log says is
         # still open, with no process of the agent running, is over.
-        if any(i.startswith("codex:") for i in jobs) and not codex_working(k):
-            jobs = {i: t for i, t in jobs.items() if not i.startswith("codex:")}
+        jobs, log = own_jobs(task, k)
+        ended = background_jobs(log)[1] if log else 0
         if jobs:
             return True
         if not ready and waits_on_own(task, address, ended) and not last_question(task, address):

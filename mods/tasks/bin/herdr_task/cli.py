@@ -10,7 +10,7 @@ import sys
 import time
 
 from . import link
-from .base import bundle, Fail, guard, run, STORE, sync_held, VERSION
+from .base import bundle, ENTRY, Fail, guard, run, STORE, sync_held, VERSION
 from .agents import LINE_MAX, SUMMARY_MAX
 from .launch import cmd_allow, name_tabs
 from .commands import (
@@ -153,6 +153,20 @@ def remote(machine, argv):
 
 def main():
     argv = sys.argv[1:]
+    if argv[:1] == ["--detach"]:
+        # #1211: the window's way to run an action that may outlast its 30 s (an Accept waiting on GitHub's merge)
+        argv = argv[1:]
+        if argv[:1] and argv[0] in link.ACTIONS:
+            r = link.local_action(argv, ENTRY)
+            sys.stdout.write(r.stdout or "")
+            sys.stderr.write(r.stderr or "")
+            return r.returncode
+    if argv[:1] == ["_job"]:
+        # an action here that was still running (link.PENDING, machine ""): its result, waiting again
+        r = link.local_follow(argv[1] if len(argv) > 1 else "", argv, time.monotonic() + link.wait_s(), started=False)
+        sys.stdout.write(r.stdout or "")
+        sys.stderr.write(r.stderr or "")
+        return r.returncode
     if argv[:1] == ["--on"] and len(argv) > 1:
         try:
             return remote(argv[1], argv[2:])

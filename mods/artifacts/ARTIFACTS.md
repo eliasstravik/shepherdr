@@ -63,7 +63,7 @@ Blocks, top to bottom (each may carry an `"id"`; the person's notes point at blo
 | `details` | `summary`, `blocks`: folded until opened |
 | `divider` | nothing |
 | `choice` | `question`, `options` [{ `label`, `description` }]: the person picks one |
-| `form` | `fields` [{ `name`, `label`, `kind` text, textarea, select or checkbox, `options` }], `submit` |
+| `form` | `fields` [{ `name`, `label`, `kind` text, textarea, select or checkbox, `options`, `value` (optional: what it starts with and replies untouched; one of a select's options, true or false for a checkbox) }], `submit` |
 | `button` | `label`, `reply`: a press sends `reply` |
 
 - **Pictures**: PNG, JPEG, GIF, WebP or SVG files in the folder, named in `src` (no paths up or

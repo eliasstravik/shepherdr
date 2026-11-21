@@ -16,7 +16,7 @@ import sys
 import time
 
 from .base import ASK_HOME, ENTRY, Fail, git, hc_json, now, run, WORKTREES
-from .settings import agent_key, ASSISTANT_TEMPLATES, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, keep_review, notes, notes_part, review_limits, settings_block, settings_for
+from .settings import agent_key, ASSISTANT_TEMPLATES, cli_env, codex_too_old, codex_update_words, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, keep_review, notes, notes_part, review_limits, settings_block, settings_for
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
 from .github import finish, remote_of
@@ -205,6 +205,12 @@ def own_command(path, text, sandboxed=False):
     if sandboxed and re.fullmatch(r"[\w#.@-]+", task):
         # the reviewer's label as the brief writes it, its one variable: this worker's own task
         text = text.replace('"herdr.task=$HERDR_BROWSER_TASK"', f'"herdr.task={task}"')
+    if sandboxed and "$PATH" in text:
+        # #1228: the reviewer's PATH as the brief writes it (its CLI's own folders, then $PATH), only exactly that
+        for who in REVIEWERS:
+            pre = cli_env(who)
+            if pre and f"-- {pre}{who} " in text:
+                text = text.replace(f"-- {pre}{who} ", f"-- env PATH=@herdr-reviewer {who} ", 1)
     words, at, text = [], 0, text.strip()
     while at < len(text):
         if text[at] in " \t":
@@ -249,6 +255,8 @@ def helper_hc(words):
         return False
     i = words.index("--")
     opts, cmd = words[2:i], words[i + 1:]
+    if cmd[:2] == ["env", "PATH=@herdr-reviewer"]:
+        cmd = cmd[2:]
     j = 0
     while j < len(opts):
         if opts[j] == "--bg":
@@ -758,6 +766,7 @@ def folder_for(s, task):
     if any(o is not task and o.get("worktree") and os.path.realpath(o["worktree"]) == os.path.realpath(path)
            for o in s.data.get("tasks") or []):
         path = f"{path}-{task['id']}"
+    fence_node(root)
     # Its own base (--base) branches from that branch; else from what the folder has checked out.
     own = task.get("base") if task.get("base_set") else None
     base = base_ref(main, own) if own else current_base(main)
@@ -797,6 +806,33 @@ def folder_for(s, task):
         start = git(main, "merge-base", fresh_start(main, base), start)[1] or start
     task.update(worktree=path, branch=branch, base=task.get("base") or base, start=start)
     return path
+
+
+NODE_FENCE = b'{"private": true, "description": "Shepherdr: keeps task worktrees off the package.json of a folder above"}\n'
+
+
+def fence_node(root):
+    """GitHub #1132: Node takes a script's module type (and a hook's require()) from the nearest package.json above
+    it, and Shepherdr's own (type: module) sits above its default worktrees folder: a repo with none of its own
+    would run as ESM in a worktree. A plain one at the worktrees root stops that search there. Only written when a
+    package.json above the root would otherwise be found; a person's own file there stays as it is."""
+    here = os.path.join(root, "package.json")
+    if os.path.lexists(here):
+        return
+    up = os.path.dirname(os.path.abspath(root))
+    while True:
+        if os.path.isfile(os.path.join(up, "package.json")):
+            break
+        nxt = os.path.dirname(up)
+        if nxt == up:
+            return
+        up = nxt
+    try:
+        os.makedirs(root, exist_ok=True)
+        with open(here, "xb") as f:
+            f.write(NODE_FENCE)
+    except OSError:
+        pass
 
 
 def registered_worktree(main, path):
@@ -866,6 +902,11 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
     apart from the task's agents. Returns its record."""
     key = s.key(task)
     cmd = list(resume or argv)
+    if agent_key(argv) == "codex" and "--no-daemon" in cmd:
+        # #1190: an old Codex exits 2 on --no-daemon in a shell nobody watches: say so here instead
+        old = codex_too_old()
+        if old:
+            raise Fail(codex_update_words(old))
     if not role:
         cmd = own_argv(cmd, folder_for(s, task))
     if message:

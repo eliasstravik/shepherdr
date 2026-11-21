@@ -17,8 +17,8 @@ from .agents import (
 )
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
-from .github import (already_merged, BEHIND, CHECKS_NEVER, checks_missing, checks_since, drop_branch, expected_checks, finish, github, merged_here, needs_approval, note_checks, pr_merged, pr_pending, pr_problem,
-                     pr_view, pr_wait, queue_entry, queue_merge, tidy_done, tidy_due, update_main, watch_main)
+from .github import (already_merged, BEHIND, CHECKS_NEVER, checks_missing, checks_since, drop_branch, merge_checks, expected_checks, finish, github, merged_here, needs_approval, note_checks, pr_merged, pr_pending, pr_problem,
+                     pr_view, pr_wait, queue_dropped_why, queue_entry, queue_merge, queue_refusal, unqueue, tidy_done, tidy_due, update_main, watch_main)
 from .launch import default_space
 from .store import locate, read_list, Store, store_files
 from .queues import machine_hold, refresh_ext, running_count, set_hold, waiting_ext, waiting_for
@@ -83,8 +83,35 @@ def queue_pass(s, t, v, report):
             report.setdefault("requeued", []).append(s.ref(t))
             return
         why += f"; queuing it again failed: {err}"
+    if queue_dropped_why(q.get("reason")) and head:
+        # #1174: its own merge group failed (or conflicted) at this commit: never queued again as it is
+        # (queue_refusal()); its agent hears to merge the base in (pr_news()).
+        t["queue_out"] = {"head": head, "why": why, "at": now()}
     t["attention"], t["attention_at"] = QUEUE_REMOVED + (f": {why}." if why else "."), now()
     report["attention"].append(t["id"])
+
+
+def refuse_queue(s, t, v, report):
+    """#1174: a pull request put back in GitHub's merge queue from outside Herdr (an agent's or the
+    Assistant's gh pr merge, GitHub's button) while it conflicts with its base, or at the commit whose
+    merge group just failed, comes out again: each such try fails a merge group and costs every pull
+    request behind it a new one. A failed group's commit is refused once (queued again after that, it
+    is the person's call); a conflict always (the queue can't merge it). True when it took it out."""
+    why = queue_refusal(t, v)
+    head = v.get("headRefOid")
+    if not why or (v.get("mergeable") != "CONFLICTING" and t.get("queue_refused") == head):
+        return False
+    q = queue_entry(t)
+    if not q or not (q["in"] or q["auto"]):
+        return False
+    ok, err = unqueue(q)
+    if not ok:
+        report.setdefault("github_error", []).append(f"{s.ref(t)}: couldn't take it out of the merge queue: {err}")
+        return False
+    t["queue_refused"] = head
+    s.dirty = True
+    report.setdefault("unqueued", []).append(s.ref(t))
+    return True
 
 
 def back_in_queue(s, t, report):
@@ -127,10 +154,14 @@ def facts(s, t, report):
             finish(s, t)
             report["done"].append(t["id"])
             return
+        # merging by itself: only the base branch's required checks count (#1221), for its news too (a red optional
+        # check sent to its agent would take it out of Ready, and the merge with it)
+        if t.get("auto_merge"):
+            v = merge_checks(t, v)
         problem = pr_problem(v)
         if t.get("merge_queued"):
             queue_pass(s, t, v, report)
-        else:
+        elif not refuse_queue(s, t, v, report):
             back_in_queue(s, t, report)
         if needs_approval(v):
             pr["needs_approval"] = True

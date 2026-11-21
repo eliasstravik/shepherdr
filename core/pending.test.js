@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { PENDING, settle } from "./pending.js";
+import { detach, PENDING, settle } from "./pending.js";
 
 const pending = (job) => ({ code: PENDING, stdout: JSON.stringify({ error: "Still running on vmb", pending: job, machine: "vmb" }), stderr: "" });
 const done = { code: 0, stdout: JSON.stringify({ id: 1, state: "done" }), stderr: "" };
@@ -28,4 +28,18 @@ test("it gives up after its rounds with the last words, and a throw is an error"
   expect(r.code).toBe(PENDING);
   const t = await settle(async () => { throw new Error("herdr.exec stopped"); }, pending("ef56"));
   expect(t).toEqual({ code: 1, stdout: "", stderr: "herdr.exec stopped" });
+});
+
+test("an action here run as its own job is followed here (#1211)", async () => {
+  const here = (job) => ({ code: PENDING, stdout: JSON.stringify({ error: "Still running here", pending: job, machine: "" }), stderr: "" });
+  const asked = [];
+  const answers = [here("gh78"), done];
+  const r = await settle(async (a) => { asked.push(a); return answers.shift(); }, here("gh78"));
+  expect(r).toEqual(done);
+  expect(asked).toEqual([["_job", "gh78", "--json"], ["_job", "gh78", "--json"]]);
+});
+
+test("detach runs an action here as a job, and leaves one on another machine to --on", () => {
+  expect(detach(["accept", "4", "--json"])).toEqual(["--detach", "accept", "4", "--json"]);
+  expect(detach(["--on", "vmb", "accept", "4"])).toEqual(["--on", "vmb", "accept", "4"]);
 });

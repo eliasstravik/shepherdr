@@ -293,19 +293,66 @@ def news_send(address, text, check=True):
     typing()): tried again next time. check=False: typing() was just asked."""
     if check and typing(address):
         return False
+    if codex_busy(hc_json("get", address)):
+        return False
     env = {k: v for k, v in os.environ.items() if k != "HC_TERMINAL_ID"}
     guard(["hc"])
     r = subprocess.run(["hc", "send", address, text], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     if r.returncode != 0:
         return False
     k = hc_json("get", address) or {}
-    if (k.get("labels") or {}).get("herdr.agent", "claude") == "claude" and status_word(k) == "working":
+    if is_codex(k):
+        codex_settle(address, text)
+    elif (k.get("labels") or {}).get("herdr.agent", "claude") == "claude" and status_word(k) == "working":
         for i in range(4):
             time.sleep(0.3 if i else 0.15)
             screen = run(["hc", "read", address, "--lines", "40"]).stdout
             if re.search(r"ctrl\+enter to send now", screen, re.I):
                 run(["hc", "keys", address, "ctrl+enter"])
                 break
+    return True
+
+
+# ---- Codex mid-turn (#1227) -------------------------------------------------------------------
+# A message pasted into Codex while it works can sit in its input box unsent ("tab to queue message"), at times
+# missing its first letter, and hc send says nothing of it. So nothing automatic goes to a working Codex: it
+# waits until the turn ends (as Codex's own queue would), and after a send the input box is checked.
+
+def is_codex(k):
+    k, st = k or {}, (k or {}).get("status")
+    return (k.get("labels") or {}).get("herdr.agent") == "codex" or (isinstance(st, dict) and "codex" in str(st.get("app") or ""))
+
+
+def codex_busy(k):
+    """A live Codex in the middle of a turn: what's sent to it now waits."""
+    return bool(k) and is_codex(k) and status_word(k) == "working"
+
+
+def codex_settle(address, text, tries=3):
+    """After a send to Codex: a draft it left for the queue is queued (Tab); one still in its input box (the last
+    › line on, past the conversation) is sent. Never presses anything when the box is empty."""
+    words = re.sub(r"\s+", " ", text).strip()
+    probe = words[1:25].strip()  # past the first letter, which may be the one dropped
+    for i in range(tries):
+        time.sleep(0.4 if i else 0.25)
+        lines = run(["hc", "read", address, "--lines", "30"]).stdout.split("\n")
+        at = max((n for n, ln in enumerate(lines) if ln.lstrip().startswith("›")), default=None)
+        box = " ".join(ln.strip() for ln in lines[at:]) if at is not None else ""
+        if re.search(r"tab to queue", box, re.I):
+            run(["hc", "keys", address, "tab"])
+            return "queued"
+        if probe and probe in box:
+            run(["hc", "keys", address, "enter"])
+            return "sent"
+    return None
+
+
+def plain_send(address, text):
+    """An agent's message (hc send) to `address`; for Codex, its input box checked after (codex_settle)."""
+    if run(["hc", "send", address, text]).returncode != 0:
+        return False
+    if is_codex(hc_json("get", address)):
+        codex_settle(address, text)
     return True
 
 
@@ -470,12 +517,12 @@ def hold(address, text, how="send"):
 def send_or_hold(address, text, how="send"):
     """Sends it now, or holds it while the person is writing to that agent. Returns "sent",
     "held", or None when it couldn't go (hc refused it)."""
-    if typing(address):
+    if typing(address) or codex_busy(hc_json("get", address)):
         hold(address, text, how)
         return "held"
     if how == "news":
         return "sent" if news_send(address, text, check=False) else None
-    return "sent" if run(["hc", "send", address, text]).returncode == 0 else None
+    return "sent" if plain_send(address, text) else None
 
 
 def held_pass(report):
@@ -490,14 +537,14 @@ def held_pass(report):
             if not k or k.get("state") != "live":
                 held.pop(addr)
                 continue
-            if typing(addr, k):
+            if typing(addr, k) or codex_busy(k):
                 continue
             for how in ("news", "send"):
                 batch = [x for x in items if x.get("how", "send") == how]
                 if not batch:
                     continue
                 text = "\n\n".join(x["text"] for x in batch)
-                ok = news_send(addr, text, check=False) if how == "news" else run(["hc", "send", addr, text]).returncode == 0
+                ok = news_send(addr, text, check=False) if how == "news" else plain_send(addr, text)
                 if ok:
                     items[:] = [x for x in items if x not in batch]
                     report.setdefault("held", []).append({"to": addr, "messages": len(batch)})

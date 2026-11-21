@@ -379,6 +379,22 @@ class Install(unittest.TestCase):
         self.assertIn("Checks: read", out[0])
         self.assertNotIn("Commit statuses", out[0])
 
+    def test_worktrees_folder_gets_a_plain_package_json(self):
+        """#1132: our package.json (type: module) sits above the task worktrees: an install puts a plain one in that
+        folder so a worktree's repo with none of its own runs as CommonJS, as in its main checkout."""
+        wt = self.p(".local/share/shepherdr/worktrees")
+        os.makedirs(os.path.join(wt, "repo", "task-1"))
+        run("install", "--root", self.root, "--yes")
+        if not os.path.isfile(self.p(".local/share/shepherdr/package.json")):
+            self.skipTest("no service installed here")
+        with open(os.path.join(wt, "package.json")) as f:
+            self.assertNotIn("type", json.load(f))
+        with open(os.path.join(wt, "package.json"), "w") as f:
+            f.write('{"mine": 1}')
+        run("update", "--root", self.root, "--yes")
+        with open(os.path.join(wt, "package.json")) as f:
+            self.assertEqual(json.load(f), {"mine": 1})
+
     def test_service_answers(self):
         """doctor and install trust only Shepherdr's own service on its port: the id it wrote in service.json, not
         another app answering health there (GitHub #635)."""
@@ -417,6 +433,30 @@ class Install(unittest.TestCase):
             for s in (ours, other):
                 s.shutdown()
                 s.server_close()
+
+    def test_the_artifact_viewer_goes_with_the_artifacts_mod(self):
+        """GitHub #1214: herdr-artifact preview looks beside itself first; the built viewer is installed there with the
+        artifacts mod, so a machine without the Web add-on (or a sync) still previews. Not built: nothing to ship."""
+        from importlib.machinery import SourceFileLoader
+        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        src = tempfile.mkdtemp(prefix="shepherdr-src-")
+        try:
+            for top in ("lib", "mods", "core", "templates", "bin"):
+                shutil.copytree(os.path.join(ROOT, top), os.path.join(src, top), ignore=shutil.ignore_patterns("node_modules", "__pycache__"))
+            shutil.copy(os.path.join(ROOT, "package.json"), src)
+            want = (".config/herdr-app/mods/artifacts/viewer.html")
+            self.assertNotIn(want, [rel for _, rel, _ in sh.source_items(src)[2]])
+            os.makedirs(os.path.join(src, "web", "dist"))
+            page = os.path.join(src, "web", "dist", "artifact-viewer.html")
+            with open(page, "w") as f:
+                f.write("<!doctype html><title>viewer</title>")
+            got = [(g, path) for g, rel, path in sh.source_items(src)[2] if rel == want]
+            self.assertEqual(got, [("artifacts", page)])
+            # where herdr-artifact looks first: beside its bin/
+            art = open(os.path.join(ROOT, "mods/artifacts/bin/herdr-artifact"), encoding="utf-8").read()
+            self.assertIn('os.path.join(HERE, "..", "viewer.html")', art)
+        finally:
+            shutil.rmtree(src, ignore_errors=True)
 
     def test_web_only(self):
         """install --web: the service, the web app, herdr-task and the helpers under .local/share/shepherdr, linked from

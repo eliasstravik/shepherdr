@@ -7,6 +7,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import time
 
 from .base import Fail, git, HOME, MAX_RUNNING, WHERE
 from . import flags as FLAGS
@@ -178,7 +179,7 @@ def argv_for(pick):
         if pick.get("effort"):
             a += ["--effort", pick["effort"]]
         a += ["--settings", json.dumps({"fastMode": bool(pick.get("fast"))})]
-        perm = pick.get("perm")
+        perm = PERM_ACROSS["claude"].get(pick.get("perm"), pick.get("perm"))
         if perm == "bypassPermissions":
             a.append("--dangerously-skip-permissions")
         elif perm:
@@ -193,7 +194,7 @@ def argv_for(pick):
         # always said, so Fast off wins over a service_tier in config.toml (default: the standard tier)
         # Ultrafast: Codex's fastest tier (SHEP-258), on models whose catalog offers it
         a += ["-c", 'service_tier="%s"' % ("ultrafast" if pick.get("fast") == "ultrafast" else "fast" if pick.get("fast") else "default")]
-        perm = pick.get("perm")
+        perm = PERM_ACROSS["codex"].get(pick.get("perm"), pick.get("perm"))
         if perm == "full":
             a.append("--dangerously-bypass-approvals-and-sandbox")
         elif perm == "read-only":
@@ -204,6 +205,40 @@ def argv_for(pick):
     return [agent] if agent else None
 
 
+# Permission modes as each CLI has them, and a mode carried to the other CLI when a task's agent
+# changes: its nearest mode there, else that CLI's default (core/agents.js PERM_ACROSS, #758, #1219).
+PERMS = {"claude": ("manual", "auto", "acceptEdits", "plan", "bypassPermissions"), "codex": ("read-only", "auto", "full")}
+PERM_ACROSS = {"claude": {"read-only": "plan", "auto": "auto", "full": "bypassPermissions"},
+               "codex": {"plan": "read-only", "auto": "auto", "acceptEdits": "auto", "bypassPermissions": "full"}}
+PERM_DEFAULT = {"codex": "auto"}
+
+
+def perm_across(perm, agent):
+    """A permission mode in `agent`'s words: its match, the same mode when that CLI has it, else its
+    default (None: the CLI's own)."""
+    if perm in PERM_ACROSS.get(agent, {}):
+        return PERM_ACROSS[agent][perm]
+    if perm in PERMS.get(agent, ()):
+        return perm
+    return PERM_DEFAULT.get(agent)
+
+
+def argv_perm(argv):
+    """The permission mode an agent's argv starts with, as argv_for writes it; None when it says none."""
+    argv = [str(a) for a in argv or []]
+    if "--dangerously-skip-permissions" in argv:
+        return "bypassPermissions"
+    if "--dangerously-bypass-approvals-and-sandbox" in argv or "--yolo" in argv:
+        return "full"
+    for i, a in enumerate(argv[:-1]):
+        nxt = argv[i + 1]
+        if a == "--permission-mode":
+            return "manual" if nxt == "default" else nxt
+        if a in ("-s", "--sandbox"):
+            return {"read-only": "read-only", "workspace-write": "auto", "danger-full-access": "full"}.get(nxt)
+    return None
+
+
 def worker_pick(s, task, space=None, agent=None):
     """What a task's agent runs on, {agent, model, effort, fast, perm}: Settings' worker, then the
     task's own --agent / --model / --effort, then `agent` (start --agent). Another CLI than
@@ -211,7 +246,9 @@ def worker_pick(s, task, space=None, agent=None):
     pick = dict(settings_for(s, space)["worker"] or {})
     for key in (task.get("agent"), agent):
         if key and key != pick.get("agent"):
-            pick = {"agent": key}
+            # #1219: the space's permission goes along, in the new CLI's words (full access stays full)
+            perm = perm_across(pick.get("perm") or argv_perm(pick.get("argv")), key)
+            pick = {"agent": key, **({"perm": perm} if perm else {})}
     if not pick.get("agent") and not pick.get("argv"):
         pick["agent"] = "claude"
     for k in ("model", "effort"):
@@ -407,6 +444,99 @@ def codex_lacks(model):
     return ids if model and ids and model not in ids else None
 
 
+# ---- finding a CLI as the person's shell does (#1228, #1190) -------------------------------------
+# hc run starts a program with the core's PATH and gives it a bare one, so an agent CLI the person's shell
+# finds (nvm, mise, npm's prefix, ~/.local/bin) can't start as a helper: "cannot start codex", or with its full
+# path "env: node: No such file or directory". The shell agents start in says where it is.
+BARE_DIRS = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
+_cli = {}
+
+
+def shell_which(name):
+    """Where the person's interactive shell (as a task's agent starts in, launch.in_shell) finds `name`, or None."""
+    sh = os.environ.get("SHELL") or "/bin/sh"
+    flag = "-lic" if os.uname().sysname == "Darwin" else "-ic"
+    try:
+        r = subprocess.run([sh, flag, 'printf "\n@herdr@%s@herdr@\n" "$(command -v ' + name + ')"'], stdin=subprocess.DEVNULL,
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r"@herdr@(/[^\n@]*)@herdr@", r.stdout or "")
+    return m.group(1) if m and os.access(m.group(1), os.X_OK) else None
+
+
+def cli_path(name):
+    """A CLI's full path: on this PATH, else the person's shell's (that one kept a few minutes: a long-running
+    scheduler sees an update or an nvm switch)."""
+    found = shutil.which(name)
+    if found or not re.fullmatch(r"[\w.-]+", name):
+        return found
+    key = (name, os.environ.get("PATH"), os.environ.get("SHELL"))
+    if key not in _cli or time.time() - _cli[key][1] > 300:
+        _cli[key] = (shell_which(name), time.time())
+    return _cli[key][0]
+
+
+def cli_dirs(name):
+    """The folders a CLI needs on PATH to start: its own, and node's for an npm script (#!/usr/bin/env node)."""
+    p = cli_path(name)
+    if not p:
+        return []
+    dirs = [os.path.dirname(p)]
+    try:
+        with open(os.path.realpath(p), "rb") as f:
+            head = f.readline(200)
+    except OSError:
+        head = b""
+    if head.startswith(b"#!") and b"node" in head:
+        node = os.path.join(dirs[0], "node")
+        node = node if os.access(node, os.X_OK) else cli_path("node")
+        if node:
+            dirs.append(os.path.dirname(node))
+    return list(dict.fromkeys(dirs))
+
+
+def cli_env(name):
+    """'env "PATH=<its folders>:$PATH" ' before a helper's command so hc run finds the CLI and what it needs, the rest
+    of the worker's PATH kept; "" when it is in the system's own folders or can't be found."""
+    dirs = [d for d in cli_dirs(name) if d not in BARE_DIRS]
+    if not dirs or any(re.search(r'["$`\\:]', d) for d in dirs):
+        return ""
+    return 'env "PATH=' + ":".join(dirs) + ':$PATH" '
+
+
+# --no-daemon is what every Codex Shepherdr starts gets (#745); a Codex without it exits 2 on it (#1190).
+UPDATE_CODEX = "npm install -g @openai/codex@latest, or brew upgrade codex"
+_codex_old = {}
+
+
+def codex_too_old():
+    """'codex-cli 0.144.5 at <path>' when the Codex here has no --no-daemon (too old for Shepherdr), else None
+    (new enough, or unknown: never blocks on a check that couldn't run)."""
+    p = cli_path("codex")
+    if not p:
+        return None
+    try:
+        key = (p, os.stat(p).st_mtime)
+    except OSError:
+        return None
+    if key not in _codex_old:
+        env = {**os.environ, "PATH": ":".join(cli_dirs("codex") + [os.environ.get("PATH") or "/usr/bin:/bin"])}
+        try:
+            h = subprocess.run([p, "--help"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15, env=env)
+            v = subprocess.run([p, "--version"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15, env=env)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        old = h.returncode == 0 and "Usage" in (h.stdout or "") and "--no-daemon" not in h.stdout
+        _codex_old[key] = f"{(v.stdout or '').strip() or 'codex'} at {p}" if old else None
+    return _codex_old[key]
+
+
+def codex_update_words(old):
+    return (f"Codex here is too old for Shepherdr ({old} has no --no-daemon). Update it ({UPDATE_CODEX}), "
+            "then start again.")
+
+
 CLAUDE_MODEL = re.compile(r"^(claude-|opus|sonnet|haiku|fable)", re.I)
 
 
@@ -475,7 +605,8 @@ def reviewer_command(who, model=None, effort=None, folder=None):
         a += ["--effort", effort] if effort else []
     else:
         return None
-    return shlex.join(a)
+    # #1228: hc run starts it with a bare PATH; its folders (nvm's, with node) go first, the worker's PATH after
+    return cli_env(who) + shlex.join(a)
 
 
 def task_settings(s, t, space=None, argv=None, live=False):
@@ -527,6 +658,10 @@ def task_settings(s, t, space=None, argv=None, live=False):
             ok, said = codex_login_now()
             if ok is False:
                 who, rv = agent, {}
+        # #1190: a Codex without --no-daemon exits at once: the worker's own CLI reviews, and the line says to update
+        old = codex_too_old() if who == "codex" and agent != "codex" else None
+        if old:
+            who, rv = agent, {}
         # #948: a model Codex here doesn't offer this account stops it at once: its own default instead, said
         lacks = codex_lacks(rv.get("model")) if who == "codex" else None
         dropped = rv.get("model")
@@ -536,7 +671,10 @@ def task_settings(s, t, space=None, argv=None, live=False):
         if lacks:
             text += (f" (Codex's own default model: Codex here doesn't offer {dropped} "
                      "for the account it is signed in with)")
-        if who != want:
+        if old:
+            text += (f" (your own CLI: Codex here is too old for Shepherdr, {old} has no --no-daemon; the person updates "
+                     f"it ({UPDATE_CODEX}), then asks for the review again)")
+        elif who != want:
             text += (f" (your own CLI: {CLI_NAMES.get(want, want)} isn't signed in here"
                      + (f", `{LOGIN.get(want, want + ' login')} status` says \"{said}\"" if said and not re.match(r"not logged in", said, re.I) else "")
                      + f"; the person runs `{LOGIN.get(want, want + ' login')}` on this machine, then asks for the review again)")

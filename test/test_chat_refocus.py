@@ -26,7 +26,7 @@ const input = %(input)s;
 const focusCalls = [];
 const timers = [];
 const self = Object.assign({ box: { focus: () => focusCalls.push(1) }, wasFocused: false, hadBox: false,
-  focused: false, call: null, press: null, refocusAt: 0, areaKey: () => "pane" }, input.self);
+  focused: false, call: null, press: null, refocusAt: 0, areaKey: () => "pane", cardKeys: () => !!input.self.cardBox }, input.self);
 const cx = { timer: { after: (ms, fn) => timers.push([ms, fn]) } };
 obj.refocus.call(self, input.paneFocused, input.showsBox, cx);
 for (const [, fn] of timers) fn();
@@ -68,6 +68,63 @@ class RefocusKeepsSelection(unittest.TestCase):
     def test_without_a_selection_that_later_render_refocuses_the_box(self):
         state = {"wasFocused": True, "hadBox": True, "focused": False, "pressMoved": False, "press": {"at": 0}}
         self.assertEqual(run(state), 1)
+
+
+class RefocusLeavesCardBoxes(unittest.TestCase):
+    """GitHub #1224: typing in a question card's Other… box (or a secret's masked box) went to the reply box: every key
+    redraws, and a redraw 1.5 s after the last press gave the reply box the keyboard back."""
+
+    @classmethod
+    def setUpClass(cls):
+        if MATCH is None or shutil.which("node") is None:
+            raise unittest.SkipTest("main.js refocus() not found or no node")
+
+    def test_a_later_render_leaves_a_card_box_that_has_the_keyboard(self):
+        state = {"wasFocused": True, "hadBox": True, "focused": False, "pressMoved": False, "press": {"at": 0}, "cardBox": True}
+        self.assertEqual(run(state), 0)
+
+    def test_the_pane_newly_focused_leaves_it_too(self):
+        # A click on Other… in a pane that hadn't the keyboard: the box's timers must not take it from the card's box.
+        self.assertEqual(run({"pressMoved": False, "press": {"at": 0}, "cardBox": True}), 0)
+
+    def test_the_chat_asks_every_kind_of_card(self):
+        body = re.search(r"\n  cardKeys\(\) \{\n(.*?)\n  \}\n", SRC, re.S).group(1)
+        for c in ("this.cards", "this.workerCards", "this.codexCards", "this.secretCards"):
+            self.assertIn(c, body)
+
+
+class CardBoxesSayTheyHoldKeys(unittest.TestCase):
+    """cards.js and secret-card.js's holdsKeys(), run as written with a stand-in box that fires focus and blur."""
+
+    def holds(self, path, setup):
+        src = open(os.path.join(ROOT, "mods", "chat", path), encoding="utf-8").read()
+        method = re.search(r"\n  holdsKeys\(\) \{\n.*?\n  \}\n", src, re.S).group(0).strip()
+        script = "const obj = { %s };\n%s" % (method, setup)
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "h.mjs")
+            with open(p, "w") as f:
+                f.write(script)
+            return subprocess.run(["node", p], capture_output=True, text=True, check=True).stdout.split()
+
+    def test_question_cards(self):
+        out = self.holds("cards.js", """
+const b = {}; const self = { typing: null, states: new Map([["a1", { boxes: [b] }]]) };
+const h = () => obj.holdsKeys.call(self);
+console.log(h()); self.typing = b; console.log(h()); self.states.delete("a1"); console.log(h());""")
+        self.assertEqual(out, ["false", "true", "false"])
+
+    def test_secret_cards(self):
+        out = self.holds("secret-card.js", """
+const b = {}; const self = { typing: null, states: new Map([["x|K", { box: b }]]) };
+const h = () => obj.holdsKeys.call(self);
+console.log(h()); self.typing = b; console.log(h()); self.states.clear(); console.log(h());""")
+        self.assertEqual(out, ["false", "true", "false"])
+
+    def test_their_boxes_note_focus_and_blur(self):
+        for path in ("cards.js", "secret-card.js"):
+            src = open(os.path.join(ROOT, "mods", "chat", path), encoding="utf-8").read()
+            self.assertIn('b.on("focus", () => { this.typing = b; });', src)
+            self.assertIn('b.on("blur", () => { if (this.typing === b) this.typing = null; });', src)
 
 
 class ChatTracksDrags(unittest.TestCase):

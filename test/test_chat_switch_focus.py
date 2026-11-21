@@ -33,7 +33,7 @@ const cx = { timer: { after: (ms, fn) => fn() } };
 // Shown and focused at its last draw, its box blurred when the window moved to the other space.
 const self = { box: { focus: () => focusCalls.push(1) }, wasFocused: true, hadBox: true, focused: false, call: null,
   press: null, pressMoved: false, refocusAt: 0, thread: false, inner: false,
-  myPane: () => "pane-mine", areaKey: () => "pane-mine", forgetHidden: obj.forgetHidden };
+  myPane: () => "pane-mine", areaKey: () => "pane-mine", forgetHidden: obj.forgetHidden, cardKeys: () => false };
 const input = %(input)s;
 if (input.hidden) { shownTab = "tab-other"; if (input.timer) self.forgetHidden(); }
 shownTab = "tab-mine";
