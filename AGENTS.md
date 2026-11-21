@@ -167,3 +167,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - herdr-task --detach/_job (window actions as local jobs): test with TMPDIR=<scratch> and HERDR_TASK_ACTION_WAIT to keep job files and waits throwaway (see DetachedActions). (from SHEP-277)
 
 - Real Codex versions for repros: `npm i --prefix <scratch> @openai/codex@<ver>`, then hc run it with env PATH=<scratch>/node_modules/.bin:<node dir>:$PATH (hc run children get a bare PATH and do not inherit the caller's). (from SHEP-278)
+
+- herdr-task's typing() reads a worker's session log from its hc herdr.resume label (log key): fake it with a temp JSONL and patch news.screen_raw (see ReadyAndPrFlow). (from SHEP-283)
