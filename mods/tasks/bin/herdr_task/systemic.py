@@ -217,7 +217,7 @@ def systemic_pass(s, report):
                 s.dirty = True
             continue
         tasks = {t["id"]: t for t in s.data["tasks"]}
-        held = [tasks[i] for i in ep["tasks"] if i in tasks and tasks[i].get("base_hold") and tasks[i]["state"] in ("ready", "running")]
+        held = [tasks[i] for i in sorted(ep["tasks"]) if i in tasks and tasks[i].get("base_hold") and tasks[i]["state"] in ("ready", "running")]
         lk = look(s, ep["repo"], base)
         green = bool(lk and not lk.get("red") and lk.get("head") and lk["head"] != ep.get("head"))
         if not held or green or now() - ep["since"] > HOLD_MS:
