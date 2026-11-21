@@ -163,3 +163,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - Fake a dropped herdr-core link: hc machine add --via <script> --session b on a throwaway core, make the script fail while a flag file exists, kill the core's `herdr-core connect` child; hc machine login only retries with a terminal (give it a pty). (from SHEP-276)
 
 - Web viewer before/after on the dev VM: `bunx vite build --config web/vite.viewer.config.ts` writes a single-file web/dist/artifact-viewer.html; serve it with a tiny Bun stub answering /api/artifacts/<id> and /recipe. (from SHEP-274)
+
+- herdr-task --detach/_job (window actions as local jobs): test with TMPDIR=<scratch> and HERDR_TASK_ACTION_WAIT to keep job files and waits throwaway (see DetachedActions). (from SHEP-277)
