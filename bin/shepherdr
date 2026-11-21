@@ -97,6 +97,15 @@ def where_for(root):
     return layout_mod().Where(home=root, env=None if real else {})
 
 
+def tpl_rel(root=None):
+    """Where the role templates go under an install root (#1182): herdr-core reads $XDG_CONFIG_HOME/herdr-core/templates,
+    so the real home follows an absolute XDG_CONFIG_HOME; a scratch root (--root) never does."""
+    xdg = os.environ.get("XDG_CONFIG_HOME") or ""
+    if root is None or not xdg.startswith("/") or os.path.realpath(root) != os.path.realpath(real_home()):
+        return TPL
+    return os.path.relpath(os.path.join(xdg, "herdr-core", "templates"), root)
+
+
 def env_for(root):
     """What decides the folders, as the service must see it too (a user service has none of the shell's)."""
     if os.path.realpath(root) != os.path.realpath(real_home()):
@@ -336,7 +345,7 @@ def walk_files(top):
     return out
 
 
-def source_items(src):
+def source_items(src, root=None):
     """What the checkout installs: [(group, rel under root, source path)]. group: a mod's name,
     or "layout", "lib", "bin", "template"."""
     manifest = json.load(open(os.path.join(src, "lib", "addons.json")))
@@ -365,7 +374,7 @@ def source_items(src):
             items.append(("lib", f"{APP}/core/{f}", os.path.join(src, "core", f)))
     for f in sorted(os.listdir(os.path.join(src, "templates"))):
         if f.endswith(".md"):
-            items.append(("template", f"{TPL}/{f}", os.path.join(src, "templates", f)))
+            items.append(("template", f"{tpl_rel(root)}/{f}", os.path.join(src, "templates", f)))
     items += service_items(src)
     return manifest, mods, items
 
@@ -1153,7 +1162,7 @@ def cmd_install(a, update=False):
             raise Stop(f"{r.p(APP)} isn't there: open Herdr once first, so it writes its home")
         r.notes.append(f"{r.p(APP)} didn't exist: made (a scratch root)")
     build_web(r, src, home, a)
-    manifest, mods, items = source_items(src)
+    manifest, mods, items = source_items(src, root)
     actions, clashes = plan_files(r, rec, items, a.adopt)
     if clashes:
         shown = "\n  ".join(clashes[:40]) + (f"\n  ... and {len(clashes) - 40} more" if len(clashes) > 40 else "")
@@ -1268,7 +1277,7 @@ def cmd_install(a, update=False):
         save_record(r.root, rec)
         shutil.rmtree(r.p(f"{APP}/.shepherdr-stage"), ignore_errors=True)
     whole_bad = [] if a.dry_run else install_checks(r, rec)[0]
-    for n in r.notes + notes:
+    for n in r.notes + notes + addons_off_notes(root):
         say(f"  - {n}")
     if not a.dry_run:
         if r.backed:
@@ -1291,11 +1300,11 @@ def cmd_install(a, update=False):
 WEB_RECORD = f"{SHARE}/installed.json"
 
 
-def web_items(src):
+def web_items(src, root=None):
     items = service_items(src)
     for f in sorted(os.listdir(os.path.join(src, "templates"))):
         if f.endswith(".md"):
-            items.append(("template", f"{TPL}/{f}", os.path.join(src, "templates", f)))
+            items.append(("template", f"{tpl_rel(root)}/{f}", os.path.join(src, "templates", f)))
     return items
 
 
@@ -1323,7 +1332,7 @@ def cmd_install_web(a, update=False):
     say(f"Shepherdr {VERSION} web-only {'update' if update else 'install'} from {src}\n  into {root}{' (dry run: nothing is written)' if a.dry_run else ''}")
     build_web(r, src, home, a)
     n = 0
-    for _g, rel, path in web_items(src):
+    for _g, rel, path in web_items(src, root):
         data, mode = read(path), os.stat(path).st_mode & 0o777
         if read(r.p(rel)) == data:
             files[rel] = fsha(rel, data)
@@ -1338,7 +1347,7 @@ def cmd_install_web(a, update=False):
         files[rel] = fsha(rel, data)
     say(f"  files: {n} written")
     # retired, as the herdr-app install does it: shipped before, not any more; a changed one is backed up first
-    shipped = {rel for _g, rel, _p in web_items(src)}
+    shipped = {rel for _g, rel, _p in web_items(src, root)}
     for rel in [x for x in files if x not in shipped and x not in MANAGED]:
         cur = read(r.p(rel))
         if cur is not None and fsha(rel, cur) != files[rel]:
@@ -1427,6 +1436,24 @@ def cmd_uninstall_web(a, root):
 def short(p):
     h = real_home()
     return "~" + p[len(h):] if p.startswith(h + "/") else p
+
+
+# GitHub #1091: the add-ons herdr-task obeys (since 3.1.35): one switched off stops work people may count on, so doctor
+# and update say so, with how to turn it back on.
+ADDON_OFF_WORDS = {
+    "machines": "Other machines is off: nothing syncs to other machines, and tell-assistant and assistants reach only this machine",
+    "autopilot": "Autopilot is off: no Assistant is woken on its schedule or by events",
+}
+
+
+def addons_off_notes(root):
+    try:
+        with open(where_for(root).path("settings")) as f:
+            off = (json.load(f).get("everywhere") or {}).get("off") or []
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [f"add-on {ADDON_OFF_WORDS[x]} (turn it on in Settings › Window › Add-ons, or `herdr-task addons on {x}`)"
+            for x in ADDON_OFF_WORDS if isinstance(off, list) and x in off]
 
 
 def data_check(root):
@@ -1639,7 +1666,7 @@ def cmd_doctor(a):
         warn += github_checks_check(root)
     d_bad, d_notes = data_check(root)
     bad += d_bad
-    t_notes = d_notes + t_notes
+    t_notes = d_notes + t_notes + addons_off_notes(root)
     if home:
         s_bad, s_notes = serve_check(root)
         bad += s_bad

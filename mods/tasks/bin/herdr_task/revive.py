@@ -20,7 +20,7 @@ import shlex
 from .base import HOME, hc_json, now, run, SHELLS
 from .agents import agent_running, status_word
 from .sessions import session_of
-from .settings import ASSISTANT_TEMPLATES
+from .settings import ASSISTANT_TEMPLATES, TEMPLATES
 from .launch import CLEAN_ENV
 
 LABEL = "herdr.resume"
@@ -215,7 +215,7 @@ def task_record(k, t):
 def template_of(name="assistant"):
     """(command, text) of a herdr-core template on this machine."""
     try:
-        with open(os.path.join(HOME, ".config", "herdr-core", "templates", f"{name}.md")) as f:
+        with open(os.path.join(TEMPLATES, f"{name}.md")) as f:
             text = f.read()
     except OSError:
         return None, None
@@ -273,6 +273,31 @@ def plan(k, rec, running):
     return ("fresh", [*argv, lost_message(task_ref(k), template)], not (rec or {}).get("shell"))
 
 
+# #1080: a Working task's agent the core gave a plain shell that nothing here brings back (no record of its session, or
+# what was typed didn't start it): its task says so, rather than looking Working with nobody at work.
+NEEDS_RESUME = "Its agent came back as a plain shell after a restart and couldn't be resumed: resume or switch it"
+# How long a typed resume or new session may take to show as running before its task says so.
+START_MS = 3 * 60000
+
+
+def worker_of(k):
+    """A task's own worker (not its reviewer): the terminals whose task can say it needs a resume."""
+    labels = k.get("labels") or {}
+    return bool(labels.get("herdr.task")) and labels.get("herdr.role") != "reviewer"
+
+
+def needs_resume(k, rec):
+    """NEEDS_RESUME when `k`, a Working task's worker the core gave a shell, gets nothing from plan(): never while
+    what was typed there may still be starting."""
+    if not worker_of(k) or (task_of(k) or {}).get("state") != "running":
+        return None
+    if rec and rec.get("pid") == k.get("pid"):
+        # the same process: quit at its shell (no restart, nothing typed), or what was typed may still be starting
+        if not rec.get("how") or now() - (rec.get("sent") or 0) < START_MS:
+            return None
+    return NEEDS_RESUME
+
+
 def revive_pass(report):
     """Records each running Assistant's and task agent's session here, and brings back the ones the
     core gave a plain shell."""
@@ -293,6 +318,9 @@ def revive_pass(report):
     for k, rec in back:
         step = plan(k, rec, running)
         if not step:
+            why = needs_resume(k, rec)
+            if why:
+                report.setdefault("revive_needed", []).append({"task": k["labels"]["herdr.task"], "terminal": k["address"], "why": why})
             continue
         how, argv, direct = step
         rec = dict(rec or {}, pid=k.get("pid"), how=how, sent=now())
@@ -302,6 +330,9 @@ def revive_pass(report):
                     env=without_caller())
             if r.returncode != 0:
                 report.setdefault("revive_failed", []).append({"terminal": k["address"], "why": (r.stderr or r.stdout).strip()})
+                if worker_of(k):
+                    report.setdefault("revive_needed", []).append({"task": k["labels"]["herdr.task"], "terminal": k["address"],
+                                                                    "why": NEEDS_RESUME})
                 continue
         # Marked as handled before anything else looks: the next tick types nothing here again.
         write_record(k, rec)

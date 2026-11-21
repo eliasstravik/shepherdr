@@ -8,6 +8,7 @@ import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
 import { props, theme, settings, knownAgents, closeOverlay, home, exec, readTextFile, writeTextFile, watchFolder } from "herdr";
 import { terminals, inRender } from "./live.js";
+import { dirs } from "./dirs.js";
 import { coordinatorIn, workersOf, entryFor, restartAgent, closeCoordinator, taskOf, switchTask } from "./coordinator.js";
 import { TEXT, H, RADIUS, button as uiButton, heading, dialogFooter } from "./ui.js";
 // Switch agent's words: core/menus.js (the web app's Switch agent reads the same).
@@ -17,7 +18,7 @@ import { INSTRUCTIONS } from "./core/settings.js";
 
 // The instructions view edits props.file (default: the assistant template); props.role picks its note.
 // Panes saved before the roles became templates name the old files: they open the templates.
-const TEMPLATES = () => `${home()}/.config/herdr-core/templates`;
+const TEMPLATES = () => dirs().templates;   // where herdr-core reads them ($XDG_CONFIG_HOME's when set: #1182)
 const MOVED = () => ({ [`${TEMPLATES()}/coordinator.md`]: `${TEMPLATES()}/assistant.md`,
   [`${home()}/.herdr/instructions/worker.md`]: `${TEMPLATES()}/worker.md`, [`${home()}/.herdr/instructions/reviewer.md`]: `${TEMPLATES()}/reviewer.md` });
 const FILE = () => { const f = props()?.file ?? `${TEMPLATES()}/assistant.md`; return MOVED()[f] ?? f; };

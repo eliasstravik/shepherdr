@@ -4,7 +4,7 @@
 // whichever answers first wins (the hook reads one answer, then the card closes everywhere). Another machine's agents
 // (the web served from a machine other than theirs) ask in that machine's data/chat-asks: read and answered through
 // herdr-core's link.
-import { watch, readdirSync, readFileSync, writeFileSync, renameSync, existsSync, statSync } from "node:fs";
+import { watch, readdirSync, readFileSync, writeFileSync, renameSync, existsSync, statSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DATA, appHome, writable } from "./paths.ts";
 import * as A from "../core/asks.js";
@@ -15,12 +15,13 @@ const { words, allow, deny, answers, annotationsOf, howAnswered, release, chatAb
 const dir = () => join(appHome(), "data", "chat-asks");
 const ID = /^[\w.-]+$/;
 const MACHINE = /^[\w.-]+$/;
-// On another machine (its folder by its own home): each request still waiting, one line each ("req", its id, its JSON),
-// then how each id given has ended ("end", its id, the hook's or a card's words).
+// On another machine (its folder by its own home): each request still waiting, one line each ("req", its id, its JSON;
+// marked seen/<id>, so its hook knows a card shows it), then how each id given has ended ("end", its id, the hook's or a card's words).
 const THERE = 'd="${HERDR_APP_HOME:-$HOME/.config/herdr-app}/data/chat-asks"';
 const LIST = `${THERE}
+mkdir -p "$d/seen" 2>/dev/null
 for f in "$d"/req/*.json; do [ -f "$f" ] || continue; n=\${f##*/}; n=\${n%.json}; [ -f "$d/ans/$n.json" ] && continue
-  printf 'req\\t%s\\t' "$n"; tr '\\n\\t' '  ' < "$f"; echo; done
+  : > "$d/seen/$n" 2>/dev/null; printf 'req\\t%s\\t' "$n"; tr '\\n\\t' '  ' < "$f"; echo; done
 for n in "$@"; do [ -f "$d/end/$n" ] && printf 'end\\t%s\\t%s\\n' "$n" "$(head -n 1 "$d/end/$n")"; done; exit 0`;
 // An answer there, as answer() writes one here: how it went (end/<id>), then the answer (stdin) in place at once.
 const ANSWER = `${THERE}; mkdir -p "$d/ans" "$d/end"; [ -f "$d/req/$1.json" ] || exit 3
@@ -136,6 +137,8 @@ export class Asks {
       if (old) { next.set(id, old); continue; }
       try {
         const req = JSON.parse(readFileSync(join(dir(), "req", n), "utf8"));
+        // seen/<id>: a card shows it, so a Codex hook keeps waiting for its answer (else Codex asks in its terminal)
+        try { mkdirSync(join(dir(), "seen"), { recursive: true }); writeFileSync(writable(join(dir(), "seen", id)), ""); } catch {}
         next.set(id, { id, terminal: id.split(".")[0], at: statSync(join(dir(), "req", n)).mtimeMs, req, words: words(req) });
       } catch {}
     }

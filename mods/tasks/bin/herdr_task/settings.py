@@ -3,6 +3,7 @@ the Settings block a task's brief ends with."""
 
 import json
 import os
+import platform
 import re
 import shlex
 import shutil
@@ -22,7 +23,10 @@ AGENTS = {"claude": ["claude"], "codex": ["codex", "--no-daemon"]}
 SETTINGS = os.environ.get("HERDR_TASK_SETTINGS") or WHERE.path("settings")
 # The role instructions are herdr-core templates (`hc templates` lists them): assistant.md (the
 # coordinator's), worker.md and reviewer.md. Workers and reviewers used ~/.herdr/instructions.
-TEMPLATES = os.environ.get("HERDR_TASK_TEMPLATES") or os.path.join(HOME, ".config", "herdr-core", "templates")
+# Where herdr-core reads the role templates: $XDG_CONFIG_HOME's when set (absolute), else ~/.config's (#1182).
+TEMPLATES = os.environ.get("HERDR_TASK_TEMPLATES") or os.path.join(
+    os.environ["XDG_CONFIG_HOME"] if os.environ.get("XDG_CONFIG_HOME", "").startswith("/") else os.path.join(HOME, ".config"),
+    "herdr-core", "templates")
 OLD_INSTRUCTIONS = os.path.join(HOME, ".herdr", "instructions")
 ASSISTANT_TEMPLATES = ("assistant", "coordinator")  # "coordinator": Assistants started before the rename
 DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "must_fix": "major", "max_running": MAX_RUNNING, "worktrees": True,
@@ -455,7 +459,7 @@ _cli = {}
 def shell_which(name):
     """Where the person's interactive shell (as a task's agent starts in, launch.in_shell) finds `name`, or None."""
     sh = os.environ.get("SHELL") or "/bin/sh"
-    flag = "-lic" if os.uname().sysname == "Darwin" else "-ic"
+    flag = "-lic" if platform.system() == "Darwin" else "-ic"
     try:
         r = subprocess.run([sh, flag, 'printf "\n@herdr@%s@herdr@\n" "$(command -v ' + name + ')"'], stdin=subprocess.DEVNULL,
                            capture_output=True, text=True, timeout=10)

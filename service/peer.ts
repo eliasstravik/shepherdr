@@ -42,7 +42,7 @@ export function peerUid(port: number, service: number): number | null {
 }
 
 /** macOS: the pids holding the caller's side, 127.0.0.1.<port> -> 127.0.0.1.<service>, established (netstat -anv's
- *  process:pid column, after the state). */
+ *  process:pid column, after the state; macOS 15 and older print a plain pid column instead: GitHub #1113). */
 export function darwinPids(port: number, service: number, text?: string): number[] {
   let out = text ?? "";
   if (text === undefined) {
@@ -54,9 +54,17 @@ export function darwinPids(port: number, service: number, text?: string): number
     peerProblem = netstatProblem(out, code, err);
   }
   const pids: number[] = [];
+  // The header names the columns: "Local Address" and "Foreign Address" are one column each. Only a header without
+  // process:pid (macOS 15 and older: "... shiwat    pid   epid state ...") gives a plain pid column to read.
+  const head = out.split("\n").find((l) => /^\s*Proto\s/.test(l))?.replace(/(Local|Foreign) Address/g, "$1-Address").trim().split(/\s+/) ?? [];
+  const pidCol = head.some((x) => x.includes(":")) ? -1 : head.indexOf("pid");
   for (const line of out.split("\n")) {
     const f = line.trim().split(/\s+/);
     if (f[3] !== `127.0.0.1.${port}` || f[4] !== `127.0.0.1.${service}` || f[5] !== "ESTABLISHED") continue;
+    if (pidCol > 5) {
+      if (f.length > pidCol && /^\d+$/.test(f[pidCol])) pids.push(Number(f[pidCol]));
+      continue;
+    }
     // the pid netstat appends to the process name: the last "<name>:<pid>" token, with only its own fixed columns
     // (state, options, counts: hex, no colon) after it. A name can hold spaces and colons of its own, never after that.
     const at = f.map((x) => /:\d+$/.test(x)).lastIndexOf(true);

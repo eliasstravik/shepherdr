@@ -8,14 +8,15 @@ import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from "
 import { join, dirname, resolve } from "node:path";
 import type { Hub } from "./hub.ts";
 import type { Host } from "./host.ts";
-import { DATA, HOME, settingsFile, underTest, writableSettings } from "./paths.ts";
+import { DATA, HOME, settingsFile, underTest, where, writableSettings } from "./paths.ts";
 import * as HC from "../core/host.js";
-import { SH } from "../core/paths.js";
+import { SH, TEMPLATES_SH } from "../core/paths.js";
 
 const { relocateSettings, merge3 } = HC as any;
 const REL = ".herdr/shepherdr.json";   // the settings file: its old place, as a name (read and written through SH)
 const TEMPLATES = ["assistant.md", "worker.md", "reviewer.md"];
-const TPL_REL = ".config/herdr-core/templates";
+const TPL_REL = ".config/herdr-core/templates";   // a template's name here; on each machine it is where herdr-core reads it (#1182)
+const TPL_SH = TEMPLATES_SH + 'f="$SHEP_TEMPLATES/$(basename "$1")"; ';
 const BASE = join(DATA, "host-base.json");
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -50,6 +51,12 @@ export class Sync {
       if (r.code !== 0) throw new Error("couldn't read the settings there");
       return Buffer.from(r.stdout ?? "", "base64").toString("utf8");
     }
+    if (rel.startsWith(`${TPL_REL}/`)) {
+      const r = await this.hub.call<{ code: number; stdout: string; stderr: string }>("machine.exec", { on, argv: ["sh", "-c", TPL_SH + '[ -e "$f" ] || exit 3; cat "$f"', "sh", rel], timeout: 20 }, 25_000);
+      if (r.code === 3) return null;
+      if (r.code !== 0) throw new Error(`couldn't read ${rel} there`);
+      return Buffer.from(r.stdout ?? "", "base64").toString("utf8");
+    }
     try { return (await this.hub.call<{ text: string }>("file.read", { path: rel, on }, 10_000)).text; }
     catch (err) { if ((err as any).kind === "not_found") return null; throw err; }
   }
@@ -58,7 +65,7 @@ export class Sync {
   private async write(on: string, rel: string, text: string) {
     // a test never writes another machine's settings or templates
     if (underTest()) throw new Error("A test may not write another machine's files.");
-    const to = rel === REL ? SH + 'f="$SHEP_SETTINGS"; ' : 'f="$1"; ';
+    const to = rel === REL ? SH + 'f="$SHEP_SETTINGS"; ' : rel.startsWith(`${TPL_REL}/`) ? TPL_SH : 'f="$1"; ';
     const r = await this.hub.call<{ code: number }>("machine.exec", { on, argv: ["sh", "-c", to + 'mkdir -p "$(dirname "$f")" && umask 077 && cat > "$f.host-tmp" && mv "$f.host-tmp" "$f"', "sh", rel],
       input: Buffer.from(text).toString("base64"), timeout: 20 }, 25_000);
     if (r.code !== 0) throw new Error(`couldn't write ${rel} there`);
@@ -92,7 +99,7 @@ export class Sync {
       // the role instructions, each file whole
       base.templates ??= {};
       for (const f of TEMPLATES) {
-        const path = join(HOME, TPL_REL, f);
+        const path = join(where().templates, f);
         const mineT = existsSync(path) ? readFileSync(path, "utf8") : null;
         const theirsT = await this.read(on, `${TPL_REL}/${f}`);
         const b = f in base.templates ? base.templates[f] : theirsT;

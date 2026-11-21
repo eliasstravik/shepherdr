@@ -16,7 +16,7 @@ import { join } from "node:path";
 import * as HC from "../core/host.js";
 import { buildId } from "./build.ts";
 import { underTest } from "./paths.ts";
-import { SH } from "../core/paths.js";
+import { SH, TEMPLATES_SH } from "../core/paths.js";
 
 const { HOST_DOC, NODE_DOC, newestHost, nodeAlive, renamer, relocateDoc, relocateSettings } = HC as any;
 const VERSION = JSON.parse(readFileSync(join(import.meta.dir, "..", "package.json"), "utf8")).version as string;
@@ -44,10 +44,6 @@ async function exec(argv: string[], on: string | null, input?: string, timeout =
   const text = (b: string) => Buffer.from(b ?? "", "base64").toString("utf8");
   return { code: r.code, stdout: text(r.stdout), stderr: text(r.stderr) };
 }
-async function readFile(rel: string, on: string | null): Promise<string | null> {
-  try { return (await call<{ text: string }>("file.read", { path: rel, ...at(on) })).text; }
-  catch (e) { if ((e as any).kind === "not_found") return null; throw e; }
-}
 // The settings file on a machine, wherever it keeps it (its Shepherdr folders, or ~/.herdr on an older one: core/paths.js SH).
 async function readSettingsOn(on: string | null): Promise<string | null> {
   const r = await exec(["sh", "-c", SH + '[ -e "$SHEP_SETTINGS" ] || exit 3; cat "$SHEP_SETTINGS"'], on);
@@ -60,12 +56,6 @@ async function writeSettingsOn(text: string, on: string | null) {
   const r = await exec(["sh", "-c", SH + 'f="$SHEP_SETTINGS"; mkdir -p "$(dirname "$f")" && umask 077 && cat > "$f.host-tmp" && mv "$f.host-tmp" "$f"'], on, text);
   if (r.code !== 0) throw new Error(`couldn't write the settings${on ? ` on ${on}` : ""}`);
 }
-const writeFile = async (rel: string, text: string, on: string | null) => {
-  // a test never moves the person's settings (paths.ts writableSettings)
-  if (underTest() && rel.endsWith("shepherdr.json")) throw new Error("A test may not write a real settings file.");
-  const r = await exec(["sh", "-c", 'mkdir -p "$(dirname "$1")" && umask 077 && cat > "$1.host-tmp" && mv "$1.host-tmp" "$1"', "sh", rel], on, text);
-  if (r.code !== 0) throw new Error(`couldn't write ${rel}${on ? ` on ${on}` : ""}`);
-};
 
 // ---- who is who ---------------------------------------------------------------------------------------------------
 const me = (await call<any>("server.status")).core as { id: string; name: string };
@@ -148,9 +138,13 @@ if ((record?.id ?? me.id) !== toId && (was === null || connected.includes(was)))
     // a pushed copy holds only that machine's part: no truth to move
     if (!("pushed_from" in f)) await writeSettingsOn(JSON.stringify({ ...relocateSettings(f, move), version: 1 }, null, 2) + "\n", to);
   }
+  // each where herdr-core reads it on that machine ($XDG_CONFIG_HOME's when set: #1182)
   for (const t of ["assistant.md", "worker.md", "reviewer.md"]) {
-    const text = await readFile(`.config/herdr-core/templates/${t}`, was);
-    if (text !== null) await writeFile(`.config/herdr-core/templates/${t}`, text, to);
+    const r = await exec(["sh", "-c", TEMPLATES_SH + 'f="$SHEP_TEMPLATES/$1"; [ -e "$f" ] || exit 3; cat "$f"', "sh", t], was);
+    if (r.code === 3) continue;
+    if (r.code !== 0) fail(`couldn't read ${t} on ${was ?? "this machine"}`);
+    const w = await exec(["sh", "-c", TEMPLATES_SH + 'f="$SHEP_TEMPLATES/$1"; mkdir -p "$(dirname "$f")" && umask 077 && cat > "$f.host-tmp" && mv "$f.host-tmp" "$f"', "sh", t], to, r.stdout);
+    if (w.code !== 0) fail(`couldn't write ${t}${to ? ` on ${to}` : ""}`);
   }
   say("Copied the pins, sidebar, Notify, settings and role instructions over.");
 }

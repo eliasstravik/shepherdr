@@ -22,6 +22,7 @@ from .tick import cmd_tick
 from .backups import cmd_backup, cmd_restore_spaces
 from .automations import auto_list, cmd_auto, cmd_scheduler, cmd_track, EVENTS, HOW
 from .machines import cmd_assistants, cmd_machines, cmd_sync_auto, cmd_tell
+from .addons import cmd_addons
 from .autopilot import cmd_autopilot, cmd_complete, cmd_progress
 from .flags import cmd_flags
 from .home import cmd_home
@@ -269,6 +270,12 @@ def main():
                                        "would need and AGENTS.md lacks; the Assistant decides whether to add it")
     c.add_argument("--pr", help="take a pull request already open, by its number (#1155): its review, checks and Accept go there "
                                 "instead of a new one, and ready pushes to its branch (\"\" lets go)")
+    c.add_argument("--pr-title", help="the pull request's title, when the repo wants its own form (#1087; default: "
+                                      "\"<task ref>: <task title>\"); a later ready with it renames the open one")
+    c.add_argument("--pr-body", help="the pull request's description, as written (#1087; default: Shepherdr's summary, "
+                                     "details and proof); a later ready with it replaces the open one's")
+    c.add_argument("--draft", action="store_true", help="open its pull request as a draft (#1155); Accept marks it ready "
+                                                        "for review before merging")
     c = cmd("reviewed", cmd_reviewed, "a task's agent records one review round of its current commit (Review: on): ready then "
                                       "accepts that commit; uses one of its Review rounds")
     c.add_argument("--report", help="the round's findings in a line (levels, what was fixed)")
@@ -466,6 +473,16 @@ def main():
     c.add_argument("--to", help="send everything to this Assistant instead (a test's own)")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_home)
+    ad = sub.add_parser("addons", help="Shepherdr's add-ons: which are off (list), and switch one on or off as Settings › Add-ons does")
+    ad.set_defaults(fn=cmd_addons, addons=None)
+    ads = ad.add_subparsers(dest="addons")
+    c = ads.add_parser("list")
+    c.add_argument("--json", action="store_true")
+    for word in ("on", "off"):
+        c = ads.add_parser(word)
+        c.add_argument("addon", help="its id or title (list shows them), e.g. machines, autopilot")
+        c.add_argument("--json", action="store_true")
+    ad.add_argument("--json", action="store_true")
     c = sub.add_parser("assistants", help="every live Assistant on every machine reachable from here: its address (machine/terminal), space and folder")
     c.add_argument("--refresh", action="store_true", help="look again now")
     c.add_argument("--json", action="store_true")

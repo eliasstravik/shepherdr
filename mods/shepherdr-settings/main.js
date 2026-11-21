@@ -53,7 +53,7 @@ const page = (id) => SECTIONS.find((s) => s.id === id).title;
 const rowTitle = (key) => TASK_ROWS.find(([s, f]) => `${s}.${f}` === key)[2];
 // Pages that moved: older openers still name them.
 const MOVED = { layout: "window", instructions: "agents", automations: "tasks" };
-const TEMPLATES = () => `${home()}/.config/herdr-core/templates`;
+const TEMPLATES = () => dirs().templates;   // where herdr-core reads them ($XDG_CONFIG_HOME's when set: #1182)
 const CLI_CHECK = () => dirs()["cli-check"];
 const tilde = (p) => (p && p.startsWith(home() + "/") ? "~" + p.slice(home().length) : p ?? "");
 const machineKeys = () => [LOCAL_MACHINE, ...machines().filter((m) => m.name && !m.temporary).map((m) => m.name)];

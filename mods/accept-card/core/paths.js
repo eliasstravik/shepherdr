@@ -35,11 +35,21 @@ const abs = (p) => (typeof p === "string" && p.startsWith("/") ? p.replace(/\/+$
 /** { config, data, state, cache } for a home and its environment (SHEPHERDR_HOME, then XDG_*, then defaults). */
 export function roots(home, env = {}, mac = false) {
   const one = abs(env.SHEPHERDR_HOME);
-  if (one) return { config: `${one}/config`, data: `${one}/data`, state: `${one}/state`, cache: `${one}/cache` };
+  const templates = templatesDir(home, env);
+  if (one) return { config: `${one}/config`, data: `${one}/data`, state: `${one}/state`, cache: `${one}/cache`, templates };
   const x = (v, dflt) => `${abs(env[v]) ?? `${home}/${dflt}`}/shepherdr`;
   return { config: x("XDG_CONFIG_HOME", ".config"), data: x("XDG_DATA_HOME", ".local/share"), state: x("XDG_STATE_HOME", ".local/state"),
-           cache: abs(env.XDG_CACHE_HOME) ? `${abs(env.XDG_CACHE_HOME)}/shepherdr` : `${home}/${mac ? "Library/Caches" : ".cache"}/shepherdr` };
+           cache: abs(env.XDG_CACHE_HOME) ? `${abs(env.XDG_CACHE_HOME)}/shepherdr` : `${home}/${mac ? "Library/Caches" : ".cache"}/shepherdr`, templates };
 }
+
+/** The role templates' folder herdr-core reads (#1182): $XDG_CONFIG_HOME/herdr-core/templates when that is set
+ *  (absolute), else ~/.config/herdr-core/templates. Herdr's, not Shepherdr's: SHEPHERDR_HOME doesn't move it. */
+export const templatesDir = (home, env = {}) => `${abs(env.XDG_CONFIG_HOME) ?? `${home}/.config`}/herdr-core/templates`;
+
+// The same in a shell, on the machine the command runs on (the agent's machine): sets SHEP_TEMPLATES. Put it first in
+// a `sh -c` script.
+export const TEMPLATES_SH = 'case "${XDG_CONFIG_HOME:-}" in /*) SHEP_TEMPLATES="${XDG_CONFIG_HOME%/}/herdr-core/templates";; '
+  + '*) SHEP_TEMPLATES="$HOME/.config/herdr-core/templates";; esac\n';
 
 /** Every kind's path: the new one when `migrated`, else the old one. Plus worktrees (where new ones go).
  *  @returns {ShepPaths} */
@@ -51,17 +61,18 @@ export function paths(home, env = {}, migrated = false, mac = false) {
  * @typedef {{ roots: { config: string, data: string, state: string, cache?: string }, migrated: boolean, settings: string,
  *   "model-picks": string, tasks: string, artifacts: string, vault: string, "secret-remote": string, tools: string,
  *   service: string, browser: string, "secret-drop": string, "secret-served": string, "cli-check": string,
- *   "machine-hold": string, worktrees: string }} ShepPaths
+ *   "machine-hold": string, worktrees: string, templates: string }} ShepPaths
  */
 
 /** The same from roots already known (what SH_PRINT printed on that machine).
- *  @param {string} home @param {{ config: string, data: string, state: string, cache?: string }} r @param {boolean} migrated
+ *  @param {string} home @param {{ config: string, data: string, state: string, cache?: string, templates?: string }} r @param {boolean} migrated
  *  @returns {ShepPaths} */
 export function pathsFrom(home, r, migrated = false) {
   /** @type {any} */
   const out = { roots: r, migrated };
   for (const [k, [old, base, rel]] of Object.entries(KINDS)) out[k] = migrated ? `${r[base]}/${rel}` : `${home}/${old}`;
   out.worktrees = migrated ? `${r.data}/worktrees` : `${home}/.herdr/worktrees`;
+  out.templates = r.templates ?? `${home}/.config/herdr-core/templates`;
   return out;
 }
 
@@ -114,5 +125,5 @@ def SHEP(rel, _t=${pyTable}):
 `;
 
 /** A script that prints this machine's paths as JSON, for callers with no environment of their own (the window). */
-export const SH_PRINT = SH + 'printf \'{"home":"%s","config":"%s","data":"%s","state":"%s","on":%s}\\n\' "$HOME" "$SHEP_CONFIG" "$SHEP_DATA" "$SHEP_STATE" '
+export const SH_PRINT = SH + TEMPLATES_SH + 'printf \'{"home":"%s","config":"%s","data":"%s","state":"%s","templates":"%s","on":%s}\\n\' "$HOME" "$SHEP_CONFIG" "$SHEP_DATA" "$SHEP_STATE" "$SHEP_TEMPLATES" '
   + `"$( [ "$SHEP_TASKS" = "$SHEP_DATA/tasks" ] && echo true || echo false )"`;

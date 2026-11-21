@@ -57,12 +57,30 @@ class ArtifactModsAreNotCopies(unittest.TestCase):
             self.assertEqual(f.read(), before)
 
     def test_a_real_unlisted_copy_is_still_named(self):
-        top = os.path.join(self.mods, "partly")
-        os.makedirs(top)
+        # one of Shepherdr's own mods (lib/addons.json) that lib/COPIES doesn't list for dirs.js
+        top = os.path.join(self.mods, "task-pr")
         shutil.copyfile(os.path.join(self.mods, "artifacts", "dirs.js"), os.path.join(top, "dirs.js"))
         p = self.run_sync("--check")
         self.assertEqual(p.returncode, 1)
-        self.assertIn("mods/partly/dirs.js looks like a copy of lib/dirs.js", p.stderr)
+        self.assertIn("mods/task-pr/dirs.js looks like a copy of lib/dirs.js", p.stderr)
+
+    def test_another_layouts_mod_is_only_a_note(self):
+        """GitHub #1179: a mod Shepherdr didn't install (another layout's) with its own copy never holds the sync."""
+        for name in ("over9k-menu", "overherd-pane"):
+            top = os.path.join(self.mods, name)
+            os.makedirs(os.path.join(top, "core"))
+            shutil.copyfile(os.path.join(self.mods, "artifacts", "dirs.js"), os.path.join(top, "dirs.js"))
+            with open(os.path.join(self.mods, "artifacts", "core", "paths.js"), "rb") as f:
+                data = f.read()
+            with open(os.path.join(top, "core", "paths.js"), "wb") as f:
+                f.write(data + b"\n// their own change\n")
+        p = self.run_sync("--check")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("note: mods/over9k-menu/dirs.js looks like a copy of lib/dirs.js; over9k-menu isn't one of Shepherdr's mods", p.stdout)
+        p = self.run_sync()
+        self.assertEqual(p.returncode, 0, p.stderr)
+        with open(os.path.join(self.mods, "overherd-pane", "core", "paths.js"), "rb") as f:
+            self.assertTrue(f.read().endswith(b"// their own change\n"))  # never written to
 
 
 if __name__ == "__main__":

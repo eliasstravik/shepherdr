@@ -20,7 +20,7 @@ The helpers that go to other machines as one file each (herdr-secret, herdr-arti
 Shepherdr's paths between "# ---- SHEP:" and "# ---- end SHEP ----": the source is
 mods/tasks/bin/herdr_task/layout.py's PY, written in here too.
 """
-import hashlib, os, shutil, subprocess, sys
+import hashlib, json, os, shutil, subprocess, sys
 
 HOME = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 LIB, MODS = os.path.join(HOME, "lib"), os.path.join(HOME, "mods")
@@ -47,6 +47,17 @@ def committed(name):
     except (OSError, subprocess.SubprocessError):
         return None
     return r.stdout if r.returncode == 0 else None
+
+
+def ours():
+    """The mods Shepherdr installs (lib/addons.json), or None when it can't be read (then every mod counts). A mod
+    another layout put beside them may carry its own copies of these files: those aren't ours to list (GitHub #1179)."""
+    try:
+        with open(os.path.join(LIB, "addons.json")) as f:
+            a = json.load(f)
+        return set(a["core"]["mods"]) | {m for x in a.get("addons", []) for m in x.get("mods", [])}
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def copies():
@@ -118,7 +129,8 @@ def main(argv):
         shutil.copyfile(src, src_of(name))
         print(f"{os.path.relpath(src_of(name), HOME)} <- {os.path.relpath(src, HOME)}")
 
-    bad, made = [], []
+    bad, made, notes = [], [], []
+    own = ours()
     for name, mods in table.items():
         lib = read(src_of(name))
         if lib is None:
@@ -154,13 +166,18 @@ def main(argv):
                 continue
             path = os.path.join(MODS, mod, name)
             if mod not in mods and (read(path) or b"").split(b"\n", 1)[0] == head:
-                bad.append(f"mods/{mod}/{name} looks like a copy of lib/{name}: add {mod} to lib/COPIES")
+                if own is None or mod in own:
+                    bad.append(f"mods/{mod}/{name} looks like a copy of lib/{name}: add {mod} to lib/COPIES")
+                else:
+                    notes.append(f"mods/{mod}/{name} looks like a copy of lib/{name}; {mod} isn't one of Shepherdr's mods, so it's left alone")
 
     b2, m2 = shep_blocks(check)
     bad += b2
     made += m2
     for rel in made:
         print(f"synced {rel}")
+    for n in notes:
+        print(f"note: {n}")
     if bad:
         print("sync-shared: " + ("copies out of sync" if check else "not synced") + ":", file=sys.stderr)
         for b in bad:

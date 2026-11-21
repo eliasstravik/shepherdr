@@ -117,7 +117,9 @@ fi
 # The new agent never inherits a parent Claude Code session's markers the holder may carry (SHEP-86):
 # the same line as core/clean-env.js CLEAN_ENV (test_repo keeps them equal).
 clean='for v in $(env | sed -nE '"'"'s/^(CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_[A-Za-z0-9_]+)=.*/\1/p'"'"' | grep -vE '"'"'^CLAUDE_CODE_(USE|SKIP|DISABLE|ENABLE|MAX|OAUTH|CLIENT|API)_'"'"'); do unset "$v"; done;'
-tpl=$HOME/.config/herdr-core/templates/assistant.md
+# The role templates' folder herdr-core reads (#1182; core/paths.js TEMPLATES_SH).
+case "${XDG_CONFIG_HOME:-}" in /*) tdir="${XDG_CONFIG_HOME%/}/herdr-core/templates" ;; *) tdir="$HOME/.config/herdr-core/templates" ;; esac
+tpl=$tdir/assistant.md
 # A coordinator restarted without an argv: the assistant template's own command and words.
 own=""
 [ -z "$argv" ] && [ "$role" = coordinator ] && own=$(awk '/^---[[:space:]]*$/ {f++; next} f == 1 && sub(/^command:[ \t]*/, "") {print; exit}' "$tpl" 2>/dev/null)
@@ -149,7 +151,7 @@ else
   # hc delivers a template's first message once the agent is ready, so the
   # handoff goes in a one-off template, removed once it has started.
   one=herdr-handoff-$$
-  file=$HOME/.config/herdr-core/templates/$one.md
+  file=$tdir/$one.md
   { printf -- '---\nname: %s\ndescription: A one-off Herdr handoff, removed after use.\ncommand: %s\n---\n' "$one" "$clean exec $line"
     printf '%s\n' "$msg"; } >"$file"
   out=$(hc run --bg --json --no-parent --cwd "$cwd" "${labels[@]}" --label "herdr.agent=$key" "$one")

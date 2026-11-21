@@ -31,7 +31,9 @@ Settings says which.
 - The window's mods read shared `addons.off` through `lib/addons.js` (`on("voice")`), so a flip shows at once.
   `tabs-tasks` loads it from `~/.config/shepherdr/settings.json` when Herdr starts.
 - herdr-task reads Everywhere's `off` (`addon_off()` in `herdr_task/base.py`) for its background work: Autopilot's
-  wake-ups, the task browsers, the sync to other machines.
+  wake-ups, the task browsers, the sync to other machines. `tell-assistant`, `assistants`, `autopilot list` and
+  `shepherdr doctor` say when one they need is off. `herdr-task addons` lists the switches; `herdr-task addons on
+  machines` turns one on (through the service when it runs, so the window follows at once).
 - An off add-on's keys stay in `keys.json` and do nothing, so turning it back on needs no merge.
 - The web app leaves an off add-on's plugins out (its `web` list in `lib/addons.json`); a page open at the flip
   starts again without them.

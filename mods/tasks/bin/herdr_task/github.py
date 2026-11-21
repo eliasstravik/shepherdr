@@ -143,7 +143,10 @@ def pr_open(s, task, repo, summary=None):
         raise Fail(f"Pull request #{done['number']} for {br} is already merged, and {br} has commits since. "
                    f"Put them on a new branch (a new task) rather than a second pull request.")
     ok, out, err = gh("pr", "create", "--repo", repo, "--head", br, "--base", task.get("base") or "main",
-                      "--title", pr_title(s, task), "--body", pr_body(s, task, summary))
+                      "--title", pr_title(s, task), "--body", pr_body(s, task, summary),
+                      *(["--draft"] if task.get("pr_draft") else []))
+    task.pop("pr_title_new", None)
+    task.pop("pr_body_new", None)
     if not ok or not out:
         raise Fail(f"Couldn't open a pull request: {err}")
     url = out.split()[-1]
@@ -183,22 +186,55 @@ def pr_note(task, repo, summary):
         task["pr_note"] = {"number": number, "id": int(m.group(1)) if m else None, "said": summary}
 
 
+# #1208: Shepherdr's part of a pull request's description, between these marks: a later ready rewrites only that part,
+# and keeps what a person or an agent added around it (gh pr edit).
+MARK_START, MARK_END = "<!-- shepherdr -->", "<!-- /shepherdr -->"
+OWN_SECTIONS = {"Summary", "Details", "Proof"}
+
+
+def described(s, task, body, want):
+    """The description a ready makes of the one there now (body), or None to leave it as it is: Shepherdr's marked part
+    replaced; an older unmarked one of Herdr's ("Task: SHEP-n" first) only while it holds nothing but its own sections;
+    anything else is a person's or an agent's."""
+    body = body or ""
+    a, b = body.find(MARK_START), body.find(MARK_END)
+    if a >= 0 and b > a:
+        new = body[:a] + want + body[b + len(MARK_END):]
+    elif body.strip().splitlines()[:1] == [f"Task: {s.ref(task)}"] and \
+            all(h in OWN_SECTIONS for h in re.findall(r"^## (.+?)\s*$", body, flags=re.M)):
+        new = want
+    else:
+        return None
+    return new if new.strip() != body.strip() else None
+
+
 def pr_describe(s, task, summary=None):
-    """#1004: an open pull request whose description Herdr wrote (pr_body(), "Task: SHEP-n" first)
-    gets the one this ready says (its summary, details and proof); one written by a person or an
-    agent, or another branch's it continues (#828), is left as it is."""
+    """#1004: an open pull request whose description Herdr wrote (pr_body()) gets the one this ready says (its summary,
+    details and proof), only its own part (#1208); one written by a person or an agent, or another branch's it continues
+    (#828), is left as it is. #1087: a title or description its agent gave (ready --pr-title/--pr-body) replaces the
+    open one's, once per time it is given."""
     pr = task.get("pr") or {}
-    if not pr.get("number") or pr.get("branch"):
+    if not pr.get("number"):
         return
-    ok, body, _ = gh("pr", "view", str(pr["number"]), "--repo", pr["repo"], "--json", "body", "-q", ".body")
-    want = pr_body(s, task, summary)
-    if ok and body.strip().splitlines()[:1] == [f"Task: {s.ref(task)}"] and body.strip() != want.strip():
-        gh("pr", "edit", str(pr["number"]), "--repo", pr["repo"], "--body", want)
+    n, repo = str(pr["number"]), pr["repo"]
+    if task.pop("pr_title_new", None) and task.get("pr_title"):
+        gh("pr", "edit", n, "--repo", repo, "--title", task["pr_title"])
+    if task.pop("pr_body_new", None) and task.get("pr_body"):
+        gh("pr", "edit", n, "--repo", repo, "--body", task["pr_body"])
+        return
+    if pr.get("branch") or task.get("pr_body"):
+        return
+    ok, body, _ = gh("pr", "view", n, "--repo", repo, "--json", "body", "-q", ".body")
+    new = described(s, task, body, pr_body(s, task, summary)) if ok else None
+    if new is not None:
+        gh("pr", "edit", n, "--repo", repo, "--body", new)
 
 
 def pr_title(s, task):
     """The repo's commit titles read "SHEP-198: the task's title" (a squash merge adds "(#945)"): the
-    task's ref first, so the pull request stays findable by it."""
+    task's ref first, so the pull request stays findable by it. Its agent's own (--pr-title, #1087) when given."""
+    if task.get("pr_title"):
+        return task["pr_title"]
     ref = s.ref(task)
     title = " ".join(str(task.get("title") or "").split())
     rest = re.sub(rf"^{re.escape(ref)}\b[:\s-]*", "", title, flags=re.I)
@@ -207,8 +243,11 @@ def pr_title(s, task):
 
 def pr_body(s, task, summary=None):
     """Short: the task's ref, what ready said (summary), the details and its proof's title. Never the
-    brief: that stays with the task in Shepherdr."""
-    lines = [f"Task: {s.ref(task)}"]
+    brief: that stays with the task in Shepherdr. Between its marks (#1208), so a later ready keeps what was added around
+    it. Its agent's own (--pr-body, #1087) instead, as written, when given."""
+    if task.get("pr_body"):
+        return task["pr_body"]
+    lines = [MARK_START, f"Task: {s.ref(task)}"]
     if summary and summary.strip():
         lines += ["", "## Summary", "", summary.strip()]
     if (task.get("details") or "").strip():
@@ -216,7 +255,7 @@ def pr_body(s, task, summary=None):
     proof = (task.get("proof") or {}).get("title")
     if proof:
         lines += ["", "## Proof", "", f"Shepherdr's proof artifact: {proof}"]
-    return "\n".join(lines)
+    return "\n".join(lines + [MARK_END])
 
 
 def pr_adopt(task, repo):
@@ -436,10 +475,14 @@ def latest_checks(rows):
 BEHIND = "It is behind its base branch, which must be up to date to merge."
 
 
+# #1106: closed on GitHub (often on purpose): the person's Accept then closes the task, nothing merged.
+PR_CLOSED = "The pull request was closed. Accept closes the task without merging, or reopen it on GitHub."
+
+
 def pr_problem(v):
     """What keeps a pull request from merging, for the person; None when nothing does."""
     if v.get("state") == "CLOSED":
-        return "The pull request was closed."
+        return PR_CLOSED
     if v.get("mergeable") == "CONFLICTING":
         return "It conflicts with the base branch."
     checks = v.get("statusCheckRollup") or []

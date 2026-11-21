@@ -3,7 +3,7 @@ looks after the machine, as Shepherdr's home coordinator: its disk, load and mem
 health sample), processes stuck busy, and worktrees finished tasks left behind. Herdr tells it in
 tagged lines only what changed (a meter crossing its alert limit or coming back, a process newly
 stuck, worktrees newly left over); it tells the person only what matters. The lead machine's home
-Assistant also keeps every machine's overview: every space's task news, one line each, and each
+Assistant also keeps every machine's overview: what needs the person in every space, one line each, and each
 home machine's health news.
 
 Opt-in per machine: Shepherdr settings machines[<name> | "local"].home (true / false); unset, on
@@ -42,6 +42,12 @@ LEFTOVER_MS = 24 * 3600000     # a finished task's worktree this long after it f
 KEEP_MS = 6 * 3600000          # lines nobody could be told (no live home Assistant) this long: dropped
 OVERVIEW_KEEP_MS = 30 * 60000  # overview lines this old: stale (the space's own Assistant has handled it by now)
 LEAD_KEEP_MS = 10 * 60000      # a lead that misses a round still leads this long (one slow answer never doubles the overview)
+
+
+# GitHub #1126: news of a space whose own live Assistant got it (every line the news log keeps) reaches the overview
+# only when it needs the person; the rest (ready, done, working again, stalled) that Assistant acts on alone, and the
+# home Assistant no longer pays a turn for each. Overview lines wait for it to be idle and go as one message.
+OVERVIEW_OWN_EVENTS = ("needs-you", "failed", "accept-failed")
 
 
 def main_here():
@@ -488,6 +494,8 @@ def home_pass(report, force=False, only=None, to=None):
                     mt = re.match(r'<herdr-news task="([^"]*)" event="([^"]*)">(.*)</herdr-news>$', line)
                     task, event, text = mt.groups() if mt else (None, None, re.sub(r"<[^>]+>", "", line))
                     text = text.split(" · For AGENTS.md:")[0]  # the space's own Assistant decides that
+                    if x.get("to") and event not in OVERVIEW_OWN_EVENTS:
+                        continue  # #1126: its space's own Assistant had it and acts on it
                     outbox.append({"to": over_to, "line": tagged("herdr-overview", f"{place}: {text}", machine=m or "",
                                                                                space=space, task=task, event=event), "at": now()})
     # Each line waits for its home's Assistant (as seen this round): one that isn't live yet, or

@@ -122,6 +122,26 @@ test("macOS: the caller's side of the exact connection, from netstat -anv (Tails
   expect(darwinPids(56080, 7788, forged)).toEqual([4242]);
 });
 
+test("macOS 15: netstat -anv prints a plain pid column, no process:pid (GitHub #1113)", async () => {
+  const { darwinPids } = await import("./peer.ts");
+  const text = [
+    "Active Internet connections (including servers)",
+    "Proto Recv-Q Send-Q  Local Address          Foreign Address        (state)          rxbytes      txbytes  rhiwat  shiwat    pid   epid state  options           gencnt    flags   flags1 usscnt rtncnt fltrs",
+    "tcp4       0      0  127.0.0.1.7788         127.0.0.1.56078        ESTABLISHED         4440          976  406272  146988  87948      0 00102 00000004 000000000eb4b4f2 00000080 04000800      1      0 000001",
+    "tcp4       0      0  127.0.0.1.56078        127.0.0.1.7788         ESTABLISHED         2160         2116  407552  146988   3083      0 00182 00000008 000000000eb4b4f3 00000080 04000800      2      0 000000",
+    "tcp4       0      0  127.0.0.1.56079        127.0.0.1.7788         TIME_WAIT           2160         2116  407552  146988   4000      0 00182 00000008 000000000eb4b4f4 00000080 04000800      2      0 000000",
+    "tcp4       0      0  *.7788                 *.*                    LISTEN                 0            0  131072  131072  87948      0 00100 00000006 000000000eb4b4f0 00000000 00000800      1      0 000001",
+  ].join("\n");
+  expect(darwinPids(56078, 7788, text)).toEqual([3083]);
+  expect(darwinPids(56079, 7788, text)).toEqual([]);
+  // older still: no rxbytes/txbytes columns
+  const old = [
+    "Proto Recv-Q Send-Q  Local Address          Foreign Address        (state)     rhiwat shiwat    pid   epid  state    options",
+    "tcp4       0      0  127.0.0.1.56078        127.0.0.1.7788         ESTABLISHED 407552 146988   3083      0 0x0182 0x00000008",
+  ].join("\n");
+  expect(darwinPids(56078, 7788, old)).toEqual([3083]);
+});
+
 test("macOS: netstat giving no socket table is said in the refusal, not a bare 'not from Tailscale' (GitHub #777)", async () => {
   const { netstatProblem } = await import("./peer.ts");
   expect(netstatProblem("Active Internet connections (including servers)\nProto Recv-Q", 0, "")).toBe(null);
