@@ -153,3 +153,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - Run `bun install` in a fresh worktree before `bun test core/`: core tests that import marked fail without it. (from SHEP-268)
 
 - The dev VM's sh is busybox (/exe.dev/bin/sh): its lsof applet ignores a fake lsof on PATH, so test macOS lsof paths under bash. (from SHEP-267)
+
+- Accept card screenshots with real evidence: run herdr_task.proof.evidence on a scratch repo (mock artifacts_of), dump the JSON, and serve it from a stub's /api/action evidence reply. (from SHEP-273)
