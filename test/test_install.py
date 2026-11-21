@@ -379,6 +379,22 @@ class Install(unittest.TestCase):
         self.assertIn("Checks: read", out[0])
         self.assertNotIn("Commit statuses", out[0])
 
+    def test_worktrees_folder_gets_a_plain_package_json(self):
+        """#1132: our package.json (type: module) sits above the task worktrees: an install puts a plain one in that
+        folder so a worktree's repo with none of its own runs as CommonJS, as in its main checkout."""
+        wt = self.p(".local/share/shepherdr/worktrees")
+        os.makedirs(os.path.join(wt, "repo", "task-1"))
+        run("install", "--root", self.root, "--yes")
+        if not os.path.isfile(self.p(".local/share/shepherdr/package.json")):
+            self.skipTest("no service installed here")
+        with open(os.path.join(wt, "package.json")) as f:
+            self.assertNotIn("type", json.load(f))
+        with open(os.path.join(wt, "package.json"), "w") as f:
+            f.write('{"mine": 1}')
+        run("update", "--root", self.root, "--yes")
+        with open(os.path.join(wt, "package.json")) as f:
+            self.assertEqual(json.load(f), {"mine": 1})
+
     def test_service_answers(self):
         """doctor and install trust only Shepherdr's own service on its port: the id it wrote in service.json, not
         another app answering health there (GitHub #635)."""

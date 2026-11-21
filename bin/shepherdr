@@ -590,8 +590,24 @@ def web_outcome(root, since, port=None, wait=15):
         time.sleep(1)
 
 
+def fence_worktrees(r):
+    """GitHub #1132: our package.json (type: module) sits above the task worktrees folder, so Node ran a repo with
+    none of its own (its tests, a git hook's require()) as ESM there. A plain package.json in that folder stops Node's
+    search; herdr-task writes the same for new worktrees (launch.fence_node). A file already there stays."""
+    d = r.p(f"{SHARE}/worktrees")
+    path = os.path.join(d, "package.json")
+    if r.dry or not os.path.isdir(d) or os.path.lexists(path):
+        return
+    try:
+        with open(path, "xb") as f:
+            f.write(b'{"private": true, "description": "Shepherdr: keeps task worktrees off the package.json of a folder above"}\n')
+    except OSError:
+        pass
+
+
 def install_service(r, rec, home):
     """Writes the unit; on the real home, (re)starts the service with it. A scratch root only gets the file."""
+    fence_worktrees(r)
     bun = bun_path()
     if not bun:
         r.notes.append("the Shepherdr service needs bun (https://bun.sh): install it, then run this again")

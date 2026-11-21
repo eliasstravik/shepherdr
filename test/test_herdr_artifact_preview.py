@@ -20,13 +20,17 @@ PAGE = "<!doctype html><title>viewer stand-in</title>"
 PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 32
 
 
-def get(url, host=None):
-    req = urllib.request.Request(url, headers={"Host": host} if host else {})
+def get(url, host=None, cookie=None):
+    headers = dict({"Host": host} if host else {}, **({"Cookie": cookie} if cookie else {}))
+    req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             return r.status, dict(r.headers), r.read()
     except urllib.error.HTTPError as e:
         return e.code, dict(e.headers), e.read()
+
+
+plain_get = get
 
 
 class Preview(unittest.TestCase):
@@ -73,11 +77,16 @@ class Preview(unittest.TestCase):
 
     def test_serves_the_viewer_and_the_artifact_on_loopback_only(self):
         link = self.preview()
-        self.assertRegex(link, r"^http://127\.0\.0\.1:\d+/\?artifact=" + self.aid + "$")
+        self.assertRegex(link, r"^http://127\.0\.0\.1:\d+/\?artifact=" + self.aid + r"&t=[\w-]{40,}$")
         base = link.split("/?")[0]
-        code, headers, body = get(link)
+        code, headers, body = plain_get(link)
         self.assertEqual((code, body.decode()), (200, PAGE))
         self.assertIn("connect-src 'self'", headers["content-security-policy"])
+        # the page's own requests carry the token as the cookie its link set
+        jar = headers["set-cookie"].split(";")[0]
+        self.assertIn("HttpOnly", headers["set-cookie"])
+        self.assertIn("SameSite=Strict", headers["set-cookie"])
+        get = lambda url, host=None: plain_get(url, host, jar)  # noqa: E731
         code, _, body = get(f"{base}/api/artifacts/{self.aid}")
         meta = json.loads(body)
         self.assertEqual((code, meta["title"], meta["version"], meta["kind"]), (200, "How to group tasks", 1, "recipe"))
@@ -98,10 +107,28 @@ class Preview(unittest.TestCase):
         mine = [l.split()[1] for l in out.splitlines()[1:] if l.split()[1].endswith(":%04X" % st["port"]) and l.split()[3] == "0A"]
         self.assertEqual(mine, ["0100007F:%04X" % st["port"]])
 
+    def test_no_token_no_answer(self):
+        """#1096: any account on this machine reaches a loopback port and can say Host: 127.0.0.1; without the
+        link's random token it gets nothing (the page, an artifact's data, its files, the ping)."""
+        link = self.preview()
+        base, token = link.split("/?")[0], link.rsplit("&t=", 1)[1]
+        for url in (f"{base}/?artifact={self.aid}", f"{base}/api/artifacts/{self.aid}", f"{base}/api/ping",
+                    f"{base}/api/artifacts/{self.aid}/recipe?v=1", f"{base}/api/artifacts/{self.aid}/file/shot.png?v=1",
+                    f"{base}/api/artifacts/{self.aid}/file/shot.png?v=1&t=wrong" + token[5:]):
+            code, _, body = get(url, host="127.0.0.1")
+            self.assertEqual(code, 403, url)
+            self.assertNotIn(PNG, body)
+        self.assertEqual(get(f"{base}/api/artifacts/{self.aid}", cookie=f"herdr_preview_{base.rsplit(':', 1)[1]}=nope")[0], 403)
+        self.assertEqual(get(f"{base}/api/artifacts/{self.aid}/file/shot.png?v=1&t={token}")[2], PNG)
+        with open(os.path.join(self.home, ".herdr", "artifacts", ".preview")) as f:
+            self.assertEqual(json.load(f)["token"], token)
+        self.assertEqual(os.stat(os.path.join(self.home, ".herdr", "artifacts", ".preview")).st_mode & 0o077, 0)
+
     def test_started_once_and_reused(self):
         a, b = self.preview(), self.preview("--version", "1")
         self.assertEqual(a.split("/?")[0], b.split("/?")[0])
-        self.assertTrue(b.endswith("&v=1"))
+        self.assertEqual(a.rsplit("&t=")[1], b.rsplit("&t=")[1])
+        self.assertIn("&v=1&t=", b)
 
     def test_an_unknown_artifact_or_version_fails(self):
         self.assertNotEqual(self.run_tool("preview", "nope-1234").returncode, 0)

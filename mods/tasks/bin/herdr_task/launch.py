@@ -758,6 +758,7 @@ def folder_for(s, task):
     if any(o is not task and o.get("worktree") and os.path.realpath(o["worktree"]) == os.path.realpath(path)
            for o in s.data.get("tasks") or []):
         path = f"{path}-{task['id']}"
+    fence_node(root)
     # Its own base (--base) branches from that branch; else from what the folder has checked out.
     own = task.get("base") if task.get("base_set") else None
     base = base_ref(main, own) if own else current_base(main)
@@ -797,6 +798,33 @@ def folder_for(s, task):
         start = git(main, "merge-base", fresh_start(main, base), start)[1] or start
     task.update(worktree=path, branch=branch, base=task.get("base") or base, start=start)
     return path
+
+
+NODE_FENCE = b'{"private": true, "description": "Shepherdr: keeps task worktrees off the package.json of a folder above"}\n'
+
+
+def fence_node(root):
+    """GitHub #1132: Node takes a script's module type (and a hook's require()) from the nearest package.json above
+    it, and Shepherdr's own (type: module) sits above its default worktrees folder: a repo with none of its own
+    would run as ESM in a worktree. A plain one at the worktrees root stops that search there. Only written when a
+    package.json above the root would otherwise be found; a person's own file there stays as it is."""
+    here = os.path.join(root, "package.json")
+    if os.path.lexists(here):
+        return
+    up = os.path.dirname(os.path.abspath(root))
+    while True:
+        if os.path.isfile(os.path.join(up, "package.json")):
+            break
+        nxt = os.path.dirname(up)
+        if nxt == up:
+            return
+        up = nxt
+    try:
+        os.makedirs(root, exist_ok=True)
+        with open(here, "xb") as f:
+            f.write(NODE_FENCE)
+    except OSError:
+        pass
 
 
 def registered_worktree(main, path):

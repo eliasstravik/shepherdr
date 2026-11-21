@@ -2447,6 +2447,32 @@ class NewWorktrees(unittest.TestCase):
         _, path = self.new_worktree()
         self.assertEqual(self.git(path, "rev-parse", "HEAD"), here)
 
+    def test_a_package_json_above_doesnt_reach_the_worktree(self):
+        """#1132: Shepherdr's own package.json (type: module) sits above its worktrees folder; a repo with none of
+        its own ran as ESM there, so its require() (tests, git hooks) failed. A plain one at the root stops Node."""
+        import shutil
+        wt = os.path.join(self.root, "wt")
+        self.assertFalse(os.path.exists(os.path.join(wt, "package.json")))   # nothing above yet: nothing written
+        _, first = self.new_worktree()
+        self.assertFalse(os.path.exists(os.path.join(wt, "package.json")))
+        with open(os.path.join(self.root, "package.json"), "w") as f:
+            f.write('{"type": "module"}')
+        _, path = self.new_worktree()
+        with open(os.path.join(path, "hook.js"), "w") as f:
+            f.write("const fs = require('fs'); console.log(typeof fs.readFileSync)")
+        node = shutil.which("node")
+        if node:
+            out = subprocess.run([node, os.path.join(path, "hook.js")], capture_output=True, text=True)
+            self.assertEqual((out.returncode, out.stdout.strip()), (0, "function"), out.stderr)
+        with open(os.path.join(wt, "package.json")) as f:
+            self.assertNotIn("type", json.load(f))
+        # a person's own file there stays as it is
+        with open(os.path.join(wt, "package.json"), "w") as f:
+            f.write('{"type": "module", "mine": 1}')
+        self.new_worktree()
+        with open(os.path.join(wt, "package.json")) as f:
+            self.assertEqual(json.load(f)["mine"], 1)
+
     def test_default_branch_name_stays(self):
         t, _ = self.new_worktree(self.task("Fix the login page"))
         self.assertEqual(t["branch"], "task/1-fix-the-login-page")
