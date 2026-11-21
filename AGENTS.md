@@ -151,3 +151,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - From SHEP-263: a real service on a throwaway core: HOME=<scratch home> (with ~/.local/share/shepherdr/LAYOUT copied), SHEPHERDR_HC=<wrapper exporting HC_SESSION, exec hc> (the hub drops HC_SESSION: without it the service attaches to the REAL core), fake herdr-task/herdr-app/tailscale first on PATH.
 
 - Run `bun install` in a fresh worktree before `bun test core/`: core tests that import marked fail without it. (from SHEP-268)
+
+- The dev VM's sh is busybox (/exe.dev/bin/sh): its lsof applet ignores a fake lsof on PATH, so test macOS lsof paths under bash. (from SHEP-267)
