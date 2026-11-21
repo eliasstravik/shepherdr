@@ -16,3 +16,11 @@ export const CLOSE_SPACE = {
 // Rename a tab: its field holds the name given (empty when nobody named it: it keeps its number, its name the
 // placeholder).
 export const RENAME_TAB = { title: "Rename tab", label: PROMPT.label, verb: PROMPT.verb };
+
+// Mark a task done by hand (#1157: its Tasks menu's Mark done…): nothing merges; a branch keeps what wasn't merged.
+export const MARK_DONE = {
+  title: (id) => `Mark ${id} done?`,
+  detail: "It moves to Done as it is: nothing is merged.",
+  branch: (branch) => `Commits on ${branch} that aren't merged stay on that branch.`,
+  verb: "Mark done",
+};

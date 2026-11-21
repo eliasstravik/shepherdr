@@ -38,7 +38,7 @@ function rowSections(p) {
   const out = [];
   let cur = null;
   for (const it of taskMenu({ pinned: p.on, status: p.status ?? null })) {
-    if (it.typed) continue;
+    if (it.typed || it.web) continue;
     if (it.sep || it.heading || !cur) out.push(cur = { title: it.heading ? (p.status === "scheduled" && p.sub ? `${it.heading} · ${p.sub}` : it.heading) : null,
       checks: false, current: null, items: [], pick: (key) => rowPick(p, key) });
     if (it.sep || it.heading) continue;

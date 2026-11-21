@@ -3707,6 +3707,39 @@ class ChecksBeforeReady(PrLooks):
         self.assertEqual(self.agents.task_status(t, self.live), ("working", None, "Merging"))
 
 
+class PrWhileWorking(PrLooks):
+    """#1176: a pull request its agent opened before ready shows on the task (its number, a link, its Pull request tab)
+    while it still works: the tick looks its branch up every few minutes."""
+
+    def gh_script(self):
+        return ("#!/usr/bin/env python3\nimport json, sys\n"
+                f"open({self.gh_log!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
+                "if sys.argv[1:3] == ['pr', 'list']:\n"
+                f"    print(open({os.path.join(self.dir, 'list.json')!r}).read())\n")
+
+    def lists(self, rows):
+        with open(os.path.join(self.dir, "list.json"), "w") as f:
+            json.dump(rows, f)
+
+    def test_its_agents_pull_request_shows_while_it_works(self):
+        t = {"id": 9, "title": "Login", "state": "running", "agents": [], "mode": "worktree", "worktree": self.dir, "branch": "b"}
+        self.store.data["tasks"] = [t]
+        self.lists([])
+        with unittest.mock.patch.object(self.tick, "github", lambda s: "o/r"):
+            self.tick.seen_pr(self.store, t)
+            self.assertNotIn("pr_seen", t)
+            self.lists([{"number": 20, "url": "https://github.com/o/r/pull/20", "isCrossRepository": False, "baseRefName": "main"}])
+            self.tick.seen_pr(self.store, t)
+            self.assertNotIn("pr_seen", t)  # asked at most every few minutes
+            self.clock[0] += self.tick.PR_OPEN_EVERY
+            self.tick.seen_pr(self.store, t)
+            self.assertEqual(t["pr_seen"], {"number": 20, "url": "https://github.com/o/r/pull/20", "repo": "o/r"})
+            # ready records it as its own: the seen one goes
+            t["pr"] = {"number": 20, "url": "https://github.com/o/r/pull/20", "repo": "o/r"}
+            self.tick.seen_pr(self.store, t)
+            self.assertNotIn("pr_seen", t)
+
+
 class RequiredChecksOnly(PrLooks):
     """GitHub #1221: merge 'after checks' waits on the base branch's required checks only (GitHub marks them: the
     GraphQL isRequired), so a red or running optional check never stops it merging or queueing."""
