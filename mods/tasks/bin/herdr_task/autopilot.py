@@ -421,14 +421,37 @@ def space_info(space):
     return sp.get("name"), folder_of(sp.get("folder"))
 
 
+def space_arg(given):
+    """--space as a space's id ("sp3", "vm/sp3") or its name, as the window lists it (GitHub #1105): an id it
+    lists, else the one space of that name; none or several: refused, never another space. A machine with no
+    window here can't say: an id goes as given, a name is looked up in its own records."""
+    given = (given or "").strip()
+    win = window_spaces()
+    with state(write=False) as d:
+        if given in d["spaces"]:
+            return given  # one it keeps (the window may no longer list it)
+        named = [sp for sp, a in d["spaces"].items() if (a.get("name") or "").strip().casefold() == given.casefold()]
+    if win is None:
+        return named[0] if len(named) == 1 else given
+    if any(x["id"] == given for x in win):
+        return given
+    named = [x for x in win if (x.get("name") or "").strip().casefold() == given.casefold()]
+    if len(named) == 1:
+        return named[0]["id"]
+    if named:
+        raise Fail(f"Several spaces are named {given}: pass one's id ({', '.join(x['id'] for x in named)}).")
+    known = ", ".join(f"{x.get('name') or 'Home'} ({x['id']})" for x in win)
+    raise Fail(f"No space named or with the id {given}. Spaces: {known or 'none'}.")
+
+
 def my_space(args):
-    """--space, else the caller's (an Assistant's own: its pane's, or its chat's). None: --everywhere."""
+    """--space (an id or a name), else the caller's (an Assistant's own: its pane's, or its chat's). None: --everywhere."""
     if getattr(args, "everywhere", False):
         if getattr(args, "space", None):
             raise Fail("Pass --space or --everywhere, not both.")
         return None
     if getattr(args, "space", None):
-        return bare(args.space)
+        return bare(space_arg(args.space))
     labels = caller_labels()
     sp = labels.get("herdr.space") or labels.get("herdr.coordinator.space")
     if not sp:
@@ -899,6 +922,8 @@ def cmd_autopilot(args):
         v = {"every": (r or {}).get("text"), "trigger": trigger_of({"every": r, "events": []}) if r else "Off"}
         say(args, v, v["trigger"])
         return
+    if getattr(args, "space", None) and not getattr(args, "everywhere", False):
+        args.space = space_arg(args.space)
     # Everywhere's (what every space works from unless it sets its own), a space's own, or its switch.
     machine, there_id = machine_of(getattr(args, "space", None) if not getattr(args, "everywhere", False) else None)
     if sub == "set":

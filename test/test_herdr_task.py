@@ -698,6 +698,41 @@ class Autopilot(unittest.TestCase):
         self.assertEqual(evs(None, None), [])
         self.assertEqual(evs("Checks failing: a.", "h2"), ["failed"])
 
+    def window(self, spaces):
+        from unittest import mock
+        p = mock.patch.object(self.ap, "window_spaces", lambda: spaces)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_space_by_name(self):
+        """GitHub #1105: --space takes a space's name too; an unknown one is refused, never the caller's own space."""
+        from unittest import mock
+        self.window([{"id": "sp1", "name": "home"}, {"id": "sp2", "name": "Dramabias"}, {"id": "vm/sp7", "name": "hollyhr", "machine": "vm"}])
+        labels = mock.patch.object(self.ap, "caller_labels", lambda: {"herdr.space": "sp1"})
+        labels.start()
+        self.addCleanup(labels.stop)
+        self.cmd("on", space="sp1")
+        v = self.cmd("off", space="dramabias")
+        self.assertEqual((v["space"], v["on"]), ("sp2", False))
+        self.assertTrue(self.cmd("show", space="sp1")["on"])  # the caller's own space is untouched
+        with self.assertRaises(self.ap.Fail) as e:
+            self.cmd("off", space="nowhere")
+        self.assertIn("No space named or with the id nowhere", str(e.exception))
+        self.assertTrue(self.cmd("show", space="sp1")["on"])
+        # another machine's space by its name goes there by its id
+        seen = []
+        fwd = mock.patch.object(self.ap, "forward", lambda args, m, sp: seen.append((m, sp)) or {"space": f"{m}/{sp}", "machine": m, "on": False, "trigger": "Off", "own": []})
+        fwd.start()
+        self.addCleanup(fwd.stop)
+        self.cmd("off", space="HollyHR")
+        self.assertEqual(seen, [("vm", "sp7")])
+
+    def test_two_spaces_of_one_name_are_refused(self):
+        self.window([{"id": "sp1", "name": "shop"}, {"id": "sp2", "name": "shop"}])
+        with self.assertRaises(self.ap.Fail) as e:
+            self.cmd("off", space="shop")
+        self.assertIn("sp1, sp2", str(e.exception))
+
 
 class RemoteInstall(unittest.TestCase):
     """herdr-task --on installs itself on the other machine first, never over a machine that holds its source."""
